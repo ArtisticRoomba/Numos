@@ -1,7 +1,7 @@
 namespace Numos;
 
 /// <summary>
-/// Defines the physical properties of a gas for thermodynamic and concentration diffusion calculations.
+///     Defines the physical properties of a gas for thermodynamic and concentration diffusion calculations.
 /// </summary>
 public struct GasProperties
 {

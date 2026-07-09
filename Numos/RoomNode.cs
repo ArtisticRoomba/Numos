@@ -1,7 +1,7 @@
 namespace Numos;
 
 /// <summary>
-/// Represents the "Macro Layer" (Equilibrium) of the simulation.
+///     Represents the "Macro Layer" (Equilibrium) of the simulation.
 /// </summary>
 public struct RoomNode
 {
@@ -16,40 +16,33 @@ public struct RoomNode
 
     public void AddGas(int gasId, float addedMoles, float incomingTemp)
     {
-        float currentTotalMoles = 0f;
-        for (int i = 0; i < GasMoles.Length; i++) currentTotalMoles += GasMoles[i];
+        var currentTotalMoles = 0f;
+        for (var i = 0; i < GasMoles.Length; i++) currentTotalMoles += GasMoles[i];
 
         if (currentTotalMoles + addedMoles > 0)
         {
-            AverageTemperature = ((currentTotalMoles * AverageTemperature) + (addedMoles * incomingTemp)) /
+            AverageTemperature = (currentTotalMoles * AverageTemperature + addedMoles * incomingTemp) /
                                  (currentTotalMoles + addedMoles);
 
             GasMoles[gasId] += addedMoles;
-            EquilibriumPressure = ((currentTotalMoles + addedMoles) * AverageTemperature) / TotalVoxelVolume;
+            EquilibriumPressure = (currentTotalMoles + addedMoles) * AverageTemperature / TotalVoxelVolume;
         }
     }
 
     public void RemoveGas(int gasId, float removedMoles)
     {
-        float currentTotalMoles = 0f;
-        for (int i = 0; i < GasMoles.Length; i++) currentTotalMoles += GasMoles[i];
+        var currentTotalMoles = 0f;
+        for (var i = 0; i < GasMoles.Length; i++) currentTotalMoles += GasMoles[i];
 
         float actualRemoved = removedMoles;
-        if (GasMoles[gasId] < actualRemoved)
-        {
-            actualRemoved = GasMoles[gasId];
-        }
+        if (GasMoles[gasId] < actualRemoved) actualRemoved = GasMoles[gasId];
 
         float newTotalMoles = currentTotalMoles - actualRemoved;
         GasMoles[gasId] -= actualRemoved;
 
         if (newTotalMoles > 0)
-        {
-            EquilibriumPressure = (newTotalMoles * AverageTemperature) / TotalVoxelVolume;
-        }
+            EquilibriumPressure = newTotalMoles * AverageTemperature / TotalVoxelVolume;
         else
-        {
             EquilibriumPressure = 0;
-        }
     }
 }

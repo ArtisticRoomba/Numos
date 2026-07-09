@@ -13,15 +13,30 @@ public struct Int3 : IEquatable<Int3>
         Z = z;
     }
 
-    public override bool Equals(object obj) => obj is Int3 other && Equals(other);
+    public override bool Equals(object obj)
+    {
+        return obj is Int3 other && Equals(other);
+    }
 
-    public bool Equals(Int3 other) => X == other.X && Y == other.Y && Z == other.Z;
+    public bool Equals(Int3 other)
+    {
+        return X == other.X && Y == other.Y && Z == other.Z;
+    }
 
-    public override int GetHashCode() => HashCode.Combine(X, Y, Z);
+    public override int GetHashCode()
+    {
+        return HashCode.Combine(X, Y, Z);
+    }
 
-    public static bool operator ==(Int3 left, Int3 right) => left.Equals(right);
+    public static bool operator ==(Int3 left, Int3 right)
+    {
+        return left.Equals(right);
+    }
 
-    public static bool operator !=(Int3 left, Int3 right) => !left.Equals(right);
+    public static bool operator !=(Int3 left, Int3 right)
+    {
+        return !left.Equals(right);
+    }
 }
 
 public struct Vector3

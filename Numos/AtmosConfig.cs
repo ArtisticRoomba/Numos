@@ -3,7 +3,7 @@ namespace Numos;
 public class AtmosConfig
 {
     public List<GasProperties> GasRegistry { get; set; } = new();
-    
+
     public float GlobalTemperature { get; set; } = 293.15f;
     public float DefaultTemperatureFallback { get; set; } = 293.15f;
     public float SpaceTemperature { get; set; } = 2.7f;

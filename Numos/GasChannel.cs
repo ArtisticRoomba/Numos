@@ -3,14 +3,14 @@ using System.Buffers;
 namespace Numos;
 
 /// <summary>
-/// Represents a single gas type within a chunk using a Structure of Arrays (SoA) layout.
+///     Represents a single gas type within a chunk using a Structure of Arrays (SoA) layout.
 /// </summary>
 public struct GasChannel
 {
     public int GasId;
     public float[] Moles;
     public bool IsInitialized => Moles != null;
-    
+
     public void Initialize(int gasId, int voxelCount)
     {
         GasId = gasId;
