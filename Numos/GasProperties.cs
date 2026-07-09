@@ -1,4 +1,4 @@
-namespace Opal.Prototypes.AtmosAndThermalGeneric;
+namespace Numos;
 
 /// <summary>
 /// Defines the physical properties of a gas for thermodynamic and concentration diffusion calculations.

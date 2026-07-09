@@ -1,7 +1,6 @@
-using System;
 using System.Buffers;
 
-namespace Opal.Prototypes.AtmosAndThermalGeneric;
+namespace Numos;
 
 /// <summary>
 /// Represents a single gas type within a chunk using a Structure of Arrays (SoA) layout.

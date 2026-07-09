@@ -1,6 +1,4 @@
-using System;
-
-namespace Opal.Prototypes.AtmosAndThermalGeneric;
+namespace Numos;
 
 public struct Int3 : IEquatable<Int3>
 {

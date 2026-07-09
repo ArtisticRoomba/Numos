@@ -1,12 +1,8 @@
-using System;
 using System.Buffers;
 using System.Collections.Concurrent;
 using System.Diagnostics;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
 
-namespace Opal.Prototypes.AtmosAndThermalGeneric;
+namespace Numos;
 
 /// <summary>
 /// Engine-agnostic core atmospheric simulation manager.

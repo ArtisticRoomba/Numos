@@ -1,6 +1,4 @@
-using System;
-
-namespace Opal.Prototypes.AtmosAndThermalGeneric;
+namespace Numos;
 
 /// <summary>
 /// Represents the active voxel grid data for a chunk, completely decoupled from any game engine.

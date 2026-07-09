@@ -1,6 +1,4 @@
-using System.Collections.Generic;
-
-namespace Opal.Prototypes.AtmosAndThermalGeneric;
+namespace Numos;
 
 public class AtmosConfig
 {

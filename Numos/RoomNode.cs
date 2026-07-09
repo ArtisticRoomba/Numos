@@ -1,4 +1,4 @@
-namespace Opal.Prototypes.AtmosAndThermalGeneric;
+namespace Numos;
 
 /// <summary>
 /// Represents the "Macro Layer" (Equilibrium) of the simulation.
