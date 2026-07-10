@@ -1,3 +1,5 @@
+using System.Diagnostics.CodeAnalysis;
+
 namespace Numos;
 
 /// <summary>
@@ -38,14 +40,19 @@ public class AtmosChunk
         EnsureInitialized();
     }
 
+    [SuppressMessage("ReSharper", "ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract")]
     public void EnsureInitialized()
     {
-        if (VoxelRoomMap == null || VoxelRoomMap.Length != VoxelCount) VoxelRoomMap = new int[VoxelCount];
+        if (VoxelRoomMap == null || VoxelRoomMap.Length != VoxelCount)
+            VoxelRoomMap = new int[VoxelCount];
         if (ActiveAirIndices == null || ActiveAirIndices.Length != VoxelCount)
             ActiveAirIndices = new ushort[VoxelCount];
-        if (TotalPressure == null || TotalPressure.Length != VoxelCount) TotalPressure = new float[VoxelCount];
-        if (Temperature == null || Temperature.Length != VoxelCount) Temperature = new float[VoxelCount];
-        if (ActiveGases == null) ActiveGases = new GasChannel[16];
+        if (TotalPressure == null || TotalPressure.Length != VoxelCount)
+            TotalPressure = new float[VoxelCount];
+        if (Temperature == null || Temperature.Length != VoxelCount)
+            Temperature = new float[VoxelCount];
+        if (ActiveGases == null)
+            ActiveGases = new GasChannel[16];
     }
 
     public void Initialize(Int3 position, int width = 16, int height = 16, int depth = 16)
@@ -80,7 +87,8 @@ public class AtmosChunk
 
     public void WakeRoom(int targetRoomId)
     {
-        if (targetRoomId == RoomSolid || targetRoomId == RoomVoid) return;
+        if (targetRoomId is RoomSolid or RoomVoid)
+            return;
 
         if (IsAwake && ActiveRoomId == targetRoomId)
         {
@@ -103,11 +111,14 @@ public class AtmosChunk
 
     public void InjectGasToVoxel(ushort localVoxelIndex, int gasId, float molesToAdd, float temperature)
     {
-        if (!IsAwake) return;
+        if (!IsAwake)
+            return;
 
         int room = VoxelRoomMap[localVoxelIndex];
-        if (room == RoomSolid) return;
-        if (room == RoomVoid) return;
+        if (room == RoomSolid)
+            return;
+        if (room == RoomVoid)
+            return;
 
         SleepTimer = 0;
 
@@ -134,7 +145,8 @@ public class AtmosChunk
         ActiveGases[targetChannelIndex].Moles[localVoxelIndex] += molesToAdd;
 
         var currentTotalMoles = 0f;
-        for (var g = 0; g < ActiveGasCount; g++) currentTotalMoles += ActiveGases[g].Moles[localVoxelIndex];
+        for (var g = 0; g < ActiveGasCount; g++)
+            currentTotalMoles += ActiveGases[g].Moles[localVoxelIndex];
 
         float currentTemp = Temperature[localVoxelIndex];
         float newTemp = ((currentTotalMoles - molesToAdd) * currentTemp + molesToAdd * temperature) / currentTotalMoles;

@@ -3,14 +3,47 @@ using System.Buffers;
 namespace Numos;
 
 /// <summary>
-///     Represents a single gas type within a chunk using a Structure of Arrays (SoA) layout.
+///     Represents a single gas type within an <see cref="AtmosChunk" /> using a Structure of Arrays (SoA) layout.
 /// </summary>
+/// <para>
+///     If you've worked with old SS14 Atmospherics/SSAir, you are probably familiar with the concept of a GasMixture
+///     and the underlying fixed-size array Moles.
+///     In old Atmos, gases were stored in the structure of Tiles dictionary -> TileAtmosphere -> GasMixture -> Moles.
+///     This wasn't cache-friendly and made iterating over all gases in a given area slow, since you had to do
+///     a lot of object lookups.
+/// </para>
+/// <para>
+///     An SoA layout is a way of organizing data in memory such that all the values
+///     of a single field are stored contiguously.
+///     This can improve cache performance and make it easier to perform operations on large datasets
+///     (since memory access patterns are more predictable).
+///     This is that implementation.
+///     Looking at adjacent tiles is, after all, a fairly common op in Atmos.
+/// </para>
 public struct GasChannel
 {
+    /// <summary>
+    ///     The ID of the gas type this channel represents.
+    /// </summary>
     public int GasId;
+
+    /// <summary>
+    ///     The amount of moles of this gas in each voxel of the chunk.
+    /// </summary>
+    /// <remarks>While this is not marked as nullable, this field
+    /// can be null when the channel is not initialized via <see cref="Initialize"/>.</remarks>
     public float[] Moles;
+
+    /// <summary>
+    ///     Whether the gas channel has been initialized and is ready for use.
+    /// </summary>
     public bool IsInitialized => Moles != null;
 
+    /// <summary>
+    ///     Initializes the gas channel with the specified gas ID and voxel count.
+    /// </summary>
+    /// <param name="gasId">The ID of the gas type this channel represents.</param>
+    /// <param name="voxelCount">The number of voxels in the chunk.</param>
     public void Initialize(int gasId, int voxelCount)
     {
         GasId = gasId;
@@ -18,12 +51,15 @@ public struct GasChannel
         Array.Clear(Moles, 0, voxelCount);
     }
 
+    /// <summary>
+    ///     Releases the resources used by the gas channel, returning the moles array to the shared array pool.
+    /// </summary>
     public void Release()
     {
         if (IsInitialized)
         {
             ArrayPool<float>.Shared.Return(Moles);
-            Moles = null;
+            Moles = null!;
         }
     }
 }

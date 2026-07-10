@@ -44,7 +44,8 @@ public class AtmosSimulation
     {
         _accumulator += elapsedSeconds;
 
-        if (_accumulator > FixedDt * MaxStepsPerFrame) _accumulator = FixedDt * MaxStepsPerFrame;
+        if (_accumulator > FixedDt * MaxStepsPerFrame)
+            _accumulator = FixedDt * MaxStepsPerFrame;
 
         LastBoundaryTicks = 0;
 
@@ -69,7 +70,8 @@ public class AtmosSimulation
 
         Parallel.ForEach(chunks, chunk =>
         {
-            if (!chunk.IsAwake) return;
+            if (!chunk.IsAwake)
+                return;
 
             var localBoundaryBuffer = _boundaryBufferPool.Value;
             var boundaryCount = 0;
@@ -82,14 +84,16 @@ public class AtmosSimulation
 
         // 2. Sequential Boundary Processing
         long boundaryFlowStart = Stopwatch.GetTimestamp();
-        foreach (var (key, evt) in boundaryEvents) ProcessBoundaryFlow(key, evt, config);
+        foreach (var (key, evt) in boundaryEvents)
+            ProcessBoundaryFlow(key, evt, config);
         LastBoundaryTicks += Stopwatch.GetTimestamp() - boundaryFlowStart;
 
         // 3. Parallel Thermodynamics & Clausius-Clapeyron Condensation (Run every 2nd tick)
         if (TickCount % 2 == 0)
             Parallel.ForEach(chunks, chunk =>
             {
-                if (!chunk.IsAwake) return;
+                if (!chunk.IsAwake)
+                    return;
 
                 var localPrecipBuffer = _precipBufferPool.Value;
                 var precipCount = 0;
@@ -100,7 +104,8 @@ public class AtmosSimulation
 
     private void ProcessBoundaryFlow(Int3 sourceKey, BoundaryFlowEvent evt, AtmosConfig config)
     {
-        if (!_chunkMap.TryGetValue(sourceKey, out var sourceChunk)) return;
+        if (!_chunkMap.TryGetValue(sourceKey, out var sourceChunk))
+            return;
         (int x, int y, int z) = sourceChunk.GetXYZ(evt.LocalVoxelIndex);
 
         TryFlowToNeighbor(sourceChunk, sourceKey, x - 1, y, z, -1, 0, 0, config);
@@ -121,18 +126,21 @@ public class AtmosSimulation
     {
         if (targetX >= 0 && targetX < sourceChunk.Width &&
             targetY >= 0 && targetY < sourceChunk.Height &&
-            targetZ >= 0 && targetZ < sourceChunk.Depth) return;
+            targetZ >= 0 && targetZ < sourceChunk.Depth)
+            return;
 
         var neighborPos = new Int3(sourceKey.X + dirX, sourceKey.Y + dirY, sourceKey.Z + dirZ);
 
-        if (!_chunkMap.TryGetValue(neighborPos, out var neighborChunk)) return;
+        if (!_chunkMap.TryGetValue(neighborPos, out var neighborChunk))
+            return;
 
         int nX = (targetX + neighborChunk.Width) % neighborChunk.Width;
         int nY = (targetY + neighborChunk.Height) % neighborChunk.Height;
         int nZ = (targetZ + neighborChunk.Depth) % neighborChunk.Depth;
         ushort neighborIdx = neighborChunk.GetIndex(nX, nY, nZ);
 
-        if (neighborChunk.VoxelRoomMap[neighborIdx] == AtmosChunk.RoomSolid) return;
+        if (neighborChunk.VoxelRoomMap[neighborIdx] == AtmosChunk.RoomSolid)
+            return;
 
         if (!neighborChunk.IsAwake)
         {
@@ -161,15 +169,18 @@ public class AtmosSimulation
             float defaultTemp = config.DefaultTemperatureFallback;
 
             float flow = pressureDelta * flowFriction;
-            if (flow > sourcePressure * cflFlowCap) flow = sourcePressure * cflFlowCap;
+            if (flow > sourcePressure * cflFlowCap)
+                flow = sourcePressure * cflFlowCap;
 
             var totalMoles = 0f;
-            for (var g = 0; g < sourceChunk.ActiveGasCount; g++) totalMoles += sourceChunk.ActiveGases[g].Moles[srcIdx];
+            for (var g = 0; g < sourceChunk.ActiveGasCount; g++)
+                totalMoles += sourceChunk.ActiveGases[g].Moles[srcIdx];
 
             if (totalMoles > 0)
             {
                 float temp = sourceChunk.Temperature[srcIdx];
-                if (temp <= 0) temp = defaultTemp;
+                if (temp <= 0)
+                    temp = defaultTemp;
 
                 for (var g = 0; g < sourceChunk.ActiveGasCount; g++)
                 {
@@ -178,7 +189,8 @@ public class AtmosSimulation
                     float molesToMove = flow / temp * moleFraction;
 
                     sourceChunk.ActiveGases[g].Moles[srcIdx] -= molesToMove;
-                    if (sourceChunk.ActiveGases[g].Moles[srcIdx] < 0) sourceChunk.ActiveGases[g].Moles[srcIdx] = 0;
+                    if (sourceChunk.ActiveGases[g].Moles[srcIdx] < 0)
+                        sourceChunk.ActiveGases[g].Moles[srcIdx] = 0;
 
                     if (neighborChunk.VoxelRoomMap[neighborIdx] != AtmosChunk.RoomVoid)
                         neighborChunk.InjectGasToVoxel(neighborIdx, gasId, molesToMove, temp);
@@ -190,7 +202,8 @@ public class AtmosSimulation
     public void Advect(AtmosChunk chunk, BoundaryFlowEvent[] boundaryBuffer, ref int boundaryEventCount,
         AtmosConfig config)
     {
-        if (!chunk.IsAwake) return;
+        if (!chunk.IsAwake)
+            return;
         var maxPressureDelta = 0f;
 
         if (chunk.ActiveGasCount > 0)
@@ -213,14 +226,17 @@ public class AtmosSimulation
 
                 if (currentPressure < vacuumThreshold)
                 {
-                    for (var g = 0; g < activeGasCount; g++) chunk.ActiveGases[g].Moles[idx] = 0f;
+                    for (var g = 0; g < activeGasCount; g++)
+                        chunk.ActiveGases[g].Moles[idx] = 0f;
                     chunk.TotalPressure[idx] = 0f;
                     continue;
                 }
 
                 var totalMoles = 0f;
-                for (var g = 0; g < activeGasCount; g++) totalMoles += chunk.ActiveGases[g].Moles[idx];
-                if (totalMoles <= 0) continue;
+                for (var g = 0; g < activeGasCount; g++)
+                    totalMoles += chunk.ActiveGases[g].Moles[idx];
+                if (totalMoles <= 0)
+                    continue;
 
                 // Inline Neighbor Checks (4 Directions for 2D, 6 Directions for 3D)
                 CheckNeighborAdvect(chunk, x - 1, y, z, idx, currentPressure, totalMoles, flowFriction,
@@ -241,7 +257,7 @@ public class AtmosSimulation
                 }
 
                 if (currentPressure > 1.0f && (x == 0 || x == chunk.Width - 1 || y == 0 || y == chunk.Height - 1 ||
-                                               (chunk.Depth > 1 && (z == 0 || z == chunk.Depth - 1))))
+                                               chunk.Depth > 1 && (z == 0 || z == chunk.Depth - 1)))
                     if (boundaryEventCount < boundaryBuffer.Length)
                     {
                         boundaryBuffer[boundaryEventCount] = new BoundaryFlowEvent
@@ -263,7 +279,8 @@ public class AtmosSimulation
         if (maxPressureDelta < sleepEpsilon)
         {
             chunk.SleepTimer++;
-            if (chunk.SleepTimer > sleepThreshold) chunk.IsAwake = false;
+            if (chunk.SleepTimer > sleepThreshold)
+                chunk.IsAwake = false;
         }
         else
         {
@@ -275,22 +292,26 @@ public class AtmosSimulation
         float currentPressure, float totalMoles, float flowFriction,
         ref float maxPressureDelta, float[] deltas, AtmosConfig config)
     {
-        if (nx < 0 || nx >= chunk.Width || ny < 0 || ny >= chunk.Height || nz < 0 || nz >= chunk.Depth) return;
+        if (nx < 0 || nx >= chunk.Width || ny < 0 || ny >= chunk.Height || nz < 0 || nz >= chunk.Depth)
+            return;
 
         ushort neighborIdx = chunk.GetIndex(nx, ny, nz);
         int neighborRoom = chunk.VoxelRoomMap[neighborIdx];
 
-        if (neighborRoom == AtmosChunk.RoomSolid) return;
+        if (neighborRoom == AtmosChunk.RoomSolid)
+            return;
 
         var neighborPressure = 0f;
         bool isVoid = neighborRoom == AtmosChunk.RoomVoid;
 
-        if (!isVoid) neighborPressure = chunk.TotalPressure[neighborIdx];
+        if (!isVoid)
+            neighborPressure = chunk.TotalPressure[neighborIdx];
 
         float pressureDelta = currentPressure - neighborPressure;
 
         float absDelta = pressureDelta > 0 ? pressureDelta : -pressureDelta;
-        if (absDelta > maxPressureDelta) maxPressureDelta = absDelta;
+        if (absDelta > maxPressureDelta)
+            maxPressureDelta = absDelta;
 
         if (pressureDelta > 0)
         {
@@ -306,12 +327,15 @@ public class AtmosSimulation
             else
                 flow = pressureDelta * flowFriction * dampingFactor;
 
-            if (flow < minFlowCutoff) return;
-            if (flow > currentPressure * cflFlowCap) flow = currentPressure * cflFlowCap;
+            if (flow < minFlowCutoff)
+                return;
+            if (flow > currentPressure * cflFlowCap)
+                flow = currentPressure * cflFlowCap;
 
             // Vectorized Solver Optimization: pre-calculate factors to eliminate division in loop
             float temp = chunk.Temperature[idx];
-            if (temp <= 0) temp = defaultTemp;
+            if (temp <= 0)
+                temp = defaultTemp;
             float invTemp = 1f / temp;
 
             float flowFactor = flow * invTemp;
@@ -340,17 +364,20 @@ public class AtmosSimulation
                 {
                     // Mathematically identical to J = D * (P1 - P2) / T1 = D * (n1 - n2 * T2 / T1)
                     float deltaN = moles - neighborMoles * tempRatio;
-                    if (deltaN > 0) molesDiffused = deltaN * diffusionCoeff;
+                    if (deltaN > 0)
+                        molesDiffused = deltaN * diffusionCoeff;
                 }
 
                 float totalMolesToMove = molesAdvected + molesDiffused;
 
-                if (totalMolesToMove > moles) totalMolesToMove = moles;
+                if (totalMolesToMove > moles)
+                    totalMolesToMove = moles;
 
                 int offset = g * chunk.VoxelCount;
                 deltas[offset + idx] -= totalMolesToMove;
 
-                if (!isVoid) deltas[offset + neighborIdx] += totalMolesToMove;
+                if (!isVoid)
+                    deltas[offset + neighborIdx] += totalMolesToMove;
             }
         }
     }
@@ -363,7 +390,8 @@ public class AtmosSimulation
         {
             ushort idx = chunk.ActiveAirIndices[i];
             var molesInVoxel = 0f;
-            for (var g = 0; g < chunk.ActiveGasCount; g++) molesInVoxel += chunk.ActiveGases[g].Moles[idx];
+            for (var g = 0; g < chunk.ActiveGasCount; g++)
+                molesInVoxel += chunk.ActiveGases[g].Moles[idx];
             float temp = chunk.Temperature[idx] > 0 ? chunk.Temperature[idx] : defaultTemp;
             chunk.TotalPressure[idx] = molesInVoxel * temp;
         }
@@ -378,7 +406,8 @@ public class AtmosSimulation
             {
                 ushort idx = chunk.ActiveAirIndices[i];
                 chunk.ActiveGases[g].Moles[idx] += deltas[offset + idx];
-                if (chunk.ActiveGases[g].Moles[idx] < 0.0001f) chunk.ActiveGases[g].Moles[idx] = 0f;
+                if (chunk.ActiveGases[g].Moles[idx] < 0.0001f)
+                    chunk.ActiveGases[g].Moles[idx] = 0f;
             }
         }
 
@@ -388,7 +417,8 @@ public class AtmosSimulation
     public void ProcessThermodynamics(AtmosChunk chunk, PrecipitationEvent[] precipBuffer, ref int precipCount,
         AtmosConfig config)
     {
-        if (!chunk.IsAwake || chunk.ActiveGasCount == 0) return;
+        if (!chunk.IsAwake || chunk.ActiveGasCount == 0)
+            return;
 
         ProcessThermalDiffusion(chunk, config);
         ProcessPhaseChanges(chunk, precipBuffer, ref precipCount, config);
@@ -405,7 +435,8 @@ public class AtmosSimulation
         for (var i = 0; i < chunk.ActiveAirCount; i++)
         {
             ushort idx = chunk.ActiveAirIndices[i];
-            if (chunk.TotalPressure[idx] < vacuumThreshold) continue;
+            if (chunk.TotalPressure[idx] < vacuumThreshold)
+                continue;
 
             (int x, int y, int z) = chunk.GetXYZ(idx);
             float currentTemp = chunk.Temperature[idx];
@@ -433,13 +464,16 @@ public class AtmosSimulation
     private void CheckNeighborThermal(AtmosChunk chunk, int nx, int ny, int nz, ushort idx,
         float currentTemp, float thermalConductivity, float[] tempDeltas, AtmosConfig config)
     {
-        if (nx < 0 || nx >= chunk.Width || ny < 0 || ny >= chunk.Height || nz < 0 || nz >= chunk.Depth) return;
+        if (nx < 0 || nx >= chunk.Width || ny < 0 || ny >= chunk.Height || nz < 0 || nz >= chunk.Depth)
+            return;
 
         ushort neighborIdx = chunk.GetIndex(nx, ny, nz);
-        if (chunk.VoxelRoomMap[neighborIdx] == AtmosChunk.RoomSolid) return;
+        if (chunk.VoxelRoomMap[neighborIdx] == AtmosChunk.RoomSolid)
+            return;
 
         float vacuumThreshold = config.VacuumThreshold;
-        if (chunk.TotalPressure[neighborIdx] < vacuumThreshold) return;
+        if (chunk.TotalPressure[neighborIdx] < vacuumThreshold)
+            return;
 
         float neighborTemp = chunk.Temperature[neighborIdx];
         float tempDelta = currentTemp - neighborTemp;
@@ -456,7 +490,8 @@ public class AtmosSimulation
         AtmosConfig config)
     {
         var gasRegistry = config.GasRegistry;
-        if (gasRegistry == null) return;
+        if (gasRegistry == null)
+            return;
 
         float condensationRateFactor = config.CondensationRateFactor;
         var P_reference = 1000f; // Reference pressure scale (R = 1)
@@ -464,7 +499,8 @@ public class AtmosSimulation
         for (var g = 0; g < chunk.ActiveGasCount; g++)
         {
             int gasId = chunk.ActiveGases[g].GasId;
-            if (gasId >= gasRegistry.Count) continue;
+            if (gasId >= gasRegistry.Count)
+                continue;
 
             var props = gasRegistry[gasId];
 
@@ -498,7 +534,8 @@ public class AtmosSimulation
                             // Moles to condense: excessPressure / T
                             float molesToCondense = excessPressure / currentTemp * condensationRateFactor;
 
-                            if (molesToCondense > gasMoles) molesToCondense = gasMoles;
+                            if (molesToCondense > gasMoles)
+                                molesToCondense = gasMoles;
 
                             chunk.ActiveGases[g].Moles[idx] -= molesToCondense;
 

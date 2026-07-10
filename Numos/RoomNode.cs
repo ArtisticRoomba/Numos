@@ -17,7 +17,8 @@ public struct RoomNode
     public void AddGas(int gasId, float addedMoles, float incomingTemp)
     {
         var currentTotalMoles = 0f;
-        for (var i = 0; i < GasMoles.Length; i++) currentTotalMoles += GasMoles[i];
+        for (var i = 0; i < GasMoles.Length; i++)
+            currentTotalMoles += GasMoles[i];
 
         if (currentTotalMoles + addedMoles > 0)
         {
@@ -32,10 +33,12 @@ public struct RoomNode
     public void RemoveGas(int gasId, float removedMoles)
     {
         var currentTotalMoles = 0f;
-        for (var i = 0; i < GasMoles.Length; i++) currentTotalMoles += GasMoles[i];
+        for (var i = 0; i < GasMoles.Length; i++)
+            currentTotalMoles += GasMoles[i];
 
         float actualRemoved = removedMoles;
-        if (GasMoles[gasId] < actualRemoved) actualRemoved = GasMoles[gasId];
+        if (GasMoles[gasId] < actualRemoved)
+            actualRemoved = GasMoles[gasId];
 
         float newTotalMoles = currentTotalMoles - actualRemoved;
         GasMoles[gasId] -= actualRemoved;
