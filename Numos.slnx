@@ -1,4 +1,3 @@
 <Solution>
-    <Project Path="CoreSim\CoreSim.csproj" />
-    <Project Path="Viewer/Viewer.csproj" />
+    <Project Path="CoreSim\CoreSim.csproj"/>
 </Solution>

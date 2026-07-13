@@ -20,4 +20,6 @@ public class AtmosConfig
     public float ThermalConductivity { get; set; } = 0.05f;
     public float CondensationRateFactor { get; set; } = 0.5f;
     public float CflFlowCap { get; set; } = 0.16f;
+    public float AccumulatorWakeThreshold { get; set; } = 15.0f;
+    public int AccumulatorMaxAliveTicks { get; set; } = 20;
 }

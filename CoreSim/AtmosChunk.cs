@@ -1,5 +1,3 @@
-using System.Diagnostics.CodeAnalysis;
-
 namespace Numos;
 
 /// <summary>
@@ -16,11 +14,13 @@ public class AtmosChunk
     public int ActiveGasCount;
 
     public GasChannel[] ActiveGases;
-    public int ActiveRoomId;
+    public int ActiveRoomCount;
+    public int[] ActiveRoomIds;
     public int Depth;
     public Int3 GridPosition;
     public int Height;
     public bool IsAwake;
+    public int MaxActiveRooms;
 
     public int SleepTimer;
     public float[] Temperature;
@@ -31,8 +31,9 @@ public class AtmosChunk
 
     public int Width;
 
-    public AtmosChunk(int width = 16, int height = 16, int depth = 16)
+    public AtmosChunk(int width = 16, int height = 16, int depth = 16, int maxActiveRooms = 64)
     {
+        MaxActiveRooms = maxActiveRooms;
         Width = width;
         Height = height;
         Depth = depth;
@@ -40,7 +41,6 @@ public class AtmosChunk
         EnsureInitialized();
     }
 
-    [SuppressMessage("ReSharper", "ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract")]
     public void EnsureInitialized()
     {
         if (VoxelRoomMap == null || VoxelRoomMap.Length != VoxelCount)
@@ -53,11 +53,14 @@ public class AtmosChunk
             Temperature = new float[VoxelCount];
         if (ActiveGases == null)
             ActiveGases = new GasChannel[16];
+        if (ActiveRoomIds == null || ActiveRoomIds.Length != MaxActiveRooms)
+            ActiveRoomIds = new int[MaxActiveRooms];
     }
 
-    public void Initialize(Int3 position, int width = 16, int height = 16, int depth = 16)
+    public void Initialize(Int3 position, int width = 16, int height = 16, int depth = 16, int maxActiveRooms = 64)
     {
         GridPosition = position;
+        MaxActiveRooms = maxActiveRooms;
         IsAwake = false;
         Width = width;
         Height = height;
@@ -67,7 +70,7 @@ public class AtmosChunk
         EnsureInitialized();
 
         ActiveAirCount = 0;
-        ActiveRoomId = RoomUnassigned;
+        ActiveRoomCount = 0;
         ActiveGasCount = 0;
         SleepTimer = 0;
 
@@ -76,37 +79,75 @@ public class AtmosChunk
         Array.Clear(TotalPressure, 0, TotalPressure.Length);
         Array.Clear(Temperature, 0, Temperature.Length);
         Array.Clear(ActiveGases, 0, ActiveGases.Length);
+        Array.Clear(ActiveRoomIds, 0, ActiveRoomIds.Length);
     }
 
     public void Release()
     {
         if (ActiveGases != null)
+        {
             for (var i = 0; i < ActiveGasCount; i++)
+            {
                 ActiveGases[i].Release();
+            }
+        }
     }
 
-    public void WakeRoom(int targetRoomId)
+    public virtual void WakeRoom(int targetRoomId)
     {
-        if (targetRoomId is RoomSolid or RoomVoid)
+        if (targetRoomId == RoomSolid || targetRoomId == RoomVoid)
             return;
 
-        if (IsAwake && ActiveRoomId == targetRoomId)
+        if (IsAwake)
         {
-            SleepTimer = 0;
-            return;
+            for (var r = 0; r < ActiveRoomCount; r++)
+            {
+                if (ActiveRoomIds[r] == targetRoomId)
+                {
+                    SleepTimer = 0;
+                    return;
+                }
+            }
         }
 
-        ActiveAirCount = 0;
-        IsAwake = true;
-        SleepTimer = 0;
-        ActiveRoomId = targetRoomId;
+        if (!IsAwake)
+        {
+            ActiveRoomCount = 0;
+            IsAwake = true;
+        }
 
+        if (ActiveRoomCount >= MaxActiveRooms)
+        {
+            throw new Exception("Maximum active rooms reached for this chunk!");
+        }
+
+        ActiveRoomIds[ActiveRoomCount] = targetRoomId;
+        ActiveRoomCount++;
+        SleepTimer = 0;
+        RebuildActiveAirIndices();
+    }
+
+    protected void RebuildActiveAirIndices()
+    {
+        ActiveAirCount = 0;
         for (ushort i = 0; i < VoxelCount; i++)
-            if (VoxelRoomMap[i] == targetRoomId)
+        {
+            int roomId = VoxelRoomMap[i];
+            for (var r = 0; r < ActiveRoomCount; r++)
             {
-                ActiveAirIndices[ActiveAirCount] = i;
-                ActiveAirCount++;
+                if (ActiveRoomIds[r] == roomId)
+                {
+                    ActiveAirIndices[ActiveAirCount] = i;
+                    ActiveAirCount++;
+                    break;
+                }
             }
+        }
+    }
+
+    public virtual void Sleep()
+    {
+        IsAwake = false;
     }
 
     public void InjectGasToVoxel(ushort localVoxelIndex, int gasId, float molesToAdd, float temperature)
@@ -124,16 +165,20 @@ public class AtmosChunk
 
         int targetChannelIndex = -1;
         for (var i = 0; i < ActiveGasCount; i++)
+        {
             if (ActiveGases[i].GasId == gasId)
             {
                 targetChannelIndex = i;
                 break;
             }
+        }
 
         if (targetChannelIndex == -1)
         {
             if (ActiveGasCount >= ActiveGases.Length)
+            {
                 throw new Exception("Maximum unique gas channels reached for this chunk!");
+            }
 
             ActiveGases[ActiveGasCount] = new GasChannel();
             ActiveGases[ActiveGasCount].Initialize(gasId, VoxelCount);
@@ -146,7 +191,9 @@ public class AtmosChunk
 
         var currentTotalMoles = 0f;
         for (var g = 0; g < ActiveGasCount; g++)
+        {
             currentTotalMoles += ActiveGases[g].Moles[localVoxelIndex];
+        }
 
         float currentTemp = Temperature[localVoxelIndex];
         float newTemp = ((currentTotalMoles - molesToAdd) * currentTemp + molesToAdd * temperature) / currentTotalMoles;

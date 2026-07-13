@@ -84,6 +84,12 @@ public struct BoundaryFlowEvent
     public float Temperature;
 }
 
+public struct ThermalBoundaryEvent
+{
+    public ushort LocalVoxelIndex;
+    public float Temperature;
+}
+
 public struct GasInjectionEvent
 {
     public Vector3 Position;

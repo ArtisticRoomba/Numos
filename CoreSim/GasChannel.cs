@@ -30,8 +30,10 @@ public struct GasChannel
     /// <summary>
     ///     The amount of moles of this gas in each voxel of the chunk.
     /// </summary>
-    /// <remarks>While this is not marked as nullable, this field
-    /// can be null when the channel is not initialized via <see cref="Initialize"/>.</remarks>
+    /// <remarks>
+    ///     While this is not marked as nullable, this field
+    ///     can be null when the channel is not initialized via <see cref="Initialize" />.
+    /// </remarks>
     public float[] Moles;
 
     /// <summary>
