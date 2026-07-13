@@ -1,16 +1,20 @@
 # Numos
-An engine-agnostic, pseudo-realistic, cell-based atmospherics simulation.
+Numos is an engine-agnostic, pseudo-realistic, cell-based atmospherics simulation.
 
-## About Numos
-Numos is a library that simulates atmospheric gas dynamics.
-
-The simulation is intended to operate in the context of a space-station or sealed-environment game (ex. a game with enclosed rooms).
-Numos makes many concessions for the sake of tuning, gameplay, and performance.
-
-## Disclaimers and Considerations
-Numos is currently a prototype/personal project and is being actively developed.
+> [!WARNING]
+> Numos is currently a prototype/personal project and is being actively developed.
 Public APIs, project structure, and features are all ephemeral and can change at any time.
 The project will follow a regular semantic versioning structure when I feel comfortable with releasing the project under v0.1.0.
+
+## Some Highlights/Lowlights
+- First class 3D support, voxel based
+- Arbritrary gas additions at runtime (SoAs)
+- Engine-agnostic, instantiate with `new` and interact with extensions
+- Multithreaded intra-chunk advection and thermodynamics
+- Singlethreaded cross-chunk boundary flow
+- Micro/macro layer
+- Simplified ideal gas law (`P = n \cdot T`)
+- Constant volume voxels
 
 ## Bug Reports & Contributions
 Contributions and bug reports are always welcome and appreciated. Feel free to submit a PR or bug report on GitHub.
