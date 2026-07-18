@@ -7,7 +7,7 @@ namespace Numos;
 /// <summary>
 ///     Engine-agnostic core atmospheric simulation manager.
 /// </summary>
-public class AtmosSimulation
+public partial class AtmosSimulation
 {
     public const float SimulationRate = 20.0f;
     private const float FixedDt = 1.0f / SimulationRate;
@@ -36,45 +36,12 @@ public class AtmosSimulation
             new ThreadLocal<ThermalBoundaryEvent[]>(() => new ThermalBoundaryEvent[_maxBoundaryEvents]);
     }
 
-    public void RegisterChunk(AtmosChunk chunk)
-    {
-        _chunkMap[chunk.GridPosition] = chunk;
-    }
-
-    public void UnregisterChunk(AtmosChunk chunk)
-    {
-        _chunkMap.TryRemove(chunk.GridPosition, out _);
-        chunk.Release();
-    }
-
-    public void Update(float elapsedSeconds, AtmosConfig config)
-    {
-        _accumulator += elapsedSeconds;
-
-        if (_accumulator > FixedDt * MaxStepsPerFrame)
-        {
-            _accumulator = FixedDt * MaxStepsPerFrame;
-        }
-
-        LastBoundaryTicks = 0;
-
-        // Snapshot chunks
-        var chunks = _chunkMap.Values.ToArray();
-
-        var steps = 0;
-        while (_accumulator >= FixedDt && steps < MaxStepsPerFrame)
-        {
-            _accumulator -= FixedDt;
-            steps++;
-            TickSimulation(chunks, config);
-        }
-    }
-
     private void TickSimulation(AtmosChunk[] chunks, AtmosConfig config)
     {
         TickCount++;
 
         // 1. Parallel Advection & Fickian Diffusion
+        // TODO PERF reuse queue
         var boundaryEvents = new ConcurrentQueue<(Int3 Key, BoundaryFlowEvent Evt)>();
 
         Parallel.ForEach(chunks, chunk =>
@@ -275,7 +242,7 @@ public class AtmosSimulation
         }
     }
 
-    public void Advect(AtmosChunk chunk, BoundaryFlowEvent[] boundaryBuffer, ref int boundaryEventCount,
+    private void Advect(AtmosChunk chunk, BoundaryFlowEvent[] boundaryBuffer, ref int boundaryEventCount,
         AtmosConfig config)
     {
         if (!chunk.IsAwake)
