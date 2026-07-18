@@ -1,6 +1,8 @@
 using System.Buffers;
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using Numos.Datatypes.Events;
+using Numos.Maths;
 
 namespace Numos;
 

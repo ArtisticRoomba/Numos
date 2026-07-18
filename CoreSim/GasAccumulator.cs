@@ -1,4 +1,4 @@
-namespace Opal.Prototypes.AtmosAndThermalGeneric;
+namespace Numos;
 
 public enum AccumulatorState
 {
