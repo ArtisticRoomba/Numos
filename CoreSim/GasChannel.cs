@@ -37,15 +37,18 @@ public struct GasChannel
     public float[] Moles;
 
     /// <summary>
-    ///     Whether the gas channel has been initialized and is ready for use.
+    ///     Whether the <see cref="GasChannel" /> has been initialized and is ready for use.
     /// </summary>
     public bool IsInitialized => Moles != null;
 
     /// <summary>
-    ///     Initializes the gas channel with the specified gas ID and voxel count.
+    ///     Initializes the <see cref="GasChannel" /> with the specified gas ID and voxel count.
     /// </summary>
     /// <param name="gasId">The ID of the gas type this channel represents.</param>
     /// <param name="voxelCount">The number of voxels in the chunk.</param>
+    /// TODO figure out if C#'s static null analysis can help with marking
+    /// the above fields null as right now we have to track if they're null ourselves
+    /// using init, it would be nice if we didn't have to worry about it past init.
     public void Initialize(int gasId, int voxelCount)
     {
         GasId = gasId;
@@ -54,7 +57,7 @@ public struct GasChannel
     }
 
     /// <summary>
-    ///     Releases the resources used by the gas channel, returning the moles array to the shared array pool.
+    ///     Releases the resources used by the <see cref="GasChannel" />, returning the moles array to the shared array pool.
     /// </summary>
     public void Release()
     {
