@@ -1,5 +1,5 @@
 # Numos
-Numos is an engine-agnostic, pseudo-realistic, cell-based atmospherics simulation.
+Numos is an engine-agnostic, pseudo-realistic, voxel-based atmospherics simulation.
 
 > [!WARNING]
 > Numos is currently a prototype/personal project and is being actively developed.
@@ -7,7 +7,7 @@ Public APIs, project structure, and features are all ephemeral and can change at
 The project will follow a regular semantic versioning structure when I feel comfortable with releasing the project under v0.1.0.
 
 ## Some Highlights/Lowlights
-- First class 3D support, voxel based
+- First-class 3D support, voxel based
 - Arbritrary gas additions at runtime (SoAs)
 - Engine-agnostic, instantiate with `new` and interact with extensions
 - Multithreaded intra-chunk advection and thermodynamics
