@@ -54,6 +54,7 @@ public partial class AtmosSimulation
             var localBoundaryBuffer = _boundaryBufferPool.Value;
             var boundaryCount = 0;
 
+            Debug.Assert(localBoundaryBuffer != null, nameof(localBoundaryBuffer) + " != null");
             Advect(chunk, localBoundaryBuffer, ref boundaryCount, config);
 
             for (var i = 0; i < boundaryCount; i++)
@@ -88,6 +89,8 @@ public partial class AtmosSimulation
                 var localThermalBuffer = _thermalBoundaryBufferPool.Value;
                 var thermalBoundaryCount = 0;
 
+                Debug.Assert(localPrecipBuffer != null, nameof(localPrecipBuffer) + " != null");
+                Debug.Assert(localThermalBuffer != null, nameof(localThermalBuffer) + " != null");
                 ProcessThermodynamics(chunk, localPrecipBuffer, ref precipCount, localThermalBuffer,
                     ref thermalBoundaryCount, config);
 
@@ -694,8 +697,7 @@ public partial class AtmosSimulation
         AtmosConfig config)
     {
         var gasRegistry = config.GasRegistry;
-        if (gasRegistry == null)
-            return;
+        Debug.Assert(gasRegistry != null, nameof(gasRegistry) + " != null");
 
         float condensationRateFactor = config.CondensationRateFactor;
         var P_reference = 1000f; // Reference pressure scale (R = 1)
