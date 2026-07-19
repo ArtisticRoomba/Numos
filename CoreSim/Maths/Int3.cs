@@ -1,5 +1,8 @@
 namespace Numos.Maths;
 
+/// <summary>
+///     3D integer datatype.
+/// </summary>
 public struct Int3(int x, int y, int z) : IEquatable<Int3>
 {
     public int X = x;

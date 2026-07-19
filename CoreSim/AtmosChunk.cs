@@ -1,3 +1,4 @@
+using JetBrains.Annotations;
 using Numos.Datatypes.Snapshots;
 using Numos.Maths;
 
@@ -8,11 +9,16 @@ namespace Numos;
 /// </summary>
 public class AtmosChunk
 {
+    // TODO Voxel Classification, make this its own primtype trollhaps
     public const int RoomUnassigned = 0;
     public const int RoomVoid = -1;
     public const int RoomSolid = -2;
     public int ActiveAirCount;
 
+    /// <summary>
+    /// 1D array of indices belonging to voxels that are part of active rooms in this chunk.
+    /// This is used to iterate over only the voxels that are relevant for simulation.
+    /// </summary>
     public ushort[] ActiveAirIndices;
     public int ActiveGasCount;
 
@@ -26,10 +32,30 @@ public class AtmosChunk
     public int MaxActiveRooms;
 
     public int SleepTimer;
+
+    /// <summary>
+    /// 1D array of temperature values for each voxel in the chunk.
+    /// </summary>
     public float[] Temperature;
 
+    /// <summary>
+    /// Cached 1D array of pressure values for each voxel in the chunk.
+    /// Recomputed each tick.
+    /// </summary>
     public float[] TotalPressure;
+
+    /// <summary>
+    /// Number of voxels in this chunk.
+    /// </summary>
     public int VoxelCount;
+
+    /// <summary>
+    /// 1D array that classifies each voxel in the chunk into a room.
+    /// Room IDs are arbitrary integers, with 0 being unassigned, -1 being void, and -2 being solid.
+    /// </summary>
+    /// <seealso cref="RoomSolid"/>
+    /// <seealso cref="RoomVoid"/>
+    /// <seealso cref="RoomUnassigned"/>
     public int[] VoxelRoomMap;
 
     public int Width;
@@ -233,13 +259,37 @@ public class AtmosChunk
         return snapshot;
     }
 
+    /// <summary>
+    /// Gets the index into any flat 1D array.
+    /// </summary>
+    [PublicAPI]
     public ushort GetIndex(int x, int y, int z)
     {
         return (ushort)(x + y * Width + z * Width * Height);
     }
 
-    public (int x, int y, int z) GetXYZ(ushort index)
+    /// <inheritdoc cref="GetIndex(int, int, int)"/>
+    [PublicAPI]
+    public ushort GetIndex(Int3 vec)
+    {
+        return (ushort)(vec.X + vec.Y * Width + vec.Z * Width * Height);
+    }
+
+    /// <summary>
+    /// Gets the 3D coords given an index for a flat 1D array.
+    /// </summary>
+    [PublicAPI]
+    public (int x, int y, int z) GetXyz(ushort index)
     {
         return (index % Width, index / Width % Height, index / (Width * Height));
+    }
+
+    /// <summary>
+    /// Gets the 3D coords as an <see cref="Int3"/> given an index for a flat 1D array.
+    /// </summary>
+    [PublicAPI]
+    public Int3 GetXyzInt3(ushort index)
+    {
+        return new Int3(index % Width, index / Width % Height, index / (Width * Height));
     }
 }

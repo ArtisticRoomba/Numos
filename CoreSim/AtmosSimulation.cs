@@ -108,7 +108,7 @@ public partial class AtmosSimulation
     {
         if (!_chunkMap.TryGetValue(sourceKey, out var sourceChunk))
             return;
-        (int x, int y, int z) = sourceChunk.GetXYZ(evt.LocalVoxelIndex);
+        (int x, int y, int z) = sourceChunk.GetXyz(evt.LocalVoxelIndex);
 
         TryFlowToNeighbor(sourceChunk, sourceKey, x - 1, y, z, -1, 0, 0, config);
         TryFlowToNeighbor(sourceChunk, sourceKey, x + 1, y, z, 1, 0, 0, config);
@@ -265,7 +265,7 @@ public partial class AtmosSimulation
             for (var i = 0; i < chunk.ActiveAirCount; i++)
             {
                 ushort idx = chunk.ActiveAirIndices[i];
-                (int x, int y, int z) = chunk.GetXYZ(idx);
+                (int x, int y, int z) = chunk.GetXyz(idx);
 
                 float currentPressure = chunk.TotalPressure[idx];
 
@@ -491,7 +491,7 @@ public partial class AtmosSimulation
             if (chunk.TotalPressure[idx] < vacuumThreshold)
                 continue;
 
-            (int x, int y, int z) = chunk.GetXYZ(idx);
+            (int x, int y, int z) = chunk.GetXyz(idx);
             float currentTemp = chunk.Temperature[idx];
 
             CheckNeighborThermal(chunk, x - 1, y, z, idx, currentTemp, thermalConductivity, tempDeltas, config);
@@ -647,7 +647,7 @@ public partial class AtmosSimulation
     {
         if (!_chunkMap.TryGetValue(sourceKey, out var sourceChunk))
             return;
-        (int x, int y, int z) = sourceChunk.GetXYZ(evt.LocalVoxelIndex);
+        (int x, int y, int z) = sourceChunk.GetXyz(evt.LocalVoxelIndex);
 
         TryThermalFlowToNeighbor(sourceChunk, sourceKey, x - 1, y, z, -1, 0, 0, config);
         TryThermalFlowToNeighbor(sourceChunk, sourceKey, x + 1, y, z, 1, 0, 0, config);
