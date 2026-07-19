@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using JetBrains.Annotations;
 using Numos.Datatypes.Snapshots;
 using Numos.Maths;
@@ -13,24 +14,66 @@ public class AtmosChunk
     public const int RoomUnassigned = 0;
     public const int RoomVoid = -1;
     public const int RoomSolid = -2;
+
+    /// <summary>
+    /// Number of voxels to be actively processed/enumerated over in <see cref="ActiveAirIndices"/>.
+    /// Basically the active length of that array.
+    /// </summary>
     public int ActiveAirCount;
 
     /// <summary>
     /// 1D array of indices belonging to voxels that are part of active rooms in this chunk.
-    /// This is used to iterate over only the voxels that are relevant for simulation.
+    /// Used to iterate over only the voxels that are relevant for simulation.
     /// </summary>
     public ushort[] ActiveAirIndices;
+
+    /// <summary>
+    /// Number of gases that are currently active in this chunk.
+    /// Basically the active length of <see cref="ActiveGases"/>.
+    /// </summary>
     public int ActiveGasCount;
 
+    /// <summary>
+    /// 1D array of gas channels that are currently active in this chunk.
+    /// </summary>
     public GasChannel[] ActiveGases;
+
+    /// <summary>
+    /// Number of rooms that are currently active in this chunk.
+    /// </summary>
     public int ActiveRoomCount;
+
+    /// <summary>
+    /// 1D array of room IDs that are currently active in this chunk.
+    /// </summary>
     public int[] ActiveRoomIds;
-    public int Depth;
+
+    /// <summary>
+    /// The position of this chunk in the grid of chunks.
+    /// </summary>
     public Int3 GridPosition;
+
+    // TODO migrate to Int3
+    public int Depth;
     public int Height;
+    public int Width;
+
+    /// <summary>
+    /// Whether this chunk is awake.
+    /// If false, the chunk is sleeping and will not be processed
+    /// in a tick.
+    /// </summary>
     public bool IsAwake;
+
+    /// <summary>
+    /// Maximum number of rooms that can be active in this chunk at once.
+    /// </summary>
     public int MaxActiveRooms;
 
+    /// <summary>
+    /// Timer for tracking whether a chunk should be put to sleep and processing stopped.
+    /// </summary>
+    /// <seealso cref="AtmosConfig.SleepThreshold"/>
     public int SleepTimer;
 
     /// <summary>
@@ -58,8 +101,6 @@ public class AtmosChunk
     /// <seealso cref="RoomUnassigned"/>
     public int[] VoxelRoomMap;
 
-    public int Width;
-
     public AtmosChunk(int width = 16, int height = 16, int depth = 16, int maxActiveRooms = 64)
     {
         MaxActiveRooms = maxActiveRooms;
@@ -70,6 +111,16 @@ public class AtmosChunk
         EnsureInitialized();
     }
 
+    /// <summary>
+    /// Ensures that all arrays are initialized and have the correct length based on the current dimensions of the chunk.
+    /// </summary>
+    [MemberNotNull(nameof(VoxelRoomMap),
+        nameof(ActiveAirIndices),
+        nameof(TotalPressure),
+        nameof(Temperature),
+        nameof(ActiveGases),
+        nameof(ActiveRoomIds))]
+    [PublicAPI]
     public void EnsureInitialized()
     {
         if (VoxelRoomMap == null || VoxelRoomMap.Length != VoxelCount)
@@ -81,11 +132,20 @@ public class AtmosChunk
         if (Temperature == null || Temperature.Length != VoxelCount)
             Temperature = new float[VoxelCount];
         if (ActiveGases == null)
-            ActiveGases = new GasChannel[16];
+            ActiveGases = new GasChannel[16]; // TODO unhardcode maxgases
         if (ActiveRoomIds == null || ActiveRoomIds.Length != MaxActiveRooms)
             ActiveRoomIds = new int[MaxActiveRooms];
     }
 
+    /// <summary>
+    /// Initializes the chunk with the given parameters.
+    /// </summary>
+    /// <param name="position">The chunk's position in the grid of chunks.</param>
+    /// <param name="width">The width of the chunk.</param>
+    /// <param name="height">The height of the chunk.</param>
+    /// <param name="depth">The depth of the chunk.</param>
+    /// <param name="maxActiveRooms">The maximum number of rooms that can be active in this chunk at once.</param>
+    [PublicAPI]
     public void Initialize(Int3 position, int width = 16, int height = 16, int depth = 16, int maxActiveRooms = 64)
     {
         GridPosition = position;
@@ -231,6 +291,11 @@ public class AtmosChunk
         TotalPressure[localVoxelIndex] = currentTotalMoles * newTemp;
     }
 
+    /// <summary>
+    /// Gets a snapshot of the current state of the chunk.
+    /// </summary>
+    /// <returns>A snapshot of the current state of the chunk.</returns>
+    [PublicAPI]
     public AtmosChunkSnapshot GetNetworkSnapshot()
     {
         var snapshot = new AtmosChunkSnapshot
