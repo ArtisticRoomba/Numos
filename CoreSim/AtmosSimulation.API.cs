@@ -1,4 +1,5 @@
 using JetBrains.Annotations;
+using Maths;
 
 namespace Numos;
 
@@ -33,6 +34,16 @@ public partial class AtmosSimulation
         }
     }
 
+    /// <summary>
+    ///     Sets the configuration for the simulation.
+    /// </summary>
+    /// <param name="config">The configuration to use.</param>
+    [PublicAPI]
+    public void SetAtmosConfig(AtmosConfig config)
+    {
+        _config = config;
+    }
+
     [PublicAPI]
     public void RegisterChunk(AtmosChunk chunk)
     {
@@ -45,4 +56,35 @@ public partial class AtmosSimulation
         _chunkMap.TryRemove(chunk.GridPosition, out _);
         chunk.Release();
     }
+
+    /// <summary>
+    ///     Runs a single simulation tick with the given configuration.
+    ///     Useful for testing deterministic behavior.
+    /// </summary>
+    /// <param name="config">The configuration to use.</param>
+    [PublicAPI]
+    public void Tick(AtmosConfig config)
+    {
+        var chunks = _chunkMap.Values.ToArray();
+        TickSimulation(chunks, config);
+    }
+
+    /// <summary>
+    ///     Runs a single simulation tick using the default configuration.
+    ///     Useful for testing deterministic behavior.
+    /// </summary>
+    [PublicAPI]
+    public void Tick()
+    {
+        // Create a minimal config for testing
+        var config = new AtmosConfig();
+        var chunks = _chunkMap.Values.ToArray();
+        TickSimulation(chunks, config);
+    }
+
+    /// <summary>
+    ///     Gets the number of registered chunks.
+    /// </summary>
+    [PublicAPI]
+    public int ChunkCount => _chunkMap.Count;
 }

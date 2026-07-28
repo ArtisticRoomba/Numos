@@ -1,3 +1,7 @@
 <Solution>
-    <Project Path="CoreSim\CoreSim.csproj"/>
+    <Project Path="CoreSim\CoreSim.csproj" />
+    <Project Path="CoreSim.Tests\CoreSim.Tests.csproj" />
+    <Project Path="CoreSim.IntegrationTests\CoreSim.IntegrationTests.csproj" />
+    <Project Path="Maths.Tests/Maths.Tests.csproj" />
+    <Project Path="Maths/Maths.csproj" />
 </Solution>

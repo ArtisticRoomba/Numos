@@ -1,4 +1,4 @@
-using Numos.Maths;
+using Maths;
 
 namespace Numos.Datatypes.Snapshots;
 

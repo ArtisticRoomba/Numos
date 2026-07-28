@@ -1,8 +1,8 @@
 using System.Buffers;
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using Maths;
 using Numos.Datatypes.Events;
-using Numos.Maths;
 
 namespace Numos;
 
@@ -14,6 +14,14 @@ public partial class AtmosSimulation
     public const float SimulationRate = 20.0f;
     private const float FixedDt = 1.0f / SimulationRate;
     private const int MaxStepsPerFrame = 5;
+
+    /// <summary>
+    /// Current <see cref="AtmosConfig"/> that this simulation runs under.
+    /// </summary>
+    /// <remarks>Note that this is a ref and as such multiple <see cref="AtmosSimulation"/>s
+    /// can be given a singular <see cref="AtmosConfig"/> instance.</remarks>
+    private AtmosConfig _config = new();
+
     private readonly ThreadLocal<BoundaryFlowEvent[]> _boundaryBufferPool;
 
     // Map of GridPosition to Chunk for neighbor lookups

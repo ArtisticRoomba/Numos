@@ -1,4 +1,4 @@
-using Numos.Maths;
+using System.Numerics;
 
 namespace Numos.Datatypes.Events;
 

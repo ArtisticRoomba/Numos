@@ -1,7 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using JetBrains.Annotations;
+using Maths;
 using Numos.Datatypes.Snapshots;
-using Numos.Maths;
 
 namespace Numos;
 
@@ -216,7 +216,7 @@ public class AtmosChunk
         RebuildActiveAirIndices();
     }
 
-    protected void RebuildActiveAirIndices()
+    public void RebuildActiveAirIndices()
     {
         ActiveAirCount = 0;
         for (ushort i = 0; i < VoxelCount; i++)
@@ -350,7 +350,7 @@ public class AtmosChunk
     }
 
     /// <summary>
-    /// Gets the 3D coords as an <see cref="Int3"/> given an index for a flat 1D array.
+    /// Gets the 3D coords as an <see cref="Maths.Int3"/> given an index for a flat 1D array.
     /// </summary>
     [PublicAPI]
     public Int3 GetXyzInt3(ushort index)

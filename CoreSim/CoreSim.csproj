@@ -11,4 +11,8 @@
       <PackageReference Include="JetBrains.Annotations" Version="2026.2.0" />
     </ItemGroup>
 
+    <ItemGroup>
+      <ProjectReference Include="..\Maths\Maths.csproj" />
+    </ItemGroup>
+
 </Project>
