@@ -30,7 +30,7 @@ public partial class AtmosSimulation
         {
             _accumulator -= FixedDt;
             steps++;
-            TickSimulation(chunks, config);
+            TickSimulation(chunks);
         }
     }
 
@@ -58,28 +58,14 @@ public partial class AtmosSimulation
     }
 
     /// <summary>
-    ///     Runs a single simulation tick with the given configuration.
-    ///     Useful for testing deterministic behavior.
-    /// </summary>
-    /// <param name="config">The configuration to use.</param>
-    [PublicAPI]
-    public void Tick(AtmosConfig config)
-    {
-        var chunks = _chunkMap.Values.ToArray();
-        TickSimulation(chunks, config);
-    }
-
-    /// <summary>
     ///     Runs a single simulation tick using the default configuration.
     ///     Useful for testing deterministic behavior.
     /// </summary>
     [PublicAPI]
     public void Tick()
     {
-        // Create a minimal config for testing
-        var config = new AtmosConfig();
         var chunks = _chunkMap.Values.ToArray();
-        TickSimulation(chunks, config);
+        TickSimulation(chunks);
     }
 
     /// <summary>

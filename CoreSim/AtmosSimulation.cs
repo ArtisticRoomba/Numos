@@ -46,7 +46,7 @@ public partial class AtmosSimulation
             new ThreadLocal<ThermalBoundaryEvent[]>(() => new ThermalBoundaryEvent[_maxBoundaryEvents]);
     }
 
-    private void TickSimulation(AtmosChunk[] chunks, AtmosConfig config)
+    private void TickSimulation(AtmosChunk[] chunks)
     {
         TickCount++;
 
@@ -63,7 +63,7 @@ public partial class AtmosSimulation
             var boundaryCount = 0;
 
             Debug.Assert(localBoundaryBuffer != null, nameof(localBoundaryBuffer) + " != null");
-            Advect(chunk, localBoundaryBuffer, ref boundaryCount, config);
+            Advect(chunk, localBoundaryBuffer, ref boundaryCount);
 
             for (var i = 0; i < boundaryCount; i++)
             {
@@ -75,7 +75,7 @@ public partial class AtmosSimulation
         long boundaryFlowStart = Stopwatch.GetTimestamp();
         foreach (var (key, evt) in boundaryEvents)
         {
-            ProcessBoundaryFlow(key, evt, config);
+            ProcessBoundaryFlow(key, evt);
         }
 
         LastBoundaryTicks += Stopwatch.GetTimestamp() - boundaryFlowStart;
@@ -100,7 +100,7 @@ public partial class AtmosSimulation
                 Debug.Assert(localPrecipBuffer != null, nameof(localPrecipBuffer) + " != null");
                 Debug.Assert(localThermalBuffer != null, nameof(localThermalBuffer) + " != null");
                 ProcessThermodynamics(chunk, localPrecipBuffer, ref precipCount, localThermalBuffer,
-                    ref thermalBoundaryCount, config);
+                    ref thermalBoundaryCount);
 
                 for (var i = 0; i < thermalBoundaryCount; i++)
                 {
@@ -111,7 +111,7 @@ public partial class AtmosSimulation
             // 4. Sequential Thermal Boundary Processing
             foreach (var (key, evt) in thermalBoundaryEvents)
             {
-                ProcessThermalBoundaryFlow(key, evt, config);
+                ProcessThermalBoundaryFlow(key, evt);
             }
         }
     }
@@ -125,23 +125,22 @@ public partial class AtmosSimulation
     ///     The boundary flow event containing the local voxel index
     ///     and pressure/temperature data.
     /// </param>
-    /// <param name="config">The relevant <see cref="AtmosConfig" /> data.</param>
-    private void ProcessBoundaryFlow(Int3 sourceKey, BoundaryFlowEvent evt, AtmosConfig config)
+    private void ProcessBoundaryFlow(Int3 sourceKey, BoundaryFlowEvent evt)
     {
         if (!_chunkMap.TryGetValue(sourceKey, out var sourceChunk))
             return;
         (int x, int y, int z) = sourceChunk.GetXyz(evt.LocalVoxelIndex);
 
-        TryFlowToNeighbor(sourceChunk, sourceKey, x - 1, y, z, -1, 0, 0, config);
-        TryFlowToNeighbor(sourceChunk, sourceKey, x + 1, y, z, 1, 0, 0, config);
-        TryFlowToNeighbor(sourceChunk, sourceKey, x, y - 1, z, 0, -1, 0, config);
-        TryFlowToNeighbor(sourceChunk, sourceKey, x, y + 1, z, 0, 1, 0, config);
+        TryFlowToNeighbor(sourceChunk, sourceKey, x - 1, y, z, -1, 0, 0);
+        TryFlowToNeighbor(sourceChunk, sourceKey, x + 1, y, z, 1, 0, 0);
+        TryFlowToNeighbor(sourceChunk, sourceKey, x, y - 1, z, 0, -1, 0);
+        TryFlowToNeighbor(sourceChunk, sourceKey, x, y + 1, z, 0, 1, 0);
 
         // Working in the Z plane.
         if (sourceChunk.Depth > 1)
         {
-            TryFlowToNeighbor(sourceChunk, sourceKey, x, y, z - 1, 0, 0, -1, config);
-            TryFlowToNeighbor(sourceChunk, sourceKey, x, y, z + 1, 0, 0, 1, config);
+            TryFlowToNeighbor(sourceChunk, sourceKey, x, y, z - 1, 0, 0, -1);
+            TryFlowToNeighbor(sourceChunk, sourceKey, x, y, z + 1, 0, 0, 1);
         }
     }
 
@@ -158,11 +157,9 @@ public partial class AtmosSimulation
     /// <param name="dirX">The x-direction to the neighboring chunk.</param>
     /// <param name="dirY">The y-direction to the neighboring chunk.</param>
     /// <param name="dirZ">The z-direction to the neighboring chunk.</param>
-    /// <param name="config">The relevant <see cref="AtmosConfig" /> data.</param>
     private void TryFlowToNeighbor(AtmosChunk sourceChunk, Int3 sourceKey,
         int targetX, int targetY, int targetZ,
-        int dirX, int dirY, int dirZ,
-        AtmosConfig config)
+        int dirX, int dirY, int dirZ)
     {
         // Back out if we're not out of bounds of our own chunk, as this is not a boundary flow.
         if (targetX >= 0 && targetX < sourceChunk.Width &&
@@ -218,11 +215,11 @@ public partial class AtmosSimulation
         {
             // TODO DOCS update, legacy docs say that an incorrect simpler flow formula is used here however
             // the same seems to be used at least for the CFL flow cap.
-            float flow = CalculateFlow(pressureDelta, sourcePressure, config);
+            float flow = CalculateFlow(pressureDelta, sourcePressure);
             if (flow == 0f)
                 return;
 
-            float defaultTemp = config.DefaultTemperatureFallback;
+            float defaultTemp = _config.DefaultTemperatureFallback;
 
             var totalMoles = 0f;
             for (var g = 0; g < sourceChunk.ActiveGasCount; g++)
@@ -239,7 +236,7 @@ public partial class AtmosSimulation
                 float neighborTemp = isVoid ? 0f : neighborChunk.Temperature[neighborIdx];
                 float tempRatio = neighborTemp * invTemp;
 
-                var gasRegistry = config.GasRegistry;
+                var gasRegistry = _config.GasRegistry;
 
                 for (var g = 0; g < sourceChunk.ActiveGasCount; g++)
                 {
@@ -301,9 +298,7 @@ public partial class AtmosSimulation
     ///     If a boundary event happens, it is queued to be run sequentially in a later processing stage.
     /// </param>
     /// <param name="boundaryEventCount"> The count of boundary events generated during processing.</param>
-    /// <param name="config">Relevant <see cref="AtmosConfig" /> data.</param>
-    private void Advect(AtmosChunk chunk, BoundaryFlowEvent[] boundaryBuffer, ref int boundaryEventCount,
-        AtmosConfig config)
+    private void Advect(AtmosChunk chunk, BoundaryFlowEvent[] boundaryBuffer, ref int boundaryEventCount)
     {
         if (!chunk.IsAwake)
             return;
@@ -314,7 +309,7 @@ public partial class AtmosSimulation
         if (chunk.ActiveGasCount > 0)
         {
             // Refresh caches for total pressure in each voxel.
-            CalculateTotalPressure(chunk, config);
+            CalculateTotalPressure(chunk);
 
             int activeGasCount = chunk.ActiveGasCount;
 
@@ -323,8 +318,7 @@ public partial class AtmosSimulation
             float[] deltas = ArrayPool<float>.Shared.Rent(activeGasVoxelCount);
             Array.Clear(deltas, 0, activeGasVoxelCount);
 
-            float flowFriction = config.FlowFriction;
-            float vacuumThreshold = config.VacuumThreshold;
+            float vacuumThreshold = _config.VacuumThreshold;
 
             for (var i = 0; i < chunk.ActiveAirCount; i++)
             {
@@ -355,22 +349,22 @@ public partial class AtmosSimulation
                     continue;
 
                 // Inline Neighbor Checks (4 Directions for 2D, 6 Directions for 3D)
-                CheckNeighborAdvect(chunk, x - 1, y, z, idx, currentPressure, totalMoles, flowFriction,
-                    ref maxPressureDelta, deltas, config);
-                CheckNeighborAdvect(chunk, x + 1, y, z, idx, currentPressure, totalMoles, flowFriction,
-                    ref maxPressureDelta, deltas, config);
-                CheckNeighborAdvect(chunk, x, y - 1, z, idx, currentPressure, totalMoles, flowFriction,
-                    ref maxPressureDelta, deltas, config);
-                CheckNeighborAdvect(chunk, x, y + 1, z, idx, currentPressure, totalMoles, flowFriction,
-                    ref maxPressureDelta, deltas, config);
+                CheckNeighborAdvect(chunk, x - 1, y, z, idx, currentPressure, totalMoles,
+                    ref maxPressureDelta, deltas);
+                CheckNeighborAdvect(chunk, x + 1, y, z, idx, currentPressure, totalMoles,
+                    ref maxPressureDelta, deltas);
+                CheckNeighborAdvect(chunk, x, y - 1, z, idx, currentPressure, totalMoles,
+                    ref maxPressureDelta, deltas);
+                CheckNeighborAdvect(chunk, x, y + 1, z, idx, currentPressure, totalMoles,
+                    ref maxPressureDelta, deltas);
 
                 // Working in the Z plane.
                 if (chunk.Depth > 1)
                 {
-                    CheckNeighborAdvect(chunk, x, y, z - 1, idx, currentPressure, totalMoles, flowFriction,
-                        ref maxPressureDelta, deltas, config);
-                    CheckNeighborAdvect(chunk, x, y, z + 1, idx, currentPressure, totalMoles, flowFriction,
-                        ref maxPressureDelta, deltas, config);
+                    CheckNeighborAdvect(chunk, x, y, z - 1, idx, currentPressure, totalMoles,
+                        ref maxPressureDelta, deltas);
+                    CheckNeighborAdvect(chunk, x, y, z + 1, idx, currentPressure, totalMoles,
+                        ref maxPressureDelta, deltas);
                 }
 
                 // If the current voxel is on the boundary of the chunk and has a pressure above 1.0f...
@@ -398,8 +392,8 @@ public partial class AtmosSimulation
             ApplyDeltas(chunk, deltas);
         }
 
-        float sleepEpsilon = config.SleepEpsilon;
-        int sleepThreshold = config.SleepThreshold;
+        float sleepEpsilon = _config.SleepEpsilon;
+        int sleepThreshold = _config.SleepThreshold;
 
         if (maxPressureDelta < sleepEpsilon)
         {
@@ -425,7 +419,6 @@ public partial class AtmosSimulation
     /// <param name="idx">The index of the current voxel in the chunk.</param>
     /// <param name="currentPressure">The total pressure of the current voxel.</param>
     /// <param name="totalMoles">The total moles of gas in the current voxel.</param>
-    /// <param name="flowFriction">The flow friction coefficient from the <see cref="AtmosConfig" />.</param>
     /// <param name="maxPressureDelta">
     ///     A reference to the maximum pressure delta observed so far,
     ///     updated if this neighbor has a larger delta.
@@ -434,10 +427,9 @@ public partial class AtmosSimulation
     ///     The array of deltas for each gas in each voxel,
     ///     to be updated based on advection and diffusion.
     /// </param>
-    /// <param name="config">The relevant <see cref="AtmosConfig" /> data.</param>
     private void CheckNeighborAdvect(AtmosChunk chunk, int nx, int ny, int nz, ushort idx,
-        float currentPressure, float totalMoles, float flowFriction, // TODO remove flowFriction param
-        ref float maxPressureDelta, float[] deltas, AtmosConfig config)
+        float currentPressure, float totalMoles, // TODO Investigate, there used to be a flowfriction param but it was unused. Might be sussus amogus.
+        ref float maxPressureDelta, float[] deltas)
     {
         // Skip if the neighbor coordinates are out of bounds of the chunk.
         if (nx < 0 || nx >= chunk.Width || ny < 0 || ny >= chunk.Height || nz < 0 || nz >= chunk.Depth)
@@ -470,11 +462,11 @@ public partial class AtmosSimulation
         // If the pressure delta is positive, we have a flow from the current voxel to the neighbor.
         if (pressureDelta > 0)
         {
-            float flow = CalculateFlow(pressureDelta, currentPressure, config);
+            float flow = CalculateFlow(pressureDelta, currentPressure);
             if (flow == 0f)
                 return;
 
-            float defaultTemp = config.DefaultTemperatureFallback;
+            float defaultTemp = _config.DefaultTemperatureFallback;
 
             // Vectorized Solver Optimization: pre-calculate factors to eliminate division in loop
             float temp = chunk.Temperature[idx];
@@ -486,7 +478,7 @@ public partial class AtmosSimulation
             float neighborTemp = isVoid ? 0f : chunk.Temperature[neighborIdx];
             float tempRatio = neighborTemp * invTemp;
 
-            var gasRegistry = config.GasRegistry;
+            var gasRegistry = _config.GasRegistry;
 
             for (var g = 0; g < chunk.ActiveGasCount; g++)
             {
@@ -539,11 +531,10 @@ public partial class AtmosSimulation
     ///     and caches it in the <see cref="AtmosChunk.TotalPressure" /> array.
     /// </summary>
     /// <param name="chunk">The chunk in question:</param>
-    /// <param name="config">The relevant <see cref="AtmosConfig" /> data.</param>
-    private static void CalculateTotalPressure(AtmosChunk chunk, AtmosConfig config)
+    private void CalculateTotalPressure(AtmosChunk chunk)
     {
         // TODO SIMD
-        float defaultTemp = config.DefaultTemperatureFallback;
+        float defaultTemp = _config.DefaultTemperatureFallback;
 
         Array.Clear(chunk.TotalPressure, 0, chunk.VoxelCount);
 
@@ -602,16 +593,15 @@ public partial class AtmosSimulation
     ///     is queued to be run sequentially in a later processing stage.
     /// </param>
     /// <param name="thermalBoundaryCount">The count of thermal boundary events generated during processing.</param>
-    /// <param name="config">Relevant <see cref="AtmosConfig" /> data.</param>
     private void ProcessThermodynamics(AtmosChunk chunk, PrecipitationEvent[] precipBuffer, ref int precipCount,
-        ThermalBoundaryEvent[] thermalBoundaryBuffer, ref int thermalBoundaryCount, AtmosConfig config)
+        ThermalBoundaryEvent[] thermalBoundaryBuffer, ref int thermalBoundaryCount)
     {
         // It's genius.
         if (!chunk.IsAwake || chunk.ActiveGasCount == 0)
             return;
 
-        ProcessThermalDiffusion(chunk, thermalBoundaryBuffer, ref thermalBoundaryCount, config);
-        ProcessPhaseChanges(chunk, precipBuffer, ref precipCount, config);
+        ProcessThermalDiffusion(chunk, thermalBoundaryBuffer, ref thermalBoundaryCount);
+        ProcessPhaseChanges(chunk, precipBuffer, ref precipCount);
     }
 
     /// <summary>
@@ -623,15 +613,14 @@ public partial class AtmosSimulation
     ///     If a thermal boundary event occurs, it is queued to be run sequentially in a later processing stage.
     /// </param>
     /// <param name="thermalBoundaryCount">The count of thermal boundary events generated during processing.</param>
-    /// <param name="config">Relevant <see cref="AtmosConfig" /> data.</param>
     private void ProcessThermalDiffusion(AtmosChunk chunk, ThermalBoundaryEvent[] thermalBoundaryBuffer,
-        ref int thermalBoundaryCount, AtmosConfig config)
+        ref int thermalBoundaryCount)
     {
         float[] tempDeltas = ArrayPool<float>.Shared.Rent(chunk.VoxelCount);
         Array.Clear(tempDeltas, 0, chunk.VoxelCount);
 
-        float thermalConductivity = config.ThermalConductivity;
-        float vacuumThreshold = config.VacuumThreshold;
+        float thermalConductivity = _config.ThermalConductivity;
+        float vacuumThreshold = _config.VacuumThreshold;
 
         for (var i = 0; i < chunk.ActiveAirCount; i++)
         {
@@ -642,14 +631,14 @@ public partial class AtmosSimulation
             (int x, int y, int z) = chunk.GetXyz(idx);
             float currentTemp = chunk.Temperature[idx];
 
-            CheckNeighborThermal(chunk, x - 1, y, z, idx, currentTemp, thermalConductivity, tempDeltas, config);
-            CheckNeighborThermal(chunk, x + 1, y, z, idx, currentTemp, thermalConductivity, tempDeltas, config);
-            CheckNeighborThermal(chunk, x, y - 1, z, idx, currentTemp, thermalConductivity, tempDeltas, config);
-            CheckNeighborThermal(chunk, x, y + 1, z, idx, currentTemp, thermalConductivity, tempDeltas, config);
+            CheckNeighborThermal(chunk, x - 1, y, z, idx, currentTemp, thermalConductivity, tempDeltas);
+            CheckNeighborThermal(chunk, x + 1, y, z, idx, currentTemp, thermalConductivity, tempDeltas);
+            CheckNeighborThermal(chunk, x, y - 1, z, idx, currentTemp, thermalConductivity, tempDeltas);
+            CheckNeighborThermal(chunk, x, y + 1, z, idx, currentTemp, thermalConductivity, tempDeltas);
             if (chunk.Depth > 1)
             {
-                CheckNeighborThermal(chunk, x, y, z - 1, idx, currentTemp, thermalConductivity, tempDeltas, config);
-                CheckNeighborThermal(chunk, x, y, z + 1, idx, currentTemp, thermalConductivity, tempDeltas, config);
+                CheckNeighborThermal(chunk, x, y, z - 1, idx, currentTemp, thermalConductivity, tempDeltas);
+                CheckNeighborThermal(chunk, x, y, z + 1, idx, currentTemp, thermalConductivity, tempDeltas);
             }
 
             // Emit thermal boundary events for edge voxels
@@ -677,7 +666,7 @@ public partial class AtmosSimulation
     }
 
     private void CheckNeighborThermal(AtmosChunk chunk, int nx, int ny, int nz, ushort idx,
-        float currentTemp, float thermalConductivity, float[] tempDeltas, AtmosConfig config)
+        float currentTemp, float thermalConductivity, float[] tempDeltas)
     {
         if (nx < 0 || nx >= chunk.Width || ny < 0 || ny >= chunk.Height || nz < 0 || nz >= chunk.Depth)
             return;
@@ -686,7 +675,7 @@ public partial class AtmosSimulation
         if (chunk.VoxelRoomMap[neighborIdx] == AtmosChunk.RoomSolid)
             return;
 
-        float vacuumThreshold = config.VacuumThreshold;
+        float vacuumThreshold = _config.VacuumThreshold;
         if (chunk.TotalPressure[neighborIdx] < vacuumThreshold)
             return;
 
@@ -701,13 +690,12 @@ public partial class AtmosSimulation
         }
     }
 
-    private void ProcessPhaseChanges(AtmosChunk chunk, PrecipitationEvent[] precipBuffer, ref int precipCount,
-        AtmosConfig config)
+    private void ProcessPhaseChanges(AtmosChunk chunk, PrecipitationEvent[] precipBuffer, ref int precipCount)
     {
-        var gasRegistry = config.GasRegistry;
+        var gasRegistry = _config.GasRegistry;
         Debug.Assert(gasRegistry != null, nameof(gasRegistry) + " != null");
 
-        float condensationRateFactor = config.CondensationRateFactor;
+        float condensationRateFactor = _config.CondensationRateFactor;
         var P_reference = 1000f; // Reference pressure scale (R = 1)
 
         for (var g = 0; g < chunk.ActiveGasCount; g++)
@@ -781,50 +769,49 @@ public partial class AtmosSimulation
     /// </summary>
     /// <param name="pressureDelta">The difference in pressure between the source and target voxels.</param>
     /// <param name="currentPressure">The current pressure of the source voxel.</param>
-    /// <param name="config">The relevant <see cref="AtmosConfig" /> data.</param>
     /// <returns>The calculated flow value, constrained by the configuration parameters.</returns>
-    private static float CalculateFlow(float pressureDelta, float currentPressure, AtmosConfig config)
+    private float CalculateFlow(float pressureDelta, float currentPressure)
     {
         float flow;
         // Fast snap to CFL flow cap if the pressure difference is below the snap threshold.
         // Helps with equilibrium scenarios where the pressure difference is small, and we want to avoid oscillations.
         // Otherwise apply flow friction and damping factor to the flow calculation.
-        if (pressureDelta < config.SnapThreshold)
-            flow = pressureDelta * config.CflFlowCap;
+        if (pressureDelta < _config.SnapThreshold)
+            flow = pressureDelta * _config.CflFlowCap;
         else
-            flow = pressureDelta * config.FlowFriction * config.DampingFactor;
+            flow = pressureDelta * _config.FlowFriction * _config.DampingFactor;
 
         // Discard flow if below the cutoff.
-        if (flow < config.MinFlowCutoff)
+        if (flow < _config.MinFlowCutoff)
             return 0f;
 
         // Cap the flow to the CFL flow cap based on the current pressure to prevent excessive flow.
-        float configCflFlowCap = currentPressure * config.CflFlowCap;
+        float configCflFlowCap = currentPressure * _config.CflFlowCap;
         if (flow > configCflFlowCap)
             flow = configCflFlowCap;
         return flow;
     }
 
-    private void ProcessThermalBoundaryFlow(Int3 sourceKey, ThermalBoundaryEvent evt, AtmosConfig config)
+    private void ProcessThermalBoundaryFlow(Int3 sourceKey, ThermalBoundaryEvent evt)
     {
         if (!_chunkMap.TryGetValue(sourceKey, out var sourceChunk))
             return;
         (int x, int y, int z) = sourceChunk.GetXyz(evt.LocalVoxelIndex);
 
-        TryThermalFlowToNeighbor(sourceChunk, sourceKey, x - 1, y, z, -1, 0, 0, config);
-        TryThermalFlowToNeighbor(sourceChunk, sourceKey, x + 1, y, z, 1, 0, 0, config);
-        TryThermalFlowToNeighbor(sourceChunk, sourceKey, x, y - 1, z, 0, -1, 0, config);
-        TryThermalFlowToNeighbor(sourceChunk, sourceKey, x, y + 1, z, 0, 1, 0, config);
+        TryThermalFlowToNeighbor(sourceChunk, sourceKey, x - 1, y, z, -1, 0, 0);
+        TryThermalFlowToNeighbor(sourceChunk, sourceKey, x + 1, y, z, 1, 0, 0);
+        TryThermalFlowToNeighbor(sourceChunk, sourceKey, x, y - 1, z, 0, -1, 0);
+        TryThermalFlowToNeighbor(sourceChunk, sourceKey, x, y + 1, z, 0, 1, 0);
         if (sourceChunk.Depth > 1)
         {
-            TryThermalFlowToNeighbor(sourceChunk, sourceKey, x, y, z - 1, 0, 0, -1, config);
-            TryThermalFlowToNeighbor(sourceChunk, sourceKey, x, y, z + 1, 0, 0, 1, config);
+            TryThermalFlowToNeighbor(sourceChunk, sourceKey, x, y, z - 1, 0, 0, -1);
+            TryThermalFlowToNeighbor(sourceChunk, sourceKey, x, y, z + 1, 0, 0, 1);
         }
     }
 
     private void TryThermalFlowToNeighbor(AtmosChunk sourceChunk, Int3 sourceKey,
         int targetX, int targetY, int targetZ,
-        int dirX, int dirY, int dirZ, AtmosConfig config)
+        int dirX, int dirY, int dirZ)
     {
         if (targetX >= 0 && targetX < sourceChunk.Width &&
             targetY >= 0 && targetY < sourceChunk.Height &&
@@ -842,7 +829,7 @@ public partial class AtmosSimulation
 
         if (neighborChunk.VoxelRoomMap[neighborIdx] == AtmosChunk.RoomSolid)
             return;
-        if (neighborChunk.TotalPressure[neighborIdx] < config.VacuumThreshold)
+        if (neighborChunk.TotalPressure[neighborIdx] < _config.VacuumThreshold)
             return;
 
         int srcX = targetX - dirX;
@@ -856,7 +843,7 @@ public partial class AtmosSimulation
 
         if (tempDelta > 0)
         {
-            float heatTransfer = tempDelta * config.ThermalConductivity;
+            float heatTransfer = tempDelta * _config.ThermalConductivity;
             sourceChunk.Temperature[srcIdx] -= heatTransfer;
             neighborChunk.Temperature[neighborIdx] += heatTransfer;
         }
