@@ -6,6 +6,7 @@
         <Nullable>enable</Nullable>
         <IsPackable>false</IsPackable>
         <IsTestProject>true</IsTestProject>
+        <RootNamespace>CoreSim.IntegrationTests</RootNamespace>
     </PropertyGroup>
 
     <ItemGroup>
@@ -22,8 +23,8 @@
     </ItemGroup>
 
     <ItemGroup>
-        <ProjectReference Include="..\CoreSim\CoreSim.csproj"/>
-        <ProjectReference Include="..\Maths\Maths.csproj" />
+        <ProjectReference Include="..\..\src\Numos.CoreSim\Numos.CoreSim.csproj" />
+        <ProjectReference Include="..\..\src\Numos.Maths\Numos.Maths.csproj" />
     </ItemGroup>
 
     <ItemGroup>

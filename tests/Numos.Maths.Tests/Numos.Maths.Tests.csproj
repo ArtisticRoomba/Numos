@@ -4,6 +4,7 @@
         <TargetFramework>net10.0</TargetFramework>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
+        <RootNamespace>Maths.Tests</RootNamespace>
     </PropertyGroup>
 
     <ItemGroup>
@@ -16,7 +17,7 @@
     </ItemGroup>
 
     <ItemGroup>
-        <ProjectReference Include="..\Maths\Maths.csproj" />
+      <ProjectReference Include="..\..\src\Numos.Maths\Numos.Maths.csproj" />
     </ItemGroup>
 
 </Project>

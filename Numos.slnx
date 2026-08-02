@@ -1,7 +1,8 @@
 <Solution>
-    <Project Path="CoreSim\CoreSim.csproj" />
-    <Project Path="CoreSim.Tests\CoreSim.Tests.csproj" />
-    <Project Path="CoreSim.IntegrationTests\CoreSim.IntegrationTests.csproj" />
-    <Project Path="Maths.Tests/Maths.Tests.csproj" />
-    <Project Path="Maths/Maths.csproj" />
+    <Project Path="tests\Numos.CoreSim.IntegrationTests\Numos.CoreSim.IntegrationTests.csproj" />
+    <Project Path="tests\Numos.CoreSim.Tests\Numos.CoreSim.Tests.csproj" />
+    <Project Path="tests\Numos.Maths.Tests\Numos.Maths.Tests.csproj" />
+
+    <Project Path="src\Numos.CoreSim\Numos.CoreSim.csproj" />
+    <Project Path="src\Numos.Maths\Numos.Maths.csproj" />
 </Solution>

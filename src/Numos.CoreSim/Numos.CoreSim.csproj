@@ -12,7 +12,7 @@
     </ItemGroup>
 
     <ItemGroup>
-      <ProjectReference Include="..\Maths\Maths.csproj" />
+      <ProjectReference Include="..\Numos.Maths\Numos.Maths.csproj" />
     </ItemGroup>
 
 </Project>
