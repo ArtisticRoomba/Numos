@@ -21,13 +21,13 @@ public readonly record struct VoxelClassification(int RoomId)
     /// <summary>
     /// Voxel is solid and cannot store gas, blocks any flow.
     /// </summary>
-    public const int RoomSolid = -1;
+    public const int RoomSolid = -2;
 
     /// <summary>
     /// Voxel is an infinite sink/true vacuum.
     /// Voids any gas that enters it.
     /// </summary>
-    public const int RoomVoid = -2;
+    public const int RoomVoid = -1;
 
     /// <summary>
     /// The ID of the room this voxel belongs to.
