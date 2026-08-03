@@ -10,9 +10,11 @@ namespace Numos.Datatypes.Events;
 ///     after all threads have completed their work processing
 ///     non-boundary voxels.
 /// </para>
-/// <remarks>TODO PERF there is a chance we can multithread boundaries that are not adjacent to each other
-/// but that would require a lot of work.</remarks>
-public struct BoundaryFlowEvent
+/// <remarks>
+///     TODO PERF there is a chance we can multithread boundaries that are not adjacent to each other
+///     but that would require a lot of work.
+/// </remarks>
+internal struct BoundaryFlowEvent
 {
     /// <summary>
     ///     The location of the event in the chunk as a 1D lookup.

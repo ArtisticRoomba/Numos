@@ -1,5 +1,8 @@
 # Atmospherics System — Technical Documentation
 
+> [!WARNING]
+> This documentation is legacy and in parts does not reflect the current implementation (ex. thermal flow across chunk boundaries).
+
 > **Revision**: 2026-07-12
 > **Scope**: Engine-agnostic specification.
 ---
@@ -8,6 +11,7 @@
 
 1. [Design Goals](#1-design-goals)
 2. [Architecture Overview](#2-architecture-overview)
+   - 2.1 [Public and Dangerous API Boundaries](#21-public-and-dangerous-api-boundaries)
 3. [Data Model](#3-data-model)
    - 3.1 [Voxel Grid & Chunk](#31-voxel-grid--chunk)
    - 3.2 [Gas Channels (Structure of Arrays)](#32-gas-channels-structure-of-arrays)
@@ -63,7 +67,10 @@ When a disturbance exceeds a configurable threshold (the "Threshold of Violence"
 
 ```mermaid
 graph TD
-    A["AtmosSimulation (Tick Driver)"] --> B["AtmosChunk[] (Active Grid)"]
+    API["AtmosSimulation (Public API)"] --> A["AtmosKernel (Tick Driver)"]
+    DANGER["Numos.API.Dangerous
+    (Opt-in Raw Views)"] -.-> A
+    A --> B["AtmosChunk[] (Active Grid)"]
     B --> C["GasChannel[] (SoA Gas Data)"]
     B --> D["VoxelRoomMap (Topology)"]
     A --> E["BoundaryFlowEvent Queue"]
@@ -74,6 +81,22 @@ graph TD
     J["GasAccumulator"] -.-> I
     J -.-> B
 ```
+
+### 2.1 Public and Dangerous API Boundaries
+
+Numos deliberately exposes two package-level integration surfaces:
+
+| Package | Intended use | Compatibility                        | State access                                      |
+|---------|--------------|--------------------------------------|---------------------------------------------------|
+| `Numos.API` | Normal engine and game integration | Supported public contract            | Handles, validated operations, detached snapshots |
+| `Numos.API.Dangerous` | Measured performance-critical code | No compatibility guarantee (for now) | No impl for now.                                  |
+
+The dangerous package must be referenced separately and imported through `Numos.Dangerous`. Access begins with
+`simulation.Dangerous()`.
+
+The kernel hooks used by this package live in `AtmosKernel.Dangerous.cs`, keeping them distinct from the internal
+operations that back the supported facade. `AtmosKernel`, `AtmosChunk`, and gas-channel representations remain
+internal CLR types and are never returned directly from either package.
 
 ---
 
@@ -520,7 +543,8 @@ All networking methods are stubs with comments indicating where real implementat
 ## 11. Porting Guidance
 
 To implement this system in another engine or language, start from the core module described in this document:
-- `AtmosSimulation` — the tick driver and all physics logic.
+- `AtmosSimulation` — the supported public facade.
+- `AtmosKernel` — the internal tick driver and physics implementation.
 - `AtmosChunk` — the parameterized voxel grid.
 - `AtmosConfig` — all tunable parameters.
 - `GasChannel`, `GasProperties`, `RoomNode` — all data structures.
@@ -530,16 +554,16 @@ To implement this system in another engine or language, start from the core modu
 
 | Component | Status | Action Required |
 |-----------|--------|-----------------|
-| Tick driver integration | ✅ Complete | Call `AtmosSimulation.Update(deltaSeconds, config)` from your engine's update loop. |
-| Chunk lifecycle | ✅ Complete | Call `RegisterChunk` / `UnregisterChunk` as chunks are created/destroyed. |
-| Voxel topology | ❌ Not provided | You must populate `VoxelRoomMap` from your world geometry (e.g., voxel terrain, tile maps, BSP). |
+| Tick driver integration | ✅ Complete | Call `AtmosSimulation.Update(deltaSeconds)` from your engine's update loop. |
+| Chunk lifecycle | ✅ Complete | Call `CreateAndRegisterChunk` / `UnregisterChunk`; chunks remain owned by the simulation. |
+| Voxel topology | ✅ API provided | Populate topology through `SetChunkClassification` and `SetVoxelClassification`. |
 | Room detection | ❌ Not provided | You must implement flood-fill or connected-component analysis to assign room IDs to contiguous open volumes in `VoxelRoomMap`. |
 | Macro-micro transition | ❌ Not provided | You must implement the logic that seeds voxel grids from `RoomNode` state on wake, and collapses back on sleep. |
 | GasAccumulator orchestration | ❌ Not provided | You must implement the per-source accumulator loop and dispatch `Diffuse`/`Inject` actions. |
-| Gas source API | ❌ Not provided | You must provide the game-side API for objects (pipes, vents, fires) to inject gas. |
+| Gas source API | ✅ API provided | Use `AddGasToVoxel` for game-side sources such as pipes, vents, and fires. |
 | Liquid system | ❌ Not provided | `PrecipitationEvent` is produced but never consumed. Build a liquid simulation if needed. |
 | Visualization | ❌ Not provided | Pressure, temperature, and gas composition are available per-voxel. You must build rendering (overlays, particle effects, fog). |
-| Networking | ❌ Stubs only | `AtmosChunkSnapshot` and `GasInjectionEvent` are defined. You must implement serialization, transport, and client reconciliation. |
+| Networking | ❌ Snapshot only | `AtmosChunkSnapshot` is exposed, but serialization, transport, and client reconciliation are not implemented. |
 
 ### Parallelism
 

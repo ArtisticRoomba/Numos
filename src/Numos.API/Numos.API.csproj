@@ -1,18 +1,15 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
         <TargetFramework>net10.0</TargetFramework>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
         <RootNamespace>Numos</RootNamespace>
+        <PackageId>Numos.API</PackageId>
     </PropertyGroup>
 
     <ItemGroup>
-        <PackageReference Include="JetBrains.Annotations" Version="2026.2.0"/>
-    </ItemGroup>
-
-    <ItemGroup>
-        <ProjectReference Include="..\Numos.Maths\Numos.Maths.csproj"/>
+        <ProjectReference Include="..\Numos.CoreSim\Numos.CoreSim.csproj"/>
     </ItemGroup>
 
 </Project>

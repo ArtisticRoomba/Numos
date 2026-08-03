@@ -1,7 +1,7 @@
 namespace Numos;
 
 /// <summary>
-/// Configuration values for the simulation.
+///     Configuration values for the simulation.
 /// </summary>
 public class AtmosConfig
 {

@@ -1,6 +1,6 @@
 namespace Numos.Datatypes.Events;
 
-public struct PrecipitationEvent
+internal struct PrecipitationEvent
 {
     public ushort LocalVoxelIndex;
     public int LiquidID;

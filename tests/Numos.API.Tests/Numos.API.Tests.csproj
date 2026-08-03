@@ -6,14 +6,10 @@
         <Nullable>enable</Nullable>
         <IsPackable>false</IsPackable>
         <IsTestProject>true</IsTestProject>
-        <RootNamespace>CoreSim.IntegrationTests</RootNamespace>
+        <RootNamespace>Numos.API.Tests</RootNamespace>
     </PropertyGroup>
 
     <ItemGroup>
-        <PackageReference Include="coverlet.collector" Version="6.0.4">
-            <PrivateAssets>all</PrivateAssets>
-            <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-        </PackageReference>
         <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1"/>
         <PackageReference Include="NUnit" Version="4.2.2"/>
         <PackageReference Include="NUnit3TestAdapter" Version="4.6.0">
@@ -23,8 +19,7 @@
     </ItemGroup>
 
     <ItemGroup>
-        <ProjectReference Include="..\..\src\Numos.CoreSim\Numos.CoreSim.csproj"/>
-        <ProjectReference Include="..\..\src\Numos.Maths\Numos.Maths.csproj"/>
+        <ProjectReference Include="..\..\src\Numos.API\Numos.API.csproj"/>
     </ItemGroup>
 
     <ItemGroup>

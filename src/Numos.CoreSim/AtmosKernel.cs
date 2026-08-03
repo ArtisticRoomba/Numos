@@ -7,20 +7,13 @@ using Numos.Datatypes.Events;
 namespace Numos;
 
 /// <summary>
-///     Engine-agnostic core atmospheric simulation manager.
+///     Internal Numos simulation kernel. Exposed to consumers under a safe/dangerous API.
 /// </summary>
-public partial class AtmosSimulation
+internal sealed partial class AtmosKernel : IDisposable
 {
-    public const float SimulationRate = 20.0f;
+    internal const float SimulationRate = 20.0f;
     private const float FixedDt = 1.0f / SimulationRate;
     private const int MaxStepsPerFrame = 5;
-
-    /// <summary>
-    /// Current <see cref="AtmosConfig"/> that this simulation runs under.
-    /// </summary>
-    /// <remarks>Note that this is a ref and as such multiple <see cref="AtmosSimulation"/>s
-    /// can be given a singular <see cref="AtmosConfig"/> instance.</remarks>
-    private AtmosConfig _config = new();
 
     private readonly ThreadLocal<BoundaryFlowEvent[]> _boundaryBufferPool;
 
@@ -33,10 +26,17 @@ public partial class AtmosSimulation
     private readonly ThreadLocal<ThermalBoundaryEvent[]> _thermalBoundaryBufferPool;
 
     private float _accumulator;
-    public long LastBoundaryTicks;
-    public int TickCount;
 
-    public AtmosSimulation(int chunkWidth = 16, int chunkHeight = 16, int chunkDepth = 16)
+    /// <summary>
+    ///     Current <see cref="AtmosConfig" /> that this simulation runs under.
+    /// </summary>
+    /// <remarks>The configuration is shared by reference with the public API facade.</remarks>
+    private AtmosConfig _config = new();
+
+    internal long LastBoundaryTicks;
+    internal int TickCount;
+
+    internal AtmosKernel(int chunkWidth = 16, int chunkHeight = 16, int chunkDepth = 16)
     {
         TickCount = 0;
         _maxBoundaryEvents = 2 * (chunkWidth * chunkHeight + chunkWidth * chunkDepth + chunkHeight * chunkDepth);
@@ -44,6 +44,17 @@ public partial class AtmosSimulation
         _precipBufferPool = new ThreadLocal<PrecipitationEvent[]>(() => new PrecipitationEvent[_maxBoundaryEvents]);
         _thermalBoundaryBufferPool =
             new ThreadLocal<ThermalBoundaryEvent[]>(() => new ThermalBoundaryEvent[_maxBoundaryEvents]);
+    }
+
+    public void Dispose()
+    {
+        foreach (var chunk in _chunkMap.Values)
+            chunk.Release();
+
+        _chunkMap.Clear();
+        _boundaryBufferPool.Dispose();
+        _precipBufferPool.Dispose();
+        _thermalBoundaryBufferPool.Dispose();
     }
 
     private void TickSimulation(AtmosChunk[] chunks)
@@ -428,7 +439,8 @@ public partial class AtmosSimulation
     ///     to be updated based on advection and diffusion.
     /// </param>
     private void CheckNeighborAdvect(AtmosChunk chunk, int nx, int ny, int nz, ushort idx,
-        float currentPressure, float totalMoles, // TODO Investigate, there used to be a flowfriction param but it was unused. Might be sussus amogus.
+        float currentPressure,
+        float totalMoles, // TODO Investigate, there used to be a flowfriction param but it was unused. Might be sussus amogus.
         ref float maxPressureDelta, float[] deltas)
     {
         // Skip if the neighbor coordinates are out of bounds of the chunk.

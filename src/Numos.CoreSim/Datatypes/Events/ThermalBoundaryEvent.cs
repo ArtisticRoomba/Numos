@@ -1,6 +1,6 @@
 namespace Numos.Datatypes.Events;
 
-public struct ThermalBoundaryEvent
+internal struct ThermalBoundaryEvent
 {
     public ushort LocalVoxelIndex;
     public float Temperature;

@@ -13,7 +13,7 @@ namespace Numos;
 ///     <see cref="GetIndex(Int3)" /> to convert local coordinates to an array index, and
 ///     <see cref="GetXyz(ushort)" /> or <see cref="GetXyzInt3(ushort)" /> for the reverse conversion.
 /// </remarks>
-public class AtmosChunk
+internal class AtmosChunk
 {
     /// <summary>
     ///     Indicates that a voxel has not been assigned to a room.
@@ -73,18 +73,24 @@ public class AtmosChunk
     public int[] ActiveRoomIds;
 
     /// <summary>
+    /// The number of voxels along the z-axis.
+    /// </summary>
+    public int Depth;
+
+    /// <summary>
+    /// The number of voxels along the x-axis.
+    /// </summary>
+    public int Width;
+
+    /// <summary>
+    /// The number of voxels along the y-axis.
+    /// </summary>
+    public int Height;
+
+    /// <summary>
     ///     The position of this chunk in the chunk grid.
     /// </summary>
     public Int3 GridPosition;
-
-    /// <summary>The number of voxels along the z axis.</summary>
-    public int Depth;
-
-    /// <summary>The number of voxels along the y axis.</summary>
-    public int Height;
-
-    /// <summary>The number of voxels along the x axis.</summary>
-    public int Width;
 
     /// <summary>
     ///     Whether this chunk is eligible to be processed by the simulation.

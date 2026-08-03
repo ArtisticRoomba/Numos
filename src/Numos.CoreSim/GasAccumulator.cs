@@ -1,6 +1,6 @@
 namespace Numos;
 
-public enum AccumulatorState
+internal enum AccumulatorState
 {
     Hold,
     Diffuse,
@@ -15,7 +15,7 @@ public enum AccumulatorState
 ///         Once the accumulator breaches the threshold (or times out), it triggers an injection event.
 ///     </para>
 /// </summary>
-public struct GasAccumulator
+internal struct GasAccumulator
 {
     public int GasId;
     public float AccumulatedMoles;

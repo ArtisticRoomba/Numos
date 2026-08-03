@@ -9,7 +9,7 @@ The project will follow a regular semantic versioning structure when I feel comf
 ## Some Highlights/Lowlights
 - First-class 3D support, voxel based
 - Arbritrary gas additions at runtime (SoAs)
-- Engine-agnostic, instantiate with `new` and interact with extensions
+- Engine-agnostic, with a supported `Numos.API` facade over an internal simulation kernel
 - Multithreaded intra-chunk advection and thermodynamics
 - Singlethreaded cross-chunk boundary flow
 - Micro/macro layer

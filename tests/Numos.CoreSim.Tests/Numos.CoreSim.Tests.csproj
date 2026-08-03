@@ -23,8 +23,8 @@
     </ItemGroup>
 
     <ItemGroup>
-        <ProjectReference Include="..\..\src\Numos.CoreSim\Numos.CoreSim.csproj" />
-        <ProjectReference Include="..\..\src\Numos.Maths\Numos.Maths.csproj" />
+        <ProjectReference Include="..\..\src\Numos.CoreSim\Numos.CoreSim.csproj"/>
+        <ProjectReference Include="..\..\src\Numos.Maths\Numos.Maths.csproj"/>
     </ItemGroup>
 
     <ItemGroup>

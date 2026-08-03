@@ -3,7 +3,7 @@ namespace Numos;
 /// <summary>
 ///     Represents the "Macro Layer" (Equilibrium) of the simulation.
 /// </summary>
-public struct RoomNode
+internal struct RoomNode
 {
     public int RoomId;
     public bool IsAsleep;

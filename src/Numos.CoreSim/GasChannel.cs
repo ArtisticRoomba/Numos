@@ -20,7 +20,7 @@ namespace Numos;
 ///     This is that implementation.
 ///     Looking at adjacent tiles is, after all, a fairly common op in Atmos.
 /// </para>
-public struct GasChannel
+internal struct GasChannel
 {
     /// <summary>
     ///     The ID of the gas type this channel represents.
