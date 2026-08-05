@@ -3,7 +3,7 @@ using JetBrains.Annotations;
 namespace Numos.API.Dangerous;
 
 /// <summary>
-///    Provides extension methods for <see cref="AtmosSimulation" /> that expose low-level, dangerous APIs.
+///     Provides extension methods for <see cref="AtmosSimulation" /> that expose low-level, dangerous APIs.
 /// </summary>
 public static class AtmosSimulationDangerousExtensions
 {

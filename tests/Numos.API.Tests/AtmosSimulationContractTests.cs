@@ -1,0 +1,449 @@
+using Numos.CoreSim;
+using Numos.CoreSim.Datatypes.Primitives;
+using Numos.Maths;
+
+namespace Numos.API.Tests;
+
+[TestFixture]
+public sealed class AtmosSimulationContractTests
+{
+    [Test]
+    public void SimulationRate_IsDocumentedTwentyHertz()
+    {
+        Assert.That(AtmosSimulation.SimulationRate, Is.EqualTo(20f));
+    }
+
+    [Test]
+    public void Constructor_WithNullConfiguration_Throws()
+    {
+        Assert.That(() => new AtmosSimulation(null!),
+            Throws.TypeOf<ArgumentNullException>()
+                .With.Property(nameof(ArgumentNullException.ParamName)).EqualTo("config"));
+    }
+
+    [TestCase(0, 1, 1, "chunkWidth")]
+    [TestCase(-1, 1, 1, "chunkWidth")]
+    [TestCase(1, 0, 1, "chunkHeight")]
+    [TestCase(1, -1, 1, "chunkHeight")]
+    [TestCase(1, 1, 0, "chunkDepth")]
+    [TestCase(1, 1, -1, "chunkDepth")]
+    public void Constructor_WithNonPositiveDimension_Throws(
+        int width,
+        int height,
+        int depth,
+        string parameterName)
+    {
+        Assert.Multiple(() =>
+        {
+            Assert.That(() => new AtmosSimulation(width, height, depth),
+                Throws.TypeOf<ArgumentOutOfRangeException>()
+                    .With.Property(nameof(ArgumentOutOfRangeException.ParamName)).EqualTo(parameterName));
+            Assert.That(() => new AtmosSimulation(new AtmosConfig(), width, height, depth),
+                Throws.TypeOf<ArgumentOutOfRangeException>()
+                    .With.Property(nameof(ArgumentOutOfRangeException.ParamName)).EqualTo(parameterName));
+        });
+    }
+
+    [Test]
+    public void Constructor_RetainsLiveConfigurationInstance()
+    {
+        var config = new AtmosConfig
+        {
+            FlowFriction = 0.2f,
+            SleepThreshold = 12
+        };
+
+        using var simulation = new AtmosSimulation(config, 2, 3, 4);
+        config.FlowFriction = 0.4f;
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(simulation.Config, Is.SameAs(config));
+            Assert.That(simulation.Config.FlowFriction, Is.EqualTo(0.4f));
+            Assert.That(simulation.Config.SleepThreshold, Is.EqualTo(12));
+        });
+    }
+
+    [Test]
+    public void Configuration_CanBeReplacedExplicitlyAndByUpdate()
+    {
+        var initial = new AtmosConfig();
+        var explicitReplacement = new AtmosConfig { SleepThreshold = 8 };
+        var updateReplacement = new AtmosConfig { SleepThreshold = 3 };
+        using var simulation = new AtmosSimulation(initial, 1, 1, 1);
+
+        simulation.SetAtmosConfig(explicitReplacement);
+        Assert.That(simulation.Config, Is.SameAs(explicitReplacement));
+
+        simulation.Update(0f, updateReplacement);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(simulation.Config, Is.SameAs(updateReplacement));
+            Assert.That(simulation.TickCount, Is.Zero);
+            Assert.That(() => simulation.SetAtmosConfig(null!),
+                Throws.TypeOf<ArgumentNullException>()
+                    .With.Property(nameof(ArgumentNullException.ParamName)).EqualTo("config"));
+            Assert.That(simulation.Config, Is.SameAs(updateReplacement));
+        });
+    }
+
+    [Test]
+    public void Update_WithNullConfiguration_ThrowsWithoutReplacingCurrentConfiguration()
+    {
+        var config = new AtmosConfig();
+        using var simulation = new AtmosSimulation(config, 1, 1, 1);
+
+        Assert.That(() => simulation.Update(0f, null!),
+            Throws.TypeOf<ArgumentNullException>()
+                .With.Property(nameof(ArgumentNullException.ParamName)).EqualTo("config"));
+        Assert.Multiple(() =>
+        {
+            Assert.That(simulation.Config, Is.SameAs(config));
+            Assert.That(simulation.TickCount, Is.Zero);
+        });
+    }
+
+    [Test]
+    public void Update_AccumulatesFractionalFixedSteps()
+    {
+        using var simulation = new AtmosSimulation(1, 1, 1);
+        float fixedStep = 1f / AtmosSimulation.SimulationRate;
+
+        simulation.Update(fixedStep / 2f);
+        Assert.That(simulation.TickCount, Is.Zero);
+
+        simulation.Update(fixedStep / 2f);
+        Assert.That(simulation.TickCount, Is.EqualTo(1));
+    }
+
+    [Test]
+    public void Tick_DoesNotConsumeElapsedTimeAccumulator()
+    {
+        using var simulation = new AtmosSimulation(1, 1, 1);
+        float halfStep = 0.5f / AtmosSimulation.SimulationRate;
+
+        simulation.Update(halfStep);
+        simulation.Tick();
+        simulation.Update(halfStep);
+
+        Assert.That(simulation.TickCount, Is.EqualTo(2));
+    }
+
+    [Test]
+    public void Update_ClampsCatchUpToFiveStepsAndDiscardsExcessBacklog()
+    {
+        using var simulation = new AtmosSimulation(1, 1, 1);
+        float fixedStep = 1f / AtmosSimulation.SimulationRate;
+
+        simulation.Update(10f);
+        Assert.That(simulation.TickCount, Is.EqualTo(5));
+
+        simulation.Update(0f);
+        Assert.That(simulation.TickCount, Is.EqualTo(5));
+
+        simulation.Update(fixedStep);
+        Assert.That(simulation.TickCount, Is.EqualTo(6));
+    }
+
+    [Test]
+    public void CreateAndRegisterChunk_ReturnsPositionHandleAndUpdatesCount()
+    {
+        using var simulation = new AtmosSimulation(2, 2, 1);
+        var position = new Int3(-4, 7, 0);
+
+        var handle = simulation.CreateAndRegisterChunk(position);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(handle, Is.EqualTo(new AtmosChunkHandle(position)));
+            Assert.That(handle.Position, Is.EqualTo(position));
+            Assert.That(simulation.ChunkCount, Is.EqualTo(1));
+            Assert.That(simulation.GetChunkSnapshot(handle).GridPosition, Is.EqualTo(position));
+        });
+    }
+
+    [Test]
+    public void CreateAndRegisterChunk_DuplicatePositionIsRejectedWithoutReplacement()
+    {
+        using var simulation = new AtmosSimulation(1, 1, 1);
+        var position = new Int3(2, 4, 6);
+        var original = simulation.CreateAndRegisterChunk(position);
+        simulation.SetVoxelTemperature(original, 0, 0, 0, 275f);
+
+        Assert.That(() => simulation.CreateAndRegisterChunk(position), Throws.InvalidOperationException);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(simulation.ChunkCount, Is.EqualTo(1));
+            Assert.That(simulation.GetChunkSnapshot(original).Temperature[0], Is.EqualTo(275f));
+        });
+    }
+
+    [TestCase(0)]
+    [TestCase(-1)]
+    public void CreateAndRegisterChunk_WithNonPositiveRoomCapacity_Throws(int maxActiveRooms)
+    {
+        using var simulation = new AtmosSimulation(1, 1, 1);
+
+        Assert.That(() => simulation.CreateAndRegisterChunk(default, maxActiveRooms),
+            Throws.TypeOf<ArgumentOutOfRangeException>()
+                .With.Property(nameof(ArgumentOutOfRangeException.ParamName)).EqualTo("maxActiveRooms"));
+        Assert.That(simulation.ChunkCount, Is.Zero);
+    }
+
+    [Test]
+    public void UnregisterChunk_ReturnsWhetherAChunkWasRemoved()
+    {
+        using var simulation = new AtmosSimulation(1, 1, 1);
+        var handle = simulation.CreateAndRegisterChunk(new Int3(1, 2, 3));
+
+        bool firstResult = simulation.UnregisterChunk(handle);
+        bool secondResult = simulation.UnregisterChunk(handle);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(firstResult, Is.True);
+            Assert.That(secondResult, Is.False);
+            Assert.That(simulation.ChunkCount, Is.Zero);
+            Assert.That(() => simulation.GetChunkSnapshot(handle), Throws.TypeOf<KeyNotFoundException>());
+        });
+    }
+
+    [Test]
+    public void Handle_UsesPositionRatherThanSimulationIdentity()
+    {
+        var position = new Int3(5, -2, 8);
+        using var firstSimulation = new AtmosSimulation(1, 1, 1);
+        using var secondSimulation = new AtmosSimulation(1, 1, 1);
+        var firstHandle = firstSimulation.CreateAndRegisterChunk(position);
+        var secondHandle = secondSimulation.CreateAndRegisterChunk(position);
+
+        secondSimulation.SetVoxelTemperature(firstHandle, 0, 0, 0, 315f);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(secondSimulation.GetChunkSnapshot(secondHandle).Temperature[0], Is.EqualTo(315f));
+            Assert.That(secondSimulation.UnregisterChunk(firstHandle), Is.True);
+            Assert.That(secondSimulation.ChunkCount, Is.Zero);
+            Assert.That(firstSimulation.ChunkCount, Is.EqualTo(1));
+        });
+    }
+
+    [Test]
+    public void CoordinateAndFlatOverloads_AddressDocumentedFlattenedIndices()
+    {
+        using var simulation = new AtmosSimulation(3, 2, 2);
+        var chunk = simulation.CreateAndRegisterChunk(default);
+        simulation.SetChunkClassification(chunk, VoxelClassification.RoomSolid);
+
+        simulation.SetVoxelClassification(chunk, 7, new VoxelClassification(17));
+        simulation.SetVoxelClassification(chunk, 2, 1, 1, new VoxelClassification(23));
+        simulation.SetVoxelTemperature(chunk, 5, 275f);
+        simulation.SetVoxelTemperature(chunk, 1, 0, 1, 325f);
+        simulation.AddGasToVoxel(chunk, 2, 1, 1, 4, 2f, 300f);
+
+        var snapshot = simulation.GetChunkSnapshot(chunk);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(snapshot.VoxelRoomMap, Has.Length.EqualTo(12));
+            Assert.That(snapshot.VoxelRoomMap[7], Is.EqualTo(17));
+            Assert.That(snapshot.VoxelRoomMap[11], Is.EqualTo(23));
+            Assert.That(snapshot.VoxelRoomMap.Where((_, index) => index is not 7 and not 11),
+                Is.All.EqualTo(VoxelClassification.RoomSolid));
+            Assert.That(snapshot.Temperature[5], Is.EqualTo(275f));
+            Assert.That(snapshot.Temperature[7], Is.EqualTo(325f));
+            Assert.That(snapshot.Temperature[11], Is.EqualTo(300f));
+            Assert.That(snapshot.Gases, Has.Length.EqualTo(1));
+            Assert.That(snapshot.Gases[0].Moles[11], Is.EqualTo(2f));
+        });
+    }
+
+    [Test]
+    public void CoordinateOverloads_RejectCoordinatesOutsideEveryAxis()
+    {
+        using var simulation = new AtmosSimulation(3, 2, 2);
+        var chunk = simulation.CreateAndRegisterChunk(default);
+
+        Assert.Multiple(() =>
+        {
+            AssertEveryInvalidCoordinateThrows((x, y, z) =>
+                simulation.SetVoxelClassification(chunk, x, y, z, new VoxelClassification(1)));
+            AssertEveryInvalidCoordinateThrows((x, y, z) => simulation.SetVoxelTemperature(chunk, x, y, z, 300f));
+            AssertEveryInvalidCoordinateThrows((x, y, z) => simulation.AddGasToVoxel(chunk, x, y, z, 1, 1f, 300f));
+        });
+    }
+
+    [Test]
+    public void FlatIndexOverloads_RejectIndexAtVoxelCount()
+    {
+        using var simulation = new AtmosSimulation(3, 2, 2);
+        var chunk = simulation.CreateAndRegisterChunk(default);
+        const ushort invalidIndex = 12;
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(
+                () => simulation.SetVoxelClassification(chunk, invalidIndex, new VoxelClassification(1)),
+                Throws.TypeOf<ArgumentOutOfRangeException>()
+                    .With.Property(nameof(ArgumentOutOfRangeException.ParamName)).EqualTo("localVoxelIndex"));
+            Assert.That(() => simulation.SetVoxelTemperature(chunk, invalidIndex, 300f),
+                Throws.TypeOf<ArgumentOutOfRangeException>()
+                    .With.Property(nameof(ArgumentOutOfRangeException.ParamName)).EqualTo("localVoxelIndex"));
+            Assert.That(() => simulation.AddGasToVoxel(chunk, invalidIndex, 1, 1f, 300f),
+                Throws.TypeOf<ArgumentOutOfRangeException>()
+                    .With.Property(nameof(ArgumentOutOfRangeException.ParamName)).EqualTo("localVoxelIndex"));
+        });
+    }
+
+    [Test]
+    public void ClassificationControlsWhetherGasCanBeAdded()
+    {
+        using var simulation = new AtmosSimulation(3, 1, 1);
+        var chunk = simulation.CreateAndRegisterChunk(default);
+        simulation.SetChunkClassification(chunk, new VoxelClassification(7));
+        simulation.SetVoxelClassification(chunk, 0, 0, 0, VoxelClassification.RoomSolid);
+        simulation.SetVoxelClassification(chunk, 1, 0, 0, VoxelClassification.RoomVoid);
+
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, 1, 2f, 300f);
+        simulation.AddGasToVoxel(chunk, 1, 0, 0, 1, 2f, 300f);
+        simulation.AddGasToVoxel(chunk, 2, 0, 0, 1, 2f, 300f);
+
+        var snapshot = simulation.GetChunkSnapshot(chunk);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(snapshot.VoxelRoomMap,
+                Is.EqualTo(new[] { VoxelClassification.RoomSolid, VoxelClassification.RoomVoid, 7 }));
+            Assert.That(snapshot.Gases, Has.Length.EqualTo(1));
+            Assert.That(snapshot.Gases[0].Moles, Is.EqualTo(new[] { 0f, 0f, 2f }));
+            Assert.That(snapshot.Temperature, Is.EqualTo(new[] { 0f, 0f, 300f }));
+            Assert.That(snapshot.TotalPressure, Is.EqualTo(new[] { 0f, 0f, 600f }));
+        });
+    }
+
+    [Test]
+    public void GetChunkSnapshot_ReturnsDeepDetachedCopies()
+    {
+        using var simulation = new AtmosSimulation(2, 1, 1);
+        var chunk = simulation.CreateAndRegisterChunk(new Int3(3, 4, 5));
+        simulation.SetChunkClassification(chunk, new VoxelClassification(9));
+        simulation.AddGasToVoxel(chunk, 0, 3, 2f, 300f);
+        simulation.AddGasToVoxel(chunk, 0, 7, 1f, 300f);
+
+        var first = simulation.GetChunkSnapshot(chunk);
+        first.TotalPressure[0] = -10f;
+        first.Temperature[0] = -20f;
+        first.VoxelRoomMap[0] = VoxelClassification.RoomSolid;
+        first.Gases[0].GasId = 99;
+        first.Gases[0].Moles[0] = -30f;
+        first.Gases[1].Moles[0] = -40f;
+
+        var second = simulation.GetChunkSnapshot(chunk);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(first.IsSnapshotValid, Is.True);
+            Assert.That(second.IsSnapshotValid, Is.True);
+            Assert.That(second.GridPosition, Is.EqualTo(chunk.Position));
+            Assert.That(second.TotalPressure[0], Is.EqualTo(900f));
+            Assert.That(second.Temperature[0], Is.EqualTo(300f));
+            Assert.That(second.VoxelRoomMap[0], Is.EqualTo(9));
+            Assert.That(second.Gases.Select(gas => gas.GasId), Is.EqualTo(new[] { 3, 7 }));
+            Assert.That(second.Gases[0].Moles[0], Is.EqualTo(2f));
+            Assert.That(second.Gases[1].Moles[0], Is.EqualTo(1f));
+            Assert.That(second.TotalPressure, Is.Not.SameAs(first.TotalPressure));
+            Assert.That(second.Temperature, Is.Not.SameAs(first.Temperature));
+            Assert.That(second.VoxelRoomMap, Is.Not.SameAs(first.VoxelRoomMap));
+            Assert.That(second.Gases, Is.Not.SameAs(first.Gases));
+            Assert.That(second.Gases[0].Moles, Is.Not.SameAs(first.Gases[0].Moles));
+            Assert.That(second.Gases[1].Moles, Is.Not.SameAs(first.Gases[1].Moles));
+        });
+    }
+
+    [Test]
+    public void ChunkOperations_WithMissingPosition_ThrowKeyNotFoundException()
+    {
+        using var simulation = new AtmosSimulation(2, 2, 1);
+        var missing = new AtmosChunkHandle(new Int3(91, -37, 12));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(() => simulation.GetChunkSnapshot(missing), Throws.TypeOf<KeyNotFoundException>());
+            Assert.That(() => simulation.SetChunkClassification(missing, new VoxelClassification(1)),
+                Throws.TypeOf<KeyNotFoundException>());
+            Assert.That(() => simulation.SetVoxelClassification(missing, 0, new VoxelClassification(1)),
+                Throws.TypeOf<KeyNotFoundException>());
+            Assert.That(() => simulation.SetVoxelClassification(missing, 0, 0, 0, new VoxelClassification(1)),
+                Throws.TypeOf<KeyNotFoundException>());
+            Assert.That(() => simulation.SetVoxelTemperature(missing, 0, 300f),
+                Throws.TypeOf<KeyNotFoundException>());
+            Assert.That(() => simulation.SetVoxelTemperature(missing, 0, 0, 0, 300f),
+                Throws.TypeOf<KeyNotFoundException>());
+            Assert.That(() => simulation.AddGasToVoxel(missing, 0, 1, 1f, 300f),
+                Throws.TypeOf<KeyNotFoundException>());
+            Assert.That(() => simulation.AddGasToVoxel(missing, 0, 0, 0, 1, 1f, 300f),
+                Throws.TypeOf<KeyNotFoundException>());
+            Assert.That(() => simulation.WakeRoom(missing, 1), Throws.TypeOf<KeyNotFoundException>());
+            Assert.That(() => simulation.SleepChunk(missing), Throws.TypeOf<KeyNotFoundException>());
+            Assert.That(simulation.UnregisterChunk(missing), Is.False);
+        });
+    }
+
+    [Test]
+    public void Dispose_IsIdempotentAndRejectsFurtherKernelAccess()
+    {
+        var simulation = new AtmosSimulation(1, 1, 1);
+        var chunk = simulation.CreateAndRegisterChunk(default);
+        simulation.Dispose();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(simulation.Dispose, Throws.Nothing);
+            Assert.That(() => { _ = simulation.ChunkCount; }, Throws.TypeOf<ObjectDisposedException>());
+            Assert.That(() => { _ = simulation.TickCount; }, Throws.TypeOf<ObjectDisposedException>());
+            Assert.That(() => { _ = simulation.LastBoundaryTicks; }, Throws.TypeOf<ObjectDisposedException>());
+            Assert.That(() => simulation.Update(0f), Throws.TypeOf<ObjectDisposedException>());
+            Assert.That(() => simulation.Update(0f, new AtmosConfig()), Throws.TypeOf<ObjectDisposedException>());
+            Assert.That(() => simulation.SetAtmosConfig(new AtmosConfig()), Throws.TypeOf<ObjectDisposedException>());
+            Assert.That(() => simulation.CreateAndRegisterChunk(new Int3(1, 0, 0)),
+                Throws.TypeOf<ObjectDisposedException>());
+            Assert.That(() => simulation.UnregisterChunk(chunk), Throws.TypeOf<ObjectDisposedException>());
+            Assert.That(() => simulation.GetChunkSnapshot(chunk), Throws.TypeOf<ObjectDisposedException>());
+            Assert.That(() => simulation.SetChunkClassification(chunk, new VoxelClassification(1)),
+                Throws.TypeOf<ObjectDisposedException>());
+            Assert.That(() => simulation.SetVoxelClassification(chunk, 0, new VoxelClassification(1)),
+                Throws.TypeOf<ObjectDisposedException>());
+            Assert.That(() => simulation.SetVoxelTemperature(chunk, 0, 300f),
+                Throws.TypeOf<ObjectDisposedException>());
+            Assert.That(() => simulation.AddGasToVoxel(chunk, 0, 1, 1f, 300f),
+                Throws.TypeOf<ObjectDisposedException>());
+            Assert.That(() => simulation.WakeRoom(chunk, 1), Throws.TypeOf<ObjectDisposedException>());
+            Assert.That(() => simulation.SleepChunk(chunk), Throws.TypeOf<ObjectDisposedException>());
+            Assert.That(simulation.Tick, Throws.TypeOf<ObjectDisposedException>());
+        });
+    }
+
+    private static void AssertEveryInvalidCoordinateThrows(Action<int, int, int> operation)
+    {
+        Assert.That(() => operation(-1, 0, 0),
+            Throws.TypeOf<ArgumentOutOfRangeException>()
+                .With.Property(nameof(ArgumentOutOfRangeException.ParamName)).EqualTo("x"));
+        Assert.That(() => operation(3, 0, 0),
+            Throws.TypeOf<ArgumentOutOfRangeException>()
+                .With.Property(nameof(ArgumentOutOfRangeException.ParamName)).EqualTo("x"));
+        Assert.That(() => operation(0, -1, 0),
+            Throws.TypeOf<ArgumentOutOfRangeException>()
+                .With.Property(nameof(ArgumentOutOfRangeException.ParamName)).EqualTo("y"));
+        Assert.That(() => operation(0, 2, 0),
+            Throws.TypeOf<ArgumentOutOfRangeException>()
+                .With.Property(nameof(ArgumentOutOfRangeException.ParamName)).EqualTo("y"));
+        Assert.That(() => operation(0, 0, -1),
+            Throws.TypeOf<ArgumentOutOfRangeException>()
+                .With.Property(nameof(ArgumentOutOfRangeException.ParamName)).EqualTo("z"));
+        Assert.That(() => operation(0, 0, 2),
+            Throws.TypeOf<ArgumentOutOfRangeException>()
+                .With.Property(nameof(ArgumentOutOfRangeException.ParamName)).EqualTo("z"));
+    }
+}

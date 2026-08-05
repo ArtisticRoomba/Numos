@@ -31,18 +31,6 @@ public sealed class AtmosSimulation : IDisposable
     private bool _disposed;
 
     /// <summary>
-    ///     Kernel accessor for the dangerous API.
-    /// </summary>
-    internal AtmosKernel Kernel
-    {
-        get
-        {
-            ThrowIfDisposed();
-            return _kernel;
-        }
-    }
-
-    /// <summary>
     ///     Initializes a simulation with a default <see cref="AtmosConfig" /> and fixed chunk dimensions.
     /// </summary>
     /// <param name="chunkWidth">The number of voxels along each chunk's local x-axis.</param>
@@ -79,6 +67,18 @@ public sealed class AtmosSimulation : IDisposable
         _chunkDepth = chunkDepth;
         _kernel = new AtmosKernel(chunkWidth, chunkHeight, chunkDepth);
         _kernel.SetAtmosConfig(config);
+    }
+
+    /// <summary>
+    ///     Kernel accessor for the dangerous API.
+    /// </summary>
+    internal AtmosKernel Kernel
+    {
+        get
+        {
+            ThrowIfDisposed();
+            return _kernel;
+        }
     }
 
     /// <summary>

@@ -28,14 +28,6 @@ internal sealed partial class AtmosKernel : IDisposable
     private readonly ThreadLocal<PrecipitationEvent[]> _precipBufferPool;
     private readonly ThreadLocal<ThermalBoundaryEvent[]> _thermalBoundaryBufferPool;
 
-    private float _accumulator;
-
-    /// <summary>
-    ///     Current <see cref="AtmosConfig" /> that this simulation runs under.
-    /// </summary>
-    /// <remarks>The configuration is shared by reference with the public API facade.</remarks>
-    private AtmosConfig _config = new();
-
     /// <summary>
     ///     High-resolution timestamp ticks spent processing boundary flow since the latest elapsed-time update began.
     /// </summary>
@@ -45,6 +37,14 @@ internal sealed partial class AtmosKernel : IDisposable
     ///     Number of fixed simulation ticks processed since the kernel was constructed.
     /// </summary>
     internal int TickCount;
+
+    private float _accumulator;
+
+    /// <summary>
+    ///     Current <see cref="AtmosConfig" /> that this simulation runs under.
+    /// </summary>
+    /// <remarks>The configuration is shared by reference with the public API facade.</remarks>
+    private AtmosConfig _config = new();
 
     /// <summary>
     ///     Initializes the kernel and sizes its boundary-event buffers for the configured chunk dimensions.
