@@ -14,6 +14,14 @@ ij_smart_tabs = false
 ij_visual_guides =
 ij_wrap_on_typing = false
 
+# Microsoft .NET properties
+csharp_preferred_modifier_order = public, private, protected, internal, file, new, readonly, abstract, virtual, closed, sealed, static, override, extern, unsafe, volatile, async, required:suggestion
+
+# ReSharper properties
+resharper_braces_for_for = not_required
+resharper_braces_for_foreach = required_for_multiline
+resharper_place_simple_initializer_on_single_line = false
+
 [*.bib]
 ij_bibtex_keep_first_column_comment = true
 ij_bibtex_keep_indents_on_empty_lines = false
