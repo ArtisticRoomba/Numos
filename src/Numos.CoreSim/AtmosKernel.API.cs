@@ -204,6 +204,7 @@ internal sealed partial class AtmosKernel
     {
         var chunk = GetChunk(position);
         ValidateVoxelIndex(chunk, localVoxelIndex);
+        ValidateGasInjection(gasId, moles, temperature);
 
         chunk.WakeRoom(chunk.VoxelRoomMap[localVoxelIndex]);
         chunk.InjectGasToVoxel(localVoxelIndex, gasId, moles, temperature);
@@ -300,6 +301,19 @@ internal sealed partial class AtmosKernel
         {
             throw new ArgumentOutOfRangeException(nameof(localVoxelIndex), localVoxelIndex,
                 $"Voxel index must be less than the chunk's voxel count ({chunk.VoxelCount}).");
+        }
+    }
+
+    private static void ValidateGasInjection(int gasId, float moles, float temperature)
+    {
+        if (gasId < 0)
+            throw new ArgumentOutOfRangeException(nameof(gasId), gasId, "Gas ID must be nonnegative.");
+        if (!float.IsFinite(moles) || moles <= 0f)
+            throw new ArgumentOutOfRangeException(nameof(moles), moles, "Moles must be positive and finite.");
+        if (!float.IsFinite(temperature) || temperature < 0f)
+        {
+            throw new ArgumentOutOfRangeException(nameof(temperature), temperature,
+                "Temperature must be nonnegative and finite.");
         }
     }
 }

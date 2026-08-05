@@ -52,6 +52,27 @@ public sealed class IntraChunkFlowTests
     }
 
     [Test]
+    public void PressureDeltaAtSnapThreshold_UsesDampedFrictionFlow()
+    {
+        var config = SimTestHelpers.CreateDeterministicConfig();
+        using var simulation = new AtmosSimulation(config, 2, 1, 1);
+        var chunk = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
+        SimTestHelpers.SetAllTemperatures(simulation, chunk, 2, 1, 1, 1f);
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasId, 5f, 1f);
+
+        simulation.Tick();
+
+        var snapshot = simulation.GetChunkSnapshot(chunk);
+        Assert.Multiple(() =>
+        {
+            Assert.That(SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 0),
+                Is.EqualTo(4.375f).Within(SimTestHelpers.Tolerance));
+            Assert.That(SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 1),
+                Is.EqualTo(0.625f).Within(SimTestHelpers.Tolerance));
+        });
+    }
+
+    [Test]
     public void MinimumFlowCutoff_DiscardsSubCutoffFlow()
     {
         var config = SimTestHelpers.CreateDeterministicConfig();
@@ -69,6 +90,29 @@ public sealed class IntraChunkFlowTests
         {
             Assert.That(SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 0), Is.EqualTo(1f));
             Assert.That(SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 1), Is.Zero);
+        });
+    }
+
+    [Test]
+    public void FlowExactlyAtMinimumCutoff_IsNotDiscarded()
+    {
+        var config = SimTestHelpers.CreateDeterministicConfig();
+        config.CflFlowCap = 0.01f;
+        config.MinFlowCutoff = 0.04f;
+        using var simulation = new AtmosSimulation(config, 2, 1, 1);
+        var chunk = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
+        SimTestHelpers.SetAllTemperatures(simulation, chunk, 2, 1, 1, 4f);
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasId, 1f, 4f);
+
+        simulation.Tick();
+
+        var snapshot = simulation.GetChunkSnapshot(chunk);
+        Assert.Multiple(() =>
+        {
+            Assert.That(SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 0),
+                Is.EqualTo(0.99f).Within(SimTestHelpers.Tolerance));
+            Assert.That(SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 1),
+                Is.EqualTo(0.01f).Within(SimTestHelpers.Tolerance));
         });
     }
 

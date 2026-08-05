@@ -106,6 +106,75 @@ public sealed class ThermodynamicsIntegrationTests
         });
     }
 
+    [TestCase(1, 0, 0, 2, 1, 1, 0, 1, 1)]
+    [TestCase(-1, 0, 0, 0, 1, 1, 2, 1, 1)]
+    [TestCase(0, 1, 0, 1, 2, 1, 1, 0, 1)]
+    [TestCase(0, -1, 0, 1, 0, 1, 1, 2, 1)]
+    [TestCase(0, 0, 1, 1, 1, 2, 1, 1, 0)]
+    [TestCase(0, 0, -1, 1, 1, 0, 1, 1, 2)]
+    public void CrossChunkThermalDiffusion_MapsEveryFaceToTheOppositeNeighborFace(
+        int dx, int dy, int dz,
+        int sourceX, int sourceY, int sourceZ,
+        int targetX, int targetY, int targetZ)
+    {
+        var config = SimTestHelpers.CreateDeterministicConfig();
+        config.FlowFriction = 0f;
+        config.CflFlowCap = 0f;
+        using var simulation = new AtmosSimulation(config, 3, 3, 3);
+        var source = CreateIsolatedVoxel(simulation, new Int3(0, 0, 0),
+            sourceX, sourceY, sourceZ, SimTestHelpers.RoomId, 400f);
+        var target = CreateIsolatedVoxel(simulation, new Int3(dx, dy, dz),
+            targetX, targetY, targetZ, SimTestHelpers.RoomId + 1, 200f);
+        simulation.AddGasToVoxel(source, sourceX, sourceY, sourceZ,
+            SimTestHelpers.FirstGasId, 1f, 400f);
+        simulation.AddGasToVoxel(target, targetX, targetY, targetZ,
+            SimTestHelpers.FirstGasId, 2f, 200f);
+
+        simulation.Tick();
+        simulation.Tick();
+
+        var sourceSnapshot = simulation.GetChunkSnapshot(source);
+        var targetSnapshot = simulation.GetChunkSnapshot(target);
+        int sourceIndex = SimTestHelpers.Index(sourceX, sourceY, sourceZ, 3, 3);
+        int targetIndex = SimTestHelpers.Index(targetX, targetY, targetZ, 3, 3);
+        Assert.Multiple(() =>
+        {
+            Assert.That(sourceSnapshot.Temperature[sourceIndex],
+                Is.EqualTo(390f).Within(SimTestHelpers.Tolerance));
+            Assert.That(targetSnapshot.Temperature[targetIndex],
+                Is.EqualTo(210f).Within(SimTestHelpers.Tolerance));
+        });
+    }
+
+    [Test]
+    public void DepthOneChunks_DoNotTreatZAsAThermalFlowPlaneWhenAnotherEdgeEmitsAnEvent()
+    {
+        const int width = 3;
+        const int height = 3;
+        var config = SimTestHelpers.CreateDeterministicConfig();
+        config.FlowFriction = 0f;
+        config.CflFlowCap = 0f;
+        using var simulation = new AtmosSimulation(config, width, height, 1);
+        var hot = CreateIsolatedVoxel(simulation, new Int3(0, 0, 0),
+            0, 1, 0, SimTestHelpers.RoomId, 400f);
+        var cold = CreateIsolatedVoxel(simulation, new Int3(0, 0, 1),
+            0, 1, 0, SimTestHelpers.RoomId + 1, 200f);
+        simulation.AddGasToVoxel(hot, 0, 1, 0, SimTestHelpers.FirstGasId, 1f, 400f);
+        simulation.AddGasToVoxel(cold, 0, 1, 0, SimTestHelpers.FirstGasId, 2f, 200f);
+
+        simulation.Tick();
+        simulation.Tick();
+
+        int index = SimTestHelpers.Index(0, 1, 0, width, height);
+        var hotSnapshot = simulation.GetChunkSnapshot(hot);
+        var coldSnapshot = simulation.GetChunkSnapshot(cold);
+        Assert.Multiple(() =>
+        {
+            Assert.That(hotSnapshot.Temperature[index], Is.EqualTo(400f));
+            Assert.That(coldSnapshot.Temperature[index], Is.EqualTo(200f));
+        });
+    }
+
     [Test]
     public void CrossChunkThermalDiffusion_IsBlockedBySolidNeighbor()
     {
@@ -260,5 +329,15 @@ public sealed class ThermodynamicsIntegrationTests
             }
         ];
         return config;
+    }
+
+    private static AtmosChunkHandle CreateIsolatedVoxel(AtmosSimulation simulation, Int3 position,
+        int x, int y, int z, VoxelClassification classification, float temperature)
+    {
+        var chunk = simulation.CreateAndRegisterChunk(position);
+        simulation.SetChunkClassification(chunk, VoxelClassification.RoomSolid);
+        simulation.SetVoxelClassification(chunk, x, y, z, classification);
+        simulation.SetVoxelTemperature(chunk, x, y, z, temperature);
+        return chunk;
     }
 }

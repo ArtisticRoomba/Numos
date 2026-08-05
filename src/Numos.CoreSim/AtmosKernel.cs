@@ -55,9 +55,11 @@ internal sealed partial class AtmosKernel : IDisposable
     internal AtmosKernel(int chunkWidth = 16, int chunkHeight = 16, int chunkDepth = 16)
     {
         TickCount = 0;
-        _maxBoundaryEvents = 2 * (chunkWidth * chunkHeight + chunkWidth * chunkDepth + chunkHeight * chunkDepth);
+        _maxBoundaryEvents = checked(2 *
+                                     (chunkWidth * chunkHeight + chunkWidth * chunkDepth + chunkHeight * chunkDepth));
+        int maxPrecipitationEvents = checked(chunkWidth * chunkHeight * chunkDepth);
         _boundaryBufferPool = new ThreadLocal<BoundaryFlowEvent[]>(() => new BoundaryFlowEvent[_maxBoundaryEvents]);
-        _precipBufferPool = new ThreadLocal<PrecipitationEvent[]>(() => new PrecipitationEvent[_maxBoundaryEvents]);
+        _precipBufferPool = new ThreadLocal<PrecipitationEvent[]>(() => new PrecipitationEvent[maxPrecipitationEvents]);
         _thermalBoundaryBufferPool =
             new ThreadLocal<ThermalBoundaryEvent[]>(() => new ThermalBoundaryEvent[_maxBoundaryEvents]);
     }
@@ -396,17 +398,17 @@ internal sealed partial class AtmosKernel : IDisposable
                      localPosition.Y == chunk.Height - 1 ||
                      chunk.Depth > 1 && (localPosition.Z == 0 || localPosition.Z == chunk.Depth - 1)))
                 {
-                    if (boundaryEventCount < boundaryBuffer.Length)
+                    if (boundaryEventCount >= boundaryBuffer.Length)
+                        throw new InvalidOperationException("Boundary flow event buffer capacity was exceeded.");
+
+                    // Queue a boundary flow event for sequential processing later.
+                    boundaryBuffer[boundaryEventCount] = new BoundaryFlowEvent
                     {
-                        // Queue a boundary flow event for sequential processing later.
-                        boundaryBuffer[boundaryEventCount] = new BoundaryFlowEvent
-                        {
-                            LocalVoxelIndex = idx,
-                            Pressure = currentPressure,
-                            Temperature = chunk.Temperature[idx]
-                        };
-                        boundaryEventCount++;
-                    }
+                        LocalVoxelIndex = idx,
+                        Pressure = currentPressure,
+                        Temperature = chunk.Temperature[idx]
+                    };
+                    boundaryEventCount++;
                 }
             }
 
@@ -671,8 +673,11 @@ internal sealed partial class AtmosKernel : IDisposable
             bool isEdge = localPosition.X == 0 || localPosition.X == chunk.Width - 1 ||
                           localPosition.Y == 0 || localPosition.Y == chunk.Height - 1 ||
                           chunk.Depth > 1 && (localPosition.Z == 0 || localPosition.Z == chunk.Depth - 1);
-            if (isEdge && thermalBoundaryCount < thermalBoundaryBuffer.Length)
+            if (isEdge)
             {
+                if (thermalBoundaryCount >= thermalBoundaryBuffer.Length)
+                    throw new InvalidOperationException("Thermal boundary event buffer capacity was exceeded.");
+
                 thermalBoundaryBuffer[thermalBoundaryCount] = new ThermalBoundaryEvent
                 {
                     LocalVoxelIndex = idx,
@@ -767,17 +772,20 @@ internal sealed partial class AtmosKernel : IDisposable
 
                             chunk.ActiveGases[g].Moles[idx] -= molesToCondense;
 
-                            if (precipCount < precipBuffer.Length)
+                            if (precipCount >= precipBuffer.Length)
                             {
-                                precipBuffer[precipCount] = new PrecipitationEvent
-                                {
-                                    LocalVoxelIndex = idx,
-                                    LiquidID = props.LiquidId,
-                                    MolesToSpawn = molesToCondense,
-                                    InheritedTemp = currentTemp
-                                };
-                                precipCount++;
+                                throw new InvalidOperationException(
+                                    "Precipitation event buffer capacity was exceeded.");
                             }
+
+                            precipBuffer[precipCount] = new PrecipitationEvent
+                            {
+                                LocalVoxelIndex = idx,
+                                LiquidID = props.LiquidId,
+                                MolesToSpawn = molesToCondense,
+                                InheritedTemp = currentTemp
+                            };
+                            precipCount++;
 
                             // Release Latent Heat back to local environment
                             float tempIncrease = molesToCondense * latentHeatVap / specificHeatCapacity;

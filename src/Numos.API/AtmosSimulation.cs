@@ -36,7 +36,10 @@ public sealed class AtmosSimulation : IDisposable
     /// <param name="chunkWidth">The number of voxels along each chunk's local x-axis.</param>
     /// <param name="chunkHeight">The number of voxels along each chunk's local y-axis.</param>
     /// <param name="chunkDepth">The number of voxels along each chunk's local z-axis.</param>
-    /// <exception cref="ArgumentOutOfRangeException">A chunk dimension is zero or negative.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    ///     A chunk dimension is zero or negative, or the combined voxel count exceeds
+    ///     <see cref="ushort.MaxValue" />.
+    /// </exception>
     public AtmosSimulation(int chunkWidth = 16, int chunkHeight = 16, int chunkDepth = 16)
         : this(new AtmosConfig(), chunkWidth, chunkHeight, chunkDepth)
     {
@@ -53,13 +56,29 @@ public sealed class AtmosSimulation : IDisposable
     /// <param name="chunkHeight">The number of voxels along each chunk's local y-axis.</param>
     /// <param name="chunkDepth">The number of voxels along each chunk's local z-axis.</param>
     /// <exception cref="ArgumentNullException"><paramref name="config" /> is <see langword="null" />.</exception>
-    /// <exception cref="ArgumentOutOfRangeException">A chunk dimension is zero or negative.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    ///     A chunk dimension is zero or negative, or the combined voxel count exceeds
+    ///     <see cref="ushort.MaxValue" />.
+    /// </exception>
     public AtmosSimulation(AtmosConfig config, int chunkWidth = 16, int chunkHeight = 16, int chunkDepth = 16)
     {
         ArgumentNullException.ThrowIfNull(config);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(chunkWidth);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(chunkHeight);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(chunkDepth);
+        if (chunkWidth > AtmosChunk.MaxVoxelCount || chunkHeight > AtmosChunk.MaxVoxelCount ||
+            chunkDepth > AtmosChunk.MaxVoxelCount)
+        {
+            throw new ArgumentOutOfRangeException(nameof(chunkWidth), chunkWidth,
+                $"No chunk dimension may exceed {AtmosChunk.MaxVoxelCount}.");
+        }
+
+        long voxelCount = (long)chunkWidth * chunkHeight * chunkDepth;
+        if (voxelCount > AtmosChunk.MaxVoxelCount)
+        {
+            throw new ArgumentOutOfRangeException(nameof(chunkWidth), chunkWidth,
+                $"Chunk dimensions contain {voxelCount} voxels, but at most {AtmosChunk.MaxVoxelCount} are supported.");
+        }
 
         Config = config;
         _chunkWidth = chunkWidth;
@@ -359,6 +378,10 @@ public sealed class AtmosSimulation : IDisposable
     ///     averaging.
     /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="localVoxelIndex" /> is outside the chunk.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    ///     <paramref name="gasId" /> is negative, <paramref name="moles" /> is not positive and finite, or
+    ///     <paramref name="temperature" /> is negative or non-finite.
+    /// </exception>
     /// <exception cref="KeyNotFoundException">No chunk is registered at the handle's position.</exception>
     /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
     [PublicAPI]
@@ -385,6 +408,10 @@ public sealed class AtmosSimulation : IDisposable
     ///     averaging.
     /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException">A local coordinate is outside the chunk.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    ///     <paramref name="gasId" /> is negative, <paramref name="moles" /> is not positive and finite, or
+    ///     <paramref name="temperature" /> is negative or non-finite.
+    /// </exception>
     /// <exception cref="KeyNotFoundException">No chunk is registered at the handle's position.</exception>
     /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
     [PublicAPI]

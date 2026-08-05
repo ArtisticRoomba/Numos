@@ -16,6 +16,11 @@ namespace Numos.CoreSim;
 internal class AtmosChunk
 {
     /// <summary>
+    ///     Largest voxel count representable by the chunk's <see cref="ushort" /> flat indexes.
+    /// </summary>
+    internal const int MaxVoxelCount = ushort.MaxValue;
+
+    /// <summary>
     ///     Indicates that a voxel has not been assigned to a room.
     /// </summary>
     public const int RoomUnassigned = 0;
@@ -150,13 +155,17 @@ internal class AtmosChunk
     /// <param name="height">The number of voxels along the y axis.</param>
     /// <param name="depth">The number of voxels along the z axis.</param>
     /// <param name="maxActiveRooms">The maximum number of rooms that can be active at once.</param>
+    /// <exception cref="ArgumentOutOfRangeException">
+    ///     A dimension is non-positive or the combined voxel count exceeds <see cref="MaxVoxelCount" />.
+    /// </exception>
     public AtmosChunk(int width = 16, int height = 16, int depth = 16, int maxActiveRooms = 64)
     {
+        int voxelCount = GetValidatedVoxelCount(width, height, depth);
         MaxActiveRooms = maxActiveRooms;
         Width = width;
         Height = height;
         Depth = depth;
-        VoxelCount = width * height * depth;
+        VoxelCount = voxelCount;
         EnsureInitialized();
     }
 
@@ -198,6 +207,9 @@ internal class AtmosChunk
     /// <param name="height">The height of the chunk.</param>
     /// <param name="depth">The depth of the chunk.</param>
     /// <param name="maxActiveRooms">The maximum number of rooms that can be active in this chunk simultaneously.</param>
+    /// <exception cref="ArgumentOutOfRangeException">
+    ///     A dimension is non-positive or the combined voxel count exceeds <see cref="MaxVoxelCount" />.
+    /// </exception>
     /// <remarks>
     ///     Initialization puts the chunk to sleep, resets all active counts and timers, and clears
     ///     its per-voxel, gas-channel, and active-room data.
@@ -205,13 +217,14 @@ internal class AtmosChunk
     [PublicAPI]
     public void Initialize(Int3 position, int width = 16, int height = 16, int depth = 16, int maxActiveRooms = 64)
     {
+        int voxelCount = GetValidatedVoxelCount(width, height, depth);
         GridPosition = position;
         MaxActiveRooms = maxActiveRooms;
         IsAwake = false;
         Width = width;
         Height = height;
         Depth = depth;
-        VoxelCount = width * height * depth;
+        VoxelCount = voxelCount;
 
         EnsureInitialized();
 
@@ -457,5 +470,26 @@ internal class AtmosChunk
     public Int3 GetXyzInt3(ushort index)
     {
         return new Int3(index % Width, index / Width % Height, index / (Width * Height));
+    }
+
+    private static int GetValidatedVoxelCount(int width, int height, int depth)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(width);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(height);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(depth);
+        if (width > MaxVoxelCount || height > MaxVoxelCount || depth > MaxVoxelCount)
+        {
+            throw new ArgumentOutOfRangeException(nameof(width), width,
+                $"No chunk dimension may exceed {MaxVoxelCount}.");
+        }
+
+        long voxelCount = (long)width * height * depth;
+        if (voxelCount > MaxVoxelCount)
+        {
+            throw new ArgumentOutOfRangeException(nameof(width), width,
+                $"Chunk dimensions contain {voxelCount} voxels, but at most {MaxVoxelCount} are supported.");
+        }
+
+        return (int)voxelCount;
     }
 }

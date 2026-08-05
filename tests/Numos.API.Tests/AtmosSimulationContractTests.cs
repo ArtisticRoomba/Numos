@@ -45,6 +45,22 @@ public sealed class AtmosSimulationContractTests
     }
 
     [Test]
+    public void Constructor_WithVoxelCountBeyondUshortIndexCapacity_Throws()
+    {
+        Assert.Multiple(() =>
+        {
+            Assert.That(() => new AtmosSimulation(256, 256, 1),
+                Throws.TypeOf<ArgumentOutOfRangeException>()
+                    .With.Property(nameof(ArgumentOutOfRangeException.ParamName)).EqualTo("chunkWidth"));
+            Assert.That(() => new AtmosSimulation(new AtmosConfig(), 256, 256, 1),
+                Throws.TypeOf<ArgumentOutOfRangeException>()
+                    .With.Property(nameof(ArgumentOutOfRangeException.ParamName)).EqualTo("chunkWidth"));
+            Assert.That(() => new AtmosSimulation(int.MaxValue, int.MaxValue, int.MaxValue),
+                Throws.TypeOf<ArgumentOutOfRangeException>());
+        });
+    }
+
+    [Test]
     public void Constructor_RetainsLiveConfigurationInstance()
     {
         var config = new AtmosConfig
@@ -321,6 +337,35 @@ public sealed class AtmosSimulationContractTests
             Assert.That(snapshot.Temperature, Is.EqualTo(new[] { 0f, 0f, 300f }));
             Assert.That(snapshot.TotalPressure, Is.EqualTo(new[] { 0f, 0f, 600f }));
         });
+    }
+
+    [Test]
+    public void AddGasToVoxel_RejectsInvalidPhysicalInputs()
+    {
+        using var simulation = new AtmosSimulation(1, 1, 1);
+        var chunk = simulation.CreateAndRegisterChunk(default);
+        simulation.SetChunkClassification(chunk, new VoxelClassification(7));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(() => simulation.AddGasToVoxel(chunk, 0, -1, 1f, 300f),
+                Throws.TypeOf<ArgumentOutOfRangeException>()
+                    .With.Property(nameof(ArgumentOutOfRangeException.ParamName)).EqualTo("gasId"));
+            Assert.That(() => simulation.AddGasToVoxel(chunk, 0, 1, 0f, 300f),
+                Throws.TypeOf<ArgumentOutOfRangeException>()
+                    .With.Property(nameof(ArgumentOutOfRangeException.ParamName)).EqualTo("moles"));
+            Assert.That(() => simulation.AddGasToVoxel(chunk, 0, 1, float.NaN, 300f),
+                Throws.TypeOf<ArgumentOutOfRangeException>()
+                    .With.Property(nameof(ArgumentOutOfRangeException.ParamName)).EqualTo("moles"));
+            Assert.That(() => simulation.AddGasToVoxel(chunk, 0, 1, 1f, -1f),
+                Throws.TypeOf<ArgumentOutOfRangeException>()
+                    .With.Property(nameof(ArgumentOutOfRangeException.ParamName)).EqualTo("temperature"));
+            Assert.That(() => simulation.AddGasToVoxel(chunk, 0, 1, 1f, float.PositiveInfinity),
+                Throws.TypeOf<ArgumentOutOfRangeException>()
+                    .With.Property(nameof(ArgumentOutOfRangeException.ParamName)).EqualTo("temperature"));
+        });
+
+        Assert.That(simulation.GetChunkSnapshot(chunk).Gases, Is.Empty);
     }
 
     [Test]

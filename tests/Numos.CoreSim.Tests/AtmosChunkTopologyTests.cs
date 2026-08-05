@@ -33,6 +33,30 @@ public sealed class AtmosChunkTopologyTests
     }
 
     [Test]
+    public void Constructor_RejectsVoxelCountBeyondUshortIndexCapacity()
+    {
+        Assert.That(() => new AtmosChunk(256, 256, 1),
+            Throws.TypeOf<ArgumentOutOfRangeException>());
+        Assert.That(() => new AtmosChunk(int.MaxValue, int.MaxValue, int.MaxValue),
+            Throws.TypeOf<ArgumentOutOfRangeException>());
+    }
+
+    [Test]
+    public void Initialize_RejectsVoxelCountBeyondUshortIndexCapacityWithoutChangingState()
+    {
+        var chunk = new AtmosChunk(2, 3, 1);
+
+        Assert.That(() => chunk.Initialize(default, 256, 256, 1),
+            Throws.TypeOf<ArgumentOutOfRangeException>());
+        Assert.Multiple(() =>
+        {
+            Assert.That(chunk.Dimensions, Is.EqualTo(new Int3(2, 3, 1)));
+            Assert.That(chunk.VoxelCount, Is.EqualTo(6));
+            Assert.That(chunk.VoxelRoomMap, Has.Length.EqualTo(6));
+        });
+    }
+
+    [Test]
     public void Initialize_ResizesAndClearsAllChunkState()
     {
         var chunk = new AtmosChunk(2, 1, 1, 2)
