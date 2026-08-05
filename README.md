@@ -12,7 +12,6 @@ The project will follow a regular semantic versioning structure when I feel comf
 - Engine-agnostic, with a supported `Numos.API` facade over an internal simulation kernel
 - Multithreaded intra-chunk advection and thermodynamics
 - Singlethreaded cross-chunk boundary flow
-- Micro/macro layer
 - Simplified ideal gas law (`P = n \cdot T`)
 - Constant volume voxels
 
