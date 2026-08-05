@@ -6,6 +6,7 @@
         <Nullable>enable</Nullable>
         <RootNamespace>Numos</RootNamespace>
         <PackageId>Numos.API</PackageId>
+        <GenerateDocumentationFile>true</GenerateDocumentationFile>
     </PropertyGroup>
 
     <ItemGroup>

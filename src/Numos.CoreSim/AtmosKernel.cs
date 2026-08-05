@@ -11,6 +11,9 @@ namespace Numos;
 /// </summary>
 internal sealed partial class AtmosKernel : IDisposable
 {
+    /// <summary>
+    ///     The number of fixed simulation ticks processed per simulated second.
+    /// </summary>
     internal const float SimulationRate = 20.0f;
     private const float FixedDt = 1.0f / SimulationRate;
     private const int MaxStepsPerFrame = 5;
@@ -33,9 +36,22 @@ internal sealed partial class AtmosKernel : IDisposable
     /// <remarks>The configuration is shared by reference with the public API facade.</remarks>
     private AtmosConfig _config = new();
 
+    /// <summary>
+    ///     High-resolution timestamp ticks spent processing boundary flow since the latest elapsed-time update began.
+    /// </summary>
     internal long LastBoundaryTicks;
+
+    /// <summary>
+    ///     Number of fixed simulation ticks processed since the kernel was constructed.
+    /// </summary>
     internal int TickCount;
 
+    /// <summary>
+    ///     Initializes the kernel and sizes its boundary-event buffers for the configured chunk dimensions.
+    /// </summary>
+    /// <param name="chunkWidth">The number of voxels along each chunk's local x-axis.</param>
+    /// <param name="chunkHeight">The number of voxels along each chunk's local y-axis.</param>
+    /// <param name="chunkDepth">The number of voxels along each chunk's local z-axis.</param>
     internal AtmosKernel(int chunkWidth = 16, int chunkHeight = 16, int chunkDepth = 16)
     {
         TickCount = 0;
@@ -46,6 +62,9 @@ internal sealed partial class AtmosKernel : IDisposable
             new ThreadLocal<ThermalBoundaryEvent[]>(() => new ThermalBoundaryEvent[_maxBoundaryEvents]);
     }
 
+    /// <summary>
+    ///     Releases every registered chunk and the kernel's worker-local event buffers.
+    /// </summary>
     public void Dispose()
     {
         foreach (var chunk in _chunkMap.Values)
