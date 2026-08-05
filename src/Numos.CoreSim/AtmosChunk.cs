@@ -1,9 +1,9 @@
 using System.Diagnostics.CodeAnalysis;
 using JetBrains.Annotations;
-using Maths;
-using Numos.Datatypes.Snapshots;
+using Numos.CoreSim.Datatypes.Snapshots;
+using Numos.Maths;
 
-namespace Numos;
+namespace Numos.CoreSim;
 
 /// <summary>
 ///     Represents the simulation state for a fixed-size voxel chunk.

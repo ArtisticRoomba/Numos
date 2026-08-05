@@ -1,6 +1,6 @@
 using System.Buffers;
 
-namespace Numos;
+namespace Numos.CoreSim;
 
 /// <summary>
 ///     Represents a single gas type within an <see cref="AtmosChunk" /> using a Structure of Arrays (SoA) layout.

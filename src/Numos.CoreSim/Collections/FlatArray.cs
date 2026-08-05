@@ -1,4 +1,4 @@
-namespace Numos.Collections;
+namespace Numos.CoreSim.Collections;
 
 /// <summary>
 ///     2-3D to 1D mapping for an array.

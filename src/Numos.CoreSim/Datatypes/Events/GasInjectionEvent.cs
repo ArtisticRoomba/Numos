@@ -1,6 +1,6 @@
 using System.Numerics;
 
-namespace Numos.Datatypes.Events;
+namespace Numos.CoreSim.Datatypes.Events;
 
 internal struct GasInjectionEvent
 {

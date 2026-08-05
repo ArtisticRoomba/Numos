@@ -1,6 +1,6 @@
 using NUnit.Framework;
 
-namespace Maths.Tests;
+namespace Numos.Maths.Tests;
 
 [TestFixture]
 public sealed class Int3Tests

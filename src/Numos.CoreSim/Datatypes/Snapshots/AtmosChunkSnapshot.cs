@@ -1,6 +1,6 @@
-using Maths;
+using Numos.Maths;
 
-namespace Numos.Datatypes.Snapshots;
+namespace Numos.CoreSim.Datatypes.Snapshots;
 
 public struct AtmosChunkSnapshot
 {

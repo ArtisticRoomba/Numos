@@ -1,8 +1,8 @@
-using Maths;
-using Numos.Datatypes.Primitives;
-using Numos.Datatypes.Snapshots;
+using Numos.CoreSim.Datatypes.Primitives;
+using Numos.CoreSim.Datatypes.Snapshots;
+using Numos.Maths;
 
-namespace Numos;
+namespace Numos.CoreSim;
 
 internal sealed partial class AtmosKernel
 {

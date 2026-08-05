@@ -4,7 +4,7 @@
         <TargetFramework>net10.0</TargetFramework>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
-        <RootNamespace>Numos</RootNamespace>
+        <RootNamespace>Numos.API</RootNamespace>
         <PackageId>Numos.API</PackageId>
         <GenerateDocumentationFile>true</GenerateDocumentationFile>
     </PropertyGroup>

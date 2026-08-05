@@ -1,4 +1,4 @@
-namespace Numos;
+namespace Numos.CoreSim;
 
 /// <summary>
 ///     Defines the physical properties of a gas.

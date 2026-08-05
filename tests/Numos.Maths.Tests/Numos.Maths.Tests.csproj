@@ -4,7 +4,7 @@
         <TargetFramework>net10.0</TargetFramework>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
-        <RootNamespace>Maths.Tests</RootNamespace>
+        <RootNamespace>Numos.Maths.Tests</RootNamespace>
     </PropertyGroup>
 
     <ItemGroup>

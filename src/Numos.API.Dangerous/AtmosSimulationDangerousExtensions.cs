@@ -1,6 +1,6 @@
 using JetBrains.Annotations;
 
-namespace Numos.Dangerous;
+namespace Numos.API.Dangerous;
 
 /// <summary>
 ///    Provides extension methods for <see cref="AtmosSimulation" /> that expose low-level, dangerous APIs.

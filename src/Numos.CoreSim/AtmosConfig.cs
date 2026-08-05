@@ -1,4 +1,4 @@
-namespace Numos;
+namespace Numos.CoreSim;
 
 /// <summary>
 ///     Configuration values for the simulation.

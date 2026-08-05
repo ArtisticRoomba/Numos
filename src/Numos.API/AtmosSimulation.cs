@@ -1,9 +1,10 @@
 using JetBrains.Annotations;
-using Maths;
-using Numos.Datatypes.Primitives;
-using Numos.Datatypes.Snapshots;
+using Numos.CoreSim;
+using Numos.CoreSim.Datatypes.Primitives;
+using Numos.CoreSim.Datatypes.Snapshots;
+using Numos.Maths;
 
-namespace Numos;
+namespace Numos.API;
 
 /// <summary>
 ///     Provides the supported, engine-agnostic facade for running a voxel-based atmospheric simulation.

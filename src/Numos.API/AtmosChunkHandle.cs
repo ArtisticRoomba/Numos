@@ -1,6 +1,6 @@
-using Maths;
+using Numos.Maths;
 
-namespace Numos;
+namespace Numos.API;
 
 /// <summary>
 ///     Identifies a chunk owned by an <see cref="AtmosSimulation" />.

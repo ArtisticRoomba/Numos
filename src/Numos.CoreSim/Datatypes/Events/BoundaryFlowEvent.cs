@@ -1,4 +1,4 @@
-namespace Numos.Datatypes.Events;
+namespace Numos.CoreSim.Datatypes.Events;
 
 /// <summary>
 ///     Event that stores data on the flow of a boundary voxel for later sequential processing.

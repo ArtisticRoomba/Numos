@@ -1,6 +1,6 @@
 using JetBrains.Annotations;
 
-namespace Numos.Datatypes.Primitives;
+namespace Numos.CoreSim.Datatypes.Primitives;
 
 /// <summary>
 ///     Prim datatype that represents the classification of a voxel in the simulation.

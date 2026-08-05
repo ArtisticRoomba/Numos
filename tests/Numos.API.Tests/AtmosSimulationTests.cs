@@ -1,5 +1,6 @@
-using Maths;
-using Numos.Datatypes.Primitives;
+using Numos.CoreSim;
+using Numos.CoreSim.Datatypes.Primitives;
+using Numos.Maths;
 
 namespace Numos.API.Tests;
 
@@ -34,8 +35,8 @@ public sealed class AtmosSimulationTests
     public void CoreSim_HidesMutableKernelTypes()
     {
         var configType = typeof(AtmosConfig);
-        var kernelType = configType.Assembly.GetType("Numos.AtmosKernel");
-        var chunkType = configType.Assembly.GetType("Numos.AtmosChunk");
+        var kernelType = configType.Assembly.GetType("Numos.CoreSim.AtmosKernel");
+        var chunkType = configType.Assembly.GetType("Numos.CoreSim.AtmosChunk");
 
         Assert.Multiple(() =>
         {

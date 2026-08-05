@@ -1,4 +1,6 @@
-namespace Numos.Dangerous;
+using Numos.CoreSim;
+
+namespace Numos.API.Dangerous;
 
 /// <summary>
 ///     Entry point for low-level <see cref="AtmosSimulation" /> APIs.

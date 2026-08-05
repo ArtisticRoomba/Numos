@@ -1,4 +1,4 @@
-namespace Numos;
+namespace Numos.CoreSim;
 
 internal enum AccumulatorState
 {

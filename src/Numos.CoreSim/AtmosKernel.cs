@@ -1,10 +1,10 @@
 using System.Buffers;
 using System.Collections.Concurrent;
 using System.Diagnostics;
-using Maths;
-using Numos.Datatypes.Events;
+using Numos.CoreSim.Datatypes.Events;
+using Numos.Maths;
 
-namespace Numos;
+namespace Numos.CoreSim;
 
 /// <summary>
 ///     Internal Numos simulation kernel. Exposed to consumers under a safe/dangerous API.

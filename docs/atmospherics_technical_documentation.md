@@ -91,7 +91,7 @@ Numos deliberately exposes two package-level integration surfaces:
 | `Numos.API` | Normal engine and game integration | Supported public contract            | Handles, validated operations, detached snapshots |
 | `Numos.API.Dangerous` | Measured performance-critical code | No compatibility guarantee (for now) | No impl for now.                                  |
 
-The dangerous package must be referenced separately and imported through `Numos.Dangerous`. Access begins with
+The dangerous package must be referenced separately and imported through `Numos.API.Dangerous`. Access begins with
 `simulation.Dangerous()`.
 
 The kernel hooks used by this package live in `AtmosKernel.Dangerous.cs`, keeping them distinct from the internal

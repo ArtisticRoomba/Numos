@@ -1,4 +1,4 @@
-namespace Numos.Datatypes.Snapshots;
+namespace Numos.CoreSim.Datatypes.Snapshots;
 
 public struct GasSnapshot
 {

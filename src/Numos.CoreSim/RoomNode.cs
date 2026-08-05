@@ -1,4 +1,4 @@
-namespace Numos;
+namespace Numos.CoreSim;
 
 /// <summary>
 ///     Represents the "Macro Layer" (Equilibrium) of the simulation.
