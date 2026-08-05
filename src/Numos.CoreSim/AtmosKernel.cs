@@ -159,18 +159,19 @@ internal sealed partial class AtmosKernel : IDisposable
     {
         if (!_chunkMap.TryGetValue(sourceKey, out var sourceChunk))
             return;
-        (int x, int y, int z) = sourceChunk.GetXyz(evt.LocalVoxelIndex);
+        var localPosition = sourceChunk.GetXyzInt3(evt.LocalVoxelIndex);
 
-        TryFlowToNeighbor(sourceChunk, sourceKey, x - 1, y, z, -1, 0, 0);
-        TryFlowToNeighbor(sourceChunk, sourceKey, x + 1, y, z, 1, 0, 0);
-        TryFlowToNeighbor(sourceChunk, sourceKey, x, y - 1, z, 0, -1, 0);
-        TryFlowToNeighbor(sourceChunk, sourceKey, x, y + 1, z, 0, 1, 0);
+
+        TryFlowToNeighbor(sourceChunk, sourceKey, localPosition + Int3.NegX, Int3.NegX);
+        TryFlowToNeighbor(sourceChunk, sourceKey, localPosition + Int3.PosX, Int3.PosX);
+        TryFlowToNeighbor(sourceChunk, sourceKey, localPosition + Int3.NegY, Int3.NegY);
+        TryFlowToNeighbor(sourceChunk, sourceKey, localPosition + Int3.PosY, Int3.PosY);
 
         // Working in the Z plane.
         if (sourceChunk.Depth > 1)
         {
-            TryFlowToNeighbor(sourceChunk, sourceKey, x, y, z - 1, 0, 0, -1);
-            TryFlowToNeighbor(sourceChunk, sourceKey, x, y, z + 1, 0, 0, 1);
+            TryFlowToNeighbor(sourceChunk, sourceKey, localPosition + Int3.NegZ, Int3.NegZ);
+            TryFlowToNeighbor(sourceChunk, sourceKey, localPosition + Int3.PosZ, Int3.PosZ);
         }
     }
 
@@ -181,33 +182,25 @@ internal sealed partial class AtmosKernel : IDisposable
     /// </summary>
     /// <param name="sourceChunk">The source chunk from which gas is flowing.</param>
     /// <param name="sourceKey">The grid position of the source chunk.</param>
-    /// <param name="targetX">The x-coordinate of the target voxel in the source chunk.</param>
-    /// <param name="targetY">The y-coordinate of the target voxel in the source chunk.</param>
-    /// <param name="targetZ">The z-coordinate of the target voxel in the source chunk.</param>
-    /// <param name="dirX">The x-direction to the neighboring chunk.</param>
-    /// <param name="dirY">The y-direction to the neighboring chunk.</param>
-    /// <param name="dirZ">The z-direction to the neighboring chunk.</param>
+    /// <param name="targetPosition">The target voxel coordinates in the source chunk.</param>
+    /// <param name="direction">The direction to the neighboring chunk.</param>
     private void TryFlowToNeighbor(AtmosChunk sourceChunk, Int3 sourceKey,
-        int targetX, int targetY, int targetZ,
-        int dirX, int dirY, int dirZ)
+        Int3 targetPosition, Int3 direction)
     {
         // Back out if we're not out of bounds of our own chunk, as this is not a boundary flow.
-        if (targetX >= 0 && targetX < sourceChunk.Width &&
-            targetY >= 0 && targetY < sourceChunk.Height &&
-            targetZ >= 0 && targetZ < sourceChunk.Depth)
+        if (targetPosition.IsWithin(default, sourceChunk.Dimensions))
             return;
 
         // Offset the source key by the direction to get the neighbor chunk's grid position.
-        var neighborPos = new Int3(sourceKey.X + dirX, sourceKey.Y + dirY, sourceKey.Z + dirZ);
+        var neighborPos = sourceKey + direction;
 
         if (!_chunkMap.TryGetValue(neighborPos, out var neighborChunk))
             return;
 
         // Calculate the local voxel index in the neighbor chunk, wrapping around if necessary.
-        int nX = (targetX + neighborChunk.Width) % neighborChunk.Width;
-        int nY = (targetY + neighborChunk.Height) % neighborChunk.Height;
-        int nZ = (targetZ + neighborChunk.Depth) % neighborChunk.Depth;
-        ushort neighborIdx = neighborChunk.GetIndex(nX, nY, nZ);
+        var neighborDimensions = neighborChunk.Dimensions;
+        var neighborLocalPosition = (targetPosition + neighborDimensions) % neighborDimensions;
+        ushort neighborIdx = neighborChunk.GetIndex(neighborLocalPosition);
 
         // If we're up against a solid wall in the neighbor chunk then oh well.
         if (neighborChunk.VoxelRoomMap[neighborIdx] == AtmosChunk.RoomSolid)
@@ -224,10 +217,8 @@ internal sealed partial class AtmosKernel : IDisposable
         }
 
         // Calculate the source voxel index in the source chunk, which is the voxel adjacent to the neighbor.
-        int srcX = targetX - dirX;
-        int srcY = targetY - dirY;
-        int srcZ = targetZ - dirZ;
-        ushort srcIdx = sourceChunk.GetIndex(srcX, srcY, srcZ);
+        var sourceLocalPosition = targetPosition - direction;
+        ushort srcIdx = sourceChunk.GetIndex(sourceLocalPosition);
 
         float sourcePressure = sourceChunk.TotalPressure[srcIdx];
         var neighborPressure = 0f;
@@ -353,7 +344,7 @@ internal sealed partial class AtmosKernel : IDisposable
             for (var i = 0; i < chunk.ActiveAirCount; i++)
             {
                 ushort idx = chunk.ActiveAirIndices[i];
-                (int x, int y, int z) = chunk.GetXyz(idx);
+                var localPosition = chunk.GetXyzInt3(idx);
 
                 float currentPressure = chunk.TotalPressure[idx];
 
@@ -379,31 +370,31 @@ internal sealed partial class AtmosKernel : IDisposable
                     continue;
 
                 // Inline Neighbor Checks (4 Directions for 2D, 6 Directions for 3D)
-                CheckNeighborAdvect(chunk, x - 1, y, z, idx, currentPressure, totalMoles,
+                CheckNeighborAdvect(chunk, localPosition + Int3.NegX, idx, currentPressure, totalMoles,
                     ref maxPressureDelta, deltas);
-                CheckNeighborAdvect(chunk, x + 1, y, z, idx, currentPressure, totalMoles,
+                CheckNeighborAdvect(chunk, localPosition + Int3.PosX, idx, currentPressure, totalMoles,
                     ref maxPressureDelta, deltas);
-                CheckNeighborAdvect(chunk, x, y - 1, z, idx, currentPressure, totalMoles,
+                CheckNeighborAdvect(chunk, localPosition + Int3.NegY, idx, currentPressure, totalMoles,
                     ref maxPressureDelta, deltas);
-                CheckNeighborAdvect(chunk, x, y + 1, z, idx, currentPressure, totalMoles,
+                CheckNeighborAdvect(chunk, localPosition + Int3.PosY, idx, currentPressure, totalMoles,
                     ref maxPressureDelta, deltas);
 
                 // Working in the Z plane.
                 if (chunk.Depth > 1)
                 {
-                    CheckNeighborAdvect(chunk, x, y, z - 1, idx, currentPressure, totalMoles,
+                    CheckNeighborAdvect(chunk, localPosition + Int3.NegZ, idx, currentPressure, totalMoles,
                         ref maxPressureDelta, deltas);
-                    CheckNeighborAdvect(chunk, x, y, z + 1, idx, currentPressure, totalMoles,
+                    CheckNeighborAdvect(chunk, localPosition + Int3.PosZ, idx, currentPressure, totalMoles,
                         ref maxPressureDelta, deltas);
                 }
 
                 // If the current voxel is on the boundary of the chunk and has a pressure above 1.0f...
                 if (currentPressure > 1.0f &&
-                    (x == 0 ||
-                     x == chunk.Width - 1 ||
-                     y == 0 ||
-                     y == chunk.Height - 1 ||
-                     chunk.Depth > 1 && (z == 0 || z == chunk.Depth - 1)))
+                    (localPosition.X == 0 ||
+                     localPosition.X == chunk.Width - 1 ||
+                     localPosition.Y == 0 ||
+                     localPosition.Y == chunk.Height - 1 ||
+                     chunk.Depth > 1 && (localPosition.Z == 0 || localPosition.Z == chunk.Depth - 1)))
                 {
                     if (boundaryEventCount < boundaryBuffer.Length)
                     {
@@ -443,9 +434,7 @@ internal sealed partial class AtmosKernel : IDisposable
     ///     Checks a Von Neumann neighbor voxel for advection and diffusion, updating deltas accordingly.
     /// </summary>
     /// <param name="chunk">The chunk being processed.</param>
-    /// <param name="nx">The x-coordinate of the neighbor voxel.</param>
-    /// <param name="ny">The y-coordinate of the neighbor voxel.</param>
-    /// <param name="nz">The z-coordinate of the neighbor voxel.</param>
+    /// <param name="neighborPosition">The local coordinates of the neighbor voxel.</param>
     /// <param name="idx">The index of the current voxel in the chunk.</param>
     /// <param name="currentPressure">The total pressure of the current voxel.</param>
     /// <param name="totalMoles">The total moles of gas in the current voxel.</param>
@@ -457,17 +446,17 @@ internal sealed partial class AtmosKernel : IDisposable
     ///     The array of deltas for each gas in each voxel,
     ///     to be updated based on advection and diffusion.
     /// </param>
-    private void CheckNeighborAdvect(AtmosChunk chunk, int nx, int ny, int nz, ushort idx,
+    private void CheckNeighborAdvect(AtmosChunk chunk, Int3 neighborPosition, ushort idx,
         float currentPressure,
         float totalMoles, // TODO Investigate, there used to be a flowfriction param but it was unused. Might be sussus amogus.
         ref float maxPressureDelta, float[] deltas)
     {
         // Skip if the neighbor coordinates are out of bounds of the chunk.
-        if (nx < 0 || nx >= chunk.Width || ny < 0 || ny >= chunk.Height || nz < 0 || nz >= chunk.Depth)
+        if (!neighborPosition.IsWithin(default, chunk.Dimensions))
             return;
 
         // TODO PERF do offsets based on bumping index instead of offsetting a vector3 and doing a lookup.
-        ushort neighborIdx = chunk.GetIndex(nx, ny, nz);
+        ushort neighborIdx = chunk.GetIndex(neighborPosition);
         int neighborRoom = chunk.VoxelRoomMap[neighborIdx];
 
         // Back out if the neighbor voxel is solid, as we cannot flow into it.
@@ -659,23 +648,29 @@ internal sealed partial class AtmosKernel : IDisposable
             if (chunk.TotalPressure[idx] < vacuumThreshold)
                 continue;
 
-            (int x, int y, int z) = chunk.GetXyz(idx);
+            var localPosition = chunk.GetXyzInt3(idx);
             float currentTemp = chunk.Temperature[idx];
 
-            CheckNeighborThermal(chunk, x - 1, y, z, idx, currentTemp, thermalConductivity, tempDeltas);
-            CheckNeighborThermal(chunk, x + 1, y, z, idx, currentTemp, thermalConductivity, tempDeltas);
-            CheckNeighborThermal(chunk, x, y - 1, z, idx, currentTemp, thermalConductivity, tempDeltas);
-            CheckNeighborThermal(chunk, x, y + 1, z, idx, currentTemp, thermalConductivity, tempDeltas);
+            CheckNeighborThermal(chunk, localPosition + Int3.NegX, idx, currentTemp, thermalConductivity,
+                tempDeltas);
+            CheckNeighborThermal(chunk, localPosition + Int3.PosX, idx, currentTemp, thermalConductivity,
+                tempDeltas);
+            CheckNeighborThermal(chunk, localPosition + Int3.NegY, idx, currentTemp, thermalConductivity,
+                tempDeltas);
+            CheckNeighborThermal(chunk, localPosition + Int3.PosY, idx, currentTemp, thermalConductivity,
+                tempDeltas);
             if (chunk.Depth > 1)
             {
-                CheckNeighborThermal(chunk, x, y, z - 1, idx, currentTemp, thermalConductivity, tempDeltas);
-                CheckNeighborThermal(chunk, x, y, z + 1, idx, currentTemp, thermalConductivity, tempDeltas);
+                CheckNeighborThermal(chunk, localPosition + Int3.NegZ, idx, currentTemp, thermalConductivity,
+                    tempDeltas);
+                CheckNeighborThermal(chunk, localPosition + Int3.PosZ, idx, currentTemp, thermalConductivity,
+                    tempDeltas);
             }
 
             // Emit thermal boundary events for edge voxels
-            bool isEdge = x == 0 || x == chunk.Width - 1 ||
-                          y == 0 || y == chunk.Height - 1 ||
-                          chunk.Depth > 1 && (z == 0 || z == chunk.Depth - 1);
+            bool isEdge = localPosition.X == 0 || localPosition.X == chunk.Width - 1 ||
+                          localPosition.Y == 0 || localPosition.Y == chunk.Height - 1 ||
+                          chunk.Depth > 1 && (localPosition.Z == 0 || localPosition.Z == chunk.Depth - 1);
             if (isEdge && thermalBoundaryCount < thermalBoundaryBuffer.Length)
             {
                 thermalBoundaryBuffer[thermalBoundaryCount] = new ThermalBoundaryEvent
@@ -696,13 +691,13 @@ internal sealed partial class AtmosKernel : IDisposable
         ArrayPool<float>.Shared.Return(tempDeltas);
     }
 
-    private void CheckNeighborThermal(AtmosChunk chunk, int nx, int ny, int nz, ushort idx,
+    private void CheckNeighborThermal(AtmosChunk chunk, Int3 neighborPosition, ushort idx,
         float currentTemp, float thermalConductivity, float[] tempDeltas)
     {
-        if (nx < 0 || nx >= chunk.Width || ny < 0 || ny >= chunk.Height || nz < 0 || nz >= chunk.Depth)
+        if (!neighborPosition.IsWithin(default, chunk.Dimensions))
             return;
 
-        ushort neighborIdx = chunk.GetIndex(nx, ny, nz);
+        ushort neighborIdx = chunk.GetIndex(neighborPosition);
         if (chunk.VoxelRoomMap[neighborIdx] == AtmosChunk.RoomSolid)
             return;
 
@@ -827,46 +822,40 @@ internal sealed partial class AtmosKernel : IDisposable
     {
         if (!_chunkMap.TryGetValue(sourceKey, out var sourceChunk))
             return;
-        (int x, int y, int z) = sourceChunk.GetXyz(evt.LocalVoxelIndex);
+        var localPosition = sourceChunk.GetXyzInt3(evt.LocalVoxelIndex);
 
-        TryThermalFlowToNeighbor(sourceChunk, sourceKey, x - 1, y, z, -1, 0, 0);
-        TryThermalFlowToNeighbor(sourceChunk, sourceKey, x + 1, y, z, 1, 0, 0);
-        TryThermalFlowToNeighbor(sourceChunk, sourceKey, x, y - 1, z, 0, -1, 0);
-        TryThermalFlowToNeighbor(sourceChunk, sourceKey, x, y + 1, z, 0, 1, 0);
+        TryThermalFlowToNeighbor(sourceChunk, sourceKey, localPosition + Int3.NegX, Int3.NegX);
+        TryThermalFlowToNeighbor(sourceChunk, sourceKey, localPosition + Int3.PosX, Int3.PosX);
+        TryThermalFlowToNeighbor(sourceChunk, sourceKey, localPosition + Int3.NegY, Int3.NegY);
+        TryThermalFlowToNeighbor(sourceChunk, sourceKey, localPosition + Int3.PosY, Int3.PosY);
         if (sourceChunk.Depth > 1)
         {
-            TryThermalFlowToNeighbor(sourceChunk, sourceKey, x, y, z - 1, 0, 0, -1);
-            TryThermalFlowToNeighbor(sourceChunk, sourceKey, x, y, z + 1, 0, 0, 1);
+            TryThermalFlowToNeighbor(sourceChunk, sourceKey, localPosition + Int3.NegZ, Int3.NegZ);
+            TryThermalFlowToNeighbor(sourceChunk, sourceKey, localPosition + Int3.PosZ, Int3.PosZ);
         }
     }
 
     private void TryThermalFlowToNeighbor(AtmosChunk sourceChunk, Int3 sourceKey,
-        int targetX, int targetY, int targetZ,
-        int dirX, int dirY, int dirZ)
+        Int3 targetPosition, Int3 direction)
     {
-        if (targetX >= 0 && targetX < sourceChunk.Width &&
-            targetY >= 0 && targetY < sourceChunk.Height &&
-            targetZ >= 0 && targetZ < sourceChunk.Depth)
+        if (targetPosition.IsWithin(default, sourceChunk.Dimensions))
             return;
 
-        var neighborPos = new Int3(sourceKey.X + dirX, sourceKey.Y + dirY, sourceKey.Z + dirZ);
+        var neighborPos = sourceKey + direction;
         if (!_chunkMap.TryGetValue(neighborPos, out var neighborChunk))
             return;
 
-        int nX = (targetX + neighborChunk.Width) % neighborChunk.Width;
-        int nY = (targetY + neighborChunk.Height) % neighborChunk.Height;
-        int nZ = (targetZ + neighborChunk.Depth) % neighborChunk.Depth;
-        ushort neighborIdx = neighborChunk.GetIndex(nX, nY, nZ);
+        var neighborDimensions = neighborChunk.Dimensions;
+        var neighborLocalPosition = (targetPosition + neighborDimensions) % neighborDimensions;
+        ushort neighborIdx = neighborChunk.GetIndex(neighborLocalPosition);
 
         if (neighborChunk.VoxelRoomMap[neighborIdx] == AtmosChunk.RoomSolid)
             return;
         if (neighborChunk.TotalPressure[neighborIdx] < _config.VacuumThreshold)
             return;
 
-        int srcX = targetX - dirX;
-        int srcY = targetY - dirY;
-        int srcZ = targetZ - dirZ;
-        ushort srcIdx = sourceChunk.GetIndex(srcX, srcY, srcZ);
+        var sourceLocalPosition = targetPosition - direction;
+        ushort srcIdx = sourceChunk.GetIndex(sourceLocalPosition);
 
         float sourceTemp = sourceChunk.Temperature[srcIdx];
         float neighborTemp = neighborChunk.Temperature[neighborIdx];

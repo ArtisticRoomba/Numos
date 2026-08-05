@@ -5,6 +5,14 @@ namespace Numos.CoreSim.Tests;
 [TestFixture]
 public sealed class AtmosChunkIndexingTests
 {
+    [Test]
+    public void Dimensions_CombinesEveryAxis()
+    {
+        var chunk = new AtmosChunk(3, 4, 5);
+
+        Assert.That(chunk.Dimensions, Is.EqualTo(new Int3(3, 4, 5)));
+    }
+
     [TestCase(0, 0, 0, 0)]
     [TestCase(1, 0, 0, 1)]
     [TestCase(2, 0, 0, 2)]

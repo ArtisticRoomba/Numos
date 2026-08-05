@@ -88,6 +88,11 @@ internal class AtmosChunk
     public int Height;
 
     /// <summary>
+    ///     The number of voxels along each axis.
+    /// </summary>
+    public Int3 Dimensions => new(Width, Height, Depth);
+
+    /// <summary>
     ///     The position of this chunk in the chunk grid.
     /// </summary>
     public Int3 GridPosition;
