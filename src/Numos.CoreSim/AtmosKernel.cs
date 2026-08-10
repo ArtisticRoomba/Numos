@@ -558,7 +558,7 @@ internal sealed partial class AtmosKernel : IDisposable
         // TODO SIMD
         float defaultTemp = _config.DefaultTemperatureFallback;
 
-        Array.Clear(chunk.TotalPressure, 0, chunk.VoxelCount);
+        chunk.TotalPressure.Clear();
 
         for (var i = 0; i < chunk.ActiveAirCount; i++)
         {

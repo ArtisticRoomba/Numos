@@ -40,6 +40,40 @@ public sealed class AtmosChunkIndexingTests
     }
 
     [Test]
+    public void VoxelStorage_Int3AndFlatIndexersAddressTheSameElement()
+    {
+        var chunk = new AtmosChunk(2, 3, 4);
+        var position = new Int3(1, 2, 3);
+
+        chunk.VoxelRoomMap[position] = 42;
+        chunk.Temperature[position] = 275f;
+        chunk.TotalPressure[position] = 12f;
+
+        ushort index = chunk.GetIndex(position);
+        Assert.Multiple(() =>
+        {
+            Assert.That(chunk.VoxelRoomMap[index], Is.EqualTo(42));
+            Assert.That(chunk.Temperature[index], Is.EqualTo(275f));
+            Assert.That(chunk.TotalPressure[index], Is.EqualTo(12f));
+        });
+    }
+
+    [Test]
+    public void Initialize_WithSameVoxelCountAndNewShape_UpdatesVoxelStorageDimensions()
+    {
+        var chunk = new AtmosChunk(2, 3, 1);
+
+        chunk.Initialize(default, 3, 2, 1);
+        chunk.VoxelRoomMap[new Int3(2, 1, 0)] = 42;
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(chunk.VoxelRoomMap.Dimensions, Is.EqualTo(new Int3(3, 2, 1)));
+            Assert.That(chunk.VoxelRoomMap[5], Is.EqualTo(42));
+        });
+    }
+
+    [Test]
     public void IndexConversions_RoundTripEveryVoxelInRectangularChunk()
     {
         var chunk = new AtmosChunk(2, 3, 4);

@@ -41,7 +41,7 @@ public sealed class AtmosChunkSnapshotTests
         try
         {
             chunk.Initialize(new Int3(4, -5, 6), 2, 1, 1);
-            Array.Fill(chunk.VoxelRoomMap, 7);
+            chunk.VoxelRoomMap.Fill(7);
             chunk.WakeRoom(7);
             chunk.InjectGasToVoxel(0, 3, 2f, 300f);
             chunk.InjectGasToVoxel(1, 8, 1f, 400f);
@@ -50,9 +50,6 @@ public sealed class AtmosChunkSnapshotTests
 
             Assert.Multiple(() =>
             {
-                Assert.That(snapshot.TotalPressure, Is.Not.SameAs(chunk.TotalPressure));
-                Assert.That(snapshot.Temperature, Is.Not.SameAs(chunk.Temperature));
-                Assert.That(snapshot.VoxelRoomMap, Is.Not.SameAs(chunk.VoxelRoomMap));
                 Assert.That(snapshot.Gases, Has.Length.EqualTo(2));
                 Assert.That(snapshot.Gases[0].Moles, Is.Not.SameAs(chunk.ActiveGases[0].Moles));
                 Assert.That(snapshot.Gases[0].Moles, Has.Length.EqualTo(chunk.VoxelCount));

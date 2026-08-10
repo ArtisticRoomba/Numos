@@ -1,5 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using JetBrains.Annotations;
+using Numos.CoreSim.Collections;
 using Numos.CoreSim.Datatypes.Snapshots;
 using Numos.Maths;
 
@@ -9,9 +10,9 @@ namespace Numos.CoreSim;
 ///     Represents the simulation state for a fixed-size voxel chunk.
 /// </summary>
 /// <remarks>
-///     Per-voxel data is stored in flat arrays. Use <see cref="GetIndex(int, int, int)" /> or
-///     <see cref="GetIndex(Int3)" /> to convert local coordinates to an array index, and
-///     <see cref="GetXyz(ushort)" /> or <see cref="GetXyzInt3(ushort)" /> for the reverse conversion.
+///     Chunk-owned per-voxel data supports both flat-index and <see cref="Int3" /> coordinate access.
+///     Use <see cref="GetIndex(Int3)" /> and <see cref="GetXyzInt3(ushort)" /> when converting indices
+///     for scalar-indexed storage such as gas channels (because... you know.... they aren't physical).
 /// </remarks>
 internal class AtmosChunk
 {
@@ -120,15 +121,15 @@ internal class AtmosChunk
     public int SleepTimer;
 
     /// <summary>
-    ///     Temperature value for each voxel, indexed by flat voxel index.
+    ///     Temperature value for each voxel, indexed by flat voxel index or local coordinate.
     /// </summary>
-    public float[] Temperature;
+    public FlatArray<float> Temperature;
 
     /// <summary>
-    ///     Cached pressure value for each voxel, indexed by flat voxel index.
+    ///     Cached pressure value for each voxel, indexed by flat voxel index or local coordinate.
     /// </summary>
     /// <remarks>These values are recomputed by the simulation each tick.</remarks>
-    public float[] TotalPressure;
+    public FlatArray<float> TotalPressure;
 
     /// <summary>
     ///     Total number of voxels in this chunk, equal to <c>Width * Height * Depth</c>.
@@ -136,17 +137,17 @@ internal class AtmosChunk
     public int VoxelCount;
 
     /// <summary>
-    ///     Room classification for each voxel, indexed by flat voxel index.
+    ///     Room classification for each voxel, indexed by flat voxel index or local coordinate.
     /// </summary>
     /// <remarks>
-    ///     Positive or otherwise application-defined IDs identify rooms. The reserved values
+    ///     Positive IDs identify rooms. The reserved values
     ///     <see cref="RoomUnassigned" />, <see cref="RoomVoid" />, and <see cref="RoomSolid" />
     ///     identify unassigned, void, and solid voxels respectively.
     /// </remarks>
     /// <seealso cref="RoomSolid" />
     /// <seealso cref="RoomVoid" />
     /// <seealso cref="RoomUnassigned" />
-    public int[] VoxelRoomMap;
+    public FlatArray<int> VoxelRoomMap;
 
     /// <summary>
     ///     Creates a chunk with the specified dimensions and active-room capacity.
@@ -176,23 +177,16 @@ internal class AtmosChunk
     ///     Existing arrays are reused when they already have the required length. This method does not
     ///     clear existing values or reset active counts; use <see cref="Initialize" /> to reset the chunk.
     /// </remarks>
-    [MemberNotNull(nameof(VoxelRoomMap),
-        nameof(ActiveAirIndices),
-        nameof(TotalPressure),
-        nameof(Temperature),
-        nameof(ActiveGases),
-        nameof(ActiveRoomIds))]
+    [MemberNotNull(nameof(ActiveAirIndices), nameof(ActiveGases), nameof(ActiveRoomIds))]
     [PublicAPI]
     public void EnsureInitialized()
     {
-        if (VoxelRoomMap == null || VoxelRoomMap.Length != VoxelCount)
-            VoxelRoomMap = new int[VoxelCount];
+        var dimensions = Dimensions;
+        EnsureInitialized(ref VoxelRoomMap, dimensions);
         if (ActiveAirIndices == null || ActiveAirIndices.Length != VoxelCount)
             ActiveAirIndices = new ushort[VoxelCount];
-        if (TotalPressure == null || TotalPressure.Length != VoxelCount)
-            TotalPressure = new float[VoxelCount];
-        if (Temperature == null || Temperature.Length != VoxelCount)
-            Temperature = new float[VoxelCount];
+        EnsureInitialized(ref TotalPressure, dimensions);
+        EnsureInitialized(ref Temperature, dimensions);
         if (ActiveGases == null)
             ActiveGases = new GasChannel[16]; // TODO unhardcode maxgases
         if (ActiveRoomIds == null || ActiveRoomIds.Length != MaxActiveRooms)
@@ -233,10 +227,10 @@ internal class AtmosChunk
         ActiveGasCount = 0;
         SleepTimer = 0;
 
-        Array.Clear(VoxelRoomMap, 0, VoxelRoomMap.Length);
+        VoxelRoomMap.Clear();
         Array.Clear(ActiveAirIndices, 0, ActiveAirIndices.Length);
-        Array.Clear(TotalPressure, 0, TotalPressure.Length);
-        Array.Clear(Temperature, 0, Temperature.Length);
+        TotalPressure.Clear();
+        Temperature.Clear();
         Array.Clear(ActiveGases, 0, ActiveGases.Length);
         Array.Clear(ActiveRoomIds, 0, ActiveRoomIds.Length);
     }
@@ -407,15 +401,11 @@ internal class AtmosChunk
         var snapshot = new AtmosChunkSnapshot
         {
             GridPosition = GridPosition,
-            TotalPressure = new float[VoxelCount],
-            Temperature = new float[VoxelCount],
+            TotalPressure = TotalPressure.ToArray(),
+            Temperature = Temperature.ToArray(),
             Gases = new GasSnapshot[ActiveGasCount],
-            VoxelRoomMap = new int[VoxelCount]
+            VoxelRoomMap = VoxelRoomMap.ToArray()
         };
-
-        Array.Copy(TotalPressure, snapshot.TotalPressure, VoxelCount);
-        Array.Copy(Temperature, snapshot.Temperature, VoxelCount);
-        Array.Copy(VoxelRoomMap, snapshot.VoxelRoomMap, VoxelCount);
 
         for (var g = 0; g < ActiveGasCount; g++)
         {
@@ -440,14 +430,14 @@ internal class AtmosChunk
     [PublicAPI]
     public ushort GetIndex(int x, int y, int z)
     {
-        return (ushort)(x + y * Width + z * Width * Height);
+        return GetIndex(new Int3(x, y, z));
     }
 
     /// <inheritdoc cref="GetIndex(int, int, int)" />
     [PublicAPI]
     public ushort GetIndex(Int3 vec)
     {
-        return (ushort)(vec.X + vec.Y * Width + vec.Z * Width * Height);
+        return (ushort)VoxelRoomMap.GetIndex(vec);
     }
 
     /// <summary>
@@ -458,7 +448,8 @@ internal class AtmosChunk
     [PublicAPI]
     public (int x, int y, int z) GetXyz(ushort index)
     {
-        return (index % Width, index / Width % Height, index / (Width * Height));
+        var position = GetXyzInt3(index);
+        return (position.X, position.Y, position.Z);
     }
 
     /// <summary>
@@ -469,7 +460,15 @@ internal class AtmosChunk
     [PublicAPI]
     public Int3 GetXyzInt3(ushort index)
     {
-        return new Int3(index % Width, index / Width % Height, index / (Width * Height));
+        return VoxelRoomMap.GetPosition(index);
+    }
+
+    private void EnsureInitialized<T>(ref FlatArray<T> array, Int3 dimensions)
+    {
+        if (!array.IsInitialized || array.Length != VoxelCount)
+            array = new FlatArray<T>(new T[VoxelCount], dimensions);
+        else if (array.Dimensions != dimensions)
+            array = array.Reshape(dimensions);
     }
 
     private static int GetValidatedVoxelCount(int width, int height, int depth)

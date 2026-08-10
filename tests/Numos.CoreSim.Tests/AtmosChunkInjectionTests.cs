@@ -116,8 +116,8 @@ public sealed class AtmosChunkInjectionTests
         {
             Assert.That(chunk.ActiveGasCount, Is.EqualTo(1));
             Assert.That(chunk.ActiveGases[0].Moles.Take(2), Is.EqualTo(new[] { 1f, 2f }));
-            Assert.That(chunk.Temperature, Is.EqualTo(new[] { 250f, 350f }));
-            Assert.That(chunk.TotalPressure, Is.EqualTo(new[] { 250f, 700f }));
+            Assert.That(chunk.Temperature.ToArray(), Is.EqualTo(new[] { 250f, 350f }));
+            Assert.That(chunk.TotalPressure.ToArray(), Is.EqualTo(new[] { 250f, 700f }));
         });
     }
 
@@ -143,7 +143,7 @@ public sealed class AtmosChunkInjectionTests
     private AtmosChunk CreateAwakeChunk(int width)
     {
         var chunk = CreateChunk(width, 1, 1);
-        Array.Fill(chunk.VoxelRoomMap, 7);
+        chunk.VoxelRoomMap.Fill(7);
         chunk.WakeRoom(7);
         return chunk;
     }

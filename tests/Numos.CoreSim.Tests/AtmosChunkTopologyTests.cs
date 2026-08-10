@@ -18,10 +18,10 @@ public sealed class AtmosChunkTopologyTests
             Assert.That(chunk.Depth, Is.EqualTo(4));
             Assert.That(chunk.VoxelCount, Is.EqualTo(24));
             Assert.That(chunk.MaxActiveRooms, Is.EqualTo(5));
-            Assert.That(chunk.VoxelRoomMap, Has.Length.EqualTo(24).And.All.Zero);
+            Assert.That(chunk.VoxelRoomMap.ToArray(), Has.Length.EqualTo(24).And.All.Zero);
             Assert.That(chunk.ActiveAirIndices, Has.Length.EqualTo(24).And.All.Zero);
-            Assert.That(chunk.TotalPressure, Has.Length.EqualTo(24).And.All.Zero);
-            Assert.That(chunk.Temperature, Has.Length.EqualTo(24).And.All.Zero);
+            Assert.That(chunk.TotalPressure.ToArray(), Has.Length.EqualTo(24).And.All.Zero);
+            Assert.That(chunk.Temperature.ToArray(), Has.Length.EqualTo(24).And.All.Zero);
             Assert.That(chunk.ActiveGases, Has.Length.EqualTo(16));
             Assert.That(chunk.ActiveRoomIds, Has.Length.EqualTo(5).And.All.Zero);
             Assert.That(chunk.ActiveAirCount, Is.Zero);
@@ -68,10 +68,10 @@ public sealed class AtmosChunkTopologyTests
             ActiveRoomCount = 2,
             SleepTimer = 12
         };
-        Array.Fill(chunk.VoxelRoomMap, 8);
+        chunk.VoxelRoomMap.Fill(8);
         Array.Fill(chunk.ActiveAirIndices, (ushort)1);
-        Array.Fill(chunk.TotalPressure, 100f);
-        Array.Fill(chunk.Temperature, 300f);
+        chunk.TotalPressure.Fill(100f);
+        chunk.Temperature.Fill(300f);
         Array.Fill(chunk.ActiveRoomIds, 8);
         chunk.ActiveGases[0].GasId = 3;
 
@@ -85,10 +85,10 @@ public sealed class AtmosChunkTopologyTests
             Assert.That(chunk.Depth, Is.EqualTo(1));
             Assert.That(chunk.VoxelCount, Is.EqualTo(6));
             Assert.That(chunk.MaxActiveRooms, Is.EqualTo(4));
-            Assert.That(chunk.VoxelRoomMap, Has.Length.EqualTo(6).And.All.Zero);
+            Assert.That(chunk.VoxelRoomMap.ToArray(), Has.Length.EqualTo(6).And.All.Zero);
             Assert.That(chunk.ActiveAirIndices, Has.Length.EqualTo(6).And.All.Zero);
-            Assert.That(chunk.TotalPressure, Has.Length.EqualTo(6).And.All.Zero);
-            Assert.That(chunk.Temperature, Has.Length.EqualTo(6).And.All.Zero);
+            Assert.That(chunk.TotalPressure.ToArray(), Has.Length.EqualTo(6).And.All.Zero);
+            Assert.That(chunk.Temperature.ToArray(), Has.Length.EqualTo(6).And.All.Zero);
             Assert.That(chunk.ActiveRoomIds, Has.Length.EqualTo(4).And.All.Zero);
             Assert.That(chunk.ActiveGases, Has.Length.EqualTo(16));
             Assert.That(chunk.ActiveGases.All(channel => !channel.IsInitialized), Is.True);
@@ -104,10 +104,10 @@ public sealed class AtmosChunkTopologyTests
     public void EnsureInitialized_ReusesCorrectlySizedStorageWithoutClearingIt()
     {
         var chunk = new AtmosChunk(2, 2, 1, 3);
-        int[] roomMap = chunk.VoxelRoomMap;
+        var roomMap = chunk.VoxelRoomMap;
         ushort[] activeAir = chunk.ActiveAirIndices;
-        float[] pressure = chunk.TotalPressure;
-        float[] temperature = chunk.Temperature;
+        var pressure = chunk.TotalPressure;
+        var temperature = chunk.Temperature;
         var gases = chunk.ActiveGases;
         int[] activeRooms = chunk.ActiveRoomIds;
         roomMap[0] = 7;
@@ -117,19 +117,22 @@ public sealed class AtmosChunkTopologyTests
         activeRooms[0] = 7;
 
         chunk.EnsureInitialized();
+        roomMap[1] = 8;
+        pressure[1] = 50f;
+        temperature[1] = 300f;
 
         Assert.Multiple(() =>
         {
-            Assert.That(chunk.VoxelRoomMap, Is.SameAs(roomMap));
             Assert.That(chunk.ActiveAirIndices, Is.SameAs(activeAir));
-            Assert.That(chunk.TotalPressure, Is.SameAs(pressure));
-            Assert.That(chunk.Temperature, Is.SameAs(temperature));
             Assert.That(chunk.ActiveGases, Is.SameAs(gases));
             Assert.That(chunk.ActiveRoomIds, Is.SameAs(activeRooms));
             Assert.That(chunk.VoxelRoomMap[0], Is.EqualTo(7));
+            Assert.That(chunk.VoxelRoomMap[1], Is.EqualTo(8));
             Assert.That(chunk.ActiveAirIndices[0], Is.EqualTo(3));
             Assert.That(chunk.TotalPressure[0], Is.EqualTo(25f));
+            Assert.That(chunk.TotalPressure[1], Is.EqualTo(50f));
             Assert.That(chunk.Temperature[0], Is.EqualTo(275f));
+            Assert.That(chunk.Temperature[1], Is.EqualTo(300f));
             Assert.That(chunk.ActiveRoomIds[0], Is.EqualTo(7));
         });
     }
@@ -176,7 +179,7 @@ public sealed class AtmosChunkTopologyTests
     {
         var chunk = new AtmosChunk(6, 1, 1);
         int[] roomIds = [1, 2, 3, 1, 2, AtmosChunk.RoomSolid];
-        Array.Copy(roomIds, chunk.VoxelRoomMap, roomIds.Length);
+        chunk.VoxelRoomMap.CopyFrom(roomIds);
 
         chunk.WakeRoom(1);
         chunk.WakeRoom(2);
@@ -194,7 +197,7 @@ public sealed class AtmosChunkTopologyTests
     public void WakeRoom_ExistingRoomOnlyResetsSleepTimer()
     {
         var chunk = new AtmosChunk(3, 1, 1);
-        Array.Fill(chunk.VoxelRoomMap, 7);
+        chunk.VoxelRoomMap.Fill(7);
         chunk.WakeRoom(7);
         chunk.SleepTimer = 25;
         int activeAirCount = chunk.ActiveAirCount;
@@ -251,7 +254,7 @@ public sealed class AtmosChunkTopologyTests
     public void RebuildActiveAirIndices_ReflectsTopologyChangesWithoutDuplicates()
     {
         var chunk = new AtmosChunk(5, 1, 1);
-        Array.Fill(chunk.VoxelRoomMap, 4);
+        chunk.VoxelRoomMap.Fill(4);
         chunk.WakeRoom(4);
         chunk.VoxelRoomMap[1] = AtmosChunk.RoomSolid;
         chunk.VoxelRoomMap[3] = 9;
