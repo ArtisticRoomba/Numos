@@ -333,6 +333,7 @@ internal sealed partial class AtmosKernel : IDisposable
         {
             // Refresh caches for total pressure in each voxel.
             CalculateTotalPressure(chunk);
+            CalculateHeatCapacity(chunk);
 
             int activeGasCount = chunk.ActiveGasCount;
 
@@ -604,8 +605,6 @@ internal sealed partial class AtmosKernel : IDisposable
             chunk.TotalHeatCapacity[idx] += summedSHC;
         }
     }
-
-
 
     /// <summary>
     ///     Writes the calculated deltas to the active gases in the chunk.
