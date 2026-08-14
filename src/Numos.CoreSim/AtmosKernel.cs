@@ -655,6 +655,7 @@ internal sealed partial class AtmosKernel : IDisposable
         // It's genius.
         if (!chunk.IsAwake || chunk.ActiveGasCount == 0)
             return;
+
         ProcessThermalDiffusion(chunk, thermalBoundaryBuffer, ref thermalBoundaryCount);
         ProcessPhaseChanges(chunk, precipBuffer, ref precipCount);
     }
