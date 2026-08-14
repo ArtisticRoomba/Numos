@@ -131,6 +131,7 @@ internal class AtmosChunk
     /// <remarks>These values are recomputed by the simulation each tick.</remarks>
     public FlatArray<float> TotalPressure;
 
+    // J/K. Not J/K mol.
     public FlatArray<float> TotalHeatCapacity;
 
     /// <summary>
