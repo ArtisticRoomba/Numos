@@ -1,3 +1,7 @@
+using System.Collections.Frozen;
+using System.Collections.Immutable;
+using Numos.CoreSim.GasReactions;
+
 namespace Numos.CoreSim;
 
 /// <summary>
@@ -9,6 +13,9 @@ public class AtmosConfig
     ///     List of gases actively registered to the sim.
     /// </summary>
     public List<GasProperties> GasRegistry { get; set; } = [];
+
+    public ImmutableArray<LinearGasReaction> LinearReactionRegistry { get; set; } = [];
+    public ImmutableArray<StandardGasReaction> StandardReactionRegistry { get; set; } = [];
 
     /// <summary>
     ///     Reference ambient temperature.
@@ -79,4 +86,6 @@ public class AtmosConfig
 
     public float AccumulatorWakeThreshold { get; set; } = 15.0f;
     public int AccumulatorMaxAliveTicks { get; set; } = 20;
+
+    public float MaxDeltaForReactionSteps { get; set; } = 0.15f;
 }

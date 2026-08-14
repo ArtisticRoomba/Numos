@@ -2,6 +2,7 @@ using System.Buffers;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using Numos.CoreSim.Datatypes.Events;
+using Numos.CoreSim.GasReactions;
 using Numos.Maths;
 
 namespace Numos.CoreSim;
@@ -52,8 +53,10 @@ internal sealed partial class AtmosKernel : IDisposable
     /// <param name="chunkWidth">The number of voxels along each chunk's local x-axis.</param>
     /// <param name="chunkHeight">The number of voxels along each chunk's local y-axis.</param>
     /// <param name="chunkDepth">The number of voxels along each chunk's local z-axis.</param>
-    internal AtmosKernel(int chunkWidth = 16, int chunkHeight = 16, int chunkDepth = 16)
+    /// <param name="solver"></param>
+    internal AtmosKernel(ReactionSolver solver, int chunkWidth = 16, int chunkHeight = 16, int chunkDepth = 16)
     {
+        this._solver = solver;
         TickCount = 0;
         _maxBoundaryEvents = checked(2 *
                                      (chunkWidth * chunkHeight + chunkWidth * chunkDepth + chunkHeight * chunkDepth));

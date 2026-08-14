@@ -1,11 +1,15 @@
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.Datatypes.Snapshots;
+using Numos.CoreSim.GasReactions;
 using Numos.Maths;
 
 namespace Numos.CoreSim;
 
 internal sealed partial class AtmosKernel
 {
+
+    private readonly ReactionSolver _solver;
+    
     /// <summary>
     ///     Gets the number of chunks currently registered with the kernel.
     /// </summary>
@@ -42,6 +46,10 @@ internal sealed partial class AtmosKernel
             steps++;
             TickSimulation(chunks);
         }
+        Parallel.ForEach(chunks, chunk =>
+        {
+            _solver.ProcessChunk(chunk,elapsedSeconds);
+        });
     }
 
     /// <summary>

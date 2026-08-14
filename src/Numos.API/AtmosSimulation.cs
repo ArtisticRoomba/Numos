@@ -2,6 +2,7 @@ using JetBrains.Annotations;
 using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.Datatypes.Snapshots;
+using Numos.CoreSim.GasReactions;
 using Numos.Maths;
 
 namespace Numos.API;
@@ -29,7 +30,8 @@ public sealed class AtmosSimulation : IDisposable
     private readonly int _chunkWidth;
     private readonly AtmosKernel _kernel;
     private bool _disposed;
-
+    private readonly ReactionSolver _solver;
+    
     /// <summary>
     ///     Initializes a simulation with a default <see cref="AtmosConfig" /> and fixed chunk dimensions.
     /// </summary>
@@ -84,8 +86,10 @@ public sealed class AtmosSimulation : IDisposable
         _chunkWidth = chunkWidth;
         _chunkHeight = chunkHeight;
         _chunkDepth = chunkDepth;
-        _kernel = new AtmosKernel(chunkWidth, chunkHeight, chunkDepth);
+        _solver = new();
+        _kernel = new AtmosKernel(_solver, chunkWidth, chunkHeight, chunkDepth);
         _kernel.SetAtmosConfig(config);
+        _solver.SetAtmosConfig(config);
     }
 
     /// <summary>
@@ -200,6 +204,7 @@ public sealed class AtmosSimulation : IDisposable
     {
         SetAtmosConfig(config);
         Update(elapsedSeconds);
+        
     }
 
     /// <summary>
@@ -218,6 +223,7 @@ public sealed class AtmosSimulation : IDisposable
         ArgumentNullException.ThrowIfNull(config);
         Config = config;
         _kernel.SetAtmosConfig(config);
+        _solver.SetAtmosConfig(config);
     }
 
     /// <summary>
