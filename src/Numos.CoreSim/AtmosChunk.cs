@@ -131,6 +131,8 @@ internal class AtmosChunk
     /// <remarks>These values are recomputed by the simulation each tick.</remarks>
     public FlatArray<float> TotalPressure;
 
+    public FlatArray<float> TotalHeatCapacity;
+
     /// <summary>
     ///     Total number of voxels in this chunk, equal to <c>Width * Height * Depth</c>.
     /// </summary>
@@ -186,6 +188,7 @@ internal class AtmosChunk
         if (ActiveAirIndices == null || ActiveAirIndices.Length != VoxelCount)
             ActiveAirIndices = new ushort[VoxelCount];
         EnsureInitialized(ref TotalPressure, dimensions);
+        EnsureInitialized(ref TotalHeatCapacity, dimensions);
         EnsureInitialized(ref Temperature, dimensions);
         if (ActiveGases == null)
             ActiveGases = new GasChannel[16]; // TODO unhardcode maxgases
@@ -230,6 +233,7 @@ internal class AtmosChunk
         VoxelRoomMap.Clear();
         Array.Clear(ActiveAirIndices, 0, ActiveAirIndices.Length);
         TotalPressure.Clear();
+        TotalHeatCapacity.Clear();
         Temperature.Clear();
         Array.Clear(ActiveGases, 0, ActiveGases.Length);
         Array.Clear(ActiveRoomIds, 0, ActiveRoomIds.Length);
