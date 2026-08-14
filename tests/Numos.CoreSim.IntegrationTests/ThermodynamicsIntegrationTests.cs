@@ -27,7 +27,10 @@ public sealed class ThermodynamicsIntegrationTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(afterOddTick.Temperature, Is.EqualTo(new[] { 400f, 200f }));
+            Assert.That(afterOddTick.Temperature[0],
+                Is.EqualTo(400f).Within(SimTestHelpers.Tolerance));
+            Assert.That(afterOddTick.Temperature[1],
+                Is.EqualTo(200f).Within(SimTestHelpers.Tolerance));
             Assert.That(afterEvenTick.Temperature[0],
                 Is.EqualTo(390f).Within(SimTestHelpers.Tolerance));
             Assert.That(afterEvenTick.Temperature[1],
