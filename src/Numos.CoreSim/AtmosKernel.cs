@@ -337,7 +337,7 @@ internal sealed partial class AtmosKernel : IDisposable
             int activeGasCount = chunk.ActiveGasCount;
 
             // Alloc a temp array upfront to store deltas for each gas in each voxel.
-            int activeGasVoxelCount = activeGasCount * chunk.VoxelCount;
+            int activeGasVoxelCount = GetDeltaArrayOffset(activeGasCount + 1, chunk.VoxelCount);
             float[] deltas = ArrayPool<float>.Shared.Rent(activeGasVoxelCount);
             Array.Clear(deltas, 0, activeGasVoxelCount);
 
@@ -534,15 +534,19 @@ internal sealed partial class AtmosKernel : IDisposable
                 {
                     totalMolesToMove = moles;
                 }
+                float specificHeatCapacity = gasId < gasRegistry.Count ? gasRegistry[gasId].SpecificHeatCapacity : 1f;
+                float energyTransferred = totalMolesToMove * specificHeatCapacity * temp;
 
                 // Update the deltas for the current voxel and the neighbor voxel.
-                int offset = g * chunk.VoxelCount;
+                int offset = GetDeltaArrayOffset(g, chunk.VoxelCount);
                 deltas[offset + idx] -= totalMolesToMove;
+                deltas[idx] -= energyTransferred;
 
                 if (!isVoid)
                 {
                     // If the neighbor is not void, we can safely add the moles to move to the neighbor's delta.
                     deltas[offset + neighborIdx] += totalMolesToMove;
+                    deltas[idx] += energyTransferred;
                 }
             }
         }
@@ -585,16 +589,19 @@ internal sealed partial class AtmosKernel : IDisposable
     private void ApplyDeltas(AtmosChunk chunk, float[] deltas)
     {
         // TODO PERF SIMD
-        for (var g = 0; g < chunk.ActiveGasCount; g++)
+        for (var i = 0; i < chunk.ActiveAirCount; i++)
         {
-            int offset = g * chunk.VoxelCount;
-            for (var i = 0; i < chunk.ActiveAirCount; i++)
+            ushort idx = chunk.ActiveAirIndices[i];
+            var totalMoles = 0f;
+            for (var g = 0; g < chunk.ActiveGasCount; g++)
             {
-                ushort idx = chunk.ActiveAirIndices[i];
+                int offset = GetDeltaArrayOffset(g, chunk.VoxelCount);
+                totalMoles += chunk.ActiveGases[g].Moles[idx];
                 chunk.ActiveGases[g].Moles[idx] += deltas[offset + idx];
                 if (chunk.ActiveGases[g].Moles[idx] < 0.0001f) // TODO unhardcode mole threshold
                     chunk.ActiveGases[g].Moles[idx] = 0f;
             }
+            chunk.Temperature[idx] += deltas[idx] / (GetTotalSpecificHeatCapacity(chunk, idx) / totalMoles);
         }
 
         ArrayPool<float>.Shared.Return(deltas); // TODO PERF but what if..... this was threadlocal......
@@ -825,6 +832,21 @@ internal sealed partial class AtmosKernel : IDisposable
             flow = configCflFlowCap;
         return flow;
     }
+
+    private float GetTotalSpecificHeatCapacity(AtmosChunk chunk, int idx)
+    {
+        var gasRegistry = _config.GasRegistry;
+        var summedSHC = 0f;
+        for (var g = 0; g < chunk.ActiveGasCount; g++)
+        {
+            int gasId = chunk.ActiveGases[g].GasId;
+            float specificHeatCapacity = gasId < gasRegistry.Count ? gasRegistry[gasId].SpecificHeatCapacity : 1f;
+            summedSHC += specificHeatCapacity * chunk.ActiveGases[g].Moles[idx];
+        }
+        return summedSHC;
+    }
+
+    private int GetDeltaArrayOffset(int g, int VoxelCount) => (g + 1) * VoxelCount;
 
     private void ProcessThermalBoundaryFlow(Int3 sourceKey, ThermalBoundaryEvent evt)
     {
