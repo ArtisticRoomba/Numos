@@ -8,6 +8,8 @@ public class ReactionSolver
 
     private FrozenSet<LinearGasReaction.Mapped> _mappedLinGasReacts = [];
 
+    private FrozenSet<StandardGasReaction.Mapped> _mappedStandardGasReacts = [];
+
     internal void SetAtmosConfig(AtmosConfig config)
     {
         _config = config;
@@ -15,6 +17,8 @@ public class ReactionSolver
         _mappedLinGasReacts =
             config.LinearReactionRegistry.Select(e => new LinearGasReaction.Mapped(e, config.GasRegistry))
                 .ToFrozenSet();
+        _mappedStandardGasReacts = config.StandardReactionRegistry
+            .Select(e => new StandardGasReaction.Mapped(e, config.GasRegistry)).ToFrozenSet();
     }
 
     /// <summary>
@@ -90,13 +94,25 @@ public class ReactionSolver
                         : [];
                 }
             ).GroupBy(e => e.Key).ToFrozenDictionary(e => e.Key, e => e.Sum(f => f.Value));
+
+            var changeOfMixtureByStandardReactionsPerSecond = _mappedStandardGasReacts.AsParallel().SelectMany(e =>
+                {
+                    var reactionSpeed = e.GetReactionSpeed(mixtureVector, stepTemp);
+                    return reactionSpeed > 0
+                        ? e.ChangeEquation.Select(f => new KeyValuePair<int, float>(f.Key, f.Value * reactionSpeed))
+                        : [];
+                })
+                .GroupBy(e => e.Key).ToFrozenDictionary(e => e.Key, e => e.Sum(f => f.Value));
+
             var bad = false;
-            if (changeOfMixtureByLinearReactionsPerSecond.Count == 0)
+            if (changeOfMixtureByLinearReactionsPerSecond.Count == 0 &&
+                changeOfMixtureByStandardReactionsPerSecond.Count == 0)
                 break;
             var loopResult = Parallel.For(0, mixtureVector.Length, (i, state) =>
             {
                 nextMixtureVector[i] = mixtureVector[i] +
-                                       changeOfMixtureByLinearReactionsPerSecond.GetValueOrDefault(i) * stepDelta;
+                                       changeOfMixtureByLinearReactionsPerSecond.GetValueOrDefault(i) * stepDelta +
+                                       changeOfMixtureByStandardReactionsPerSecond.GetValueOrDefault(i) * stepDelta;
                 if (nextMixtureVector[i] < 0)
                 {
                     state.Stop();

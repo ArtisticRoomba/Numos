@@ -10,14 +10,14 @@ namespace Numos.CoreSim.GasReactions;
 public readonly record struct StandardGasReaction
 {
     public StandardGasReaction(IDictionary<GasProperties, float> input, IDictionary<GasProperties, float> output,
-        float energyBalance, float arrheniusFactor, float activiationEnergy,
+        float energyBalance, float arrheniusFactor, float activationEnergy,
         IDictionary<GasProperties, float> speedFactors)
     {
         Input = input.ToFrozenDictionary();
         Output = output.ToFrozenDictionary();
         EnergyBalance = energyBalance;
         ArrheniusFactor = arrheniusFactor;
-        ActiviationEnergy = activiationEnergy;
+        ActivationEnergy = activationEnergy;
         SpeedFactors = speedFactors.ToFrozenDictionary();
     }
 
@@ -47,7 +47,7 @@ public readonly record struct StandardGasReaction
     /// <summary>
     ///     Molar activation energy kJ/mol
     /// </summary>
-    public float ActiviationEnergy { get; }
+    public float ActivationEnergy { get; }
 
     /// <summary>
     ///     The exponents of the rate equation:
@@ -63,7 +63,7 @@ public readonly record struct StandardGasReaction
     /// <remarks>there are more sophisticated models for k but good luck having anyone setup all the parameters necessary.</remarks>
     public float GetRateConstant(float temperatureKelvin)
     {
-        return ArrheniusFactor * MathF.Pow(MathF.E, -ActiviationEnergy / (temperatureKelvin * 8.31446261815324f));
+        return ArrheniusFactor * MathF.Pow(MathF.E, -ActivationEnergy / (temperatureKelvin * 8.31446261815324f));
     }
 
     /// <summary>
@@ -87,5 +87,45 @@ public readonly record struct StandardGasReaction
         }
 
         return result;
+    }
+
+    public readonly record struct Mapped
+    {
+        public Mapped(StandardGasReaction original, IList<GasProperties> properties)
+        {
+            Original = original;
+
+            MappedInputs = original.Input.ToFrozenDictionary(e => properties.IndexOf(e.Key), e => e.Value);
+            MappedOutputs = original.Output.ToFrozenDictionary(e => properties.IndexOf(e.Key), e => e.Value);
+            MappedFactors = original.SpeedFactors.ToFrozenDictionary(e => properties.IndexOf(e.Key), e => e.Value);
+
+            var changeEquation = new Dictionary<int, float>();
+            foreach (var gas in MappedInputs.Keys.Concat(MappedOutputs.Keys).Distinct())
+                changeEquation[gas] = MappedOutputs.GetValueOrDefault(gas) - MappedInputs.GetValueOrDefault(gas);
+
+            changeEquation[properties.Count] = original.EnergyBalance;
+
+            ChangeEquation = changeEquation.ToFrozenDictionary();
+        }
+
+        public FrozenDictionary<int, float> MappedInputs { get; }
+
+        public FrozenDictionary<int, float> MappedOutputs { get; }
+
+        public StandardGasReaction Original { get; }
+
+        public FrozenDictionary<int, float> ChangeEquation { get; }
+
+        public FrozenDictionary<int, float> MappedFactors { get; }
+
+        public float GetReactionSpeed(float[] molarityVector, float temperature)
+        {
+            var result = Original.GetRateConstant(temperature);
+            if (result <= 0)
+                return 0;
+            return result * MappedFactors.AsParallel()
+                .Select(factor => MathF.Pow(molarityVector[factor.Key], factor.Value))
+                .Aggregate((a, b) => a * b);
+        }
     }
 }
