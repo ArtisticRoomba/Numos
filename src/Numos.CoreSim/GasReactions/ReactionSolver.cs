@@ -29,7 +29,11 @@ public class ReactionSolver
     {
         //process each voxel in parallel
         var voxelCount = chunk.Depth * chunk.Width * chunk.Height;
-        Parallel.For(0, voxelCount, voxelIndex => ProcessVoxel(chunk, deltaTime, voxelIndex));
+        //  Parallel.For(0, voxelCount, voxelIndex => ProcessVoxel(chunk, deltaTime, voxelIndex));
+        for (int i = 0; i < voxelCount; i++)
+        {
+            ProcessVoxel(chunk, deltaTime, i);
+        }
     }
 
     private void ProcessVoxel(AtmosChunk chunk, float deltaTime, int voxelIndex)
@@ -37,7 +41,7 @@ public class ReactionSolver
         //get the mixture
         var mixtureVector = new float[_config.GasRegistry.Count + 1];
 
-        for (var i = 0; i < chunk.ActiveAirCount; i++)
+        for (var i = 0; i < chunk.ActiveGasCount; i++)
             mixtureVector[chunk.ActiveGases[i].GasId] = chunk.ActiveGases[i].Moles[voxelIndex];
         //TODO Get the energy of the mixture. yes i know dirty, but what can you do.
         mixtureVector[^1] = 0;
