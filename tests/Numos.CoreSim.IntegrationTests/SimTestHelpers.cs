@@ -78,4 +78,37 @@ internal static class SimTestHelpers
     {
         return snapshots.Sum(TotalMoles);
     }
+
+    internal static float TotalThermalEnergy(AtmosConfig config,
+        params AtmosChunkSnapshot[] snapshots)
+    {
+        var totalEnergy = 0f;
+        foreach (var snapshot in snapshots)
+        {
+            for (var index = 0; index < snapshot.Temperature.Length; index++)
+            {
+                var heatCapacity = 0f;
+                foreach (var gas in snapshot.Gases)
+                {
+                    float configuredSpecificHeatCapacity = gas.GasId >= 0 &&
+                                                           gas.GasId < config.GasRegistry.Count
+                        ? config.GasRegistry[gas.GasId].SpecificHeatCapacity
+                        : 1f;
+                    float specificHeatCapacity = float.IsFinite(configuredSpecificHeatCapacity) &&
+                                                 configuredSpecificHeatCapacity > 0f
+                        ? configuredSpecificHeatCapacity
+                        : 1f;
+                    heatCapacity += gas.Moles[index] * specificHeatCapacity;
+                }
+
+                float storedTemperature = snapshot.Temperature[index];
+                float effectiveTemperature = float.IsFinite(storedTemperature) && storedTemperature > 0f
+                    ? storedTemperature
+                    : config.DefaultTemperatureFallback;
+                totalEnergy += effectiveTemperature * heatCapacity;
+            }
+        }
+
+        return totalEnergy;
+    }
 }

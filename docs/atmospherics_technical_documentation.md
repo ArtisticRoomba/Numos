@@ -1,9 +1,9 @@
 # Atmospherics System — Technical Documentation
 
-> [!WARNING]
-> This documentation is legacy and in parts does not reflect the current implementation (ex. thermal flow across chunk boundaries).
+> [!NOTE]
+> The thermodynamics and energy-transfer sections were updated for the effective molar heat-capacity model. Other legacy sections may not reflect every current implementation detail.
 
-> **Revision**: 2026-07-12
+> **Revision**: 2026-08-14
 > **Scope**: Engine-agnostic specification.
 ---
 
@@ -34,7 +34,7 @@
 7. [The Leaky Faucet Problem & GasAccumulator](#7-the-leaky-faucet-problem--gasaccumulator)
 8. [Phase Changes (Condensation)](#8-phase-changes-condensation)
    - 8.1 [Clausius-Clapeyron Saturation Model](#81-clausius-clapeyron-saturation-model)
-   - 8.2 [The Latent Heat Trap](#82-the-latent-heat-trap)
+   - 8.2 [Latent-Heat Energy Balance](#82-latent-heat-energy-balance)
 9. [Networking & Replication](#9-networking--replication)
 10. [Known Flaws & Limitations](#10-known-flaws--limitations)
 11. [Porting Guidance](#11-porting-guidance)
@@ -125,17 +125,27 @@ Each chunk stores:
 | Array | Type | Description |
 |-------|------|-------------|
 | `VoxelRoomMap` | `int[]` | Classifies each voxel (see §3.3) |
-| `TotalPressure` | `float[]` | Cached pressure per voxel, recomputed each tick |
+| `TotalPressure` | `float[]` | Cached pressure per voxel, recalculated at advection start and refreshed as state changes |
 | `Temperature` | `float[]` | Temperature in Kelvin per voxel |
-| `ActiveAirIndices` | `ushort[]` | Dense list of voxel indices belonging to the currently active room |
+| `TotalHeatCapacity` | `float[]` | Cached total heat capacity per voxel, in J/K |
+| `ActiveAirIndices` | `ushort[]` | Dense list of voxel indices belonging to the currently active rooms |
 | `ActiveGases` | `GasChannel[]` | Sparse array of gas-specific mole data (see §3.2) |
+
+For thermodynamic calculations, each gas uses an effective molar heat capacity:
+
+```
+c_effective = gasIsRegistered && isFinite(SpecificHeatCapacity) && SpecificHeatCapacity > 0
+    ? SpecificHeatCapacity
+    : 1 J/(mol·K)
+C_voxel = sum(moles[g] * c_effective[g])
+E_voxel = C_voxel * effectiveTemperature
+```
+
+`C_voxel` is a total heat capacity in J/K, not a molar heat capacity. `E_voxel` is the sensible energy represented by the voxel state. The heat-capacity cache is recalculated or updated whenever gas composition changes. When a gas-bearing voxel's stored temperature is non-finite or nonpositive, pressure and energy calculations use `DefaultTemperatureFallback` as the starting effective temperature. An energy update then stores its calculated blended, diffused, or phase-change temperature.
 
 Chunks are identified by an `Int3 GridPosition` in a spatial map (e.g. a `ConcurrentDictionary<Int3, AtmosChunk>`).
 
-**Active Air Optimization**: The simulation never iterates over the full 4,096 voxels. When a room is woken, `WakeRoom(roomId)` scans the `VoxelRoomMap` and builds a dense list of indices (`ActiveAirIndices`) containing only voxels belonging to that room. All subsequent iteration uses this list, skipping solid geometry entirely.
-
-> [!WARNING]
-> **Single-room-per-chunk limitation**: A chunk can only have one `ActiveRoomId` at a time. If a chunk contains voxels from multiple rooms, calling `WakeRoom` with a different room ID overwrites the active list. The system does not simulate two rooms within the same chunk concurrently. This is a structural limitation that could cause issues in dense multi-room layouts.
+**Active Air Optimization**: The simulation never iterates over the full 4,096 voxels. `WakeRoom(roomId)` adds the room to `ActiveRoomIds` up to the configured `MaxActiveRooms`, then rebuilds `ActiveAirIndices` with voxels from every active room. All subsequent iteration uses this dense list, skipping solid geometry entirely.
 
 ### 3.2 Gas Channels (Structure of Arrays)
 
@@ -198,10 +208,10 @@ Each gas species is defined by a `GasProperties` struct:
 | Field | Type | Purpose |
 |-------|------|---------|
 | `Name` | `string` | Display name |
-| `SpecificHeatCapacity` | `float` | Used in latent heat calculations during condensation |
+| `SpecificHeatCapacity` | `float` | Effective molar heat capacity in J/(mol·K). It controls sensible energy during injection, gas flow, thermal diffusion, and condensation. Energy and capacity paths use `1` for missing registry entries and non-finite or nonpositive values; condensation skips unregistered gas IDs. |
 | `BoilingPoint` | `float` | Temperature (K) above which the gas remains gaseous |
 | `CondensationPoint` | `float` | Temperature (K) below which condensation can begin. In practice, used as a boolean gate (`> 0` means "this gas can condense") |
-| `LatentHeatOfVaporization` | `float` | Energy released per mole during condensation |
+| `LatentHeatOfVaporization` | `float` | Energy released per mole during condensation, in J/mol |
 | `LiquidId` | `int` | ID of the liquid this gas condenses into (for a separate liquid simulation system) |
 | `DiffusionCoefficient` | `float` | Fickian diffusion rate for partial-pressure-driven mixing |
 
@@ -214,7 +224,7 @@ All tunable simulation parameters are centralized in a configuration object:
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `GlobalTemperature` | 293.15 | Reference ambient temperature (K). Not actively used in the simulation loop. |
-| `DefaultTemperatureFallback` | 293.15 | Fallback when a voxel has 0 or uninitialized temperature. |
+| `DefaultTemperatureFallback` | 293.15 | Starting effective temperature used for pressure and sensible energy when a gas-bearing voxel stores a non-finite or nonpositive temperature. Energy evolution then stores its calculated result. |
 | `SpaceTemperature` | 2.7 | Temperature of space (K). Not actively used in the simulation loop. |
 | `FlowFriction` | 0.25 | Fraction of pressure delta converted to flow per tick. The `k` constant. |
 | `DampingFactor` | 0.5 | Multiplier applied to `FlowFriction` during large-delta advection to reduce oscillation. |
@@ -223,7 +233,7 @@ All tunable simulation parameters are centralized in a configuration object:
 | `VacuumThreshold` | 1.0 | Below this pressure, voxel contents are zeroed out. |
 | `SleepThreshold` | 100 | Consecutive ticks below `SleepEpsilon` before a chunk goes to sleep. |
 | `SleepEpsilon` | 3.5 | Maximum pressure delta considered "at rest". |
-| `ThermalConductivity` | 0.05 | Fraction of temperature delta transferred per neighbor per tick. |
+| `ThermalConductivity` | 0.05 | Effective conductance in J/K per thermodynamics tick (currently every second simulation tick). Multiplying it by a temperature difference produces a candidate energy transfer, which is then bounded for stability. Non-finite or nonpositive values disable thermal diffusion. |
 | `CondensationRateFactor` | 0.5 | Rate multiplier for phase-change condensation. |
 | `CflFlowCap` | 0.16 | Maximum fraction of a voxel's pressure that can flow to a single neighbor per tick (≈1/6 for 3D). |
 
@@ -254,7 +264,7 @@ This is the core fluid dynamics step. It runs in parallel across chunks.
 
 **For each awake chunk:**
 
-1. **Recalculate pressure**: For every active voxel, `TotalPressure[i] = TotalMoles[i] * Temperature[i]`. This is a simplified ideal gas law with unit volume (`V = 1`).
+1. **Recalculate pressure and heat capacity**: For every active voxel, `TotalPressure[i] = TotalMoles[i] * effectiveTemperature[i]`. This is a simplified ideal gas law with unit volume (`V = 1`); `effectiveTemperature` is the stored positive temperature or `DefaultTemperatureFallback`. The kernel also caches `TotalHeatCapacity[i] = sum(moles[g] * c_effective[g])` for energy calculations.
 
 2. **Compute flow deltas**: For every active voxel, examine each Von Neumann neighbor (±X, ±Y, ±Z — 4 neighbors for 2D chunks, 6 for 3D):
    - Skip solid neighbors.
@@ -265,8 +275,10 @@ This is the core fluid dynamics step. It runs in parallel across chunks.
      - Else: use `flow = pressureDelta * FlowFriction * DampingFactor`.
      - Discard if `flow < MinFlowCutoff`.
      - Clamp: `flow = min(flow, currentPressure * CflFlowCap)`.
-     - Convert flow to moles: `molesToMove = (flow / Temperature) * moleFraction` for each gas.
-     - Accumulate into a flat delta buffer (not applied immediately).
+     - Convert flow to moles: `molesToMove = (flow / sourceEffectiveTemperature) * moleFraction` for each gas.
+     - Compute the sensible energy carried by each species: `energyToMove = molesToMove * c_effective * sourceEffectiveTemperature`.
+     - Cap each species' combined scheduled outflow across all neighbors to the moles present at the start of the pass.
+     - Accumulate mole and energy changes into flat delta buffers (not applied immediately). Gas entering a void contributes no target delta, so both its moles and energy leave the simulation.
 
 3. **Fickian Diffusion**: In addition to bulk advection, a diffusion term based on concentration gradients is applied:
    ```
@@ -275,7 +287,7 @@ This is the core fluid dynamics step. It runs in parallel across chunks.
    ```
    This allows gases with different diffusion rates to mix even after bulk pressure has equalized. The Z-axis is checked conditionally, only when `Depth > 1`, allowing efficient 2D operation.
 
-4. **Apply deltas**: After all voxels have been processed, the accumulated deltas are applied to the mole arrays. Values below 0.0001 are snapped to 0.
+4. **Apply deltas**: After all voxels have been processed, the accumulated mole deltas are applied and values below 0.0001 are snapped to 0. Each voxel's heat capacity is recalculated from its new composition, then its temperature is recovered from `newTemperature = (oldTotalHeatCapacity * oldEffectiveTemperature + energyDelta) / newTotalHeatCapacity`. A voxel with no heat capacity retains its stored temperature. The pressure cache is refreshed from the resulting moles and temperature before boundary processing.
 
 5. **Emit boundary events**: If a voxel is on the edge of the chunk (coordinate is 0 or `Size - 1`) and has pressure > 1.0, a `BoundaryFlowEvent` is emitted for cross-chunk processing.
 
@@ -289,24 +301,29 @@ For each boundary event:
 3. If outside: look up the neighboring chunk at `GridPosition + direction`.
 4. Map the out-of-bounds coordinate into the neighbor's local space using modular arithmetic: `nX = (targetX + neighborWidth) % neighborWidth`.
 5. If the neighbor voxel is solid, skip. If the neighbor chunk is asleep, wake the target room.
-6. Calculate pressure delta and flow using the same logic as intra-chunk advection (but using `FlowFriction` without the `DampingFactor` or snap logic).
+6. Calculate pressure delta and flow with the same `CalculateFlow` logic used by intra-chunk advection, including damping, snap, minimum-flow cutoff, and the CFL cap.
 7. Transfer moles directly (no delta buffer — this is sequential).
 
-> [!WARNING]
-> **Asymmetry between intra-chunk and cross-chunk flow**: The boundary flow uses a simpler flow formula (`pressureDelta * FlowFriction` capped by `CflFlowCap`) without the damping, snap-to-equilibrium, or minimum flow cutoff logic applied during intra-chunk advection. This means gas crossing chunk boundaries behaves differently from gas flowing within a chunk, which could produce visible seams at chunk edges under certain conditions.
+Each species carries `molesMoved * c_effective * sourceEffectiveTemperature` of sensible energy during the direct transfer. The source and target heat-capacity caches, temperatures, and pressures are updated immediately by energy balance. Before injection, the target voxel's existing heat capacity is recalculated from its current moles and the live gas registry, including for a target chunk that was sleeping before the transfer.
+
+If the adjacent chunk is not registered or the mapped target is solid, no transfer occurs. A non-void target room is woken before it receives gas. A void target is an energy sink: transferred moles and their carried energy are removed from the source without being added to a target voxel.
 
 ### 4.4 Phase 3 — Thermodynamics
 
 Thermodynamics runs at half frequency (every 2nd tick) to save computation. It consists of two sub-phases:
 
-**Thermal Diffusion**: Heat transfers between adjacent voxels proportional to their temperature difference:
-```
-heatTransfer = (currentTemp - neighborTemp) * ThermalConductivity
-```
-Applied via a delta buffer to prevent directional bias. Vacuum voxels (pressure below `VacuumThreshold`) are excluded.
+**Thermal Diffusion**: Adjacent non-vacuum voxels exchange energy according to their temperature difference and total heat capacities. For a hot voxel `h` and cold voxel `c`:
 
-> [!IMPORTANT]
-> Thermal diffusion is only processed within a single chunk. There is no cross-chunk thermal diffusion. Heat does not conduct across chunk boundaries.
+```
+candidateEnergy = max(0, ThermalConductivity * (T_h - T_c))
+equilibriumEnergy = (T_h - T_c) / (1 / C_h + 1 / C_c)
+remainingSourceEnergy = max(0, C_h * T_h)
+energyTransferred = min(candidateEnergy, equilibriumEnergy, remainingSourceEnergy)
+```
+
+For intra-chunk diffusion, `T_h` and `T_c` include energy deltas already accumulated during the current neighbor scan. The equilibrium bound prevents a pair from crossing temperatures in one update, while the remaining-energy bound prevents a hot voxel from donating more energy than it currently contains across all of its neighbors. Equal and opposite energy deltas are buffered and temperatures are updated by `deltaTemperature = energyDelta / TotalHeatCapacity`. Voxels with zero heat capacity do not participate and retain their stored temperature.
+
+Thermal boundary events apply the same bounded, energy-conserving transfer to mapped voxels in registered adjacent chunks. Solid voxels block conduction, voxels below `VacuumThreshold` are excluded, and a missing adjacent chunk receives no heat. Depth-one chunks do not conduct through their Z faces. Boundary events are applied sequentially after the parallel per-chunk thermodynamics pass. Unlike gas boundary flow, thermal transfer can update a sleeping neighbor's cached temperature without waking that chunk.
 
 **Phase Changes (Condensation)**: See §8.
 
@@ -428,7 +445,10 @@ Unit tests confirm:
 Condensation is modeled using a saturation-vapor-pressure approach based on the Clausius-Clapeyron equation:
 
 ```
-P_sat = P_reference * exp(-LatentHeat * (1/T - 1/T_boiling))
+T_effective = storedTemperature > 0 && isFinite(storedTemperature)
+    ? storedTemperature
+    : DefaultTemperatureFallback
+P_sat = P_reference * exp(-LatentHeat * (1/T_effective - 1/T_boiling))
 ```
 
 Where `P_reference = 1000.0` (a reference pressure scale, not atmospheric pressure).
@@ -436,24 +456,30 @@ Where `P_reference = 1000.0` (a reference pressure scale, not atmospheric pressu
 Condensation occurs when partial pressure exceeds saturation:
 
 ```
-currentPartialPressure = gasMoles * Temperature
+currentPartialPressure = gasMoles * T_effective
 if (currentPartialPressure > P_sat):
     excessPressure = currentPartialPressure - P_sat
-    molesToCondense = (excessPressure / Temperature) * CondensationRateFactor
+    molesToCondense = (excessPressure / T_effective) * CondensationRateFactor
 ```
 
-This model allows condensation to occur at any temperature where the gas is supersaturated, rather than only below a fixed boiling point.
+This model allows condensation to occur at any temperature where the gas is supersaturated, rather than only below a fixed boiling point. Gas IDs without a registry entry are skipped because their phase-change properties are unavailable.
 
-### 8.2 The Latent Heat Trap
+### 8.2 Latent-Heat Energy Balance
 
-Condensation releases latent heat back into the local voxel:
+Condensation removes both the condensed gas's heat capacity and the sensible energy that gas carried, then releases latent heat into the gas remaining in the voxel. Let `n_condensed` be the number of moles condensed, `c_effective` the species' effective molar heat capacity, and `C_before` the voxel's total heat capacity before condensation:
 
 ```
-tempIncrease = (molesToCondense * LatentHeatOfVaporization) / SpecificHeatCapacity
-Temperature[idx] += tempIncrease
+C_after = max(0, C_before - n_condensed * c_effective)
+E_after = T_effective * C_before
+          - T_effective * n_condensed * c_effective
+          + n_condensed * LatentHeatOfVaporization
+if C_after > 0:
+    T_after = max(0, E_after / C_after)
 ```
 
-This creates a negative feedback loop. As gas condenses, the voxel warms, which raises the saturation pressure, which slows further condensation. This prevents runaway condensation from instantly removing all gas from a cold voxel.
+The temperature division is performed only when `C_after > 0`. The voxel's cached `TotalHeatCapacity` and `TotalPressure` are updated immediately. As elsewhere in the energy model, a non-finite or nonpositive configured `SpecificHeatCapacity` uses `1 J/(mol·K)`.
+
+Latent heat generally warms the remaining gas, which raises saturation pressure and slows further condensation. Accounting for the condensed gas's departing sensible energy avoids assigning its energy to gas that remains in the voxel.
 
 ### Output: PrecipitationEvent
 
@@ -518,25 +544,15 @@ All networking methods are stubs with comments indicating where real implementat
 
 ### Structural
 
-1. **Single active room per chunk.** `WakeRoom` can only activate one room at a time. A chunk containing voxels from two different rooms cannot simulate both simultaneously. This requires either careful spatial partitioning to avoid multi-room chunks, or extending the system to support multiple active room indices per chunk.
-
-2. **Macro-micro transition not implemented.** The `RoomNode`, `GasAccumulator`, and the transition logic between macro (sleeping room) and micro (active voxel grid) layers are defined as data structures but are not orchestrated by the simulation loop. An integrator must implement: (a) how a sleeping room's aggregate state seeds the voxel grid on wake, (b) how a sleeping voxel grid's state is collapsed back into a `RoomNode`, and (c) how `GasAccumulator` feeds into this process.
-
-3. **No cross-chunk thermal diffusion.** Heat only conducts between voxels within the same chunk. At chunk boundaries, temperature gradients are invisible to the thermal diffusion pass. This could produce thermal discontinuities at chunk edges.
+1. **Macro-micro transition not implemented.** The `RoomNode`, `GasAccumulator`, and the transition logic between macro (sleeping room) and micro (active voxel grid) layers are defined as data structures but are not orchestrated by the simulation loop. An integrator must implement: (a) how a sleeping room's aggregate state seeds the voxel grid on wake, (b) how a sleeping voxel grid's state is collapsed back into a `RoomNode`, and (c) how `GasAccumulator` feeds into this process.
 
 ### Numerical
 
-4. **Asymmetric boundary flow formula.** Cross-chunk boundary flow uses `pressureDelta * FlowFriction` (no damping, no snap threshold, no stiction cutoff), while intra-chunk flow applies damping, snap, and stiction. This asymmetry can produce different flow rates across a chunk boundary versus within a chunk for identical pressure deltas.
-
-5. **Unidirectional flow in advection.** The advection loop only processes flow from high pressure to low (`pressureDelta > 0`). Due to the delta buffer, this is correct for order-independence but means each voxel-pair interaction is computed once (from the higher-pressure side). The thermal diffusion loop has the same unidirectional guard (`tempDelta > 0`), and it applies symmetric deltas (subtracts from source, adds to neighbor). However, because both voxels are iterated and both will compute their own outward deltas to different neighbors, a pair can be processed twice if both sides iterate — once from each direction. The thermal diffusion delta buffer prevents this from causing instability but it does mean some pairs contribute double the intended heat transfer.
-
-6. **Temperature weighting on injection.** `InjectGasToVoxel` computes a weighted average temperature: `newTemp = ((existingMoles * existingTemp) + (newMoles * newTemp)) / totalMoles`. If `existingTemp` is 0 (uninitialized) and existing moles are non-zero, this will dilute the incoming temperature toward zero. The fallback temperature (`DefaultTemperatureFallback`) is applied only during pressure calculation, not during injection.
+2. **Unidirectional flow in advection.** The advection loop only processes flow from high pressure to low (`pressureDelta > 0`). Due to the delta buffer, each voxel-pair transfer is computed from the higher-pressure side and applied after the neighbor scan.
 
 ### Performance
 
-7. **Per-tick chunk snapshot via `.ToArray()`.** Each tick, the simulation calls `_chunkMap.Values.ToArray()` to snapshot the chunk collection. This allocates a new array every tick. For large chunk counts at 20 Hz, this generates significant GC pressure.
-
-8. **Thread-local buffer overflow.** The `BoundaryFlowEvent` and `PrecipitationEvent` thread-local buffers are fixed at 64 entries. If a chunk has more than 64 boundary voxels with pressure > 1.0, excess events are silently dropped. For a 16×16×16 chunk, the boundary surface is up to 1,536 voxels (6 faces × 256), so 64 is insufficient in the worst case.
+3. **Per-tick chunk snapshot via `.ToArray()`.** Each tick, the simulation calls `_chunkMap.Values.ToArray()` to snapshot the chunk collection. This allocates a new array every tick. For large chunk counts at 20 Hz, this generates significant GC pressure.
 
 ---
 
@@ -569,16 +585,16 @@ To implement this system in another engine or language, start from the core modu
 
 The simulation assumes parallel execution:
 - **Intra-chunk advection and thermodynamics** are dispatched in parallel across chunks (e.g. via a `Parallel.ForEach`-style construct).
-- **Boundary flow** is sequential and must remain so to avoid race conditions when two chunks write to each other's voxels.
-- **Thread-local buffers** (`ThreadLocal<T>`) are used for boundary and precipitation events to avoid contention.
+- **Gas and thermal boundary processing** is sequential and must remain so to avoid race conditions when two chunks write to each other's voxels.
+- **Thread-local buffers** (`ThreadLocal<T>`) are used for gas-boundary, thermal-boundary, and precipitation events to avoid contention.
 
 If your target platform does not support threading (e.g., single-threaded WASM), the simulation will still function correctly when run sequentially — the parallel regions have no ordering dependencies within them.
 
 ### Memory
 
 At 16×16×16 with one gas:
-- Per chunk: `4096 * 4 bytes * 4 arrays` (VoxelRoomMap, TotalPressure, Temperature, ActiveAirIndices) + `4096 * 4 bytes` (one GasChannel) ≈ **80 KB**.
+- Per chunk: about **88 KB** for `VoxelRoomMap`, `TotalPressure`, `Temperature`, `TotalHeatCapacity`, `ActiveAirIndices`, and one `GasChannel`, excluding smaller metadata arrays and pool overhead.
 - Per additional gas: +16 KB.
-- 512 chunks (8×8×8 grid): ≈ **40 MB** base.
+- 512 chunks (8×8×8 grid): about **44 MB** before pool overhead and metadata.
 
 `ArrayPool` rental means actual memory footprint depends on pool behavior. Arrays may be larger than requested and may persist in the pool after `Release()`.

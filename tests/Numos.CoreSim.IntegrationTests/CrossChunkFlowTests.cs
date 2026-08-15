@@ -81,6 +81,42 @@ public sealed class CrossChunkFlowTests
     }
 
     [Test]
+    public void BoundaryFlow_WithUnequalSpecificHeatCapacities_ConservesThermalEnergy()
+    {
+        var config = SimTestHelpers.CreateDeterministicConfig();
+        var first = config.GasRegistry[SimTestHelpers.FirstGasId];
+        first.SpecificHeatCapacity = 1f;
+        config.GasRegistry[SimTestHelpers.FirstGasId] = first;
+        var second = config.GasRegistry[SimTestHelpers.SecondGasId];
+        second.SpecificHeatCapacity = 4f;
+        config.GasRegistry[SimTestHelpers.SecondGasId] = second;
+        using var simulation = new AtmosSimulation(config, 1, 1, 1);
+        var source = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
+        var target = SimTestHelpers.CreateOpenChunk(simulation, new Int3(1, 0, 0));
+        simulation.AddGasToVoxel(source, 0, 0, 0, SimTestHelpers.FirstGasId, 3f, 400f);
+        simulation.AddGasToVoxel(source, 0, 0, 0, SimTestHelpers.SecondGasId, 1f, 400f);
+        simulation.AddGasToVoxel(target, 0, 0, 0, SimTestHelpers.FirstGasId, 1f, 200f);
+        simulation.SetVoxelTemperature(source, 0, 0, 0, 400f);
+        simulation.SetVoxelTemperature(target, 0, 0, 0, 200f);
+        float initialEnergy = SimTestHelpers.TotalThermalEnergy(config,
+            simulation.GetChunkSnapshot(source), simulation.GetChunkSnapshot(target));
+
+        simulation.Tick();
+
+        var sourceSnapshot = simulation.GetChunkSnapshot(source);
+        var targetSnapshot = simulation.GetChunkSnapshot(target);
+        Assert.Multiple(() =>
+        {
+            Assert.That(sourceSnapshot.Temperature[0],
+                Is.EqualTo(400f).Within(SimTestHelpers.Tolerance));
+            Assert.That(targetSnapshot.Temperature[0],
+                Is.EqualTo(286.7256637f).Within(SimTestHelpers.Tolerance));
+            Assert.That(SimTestHelpers.TotalThermalEnergy(config, sourceSnapshot, targetSnapshot),
+                Is.EqualTo(initialEnergy).Within(SimTestHelpers.Tolerance));
+        });
+    }
+
+    [Test]
     public void BoundaryWithoutRegisteredNeighbor_DoesNotLoseGas()
     {
         var config = SimTestHelpers.CreateDeterministicConfig();

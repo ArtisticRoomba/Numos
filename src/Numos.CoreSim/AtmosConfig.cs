@@ -16,8 +16,13 @@ public class AtmosConfig
     public float GlobalTemperature { get; set; } = 293.15f;
 
     /// <summary>
-    ///     Default fallback temperature to set when a voxel has 0 or an uninitialized temperature.
+    ///     Effective temperature used for pressure and sensible-energy calculations when a gas-bearing voxel
+    ///     has a non-finite or nonpositive stored temperature.
     /// </summary>
+    /// <remarks>
+    ///     Energy evolution uses this value as the voxel's starting temperature, then stores the resulting
+    ///     blended or transferred temperature.
+    /// </remarks>
     public float DefaultTemperatureFallback { get; set; } = 293.15f;
 
     /// <summary>
@@ -63,8 +68,15 @@ public class AtmosConfig
     public float SleepEpsilon { get; set; } = 3.5f;
 
     /// <summary>
-    ///     Fraction of temperature delta transferred per neighbor per tick.
+    ///     Effective thermal conductance between adjacent voxels, in joules per kelvin (J/K) per
+    ///     thermodynamics tick (currently every second simulation tick).
     /// </summary>
+    /// <remarks>
+    ///     The simulation multiplies this value by the temperature difference to obtain an energy transfer,
+    ///     then limits the transfer to prevent either voxel from passing thermal equilibrium or the source
+    ///     from transferring more energy than it contains. Non-finite or nonpositive values disable thermal
+    ///     diffusion.
+    /// </remarks>
     public float ThermalConductivity { get; set; } = 0.05f;
 
     /// <summary>
@@ -73,7 +85,7 @@ public class AtmosConfig
     public float CondensationRateFactor { get; set; } = 0.5f;
 
     /// <summary>
-    ///     Rate multiplier for phase-change condensation.
+    ///     Maximum fraction of a source voxel's pressure that may flow to one neighbor per tick.
     /// </summary>
     public float CflFlowCap { get; set; } = 0.16f;
 

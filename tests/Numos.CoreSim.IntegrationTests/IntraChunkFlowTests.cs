@@ -166,6 +166,103 @@ public sealed class IntraChunkFlowTests
     }
 
     [Test]
+    public void BulkFlow_WithUnequalSpecificHeatCapacities_ConservesThermalEnergy()
+    {
+        var config = SimTestHelpers.CreateDeterministicConfig();
+        var first = config.GasRegistry[SimTestHelpers.FirstGasId];
+        first.SpecificHeatCapacity = 1f;
+        config.GasRegistry[SimTestHelpers.FirstGasId] = first;
+        var second = config.GasRegistry[SimTestHelpers.SecondGasId];
+        second.SpecificHeatCapacity = 4f;
+        config.GasRegistry[SimTestHelpers.SecondGasId] = second;
+        using var simulation = new AtmosSimulation(config, 2, 1, 1);
+        var chunk = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasId, 3f, 400f);
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.SecondGasId, 1f, 400f);
+        simulation.AddGasToVoxel(chunk, 1, 0, 0, SimTestHelpers.FirstGasId, 1f, 200f);
+        simulation.SetVoxelTemperature(chunk, 0, 0, 0, 400f);
+        simulation.SetVoxelTemperature(chunk, 1, 0, 0, 200f);
+        float initialEnergy = SimTestHelpers.TotalThermalEnergy(config,
+            simulation.GetChunkSnapshot(chunk));
+
+        simulation.Tick();
+
+        var snapshot = simulation.GetChunkSnapshot(chunk);
+        Assert.Multiple(() =>
+        {
+            Assert.That(snapshot.Temperature[0],
+                Is.EqualTo(400f).Within(SimTestHelpers.Tolerance));
+            Assert.That(snapshot.Temperature[1],
+                Is.EqualTo(286.7256637f).Within(SimTestHelpers.Tolerance));
+            Assert.That(SimTestHelpers.TotalThermalEnergy(config, snapshot),
+                Is.EqualTo(initialEnergy).Within(SimTestHelpers.Tolerance));
+        });
+    }
+
+    [Test]
+    public void BulkFlow_ToMultipleNeighborsPreservesMassAndSensibleEnergy()
+    {
+        const int size = 3;
+        var config = SimTestHelpers.CreateDeterministicConfig();
+        var gas = config.GasRegistry[SimTestHelpers.FirstGasId];
+        gas.DiffusionCoefficient = 0.02f;
+        config.GasRegistry[SimTestHelpers.FirstGasId] = gas;
+        using var simulation = new AtmosSimulation(config, size, size, size);
+        var chunk = simulation.CreateAndRegisterChunk(new Int3(0, 0, 0));
+        simulation.SetChunkClassification(chunk, VoxelClassification.RoomSolid);
+        (int X, int Y, int Z)[] neighbors =
+        [
+            (0, 1, 1), (2, 1, 1),
+            (1, 0, 1), (1, 2, 1),
+            (1, 1, 0), (1, 1, 2)
+        ];
+        simulation.SetVoxelClassification(chunk, 1, 1, 1, SimTestHelpers.RoomId);
+        foreach (var (x, y, z) in neighbors)
+            simulation.SetVoxelClassification(chunk, x, y, z, SimTestHelpers.RoomId);
+        simulation.AddGasToVoxel(chunk, 1, 1, 1, SimTestHelpers.FirstGasId, 1f, 4f);
+
+        simulation.Tick();
+
+        var snapshot = simulation.GetChunkSnapshot(chunk);
+        int center = SimTestHelpers.Index(1, 1, 1, size, size);
+        Assert.Multiple(() =>
+        {
+            Assert.That(SimTestHelpers.TotalMoles(snapshot),
+                Is.EqualTo(1f).Within(SimTestHelpers.Tolerance));
+            Assert.That(SimTestHelpers.TotalThermalEnergy(config, snapshot),
+                Is.EqualTo(4f).Within(SimTestHelpers.Tolerance));
+            Assert.That(SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, center),
+                Is.GreaterThanOrEqualTo(0f));
+            Assert.That(snapshot.Temperature.All(float.IsFinite), Is.True);
+        });
+    }
+
+    [Test]
+    public void BulkFlow_ZeroStoredTemperatureUsesFallbackForExistingEnergy()
+    {
+        var config = SimTestHelpers.CreateDeterministicConfig();
+        using var simulation = new AtmosSimulation(config, 2, 1, 1);
+        var chunk = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasId, 1f,
+            config.DefaultTemperatureFallback);
+        simulation.SetVoxelTemperature(chunk, 0, 0, 0, 0f);
+        simulation.SetVoxelTemperature(chunk, 1, 0, 0, 0f);
+
+        simulation.Tick();
+
+        var snapshot = simulation.GetChunkSnapshot(chunk);
+        Assert.Multiple(() =>
+        {
+            Assert.That(snapshot.Temperature[0],
+                Is.EqualTo(config.DefaultTemperatureFallback).Within(SimTestHelpers.Tolerance));
+            Assert.That(snapshot.Temperature[1],
+                Is.EqualTo(config.DefaultTemperatureFallback).Within(SimTestHelpers.Tolerance));
+            Assert.That(SimTestHelpers.TotalThermalEnergy(config, snapshot),
+                Is.EqualTo(config.DefaultTemperatureFallback).Within(SimTestHelpers.Tolerance));
+        });
+    }
+
+    [Test]
     public void DiffusionCoefficient_AddsSpeciesSpecificTransfer()
     {
         var config = SimTestHelpers.CreateDeterministicConfig();

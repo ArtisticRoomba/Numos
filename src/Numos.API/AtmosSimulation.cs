@@ -335,7 +335,11 @@ public sealed class AtmosSimulation : IDisposable
     /// </summary>
     /// <param name="chunk">A handle identifying the target chunk.</param>
     /// <param name="localVoxelIndex">The voxel's zero-based index in the chunk's flattened storage.</param>
-    /// <param name="temperature">The absolute temperature to store, in kelvins.</param>
+    /// <param name="temperature">The raw temperature value to store, in kelvins.</param>
+    /// <remarks>
+    ///     During simulation, a gas-bearing voxel with a non-finite or nonpositive stored value uses
+    ///     <see cref="AtmosConfig.DefaultTemperatureFallback" /> as its effective temperature.
+    /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="localVoxelIndex" /> is outside the chunk.</exception>
     /// <exception cref="KeyNotFoundException">No chunk is registered at the handle's position.</exception>
     /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
@@ -353,7 +357,11 @@ public sealed class AtmosSimulation : IDisposable
     /// <param name="x">The zero-based local x-coordinate.</param>
     /// <param name="y">The zero-based local y-coordinate.</param>
     /// <param name="z">The zero-based local z-coordinate.</param>
-    /// <param name="temperature">The absolute temperature to store, in kelvins.</param>
+    /// <param name="temperature">The raw temperature value to store, in kelvins.</param>
+    /// <remarks>
+    ///     During simulation, a gas-bearing voxel with a non-finite or nonpositive stored value uses
+    ///     <see cref="AtmosConfig.DefaultTemperatureFallback" /> as its effective temperature.
+    /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException">A local coordinate is outside the chunk.</exception>
     /// <exception cref="KeyNotFoundException">No chunk is registered at the handle's position.</exception>
     /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
@@ -374,8 +382,12 @@ public sealed class AtmosSimulation : IDisposable
     /// <param name="temperature">The temperature of the added gas, in kelvins.</param>
     /// <remarks>
     ///     The room classification containing the voxel is activated before injection. Injection into a solid or
-    ///     void voxel is ignored. If gas is already present, the stored temperature is updated by mole-weighted
-    ///     averaging.
+    ///     void voxel is ignored. The added gas carries sensible energy according to its effective molar heat
+    ///     capacity, and the stored temperature is updated by sensible-energy balance. A missing registry entry or
+    ///     non-finite or nonpositive configured heat capacity is treated as <c>1 J/(mol·K)</c>. An existing
+    ///     non-finite or nonpositive stored temperature contributes prior sensible energy at
+    ///     <see cref="AtmosConfig.DefaultTemperatureFallback" />; the stored result is the balanced mixture
+    ///     temperature.
     /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="localVoxelIndex" /> is outside the chunk.</exception>
     /// <exception cref="ArgumentOutOfRangeException">
@@ -404,8 +416,12 @@ public sealed class AtmosSimulation : IDisposable
     /// <param name="temperature">The temperature of the added gas, in kelvins.</param>
     /// <remarks>
     ///     The room classification containing the voxel is activated before injection. Injection into a solid or
-    ///     void voxel is ignored. If gas is already present, the stored temperature is updated by mole-weighted
-    ///     averaging.
+    ///     void voxel is ignored. The added gas carries sensible energy according to its effective molar heat
+    ///     capacity, and the stored temperature is updated by sensible-energy balance. A missing registry entry or
+    ///     non-finite or nonpositive configured heat capacity is treated as <c>1 J/(mol·K)</c>. An existing
+    ///     non-finite or nonpositive stored temperature contributes prior sensible energy at
+    ///     <see cref="AtmosConfig.DefaultTemperatureFallback" />; the stored result is the balanced mixture
+    ///     temperature.
     /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException">A local coordinate is outside the chunk.</exception>
     /// <exception cref="ArgumentOutOfRangeException">

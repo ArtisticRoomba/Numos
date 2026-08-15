@@ -207,7 +207,7 @@ internal sealed partial class AtmosKernel
         ValidateGasInjection(gasId, moles, temperature);
 
         chunk.WakeRoom(chunk.VoxelRoomMap[localVoxelIndex]);
-        chunk.InjectGasToVoxel(localVoxelIndex, gasId, moles, temperature);
+        InjectGasWithEnergy(chunk, localVoxelIndex, gasId, moles, temperature, GetSpecificHeatCapacity(gasId));
     }
 
     /// <summary>

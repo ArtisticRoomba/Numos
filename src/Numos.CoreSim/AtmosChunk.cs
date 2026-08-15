@@ -131,7 +131,13 @@ internal class AtmosChunk
     /// <remarks>These values are recomputed by the simulation each tick.</remarks>
     public FlatArray<float> TotalPressure;
 
-    // J/K. Not J/K mol.
+    /// <summary>
+    ///     Cached total heat capacity for each voxel, in joules per kelvin (J/K).
+    /// </summary>
+    /// <remarks>
+    ///     Each value is the sum of <c>moles × effective molar heat capacity</c> for the gases in that voxel.
+    ///     It is not a molar quantity.
+    /// </remarks>
     public FlatArray<float> TotalHeatCapacity;
 
     /// <summary>
@@ -334,7 +340,7 @@ internal class AtmosChunk
     }
 
     /// <summary>
-    ///     Adds gas to a voxel and updates that voxel's temperature and total pressure.
+    ///     Adds gas to a voxel with unit effective molar heat capacity and updates the voxel's cached thermal state.
     /// </summary>
     /// <param name="localVoxelIndex">The flat index of the target voxel within this chunk.</param>
     /// <param name="gasId">The ID of the gas to add.</param>
@@ -346,6 +352,27 @@ internal class AtmosChunk
     /// </remarks>
     public void InjectGasToVoxel(ushort localVoxelIndex, int gasId, float molesToAdd, float temperature)
     {
+        InjectGasToVoxel(localVoxelIndex, gasId, molesToAdd, temperature, 1f);
+    }
+
+    /// <summary>
+    ///     Adds gas to a voxel using its effective molar heat capacity to conserve sensible energy.
+    /// </summary>
+    /// <param name="localVoxelIndex">The flat index of the target voxel within this chunk.</param>
+    /// <param name="gasId">The ID of the gas to add.</param>
+    /// <param name="molesToAdd">The number of moles to add.</param>
+    /// <param name="temperature">The temperature of the injected gas.</param>
+    /// <param name="specificHeatCapacity">
+    ///     The effective molar heat capacity of the injected gas, in J/(mol·K). Non-finite and nonpositive values
+    ///     use a fallback of <c>1</c>.
+    /// </param>
+    /// <remarks>
+    ///     Injection is ignored when the chunk is sleeping or the target voxel is solid or void.
+    ///     A new gas channel is created when this gas is not already present in the chunk.
+    /// </remarks>
+    public void InjectGasToVoxel(ushort localVoxelIndex, int gasId, float molesToAdd, float temperature,
+        float specificHeatCapacity)
+    {
         if (!IsAwake)
             return;
 
@@ -356,6 +383,8 @@ internal class AtmosChunk
             return;
 
         SleepTimer = 0;
+
+        float currentHeatCapacity = TotalHeatCapacity[localVoxelIndex];
 
         int targetChannelIndex = -1;
         for (var i = 0; i < ActiveGasCount; i++)
@@ -389,8 +418,17 @@ internal class AtmosChunk
             currentTotalMoles += ActiveGases[g].Moles[localVoxelIndex];
         }
 
+        float effectiveHeatCapacity = float.IsFinite(specificHeatCapacity) && specificHeatCapacity > 0f
+            ? specificHeatCapacity
+            : 1f;
+        float incomingHeatCapacity = molesToAdd * effectiveHeatCapacity;
+        float newHeatCapacity = currentHeatCapacity + incomingHeatCapacity;
         float currentTemp = Temperature[localVoxelIndex];
-        float newTemp = ((currentTotalMoles - molesToAdd) * currentTemp + molesToAdd * temperature) / currentTotalMoles;
+        float newTemp = currentHeatCapacity > 0f && newHeatCapacity > 0f
+            ? (currentHeatCapacity * currentTemp + incomingHeatCapacity * temperature) / newHeatCapacity
+            : temperature;
+
+        TotalHeatCapacity[localVoxelIndex] = newHeatCapacity;
         Temperature[localVoxelIndex] = newTemp;
 
         TotalPressure[localVoxelIndex] = currentTotalMoles * newTemp;
