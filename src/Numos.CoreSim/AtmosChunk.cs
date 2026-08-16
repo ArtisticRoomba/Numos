@@ -401,10 +401,15 @@ internal class AtmosChunk
         var snapshot = new AtmosChunkSnapshot
         {
             GridPosition = GridPosition,
+            Dimensions = Dimensions,
             TotalPressure = TotalPressure.ToArray(),
             Temperature = Temperature.ToArray(),
             Gases = new GasSnapshot[ActiveGasCount],
-            VoxelRoomMap = VoxelRoomMap.ToArray()
+            VoxelRoomMap = VoxelRoomMap.ToArray(),
+            ActiveAirCount = ActiveAirCount,
+            ActiveGasCount = ActiveGasCount,
+            IsAwake = IsAwake,
+            SleepTimer = SleepTimer
         };
 
         for (var g = 0; g < ActiveGasCount; g++)

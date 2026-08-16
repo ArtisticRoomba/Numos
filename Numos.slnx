@@ -11,4 +11,6 @@
     <Project Path="src\Numos.API\Numos.API.csproj"/>
     <Project Path="src\Numos.CoreSim\Numos.CoreSim.csproj"/>
     <Project Path="src\Numos.Maths\Numos.Maths.csproj"/>
+    <Project Path="src\Numos.SimDrawer\Numos.SimDrawer.csproj"/>
+    <Project Path="src\Numos.Viewer\Numos.Viewer.csproj"/>
 </Solution>
