@@ -58,7 +58,8 @@ public class GasReactionTests
         solver.SetAtmosConfig(config);
         
         var chunk = new AtmosChunk(1, 1, 1);
-        chunk.IsAwake = true;
+        chunk.VoxelRoomMap[0] = AtmosChunk.RoomUnassigned;
+        chunk.WakeRoom(0);
         chunk.InjectGasToVoxel(0,0,100,5000);
         chunk.InjectGasToVoxel(0,1,100,5000);
         Assert.That(chunk.ActiveGasCount == 2);

@@ -8,7 +8,10 @@ public class ReactionSolver
 
     private FrozenSet<LinearGasReaction.Mapped> _mappedLinGasReacts = [];
 
+    private IGasReaction[] _mappedReactions = [];
+
     private FrozenSet<StandardGasReaction.Mapped> _mappedStandardGasReacts = [];
+
 
     internal void SetAtmosConfig(AtmosConfig config)
     {
@@ -19,6 +22,11 @@ public class ReactionSolver
                 .ToFrozenSet();
         _mappedStandardGasReacts = config.StandardReactionRegistry
             .Select(e => new StandardGasReaction.Mapped(e, config.GasRegistry)).ToFrozenSet();
+        _mappedReactions =
+        [
+            .. _mappedLinGasReacts.Cast<IGasReaction>(),
+            .. _mappedStandardGasReacts.Cast<IGasReaction>()
+        ];
     }
 
     /// <summary>
@@ -30,10 +38,7 @@ public class ReactionSolver
         //process each voxel in parallel
         var voxelCount = chunk.Depth * chunk.Width * chunk.Height;
         //  Parallel.For(0, voxelCount, voxelIndex => ProcessVoxel(chunk, deltaTime, voxelIndex));
-        for (int i = 0; i < voxelCount; i++)
-        {
-            ProcessVoxel(chunk, deltaTime, i);
-        }
+        for (var i = 0; i < voxelCount; i++) ProcessVoxel(chunk, deltaTime, i);
     }
 
     private void ProcessVoxel(AtmosChunk chunk, float deltaTime, int voxelIndex)
@@ -43,19 +48,86 @@ public class ReactionSolver
 
         for (var i = 0; i < chunk.ActiveGasCount; i++)
             mixtureVector[chunk.ActiveGases[i].GasId] = chunk.ActiveGases[i].Moles[voxelIndex];
+
         //TODO Get the energy of the mixture. yes i know dirty, but what can you do.
         mixtureVector[^1] = 0;
-        var nextMixtureVector = new float[_config.GasRegistry.Count + 1];
-        var stepDelta = Math.Min(deltaTime, _config.MaxDeltaForReactionSteps);
         var currentTemperature = chunk.Temperature[voxelIndex];
-        var tookStep = TookStep(deltaTime, mixtureVector, ref currentTemperature, nextMixtureVector, stepDelta);
-        //check if any reactions could took place at all
-        if (!tookStep)
-            return;
-        //adjust moles from the mixture vector
-        foreach (var gasChannel in chunk.ActiveGases)
+        //make sure in single step we dont overstep.
+        var stepSize = MathF.Min(_config.MaxDeltaForReactionSteps, deltaTime);
+        //split our time interval into smaller steps.
+        for (float position = 0; position < deltaTime; position += _config.MaxDeltaForReactionSteps)
         {
-            gasChannel.Moles[voxelIndex] = mixtureVector[gasChannel.GasId];
+            //get all reaction speeds
+            bool anyReaction = false;
+            var reactionSpeeds = new float[_mappedReactions.Length];
+            var temperature = currentTemperature;//to stop warning about the later change of currentTemperature.
+            Parallel.For(0, _mappedReactions.Length, i =>
+            {
+                var e = _mappedReactions[i];
+                var speed = e.GetReactionSpeed(mixtureVector, temperature) * stepSize;
+                if (reactionSpeeds[i] <= 0)
+                    return;
+                reactionSpeeds[i] = speed;
+                anyReaction = true;
+            });
+            //check if there was even a reaction.
+            if (!anyReaction)
+                break;
+            //adjusts reactions speed as to not consume our available material in a single step.
+            while (true)
+            {
+                var criticalIndex = -1;
+                float criticalValue = 0;
+                //check which consumption might go over available material
+                for (var i = 0; i < mixtureVector.Length; i++)
+                {
+                    //we calculate total consumption, ignoring production by reactions.
+                    var consumption = _mappedReactions.Select((e, j) =>
+                        MathF.Min(0, e.ChangeEquation.GetValueOrDefault(i)) * reactionSpeeds[j]).Sum();
+                    var postReactionMoles = mixtureVector[i] + consumption;
+                    //if negative and even more critical, mark.
+                    if (postReactionMoles < criticalValue)
+                    {
+                        criticalValue = consumption;
+                        criticalIndex = i;
+                    }
+                }
+
+                //check if all reaction speeds have been balanced
+                if (criticalIndex == -1)
+                    break;
+                //adjust reaction speeds so our post reaction moles are 0, eliminating any reaction we cannot solve for.
+                // our equation we try to optimize looks like this (((change * speed)/total change in scaled reaction)*available moles)/(change * speed) = (available volume)/(total change in scaled reaction)
+                var scale = mixtureVector[criticalIndex] / Math.Abs(criticalValue);
+                for (var i = 0; i < reactionSpeeds.Length; i++)
+                {
+                    if (!_mappedReactions[i].ChangeEquation.ContainsKey(criticalIndex))
+                        continue;
+                    //select the lower reaction speed
+                    reactionSpeeds[i] = MathF.Min(reactionSpeeds[i], reactionSpeeds[i] * scale);
+                }
+            }
+            for (var i = 0; i < mixtureVector.Length - 1; i++)
+            {
+                for (var j = 0; j < reactionSpeeds.Length; j++)
+                    mixtureVector[i] += _mappedReactions[j].ChangeEquation.GetValueOrDefault(i) * reactionSpeeds[j];
+            }
+
+            //calculate next heat value
+            for (var j = 0; j < reactionSpeeds.Length; j++)
+            {
+                mixtureVector[^1] += _mappedReactions[j].EnergyBalance * reactionSpeeds[j];
+            }
+
+            mixtureVector[^1] = Math.Max(0, mixtureVector[^1]);
+            //TODO: adjust temperature based on thermal energy and pressure.
+            currentTemperature = currentTemperature;
+        }
+
+        //adjust moles from the mixture vector
+        foreach (var gasChannel in chunk.ActiveGases.Take(chunk.ActiveGasCount))
+        {
+            gasChannel.Moles[voxelIndex] = MathF.Max(0, mixtureVector[gasChannel.GasId]);
             //set gas to 0.
             mixtureVector[gasChannel.GasId] = 0;
         }
@@ -66,73 +138,9 @@ public class ReactionSolver
         var idxShort = (ushort)voxelIndex;
         for (var i = 0; i < mixtureVector.Length - 1; i++)
         {
-            if (mixtureVector[i] == 0) continue;
+            if (mixtureVector[i] <= 0) continue;
             chunk.InjectGasToVoxel(idxShort, i, mixtureVector[i], currentTemperature);
         }
         //TODO: report reaction count back. 
-    }
-
-    /// <summary>
-    ///     This is the meat of our solver. in small steps processing all reactions.
-    /// </summary>
-    /// <param name="deltaTime"></param>
-    /// <param name="mixtureVector"></param>
-    /// <param name="currentTemperature"></param>
-    /// <param name="nextMixtureVector"></param>
-    /// <param name="stepDelta"></param>
-    /// <returns></returns>
-    private bool TookStep(float deltaTime, float[] mixtureVector, ref float currentTemperature,
-        float[] nextMixtureVector,
-        float stepDelta)
-    {
-        var tookStep = false;
-        for (float position = 0; position < deltaTime; position += _config.MaxDeltaForReactionSteps)
-        {
-            var stepTemp = currentTemperature;
-
-            var changeOfMixtureByLinearReactionsPerSecond = _mappedLinGasReacts.AsParallel().SelectMany(e =>
-                {
-                    var reactionSpeed = e.GetReactionSpeed(mixtureVector, stepTemp);
-                    return reactionSpeed > 0
-                        ? e.ChangeEquation.Select(f => new KeyValuePair<int, float>(f.Key, f.Value * reactionSpeed))
-                        : [];
-                }
-            ).GroupBy(e => e.Key).ToFrozenDictionary(e => e.Key, e => e.Sum(f => f.Value));
-
-            var changeOfMixtureByStandardReactionsPerSecond = _mappedStandardGasReacts.AsParallel().SelectMany(e =>
-                {
-                    var reactionSpeed = e.GetReactionSpeed(mixtureVector, stepTemp);
-                    return reactionSpeed > 0
-                        ? e.ChangeEquation.Select(f => new KeyValuePair<int, float>(f.Key, f.Value * reactionSpeed))
-                        : [];
-                })
-                .GroupBy(e => e.Key).ToFrozenDictionary(e => e.Key, e => e.Sum(f => f.Value));
-
-            var bad = false;
-            if (changeOfMixtureByLinearReactionsPerSecond.Count == 0 &&
-                changeOfMixtureByStandardReactionsPerSecond.Count == 0)
-                break;
-            var loopResult = Parallel.For(0, mixtureVector.Length, (i, state) =>
-            {
-                nextMixtureVector[i] = mixtureVector[i] +
-                                       changeOfMixtureByLinearReactionsPerSecond.GetValueOrDefault(i) * stepDelta +
-                                       changeOfMixtureByStandardReactionsPerSecond.GetValueOrDefault(i) * stepDelta;
-                if (nextMixtureVector[i] < 0)
-                {
-                    state.Stop();
-                    bad = true;
-                }
-            });
-            if (!loopResult.IsCompleted || bad)
-                //we ran simulation until nothing could be done anymore
-                break;
-            //TODO: calculate new temperature of the system
-
-            //write new values back for next iteration.
-            nextMixtureVector.CopyTo(mixtureVector);
-            tookStep = true;
-        }
-
-        return tookStep;
     }
 }

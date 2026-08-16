@@ -1,4 +1,5 @@
 using System.Collections.Frozen;
+using Numos.CoreSim.GasReactions;
 
 namespace Numos.CoreSim;
 
@@ -127,7 +128,7 @@ public readonly record struct LinearGasReaction
         }).Append(GetRateConstantForTemperature(temperature)).Aggregate((a, b) => a * b);
     }
 
-    public readonly record struct Mapped
+    public readonly record struct Mapped : IGasReaction
     {
         public Mapped(LinearGasReaction original, IList<GasProperties> properties)
         {
@@ -152,12 +153,13 @@ public readonly record struct LinearGasReaction
 
         public LinearGasReaction Original { get; }
 
-        public FrozenDictionary<int, float> ChangeEquation { get; }
-
         /// <summary>
         ///     foreach
         /// </summary>
         public FrozenSet<Factor> MappedFactors { get; }
+
+        public FrozenDictionary<int, float> ChangeEquation { get; }
+        public float EnergyBalance => Original.EnergyBalance;
 
         public float GetReactionSpeed(float[] molarityVector, float temperature)
         {

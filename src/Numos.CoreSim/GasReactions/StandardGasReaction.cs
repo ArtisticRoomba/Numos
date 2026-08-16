@@ -89,7 +89,7 @@ public readonly record struct StandardGasReaction
         return result;
     }
 
-    public readonly record struct Mapped
+    public readonly record struct Mapped : IGasReaction
     {
         public Mapped(StandardGasReaction original, IList<GasProperties> properties)
         {
@@ -114,9 +114,10 @@ public readonly record struct StandardGasReaction
 
         public StandardGasReaction Original { get; }
 
-        public FrozenDictionary<int, float> ChangeEquation { get; }
-
         public FrozenDictionary<int, float> MappedFactors { get; }
+        public float EnergyBalance => Original.EnergyBalance;
+
+        public FrozenDictionary<int, float> ChangeEquation { get; }
 
         public float GetReactionSpeed(float[] molarityVector, float temperature)
         {
