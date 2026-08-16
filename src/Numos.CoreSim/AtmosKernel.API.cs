@@ -329,6 +329,38 @@ internal sealed partial class AtmosKernel
     }
 
     /// <summary>
+    ///     Assigns one classification to the voxels on every simulated outer face of a chunk.
+    /// </summary>
+    /// <remarks>
+    ///     X and Y faces are always included. Z faces are included only for chunks with more than one
+    ///     layer, matching the kernel's two-dimensional boundary behavior for single-layer chunks.
+    /// </remarks>
+    internal void SetChunkBoundaryClassification(Int3 position, VoxelClassification classification)
+    {
+        lock (_stateGate)
+        {
+            var chunk = GetChunk(position);
+            var dimensions = chunk.Dimensions;
+
+            for (var z = 0; z < dimensions.Z; z++)
+            for (var y = 0; y < dimensions.Y; y++)
+            for (var x = 0; x < dimensions.X; x++)
+            {
+                bool isBoundary =
+                    x == 0 || x == dimensions.X - 1 ||
+                    y == 0 || y == dimensions.Y - 1 ||
+                    dimensions.Z > 1 && (z == 0 || z == dimensions.Z - 1);
+
+                if (isBoundary)
+                    chunk.VoxelRoomMap[chunk.GetIndex(new Int3(x, y, z))] = classification.RoomId;
+            }
+
+            RebuildActiveTopology(chunk);
+            chunk.MarkChanged();
+        }
+    }
+
+    /// <summary>
     ///     Assigns a classification to one voxel addressed by its flat local index.
     /// </summary>
     /// <param name="position">The target chunk's grid position.</param>

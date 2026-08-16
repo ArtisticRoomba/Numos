@@ -449,6 +449,27 @@ public sealed class AtmosSimulation : IDisposable
     }
 
     /// <summary>
+    ///     Assigns one classification to the voxels on every simulated outer face of a chunk.
+    /// </summary>
+    /// <param name="chunk">A handle identifying the target chunk.</param>
+    /// <param name="classification">The room, solid, or void classification to assign.</param>
+    /// <remarks>
+    ///     X and Y faces are always included. Z faces are included only when the chunk has more than one
+    ///     layer, so a two-dimensional chunk receives a perimeter instead of becoming entirely classified.
+    ///     The active-voxel topology is rebuilt once after the bulk update.
+    /// </remarks>
+    /// <exception cref="KeyNotFoundException">No chunk is registered at the handle's position.</exception>
+    /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
+    [PublicAPI]
+    public void SetChunkBoundaryClassification(
+        AtmosChunkHandle chunk,
+        VoxelClassification classification)
+    {
+        ThrowIfDisposed();
+        _kernel.SetChunkBoundaryClassification(chunk.Position, classification);
+    }
+
+    /// <summary>
     ///     Assigns a classification to one voxel addressed by its flat local index.
     /// </summary>
     /// <param name="chunk">A handle identifying the target chunk.</param>

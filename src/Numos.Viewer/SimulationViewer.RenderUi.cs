@@ -19,6 +19,15 @@ public partial class SimulationViewer
 
         RenderMenuBar();
 
+        if (_simulation == null)
+        {
+            RenderProjectWelcome();
+            DrawCreateProjectModal();
+            DrawCloseProjectModal();
+            DrawAboutModal();
+            return;
+        }
+
         _viewport?.Draw("Simulation 3D##viewport", RenderSimulationScene);
 
         if (_showSliceViewport)
@@ -34,8 +43,11 @@ public partial class SimulationViewer
         }
 
         RenderDebugPanel();
+        RenderProjectPanel();
         RenderSettingsPanel();
         RenderSimInfoPanel();
+        DrawCreateProjectModal();
+        DrawCloseProjectModal();
         DrawAboutModal();
     }
 
@@ -142,7 +154,7 @@ public partial class SimulationViewer
             ImGuiWindowFlags.None);
 
         ImGui.TextWrapped(
-            "An external viewer for Numos, an engine-agnostic, pseudo-realistic, ideal-gas, cell-based, atmospherics simulation.");
+            "An external viewer for Numos, an engine-agnostic, pseudo-realistic, voxel-based, atmospherics simulation.");
         ImGui.Spacing();
 
         ImGui.Text("© 2026 Numos contributors");
@@ -178,7 +190,7 @@ public partial class SimulationViewer
         ImGui.BeginGroup();
 
         ImGui.Text("Numos Simulation Viewer");
-        ImGui.TextDisabled("Version 0.1.0-alpha-alpha-alpha");
+        ImGui.TextDisabled($"Version {ViewerVersion}");
 
         ImGui.EndGroup();
     }
@@ -189,6 +201,11 @@ public partial class SimulationViewer
         {
             if (ImGui.BeginMenu("File"))
             {
+                if (ImGui.MenuItem("New Simulation"))
+                    RequestCreateProject();
+                if (_simulation != null && ImGui.MenuItem("Close Simulation"))
+                    RequestCloseProject();
+                ImGui.Separator();
                 if (ImGui.MenuItem("Exit", "Alt+F4"))
                     _requestExit = true;
                 ImGui.EndMenu();
@@ -196,6 +213,8 @@ public partial class SimulationViewer
 
             if (ImGui.BeginMenu("View"))
             {
+                if (_simulation != null)
+                    ImGui.MenuItem("Project Panel", null, ref _showProjectPanel);
                 ImGui.MenuItem("Debug Panel", null, ref _showDebugPanel);
                 ImGui.MenuItem("Settings Panel", null, ref _showSettingsPanel);
                 ImGui.MenuItem("Sim Info Panel", null, ref _showSimInfoPanel);
@@ -496,6 +515,13 @@ public partial class SimulationViewer
                 FocusCameraOnChunk(focused);
             else
                 FocusCameraOnScene();
+        }
+
+        if (_focusedChunk.HasValue)
+        {
+            ImGui.SameLine();
+            if (ImGui.Button("Reset focus"))
+                SetFocusedChunk(null);
         }
     }
 

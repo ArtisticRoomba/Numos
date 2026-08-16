@@ -35,8 +35,6 @@ public partial class SimulationViewer
 
         _disposed = true;
         DisposeGraphics();
-
-        _simulation?.Dispose();
-        _simulation = null;
+        DisposeSimulationProject();
     }
 }

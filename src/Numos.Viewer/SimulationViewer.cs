@@ -2,7 +2,6 @@ using System.Numerics;
 using ImGuiNET;
 using Numos.API;
 using Numos.CoreSim;
-using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.Datatypes.Snapshots;
 using Numos.Maths;
 using Numos.SimDrawer;
@@ -18,6 +17,8 @@ namespace Numos.Viewer;
 /// </summary>
 public partial class SimulationViewer : IDisposable
 {
+    private const string ViewerVersion = "0.1.0-alpha-alpha-alpha";
+
     private readonly record struct VoxelDetailCacheEntry(
         AtmosChunkVersion PresentedVersion,
         bool IsAvailable,
@@ -37,6 +38,7 @@ public partial class SimulationViewer : IDisposable
 
     private AtmosSimulation? _simulation;
     private AtmosConfig? _config;
+    private string? _projectName;
     private readonly List<AtmosChunkHandle> _liveChunkHandles = [];
     private readonly HashSet<Int3> _liveChunkPositions = [];
     private long _chunkCollectionRevision = -1;
@@ -78,6 +80,12 @@ public partial class SimulationViewer : IDisposable
     };
     private bool _cameraInitialized;
     private bool _frameSceneOnNextPresentation;
+    private Vector3 _cameraMoveStartPosition;
+    private Vector3 _cameraMoveStartTarget;
+    private Vector3 _cameraMoveEndPosition;
+    private Vector3 _cameraMoveEndTarget;
+    private const float CameraMoveDuration = 0.45f;
+    private float _cameraMoveElapsed = CameraMoveDuration;
 
     // UI state
     private bool _showDebugPanel = true;
@@ -99,12 +107,11 @@ public partial class SimulationViewer : IDisposable
 
     public void Run()
     {
-        InitializeSimulation();
         Raylib.SetConfigFlags(
             ConfigFlags.ResizableWindow |
             ConfigFlags.Msaa4xHint |
             ConfigFlags.VSyncHint);
-        Raylib.InitWindow(1400, 900, "Numos Atmospheric Simulation Viewer");
+        Raylib.InitWindow(1400, 900, "Numos Simulation Viewer");
         _windowInitialized = true;
 
         try
@@ -120,7 +127,6 @@ public partial class SimulationViewer : IDisposable
             _sliceViewport = new SimulationViewport(
                 TextureFilter.Point,
                 new Color(0.04f, 0.04f, 0.05f, 1f));
-            RefreshPresentation();
 
             while (!Raylib.WindowShouldClose() && !_requestExit)
             {
@@ -135,41 +141,6 @@ public partial class SimulationViewer : IDisposable
         }
     }
 
-    private void InitializeSimulation()
-    {
-        _config = new AtmosConfig();
-        _config.GasRegistry.Add(new GasProperties
-        {
-            Name = "Oxygen",
-            SpecificHeatCapacity = 1000f,
-            BoilingPoint = 90f,
-            CondensationPoint = 85f,
-            LatentHeatOfVaporization = 10000f,
-            LiquidId = 0,
-            DiffusionCoefficient = 0.1f
-        });
-        _config.GasRegistry.Add(new GasProperties
-        {
-            Name = "Nitrogen",
-            SpecificHeatCapacity = 1040f,
-            BoilingPoint = 77f,
-            CondensationPoint = 73f,
-            LatentHeatOfVaporization = 11500f,
-            LiquidId = 1,
-            DiffusionCoefficient = 0.08f
-        });
-
-        _simulation = new AtmosSimulation(_config, chunkDepth: 1);
-        var visualizations = VisualizationRegistry.CreateDefault(_config);
-        _configureVisualizations?.Invoke(visualizations);
-        _frameBuilder = new SimulationFrameBuilder(_config, visualizations);
-
-        var chunk = _simulation.CreateAndRegisterChunk(new Int3(0, 0, 0));
-        _simulation.SetChunkClassification(chunk, new VoxelClassification(1));
-        for (ushort index = 0; index < 16 * 16; index++)
-            _simulation.AddGasToVoxel(chunk, index, 0, 100, 293.15f);
-    }
-
     private void Update(float deltaTime)
     {
         if (_simulation != null && _config != null)
@@ -180,7 +151,7 @@ public partial class SimulationViewer : IDisposable
             RefreshPresentation();
         }
 
-        UpdateCamera();
+        UpdateCamera(deltaTime);
     }
 
     private void RefreshPresentation()
@@ -396,6 +367,31 @@ public partial class SimulationViewer : IDisposable
         FrameCamera(target, distance);
     }
 
+    private void MoveCameraToChunk(ChunkDrawData chunk)
+    {
+        ShowAllChunks();
+        FocusCameraOnChunk(chunk);
+    }
+
+    private void MoveCameraToVoxel(ChunkDrawData chunk, int x, int y, int z)
+    {
+        x = Math.Clamp(x, 0, chunk.Dimensions.X - 1);
+        y = Math.Clamp(y, 0, chunk.Dimensions.Y - 1);
+        z = Math.Clamp(z, 0, chunk.Dimensions.Z - 1);
+
+        ShowAllChunks();
+        var target = new Vector3(
+            chunk.ChunkPosition.X * chunk.Dimensions.X + x + 0.5f,
+            chunk.ChunkPosition.Y * chunk.Dimensions.Y + y + 0.5f,
+            chunk.ChunkPosition.Z * chunk.Dimensions.Z + z + 0.5f);
+        FrameCamera(target, Vector3.Distance(_camera3D.Position, _camera3D.Target));
+    }
+
+    private void ShowAllChunks()
+    {
+        _focusedChunk = null;
+    }
+
     private void FocusCameraOnScene()
     {
         if (_drawData == null || _drawData.Chunks.Count == 0)
@@ -425,13 +421,16 @@ public partial class SimulationViewer : IDisposable
         FrameCamera(target, distance);
     }
 
-    private void UpdateCamera()
+    private void UpdateCamera(float deltaTime)
     {
+        UpdateCameraMove(deltaTime);
+
         if (_viewport is not { IsHovered: true })
             return;
 
         if (Raylib.IsMouseButtonDown(MouseButton.Left))
         {
+            CancelCameraMove();
             var mouseDelta = Raylib.GetMouseDelta();
             Raylib.CameraYaw(ref _camera3D, -mouseDelta.X * 0.01f, true);
             Raylib.CameraPitch(ref _camera3D, -mouseDelta.Y * 0.01f, true, true, false);
@@ -439,7 +438,10 @@ public partial class SimulationViewer : IDisposable
 
         float wheel = Raylib.GetMouseWheelMove();
         if (wheel != 0f)
+        {
+            CancelCameraMove();
             Raylib.CameraMoveToTarget(ref _camera3D, -wheel * 2f);
+        }
     }
 
     private void FrameCamera(Vector3 target, float distance)
@@ -450,8 +452,28 @@ public partial class SimulationViewer : IDisposable
         else
             direction = Vector3.Normalize(direction);
 
-        _camera3D.Target = target;
-        _camera3D.Position = target + direction * distance;
+        _cameraMoveStartPosition = _camera3D.Position;
+        _cameraMoveStartTarget = _camera3D.Target;
+        _cameraMoveEndTarget = target;
+        _cameraMoveEndPosition = target + direction * Math.Max(distance, 0.1f);
+        _cameraMoveElapsed = 0f;
+    }
+
+    private void UpdateCameraMove(float deltaTime)
+    {
+        if (_cameraMoveElapsed >= CameraMoveDuration)
+            return;
+
+        _cameraMoveElapsed = Math.Min(_cameraMoveElapsed + Math.Max(deltaTime, 0f), CameraMoveDuration);
+        float amount = _cameraMoveElapsed / CameraMoveDuration;
+        amount = amount * amount * (3f - 2f * amount);
+        _camera3D.Position = Vector3.Lerp(_cameraMoveStartPosition, _cameraMoveEndPosition, amount);
+        _camera3D.Target = Vector3.Lerp(_cameraMoveStartTarget, _cameraMoveEndTarget, amount);
+    }
+
+    private void CancelCameraMove()
+    {
+        _cameraMoveElapsed = CameraMoveDuration;
     }
 
     private void Draw(float deltaTime)

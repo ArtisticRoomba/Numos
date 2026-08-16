@@ -1,0 +1,534 @@
+using System.Numerics;
+using ImGuiNET;
+using Numos.API;
+using Numos.CoreSim;
+using Numos.Maths;
+
+namespace Numos.Viewer;
+
+public partial class SimulationViewer
+{
+    private const double StepProgressDisplayDuration = 0.8;
+    private double _stepProgressDisplayUntil;
+    private int _completedStepTick;
+
+    private bool _showProjectPanel = true;
+    private bool _welcomeModalOpen = true;
+    private bool _requestOpenCreateProject;
+    private bool _createProjectModalOpen;
+    private bool _requestOpenCloseProject;
+    private bool _closeProjectModalOpen;
+
+    private string _projectNameDraft = "Untitled Simulation";
+    private int _projectChunkWidthDraft = 16;
+    private int _projectChunkHeightDraft = 16;
+    private int _projectChunkDepthDraft = 1;
+    private bool _includeDefaultGasesDraft = true;
+    private string? _createProjectError;
+
+    private int _newChunkX;
+    private int _newChunkY;
+    private int _newChunkZ;
+    private int _newChunkRoomId = 1;
+
+    private Int3? _injectionChunkPosition;
+    private int _injectionX;
+    private int _injectionY;
+    private int _injectionZ;
+    private int _injectionGasId;
+    private float _injectionMoles = 1f;
+    private float _injectionTemperature = 293.15f;
+
+    private string _newGasName = "New Gas";
+    private float _newGasSpecificHeatCapacity = 1000f;
+    private float _newGasBoilingPoint;
+    private float _newGasCondensationPoint;
+    private float _newGasLatentHeat;
+    private int _newGasLiquidId = -1;
+    private float _newGasDiffusionCoefficient = 0.02f;
+
+    private string? _projectMessage;
+    private bool _projectMessageIsError;
+
+    private void RequestCreateProject()
+    {
+        _projectNameDraft = _simulation == null ? "Untitled Simulation" : $"{_projectName} Copy";
+        _projectChunkWidthDraft = _chunkDimensions.X > 0 ? _chunkDimensions.X : 16;
+        _projectChunkHeightDraft = _chunkDimensions.Y > 0 ? _chunkDimensions.Y : 16;
+        _projectChunkDepthDraft = _chunkDimensions.Z > 0 ? _chunkDimensions.Z : 1;
+        _includeDefaultGasesDraft = true;
+        _createProjectError = null;
+        _requestOpenCreateProject = true;
+        _createProjectModalOpen = true;
+    }
+
+    private void RequestCloseProject()
+    {
+        if (_simulation == null)
+            return;
+
+        _requestOpenCloseProject = true;
+        _closeProjectModalOpen = true;
+    }
+
+    private void RenderProjectWelcome()
+    {
+        const string popupId = "Welcome to Numos##welcome";
+
+        if (!_requestOpenCreateProject && !_createProjectModalOpen)
+        {
+            _welcomeModalOpen = true;
+            ImGui.OpenPopup(popupId);
+        }
+
+        var viewport = ImGui.GetMainViewport();
+        ImGui.SetNextWindowPos(
+            viewport.Pos + viewport.Size * 0.5f,
+            ImGuiCond.Appearing,
+            new Vector2(0.5f, 0.5f));
+        ImGui.SetNextWindowSize(new Vector2(360, 170), ImGuiCond.Appearing);
+
+        var flags = ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoSavedSettings;
+        if (!ImGui.BeginPopupModal(popupId, ref _welcomeModalOpen, flags))
+            return;
+
+        CenterWelcomeText("Numos");
+        CenterWelcomeText($"Version {ViewerVersion}", true);
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+        ImGui.TextWrapped(
+            "Numos is an engine-agnostic, pseudo-realistic, voxel-based atmospherics simulation library.");
+
+        ImGui.SetCursorPosY(ImGui.GetWindowSize().Y - 50);
+        const float buttonWidth = 220;
+        ImGui.SetCursorPosX((ImGui.GetWindowSize().X - buttonWidth) * 0.5f);
+        if (ImGui.Button("Start New Simulation", new Vector2(buttonWidth, 0)))
+        {
+            RequestCreateProject();
+            _welcomeModalOpen = false;
+            ImGui.CloseCurrentPopup();
+        }
+
+        ImGui.EndPopup();
+    }
+
+    private static void CenterWelcomeText(string text, bool disabled = false)
+    {
+        float textWidth = ImGui.CalcTextSize(text).X;
+        ImGui.SetCursorPosX((ImGui.GetWindowSize().X - textWidth) * 0.5f);
+        if (disabled)
+            ImGui.TextDisabled(text);
+        else
+            ImGui.Text(text);
+    }
+
+    private void DrawCreateProjectModal()
+    {
+        const string popupId = "Create Simulation";
+        if (_requestOpenCreateProject)
+        {
+            ImGui.OpenPopup(popupId);
+            _requestOpenCreateProject = false;
+        }
+
+        var viewport = ImGui.GetMainViewport();
+        ImGui.SetNextWindowPos(
+            viewport.Pos + viewport.Size * 0.5f,
+            ImGuiCond.Appearing,
+            new Vector2(0.5f, 0.5f));
+        ImGui.SetNextWindowSize(new Vector2(520, 0), ImGuiCond.Appearing);
+        var flags = ImGuiWindowFlags.AlwaysAutoResize | ImGuiWindowFlags.NoSavedSettings;
+        if (!ImGui.BeginPopupModal(popupId, ref _createProjectModalOpen, flags))
+            return;
+
+        ImGui.InputText("Project name", ref _projectNameDraft, 128);
+        ImGui.Separator();
+        ImGui.Text("Chunk dimensions");
+        ImGui.InputInt("Width##project-chunk", ref _projectChunkWidthDraft);
+        ImGui.InputInt("Height##project-chunk", ref _projectChunkHeightDraft);
+        ImGui.InputInt("Depth##project-chunk", ref _projectChunkDepthDraft);
+        ImGui.TextDisabled("Every chunk in this project uses these fixed dimensions.");
+
+        ImGui.Separator();
+        ImGui.Checkbox("Include Oxygen and Nitrogen", ref _includeDefaultGasesDraft);
+        ImGui.TextDisabled(_includeDefaultGasesDraft
+            ? "The default gas definitions will be appended to the new project."
+            : "The project will start with a blank gas registry.");
+
+        if (_simulation != null)
+        {
+            ImGui.Spacing();
+            ImGui.TextColored(
+                new Vector4(1f, 0.72f, 0.25f, 1f),
+                "Creating this project will close the current in-memory project.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(_createProjectError))
+        {
+            ImGui.Spacing();
+            ImGui.TextColored(new Vector4(1f, 0.35f, 0.35f, 1f), _createProjectError);
+        }
+
+        ImGui.Spacing();
+        if (ImGui.Button("Create", new Vector2(120, 0)))
+        {
+            try
+            {
+                CreateSimulationProject(
+                    _projectNameDraft,
+                    _projectChunkWidthDraft,
+                    _projectChunkHeightDraft,
+                    _projectChunkDepthDraft,
+                    _includeDefaultGasesDraft);
+                _createProjectModalOpen = false;
+                ImGui.CloseCurrentPopup();
+            }
+            catch (Exception exception) when (
+                exception is ArgumentException or InvalidOperationException)
+            {
+                _createProjectError = exception.Message;
+            }
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("Cancel", new Vector2(120, 0)))
+        {
+            _createProjectModalOpen = false;
+            ImGui.CloseCurrentPopup();
+        }
+
+        ImGui.EndPopup();
+    }
+
+    private void DrawCloseProjectModal()
+    {
+        const string popupId = "Close Simulation Project?";
+        if (_requestOpenCloseProject)
+        {
+            ImGui.OpenPopup(popupId);
+            _requestOpenCloseProject = false;
+        }
+
+        ImGui.SetNextWindowSize(new Vector2(430, 0), ImGuiCond.Appearing);
+        var flags = ImGuiWindowFlags.AlwaysAutoResize | ImGuiWindowFlags.NoSavedSettings;
+        if (!ImGui.BeginPopupModal(popupId, ref _closeProjectModalOpen, flags))
+            return;
+
+        ImGui.TextWrapped(
+            $"Close '{_projectName}' and dispose its simulation? This project only exists in memory.");
+        ImGui.Spacing();
+        if (ImGui.Button("Close Project", new Vector2(140, 0)))
+        {
+            DisposeSimulationProject();
+            _closeProjectModalOpen = false;
+            ImGui.CloseCurrentPopup();
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("Cancel", new Vector2(120, 0)))
+        {
+            _closeProjectModalOpen = false;
+            ImGui.CloseCurrentPopup();
+        }
+
+        ImGui.EndPopup();
+    }
+
+    private void RenderProjectPanel()
+    {
+        if (!_showProjectPanel || _simulation == null || _config == null)
+            return;
+
+        ImGui.SetNextWindowPos(new Vector2(10, 360), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSize(new Vector2(380, 520), ImGuiCond.FirstUseEver);
+        if (!ImGui.Begin("Simulation Project##project", ref _showProjectPanel))
+        {
+            ImGui.End();
+            return;
+        }
+
+        ImGui.Text(_projectName ?? "Untitled Simulation");
+        ImGui.TextDisabled(
+            $"Chunks: {_simulation.ChunkCount}  |  Gases: {_config.GasRegistry.Count}  |  Ticks: {_simulation.TickCount}");
+
+        if (_isPaused)
+        {
+            if (ImGui.Button("Run", new Vector2(90, 0)))
+                _isPaused = false;
+        }
+        else if (ImGui.Button("Pause", new Vector2(90, 0)))
+        {
+            _isPaused = true;
+        }
+
+        ImGui.SameLine();
+        if (_isPaused)
+        {
+            if (ImGui.Button("Step", new Vector2(90, 0)))
+            {
+                _simulation.Tick();
+                _completedStepTick = _simulation.TickCount;
+                _stepProgressDisplayUntil = ImGui.GetTime() + StepProgressDisplayDuration;
+            }
+        }
+        else
+        {
+            ImGui.BeginDisabled();
+            ImGui.Button("Step", new Vector2(90, 0));
+            ImGui.EndDisabled();
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("Close Project", new Vector2(130, 0)))
+            RequestCloseProject();
+
+        RenderSimulationProgress();
+
+        RenderProjectMessage();
+
+        if (ImGui.CollapsingHeader("Chunks", ImGuiTreeNodeFlags.DefaultOpen))
+            RenderProjectChunkControls();
+        if (ImGui.CollapsingHeader("Gas Registry", ImGuiTreeNodeFlags.DefaultOpen))
+            RenderProjectGasControls();
+        if (ImGui.CollapsingHeader("Inject Gas", ImGuiTreeNodeFlags.DefaultOpen))
+            RenderProjectInjectionControls();
+
+        ImGui.End();
+    }
+
+    private void RenderSimulationProgress()
+    {
+        const float cycleDuration = 1.25f;
+        double now = ImGui.GetTime();
+        var indet = (float)(-1f * (now % (cycleDuration / cycleDuration)));
+
+        if (!_isPaused)
+        {
+            ImGui.ProgressBar(indet, new Vector2(-1, 0), "Ticking...");
+            return;
+        }
+
+        if (now < _stepProgressDisplayUntil)
+        {
+            ImGui.ProgressBar(0f, new Vector2(-1, 0), $"Step complete - Tick {_completedStepTick}");
+            return;
+        }
+
+        ImGui.ProgressBar(0f, new Vector2(-1, 0), "Paused");
+    }
+
+    private void RenderProjectMessage()
+    {
+        if (string.IsNullOrWhiteSpace(_projectMessage))
+            return;
+
+        ImGui.Spacing();
+        ImGui.PushStyleColor(
+            ImGuiCol.Text,
+            _projectMessageIsError
+                ? new Vector4(1f, 0.35f, 0.35f, 1f)
+                : new Vector4(0.4f, 0.85f, 0.5f, 1f));
+        ImGui.TextWrapped(_projectMessage);
+        ImGui.PopStyleColor();
+        ImGui.Spacing();
+    }
+
+    private void SetProjectMessage(string message, bool isError)
+    {
+        _projectMessage = message;
+        _projectMessageIsError = isError;
+    }
+
+    private void RenderProjectChunkControls()
+    {
+        ImGui.TextDisabled(
+            $"Fixed size: {_chunkDimensions.X} x {_chunkDimensions.Y} x {_chunkDimensions.Z}");
+
+        AtmosChunkHandle? chunkToRemove = null;
+        AtmosChunkHandle? chunkToSeal = null;
+        foreach (var handle in _liveChunkHandles)
+        {
+            ImGui.PushID($"chunk-{handle.Position.X}-{handle.Position.Y}-{handle.Position.Z}");
+            ImGui.Text(FormatChunkPosition(handle.Position));
+            ImGui.SameLine();
+            if (ImGui.SmallButton("Move Camera") &&
+                _drawData != null &&
+                _drawData.Chunks.TryGetValue(handle.Position, out var chunkData))
+                MoveCameraToChunk(chunkData);
+            ImGui.SameLine();
+            if (ImGui.SmallButton("Seal With Walls"))
+                chunkToSeal = handle;
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Replace the chunk's simulated outer faces with solid voxels.");
+            ImGui.SameLine();
+            if (ImGui.SmallButton("Remove"))
+                chunkToRemove = handle;
+            ImGui.PopID();
+        }
+
+        if (chunkToRemove.HasValue)
+            RemoveProjectChunk(chunkToRemove.Value);
+        else if (chunkToSeal.HasValue)
+            SealProjectChunk(chunkToSeal.Value);
+
+        if (_liveChunkHandles.Count == 0)
+            ImGui.TextDisabled("No chunks. Add one at a chunk-grid position.");
+
+        ImGui.Separator();
+        ImGui.InputInt("X##new-chunk", ref _newChunkX);
+        ImGui.InputInt("Y##new-chunk", ref _newChunkY);
+        ImGui.InputInt("Z##new-chunk", ref _newChunkZ);
+        ImGui.InputInt("Initial room ID##new-chunk", ref _newChunkRoomId);
+        if (ImGui.Button("Add Chunk", new Vector2(120, 0)))
+            AddProjectChunk(new Int3(_newChunkX, _newChunkY, _newChunkZ), _newChunkRoomId);
+    }
+
+    private void RenderProjectGasControls()
+    {
+        int gasToRemove = -1;
+        for (var gasId = 0; gasId < _config!.GasRegistry.Count; gasId++)
+        {
+            var gas = _config.GasRegistry[gasId];
+            ImGui.PushID($"gas-{gasId}");
+            ImGui.Text($"{gasId}: {gas.Name}");
+            ImGui.SameLine();
+            if (ImGui.SmallButton("Remove"))
+                gasToRemove = gasId;
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Removal is allowed while no stored chunk gas IDs would be shifted.");
+            ImGui.PopID();
+        }
+
+        if (gasToRemove >= 0)
+            RemoveProjectGas(gasToRemove);
+
+        if (_config.GasRegistry.Count == 0)
+            ImGui.TextDisabled("Blank gas registry. Add a gas before injecting.");
+
+        ImGui.Separator();
+        ImGui.Text("Add gas definition");
+        ImGui.InputText("Name##new-gas", ref _newGasName, 64);
+        ImGui.InputFloat("Specific heat##new-gas", ref _newGasSpecificHeatCapacity);
+        ImGui.InputFloat("Boiling point (K)##new-gas", ref _newGasBoilingPoint);
+        ImGui.InputFloat("Condensation point (K)##new-gas", ref _newGasCondensationPoint);
+        ImGui.InputFloat("Latent heat##new-gas", ref _newGasLatentHeat);
+        ImGui.InputInt("Liquid ID##new-gas", ref _newGasLiquidId);
+        ImGui.InputFloat("Diffusion coefficient##new-gas", ref _newGasDiffusionCoefficient);
+        if (ImGui.Button("Add Gas", new Vector2(120, 0)))
+        {
+            AddProjectGas(new GasProperties
+            {
+                Name = _newGasName,
+                SpecificHeatCapacity = _newGasSpecificHeatCapacity,
+                BoilingPoint = _newGasBoilingPoint,
+                CondensationPoint = _newGasCondensationPoint,
+                LatentHeatOfVaporization = _newGasLatentHeat,
+                LiquidId = _newGasLiquidId,
+                DiffusionCoefficient = _newGasDiffusionCoefficient
+            });
+        }
+    }
+
+    private void RenderProjectInjectionControls()
+    {
+        if (_liveChunkHandles.Count == 0)
+        {
+            _injectionChunkPosition = null;
+            ImGui.TextDisabled("Add a chunk before injecting gas.");
+            return;
+        }
+
+        if (!_injectionChunkPosition.HasValue ||
+            !_liveChunkPositions.Contains(_injectionChunkPosition.Value))
+            _injectionChunkPosition = _liveChunkHandles[0].Position;
+
+        string chunkLabel = FormatChunkPosition(_injectionChunkPosition.Value);
+        if (ImGui.BeginCombo("Chunk##inject", chunkLabel))
+        {
+            foreach (var handle in _liveChunkHandles)
+            {
+                bool selected = handle.Position == _injectionChunkPosition.Value;
+                if (ImGui.Selectable(FormatChunkPosition(handle.Position), selected))
+                    _injectionChunkPosition = handle.Position;
+                if (selected)
+                    ImGui.SetItemDefaultFocus();
+            }
+
+            ImGui.EndCombo();
+        }
+
+        if (_selectedCell.HasValue &&
+            _drawData != null &&
+            _drawData.Chunks.TryGetValue(_selectedCell.Value.Chunk.Position, out var selectedChunk) &&
+            selectedChunk.Identity == _selectedCell.Value.Chunk)
+        {
+            if (ImGui.Button("Use Selected Cell"))
+            {
+                var coordinates = selectedChunk.GetCoordinates(_selectedCell.Value.LocalIndex);
+                _injectionChunkPosition = selectedChunk.ChunkPosition;
+                _injectionX = coordinates.X;
+                _injectionY = coordinates.Y;
+                _injectionZ = coordinates.Z;
+            }
+        }
+
+        ImGui.InputInt("Voxel X##inject", ref _injectionX);
+        ImGui.InputInt("Voxel Y##inject", ref _injectionY);
+        ImGui.InputInt("Voxel Z##inject", ref _injectionZ);
+
+        if (ImGui.Button("Move Camera to Voxel", new Vector2(180, 0)) &&
+            _injectionChunkPosition.HasValue &&
+            _drawData != null &&
+            _drawData.Chunks.TryGetValue(_injectionChunkPosition.Value, out var cameraChunk))
+        {
+            MoveCameraToVoxel(cameraChunk, _injectionX, _injectionY, _injectionZ);
+        }
+
+        if (_config!.GasRegistry.Count > 0)
+        {
+            _injectionGasId = Math.Clamp(_injectionGasId, 0, _config.GasRegistry.Count - 1);
+            string gasLabel = FormatGas(_injectionGasId);
+            if (ImGui.BeginCombo("Gas##inject", gasLabel))
+            {
+                for (var gasId = 0; gasId < _config.GasRegistry.Count; gasId++)
+                {
+                    bool selected = gasId == _injectionGasId;
+                    if (ImGui.Selectable(FormatGas(gasId), selected))
+                        _injectionGasId = gasId;
+                    if (selected)
+                        ImGui.SetItemDefaultFocus();
+                }
+
+                ImGui.EndCombo();
+            }
+        }
+        else
+        {
+            ImGui.TextDisabled("Gas: none registered");
+        }
+
+        ImGui.InputFloat("Moles##inject", ref _injectionMoles);
+        ImGui.InputFloat("Temperature (K)##inject", ref _injectionTemperature);
+
+        bool canInject = _config.GasRegistry.Count > 0;
+        if (!canInject)
+            ImGui.BeginDisabled();
+        if (ImGui.Button("Inject Gas##inject-action", new Vector2(120, 0)) &&
+            _injectionChunkPosition.HasValue)
+        {
+            InjectProjectGas(
+                new AtmosChunkHandle(_injectionChunkPosition.Value),
+                _injectionX,
+                _injectionY,
+                _injectionZ,
+                _injectionGasId,
+                _injectionMoles,
+                _injectionTemperature);
+        }
+
+        if (!canInject)
+            ImGui.EndDisabled();
+    }
+}

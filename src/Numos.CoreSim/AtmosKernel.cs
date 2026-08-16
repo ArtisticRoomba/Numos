@@ -598,14 +598,18 @@ internal sealed partial class AtmosKernel : IDisposable
     private void ApplyDeltas(AtmosChunk chunk, float[] deltas)
     {
         // TODO PERF SIMD
+        float defaultTemperature = _config.DefaultTemperatureFallback;
         for (var g = 0; g < chunk.ActiveGasCount; g++)
         {
             int offset = g * chunk.VoxelCount;
             for (var i = 0; i < chunk.ActiveAirCount; i++)
             {
                 ushort idx = chunk.ActiveAirIndices[i];
+                if (deltas[offset + idx] > 0f && chunk.Temperature[idx] <= 0f)
+                    chunk.Temperature[idx] = defaultTemperature;
+
                 chunk.ActiveGases[g].Moles[idx] += deltas[offset + idx];
-                if (chunk.ActiveGases[g].Moles[idx] < 0.0001f) // TODO unhardcode mole threshold
+                if (chunk.ActiveGases[g].Moles[idx] < 0f)
                     chunk.ActiveGases[g].Moles[idx] = 0f;
             }
         }
