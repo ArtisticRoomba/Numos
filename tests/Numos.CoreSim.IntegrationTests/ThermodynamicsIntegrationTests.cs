@@ -401,10 +401,11 @@ public sealed class ThermodynamicsIntegrationTests
 
     [TestCase(0f)]
     [TestCase(-2f)]
-    public void Condensation_NonPositiveSpecificHeatCapacityUsesUnitFallback(
+    public void Condensation_NonPositiveSpecificHeatCapacityUsesConfiguredFallback(
         float configuredSpecificHeatCapacity)
     {
         var config = CreateCondensationConfig();
+        config.DefaultSpecificHeatCapacity = 2f;
         var gas = config.GasRegistry[SimTestHelpers.FirstGasId];
         gas.SpecificHeatCapacity = configuredSpecificHeatCapacity;
         config.GasRegistry[SimTestHelpers.FirstGasId] = gas;
@@ -421,7 +422,7 @@ public sealed class ThermodynamicsIntegrationTests
             Assert.That(SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 0),
                 Is.EqualTo(7.5f).Within(SimTestHelpers.Tolerance));
             Assert.That(snapshot.Temperature[0],
-                Is.EqualTo(203.3333333f).Within(SimTestHelpers.Tolerance));
+                Is.EqualTo(201.6666667f).Within(SimTestHelpers.Tolerance));
         });
     }
 

@@ -16,7 +16,7 @@ public struct GasProperties
     /// <remarks>
     ///     This value determines the sensible energy carried by gas during injection and flow, the voxel's
     ///     total heat capacity, and the energy removed during condensation. Non-finite values and values less
-    ///     than or equal to zero are treated as <c>1 J/(mol·K)</c> by the simulation.
+    ///     than or equal to zero use <see cref="AtmosConfig.DefaultSpecificHeatCapacity" />.
     /// </remarks>
     public float SpecificHeatCapacity;
 

@@ -13,6 +13,7 @@ public sealed class AtmosConfigTests
             Assert.That(config.GasRegistry, Is.Not.Null.And.Empty);
             Assert.That(config.GlobalTemperature, Is.EqualTo(293.15f));
             Assert.That(config.DefaultTemperatureFallback, Is.EqualTo(293.15f));
+            Assert.That(config.DefaultSpecificHeatCapacity, Is.EqualTo(1f));
             Assert.That(config.SpaceTemperature, Is.EqualTo(2.7f));
             Assert.That(config.FlowFriction, Is.EqualTo(0.25f));
             Assert.That(config.DampingFactor, Is.EqualTo(0.5f));

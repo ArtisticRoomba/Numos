@@ -83,6 +83,10 @@ internal static class SimTestHelpers
         params AtmosChunkSnapshot[] snapshots)
     {
         var totalEnergy = 0f;
+        float fallbackSpecificHeatCapacity = float.IsFinite(config.DefaultSpecificHeatCapacity) &&
+                                             config.DefaultSpecificHeatCapacity > 0f
+            ? config.DefaultSpecificHeatCapacity
+            : 1f;
         foreach (var snapshot in snapshots)
         {
             for (var index = 0; index < snapshot.Temperature.Length; index++)
@@ -93,11 +97,11 @@ internal static class SimTestHelpers
                     float configuredSpecificHeatCapacity = gas.GasId >= 0 &&
                                                            gas.GasId < config.GasRegistry.Count
                         ? config.GasRegistry[gas.GasId].SpecificHeatCapacity
-                        : 1f;
+                        : fallbackSpecificHeatCapacity;
                     float specificHeatCapacity = float.IsFinite(configuredSpecificHeatCapacity) &&
                                                  configuredSpecificHeatCapacity > 0f
                         ? configuredSpecificHeatCapacity
-                        : 1f;
+                        : fallbackSpecificHeatCapacity;
                     heatCapacity += gas.Moles[index] * specificHeatCapacity;
                 }
 

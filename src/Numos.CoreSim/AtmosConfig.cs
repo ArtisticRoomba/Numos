@@ -20,10 +20,22 @@ public class AtmosConfig
     ///     has a non-finite or nonpositive stored temperature.
     /// </summary>
     /// <remarks>
+    ///     This value must be finite and positive; the simulation does not normalize an invalid configured
+    ///     temperature fallback.
     ///     Energy evolution uses this value as the voxel's starting temperature, then stores the resulting
     ///     blended or transferred temperature.
     /// </remarks>
     public float DefaultTemperatureFallback { get; set; } = 293.15f;
+
+    /// <summary>
+    ///     Effective molar heat capacity used when a gas is not registered or its configured
+    ///     <see cref="GasProperties.SpecificHeatCapacity" /> is non-finite or nonpositive, in joules per
+    ///     mole-kelvin (J/(mol·K)).
+    /// </summary>
+    /// <remarks>
+    ///     Non-finite and nonpositive fallback values are normalized to <c>1 J/(mol·K)</c> by the simulation.
+    /// </remarks>
+    public float DefaultSpecificHeatCapacity { get; set; } = 1f;
 
     /// <summary>
     ///     Default temperature of space.
@@ -72,10 +84,10 @@ public class AtmosConfig
     ///     thermodynamics tick (currently every second simulation tick).
     /// </summary>
     /// <remarks>
-    ///     The simulation multiplies this value by the temperature difference to obtain an energy transfer,
-    ///     then limits the transfer to prevent either voxel from passing thermal equilibrium or the source
-    ///     from transferring more energy than it contains. Non-finite or nonpositive values disable thermal
-    ///     diffusion.
+    ///     The simulation applies equal-and-opposite energy transfers to conserve sensible energy. Transfer
+    ///     limiting makes each updated gas-bearing temperature a convex combination of temperatures participating
+    ///     in the solve, preventing negative temperatures and new temperature extrema. Non-finite or nonpositive
+    ///     values disable thermal diffusion.
     /// </remarks>
     public float ThermalConductivity { get; set; } = 0.05f;
 
@@ -85,8 +97,9 @@ public class AtmosConfig
     public float CondensationRateFactor { get; set; } = 0.5f;
 
     /// <summary>
-    ///     Maximum fraction of a source voxel's pressure that may flow to one neighbor per tick.
+    ///     Maximum fraction of a source voxel's pressure used by the bulk-advection term for one neighbor per tick.
     /// </summary>
+    /// <remarks>Passive Fickian diffusion is calculated separately and is not capped by this value.</remarks>
     public float CflFlowCap { get; set; } = 0.16f;
 
     public float AccumulatorWakeThreshold { get; set; } = 15.0f;

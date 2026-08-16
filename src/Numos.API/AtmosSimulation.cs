@@ -49,8 +49,8 @@ public sealed class AtmosSimulation : IDisposable
     ///     Initializes a simulation with a live configuration and fixed chunk dimensions.
     /// </summary>
     /// <param name="config">
-    ///     The configuration to use. The simulation retains this instance, so later changes to its properties
-    ///     affect subsequent ticks.
+    ///     The mutable configuration to use. The simulation retains this instance, and its current values affect
+    ///     subsequent simulation operations, including <see cref="AddGasToVoxel(AtmosChunkHandle, ushort, int, float, float)" />.
     /// </param>
     /// <param name="chunkWidth">The number of voxels along each chunk's local x-axis.</param>
     /// <param name="chunkHeight">The number of voxels along each chunk's local y-axis.</param>
@@ -101,9 +101,12 @@ public sealed class AtmosSimulation : IDisposable
     }
 
     /// <summary>
-    ///     Gets the live configuration used by subsequent updates and ticks.
+    ///     Gets the retained, mutable configuration used by subsequent simulation operations.
     /// </summary>
-    /// <remarks>Note that this is a ref.</remarks>
+    /// <remarks>
+    ///     Mutating this instance affects later operations, including gas injection, updates, and direct ticks.
+    ///     Call <see cref="SetAtmosConfig" /> to replace the retained instance.
+    /// </remarks>
     [PublicAPI]
     public AtmosConfig Config { get; private set; }
 
@@ -192,7 +195,9 @@ public sealed class AtmosSimulation : IDisposable
     ///     Replaces the live configuration, then advances the fixed-step simulation.
     /// </summary>
     /// <param name="elapsedSeconds">Elapsed real time, in seconds, since the previous update.</param>
-    /// <param name="config">The configuration instance to use for this and subsequent ticks.</param>
+    /// <param name="config">
+    ///     The mutable configuration instance to retain and use for this update and subsequent simulation operations.
+    /// </param>
     /// <exception cref="ArgumentNullException"><paramref name="config" /> is <see langword="null" />.</exception>
     /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
     [PublicAPI]
@@ -203,11 +208,11 @@ public sealed class AtmosSimulation : IDisposable
     }
 
     /// <summary>
-    ///     Changes the live configuration used by subsequent updates and ticks.
+    ///     Changes the live configuration used by subsequent simulation operations.
     /// </summary>
     /// <param name="config">
-    ///     The configuration to use. The simulation retains this instance, so later changes to its properties
-    ///     affect subsequent ticks.
+    ///     The mutable configuration to use. The simulation retains this instance, and its current values affect
+    ///     subsequent operations, including gas injection, updates, and direct ticks.
     /// </param>
     /// <exception cref="ArgumentNullException"><paramref name="config" /> is <see langword="null" />.</exception>
     /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
@@ -337,8 +342,10 @@ public sealed class AtmosSimulation : IDisposable
     /// <param name="localVoxelIndex">The voxel's zero-based index in the chunk's flattened storage.</param>
     /// <param name="temperature">The raw temperature value to store, in kelvins.</param>
     /// <remarks>
-    ///     During simulation, a gas-bearing voxel with a non-finite or nonpositive stored value uses
-    ///     <see cref="AtmosConfig.DefaultTemperatureFallback" /> as its effective temperature.
+    ///     The supplied value is stored without validation or eager normalization. Snapshots expose that raw value
+    ///     until a later operation overwrites it. Pressure and sensible-energy calculations treat a gas-bearing
+    ///     voxel's non-finite or nonpositive stored value as
+    ///     <see cref="AtmosConfig.DefaultTemperatureFallback" /> for that calculation.
     /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="localVoxelIndex" /> is outside the chunk.</exception>
     /// <exception cref="KeyNotFoundException">No chunk is registered at the handle's position.</exception>
@@ -359,8 +366,10 @@ public sealed class AtmosSimulation : IDisposable
     /// <param name="z">The zero-based local z-coordinate.</param>
     /// <param name="temperature">The raw temperature value to store, in kelvins.</param>
     /// <remarks>
-    ///     During simulation, a gas-bearing voxel with a non-finite or nonpositive stored value uses
-    ///     <see cref="AtmosConfig.DefaultTemperatureFallback" /> as its effective temperature.
+    ///     The supplied value is stored without validation or eager normalization. Snapshots expose that raw value
+    ///     until a later operation overwrites it. Pressure and sensible-energy calculations treat a gas-bearing
+    ///     voxel's non-finite or nonpositive stored value as
+    ///     <see cref="AtmosConfig.DefaultTemperatureFallback" /> for that calculation.
     /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException">A local coordinate is outside the chunk.</exception>
     /// <exception cref="KeyNotFoundException">No chunk is registered at the handle's position.</exception>
@@ -383,10 +392,12 @@ public sealed class AtmosSimulation : IDisposable
     /// <remarks>
     ///     The room classification containing the voxel is activated before injection. Injection into a solid or
     ///     void voxel is ignored. The added gas carries sensible energy according to its effective molar heat
-    ///     capacity, and the stored temperature is updated by sensible-energy balance. A missing registry entry or
-    ///     non-finite or nonpositive configured heat capacity is treated as <c>1 J/(mol·K)</c>. An existing
-    ///     non-finite or nonpositive stored temperature contributes prior sensible energy at
-    ///     <see cref="AtmosConfig.DefaultTemperatureFallback" />; the stored result is the balanced mixture
+    ///     capacity, and the stored temperature is updated by sensible-energy balance. Before blending, the heat
+    ///     capacity of gas already in the voxel is recomputed from the current <see cref="Config" />. A missing
+    ///     registry entry or non-finite or nonpositive configured heat capacity uses
+    ///     <see cref="AtmosConfig.DefaultSpecificHeatCapacity" />. When gas is already present, a non-finite or
+    ///     nonpositive stored temperature contributes prior sensible energy at
+    ///     <see cref="AtmosConfig.DefaultTemperatureFallback" />. An empty voxel instead adopts the incoming
     ///     temperature.
     /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="localVoxelIndex" /> is outside the chunk.</exception>
@@ -417,10 +428,12 @@ public sealed class AtmosSimulation : IDisposable
     /// <remarks>
     ///     The room classification containing the voxel is activated before injection. Injection into a solid or
     ///     void voxel is ignored. The added gas carries sensible energy according to its effective molar heat
-    ///     capacity, and the stored temperature is updated by sensible-energy balance. A missing registry entry or
-    ///     non-finite or nonpositive configured heat capacity is treated as <c>1 J/(mol·K)</c>. An existing
-    ///     non-finite or nonpositive stored temperature contributes prior sensible energy at
-    ///     <see cref="AtmosConfig.DefaultTemperatureFallback" />; the stored result is the balanced mixture
+    ///     capacity, and the stored temperature is updated by sensible-energy balance. Before blending, the heat
+    ///     capacity of gas already in the voxel is recomputed from the current <see cref="Config" />. A missing
+    ///     registry entry or non-finite or nonpositive configured heat capacity uses
+    ///     <see cref="AtmosConfig.DefaultSpecificHeatCapacity" />. When gas is already present, a non-finite or
+    ///     nonpositive stored temperature contributes prior sensible energy at
+    ///     <see cref="AtmosConfig.DefaultTemperatureFallback" />. An empty voxel instead adopts the incoming
     ///     temperature.
     /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException">A local coordinate is outside the chunk.</exception>

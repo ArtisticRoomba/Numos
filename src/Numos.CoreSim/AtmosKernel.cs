@@ -348,17 +348,20 @@ internal sealed partial class AtmosKernel : IDisposable
 
         if (chunk.ActiveGasCount > 0)
         {
-            // Refresh caches for total pressure in each voxel.
+            // Refresh total-pressure and total-heat-capacity caches for active voxels.
             CalculateTotalPressure(chunk);
             CalculateHeatCapacity(chunk);
 
             int activeGasCount = chunk.ActiveGasCount;
 
-            // Alloc a temp array upfront to store deltas for each gas in each voxel.
+            // Layout: energy deltas occupy [0, VoxelCount); gas g mole deltas occupy
+            // [(g + 1) * VoxelCount, (g + 2) * VoxelCount).
             int activeGasVoxelCount = GetDeltaArrayOffset(activeGasCount, chunk.VoxelCount);
             float[] deltas = ArrayPool<float>.Shared.Rent(activeGasVoxelCount);
             Array.Clear(deltas, 0, activeGasVoxelCount);
             int gasVoxelCount = activeGasCount * chunk.VoxelCount;
+            // Signed deltas hide gross depletion when several neighbors read the same snapshot.
+            // Track scheduled gross outflow per gas and voxel in a separate rented buffer.
             float[] scheduledOutflows = ArrayPool<float>.Shared.Rent(gasVoxelCount);
             Array.Clear(scheduledOutflows, 0, gasVoxelCount);
 
@@ -468,8 +471,12 @@ internal sealed partial class AtmosKernel : IDisposable
     ///     updated if this neighbor has a larger delta.
     /// </param>
     /// <param name="deltas">
-    ///     The array of deltas for each gas in each voxel,
-    ///     to be updated based on advection and diffusion.
+    ///     Buffered energy and mole deltas. The first <see cref="AtmosChunk.VoxelCount" /> entries are per-voxel
+    ///     energy deltas; gas <c>g</c> mole deltas begin at <c>(g + 1) * VoxelCount</c>.
+    /// </param>
+    /// <param name="scheduledOutflows">
+    ///     Gross moles already scheduled to leave each gas and voxel during this buffered pass, stored in
+    ///     gas-major order at <c>gasIndex * VoxelCount + voxelIndex</c>.
     /// </param>
     private void CheckNeighborAdvect(AtmosChunk chunk, Int3 neighborPosition, ushort idx,
         float currentPressure,
@@ -620,15 +627,19 @@ internal sealed partial class AtmosKernel : IDisposable
 
     private float GetSpecificHeatCapacity(int gasId)
     {
+        float fallbackSpecificHeatCapacity = _config.DefaultSpecificHeatCapacity;
+        if (!IsFinitePositive(fallbackSpecificHeatCapacity))
+            fallbackSpecificHeatCapacity = 1f;
+
         var gasRegistry = _config.GasRegistry;
         if ((uint)gasId < (uint)gasRegistry.Count)
         {
             float specificHeatCapacity = gasRegistry[gasId].SpecificHeatCapacity;
-            if (float.IsFinite(specificHeatCapacity) && specificHeatCapacity > 0f)
+            if (IsFinitePositive(specificHeatCapacity))
                 return specificHeatCapacity;
         }
 
-        return 1f;
+        return fallbackSpecificHeatCapacity;
     }
 
     private float CalculateHeatCapacityAtVoxel(AtmosChunk chunk, ushort localVoxelIndex)
@@ -681,10 +692,14 @@ internal sealed partial class AtmosKernel : IDisposable
     }
 
     /// <summary>
-    ///     Writes the calculated deltas to the active gases in the chunk.
+    ///     Applies buffered energy and mole deltas, then refreshes active-voxel temperature, heat-capacity,
+    ///     and pressure state.
     /// </summary>
     /// <param name="chunk">The chunk to write deltas to.</param>
-    /// <param name="deltas">The array of deltas for each gas in each voxel.</param>
+    /// <param name="deltas">
+    ///     The buffer whose first <see cref="AtmosChunk.VoxelCount" /> entries are per-voxel energy deltas and
+    ///     whose gas <c>g</c> mole deltas begin at <c>(g + 1) * VoxelCount</c>.
+    /// </param>
     private void ApplyDeltas(AtmosChunk chunk, float[] deltas)
     {
         // TODO PERF SIMD
@@ -761,11 +776,14 @@ internal sealed partial class AtmosKernel : IDisposable
     private void ProcessThermalDiffusion(AtmosChunk chunk, ThermalBoundaryEvent[] thermalBoundaryBuffer,
         ref int thermalBoundaryCount)
     {
-        float[] energyDeltas = ArrayPool<float>.Shared.Rent(chunk.VoxelCount);
+        double[] incidentConductances = ArrayPool<double>.Shared.Rent(chunk.VoxelCount);
+        double[] energyDeltas = ArrayPool<double>.Shared.Rent(chunk.VoxelCount);
+        Array.Clear(incidentConductances, 0, chunk.VoxelCount);
         Array.Clear(energyDeltas, 0, chunk.VoxelCount);
 
         float thermalConductivity = _config.ThermalConductivity;
         float vacuumThreshold = _config.VacuumThreshold;
+        bool canDiffuse = IsFinitePositive(thermalConductivity);
 
         for (var i = 0; i < chunk.ActiveAirCount; i++)
         {
@@ -776,20 +794,18 @@ internal sealed partial class AtmosKernel : IDisposable
             var localPosition = chunk.GetXyzInt3(idx);
             float currentTemp = GetEffectiveTemperature(chunk.Temperature[idx]);
 
-            CheckNeighborThermal(chunk, localPosition + Int3.NegX, idx, thermalConductivity,
-                energyDeltas);
-            CheckNeighborThermal(chunk, localPosition + Int3.PosX, idx, thermalConductivity,
-                energyDeltas);
-            CheckNeighborThermal(chunk, localPosition + Int3.NegY, idx, thermalConductivity,
-                energyDeltas);
-            CheckNeighborThermal(chunk, localPosition + Int3.PosY, idx, thermalConductivity,
-                energyDeltas);
-            if (chunk.Depth > 1)
+            if (canDiffuse)
             {
-                CheckNeighborThermal(chunk, localPosition + Int3.NegZ, idx, thermalConductivity,
-                    energyDeltas);
-                CheckNeighborThermal(chunk, localPosition + Int3.PosZ, idx, thermalConductivity,
-                    energyDeltas);
+                // Enumerating only positive axes visits each undirected edge exactly once.
+                AccumulateThermalConductance(chunk, localPosition + Int3.PosX, idx, thermalConductivity,
+                    vacuumThreshold, incidentConductances);
+                AccumulateThermalConductance(chunk, localPosition + Int3.PosY, idx, thermalConductivity,
+                    vacuumThreshold, incidentConductances);
+                if (chunk.Depth > 1)
+                {
+                    AccumulateThermalConductance(chunk, localPosition + Int3.PosZ, idx, thermalConductivity,
+                        vacuumThreshold, incidentConductances);
+                }
             }
 
             // Emit thermal boundary events for edge voxels
@@ -810,23 +826,50 @@ internal sealed partial class AtmosKernel : IDisposable
             }
         }
 
+        if (canDiffuse)
+        {
+            // Apply all fluxes from the same temperature/capacity snapshot. The symmetric row limiter
+            // makes every final temperature a convex combination of the snapshot temperatures.
+            for (var i = 0; i < chunk.ActiveAirCount; i++)
+            {
+                ushort idx = chunk.ActiveAirIndices[i];
+                var localPosition = chunk.GetXyzInt3(idx);
+
+                ApplyThermalFlux(chunk, localPosition + Int3.PosX, idx, thermalConductivity,
+                    vacuumThreshold, incidentConductances, energyDeltas);
+                ApplyThermalFlux(chunk, localPosition + Int3.PosY, idx, thermalConductivity,
+                    vacuumThreshold, incidentConductances, energyDeltas);
+                if (chunk.Depth > 1)
+                {
+                    ApplyThermalFlux(chunk, localPosition + Int3.PosZ, idx, thermalConductivity,
+                        vacuumThreshold, incidentConductances, energyDeltas);
+                }
+            }
+        }
+
         for (var i = 0; i < chunk.ActiveAirCount; i++)
         {
             ushort idx = chunk.ActiveAirIndices[i];
-            float heatCapacity = chunk.TotalHeatCapacity[idx];
-            if (heatCapacity <= 0f || energyDeltas[idx] == 0f)
+            if (energyDeltas[idx] == 0d ||
+                !TryGetThermalState(chunk, idx, vacuumThreshold, out double oldTemperature,
+                    out double heatCapacity))
                 continue;
 
-            float oldEnergy = GetEffectiveTemperature(chunk.Temperature[idx]) * heatCapacity;
-            chunk.Temperature[idx] = MathF.Max(0f, (oldEnergy + energyDeltas[idx]) / heatCapacity);
+            double newEnergy = oldTemperature * heatCapacity + energyDeltas[idx];
+            double newTemperature = Math.Max(0d, newEnergy / heatCapacity);
+            if (!double.IsFinite(newTemperature))
+                continue;
+
+            chunk.Temperature[idx] = (float)newTemperature;
             chunk.TotalPressure[idx] = CalculatePressureAtVoxel(chunk, idx);
         }
 
-        ArrayPool<float>.Shared.Return(energyDeltas);
+        ArrayPool<double>.Shared.Return(incidentConductances);
+        ArrayPool<double>.Shared.Return(energyDeltas);
     }
 
-    private void CheckNeighborThermal(AtmosChunk chunk, Int3 neighborPosition, ushort idx,
-        float thermalConductivity, float[] energyDeltas)
+    private void AccumulateThermalConductance(AtmosChunk chunk, Int3 neighborPosition, ushort idx,
+        float thermalConductivity, float vacuumThreshold, double[] incidentConductances)
     {
         if (!neighborPosition.IsWithin(default, chunk.Dimensions))
             return;
@@ -835,38 +878,93 @@ internal sealed partial class AtmosKernel : IDisposable
         if (chunk.VoxelRoomMap[neighborIdx] == AtmosChunk.RoomSolid)
             return;
 
-        float vacuumThreshold = _config.VacuumThreshold;
-        if (chunk.TotalPressure[neighborIdx] < vacuumThreshold)
+        if (!TryGetThermalState(chunk, idx, vacuumThreshold, out _, out double currentHeatCapacity) ||
+            !TryGetThermalState(chunk, neighborIdx, vacuumThreshold, out _, out double neighborHeatCapacity))
             return;
 
-        float currentHeatCapacity = chunk.TotalHeatCapacity[idx];
-        float neighborHeatCapacity = chunk.TotalHeatCapacity[neighborIdx];
-        if (currentHeatCapacity <= 0f || neighborHeatCapacity <= 0f)
+        double conductance = CalculateThermalConductance(currentHeatCapacity, neighborHeatCapacity,
+            thermalConductivity);
+        if (conductance <= 0d)
             return;
 
-        float currentTemp = GetEffectiveTemperature(chunk.Temperature[idx]) +
-                            energyDeltas[idx] / currentHeatCapacity;
-        float neighborTemp = GetEffectiveTemperature(chunk.Temperature[neighborIdx]) +
-                             energyDeltas[neighborIdx] / neighborHeatCapacity;
-        float tempDelta = currentTemp - neighborTemp;
-        float availableEnergy = MathF.Max(0f, currentTemp * currentHeatCapacity);
-        float heatTransfer = CalculateHeatTransfer(tempDelta, currentHeatCapacity, neighborHeatCapacity,
-            thermalConductivity, availableEnergy);
-        if (heatTransfer <= 0f)
+        incidentConductances[idx] += conductance;
+        incidentConductances[neighborIdx] += conductance;
+    }
+
+    private void ApplyThermalFlux(AtmosChunk chunk, Int3 neighborPosition, ushort idx,
+        float thermalConductivity, float vacuumThreshold, double[] incidentConductances, double[] energyDeltas)
+    {
+        if (!neighborPosition.IsWithin(default, chunk.Dimensions))
+            return;
+
+        ushort neighborIdx = chunk.GetIndex(neighborPosition);
+        if (chunk.VoxelRoomMap[neighborIdx] == AtmosChunk.RoomSolid)
+            return;
+
+        if (!TryGetThermalState(chunk, idx, vacuumThreshold, out double currentTemperature,
+                out double currentHeatCapacity) ||
+            !TryGetThermalState(chunk, neighborIdx, vacuumThreshold, out double neighborTemperature,
+                out double neighborHeatCapacity))
+            return;
+
+        double conductance = CalculateThermalConductance(currentHeatCapacity, neighborHeatCapacity,
+            thermalConductivity);
+        double currentIncidentConductance = incidentConductances[idx];
+        double neighborIncidentConductance = incidentConductances[neighborIdx];
+        if (conductance <= 0d || !double.IsFinite(currentIncidentConductance) ||
+            currentIncidentConductance <= 0d || !double.IsFinite(neighborIncidentConductance) ||
+            neighborIncidentConductance <= 0d)
+            return;
+
+        double scale = Math.Min(1d, Math.Min(currentHeatCapacity / currentIncidentConductance,
+            neighborHeatCapacity / neighborIncidentConductance));
+        double heatTransfer = scale * conductance * (currentTemperature - neighborTemperature);
+        if (!double.IsFinite(heatTransfer) || heatTransfer == 0d)
             return;
 
         energyDeltas[idx] -= heatTransfer;
         energyDeltas[neighborIdx] += heatTransfer;
     }
 
+    private bool TryGetThermalState(AtmosChunk chunk, ushort idx, float vacuumThreshold,
+        out double temperature, out double heatCapacity)
+    {
+        float storedHeatCapacity = chunk.TotalHeatCapacity[idx];
+        float pressure = chunk.TotalPressure[idx];
+        float effectiveTemperature = GetEffectiveTemperature(chunk.Temperature[idx]);
+        if (!IsFinitePositive(storedHeatCapacity) || !float.IsFinite(pressure) ||
+            pressure < vacuumThreshold || !float.IsFinite(effectiveTemperature) || effectiveTemperature < 0f)
+        {
+            temperature = 0d;
+            heatCapacity = 0d;
+            return false;
+        }
+
+        temperature = effectiveTemperature;
+        heatCapacity = storedHeatCapacity;
+        return true;
+    }
+
+    private static double CalculateThermalConductance(double sourceHeatCapacity, double targetHeatCapacity,
+        float thermalConductivity)
+    {
+        if (!double.IsFinite(sourceHeatCapacity) || sourceHeatCapacity <= 0d ||
+            !double.IsFinite(targetHeatCapacity) || targetHeatCapacity <= 0d ||
+            !IsFinitePositive(thermalConductivity))
+            return 0d;
+
+        double equilibriumConductance = sourceHeatCapacity * targetHeatCapacity /
+                                        (sourceHeatCapacity + targetHeatCapacity);
+        double conductance = Math.Min(thermalConductivity, equilibriumConductance);
+        return double.IsFinite(conductance) && conductance > 0d ? conductance : 0d;
+    }
+
     private static float CalculateHeatTransfer(float temperatureDelta, float sourceHeatCapacity,
         float targetHeatCapacity, float thermalConductivity, float availableSourceEnergy)
     {
-        if (!float.IsFinite(temperatureDelta) || temperatureDelta <= 0f ||
-            !float.IsFinite(sourceHeatCapacity) || sourceHeatCapacity <= 0f ||
-            !float.IsFinite(targetHeatCapacity) || targetHeatCapacity <= 0f ||
-            !float.IsFinite(thermalConductivity) || thermalConductivity <= 0f ||
-            !float.IsFinite(availableSourceEnergy) || availableSourceEnergy <= 0f)
+        if (!IsFinitePositive(temperatureDelta) || !IsFinitePositive(sourceHeatCapacity) ||
+            !IsFinitePositive(targetHeatCapacity) || !IsFinitePositive(thermalConductivity) ||
+            !IsFinitePositive(availableSourceEnergy))
             return 0f;
 
         double requestedTransfer = (double)temperatureDelta * thermalConductivity;
@@ -874,6 +972,11 @@ internal sealed partial class AtmosKernel : IDisposable
                                      ((double)sourceHeatCapacity + targetHeatCapacity);
         double heatTransfer = Math.Min(requestedTransfer, equilibriumTransfer);
         return (float)Math.Min(heatTransfer, availableSourceEnergy);
+    }
+
+    private static bool IsFinitePositive(float value)
+    {
+        return float.IsFinite(value) && value > 0f;
     }
 
     private void ProcessPhaseChanges(AtmosChunk chunk, PrecipitationEvent[] precipBuffer, ref int precipCount)
