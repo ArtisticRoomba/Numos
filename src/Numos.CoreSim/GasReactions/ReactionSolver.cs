@@ -37,8 +37,8 @@ public class ReactionSolver
     {
         //process each voxel in parallel
         var voxelCount = chunk.Depth * chunk.Width * chunk.Height;
-        //  Parallel.For(0, voxelCount, voxelIndex => ProcessVoxel(chunk, deltaTime, voxelIndex));
-        for (var i = 0; i < voxelCount; i++) ProcessVoxel(chunk, deltaTime, i);
+      // Parallel.For(0, voxelCount, voxelIndex => ProcessVoxel(chunk, deltaTime, voxelIndex));
+       for (var i = 0; i < voxelCount; i++) ProcessVoxel(chunk, deltaTime, i);
     }
 
     private void ProcessVoxel(AtmosChunk chunk, float deltaTime, int voxelIndex)
@@ -65,7 +65,7 @@ public class ReactionSolver
             {
                 var e = _mappedReactions[i];
                 var speed = e.GetReactionSpeed(mixtureVector, temperature) * stepSize;
-                if (reactionSpeeds[i] <= 0)
+                if (speed <= 0)
                     return;
                 reactionSpeeds[i] = speed;
                 anyReaction = true;
@@ -84,6 +84,7 @@ public class ReactionSolver
                     //we calculate total consumption, ignoring production by reactions.
                     var consumption = _mappedReactions.Select((e, j) =>
                         MathF.Min(0, e.ChangeEquation.GetValueOrDefault(i)) * reactionSpeeds[j]).Sum();
+                    //check how much moles/joules are left over after all reactions.
                     var postReactionMoles = mixtureVector[i] + consumption;
                     //if negative and even more critical, mark.
                     if (postReactionMoles < criticalValue)
@@ -93,20 +94,22 @@ public class ReactionSolver
                     }
                 }
 
-                //check if all reaction speeds have been balanced
+                //check if all reaction speeds have been balanced / are without conflict
                 if (criticalIndex == -1)
                     break;
-                //adjust reaction speeds so our post reaction moles are 0, eliminating any reaction we cannot solve for.
+                // adjust reaction speeds so our post reaction moles are 0.
                 // our equation we try to optimize looks like this (((change * speed)/total change in scaled reaction)*available moles)/(change * speed) = (available volume)/(total change in scaled reaction)
+                // so we calculate the scale, to scale reaction speeds down to balance the equation of consumption.
                 var scale = mixtureVector[criticalIndex] / Math.Abs(criticalValue);
                 for (var i = 0; i < reactionSpeeds.Length; i++)
                 {
                     if (!_mappedReactions[i].ChangeEquation.ContainsKey(criticalIndex))
                         continue;
-                    //select the lower reaction speed
+                    //select the lower reaction speed.
                     reactionSpeeds[i] = MathF.Min(reactionSpeeds[i], reactionSpeeds[i] * scale);
                 }
             }
+            //apply mixture.
             for (var i = 0; i < mixtureVector.Length - 1; i++)
             {
                 for (var j = 0; j < reactionSpeeds.Length; j++)
