@@ -598,6 +598,8 @@ internal sealed partial class AtmosKernel : IDisposable
     private void ApplyDeltas(AtmosChunk chunk, float[] deltas)
     {
         // TODO PERF SIMD
+        // TODO THERMO, gas entering uninitted voxels inherited zero temp so they fell
+        // below pressure threshold and were deleted, however making them inherit default temp is not accurate
         float defaultTemperature = _config.DefaultTemperatureFallback;
         for (var g = 0; g < chunk.ActiveGasCount; g++)
         {
