@@ -5,6 +5,7 @@
         <Project Path="tests\Numos.CoreSim.IntegrationTests\Numos.CoreSim.IntegrationTests.csproj"/>
         <Project Path="tests\Numos.CoreSim.Tests\Numos.CoreSim.Tests.csproj"/>
         <Project Path="tests\Numos.Maths.Tests\Numos.Maths.Tests.csproj"/>
+        <Project Path="tests\Numos.SimDrawer.Tests\Numos.SimDrawer.Tests.csproj"/>
     </Folder>
 
     <Project Path="src\Numos.API.Dangerous\Numos.API.Dangerous.csproj"/>

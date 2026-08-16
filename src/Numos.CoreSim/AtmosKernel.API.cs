@@ -10,7 +10,49 @@ internal sealed partial class AtmosKernel
     ///     Gets the number of chunks currently registered with the kernel.
     /// </summary>
     /// <remarks>The count includes both awake and sleeping chunks.</remarks>
-    internal int ChunkCount => _chunkMap.Count;
+    internal int ChunkCount
+    {
+        get
+        {
+            lock (_stateGate)
+            {
+                return _chunkMap.Count;
+            }
+        }
+    }
+
+    /// <summary>
+    ///     Returns a detached list of the currently registered chunk-grid positions.
+    /// </summary>
+    internal Int3[] GetChunkPositions()
+    {
+        lock (_stateGate)
+        {
+            return _chunkMap.Keys.ToArray();
+        }
+    }
+
+    /// <summary>
+    ///     Returns registered positions only when the chunk collection changed.
+    /// </summary>
+    internal bool TryGetChunkPositions(
+        long knownRevision,
+        out long revision,
+        out Int3[] positions)
+    {
+        lock (_stateGate)
+        {
+            revision = _chunkCollectionRevision;
+            if (revision == knownRevision)
+            {
+                positions = [];
+                return false;
+            }
+
+            positions = _chunkMap.Keys.ToArray();
+            return true;
+        }
+    }
 
     /// <summary>
     ///     Updates the simulation.
@@ -23,24 +65,27 @@ internal sealed partial class AtmosKernel
     /// </remarks>
     internal void Update(float elapsedSeconds)
     {
-        _accumulator += elapsedSeconds;
-
-        if (_accumulator > FixedDt * MaxStepsPerFrame)
+        lock (_stateGate)
         {
-            _accumulator = FixedDt * MaxStepsPerFrame;
-        }
+            _accumulator += elapsedSeconds;
 
-        LastBoundaryTicks = 0;
+            if (_accumulator > FixedDt * MaxStepsPerFrame)
+            {
+                _accumulator = FixedDt * MaxStepsPerFrame;
+            }
 
-        // Snapshot chunks
-        var chunks = _chunkMap.Values.ToArray();
+            LastBoundaryTicks = 0;
 
-        var steps = 0;
-        while (_accumulator >= FixedDt && steps < MaxStepsPerFrame)
-        {
-            _accumulator -= FixedDt;
-            steps++;
-            TickSimulation(chunks);
+            // Snapshot chunks
+            var chunks = _chunkMap.Values.ToArray();
+
+            var steps = 0;
+            while (_accumulator >= FixedDt && steps < MaxStepsPerFrame)
+            {
+                _accumulator -= FixedDt;
+                steps++;
+                TickSimulation(chunks);
+            }
         }
     }
 
@@ -51,7 +96,10 @@ internal sealed partial class AtmosKernel
     /// <exception cref="ArgumentNullException"><paramref name="config" /> is <see langword="null" />.</exception>
     internal void SetAtmosConfig(AtmosConfig config)
     {
-        _config = config ?? throw new ArgumentNullException(nameof(config));
+        lock (_stateGate)
+        {
+            _config = config ?? throw new ArgumentNullException(nameof(config));
+        }
     }
 
     /// <summary>
@@ -63,8 +111,12 @@ internal sealed partial class AtmosKernel
     /// </exception>
     internal void RegisterChunk(AtmosChunk chunk)
     {
-        if (!_chunkMap.TryAdd(chunk.GridPosition, chunk))
-            throw new InvalidOperationException($"A chunk is already registered at {chunk.GridPosition}.");
+        lock (_stateGate)
+        {
+            if (!_chunkMap.TryAdd(chunk.GridPosition, chunk))
+                throw new InvalidOperationException($"A chunk is already registered at {chunk.GridPosition}.");
+            _chunkCollectionRevision++;
+        }
     }
 
     /// <summary>
@@ -74,11 +126,15 @@ internal sealed partial class AtmosKernel
     /// <returns><see langword="true" /> if a chunk was removed; otherwise, <see langword="false" />.</returns>
     internal bool UnregisterChunk(Int3 position)
     {
-        if (!_chunkMap.TryRemove(position, out var chunk))
-            return false;
+        lock (_stateGate)
+        {
+            if (!_chunkMap.TryRemove(position, out var chunk))
+                return false;
 
-        chunk.Release();
-        return true;
+            chunk.Release();
+            _chunkCollectionRevision++;
+            return true;
+        }
     }
 
     /// <summary>
@@ -92,9 +148,12 @@ internal sealed partial class AtmosKernel
     /// <exception cref="InvalidOperationException">A chunk is already registered at <paramref name="position" />.</exception>
     internal void CreateAndRegisterChunk(Int3 position, int width, int height, int depth, int maxActiveRooms)
     {
-        var chunk = new AtmosChunk(width, height, depth, maxActiveRooms);
-        chunk.Initialize(position, width, height, depth, maxActiveRooms);
-        RegisterChunk(chunk);
+        lock (_stateGate)
+        {
+            var chunk = new AtmosChunk(width, height, depth, maxActiveRooms);
+            chunk.Initialize(position, width, height, depth, maxActiveRooms);
+            RegisterChunk(chunk);
+        }
     }
 
     /// <summary>
@@ -105,7 +164,150 @@ internal sealed partial class AtmosKernel
     /// <exception cref="KeyNotFoundException">No chunk is registered at <paramref name="position" />.</exception>
     internal AtmosChunkSnapshot GetChunkSnapshot(Int3 position)
     {
-        return GetChunk(position).GetNetworkSnapshot();
+        lock (_stateGate)
+        {
+            return GetChunk(position).GetNetworkSnapshot();
+        }
+    }
+
+    /// <summary>
+    ///     Captures detached interaction details for one voxel without cloning whole chunk fields.
+    /// </summary>
+    internal AtmosVoxelSnapshot GetVoxelSnapshot(Int3 position, ushort localVoxelIndex)
+    {
+        lock (_stateGate)
+        {
+            var chunk = GetChunk(position);
+            return CreateVoxelSnapshot(chunk, position, localVoxelIndex);
+        }
+    }
+
+    /// <summary>
+    ///     Captures one voxel only when the chunk is still at the exact presentation version.
+    /// </summary>
+    internal bool TryGetVoxelSnapshot(
+        Int3 position,
+        ushort localVoxelIndex,
+        AtmosChunkVersion expectedVersion,
+        out AtmosVoxelSnapshot snapshot)
+    {
+        lock (_stateGate)
+        {
+            var chunk = GetChunk(position);
+            if (chunk.Version != expectedVersion)
+            {
+                snapshot = default;
+                return false;
+            }
+
+            snapshot = CreateVoxelSnapshot(chunk, position, localVoxelIndex);
+            return true;
+        }
+    }
+
+    private static AtmosVoxelSnapshot CreateVoxelSnapshot(
+        AtmosChunk chunk,
+        Int3 position,
+        ushort localVoxelIndex)
+    {
+        ValidateVoxelIndex(chunk, localVoxelIndex);
+        var gases = new VoxelGasSnapshot[chunk.ActiveGasCount];
+        for (var gas = 0; gas < gases.Length; gas++)
+        {
+            gases[gas] = new VoxelGasSnapshot(
+                chunk.ActiveGases[gas].GasId,
+                chunk.ActiveGases[gas].Moles[localVoxelIndex]);
+        }
+
+        return new AtmosVoxelSnapshot(
+            chunk.Version,
+            position,
+            localVoxelIndex,
+            chunk.VoxelRoomMap[localVoxelIndex],
+            chunk.TotalPressure[localVoxelIndex],
+            chunk.Temperature[localVoxelIndex],
+            gases);
+    }
+
+    /// <summary>
+    ///     Creates a detached snapshot only when the chunk differs from a known version.
+    /// </summary>
+    internal bool TryGetChunkSnapshot(
+        Int3 position,
+        AtmosChunkVersion knownVersion,
+        out AtmosChunkSnapshot snapshot)
+    {
+        return TryGetChunkSnapshot(
+            position,
+            knownVersion,
+            AtmosChunkSnapshotFields.All,
+            out snapshot);
+    }
+
+    /// <summary>
+    ///     Creates selected detached fields only when the chunk differs from a known version.
+    /// </summary>
+    internal bool TryGetChunkSnapshot(
+        Int3 position,
+        AtmosChunkVersion knownVersion,
+        AtmosChunkSnapshotFields fields,
+        out AtmosChunkSnapshot snapshot)
+    {
+        if ((fields & ~AtmosChunkSnapshotFields.All) != 0)
+            throw new ArgumentOutOfRangeException(nameof(fields));
+
+        lock (_stateGate)
+        {
+            var chunk = GetChunk(position);
+            if (chunk.Version == knownVersion)
+            {
+                snapshot = default;
+                return false;
+            }
+
+            snapshot = chunk.GetNetworkSnapshot(fields);
+            return true;
+        }
+    }
+
+    /// <summary>
+    ///     Captures every changed request from one coherent simulation state.
+    /// </summary>
+    internal AtmosChunkSnapshotBatch GetChangedChunkSnapshots(
+        IReadOnlyList<AtmosChunkSnapshotRequest> requests)
+    {
+        lock (_stateGate)
+        {
+            var positions = new HashSet<Int3>();
+            for (var index = 0; index < requests.Count; index++)
+            {
+                var request = requests[index];
+                if ((request.Fields & ~AtmosChunkSnapshotFields.All) != 0)
+                    throw new ArgumentOutOfRangeException(nameof(requests), "A request contains invalid fields.");
+                if (!positions.Add(request.Position))
+                {
+                    throw new ArgumentException($"Chunk {request.Position} was requested more than once.",
+                        nameof(requests));
+                }
+            }
+
+            var changed = new List<AtmosChunkSnapshot>(requests.Count);
+            for (var index = 0; index < requests.Count; index++)
+            {
+                var request = requests[index];
+                // Handle lists are detached. A concurrent unregistration between enumeration
+                // and this batch is represented by the chunk simply not being returned.
+                if (!_chunkMap.TryGetValue(request.Position, out var chunk) ||
+                    chunk.Version == request.KnownVersion)
+                {
+                    continue;
+                }
+
+                changed.Add(chunk.GetNetworkSnapshot(request.Fields));
+            }
+
+            return new AtmosChunkSnapshotBatch(TickCount, changed.ToArray());
+        }
     }
 
     /// <summary>
@@ -117,9 +319,13 @@ internal sealed partial class AtmosKernel
     /// <exception cref="KeyNotFoundException">No chunk is registered at <paramref name="position" />.</exception>
     internal void SetChunkClassification(Int3 position, VoxelClassification classification)
     {
-        var chunk = GetChunk(position);
-        chunk.VoxelRoomMap.Fill(classification.RoomId);
-        RebuildActiveTopology(chunk);
+        lock (_stateGate)
+        {
+            var chunk = GetChunk(position);
+            chunk.VoxelRoomMap.Fill(classification.RoomId);
+            RebuildActiveTopology(chunk);
+            chunk.MarkChanged();
+        }
     }
 
     /// <summary>
@@ -134,10 +340,14 @@ internal sealed partial class AtmosKernel
     internal void SetVoxelClassification(Int3 position, ushort localVoxelIndex,
         VoxelClassification classification)
     {
-        var chunk = GetChunk(position);
-        ValidateVoxelIndex(chunk, localVoxelIndex);
-        chunk.VoxelRoomMap[localVoxelIndex] = classification.RoomId;
-        RebuildActiveTopology(chunk);
+        lock (_stateGate)
+        {
+            var chunk = GetChunk(position);
+            ValidateVoxelIndex(chunk, localVoxelIndex);
+            chunk.VoxelRoomMap[localVoxelIndex] = classification.RoomId;
+            RebuildActiveTopology(chunk);
+            chunk.MarkChanged();
+        }
     }
 
     /// <summary>
@@ -153,8 +363,11 @@ internal sealed partial class AtmosKernel
     internal void SetVoxelClassification(Int3 position, int x, int y, int z,
         VoxelClassification classification)
     {
-        var chunk = GetChunk(position);
-        SetVoxelClassification(position, GetValidatedVoxelIndex(chunk, x, y, z), classification);
+        lock (_stateGate)
+        {
+            var chunk = GetChunk(position);
+            SetVoxelClassification(position, GetValidatedVoxelIndex(chunk, x, y, z), classification);
+        }
     }
 
     /// <summary>
@@ -167,9 +380,13 @@ internal sealed partial class AtmosKernel
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="localVoxelIndex" /> is outside the chunk.</exception>
     internal void SetVoxelTemperature(Int3 position, ushort localVoxelIndex, float temperature)
     {
-        var chunk = GetChunk(position);
-        ValidateVoxelIndex(chunk, localVoxelIndex);
-        chunk.Temperature[localVoxelIndex] = temperature;
+        lock (_stateGate)
+        {
+            var chunk = GetChunk(position);
+            ValidateVoxelIndex(chunk, localVoxelIndex);
+            chunk.Temperature[localVoxelIndex] = temperature;
+            chunk.MarkChanged();
+        }
     }
 
     /// <summary>
@@ -184,8 +401,11 @@ internal sealed partial class AtmosKernel
     /// <exception cref="ArgumentOutOfRangeException">A local coordinate is outside the chunk.</exception>
     internal void SetVoxelTemperature(Int3 position, int x, int y, int z, float temperature)
     {
-        var chunk = GetChunk(position);
-        SetVoxelTemperature(position, GetValidatedVoxelIndex(chunk, x, y, z), temperature);
+        lock (_stateGate)
+        {
+            var chunk = GetChunk(position);
+            SetVoxelTemperature(position, GetValidatedVoxelIndex(chunk, x, y, z), temperature);
+        }
     }
 
     /// <summary>
@@ -202,12 +422,15 @@ internal sealed partial class AtmosKernel
     internal void AddGasToVoxel(Int3 position, ushort localVoxelIndex, int gasId, float moles,
         float temperature)
     {
-        var chunk = GetChunk(position);
-        ValidateVoxelIndex(chunk, localVoxelIndex);
-        ValidateGasInjection(gasId, moles, temperature);
+        lock (_stateGate)
+        {
+            var chunk = GetChunk(position);
+            ValidateVoxelIndex(chunk, localVoxelIndex);
+            ValidateGasInjection(gasId, moles, temperature);
 
-        chunk.WakeRoom(chunk.VoxelRoomMap[localVoxelIndex]);
-        chunk.InjectGasToVoxel(localVoxelIndex, gasId, moles, temperature);
+            chunk.WakeRoom(chunk.VoxelRoomMap[localVoxelIndex]);
+            chunk.InjectGasToVoxel(localVoxelIndex, gasId, moles, temperature);
+        }
     }
 
     /// <summary>
@@ -226,8 +449,11 @@ internal sealed partial class AtmosKernel
     internal void AddGasToVoxel(Int3 position, int x, int y, int z, int gasId, float moles,
         float temperature)
     {
-        var chunk = GetChunk(position);
-        AddGasToVoxel(position, GetValidatedVoxelIndex(chunk, x, y, z), gasId, moles, temperature);
+        lock (_stateGate)
+        {
+            var chunk = GetChunk(position);
+            AddGasToVoxel(position, GetValidatedVoxelIndex(chunk, x, y, z), gasId, moles, temperature);
+        }
     }
 
     /// <summary>
@@ -239,7 +465,10 @@ internal sealed partial class AtmosKernel
     /// <exception cref="KeyNotFoundException">No chunk is registered at <paramref name="position" />.</exception>
     internal void WakeRoom(Int3 position, int roomId)
     {
-        GetChunk(position).WakeRoom(roomId);
+        lock (_stateGate)
+        {
+            GetChunk(position).WakeRoom(roomId);
+        }
     }
 
     /// <summary>
@@ -249,7 +478,10 @@ internal sealed partial class AtmosKernel
     /// <exception cref="KeyNotFoundException">No chunk is registered at <paramref name="position" />.</exception>
     internal void SleepChunk(Int3 position)
     {
-        GetChunk(position).Sleep();
+        lock (_stateGate)
+        {
+            GetChunk(position).Sleep();
+        }
     }
 
     /// <summary>
@@ -258,8 +490,11 @@ internal sealed partial class AtmosKernel
     /// <remarks>This bypasses the elapsed-time accumulator and is useful for deterministic driving and tests.</remarks>
     internal void Tick()
     {
-        var chunks = _chunkMap.Values.ToArray();
-        TickSimulation(chunks);
+        lock (_stateGate)
+        {
+            var chunks = _chunkMap.Values.ToArray();
+            TickSimulation(chunks);
+        }
     }
 
     private AtmosChunk GetChunk(Int3 position)

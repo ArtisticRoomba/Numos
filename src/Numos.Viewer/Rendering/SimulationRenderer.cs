@@ -1,227 +1,102 @@
+using System.Numerics;
 using Numos.SimDrawer;
-using Silk.NET.Maths;
-using Silk.NET.OpenGL;
+using Raylib_cs;
 
 namespace Numos.Viewer.Rendering;
 
+public readonly record struct VoxelHighlight(VoxelAddress Address, ColorRgba Color);
+
 /// <summary>
-///     Handles OpenGL rendering of simulation data.
+///     Raylib renderer for immutable simulation presentation frames.
 /// </summary>
-public class SimulationRenderer : IDisposable
+public static class SimulationRenderer
 {
-    private readonly GL _gl;
-    private uint _vao;
-    private uint _vbo;
-    private uint _ebo;
-    private uint _shaderProgram;
-    private int _elementCount;
-    private PrimitiveType _primitiveType = PrimitiveType.Triangles;
+    private readonly static Vector3 VoxelSize = Vector3.One;
+    private readonly static Vector3 HighlightSize = new(1.04f);
 
-    public SimulationRenderer(GL gl)
+    public static void Draw(
+        SimulationDrawData frame,
+        ChunkIdentity? focusedChunk,
+        IReadOnlyList<VoxelHighlight> highlights)
     {
-        _gl = gl;
-        InitializeShaders();
-    }
-
-    private void InitializeShaders()
-    {
-        const string vertexShaderSource = @"
-#version 330 core
-layout(location = 0) in vec3 aPosition;
-layout(location = 1) in vec3 aColor;
-
-out vec3 vertexColor;
-
-uniform mat4 projection;
-uniform mat4 view;
-uniform mat4 model;
-
-void main()
-{
-    gl_Position = projection * view * model * vec4(aPosition, 1.0);
-    vertexColor = aColor;
-}
-";
-
-        const string fragmentShaderSource = @"
-#version 330 core
-in vec3 vertexColor;
-out vec4 FragColor;
-
-void main()
-{
-    FragColor = vec4(vertexColor, 1.0);
-}
-";
-
-        uint vertexShader = CompileShader(vertexShaderSource, ShaderType.VertexShader);
-        uint fragmentShader = CompileShader(fragmentShaderSource, ShaderType.FragmentShader);
-
-        _shaderProgram = _gl.CreateProgram();
-        _gl.AttachShader(_shaderProgram, vertexShader);
-        _gl.AttachShader(_shaderProgram, fragmentShader);
-        _gl.LinkProgram(_shaderProgram);
-
-        _gl.GetProgram(_shaderProgram, GLEnum.LinkStatus, out int success);
-        if (success == 0)
+        foreach (var chunk in frame.Chunks.Values)
         {
-            string infoLog = _gl.GetProgramInfoLog(_shaderProgram);
-            Console.WriteLine($"ERROR::PROGRAM::LINKING_FAILED\n{infoLog}");
-        }
-
-        _gl.DeleteShader(vertexShader);
-        _gl.DeleteShader(fragmentShader);
-    }
-
-    private uint CompileShader(string source, ShaderType type)
-    {
-        uint shader = _gl.CreateShader(type);
-        _gl.ShaderSource(shader, source);
-        _gl.CompileShader(shader);
-
-        _gl.GetShader(shader, GLEnum.CompileStatus, out int success);
-        if (success == 0)
-        {
-            string infoLog = _gl.GetShaderInfoLog(shader);
-            Console.WriteLine($"ERROR::SHADER::COMPILATION_FAILED\n{infoLog}");
-        }
-
-        return shader;
-    }
-
-    public void UpdateGeometry(
-        Vertex[] vertices,
-        uint[] indices,
-        PrimitiveType primitiveType = PrimitiveType.Triangles)
-    {
-        _elementCount = indices.Length;
-        _primitiveType = primitiveType;
-
-        if (_vao == 0)
-            _vao = _gl.GenVertexArray();
-        if (_vbo == 0)
-            _vbo = _gl.GenBuffer();
-        if (_ebo == 0)
-            _ebo = _gl.GenBuffer();
-
-        _gl.BindVertexArray(_vao);
-
-        _gl.BindBuffer(BufferTargetARB.ArrayBuffer, _vbo);
-        unsafe
-        {
-            fixed (Vertex* v = vertices)
+            if (!frame.HasCurrentVisualizationMapping(chunk) ||
+                focusedChunk.HasValue && chunk.Identity != focusedChunk.Value)
             {
-                _gl.BufferData(BufferTargetARB.ArrayBuffer, (nuint)(vertices.Length * sizeof(Vertex)), v,
-                    BufferUsageARB.DynamicDraw);
+                continue;
             }
+
+            DrawChunk(chunk);
         }
 
-        _gl.BindBuffer(BufferTargetARB.ElementArrayBuffer, _ebo);
-        unsafe
-        {
-            fixed (uint* i = indices)
-            {
-                _gl.BufferData(BufferTargetARB.ElementArrayBuffer, (nuint)(indices.Length * sizeof(uint)), i,
-                    BufferUsageARB.DynamicDraw);
-            }
-        }
-
-        const uint positionLocation = 0;
-        unsafe
-        {
-            _gl.VertexAttribPointer(positionLocation, 3, VertexAttribPointerType.Float, false,
-                (uint)sizeof(Vertex), 0);
-        }
-
-        _gl.EnableVertexAttribArray(positionLocation);
-
-        const uint colorLocation = 1;
-        unsafe
-        {
-            _gl.VertexAttribPointer(colorLocation, 3, VertexAttribPointerType.Float, false,
-                (uint)sizeof(Vertex), 12);
-        }
-
-        _gl.EnableVertexAttribArray(colorLocation);
-
-        // Keep the EBO associated with the VAO.
-        _gl.BindVertexArray(0);
-        _gl.BindBuffer(BufferTargetARB.ArrayBuffer, 0);
-        _gl.BindBuffer(BufferTargetARB.ElementArrayBuffer, 0);
+        DrawHighlights(frame, focusedChunk, highlights);
     }
 
-    public void ClearGeometry()
+    private static void DrawChunk(ChunkDrawData chunk)
     {
-        _elementCount = 0;
-        _primitiveType = PrimitiveType.Triangles;
+        var cells = chunk.Cells;
+        for (var localIndex = 0; localIndex < cells.Length; localIndex++)
+        {
+            ref readonly var cell = ref cells[localIndex];
+            if (!cell.IsVisible || cell.VisibleFaces == VoxelFaceMask.None)
+                continue;
+
+            int x = localIndex % chunk.Dimensions.X;
+            int yz = localIndex / chunk.Dimensions.X;
+            int y = yz % chunk.Dimensions.Y;
+            int z = yz / chunk.Dimensions.Y;
+            var center = new Vector3(
+                chunk.ChunkPosition.X * chunk.Dimensions.X + x + 0.5f,
+                chunk.ChunkPosition.Y * chunk.Dimensions.Y + y + 0.5f,
+                chunk.ChunkPosition.Z * chunk.Dimensions.Z + z + 0.5f);
+
+            Raylib.DrawCubeV(center, VoxelSize, ToRaylibColor(cell.Color));
+        }
     }
 
-    public void Render(
-        Matrix4X4<float> projection,
-        Matrix4X4<float> view,
-        Matrix4X4<float> model)
+    private static void DrawHighlights(
+        SimulationDrawData frame,
+        ChunkIdentity? focusedChunk,
+        IReadOnlyList<VoxelHighlight> highlights)
     {
-        if (_vao == 0 || _elementCount == 0 || _shaderProgram == 0)
-            return;
-
-        _gl.UseProgram(_shaderProgram);
-
-        int projectionLocation = _gl.GetUniformLocation(_shaderProgram, "projection");
-        int viewLocation = _gl.GetUniformLocation(_shaderProgram, "view");
-        int modelLocation = _gl.GetUniformLocation(_shaderProgram, "model");
-
-        unsafe
+        foreach (var highlight in highlights)
         {
-            _gl.UniformMatrix4(projectionLocation, 1, false, (float*)&projection);
-            _gl.UniformMatrix4(viewLocation, 1, false, (float*)&view);
-            _gl.UniformMatrix4(modelLocation, 1, false, (float*)&model);
+            if (!TryResolveVisibleHighlight(frame, highlight, focusedChunk, out var chunk))
+                continue;
+
+            var position = chunk.GetWorldCoordinates(highlight.Address.LocalIndex);
+            var center = new Vector3(position.X + 0.5f, position.Y + 0.5f, position.Z + 0.5f);
+            Raylib.DrawCubeWiresV(center, HighlightSize, ToRaylibColor(highlight.Color));
         }
-
-        _gl.BindVertexArray(_vao);
-
-        unsafe
-        {
-            _gl.DrawElements(
-                _primitiveType,
-                (uint)_elementCount,
-                DrawElementsType.UnsignedInt,
-                (void*)0);
-        }
-
-        _gl.BindVertexArray(0);
     }
 
-    private bool _disposed;
-
-    public void Dispose()
+    private static bool TryResolveVisibleHighlight(
+        SimulationDrawData frame,
+        VoxelHighlight highlight,
+        ChunkIdentity? focusedChunk,
+        out ChunkDrawData chunk)
     {
-        if (_disposed)
-            return;
-
-        _disposed = true;
-
-        if (_vao != 0)
+        if (frame.Chunks.TryGetValue(highlight.Address.Chunk.Position, out var resolved) &&
+            resolved.Identity == highlight.Address.Chunk &&
+            frame.HasCurrentVisualizationMapping(resolved) &&
+            (!focusedChunk.HasValue || resolved.Identity == focusedChunk.Value) &&
+            highlight.Address.LocalIndex < resolved.CellCount)
         {
-            _gl.DeleteVertexArray(_vao);
-            _vao = 0;
+            chunk = resolved;
+            return true;
         }
 
-        if (_vbo != 0)
-        {
-            _gl.DeleteBuffer(_vbo);
-            _vbo = 0;
-        }
+        chunk = null!;
+        return false;
+    }
 
-        if (_ebo != 0)
-        {
-            _gl.DeleteBuffer(_ebo);
-            _ebo = 0;
-        }
-
-        if (_shaderProgram != 0)
-        {
-            _gl.DeleteProgram(_shaderProgram);
-            _shaderProgram = 0;
-        }
+    internal static Color ToRaylibColor(ColorRgba color)
+    {
+        return new Color(
+            Math.Clamp(color.R, 0f, 1f),
+            Math.Clamp(color.G, 0f, 1f),
+            Math.Clamp(color.B, 0f, 1f),
+            Math.Clamp(color.A, 0f, 1f));
     }
 }

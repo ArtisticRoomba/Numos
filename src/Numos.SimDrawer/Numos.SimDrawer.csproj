@@ -13,7 +13,7 @@
     </ItemGroup>
 
     <ItemGroup>
-        <PackageReference Include="Silk.NET.Maths" Version="2.23.0"/>
+        <Compile Remove="SimDrawer.cs"/>
     </ItemGroup>
 
 </Project>

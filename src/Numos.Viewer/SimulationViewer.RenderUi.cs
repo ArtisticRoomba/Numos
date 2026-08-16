@@ -1,8 +1,10 @@
 using System.Numerics;
 using ImGuiNET;
+using Numos.API;
 using Numos.CoreSim.Datatypes.Snapshots;
 using Numos.Maths;
 using Numos.SimDrawer;
+using Raylib_cs;
 
 namespace Numos.Viewer;
 
@@ -28,6 +30,7 @@ public partial class SimulationViewer
         else
         {
             _hoveredSliceCell = null;
+            RebuildHighlights();
         }
 
         RenderDebugPanel();
@@ -135,7 +138,7 @@ public partial class SimulationViewer
         ImGui.BeginChild(
             "AboutTabContent",
             size,
-            ImGuiChildFlags.Border,
+            ImGuiChildFlags.Borders,
             ImGuiWindowFlags.None);
 
         ImGui.TextWrapped(
@@ -158,7 +161,7 @@ public partial class SimulationViewer
         ImGui.BeginChild(
             "AuthorsTabContent",
             size,
-            ImGuiChildFlags.Border,
+            ImGuiChildFlags.Borders,
             ImGuiWindowFlags.None);
 
         ImGui.Text("VeritableCalamity");
@@ -187,7 +190,7 @@ public partial class SimulationViewer
             if (ImGui.BeginMenu("File"))
             {
                 if (ImGui.MenuItem("Exit", "Alt+F4"))
-                    _window?.Close();
+                    _requestExit = true;
                 ImGui.EndMenu();
             }
 
@@ -203,15 +206,19 @@ public partial class SimulationViewer
 
             if (ImGui.BeginMenu("Visualization"))
             {
-                if (ImGui.MenuItem("Temperature", null, _currentVisualizationMode == VisualizationMode.Temperature))
-                    _currentVisualizationMode = VisualizationMode.Temperature;
-                if (ImGui.MenuItem("Pressure", null, _currentVisualizationMode == VisualizationMode.Pressure))
-                    _currentVisualizationMode = VisualizationMode.Pressure;
-                if (ImGui.MenuItem("Gas Composition", null,
-                        _currentVisualizationMode == VisualizationMode.GasComposition))
-                    _currentVisualizationMode = VisualizationMode.GasComposition;
-                if (ImGui.MenuItem("Active Only", null, _currentVisualizationMode == VisualizationMode.ActiveOnly))
-                    _currentVisualizationMode = VisualizationMode.ActiveOnly;
+                if (_frameBuilder != null)
+                {
+                    foreach (var method in _frameBuilder.Visualizations.Methods)
+                    {
+                        bool selected = string.Equals(
+                            method.Id,
+                            _currentVisualizationId,
+                            StringComparison.OrdinalIgnoreCase);
+                        if (ImGui.MenuItem(method.DisplayName, null, selected))
+                            SetVisualization(method.Id);
+                    }
+                }
+
                 ImGui.EndMenu();
             }
 
@@ -246,19 +253,20 @@ public partial class SimulationViewer
 
             if (ImGui.CollapsingHeader("Camera"))
             {
-                ImGui.Text($"Position: {_cameraPosition.X:F1}, {_cameraPosition.Y:F1}, {_cameraPosition.Z:F1}");
-                ImGui.Text($"Distance: {_cameraDistance:F1}");
-                ImGui.Text($"Yaw: {_cameraYaw:F2}, Pitch: {_cameraPitch:F2}");
+                ImGui.Text(
+                    $"Position: {_camera3D.Position.X:F1}, {_camera3D.Position.Y:F1}, {_camera3D.Position.Z:F1}");
+                ImGui.Text($"Target: {_camera3D.Target.X:F1}, {_camera3D.Target.Y:F1}, {_camera3D.Target.Z:F1}");
+                ImGui.Text($"Distance: {Vector3.Distance(_camera3D.Position, _camera3D.Target):F1}");
             }
 
             if (ImGui.CollapsingHeader("2D Slice"))
             {
                 ImGui.Text($"Axis: {_currentSliceAxis}");
                 ImGui.Text($"Slice Index: {_currentSliceIndex}");
-                ImGui.Text($"Visible Cells: {_sliceDrawData?.Chunks.Values.Sum(chunk => chunk.Cells.Count) ?? 0}");
+                ImGui.Text($"Visible Cells: {(_sliceDrawData == null ? 0 : _sliceDrawData.Cells.Length)}");
 
                 if (_hoveredSliceCell.HasValue)
-                    ImGui.Text($"Hovered Cell: {FormatCellCoordinates(_hoveredSliceCell.Value)}");
+                    ImGui.Text($"Hovered Cell: {FormatCellCoordinates(_hoveredSliceCell.Value.Address)}");
                 else
                     ImGui.TextDisabled("Hovered Cell: none");
             }
@@ -270,7 +278,10 @@ public partial class SimulationViewer
                     DrawCellSelectionDetails(_selectedCell.Value);
 
                     if (ImGui.Button("Clear Selection##selected-cell"))
+                    {
                         _selectedCell = null;
+                        RebuildHighlights();
+                    }
                 }
                 else
                 {
@@ -280,10 +291,14 @@ public partial class SimulationViewer
 
             if (ImGui.CollapsingHeader("Chunks"))
             {
-                ImGui.Text($"Active Chunks: {_chunkSnapshots.Count}");
-                foreach (var chunk in _chunkSnapshots)
+                ImGui.Text($"Presented Chunks: {_drawData?.Chunks.Count ?? 0}");
+                if (_drawData != null)
                 {
-                    ImGui.BulletText($"Chunk {chunk.GridPosition}: Active Voxels: {chunk.ActiveAirCount}");
+                    foreach (var chunk in _drawData.Chunks.Values)
+                    {
+                        ImGui.BulletText(
+                            $"Chunk {chunk.ChunkPosition}: {chunk.VisibleCellCount} visible cells, {chunk.SurfaceFaceCount} faces");
+                    }
                 }
             }
 
@@ -308,26 +323,51 @@ public partial class SimulationViewer
             {
                 float globalTemp = _config.GlobalTemperature;
                 if (ImGui.SliderFloat("Global Temperature", ref globalTemp, 0f, 500f))
+                {
                     _config.GlobalTemperature = globalTemp;
+                }
 
                 float flowFriction = _config.FlowFriction;
                 if (ImGui.SliderFloat("Flow Friction", ref flowFriction, 0f, 1f))
+                {
                     _config.FlowFriction = flowFriction;
+                }
 
                 float thermalConductivity = _config.ThermalConductivity;
                 if (ImGui.SliderFloat("Thermal Conductivity", ref thermalConductivity, 0f, 0.2f))
+                {
                     _config.ThermalConductivity = thermalConductivity;
+                }
             }
 
             ImGui.Separator();
             ImGui.Text("Visualization");
 
-            var mode = (int)_currentVisualizationMode;
-            if (ImGui.Combo("Mode##viz", ref mode,
-                    new[] { "Temperature", "Pressure", "Gas Composition", "Active Only" }, 4))
+            if (_frameBuilder != null)
             {
-                _currentVisualizationMode = (VisualizationMode)mode;
+                var current = _frameBuilder.Visualizations.GetRequired(_currentVisualizationId);
+                if (ImGui.BeginCombo("Mode##viz", current.DisplayName))
+                {
+                    foreach (var method in _frameBuilder.Visualizations.Methods)
+                    {
+                        bool selected = string.Equals(
+                            method.Id,
+                            _currentVisualizationId,
+                            StringComparison.OrdinalIgnoreCase);
+                        if (ImGui.Selectable(method.DisplayName, selected))
+                            SetVisualization(method.Id);
+                        if (selected)
+                            ImGui.SetItemDefaultFocus();
+                    }
+
+                    ImGui.EndCombo();
+                }
             }
+
+            RenderVisualizationLegend();
+
+            ImGui.Separator();
+            RenderChunkFocusControls();
 
             ImGui.Separator();
             ImGui.Text("2D Slice View");
@@ -340,25 +380,32 @@ public partial class SimulationViewer
 
     private void RenderSliceControls()
     {
-        if (_chunkSnapshots.Count == 0)
+        if (_drawData == null || _drawData.Chunks.Count == 0)
         {
             ImGui.TextDisabled("No chunks available.");
             return;
         }
 
-        var chunks = _chunkSnapshots;
-        _selectedSliceChunkIndex = Math.Clamp(_selectedSliceChunkIndex, 0, chunks.Count - 1);
+        if (!_selectedSliceChunkPosition.HasValue ||
+            !_drawData.Chunks.ContainsKey(_selectedSliceChunkPosition.Value))
+            _selectedSliceChunkPosition = _drawData.Chunks.Keys.First();
 
-        string selectedChunkLabel = FormatChunkPosition(chunks[_selectedSliceChunkIndex].GridPosition);
-        if (ImGui.BeginCombo("Chunk##slice-chunk", selectedChunkLabel))
+        string selectedChunkLabel = FormatChunkPosition(_selectedSliceChunkPosition.Value);
+        if (_focusedChunk.HasValue)
         {
-            for (var i = 0; i < chunks.Count; i++)
+            _selectedSliceChunkPosition = _focusedChunk.Value.Position;
+            selectedChunkLabel = FormatChunkPosition(_selectedSliceChunkPosition.Value);
+            ImGui.TextDisabled($"Chunk: {selectedChunkLabel} (focused)");
+        }
+        else if (ImGui.BeginCombo("Chunk##slice-chunk", selectedChunkLabel))
+        {
+            foreach (var chunk in _drawData.Chunks.Values)
             {
-                bool selected = i == _selectedSliceChunkIndex;
-                string label = FormatChunkPosition(chunks[i].GridPosition);
+                bool selected = chunk.ChunkPosition == _selectedSliceChunkPosition.Value;
+                string label = FormatChunkPosition(chunk.ChunkPosition);
 
                 if (ImGui.Selectable(label, selected))
-                    _selectedSliceChunkIndex = i;
+                    _selectedSliceChunkPosition = chunk.ChunkPosition;
 
                 if (selected)
                     ImGui.SetItemDefaultFocus();
@@ -374,19 +421,82 @@ public partial class SimulationViewer
                 "Y (XZ plane)",
                 "Z (XY plane)"
             }, 3))
-        {
             _currentSliceAxis = (SliceAxis)axis;
-        }
 
-        var selectedChunk = chunks[_selectedSliceChunkIndex];
+        var selectedChunk = _drawData.Chunks[_selectedSliceChunkPosition.Value];
         int maxSliceIndex = Math.Max(
-            SimDrawer.SimDrawer.GetSliceAxisLength(selectedChunk.Dimensions, _currentSliceAxis) - 1,
+            SimulationFrameBuilder.GetSliceAxisLength(selectedChunk.Dimensions, _currentSliceAxis) - 1,
             0);
         _currentSliceIndex = Math.Clamp(_currentSliceIndex, 0, maxSliceIndex);
 
         ImGui.SliderInt("Slice##slice-index", ref _currentSliceIndex, 0, maxSliceIndex);
 
         ImGui.TextDisabled($"Viewing {_currentSliceAxis}={_currentSliceIndex} on chunk {selectedChunkLabel}");
+    }
+
+    private void RenderVisualizationLegend()
+    {
+        if (_drawData == null)
+            return;
+
+        var legend = _drawData.Visualization.Legend;
+        ImGui.TextDisabled(string.IsNullOrWhiteSpace(legend.Units)
+            ? legend.Title
+            : $"{legend.Title} ({legend.Units})");
+
+        for (var index = 0; index < legend.Entries.Count; index++)
+        {
+            var entry = legend.Entries[index];
+            var color = entry.Color;
+            ImGui.ColorButton(
+                $"##legend-{index}",
+                new Vector4(color.R, color.G, color.B, color.A),
+                ImGuiColorEditFlags.NoTooltip,
+                new Vector2(16, 16));
+            ImGui.SameLine();
+            ImGui.TextUnformatted(entry.Label);
+        }
+    }
+
+    private void RenderChunkFocusControls()
+    {
+        ImGui.Text("3D Focus");
+        string currentLabel = _focusedChunk.HasValue
+            ? FormatChunkPosition(_focusedChunk.Value.Position)
+            : "All chunks";
+
+        if (ImGui.BeginCombo("Focus##chunk-focus", currentLabel))
+        {
+            bool allSelected = !_focusedChunk.HasValue;
+            if (ImGui.Selectable("All chunks", allSelected))
+                SetFocusedChunk(null);
+            if (allSelected)
+                ImGui.SetItemDefaultFocus();
+
+            if (_drawData != null)
+            {
+                foreach (var chunk in _drawData.Chunks.Values)
+                {
+                    bool selected = _focusedChunk == chunk.Identity;
+                    if (ImGui.Selectable(FormatChunkPosition(chunk.ChunkPosition), selected))
+                        SetFocusedChunk(chunk.Identity);
+                    if (selected)
+                        ImGui.SetItemDefaultFocus();
+                }
+            }
+
+            ImGui.EndCombo();
+        }
+
+        if (ImGui.Button("Frame current view"))
+        {
+            if (_focusedChunk.HasValue &&
+                _drawData != null &&
+                _drawData.Chunks.TryGetValue(_focusedChunk.Value.Position, out var focused))
+                FocusCameraOnChunk(focused);
+            else
+                FocusCameraOnScene();
+        }
     }
 
     private void RenderSliceCellTooltip()
@@ -397,27 +507,126 @@ public partial class SimulationViewer
         ImGui.BeginTooltip();
         ImGui.Text("2D Slice Cell");
         ImGui.Separator();
-        DrawCellSelectionDetails(_hoveredSliceCell.Value);
+        DrawCellSelectionDetails(_hoveredSliceCell.Value.Address, _hoveredSliceCell.Value.U, _hoveredSliceCell.Value.V);
         ImGui.Separator();
         ImGui.TextDisabled("Left-click to select");
         ImGui.EndTooltip();
     }
 
-    private static void DrawCellSelectionDetails(CellSelection cell)
+    private void DrawCellSelectionDetails(VoxelAddress address, int? sliceU = null, int? sliceV = null)
     {
-        ImGui.Text($"Chunk: {FormatChunkPosition(cell.ChunkPosition)}");
-        ImGui.Text($"Cell: {FormatCellCoordinates(cell)}");
-        ImGui.Text($"Slice UV: {cell.U}, {cell.V}");
-        ImGui.Text($"Temperature: {cell.Temperature:F2} K");
-        ImGui.Text($"Pressure: {cell.Pressure:F2}");
-        ImGui.Text($"Total Moles: {cell.TotalMoles:F2}");
-        ImGui.Text($"Primary Gas: {cell.PrimaryGasId}");
-        ImGui.Text($"Room: {cell.RoomId}");
+        ImGui.Text($"Chunk: {FormatChunkPosition(address.Chunk.Position)}");
+        ImGui.Text($"Cell: {FormatCellCoordinates(address)}");
+        if (sliceU.HasValue && sliceV.HasValue)
+            ImGui.Text($"Slice UV: {sliceU.Value}, {sliceV.Value}");
+
+        if (_drawData == null || !_drawData.TryResolve(address, out _))
+        {
+            ImGui.TextDisabled("Cell is not present in the latest frame.");
+            return;
+        }
+
+        if (!TryGetVoxelDetails(address, out var details))
+        {
+            ImGui.TextDisabled("Details are unavailable for this presented revision.");
+            return;
+        }
+
+        ImGui.Text($"Temperature: {details.Temperature:F2} K");
+        ImGui.Text($"Pressure: {details.Pressure:F2}");
+        GetGasSummary(details.Gases, out float totalMoles, out int primaryGasId);
+        ImGui.Text($"Total Moles: {totalMoles:F2}");
+        ImGui.Text($"Primary Gas: {FormatGas(primaryGasId)}");
+        ImGui.Text($"Room: {details.RoomId}");
     }
 
-    private static string FormatCellCoordinates(CellSelection cell)
+    private static void GetGasSummary(
+        IReadOnlyList<VoxelGasSnapshot> gases,
+        out float totalMoles,
+        out int primaryGasId)
     {
-        return $"({cell.X}, {cell.Y}, {cell.Z})";
+        totalMoles = 0f;
+        primaryGasId = -1;
+        var maximumMoles = 0f;
+        foreach (var gas in gases)
+        {
+            float moles = gas.Moles;
+            if (float.IsFinite(moles) && moles > 0f)
+                totalMoles += moles;
+            if (moles > maximumMoles ||
+                moles == maximumMoles && moles > 0f && (primaryGasId < 0 || gas.GasId < primaryGasId))
+            {
+                maximumMoles = moles;
+                primaryGasId = gas.GasId;
+            }
+        }
+    }
+
+    private bool TryGetVoxelDetails(VoxelAddress address, out AtmosVoxelSnapshot snapshot)
+    {
+        if (!_snapshotCache.TryGetValue(address.Chunk.Position, out var presented) ||
+            presented.Version.Generation != address.Chunk.Generation)
+        {
+            snapshot = default;
+            return false;
+        }
+
+        var presentedVersion = presented.Version;
+        if (_voxelDetailCache.TryGetValue(address, out var cached) &&
+            cached.PresentedVersion == presentedVersion)
+        {
+            snapshot = cached.Snapshot;
+            return cached.IsAvailable;
+        }
+
+        if (_simulation == null)
+        {
+            snapshot = default;
+            return false;
+        }
+
+        try
+        {
+            bool available = _simulation.TryGetVoxelSnapshot(
+                new AtmosChunkHandle(address.Chunk.Position),
+                address.LocalIndex,
+                presentedVersion,
+                out snapshot);
+            CacheVoxelDetail(address, presentedVersion, available, snapshot);
+            return available;
+        }
+        catch (Exception exception) when (
+            exception is KeyNotFoundException or ArgumentOutOfRangeException)
+        {
+            snapshot = default;
+            CacheVoxelDetail(address, presentedVersion, false, snapshot);
+            return false;
+        }
+    }
+
+    private void CacheVoxelDetail(
+        VoxelAddress address,
+        AtmosChunkVersion presentedVersion,
+        bool isAvailable,
+        AtmosVoxelSnapshot snapshot)
+    {
+        if (_voxelDetailCache.Count >= 16 && !_voxelDetailCache.ContainsKey(address))
+            _voxelDetailCache.Clear();
+        _voxelDetailCache[address] = new VoxelDetailCacheEntry(presentedVersion, isAvailable, snapshot);
+    }
+
+    private string FormatCellCoordinates(VoxelAddress address)
+    {
+        if (_drawData != null &&
+            _drawData.Chunks.TryGetValue(address.Chunk.Position, out var chunk) &&
+            chunk.Identity == address.Chunk &&
+            address.LocalIndex < chunk.CellCount)
+        {
+            var coordinates = chunk.GetCoordinates(address.LocalIndex);
+            return $"({coordinates.X}, {coordinates.Y}, {coordinates.Z})";
+        }
+
+        return $"index {address.LocalIndex}";
     }
 
     private static string FormatChunkPosition(Int3 position)
@@ -425,12 +634,21 @@ public partial class SimulationViewer
         return $"({position.X}, {position.Y}, {position.Z})";
     }
 
+    private string FormatGas(int gasId)
+    {
+        if (gasId < 0)
+            return "none";
+        if (_config != null && gasId < _config.GasRegistry.Count)
+            return $"{_config.GasRegistry[gasId].Name} ({gasId})";
+        return $"Gas {gasId}";
+    }
+
     private void RenderSimInfoPanel()
     {
         if (!_showSimInfoPanel)
             return;
 
-        ImGui.SetNextWindowPos(new Vector2(_window!.Size.X - 310, 40), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowPos(new Vector2(Raylib.GetScreenWidth() - 310, 40), ImGuiCond.FirstUseEver);
         ImGui.SetNextWindowSize(new Vector2(300, 400), ImGuiCond.FirstUseEver);
 
         if (ImGui.Begin("Simulation Info##siminfo", ref _showSimInfoPanel))
@@ -439,7 +657,7 @@ public partial class SimulationViewer
             {
                 if (_simulation != null)
                 {
-                    AtmosChunkSnapshot? chunk = _chunkSnapshots.Count > 0 ? _chunkSnapshots[0] : null;
+                    AtmosChunkSnapshot? chunk = _snapshotCache.Count > 0 ? _snapshotCache.Values.First() : null;
                     if (chunk.HasValue)
                     {
                         var snapshot = chunk.Value;

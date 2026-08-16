@@ -1,36 +1,31 @@
+using Raylib_cs;
+using rlImGui_cs;
+
 namespace Numos.Viewer;
 
 public partial class SimulationViewer
 {
-    private bool _glResourcesDisposed;
     private bool _disposed;
 
-    private void OnWindowClosing()
+    private void DisposeGraphics()
     {
-        DisposeGlResources();
-    }
-
-    private void DisposeGlResources()
-    {
-        if (_glResourcesDisposed)
-            return;
-
-        _glResourcesDisposed = true;
-
-        _imguiController?.Dispose();
-        _imguiController = null;
-
         _viewport?.Dispose();
         _viewport = null;
 
         _sliceViewport?.Dispose();
         _sliceViewport = null;
 
-        _renderer?.Dispose();
-        _renderer = null;
+        if (_imguiInitialized)
+        {
+            rlImGui.Shutdown();
+            _imguiInitialized = false;
+        }
 
-        _sliceRenderer?.Dispose();
-        _sliceRenderer = null;
+        if (_windowInitialized)
+        {
+            Raylib.CloseWindow();
+            _windowInitialized = false;
+        }
     }
 
     public void Dispose()
@@ -39,11 +34,7 @@ public partial class SimulationViewer
             return;
 
         _disposed = true;
-
-        DisposeGlResources();
-
-        _input?.Dispose();
-        _input = null;
+        DisposeGraphics();
 
         _simulation?.Dispose();
         _simulation = null;
