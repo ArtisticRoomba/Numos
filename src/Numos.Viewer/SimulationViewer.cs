@@ -100,6 +100,12 @@ public partial class SimulationViewer : IDisposable
     private bool _uncappedFps;
     private int _programSettingsTab;
     private bool _showSliceViewport = true;
+    private bool _show3DChunkOutlines;
+    private bool _show3DVoxelOutlines = true;
+    private bool _transparent3DVoxels;
+    private bool _show2DChunkOutlines;
+    private bool _show2DVoxelOutlines = true;
+    private bool _transparent2DVoxels;
     private SliceAxis _currentSliceAxis = SliceAxis.Z;
     private int _currentSliceIndex;
     private Int3? _selectedSliceChunkPosition;
@@ -522,7 +528,11 @@ public partial class SimulationViewer : IDisposable
         Raylib.BeginMode3D(_camera3D);
         try
         {
-            SimulationRenderer.Draw(_drawData, _focusedChunk, _highlights);
+            SimulationRenderer.Draw(
+                _drawData,
+                _focusedChunk,
+                _highlights,
+                Get3DRenderStyleOptions());
         }
         finally
         {
@@ -551,7 +561,8 @@ public partial class SimulationViewer : IDisposable
         SliceRenderer.Draw(
             _sliceDrawData,
             _camera2D,
-            GetSliceRenderOptions());
+            GetSliceRenderOptions(),
+            Get2DRenderStyleOptions());
 
         NavigationGizmo.Draw2D(
             _sliceDrawData.Axis,
@@ -621,6 +632,22 @@ public partial class SimulationViewer : IDisposable
             _hoveredSliceCell?.V ?? -1,
             selectedU,
             selectedV);
+    }
+
+    private Render3DStyleOptions Get3DRenderStyleOptions()
+    {
+        return new Render3DStyleOptions(
+            _show3DChunkOutlines,
+            _show3DVoxelOutlines,
+            _transparent3DVoxels);
+    }
+
+    private Render2DStyleOptions Get2DRenderStyleOptions()
+    {
+        return new Render2DStyleOptions(
+            _show2DChunkOutlines,
+            _show2DVoxelOutlines,
+            _transparent2DVoxels);
     }
 
     private void RebuildHighlights()

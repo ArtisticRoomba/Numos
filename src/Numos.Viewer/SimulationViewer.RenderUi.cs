@@ -381,12 +381,66 @@ public partial class SimulationViewer
         RenderVisualizationLegend();
 
         ImGui.Separator();
+        RenderRenderingStyleTable();
+
+        ImGui.Separator();
         RenderChunkFocusControls();
 
         ImGui.Separator();
         ImGui.Text("2D Slice View");
         ImGui.Checkbox("Show Slice Viewport", ref _showSliceViewport);
         RenderSliceControls();
+    }
+
+    private void RenderRenderingStyleTable()
+    {
+        ImGui.Text("Rendering Style");
+
+        if (!ImGui.BeginTable(
+                "RenderingStyleTable##render-style",
+                3,
+                ImGuiTableFlags.BordersInnerV | ImGuiTableFlags.RowBg))
+        {
+            return;
+        }
+
+        ImGui.TableSetupColumn("");
+        ImGui.TableSetupColumn("3D", ImGuiTableColumnFlags.WidthFixed, 40f);
+        ImGui.TableSetupColumn("2D", ImGuiTableColumnFlags.WidthFixed, 40f);
+        ImGui.TableHeadersRow();
+
+        RenderRenderingStyleRow(
+            "Chunk Outlines",
+            "chunk-outlines",
+            ref _show3DChunkOutlines,
+            ref _show2DChunkOutlines);
+        RenderRenderingStyleRow(
+            "Voxel Outlines",
+            "voxel-outlines",
+            ref _show3DVoxelOutlines,
+            ref _show2DVoxelOutlines);
+        RenderRenderingStyleRow(
+            "Transparent Voxels",
+            "transparent-voxels",
+            ref _transparent3DVoxels,
+            ref _transparent2DVoxels);
+
+        ImGui.EndTable();
+    }
+
+    private static void RenderRenderingStyleRow(
+        string label,
+        string id,
+        ref bool show3D,
+        ref bool show2D)
+    {
+        ImGui.TableNextRow();
+        ImGui.TableSetColumnIndex(0);
+        ImGui.Text(label);
+        ImGui.TableSetColumnIndex(1);
+        ImGui.Checkbox($"##{id}-3d", ref show3D);
+        ImGui.TableSetColumnIndex(2);
+        ImGui.Checkbox($"##{id}-2d", ref show2D);
     }
 
     private void RenderConfigurationPanel()

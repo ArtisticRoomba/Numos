@@ -19,7 +19,8 @@ public static class SliceRenderer
     public static void Draw(
         SimulationSliceDrawData slice,
         Camera2D camera,
-        SliceRenderOptions options = default)
+        SliceRenderOptions options = default,
+        Render2DStyleOptions style = default)
     {
         ArgumentNullException.ThrowIfNull(slice);
 
@@ -29,9 +30,17 @@ public static class SliceRenderer
             foreach (var cell in slice.Cells)
             {
                 var rectangle = GetCellRectangle(slice, cell.U, cell.V);
-                Raylib.DrawRectangleRec(rectangle, SimulationRenderer.ToRaylibColor(cell.Voxel.Color));
-                Raylib.DrawRectangleLinesEx(rectangle, 0.025f, CellBorder);
+                var color = SimulationRenderer.ToRaylibColor(cell.Voxel.Color);
+                if (style.TransparentVoxels)
+                    color.A = 89;
+
+                Raylib.DrawRectangleRec(rectangle, color);
+                if (style.ShowVoxelOutlines)
+                    Raylib.DrawRectangleLinesEx(rectangle, 0.025f, CellBorder);
             }
+
+            if (style.ShowChunkOutlines)
+                Raylib.DrawRectangleLinesEx(new Rectangle(0f, 0f, slice.Width, slice.Height), 0.08f, Color.White);
 
             DrawHighlight(slice, options.SelectedU, options.SelectedV, 0.08f, new Color(1f, 0.82f, 0.15f, 1f));
             DrawHighlight(slice, options.HoveredU, options.HoveredV, 0.05f, Color.White);

@@ -17,7 +17,8 @@ public static class SimulationRenderer
     public static void Draw(
         SimulationDrawData frame,
         ChunkIdentity? focusedChunk,
-        IReadOnlyList<VoxelHighlight> highlights)
+        IReadOnlyList<VoxelHighlight> highlights,
+        Render3DStyleOptions options = default)
     {
         foreach (var chunk in frame.Chunks.Values)
         {
@@ -27,13 +28,16 @@ public static class SimulationRenderer
                 continue;
             }
 
-            DrawChunk(chunk);
+            DrawChunk(chunk, options);
+
+            if (options.ShowChunkOutlines)
+                DrawChunkOutline(chunk);
         }
 
         DrawHighlights(frame, focusedChunk, highlights);
     }
 
-    private static void DrawChunk(ChunkDrawData chunk)
+    private static void DrawChunk(ChunkDrawData chunk, Render3DStyleOptions options)
     {
         var cells = chunk.Cells;
         for (var localIndex = 0; localIndex < cells.Length; localIndex++)
@@ -51,8 +55,27 @@ public static class SimulationRenderer
                 chunk.ChunkPosition.Y * chunk.Dimensions.Y + y + 0.5f,
                 chunk.ChunkPosition.Z * chunk.Dimensions.Z + z + 0.5f);
 
-            Raylib.DrawCubeV(center, VoxelSize, ToRaylibColor(cell.Color));
+            var color = ToRaylibColor(cell.Color);
+            if (options.TransparentVoxels)
+                color.A = 89;
+
+            Raylib.DrawCubeV(center, VoxelSize, color);
+
+            if (options.ShowVoxelOutlines)
+                Raylib.DrawCubeWiresV(center, VoxelSize, new Color(0f, 0f, 0f, 0.55f));
         }
+    }
+
+    private static void DrawChunkOutline(ChunkDrawData chunk)
+    {
+        var dimensions = chunk.Dimensions;
+        var center = new Vector3(
+            chunk.ChunkPosition.X * dimensions.X + dimensions.X * 0.5f,
+            chunk.ChunkPosition.Y * dimensions.Y + dimensions.Y * 0.5f,
+            chunk.ChunkPosition.Z * dimensions.Z + dimensions.Z * 0.5f);
+        var size = new Vector3(dimensions.X, dimensions.Y, dimensions.Z);
+
+        Raylib.DrawCubeWiresV(center, size, new Color(1f, 1f, 1f, 0.7f));
     }
 
     private static void DrawHighlights(
