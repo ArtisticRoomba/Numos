@@ -15,6 +15,11 @@ public readonly record struct VisualizationLegendEntry(
     ColorRgba Color,
     float? Value = null);
 
+public readonly record struct VisualizationRange(float Minimum, float Maximum, int Resolution = 32)
+{
+    public static VisualizationRange Default => new(0f, 1f);
+}
+
 public sealed class VisualizationLegend
 {
     public VisualizationLegend(
@@ -36,12 +41,17 @@ public sealed class VisualizationLegend
     public VisualizationLegendKind Kind { get; }
 
     public IReadOnlyList<VisualizationLegendEntry> Entries { get; }
+
+    public VisualizationRange Range { get; internal set; } = VisualizationRange.Default;
 }
 
 public sealed record VisualizationDescriptor(
     string Id,
     string DisplayName,
-    VisualizationLegend Legend);
+    VisualizationLegend Legend)
+{
+    public VisualizationRange Range { get; init; } = VisualizationRange.Default;
+}
 
 public static class BuiltInVisualizationIds
 {
@@ -94,7 +104,10 @@ public readonly record struct VoxelSample(
     float Pressure,
     float TotalMoles,
     int PrimaryGasId,
-    VoxelGasData Gases);
+    VoxelGasData Gases)
+{
+    public VisualizationRange Range { get; init; } = VisualizationRange.Default;
+}
 
 [Flags]
 public enum VisualizationDataRequirements
@@ -141,6 +154,13 @@ public interface IVisualizationMethod
     bool TryGetColor(in VoxelSample sample, out ColorRgba color);
 
     VisualizationLegend CreateLegend(IReadOnlyCollection<int> activeGasIds);
+
+    VisualizationLegend CreateLegend(
+        IReadOnlyCollection<int> activeGasIds,
+        VisualizationRange range)
+    {
+        return CreateLegend(activeGasIds);
+    }
 }
 
 /// <summary>
@@ -207,7 +227,7 @@ public sealed class VisualizationRegistry
 
         public bool TryGetColor(in VoxelSample sample, out ColorRgba color)
         {
-            float normalized = Normalize(sample.Temperature, 373f);
+            float normalized = Normalize(sample.Temperature, sample.Range);
             color = normalized < 0.5f
                 ? ColorRgba.Lerp(Cold, Temperate, normalized * 2f)
                 : ColorRgba.Lerp(Temperate, Hot, (normalized - 0.5f) * 2f);
@@ -216,14 +236,22 @@ public sealed class VisualizationRegistry
 
         public VisualizationLegend CreateLegend(IReadOnlyCollection<int> activeGasIds)
         {
+            return CreateLegend(activeGasIds, VisualizationRange.Default);
+        }
+
+        public VisualizationLegend CreateLegend(
+            IReadOnlyCollection<int> activeGasIds,
+            VisualizationRange range)
+        {
+            float midpoint = range.Minimum + (range.Maximum - range.Minimum) * 0.5f;
             return new VisualizationLegend(
                 "Temperature",
                 "K",
                 VisualizationLegendKind.Gradient,
                 [
-                    new VisualizationLegendEntry("0 K", Cold, 0f),
-                    new VisualizationLegendEntry("186.5 K", Temperate, 186.5f),
-                    new VisualizationLegendEntry("373 K+", Hot, 373f)
+                    new VisualizationLegendEntry($"{range.Minimum:G6} K", Cold, range.Minimum),
+                    new VisualizationLegendEntry($"{midpoint:G6} K", Temperate, midpoint),
+                    new VisualizationLegendEntry($"{range.Maximum:G6} K", Hot, range.Maximum)
                 ]);
         }
     }
@@ -238,21 +266,29 @@ public sealed class VisualizationRegistry
 
         public bool TryGetColor(in VoxelSample sample, out ColorRgba color)
         {
-            float normalized = Normalize(sample.Pressure, 300f);
+            float normalized = Normalize(sample.Pressure, sample.Range);
             color = new ColorRgba(normalized, normalized, normalized);
             return true;
         }
 
         public VisualizationLegend CreateLegend(IReadOnlyCollection<int> activeGasIds)
         {
+            return CreateLegend(activeGasIds, VisualizationRange.Default);
+        }
+
+        public VisualizationLegend CreateLegend(
+            IReadOnlyCollection<int> activeGasIds,
+            VisualizationRange range)
+        {
+            float midpoint = range.Minimum + (range.Maximum - range.Minimum) * 0.5f;
             return new VisualizationLegend(
                 "Pressure",
                 "simulation units",
                 VisualizationLegendKind.Gradient,
                 [
-                    new VisualizationLegendEntry("Vacuum", new ColorRgba(0f, 0f, 0f), 0f),
-                    new VisualizationLegendEntry("150", new ColorRgba(0.5f, 0.5f, 0.5f), 150f),
-                    new VisualizationLegendEntry("300+", new ColorRgba(1f, 1f, 1f), 300f)
+                    new VisualizationLegendEntry($"{range.Minimum:G6}", new ColorRgba(0f, 0f, 0f), range.Minimum),
+                    new VisualizationLegendEntry($"{midpoint:G6}", new ColorRgba(0.5f, 0.5f, 0.5f), midpoint),
+                    new VisualizationLegendEntry($"{range.Maximum:G6}", new ColorRgba(1f, 1f, 1f), range.Maximum)
                 ]);
         }
     }
@@ -348,12 +384,19 @@ public sealed class VisualizationRegistry
         }
     }
 
-    private static float Normalize(float value, float maximum)
+    private static float Normalize(float value, VisualizationRange range)
     {
         if (!float.IsFinite(value))
             return value > 0f ? 1f : 0f;
 
-        return Math.Clamp(value / maximum, 0f, 1f);
+        if (range.Maximum <= range.Minimum)
+            return 0.5f;
+
+        float normalized = Math.Clamp((value - range.Minimum) / (range.Maximum - range.Minimum), 0f, 1f);
+        int resolution = Math.Max(range.Resolution, 1);
+        return resolution == 1
+            ? 0.5f
+            : MathF.Round(normalized * (resolution - 1)) / (resolution - 1);
     }
 
     public static ColorRgba ColorForGasId(int gasId)

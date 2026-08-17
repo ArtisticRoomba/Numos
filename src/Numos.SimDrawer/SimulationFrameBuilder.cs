@@ -53,16 +53,20 @@ public sealed class SimulationFrameBuilder
         long sourceVersion,
         SimulationDrawData? previousFrame = null,
         IReadOnlySet<Int3>? mappingScope = null,
-        bool forceRemap = false)
+        bool forceRemap = false,
+        int resolution = 32)
     {
         ArgumentNullException.ThrowIfNull(snapshots);
+        var snapshotList = snapshots as IReadOnlyCollection<AtmosChunkSnapshot> ?? snapshots.ToArray();
         var visualization = Visualizations.GetRequired(visualizationId);
         ulong visualizationMappingRevision = visualization.MappingRevision;
+        var range = GetVisualizationRange(snapshotList, visualization.RequiredData, resolution);
+        bool rangeChanged = previousFrame == null || previousFrame.Visualization.Range != range;
         var chunks = new Dictionary<Int3, ChunkDrawData>();
         var seenPositions = new HashSet<Int3>();
         var activeGasIds = new HashSet<int>();
 
-        foreach (var snapshot in snapshots)
+        foreach (var snapshot in snapshotList)
         {
             if (!seenPositions.Add(snapshot.GridPosition))
                 throw new ArgumentException($"Duplicate chunk position {snapshot.GridPosition}.", nameof(snapshots));
@@ -80,7 +84,7 @@ public sealed class SimulationFrameBuilder
             }
 
             AddGasIds(snapshot, activeGasIds);
-            if (!forceRemap && CanReuse(
+            if (!forceRemap && !rangeChanged && CanReuse(
                     previousFrame,
                     visualizationId,
                     visualizationMappingRevision,
@@ -94,13 +98,18 @@ public sealed class SimulationFrameBuilder
 
             chunks.Add(
                 snapshot.GridPosition,
-                BuildChunk(snapshot, identity, visualization, visualizationMappingRevision));
+                BuildChunk(snapshot, identity, visualization, visualizationMappingRevision, range));
         }
 
+        var legend = visualization.CreateLegend(activeGasIds, range);
+        legend.Range = range;
         var descriptor = new VisualizationDescriptor(
             visualization.Id,
             visualization.DisplayName,
-            visualization.CreateLegend(activeGasIds));
+            legend)
+        {
+            Range = range
+        };
 
         return new SimulationDrawData(
             chunks,
@@ -108,6 +117,41 @@ public sealed class SimulationFrameBuilder
             visualizationMappingRevision,
             sourceVersion,
             Interlocked.Increment(ref _nextFrameVersion));
+    }
+
+    private static VisualizationRange GetVisualizationRange(
+        IEnumerable<AtmosChunkSnapshot> snapshots,
+        VisualizationDataRequirements requirements,
+        int resolution)
+    {
+        float minimum = float.PositiveInfinity;
+        float maximum = float.NegativeInfinity;
+        foreach (var snapshot in snapshots)
+        {
+            if ((requirements & VisualizationDataRequirements.Temperature) != 0)
+                IncludeFiniteRange(snapshot.Temperature, ref minimum, ref maximum);
+            if ((requirements & VisualizationDataRequirements.Pressure) != 0)
+                IncludeFiniteRange(snapshot.TotalPressure, ref minimum, ref maximum);
+        }
+
+        int safeResolution = Math.Max(resolution, 1);
+        return float.IsFinite(minimum) && float.IsFinite(maximum)
+            ? new VisualizationRange(minimum, maximum, safeResolution)
+            : new VisualizationRange(0f, 1f, safeResolution);
+    }
+
+    private static void IncludeFiniteRange(
+        ReadOnlySpan<float> values,
+        ref float minimum,
+        ref float maximum)
+    {
+        foreach (float value in values)
+        {
+            if (!float.IsFinite(value))
+                continue;
+            minimum = Math.Min(minimum, value);
+            maximum = Math.Max(maximum, value);
+        }
     }
 
     /// <summary>
@@ -180,7 +224,8 @@ public sealed class SimulationFrameBuilder
         AtmosChunkSnapshot snapshot,
         ChunkIdentity identity,
         IVisualizationMethod visualization,
-        ulong visualizationMappingRevision)
+        ulong visualizationMappingRevision,
+        VisualizationRange range)
     {
         int voxelCount = ValidateSnapshot(snapshot, visualization.RequiredData);
         if (voxelCount == 0)
@@ -235,6 +280,7 @@ public sealed class SimulationFrameBuilder
                 totalMoles,
                 primaryGasId,
                 new VoxelGasData(snapshot.Gases, localIndex));
+            sample = sample with { Range = range };
 
             var color = default(ColorRgba);
             bool visible = isInVisualizationDomain && visualization.TryGetColor(sample, out color);

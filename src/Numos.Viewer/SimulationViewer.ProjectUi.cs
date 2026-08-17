@@ -13,7 +13,6 @@ public partial class SimulationViewer
     private double _stepProgressDisplayUntil;
     private int _completedStepTick;
 
-    private bool _showProjectPanel = true;
     private bool _requestOpenCreateProject;
     private bool _createProjectModalOpen;
     private bool _requestOpenCloseProject;
@@ -30,6 +29,9 @@ public partial class SimulationViewer
     private int _newChunkY;
     private int _newChunkZ;
     private int _newChunkRoomId = 1;
+    private Int3? _toolChunkPosition;
+    private int _toolClassificationDraft;
+    private int _voxelClassificationDraft;
 
     private Int3? _injectionChunkPosition;
     private int _injectionX;
@@ -89,8 +91,11 @@ public partial class SimulationViewer
         ImGui.InputText("Project name", ref _projectNameDraft, 128);
         ImGui.Separator();
         ImGui.Text("Chunk dimensions");
+        ImGui.SetNextItemWidth(NumericInputWidth);
         ImGui.InputInt("Width##project-chunk", ref _projectChunkWidthDraft);
+        ImGui.SetNextItemWidth(NumericInputWidth);
         ImGui.InputInt("Height##project-chunk", ref _projectChunkHeightDraft);
+        ImGui.SetNextItemWidth(NumericInputWidth);
         ImGui.InputInt("Depth##project-chunk", ref _projectChunkDepthDraft);
         ImGui.TextDisabled("Every chunk in this project uses these fixed dimensions.");
 
@@ -171,14 +176,14 @@ public partial class SimulationViewer
         }
     }
 
-    private void RenderProjectPanel()
+    private void RenderSolutionPanel()
     {
-        if (!_showProjectPanel || _simulation == null || _config == null)
+        if (!_showSolutionPanel || _simulation == null || _config == null)
             return;
 
         using var window = ImGuiExtensions.BeginWindow(
-            "Simulation Project##project",
-            ref _showProjectPanel,
+            "Solution##solution",
+            ref _showSolutionPanel,
             new Vector2(10, 360),
             new Vector2(380, 520));
         if (!window.IsVisible)
@@ -193,7 +198,7 @@ public partial class SimulationViewer
             if (ImGui.Button("Run", new Vector2(90, 0)))
                 _isPaused = false;
         }
-        else if (ImGui.Button("Pause", new Vector2(90, 0)))
+        else if (ImGui.Button("Stop", new Vector2(90, 0)))
         {
             _isPaused = true;
         }
@@ -219,16 +224,17 @@ public partial class SimulationViewer
         if (ImGui.Button("Close Project", new Vector2(130, 0)))
             RequestCloseProject();
 
+        if (ImGui.Button("Initialize New Simulation", new Vector2(190, 0)))
+            RequestCreateProject();
+        ImGui.SameLine();
+        if (ImGui.Button("Exit", new Vector2(90, 0)))
+            _requestExit = true;
+
         RenderSimulationProgress();
 
         RenderProjectMessage();
-
-        if (ImGui.CollapsingHeader("Chunks", ImGuiTreeNodeFlags.DefaultOpen))
-            RenderProjectChunkControls();
-        if (ImGui.CollapsingHeader("Gas Registry", ImGuiTreeNodeFlags.DefaultOpen))
-            RenderProjectGasControls();
-        if (ImGui.CollapsingHeader("Inject Gas", ImGuiTreeNodeFlags.DefaultOpen))
-            RenderProjectInjectionControls();
+        if (ImGui.CollapsingHeader("Simulation Details"))
+            RenderSolutionDetails();
     }
 
     private void RenderSimulationProgress()
@@ -310,9 +316,13 @@ public partial class SimulationViewer
             ImGui.TextDisabled("No chunks. Add one at a chunk-grid position.");
 
         ImGui.Separator();
+        ImGui.SetNextItemWidth(NumericInputWidth);
         ImGui.InputInt("X##new-chunk", ref _newChunkX);
+        ImGui.SetNextItemWidth(NumericInputWidth);
         ImGui.InputInt("Y##new-chunk", ref _newChunkY);
+        ImGui.SetNextItemWidth(NumericInputWidth);
         ImGui.InputInt("Z##new-chunk", ref _newChunkZ);
+        ImGui.SetNextItemWidth(NumericInputWidth);
         ImGui.InputInt("Initial room ID##new-chunk", ref _newChunkRoomId);
         if (ImGui.Button("Add Chunk", new Vector2(120, 0)))
             AddProjectChunk(new Int3(_newChunkX, _newChunkY, _newChunkZ), _newChunkRoomId);
@@ -343,11 +353,17 @@ public partial class SimulationViewer
         ImGui.Separator();
         ImGui.Text("Add gas definition");
         ImGui.InputText("Name##new-gas", ref _newGasName, 64);
+        ImGui.SetNextItemWidth(NumericInputWidth);
         ImGui.InputFloat("Specific heat##new-gas", ref _newGasSpecificHeatCapacity);
+        ImGui.SetNextItemWidth(NumericInputWidth);
         ImGui.InputFloat("Boiling point (K)##new-gas", ref _newGasBoilingPoint);
+        ImGui.SetNextItemWidth(NumericInputWidth);
         ImGui.InputFloat("Condensation point (K)##new-gas", ref _newGasCondensationPoint);
+        ImGui.SetNextItemWidth(NumericInputWidth);
         ImGui.InputFloat("Latent heat##new-gas", ref _newGasLatentHeat);
+        ImGui.SetNextItemWidth(NumericInputWidth);
         ImGui.InputInt("Liquid ID##new-gas", ref _newGasLiquidId);
+        ImGui.SetNextItemWidth(NumericInputWidth);
         ImGui.InputFloat("Diffusion coefficient##new-gas", ref _newGasDiffusionCoefficient);
         if (ImGui.Button("Add Gas", new Vector2(120, 0)))
         {
@@ -407,8 +423,11 @@ public partial class SimulationViewer
             }
         }
 
+        ImGui.SetNextItemWidth(NumericInputWidth);
         ImGui.InputInt("Voxel X##inject", ref _injectionX);
+        ImGui.SetNextItemWidth(NumericInputWidth);
         ImGui.InputInt("Voxel Y##inject", ref _injectionY);
+        ImGui.SetNextItemWidth(NumericInputWidth);
         ImGui.InputInt("Voxel Z##inject", ref _injectionZ);
 
         if (ImGui.Button("Move Camera to Voxel", new Vector2(180, 0)) &&
@@ -442,7 +461,9 @@ public partial class SimulationViewer
             ImGui.TextDisabled("Gas: none registered");
         }
 
+        ImGui.SetNextItemWidth(NumericInputWidth);
         ImGui.InputFloat("Moles##inject", ref _injectionMoles);
+        ImGui.SetNextItemWidth(NumericInputWidth);
         ImGui.InputFloat("Temperature (K)##inject", ref _injectionTemperature);
 
         bool canInject = _config.GasRegistry.Count > 0;

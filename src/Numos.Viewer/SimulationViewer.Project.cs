@@ -64,6 +64,7 @@ public partial class SimulationViewer
                 : projectName.Trim();
             _chunkDimensions = new Int3(chunkWidth, chunkHeight, chunkDepth);
             _isPaused = true;
+            _showConfigurationPanel = true;
             simulation = null;
             SetProjectMessage($"Created project '{_projectName}'.", false);
         }

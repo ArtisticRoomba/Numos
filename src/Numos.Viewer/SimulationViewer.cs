@@ -60,6 +60,8 @@ public partial class SimulationViewer : IDisposable
 
     private bool _isPaused;
     private string _currentVisualizationId = BuiltInVisualizationIds.Temperature;
+    private bool _legendResolutionEnabled;
+    private int _legendResolution = 32;
     private ChunkIdentity? _focusedChunk;
 
     private SimulationViewport? _viewport;
@@ -88,9 +90,10 @@ public partial class SimulationViewer : IDisposable
     private float _cameraMoveElapsed = CameraMoveDuration;
 
     // UI state
-    private bool _showDebugPanel = true;
-    private bool _showSettingsPanel;
-    private bool _showSimInfoPanel = true;
+    private bool _showSolutionPanel = true;
+    private bool _showToolsPanel = true;
+    private bool _showViewPanel = true;
+    private bool _showConfigurationPanel;
     private bool _showSliceViewport = true;
     private SliceAxis _currentSliceAxis = SliceAxis.Z;
     private int _currentSliceIndex;
@@ -166,7 +169,8 @@ public partial class SimulationViewer : IDisposable
                                         _drawData.Visualization.Id,
                                         visualization.Id,
                                         StringComparison.OrdinalIgnoreCase) ||
-                                    _drawData.VisualizationMappingRevision != visualization.MappingRevision;
+                                    _drawData.VisualizationMappingRevision != visualization.MappingRevision ||
+                                    _drawData.Visualization.Range.Resolution != GetLegendResolution();
         if (!snapshotsChanged && !visualizationChanged)
         {
             RefreshSliceData();
@@ -185,7 +189,8 @@ public partial class SimulationViewer : IDisposable
             _currentVisualizationId,
             _snapshotSourceVersion,
             _drawData,
-            forceRemap: visualizationChanged);
+            forceRemap: visualizationChanged,
+            resolution: GetLegendResolution());
         NormalizeInteractionState();
         RefreshSliceData();
         RebuildHighlights();

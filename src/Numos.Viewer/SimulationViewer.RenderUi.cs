@@ -1,16 +1,19 @@
 using System.Numerics;
 using ImGuiNET;
 using Numos.API;
+using Numos.CoreSim;
+using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.Datatypes.Snapshots;
 using Numos.Maths;
 using Numos.SimDrawer;
 using Numos.Viewer.Ui;
-using Raylib_cs;
 
 namespace Numos.Viewer;
 
 public partial class SimulationViewer
 {
+    private const float NumericInputWidth = 100f;
+
     private bool _requestOpenAboutModal;
     private bool _aboutModalOpen;
 
@@ -43,10 +46,10 @@ public partial class SimulationViewer
             RebuildHighlights();
         }
 
-        RenderDebugPanel();
-        RenderProjectPanel();
-        RenderSettingsPanel();
-        RenderSimInfoPanel();
+        RenderSolutionPanel();
+        RenderToolsPanel();
+        RenderViewPanel();
+        RenderConfigurationPanel();
         DrawCreateProjectModal();
         DrawCloseProjectModal();
         DrawAboutModal();
@@ -238,10 +241,10 @@ public partial class SimulationViewer
             if (ImGui.BeginMenu("View"))
             {
                 if (_simulation != null)
-                    ImGui.MenuItem("Project Panel", null, ref _showProjectPanel);
-                ImGui.MenuItem("Debug Panel", null, ref _showDebugPanel);
-                ImGui.MenuItem("Settings Panel", null, ref _showSettingsPanel);
-                ImGui.MenuItem("Sim Info Panel", null, ref _showSimInfoPanel);
+                    ImGui.MenuItem("Solution", null, ref _showSolutionPanel);
+                ImGui.MenuItem("Tools", null, ref _showToolsPanel);
+                ImGui.MenuItem("View", null, ref _showViewPanel);
+                ImGui.MenuItem("Configuration", null, ref _showConfigurationPanel);
                 ImGui.MenuItem("2D Slice Viewport", null, ref _showSliceViewport);
 
                 ImGui.EndMenu();
@@ -280,22 +283,10 @@ public partial class SimulationViewer
         }
     }
 
-    private void RenderDebugPanel()
+    private void RenderSolutionDiagnostics()
     {
-        if (!_showDebugPanel)
-            return;
-
-        using var window = ImGuiExtensions.BeginWindow(
-            "Debug Info##debug",
-            ref _showDebugPanel,
-            new Vector2(10, 40),
-            new Vector2(300, 300));
-        if (!window.IsVisible)
-            return;
-
         ImGui.Text($"FPS: {ImGui.GetIO().Framerate:F1}");
         ImGui.Text($"Simulation Ticks: {_simulation?.TickCount ?? 0}");
-        ImGui.Checkbox("Paused", ref _isPaused);
 
         if (ImGui.CollapsingHeader("Camera"))
         {
@@ -349,44 +340,19 @@ public partial class SimulationViewer
         }
     }
 
-    private void RenderSettingsPanel()
+    private void RenderViewPanel()
     {
-        if (!_showSettingsPanel)
+        if (!_showViewPanel)
             return;
 
         using var window = ImGuiExtensions.BeginWindow(
-            "Settings##settings",
-            ref _showSettingsPanel,
+            "View##view",
+            ref _showViewPanel,
             new Vector2(320, 40),
             new Vector2(300, 400));
         if (!window.IsVisible)
             return;
 
-        ImGui.Text("Simulation Settings");
-        ImGui.Separator();
-
-        if (_config != null)
-        {
-            float globalTemp = _config.GlobalTemperature;
-            if (ImGui.SliderFloat("Global Temperature", ref globalTemp, 0f, 500f))
-            {
-                _config.GlobalTemperature = globalTemp;
-            }
-
-            float flowFriction = _config.FlowFriction;
-            if (ImGui.SliderFloat("Flow Friction", ref flowFriction, 0f, 1f))
-            {
-                _config.FlowFriction = flowFriction;
-            }
-
-            float thermalConductivity = _config.ThermalConductivity;
-            if (ImGui.SliderFloat("Thermal Conductivity", ref thermalConductivity, 0f, 0.2f))
-            {
-                _config.ThermalConductivity = thermalConductivity;
-            }
-        }
-
-        ImGui.Separator();
         ImGui.Text("Visualization");
 
         if (_frameBuilder != null)
@@ -419,6 +385,246 @@ public partial class SimulationViewer
         ImGui.Text("2D Slice View");
         ImGui.Checkbox("Show Slice Viewport", ref _showSliceViewport);
         RenderSliceControls();
+    }
+
+    private void RenderConfigurationPanel()
+    {
+        if (!_showConfigurationPanel || _config == null)
+            return;
+
+        using var window = ImGuiExtensions.BeginWindow(
+            "Configuration##configuration",
+            ref _showConfigurationPanel,
+            new Vector2(640, 40),
+            new Vector2(380, 600));
+        if (!window.IsVisible)
+            return;
+
+        ImGui.Text("AtmosConfig");
+        if (ImGui.Button("Reset to Defaults##config-reset"))
+            ResetConfigurationValues();
+        ImGui.Separator();
+        float globalTemp = _config.GlobalTemperature;
+        if (ConfigSlider("Global Temperature", "config-global-temperature", ref globalTemp, 0f, 1000f,
+                "Reference ambient temperature."))
+            _config.GlobalTemperature = globalTemp;
+        float defaultTemperatureFallback = _config.DefaultTemperatureFallback;
+        if (ConfigSlider("Default Temperature Fallback", "config-default-temperature-fallback",
+                ref defaultTemperatureFallback, 0f, 1000f,
+                "Default fallback temperature to set when a voxel has 0 or an uninitialized temperature."))
+            _config.DefaultTemperatureFallback = defaultTemperatureFallback;
+        float spaceTemperature = _config.SpaceTemperature;
+        if (ConfigSlider("Space Temperature", "config-space-temperature", ref spaceTemperature, 0f, 100f,
+                "Default temperature of space."))
+            _config.SpaceTemperature = spaceTemperature;
+        float flowFriction = _config.FlowFriction;
+        if (ConfigSlider("Flow Friction", "config-flow-friction", ref flowFriction, 0f, 1f,
+                "Fraction of pressure delta converted to flow per tick."))
+            _config.FlowFriction = flowFriction;
+        float dampingFactor = _config.DampingFactor;
+        if (ConfigSlider("Damping Factor", "config-damping-factor", ref dampingFactor, 0f, 1f,
+                "Multiplier applied to Flow Friction during large-delta advection. Used to reduce oscillation in the sim."))
+            _config.DampingFactor = dampingFactor;
+        float snapThreshold = _config.SnapThreshold;
+        if (ConfigSlider("Snap Threshold", "config-snap-threshold", ref snapThreshold, 0f, 100f,
+                "Below this pressure delta, flow uses the Cfl Flow Cap directly instead of Flow Friction multiplied by Damping Factor."))
+            _config.SnapThreshold = snapThreshold;
+        float minFlowCutoff = _config.MinFlowCutoff;
+        if (ConfigSlider("Minimum Flow Cutoff", "config-min-flow-cutoff", ref minFlowCutoff, 0f, 10f,
+                "Flows below this magnitude are discarded."))
+            _config.MinFlowCutoff = minFlowCutoff;
+        float vacuumThreshold = _config.VacuumThreshold;
+        if (ConfigSlider("Vacuum Threshold", "config-vacuum-threshold", ref vacuumThreshold, 0f, 100f,
+                "Below this pressure, voxel contents are zeroed out."))
+            _config.VacuumThreshold = vacuumThreshold;
+        int sleepThreshold = _config.SleepThreshold;
+        if (ConfigSlider("Sleep Threshold", "config-sleep-threshold", ref sleepThreshold, 1, 1000,
+                "Consecutive ticks below Sleep Epsilon before a chunk goes to sleep."))
+            _config.SleepThreshold = sleepThreshold;
+        float sleepEpsilon = _config.SleepEpsilon;
+        if (ConfigSlider("Sleep Epsilon", "config-sleep-epsilon", ref sleepEpsilon, 0f, 100f,
+                "Maximum pressure delta considered at rest."))
+            _config.SleepEpsilon = sleepEpsilon;
+        float thermalConductivity = _config.ThermalConductivity;
+        if (ConfigSlider("Thermal Conductivity", "config-thermal-conductivity", ref thermalConductivity, 0f, 1f,
+                "Fraction of temperature delta transferred per neighbor per tick."))
+            _config.ThermalConductivity = thermalConductivity;
+        float condensationRateFactor = _config.CondensationRateFactor;
+        if (ConfigSlider("Condensation Rate Factor", "config-condensation-rate-factor", ref condensationRateFactor, 0f,
+                1f,
+                "Rate multiplier for phase-change condensation."))
+            _config.CondensationRateFactor = condensationRateFactor;
+        float cflFlowCap = _config.CflFlowCap;
+        if (ConfigSlider("CFL Flow Cap", "config-cfl-flow-cap", ref cflFlowCap, 0f, 1f,
+                "Rate multiplier for phase-change condensation."))
+            _config.CflFlowCap = cflFlowCap;
+        float accumulatorWakeThreshold = _config.AccumulatorWakeThreshold;
+        if (ConfigSlider("Accumulator Wake Threshold", "config-accumulator-wake-threshold",
+                ref accumulatorWakeThreshold, 0f, 100f,
+                "Minimum accumulated flow or pressure activity required to wake a sleeping chunk."))
+            _config.AccumulatorWakeThreshold = accumulatorWakeThreshold;
+        int accumulatorMaxAliveTicks = _config.AccumulatorMaxAliveTicks;
+        if (ConfigSlider("Accumulator Max Alive Ticks", "config-accumulator-max-alive-ticks",
+                ref accumulatorMaxAliveTicks, 1, 1000,
+                "Maximum number of ticks that an accumulated activity value remains alive."))
+            _config.AccumulatorMaxAliveTicks = accumulatorMaxAliveTicks;
+
+        ImGui.Spacing();
+        if (ImGui.CollapsingHeader("Gas Registry", ImGuiTreeNodeFlags.DefaultOpen))
+            RenderProjectGasControls();
+    }
+
+    private void ResetConfigurationValues()
+    {
+        if (_config == null)
+            return;
+
+        var defaults = new AtmosConfig();
+        _config.GlobalTemperature = defaults.GlobalTemperature;
+        _config.DefaultTemperatureFallback = defaults.DefaultTemperatureFallback;
+        _config.SpaceTemperature = defaults.SpaceTemperature;
+        _config.FlowFriction = defaults.FlowFriction;
+        _config.DampingFactor = defaults.DampingFactor;
+        _config.SnapThreshold = defaults.SnapThreshold;
+        _config.MinFlowCutoff = defaults.MinFlowCutoff;
+        _config.VacuumThreshold = defaults.VacuumThreshold;
+        _config.SleepThreshold = defaults.SleepThreshold;
+        _config.SleepEpsilon = defaults.SleepEpsilon;
+        _config.ThermalConductivity = defaults.ThermalConductivity;
+        _config.CondensationRateFactor = defaults.CondensationRateFactor;
+        _config.CflFlowCap = defaults.CflFlowCap;
+        _config.AccumulatorWakeThreshold = defaults.AccumulatorWakeThreshold;
+        _config.AccumulatorMaxAliveTicks = defaults.AccumulatorMaxAliveTicks;
+    }
+
+    private static bool ConfigSlider(string label, string id, ref float value, float min, float max, string tooltip)
+    {
+        ImGui.SetNextItemWidth(100f);
+        bool changed = ImGui.SliderFloat($"{label} (?)##{id}", ref value, min, max);
+        SetConfigTooltip(tooltip);
+        return changed;
+    }
+
+    private static bool ConfigSlider(string label, string id, ref int value, int min, int max, string tooltip)
+    {
+        ImGui.SetNextItemWidth(100f);
+        bool changed = ImGui.SliderInt($"{label} (?)##{id}", ref value, min, max);
+        SetConfigTooltip(tooltip);
+        return changed;
+    }
+
+    private static void SetConfigTooltip(string tooltip)
+    {
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip(tooltip);
+    }
+
+    private void RenderToolsPanel()
+    {
+        if (!_showToolsPanel || _simulation == null || _config == null)
+            return;
+
+        using var window = ImGuiExtensions.BeginWindow(
+            "Tools##tools",
+            ref _showToolsPanel,
+            new Vector2(390, 40),
+            new Vector2(380, 560));
+        if (!window.IsVisible)
+            return;
+
+        if (ImGui.CollapsingHeader("Chunks", ImGuiTreeNodeFlags.DefaultOpen))
+            RenderProjectChunkControls();
+        if (ImGui.CollapsingHeader("Voxel Selection", ImGuiTreeNodeFlags.DefaultOpen))
+            RenderVoxelTools();
+        if (ImGui.CollapsingHeader("Inject Gas"))
+            RenderProjectInjectionControls();
+    }
+
+    private void RenderVoxelTools()
+    {
+        ImGui.Text("Chunk operations");
+        if (_liveChunkHandles.Count == 0)
+        {
+            ImGui.TextDisabled("Add a chunk before editing classifications.");
+        }
+        else
+        {
+            if (!_toolChunkPosition.HasValue || !_liveChunkPositions.Contains(_toolChunkPosition.Value))
+                _toolChunkPosition = _liveChunkHandles[0].Position;
+
+            string chunkLabel = FormatChunkPosition(_toolChunkPosition.Value);
+            if (ImGui.BeginCombo("Chunk##tool-classification", chunkLabel))
+            {
+                foreach (var handle in _liveChunkHandles)
+                {
+                    bool chunkSelected = handle.Position == _toolChunkPosition.Value;
+                    if (ImGui.Selectable(FormatChunkPosition(handle.Position), chunkSelected))
+                        _toolChunkPosition = handle.Position;
+                    if (chunkSelected)
+                        ImGui.SetItemDefaultFocus();
+                }
+
+                ImGui.EndCombo();
+            }
+
+            ImGui.SetNextItemWidth(NumericInputWidth);
+            ImGui.InputInt("Fill VoxelClassification", ref _toolClassificationDraft);
+            if (ImGui.Button("Fill Selected Chunk"))
+            {
+                try
+                {
+                    _simulation!.SetChunkClassification(
+                        new AtmosChunkHandle(_toolChunkPosition.Value),
+                        new VoxelClassification(_toolClassificationDraft));
+                    SetProjectMessage(
+                        $"Filled chunk {FormatChunkPosition(_toolChunkPosition.Value)} with classification " +
+                        $"{_toolClassificationDraft}.", false);
+                }
+                catch (Exception exception) when (exception is ArgumentOutOfRangeException or KeyNotFoundException)
+                {
+                    SetProjectMessage(exception.Message, true);
+                }
+            }
+        }
+
+        ImGui.Separator();
+        if (!_selectedCell.HasValue)
+        {
+            ImGui.TextDisabled("Select a voxel in the 3D or 2D view.");
+            return;
+        }
+
+        var selected = _selectedCell.Value;
+        ImGui.Text($"Chunk: {FormatChunkPosition(selected.Chunk.Position)}");
+        ImGui.Text($"Voxel: {FormatCellCoordinates(selected)}");
+        DrawCellSelectionDetails(selected);
+
+        if (ImGui.Button("Clear Selection"))
+        {
+            _selectedCell = null;
+            RebuildHighlights();
+            return;
+        }
+
+        ImGui.Separator();
+        ImGui.SetNextItemWidth(NumericInputWidth);
+        if (ImGui.InputInt("VoxelClassification", ref _voxelClassificationDraft))
+        {
+            try
+            {
+                _simulation!.SetVoxelClassification(
+                    new AtmosChunkHandle(selected.Chunk.Position),
+                    selected.LocalIndex,
+                    new VoxelClassification(_voxelClassificationDraft));
+                SetProjectMessage($"Changed voxel classification to {_voxelClassificationDraft}.", false);
+            }
+            catch (Exception exception) when (exception is ArgumentOutOfRangeException or KeyNotFoundException)
+            {
+                SetProjectMessage(exception.Message, true);
+            }
+        }
+
+        ImGui.TextDisabled("0 = unassigned, -2 = solid, -1 = void; positive values are room IDs.");
     }
 
     private void RenderSliceControls()
@@ -487,18 +693,100 @@ public partial class SimulationViewer
             ? legend.Title
             : $"{legend.Title} ({legend.Units})");
 
+        if (legend.Kind == VisualizationLegendKind.Gradient && legend.Entries.Count > 0)
+        {
+            ImGui.Checkbox("Resolution##legend-resolution-enabled", ref _legendResolutionEnabled);
+            if (_legendResolutionEnabled)
+            {
+                ImGui.SameLine();
+                ImGui.SetNextItemWidth(-1f);
+                ImGui.SliderInt("##legend-resolution", ref _legendResolution, 1, 256);
+            }
+            else
+                ImGui.SameLine();
+
+            ImGui.TextDisabled(_legendResolutionEnabled ? $"{_legendResolution} levels" : "Off (coarse)");
+            RenderGradientLegend(legend);
+            return;
+        }
+
         for (var index = 0; index < legend.Entries.Count; index++)
         {
             var entry = legend.Entries[index];
             var color = entry.Color;
-            ImGui.ColorButton(
-                $"##legend-{index}",
-                new Vector4(color.R, color.G, color.B, color.A),
-                ImGuiColorEditFlags.NoTooltip,
-                new Vector2(16, 16));
+            ImGui.ColorButton($"##legend-{index}", new Vector4(color.R, color.G, color.B, color.A),
+                ImGuiColorEditFlags.NoTooltip, new Vector2(16, 16));
             ImGui.SameLine();
             ImGui.TextUnformatted(entry.Label);
         }
+    }
+
+    private static void RenderGradientLegend(VisualizationLegend legend)
+    {
+        const int segmentCount = 256;
+        const float barHeight = 18f;
+        const float labelHeight = 18f;
+        float width = Math.Max(ImGui.GetContentRegionAvail().X, 160f);
+        var topLeft = ImGui.GetCursorScreenPos();
+        var bottomRight = topLeft + new Vector2(width, barHeight);
+        var drawList = ImGui.GetWindowDrawList();
+        for (var segment = 0; segment < segmentCount; segment++)
+        {
+            float start = segment / (float)segmentCount;
+            float end = (segment + 1) / (float)segmentCount;
+            var color = InterpolateLegendColor(legend, QuantizeLegendPosition(start, legend.Range.Resolution));
+            drawList.AddRectFilled(new Vector2(topLeft.X + width * start, topLeft.Y),
+                new Vector2(topLeft.X + width * end + 1f, bottomRight.Y),
+                ImGui.GetColorU32(new Vector4(color.R, color.G, color.B, color.A)));
+        }
+
+        ImGui.Dummy(new Vector2(width, barHeight + labelHeight));
+        uint textColor = ImGui.GetColorU32(ImGuiCol.Text);
+        foreach (var entry in legend.Entries)
+        {
+            if (!entry.Value.HasValue)
+                continue;
+            float position = NormalizeLegendValue(entry.Value.Value, legend);
+            float textWidth = ImGui.CalcTextSize(entry.Label).X;
+            float x = Math.Clamp(topLeft.X + width * position - textWidth * position, topLeft.X,
+                bottomRight.X - textWidth);
+            drawList.AddText(new Vector2(x, bottomRight.Y + 1f), textColor, entry.Label);
+        }
+    }
+
+    private static ColorRgba InterpolateLegendColor(VisualizationLegend legend, float position)
+    {
+        var entries = legend.Entries;
+        if (entries.Count == 1)
+            return entries[0].Color;
+        var lower = 0;
+        while (lower < entries.Count - 2 &&
+               NormalizeLegendValue(entries[lower + 1].Value ?? 0f, legend) < position)
+            lower++;
+        float lowerPosition = NormalizeLegendValue(entries[lower].Value ?? 0f, legend);
+        float upperPosition = NormalizeLegendValue(entries[lower + 1].Value ?? 1f, legend);
+        float amount = upperPosition <= lowerPosition
+            ? 0.5f
+            : (position - lowerPosition) / (upperPosition - lowerPosition);
+        return ColorRgba.Lerp(entries[lower].Color, entries[lower + 1].Color, amount);
+    }
+
+    private static float NormalizeLegendValue(float value, VisualizationLegend legend)
+    {
+        float minimum = legend.Entries[0].Value ?? 0f;
+        float maximum = legend.Entries[^1].Value ?? minimum + 1f;
+        return maximum <= minimum ? 0.5f : Math.Clamp((value - minimum) / (maximum - minimum), 0f, 1f);
+    }
+
+    private static float QuantizeLegendPosition(float position, int resolution)
+    {
+        resolution = Math.Max(resolution, 1);
+        return resolution == 1 ? 0.5f : MathF.Round(position * (resolution - 1)) / (resolution - 1);
+    }
+
+    private int GetLegendResolution()
+    {
+        return _legendResolutionEnabled ? _legendResolution : 8;
     }
 
     private void RenderChunkFocusControls()
@@ -693,19 +981,8 @@ public partial class SimulationViewer
         return $"Gas {gasId}";
     }
 
-    private void RenderSimInfoPanel()
+    private void RenderSolutionDetails()
     {
-        if (!_showSimInfoPanel)
-            return;
-
-        using var window = ImGuiExtensions.BeginWindow(
-            "Simulation Info##siminfo",
-            ref _showSimInfoPanel,
-            new Vector2(Raylib.GetScreenWidth() - 310, 40),
-            new Vector2(300, 400));
-        if (!window.IsVisible)
-            return;
-
         if (ImGui.CollapsingHeader("Simulation State"))
         {
             if (_simulation != null)
