@@ -19,4 +19,11 @@
         <PackageReference Include="rlImgui-cs" Version="3.2.0"/>
     </ItemGroup>
 
+    <ItemGroup>
+        <None Update="assets/icon.png">
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+            <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+        </None>
+    </ItemGroup>
+
 </Project>

@@ -122,6 +122,18 @@ public partial class SimulationViewer : IDisposable
         Raylib.InitWindow(1400, 900, "Numos Simulation Viewer");
         _windowInitialized = true;
 
+        string iconPath = Path.Combine(
+            AppContext.BaseDirectory,
+            "assets",
+            "icon.png");
+
+        if (File.Exists(iconPath))
+        {
+            var icon = Raylib.LoadImage(iconPath);
+            Raylib.SetWindowIcon(icon);
+            Raylib.UnloadImage(icon);
+        }
+
         try
         {
             Raylib.SetTargetFPS(144);
