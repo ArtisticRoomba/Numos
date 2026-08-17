@@ -270,24 +270,6 @@ public partial class SimulationViewer
                 ImGui.EndMenu();
             }
 
-            if (ImGui.BeginMenu("Visualization"))
-            {
-                if (_frameBuilder != null)
-                {
-                    foreach (var method in _frameBuilder.Visualizations.Methods)
-                    {
-                        bool selected = string.Equals(
-                            method.Id,
-                            _currentVisualizationId,
-                            StringComparison.OrdinalIgnoreCase);
-                        if (ImGui.MenuItem(method.DisplayName, null, selected))
-                            SetVisualization(method.Id);
-                    }
-                }
-
-                ImGui.EndMenu();
-            }
-
             if (ImGui.BeginMenu("Help"))
             {
                 if (ImGui.MenuItem("About"))
