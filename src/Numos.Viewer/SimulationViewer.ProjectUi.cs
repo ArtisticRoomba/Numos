@@ -3,6 +3,7 @@ using ImGuiNET;
 using Numos.API;
 using Numos.CoreSim;
 using Numos.Maths;
+using Numos.Viewer.Ui;
 
 namespace Numos.Viewer;
 
@@ -73,11 +74,7 @@ public partial class SimulationViewer
     private void DrawCreateProjectModal()
     {
         const string popupId = "Create Simulation";
-        if (_requestOpenCreateProject)
-        {
-            ImGui.OpenPopup(popupId);
-            _requestOpenCreateProject = false;
-        }
+        ImGuiExtensions.OpenPopupWhenRequested(popupId, ref _requestOpenCreateProject);
 
         var viewport = ImGui.GetMainViewport();
         ImGui.SetNextWindowPos(
@@ -85,8 +82,8 @@ public partial class SimulationViewer
             ImGuiCond.Appearing,
             new Vector2(0.5f, 0.5f));
         ImGui.SetNextWindowSize(new Vector2(520, 0), ImGuiCond.Appearing);
-        var flags = ImGuiWindowFlags.AlwaysAutoResize | ImGuiWindowFlags.NoSavedSettings;
-        if (!ImGui.BeginPopupModal(popupId, ref _createProjectModalOpen, flags))
+        using var modal = ImGuiExtensions.BeginPopupModal(popupId, ref _createProjectModalOpen);
+        if (!modal.IsVisible)
             return;
 
         ImGui.InputText("Project name", ref _projectNameDraft, 128);
@@ -144,22 +141,16 @@ public partial class SimulationViewer
             _createProjectModalOpen = false;
             ImGui.CloseCurrentPopup();
         }
-
-        ImGui.EndPopup();
     }
 
     private void DrawCloseProjectModal()
     {
         const string popupId = "Close Simulation Project?";
-        if (_requestOpenCloseProject)
-        {
-            ImGui.OpenPopup(popupId);
-            _requestOpenCloseProject = false;
-        }
+        ImGuiExtensions.OpenPopupWhenRequested(popupId, ref _requestOpenCloseProject);
 
         ImGui.SetNextWindowSize(new Vector2(430, 0), ImGuiCond.Appearing);
-        var flags = ImGuiWindowFlags.AlwaysAutoResize | ImGuiWindowFlags.NoSavedSettings;
-        if (!ImGui.BeginPopupModal(popupId, ref _closeProjectModalOpen, flags))
+        using var modal = ImGuiExtensions.BeginPopupModal(popupId, ref _closeProjectModalOpen);
+        if (!modal.IsVisible)
             return;
 
         ImGui.TextWrapped(
@@ -178,8 +169,6 @@ public partial class SimulationViewer
             _closeProjectModalOpen = false;
             ImGui.CloseCurrentPopup();
         }
-
-        ImGui.EndPopup();
     }
 
     private void RenderProjectPanel()
@@ -187,13 +176,13 @@ public partial class SimulationViewer
         if (!_showProjectPanel || _simulation == null || _config == null)
             return;
 
-        ImGui.SetNextWindowPos(new Vector2(10, 360), ImGuiCond.FirstUseEver);
-        ImGui.SetNextWindowSize(new Vector2(380, 520), ImGuiCond.FirstUseEver);
-        if (!ImGui.Begin("Simulation Project##project", ref _showProjectPanel))
-        {
-            ImGui.End();
+        using var window = ImGuiExtensions.BeginWindow(
+            "Simulation Project##project",
+            ref _showProjectPanel,
+            new Vector2(10, 360),
+            new Vector2(380, 520));
+        if (!window.IsVisible)
             return;
-        }
 
         ImGui.Text(_projectName ?? "Untitled Simulation");
         ImGui.TextDisabled(
@@ -240,8 +229,6 @@ public partial class SimulationViewer
             RenderProjectGasControls();
         if (ImGui.CollapsingHeader("Inject Gas", ImGuiTreeNodeFlags.DefaultOpen))
             RenderProjectInjectionControls();
-
-        ImGui.End();
     }
 
     private void RenderSimulationProgress()

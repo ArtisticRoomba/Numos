@@ -4,6 +4,7 @@ using Numos.API;
 using Numos.CoreSim.Datatypes.Snapshots;
 using Numos.Maths;
 using Numos.SimDrawer;
+using Numos.Viewer.Ui;
 using Raylib_cs;
 
 namespace Numos.Viewer;
@@ -104,67 +105,45 @@ public partial class SimulationViewer
 
         ImGui.Begin("Empty workspace##empty-workspace", windowFlags);
 
-        TextCentered("Numos");
-        TextCentered($"v{ViewerVersion}", ImGui.TextDisabled);
+        ImGuiExtensions.TextCentered("Numos");
+        ImGuiExtensions.TextCentered($"v{ViewerVersion}", ImGui.TextDisabled);
 
         ImGui.Separator();
 
-        TextCentered("No simulation is currently loaded.");
-        TextCentered(
+        ImGuiExtensions.TextCentered("No simulation is currently loaded.");
+        ImGuiExtensions.TextCentered(
             "To get started, choose File > New Simulation.",
             ImGui.TextDisabled);
 
         ImGui.End();
     }
 
-    private static void TextCentered(
-        string text,
-        Action<string>? renderText = null)
-    {
-        float textWidth = ImGui.CalcTextSize(text).X;
-        float centeredX = (ImGui.GetWindowSize().X - textWidth) * 0.5f;
-
-        ImGui.SetCursorPosX(centeredX);
-
-        renderText ??= ImGui.TextUnformatted;
-        renderText(text);
-    }
-
     private void DrawAboutModal()
     {
         const string popupId = "About Numos";
 
-        if (_requestOpenAboutModal)
-        {
-            ImGui.OpenPopup(popupId);
-            _requestOpenAboutModal = false;
-        }
+        ImGuiExtensions.OpenPopupWhenRequested(popupId, ref _requestOpenAboutModal);
 
         ImGui.SetNextWindowSize(new Vector2(420, 0), ImGuiCond.Appearing);
 
-        var flags =
-            ImGuiWindowFlags.AlwaysAutoResize |
-            ImGuiWindowFlags.NoSavedSettings;
+        using var modal = ImGuiExtensions.BeginPopupModal(popupId, ref _aboutModalOpen);
+        if (!modal.IsVisible)
+            return;
 
-        if (ImGui.BeginPopupModal(popupId, ref _aboutModalOpen, flags))
+        DrawAboutHeader();
+
+        DrawAboutTabs();
+
+        ImGui.Spacing();
+
+        const float buttonWidth = 120f;
+        float availableWidth = ImGui.GetContentRegionAvail().X;
+        ImGui.SetCursorPosX(ImGui.GetCursorPosX() + availableWidth - buttonWidth);
+
+        if (ImGui.Button("Close", new Vector2(buttonWidth, 0)))
         {
-            DrawAboutHeader();
-
-            DrawAboutTabs();
-
-            ImGui.Spacing();
-
-            const float buttonWidth = 120f;
-            float availableWidth = ImGui.GetContentRegionAvail().X;
-            ImGui.SetCursorPosX(ImGui.GetCursorPosX() + availableWidth - buttonWidth);
-
-            if (ImGui.Button("Close", new Vector2(buttonWidth, 0)))
-            {
-                _aboutModalOpen = false;
-                ImGui.CloseCurrentPopup();
-            }
-
-            ImGui.EndPopup();
+            _aboutModalOpen = false;
+            ImGui.CloseCurrentPopup();
         }
     }
 
@@ -306,67 +285,67 @@ public partial class SimulationViewer
         if (!_showDebugPanel)
             return;
 
-        ImGui.SetNextWindowPos(new Vector2(10, 40), ImGuiCond.FirstUseEver);
-        ImGui.SetNextWindowSize(new Vector2(300, 300), ImGuiCond.FirstUseEver);
+        using var window = ImGuiExtensions.BeginWindow(
+            "Debug Info##debug",
+            ref _showDebugPanel,
+            new Vector2(10, 40),
+            new Vector2(300, 300));
+        if (!window.IsVisible)
+            return;
 
-        if (ImGui.Begin("Debug Info##debug", ref _showDebugPanel))
+        ImGui.Text($"FPS: {ImGui.GetIO().Framerate:F1}");
+        ImGui.Text($"Simulation Ticks: {_simulation?.TickCount ?? 0}");
+        ImGui.Checkbox("Paused", ref _isPaused);
+
+        if (ImGui.CollapsingHeader("Camera"))
         {
-            ImGui.Text($"FPS: {ImGui.GetIO().Framerate:F1}");
-            ImGui.Text($"Simulation Ticks: {_simulation?.TickCount ?? 0}");
-            ImGui.Checkbox("Paused", ref _isPaused);
+            ImGui.Text(
+                $"Position: {_camera3D.Position.X:F1}, {_camera3D.Position.Y:F1}, {_camera3D.Position.Z:F1}");
+            ImGui.Text($"Target: {_camera3D.Target.X:F1}, {_camera3D.Target.Y:F1}, {_camera3D.Target.Z:F1}");
+            ImGui.Text($"Distance: {Vector3.Distance(_camera3D.Position, _camera3D.Target):F1}");
+        }
 
-            if (ImGui.CollapsingHeader("Camera"))
+        if (ImGui.CollapsingHeader("2D Slice"))
+        {
+            ImGui.Text($"Axis: {_currentSliceAxis}");
+            ImGui.Text($"Slice Index: {_currentSliceIndex}");
+            ImGui.Text($"Visible Cells: {(_sliceDrawData == null ? 0 : _sliceDrawData.Cells.Length)}");
+
+            if (_hoveredSliceCell.HasValue)
+                ImGui.Text($"Hovered Cell: {FormatCellCoordinates(_hoveredSliceCell.Value.Address)}");
+            else
+                ImGui.TextDisabled("Hovered Cell: none");
+        }
+
+        if (ImGui.CollapsingHeader("Selection"))
+        {
+            if (_selectedCell.HasValue)
             {
-                ImGui.Text(
-                    $"Position: {_camera3D.Position.X:F1}, {_camera3D.Position.Y:F1}, {_camera3D.Position.Z:F1}");
-                ImGui.Text($"Target: {_camera3D.Target.X:F1}, {_camera3D.Target.Y:F1}, {_camera3D.Target.Z:F1}");
-                ImGui.Text($"Distance: {Vector3.Distance(_camera3D.Position, _camera3D.Target):F1}");
-            }
+                DrawCellSelectionDetails(_selectedCell.Value);
 
-            if (ImGui.CollapsingHeader("2D Slice"))
-            {
-                ImGui.Text($"Axis: {_currentSliceAxis}");
-                ImGui.Text($"Slice Index: {_currentSliceIndex}");
-                ImGui.Text($"Visible Cells: {(_sliceDrawData == null ? 0 : _sliceDrawData.Cells.Length)}");
-
-                if (_hoveredSliceCell.HasValue)
-                    ImGui.Text($"Hovered Cell: {FormatCellCoordinates(_hoveredSliceCell.Value.Address)}");
-                else
-                    ImGui.TextDisabled("Hovered Cell: none");
-            }
-
-            if (ImGui.CollapsingHeader("Selection"))
-            {
-                if (_selectedCell.HasValue)
+                if (ImGui.Button("Clear Selection##selected-cell"))
                 {
-                    DrawCellSelectionDetails(_selectedCell.Value);
-
-                    if (ImGui.Button("Clear Selection##selected-cell"))
-                    {
-                        _selectedCell = null;
-                        RebuildHighlights();
-                    }
-                }
-                else
-                {
-                    ImGui.TextDisabled("No selected cell.");
+                    _selectedCell = null;
+                    RebuildHighlights();
                 }
             }
-
-            if (ImGui.CollapsingHeader("Chunks"))
+            else
             {
-                ImGui.Text($"Presented Chunks: {_drawData?.Chunks.Count ?? 0}");
-                if (_drawData != null)
+                ImGui.TextDisabled("No selected cell.");
+            }
+        }
+
+        if (ImGui.CollapsingHeader("Chunks"))
+        {
+            ImGui.Text($"Presented Chunks: {_drawData?.Chunks.Count ?? 0}");
+            if (_drawData != null)
+            {
+                foreach (var chunk in _drawData.Chunks.Values)
                 {
-                    foreach (var chunk in _drawData.Chunks.Values)
-                    {
-                        ImGui.BulletText(
-                            $"Chunk {chunk.ChunkPosition}: {chunk.VisibleCellCount} visible cells, {chunk.SurfaceFaceCount} faces");
-                    }
+                    ImGui.BulletText(
+                        $"Chunk {chunk.ChunkPosition}: {chunk.VisibleCellCount} visible cells, {chunk.SurfaceFaceCount} faces");
                 }
             }
-
-            ImGui.End();
         }
     }
 
@@ -375,71 +354,71 @@ public partial class SimulationViewer
         if (!_showSettingsPanel)
             return;
 
-        ImGui.SetNextWindowPos(new Vector2(320, 40), ImGuiCond.FirstUseEver);
-        ImGui.SetNextWindowSize(new Vector2(300, 400), ImGuiCond.FirstUseEver);
+        using var window = ImGuiExtensions.BeginWindow(
+            "Settings##settings",
+            ref _showSettingsPanel,
+            new Vector2(320, 40),
+            new Vector2(300, 400));
+        if (!window.IsVisible)
+            return;
 
-        if (ImGui.Begin("Settings##settings", ref _showSettingsPanel))
+        ImGui.Text("Simulation Settings");
+        ImGui.Separator();
+
+        if (_config != null)
         {
-            ImGui.Text("Simulation Settings");
-            ImGui.Separator();
-
-            if (_config != null)
+            float globalTemp = _config.GlobalTemperature;
+            if (ImGui.SliderFloat("Global Temperature", ref globalTemp, 0f, 500f))
             {
-                float globalTemp = _config.GlobalTemperature;
-                if (ImGui.SliderFloat("Global Temperature", ref globalTemp, 0f, 500f))
-                {
-                    _config.GlobalTemperature = globalTemp;
-                }
-
-                float flowFriction = _config.FlowFriction;
-                if (ImGui.SliderFloat("Flow Friction", ref flowFriction, 0f, 1f))
-                {
-                    _config.FlowFriction = flowFriction;
-                }
-
-                float thermalConductivity = _config.ThermalConductivity;
-                if (ImGui.SliderFloat("Thermal Conductivity", ref thermalConductivity, 0f, 0.2f))
-                {
-                    _config.ThermalConductivity = thermalConductivity;
-                }
+                _config.GlobalTemperature = globalTemp;
             }
 
-            ImGui.Separator();
-            ImGui.Text("Visualization");
-
-            if (_frameBuilder != null)
+            float flowFriction = _config.FlowFriction;
+            if (ImGui.SliderFloat("Flow Friction", ref flowFriction, 0f, 1f))
             {
-                var current = _frameBuilder.Visualizations.GetRequired(_currentVisualizationId);
-                if (ImGui.BeginCombo("Mode##viz", current.DisplayName))
-                {
-                    foreach (var method in _frameBuilder.Visualizations.Methods)
-                    {
-                        bool selected = string.Equals(
-                            method.Id,
-                            _currentVisualizationId,
-                            StringComparison.OrdinalIgnoreCase);
-                        if (ImGui.Selectable(method.DisplayName, selected))
-                            SetVisualization(method.Id);
-                        if (selected)
-                            ImGui.SetItemDefaultFocus();
-                    }
-
-                    ImGui.EndCombo();
-                }
+                _config.FlowFriction = flowFriction;
             }
 
-            RenderVisualizationLegend();
-
-            ImGui.Separator();
-            RenderChunkFocusControls();
-
-            ImGui.Separator();
-            ImGui.Text("2D Slice View");
-            ImGui.Checkbox("Show Slice Viewport", ref _showSliceViewport);
-            RenderSliceControls();
-
-            ImGui.End();
+            float thermalConductivity = _config.ThermalConductivity;
+            if (ImGui.SliderFloat("Thermal Conductivity", ref thermalConductivity, 0f, 0.2f))
+            {
+                _config.ThermalConductivity = thermalConductivity;
+            }
         }
+
+        ImGui.Separator();
+        ImGui.Text("Visualization");
+
+        if (_frameBuilder != null)
+        {
+            var current = _frameBuilder.Visualizations.GetRequired(_currentVisualizationId);
+            if (ImGui.BeginCombo("Mode##viz", current.DisplayName))
+            {
+                foreach (var method in _frameBuilder.Visualizations.Methods)
+                {
+                    bool selected = string.Equals(
+                        method.Id,
+                        _currentVisualizationId,
+                        StringComparison.OrdinalIgnoreCase);
+                    if (ImGui.Selectable(method.DisplayName, selected))
+                        SetVisualization(method.Id);
+                    if (selected)
+                        ImGui.SetItemDefaultFocus();
+                }
+
+                ImGui.EndCombo();
+            }
+        }
+
+        RenderVisualizationLegend();
+
+        ImGui.Separator();
+        RenderChunkFocusControls();
+
+        ImGui.Separator();
+        ImGui.Text("2D Slice View");
+        ImGui.Checkbox("Show Slice Viewport", ref _showSliceViewport);
+        RenderSliceControls();
     }
 
     private void RenderSliceControls()
@@ -719,49 +698,49 @@ public partial class SimulationViewer
         if (!_showSimInfoPanel)
             return;
 
-        ImGui.SetNextWindowPos(new Vector2(Raylib.GetScreenWidth() - 310, 40), ImGuiCond.FirstUseEver);
-        ImGui.SetNextWindowSize(new Vector2(300, 400), ImGuiCond.FirstUseEver);
+        using var window = ImGuiExtensions.BeginWindow(
+            "Simulation Info##siminfo",
+            ref _showSimInfoPanel,
+            new Vector2(Raylib.GetScreenWidth() - 310, 40),
+            new Vector2(300, 400));
+        if (!window.IsVisible)
+            return;
 
-        if (ImGui.Begin("Simulation Info##siminfo", ref _showSimInfoPanel))
+        if (ImGui.CollapsingHeader("Simulation State"))
         {
-            if (ImGui.CollapsingHeader("Simulation State"))
+            if (_simulation != null)
             {
-                if (_simulation != null)
+                AtmosChunkSnapshot? chunk = _snapshotCache.Count > 0 ? _snapshotCache.Values.First() : null;
+                if (chunk.HasValue)
                 {
-                    AtmosChunkSnapshot? chunk = _snapshotCache.Count > 0 ? _snapshotCache.Values.First() : null;
-                    if (chunk.HasValue)
+                    var snapshot = chunk.Value;
+                    ImGui.Text(
+                        $"Chunk Position: {snapshot.GridPosition.X}x{snapshot.GridPosition.Y}x{snapshot.GridPosition.Z}");
+                    ImGui.Text(
+                        $"Dimensions: {snapshot.Dimensions.X}x{snapshot.Dimensions.Y}x{snapshot.Dimensions.Z}");
+                    ImGui.Text($"Total Voxels: {snapshot.VoxelRoomMap.Length}");
+                    ImGui.Text($"Active Voxels: {snapshot.ActiveAirCount}");
+                    ImGui.Text($"Active Gases: {snapshot.ActiveGasCount}");
+                    ImGui.Text($"Awake: {snapshot.IsAwake}");
+                    ImGui.Text($"Sleep Timer: {snapshot.SleepTimer}");
+
+                    if (snapshot.TotalPressure is { Length: > 0 })
                     {
-                        var snapshot = chunk.Value;
-                        ImGui.Text(
-                            $"Chunk Position: {snapshot.GridPosition.X}x{snapshot.GridPosition.Y}x{snapshot.GridPosition.Z}");
-                        ImGui.Text(
-                            $"Dimensions: {snapshot.Dimensions.X}x{snapshot.Dimensions.Y}x{snapshot.Dimensions.Z}");
-                        ImGui.Text($"Total Voxels: {snapshot.VoxelRoomMap.Length}");
-                        ImGui.Text($"Active Voxels: {snapshot.ActiveAirCount}");
-                        ImGui.Text($"Active Gases: {snapshot.ActiveGasCount}");
-                        ImGui.Text($"Awake: {snapshot.IsAwake}");
-                        ImGui.Text($"Sleep Timer: {snapshot.SleepTimer}");
+                        float maxPressure = snapshot.TotalPressure.Max();
+                        float avgPressure = snapshot.TotalPressure.Where(p => p > 0).DefaultIfEmpty(0).Average();
+                        ImGui.Text($"Max Pressure: {maxPressure:F2}");
+                        ImGui.Text($"Avg Pressure: {avgPressure:F2}");
+                    }
 
-                        if (snapshot.TotalPressure is { Length: > 0 })
-                        {
-                            float maxPressure = snapshot.TotalPressure.Max();
-                            float avgPressure = snapshot.TotalPressure.Where(p => p > 0).DefaultIfEmpty(0).Average();
-                            ImGui.Text($"Max Pressure: {maxPressure:F2}");
-                            ImGui.Text($"Avg Pressure: {avgPressure:F2}");
-                        }
-
-                        if (snapshot.Temperature is { Length: > 0 })
-                        {
-                            float maxTemp = snapshot.Temperature.Max();
-                            float minTemp = snapshot.Temperature.Where(t => t > 0).DefaultIfEmpty(0).Min();
-                            ImGui.Text($"Min Temp: {minTemp:F2}K");
-                            ImGui.Text($"Max Temp: {maxTemp:F2}K");
-                        }
+                    if (snapshot.Temperature is { Length: > 0 })
+                    {
+                        float maxTemp = snapshot.Temperature.Max();
+                        float minTemp = snapshot.Temperature.Where(t => t > 0).DefaultIfEmpty(0).Min();
+                        ImGui.Text($"Min Temp: {minTemp:F2}K");
+                        ImGui.Text($"Max Temp: {maxTemp:F2}K");
                     }
                 }
             }
-
-            ImGui.End();
         }
     }
 }
