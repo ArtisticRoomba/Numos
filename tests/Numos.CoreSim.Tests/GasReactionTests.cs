@@ -7,7 +7,7 @@ public class GasReactionTests
     [Test]
     public void MixingWater()
     {
-       var hydrogen = new GasProperties()
+        var hydrogen = new GasProperties()
         {
             BoilingPoint = 20.271f,
             CondensationPoint = 13.99f,
@@ -56,17 +56,27 @@ public class GasReactionTests
 
         var solver = new ReactionSolver();
         solver.SetAtmosConfig(config);
-        
+
         var chunk = new AtmosChunk(16, 16, 16);
-        for (ushort i = 0; i < 16*16*16&&i<chunk.MaxActiveRooms;i++)
+        for (ushort i = 0; i < 16 * 16 * 16 && i < chunk.MaxActiveRooms; i++)
         {
             chunk.VoxelRoomMap[i] = i;
             chunk.WakeRoom(i);
-            chunk.InjectGasToVoxel(i,0,100,5000);
-            chunk.InjectGasToVoxel(i,1,100,5000);
+            chunk.InjectGasToVoxel(i, 0, 1000, 1);
+            chunk.InjectGasToVoxel(i, 1, 1000, 1);
             Assert.That(chunk.ActiveGasCount == 2);
         }
-        solver.ProcessChunk(chunk,50);
+
+        for (var r = 0; r < 100; r++)
+        {
+            solver.ProcessChunk(chunk, 50);
+            for (ushort i = 0; i < 16 * 16 * 16 && i < chunk.MaxActiveRooms; i++)
+            {
+                chunk.InjectGasToVoxel(i, 0, 1000, 1);
+                chunk.InjectGasToVoxel(i, 1, 1000, 1);
+            }
+        }
+
         Assert.That(chunk.ActiveGasCount == 3);
     }
 }
