@@ -13,7 +13,6 @@ public partial class SimulationViewer
     private int _completedStepTick;
 
     private bool _showProjectPanel = true;
-    private bool _welcomeModalOpen = true;
     private bool _requestOpenCreateProject;
     private bool _createProjectModalOpen;
     private bool _requestOpenCloseProject;
@@ -69,59 +68,6 @@ public partial class SimulationViewer
 
         _requestOpenCloseProject = true;
         _closeProjectModalOpen = true;
-    }
-
-    private void RenderProjectWelcome()
-    {
-        const string popupId = "Welcome to Numos##welcome";
-
-        if (!_requestOpenCreateProject && !_createProjectModalOpen)
-        {
-            _welcomeModalOpen = true;
-            ImGui.OpenPopup(popupId);
-        }
-
-        var viewport = ImGui.GetMainViewport();
-        ImGui.SetNextWindowPos(
-            viewport.Pos + viewport.Size * 0.5f,
-            ImGuiCond.Appearing,
-            new Vector2(0.5f, 0.5f));
-        ImGui.SetNextWindowSize(new Vector2(360, 170), ImGuiCond.Appearing);
-
-        var flags = ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoSavedSettings;
-        if (!ImGui.BeginPopupModal(popupId, ref _welcomeModalOpen, flags))
-            return;
-
-        CenterWelcomeText("Numos");
-        CenterWelcomeText($"Version {ViewerVersion}", true);
-
-        ImGui.Spacing();
-        ImGui.Separator();
-        ImGui.Spacing();
-        ImGui.TextWrapped(
-            "Numos is an engine-agnostic, pseudo-realistic, voxel-based atmospherics simulation library.");
-
-        ImGui.SetCursorPosY(ImGui.GetWindowSize().Y - 50);
-        const float buttonWidth = 220;
-        ImGui.SetCursorPosX((ImGui.GetWindowSize().X - buttonWidth) * 0.5f);
-        if (ImGui.Button("Start New Simulation", new Vector2(buttonWidth, 0)))
-        {
-            RequestCreateProject();
-            _welcomeModalOpen = false;
-            ImGui.CloseCurrentPopup();
-        }
-
-        ImGui.EndPopup();
-    }
-
-    private static void CenterWelcomeText(string text, bool disabled = false)
-    {
-        float textWidth = ImGui.CalcTextSize(text).X;
-        ImGui.SetCursorPosX((ImGui.GetWindowSize().X - textWidth) * 0.5f);
-        if (disabled)
-            ImGui.TextDisabled(text);
-        else
-            ImGui.Text(text);
     }
 
     private void DrawCreateProjectModal()

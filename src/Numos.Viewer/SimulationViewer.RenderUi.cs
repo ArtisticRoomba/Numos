@@ -21,7 +21,7 @@ public partial class SimulationViewer
 
         if (_simulation == null)
         {
-            RenderProjectWelcome();
+            RenderEmptyWorkspaceMessage();
             DrawCreateProjectModal();
             DrawCloseProjectModal();
             DrawAboutModal();
@@ -80,9 +80,54 @@ public partial class SimulationViewer
         ImGui.PopStyleVar(3);
 
         uint dockspaceId = ImGui.GetID("MainDockspace##main-dockspace-id");
-        ImGui.DockSpace(dockspaceId, Vector2.Zero, ImGuiDockNodeFlags.None);
+        ImGui.DockSpace(dockspaceId, Vector2.Zero, ImGuiDockNodeFlags.PassthruCentralNode);
 
         ImGui.End();
+    }
+
+    private static void RenderEmptyWorkspaceMessage()
+    {
+        var viewport = ImGui.GetMainViewport();
+        ImGui.SetNextWindowPos(
+            viewport.WorkPos + viewport.WorkSize * 0.5f,
+            ImGuiCond.Always,
+            new Vector2(0.5f, 0.5f));
+
+        const ImGuiWindowFlags windowFlags =
+            ImGuiWindowFlags.AlwaysAutoResize |
+            ImGuiWindowFlags.NoBackground |
+            ImGuiWindowFlags.NoDecoration |
+            ImGuiWindowFlags.NoDocking |
+            ImGuiWindowFlags.NoInputs |
+            ImGuiWindowFlags.NoNav |
+            ImGuiWindowFlags.NoSavedSettings;
+
+        ImGui.Begin("Empty workspace##empty-workspace", windowFlags);
+
+        TextCentered("Numos");
+        TextCentered($"v{ViewerVersion}", ImGui.TextDisabled);
+
+        ImGui.Separator();
+
+        TextCentered("No simulation is currently loaded.");
+        TextCentered(
+            "To get started, choose File > New Simulation.",
+            ImGui.TextDisabled);
+
+        ImGui.End();
+    }
+
+    private static void TextCentered(
+        string text,
+        Action<string>? renderText = null)
+    {
+        float textWidth = ImGui.CalcTextSize(text).X;
+        float centeredX = (ImGui.GetWindowSize().X - textWidth) * 0.5f;
+
+        ImGui.SetCursorPosX(centeredX);
+
+        renderText ??= ImGui.TextUnformatted;
+        renderText(text);
     }
 
     private void DrawAboutModal()
@@ -109,7 +154,7 @@ public partial class SimulationViewer
 
             ImGui.Spacing();
 
-            var buttonWidth = 120f;
+            const float buttonWidth = 120f;
             float availableWidth = ImGui.GetContentRegionAvail().X;
             ImGui.SetCursorPosX(ImGui.GetCursorPosX() + availableWidth - buttonWidth);
 
@@ -154,7 +199,7 @@ public partial class SimulationViewer
             ImGuiWindowFlags.None);
 
         ImGui.TextWrapped(
-            "An external viewer for Numos, an engine-agnostic, pseudo-realistic, voxel-based, atmospherics simulation.");
+            "An external viewer for Numos, an engine-agnostic, pseudo-realistic, voxel-based atmospherics simulation library.");
         ImGui.Spacing();
 
         ImGui.Text("© 2026 Numos contributors");

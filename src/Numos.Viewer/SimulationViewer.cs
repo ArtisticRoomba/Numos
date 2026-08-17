@@ -506,6 +506,9 @@ public partial class SimulationViewer : IDisposable
         {
             Raylib.EndMode3D();
         }
+
+        if (_viewport != null)
+            NavigationGizmo.Draw3D(_camera3D, _viewport.Width, _viewport.Height);
     }
 
     private void RenderSimulationSliceScene()
@@ -527,6 +530,11 @@ public partial class SimulationViewer : IDisposable
             _sliceDrawData,
             _camera2D,
             GetSliceRenderOptions());
+
+        NavigationGizmo.Draw2D(
+            _sliceDrawData.Axis,
+            _sliceViewport.Width,
+            _sliceViewport.Height);
     }
 
     private void UpdateSlicePicking()
