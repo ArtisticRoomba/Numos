@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using Numos.CoreSim;
+using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.Datatypes.Snapshots;
 
 namespace Numos.SimDrawer;
@@ -59,6 +60,7 @@ public static class BuiltInVisualizationIds
     public const string Pressure = "pressure";
     public const string GasComposition = "gas-composition";
     public const string ActiveOnly = "active-only";
+    public const string VoxelClassification = "voxel-classification";
 }
 
 /// <summary>
@@ -210,7 +212,76 @@ public sealed class VisualizationRegistry
         registry.Register(new PressureVisualization());
         registry.Register(new GasCompositionVisualization(config));
         registry.Register(new ActiveOnlyVisualization(config));
+        registry.Register(new VoxelClassificationVisualization());
         return registry;
+    }
+
+    private sealed class VoxelClassificationVisualization : IVisualizationMethod
+    {
+        private readonly static ColorRgba UnassignedColor = new(0.35f, 0.35f, 0.38f);
+        private readonly static ColorRgba SolidColor = new(0.18f, 0.18f, 0.2f);
+        private readonly static ColorRgba VoidColor = new(0.04f, 0.04f, 0.05f);
+
+        public string Id => BuiltInVisualizationIds.VoxelClassification;
+
+        public string DisplayName => "Voxel Classification";
+
+        public VisualizationDataRequirements RequiredData => VisualizationDataRequirements.None;
+
+        public VisualizationCellDomain CellDomain => VisualizationCellDomain.AllCells;
+
+        public bool TryGetColor(in VoxelSample sample, out ColorRgba color)
+        {
+            color = sample.RoomId switch
+            {
+                VoxelClassification.RoomSolid => SolidColor,
+                VoxelClassification.RoomVoid => VoidColor,
+                VoxelClassification.RoomUnassigned => UnassignedColor,
+                _ => ColorForRoom(sample.RoomId)
+            };
+            return true;
+        }
+
+        public VisualizationLegend CreateLegend(IReadOnlyCollection<int> activeGasIds)
+        {
+            return new VisualizationLegend(
+                "Voxel classification",
+                "",
+                VisualizationLegendKind.Categories,
+                [
+                    new VisualizationLegendEntry("Solid (-2)", SolidColor, VoxelClassification.RoomSolid),
+                    new VisualizationLegendEntry("Void (-1)", VoidColor, VoxelClassification.RoomVoid),
+                    new VisualizationLegendEntry("Unassigned (0)", UnassignedColor, VoxelClassification.RoomUnassigned),
+                    new VisualizationLegendEntry("Room IDs (positive)", ColorForRoom(1))
+                ]);
+        }
+
+        private static ColorRgba ColorForRoom(int roomId)
+        {
+            unchecked
+            {
+                uint hash = (uint)roomId * 2654435761u;
+                hash ^= hash >> 16;
+                float hue = hash % 360u / 360f;
+                const float saturation = 0.72f;
+                const float value = 0.9f;
+                float scaled = hue * 6f;
+                var sector = (int)scaled;
+                float fraction = scaled - sector;
+                float p = value * (1f - saturation);
+                float q = value * (1f - saturation * fraction);
+                float t = value * (1f - saturation * (1f - fraction));
+                return (sector % 6) switch
+                {
+                    0 => new ColorRgba(value, t, p),
+                    1 => new ColorRgba(q, value, p),
+                    2 => new ColorRgba(p, value, t),
+                    3 => new ColorRgba(p, q, value),
+                    4 => new ColorRgba(t, p, value),
+                    _ => new ColorRgba(value, p, q)
+                };
+            }
+        }
     }
 
     private sealed class TemperatureVisualization : IVisualizationMethod
