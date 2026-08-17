@@ -224,16 +224,10 @@ public partial class SimulationViewer
         if (ImGui.Button("Close Project", new Vector2(130, 0)))
             RequestCloseProject();
 
-        if (ImGui.Button("Initialize New Simulation", new Vector2(190, 0)))
-            RequestCreateProject();
-        ImGui.SameLine();
-        if (ImGui.Button("Exit", new Vector2(90, 0)))
-            _requestExit = true;
-
         RenderSimulationProgress();
 
         RenderProjectMessage();
-        if (ImGui.CollapsingHeader("Simulation Details"))
+        if (ImGui.CollapsingHeader("Simulation Details", ImGuiTreeNodeFlags.DefaultOpen))
             RenderSolutionDetails();
     }
 
@@ -284,6 +278,8 @@ public partial class SimulationViewer
     {
         ImGui.TextDisabled(
             $"Fixed size: {_chunkDimensions.X} x {_chunkDimensions.Y} x {_chunkDimensions.Z}");
+        ImGui.TextDisabled(
+            "Right-click a chunk coordinate for options.");
 
         AtmosChunkHandle? chunkToRemove = null;
         AtmosChunkHandle? chunkToSeal = null;
@@ -291,19 +287,25 @@ public partial class SimulationViewer
         {
             ImGui.PushID($"chunk-{handle.Position.X}-{handle.Position.Y}-{handle.Position.Z}");
             ImGui.Text(FormatChunkPosition(handle.Position));
-            ImGui.SameLine();
-            if (ImGui.SmallButton("Move Camera") &&
-                _drawData != null &&
-                _drawData.Chunks.TryGetValue(handle.Position, out var chunkData))
-                MoveCameraToChunk(chunkData);
-            ImGui.SameLine();
-            if (ImGui.SmallButton("Seal With Walls"))
-                chunkToSeal = handle;
-            if (ImGui.IsItemHovered())
-                ImGui.SetTooltip("Replace the chunk's simulated outer faces with solid voxels.");
-            ImGui.SameLine();
-            if (ImGui.SmallButton("Remove"))
-                chunkToRemove = handle;
+
+            if (ImGui.BeginPopupContextItem("Chunk actions"))
+            {
+                if (ImGui.MenuItem("Move Camera") &&
+                    _drawData != null &&
+                    _drawData.Chunks.TryGetValue(handle.Position, out var chunkData))
+                    MoveCameraToChunk(chunkData);
+
+                if (ImGui.MenuItem("Seal With Walls"))
+                    chunkToSeal = handle;
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip("Replace the chunk's simulated outer faces with solid voxels.");
+
+                if (ImGui.MenuItem("Remove"))
+                    chunkToRemove = handle;
+
+                ImGui.EndPopup();
+            }
+
             ImGui.PopID();
         }
 

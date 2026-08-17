@@ -400,74 +400,77 @@ public partial class SimulationViewer
         if (!window.IsVisible)
             return;
 
-        ImGui.Text("AtmosConfig");
-        if (ImGui.Button("Reset to Defaults##config-reset"))
-            ResetConfigurationValues();
-        ImGui.Separator();
-        float globalTemp = _config.GlobalTemperature;
-        if (ConfigSlider("Global Temperature", "config-global-temperature", ref globalTemp, 0f, 1000f,
-                "Reference ambient temperature."))
-            _config.GlobalTemperature = globalTemp;
-        float defaultTemperatureFallback = _config.DefaultTemperatureFallback;
-        if (ConfigSlider("Default Temperature Fallback", "config-default-temperature-fallback",
-                ref defaultTemperatureFallback, 0f, 1000f,
-                "Default fallback temperature to set when a voxel has 0 or an uninitialized temperature."))
-            _config.DefaultTemperatureFallback = defaultTemperatureFallback;
-        float spaceTemperature = _config.SpaceTemperature;
-        if (ConfigSlider("Space Temperature", "config-space-temperature", ref spaceTemperature, 0f, 100f,
-                "Default temperature of space."))
-            _config.SpaceTemperature = spaceTemperature;
-        float flowFriction = _config.FlowFriction;
-        if (ConfigSlider("Flow Friction", "config-flow-friction", ref flowFriction, 0f, 1f,
-                "Fraction of pressure delta converted to flow per tick."))
-            _config.FlowFriction = flowFriction;
-        float dampingFactor = _config.DampingFactor;
-        if (ConfigSlider("Damping Factor", "config-damping-factor", ref dampingFactor, 0f, 1f,
-                "Multiplier applied to Flow Friction during large-delta advection. Used to reduce oscillation in the sim."))
-            _config.DampingFactor = dampingFactor;
-        float snapThreshold = _config.SnapThreshold;
-        if (ConfigSlider("Snap Threshold", "config-snap-threshold", ref snapThreshold, 0f, 100f,
-                "Below this pressure delta, flow uses the Cfl Flow Cap directly instead of Flow Friction multiplied by Damping Factor."))
-            _config.SnapThreshold = snapThreshold;
-        float minFlowCutoff = _config.MinFlowCutoff;
-        if (ConfigSlider("Minimum Flow Cutoff", "config-min-flow-cutoff", ref minFlowCutoff, 0f, 10f,
-                "Flows below this magnitude are discarded."))
-            _config.MinFlowCutoff = minFlowCutoff;
-        float vacuumThreshold = _config.VacuumThreshold;
-        if (ConfigSlider("Vacuum Threshold", "config-vacuum-threshold", ref vacuumThreshold, 0f, 100f,
-                "Below this pressure, voxel contents are zeroed out."))
-            _config.VacuumThreshold = vacuumThreshold;
-        int sleepThreshold = _config.SleepThreshold;
-        if (ConfigSlider("Sleep Threshold", "config-sleep-threshold", ref sleepThreshold, 1, 1000,
-                "Consecutive ticks below Sleep Epsilon before a chunk goes to sleep."))
-            _config.SleepThreshold = sleepThreshold;
-        float sleepEpsilon = _config.SleepEpsilon;
-        if (ConfigSlider("Sleep Epsilon", "config-sleep-epsilon", ref sleepEpsilon, 0f, 100f,
-                "Maximum pressure delta considered at rest."))
-            _config.SleepEpsilon = sleepEpsilon;
-        float thermalConductivity = _config.ThermalConductivity;
-        if (ConfigSlider("Thermal Conductivity", "config-thermal-conductivity", ref thermalConductivity, 0f, 1f,
-                "Fraction of temperature delta transferred per neighbor per tick."))
-            _config.ThermalConductivity = thermalConductivity;
-        float condensationRateFactor = _config.CondensationRateFactor;
-        if (ConfigSlider("Condensation Rate Factor", "config-condensation-rate-factor", ref condensationRateFactor, 0f,
-                1f,
-                "Rate multiplier for phase-change condensation."))
-            _config.CondensationRateFactor = condensationRateFactor;
-        float cflFlowCap = _config.CflFlowCap;
-        if (ConfigSlider("CFL Flow Cap", "config-cfl-flow-cap", ref cflFlowCap, 0f, 1f,
-                "Rate multiplier for phase-change condensation."))
-            _config.CflFlowCap = cflFlowCap;
-        float accumulatorWakeThreshold = _config.AccumulatorWakeThreshold;
-        if (ConfigSlider("Accumulator Wake Threshold", "config-accumulator-wake-threshold",
-                ref accumulatorWakeThreshold, 0f, 100f,
-                "Minimum accumulated flow or pressure activity required to wake a sleeping chunk."))
-            _config.AccumulatorWakeThreshold = accumulatorWakeThreshold;
-        int accumulatorMaxAliveTicks = _config.AccumulatorMaxAliveTicks;
-        if (ConfigSlider("Accumulator Max Alive Ticks", "config-accumulator-max-alive-ticks",
-                ref accumulatorMaxAliveTicks, 1, 1000,
-                "Maximum number of ticks that an accumulated activity value remains alive."))
-            _config.AccumulatorMaxAliveTicks = accumulatorMaxAliveTicks;
+        if (ImGui.CollapsingHeader("AtmosConfig", ImGuiTreeNodeFlags.DefaultOpen))
+        {
+            if (ImGui.Button("Reset to Defaults##config-reset"))
+                ResetConfigurationValues();
+            ImGui.Separator();
+            float globalTemp = _config.GlobalTemperature;
+            if (ConfigSlider("Global Temperature", "config-global-temperature", ref globalTemp, 0f, 1000f,
+                    "Reference ambient temperature."))
+                _config.GlobalTemperature = globalTemp;
+            float defaultTemperatureFallback = _config.DefaultTemperatureFallback;
+            if (ConfigSlider("Default Temperature Fallback", "config-default-temperature-fallback",
+                    ref defaultTemperatureFallback, 0f, 1000f,
+                    "Default fallback temperature to set when a voxel has 0 or an uninitialized temperature."))
+                _config.DefaultTemperatureFallback = defaultTemperatureFallback;
+            float spaceTemperature = _config.SpaceTemperature;
+            if (ConfigSlider("Space Temperature", "config-space-temperature", ref spaceTemperature, 0f, 100f,
+                    "Default temperature of space."))
+                _config.SpaceTemperature = spaceTemperature;
+            float flowFriction = _config.FlowFriction;
+            if (ConfigSlider("Flow Friction", "config-flow-friction", ref flowFriction, 0f, 1f,
+                    "Fraction of pressure delta converted to flow per tick."))
+                _config.FlowFriction = flowFriction;
+            float dampingFactor = _config.DampingFactor;
+            if (ConfigSlider("Damping Factor", "config-damping-factor", ref dampingFactor, 0f, 1f,
+                    "Multiplier applied to Flow Friction during large-delta advection. Used to reduce oscillation in the sim."))
+                _config.DampingFactor = dampingFactor;
+            float snapThreshold = _config.SnapThreshold;
+            if (ConfigSlider("Snap Threshold", "config-snap-threshold", ref snapThreshold, 0f, 100f,
+                    "Below this pressure delta, flow uses the Cfl Flow Cap directly instead of Flow Friction multiplied by Damping Factor."))
+                _config.SnapThreshold = snapThreshold;
+            float minFlowCutoff = _config.MinFlowCutoff;
+            if (ConfigSlider("Minimum Flow Cutoff", "config-min-flow-cutoff", ref minFlowCutoff, 0f, 10f,
+                    "Flows below this magnitude are discarded."))
+                _config.MinFlowCutoff = minFlowCutoff;
+            float vacuumThreshold = _config.VacuumThreshold;
+            if (ConfigSlider("Vacuum Threshold", "config-vacuum-threshold", ref vacuumThreshold, 0f, 100f,
+                    "Below this pressure, voxel contents are zeroed out."))
+                _config.VacuumThreshold = vacuumThreshold;
+            int sleepThreshold = _config.SleepThreshold;
+            if (ConfigSlider("Sleep Threshold", "config-sleep-threshold", ref sleepThreshold, 1, 1000,
+                    "Consecutive ticks below Sleep Epsilon before a chunk goes to sleep."))
+                _config.SleepThreshold = sleepThreshold;
+            float sleepEpsilon = _config.SleepEpsilon;
+            if (ConfigSlider("Sleep Epsilon", "config-sleep-epsilon", ref sleepEpsilon, 0f, 100f,
+                    "Maximum pressure delta considered at rest."))
+                _config.SleepEpsilon = sleepEpsilon;
+            float thermalConductivity = _config.ThermalConductivity;
+            if (ConfigSlider("Thermal Conductivity", "config-thermal-conductivity", ref thermalConductivity, 0f, 1f,
+                    "Fraction of temperature delta transferred per neighbor per tick."))
+                _config.ThermalConductivity = thermalConductivity;
+            float condensationRateFactor = _config.CondensationRateFactor;
+            if (ConfigSlider("Condensation Rate Factor", "config-condensation-rate-factor", ref condensationRateFactor,
+                    0f,
+                    1f,
+                    "Rate multiplier for phase-change condensation."))
+                _config.CondensationRateFactor = condensationRateFactor;
+            float cflFlowCap = _config.CflFlowCap;
+            if (ConfigSlider("CFL Flow Cap", "config-cfl-flow-cap", ref cflFlowCap, 0f, 1f,
+                    "Rate multiplier for phase-change condensation."))
+                _config.CflFlowCap = cflFlowCap;
+            float accumulatorWakeThreshold = _config.AccumulatorWakeThreshold;
+            if (ConfigSlider("Accumulator Wake Threshold", "config-accumulator-wake-threshold",
+                    ref accumulatorWakeThreshold, 0f, 100f,
+                    "Minimum accumulated flow or pressure activity required to wake a sleeping chunk."))
+                _config.AccumulatorWakeThreshold = accumulatorWakeThreshold;
+            int accumulatorMaxAliveTicks = _config.AccumulatorMaxAliveTicks;
+            if (ConfigSlider("Accumulator Max Alive Ticks", "config-accumulator-max-alive-ticks",
+                    ref accumulatorMaxAliveTicks, 1, 1000,
+                    "Maximum number of ticks that an accumulated activity value remains alive."))
+                _config.AccumulatorMaxAliveTicks = accumulatorMaxAliveTicks;
+        }
 
         ImGui.Spacing();
         if (ImGui.CollapsingHeader("Gas Registry", ImGuiTreeNodeFlags.DefaultOpen))
@@ -595,8 +598,6 @@ public partial class SimulationViewer
         }
 
         var selected = _selectedCell.Value;
-        ImGui.Text($"Chunk: {FormatChunkPosition(selected.Chunk.Position)}");
-        ImGui.Text($"Voxel: {FormatCellCoordinates(selected)}");
         DrawCellSelectionDetails(selected);
 
         if (ImGui.Button("Clear Selection"))
@@ -983,7 +984,7 @@ public partial class SimulationViewer
 
     private void RenderSolutionDetails()
     {
-        if (ImGui.CollapsingHeader("Simulation State"))
+        if (ImGui.CollapsingHeader("Simulation State", ImGuiTreeNodeFlags.DefaultOpen))
         {
             if (_simulation != null)
             {
