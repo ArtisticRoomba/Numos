@@ -72,7 +72,7 @@ public partial class SimulationViewer : IDisposable
     {
         Position = new Vector3(24, 24, 24),
         Target = new Vector3(8, 8, 8),
-        Up = Vector3.UnitY,
+        Up = Vector3.UnitZ,
         FovY = 45f,
         Projection = CameraProjection.Perspective
     };
