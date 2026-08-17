@@ -22,6 +22,9 @@ public partial class SimulationViewer
         RenderMainDockspace();
 
         RenderMenuBar();
+        RenderProgramSettingsPanel();
+        RenderResolutionConfirmationModal();
+        RenderPerformanceOverlay();
 
         if (_simulation == null)
         {
@@ -240,12 +243,29 @@ public partial class SimulationViewer
 
             if (ImGui.BeginMenu("View"))
             {
-                if (_simulation != null)
-                    ImGui.MenuItem("Solution", null, ref _showSolutionPanel);
+                // The empty workspace does not render any of these panes. Keep their
+                // entries in the menu for consistency, but prevent toggling them until
+                // a simulation has been created.
+                bool panesAvailable = _simulation != null && _config != null;
+                if (!panesAvailable)
+                    ImGui.BeginDisabled();
+
+                ImGui.MenuItem("Solution", null, ref _showSolutionPanel);
                 ImGui.MenuItem("Tools", null, ref _showToolsPanel);
                 ImGui.MenuItem("View", null, ref _showViewPanel);
                 ImGui.MenuItem("Configuration", null, ref _showConfigurationPanel);
                 ImGui.MenuItem("2D Slice Viewport", null, ref _showSliceViewport);
+
+                if (!panesAvailable)
+                    ImGui.EndDisabled();
+
+                ImGui.EndMenu();
+            }
+
+            if (ImGui.BeginMenu("Settings"))
+            {
+                if (ImGui.MenuItem("Configure..."))
+                    _showProgramSettingsPanel = true;
 
                 ImGui.EndMenu();
             }

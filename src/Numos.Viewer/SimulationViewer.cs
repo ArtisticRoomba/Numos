@@ -94,6 +94,11 @@ public partial class SimulationViewer : IDisposable
     private bool _showToolsPanel = true;
     private bool _showViewPanel = true;
     private bool _showConfigurationPanel;
+    private bool _showProgramSettingsPanel;
+    private bool _showPerformanceOverlay;
+    private int _targetFps = 144;
+    private bool _uncappedFps;
+    private int _programSettingsTab;
     private bool _showSliceViewport = true;
     private SliceAxis _currentSliceAxis = SliceAxis.Z;
     private int _currentSliceIndex;
