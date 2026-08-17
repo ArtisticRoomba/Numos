@@ -111,12 +111,19 @@ public partial class SimulationViewer
 
         ImGui.Begin("Empty workspace##empty-workspace", windowFlags);
 
-        ImGuiExtensions.TextCentered("Numos");
+        ImGuiExtensions.TextCentered("Numos Simulation Viewer");
         ImGuiExtensions.TextCentered($"v{ViewerVersion}", ImGui.TextDisabled);
 
+        ImGui.Spacing();
         ImGui.Separator();
 
-        ImGuiExtensions.TextCentered("No simulation is currently loaded.");
+        ImGuiExtensions.TextCentered("An external viewer for Numos, an engine-agnostic,");
+        ImGuiExtensions.TextCentered(" pseudo-realistic, voxel-based atmospherics simulation library.");
+
+        ImGui.Separator();
+        ImGui.Spacing();
+
+        ImGuiExtensions.TextCentered("No simulation is currently loaded.", ImGui.TextDisabled);
         ImGuiExtensions.TextCentered(
             "To get started, choose File > New Simulation.",
             ImGui.TextDisabled);
@@ -681,7 +688,7 @@ public partial class SimulationViewer
             }
         }
 
-        ImGui.TextDisabled("0 = unassigned, -2 = solid, -1 = void; positive values are room IDs.");
+        ImGui.TextDisabled("0 = unassigned, -2 = solid, -1 = void \nPositive values are room IDs.");
     }
 
     private void RenderSliceControls()
