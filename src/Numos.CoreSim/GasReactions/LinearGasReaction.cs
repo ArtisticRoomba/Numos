@@ -168,7 +168,7 @@ public readonly record struct LinearGasReaction
                 return 0;
 
             return result * MappedFactors.AsParallel()
-                .Select(factor => factor.Original.GetFactor(molarityVector[factor.GasId]))
+                .Select(factor => factor.Original.GetFactor(molarityVector[factor.GasId])).Where(e=>!float.IsNaN(e)).Append(1)
                 .Aggregate((a, b) => a * b);
         }
 

@@ -5,7 +5,6 @@ namespace Numos.CoreSim.Tests;
 
 public class GasReactionTests
 {
-
     /// <summary>
     /// Create a random reaction and gas set.
     /// Fill a chunk with random gas.
@@ -16,82 +15,84 @@ public class GasReactionTests
     {
         Random random = new(42);
         //create random gases
-        List<GasProperties> gases=[];
+        List<GasProperties> gases = [];
         for (var i = 0; i < 16; i++)
         {
-            var bp = 10+random.NextSingle() * 100;
+            var bp = 10 + random.NextSingle() * 100;
             gases.Add(new()
             {
                 BoilingPoint = bp,
-                CondensationPoint = bp*random.NextSingle()-1,
+                CondensationPoint = bp * random.NextSingle() - 1,
                 LatentHeatOfVaporization = random.NextSingle(),
-                Name = ((char)('a'+i)).ToString(),
-                SpecificHeatCapacity = random.NextSingle()*10000,
+                Name = ((char)('a' + i)).ToString(),
+                SpecificHeatCapacity = random.NextSingle() * 10000,
             });
         }
-    //create random reactions.
+
+        //create random reactions.
         var gasArray = gases.ToArray();
         List<StandardGasReaction> standardReactions = [];
-        for (var i = 0; i < 16 * 16; i++)
+        for (var i = 0; i < 16 * 2; i++)
         {
-            Dictionary<GasProperties, float> input=[];
-            var inputCounts = random.Next(3)+2;
-            while (inputCounts>0)
+            Dictionary<GasProperties, float> input = [];
+            var inputCounts = random.Next(3) + 2;
+            while (inputCounts > 0)
             {
                 if (input.TryAdd(random.GetItems(gasArray, 1)[0], random.NextSingle()))
                     inputCounts--;
             }
 
-            Dictionary<GasProperties, float> output=[];
-            var outputCounts = random.Next(1)+1;
-            
-            while (outputCounts>0)
+            Dictionary<GasProperties, float> output = [];
+            var outputCounts = random.Next(1) + 1;
+
+            while (outputCounts > 0)
             {
                 if (output.TryAdd(random.GetItems(gasArray, 1)[0], random.NextSingle()))
                     outputCounts--;
             }
-            
-            float energyBalance=random.Next(200)-100;
-            float arrheniusFactor=1;
-            float activationEnergy = random.Next(1000);
+
+            float energyBalance = random.Next(200) - 100;
+            float arrheniusFactor = 1;
+            float activationEnergy = random.Next(10);
             Dictionary<GasProperties, float> speedFactors = [];
 
             foreach (var gas in input.Keys)
             {
-                speedFactors.Add(gas,random.NextSingle()-0.5f+random.Next(5)-2);
+                speedFactors.Add(gas, random.NextSingle() - 0.5f + random.Next(5) - 2);
             }
-            
+
             standardReactions.Add(new(input, output, energyBalance, arrheniusFactor, activationEnergy, speedFactors));
         }
+
         //setup simulation
         var config = new AtmosConfig()
         {
             GasRegistry = gases,
-            StandardReactionRegistry = standardReactions.ToImmutableArray()
+            StandardReactionRegistry = standardReactions.ToImmutableArray(),
+            MaxDeltaForReactionSteps = 0.25f,
         };
-        
+
         var solver = new ReactionSolver();
         solver.SetAtmosConfig(config);
 
         var chunk = new AtmosChunk(16, 16, 16);
 //setup voxel with random shit.
-        for (ushort i = 0; i < chunk.VoxelCount; i++)
+        for (ushort i = 0; i < chunk.VoxelCount && i < chunk.MaxActiveRooms; i++)
         {
-            for (int j=0;j<gases.Count;j++)
+            chunk.VoxelRoomMap[i] = i;
+            chunk.WakeRoom(i);
+            for (int j = 0; j < gases.Count; j++)
             {
-                chunk.InjectGasToVoxel(i,j,random.NextSingle(),random.Next(500));
+                chunk.InjectGasToVoxel(i, j, random.NextSingle()*10-5, random.Next(500));
             }
         }
+
         //run reactions. wheeeeee
-        for (var r = 0; r < 100; r++)
-        {
-            solver.ProcessChunk(chunk, 1);
-            for (ushort i = 0; i < 16 * 16 * 16 && i < chunk.MaxActiveRooms; i++)
-            {
-                chunk.InjectGasToVoxel(i, 0, 1000, 1);
-                chunk.InjectGasToVoxel(i, 1, 1000, 1);
-            }
-        }
+        var totalReactions = new float[standardReactions.Count];
+
+        solver.ProcessChunk(chunk, 1, totalReactions);
+
+        Assert.That(totalReactions.Where(e=>!float.IsNaN(e)).Sum() > 0);
     }
 
     [Test]
@@ -152,21 +153,23 @@ public class GasReactionTests
         {
             chunk.VoxelRoomMap[i] = i;
             chunk.WakeRoom(i);
-            chunk.InjectGasToVoxel(i, 0, 1000, 1);
-            chunk.InjectGasToVoxel(i, 1, 1000, 1);
+            chunk.InjectGasToVoxel(i, 0, 0.001f, 1);
+            chunk.InjectGasToVoxel(i, 1, 0.002f, 1);
             Assert.That(chunk.ActiveGasCount == 2);
         }
 
+        float[] feedback = [0];
         for (var r = 0; r < 100; r++)
         {
-            solver.ProcessChunk(chunk, 1);
+            solver.ProcessChunk(chunk, 1, feedback);
             for (ushort i = 0; i < 16 * 16 * 16 && i < chunk.MaxActiveRooms; i++)
             {
-                chunk.InjectGasToVoxel(i, 0, 1000, 1);
-                chunk.InjectGasToVoxel(i, 1, 1000, 1);
+                chunk.InjectGasToVoxel(i, 0, 0.000005f, 1);
+                chunk.InjectGasToVoxel(i, 1, 0.000002f, 1);
             }
         }
 
         Assert.That(chunk.ActiveGasCount == 3);
+        Assert.That(feedback[0] > 0);
     }
 }

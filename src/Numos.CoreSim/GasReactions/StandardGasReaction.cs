@@ -125,7 +125,7 @@ public readonly record struct StandardGasReaction
             if (result <= 0)
                 return 0;
             return result * MappedFactors.AsParallel()
-                .Select(factor => MathF.Pow(molarityVector[factor.Key], factor.Value))
+                .Select(factor => MathF.Pow(molarityVector[factor.Key], factor.Value)).Where(e=>!float.IsNaN(e)).Append(1)
                 .Aggregate((a, b) => a * b);
         }
     }

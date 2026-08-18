@@ -34,26 +34,41 @@ public class ReactionSolver
     /// </summary>
     /// <param name="chunk"></param>
     /// <param name="deltaTime">Over which timespan reactions should occur.</param>
-    internal void ProcessChunk(AtmosChunk chunk, float deltaTime)
+    /// <param name="reactionCount"></param>
+    internal void ProcessChunk(AtmosChunk chunk, float deltaTime, float[]? reactionCount = null)
     {
         //process each voxel in parallel
         int voxelCount = chunk.Depth * chunk.Width * chunk.Height;
 
         var newMixtures = ArrayPool<float[]>.Shared.Rent(voxelCount);
+        var reactionFeedbacks = reactionCount == null ? null : ArrayPool<float[]>.Shared.Rent(voxelCount);
         var newTemps = ArrayPool<float>.Shared.Rent(voxelCount);
         var mixtureLength = _config.GasRegistry.Count + 1;
+
         Parallel.For(0, voxelCount, (int voxelIndex) =>
         {
             var temp = chunk.Temperature[voxelIndex];
-          
+            var reactionFeedback = reactionCount == null ? null : ArrayPool<float>.Shared.Rent(_mappedReactions.Length);
+            if (reactionFeedback != null)
+                Array.Clear(reactionFeedback, 0, reactionFeedback.Length);
+            if (reactionFeedbacks != null && reactionFeedback != null)
+                reactionFeedbacks[voxelIndex] = reactionFeedback;
             // get the mixture
             var mixtureVector = ArrayPool<float>.Shared.Rent(mixtureLength);
+            var content = 0f;
             Array.Clear(mixtureVector, 0, mixtureLength);
             for (var i = 0; i < chunk.ActiveGasCount; i++)
+            {
                 mixtureVector[chunk.ActiveGases[i].GasId] = chunk.ActiveGases[i].Moles[voxelIndex];
-            // do actual evaluation of the mixture for reactions.
-            ProcessVoxel(deltaTime, mixtureVector, ref temp, mixtureLength);
+                content += chunk.ActiveGases[i].Moles[voxelIndex];
+            }
             newMixtures[voxelIndex] = mixtureVector;
+            newTemps[voxelIndex] = temp;
+            if (content <= 0.0001)
+                return;
+            // do actual evaluation of the mixture for reactions.
+            ProcessVoxel(deltaTime, mixtureVector, ref temp, mixtureLength, reactionFeedback);
+         
             // adjust temperature of the voxel.
             chunk.Temperature[voxelIndex] = temp;
             newTemps[voxelIndex] = temp;
@@ -78,27 +93,47 @@ public class ReactionSolver
                 chunk.InjectGasToVoxel(voxelIndex, i, mixtureVector[i], newTemps[voxelIndex]);
             }
 
+            //collect feedbacks and respond back.
             ArrayPool<float>.Shared.Return(mixtureVector);
         }
 
         ArrayPool<float>.Shared.Return(newTemps);
         ArrayPool<float[]>.Shared.Return(newMixtures);
+
+        if (reactionCount != null && reactionFeedbacks != null)
+        {
+            foreach (var feedback in reactionFeedbacks)
+            {
+                for (int i = 0; i < reactionCount.Length; i++)
+                {
+                    reactionCount[i] += feedback[i];
+                }
+
+                ArrayPool<float>.Shared.Return(feedback);
+            }
+
+            ArrayPool<float[]>.Shared.Return(reactionFeedbacks);
+        }
     }
 
 
-    private void ProcessVoxel(float deltaTime, float[] mixtureVector, ref float currentTemperature, int mixtureLength)
+    private void ProcessVoxel(float deltaTime, float[] mixtureVector, ref float currentTemperature, int mixtureLength,
+        float[]? reactionFeedback)
     {
         //TODO Get the energy of the mixture. yes i know dirty, but what can you do.
-        mixtureVector[mixtureLength-1] = 0;
+        mixtureVector[mixtureLength - 1] = 0;
         //make sure in single step we dont overstep.
         var stepSize = MathF.Min(_config.MaxDeltaForReactionSteps, deltaTime);
         //split our time interval into smaller steps.
+        var reactionCount = _mappedReactions.Length;
+        var reactionSpeeds = ArrayPool<float>.Shared.Rent(reactionCount);
         for (float position = 0; position < deltaTime; position += _config.MaxDeltaForReactionSteps)
         {
+            //prep array.
+            Array.Clear(reactionSpeeds, 0, reactionCount);
             //get all reaction speeds
             bool anyReaction = false;
-            var reactionCount = _mappedReactions.Length;
-            var reactionSpeeds = ArrayPool<float>.Shared.Rent(reactionCount);
+
             var temperature = currentTemperature; //to stop warning about the later change of currentTemperature.
             Parallel.For(0, reactionCount, (int i) =>
             {
@@ -139,7 +174,7 @@ public class ReactionSolver
                 // adjust reaction speeds so our post reaction moles are 0.
                 // our equation we try to optimize looks like this (((change * speed)/total change in scaled reaction)*available moles)/(change * speed) = (available volume)/(total change in scaled reaction)
                 // so we calculate the scale, to scale reaction speeds down to balance the equation of consumption.
-                var scale = mixtureVector[criticalIndex] / Math.Abs(criticalValue);
+                var scale = MathF.Min(1, mixtureVector[criticalIndex] / Math.Abs(criticalValue));
                 for (var i = 0; i < reactionCount; i++)
                 {
                     if (!_mappedReactions[i].ChangeEquation.ContainsKey(criticalIndex))
@@ -147,7 +182,6 @@ public class ReactionSolver
                     //select the lower reaction speed.
                     reactionSpeeds[i] = MathF.Min(reactionSpeeds[i], reactionSpeeds[i] * scale);
                 }
-                ArrayPool<float>.Shared.Return(reactionSpeeds);
             }
 
             //apply mixture.
@@ -157,15 +191,30 @@ public class ReactionSolver
                     mixtureVector[i] += _mappedReactions[j].ChangeEquation.GetValueOrDefault(i) * reactionSpeeds[j];
             }
 
-            //calculate next heat value
-            for (var j = 0; j < reactionCount; j++)
+            if (reactionFeedback != null)
             {
-                mixtureVector[mixtureLength-1] += _mappedReactions[j].EnergyBalance * reactionSpeeds[j];
+                //calculate next heat value and report feedback
+                for (var j = 0; j < reactionCount; j++)
+                {
+                    mixtureVector[mixtureLength - 1] += _mappedReactions[j].EnergyBalance * reactionSpeeds[j];
+                    reactionFeedback[j] += reactionSpeeds[j];
+                }
             }
-            mixtureVector[mixtureLength-1] = Math.Max(0, mixtureVector[mixtureLength-1]);
+            else
+            {
+                //calculate next heat value
+                for (var j = 0; j < reactionCount; j++)
+                {
+                    mixtureVector[mixtureLength - 1] += _mappedReactions[j].EnergyBalance * reactionSpeeds[j];
+                }
+            }
+
+            mixtureVector[mixtureLength - 1] = Math.Max(0, mixtureVector[mixtureLength - 1]);
             //TODO: adjust temperature based on thermal energy and pressure.
             currentTemperature = currentTemperature;
-            //TODO: report reaction count back. 
         }
+
+        //cleanup speeds.
+        ArrayPool<float>.Shared.Return(reactionSpeeds);
     }
 }
