@@ -102,6 +102,13 @@ public class AtmosConfig
     /// <remarks>Passive Fickian diffusion is calculated separately and is not capped by this value.</remarks>
     public float CflFlowCap { get; set; } = 0.16f;
 
+    /// <summary>
+    ///     Minimum accumulated flow or pressure activity required to wake a sleeping chunk.
+    /// </summary>
     public float AccumulatorWakeThreshold { get; set; } = 15.0f;
+
+    /// <summary>
+    ///     Maximum number of ticks that an accumulated activity value remains alive.
+    /// </summary>
     public int AccumulatorMaxAliveTicks { get; set; } = 20;
 }

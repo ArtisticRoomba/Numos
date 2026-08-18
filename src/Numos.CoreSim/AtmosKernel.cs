@@ -22,6 +22,8 @@ internal sealed partial class AtmosKernel : IDisposable
 
     // Map of GridPosition to Chunk for neighbor lookups
     private readonly ConcurrentDictionary<Int3, AtmosChunk> _chunkMap = new();
+    private readonly object _stateGate = new();
+    private long _chunkCollectionRevision;
 
     // Thread-local buffers sized to maximum boundary surface area
     private readonly int _maxBoundaryEvents;
@@ -69,18 +71,29 @@ internal sealed partial class AtmosKernel : IDisposable
     /// </summary>
     public void Dispose()
     {
-        foreach (var chunk in _chunkMap.Values)
-            chunk.Release();
+        lock (_stateGate)
+        {
+            foreach (var chunk in _chunkMap.Values)
+                chunk.Release();
 
-        _chunkMap.Clear();
-        _boundaryBufferPool.Dispose();
-        _precipBufferPool.Dispose();
-        _thermalBoundaryBufferPool.Dispose();
+            _chunkMap.Clear();
+            _boundaryBufferPool.Dispose();
+            _precipBufferPool.Dispose();
+            _thermalBoundaryBufferPool.Dispose();
+        }
     }
 
     private void TickSimulation(AtmosChunk[] chunks)
     {
         TickCount++;
+
+        // A revision is advanced once per processed tick. Conditional snapshot consumers can
+        // consequently retain sleeping chunks without copying their arrays again.
+        foreach (var chunk in chunks)
+        {
+            if (chunk.IsAwake)
+                chunk.MarkChanged();
+        }
 
         // 1. Parallel Advection & Fickian Diffusion
         // TODO PERF reuse queue
@@ -1162,5 +1175,12 @@ internal sealed partial class AtmosKernel : IDisposable
             (neighborEnergy + heatTransfer) / neighborHeatCapacity);
         sourceChunk.TotalPressure[srcIdx] = CalculatePressureAtVoxel(sourceChunk, srcIdx);
         neighborChunk.TotalPressure[neighborIdx] = CalculatePressureAtVoxel(neighborChunk, neighborIdx);
+
+        if (tempDelta > 0)
+        {
+            // need to tell numos viewer that chunk has been mutated
+            sourceChunk.MarkChanged();
+            neighborChunk.MarkChanged();
+        }
     }
 }
