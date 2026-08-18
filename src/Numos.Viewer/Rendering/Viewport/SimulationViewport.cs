@@ -30,11 +30,13 @@ public sealed class SimulationViewport : IDisposable
 
     public Vector2 NormalizedMousePosition { get; private set; }
 
-    public void Draw(string title, Action renderScene)
+    public void Draw(string title, Action renderScene, Vector2 firstUsePosition, Vector2 firstUseSize)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(renderScene);
 
+        ImGui.SetNextWindowPos(firstUsePosition, ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSize(firstUseSize, ImGuiCond.FirstUseEver);
         ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, Vector2.Zero);
         const ImGuiWindowFlags windowFlags =
             ImGuiWindowFlags.NoScrollbar |

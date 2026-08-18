@@ -17,6 +17,7 @@ public partial class SimulationViewer
 
         if (_imguiInitialized)
         {
+            SaveCurrentLayout();
             rlImGui.Shutdown();
             _imguiInitialized = false;
         }

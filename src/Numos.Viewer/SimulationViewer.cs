@@ -146,6 +146,7 @@ public partial class SimulationViewer : IDisposable
             rlImGui.Setup(true, true);
             _imguiInitialized = true;
             ImGui.GetIO().ConfigWindowsMoveFromTitleBarOnly = true;
+            ConfigureLayoutPersistence();
 
             _viewport = new SimulationViewport(
                 TextureFilter.Bilinear,

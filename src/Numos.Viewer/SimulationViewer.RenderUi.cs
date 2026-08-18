@@ -35,11 +35,19 @@ public partial class SimulationViewer
             return;
         }
 
-        _viewport?.Draw("Simulation 3D##viewport", RenderSimulationScene);
+        _viewport?.Draw(
+            "Simulation 3D##viewport",
+            RenderSimulationScene,
+            new Vector2(320, 40),
+            new Vector2(660, 510));
 
         if (_showSliceViewport)
         {
-            _sliceViewport?.Draw("Simulation Slice 2D##slice-viewport", RenderSimulationSliceScene);
+            _sliceViewport?.Draw(
+                "Simulation Slice 2D##slice-viewport",
+                RenderSimulationSliceScene,
+                new Vector2(320, 560),
+                new Vector2(660, 330));
             UpdateSlicePicking();
             RenderSliceCellTooltip();
         }
@@ -357,8 +365,8 @@ public partial class SimulationViewer
         using var window = ImGuiExtensions.BeginWindow(
             "View##view",
             ref _showViewPanel,
-            new Vector2(320, 40),
-            new Vector2(300, 400));
+            new Vector2(990, 40),
+            new Vector2(400, 420));
         if (!window.IsVisible)
             return;
 
@@ -458,8 +466,8 @@ public partial class SimulationViewer
         using var window = ImGuiExtensions.BeginWindow(
             "Configuration##configuration",
             ref _showConfigurationPanel,
-            new Vector2(640, 40),
-            new Vector2(380, 600));
+            new Vector2(990, 470),
+            new Vector2(400, 420));
         if (!window.IsVisible)
             return;
 
@@ -593,8 +601,8 @@ public partial class SimulationViewer
         using var window = ImGuiExtensions.BeginWindow(
             "Tools##tools",
             ref _showToolsPanel,
-            new Vector2(390, 40),
-            new Vector2(380, 560));
+            new Vector2(10, 340),
+            new Vector2(300, 550));
         if (!window.IsVisible)
             return;
 

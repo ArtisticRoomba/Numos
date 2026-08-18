@@ -184,8 +184,8 @@ public partial class SimulationViewer
         using var window = ImGuiExtensions.BeginWindow(
             "Solution##solution",
             ref _showSolutionPanel,
-            new Vector2(10, 360),
-            new Vector2(380, 520));
+            new Vector2(10, 40),
+            new Vector2(300, 290));
         if (!window.IsVisible)
             return;
 

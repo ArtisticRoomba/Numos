@@ -133,6 +133,15 @@ public partial class SimulationViewer
         ImGui.Separator();
         ImGui.Checkbox("Show FPS overlay", ref _showPerformanceOverlay);
         ImGui.TextDisabled("Displays the current render rate in the upper-left corner.");
+
+        ImGui.Separator();
+        ImGui.Text("Window layout");
+        if (ImGui.Button("Save Current Layout"))
+            SaveCurrentLayout();
+        ImGui.TextDisabled("Restores this arrangement the next time Numos starts.");
+
+        if (!string.IsNullOrEmpty(_layoutStatus))
+            ImGui.TextDisabled(_layoutStatus);
     }
 
     private static (int Width, int Height)[] GetTargetResolutions()
