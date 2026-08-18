@@ -89,4 +89,9 @@ public struct Int3(int x, int y, int z) : IEquatable<Int3>
                Y >= minInclusive.Y && Y < maxExclusive.Y &&
                Z >= minInclusive.Z && Z < maxExclusive.Z;
     }
+
+    public override string ToString()
+    {
+        return $"{X}, {Y}, {Z}";
+    }
 }

@@ -1,0 +1,7 @@
+<Project>
+    <PropertyGroup>
+        <!--        We'll try to keep it AOT-compatible. Smile.-->
+        <IsAotCompatible>true</IsAotCompatible>
+        <IsTrimmable>true</IsTrimmable>
+    </PropertyGroup>
+</Project>
