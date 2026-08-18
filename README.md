@@ -14,6 +14,7 @@ The project will follow a regular semantic versioning structure when I feel comf
 - Singlethreaded cross-chunk boundary flow
 - Simplified ideal gas law (`P = n \cdot T`)
 - Constant volume voxels
+- Attempts at being trimmable and Native AOT-compatible
 
 ## Bug Reports & Contributions
 Contributions and bug reports are always welcome and appreciated. Feel free to submit a PR or bug report on GitHub.

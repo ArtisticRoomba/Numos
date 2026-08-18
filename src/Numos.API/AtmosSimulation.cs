@@ -268,6 +268,63 @@ public sealed class AtmosSimulation : IDisposable
     }
 
     /// <summary>
+    ///     Returns handles for every chunk currently registered with the simulation.
+    /// </summary>
+    /// <remarks>
+    ///     The returned array is detached from the simulation. It can be used by retained consumers to
+    ///     discover additions and removals without maintaining a second chunk registry.
+    /// </remarks>
+    /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
+    [PublicAPI]
+    public AtmosChunkHandle[] GetChunkHandles()
+    {
+        ThrowIfDisposed();
+        var positions = _kernel.GetChunkPositions();
+        return CreateSortedHandles(positions);
+    }
+
+    /// <summary>
+    ///     Returns a detached handle list only when chunks were added or removed.
+    /// </summary>
+    /// <param name="knownRevision">The collection revision held by the caller, or a negative value for none.</param>
+    /// <param name="revision">The current collection revision.</param>
+    /// <param name="handles">The current sorted handles when the method returns <see langword="true" />.</param>
+    /// <returns><see langword="true" /> when the collection changed.</returns>
+    [PublicAPI]
+    public bool TryGetChunkHandles(
+        long knownRevision,
+        out long revision,
+        out AtmosChunkHandle[] handles)
+    {
+        ThrowIfDisposed();
+        if (!_kernel.TryGetChunkPositions(knownRevision, out revision, out var positions))
+        {
+            handles = [];
+            return false;
+        }
+
+        handles = CreateSortedHandles(positions);
+        return true;
+    }
+
+    private static AtmosChunkHandle[] CreateSortedHandles(Int3[] positions)
+    {
+        Array.Sort(positions, static (left, right) =>
+        {
+            int x = left.X.CompareTo(right.X);
+            if (x != 0)
+                return x;
+            int y = left.Y.CompareTo(right.Y);
+            return y != 0 ? y : left.Z.CompareTo(right.Z);
+        });
+
+        var handles = new AtmosChunkHandle[positions.Length];
+        for (var index = 0; index < positions.Length; index++)
+            handles[index] = new AtmosChunkHandle(positions[index]);
+        return handles;
+    }
+
+    /// <summary>
     ///     Returns a detached copy of the current state of a chunk.
     /// </summary>
     /// <param name="chunk">A handle identifying the chunk to inspect.</param>
@@ -285,6 +342,104 @@ public sealed class AtmosSimulation : IDisposable
     }
 
     /// <summary>
+    ///     Returns detached values for one voxel without copying the chunk's full field arrays.
+    /// </summary>
+    /// <param name="chunk">The chunk containing the voxel.</param>
+    /// <param name="localVoxelIndex">The voxel's flat local index.</param>
+    /// <returns>Scalar values plus one moles value per active gas channel.</returns>
+    [PublicAPI]
+    public AtmosVoxelSnapshot GetVoxelSnapshot(
+        AtmosChunkHandle chunk,
+        ushort localVoxelIndex)
+    {
+        ThrowIfDisposed();
+        return _kernel.GetVoxelSnapshot(chunk.Position, localVoxelIndex);
+    }
+
+    /// <summary>
+    ///     Returns detached values for one voxel only if its chunk is still at an expected version.
+    /// </summary>
+    /// <remarks>
+    ///     The version comparison and scalar/gas copy occur under the simulation state gate. A
+    ///     mismatch returns without allocating a gas array, which makes this suitable for retained
+    ///     frame tooltips.
+    /// </remarks>
+    /// <param name="chunk">The chunk containing the voxel.</param>
+    /// <param name="localVoxelIndex">The voxel's flat local index.</param>
+    /// <param name="expectedVersion">The exact chunk version represented by the caller's frame.</param>
+    /// <param name="snapshot">The detached values when this method returns <see langword="true" />.</param>
+    /// <returns><see langword="true" /> only when the expected version is still current.</returns>
+    [PublicAPI]
+    public bool TryGetVoxelSnapshot(
+        AtmosChunkHandle chunk,
+        ushort localVoxelIndex,
+        AtmosChunkVersion expectedVersion,
+        out AtmosVoxelSnapshot snapshot)
+    {
+        ThrowIfDisposed();
+        return _kernel.TryGetVoxelSnapshot(chunk.Position, localVoxelIndex, expectedVersion, out snapshot);
+    }
+
+    /// <summary>
+    ///     Returns a detached snapshot only when a chunk differs from <paramref name="knownVersion" />.
+    /// </summary>
+    /// <param name="chunk">A handle identifying the chunk to inspect.</param>
+    /// <param name="knownVersion">The version held by the caller, or <see langword="default" /> for no version.</param>
+    /// <param name="snapshot">The new detached snapshot when this method returns <see langword="true" />.</param>
+    /// <returns><see langword="true" /> when a new snapshot was created; otherwise <see langword="false" />.</returns>
+    [PublicAPI]
+    public bool TryGetChunkSnapshot(
+        AtmosChunkHandle chunk,
+        AtmosChunkVersion knownVersion,
+        out AtmosChunkSnapshot snapshot)
+    {
+        ThrowIfDisposed();
+        return _kernel.TryGetChunkSnapshot(chunk.Position, knownVersion, out snapshot);
+    }
+
+    /// <summary>
+    ///     Returns selected detached fields only when a chunk differs from <paramref name="knownVersion" />.
+    /// </summary>
+    /// <remarks>
+    ///     Version comparison and field copies are serialized with simulation ticks and direct API mutations,
+    ///     so a successful result is a consistent snapshot for the returned version. Pass a default known
+    ///     version when expanding a cached snapshot with additional fields.
+    /// </remarks>
+    /// <param name="chunk">A handle identifying the chunk to inspect.</param>
+    /// <param name="knownVersion">The version held by the caller, or <see langword="default" /> for no version.</param>
+    /// <param name="fields">Per-voxel fields to detach. Metadata and version are always included.</param>
+    /// <param name="snapshot">The new detached snapshot when this method returns <see langword="true" />.</param>
+    /// <returns><see langword="true" /> when a new snapshot was created; otherwise <see langword="false" />.</returns>
+    [PublicAPI]
+    public bool TryGetChunkSnapshot(
+        AtmosChunkHandle chunk,
+        AtmosChunkVersion knownVersion,
+        AtmosChunkSnapshotFields fields,
+        out AtmosChunkSnapshot snapshot)
+    {
+        ThrowIfDisposed();
+        return _kernel.TryGetChunkSnapshot(chunk.Position, knownVersion, fields, out snapshot);
+    }
+
+    /// <summary>
+    ///     Captures all changed requests from one coherent simulation tick/state.
+    /// </summary>
+    /// <remarks>
+    ///     Version checks and requested field copies occur under one state gate. Handles that were
+    ///     unregistered after a detached handle enumeration are omitted. Duplicate positions are rejected.
+    /// </remarks>
+    /// <param name="requests">Conditional per-chunk field requests.</param>
+    /// <returns>The coherent tick count and changed detached chunk snapshots.</returns>
+    [PublicAPI]
+    public AtmosChunkSnapshotBatch GetChangedChunkSnapshots(
+        IReadOnlyList<AtmosChunkSnapshotRequest> requests)
+    {
+        ThrowIfDisposed();
+        ArgumentNullException.ThrowIfNull(requests);
+        return _kernel.GetChangedChunkSnapshots(requests);
+    }
+
+    /// <summary>
     ///     Assigns one classification to every voxel in a chunk.
     /// </summary>
     /// <param name="chunk">A handle identifying the target chunk.</param>
@@ -297,6 +452,27 @@ public sealed class AtmosSimulation : IDisposable
     {
         ThrowIfDisposed();
         _kernel.SetChunkClassification(chunk.Position, classification);
+    }
+
+    /// <summary>
+    ///     Assigns one classification to the voxels on every simulated outer face of a chunk.
+    /// </summary>
+    /// <param name="chunk">A handle identifying the target chunk.</param>
+    /// <param name="classification">The room, solid, or void classification to assign.</param>
+    /// <remarks>
+    ///     X and Y faces are always included. Z faces are included only when the chunk has more than one
+    ///     layer, so a two-dimensional chunk receives a perimeter instead of becoming entirely classified.
+    ///     The active-voxel topology is rebuilt once after the bulk update.
+    /// </remarks>
+    /// <exception cref="KeyNotFoundException">No chunk is registered at the handle's position.</exception>
+    /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
+    [PublicAPI]
+    public void SetChunkBoundaryClassification(
+        AtmosChunkHandle chunk,
+        VoxelClassification classification)
+    {
+        ThrowIfDisposed();
+        _kernel.SetChunkBoundaryClassification(chunk.Position, classification);
     }
 
     /// <summary>
