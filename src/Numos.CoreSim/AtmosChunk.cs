@@ -16,6 +16,8 @@ namespace Numos.CoreSim;
 /// </remarks>
 internal class AtmosChunk
 {
+    private static long _nextGeneration;
+
     /// <summary>
     ///     Largest voxel count representable by the chunk's <see cref="ushort" /> flat indexes.
     /// </summary>
@@ -68,6 +70,14 @@ internal class AtmosChunk
     ///     Number of valid room IDs at the beginning of <see cref="ActiveRoomIds" />.
     /// </summary>
     public int ActiveRoomCount;
+
+    /// <summary>
+    ///     Identity and revision used by conditional snapshot consumers.
+    /// </summary>
+    public AtmosChunkVersion Version => new(_generation, Interlocked.Read(ref _revision));
+
+    private long _generation;
+    private long _revision;
 
     /// <summary>
     ///     Room IDs currently being processed in this chunk.
@@ -233,6 +243,17 @@ internal class AtmosChunk
         Temperature.Clear();
         Array.Clear(ActiveGases, 0, ActiveGases.Length);
         Array.Clear(ActiveRoomIds, 0, ActiveRoomIds.Length);
+
+        _generation = Interlocked.Increment(ref _nextGeneration);
+        Interlocked.Exchange(ref _revision, 1);
+    }
+
+    /// <summary>
+    ///     Marks the externally observable state as potentially changed.
+    /// </summary>
+    public void MarkChanged()
+    {
+        Interlocked.Increment(ref _revision);
     }
 
     /// <summary>
@@ -273,6 +294,7 @@ internal class AtmosChunk
                 if (ActiveRoomIds[r] == targetRoomId)
                 {
                     SleepTimer = 0;
+                    MarkChanged();
                     return;
                 }
             }
@@ -293,6 +315,7 @@ internal class AtmosChunk
         ActiveRoomCount++;
         SleepTimer = 0;
         RebuildActiveAirIndices();
+        MarkChanged();
     }
 
     /// <summary>
@@ -326,6 +349,7 @@ internal class AtmosChunk
     public virtual void Sleep()
     {
         IsAwake = false;
+        MarkChanged();
     }
 
     /// <summary>
@@ -389,6 +413,7 @@ internal class AtmosChunk
         Temperature[localVoxelIndex] = newTemp;
 
         TotalPressure[localVoxelIndex] = currentTotalMoles * newTemp;
+        MarkChanged();
     }
 
     /// <summary>
@@ -396,27 +421,52 @@ internal class AtmosChunk
     /// </summary>
     /// <returns>A snapshot containing copies of the chunk's position, pressure, temperature, gas, and room data.</returns>
     [PublicAPI]
-    public AtmosChunkSnapshot GetNetworkSnapshot()
+    public AtmosChunkSnapshot GetNetworkSnapshot(
+        AtmosChunkSnapshotFields fields = AtmosChunkSnapshotFields.All)
     {
+        if ((fields & ~AtmosChunkSnapshotFields.All) != 0)
+            throw new ArgumentOutOfRangeException(nameof(fields));
+
         var snapshot = new AtmosChunkSnapshot
         {
+            Fields = fields,
+            HasExplicitFields = true,
             GridPosition = GridPosition,
-            TotalPressure = TotalPressure.ToArray(),
-            Temperature = Temperature.ToArray(),
-            Gases = new GasSnapshot[ActiveGasCount],
-            VoxelRoomMap = VoxelRoomMap.ToArray()
+            Dimensions = Dimensions,
+            TotalPressure = fields.HasFlag(AtmosChunkSnapshotFields.Pressure)
+                ? TotalPressure.ToArray()
+                : [],
+            Temperature = fields.HasFlag(AtmosChunkSnapshotFields.Temperature)
+                ? Temperature.ToArray()
+                : [],
+            Gases = fields.HasFlag(AtmosChunkSnapshotFields.Gases)
+                ? new GasSnapshot[ActiveGasCount]
+                : [],
+            VoxelRoomMap = fields.HasFlag(AtmosChunkSnapshotFields.VoxelClassification)
+                ? VoxelRoomMap.ToArray()
+                : [],
+            ActiveAirCount = ActiveAirCount,
+            ActiveGasCount = ActiveGasCount,
+            IsAwake = IsAwake,
+            SleepTimer = SleepTimer
         };
 
-        for (var g = 0; g < ActiveGasCount; g++)
+        if (fields.HasFlag(AtmosChunkSnapshotFields.Gases))
         {
-            snapshot.Gases[g] = new GasSnapshot
+            for (var g = 0; g < ActiveGasCount; g++)
             {
-                GasId = ActiveGases[g].GasId,
-                Moles = new float[VoxelCount]
-            };
-            Array.Copy(ActiveGases[g].Moles, snapshot.Gases[g].Moles, VoxelCount);
+                snapshot.Gases[g] = new GasSnapshot
+                {
+                    GasId = ActiveGases[g].GasId,
+                    Moles = new float[VoxelCount]
+                };
+                Array.Copy(ActiveGases[g].Moles, snapshot.Gases[g].Moles, VoxelCount);
+            }
         }
 
+        // Kernel snapshot entry points serialize this copy against ticks and direct mutations.
+        // Capture the version after all requested fields have been detached.
+        snapshot.Version = Version;
         return snapshot;
     }
 

@@ -22,6 +22,8 @@ internal sealed partial class AtmosKernel : IDisposable
 
     // Map of GridPosition to Chunk for neighbor lookups
     private readonly ConcurrentDictionary<Int3, AtmosChunk> _chunkMap = new();
+    private readonly object _stateGate = new();
+    private long _chunkCollectionRevision;
 
     // Thread-local buffers sized to maximum boundary surface area
     private readonly int _maxBoundaryEvents;
@@ -69,18 +71,29 @@ internal sealed partial class AtmosKernel : IDisposable
     /// </summary>
     public void Dispose()
     {
-        foreach (var chunk in _chunkMap.Values)
-            chunk.Release();
+        lock (_stateGate)
+        {
+            foreach (var chunk in _chunkMap.Values)
+                chunk.Release();
 
-        _chunkMap.Clear();
-        _boundaryBufferPool.Dispose();
-        _precipBufferPool.Dispose();
-        _thermalBoundaryBufferPool.Dispose();
+            _chunkMap.Clear();
+            _boundaryBufferPool.Dispose();
+            _precipBufferPool.Dispose();
+            _thermalBoundaryBufferPool.Dispose();
+        }
     }
 
     private void TickSimulation(AtmosChunk[] chunks)
     {
         TickCount++;
+
+        // A revision is advanced once per processed tick. Conditional snapshot consumers can
+        // consequently retain sleeping chunks without copying their arrays again.
+        foreach (var chunk in chunks)
+        {
+            if (chunk.IsAwake)
+                chunk.MarkChanged();
+        }
 
         // 1. Parallel Advection & Fickian Diffusion
         // TODO PERF reuse queue
@@ -585,14 +598,20 @@ internal sealed partial class AtmosKernel : IDisposable
     private void ApplyDeltas(AtmosChunk chunk, float[] deltas)
     {
         // TODO PERF SIMD
+        // TODO THERMO, gas entering uninitted voxels inherited zero temp so they fell
+        // below pressure threshold and were deleted, however making them inherit default temp is not accurate
+        float defaultTemperature = _config.DefaultTemperatureFallback;
         for (var g = 0; g < chunk.ActiveGasCount; g++)
         {
             int offset = g * chunk.VoxelCount;
             for (var i = 0; i < chunk.ActiveAirCount; i++)
             {
                 ushort idx = chunk.ActiveAirIndices[i];
+                if (deltas[offset + idx] > 0f && chunk.Temperature[idx] <= 0f)
+                    chunk.Temperature[idx] = defaultTemperature;
+
                 chunk.ActiveGases[g].Moles[idx] += deltas[offset + idx];
-                if (chunk.ActiveGases[g].Moles[idx] < 0.0001f) // TODO unhardcode mole threshold
+                if (chunk.ActiveGases[g].Moles[idx] < 0f)
                     chunk.ActiveGases[g].Moles[idx] = 0f;
             }
         }
@@ -874,6 +893,11 @@ internal sealed partial class AtmosKernel : IDisposable
             float heatTransfer = tempDelta * _config.ThermalConductivity;
             sourceChunk.Temperature[srcIdx] -= heatTransfer;
             neighborChunk.Temperature[neighborIdx] += heatTransfer;
+
+            // Boundary heat transfer may mutate a sleeping neighbor. Sleeping chunks are not
+            // conservatively revised at tick start, so both participants must be marked here.
+            sourceChunk.MarkChanged();
+            neighborChunk.MarkChanged();
         }
     }
 }

@@ -32,6 +32,66 @@ public sealed class AtmosSimulationTests
     }
 
     [Test]
+    public void SetChunkBoundaryClassification_SealsOuterFacesAndPreservesInterior()
+    {
+        using var simulation = new AtmosSimulation(4, 4, 3);
+        var chunk = simulation.CreateAndRegisterChunk(default);
+        simulation.SetChunkClassification(chunk, new VoxelClassification(7));
+
+        simulation.SetChunkBoundaryClassification(chunk, VoxelClassification.RoomSolid);
+
+        var snapshot = simulation.GetChunkSnapshot(chunk);
+        var dimensions = snapshot.Dimensions;
+        for (var z = 0; z < dimensions.Z; z++)
+        for (var y = 0; y < dimensions.Y; y++)
+        for (var x = 0; x < dimensions.X; x++)
+        {
+            int index = x + dimensions.X * (y + dimensions.Y * z);
+            bool isBoundary = x == 0 || x == dimensions.X - 1 ||
+                              y == 0 || y == dimensions.Y - 1 ||
+                              z == 0 || z == dimensions.Z - 1;
+            Assert.That(snapshot.VoxelRoomMap[index],
+                Is.EqualTo(isBoundary ? VoxelClassification.RoomSolid : 7));
+        }
+    }
+
+    [Test]
+    public void SetChunkBoundaryClassification_SingleLayerChunkSealsPerimeterOnly()
+    {
+        using var simulation = new AtmosSimulation(3, 3, 1);
+        var chunk = simulation.CreateAndRegisterChunk(default);
+        simulation.SetChunkClassification(chunk, new VoxelClassification(7));
+
+        simulation.SetChunkBoundaryClassification(chunk, VoxelClassification.RoomSolid);
+
+        var snapshot = simulation.GetChunkSnapshot(chunk);
+        Assert.That(snapshot.VoxelRoomMap,
+            Is.EqualTo(new[]
+            {
+                -2, -2, -2,
+                -2, 7, -2,
+                -2, -2, -2
+            }));
+    }
+
+    [Test]
+    public void SealedSingleLayerChunk_DoesNotLoseGasThroughZPlane()
+    {
+        using var simulation = new AtmosSimulation(16, 16, 1);
+        var chunk = simulation.CreateAndRegisterChunk(default);
+        simulation.SetChunkClassification(chunk, new VoxelClassification(1));
+        simulation.SetChunkBoundaryClassification(chunk, VoxelClassification.RoomSolid);
+        simulation.AddGasToVoxel(chunk, 8, 8, 0, 0, 500f, 293.15f);
+
+        for (var tick = 0; tick < 20; tick++)
+            simulation.Tick();
+
+        var snapshot = simulation.GetChunkSnapshot(chunk);
+        float totalMoles = snapshot.Gases.Single().Moles.Sum();
+        Assert.That(totalMoles, Is.GreaterThan(499.5f));
+    }
+
+    [Test]
     public void CoreSim_HidesMutableKernelTypes()
     {
         var configType = typeof(AtmosConfig);
