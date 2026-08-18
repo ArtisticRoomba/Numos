@@ -14,14 +14,6 @@ ij_smart_tabs = false
 ij_visual_guides =
 ij_wrap_on_typing = false
 
-# Microsoft .NET properties
-csharp_preferred_modifier_order = public, private, protected, internal, file, new, readonly, abstract, virtual, closed, sealed, static, override, extern, unsafe, volatile, async, required:suggestion
-
-# ReSharper properties
-resharper_braces_for_for = not_required
-resharper_braces_for_foreach = required_for_multiline
-resharper_place_simple_initializer_on_single_line = false
-
 [*.bib]
 ij_bibtex_keep_first_column_comment = true
 ij_bibtex_keep_indents_on_empty_lines = false
@@ -562,24 +554,64 @@ ij_cmake_spaces_within_while_parentheses = false
 
 [{*.gd,*.gdf}]
 indent_style = tab
-ij_gdscript_align_after_assignments = true
-ij_gdscript_align_assignments = true
-ij_gdscript_align_comments = true
+ij_gdscript_array_new_line_after_left_bracket = false
+ij_gdscript_array_new_line_before_right_bracket = false
+ij_gdscript_array_wrapping = normal
+ij_gdscript_call_parameters_new_line_after_left_paren = false
+ij_gdscript_call_parameters_right_paren_on_new_line = false
+ij_gdscript_call_parameters_wrap = normal
+ij_gdscript_class_header_style = 0
+ij_gdscript_dict_new_line_after_left_brace = false
+ij_gdscript_dict_new_line_before_right_brace = false
+ij_gdscript_dict_wrapping = normal
+ij_gdscript_hang_closing_brackets = false
 ij_gdscript_keep_indents_on_empty_lines = false
 ij_gdscript_label_indent_absolute = false
 ij_gdscript_label_indent_size = 0
-ij_gdscript_lines_after_header = 1
-ij_gdscript_lines_after_variable_group = 0
-ij_gdscript_lines_around_multiline_var = 1
-ij_gdscript_lines_before_func_max = 2
-ij_gdscript_lines_before_func_min = 2
-ij_gdscript_lines_between_export_groups = 1
-ij_gdscript_lines_in_between_variable_group = 0
 ij_gdscript_lines_within_suite = 1
+ij_gdscript_max_blank_lines_around_inner_classes_functions = 1
+ij_gdscript_max_blank_lines_around_top_level_classes_functions = 2
+ij_gdscript_max_blank_lines_before_first_method_in_class = 0
+ij_gdscript_max_lines_after_header = 2
+ij_gdscript_max_lines_in_between_variable_groups = 1
+ij_gdscript_method_parameters_new_line_after_left_paren = false
+ij_gdscript_method_parameters_right_paren_on_new_line = false
+ij_gdscript_method_parameters_wrap = normal
+ij_gdscript_min_blank_lines_around_inner_classes_functions = 0
+ij_gdscript_min_blank_lines_around_top_level_classes_functions = 0
+ij_gdscript_min_blank_lines_before_first_method_in_class = 0
+ij_gdscript_min_lines_after_header = 1
+ij_gdscript_new_line_after_colon = false
+ij_gdscript_parenthesise_on_enter = false
 ij_gdscript_space_after_colon = true
 ij_gdscript_space_after_comma = true
 ij_gdscript_space_before_colon = false
 ij_gdscript_space_before_comma = false
+ij_gdscript_space_before_for_semicolon = false
+ij_gdscript_space_before_lambda_parentheses = false
+ij_gdscript_space_before_lbracket = false
+ij_gdscript_space_before_method_call_parentheses = false
+ij_gdscript_space_before_method_parentheses = false
+ij_gdscript_space_before_semicolon = false
+ij_gdscript_space_within_empty_method_call_parentheses = false
+ij_gdscript_space_within_empty_method_parentheses = false
+ij_gdscript_spaces_around_additive_operators = true
+ij_gdscript_spaces_around_arrow_in_method_return = true
+ij_gdscript_spaces_around_assignment_operators = true
+ij_gdscript_spaces_around_backslash = true
+ij_gdscript_spaces_around_bitwise_operators = true
+ij_gdscript_spaces_around_eq_in_lua_style_dicts = true
+ij_gdscript_spaces_around_eq_in_named_parameter = false
+ij_gdscript_spaces_around_multiplicative_operators = true
+ij_gdscript_spaces_around_relational_operators = true
+ij_gdscript_spaces_around_shift_operators = true
+ij_gdscript_spaces_within_braces = false
+ij_gdscript_spaces_within_brackets = false
+ij_gdscript_spaces_within_method_call_parentheses = false
+ij_gdscript_spaces_within_method_parentheses = false
+ij_gdscript_use_continuation_indent_for_arguments = true
+ij_gdscript_use_continuation_indent_for_collections = false
+ij_gdscript_use_continuation_indent_for_parameters = true
 ij_gdscript_use_relative_indents = false
 
 [{*.glstex,*.tex}]
