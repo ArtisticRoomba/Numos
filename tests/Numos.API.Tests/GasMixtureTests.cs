@@ -242,6 +242,46 @@ public sealed class GasMixtureTests
     }
 
     [Test]
+    public void StoredTemperature_AllowsRawValuesAndUsesConfiguredFallback()
+    {
+        var config = CreateSimulationConfig();
+        config.DefaultTemperatureFallback = 123f;
+        using var simulation = new AtmosSimulation(config, 1, 1, 1);
+        var chunk = simulation.CreateAndRegisterChunk(default);
+        var owned = simulation.CreateGasMixture(1f, 300f);
+        var voxel = simulation.GetVoxelGasMixture(chunk, 0);
+
+        owned.SetMoles(0, 1f);
+        voxel.SetMoles(0, 1f);
+        owned.Temperature = float.NaN;
+        voxel.Temperature = float.NaN;
+
+        float expectedPressure = AtmosPhysicalConstants.MolarGasConstant * config.DefaultTemperatureFallback;
+        Assert.Multiple(() =>
+        {
+            Assert.That(owned.Temperature, Is.NaN);
+            Assert.That(voxel.Temperature, Is.NaN);
+            Assert.That(owned.Pressure, Is.EqualTo(expectedPressure).Within(0.001f));
+            Assert.That(voxel.Pressure, Is.EqualTo(expectedPressure).Within(0.001f));
+        });
+    }
+
+    [Test]
+    public void VoxelMixture_ScalarMutationPreservesRoomCapacityGuard()
+    {
+        using var simulation = new AtmosSimulation(CreateSimulationConfig(), 2, 1, 1);
+        var chunk = simulation.CreateAndRegisterChunk(default, maxActiveRooms: 1);
+        simulation.SetVoxelClassification(chunk, 0, new VoxelClassification(1));
+        simulation.SetVoxelClassification(chunk, 1, new VoxelClassification(2));
+        var first = simulation.GetVoxelGasMixture(chunk, 0);
+        var second = simulation.GetVoxelGasMixture(chunk, 1);
+        first.SetMoles(0, 1f);
+
+        Assert.That(() => second.SetMoles(0, 1f), Throws.InvalidOperationException);
+        Assert.That(second.TotalMoles, Is.Zero);
+    }
+
+    [Test]
     public void VoxelMixture_IsBoundToOriginalChunkGeneration()
     {
         using var simulation = CreateSimulation();

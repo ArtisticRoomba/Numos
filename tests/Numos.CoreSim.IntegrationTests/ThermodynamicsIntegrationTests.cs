@@ -332,6 +332,42 @@ public sealed class ThermodynamicsIntegrationTests
     }
 
     [Test]
+    public void IntraChunkThermalDiffusion_FloatWorkspaceBoundsLongRunningEnergyDrift()
+    {
+        const int size = 4;
+        var config = SimTestHelpers.CreateDeterministicConfig();
+        config.BulkFlowCoefficient = 0f;
+        config.MaxPressureTransferFractionPerNeighbor = 0f;
+        config.ThermalConductance = 0.7f;
+        var gas = config.GasRegistry[SimTestHelpers.FirstGasId];
+        gas.MolarHeatCapacityAtConstantVolume = 2.75f;
+        config.GasRegistry[SimTestHelpers.FirstGasId] = gas;
+
+        using var simulation = new AtmosSimulation(config, size, size, size);
+        var chunk = SimTestHelpers.CreateOpenChunk(simulation, default);
+        for (var z = 0; z < size; z++)
+            for (var y = 0; y < size; y++)
+                for (var x = 0; x < size; x++)
+                {
+                    int sequence = x + y * size + z * size * size;
+                    float moles = 0.5f + sequence % 7 * 0.37f;
+                    float temperature = 150f + sequence % 11 * 23.7f;
+                    simulation.AddGasToVoxel(chunk, x, y, z, SimTestHelpers.FirstGasId, moles, temperature);
+                }
+
+        double initialEnergy = SimTestHelpers.TotalThermalEnergyPrecise(config,
+            simulation.GetChunkSnapshot(chunk));
+        for (var tick = 0; tick < 200; tick++)
+            simulation.Tick();
+
+        double finalEnergy = SimTestHelpers.TotalThermalEnergyPrecise(config,
+            simulation.GetChunkSnapshot(chunk));
+        double relativeDrift = Math.Abs(finalEnergy - initialEnergy) / initialEnergy;
+
+        Assert.That(relativeDrift, Is.LessThan(2e-6d));
+    }
+
+    [Test]
     public void DepthOneChunks_DoNotTreatZAsAThermalFlowPlaneWhenAnotherEdgeEmitsAnEvent()
     {
         const int width = 3;
