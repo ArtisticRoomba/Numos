@@ -9,11 +9,13 @@ public struct AtmosChunkSnapshot
 
     /// <summary>Detached per-voxel pressure values, in pascals (Pa).</summary>
     public float[] TotalPressure;
+    public float[] TotalHeatCapacity;
 
     /// <summary>Detached per-voxel temperature values, in kelvins (K).</summary>
     public float[] Temperature;
     public GasSnapshot[] Gases;
     public int[] VoxelRoomMap;
+    public bool[] IsVacuum;
     public int ActiveAirCount;
     public int ActiveGasCount;
     public bool IsAwake;

@@ -154,6 +154,11 @@ internal class AtmosChunk
     public FlatArray<int> VoxelRoomMap;
 
     /// <summary>
+    ///     If the voxel is currently a vacuum. Is recalculated on pressure recalculation.
+    /// </summary>
+    public FlatArray<bool> IsVacuum;
+
+    /// <summary>
     ///     Creates a chunk with the specified dimensions and active-room capacity.
     /// </summary>
     /// <param name="width">The number of voxels along the x axis.</param>
@@ -197,6 +202,7 @@ internal class AtmosChunk
         EnsureInitialized(ref TotalPressure, dimensions);
         EnsureInitialized(ref TotalHeatCapacity, dimensions);
         EnsureInitialized(ref Temperature, dimensions);
+        EnsureInitialized(ref IsVacuum, dimensions);
         if (ActiveGases == null)
             ActiveGases = new GasChannel[AtmosChunkConstants.InitialGasChannelCapacity];
         if (ActiveRoomIds == null || ActiveRoomIds.Length != MaxActiveRooms)
@@ -247,6 +253,7 @@ internal class AtmosChunk
         Array.Clear(ActiveAirIndices, 0, ActiveAirIndices.Length);
         TotalPressure.Clear();
         TotalHeatCapacity.Clear();
+        IsVacuum.Clear();
         Temperature.Clear();
         Array.Clear(ActiveGases, 0, ActiveGases.Length);
         Array.Clear(ActiveRoomIds, 0, ActiveRoomIds.Length);
@@ -442,6 +449,22 @@ internal class AtmosChunk
     }
 
     /// <summary>
+    ///     Sets a specific voxel to a vacuum. This sets TotalPressure, ActiveGases, and TotalHeatCapacity to 0 and IsVacuum to true.
+    /// </summary>
+    /// <param name="idx">Index of voxel</param>
+    [PublicAPI]
+    public void SetVoxelToVacuum(ushort idx)
+    {
+        TotalPressure[idx] = 0f;
+        for (var g = 0; g < ActiveGasCount; g++)
+        {
+            ActiveGases[g].Moles[idx] = 0f; 
+        }
+        IsVacuum[idx] = true; 
+        TotalHeatCapacity[idx] = 0f;
+    }
+
+    /// <summary>
     ///     Creates a snapshot of the chunk's current network state.
     /// </summary>
     /// <returns>A snapshot containing copies of the chunk's position, pressure, temperature, gas, and room data.</returns>
@@ -464,11 +487,17 @@ internal class AtmosChunk
             Temperature = fields.HasFlag(AtmosChunkSnapshotFields.Temperature)
                 ? Temperature.ToArray()
                 : [],
+            TotalHeatCapacity = fields.HasFlag(AtmosChunkSnapshotFields.TotalHeatCapacity)
+                ? TotalHeatCapacity.ToArray()
+                : [],
             Gases = fields.HasFlag(AtmosChunkSnapshotFields.Gases)
                 ? new GasSnapshot[ActiveGasCount]
                 : [],
             VoxelRoomMap = fields.HasFlag(AtmosChunkSnapshotFields.VoxelClassification)
                 ? VoxelRoomMap.ToArray()
+                : [],
+            IsVacuum = fields.HasFlag(AtmosChunkSnapshotFields.IsVacuum)
+                ? IsVacuum.ToArray()
                 : [],
             ActiveAirCount = ActiveAirCount,
             ActiveGasCount = ActiveGasCount,
