@@ -22,7 +22,7 @@ public sealed class AtmosSimulation : IDisposable
     /// </summary>
     /// <remarks>Elapsed-time updates therefore use a fixed step of <c>1 / SimulationRate</c> seconds.</remarks>
     [PublicAPI]
-    public const float SimulationRate = AtmosKernel.SimulationRate;
+    public const float SimulationRate = AtmosSolverConstants.SimulationRate;
 
     private readonly int _chunkDepth;
     private readonly int _chunkHeight;
@@ -40,7 +40,10 @@ public sealed class AtmosSimulation : IDisposable
     ///     A chunk dimension is zero or negative, or the combined voxel count exceeds
     ///     <see cref="ushort.MaxValue" />.
     /// </exception>
-    public AtmosSimulation(int chunkWidth = 16, int chunkHeight = 16, int chunkDepth = 16)
+    public AtmosSimulation(
+        int chunkWidth = AtmosChunkConstants.DefaultWidth,
+        int chunkHeight = AtmosChunkConstants.DefaultHeight,
+        int chunkDepth = AtmosChunkConstants.DefaultDepth)
         : this(new AtmosConfig(), chunkWidth, chunkHeight, chunkDepth)
     {
     }
@@ -61,24 +64,30 @@ public sealed class AtmosSimulation : IDisposable
     ///     A chunk dimension is zero or negative, or the combined voxel count exceeds
     ///     <see cref="ushort.MaxValue" />.
     /// </exception>
-    public AtmosSimulation(AtmosConfig config, int chunkWidth = 16, int chunkHeight = 16, int chunkDepth = 16)
+    public AtmosSimulation(
+        AtmosConfig config,
+        int chunkWidth = AtmosChunkConstants.DefaultWidth,
+        int chunkHeight = AtmosChunkConstants.DefaultHeight,
+        int chunkDepth = AtmosChunkConstants.DefaultDepth)
     {
         ArgumentNullException.ThrowIfNull(config);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(chunkWidth);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(chunkHeight);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(chunkDepth);
-        if (chunkWidth > AtmosChunk.MaxVoxelCount || chunkHeight > AtmosChunk.MaxVoxelCount ||
-            chunkDepth > AtmosChunk.MaxVoxelCount)
+        if (chunkWidth > AtmosChunkConstants.MaximumVoxelCount ||
+            chunkHeight > AtmosChunkConstants.MaximumVoxelCount ||
+            chunkDepth > AtmosChunkConstants.MaximumVoxelCount)
         {
             throw new ArgumentOutOfRangeException(nameof(chunkWidth), chunkWidth,
-                $"No chunk dimension may exceed {AtmosChunk.MaxVoxelCount}.");
+                $"No chunk dimension may exceed {AtmosChunkConstants.MaximumVoxelCount}.");
         }
 
         long voxelCount = (long)chunkWidth * chunkHeight * chunkDepth;
-        if (voxelCount > AtmosChunk.MaxVoxelCount)
+        if (voxelCount > AtmosChunkConstants.MaximumVoxelCount)
         {
             throw new ArgumentOutOfRangeException(nameof(chunkWidth), chunkWidth,
-                $"Chunk dimensions contain {voxelCount} voxels, but at most {AtmosChunk.MaxVoxelCount} are supported.");
+                $"Chunk dimensions contain {voxelCount} voxels, but at most " +
+                $"{AtmosChunkConstants.MaximumVoxelCount} are supported.");
         }
 
         Config = config;
@@ -242,7 +251,9 @@ public sealed class AtmosSimulation : IDisposable
     /// <exception cref="InvalidOperationException">A chunk is already registered at <paramref name="position" />.</exception>
     /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
     [PublicAPI]
-    public AtmosChunkHandle CreateAndRegisterChunk(Int3 position, int maxActiveRooms = 64)
+    public AtmosChunkHandle CreateAndRegisterChunk(
+        Int3 position,
+        int maxActiveRooms = AtmosChunkConstants.DefaultMaxActiveRooms)
     {
         ThrowIfDisposed();
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxActiveRooms);
@@ -568,11 +579,12 @@ public sealed class AtmosSimulation : IDisposable
     /// <param name="temperature">The temperature of the added gas, in kelvins.</param>
     /// <remarks>
     ///     The room classification containing the voxel is activated before injection. Injection into a solid or
-    ///     void voxel is ignored. The added gas carries sensible energy according to its effective molar heat
-    ///     capacity, and the stored temperature is updated by sensible-energy balance. Before blending, the heat
+    ///     void voxel is ignored. The added gas carries sensible internal energy according to its molar heat
+    ///     capacity at constant volume, and the stored temperature is updated by energy balance. Before blending, the
+    ///     heat
     ///     capacity of gas already in the voxel is recomputed from the current <see cref="Config" />. A missing
     ///     registry entry or non-finite or nonpositive configured heat capacity uses
-    ///     <see cref="AtmosConfig.DefaultSpecificHeatCapacity" />. When gas is already present, a non-finite or
+    ///     <see cref="AtmosConfig.DefaultMolarHeatCapacityAtConstantVolume" />. When gas is already present, a non-finite or
     ///     nonpositive stored temperature contributes prior sensible energy at
     ///     <see cref="AtmosConfig.DefaultTemperatureFallback" />. An empty voxel instead adopts the incoming
     ///     temperature.
@@ -604,11 +616,12 @@ public sealed class AtmosSimulation : IDisposable
     /// <param name="temperature">The temperature of the added gas, in kelvins.</param>
     /// <remarks>
     ///     The room classification containing the voxel is activated before injection. Injection into a solid or
-    ///     void voxel is ignored. The added gas carries sensible energy according to its effective molar heat
-    ///     capacity, and the stored temperature is updated by sensible-energy balance. Before blending, the heat
+    ///     void voxel is ignored. The added gas carries sensible internal energy according to its molar heat
+    ///     capacity at constant volume, and the stored temperature is updated by energy balance. Before blending, the
+    ///     heat
     ///     capacity of gas already in the voxel is recomputed from the current <see cref="Config" />. A missing
     ///     registry entry or non-finite or nonpositive configured heat capacity uses
-    ///     <see cref="AtmosConfig.DefaultSpecificHeatCapacity" />. When gas is already present, a non-finite or
+    ///     <see cref="AtmosConfig.DefaultMolarHeatCapacityAtConstantVolume" />. When gas is already present, a non-finite or
     ///     nonpositive stored temperature contributes prior sensible energy at
     ///     <see cref="AtmosConfig.DefaultTemperatureFallback" />. An empty voxel instead adopts the incoming
     ///     temperature.

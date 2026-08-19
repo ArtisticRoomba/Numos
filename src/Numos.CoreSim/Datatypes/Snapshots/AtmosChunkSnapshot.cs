@@ -6,7 +6,11 @@ public struct AtmosChunkSnapshot
 {
     public Int3 GridPosition;
     public Int3 Dimensions;
+
+    /// <summary>Detached per-voxel pressure values, in pascals (Pa).</summary>
     public float[] TotalPressure;
+
+    /// <summary>Detached per-voxel temperature values, in kelvins (K).</summary>
     public float[] Temperature;
     public GasSnapshot[] Gases;
     public int[] VoxelRoomMap;

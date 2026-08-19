@@ -1,3 +1,5 @@
+using Numos.CoreSim.Datatypes.Primitives;
+
 namespace Numos.CoreSim.Tests;
 
 [TestFixture]
@@ -18,7 +20,7 @@ public sealed class AtmosChunkInjectionTests
     {
         var chunk = CreateChunk(1, 1, 1);
 
-        chunk.InjectGasToVoxel(0, 3, 2f, 300f);
+        chunk.InjectGasToVoxel(0, 3, 2f, 300f, 1f, 1f);
 
         Assert.Multiple(() =>
         {
@@ -28,8 +30,8 @@ public sealed class AtmosChunkInjectionTests
         });
     }
 
-    [TestCase(AtmosChunk.RoomSolid)]
-    [TestCase(AtmosChunk.RoomVoid)]
+    [TestCase(VoxelClassification.RoomSolid)]
+    [TestCase(VoxelClassification.RoomVoid)]
     public void InjectGasToVoxel_WhenVoxelCannotHoldGas_DoesNothing(int classification)
     {
         var chunk = CreateChunk(2, 1, 1);
@@ -37,7 +39,7 @@ public sealed class AtmosChunkInjectionTests
         chunk.VoxelRoomMap[1] = classification;
         chunk.WakeRoom(7);
 
-        chunk.InjectGasToVoxel(1, 3, 2f, 300f);
+        chunk.InjectGasToVoxel(1, 3, 2f, 300f, 1f, 1f);
 
         Assert.Multiple(() =>
         {
@@ -53,7 +55,7 @@ public sealed class AtmosChunkInjectionTests
         var chunk = CreateAwakeChunk(1);
         chunk.SleepTimer = 9;
 
-        chunk.InjectGasToVoxel(0, 3, 2f, 300f);
+        chunk.InjectGasToVoxel(0, 3, 2f, 300f, 1f, 1f);
 
         Assert.Multiple(() =>
         {
@@ -71,9 +73,9 @@ public sealed class AtmosChunkInjectionTests
     public void InjectGasToVoxel_ExistingGasReusesChannelAndWeightsTemperatureByMoles()
     {
         var chunk = CreateAwakeChunk(1);
-        chunk.InjectGasToVoxel(0, 3, 2f, 300f);
+        chunk.InjectGasToVoxel(0, 3, 2f, 300f, 1f, 1f);
 
-        chunk.InjectGasToVoxel(0, 3, 1f, 600f);
+        chunk.InjectGasToVoxel(0, 3, 1f, 600f, 1f, 1f);
 
         Assert.Multiple(() =>
         {
@@ -88,9 +90,9 @@ public sealed class AtmosChunkInjectionTests
     public void InjectGasToVoxel_DifferentGasCreatesChannelAndUsesTotalMixtureForTemperature()
     {
         var chunk = CreateAwakeChunk(1);
-        chunk.InjectGasToVoxel(0, 3, 2f, 300f);
+        chunk.InjectGasToVoxel(0, 3, 2f, 300f, 1f, 1f);
 
-        chunk.InjectGasToVoxel(0, 8, 1f, 600f);
+        chunk.InjectGasToVoxel(0, 8, 1f, 600f, 1f, 1f);
 
         Assert.Multiple(() =>
         {
@@ -109,8 +111,8 @@ public sealed class AtmosChunkInjectionTests
     {
         var chunk = CreateAwakeChunk(2);
 
-        chunk.InjectGasToVoxel(0, 5, 1f, 250f);
-        chunk.InjectGasToVoxel(1, 5, 2f, 350f);
+        chunk.InjectGasToVoxel(0, 5, 1f, 250f, 1f, 1f);
+        chunk.InjectGasToVoxel(1, 5, 2f, 350f, 1f, 1f);
 
         Assert.Multiple(() =>
         {
@@ -126,9 +128,9 @@ public sealed class AtmosChunkInjectionTests
     {
         var chunk = CreateAwakeChunk(1);
         for (var gasId = 0; gasId < chunk.ActiveGases.Length; gasId++)
-            chunk.InjectGasToVoxel(0, gasId, 1f, 300f);
+            chunk.InjectGasToVoxel(0, gasId, 1f, 300f, 1f, 1f);
 
-        Assert.That(() => chunk.InjectGasToVoxel(0, chunk.ActiveGases.Length, 1f, 300f),
+        Assert.That(() => chunk.InjectGasToVoxel(0, chunk.ActiveGases.Length, 1f, 300f, 1f, 1f),
             Throws.Exception.With.Message.EqualTo("Maximum unique gas channels reached for this chunk!"));
         Assert.That(chunk.ActiveGasCount, Is.EqualTo(chunk.ActiveGases.Length));
     }

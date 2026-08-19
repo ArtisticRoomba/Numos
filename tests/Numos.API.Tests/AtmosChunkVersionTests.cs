@@ -267,7 +267,7 @@ public sealed class AtmosChunkVersionTests
     {
         var config = new AtmosConfig
         {
-            ThermalConductivity = 0.1f,
+            ThermalConductance = 0.1f,
             VacuumThreshold = 0.1f
         };
         using var simulation = new AtmosSimulation(config, 1, 1, 1);

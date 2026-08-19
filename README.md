@@ -12,8 +12,8 @@ The project will follow a regular semantic versioning structure when I feel comf
 - Engine-agnostic, with a supported `Numos.API` facade over an internal simulation kernel
 - Multithreaded intra-chunk advection and thermodynamics
 - Singlethreaded cross-chunk boundary flow
-- Simplified ideal gas law (`P = n \cdot T`)
-- Constant volume voxels
+- Ideal-gas pressure in pascals (`P = nRT/V`) with configurable, uniform voxel volume
+- Sensible internal-energy transport using per-species molar heat capacity at constant volume
 - Attempts at being trimmable and Native AOT-compatible
 
 ## Bug Reports & Contributions
