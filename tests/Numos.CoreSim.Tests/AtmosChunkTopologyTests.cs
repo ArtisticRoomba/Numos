@@ -22,7 +22,7 @@ public sealed class AtmosChunkTopologyTests
             Assert.That(chunk.ActiveAirIndices, Has.Length.EqualTo(24).And.All.Zero);
             Assert.That(chunk.TotalPressure.ToArray(), Has.Length.EqualTo(24).And.All.Zero);
             Assert.That(chunk.Temperature.ToArray(), Has.Length.EqualTo(24).And.All.Zero);
-            Assert.That(chunk.ActiveGases, Has.Length.EqualTo(AtmosChunkConstants.MaximumGasChannelsPerChunk));
+            Assert.That(chunk.ActiveGases, Has.Length.EqualTo(AtmosChunkConstants.InitialGasChannelCapacity));
             Assert.That(chunk.ActiveRoomIds, Has.Length.EqualTo(5).And.All.Zero);
             Assert.That(chunk.ActiveAirCount, Is.Zero);
             Assert.That(chunk.ActiveGasCount, Is.Zero);

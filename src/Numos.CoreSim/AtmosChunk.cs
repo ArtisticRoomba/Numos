@@ -198,7 +198,7 @@ internal class AtmosChunk
         EnsureInitialized(ref TotalHeatCapacity, dimensions);
         EnsureInitialized(ref Temperature, dimensions);
         if (ActiveGases == null)
-            ActiveGases = new GasChannel[AtmosChunkConstants.MaximumGasChannelsPerChunk];
+            ActiveGases = new GasChannel[AtmosChunkConstants.InitialGasChannelCapacity];
         if (ActiveRoomIds == null || ActiveRoomIds.Length != MaxActiveRooms)
             ActiveRoomIds = new int[MaxActiveRooms];
     }
@@ -392,29 +392,7 @@ internal class AtmosChunk
 
         float currentHeatCapacity = TotalHeatCapacity[localVoxelIndex];
 
-        int targetChannelIndex = -1;
-        for (var i = 0; i < ActiveGasCount; i++)
-        {
-            if (ActiveGases[i].GasId == gasId)
-            {
-                targetChannelIndex = i;
-                break;
-            }
-        }
-
-        if (targetChannelIndex == -1)
-        {
-            if (ActiveGasCount >= ActiveGases.Length)
-            {
-                throw new Exception("Maximum unique gas channels reached for this chunk!");
-            }
-
-            ActiveGases[ActiveGasCount] = new GasChannel();
-            ActiveGases[ActiveGasCount].Initialize(gasId, VoxelCount);
-
-            targetChannelIndex = ActiveGasCount;
-            ActiveGasCount++;
-        }
+        int targetChannelIndex = GetOrCreateGasChannel(gasId);
 
         ActiveGases[targetChannelIndex].Moles[localVoxelIndex] += molesToAdd;
 
@@ -439,6 +417,28 @@ internal class AtmosChunk
 
         TotalPressure[localVoxelIndex] = (float)(currentTotalMoles * newTemp * pressurePerMoleKelvin);
         MarkChanged();
+    }
+
+    internal int GetOrCreateGasChannel(int gasId)
+    {
+        for (var index = 0; index < ActiveGasCount; index++)
+        {
+            if (ActiveGases[index].GasId == gasId)
+                return index;
+        }
+
+        if (ActiveGasCount == ActiveGases.Length)
+        {
+            int newLength = checked(Math.Max(ActiveGases.Length * 2, ActiveGasCount + 1));
+            Array.Resize(ref ActiveGases, newLength);
+        }
+
+        int channelIndex = ActiveGasCount;
+        var channel = new GasChannel();
+        channel.Initialize(gasId, VoxelCount);
+        ActiveGases[channelIndex] = channel;
+        ActiveGasCount++;
+        return channelIndex;
     }
 
     /// <summary>

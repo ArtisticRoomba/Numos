@@ -124,15 +124,20 @@ public sealed class AtmosChunkInjectionTests
     }
 
     [Test]
-    public void InjectGasToVoxel_ThrowsBeforeExceedingGasChannelCapacity()
+    public void InjectGasToVoxel_GrowsGasChannelTableWhenInitialCapacityIsExceeded()
     {
         var chunk = CreateAwakeChunk(1);
-        for (var gasId = 0; gasId < chunk.ActiveGases.Length; gasId++)
+        int initialCapacity = chunk.ActiveGases.Length;
+        for (var gasId = 0; gasId <= initialCapacity; gasId++)
             chunk.InjectGasToVoxel(0, gasId, 1f, 300f, 1f, 1f);
 
-        Assert.That(() => chunk.InjectGasToVoxel(0, chunk.ActiveGases.Length, 1f, 300f, 1f, 1f),
-            Throws.Exception.With.Message.EqualTo("Maximum unique gas channels reached for this chunk!"));
-        Assert.That(chunk.ActiveGasCount, Is.EqualTo(chunk.ActiveGases.Length));
+        Assert.Multiple(() =>
+        {
+            Assert.That(chunk.ActiveGasCount, Is.EqualTo(initialCapacity + 1));
+            Assert.That(chunk.ActiveGases, Has.Length.GreaterThan(initialCapacity));
+            Assert.That(chunk.ActiveGases.Take(chunk.ActiveGasCount).Select(static gas => gas.GasId),
+                Is.EqualTo(Enumerable.Range(0, initialCapacity + 1)));
+        });
     }
 
     private AtmosChunk CreateChunk(int width, int height, int depth)

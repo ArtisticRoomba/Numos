@@ -19,6 +19,7 @@
    - 3.4 [Room Nodes (Macro Layer)](#34-room-nodes-macro-layer)
    - 3.5 [Gas Properties Registry](#35-gas-properties-registry)
    - 3.6 [Configuration Parameters](#36-configuration-parameters)
+   - 3.7 [Container and Voxel Gas Mixtures](#37-container-and-voxel-gas-mixtures)
 4. [Simulation Loop](#4-simulation-loop)
    - 4.1 [Fixed Timestep Accumulator](#41-fixed-timestep-accumulator)
    - 4.2 [Phase 1 — Pressure Advection](#42-phase-1--pressure-advection)
@@ -168,7 +169,7 @@ Key properties:
 
 - **Lazy allocation**: A `GasChannel` is only created when that gas type is first introduced to a chunk via `InjectGasToVoxel`. A chunk containing only oxygen will have one channel; a chunk containing oxygen, nitrogen, and plasma will have three.
 - **ArrayPool rental**: The `Moles` array is rented from `System.Buffers.ArrayPool<float>` and cleared to zero on allocation. This avoids GC pressure from repeated allocations. The array must be explicitly returned via `Release()`.
-- **Fixed capacity**: The `ActiveGases` array has a fixed capacity (default 16 slots). If more than 16 unique gas types are injected into a single chunk, the system throws an exception. There is no resize logic.
+- **Growable channel table**: `ActiveGases` begins with `AtmosChunkConstants.InitialGasChannelCapacity` slots (currently 16) and doubles only when another distinct gas ID reaches the chunk. Existing per-gas mole arrays remain untouched, preserving the structure-of-arrays solver layout while permitting arbitrary gas IDs and counts.
 
 > [!NOTE]
 > The `ArrayPool` may return an array larger than requested. Only the first `VoxelCount` entries are used. Implementations should clear only the requested range.
@@ -233,7 +234,7 @@ All tunable simulation parameters are centralized in a configuration object:
 The literals backing these defaults are exposed through `AtmosConfigDefaults`, while immutable SI and reference
 condition values are exposed through `AtmosPhysicalConstants`. Internal fixed-step scheduling values and numerical
 cutoffs live in `AtmosSolverConstants`; they are deliberately not presented as runtime configuration. Default chunk
-dimensions and hard chunk capacities are exposed through `AtmosChunkConstants`, while reserved room IDs have a
+dimensions and initial chunk capacities are exposed through `AtmosChunkConstants`, while reserved room IDs have a
 single definition in `VoxelClassification`.
 
 | Parameter | Default | Description |
@@ -255,6 +256,45 @@ single definition in `VoxelClassification`.
 | `ThermalConductance` | 0.05 | Effective per-face conductance in J/K per thermodynamics tick. Multiplying it by a temperature difference produces a candidate energy transfer, which is bounded for explicit-solver stability. Invalid or nonpositive values disable thermal diffusion. |
 | `CondensationRateFactor` | 0.5 | Dimensionless fraction of supersaturated vapor condensed per thermodynamics tick. Finite values are clamped to [0, 1]; non-finite values disable condensation. |
 | `MaxPressureTransferFractionPerNeighbor` | 0.16 | Maximum fraction of a voxel's pressure requested as bulk flow to one neighbor per tick. Finite values are clamped to [0, 1]; non-finite values disable bulk flow. |
+
+### 3.7 Container and Voxel Gas Mixtures
+
+`IGasMixture` provides one public interaction model for portable containers and individual voxels while preserving
+the solver's structure-of-arrays layout:
+
+- `AtmosSimulation.CreateGasMixture(volume, temperature)` returns a concrete `GasMixture` with independent sparse
+  storage. Its `Volume` can be changed, and it is suitable for canisters, tanks, pipes, pumps, or temporary parcels.
+- `AtmosSimulation.GetVoxelGasMixture(...)` returns an `IGasMixture` capability over one live voxel. It does not
+  contain or expose spans, gas-channel arrays, or references into pooled solver memory.
+- Every mixture retains its owning `AtmosSimulation`. Transfers require both endpoints to have the same owner, so
+  gas IDs and molar heat capacities are interpreted through one live configuration.
+- `IGasMixture` is a common capability surface rather than an extension point. Transfer endpoints must be mixtures
+  created by `AtmosSimulation`; external implementations are rejected before either endpoint changes.
+- A voxel capability records the chunk generation at creation. Removing and recreating a chunk at the same position
+  makes the old capability stale instead of silently retargeting it to unrelated state.
+- Voxel reads and mutations enter the simulation state lock. Multi-endpoint transfers capture and validate both
+  results before committing, preventing simulation ticks from observing a half-applied transfer.
+- Solid and void voxels can be inspected but reject mutation. Disposing the owner invalidates both container and
+  voxel mixtures.
+
+The common surface exposes volume, temperature, pressure, total moles, sparse gas lookup, snapshots, proportional
+removal, and transfer operations. `SetMoles` and `AdjustMoles` intentionally preserve the stored temperature for
+low-level tooling parity. `AddGas` and transfers instead conserve sensible internal energy using each gas's effective
+constant-volume molar heat capacity. Pressure is always derived from `P = nRT/V` rather than being independently
+mutable.
+
+```csharp
+var canister = simulation.CreateGasMixture(volume: 0.07f, temperature: 293.15f);
+canister.AddGas(oxygenId, moles: 2f, temperature: 293.15f);
+
+IGasMixture voxel = simulation.GetVoxelGasMixture(chunk, x: 4, y: 3, z: 0);
+float moved = canister.TransferTo(voxel, moles: 0.5f);
+GasMixture sample = voxel.RemoveRatio(0.1f);
+```
+
+The API follows the useful container semantics of
+[SS14's `GasMixture`](https://github.com/space-wizards/space-station-14/blob/master/Content.Shared/Atmos/GasMixture.cs)
+while replacing its globally sized per-mixture gas array with sparse container storage and locked SoA voxel access.
 
 ---
 
