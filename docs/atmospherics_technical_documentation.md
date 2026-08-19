@@ -266,7 +266,7 @@ single definition in `VoxelClassification`.
 | `SleepThreshold` | 100 | Consecutive ticks below `SleepEpsilon` before a chunk goes to sleep. Negative values normalize to zero. |
 | `SleepEpsilon` | 3.5 | Maximum pressure delta considered "at rest" (Pa). Invalid or negative values normalize to zero. |
 | `ThermalConductance` | 0.05 | Effective per-face conductance in J/K per thermodynamics tick. Multiplying it by a temperature difference produces a candidate energy transfer, which is bounded for explicit-solver stability. Invalid or nonpositive values disable thermal diffusion. |
-| `CondensationRateFactor` | 0.5 | Dimensionless fraction of supersaturated vapor condensed per thermodynamics tick. Finite values are clamped to [0, 1]; non-finite values disable condensation. |
+| `CondensationRateFactor` | 0.5 | Dimensionless fraction of the heat-coupled equilibrium condensation amount applied per thermodynamics tick. Finite values are clamped to [0, 1]; non-finite values disable condensation. |
 | `MaxPressureTransferFractionPerNeighbor` | 0.16 | Maximum fraction of a voxel's pressure requested as bulk flow to one neighbor per tick. Finite values are clamped to [0, 1]; non-finite values disable bulk flow. |
 
 ### 3.7 Container and Voxel Gas Mixtures
@@ -674,22 +674,29 @@ T_effective = storedTemperature > 0 && isFinite(storedTemperature)
 
 `SaturationReferencePressure` defaults to one standard atmosphere (`101325 Pa`) and is the pressure at which the configured `BoilingPoint` applies.
 
-For a registered species, phase-change processing first requires `CondensationEnabled`, more than `0.01` moles in the voxel, and a positive effective temperature. Condensation then occurs when partial pressure exceeds saturation:
+For a registered species, phase-change processing first requires `CondensationEnabled`, more than `0.01` moles in the voxel, and a positive effective temperature. Condensation then occurs when partial pressure exceeds saturation. Let `n0` and `T0` be the initial vapor amount and temperature, `x` the candidate condensed amount, `Cv` the condensing species' effective molar heat capacity, `C_other` the heat capacity of every other gas, and `K = R / VoxelVolume`:
 
 ```
 if gasIsRegistered && CondensationEnabled && gasMoles > 0.01 && T_effective > 0:
-    P_sat = SaturationReferencePressure
-            * exp(-(MolarEnthalpyOfVaporization / R) * (1/T_effective - 1/T_boiling))
-    saturationMoles = P_sat / ((R / VoxelVolume) * T_effective)
-    if gasMoles > saturationMoles:
-        molesToCondense = (gasMoles - saturationMoles) * CondensationRateFactor
+    deltaU = max(0, MolarEnthalpyOfVaporization - R * T0)
+    C_after(x) = C_other + (n0 - x) * Cv
+    T_after(x) = T0 + x * deltaU / C_after(x)
+    P_vapor(x) = (n0 - x) * K * T_after(x)
+    P_sat(x) = SaturationReferencePressure
+               * exp(-(MolarEnthalpyOfVaporization / R)
+                     * (1/T_after(x) - 1/T_boiling))
+    solve P_vapor(x_equilibrium) = P_sat(x_equilibrium), 0 <= x_equilibrium <= n0
+    molesToCondense = x_equilibrium * CondensationRateFactor
 ```
 
 Dividing molar vaporization enthalpy by `R` makes the exponential dimensionless. This integrated Clausius–Clapeyron form assumes ideal vapor and approximately constant vaporization enthalpy over the modeled temperature interval. Subject to the gates above, this model allows condensation at any temperature where the gas is supersaturated rather than only below a fixed temperature. Gas IDs without a registry entry, invalid boiling points, and invalid or nonpositive vaporization enthalpies are skipped.
 
-The direct mole-space calculation is algebraically equivalent to converting excess partial pressure back to moles,
-but it avoids an overflow-prone pressure round trip for large inventories. The approximation and its assumptions
-match the integrated ideal-vapor derivation summarized in [NISTIR 5321](https://nvlpubs.nist.gov/nistpubs/Legacy/IR/nistir5321.pdf).
+The equilibrium solve uses the remaining vapor amount and saturation amount in logarithmic mole space. A bounded
+Newton iteration with a bisection fallback keeps the solution inside `[0, n0]`, uses double-precision intermediates,
+and avoids an overflow-prone pressure round trip for large inventories. The same temperature curve is used both to
+select the condensed amount and to apply its energy change, so the solve includes the warming of the remaining
+vapor as well as the resulting rise in saturation pressure. The approximation and its assumptions match the
+integrated ideal-vapor derivation summarized in [NISTIR 5321](https://nvlpubs.nist.gov/nistpubs/Legacy/IR/nistir5321.pdf).
 
 ### 8.2 Phase-Change Internal-Energy Balance
 
@@ -707,7 +714,10 @@ performed only when `C_after > 0`. The voxel's cached `TotalHeatCapacity` and `T
 As elsewhere in the energy model, a non-finite or nonpositive configured `MolarHeatCapacityAtConstantVolume` uses the
 normalized `DefaultMolarHeatCapacityAtConstantVolume`.
 
-Phase-change energy generally warms the remaining gas, which raises saturation pressure and slows further condensation. Accounting for both the ideal-gas `pV` term and the condensed gas's departing sensible energy avoids assigning enthalpy directly to a constant-volume internal-energy state.
+Phase-change energy generally warms the remaining gas, which raises both its partial pressure and its saturation
+pressure. The coupled amount solve in §8.1 evaluates both effects before applying `CondensationRateFactor`.
+Accounting for the ideal-gas `pV` term and the condensed gas's departing sensible energy avoids assigning enthalpy
+directly to a constant-volume internal-energy state.
 
 ### Liquid-system integration
 
