@@ -127,7 +127,8 @@ public class AtmosConfig
     public float ThermalConductance { get; set; } = AtmosConfigDefaults.ThermalConductance;
 
     /// <summary>
-    ///     Dimensionless fraction of supersaturated vapor condensed per thermodynamics tick.
+    ///     Dimensionless fraction of the heat-coupled equilibrium condensation amount applied per
+    ///     thermodynamics tick.
     /// </summary>
     /// <remarks>Values are clamped to [0, 1]; non-finite values disable condensation.</remarks>
     public float CondensationRateFactor { get; set; } = AtmosConfigDefaults.CondensationRateFactor;

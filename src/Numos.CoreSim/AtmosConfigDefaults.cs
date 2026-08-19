@@ -55,7 +55,7 @@ public static class AtmosConfigDefaults
     /// <summary>Default effective per-face thermal conductance, in joules per kelvin per thermodynamics tick.</summary>
     public const float ThermalConductance = 0.05f;
 
-    /// <summary>Default fraction of supersaturated vapor condensed per thermodynamics tick.</summary>
+    /// <summary>Default fraction of the heat-coupled equilibrium condensation amount applied per tick.</summary>
     public const float CondensationRateFactor = 0.5f;
 
     /// <summary>Default maximum source-pressure fraction transferred to one neighbor per tick.</summary>
