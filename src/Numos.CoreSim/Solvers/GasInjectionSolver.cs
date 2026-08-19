@@ -13,31 +13,20 @@ internal static class GasInjectionSolver
         if (!CanInject(chunk, localVoxelIndex))
             return;
 
-        float fallbackHeatCapacity = IsFinitePositive(config.DefaultMolarHeatCapacityAtConstantVolume)
-            ? config.DefaultMolarHeatCapacityAtConstantVolume
-            : AtmosConfigDefaults.DefaultMolarHeatCapacityAtConstantVolume;
         float currentHeatCapacity = 0f;
         for (var gas = 0; gas < chunk.ActiveGasCount; gas++)
         {
             float existingMoles = chunk.ActiveGases[gas].Moles[localVoxelIndex];
             if (existingMoles <= 0f)
                 continue;
-            currentHeatCapacity += existingMoles * GetMolarHeatCapacity(
-                chunk.ActiveGases[gas].GasId, config, fallbackHeatCapacity);
+            currentHeatCapacity += existingMoles *
+                                   AtmosSolverMath.GetMolarHeatCapacity(config, chunk.ActiveGases[gas].GasId);
         }
 
-        float effectiveTemperature = IsFinitePositive(chunk.Temperature[localVoxelIndex])
-            ? chunk.Temperature[localVoxelIndex]
-            : IsFinitePositive(config.DefaultTemperatureFallback)
-                ? config.DefaultTemperatureFallback
-                : AtmosConfigDefaults.DefaultTemperatureFallback;
-        float volume = IsFinitePositive(config.VoxelVolume)
-            ? config.VoxelVolume
-            : AtmosConfigDefaults.VoxelVolume;
-
         InjectCore(chunk, localVoxelIndex, gasId, moles, temperature,
-            GetMolarHeatCapacity(gasId, config, fallbackHeatCapacity), currentHeatCapacity,
-            effectiveTemperature, AtmosPhysicalConstants.MolarGasConstant / volume);
+            AtmosSolverMath.GetMolarHeatCapacity(config, gasId), currentHeatCapacity,
+            AtmosSolverMath.GetEffectiveTemperature(config, chunk.Temperature[localVoxelIndex]),
+            AtmosPhysicalConstants.MolarGasConstant / AtmosSolverMath.GetVoxelVolume(config));
     }
 
     internal static void InjectDuringTick(AtmosChunk chunk, ushort localVoxelIndex, int gasId, float moles,
@@ -75,27 +64,11 @@ internal static class GasInjectionSolver
         float effectiveCurrentTemperature, float pressurePerMoleKelvin)
     {
         chunk.TotalHeatCapacity[localVoxelIndex] = currentHeatCapacity;
-        if (currentHeatCapacity > 0f && !IsFinitePositive(chunk.Temperature[localVoxelIndex]))
+        if (currentHeatCapacity > 0f && !AtmosSolverMath.IsFinitePositive(chunk.Temperature[localVoxelIndex]))
             chunk.Temperature[localVoxelIndex] = effectiveCurrentTemperature;
 
         chunk.InjectGasToVoxel(localVoxelIndex, gasId, moles, temperature, molarHeatCapacity,
             pressurePerMoleKelvin);
     }
 
-    private static float GetMolarHeatCapacity(int gasId, AtmosConfig config, float fallback)
-    {
-        if ((uint)gasId < (uint)config.GasRegistry.Count)
-        {
-            float configured = config.GasRegistry[gasId].MolarHeatCapacityAtConstantVolume;
-            if (IsFinitePositive(configured))
-                return configured;
-        }
-
-        return fallback;
-    }
-
-    private static bool IsFinitePositive(float value)
-    {
-        return float.IsFinite(value) && value > 0f;
-    }
 }

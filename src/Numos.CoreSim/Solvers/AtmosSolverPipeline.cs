@@ -3,14 +3,16 @@ namespace Numos.CoreSim.Solvers;
 /// <summary>
 ///     Ordered, mutable collection of solver delegates executed for every fixed tick.
 /// </summary>
-internal sealed class AtmosSolverPipeline
+internal sealed class AtmosSolverPipeline : IDisposable
 {
     private readonly Func<SolverStep[]> _createDefaults;
+    private readonly IDisposable? _defaultLifetime;
     private readonly List<SolverStep> _steps = [];
 
-    internal AtmosSolverPipeline(Func<SolverStep[]> createDefaults)
+    internal AtmosSolverPipeline(Func<SolverStep[]> createDefaults, IDisposable? defaultLifetime = null)
     {
         _createDefaults = createDefaults;
+        _defaultLifetime = defaultLifetime;
         Reset();
     }
 
@@ -75,6 +77,11 @@ internal sealed class AtmosSolverPipeline
         SolverStep[] steps = _steps.Where(static step => step.Enabled).ToArray();
         foreach (SolverStep step in steps)
             step.Solver(context);
+    }
+
+    public void Dispose()
+    {
+        _defaultLifetime?.Dispose();
     }
 
     private static void ValidateName(string name)

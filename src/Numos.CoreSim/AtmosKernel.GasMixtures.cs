@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using Numos.CoreSim.Datatypes.Primitives;
+using Numos.CoreSim.Solvers;
 using Numos.Maths;
 
 namespace Numos.CoreSim;
@@ -59,7 +60,7 @@ internal sealed partial class AtmosKernel
         lock (_stateGate)
         {
             GetMixtureChunk(position, generation, localVoxelIndex);
-            return GetVoxelVolume();
+            return AtmosSolverMath.GetVoxelVolume(_config);
         }
     }
 
@@ -84,7 +85,8 @@ internal sealed partial class AtmosKernel
         {
             var chunk = GetMixtureChunk(position, generation, localVoxelIndex);
             float totalMoles = GetVoxelTotalMoles(chunk, localVoxelIndex);
-            return CalculatePressure(totalMoles, chunk.Temperature[localVoxelIndex]);
+            return AtmosSolverMath.CalculatePressure(_config, totalMoles,
+                chunk.Temperature[localVoxelIndex]);
         }
     }
 
@@ -161,7 +163,7 @@ internal sealed partial class AtmosKernel
             Array.Sort(gases, static (left, right) => left.Key.CompareTo(right.Key));
 
             return new VoxelGasMixtureState(
-                GetVoxelVolume(),
+                AtmosSolverMath.GetVoxelVolume(_config),
                 chunk.Temperature[localVoxelIndex],
                 gases);
         }
@@ -265,13 +267,14 @@ internal sealed partial class AtmosKernel
                 localVoxelIndex,
                 chunk.Temperature[localVoxelIndex]);
             float currentHeatCapacity = currentTotals.HeatCapacity;
-            float incomingHeatCapacity = moles * GetMolarHeatCapacityAtConstantVolume(gasId);
+            float incomingHeatCapacity = moles * AtmosSolverMath.GetMolarHeatCapacity(_config, gasId);
             float combinedHeatCapacity = currentHeatCapacity + incomingHeatCapacity;
             if (!float.IsFinite(combinedHeatCapacity))
                 throw new InvalidOperationException("The mixture's heat capacity exceeds the supported range.");
 
-            float currentTemperature = GetEffectiveTemperature(chunk.Temperature[localVoxelIndex]);
-            float incomingTemperature = GetEffectiveTemperature(temperature);
+            float currentTemperature = AtmosSolverMath.GetEffectiveTemperature(
+                _config, chunk.Temperature[localVoxelIndex]);
+            float incomingTemperature = AtmosSolverMath.GetEffectiveTemperature(_config, temperature);
             float mixedTemperature = combinedHeatCapacity > 0f
                 ? currentTemperature +
                   (incomingTemperature - currentTemperature) * incomingHeatCapacity / combinedHeatCapacity
@@ -367,7 +370,7 @@ internal sealed partial class AtmosKernel
             foreach (var (gasId, moles) in gases)
             {
                 totalMoles += moles;
-                totalHeatCapacity += moles * GetMolarHeatCapacityAtConstantVolume(gasId);
+                totalHeatCapacity += moles * AtmosSolverMath.GetMolarHeatCapacity(_config, gasId);
             }
 
             Debug.Assert(float.IsFinite(totalMoles));
@@ -385,7 +388,8 @@ internal sealed partial class AtmosKernel
 
             chunk.Temperature[localVoxelIndex] = temperature;
             chunk.TotalHeatCapacity[localVoxelIndex] = totalHeatCapacity;
-            chunk.TotalPressure[localVoxelIndex] = CalculatePressure(totalMoles, temperature);
+            chunk.TotalPressure[localVoxelIndex] =
+                AtmosSolverMath.CalculatePressure(_config, totalMoles, temperature);
             chunk.MarkChanged();
         }
     }
@@ -471,13 +475,13 @@ internal sealed partial class AtmosKernel
                 continue;
 
             totalMoles += moles;
-            totalHeatCapacity += moles * GetMolarHeatCapacityAtConstantVolume(gasId);
+            totalHeatCapacity += moles * AtmosSolverMath.GetMolarHeatCapacity(_config, gasId);
         }
 
         if (!foundOverride && overrideGasId >= 0 && overrideMoles > 0f)
         {
             totalMoles += overrideMoles;
-            totalHeatCapacity += overrideMoles * GetMolarHeatCapacityAtConstantVolume(overrideGasId);
+            totalHeatCapacity += overrideMoles * AtmosSolverMath.GetMolarHeatCapacity(_config, overrideGasId);
         }
 
         if (!float.IsFinite(totalMoles))
@@ -485,8 +489,7 @@ internal sealed partial class AtmosKernel
         if (!float.IsFinite(totalHeatCapacity))
             throw new InvalidOperationException("The mixture's heat capacity exceeds the supported range.");
 
-        float pressure = totalMoles / GetVoxelVolume() * AtmosPhysicalConstants.MolarGasConstant *
-                         GetEffectiveTemperature(temperature);
+        float pressure = AtmosSolverMath.CalculatePressure(_config, totalMoles, temperature);
         if (!float.IsFinite(pressure))
             throw new InvalidOperationException("The mixture's pressure exceeds the supported range.");
 

@@ -1,4 +1,5 @@
 using Numos.CoreSim;
+using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.Solvers;
 using Numos.Maths;
 
@@ -29,7 +30,7 @@ public readonly ref struct AtmosDangerousSolverContext
     public int TickCount => _context.TickCount;
 
     /// <summary>The mutable live configuration retained by the simulation.</summary>
-    public AtmosConfig Config => _context.Kernel.DangerousConfiguration;
+    public AtmosConfig Config => _context.Configuration;
 
     /// <summary>The number of chunks in the tick snapshot.</summary>
     public int ChunkCount => _context.Chunks.Length;
@@ -46,8 +47,14 @@ public readonly ref struct AtmosDangerousSolverContext
     public void InjectGasToVoxel(int chunkIndex, ushort localVoxelIndex, int gasId, float moles,
         float temperature)
     {
-        _context.Kernel.DangerousInjectGasDuringTick(
-            _context.Chunks[chunkIndex], localVoxelIndex, gasId, moles, temperature);
+        AtmosChunk chunk = _context.Chunks[chunkIndex];
+        int roomId = chunk.VoxelRoomMap[localVoxelIndex];
+        if (roomId == VoxelClassification.RoomSolid || roomId == VoxelClassification.RoomVoid)
+            return;
+
+        chunk.WakeRoom(roomId);
+        GasInjectionSolver.InjectDuringTick(
+            chunk, localVoxelIndex, gasId, moles, temperature, _context.Config);
     }
 }
 
