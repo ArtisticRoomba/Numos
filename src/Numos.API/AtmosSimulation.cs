@@ -50,7 +50,8 @@ public sealed class AtmosSimulation : IDisposable
     /// </summary>
     /// <param name="config">
     ///     The mutable configuration to use. The simulation retains this instance, and its current values affect
-    ///     subsequent simulation operations, including <see cref="AddGasToVoxel(AtmosChunkHandle, ushort, int, float, float)" />.
+    ///     subsequent simulation operations, including
+    ///     <see cref="AddGasToVoxel(AtmosChunkHandle, ushort, int, float, float)" />.
     /// </param>
     /// <param name="chunkWidth">The number of voxels along each chunk's local x-axis.</param>
     /// <param name="chunkHeight">The number of voxels along each chunk's local y-axis.</param>

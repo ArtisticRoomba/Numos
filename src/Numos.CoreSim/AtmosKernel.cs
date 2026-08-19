@@ -22,12 +22,11 @@ internal sealed partial class AtmosKernel : IDisposable
 
     // Map of GridPosition to Chunk for neighbor lookups
     private readonly ConcurrentDictionary<Int3, AtmosChunk> _chunkMap = new();
-    private readonly object _stateGate = new();
-    private long _chunkCollectionRevision;
 
     // Thread-local buffers sized to maximum boundary surface area
     private readonly int _maxBoundaryEvents;
     private readonly ThreadLocal<PrecipitationEvent[]> _precipBufferPool;
+    private readonly object _stateGate = new();
     private readonly ThreadLocal<ThermalBoundaryEvent[]> _thermalBoundaryBufferPool;
 
     /// <summary>
@@ -41,6 +40,7 @@ internal sealed partial class AtmosKernel : IDisposable
     internal int TickCount;
 
     private float _accumulator;
+    private long _chunkCollectionRevision;
 
     /// <summary>
     ///     Current <see cref="AtmosConfig" /> that this simulation runs under.
@@ -269,7 +269,7 @@ internal sealed partial class AtmosKernel : IDisposable
                 float tempRatio = neighborTemp * invTemp;
 
                 var gasRegistry = _config.GasRegistry;
-                bool movedGas = false;
+                var movedGas = false;
 
                 for (var g = 0; g < sourceChunk.ActiveGasCount; g++)
                 {
@@ -330,7 +330,7 @@ internal sealed partial class AtmosKernel : IDisposable
 
                 if (movedGas)
                 {
-                    float remainingMoles = 0f;
+                    var remainingMoles = 0f;
                     for (var g = 0; g < sourceChunk.ActiveGasCount; g++)
                         remainingMoles += sourceChunk.ActiveGases[g].Moles[srcIdx];
 
@@ -1106,7 +1106,10 @@ internal sealed partial class AtmosKernel : IDisposable
         return flow;
     }
 
-    private int GetDeltaArrayOffset(int g, int VoxelCount) => (g + 1) * VoxelCount;
+    private static int GetDeltaArrayOffset(int g, int VoxelCount)
+    {
+        return (g + 1) * VoxelCount;
+    }
 
     private void ProcessThermalBoundaryFlow(Int3 sourceKey, ThermalBoundaryEvent evt)
     {
