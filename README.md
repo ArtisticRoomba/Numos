@@ -1,5 +1,5 @@
 # Numos
-Numos is an engine-agnostic, pseudo-realistic, voxel-based atmospherics simulation.
+Numos is an engine-agnostic, pseudo-realistic, voxel-based atmospherics simulation library.
 
 > [!WARNING]
 > Numos is currently a prototype/personal project and is being actively developed.
@@ -18,7 +18,7 @@ The project will follow a regular semantic versioning structure when I feel comf
 
 ## Bug Reports & Contributions
 Contributions and bug reports are always welcome and appreciated. Feel free to submit a PR or bug report on GitHub.
-Be sure to follow the project's `.editorconfig` when making changes.
+See `CONTRIBUTING.md` before contributing.
 
 ## Documentation
 Documentation for APIs and the project itself is available under `/docs`.
