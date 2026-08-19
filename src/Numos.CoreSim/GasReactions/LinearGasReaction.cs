@@ -1,8 +1,7 @@
 using System.Collections.Concurrent;
 using System.Collections.Frozen;
-using Numos.CoreSim.GasReactions;
 
-namespace Numos.CoreSim;
+namespace Numos.CoreSim.GasReactions;
 
 /// <summary>
 ///     A linear gas reaction in which the reaction speed doesn't use standard rate equation, but a series of linear
