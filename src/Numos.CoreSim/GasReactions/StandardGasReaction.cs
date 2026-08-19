@@ -1,3 +1,5 @@
+using System.Buffers;
+using System.Collections.Concurrent;
 using System.Collections.Frozen;
 
 namespace Numos.CoreSim.GasReactions;
@@ -122,11 +124,29 @@ public readonly record struct StandardGasReaction
         public float GetReactionSpeed(float[] molarityVector, float temperature)
         {
             var result = Original.GetRateConstant(temperature);
-            if (result <= 0)
+            if (result <= 0 || !float.IsNormal(result))
                 return 0;
-            return result * MappedFactors.AsParallel()
-                .Select(factor => MathF.Pow(molarityVector[factor.Key], factor.Value)).Where(e=>!float.IsNaN(e)).Append(1)
-                .Aggregate((a, b) => a * b);
+            var parts = new ConcurrentBag<float>();
+
+            var state = Parallel.ForEach(MappedFactors, (factor, loop) =>
+            {
+                var f = MathF.Pow(molarityVector[factor.Key], factor.Value);
+                if (!float.IsNormal(f) || f == 0)
+                {
+                    loop.Stop();
+                    return;
+                }
+
+                parts.Add(f);
+            });
+            if (!state.IsCompleted)
+                return 0;
+            foreach (var p in parts)
+            {
+                result *= p;
+            }
+
+            return result;
         }
     }
 }

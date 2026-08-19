@@ -86,13 +86,12 @@ public class GasReactionTests
                 chunk.InjectGasToVoxel(i, j, random.NextSingle()*10-5, random.Next(500));
             }
         }
-
         //run reactions. wheeeeee
         var totalReactions = new float[standardReactions.Count];
-
-        solver.ProcessChunk(chunk, 1, totalReactions);
-
-        Assert.That(totalReactions.Where(e=>!float.IsNaN(e)).Sum() > 0);
+        solver.ProcessChunk(chunk, 10, totalReactions);
+        //sum reaction amounts
+        var totalReactionSum = totalReactions.Where(e => !float.IsNaN(e)).Sum();
+        Assert.That(totalReactionSum> 0);
     }
 
     [Test]

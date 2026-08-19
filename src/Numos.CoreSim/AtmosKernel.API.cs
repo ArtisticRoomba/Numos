@@ -90,11 +90,12 @@ internal sealed partial class AtmosKernel
                 steps++;
                 TickSimulation(chunks);
             }
+            Parallel.ForEach(chunks, chunk =>
+            {
+                _solver.ProcessChunk(chunk,elapsedSeconds);
+            });
         }
-        Parallel.ForEach(chunks, chunk =>
-        {
-            _solver.ProcessChunk(chunk,elapsedSeconds);
-        });
+       
     }
 
     /// <summary>
