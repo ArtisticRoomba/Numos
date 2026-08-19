@@ -39,9 +39,46 @@ internal sealed class PhaseChangeSolver
             if (gasMoles <= saturationMoles)
                 continue;
 
-            // Since P = nRT/V at fixed T and V, the pressure excess can be converted directly into a
-            // mole excess. This avoids an overflow-prone pressure round trip for large inventories.
-            float molesToCondense = (gasMoles - saturationMoles) * config.CondensationRateFactor;
+            float currentPartialPressure = saturationPressure * (gasMoles / saturationMoles);
+            float excessPressure = currentPartialPressure - saturationPressure;
+            float oldHeatCapacity = chunk.TotalHeatCapacity[voxelIndex];
+
+            // Latent heat released per mole condensed.
+            float molarInternalEnergyOfVaporization = MathF.Max(0f,
+                properties.MolarEnthalpyOfVaporization - AtmosPhysicalConstants.MolarGasConstant * temperature);
+
+            float pressureDropPerMole = currentPartialPressure / gasMoles;
+            float tempRisePerMole = molarInternalEnergyOfVaporization / oldHeatCapacity;
+
+            // Predict moles-to-condense using the closing rate at the starting temp.
+            float satSlopeStart = saturationPressure * properties.MolarEnthalpyOfVaporization /
+                                (AtmosPhysicalConstants.MolarGasConstant * temperature * temperature);
+            float satRisePerMoleStart = satSlopeStart * tempRisePerMole;
+            float closingRateStart = pressureDropPerMole + satRisePerMoleStart;
+
+            float predictedMoles = closingRateStart > 0f
+                ? MathF.Min(excessPressure / closingRateStart, gasMoles)
+                : 0f;
+
+            // Correct using the closing rate at the predicted end temp, since
+            // P_sat rises faster than a straight line as T increases.
+            float predictedTemp = temperature + tempRisePerMole * predictedMoles;
+            float exponentEnd = -properties.MolarEnthalpyOfVaporization / AtmosPhysicalConstants.MolarGasConstant *
+                                (1f / predictedTemp - 1f / temperature);
+            float satVaporPressureEnd = config.SaturationReferencePressure * MathF.Exp(exponentEnd);
+            float satSlopeEnd = satVaporPressureEnd * properties.MolarEnthalpyOfVaporization /
+                                (AtmosPhysicalConstants.MolarGasConstant * predictedTemp * predictedTemp);
+            float satRisePerMoleEnd = satSlopeEnd * tempRisePerMole;
+
+            // Average of start/end rates gives a better estimate than either alone.
+            float closingRateAvg = pressureDropPerMole + 0.5f * (satRisePerMoleStart + satRisePerMoleEnd);
+
+            float molesToCondense = closingRateAvg > 0f
+                ? excessPressure / closingRateAvg
+                : 0f;
+
+            molesToCondense = MathF.Min(molesToCondense, gasMoles) * config.CondensationRateFactor;
+
             if (molesToCondense <= 0f)
                 continue;
 
