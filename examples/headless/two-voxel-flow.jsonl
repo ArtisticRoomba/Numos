@@ -1,0 +1,10 @@
+{"protocolVersion":1,"id":"create","op":"createSimulation","name":"Two-voxel flow","dimensions":{"x":2,"y":1,"z":1},"config":{"defaultTemperatureFallbackK":300,"defaultMolarHeatCapacityAtConstantVolume":1,"voxelVolumeM3":8.31446262,"saturationReferencePressurePa":1000,"defaultDiffusionCoefficient":0,"bulkFlowCoefficient":0.25,"bulkFlowDamping":0.5,"lowPressureDeltaThresholdPa":5,"minimumPressureTransferPa":0,"vacuumThresholdPa":0,"sleepThreshold":2147483647,"sleepEpsilonPa":0,"thermalConductance":0.05,"condensationRateFactor":0.5,"maxPressureTransferFractionPerNeighbor":0.16}}
+{"protocolVersion":1,"id":"gas","op":"addGas","gas":{"name":"First","molarHeatCapacityAtConstantVolume":1,"boilingPointK":0,"condensationEnabled":false,"molarEnthalpyOfVaporization":0,"liquidId":-1,"diffusionCoefficient":0}}
+{"protocolVersion":1,"id":"chunk","op":"addChunk","position":{"x":0,"y":0,"z":0},"classification":1}
+{"protocolVersion":1,"id":"temperature-left","op":"setVoxelTemperature","position":{"x":0,"y":0,"z":0},"voxel":{"x":0,"y":0,"z":0},"temperatureK":300}
+{"protocolVersion":1,"id":"temperature-right","op":"setVoxelTemperature","position":{"x":0,"y":0,"z":0},"voxel":{"x":1,"y":0,"z":0},"temperatureK":300}
+{"protocolVersion":1,"id":"inject","op":"injectGas","position":{"x":0,"y":0,"z":0},"voxel":{"x":0,"y":0,"z":0},"gasId":0,"moles":2,"temperatureK":300}
+{"protocolVersion":1,"id":"before","op":"observe","includeVoxels":true}
+{"protocolVersion":1,"id":"tick-1","op":"tick","count":1}
+{"protocolVersion":1,"id":"after","op":"observe","includeVoxels":true}
+{"protocolVersion":1,"id":"exit","op":"exit"}
