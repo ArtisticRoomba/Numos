@@ -18,10 +18,10 @@ internal sealed class GasMixtureState
     {
         get
         {
-            double total = 0d;
+            var total = 0f;
             foreach (float moles in Moles.Values)
                 total += moles;
-            return (float)total;
+            return total;
         }
     }
 

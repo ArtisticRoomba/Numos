@@ -43,8 +43,8 @@ internal struct RoomNode
         {
             AverageTemperature = TotalHeatCapacity > 0f && AverageTemperature == incomingTemp
                 ? AverageTemperature
-                : (float)(((double)TotalHeatCapacity * AverageTemperature +
-                           (double)incomingHeatCapacity * incomingTemp) / newHeatCapacity);
+                : AverageTemperature +
+                  (incomingTemp - AverageTemperature) * incomingHeatCapacity / newHeatCapacity;
 
             GasMoles[gasId] += addedMoles;
             TotalHeatCapacity = newHeatCapacity;
@@ -80,7 +80,7 @@ internal struct RoomNode
         float voxelVolume = float.IsFinite(VoxelVolume) && VoxelVolume > 0f
             ? VoxelVolume
             : AtmosConfigDefaults.VoxelVolume;
-        return (float)((double)totalMoles * AtmosPhysicalConstants.MolarGasConstant * AverageTemperature /
-                       (VoxelCount * voxelVolume));
+        return totalMoles / VoxelCount / voxelVolume *
+               AtmosPhysicalConstants.MolarGasConstant * AverageTemperature;
     }
 }

@@ -291,10 +291,12 @@ At the start of each simulation tick, the solver captures one normalized configu
 This keeps the tick internally consistent while retaining the public live-configuration model, and avoids repeating
 configuration validation in the per-neighbor and per-species loops.
 
-Persistent voxel state and per-voxel thermal work buffers use single-precision storage. Numerically sensitive
-products, ratios, reductions, and overflow checks are promoted to double precision only for the duration of the
-calculation and are narrowed before storage. This preserves the range and rounding benefits where they affect the
-math without doubling the memory bandwidth and working-set cost of the solver's structure-of-arrays layout.
+Persistent voxel state, per-voxel thermal work buffers, and production atmos calculations use single precision
+end-to-end. Overflow-prone formulas use algebraically equivalent float forms: thermal equilibrium conductance is
+evaluated without forming `C1 * C2`, temperature updates use `T + ΔE/C`, and heat-capacity-weighted mixing uses
+bounded interpolation. Finite-range checks reject results that cannot be represented by the float-backed state.
+Double precision is reserved for test/reference reductions, avoiding production float-to-double conversions while
+preserving an independent, higher-precision conservation check.
 
 ```csharp
 var canister = simulation.CreateGasMixture(volume: 0.07f, temperature: 293.15f);

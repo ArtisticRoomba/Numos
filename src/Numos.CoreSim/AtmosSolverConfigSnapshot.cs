@@ -38,7 +38,7 @@ internal sealed class AtmosSolverConfigSnapshot
         VoxelVolume = IsFinitePositive(config.VoxelVolume)
             ? config.VoxelVolume
             : AtmosConfigDefaults.VoxelVolume;
-        PressurePerMoleKelvin = (double)AtmosPhysicalConstants.MolarGasConstant / VoxelVolume;
+        PressurePerMoleKelvin = AtmosPhysicalConstants.MolarGasConstant / VoxelVolume;
         SaturationReferencePressure = IsFinitePositive(config.SaturationReferencePressure)
             ? config.SaturationReferencePressure
             : AtmosConfigDefaults.SaturationReferencePressure;
@@ -79,7 +79,7 @@ internal sealed class AtmosSolverConfigSnapshot
 
     internal float DefaultTemperatureFallback { get; private set; }
     internal float VoxelVolume { get; private set; }
-    internal double PressurePerMoleKelvin { get; private set; }
+    internal float PressurePerMoleKelvin { get; private set; }
     internal float SaturationReferencePressure { get; private set; }
     internal float BulkFlowCoefficient { get; private set; }
     internal float BulkFlowDamping { get; private set; }

@@ -332,7 +332,7 @@ public sealed class ThermodynamicsIntegrationTests
     }
 
     [Test]
-    public void IntraChunkThermalDiffusion_FloatWorkspaceBoundsLongRunningEnergyDrift()
+    public void IntraChunkThermalDiffusion_FloatArithmeticBoundsLongRunningEnergyDrift()
     {
         const int size = 4;
         var config = SimTestHelpers.CreateDeterministicConfig();
@@ -365,6 +365,29 @@ public sealed class ThermodynamicsIntegrationTests
         double relativeDrift = Math.Abs(finalEnergy - initialEnergy) / initialEnergy;
 
         Assert.That(relativeDrift, Is.LessThan(2e-6d));
+    }
+
+    [Test]
+    public void IntraChunkThermalDiffusion_LargeHeatCapacitiesAvoidIntermediateOverflow()
+    {
+        var config = SimTestHelpers.CreateDeterministicConfig();
+        config.BulkFlowCoefficient = 0f;
+        config.MaxPressureTransferFractionPerNeighbor = 0f;
+        config.ThermalConductance = float.MaxValue;
+        var gas = config.GasRegistry[SimTestHelpers.FirstGasId];
+        gas.MolarHeatCapacityAtConstantVolume = 1e30f;
+        config.GasRegistry[SimTestHelpers.FirstGasId] = gas;
+
+        using var simulation = new AtmosSimulation(config, 2, 1, 1);
+        var chunk = SimTestHelpers.CreateOpenChunk(simulation, default);
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasId, 1f, 400f);
+        simulation.AddGasToVoxel(chunk, 1, 0, 0, SimTestHelpers.FirstGasId, 1f, 200f);
+
+        simulation.Tick();
+        simulation.Tick();
+
+        var snapshot = simulation.GetChunkSnapshot(chunk);
+        Assert.That(snapshot.Temperature, Is.All.EqualTo(300f).Within(SimTestHelpers.Tolerance));
     }
 
     [Test]
