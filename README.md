@@ -14,6 +14,7 @@ The project will follow a regular semantic versioning structure when I feel comf
 - Singlethreaded cross-chunk boundary flow
 - Ideal-gas pressure in pascals (`P = nRT/V`) with configurable, uniform voxel volume
 - Sensible internal-energy transport using per-species molar heat capacity at constant volume
+- Simulation-owned `IGasMixture` containers and sandboxed live voxel mixtures for canisters, pumps, and tools
 - Attempts at being trimmable and Native AOT-compatible
 
 ## Bug Reports & Contributions

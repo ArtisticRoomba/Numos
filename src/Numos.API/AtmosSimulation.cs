@@ -15,7 +15,7 @@ namespace Numos.API;
 ///     worker-local buffers. Unless otherwise noted, members that access kernel state throw
 ///     <see cref="ObjectDisposedException" /> after disposal.
 /// </remarks>
-public sealed class AtmosSimulation : IDisposable
+public sealed partial class AtmosSimulation : IDisposable
 {
     /// <summary>
     ///     The fixed simulation rate, in ticks per second.
@@ -178,11 +178,14 @@ public sealed class AtmosSimulation : IDisposable
     [PublicAPI]
     public void Dispose()
     {
-        if (_disposed)
-            return;
+        lock (_mixtureGate)
+        {
+            if (_disposed)
+                return;
 
-        _kernel.Dispose();
-        _disposed = true;
+            _kernel.Dispose();
+            _disposed = true;
+        }
     }
 
     /// <summary>
@@ -229,10 +232,13 @@ public sealed class AtmosSimulation : IDisposable
     [PublicAPI]
     public void SetAtmosConfig(AtmosConfig config)
     {
-        ThrowIfDisposed();
         ArgumentNullException.ThrowIfNull(config);
-        Config = config;
-        _kernel.SetAtmosConfig(config);
+        lock (_mixtureGate)
+        {
+            ThrowIfDisposed();
+            Config = config;
+            _kernel.SetAtmosConfig(config);
+        }
     }
 
     /// <summary>
