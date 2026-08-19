@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Collections.Frozen;
 
 namespace Numos.CoreSim.GasReactions;
@@ -8,7 +7,7 @@ namespace Numos.CoreSim.GasReactions;
 ///     functions.
 ///     To reduce computational load and make setting them up easier, at the cost of realism.
 /// </summary>
-public readonly record struct LinearGasReaction
+public readonly partial record struct LinearGasReaction
 {
     /// <summary>
     ///     Main Constructor. For a case study on how the temperature graph is evaluated and thus should be parametrized see
@@ -126,113 +125,5 @@ public readonly record struct LinearGasReaction
             gasMolarities.TryGetValue(factor.Gas, out var molarity);
             return factor.GetFactor(molarity);
         }).Append(GetRateConstantForTemperature(temperature)).Aggregate((a, b) => a * b);
-    }
-
-    internal readonly record struct Mapped : IGasReaction
-    {
-        public Mapped(LinearGasReaction original, IList<GasProperties> properties)
-        {
-            Original = original;
-
-            MappedInputs = original.Input.ToFrozenDictionary(e => properties.IndexOf(e.Key), e => e.Value);
-            MappedOutputs = original.Output.ToFrozenDictionary(e => properties.IndexOf(e.Key), e => e.Value);
-            MappedFactors = original.SpeedFactors.Select(e => new Factor(e, properties)).ToFrozenSet();
-
-            var changeEquation = new Dictionary<int, float>();
-            foreach (var gas in MappedInputs.Keys.Concat(MappedOutputs.Keys).Distinct())
-                changeEquation[gas] = MappedOutputs.GetValueOrDefault(gas) - MappedInputs.GetValueOrDefault(gas);
-
-            changeEquation[properties.Count] = original.EnergyBalance;
-
-            ChangeEquation = changeEquation.ToFrozenDictionary();
-        }
-
-        public FrozenDictionary<int, float> MappedInputs { get; }
-
-        public FrozenDictionary<int, float> MappedOutputs { get; }
-
-        public LinearGasReaction Original { get; }
-
-        /// <summary>
-        ///     foreach
-        /// </summary>
-        public FrozenSet<Factor> MappedFactors { get; }
-
-        public FrozenDictionary<int, float> ChangeEquation { get; }
-        public float EnergyBalance => Original.EnergyBalance;
-
-        public float GetReactionSpeed(float[] molarityVector, float temperature)
-        {
-            var result = Original.GetRateConstantForTemperature(temperature);
-            if (!float.IsNormal(result) || result <= 0)
-                return 0;
-
-            var bag = new ConcurrentBag<float>();
-
-            var response = Parallel.ForEach(MappedFactors, (factor, loopState) =>
-            {
-                var f = factor.Original.GetFactor(molarityVector[factor.GasId]);
-                if (!float.IsNormal(f) || f <= 0)
-                {
-                    loopState.Stop();
-                    return;
-                }
-
-                bag.Add(f);
-            });
-            if (!response.IsCompleted)
-                return 0;
-            foreach (var f in bag)
-            {
-                result *= f;
-            }
-            return result;
-        }
-
-        public readonly record struct Factor
-        {
-            public Factor(LinearSpeedFactor original, IList<GasProperties> properties)
-            {
-                Original = original;
-                GasId = properties.IndexOf(original.Gas);
-            }
-
-            public LinearSpeedFactor Original { get; }
-
-            public int GasId { get; }
-        }
-    }
-
-
-    public readonly record struct LinearSpeedFactor(
-        GasProperties Gas,
-        float LowMolarityBound,
-        float HighMolarityBound,
-        float LowMolaritySpeed,
-        float HighMolaritySpeed,
-        bool LowStrict,
-        bool HighStrict)
-    {
-        public GasProperties Gas { get; } = Gas;
-
-        /// <summary>
-        ///     Can the reaction occur below low molarity bound (extending linear graph)
-        /// </summary>
-        public bool LowStrict { get; } = LowStrict;
-
-        /// <summary>
-        ///     Can the reaction occur above high molarity bound (extending linear graph)
-        /// </summary>
-        public bool HighStrict { get; } = HighStrict;
-
-        public float BoundaryRange { get; } = HighMolarityBound - LowMolarityBound;
-
-        public float FactorRange { get; } = HighMolaritySpeed - LowMolaritySpeed;
-
-        public float GetFactor(float molarity)
-        {
-            return EvalLinear(molarity, BoundaryRange, LowMolarityBound, LowStrict, HighStrict, LowMolaritySpeed,
-                FactorRange);
-        }
     }
 }
