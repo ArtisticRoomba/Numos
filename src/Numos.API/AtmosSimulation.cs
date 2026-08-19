@@ -96,6 +96,7 @@ public sealed partial class AtmosSimulation : IDisposable
         _chunkDepth = chunkDepth;
         _kernel = new AtmosKernel(chunkWidth, chunkHeight, chunkDepth);
         _kernel.SetAtmosConfig(config);
+        Solvers = new AtmosSolverPipeline(this);
     }
 
     /// <summary>
@@ -119,6 +120,12 @@ public sealed partial class AtmosSimulation : IDisposable
     /// </remarks>
     [PublicAPI]
     public AtmosConfig Config { get; private set; }
+
+    /// <summary>
+    ///     Gets the ordered solver pipeline used by subsequent ticks.
+    /// </summary>
+    [PublicAPI]
+    public AtmosSolverPipeline Solvers { get; }
 
     /// <summary>
     ///     Gets the number of chunks currently owned by the simulation.

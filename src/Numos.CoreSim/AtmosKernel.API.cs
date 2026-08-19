@@ -1,5 +1,6 @@
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.Datatypes.Snapshots;
+using Numos.CoreSim.Solvers;
 using Numos.Maths;
 
 namespace Numos.CoreSim;
@@ -18,6 +19,74 @@ internal sealed partial class AtmosKernel
             {
                 return _chunkMap.Count;
             }
+        }
+    }
+
+    /// <summary>
+    ///     Returns a detached description of the currently configured solver pipeline.
+    /// </summary>
+    internal SolverStepInfo[] GetSolverSteps()
+    {
+        lock (_stateGate)
+        {
+            return _solverPipeline.GetSteps();
+        }
+    }
+
+    internal void RegisterSolver(string name, SolverStepKind kind,
+        Action<AtmosSolverExecutionContext> solver)
+    {
+        lock (_stateGate)
+        {
+            _solverPipeline.Register(name, kind, solver, _solverPipeline.Count);
+        }
+    }
+
+    internal void RegisterSolverBefore(string existingName, string name, SolverStepKind kind,
+        Action<AtmosSolverExecutionContext> solver)
+    {
+        lock (_stateGate)
+        {
+            int index = _solverPipeline.IndexOf(existingName);
+            if (index < 0)
+                throw new KeyNotFoundException($"No solver named '{existingName}' is registered.");
+            _solverPipeline.Register(name, kind, solver, index);
+        }
+    }
+
+    internal void RegisterSolverAfter(string existingName, string name, SolverStepKind kind,
+        Action<AtmosSolverExecutionContext> solver)
+    {
+        lock (_stateGate)
+        {
+            int index = _solverPipeline.IndexOf(existingName);
+            if (index < 0)
+                throw new KeyNotFoundException($"No solver named '{existingName}' is registered.");
+            _solverPipeline.Register(name, kind, solver, index + 1);
+        }
+    }
+
+    internal bool UnregisterSolver(string name)
+    {
+        lock (_stateGate)
+        {
+            return _solverPipeline.Unregister(name);
+        }
+    }
+
+    internal bool SetSolverEnabled(string name, bool enabled)
+    {
+        lock (_stateGate)
+        {
+            return _solverPipeline.SetEnabled(name, enabled);
+        }
+    }
+
+    internal void ResetSolverPipeline()
+    {
+        lock (_stateGate)
+        {
+            _solverPipeline.Reset();
         }
     }
 
@@ -464,7 +533,7 @@ internal sealed partial class AtmosKernel
             ValidateGasInjection(gasId, moles, temperature);
 
             chunk.WakeRoom(chunk.VoxelRoomMap[localVoxelIndex]);
-            InjectGasWithEnergy(chunk, localVoxelIndex, gasId, moles, temperature, GetMolarHeatCapacityAtConstantVolume(gasId));
+            GasInjectionSolver.Inject(chunk, localVoxelIndex, gasId, moles, temperature, _config);
         }
     }
 

@@ -1,5 +1,3 @@
-using Numos.CoreSim;
-
 namespace Numos.API.Dangerous;
 
 /// <summary>
@@ -20,10 +18,15 @@ namespace Numos.API.Dangerous;
 /// </remarks>
 public readonly struct AtmosDangerousApi
 {
-    private readonly AtmosKernel _kernel;
+    private readonly AtmosSimulation _simulation;
 
-    internal AtmosDangerousApi(AtmosKernel kernel)
+    internal AtmosDangerousApi(AtmosSimulation simulation)
     {
-        _kernel = kernel;
+        _simulation = simulation;
     }
+
+    /// <summary>
+    ///     Gets the dangerous registration surface for the simulation's shared solver pipeline.
+    /// </summary>
+    public AtmosDangerousSolverPipeline Solvers => new(_simulation);
 }

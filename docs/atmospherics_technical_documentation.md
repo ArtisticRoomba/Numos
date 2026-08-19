@@ -22,9 +22,10 @@
    - 3.7 [Container and Voxel Gas Mixtures](#37-container-and-voxel-gas-mixtures)
 4. [Simulation Loop](#4-simulation-loop)
    - 4.1 [Fixed Timestep Accumulator](#41-fixed-timestep-accumulator)
-   - 4.2 [Phase 1 — Pressure Advection](#42-phase-1--pressure-advection)
-   - 4.3 [Phase 2 — Cross-Chunk Boundary Flow](#43-phase-2--cross-chunk-boundary-flow)
-   - 4.4 [Phase 3 — Thermodynamics](#44-phase-3--thermodynamics)
+   - 4.2 [Solver Pipeline](#42-solver-pipeline)
+   - 4.3 [Stage 1 — Pressure Advection](#43-stage-1--pressure-advection)
+   - 4.4 [Stage 2 — Cross-Chunk Boundary Flow](#44-stage-2--cross-chunk-boundary-flow)
+   - 4.5 [Stages 3 and 4 — Thermodynamics and Thermal Boundaries](#45-stages-3-and-4--thermodynamics-and-thermal-boundaries)
 5. [Stability & Convergence Mechanisms](#5-stability--convergence-mechanisms)
    - 5.1 [Per-Neighbor Bulk-Flow Cap](#51-per-neighbor-bulk-flow-cap)
    - 5.2 [Damping & Low-Delta Regime](#52-damping--low-delta-regime)
@@ -68,7 +69,8 @@ When a disturbance exceeds a configurable threshold (the "Threshold of Violence"
 
 ```mermaid
 graph TD
-    API["AtmosSimulation (Public API)"] --> A["AtmosKernel (Tick Driver)"]
+    API["AtmosSimulation (Public API)"] --> PIPE["Solver Pipeline"]
+    PIPE --> A["AtmosKernel (Tick State)"]
     DANGER["Numos.API.Dangerous
     (Opt-in Raw Views)"] -.-> A
     A --> B["AtmosChunk[] (Active Grid)"]
@@ -90,10 +92,12 @@ Numos deliberately exposes two package-level integration surfaces:
 | Package | Intended use | Compatibility                        | State access                                      |
 |---------|--------------|--------------------------------------|---------------------------------------------------|
 | `Numos.API` | Normal engine and game integration | Supported public contract            | Handles, validated operations, detached snapshots |
-| `Numos.API.Dangerous` | Measured performance-critical code | No compatibility guarantee (for now) | No impl for now.                                  |
+| `Numos.API.Dangerous` | Measured performance-critical solver code | No compatibility guarantee (for now) | Callback-scoped live spans and unchecked state views |
 
 The dangerous package must be referenced separately and imported through `Numos.API.Dangerous`. Access begins with
-`simulation.Dangerous()`.
+`simulation.Dangerous()`. Standard custom solvers use detached snapshots and validated mutations. Dangerous custom
+solvers are stack-scoped callbacks over live chunk arrays and gas-channel spans; they are responsible for maintaining
+cache, topology, and revision invariants after raw writes.
 
 The kernel hooks used by this package live in `AtmosKernel.Dangerous.cs`, keeping them distinct from the internal
 operations that back the supported facade. `AtmosKernel`, `AtmosChunk`, and gas-channel representations remain
@@ -330,9 +334,54 @@ Each frame:
 2. The accumulator is clamped to `FixedDt * MaxStepsPerFrame` to prevent a "spiral of death" when frame rate drops.
 3. While the accumulator ≥ `FixedDt`, a simulation tick is consumed.
 
-Each tick proceeds through three phases:
+### 4.2 Solver Pipeline
 
-### 4.2 Phase 1 — Pressure Advection
+Each tick captures one chunk/configuration snapshot, increments the tick counter, and executes the ordered
+`simulation.Solvers` pipeline. Its default stages are:
+
+1. `advection`
+2. `boundary-flow`
+3. `thermodynamics`
+4. `thermal-boundary`
+
+Stages can be enabled, disabled, removed, or restored with `ResetToDefaults`. Standard delegates can be appended or
+inserted before/after any named stage:
+
+```csharp
+simulation.Solvers.RegisterAfter(AtmosBuiltInSolvers.Advection, "game-reactions", context =>
+{
+    foreach (AtmosChunkHandle chunk in context.Chunks)
+    {
+        AtmosChunkSnapshot snapshot = context.GetChunkSnapshot(chunk);
+        // Inspect the detached snapshot and apply results through validated context methods.
+    }
+});
+
+simulation.Solvers.SetEnabled(AtmosBuiltInSolvers.Thermodynamics, false);
+```
+
+Pipeline edits made by a callback take effect on the next tick. Transient boundary-event queues are cleared at the
+start of every tick, so disabling a consumer stage cannot replay stale events when it is later re-enabled.
+
+Solvers that have a measured need to avoid snapshot copies can opt into live storage through the separate dangerous
+package:
+
+```csharp
+simulation.Dangerous().Solvers.RegisterAfter(AtmosBuiltInSolvers.Advection, "fast-reaction", context =>
+{
+    AtmosDangerousChunk chunk = context.GetChunk(0);
+    Span<float> oxygen = chunk.GetGasChannel(0).Moles;
+    // Raw writes are unchecked. Repair affected caches/topology and call MarkChanged as required.
+});
+```
+
+Gas injection is an atomic solver operation shared by the supported API, boundary flow, and dangerous solver context.
+It recalculates the target voxel's existing total SHC from its gas composition before temperature mixing. Dangerous
+pipeline injection uses the normalized gas properties and pressure coefficient captured for that tick.
+
+The four default stages are described below.
+
+### 4.3 Stage 1 — Pressure Advection
 
 This is the core fluid dynamics step. It runs in parallel across chunks.
 
@@ -365,7 +414,7 @@ This is the core fluid dynamics step. It runs in parallel across chunks.
 
 5. **Emit boundary events**: If a voxel is on the edge of the chunk (coordinate is 0 or `Size - 1`) and has positive pressure at or above the normalized `VacuumThreshold`, a `BoundaryFlowEvent` is emitted for cross-chunk processing.
 
-### 4.3 Phase 2 — Cross-Chunk Boundary Flow
+### 4.4 Stage 2 — Cross-Chunk Boundary Flow
 
 Boundary events are collected into a `ConcurrentQueue` during the parallel advection phase, then processed **sequentially** afterward.
 
@@ -386,11 +435,11 @@ For each boundary event:
    For a void target, neighbor moles and temperature are treated as zero. An unregistered gas uses `DefaultDiffusionCoefficient`.
 8. Transfer the capped moles directly (no delta buffer — this is sequential).
 
-Each species carries `molesMoved * c_effective * sourceEffectiveTemperature` of sensible energy during the direct transfer. The source and target heat-capacity caches, temperatures, and pressures are updated immediately by energy balance. Before injection, the target voxel's existing heat capacity is recalculated from its current moles and the live gas registry, including for a target chunk that was sleeping before the transfer.
+Each species carries `molesMoved * c_effective * sourceEffectiveTemperature` of sensible energy during the direct transfer. The source and target heat-capacity caches, temperatures, and pressures are updated immediately by energy balance. Before injection, the target voxel's existing heat capacity is recalculated from its current moles and the normalized gas registry captured for the tick, including for a target chunk that was sleeping before the transfer.
 
 If the adjacent chunk is not registered or the mapped target is solid, no transfer occurs. A non-void target room is woken before it receives gas. A void target is an energy sink: transferred moles and their carried energy are removed from the source without being added to a target voxel.
 
-### 4.4 Phase 3 — Thermodynamics
+### 4.5 Stages 3 and 4 — Thermodynamics and Thermal Boundaries
 
 Thermodynamics runs at half frequency (every 2nd tick) to save computation. Execution order is:
 

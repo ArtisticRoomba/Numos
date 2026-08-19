@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using Numos.CoreSim.Datatypes.Events;
 using Numos.CoreSim.Datatypes.Primitives;
+using Numos.CoreSim.Solvers;
 using Numos.Maths;
 
 namespace Numos.CoreSim;
@@ -46,6 +47,7 @@ internal sealed partial class AtmosKernel : IDisposable
     private float _accumulator;
     private long _chunkCollectionRevision;
     private readonly AtmosSolverConfigSnapshot _tickConfig = new();
+    private readonly AtmosSolverPipeline _solverPipeline;
 
     /// <summary>
     ///     Current <see cref="AtmosConfig" /> that this simulation runs under.
@@ -72,6 +74,7 @@ internal sealed partial class AtmosKernel : IDisposable
         _precipBufferPool = new ThreadLocal<PrecipitationEvent[]>(() => new PrecipitationEvent[maxPrecipitationEvents]);
         _thermalBoundaryBufferPool =
             new ThreadLocal<ThermalBoundaryEvent[]>(() => new ThermalBoundaryEvent[_maxBoundaryEvents]);
+        _solverPipeline = new AtmosSolverPipeline(CreateDefaultSolverSteps);
     }
 
     /// <summary>
@@ -96,6 +99,15 @@ internal sealed partial class AtmosKernel : IDisposable
         _tickConfig.Capture(_config);
         TickCount++;
 
+        // Producer and consumer stages may be independently disabled. Never carry their transient events into a
+        // later tick when the consumer is re-enabled.
+        while (_boundaryEvents.TryDequeue(out _))
+        {
+        }
+        while (_thermalBoundaryEvents.TryDequeue(out _))
+        {
+        }
+
         // A revision is advanced once per processed tick. Conditional snapshot consumers can
         // consequently retain sleeping chunks without copying their arrays again.
         foreach (var chunk in chunks)
@@ -104,8 +116,26 @@ internal sealed partial class AtmosKernel : IDisposable
                 chunk.MarkChanged();
         }
 
-        // 1. Parallel Advection & Fickian Diffusion
+        _solverPipeline.Execute(new AtmosSolverExecutionContext(this, chunks));
+    }
 
+    private static SolverStep[] CreateDefaultSolverSteps()
+    {
+        IAtmosSolver advection = new AdvectionSolver();
+        IAtmosSolver boundaryFlow = new BoundaryFlowSolver();
+        IAtmosSolver thermodynamics = new ThermodynamicsSolver();
+        IAtmosSolver thermalBoundary = new ThermalBoundarySolver();
+        return
+        [
+            new SolverStep(AtmosSolverStageNames.Advection, SolverStepKind.BuiltIn, advection.Solve),
+            new SolverStep(AtmosSolverStageNames.BoundaryFlow, SolverStepKind.BuiltIn, boundaryFlow.Solve),
+            new SolverStep(AtmosSolverStageNames.Thermodynamics, SolverStepKind.BuiltIn, thermodynamics.Solve),
+            new SolverStep(AtmosSolverStageNames.ThermalBoundary, SolverStepKind.BuiltIn, thermalBoundary.Solve)
+        ];
+    }
+
+    internal void SolveAdvection(AtmosChunk[] chunks)
+    {
         Parallel.ForEach(chunks, chunk =>
         {
             if (!chunk.IsAwake)
@@ -122,8 +152,10 @@ internal sealed partial class AtmosKernel : IDisposable
                 _boundaryEvents.Enqueue((chunk.GridPosition, localBoundaryBuffer[i]));
             }
         });
+    }
 
-        // 2. Sequential Boundary Processing
+    internal void SolveBoundaryFlow()
+    {
         long boundaryFlowStart = Stopwatch.GetTimestamp();
         _orderedBoundaryEvents.Clear();
         while (_boundaryEvents.TryDequeue(out var boundaryEvent))
@@ -135,35 +167,40 @@ internal sealed partial class AtmosKernel : IDisposable
         }
 
         LastBoundaryTicks += Stopwatch.GetTimestamp() - boundaryFlowStart;
+    }
 
-        // 3. Parallel Thermodynamics & Clausius-Clapeyron condensation.
-        if (TickCount % AtmosSolverConstants.ThermodynamicsTickInterval == 0)
+    internal void SolveThermodynamics(AtmosChunk[] chunks)
+    {
+        if (TickCount % AtmosSolverConstants.ThermodynamicsTickInterval != 0)
+            return;
+
+        Parallel.ForEach(chunks, chunk =>
         {
-            Parallel.ForEach(chunks, chunk =>
-            {
-                if (!chunk.IsAwake)
-                    return;
+            if (!chunk.IsAwake)
+                return;
 
-                var localPrecipBuffer = _precipBufferPool.Value;
-                var precipCount = 0;
+            var localPrecipBuffer = _precipBufferPool.Value;
+            var precipCount = 0;
 
-                var localThermalBuffer = _thermalBoundaryBufferPool.Value;
-                var thermalBoundaryCount = 0;
+            var localThermalBuffer = _thermalBoundaryBufferPool.Value;
+            var thermalBoundaryCount = 0;
 
-                Debug.Assert(localPrecipBuffer != null, nameof(localPrecipBuffer) + " != null");
-                Debug.Assert(localThermalBuffer != null, nameof(localThermalBuffer) + " != null");
-                ProcessThermodynamics(chunk, localPrecipBuffer, ref precipCount, localThermalBuffer,
-                    ref thermalBoundaryCount);
+            Debug.Assert(localPrecipBuffer != null, nameof(localPrecipBuffer) + " != null");
+            Debug.Assert(localThermalBuffer != null, nameof(localThermalBuffer) + " != null");
+            ProcessThermodynamics(chunk, localPrecipBuffer, ref precipCount, localThermalBuffer,
+                ref thermalBoundaryCount);
 
-                for (var i = 0; i < thermalBoundaryCount; i++)
-                {
-                    _thermalBoundaryEvents.Enqueue((chunk.GridPosition, localThermalBuffer[i]));
-                }
-            });
+            for (var i = 0; i < thermalBoundaryCount; i++)
+                _thermalBoundaryEvents.Enqueue((chunk.GridPosition, localThermalBuffer[i]));
+        });
+    }
 
-            // 4. Boundary thermodynamics uses the same simultaneous conservative solve as intra-chunk edges.
-            ProcessThermalBoundaryFlows(_thermalBoundaryEvents);
-        }
+    internal void SolveThermalBoundary()
+    {
+        if (TickCount % AtmosSolverConstants.ThermodynamicsTickInterval != 0)
+            return;
+
+        ProcessThermalBoundaryFlows(_thermalBoundaryEvents);
     }
 
     /// <summary>
@@ -319,8 +356,8 @@ internal sealed partial class AtmosKernel : IDisposable
                 {
                     if (!neighborChunk.IsAwake)
                         neighborChunk.WakeRoom(neighborChunk.VoxelRoomMap[neighborIdx]);
-                    InjectGasWithEnergyDuringTick(neighborChunk, neighborIdx, gasId, totalMolesToMove, temp,
-                        molarHeatCapacityAtConstantVolume);
+                    GasInjectionSolver.InjectDuringTick(neighborChunk, neighborIdx, gasId, totalMolesToMove,
+                        temp, _tickConfig);
                 }
             }
 
@@ -679,21 +716,6 @@ internal sealed partial class AtmosKernel : IDisposable
         return pressure / denominator;
     }
 
-    private float CalculateHeatCapacityAtVoxel(AtmosChunk chunk, ushort localVoxelIndex)
-    {
-        var totalHeatCapacity = 0f;
-        for (var g = 0; g < chunk.ActiveGasCount; g++)
-        {
-            float moles = chunk.ActiveGases[g].Moles[localVoxelIndex];
-            if (moles <= 0f)
-                continue;
-
-            totalHeatCapacity += moles * GetMolarHeatCapacityAtConstantVolume(chunk.ActiveGases[g].GasId);
-        }
-
-        return totalHeatCapacity;
-    }
-
     private float CalculatePressureAtVoxel(AtmosChunk chunk, ushort localVoxelIndex)
     {
         var totalMoles = 0f;
@@ -710,47 +732,6 @@ internal sealed partial class AtmosKernel : IDisposable
 
         float fallback = _config.DefaultTemperatureFallback;
         return IsFinitePositive(fallback) ? fallback : AtmosConfigDefaults.DefaultTemperatureFallback;
-    }
-
-    private void InjectGasWithEnergy(AtmosChunk chunk, ushort localVoxelIndex, int gasId, float moles,
-        float temperature, float molarHeatCapacityAtConstantVolume)
-    {
-        if (!chunk.IsAwake)
-            return;
-
-        int room = chunk.VoxelRoomMap[localVoxelIndex];
-        if (room == VoxelClassification.RoomSolid || room == VoxelClassification.RoomVoid)
-            return;
-
-        chunk.TotalHeatCapacity[localVoxelIndex] = CalculateHeatCapacityAtVoxel(chunk, localVoxelIndex);
-        if (chunk.TotalHeatCapacity[localVoxelIndex] > 0f &&
-            (!float.IsFinite(chunk.Temperature[localVoxelIndex]) || chunk.Temperature[localVoxelIndex] <= 0f))
-            chunk.Temperature[localVoxelIndex] = GetEffectiveTemperature(chunk.Temperature[localVoxelIndex]);
-
-        chunk.InjectGasToVoxel(localVoxelIndex, gasId, moles, temperature, molarHeatCapacityAtConstantVolume,
-            GetPressurePerMoleKelvin());
-    }
-
-    private void InjectGasWithEnergyDuringTick(AtmosChunk chunk, ushort localVoxelIndex, int gasId, float moles,
-        float temperature, float molarHeatCapacityAtConstantVolume)
-    {
-        if (!chunk.IsAwake)
-            return;
-
-        int room = chunk.VoxelRoomMap[localVoxelIndex];
-        if (room == VoxelClassification.RoomSolid || room == VoxelClassification.RoomVoid)
-            return;
-
-        chunk.TotalHeatCapacity[localVoxelIndex] = CalculateTickHeatCapacityAtVoxel(chunk, localVoxelIndex);
-        if (chunk.TotalHeatCapacity[localVoxelIndex] > 0f &&
-            !IsFinitePositive(chunk.Temperature[localVoxelIndex]))
-        {
-            chunk.Temperature[localVoxelIndex] =
-                _tickConfig.GetEffectiveTemperature(chunk.Temperature[localVoxelIndex]);
-        }
-
-        chunk.InjectGasToVoxel(localVoxelIndex, gasId, moles, temperature, molarHeatCapacityAtConstantVolume,
-            _tickConfig.PressurePerMoleKelvin);
     }
 
     private float CalculateTickHeatCapacityAtVoxel(AtmosChunk chunk, ushort localVoxelIndex)
