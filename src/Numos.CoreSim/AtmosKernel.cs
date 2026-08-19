@@ -24,8 +24,7 @@ internal sealed partial class AtmosKernel : IDisposable
     private readonly ThreadLocal<PrecipitationEvent[]> _precipBufferPool;
     private readonly object _stateGate = new();
     private readonly List<ThermalBoundaryConductance> _activeThermalBoundaryEdges = [];
-    // Boundary payloads match the float-backed voxel state; only arithmetic that benefits from extra range or
-    // precision is promoted to double while it is being evaluated.
+    // Boundary payloads match the float-backed voxel state so the thermal path does not switch precision.
     private readonly Dictionary<ThermalVoxelAddress, float> _thermalBoundaryEnergyDeltas = [];
     private readonly HashSet<ThermalBoundaryEdge> _thermalBoundaryEdges = [];
     private readonly ThreadLocal<ThermalBoundaryEvent[]> _thermalBoundaryBufferPool;
@@ -653,23 +652,21 @@ internal sealed partial class AtmosKernel : IDisposable
         return IsFinitePositive(volume) ? volume : AtmosConfigDefaults.VoxelVolume;
     }
 
-    private double GetPressurePerMoleKelvin()
+    private float GetPressurePerMoleKelvin()
     {
-        return (double)AtmosPhysicalConstants.MolarGasConstant / GetVoxelVolume();
+        return AtmosPhysicalConstants.MolarGasConstant / GetVoxelVolume();
     }
 
     private float CalculatePressure(float moles, float temperature)
     {
-        double pressure = Math.Max(0d, moles) * GetEffectiveTemperature(temperature) *
-                          GetPressurePerMoleKelvin();
-        return (float)pressure;
+        return MathF.Max(0f, moles) * GetEffectiveTemperature(temperature) *
+               GetPressurePerMoleKelvin();
     }
 
     private float CalculateTickPressure(float moles, float temperature)
     {
-        double pressure = Math.Max(0d, moles) * _tickConfig.GetEffectiveTemperature(temperature) *
-                          _tickConfig.PressurePerMoleKelvin;
-        return (float)pressure;
+        return MathF.Max(0f, moles) * _tickConfig.GetEffectiveTemperature(temperature) *
+               _tickConfig.PressurePerMoleKelvin;
     }
 
     private float TickPressureToMoles(float pressure, float temperature)
@@ -677,9 +674,9 @@ internal sealed partial class AtmosKernel : IDisposable
         if (!IsFinitePositive(pressure))
             return 0f;
 
-        double denominator = _tickConfig.PressurePerMoleKelvin *
-                             _tickConfig.GetEffectiveTemperature(temperature);
-        return (float)(pressure / denominator);
+        float denominator = _tickConfig.PressurePerMoleKelvin *
+                            _tickConfig.GetEffectiveTemperature(temperature);
+        return pressure / denominator;
     }
 
     private float CalculateHeatCapacityAtVoxel(AtmosChunk chunk, ushort localVoxelIndex)
@@ -863,8 +860,7 @@ internal sealed partial class AtmosKernel : IDisposable
         if (thermalConductance <= 0f)
             return;
 
-        // Keep per-voxel workspace at the same precision as the SoA state. Products, ratios, and the final
-        // energy-to-temperature conversion are promoted below, without doubling the solver's working set.
+        // Keep per-voxel workspace and arithmetic at the same precision as the SoA state.
         float[] incidentConductances = ArrayPool<float>.Shared.Rent(chunk.VoxelCount);
         float[] energyDeltas = ArrayPool<float>.Shared.Rent(chunk.VoxelCount);
         Array.Clear(incidentConductances, 0, chunk.VoxelCount);
@@ -931,9 +927,9 @@ internal sealed partial class AtmosKernel : IDisposable
                     out float heatCapacity))
                 continue;
 
-            double newEnergy = (double)oldTemperature * heatCapacity + energyDeltas[idx];
-            double newTemperature = Math.Max(0d, newEnergy / heatCapacity);
-            chunk.Temperature[idx] = (float)newTemperature;
+            // T + ΔE/C is equivalent to (C*T + ΔE)/C without an overflow-prone C*T product.
+            float newTemperature = MathF.Max(0f, oldTemperature + energyDeltas[idx] / heatCapacity);
+            chunk.Temperature[idx] = newTemperature;
             chunk.TotalPressure[idx] = CalculatePressureAtVoxel(chunk, idx);
         }
 
@@ -987,10 +983,10 @@ internal sealed partial class AtmosKernel : IDisposable
         if (conductance <= 0f || currentIncidentConductance <= 0f || neighborIncidentConductance <= 0f)
             return;
 
-        double scale = Math.Min(1d, Math.Min(
-            (double)currentHeatCapacity / currentIncidentConductance,
-            (double)neighborHeatCapacity / neighborIncidentConductance));
-        float heatTransfer = (float)(scale * conductance * (currentTemperature - neighborTemperature));
+        float scale = MathF.Min(1f, MathF.Min(
+            currentHeatCapacity / currentIncidentConductance,
+            neighborHeatCapacity / neighborIncidentConductance));
+        float heatTransfer = scale * conductance * (currentTemperature - neighborTemperature);
         if (heatTransfer == 0f)
             return;
 
@@ -1024,9 +1020,12 @@ internal sealed partial class AtmosKernel : IDisposable
         Debug.Assert(float.IsFinite(targetHeatCapacity) && targetHeatCapacity > 0f);
         Debug.Assert(float.IsFinite(thermalConductance) && thermalConductance > 0f);
 
-        double equilibriumConductance = (double)sourceHeatCapacity * targetHeatCapacity /
-                                        ((double)sourceHeatCapacity + targetHeatCapacity);
-        return (float)Math.Min(thermalConductance, equilibriumConductance);
+        // Algebraically equivalent to C1*C2/(C1+C2), but neither intermediate can exceed the smaller capacity.
+        float smallerHeatCapacity = MathF.Min(sourceHeatCapacity, targetHeatCapacity);
+        float largerHeatCapacity = MathF.Max(sourceHeatCapacity, targetHeatCapacity);
+        float equilibriumConductance = smallerHeatCapacity /
+                                       (1f + smallerHeatCapacity / largerHeatCapacity);
+        return MathF.Min(thermalConductance, equilibriumConductance);
     }
 
     private static bool IsFinitePositive(float value)
@@ -1226,11 +1225,11 @@ internal sealed partial class AtmosKernel : IDisposable
             ThermalBoundaryState secondState = _thermalBoundaryStates[edge.Second];
             float firstIncident = _thermalBoundaryIncidentConductances[edge.First];
             float secondIncident = _thermalBoundaryIncidentConductances[edge.Second];
-            double scale = Math.Min(1d, Math.Min(
-                (double)firstState.HeatCapacity / firstIncident,
-                (double)secondState.HeatCapacity / secondIncident));
-            float heatTransfer = (float)(scale * conductance *
-                                         (firstState.Temperature - secondState.Temperature));
+            float scale = MathF.Min(1f, MathF.Min(
+                firstState.HeatCapacity / firstIncident,
+                secondState.HeatCapacity / secondIncident));
+            float heatTransfer = scale * conductance *
+                                 (firstState.Temperature - secondState.Temperature);
             if (heatTransfer == 0f)
                 continue;
 
@@ -1241,12 +1240,12 @@ internal sealed partial class AtmosKernel : IDisposable
         foreach (var (address, energyDelta) in _thermalBoundaryEnergyDeltas)
         {
             ThermalBoundaryState state = _thermalBoundaryStates[address];
-            double newTemperature = ((double)state.Temperature * state.HeatCapacity + energyDelta) /
-                                    state.HeatCapacity;
-            if (newTemperature < 0d || !_chunkMap.TryGetValue(address.ChunkPosition, out var chunk))
+            // Avoid forming the potentially much larger intermediate C*T.
+            float newTemperature = state.Temperature + energyDelta / state.HeatCapacity;
+            if (newTemperature < 0f || !_chunkMap.TryGetValue(address.ChunkPosition, out var chunk))
                 continue;
 
-            chunk.Temperature[address.LocalVoxelIndex] = (float)newTemperature;
+            chunk.Temperature[address.LocalVoxelIndex] = newTemperature;
             chunk.TotalPressure[address.LocalVoxelIndex] =
                 CalculatePressureAtVoxel(chunk, address.LocalVoxelIndex);
             chunk.MarkChanged();

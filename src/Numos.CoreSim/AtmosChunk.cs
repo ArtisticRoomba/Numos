@@ -373,11 +373,11 @@ internal class AtmosChunk
     ///     The already-resolved ideal-gas coefficient <c>R/V</c>, in Pa/(mol·K).
     /// </param>
     public void InjectGasToVoxel(ushort localVoxelIndex, int gasId, float molesToAdd, float temperature,
-        float effectiveMolarHeatCapacityAtConstantVolume, double pressurePerMoleKelvin)
+        float effectiveMolarHeatCapacityAtConstantVolume, float pressurePerMoleKelvin)
     {
         Debug.Assert(float.IsFinite(effectiveMolarHeatCapacityAtConstantVolume) &&
                      effectiveMolarHeatCapacityAtConstantVolume > 0f);
-        Debug.Assert(double.IsFinite(pressurePerMoleKelvin) && pressurePerMoleKelvin > 0d);
+        Debug.Assert(float.IsFinite(pressurePerMoleKelvin) && pressurePerMoleKelvin > 0f);
 
         if (!IsAwake)
             return;
@@ -408,14 +408,14 @@ internal class AtmosChunk
         float newTemp = currentHeatCapacity > 0f && newHeatCapacity > 0f
             ? currentTemp == temperature
                 ? currentTemp
-                : (float)(((double)currentHeatCapacity * currentTemp +
-                           (double)incomingHeatCapacity * temperature) / newHeatCapacity)
+                // Interpolation avoids the overflow-prone sum C1*T1 + C2*T2.
+                : currentTemp + (temperature - currentTemp) * incomingHeatCapacity / newHeatCapacity
             : temperature;
 
         TotalHeatCapacity[localVoxelIndex] = newHeatCapacity;
         Temperature[localVoxelIndex] = newTemp;
 
-        TotalPressure[localVoxelIndex] = (float)(currentTotalMoles * newTemp * pressurePerMoleKelvin);
+        TotalPressure[localVoxelIndex] = currentTotalMoles * newTemp * pressurePerMoleKelvin;
         MarkChanged();
     }
 
