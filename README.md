@@ -29,6 +29,13 @@ Documentation for APIs and the project itself is available under `/docs`. Also s
 - [Using Numos](docs/using.md)
 - [Versioning](docs/versioning.md)
 
+### Headless debugging
+
+`Numos.Headless` runs reproducible simulation experiments from newline-delimited JSON without opening the graphical
+viewer. It can read commands interactively from standard input or replay a checked-in script, emitting one compact
+JSON response per command for tools and automated comparisons. See the [headless runner guide](docs/headless_runner.md)
+and the [two-voxel flow example](examples/headless/two-voxel-flow.jsonl).
+
 ## Copyright, Credits & License
 Numos is licensed under the MIT license. See `LICENSE.TXT` for more info.
 
