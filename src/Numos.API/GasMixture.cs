@@ -93,6 +93,6 @@ public sealed class GasMixture : IInternalGasMixture
 
     internal void ApplyState(GasMixtureState state)
     {
-        _state = state.Clone();
+        _state = state;
     }
 }

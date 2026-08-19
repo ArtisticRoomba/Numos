@@ -283,6 +283,19 @@ low-level tooling parity. `AddGas` and transfers instead conserve sensible inter
 constant-volume molar heat capacity. Pressure is always derived from `P = nRT/V` rather than being independently
 mutable.
 
+The `Temperature` setter stores its raw value for parity with direct voxel tooling. Non-finite and nonpositive stored
+temperatures are interpreted through `DefaultTemperatureFallback` when pressure or sensible energy is calculated.
+Creation and incoming-gas operations still require finite, nonnegative temperatures.
+
+At the start of each simulation tick, the solver captures one normalized configuration and gas-property snapshot.
+This keeps the tick internally consistent while retaining the public live-configuration model, and avoids repeating
+configuration validation in the per-neighbor and per-species loops.
+
+Persistent voxel state and per-voxel thermal work buffers use single-precision storage. Numerically sensitive
+products, ratios, reductions, and overflow checks are promoted to double precision only for the duration of the
+calculation and are narrowed before storage. This preserves the range and rounding benefits where they affect the
+math without doubling the memory bandwidth and working-set cost of the solver's structure-of-arrays layout.
+
 ```csharp
 var canister = simulation.CreateGasMixture(volume: 0.07f, temperature: 293.15f);
 canister.AddGas(oxygenId, moles: 2f, temperature: 293.15f);

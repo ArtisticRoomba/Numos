@@ -21,6 +21,10 @@ public interface IGasMixture
     float Volume { get; }
 
     /// <summary>The stored temperature, in kelvins (K).</summary>
+    /// <remarks>
+    ///     The setter stores the raw value. Pressure and energy calculations use the owner's configured fallback
+    ///     when the stored value is non-finite or nonpositive.
+    /// </remarks>
     float Temperature { get; set; }
 
     /// <summary>The ideal-gas pressure, in pascals (Pa).</summary>
