@@ -45,6 +45,14 @@ public sealed class AtmosSolverPipeline
             context => solver(new AtmosSolverContext(_simulation, context)));
     }
 
+    /// <summary>Appends a supported solver that owns strongly typed configuration.</summary>
+    [PublicAPI]
+    public void Register<TConfig>(string name, IAtmosSolver<TConfig> solver) where TConfig : class
+    {
+        ArgumentNullException.ThrowIfNull(solver);
+        Register(name, solver.Solve);
+    }
+
     /// <summary>Registers a supported custom solver immediately before an existing stage.</summary>
     [PublicAPI]
     public void RegisterBefore(string existingName, string name, AtmosSolver solver)
@@ -54,6 +62,15 @@ public sealed class AtmosSolverPipeline
             context => solver(new AtmosSolverContext(_simulation, context)));
     }
 
+    /// <summary>Registers a configured supported solver immediately before an existing stage.</summary>
+    [PublicAPI]
+    public void RegisterBefore<TConfig>(string existingName, string name, IAtmosSolver<TConfig> solver)
+        where TConfig : class
+    {
+        ArgumentNullException.ThrowIfNull(solver);
+        RegisterBefore(existingName, name, solver.Solve);
+    }
+
     /// <summary>Registers a supported custom solver immediately after an existing stage.</summary>
     [PublicAPI]
     public void RegisterAfter(string existingName, string name, AtmosSolver solver)
@@ -61,6 +78,15 @@ public sealed class AtmosSolverPipeline
         ArgumentNullException.ThrowIfNull(solver);
         _simulation.Kernel.RegisterSolverAfter(existingName, name, SolverStepKind.Standard,
             context => solver(new AtmosSolverContext(_simulation, context)));
+    }
+
+    /// <summary>Registers a configured supported solver immediately after an existing stage.</summary>
+    [PublicAPI]
+    public void RegisterAfter<TConfig>(string existingName, string name, IAtmosSolver<TConfig> solver)
+        where TConfig : class
+    {
+        ArgumentNullException.ThrowIfNull(solver);
+        RegisterAfter(existingName, name, solver.Solve);
     }
 
     /// <summary>Removes a stage by name.</summary>

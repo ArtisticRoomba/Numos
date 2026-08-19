@@ -12,6 +12,25 @@ namespace Numos.API;
 public delegate void AtmosSolver(AtmosSolverContext context);
 
 /// <summary>
+///     A supported custom solver that owns its strongly typed configuration.
+/// </summary>
+/// <typeparam name="TConfig">The solver-specific reference type retained by the solver.</typeparam>
+/// <remarks>
+///     Keep game- or solver-specific settings here rather than adding them to the simulation-wide
+///     <see cref="CoreSim.AtmosConfig" />. The pipeline retains the solver instance through its registered
+///     callback, so callers may edit <see cref="Config" /> after registration.
+/// </remarks>
+public interface IAtmosSolver<out TConfig> where TConfig : class
+{
+    /// <summary>The configuration owned by this solver.</summary>
+    TConfig Config { get; }
+
+    /// <summary>Executes the solver through the supported simulation API.</summary>
+    /// <param name="context">The supported simulation surface for the current tick.</param>
+    void Solve(AtmosSolverContext context);
+}
+
+/// <summary>
 ///     Identifies the origin and compatibility boundary of a registered solver stage.
 /// </summary>
 public enum AtmosSolverKind

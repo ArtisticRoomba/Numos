@@ -25,6 +25,14 @@ public readonly struct AtmosDangerousSolverPipeline
             context => solver(new AtmosDangerousSolverContext(context)));
     }
 
+    /// <summary>Appends a dangerous solver that owns strongly typed configuration.</summary>
+    [PublicAPI]
+    public void Register<TConfig>(string name, IAtmosDangerousSolver<TConfig> solver) where TConfig : class
+    {
+        ArgumentNullException.ThrowIfNull(solver);
+        Register(name, solver.Solve);
+    }
+
     /// <summary>Registers a dangerous solver immediately before an existing stage.</summary>
     [PublicAPI]
     public void RegisterBefore(string existingName, string name, AtmosDangerousSolver solver)
@@ -34,6 +42,15 @@ public readonly struct AtmosDangerousSolverPipeline
             context => solver(new AtmosDangerousSolverContext(context)));
     }
 
+    /// <summary>Registers a configured dangerous solver immediately before an existing stage.</summary>
+    [PublicAPI]
+    public void RegisterBefore<TConfig>(string existingName, string name, IAtmosDangerousSolver<TConfig> solver)
+        where TConfig : class
+    {
+        ArgumentNullException.ThrowIfNull(solver);
+        RegisterBefore(existingName, name, solver.Solve);
+    }
+
     /// <summary>Registers a dangerous solver immediately after an existing stage.</summary>
     [PublicAPI]
     public void RegisterAfter(string existingName, string name, AtmosDangerousSolver solver)
@@ -41,5 +58,14 @@ public readonly struct AtmosDangerousSolverPipeline
         ArgumentNullException.ThrowIfNull(solver);
         _simulation.Kernel.RegisterSolverAfter(existingName, name, SolverStepKind.Dangerous,
             context => solver(new AtmosDangerousSolverContext(context)));
+    }
+
+    /// <summary>Registers a configured dangerous solver immediately after an existing stage.</summary>
+    [PublicAPI]
+    public void RegisterAfter<TConfig>(string existingName, string name, IAtmosDangerousSolver<TConfig> solver)
+        where TConfig : class
+    {
+        ArgumentNullException.ThrowIfNull(solver);
+        RegisterAfter(existingName, name, solver.Solve);
     }
 }

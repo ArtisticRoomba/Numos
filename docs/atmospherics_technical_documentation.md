@@ -371,21 +371,38 @@ Pipeline edits made by a callback take effect on the next tick. Gas and thermal 
 per-tick execution context, so disabling a consumer stage cannot replay stale events when it is later re-enabled.
 
 Solver-specific settings should remain with the solver instead of expanding `AtmosConfig` with unrelated game
-configuration. A delegate naturally captures a dedicated configuration object:
+configuration. Implement `IAtmosSolver<TConfig>` to make that ownership explicit:
 
 ```csharp
-var reactionConfig = new ReactionSolverConfig { Rate = 0.25f };
-var reactionSolver = new ReactionSolver(reactionConfig);
+public sealed class ReactionSolverConfig
+{
+    public float Rate { get; set; } = 0.25f;
+}
+
+public sealed class ReactionSolver : IAtmosSolver<ReactionSolverConfig>
+{
+    public ReactionSolverConfig Config { get; } = new();
+
+    public void Solve(AtmosSolverContext context)
+    {
+        // Read snapshots and apply validated mutations through context.
+    }
+}
+
+var reactionSolver = new ReactionSolver();
 
 simulation.Solvers.RegisterAfter(
     AtmosBuiltInSolvers.Advection,
     "game-reactions",
-    reactionSolver.Solve);
+    reactionSolver);
+
+reactionSolver.Config.Rate = 0.5f;
 ```
 
-`AtmosSolverContext.Config` still exposes the simulation-wide physical configuration for stages that need it. The
-same ownership pattern applies to dangerous solvers; only state access, not configuration ownership, determines
-which package a custom stage belongs in.
+The pipeline retains the solver instance through its callback, so its typed configuration remains editable after
+registration. `AtmosSolverContext.Config` still exposes the simulation-wide physical configuration for stages that
+need it. Dangerous solvers can implement `IAtmosDangerousSolver<TConfig>` for the same ownership pattern; only state
+access, not configuration ownership, determines which package a custom stage belongs in.
 
 Solvers that have a measured need to avoid snapshot copies can opt into live storage through the separate dangerous
 package:

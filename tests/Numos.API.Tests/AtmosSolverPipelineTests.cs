@@ -83,6 +83,21 @@ public sealed class AtmosSolverPipelineTests
     }
 
     [Test]
+    public void ConfiguredSolver_RetainsEditableTypedConfiguration()
+    {
+        using var simulation = new AtmosSimulation(1, 1, 1);
+        var chunk = simulation.CreateAndRegisterChunk(default);
+        simulation.SetChunkClassification(chunk, new VoxelClassification(7));
+        var solver = new ConfiguredInjectionSolver();
+        simulation.Solvers.RegisterBefore(AtmosBuiltInSolvers.Advection, "configured-injection", solver);
+
+        solver.Config.Moles = 2.5f;
+        simulation.Tick();
+
+        Assert.That(simulation.GetChunkSnapshot(chunk).Gases.Single().Moles[0], Is.EqualTo(2.5f));
+    }
+
+    [Test]
     public void ResetToDefaults_RemovesCustomizations()
     {
         using var simulation = new AtmosSimulation();
@@ -99,5 +114,20 @@ public sealed class AtmosSolverPipelineTests
                 (AtmosBuiltInSolvers.Thermodynamics, true),
                 (AtmosBuiltInSolvers.ThermalBoundary, true)
             }));
+    }
+
+    private sealed class ConfiguredInjectionSolver : IAtmosSolver<InjectionSolverConfig>
+    {
+        public InjectionSolverConfig Config { get; } = new();
+
+        public void Solve(AtmosSolverContext context)
+        {
+            context.AddGasToVoxel(context.Chunks[0], 0, 0, Config.Moles, 300f);
+        }
+    }
+
+    private sealed class InjectionSolverConfig
+    {
+        internal float Moles { get; set; }
     }
 }

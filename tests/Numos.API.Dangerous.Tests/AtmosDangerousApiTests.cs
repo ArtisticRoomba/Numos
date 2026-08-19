@@ -87,4 +87,37 @@ public sealed class AtmosDangerousApiTests
         var snapshot = simulation.GetChunkSnapshot(chunk);
         Assert.That(snapshot.Temperature[0], Is.EqualTo(525f).Within(0.0001f));
     }
+
+    [Test]
+    public void ConfiguredDangerousSolver_RetainsEditableTypedConfiguration()
+    {
+        using var simulation = new AtmosSimulation(1, 1, 1);
+        var chunk = simulation.CreateAndRegisterChunk(default);
+        simulation.SetChunkClassification(chunk,
+            new Numos.CoreSim.Datatypes.Primitives.VoxelClassification(7));
+        var solver = new ConfiguredDangerousInjectionSolver();
+        simulation.Dangerous().Solvers.RegisterBefore(
+            AtmosBuiltInSolvers.Advection, "configured-injection", solver);
+
+        solver.Config.Moles = 3f;
+        simulation.Tick();
+
+        Assert.That(simulation.GetChunkSnapshot(chunk).Gases.Single().Moles[0], Is.EqualTo(3f));
+    }
+
+    private sealed class ConfiguredDangerousInjectionSolver :
+        IAtmosDangerousSolver<DangerousInjectionSolverConfig>
+    {
+        public DangerousInjectionSolverConfig Config { get; } = new();
+
+        public void Solve(AtmosDangerousSolverContext context)
+        {
+            context.InjectGasToVoxel(0, 0, 0, Config.Moles, 300f);
+        }
+    }
+
+    private sealed class DangerousInjectionSolverConfig
+    {
+        internal float Moles { get; set; }
+    }
 }

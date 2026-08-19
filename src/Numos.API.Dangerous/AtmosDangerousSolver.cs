@@ -15,6 +15,25 @@ namespace Numos.API.Dangerous;
 public delegate void AtmosDangerousSolver(AtmosDangerousSolverContext context);
 
 /// <summary>
+///     A low-level custom solver that owns its strongly typed configuration.
+/// </summary>
+/// <typeparam name="TConfig">The solver-specific reference type retained by the solver.</typeparam>
+/// <remarks>
+///     This interface provides configuration ownership only. Its solver still receives live, unchecked storage
+///     and therefore has the same compatibility and invariant-maintenance responsibilities as
+///     <see cref="AtmosDangerousSolver" />.
+/// </remarks>
+public interface IAtmosDangerousSolver<out TConfig> where TConfig : class
+{
+    /// <summary>The configuration owned by this solver.</summary>
+    TConfig Config { get; }
+
+    /// <summary>Executes the solver against live simulation storage.</summary>
+    /// <param name="context">The unchecked simulation surface for the current tick.</param>
+    void Solve(AtmosDangerousSolverContext context);
+}
+
+/// <summary>
 ///     Low-level state supplied to a dangerous solver for one fixed tick.
 /// </summary>
 public readonly ref struct AtmosDangerousSolverContext

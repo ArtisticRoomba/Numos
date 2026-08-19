@@ -12,7 +12,7 @@ The project will follow a regular semantic versioning structure when I feel comf
 - Engine-agnostic, with a supported `Numos.API` facade over an internal simulation kernel
 - Multithreaded intra-chunk advection and thermodynamics
 - Singlethreaded cross-chunk boundary flow
-- Ordered solver pipeline with replaceable/disableable built-in stages and custom delegates
+- Ordered solver pipeline with replaceable/disableable built-in stages, custom delegates, and typed solver-owned configuration
 - Separate supported solver context and opt-in `Numos.API.Dangerous` live-span context
 - Ideal-gas pressure in pascals (`P = nRT/V`) with configurable, uniform voxel volume
 - Sensible internal-energy transport using per-species molar heat capacity at constant volume
