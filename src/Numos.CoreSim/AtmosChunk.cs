@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using JetBrains.Annotations;
 using Numos.CoreSim.Collections;
@@ -142,6 +143,17 @@ internal class AtmosChunk
     public FlatArray<float> TotalPressure;
 
     /// <summary>
+    ///     Cached total heat capacity for each voxel, in joules per kelvin (J/K).
+    /// </summary>
+    /// <remarks>
+    ///     For each refreshed active voxel, the value is the sum of
+    ///     <c>moles × effective molar heat capacity</c> for its gases. Entries outside
+    ///     <see cref="ActiveAirIndices" /> are not authoritative until that voxel is active and refreshed.
+    ///     Values are total heat capacities, not molar quantities.
+    /// </remarks>
+    public FlatArray<float> TotalHeatCapacity;
+
+    /// <summary>
     ///     Total number of voxels in this chunk, equal to <c>Width * Height * Depth</c>.
     /// </summary>
     public int VoxelCount;
@@ -196,6 +208,7 @@ internal class AtmosChunk
         if (ActiveAirIndices == null || ActiveAirIndices.Length != VoxelCount)
             ActiveAirIndices = new ushort[VoxelCount];
         EnsureInitialized(ref TotalPressure, dimensions);
+        EnsureInitialized(ref TotalHeatCapacity, dimensions);
         EnsureInitialized(ref Temperature, dimensions);
         if (ActiveGases == null)
             ActiveGases = new GasChannel[16]; // TODO unhardcode maxgases
@@ -240,6 +253,7 @@ internal class AtmosChunk
         VoxelRoomMap.Clear();
         Array.Clear(ActiveAirIndices, 0, ActiveAirIndices.Length);
         TotalPressure.Clear();
+        TotalHeatCapacity.Clear();
         Temperature.Clear();
         Array.Clear(ActiveGases, 0, ActiveGases.Length);
         Array.Clear(ActiveRoomIds, 0, ActiveRoomIds.Length);
@@ -353,7 +367,7 @@ internal class AtmosChunk
     }
 
     /// <summary>
-    ///     Adds gas to a voxel and updates that voxel's temperature and total pressure.
+    ///     Adds gas to a voxel with unit effective molar heat capacity and updates the voxel's cached thermal state.
     /// </summary>
     /// <param name="localVoxelIndex">The flat index of the target voxel within this chunk.</param>
     /// <param name="gasId">The ID of the gas to add.</param>
@@ -365,6 +379,29 @@ internal class AtmosChunk
     /// </remarks>
     public void InjectGasToVoxel(ushort localVoxelIndex, int gasId, float molesToAdd, float temperature)
     {
+        InjectGasToVoxel(localVoxelIndex, gasId, molesToAdd, temperature, 1f);
+    }
+
+    /// <summary>
+    ///     Adds gas to a voxel using its effective molar heat capacity to conserve sensible energy.
+    /// </summary>
+    /// <param name="localVoxelIndex">The flat index of the target voxel within this chunk.</param>
+    /// <param name="gasId">The ID of the gas to add.</param>
+    /// <param name="molesToAdd">The number of moles to add.</param>
+    /// <param name="temperature">The temperature of the injected gas.</param>
+    /// <param name="effectiveSpecificHeatCapacity">
+    ///     The already-resolved, finite, positive effective molar heat capacity of the injected gas, in J/(mol·K).
+    /// </param>
+    /// <remarks>
+    ///     Injection is ignored when the chunk is sleeping or the target voxel is solid or void.
+    ///     A new gas channel is created when this gas is not already present in the chunk.
+    /// </remarks>
+    public void InjectGasToVoxel(ushort localVoxelIndex, int gasId, float molesToAdd, float temperature,
+        float effectiveSpecificHeatCapacity)
+    {
+        Debug.Assert(float.IsFinite(effectiveSpecificHeatCapacity) &&
+                     effectiveSpecificHeatCapacity > 0f);
+
         if (!IsAwake)
             return;
 
@@ -375,6 +412,8 @@ internal class AtmosChunk
             return;
 
         SleepTimer = 0;
+
+        float currentHeatCapacity = TotalHeatCapacity[localVoxelIndex];
 
         int targetChannelIndex = -1;
         for (var i = 0; i < ActiveGasCount; i++)
@@ -408,8 +447,14 @@ internal class AtmosChunk
             currentTotalMoles += ActiveGases[g].Moles[localVoxelIndex];
         }
 
+        float incomingHeatCapacity = molesToAdd * effectiveSpecificHeatCapacity;
+        float newHeatCapacity = currentHeatCapacity + incomingHeatCapacity;
         float currentTemp = Temperature[localVoxelIndex];
-        float newTemp = ((currentTotalMoles - molesToAdd) * currentTemp + molesToAdd * temperature) / currentTotalMoles;
+        float newTemp = currentHeatCapacity > 0f && newHeatCapacity > 0f
+            ? (currentHeatCapacity * currentTemp + incomingHeatCapacity * temperature) / newHeatCapacity
+            : temperature;
+
+        TotalHeatCapacity[localVoxelIndex] = newHeatCapacity;
         Temperature[localVoxelIndex] = newTemp;
 
         TotalPressure[localVoxelIndex] = currentTotalMoles * newTemp;

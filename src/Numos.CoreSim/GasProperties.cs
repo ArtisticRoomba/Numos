@@ -11,8 +11,13 @@ public struct GasProperties
     public string Name;
 
     /// <summary>
-    ///     Specific heat capacity of the gas. Used in latent heat calculations during condensation.
+    ///     Effective molar heat capacity of the gas, in joules per mole-kelvin (J/(mol·K)).
     /// </summary>
+    /// <remarks>
+    ///     This value determines the sensible energy carried by gas during injection and flow, the voxel's
+    ///     total heat capacity, and the energy removed during condensation. Non-finite values and values less
+    ///     than or equal to zero use <see cref="AtmosConfig.DefaultSpecificHeatCapacity" />.
+    /// </remarks>
     public float SpecificHeatCapacity;
 
     /// <summary>
@@ -30,7 +35,7 @@ public struct GasProperties
     public float CondensationPoint;
 
     /// <summary>
-    ///     Energy released per mole during condensation.
+    ///     Energy released per mole during condensation, in joules per mole (J/mol).
     /// </summary>
     public float LatentHeatOfVaporization;
 
