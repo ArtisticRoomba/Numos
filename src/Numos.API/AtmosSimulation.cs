@@ -655,4 +655,16 @@ public sealed class AtmosSimulation : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
     }
+
+    /// <summary>
+    /// Using the current config, updates a gas mixture to account for all reactions.
+    /// </summary>
+    /// <param name="deltaTime">over what time reactions should be evaluated [s]</param>
+    /// <param name="mixtureVector">molarity of each gas (mol/l). index = gas id. will be adjusted to reflect final condition</param>
+    /// <param name="temperature">temperature of the mixture in K. will be adjusted to reflect final value</param>
+    /// <param name="feedback">optional count of how often each reaction occured. index = reaction id</param>
+    public void PredictReactions(float deltaTime, float[] mixtureVector, ref  float temperature, float[]? feedback=null)
+    {
+        this._solver.ProcessVoxel(deltaTime,mixtureVector,ref temperature, feedback);
+    }
 }

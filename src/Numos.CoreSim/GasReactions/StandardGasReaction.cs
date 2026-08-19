@@ -91,7 +91,7 @@ public readonly record struct StandardGasReaction
         return result;
     }
 
-    public readonly record struct Mapped : IGasReaction
+    internal readonly record struct Mapped : IGasReaction
     {
         public Mapped(StandardGasReaction original, IList<GasProperties> properties)
         {

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Collections.Frozen;
 using Numos.CoreSim.GasReactions;
 
@@ -128,7 +129,7 @@ public readonly record struct LinearGasReaction
         }).Append(GetRateConstantForTemperature(temperature)).Aggregate((a, b) => a * b);
     }
 
-    public readonly record struct Mapped : IGasReaction
+    internal readonly record struct Mapped : IGasReaction
     {
         public Mapped(LinearGasReaction original, IList<GasProperties> properties)
         {
@@ -164,12 +165,29 @@ public readonly record struct LinearGasReaction
         public float GetReactionSpeed(float[] molarityVector, float temperature)
         {
             var result = Original.GetRateConstantForTemperature(temperature);
-            if (result <= 0)
+            if (!float.IsNormal(result) || result <= 0)
                 return 0;
 
-            return result * MappedFactors.AsParallel()
-                .Select(factor => factor.Original.GetFactor(molarityVector[factor.GasId])).Where(e=>!float.IsNaN(e)).Append(1)
-                .Aggregate((a, b) => a * b);
+            var bag = new ConcurrentBag<float>();
+
+            var response = Parallel.ForEach(MappedFactors, (factor, loopState) =>
+            {
+                var f = factor.Original.GetFactor(molarityVector[factor.GasId]);
+                if (!float.IsNormal(f) || f <= 0)
+                {
+                    loopState.Stop();
+                    return;
+                }
+
+                bag.Add(f);
+            });
+            if (!response.IsCompleted)
+                return 0;
+            foreach (var f in bag)
+            {
+                result *= f;
+            }
+            return result;
         }
 
         public readonly record struct Factor

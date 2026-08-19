@@ -31,6 +31,7 @@ public class ReactionSolver
     }
 
     /// <summary>
+    /// wrapping core solver into a chunk.
     /// </summary>
     /// <param name="chunk"></param>
     /// <param name="deltaTime">Over which timespan reactions should occur.</param>
@@ -62,13 +63,14 @@ public class ReactionSolver
                 mixtureVector[chunk.ActiveGases[i].GasId] = chunk.ActiveGases[i].Moles[voxelIndex];
                 content += chunk.ActiveGases[i].Moles[voxelIndex];
             }
+
             newMixtures[voxelIndex] = mixtureVector;
             newTemps[voxelIndex] = temp;
             if (content <= 0.0001)
                 return;
             // do actual evaluation of the mixture for reactions.
-            ProcessVoxel(deltaTime, mixtureVector, ref temp, mixtureLength, reactionFeedback);
-         
+            ProcessVoxel(deltaTime, mixtureVector, ref temp, reactionFeedback);
+
             // adjust temperature of the voxel.
             chunk.Temperature[voxelIndex] = temp;
             newTemps[voxelIndex] = temp;
@@ -117,9 +119,17 @@ public class ReactionSolver
     }
 
 
-    private void ProcessVoxel(float deltaTime, float[] mixtureVector, ref float currentTemperature, int mixtureLength,
+    /// <summary>
+    /// Core solver.
+    /// </summary>
+    /// <param name="deltaTime"></param>
+    /// <param name="mixtureVector">a vector describing molarity of the mixture (mol/l)</param>
+    /// <param name="currentTemperature">temperature, which will be adjusted to reflect final temperature of the mixture</param>
+    /// <param name="reactionFeedback">optional array to which we write how often each reaction occured, index = reaction id</param>
+    internal void ProcessVoxel(float deltaTime, float[] mixtureVector, ref float currentTemperature,
         float[]? reactionFeedback)
     {
+        int mixtureLength = _config.GasRegistry.Count;
         //TODO Get the energy of the mixture. yes i know dirty, but what can you do.
         mixtureVector[mixtureLength - 1] = 0;
         //make sure in single step we dont overstep.
