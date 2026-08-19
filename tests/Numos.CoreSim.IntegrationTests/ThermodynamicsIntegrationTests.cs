@@ -11,8 +11,8 @@ public sealed class ThermodynamicsIntegrationTests
     public void IntraChunkThermalDiffusion_RunsOnlyOnEvenTicks()
     {
         var config = SimTestHelpers.CreateDeterministicConfig();
-        config.FlowFriction = 0f;
-        config.CflFlowCap = 0f;
+        config.BulkFlowCoefficient = 0f;
+        config.MaxPressureTransferFractionPerNeighbor = 0f;
         using var simulation = new AtmosSimulation(config, 2, 1, 1);
         var chunk = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
         simulation.SetVoxelTemperature(chunk, 0, 0, 0, 400f);
@@ -65,8 +65,8 @@ public sealed class ThermodynamicsIntegrationTests
     public void IntraChunkThermalDiffusion_IgnoresVacuumVoxel()
     {
         var config = SimTestHelpers.CreateDeterministicConfig();
-        config.FlowFriction = 0f;
-        config.CflFlowCap = 0f;
+        config.BulkFlowCoefficient = 0f;
+        config.MaxPressureTransferFractionPerNeighbor = 0f;
         config.VacuumThreshold = 1f;
         using var simulation = new AtmosSimulation(config, 2, 1, 1);
         var chunk = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
@@ -85,8 +85,8 @@ public sealed class ThermodynamicsIntegrationTests
     public void CrossChunkThermalDiffusion_TransfersHeatAcrossBoundaryOnEvenTick()
     {
         var config = SimTestHelpers.CreateDeterministicConfig();
-        config.FlowFriction = 0f;
-        config.CflFlowCap = 0f;
+        config.BulkFlowCoefficient = 0f;
+        config.MaxPressureTransferFractionPerNeighbor = 0f;
         using var simulation = new AtmosSimulation(config, 1, 1, 1);
         var hot = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
         var cold = SimTestHelpers.CreateOpenChunk(simulation, new Int3(1, 0, 0));
@@ -117,10 +117,10 @@ public sealed class ThermodynamicsIntegrationTests
     public void CrossChunkThermalDiffusion_LowCapacityVoxelsStopAtEquilibrium()
     {
         var config = SimTestHelpers.CreateDeterministicConfig();
-        config.FlowFriction = 0f;
-        config.CflFlowCap = 0f;
+        config.BulkFlowCoefficient = 0f;
+        config.MaxPressureTransferFractionPerNeighbor = 0f;
         var gas = config.GasRegistry[SimTestHelpers.FirstGasId];
-        gas.SpecificHeatCapacity = 0.01f;
+        gas.MolarHeatCapacityAtConstantVolume = 0.01f;
         config.GasRegistry[SimTestHelpers.FirstGasId] = gas;
         using var simulation = new AtmosSimulation(config, 1, 1, 1);
         var hot = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
@@ -147,16 +147,54 @@ public sealed class ThermodynamicsIntegrationTests
     }
 
     [Test]
+    public void CrossChunkThermalDiffusion_MultipleFacesUseOneSymmetricSnapshot()
+    {
+        var config = SimTestHelpers.CreateDeterministicConfig();
+        config.BulkFlowCoefficient = 0f;
+        config.MaxPressureTransferFractionPerNeighbor = 0f;
+        config.ThermalConductance = 1f;
+        using var simulation = new AtmosSimulation(config, 1, 1, 1);
+        var center = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
+        Int3[] neighborPositions = [Int3.NegX, Int3.PosX, Int3.NegY, Int3.PosY];
+        AtmosChunkHandle[] neighbors = neighborPositions
+            .Select(position => SimTestHelpers.CreateOpenChunk(simulation, position))
+            .ToArray();
+        simulation.AddGasToVoxel(center, 0, 0, 0, SimTestHelpers.FirstGasId, 1f, 400f);
+        foreach (var neighbor in neighbors)
+            simulation.AddGasToVoxel(neighbor, 0, 0, 0, SimTestHelpers.FirstGasId, 1f, 200f);
+
+        simulation.Tick();
+        var initialSnapshots = neighbors.Select(simulation.GetChunkSnapshot)
+            .Prepend(simulation.GetChunkSnapshot(center))
+            .ToArray();
+        float initialEnergy = SimTestHelpers.TotalThermalEnergy(config, initialSnapshots);
+        simulation.Tick();
+
+        var centerSnapshot = simulation.GetChunkSnapshot(center);
+        var neighborSnapshots = neighbors.Select(simulation.GetChunkSnapshot).ToArray();
+        var finalSnapshots = neighborSnapshots.Prepend(centerSnapshot).ToArray();
+        Assert.Multiple(() =>
+        {
+            Assert.That(centerSnapshot.Temperature[0],
+                Is.EqualTo(200f).Within(SimTestHelpers.Tolerance));
+            Assert.That(neighborSnapshots.Select(snapshot => snapshot.Temperature[0]),
+                Is.All.EqualTo(250f).Within(SimTestHelpers.Tolerance));
+            Assert.That(SimTestHelpers.TotalThermalEnergy(config, finalSnapshots),
+                Is.EqualTo(initialEnergy).Within(SimTestHelpers.Tolerance));
+        });
+    }
+
+    [Test]
     public void BoundaryGasFlow_OnEvenTickUpdatesCapacitiesBeforeThermalDiffusion()
     {
         var config = SimTestHelpers.CreateDeterministicConfig();
-        config.FlowFriction = 0f;
-        config.CflFlowCap = 0f;
+        config.BulkFlowCoefficient = 0f;
+        config.MaxPressureTransferFractionPerNeighbor = 0f;
         var first = config.GasRegistry[SimTestHelpers.FirstGasId];
-        first.SpecificHeatCapacity = 1f;
+        first.MolarHeatCapacityAtConstantVolume = 1f;
         config.GasRegistry[SimTestHelpers.FirstGasId] = first;
         var second = config.GasRegistry[SimTestHelpers.SecondGasId];
-        second.SpecificHeatCapacity = 4f;
+        second.MolarHeatCapacityAtConstantVolume = 4f;
         config.GasRegistry[SimTestHelpers.SecondGasId] = second;
         using var simulation = new AtmosSimulation(config, 1, 1, 1);
         var source = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
@@ -170,8 +208,8 @@ public sealed class ThermodynamicsIntegrationTests
         float initialEnergy = SimTestHelpers.TotalThermalEnergy(config, initialSource, initialTarget);
 
         simulation.Tick();
-        config.FlowFriction = 0.25f;
-        config.CflFlowCap = 0.16f;
+        config.BulkFlowCoefficient = 0.25f;
+        config.MaxPressureTransferFractionPerNeighbor = 0.16f;
         simulation.Tick();
 
         var sourceSnapshot = simulation.GetChunkSnapshot(source);
@@ -185,7 +223,7 @@ public sealed class ThermodynamicsIntegrationTests
             Assert.That(SimTestHelpers.TotalMoles(sourceSnapshot, targetSnapshot),
                 Is.EqualTo(initialMoles).Within(SimTestHelpers.Tolerance));
             Assert.That(SimTestHelpers.TotalThermalEnergy(config, sourceSnapshot, targetSnapshot),
-                Is.EqualTo(initialEnergy).Within(SimTestHelpers.Tolerance));
+                Is.EqualTo(initialEnergy).Within(SimTestHelpers.EnergyTolerance));
         });
     }
 
@@ -201,8 +239,8 @@ public sealed class ThermodynamicsIntegrationTests
         int targetX, int targetY, int targetZ)
     {
         var config = SimTestHelpers.CreateDeterministicConfig();
-        config.FlowFriction = 0f;
-        config.CflFlowCap = 0f;
+        config.BulkFlowCoefficient = 0f;
+        config.MaxPressureTransferFractionPerNeighbor = 0f;
         using var simulation = new AtmosSimulation(config, 3, 3, 3);
         var source = CreateIsolatedVoxel(simulation, new Int3(0, 0, 0),
             sourceX, sourceY, sourceZ, SimTestHelpers.RoomId, 400f);
@@ -233,10 +271,10 @@ public sealed class ThermodynamicsIntegrationTests
     public void IntraChunkThermalDiffusion_LowCapacityVoxelsStopAtEquilibrium()
     {
         var config = SimTestHelpers.CreateDeterministicConfig();
-        config.FlowFriction = 0f;
-        config.CflFlowCap = 0f;
+        config.BulkFlowCoefficient = 0f;
+        config.MaxPressureTransferFractionPerNeighbor = 0f;
         var gas = config.GasRegistry[SimTestHelpers.FirstGasId];
-        gas.SpecificHeatCapacity = 0.01f;
+        gas.MolarHeatCapacityAtConstantVolume = 0.01f;
         config.GasRegistry[SimTestHelpers.FirstGasId] = gas;
         using var simulation = new AtmosSimulation(config, 2, 1, 1);
         var chunk = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
@@ -265,11 +303,11 @@ public sealed class ThermodynamicsIntegrationTests
     {
         const int size = 3;
         var config = SimTestHelpers.CreateDeterministicConfig();
-        config.FlowFriction = 0f;
-        config.CflFlowCap = 0f;
+        config.BulkFlowCoefficient = 0f;
+        config.MaxPressureTransferFractionPerNeighbor = 0f;
         config.VacuumThreshold = 1f;
         var gas = config.GasRegistry[SimTestHelpers.FirstGasId];
-        gas.SpecificHeatCapacity = 0.01f;
+        gas.MolarHeatCapacityAtConstantVolume = 0.01f;
         config.GasRegistry[SimTestHelpers.FirstGasId] = gas;
         using var simulation = new AtmosSimulation(config, size, size, 1);
         var chunk = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
@@ -299,8 +337,8 @@ public sealed class ThermodynamicsIntegrationTests
         const int width = 3;
         const int height = 3;
         var config = SimTestHelpers.CreateDeterministicConfig();
-        config.FlowFriction = 0f;
-        config.CflFlowCap = 0f;
+        config.BulkFlowCoefficient = 0f;
+        config.MaxPressureTransferFractionPerNeighbor = 0f;
         using var simulation = new AtmosSimulation(config, width, height, 1);
         var hot = CreateIsolatedVoxel(simulation, new Int3(0, 0, 0),
             0, 1, 0, SimTestHelpers.RoomId, 400f);
@@ -351,8 +389,8 @@ public sealed class ThermodynamicsIntegrationTests
     public void CrossChunkThermalDiffusion_IgnoresVacuumNeighbor()
     {
         var config = SimTestHelpers.CreateDeterministicConfig();
-        config.FlowFriction = 0f;
-        config.CflFlowCap = 0f;
+        config.BulkFlowCoefficient = 0f;
+        config.MaxPressureTransferFractionPerNeighbor = 0f;
         config.VacuumThreshold = 1f;
         using var simulation = new AtmosSimulation(config, 1, 1, 1);
         var hot = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
@@ -374,7 +412,7 @@ public sealed class ThermodynamicsIntegrationTests
     }
 
     [Test]
-    public void Condensation_RunsOnEvenTickAndReleasesLatentHeat()
+    public void Condensation_RunsOnEvenTickAndReleasesInternalPhaseChangeEnergy()
     {
         var config = CreateCondensationConfig();
         using var simulation = new AtmosSimulation(config, 1, 1, 1);
@@ -401,13 +439,13 @@ public sealed class ThermodynamicsIntegrationTests
 
     [TestCase(0f)]
     [TestCase(-2f)]
-    public void Condensation_NonPositiveSpecificHeatCapacityUsesConfiguredFallback(
-        float configuredSpecificHeatCapacity)
+    public void Condensation_NonPositiveMolarHeatCapacityAtConstantVolumeUsesConfiguredFallback(
+        float configuredMolarHeatCapacityAtConstantVolume)
     {
         var config = CreateCondensationConfig();
-        config.DefaultSpecificHeatCapacity = 2f;
+        config.DefaultMolarHeatCapacityAtConstantVolume = 2f;
         var gas = config.GasRegistry[SimTestHelpers.FirstGasId];
-        gas.SpecificHeatCapacity = configuredSpecificHeatCapacity;
+        gas.MolarHeatCapacityAtConstantVolume = configuredMolarHeatCapacityAtConstantVolume;
         config.GasRegistry[SimTestHelpers.FirstGasId] = gas;
         using var simulation = new AtmosSimulation(config, 1, 1, 1);
         var chunk = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
@@ -427,11 +465,11 @@ public sealed class ThermodynamicsIntegrationTests
     }
 
     [Test]
-    public void Condensation_RequiresPositiveCondensationPointGate()
+    public void Condensation_RequiresEnabledGate()
     {
         var config = CreateCondensationConfig();
         var gas = config.GasRegistry[SimTestHelpers.FirstGasId];
-        gas.CondensationPoint = 0f;
+        gas.CondensationEnabled = false;
         config.GasRegistry[SimTestHelpers.FirstGasId] = gas;
         using var simulation = new AtmosSimulation(config, 1, 1, 1);
         var chunk = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
@@ -468,6 +506,49 @@ public sealed class ThermodynamicsIntegrationTests
     }
 
     [Test]
+    public void CondensationRateFactor_AboveOneIsClampedToOne()
+    {
+        var config = CreateCondensationConfig();
+        config.CondensationRateFactor = 2f;
+        using var simulation = new AtmosSimulation(config, 1, 1, 1);
+        var chunk = SimTestHelpers.CreateOpenChunk(simulation, default);
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasId, 10f, 200f);
+
+        simulation.Tick();
+        simulation.Tick();
+
+        var snapshot = simulation.GetChunkSnapshot(chunk);
+        Assert.That(SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 0),
+            Is.EqualTo(5f).Within(SimTestHelpers.Tolerance));
+    }
+
+    [Test]
+    public void Condensation_ClausiusClapeyronExponentUsesMolarGasConstant()
+    {
+        const float temperature = 150f;
+        const float initialMoles = 6f;
+        var config = CreateCondensationConfig();
+        var gas = config.GasRegistry[SimTestHelpers.FirstGasId];
+        gas.MolarEnthalpyOfVaporization = 1000f;
+        config.GasRegistry[SimTestHelpers.FirstGasId] = gas;
+        using var simulation = new AtmosSimulation(config, 1, 1, 1);
+        var chunk = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasId, initialMoles, temperature);
+
+        simulation.Tick();
+        simulation.Tick();
+
+        double exponent = -gas.MolarEnthalpyOfVaporization / AtmosPhysicalConstants.MolarGasConstant *
+                          (1d / temperature - 1d / gas.BoilingPoint);
+        double saturationPressure = config.SaturationReferencePressure * Math.Exp(exponent);
+        double expectedCondensedMoles =
+            (initialMoles * temperature - saturationPressure) / temperature * config.CondensationRateFactor;
+        var snapshot = simulation.GetChunkSnapshot(chunk);
+        Assert.That(SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 0),
+            Is.EqualTo(initialMoles - expectedCondensedMoles).Within(SimTestHelpers.Tolerance));
+    }
+
+    [Test]
     public void Condensation_SkipsGasMissingFromRegistry()
     {
         var config = CreateCondensationConfig();
@@ -494,10 +575,11 @@ public sealed class ThermodynamicsIntegrationTests
             new GasProperties
             {
                 Name = "Condensable",
-                SpecificHeatCapacity = 5f,
+                MolarHeatCapacityAtConstantVolume = 5f,
                 BoilingPoint = 200f,
-                CondensationPoint = 1f,
-                LatentHeatOfVaporization = 10f,
+                CondensationEnabled = true,
+                MolarEnthalpyOfVaporization =
+                    AtmosPhysicalConstants.MolarGasConstant * 200f + 10f,
                 LiquidId = 12,
                 DiffusionCoefficient = 0f
             }

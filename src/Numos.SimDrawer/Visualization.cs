@@ -99,6 +99,9 @@ public readonly struct VoxelGasData
 /// <summary>
 ///     Backend-independent values passed to a visualization method for one voxel.
 /// </summary>
+/// <param name="Temperature">Temperature in kelvins (K).</param>
+/// <param name="Pressure">Pressure in pascals (Pa).</param>
+/// <param name="TotalMoles">Total gas amount in moles (mol).</param>
 public readonly record struct VoxelSample(
     ushort LocalIndex,
     int RoomId,

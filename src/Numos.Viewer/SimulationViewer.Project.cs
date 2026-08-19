@@ -11,10 +11,11 @@ public partial class SimulationViewer
     private readonly static GasProperties Oxygen = new()
     {
         Name = "Oxygen",
-        SpecificHeatCapacity = 1000f,
-        BoilingPoint = 90f,
-        CondensationPoint = 85f,
-        LatentHeatOfVaporization = 10000f,
+        MolarHeatCapacityAtConstantVolume =
+            AtmosPhysicalConstants.IdealDiatomicMolarHeatCapacityAtConstantVolume,
+        BoilingPoint = 90.2f,
+        CondensationEnabled = true,
+        MolarEnthalpyOfVaporization = 6_820f,
         LiquidId = 0,
         DiffusionCoefficient = 0.1f
     };
@@ -22,10 +23,11 @@ public partial class SimulationViewer
     private readonly static GasProperties Nitrogen = new()
     {
         Name = "Nitrogen",
-        SpecificHeatCapacity = 1040f,
-        BoilingPoint = 77f,
-        CondensationPoint = 73f,
-        LatentHeatOfVaporization = 11500f,
+        MolarHeatCapacityAtConstantVolume =
+            AtmosPhysicalConstants.IdealDiatomicMolarHeatCapacityAtConstantVolume,
+        BoilingPoint = 77.34f,
+        CondensationEnabled = true,
+        MolarEnthalpyOfVaporization = 5_600f,
         LiquidId = 1,
         DiffusionCoefficient = 0.08f
     };
@@ -167,10 +169,9 @@ public partial class SimulationViewer
             return;
         }
 
-        if (!float.IsFinite(gas.SpecificHeatCapacity) || gas.SpecificHeatCapacity < 0f ||
+        if (!float.IsFinite(gas.MolarHeatCapacityAtConstantVolume) || gas.MolarHeatCapacityAtConstantVolume < 0f ||
             !float.IsFinite(gas.BoilingPoint) || gas.BoilingPoint < 0f ||
-            !float.IsFinite(gas.CondensationPoint) || gas.CondensationPoint < 0f ||
-            !float.IsFinite(gas.LatentHeatOfVaporization) || gas.LatentHeatOfVaporization < 0f ||
+            !float.IsFinite(gas.MolarEnthalpyOfVaporization) || gas.MolarEnthalpyOfVaporization < 0f ||
             !float.IsFinite(gas.DiffusionCoefficient) || gas.DiffusionCoefficient < 0f)
         {
             SetProjectMessage("Gas properties must be finite, non-negative values.", true);
