@@ -542,9 +542,9 @@ public sealed class ThermodynamicsIntegrationTests
                 Is.EqualTo(10f));
             Assert.That(afterOddTick.Temperature[0], Is.EqualTo(200f));
             Assert.That(SimTestHelpers.Moles(afterEvenTick, SimTestHelpers.FirstGasId, 0),
-                Is.EqualTo(7.5f).Within(SimTestHelpers.Tolerance));
+                Is.EqualTo(7.5000255f).Within(SimTestHelpers.Tolerance));
             Assert.That(afterEvenTick.Temperature[0],
-                Is.EqualTo(200.6666667f).Within(SimTestHelpers.Tolerance));
+                Is.EqualTo(200.6666576f).Within(SimTestHelpers.Tolerance));
         });
     }
 
@@ -569,9 +569,9 @@ public sealed class ThermodynamicsIntegrationTests
         Assert.Multiple(() =>
         {
             Assert.That(SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 0),
-                Is.EqualTo(7.5f).Within(SimTestHelpers.Tolerance));
+                Is.EqualTo(7.4996104f).Within(SimTestHelpers.Tolerance));
             Assert.That(snapshot.Temperature[0],
-                Is.EqualTo(201.6666667f).Within(SimTestHelpers.Tolerance));
+                Is.EqualTo(201.667013f).Within(SimTestHelpers.Tolerance));
         });
     }
 
@@ -629,8 +629,167 @@ public sealed class ThermodynamicsIntegrationTests
         simulation.Tick();
 
         var snapshot = simulation.GetChunkSnapshot(chunk);
-        Assert.That(SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 0),
-            Is.EqualTo(5f).Within(SimTestHelpers.Tolerance));
+        Assert.Multiple(() =>
+        {
+            Assert.That(SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 0),
+                Is.EqualTo(5.000051f).Within(SimTestHelpers.Tolerance));
+            Assert.That(snapshot.Temperature[0],
+                Is.EqualTo(201.9999592f).Within(SimTestHelpers.Tolerance));
+        });
+    }
+
+    [Test]
+    public void Condensation_LatentHeatingConvergesWaterVaporToWarmedSaturation()
+    {
+        const float initialMoles = 9000f / 256f;
+        const float initialTemperature = 293f;
+        var config = SimTestHelpers.CreateDeterministicConfig();
+        config.VoxelVolume = 1f;
+        config.SaturationReferencePressure = AtmosPhysicalConstants.StandardAtmosphericPressure;
+        config.CondensationRateFactor = 1f;
+        config.GasRegistry =
+        [
+            new GasProperties
+            {
+                Name = "Water vapor",
+                MolarHeatCapacityAtConstantVolume = 33f,
+                BoilingPoint = 373f,
+                CondensationEnabled = true,
+                MolarEnthalpyOfVaporization = 40_650f,
+                DiffusionCoefficient = 0f
+            }
+        ];
+        using var simulation = new AtmosSimulation(config, 1, 1, 1);
+        var chunk = SimTestHelpers.CreateOpenChunk(simulation, default);
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasId,
+            initialMoles, initialTemperature);
+
+        simulation.Tick();
+        simulation.Tick();
+
+        var snapshot = simulation.GetChunkSnapshot(chunk);
+        float remainingMoles = SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 0);
+        float finalTemperature = snapshot.Temperature[0];
+        double partialPressure = remainingMoles * AtmosPhysicalConstants.MolarGasConstant *
+                                 finalTemperature / config.VoxelVolume;
+        double exponent = -config.GasRegistry[0].MolarEnthalpyOfVaporization /
+                          AtmosPhysicalConstants.MolarGasConstant *
+                          (1d / finalTemperature - 1d / config.GasRegistry[0].BoilingPoint);
+        double saturationPressure = config.SaturationReferencePressure * Math.Exp(exponent);
+        double relativeSaturationError = Math.Abs(partialPressure - saturationPressure) /
+                                         saturationPressure;
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(remainingMoles, Is.EqualTo(32.87925f).Within(0.002f));
+            Assert.That(finalTemperature, Is.EqualTo(373.195f).Within(0.05f));
+            Assert.That(finalTemperature, Is.LessThan(400f));
+            Assert.That(float.IsFinite(remainingMoles) && float.IsFinite(finalTemperature), Is.True);
+            Assert.That(relativeSaturationError, Is.LessThan(1e-4d));
+        });
+    }
+
+    [Test]
+    public void Condensation_MixedInertGasUsesOtherHeatCapacityBeforeApplyingRateFactor()
+    {
+        const float initialTemperature = 200f;
+        const float initialVaporMoles = 10f;
+        const float inertMoles = 10f;
+        const float molarHeatCapacity = 5f;
+        const float molarEnthalpyOfVaporization = 5000f;
+        const float equilibriumCondensedMoles = 4f;
+        const float condensationRateFactor = 0.5f;
+        float molarInternalEnergyOfVaporization = MathF.Max(0f,
+            molarEnthalpyOfVaporization -
+            AtmosPhysicalConstants.MolarGasConstant * initialTemperature);
+        float equilibriumRemainingHeatCapacity =
+            (initialVaporMoles - equilibriumCondensedMoles + inertMoles) * molarHeatCapacity;
+        float equilibriumTemperature = initialTemperature +
+                                       equilibriumCondensedMoles / equilibriumRemainingHeatCapacity *
+                                       molarInternalEnergyOfVaporization;
+
+        var config = SimTestHelpers.CreateDeterministicConfig();
+        config.CondensationRateFactor = condensationRateFactor;
+        config.SaturationReferencePressure =
+            (initialVaporMoles - equilibriumCondensedMoles) *
+            (AtmosPhysicalConstants.MolarGasConstant / config.VoxelVolume) *
+            equilibriumTemperature;
+        config.GasRegistry =
+        [
+            new GasProperties
+            {
+                Name = "Condensable",
+                MolarHeatCapacityAtConstantVolume = molarHeatCapacity,
+                BoilingPoint = equilibriumTemperature,
+                CondensationEnabled = true,
+                MolarEnthalpyOfVaporization = molarEnthalpyOfVaporization,
+                DiffusionCoefficient = 0f
+            },
+            new GasProperties
+            {
+                Name = "Inert",
+                MolarHeatCapacityAtConstantVolume = molarHeatCapacity,
+                DiffusionCoefficient = 0f
+            }
+        ];
+        using var simulation = new AtmosSimulation(config, 1, 1, 1);
+        var chunk = SimTestHelpers.CreateOpenChunk(simulation, default);
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasId,
+            initialVaporMoles, initialTemperature);
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.SecondGasId,
+            inertMoles, initialTemperature);
+
+        simulation.Tick();
+        simulation.Tick();
+
+        float expectedCondensedMoles = equilibriumCondensedMoles * condensationRateFactor;
+        float expectedVaporMoles = initialVaporMoles - expectedCondensedMoles;
+        float expectedRemainingHeatCapacity =
+            (expectedVaporMoles + inertMoles) * molarHeatCapacity;
+        float expectedTemperature = initialTemperature +
+                                    expectedCondensedMoles / expectedRemainingHeatCapacity *
+                                    molarInternalEnergyOfVaporization;
+        var snapshot = simulation.GetChunkSnapshot(chunk);
+        Assert.Multiple(() =>
+        {
+            Assert.That(SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 0),
+                Is.EqualTo(expectedVaporMoles).Within(0.001f));
+            Assert.That(SimTestHelpers.Moles(snapshot, SimTestHelpers.SecondGasId, 0),
+                Is.EqualTo(inertMoles));
+            Assert.That(snapshot.Temperature[0],
+                Is.EqualTo(expectedTemperature).Within(0.001f));
+        });
+    }
+
+    [Test]
+    public void Condensation_ZeroFloatInternalEnergyUsesTheIsothermalEquilibrium()
+    {
+        const float initialTemperature = 200f;
+        var config = CreateCondensationConfig();
+        config.CondensationRateFactor = 1f;
+        var gas = config.GasRegistry[SimTestHelpers.FirstGasId];
+        gas.MolarHeatCapacityAtConstantVolume = 1e-9f;
+        gas.MolarEnthalpyOfVaporization =
+            AtmosPhysicalConstants.MolarGasConstant * initialTemperature;
+        config.GasRegistry[SimTestHelpers.FirstGasId] = gas;
+        using var simulation = new AtmosSimulation(config, 1, 1, 1);
+        var chunk = SimTestHelpers.CreateOpenChunk(simulation, default);
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasId,
+            10f, initialTemperature);
+
+        simulation.Tick();
+        simulation.Tick();
+
+        var snapshot = simulation.GetChunkSnapshot(chunk);
+        Assert.Multiple(() =>
+        {
+            Assert.That(gas.MolarEnthalpyOfVaporization -
+                        AtmosPhysicalConstants.MolarGasConstant * initialTemperature,
+                Is.Zero);
+            Assert.That(SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 0),
+                Is.EqualTo(5f).Within(SimTestHelpers.Tolerance));
+            Assert.That(snapshot.Temperature[0], Is.EqualTo(initialTemperature));
+        });
     }
 
     [Test]
