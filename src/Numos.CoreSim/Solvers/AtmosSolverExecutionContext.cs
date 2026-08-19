@@ -5,7 +5,7 @@ using Numos.Maths;
 namespace Numos.CoreSim.Solvers;
 
 /// <summary>
-///     Stable inputs shared by every solver stage in one tick.
+///     Tick-scoped inputs shared by every solver stage.
 /// </summary>
 internal sealed class AtmosSolverExecutionContext
 {
@@ -14,14 +14,17 @@ internal sealed class AtmosSolverExecutionContext
     {
         World = world;
         Chunks = chunks;
-        Config = config;
+        TickConfig = config;
         Configuration = configuration;
         TickCount = tickCount;
     }
 
     internal IAtmosSolverWorld World { get; }
     internal AtmosChunk[] Chunks { get; }
-    internal AtmosSolverConfigSnapshot Config { get; }
+    /// <summary>Normalized built-in solver settings captured before this tick began.</summary>
+    internal AtmosSolverConfigSnapshot TickConfig { get; }
+
+    /// <summary>The live public configuration reference captured before this tick began.</summary>
     internal AtmosConfig Configuration { get; }
     internal int TickCount { get; }
     internal ConcurrentQueue<(Int3 Key, BoundaryFlowEvent Event)> BoundaryEvents { get; } = new();

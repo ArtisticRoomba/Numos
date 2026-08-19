@@ -13,7 +13,9 @@ namespace Numos.API;
 ///     The simulation owns every chunk created through <see cref="CreateAndRegisterChunk" />. Call
 ///     <see cref="Dispose" /> when the simulation is no longer needed to release those chunks and its
 ///     worker-local buffers. Unless otherwise noted, members that access kernel state throw
-///     <see cref="ObjectDisposedException" /> after disposal.
+///     <see cref="ObjectDisposedException" /> after disposal. A solver callback may use its context and edit the
+///     solver pipeline, but it must not recursively execute or dispose the simulation or change chunk ownership
+///     during the current tick.
 /// </remarks>
 public sealed partial class AtmosSimulation : IDisposable
 {
@@ -181,7 +183,8 @@ public sealed partial class AtmosSimulation : IDisposable
     /// <summary>
     ///     Releases all registered chunks and resources owned by the simulation.
     /// </summary>
-    /// <remarks>Disposal is idempotent.</remarks>
+    /// <remarks>Disposal is idempotent outside solver execution.</remarks>
+    /// <exception cref="InvalidOperationException">Called from a solver callback.</exception>
     [PublicAPI]
     public void Dispose()
     {
@@ -204,6 +207,7 @@ public sealed partial class AtmosSimulation : IDisposable
     ///     update processes at most five fixed steps and discards time beyond that backlog limit.
     /// </remarks>
     /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
+    /// <exception cref="InvalidOperationException">Called recursively from a solver callback.</exception>
     [PublicAPI]
     public void Update(float elapsedSeconds)
     {
@@ -220,9 +224,13 @@ public sealed partial class AtmosSimulation : IDisposable
     /// </param>
     /// <exception cref="ArgumentNullException"><paramref name="config" /> is <see langword="null" />.</exception>
     /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
+    /// <exception cref="InvalidOperationException">Called recursively from a solver callback.</exception>
     [PublicAPI]
     public void Update(float elapsedSeconds, AtmosConfig config)
     {
+        ArgumentNullException.ThrowIfNull(config);
+        ThrowIfDisposed();
+        _kernel.EnsureCanExecuteTick();
         SetAtmosConfig(config);
         Update(elapsedSeconds);
     }
@@ -261,7 +269,9 @@ public sealed partial class AtmosSimulation : IDisposable
     ///     access to mutable kernel state.
     /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="maxActiveRooms" /> is zero or negative.</exception>
-    /// <exception cref="InvalidOperationException">A chunk is already registered at <paramref name="position" />.</exception>
+    /// <exception cref="InvalidOperationException">
+    ///     A chunk is already registered at <paramref name="position" />, or this is called from a solver callback.
+    /// </exception>
     /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
     [PublicAPI]
     public AtmosChunkHandle CreateAndRegisterChunk(
@@ -284,6 +294,7 @@ public sealed partial class AtmosSimulation : IDisposable
     ///     position. Callers are responsible for keeping handles associated with their owning simulation.
     /// </remarks>
     /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
+    /// <exception cref="InvalidOperationException">Called from a solver callback.</exception>
     [PublicAPI]
     public bool UnregisterChunk(AtmosChunkHandle chunk)
     {
@@ -544,8 +555,8 @@ public sealed partial class AtmosSimulation : IDisposable
     /// <param name="temperature">The raw temperature value to store, in kelvins.</param>
     /// <remarks>
     ///     The supplied value is stored without validation or eager normalization. Snapshots expose that raw value
-    ///     until a later operation overwrites it. Pressure and sensible-energy calculations treat a gas-bearing
-    ///     voxel's non-finite or nonpositive stored value as
+    ///     until a later operation overwrites it. The pressure cache is refreshed immediately; pressure and
+    ///     sensible-energy calculations treat a gas-bearing voxel's non-finite or nonpositive stored value as
     ///     <see cref="AtmosConfig.DefaultTemperatureFallback" /> for that calculation.
     /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="localVoxelIndex" /> is outside the chunk.</exception>
@@ -568,8 +579,8 @@ public sealed partial class AtmosSimulation : IDisposable
     /// <param name="temperature">The raw temperature value to store, in kelvins.</param>
     /// <remarks>
     ///     The supplied value is stored without validation or eager normalization. Snapshots expose that raw value
-    ///     until a later operation overwrites it. Pressure and sensible-energy calculations treat a gas-bearing
-    ///     voxel's non-finite or nonpositive stored value as
+    ///     until a later operation overwrites it. The pressure cache is refreshed immediately; pressure and
+    ///     sensible-energy calculations treat a gas-bearing voxel's non-finite or nonpositive stored value as
     ///     <see cref="AtmosConfig.DefaultTemperatureFallback" /> for that calculation.
     /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException">A local coordinate is outside the chunk.</exception>
@@ -694,6 +705,7 @@ public sealed partial class AtmosSimulation : IDisposable
     ///     increments <see cref="TickCount" /> by one.
     /// </remarks>
     /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
+    /// <exception cref="InvalidOperationException">Called recursively from a solver callback.</exception>
     [PublicAPI]
     public void Tick()
     {

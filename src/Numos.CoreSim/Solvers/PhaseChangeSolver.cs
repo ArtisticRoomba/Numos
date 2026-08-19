@@ -24,7 +24,6 @@ internal sealed class PhaseChangeSolver
             return;
 
         float inverseBoilingPoint = 1f / properties.BoilingPoint;
-        float molarHeatCapacity = config.GetMolarHeatCapacityAtConstantVolume(gasId);
         for (var activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
         {
             ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
@@ -35,16 +34,19 @@ internal sealed class PhaseChangeSolver
             float temperature = config.GetEffectiveTemperature(chunk.Temperature[voxelIndex]);
             float saturationPressure = CalculateSaturationPressure(
                 config, properties, temperature, inverseBoilingPoint);
-            float partialPressure = AtmosSolverMath.CalculatePressure(config, gasMoles, temperature);
-            if (partialPressure <= saturationPressure)
+            float saturationMoles = AtmosSolverMath.PressureToMoles(
+                config, saturationPressure, temperature);
+            if (gasMoles <= saturationMoles)
                 continue;
 
-            float molesToCondense = AtmosSolverMath.PressureToMoles(
-                                        config, partialPressure - saturationPressure, temperature) *
-                                    config.CondensationRateFactor;
+            // Since P = nRT/V at fixed T and V, the pressure excess can be converted directly into a
+            // mole excess. This avoids an overflow-prone pressure round trip for large inventories.
+            float molesToCondense = (gasMoles - saturationMoles) * config.CondensationRateFactor;
+            if (molesToCondense <= 0f)
+                continue;
+
             ApplyCondensation(chunk, config, gasIndex, voxelIndex, temperature,
-                MathF.Min(gasMoles, molesToCondense), molarHeatCapacity,
-                properties.MolarEnthalpyOfVaporization);
+                molesToCondense, properties.MolarEnthalpyOfVaporization);
         }
     }
 
@@ -59,21 +61,21 @@ internal sealed class PhaseChangeSolver
 
     private static void ApplyCondensation(AtmosChunk chunk, AtmosSolverConfigSnapshot config,
         int gasIndex, ushort voxelIndex, float temperature, float condensedMoles,
-        float molarHeatCapacity, float molarEnthalpyOfVaporization)
+        float molarEnthalpyOfVaporization)
     {
         chunk.ActiveGases[gasIndex].Moles[voxelIndex] -= condensedMoles;
 
-        float oldHeatCapacity = chunk.TotalHeatCapacity[voxelIndex];
-        float condensedHeatCapacity = condensedMoles * molarHeatCapacity;
-        float newHeatCapacity = MathF.Max(0f, oldHeatCapacity - condensedHeatCapacity);
+        float newHeatCapacity = AtmosSolverMath.CalculateHeatCapacityAtVoxel(config, chunk, voxelIndex);
         float molarInternalEnergyOfVaporization = MathF.Max(0f,
             molarEnthalpyOfVaporization - AtmosPhysicalConstants.MolarGasConstant * temperature);
-        float remainingEnergy = temperature * oldHeatCapacity -
-                                temperature * condensedHeatCapacity +
-                                condensedMoles * molarInternalEnergyOfVaporization;
         chunk.TotalHeatCapacity[voxelIndex] = newHeatCapacity;
         if (newHeatCapacity > 0f)
-            chunk.Temperature[voxelIndex] = MathF.Max(0f, remainingEnergy / newHeatCapacity);
+        {
+            // Algebraically this is (T*C_remaining + n_condensed*U_vap) / C_remaining. Dividing
+            // before multiplying avoids both C*T overflow and the cancellation of two large energies.
+            chunk.Temperature[voxelIndex] = MathF.Max(0f,
+                temperature + condensedMoles / newHeatCapacity * molarInternalEnergyOfVaporization);
+        }
         chunk.TotalPressure[voxelIndex] =
             AtmosSolverMath.CalculatePressureAtVoxel(config, chunk, voxelIndex);
     }

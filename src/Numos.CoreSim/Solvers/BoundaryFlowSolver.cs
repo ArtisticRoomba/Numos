@@ -8,7 +8,7 @@ namespace Numos.CoreSim.Solvers;
 /// <summary>
 ///     Applies deterministic, sequential gas flow across chunk boundaries.
 /// </summary>
-internal sealed class BoundaryFlowSolver : IAtmosSolver
+internal sealed class BoundaryFlowSolver : IAtmosSolverStage
 {
     private readonly List<(Int3 Key, BoundaryFlowEvent Event)> _orderedEvents = [];
 
@@ -59,12 +59,16 @@ internal sealed class BoundaryFlowSolver : IAtmosSolver
             return;
 
         ushort sourceIndex = sourceChunk.GetIndex(targetPosition - direction);
+        int sourceRoom = sourceChunk.VoxelRoomMap[sourceIndex];
+        if (sourceRoom == VoxelClassification.RoomSolid || sourceRoom == VoxelClassification.RoomVoid)
+            return;
+
         float sourcePressure = sourceChunk.TotalPressure[sourceIndex];
         bool isVoid = neighborRoom == VoxelClassification.RoomVoid;
         float neighborPressure = isVoid ? 0f : neighborChunk.TotalPressure[neighborIndex];
         float pressureDelta = sourcePressure - neighborPressure;
         float bulkPressureTransfer = pressureDelta > 0f
-            ? AtmosSolverMath.CalculateBulkPressureTransfer(context.Config, pressureDelta, sourcePressure)
+            ? AtmosSolverMath.CalculateBulkPressureTransfer(context.TickConfig, pressureDelta, sourcePressure)
             : 0f;
 
         float totalMoles = GetTotalMoles(sourceChunk, sourceIndex);
@@ -79,12 +83,11 @@ internal sealed class BoundaryFlowSolver : IAtmosSolver
         ushort sourceIndex, AtmosChunk neighborChunk, ushort neighborIndex, bool isVoid,
         float totalMoles, float bulkPressureTransfer)
     {
-        AtmosSolverConfigSnapshot config = context.Config;
+        AtmosSolverConfigSnapshot config = context.TickConfig;
         float sourceTemperature = config.GetEffectiveTemperature(sourceChunk.Temperature[sourceIndex]);
         float neighborTemperature = isVoid
             ? 0f
             : config.GetEffectiveTemperature(neighborChunk.Temperature[neighborIndex]);
-        float temperatureRatio = neighborTemperature / sourceTemperature;
         float advectedMoles = AtmosSolverMath.PressureToMoles(
             config, bulkPressureTransfer, sourceTemperature);
         var movedGas = false;
@@ -94,8 +97,9 @@ internal sealed class BoundaryFlowSolver : IAtmosSolver
             int gasId = sourceChunk.ActiveGases[gas].GasId;
             float sourceMoles = sourceChunk.ActiveGases[gas].Moles[sourceIndex];
             float molesAdvected = advectedMoles * (sourceMoles / totalMoles);
-            float moleImbalance = sourceMoles -
-                                  GetGasMoles(neighborChunk, neighborIndex, gasId, isVoid) * temperatureRatio;
+            float moleImbalance = AtmosSolverMath.CalculateMoleImbalance(
+                sourceMoles, sourceTemperature,
+                GetGasMoles(neighborChunk, neighborIndex, gasId, isVoid), neighborTemperature);
             float molesDiffused = moleImbalance > 0f
                 ? moleImbalance * config.GetDiffusionCoefficient(gasId)
                 : 0f;
@@ -105,7 +109,7 @@ internal sealed class BoundaryFlowSolver : IAtmosSolver
 
             float transferredHeatCapacity = molesToMove *
                                             config.GetMolarHeatCapacityAtConstantVolume(gasId);
-            sourceChunk.ActiveGases[gas].Moles[sourceIndex] = MathF.Max(0f, sourceMoles - molesToMove);
+            sourceChunk.ActiveGases[gas].Moles[sourceIndex] = sourceMoles - molesToMove;
             sourceChunk.TotalHeatCapacity[sourceIndex] = MathF.Max(0f,
                 sourceChunk.TotalHeatCapacity[sourceIndex] - transferredHeatCapacity);
             movedGas = true;
@@ -125,6 +129,11 @@ internal sealed class BoundaryFlowSolver : IAtmosSolver
             sourceChunk.Temperature[sourceIndex] = sourceTemperature;
         sourceChunk.TotalPressure[sourceIndex] = AtmosSolverMath.CalculatePressure(
             config, GetTotalMoles(sourceChunk, sourceIndex), sourceTemperature);
+        // Intra-chunk sleep detection cannot see cross-chunk gradients. A boundary transfer therefore keeps
+        // its source eligible for the next tick, just as injection keeps the target awake.
+        sourceChunk.IsAwake = true;
+        sourceChunk.SleepTimer = 0;
+        sourceChunk.MarkChanged();
     }
 
     private static float GetGasMoles(AtmosChunk chunk, ushort voxelIndex, int gasId, bool isVoid)

@@ -137,6 +137,7 @@ internal sealed partial class AtmosKernel
     {
         lock (_stateGate)
         {
+            ThrowIfTickExecuting("update the simulation recursively");
             _accumulator += elapsedSeconds;
 
             if (_accumulator > AtmosSolverConstants.FixedTimeStep * AtmosSolverConstants.MaximumStepsPerUpdate)
@@ -147,9 +148,9 @@ internal sealed partial class AtmosKernel
 
             LastBoundaryTicks = 0;
 
-            // Snapshot chunks
+            // One elapsed-time update is one externally atomic batch. Solver callbacks may edit the pipeline, but
+            // chunk lifecycle changes are rejected until the batch completes.
             var chunks = _chunkMap.Values.ToArray();
-
             var steps = 0;
             while (_accumulator >= AtmosSolverConstants.FixedTimeStep &&
                    steps < AtmosSolverConstants.MaximumStepsPerUpdate)
@@ -158,6 +159,15 @@ internal sealed partial class AtmosKernel
                 steps++;
                 TickSimulation(chunks);
             }
+        }
+    }
+
+    /// <summary>Rejects public operations that would begin another tick from a running solver callback.</summary>
+    internal void EnsureCanExecuteTick()
+    {
+        lock (_stateGate)
+        {
+            ThrowIfTickExecuting("update the simulation recursively");
         }
     }
 
@@ -200,6 +210,7 @@ internal sealed partial class AtmosKernel
     {
         lock (_stateGate)
         {
+            ThrowIfTickExecuting("unregister a chunk used by the current tick");
             if (!_chunkMap.TryRemove(position, out var chunk))
                 return false;
 
@@ -222,6 +233,7 @@ internal sealed partial class AtmosKernel
     {
         lock (_stateGate)
         {
+            ThrowIfTickExecuting("register a chunk during the current tick");
             var chunk = new AtmosChunk(width, height, depth, maxActiveRooms);
             chunk.Initialize(position, width, height, depth, maxActiveRooms);
             RegisterChunk(chunk);
@@ -489,6 +501,8 @@ internal sealed partial class AtmosKernel
             var chunk = GetChunk(position);
             ValidateVoxelIndex(chunk, localVoxelIndex);
             chunk.Temperature[localVoxelIndex] = temperature;
+            chunk.TotalPressure[localVoxelIndex] =
+                AtmosSolverMath.CalculatePressureAtVoxel(_config, chunk, localVoxelIndex);
             chunk.MarkChanged();
         }
     }
@@ -532,7 +546,11 @@ internal sealed partial class AtmosKernel
             ValidateVoxelIndex(chunk, localVoxelIndex);
             ValidateGasInjection(gasId, moles, temperature);
 
-            chunk.WakeRoom(chunk.VoxelRoomMap[localVoxelIndex]);
+            int roomId = chunk.VoxelRoomMap[localVoxelIndex];
+            if (roomId == VoxelClassification.RoomSolid || roomId == VoxelClassification.RoomVoid)
+                return;
+
+            chunk.WakeRoom(roomId);
             GasInjectionSolver.Inject(chunk, localVoxelIndex, gasId, moles, temperature, _config);
         }
     }

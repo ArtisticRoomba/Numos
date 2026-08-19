@@ -48,13 +48,13 @@ internal static class AtmosSolverMath
 
     internal static float CalculatePressure(AtmosSolverConfigSnapshot config, float moles, float temperature)
     {
-        return MathF.Max(0f, moles) * config.GetEffectiveTemperature(temperature) *
-               config.PressurePerMoleKelvin;
+        Debug.Assert(float.IsFinite(moles) && moles >= 0f);
+        return moles * config.GetEffectiveTemperature(temperature) * config.PressurePerMoleKelvin;
     }
 
     internal static float PressureToMoles(AtmosSolverConfigSnapshot config, float pressure, float temperature)
     {
-        if (!IsFinitePositive(pressure))
+        if (pressure <= 0f || float.IsNaN(pressure))
             return 0f;
 
         float denominator = config.PressurePerMoleKelvin * config.GetEffectiveTemperature(temperature);
@@ -66,7 +66,18 @@ internal static class AtmosSolverMath
     {
         var totalMoles = 0f;
         for (var gas = 0; gas < chunk.ActiveGasCount; gas++)
-            totalMoles += MathF.Max(0f, chunk.ActiveGases[gas].Moles[localVoxelIndex]);
+            totalMoles += chunk.ActiveGases[gas].Moles[localVoxelIndex];
+
+        return CalculatePressure(config, totalMoles, chunk.Temperature[localVoxelIndex]);
+    }
+
+    /// <summary>Recalculates a voxel pressure using the normalized values in a live public configuration.</summary>
+    internal static float CalculatePressureAtVoxel(AtmosConfig config, AtmosChunk chunk,
+        ushort localVoxelIndex)
+    {
+        var totalMoles = 0f;
+        for (var gas = 0; gas < chunk.ActiveGasCount; gas++)
+            totalMoles += chunk.ActiveGases[gas].Moles[localVoxelIndex];
 
         return CalculatePressure(config, totalMoles, chunk.Temperature[localVoxelIndex]);
     }
@@ -102,6 +113,24 @@ internal static class AtmosSolverMath
             return 0f;
 
         return MathF.Min(pressureTransfer, currentPressure * maximumFraction);
+    }
+
+    /// <summary>
+    ///     Returns the source-relative species imbalance used by explicit Fickian diffusion.
+    /// </summary>
+    internal static float CalculateMoleImbalance(float sourceMoles, float sourceTemperature,
+        float targetMoles, float targetTemperature)
+    {
+        Debug.Assert(sourceMoles >= 0f && targetMoles >= 0f);
+        Debug.Assert(IsFinitePositive(sourceTemperature));
+
+        // Mathematically an empty target contributes zero regardless of the temperature ratio. Handling it first
+        // prevents 0 * infinity from turning a valid outward imbalance into NaN at extreme temperatures.
+        if (targetMoles == 0f)
+            return sourceMoles;
+
+        Debug.Assert(IsFinitePositive(targetTemperature));
+        return sourceMoles - targetMoles * (targetTemperature / sourceTemperature);
     }
 
     internal static float CalculateThermalConductance(float sourceHeatCapacity, float targetHeatCapacity,

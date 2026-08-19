@@ -10,7 +10,8 @@ namespace Numos.API;
 /// </summary>
 /// <remarks>
 ///     Reads are detached snapshots and writes use the same validation as <see cref="AtmosSimulation" />. The
-///     chunk list is captured at the beginning of the tick; registration changes apply to the next tick.
+///     chunk list is fixed for the direct tick or fixed-step update batch. Chunk lifecycle changes are not allowed
+///     from a solver callback.
 /// </remarks>
 public sealed class AtmosSolverContext
 {
@@ -21,14 +22,20 @@ public sealed class AtmosSolverContext
     {
         _simulation = simulation;
         TickCount = context.TickCount;
+        Config = context.Configuration;
         _chunks = context.Chunks.Select(static chunk => new AtmosChunkHandle(chunk.GridPosition)).ToArray();
     }
 
     /// <summary>The one-based tick number currently being solved.</summary>
     public int TickCount { get; }
 
-    /// <summary>The simulation's live configuration.</summary>
-    public AtmosConfig Config => _simulation.Config;
+    /// <summary>The mutable configuration reference captured at the beginning of this tick.</summary>
+    /// <remarks>
+    ///     Replacing the simulation configuration during a callback does not change the reference observed by
+    ///     later callbacks in the same tick. Built-in stages use a normalized snapshot captured before any
+    ///     callback ran, so configuration edits take effect on the next tick.
+    /// </remarks>
+    public AtmosConfig Config { get; }
 
     /// <summary>Chunks captured for the current tick.</summary>
     public IReadOnlyList<AtmosChunkHandle> Chunks => _chunks;
@@ -52,7 +59,7 @@ public sealed class AtmosSolverContext
         _simulation.SetVoxelClassification(chunk, localVoxelIndex, classification);
     }
 
-    /// <summary>Changes one voxel temperature through the validated API.</summary>
+    /// <summary>Changes one voxel temperature and refreshes its pressure cache through the validated API.</summary>
     public void SetVoxelTemperature(AtmosChunkHandle chunk, ushort localVoxelIndex, float temperature)
     {
         _simulation.SetVoxelTemperature(chunk, localVoxelIndex, temperature);

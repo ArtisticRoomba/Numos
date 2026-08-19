@@ -7,6 +7,10 @@ namespace Numos.API.Dangerous;
 /// <summary>
 ///     Registers custom stages that receive unchecked live simulation views.
 /// </summary>
+/// <remarks>
+///     Pipeline edits made by a running stage take effect on the next tick. Registered custom solver instances
+///     remain caller-owned and are not disposed by the pipeline.
+/// </remarks>
 public readonly struct AtmosDangerousSolverPipeline
 {
     private readonly AtmosSimulation _simulation;

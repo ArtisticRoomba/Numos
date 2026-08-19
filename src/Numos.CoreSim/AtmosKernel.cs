@@ -17,6 +17,7 @@ internal sealed partial class AtmosKernel : IDisposable, IAtmosSolverWorld
     private float _accumulator;
     private long _chunkCollectionRevision;
     private AtmosConfig _config = new();
+    private bool _isTickExecuting;
 
     /// <summary>
     ///     High-resolution timestamp ticks spent processing boundary flow since the latest elapsed-time update.
@@ -39,6 +40,7 @@ internal sealed partial class AtmosKernel : IDisposable, IAtmosSolverWorld
     {
         lock (_stateGate)
         {
+            ThrowIfTickExecuting("dispose the simulation");
             foreach (var chunk in _chunkMap.Values)
                 chunk.Release();
 
@@ -49,17 +51,32 @@ internal sealed partial class AtmosKernel : IDisposable, IAtmosSolverWorld
 
     private void TickSimulation(AtmosChunk[] chunks)
     {
-        _tickConfig.Capture(_config);
-        TickCount++;
-
-        foreach (var chunk in chunks)
+        ThrowIfTickExecuting("run a recursive simulation tick");
+        _isTickExecuting = true;
+        try
         {
-            if (chunk.IsAwake)
-                chunk.MarkChanged();
-        }
+            _tickConfig.Capture(_config);
+            TickCount++;
 
-        var context = new AtmosSolverExecutionContext(this, chunks, _tickConfig, _config, TickCount);
-        _solverPipeline.Execute(context);
+            foreach (var chunk in chunks)
+            {
+                if (chunk.IsAwake)
+                    chunk.MarkChanged();
+            }
+
+            var context = new AtmosSolverExecutionContext(this, chunks, _tickConfig, _config, TickCount);
+            _solverPipeline.Execute(context);
+        }
+        finally
+        {
+            _isTickExecuting = false;
+        }
+    }
+
+    private void ThrowIfTickExecuting(string operation)
+    {
+        if (_isTickExecuting)
+            throw new InvalidOperationException($"A solver callback cannot {operation}.");
     }
 
     bool IAtmosSolverWorld.TryGetChunk(Int3 position, out AtmosChunk chunk)

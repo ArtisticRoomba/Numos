@@ -21,7 +21,7 @@ public delegate void AtmosDangerousSolver(AtmosDangerousSolverContext context);
 /// <remarks>
 ///     This interface provides configuration ownership only. Its solver still receives live, unchecked storage
 ///     and therefore has the same compatibility and invariant-maintenance responsibilities as
-///     <see cref="AtmosDangerousSolver" />.
+///     <see cref="AtmosDangerousSolver" />. Registration does not transfer ownership or disposal responsibility.
 /// </remarks>
 public interface IAtmosDangerousSolver<out TConfig> where TConfig : class
 {
@@ -48,7 +48,8 @@ public readonly ref struct AtmosDangerousSolverContext
     /// <summary>The one-based tick number currently being solved.</summary>
     public int TickCount => _context.TickCount;
 
-    /// <summary>The mutable live configuration retained by the simulation.</summary>
+    /// <summary>The mutable configuration reference captured at the beginning of this tick.</summary>
+    /// <remarks>Replacing the simulation configuration during this tick does not replace this reference.</remarks>
     public AtmosConfig Config => _context.Configuration;
 
     /// <summary>The number of chunks in the tick snapshot.</summary>
@@ -73,7 +74,7 @@ public readonly ref struct AtmosDangerousSolverContext
 
         chunk.WakeRoom(roomId);
         GasInjectionSolver.InjectDuringTick(
-            chunk, localVoxelIndex, gasId, moles, temperature, _context.Config);
+            chunk, localVoxelIndex, gasId, moles, temperature, _context.TickConfig);
     }
 }
 
@@ -98,7 +99,7 @@ public readonly ref struct AtmosDangerousChunk
     /// <summary>The number of addressable voxels.</summary>
     public int VoxelCount => _chunk.VoxelCount;
 
-    /// <summary>Whether built-in solver stages currently process the chunk.</summary>
+    /// <summary>Whether built-in stages that honor sleeping currently process this chunk.</summary>
     public bool IsAwake => _chunk.IsAwake;
 
     /// <summary>Gets or sets the unchecked sleep counter.</summary>
@@ -145,13 +146,13 @@ public readonly ref struct AtmosDangerousChunk
         return _chunk.GetIndex(x, y, z);
     }
 
-    /// <summary>Wakes and activates a room using the kernel operation.</summary>
+    /// <summary>Wakes and activates a room using the chunk topology operation.</summary>
     public void WakeRoom(int roomId)
     {
         _chunk.WakeRoom(roomId);
     }
 
-    /// <summary>Puts the chunk to sleep using the kernel operation.</summary>
+    /// <summary>Puts the chunk to sleep using the chunk lifecycle operation.</summary>
     public void Sleep()
     {
         _chunk.Sleep();

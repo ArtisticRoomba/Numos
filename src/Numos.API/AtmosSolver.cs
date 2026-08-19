@@ -18,7 +18,9 @@ public delegate void AtmosSolver(AtmosSolverContext context);
 /// <remarks>
 ///     Keep game- or solver-specific settings here rather than adding them to the simulation-wide
 ///     <see cref="CoreSim.AtmosConfig" />. The pipeline retains the solver instance through its registered
-///     callback, so callers may edit <see cref="Config" /> after registration.
+///     callback, so callers may edit <see cref="Config" /> after registration. Registration does not transfer
+///     ownership: if the implementation is disposable, the caller remains responsible for disposing it after
+///     unregistering it or disposing the simulation.
 /// </remarks>
 public interface IAtmosSolver<out TConfig> where TConfig : class
 {

@@ -105,6 +105,27 @@ public sealed class AtmosDangerousApiTests
         Assert.That(simulation.GetChunkSnapshot(chunk).Gases.Single().Moles[0], Is.EqualTo(3f));
     }
 
+    [Test]
+    public void DangerousSolver_ConfigReferenceIsStableForTheTick()
+    {
+        var original = new Numos.CoreSim.AtmosConfig();
+        var replacement = new Numos.CoreSim.AtmosConfig();
+        using var simulation = new AtmosSimulation(original);
+        var observed = new List<Numos.CoreSim.AtmosConfig>();
+        simulation.Dangerous().Solvers.RegisterBefore(AtmosBuiltInSolvers.Advection, "replace-config", context =>
+        {
+            if (context.TickCount == 1)
+                simulation.SetAtmosConfig(replacement);
+        });
+        simulation.Dangerous().Solvers.RegisterAfter("replace-config", "observe-config",
+            context => observed.Add(context.Config));
+
+        simulation.Tick();
+        simulation.Tick();
+
+        Assert.That(observed, Is.EqualTo(new[] { original, replacement }));
+    }
+
     private sealed class ConfiguredDangerousInjectionSolver :
         IAtmosDangerousSolver<DangerousInjectionSolverConfig>
     {

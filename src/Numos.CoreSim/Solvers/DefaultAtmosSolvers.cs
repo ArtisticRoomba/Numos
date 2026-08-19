@@ -12,8 +12,7 @@ internal sealed class DefaultAtmosSolvers : IDisposable
 
     internal DefaultAtmosSolvers(int chunkWidth, int chunkHeight, int chunkDepth)
     {
-        int maximumBoundaryEvents = checked(2 *
-            (chunkWidth * chunkHeight + chunkWidth * chunkDepth + chunkHeight * chunkDepth));
+        int maximumBoundaryEvents = GetBoundaryVoxelCount(chunkWidth, chunkHeight, chunkDepth);
         _advection = new AdvectionSolver(maximumBoundaryEvents);
         _thermodynamics = new ThermodynamicsSolver(maximumBoundaryEvents);
     }
@@ -33,5 +32,15 @@ internal sealed class DefaultAtmosSolvers : IDisposable
     {
         _advection.Dispose();
         _thermodynamics.Dispose();
+    }
+
+    private static int GetBoundaryVoxelCount(int width, int height, int depth)
+    {
+        int voxelCount = checked(width * height * depth);
+        int interiorWidth = Math.Max(0, width - 2);
+        int interiorHeight = Math.Max(0, height - 2);
+        int interiorDepth = depth > 1 ? Math.Max(0, depth - 2) : 1;
+        int interiorVoxelCount = checked(interiorWidth * interiorHeight * interiorDepth);
+        return voxelCount - interiorVoxelCount;
     }
 }

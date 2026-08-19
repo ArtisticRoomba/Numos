@@ -6,6 +6,11 @@ namespace Numos.API;
 /// <summary>
 ///     Configures the ordered solver stages executed by an <see cref="AtmosSimulation" />.
 /// </summary>
+/// <remarks>
+///     The enabled stage list is snapshotted before each tick. Registration, removal, and enablement changes made
+///     by a running solver therefore take effect on the next tick. Registered custom solver instances remain
+///     caller-owned; this pipeline does not dispose them.
+/// </remarks>
 public sealed class AtmosSolverPipeline
 {
     private readonly AtmosSimulation _simulation;
