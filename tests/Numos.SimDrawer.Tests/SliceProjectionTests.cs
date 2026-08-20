@@ -130,7 +130,9 @@ public sealed class SliceProjectionTests
             TotalPressure = Enumerable.Repeat(100f, count).ToArray(),
             Temperature = Enumerable.Repeat(293.15f, count).ToArray(),
             VoxelRoomMap = Enumerable.Repeat(1, count).ToArray(),
-            Gases = []
+            VoxelSnapGroupMap = Enumerable.Repeat(-1, count).ToArray(),
+            Gases = [],
+            IsAwake = true
         };
     }
 }

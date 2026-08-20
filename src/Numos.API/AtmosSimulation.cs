@@ -10,19 +10,21 @@ namespace Numos.API;
 ///     Provides the supported, engine-agnostic facade for running a voxel-based atmospheric simulation.
 /// </summary>
 /// <remarks>
-///     The simulation owns every chunk created through <see cref="CreateAndRegisterChunk" />. Call
+    ///     The simulation owns every chunk created through <see cref="CreateAndRegisterChunk(Int3, int)" />. Call
 ///     <see cref="Dispose" /> when the simulation is no longer needed to release those chunks and its
 ///     worker-local buffers. Unless otherwise noted, members that access kernel state throw
-///     <see cref="ObjectDisposedException" /> after disposal.
+///     <see cref="ObjectDisposedException" /> after disposal. A solver callback may use its context and edit the
+///     solver pipeline, but it must not recursively execute or dispose the simulation or change chunk ownership
+///     during the current tick.
 /// </remarks>
-public sealed class AtmosSimulation : IDisposable
+public sealed partial class AtmosSimulation : IDisposable
 {
     /// <summary>
     ///     The fixed simulation rate, in ticks per second.
     /// </summary>
     /// <remarks>Elapsed-time updates therefore use a fixed step of <c>1 / SimulationRate</c> seconds.</remarks>
     [PublicAPI]
-    public const float SimulationRate = AtmosKernel.SimulationRate;
+    public const float SimulationRate = AtmosSolverConstants.SimulationRate;
 
     private readonly int _chunkDepth;
     private readonly int _chunkHeight;
@@ -40,7 +42,10 @@ public sealed class AtmosSimulation : IDisposable
     ///     A chunk dimension is zero or negative, or the combined voxel count exceeds
     ///     <see cref="ushort.MaxValue" />.
     /// </exception>
-    public AtmosSimulation(int chunkWidth = 16, int chunkHeight = 16, int chunkDepth = 16)
+    public AtmosSimulation(
+        int chunkWidth = AtmosChunkConstants.DefaultWidth,
+        int chunkHeight = AtmosChunkConstants.DefaultHeight,
+        int chunkDepth = AtmosChunkConstants.DefaultDepth)
         : this(new AtmosConfig(), chunkWidth, chunkHeight, chunkDepth)
     {
     }
@@ -61,24 +66,30 @@ public sealed class AtmosSimulation : IDisposable
     ///     A chunk dimension is zero or negative, or the combined voxel count exceeds
     ///     <see cref="ushort.MaxValue" />.
     /// </exception>
-    public AtmosSimulation(AtmosConfig config, int chunkWidth = 16, int chunkHeight = 16, int chunkDepth = 16)
+    public AtmosSimulation(
+        AtmosConfig config,
+        int chunkWidth = AtmosChunkConstants.DefaultWidth,
+        int chunkHeight = AtmosChunkConstants.DefaultHeight,
+        int chunkDepth = AtmosChunkConstants.DefaultDepth)
     {
         ArgumentNullException.ThrowIfNull(config);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(chunkWidth);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(chunkHeight);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(chunkDepth);
-        if (chunkWidth > AtmosChunk.MaxVoxelCount || chunkHeight > AtmosChunk.MaxVoxelCount ||
-            chunkDepth > AtmosChunk.MaxVoxelCount)
+        if (chunkWidth > AtmosChunkConstants.MaximumVoxelCount ||
+            chunkHeight > AtmosChunkConstants.MaximumVoxelCount ||
+            chunkDepth > AtmosChunkConstants.MaximumVoxelCount)
         {
             throw new ArgumentOutOfRangeException(nameof(chunkWidth), chunkWidth,
-                $"No chunk dimension may exceed {AtmosChunk.MaxVoxelCount}.");
+                $"No chunk dimension may exceed {AtmosChunkConstants.MaximumVoxelCount}.");
         }
 
         long voxelCount = (long)chunkWidth * chunkHeight * chunkDepth;
-        if (voxelCount > AtmosChunk.MaxVoxelCount)
+        if (voxelCount > AtmosChunkConstants.MaximumVoxelCount)
         {
             throw new ArgumentOutOfRangeException(nameof(chunkWidth), chunkWidth,
-                $"Chunk dimensions contain {voxelCount} voxels, but at most {AtmosChunk.MaxVoxelCount} are supported.");
+                $"Chunk dimensions contain {voxelCount} voxels, but at most " +
+                $"{AtmosChunkConstants.MaximumVoxelCount} are supported.");
         }
 
         Config = config;
@@ -87,6 +98,7 @@ public sealed class AtmosSimulation : IDisposable
         _chunkDepth = chunkDepth;
         _kernel = new AtmosKernel(chunkWidth, chunkHeight, chunkDepth);
         _kernel.SetAtmosConfig(config);
+        Solvers = new AtmosSolverPipeline(this);
     }
 
     /// <summary>
@@ -110,6 +122,12 @@ public sealed class AtmosSimulation : IDisposable
     /// </remarks>
     [PublicAPI]
     public AtmosConfig Config { get; private set; }
+
+    /// <summary>
+    ///     Gets the ordered solver pipeline used by subsequent ticks.
+    /// </summary>
+    [PublicAPI]
+    public AtmosSolverPipeline Solvers { get; }
 
     /// <summary>
     ///     Gets the number of chunks currently owned by the simulation.
@@ -165,15 +183,19 @@ public sealed class AtmosSimulation : IDisposable
     /// <summary>
     ///     Releases all registered chunks and resources owned by the simulation.
     /// </summary>
-    /// <remarks>Disposal is idempotent.</remarks>
+    /// <remarks>Disposal is idempotent outside solver execution.</remarks>
+    /// <exception cref="InvalidOperationException">Called from a solver callback.</exception>
     [PublicAPI]
     public void Dispose()
     {
-        if (_disposed)
-            return;
+        lock (_mixtureGate)
+        {
+            if (_disposed)
+                return;
 
-        _kernel.Dispose();
-        _disposed = true;
+            _kernel.Dispose();
+            _disposed = true;
+        }
     }
 
     /// <summary>
@@ -185,11 +207,15 @@ public sealed class AtmosSimulation : IDisposable
     ///     update processes at most five fixed steps and discards time beyond that backlog limit.
     /// </remarks>
     /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
+    /// <exception cref="InvalidOperationException">Called recursively from a solver callback.</exception>
     [PublicAPI]
     public void Update(float elapsedSeconds)
     {
-        ThrowIfDisposed();
-        _kernel.Update(elapsedSeconds);
+        lock (_mixtureGate)
+        {
+            ThrowIfDisposed();
+            _kernel.Update(elapsedSeconds);
+        }
     }
 
     /// <summary>
@@ -201,11 +227,18 @@ public sealed class AtmosSimulation : IDisposable
     /// </param>
     /// <exception cref="ArgumentNullException"><paramref name="config" /> is <see langword="null" />.</exception>
     /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
+    /// <exception cref="InvalidOperationException">Called recursively from a solver callback.</exception>
     [PublicAPI]
     public void Update(float elapsedSeconds, AtmosConfig config)
     {
-        SetAtmosConfig(config);
-        Update(elapsedSeconds);
+        ArgumentNullException.ThrowIfNull(config);
+        lock (_mixtureGate)
+        {
+            ThrowIfDisposed();
+            _kernel.EnsureCanExecuteTick();
+            SetAtmosConfig(config);
+            Update(elapsedSeconds);
+        }
     }
 
     /// <summary>
@@ -220,10 +253,13 @@ public sealed class AtmosSimulation : IDisposable
     [PublicAPI]
     public void SetAtmosConfig(AtmosConfig config)
     {
-        ThrowIfDisposed();
         ArgumentNullException.ThrowIfNull(config);
-        Config = config;
-        _kernel.SetAtmosConfig(config);
+        lock (_mixtureGate)
+        {
+            ThrowIfDisposed();
+            Config = config;
+            _kernel.SetAtmosConfig(config);
+        }
     }
 
     /// <summary>
@@ -239,14 +275,49 @@ public sealed class AtmosSimulation : IDisposable
     ///     access to mutable kernel state.
     /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="maxActiveRooms" /> is zero or negative.</exception>
-    /// <exception cref="InvalidOperationException">A chunk is already registered at <paramref name="position" />.</exception>
+    /// <exception cref="InvalidOperationException">
+    ///     A chunk is already registered at <paramref name="position" />, or this is called from a solver callback.
+    /// </exception>
     /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
     [PublicAPI]
-    public AtmosChunkHandle CreateAndRegisterChunk(Int3 position, int maxActiveRooms = 64)
+    public AtmosChunkHandle CreateAndRegisterChunk(
+        Int3 position,
+        int maxActiveRooms = AtmosChunkConstants.DefaultMaxActiveRooms)
     {
         ThrowIfDisposed();
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxActiveRooms);
         _kernel.CreateAndRegisterChunk(position, _chunkWidth, _chunkHeight, _chunkDepth, maxActiveRooms);
+        return new AtmosChunkHandle(position);
+    }
+
+    /// <summary>
+    ///     Creates, classifies, and registers a chunk using this simulation's fixed chunk dimensions.
+    /// </summary>
+    /// <param name="position">The chunk's position in the chunk grid.</param>
+    /// <param name="maxActiveRooms">The maximum number of room IDs that may be active simultaneously.</param>
+    /// <param name="initialClassification">
+    ///     The classification assigned to every voxel before the chunk becomes visible to adjacent chunks.
+    /// </param>
+    /// <returns>A lightweight handle that identifies the new chunk to this facade.</returns>
+    /// <remarks>
+    ///     Applying the classification before registration makes chunk creation atomic with respect to boundary
+    ///     connectivity. In particular, a solid chunk is never transiently exposed as a passable neighbor.
+    /// </remarks>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="maxActiveRooms" /> is zero or negative.</exception>
+    /// <exception cref="InvalidOperationException">
+    ///     A chunk is already registered at <paramref name="position" />, or this is called from a solver callback.
+    /// </exception>
+    /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
+    [PublicAPI]
+    public AtmosChunkHandle CreateAndRegisterChunk(
+        Int3 position,
+        int maxActiveRooms,
+        VoxelClassification initialClassification)
+    {
+        ThrowIfDisposed();
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxActiveRooms);
+        _kernel.CreateAndRegisterChunk(position, _chunkWidth, _chunkHeight, _chunkDepth, maxActiveRooms,
+            initialClassification.RoomId);
         return new AtmosChunkHandle(position);
     }
 
@@ -260,6 +331,7 @@ public sealed class AtmosSimulation : IDisposable
     ///     position. Callers are responsible for keeping handles associated with their owning simulation.
     /// </remarks>
     /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
+    /// <exception cref="InvalidOperationException">Called from a solver callback.</exception>
     [PublicAPI]
     public bool UnregisterChunk(AtmosChunkHandle chunk)
     {
@@ -331,7 +403,10 @@ public sealed class AtmosSimulation : IDisposable
     /// <returns>
     ///     A snapshot containing copied pressure, temperature, gas-channel, and voxel-classification arrays.
     /// </returns>
-    /// <remarks>Mutating the returned arrays does not mutate the simulation.</remarks>
+    /// <remarks>
+    ///     Mutating the returned arrays does not mutate the simulation. Pressure is the chunk's cached field from
+    ///     its latest supported refresh; an in-place live-configuration edit is reflected after the next tick.
+    /// </remarks>
     /// <exception cref="KeyNotFoundException">No chunk is registered at the handle's position.</exception>
     /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
     [PublicAPI]
@@ -344,6 +419,10 @@ public sealed class AtmosSimulation : IDisposable
     /// <summary>
     ///     Returns detached values for one voxel without copying the chunk's full field arrays.
     /// </summary>
+    /// <remarks>
+    ///     Pressure is sampled from the chunk cache. Unlike <see cref="IGasMixture.Pressure" />, this method does not
+    ///     rederive pressure from an uncommitted in-place configuration edit before the next tick.
+    /// </remarks>
     /// <param name="chunk">The chunk containing the voxel.</param>
     /// <param name="localVoxelIndex">The voxel's flat local index.</param>
     /// <returns>Scalar values plus one moles value per active gas channel.</returns>
@@ -519,14 +598,17 @@ public sealed class AtmosSimulation : IDisposable
     /// <param name="localVoxelIndex">The voxel's zero-based index in the chunk's flattened storage.</param>
     /// <param name="temperature">The raw temperature value to store, in kelvins.</param>
     /// <remarks>
-    ///     The supplied value is stored without validation or eager normalization. Snapshots expose that raw value
-    ///     until a later operation overwrites it. Pressure and sensible-energy calculations treat a gas-bearing
-    ///     voxel's non-finite or nonpositive stored value as
+    ///     Subject to a representable derived pressure, the supplied value is stored without eager normalization.
+    ///     Snapshots expose that raw value until a later operation overwrites it. The pressure cache is refreshed immediately; pressure and
+    ///     sensible-energy calculations treat a gas-bearing voxel's non-finite or nonpositive stored value as
     ///     <see cref="AtmosConfig.DefaultTemperatureFallback" /> for that calculation.
     /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="localVoxelIndex" /> is outside the chunk.</exception>
     /// <exception cref="KeyNotFoundException">No chunk is registered at the handle's position.</exception>
     /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
+    /// <exception cref="InvalidOperationException">
+    ///     The requested temperature would make the voxel's derived pressure unrepresentable.
+    /// </exception>
     [PublicAPI]
     public void SetVoxelTemperature(AtmosChunkHandle chunk, ushort localVoxelIndex, float temperature)
     {
@@ -543,14 +625,17 @@ public sealed class AtmosSimulation : IDisposable
     /// <param name="z">The zero-based local z-coordinate.</param>
     /// <param name="temperature">The raw temperature value to store, in kelvins.</param>
     /// <remarks>
-    ///     The supplied value is stored without validation or eager normalization. Snapshots expose that raw value
-    ///     until a later operation overwrites it. Pressure and sensible-energy calculations treat a gas-bearing
-    ///     voxel's non-finite or nonpositive stored value as
+    ///     Subject to a representable derived pressure, the supplied value is stored without eager normalization.
+    ///     Snapshots expose that raw value until a later operation overwrites it. The pressure cache is refreshed immediately; pressure and
+    ///     sensible-energy calculations treat a gas-bearing voxel's non-finite or nonpositive stored value as
     ///     <see cref="AtmosConfig.DefaultTemperatureFallback" /> for that calculation.
     /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException">A local coordinate is outside the chunk.</exception>
     /// <exception cref="KeyNotFoundException">No chunk is registered at the handle's position.</exception>
     /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
+    /// <exception cref="InvalidOperationException">
+    ///     The requested temperature would make the voxel's derived pressure unrepresentable.
+    /// </exception>
     [PublicAPI]
     public void SetVoxelTemperature(AtmosChunkHandle chunk, int x, int y, int z, float temperature)
     {
@@ -568,11 +653,12 @@ public sealed class AtmosSimulation : IDisposable
     /// <param name="temperature">The temperature of the added gas, in kelvins.</param>
     /// <remarks>
     ///     The room classification containing the voxel is activated before injection. Injection into a solid or
-    ///     void voxel is ignored. The added gas carries sensible energy according to its effective molar heat
-    ///     capacity, and the stored temperature is updated by sensible-energy balance. Before blending, the heat
+    ///     void voxel is ignored. The added gas carries sensible internal energy according to its molar heat
+    ///     capacity at constant volume, and the stored temperature is updated by energy balance. Before blending, the
+    ///     heat
     ///     capacity of gas already in the voxel is recomputed from the current <see cref="Config" />. A missing
     ///     registry entry or non-finite or nonpositive configured heat capacity uses
-    ///     <see cref="AtmosConfig.DefaultSpecificHeatCapacity" />. When gas is already present, a non-finite or
+    ///     <see cref="AtmosConfig.DefaultMolarHeatCapacityAtConstantVolume" />. When gas is already present, a non-finite or
     ///     nonpositive stored temperature contributes prior sensible energy at
     ///     <see cref="AtmosConfig.DefaultTemperatureFallback" />. An empty voxel instead adopts the incoming
     ///     temperature.
@@ -581,6 +667,9 @@ public sealed class AtmosSimulation : IDisposable
     /// <exception cref="ArgumentOutOfRangeException">
     ///     <paramref name="gasId" /> is negative, <paramref name="moles" /> is not positive and finite, or
     ///     <paramref name="temperature" /> is negative or non-finite.
+    /// </exception>
+    /// <exception cref="InvalidOperationException">
+    ///     The resulting gas amount, total moles, heat capacity, temperature, or pressure is not representable.
     /// </exception>
     /// <exception cref="KeyNotFoundException">No chunk is registered at the handle's position.</exception>
     /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
@@ -604,11 +693,12 @@ public sealed class AtmosSimulation : IDisposable
     /// <param name="temperature">The temperature of the added gas, in kelvins.</param>
     /// <remarks>
     ///     The room classification containing the voxel is activated before injection. Injection into a solid or
-    ///     void voxel is ignored. The added gas carries sensible energy according to its effective molar heat
-    ///     capacity, and the stored temperature is updated by sensible-energy balance. Before blending, the heat
+    ///     void voxel is ignored. The added gas carries sensible internal energy according to its molar heat
+    ///     capacity at constant volume, and the stored temperature is updated by energy balance. Before blending, the
+    ///     heat
     ///     capacity of gas already in the voxel is recomputed from the current <see cref="Config" />. A missing
     ///     registry entry or non-finite or nonpositive configured heat capacity uses
-    ///     <see cref="AtmosConfig.DefaultSpecificHeatCapacity" />. When gas is already present, a non-finite or
+    ///     <see cref="AtmosConfig.DefaultMolarHeatCapacityAtConstantVolume" />. When gas is already present, a non-finite or
     ///     nonpositive stored temperature contributes prior sensible energy at
     ///     <see cref="AtmosConfig.DefaultTemperatureFallback" />. An empty voxel instead adopts the incoming
     ///     temperature.
@@ -635,8 +725,12 @@ public sealed class AtmosSimulation : IDisposable
     /// <param name="chunk">A handle identifying the target chunk.</param>
     /// <param name="roomId">The classification ID of the room to activate.</param>
     /// <remarks>
-    ///     Waking an already active room resets its sleep timer. Solid and void classification IDs are ignored.
+    ///     Waking an already active room resets its sleep timer. A wake from automatic sleep first restores the
+    ///     complete retained active domain, then admits a new room only when it fits the chunk's capacity. A chunk
+    ///     frozen explicitly with <see cref="SleepChunk" /> retains targeted replacement-domain behavior. Solid and
+    ///     void classification IDs are ignored.
     /// </remarks>
+    /// <exception cref="InvalidOperationException">The chunk's active-room capacity would be exceeded.</exception>
     /// <exception cref="KeyNotFoundException">No chunk is registered at the handle's position.</exception>
     /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
     [PublicAPI]
@@ -668,11 +762,15 @@ public sealed class AtmosSimulation : IDisposable
     ///     increments <see cref="TickCount" /> by one.
     /// </remarks>
     /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
+    /// <exception cref="InvalidOperationException">Called recursively from a solver callback.</exception>
     [PublicAPI]
     public void Tick()
     {
-        ThrowIfDisposed();
-        _kernel.Tick();
+        lock (_mixtureGate)
+        {
+            ThrowIfDisposed();
+            _kernel.Tick();
+        }
     }
 
     private void ThrowIfDisposed()

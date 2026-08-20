@@ -395,6 +395,10 @@ public partial class SimulationViewer
 
         RenderVisualizationLegend();
 
+        ImGui.Text("Voxel State");
+        ImGui.Text("/  Snapped group (color-coded)");
+        ImGui.TextColored(new Vector4(1f, 0.25f, 0.2f, 1f), "X  Sleeping chunk");
+
         ImGui.Separator();
         RenderRenderingStyleTable();
 
@@ -485,52 +489,99 @@ public partial class SimulationViewer
                     ref defaultTemperatureFallback, 0f, 1000f,
                     "Default fallback temperature to set when a voxel has 0 or an uninitialized temperature."))
                 _config.DefaultTemperatureFallback = defaultTemperatureFallback;
+            float voxelVolume = _config.VoxelVolume;
+            if (ConfigSlider("Voxel Volume (m³)", "config-voxel-volume", ref voxelVolume, 0.001f, 100f,
+                    "Physical volume represented by each voxel. Pressure uses P = nRT/V."))
+                _config.VoxelVolume = voxelVolume;
+            float saturationReferencePressure = _config.SaturationReferencePressure;
+            if (ConfigSlider("Saturation Reference Pressure (Pa)", "config-saturation-reference-pressure",
+                    ref saturationReferencePressure, 100f, 200_000f,
+                    "Pressure at which each gas's configured boiling point applies."))
+                _config.SaturationReferencePressure = saturationReferencePressure;
+            float defaultMolarHeatCapacityAtConstantVolume = _config.DefaultMolarHeatCapacityAtConstantVolume;
+            if (ConfigSlider("Default Molar Cv", "config-default-molar-cv",
+                    ref defaultMolarHeatCapacityAtConstantVolume, 0.01f, 10_000f,
+                    "Fallback molar heat capacity at constant volume in J/(mol·K)."))
+                _config.DefaultMolarHeatCapacityAtConstantVolume = defaultMolarHeatCapacityAtConstantVolume;
+            float defaultDiffusionCoefficient = _config.DefaultDiffusionCoefficient;
+            if (ConfigSlider("Default Diffusion Coefficient", "config-default-diffusion-coefficient",
+                    ref defaultDiffusionCoefficient, 0f, 1f,
+                    "Fallback fraction of the species mole imbalance mixed per tick."))
+                _config.DefaultDiffusionCoefficient = defaultDiffusionCoefficient;
             float spaceTemperature = _config.SpaceTemperature;
             if (ConfigSlider("Space Temperature", "config-space-temperature", ref spaceTemperature, 0f, 100f,
                     "Default temperature of space."))
                 _config.SpaceTemperature = spaceTemperature;
-            float flowFriction = _config.FlowFriction;
-            if (ConfigSlider("Flow Friction", "config-flow-friction", ref flowFriction, 0f, 1f,
+            float bulkFlowCoefficient = _config.BulkFlowCoefficient;
+            if (ConfigSlider("Bulk Flow Coefficient", "config-bulk-flow-coefficient", ref bulkFlowCoefficient, 0f, 1f,
                     "Fraction of pressure delta converted to flow per tick."))
-                _config.FlowFriction = flowFriction;
-            float dampingFactor = _config.DampingFactor;
-            if (ConfigSlider("Damping Factor", "config-damping-factor", ref dampingFactor, 0f, 1f,
-                    "Multiplier applied to Flow Friction during large-delta advection. Used to reduce oscillation in the sim."))
-                _config.DampingFactor = dampingFactor;
-            float snapThreshold = _config.SnapThreshold;
-            if (ConfigSlider("Snap Threshold", "config-snap-threshold", ref snapThreshold, 0f, 100f,
-                    "Below this pressure delta, flow uses the Cfl Flow Cap directly instead of Flow Friction multiplied by Damping Factor."))
-                _config.SnapThreshold = snapThreshold;
-            float minFlowCutoff = _config.MinFlowCutoff;
-            if (ConfigSlider("Minimum Flow Cutoff", "config-min-flow-cutoff", ref minFlowCutoff, 0f, 10f,
-                    "Flows below this magnitude are discarded."))
-                _config.MinFlowCutoff = minFlowCutoff;
+                _config.BulkFlowCoefficient = bulkFlowCoefficient;
+            float bulkFlowDamping = _config.BulkFlowDamping;
+            if (ConfigSlider("Bulk Flow Damping", "config-bulk-flow-damping", ref bulkFlowDamping, 0f, 1f,
+                    "Multiplier applied to the bulk-flow coefficient during large pressure deltas."))
+                _config.BulkFlowDamping = bulkFlowDamping;
+            float lowPressureDeltaThreshold = _config.LowPressureDeltaThreshold;
+            if (ConfigSlider("Low-Pressure Delta Threshold (Pa)", "config-low-pressure-delta-threshold",
+                    ref lowPressureDeltaThreshold, 0f, 100f,
+                    "Below this pressure delta, flow uses the maximum pressure-transfer fraction directly."))
+                _config.LowPressureDeltaThreshold = lowPressureDeltaThreshold;
+            float minimumPressureTransfer = _config.MinimumPressureTransfer;
+            if (ConfigSlider("Minimum Pressure Transfer (Pa/tick)", "config-minimum-pressure-transfer",
+                    ref minimumPressureTransfer, 0f, 10f,
+                    "Candidate pressure transfers below this magnitude are discarded."))
+                _config.MinimumPressureTransfer = minimumPressureTransfer;
             float vacuumThreshold = _config.VacuumThreshold;
             if (ConfigSlider("Vacuum Threshold", "config-vacuum-threshold", ref vacuumThreshold, 0f, 100f,
                     "Below this pressure, voxel contents are zeroed out."))
                 _config.VacuumThreshold = vacuumThreshold;
             int sleepThreshold = _config.SleepThreshold;
-            if (ConfigSlider("Sleep Threshold", "config-sleep-threshold", ref sleepThreshold, 1, 1000,
-                    "Consecutive ticks below Sleep Epsilon before a chunk goes to sleep."))
+            if (ConfigSlider("Sleep Threshold", "config-sleep-threshold", ref sleepThreshold, 0, 1000,
+                    "Consecutive stable verification ticks required before automatic sleep. Snap-assisted sleep " +
+                    "always observes at least one complete thermodynamics cadence."))
                 _config.SleepThreshold = sleepThreshold;
             float sleepEpsilon = _config.SleepEpsilon;
-            if (ConfigSlider("Sleep Epsilon", "config-sleep-epsilon", ref sleepEpsilon, 0f, 100f,
-                    "Maximum pressure delta considered at rest."))
+            if (ConfigSlider("Absolute Sleep Epsilon (Pa)", "config-sleep-epsilon", ref sleepEpsilon, 0f, 100f,
+                    "Absolute floor for the maximum pressure correction allowed during voxel snapping. " +
+                    "When snapping is disabled, this is the legacy neighboring pressure-delta threshold."))
                 _config.SleepEpsilon = sleepEpsilon;
-            float thermalConductivity = _config.ThermalConductivity;
-            if (ConfigSlider("Thermal Conductivity", "config-thermal-conductivity", ref thermalConductivity, 0f, 1f,
-                    "Fraction of temperature delta transferred per neighbor per tick."))
-                _config.ThermalConductivity = thermalConductivity;
+            float voxelSnapPressureRelativeEpsilon = _config.VoxelSnapPressureRelativeEpsilon;
+            if (ConfigSlider("Voxel Snap Relative Pressure Epsilon",
+                    "config-voxel-snap-pressure-relative-epsilon",
+                    ref voxelSnapPressureRelativeEpsilon, 0f, 0.01f,
+                    "Maximum pressure correction as a fraction of the current/equilibrium pressure scale; " +
+                    "0.001 means 0.1%. The larger of this limit and the absolute sleep epsilon is used."))
+                _config.VoxelSnapPressureRelativeEpsilon = voxelSnapPressureRelativeEpsilon;
+            bool voxelSnappingEnabled = _config.VoxelSnappingEnabled;
+            if (ConfigCheckbox("Voxel Snapping Enabled", "config-voxel-snapping-enabled",
+                    ref voxelSnappingEnabled,
+                    "Conservatively projects settled neighboring voxels toward uniform species and energy state. " +
+                    "Disabling this bypasses the projection but does not disable automatic or manual sleeping."))
+                _config.VoxelSnappingEnabled = voxelSnappingEnabled;
+            float voxelSnapTemperatureEpsilon = _config.VoxelSnapTemperatureEpsilon;
+            if (ConfigSlider("Voxel Snap Temperature Epsilon (K)", "config-voxel-snap-temperature-epsilon",
+                    ref voxelSnapTemperatureEpsilon, 0f, 10f,
+                    "Maximum temperature correction, in kelvins, allowed for each member of a proposed aggregate."))
+                _config.VoxelSnapTemperatureEpsilon = voxelSnapTemperatureEpsilon;
+            float voxelSnapMoleFractionEpsilon = _config.VoxelSnapMoleFractionEpsilon;
+            if (ConfigSlider("Voxel Snap Mole-Fraction Epsilon", "config-voxel-snap-mole-fraction-epsilon",
+                    ref voxelSnapMoleFractionEpsilon, 0f, 1f,
+                    "Maximum per-species mole-fraction correction allowed for each proposed member (0 to 1)."))
+                _config.VoxelSnapMoleFractionEpsilon = voxelSnapMoleFractionEpsilon;
+            float thermalConductance = _config.ThermalConductance;
+            if (ConfigSlider("Thermal Conductance", "config-thermal-conductance", ref thermalConductance, 0f, 1f,
+                    "Per-face energy conductance in J/K per thermodynamics tick."))
+                _config.ThermalConductance = thermalConductance;
             float condensationRateFactor = _config.CondensationRateFactor;
             if (ConfigSlider("Condensation Rate Factor", "config-condensation-rate-factor", ref condensationRateFactor,
                     0f,
                     1f,
                     "Rate multiplier for phase-change condensation."))
                 _config.CondensationRateFactor = condensationRateFactor;
-            float cflFlowCap = _config.CflFlowCap;
-            if (ConfigSlider("CFL Flow Cap", "config-cfl-flow-cap", ref cflFlowCap, 0f, 1f,
-                    "Rate multiplier for phase-change condensation."))
-                _config.CflFlowCap = cflFlowCap;
+            float maxPressureTransferFraction = _config.MaxPressureTransferFractionPerNeighbor;
+            if (ConfigSlider("Max Pressure Transfer / Neighbor", "config-max-pressure-transfer-fraction",
+                    ref maxPressureTransferFraction, 0f, 1f,
+                    "Maximum source-pressure fraction requested as bulk flow to one neighbor per tick."))
+                _config.MaxPressureTransferFractionPerNeighbor = maxPressureTransferFraction;
             float accumulatorWakeThreshold = _config.AccumulatorWakeThreshold;
             if (ConfigSlider("Accumulator Wake Threshold", "config-accumulator-wake-threshold",
                     ref accumulatorWakeThreshold, 0f, 100f,
@@ -556,17 +607,25 @@ public partial class SimulationViewer
         var defaults = new AtmosConfig();
         _config.GlobalTemperature = defaults.GlobalTemperature;
         _config.DefaultTemperatureFallback = defaults.DefaultTemperatureFallback;
+        _config.DefaultMolarHeatCapacityAtConstantVolume = defaults.DefaultMolarHeatCapacityAtConstantVolume;
+        _config.VoxelVolume = defaults.VoxelVolume;
+        _config.SaturationReferencePressure = defaults.SaturationReferencePressure;
+        _config.DefaultDiffusionCoefficient = defaults.DefaultDiffusionCoefficient;
         _config.SpaceTemperature = defaults.SpaceTemperature;
-        _config.FlowFriction = defaults.FlowFriction;
-        _config.DampingFactor = defaults.DampingFactor;
-        _config.SnapThreshold = defaults.SnapThreshold;
-        _config.MinFlowCutoff = defaults.MinFlowCutoff;
+        _config.BulkFlowCoefficient = defaults.BulkFlowCoefficient;
+        _config.BulkFlowDamping = defaults.BulkFlowDamping;
+        _config.LowPressureDeltaThreshold = defaults.LowPressureDeltaThreshold;
+        _config.MinimumPressureTransfer = defaults.MinimumPressureTransfer;
         _config.VacuumThreshold = defaults.VacuumThreshold;
         _config.SleepThreshold = defaults.SleepThreshold;
         _config.SleepEpsilon = defaults.SleepEpsilon;
-        _config.ThermalConductivity = defaults.ThermalConductivity;
+        _config.VoxelSnapPressureRelativeEpsilon = defaults.VoxelSnapPressureRelativeEpsilon;
+        _config.VoxelSnappingEnabled = defaults.VoxelSnappingEnabled;
+        _config.VoxelSnapTemperatureEpsilon = defaults.VoxelSnapTemperatureEpsilon;
+        _config.VoxelSnapMoleFractionEpsilon = defaults.VoxelSnapMoleFractionEpsilon;
+        _config.ThermalConductance = defaults.ThermalConductance;
         _config.CondensationRateFactor = defaults.CondensationRateFactor;
-        _config.CflFlowCap = defaults.CflFlowCap;
+        _config.MaxPressureTransferFractionPerNeighbor = defaults.MaxPressureTransferFractionPerNeighbor;
         _config.AccumulatorWakeThreshold = defaults.AccumulatorWakeThreshold;
         _config.AccumulatorMaxAliveTicks = defaults.AccumulatorMaxAliveTicks;
     }
@@ -583,6 +642,13 @@ public partial class SimulationViewer
     {
         ImGui.SetNextItemWidth(100f);
         bool changed = ImGui.SliderInt($"{label} (?)##{id}", ref value, min, max);
+        SetConfigTooltip(tooltip);
+        return changed;
+    }
+
+    private static bool ConfigCheckbox(string label, string id, ref bool value, string tooltip)
+    {
+        bool changed = ImGui.Checkbox($"{label} (?)##{id}", ref value);
         SetConfigTooltip(tooltip);
         return changed;
     }
@@ -943,7 +1009,7 @@ public partial class SimulationViewer
         }
 
         ImGui.Text($"Temperature: {details.Temperature:F2} K");
-        ImGui.Text($"Pressure: {details.Pressure:F2}");
+        ImGui.Text($"Pressure: {details.Pressure:F2} Pa");
         GetGasSummary(details.Gases, out float totalMoles, out int primaryGasId);
         ImGui.Text($"Total Moles: {totalMoles:F2}");
         ImGui.Text($"Primary Gas: {FormatGas(primaryGasId)}");
@@ -1077,8 +1143,8 @@ public partial class SimulationViewer
                     {
                         float maxPressure = snapshot.TotalPressure.Max();
                         float avgPressure = snapshot.TotalPressure.Where(p => p > 0).DefaultIfEmpty(0).Average();
-                        ImGui.Text($"Max Pressure: {maxPressure:F2}");
-                        ImGui.Text($"Avg Pressure: {avgPressure:F2}");
+                        ImGui.Text($"Max Pressure: {maxPressure:F2} Pa");
+                        ImGui.Text($"Avg Pressure: {avgPressure:F2} Pa");
                     }
 
                     if (snapshot.Temperature is { Length: > 0 })

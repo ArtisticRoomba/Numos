@@ -22,7 +22,7 @@ public sealed class AtmosChunkTopologyTests
             Assert.That(chunk.ActiveAirIndices, Has.Length.EqualTo(24).And.All.Zero);
             Assert.That(chunk.TotalPressure.ToArray(), Has.Length.EqualTo(24).And.All.Zero);
             Assert.That(chunk.Temperature.ToArray(), Has.Length.EqualTo(24).And.All.Zero);
-            Assert.That(chunk.ActiveGases, Has.Length.EqualTo(16));
+            Assert.That(chunk.ActiveGases, Has.Length.EqualTo(AtmosChunkConstants.InitialGasChannelCapacity));
             Assert.That(chunk.ActiveRoomIds, Has.Length.EqualTo(5).And.All.Zero);
             Assert.That(chunk.ActiveAirCount, Is.Zero);
             Assert.That(chunk.ActiveGasCount, Is.Zero);
@@ -137,8 +137,8 @@ public sealed class AtmosChunkTopologyTests
         });
     }
 
-    [TestCase(AtmosChunk.RoomSolid)]
-    [TestCase(AtmosChunk.RoomVoid)]
+    [TestCase(VoxelClassification.RoomSolid)]
+    [TestCase(VoxelClassification.RoomVoid)]
     public void WakeRoom_IgnoresReservedNonAirClassifications(int roomId)
     {
         var chunk = new AtmosChunk(2, 1, 1)
@@ -162,23 +162,23 @@ public sealed class AtmosChunkTopologyTests
     {
         var chunk = new AtmosChunk(4, 1, 1);
 
-        chunk.WakeRoom(AtmosChunk.RoomUnassigned);
+        chunk.WakeRoom(VoxelClassification.RoomUnassigned);
 
         Assert.Multiple(() =>
         {
             Assert.That(chunk.IsAwake, Is.True);
             Assert.That(chunk.ActiveRoomCount, Is.EqualTo(1));
-            Assert.That(chunk.ActiveRoomIds[0], Is.EqualTo(AtmosChunk.RoomUnassigned));
+            Assert.That(chunk.ActiveRoomIds[0], Is.EqualTo(VoxelClassification.RoomUnassigned));
             Assert.That(chunk.ActiveAirCount, Is.EqualTo(4));
             Assert.That(chunk.ActiveAirIndices.Take(chunk.ActiveAirCount), Is.EqualTo(new ushort[] { 0, 1, 2, 3 }));
         });
     }
 
     [Test]
-    public void WakeRoom_BuildsAscendingUnionOfAllActiveRooms()
+    public void WakeRoom_ClosesAcrossAdjacentPassableRoomLabels()
     {
         var chunk = new AtmosChunk(6, 1, 1);
-        int[] roomIds = [1, 2, 3, 1, 2, AtmosChunk.RoomSolid];
+        int[] roomIds = [1, 2, 3, 1, 2, VoxelClassification.RoomSolid];
         chunk.VoxelRoomMap.CopyFrom(roomIds);
 
         chunk.WakeRoom(1);
@@ -186,10 +186,12 @@ public sealed class AtmosChunkTopologyTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(chunk.ActiveRoomCount, Is.EqualTo(2));
+            Assert.That(chunk.ActiveRoomCount, Is.EqualTo(2),
+                "Explicit WakeRoom calls retain their requested seed IDs.");
             Assert.That(chunk.ActiveRoomIds.Take(chunk.ActiveRoomCount), Is.EqualTo(new[] { 1, 2 }));
-            Assert.That(chunk.ActiveAirCount, Is.EqualTo(4));
-            Assert.That(chunk.ActiveAirIndices.Take(chunk.ActiveAirCount), Is.EqualTo(new ushort[] { 0, 1, 3, 4 }));
+            Assert.That(chunk.ActiveAirCount, Is.EqualTo(5));
+            Assert.That(chunk.ActiveAirIndices.Take(chunk.ActiveAirCount),
+                Is.EqualTo(new ushort[] { 0, 1, 2, 3, 4 }));
         });
     }
 
@@ -230,23 +232,27 @@ public sealed class AtmosChunkTopologyTests
             Assert.That(chunk.IsAwake, Is.True);
             Assert.That(chunk.ActiveRoomCount, Is.EqualTo(1));
             Assert.That(chunk.ActiveRoomIds[0], Is.EqualTo(3));
-            Assert.That(chunk.ActiveAirCount, Is.EqualTo(1));
-            Assert.That(chunk.ActiveAirIndices[0], Is.EqualTo(2));
+            Assert.That(chunk.ActiveAirCount, Is.EqualTo(3));
+            Assert.That(chunk.ActiveAirIndices.Take(chunk.ActiveAirCount),
+                Is.EqualTo(new ushort[] { 0, 1, 2 }));
         });
     }
 
     [Test]
     public void WakeRoom_ThrowsBeforeExceedingRoomCapacity()
     {
-        var chunk = new AtmosChunk(3, 1, 1, 2);
+        var chunk = new AtmosChunk(5, 1, 1, 2);
         chunk.VoxelRoomMap[0] = 1;
-        chunk.VoxelRoomMap[1] = 2;
-        chunk.VoxelRoomMap[2] = 3;
+        chunk.VoxelRoomMap[1] = VoxelClassification.RoomSolid;
+        chunk.VoxelRoomMap[2] = 2;
+        chunk.VoxelRoomMap[3] = VoxelClassification.RoomSolid;
+        chunk.VoxelRoomMap[4] = 3;
         chunk.WakeRoom(1);
         chunk.WakeRoom(2);
 
         Assert.That(() => chunk.WakeRoom(3),
-            Throws.Exception.With.Message.EqualTo("Maximum active rooms reached for this chunk!"));
+            Throws.TypeOf<InvalidOperationException>()
+                .With.Message.EqualTo("Maximum active rooms reached for this chunk."));
         Assert.That(chunk.ActiveRoomCount, Is.EqualTo(2));
     }
 
@@ -256,15 +262,16 @@ public sealed class AtmosChunkTopologyTests
         var chunk = new AtmosChunk(5, 1, 1);
         chunk.VoxelRoomMap.Fill(4);
         chunk.WakeRoom(4);
-        chunk.VoxelRoomMap[1] = AtmosChunk.RoomSolid;
+        chunk.VoxelRoomMap[1] = VoxelClassification.RoomSolid;
         chunk.VoxelRoomMap[3] = 9;
 
         chunk.RebuildActiveAirIndices();
 
         Assert.Multiple(() =>
         {
-            Assert.That(chunk.ActiveAirCount, Is.EqualTo(3));
-            Assert.That(chunk.ActiveAirIndices.Take(chunk.ActiveAirCount), Is.EqualTo(new ushort[] { 0, 2, 4 }));
+            Assert.That(chunk.ActiveAirCount, Is.EqualTo(4));
+            Assert.That(chunk.ActiveAirIndices.Take(chunk.ActiveAirCount),
+                Is.EqualTo(new ushort[] { 0, 2, 3, 4 }));
         });
     }
 
@@ -272,7 +279,7 @@ public sealed class AtmosChunkTopologyTests
     public void Sleep_MarksChunkAsNotAwakeWithoutDiscardingTopology()
     {
         var chunk = new AtmosChunk(2, 1, 1);
-        chunk.WakeRoom(AtmosChunk.RoomUnassigned);
+        chunk.WakeRoom(VoxelClassification.RoomUnassigned);
 
         chunk.Sleep();
 
@@ -284,14 +291,4 @@ public sealed class AtmosChunkTopologyTests
         });
     }
 
-    [Test]
-    public void RoomConstants_MatchPublicVoxelClassificationConstants()
-    {
-        Assert.Multiple(() =>
-        {
-            Assert.That(AtmosChunk.RoomUnassigned, Is.EqualTo(VoxelClassification.RoomUnassigned));
-            Assert.That(AtmosChunk.RoomSolid, Is.EqualTo(VoxelClassification.RoomSolid));
-            Assert.That(AtmosChunk.RoomVoid, Is.EqualTo(VoxelClassification.RoomVoid));
-        });
-    }
 }

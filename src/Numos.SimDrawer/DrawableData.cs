@@ -56,8 +56,21 @@ public enum VoxelFaceMask : byte
 }
 
 /// <summary>
+///     Diagnostic symbol drawn over a voxel independently of the selected visualization.
+/// </summary>
+public enum VoxelStateMarker : byte
+{
+    None,
+    Snapped,
+    Sleeping
+}
+
+/// <summary>
 ///     Immutable presentation values for one voxel. It contains no API-specific mesh data.
 /// </summary>
+/// <param name="Temperature">Temperature in kelvins (K).</param>
+/// <param name="Pressure">Pressure in pascals (Pa).</param>
+/// <param name="TotalMoles">Total gas amount in moles (mol).</param>
 public readonly record struct VoxelDrawData(
     bool IsVisible,
     VoxelFaceMask VisibleFaces,
@@ -66,7 +79,10 @@ public readonly record struct VoxelDrawData(
     float TotalMoles,
     int PrimaryGasId,
     int RoomId,
-    ColorRgba Color);
+    ColorRgba Color,
+    VoxelStateMarker StateMarker = VoxelStateMarker.None,
+    int SnapGroupId = -1,
+    ColorRgba StateMarkerColor = default);
 
 /// <summary>
 ///     Immutable presentation data and invalidation keys for one chunk.

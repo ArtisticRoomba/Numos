@@ -11,42 +11,51 @@ public struct GasProperties
     public string Name;
 
     /// <summary>
-    ///     Effective molar heat capacity of the gas, in joules per mole-kelvin (J/(mol·K)).
+    ///     Molar heat capacity at constant volume, in joules per mole-kelvin (J/(mol·K)).
     /// </summary>
     /// <remarks>
     ///     This value determines the sensible energy carried by gas during injection and flow, the voxel's
     ///     total heat capacity, and the energy removed during condensation. Non-finite values and values less
-    ///     than or equal to zero use <see cref="AtmosConfig.DefaultSpecificHeatCapacity" />.
+    ///     than or equal to zero use <see cref="AtmosConfig.DefaultMolarHeatCapacityAtConstantVolume" />.
     /// </remarks>
-    public float SpecificHeatCapacity;
+    public float MolarHeatCapacityAtConstantVolume;
 
     /// <summary>
-    ///     Temperature in kelvin above which the gas remains gaseous.
+    ///     Normal boiling temperature, in kelvins (K), at
+    ///     <see cref="AtmosConfig.SaturationReferencePressure" />.
     /// </summary>
     public float BoilingPoint;
 
     /// <summary>
-    ///     Temperature in kelvin below which condensation can begin.
+    ///     Whether this species participates in the condensation model.
+    /// </summary>
+    public bool CondensationEnabled;
+
+    /// <summary>
+    ///     Molar enthalpy of vaporization, in joules per mole (J/mol).
     /// </summary>
     /// <remarks>
-    ///     In the sim, this is used as a hard gate for condensation,
-    ///     it doesn't actually reflect the real life behavior.
+    ///     The phase-equilibrium model uses this value in Clausius–Clapeyron. The constant-volume energy
+    ///     balance converts it to an approximate internal-energy change, <c>ΔU_vap = ΔH_vap - RT</c>.
     /// </remarks>
-    public float CondensationPoint;
+    public float MolarEnthalpyOfVaporization;
 
     /// <summary>
-    ///     Energy released per mole during condensation, in joules per mole (J/mol).
+    ///     Reserved ID for a liquid produced by condensation.
     /// </summary>
-    public float LatentHeatOfVaporization;
-
-    /// <summary>
-    ///     ID of the liquid this gas condenses to. Currently unused but can be passed to a separate fluid sim.
-    /// </summary>
+    /// <remarks>
+    ///     Numos currently removes condensed vapor without producing liquid state or an event, so this field is
+    ///     not consumed by the built-in solver. A custom liquid integration may interpret it.
+    /// </remarks>
     /// TODO FAR FUTURE fluid sim :godo:
     public int LiquidId;
 
     /// <summary>
-    ///     Fickian diffusion rate, used when calculating gas mixing via partial pressures.
+    ///     Dimensionless fraction of the per-species mole imbalance mixed per simulation tick.
     /// </summary>
-    public float DiffusionCoefficient; // Passive Fickian diffusion rate
+    /// <remarks>
+    ///     Values are normalized to [0, 1] and the explicit face update caps the effective fraction at 0.5;
+    ///     non-finite values disable diffusion for this species.
+    /// </remarks>
+    public float DiffusionCoefficient;
 }

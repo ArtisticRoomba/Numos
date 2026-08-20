@@ -15,6 +15,7 @@ public readonly record struct SliceRenderOptions(
 public static class SliceRenderer
 {
     private readonly static Color CellBorder = new(0f, 0f, 0f, 0.5f);
+    private readonly static Color MarkerShadow = new(0f, 0f, 0f, 0.8f);
 
     public static void Draw(
         SimulationSliceDrawData slice,
@@ -30,13 +31,21 @@ public static class SliceRenderer
             foreach (var cell in slice.Cells)
             {
                 var rectangle = GetCellRectangle(slice, cell.U, cell.V);
-                var color = SimulationRenderer.ToRaylibColor(cell.Voxel.Color);
-                if (style.TransparentVoxels)
-                    color.A = 89;
+                if (cell.Voxel.IsVisible)
+                {
+                    var color = SimulationRenderer.ToRaylibColor(cell.Voxel.Color);
+                    if (style.TransparentVoxels)
+                        color.A = 89;
 
-                Raylib.DrawRectangleRec(rectangle, color);
-                if (style.ShowVoxelOutlines)
-                    Raylib.DrawRectangleLinesEx(rectangle, 0.025f, CellBorder);
+                    Raylib.DrawRectangleRec(rectangle, color);
+                    if (style.ShowVoxelOutlines)
+                        Raylib.DrawRectangleLinesEx(rectangle, 0.025f, CellBorder);
+                }
+
+                DrawStateMarker(
+                    rectangle,
+                    cell.Voxel.StateMarker,
+                    SimulationRenderer.ToRaylibColor(cell.Voxel.StateMarkerColor));
             }
 
             if (style.ShowChunkOutlines)
@@ -49,6 +58,32 @@ public static class SliceRenderer
         {
             Raylib.EndMode2D();
         }
+    }
+
+    private static void DrawStateMarker(Rectangle rectangle, VoxelStateMarker marker, Color color)
+    {
+        if (marker == VoxelStateMarker.None)
+            return;
+
+        var lowerLeft = new System.Numerics.Vector2(rectangle.X + 0.25f, rectangle.Y + 0.75f);
+        var upperRight = new System.Numerics.Vector2(rectangle.X + 0.75f, rectangle.Y + 0.25f);
+        DrawMarkerStroke(lowerLeft, upperRight, color);
+
+        if (marker != VoxelStateMarker.Sleeping)
+            return;
+
+        var upperLeft = new System.Numerics.Vector2(rectangle.X + 0.25f, rectangle.Y + 0.25f);
+        var lowerRight = new System.Numerics.Vector2(rectangle.X + 0.75f, rectangle.Y + 0.75f);
+        DrawMarkerStroke(upperLeft, lowerRight, color);
+    }
+
+    private static void DrawMarkerStroke(
+        System.Numerics.Vector2 start,
+        System.Numerics.Vector2 end,
+        Color color)
+    {
+        Raylib.DrawLineEx(start, end, 0.13f, MarkerShadow);
+        Raylib.DrawLineEx(start, end, 0.08f, color);
     }
 
     private static void DrawHighlight(

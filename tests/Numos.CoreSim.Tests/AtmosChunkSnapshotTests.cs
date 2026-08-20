@@ -1,3 +1,4 @@
+using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.Datatypes.Snapshots;
 using Numos.Maths;
 
@@ -31,6 +32,7 @@ public sealed class AtmosChunkSnapshotTests
             Assert.That(snapshot.Temperature, Is.EqualTo(new[] { 0f, 0f, 0f, 275f }));
             Assert.That(snapshot.TotalPressure, Is.EqualTo(new[] { 0f, 0f, 0f, 25f }));
             Assert.That(snapshot.Gases, Is.Empty);
+            Assert.That(snapshot.VoxelSnapGroupMap, Is.EqualTo(new[] { -1, -1, -1, -1 }));
         });
     }
 
@@ -43,8 +45,8 @@ public sealed class AtmosChunkSnapshotTests
             chunk.Initialize(new Int3(4, -5, 6), 2, 1, 1);
             chunk.VoxelRoomMap.Fill(7);
             chunk.WakeRoom(7);
-            chunk.InjectGasToVoxel(0, 3, 2f, 300f);
-            chunk.InjectGasToVoxel(1, 8, 1f, 400f);
+            chunk.InjectGasToVoxel(0, 3, 2f, 300f, 1f, 1f);
+            chunk.InjectGasToVoxel(1, 8, 1f, 400f, 1f, 1f);
 
             var snapshot = chunk.GetNetworkSnapshot();
 
@@ -62,7 +64,8 @@ public sealed class AtmosChunkSnapshotTests
 
             snapshot.TotalPressure[0] = -1f;
             snapshot.Temperature[0] = -1f;
-            snapshot.VoxelRoomMap[0] = AtmosChunk.RoomSolid;
+            snapshot.VoxelRoomMap[0] = VoxelClassification.RoomSolid;
+            snapshot.VoxelSnapGroupMap[0] = 9;
             snapshot.Gases[0].Moles[0] = -1f;
             snapshot.Gases[0].GasId = 99;
             var freshSnapshot = chunk.GetNetworkSnapshot();
@@ -72,6 +75,7 @@ public sealed class AtmosChunkSnapshotTests
                 Assert.That(freshSnapshot.TotalPressure[0], Is.EqualTo(600f));
                 Assert.That(freshSnapshot.Temperature[0], Is.EqualTo(300f));
                 Assert.That(freshSnapshot.VoxelRoomMap[0], Is.EqualTo(7));
+                Assert.That(freshSnapshot.VoxelSnapGroupMap[0], Is.EqualTo(-1));
                 Assert.That(freshSnapshot.Gases[0].GasId, Is.EqualTo(3));
                 Assert.That(freshSnapshot.Gases[0].Moles[0], Is.EqualTo(2f));
             });

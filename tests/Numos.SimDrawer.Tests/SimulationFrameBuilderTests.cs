@@ -37,7 +37,9 @@ public sealed class SimulationFrameBuilderTests
         var builder = CreateBuilder();
         var snapshot = CreateSnapshot(new Int3(0, 0, 0), new Int3(1, 1, 1));
         snapshot.Fields =
-            AtmosChunkSnapshotFields.Temperature | AtmosChunkSnapshotFields.VoxelClassification;
+            AtmosChunkSnapshotFields.Temperature |
+            AtmosChunkSnapshotFields.VoxelClassification |
+            AtmosChunkSnapshotFields.VoxelSnapping;
         snapshot.TotalPressure = [];
         snapshot.Gases = [];
 
@@ -77,6 +79,186 @@ public sealed class SimulationFrameBuilderTests
             Assert.That(
                 chunk.GetCell(1).VisibleFaces & VoxelFaceMask.NegativeX,
                 Is.EqualTo(VoxelFaceMask.None));
+        });
+    }
+
+    [Test]
+    public void BuildSimulation_AwakeChunk_MapsDistinctAggregateGroupsToStableDistinctColors()
+    {
+        var builder = CreateBuilder();
+        var snapshot = CreateSnapshot(
+            new Int3(0, 0, 0),
+            new Int3(5, 1, 1),
+            voxelSnapGroupMap: [0, 0, 2, 2, -1]);
+
+        var firstChunk = builder.BuildSimulation(
+            [snapshot],
+            BuiltInVisualizationIds.Temperature,
+            1).Chunks[snapshot.GridPosition];
+        var secondChunk = builder.BuildSimulation(
+            [snapshot],
+            BuiltInVisualizationIds.Temperature,
+            2).Chunks[snapshot.GridPosition];
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(firstChunk.GetCell(0).StateMarker, Is.EqualTo(VoxelStateMarker.Snapped));
+            Assert.That(firstChunk.GetCell(1).StateMarker, Is.EqualTo(VoxelStateMarker.Snapped));
+            Assert.That(firstChunk.GetCell(2).StateMarker, Is.EqualTo(VoxelStateMarker.Snapped));
+            Assert.That(firstChunk.GetCell(3).StateMarker, Is.EqualTo(VoxelStateMarker.Snapped));
+            Assert.That(firstChunk.GetCell(4).StateMarker, Is.EqualTo(VoxelStateMarker.None));
+            Assert.That(firstChunk.GetCell(0).SnapGroupId, Is.EqualTo(0));
+            Assert.That(firstChunk.GetCell(2).SnapGroupId, Is.EqualTo(2));
+            Assert.That(firstChunk.GetCell(4).SnapGroupId, Is.EqualTo(-1));
+            Assert.That(firstChunk.GetCell(1).StateMarkerColor,
+                Is.EqualTo(firstChunk.GetCell(0).StateMarkerColor));
+            Assert.That(firstChunk.GetCell(3).StateMarkerColor,
+                Is.EqualTo(firstChunk.GetCell(2).StateMarkerColor));
+            Assert.That(firstChunk.GetCell(2).StateMarkerColor,
+                Is.Not.EqualTo(firstChunk.GetCell(0).StateMarkerColor));
+            Assert.That(secondChunk.GetCell(0).StateMarkerColor,
+                Is.EqualTo(firstChunk.GetCell(0).StateMarkerColor));
+            Assert.That(secondChunk.GetCell(2).StateMarkerColor,
+                Is.EqualTo(firstChunk.GetCell(2).StateMarkerColor));
+        });
+    }
+
+    [Test]
+    public void BuildSimulation_DistantAggregateRootsRemainDistinctAfterDisplayQuantization()
+    {
+        const int voxelCount = 622;
+        int[] groupMap = Enumerable.Repeat(-1, voxelCount).ToArray();
+        groupMap[10] = 10;
+        groupMap[11] = 10;
+        groupMap[620] = 620;
+        groupMap[621] = 620;
+        var snapshot = CreateSnapshot(
+            new Int3(0, 0, 0),
+            new Int3(voxelCount, 1, 1),
+            voxelSnapGroupMap: groupMap);
+
+        var chunk = CreateBuilder().BuildSimulation(
+            [snapshot],
+            BuiltInVisualizationIds.Temperature,
+            1).Chunks[snapshot.GridPosition];
+
+        Assert.That(
+            QuantizeDisplayColor(chunk.GetCell(10).StateMarkerColor),
+            Is.Not.EqualTo(QuantizeDisplayColor(chunk.GetCell(620).StateMarkerColor)),
+            "Every local aggregate group must retain its own color after the viewer converts it to RGB bytes.");
+    }
+
+    [Test]
+    public void BuildSimulation_SleepingChunk_OverridesSnapMapAndMarksEveryVoxel()
+    {
+        var builder = CreateBuilder();
+        var snapshot = CreateSnapshot(
+            new Int3(0, 0, 0),
+            new Int3(3, 1, 1),
+            rooms:
+            [
+                1,
+                VoxelClassification.RoomSolid,
+                VoxelClassification.RoomVoid
+            ],
+            voxelSnapGroupMap: [0, -1, 0],
+            isAwake: false);
+
+        var frame = builder.BuildSimulation(
+            [snapshot],
+            BuiltInVisualizationIds.Temperature,
+            1);
+        var chunk = frame.Chunks[snapshot.GridPosition];
+        var slice = builder.BuildChunkSlice(frame, chunk.Identity, SliceAxis.Z, 0);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(chunk.Cells.ToArray().Select(cell => cell.StateMarker),
+                Is.All.EqualTo(VoxelStateMarker.Sleeping));
+            Assert.That(chunk.Cells.ToArray().Select(cell => cell.StateMarkerColor),
+                Is.All.EqualTo(new ColorRgba(1f, 0.25f, 0.2f)));
+            Assert.That(chunk.GetCell(0).SnapGroupId, Is.EqualTo(0),
+                "Sleeping presentation must retain diagnostic group identity while overriding its marker color.");
+            Assert.That(chunk.VisibleCellCount, Is.EqualTo(1));
+            Assert.That(slice.Cells.Length, Is.EqualTo(3),
+                "Sleeping markers must remain present in a slice even where its visualization hides the voxel.");
+            Assert.That(slice.TryGetCell(1, 0, out var solid), Is.True);
+            Assert.That(solid.Voxel.IsVisible, Is.False);
+            Assert.That(solid.Voxel.StateMarker, Is.EqualTo(VoxelStateMarker.Sleeping));
+            Assert.That(slice.TryGetCell(2, 0, out var voidCell), Is.True);
+            Assert.That(voidCell.Voxel.IsVisible, Is.False);
+            Assert.That(voidCell.Voxel.StateMarker, Is.EqualTo(VoxelStateMarker.Sleeping));
+        });
+    }
+
+    [Test]
+    public void BuildSimulation_SnappedToSleepingMarker_ChangesStyleAndSliceRenderVersion()
+    {
+        var builder = CreateBuilder();
+        var snappedSnapshot = CreateSnapshot(
+            new Int3(0, 0, 0),
+            new Int3(1, 1, 1),
+            voxelSnapGroupMap: [0]);
+        var sleepingSnapshot = snappedSnapshot;
+        sleepingSnapshot.IsAwake = false;
+
+        var snappedFrame = builder.BuildSimulation(
+            [snappedSnapshot],
+            BuiltInVisualizationIds.Temperature,
+            1);
+        var sleepingFrame = builder.BuildSimulation(
+            [sleepingSnapshot],
+            BuiltInVisualizationIds.Temperature,
+            2);
+        var snappedChunk = snappedFrame.Chunks.Values.Single();
+        var sleepingChunk = sleepingFrame.Chunks.Values.Single();
+        var snappedSlice = builder.BuildChunkSlice(snappedFrame, snappedChunk.Identity, SliceAxis.Z, 0);
+        var sleepingSlice = builder.BuildChunkSlice(sleepingFrame, sleepingChunk.Identity, SliceAxis.Z, 0);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(snappedChunk.GetCell(0).StateMarker, Is.EqualTo(VoxelStateMarker.Snapped));
+            Assert.That(sleepingChunk.GetCell(0).StateMarker, Is.EqualTo(VoxelStateMarker.Sleeping));
+            Assert.That(sleepingChunk.TopologyVersion, Is.EqualTo(snappedChunk.TopologyVersion));
+            Assert.That(sleepingChunk.StyleVersion, Is.Not.EqualTo(snappedChunk.StyleVersion));
+            Assert.That(sleepingSlice.RenderVersion, Is.Not.EqualTo(snappedSlice.RenderVersion));
+        });
+    }
+
+    [Test]
+    public void BuildSimulation_SnapGroupsMerge_ChangesStyleAndSliceRenderVersion()
+    {
+        var builder = CreateBuilder();
+        var separateSnapshot = CreateSnapshot(
+            new Int3(0, 0, 0),
+            new Int3(4, 1, 1),
+            voxelSnapGroupMap: [0, 0, 2, 2]);
+        var mergedSnapshot = separateSnapshot;
+        mergedSnapshot.VoxelSnapGroupMap = [0, 0, 0, 0];
+
+        var separateFrame = builder.BuildSimulation(
+            [separateSnapshot],
+            BuiltInVisualizationIds.Temperature,
+            1);
+        var mergedFrame = builder.BuildSimulation(
+            [mergedSnapshot],
+            BuiltInVisualizationIds.Temperature,
+            2);
+        var separateChunk = separateFrame.Chunks.Values.Single();
+        var mergedChunk = mergedFrame.Chunks.Values.Single();
+        var separateSlice = builder.BuildChunkSlice(separateFrame, separateChunk.Identity, SliceAxis.Z, 0);
+        var mergedSlice = builder.BuildChunkSlice(mergedFrame, mergedChunk.Identity, SliceAxis.Z, 0);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(separateChunk.GetCell(2).StateMarkerColor,
+                Is.Not.EqualTo(separateChunk.GetCell(0).StateMarkerColor));
+            Assert.That(mergedChunk.GetCell(2).StateMarkerColor,
+                Is.EqualTo(mergedChunk.GetCell(0).StateMarkerColor));
+            Assert.That(mergedChunk.TopologyVersion, Is.EqualTo(separateChunk.TopologyVersion));
+            Assert.That(mergedChunk.StyleVersion, Is.Not.EqualTo(separateChunk.StyleVersion),
+                "A group-only color change must invalidate the cached slice style.");
+            Assert.That(mergedSlice.RenderVersion, Is.Not.EqualTo(separateSlice.RenderVersion));
         });
     }
 
@@ -466,6 +648,15 @@ public sealed class SimulationFrameBuilderTests
         return new SimulationFrameBuilder(new AtmosConfig());
     }
 
+    private static int QuantizeDisplayColor(ColorRgba color)
+    {
+        static byte ToByte(float value) => (byte)(Math.Clamp(value, 0f, 1f) * byte.MaxValue);
+
+        return ToByte(color.R) << 16 |
+               ToByte(color.G) << 8 |
+               ToByte(color.B);
+    }
+
     private static AtmosChunkSnapshot CreateSnapshot(
         Int3 position,
         Int3 dimensions,
@@ -473,7 +664,9 @@ public sealed class SimulationFrameBuilderTests
         float[]? temperature = null,
         int[]? rooms = null,
         GasSnapshot[]? gases = null,
-        AtmosChunkVersion version = default)
+        AtmosChunkVersion version = default,
+        int[]? voxelSnapGroupMap = null,
+        bool isAwake = true)
     {
         int count = dimensions.X * dimensions.Y * dimensions.Z;
         return new AtmosChunkSnapshot
@@ -484,9 +677,11 @@ public sealed class SimulationFrameBuilderTests
             TotalPressure = pressure ?? Enumerable.Repeat(100f, count).ToArray(),
             Temperature = temperature ?? Enumerable.Repeat(293.15f, count).ToArray(),
             VoxelRoomMap = rooms ?? Enumerable.Repeat(1, count).ToArray(),
+            VoxelSnapGroupMap = voxelSnapGroupMap ?? Enumerable.Repeat(-1, count).ToArray(),
             Gases = gases ?? [],
             ActiveAirCount = count,
-            ActiveGasCount = gases?.Length ?? 0
+            ActiveGasCount = gases?.Length ?? 0,
+            IsAwake = isAwake
         };
     }
 

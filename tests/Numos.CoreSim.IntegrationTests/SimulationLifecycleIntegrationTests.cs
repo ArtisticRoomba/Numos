@@ -13,9 +13,9 @@ public sealed class SimulationLifecycleIntegrationTests
     {
         Assert.Multiple(() =>
         {
-            Assert.That(FlowsAfterStableTicks(2), Is.True,
+            Assert.That(IsAwakeAfterStableTicks(2), Is.True,
                 "The chunk must remain awake when SleepTimer equals SleepThreshold.");
-            Assert.That(FlowsAfterStableTicks(3), Is.False,
+            Assert.That(IsAwakeAfterStableTicks(3), Is.False,
                 "The chunk must sleep when SleepTimer becomes greater than SleepThreshold.");
         });
     }
@@ -98,6 +98,7 @@ public sealed class SimulationLifecycleIntegrationTests
 
         var converged = simulation.GetChunkSnapshot(chunk);
         float[] convergedMoles = ReadOpenMoles(converged, openVoxels, width, height);
+        simulation.SleepChunk(chunk);
         simulation.SetVoxelTemperature(chunk, 0, 0, 0, 600f);
         simulation.Tick();
         var stillSleeping = simulation.GetChunkSnapshot(chunk);
@@ -117,7 +118,7 @@ public sealed class SimulationLifecycleIntegrationTests
         });
     }
 
-    private static bool FlowsAfterStableTicks(int stableTicks)
+    private static bool IsAwakeAfterStableTicks(int stableTicks)
     {
         var config = SimTestHelpers.CreateDeterministicConfig();
         config.SleepThreshold = 2;
@@ -131,10 +132,7 @@ public sealed class SimulationLifecycleIntegrationTests
         for (var i = 0; i < stableTicks; i++)
             simulation.Tick();
 
-        simulation.SetVoxelTemperature(chunk, 0, 0, 0, 600f);
-        simulation.Tick();
-        var snapshot = simulation.GetChunkSnapshot(chunk);
-        return SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 1) > 1f;
+        return simulation.GetChunkSnapshot(chunk).IsAwake;
     }
 
     private static float[] ReadOpenMoles(AtmosChunkSnapshot snapshot, (int X, int Y)[] openVoxels,
