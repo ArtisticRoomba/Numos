@@ -89,6 +89,32 @@ public sealed class AtmosDangerousApiTests
     }
 
     [Test]
+    public void DangerousInjection_IntoActivePassableClosureDoesNotConsumeAnotherRoomSlot()
+    {
+        var config = new Numos.CoreSim.AtmosConfig
+        {
+            BulkFlowCoefficient = 0f,
+            DefaultDiffusionCoefficient = 0f,
+            VoxelSnappingEnabled = false,
+            SleepThreshold = int.MaxValue
+        };
+        using var simulation = new AtmosSimulation(config, 2, 1, 1);
+        var chunk = simulation.CreateAndRegisterChunk(default, maxActiveRooms: 1);
+        simulation.SetChunkClassification(chunk,
+            Numos.CoreSim.Datatypes.Primitives.VoxelClassification.RoomSolid);
+        simulation.SetVoxelClassification(chunk, 0,
+            new Numos.CoreSim.Datatypes.Primitives.VoxelClassification(1));
+        simulation.SetVoxelClassification(chunk, 1,
+            new Numos.CoreSim.Datatypes.Primitives.VoxelClassification(2));
+        simulation.AddGasToVoxel(chunk, 0, 0, 1f, 300f);
+        simulation.Dangerous().Solvers.RegisterBefore(AtmosBuiltInSolvers.Advection, "inject-closure",
+            context => context.InjectGasToVoxel(0, 1, 0, 1f, 300f));
+
+        Assert.That(simulation.Tick, Throws.Nothing);
+        Assert.That(simulation.GetVoxelSnapshot(chunk, 1).Gases.Single().Moles, Is.EqualTo(1f));
+    }
+
+    [Test]
     public void ConfiguredDangerousSolver_RetainsEditableTypedConfiguration()
     {
         using var simulation = new AtmosSimulation(1, 1, 1);

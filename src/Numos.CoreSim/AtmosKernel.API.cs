@@ -1,3 +1,5 @@
+using System.Buffers;
+using System.Diagnostics;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.Datatypes.Snapshots;
 using Numos.CoreSim.Solvers;
@@ -39,6 +41,7 @@ internal sealed partial class AtmosKernel
         lock (_stateGate)
         {
             _solverPipeline.Register(name, kind, solver, _solverPipeline.Count);
+            _solverPipelineInvalidationPending = true;
         }
     }
 
@@ -51,6 +54,7 @@ internal sealed partial class AtmosKernel
             if (index < 0)
                 throw new KeyNotFoundException($"No solver named '{existingName}' is registered.");
             _solverPipeline.Register(name, kind, solver, index);
+            _solverPipelineInvalidationPending = true;
         }
     }
 
@@ -63,6 +67,7 @@ internal sealed partial class AtmosKernel
             if (index < 0)
                 throw new KeyNotFoundException($"No solver named '{existingName}' is registered.");
             _solverPipeline.Register(name, kind, solver, index + 1);
+            _solverPipelineInvalidationPending = true;
         }
     }
 
@@ -78,7 +83,9 @@ internal sealed partial class AtmosKernel
     {
         lock (_stateGate)
         {
-            return _solverPipeline.SetEnabled(name, enabled);
+            bool found = _solverPipeline.SetEnabled(name, enabled, out bool becameEnabled);
+            _solverPipelineInvalidationPending |= becameEnabled;
+            return found;
         }
     }
 
@@ -86,7 +93,7 @@ internal sealed partial class AtmosKernel
     {
         lock (_stateGate)
         {
-            _solverPipeline.Reset();
+            _solverPipelineInvalidationPending |= _solverPipeline.Reset();
         }
     }
 
@@ -195,9 +202,15 @@ internal sealed partial class AtmosKernel
     {
         lock (_stateGate)
         {
-            if (!_chunkMap.TryAdd(chunk.GridPosition, chunk))
+            if (_chunkMap.ContainsKey(chunk.GridPosition))
                 throw new InvalidOperationException($"A chunk is already registered at {chunk.GridPosition}.");
+
+            Dictionary<AtmosChunk, SortedSet<ushort>> wakePlan = CreateBoundaryWakePlan(chunk);
+            ValidateBoundaryWakePlan(wakePlan);
+            bool added = _chunkMap.TryAdd(chunk.GridPosition, chunk);
+            Debug.Assert(added);
             _chunkCollectionRevision++;
+            ApplyBoundaryWakePlan(wakePlan);
         }
     }
 
@@ -229,13 +242,15 @@ internal sealed partial class AtmosKernel
     /// <param name="depth">The number of voxels along the local z-axis.</param>
     /// <param name="maxActiveRooms">The maximum number of room IDs that may be active simultaneously.</param>
     /// <exception cref="InvalidOperationException">A chunk is already registered at <paramref name="position" />.</exception>
-    internal void CreateAndRegisterChunk(Int3 position, int width, int height, int depth, int maxActiveRooms)
+    internal void CreateAndRegisterChunk(Int3 position, int width, int height, int depth, int maxActiveRooms,
+        int initialClassification = VoxelClassification.RoomUnassigned)
     {
         lock (_stateGate)
         {
             ThrowIfTickExecuting("register a chunk during the current tick");
             var chunk = new AtmosChunk(width, height, depth, maxActiveRooms);
             chunk.Initialize(position, width, height, depth, maxActiveRooms);
+            chunk.VoxelRoomMap.Fill(initialClassification);
             RegisterChunk(chunk);
         }
     }
@@ -406,8 +421,27 @@ internal sealed partial class AtmosKernel
         lock (_stateGate)
         {
             var chunk = GetChunk(position);
+            int[] previousClassifications = chunk.VoxelRoomMap.ToArray();
+            ushort[] previouslyActiveVoxels = CaptureActiveVoxels(chunk);
             chunk.VoxelRoomMap.Fill(classification.RoomId);
+            Dictionary<AtmosChunk, SortedSet<ushort>> wakePlan;
+            try
+            {
+                wakePlan = CreateChangedBoundaryWakePlan(chunk, previousClassifications);
+                AddPreviouslyActiveComponents(
+                    wakePlan, chunk, previouslyActiveVoxels, previousClassifications);
+                AddGasBearingChangedComponents(wakePlan, chunk, previousClassifications);
+                AddGasBearingNewVoidAdjacentComponents(wakePlan, chunk, previousClassifications);
+                ValidateBoundaryWakePlan(wakePlan);
+            }
+            catch
+            {
+                chunk.VoxelRoomMap.CopyFrom(previousClassifications);
+                throw;
+            }
+
             RebuildActiveTopology(chunk);
+            ApplyBoundaryWakePlan(wakePlan);
             chunk.MarkChanged();
         }
     }
@@ -424,6 +458,8 @@ internal sealed partial class AtmosKernel
         lock (_stateGate)
         {
             var chunk = GetChunk(position);
+            int[] previousClassifications = chunk.VoxelRoomMap.ToArray();
+            ushort[] previouslyActiveVoxels = CaptureActiveVoxels(chunk);
             var dimensions = chunk.Dimensions;
 
             for (var z = 0; z < dimensions.Z; z++)
@@ -439,7 +475,24 @@ internal sealed partial class AtmosKernel
                             chunk.VoxelRoomMap[chunk.GetIndex(new Int3(x, y, z))] = classification.RoomId;
                     }
 
+            Dictionary<AtmosChunk, SortedSet<ushort>> wakePlan;
+            try
+            {
+                wakePlan = CreateChangedBoundaryWakePlan(chunk, previousClassifications);
+                AddPreviouslyActiveComponents(
+                    wakePlan, chunk, previouslyActiveVoxels, previousClassifications);
+                AddGasBearingChangedComponents(wakePlan, chunk, previousClassifications);
+                AddGasBearingNewVoidAdjacentComponents(wakePlan, chunk, previousClassifications);
+                ValidateBoundaryWakePlan(wakePlan);
+            }
+            catch
+            {
+                chunk.VoxelRoomMap.CopyFrom(previousClassifications);
+                throw;
+            }
+
             RebuildActiveTopology(chunk);
+            ApplyBoundaryWakePlan(wakePlan);
             chunk.MarkChanged();
         }
     }
@@ -460,8 +513,27 @@ internal sealed partial class AtmosKernel
         {
             var chunk = GetChunk(position);
             ValidateVoxelIndex(chunk, localVoxelIndex);
+            int[] previousClassifications = chunk.VoxelRoomMap.ToArray();
+            ushort[] previouslyActiveVoxels = CaptureActiveVoxels(chunk);
             chunk.VoxelRoomMap[localVoxelIndex] = classification.RoomId;
+            Dictionary<AtmosChunk, SortedSet<ushort>> wakePlan;
+            try
+            {
+                wakePlan = CreateChangedBoundaryWakePlan(chunk, previousClassifications);
+                AddPreviouslyActiveComponents(
+                    wakePlan, chunk, previouslyActiveVoxels, previousClassifications);
+                AddGasBearingChangedComponents(wakePlan, chunk, previousClassifications);
+                AddGasBearingNewVoidAdjacentComponents(wakePlan, chunk, previousClassifications);
+                ValidateBoundaryWakePlan(wakePlan);
+            }
+            catch
+            {
+                chunk.VoxelRoomMap.CopyFrom(previousClassifications);
+                throw;
+            }
+
             RebuildActiveTopology(chunk);
+            ApplyBoundaryWakePlan(wakePlan);
             chunk.MarkChanged();
         }
     }
@@ -494,16 +566,25 @@ internal sealed partial class AtmosKernel
     /// <param name="temperature">The absolute temperature to store, in kelvins.</param>
     /// <exception cref="KeyNotFoundException">No chunk is registered at <paramref name="position" />.</exception>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="localVoxelIndex" /> is outside the chunk.</exception>
+    /// <exception cref="InvalidOperationException">
+    ///     The requested temperature would make the voxel's derived pressure unrepresentable.
+    /// </exception>
     internal void SetVoxelTemperature(Int3 position, ushort localVoxelIndex, float temperature)
     {
         lock (_stateGate)
         {
             var chunk = GetChunk(position);
             ValidateVoxelIndex(chunk, localVoxelIndex);
+            VoxelGasMixtureTotals totals = CalculateVoxelMixtureTotals(
+                chunk,
+                localVoxelIndex,
+                temperature);
+            if (chunk.IsAwake || chunk.WasAutomaticallySlept)
+                chunk.WakeVoxel(localVoxelIndex);
+            else
+                chunk.VoxelAggregates.Reset();
             chunk.Temperature[localVoxelIndex] = temperature;
-            chunk.TotalPressure[localVoxelIndex] =
-                AtmosSolverMath.CalculatePressureAtVoxel(_config, chunk, localVoxelIndex);
-            chunk.MarkChanged();
+            ApplyVoxelMixtureTotals(chunk, localVoxelIndex, totals);
         }
     }
 
@@ -550,8 +631,15 @@ internal sealed partial class AtmosKernel
             if (roomId == VoxelClassification.RoomSolid || roomId == VoxelClassification.RoomVoid)
                 return;
 
-            chunk.WakeRoom(roomId);
-            GasInjectionSolver.Inject(chunk, localVoxelIndex, gasId, moles, temperature, _config);
+            // Validate the complete projected mixture before waking the target. Individually finite inputs can
+            // still overflow an existing species, the voxel total, heat capacity, or pressure; rejecting those
+            // states after WakeVoxel would make a failed injection observably mutate lifecycle state.
+            VoxelGasAddition addition = PrepareVoxelGasAddition(
+                chunk, localVoxelIndex, gasId, moles, temperature);
+            chunk.WakeVoxel(localVoxelIndex);
+            SetVoxelGasMoles(chunk, localVoxelIndex, gasId, addition.CombinedGasMoles);
+            chunk.Temperature[localVoxelIndex] = addition.MixedTemperature;
+            ApplyVoxelMixtureTotals(chunk, localVoxelIndex, addition.Totals);
         }
     }
 
@@ -630,8 +718,654 @@ internal sealed partial class AtmosKernel
 
     private static void RebuildActiveTopology(AtmosChunk chunk)
     {
-        if (chunk.IsAwake)
-            chunk.RebuildActiveAirIndices();
+        if (!chunk.IsAwake)
+            return;
+
+        var retainedRoomCount = 0;
+        for (var roomIndex = 0; roomIndex < chunk.ActiveRoomCount; roomIndex++)
+        {
+            int roomId = chunk.ActiveRoomIds[roomIndex];
+            if (HasPassableRoomVoxel(chunk, roomId))
+                chunk.ActiveRoomIds[retainedRoomCount++] = roomId;
+        }
+
+        chunk.ActiveRoomCount = retainedRoomCount;
+        chunk.RebuildActiveAirIndices();
+    }
+
+    private static bool HasPassableRoomVoxel(AtmosChunk chunk, int roomId)
+    {
+        if (roomId == VoxelClassification.RoomSolid || roomId == VoxelClassification.RoomVoid)
+            return false;
+
+        for (var voxelIndex = 0; voxelIndex < chunk.VoxelCount; voxelIndex++)
+        {
+            if (chunk.VoxelRoomMap[voxelIndex] == roomId)
+                return true;
+        }
+
+        return false;
+    }
+
+    private static ushort[] CaptureActiveVoxels(AtmosChunk chunk)
+    {
+        if ((!chunk.IsAwake && !chunk.WasAutomaticallySlept) || chunk.ActiveAirCount == 0)
+            return [];
+
+        var activeVoxels = new ushort[chunk.ActiveAirCount];
+        Array.Copy(chunk.ActiveAirIndices, activeVoxels, chunk.ActiveAirCount);
+        return activeVoxels;
+    }
+
+    private static void AddPreviouslyActiveComponents(
+        Dictionary<AtmosChunk, SortedSet<ushort>> wakePlan, AtmosChunk chunk,
+        ReadOnlySpan<ushort> previouslyActiveVoxels,
+        ReadOnlySpan<int> previousClassifications)
+    {
+        if (previouslyActiveVoxels.IsEmpty)
+            return;
+
+        bool activeTopologyChanged = false;
+        foreach (ushort voxelIndex in previouslyActiveVoxels)
+        {
+            if (previousClassifications[voxelIndex] == chunk.VoxelRoomMap[voxelIndex])
+                continue;
+            activeTopologyChanged = true;
+            break;
+        }
+
+        if (!activeTopologyChanged)
+            return;
+
+        bool[] visited = ArrayPool<bool>.Shared.Rent(chunk.VoxelCount);
+        int[] queue = ArrayPool<int>.Shared.Rent(chunk.VoxelCount);
+        Array.Clear(visited, 0, chunk.VoxelCount);
+        try
+        {
+            foreach (ushort seedVoxel in previouslyActiveVoxels)
+            {
+                int roomId = chunk.VoxelRoomMap[seedVoxel];
+                if (visited[seedVoxel] ||
+                    roomId == VoxelClassification.RoomSolid ||
+                    roomId == VoxelClassification.RoomVoid)
+                    continue;
+
+                if (!wakePlan.TryGetValue(chunk, out SortedSet<ushort>? componentSeeds))
+                {
+                    componentSeeds = [];
+                    wakePlan.Add(chunk, componentSeeds);
+                }
+
+                componentSeeds.Add(seedVoxel);
+                var queuedCount = 0;
+                visited[seedVoxel] = true;
+                queue[queuedCount++] = seedVoxel;
+                for (var queuedIndex = 0; queuedIndex < queuedCount; queuedIndex++)
+                {
+                    int componentVoxel = queue[queuedIndex];
+                    int x = componentVoxel % chunk.Width;
+                    int yz = componentVoxel / chunk.Width;
+                    int y = yz % chunk.Height;
+                    int z = yz / chunk.Height;
+                    if (x > 0)
+                        TryEnqueuePassableVoxel(chunk, componentVoxel - 1,
+                            visited, queue, ref queuedCount);
+                    if (x + 1 < chunk.Width)
+                        TryEnqueuePassableVoxel(chunk, componentVoxel + 1,
+                            visited, queue, ref queuedCount);
+                    if (y > 0)
+                        TryEnqueuePassableVoxel(chunk, componentVoxel - chunk.Width,
+                            visited, queue, ref queuedCount);
+                    if (y + 1 < chunk.Height)
+                        TryEnqueuePassableVoxel(chunk, componentVoxel + chunk.Width,
+                            visited, queue, ref queuedCount);
+                    int layerSize = chunk.Width * chunk.Height;
+                    if (z > 0)
+                        TryEnqueuePassableVoxel(chunk, componentVoxel - layerSize,
+                            visited, queue, ref queuedCount);
+                    if (z + 1 < chunk.Depth)
+                        TryEnqueuePassableVoxel(chunk, componentVoxel + layerSize,
+                            visited, queue, ref queuedCount);
+                }
+            }
+        }
+        finally
+        {
+            ArrayPool<int>.Shared.Return(queue);
+            ArrayPool<bool>.Shared.Return(visited);
+        }
+    }
+
+    private static void AddGasBearingChangedComponents(
+        Dictionary<AtmosChunk, SortedSet<ushort>> wakePlan,
+        AtmosChunk chunk,
+        ReadOnlySpan<int> previousClassifications)
+    {
+        bool[] visited = ArrayPool<bool>.Shared.Rent(chunk.VoxelCount);
+        int[] queue = ArrayPool<int>.Shared.Rent(chunk.VoxelCount);
+        Array.Clear(visited, 0, chunk.VoxelCount);
+        try
+        {
+            for (ushort seedVoxel = 0; seedVoxel < chunk.VoxelCount; seedVoxel++)
+            {
+                int seedRoom = chunk.VoxelRoomMap[seedVoxel];
+                if (visited[seedVoxel] ||
+                    seedRoom == VoxelClassification.RoomSolid ||
+                    seedRoom == VoxelClassification.RoomVoid)
+                    continue;
+
+                var queuedCount = 0;
+                visited[seedVoxel] = true;
+                queue[queuedCount++] = seedVoxel;
+                var hasGas = false;
+                var containsChangedVoxel = false;
+                for (var queuedIndex = 0; queuedIndex < queuedCount; queuedIndex++)
+                {
+                    int componentVoxel = queue[queuedIndex];
+                    hasGas |= HasGasAtVoxel(chunk, (ushort)componentVoxel);
+                    containsChangedVoxel |= previousClassifications[componentVoxel] !=
+                                            chunk.VoxelRoomMap[componentVoxel];
+                    int x = componentVoxel % chunk.Width;
+                    int yz = componentVoxel / chunk.Width;
+                    int y = yz % chunk.Height;
+                    int z = yz / chunk.Height;
+                    if (x > 0)
+                        TryEnqueuePassableVoxel(chunk, componentVoxel - 1,
+                            visited, queue, ref queuedCount);
+                    if (x + 1 < chunk.Width)
+                        TryEnqueuePassableVoxel(chunk, componentVoxel + 1,
+                            visited, queue, ref queuedCount);
+                    if (y > 0)
+                        TryEnqueuePassableVoxel(chunk, componentVoxel - chunk.Width,
+                            visited, queue, ref queuedCount);
+                    if (y + 1 < chunk.Height)
+                        TryEnqueuePassableVoxel(chunk, componentVoxel + chunk.Width,
+                            visited, queue, ref queuedCount);
+                    int layerSize = chunk.Width * chunk.Height;
+                    if (z > 0)
+                        TryEnqueuePassableVoxel(chunk, componentVoxel - layerSize,
+                            visited, queue, ref queuedCount);
+                    if (z + 1 < chunk.Depth)
+                        TryEnqueuePassableVoxel(chunk, componentVoxel + layerSize,
+                            visited, queue, ref queuedCount);
+                }
+
+                if (!hasGas || !containsChangedVoxel)
+                    continue;
+                if (!wakePlan.TryGetValue(chunk, out SortedSet<ushort>? componentSeeds))
+                {
+                    componentSeeds = [];
+                    wakePlan.Add(chunk, componentSeeds);
+                }
+
+                componentSeeds.Add(seedVoxel);
+            }
+        }
+        finally
+        {
+            ArrayPool<int>.Shared.Return(queue);
+            ArrayPool<bool>.Shared.Return(visited);
+        }
+    }
+
+    private static void AddGasBearingNewVoidAdjacentComponents(
+        Dictionary<AtmosChunk, SortedSet<ushort>> wakePlan,
+        AtmosChunk chunk,
+        ReadOnlySpan<int> previousClassifications)
+    {
+        bool[] visited = ArrayPool<bool>.Shared.Rent(chunk.VoxelCount);
+        int[] queue = ArrayPool<int>.Shared.Rent(chunk.VoxelCount);
+        Array.Clear(visited, 0, chunk.VoxelCount);
+        try
+        {
+            for (ushort seedVoxel = 0; seedVoxel < chunk.VoxelCount; seedVoxel++)
+            {
+                int seedRoom = chunk.VoxelRoomMap[seedVoxel];
+                if (visited[seedVoxel] ||
+                    seedRoom == VoxelClassification.RoomSolid ||
+                    seedRoom == VoxelClassification.RoomVoid)
+                    continue;
+
+                var queuedCount = 0;
+                visited[seedVoxel] = true;
+                queue[queuedCount++] = seedVoxel;
+                var hasGas = false;
+                var touchesVoid = false;
+                for (var queuedIndex = 0; queuedIndex < queuedCount; queuedIndex++)
+                {
+                    int componentVoxel = queue[queuedIndex];
+                    hasGas |= HasGasAtVoxel(chunk, (ushort)componentVoxel);
+                    int x = componentVoxel % chunk.Width;
+                    int yz = componentVoxel / chunk.Width;
+                    int y = yz % chunk.Height;
+                    int z = yz / chunk.Height;
+                    if (x > 0)
+                        VisitTopologyNeighbor(chunk, componentVoxel - 1,
+                            visited, queue, ref queuedCount, previousClassifications, ref touchesVoid);
+                    if (x + 1 < chunk.Width)
+                        VisitTopologyNeighbor(chunk, componentVoxel + 1,
+                            visited, queue, ref queuedCount, previousClassifications, ref touchesVoid);
+                    if (y > 0)
+                        VisitTopologyNeighbor(chunk, componentVoxel - chunk.Width,
+                            visited, queue, ref queuedCount, previousClassifications, ref touchesVoid);
+                    if (y + 1 < chunk.Height)
+                        VisitTopologyNeighbor(chunk, componentVoxel + chunk.Width,
+                            visited, queue, ref queuedCount, previousClassifications, ref touchesVoid);
+                    int layerSize = chunk.Width * chunk.Height;
+                    if (z > 0)
+                        VisitTopologyNeighbor(chunk, componentVoxel - layerSize,
+                            visited, queue, ref queuedCount, previousClassifications, ref touchesVoid);
+                    if (z + 1 < chunk.Depth)
+                        VisitTopologyNeighbor(chunk, componentVoxel + layerSize,
+                            visited, queue, ref queuedCount, previousClassifications, ref touchesVoid);
+                }
+
+                if (!hasGas || !touchesVoid)
+                    continue;
+                if (!wakePlan.TryGetValue(chunk, out SortedSet<ushort>? componentSeeds))
+                {
+                    componentSeeds = [];
+                    wakePlan.Add(chunk, componentSeeds);
+                }
+
+                componentSeeds.Add(seedVoxel);
+            }
+        }
+        finally
+        {
+            ArrayPool<int>.Shared.Return(queue);
+            ArrayPool<bool>.Shared.Return(visited);
+        }
+    }
+
+    private static void VisitTopologyNeighbor(AtmosChunk chunk, int voxelIndex,
+        bool[] visited, int[] queue, ref int queuedCount,
+        ReadOnlySpan<int> previousClassifications, ref bool touchesVoid)
+    {
+        int roomId = chunk.VoxelRoomMap[voxelIndex];
+        if (roomId == VoxelClassification.RoomVoid)
+        {
+            touchesVoid |= previousClassifications[voxelIndex] != VoxelClassification.RoomVoid;
+            return;
+        }
+
+        if (roomId == VoxelClassification.RoomSolid || visited[voxelIndex])
+            return;
+
+        visited[voxelIndex] = true;
+        queue[queuedCount++] = voxelIndex;
+    }
+
+    private Dictionary<AtmosChunk, SortedSet<ushort>> CreateBoundaryWakePlan(AtmosChunk chunk)
+    {
+        var wakePlan = new Dictionary<AtmosChunk, SortedSet<ushort>>();
+        AddBoundaryWakeConnection(wakePlan, chunk, Int3.NegX, Int3.PosX);
+        AddBoundaryWakeConnection(wakePlan, chunk, Int3.PosX, Int3.NegX);
+        AddBoundaryWakeConnection(wakePlan, chunk, Int3.NegY, Int3.PosY);
+        AddBoundaryWakeConnection(wakePlan, chunk, Int3.PosY, Int3.NegY);
+        if (chunk.Depth > 1)
+        {
+            AddBoundaryWakeConnection(wakePlan, chunk, Int3.NegZ, Int3.PosZ);
+            AddBoundaryWakeConnection(wakePlan, chunk, Int3.PosZ, Int3.NegZ);
+        }
+
+        return wakePlan;
+    }
+
+    private Dictionary<AtmosChunk, SortedSet<ushort>> CreateChangedBoundaryWakePlan(
+        AtmosChunk chunk,
+        ReadOnlySpan<int> previousClassifications)
+    {
+        var wakePlan = new Dictionary<AtmosChunk, SortedSet<ushort>>();
+        AddChangedBoundaryWakeConnection(
+            wakePlan, chunk, previousClassifications, Int3.NegX);
+        AddChangedBoundaryWakeConnection(
+            wakePlan, chunk, previousClassifications, Int3.PosX);
+        AddChangedBoundaryWakeConnection(
+            wakePlan, chunk, previousClassifications, Int3.NegY);
+        AddChangedBoundaryWakeConnection(
+            wakePlan, chunk, previousClassifications, Int3.PosY);
+        if (chunk.Depth > 1)
+        {
+            AddChangedBoundaryWakeConnection(
+                wakePlan, chunk, previousClassifications, Int3.NegZ);
+            AddChangedBoundaryWakeConnection(
+                wakePlan, chunk, previousClassifications, Int3.PosZ);
+        }
+
+        return wakePlan;
+    }
+
+    private void AddChangedBoundaryWakeConnection(
+        Dictionary<AtmosChunk, SortedSet<ushort>> wakePlan,
+        AtmosChunk chunk,
+        ReadOnlySpan<int> previousClassifications,
+        Int3 direction)
+    {
+        if (!_chunkMap.TryGetValue(chunk.GridPosition + direction, out var neighbor))
+            return;
+
+        for (ushort voxelIndex = 0; voxelIndex < chunk.VoxelCount; voxelIndex++)
+        {
+            Int3 position = chunk.GetXyzInt3(voxelIndex);
+            bool isFace = direction.X < 0 && position.X == 0 ||
+                          direction.X > 0 && position.X == chunk.Width - 1 ||
+                          direction.Y < 0 && position.Y == 0 ||
+                          direction.Y > 0 && position.Y == chunk.Height - 1 ||
+                          direction.Z < 0 && position.Z == 0 ||
+                          direction.Z > 0 && position.Z == chunk.Depth - 1;
+            if (!isFace)
+                continue;
+
+            Int3 neighborPosition = (position + direction + neighbor.Dimensions) %
+                                    neighbor.Dimensions;
+            ushort neighborIndex = neighbor.GetIndex(neighborPosition);
+            int neighborRoom = neighbor.VoxelRoomMap[neighborIndex];
+            int oldRoom = previousClassifications[voxelIndex];
+            int newRoom = chunk.VoxelRoomMap[voxelIndex];
+            if (!OpensOrChangesBoundaryBehavior(oldRoom, newRoom, neighborRoom))
+                continue;
+
+            AddGasBearingComponentAtVoxel(wakePlan, chunk, voxelIndex);
+            AddGasBearingComponentAtVoxel(wakePlan, neighbor, neighborIndex);
+        }
+    }
+
+    private static bool OpensOrChangesBoundaryBehavior(int oldRoom, int newRoom, int neighborRoom)
+    {
+        if (newRoom == VoxelClassification.RoomSolid ||
+            neighborRoom == VoxelClassification.RoomSolid)
+            return false;
+
+        if (oldRoom == VoxelClassification.RoomSolid)
+            return true;
+
+        bool oldIsVoid = oldRoom == VoxelClassification.RoomVoid;
+        bool newIsVoid = newRoom == VoxelClassification.RoomVoid;
+        return oldIsVoid != newIsVoid;
+    }
+
+    private static void AddGasBearingComponentAtVoxel(
+        Dictionary<AtmosChunk, SortedSet<ushort>> wakePlan,
+        AtmosChunk chunk,
+        ushort seedVoxel)
+    {
+        int seedRoom = chunk.VoxelRoomMap[seedVoxel];
+        if (seedRoom == VoxelClassification.RoomSolid ||
+            seedRoom == VoxelClassification.RoomVoid)
+            return;
+
+        bool[] visited = ArrayPool<bool>.Shared.Rent(chunk.VoxelCount);
+        int[] queue = ArrayPool<int>.Shared.Rent(chunk.VoxelCount);
+        Array.Clear(visited, 0, chunk.VoxelCount);
+        try
+        {
+            var queuedCount = 0;
+            visited[seedVoxel] = true;
+            queue[queuedCount++] = seedVoxel;
+            var hasGas = false;
+            for (var queuedIndex = 0; queuedIndex < queuedCount; queuedIndex++)
+            {
+                int componentVoxel = queue[queuedIndex];
+                hasGas |= HasGasAtVoxel(chunk, (ushort)componentVoxel);
+                int x = componentVoxel % chunk.Width;
+                int yz = componentVoxel / chunk.Width;
+                int y = yz % chunk.Height;
+                int z = yz / chunk.Height;
+                if (x > 0)
+                    TryEnqueuePassableVoxel(chunk, componentVoxel - 1,
+                        visited, queue, ref queuedCount);
+                if (x + 1 < chunk.Width)
+                    TryEnqueuePassableVoxel(chunk, componentVoxel + 1,
+                        visited, queue, ref queuedCount);
+                if (y > 0)
+                    TryEnqueuePassableVoxel(chunk, componentVoxel - chunk.Width,
+                        visited, queue, ref queuedCount);
+                if (y + 1 < chunk.Height)
+                    TryEnqueuePassableVoxel(chunk, componentVoxel + chunk.Width,
+                        visited, queue, ref queuedCount);
+                int layerSize = chunk.Width * chunk.Height;
+                if (z > 0)
+                    TryEnqueuePassableVoxel(chunk, componentVoxel - layerSize,
+                        visited, queue, ref queuedCount);
+                if (z + 1 < chunk.Depth)
+                    TryEnqueuePassableVoxel(chunk, componentVoxel + layerSize,
+                        visited, queue, ref queuedCount);
+            }
+
+            if (!hasGas)
+                return;
+            if (!wakePlan.TryGetValue(chunk, out SortedSet<ushort>? componentSeeds))
+            {
+                componentSeeds = [];
+                wakePlan.Add(chunk, componentSeeds);
+            }
+
+            componentSeeds.Add(seedVoxel);
+        }
+        finally
+        {
+            ArrayPool<int>.Shared.Return(queue);
+            ArrayPool<bool>.Shared.Return(visited);
+        }
+    }
+
+    private void AddBoundaryWakeConnection(Dictionary<AtmosChunk, SortedSet<ushort>> wakePlan,
+        AtmosChunk chunk, Int3 direction, Int3 oppositeDirection)
+    {
+        if (!_chunkMap.TryGetValue(chunk.GridPosition + direction, out var neighbor))
+            return;
+
+        AddGasBearingBoundaryRooms(wakePlan, chunk, neighbor, direction);
+        if (direction.Z == 0 || neighbor.Depth > 1)
+            AddGasBearingBoundaryRooms(wakePlan, neighbor, chunk, oppositeDirection);
+    }
+
+    private static void AddGasBearingBoundaryRooms(
+        Dictionary<AtmosChunk, SortedSet<ushort>> wakePlan, AtmosChunk chunk,
+        AtmosChunk neighbor, Int3 direction)
+    {
+        bool[] visited = ArrayPool<bool>.Shared.Rent(chunk.VoxelCount);
+        int[] queue = ArrayPool<int>.Shared.Rent(chunk.VoxelCount);
+        Array.Clear(visited, 0, chunk.VoxelCount);
+        try
+        {
+            for (ushort voxelIndex = 0; voxelIndex < chunk.VoxelCount; voxelIndex++)
+            {
+                Int3 position = chunk.GetXyzInt3(voxelIndex);
+                bool isFace = direction.X < 0 && position.X == 0 ||
+                              direction.X > 0 && position.X == chunk.Width - 1 ||
+                              direction.Y < 0 && position.Y == 0 ||
+                              direction.Y > 0 && position.Y == chunk.Height - 1 ||
+                              direction.Z < 0 && position.Z == 0 ||
+                              direction.Z > 0 && position.Z == chunk.Depth - 1;
+                if (!isFace || visited[voxelIndex])
+                    continue;
+
+                int roomId = chunk.VoxelRoomMap[voxelIndex];
+                if (roomId == VoxelClassification.RoomSolid ||
+                    roomId == VoxelClassification.RoomVoid)
+                    continue;
+
+                Int3 neighborPosition = (position + direction + neighbor.Dimensions) %
+                                        neighbor.Dimensions;
+                int neighborRoom = neighbor.VoxelRoomMap[neighbor.GetIndex(neighborPosition)];
+                if (neighborRoom == VoxelClassification.RoomSolid)
+                    continue;
+
+                var queuedCount = 0;
+                visited[voxelIndex] = true;
+                queue[queuedCount++] = voxelIndex;
+                var hasGas = false;
+                for (var queuedIndex = 0; queuedIndex < queuedCount; queuedIndex++)
+                {
+                    int componentVoxel = queue[queuedIndex];
+                    hasGas |= HasGasAtVoxel(chunk, (ushort)componentVoxel);
+                    int x = componentVoxel % chunk.Width;
+                    int yz = componentVoxel / chunk.Width;
+                    int y = yz % chunk.Height;
+                    int z = yz / chunk.Height;
+                    if (x > 0)
+                        TryEnqueuePassableVoxel(chunk, componentVoxel - 1, visited, queue, ref queuedCount);
+                    if (x + 1 < chunk.Width)
+                        TryEnqueuePassableVoxel(chunk, componentVoxel + 1, visited, queue, ref queuedCount);
+                    if (y > 0)
+                        TryEnqueuePassableVoxel(chunk, componentVoxel - chunk.Width,
+                            visited, queue, ref queuedCount);
+                    if (y + 1 < chunk.Height)
+                        TryEnqueuePassableVoxel(chunk, componentVoxel + chunk.Width,
+                            visited, queue, ref queuedCount);
+                    int layerSize = chunk.Width * chunk.Height;
+                    if (z > 0)
+                        TryEnqueuePassableVoxel(chunk, componentVoxel - layerSize,
+                            visited, queue, ref queuedCount);
+                    if (z + 1 < chunk.Depth)
+                        TryEnqueuePassableVoxel(chunk, componentVoxel + layerSize,
+                            visited, queue, ref queuedCount);
+                }
+
+                if (!hasGas)
+                    continue;
+                if (!wakePlan.TryGetValue(chunk, out SortedSet<ushort>? componentSeeds))
+                {
+                    componentSeeds = [];
+                    wakePlan.Add(chunk, componentSeeds);
+                }
+
+                componentSeeds.Add(voxelIndex);
+            }
+        }
+        finally
+        {
+            ArrayPool<int>.Shared.Return(queue);
+            ArrayPool<bool>.Shared.Return(visited);
+        }
+    }
+
+    private static void TryEnqueuePassableVoxel(AtmosChunk chunk, int voxelIndex,
+        bool[] visited, int[] queue, ref int queuedCount)
+    {
+        if (visited[voxelIndex])
+            return;
+
+        int roomId = chunk.VoxelRoomMap[voxelIndex];
+        if (roomId == VoxelClassification.RoomSolid || roomId == VoxelClassification.RoomVoid)
+            return;
+
+        visited[voxelIndex] = true;
+        queue[queuedCount++] = voxelIndex;
+    }
+
+    private static void ValidateBoundaryWakePlan(
+        Dictionary<AtmosChunk, SortedSet<ushort>> wakePlan)
+    {
+        foreach ((AtmosChunk chunk, SortedSet<ushort> requestedVoxels) in wakePlan)
+        {
+            bool[] included = ArrayPool<bool>.Shared.Rent(chunk.VoxelCount);
+            int[] queue = ArrayPool<int>.Shared.Rent(chunk.VoxelCount);
+            Array.Clear(included, 0, chunk.VoxelCount);
+            var activeRooms = new HashSet<int>();
+            try
+            {
+                if (chunk.IsAwake || chunk.WasAutomaticallySlept)
+                {
+                    for (var roomIndex = 0; roomIndex < chunk.ActiveRoomCount; roomIndex++)
+                    {
+                        int activeRoom = chunk.ActiveRoomIds[roomIndex];
+                        if (!HasPassableRoomVoxel(chunk, activeRoom))
+                            continue;
+                        activeRooms.Add(activeRoom);
+                        IncludeRoomClosure(chunk, activeRoom, included, queue);
+                    }
+                }
+
+                foreach (ushort requestedVoxel in requestedVoxels)
+                {
+                    if (included[requestedVoxel])
+                        continue;
+
+                    int requestedRoom = chunk.VoxelRoomMap[requestedVoxel];
+                    if (activeRooms.Add(requestedRoom) && activeRooms.Count > chunk.MaxActiveRooms)
+                    {
+                        throw new InvalidOperationException(
+                            "Opening a chunk boundary would exceed an adjacent chunk's active-room capacity.");
+                    }
+
+                    IncludeRoomClosure(chunk, requestedRoom, included, queue);
+                }
+            }
+            finally
+            {
+                ArrayPool<int>.Shared.Return(queue);
+                ArrayPool<bool>.Shared.Return(included);
+            }
+        }
+    }
+
+    private static void IncludeRoomClosure(AtmosChunk chunk, int roomId,
+        bool[] included, int[] queue)
+    {
+        var queuedCount = 0;
+        for (var voxelIndex = 0; voxelIndex < chunk.VoxelCount; voxelIndex++)
+        {
+            if (!included[voxelIndex] && chunk.VoxelRoomMap[voxelIndex] == roomId)
+            {
+                included[voxelIndex] = true;
+                queue[queuedCount++] = voxelIndex;
+            }
+        }
+
+        for (var queuedIndex = 0; queuedIndex < queuedCount; queuedIndex++)
+        {
+            int componentVoxel = queue[queuedIndex];
+            int x = componentVoxel % chunk.Width;
+            int yz = componentVoxel / chunk.Width;
+            int y = yz % chunk.Height;
+            int z = yz / chunk.Height;
+            if (x > 0)
+                TryEnqueuePassableVoxel(chunk, componentVoxel - 1,
+                    included, queue, ref queuedCount);
+            if (x + 1 < chunk.Width)
+                TryEnqueuePassableVoxel(chunk, componentVoxel + 1,
+                    included, queue, ref queuedCount);
+            if (y > 0)
+                TryEnqueuePassableVoxel(chunk, componentVoxel - chunk.Width,
+                    included, queue, ref queuedCount);
+            if (y + 1 < chunk.Height)
+                TryEnqueuePassableVoxel(chunk, componentVoxel + chunk.Width,
+                    included, queue, ref queuedCount);
+            int layerSize = chunk.Width * chunk.Height;
+            if (z > 0)
+                TryEnqueuePassableVoxel(chunk, componentVoxel - layerSize,
+                    included, queue, ref queuedCount);
+            if (z + 1 < chunk.Depth)
+                TryEnqueuePassableVoxel(chunk, componentVoxel + layerSize,
+                    included, queue, ref queuedCount);
+        }
+    }
+
+    private static void ApplyBoundaryWakePlan(
+        Dictionary<AtmosChunk, SortedSet<ushort>> wakePlan)
+    {
+        foreach ((AtmosChunk chunk, SortedSet<ushort> requestedVoxels) in wakePlan
+                     .OrderBy(static pair => pair.Key.GridPosition.X)
+                     .ThenBy(static pair => pair.Key.GridPosition.Y)
+                     .ThenBy(static pair => pair.Key.GridPosition.Z))
+        {
+            foreach (ushort voxelIndex in requestedVoxels)
+                chunk.WakeVoxel(voxelIndex);
+        }
+    }
+
+    private static bool HasGasAtVoxel(AtmosChunk chunk, ushort voxelIndex)
+    {
+        for (var gas = 0; gas < chunk.ActiveGasCount; gas++)
+        {
+            if (chunk.ActiveGases[gas].Moles[voxelIndex] > 0f)
+                return true;
+        }
+
+        return false;
     }
 
     private static ushort GetValidatedVoxelIndex(AtmosChunk chunk, int x, int y, int z)

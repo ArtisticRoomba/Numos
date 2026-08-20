@@ -31,6 +31,14 @@ public sealed class AtmosConfigTests
             Assert.That(config.VacuumThreshold, Is.EqualTo(AtmosConfigDefaults.VacuumThreshold));
             Assert.That(config.SleepThreshold, Is.EqualTo(AtmosConfigDefaults.SleepThreshold));
             Assert.That(config.SleepEpsilon, Is.EqualTo(AtmosConfigDefaults.SleepEpsilon));
+            Assert.That(config.VoxelSnappingEnabled,
+                Is.EqualTo(AtmosConfigDefaults.VoxelSnappingEnabled));
+            Assert.That(config.VoxelSnapPressureRelativeEpsilon,
+                Is.EqualTo(AtmosConfigDefaults.VoxelSnapPressureRelativeEpsilon));
+            Assert.That(config.VoxelSnapTemperatureEpsilon,
+                Is.EqualTo(AtmosConfigDefaults.VoxelSnapTemperatureEpsilon));
+            Assert.That(config.VoxelSnapMoleFractionEpsilon,
+                Is.EqualTo(AtmosConfigDefaults.VoxelSnapMoleFractionEpsilon));
             Assert.That(config.ThermalConductance, Is.EqualTo(AtmosConfigDefaults.ThermalConductance));
             Assert.That(config.CondensationRateFactor,
                 Is.EqualTo(AtmosConfigDefaults.CondensationRateFactor));
@@ -41,6 +49,32 @@ public sealed class AtmosConfigTests
             Assert.That(config.AccumulatorMaxAliveTicks,
                 Is.EqualTo(AtmosConfigDefaults.AccumulatorMaxAliveTicks));
         });
+    }
+
+    [Test]
+    public void Constructor_UsesProgressiveVoxelSnappingDefaults()
+    {
+        var config = new AtmosConfig();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(config.VoxelSnappingEnabled, Is.True);
+            Assert.That(config.SleepEpsilon, Is.EqualTo(0.5f));
+            Assert.That(config.VoxelSnapPressureRelativeEpsilon, Is.EqualTo(0.001f));
+            Assert.That(config.VoxelSnapTemperatureEpsilon, Is.EqualTo(0.01f));
+            Assert.That(config.VoxelSnapMoleFractionEpsilon, Is.EqualTo(0.001f));
+        });
+    }
+
+    [Test]
+    public void Defaults_LegacyQuietPressureCannotRequestBulkTransfer()
+    {
+        var config = new AtmosConfig();
+
+        Assert.That(config.SleepEpsilon * config.MaxPressureTransferFractionPerNeighbor,
+            Is.LessThan(config.MinimumPressureTransfer),
+            "At the default low-delta rate, a pressure difference considered quiet must remain below the " +
+            "minimum actionable bulk transfer.");
     }
 
     [Test]

@@ -25,8 +25,12 @@ internal static class AtmosSolverMath
 
     internal static float GetVoxelVolume(AtmosConfig config)
     {
-        return IsFinitePositive(config.VoxelVolume)
+        float volume = IsFinitePositive(config.VoxelVolume)
             ? config.VoxelVolume
+            : AtmosConfigDefaults.VoxelVolume;
+        float pressurePerMoleKelvin = AtmosPhysicalConstants.MolarGasConstant / volume;
+        return IsFinitePositive(pressurePerMoleKelvin)
+            ? volume
             : AtmosConfigDefaults.VoxelVolume;
     }
 
@@ -42,14 +46,17 @@ internal static class AtmosSolverMath
 
     internal static float CalculatePressure(AtmosConfig config, float moles, float temperature)
     {
-        return MathF.Max(0f, moles) * GetEffectiveTemperature(config, temperature) *
-               (AtmosPhysicalConstants.MolarGasConstant / GetVoxelVolume(config));
+        double pressure = (double)MathF.Max(0f, moles) * GetEffectiveTemperature(config, temperature) *
+                          (AtmosPhysicalConstants.MolarGasConstant / GetVoxelVolume(config));
+        return (float)pressure;
     }
 
     internal static float CalculatePressure(AtmosSolverConfigSnapshot config, float moles, float temperature)
     {
         Debug.Assert(float.IsFinite(moles) && moles >= 0f);
-        return moles * config.GetEffectiveTemperature(temperature) * config.PressurePerMoleKelvin;
+        double pressure = (double)moles * config.GetEffectiveTemperature(temperature) *
+                          config.PressurePerMoleKelvin;
+        return (float)pressure;
     }
 
     internal static float PressureToMoles(AtmosSolverConfigSnapshot config, float pressure, float temperature)

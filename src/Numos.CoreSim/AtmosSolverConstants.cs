@@ -22,9 +22,6 @@ internal static class AtmosSolverConstants
     /// <summary>Number of simulation ticks between thermodynamics passes.</summary>
     internal const int ThermodynamicsTickInterval = 2;
 
-    /// <summary>Per-species amount below which residual gas is discarded, in moles (mol).</summary>
-    internal const float MinimumTrackedMoles = 0.0001f;
-
     /// <summary>Minimum vapor amount considered by the phase-change solver, in moles (mol).</summary>
     internal const float MinimumMolesForCondensation = 0.01f;
 }

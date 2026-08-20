@@ -188,7 +188,18 @@ public sealed partial class AtmosSimulation
             ThrowIfDisposed();
             if (mixture is GasMixture owned)
             {
-                owned.State.Temperature = temperature;
+                GasMixtureState state = owned.State;
+                float previousTemperature = state.Temperature;
+                state.Temperature = temperature;
+                try
+                {
+                    ValidateState(state);
+                }
+                catch
+                {
+                    state.Temperature = previousTemperature;
+                    throw;
+                }
                 return;
             }
 
@@ -568,12 +579,12 @@ public sealed partial class AtmosSimulation
         if (!float.IsFinite(combinedHeatCapacity))
             throw new InvalidOperationException("The mixture's heat capacity exceeds the supported range.");
 
-        float currentTemperature = GetEffectiveMixtureTemperature(state.Temperature);
-        float incomingTemperature = GetEffectiveMixtureTemperature(temperature);
-        float mixedTemperature = combinedHeatCapacity > 0f
-            ? currentTemperature +
-              (incomingTemperature - currentTemperature) * incomingHeatCapacity / combinedHeatCapacity
-            : temperature;
+        float mixedTemperature = MixTemperatures(
+            state.Temperature,
+            currentHeatCapacity,
+            temperature,
+            incomingHeatCapacity,
+            temperature);
 
         state.Moles[gasId] = combinedMoles;
         state.Temperature = mixedTemperature;
@@ -603,12 +614,12 @@ public sealed partial class AtmosSimulation
         if (!float.IsFinite(combinedHeatCapacity))
             throw new InvalidOperationException("The merged mixture heat capacity exceeds the supported range.");
 
-        float destinationTemperature = GetEffectiveMixtureTemperature(destination.Temperature);
-        float incomingTemperature = GetEffectiveMixtureTemperature(incoming.Temperature);
-        float mixedTemperature = combinedHeatCapacity > 0f
-            ? destinationTemperature +
-              (incomingTemperature - destinationTemperature) * incomingHeatCapacity / combinedHeatCapacity
-            : incoming.Temperature;
+        float mixedTemperature = MixTemperatures(
+            destination.Temperature,
+            destinationHeatCapacity,
+            incoming.Temperature,
+            incomingHeatCapacity,
+            incoming.Temperature);
 
         foreach (var (gasId, incomingMoles) in incoming.Moles)
         {
@@ -660,13 +671,37 @@ public sealed partial class AtmosSimulation
             : AtmosConfigDefaults.DefaultTemperatureFallback;
     }
 
+    private float MixTemperatures(
+        float currentStoredTemperature,
+        float currentHeatCapacity,
+        float incomingStoredTemperature,
+        float incomingHeatCapacity,
+        float emptyTemperature)
+    {
+        if (currentHeatCapacity <= 0f)
+            return emptyTemperature;
+
+        double combinedHeatCapacity = (double)currentHeatCapacity + incomingHeatCapacity;
+        double mixedTemperature =
+            ((double)GetEffectiveMixtureTemperature(currentStoredTemperature) * currentHeatCapacity +
+             (double)GetEffectiveMixtureTemperature(incomingStoredTemperature) * incomingHeatCapacity) /
+            combinedHeatCapacity;
+        return (float)mixedTemperature;
+    }
+
     private float CalculateMixturePressure(GasMixtureState state)
     {
         float totalMoles = state.TotalMoles;
         if (totalMoles <= 0f)
             return 0f;
-        return totalMoles / state.Volume * AtmosPhysicalConstants.MolarGasConstant *
-               GetEffectiveMixtureTemperature(state.Temperature);
+        double pressure = (double)totalMoles / state.Volume * AtmosPhysicalConstants.MolarGasConstant *
+                          GetEffectiveMixtureTemperature(state.Temperature);
+        float storedPressure = (float)pressure;
+        if (!float.IsFinite(storedPressure))
+            throw new InvalidOperationException(
+                "The mixture pressure is not representable under the current simulation configuration.");
+
+        return storedPressure;
     }
 
     private static GasMixtureState RemoveRatioFromState(GasMixtureState source, float ratio)
@@ -709,9 +744,9 @@ public sealed partial class AtmosSimulation
 
         CalculateMixtureHeatCapacity(state);
 
-        float pressure = total / state.Volume * AtmosPhysicalConstants.MolarGasConstant *
-                         GetEffectiveMixtureTemperature(state.Temperature);
-        if (!float.IsFinite(pressure))
+        double pressure = (double)total / state.Volume * AtmosPhysicalConstants.MolarGasConstant *
+                          GetEffectiveMixtureTemperature(state.Temperature);
+        if (!double.IsFinite(pressure) || pressure > float.MaxValue)
             throw new InvalidOperationException("The mixture's pressure exceeds the supported range.");
     }
 

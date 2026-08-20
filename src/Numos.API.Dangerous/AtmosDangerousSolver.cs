@@ -72,7 +72,7 @@ public readonly ref struct AtmosDangerousSolverContext
         if (roomId == VoxelClassification.RoomSolid || roomId == VoxelClassification.RoomVoid)
             return;
 
-        chunk.WakeRoom(roomId);
+        chunk.WakeVoxel(localVoxelIndex);
         GasInjectionSolver.InjectDuringTick(
             chunk, localVoxelIndex, gasId, moles, temperature, _context.TickConfig);
     }

@@ -18,6 +18,13 @@ internal sealed class ThermalDiffusionSolver
         if (thermalConductance <= 0f)
             return 0;
 
+        // Advection normally refreshes these derived caches, but solver stages are independently disable-able
+        // and live configuration changes can revalue every species' heat capacity between ticks. Thermal
+        // diffusion must therefore establish its own coherent view from primary mole/temperature state.
+        RefreshDerivedState(chunk, config);
+        bool skipStableAggregateEdges = config.VoxelSnappingEnabled &&
+                                        chunk.VoxelAggregates.IsMaterializedStateCurrent(chunk);
+
         double[] incidentConductances = ArrayPool<double>.Shared.Rent(chunk.VoxelCount);
         double[] energyDeltas = ArrayPool<double>.Shared.Rent(chunk.VoxelCount);
         Array.Clear(incidentConductances, 0, chunk.VoxelCount);
@@ -26,8 +33,9 @@ internal sealed class ThermalDiffusionSolver
         try
         {
             int boundaryCount = AccumulateConductancesAndBoundaries(
-                chunk, config, incidentConductances, boundaryBuffer);
-            AccumulateEnergyDeltas(chunk, config, incidentConductances, energyDeltas);
+                chunk, config, incidentConductances, boundaryBuffer, skipStableAggregateEdges);
+            AccumulateEnergyDeltas(
+                chunk, config, incidentConductances, energyDeltas, skipStableAggregateEdges);
             ApplyEnergyDeltas(chunk, config, energyDeltas);
             return boundaryCount;
         }
@@ -38,9 +46,21 @@ internal sealed class ThermalDiffusionSolver
         }
     }
 
+    private static void RefreshDerivedState(AtmosChunk chunk, AtmosSolverConfigSnapshot config)
+    {
+        for (var activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
+        {
+            ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
+            chunk.TotalHeatCapacity[voxelIndex] =
+                AtmosSolverMath.CalculateHeatCapacityAtVoxel(config, chunk, voxelIndex);
+            chunk.TotalPressure[voxelIndex] =
+                AtmosSolverMath.CalculatePressureAtVoxel(config, chunk, voxelIndex);
+        }
+    }
+
     private static int AccumulateConductancesAndBoundaries(AtmosChunk chunk,
         AtmosSolverConfigSnapshot config, double[] incidentConductances,
-        ThermalBoundaryEvent[] boundaryBuffer)
+        ThermalBoundaryEvent[] boundaryBuffer, bool skipStableAggregateEdges)
     {
         var boundaryCount = 0;
         for (var activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
@@ -51,13 +71,13 @@ internal sealed class ThermalDiffusionSolver
 
             Int3 position = chunk.GetXyzInt3(voxelIndex);
             AccumulateConductance(chunk, config, position + Int3.PosX, voxelIndex, heatCapacity,
-                incidentConductances);
+                incidentConductances, skipStableAggregateEdges);
             AccumulateConductance(chunk, config, position + Int3.PosY, voxelIndex, heatCapacity,
-                incidentConductances);
+                incidentConductances, skipStableAggregateEdges);
             if (chunk.Depth > 1)
             {
                 AccumulateConductance(chunk, config, position + Int3.PosZ, voxelIndex, heatCapacity,
-                    incidentConductances);
+                    incidentConductances, skipStableAggregateEdges);
             }
 
             if (IsBoundary(chunk, position))
@@ -68,7 +88,7 @@ internal sealed class ThermalDiffusionSolver
     }
 
     private static void AccumulateEnergyDeltas(AtmosChunk chunk, AtmosSolverConfigSnapshot config,
-        double[] incidentConductances, double[] energyDeltas)
+        double[] incidentConductances, double[] energyDeltas, bool skipStableAggregateEdges)
     {
         for (var activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
         {
@@ -79,13 +99,13 @@ internal sealed class ThermalDiffusionSolver
 
             Int3 position = chunk.GetXyzInt3(voxelIndex);
             AccumulateFlux(chunk, config, position + Int3.PosX, voxelIndex, temperature, heatCapacity,
-                incidentConductances, energyDeltas);
+                incidentConductances, energyDeltas, skipStableAggregateEdges);
             AccumulateFlux(chunk, config, position + Int3.PosY, voxelIndex, temperature, heatCapacity,
-                incidentConductances, energyDeltas);
+                incidentConductances, energyDeltas, skipStableAggregateEdges);
             if (chunk.Depth > 1)
             {
                 AccumulateFlux(chunk, config, position + Int3.PosZ, voxelIndex, temperature, heatCapacity,
-                    incidentConductances, energyDeltas);
+                    incidentConductances, energyDeltas, skipStableAggregateEdges);
             }
         }
     }
@@ -93,24 +113,75 @@ internal sealed class ThermalDiffusionSolver
     private static void ApplyEnergyDeltas(AtmosChunk chunk, AtmosSolverConfigSnapshot config,
         double[] energyDeltas)
     {
+        // Validate the whole simultaneous batch before changing primary state. Individually finite heat
+        // transfers can still produce a temperature or ideal-gas pressure outside float storage range.
         for (var activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
         {
             ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
-            if (energyDeltas[voxelIndex] == 0f ||
+            if (energyDeltas[voxelIndex] == 0d ||
+                !TryGetThermalState(chunk, config, voxelIndex, out float oldTemperature,
+                    out float heatCapacity))
+                continue;
+            if (TryCalculateProjectedState(
+                    chunk, config, voxelIndex, oldTemperature, heatCapacity,
+                    energyDeltas[voxelIndex], out _, out _))
+                continue;
+
+            chunk.SleepTimer = 0;
+            return;
+        }
+
+        for (var activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
+        {
+            ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
+            if (energyDeltas[voxelIndex] == 0d ||
                 !TryGetThermalState(chunk, config, voxelIndex, out float oldTemperature,
                     out float heatCapacity))
                 continue;
 
-            chunk.Temperature[voxelIndex] = MathF.Max(0f,
-                oldTemperature + (float)(energyDeltas[voxelIndex] / heatCapacity));
-            chunk.TotalPressure[voxelIndex] =
-                AtmosSolverMath.CalculatePressureAtVoxel(config, chunk, voxelIndex);
+            bool valid = TryCalculateProjectedState(
+                chunk, config, voxelIndex, oldTemperature, heatCapacity,
+                energyDeltas[voxelIndex], out float newTemperature, out float newPressure);
+            Debug.Assert(valid);
+            chunk.Temperature[voxelIndex] = newTemperature;
+            chunk.TotalPressure[voxelIndex] = newPressure;
         }
+    }
+
+    private static bool TryCalculateProjectedState(
+        AtmosChunk chunk,
+        AtmosSolverConfigSnapshot config,
+        ushort voxelIndex,
+        float oldTemperature,
+        float heatCapacity,
+        double energyDelta,
+        out float newTemperature,
+        out float newPressure)
+    {
+        double projectedTemperature = Math.Max(0d, oldTemperature + energyDelta / heatCapacity);
+        newTemperature = (float)projectedTemperature;
+        if (!double.IsFinite(projectedTemperature) || !float.IsFinite(newTemperature))
+        {
+            newPressure = 0f;
+            return false;
+        }
+
+        var totalMoles = 0f;
+        for (var gas = 0; gas < chunk.ActiveGasCount; gas++)
+            totalMoles += chunk.ActiveGases[gas].Moles[voxelIndex];
+        if (!float.IsFinite(totalMoles))
+        {
+            newPressure = 0f;
+            return false;
+        }
+
+        newPressure = AtmosSolverMath.CalculatePressure(config, totalMoles, newTemperature);
+        return float.IsFinite(newPressure);
     }
 
     private static void AccumulateConductance(AtmosChunk chunk, AtmosSolverConfigSnapshot config,
         Int3 neighborPosition, ushort voxelIndex, float currentHeatCapacity,
-        double[] incidentConductances)
+        double[] incidentConductances, bool skipStableAggregateEdges)
     {
         if (!neighborPosition.IsWithin(default, chunk.Dimensions))
             return;
@@ -119,6 +190,9 @@ internal sealed class ThermalDiffusionSolver
         int neighborRoom = chunk.VoxelRoomMap[neighborIndex];
         if (neighborRoom == VoxelClassification.RoomSolid ||
             neighborRoom == VoxelClassification.RoomVoid)
+            return;
+        if (skipStableAggregateEdges &&
+            chunk.VoxelAggregates.AreAggregatedTogether(voxelIndex, neighborIndex))
             return;
         if (!TryGetThermalState(chunk, config, neighborIndex, out _, out float neighborHeatCapacity))
             return;
@@ -131,7 +205,7 @@ internal sealed class ThermalDiffusionSolver
 
     private static void AccumulateFlux(AtmosChunk chunk, AtmosSolverConfigSnapshot config,
         Int3 neighborPosition, ushort voxelIndex, float currentTemperature, float currentHeatCapacity,
-        double[] incidentConductances, double[] energyDeltas)
+        double[] incidentConductances, double[] energyDeltas, bool skipStableAggregateEdges)
     {
         if (!neighborPosition.IsWithin(default, chunk.Dimensions))
             return;
@@ -140,6 +214,9 @@ internal sealed class ThermalDiffusionSolver
         int neighborRoom = chunk.VoxelRoomMap[neighborIndex];
         if (neighborRoom == VoxelClassification.RoomSolid ||
             neighborRoom == VoxelClassification.RoomVoid)
+            return;
+        if (skipStableAggregateEdges &&
+            chunk.VoxelAggregates.AreAggregatedTogether(voxelIndex, neighborIndex))
             return;
         if (!TryGetThermalState(chunk, config, neighborIndex, out float neighborTemperature,
                 out float neighborHeatCapacity))

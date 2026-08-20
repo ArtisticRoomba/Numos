@@ -30,6 +30,8 @@ internal static class SimTestHelpers
             VacuumThreshold = 0f,
             SleepThreshold = int.MaxValue,
             SleepEpsilon = 0f,
+            // Progressive projection has dedicated fixtures; ordinary solver tests isolate it here.
+            VoxelSnappingEnabled = false,
             ThermalConductance = 0.05f,
             CondensationRateFactor = 0.5f,
             MaxPressureTransferFractionPerNeighbor = 0.16f,

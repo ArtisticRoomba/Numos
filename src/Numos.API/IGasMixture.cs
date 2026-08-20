@@ -22,12 +22,15 @@ public interface IGasMixture
 
     /// <summary>The stored temperature, in kelvins (K).</summary>
     /// <remarks>
-    ///     The setter stores the raw value. Pressure and energy calculations use the owner's configured fallback
-    ///     when the stored value is non-finite or nonpositive.
+    ///     Subject to a representable derived pressure, the setter stores the raw value. Pressure and energy
+    ///     calculations use the owner's configured fallback when the stored value is non-finite or nonpositive.
     /// </remarks>
     float Temperature { get; set; }
 
     /// <summary>The ideal-gas pressure, in pascals (Pa).</summary>
+    /// <exception cref="InvalidOperationException">
+    ///     The mixture's pressure is not representable under the owner's current live configuration.
+    /// </exception>
     float Pressure { get; }
 
     /// <summary>The total amount of gas, in moles (mol).</summary>

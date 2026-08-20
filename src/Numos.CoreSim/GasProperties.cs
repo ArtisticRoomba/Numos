@@ -53,6 +53,9 @@ public struct GasProperties
     /// <summary>
     ///     Dimensionless fraction of the per-species mole imbalance mixed per simulation tick.
     /// </summary>
-    /// <remarks>Values are clamped to [0, 1]; non-finite values disable diffusion for this species.</remarks>
+    /// <remarks>
+    ///     Values are normalized to [0, 1] and the explicit face update caps the effective fraction at 0.5;
+    ///     non-finite values disable diffusion for this species.
+    /// </remarks>
     public float DiffusionCoefficient;
 }

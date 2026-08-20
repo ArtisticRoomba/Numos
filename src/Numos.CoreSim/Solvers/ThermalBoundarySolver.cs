@@ -10,6 +10,10 @@ namespace Numos.CoreSim.Solvers;
 internal sealed class ThermalBoundarySolver : IAtmosSolverStage
 {
     private readonly List<ThermalBoundaryConductance> _activeEdges = [];
+    private readonly List<ThermalVoxelAddress> _componentAddresses = [];
+    private readonly List<ThermalVoxelAddress> _componentMembers = [];
+    private readonly Dictionary<ThermalVoxelAddress, ThermalVoxelAddress> _componentParents = [];
+    private readonly List<ThermalVoxelAddress> _componentRoots = [];
     private readonly Dictionary<ThermalVoxelAddress, double> _energyDeltas = [];
     private readonly HashSet<ThermalBoundaryEdge> _edges = [];
     private readonly Dictionary<ThermalVoxelAddress, double> _incidentConductances = [];
@@ -44,6 +48,10 @@ internal sealed class ThermalBoundarySolver : IAtmosSolverStage
         _incidentConductances.Clear();
         _activeEdges.Clear();
         _energyDeltas.Clear();
+        _componentAddresses.Clear();
+        _componentMembers.Clear();
+        _componentParents.Clear();
+        _componentRoots.Clear();
     }
 
     private void CollectEdges(AtmosSolverExecutionContext context)
@@ -136,17 +144,186 @@ internal sealed class ThermalBoundarySolver : IAtmosSolverStage
 
     private void ApplyEnergyDeltas(AtmosSolverExecutionContext context)
     {
-        foreach (var (address, energyDelta) in _energyDeltas)
+        BuildThermalComponents();
+        foreach (ThermalVoxelAddress root in _componentRoots)
+        {
+            _componentMembers.Clear();
+            foreach (ThermalVoxelAddress address in _componentParents.Keys)
+            {
+                if (FindComponentRoot(address) == root)
+                    _componentMembers.Add(address);
+            }
+
+            _componentMembers.Sort(CompareVoxels);
+            _componentAddresses.Clear();
+            foreach ((ThermalVoxelAddress address, double energyDelta) in _energyDeltas)
+            {
+                if (energyDelta != 0d && FindComponentRoot(address) == root)
+                    _componentAddresses.Add(address);
+            }
+
+            if (_componentAddresses.Count == 0)
+                continue;
+            _componentAddresses.Sort(CompareVoxels);
+
+            bool representable = true;
+            foreach (ThermalVoxelAddress address in _componentAddresses)
+            {
+                if (TryCalculateProjectedState(
+                        context.TickConfig, address, _states[address], _energyDeltas[address],
+                        out _, out _))
+                    continue;
+                representable = false;
+                break;
+            }
+
+            if (!representable)
+            {
+                KeepActiveBoundaryProducersAwake(_componentMembers);
+                continue;
+            }
+
+            var requestedVoxels = new Dictionary<AtmosChunk, List<ushort>>();
+            foreach (ThermalVoxelAddress address in _componentAddresses)
+            {
+                ThermalBoundaryState state = _states[address];
+                if (!requestedVoxels.TryGetValue(state.Chunk, out List<ushort>? chunkVoxels))
+                {
+                    chunkVoxels = [];
+                    requestedVoxels.Add(state.Chunk, chunkVoxels);
+                }
+
+                chunkVoxels.Add(address.LocalVoxelIndex);
+            }
+
+            var canApplyComponent = true;
+            foreach ((AtmosChunk chunk, List<ushort> chunkVoxels) in requestedVoxels)
+            {
+                if (chunk.CanWakeVoxels(chunkVoxels.ToArray()))
+                    continue;
+                canApplyComponent = false;
+                break;
+            }
+
+            if (!canApplyComponent)
+            {
+                // Each connected boundary graph is one simultaneous conservative batch. Defer only the blocked
+                // component, leaving unrelated thermal boundaries free to progress, and retain its currently
+                // active edge producers so it is retried after inactive target capacity becomes available.
+                // Component membership, rather than only nonzero net-delta addresses, matters here: an active
+                // mediator can balance equal-and-opposite edge transfers while still being the sole event source.
+                KeepActiveBoundaryProducersAwake(_componentMembers);
+                continue;
+            }
+
+            foreach (ThermalVoxelAddress address in _componentAddresses)
+            {
+                double energyDelta = _energyDeltas[address];
+                ThermalBoundaryState state = _states[address];
+                // A chunk can be awake while this boundary voxel's classification seed is inactive. Activate
+                // that seed before applying energy so internal thermal diffusion and snap validation observe it.
+                state.Chunk.WakeVoxel(address.LocalVoxelIndex);
+
+                bool valid = TryCalculateProjectedState(
+                    context.TickConfig, address, state, energyDelta,
+                    out float newTemperature, out float newPressure);
+                System.Diagnostics.Debug.Assert(valid);
+
+                state.Chunk.Temperature[address.LocalVoxelIndex] = newTemperature;
+                state.Chunk.TotalHeatCapacity[address.LocalVoxelIndex] = state.HeatCapacity;
+                state.Chunk.TotalPressure[address.LocalVoxelIndex] = newPressure;
+                state.Chunk.MarkChanged();
+            }
+        }
+    }
+
+    private void BuildThermalComponents()
+    {
+        foreach ((ThermalBoundaryEdge edge, _) in _activeEdges)
+            UnionComponents(edge.First, edge.Second);
+
+        var roots = new HashSet<ThermalVoxelAddress>();
+        foreach (ThermalVoxelAddress address in _componentParents.Keys)
+        {
+            ThermalVoxelAddress root = FindComponentRoot(address);
+            if (roots.Add(root))
+                _componentRoots.Add(root);
+        }
+
+        _componentRoots.Sort(CompareVoxels);
+    }
+
+    private void UnionComponents(ThermalVoxelAddress first, ThermalVoxelAddress second)
+    {
+        if (!_componentParents.TryAdd(first, first))
+            first = FindComponentRoot(first);
+        if (!_componentParents.TryAdd(second, second))
+            second = FindComponentRoot(second);
+
+        ThermalVoxelAddress firstRoot = FindComponentRoot(first);
+        ThermalVoxelAddress secondRoot = FindComponentRoot(second);
+        if (firstRoot == secondRoot)
+            return;
+
+        if (CompareVoxels(firstRoot, secondRoot) <= 0)
+            _componentParents[secondRoot] = firstRoot;
+        else
+            _componentParents[firstRoot] = secondRoot;
+    }
+
+    private ThermalVoxelAddress FindComponentRoot(ThermalVoxelAddress address)
+    {
+        ThermalVoxelAddress root = address;
+        while (_componentParents[root] != root)
+            root = _componentParents[root];
+
+        while (_componentParents[address] != address)
+        {
+            ThermalVoxelAddress parent = _componentParents[address];
+            _componentParents[address] = root;
+            address = parent;
+        }
+
+        return root;
+    }
+
+    private void KeepActiveBoundaryProducersAwake(IEnumerable<ThermalVoxelAddress> addresses)
+    {
+        foreach (ThermalVoxelAddress address in addresses)
         {
             ThermalBoundaryState state = _states[address];
-            float newTemperature = MathF.Max(0f,
-                state.Temperature + (float)(energyDelta / state.HeatCapacity));
-
-            state.Chunk.Temperature[address.LocalVoxelIndex] = newTemperature;
-            state.Chunk.TotalPressure[address.LocalVoxelIndex] = AtmosSolverMath.CalculatePressureAtVoxel(
-                context.TickConfig, state.Chunk, address.LocalVoxelIndex);
-            state.Chunk.MarkChanged();
+            if (state.Chunk.IsVoxelActive(address.LocalVoxelIndex))
+                state.Chunk.SleepTimer = 0;
         }
+    }
+
+    private static bool TryCalculateProjectedState(
+        AtmosSolverConfigSnapshot config,
+        ThermalVoxelAddress address,
+        ThermalBoundaryState state,
+        double energyDelta,
+        out float newTemperature,
+        out float newPressure)
+    {
+        double projectedTemperature = Math.Max(0d, state.Temperature + energyDelta / state.HeatCapacity);
+        newTemperature = (float)projectedTemperature;
+        if (!double.IsFinite(projectedTemperature) || !float.IsFinite(newTemperature))
+        {
+            newPressure = 0f;
+            return false;
+        }
+
+        var totalMoles = 0f;
+        for (var gas = 0; gas < state.Chunk.ActiveGasCount; gas++)
+            totalMoles += state.Chunk.ActiveGases[gas].Moles[address.LocalVoxelIndex];
+        if (!float.IsFinite(totalMoles))
+        {
+            newPressure = 0f;
+            return false;
+        }
+
+        newPressure = AtmosSolverMath.CalculatePressure(config, totalMoles, newTemperature);
+        return float.IsFinite(newPressure);
     }
 
     private bool TryGetState(AtmosSolverExecutionContext context, ThermalVoxelAddress address,
@@ -160,8 +337,6 @@ internal sealed class ThermalBoundarySolver : IAtmosSolverStage
         ushort voxelIndex = address.LocalVoxelIndex;
         float pressure = AtmosSolverMath.CalculatePressureAtVoxel(context.TickConfig, chunk, voxelIndex);
         float heatCapacity = AtmosSolverMath.CalculateHeatCapacityAtVoxel(context.TickConfig, chunk, voxelIndex);
-        chunk.TotalPressure[voxelIndex] = pressure;
-        chunk.TotalHeatCapacity[voxelIndex] = heatCapacity;
         if (!AtmosSolverMath.IsFinitePositive(heatCapacity) || !float.IsFinite(pressure) ||
             pressure < context.TickConfig.VacuumThreshold)
             return false;

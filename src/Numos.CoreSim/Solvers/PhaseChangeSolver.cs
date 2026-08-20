@@ -221,18 +221,71 @@ internal sealed class PhaseChangeSolver
         int gasIndex, ushort voxelIndex, float temperature, float remainingMoles,
         float condensedMoles, float molarInternalEnergyOfVaporization)
     {
-        chunk.ActiveGases[gasIndex].Moles[voxelIndex] = remainingMoles;
+        if (!TryPrepareCondensation(chunk, config, gasIndex, voxelIndex, temperature,
+                remainingMoles, condensedMoles, molarInternalEnergyOfVaporization,
+                out float newHeatCapacity, out float newTemperature, out float newPressure))
+        {
+            // A supersaturated voxel still has actionable phase work. Keep retrying instead of allowing the
+            // unchanged materialized state to satisfy the automatic-sleep verification window.
+            chunk.SleepTimer = 0;
+            chunk.VoxelAggregates.Reset();
+            return;
+        }
 
-        float newHeatCapacity = AtmosSolverMath.CalculateHeatCapacityAtVoxel(config, chunk, voxelIndex);
+        chunk.ActiveGases[gasIndex].Moles[voxelIndex] = remainingMoles;
         chunk.TotalHeatCapacity[voxelIndex] = newHeatCapacity;
         if (newHeatCapacity > 0f)
+            chunk.Temperature[voxelIndex] = newTemperature;
+        chunk.TotalPressure[voxelIndex] = newPressure;
+    }
+
+    private static bool TryPrepareCondensation(AtmosChunk chunk, AtmosSolverConfigSnapshot config,
+        int gasIndex, ushort voxelIndex, float temperature, float remainingMoles,
+        float condensedMoles, float molarInternalEnergyOfVaporization,
+        out float newHeatCapacity, out float newTemperature, out float newPressure)
+    {
+        var newTotalMoles = 0f;
+        newHeatCapacity = 0f;
+        for (var gas = 0; gas < chunk.ActiveGasCount; gas++)
         {
-            // Algebraically this is (T*C_remaining + n_condensed*U_vap) / C_remaining. Dividing
-            // before multiplying avoids both C*T overflow and the cancellation of two large energies.
-            chunk.Temperature[voxelIndex] = MathF.Max(0f,
-                temperature + condensedMoles / newHeatCapacity * molarInternalEnergyOfVaporization);
+            float moles = gas == gasIndex
+                ? remainingMoles
+                : chunk.ActiveGases[gas].Moles[voxelIndex];
+            if (moles <= 0f)
+                continue;
+
+            newTotalMoles += moles;
+            float heatCapacityContribution = moles *
+                                             config.GetMolarHeatCapacityAtConstantVolume(
+                                                 chunk.ActiveGases[gas].GasId);
+            newHeatCapacity += heatCapacityContribution;
+            if (!float.IsFinite(newTotalMoles) || !float.IsFinite(heatCapacityContribution) ||
+                !float.IsFinite(newHeatCapacity))
+            {
+                newTemperature = 0f;
+                newPressure = 0f;
+                return false;
+            }
         }
-        chunk.TotalPressure[voxelIndex] =
-            AtmosSolverMath.CalculatePressureAtVoxel(config, chunk, voxelIndex);
+
+        newTemperature = chunk.Temperature[voxelIndex];
+        if (newHeatCapacity > 0f)
+        {
+            // Algebraically this is (T*C_remaining + n_condensed*U_vap) / C_remaining. Perform
+            // the quotient in double so a finite projected temperature is not rejected because of
+            // an overflowing single-precision intermediate.
+            double projectedTemperature = temperature +
+                                          (double)condensedMoles / newHeatCapacity *
+                                          molarInternalEnergyOfVaporization;
+            newTemperature = (float)projectedTemperature;
+            if (!float.IsFinite(newTemperature) || newTemperature <= 0f)
+            {
+                newPressure = 0f;
+                return false;
+            }
+        }
+
+        newPressure = AtmosSolverMath.CalculatePressure(config, newTotalMoles, newTemperature);
+        return float.IsFinite(newPressure);
     }
 }

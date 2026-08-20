@@ -13,7 +13,7 @@ internal sealed class AtmosSolverPipeline : IDisposable
     {
         _createDefaults = createDefaults;
         _defaultLifetime = defaultLifetime;
-        Reset();
+        _ = Reset();
     }
 
     internal int Count => _steps.Count;
@@ -54,20 +54,52 @@ internal sealed class AtmosSolverPipeline : IDisposable
         return true;
     }
 
-    internal bool SetEnabled(string name, bool enabled)
+    internal bool SetEnabled(string name, bool enabled, out bool becameEnabled)
     {
+        becameEnabled = false;
         int index = IndexOf(name);
         if (index < 0)
             return false;
 
+        if (_steps[index].Enabled == enabled)
+            return true;
+
         _steps[index].Enabled = enabled;
+        becameEnabled = enabled;
         return true;
     }
 
-    internal void Reset()
+    internal bool Reset()
     {
+        SolverStep[] defaults = _createDefaults();
+        bool restoresEnabledDefault = defaults.Any(expected => !_steps.Any(current =>
+            string.Equals(current.Name, expected.Name, StringComparison.Ordinal) &&
+            current.Kind == expected.Kind &&
+            current.Enabled));
+
+        bool alreadyDefault = _steps.Count == defaults.Length;
+        if (alreadyDefault)
+        {
+            for (var index = 0; index < defaults.Length; index++)
+            {
+                SolverStep current = _steps[index];
+                SolverStep expected = defaults[index];
+                if (!string.Equals(current.Name, expected.Name, StringComparison.Ordinal) ||
+                    current.Kind != expected.Kind ||
+                    current.Enabled != expected.Enabled)
+                {
+                    alreadyDefault = false;
+                    break;
+                }
+            }
+        }
+
+        if (alreadyDefault)
+            return false;
+
         _steps.Clear();
-        _steps.AddRange(_createDefaults());
+        _steps.AddRange(defaults);
+        return restoresEnabledDefault;
     }
 
     internal void Execute(AtmosSolverExecutionContext context)

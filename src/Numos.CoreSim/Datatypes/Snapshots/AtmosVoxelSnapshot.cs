@@ -14,7 +14,7 @@ public readonly record struct VoxelGasSnapshot(
 /// <summary>
 ///     Detached values for one voxel, intended for interaction details and tooltips.
 /// </summary>
-/// <param name="Pressure">Pressure in pascals (Pa).</param>
+/// <param name="Pressure">Cached pressure in pascals (Pa) at the sampled chunk version.</param>
 /// <param name="Temperature">Temperature in kelvins (K).</param>
 public readonly record struct AtmosVoxelSnapshot(
     AtmosChunkVersion ChunkVersion,

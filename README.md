@@ -26,6 +26,17 @@ See `CONTRIBUTING.md` before contributing.
 ## Documentation
 Documentation for APIs and the project itself is available under `/docs`.
 
+### Headless debugging
+
+`Numos.Headless` runs reproducible simulation experiments from newline-delimited JSON without opening the graphical
+viewer. It can read commands interactively from standard input or replay a checked-in script, emitting one compact
+JSON response per command for tools and automated comparisons. See the [headless runner guide](docs/headless_runner.md)
+and the checked-in [two-voxel flow](examples/headless/two-voxel-flow.jsonl) and
+[16×16 equilibrium](examples/headless/16x16-equilibrium.jsonl) experiments. The
+[relative-pressure snap](examples/headless/16x16-relative-snap-equilibrium.jsonl) and
+[mixed-gas relative-pressure snap](examples/headless/16x16-relative-snap-mixed-gas-equilibrium.jsonl) scenarios
+exercise the production `0.1%` snap tolerance with the normal `0.1` Pa/tick minimum-transfer setting.
+
 ## Copyright, Credits & License
 Numos is licensed under the MIT license. See `LICENSE.TXT` for more info.
 

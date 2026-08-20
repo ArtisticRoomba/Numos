@@ -43,7 +43,8 @@ public class AtmosConfig
     ///     Physical volume represented by one voxel, in cubic metres (m³).
     /// </summary>
     /// <remarks>
-    ///     Numos calculates pressure in pascals from <c>P = nRT/V</c>. Non-finite and nonpositive values are
+    ///     Numos calculates pressure in pascals from <c>P = nRT/V</c>. Non-finite and nonpositive values, and
+    ///     positive values for which the single-precision <c>R/V</c> coefficient is unrepresentable, are
     ///     normalized to <c>1 m³</c> by the simulation.
     /// </remarks>
     public float VoxelVolume { get; set; } = AtmosConfigDefaults.VoxelVolume;
@@ -61,7 +62,10 @@ public class AtmosConfig
     /// <summary>
     ///     Per-tick Fickian mixing fraction used for gas IDs missing from <see cref="GasRegistry" />.
     /// </summary>
-    /// <remarks>Values are clamped to [0, 1]; non-finite values disable fallback diffusion.</remarks>
+    /// <remarks>
+    ///     Values are normalized to [0, 1] and the explicit face update caps the effective fraction at 0.5;
+    ///     non-finite values disable fallback diffusion.
+    /// </remarks>
     public float DefaultDiffusionCoefficient { get; set; } = AtmosConfigDefaults.DefaultDiffusionCoefficient;
 
     /// <summary>
@@ -103,16 +107,58 @@ public class AtmosConfig
     public float VacuumThreshold { get; set; } = AtmosConfigDefaults.VacuumThreshold;
 
     /// <summary>
-    ///     Consecutive ticks below <see cref="SleepEpsilon" /> before a chunk goes to sleep.
+    ///     Consecutive stable verification ticks required before a chunk goes to sleep.
     /// </summary>
-    /// <remarks>Negative values are normalized to zero.</remarks>
+    /// <remarks>
+    ///     Negative values are normalized to zero. Snap-assisted sleep observes at least one complete built-in
+    ///     thermodynamics cadence even when this value is smaller. Legacy pressure-only automatic sleep is
+    ///     evaluated by the advection stage and therefore requires that stage to be enabled.
+    /// </remarks>
     public int SleepThreshold { get; set; } = AtmosConfigDefaults.SleepThreshold;
 
     /// <summary>
-    ///     Maximum pressure delta considered "at rest", in pascals (Pa).
+    ///     Maximum pressure correction considered "at rest", in pascals (Pa).
     /// </summary>
     /// <remarks>Non-finite and negative values are normalized to zero.</remarks>
     public float SleepEpsilon { get; set; } = AtmosConfigDefaults.SleepEpsilon;
+
+    /// <summary>
+    ///     Whether neighboring, nearly equilibrated voxels are conservatively combined before automatic sleep.
+    /// </summary>
+    /// <remarks>
+    ///     Snapping is confined to face-connected voxels in one chunk. Disabling it retains the legacy
+    ///     pressure-only automatic-sleep behavior while advection is enabled.
+    /// </remarks>
+    public bool VoxelSnappingEnabled { get; set; } = AtmosConfigDefaults.VoxelSnappingEnabled;
+
+    /// <summary>
+    ///     Maximum relative pressure correction allowed when snapping neighboring voxels.
+    /// </summary>
+    /// <remarks>
+    ///     Each member's pressure correction is compared with this fraction of the greatest of its current
+    ///     pressure, the proposed aggregate equilibrium pressure, and <see cref="VacuumThreshold" />. The allowed
+    ///     correction is never smaller than <see cref="SleepEpsilon" />. The setting has no effect while voxel
+    ///     snapping is disabled. Finite values are clamped to [0, 1]; non-finite values normalize to zero.
+    /// </remarks>
+    public float VoxelSnapPressureRelativeEpsilon { get; set; } =
+        AtmosConfigDefaults.VoxelSnapPressureRelativeEpsilon;
+
+    /// <summary>
+    ///     Maximum absolute temperature correction allowed when snapping neighboring voxels, in kelvins (K).
+    /// </summary>
+    /// <remarks>
+    ///     This bounds each member's correction to a proposed aggregate equilibrium. The setting has no effect
+    ///     while voxel snapping is disabled. Non-finite and negative values normalize to zero.
+    /// </remarks>
+    public float VoxelSnapTemperatureEpsilon { get; set; } =
+        AtmosConfigDefaults.VoxelSnapTemperatureEpsilon;
+
+    /// <summary>
+    ///     Maximum absolute per-species mole-fraction correction allowed when snapping neighboring voxels.
+    /// </summary>
+    /// <remarks>Finite values are clamped to [0, 1]; non-finite values are normalized to zero.</remarks>
+    public float VoxelSnapMoleFractionEpsilon { get; set; } =
+        AtmosConfigDefaults.VoxelSnapMoleFractionEpsilon;
 
     /// <summary>
     ///     Effective thermal conductance between adjacent voxels, in joules per kelvin (J/K) per

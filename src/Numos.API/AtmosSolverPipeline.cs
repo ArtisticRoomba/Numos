@@ -9,7 +9,10 @@ namespace Numos.API;
 /// <remarks>
 ///     The enabled stage list is snapshotted before each tick. Registration, removal, and enablement changes made
 ///     by a running solver therefore take effect on the next tick. Registered custom solver instances remain
-///     caller-owned; this pipeline does not dispose them.
+///     caller-owned; this pipeline does not dispose them. Adding or re-enabling executable solver behavior
+///     invalidates solver-derived equilibrium at the next tick boundary: automatically slept chunks resume their
+///     retained active domains, while chunks frozen explicitly with <see cref="AtmosSimulation.SleepChunk" /> remain
+///     asleep. Removing or disabling behavior does not wake a chunk.
 /// </remarks>
 public sealed class AtmosSolverPipeline
 {
@@ -102,6 +105,11 @@ public sealed class AtmosSolverPipeline
     }
 
     /// <summary>Enables or disables a stage without changing its position.</summary>
+    /// <returns><see langword="true" /> when the named stage exists; otherwise, <see langword="false" />.</returns>
+    /// <remarks>
+    ///     Re-enabling a stage schedules automatic-sleep invalidation for the next tick. Disabling a stage or
+    ///     requesting its existing state does not wake chunks.
+    /// </remarks>
     [PublicAPI]
     public bool SetEnabled(string name, bool enabled)
     {
@@ -109,6 +117,10 @@ public sealed class AtmosSolverPipeline
     }
 
     /// <summary>Restores the built-in pipeline and removes every custom solver.</summary>
+    /// <remarks>
+    ///     Restoring a missing or disabled built-in schedules automatic-sleep invalidation for the next tick.
+    ///     A reset that only removes custom behavior does not wake chunks.
+    /// </remarks>
     [PublicAPI]
     public void ResetToDefaults()
     {

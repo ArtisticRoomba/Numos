@@ -49,8 +49,23 @@ public static class AtmosConfigDefaults
     /// <summary>Default consecutive quiet ticks required before a chunk sleeps.</summary>
     public const int SleepThreshold = 100;
 
-    /// <summary>Default maximum pressure delta considered at rest, in pascals (Pa).</summary>
-    public const float SleepEpsilon = 3.5f;
+    /// <summary>
+    ///     Default absolute pressure-correction floor used by voxel snapping, and the legacy neighboring-pressure
+    ///     tolerance when snapping is disabled, in pascals (Pa).
+    /// </summary>
+    public const float SleepEpsilon = 0.5f;
+
+    /// <summary>Default enablement for conservative progressive voxel snapping.</summary>
+    public const bool VoxelSnappingEnabled = true;
+
+    /// <summary>Default maximum relative pressure correction made by one voxel snap.</summary>
+    public const float VoxelSnapPressureRelativeEpsilon = 0.001f;
+
+    /// <summary>Default maximum temperature correction made by one voxel snap, in kelvins (K).</summary>
+    public const float VoxelSnapTemperatureEpsilon = 0.01f;
+
+    /// <summary>Default maximum per-species mole-fraction correction made by one voxel snap.</summary>
+    public const float VoxelSnapMoleFractionEpsilon = 0.001f;
 
     /// <summary>Default effective per-face thermal conductance, in joules per kelvin per thermodynamics tick.</summary>
     public const float ThermalConductance = 0.05f;

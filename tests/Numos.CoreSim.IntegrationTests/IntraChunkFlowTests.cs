@@ -347,7 +347,7 @@ public sealed class IntraChunkFlowTests
     }
 
     [Test]
-    public void DiffusionCoefficient_AboveOneIsClampedToOne()
+    public void DiffusionCoefficient_AboveOneUsesHalfPairRelaxation()
     {
         var config = SimTestHelpers.CreateDeterministicConfig();
         config.MaxPressureTransferFractionPerNeighbor = 0f;
@@ -364,9 +364,10 @@ public sealed class IntraChunkFlowTests
         var snapshot = simulation.GetChunkSnapshot(chunk);
         Assert.Multiple(() =>
         {
-            Assert.That(SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 0), Is.Zero);
+            Assert.That(SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 0),
+                Is.EqualTo(0.5f).Within(SimTestHelpers.Tolerance));
             Assert.That(SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 1),
-                Is.EqualTo(1f).Within(SimTestHelpers.Tolerance));
+                Is.EqualTo(0.5f).Within(SimTestHelpers.Tolerance));
         });
     }
 

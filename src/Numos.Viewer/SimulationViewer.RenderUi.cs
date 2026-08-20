@@ -531,13 +531,38 @@ public partial class SimulationViewer
                     "Below this pressure, voxel contents are zeroed out."))
                 _config.VacuumThreshold = vacuumThreshold;
             int sleepThreshold = _config.SleepThreshold;
-            if (ConfigSlider("Sleep Threshold", "config-sleep-threshold", ref sleepThreshold, 1, 1000,
-                    "Consecutive ticks below Sleep Epsilon before a chunk goes to sleep."))
+            if (ConfigSlider("Sleep Threshold", "config-sleep-threshold", ref sleepThreshold, 0, 1000,
+                    "Consecutive stable verification ticks required before automatic sleep. Snap-assisted sleep " +
+                    "always observes at least one complete thermodynamics cadence."))
                 _config.SleepThreshold = sleepThreshold;
             float sleepEpsilon = _config.SleepEpsilon;
-            if (ConfigSlider("Sleep Epsilon", "config-sleep-epsilon", ref sleepEpsilon, 0f, 100f,
-                    "Maximum pressure delta considered at rest."))
+            if (ConfigSlider("Absolute Sleep Epsilon (Pa)", "config-sleep-epsilon", ref sleepEpsilon, 0f, 100f,
+                    "Absolute floor for the maximum pressure correction allowed during voxel snapping. " +
+                    "When snapping is disabled, this is the legacy neighboring pressure-delta threshold."))
                 _config.SleepEpsilon = sleepEpsilon;
+            float voxelSnapPressureRelativeEpsilon = _config.VoxelSnapPressureRelativeEpsilon;
+            if (ConfigSlider("Voxel Snap Relative Pressure Epsilon",
+                    "config-voxel-snap-pressure-relative-epsilon",
+                    ref voxelSnapPressureRelativeEpsilon, 0f, 0.01f,
+                    "Maximum pressure correction as a fraction of the current/equilibrium pressure scale; " +
+                    "0.001 means 0.1%. The larger of this limit and the absolute sleep epsilon is used."))
+                _config.VoxelSnapPressureRelativeEpsilon = voxelSnapPressureRelativeEpsilon;
+            bool voxelSnappingEnabled = _config.VoxelSnappingEnabled;
+            if (ConfigCheckbox("Voxel Snapping Enabled", "config-voxel-snapping-enabled",
+                    ref voxelSnappingEnabled,
+                    "Conservatively projects settled neighboring voxels toward uniform species and energy state. " +
+                    "Disabling this bypasses the projection but does not disable automatic or manual sleeping."))
+                _config.VoxelSnappingEnabled = voxelSnappingEnabled;
+            float voxelSnapTemperatureEpsilon = _config.VoxelSnapTemperatureEpsilon;
+            if (ConfigSlider("Voxel Snap Temperature Epsilon (K)", "config-voxel-snap-temperature-epsilon",
+                    ref voxelSnapTemperatureEpsilon, 0f, 10f,
+                    "Maximum temperature correction, in kelvins, allowed for each member of a proposed aggregate."))
+                _config.VoxelSnapTemperatureEpsilon = voxelSnapTemperatureEpsilon;
+            float voxelSnapMoleFractionEpsilon = _config.VoxelSnapMoleFractionEpsilon;
+            if (ConfigSlider("Voxel Snap Mole-Fraction Epsilon", "config-voxel-snap-mole-fraction-epsilon",
+                    ref voxelSnapMoleFractionEpsilon, 0f, 1f,
+                    "Maximum per-species mole-fraction correction allowed for each proposed member (0 to 1)."))
+                _config.VoxelSnapMoleFractionEpsilon = voxelSnapMoleFractionEpsilon;
             float thermalConductance = _config.ThermalConductance;
             if (ConfigSlider("Thermal Conductance", "config-thermal-conductance", ref thermalConductance, 0f, 1f,
                     "Per-face energy conductance in J/K per thermodynamics tick."))
@@ -590,6 +615,10 @@ public partial class SimulationViewer
         _config.VacuumThreshold = defaults.VacuumThreshold;
         _config.SleepThreshold = defaults.SleepThreshold;
         _config.SleepEpsilon = defaults.SleepEpsilon;
+        _config.VoxelSnapPressureRelativeEpsilon = defaults.VoxelSnapPressureRelativeEpsilon;
+        _config.VoxelSnappingEnabled = defaults.VoxelSnappingEnabled;
+        _config.VoxelSnapTemperatureEpsilon = defaults.VoxelSnapTemperatureEpsilon;
+        _config.VoxelSnapMoleFractionEpsilon = defaults.VoxelSnapMoleFractionEpsilon;
         _config.ThermalConductance = defaults.ThermalConductance;
         _config.CondensationRateFactor = defaults.CondensationRateFactor;
         _config.MaxPressureTransferFractionPerNeighbor = defaults.MaxPressureTransferFractionPerNeighbor;
@@ -609,6 +638,13 @@ public partial class SimulationViewer
     {
         ImGui.SetNextItemWidth(100f);
         bool changed = ImGui.SliderInt($"{label} (?)##{id}", ref value, min, max);
+        SetConfigTooltip(tooltip);
+        return changed;
+    }
+
+    private static bool ConfigCheckbox(string label, string id, ref bool value, string tooltip)
+    {
+        bool changed = ImGui.Checkbox($"{label} (?)##{id}", ref value);
         SetConfigTooltip(tooltip);
         return changed;
     }

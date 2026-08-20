@@ -20,6 +20,7 @@ public sealed class SimulationStabilityTests
         simulation.AddGasToVoxel(chunk, 1, 0, 0, SimTestHelpers.FirstGasId, 1f, 300f);
 
         simulation.Tick();
+        simulation.SleepChunk(chunk);
         simulation.SetVoxelTemperature(chunk, 0, 0, 0, 600f);
         simulation.Tick();
         var whileSleeping = simulation.GetChunkSnapshot(chunk);

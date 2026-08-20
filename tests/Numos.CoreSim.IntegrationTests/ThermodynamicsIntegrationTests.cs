@@ -845,6 +845,48 @@ public sealed class ThermodynamicsIntegrationTests
     }
 
     [Test]
+    public void Condensation_UnrepresentableLatentHeatingIsDeferredAtomically()
+    {
+        var config = SimTestHelpers.CreateDeterministicConfig();
+        config.VoxelVolume = float.MaxValue;
+        config.CondensationRateFactor = 1f;
+        config.VoxelSnappingEnabled = true;
+        config.SleepThreshold = 0;
+        config.GasRegistry =
+        [
+            new GasProperties
+            {
+                Name = "Extreme condensable",
+                MolarHeatCapacityAtConstantVolume = float.Epsilon,
+                BoilingPoint = float.MaxValue,
+                CondensationEnabled = true,
+                MolarEnthalpyOfVaporization = float.MaxValue,
+                LiquidId = 1,
+                DiffusionCoefficient = 0f
+            }
+        ];
+        using var simulation = new AtmosSimulation(config, 1, 1, 1);
+        var chunk = SimTestHelpers.CreateOpenChunk(simulation, default);
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasId, 1e10f, 1f);
+        var before = simulation.GetChunkSnapshot(chunk);
+
+        for (var tick = 0; tick < 6; tick++)
+            simulation.Tick();
+
+        var after = simulation.GetChunkSnapshot(chunk);
+        Assert.Multiple(() =>
+        {
+            Assert.That(SimTestHelpers.Moles(after, SimTestHelpers.FirstGasId, 0),
+                Is.EqualTo(SimTestHelpers.Moles(before, SimTestHelpers.FirstGasId, 0)));
+            Assert.That(after.Temperature[0], Is.EqualTo(before.Temperature[0]));
+            Assert.That(float.IsFinite(after.Temperature[0]), Is.True);
+            Assert.That(float.IsFinite(after.TotalPressure[0]), Is.True);
+            Assert.That(after.IsAwake, Is.True,
+                "Deferred phase work must keep the chunk eligible for a later representable retry.");
+        });
+    }
+
+    [Test]
     public void Condensation_InfiniteSaturationPressureDoesNotCondense()
     {
         var config = CreateCondensationConfig();

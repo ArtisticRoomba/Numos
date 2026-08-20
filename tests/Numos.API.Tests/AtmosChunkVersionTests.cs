@@ -290,7 +290,10 @@ public sealed class AtmosChunkVersionTests
         Assert.Multiple(() =>
         {
             Assert.That(created, Is.True);
-            Assert.That(after.IsAwake, Is.False);
+            Assert.That(before.IsAwake, Is.False);
+            Assert.That(after.IsAwake, Is.True,
+                "A nonzero thermal-boundary transfer must wake the receiving chunk.");
+            Assert.That(after.SleepTimer, Is.Zero);
             Assert.That(after.Temperature[0], Is.GreaterThan(before.Temperature[0]));
         });
     }

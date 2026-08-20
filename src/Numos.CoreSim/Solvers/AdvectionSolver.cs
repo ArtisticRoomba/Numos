@@ -49,20 +49,26 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
         var maximumPressureDelta = 0f;
         if (chunk.ActiveGasCount > 0)
         {
+            bool skipStableAggregateEdges = config.VoxelSnappingEnabled &&
+                                            chunk.VoxelAggregates.IsMaterializedStateCurrent(chunk);
             RefreshPressureAndHeatCapacity(chunk, config);
             ProcessActiveVoxels(chunk, config, boundaryBuffer, ref boundaryEventCount,
-                ref maximumPressureDelta);
+                ref maximumPressureDelta, skipStableAggregateEdges);
         }
 
-        UpdateSleepState(chunk, config, maximumPressureDelta);
+        // Snap-assisted sleep is finalized after every configured solver stage. Keeping the legacy decision
+        // here when projection is disabled preserves its established pressure-only behavior.
+        if (!config.VoxelSnappingEnabled)
+            UpdateSleepState(chunk, config, maximumPressureDelta);
     }
 
     private static void ProcessActiveVoxels(AtmosChunk chunk, AtmosSolverConfigSnapshot config,
-        BoundaryFlowEvent[] boundaryBuffer, ref int boundaryEventCount, ref float maximumPressureDelta)
+        BoundaryFlowEvent[] boundaryBuffer, ref int boundaryEventCount, ref float maximumPressureDelta,
+        bool skipStableAggregateEdges)
     {
         int activeGasCount = chunk.ActiveGasCount;
         int moleDeltaLength = activeGasCount * chunk.VoxelCount;
-        float[] moleDeltas = ArrayPool<float>.Shared.Rent(moleDeltaLength);
+        double[] moleDeltas = ArrayPool<double>.Shared.Rent(moleDeltaLength);
         double[] energyDeltas = ArrayPool<double>.Shared.Rent(chunk.VoxelCount);
         float[] scheduledOutflows = ArrayPool<float>.Shared.Rent(activeGasCount * chunk.VoxelCount);
         Array.Clear(moleDeltas, 0, moleDeltaLength);
@@ -74,6 +80,11 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
             for (var activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
             {
                 ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
+                Int3 position = chunk.GetXyzInt3(voxelIndex);
+                // Empty and vacuum boundary voxels still have to publish their edge. Otherwise an awake low-
+                // pressure endpoint cannot discover and wake a higher-pressure sleeping neighbor.
+                TryAppendBoundaryEvent(chunk, position, voxelIndex, boundaryBuffer,
+                    ref boundaryEventCount);
                 float currentPressure = chunk.TotalPressure[voxelIndex];
                 if (currentPressure < config.VacuumThreshold)
                 {
@@ -85,49 +96,59 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
                 if (totalMoles <= 0f)
                     continue;
 
-                Int3 position = chunk.GetXyzInt3(voxelIndex);
                 ProcessNeighbors(chunk, config, position, voxelIndex, currentPressure, totalMoles,
-                    ref maximumPressureDelta, moleDeltas, energyDeltas, scheduledOutflows);
-                TryAppendBoundaryEvent(chunk, position, voxelIndex, boundaryBuffer,
-                    ref boundaryEventCount);
+                    ref maximumPressureDelta, moleDeltas, energyDeltas, scheduledOutflows,
+                    skipStableAggregateEdges);
             }
 
-            ApplyDeltas(chunk, config, moleDeltas, energyDeltas);
+            if (!ApplyDeltas(chunk, config, moleDeltas, energyDeltas))
+            {
+                // A finite set of simultaneous inflows can have an unrepresentable float-backed result.
+                // Deterministically defer the whole delta batch rather than partially applying it or poisoning
+                // primary state, and keep legacy sleep from treating the unchanged tick as settled.
+                maximumPressureDelta = float.PositiveInfinity;
+            }
         }
         finally
         {
             ArrayPool<float>.Shared.Return(scheduledOutflows);
             ArrayPool<double>.Shared.Return(energyDeltas);
-            ArrayPool<float>.Shared.Return(moleDeltas);
+            ArrayPool<double>.Shared.Return(moleDeltas);
         }
     }
 
     private static void ProcessNeighbors(AtmosChunk chunk, AtmosSolverConfigSnapshot config,
         Int3 position, ushort voxelIndex, float currentPressure, float totalMoles,
-        ref float maximumPressureDelta, float[] moleDeltas, double[] energyDeltas,
-        float[] scheduledOutflows)
+        ref float maximumPressureDelta, double[] moleDeltas, double[] energyDeltas,
+        float[] scheduledOutflows, bool skipStableAggregateEdges)
     {
         CheckNeighbor(chunk, config, position + Int3.NegX, voxelIndex, currentPressure, totalMoles,
-            ref maximumPressureDelta, moleDeltas, energyDeltas, scheduledOutflows);
+            ref maximumPressureDelta, moleDeltas, energyDeltas, scheduledOutflows,
+            skipStableAggregateEdges);
         CheckNeighbor(chunk, config, position + Int3.PosX, voxelIndex, currentPressure, totalMoles,
-            ref maximumPressureDelta, moleDeltas, energyDeltas, scheduledOutflows);
+            ref maximumPressureDelta, moleDeltas, energyDeltas, scheduledOutflows,
+            skipStableAggregateEdges);
         CheckNeighbor(chunk, config, position + Int3.NegY, voxelIndex, currentPressure, totalMoles,
-            ref maximumPressureDelta, moleDeltas, energyDeltas, scheduledOutflows);
+            ref maximumPressureDelta, moleDeltas, energyDeltas, scheduledOutflows,
+            skipStableAggregateEdges);
         CheckNeighbor(chunk, config, position + Int3.PosY, voxelIndex, currentPressure, totalMoles,
-            ref maximumPressureDelta, moleDeltas, energyDeltas, scheduledOutflows);
+            ref maximumPressureDelta, moleDeltas, energyDeltas, scheduledOutflows,
+            skipStableAggregateEdges);
         if (chunk.Depth <= 1)
             return;
 
         CheckNeighbor(chunk, config, position + Int3.NegZ, voxelIndex, currentPressure, totalMoles,
-            ref maximumPressureDelta, moleDeltas, energyDeltas, scheduledOutflows);
+            ref maximumPressureDelta, moleDeltas, energyDeltas, scheduledOutflows,
+            skipStableAggregateEdges);
         CheckNeighbor(chunk, config, position + Int3.PosZ, voxelIndex, currentPressure, totalMoles,
-            ref maximumPressureDelta, moleDeltas, energyDeltas, scheduledOutflows);
+            ref maximumPressureDelta, moleDeltas, energyDeltas, scheduledOutflows,
+            skipStableAggregateEdges);
     }
 
     private static void CheckNeighbor(AtmosChunk chunk, AtmosSolverConfigSnapshot config,
         Int3 neighborPosition, ushort voxelIndex, float currentPressure, float totalMoles,
-        ref float maximumPressureDelta, float[] moleDeltas, double[] energyDeltas,
-        float[] scheduledOutflows)
+        ref float maximumPressureDelta, double[] moleDeltas, double[] energyDeltas,
+        float[] scheduledOutflows, bool skipStableAggregateEdges)
     {
         if (!neighborPosition.IsWithin(default, chunk.Dimensions))
             return;
@@ -135,6 +156,9 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
         ushort neighborIndex = chunk.GetIndex(neighborPosition);
         int neighborRoom = chunk.VoxelRoomMap[neighborIndex];
         if (neighborRoom == VoxelClassification.RoomSolid)
+            return;
+        if (skipStableAggregateEdges &&
+            chunk.VoxelAggregates.AreAggregatedTogether(voxelIndex, neighborIndex))
             return;
 
         bool isVoid = neighborRoom == VoxelClassification.RoomVoid;
@@ -158,8 +182,10 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
             float neighborMoles = isVoid ? 0f : chunk.ActiveGases[gas].Moles[neighborIndex];
             float moleImbalance = AtmosSolverMath.CalculateMoleImbalance(
                 sourceMoles, sourceTemperature, neighborMoles, neighborTemperature);
+            float diffusionCoefficient = MathF.Min(0.5f,
+                config.GetDiffusionCoefficient(gasId));
             float molesDiffused = moleImbalance > 0f
-                ? moleImbalance * config.GetDiffusionCoefficient(gasId)
+                ? moleImbalance * diffusionCoefficient
                 : 0f;
 
             int outflowOffset = gas * chunk.VoxelCount + voxelIndex;
@@ -185,12 +211,10 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
 
     private static void RefreshPressureAndHeatCapacity(AtmosChunk chunk, AtmosSolverConfigSnapshot config)
     {
-        chunk.TotalPressure.Clear();
-        chunk.TotalHeatCapacity.Clear();
-
         for (var activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
         {
             ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
+            chunk.TotalHeatCapacity[voxelIndex] = 0f;
             chunk.TotalPressure[voxelIndex] = AtmosSolverMath.CalculatePressure(
                 config, GetTotalMoles(chunk, voxelIndex), chunk.Temperature[voxelIndex]);
         }
@@ -209,8 +233,54 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
         }
     }
 
-    private static void ApplyDeltas(AtmosChunk chunk, AtmosSolverConfigSnapshot config,
-        float[] moleDeltas, double[] energyDeltas)
+    private static bool ApplyDeltas(AtmosChunk chunk, AtmosSolverConfigSnapshot config,
+        double[] moleDeltas, double[] energyDeltas)
+    {
+        if (!CanApplyDeltas(chunk, config, moleDeltas, energyDeltas))
+            return false;
+
+        for (var activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
+        {
+            ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
+            double oldEnergy = (double)config.GetEffectiveTemperature(chunk.Temperature[voxelIndex]) *
+                               chunk.TotalHeatCapacity[voxelIndex];
+            bool stateChanged = energyDeltas[voxelIndex] != 0d;
+            var totalHeatCapacity = 0d;
+            var totalMoles = 0d;
+
+            for (var gas = 0; gas < chunk.ActiveGasCount; gas++)
+            {
+                int offset = gas * chunk.VoxelCount;
+                double moleDelta = moleDeltas[offset + voxelIndex];
+                stateChanged |= moleDelta != 0f;
+                double projectedMoles = chunk.ActiveGases[gas].Moles[voxelIndex] + moleDelta;
+                // Per-voxel trace pruning is not conservative: a component can hold a meaningful species total
+                // whose uniformly materialized share is tiny in every voxel. Clamp only negative roundoff and
+                // retain every positive representable amount.
+                float moles = (float)Math.Max(0d, projectedMoles);
+                chunk.ActiveGases[gas].Moles[voxelIndex] = moles;
+                totalHeatCapacity += (double)moles *
+                    config.GetMolarHeatCapacityAtConstantVolume(chunk.ActiveGases[gas].GasId);
+                totalMoles += moles;
+            }
+
+            chunk.TotalHeatCapacity[voxelIndex] = (float)totalHeatCapacity;
+            if (stateChanged && totalHeatCapacity > 0d)
+            {
+                chunk.Temperature[voxelIndex] = MathF.Max(0f,
+                    (float)((oldEnergy + energyDeltas[voxelIndex]) /
+                            totalHeatCapacity));
+            }
+
+            chunk.TotalPressure[voxelIndex] = AtmosSolverMath.CalculatePressure(
+                config, (float)totalMoles, chunk.Temperature[voxelIndex]);
+        }
+
+        return true;
+    }
+
+    private static bool CanApplyDeltas(AtmosChunk chunk, AtmosSolverConfigSnapshot config,
+        double[] moleDeltas, double[] energyDeltas)
     {
         for (var activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
         {
@@ -218,33 +288,48 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
             double oldEnergy = (double)config.GetEffectiveTemperature(chunk.Temperature[voxelIndex]) *
                                chunk.TotalHeatCapacity[voxelIndex];
             bool stateChanged = energyDeltas[voxelIndex] != 0d;
-            chunk.TotalHeatCapacity[voxelIndex] = 0f;
-            var totalMoles = 0f;
+            var totalHeatCapacity = 0d;
+            var totalMoles = 0d;
 
             for (var gas = 0; gas < chunk.ActiveGasCount; gas++)
             {
                 int offset = gas * chunk.VoxelCount;
-                float moleDelta = moleDeltas[offset + voxelIndex];
-                stateChanged |= moleDelta != 0f;
-                float moles = chunk.ActiveGases[gas].Moles[voxelIndex] + moleDelta;
-                if (moles < AtmosSolverConstants.MinimumTrackedMoles)
-                    moles = 0f;
-                chunk.ActiveGases[gas].Moles[voxelIndex] = moles;
-                chunk.TotalHeatCapacity[voxelIndex] += moles *
-                    config.GetMolarHeatCapacityAtConstantVolume(chunk.ActiveGases[gas].GasId);
-                totalMoles += moles;
+                double moleDelta = moleDeltas[offset + voxelIndex];
+                stateChanged |= moleDelta != 0d;
+                double projectedMoles = Math.Max(0d,
+                    chunk.ActiveGases[gas].Moles[voxelIndex] + moleDelta);
+                float storedMoles = (float)projectedMoles;
+                if (!float.IsFinite(storedMoles))
+                    return false;
+
+                totalMoles += storedMoles;
+                totalHeatCapacity += (double)storedMoles *
+                                     config.GetMolarHeatCapacityAtConstantVolume(
+                                         chunk.ActiveGases[gas].GasId);
             }
 
-            if (stateChanged && chunk.TotalHeatCapacity[voxelIndex] > 0f)
+            float storedTotalMoles = (float)totalMoles;
+            float storedHeatCapacity = (float)totalHeatCapacity;
+            if (!float.IsFinite(storedTotalMoles) || !float.IsFinite(storedHeatCapacity))
+                return false;
+
+            float projectedTemperature = chunk.Temperature[voxelIndex];
+            if (stateChanged && totalHeatCapacity > 0d)
             {
-                chunk.Temperature[voxelIndex] = MathF.Max(0f,
-                    (float)((oldEnergy + energyDeltas[voxelIndex]) /
-                            chunk.TotalHeatCapacity[voxelIndex]));
+                double targetTemperature = Math.Max(0d,
+                    (oldEnergy + energyDeltas[voxelIndex]) / totalHeatCapacity);
+                projectedTemperature = (float)targetTemperature;
+                if (!float.IsFinite(projectedTemperature))
+                    return false;
             }
 
-            chunk.TotalPressure[voxelIndex] = AtmosSolverMath.CalculatePressure(
-                config, totalMoles, chunk.Temperature[voxelIndex]);
+            float projectedPressure = AtmosSolverMath.CalculatePressure(
+                config, storedTotalMoles, projectedTemperature);
+            if (!float.IsFinite(projectedPressure))
+                return false;
         }
+
+        return true;
     }
 
     private static void TryAppendBoundaryEvent(AtmosChunk chunk, Int3 position, ushort voxelIndex,
@@ -285,9 +370,10 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
             return;
         }
 
-        chunk.SleepTimer++;
+        if (chunk.SleepTimer < int.MaxValue)
+            chunk.SleepTimer++;
         if (chunk.SleepTimer > config.SleepThreshold)
-            chunk.Sleep();
+            chunk.SleepAutomatically();
     }
 
 }

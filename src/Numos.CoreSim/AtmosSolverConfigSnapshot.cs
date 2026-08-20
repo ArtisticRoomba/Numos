@@ -35,9 +35,7 @@ internal sealed class AtmosSolverConfigSnapshot
             IsFinitePositive(config.DefaultMolarHeatCapacityAtConstantVolume)
                 ? config.DefaultMolarHeatCapacityAtConstantVolume
                 : AtmosConfigDefaults.DefaultMolarHeatCapacityAtConstantVolume;
-        VoxelVolume = IsFinitePositive(config.VoxelVolume)
-            ? config.VoxelVolume
-            : AtmosConfigDefaults.VoxelVolume;
+        VoxelVolume = Solvers.AtmosSolverMath.GetVoxelVolume(config);
         PressurePerMoleKelvin = AtmosPhysicalConstants.MolarGasConstant / VoxelVolume;
         SaturationReferencePressure = IsFinitePositive(config.SaturationReferencePressure)
             ? config.SaturationReferencePressure
@@ -69,12 +67,17 @@ internal sealed class AtmosSolverConfigSnapshot
         VacuumThreshold = GetNonnegativeFinite(config.VacuumThreshold);
         SleepThreshold = Math.Max(0, config.SleepThreshold);
         SleepEpsilon = GetNonnegativeFinite(config.SleepEpsilon);
+        VoxelSnappingEnabled = config.VoxelSnappingEnabled;
+        VoxelSnapPressureRelativeEpsilon = ClampUnitInterval(config.VoxelSnapPressureRelativeEpsilon);
+        VoxelSnapTemperatureEpsilon = GetNonnegativeFinite(config.VoxelSnapTemperatureEpsilon);
+        VoxelSnapMoleFractionEpsilon = ClampUnitInterval(config.VoxelSnapMoleFractionEpsilon);
         ThermalConductance = IsFinitePositive(config.ThermalConductance)
             ? config.ThermalConductance
             : 0f;
         CondensationRateFactor = ClampUnitInterval(config.CondensationRateFactor);
         MaxPressureTransferFractionPerNeighbor =
             ClampUnitInterval(config.MaxPressureTransferFractionPerNeighbor);
+        ConfigurationFingerprint = CalculateConfigurationFingerprint();
     }
 
     internal float DefaultTemperatureFallback { get; private set; }
@@ -88,9 +91,14 @@ internal sealed class AtmosSolverConfigSnapshot
     internal float VacuumThreshold { get; private set; }
     internal int SleepThreshold { get; private set; }
     internal float SleepEpsilon { get; private set; }
+    internal bool VoxelSnappingEnabled { get; private set; }
+    internal float VoxelSnapPressureRelativeEpsilon { get; private set; }
+    internal float VoxelSnapTemperatureEpsilon { get; private set; }
+    internal float VoxelSnapMoleFractionEpsilon { get; private set; }
     internal float ThermalConductance { get; private set; }
     internal float CondensationRateFactor { get; private set; }
     internal float MaxPressureTransferFractionPerNeighbor { get; private set; }
+    internal ulong ConfigurationFingerprint { get; private set; }
 
     internal float GetEffectiveTemperature(float storedTemperature)
     {
@@ -136,5 +144,58 @@ internal sealed class AtmosSolverConfigSnapshot
     private static float GetNonnegativeFinite(float value)
     {
         return float.IsFinite(value) ? MathF.Max(0f, value) : 0f;
+    }
+
+    private ulong CalculateConfigurationFingerprint()
+    {
+        const ulong offsetBasis = 14695981039346656037UL;
+        ulong hash = offsetBasis;
+        Add(ref hash, DefaultTemperatureFallback);
+        Add(ref hash, _defaultMolarHeatCapacityAtConstantVolume);
+        Add(ref hash, VoxelVolume);
+        Add(ref hash, SaturationReferencePressure);
+        Add(ref hash, _defaultDiffusionCoefficient);
+        Add(ref hash, BulkFlowCoefficient);
+        Add(ref hash, BulkFlowDamping);
+        Add(ref hash, LowPressureDeltaThreshold);
+        Add(ref hash, MinimumPressureTransfer);
+        Add(ref hash, VacuumThreshold);
+        Add(ref hash, SleepThreshold);
+        Add(ref hash, SleepEpsilon);
+        Add(ref hash, VoxelSnappingEnabled ? 1 : 0);
+        Add(ref hash, VoxelSnapPressureRelativeEpsilon);
+        Add(ref hash, VoxelSnapTemperatureEpsilon);
+        Add(ref hash, VoxelSnapMoleFractionEpsilon);
+        Add(ref hash, ThermalConductance);
+        Add(ref hash, CondensationRateFactor);
+        Add(ref hash, MaxPressureTransferFractionPerNeighbor);
+        Add(ref hash, _gasRegistryCount);
+        for (var gasId = 0; gasId < _gasRegistryCount; gasId++)
+        {
+            GasProperties properties = _gasRegistry[gasId];
+            Add(ref hash, _molarHeatCapacitiesAtConstantVolume[gasId]);
+            Add(ref hash, _diffusionCoefficients[gasId]);
+            Add(ref hash, properties.BoilingPoint);
+            Add(ref hash, properties.CondensationEnabled ? 1 : 0);
+            Add(ref hash, properties.MolarEnthalpyOfVaporization);
+        }
+
+        return hash;
+    }
+
+    private static void Add(ref ulong hash, float value)
+    {
+        Add(ref hash, BitConverter.SingleToInt32Bits(value));
+    }
+
+    private static void Add(ref ulong hash, int value)
+    {
+        const ulong prime = 1099511628211UL;
+        uint bits = unchecked((uint)value);
+        for (var shift = 0; shift < 32; shift += 8)
+        {
+            hash ^= (byte)(bits >> shift);
+            hash *= prime;
+        }
     }
 }

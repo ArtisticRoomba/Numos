@@ -140,6 +140,29 @@ public sealed class AtmosChunkInjectionTests
         });
     }
 
+    [Test]
+    public void InjectGasToVoxel_UnrepresentableCombinedStateIsRejectedBeforeMutation()
+    {
+        var chunk = CreateAwakeChunk(1);
+        chunk.InjectGasToVoxel(0, 3, float.MaxValue, 1f, float.Epsilon, float.Epsilon);
+        chunk.SleepTimer = 9;
+        var version = chunk.Version;
+
+        Assert.That(() => chunk.InjectGasToVoxel(
+                0, 3, float.MaxValue, 1f, float.Epsilon, float.Epsilon),
+            Throws.TypeOf<InvalidOperationException>());
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(chunk.ActiveGasCount, Is.EqualTo(1));
+            Assert.That(chunk.ActiveGases[0].Moles[0], Is.EqualTo(float.MaxValue));
+            Assert.That(float.IsFinite(chunk.TotalPressure[0]), Is.True);
+            Assert.That(float.IsFinite(chunk.TotalHeatCapacity[0]), Is.True);
+            Assert.That(chunk.SleepTimer, Is.EqualTo(9));
+            Assert.That(chunk.Version, Is.EqualTo(version));
+        });
+    }
+
     private AtmosChunk CreateChunk(int width, int height, int depth)
     {
         var chunk = new AtmosChunk(width, height, depth);
