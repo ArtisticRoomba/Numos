@@ -938,6 +938,11 @@ does not independently wake an explicitly slept chunk, and `SleepChunk` delibera
 snapshot for its batch of up to five fixed steps. Frequent direct ticks or updates with large chunk counts therefore
 generate array-allocation pressure.
 
+5. **Cross-chunk bulk transfer has a long, non-terminating tail.** Local pressure propagation scales approximately
+with distance squared, while every positive boundary diffusion attempt resets snap/sleep progress. Sub-ULP attempts
+can continue revising both chunks indefinitely. The reproduction, analysis, and ranked resolution options are tracked
+in [Known Issues: KI-001](known_issues.md#ki-001-cross-chunk-bulk-transfer-converges-pathologically-slowly).
+
 ---
 
 ## 11. Porting Guidance

@@ -25,6 +25,7 @@ See `CONTRIBUTING.md` before contributing.
 
 ## Documentation
 Documentation for APIs and the project itself is available under `/docs`.
+Tracked numerical and lifecycle limitations are documented in [Known Issues](docs/known_issues.md).
 
 ### Headless debugging
 
