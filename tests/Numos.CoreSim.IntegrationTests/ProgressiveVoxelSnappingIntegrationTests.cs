@@ -1781,6 +1781,73 @@ public sealed class ProgressiveVoxelSnappingIntegrationTests
         });
     }
 
+    [Test]
+    public void ProductionDefaults_FourSourceMixtureSleepsNearUniformWithinFiveHundredTicks()
+    {
+        const int size = 16;
+        const float initialMolesPerSource = 5_000f;
+        const float initialTemperature = 293.15f;
+        var config = new AtmosConfig();
+        config.GasRegistry.Add(new GasProperties
+        {
+            Name = "O2",
+            MolarHeatCapacityAtConstantVolume = 20.786157f,
+            BoilingPoint = 90.2f,
+            CondensationEnabled = true,
+            MolarEnthalpyOfVaporization = 6820f,
+            LiquidId = 0,
+            DiffusionCoefficient = 0.1f
+        });
+        config.GasRegistry.Add(new GasProperties
+        {
+            Name = "N2",
+            MolarHeatCapacityAtConstantVolume = 20.786157f,
+            BoilingPoint = 77.34f,
+            CondensationEnabled = true,
+            MolarEnthalpyOfVaporization = 5600f,
+            LiquidId = 1,
+            DiffusionCoefficient = 0.08f
+        });
+        using var simulation = new AtmosSimulation(config, size, size, 1);
+        var chunk = SimTestHelpers.CreateOpenChunk(simulation, default);
+        simulation.AddGasToVoxel(chunk, 15, 0, 0, 0, initialMolesPerSource, initialTemperature);
+        simulation.AddGasToVoxel(chunk, 0, 15, 0, 0, initialMolesPerSource, initialTemperature);
+        simulation.AddGasToVoxel(chunk, 7, 7, 0, 1, initialMolesPerSource, initialTemperature);
+        simulation.AddGasToVoxel(chunk, 8, 8, 0, 1, initialMolesPerSource, initialTemperature);
+        var initial = simulation.GetChunkSnapshot(chunk);
+        double initialEnergy = SimTestHelpers.TotalThermalEnergyPrecise(config, initial);
+
+        var final = RunUntilSleeping(simulation, chunk, 500);
+        float[] oxygen = ReadMoles(final, 0);
+        float[] nitrogen = ReadMoles(final, 1);
+        float pressureSpread = final.TotalPressure.Max() - final.TotalPressure.Min();
+        float temperatureSpread = final.Temperature.Max() - final.Temperature.Min();
+        double finalEnergy = SimTestHelpers.TotalThermalEnergyPrecise(config, final);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(final.IsAwake, Is.False);
+            Assert.That(final.SleepTimer, Is.GreaterThan(config.SleepThreshold));
+            Assert.That(simulation.TickCount, Is.LessThanOrEqualTo(500));
+            Assert.That(pressureSpread,
+                Is.LessThanOrEqualTo(8f * Ulp(final.TotalPressure.Max())));
+            Assert.That(temperatureSpread,
+                Is.LessThanOrEqualTo(8f * Ulp(final.Temperature.Max())));
+            Assert.That(oxygen.Max() - oxygen.Min(),
+                Is.LessThanOrEqualTo(8f * Ulp(oxygen.Max())));
+            Assert.That(nitrogen.Max() - nitrogen.Min(),
+                Is.LessThanOrEqualTo(8f * Ulp(nitrogen.Max())));
+            Assert.That(SpeciesTotal(final, 0),
+                Is.EqualTo(SpeciesTotal(initial, 0))
+                    .Within(FloatSumTolerance(SpeciesTotal(initial, 0), size * size)));
+            Assert.That(SpeciesTotal(final, 1),
+                Is.EqualTo(SpeciesTotal(initial, 1))
+                    .Within(FloatSumTolerance(SpeciesTotal(initial, 1), size * size)));
+            Assert.That(finalEnergy,
+                Is.EqualTo(initialEnergy).Within(FloatEnergyTolerance(initialEnergy, size * size)));
+        });
+    }
+
     private static AtmosConfig CreateForcedSnappingConfig()
     {
         var config = SimTestHelpers.CreateDeterministicConfig();

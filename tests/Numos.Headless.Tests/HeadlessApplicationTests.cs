@@ -388,7 +388,8 @@ public sealed class HeadlessApplicationTests
             Assert.That(global.GetProperty("awakeChunkCount").GetInt32(), Is.Zero);
             Assert.That(global.GetProperty("sleepingChunkCount").GetInt32(), Is.EqualTo(1));
             Assert.That(chunk.GetProperty("isAwake").GetBoolean(), Is.False);
-            Assert.That(chunk.GetProperty("sleepTimer").GetInt32(), Is.GreaterThan(100));
+            Assert.That(chunk.GetProperty("sleepTimer").GetInt32(),
+                Is.GreaterThan(observation.GetProperty("config").GetProperty("sleepThreshold").GetInt32()));
             Assert.That(global.GetProperty("gasBearingVoxelCount").GetInt32(), Is.EqualTo(256));
             Assert.That(pressureSpread,
                 Is.LessThanOrEqualTo(observation.GetProperty("config")

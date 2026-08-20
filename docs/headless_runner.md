@@ -186,7 +186,8 @@ that member's current pressure, the proposed aggregate equilibrium pressure, and
 `voxelSnapMoleFractionEpsilon` bounds each dimensionless per-species mole-fraction correction. Species totals and
 sensible internal energy are preserved by the projection, subject to the simulation's single-precision storage.
 The relative pressure epsilon is dimensionless and normalizes to `[0, 1]`; its default `0.001` means `0.1%`.
-The other current defaults are `0.5` Pa, `0.01` K, and `0.001` mole fraction.
+The other current defaults are `0.5` Pa, `0.01` K, and `0.005` mole fraction. The composition limit therefore
+allows a conservative projection to correct at most 0.5 percentage points of any species' local mole fraction.
 
 Snap eligibility is intentionally independent of `minimumPressureTransferPa`, whose production default remains
 `0.1` Pa/tick. A conservative snap may finish the diminishing flow tail even while ordinary advection would still

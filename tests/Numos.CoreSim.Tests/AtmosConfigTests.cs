@@ -59,10 +59,11 @@ public sealed class AtmosConfigTests
         Assert.Multiple(() =>
         {
             Assert.That(config.VoxelSnappingEnabled, Is.True);
+            Assert.That(config.SleepThreshold, Is.EqualTo(15));
             Assert.That(config.SleepEpsilon, Is.EqualTo(0.5f));
             Assert.That(config.VoxelSnapPressureRelativeEpsilon, Is.EqualTo(0.001f));
             Assert.That(config.VoxelSnapTemperatureEpsilon, Is.EqualTo(0.01f));
-            Assert.That(config.VoxelSnapMoleFractionEpsilon, Is.EqualTo(0.001f));
+            Assert.That(config.VoxelSnapMoleFractionEpsilon, Is.EqualTo(0.005f));
         });
     }
 
