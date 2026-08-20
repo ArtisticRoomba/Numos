@@ -767,6 +767,8 @@ public partial class SimulationViewer
 
         if (legend.Kind == VisualizationLegendKind.Gradient && legend.Entries.Count > 0)
         {
+            RenderLegendBoundsControls(legend.Range);
+
             ImGui.Checkbox("Resolution##legend-resolution-enabled", ref _legendResolutionEnabled);
             if (_legendResolutionEnabled)
             {
@@ -790,6 +792,61 @@ public partial class SimulationViewer
                 ImGuiColorEditFlags.NoTooltip, new Vector2(16, 16));
             ImGui.SameLine();
             ImGui.TextUnformatted(entry.Label);
+        }
+    }
+
+    private void RenderLegendBoundsControls(VisualizationRange currentRange)
+    {
+        bool automaticBounds = _legendAutomaticBounds;
+        if (ImGui.Checkbox("Automatic bounds##legend-automatic-bounds", ref automaticBounds))
+        {
+            _legendAutomaticBounds = automaticBounds;
+            if (!automaticBounds)
+            {
+                _legendMinimum = currentRange.Minimum;
+                _legendMaximum = currentRange.Maximum;
+            }
+
+            _legendRangeRevision++;
+        }
+
+        if (_legendAutomaticBounds)
+        {
+            ImGui.SetNextItemWidth(NumericInputWidth);
+            float offset = _legendAutomaticRangeOffset;
+            if (ImGui.InputFloat("± Offset##legend-range-offset", ref offset))
+            {
+                _legendAutomaticRangeOffset = Math.Max(offset, 0f);
+                _legendRangeRevision++;
+            }
+
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Expands the automatic minimum and maximum by this amount.");
+
+            return;
+        }
+
+        ImGui.SetNextItemWidth(NumericInputWidth);
+        float minimum = _legendMinimum;
+        if (ImGui.InputFloat("Min##legend-minimum", ref minimum))
+        {
+            _legendMinimum = Math.Min(minimum, _legendMaximum);
+            _legendRangeRevision++;
+        }
+
+        ImGui.SameLine();
+        ImGui.SetNextItemWidth(NumericInputWidth);
+        float maximum = _legendMaximum;
+        if (ImGui.InputFloat("Max##legend-maximum", ref maximum))
+        {
+            _legendMaximum = Math.Max(maximum, _legendMinimum);
+            _legendRangeRevision++;
+        }
+
+        if (_legendMaximum <= _legendMinimum)
+        {
+            _legendMaximum = _legendMinimum + 1f;
+            _legendRangeRevision++;
         }
     }
 

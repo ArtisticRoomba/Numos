@@ -62,6 +62,12 @@ public partial class SimulationViewer : IDisposable
     private string _currentVisualizationId = BuiltInVisualizationIds.Temperature;
     private bool _legendResolutionEnabled;
     private int _legendResolution = 32;
+    private bool _legendAutomaticBounds = true;
+    private float _legendAutomaticRangeOffset;
+    private float _legendMinimum;
+    private float _legendMaximum = 1f;
+    private ulong _legendRangeRevision;
+    private ulong _appliedLegendRangeRevision = ulong.MaxValue;
     private ChunkIdentity? _focusedChunk;
 
     private SimulationViewport? _viewport;
@@ -194,7 +200,8 @@ public partial class SimulationViewer : IDisposable
                                         visualization.Id,
                                         StringComparison.OrdinalIgnoreCase) ||
                                     _drawData.VisualizationMappingRevision != visualization.MappingRevision ||
-                                    _drawData.Visualization.Range.Resolution != GetLegendResolution();
+                                    _drawData.Visualization.Range.Resolution != GetLegendResolution() ||
+                                    _appliedLegendRangeRevision != _legendRangeRevision;
         if (!snapshotsChanged && !visualizationChanged)
         {
             RefreshSliceData();
@@ -214,7 +221,12 @@ public partial class SimulationViewer : IDisposable
             _snapshotSourceVersion,
             _drawData,
             forceRemap: visualizationChanged,
-            resolution: GetLegendResolution());
+            resolution: GetLegendResolution(),
+            automaticRangeOffset: _legendAutomaticBounds ? _legendAutomaticRangeOffset : 0f,
+            rangeOverride: _legendAutomaticBounds
+                ? null
+                : new VisualizationRange(_legendMinimum, _legendMaximum));
+        _appliedLegendRangeRevision = _legendRangeRevision;
         NormalizeInteractionState();
         RefreshSliceData();
         RebuildHighlights();

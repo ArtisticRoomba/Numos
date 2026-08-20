@@ -54,13 +54,20 @@ public sealed class SimulationFrameBuilder
         SimulationDrawData? previousFrame = null,
         IReadOnlySet<Int3>? mappingScope = null,
         bool forceRemap = false,
-        int resolution = 32)
+        int resolution = 32,
+        float automaticRangeOffset = 0f,
+        VisualizationRange? rangeOverride = null)
     {
         ArgumentNullException.ThrowIfNull(snapshots);
         var snapshotList = snapshots as IReadOnlyCollection<AtmosChunkSnapshot> ?? snapshots.ToArray();
         var visualization = Visualizations.GetRequired(visualizationId);
         ulong visualizationMappingRevision = visualization.MappingRevision;
-        var range = GetVisualizationRange(snapshotList, visualization.RequiredData, resolution);
+        var range = GetVisualizationRange(
+            snapshotList,
+            visualization.RequiredData,
+            resolution,
+            automaticRangeOffset,
+            rangeOverride);
         bool rangeChanged = previousFrame == null || previousFrame.Visualization.Range != range;
         var chunks = new Dictionary<Int3, ChunkDrawData>();
         var seenPositions = new HashSet<Int3>();
@@ -122,8 +129,28 @@ public sealed class SimulationFrameBuilder
     private static VisualizationRange GetVisualizationRange(
         IEnumerable<AtmosChunkSnapshot> snapshots,
         VisualizationDataRequirements requirements,
-        int resolution)
+        int resolution,
+        float automaticRangeOffset,
+        VisualizationRange? rangeOverride)
     {
+        int safeResolution = Math.Max(resolution, 1);
+        if (rangeOverride is { } overrideRange)
+        {
+            if (!float.IsFinite(overrideRange.Minimum) ||
+                !float.IsFinite(overrideRange.Maximum) ||
+                overrideRange.Maximum <= overrideRange.Minimum)
+            {
+                throw new ArgumentException(
+                    "A visualization range override must contain finite, increasing bounds.",
+                    nameof(rangeOverride));
+            }
+
+            return overrideRange with
+            {
+                Resolution = safeResolution
+            };
+        }
+
         float minimum = float.PositiveInfinity;
         float maximum = float.NegativeInfinity;
         foreach (var snapshot in snapshots)
@@ -134,10 +161,13 @@ public sealed class SimulationFrameBuilder
                 IncludeFiniteRange(snapshot.TotalPressure, ref minimum, ref maximum);
         }
 
-        int safeResolution = Math.Max(resolution, 1);
-        return float.IsFinite(minimum) && float.IsFinite(maximum)
-            ? new VisualizationRange(minimum, maximum, safeResolution)
-            : new VisualizationRange(0f, 1f, safeResolution);
+        if (!float.IsFinite(minimum) || !float.IsFinite(maximum))
+            return new VisualizationRange(0f, 1f, safeResolution);
+
+        float offset = float.IsFinite(automaticRangeOffset)
+            ? Math.Max(automaticRangeOffset, 0f)
+            : 0f;
+        return new VisualizationRange(minimum - offset, maximum + offset, safeResolution);
     }
 
     private static void IncludeFiniteRange(
