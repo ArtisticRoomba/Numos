@@ -161,6 +161,8 @@ public sealed record VoxelStateReport(
     int RoomId,
     bool IsGasCapable,
     bool IsGasBearing,
+    bool IsSnapped,
+    int? SnapGroupId,
     float PressurePa,
     float TemperatureK,
     double TotalMoles,

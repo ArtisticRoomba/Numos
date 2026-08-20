@@ -80,6 +80,39 @@ public sealed class HeadlessApplicationTests
     }
 
     [Test]
+    public async Task Observe_VoxelSnapMembershipIsMachineReadable()
+    {
+        var run = await RunAsync(
+            Request("create", "createSimulation",
+                "\"dimensions\":{\"x\":2,\"y\":1,\"z\":1}"),
+            AddChunkRequest("chunk", 0, 0, 0),
+            Request("wake", "wakeRoom",
+                "\"position\":{\"x\":0,\"y\":0,\"z\":0},\"roomId\":1"),
+            Request("tick", "tick", "\"count\":1"),
+            Request("observe", "observe", "\"includeVoxels\":true"),
+            Request("exit", "exit"));
+
+        JsonElement observation = FindResponse(run.Responses, "observe")
+            .GetProperty("observation");
+        JsonElement chunk = observation.GetProperty("chunks").EnumerateArray().Single();
+        JsonElement[] voxels = chunk.GetProperty("voxels").EnumerateArray().ToArray();
+        bool[] snapped = voxels
+            .Select(voxel => voxel.GetProperty("isSnapped").GetBoolean())
+            .ToArray();
+        int[] groupIds = voxels
+            .Select(voxel => voxel.GetProperty("snapGroupId").GetInt32())
+            .ToArray();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(run.ExitCode, Is.Zero);
+            Assert.That(chunk.GetProperty("isAwake").GetBoolean(), Is.True);
+            Assert.That(snapped, Is.EqualTo(new[] { true, true }));
+            Assert.That(groupIds, Is.EqualTo(new[] { 0, 0 }));
+        });
+    }
+
+    [Test]
     public async Task JsonlSession_MalformedJson_ReturnsStructuredErrorAndProcessesNextLine()
     {
         var run = await RunAsync(

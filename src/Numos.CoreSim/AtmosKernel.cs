@@ -101,7 +101,9 @@ internal sealed partial class AtmosKernel : IDisposable, IAtmosSolverWorld
                 }
                 else
                 {
-                    chunk.VoxelAggregates.Reset();
+                    bool snapGroupMapChanged = chunk.VoxelAggregates.Reset();
+                    if (snapGroupMapChanged && !chunk.IsAwake)
+                        chunk.MarkChanged();
                 }
             }
         }

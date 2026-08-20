@@ -42,6 +42,7 @@ public sealed class AtmosChunkVersionTests
             Assert.That(snapshot.VoxelRoomMap, Has.Length.EqualTo(2));
             Assert.That(snapshot.TotalPressure, Is.Empty);
             Assert.That(snapshot.Gases, Is.Empty);
+            Assert.That(snapshot.VoxelSnapGroupMap, Is.Empty);
             Assert.That(snapshot.HasFields(fields), Is.True);
             Assert.That(snapshot.HasFields(AtmosChunkSnapshotFields.All), Is.False);
         });
@@ -66,6 +67,102 @@ public sealed class AtmosChunkVersionTests
             Assert.That(snapshot.HasFields(AtmosChunkSnapshotFields.Temperature), Is.False);
             Assert.That(snapshot.HasFields(AtmosChunkSnapshotFields.Gases), Is.False);
             Assert.That(snapshot.HasFields(AtmosChunkSnapshotFields.VoxelClassification), Is.False);
+            Assert.That(snapshot.HasFields(AtmosChunkSnapshotFields.VoxelSnapping), Is.False);
+        });
+    }
+
+    [Test]
+    public void TryGetChunkSnapshot_VoxelSnappingFieldReportsAuthoritativeAggregateMembership()
+    {
+        using var simulation = new AtmosSimulation(4, 1, 1);
+        var chunk = simulation.CreateAndRegisterChunk(default);
+        simulation.SetChunkClassification(chunk, new VoxelClassification(1));
+        simulation.WakeRoom(chunk, 1);
+
+        simulation.TryGetChunkSnapshot(
+            chunk,
+            default,
+            AtmosChunkSnapshotFields.VoxelSnapping,
+            out var before);
+        simulation.Tick();
+        simulation.TryGetChunkSnapshot(
+            chunk,
+            before.Version,
+            AtmosChunkSnapshotFields.VoxelSnapping,
+            out var firstRound);
+        simulation.Tick();
+        simulation.TryGetChunkSnapshot(
+            chunk,
+            firstRound.Version,
+            AtmosChunkSnapshotFields.VoxelSnapping,
+            out var merged);
+        simulation.SleepChunk(chunk);
+        simulation.TryGetChunkSnapshot(
+            chunk,
+            merged.Version,
+            AtmosChunkSnapshotFields.VoxelSnapping,
+            out var sleeping);
+        simulation.WakeRoom(chunk, 1);
+        simulation.TryGetChunkSnapshot(
+            chunk,
+            sleeping.Version,
+            AtmosChunkSnapshotFields.VoxelSnapping,
+            out var reset);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(before.VoxelSnapGroupMap, Is.All.EqualTo(-1));
+            Assert.That(firstRound.VoxelSnapGroupMap, Is.EqualTo(new[] { 0, 0, 2, 2 }),
+                "Each deterministic merge round must expose distinct canonical roots.");
+            Assert.That(merged.VoxelSnapGroupMap, Is.All.EqualTo(0));
+            Assert.That(sleeping.IsAwake, Is.False);
+            Assert.That(sleeping.VoxelSnapGroupMap, Is.All.EqualTo(0),
+                "Sleeping retains aggregate provenance; presentation gives the sleeping marker precedence.");
+            Assert.That(reset.VoxelSnapGroupMap, Is.All.EqualTo(-1));
+            Assert.That(firstRound.HasFields(AtmosChunkSnapshotFields.VoxelSnapping), Is.True);
+            Assert.That(firstRound.TotalPressure, Is.Empty);
+            Assert.That(firstRound.Temperature, Is.Empty);
+            Assert.That(firstRound.Gases, Is.Empty);
+            Assert.That(firstRound.VoxelRoomMap, Is.Empty);
+        });
+    }
+
+    [Test]
+    public void DisablingVoxelSnapping_PublishesOneRetainedSleepingGroupMapReset()
+    {
+        var config = new AtmosConfig();
+        using var simulation = new AtmosSimulation(config, 2, 1, 1);
+        var chunk = simulation.CreateAndRegisterChunk(default);
+        simulation.SetChunkClassification(chunk, new VoxelClassification(1));
+        simulation.WakeRoom(chunk, 1);
+        simulation.Tick();
+        simulation.SleepChunk(chunk);
+        var grouped = simulation.GetChunkSnapshot(chunk);
+
+        config.VoxelSnappingEnabled = false;
+        simulation.Tick();
+        bool resetPublished = simulation.TryGetChunkSnapshot(
+            chunk,
+            grouped.Version,
+            AtmosChunkSnapshotFields.VoxelSnapping,
+            out var reset);
+        simulation.Tick();
+        bool unchangedPublished = simulation.TryGetChunkSnapshot(
+            chunk,
+            reset.Version,
+            AtmosChunkSnapshotFields.VoxelSnapping,
+            out _);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(grouped.IsAwake, Is.False);
+            Assert.That(grouped.VoxelSnapGroupMap, Is.All.EqualTo(0));
+            Assert.That(resetPublished, Is.True);
+            Assert.That(reset.IsAwake, Is.False);
+            Assert.That(reset.VoxelSnapGroupMap, Is.All.EqualTo(-1));
+            Assert.That(reset.Version.Revision, Is.GreaterThan(grouped.Version.Revision));
+            Assert.That(unchangedPublished, Is.False,
+                "An already-reset sleeping map must not spuriously advance its chunk revision.");
         });
     }
 

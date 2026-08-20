@@ -828,11 +828,17 @@ internal class AtmosChunk
             VoxelRoomMap = fields.HasFlag(AtmosChunkSnapshotFields.VoxelClassification)
                 ? VoxelRoomMap.ToArray()
                 : [],
+            VoxelSnapGroupMap = fields.HasFlag(AtmosChunkSnapshotFields.VoxelSnapping)
+                ? new int[VoxelCount]
+                : [],
             ActiveAirCount = ActiveAirCount,
             ActiveGasCount = ActiveGasCount,
             IsAwake = IsAwake,
             SleepTimer = SleepTimer
         };
+
+        if (fields.HasFlag(AtmosChunkSnapshotFields.VoxelSnapping))
+            VoxelAggregates.CopySnapGroupMap(snapshot.VoxelSnapGroupMap);
 
         if (fields.HasFlag(AtmosChunkSnapshotFields.Gases))
         {

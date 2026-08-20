@@ -533,6 +533,7 @@ public partial class SimulationViewer : IDisposable
                 _drawData,
                 _focusedChunk,
                 _highlights,
+                _camera3D,
                 Get3DRenderStyleOptions());
         }
         finally

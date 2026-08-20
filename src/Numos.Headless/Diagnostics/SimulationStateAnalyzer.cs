@@ -222,6 +222,7 @@ public static class SimulationStateAnalyzer
         VoxelAnalysis voxel,
         AtmosConfig config)
     {
+        int snapGroupId = snapshot.VoxelSnapGroupMap[localIndex];
         VoxelGasReport[] gases = snapshot.Gases
             .OrderBy(static gas => gas.GasId)
             .Select(gas => new VoxelGasReport(
@@ -235,6 +236,8 @@ public static class SimulationStateAnalyzer
             snapshot.VoxelRoomMap[localIndex],
             voxel.IsGasCapable,
             voxel.IsGasBearing,
+            snapGroupId >= 0,
+            snapGroupId >= 0 ? snapGroupId : null,
             snapshot.TotalPressure[localIndex],
             snapshot.Temperature[localIndex],
             voxel.TotalMoles,

@@ -40,10 +40,27 @@ internal sealed class AggregateVoxels
     /// <summary>
     ///     Invalidates every progressive aggregate and the stable-state verification window.
     /// </summary>
-    internal void Reset()
+    /// <returns>Whether the externally observable snap-group map contained a multi-voxel group.</returns>
+    internal bool Reset()
     {
+        bool snapGroupMapChanged = HasMultiVoxelAggregate();
         _isInitialized = false;
         _hasPreviousFingerprint = false;
+        return snapGroupMapChanged;
+    }
+
+    private bool HasMultiVoxelAggregate()
+    {
+        if (!_isInitialized)
+            return false;
+
+        for (var voxelIndex = 0; voxelIndex < _parent.Length; voxelIndex++)
+        {
+            if (_parent[voxelIndex] == voxelIndex && _next[voxelIndex] >= 0)
+                return true;
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -126,6 +143,29 @@ internal sealed class AggregateVoxels
 
         int firstRoot = _parent[firstVoxel];
         return firstRoot >= 0 && firstRoot == _parent[secondVoxel];
+    }
+
+    /// <summary>
+    ///     Copies the canonical group ID for each voxel in an established multi-voxel aggregate.
+    /// </summary>
+    /// <remarks>
+    ///     The result describes solver-owned aggregate topology, not similarity inferred from the materialized
+    ///     pressure or composition arrays. A group ID is its lowest local flat voxel index. Inactive voxels,
+    ///     singleton roots, and reset topology are reported as <c>-1</c>.
+    /// </remarks>
+    internal void CopySnapGroupMap(Span<int> destination)
+    {
+        destination.Fill(-1);
+        if (!_isInitialized)
+            return;
+
+        Debug.Assert(destination.Length == _parent.Length);
+        for (var voxelIndex = 0; voxelIndex < destination.Length; voxelIndex++)
+        {
+            int root = _parent[voxelIndex];
+            if (root >= 0 && _next[root] >= 0)
+                destination[voxelIndex] = root;
+        }
     }
 
     /// <summary>

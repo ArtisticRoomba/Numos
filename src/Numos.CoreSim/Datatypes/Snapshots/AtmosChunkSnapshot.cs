@@ -14,6 +14,13 @@ public struct AtmosChunkSnapshot
     public float[] Temperature;
     public GasSnapshot[] Gases;
     public int[] VoxelRoomMap;
+
+    /// <summary>
+    ///     Detached per-voxel aggregate IDs. A nonnegative entry is the lowest local flat voxel index in an
+    ///     established multi-voxel aggregate; <c>-1</c> identifies an ungrouped voxel.
+    /// </summary>
+    public int[] VoxelSnapGroupMap;
+
     public int ActiveAirCount;
     public int ActiveGasCount;
     public bool IsAwake;
@@ -52,6 +59,8 @@ public struct AtmosChunkSnapshot
                 available |= AtmosChunkSnapshotFields.Gases;
             if (VoxelRoomMap is { Length: > 0 })
                 available |= AtmosChunkSnapshotFields.VoxelClassification;
+            if (VoxelSnapGroupMap is { Length: > 0 })
+                available |= AtmosChunkSnapshotFields.VoxelSnapping;
         }
 
         return (available & fields) == fields;

@@ -256,8 +256,12 @@ Dense voxel details are deliberately opt-in because they can dominate output for
 cells. An optional chunk `position` limits the report to one chunk. Supplying both `position` and a local `voxel` returns
 that exact cell even if `includeVoxels` is false; `voxel` is invalid without `position`. `maxIssueLocations` caps the
 coordinate samples attached to invalid-value diagnostics (default `32`, maximum `1024`). Each emitted voxel has a stable
-local index and local coordinates, classification, gas-capable/gas-bearing flags, raw pressure and temperature, total
-moles, estimated sensible energy, and per-gas moles.
+local index and local coordinates, classification, gas-capable/gas-bearing flags, authoritative `isSnapped` aggregate
+membership and optional `snapGroupId` (omitted when the voxel is ungrouped), raw pressure and temperature, total
+moles, estimated sensible energy, and per-gas moles. A group ID is the group's lowest local voxel index, is local to
+its chunk, and can change when groups merge, split, or reset. Combine it with the containing chunk's `isAwake`:
+the viewer displays a color-coded `/` for a snapped voxel only while awake and displays `X` for every voxel when the
+chunk is asleep.
 
 `pressurePa` is the simulation's cached pressure field. Supported mutations and live-configuration refreshes keep it
 coherent, but an inactive voxel modified through unchecked dangerous solver storage can retain a stale cached value.

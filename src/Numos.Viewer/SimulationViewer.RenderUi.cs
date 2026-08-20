@@ -395,6 +395,10 @@ public partial class SimulationViewer
 
         RenderVisualizationLegend();
 
+        ImGui.Text("Voxel State");
+        ImGui.Text("/  Snapped group (color-coded)");
+        ImGui.TextColored(new Vector4(1f, 0.25f, 0.2f, 1f), "X  Sleeping chunk");
+
         ImGui.Separator();
         RenderRenderingStyleTable();
 

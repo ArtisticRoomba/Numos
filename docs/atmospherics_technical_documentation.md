@@ -704,6 +704,16 @@ processed normally before the terminal coordinator splits or revalidates the gro
 threshold is `max(SleepThreshold, ThermodynamicsTickInterval)` (currently two ticks), ensuring at least one complete
 lower-frequency thermal/phase cadence is observed. Sleep occurs only when the timer grows beyond that threshold.
 
+`AtmosChunkSnapshotFields.VoxelSnapping` requests the detached `VoxelSnapGroupMap`. A nonnegative entry identifies
+an established aggregate containing at least two voxels; its deterministic, chunk-local ID is the lowest local flat
+voxel index in that group. Singleton, inactive, and reset entries are `-1`. This is authoritative solver topology
+rather than a pressure-similarity inference, and IDs can change when groups merge, split, or reset. While a chunk is
+awake, the viewer draws `/` in one deterministic color for every member of a group and assigns every different group
+within that chunk a distinct display color. The color key includes chunk identity and group ID, so it remains stable
+across unchanged frames.
+An asleep chunk instead displays a red `X` on every voxel, including voxels that retain a nonnegative group ID, so
+the sleeping marker and color always take precedence.
+
 Snap aggregates never span chunks. Registered neighboring chunks continue to exchange gas through the normal
 boundary-flow stage, and a transfer keeps the source awake and wakes the target as applicable. Missing chunks remain
 reflecting boundaries. This behavior should not be interpreted as an atomic cross-chunk equilibrium projection.

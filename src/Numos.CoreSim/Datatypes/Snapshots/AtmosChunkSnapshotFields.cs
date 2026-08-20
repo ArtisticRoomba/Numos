@@ -11,5 +11,6 @@ public enum AtmosChunkSnapshotFields
     Temperature = 1 << 1,
     Gases = 1 << 2,
     VoxelClassification = 1 << 3,
-    All = Pressure | Temperature | Gases | VoxelClassification
+    VoxelSnapping = 1 << 4,
+    All = Pressure | Temperature | Gases | VoxelClassification | VoxelSnapping
 }

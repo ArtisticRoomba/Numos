@@ -31,7 +31,8 @@ public sealed class SimulationFrameBuilder
     public AtmosChunkSnapshotFields GetRequiredSnapshotFields(string visualizationId)
     {
         var visualization = Visualizations.GetRequired(visualizationId);
-        var fields = AtmosChunkSnapshotFields.VoxelClassification;
+        var fields = AtmosChunkSnapshotFields.VoxelClassification |
+                     AtmosChunkSnapshotFields.VoxelSnapping;
         if ((visualization.RequiredData & VisualizationDataRequirements.Temperature) != 0)
             fields |= AtmosChunkSnapshotFields.Temperature;
         if ((visualization.RequiredData & VisualizationDataRequirements.Pressure) != 0)
@@ -179,7 +180,7 @@ public sealed class SimulationFrameBuilder
                 (int x, int y, int z) = MapSliceToLocal(axis, clampedIndex, u, v);
                 ushort localIndex = chunk.GetLocalIndex(x, y, z);
                 ref readonly var voxel = ref chunk.GetCell(localIndex);
-                if (!voxel.IsVisible)
+                if (!voxel.IsVisible && voxel.StateMarker == VoxelStateMarker.None)
                     continue;
 
                 var sliceCell = new SliceCellDrawData(
@@ -254,6 +255,7 @@ public sealed class SimulationFrameBuilder
 
         var visibleCount = 0;
         bool summarizeGases = (visualization.RequiredData & VisualizationDataRequirements.Gases) != 0;
+        bool hasVoxelSnapGroupMap = snapshot.VoxelSnapGroupMap is { Length: > 0 };
         for (var index = 0; index < voxelCount; index++)
         {
             var localIndex = checked((ushort)index);
@@ -286,6 +288,20 @@ public sealed class SimulationFrameBuilder
             bool visible = isInVisualizationDomain && visualization.TryGetColor(sample, out color);
             if (visible)
                 color = ToOpaqueFiniteColor(color);
+            int snapGroupId = hasVoxelSnapGroupMap
+                ? snapshot.VoxelSnapGroupMap[index]
+                : -1;
+            VoxelStateMarker stateMarker = !snapshot.IsAwake
+                ? VoxelStateMarker.Sleeping
+                : snapGroupId >= 0
+                    ? VoxelStateMarker.Snapped
+                    : VoxelStateMarker.None;
+            ColorRgba stateMarkerColor = stateMarker switch
+            {
+                VoxelStateMarker.Snapped => GetSnapGroupColor(identity, snapGroupId),
+                VoxelStateMarker.Sleeping => new ColorRgba(1f, 0.25f, 0.2f),
+                _ => default
+            };
             cells[index] = new VoxelDrawData(
                 visible,
                 VoxelFaceMask.None,
@@ -294,9 +310,16 @@ public sealed class SimulationFrameBuilder
                 sample.TotalMoles,
                 sample.PrimaryGasId,
                 sample.RoomId,
-                visible ? color : default);
+                visible ? color : default,
+                stateMarker,
+                snapGroupId,
+                stateMarkerColor);
 
             topologyHash.Add(visible);
+            topologyHash.Add(stateMarker != VoxelStateMarker.None);
+            styleHash.Add((byte)stateMarker);
+            styleHash.Add(snapGroupId);
+            styleHash.Add(stateMarkerColor);
             if (visible)
             {
                 visibleCount++;
@@ -439,6 +462,13 @@ public sealed class SimulationFrameBuilder
             throw new ArgumentException("Snapshot classifications do not match its dimensions.", nameof(snapshot));
         }
 
+        if (snapshot.VoxelSnapGroupMap is { Length: > 0 } &&
+            snapshot.VoxelSnapGroupMap.Length != voxelCount)
+        {
+            throw new ArgumentException("Snapshot voxel-snap markers do not match its dimensions.",
+                nameof(snapshot));
+        }
+
         if ((requirements & VisualizationDataRequirements.Pressure) != 0 &&
             snapshot.TotalPressure.Length != voxelCount)
             throw new ArgumentException("The visualization requires a complete pressure field.", nameof(snapshot));
@@ -459,6 +489,42 @@ public sealed class SimulationFrameBuilder
         }
 
         return voxelCount;
+    }
+
+    private static ColorRgba GetSnapGroupColor(ChunkIdentity identity, int groupId)
+    {
+        uint chunkHash = 2166136261u;
+        Mix(ref chunkHash, unchecked((uint)identity.Position.X));
+        Mix(ref chunkHash, unchecked((uint)identity.Position.Y));
+        Mix(ref chunkHash, unchecked((uint)identity.Position.Z));
+        Mix(ref chunkHash, unchecked((uint)identity.Generation));
+        Mix(ref chunkHash, unchecked((uint)(identity.Generation >> 32)));
+
+        // Local voxel indices are ushort-backed. Multiplication by an odd number and addition are a
+        // permutation modulo 2^16, so every possible group root receives a different pair of display bytes.
+        // Pinning the remaining channel at full intensity keeps every marker bright, while the chunk hash
+        // rotates the RGB face and palette offset without compromising within-chunk uniqueness.
+        ushort paletteCode = unchecked((ushort)((uint)groupId * 0x9E37u + (chunkHash & 0xFFFFu)));
+        byte first = (byte)(paletteCode >> 8);
+        byte second = (byte)paletteCode;
+        return (chunkHash % 3u) switch
+        {
+            0u => FromDisplayBytes(byte.MaxValue, first, second),
+            1u => FromDisplayBytes(first, byte.MaxValue, second),
+            _ => FromDisplayBytes(first, second, byte.MaxValue)
+        };
+    }
+
+    private static void Mix(ref uint hash, uint value)
+    {
+        hash ^= value;
+        hash *= 16777619u;
+    }
+
+    private static ColorRgba FromDisplayBytes(byte red, byte green, byte blue)
+    {
+        const float byteScale = 1f / byte.MaxValue;
+        return new ColorRgba(red * byteScale, green * byteScale, blue * byteScale);
     }
 
     private static void AddGasIds(AtmosChunkSnapshot snapshot, ISet<int> destination)
