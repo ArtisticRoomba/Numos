@@ -47,6 +47,7 @@ public class ReactionSolver
         var mixtureLength = _config.GasRegistry.Count + 1;
 
         Parallel.For(0, voxelCount, (int voxelIndex) =>
+            //   for (var voxelIndex = 0; voxelIndex < voxelCount; voxelIndex++)
         {
             var temp = chunk.Temperature[voxelIndex];
             var reactionFeedback = reactionCount == null ? null : ArrayPool<float>.Shared.Rent(_mappedReactions.Length);
@@ -68,6 +69,7 @@ public class ReactionSolver
             newTemps[voxelIndex] = temp;
             if (content <= 0.0001)
                 return;
+            //continue;
             // do actual evaluation of the mixture for reactions.
             ProcessVoxel(deltaTime, mixtureVector, ref temp, reactionFeedback);
 
@@ -83,11 +85,16 @@ public class ReactionSolver
             //adjust moles from the mixture vector
             foreach (var gasChannel in chunk.ActiveGases.Take(c))
             {
-                gasChannel.Moles[voxelIndex] = MathF.Max(0, mixtureVector[gasChannel.GasId]);
+                var diff = gasChannel.Moles[voxelIndex] - mixtureVector[gasChannel.GasId];
+                if (diff != 0)
+                {
+                    gasChannel.Moles[voxelIndex] = MathF.Max(0, mixtureVector[gasChannel.GasId]);
+                    chunk.MarkChanged();
+                }
                 //set gas to 0.
                 mixtureVector[gasChannel.GasId] = 0;
             }
-
+            
             //inject remaining gases
             for (var i = 0; i < mixtureLength - 1; i++)
             {
@@ -119,6 +126,33 @@ public class ReactionSolver
     }
 
 
+    private void ExtractHeat(float[] mixtureVector, ref readonly float temperature, int mixtureLength)
+    {
+        var result = 0f;
+        // Use specific heat capacity of each gas to calculate the necessary energy to keep at temperature
+        for (var i = 0; i < mixtureLength; i++)
+        {
+            if (mixtureVector[i] == 0)
+                continue;
+            // multiply by mole amounts
+            //sum together
+            result += mixtureVector[i] * temperature * _config.GasRegistry[i].SpecificHeatCapacity;
+        }
+
+        mixtureVector[mixtureLength] = result;
+    }
+
+
+    private float UpdateTemperature(float[] mixtureVector)
+    {
+        const float constantHelper = 3 * 1.380649E-23f;
+        var totalKineticEnergy = mixtureVector[^1];
+        // KE = (3/2) k * T <- see  Kinetic Molecular Theory. k is boltzman constant, KE is kinetic energy.
+        // Solving for T we get:
+        // (KE * 2 )/3k = T
+        return (totalKineticEnergy * 2) / constantHelper;
+    }
+
     /// <summary>
     /// Core solver.
     /// </summary>
@@ -130,8 +164,7 @@ public class ReactionSolver
         float[]? reactionFeedback)
     {
         int mixtureLength = _config.GasRegistry.Count;
-        //TODO Get the energy of the mixture. yes i know dirty, but what can you do.
-        mixtureVector[mixtureLength - 1] = 0;
+        ExtractHeat(mixtureVector, ref currentTemperature, mixtureLength);
         //make sure in single step we dont overstep.
         var stepSize = MathF.Min(_config.MaxDeltaForReactionSteps, deltaTime);
         //split our time interval into smaller steps.
@@ -162,6 +195,7 @@ public class ReactionSolver
             {
                 var criticalIndex = -1;
                 float criticalValue = 0;
+                float criticalConsumption = 0;
                 //check which consumption might go over available material
                 for (var i = 0; i < mixtureLength; i++)
                 {
@@ -173,7 +207,8 @@ public class ReactionSolver
                     //if negative and even more critical, mark.
                     if (postReactionMoles < criticalValue)
                     {
-                        criticalValue = consumption;
+                        criticalValue = postReactionMoles;
+                        criticalConsumption = consumption;
                         criticalIndex = i;
                     }
                 }
@@ -184,7 +219,7 @@ public class ReactionSolver
                 // adjust reaction speeds so our post reaction moles are 0.
                 // our equation we try to optimize looks like this (((change * speed)/total change in scaled reaction)*available moles)/(change * speed) = (available volume)/(total change in scaled reaction)
                 // so we calculate the scale, to scale reaction speeds down to balance the equation of consumption.
-                var scale = MathF.Min(1, mixtureVector[criticalIndex] / Math.Abs(criticalValue));
+                var scale = MathF.Min(1f, MathF.Max(0f, mixtureVector[criticalIndex] / Math.Abs(criticalConsumption)));
                 for (var i = 0; i < reactionCount; i++)
                 {
                     if (!_mappedReactions[i].ChangeEquation.ContainsKey(criticalIndex))
@@ -195,7 +230,7 @@ public class ReactionSolver
             }
 
             //apply mixture.
-            for (var i = 0; i < mixtureLength - 1; i++)
+            for (var i = 0; i < mixtureLength; i++)
             {
                 for (var j = 0; j < reactionCount; j++)
                     mixtureVector[i] += _mappedReactions[j].ChangeEquation.GetValueOrDefault(i) * reactionSpeeds[j];
@@ -206,7 +241,7 @@ public class ReactionSolver
                 //calculate next heat value and report feedback
                 for (var j = 0; j < reactionCount; j++)
                 {
-                    mixtureVector[mixtureLength - 1] += _mappedReactions[j].EnergyBalance * reactionSpeeds[j];
+                    mixtureVector[mixtureLength] += _mappedReactions[j].EnergyBalance * reactionSpeeds[j];
                     reactionFeedback[j] += reactionSpeeds[j];
                 }
             }
@@ -215,13 +250,13 @@ public class ReactionSolver
                 //calculate next heat value
                 for (var j = 0; j < reactionCount; j++)
                 {
-                    mixtureVector[mixtureLength - 1] += _mappedReactions[j].EnergyBalance * reactionSpeeds[j];
+                    mixtureVector[mixtureLength] += _mappedReactions[j].EnergyBalance * reactionSpeeds[j];
                 }
             }
 
-            mixtureVector[mixtureLength - 1] = Math.Max(0, mixtureVector[mixtureLength - 1]);
-            //TODO: adjust temperature based on thermal energy and pressure.
-            currentTemperature = currentTemperature;
+            mixtureVector[mixtureLength] = Math.Max(0, mixtureVector[mixtureLength]);
+            //adjust temperature based on heat value.
+            currentTemperature = UpdateTemperature(mixtureVector);
         }
 
         //cleanup speeds.

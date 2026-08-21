@@ -83,15 +83,23 @@ public class GasReactionTests
             chunk.WakeRoom(i);
             for (int j = 0; j < gases.Count; j++)
             {
-                chunk.InjectGasToVoxel(i, j, random.NextSingle()*10-5, random.Next(500));
+                chunk.InjectGasToVoxel(i, j, Math.Max(0, random.NextSingle() * 10 - 3), random.Next(500));
             }
         }
+
         //run reactions. wheeeeee
         var totalReactions = new float[standardReactions.Count];
         solver.ProcessChunk(chunk, 10, totalReactions);
         //sum reaction amounts
-        var totalReactionSum = totalReactions.Where(e => !float.IsNaN(e)).Sum();
-        Assert.That(totalReactionSum> 0);
+        foreach (var gc in chunk.ActiveGases)
+        {
+            var x = gc.Moles.Where(e => !float.IsNormal(e) && e != 0).ToArray();
+            Assert.That(x.Length==0);
+        }
+
+        Assert.That(totalReactions.All(e => float.IsNormal(e) || e == 0));
+        var totalReactionSum = totalReactions.Sum();
+        Assert.That(totalReactionSum > 0);
     }
 
     [Test]
