@@ -92,6 +92,11 @@ resharper_web_config_module_not_resolved_highlighting = warning
 resharper_web_config_type_not_resolved_highlighting = warning
 resharper_web_config_wrong_module_highlighting = warning
 
+# if rider touches ImGui's config it segv's on other systems lmao
+[*.ini]
+ij_formatter_enabled = false
+resharper_disable_formatter = true
+
 [*.bib]
 ij_bibtex_keep_first_column_comment = true
 ij_bibtex_keep_indents_on_empty_lines = false
