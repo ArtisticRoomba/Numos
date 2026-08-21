@@ -140,6 +140,13 @@ public partial class SimulationViewer
             SaveCurrentLayout();
         ImGui.TextDisabled("Restores this arrangement the next time Numos starts.");
 
+#if DEBUG || TOOLS
+        ImGui.Spacing();
+        if (ImGui.Button("Save as Default Preset"))
+            SavePackagedDefaultLayout();
+        ImGui.TextDisabled("Saves the default that future publishes use on first launch.");
+#endif
+
         if (!string.IsNullOrEmpty(_layoutStatus))
             ImGui.TextDisabled(_layoutStatus);
     }
