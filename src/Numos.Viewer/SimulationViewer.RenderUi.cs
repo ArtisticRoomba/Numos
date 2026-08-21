@@ -35,11 +35,14 @@ public partial class SimulationViewer
             return;
         }
 
-        _viewport?.Draw(
-            "Simulation 3D##viewport",
-            RenderSimulationScene,
-            new Vector2(320, 40),
-            new Vector2(660, 510));
+        if (_show3DViewport)
+        {
+            _viewport?.Draw(
+                "Simulation 3D##viewport",
+                RenderSimulationScene,
+                new Vector2(320, 40),
+                new Vector2(660, 510));
+        }
 
         if (_showSliceViewport)
         {
@@ -269,6 +272,7 @@ public partial class SimulationViewer
                 ImGui.MenuItem("Tools", null, ref _showToolsPanel);
                 ImGui.MenuItem("View", null, ref _showViewPanel);
                 ImGui.MenuItem("Configuration", null, ref _showConfigurationPanel);
+                ImGui.MenuItem("3D Viewport", null, ref _show3DViewport);
                 ImGui.MenuItem("2D Slice Viewport", null, ref _showSliceViewport);
 
                 if (!panesAvailable)
