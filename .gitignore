@@ -4,3 +4,10 @@ artifacts/
 /packages/
 riderModule.iml
 /_ReSharper.Caches/
+
+# Visual Studio Code workspace settings.
+.vscode/*
+!.vscode/launch.json
+!.vscode/tasks.json
+
+imgui.ini
