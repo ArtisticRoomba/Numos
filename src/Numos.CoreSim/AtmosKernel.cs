@@ -12,26 +12,27 @@ namespace Numos.CoreSim;
 /// </summary>
 internal sealed partial class AtmosKernel : IDisposable
 {
+    private readonly List<ThermalBoundaryConductance> _activeThermalBoundaryEdges = [];
     private readonly ThreadLocal<BoundaryFlowEvent[]> _boundaryBufferPool;
     private readonly ConcurrentQueue<(Int3 Key, BoundaryFlowEvent Evt)> _boundaryEvents = new();
-    private readonly List<(Int3 Key, BoundaryFlowEvent Evt)> _orderedBoundaryEvents = [];
 
     // Map of GridPosition to Chunk for neighbor lookups
     private readonly ConcurrentDictionary<Int3, AtmosChunk> _chunkMap = new();
 
     // Thread-local buffers sized to maximum boundary surface area
     private readonly int _maxBoundaryEvents;
+    private readonly List<(Int3 Key, BoundaryFlowEvent Evt)> _orderedBoundaryEvents = [];
     private readonly ThreadLocal<PrecipitationEvent[]> _precipBufferPool;
     private readonly object _stateGate = new();
-    private readonly List<ThermalBoundaryConductance> _activeThermalBoundaryEdges = [];
+    private readonly ThreadLocal<ThermalBoundaryEvent[]> _thermalBoundaryBufferPool;
+    private readonly HashSet<ThermalBoundaryEdge> _thermalBoundaryEdges = [];
     // Boundary payloads match the float-backed voxel state so the thermal path does not switch precision.
     private readonly Dictionary<ThermalVoxelAddress, float> _thermalBoundaryEnergyDeltas = [];
-    private readonly HashSet<ThermalBoundaryEdge> _thermalBoundaryEdges = [];
-    private readonly ThreadLocal<ThermalBoundaryEvent[]> _thermalBoundaryBufferPool;
     private readonly ConcurrentQueue<(Int3 Key, ThermalBoundaryEvent Evt)> _thermalBoundaryEvents = new();
     private readonly Dictionary<ThermalVoxelAddress, float> _thermalBoundaryIncidentConductances = [];
     private readonly List<ThermalBoundaryEdge> _thermalBoundaryOrderedEdges = [];
     private readonly Dictionary<ThermalVoxelAddress, ThermalBoundaryState> _thermalBoundaryStates = [];
+    private readonly AtmosSolverConfigSnapshot _tickConfig = new();
 
     /// <summary>
     ///     High-resolution timestamp ticks spent processing boundary flow since the latest elapsed-time update began.
@@ -45,7 +46,6 @@ internal sealed partial class AtmosKernel : IDisposable
 
     private float _accumulator;
     private long _chunkCollectionRevision;
-    private readonly AtmosSolverConfigSnapshot _tickConfig = new();
 
     /// <summary>
     ///     Current <see cref="AtmosConfig" /> that this simulation runs under.
@@ -628,12 +628,17 @@ internal sealed partial class AtmosKernel : IDisposable
         }
     }
 
+    /// <summary>
+    ///     Gets a gas's molar constant-volume heat capacity, falling back through configured and built-in defaults.
+    /// </summary>
     private float GetMolarHeatCapacityAtConstantVolume(int gasId)
     {
         float fallbackMolarHeatCapacityAtConstantVolume = _config.DefaultMolarHeatCapacityAtConstantVolume;
         if (!IsFinitePositive(fallbackMolarHeatCapacityAtConstantVolume))
+        {
             fallbackMolarHeatCapacityAtConstantVolume =
                 AtmosConfigDefaults.DefaultMolarHeatCapacityAtConstantVolume;
+        }
 
         var gasRegistry = _config.GasRegistry;
         if ((uint)gasId < (uint)gasRegistry.Count)
@@ -646,29 +651,45 @@ internal sealed partial class AtmosKernel : IDisposable
         return fallbackMolarHeatCapacityAtConstantVolume;
     }
 
+    /// <summary>
+    ///     Gets the configured voxel volume, using the built-in positive fallback for invalid configuration.
+    /// </summary>
     private float GetVoxelVolume()
     {
         float volume = _config.VoxelVolume;
         return IsFinitePositive(volume) ? volume : AtmosConfigDefaults.VoxelVolume;
     }
 
+    /// <summary>
+    ///     Gets the ideal-gas pressure factor R/V for the live configuration.
+    /// </summary>
     private float GetPressurePerMoleKelvin()
     {
         return AtmosPhysicalConstants.MolarGasConstant / GetVoxelVolume();
     }
 
+    /// <summary>
+    ///     Calculates live-configuration ideal-gas pressure, clamping negative moles and invalid temperatures.
+    /// </summary>
     private float CalculatePressure(float moles, float temperature)
     {
         return MathF.Max(0f, moles) * GetEffectiveTemperature(temperature) *
                GetPressurePerMoleKelvin();
     }
 
+    /// <summary>
+    ///     Calculates ideal-gas pressure against the immutable configuration snapshot for the current tick.
+    /// </summary>
     private float CalculateTickPressure(float moles, float temperature)
     {
         return MathF.Max(0f, moles) * _tickConfig.GetEffectiveTemperature(temperature) *
                _tickConfig.PressurePerMoleKelvin;
     }
 
+    /// <summary>
+    ///     C
+    ///     onverts a positive tick-snapshot pressure to moles at the effective tick temperature.
+    /// </summary>
     private float TickPressureToMoles(float pressure, float temperature)
     {
         if (!IsFinitePositive(pressure))
@@ -679,6 +700,9 @@ internal sealed partial class AtmosKernel : IDisposable
         return pressure / denominator;
     }
 
+    /// <summary>
+    ///     Recomputes a voxel's heat capacity using the live configuration and positive species amounts.
+    /// </summary>
     private float CalculateHeatCapacityAtVoxel(AtmosChunk chunk, ushort localVoxelIndex)
     {
         var totalHeatCapacity = 0f;
@@ -694,6 +718,9 @@ internal sealed partial class AtmosKernel : IDisposable
         return totalHeatCapacity;
     }
 
+    /// <summary>
+    ///     Recomputes a voxel's pressure using tick configuration and non-negative species amounts.
+    /// </summary>
     private float CalculatePressureAtVoxel(AtmosChunk chunk, ushort localVoxelIndex)
     {
         var totalMoles = 0f;
@@ -703,6 +730,9 @@ internal sealed partial class AtmosKernel : IDisposable
         return CalculateTickPressure(totalMoles, chunk.Temperature[localVoxelIndex]);
     }
 
+    /// <summary>
+    ///     Returns a positive finite temperature, substituting configured then built-in fallbacks when needed.
+    /// </summary>
     private float GetEffectiveTemperature(float storedTemperature)
     {
         if (IsFinitePositive(storedTemperature))
@@ -712,6 +742,10 @@ internal sealed partial class AtmosKernel : IDisposable
         return IsFinitePositive(fallback) ? fallback : AtmosConfigDefaults.DefaultTemperatureFallback;
     }
 
+    /// <summary>
+    ///     Injects gas through the live API path after synchronizing the voxel's cached heat capacity.
+    /// </summary>
+    /// <remarks>Sleeping chunks and solid or void voxels deliberately receive no injection.</remarks>
     private void InjectGasWithEnergy(AtmosChunk chunk, ushort localVoxelIndex, int gasId, float moles,
         float temperature, float molarHeatCapacityAtConstantVolume)
     {
@@ -731,6 +765,11 @@ internal sealed partial class AtmosKernel : IDisposable
             GetPressurePerMoleKelvin());
     }
 
+    /// <summary>
+    ///     Injects cross-chunk flow during a tick using only the tick configuration snapshot for cache recovery and
+    ///     pressure conversion.
+    /// </summary>
+    /// <remarks>Sleeping chunks and solid or void voxels deliberately receive no injection.</remarks>
     private void InjectGasWithEnergyDuringTick(AtmosChunk chunk, ushort localVoxelIndex, int gasId, float moles,
         float temperature, float molarHeatCapacityAtConstantVolume)
     {
@@ -753,6 +792,9 @@ internal sealed partial class AtmosKernel : IDisposable
             _tickConfig.PressurePerMoleKelvin);
     }
 
+    /// <summary>
+    ///     Recomputes a voxel's heat capacity from positive species amounts using the tick snapshot.
+    /// </summary>
     private float CalculateTickHeatCapacityAtVoxel(AtmosChunk chunk, ushort localVoxelIndex)
     {
         var totalHeatCapacity = 0f;
@@ -937,6 +979,7 @@ internal sealed partial class AtmosKernel : IDisposable
         ArrayPool<float>.Shared.Return(energyDeltas);
     }
 
+    /// <summary>Accumulates an eligible intra-chunk edge's symmetric conductance at both endpoints.</summary>
     private void AccumulateThermalConductance(AtmosChunk chunk, Int3 neighborPosition, ushort idx,
         float thermalConductance, float vacuumThreshold, float[] incidentConductances)
     {
@@ -960,6 +1003,9 @@ internal sealed partial class AtmosKernel : IDisposable
         incidentConductances[neighborIdx] += conductance;
     }
 
+    /// <summary>
+    ///     Buffers the row-limited energy exchange across one eligible intra-chunk thermal edge.
+    /// </summary>
     private void ApplyThermalFlux(AtmosChunk chunk, Int3 neighborPosition, ushort idx,
         float thermalConductance, float vacuumThreshold, float[] incidentConductances, float[] energyDeltas)
     {
@@ -994,6 +1040,9 @@ internal sealed partial class AtmosKernel : IDisposable
         energyDeltas[neighborIdx] += heatTransfer;
     }
 
+    /// <summary>
+    ///     Returns thermal data only for a finite, non-vacuum voxel with positive heat capacity.
+    /// </summary>
     private bool TryGetThermalState(AtmosChunk chunk, ushort idx, float vacuumThreshold,
         out float temperature, out float heatCapacity)
     {
@@ -1013,6 +1062,9 @@ internal sealed partial class AtmosKernel : IDisposable
         return true;
     }
 
+    /// <summary>
+    ///     Limits edge conductance by the two-voxel equilibrium capacity without overflow-prone products.
+    /// </summary>
     private static float CalculateThermalConductance(float sourceHeatCapacity, float targetHeatCapacity,
         float thermalConductance)
     {
@@ -1028,11 +1080,17 @@ internal sealed partial class AtmosKernel : IDisposable
         return MathF.Min(thermalConductance, equilibriumConductance);
     }
 
+    /// <summary>
+    ///     Returns whether a floating-point value is finite and strictly positive.
+    /// </summary>
     private static bool IsFinitePositive(float value)
     {
         return float.IsFinite(value) && value > 0f;
     }
 
+    /// <summary>
+    ///     Condenses supersaturated enabled species and records precipitation with the resulting energy change.
+    /// </summary>
     private void ProcessPhaseChanges(AtmosChunk chunk, PrecipitationEvent[] precipBuffer, ref int precipCount)
     {
         float condensationRateFactor = _tickConfig.CondensationRateFactor;
@@ -1079,7 +1137,7 @@ internal sealed partial class AtmosKernel : IDisposable
                             float excessPressure = currentPartialPressure - satVaporPressure;
 
                             float molesToCondense = TickPressureToMoles(excessPressure, currentTemp) *
-                                                   condensationRateFactor;
+                                                    condensationRateFactor;
 
                             if (molesToCondense > gasMoles)
                                 molesToCondense = gasMoles;
@@ -1144,8 +1202,10 @@ internal sealed partial class AtmosKernel : IDisposable
         if (pressureDelta < lowPressureThreshold)
             pressureTransfer = pressureDelta * maximumFraction;
         else
+        {
             pressureTransfer = pressureDelta * _tickConfig.BulkFlowCoefficient *
                                _tickConfig.BulkFlowDamping;
+        }
 
         if (pressureTransfer <= 0f || pressureTransfer < _tickConfig.MinimumPressureTransfer)
             return 0f;
@@ -1155,6 +1215,9 @@ internal sealed partial class AtmosKernel : IDisposable
         return MathF.Min(pressureTransfer, maximumTransfer);
     }
 
+    /// <summary>
+    ///     Gets the start of gas channel <paramref name="g" /> in an energy-plus-gas delta buffer.
+    /// </summary>
     private static int GetDeltaArrayOffset(int g, int VoxelCount)
     {
         return (g + 1) * VoxelCount;
@@ -1184,6 +1247,7 @@ internal sealed partial class AtmosKernel : IDisposable
             while (boundaryEvents.TryDequeue(out _))
             {
             }
+
             return;
         }
 
@@ -1219,10 +1283,10 @@ internal sealed partial class AtmosKernel : IDisposable
             _activeThermalBoundaryEdges.Add(new ThermalBoundaryConductance(edge, conductance));
         }
 
-        foreach (var (edge, conductance) in _activeThermalBoundaryEdges)
+        foreach ((var edge, float conductance) in _activeThermalBoundaryEdges)
         {
-            ThermalBoundaryState firstState = _thermalBoundaryStates[edge.First];
-            ThermalBoundaryState secondState = _thermalBoundaryStates[edge.Second];
+            var firstState = _thermalBoundaryStates[edge.First];
+            var secondState = _thermalBoundaryStates[edge.Second];
             float firstIncident = _thermalBoundaryIncidentConductances[edge.First];
             float secondIncident = _thermalBoundaryIncidentConductances[edge.Second];
             float scale = MathF.Min(1f, MathF.Min(
@@ -1237,9 +1301,9 @@ internal sealed partial class AtmosKernel : IDisposable
             AddToDictionary(_thermalBoundaryEnergyDeltas, edge.Second, heatTransfer);
         }
 
-        foreach (var (address, energyDelta) in _thermalBoundaryEnergyDeltas)
+        foreach ((var address, float energyDelta) in _thermalBoundaryEnergyDeltas)
         {
-            ThermalBoundaryState state = _thermalBoundaryStates[address];
+            var state = _thermalBoundaryStates[address];
             // Avoid forming the potentially much larger intermediate C*T.
             float newTemperature = state.Temperature + energyDelta / state.HeatCapacity;
             if (newTemperature < 0f || !_chunkMap.TryGetValue(address.ChunkPosition, out var chunk))
@@ -1252,6 +1316,9 @@ internal sealed partial class AtmosKernel : IDisposable
         }
     }
 
+    /// <summary>
+    ///     Collects every cross-chunk edge incident to one thermal boundary event.
+    /// </summary>
     private void CollectThermalBoundaryEdges(Int3 sourceKey, ThermalBoundaryEvent evt,
         HashSet<ThermalBoundaryEdge> edges)
     {
@@ -1270,6 +1337,9 @@ internal sealed partial class AtmosKernel : IDisposable
         }
     }
 
+    /// <summary>
+    ///     Adds one valid cross-chunk thermal edge in canonical order, deduplicating it in <paramref name="edges" />.
+    /// </summary>
     private void TryAddThermalBoundaryEdge(AtmosChunk sourceChunk, Int3 sourceKey,
         Int3 targetPosition, Int3 direction, HashSet<ThermalBoundaryEdge> edges)
     {
@@ -1293,6 +1363,9 @@ internal sealed partial class AtmosKernel : IDisposable
             : new ThermalBoundaryEdge(neighbor, source));
     }
 
+    /// <summary>
+    ///     Captures and caches a valid boundary thermal state while refreshing its tick-derived caches.
+    /// </summary>
     private bool TryGetBoundaryThermalState(ThermalVoxelAddress address, float vacuumThreshold,
         Dictionary<ThermalVoxelAddress, ThermalBoundaryState> states, out ThermalBoundaryState state)
     {
@@ -1316,12 +1389,18 @@ internal sealed partial class AtmosKernel : IDisposable
         return true;
     }
 
+    /// <summary>
+    ///     Orders voxel addresses by chunk position and then local index for deterministic edge ordering.
+    /// </summary>
     private static int CompareThermalVoxels(ThermalVoxelAddress left, ThermalVoxelAddress right)
     {
         int comparison = CompareChunkPositions(left.ChunkPosition, right.ChunkPosition);
         return comparison != 0 ? comparison : left.LocalVoxelIndex.CompareTo(right.LocalVoxelIndex);
     }
 
+    /// <summary>
+    ///     Orders chunk positions lexicographically by x, y, then z.
+    /// </summary>
     private static int CompareChunkPositions(Int3 left, Int3 right)
     {
         int comparison = left.X.CompareTo(right.X);
@@ -1333,6 +1412,9 @@ internal sealed partial class AtmosKernel : IDisposable
         return left.Z.CompareTo(right.Z);
     }
 
+    /// <summary>
+    ///     Orders boundary events deterministically by source chunk and local voxel index.
+    /// </summary>
     private static int CompareBoundaryEvents(
         (Int3 Key, BoundaryFlowEvent Evt) left,
         (Int3 Key, BoundaryFlowEvent Evt) right)
@@ -1343,12 +1425,18 @@ internal sealed partial class AtmosKernel : IDisposable
             : left.Evt.LocalVoxelIndex.CompareTo(right.Evt.LocalVoxelIndex);
     }
 
+    /// <summary>
+    ///     Orders canonical thermal edges by their first endpoint and then their second endpoint.
+    /// </summary>
     private static int CompareThermalEdges(ThermalBoundaryEdge left, ThermalBoundaryEdge right)
     {
         int comparison = CompareThermalVoxels(left.First, right.First);
         return comparison != 0 ? comparison : CompareThermalVoxels(left.Second, right.Second);
     }
 
+    /// <summary>
+    ///     Accumulates a scalar contribution for one boundary voxel address.
+    /// </summary>
     private static void AddToDictionary(Dictionary<ThermalVoxelAddress, float> values,
         ThermalVoxelAddress address, float value)
     {
@@ -1356,7 +1444,10 @@ internal sealed partial class AtmosKernel : IDisposable
     }
 
     private readonly record struct ThermalVoxelAddress(Int3 ChunkPosition, ushort LocalVoxelIndex);
+
     private readonly record struct ThermalBoundaryEdge(ThermalVoxelAddress First, ThermalVoxelAddress Second);
+
     private readonly record struct ThermalBoundaryConductance(ThermalBoundaryEdge Edge, float Conductance);
+
     private readonly record struct ThermalBoundaryState(float Temperature, float HeatCapacity);
 }
