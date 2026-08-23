@@ -13,6 +13,8 @@
         <PackageTags>simulation;atmospherics;voxel;nativeaot</PackageTags>
         <GenerateDocumentationFile>true</GenerateDocumentationFile>
         <GenerateNumosBuildInfo>true</GenerateNumosBuildInfo>
+        <NumosSourceRevisionId Condition="'$(CoreSimSourceRevisionId)' != ''">$(CoreSimSourceRevisionId)</NumosSourceRevisionId>
+        <NumosSourceReference Condition="'$(CoreSimSourceReference)' != ''">$(CoreSimSourceReference)</NumosSourceReference>
     </PropertyGroup>
 
     <ItemGroup>

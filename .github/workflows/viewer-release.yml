@@ -32,6 +32,8 @@ jobs:
     outputs:
       commit: ${{ steps.release.outputs.commit }}
       version: ${{ steps.release.outputs.version }}
+      core_sim_commit: ${{ steps.release.outputs.core_sim_commit }}
+      core_sim_ref: ${{ steps.release.outputs.core_sim_ref }}
 
     steps:
       - name: Check out tagged source
@@ -58,8 +60,21 @@ jobs:
             exit 2
           fi
           python3 eng/version.py verify viewer
+          core_sim_version="$(python3 eng/version.py get coresim)"
+          core_sim_tag="coresim/v$core_sim_version"
+          if [[ "$(git cat-file -t "$core_sim_tag" 2>/dev/null)" != "tag" ]]; then
+            echo "CoreSim release tag '$core_sim_tag' must exist and be annotated." >&2
+            exit 2
+          fi
+          core_sim_tagged_version="$(git show "$core_sim_tag:src/Numos.CoreSim/Version.props" | sed -n 's|.*<Version>\([^<]*\)</Version>.*|\1|p')"
+          if [[ "$core_sim_tagged_version" != "$core_sim_version" ]]; then
+            echo "CoreSim release tag '$core_sim_tag' does not contain version '$core_sim_version'." >&2
+            exit 2
+          fi
           echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "core_sim_commit=$(git rev-parse "$core_sim_tag^{}")" >> "$GITHUB_OUTPUT"
+          echo "core_sim_ref=refs/tags/$core_sim_tag" >> "$GITHUB_OUTPUT"
 
   test:
     name: Test (${{ matrix.os }})
@@ -134,9 +149,9 @@ jobs:
             -p:PublishAot=true `
             -p:ContinuousIntegrationBuild=true `
             -p:SourceRevisionId="${{ needs.verify.outputs.commit }}" `
-            -p:RepositoryCommit="${{ needs.verify.outputs.commit }}" `
-            -p:SourceBranchName="refs/tags/$env:TARGET_TAG" `
-            -p:RepositoryBranch="refs/tags/$env:TARGET_TAG"
+            -p:ViewerSourceReference="refs/tags/$env:TARGET_TAG" `
+            -p:CoreSimSourceRevisionId="${{ needs.verify.outputs.core_sim_commit }}" `
+            -p:CoreSimSourceReference="${{ needs.verify.outputs.core_sim_ref }}"
 
       - name: Archive NativeAOT application
         shell: pwsh

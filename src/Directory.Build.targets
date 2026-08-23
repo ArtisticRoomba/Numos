@@ -3,8 +3,12 @@
             BeforeTargets="GenerateNuspec;GetAssemblyAttributes"
             DependsOnTargets="InitializeSourceControlInformation">
         <PropertyGroup>
-            <RepositoryCommit Condition="'$(RepositoryCommit)' == ''">$(SourceRevisionId)</RepositoryCommit>
-            <RepositoryBranch Condition="'$(RepositoryBranch)' == ''">$(SourceBranchName)</RepositoryBranch>
+            <_NumosSourceRevision>$(SourceRevisionId)</_NumosSourceRevision>
+            <_NumosSourceRevision Condition="'$(NumosSourceRevisionId)' != ''">$(NumosSourceRevisionId)</_NumosSourceRevision>
+            <_NumosSourceReference>$(SourceBranchName)</_NumosSourceReference>
+            <_NumosSourceReference Condition="'$(NumosSourceReference)' != ''">$(NumosSourceReference)</_NumosSourceReference>
+            <RepositoryCommit Condition="'$(RepositoryCommit)' == ''">$(_NumosSourceRevision)</RepositoryCommit>
+            <RepositoryBranch Condition="'$(RepositoryBranch)' == ''">$(_NumosSourceReference)</RepositoryBranch>
         </PropertyGroup>
         <ItemGroup>
             <AssemblyMetadata Include="PackageVersion" Value="$(PackageVersion)"/>
@@ -27,10 +31,8 @@
             <_NumosPackageVersion Condition="'$(PackageVersion)' != ''">$(PackageVersion)</_NumosPackageVersion>
             <_NumosInformationalVersion Condition="'$(InformationalVersion)' == ''">$(_NumosUnknown)</_NumosInformationalVersion>
             <_NumosInformationalVersion Condition="'$(InformationalVersion)' != ''">$(InformationalVersion)</_NumosInformationalVersion>
-            <_NumosSourceRevision Condition="'$(SourceRevisionId)' == ''">$(_NumosUnknown)</_NumosSourceRevision>
-            <_NumosSourceRevision Condition="'$(SourceRevisionId)' != ''">$(SourceRevisionId)</_NumosSourceRevision>
-            <_NumosSourceReference Condition="'$(RepositoryBranch)' == ''">$(_NumosUnknown)</_NumosSourceReference>
-            <_NumosSourceReference Condition="'$(RepositoryBranch)' != ''">$(RepositoryBranch)</_NumosSourceReference>
+            <_NumosSourceRevision Condition="'$(_NumosSourceRevision)' == ''">$(_NumosUnknown)</_NumosSourceRevision>
+            <_NumosSourceReference Condition="'$(_NumosSourceReference)' == ''">$(_NumosUnknown)</_NumosSourceReference>
             <_NumosRepositoryUrl Condition="'$(RepositoryUrl)' == ''">$(_NumosUnknown)</_NumosRepositoryUrl>
             <_NumosRepositoryUrl Condition="'$(RepositoryUrl)' != ''">$(RepositoryUrl)</_NumosRepositoryUrl>
             <_NumosSdkVersion Condition="'$(NETCoreSdkVersion)' == ''">$(_NumosUnknown)</_NumosSdkVersion>
