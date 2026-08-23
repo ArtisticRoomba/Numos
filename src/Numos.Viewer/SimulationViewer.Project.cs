@@ -17,7 +17,7 @@ public partial class SimulationViewer
         CondensationEnabled = true,
         MolarEnthalpyOfVaporization = 6_820f,
         LiquidId = 0,
-        DiffusionCoefficient = 0.1f
+        DiffusionCoefficient = 0.0002f/20f
     };
 
     private readonly static GasProperties Nitrogen = new()
@@ -29,7 +29,7 @@ public partial class SimulationViewer
         CondensationEnabled = true,
         MolarEnthalpyOfVaporization = 5_600f,
         LiquidId = 1,
-        DiffusionCoefficient = 0.08f
+        DiffusionCoefficient = 0.0002f/20f
     };
 
     private Int3 _chunkDimensions;

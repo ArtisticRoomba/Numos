@@ -134,6 +134,7 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
         ref float maximumPressureDelta, float[] moleDeltas, double[] energyDeltas,
         float[] scheduledOutflows)
     {
+        var dx = MathF.Pow(config.VoxelVolume, 1f/3f);
         if (!neighborPosition.IsWithin(default, chunk.Dimensions))
             return;
 
@@ -152,21 +153,27 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
             : 0f;
         float sourceTemperature = config.GetValidatedTemp(chunk.Temperature[voxelIndex]);
         float advectedMoles = AtmosSolverMath.PressureToMoles(config, bulkPressureTransfer, sourceTemperature);
-        float neighborTemperature = isVoid
-            ? 0f
-            : config.GetValidatedTemp(chunk.Temperature[neighborIndex]);
+        
+        // Reference temp and pressure for diffusion coefficient
+        float temperatureRatio = sourceTemperature / 300f;
+        float pressureRatio = 100000f / currentPressure;
+
         for (var gas = 0; gas < chunk.ActiveGasCount; gas++)
         {
             int gasId = chunk.ActiveGases[gas].GasId;
             float sourceMoles = chunk.ActiveGases[gas].Moles[voxelIndex];
             float molesAdvected = advectedMoles * (sourceMoles / totalMoles);
-            float neighborMoles = isVoid ? 0f : chunk.ActiveGases[gas].Moles[neighborIndex];
-            float moleImbalance = AtmosSolverMath.CalculateMoleImbalance(
-                sourceMoles, sourceTemperature, neighborMoles, neighborTemperature);
-            float molesDiffused = moleImbalance > 0f
-                ? moleImbalance * config.GetDiffusionCoefficient(gasId)
-                : 0f;
 
+            float referenceDiffusivity = config.GetDiffusionCoefficient(gasId);
+            // dx is area/dx where dx is the distance between centre of voxels.
+            // as voxel area and width is not easily exposed here just simplified to assume cubic voxels.
+            float diffusionConstant = referenceDiffusivity * MathF.Pow(temperatureRatio, 1.5f) * pressureRatio * dx;
+
+            float molesDiffused = diffusionConstant * sourceMoles;
+
+            // This is a bad way to do this. 
+            // The way thermal diffusion does it is much better.
+            // This method causes bias direction.
             int outflowOffset = gas * chunk.VoxelCount + voxelIndex;
             float remainingMoles = sourceMoles - scheduledOutflows[outflowOffset];
             float molesToMove = MathF.Min(remainingMoles, molesAdvected + molesDiffused);
