@@ -178,6 +178,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           TARGET_TAG: ${{ inputs.tag }}
           VERSION: ${{ needs.verify.outputs.version }}
           RELEASE_NOTES: ${{ inputs.release_notes }}
