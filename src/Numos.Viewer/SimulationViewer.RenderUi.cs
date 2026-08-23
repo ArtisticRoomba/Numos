@@ -8,12 +8,15 @@ using Numos.Maths;
 using Numos.SimDrawer;
 using Numos.Viewer.Ui;
 using Raylib_cs;
+using rlImGui_cs;
 
 namespace Numos.Viewer;
 
 public partial class SimulationViewer
 {
     private const float NumericInputWidth = 100f;
+    private const float AboutTabContentWidth = 520f;
+    private const float AboutTabContentHeight = 390f;
 
     private bool _requestOpenAboutModal;
     private bool _aboutModalOpen;
@@ -104,7 +107,7 @@ public partial class SimulationViewer
         ImGui.End();
     }
 
-    private static void RenderEmptyWorkspaceMessage()
+    private void RenderEmptyWorkspaceMessage()
     {
         var viewport = ImGui.GetMainViewport();
         ImGui.SetNextWindowPos(
@@ -123,9 +126,7 @@ public partial class SimulationViewer
 
         ImGui.Begin("Empty workspace##empty-workspace", windowFlags);
 
-        ImGuiExtensions.TextCentered("Numos Simulation Viewer");
-        ImGuiExtensions.TextCentered($"CoreSim v{CoreSimBuildInfo.PackageVersion}, Viewer v{ViewerBuildInfo.PackageVersion}",
-            ImGui.TextDisabled);
+        DrawEmptyWorkspaceBranding();
 
         ImGui.Spacing();
         ImGui.Separator();
@@ -150,7 +151,8 @@ public partial class SimulationViewer
 
         ImGuiExtensions.OpenPopupWhenRequested(popupId, ref _requestOpenAboutModal);
 
-        ImGui.SetNextWindowSize(new Vector2(560, 0), ImGuiCond.Appearing);
+        float aboutWindowWidth = AboutTabContentWidth + ImGui.GetStyle().WindowPadding.X * 2;
+        ImGui.SetNextWindowSize(new Vector2(aboutWindowWidth, 0), ImGuiCond.Appearing);
 
         using var modal = ImGuiExtensions.BeginPopupModal(popupId, ref _aboutModalOpen);
         if (!modal.IsVisible)
@@ -175,7 +177,7 @@ public partial class SimulationViewer
 
     private void DrawAboutTabs()
     {
-        var tabAreaSize = new Vector2(520, 390);
+        var tabAreaSize = new Vector2(AboutTabContentWidth, AboutTabContentHeight);
 
         if (ImGui.BeginTabBar("AboutTabs", ImGuiTabBarFlags.None))
         {
@@ -313,11 +315,52 @@ public partial class SimulationViewer
 
     private void DrawAboutHeader()
     {
+        float brandingHeight = ImGui.GetTextLineHeight() * 3 + ImGui.GetStyle().ItemSpacing.Y * 2;
+        int logoSize = Math.Max(1, (int)MathF.Ceiling(brandingHeight));
+
         ImGui.BeginGroup();
 
-        ImGui.Text("Numos Simulation Viewer");
-        ImGui.TextDisabled($"Version {ViewerBuildInfo.PackageVersion}");
+        bool hasLogo = _viewportBranding.Id != 0;
+        if (hasLogo)
+        {
+            rlImGui.ImageSize(_viewportBranding, logoSize, logoSize);
 
+            ImGui.SameLine(0, ImGui.GetStyle().ItemSpacing.X);
+        }
+
+        ImGui.BeginGroup();
+        ImGui.TextUnformatted("Numos Simulation Viewer");
+        ImGui.TextDisabled($"CoreSim v{CoreSimBuildInfo.PackageVersion}");
+        ImGui.TextDisabled($"Viewer v{ViewerBuildInfo.PackageVersion}");
+        ImGui.EndGroup();
+
+        ImGui.EndGroup();
+    }
+
+    private void DrawEmptyWorkspaceBranding()
+    {
+        if (_viewportBranding.Id == 0)
+            return;
+
+        const string title = "Numos Simulation Viewer";
+        var coreSimVersion = $"CoreSim v{CoreSimBuildInfo.PackageVersion}";
+        var viewerVersion = $"Viewer v{ViewerBuildInfo.PackageVersion}";
+        float textHeight = ImGui.GetTextLineHeight() * 3 + ImGui.GetStyle().ItemSpacing.Y * 2;
+        int logoSize = Math.Max(1, (int)MathF.Ceiling(textHeight));
+        float textWidth = Math.Max(
+            ImGui.CalcTextSize(title).X,
+            Math.Max(ImGui.CalcTextSize(coreSimVersion).X, ImGui.CalcTextSize(viewerVersion).X));
+        float logoTextGap = ImGui.GetStyle().ItemSpacing.X * 2;
+        float availableWidth = ImGui.GetContentRegionAvail().X;
+        float left = ImGui.GetCursorPosX() + Math.Max(0f, (availableWidth - logoSize - logoTextGap - textWidth) * 0.5f);
+        ImGui.SetCursorPosX(left);
+        rlImGui.ImageSize(_viewportBranding, logoSize, logoSize);
+        ImGui.SameLine(0, logoTextGap);
+
+        ImGui.BeginGroup();
+        ImGui.TextUnformatted(title);
+        ImGui.TextDisabled(coreSimVersion);
+        ImGui.TextDisabled(viewerVersion);
         ImGui.EndGroup();
     }
 

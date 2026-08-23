@@ -610,20 +610,25 @@ public partial class SimulationViewer : IDisposable
             return;
 
         const string label = "Numos";
-        var versionLabel = $"CoreSim v{CoreSimBuildInfo.PackageVersion}, Viewer v{ViewerBuildInfo.PackageVersion}";
+        var coreSimVersionLabel = $"CoreSim v{CoreSimBuildInfo.PackageVersion}";
+        var viewerVersionLabel = $"Viewer v{ViewerBuildInfo.PackageVersion}";
 
         float smallerViewportDimension = Math.Max(1f, Math.Min(viewportWidth, viewportHeight));
         int requestedLogoSize = Math.Max(
             1,
             (int)MathF.Round(smallerViewportDimension * _viewportBrandingSizePercent / 100f));
         int logoSize = Math.Min(requestedLogoSize, Math.Max(1, Math.Min(viewportHeight, viewportWidth / 4)));
-        int versionTextSize = logoSize >= 3 ? Math.Max(1, logoSize / 3) : 0;
-        int textLineGap = versionTextSize > 0 ? Math.Max(0, logoSize / 16) : 0;
-        int titleTextSize = Math.Max(1, logoSize - versionTextSize - textLineGap);
+        int textLineGap = Math.Max(1, (int)MathF.Round(logoSize * 0.08f));
+        int textHeight = Math.Max(3, logoSize - textLineGap * 2);
+        int titleTextSize = Math.Max(1, textHeight / 2);
+        int coreSimVersionTextSize = Math.Max(1, (textHeight - titleTextSize) / 2);
+        int viewerVersionTextSize = Math.Max(1, textHeight - titleTextSize - coreSimVersionTextSize);
         int logoTextGap = Math.Max(1, (int)MathF.Round(logoSize * 0.23f));
         int textColumnWidth = Math.Max(
             Raylib.MeasureText(label, titleTextSize),
-            versionTextSize > 0 ? Raylib.MeasureText(versionLabel, versionTextSize) : 0);
+            Math.Max(
+                Raylib.MeasureText(coreSimVersionLabel, coreSimVersionTextSize),
+                Raylib.MeasureText(viewerVersionLabel, viewerVersionTextSize)));
         int totalWidth = logoSize + logoTextGap + textColumnWidth;
         int offsetX = Math.Max(0, (int)MathF.Round(_viewportBrandingOffsetX));
         int offsetY = Math.Max(0, (int)MathF.Round(_viewportBrandingOffsetY));
@@ -649,15 +654,18 @@ public partial class SimulationViewer : IDisposable
             tint);
         int textLeft = left + logoSize + logoTextGap;
         Raylib.DrawText(label, textLeft, top, titleTextSize, tint);
-        if (versionTextSize > 0)
-        {
-            Raylib.DrawText(
-                versionLabel,
-                textLeft,
-                top + titleTextSize + textLineGap,
-                versionTextSize,
-                tint);
-        }
+        Raylib.DrawText(
+            coreSimVersionLabel,
+            textLeft,
+            top + titleTextSize + textLineGap,
+            coreSimVersionTextSize,
+            tint);
+        Raylib.DrawText(
+            viewerVersionLabel,
+            textLeft,
+            top + titleTextSize + textLineGap + coreSimVersionTextSize + textLineGap,
+            viewerVersionTextSize,
+            tint);
     }
 
     private static string GetViewportBrandingCornerLabel(ViewportBrandingCorner corner)
