@@ -1,0 +1,146 @@
+name: Publish NuGet packages
+
+on:
+  push:
+    tags:
+      - coresim/v*
+      - viewer/v*
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nuget-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  DOTNET_NOLOGO: true
+  NUGET_SOURCE: https://api.nuget.org/v3/index.json
+
+jobs:
+  build:
+    name: Build ${{ github.ref_name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      family: ${{ steps.release.outputs.family }}
+      version: ${{ steps.release.outputs.version }}
+
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Verify release tag
+        id: release
+        shell: bash
+        run: |
+          family="${GITHUB_REF_NAME%%/*}"
+          version="$(python3 eng/version.py get "$family")"
+          expected="$family/v$version"
+          if [[ "$GITHUB_REF_NAME" != "$expected" ]]; then
+            echo "Expected release tag '$expected', got '$GITHUB_REF_NAME'." >&2
+            exit 2
+          fi
+          python3 eng/version.py verify "$family"
+          echo "family=$family" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Test version tooling
+        run: python3 -m unittest discover -s eng/tests -v
+
+      - name: Build
+        run: dotnet build Numos.slnx -c Release -warnaserror
+
+      - name: Run tests
+        run: dotnet test Numos.slnx -c Release --no-build --no-restore
+
+      - name: Pack release family
+        run: >-
+          python3 eng/pack_packages.py "${{ steps.release.outputs.family }}" artifacts/packages
+          --repository-commit "${{ github.sha }}"
+          --repository-branch "${{ github.ref }}"
+          --publish-manifest artifacts/packages/publish-order.txt
+
+      - name: Verify package metadata and contents
+        run: >-
+          python3 eng/verify_packages.py artifacts/packages
+          --family "${{ steps.release.outputs.family }}"
+
+      - name: Upload reviewed release artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: nuget-packages
+          path: artifacts/packages/
+          if-no-files-found: error
+
+  publish:
+    environment: nuget-release
+    name: Publish ${{ needs.build.outputs.family }} v${{ needs.build.outputs.version }}
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Set up .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Download reviewed release artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: nuget-packages
+          path: artifacts/packages
+
+      - name: Confirm NuGet publisher is configured
+        env:
+          NUGET_USER: ${{ vars.NUGET_USER }}
+        run: |
+          if [[ -z "$NUGET_USER" ]]; then
+            echo "Repository variable NUGET_USER must contain the trusted-publishing account name." >&2
+            exit 2
+          fi
+
+      - name: Request temporary NuGet credential
+        id: nuget-login
+        uses: NuGet/login@ebc737b6fc418a6ca0073cf116ec8dc156d8b81e # v1
+        with:
+          user: ${{ vars.NUGET_USER }}
+
+      - name: Publish packages and symbols
+        shell: bash
+        env:
+          NUGET_API_KEY: ${{ steps.nuget-login.outputs.NUGET_API_KEY }}
+        run: |
+          while IFS= read -r package_name; do
+            if [[ -z "$package_name" || "$package_name" == */* || "$package_name" != *.nupkg || "$package_name" == *.snupkg ]]; then
+              echo "Invalid primary package name in publication manifest." >&2
+              exit 2
+            fi
+            package="artifacts/packages/$package_name"
+            if [[ ! -f "$package" ]]; then
+              echo "Missing reviewed package '$package_name'." >&2
+              exit 2
+            fi
+            symbols="${package%.nupkg}.snupkg"
+            if [[ ! -f "$symbols" ]]; then
+              echo "Missing reviewed symbols for '$package_name'." >&2
+              exit 2
+            fi
+            dotnet nuget push "$package" \
+              --api-key "$NUGET_API_KEY" \
+              --source "$NUGET_SOURCE" \
+              --skip-duplicate
+          done < artifacts/packages/publish-order.txt

@@ -7,12 +7,16 @@ using Numos.CoreSim.Datatypes.Snapshots;
 using Numos.Maths;
 using Numos.SimDrawer;
 using Numos.Viewer.Ui;
+using Raylib_cs;
+using rlImGui_cs;
 
 namespace Numos.Viewer;
 
 public partial class SimulationViewer
 {
     private const float NumericInputWidth = 100f;
+    private const float AboutTabContentWidth = 520f;
+    private const float AboutTabContentHeight = 390f;
 
     private bool _requestOpenAboutModal;
     private bool _aboutModalOpen;
@@ -35,11 +39,14 @@ public partial class SimulationViewer
             return;
         }
 
-        _viewport?.Draw(
-            "Simulation 3D##viewport",
-            RenderSimulationScene,
-            new Vector2(320, 40),
-            new Vector2(660, 510));
+        if (_show3DViewport)
+        {
+            _viewport?.Draw(
+                "Simulation 3D##viewport",
+                RenderSimulationScene,
+                new Vector2(320, 40),
+                new Vector2(660, 510));
+        }
 
         if (_showSliceViewport)
         {
@@ -100,7 +107,7 @@ public partial class SimulationViewer
         ImGui.End();
     }
 
-    private static void RenderEmptyWorkspaceMessage()
+    private void RenderEmptyWorkspaceMessage()
     {
         var viewport = ImGui.GetMainViewport();
         ImGui.SetNextWindowPos(
@@ -119,8 +126,7 @@ public partial class SimulationViewer
 
         ImGui.Begin("Empty workspace##empty-workspace", windowFlags);
 
-        ImGuiExtensions.TextCentered("Numos Simulation Viewer");
-        ImGuiExtensions.TextCentered($"v{ViewerVersion}", ImGui.TextDisabled);
+        DrawEmptyWorkspaceBranding();
 
         ImGui.Spacing();
         ImGui.Separator();
@@ -145,7 +151,8 @@ public partial class SimulationViewer
 
         ImGuiExtensions.OpenPopupWhenRequested(popupId, ref _requestOpenAboutModal);
 
-        ImGui.SetNextWindowSize(new Vector2(420, 0), ImGuiCond.Appearing);
+        float aboutWindowWidth = AboutTabContentWidth + ImGui.GetStyle().WindowPadding.X * 2;
+        ImGui.SetNextWindowSize(new Vector2(aboutWindowWidth, 0), ImGuiCond.Appearing);
 
         using var modal = ImGuiExtensions.BeginPopupModal(popupId, ref _aboutModalOpen);
         if (!modal.IsVisible)
@@ -170,7 +177,7 @@ public partial class SimulationViewer
 
     private void DrawAboutTabs()
     {
-        var tabAreaSize = new Vector2(480, 280);
+        var tabAreaSize = new Vector2(AboutTabContentWidth, AboutTabContentHeight);
 
         if (ImGui.BeginTabBar("AboutTabs", ImGuiTabBarFlags.None))
         {
@@ -210,7 +217,83 @@ public partial class SimulationViewer
             new Vector4(0.2f, 0.6f, 1.0f, 1.0f),
             "License: MIT");
 
+        ImGui.Spacing();
+        ImGui.SeparatorText("Build provenance");
+        DrawBuildProvenance(
+            "Viewer",
+            ViewerBuildInfo.PackageVersion,
+            ViewerBuildInfo.GitBranch ?? ViewerBuildInfo.SourceReference,
+            ViewerBuildInfo.GitCommit,
+            ViewerBuildInfo.GitCommitShort,
+            ViewerBuildInfo.BuildConfiguration,
+            ViewerBuildInfo.TargetFramework,
+            ViewerBuildInfo.SdkVersion,
+            ViewerBuildInfo.RepositoryUrl,
+            ViewerBuildInfo.CommitUrl);
+        ImGui.Spacing();
+        DrawBuildProvenance(
+            "CoreSim",
+            CoreSimBuildInfo.PackageVersion,
+            CoreSimBuildInfo.GitBranch ?? CoreSimBuildInfo.SourceReference,
+            CoreSimBuildInfo.GitCommit,
+            CoreSimBuildInfo.GitCommitShort,
+            CoreSimBuildInfo.BuildConfiguration,
+            CoreSimBuildInfo.TargetFramework,
+            CoreSimBuildInfo.SdkVersion,
+            CoreSimBuildInfo.RepositoryUrl,
+            CoreSimBuildInfo.CommitUrl);
+
         ImGui.EndChild();
+    }
+
+    private static void DrawBuildProvenance(
+        string component,
+        string version,
+        string sourceReference,
+        string commit,
+        string shortCommit,
+        string configuration,
+        string targetFramework,
+        string sdkVersion,
+        string repositoryUrl,
+        string? commitUrl)
+    {
+        ImGui.TextUnformatted($"{component} {version}");
+        ImGui.TextDisabled($"Source: {sourceReference}");
+        ImGui.TextDisabled($"Commit: {shortCommit}");
+        ImGui.TextDisabled($"Build: {configuration} / {targetFramework} / SDK {sdkVersion}");
+
+        bool hasRepository = IsKnownBuildValue(repositoryUrl);
+        if (!hasRepository)
+            ImGui.BeginDisabled();
+        if (ImGui.SmallButton($"Repository##{component}"))
+            Raylib.OpenURL(repositoryUrl);
+        if (!hasRepository)
+            ImGui.EndDisabled();
+
+        ImGui.SameLine();
+        bool hasCommitUrl = commitUrl != null;
+        if (!hasCommitUrl)
+            ImGui.BeginDisabled();
+        if (ImGui.SmallButton($"Commit##{component}") && commitUrl != null)
+            Raylib.OpenURL(commitUrl);
+        if (!hasCommitUrl)
+            ImGui.EndDisabled();
+
+        ImGui.SameLine();
+        bool hasCommit = IsKnownBuildValue(commit);
+        if (!hasCommit)
+            ImGui.BeginDisabled();
+        if (ImGui.SmallButton($"Copy hash##{component}"))
+            Raylib.SetClipboardText(commit);
+        if (!hasCommit)
+            ImGui.EndDisabled();
+    }
+
+    private static bool IsKnownBuildValue(string value)
+    {
+        return !string.IsNullOrWhiteSpace(value) &&
+               !string.Equals(value, "unknown", StringComparison.Ordinal);
     }
 
     private void DrawAuthorsTab(Vector2 size)
@@ -232,11 +315,52 @@ public partial class SimulationViewer
 
     private void DrawAboutHeader()
     {
+        float brandingHeight = ImGui.GetTextLineHeight() * 3 + ImGui.GetStyle().ItemSpacing.Y * 2;
+        int logoSize = Math.Max(1, (int)MathF.Ceiling(brandingHeight));
+
         ImGui.BeginGroup();
 
-        ImGui.Text("Numos Simulation Viewer");
-        ImGui.TextDisabled($"Version {ViewerVersion}");
+        bool hasLogo = _viewportBranding.Id != 0;
+        if (hasLogo)
+        {
+            rlImGui.ImageSize(_viewportBranding, logoSize, logoSize);
 
+            ImGui.SameLine(0, ImGui.GetStyle().ItemSpacing.X);
+        }
+
+        ImGui.BeginGroup();
+        ImGui.TextUnformatted("Numos Simulation Viewer");
+        ImGui.TextDisabled($"CoreSim v{CoreSimBuildInfo.PackageVersion}");
+        ImGui.TextDisabled($"Viewer v{ViewerBuildInfo.PackageVersion}");
+        ImGui.EndGroup();
+
+        ImGui.EndGroup();
+    }
+
+    private void DrawEmptyWorkspaceBranding()
+    {
+        if (_viewportBranding.Id == 0)
+            return;
+
+        const string title = "Numos Simulation Viewer";
+        var coreSimVersion = $"CoreSim v{CoreSimBuildInfo.PackageVersion}";
+        var viewerVersion = $"Viewer v{ViewerBuildInfo.PackageVersion}";
+        float textHeight = ImGui.GetTextLineHeight() * 3 + ImGui.GetStyle().ItemSpacing.Y * 2;
+        int logoSize = Math.Max(1, (int)MathF.Ceiling(textHeight));
+        float textWidth = Math.Max(
+            ImGui.CalcTextSize(title).X,
+            Math.Max(ImGui.CalcTextSize(coreSimVersion).X, ImGui.CalcTextSize(viewerVersion).X));
+        float logoTextGap = ImGui.GetStyle().ItemSpacing.X * 2;
+        float availableWidth = ImGui.GetContentRegionAvail().X;
+        float left = ImGui.GetCursorPosX() + Math.Max(0f, (availableWidth - logoSize - logoTextGap - textWidth) * 0.5f);
+        ImGui.SetCursorPosX(left);
+        rlImGui.ImageSize(_viewportBranding, logoSize, logoSize);
+        ImGui.SameLine(0, logoTextGap);
+
+        ImGui.BeginGroup();
+        ImGui.TextUnformatted(title);
+        ImGui.TextDisabled(coreSimVersion);
+        ImGui.TextDisabled(viewerVersion);
         ImGui.EndGroup();
     }
 
@@ -269,6 +393,7 @@ public partial class SimulationViewer
                 ImGui.MenuItem("Tools", null, ref _showToolsPanel);
                 ImGui.MenuItem("View", null, ref _showViewPanel);
                 ImGui.MenuItem("Configuration", null, ref _showConfigurationPanel);
+                ImGui.MenuItem("3D Viewport", null, ref _show3DViewport);
                 ImGui.MenuItem("2D Slice Viewport", null, ref _showSliceViewport);
 
                 if (!panesAvailable)
@@ -793,6 +918,8 @@ public partial class SimulationViewer
 
         if (legend.Kind == VisualizationLegendKind.Gradient && legend.Entries.Count > 0)
         {
+            RenderLegendBoundsControls(legend.Range);
+
             ImGui.Checkbox("Resolution##legend-resolution-enabled", ref _legendResolutionEnabled);
             if (_legendResolutionEnabled)
             {
@@ -816,6 +943,61 @@ public partial class SimulationViewer
                 ImGuiColorEditFlags.NoTooltip, new Vector2(16, 16));
             ImGui.SameLine();
             ImGui.TextUnformatted(entry.Label);
+        }
+    }
+
+    private void RenderLegendBoundsControls(VisualizationRange currentRange)
+    {
+        bool automaticBounds = _legendAutomaticBounds;
+        if (ImGui.Checkbox("Automatic bounds##legend-automatic-bounds", ref automaticBounds))
+        {
+            _legendAutomaticBounds = automaticBounds;
+            if (!automaticBounds)
+            {
+                _legendMinimum = currentRange.Minimum;
+                _legendMaximum = currentRange.Maximum;
+            }
+
+            _legendRangeRevision++;
+        }
+
+        if (_legendAutomaticBounds)
+        {
+            ImGui.SetNextItemWidth(NumericInputWidth);
+            float offset = _legendAutomaticRangeOffset;
+            if (ImGui.InputFloat("± Offset##legend-range-offset", ref offset))
+            {
+                _legendAutomaticRangeOffset = Math.Max(offset, 0f);
+                _legendRangeRevision++;
+            }
+
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Expands the automatic minimum and maximum by this amount.");
+
+            return;
+        }
+
+        ImGui.SetNextItemWidth(NumericInputWidth);
+        float minimum = _legendMinimum;
+        if (ImGui.InputFloat("Min##legend-minimum", ref minimum))
+        {
+            _legendMinimum = Math.Min(minimum, _legendMaximum);
+            _legendRangeRevision++;
+        }
+
+        ImGui.SameLine();
+        ImGui.SetNextItemWidth(NumericInputWidth);
+        float maximum = _legendMaximum;
+        if (ImGui.InputFloat("Max##legend-maximum", ref maximum))
+        {
+            _legendMaximum = Math.Max(maximum, _legendMinimum);
+            _legendRangeRevision++;
+        }
+
+        if (_legendMaximum <= _legendMinimum)
+        {
+            _legendMaximum = _legendMinimum + 1f;
+            _legendRangeRevision++;
         }
     }
 

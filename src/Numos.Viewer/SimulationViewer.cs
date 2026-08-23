@@ -17,7 +17,13 @@ namespace Numos.Viewer;
 /// </summary>
 public partial class SimulationViewer : IDisposable
 {
-    private const string ViewerVersion = "0.1.0-alpha-alpha-alpha";
+    private enum ViewportBrandingCorner
+    {
+        TopLeft,
+        TopRight,
+        BottomLeft,
+        BottomRight
+    }
 
     private readonly record struct VoxelDetailCacheEntry(
         AtmosChunkVersion PresentedVersion,
@@ -62,10 +68,17 @@ public partial class SimulationViewer : IDisposable
     private string _currentVisualizationId = BuiltInVisualizationIds.Temperature;
     private bool _legendResolutionEnabled;
     private int _legendResolution = 32;
+    private bool _legendAutomaticBounds = true;
+    private float _legendAutomaticRangeOffset;
+    private float _legendMinimum;
+    private float _legendMaximum = 1f;
+    private ulong _legendRangeRevision;
+    private ulong _appliedLegendRangeRevision = ulong.MaxValue;
     private ChunkIdentity? _focusedChunk;
 
     private SimulationViewport? _viewport;
     private SimulationViewport? _sliceViewport;
+    private Texture2D _viewportBranding;
 
     // Cameras
     private Camera3D _camera3D = new()
@@ -96,9 +109,16 @@ public partial class SimulationViewer : IDisposable
     private bool _showConfigurationPanel;
     private bool _showProgramSettingsPanel;
     private bool _showPerformanceOverlay;
+    private bool _showViewportBranding = true;
+    private float _viewportBrandingOpacityPercent = 80f;
+    private ViewportBrandingCorner _viewportBrandingCorner = ViewportBrandingCorner.TopLeft;
+    private float _viewportBrandingOffsetX = 10f;
+    private float _viewportBrandingOffsetY = 10f;
+    private float _viewportBrandingSizePercent = 6f;
     private int _targetFps = 144;
     private bool _uncappedFps;
     private int _programSettingsTab;
+    private bool _show3DViewport = true;
     private bool _showSliceViewport = true;
     private bool _show3DChunkOutlines;
     private bool _show3DVoxelOutlines = true;
@@ -138,6 +158,9 @@ public partial class SimulationViewer : IDisposable
             var icon = Raylib.LoadImage(iconPath);
             Raylib.SetWindowIcon(icon);
             Raylib.UnloadImage(icon);
+
+            _viewportBranding = Raylib.LoadTexture(iconPath);
+            Raylib.SetTextureFilter(_viewportBranding, TextureFilter.Bilinear);
         }
 
         try
@@ -194,7 +217,8 @@ public partial class SimulationViewer : IDisposable
                                         visualization.Id,
                                         StringComparison.OrdinalIgnoreCase) ||
                                     _drawData.VisualizationMappingRevision != visualization.MappingRevision ||
-                                    _drawData.Visualization.Range.Resolution != GetLegendResolution();
+                                    _drawData.Visualization.Range.Resolution != GetLegendResolution() ||
+                                    _appliedLegendRangeRevision != _legendRangeRevision;
         if (!snapshotsChanged && !visualizationChanged)
         {
             RefreshSliceData();
@@ -214,7 +238,12 @@ public partial class SimulationViewer : IDisposable
             _snapshotSourceVersion,
             _drawData,
             forceRemap: visualizationChanged,
-            resolution: GetLegendResolution());
+            resolution: GetLegendResolution(),
+            automaticRangeOffset: _legendAutomaticBounds ? _legendAutomaticRangeOffset : 0f,
+            rangeOverride: _legendAutomaticBounds
+                ? null
+                : new VisualizationRange(_legendMinimum, _legendMaximum));
+        _appliedLegendRangeRevision = _legendRangeRevision;
         NormalizeInteractionState();
         RefreshSliceData();
         RebuildHighlights();
@@ -523,52 +552,132 @@ public partial class SimulationViewer : IDisposable
 
     private void RenderSimulationScene()
     {
-        if (_drawData == null)
-            return;
-
-        Raylib.BeginMode3D(_camera3D);
-        try
+        if (_drawData != null)
         {
-            SimulationRenderer.Draw(
-                _drawData,
-                _focusedChunk,
-                _highlights,
-                Get3DRenderStyleOptions());
-        }
-        finally
-        {
-            Raylib.EndMode3D();
+            Raylib.BeginMode3D(_camera3D);
+            try
+            {
+                SimulationRenderer.Draw(
+                    _drawData,
+                    _focusedChunk,
+                    _highlights,
+                    Get3DRenderStyleOptions());
+            }
+            finally
+            {
+                Raylib.EndMode3D();
+            }
         }
 
         if (_viewport != null)
             NavigationGizmo.Draw3D(_camera3D, _viewport.Width, _viewport.Height);
+
+        DrawViewportBranding(_viewport?.Width ?? 1, _viewport?.Height ?? 1);
     }
 
     private void RenderSimulationSliceScene()
     {
-        if (_sliceDrawData == null || _sliceViewport == null)
+        if (_sliceDrawData != null && _sliceViewport != null)
+        {
+            const float margin = 0.5f;
+            _camera2D.Offset = new Vector2(_sliceViewport.Width, _sliceViewport.Height) * 0.5f;
+            _camera2D.Target = new Vector2(_sliceDrawData.Width * 0.5f, _sliceDrawData.Height * 0.5f);
+            _camera2D.Rotation = 0f;
+            _camera2D.Zoom = Math.Max(
+                0.01f,
+                Math.Min(
+                    _sliceViewport.Width / (_sliceDrawData.Width + margin * 2f),
+                    _sliceViewport.Height / (_sliceDrawData.Height + margin * 2f)));
+
+            SliceRenderer.Draw(
+                _sliceDrawData,
+                _camera2D,
+                GetSliceRenderOptions(),
+                Get2DRenderStyleOptions());
+
+            NavigationGizmo.Draw2D(
+                _sliceDrawData.Axis,
+                _sliceViewport.Width,
+                _sliceViewport.Height);
+        }
+
+        DrawViewportBranding(_sliceViewport?.Width ?? 1, _sliceViewport?.Height ?? 1);
+    }
+
+    private void DrawViewportBranding(int viewportWidth, int viewportHeight)
+    {
+        if (!_showViewportBranding || _viewportBranding.Id == 0)
             return;
 
-        const float margin = 0.5f;
-        _camera2D.Offset = new Vector2(_sliceViewport.Width, _sliceViewport.Height) * 0.5f;
-        _camera2D.Target = new Vector2(_sliceDrawData.Width * 0.5f, _sliceDrawData.Height * 0.5f);
-        _camera2D.Rotation = 0f;
-        _camera2D.Zoom = Math.Max(
-            0.01f,
-            Math.Min(
-                _sliceViewport.Width / (_sliceDrawData.Width + margin * 2f),
-                _sliceViewport.Height / (_sliceDrawData.Height + margin * 2f)));
+        const string label = "Numos";
+        var coreSimVersionLabel = $"CoreSim v{CoreSimBuildInfo.PackageVersion}";
+        var viewerVersionLabel = $"Viewer v{ViewerBuildInfo.PackageVersion}";
 
-        SliceRenderer.Draw(
-            _sliceDrawData,
-            _camera2D,
-            GetSliceRenderOptions(),
-            Get2DRenderStyleOptions());
+        float smallerViewportDimension = Math.Max(1f, Math.Min(viewportWidth, viewportHeight));
+        int requestedLogoSize = Math.Max(
+            1,
+            (int)MathF.Round(smallerViewportDimension * _viewportBrandingSizePercent / 100f));
+        int logoSize = Math.Min(requestedLogoSize, Math.Max(1, Math.Min(viewportHeight, viewportWidth / 4)));
+        int textLineGap = Math.Max(1, (int)MathF.Round(logoSize * 0.08f));
+        int textHeight = Math.Max(3, logoSize - textLineGap * 2);
+        int titleTextSize = Math.Max(1, textHeight / 2);
+        int coreSimVersionTextSize = Math.Max(1, (textHeight - titleTextSize) / 2);
+        int viewerVersionTextSize = Math.Max(1, textHeight - titleTextSize - coreSimVersionTextSize);
+        int logoTextGap = Math.Max(1, (int)MathF.Round(logoSize * 0.23f));
+        int textColumnWidth = Math.Max(
+            Raylib.MeasureText(label, titleTextSize),
+            Math.Max(
+                Raylib.MeasureText(coreSimVersionLabel, coreSimVersionTextSize),
+                Raylib.MeasureText(viewerVersionLabel, viewerVersionTextSize)));
+        int totalWidth = logoSize + logoTextGap + textColumnWidth;
+        int offsetX = Math.Max(0, (int)MathF.Round(_viewportBrandingOffsetX));
+        int offsetY = Math.Max(0, (int)MathF.Round(_viewportBrandingOffsetY));
+        (int left, int top) = _viewportBrandingCorner switch
+        {
+            ViewportBrandingCorner.TopLeft => (offsetX, offsetY),
+            ViewportBrandingCorner.TopRight => (viewportWidth - offsetX - totalWidth, offsetY),
+            ViewportBrandingCorner.BottomLeft => (offsetX, viewportHeight - offsetY - logoSize),
+            ViewportBrandingCorner.BottomRight =>
+                (viewportWidth - offsetX - totalWidth, viewportHeight - offsetY - logoSize),
+            _ => (offsetX, offsetY)
+        };
+        left = Math.Clamp(left, 0, Math.Max(0, viewportWidth - totalWidth));
+        top = Math.Clamp(top, 0, Math.Max(0, viewportHeight - logoSize));
+        var tint = new Color(1f, 1f, 1f, _viewportBrandingOpacityPercent / 100f);
 
-        NavigationGizmo.Draw2D(
-            _sliceDrawData.Axis,
-            _sliceViewport.Width,
-            _sliceViewport.Height);
+        Raylib.DrawTexturePro(
+            _viewportBranding,
+            new Rectangle(0, 0, _viewportBranding.Width, _viewportBranding.Height),
+            new Rectangle(left, top, logoSize, logoSize),
+            Vector2.Zero,
+            0f,
+            tint);
+        int textLeft = left + logoSize + logoTextGap;
+        Raylib.DrawText(label, textLeft, top, titleTextSize, tint);
+        Raylib.DrawText(
+            coreSimVersionLabel,
+            textLeft,
+            top + titleTextSize + textLineGap,
+            coreSimVersionTextSize,
+            tint);
+        Raylib.DrawText(
+            viewerVersionLabel,
+            textLeft,
+            top + titleTextSize + textLineGap + coreSimVersionTextSize + textLineGap,
+            viewerVersionTextSize,
+            tint);
+    }
+
+    private static string GetViewportBrandingCornerLabel(ViewportBrandingCorner corner)
+    {
+        return corner switch
+        {
+            ViewportBrandingCorner.TopLeft => "Top left",
+            ViewportBrandingCorner.TopRight => "Top right",
+            ViewportBrandingCorner.BottomLeft => "Bottom left",
+            ViewportBrandingCorner.BottomRight => "Bottom right",
+            _ => throw new ArgumentOutOfRangeException(nameof(corner), corner, null)
+        };
     }
 
     private void UpdateSlicePicking()
