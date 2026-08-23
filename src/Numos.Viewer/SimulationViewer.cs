@@ -17,8 +17,6 @@ namespace Numos.Viewer;
 /// </summary>
 public partial class SimulationViewer : IDisposable
 {
-    private const string ViewerVersion = "0.1.0-alpha-alpha-alpha";
-
     private enum ViewportBrandingCorner
     {
         TopLeft,
@@ -612,7 +610,7 @@ public partial class SimulationViewer : IDisposable
             return;
 
         const string label = "Numos";
-        const string versionLabel = $"v{ViewerVersion}";
+        var versionLabel = $"CoreSim v{CoreSimBuildInfo.PackageVersion}, Viewer v{ViewerBuildInfo.PackageVersion}";
 
         float smallerViewportDimension = Math.Max(1f, Math.Min(viewportWidth, viewportHeight));
         int requestedLogoSize = Math.Max(

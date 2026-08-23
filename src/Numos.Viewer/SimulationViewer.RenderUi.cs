@@ -7,6 +7,7 @@ using Numos.CoreSim.Datatypes.Snapshots;
 using Numos.Maths;
 using Numos.SimDrawer;
 using Numos.Viewer.Ui;
+using Raylib_cs;
 
 namespace Numos.Viewer;
 
@@ -123,7 +124,8 @@ public partial class SimulationViewer
         ImGui.Begin("Empty workspace##empty-workspace", windowFlags);
 
         ImGuiExtensions.TextCentered("Numos Simulation Viewer");
-        ImGuiExtensions.TextCentered($"v{ViewerVersion}", ImGui.TextDisabled);
+        ImGuiExtensions.TextCentered($"CoreSim v{CoreSimBuildInfo.PackageVersion}, Viewer v{ViewerBuildInfo.PackageVersion}",
+            ImGui.TextDisabled);
 
         ImGui.Spacing();
         ImGui.Separator();
@@ -148,7 +150,7 @@ public partial class SimulationViewer
 
         ImGuiExtensions.OpenPopupWhenRequested(popupId, ref _requestOpenAboutModal);
 
-        ImGui.SetNextWindowSize(new Vector2(420, 0), ImGuiCond.Appearing);
+        ImGui.SetNextWindowSize(new Vector2(560, 0), ImGuiCond.Appearing);
 
         using var modal = ImGuiExtensions.BeginPopupModal(popupId, ref _aboutModalOpen);
         if (!modal.IsVisible)
@@ -173,7 +175,7 @@ public partial class SimulationViewer
 
     private void DrawAboutTabs()
     {
-        var tabAreaSize = new Vector2(480, 280);
+        var tabAreaSize = new Vector2(520, 390);
 
         if (ImGui.BeginTabBar("AboutTabs", ImGuiTabBarFlags.None))
         {
@@ -213,7 +215,83 @@ public partial class SimulationViewer
             new Vector4(0.2f, 0.6f, 1.0f, 1.0f),
             "License: MIT");
 
+        ImGui.Spacing();
+        ImGui.SeparatorText("Build provenance");
+        DrawBuildProvenance(
+            "Viewer",
+            ViewerBuildInfo.PackageVersion,
+            ViewerBuildInfo.GitBranch ?? ViewerBuildInfo.SourceReference,
+            ViewerBuildInfo.GitCommit,
+            ViewerBuildInfo.GitCommitShort,
+            ViewerBuildInfo.BuildConfiguration,
+            ViewerBuildInfo.TargetFramework,
+            ViewerBuildInfo.SdkVersion,
+            ViewerBuildInfo.RepositoryUrl,
+            ViewerBuildInfo.CommitUrl);
+        ImGui.Spacing();
+        DrawBuildProvenance(
+            "CoreSim",
+            CoreSimBuildInfo.PackageVersion,
+            CoreSimBuildInfo.GitBranch ?? CoreSimBuildInfo.SourceReference,
+            CoreSimBuildInfo.GitCommit,
+            CoreSimBuildInfo.GitCommitShort,
+            CoreSimBuildInfo.BuildConfiguration,
+            CoreSimBuildInfo.TargetFramework,
+            CoreSimBuildInfo.SdkVersion,
+            CoreSimBuildInfo.RepositoryUrl,
+            CoreSimBuildInfo.CommitUrl);
+
         ImGui.EndChild();
+    }
+
+    private static void DrawBuildProvenance(
+        string component,
+        string version,
+        string sourceReference,
+        string commit,
+        string shortCommit,
+        string configuration,
+        string targetFramework,
+        string sdkVersion,
+        string repositoryUrl,
+        string? commitUrl)
+    {
+        ImGui.TextUnformatted($"{component} {version}");
+        ImGui.TextDisabled($"Source: {sourceReference}");
+        ImGui.TextDisabled($"Commit: {shortCommit}");
+        ImGui.TextDisabled($"Build: {configuration} / {targetFramework} / SDK {sdkVersion}");
+
+        bool hasRepository = IsKnownBuildValue(repositoryUrl);
+        if (!hasRepository)
+            ImGui.BeginDisabled();
+        if (ImGui.SmallButton($"Repository##{component}"))
+            Raylib.OpenURL(repositoryUrl);
+        if (!hasRepository)
+            ImGui.EndDisabled();
+
+        ImGui.SameLine();
+        bool hasCommitUrl = commitUrl != null;
+        if (!hasCommitUrl)
+            ImGui.BeginDisabled();
+        if (ImGui.SmallButton($"Commit##{component}") && commitUrl != null)
+            Raylib.OpenURL(commitUrl);
+        if (!hasCommitUrl)
+            ImGui.EndDisabled();
+
+        ImGui.SameLine();
+        bool hasCommit = IsKnownBuildValue(commit);
+        if (!hasCommit)
+            ImGui.BeginDisabled();
+        if (ImGui.SmallButton($"Copy hash##{component}"))
+            Raylib.SetClipboardText(commit);
+        if (!hasCommit)
+            ImGui.EndDisabled();
+    }
+
+    private static bool IsKnownBuildValue(string value)
+    {
+        return !string.IsNullOrWhiteSpace(value) &&
+               !string.Equals(value, "unknown", StringComparison.Ordinal);
     }
 
     private void DrawAuthorsTab(Vector2 size)
@@ -238,7 +316,7 @@ public partial class SimulationViewer
         ImGui.BeginGroup();
 
         ImGui.Text("Numos Simulation Viewer");
-        ImGui.TextDisabled($"Version {ViewerVersion}");
+        ImGui.TextDisabled($"Version {ViewerBuildInfo.PackageVersion}");
 
         ImGui.EndGroup();
     }

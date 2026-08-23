@@ -2,6 +2,7 @@ bin/
 obj/
 artifacts/
 /packages/
+__pycache__/
 riderModule.iml
 /_ReSharper.Caches/
 
