@@ -3,9 +3,7 @@ Numos is an engine-agnostic, pseudo-realistic, voxel-based atmospherics simulati
 
 The library is intended to replace the aging and techdebt-ridden `AtmosphereSystem` (`AS`) or `SSAir` `EntitySystem` in the disaster simulation and roleplaying game Space Station 14. However, Numos is still designed architecturally to be decoupled from any specific game engine, and can be easily ported to any other C# game engine.
 
-Since Numos was mostly designed to be `AtmosphereSystem`'s replacement, a lot of documentation, both code and formal docs, will reference SS14 systems as talking points. In formal docs, these will try to be explained as much as possible.
-
-Since Numos was designed to be SS14's `AtmosphereSystem` replacement, a lot of architecture decisions were explicitly made to combat the pains seen while working in `AtmosphereSystem`.
+Since Numos was mostly designed to be `AtmosphereSystem`'s replacement, a lot of documentation, both code and formal docs, will reference SS14 systems as talking points. In a similar vein, a lot of architecture decisions were explicitly made to combat the pains seen while working in `AtmosphereSystem`.
 
 ## Core Design
 `Numos.CoreSim` is designed to be as configurable and extensible as (reasonably) possible while still exposing a stable API surface to protect its internal datastructures and inner workings from unsafe mutation and illegal physics operations. This was a lesson largely learned from SS14, where: 
