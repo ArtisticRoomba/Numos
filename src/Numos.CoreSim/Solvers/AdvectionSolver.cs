@@ -169,7 +169,7 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
             // as voxel area and width is not easily exposed here just simplified to assume cubic voxels.
             float diffusionConstant = referenceDiffusivity * MathF.Pow(temperatureRatio, 1.5f) * pressureRatio * dx;
 
-            float molesDiffused = diffusionConstant * sourceMoles;
+            float molesDiffused = diffusionConstant * sourceMoles * AtmosSolverConstants.FixedTimeStep;
 
             // This is a bad way to do this. 
             // The way thermal diffusion does it is much better.
