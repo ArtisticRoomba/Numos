@@ -1,5 +1,8 @@
 # Using Numos
-Numos is split into small packages so an integration can reference only the parts it actually needs. For almost every game or engine integration, `Numos.API` is the package to start with. It is the supported facade around the simulator and is deliberately shaped around handles, validated operations, and detached snapshots instead of direct access to the kernel's mutable data.
+Numos is intentionally designed to be engine-agnostic and self-contained.
+As such, creating and performing operations on the simulation is relatively simple.
+
+For almost every game or engine integration, `Numos.API` is the package to start with. It is the supported facade around the simulator and is deliberately shaped around handles, validated operations, and detached snapshots instead of direct access to the kernel's mutable data. Interacting with the sim is done entirely through this API surface.
 
 > [!WARNING]
 > The packages are still prerelease while Numos is a prototype. Include prerelease versions when installing them, and expect the `0.x` API surface to continue moving as the simulation matures.
@@ -10,13 +13,14 @@ Numos has two independently versioned package families:
 - The CoreSim family contains `Numos.Maths`, `Numos.CoreSim`, `Numos.API`, and `Numos.API.Dangerous`.
 - The Viewer family contains `Numos.SimDrawer` and `Numos.Viewer`.
 
-Most consumers should add only `Numos.API`. NuGet restores its required CoreSim and maths packages transitively.
+Consumers should generally add only `Numos.API` and go from there. NuGet restores its required CoreSim and maths packages transitively.
 
 ```shell
 dotnet add package Numos.API --prerelease
 ```
 
-`Numos.CoreSim` is useful when an integration genuinely needs core simulation types such as `AtmosConfig`, but it is not the normal entry point. `Numos.Maths` is generally restored as a dependency, though an engine adapter may choose to reference it explicitly for `Int3`.
+`Numos.Maths` is generally restored as a dependency, though an engine adapter may want to reference it explicitly for Numos' `Int3`,
+which is used in the API.
 
 ## Creating a Simulation
 An `AtmosSimulation` owns the chunks registered with it and the buffers used by its solver. Dispose it when the game world or simulation session ends. The constructor takes fixed chunk dimensions; every chunk in one simulation has those dimensions.
@@ -35,7 +39,7 @@ AtmosChunkHandle chunk = simulation.CreateAndRegisterChunk(new Int3(0, 0, 0));
 
 The `Int3` passed to `CreateAndRegisterChunk` is a position in the chunk grid, not a voxel position. A chunk handle identifies that position inside its owning simulation. It does not expose the chunk's internal arrays, and it should not be treated as valid for another simulation just because it has the same position (doing so is effectively undefined behavior).
 
-Register chunks when world regions become relevant and call `UnregisterChunk` when they are no longer needed. Trying to register two chunks at the same position is an error, which is intentional: it keeps a streaming integration from quietly replacing live atmospheric state.
+Register chunks when world regions become relevant and call `UnregisterChunk` when they are no longer needed and should be disposed.
 
 ## Driving the Solver
 Numos uses a fixed simulation rate. In a normal engine loop, give the facade the elapsed real time and let it retain partial steps and process complete ticks.
@@ -65,9 +69,7 @@ simulation.AddGasToVoxel(
     temperature: 293.15f);
 ```
 
-Gas identifiers are application-defined integers. Numos supports adding gas channels at runtime, and an unregistered gas uses the fallback thermodynamic values from `AtmosConfig`. An integration that needs distinct heat capacities or phase-change behavior should populate and retain an `AtmosConfig` with the appropriate `GasProperties` before it starts ticking.
-
-Injection validates chunk ownership, coordinates, physical inputs, and the target voxel classification. Adding gas to a solid or void voxel is intentionally ignored. This is one of the reasons an engine should use `Numos.API` for normal gameplay code instead of reaching into the kernel.
+Numos supports adding gases at runtime through a simple API call. Gases have various properties that affect their behavior when simulated (ex. advection, thermodynamics), as such integrators should be aware of and fill out their configuration options in `GasProperties`. An integration that needs distinct heat capacities or phase-change behavior should populate and retain an `AtmosConfig` with the appropriate `GasProperties` before it starts ticking.
 
 ## Reading Simulation State
 The facade returns detached snapshots for presentation, networking, and gameplay decisions. A snapshot is safe to retain after the call, but it is not live: request another snapshot when a consumer needs newer state.
@@ -97,4 +99,4 @@ dotnet add package Numos.API.Dangerous --prerelease
 
 Importing `Numos.API.Dangerous` adds the `simulation.Dangerous()` extension. This package exists for measured, performance-sensitive, or experimental integration work where the supported facade is insufficient. It is not a way to skip learning the supported lifecycle, topology, or physics rules.
 
-The dangerous surface may bypass validation and is allowed to change more aggressively than the supported API. Keep its use behind a small adapter in an engine integration, document every assumption it relies on, and prefer a regular safe API op whenever one is available.
+The dangerous surface may bypass validation and is allowed to change more aggressively than the supported API. Keep its use behind a small adapter in an engine integration, document every assumption it relies on, and prefer a regular safe API over the dangerous one whenever possible.
