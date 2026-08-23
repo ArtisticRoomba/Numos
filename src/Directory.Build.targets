@@ -1,7 +1,27 @@
 <Project>
+    <Target Name="ResolveNumosReleaseProvenance"
+            Condition="'$(NumosReleaseTagPrefix)' != '' and '$(NumosSourceRevisionId)' == ''">
+        <PropertyGroup>
+            <_NumosReleaseTag>$(NumosReleaseTagPrefix)/v$(PackageVersion)</_NumosReleaseTag>
+            <_NumosReleaseTagCommitFile>$(MSBuildProjectDirectory)/$(IntermediateOutputPath)Numos.ReleaseTagCommit.txt</_NumosReleaseTagCommitFile>
+        </PropertyGroup>
+        <MakeDir Directories="$(IntermediateOutputPath)"/>
+        <Exec Command="git rev-parse --verify --quiet &quot;refs/tags/$(_NumosReleaseTag)^{}&quot; &gt; &quot;$(_NumosReleaseTagCommitFile)&quot;"
+              WorkingDirectory="$(MSBuildThisFileDirectory)"
+              IgnoreExitCode="true"/>
+        <ReadLinesFromFile File="$(_NumosReleaseTagCommitFile)"
+                           Condition="Exists('$(_NumosReleaseTagCommitFile)')">
+            <Output TaskParameter="Lines" ItemName="_NumosReleaseTagCommitOutput"/>
+        </ReadLinesFromFile>
+        <PropertyGroup Condition="'@(_NumosReleaseTagCommitOutput)' != ''">
+            <NumosSourceRevisionId>@(_NumosReleaseTagCommitOutput)</NumosSourceRevisionId>
+            <NumosSourceReference>refs/tags/$(_NumosReleaseTag)</NumosSourceReference>
+        </PropertyGroup>
+    </Target>
+
     <Target Name="PopulateNumosRepositoryMetadata"
             BeforeTargets="GenerateNuspec;GetAssemblyAttributes"
-            DependsOnTargets="InitializeSourceControlInformation">
+            DependsOnTargets="InitializeSourceControlInformation;ResolveNumosReleaseProvenance">
         <PropertyGroup>
             <_NumosSourceRevision>$(SourceRevisionId)</_NumosSourceRevision>
             <_NumosSourceRevision Condition="'$(NumosSourceRevisionId)' != ''">$(NumosSourceRevisionId)</_NumosSourceRevision>
