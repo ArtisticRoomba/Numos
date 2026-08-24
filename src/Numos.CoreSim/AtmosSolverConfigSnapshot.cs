@@ -92,7 +92,7 @@ internal sealed class AtmosSolverConfigSnapshot
     internal float CondensationRateFactor { get; private set; }
     internal float MaxPressureTransferFractionPerNeighbor { get; private set; }
 
-    internal float GetEffectiveTemperature(float storedTemperature)
+    internal float GetValidatedTemp(float storedTemperature)
     {
         return IsFinitePositive(storedTemperature) ? storedTemperature : DefaultTemperatureFallback;
     }
