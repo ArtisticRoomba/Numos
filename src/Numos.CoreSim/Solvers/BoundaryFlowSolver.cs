@@ -84,10 +84,10 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
         float totalMoles, float bulkPressureTransfer)
     {
         AtmosSolverConfigSnapshot config = context.TickConfig;
-        float sourceTemperature = config.GetEffectiveTemperature(sourceChunk.Temperature[sourceIndex]);
+        float sourceTemperature = config.GetValidatedTemp(sourceChunk.Temperature[sourceIndex]);
         float neighborTemperature = isVoid
             ? 0f
-            : config.GetEffectiveTemperature(neighborChunk.Temperature[neighborIndex]);
+            : config.GetValidatedTemp(neighborChunk.Temperature[neighborIndex]);
         float advectedMoles = AtmosSolverMath.PressureToMoles(
             config, bulkPressureTransfer, sourceTemperature);
         var movedGas = false;

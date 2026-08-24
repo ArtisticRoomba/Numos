@@ -176,7 +176,7 @@ internal sealed class ThermalDiffusionSolver
             return false;
         }
 
-        temperature = config.GetEffectiveTemperature(chunk.Temperature[voxelIndex]);
+        temperature = config.GetValidatedTemp(chunk.Temperature[voxelIndex]);
         return true;
     }
 

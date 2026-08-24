@@ -31,7 +31,7 @@ internal sealed class PhaseChangeSolver
             if (gasMoles <= AtmosSolverConstants.MinimumMolesForCondensation)
                 continue;
 
-            float temperature = config.GetEffectiveTemperature(chunk.Temperature[voxelIndex]);
+            float temperature = config.GetValidatedTemp(chunk.Temperature[voxelIndex]);
             float saturationPressure = CalculateSaturationPressure(
                 config, properties, temperature, inverseBoilingPoint);
             float saturationMoles = AtmosSolverMath.PressureToMoles(
@@ -76,6 +76,7 @@ internal sealed class PhaseChangeSolver
             chunk.Temperature[voxelIndex] = MathF.Max(0f,
                 temperature + condensedMoles / newHeatCapacity * molarInternalEnergyOfVaporization);
         }
+
         chunk.TotalPressure[voxelIndex] =
             AtmosSolverMath.CalculatePressureAtVoxel(config, chunk, voxelIndex);
     }

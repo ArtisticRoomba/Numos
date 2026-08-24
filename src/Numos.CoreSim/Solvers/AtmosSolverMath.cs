@@ -49,7 +49,7 @@ internal static class AtmosSolverMath
     internal static float CalculatePressure(AtmosSolverConfigSnapshot config, float moles, float temperature)
     {
         Debug.Assert(float.IsFinite(moles) && moles >= 0f);
-        return moles * config.GetEffectiveTemperature(temperature) * config.PressurePerMoleKelvin;
+        return moles * config.GetValidatedTemp(temperature) * config.PressurePerMoleKelvin;
     }
 
     internal static float PressureToMoles(AtmosSolverConfigSnapshot config, float pressure, float temperature)
@@ -57,7 +57,7 @@ internal static class AtmosSolverMath
         if (pressure <= 0f || float.IsNaN(pressure))
             return 0f;
 
-        float denominator = config.PressurePerMoleKelvin * config.GetEffectiveTemperature(temperature);
+        float denominator = config.PressurePerMoleKelvin * config.GetValidatedTemp(temperature);
         return pressure / denominator;
     }
 

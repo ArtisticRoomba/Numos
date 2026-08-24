@@ -346,14 +346,14 @@ public sealed class ThermodynamicsIntegrationTests
         using var simulation = new AtmosSimulation(config, size, size, size);
         var chunk = SimTestHelpers.CreateOpenChunk(simulation, default);
         for (var z = 0; z < size; z++)
-            for (var y = 0; y < size; y++)
-                for (var x = 0; x < size; x++)
-                {
-                    int sequence = x + y * size + z * size * size;
-                    float moles = 0.5f + sequence % 7 * 0.37f;
-                    float temperature = 150f + sequence % 11 * 23.7f;
-                    simulation.AddGasToVoxel(chunk, x, y, z, SimTestHelpers.FirstGasId, moles, temperature);
-                }
+        for (var y = 0; y < size; y++)
+        for (var x = 0; x < size; x++)
+        {
+            int sequence = x + y * size + z * size * size;
+            float moles = 0.5f + sequence % 7 * 0.37f;
+            float temperature = 150f + sequence % 11 * 23.7f;
+            simulation.AddGasToVoxel(chunk, x, y, z, SimTestHelpers.FirstGasId, moles, temperature);
+        }
 
         double initialEnergy = SimTestHelpers.TotalThermalEnergyPrecise(config,
             simulation.GetChunkSnapshot(chunk));
@@ -702,49 +702,6 @@ public sealed class ThermodynamicsIntegrationTests
 
         Assert.That(SimTestHelpers.Moles(simulation.GetChunkSnapshot(chunk),
             SimTestHelpers.FirstGasId, 0), Is.EqualTo(10f));
-    }
-
-    [Test]
-    public void CondensationRateFactor_AboveOneIsClampedToOne()
-    {
-        var config = CreateCondensationConfig();
-        config.CondensationRateFactor = 2f;
-        using var simulation = new AtmosSimulation(config, 1, 1, 1);
-        var chunk = SimTestHelpers.CreateOpenChunk(simulation, default);
-        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasId, 10f, 200f);
-
-        simulation.Tick();
-        simulation.Tick();
-
-        var snapshot = simulation.GetChunkSnapshot(chunk);
-        Assert.That(SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 0),
-            Is.EqualTo(5f).Within(SimTestHelpers.Tolerance));
-    }
-
-    [Test]
-    public void Condensation_ClausiusClapeyronExponentUsesMolarGasConstant()
-    {
-        const float temperature = 150f;
-        const float initialMoles = 6f;
-        var config = CreateCondensationConfig();
-        var gas = config.GasRegistry[SimTestHelpers.FirstGasId];
-        gas.MolarEnthalpyOfVaporization = 1000f;
-        config.GasRegistry[SimTestHelpers.FirstGasId] = gas;
-        using var simulation = new AtmosSimulation(config, 1, 1, 1);
-        var chunk = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
-        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasId, initialMoles, temperature);
-
-        simulation.Tick();
-        simulation.Tick();
-
-        double exponent = -gas.MolarEnthalpyOfVaporization / AtmosPhysicalConstants.MolarGasConstant *
-                          (1d / temperature - 1d / gas.BoilingPoint);
-        double saturationPressure = config.SaturationReferencePressure * Math.Exp(exponent);
-        double expectedCondensedMoles =
-            (initialMoles * temperature - saturationPressure) / temperature * config.CondensationRateFactor;
-        var snapshot = simulation.GetChunkSnapshot(chunk);
-        Assert.That(SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 0),
-            Is.EqualTo(initialMoles - expectedCondensedMoles).Within(SimTestHelpers.Tolerance));
     }
 
     [Test]

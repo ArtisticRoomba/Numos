@@ -43,7 +43,7 @@ internal static class GasInjectionSolver
 
         InjectCore(chunk, localVoxelIndex, gasId, moles, temperature,
             config.GetMolarHeatCapacityAtConstantVolume(gasId), currentHeatCapacity,
-            config.GetEffectiveTemperature(chunk.Temperature[localVoxelIndex]), config.PressurePerMoleKelvin);
+            config.GetValidatedTemp(chunk.Temperature[localVoxelIndex]), config.PressurePerMoleKelvin);
     }
 
     private static void InjectCore(AtmosChunk chunk, ushort localVoxelIndex, int gasId, float moles,
@@ -57,5 +57,4 @@ internal static class GasInjectionSolver
         chunk.InjectGasToVoxel(localVoxelIndex, gasId, moles, temperature, molarHeatCapacity,
             pressurePerMoleKelvin);
     }
-
 }

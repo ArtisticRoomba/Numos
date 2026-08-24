@@ -15,8 +15,7 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
 
     internal AdvectionSolver(int maximumBoundaryEvents)
     {
-        _boundaryBuffers = new ThreadLocal<BoundaryFlowEvent[]>(
-            () => new BoundaryFlowEvent[maximumBoundaryEvents]);
+        _boundaryBuffers = new ThreadLocal<BoundaryFlowEvent[]>(() => new BoundaryFlowEvent[maximumBoundaryEvents]);
     }
 
     public void Solve(AtmosSolverExecutionContext context)
@@ -145,11 +144,11 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
         float bulkPressureTransfer = pressureDelta > 0f
             ? AtmosSolverMath.CalculateBulkPressureTransfer(config, pressureDelta, currentPressure)
             : 0f;
-        float sourceTemperature = config.GetEffectiveTemperature(chunk.Temperature[voxelIndex]);
+        float sourceTemperature = config.GetValidatedTemp(chunk.Temperature[voxelIndex]);
         float advectedMoles = AtmosSolverMath.PressureToMoles(config, bulkPressureTransfer, sourceTemperature);
         float neighborTemperature = isVoid
             ? 0f
-            : config.GetEffectiveTemperature(chunk.Temperature[neighborIndex]);
+            : config.GetValidatedTemp(chunk.Temperature[neighborIndex]);
         for (var gas = 0; gas < chunk.ActiveGasCount; gas++)
         {
             int gasId = chunk.ActiveGases[gas].GasId;
@@ -215,7 +214,7 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
         for (var activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
         {
             ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
-            double oldEnergy = (double)config.GetEffectiveTemperature(chunk.Temperature[voxelIndex]) *
+            double oldEnergy = (double)config.GetValidatedTemp(chunk.Temperature[voxelIndex]) *
                                chunk.TotalHeatCapacity[voxelIndex];
             bool stateChanged = energyDeltas[voxelIndex] != 0d;
             chunk.TotalHeatCapacity[voxelIndex] = 0f;
@@ -231,7 +230,7 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
                     moles = 0f;
                 chunk.ActiveGases[gas].Moles[voxelIndex] = moles;
                 chunk.TotalHeatCapacity[voxelIndex] += moles *
-                    config.GetMolarHeatCapacityAtConstantVolume(chunk.ActiveGases[gas].GasId);
+                                                       config.GetMolarHeatCapacityAtConstantVolume(chunk.ActiveGases[gas].GasId);
                 totalMoles += moles;
             }
 
@@ -289,5 +288,4 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
         if (chunk.SleepTimer > config.SleepThreshold)
             chunk.Sleep();
     }
-
 }

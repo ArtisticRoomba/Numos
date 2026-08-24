@@ -167,7 +167,7 @@ internal sealed class ThermalBoundarySolver : IAtmosSolverStage
             return false;
 
         state = new ThermalBoundaryState(chunk,
-            context.TickConfig.GetEffectiveTemperature(chunk.Temperature[voxelIndex]), heatCapacity);
+            context.TickConfig.GetValidatedTemp(chunk.Temperature[voxelIndex]), heatCapacity);
         _states.Add(address, state);
         return true;
     }
@@ -191,8 +191,13 @@ internal sealed class ThermalBoundarySolver : IAtmosSolverStage
     }
 
     private readonly record struct ThermalVoxelAddress(Int3 ChunkPosition, ushort LocalVoxelIndex);
+
     private readonly record struct ThermalBoundaryEdge(ThermalVoxelAddress First, ThermalVoxelAddress Second);
+
     private readonly record struct ThermalBoundaryConductance(ThermalBoundaryEdge Edge, float Conductance);
+
     private readonly record struct ThermalBoundaryState(
-        AtmosChunk Chunk, float Temperature, float HeatCapacity);
+        AtmosChunk Chunk,
+        float Temperature,
+        float HeatCapacity);
 }
