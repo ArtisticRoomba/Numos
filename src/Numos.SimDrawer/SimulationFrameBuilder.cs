@@ -12,6 +12,11 @@ public sealed class SimulationFrameBuilder
 {
     private long _nextFrameVersion;
 
+    /// <summary>
+    ///     Creates a presentation-frame builder.
+    /// </summary>
+    /// <param name="config">Simulation configuration used by default visualizations.</param>
+    /// <param name="visualizations">Optional visualization registry.</param>
     public SimulationFrameBuilder(AtmosConfig config, VisualizationRegistry? visualizations = null)
     {
         ArgumentNullException.ThrowIfNull(config);
@@ -23,6 +28,9 @@ public sealed class SimulationFrameBuilder
         }
     }
 
+    /// <summary>
+    ///     Gets the registered visualization methods.
+    /// </summary>
     public VisualizationRegistry Visualizations { get; }
 
     /// <summary>
@@ -239,6 +247,12 @@ public sealed class SimulationFrameBuilder
             hash.Value);
     }
 
+    /// <summary>
+    ///     Gets the dimension length along a slice axis.
+    /// </summary>
+    /// <param name="dimensions">Chunk dimensions.</param>
+    /// <param name="axis">Slice axis.</param>
+    /// <returns>The selected axis length.</returns>
     public static int GetSliceAxisLength(Int3 dimensions, SliceAxis axis)
     {
         return axis switch
