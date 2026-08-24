@@ -1407,7 +1407,7 @@ internal sealed partial class AtmosKernel : IDisposable
     /// <summary>
     ///     Orders boundary events deterministically by source chunk and local voxel index.
     /// </summary>
-    private static int CompareBoundaryEvents(
+    private static int CompareBoundaryEvents( // TODO move these comparisons to BFE class or like other things smile
         (Int3 Key, BoundaryFlowEvent Evt) left,
         (Int3 Key, BoundaryFlowEvent Evt) right)
     {
