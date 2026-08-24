@@ -149,9 +149,9 @@ public sealed class TopologyAndSymmetryTests
     [TestCase(float.NegativeInfinity)]
     [TestCase(0f)]
     [TestCase(-0.05f)]
-    public void ThermalDiffusion_NonFiniteOrNonPositiveConductivityIsNoOp(float thermalConductivity)
+    public void ThermalDiffusion_NonFiniteOrNonPositiveConductanceIsNoOp(float thermalConductance)
     {
-        var config = CreateThermalOnlyConfig(thermalConductivity);
+        var config = CreateThermalOnlyConfig(thermalConductance);
         using var simulation = new AtmosSimulation(config, 2, 1, 1);
         var chunk = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
         simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasId, 1f, 400f);
@@ -182,14 +182,14 @@ public sealed class TopologyAndSymmetryTests
         return simulation.GetChunkSnapshot(chunk).Temperature;
     }
 
-    private static AtmosConfig CreateThermalOnlyConfig(float thermalConductivity)
+    private static AtmosConfig CreateThermalOnlyConfig(float thermalConductance)
     {
         var config = SimTestHelpers.CreateDeterministicConfig();
-        config.FlowFriction = 0f;
-        config.CflFlowCap = 0f;
-        config.ThermalConductivity = thermalConductivity;
+        config.BulkFlowCoefficient = 0f;
+        config.MaxPressureTransferFractionPerNeighbor = 0f;
+        config.ThermalConductance = thermalConductance;
         var gas = config.GasRegistry[SimTestHelpers.FirstGasId];
-        gas.SpecificHeatCapacity = 1f;
+        gas.MolarHeatCapacityAtConstantVolume = 1f;
         config.GasRegistry[SimTestHelpers.FirstGasId] = gas;
         return config;
     }

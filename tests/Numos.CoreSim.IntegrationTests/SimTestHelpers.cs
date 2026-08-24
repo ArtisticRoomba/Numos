@@ -12,22 +12,27 @@ internal static class SimTestHelpers
     internal const int RoomId = 1;
     internal const float DefaultTemperature = 300f;
     internal const float Tolerance = 0.0001f;
+    internal const float EnergyTolerance = 0.001f;
 
     internal static AtmosConfig CreateDeterministicConfig()
     {
         return new AtmosConfig
         {
             DefaultTemperatureFallback = DefaultTemperature,
-            FlowFriction = 0.25f,
-            DampingFactor = 0.5f,
-            SnapThreshold = 5f,
-            MinFlowCutoff = 0f,
+            DefaultMolarHeatCapacityAtConstantVolume = 1f,
+            // Preserve the historical reduced-pressure scale in solver tests while production defaults use SI.
+            VoxelVolume = AtmosPhysicalConstants.MolarGasConstant,
+            SaturationReferencePressure = 1000f,
+            BulkFlowCoefficient = 0.25f,
+            BulkFlowDamping = 0.5f,
+            LowPressureDeltaThreshold = 5f,
+            MinimumPressureTransfer = 0f,
             VacuumThreshold = 0f,
             SleepThreshold = int.MaxValue,
             SleepEpsilon = 0f,
-            ThermalConductivity = 0.05f,
+            ThermalConductance = 0.05f,
             CondensationRateFactor = 0.5f,
-            CflFlowCap = 0.16f,
+            MaxPressureTransferFractionPerNeighbor = 0.16f,
             GasRegistry =
             [
                 new GasProperties { Name = "First", DiffusionCoefficient = 0f },
@@ -48,9 +53,9 @@ internal static class SimTestHelpers
         int width, int height, int depth, float temperature = DefaultTemperature)
     {
         for (var z = 0; z < depth; z++)
-        for (var y = 0; y < height; y++)
-        for (var x = 0; x < width; x++)
-            simulation.SetVoxelTemperature(chunk, x, y, z, temperature);
+            for (var y = 0; y < height; y++)
+                for (var x = 0; x < width; x++)
+                    simulation.SetVoxelTemperature(chunk, x, y, z, temperature);
     }
 
     internal static int Index(int x, int y, int z, int width, int height)
@@ -82,34 +87,43 @@ internal static class SimTestHelpers
     internal static float TotalThermalEnergy(AtmosConfig config,
         params AtmosChunkSnapshot[] snapshots)
     {
-        var totalEnergy = 0f;
-        float fallbackSpecificHeatCapacity = float.IsFinite(config.DefaultSpecificHeatCapacity) &&
-                                             config.DefaultSpecificHeatCapacity > 0f
-            ? config.DefaultSpecificHeatCapacity
-            : 1f;
+        return (float)TotalThermalEnergyPrecise(config, snapshots);
+    }
+
+    internal static double TotalThermalEnergyPrecise(AtmosConfig config,
+        params AtmosChunkSnapshot[] snapshots)
+    {
+        double totalEnergy = 0d;
+        float fallbackMolarHeatCapacityAtConstantVolume =
+            float.IsFinite(config.DefaultMolarHeatCapacityAtConstantVolume) &&
+            config.DefaultMolarHeatCapacityAtConstantVolume > 0f
+                ? config.DefaultMolarHeatCapacityAtConstantVolume
+                : AtmosPhysicalConstants.IdealDiatomicMolarHeatCapacityAtConstantVolume;
+
         foreach (var snapshot in snapshots)
         {
             for (var index = 0; index < snapshot.Temperature.Length; index++)
             {
-                var heatCapacity = 0f;
+                double heatCapacity = 0d;
                 foreach (var gas in snapshot.Gases)
                 {
-                    float configuredSpecificHeatCapacity = gas.GasId >= 0 &&
-                                                           gas.GasId < config.GasRegistry.Count
-                        ? config.GasRegistry[gas.GasId].SpecificHeatCapacity
-                        : fallbackSpecificHeatCapacity;
-                    float specificHeatCapacity = float.IsFinite(configuredSpecificHeatCapacity) &&
-                                                 configuredSpecificHeatCapacity > 0f
-                        ? configuredSpecificHeatCapacity
-                        : fallbackSpecificHeatCapacity;
-                    heatCapacity += gas.Moles[index] * specificHeatCapacity;
+                    float configuredMolarHeatCapacityAtConstantVolume = gas.GasId >= 0 &&
+                                                                       gas.GasId < config.GasRegistry.Count
+                        ? config.GasRegistry[gas.GasId].MolarHeatCapacityAtConstantVolume
+                        : fallbackMolarHeatCapacityAtConstantVolume;
+                    float molarHeatCapacityAtConstantVolume =
+                        float.IsFinite(configuredMolarHeatCapacityAtConstantVolume) &&
+                        configuredMolarHeatCapacityAtConstantVolume > 0f
+                            ? configuredMolarHeatCapacityAtConstantVolume
+                            : fallbackMolarHeatCapacityAtConstantVolume;
+                    heatCapacity += (double)gas.Moles[index] * molarHeatCapacityAtConstantVolume;
                 }
 
                 float storedTemperature = snapshot.Temperature[index];
                 float effectiveTemperature = float.IsFinite(storedTemperature) && storedTemperature > 0f
                     ? storedTemperature
                     : config.DefaultTemperatureFallback;
-                totalEnergy += effectiveTemperature * heatCapacity;
+                totalEnergy += heatCapacity * effectiveTemperature;
             }
         }
 

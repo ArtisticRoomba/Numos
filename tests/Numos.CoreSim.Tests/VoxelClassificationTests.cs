@@ -66,14 +66,4 @@ public sealed class VoxelClassificationTests
         });
     }
 
-    [Test]
-    public void ReservedConstants_MatchInternalChunkClassifications()
-    {
-        Assert.Multiple(() =>
-        {
-            Assert.That(VoxelClassification.RoomUnassigned, Is.EqualTo(AtmosChunk.RoomUnassigned));
-            Assert.That(VoxelClassification.RoomSolid, Is.EqualTo(AtmosChunk.RoomSolid));
-            Assert.That(VoxelClassification.RoomVoid, Is.EqualTo(AtmosChunk.RoomVoid));
-        });
-    }
 }

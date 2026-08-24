@@ -1,3 +1,4 @@
+using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.Datatypes.Snapshots;
 using Numos.Maths;
 
@@ -43,8 +44,8 @@ public sealed class AtmosChunkSnapshotTests
             chunk.Initialize(new Int3(4, -5, 6), 2, 1, 1);
             chunk.VoxelRoomMap.Fill(7);
             chunk.WakeRoom(7);
-            chunk.InjectGasToVoxel(0, 3, 2f, 300f);
-            chunk.InjectGasToVoxel(1, 8, 1f, 400f);
+            chunk.InjectGasToVoxel(0, 3, 2f, 300f, 1f, 1f);
+            chunk.InjectGasToVoxel(1, 8, 1f, 400f, 1f, 1f);
 
             var snapshot = chunk.GetNetworkSnapshot();
 
@@ -62,7 +63,7 @@ public sealed class AtmosChunkSnapshotTests
 
             snapshot.TotalPressure[0] = -1f;
             snapshot.Temperature[0] = -1f;
-            snapshot.VoxelRoomMap[0] = AtmosChunk.RoomSolid;
+            snapshot.VoxelRoomMap[0] = VoxelClassification.RoomSolid;
             snapshot.Gases[0].Moles[0] = -1f;
             snapshot.Gases[0].GasId = 99;
             var freshSnapshot = chunk.GetNetworkSnapshot();

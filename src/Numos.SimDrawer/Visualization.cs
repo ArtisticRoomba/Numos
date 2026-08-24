@@ -5,24 +5,58 @@ using Numos.CoreSim.Datatypes.Snapshots;
 
 namespace Numos.SimDrawer;
 
+/// <summary>
+///     Describes how a visualization legend is presented.
+/// </summary>
 public enum VisualizationLegendKind
 {
+    /// <summary>
+    ///     Uses a continuous color gradient.
+    /// </summary>
     Gradient,
+    /// <summary>
+    ///     Uses discrete categories.
+    /// </summary>
     Categories
 }
 
+/// <summary>
+///     Defines one entry in a visualization legend.
+/// </summary>
+/// <param name="Label">Display label.</param>
+/// <param name="Color">Associated color.</param>
+/// <param name="Value">Optional represented value.</param>
 public readonly record struct VisualizationLegendEntry(
     string Label,
     ColorRgba Color,
     float? Value = null);
 
+/// <summary>
+///     Defines the numeric range used by a visualization.
+/// </summary>
+/// <param name="Minimum">Minimum mapped value.</param>
+/// <param name="Maximum">Maximum mapped value.</param>
+/// <param name="Resolution">Number of quantization steps.</param>
 public readonly record struct VisualizationRange(float Minimum, float Maximum, int Resolution = 32)
 {
+    /// <summary>
+    ///     Gets the default normalized range.
+    /// </summary>
     public static VisualizationRange Default => new(0f, 1f);
 }
 
+/// <summary>
+///     Describes the legend for a visualization.
+/// </summary>
 public sealed class VisualizationLegend
 {
+    /// <summary>
+    ///     Creates a visualization legend.
+    /// </summary>
+    /// <param name="title">Legend title.</param>
+    /// <param name="units">Units displayed by the legend.</param>
+    /// <param name="kind">Legend presentation kind.</param>
+    /// <param name="entries">Legend entries.</param>
     public VisualizationLegend(
         string title,
         string units,
@@ -35,31 +69,73 @@ public sealed class VisualizationLegend
         Entries = new ReadOnlyCollection<VisualizationLegendEntry>(entries.ToArray());
     }
 
+    /// <summary>
+    ///     Gets the legend title.
+    /// </summary>
     public string Title { get; }
 
+    /// <summary>
+    ///     Gets the displayed units.
+    /// </summary>
     public string Units { get; }
 
+    /// <summary>
+    ///     Gets the legend presentation kind.
+    /// </summary>
     public VisualizationLegendKind Kind { get; }
 
+    /// <summary>
+    ///     Gets the legend entries.
+    /// </summary>
     public IReadOnlyList<VisualizationLegendEntry> Entries { get; }
 
+    /// <summary>
+    ///     Gets the numeric range represented by the legend.
+    /// </summary>
     public VisualizationRange Range { get; internal set; } = VisualizationRange.Default;
 }
 
+/// <summary>
+///     Describes a selected visualization and its legend.
+/// </summary>
+/// <param name="Id">Stable visualization ID.</param>
+/// <param name="DisplayName">Display name.</param>
+/// <param name="Legend">Visualization legend.</param>
 public sealed record VisualizationDescriptor(
     string Id,
     string DisplayName,
     VisualizationLegend Legend)
 {
+    /// <summary>
+    ///     Gets the numeric range used by the visualization.
+    /// </summary>
     public VisualizationRange Range { get; init; } = VisualizationRange.Default;
 }
 
+/// <summary>
+///     Provides IDs for built-in visualization methods.
+/// </summary>
 public static class BuiltInVisualizationIds
 {
+    /// <summary>
+    ///     Gets the temperature visualization ID.
+    /// </summary>
     public const string Temperature = "temperature";
+    /// <summary>
+    ///     Gets the pressure visualization ID.
+    /// </summary>
     public const string Pressure = "pressure";
+    /// <summary>
+    ///     Gets the gas-composition visualization ID.
+    /// </summary>
     public const string GasComposition = "gas-composition";
+    /// <summary>
+    ///     Gets the active-air visualization ID.
+    /// </summary>
     public const string ActiveOnly = "active-only";
+    /// <summary>
+    ///     Gets the voxel-classification visualization ID.
+    /// </summary>
     public const string VoxelClassification = "voxel-classification";
 }
 
@@ -77,8 +153,16 @@ public readonly struct VoxelGasData
         _localIndex = localIndex;
     }
 
+    /// <summary>
+    ///     Gets the number of gas channels.
+    /// </summary>
     public int Count => _channels?.Length ?? 0;
 
+    /// <summary>
+    ///     Gets a gas ID by channel index.
+    /// </summary>
+    /// <param name="channel">Gas-channel index.</param>
+    /// <returns>The gas registry ID.</returns>
     public int GetGasId(int channel)
     {
         if (_channels == null || (uint)channel >= (uint)_channels.Length)
@@ -87,6 +171,11 @@ public readonly struct VoxelGasData
         return _channels[channel].GasId;
     }
 
+    /// <summary>
+    ///     Gets the sampled moles for a gas channel.
+    /// </summary>
+    /// <param name="channel">Gas-channel index.</param>
+    /// <returns>The sampled moles.</returns>
     public float GetMoles(int channel)
     {
         if (_channels == null || (uint)channel >= (uint)_channels.Length)
@@ -99,6 +188,13 @@ public readonly struct VoxelGasData
 /// <summary>
 ///     Backend-independent values passed to a visualization method for one voxel.
 /// </summary>
+/// <param name="Temperature">Temperature in kelvins (K).</param>
+/// <param name="Pressure">Pressure in pascals (Pa).</param>
+/// <param name="TotalMoles">Total gas amount in moles (mol).</param>
+/// <param name="LocalIndex">Local voxel index.</param>
+/// <param name="RoomId">Voxel room ID.</param>
+/// <param name="PrimaryGasId">Primary gas registry ID.</param>
+/// <param name="Gases">Gas-channel access data.</param>
 public readonly record struct VoxelSample(
     ushort LocalIndex,
     int RoomId,
@@ -108,22 +204,52 @@ public readonly record struct VoxelSample(
     int PrimaryGasId,
     VoxelGasData Gases)
 {
+    /// <summary>
+    ///     Gets the numeric range used for mapping this sample.
+    /// </summary>
     public VisualizationRange Range { get; init; } = VisualizationRange.Default;
 }
 
+/// <summary>
+///     Identifies source data required by a visualization.
+/// </summary>
 [Flags]
 public enum VisualizationDataRequirements
 {
+    /// <summary>
+    ///     Requires no additional source data.
+    /// </summary>
     None = 0,
+    /// <summary>
+    ///     Requires temperature data.
+    /// </summary>
     Temperature = 1 << 0,
+    /// <summary>
+    ///     Requires pressure data.
+    /// </summary>
     Pressure = 1 << 1,
+    /// <summary>
+    ///     Requires gas data.
+    /// </summary>
     Gases = 1 << 2,
+    /// <summary>
+    ///     Requires every supported source field.
+    /// </summary>
     All = Temperature | Pressure | Gases
 }
 
+/// <summary>
+///     Defines the voxel domain considered by a visualization.
+/// </summary>
 public enum VisualizationCellDomain
 {
+    /// <summary>
+    ///     Includes air cells only.
+    /// </summary>
     AirCells,
+    /// <summary>
+    ///     Includes every cell.
+    /// </summary>
     AllCells
 }
 
@@ -132,8 +258,14 @@ public enum VisualizationCellDomain
 /// </summary>
 public interface IVisualizationMethod
 {
+    /// <summary>
+    ///     Gets the stable visualization ID.
+    /// </summary>
     string Id { get; }
 
+    /// <summary>
+    ///     Gets the display name.
+    /// </summary>
     string DisplayName { get; }
 
     /// <summary>
@@ -153,10 +285,27 @@ public interface IVisualizationMethod
     /// </summary>
     VisualizationCellDomain CellDomain => VisualizationCellDomain.AirCells;
 
+    /// <summary>
+    ///     Attempts to map a voxel sample to a display color.
+    /// </summary>
+    /// <param name="sample">Source voxel sample.</param>
+    /// <param name="color">Mapped color.</param>
+    /// <returns>Whether the voxel should be visible.</returns>
     bool TryGetColor(in VoxelSample sample, out ColorRgba color);
 
+    /// <summary>
+    ///     Creates a legend for the active gas IDs.
+    /// </summary>
+    /// <param name="activeGasIds">Active gas registry IDs.</param>
+    /// <returns>The visualization legend.</returns>
     VisualizationLegend CreateLegend(IReadOnlyCollection<int> activeGasIds);
 
+    /// <summary>
+    ///     Creates a legend for the active gas IDs and numeric range.
+    /// </summary>
+    /// <param name="activeGasIds">Active gas registry IDs.</param>
+    /// <param name="range">Numeric visualization range.</param>
+    /// <returns>The visualization legend.</returns>
     VisualizationLegend CreateLegend(
         IReadOnlyCollection<int> activeGasIds,
         VisualizationRange range)
@@ -176,13 +325,23 @@ public sealed class VisualizationRegistry
     private readonly List<IVisualizationMethod> _methods = [];
     private readonly ReadOnlyCollection<IVisualizationMethod> _readOnlyMethods;
 
+    /// <summary>
+    ///     Creates an empty visualization registry.
+    /// </summary>
     public VisualizationRegistry()
     {
         _readOnlyMethods = _methods.AsReadOnly();
     }
 
+    /// <summary>
+    ///     Gets registered visualization methods in order.
+    /// </summary>
     public IReadOnlyList<IVisualizationMethod> Methods => _readOnlyMethods;
 
+    /// <summary>
+    ///     Registers a visualization method.
+    /// </summary>
+    /// <param name="method">Method to register.</param>
     public void Register(IVisualizationMethod method)
     {
         ArgumentNullException.ThrowIfNull(method);
@@ -194,6 +353,11 @@ public sealed class VisualizationRegistry
         _methods.Add(method);
     }
 
+    /// <summary>
+    ///     Gets a registered visualization method by ID.
+    /// </summary>
+    /// <param name="id">Visualization ID.</param>
+    /// <returns>The registered method.</returns>
     public IVisualizationMethod GetRequired(string id)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(id);
@@ -203,6 +367,11 @@ public sealed class VisualizationRegistry
         throw new KeyNotFoundException($"No visualization method with ID '{id}' is registered.");
     }
 
+    /// <summary>
+    ///     Creates a registry containing built-in visualizations.
+    /// </summary>
+    /// <param name="config">Simulation configuration.</param>
+    /// <returns>The configured registry.</returns>
     public static VisualizationRegistry CreateDefault(AtmosConfig config)
     {
         ArgumentNullException.ThrowIfNull(config);
@@ -470,6 +639,11 @@ public sealed class VisualizationRegistry
             : MathF.Round(normalized * (resolution - 1)) / (resolution - 1);
     }
 
+    /// <summary>
+    ///     Gets the stable display color for a gas ID.
+    /// </summary>
+    /// <param name="gasId">Gas registry ID.</param>
+    /// <returns>The assigned color.</returns>
     public static ColorRgba ColorForGasId(int gasId)
     {
         uint hash = unchecked((uint)gasId) * 2654435761u;

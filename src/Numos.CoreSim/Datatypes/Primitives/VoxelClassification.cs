@@ -31,6 +31,9 @@ public readonly record struct VoxelClassification(int RoomId)
     /// </summary>
     public const int RoomVoid = -1;
 
+    /// <summary>
+    ///     Creates an unassigned voxel classification.
+    /// </summary>
     public VoxelClassification() : this(RoomUnassigned)
     {
     }

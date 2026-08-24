@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using JetBrains.Annotations;
 using Numos.CoreSim.Collections;
+using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.Datatypes.Snapshots;
 using Numos.Maths;
 
@@ -18,26 +19,6 @@ namespace Numos.CoreSim;
 internal class AtmosChunk
 {
     private static long _nextGeneration;
-
-    /// <summary>
-    ///     Largest voxel count representable by the chunk's <see cref="ushort" /> flat indexes.
-    /// </summary>
-    internal const int MaxVoxelCount = ushort.MaxValue;
-
-    /// <summary>
-    ///     Indicates that a voxel has not been assigned to a room.
-    /// </summary>
-    public const int RoomUnassigned = 0;
-
-    /// <summary>
-    ///     Indicates that a voxel represents the space outside the simulated map.
-    /// </summary>
-    public const int RoomVoid = -1;
-
-    /// <summary>
-    ///     Indicates that a voxel is solid and cannot contain or exchange gas.
-    /// </summary>
-    public const int RoomSolid = -2;
 
     /// <summary>
     ///     Number of valid entries at the beginning of <see cref="ActiveAirIndices" />.
@@ -132,12 +113,12 @@ internal class AtmosChunk
     public int SleepTimer;
 
     /// <summary>
-    ///     Temperature value for each voxel, indexed by flat voxel index or local coordinate.
+    ///     Temperature for each voxel, in kelvins (K), indexed by flat voxel index or local coordinate.
     /// </summary>
     public FlatArray<float> Temperature;
 
     /// <summary>
-    ///     Cached pressure value for each voxel, indexed by flat voxel index or local coordinate.
+    ///     Cached pressure for each voxel, in pascals (Pa), indexed by flat voxel index or local coordinate.
     /// </summary>
     /// <remarks>These values are recomputed by the simulation each tick.</remarks>
     public FlatArray<float> TotalPressure;
@@ -163,12 +144,13 @@ internal class AtmosChunk
     /// </summary>
     /// <remarks>
     ///     Positive IDs identify rooms. The reserved values
-    ///     <see cref="RoomUnassigned" />, <see cref="RoomVoid" />, and <see cref="RoomSolid" />
+    ///     <see cref="VoxelClassification.RoomUnassigned" />, <see cref="VoxelClassification.RoomVoid" />, and
+    ///     <see cref="VoxelClassification.RoomSolid" />
     ///     identify unassigned, void, and solid voxels respectively.
     /// </remarks>
-    /// <seealso cref="RoomSolid" />
-    /// <seealso cref="RoomVoid" />
-    /// <seealso cref="RoomUnassigned" />
+    /// <seealso cref="VoxelClassification.RoomSolid" />
+    /// <seealso cref="VoxelClassification.RoomVoid" />
+    /// <seealso cref="VoxelClassification.RoomUnassigned" />
     public FlatArray<int> VoxelRoomMap;
 
     /// <summary>
@@ -179,9 +161,14 @@ internal class AtmosChunk
     /// <param name="depth">The number of voxels along the z axis.</param>
     /// <param name="maxActiveRooms">The maximum number of rooms that can be active at once.</param>
     /// <exception cref="ArgumentOutOfRangeException">
-    ///     A dimension is non-positive or the combined voxel count exceeds <see cref="MaxVoxelCount" />.
+    ///     A dimension is non-positive or the combined voxel count exceeds
+    ///     <see cref="AtmosChunkConstants.MaximumVoxelCount" />.
     /// </exception>
-    public AtmosChunk(int width = 16, int height = 16, int depth = 16, int maxActiveRooms = 64)
+    public AtmosChunk(
+        int width = AtmosChunkConstants.DefaultWidth,
+        int height = AtmosChunkConstants.DefaultHeight,
+        int depth = AtmosChunkConstants.DefaultDepth,
+        int maxActiveRooms = AtmosChunkConstants.DefaultMaxActiveRooms)
     {
         int voxelCount = GetValidatedVoxelCount(width, height, depth);
         MaxActiveRooms = maxActiveRooms;
@@ -211,7 +198,7 @@ internal class AtmosChunk
         EnsureInitialized(ref TotalHeatCapacity, dimensions);
         EnsureInitialized(ref Temperature, dimensions);
         if (ActiveGases == null)
-            ActiveGases = new GasChannel[16]; // TODO unhardcode maxgases
+            ActiveGases = new GasChannel[AtmosChunkConstants.InitialGasChannelCapacity];
         if (ActiveRoomIds == null || ActiveRoomIds.Length != MaxActiveRooms)
             ActiveRoomIds = new int[MaxActiveRooms];
     }
@@ -225,14 +212,20 @@ internal class AtmosChunk
     /// <param name="depth">The depth of the chunk.</param>
     /// <param name="maxActiveRooms">The maximum number of rooms that can be active in this chunk simultaneously.</param>
     /// <exception cref="ArgumentOutOfRangeException">
-    ///     A dimension is non-positive or the combined voxel count exceeds <see cref="MaxVoxelCount" />.
+    ///     A dimension is non-positive or the combined voxel count exceeds
+    ///     <see cref="AtmosChunkConstants.MaximumVoxelCount" />.
     /// </exception>
     /// <remarks>
     ///     Initialization puts the chunk to sleep, resets all active counts and timers, and clears
     ///     its per-voxel, gas-channel, and active-room data.
     /// </remarks>
     [PublicAPI]
-    public void Initialize(Int3 position, int width = 16, int height = 16, int depth = 16, int maxActiveRooms = 64)
+    public void Initialize(
+        Int3 position,
+        int width = AtmosChunkConstants.DefaultWidth,
+        int height = AtmosChunkConstants.DefaultHeight,
+        int depth = AtmosChunkConstants.DefaultDepth,
+        int maxActiveRooms = AtmosChunkConstants.DefaultMaxActiveRooms)
     {
         int voxelCount = GetValidatedVoxelCount(width, height, depth);
         GridPosition = position;
@@ -298,7 +291,7 @@ internal class AtmosChunk
     /// <exception cref="Exception">Thrown when <paramref name="targetRoomId" /> would exceed <see cref="MaxActiveRooms" />.</exception>
     public virtual void WakeRoom(int targetRoomId)
     {
-        if (targetRoomId == RoomSolid || targetRoomId == RoomVoid)
+        if (targetRoomId == VoxelClassification.RoomSolid || targetRoomId == VoxelClassification.RoomVoid)
             return;
 
         if (IsAwake)
@@ -367,77 +360,39 @@ internal class AtmosChunk
     }
 
     /// <summary>
-    ///     Adds gas to a voxel with unit effective molar heat capacity and updates the voxel's cached thermal state.
+    ///     Adds gas to a voxel and updates pressure with the supplied ideal-gas pressure coefficient.
     /// </summary>
     /// <param name="localVoxelIndex">The flat index of the target voxel within this chunk.</param>
     /// <param name="gasId">The ID of the gas to add.</param>
     /// <param name="molesToAdd">The number of moles to add.</param>
-    /// <param name="temperature">The temperature of the injected gas.</param>
-    /// <remarks>
-    ///     Injection is ignored when the chunk is sleeping or the target voxel is solid or void.
-    ///     A new gas channel is created when this gas is not already present in the chunk.
-    /// </remarks>
-    public void InjectGasToVoxel(ushort localVoxelIndex, int gasId, float molesToAdd, float temperature)
-    {
-        InjectGasToVoxel(localVoxelIndex, gasId, molesToAdd, temperature, 1f);
-    }
-
-    /// <summary>
-    ///     Adds gas to a voxel using its effective molar heat capacity to conserve sensible energy.
-    /// </summary>
-    /// <param name="localVoxelIndex">The flat index of the target voxel within this chunk.</param>
-    /// <param name="gasId">The ID of the gas to add.</param>
-    /// <param name="molesToAdd">The number of moles to add.</param>
-    /// <param name="temperature">The temperature of the injected gas.</param>
-    /// <param name="effectiveSpecificHeatCapacity">
-    ///     The already-resolved, finite, positive effective molar heat capacity of the injected gas, in J/(mol·K).
+    /// <param name="temperature">The temperature of the injected gas, in kelvins (K).</param>
+    /// <param name="effectiveMolarHeatCapacityAtConstantVolume">
+    ///     The already-resolved, finite, positive molar heat capacity at constant volume, in J/(mol·K).
     /// </param>
-    /// <remarks>
-    ///     Injection is ignored when the chunk is sleeping or the target voxel is solid or void.
-    ///     A new gas channel is created when this gas is not already present in the chunk.
-    /// </remarks>
+    /// <param name="pressurePerMoleKelvin">
+    ///     The already-resolved ideal-gas coefficient <c>R/V</c>, in Pa/(mol·K).
+    /// </param>
     public void InjectGasToVoxel(ushort localVoxelIndex, int gasId, float molesToAdd, float temperature,
-        float effectiveSpecificHeatCapacity)
+        float effectiveMolarHeatCapacityAtConstantVolume, float pressurePerMoleKelvin)
     {
-        Debug.Assert(float.IsFinite(effectiveSpecificHeatCapacity) &&
-                     effectiveSpecificHeatCapacity > 0f);
+        Debug.Assert(float.IsFinite(effectiveMolarHeatCapacityAtConstantVolume) &&
+                     effectiveMolarHeatCapacityAtConstantVolume > 0f);
+        Debug.Assert(float.IsFinite(pressurePerMoleKelvin) && pressurePerMoleKelvin > 0f);
 
         if (!IsAwake)
             return;
 
         int room = VoxelRoomMap[localVoxelIndex];
-        if (room == RoomSolid)
+        if (room == VoxelClassification.RoomSolid)
             return;
-        if (room == RoomVoid)
+        if (room == VoxelClassification.RoomVoid)
             return;
 
         SleepTimer = 0;
 
         float currentHeatCapacity = TotalHeatCapacity[localVoxelIndex];
 
-        int targetChannelIndex = -1;
-        for (var i = 0; i < ActiveGasCount; i++)
-        {
-            if (ActiveGases[i].GasId == gasId)
-            {
-                targetChannelIndex = i;
-                break;
-            }
-        }
-
-        if (targetChannelIndex == -1)
-        {
-            if (ActiveGasCount >= ActiveGases.Length)
-            {
-                throw new Exception("Maximum unique gas channels reached for this chunk!");
-            }
-
-            ActiveGases[ActiveGasCount] = new GasChannel();
-            ActiveGases[ActiveGasCount].Initialize(gasId, VoxelCount);
-
-            targetChannelIndex = ActiveGasCount;
-            ActiveGasCount++;
-        }
+        int targetChannelIndex = GetOrCreateGasChannel(gasId);
 
         ActiveGases[targetChannelIndex].Moles[localVoxelIndex] += molesToAdd;
 
@@ -447,18 +402,43 @@ internal class AtmosChunk
             currentTotalMoles += ActiveGases[g].Moles[localVoxelIndex];
         }
 
-        float incomingHeatCapacity = molesToAdd * effectiveSpecificHeatCapacity;
+        float incomingHeatCapacity = molesToAdd * effectiveMolarHeatCapacityAtConstantVolume;
         float newHeatCapacity = currentHeatCapacity + incomingHeatCapacity;
         float currentTemp = Temperature[localVoxelIndex];
         float newTemp = currentHeatCapacity > 0f && newHeatCapacity > 0f
-            ? (currentHeatCapacity * currentTemp + incomingHeatCapacity * temperature) / newHeatCapacity
+            ? currentTemp == temperature
+                ? currentTemp
+                // Interpolation avoids the overflow-prone sum C1*T1 + C2*T2.
+                : currentTemp + (temperature - currentTemp) * incomingHeatCapacity / newHeatCapacity
             : temperature;
 
         TotalHeatCapacity[localVoxelIndex] = newHeatCapacity;
         Temperature[localVoxelIndex] = newTemp;
 
-        TotalPressure[localVoxelIndex] = currentTotalMoles * newTemp;
+        TotalPressure[localVoxelIndex] = currentTotalMoles * newTemp * pressurePerMoleKelvin;
         MarkChanged();
+    }
+
+    internal int GetOrCreateGasChannel(int gasId)
+    {
+        for (var index = 0; index < ActiveGasCount; index++)
+        {
+            if (ActiveGases[index].GasId == gasId)
+                return index;
+        }
+
+        if (ActiveGasCount == ActiveGases.Length)
+        {
+            int newLength = checked(Math.Max(ActiveGases.Length * 2, ActiveGasCount + 1));
+            Array.Resize(ref ActiveGases, newLength);
+        }
+
+        int channelIndex = ActiveGasCount;
+        var channel = new GasChannel();
+        channel.Initialize(gasId, VoxelCount);
+        ActiveGases[channelIndex] = channel;
+        ActiveGasCount++;
+        return channelIndex;
     }
 
     /// <summary>
@@ -571,17 +551,19 @@ internal class AtmosChunk
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(width);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(height);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(depth);
-        if (width > MaxVoxelCount || height > MaxVoxelCount || depth > MaxVoxelCount)
+        if (width > AtmosChunkConstants.MaximumVoxelCount || height > AtmosChunkConstants.MaximumVoxelCount ||
+            depth > AtmosChunkConstants.MaximumVoxelCount)
         {
             throw new ArgumentOutOfRangeException(nameof(width), width,
-                $"No chunk dimension may exceed {MaxVoxelCount}.");
+                $"No chunk dimension may exceed {AtmosChunkConstants.MaximumVoxelCount}.");
         }
 
         long voxelCount = (long)width * height * depth;
-        if (voxelCount > MaxVoxelCount)
+        if (voxelCount > AtmosChunkConstants.MaximumVoxelCount)
         {
             throw new ArgumentOutOfRangeException(nameof(width), width,
-                $"Chunk dimensions contain {voxelCount} voxels, but at most {MaxVoxelCount} are supported.");
+                $"Chunk dimensions contain {voxelCount} voxels, but at most " +
+                $"{AtmosChunkConstants.MaximumVoxelCount} are supported.");
         }
 
         return (int)voxelCount;

@@ -1,7 +1,7 @@
 namespace Numos.CoreSim.Datatypes.Events;
 
 /// <summary>
-///     Event that stores data on the flow of a boundary voxel for later sequential processing.
+///     Identifies a boundary voxel for later sequential flow processing.
 /// </summary>
 /// <para>
 ///     This event is used to store data on the flow of air across a voxel that sits on the boundary of a chunk.
@@ -20,14 +20,4 @@ internal struct BoundaryFlowEvent
     ///     The location of the event in the chunk as a 1D lookup.
     /// </summary>
     public ushort LocalVoxelIndex;
-
-    /// <summary>
-    ///     The pressure at the boundary voxel at the time of the event.
-    /// </summary>
-    public float Pressure;
-
-    /// <summary>
-    ///     The temperature at the boundary voxel at the time of the event.
-    /// </summary>
-    public float Temperature;
 }

@@ -18,19 +18,27 @@ internal enum AccumulatorState
 internal struct GasAccumulator
 {
     public int GasId;
+
+    /// <summary>Accumulated amount, in moles (mol).</summary>
     public float AccumulatedMoles;
+
+    /// <summary>Mole-weighted output temperature, in kelvins (K).</summary>
     public float OutputTemperature;
     public int TicksAlive;
 
-    public void AddGas(float moles, float temp)
+    /// <summary>Adds one sample of this accumulator's gas species.</summary>
+    /// <param name="moles">Amount to add, in moles (mol).</param>
+    /// <param name="temperature">Sample temperature, in kelvins (K).</param>
+    public void AddGas(float moles, float temperature)
     {
         if (AccumulatedMoles + moles > 0)
         {
-            OutputTemperature = (AccumulatedMoles * OutputTemperature + moles * temp) / (AccumulatedMoles + moles);
+            OutputTemperature = (AccumulatedMoles * OutputTemperature + moles * temperature) /
+                                (AccumulatedMoles + moles);
         }
         else
         {
-            OutputTemperature = temp;
+            OutputTemperature = temperature;
         }
 
         AccumulatedMoles += moles;
@@ -48,8 +56,8 @@ internal struct GasAccumulator
     ///     Determines if the accumulated gas should trigger a violent Micro Injection (wake chunk)
     ///     or a passive Macro Diffusion (add to room node).
     /// </summary>
-    /// <param name="currentPressureDelta">The calculated local pressure spike |P_spike - P_room|.</param>
-    /// <param name="wakeThreshold">The constant 'Threshold of Violence' (tau_wake).</param>
+    /// <param name="currentPressureDelta">The calculated local pressure spike |P_spike - P_room|, in pascals.</param>
+    /// <param name="wakeThreshold">The pressure threshold for waking the micro solver, in pascals.</param>
     /// <param name="maxAliveTicks">Maximum ticks before the accumulator times out and diffuses.</param>
     public AccumulatorState EvaluateState(float currentPressureDelta, float wakeThreshold, int maxAliveTicks)
     {
