@@ -189,6 +189,7 @@ internal sealed partial class AtmosKernel
         lock (_stateGate)
         {
             _config = config ?? throw new ArgumentNullException(nameof(config));
+            _tickConfig.Capture(_config);
         }
     }
 

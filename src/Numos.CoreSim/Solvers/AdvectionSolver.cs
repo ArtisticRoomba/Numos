@@ -80,13 +80,10 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
             {
                 ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
                 float currentPressure = chunk.TotalPressure[voxelIndex];
-                if (currentPressure < config.VacuumThreshold)
-                {
-                    ClearVacuumVoxel(chunk, voxelIndex);
+                if (currentPressure == 0f)
                     continue;
-                }
 
-                float totalMoles = GetTotalMoles(chunk, voxelIndex);
+                float totalMoles = AtmosSolverMath.GetTotalMoles(chunk, voxelIndex);
                 if (totalMoles <= 0f)
                     continue;
 
@@ -196,8 +193,8 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
         for (var activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
         {
             ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
-            chunk.TotalPressure[voxelIndex] = AtmosSolverMath.CalculatePressure(
-                config, GetTotalMoles(chunk, voxelIndex), chunk.Temperature[voxelIndex]);
+            chunk.TotalPressure[voxelIndex] = AtmosSolverMath.CalculatePressureAtVoxel(
+                config, chunk, voxelIndex);
         }
 
         for (var gas = 0; gas < chunk.ActiveGasCount; gas++)
@@ -224,7 +221,6 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
                                chunk.TotalHeatCapacity[voxelIndex];
             bool stateChanged = energyDeltas[voxelIndex] != 0d;
             chunk.TotalHeatCapacity[voxelIndex] = 0f;
-            var totalMoles = 0f;
 
             for (var gas = 0; gas < chunk.ActiveGasCount; gas++)
             {
@@ -237,7 +233,6 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
                 chunk.ActiveGases[gas].Moles[voxelIndex] = moles;
                 chunk.TotalHeatCapacity[voxelIndex] += moles *
                                                        config.GetMolarHeatCapacityAtConstantVolume(chunk.ActiveGases[gas].GasId);
-                totalMoles += moles;
             }
 
             if (stateChanged && chunk.TotalHeatCapacity[voxelIndex] > 0f)
@@ -247,8 +242,8 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
                             chunk.TotalHeatCapacity[voxelIndex]));
             }
 
-            chunk.TotalPressure[voxelIndex] = AtmosSolverMath.CalculatePressure(
-                config, totalMoles, chunk.Temperature[voxelIndex]);
+            chunk.TotalPressure[voxelIndex] = AtmosSolverMath.CalculatePressureAtVoxel(
+                config, chunk, voxelIndex);
         }
     }
 
@@ -263,24 +258,6 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
 
         // DefaultAtmosSolvers allocates one slot for every geometrically distinct boundary voxel.
         buffer[count++] = new BoundaryFlowEvent { LocalVoxelIndex = voxelIndex };
-    }
-
-    // TODO make into solver helper API
-    private static void ClearVacuumVoxel(AtmosChunk chunk, ushort voxelIndex)
-    {
-        for (var gas = 0; gas < chunk.ActiveGasCount; gas++)
-            chunk.ActiveGases[gas].Moles[voxelIndex] = 0f;
-        chunk.TotalPressure[voxelIndex] = 0f;
-        chunk.TotalHeatCapacity[voxelIndex] = 0f;
-    }
-
-    // TODO refac into public API
-    private static float GetTotalMoles(AtmosChunk chunk, ushort voxelIndex)
-    {
-        var totalMoles = 0f;
-        for (var gas = 0; gas < chunk.ActiveGasCount; gas++)
-            totalMoles += chunk.ActiveGases[gas].Moles[voxelIndex];
-        return totalMoles;
     }
 
     private static void UpdateSleepState(AtmosChunk chunk, AtmosSolverConfigSnapshot config,

@@ -167,9 +167,7 @@ internal sealed class ThermalDiffusionSolver
         ushort voxelIndex, out float temperature, out float heatCapacity)
     {
         heatCapacity = chunk.TotalHeatCapacity[voxelIndex];
-        float pressure = chunk.TotalPressure[voxelIndex];
-        if (!AtmosSolverMath.IsFinitePositive(heatCapacity) || !float.IsFinite(pressure) ||
-            pressure < config.VacuumThreshold)
+        if (!AtmosSolverMath.IsFinitePositive(heatCapacity) || chunk.TotalPressure[voxelIndex] == 0f)
         {
             temperature = 0f;
             heatCapacity = 0f;

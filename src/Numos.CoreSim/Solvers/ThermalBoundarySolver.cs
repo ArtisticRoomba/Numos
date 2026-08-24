@@ -173,12 +173,9 @@ internal sealed class ThermalBoundarySolver : IAtmosSolverStage
             return false;
 
         ushort voxelIndex = address.LocalVoxelIndex;
-        float pressure = AtmosSolverMath.CalculatePressureAtVoxel(context.TickConfig, chunk, voxelIndex);
         float heatCapacity = AtmosSolverMath.CalculateHeatCapacityAtVoxel(context.TickConfig, chunk, voxelIndex);
-        chunk.TotalPressure[voxelIndex] = pressure;
         chunk.TotalHeatCapacity[voxelIndex] = heatCapacity;
-        if (!AtmosSolverMath.IsFinitePositive(heatCapacity) || !float.IsFinite(pressure) ||
-            pressure < context.TickConfig.VacuumThreshold)
+        if (!AtmosSolverMath.IsFinitePositive(heatCapacity) || chunk.TotalPressure[voxelIndex] == 0f)
             return false;
 
         state = new ThermalBoundaryState(chunk,
