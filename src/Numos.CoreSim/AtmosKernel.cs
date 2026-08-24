@@ -634,7 +634,7 @@ internal sealed partial class AtmosKernel : IDisposable
     private float GetMolarHeatCapacityAtConstantVolume(int gasId)
     {
         float fallbackMolarHeatCapacityAtConstantVolume = _config.DefaultMolarHeatCapacityAtConstantVolume;
-        if (!IsFinitePositive(fallbackMolarHeatCapacityAtConstantVolume))
+        if (!FloatMath.IsFinitePositive(fallbackMolarHeatCapacityAtConstantVolume))
         {
             fallbackMolarHeatCapacityAtConstantVolume =
                 AtmosConfigDefaults.DefaultMolarHeatCapacityAtConstantVolume;
@@ -644,7 +644,7 @@ internal sealed partial class AtmosKernel : IDisposable
         if ((uint)gasId < (uint)gasRegistry.Count)
         {
             float molarHeatCapacityAtConstantVolume = gasRegistry[gasId].MolarHeatCapacityAtConstantVolume;
-            if (IsFinitePositive(molarHeatCapacityAtConstantVolume))
+            if (FloatMath.IsFinitePositive(molarHeatCapacityAtConstantVolume))
                 return molarHeatCapacityAtConstantVolume;
         }
 
@@ -657,7 +657,7 @@ internal sealed partial class AtmosKernel : IDisposable
     private float GetVoxelVolume()
     {
         float volume = _config.VoxelVolume;
-        return IsFinitePositive(volume) ? volume : AtmosConfigDefaults.VoxelVolume;
+        return FloatMath.IsFinitePositive(volume) ? volume : AtmosConfigDefaults.VoxelVolume;
     }
 
     /// <summary>
@@ -692,7 +692,7 @@ internal sealed partial class AtmosKernel : IDisposable
     /// </summary>
     private float TickPressureToMoles(float pressure, float temperature)
     {
-        if (!IsFinitePositive(pressure))
+        if (!FloatMath.IsFinitePositive(pressure))
             return 0f;
 
         float denominator = _tickConfig.PressurePerMoleKelvin *
@@ -735,11 +735,11 @@ internal sealed partial class AtmosKernel : IDisposable
     /// </summary>
     private float GetEffectiveTemperature(float storedTemperature)
     {
-        if (IsFinitePositive(storedTemperature))
+        if (FloatMath.IsFinitePositive(storedTemperature))
             return storedTemperature;
 
         float fallback = _config.DefaultTemperatureFallback;
-        return IsFinitePositive(fallback) ? fallback : AtmosConfigDefaults.DefaultTemperatureFallback;
+        return FloatMath.IsFinitePositive(fallback) ? fallback : AtmosConfigDefaults.DefaultTemperatureFallback;
     }
 
     /// <summary>
@@ -782,7 +782,7 @@ internal sealed partial class AtmosKernel : IDisposable
 
         chunk.TotalHeatCapacity[localVoxelIndex] = CalculateTickHeatCapacityAtVoxel(chunk, localVoxelIndex);
         if (chunk.TotalHeatCapacity[localVoxelIndex] > 0f &&
-            !IsFinitePositive(chunk.Temperature[localVoxelIndex]))
+            !FloatMath.IsFinitePositive(chunk.Temperature[localVoxelIndex]))
         {
             chunk.Temperature[localVoxelIndex] =
                 _tickConfig.GetValidatedTemp(chunk.Temperature[localVoxelIndex]);
@@ -1049,7 +1049,7 @@ internal sealed partial class AtmosKernel : IDisposable
         float storedHeatCapacity = chunk.TotalHeatCapacity[idx];
         float pressure = chunk.TotalPressure[idx];
         float effectiveTemperature = _tickConfig.GetValidatedTemp(chunk.Temperature[idx]);
-        if (!IsFinitePositive(storedHeatCapacity) || !float.IsFinite(pressure) ||
+        if (!FloatMath.IsFinitePositive(storedHeatCapacity) || !float.IsFinite(pressure) ||
             pressure < vacuumThreshold)
         {
             temperature = 0f;
@@ -1081,14 +1081,6 @@ internal sealed partial class AtmosKernel : IDisposable
     }
 
     /// <summary>
-    ///     Returns whether a floating-point value is finite and strictly positive.
-    /// </summary>
-    private static bool IsFinitePositive(float value)
-    {
-        return float.IsFinite(value) && value > 0f;
-    }
-
-    /// <summary>
     ///     Condenses supersaturated enabled species and records precipitation with the resulting energy change.
     /// </summary>
     private void ProcessPhaseChanges(AtmosChunk chunk, PrecipitationEvent[] precipBuffer, ref int precipCount)
@@ -1111,7 +1103,7 @@ internal sealed partial class AtmosKernel : IDisposable
                 float molarHeatCapacityAtConstantVolume =
                     _tickConfig.GetMolarHeatCapacityAtConstantVolume(gasId);
 
-                if (!IsFinitePositive(boilingPoint) || !IsFinitePositive(molarEnthalpyOfVaporization))
+                if (!FloatMath.IsFinitePositive(boilingPoint) || !FloatMath.IsFinitePositive(molarEnthalpyOfVaporization))
                     continue;
 
                 float invBoilingPoint = 1f / boilingPoint;
@@ -1381,7 +1373,7 @@ internal sealed partial class AtmosKernel : IDisposable
         chunk.TotalPressure[idx] = pressure;
         chunk.TotalHeatCapacity[idx] = heatCapacity;
         float temperature = _tickConfig.GetValidatedTemp(chunk.Temperature[idx]);
-        if (!IsFinitePositive(heatCapacity) || !float.IsFinite(pressure) || pressure < vacuumThreshold)
+        if (!FloatMath.IsFinitePositive(heatCapacity) || !float.IsFinite(pressure) || pressure < vacuumThreshold)
             return false;
 
         state = new ThermalBoundaryState(temperature, heatCapacity);

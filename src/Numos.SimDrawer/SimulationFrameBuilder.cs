@@ -440,7 +440,7 @@ public sealed class SimulationFrameBuilder
     {
         static float Channel(float value)
         {
-            return float.IsFinite(value) ? Math.Clamp(value, 0f, 1f) : 0f;
+            return FloatMath.ClampUnitInterval(value);
         }
 
         return new ColorRgba(Channel(color.R), Channel(color.G), Channel(color.B));
