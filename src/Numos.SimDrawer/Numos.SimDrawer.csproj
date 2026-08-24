@@ -1,11 +1,18 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
+    <Import Project="..\Numos.Viewer\Version.props"/>
+
     <PropertyGroup>
         <TargetFramework>net10.0</TargetFramework>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
         <RootNamespace>Numos.SimDrawer</RootNamespace>
         <AssemblyName>Numos.SimDrawer</AssemblyName>
+        <PackageId>Numos.SimDrawer</PackageId>
+        <Title>Numos Simulation Drawing</Title>
+        <Description>Presentation data and visualization mapping for Numos simulations.</Description>
+        <PackageTags>simulation;visualization;voxel;nativeaot</PackageTags>
+        <GenerateDocumentationFile>true</GenerateDocumentationFile>
     </PropertyGroup>
 
     <ItemGroup>

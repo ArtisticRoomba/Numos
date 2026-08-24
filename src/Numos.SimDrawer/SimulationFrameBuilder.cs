@@ -12,6 +12,11 @@ public sealed class SimulationFrameBuilder
 {
     private long _nextFrameVersion;
 
+    /// <summary>
+    ///     Creates a presentation-frame builder.
+    /// </summary>
+    /// <param name="config">Simulation configuration used by default visualizations.</param>
+    /// <param name="visualizations">Optional visualization registry.</param>
     public SimulationFrameBuilder(AtmosConfig config, VisualizationRegistry? visualizations = null)
     {
         ArgumentNullException.ThrowIfNull(config);
@@ -23,6 +28,9 @@ public sealed class SimulationFrameBuilder
         }
     }
 
+    /// <summary>
+    ///     Gets the registered visualization methods.
+    /// </summary>
     public VisualizationRegistry Visualizations { get; }
 
     /// <summary>
@@ -54,13 +62,20 @@ public sealed class SimulationFrameBuilder
         SimulationDrawData? previousFrame = null,
         IReadOnlySet<Int3>? mappingScope = null,
         bool forceRemap = false,
-        int resolution = 32)
+        int resolution = 32,
+        float automaticRangeOffset = 0f,
+        VisualizationRange? rangeOverride = null)
     {
         ArgumentNullException.ThrowIfNull(snapshots);
         var snapshotList = snapshots as IReadOnlyCollection<AtmosChunkSnapshot> ?? snapshots.ToArray();
         var visualization = Visualizations.GetRequired(visualizationId);
         ulong visualizationMappingRevision = visualization.MappingRevision;
-        var range = GetVisualizationRange(snapshotList, visualization.RequiredData, resolution);
+        var range = GetVisualizationRange(
+            snapshotList,
+            visualization.RequiredData,
+            resolution,
+            automaticRangeOffset,
+            rangeOverride);
         bool rangeChanged = previousFrame == null || previousFrame.Visualization.Range != range;
         var chunks = new Dictionary<Int3, ChunkDrawData>();
         var seenPositions = new HashSet<Int3>();
@@ -122,8 +137,28 @@ public sealed class SimulationFrameBuilder
     private static VisualizationRange GetVisualizationRange(
         IEnumerable<AtmosChunkSnapshot> snapshots,
         VisualizationDataRequirements requirements,
-        int resolution)
+        int resolution,
+        float automaticRangeOffset,
+        VisualizationRange? rangeOverride)
     {
+        int safeResolution = Math.Max(resolution, 1);
+        if (rangeOverride is { } overrideRange)
+        {
+            if (!float.IsFinite(overrideRange.Minimum) ||
+                !float.IsFinite(overrideRange.Maximum) ||
+                overrideRange.Maximum <= overrideRange.Minimum)
+            {
+                throw new ArgumentException(
+                    "A visualization range override must contain finite, increasing bounds.",
+                    nameof(rangeOverride));
+            }
+
+            return overrideRange with
+            {
+                Resolution = safeResolution
+            };
+        }
+
         float minimum = float.PositiveInfinity;
         float maximum = float.NegativeInfinity;
         foreach (var snapshot in snapshots)
@@ -134,10 +169,13 @@ public sealed class SimulationFrameBuilder
                 IncludeFiniteRange(snapshot.TotalPressure, ref minimum, ref maximum);
         }
 
-        int safeResolution = Math.Max(resolution, 1);
-        return float.IsFinite(minimum) && float.IsFinite(maximum)
-            ? new VisualizationRange(minimum, maximum, safeResolution)
-            : new VisualizationRange(0f, 1f, safeResolution);
+        if (!float.IsFinite(minimum) || !float.IsFinite(maximum))
+            return new VisualizationRange(0f, 1f, safeResolution);
+
+        float offset = float.IsFinite(automaticRangeOffset)
+            ? Math.Max(automaticRangeOffset, 0f)
+            : 0f;
+        return new VisualizationRange(minimum - offset, maximum + offset, safeResolution);
     }
 
     private static void IncludeFiniteRange(
@@ -209,6 +247,12 @@ public sealed class SimulationFrameBuilder
             hash.Value);
     }
 
+    /// <summary>
+    ///     Gets the dimension length along a slice axis.
+    /// </summary>
+    /// <param name="dimensions">Chunk dimensions.</param>
+    /// <param name="axis">Slice axis.</param>
+    /// <returns>The selected axis length.</returns>
     public static int GetSliceAxisLength(Int3 dimensions, SliceAxis axis)
     {
         return axis switch
@@ -410,7 +454,7 @@ public sealed class SimulationFrameBuilder
     {
         static float Channel(float value)
         {
-            return float.IsFinite(value) ? Math.Clamp(value, 0f, 1f) : 0f;
+            return FloatMath.ClampUnitInterval(value);
         }
 
         return new ColorRgba(Channel(color.R), Channel(color.G), Channel(color.B));

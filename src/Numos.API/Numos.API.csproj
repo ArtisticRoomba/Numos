@@ -1,11 +1,16 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
+    <Import Project="..\Numos.CoreSim\Version.props"/>
+
     <PropertyGroup>
         <TargetFramework>net10.0</TargetFramework>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
         <RootNamespace>Numos.API</RootNamespace>
         <PackageId>Numos.API</PackageId>
+        <Title>Numos API</Title>
+        <Description>Supported public API for Numos, an engine-agnostic, pseudo-realistic, voxel-based atmospherics simulation library.</Description>
+        <PackageTags>simulation;atmospherics;voxel;nativeaot</PackageTags>
         <GenerateDocumentationFile>true</GenerateDocumentationFile>
     </PropertyGroup>
 

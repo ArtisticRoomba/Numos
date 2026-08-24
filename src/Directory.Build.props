@@ -3,5 +3,31 @@
         <!--        We'll try to keep it AOT-compatible. Smile.-->
         <IsAotCompatible>true</IsAotCompatible>
         <IsTrimmable>true</IsTrimmable>
+
+        <Authors>VeritableCalamity;ArtisticRoomba;Numos contributors</Authors>
+        <Company>Numos contributors</Company>
+        <Copyright>Copyright © 2026 VeritableCalamity; Copyright © 2026 ArtisticRoomba; Copyright © 2026 Numos contributors</Copyright>
+        <PackageLicenseExpression>MIT</PackageLicenseExpression>
+        <PackageProjectUrl>https://github.com/ArtisticRoomba/Numos</PackageProjectUrl>
+        <RepositoryUrl>https://github.com/ArtisticRoomba/Numos</RepositoryUrl>
+        <RepositoryType>git</RepositoryType>
+        <PublishRepositoryUrl>true</PublishRepositoryUrl>
+        <EmbedUntrackedSources>true</EmbedUntrackedSources>
+        <Deterministic>true</Deterministic>
+        <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
+        <ContinuousIntegrationBuild Condition="'$(ContinuousIntegrationBuild)' == ''">false</ContinuousIntegrationBuild>
+
+        <PackageReadmeFile>README.md</PackageReadmeFile>
+        <PackageIcon>icon.png</PackageIcon>
+        <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
+        <IncludeSymbols>true</IncludeSymbols>
+        <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+        <PackageOutputPath>$(MSBuildThisFileDirectory)..\artifacts\packages</PackageOutputPath>
+        <NoWarn>$(NoWarn);1591</NoWarn>
     </PropertyGroup>
+
+    <ItemGroup>
+        <None Include="$(MSBuildThisFileDirectory)..\README.md" Pack="true" PackagePath="README.md"/>
+        <Content Include="$(MSBuildThisFileDirectory)Numos.Viewer\assets\icon.png" Pack="true" PackagePath="icon.png"/>
+    </ItemGroup>
 </Project>

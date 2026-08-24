@@ -1,0 +1,90 @@
+<Project>
+    <Target Name="ResolveNumosReleaseProvenance"
+            Condition="'$(NumosReleaseTagPrefix)' != '' and '$(NumosSourceRevisionId)' == ''">
+        <PropertyGroup>
+            <_NumosReleaseTag>$(NumosReleaseTagPrefix)/v$(PackageVersion)</_NumosReleaseTag>
+            <_NumosReleaseTagCommitFile>$(MSBuildProjectDirectory)/$(IntermediateOutputPath)Numos.ReleaseTagCommit.txt</_NumosReleaseTagCommitFile>
+        </PropertyGroup>
+        <MakeDir Directories="$(IntermediateOutputPath)"/>
+        <Exec Command="git rev-parse --verify --quiet &quot;refs/tags/$(_NumosReleaseTag)^{}&quot; &gt; &quot;$(_NumosReleaseTagCommitFile)&quot;"
+              WorkingDirectory="$(MSBuildThisFileDirectory)"
+              IgnoreExitCode="true"/>
+        <ReadLinesFromFile File="$(_NumosReleaseTagCommitFile)"
+                           Condition="Exists('$(_NumosReleaseTagCommitFile)')">
+            <Output TaskParameter="Lines" ItemName="_NumosReleaseTagCommitOutput"/>
+        </ReadLinesFromFile>
+        <PropertyGroup Condition="'@(_NumosReleaseTagCommitOutput)' != ''">
+            <NumosSourceRevisionId>@(_NumosReleaseTagCommitOutput)</NumosSourceRevisionId>
+            <NumosSourceReference>refs/tags/$(_NumosReleaseTag)</NumosSourceReference>
+        </PropertyGroup>
+    </Target>
+
+    <Target Name="PopulateNumosRepositoryMetadata"
+            BeforeTargets="GenerateNuspec;GetAssemblyAttributes"
+            DependsOnTargets="InitializeSourceControlInformation;ResolveNumosReleaseProvenance">
+        <PropertyGroup>
+            <_NumosSourceRevision>$(SourceRevisionId)</_NumosSourceRevision>
+            <_NumosSourceRevision Condition="'$(NumosSourceRevisionId)' != ''">$(NumosSourceRevisionId)</_NumosSourceRevision>
+            <_NumosSourceReference>$(SourceBranchName)</_NumosSourceReference>
+            <_NumosSourceReference Condition="'$(NumosSourceReference)' != ''">$(NumosSourceReference)</_NumosSourceReference>
+            <RepositoryCommit Condition="'$(RepositoryCommit)' == ''">$(_NumosSourceRevision)</RepositoryCommit>
+            <RepositoryBranch Condition="'$(RepositoryBranch)' == ''">$(_NumosSourceReference)</RepositoryBranch>
+        </PropertyGroup>
+        <ItemGroup>
+            <AssemblyMetadata Include="PackageVersion" Value="$(PackageVersion)"/>
+            <AssemblyMetadata Include="RepositoryBranch" Value="$(RepositoryBranch)"/>
+            <AssemblyMetadata Include="RepositoryCommit" Value="$(RepositoryCommit)"/>
+            <AssemblyMetadata Include="BuildConfiguration" Value="$(Configuration)"/>
+            <AssemblyMetadata Include="TargetFramework" Value="$(TargetFramework)"/>
+            <AssemblyMetadata Include="SdkVersion" Value="$(NETCoreSdkVersion)"/>
+            <AssemblyMetadata Include="ContinuousIntegrationBuild" Value="$(ContinuousIntegrationBuild)"/>
+        </ItemGroup>
+    </Target>
+
+    <Target Name="GenerateNumosBuildInfo"
+            BeforeTargets="CoreCompile"
+            DependsOnTargets="PopulateNumosRepositoryMetadata;AddSourceRevisionToInformationalVersion"
+            Condition="'$(GenerateNumosBuildInfo)' == 'true'">
+        <PropertyGroup>
+            <_NumosUnknown>unknown</_NumosUnknown>
+            <_NumosPackageVersion Condition="'$(PackageVersion)' == ''">$(_NumosUnknown)</_NumosPackageVersion>
+            <_NumosPackageVersion Condition="'$(PackageVersion)' != ''">$(PackageVersion)</_NumosPackageVersion>
+            <_NumosInformationalVersion Condition="'$(InformationalVersion)' == ''">$(_NumosUnknown)</_NumosInformationalVersion>
+            <_NumosInformationalVersion Condition="'$(InformationalVersion)' != ''">$(InformationalVersion)</_NumosInformationalVersion>
+            <_NumosSourceRevision Condition="'$(_NumosSourceRevision)' == ''">$(_NumosUnknown)</_NumosSourceRevision>
+            <_NumosSourceReference Condition="'$(_NumosSourceReference)' == ''">$(_NumosUnknown)</_NumosSourceReference>
+            <_NumosRepositoryUrl Condition="'$(RepositoryUrl)' == ''">$(_NumosUnknown)</_NumosRepositoryUrl>
+            <_NumosRepositoryUrl Condition="'$(RepositoryUrl)' != ''">$(RepositoryUrl)</_NumosRepositoryUrl>
+            <_NumosSdkVersion Condition="'$(NETCoreSdkVersion)' == ''">$(_NumosUnknown)</_NumosSdkVersion>
+            <_NumosSdkVersion Condition="'$(NETCoreSdkVersion)' != ''">$(NETCoreSdkVersion)</_NumosSdkVersion>
+            <_NumosIsCiBuild>false</_NumosIsCiBuild>
+            <_NumosIsCiBuild Condition="'$(ContinuousIntegrationBuild)' == 'true'">true</_NumosIsCiBuild>
+            <_NumosBuildInfoFile>$(IntermediateOutputPath)Numos.BuildInfo.g.cs</_NumosBuildInfoFile>
+        </PropertyGroup>
+
+        <!--        100% certified legit sourcegen-->
+        <ItemGroup>
+            <_NumosBuildInfoLine Include="// &lt;auto-generated/&gt;"/>
+            <_NumosBuildInfoLine Include="namespace Numos.Build%3B"/>
+            <_NumosBuildInfoLine Include="internal static class GeneratedBuildInfo"/>
+            <_NumosBuildInfoLine Include="{"/>
+            <_NumosBuildInfoLine Include="    internal static string PackageVersion { get%3B } = &quot;$(_NumosPackageVersion)&quot;%3B"/>
+            <_NumosBuildInfoLine Include="    internal static string InformationalVersion { get%3B } = &quot;$(_NumosInformationalVersion)&quot;%3B"/>
+            <_NumosBuildInfoLine Include="    internal static string GitCommit { get%3B } = &quot;$(_NumosSourceRevision)&quot;%3B"/>
+            <_NumosBuildInfoLine Include="    internal static string SourceReference { get%3B } = &quot;$(_NumosSourceReference)&quot;%3B"/>
+            <_NumosBuildInfoLine Include="    internal static string RepositoryUrl { get%3B } = &quot;$(_NumosRepositoryUrl)&quot;%3B"/>
+            <_NumosBuildInfoLine Include="    internal static string BuildConfiguration { get%3B } = &quot;$(Configuration)&quot;%3B"/>
+            <_NumosBuildInfoLine Include="    internal static string TargetFramework { get%3B } = &quot;$(TargetFramework)&quot;%3B"/>
+            <_NumosBuildInfoLine Include="    internal static string SdkVersion { get%3B } = &quot;$(_NumosSdkVersion)&quot;%3B"/>
+            <_NumosBuildInfoLine Include="    internal static bool IsContinuousIntegrationBuild { get%3B } = $(_NumosIsCiBuild)%3B"/>
+            <_NumosBuildInfoLine Include="}"/>
+            <Compile Include="$(_NumosBuildInfoFile)" Visible="false"/>
+        </ItemGroup>
+
+        <WriteLinesToFile File="$(_NumosBuildInfoFile)"
+                          Lines="@(_NumosBuildInfoLine)"
+                          Overwrite="true"
+                          WriteOnlyWhenDifferent="true"
+                          Encoding="UTF-8"/>
+    </Target>
+</Project>

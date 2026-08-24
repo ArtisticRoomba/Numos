@@ -6,10 +6,28 @@ namespace Numos.CoreSim.Datatypes.Snapshots;
 [Flags]
 public enum AtmosChunkSnapshotFields
 {
+    /// <summary>
+    ///     Selects no detached fields.
+    /// </summary>
     None = 0,
+    /// <summary>
+    ///     Selects pressure values.
+    /// </summary>
     Pressure = 1 << 0,
+    /// <summary>
+    ///     Selects temperature values.
+    /// </summary>
     Temperature = 1 << 1,
+    /// <summary>
+    ///     Selects gas-channel values.
+    /// </summary>
     Gases = 1 << 2,
+    /// <summary>
+    ///     Selects voxel classifications.
+    /// </summary>
     VoxelClassification = 1 << 3,
+    /// <summary>
+    ///     Selects every detached field.
+    /// </summary>
     All = Pressure | Temperature | Gases | VoxelClassification
 }

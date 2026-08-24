@@ -1,3 +1,5 @@
+using Numos.Maths;
+
 namespace Numos.CoreSim;
 
 /// <summary>
@@ -28,30 +30,30 @@ internal sealed class AtmosSolverConfigSnapshot
         }
 
         _gasRegistryCount = gasRegistry.Count;
-        DefaultTemperatureFallback = IsFinitePositive(config.DefaultTemperatureFallback)
+        DefaultTemperatureFallback = FloatMath.IsFinitePositive(config.DefaultTemperatureFallback)
             ? config.DefaultTemperatureFallback
             : AtmosConfigDefaults.DefaultTemperatureFallback;
         _defaultMolarHeatCapacityAtConstantVolume =
-            IsFinitePositive(config.DefaultMolarHeatCapacityAtConstantVolume)
+            FloatMath.IsFinitePositive(config.DefaultMolarHeatCapacityAtConstantVolume)
                 ? config.DefaultMolarHeatCapacityAtConstantVolume
                 : AtmosConfigDefaults.DefaultMolarHeatCapacityAtConstantVolume;
-        VoxelVolume = IsFinitePositive(config.VoxelVolume)
+        VoxelVolume = FloatMath.IsFinitePositive(config.VoxelVolume)
             ? config.VoxelVolume
             : AtmosConfigDefaults.VoxelVolume;
         PressurePerMoleKelvin = AtmosPhysicalConstants.MolarGasConstant / VoxelVolume;
-        SaturationReferencePressure = IsFinitePositive(config.SaturationReferencePressure)
+        SaturationReferencePressure = FloatMath.IsFinitePositive(config.SaturationReferencePressure)
             ? config.SaturationReferencePressure
             : AtmosConfigDefaults.SaturationReferencePressure;
-        _defaultDiffusionCoefficient = ClampUnitInterval(config.DefaultDiffusionCoefficient);
+        _defaultDiffusionCoefficient = FloatMath.ClampUnitInterval(config.DefaultDiffusionCoefficient);
         for (var gasId = 0; gasId < _gasRegistryCount; gasId++)
         {
             GasProperties properties = gasRegistry[gasId];
             _gasRegistry[gasId] = properties;
             _molarHeatCapacitiesAtConstantVolume[gasId] =
-                IsFinitePositive(properties.MolarHeatCapacityAtConstantVolume)
+                FloatMath.IsFinitePositive(properties.MolarHeatCapacityAtConstantVolume)
                     ? properties.MolarHeatCapacityAtConstantVolume
                     : _defaultMolarHeatCapacityAtConstantVolume;
-            _diffusionCoefficients[gasId] = ClampUnitInterval(properties.DiffusionCoefficient);
+            _diffusionCoefficients[gasId] = FloatMath.ClampUnitInterval(properties.DiffusionCoefficient);
         }
 
         if (_gasRegistryCount < previousGasRegistryCount)
@@ -62,19 +64,19 @@ internal sealed class AtmosSolverConfigSnapshot
             Array.Clear(_diffusionCoefficients, _gasRegistryCount, removedCount);
         }
 
-        BulkFlowCoefficient = ClampUnitInterval(config.BulkFlowCoefficient);
-        BulkFlowDamping = ClampUnitInterval(config.BulkFlowDamping);
-        LowPressureDeltaThreshold = GetNonnegativeFinite(config.LowPressureDeltaThreshold);
-        MinimumPressureTransfer = GetNonnegativeFinite(config.MinimumPressureTransfer);
-        VacuumThreshold = GetNonnegativeFinite(config.VacuumThreshold);
+        BulkFlowCoefficient = FloatMath.ClampUnitInterval(config.BulkFlowCoefficient);
+        BulkFlowDamping = FloatMath.ClampUnitInterval(config.BulkFlowDamping);
+        LowPressureDeltaThreshold = FloatMath.GetNonnegativeFinite(config.LowPressureDeltaThreshold);
+        MinimumPressureTransfer = FloatMath.GetNonnegativeFinite(config.MinimumPressureTransfer);
+        VacuumThreshold = FloatMath.GetNonnegativeFinite(config.VacuumThreshold);
         SleepThreshold = Math.Max(0, config.SleepThreshold);
-        SleepEpsilon = GetNonnegativeFinite(config.SleepEpsilon);
-        ThermalConductance = IsFinitePositive(config.ThermalConductance)
+        SleepEpsilon = FloatMath.GetNonnegativeFinite(config.SleepEpsilon);
+        ThermalConductance = FloatMath.IsFinitePositive(config.ThermalConductance)
             ? config.ThermalConductance
             : 0f;
-        CondensationRateFactor = ClampUnitInterval(config.CondensationRateFactor);
+        CondensationRateFactor = FloatMath.ClampUnitInterval(config.CondensationRateFactor);
         MaxPressureTransferFractionPerNeighbor =
-            ClampUnitInterval(config.MaxPressureTransferFractionPerNeighbor);
+            FloatMath.ClampUnitInterval(config.MaxPressureTransferFractionPerNeighbor);
     }
 
     internal float DefaultTemperatureFallback { get; private set; }
@@ -92,9 +94,9 @@ internal sealed class AtmosSolverConfigSnapshot
     internal float CondensationRateFactor { get; private set; }
     internal float MaxPressureTransferFractionPerNeighbor { get; private set; }
 
-    internal float GetEffectiveTemperature(float storedTemperature)
+    internal float GetValidatedTemp(float storedTemperature)
     {
-        return IsFinitePositive(storedTemperature) ? storedTemperature : DefaultTemperatureFallback;
+        return FloatMath.IsFinitePositive(storedTemperature) ? storedTemperature : DefaultTemperatureFallback;
     }
 
     internal float GetMolarHeatCapacityAtConstantVolume(int gasId)
@@ -121,20 +123,5 @@ internal sealed class AtmosSolverConfigSnapshot
 
         properties = default;
         return false;
-    }
-
-    private static bool IsFinitePositive(float value)
-    {
-        return float.IsFinite(value) && value > 0f;
-    }
-
-    private static float ClampUnitInterval(float value)
-    {
-        return float.IsFinite(value) ? Math.Clamp(value, 0f, 1f) : 0f;
-    }
-
-    private static float GetNonnegativeFinite(float value)
-    {
-        return float.IsFinite(value) ? MathF.Max(0f, value) : 0f;
     }
 }

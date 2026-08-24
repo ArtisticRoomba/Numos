@@ -705,6 +705,49 @@ public sealed class ThermodynamicsIntegrationTests
     }
 
     [Test]
+    public void CondensationRateFactor_AboveOneIsClampedToOne()
+    {
+        var config = CreateCondensationConfig();
+        config.CondensationRateFactor = 2f;
+        using var simulation = new AtmosSimulation(config, 1, 1, 1);
+        var chunk = SimTestHelpers.CreateOpenChunk(simulation, default);
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasId, 10f, 200f);
+
+        simulation.Tick();
+        simulation.Tick();
+
+        var snapshot = simulation.GetChunkSnapshot(chunk);
+        Assert.That(SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 0),
+            Is.EqualTo(5f).Within(SimTestHelpers.Tolerance));
+    }
+
+    [Test]
+    public void Condensation_ClausiusClapeyronExponentUsesMolarGasConstant()
+    {
+        const float temperature = 150f;
+        const float initialMoles = 6f;
+        var config = CreateCondensationConfig();
+        var gas = config.GasRegistry[SimTestHelpers.FirstGasId];
+        gas.MolarEnthalpyOfVaporization = 1000f;
+        config.GasRegistry[SimTestHelpers.FirstGasId] = gas;
+        using var simulation = new AtmosSimulation(config, 1, 1, 1);
+        var chunk = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasId, initialMoles, temperature);
+
+        simulation.Tick();
+        simulation.Tick();
+
+        double exponent = -gas.MolarEnthalpyOfVaporization / AtmosPhysicalConstants.MolarGasConstant *
+                          (1d / temperature - 1d / gas.BoilingPoint);
+        double saturationPressure = config.SaturationReferencePressure * Math.Exp(exponent);
+        double expectedCondensedMoles =
+            (initialMoles * temperature - saturationPressure) / temperature * config.CondensationRateFactor;
+        var snapshot = simulation.GetChunkSnapshot(chunk);
+        Assert.That(SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 0),
+            Is.EqualTo(initialMoles - expectedCondensedMoles).Within(SimTestHelpers.Tolerance));
+    }
+
+    [Test]
     public void Condensation_SkipsGasMissingFromRegistry()
     {
         var config = CreateCondensationConfig();

@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using Numos.CoreSim.Solvers;
+using Numos.CoreSim.Datatypes.Primitives;
 using Numos.Maths;
 
 namespace Numos.CoreSim;
@@ -88,4 +89,12 @@ internal sealed partial class AtmosKernel : IDisposable, IAtmosSolverWorld
     {
         LastBoundaryTicks += elapsedTicks;
     }
+
+    private readonly record struct ThermalVoxelAddress(Int3 ChunkPosition, ushort LocalVoxelIndex);
+
+    private readonly record struct ThermalBoundaryEdge(ThermalVoxelAddress First, ThermalVoxelAddress Second);
+
+    private readonly record struct ThermalBoundaryConductance(ThermalBoundaryEdge Edge, float Conductance);
+
+    private readonly record struct ThermalBoundaryState(float Temperature, float HeatCapacity);
 }
