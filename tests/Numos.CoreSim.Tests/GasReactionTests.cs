@@ -22,10 +22,9 @@ public class GasReactionTests
             gases.Add(new()
             {
                 BoilingPoint = bp,
-                CondensationPoint = bp * random.NextSingle() - 1,
-                LatentHeatOfVaporization = random.NextSingle(),
+                MolarEnthalpyOfVaporization = random.NextSingle(),
                 Name = ((char)('a' + i)).ToString(),
-                SpecificHeatCapacity = random.NextSingle() * 10000,
+                MolarHeatCapacityAtConstantVolume = random.NextSingle() * 10000,
             });
         }
 
@@ -83,7 +82,7 @@ public class GasReactionTests
             chunk.WakeRoom(i);
             for (int j = 0; j < gases.Count; j++)
             {
-                chunk.InjectGasToVoxel(i, j, Math.Max(0, random.NextSingle() * 10 - 3), random.Next(500));
+                chunk.InjectGasToVoxel(i, j, Math.Max(0, random.NextSingle() * 10 - 3), random.Next(500),0,0);
             }
         }
 
@@ -108,28 +107,25 @@ public class GasReactionTests
         var hydrogen = new GasProperties()
         {
             BoilingPoint = 20.271f,
-            CondensationPoint = 13.99f,
-            LatentHeatOfVaporization = 0.904f,
+            MolarEnthalpyOfVaporization = 0.904f,
             Name = "Hydrogen",
-            SpecificHeatCapacity = 14303.571f,
+            MolarHeatCapacityAtConstantVolume = 14303.571f,
         };
 
         var oxygen = new GasProperties()
         {
             BoilingPoint = 90.188f,
-            CondensationPoint = 54.36f,
-            LatentHeatOfVaporization = 6.82f,
+            MolarEnthalpyOfVaporization = 6.82f,
             Name = "Oxygen",
-            SpecificHeatCapacity = 918.12f,
+            MolarHeatCapacityAtConstantVolume = 918.12f,
         };
 
         var water = new GasProperties()
         {
             BoilingPoint = 373.13f,
-            CondensationPoint = 273.15f,
-            LatentHeatOfVaporization = 40.65f,
+            MolarEnthalpyOfVaporization = 40.65f,
             Name = "Oxygen",
-            SpecificHeatCapacity = 36500f,
+            MolarHeatCapacityAtConstantVolume = 36500f,
         };
 
         var waterSynthesis = new StandardGasReaction(new Dictionary<GasProperties, float>()
@@ -160,8 +156,8 @@ public class GasReactionTests
         {
             chunk.VoxelRoomMap[i] = i;
             chunk.WakeRoom(i);
-            chunk.InjectGasToVoxel(i, 0, 0.001f, 1);
-            chunk.InjectGasToVoxel(i, 1, 0.002f, 1);
+            chunk.InjectGasToVoxel(i, 0, 0.001f, 1,0,0);
+            chunk.InjectGasToVoxel(i, 1, 0.002f, 1,0,0);
             Assert.That(chunk.ActiveGasCount == 2);
         }
 
@@ -171,8 +167,8 @@ public class GasReactionTests
             solver.ProcessChunk(chunk, 1, feedback);
             for (ushort i = 0; i < 16 * 16 * 16 && i < chunk.MaxActiveRooms; i++)
             {
-                chunk.InjectGasToVoxel(i, 0, 0.000005f, 1);
-                chunk.InjectGasToVoxel(i, 1, 0.000002f, 1);
+                chunk.InjectGasToVoxel(i, 0, 0.000005f, 1,0,0);
+                chunk.InjectGasToVoxel(i, 1, 0.000002f, 1,0,0);
             }
         }
 

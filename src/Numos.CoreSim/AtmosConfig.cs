@@ -1,8 +1,7 @@
-namespace Numos.CoreSim;
-using System.Collections.Frozen;
 using System.Collections.Immutable;
 using Numos.CoreSim.GasReactions;
 
+namespace Numos.CoreSim;
 
 /// <summary>
 ///     Configuration values for the simulation.
@@ -13,9 +12,6 @@ public class AtmosConfig
     ///     List of gases actively registered to the sim.
     /// </summary>
     public List<GasProperties> GasRegistry { get; set; } = [];
-
-    public ImmutableArray<LinearGasReaction> LinearReactionRegistry { get; set; } = [];
-    public ImmutableArray<StandardGasReaction> StandardReactionRegistry { get; set; } = [];
 
     /// <summary>
     ///     Reference ambient temperature, in kelvins (K).
@@ -116,9 +112,10 @@ public class AtmosConfig
     public int SleepThreshold { get; set; } = AtmosConfigDefaults.SleepThreshold;
 
     /// <summary>
-    ///     Maximum pressure delta considered "at rest".
+    ///     Maximum pressure delta considered "at rest", in pascals (Pa).
     /// </summary>
-    public float SleepEpsilon { get; set; } = 3.5f;
+    /// <remarks>Non-finite and negative values are normalized to zero.</remarks>
+    public float SleepEpsilon { get; set; } = AtmosConfigDefaults.SleepEpsilon;
 
     /// <summary>
     ///     Effective thermal conductance between adjacent voxels, in joules per kelvin (J/K) per
@@ -133,9 +130,10 @@ public class AtmosConfig
     public float ThermalConductance { get; set; } = AtmosConfigDefaults.ThermalConductance;
 
     /// <summary>
-    ///     Rate multiplier for phase-change condensation.
+    ///     Dimensionless fraction of supersaturated vapor condensed per thermodynamics tick.
     /// </summary>
-    public float CondensationRateFactor { get; set; } = 0.5f;
+    /// <remarks>Values are clamped to [0, 1]; non-finite values disable condensation.</remarks>
+    public float CondensationRateFactor { get; set; } = AtmosConfigDefaults.CondensationRateFactor;
 
     /// <summary>
     ///     Maximum fraction of a source voxel's pressure used by the bulk-advection term for one neighbor per tick.
@@ -156,8 +154,13 @@ public class AtmosConfig
     ///     Maximum number of ticks that an accumulated activity value remains alive.
     /// </summary>
     public int AccumulatorMaxAliveTicks { get; set; } = AtmosConfigDefaults.AccumulatorMaxAliveTicks;
+    
+    public ImmutableArray<LinearGasReaction> LinearReactionRegistry { get; init; } = [];
+    public ImmutableArray<StandardGasReaction> StandardReactionRegistry { get; init; } = [];
+    
     /// <summary>
     /// Largest Time Span by which the reaction simulation is allowed to move [ms]
     /// </summary>
     public float MaxDeltaForReactionSteps { get; set; } = 0.15f;
+    
 }
