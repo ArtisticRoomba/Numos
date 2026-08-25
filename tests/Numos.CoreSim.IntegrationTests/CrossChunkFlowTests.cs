@@ -81,6 +81,72 @@ public sealed class CrossChunkFlowTests
     }
 
     [Test]
+    public void BoundaryDiffusion_WakesTargetWhenBulkFlowIsDisabled()
+    {
+        var config = SimTestHelpers.CreateDeterministicConfig();
+        config.MaxPressureTransferFractionPerNeighbor = 0f;
+        var gas = config.GasRegistry[SimTestHelpers.FirstGasId];
+        gas.DiffusionCoefficient = 0.1f;
+        config.GasRegistry[SimTestHelpers.FirstGasId] = gas;
+        using var simulation = new AtmosSimulation(config, 1, 1, 1);
+        var source = CreateIsolatedVoxel(simulation, default, 0, 0, 0, SimTestHelpers.RoomId);
+        var target = CreateIsolatedVoxel(simulation, Int3.PosX, 0, 0, 0, SimTestHelpers.RoomId + 1);
+        simulation.AddGasToVoxel(source, 0, 0, 0,
+            SimTestHelpers.FirstGasId, 1f, SimTestHelpers.DefaultTemperature);
+
+        simulation.Tick();
+
+        var sourceSnapshot = simulation.GetChunkSnapshot(source);
+        var targetSnapshot = simulation.GetChunkSnapshot(target);
+        Assert.Multiple(() =>
+        {
+            Assert.That(SimTestHelpers.Moles(sourceSnapshot, SimTestHelpers.FirstGasId, 0),
+                Is.EqualTo(0.9f).Within(SimTestHelpers.Tolerance));
+            Assert.That(SimTestHelpers.Moles(targetSnapshot, SimTestHelpers.FirstGasId, 0),
+                Is.EqualTo(0.1f).Within(SimTestHelpers.Tolerance));
+            Assert.That(targetSnapshot.IsAwake, Is.True);
+            Assert.That(SimTestHelpers.TotalMoles(sourceSnapshot, targetSnapshot),
+                Is.EqualTo(1f).Within(SimTestHelpers.Tolerance));
+        });
+    }
+
+    [Test]
+    public void BoundaryFlow_WithUnequalMolarHeatCapacities_ConservesThermalEnergy()
+    {
+        var config = SimTestHelpers.CreateDeterministicConfig();
+        var first = config.GasRegistry[SimTestHelpers.FirstGasId];
+        first.MolarHeatCapacityAtConstantVolume = 1f;
+        config.GasRegistry[SimTestHelpers.FirstGasId] = first;
+        var second = config.GasRegistry[SimTestHelpers.SecondGasId];
+        second.MolarHeatCapacityAtConstantVolume = 4f;
+        config.GasRegistry[SimTestHelpers.SecondGasId] = second;
+        using var simulation = new AtmosSimulation(config, 1, 1, 1);
+        var source = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
+        var target = SimTestHelpers.CreateOpenChunk(simulation, new Int3(1, 0, 0));
+        simulation.AddGasToVoxel(source, 0, 0, 0, SimTestHelpers.FirstGasId, 3f, 400f);
+        simulation.AddGasToVoxel(source, 0, 0, 0, SimTestHelpers.SecondGasId, 1f, 400f);
+        simulation.AddGasToVoxel(target, 0, 0, 0, SimTestHelpers.FirstGasId, 1f, 200f);
+        simulation.SetVoxelTemperature(source, 0, 0, 0, 400f);
+        simulation.SetVoxelTemperature(target, 0, 0, 0, 200f);
+        float initialEnergy = SimTestHelpers.TotalThermalEnergy(config,
+            simulation.GetChunkSnapshot(source), simulation.GetChunkSnapshot(target));
+
+        simulation.Tick();
+
+        var sourceSnapshot = simulation.GetChunkSnapshot(source);
+        var targetSnapshot = simulation.GetChunkSnapshot(target);
+        Assert.Multiple(() =>
+        {
+            Assert.That(sourceSnapshot.Temperature[0],
+                Is.EqualTo(400f).Within(SimTestHelpers.Tolerance));
+            Assert.That(targetSnapshot.Temperature[0],
+                Is.EqualTo(286.7256637f).Within(SimTestHelpers.Tolerance));
+            Assert.That(SimTestHelpers.TotalThermalEnergy(config, sourceSnapshot, targetSnapshot),
+                Is.EqualTo(initialEnergy).Within(SimTestHelpers.Tolerance));
+        });
+    }
+
+    [Test]
     public void BoundaryWithoutRegisteredNeighbor_DoesNotLoseGas()
     {
         var config = SimTestHelpers.CreateDeterministicConfig();

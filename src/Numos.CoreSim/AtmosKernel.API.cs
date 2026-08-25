@@ -63,9 +63,10 @@ internal sealed partial class AtmosKernel
     /// </summary>
     /// <param name="elapsedSeconds">Elapsed real time, in seconds, since the previous update.</param>
     /// <remarks>
-    ///     The kernel runs at <see cref="SimulationRate" />. At most five ticks are processed by one call;
-    ///     excess accumulated time is discarded to prevent an unbounded catch-up loop. Values smaller than
-    ///     one fixed step remain in the accumulator for a later call.
+    ///     The kernel runs at <see cref="AtmosSolverConstants.SimulationRate" />. At most
+    ///     <see cref="AtmosSolverConstants.MaximumStepsPerUpdate" /> ticks are processed by one call; excess
+    ///     accumulated time is discarded to prevent an unbounded catch-up loop. Values smaller than one fixed
+    ///     step remain in the accumulator for a later call.
     /// </remarks>
     internal void Update(float elapsedSeconds)
     {
@@ -73,9 +74,10 @@ internal sealed partial class AtmosKernel
         {
             _accumulator += elapsedSeconds;
 
-            if (_accumulator > FixedDt * MaxStepsPerFrame)
+            if (_accumulator > AtmosSolverConstants.FixedTimeStep * AtmosSolverConstants.MaximumStepsPerUpdate)
             {
-                _accumulator = FixedDt * MaxStepsPerFrame;
+                _accumulator =
+                    AtmosSolverConstants.FixedTimeStep * AtmosSolverConstants.MaximumStepsPerUpdate;
             }
 
             LastBoundaryTicks = 0;
@@ -84,9 +86,10 @@ internal sealed partial class AtmosKernel
             var chunks = _chunkMap.Values.ToArray();
 
             var steps = 0;
-            while (_accumulator >= FixedDt && steps < MaxStepsPerFrame)
+            while (_accumulator >= AtmosSolverConstants.FixedTimeStep &&
+                   steps < AtmosSolverConstants.MaximumStepsPerUpdate)
             {
-                _accumulator -= FixedDt;
+                _accumulator -= AtmosSolverConstants.FixedTimeStep;
                 steps++;
                 TickSimulation(chunks);
             }
@@ -352,17 +355,17 @@ internal sealed partial class AtmosKernel
             var dimensions = chunk.Dimensions;
 
             for (var z = 0; z < dimensions.Z; z++)
-            for (var y = 0; y < dimensions.Y; y++)
-            for (var x = 0; x < dimensions.X; x++)
-            {
-                bool isBoundary =
-                    x == 0 || x == dimensions.X - 1 ||
-                    y == 0 || y == dimensions.Y - 1 ||
-                    dimensions.Z > 1 && (z == 0 || z == dimensions.Z - 1);
+                for (var y = 0; y < dimensions.Y; y++)
+                    for (var x = 0; x < dimensions.X; x++)
+                    {
+                        bool isBoundary =
+                            x == 0 || x == dimensions.X - 1 ||
+                            y == 0 || y == dimensions.Y - 1 ||
+                            dimensions.Z > 1 && (z == 0 || z == dimensions.Z - 1);
 
-                if (isBoundary)
-                    chunk.VoxelRoomMap[chunk.GetIndex(new Int3(x, y, z))] = classification.RoomId;
-            }
+                        if (isBoundary)
+                            chunk.VoxelRoomMap[chunk.GetIndex(new Int3(x, y, z))] = classification.RoomId;
+                    }
 
             RebuildActiveTopology(chunk);
             chunk.MarkChanged();
@@ -470,7 +473,7 @@ internal sealed partial class AtmosKernel
             ValidateGasInjection(gasId, moles, temperature);
 
             chunk.WakeRoom(chunk.VoxelRoomMap[localVoxelIndex]);
-            chunk.InjectGasToVoxel(localVoxelIndex, gasId, moles, temperature);
+            InjectGasWithEnergy(chunk, localVoxelIndex, gasId, moles, temperature, GetMolarHeatCapacityAtConstantVolume(gasId));
         }
     }
 

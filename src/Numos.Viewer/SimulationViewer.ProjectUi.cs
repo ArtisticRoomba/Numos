@@ -19,8 +19,8 @@ public partial class SimulationViewer
     private bool _closeProjectModalOpen;
 
     private string _projectNameDraft = "Untitled Simulation";
-    private int _projectChunkWidthDraft = 16;
-    private int _projectChunkHeightDraft = 16;
+    private int _projectChunkWidthDraft = AtmosChunkConstants.DefaultWidth;
+    private int _projectChunkHeightDraft = AtmosChunkConstants.DefaultHeight;
     private int _projectChunkDepthDraft = 1;
     private bool _includeDefaultGasesDraft = true;
     private string? _createProjectError;
@@ -39,15 +39,16 @@ public partial class SimulationViewer
     private int _injectionZ;
     private int _injectionGasId;
     private float _injectionMoles = 1f;
-    private float _injectionTemperature = 293.15f;
+    private float _injectionTemperature = AtmosPhysicalConstants.RoomTemperature;
 
     private string _newGasName = "New Gas";
-    private float _newGasSpecificHeatCapacity = 1000f;
+    private float _newGasMolarHeatCapacityAtConstantVolume =
+        AtmosPhysicalConstants.IdealDiatomicMolarHeatCapacityAtConstantVolume;
     private float _newGasBoilingPoint;
-    private float _newGasCondensationPoint;
-    private float _newGasLatentHeat;
+    private bool _newGasCondensationEnabled;
+    private float _newGasEnthalpyOfVaporization;
     private int _newGasLiquidId = -1;
-    private float _newGasDiffusionCoefficient = 0.02f;
+    private float _newGasDiffusionCoefficient = AtmosConfigDefaults.DefaultDiffusionCoefficient;
 
     private string? _projectMessage;
     private bool _projectMessageIsError;
@@ -55,8 +56,12 @@ public partial class SimulationViewer
     private void RequestCreateProject()
     {
         _projectNameDraft = _simulation == null ? "Untitled Simulation" : $"{_projectName} Copy";
-        _projectChunkWidthDraft = _chunkDimensions.X > 0 ? _chunkDimensions.X : 16;
-        _projectChunkHeightDraft = _chunkDimensions.Y > 0 ? _chunkDimensions.Y : 16;
+        _projectChunkWidthDraft = _chunkDimensions.X > 0
+            ? _chunkDimensions.X
+            : AtmosChunkConstants.DefaultWidth;
+        _projectChunkHeightDraft = _chunkDimensions.Y > 0
+            ? _chunkDimensions.Y
+            : AtmosChunkConstants.DefaultHeight;
         _projectChunkDepthDraft = _chunkDimensions.Z > 0 ? _chunkDimensions.Z : 1;
         _includeDefaultGasesDraft = true;
         _createProjectError = null;
@@ -184,8 +189,8 @@ public partial class SimulationViewer
         using var window = ImGuiExtensions.BeginWindow(
             "Solution##solution",
             ref _showSolutionPanel,
-            new Vector2(10, 360),
-            new Vector2(380, 520));
+            new Vector2(10, 40),
+            new Vector2(300, 290));
         if (!window.IsVisible)
             return;
 
@@ -356,13 +361,12 @@ public partial class SimulationViewer
         ImGui.Text("Add gas definition");
         ImGui.InputText("Name##new-gas", ref _newGasName, 64);
         ImGui.SetNextItemWidth(NumericInputWidth);
-        ImGui.InputFloat("Specific heat##new-gas", ref _newGasSpecificHeatCapacity);
+        ImGui.InputFloat("Molar Cv (J/mol-K)##new-gas", ref _newGasMolarHeatCapacityAtConstantVolume);
         ImGui.SetNextItemWidth(NumericInputWidth);
         ImGui.InputFloat("Boiling point (K)##new-gas", ref _newGasBoilingPoint);
+        ImGui.Checkbox("Condensation enabled##new-gas", ref _newGasCondensationEnabled);
         ImGui.SetNextItemWidth(NumericInputWidth);
-        ImGui.InputFloat("Condensation point (K)##new-gas", ref _newGasCondensationPoint);
-        ImGui.SetNextItemWidth(NumericInputWidth);
-        ImGui.InputFloat("Latent heat##new-gas", ref _newGasLatentHeat);
+        ImGui.InputFloat("Vaporization enthalpy (J/mol)##new-gas", ref _newGasEnthalpyOfVaporization);
         ImGui.SetNextItemWidth(NumericInputWidth);
         ImGui.InputInt("Liquid ID##new-gas", ref _newGasLiquidId);
         ImGui.SetNextItemWidth(NumericInputWidth);
@@ -372,10 +376,10 @@ public partial class SimulationViewer
             AddProjectGas(new GasProperties
             {
                 Name = _newGasName,
-                SpecificHeatCapacity = _newGasSpecificHeatCapacity,
+                MolarHeatCapacityAtConstantVolume = _newGasMolarHeatCapacityAtConstantVolume,
                 BoilingPoint = _newGasBoilingPoint,
-                CondensationPoint = _newGasCondensationPoint,
-                LatentHeatOfVaporization = _newGasLatentHeat,
+                CondensationEnabled = _newGasCondensationEnabled,
+                MolarEnthalpyOfVaporization = _newGasEnthalpyOfVaporization,
                 LiquidId = _newGasLiquidId,
                 DiffusionCoefficient = _newGasDiffusionCoefficient
             });

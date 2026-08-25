@@ -1,0 +1,14 @@
+{
+    "configurations": [
+        {
+            "name": "Viewer",
+            "type": "coreclr",
+            "request": "launch",
+            "program": "${workspaceFolder}/src/Numos.Viewer/bin/Debug/net10.0/Numos.Viewer.dll",
+            "args": [],
+            "console": "internalConsole",
+            "stopAtEntry": false,
+            "preLaunchTask": "build"
+        }
+      ]
+}

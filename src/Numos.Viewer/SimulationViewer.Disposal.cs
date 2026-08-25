@@ -15,8 +15,15 @@ public partial class SimulationViewer
         _sliceViewport?.Dispose();
         _sliceViewport = null;
 
+        if (_viewportBranding.Id != 0)
+        {
+            Raylib.UnloadTexture(_viewportBranding);
+            _viewportBranding = default;
+        }
+
         if (_imguiInitialized)
         {
+            SaveCurrentLayout();
             rlImGui.Shutdown();
             _imguiInitialized = false;
         }

@@ -65,17 +65,17 @@ public sealed class AtmosSimulationContractTests
     {
         var config = new AtmosConfig
         {
-            FlowFriction = 0.2f,
+            BulkFlowCoefficient = 0.2f,
             SleepThreshold = 12
         };
 
         using var simulation = new AtmosSimulation(config, 2, 3, 4);
-        config.FlowFriction = 0.4f;
+        config.BulkFlowCoefficient = 0.4f;
 
         Assert.Multiple(() =>
         {
             Assert.That(simulation.Config, Is.SameAs(config));
-            Assert.That(simulation.Config.FlowFriction, Is.EqualTo(0.4f));
+            Assert.That(simulation.Config.BulkFlowCoefficient, Is.EqualTo(0.4f));
             Assert.That(simulation.Config.SleepThreshold, Is.EqualTo(12));
         });
     }
@@ -335,7 +335,201 @@ public sealed class AtmosSimulationContractTests
             Assert.That(snapshot.Gases, Has.Length.EqualTo(1));
             Assert.That(snapshot.Gases[0].Moles, Is.EqualTo(new[] { 0f, 0f, 2f }));
             Assert.That(snapshot.Temperature, Is.EqualTo(new[] { 0f, 0f, 300f }));
-            Assert.That(snapshot.TotalPressure, Is.EqualTo(new[] { 0f, 0f, 600f }));
+            Assert.That(snapshot.TotalPressure,
+                Is.EqualTo(new[] { 0f, 0f, ExpectedPressure(2f, 300f) }).Within(0.001f));
+        });
+    }
+
+    [Test]
+    public void AddGasToVoxel_MixesUnequalMolarHeatCapacitiesBySensibleEnergy()
+    {
+        var config = new AtmosConfig
+        {
+            GasRegistry =
+            [
+                new GasProperties { Name = "Light", MolarHeatCapacityAtConstantVolume = 1f },
+                new GasProperties { Name = "Heavy", MolarHeatCapacityAtConstantVolume = 4f }
+            ]
+        };
+        using var simulation = new AtmosSimulation(config, 1, 1, 1);
+        var chunk = simulation.CreateAndRegisterChunk(default);
+        simulation.SetChunkClassification(chunk, new VoxelClassification(7));
+
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, 0, 1f, 100f);
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, 1, 1f, 200f);
+
+        var snapshot = simulation.GetChunkSnapshot(chunk);
+        Assert.Multiple(() =>
+        {
+            Assert.That(snapshot.Temperature[0], Is.EqualTo(180f).Within(0.0001f));
+            Assert.That(snapshot.TotalPressure[0],
+                Is.EqualTo(ExpectedPressure(2f, 180f)).Within(0.001f));
+            Assert.That(snapshot.Gases.Select(gas => gas.Moles[0]), Is.EqualTo(new[] { 1f, 1f }));
+        });
+    }
+
+    [Test]
+    public void AddGasToVoxel_LiveMolarHeatCapacityAtConstantVolumeChangeRevaluesExistingMixture()
+    {
+        var config = new AtmosConfig
+        {
+            GasRegistry =
+            [
+                new GasProperties { Name = "Variable", MolarHeatCapacityAtConstantVolume = 1f }
+            ]
+        };
+        using var simulation = new AtmosSimulation(config, 1, 1, 1);
+        var chunk = simulation.CreateAndRegisterChunk(default);
+        simulation.SetChunkClassification(chunk, new VoxelClassification(7));
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, 0, 1f, 100f);
+        var gas = config.GasRegistry[0];
+        gas.MolarHeatCapacityAtConstantVolume = 4f;
+        config.GasRegistry[0] = gas;
+
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, 0, 1f, 200f);
+
+        var snapshot = simulation.GetChunkSnapshot(chunk);
+        Assert.Multiple(() =>
+        {
+            Assert.That(snapshot.Temperature[0], Is.EqualTo(150f).Within(0.0001f));
+            Assert.That(snapshot.TotalPressure[0],
+                Is.EqualTo(ExpectedPressure(2f, 150f)).Within(0.001f));
+            Assert.That(snapshot.Gases[0].Moles[0], Is.EqualTo(2f));
+        });
+    }
+
+    [Test]
+    public void AddGasToVoxel_LiveDefaultMolarHeatCapacityAtConstantVolumeChangeRevaluesExistingFallbackGas()
+    {
+        var config = new AtmosConfig
+        {
+            GasRegistry =
+            [
+                new GasProperties { Name = "Fallback", MolarHeatCapacityAtConstantVolume = 0f },
+                new GasProperties { Name = "Registered", MolarHeatCapacityAtConstantVolume = 1f }
+            ]
+        };
+        using var simulation = new AtmosSimulation(config, 1, 1, 1);
+        var chunk = simulation.CreateAndRegisterChunk(default);
+        simulation.SetChunkClassification(chunk, new VoxelClassification(7));
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, 0, 1f, 100f);
+
+        config.DefaultMolarHeatCapacityAtConstantVolume = 4f;
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, 1, 1f, 200f);
+
+        var snapshot = simulation.GetChunkSnapshot(chunk);
+        Assert.Multiple(() =>
+        {
+            Assert.That(snapshot.Temperature[0], Is.EqualTo(120f).Within(0.0001f));
+            Assert.That(snapshot.TotalPressure[0],
+                Is.EqualTo(ExpectedPressure(2f, 120f)).Within(0.001f));
+            Assert.That(snapshot.Gases.Select(gas => gas.Moles[0]), Is.EqualTo(new[] { 1f, 1f }));
+        });
+    }
+
+    [Test]
+    public void AddGasToVoxel_UnregisteredGasUsesConfiguredDefaultMolarHeatCapacityAtConstantVolume()
+    {
+        var config = new AtmosConfig
+        {
+            DefaultMolarHeatCapacityAtConstantVolume = 4f,
+            GasRegistry =
+            [
+                new GasProperties { Name = "Registered", MolarHeatCapacityAtConstantVolume = 1f }
+            ]
+        };
+        using var simulation = new AtmosSimulation(config, 1, 1, 1);
+        var chunk = simulation.CreateAndRegisterChunk(default);
+        simulation.SetChunkClassification(chunk, new VoxelClassification(7));
+
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, 3, 1f, 100f);
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, 0, 1f, 200f);
+
+        var snapshot = simulation.GetChunkSnapshot(chunk);
+        Assert.Multiple(() =>
+        {
+            Assert.That(snapshot.Temperature[0], Is.EqualTo(120f).Within(0.0001f));
+            Assert.That(snapshot.TotalPressure[0],
+                Is.EqualTo(ExpectedPressure(2f, 120f)).Within(0.001f));
+        });
+    }
+
+    [TestCase(0f)]
+    [TestCase(-2f)]
+    [TestCase(float.NaN)]
+    [TestCase(float.PositiveInfinity)]
+    public void AddGasToVoxel_InvalidDefaultMolarHeatCapacityAtConstantVolumeUsesDiatomicFallback(
+        float configuredDefaultMolarHeatCapacityAtConstantVolume)
+    {
+        var config = new AtmosConfig
+        {
+            DefaultMolarHeatCapacityAtConstantVolume = configuredDefaultMolarHeatCapacityAtConstantVolume,
+            GasRegistry =
+            [
+                new GasProperties { Name = "Registered", MolarHeatCapacityAtConstantVolume = 4f }
+            ]
+        };
+        using var simulation = new AtmosSimulation(config, 1, 1, 1);
+        var chunk = simulation.CreateAndRegisterChunk(default);
+        simulation.SetChunkClassification(chunk, new VoxelClassification(7));
+
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, 3, 1f, 100f);
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, 0, 1f, 200f);
+
+        var snapshot = simulation.GetChunkSnapshot(chunk);
+        Assert.Multiple(() =>
+        {
+            float fallback = AtmosPhysicalConstants.IdealDiatomicMolarHeatCapacityAtConstantVolume;
+            float expectedTemperature = (fallback * 100f + 4f * 200f) / (fallback + 4f);
+            Assert.That(snapshot.Temperature[0], Is.EqualTo(expectedTemperature).Within(0.0001f));
+            Assert.That(snapshot.TotalPressure[0],
+                Is.EqualTo(ExpectedPressure(2f, expectedTemperature)).Within(0.001f));
+        });
+    }
+
+    [Test]
+    public void AddGasToVoxel_FirstInjectionReplacesNaNEmptyVoxelTemperature()
+    {
+        using var simulation = new AtmosSimulation(1, 1, 1);
+        var chunk = simulation.CreateAndRegisterChunk(default);
+        simulation.SetChunkClassification(chunk, new VoxelClassification(7));
+        simulation.SetVoxelTemperature(chunk, 0, 0, 0, float.NaN);
+
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, 0, 2f, 250f);
+
+        var snapshot = simulation.GetChunkSnapshot(chunk);
+        Assert.Multiple(() =>
+        {
+            Assert.That(snapshot.Temperature[0], Is.EqualTo(250f));
+            Assert.That(snapshot.TotalPressure[0],
+                Is.EqualTo(ExpectedPressure(2f, 250f)).Within(0.001f));
+            Assert.That(snapshot.Gases[0].Moles[0], Is.EqualTo(2f));
+        });
+    }
+
+    [TestCase(VoxelClassification.RoomSolid)]
+    [TestCase(VoxelClassification.RoomVoid)]
+    public void AddGasToVoxel_DisallowedClassificationDoesNotNormalizeTemperature(int roomId)
+    {
+        using var simulation = new AtmosSimulation(1, 1, 1);
+        var chunk = simulation.CreateAndRegisterChunk(default);
+        simulation.SetChunkClassification(chunk, new VoxelClassification(7));
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, 0, 1f, 300f);
+        simulation.SetVoxelClassification(chunk, 0, 0, 0, new VoxelClassification(roomId));
+        simulation.SetVoxelTemperature(chunk, 0, 0, 0, 0f);
+        var beforeIgnoredInjection = simulation.GetChunkSnapshot(chunk);
+
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, 0, 1f, 600f);
+
+        var afterIgnoredInjection = simulation.GetChunkSnapshot(chunk);
+        Assert.Multiple(() =>
+        {
+            Assert.That(afterIgnoredInjection.Temperature,
+                Is.EqualTo(beforeIgnoredInjection.Temperature));
+            Assert.That(afterIgnoredInjection.TotalPressure,
+                Is.EqualTo(beforeIgnoredInjection.TotalPressure));
+            Assert.That(afterIgnoredInjection.Gases[0].Moles,
+                Is.EqualTo(beforeIgnoredInjection.Gases[0].Moles));
         });
     }
 
@@ -392,7 +586,8 @@ public sealed class AtmosSimulationContractTests
             Assert.That(first.IsSnapshotValid, Is.True);
             Assert.That(second.IsSnapshotValid, Is.True);
             Assert.That(second.GridPosition, Is.EqualTo(chunk.Position));
-            Assert.That(second.TotalPressure[0], Is.EqualTo(900f));
+            Assert.That(second.TotalPressure[0],
+                Is.EqualTo(ExpectedPressure(3f, 300f)).Within(0.001f));
             Assert.That(second.Temperature[0], Is.EqualTo(300f));
             Assert.That(second.VoxelRoomMap[0], Is.EqualTo(9));
             Assert.That(second.Gases.Select(gas => gas.GasId), Is.EqualTo(new[] { 3, 7 }));
@@ -490,5 +685,41 @@ public sealed class AtmosSimulationContractTests
         Assert.That(() => operation(0, 0, 2),
             Throws.TypeOf<ArgumentOutOfRangeException>()
                 .With.Property(nameof(ArgumentOutOfRangeException.ParamName)).EqualTo("z"));
+    }
+
+    [Test]
+    public void AddGasToVoxel_ConfiguredVoxelVolumeControlsPressureInPascals()
+    {
+        var config = new AtmosConfig { VoxelVolume = 2f };
+        using var simulation = new AtmosSimulation(config, 1, 1, 1);
+        var chunk = simulation.CreateAndRegisterChunk(default);
+        simulation.SetChunkClassification(chunk, new VoxelClassification(1));
+
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, 0, 3f, 400f);
+
+        Assert.That(simulation.GetChunkSnapshot(chunk).TotalPressure[0],
+            Is.EqualTo(ExpectedPressure(3f, 400f, 2f)).Within(0.001f));
+    }
+
+    [TestCase(0f)]
+    [TestCase(-1f)]
+    [TestCase(float.NaN)]
+    [TestCase(float.PositiveInfinity)]
+    public void AddGasToVoxel_InvalidVoxelVolumeUsesOneCubicMetreFallback(float voxelVolume)
+    {
+        var config = new AtmosConfig { VoxelVolume = voxelVolume };
+        using var simulation = new AtmosSimulation(config, 1, 1, 1);
+        var chunk = simulation.CreateAndRegisterChunk(default);
+        simulation.SetChunkClassification(chunk, new VoxelClassification(1));
+
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, 0, 1f, 300f);
+
+        Assert.That(simulation.GetChunkSnapshot(chunk).TotalPressure[0],
+            Is.EqualTo(ExpectedPressure(1f, 300f)).Within(0.001f));
+    }
+
+    private static float ExpectedPressure(float moles, float temperature, float volume = 1f)
+    {
+        return (float)((double)moles * AtmosPhysicalConstants.MolarGasConstant * temperature / volume);
     }
 }

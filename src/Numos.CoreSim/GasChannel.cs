@@ -28,7 +28,7 @@ internal struct GasChannel
     public int GasId;
 
     /// <summary>
-    ///     The amount of moles of this gas in each voxel of the chunk.
+    ///     The amount of this gas in each voxel of the chunk, in moles (mol).
     /// </summary>
     /// <remarks>
     ///     While this is not marked as nullable, this field

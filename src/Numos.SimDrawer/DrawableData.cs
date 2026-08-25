@@ -8,8 +8,17 @@ namespace Numos.SimDrawer;
 /// </summary>
 public enum SliceAxis
 {
+    /// <summary>
+    ///     Selects the X axis.
+    /// </summary>
     X,
+    /// <summary>
+    ///     Selects the Y axis.
+    /// </summary>
     Y,
+    /// <summary>
+    ///     Selects the Z axis.
+    /// </summary>
     Z
 }
 
@@ -18,6 +27,13 @@ public enum SliceAxis
 /// </summary>
 public readonly record struct ColorRgba(float R, float G, float B, float A = 1f)
 {
+    /// <summary>
+    ///     Linearly interpolates between two colors.
+    /// </summary>
+    /// <param name="from">Starting color.</param>
+    /// <param name="to">Ending color.</param>
+    /// <param name="amount">Interpolation amount from zero to one.</param>
+    /// <returns>The interpolated color.</returns>
     public static ColorRgba Lerp(ColorRgba from, ColorRgba to, float amount)
     {
         amount = Math.Clamp(amount, 0f, 1f);
@@ -45,19 +61,51 @@ public readonly record struct VoxelAddress(ChunkIdentity Chunk, ushort LocalInde
 [Flags]
 public enum VoxelFaceMask : byte
 {
+    /// <summary>
+    ///     Selects no faces.
+    /// </summary>
     None = 0,
+    /// <summary>
+    ///     Selects the negative X face.
+    /// </summary>
     NegativeX = 1 << 0,
+    /// <summary>
+    ///     Selects the positive X face.
+    /// </summary>
     PositiveX = 1 << 1,
+    /// <summary>
+    ///     Selects the negative Y face.
+    /// </summary>
     NegativeY = 1 << 2,
+    /// <summary>
+    ///     Selects the positive Y face.
+    /// </summary>
     PositiveY = 1 << 3,
+    /// <summary>
+    ///     Selects the negative Z face.
+    /// </summary>
     NegativeZ = 1 << 4,
+    /// <summary>
+    ///     Selects the positive Z face.
+    /// </summary>
     PositiveZ = 1 << 5,
+    /// <summary>
+    ///     Selects every face.
+    /// </summary>
     All = NegativeX | PositiveX | NegativeY | PositiveY | NegativeZ | PositiveZ
 }
 
 /// <summary>
 ///     Immutable presentation values for one voxel. It contains no API-specific mesh data.
 /// </summary>
+/// <param name="Temperature">Temperature in kelvins (K).</param>
+/// <param name="Pressure">Pressure in pascals (Pa).</param>
+/// <param name="TotalMoles">Total gas amount in moles (mol).</param>
+/// <param name="IsVisible">Whether the voxel is visible.</param>
+/// <param name="VisibleFaces">Faces exposed by the voxel.</param>
+/// <param name="PrimaryGasId">Registry ID of the primary gas.</param>
+/// <param name="RoomId">ID of the voxel's room.</param>
+/// <param name="Color">Mapped display color.</param>
 public readonly record struct VoxelDrawData(
     bool IsVisible,
     VoxelFaceMask VisibleFaces,
@@ -99,12 +147,24 @@ public sealed class ChunkDrawData
         SurfaceFaceCount = surfaceFaceCount;
     }
 
+    /// <summary>
+    ///     Gets the chunk identity.
+    /// </summary>
     public ChunkIdentity Identity { get; }
 
+    /// <summary>
+    ///     Gets the chunk grid position.
+    /// </summary>
     public Int3 ChunkPosition => Identity.Position;
 
+    /// <summary>
+    ///     Gets the chunk dimensions.
+    /// </summary>
     public Int3 Dimensions { get; }
 
+    /// <summary>
+    ///     Gets the source revision used to create this data.
+    /// </summary>
     public long SourceRevision { get; }
 
     /// <summary>
@@ -113,6 +173,9 @@ public sealed class ChunkDrawData
     /// </summary>
     public string VisualizationId { get; }
 
+    /// <summary>
+    ///     Gets the visualization mapping revision.
+    /// </summary>
     public ulong VisualizationMappingRevision { get; }
 
     /// <summary>
@@ -125,14 +188,31 @@ public sealed class ChunkDrawData
     /// </summary>
     public ulong StyleVersion { get; }
 
+    /// <summary>
+    ///     Gets the total number of cells.
+    /// </summary>
     public int CellCount => _cells.Length;
 
+    /// <summary>
+    ///     Gets the number of visible cells.
+    /// </summary>
     public int VisibleCellCount { get; }
 
+    /// <summary>
+    ///     Gets the number of exposed faces.
+    /// </summary>
     public int SurfaceFaceCount { get; }
 
+    /// <summary>
+    ///     Gets the cells in local-index order.
+    /// </summary>
     public ReadOnlySpan<VoxelDrawData> Cells => _cells;
 
+    /// <summary>
+    ///     Gets a cell by local index.
+    /// </summary>
+    /// <param name="localIndex">Local voxel index.</param>
+    /// <returns>A read-only reference to the cell.</returns>
     public ref readonly VoxelDrawData GetCell(ushort localIndex)
     {
         if (localIndex >= _cells.Length)
@@ -141,6 +221,12 @@ public sealed class ChunkDrawData
         return ref _cells[localIndex];
     }
 
+    /// <summary>
+    ///     Attempts to get a cell by address.
+    /// </summary>
+    /// <param name="address">Address of the voxel.</param>
+    /// <param name="cell">The resolved cell.</param>
+    /// <returns>Whether the cell was found.</returns>
     public bool TryGetCell(VoxelAddress address, out VoxelDrawData cell)
     {
         if (address.Chunk != Identity || address.LocalIndex >= _cells.Length)
@@ -153,6 +239,13 @@ public sealed class ChunkDrawData
         return true;
     }
 
+    /// <summary>
+    ///     Gets the local index for local coordinates.
+    /// </summary>
+    /// <param name="x">Local X coordinate.</param>
+    /// <param name="y">Local Y coordinate.</param>
+    /// <param name="z">Local Z coordinate.</param>
+    /// <returns>The local voxel index.</returns>
     public ushort GetLocalIndex(int x, int y, int z)
     {
         if (x < 0 || x >= Dimensions.X)
@@ -165,6 +258,11 @@ public sealed class ChunkDrawData
         return checked((ushort)(x + Dimensions.X * (y + Dimensions.Y * z)));
     }
 
+    /// <summary>
+    ///     Gets local coordinates for a local index.
+    /// </summary>
+    /// <param name="localIndex">Local voxel index.</param>
+    /// <returns>The local coordinates.</returns>
     public Int3 GetCoordinates(ushort localIndex)
     {
         if (localIndex >= _cells.Length)
@@ -177,6 +275,11 @@ public sealed class ChunkDrawData
         return new Int3(x, y, z);
     }
 
+    /// <summary>
+    ///     Gets world coordinates for a local index.
+    /// </summary>
+    /// <param name="localIndex">Local voxel index.</param>
+    /// <returns>The world coordinates.</returns>
     public Int3 GetWorldCoordinates(ushort localIndex)
     {
         var local = GetCoordinates(localIndex);
@@ -210,8 +313,14 @@ public sealed class SimulationDrawData
         FrameVersion = frameVersion;
     }
 
+    /// <summary>
+    ///     Gets retained chunk presentation data by grid position.
+    /// </summary>
     public IReadOnlyDictionary<Int3, ChunkDrawData> Chunks => _chunks;
 
+    /// <summary>
+    ///     Gets the visualization descriptor used for this frame.
+    /// </summary>
     public VisualizationDescriptor Visualization { get; }
 
     /// <summary>
@@ -219,8 +328,14 @@ public sealed class SimulationDrawData
     /// </summary>
     public ulong VisualizationMappingRevision { get; }
 
+    /// <summary>
+    ///     Gets the source simulation version.
+    /// </summary>
     public long SourceVersion { get; }
 
+    /// <summary>
+    ///     Gets the retained frame version.
+    /// </summary>
     public long FrameVersion { get; }
 
     /// <summary>
@@ -237,6 +352,12 @@ public sealed class SimulationDrawData
                chunk.VisualizationMappingRevision == VisualizationMappingRevision;
     }
 
+    /// <summary>
+    ///     Attempts to resolve presentation data for a voxel address.
+    /// </summary>
+    /// <param name="address">Address of the voxel.</param>
+    /// <param name="cell">The resolved cell.</param>
+    /// <returns>Whether the cell was found.</returns>
     public bool TryResolve(VoxelAddress address, out VoxelDrawData cell)
     {
         if (_chunks.TryGetValue(address.Chunk.Position, out var chunk))
@@ -250,12 +371,23 @@ public sealed class SimulationDrawData
 /// <summary>
 ///     One visible cell in a focused two-dimensional slice.
 /// </summary>
+/// <param name="U">Horizontal slice coordinate.</param>
+/// <param name="V">Vertical slice coordinate.</param>
+/// <param name="Address">Address of the source voxel.</param>
+/// <param name="Voxel">Presentation data for the voxel.</param>
 public readonly record struct SliceCellDrawData(
     int U,
     int V,
     VoxelAddress Address,
     VoxelDrawData Voxel);
 
+/// <summary>
+///     Defines the world-space bounds of a two-dimensional slice.
+/// </summary>
+/// <param name="Left">Left bound.</param>
+/// <param name="Right">Right bound.</param>
+/// <param name="Bottom">Bottom bound.</param>
+/// <param name="Top">Top bound.</param>
 public readonly record struct SliceBounds(float Left, float Right, float Bottom, float Top);
 
 /// <summary>
@@ -286,20 +418,48 @@ public sealed class SimulationSliceDrawData
         RenderVersion = renderVersion;
     }
 
+    /// <summary>
+    ///     Gets the sliced chunk identity.
+    /// </summary>
     public ChunkIdentity Chunk { get; }
 
+    /// <summary>
+    ///     Gets the axis normal to the slice.
+    /// </summary>
     public SliceAxis Axis { get; }
 
+    /// <summary>
+    ///     Gets the selected index along the slice axis.
+    /// </summary>
     public int SliceIndex { get; }
 
+    /// <summary>
+    ///     Gets the slice width.
+    /// </summary>
     public int Width { get; }
 
+    /// <summary>
+    ///     Gets the slice height.
+    /// </summary>
     public int Height { get; }
 
+    /// <summary>
+    ///     Gets the render invalidation version.
+    /// </summary>
     public ulong RenderVersion { get; }
 
+    /// <summary>
+    ///     Gets visible slice cells.
+    /// </summary>
     public ReadOnlySpan<SliceCellDrawData> Cells => _cells;
 
+    /// <summary>
+    ///     Attempts to get a visible cell by slice coordinates.
+    /// </summary>
+    /// <param name="u">Horizontal slice coordinate.</param>
+    /// <param name="v">Vertical slice coordinate.</param>
+    /// <param name="cell">The resolved cell.</param>
+    /// <returns>Whether a visible cell exists at the coordinates.</returns>
     public bool TryGetCell(int u, int v, out SliceCellDrawData cell)
     {
         if (u < 0 || u >= Width || v < 0 || v >= Height)
@@ -319,6 +479,12 @@ public sealed class SimulationSliceDrawData
         return true;
     }
 
+    /// <summary>
+    ///     Gets aspect-corrected view bounds for the slice.
+    /// </summary>
+    /// <param name="viewportAspectRatio">Viewport width divided by height.</param>
+    /// <param name="margin">Margin around the slice.</param>
+    /// <returns>The view bounds.</returns>
     public SliceBounds GetViewBounds(float viewportAspectRatio, float margin = 0.5f)
     {
         float left = -margin;

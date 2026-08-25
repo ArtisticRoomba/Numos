@@ -1,10 +1,11 @@
 # Numos
-Numos is an engine-agnostic, pseudo-realistic, voxel-based atmospherics simulation.
+Numos is an engine-agnostic, pseudo-realistic, voxel-based atmospherics simulation library.
 
 > [!WARNING]
-> Numos is currently a prototype/personal project and is being actively developed.
-Public APIs, project structure, and features are all ephemeral and can change at any time.
-The project will follow a regular semantic versioning structure when I feel comfortable with releasing the project under v0.1.0.
+> Numos is currently a prototype/personal project and is being actively developed. Public APIs, project structure, and
+features are all ephemeral and can change at any time. Published packages
+use [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html). Until the public API stabilizes, releases remain
+in the `0.x` series and may be published as prereleases (for others to just import and mess around with).
 
 ## Some Highlights/Lowlights
 - First-class 3D support, voxel based
@@ -12,16 +13,22 @@ The project will follow a regular semantic versioning structure when I feel comf
 - Engine-agnostic, with a supported `Numos.API` facade over an internal simulation kernel
 - Multithreaded intra-chunk advection and thermodynamics
 - Singlethreaded cross-chunk boundary flow
-- Simplified ideal gas law (`P = n \cdot T`)
-- Constant volume voxels
+- Ideal-gas pressure in pascals (`P = nRT/V`) with configurable, uniform voxel volume
+- Sensible internal-energy transport using per-species molar heat capacity at constant volume
+- Simulation-owned `IGasMixture` containers and sandboxed live voxel mixtures for canisters, pumps, and tools
 - Attempts at being trimmable and Native AOT-compatible
 
 ## Bug Reports & Contributions
 Contributions and bug reports are always welcome and appreciated. Feel free to submit a PR or bug report on GitHub.
-Be sure to follow the project's `.editorconfig` when making changes.
+See `CONTRIBUTING.md` before contributing.
 
-## Documentation
-Documentation for APIs and the project itself is available under `/docs`.
+## Documentation & Various Readings
+
+Documentation for APIs and the project itself is available under `/docs`. Also see:
+
+- [An Overview of Numos](docs/overview.md)
+- [Using Numos](docs/using.md)
+- [Versioning](docs/versioning.md)
 
 ## Copyright, Credits & License
 Numos is licensed under the MIT license. See `LICENSE.TXT` for more info.

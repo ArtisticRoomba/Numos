@@ -7,12 +7,16 @@ using Numos.CoreSim.Datatypes.Snapshots;
 using Numos.Maths;
 using Numos.SimDrawer;
 using Numos.Viewer.Ui;
+using Raylib_cs;
+using rlImGui_cs;
 
 namespace Numos.Viewer;
 
 public partial class SimulationViewer
 {
     private const float NumericInputWidth = 100f;
+    private const float AboutTabContentWidth = 520f;
+    private const float AboutTabContentHeight = 390f;
 
     private bool _requestOpenAboutModal;
     private bool _aboutModalOpen;
@@ -35,11 +39,22 @@ public partial class SimulationViewer
             return;
         }
 
-        _viewport?.Draw("Simulation 3D##viewport", RenderSimulationScene);
+        if (_show3DViewport)
+        {
+            _viewport?.Draw(
+                "Simulation 3D##viewport",
+                RenderSimulationScene,
+                new Vector2(320, 40),
+                new Vector2(660, 510));
+        }
 
         if (_showSliceViewport)
         {
-            _sliceViewport?.Draw("Simulation Slice 2D##slice-viewport", RenderSimulationSliceScene);
+            _sliceViewport?.Draw(
+                "Simulation Slice 2D##slice-viewport",
+                RenderSimulationSliceScene,
+                new Vector2(320, 560),
+                new Vector2(660, 330));
             UpdateSlicePicking();
             RenderSliceCellTooltip();
         }
@@ -92,7 +107,7 @@ public partial class SimulationViewer
         ImGui.End();
     }
 
-    private static void RenderEmptyWorkspaceMessage()
+    private void RenderEmptyWorkspaceMessage()
     {
         var viewport = ImGui.GetMainViewport();
         ImGui.SetNextWindowPos(
@@ -111,8 +126,7 @@ public partial class SimulationViewer
 
         ImGui.Begin("Empty workspace##empty-workspace", windowFlags);
 
-        ImGuiExtensions.TextCentered("Numos Simulation Viewer");
-        ImGuiExtensions.TextCentered($"v{ViewerVersion}", ImGui.TextDisabled);
+        DrawEmptyWorkspaceBranding();
 
         ImGui.Spacing();
         ImGui.Separator();
@@ -137,7 +151,8 @@ public partial class SimulationViewer
 
         ImGuiExtensions.OpenPopupWhenRequested(popupId, ref _requestOpenAboutModal);
 
-        ImGui.SetNextWindowSize(new Vector2(420, 0), ImGuiCond.Appearing);
+        float aboutWindowWidth = AboutTabContentWidth + ImGui.GetStyle().WindowPadding.X * 2;
+        ImGui.SetNextWindowSize(new Vector2(aboutWindowWidth, 0), ImGuiCond.Appearing);
 
         using var modal = ImGuiExtensions.BeginPopupModal(popupId, ref _aboutModalOpen);
         if (!modal.IsVisible)
@@ -162,7 +177,7 @@ public partial class SimulationViewer
 
     private void DrawAboutTabs()
     {
-        var tabAreaSize = new Vector2(480, 280);
+        var tabAreaSize = new Vector2(AboutTabContentWidth, AboutTabContentHeight);
 
         if (ImGui.BeginTabBar("AboutTabs", ImGuiTabBarFlags.None))
         {
@@ -202,7 +217,83 @@ public partial class SimulationViewer
             new Vector4(0.2f, 0.6f, 1.0f, 1.0f),
             "License: MIT");
 
+        ImGui.Spacing();
+        ImGui.SeparatorText("Build provenance");
+        DrawBuildProvenance(
+            "Viewer",
+            ViewerBuildInfo.PackageVersion,
+            ViewerBuildInfo.GitBranch ?? ViewerBuildInfo.SourceReference,
+            ViewerBuildInfo.GitCommit,
+            ViewerBuildInfo.GitCommitShort,
+            ViewerBuildInfo.BuildConfiguration,
+            ViewerBuildInfo.TargetFramework,
+            ViewerBuildInfo.SdkVersion,
+            ViewerBuildInfo.RepositoryUrl,
+            ViewerBuildInfo.CommitUrl);
+        ImGui.Spacing();
+        DrawBuildProvenance(
+            "CoreSim",
+            CoreSimBuildInfo.PackageVersion,
+            CoreSimBuildInfo.GitBranch ?? CoreSimBuildInfo.SourceReference,
+            CoreSimBuildInfo.GitCommit,
+            CoreSimBuildInfo.GitCommitShort,
+            CoreSimBuildInfo.BuildConfiguration,
+            CoreSimBuildInfo.TargetFramework,
+            CoreSimBuildInfo.SdkVersion,
+            CoreSimBuildInfo.RepositoryUrl,
+            CoreSimBuildInfo.CommitUrl);
+
         ImGui.EndChild();
+    }
+
+    private static void DrawBuildProvenance(
+        string component,
+        string version,
+        string sourceReference,
+        string commit,
+        string shortCommit,
+        string configuration,
+        string targetFramework,
+        string sdkVersion,
+        string repositoryUrl,
+        string? commitUrl)
+    {
+        ImGui.TextUnformatted($"{component} {version}");
+        ImGui.TextDisabled($"Source: {sourceReference}");
+        ImGui.TextDisabled($"Commit: {shortCommit}");
+        ImGui.TextDisabled($"Build: {configuration} / {targetFramework} / SDK {sdkVersion}");
+
+        bool hasRepository = IsKnownBuildValue(repositoryUrl);
+        if (!hasRepository)
+            ImGui.BeginDisabled();
+        if (ImGui.SmallButton($"Repository##{component}"))
+            Raylib.OpenURL(repositoryUrl);
+        if (!hasRepository)
+            ImGui.EndDisabled();
+
+        ImGui.SameLine();
+        bool hasCommitUrl = commitUrl != null;
+        if (!hasCommitUrl)
+            ImGui.BeginDisabled();
+        if (ImGui.SmallButton($"Commit##{component}") && commitUrl != null)
+            Raylib.OpenURL(commitUrl);
+        if (!hasCommitUrl)
+            ImGui.EndDisabled();
+
+        ImGui.SameLine();
+        bool hasCommit = IsKnownBuildValue(commit);
+        if (!hasCommit)
+            ImGui.BeginDisabled();
+        if (ImGui.SmallButton($"Copy hash##{component}"))
+            Raylib.SetClipboardText(commit);
+        if (!hasCommit)
+            ImGui.EndDisabled();
+    }
+
+    private static bool IsKnownBuildValue(string value)
+    {
+        return !string.IsNullOrWhiteSpace(value) &&
+               !string.Equals(value, "unknown", StringComparison.Ordinal);
     }
 
     private void DrawAuthorsTab(Vector2 size)
@@ -224,11 +315,52 @@ public partial class SimulationViewer
 
     private void DrawAboutHeader()
     {
+        float brandingHeight = ImGui.GetTextLineHeight() * 3 + ImGui.GetStyle().ItemSpacing.Y * 2;
+        int logoSize = Math.Max(1, (int)MathF.Ceiling(brandingHeight));
+
         ImGui.BeginGroup();
 
-        ImGui.Text("Numos Simulation Viewer");
-        ImGui.TextDisabled($"Version {ViewerVersion}");
+        bool hasLogo = _viewportBranding.Id != 0;
+        if (hasLogo)
+        {
+            rlImGui.ImageSize(_viewportBranding, logoSize, logoSize);
 
+            ImGui.SameLine(0, ImGui.GetStyle().ItemSpacing.X);
+        }
+
+        ImGui.BeginGroup();
+        ImGui.TextUnformatted("Numos Simulation Viewer");
+        ImGui.TextDisabled($"CoreSim v{CoreSimBuildInfo.PackageVersion}");
+        ImGui.TextDisabled($"Viewer v{ViewerBuildInfo.PackageVersion}");
+        ImGui.EndGroup();
+
+        ImGui.EndGroup();
+    }
+
+    private void DrawEmptyWorkspaceBranding()
+    {
+        if (_viewportBranding.Id == 0)
+            return;
+
+        const string title = "Numos Simulation Viewer";
+        var coreSimVersion = $"CoreSim v{CoreSimBuildInfo.PackageVersion}";
+        var viewerVersion = $"Viewer v{ViewerBuildInfo.PackageVersion}";
+        float textHeight = ImGui.GetTextLineHeight() * 3 + ImGui.GetStyle().ItemSpacing.Y * 2;
+        int logoSize = Math.Max(1, (int)MathF.Ceiling(textHeight));
+        float textWidth = Math.Max(
+            ImGui.CalcTextSize(title).X,
+            Math.Max(ImGui.CalcTextSize(coreSimVersion).X, ImGui.CalcTextSize(viewerVersion).X));
+        float logoTextGap = ImGui.GetStyle().ItemSpacing.X * 2;
+        float availableWidth = ImGui.GetContentRegionAvail().X;
+        float left = ImGui.GetCursorPosX() + Math.Max(0f, (availableWidth - logoSize - logoTextGap - textWidth) * 0.5f);
+        ImGui.SetCursorPosX(left);
+        rlImGui.ImageSize(_viewportBranding, logoSize, logoSize);
+        ImGui.SameLine(0, logoTextGap);
+
+        ImGui.BeginGroup();
+        ImGui.TextUnformatted(title);
+        ImGui.TextDisabled(coreSimVersion);
+        ImGui.TextDisabled(viewerVersion);
         ImGui.EndGroup();
     }
 
@@ -261,6 +393,7 @@ public partial class SimulationViewer
                 ImGui.MenuItem("Tools", null, ref _showToolsPanel);
                 ImGui.MenuItem("View", null, ref _showViewPanel);
                 ImGui.MenuItem("Configuration", null, ref _showConfigurationPanel);
+                ImGui.MenuItem("3D Viewport", null, ref _show3DViewport);
                 ImGui.MenuItem("2D Slice Viewport", null, ref _showSliceViewport);
 
                 if (!panesAvailable)
@@ -357,8 +490,8 @@ public partial class SimulationViewer
         using var window = ImGuiExtensions.BeginWindow(
             "View##view",
             ref _showViewPanel,
-            new Vector2(320, 40),
-            new Vector2(300, 400));
+            new Vector2(990, 40),
+            new Vector2(400, 420));
         if (!window.IsVisible)
             return;
 
@@ -458,8 +591,8 @@ public partial class SimulationViewer
         using var window = ImGuiExtensions.BeginWindow(
             "Configuration##configuration",
             ref _showConfigurationPanel,
-            new Vector2(640, 40),
-            new Vector2(380, 600));
+            new Vector2(990, 470),
+            new Vector2(400, 420));
         if (!window.IsVisible)
             return;
 
@@ -477,26 +610,47 @@ public partial class SimulationViewer
                     ref defaultTemperatureFallback, 0f, 1000f,
                     "Default fallback temperature to set when a voxel has 0 or an uninitialized temperature."))
                 _config.DefaultTemperatureFallback = defaultTemperatureFallback;
+            float voxelVolume = _config.VoxelVolume;
+            if (ConfigSlider("Voxel Volume (m³)", "config-voxel-volume", ref voxelVolume, 0.001f, 100f,
+                    "Physical volume represented by each voxel. Pressure uses P = nRT/V."))
+                _config.VoxelVolume = voxelVolume;
+            float saturationReferencePressure = _config.SaturationReferencePressure;
+            if (ConfigSlider("Saturation Reference Pressure (Pa)", "config-saturation-reference-pressure",
+                    ref saturationReferencePressure, 100f, 200_000f,
+                    "Pressure at which each gas's configured boiling point applies."))
+                _config.SaturationReferencePressure = saturationReferencePressure;
+            float defaultMolarHeatCapacityAtConstantVolume = _config.DefaultMolarHeatCapacityAtConstantVolume;
+            if (ConfigSlider("Default Molar Cv", "config-default-molar-cv",
+                    ref defaultMolarHeatCapacityAtConstantVolume, 0.01f, 10_000f,
+                    "Fallback molar heat capacity at constant volume in J/(mol·K)."))
+                _config.DefaultMolarHeatCapacityAtConstantVolume = defaultMolarHeatCapacityAtConstantVolume;
+            float defaultDiffusionCoefficient = _config.DefaultDiffusionCoefficient;
+            if (ConfigSlider("Default Diffusion Coefficient", "config-default-diffusion-coefficient",
+                    ref defaultDiffusionCoefficient, 0f, 1f,
+                    "Fallback fraction of the species mole imbalance mixed per tick."))
+                _config.DefaultDiffusionCoefficient = defaultDiffusionCoefficient;
             float spaceTemperature = _config.SpaceTemperature;
             if (ConfigSlider("Space Temperature", "config-space-temperature", ref spaceTemperature, 0f, 100f,
                     "Default temperature of space."))
                 _config.SpaceTemperature = spaceTemperature;
-            float flowFriction = _config.FlowFriction;
-            if (ConfigSlider("Flow Friction", "config-flow-friction", ref flowFriction, 0f, 1f,
+            float bulkFlowCoefficient = _config.BulkFlowCoefficient;
+            if (ConfigSlider("Bulk Flow Coefficient", "config-bulk-flow-coefficient", ref bulkFlowCoefficient, 0f, 1f,
                     "Fraction of pressure delta converted to flow per tick."))
-                _config.FlowFriction = flowFriction;
-            float dampingFactor = _config.DampingFactor;
-            if (ConfigSlider("Damping Factor", "config-damping-factor", ref dampingFactor, 0f, 1f,
-                    "Multiplier applied to Flow Friction during large-delta advection. Used to reduce oscillation in the sim."))
-                _config.DampingFactor = dampingFactor;
-            float snapThreshold = _config.SnapThreshold;
-            if (ConfigSlider("Snap Threshold", "config-snap-threshold", ref snapThreshold, 0f, 100f,
-                    "Below this pressure delta, flow uses the Cfl Flow Cap directly instead of Flow Friction multiplied by Damping Factor."))
-                _config.SnapThreshold = snapThreshold;
-            float minFlowCutoff = _config.MinFlowCutoff;
-            if (ConfigSlider("Minimum Flow Cutoff", "config-min-flow-cutoff", ref minFlowCutoff, 0f, 10f,
-                    "Flows below this magnitude are discarded."))
-                _config.MinFlowCutoff = minFlowCutoff;
+                _config.BulkFlowCoefficient = bulkFlowCoefficient;
+            float bulkFlowDamping = _config.BulkFlowDamping;
+            if (ConfigSlider("Bulk Flow Damping", "config-bulk-flow-damping", ref bulkFlowDamping, 0f, 1f,
+                    "Multiplier applied to the bulk-flow coefficient during large pressure deltas."))
+                _config.BulkFlowDamping = bulkFlowDamping;
+            float lowPressureDeltaThreshold = _config.LowPressureDeltaThreshold;
+            if (ConfigSlider("Low-Pressure Delta Threshold (Pa)", "config-low-pressure-delta-threshold",
+                    ref lowPressureDeltaThreshold, 0f, 100f,
+                    "Below this pressure delta, flow uses the maximum pressure-transfer fraction directly."))
+                _config.LowPressureDeltaThreshold = lowPressureDeltaThreshold;
+            float minimumPressureTransfer = _config.MinimumPressureTransfer;
+            if (ConfigSlider("Minimum Pressure Transfer (Pa/tick)", "config-minimum-pressure-transfer",
+                    ref minimumPressureTransfer, 0f, 10f,
+                    "Candidate pressure transfers below this magnitude are discarded."))
+                _config.MinimumPressureTransfer = minimumPressureTransfer;
             float vacuumThreshold = _config.VacuumThreshold;
             if (ConfigSlider("Vacuum Threshold", "config-vacuum-threshold", ref vacuumThreshold, 0f, 100f,
                     "Below this pressure, voxel contents are zeroed out."))
@@ -509,20 +663,21 @@ public partial class SimulationViewer
             if (ConfigSlider("Sleep Epsilon", "config-sleep-epsilon", ref sleepEpsilon, 0f, 100f,
                     "Maximum pressure delta considered at rest."))
                 _config.SleepEpsilon = sleepEpsilon;
-            float thermalConductivity = _config.ThermalConductivity;
-            if (ConfigSlider("Thermal Conductivity", "config-thermal-conductivity", ref thermalConductivity, 0f, 1f,
-                    "Fraction of temperature delta transferred per neighbor per tick."))
-                _config.ThermalConductivity = thermalConductivity;
+            float thermalConductance = _config.ThermalConductance;
+            if (ConfigSlider("Thermal Conductance", "config-thermal-conductance", ref thermalConductance, 0f, 1f,
+                    "Per-face energy conductance in J/K per thermodynamics tick."))
+                _config.ThermalConductance = thermalConductance;
             float condensationRateFactor = _config.CondensationRateFactor;
             if (ConfigSlider("Condensation Rate Factor", "config-condensation-rate-factor", ref condensationRateFactor,
                     0f,
                     1f,
                     "Rate multiplier for phase-change condensation."))
                 _config.CondensationRateFactor = condensationRateFactor;
-            float cflFlowCap = _config.CflFlowCap;
-            if (ConfigSlider("CFL Flow Cap", "config-cfl-flow-cap", ref cflFlowCap, 0f, 1f,
-                    "Rate multiplier for phase-change condensation."))
-                _config.CflFlowCap = cflFlowCap;
+            float maxPressureTransferFraction = _config.MaxPressureTransferFractionPerNeighbor;
+            if (ConfigSlider("Max Pressure Transfer / Neighbor", "config-max-pressure-transfer-fraction",
+                    ref maxPressureTransferFraction, 0f, 1f,
+                    "Maximum source-pressure fraction requested as bulk flow to one neighbor per tick."))
+                _config.MaxPressureTransferFractionPerNeighbor = maxPressureTransferFraction;
             float accumulatorWakeThreshold = _config.AccumulatorWakeThreshold;
             if (ConfigSlider("Accumulator Wake Threshold", "config-accumulator-wake-threshold",
                     ref accumulatorWakeThreshold, 0f, 100f,
@@ -548,17 +703,21 @@ public partial class SimulationViewer
         var defaults = new AtmosConfig();
         _config.GlobalTemperature = defaults.GlobalTemperature;
         _config.DefaultTemperatureFallback = defaults.DefaultTemperatureFallback;
+        _config.DefaultMolarHeatCapacityAtConstantVolume = defaults.DefaultMolarHeatCapacityAtConstantVolume;
+        _config.VoxelVolume = defaults.VoxelVolume;
+        _config.SaturationReferencePressure = defaults.SaturationReferencePressure;
+        _config.DefaultDiffusionCoefficient = defaults.DefaultDiffusionCoefficient;
         _config.SpaceTemperature = defaults.SpaceTemperature;
-        _config.FlowFriction = defaults.FlowFriction;
-        _config.DampingFactor = defaults.DampingFactor;
-        _config.SnapThreshold = defaults.SnapThreshold;
-        _config.MinFlowCutoff = defaults.MinFlowCutoff;
+        _config.BulkFlowCoefficient = defaults.BulkFlowCoefficient;
+        _config.BulkFlowDamping = defaults.BulkFlowDamping;
+        _config.LowPressureDeltaThreshold = defaults.LowPressureDeltaThreshold;
+        _config.MinimumPressureTransfer = defaults.MinimumPressureTransfer;
         _config.VacuumThreshold = defaults.VacuumThreshold;
         _config.SleepThreshold = defaults.SleepThreshold;
         _config.SleepEpsilon = defaults.SleepEpsilon;
-        _config.ThermalConductivity = defaults.ThermalConductivity;
+        _config.ThermalConductance = defaults.ThermalConductance;
         _config.CondensationRateFactor = defaults.CondensationRateFactor;
-        _config.CflFlowCap = defaults.CflFlowCap;
+        _config.MaxPressureTransferFractionPerNeighbor = defaults.MaxPressureTransferFractionPerNeighbor;
         _config.AccumulatorWakeThreshold = defaults.AccumulatorWakeThreshold;
         _config.AccumulatorMaxAliveTicks = defaults.AccumulatorMaxAliveTicks;
     }
@@ -593,8 +752,8 @@ public partial class SimulationViewer
         using var window = ImGuiExtensions.BeginWindow(
             "Tools##tools",
             ref _showToolsPanel,
-            new Vector2(390, 40),
-            new Vector2(380, 560));
+            new Vector2(10, 340),
+            new Vector2(300, 550));
         if (!window.IsVisible)
             return;
 
@@ -759,6 +918,8 @@ public partial class SimulationViewer
 
         if (legend.Kind == VisualizationLegendKind.Gradient && legend.Entries.Count > 0)
         {
+            RenderLegendBoundsControls(legend.Range);
+
             ImGui.Checkbox("Resolution##legend-resolution-enabled", ref _legendResolutionEnabled);
             if (_legendResolutionEnabled)
             {
@@ -782,6 +943,61 @@ public partial class SimulationViewer
                 ImGuiColorEditFlags.NoTooltip, new Vector2(16, 16));
             ImGui.SameLine();
             ImGui.TextUnformatted(entry.Label);
+        }
+    }
+
+    private void RenderLegendBoundsControls(VisualizationRange currentRange)
+    {
+        bool automaticBounds = _legendAutomaticBounds;
+        if (ImGui.Checkbox("Automatic bounds##legend-automatic-bounds", ref automaticBounds))
+        {
+            _legendAutomaticBounds = automaticBounds;
+            if (!automaticBounds)
+            {
+                _legendMinimum = currentRange.Minimum;
+                _legendMaximum = currentRange.Maximum;
+            }
+
+            _legendRangeRevision++;
+        }
+
+        if (_legendAutomaticBounds)
+        {
+            ImGui.SetNextItemWidth(NumericInputWidth);
+            float offset = _legendAutomaticRangeOffset;
+            if (ImGui.InputFloat("± Offset##legend-range-offset", ref offset))
+            {
+                _legendAutomaticRangeOffset = Math.Max(offset, 0f);
+                _legendRangeRevision++;
+            }
+
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Expands the automatic minimum and maximum by this amount.");
+
+            return;
+        }
+
+        ImGui.SetNextItemWidth(NumericInputWidth);
+        float minimum = _legendMinimum;
+        if (ImGui.InputFloat("Min##legend-minimum", ref minimum))
+        {
+            _legendMinimum = Math.Min(minimum, _legendMaximum);
+            _legendRangeRevision++;
+        }
+
+        ImGui.SameLine();
+        ImGui.SetNextItemWidth(NumericInputWidth);
+        float maximum = _legendMaximum;
+        if (ImGui.InputFloat("Max##legend-maximum", ref maximum))
+        {
+            _legendMaximum = Math.Max(maximum, _legendMinimum);
+            _legendRangeRevision++;
+        }
+
+        if (_legendMaximum <= _legendMinimum)
+        {
+            _legendMaximum = _legendMinimum + 1f;
+            _legendRangeRevision++;
         }
     }
 
@@ -935,7 +1151,7 @@ public partial class SimulationViewer
         }
 
         ImGui.Text($"Temperature: {details.Temperature:F2} K");
-        ImGui.Text($"Pressure: {details.Pressure:F2}");
+        ImGui.Text($"Pressure: {details.Pressure:F2} Pa");
         GetGasSummary(details.Gases, out float totalMoles, out int primaryGasId);
         ImGui.Text($"Total Moles: {totalMoles:F2}");
         ImGui.Text($"Primary Gas: {FormatGas(primaryGasId)}");
@@ -1069,8 +1285,8 @@ public partial class SimulationViewer
                     {
                         float maxPressure = snapshot.TotalPressure.Max();
                         float avgPressure = snapshot.TotalPressure.Where(p => p > 0).DefaultIfEmpty(0).Average();
-                        ImGui.Text($"Max Pressure: {maxPressure:F2}");
-                        ImGui.Text($"Avg Pressure: {avgPressure:F2}");
+                        ImGui.Text($"Max Pressure: {maxPressure:F2} Pa");
+                        ImGui.Text($"Avg Pressure: {avgPressure:F2} Pa");
                     }
 
                     if (snapshot.Temperature is { Length: > 0 })

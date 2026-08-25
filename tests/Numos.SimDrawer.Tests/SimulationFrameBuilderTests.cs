@@ -9,6 +9,34 @@ namespace Numos.SimDrawer.Tests;
 public sealed class SimulationFrameBuilderTests
 {
     [Test]
+    public void BuildSimulation_RangeControls_ExpandsAutomaticBoundsOrUsesManualBounds()
+    {
+        var builder = CreateBuilder();
+        var snapshot = CreateSnapshot(
+            new Int3(0, 0, 0),
+            new Int3(2, 1, 1),
+            temperature: [10f, 20f]);
+
+        var expanded = builder.BuildSimulation(
+            [snapshot],
+            BuiltInVisualizationIds.Temperature,
+            1,
+            automaticRangeOffset: 2f);
+        var manual = builder.BuildSimulation(
+            [snapshot],
+            BuiltInVisualizationIds.Temperature,
+            2,
+            resolution: 64,
+            rangeOverride: new VisualizationRange(0f, 100f));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(expanded.Visualization.Range, Is.EqualTo(new VisualizationRange(8f, 22f)));
+            Assert.That(manual.Visualization.Range, Is.EqualTo(new VisualizationRange(0f, 100f, 64)));
+        });
+    }
+
+    [Test]
     public void BuildSimulation_TwoChunksIncludingEmpty_PreservesBothChunks()
     {
         var builder = CreateBuilder();

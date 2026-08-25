@@ -1,10 +1,21 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
+    <Import Project="Version.props"/>
+
     <PropertyGroup>
         <TargetFramework>net10.0</TargetFramework>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
         <RootNamespace>Numos.CoreSim</RootNamespace>
+        <PackageId>Numos.CoreSim</PackageId>
+        <Title>Numos CoreSim</Title>
+        <Description>Engine-agnostic, pseudo-realistic, voxel-based atmospherics simulation kernel.</Description>
+        <PackageTags>simulation;atmospherics;voxel;nativeaot</PackageTags>
+        <GenerateDocumentationFile>true</GenerateDocumentationFile>
+        <GenerateNumosBuildInfo>true</GenerateNumosBuildInfo>
+        <NumosReleaseTagPrefix>coresim</NumosReleaseTagPrefix>
+        <NumosSourceRevisionId Condition="'$(CoreSimSourceRevisionId)' != ''">$(CoreSimSourceRevisionId)</NumosSourceRevisionId>
+        <NumosSourceReference Condition="'$(CoreSimSourceReference)' != ''">$(CoreSimSourceReference)</NumosSourceReference>
     </PropertyGroup>
 
     <ItemGroup>

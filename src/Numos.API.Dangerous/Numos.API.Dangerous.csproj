@@ -1,11 +1,16 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
+    <Import Project="..\Numos.CoreSim\Version.props"/>
+
     <PropertyGroup>
         <TargetFramework>net10.0</TargetFramework>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
         <RootNamespace>Numos.API.Dangerous</RootNamespace>
         <PackageId>Numos.API.Dangerous</PackageId>
+        <Title>Numos Dangerous API</Title>
+        <Description>Opt-in low-level APIs for Numos simulations that can bypass normal validation and safety checks.</Description>
+        <PackageTags>simulation;atmospherics;voxel;low-level;dangerous;nativeaot</PackageTags>
         <GenerateDocumentationFile>true</GenerateDocumentationFile>
     </PropertyGroup>
 

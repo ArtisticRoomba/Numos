@@ -133,6 +133,51 @@ public partial class SimulationViewer
         ImGui.Separator();
         ImGui.Checkbox("Show FPS overlay", ref _showPerformanceOverlay);
         ImGui.TextDisabled("Displays the current render rate in the upper-left corner.");
+
+        ImGui.Spacing();
+        ImGui.Checkbox("Show viewport branding", ref _showViewportBranding);
+        ImGui.TextDisabled("Displays the Numos logo and name in simulation views.");
+        ImGui.TextDisabled("How it feels to LARP as an actual CFD tool.");
+        ImGui.SetNextItemWidth(220f);
+        ImGui.SliderFloat(
+            "Branding opacity", ref _viewportBrandingOpacityPercent, 0f, 100f, "%.0f%%");
+        ImGui.SetNextItemWidth(220f);
+        if (ImGui.BeginCombo("Corner", GetViewportBrandingCornerLabel(_viewportBrandingCorner)))
+        {
+            foreach (var corner in Enum.GetValues<ViewportBrandingCorner>())
+            {
+                bool isSelected = corner == _viewportBrandingCorner;
+                if (ImGui.Selectable(GetViewportBrandingCornerLabel(corner), isSelected))
+                    _viewportBrandingCorner = corner;
+                if (isSelected)
+                    ImGui.SetItemDefaultFocus();
+            }
+
+            ImGui.EndCombo();
+        }
+
+        ImGui.SetNextItemWidth(220f);
+        ImGui.SliderFloat("Offset X", ref _viewportBrandingOffsetX, 0f, 500f, "%.0f px");
+        ImGui.SetNextItemWidth(220f);
+        ImGui.SliderFloat("Offset Y", ref _viewportBrandingOffsetY, 0f, 500f, "%.0f px");
+        ImGui.SetNextItemWidth(220f);
+        ImGui.SliderFloat("Logo size", ref _viewportBrandingSizePercent, 1f, 25f, "%.0f%%");
+
+        ImGui.Separator();
+        ImGui.Text("Window layout");
+        if (ImGui.Button("Save Current Layout"))
+            SaveCurrentLayout();
+        ImGui.TextDisabled("Restores this arrangement the next time Numos starts.");
+
+#if DEBUG || TOOLS
+        ImGui.Spacing();
+        if (ImGui.Button("Save as Default Preset"))
+            SavePackagedDefaultLayout();
+        ImGui.TextDisabled("Saves the default that future publishes use on first launch.");
+#endif
+
+        if (!string.IsNullOrEmpty(_layoutStatus))
+            ImGui.TextDisabled(_layoutStatus);
     }
 
     private static (int Width, int Height)[] GetTargetResolutions()
