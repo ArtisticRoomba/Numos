@@ -99,7 +99,8 @@ public class ReactionSolver
             for (var i = 0; i < mixtureLength - 1; i++)
             {
                 if (mixtureVector[i] <= 0) continue;
-                chunk.InjectGasToVoxel(voxelIndex, i, mixtureVector[i], newTemps[voxelIndex]);
+                //TODO: FILL CORRECT ARGUMENTS.
+                chunk.InjectGasToVoxel(voxelIndex, i, mixtureVector[i], newTemps[voxelIndex],0,0);
             }
 
             //collect feedbacks and respond back.
@@ -136,7 +137,7 @@ public class ReactionSolver
                 continue;
             // multiply by mole amounts
             //sum together
-            result += mixtureVector[i] * temperature * _config.GasRegistry[i].SpecificHeatCapacity;
+            result += mixtureVector[i] * temperature * _config.GasRegistry[i].MolarHeatCapacityAtConstantVolume;
         }
 
         mixtureVector[mixtureLength] = result;

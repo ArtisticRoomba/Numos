@@ -121,9 +121,16 @@ public class AtmosConfig
     public float SleepEpsilon { get; set; } = 3.5f;
 
     /// <summary>
-    ///     Fraction of temperature delta transferred per neighbor per tick.
+    ///     Effective thermal conductance between adjacent voxels, in joules per kelvin (J/K) per
+    ///     thermodynamics tick (currently every second simulation tick).
     /// </summary>
-    public float ThermalConductivity { get; set; } = 0.05f;
+    /// <remarks>
+    ///     The simulation applies equal-and-opposite energy transfers to conserve sensible energy. Transfer
+    ///     limiting makes each updated gas-bearing temperature a convex combination of temperatures participating
+    ///     in the solve, preventing negative temperatures and new temperature extrema. Non-finite or nonpositive
+    ///     values disable thermal diffusion.
+    /// </remarks>
+    public float ThermalConductance { get; set; } = AtmosConfigDefaults.ThermalConductance;
 
     /// <summary>
     ///     Rate multiplier for phase-change condensation.
@@ -131,9 +138,14 @@ public class AtmosConfig
     public float CondensationRateFactor { get; set; } = 0.5f;
 
     /// <summary>
-    ///     Rate multiplier for phase-change condensation.
+    ///     Maximum fraction of a source voxel's pressure used by the bulk-advection term for one neighbor per tick.
     /// </summary>
-    public float CflFlowCap { get; set; } = 0.16f;
+    /// <remarks>
+    ///     Values are clamped to [0, 1]; non-finite values disable bulk flow. Passive Fickian diffusion is
+    ///     calculated separately and is not capped by this value.
+    /// </remarks>
+    public float MaxPressureTransferFractionPerNeighbor { get; set; } =
+        AtmosConfigDefaults.MaxPressureTransferFractionPerNeighbor;
 
     /// <summary>
     ///     Minimum accumulated pressure activity required to wake a sleeping chunk, in pascals (Pa).
