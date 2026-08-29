@@ -1,86 +1,15 @@
 using Numos.CoreSim;
-using Numos.CoreSim.Datatypes.Primitives;
-using Numos.CoreSim.Solvers;
 using Numos.Maths;
 
 namespace Numos.API.Dangerous;
 
 /// <summary>
-///     A low-level solver that operates on live simulation storage.
+///     Live, unchecked views over one simulation chunk.
 /// </summary>
 /// <remarks>
-///     The context and its views are valid only for the callback. Numos performs no validation or cache repair
-///     after arbitrary span writes; the solver is responsible for maintaining all invariants it touches.
+///     Numos performs no validation or cache repair after arbitrary span writes. The caller is responsible for
+///     maintaining every storage, cache, topology, sleep, and revision invariant it touches.
 /// </remarks>
-public delegate void AtmosDangerousSolver(AtmosDangerousSolverContext context);
-
-/// <summary>
-///     A low-level custom solver that owns its strongly typed configuration.
-/// </summary>
-/// <typeparam name="TConfig">The solver-specific reference type retained by the solver.</typeparam>
-/// <remarks>
-///     This interface provides configuration ownership only. Its solver still receives live, unchecked storage
-///     and therefore has the same compatibility and invariant-maintenance responsibilities as
-///     <see cref="AtmosDangerousSolver" />. Registration does not transfer ownership or disposal responsibility.
-/// </remarks>
-public interface IAtmosDangerousSolver<out TConfig> where TConfig : class
-{
-    /// <summary>The configuration owned by this solver.</summary>
-    TConfig Config { get; }
-
-    /// <summary>Executes the solver against live simulation storage.</summary>
-    /// <param name="context">The unchecked simulation surface for the current tick.</param>
-    void Solve(AtmosDangerousSolverContext context);
-}
-
-/// <summary>
-///     Low-level state supplied to a dangerous solver for one fixed tick.
-/// </summary>
-public readonly ref struct AtmosDangerousSolverContext
-{
-    private readonly AtmosSolverExecutionContext _context;
-
-    internal AtmosDangerousSolverContext(AtmosSolverExecutionContext context)
-    {
-        _context = context;
-    }
-
-    /// <summary>The one-based tick number currently being solved.</summary>
-    public int TickCount => _context.TickCount;
-
-    /// <summary>The mutable configuration reference captured at the beginning of this tick.</summary>
-    /// <remarks>Replacing the simulation configuration during this tick does not replace this reference.</remarks>
-    public AtmosConfig Config => _context.Configuration;
-
-    /// <summary>The number of chunks in the tick snapshot.</summary>
-    public int ChunkCount => _context.Chunks.Length;
-
-    /// <summary>Returns a live view of a chunk in the tick snapshot.</summary>
-    public AtmosDangerousChunk GetChunk(int index)
-    {
-        return new AtmosDangerousChunk(_context.Chunks[index]);
-    }
-
-    /// <summary>
-    ///     Injects gas using the normalized SHC and pressure coefficient captured for this tick.
-    /// </summary>
-    public void InjectGasToVoxel(int chunkIndex, ushort localVoxelIndex, int gasId, float moles,
-        float temperature)
-    {
-        AtmosChunk chunk = _context.Chunks[chunkIndex];
-        int roomId = chunk.VoxelRoomMap[localVoxelIndex];
-        if (roomId == VoxelClassification.RoomSolid || roomId == VoxelClassification.RoomVoid)
-            return;
-
-        chunk.WakeRoom(roomId);
-        GasInjectionSolver.InjectDuringTick(
-            chunk, localVoxelIndex, gasId, moles, temperature, _context.TickConfig);
-    }
-}
-
-/// <summary>
-///     Live, unchecked views over one solver chunk.
-/// </summary>
 public readonly ref struct AtmosDangerousChunk
 {
     private readonly AtmosChunk _chunk;

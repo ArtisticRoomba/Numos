@@ -71,7 +71,7 @@ When a disturbance exceeds a configurable threshold (the "Threshold of Violence"
 graph TD
     API["AtmosSimulation (Public API)"] --> KERNEL["AtmosKernel (Lifecycle and Tick Driver)"]
     API --> PIPE["Ordered Solver Pipeline"]
-    DANGER["Numos.API.Dangerous (Opt-in Raw Views)"] --> PIPE
+    DANGER["Numos.API.Dangerous (Opt-in Raw Views)"] --> B
     KERNEL --> PIPE
     PIPE --> CTX["Per-tick Solver Context"]
     PIPE --> A["AdvectionSolver"]
@@ -79,10 +79,12 @@ graph TD
     PIPE --> THERMO["ThermodynamicsSolver"]
     PIPE --> THERMAL["ThermalBoundarySolver"]
     CTX --> B["AtmosChunk[] (Tick Snapshot)"]
-    CTX --> E["Tick-scoped Boundary Queues"]
+    A -->|"Tick-tagged events"| BOUNDARY
+    THERMO -->|"Tick-tagged events"| THERMAL
     B --> C["GasChannel[] (SoA Gas Data)"]
     B --> D["VoxelRoomMap (Topology)"]
-    G["AtmosConfig (Live Tuning)"] --> CTX
+    G["AtmosConfig (Live Tuning)"] --> API
+    G -->|"Normalized tick snapshot"| CTX
     H["GasProperties Registry"] --> G
     I["RoomNode (Macro Layer)"] -.-> B
     J["GasAccumulator"] -.-> I
@@ -96,22 +98,18 @@ Numos deliberately exposes two package-level integration surfaces:
 | Package | Intended use | Compatibility                        | State access                                      |
 |---------|--------------|--------------------------------------|---------------------------------------------------|
 | `Numos.API` | Normal engine and game integration | Supported public contract            | Handles, validated operations, detached snapshots |
-| `Numos.API.Dangerous` | Measured performance-critical solver code | No compatibility guarantee (for now) | Callback-scoped live spans and unchecked state views |
+| `Numos.API.Dangerous` | Measured performance-critical solver code | No compatibility guarantee (for now) | Handle-addressed live spans and unchecked state views |
 
 The dangerous package must be referenced separately and imported through `Numos.API.Dangerous`. Access begins with
-`simulation.Dangerous()`. Standard custom solvers use detached snapshots and validated mutations. Dangerous custom
-solvers are stack-scoped callbacks over live chunk arrays and gas-channel spans; they are responsible for maintaining
-cache, topology, and revision invariants after raw writes.
+`simulation.Dangerous()`. Every custom solver is registered through `simulation.Solvers` and receives the same
+`AtmosSimulation` facade. Most solvers use its detached snapshots and validated mutations; a measured hot path can call
+`simulation.Dangerous().GetChunk(handle)` from that callback to obtain stack-scoped live chunk and gas-channel spans.
 
-The standard context is the stable solver extension surface. Its mutation methods keep pressure/heat-capacity caches,
-room activation, topology indices, sleep state, and observable revisions coherent as applicable. A solver should use
-the dangerous package only when it must directly traverse or mutate backing storage and can maintain those coupled
-invariants itself. Downstream standard solvers consequently depend on API behavior rather than chunk-array layout.
-
-The dangerous package translates internal state into callback-scoped `ref struct` views. It does not add raw-access
-members to `AtmosKernel`; lifecycle and tick orchestration therefore remain separate from the opt-in integration
-surface. `AtmosKernel`, `AtmosChunk`, and gas-channel representations remain internal CLR types and are never
-returned directly from either package.
+Validated simulation mutations keep pressure/heat-capacity caches, room activation, topology indices, sleep state,
+and observable revisions coherent as applicable. A solver should use the dangerous package only when it must directly
+traverse or mutate backing storage and can maintain those coupled invariants itself. The dangerous views are
+`ref struct` values and never expose the internal `AtmosChunk` or `GasChannel` CLR types. They are safest inside a
+solver callback, where the simulation already prevents concurrent tick and chunk-lifecycle operations.
 
 ---
 
@@ -301,11 +299,10 @@ The `Temperature` setter stores its raw value for parity with direct voxel tooli
 temperatures are interpreted through `DefaultTemperatureFallback` when pressure or sensible energy is calculated.
 Creation and incoming-gas operations still require finite, nonnegative temperatures.
 
-At the start of each simulation tick, the solver captures the current `AtmosConfig` reference and a normalized
-configuration/gas-property snapshot. Built-in stages use the normalized snapshot for the whole tick. Standard and
-dangerous contexts expose the captured live reference, so mutating it is visible as ordinary object mutation, but
-replacing the simulation configuration during a callback does not change the reference seen by later callbacks.
-Either kind of configuration change affects normalized built-in settings on the next tick.
+At the start of each simulation tick, the solver captures a normalized configuration/gas-property snapshot from the
+current `AtmosConfig`. Built-in stages use that normalized snapshot for the whole tick. Custom callbacks receive the
+live `AtmosSimulation`, so `simulation.Config` reflects an immediately replaced configuration for subsequent custom
+callbacks. Mutating or replacing it affects normalized built-in settings on the next tick.
 
 Persistent voxel state and advection work buffers use single precision. Overflow-prone formulas use stable algebraic
 forms: thermal equilibrium conductance is evaluated without forming `C1 * C2`, heat-capacity-weighted mixing uses
@@ -351,9 +348,9 @@ Each frame:
 `AtmosKernel` owns chunk lifecycle, tick state, and pipeline execution. Physics is implemented by focused components
 under `Numos.CoreSim.Solvers`; the kernel does not contain advection, boundary-flow, thermodynamics, or phase-change
 algorithms. A direct `Tick` snapshots the current chunk set; `Update` snapshots it once for its fixed-step batch.
-Every fixed tick captures the live configuration reference plus its normalized built-in settings, increments the
-tick counter, constructs a fresh execution context, and executes the ordered `simulation.Solvers` pipeline. Its
-default stages are:
+Every fixed tick captures normalized built-in settings, increments the tick counter, constructs an internal execution
+context containing only tick-wide inputs, and executes the ordered `simulation.Solvers` pipeline. Its default stages
+are:
 
 1. `advection`
 2. `boundary-flow`
@@ -371,30 +368,31 @@ The producer/consumer order is part of the default contract. Removing or disabli
 no-op for that tick. Moving a consumer before its producer also makes it observe an empty queue; events are never
 carried into a later tick.
 
-Stages can be enabled, disabled, removed, or restored with `ResetToDefaults`. Standard delegates can be appended or
+Stages can be enabled, disabled, removed, or restored with `ResetToDefaults`. Custom delegates can be appended or
 inserted before/after any named stage:
 
 ```csharp
-simulation.Solvers.RegisterAfter(AtmosBuiltInSolvers.Advection, "game-reactions", context =>
+simulation.Solvers.RegisterAfter(AtmosBuiltInSolvers.Advection, "game-reactions", solverSimulation =>
 {
-    foreach (AtmosChunkHandle chunk in context.Chunks)
+    foreach (AtmosChunkHandle chunk in solverSimulation.GetChunkHandles())
     {
-        AtmosChunkSnapshot snapshot = context.GetChunkSnapshot(chunk);
-        // Inspect the detached snapshot and apply results through validated context methods.
+        AtmosChunkSnapshot snapshot = solverSimulation.GetChunkSnapshot(chunk);
+        // Inspect the detached snapshot and apply results through validated simulation methods.
     }
 });
 
 simulation.Solvers.SetEnabled(AtmosBuiltInSolvers.Thermodynamics, false);
 ```
 
-Pipeline edits made by a callback take effect on the next tick. Gas and thermal boundary events are stored in the
-per-tick execution context, so disabling a consumer stage cannot replay stale events when it is later re-enabled.
-Recursive `Tick`/`Update`, simulation disposal, and chunk registration/removal are rejected during a callback because
-they would invalidate or escape the current chunk snapshot. Perform those lifecycle operations outside the solver
-tick.
+Pipeline edits made by a callback take effect on the next tick. Gas and thermal boundary queues belong to their
+consumer solver instances. Producers clear the prior batch and tag every event with its tick; consumers discard any
+event not produced for their current tick. Disabling or reordering a consumer therefore cannot replay stale work when
+it is later re-enabled. Recursive `Tick`/`Update`, simulation disposal, and chunk registration/removal are rejected
+during a callback because they would invalidate the current chunk snapshot. Perform those lifecycle operations outside
+the solver tick.
 
-Solver-specific settings should remain with the solver instead of expanding `AtmosConfig` with unrelated game
-configuration. Implement `IAtmosSolver<TConfig>` to make that ownership explicit:
+Solver-specific settings should remain with a stateful solver object instead of expanding `AtmosConfig` with unrelated
+game configuration. Register its method as the callback:
 
 ```csharp
 public sealed class ReactionSolverConfig
@@ -402,13 +400,13 @@ public sealed class ReactionSolverConfig
     public float Rate { get; set; } = 0.25f;
 }
 
-public sealed class ReactionSolver : IAtmosSolver<ReactionSolverConfig>
+public sealed class ReactionSolver
 {
     public ReactionSolverConfig Config { get; } = new();
 
-    public void Solve(AtmosSolverContext context)
+    public void Solve(AtmosSimulation simulation)
     {
-        // Read snapshots and apply validated mutations through context.
+        // Read snapshots and apply validated mutations through simulation.
     }
 }
 
@@ -417,32 +415,31 @@ var reactionSolver = new ReactionSolver();
 simulation.Solvers.RegisterAfter(
     AtmosBuiltInSolvers.Advection,
     "game-reactions",
-    reactionSolver);
+    reactionSolver.Solve);
 
 reactionSolver.Config.Rate = 0.5f;
 ```
 
-The pipeline retains the solver instance through its callback, so its typed configuration remains editable after
-registration. It does not own or dispose custom solvers; callers remain responsible for an `IDisposable` solver's
-lifetime. `AtmosSolverContext.Config` exposes the simulation-wide physical configuration reference captured for the
-tick. Dangerous solvers can implement `IAtmosDangerousSolver<TConfig>` for the same ownership pattern; only state
-access, not configuration ownership, determines which package a custom stage belongs in.
+The registered method retains the solver instance, so its typed configuration remains editable after registration.
+The pipeline does not own or dispose custom solvers; callers remain responsible for an `IDisposable` solver's lifetime.
 
-Solvers that have a measured need to avoid snapshot copies can opt into live storage through the separate dangerous
-package:
+Solvers that have a measured need to avoid snapshot copies can opt into live storage from the same callback:
 
 ```csharp
-simulation.Dangerous().Solvers.RegisterAfter(AtmosBuiltInSolvers.Advection, "fast-reaction", context =>
+simulation.Solvers.RegisterAfter(AtmosBuiltInSolvers.Advection, "fast-reaction", solverSimulation =>
 {
-    AtmosDangerousChunk chunk = context.GetChunk(0);
-    Span<float> oxygen = chunk.GetGasChannel(0).Moles;
-    // Raw writes are unchecked. Repair affected caches/topology and call MarkChanged as required.
+    foreach (AtmosChunkHandle handle in solverSimulation.GetChunkHandles())
+    {
+        AtmosDangerousChunk chunk = solverSimulation.Dangerous().GetChunk(handle);
+        Span<float> oxygen = chunk.GetGasChannel(0).Moles;
+        // Raw writes are unchecked. Repair affected caches/topology and call MarkChanged as required.
+    }
 });
 ```
 
-Gas injection is an atomic solver operation shared by the supported API, boundary flow, and dangerous solver context.
-It recalculates the target voxel's existing total SHC from its gas composition before temperature mixing. Dangerous
-pipeline injection uses the normalized gas properties and pressure coefficient captured for that tick.
+Gas injection through `AtmosSimulation.AddGasToVoxel` recalculates the target voxel's existing total SHC from its gas
+composition before temperature mixing. Internal boundary flow uses the same atomic injection operation with the
+normalized gas properties and pressure coefficient captured for that tick.
 
 The four default stages are described below.
 

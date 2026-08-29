@@ -65,7 +65,7 @@ internal sealed partial class AtmosKernel : IDisposable, IAtmosSolverWorld
                     chunk.MarkChanged();
             }
 
-            var context = new AtmosSolverExecutionContext(this, chunks, _tickConfig, _config, TickCount);
+            var context = new AtmosSolverExecutionContext(this, chunks, _tickConfig, TickCount);
             _solverPipeline.Execute(context);
         }
         finally

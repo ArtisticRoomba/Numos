@@ -1,5 +1,3 @@
-using System.Collections.Concurrent;
-using Numos.CoreSim.Datatypes.Events;
 using Numos.Maths;
 
 namespace Numos.CoreSim.Solvers;
@@ -10,12 +8,11 @@ namespace Numos.CoreSim.Solvers;
 internal sealed class AtmosSolverExecutionContext
 {
     internal AtmosSolverExecutionContext(IAtmosSolverWorld world, AtmosChunk[] chunks,
-        AtmosSolverConfigSnapshot config, AtmosConfig configuration, int tickCount)
+        AtmosSolverConfigSnapshot config, int tickCount)
     {
         World = world;
         Chunks = chunks;
         TickConfig = config;
-        Configuration = configuration;
         TickCount = tickCount;
     }
 
@@ -24,11 +21,7 @@ internal sealed class AtmosSolverExecutionContext
     /// <summary>Normalized built-in solver settings captured before this tick began.</summary>
     internal AtmosSolverConfigSnapshot TickConfig { get; }
 
-    /// <summary>The live public configuration reference captured before this tick began.</summary>
-    internal AtmosConfig Configuration { get; }
     internal int TickCount { get; }
-    internal ConcurrentQueue<(Int3 Key, BoundaryFlowEvent Event)> BoundaryEvents { get; } = new();
-    internal ConcurrentQueue<(Int3 Key, ThermalBoundaryEvent Event)> ThermalBoundaryEvents { get; } = new();
 }
 
 /// <summary>

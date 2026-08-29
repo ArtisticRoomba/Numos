@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using Numos.CoreSim.Datatypes.Events;
 using Numos.CoreSim.Datatypes.Primitives;
@@ -10,14 +11,28 @@ namespace Numos.CoreSim.Solvers;
 /// </summary>
 internal sealed class BoundaryFlowSolver : IAtmosSolverStage
 {
+    private readonly ConcurrentQueue<TickBoundaryFlowEvent> _boundaryEvents = new();
     private readonly List<(Int3 Key, BoundaryFlowEvent Event)> _orderedEvents = [];
+
+    internal void ClearPendingEvents()
+    {
+        _boundaryEvents.Clear();
+    }
+
+    internal void Enqueue(int tickCount, Int3 key, BoundaryFlowEvent boundaryEvent)
+    {
+        _boundaryEvents.Enqueue(new TickBoundaryFlowEvent(tickCount, key, boundaryEvent));
+    }
 
     public void Solve(AtmosSolverExecutionContext context)
     {
         long startedAt = Stopwatch.GetTimestamp();
         _orderedEvents.Clear();
-        while (context.BoundaryEvents.TryDequeue(out var boundaryEvent))
-            _orderedEvents.Add(boundaryEvent);
+        while (_boundaryEvents.TryDequeue(out var boundaryEvent))
+        {
+            if (boundaryEvent.TickCount == context.TickCount)
+                _orderedEvents.Add((boundaryEvent.Key, boundaryEvent.Event));
+        }
         _orderedEvents.Sort(CompareEvents);
 
         foreach (var (chunkPosition, boundaryEvent) in _orderedEvents)
@@ -167,4 +182,9 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
             ? comparison
             : left.Event.LocalVoxelIndex.CompareTo(right.Event.LocalVoxelIndex);
     }
+
+    private readonly record struct TickBoundaryFlowEvent(
+        int TickCount,
+        Int3 Key,
+        BoundaryFlowEvent Event);
 }

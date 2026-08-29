@@ -1,3 +1,7 @@
+using Numos.CoreSim;
+using Numos.CoreSim.Datatypes.Primitives;
+using Numos.Maths;
+
 namespace Numos.API.Dangerous.Tests;
 
 [TestFixture]
@@ -24,35 +28,44 @@ public sealed class AtmosDangerousApiTests
     }
 
     [Test]
-    public void Dangerous_WithDisposedSimulation_Throws()
+    public void Dangerous_WithDisposedSimulation_ReturnsEntryPoint()
     {
         var simulation = new AtmosSimulation();
         simulation.Dispose();
 
-        Assert.That(simulation.Dangerous, Throws.TypeOf<ObjectDisposedException>());
+        Assert.That(simulation.Dangerous, Throws.Nothing);
     }
 
     [Test]
-    public void RetainedDangerousApi_RejectsRegistrationAfterSimulationIsDisposed()
+    public void RetainedDangerousApi_RejectsChunkAccessAfterSimulationIsDisposed()
     {
         var simulation = new AtmosSimulation();
+        var chunk = simulation.CreateAndRegisterChunk(default);
         var dangerous = simulation.Dangerous();
         simulation.Dispose();
 
-        Assert.That(() => dangerous.Solvers.Register("late", _ => { }),
-            Throws.TypeOf<ObjectDisposedException>());
+        Assert.That(() => dangerous.GetChunk(chunk), Throws.TypeOf<ObjectDisposedException>());
     }
 
     [Test]
-    public void DangerousSolver_ReceivesLiveChunkAndGasSpans()
+    public void GetChunk_WithUnknownHandle_Throws()
+    {
+        using var simulation = new AtmosSimulation();
+
+        Assert.That(() => simulation.Dangerous().GetChunk(new AtmosChunkHandle(Int3.PosX)),
+            Throws.TypeOf<KeyNotFoundException>());
+    }
+
+    [Test]
+    public void CustomSolver_CanAccessLiveChunkAndGasSpans()
     {
         using var simulation = new AtmosSimulation(1, 1, 1);
         var chunk = simulation.CreateAndRegisterChunk(default);
-        simulation.SetChunkClassification(chunk, new Numos.CoreSim.Datatypes.Primitives.VoxelClassification(7));
+        simulation.SetChunkClassification(chunk, new VoxelClassification(7));
         simulation.AddGasToVoxel(chunk, 0, 2, 1f, 300f);
-        simulation.Dangerous().Solvers.RegisterAfter(AtmosBuiltInSolvers.ThermalBoundary, "raw-write", context =>
+        simulation.Solvers.RegisterAfter(AtmosBuiltInSolvers.ThermalBoundary, "raw-write", solverSimulation =>
         {
-            var rawChunk = context.GetChunk(0);
+            var rawChunk = solverSimulation.Dangerous().GetChunk(chunk);
             rawChunk.GetGasChannel(0).Moles[0] = 4f;
             rawChunk.MarkChanged();
         });
@@ -61,43 +74,42 @@ public sealed class AtmosDangerousApiTests
 
         Assert.That(simulation.GetChunkSnapshot(chunk).Gases.Single().Moles[0], Is.EqualTo(4f));
         Assert.That(simulation.Solvers.Steps.Single(step => step.Name == "raw-write").Kind,
-            Is.EqualTo(AtmosSolverKind.Dangerous));
+            Is.EqualTo(AtmosSolverKind.Custom));
     }
 
     [Test]
-    public void DangerousInjection_UsesCurrentVoxelShcFromTickSnapshot()
+    public void CustomSolver_UsesValidatedSimulationInjection()
     {
-        var config = new Numos.CoreSim.AtmosConfig
+        var config = new AtmosConfig
         {
             GasRegistry =
             [
-                new Numos.CoreSim.GasProperties { MolarHeatCapacityAtConstantVolume = 10f },
-                new Numos.CoreSim.GasProperties { MolarHeatCapacityAtConstantVolume = 30f }
+                new GasProperties { MolarHeatCapacityAtConstantVolume = 10f },
+                new GasProperties { MolarHeatCapacityAtConstantVolume = 30f }
             ]
         };
         using var simulation = new AtmosSimulation(config, 1, 1, 1);
         var chunk = simulation.CreateAndRegisterChunk(default);
-        simulation.SetChunkClassification(chunk, new Numos.CoreSim.Datatypes.Primitives.VoxelClassification(7));
+        simulation.SetChunkClassification(chunk, new VoxelClassification(7));
         simulation.AddGasToVoxel(chunk, 0, 0, 1f, 300f);
-        simulation.Dangerous().Solvers.RegisterBefore(AtmosBuiltInSolvers.Advection, "inject", context =>
-            context.InjectGasToVoxel(0, 0, 1, 1f, 600f));
+        simulation.Solvers.RegisterBefore(AtmosBuiltInSolvers.Advection, "inject", solverSimulation =>
+            solverSimulation.AddGasToVoxel(chunk, 0, 1, 1f, 600f));
 
         simulation.Tick();
 
-        var snapshot = simulation.GetChunkSnapshot(chunk);
-        Assert.That(snapshot.Temperature[0], Is.EqualTo(525f).Within(0.0001f));
+        Assert.That(simulation.GetChunkSnapshot(chunk).Temperature[0], Is.EqualTo(525f).Within(0.0001f));
     }
 
     [Test]
-    public void ConfiguredDangerousSolver_RetainsEditableTypedConfiguration()
+    public void StatefulDangerousSolver_RetainsEditableConfiguration()
     {
         using var simulation = new AtmosSimulation(1, 1, 1);
         var chunk = simulation.CreateAndRegisterChunk(default);
-        simulation.SetChunkClassification(chunk,
-            new Numos.CoreSim.Datatypes.Primitives.VoxelClassification(7));
-        var solver = new ConfiguredDangerousInjectionSolver();
-        simulation.Dangerous().Solvers.RegisterBefore(
-            AtmosBuiltInSolvers.Advection, "configured-injection", solver);
+        simulation.SetChunkClassification(chunk, new VoxelClassification(7));
+        simulation.AddGasToVoxel(chunk, 0, 0, 1f, 300f);
+        var solver = new ConfiguredDangerousWriter(chunk);
+        simulation.Solvers.RegisterAfter(AtmosBuiltInSolvers.ThermalBoundary,
+            "configured-write", solver.Solve);
 
         solver.Config.Moles = 3f;
         simulation.Tick();
@@ -105,39 +117,19 @@ public sealed class AtmosDangerousApiTests
         Assert.That(simulation.GetChunkSnapshot(chunk).Gases.Single().Moles[0], Is.EqualTo(3f));
     }
 
-    [Test]
-    public void DangerousSolver_ConfigReferenceIsStableForTheTick()
+    private sealed class ConfiguredDangerousWriter(AtmosChunkHandle chunk)
     {
-        var original = new Numos.CoreSim.AtmosConfig();
-        var replacement = new Numos.CoreSim.AtmosConfig();
-        using var simulation = new AtmosSimulation(original);
-        var observed = new List<Numos.CoreSim.AtmosConfig>();
-        simulation.Dangerous().Solvers.RegisterBefore(AtmosBuiltInSolvers.Advection, "replace-config", context =>
+        public DangerousWriterConfig Config { get; } = new();
+
+        public void Solve(AtmosSimulation simulation)
         {
-            if (context.TickCount == 1)
-                simulation.SetAtmosConfig(replacement);
-        });
-        simulation.Dangerous().Solvers.RegisterAfter("replace-config", "observe-config",
-            context => observed.Add(context.Config));
-
-        simulation.Tick();
-        simulation.Tick();
-
-        Assert.That(observed, Is.EqualTo(new[] { original, replacement }));
-    }
-
-    private sealed class ConfiguredDangerousInjectionSolver :
-        IAtmosDangerousSolver<DangerousInjectionSolverConfig>
-    {
-        public DangerousInjectionSolverConfig Config { get; } = new();
-
-        public void Solve(AtmosDangerousSolverContext context)
-        {
-            context.InjectGasToVoxel(0, 0, 0, Config.Moles, 300f);
+            var rawChunk = simulation.Dangerous().GetChunk(chunk);
+            rawChunk.GetGasChannel(0).Moles[0] = Config.Moles;
+            rawChunk.MarkChanged();
         }
     }
 
-    private sealed class DangerousInjectionSolverConfig
+    private sealed class DangerousWriterConfig
     {
         internal float Moles { get; set; }
     }

@@ -33,16 +33,15 @@ internal sealed partial class AtmosKernel
         }
     }
 
-    internal void RegisterSolver(string name, SolverStepKind kind,
-        Action<AtmosSolverExecutionContext> solver)
+    internal void RegisterSolver(string name, Action<AtmosSolverExecutionContext> solver)
     {
         lock (_stateGate)
         {
-            _solverPipeline.Register(name, kind, solver, _solverPipeline.Count);
+            _solverPipeline.Register(name, SolverStepKind.Custom, solver, _solverPipeline.Count);
         }
     }
 
-    internal void RegisterSolverBefore(string existingName, string name, SolverStepKind kind,
+    internal void RegisterSolverBefore(string existingName, string name,
         Action<AtmosSolverExecutionContext> solver)
     {
         lock (_stateGate)
@@ -50,11 +49,11 @@ internal sealed partial class AtmosKernel
             int index = _solverPipeline.IndexOf(existingName);
             if (index < 0)
                 throw new KeyNotFoundException($"No solver named '{existingName}' is registered.");
-            _solverPipeline.Register(name, kind, solver, index);
+            _solverPipeline.Register(name, SolverStepKind.Custom, solver, index);
         }
     }
 
-    internal void RegisterSolverAfter(string existingName, string name, SolverStepKind kind,
+    internal void RegisterSolverAfter(string existingName, string name,
         Action<AtmosSolverExecutionContext> solver)
     {
         lock (_stateGate)
@@ -62,7 +61,7 @@ internal sealed partial class AtmosKernel
             int index = _solverPipeline.IndexOf(existingName);
             if (index < 0)
                 throw new KeyNotFoundException($"No solver named '{existingName}' is registered.");
-            _solverPipeline.Register(name, kind, solver, index + 1);
+            _solverPipeline.Register(name, SolverStepKind.Custom, solver, index + 1);
         }
     }
 
@@ -98,6 +97,15 @@ internal sealed partial class AtmosKernel
         lock (_stateGate)
         {
             return _chunkMap.Keys.ToArray();
+        }
+    }
+
+    /// <summary>Returns live chunk storage for the opt-in Dangerous API.</summary>
+    internal AtmosChunk GetChunkForDangerousAccess(Int3 position)
+    {
+        lock (_stateGate)
+        {
+            return GetChunk(position);
         }
     }
 

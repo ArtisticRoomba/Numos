@@ -6,15 +6,19 @@ namespace Numos.CoreSim.Solvers;
 internal sealed class DefaultAtmosSolvers : IDisposable
 {
     private readonly AdvectionSolver _advection;
-    private readonly BoundaryFlowSolver _boundaryFlow = new();
-    private readonly ThermalBoundarySolver _thermalBoundary = new();
+    private readonly BoundaryFlowSolver _boundaryFlow;
+    private readonly ThermalBoundarySolver _thermalBoundary;
     private readonly ThermodynamicsSolver _thermodynamics;
 
     internal DefaultAtmosSolvers(int chunkWidth, int chunkHeight, int chunkDepth)
     {
         int maximumBoundaryEvents = GetBoundaryVoxelCount(chunkWidth, chunkHeight, chunkDepth);
-        _advection = new AdvectionSolver(maximumBoundaryEvents);
-        _thermodynamics = new ThermodynamicsSolver(maximumBoundaryEvents);
+        _boundaryFlow = new BoundaryFlowSolver();
+        _thermalBoundary = new ThermalBoundarySolver();
+        _advection = new AdvectionSolver(maximumBoundaryEvents,
+            _boundaryFlow.ClearPendingEvents, _boundaryFlow.Enqueue);
+        _thermodynamics = new ThermodynamicsSolver(maximumBoundaryEvents,
+            _thermalBoundary.ClearPendingEvents, _thermalBoundary.Enqueue);
     }
 
     internal SolverStep[] CreateSteps()

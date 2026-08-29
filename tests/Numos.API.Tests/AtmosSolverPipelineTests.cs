@@ -27,7 +27,7 @@ public sealed class AtmosSolverPipelineTests
         using var simulation = new AtmosSimulation();
         var calls = new List<string>();
         simulation.Solvers.RegisterBefore(AtmosBuiltInSolvers.Advection, "first",
-            context => calls.Add($"first:{context.TickCount}"));
+            solverSimulation => calls.Add($"first:{solverSimulation.TickCount}"));
         simulation.Solvers.RegisterAfter("first", "second", _ => calls.Add("second"));
 
         simulation.Tick();
@@ -64,16 +64,16 @@ public sealed class AtmosSolverPipelineTests
     }
 
     [Test]
-    public void StandardSolver_UsesDetachedReadsAndValidatedMutations()
+    public void CustomSolver_UsesSimulationSnapshotsAndValidatedMutations()
     {
         using var simulation = new AtmosSimulation(1, 1, 1);
         var chunk = simulation.CreateAndRegisterChunk(default);
         simulation.SetChunkClassification(chunk, new VoxelClassification(7));
-        simulation.Solvers.RegisterBefore(AtmosBuiltInSolvers.Advection, "inject", context =>
+        simulation.Solvers.RegisterBefore(AtmosBuiltInSolvers.Advection, "inject", solverSimulation =>
         {
-            Assert.That(context.Chunks, Is.EqualTo(new[] { chunk }));
-            Assert.That(context.GetChunkSnapshot(chunk).Gases, Is.Empty);
-            context.AddGasToVoxel(chunk, 0, 3, 2f, 350f);
+            Assert.That(solverSimulation.GetChunkHandles(), Is.EqualTo(new[] { chunk }));
+            Assert.That(solverSimulation.GetChunkSnapshot(chunk).Gases, Is.Empty);
+            solverSimulation.AddGasToVoxel(chunk, 0, 3, 2f, 350f);
         });
 
         simulation.Tick();
@@ -90,7 +90,7 @@ public sealed class AtmosSolverPipelineTests
         var chunk = simulation.CreateAndRegisterChunk(default);
         simulation.SetChunkClassification(chunk, new VoxelClassification(7));
         var solver = new ConfiguredInjectionSolver();
-        simulation.Solvers.RegisterBefore(AtmosBuiltInSolvers.Advection, "configured-injection", solver);
+        simulation.Solvers.RegisterBefore(AtmosBuiltInSolvers.Advection, "configured-injection", solver.Solve);
 
         solver.Config.Moles = 2.5f;
         simulation.Tick();
@@ -103,7 +103,7 @@ public sealed class AtmosSolverPipelineTests
     {
         var simulation = new AtmosSimulation();
         var solver = new DisposableConfiguredSolver();
-        simulation.Solvers.Register("caller-owned", solver);
+        simulation.Solvers.Register("caller-owned", solver.Solve);
 
         simulation.Dispose();
 
@@ -113,26 +113,31 @@ public sealed class AtmosSolverPipelineTests
     }
 
     [Test]
-    public void StandardSolver_ConfigReferenceIsStableForTheTick()
+    public void ConfigReplacementDuringCustomSolver_AffectsBuiltInsOnNextTick()
     {
-        var original = new AtmosConfig();
-        var replacement = new AtmosConfig();
-        using var simulation = new AtmosSimulation(original);
-        var observed = new List<AtmosConfig>();
-        simulation.Solvers.RegisterBefore(AtmosBuiltInSolvers.Advection, "replace-config", context =>
+        var original = CreateDiffusionConfig(0f);
+        var replacement = CreateDiffusionConfig(1f);
+        using var simulation = new AtmosSimulation(original, 2, 1, 1);
+        var chunk = simulation.CreateAndRegisterChunk(default);
+        simulation.SetChunkClassification(chunk, new VoxelClassification(1));
+        simulation.AddGasToVoxel(chunk, 0, 0, 2f, 300f);
+        simulation.Solvers.RegisterBefore(AtmosBuiltInSolvers.Advection, "replace-config", solverSimulation =>
         {
-            if (context.TickCount == 1)
-                simulation.SetAtmosConfig(replacement);
+            if (solverSimulation.TickCount == 1)
+                solverSimulation.SetAtmosConfig(replacement);
         });
-        simulation.Solvers.RegisterAfter("replace-config", "observe-config",
-            context => observed.Add(context.Config));
 
         simulation.Tick();
+        float firstTickTargetMoles = simulation.GetVoxelSnapshot(chunk, 1).Gases
+            .SingleOrDefault().Moles;
         simulation.Tick();
+        float secondTickTargetMoles = simulation.GetVoxelSnapshot(chunk, 1).Gases
+            .Single().Moles;
 
         Assert.Multiple(() =>
         {
-            Assert.That(observed, Is.EqualTo(new[] { original, replacement }));
+            Assert.That(firstTickTargetMoles, Is.Zero);
+            Assert.That(secondTickTargetMoles, Is.GreaterThan(0f));
             Assert.That(simulation.Config, Is.SameAs(replacement));
         });
     }
@@ -142,10 +147,13 @@ public sealed class AtmosSolverPipelineTests
     {
         using var simulation = new AtmosSimulation();
         var calls = new List<int>();
-        simulation.Solvers.RegisterBefore(AtmosBuiltInSolvers.Advection, "register-later", context =>
+        simulation.Solvers.RegisterBefore(AtmosBuiltInSolvers.Advection, "register-later", solverSimulation =>
         {
-            if (context.TickCount == 1)
-                simulation.Solvers.RegisterAfter("register-later", "later", later => calls.Add(later.TickCount));
+            if (solverSimulation.TickCount == 1)
+            {
+                solverSimulation.Solvers.RegisterAfter("register-later", "later",
+                    later => calls.Add(later.TickCount));
+            }
         });
 
         simulation.Tick();
@@ -203,10 +211,10 @@ public sealed class AtmosSolverPipelineTests
         simulation.AddGasToVoxel(chunk, 0, 0, 1f, 300f);
         simulation.AddGasToVoxel(chunk, 1, 0, 1f, 300f);
         simulation.Solvers.SetEnabled(AtmosBuiltInSolvers.Advection, false);
-        simulation.Solvers.RegisterBefore(AtmosBuiltInSolvers.Thermodynamics, "cool", context =>
+        simulation.Solvers.RegisterBefore(AtmosBuiltInSolvers.Thermodynamics, "cool", solverSimulation =>
         {
-            if (context.TickCount == 2)
-                context.SetVoxelTemperature(chunk, 0, 1f);
+            if (solverSimulation.TickCount == 2)
+                solverSimulation.SetVoxelTemperature(chunk, 0, 1f);
         });
 
         simulation.Tick();
@@ -238,11 +246,56 @@ public sealed class AtmosSolverPipelineTests
         simulation.Solvers.SetEnabled(AtmosBuiltInSolvers.BoundaryFlow, false);
 
         simulation.Tick();
+        simulation.Solvers.ResetToDefaults();
         simulation.Solvers.SetEnabled(AtmosBuiltInSolvers.Advection, false);
-        simulation.Solvers.SetEnabled(AtmosBuiltInSolvers.BoundaryFlow, true);
         simulation.Tick();
 
         Assert.That(simulation.GetVoxelSnapshot(target, 0).Gases, Is.Empty);
+    }
+
+    [Test]
+    public void DisabledThermalConsumer_DoesNotReplayProducerEventsOnALaterTick()
+    {
+        var config = new AtmosConfig
+        {
+            VoxelVolume = AtmosPhysicalConstants.MolarGasConstant,
+            VacuumThreshold = 0f,
+            MinimumPressureTransfer = 0f,
+            BulkFlowCoefficient = 0f,
+            MaxPressureTransferFractionPerNeighbor = 0f,
+            DefaultDiffusionCoefficient = 0f,
+            ThermalConductance = 1f,
+            SleepThreshold = int.MaxValue,
+            GasRegistry =
+            [
+                new GasProperties
+                {
+                    DiffusionCoefficient = 0f,
+                    MolarHeatCapacityAtConstantVolume = 1f
+                }
+            ]
+        };
+        using var simulation = new AtmosSimulation(config, 1, 1, 1);
+        var hot = simulation.CreateAndRegisterChunk(default);
+        var cold = simulation.CreateAndRegisterChunk(Int3.PosX);
+        simulation.SetChunkClassification(hot, new VoxelClassification(1));
+        simulation.SetChunkClassification(cold, new VoxelClassification(2));
+        simulation.AddGasToVoxel(hot, 0, 0, 1f, 400f);
+        simulation.AddGasToVoxel(cold, 0, 0, 1f, 200f);
+        simulation.Solvers.SetEnabled(AtmosBuiltInSolvers.ThermalBoundary, false);
+
+        simulation.Tick();
+        simulation.Tick();
+        simulation.Solvers.SetEnabled(AtmosBuiltInSolvers.Thermodynamics, false);
+        simulation.Solvers.SetEnabled(AtmosBuiltInSolvers.ThermalBoundary, true);
+        simulation.Tick();
+        simulation.Tick();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(simulation.GetVoxelSnapshot(hot, 0).Temperature, Is.EqualTo(400f));
+            Assert.That(simulation.GetVoxelSnapshot(cold, 0).Temperature, Is.EqualTo(200f));
+        });
     }
 
     [Test]
@@ -266,7 +319,8 @@ public sealed class AtmosSolverPipelineTests
         simulation.SetChunkClassification(target, new VoxelClassification(2));
         simulation.AddGasToVoxel(source, 0, 0, 2f, 300f);
         simulation.Solvers.RegisterAfter(AtmosBuiltInSolvers.Advection, "seal-source",
-            context => context.SetVoxelClassification(source, 0, VoxelClassification.RoomSolid));
+            solverSimulation => solverSimulation.SetVoxelClassification(
+                source, 0, VoxelClassification.RoomSolid));
 
         simulation.Tick();
 
@@ -292,10 +346,10 @@ public sealed class AtmosSolverPipelineTests
         simulation.SetChunkClassification(cold, new VoxelClassification(2));
         simulation.AddGasToVoxel(hot, 0, 0, 1f, 400f);
         simulation.AddGasToVoxel(cold, 0, 0, 1f, 200f);
-        simulation.Solvers.RegisterAfter(AtmosBuiltInSolvers.Thermodynamics, "seal-hot", context =>
+        simulation.Solvers.RegisterAfter(AtmosBuiltInSolvers.Thermodynamics, "seal-hot", solverSimulation =>
         {
-            if (context.TickCount == 2)
-                context.SetVoxelClassification(hot, 0, VoxelClassification.RoomSolid);
+            if (solverSimulation.TickCount == 2)
+                solverSimulation.SetVoxelClassification(hot, 0, VoxelClassification.RoomSolid);
         });
 
         simulation.Tick();
@@ -327,13 +381,28 @@ public sealed class AtmosSolverPipelineTests
             }));
     }
 
-    private sealed class ConfiguredInjectionSolver : IAtmosSolver<InjectionSolverConfig>
+    private static AtmosConfig CreateDiffusionConfig(float diffusionCoefficient)
+    {
+        return new AtmosConfig
+        {
+            VoxelVolume = AtmosPhysicalConstants.MolarGasConstant,
+            VacuumThreshold = 0f,
+            MinimumPressureTransfer = 0f,
+            BulkFlowCoefficient = 0f,
+            MaxPressureTransferFractionPerNeighbor = 0f,
+            DefaultDiffusionCoefficient = 0f,
+            SleepThreshold = int.MaxValue,
+            GasRegistry = [new GasProperties { DiffusionCoefficient = diffusionCoefficient }]
+        };
+    }
+
+    private sealed class ConfiguredInjectionSolver
     {
         public InjectionSolverConfig Config { get; } = new();
 
-        public void Solve(AtmosSolverContext context)
+        public void Solve(AtmosSimulation simulation)
         {
-            context.AddGasToVoxel(context.Chunks[0], 0, 0, Config.Moles, 300f);
+            simulation.AddGasToVoxel(simulation.GetChunkHandles()[0], 0, 0, Config.Moles, 300f);
         }
     }
 
@@ -342,12 +411,12 @@ public sealed class AtmosSolverPipelineTests
         internal float Moles { get; set; }
     }
 
-    private sealed class DisposableConfiguredSolver : IAtmosSolver<object>, IDisposable
+    private sealed class DisposableConfiguredSolver : IDisposable
     {
         public object Config { get; } = new();
         internal bool IsDisposed { get; private set; }
 
-        public void Solve(AtmosSolverContext context)
+        public void Solve(AtmosSimulation simulation)
         {
         }
 

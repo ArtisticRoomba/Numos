@@ -12,14 +12,20 @@ namespace Numos.CoreSim.Solvers;
 internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
 {
     private readonly ThreadLocal<BoundaryFlowEvent[]> _boundaryBuffers;
+    private readonly Action _clearBoundaryEvents;
+    private readonly Action<int, Int3, BoundaryFlowEvent> _enqueueBoundaryEvent;
 
-    internal AdvectionSolver(int maximumBoundaryEvents)
+    internal AdvectionSolver(int maximumBoundaryEvents, Action clearBoundaryEvents,
+        Action<int, Int3, BoundaryFlowEvent> enqueueBoundaryEvent)
     {
+        _clearBoundaryEvents = clearBoundaryEvents;
+        _enqueueBoundaryEvent = enqueueBoundaryEvent;
         _boundaryBuffers = new ThreadLocal<BoundaryFlowEvent[]>(() => new BoundaryFlowEvent[maximumBoundaryEvents]);
     }
 
     public void Solve(AtmosSolverExecutionContext context)
     {
+        _clearBoundaryEvents();
         Parallel.ForEach(context.Chunks, chunk => SolveChunk(context, chunk));
     }
 
@@ -39,7 +45,7 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
         Advect(chunk, context.TickConfig, boundaryBuffer, ref boundaryCount);
 
         for (var index = 0; index < boundaryCount; index++)
-            context.BoundaryEvents.Enqueue((chunk.GridPosition, boundaryBuffer[index]));
+            _enqueueBoundaryEvent(context.TickCount, chunk.GridPosition, boundaryBuffer[index]);
     }
 
     private static void Advect(AtmosChunk chunk, AtmosSolverConfigSnapshot config,

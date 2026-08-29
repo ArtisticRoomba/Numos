@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Numos.CoreSim.Datatypes.Events;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.Maths;
@@ -10,11 +11,22 @@ namespace Numos.CoreSim.Solvers;
 internal sealed class ThermalBoundarySolver : IAtmosSolverStage
 {
     private readonly List<ThermalBoundaryConductance> _activeEdges = [];
+    private readonly ConcurrentQueue<TickThermalBoundaryEvent> _boundaryEvents = new();
     private readonly Dictionary<ThermalVoxelAddress, double> _energyDeltas = [];
     private readonly HashSet<ThermalBoundaryEdge> _edges = [];
     private readonly Dictionary<ThermalVoxelAddress, double> _incidentConductances = [];
     private readonly List<ThermalBoundaryEdge> _orderedEdges = [];
     private readonly Dictionary<ThermalVoxelAddress, ThermalBoundaryState> _states = [];
+
+    internal void ClearPendingEvents()
+    {
+        _boundaryEvents.Clear();
+    }
+
+    internal void Enqueue(int tickCount, Int3 key, ThermalBoundaryEvent boundaryEvent)
+    {
+        _boundaryEvents.Enqueue(new TickThermalBoundaryEvent(tickCount, key, boundaryEvent));
+    }
 
     public void Solve(AtmosSolverExecutionContext context)
     {
@@ -48,8 +60,11 @@ internal sealed class ThermalBoundarySolver : IAtmosSolverStage
 
     private void CollectEdges(AtmosSolverExecutionContext context)
     {
-        while (context.ThermalBoundaryEvents.TryDequeue(out var boundaryEvent))
-            CollectEdges(context, boundaryEvent.Key, boundaryEvent.Event);
+        while (_boundaryEvents.TryDequeue(out var boundaryEvent))
+        {
+            if (boundaryEvent.TickCount == context.TickCount)
+                CollectEdges(context, boundaryEvent.Key, boundaryEvent.Event);
+        }
     }
 
     private void CollectEdges(AtmosSolverExecutionContext context, Int3 sourcePosition,
@@ -200,4 +215,9 @@ internal sealed class ThermalBoundarySolver : IAtmosSolverStage
         AtmosChunk Chunk,
         float Temperature,
         float HeatCapacity);
+
+    private readonly record struct TickThermalBoundaryEvent(
+        int TickCount,
+        Int3 Key,
+        ThermalBoundaryEvent Event);
 }

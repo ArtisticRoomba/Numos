@@ -26,7 +26,16 @@ public readonly struct AtmosDangerousApi
     }
 
     /// <summary>
-    ///     Gets the dangerous registration surface for the simulation's shared solver pipeline.
+    ///     Returns an unchecked live view of a registered chunk.
     /// </summary>
-    public AtmosDangerousSolverPipeline Solvers => new(_simulation);
+    /// <remarks>
+    ///     The caller is responsible for preventing concurrent simulation or chunk-lifecycle operations while using
+    ///     the returned view. A custom solver callback provides that synchronization automatically.
+    /// </remarks>
+    /// <exception cref="KeyNotFoundException">No chunk is registered at the handle's position.</exception>
+    /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
+    public AtmosDangerousChunk GetChunk(AtmosChunkHandle chunk)
+    {
+        return new AtmosDangerousChunk(_simulation.Kernel.GetChunkForDangerousAccess(chunk.Position));
+    }
 }

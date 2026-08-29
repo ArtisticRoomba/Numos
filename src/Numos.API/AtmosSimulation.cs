@@ -13,8 +13,8 @@ namespace Numos.API;
 ///     The simulation owns every chunk created through <see cref="CreateAndRegisterChunk" />. Call
 ///     <see cref="Dispose" /> when the simulation is no longer needed to release those chunks and its
 ///     worker-local buffers. Unless otherwise noted, members that access kernel state throw
-///     <see cref="ObjectDisposedException" /> after disposal. A solver callback may use its context and edit the
-///     solver pipeline, but it must not recursively execute or dispose the simulation or change chunk ownership
+///     <see cref="ObjectDisposedException" /> after disposal. A solver callback may use the simulation API and edit
+///     the solver pipeline, but it must not recursively execute or dispose the simulation or change chunk ownership
 ///     during the current tick.
 /// </remarks>
 public sealed partial class AtmosSimulation : IDisposable

@@ -13,7 +13,7 @@ in the `0.x` series and may be published as prereleases (for others to just impo
 - Engine-agnostic, with a supported `Numos.API` facade over an internal simulation kernel
 - Multithreaded intra-chunk advection and thermodynamics
 - Singlethreaded cross-chunk boundary flow
-- Ordered solver pipeline with replaceable/disableable built-in stages, custom delegates, and custom configs
+- Ordered solver pipeline with replaceable/disableable built-in stages and stateful custom callbacks
 - Ideal-gas based (`P = nRT/V`) with configurable voxel volume
 - Attempts at being trimmable and Native AOT-compatible
 

@@ -104,8 +104,7 @@ internal sealed class SolverStep(
 internal enum SolverStepKind
 {
     BuiltIn,
-    Standard,
-    Dangerous
+    Custom
 }
 
 internal readonly record struct SolverStepInfo(string Name, bool Enabled, SolverStepKind Kind);
