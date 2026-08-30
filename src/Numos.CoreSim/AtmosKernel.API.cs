@@ -421,7 +421,7 @@ internal sealed partial class AtmosKernel
         lock (_stateGate)
         {
             var chunk = GetChunk(position);
-            chunk.VoxelRoomMap.Fill(classification.RoomId);
+            chunk.SetChunkClassification(classification);
             RebuildActiveTopology(chunk);
             chunk.MarkChanged();
         }

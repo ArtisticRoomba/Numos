@@ -436,6 +436,22 @@ internal class AtmosChunk
     }
 
     /// <summary>
+    ///     Sets a specific voxel to a vacuum. This sets TotalPressure, ActiveGases, and TotalHeatCapacity to 0 and IsVacuum to true.
+    /// </summary>
+    /// <param name="idx">Index of voxel</param>
+    [PublicAPI]
+    public void SetChunkToVacuum()
+    {
+        TotalPressure.Fill(0f);
+        for (var g = 0; g < ActiveGasCount; g++)
+        {
+            ActiveGases[g].Moles.Select(a => a = 0f);
+        }
+        TotalHeatCapacity.Fill(0f);
+    }
+
+
+    /// <summary>
     ///     Sets a specific voxel to a specific room id.
     ///     If the room id is a wall or void is sets the voxel to a vacuum.
     /// </summary>
@@ -462,6 +478,36 @@ internal class AtmosChunk
             SetVoxelToVacuum(idx);
         VoxelRoomMap[idx] = classification.RoomId;
     }
+
+    
+    /// <summary>
+    ///     Sets a specific voxel to a specific room id.
+    ///     If the room id is a wall or void is sets the voxel to a vacuum.
+    /// </summary>
+    /// <param name="roomId">room id to set the room to</param>
+    [PublicAPI]
+    public void SetChunkClassification(int roomId)
+    {
+        if (roomId < 0)
+            SetChunkToVacuum();
+        VoxelRoomMap.Fill(roomId);
+    }
+
+
+
+    /// <summary>
+    ///     Sets the entire chunk to a specific room id
+    ///     If the room id is a wall or void is sets the voxel to a vacuum.
+    /// </summary>
+    /// <param name="classification">VoxelClassification to set room id to</param>
+    [PublicAPI]
+    public void SetChunkClassification(VoxelClassification classification)
+    {
+        if (classification.IsSolid || classification.IsVoid)
+            SetChunkToVacuum();
+        VoxelRoomMap.Fill(classification.RoomId);
+    }
+
 
 
     internal int GetOrCreateGasChannel(int gasId)
