@@ -65,9 +65,6 @@ internal sealed class AtmosSolverConfigSnapshot
         }
 
         BulkFlowCoefficient = FloatMath.ClampUnitInterval(config.BulkFlowCoefficient);
-        BulkFlowDamping = FloatMath.ClampUnitInterval(config.BulkFlowDamping);
-        LowPressureDeltaThreshold = FloatMath.GetNonnegativeFinite(config.LowPressureDeltaThreshold);
-        MinimumPressureTransfer = FloatMath.GetNonnegativeFinite(config.MinimumPressureTransfer);
         VacuumThreshold = FloatMath.GetNonnegativeFinite(config.VacuumThreshold);
         SleepThreshold = Math.Max(0, config.SleepThreshold);
         SleepEpsilon = FloatMath.GetNonnegativeFinite(config.SleepEpsilon);
@@ -84,9 +81,6 @@ internal sealed class AtmosSolverConfigSnapshot
     internal float PressurePerMoleKelvin { get; private set; }
     internal float SaturationReferencePressure { get; private set; }
     internal float BulkFlowCoefficient { get; private set; }
-    internal float BulkFlowDamping { get; private set; }
-    internal float LowPressureDeltaThreshold { get; private set; }
-    internal float MinimumPressureTransfer { get; private set; }
     internal float VacuumThreshold { get; private set; }
     internal int SleepThreshold { get; private set; }
     internal float SleepEpsilon { get; private set; }

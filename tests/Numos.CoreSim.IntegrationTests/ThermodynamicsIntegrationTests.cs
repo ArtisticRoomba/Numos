@@ -217,9 +217,9 @@ public sealed class ThermodynamicsIntegrationTests
         Assert.Multiple(() =>
         {
             Assert.That(sourceSnapshot.Temperature[0],
-                Is.EqualTo(399.0915f).Within(SimTestHelpers.Tolerance));
+                Is.EqualTo(399.197784f).Within(SimTestHelpers.Tolerance));
             Assert.That(targetSnapshot.Temperature[0],
-                Is.EqualTo(289.9334f).Within(SimTestHelpers.Tolerance));
+                Is.EqualTo(307.885376f).Within(SimTestHelpers.Tolerance));
             Assert.That(SimTestHelpers.TotalMoles(sourceSnapshot, targetSnapshot),
                 Is.EqualTo(initialMoles).Within(SimTestHelpers.Tolerance));
             Assert.That(SimTestHelpers.TotalThermalEnergy(config, sourceSnapshot, targetSnapshot),

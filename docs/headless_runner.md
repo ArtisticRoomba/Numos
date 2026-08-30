@@ -150,9 +150,6 @@ The built-in solver names accepted by `setSolverEnabled` are `advection`, `bound
 - `defaultDiffusionCoefficient`
 - `spaceTemperatureK`
 - `bulkFlowCoefficient`
-- `bulkFlowDamping`
-- `lowPressureDeltaThresholdPa`
-- `minimumPressureTransferPa`
 - `vacuumThresholdPa`
 - `sleepThreshold`
 - `sleepEpsilonPa`

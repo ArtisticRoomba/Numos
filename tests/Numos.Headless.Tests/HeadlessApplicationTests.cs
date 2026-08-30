@@ -40,8 +40,8 @@ public sealed class HeadlessApplicationTests
             Assert.That(observationResponse.GetProperty("state").GetProperty("tick").GetInt32(),
                 Is.EqualTo(1));
             Assert.That(gasMoles, Has.Length.EqualTo(2));
-            Assert.That(gasMoles[0], Is.EqualTo(1.75f).Within(Tolerance));
-            Assert.That(gasMoles[1], Is.EqualTo(0.25f).Within(Tolerance));
+            Assert.That(gasMoles[0], Is.EqualTo(1.68f).Within(Tolerance));
+            Assert.That(gasMoles[1], Is.EqualTo(0.32f).Within(Tolerance));
             Assert.That(gasMoles.Sum(), Is.EqualTo(2f).Within(Tolerance));
         });
     }
@@ -280,9 +280,6 @@ public sealed class HeadlessApplicationTests
             "\"saturationReferencePressurePa\":1000," +
             "\"defaultDiffusionCoefficient\":0," +
             "\"bulkFlowCoefficient\":0.25," +
-            "\"bulkFlowDamping\":0.5," +
-            "\"lowPressureDeltaThresholdPa\":5," +
-            "\"minimumPressureTransferPa\":0," +
             "\"vacuumThresholdPa\":0," +
             "\"sleepThreshold\":2147483647," +
             "\"sleepEpsilonPa\":0," +
