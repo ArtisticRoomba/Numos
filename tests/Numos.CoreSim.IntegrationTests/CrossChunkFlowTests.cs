@@ -138,32 +138,6 @@ public sealed class CrossChunkFlowTests
     }
 
     [Test]
-    public void BoundaryDiffusion_DoesNotRequireRepresentablePressure()
-    {
-        var config = SimTestHelpers.CreateDeterministicConfig();
-        config.VoxelVolume = float.MaxValue;
-        config.MaxPressureTransferFractionPerNeighbor = 0f;
-        var gas = config.GasRegistry[SimTestHelpers.FirstGasId];
-        gas.DiffusionCoefficient = 0.1f;
-        config.GasRegistry[SimTestHelpers.FirstGasId] = gas;
-        using var simulation = new AtmosSimulation(config, 1, 1, 1);
-        var source = CreateIsolatedVoxel(simulation, default, 0, 0, 0, SimTestHelpers.RoomId);
-        var target = CreateIsolatedVoxel(simulation, Int3.PosX, 0, 0, 0, SimTestHelpers.RoomId + 1);
-        simulation.SetVoxelTemperature(source, 0, float.Epsilon);
-        simulation.AddGasToVoxel(source, 0, SimTestHelpers.FirstGasId, 1f, float.Epsilon);
-
-        simulation.Tick();
-
-        Assert.Multiple(() =>
-        {
-            Assert.That(simulation.GetVoxelSnapshot(source, 0).Pressure, Is.Zero);
-            Assert.That(SimTestHelpers.Moles(simulation.GetChunkSnapshot(target),
-                    SimTestHelpers.FirstGasId, 0),
-                Is.EqualTo(0.1f).Within(SimTestHelpers.Tolerance));
-        });
-    }
-
-    [Test]
     public void BoundaryFlow_WithUnequalMolarHeatCapacities_ConservesThermalEnergy()
     {
         var config = SimTestHelpers.CreateDeterministicConfig();

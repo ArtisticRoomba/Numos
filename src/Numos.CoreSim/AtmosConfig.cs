@@ -1,3 +1,4 @@
+using Numos.CoreSim.Solvers;
 using Numos.Maths;
 
 namespace Numos.CoreSim;
@@ -168,7 +169,17 @@ public class AtmosConfig : IAtmosConfig
     }
 
     public float GetMolarHeatCapacityAtConstantVolume(int gasId)
-    {
+    {        
+        float fallback = AtmosSolverMath.IsFinitePositive(DefaultMolarHeatCapacityAtConstantVolume)
+            ? DefaultMolarHeatCapacityAtConstantVolume
+            : AtmosConfigDefaults.DefaultMolarHeatCapacityAtConstantVolume;
+        if ((uint)gasId < (uint)GasRegistry.Count)
+        {
+            float configured = GasRegistry[gasId].MolarHeatCapacityAtConstantVolume;
+            if (AtmosSolverMath.IsFinitePositive(configured))
+                return configured;
+        }
+
         if ((uint)gasId < (uint)GasRegistry.Count)
         {
             var value = GasRegistry[gasId].MolarHeatCapacityAtConstantVolume;
@@ -176,7 +187,7 @@ public class AtmosConfig : IAtmosConfig
                 return value;
         }
 
-        return DefaultMolarHeatCapacityAtConstantVolume;
+        return fallback;
     }
 
     public float GetDiffusionCoefficient(int gasId) =>
