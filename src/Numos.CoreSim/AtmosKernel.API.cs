@@ -475,7 +475,7 @@ internal sealed partial class AtmosKernel
         {
             var chunk = GetChunk(position);
             ValidateVoxelIndex(chunk, localVoxelIndex);
-            chunk.SetVoxelClassification(localVoxelIndex, classification.RoomId);
+            chunk.SetVoxelClassification(localVoxelIndex, classification);
             RebuildActiveTopology(chunk);
             chunk.MarkChanged();
         }
