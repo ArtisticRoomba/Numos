@@ -444,7 +444,7 @@ internal class AtmosChunk
         TotalPressure.Fill(0f);
         for (var g = 0; g < ActiveGasCount; g++)
         {
-            ActiveGases[g].Moles.Select(a => a = 0f);
+            Array.Clear(ActiveGases[g].Moles, 0, ActiveGases[g].Moles.Length);
         }
         TotalHeatCapacity.Fill(0f);
     }
