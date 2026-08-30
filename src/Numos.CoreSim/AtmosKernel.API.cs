@@ -7,6 +7,7 @@ namespace Numos.CoreSim;
 
 internal sealed partial class AtmosKernel
 {
+    private bool _configSet;
     /// <summary>
     ///     Gets the number of chunks currently registered with the kernel.
     /// </summary>
@@ -189,6 +190,12 @@ internal sealed partial class AtmosKernel
         lock (_stateGate)
         {
             _config = config ?? throw new ArgumentNullException(nameof(config));
+            // Makes _tickConfig valid before first tick has been ran.
+            if (!_configSet)
+            {
+                _tickConfig.Capture(_config);
+                _configSet = true;
+            }
         }
     }
 

@@ -8,51 +8,13 @@ namespace Numos.CoreSim.Solvers;
 /// </summary>
 internal static class AtmosSolverMath
 {
-    internal static float GetMolarHeatCapacity(AtmosConfig config, int gasId)
-    {
-        float fallback = IsFinitePositive(config.DefaultMolarHeatCapacityAtConstantVolume)
-            ? config.DefaultMolarHeatCapacityAtConstantVolume
-            : AtmosConfigDefaults.DefaultMolarHeatCapacityAtConstantVolume;
-        if ((uint)gasId < (uint)config.GasRegistry.Count)
-        {
-            float configured = config.GasRegistry[gasId].MolarHeatCapacityAtConstantVolume;
-            if (IsFinitePositive(configured))
-                return configured;
-        }
-
-        return fallback;
-    }
-
-    internal static float GetVoxelVolume(AtmosConfig config)
-    {
-        return IsFinitePositive(config.VoxelVolume)
-            ? config.VoxelVolume
-            : AtmosConfigDefaults.VoxelVolume;
-    }
-
-    internal static float GetEffectiveTemperature(AtmosConfig config, float storedTemperature)
-    {
-        if (IsFinitePositive(storedTemperature))
-            return storedTemperature;
-
-        return IsFinitePositive(config.DefaultTemperatureFallback)
-            ? config.DefaultTemperatureFallback
-            : AtmosConfigDefaults.DefaultTemperatureFallback;
-    }
-
-    internal static float CalculatePressure(AtmosConfig config, float moles, float temperature)
-    {
-        return MathF.Max(0f, moles) * GetEffectiveTemperature(config, temperature) *
-               (AtmosPhysicalConstants.MolarGasConstant / GetVoxelVolume(config));
-    }
-
-    internal static float CalculatePressure(AtmosSolverConfigSnapshot config, float moles, float temperature)
+    internal static float CalculatePressure(IAtmosConfig config, float moles, float temperature)
     {
         Debug.Assert(float.IsFinite(moles) && moles >= 0f);
         return moles * config.GetValidatedTemp(temperature) * config.PressurePerMoleKelvin;
     }
 
-    internal static float PressureToMoles(AtmosSolverConfigSnapshot config, float pressure, float temperature)
+    internal static float PressureToMoles(IAtmosConfig config, float pressure, float temperature)
     {
         if (pressure <= 0f || float.IsNaN(pressure))
             return 0f;
@@ -61,28 +23,29 @@ internal static class AtmosSolverMath
         return pressure / denominator;
     }
 
-    internal static float CalculatePressureAtVoxel(AtmosSolverConfigSnapshot config, AtmosChunk chunk,
-        ushort localVoxelIndex)
-    {
-        var totalMoles = 0f;
-        for (var gas = 0; gas < chunk.ActiveGasCount; gas++)
-            totalMoles += chunk.ActiveGases[gas].Moles[localVoxelIndex];
-
-        return CalculatePressure(config, totalMoles, chunk.Temperature[localVoxelIndex]);
-    }
-
     /// <summary>Recalculates a voxel pressure using the normalized values in a live public configuration.</summary>
-    internal static float CalculatePressureAtVoxel(AtmosConfig config, AtmosChunk chunk,
+    internal static float CalculatePressureAtVoxel(IAtmosConfig config, AtmosChunk chunk,
         ushort localVoxelIndex)
     {
-        var totalMoles = 0f;
-        for (var gas = 0; gas < chunk.ActiveGasCount; gas++)
-            totalMoles += chunk.ActiveGases[gas].Moles[localVoxelIndex];
+        var totalMoles = GetTotalMoles(chunk, localVoxelIndex);
 
-        return CalculatePressure(config, totalMoles, chunk.Temperature[localVoxelIndex]);
+        if (totalMoles <= 0f)
+        {
+            chunk.SetVoxelToVacuum(localVoxelIndex);
+            return 0f;
+        }
+
+        var pressure = CalculatePressure(config, totalMoles, chunk.Temperature[localVoxelIndex]);
+        if (pressure < config.VacuumThreshold)
+        {
+            chunk.SetVoxelToVacuum(localVoxelIndex);
+            return 0f;
+        }
+
+        return pressure;
     }
 
-    internal static float CalculateHeatCapacityAtVoxel(AtmosSolverConfigSnapshot config, AtmosChunk chunk,
+    internal static float CalculateHeatCapacityAtVoxel(IAtmosConfig config, AtmosChunk chunk,
         ushort localVoxelIndex)
     {
         var totalHeatCapacity = 0f;
@@ -158,4 +121,13 @@ internal static class AtmosSolverMath
     {
         return float.IsFinite(value) && value > 0f;
     }
+
+    internal static float GetTotalMoles(AtmosChunk chunk, ushort voxelIndex)
+    {
+        var totalMoles = 0f;
+        for (var gas = 0; gas < chunk.ActiveGasCount; gas++)
+            totalMoles += chunk.ActiveGases[gas].Moles[voxelIndex];
+        return totalMoles;
+    }
+
 }

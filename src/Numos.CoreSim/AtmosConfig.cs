@@ -1,9 +1,12 @@
+using Numos.CoreSim.Solvers;
+using Numos.Maths;
+
 namespace Numos.CoreSim;
 
 /// <summary>
 ///     Configuration values for the simulation.
 /// </summary>
-public class AtmosConfig
+public class AtmosConfig : IAtmosConfig
 {
     /// <summary>
     ///     List of gases actively registered to the sim.
@@ -131,4 +134,56 @@ public class AtmosConfig
     ///     Maximum number of ticks that an accumulated activity value remains alive.
     /// </summary>
     public int AccumulatorMaxAliveTicks { get; set; } = AtmosConfigDefaults.AccumulatorMaxAliveTicks;
+
+    public float PressurePerMoleKelvin => AtmosPhysicalConstants.MolarGasConstant / VoxelVolume;
+
+    public float GetValidatedTemp(float storedTemperature) =>
+        FloatMath.IsFinitePositive(storedTemperature) ? storedTemperature : DefaultTemperatureFallback;
+
+    public float GetVoxelVolume()
+    {
+        return FloatMath.IsFinitePositive(VoxelVolume)
+            ? VoxelVolume
+            : AtmosConfigDefaults.VoxelVolume;
+    }
+
+    public float GetMolarHeatCapacityAtConstantVolume(int gasId)
+    {        
+        float fallback = AtmosSolverMath.IsFinitePositive(DefaultMolarHeatCapacityAtConstantVolume)
+            ? DefaultMolarHeatCapacityAtConstantVolume
+            : AtmosConfigDefaults.DefaultMolarHeatCapacityAtConstantVolume;
+        if ((uint)gasId < (uint)GasRegistry.Count)
+        {
+            float configured = GasRegistry[gasId].MolarHeatCapacityAtConstantVolume;
+            if (AtmosSolverMath.IsFinitePositive(configured))
+                return configured;
+        }
+
+        if ((uint)gasId < (uint)GasRegistry.Count)
+        {
+            var value = GasRegistry[gasId].MolarHeatCapacityAtConstantVolume;
+            if (FloatMath.IsFinitePositive(value))
+                return value;
+        }
+
+        return fallback;
+    }
+
+    public float GetDiffusionCoefficient(int gasId) =>
+        (uint)gasId < (uint)GasRegistry.Count
+            ? FloatMath.ClampUnitInterval(GasRegistry[gasId].DiffusionCoefficient)
+            : DefaultDiffusionCoefficient;
+
+    public bool TryGetGasProperties(int gasId, out GasProperties properties)
+    {
+        if ((uint)gasId < (uint)GasRegistry.Count)
+        {
+            properties = GasRegistry[gasId];
+            return true;
+        }
+
+        properties = default;
+        return false;
+    }
+
 }

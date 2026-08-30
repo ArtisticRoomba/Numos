@@ -19,13 +19,13 @@ internal static class GasInjectionSolver
             if (existingMoles <= 0f)
                 continue;
             currentHeatCapacity += existingMoles *
-                                   AtmosSolverMath.GetMolarHeatCapacity(config, chunk.ActiveGases[gas].GasId);
+                                   config.GetMolarHeatCapacityAtConstantVolume(chunk.ActiveGases[gas].GasId);
         }
 
         InjectCore(chunk, localVoxelIndex, gasId, moles, temperature,
-            AtmosSolverMath.GetMolarHeatCapacity(config, gasId), currentHeatCapacity,
-            AtmosSolverMath.GetEffectiveTemperature(config, chunk.Temperature[localVoxelIndex]),
-            AtmosPhysicalConstants.MolarGasConstant / AtmosSolverMath.GetVoxelVolume(config));
+            config.GetMolarHeatCapacityAtConstantVolume(gasId), currentHeatCapacity,
+            config.GetValidatedTemp(chunk.Temperature[localVoxelIndex]),
+            AtmosPhysicalConstants.MolarGasConstant / config.GetVoxelVolume());
     }
 
     internal static void InjectDuringTick(AtmosChunk chunk, ushort localVoxelIndex, int gasId, float moles,

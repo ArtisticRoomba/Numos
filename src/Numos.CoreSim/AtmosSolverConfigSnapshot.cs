@@ -9,7 +9,7 @@ namespace Numos.CoreSim;
 ///     Public configuration remains mutable. This reusable snapshot remains stable for the duration of a tick,
 ///     keeping the tick internally consistent and moving validation out of per-voxel and per-neighbor hot paths.
 /// </remarks>
-internal sealed class AtmosSolverConfigSnapshot
+internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
 {
     private float _defaultMolarHeatCapacityAtConstantVolume;
     private float _defaultDiffusionCoefficient;
@@ -30,6 +30,9 @@ internal sealed class AtmosSolverConfigSnapshot
         }
 
         _gasRegistryCount = gasRegistry.Count;
+        GlobalTemperature = FloatMath.IsFinitePositive(config.GlobalTemperature)
+            ? config.GlobalTemperature
+            : AtmosConfigDefaults.GlobalTemperature;
         DefaultTemperatureFallback = FloatMath.IsFinitePositive(config.DefaultTemperatureFallback)
             ? config.DefaultTemperatureFallback
             : AtmosConfigDefaults.DefaultTemperatureFallback;
@@ -45,6 +48,9 @@ internal sealed class AtmosSolverConfigSnapshot
             ? config.SaturationReferencePressure
             : AtmosConfigDefaults.SaturationReferencePressure;
         _defaultDiffusionCoefficient = FloatMath.ClampUnitInterval(config.DefaultDiffusionCoefficient);
+        SpaceTemperature = FloatMath.IsFinitePositive(config.SpaceTemperature)
+            ? config.SpaceTemperature
+            : AtmosConfigDefaults.SpaceTemperature;
         for (var gasId = 0; gasId < _gasRegistryCount; gasId++)
         {
             GasProperties properties = gasRegistry[gasId];
@@ -74,40 +80,54 @@ internal sealed class AtmosSolverConfigSnapshot
         CondensationRateFactor = FloatMath.ClampUnitInterval(config.CondensationRateFactor);
         MaxPressureTransferFractionPerNeighbor =
             FloatMath.ClampUnitInterval(config.MaxPressureTransferFractionPerNeighbor);
+        AccumulatorWakeThreshold = FloatMath.GetNonnegativeFinite(config.AccumulatorWakeThreshold);
+        AccumulatorMaxAliveTicks = Math.Max(0, config.AccumulatorMaxAliveTicks);
     }
 
-    internal float DefaultTemperatureFallback { get; private set; }
-    internal float VoxelVolume { get; private set; }
-    internal float PressurePerMoleKelvin { get; private set; }
-    internal float SaturationReferencePressure { get; private set; }
-    internal float BulkFlowCoefficient { get; private set; }
-    internal float VacuumThreshold { get; private set; }
-    internal int SleepThreshold { get; private set; }
-    internal float SleepEpsilon { get; private set; }
-    internal float ThermalConductance { get; private set; }
-    internal float CondensationRateFactor { get; private set; }
-    internal float MaxPressureTransferFractionPerNeighbor { get; private set; }
+    public float GlobalTemperature { get; private set; }
+    public float DefaultTemperatureFallback { get; private set; }
+    public float VoxelVolume { get; private set; }
+    public float PressurePerMoleKelvin { get; private set; }
+    public float SaturationReferencePressure { get; private set; }
+    public float SpaceTemperature { get; private set; }
+    public float BulkFlowCoefficient { get; private set; }
+    public float VacuumThreshold { get; private set; }
+    public int SleepThreshold { get; private set; }
+    public float SleepEpsilon { get; private set; }
+    public float ThermalConductance { get; private set; }
+    public float CondensationRateFactor { get; private set; }
+    public float MaxPressureTransferFractionPerNeighbor { get; private set; }
+    public float AccumulatorWakeThreshold { get; private set; }
+    public int AccumulatorMaxAliveTicks { get; private set; }
 
-    internal float GetValidatedTemp(float storedTemperature)
+    public float DefaultMolarHeatCapacityAtConstantVolume => _defaultMolarHeatCapacityAtConstantVolume;
+    public float DefaultDiffusionCoefficient => _defaultDiffusionCoefficient;
+
+    public float GetVoxelVolume()
+    {
+        return VoxelVolume;
+    }
+
+    public float GetValidatedTemp(float storedTemperature)
     {
         return FloatMath.IsFinitePositive(storedTemperature) ? storedTemperature : DefaultTemperatureFallback;
     }
 
-    internal float GetMolarHeatCapacityAtConstantVolume(int gasId)
+    public float GetMolarHeatCapacityAtConstantVolume(int gasId)
     {
         return (uint)gasId < (uint)_gasRegistryCount
             ? _molarHeatCapacitiesAtConstantVolume[gasId]
             : _defaultMolarHeatCapacityAtConstantVolume;
     }
 
-    internal float GetDiffusionCoefficient(int gasId)
+    public float GetDiffusionCoefficient(int gasId)
     {
         return (uint)gasId < (uint)_gasRegistryCount
             ? _diffusionCoefficients[gasId]
             : _defaultDiffusionCoefficient;
     }
 
-    internal bool TryGetGasProperties(int gasId, out GasProperties properties)
+    public bool TryGetGasProperties(int gasId, out GasProperties properties)
     {
         if ((uint)gasId < (uint)_gasRegistryCount)
         {
