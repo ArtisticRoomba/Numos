@@ -14,6 +14,7 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
     private readonly ConcurrentQueue<TickBoundaryFlowEvent> _boundaryEvents = new();
     private readonly List<(Int3 Key, BoundaryFlowEvent Event)> _orderedEvents = [];
 
+    // TODO think of a smarter way to do solver callback/dependencies
     internal void ClearPendingEvents()
     {
         _boundaryEvents.Clear();
@@ -28,11 +29,22 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
     {
         long startedAt = Stopwatch.GetTimestamp();
         _orderedEvents.Clear();
+        // TODO PERF properly microopt this
+        // This performs a sort op so that indexing the arrays goes from least to greatest, which is better
+        // than random access, however the sorting op does a In3 comparison before doing a index comparison
+        // when the index comparison is extremely cheap so it's kinda nil.
+        // Ideally:
+        // Boundary events get queued into a ConcurrentBag so collection is still thread-safe and can be added to from multiple threads.
+        // ConcurrentBag gets copied to a working array (not list)
+        // Working array gets sorted by event index
+        // Working array gets passed to the solver to process in order, which is now a single pass through the array.
         while (_boundaryEvents.TryDequeue(out var boundaryEvent))
         {
+            // TODO check if this tickcount check really really needs to be here
             if (boundaryEvent.TickCount == context.TickCount)
                 _orderedEvents.Add((boundaryEvent.Key, boundaryEvent.Event));
         }
+
         _orderedEvents.Sort(CompareEvents);
 
         foreach (var (chunkPosition, boundaryEvent) in _orderedEvents)

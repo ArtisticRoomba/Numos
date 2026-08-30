@@ -10,6 +10,7 @@ namespace Numos.API;
 /// </remarks>
 /// <param name="simulation">The simulation being solved.</param>
 public delegate void AtmosSolver(AtmosSimulation simulation);
+// TODO AtmosSolver add custom config options that are registered with the solver
 
 /// <summary>
 ///     Identifies whether a registered solver stage is built in or caller provided.

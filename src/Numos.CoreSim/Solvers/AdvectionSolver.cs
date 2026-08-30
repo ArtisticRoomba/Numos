@@ -265,6 +265,7 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
         buffer[count++] = new BoundaryFlowEvent { LocalVoxelIndex = voxelIndex };
     }
 
+    // TODO make into solver helper API
     private static void ClearVacuumVoxel(AtmosChunk chunk, ushort voxelIndex)
     {
         for (var gas = 0; gas < chunk.ActiveGasCount; gas++)
@@ -273,6 +274,7 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
         chunk.TotalHeatCapacity[voxelIndex] = 0f;
     }
 
+    // TODO refac into public API
     private static float GetTotalMoles(AtmosChunk chunk, ushort voxelIndex)
     {
         var totalMoles = 0f;
