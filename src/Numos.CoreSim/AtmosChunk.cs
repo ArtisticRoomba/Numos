@@ -438,7 +438,6 @@ internal class AtmosChunk
     /// <summary>
     ///     Sets a specific voxel to a vacuum. This sets TotalPressure, ActiveGases, and TotalHeatCapacity to 0 and IsVacuum to true.
     /// </summary>
-    /// <param name="idx">Index of voxel</param>
     [PublicAPI]
     public void SetChunkToVacuum()
     {
