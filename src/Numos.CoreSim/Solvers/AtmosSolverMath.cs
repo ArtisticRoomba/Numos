@@ -69,10 +69,8 @@ internal static class AtmosSolverMath
         if (maximumFraction <= 0f)
             return 0f;
 
-        float pressureTransfer = pressureDelta < config.LowPressureDeltaThreshold
-            ? pressureDelta * maximumFraction
-            : pressureDelta * config.BulkFlowCoefficient * config.BulkFlowDamping;
-        if (pressureTransfer <= 0f || pressureTransfer < config.MinimumPressureTransfer)
+        float pressureTransfer = pressureDelta * config.BulkFlowCoefficient;
+        if (pressureTransfer <= 0f)
             return 0f;
 
         return MathF.Min(pressureTransfer, currentPressure * maximumFraction);

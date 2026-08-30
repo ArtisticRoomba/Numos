@@ -71,9 +71,6 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
         }
 
         BulkFlowCoefficient = FloatMath.ClampUnitInterval(config.BulkFlowCoefficient);
-        BulkFlowDamping = FloatMath.ClampUnitInterval(config.BulkFlowDamping);
-        LowPressureDeltaThreshold = FloatMath.GetNonnegativeFinite(config.LowPressureDeltaThreshold);
-        MinimumPressureTransfer = FloatMath.GetNonnegativeFinite(config.MinimumPressureTransfer);
         VacuumThreshold = FloatMath.GetNonnegativeFinite(config.VacuumThreshold);
         SleepThreshold = Math.Max(0, config.SleepThreshold);
         SleepEpsilon = FloatMath.GetNonnegativeFinite(config.SleepEpsilon);
@@ -94,9 +91,6 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
     public float SaturationReferencePressure { get; private set; }
     public float SpaceTemperature { get; private set; }
     public float BulkFlowCoefficient { get; private set; }
-    public float BulkFlowDamping { get; private set; }
-    public float LowPressureDeltaThreshold { get; private set; }
-    public float MinimumPressureTransfer { get; private set; }
     public float VacuumThreshold { get; private set; }
     public int SleepThreshold { get; private set; }
     public float SleepEpsilon { get; private set; }

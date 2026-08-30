@@ -82,9 +82,6 @@ internal sealed class ConfigurationPatch
     public float? DefaultDiffusionCoefficient { get; init; }
     public float? SpaceTemperatureK { get; init; }
     public float? BulkFlowCoefficient { get; init; }
-    public float? BulkFlowDamping { get; init; }
-    public float? LowPressureDeltaThresholdPa { get; init; }
-    public float? MinimumPressureTransferPa { get; init; }
     public float? VacuumThresholdPa { get; init; }
     public int? SleepThreshold { get; init; }
     public float? SleepEpsilonPa { get; init; }
@@ -114,12 +111,6 @@ internal sealed class ConfigurationPatch
             config.SpaceTemperature = SpaceTemperatureK.Value;
         if (BulkFlowCoefficient.HasValue)
             config.BulkFlowCoefficient = BulkFlowCoefficient.Value;
-        if (BulkFlowDamping.HasValue)
-            config.BulkFlowDamping = BulkFlowDamping.Value;
-        if (LowPressureDeltaThresholdPa.HasValue)
-            config.LowPressureDeltaThreshold = LowPressureDeltaThresholdPa.Value;
-        if (MinimumPressureTransferPa.HasValue)
-            config.MinimumPressureTransfer = MinimumPressureTransferPa.Value;
         if (VacuumThresholdPa.HasValue)
             config.VacuumThreshold = VacuumThresholdPa.Value;
         if (SleepThreshold.HasValue)

@@ -38,9 +38,9 @@ public sealed class CrossChunkFlowTests
         Assert.Multiple(() =>
         {
             Assert.That(SimTestHelpers.Moles(sourceSnapshot, SimTestHelpers.FirstGasId, sourceIndex),
-                Is.EqualTo(1.75f).Within(SimTestHelpers.Tolerance));
+                Is.EqualTo(1.68f).Within(SimTestHelpers.Tolerance));
             Assert.That(SimTestHelpers.Moles(targetSnapshot, SimTestHelpers.FirstGasId, targetIndex),
-                Is.EqualTo(0.25f).Within(SimTestHelpers.Tolerance));
+                Is.EqualTo(0.32f).Within(SimTestHelpers.Tolerance));
             Assert.That(SimTestHelpers.TotalMoles(sourceSnapshot, targetSnapshot),
                 Is.EqualTo(2f).Within(SimTestHelpers.Tolerance));
         });
@@ -68,13 +68,13 @@ public sealed class CrossChunkFlowTests
         Assert.Multiple(() =>
         {
             Assert.That(SimTestHelpers.Moles(targetSnapshot, SimTestHelpers.FirstGasId, targetIndex),
-                Is.EqualTo(0.375f).Within(SimTestHelpers.Tolerance));
+                Is.EqualTo(0.48f).Within(SimTestHelpers.Tolerance));
             Assert.That(SimTestHelpers.Moles(targetSnapshot, SimTestHelpers.SecondGasId, targetIndex),
-                Is.EqualTo(0.125f).Within(SimTestHelpers.Tolerance));
+                Is.EqualTo(0.16f).Within(SimTestHelpers.Tolerance));
             Assert.That(SimTestHelpers.Moles(sourceSnapshot, SimTestHelpers.FirstGasId, sourceIndex),
-                Is.EqualTo(2.625f).Within(SimTestHelpers.Tolerance));
+                Is.EqualTo(2.52f).Within(SimTestHelpers.Tolerance));
             Assert.That(SimTestHelpers.Moles(sourceSnapshot, SimTestHelpers.SecondGasId, sourceIndex),
-                Is.EqualTo(0.875f).Within(SimTestHelpers.Tolerance));
+                Is.EqualTo(0.84f).Within(SimTestHelpers.Tolerance));
             Assert.That(SimTestHelpers.TotalMoles(sourceSnapshot, targetSnapshot),
                 Is.EqualTo(4f).Within(SimTestHelpers.Tolerance));
         });
@@ -130,7 +130,7 @@ public sealed class CrossChunkFlowTests
         {
             Assert.That(simulation.GetChunkSnapshot(source).IsAwake, Is.True);
             Assert.That(SimTestHelpers.Moles(afterFirstTick, SimTestHelpers.FirstGasId, 0),
-                Is.EqualTo(0.25f).Within(SimTestHelpers.Tolerance));
+                Is.EqualTo(0.32f).Within(SimTestHelpers.Tolerance));
             Assert.That(SimTestHelpers.Moles(simulation.GetChunkSnapshot(target),
                     SimTestHelpers.FirstGasId, 0),
                 Is.GreaterThan(0.25f));
@@ -167,7 +167,7 @@ public sealed class CrossChunkFlowTests
             Assert.That(sourceSnapshot.Temperature[0],
                 Is.EqualTo(400f).Within(SimTestHelpers.Tolerance));
             Assert.That(targetSnapshot.Temperature[0],
-                Is.EqualTo(286.7256637f).Within(SimTestHelpers.Tolerance));
+                Is.EqualTo(305.66037f).Within(SimTestHelpers.Tolerance));
             Assert.That(SimTestHelpers.TotalThermalEnergy(config, sourceSnapshot, targetSnapshot),
                 Is.EqualTo(initialEnergy).Within(SimTestHelpers.Tolerance));
         });
@@ -236,10 +236,10 @@ public sealed class CrossChunkFlowTests
         Assert.Multiple(() =>
         {
             Assert.That(SimTestHelpers.Moles(sourceSnapshot, SimTestHelpers.FirstGasId, sourceIndex),
-                Is.EqualTo(1.75f).Within(SimTestHelpers.Tolerance));
+                Is.EqualTo(1.68f).Within(SimTestHelpers.Tolerance));
             Assert.That(SimTestHelpers.TotalMoles(targetSnapshot), Is.Zero);
             Assert.That(SimTestHelpers.TotalMoles(sourceSnapshot, targetSnapshot),
-                Is.EqualTo(1.75f).Within(SimTestHelpers.Tolerance));
+                Is.EqualTo(1.68f).Within(SimTestHelpers.Tolerance));
         });
     }
 
@@ -309,9 +309,9 @@ public sealed class CrossChunkFlowTests
         Assert.Multiple(() =>
         {
             Assert.That(SimTestHelpers.Moles(sourceSnapshot, SimTestHelpers.FirstGasId, sourceIndex),
-                Is.EqualTo(1.75f).Within(SimTestHelpers.Tolerance));
+                Is.EqualTo(1.68f).Within(SimTestHelpers.Tolerance));
             Assert.That(SimTestHelpers.Moles(targetSnapshot, SimTestHelpers.FirstGasId, targetIndex),
-                Is.EqualTo(0.25f).Within(SimTestHelpers.Tolerance));
+                Is.EqualTo(0.32f).Within(SimTestHelpers.Tolerance));
         });
     }
 
@@ -342,7 +342,7 @@ public sealed class CrossChunkFlowTests
         int targetIndex = SimTestHelpers.Index(size - 1, 0, 0, size, size);
         Assert.That(SimTestHelpers.Moles(simulation.GetChunkSnapshot(target),
                 SimTestHelpers.FirstGasId, targetIndex),
-            Is.EqualTo(0.25f).Within(SimTestHelpers.Tolerance));
+            Is.EqualTo(0.32f).Within(SimTestHelpers.Tolerance));
     }
 
     private static AtmosChunkHandle CreateIsolatedVoxel(AtmosSimulation simulation, Int3 position,

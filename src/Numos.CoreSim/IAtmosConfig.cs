@@ -10,9 +10,6 @@ internal interface IAtmosConfig
     float DefaultDiffusionCoefficient { get; }
     float SpaceTemperature { get; }
     float BulkFlowCoefficient { get; }
-    float BulkFlowDamping { get; }
-    float LowPressureDeltaThreshold { get; }
-    float MinimumPressureTransfer { get; }
     float VacuumThreshold { get; }
     int SleepThreshold { get; }
     float SleepEpsilon { get; }

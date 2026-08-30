@@ -34,9 +34,9 @@ public sealed class SimulationStabilityTests
             Assert.That(SimTestHelpers.Moles(whileSleeping, SimTestHelpers.FirstGasId, 1),
                 Is.EqualTo(1f));
             Assert.That(SimTestHelpers.Moles(afterWake, SimTestHelpers.FirstGasId, 0),
-                Is.EqualTo(0.9375f).Within(SimTestHelpers.Tolerance));
+                Is.EqualTo(0.875f).Within(SimTestHelpers.Tolerance));
             Assert.That(SimTestHelpers.Moles(afterWake, SimTestHelpers.FirstGasId, 1),
-                Is.EqualTo(1.0625f).Within(SimTestHelpers.Tolerance));
+                Is.EqualTo(1.125f).Within(SimTestHelpers.Tolerance));
             Assert.That(SimTestHelpers.TotalMoles(afterWake),
                 Is.EqualTo(2f).Within(SimTestHelpers.Tolerance));
         });

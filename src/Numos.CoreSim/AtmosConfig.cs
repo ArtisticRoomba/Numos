@@ -79,27 +79,6 @@ public class AtmosConfig : IAtmosConfig
     public float BulkFlowCoefficient { get; set; } = AtmosConfigDefaults.BulkFlowCoefficient;
 
     /// <summary>
-    ///     Multiplier applied to <see cref="BulkFlowCoefficient" /> during large-delta advection.
-    ///     Used to reduce oscillation in the sim.
-    /// </summary>
-    /// <remarks>Values are clamped to [0, 1]; non-finite values disable large-delta bulk flow.</remarks>
-    public float BulkFlowDamping { get; set; } = AtmosConfigDefaults.BulkFlowDamping;
-
-    /// <summary>
-    ///     Below this pressure delta, in pascals (Pa), flow uses
-    ///     <see cref="MaxPressureTransferFractionPerNeighbor" /> directly
-    ///     instead of <see cref="BulkFlowCoefficient" /> * <see cref="BulkFlowDamping" />
-    /// </summary>
-    /// <remarks>Non-finite and negative values are normalized to zero.</remarks>
-    public float LowPressureDeltaThreshold { get; set; } = AtmosConfigDefaults.LowPressureDeltaThreshold;
-
-    /// <summary>
-    ///     Candidate pressure transfers below this magnitude, in pascals (Pa) per simulation tick, are discarded.
-    /// </summary>
-    /// <remarks>Non-finite and negative values are normalized to zero.</remarks>
-    public float MinimumPressureTransfer { get; set; } = AtmosConfigDefaults.MinimumPressureTransfer;
-
-    /// <summary>
     ///     Below this pressure, in pascals (Pa), voxel contents are zeroed out.
     /// </summary>
     /// <remarks>Non-finite and negative values are normalized to zero.</remarks>
