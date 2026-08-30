@@ -58,7 +58,7 @@ internal sealed class GasMixtureState
     internal GasMixtureState Clone()
     {
         var clone = new GasMixtureState(Volume, Temperature);
-        foreach ((int gasId, float moles) in Moles)
+        foreach (var (gasId, moles) in Moles)
             clone.Moles.Add(gasId, moles);
         return clone;
     }

@@ -478,6 +478,33 @@ public sealed class IntraChunkFlowTests
     }
 
     [Test]
+    public void Diffusion_MaximumHeatCapacityAvoidsSensibleEnergyOverflow()
+    {
+        var config = SimTestHelpers.CreateDeterministicConfig();
+        config.MaxPressureTransferFractionPerNeighbor = 0f;
+        var gas = config.GasRegistry[SimTestHelpers.FirstGasId];
+        gas.DiffusionCoefficient = 0.1f;
+        gas.MolarHeatCapacityAtConstantVolume = float.MaxValue;
+        config.GasRegistry[SimTestHelpers.FirstGasId] = gas;
+        using var simulation = new AtmosSimulation(config, 2, 1, 1);
+        var chunk = SimTestHelpers.CreateOpenChunk(simulation, default);
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasId, 1f, 400f);
+        simulation.AddGasToVoxel(chunk, 1, 0, 0, SimTestHelpers.FirstGasId, 0.5f, 200f);
+
+        simulation.Tick();
+
+        var snapshot = simulation.GetChunkSnapshot(chunk);
+        Assert.Multiple(() =>
+        {
+            Assert.That(snapshot.Temperature[0],
+                Is.EqualTo(400f).Within(SimTestHelpers.Tolerance));
+            Assert.That(snapshot.Temperature[1],
+                Is.EqualTo(226.08696f).Within(SimTestHelpers.Tolerance));
+            Assert.That(snapshot.Temperature.All(float.IsFinite), Is.True);
+        });
+    }
+
+    [Test]
     public void VoidVoxel_RemovesGasThatFlowsIntoIt()
     {
         var config = SimTestHelpers.CreateDeterministicConfig();

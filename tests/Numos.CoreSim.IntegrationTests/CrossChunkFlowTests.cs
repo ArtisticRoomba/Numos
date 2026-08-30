@@ -111,6 +111,59 @@ public sealed class CrossChunkFlowTests
     }
 
     [Test]
+    public void BoundaryFlow_TransferKeepsSourceAwakeForSubsequentTicks()
+    {
+        var config = SimTestHelpers.CreateDeterministicConfig();
+        config.SleepThreshold = 0;
+        config.SleepEpsilon = 1f;
+        using var simulation = new AtmosSimulation(config, 1, 1, 1);
+        var source = CreateIsolatedVoxel(simulation, default, 0, 0, 0, SimTestHelpers.RoomId);
+        var target = CreateIsolatedVoxel(simulation, Int3.PosX, 0, 0, 0, SimTestHelpers.RoomId + 1);
+        simulation.AddGasToVoxel(source, 0, 0, 0,
+            SimTestHelpers.FirstGasId, 2f, SimTestHelpers.DefaultTemperature);
+
+        simulation.Tick();
+        var afterFirstTick = simulation.GetChunkSnapshot(target);
+        simulation.Tick();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(simulation.GetChunkSnapshot(source).IsAwake, Is.True);
+            Assert.That(SimTestHelpers.Moles(afterFirstTick, SimTestHelpers.FirstGasId, 0),
+                Is.EqualTo(0.25f).Within(SimTestHelpers.Tolerance));
+            Assert.That(SimTestHelpers.Moles(simulation.GetChunkSnapshot(target),
+                    SimTestHelpers.FirstGasId, 0),
+                Is.GreaterThan(0.25f));
+        });
+    }
+
+    [Test]
+    public void BoundaryDiffusion_DoesNotRequireRepresentablePressure()
+    {
+        var config = SimTestHelpers.CreateDeterministicConfig();
+        config.VoxelVolume = float.MaxValue;
+        config.MaxPressureTransferFractionPerNeighbor = 0f;
+        var gas = config.GasRegistry[SimTestHelpers.FirstGasId];
+        gas.DiffusionCoefficient = 0.1f;
+        config.GasRegistry[SimTestHelpers.FirstGasId] = gas;
+        using var simulation = new AtmosSimulation(config, 1, 1, 1);
+        var source = CreateIsolatedVoxel(simulation, default, 0, 0, 0, SimTestHelpers.RoomId);
+        var target = CreateIsolatedVoxel(simulation, Int3.PosX, 0, 0, 0, SimTestHelpers.RoomId + 1);
+        simulation.SetVoxelTemperature(source, 0, float.Epsilon);
+        simulation.AddGasToVoxel(source, 0, SimTestHelpers.FirstGasId, 1f, float.Epsilon);
+
+        simulation.Tick();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(simulation.GetVoxelSnapshot(source, 0).Pressure, Is.Zero);
+            Assert.That(SimTestHelpers.Moles(simulation.GetChunkSnapshot(target),
+                    SimTestHelpers.FirstGasId, 0),
+                Is.EqualTo(0.1f).Within(SimTestHelpers.Tolerance));
+        });
+    }
+
+    [Test]
     public void BoundaryFlow_WithUnequalMolarHeatCapacities_ConservesThermalEnergy()
     {
         var config = SimTestHelpers.CreateDeterministicConfig();
@@ -260,15 +313,15 @@ public sealed class CrossChunkFlowTests
         SimTestHelpers.SetAllTemperatures(simulation, source, size, size, size);
 
         for (var z = 0; z < size; z++)
-        for (var y = 0; y < size; y++)
-        for (var x = 0; x < size; x++)
-        {
-            if (x == 0 || x == size - 1 || y == 0 || y == size - 1 || z == 0 || z == size - 1)
-            {
-                simulation.AddGasToVoxel(source, x, y, z,
-                    SimTestHelpers.FirstGasId, 2f, SimTestHelpers.DefaultTemperature);
-            }
-        }
+            for (var y = 0; y < size; y++)
+                for (var x = 0; x < size; x++)
+                {
+                    if (x == 0 || x == size - 1 || y == 0 || y == size - 1 || z == 0 || z == size - 1)
+                    {
+                        simulation.AddGasToVoxel(source, x, y, z,
+                            SimTestHelpers.FirstGasId, 2f, SimTestHelpers.DefaultTemperature);
+                    }
+                }
 
         var target = CreateIsolatedVoxel(simulation, new Int3(0, 0, 1),
             size - 1, size - 1, 0, SimTestHelpers.RoomId + 1);
@@ -286,6 +339,36 @@ public sealed class CrossChunkFlowTests
             Assert.That(SimTestHelpers.Moles(targetSnapshot, SimTestHelpers.FirstGasId, targetIndex),
                 Is.EqualTo(0.25f).Within(SimTestHelpers.Tolerance));
         });
+    }
+
+    [Test]
+    public void DenseDepthOneBoundary_FitsExactBoundaryBufferCapacity()
+    {
+        const int size = 4;
+        var config = SimTestHelpers.CreateDeterministicConfig();
+        using var simulation = new AtmosSimulation(config, size, size, 1);
+        var source = SimTestHelpers.CreateOpenChunk(simulation, default);
+        SimTestHelpers.SetAllTemperatures(simulation, source, size, size, 1);
+
+        for (var y = 0; y < size; y++)
+            for (var x = 0; x < size; x++)
+            {
+                if (x == 0 || x == size - 1 || y == 0 || y == size - 1)
+                {
+                    simulation.AddGasToVoxel(source, x, y, 0,
+                        SimTestHelpers.FirstGasId, 2f, SimTestHelpers.DefaultTemperature);
+                }
+            }
+
+        var target = CreateIsolatedVoxel(simulation, Int3.PosY,
+            size - 1, 0, 0, SimTestHelpers.RoomId + 1);
+
+        simulation.Tick();
+
+        int targetIndex = SimTestHelpers.Index(size - 1, 0, 0, size, size);
+        Assert.That(SimTestHelpers.Moles(simulation.GetChunkSnapshot(target),
+                SimTestHelpers.FirstGasId, targetIndex),
+            Is.EqualTo(0.25f).Within(SimTestHelpers.Tolerance));
     }
 
     private static AtmosChunkHandle CreateIsolatedVoxel(AtmosSimulation simulation, Int3 position,

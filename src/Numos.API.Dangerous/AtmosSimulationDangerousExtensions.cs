@@ -15,6 +15,6 @@ public static class AtmosSimulationDangerousExtensions
     public static AtmosDangerousApi Dangerous(this AtmosSimulation simulation)
     {
         ArgumentNullException.ThrowIfNull(simulation);
-        return new AtmosDangerousApi(simulation.Kernel);
+        return new AtmosDangerousApi(simulation);
     }
 }

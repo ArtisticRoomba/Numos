@@ -41,8 +41,12 @@ public struct GasProperties
     public float MolarEnthalpyOfVaporization;
 
     /// <summary>
-    ///     ID of the liquid this gas condenses to. Currently unused but can be passed to a separate fluid sim.
+    ///     Reserved ID for a liquid produced by condensation.
     /// </summary>
+    /// <remarks>
+    ///     Numos currently removes condensed vapor without producing liquid state or an event, so this field is
+    ///     not consumed by the built-in solver. A custom liquid integration may interpret it.
+    /// </remarks>
     /// TODO FAR FUTURE fluid sim :godo:
     public int LiquidId;
 

@@ -1,5 +1,3 @@
-using Numos.CoreSim;
-
 namespace Numos.API.Dangerous;
 
 /// <summary>
@@ -20,10 +18,24 @@ namespace Numos.API.Dangerous;
 /// </remarks>
 public readonly struct AtmosDangerousApi
 {
-    private readonly AtmosKernel _kernel;
+    private readonly AtmosSimulation _simulation;
 
-    internal AtmosDangerousApi(AtmosKernel kernel)
+    internal AtmosDangerousApi(AtmosSimulation simulation)
     {
-        _kernel = kernel;
+        _simulation = simulation;
+    }
+
+    /// <summary>
+    ///     Returns an unchecked live view of a registered chunk.
+    /// </summary>
+    /// <remarks>
+    ///     The caller is responsible for preventing concurrent simulation or chunk-lifecycle operations while using
+    ///     the returned view. A custom solver callback provides that synchronization automatically.
+    /// </remarks>
+    /// <exception cref="KeyNotFoundException">No chunk is registered at the handle's position.</exception>
+    /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
+    public AtmosDangerousChunk GetChunk(AtmosChunkHandle chunk)
+    {
+        return new AtmosDangerousChunk(_simulation.Kernel.GetChunkForDangerousAccess(chunk.Position));
     }
 }

@@ -166,6 +166,14 @@ internal readonly struct FlatArray<T>
     }
 
     /// <summary>
+    ///     Returns a live span over the backing storage for the opt-in dangerous API.
+    /// </summary>
+    internal Span<T> AsSpan()
+    {
+        return _data.AsSpan();
+    }
+
+    /// <summary>
     ///     Returns a wrapper over the same storage using new dimensions.
     /// </summary>
     public FlatArray<T> Reshape(Int3 dimensions)

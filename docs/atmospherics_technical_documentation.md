@@ -22,9 +22,10 @@
    - 3.7 [Container and Voxel Gas Mixtures](#37-container-and-voxel-gas-mixtures)
 4. [Simulation Loop](#4-simulation-loop)
    - 4.1 [Fixed Timestep Accumulator](#41-fixed-timestep-accumulator)
-   - 4.2 [Phase 1 — Pressure Advection](#42-phase-1--pressure-advection)
-   - 4.3 [Phase 2 — Cross-Chunk Boundary Flow](#43-phase-2--cross-chunk-boundary-flow)
-   - 4.4 [Phase 3 — Thermodynamics](#44-phase-3--thermodynamics)
+   - 4.2 [Solver Pipeline](#42-solver-pipeline)
+   - 4.3 [Stage 1 — Pressure Advection](#43-stage-1--pressure-advection)
+   - 4.4 [Stage 2 — Cross-Chunk Boundary Flow](#44-stage-2--cross-chunk-boundary-flow)
+   - 4.5 [Stages 3 and 4 — Thermodynamics and Thermal Boundaries](#45-stages-3-and-4--thermodynamics-and-thermal-boundaries)
 5. [Stability & Convergence Mechanisms](#5-stability--convergence-mechanisms)
    - 5.1 [Per-Neighbor Bulk-Flow Cap](#51-per-neighbor-bulk-flow-cap)
    - 5.2 [Damping & Low-Delta Regime](#52-damping--low-delta-regime)
@@ -68,15 +69,22 @@ When a disturbance exceeds a configurable threshold (the "Threshold of Violence"
 
 ```mermaid
 graph TD
-    API["AtmosSimulation (Public API)"] --> A["AtmosKernel (Tick Driver)"]
-    DANGER["Numos.API.Dangerous
-    (Opt-in Raw Views)"] -.-> A
-    A --> B["AtmosChunk[] (Active Grid)"]
+    API["AtmosSimulation (Public API)"] --> KERNEL["AtmosKernel (Lifecycle and Tick Driver)"]
+    API --> PIPE["Ordered Solver Pipeline"]
+    DANGER["Numos.API.Dangerous (Opt-in Raw Views)"] --> B
+    KERNEL --> PIPE
+    PIPE --> CTX["Per-tick Solver Context"]
+    PIPE --> A["AdvectionSolver"]
+    PIPE --> BOUNDARY["BoundaryFlowSolver"]
+    PIPE --> THERMO["ThermodynamicsSolver"]
+    PIPE --> THERMAL["ThermalBoundarySolver"]
+    CTX --> B["AtmosChunk[] (Tick Snapshot)"]
+    A -->|"Tick-tagged events"| BOUNDARY
+    THERMO -->|"Tick-tagged events"| THERMAL
     B --> C["GasChannel[] (SoA Gas Data)"]
     B --> D["VoxelRoomMap (Topology)"]
-    A --> E["BoundaryFlowEvent Queue"]
-    A --> F["PrecipitationEvent Buffer"]
-    G["AtmosConfig (Tuning)"] --> A
+    G["AtmosConfig (Live Tuning)"] --> API
+    G -->|"Normalized tick snapshot"| CTX
     H["GasProperties Registry"] --> G
     I["RoomNode (Macro Layer)"] -.-> B
     J["GasAccumulator"] -.-> I
@@ -90,14 +98,18 @@ Numos deliberately exposes two package-level integration surfaces:
 | Package | Intended use | Compatibility                        | State access                                      |
 |---------|--------------|--------------------------------------|---------------------------------------------------|
 | `Numos.API` | Normal engine and game integration | Supported public contract            | Handles, validated operations, detached snapshots |
-| `Numos.API.Dangerous` | Measured performance-critical code | No compatibility guarantee (for now) | No impl for now.                                  |
+| `Numos.API.Dangerous` | Measured performance-critical solver code | No compatibility guarantee (for now) | Handle-addressed live spans and unchecked state views |
 
 The dangerous package must be referenced separately and imported through `Numos.API.Dangerous`. Access begins with
-`simulation.Dangerous()`.
+`simulation.Dangerous()`. Every custom solver is registered through `simulation.Solvers` and receives the same
+`AtmosSimulation` facade. Most solvers use its detached snapshots and validated mutations; a measured hot path can call
+`simulation.Dangerous().GetChunk(handle)` from that callback to obtain stack-scoped live chunk and gas-channel spans.
 
-The kernel hooks used by this package live in `AtmosKernel.Dangerous.cs`, keeping them distinct from the internal
-operations that back the supported facade. `AtmosKernel`, `AtmosChunk`, and gas-channel representations remain
-internal CLR types and are never returned directly from either package.
+Validated simulation mutations keep pressure/heat-capacity caches, room activation, topology indices, sleep state,
+and observable revisions coherent as applicable. A solver should use the dangerous package only when it must directly
+traverse or mutate backing storage and can maintain those coupled invariants itself. The dangerous views are
+`ref struct` values and never expose the internal `AtmosChunk` or `GasChannel` CLR types. They are safest inside a
+solver callback, where the simulation already prevents concurrent tick and chunk-lifecycle operations.
 
 ---
 
@@ -222,7 +234,7 @@ Each gas species is defined by a `GasProperties` struct:
 | `BoilingPoint` | `float` | Normal boiling temperature (K) at `SaturationReferencePressure` |
 | `CondensationEnabled` | `bool` | Enables this species in the condensation model. |
 | `MolarEnthalpyOfVaporization` | `float` | Vaporization enthalpy in J/mol, used by Clausius–Clapeyron and converted to an approximate constant-volume internal-energy change for condensation. |
-| `LiquidId` | `int` | ID of the liquid this gas condenses into (for a separate liquid simulation system) |
+| `LiquidId` | `int` | Reserved integration ID. The built-in solver does not currently create liquid state or emit a condensation event. |
 | `DiffusionCoefficient` | `float` | Dimensionless fraction of the per-species mole imbalance mixed per simulation tick; finite values are clamped to [0, 1], and non-finite values disable species diffusion. |
 
 The registry is stored as a `List<GasProperties>` indexed by gas ID; zero is a valid gas ID.
@@ -287,16 +299,17 @@ The `Temperature` setter stores its raw value for parity with direct voxel tooli
 temperatures are interpreted through `DefaultTemperatureFallback` when pressure or sensible energy is calculated.
 Creation and incoming-gas operations still require finite, nonnegative temperatures.
 
-At the start of each simulation tick, the solver captures one normalized configuration and gas-property snapshot.
-This keeps the tick internally consistent while retaining the public live-configuration model, and avoids repeating
-configuration validation in the per-neighbor and per-species loops.
+At the start of each simulation tick, the solver captures a normalized configuration/gas-property snapshot from the
+current `AtmosConfig`. Built-in stages use that normalized snapshot for the whole tick. Custom callbacks receive the
+live `AtmosSimulation`, so `simulation.Config` reflects an immediately replaced configuration for subsequent custom
+callbacks. Mutating or replacing it affects normalized built-in settings on the next tick.
 
-Persistent voxel state, per-voxel thermal work buffers, and production atmos calculations use single precision
-end-to-end. Overflow-prone formulas use algebraically equivalent float forms: thermal equilibrium conductance is
-evaluated without forming `C1 * C2`, temperature updates use `T + ΔE/C`, and heat-capacity-weighted mixing uses
-bounded interpolation. Finite-range checks reject results that cannot be represented by the float-backed state.
-Double precision is reserved for test/reference reductions, avoiding production float-to-double conversions while
-preserving an independent, higher-precision conservation check.
+Persistent voxel state and advection work buffers use single precision. Overflow-prone formulas use stable algebraic
+forms: thermal equilibrium conductance is evaluated without forming `C1 * C2`, heat-capacity-weighted mixing uses
+bounded interpolation, and condensation computes the temperature increment without subtracting large sensible-energy
+terms. Thermal diffusion alone accumulates conductance and equal-and-opposite energy deltas in `double`; temperatures,
+pressures, heat capacities, and gas inventories remain `float`. This prevents a representable temperature result from
+being lost when an intermediate `C * ΔT` exceeds the `float` range.
 
 ```csharp
 var canister = simulation.CreateGasMixture(volume: 0.07f, temperature: 293.15f);
@@ -330,15 +343,113 @@ Each frame:
 2. The accumulator is clamped to `FixedDt * MaxStepsPerFrame` to prevent a "spiral of death" when frame rate drops.
 3. While the accumulator ≥ `FixedDt`, a simulation tick is consumed.
 
-Each tick proceeds through three phases:
+### 4.2 Solver Pipeline
 
-### 4.2 Phase 1 — Pressure Advection
+`AtmosKernel` owns chunk lifecycle, tick state, and pipeline execution. Physics is implemented by focused components
+under `Numos.CoreSim.Solvers`; the kernel does not contain advection, boundary-flow, thermodynamics, or phase-change
+algorithms. A direct `Tick` snapshots the current chunk set; `Update` snapshots it once for its fixed-step batch.
+Every fixed tick captures normalized built-in settings, increments the tick counter, constructs an internal execution
+context containing only tick-wide inputs, and executes the ordered `simulation.Solvers` pipeline. Its default stages
+are:
+
+1. `advection`
+2. `boundary-flow`
+3. `thermodynamics`
+4. `thermal-boundary`
+
+| Stage | Reads / writes | Tick-scoped output consumed by |
+|-------|----------------|---------------------------------|
+| `advection` | Refreshes pressure/heat-capacity caches; applies intra-chunk gas and energy deltas | Gas boundary events → `boundary-flow` |
+| `boundary-flow` | Applies deterministic cross-chunk gas transfers and refreshes affected caches | None |
+| `thermodynamics` | On even ticks, applies intra-chunk thermal diffusion and condensation | Thermal boundary events → `thermal-boundary` |
+| `thermal-boundary` | On even ticks, applies simultaneous cross-chunk thermal diffusion | None |
+
+The producer/consumer order is part of the default contract. Removing or disabling a producer makes its consumer a
+no-op for that tick. Moving a consumer before its producer also makes it observe an empty queue; events are never
+carried into a later tick.
+
+Stages can be enabled, disabled, removed, or restored with `ResetToDefaults`. Custom delegates can be appended or
+inserted before/after any named stage:
+
+```csharp
+simulation.Solvers.RegisterAfter(AtmosBuiltInSolvers.Advection, "game-reactions", solverSimulation =>
+{
+    foreach (AtmosChunkHandle chunk in solverSimulation.GetChunkHandles())
+    {
+        AtmosChunkSnapshot snapshot = solverSimulation.GetChunkSnapshot(chunk);
+        // Inspect the detached snapshot and apply results through validated simulation methods.
+    }
+});
+
+simulation.Solvers.SetEnabled(AtmosBuiltInSolvers.Thermodynamics, false);
+```
+
+Pipeline edits made by a callback take effect on the next tick. Gas and thermal boundary queues belong to their
+consumer solver instances. Producers clear the prior batch and tag every event with its tick; consumers discard any
+event not produced for their current tick. Disabling or reordering a consumer therefore cannot replay stale work when
+it is later re-enabled. Recursive `Tick`/`Update`, simulation disposal, and chunk registration/removal are rejected
+during a callback because they would invalidate the current chunk snapshot. Perform those lifecycle operations outside
+the solver tick.
+
+Solver-specific settings should remain with a stateful solver object instead of expanding `AtmosConfig` with unrelated
+game configuration. Register its method as the callback:
+
+```csharp
+public sealed class ReactionSolverConfig
+{
+    public float Rate { get; set; } = 0.25f;
+}
+
+public sealed class ReactionSolver
+{
+    public ReactionSolverConfig Config { get; } = new();
+
+    public void Solve(AtmosSimulation simulation)
+    {
+        // Read snapshots and apply validated mutations through simulation.
+    }
+}
+
+var reactionSolver = new ReactionSolver();
+
+simulation.Solvers.RegisterAfter(
+    AtmosBuiltInSolvers.Advection,
+    "game-reactions",
+    reactionSolver.Solve);
+
+reactionSolver.Config.Rate = 0.5f;
+```
+
+The registered method retains the solver instance, so its typed configuration remains editable after registration.
+The pipeline does not own or dispose custom solvers; callers remain responsible for an `IDisposable` solver's lifetime.
+
+Solvers that have a measured need to avoid snapshot copies can opt into live storage from the same callback:
+
+```csharp
+simulation.Solvers.RegisterAfter(AtmosBuiltInSolvers.Advection, "fast-reaction", solverSimulation =>
+{
+    foreach (AtmosChunkHandle handle in solverSimulation.GetChunkHandles())
+    {
+        AtmosDangerousChunk chunk = solverSimulation.Dangerous().GetChunk(handle);
+        Span<float> oxygen = chunk.GetGasChannel(0).Moles;
+        // Raw writes are unchecked. Repair affected caches/topology and call MarkChanged as required.
+    }
+});
+```
+
+Gas injection through `AtmosSimulation.AddGasToVoxel` recalculates the target voxel's existing total SHC from its gas
+composition before temperature mixing. Internal boundary flow uses the same atomic injection operation with the
+normalized gas properties and pressure coefficient captured for that tick.
+
+The four default stages are described below.
+
+### 4.3 Stage 1 — Pressure Advection
 
 This is the core fluid dynamics step. It runs in parallel across chunks.
 
 **For each awake chunk:**
 
-1. **Recalculate pressure and heat capacity**: For every active voxel, `TotalPressure[i] = TotalMoles[i] * R * effectiveTemperature[i] / VoxelVolume`. `effectiveTemperature` is the stored temperature when it is finite and positive, otherwise the normalized `DefaultTemperatureFallback`. The kernel also caches `TotalHeatCapacity[i] = sum(moles[g] * c_effective[g])` for energy calculations.
+1. **Recalculate pressure and heat capacity**: For every active voxel, `TotalPressure[i] = TotalMoles[i] * R * effectiveTemperature[i] / VoxelVolume`. `effectiveTemperature` is the stored temperature when it is finite and positive, otherwise the normalized `DefaultTemperatureFallback`. The advection stage also caches `TotalHeatCapacity[i] = sum(moles[g] * c_effective[g])` for energy calculations.
 
 2. **Compute flow deltas**: For every active voxel, examine each Von Neumann neighbor (±X, ±Y, ±Z — 4 neighbors for 2D chunks, 6 for 3D):
    - Skip solid neighbors.
@@ -363,9 +474,12 @@ This is the core fluid dynamics step. It runs in parallel across chunks.
 
 4. **Apply deltas**: After all voxels have been processed, the accumulated mole deltas are applied and per-species amounts below `AtmosSolverConstants.MinimumTrackedMoles` (currently 0.0001 mol) are snapped to 0. Each voxel's heat capacity is recalculated from its new composition, then its temperature is recovered from `newTemperature = (oldTotalHeatCapacity * oldEffectiveTemperature + energyDelta) / newTotalHeatCapacity`. A voxel with no heat capacity retains its stored temperature. The pressure cache is refreshed from the resulting moles and temperature before boundary processing.
 
-5. **Emit boundary events**: If a voxel is on the edge of the chunk (coordinate is 0 or `Size - 1`) and has positive pressure at or above the normalized `VacuumThreshold`, a `BoundaryFlowEvent` is emitted for cross-chunk processing.
+5. **Emit boundary events**: Every gas-bearing voxel that survives vacuum cleanup and lies on a chunk edge
+   (coordinate is 0 or `Size - 1`) emits one `BoundaryFlowEvent`. Eligibility is based on gas inventory rather than
+   a second positive-pressure check: an extremely small representable pressure can underflow to zero while the
+   species mole imbalance still supports diffusion.
 
-### 4.3 Phase 2 — Cross-Chunk Boundary Flow
+### 4.4 Stage 2 — Cross-Chunk Boundary Flow
 
 Boundary events are collected into a `ConcurrentQueue` during the parallel advection phase, then processed **sequentially** afterward.
 
@@ -386,11 +500,14 @@ For each boundary event:
    For a void target, neighbor moles and temperature are treated as zero. An unregistered gas uses `DefaultDiffusionCoefficient`.
 8. Transfer the capped moles directly (no delta buffer — this is sequential).
 
-Each species carries `molesMoved * c_effective * sourceEffectiveTemperature` of sensible energy during the direct transfer. The source and target heat-capacity caches, temperatures, and pressures are updated immediately by energy balance. Before injection, the target voxel's existing heat capacity is recalculated from its current moles and the live gas registry, including for a target chunk that was sleeping before the transfer.
+Each species carries `molesMoved * c_effective * sourceEffectiveTemperature` of sensible energy during the direct transfer. The source and target heat-capacity caches, temperatures, and pressures are updated immediately by energy balance. Before injection, the target voxel's existing heat capacity is recalculated from its current moles and the normalized gas registry captured for the tick, including for a target chunk that was sleeping before the transfer.
 
-If the adjacent chunk is not registered or the mapped target is solid, no transfer occurs. A non-void target room is woken before it receives gas. A void target is an energy sink: transferred moles and their carried energy are removed from the source without being added to a target voxel.
+If the adjacent chunk is not registered or the mapped target is solid, no transfer occurs. A non-void target room is
+woken before it receives gas. Any source that moves gas is also kept awake with its sleep timer reset, because the
+intra-chunk sleep scan cannot observe a cross-chunk gradient. A void target is an energy sink: transferred moles and
+their carried energy are removed from the source without being added to a target voxel.
 
-### 4.4 Phase 3 — Thermodynamics
+### 4.5 Stages 3 and 4 — Thermodynamics and Thermal Boundaries
 
 Thermodynamics runs at half frequency (every 2nd tick) to save computation. Execution order is:
 
@@ -407,11 +524,16 @@ s_ij = min(1, C_i / G_i, C_j / G_j)
 Q_ij = s_ij * g_ij * (T_i - T_j)
 ```
 
-The first pass accumulates each voxel's incident conductance `G`; the second recomputes the same edges and buffers equal-and-opposite energy deltas. The symmetric scale ensures the total applied conductance at either endpoint cannot exceed that endpoint's heat capacity, so each result is a convex combination of the snapshot temperatures. This removes traversal-direction bias, conserves energy, and prevents new temperature extrema. Voxels with zero heat capacity do not participate and retain their stored temperature.
+The first pass accumulates each voxel's incident conductance `G`; the second recomputes the same edges and buffers
+equal-and-opposite energy deltas. Conductance sums and energy deltas use double-precision work storage to avoid
+intermediate overflow, while the persistent result remains single precision. The symmetric scale ensures the total
+applied conductance at either endpoint cannot exceed that endpoint's heat capacity, so each result is a convex
+combination of the snapshot temperatures. This removes traversal-direction bias, conserves energy, and prevents new
+temperature extrema. Voxels with zero heat capacity do not participate and retain their stored temperature.
 
 **Phase Changes (Condensation)**: See §8. These run after intra-chunk thermal temperatures have been applied and before thermal-boundary events are drained.
 
-**Cross-Chunk Thermal Diffusion**: Boundary faces are deduplicated, their post-phase-change temperatures and heat capacities are snapshotted, and the same `g`, `G`, `s`, and `Q` equations are applied across the entire boundary set. Equal-and-opposite energy deltas are buffered before any boundary temperature is written, eliminating concurrent-queue traversal bias. Solid voxels block conduction, voxels below `VacuumThreshold` are excluded, and a missing adjacent chunk receives no heat. Depth-one chunks do not conduct through their Z faces. Thermal transfer can update a sleeping neighbor without waking it.
+**Cross-Chunk Thermal Diffusion**: Boundary faces are deduplicated, their post-phase-change temperatures and heat capacities are snapshotted, and the same `g`, `G`, `s`, and `Q` equations are applied across the entire boundary set. Equal-and-opposite energy deltas are buffered before any boundary temperature is written, eliminating concurrent-queue traversal bias. Solid and void voxels do not conduct, voxels below `VacuumThreshold` are excluded, and a missing adjacent chunk receives no heat. Depth-one chunks do not conduct through their Z faces. Thermal transfer can update a sleeping neighbor without waking it.
 
 ---
 
@@ -450,14 +572,21 @@ Voxels with `TotalPressure < VacuumThreshold` (1.0) have all gas moles zeroed ou
 
 ### 5.5 Delta Buffers (Ordering Scope)
 
-Mole and sensible-energy transfers within a chunk are not applied directly during the neighbor scan. They are accumulated into a rented `float[]` whose first `VoxelCount` entries are the per-voxel energy-delta lane and whose remaining gas-major lanes hold mole deltas at `(gasIndex + 1) * VoxelCount + voxelIndex`. After every active source voxel has been scanned, the mole and energy deltas are applied together in a single pass.
+Mole and sensible-energy transfers within a chunk are not applied directly during the neighbor scan. Gas-major mole
+deltas are accumulated in a rented `float[]` at `gasIndex * VoxelCount + voxelIndex`. Equal-and-opposite sensible
+energy deltas use a separate rented `double[]`, preventing a representable final temperature from being lost when an
+intermediate `moles * C_v * temperature` exceeds the `float` range. After every active source voxel has been scanned,
+the mole and energy deltas are applied together in a single pass and persistent state is stored as `float`.
 
 This buffering prevents an earlier voxel's applied result from changing the snapshot read by a later voxel, so results do not depend on active-voxel iteration order when the neighbor order is held fixed. It does not make every permutation equivalent: the separate `scheduledOutflows` safety cap is consumed in fixed neighbor order, as described in §5.1, and can favor earlier directions when a source saturates.
 
-Both the delta array and the gas-major `scheduledOutflows` array are rented from `ArrayPool<float>` and returned after application.
+The mole-delta and gas-major `scheduledOutflows` arrays are rented from `ArrayPool<float>`; the energy-delta array is
+rented from `ArrayPool<double>`. All are returned after application.
 
 > [!NOTE]
-> Cross-chunk gas and thermal transfers do **not** use these buffers. They update current state immediately during sequential boundary processing, which introduces event-order dependence when multiple boundary events affect the same voxel.
+> Cross-chunk gas flow is deterministic but sequential and updates current state immediately, so a later boundary
+> event observes earlier transfers. Cross-chunk thermal diffusion is different: it deduplicates edges, snapshots
+> their states, and buffers equal-and-opposite energy deltas before applying any temperature.
 
 ---
 
@@ -473,6 +602,9 @@ Each chunk maintains a `SleepTimer` counter. After each advection pass:
 A sleeping chunk is woken when:
 - `InjectGasToVoxel` is called on it (the sleep timer is reset).
 - A boundary flow event targets one of its voxels (the target room is woken via `WakeRoom`).
+
+A chunk that sends gas across a boundary is kept awake and has its sleep timer reset. The sleep criterion itself is
+pressure-based; a temperature gradient alone does not wake or keep a chunk active.
 
 The sleep system is the primary mechanism for achieving the "work-proportional cost" goal. In a station with 500 chunks, only the handful with active pressure gradients consume CPU.
 
@@ -548,49 +680,40 @@ For a registered species, phase-change processing first requires `CondensationEn
 if gasIsRegistered && CondensationEnabled && gasMoles > 0.01 && T_effective > 0:
     P_sat = SaturationReferencePressure
             * exp(-(MolarEnthalpyOfVaporization / R) * (1/T_effective - 1/T_boiling))
-    currentPartialPressure = gasMoles * R * T_effective / VoxelVolume
-    if currentPartialPressure > P_sat:
-        excessPressure = currentPartialPressure - P_sat
-        requestedMoles = (excessPressure * VoxelVolume / (R * T_effective))
-                         * CondensationRateFactor
-        molesToCondense = min(gasMoles, requestedMoles)
+    saturationMoles = P_sat / ((R / VoxelVolume) * T_effective)
+    if gasMoles > saturationMoles:
+        molesToCondense = (gasMoles - saturationMoles) * CondensationRateFactor
 ```
 
 Dividing molar vaporization enthalpy by `R` makes the exponential dimensionless. This integrated Clausius–Clapeyron form assumes ideal vapor and approximately constant vaporization enthalpy over the modeled temperature interval. Subject to the gates above, this model allows condensation at any temperature where the gas is supersaturated rather than only below a fixed temperature. Gas IDs without a registry entry, invalid boiling points, and invalid or nonpositive vaporization enthalpies are skipped.
 
-The approximation and its assumptions match the integrated ideal-vapor derivation summarized in [NISTIR 5321](https://nvlpubs.nist.gov/nistpubs/Legacy/IR/nistir5321.pdf).
+The direct mole-space calculation is algebraically equivalent to converting excess partial pressure back to moles,
+but it avoids an overflow-prone pressure round trip for large inventories. The approximation and its assumptions
+match the integrated ideal-vapor derivation summarized in [NISTIR 5321](https://nvlpubs.nist.gov/nistpubs/Legacy/IR/nistir5321.pdf).
 
 ### 8.2 Phase-Change Internal-Energy Balance
 
-Condensation removes both the condensed gas's heat capacity and the sensible energy that gas carried. Clausius–Clapeyron uses vaporization enthalpy, but this is a constant-volume internal-energy balance, so the released energy per mole is approximated as `ΔU_vap = max(0, ΔH_vap - RT)`. Let `n_condensed` be the number of moles condensed, `c_effective` the species' effective molar `C_v`, and `C_before` the voxel's total heat capacity before condensation:
+Condensation removes both the condensed gas's heat capacity and the sensible energy that gas carried. Clausius–Clapeyron uses vaporization enthalpy, but this is a constant-volume internal-energy balance, so the released energy per mole is approximated as `ΔU_vap = max(0, ΔH_vap - RT)`. Let `n_condensed` be the number of moles condensed and `C_after` the heat capacity recalculated from the remaining composition:
 
 ```
-C_after = max(0, C_before - n_condensed * c_effective)
-E_after = T_effective * C_before
-          - T_effective * n_condensed * c_effective
-          + n_condensed * max(0, MolarEnthalpyOfVaporization - R * T_effective)
+C_after = sum(remainingMoles[g] * c_effective[g])
 if C_after > 0:
-    T_after = max(0, E_after / C_after)
+    T_after = max(0, T_effective + (n_condensed / C_after) * ΔU_vap)
 ```
 
-The temperature division is performed only when `C_after > 0`. The voxel's cached `TotalHeatCapacity` and `TotalPressure` are updated immediately. As elsewhere in the energy model, a non-finite or nonpositive configured `MolarHeatCapacityAtConstantVolume` uses the normalized `DefaultMolarHeatCapacityAtConstantVolume`.
+This temperature form is the simplified constant-volume energy equation after the departing vapor's sensible energy
+has canceled. It avoids computing and subtracting two potentially overflowing `T*C` terms. The temperature update is
+performed only when `C_after > 0`. The voxel's cached `TotalHeatCapacity` and `TotalPressure` are updated immediately.
+As elsewhere in the energy model, a non-finite or nonpositive configured `MolarHeatCapacityAtConstantVolume` uses the
+normalized `DefaultMolarHeatCapacityAtConstantVolume`.
 
 Phase-change energy generally warms the remaining gas, which raises saturation pressure and slows further condensation. Accounting for both the ideal-gas `pV` term and the condensed gas's departing sensible energy avoids assigning enthalpy directly to a constant-volume internal-energy state.
 
-### Output: PrecipitationEvent
+### Liquid-system integration
 
-Condensed gas is packaged into a `PrecipitationEvent`:
-
-```
-struct PrecipitationEvent {
-    ushort LocalVoxelIndex;
-    int LiquidId;
-    float CondensedMoles;
-    float Temperature;
-}
-```
-
-These events are written to a thread-local buffer and are intended to be consumed by a separate liquid simulation system. That liquid system is not part of this codebase. Each worker's buffer holds `VoxelCount` events for the configured chunk dimensions. Phase changes can emit one event per gas per voxel, so multiple condensable species can exceed this capacity; the simulation then throws `InvalidOperationException` rather than dropping the event.
+Condensed moles are removed from the gas channel and their energy effect is applied immediately. Numos does not
+currently expose a liquid state or precipitation-event output. A game that models liquids must provide that state and
+coordinate it with a custom solver.
 
 ---
 
@@ -646,13 +769,15 @@ All networking methods are stubs with comments indicating where real implementat
 
 2. **Unidirectional flow in advection.** The advection loop only processes flow from high pressure to low (`pressureDelta > 0`). Due to the delta buffer, each voxel-pair transfer is computed from the higher-pressure side and applied after the neighbor scan.
 
-### Capacity
-
-3. **Precipitation-event buffer is sized per voxel, not per gas-voxel pair.** Each worker has room for `VoxelCount` precipitation events, but phase changes can emit an event for every condensable gas in every voxel. If more than `VoxelCount` events are generated during one thermodynamics pass, the simulation throws `InvalidOperationException`.
+3. **Sleep is pressure-driven.** The chunk sleep criterion observes intra-chunk pressure deltas, not temperature
+gradients. Thermal diffusion can update an already participating sleeping neighbor across a boundary, but a thermal
+gradient alone does not wake a chunk or keep its thermodynamics stage active.
 
 ### Performance
 
-4. **Per-tick chunk snapshot via `.ToArray()`.** Each tick, the simulation calls `_chunkMap.Values.ToArray()` to snapshot the chunk collection. This allocates a new array every tick. For large chunk counts at 20 Hz, this generates significant GC pressure.
+4. **Chunk snapshot allocation.** A direct `Tick` snapshots `_chunkMap.Values` with `.ToArray()`. `Update` performs one
+snapshot for its batch of up to five fixed steps. Frequent direct ticks or updates with large chunk counts therefore
+generate array-allocation pressure.
 
 ---
 
@@ -660,7 +785,8 @@ All networking methods are stubs with comments indicating where real implementat
 
 To implement this system in another engine or language, start from the core module described in this document:
 - `AtmosSimulation` — the supported public facade.
-- `AtmosKernel` — the internal tick driver and physics implementation.
+- `AtmosKernel` — the internal lifecycle and tick driver.
+- `Numos.CoreSim.Solvers` — atomic physics stages and shared solver math.
 - `AtmosChunk` — the parameterized voxel grid.
 - `AtmosConfig` — all tunable parameters.
 - `GasChannel`, `GasProperties`, `RoomNode` — all data structures.
@@ -677,7 +803,7 @@ To implement this system in another engine or language, start from the core modu
 | Macro-micro transition | ❌ Not provided | You must implement the logic that seeds voxel grids from `RoomNode` state on wake, and collapses back on sleep. |
 | GasAccumulator orchestration | ❌ Not provided | You must implement the per-source accumulator loop and dispatch `Diffuse`/`Inject` actions. |
 | Gas source API | ✅ API provided | Use `AddGasToVoxel` for game-side sources such as pipes, vents, and fires. |
-| Liquid system | ❌ Not provided | `PrecipitationEvent` is produced but never consumed. Build a liquid simulation if needed. |
+| Liquid system | ❌ Not provided | Condensation updates atmospheric state only. Build liquid state and integration if needed. |
 | Visualization | ❌ Not provided | Pressure, temperature, and gas composition are available per-voxel. You must build rendering (overlays, particle effects, fog). |
 | Networking | ❌ Snapshot only | `AtmosChunkSnapshot` is exposed, but serialization, transport, and client reconciliation are not implemented. |
 
@@ -686,7 +812,7 @@ To implement this system in another engine or language, start from the core modu
 The simulation assumes parallel execution:
 - **Intra-chunk advection and thermodynamics** are dispatched in parallel across chunks (e.g. via a `Parallel.ForEach`-style construct).
 - **Gas and thermal boundary processing** is sequential and must remain so to avoid race conditions when two chunks write to each other's voxels.
-- **Thread-local buffers** (`ThreadLocal<T>`) are used for gas-boundary, thermal-boundary, and precipitation events to avoid contention.
+- **Thread-local buffers** (`ThreadLocal<T>`) are owned by the producer stages for gas- and thermal-boundary events to avoid contention.
 
 If your target platform does not support threading (e.g., single-threaded WASM), the simulation will still function correctly when run sequentially — the parallel regions have no ordering dependencies within them.
 
