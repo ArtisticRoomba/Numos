@@ -115,7 +115,7 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
         try
         {
             ComputeCapacitance(chunk, capacitance);
-            AccumulateBulkConductance(chunk, config, capacitance, incidentBulkConductance);
+            AccumulateBulkConductance(chunk, config, incidentBulkConductance);
 
             for (int activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
             {
@@ -208,8 +208,7 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
         }
     }
 
-    private static void AccumulateBulkConductance(AtmosChunk chunk, AtmosSolverConfigSnapshot config,
-        float[] capacitance, float[] incidentBulkConductance)
+    private static void AccumulateBulkConductance(AtmosChunk chunk, AtmosSolverConfigSnapshot config, float[] incidentBulkConductance)
     {
         for (var activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
         {
