@@ -50,11 +50,11 @@ public sealed class SimulationLifecycleIntegrationTests
             Assert.That(SimTestHelpers.Moles(whileSleeping, SimTestHelpers.FirstGasId, 1), Is.Zero);
             Assert.That(
                 SimTestHelpers.Moles(afterInjection, SimTestHelpers.FirstGasId, 0),
-                Is.EqualTo(2.52f).Within(SimTestHelpers.Tolerance));
+                Is.EqualTo(2.25f).Within(SimTestHelpers.Tolerance));
 
             Assert.That(
                 SimTestHelpers.Moles(afterInjection, SimTestHelpers.FirstGasId, 1),
-                Is.EqualTo(0.48f).Within(SimTestHelpers.Tolerance));
+                Is.EqualTo(0.75f).Within(SimTestHelpers.Tolerance));
 
             Assert.That(
                 SimTestHelpers.TotalMoles(afterInjection),

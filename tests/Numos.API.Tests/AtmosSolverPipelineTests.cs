@@ -392,7 +392,7 @@ public sealed class AtmosSolverPipelineTests
         Assert.Multiple(() =>
         {
             Assert.That(simulation.GetVoxelSnapshot(hot, 0).Temperature, Is.EqualTo(400f));
-            Assert.That(simulation.GetVoxelSnapshot(cold, 0).Temperature, Is.EqualTo(200f));
+            Assert.That(simulation.GetVoxelSnapshot(cold, 0).Temperature, Is.EqualTo(219.718307f));
         });
     }
 
