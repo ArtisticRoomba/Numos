@@ -204,8 +204,7 @@ public static class SimulationStateAnalyzer
         string kind = step.Kind switch
         {
             AtmosSolverKind.BuiltIn => "builtIn",
-            AtmosSolverKind.Standard => "standard",
-            AtmosSolverKind.Dangerous => "dangerous",
+            AtmosSolverKind.Custom => "custom",
             _ => throw new ArgumentOutOfRangeException(nameof(step))
         };
         return new SolverStepReport(step.Name, step.IsEnabled, kind);
