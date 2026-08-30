@@ -13,8 +13,9 @@ in the `0.x` series and may be published as prereleases (for others to just impo
 - Engine-agnostic, with a supported `Numos.API` facade over an internal simulation kernel
 - Multithreaded intra-chunk advection and thermodynamics
 - Singlethreaded cross-chunk boundary flow
-- Ordered solver pipeline with replaceable/disableable built-in stages and stateful custom callbacks
-- Ideal-gas based (`P = nRT/V`) with configurable voxel volume
+- Solver pipeline, allowing you to write and add your own solvers to be executed on Numos' behalf
+- Ideal-gas based (`PV = nRT`)
+- Includes an external sim viewer and headless runner
 - Attempts at being trimmable and Native AOT-compatible
 
 ## Bug Reports & Contributions
@@ -27,14 +28,8 @@ Documentation for APIs and the project itself is available under `/docs`. Also s
 
 - [An Overview of Numos](docs/overview.md)
 - [Using Numos](docs/using.md)
+- [Using the headless runner](docs/headless_runner.md)
 - [Versioning](docs/versioning.md)
-
-### Headless debugging
-
-`Numos.Headless` runs reproducible simulation experiments from newline-delimited JSON without opening the graphical
-viewer. It can read commands interactively from standard input or replay a checked-in script, emitting one compact
-JSON response per command for tools and automated comparisons. See the [headless runner guide](docs/headless_runner.md)
-and the [two-voxel flow example](examples/headless/two-voxel-flow.jsonl).
 
 ## Copyright, Credits & License
 Numos is licensed under the MIT license. See `LICENSE.TXT` for more info.
