@@ -451,7 +451,7 @@ internal sealed partial class AtmosKernel
                             dimensions.Z > 1 && (z == 0 || z == dimensions.Z - 1);
 
                         if (isBoundary)
-                            chunk.VoxelRoomMap[chunk.GetIndex(new Int3(x, y, z))] = classification.RoomId;
+                            chunk.SetVoxelClassification(chunk.GetIndex(new Int3(x, y, z)), classification);
                     }
 
             RebuildActiveTopology(chunk);
@@ -475,7 +475,7 @@ internal sealed partial class AtmosKernel
         {
             var chunk = GetChunk(position);
             ValidateVoxelIndex(chunk, localVoxelIndex);
-            chunk.VoxelRoomMap[localVoxelIndex] = classification.RoomId;
+            chunk.SetVoxelClassification(localVoxelIndex, classification.RoomId);
             RebuildActiveTopology(chunk);
             chunk.MarkChanged();
         }
