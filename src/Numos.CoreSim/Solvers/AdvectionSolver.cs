@@ -224,6 +224,10 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
             if (chunk.Depth > 1)
                 AccumulateBulkConductanceEdge(chunk, config, position + Int3.PosZ, voxelIndex, incidentBulkConductance);
 
+            // Adds itself as a draw of pressure
+            // This means when splitting pressure it is included, avoiding cases where it over shoots the equilibrium
+            // TODO PERF
+            // This can for sure be simplified
             float bulkPressureTransfer = AtmosSolverMath.CalculateBulkPressureTransfer(config, chunk.TotalPressure[voxelIndex]);
             float upstreamTemperature = config.GetValidatedTemp(chunk.Temperature[voxelIndex]);
             float advectedMoles = AtmosSolverMath.PressureToMoles(config, bulkPressureTransfer, upstreamTemperature);
