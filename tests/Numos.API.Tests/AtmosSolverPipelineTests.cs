@@ -41,7 +41,6 @@ public sealed class AtmosSolverPipelineTests
         var config = new AtmosConfig
         {
             VacuumThreshold = 0f,
-            MinimumPressureTransfer = 0f,
             SleepThreshold = int.MaxValue
         };
         using var simulation = new AtmosSimulation(config, 2, 1, 1);
@@ -230,9 +229,7 @@ public sealed class AtmosSolverPipelineTests
         {
             VoxelVolume = AtmosPhysicalConstants.MolarGasConstant,
             VacuumThreshold = 0f,
-            MinimumPressureTransfer = 0f,
             BulkFlowCoefficient = 0.25f,
-            BulkFlowDamping = 0.5f,
             MaxPressureTransferFractionPerNeighbor = 0.16f,
             SleepThreshold = int.MaxValue,
             GasRegistry = [new GasProperties()]
@@ -260,7 +257,6 @@ public sealed class AtmosSolverPipelineTests
         {
             VoxelVolume = AtmosPhysicalConstants.MolarGasConstant,
             VacuumThreshold = 0f,
-            MinimumPressureTransfer = 0f,
             BulkFlowCoefficient = 0f,
             MaxPressureTransferFractionPerNeighbor = 0f,
             DefaultDiffusionCoefficient = 0f,
@@ -305,9 +301,7 @@ public sealed class AtmosSolverPipelineTests
         {
             VoxelVolume = AtmosPhysicalConstants.MolarGasConstant,
             VacuumThreshold = 0f,
-            MinimumPressureTransfer = 0f,
             BulkFlowCoefficient = 0.25f,
-            BulkFlowDamping = 0.5f,
             MaxPressureTransferFractionPerNeighbor = 0.16f,
             SleepThreshold = int.MaxValue,
             GasRegistry = [new GasProperties()]
@@ -387,7 +381,6 @@ public sealed class AtmosSolverPipelineTests
         {
             VoxelVolume = AtmosPhysicalConstants.MolarGasConstant,
             VacuumThreshold = 0f,
-            MinimumPressureTransfer = 0f,
             BulkFlowCoefficient = 0f,
             MaxPressureTransferFractionPerNeighbor = 0f,
             DefaultDiffusionCoefficient = 0f,

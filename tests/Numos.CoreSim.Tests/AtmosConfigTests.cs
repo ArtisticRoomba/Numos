@@ -23,11 +23,6 @@ public sealed class AtmosConfigTests
                 Is.EqualTo(AtmosConfigDefaults.DefaultDiffusionCoefficient));
             Assert.That(config.SpaceTemperature, Is.EqualTo(AtmosConfigDefaults.SpaceTemperature));
             Assert.That(config.BulkFlowCoefficient, Is.EqualTo(AtmosConfigDefaults.BulkFlowCoefficient));
-            Assert.That(config.BulkFlowDamping, Is.EqualTo(AtmosConfigDefaults.BulkFlowDamping));
-            Assert.That(config.LowPressureDeltaThreshold,
-                Is.EqualTo(AtmosConfigDefaults.LowPressureDeltaThreshold));
-            Assert.That(config.MinimumPressureTransfer,
-                Is.EqualTo(AtmosConfigDefaults.MinimumPressureTransfer));
             Assert.That(config.VacuumThreshold, Is.EqualTo(AtmosConfigDefaults.VacuumThreshold));
             Assert.That(config.SleepThreshold, Is.EqualTo(AtmosConfigDefaults.SleepThreshold));
             Assert.That(config.SleepEpsilon, Is.EqualTo(AtmosConfigDefaults.SleepEpsilon));

@@ -32,16 +32,7 @@ public static class AtmosConfigDefaults
     public const float SpaceTemperature = 2.7f;
 
     /// <summary>Default fraction of a pressure delta requested as bulk flow per tick.</summary>
-    public const float BulkFlowCoefficient = 0.25f;
-
-    /// <summary>Default large-delta bulk-flow damping multiplier.</summary>
-    public const float BulkFlowDamping = 0.5f;
-
-    /// <summary>Default pressure-delta boundary between low- and large-delta flow, in pascals (Pa).</summary>
-    public const float LowPressureDeltaThreshold = 5f;
-
-    /// <summary>Default minimum candidate pressure transfer, in pascals per tick (Pa/tick).</summary>
-    public const float MinimumPressureTransfer = 0.1f;
+    public const float BulkFlowCoefficient = 0.125f;
 
     /// <summary>Default pressure below which a voxel is treated as vacuum, in pascals (Pa).</summary>
     public const float VacuumThreshold = 1f;

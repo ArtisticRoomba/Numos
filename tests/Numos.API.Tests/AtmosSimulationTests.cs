@@ -124,7 +124,6 @@ public sealed class AtmosSimulationTests
         var config = new AtmosConfig
         {
             VacuumThreshold = 0f,
-            MinimumPressureTransfer = 0f,
             SleepThreshold = int.MaxValue
         };
         using var simulation = new AtmosSimulation(config, 2, 1, 1);

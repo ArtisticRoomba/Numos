@@ -280,9 +280,6 @@ public sealed class HeadlessApplicationTests
             "\"saturationReferencePressurePa\":1000," +
             "\"defaultDiffusionCoefficient\":0," +
             "\"bulkFlowCoefficient\":0.25," +
-            "\"bulkFlowDamping\":0.5," +
-            "\"lowPressureDeltaThresholdPa\":5," +
-            "\"minimumPressureTransferPa\":0," +
             "\"vacuumThresholdPa\":0," +
             "\"sleepThreshold\":2147483647," +
             "\"sleepEpsilonPa\":0," +

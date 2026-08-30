@@ -637,20 +637,6 @@ public partial class SimulationViewer
             if (ConfigSlider("Bulk Flow Coefficient", "config-bulk-flow-coefficient", ref bulkFlowCoefficient, 0f, 1f,
                     "Fraction of pressure delta converted to flow per tick."))
                 _config.BulkFlowCoefficient = bulkFlowCoefficient;
-            float bulkFlowDamping = _config.BulkFlowDamping;
-            if (ConfigSlider("Bulk Flow Damping", "config-bulk-flow-damping", ref bulkFlowDamping, 0f, 1f,
-                    "Multiplier applied to the bulk-flow coefficient during large pressure deltas."))
-                _config.BulkFlowDamping = bulkFlowDamping;
-            float lowPressureDeltaThreshold = _config.LowPressureDeltaThreshold;
-            if (ConfigSlider("Low-Pressure Delta Threshold (Pa)", "config-low-pressure-delta-threshold",
-                    ref lowPressureDeltaThreshold, 0f, 100f,
-                    "Below this pressure delta, flow uses the maximum pressure-transfer fraction directly."))
-                _config.LowPressureDeltaThreshold = lowPressureDeltaThreshold;
-            float minimumPressureTransfer = _config.MinimumPressureTransfer;
-            if (ConfigSlider("Minimum Pressure Transfer (Pa/tick)", "config-minimum-pressure-transfer",
-                    ref minimumPressureTransfer, 0f, 10f,
-                    "Candidate pressure transfers below this magnitude are discarded."))
-                _config.MinimumPressureTransfer = minimumPressureTransfer;
             float vacuumThreshold = _config.VacuumThreshold;
             if (ConfigSlider("Vacuum Threshold", "config-vacuum-threshold", ref vacuumThreshold, 0f, 100f,
                     "Below this pressure, voxel contents are zeroed out."))
@@ -709,9 +695,6 @@ public partial class SimulationViewer
         _config.DefaultDiffusionCoefficient = defaults.DefaultDiffusionCoefficient;
         _config.SpaceTemperature = defaults.SpaceTemperature;
         _config.BulkFlowCoefficient = defaults.BulkFlowCoefficient;
-        _config.BulkFlowDamping = defaults.BulkFlowDamping;
-        _config.LowPressureDeltaThreshold = defaults.LowPressureDeltaThreshold;
-        _config.MinimumPressureTransfer = defaults.MinimumPressureTransfer;
         _config.VacuumThreshold = defaults.VacuumThreshold;
         _config.SleepThreshold = defaults.SleepThreshold;
         _config.SleepEpsilon = defaults.SleepEpsilon;
