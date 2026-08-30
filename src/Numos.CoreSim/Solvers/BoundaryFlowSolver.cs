@@ -111,7 +111,7 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
         Pascal neighborPressure = isVoid ? 0f : neighborChunk.TotalPressure[neighborIndex];
         Pascal pressureDelta = sourcePressure - neighborPressure;
         Pascal bulkPressureTransfer = pressureDelta > 0f
-            ? AtmosSolverMath.CalculateBulkPressureTransfer(context.TickConfig, pressureDelta, sourcePressure)
+            ? AtmosSolverMath.CalculateBulkPressureTransfer(context.TickConfig, pressureDelta)
             : 0f;
 
         TransferSpecies(

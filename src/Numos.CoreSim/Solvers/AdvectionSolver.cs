@@ -96,13 +96,22 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
         // This is a check to make sure that no voxel is giving away more than it has
         // An improved method should be used in the future which doesn't require this as it is prone to directional bias
         Mole[] scheduledOutflows = ArrayPool<Mole>.Shared.Rent(activeGasCount * chunk.VoxelCount);
+        float[] capacitance = ArrayPool<float>.Shared.Rent(chunk.VoxelCount);
+        float[] incidentBulkConductance = ArrayPool<float>.Shared.Rent(chunk.VoxelCount);
         Array.Clear(moleDeltas, 0, moleDeltaLength);
         Array.Clear(energyDeltas, 0, chunk.VoxelCount);
         Array.Clear(scheduledOutflows, 0, activeGasCount * chunk.VoxelCount);
+        Array.Clear(capacitance, 0, chunk.VoxelCount);
+        Array.Clear(incidentBulkConductance, 0, chunk.VoxelCount);
 
         // try finally to release array memory even if this throws
         try
         {
+            ComputeCapacitance(chunk, capacitance);
+
+            AccumulateBulkConductance(chunk, config, capacitance, incidentBulkConductance);
+
+            // Pass 4: apply row-limited bulk advection plus diffusion.
             for (int activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
             {
                 ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
@@ -128,6 +137,8 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
                     voxelIndex,
                     currentPressure,
                     totalMoles,
+                    capacitance,
+                    incidentBulkConductance,
                     ref maximumPressureDelta,
                     moleDeltas,
                     energyDeltas,
@@ -147,31 +158,116 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
         }
         finally
         {
+            ArrayPool<float>.Shared.Return(incidentBulkConductance);
+            ArrayPool<float>.Shared.Return(capacitance);
             ArrayPool<Mole>.Shared.Return(scheduledOutflows);
             ArrayPool<Joule64>.Shared.Return(energyDeltas);
             ArrayPool<Mole>.Shared.Return(moleDeltas);
         }
     }
 
+    private static void ComputeCapacitance(AtmosChunk chunk, float[] capacitance)
+    {
+        for (var activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
+        {
+            ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
+            float pressure = chunk.TotalPressure[voxelIndex];
+            if (pressure <= 0f)
+                continue;
+
+            float totalMoles = AtmosSolverMath.GetTotalMoles(chunk, voxelIndex);
+            if (totalMoles <= 0f)
+                continue;
+
+            capacitance[voxelIndex] = totalMoles / pressure;
+        }
+    }
+
+    private static void AccumulateBulkConductance(AtmosChunk chunk, AtmosSolverConfigSnapshot config,
+        float[] capacitance, float[] incidentBulkConductance)
+    {
+        for (var activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
+        {
+            ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
+
+            Int3 position = chunk.GetXyzInt3(voxelIndex);
+
+            // Enumerating only positive axes visits each undirected edge exactly once; the conductance
+            // accumulated here is what CheckNeighbor's row-limiter divides by, on both ends of the edge.
+            AccumulateBulkConductanceEdge(chunk, config, position + Int3.PosX, voxelIndex, incidentBulkConductance, capacitance);
+            AccumulateBulkConductanceEdge(chunk, config, position + Int3.PosY, voxelIndex, incidentBulkConductance, capacitance);
+            if (chunk.Depth > 1)
+                AccumulateBulkConductanceEdge(chunk, config, position + Int3.PosZ, voxelIndex, incidentBulkConductance, capacitance);
+            
+            float bulkPressureTransfer = AtmosSolverMath.CalculateBulkPressureTransfer(config, chunk.TotalPressure[voxelIndex]);
+            float upstreamTemperature = config.GetValidatedTemp(chunk.Temperature[voxelIndex]);
+            float advectedMoles = AtmosSolverMath.PressureToMoles(config, bulkPressureTransfer, upstreamTemperature);
+            float conductance = advectedMoles / chunk.TotalPressure[voxelIndex];
+            incidentBulkConductance[voxelIndex] += conductance;
+        }
+    }
+
+    private static void AccumulateBulkConductanceEdge(AtmosChunk chunk, AtmosSolverConfigSnapshot config,
+        Int3 neighborPosition, ushort voxelIndex, float[] incidentBulkConductance, float[] capacitance)
+    {
+        if (!neighborPosition.IsWithin(default, chunk.Dimensions))
+            return;
+
+        ushort neighborIndex = chunk.GetIndex(neighborPosition);
+        int neighborRoom = chunk.VoxelRoomMap[neighborIndex];
+        if (neighborRoom == VoxelClassification.RoomSolid)
+            return;
+
+        bool isVoid = neighborRoom == VoxelClassification.RoomVoid;
+        float currentPressure = chunk.TotalPressure[voxelIndex];
+        float neighborPressure = isVoid ? 0f : chunk.TotalPressure[neighborIndex];
+        float pressureDelta = currentPressure - neighborPressure;
+        if (pressureDelta == 0f)
+            return;
+
+        float upstreamPressure = pressureDelta > 0f ? currentPressure : neighborPressure;
+        ushort upstreamIndex = pressureDelta > 0f ? voxelIndex : neighborIndex;
+        float absPressureDelta = MathF.Abs(pressureDelta);
+
+        // Same call CheckNeighbor makes for the upstream side; dividing its result by the pressure
+        // delta recovers the effective per-edge conductance without duplicating whatever rate cap
+        // CalculateBulkPressureTransfer applies internally.
+        float bulkPressureTransfer = AtmosSolverMath.CalculateBulkPressureTransfer(config, absPressureDelta);
+        if (bulkPressureTransfer <= 0f)
+            return;
+
+        float upstreamTemperature = config.GetValidatedTemp(chunk.Temperature[upstreamIndex]);
+        float advectedMoles = AtmosSolverMath.PressureToMoles(config, bulkPressureTransfer, upstreamTemperature);
+        if (advectedMoles <= 0f)
+            return;
+
+        float conductance = advectedMoles / absPressureDelta;
+        incidentBulkConductance[voxelIndex] += conductance;
+        incidentBulkConductance[neighborIndex] += conductance;
+    }
+
     private static void ProcessNeighbors(
         AtmosChunk chunk, AtmosSolverConfigSnapshot config,
         Int3 position, ushort voxelIndex, Pascal currentPressure, Mole totalMoles,
-        ref Pascal maximumPressureDelta, Mole[] moleDeltas, Joule64[] energyDeltas,
-        Mole[] scheduledOutflows)
+        float[] capacitance, float[] incidentBulkConductance, ref Pascal maximumPressureDelta,
+        Mole[] moleDeltas, Joule64[] energyDeltas, Mole[] scheduledOutflows)
     {
         foreach (var offset in HorizontalNeighbors)
         {
             CheckNeighbor(
                 chunk,
-                config,
-                position + offset,
-                voxelIndex,
-                currentPressure,
+                config, 
+                position + offset, 
+                voxelIndex, 
+                currentPressure, 
                 totalMoles,
-                ref maximumPressureDelta,
-                moleDeltas,
-                energyDeltas,
-                scheduledOutflows);
+                capacitance, 
+                incidentBulkConductance, 
+                ref maximumPressureDelta, 
+                moleDeltas, 
+                energyDeltas, 
+                scheduledOutflows
+            );
         }
 
         if (chunk.Depth <= 1)
@@ -181,23 +277,26 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
         {
             CheckNeighbor(
                 chunk,
-                config,
-                position + offset,
-                voxelIndex,
-                currentPressure,
+                config, 
+                position + offset, 
+                voxelIndex, 
+                currentPressure, 
                 totalMoles,
-                ref maximumPressureDelta,
-                moleDeltas,
-                energyDeltas,
-                scheduledOutflows);
+                capacitance, 
+                incidentBulkConductance, 
+                ref maximumPressureDelta, 
+                moleDeltas, 
+                energyDeltas, 
+                scheduledOutflows
+            );
         }
     }
 
     private static void CheckNeighbor(
         AtmosChunk chunk, AtmosSolverConfigSnapshot config,
         Int3 neighborPosition, ushort voxelIndex, Pascal currentPressure, Mole totalMoles,
-        ref Pascal maximumPressureDelta, Mole[] moleDeltas, Joule64[] energyDeltas,
-        Mole[] scheduledOutflows)
+        float[] capacitance, float[] incidentBulkConductance, ref Pascal maximumPressureDelta,
+        Mole[] moleDeltas, Joule64[] energyDeltas, Mole[] scheduledOutflows)
     {
         if (!neighborPosition.IsWithin(default, chunk.Dimensions))
             return;
@@ -220,13 +319,36 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
 
         // Only checks outflows
         Pascal bulkPressureTransfer = pressureDelta > 0f
-            ? AtmosSolverMath.CalculateBulkPressureTransfer(config, pressureDelta, currentPressure)
+            ? AtmosSolverMath.CalculateBulkPressureTransfer(config, pressureDelta)
             : 0f;
 
         Kelvin sourceTemperature = config.GetValidatedTemp(chunk.Temperature[voxelIndex]);
 
         // pressure transfer can instead be described as number of moles leaving
         Mole advectedMoles = AtmosSolverMath.PressureToMoles(config, bulkPressureTransfer, sourceTemperature);
+
+        if (advectedMoles > 0f)
+        {
+            // Row-limit against both ends' remaining capacity, exactly like the thermal solver's
+            // convex-combination limiter. This is what stops the source from giving away more than its
+            // equilibrium share when it has several downhill neighbors at once, and stops a voxel with
+            // several upstream neighbors from being pushed past equilibrium from the receiving side.
+            float sourceIncident = incidentBulkConductance[voxelIndex];
+            float sourceTerm = sourceIncident > 0f ? capacitance[voxelIndex] / sourceIncident : 1f;
+
+            float neighborCapacity = capacitance[neighborIndex];
+            float neighborIncident = incidentBulkConductance[neighborIndex];
+            // A void or currently-empty neighbor has no meaningful capacity to be limited by — treat
+            // it as unconstrained on the receiving end rather than letting a zero capacity block flow
+            // into it entirely.
+            float neighborTerm = isVoid || neighborCapacity <= 0f || neighborIncident <= 0f
+                ? 1f
+                : neighborCapacity / neighborIncident;
+
+            float scale = MathF.Min(1f, MathF.Min(sourceTerm, neighborTerm));
+            advectedMoles *= scale;
+        }
+
         Kelvin neighborTemperature = isVoid
             ? 0f
             : config.GetValidatedTemp(chunk.Temperature[neighborIndex]);

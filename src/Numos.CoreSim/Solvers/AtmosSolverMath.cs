@@ -85,17 +85,13 @@ internal static class AtmosSolverMath
     /// </summary>
     internal static Pascal CalculateBulkPressureTransfer(
         AtmosSolverConfigSnapshot config,
-        Pascal pressureDelta, Pascal currentPressure)
+        Pascal pressureDelta)
     {
-        Scalar maximumFraction = config.MaxPressureTransferFractionPerNeighbor;
-        if (maximumFraction <= 0f)
+        if (pressureDelta == 0f)
             return 0f;
 
-        Pascal pressureTransfer = pressureDelta * config.BulkFlowCoefficient;
-        if (pressureTransfer <= 0f)
-            return 0f;
-
-        return MathF.Min(pressureTransfer, currentPressure * maximumFraction);
+        float bulkFlowCoefficient = MathF.Min(config.BulkFlowCoefficient, 0.5f);
+        return pressureDelta * bulkFlowCoefficient;
     }
 
     /// <summary>
