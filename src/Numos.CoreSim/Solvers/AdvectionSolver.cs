@@ -342,7 +342,7 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
         MolePerPascal sourceIncident = incidentBulkConductance[voxelIndex];
         Scalar sourceTerm = sourceIncident > 0f ? capacitance[voxelIndex] / sourceIncident : 1f;
 
-        float neighborCapacity = capacitance[neighborIndex];
+        MolePerPascal neighborCapacity = capacitance[neighborIndex];
         MolePerPascal neighborIncident = incidentBulkConductance[neighborIndex];
         // A void or currently-empty neighbor has no meaningful capacity to be limited by -- treat it as
         // unconstrained on the receiving end rather than letting a zero capacity block flow into it.
