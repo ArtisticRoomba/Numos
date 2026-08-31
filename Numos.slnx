@@ -7,6 +7,7 @@
         <Project Path="tests\Numos.Headless.Tests\Numos.Headless.Tests.csproj"/>
         <Project Path="tests\Numos.Maths.Tests\Numos.Maths.Tests.csproj"/>
         <Project Path="tests\Numos.SimDrawer.Tests\Numos.SimDrawer.Tests.csproj"/>
+        <Project Path="tests\Numos.Units.Analyzers.Tests\Numos.Units.Analyzers.Tests.csproj"/>
     </Folder>
 
     <Project Path="src\Numos.API.Dangerous\Numos.API.Dangerous.csproj"/>
@@ -15,5 +16,7 @@
     <Project Path="src\Numos.Headless\Numos.Headless.csproj"/>
     <Project Path="src\Numos.Maths\Numos.Maths.csproj"/>
     <Project Path="src\Numos.SimDrawer\Numos.SimDrawer.csproj"/>
+    <Project Path="src\Numos.Units\Numos.Units.csproj"/>
+    <Project Path="src\Numos.Units.Analyzers\Numos.Units.Analyzers.csproj"/>
     <Project Path="src\Numos.Viewer\Numos.Viewer.csproj"/>
 </Solution>

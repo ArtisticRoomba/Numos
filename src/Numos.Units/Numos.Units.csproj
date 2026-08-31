@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <Import Project="..\Numos.CoreSim\Version.props"/>
+
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <RootNamespace>Numos.Units</RootNamespace>
+        <PackageId>Numos.Units</PackageId>
+        <Title>Numos Units</Title>
+        <Description>Compile-time quantity annotations used by Numos dimensional analysis.</Description>
+        <PackageTags>units;dimensional-analysis;nativeaot</PackageTags>
+        <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    </PropertyGroup>
+
+</Project>

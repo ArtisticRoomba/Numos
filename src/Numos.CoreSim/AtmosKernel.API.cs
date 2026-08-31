@@ -141,7 +141,7 @@ internal sealed partial class AtmosKernel
     ///     accumulated time is discarded to prevent an unbounded catch-up loop. Values smaller than one fixed
     ///     step remain in the accumulator for a later call.
     /// </remarks>
-    internal void Update(float elapsedSeconds)
+    internal void Update(Second elapsedSeconds)
     {
         lock (_stateGate)
         {
@@ -435,17 +435,17 @@ internal sealed partial class AtmosKernel
             var dimensions = chunk.Dimensions;
 
             for (var z = 0; z < dimensions.Z; z++)
-                for (var y = 0; y < dimensions.Y; y++)
-                    for (var x = 0; x < dimensions.X; x++)
-                    {
-                        bool isBoundary =
-                            x == 0 || x == dimensions.X - 1 ||
-                            y == 0 || y == dimensions.Y - 1 ||
-                            dimensions.Z > 1 && (z == 0 || z == dimensions.Z - 1);
+            for (var y = 0; y < dimensions.Y; y++)
+            for (var x = 0; x < dimensions.X; x++)
+            {
+                bool isBoundary =
+                    x == 0 || x == dimensions.X - 1 ||
+                    y == 0 || y == dimensions.Y - 1 ||
+                    dimensions.Z > 1 && (z == 0 || z == dimensions.Z - 1);
 
-                        if (isBoundary)
-                            chunk.VoxelRoomMap[chunk.GetIndex(new Int3(x, y, z))] = classification.RoomId;
-                    }
+                if (isBoundary)
+                    chunk.VoxelRoomMap[chunk.GetIndex(new Int3(x, y, z))] = classification.RoomId;
+            }
 
             RebuildActiveTopology(chunk);
             chunk.MarkChanged();
@@ -502,7 +502,7 @@ internal sealed partial class AtmosKernel
     /// <param name="temperature">The absolute temperature to store, in kelvins.</param>
     /// <exception cref="KeyNotFoundException">No chunk is registered at <paramref name="position" />.</exception>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="localVoxelIndex" /> is outside the chunk.</exception>
-    internal void SetVoxelTemperature(Int3 position, ushort localVoxelIndex, float temperature)
+    internal void SetVoxelTemperature(Int3 position, ushort localVoxelIndex, Kelvin temperature)
     {
         lock (_stateGate)
         {
@@ -525,7 +525,7 @@ internal sealed partial class AtmosKernel
     /// <param name="temperature">The absolute temperature to store, in kelvins.</param>
     /// <exception cref="KeyNotFoundException">No chunk is registered at <paramref name="position" />.</exception>
     /// <exception cref="ArgumentOutOfRangeException">A local coordinate is outside the chunk.</exception>
-    internal void SetVoxelTemperature(Int3 position, int x, int y, int z, float temperature)
+    internal void SetVoxelTemperature(Int3 position, int x, int y, int z, Kelvin temperature)
     {
         lock (_stateGate)
         {
@@ -545,8 +545,8 @@ internal sealed partial class AtmosKernel
     /// <remarks>Injection into a solid or void voxel is ignored by the chunk.</remarks>
     /// <exception cref="KeyNotFoundException">No chunk is registered at <paramref name="position" />.</exception>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="localVoxelIndex" /> is outside the chunk.</exception>
-    internal void AddGasToVoxel(Int3 position, ushort localVoxelIndex, int gasId, float moles,
-        float temperature)
+    internal void AddGasToVoxel(Int3 position, ushort localVoxelIndex, int gasId, Mole moles,
+        Kelvin temperature)
     {
         lock (_stateGate)
         {
@@ -576,8 +576,8 @@ internal sealed partial class AtmosKernel
     /// <remarks>Injection into a solid or void voxel is ignored by the chunk.</remarks>
     /// <exception cref="KeyNotFoundException">No chunk is registered at <paramref name="position" />.</exception>
     /// <exception cref="ArgumentOutOfRangeException">A local coordinate is outside the chunk.</exception>
-    internal void AddGasToVoxel(Int3 position, int x, int y, int z, int gasId, float moles,
-        float temperature)
+    internal void AddGasToVoxel(Int3 position, int x, int y, int z, int gasId, Mole moles,
+        Kelvin temperature)
     {
         lock (_stateGate)
         {
@@ -669,7 +669,7 @@ internal sealed partial class AtmosKernel
         }
     }
 
-    private static void ValidateGasInjection(int gasId, float moles, float temperature)
+    private static void ValidateGasInjection(int gasId, Mole moles, Kelvin temperature)
     {
         if (gasId < 0)
             throw new ArgumentOutOfRangeException(nameof(gasId), gasId, "Gas ID must be nonnegative.");

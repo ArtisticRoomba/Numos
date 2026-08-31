@@ -11,12 +11,12 @@ namespace Numos.CoreSim;
 /// </remarks>
 internal sealed class AtmosSolverConfigSnapshot
 {
-    private float _defaultMolarHeatCapacityAtConstantVolume;
-    private float _defaultDiffusionCoefficient;
-    private float[] _diffusionCoefficients = [];
+    private JoulePerMoleKelvin _defaultMolarHeatCapacityAtConstantVolume;
+    private Scalar _defaultDiffusionCoefficient;
+    private Scalar[] _diffusionCoefficients = [];
     private GasProperties[] _gasRegistry = [];
     private int _gasRegistryCount;
-    private float[] _molarHeatCapacitiesAtConstantVolume = [];
+    private JoulePerMoleKelvin[] _molarHeatCapacitiesAtConstantVolume = [];
 
     internal void Capture(AtmosConfig config)
     {
@@ -76,31 +76,31 @@ internal sealed class AtmosSolverConfigSnapshot
             FloatMath.ClampUnitInterval(config.MaxPressureTransferFractionPerNeighbor);
     }
 
-    internal float DefaultTemperatureFallback { get; private set; }
-    internal float VoxelVolume { get; private set; }
-    internal float PressurePerMoleKelvin { get; private set; }
-    internal float SaturationReferencePressure { get; private set; }
-    internal float BulkFlowCoefficient { get; private set; }
-    internal float VacuumThreshold { get; private set; }
+    internal Kelvin DefaultTemperatureFallback { get; private set; }
+    internal CubicMetre VoxelVolume { get; private set; }
+    internal PascalPerMoleKelvin PressurePerMoleKelvin { get; private set; }
+    internal Pascal SaturationReferencePressure { get; private set; }
+    internal Scalar BulkFlowCoefficient { get; private set; }
+    internal Pascal VacuumThreshold { get; private set; }
     internal int SleepThreshold { get; private set; }
-    internal float SleepEpsilon { get; private set; }
-    internal float ThermalConductance { get; private set; }
-    internal float CondensationRateFactor { get; private set; }
-    internal float MaxPressureTransferFractionPerNeighbor { get; private set; }
+    internal Pascal SleepEpsilon { get; private set; }
+    internal JoulePerKelvin ThermalConductance { get; private set; }
+    internal Scalar CondensationRateFactor { get; private set; }
+    internal Scalar MaxPressureTransferFractionPerNeighbor { get; private set; }
 
-    internal float GetValidatedTemp(float storedTemperature)
+    internal Kelvin GetValidatedTemp(Kelvin storedTemperature)
     {
         return FloatMath.IsFinitePositive(storedTemperature) ? storedTemperature : DefaultTemperatureFallback;
     }
 
-    internal float GetMolarHeatCapacityAtConstantVolume(int gasId)
+    internal JoulePerMoleKelvin GetMolarHeatCapacityAtConstantVolume(int gasId)
     {
         return (uint)gasId < (uint)_gasRegistryCount
             ? _molarHeatCapacitiesAtConstantVolume[gasId]
             : _defaultMolarHeatCapacityAtConstantVolume;
     }
 
-    internal float GetDiffusionCoefficient(int gasId)
+    internal Scalar GetDiffusionCoefficient(int gasId)
     {
         return (uint)gasId < (uint)_gasRegistryCount
             ? _diffusionCoefficients[gasId]

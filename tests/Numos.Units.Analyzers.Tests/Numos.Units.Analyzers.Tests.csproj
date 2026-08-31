@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
         <TargetFramework>net10.0</TargetFramework>
@@ -6,14 +6,11 @@
         <Nullable>enable</Nullable>
         <IsPackable>false</IsPackable>
         <IsTestProject>true</IsTestProject>
-        <RootNamespace>Numos.CoreSim.Tests</RootNamespace>
+        <RootNamespace>Numos.Units.Analyzers.Tests</RootNamespace>
     </PropertyGroup>
 
     <ItemGroup>
-        <PackageReference Include="coverlet.collector" Version="6.0.4">
-            <PrivateAssets>all</PrivateAssets>
-            <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-        </PackageReference>
+        <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.0.0"/>
         <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1"/>
         <PackageReference Include="NUnit" Version="4.2.2"/>
         <PackageReference Include="NUnit3TestAdapter" Version="4.6.0">
@@ -23,9 +20,8 @@
     </ItemGroup>
 
     <ItemGroup>
-        <ProjectReference Include="..\..\src\Numos.CoreSim\Numos.CoreSim.csproj"/>
-        <ProjectReference Include="..\..\src\Numos.Maths\Numos.Maths.csproj"/>
         <ProjectReference Include="..\..\src\Numos.Units\Numos.Units.csproj"/>
+        <ProjectReference Include="..\..\src\Numos.Units.Analyzers\Numos.Units.Analyzers.csproj"/>
     </ItemGroup>
 
     <ItemGroup>

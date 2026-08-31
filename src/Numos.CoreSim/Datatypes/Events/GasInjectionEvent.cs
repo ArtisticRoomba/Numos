@@ -6,6 +6,6 @@ internal struct GasInjectionEvent
 {
     public Vector3 Position;
     public int GasId;
-    public float Moles;
-    public float Temperature;
+    public Mole Moles;
+    public Kelvin Temperature;
 }
