@@ -16,7 +16,8 @@ public sealed class AtmosSimulationContractTests
     [Test]
     public void Constructor_WithNullConfiguration_Throws()
     {
-        Assert.That(() => new AtmosSimulation(null!),
+        Assert.That(
+            () => new AtmosSimulation(null!),
             Throws.TypeOf<ArgumentNullException>()
                 .With.Property(nameof(ArgumentNullException.ParamName)).EqualTo("config"));
     }
@@ -35,10 +36,13 @@ public sealed class AtmosSimulationContractTests
     {
         Assert.Multiple(() =>
         {
-            Assert.That(() => new AtmosSimulation(width, height, depth),
+            Assert.That(
+                () => new AtmosSimulation(width, height, depth),
                 Throws.TypeOf<ArgumentOutOfRangeException>()
                     .With.Property(nameof(ArgumentOutOfRangeException.ParamName)).EqualTo(parameterName));
-            Assert.That(() => new AtmosSimulation(new AtmosConfig(), width, height, depth),
+
+            Assert.That(
+                () => new AtmosSimulation(new AtmosConfig(), width, height, depth),
                 Throws.TypeOf<ArgumentOutOfRangeException>()
                     .With.Property(nameof(ArgumentOutOfRangeException.ParamName)).EqualTo(parameterName));
         });
@@ -49,13 +53,18 @@ public sealed class AtmosSimulationContractTests
     {
         Assert.Multiple(() =>
         {
-            Assert.That(() => new AtmosSimulation(256, 256, 1),
+            Assert.That(
+                () => new AtmosSimulation(256, 256, 1),
                 Throws.TypeOf<ArgumentOutOfRangeException>()
                     .With.Property(nameof(ArgumentOutOfRangeException.ParamName)).EqualTo("chunkWidth"));
-            Assert.That(() => new AtmosSimulation(new AtmosConfig(), 256, 256, 1),
+
+            Assert.That(
+                () => new AtmosSimulation(new AtmosConfig(), 256, 256, 1),
                 Throws.TypeOf<ArgumentOutOfRangeException>()
                     .With.Property(nameof(ArgumentOutOfRangeException.ParamName)).EqualTo("chunkWidth"));
-            Assert.That(() => new AtmosSimulation(int.MaxValue, int.MaxValue, int.MaxValue),
+
+            Assert.That(
+                () => new AtmosSimulation(int.MaxValue, int.MaxValue, int.MaxValue),
                 Throws.TypeOf<ArgumentOutOfRangeException>());
         });
     }
@@ -97,9 +106,11 @@ public sealed class AtmosSimulationContractTests
         {
             Assert.That(simulation.Config, Is.SameAs(updateReplacement));
             Assert.That(simulation.TickCount, Is.Zero);
-            Assert.That(() => simulation.SetAtmosConfig(null!),
+            Assert.That(
+                () => simulation.SetAtmosConfig(null!),
                 Throws.TypeOf<ArgumentNullException>()
                     .With.Property(nameof(ArgumentNullException.ParamName)).EqualTo("config"));
+
             Assert.That(simulation.Config, Is.SameAs(updateReplacement));
         });
     }
@@ -110,9 +121,11 @@ public sealed class AtmosSimulationContractTests
         var config = new AtmosConfig();
         using var simulation = new AtmosSimulation(config, 1, 1, 1);
 
-        Assert.That(() => simulation.Update(0f, null!),
+        Assert.That(
+            () => simulation.Update(0f, null!),
             Throws.TypeOf<ArgumentNullException>()
                 .With.Property(nameof(ArgumentNullException.ParamName)).EqualTo("config"));
+
         Assert.Multiple(() =>
         {
             Assert.That(simulation.Config, Is.SameAs(config));
@@ -202,9 +215,11 @@ public sealed class AtmosSimulationContractTests
     {
         using var simulation = new AtmosSimulation(1, 1, 1);
 
-        Assert.That(() => simulation.CreateAndRegisterChunk(default, maxActiveRooms),
+        Assert.That(
+            () => simulation.CreateAndRegisterChunk(default, maxActiveRooms),
             Throws.TypeOf<ArgumentOutOfRangeException>()
                 .With.Property(nameof(ArgumentOutOfRangeException.ParamName)).EqualTo("maxActiveRooms"));
+
         Assert.That(simulation.ChunkCount, Is.Zero);
     }
 
@@ -266,8 +281,10 @@ public sealed class AtmosSimulationContractTests
             Assert.That(snapshot.VoxelRoomMap, Has.Length.EqualTo(12));
             Assert.That(snapshot.VoxelRoomMap[7], Is.EqualTo(17));
             Assert.That(snapshot.VoxelRoomMap[11], Is.EqualTo(23));
-            Assert.That(snapshot.VoxelRoomMap.Where((_, index) => index is not 7 and not 11),
+            Assert.That(
+                snapshot.VoxelRoomMap.Where((_, index) => index is not 7 and not 11),
                 Is.All.EqualTo(VoxelClassification.RoomSolid));
+
             Assert.That(snapshot.Temperature[5], Is.EqualTo(275f));
             Assert.That(snapshot.Temperature[7], Is.EqualTo(325f));
             Assert.That(snapshot.Temperature[11], Is.EqualTo(300f));
@@ -286,6 +303,7 @@ public sealed class AtmosSimulationContractTests
         {
             AssertEveryInvalidCoordinateThrows((x, y, z) =>
                 simulation.SetVoxelClassification(chunk, x, y, z, new VoxelClassification(1)));
+
             AssertEveryInvalidCoordinateThrows((x, y, z) => simulation.SetVoxelTemperature(chunk, x, y, z, 300f));
             AssertEveryInvalidCoordinateThrows((x, y, z) => simulation.AddGasToVoxel(chunk, x, y, z, 1, 1f, 300f));
         });
@@ -304,10 +322,14 @@ public sealed class AtmosSimulationContractTests
                 () => simulation.SetVoxelClassification(chunk, invalidIndex, new VoxelClassification(1)),
                 Throws.TypeOf<ArgumentOutOfRangeException>()
                     .With.Property(nameof(ArgumentOutOfRangeException.ParamName)).EqualTo("localVoxelIndex"));
-            Assert.That(() => simulation.SetVoxelTemperature(chunk, invalidIndex, 300f),
+
+            Assert.That(
+                () => simulation.SetVoxelTemperature(chunk, invalidIndex, 300f),
                 Throws.TypeOf<ArgumentOutOfRangeException>()
                     .With.Property(nameof(ArgumentOutOfRangeException.ParamName)).EqualTo("localVoxelIndex"));
-            Assert.That(() => simulation.AddGasToVoxel(chunk, invalidIndex, 1, 1f, 300f),
+
+            Assert.That(
+                () => simulation.AddGasToVoxel(chunk, invalidIndex, 1, 1f, 300f),
                 Throws.TypeOf<ArgumentOutOfRangeException>()
                     .With.Property(nameof(ArgumentOutOfRangeException.ParamName)).EqualTo("localVoxelIndex"));
         });
@@ -330,12 +352,15 @@ public sealed class AtmosSimulationContractTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(snapshot.VoxelRoomMap,
+            Assert.That(
+                snapshot.VoxelRoomMap,
                 Is.EqualTo(new[] { VoxelClassification.RoomSolid, VoxelClassification.RoomVoid, 7 }));
+
             Assert.That(snapshot.Gases, Has.Length.EqualTo(1));
             Assert.That(snapshot.Gases[0].Moles, Is.EqualTo(new[] { 0f, 0f, 2f }));
             Assert.That(snapshot.Temperature, Is.EqualTo(new[] { 0f, 0f, 300f }));
-            Assert.That(snapshot.TotalPressure,
+            Assert.That(
+                snapshot.TotalPressure,
                 Is.EqualTo(new[] { 0f, 0f, ExpectedPressure(2f, 300f) }).Within(0.001f));
         });
     }
@@ -351,6 +376,7 @@ public sealed class AtmosSimulationContractTests
                 new GasProperties { Name = "Heavy", MolarHeatCapacityAtConstantVolume = 4f }
             ]
         };
+
         using var simulation = new AtmosSimulation(config, 1, 1, 1);
         var chunk = simulation.CreateAndRegisterChunk(default);
         simulation.SetChunkClassification(chunk, new VoxelClassification(7));
@@ -362,8 +388,10 @@ public sealed class AtmosSimulationContractTests
         Assert.Multiple(() =>
         {
             Assert.That(snapshot.Temperature[0], Is.EqualTo(180f).Within(0.0001f));
-            Assert.That(snapshot.TotalPressure[0],
+            Assert.That(
+                snapshot.TotalPressure[0],
                 Is.EqualTo(ExpectedPressure(2f, 180f)).Within(0.001f));
+
             Assert.That(snapshot.Gases.Select(gas => gas.Moles[0]), Is.EqualTo(new[] { 1f, 1f }));
         });
     }
@@ -378,6 +406,7 @@ public sealed class AtmosSimulationContractTests
                 new GasProperties { Name = "Variable", MolarHeatCapacityAtConstantVolume = 1f }
             ]
         };
+
         using var simulation = new AtmosSimulation(config, 1, 1, 1);
         var chunk = simulation.CreateAndRegisterChunk(default);
         simulation.SetChunkClassification(chunk, new VoxelClassification(7));
@@ -392,8 +421,10 @@ public sealed class AtmosSimulationContractTests
         Assert.Multiple(() =>
         {
             Assert.That(snapshot.Temperature[0], Is.EqualTo(150f).Within(0.0001f));
-            Assert.That(snapshot.TotalPressure[0],
+            Assert.That(
+                snapshot.TotalPressure[0],
                 Is.EqualTo(ExpectedPressure(2f, 150f)).Within(0.001f));
+
             Assert.That(snapshot.Gases[0].Moles[0], Is.EqualTo(2f));
         });
     }
@@ -409,6 +440,7 @@ public sealed class AtmosSimulationContractTests
                 new GasProperties { Name = "Registered", MolarHeatCapacityAtConstantVolume = 1f }
             ]
         };
+
         using var simulation = new AtmosSimulation(config, 1, 1, 1);
         var chunk = simulation.CreateAndRegisterChunk(default);
         simulation.SetChunkClassification(chunk, new VoxelClassification(7));
@@ -421,8 +453,10 @@ public sealed class AtmosSimulationContractTests
         Assert.Multiple(() =>
         {
             Assert.That(snapshot.Temperature[0], Is.EqualTo(120f).Within(0.0001f));
-            Assert.That(snapshot.TotalPressure[0],
+            Assert.That(
+                snapshot.TotalPressure[0],
                 Is.EqualTo(ExpectedPressure(2f, 120f)).Within(0.001f));
+
             Assert.That(snapshot.Gases.Select(gas => gas.Moles[0]), Is.EqualTo(new[] { 1f, 1f }));
         });
     }
@@ -438,6 +472,7 @@ public sealed class AtmosSimulationContractTests
                 new GasProperties { Name = "Registered", MolarHeatCapacityAtConstantVolume = 1f }
             ]
         };
+
         using var simulation = new AtmosSimulation(config, 1, 1, 1);
         var chunk = simulation.CreateAndRegisterChunk(default);
         simulation.SetChunkClassification(chunk, new VoxelClassification(7));
@@ -449,7 +484,8 @@ public sealed class AtmosSimulationContractTests
         Assert.Multiple(() =>
         {
             Assert.That(snapshot.Temperature[0], Is.EqualTo(120f).Within(0.0001f));
-            Assert.That(snapshot.TotalPressure[0],
+            Assert.That(
+                snapshot.TotalPressure[0],
                 Is.EqualTo(ExpectedPressure(2f, 120f)).Within(0.001f));
         });
     }
@@ -469,6 +505,7 @@ public sealed class AtmosSimulationContractTests
                 new GasProperties { Name = "Registered", MolarHeatCapacityAtConstantVolume = 4f }
             ]
         };
+
         using var simulation = new AtmosSimulation(config, 1, 1, 1);
         var chunk = simulation.CreateAndRegisterChunk(default);
         simulation.SetChunkClassification(chunk, new VoxelClassification(7));
@@ -482,7 +519,8 @@ public sealed class AtmosSimulationContractTests
             float fallback = AtmosPhysicalConstants.IdealDiatomicMolarHeatCapacityAtConstantVolume;
             float expectedTemperature = (fallback * 100f + 4f * 200f) / (fallback + 4f);
             Assert.That(snapshot.Temperature[0], Is.EqualTo(expectedTemperature).Within(0.0001f));
-            Assert.That(snapshot.TotalPressure[0],
+            Assert.That(
+                snapshot.TotalPressure[0],
                 Is.EqualTo(ExpectedPressure(2f, expectedTemperature)).Within(0.001f));
         });
     }
@@ -501,8 +539,10 @@ public sealed class AtmosSimulationContractTests
         Assert.Multiple(() =>
         {
             Assert.That(snapshot.Temperature[0], Is.EqualTo(250f));
-            Assert.That(snapshot.TotalPressure[0],
+            Assert.That(
+                snapshot.TotalPressure[0],
                 Is.EqualTo(ExpectedPressure(2f, 250f)).Within(0.001f));
+
             Assert.That(snapshot.Gases[0].Moles[0], Is.EqualTo(2f));
         });
     }
@@ -524,11 +564,16 @@ public sealed class AtmosSimulationContractTests
         var afterIgnoredInjection = simulation.GetChunkSnapshot(chunk);
         Assert.Multiple(() =>
         {
-            Assert.That(afterIgnoredInjection.Temperature,
+            Assert.That(
+                afterIgnoredInjection.Temperature,
                 Is.EqualTo(beforeIgnoredInjection.Temperature));
-            Assert.That(afterIgnoredInjection.TotalPressure,
+
+            Assert.That(
+                afterIgnoredInjection.TotalPressure,
                 Is.EqualTo(beforeIgnoredInjection.TotalPressure));
-            Assert.That(afterIgnoredInjection.Gases[0].Moles,
+
+            Assert.That(
+                afterIgnoredInjection.Gases[0].Moles,
                 Is.EqualTo(beforeIgnoredInjection.Gases[0].Moles));
         });
     }
@@ -542,19 +587,28 @@ public sealed class AtmosSimulationContractTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(() => simulation.AddGasToVoxel(chunk, 0, -1, 1f, 300f),
+            Assert.That(
+                () => simulation.AddGasToVoxel(chunk, 0, -1, 1f, 300f),
                 Throws.TypeOf<ArgumentOutOfRangeException>()
                     .With.Property(nameof(ArgumentOutOfRangeException.ParamName)).EqualTo("gasId"));
-            Assert.That(() => simulation.AddGasToVoxel(chunk, 0, 1, 0f, 300f),
+
+            Assert.That(
+                () => simulation.AddGasToVoxel(chunk, 0, 1, 0f, 300f),
                 Throws.TypeOf<ArgumentOutOfRangeException>()
                     .With.Property(nameof(ArgumentOutOfRangeException.ParamName)).EqualTo("moles"));
-            Assert.That(() => simulation.AddGasToVoxel(chunk, 0, 1, float.NaN, 300f),
+
+            Assert.That(
+                () => simulation.AddGasToVoxel(chunk, 0, 1, float.NaN, 300f),
                 Throws.TypeOf<ArgumentOutOfRangeException>()
                     .With.Property(nameof(ArgumentOutOfRangeException.ParamName)).EqualTo("moles"));
-            Assert.That(() => simulation.AddGasToVoxel(chunk, 0, 1, 1f, -1f),
+
+            Assert.That(
+                () => simulation.AddGasToVoxel(chunk, 0, 1, 1f, -1f),
                 Throws.TypeOf<ArgumentOutOfRangeException>()
                     .With.Property(nameof(ArgumentOutOfRangeException.ParamName)).EqualTo("temperature"));
-            Assert.That(() => simulation.AddGasToVoxel(chunk, 0, 1, 1f, float.PositiveInfinity),
+
+            Assert.That(
+                () => simulation.AddGasToVoxel(chunk, 0, 1, 1f, float.PositiveInfinity),
                 Throws.TypeOf<ArgumentOutOfRangeException>()
                     .With.Property(nameof(ArgumentOutOfRangeException.ParamName)).EqualTo("temperature"));
         });
@@ -586,8 +640,10 @@ public sealed class AtmosSimulationContractTests
             Assert.That(first.IsSnapshotValid, Is.True);
             Assert.That(second.IsSnapshotValid, Is.True);
             Assert.That(second.GridPosition, Is.EqualTo(chunk.Position));
-            Assert.That(second.TotalPressure[0],
+            Assert.That(
+                second.TotalPressure[0],
                 Is.EqualTo(ExpectedPressure(3f, 300f)).Within(0.001f));
+
             Assert.That(second.Temperature[0], Is.EqualTo(300f));
             Assert.That(second.VoxelRoomMap[0], Is.EqualTo(9));
             Assert.That(second.Gases.Select(gas => gas.GasId), Is.EqualTo(new[] { 3, 7 }));
@@ -611,20 +667,34 @@ public sealed class AtmosSimulationContractTests
         Assert.Multiple(() =>
         {
             Assert.That(() => simulation.GetChunkSnapshot(missing), Throws.TypeOf<KeyNotFoundException>());
-            Assert.That(() => simulation.SetChunkClassification(missing, new VoxelClassification(1)),
+            Assert.That(
+                () => simulation.SetChunkClassification(missing, new VoxelClassification(1)),
                 Throws.TypeOf<KeyNotFoundException>());
-            Assert.That(() => simulation.SetVoxelClassification(missing, 0, new VoxelClassification(1)),
+
+            Assert.That(
+                () => simulation.SetVoxelClassification(missing, 0, new VoxelClassification(1)),
                 Throws.TypeOf<KeyNotFoundException>());
-            Assert.That(() => simulation.SetVoxelClassification(missing, 0, 0, 0, new VoxelClassification(1)),
+
+            Assert.That(
+                () => simulation.SetVoxelClassification(missing, 0, 0, 0, new VoxelClassification(1)),
                 Throws.TypeOf<KeyNotFoundException>());
-            Assert.That(() => simulation.SetVoxelTemperature(missing, 0, 300f),
+
+            Assert.That(
+                () => simulation.SetVoxelTemperature(missing, 0, 300f),
                 Throws.TypeOf<KeyNotFoundException>());
-            Assert.That(() => simulation.SetVoxelTemperature(missing, 0, 0, 0, 300f),
+
+            Assert.That(
+                () => simulation.SetVoxelTemperature(missing, 0, 0, 0, 300f),
                 Throws.TypeOf<KeyNotFoundException>());
-            Assert.That(() => simulation.AddGasToVoxel(missing, 0, 1, 1f, 300f),
+
+            Assert.That(
+                () => simulation.AddGasToVoxel(missing, 0, 1, 1f, 300f),
                 Throws.TypeOf<KeyNotFoundException>());
-            Assert.That(() => simulation.AddGasToVoxel(missing, 0, 0, 0, 1, 1f, 300f),
+
+            Assert.That(
+                () => simulation.AddGasToVoxel(missing, 0, 0, 0, 1, 1f, 300f),
                 Throws.TypeOf<KeyNotFoundException>());
+
             Assert.That(() => simulation.WakeRoom(missing, 1), Throws.TypeOf<KeyNotFoundException>());
             Assert.That(() => simulation.SleepChunk(missing), Throws.TypeOf<KeyNotFoundException>());
             Assert.That(simulation.UnregisterChunk(missing), Is.False);
@@ -647,18 +717,28 @@ public sealed class AtmosSimulationContractTests
             Assert.That(() => simulation.Update(0f), Throws.TypeOf<ObjectDisposedException>());
             Assert.That(() => simulation.Update(0f, new AtmosConfig()), Throws.TypeOf<ObjectDisposedException>());
             Assert.That(() => simulation.SetAtmosConfig(new AtmosConfig()), Throws.TypeOf<ObjectDisposedException>());
-            Assert.That(() => simulation.CreateAndRegisterChunk(new Int3(1, 0, 0)),
+            Assert.That(
+                () => simulation.CreateAndRegisterChunk(new Int3(1, 0, 0)),
                 Throws.TypeOf<ObjectDisposedException>());
+
             Assert.That(() => simulation.UnregisterChunk(chunk), Throws.TypeOf<ObjectDisposedException>());
             Assert.That(() => simulation.GetChunkSnapshot(chunk), Throws.TypeOf<ObjectDisposedException>());
-            Assert.That(() => simulation.SetChunkClassification(chunk, new VoxelClassification(1)),
+            Assert.That(
+                () => simulation.SetChunkClassification(chunk, new VoxelClassification(1)),
                 Throws.TypeOf<ObjectDisposedException>());
-            Assert.That(() => simulation.SetVoxelClassification(chunk, 0, new VoxelClassification(1)),
+
+            Assert.That(
+                () => simulation.SetVoxelClassification(chunk, 0, new VoxelClassification(1)),
                 Throws.TypeOf<ObjectDisposedException>());
-            Assert.That(() => simulation.SetVoxelTemperature(chunk, 0, 300f),
+
+            Assert.That(
+                () => simulation.SetVoxelTemperature(chunk, 0, 300f),
                 Throws.TypeOf<ObjectDisposedException>());
-            Assert.That(() => simulation.AddGasToVoxel(chunk, 0, 1, 1f, 300f),
+
+            Assert.That(
+                () => simulation.AddGasToVoxel(chunk, 0, 1, 1f, 300f),
                 Throws.TypeOf<ObjectDisposedException>());
+
             Assert.That(() => simulation.WakeRoom(chunk, 1), Throws.TypeOf<ObjectDisposedException>());
             Assert.That(() => simulation.SleepChunk(chunk), Throws.TypeOf<ObjectDisposedException>());
             Assert.That(simulation.Tick, Throws.TypeOf<ObjectDisposedException>());
@@ -667,22 +747,33 @@ public sealed class AtmosSimulationContractTests
 
     private static void AssertEveryInvalidCoordinateThrows(Action<int, int, int> operation)
     {
-        Assert.That(() => operation(-1, 0, 0),
+        Assert.That(
+            () => operation(-1, 0, 0),
             Throws.TypeOf<ArgumentOutOfRangeException>()
                 .With.Property(nameof(ArgumentOutOfRangeException.ParamName)).EqualTo("x"));
-        Assert.That(() => operation(3, 0, 0),
+
+        Assert.That(
+            () => operation(3, 0, 0),
             Throws.TypeOf<ArgumentOutOfRangeException>()
                 .With.Property(nameof(ArgumentOutOfRangeException.ParamName)).EqualTo("x"));
-        Assert.That(() => operation(0, -1, 0),
+
+        Assert.That(
+            () => operation(0, -1, 0),
             Throws.TypeOf<ArgumentOutOfRangeException>()
                 .With.Property(nameof(ArgumentOutOfRangeException.ParamName)).EqualTo("y"));
-        Assert.That(() => operation(0, 2, 0),
+
+        Assert.That(
+            () => operation(0, 2, 0),
             Throws.TypeOf<ArgumentOutOfRangeException>()
                 .With.Property(nameof(ArgumentOutOfRangeException.ParamName)).EqualTo("y"));
-        Assert.That(() => operation(0, 0, -1),
+
+        Assert.That(
+            () => operation(0, 0, -1),
             Throws.TypeOf<ArgumentOutOfRangeException>()
                 .With.Property(nameof(ArgumentOutOfRangeException.ParamName)).EqualTo("z"));
-        Assert.That(() => operation(0, 0, 2),
+
+        Assert.That(
+            () => operation(0, 0, 2),
             Throws.TypeOf<ArgumentOutOfRangeException>()
                 .With.Property(nameof(ArgumentOutOfRangeException.ParamName)).EqualTo("z"));
     }
@@ -697,7 +788,8 @@ public sealed class AtmosSimulationContractTests
 
         simulation.AddGasToVoxel(chunk, 0, 0, 0, 0, 3f, 400f);
 
-        Assert.That(simulation.GetChunkSnapshot(chunk).TotalPressure[0],
+        Assert.That(
+            simulation.GetChunkSnapshot(chunk).TotalPressure[0],
             Is.EqualTo(ExpectedPressure(3f, 400f, 2f)).Within(0.001f));
     }
 
@@ -714,7 +806,8 @@ public sealed class AtmosSimulationContractTests
 
         simulation.AddGasToVoxel(chunk, 0, 0, 0, 0, 1f, 300f);
 
-        Assert.That(simulation.GetChunkSnapshot(chunk).TotalPressure[0],
+        Assert.That(
+            simulation.GetChunkSnapshot(chunk).TotalPressure[0],
             Is.EqualTo(ExpectedPressure(1f, 300f)).Within(0.001f));
     }
 

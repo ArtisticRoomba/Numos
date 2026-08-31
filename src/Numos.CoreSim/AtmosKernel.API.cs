@@ -42,7 +42,8 @@ internal sealed partial class AtmosKernel
         }
     }
 
-    internal void RegisterSolverBefore(string existingName, string name,
+    internal void RegisterSolverBefore(
+        string existingName, string name,
         Action<AtmosSolverExecutionContext> solver)
     {
         lock (_stateGate)
@@ -50,11 +51,13 @@ internal sealed partial class AtmosKernel
             int index = _solverPipeline.IndexOf(existingName);
             if (index < 0)
                 throw new KeyNotFoundException($"No solver named '{existingName}' is registered.");
+
             _solverPipeline.Register(name, SolverStepKind.Custom, solver, index);
         }
     }
 
-    internal void RegisterSolverAfter(string existingName, string name,
+    internal void RegisterSolverAfter(
+        string existingName, string name,
         Action<AtmosSolverExecutionContext> solver)
     {
         lock (_stateGate)
@@ -62,6 +65,7 @@ internal sealed partial class AtmosKernel
             int index = _solverPipeline.IndexOf(existingName);
             if (index < 0)
                 throw new KeyNotFoundException($"No solver named '{existingName}' is registered.");
+
             _solverPipeline.Register(name, SolverStepKind.Custom, solver, index + 1);
         }
     }
@@ -159,8 +163,8 @@ internal sealed partial class AtmosKernel
 
             // One elapsed-time update is one externally atomic batch. Solver callbacks may edit the pipeline, but
             // chunk lifecycle changes are rejected until the batch completes.
-            var chunks = _chunkMap.Values.ToArray();
-            var steps = 0;
+            AtmosChunk[] chunks = _chunkMap.Values.ToArray();
+            int steps = 0;
             while (_accumulator >= AtmosSolverConstants.FixedTimeStep &&
                    steps < AtmosSolverConstants.MaximumStepsPerUpdate)
             {
@@ -212,6 +216,7 @@ internal sealed partial class AtmosKernel
         {
             if (!_chunkMap.TryAdd(chunk.GridPosition, chunk))
                 throw new InvalidOperationException($"A chunk is already registered at {chunk.GridPosition}.");
+
             _chunkCollectionRevision++;
         }
     }
@@ -311,7 +316,7 @@ internal sealed partial class AtmosKernel
     {
         ValidateVoxelIndex(chunk, localVoxelIndex);
         var gases = new VoxelGasSnapshot[chunk.ActiveGasCount];
-        for (var gas = 0; gas < gases.Length; gas++)
+        for (int gas = 0; gas < gases.Length; gas++)
         {
             gases[gas] = new VoxelGasSnapshot(
                 chunk.ActiveGases[gas].GasId,
@@ -378,20 +383,22 @@ internal sealed partial class AtmosKernel
         lock (_stateGate)
         {
             var positions = new HashSet<Int3>();
-            for (var index = 0; index < requests.Count; index++)
+            for (int index = 0; index < requests.Count; index++)
             {
                 var request = requests[index];
                 if ((request.Fields & ~AtmosChunkSnapshotFields.All) != 0)
                     throw new ArgumentOutOfRangeException(nameof(requests), "A request contains invalid fields.");
+
                 if (!positions.Add(request.Position))
                 {
-                    throw new ArgumentException($"Chunk {request.Position} was requested more than once.",
+                    throw new ArgumentException(
+                        $"Chunk {request.Position} was requested more than once.",
                         nameof(requests));
                 }
             }
 
             var changed = new List<AtmosChunkSnapshot>(requests.Count);
-            for (var index = 0; index < requests.Count; index++)
+            for (int index = 0; index < requests.Count; index++)
             {
                 var request = requests[index];
                 // Handle lists are detached. A concurrent unregistration between enumeration
@@ -441,13 +448,15 @@ internal sealed partial class AtmosKernel
             var chunk = GetChunk(position);
             var dimensions = chunk.Dimensions;
 
-            for (var z = 0; z < dimensions.Z; z++)
-            for (var y = 0; y < dimensions.Y; y++)
-            for (var x = 0; x < dimensions.X; x++)
+            for (int z = 0; z < dimensions.Z; z++)
+            for (int y = 0; y < dimensions.Y; y++)
+            for (int x = 0; x < dimensions.X; x++)
             {
                 bool isBoundary =
-                    x == 0 || x == dimensions.X - 1 ||
-                    y == 0 || y == dimensions.Y - 1 ||
+                    x == 0 ||
+                    x == dimensions.X - 1 ||
+                    y == 0 ||
+                    y == dimensions.Y - 1 ||
                     dimensions.Z > 1 && (z == 0 || z == dimensions.Z - 1);
 
                 if (isBoundary)
@@ -468,7 +477,8 @@ internal sealed partial class AtmosKernel
     /// <remarks>If the chunk is awake, its active-voxel topology is rebuilt immediately.</remarks>
     /// <exception cref="KeyNotFoundException">No chunk is registered at <paramref name="position" />.</exception>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="localVoxelIndex" /> is outside the chunk.</exception>
-    internal void SetVoxelClassification(Int3 position, ushort localVoxelIndex,
+    internal void SetVoxelClassification(
+        Int3 position, ushort localVoxelIndex,
         VoxelClassification classification)
     {
         lock (_stateGate)
@@ -491,7 +501,8 @@ internal sealed partial class AtmosKernel
     /// <param name="classification">The room, solid, or void classification to assign.</param>
     /// <exception cref="KeyNotFoundException">No chunk is registered at <paramref name="position" />.</exception>
     /// <exception cref="ArgumentOutOfRangeException">A local coordinate is outside the chunk.</exception>
-    internal void SetVoxelClassification(Int3 position, int x, int y, int z,
+    internal void SetVoxelClassification(
+        Int3 position, int x, int y, int z,
         VoxelClassification classification)
     {
         lock (_stateGate)
@@ -518,6 +529,7 @@ internal sealed partial class AtmosKernel
             chunk.Temperature[localVoxelIndex] = temperature;
             chunk.TotalPressure[localVoxelIndex] =
                 AtmosSolverMath.CalculatePressureAtVoxel(_config, chunk, localVoxelIndex);
+
             chunk.MarkChanged();
         }
     }
@@ -552,7 +564,8 @@ internal sealed partial class AtmosKernel
     /// <remarks>Injection into a solid or void voxel is ignored by the chunk.</remarks>
     /// <exception cref="KeyNotFoundException">No chunk is registered at <paramref name="position" />.</exception>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="localVoxelIndex" /> is outside the chunk.</exception>
-    internal void AddGasToVoxel(Int3 position, ushort localVoxelIndex, int gasId, Mole moles,
+    internal void AddGasToVoxel(
+        Int3 position, ushort localVoxelIndex, int gasId, Mole moles,
         Kelvin temperature)
     {
         lock (_stateGate)
@@ -583,7 +596,8 @@ internal sealed partial class AtmosKernel
     /// <remarks>Injection into a solid or void voxel is ignored by the chunk.</remarks>
     /// <exception cref="KeyNotFoundException">No chunk is registered at <paramref name="position" />.</exception>
     /// <exception cref="ArgumentOutOfRangeException">A local coordinate is outside the chunk.</exception>
-    internal void AddGasToVoxel(Int3 position, int x, int y, int z, int gasId, Mole moles,
+    internal void AddGasToVoxel(
+        Int3 position, int x, int y, int z, int gasId, Mole moles,
         Kelvin temperature)
     {
         lock (_stateGate)
@@ -629,7 +643,7 @@ internal sealed partial class AtmosKernel
     {
         lock (_stateGate)
         {
-            var chunks = _chunkMap.Values.ToArray();
+            AtmosChunk[] chunks = _chunkMap.Values.ToArray();
             TickSimulation(chunks);
         }
     }
@@ -639,8 +653,7 @@ internal sealed partial class AtmosKernel
         if (_chunkMap.TryGetValue(position, out var chunk))
             return chunk;
 
-        throw new KeyNotFoundException(
-            $"No atmospheric chunk is registered at ({position.X}, {position.Y}, {position.Z}).");
+        throw new KeyNotFoundException($"No atmospheric chunk is registered at ({position.X}, {position.Y}, {position.Z}).");
     }
 
     private static void RebuildActiveTopology(AtmosChunk chunk)
@@ -653,8 +666,10 @@ internal sealed partial class AtmosKernel
     {
         if (x < 0 || x >= chunk.Width)
             throw new ArgumentOutOfRangeException(nameof(x));
+
         if (y < 0 || y >= chunk.Height)
             throw new ArgumentOutOfRangeException(nameof(y));
+
         if (z < 0 || z >= chunk.Depth)
             throw new ArgumentOutOfRangeException(nameof(z));
 
@@ -671,7 +686,9 @@ internal sealed partial class AtmosKernel
     {
         if (localVoxelIndex >= chunk.VoxelCount)
         {
-            throw new ArgumentOutOfRangeException(nameof(localVoxelIndex), localVoxelIndex,
+            throw new ArgumentOutOfRangeException(
+                nameof(localVoxelIndex),
+                localVoxelIndex,
                 $"Voxel index must be less than the chunk's voxel count ({chunk.VoxelCount}).");
         }
     }
@@ -680,11 +697,15 @@ internal sealed partial class AtmosKernel
     {
         if (gasId < 0)
             throw new ArgumentOutOfRangeException(nameof(gasId), gasId, "Gas ID must be nonnegative.");
+
         if (!float.IsFinite(moles) || moles <= 0f)
             throw new ArgumentOutOfRangeException(nameof(moles), moles, "Moles must be positive and finite.");
+
         if (!float.IsFinite(temperature) || temperature < 0f)
         {
-            throw new ArgumentOutOfRangeException(nameof(temperature), temperature,
+            throw new ArgumentOutOfRangeException(
+                nameof(temperature),
+                temperature,
                 "Temperature must be nonnegative and finite.");
         }
     }

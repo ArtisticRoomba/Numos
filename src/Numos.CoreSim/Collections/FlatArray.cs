@@ -81,8 +81,7 @@ internal readonly struct FlatArray<T>
         long expectedLength = (long)dimensions.X * dimensions.Y * dimensions.Z;
         if (expectedLength != data.LongLength)
         {
-            throw new ArgumentException(
-                $"The array length must equal the product of its dimensions ({expectedLength}).", nameof(data));
+            throw new ArgumentException($"The array length must equal the product of its dimensions ({expectedLength}).", nameof(data));
         }
 
         _data = data;
@@ -128,7 +127,8 @@ internal readonly struct FlatArray<T>
         if ((uint)index >= (uint)Length)
             throw new IndexOutOfRangeException();
 
-        return new Int3(index % _dimensions.X,
+        return new Int3(
+            index % _dimensions.X,
             index / _dimensions.X % _dimensions.Y,
             index / (_dimensions.X * _dimensions.Y));
     }

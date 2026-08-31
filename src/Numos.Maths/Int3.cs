@@ -85,9 +85,12 @@ public struct Int3(int x, int y, int z) : IEquatable<Int3>
     /// <returns><see langword="true" /> when every coordinate is within its corresponding bounds.</returns>
     public readonly bool IsWithin(Int3 minInclusive, Int3 maxExclusive)
     {
-        return X >= minInclusive.X && X < maxExclusive.X &&
-               Y >= minInclusive.Y && Y < maxExclusive.Y &&
-               Z >= minInclusive.Z && Z < maxExclusive.Z;
+        return X >= minInclusive.X &&
+               X < maxExclusive.X &&
+               Y >= minInclusive.Y &&
+               Y < maxExclusive.Y &&
+               Z >= minInclusive.Z &&
+               Z < maxExclusive.Z;
     }
 
     public override string ToString()

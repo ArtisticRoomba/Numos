@@ -10,16 +10,16 @@ public sealed class DimensionalAnalysisIntegrationTests
     [Test]
     public void QuantityAliasesPreserveSolverClrStorageTypes()
     {
-        Assembly assembly = typeof(AtmosConfig).Assembly;
-        Type chunkType = assembly.GetType("Numos.CoreSim.AtmosChunk", true)!;
-        Type gasChannelType = assembly.GetType("Numos.CoreSim.GasChannel", true)!;
-        Type solverMathType = assembly.GetType("Numos.CoreSim.Solvers.AtmosSolverMath", true)!;
-        Type configType = assembly.GetType("Numos.CoreSim.IAtmosConfig", true)!;
+        var assembly = typeof(AtmosConfig).Assembly;
+        var chunkType = assembly.GetType("Numos.CoreSim.AtmosChunk", true)!;
+        var gasChannelType = assembly.GetType("Numos.CoreSim.GasChannel", true)!;
+        var solverMathType = assembly.GetType("Numos.CoreSim.Solvers.AtmosSolverMath", true)!;
+        var configType = assembly.GetType("Numos.CoreSim.IAtmosConfig", true)!;
 
-        FieldInfo temperature = chunkType.GetField("Temperature")!;
-        FieldInfo pressure = chunkType.GetField("TotalPressure")!;
-        FieldInfo moles = gasChannelType.GetField("Moles")!;
-        MethodInfo calculatePressure = solverMathType.GetMethods(BindingFlags.Static | BindingFlags.NonPublic)
+        var temperature = chunkType.GetField("Temperature")!;
+        var pressure = chunkType.GetField("TotalPressure")!;
+        var moles = gasChannelType.GetField("Moles")!;
+        var calculatePressure = solverMathType.GetMethods(BindingFlags.Static | BindingFlags.NonPublic)
             .Single(method => method.Name == "CalculatePressure" &&
                               method.GetParameters().First().ParameterType == configType);
 
@@ -29,7 +29,8 @@ public sealed class DimensionalAnalysisIntegrationTests
             Assert.That(pressure.FieldType.GetGenericArguments().Single(), Is.EqualTo(typeof(float)));
             Assert.That(moles.FieldType, Is.EqualTo(typeof(float[])));
             Assert.That(calculatePressure.ReturnType, Is.EqualTo(typeof(float)));
-            Assert.That(calculatePressure.GetParameters().Select(parameter => parameter.ParameterType),
+            Assert.That(
+                calculatePressure.GetParameters().Select(parameter => parameter.ParameterType),
                 Is.EqualTo(new[] { configType, typeof(float), typeof(float) }));
         });
     }
@@ -37,17 +38,19 @@ public sealed class DimensionalAnalysisIntegrationTests
     [Test]
     public void PublicQuantityMetadataSurvivesAliasErasure()
     {
-        PropertyInfo temperature = typeof(AtmosConfig).GetProperty(nameof(AtmosConfig.GlobalTemperature))!;
-        FieldInfo molarEnergy = typeof(GasProperties).GetField(
-            nameof(GasProperties.MolarEnthalpyOfVaporization))!;
+        var temperature = typeof(AtmosConfig).GetProperty(nameof(AtmosConfig.GlobalTemperature))!;
+        var molarEnergy = typeof(GasProperties).GetField(nameof(GasProperties.MolarEnthalpyOfVaporization))!;
 
         Assert.Multiple(() =>
         {
             Assert.That(temperature.PropertyType, Is.EqualTo(typeof(float)));
-            Assert.That(temperature.GetCustomAttribute<QuantityAttribute>()?.Id,
+            Assert.That(
+                temperature.GetCustomAttribute<QuantityAttribute>()?.Id,
                 Is.EqualTo("temperature"));
+
             Assert.That(molarEnergy.FieldType, Is.EqualTo(typeof(float)));
-            Assert.That(molarEnergy.GetCustomAttribute<QuantityAttribute>()?.Id,
+            Assert.That(
+                molarEnergy.GetCustomAttribute<QuantityAttribute>()?.Id,
                 Is.EqualTo("molarEnergy"));
         });
     }

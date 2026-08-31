@@ -12,8 +12,11 @@ public sealed class DimensionalAnalysisAnalyzer : DiagnosticAnalyzer
 {
     /// <inheritdoc />
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics =>
-        ImmutableArray.Create(Diagnostics.InvalidCatalog, Diagnostics.IncompatibleOperands,
-            Diagnostics.IncompatibleAssignment, Diagnostics.IncompatibleArgument,
+        ImmutableArray.Create(
+            Diagnostics.InvalidCatalog,
+            Diagnostics.IncompatibleOperands,
+            Diagnostics.IncompatibleAssignment,
+            Diagnostics.IncompatibleArgument,
             Diagnostics.IncompatibleReturn);
 
     /// <inheritdoc />
@@ -23,16 +26,20 @@ public sealed class DimensionalAnalysisAnalyzer : DiagnosticAnalyzer
         context.EnableConcurrentExecution();
         context.RegisterCompilationStartAction(startContext =>
         {
-            UnitCatalog catalog = UnitCatalog.Parse(startContext.Options.AdditionalFiles,
+            var catalog = UnitCatalog.Parse(
+                startContext.Options.AdditionalFiles,
                 startContext.CancellationToken);
+
             if (catalog.Definitions.Length == 0)
                 return;
 
             var analysis = new QuantityAnalysis(startContext.Compilation, catalog);
             startContext.RegisterOperationAction(analysis.AnalyzeBinary, OperationKind.Binary);
             startContext.RegisterOperationAction(analysis.AnalyzeAssignment, OperationKind.SimpleAssignment);
-            startContext.RegisterOperationAction(analysis.AnalyzeCompoundAssignment,
+            startContext.RegisterOperationAction(
+                analysis.AnalyzeCompoundAssignment,
                 OperationKind.CompoundAssignment);
+
             startContext.RegisterOperationAction(analysis.AnalyzeVariable, OperationKind.VariableDeclarator);
             startContext.RegisterOperationAction(analysis.AnalyzeArgument, OperationKind.Argument);
             startContext.RegisterOperationAction(analysis.AnalyzeReturn, OperationKind.Return);
@@ -44,9 +51,9 @@ public sealed class DimensionalAnalysisAnalyzer : DiagnosticAnalyzer
     {
         private const string QuantityAttributeName = "Numos.Units.QuantityAttribute";
         private const string ElementQuantityAttributeName = "Numos.Units.ElementQuantityAttribute";
+        private readonly UnitCatalog _catalog;
 
         private readonly Compilation _compilation;
-        private readonly UnitCatalog _catalog;
 
         internal QuantityAnalysis(Compilation compilation, UnitCatalog catalog)
         {
@@ -60,11 +67,18 @@ public sealed class DimensionalAnalysisAnalyzer : DiagnosticAnalyzer
             if (!RequiresEqualOperands(operation.OperatorKind))
                 return;
 
-            QuantityValue left = Infer(operation.LeftOperand);
-            QuantityValue right = Infer(operation.RightOperand);
+            var left = Infer(operation.LeftOperand);
+            var right = Infer(operation.RightOperand);
             if (AreIncompatible(left, right))
-                context.ReportDiagnostic(Diagnostic.Create(Diagnostics.IncompatibleOperands,
-                    operation.Syntax.GetLocation(), GetOperatorText(operation), left, right));
+            {
+                context.ReportDiagnostic(
+                    Diagnostic.Create(
+                        Diagnostics.IncompatibleOperands,
+                        operation.Syntax.GetLocation(),
+                        GetOperatorText(operation),
+                        left,
+                        right));
+            }
         }
 
         internal void AnalyzeAssignment(OperationAnalysisContext context)
@@ -76,21 +90,28 @@ public sealed class DimensionalAnalysisAnalyzer : DiagnosticAnalyzer
         internal void AnalyzeCompoundAssignment(OperationAnalysisContext context)
         {
             var operation = (ICompoundAssignmentOperation)context.Operation;
-            QuantityValue target = Infer(operation.Target);
-            QuantityValue value = Infer(operation.Value);
+            var target = Infer(operation.Target);
+            var value = Infer(operation.Value);
             if (!target.IsKnown || !value.IsKnown)
                 return;
 
-            QuantityValue result = operation.OperatorKind switch
+            var result = operation.OperatorKind switch
             {
                 BinaryOperatorKind.Add or BinaryOperatorKind.Subtract => value,
                 BinaryOperatorKind.Multiply => target.Multiply(value),
                 BinaryOperatorKind.Divide => target.Divide(value),
-                _ => QuantityValue.Unknown,
+                _ => QuantityValue.Unknown
             };
+
             if (AreIncompatible(target, result))
-                context.ReportDiagnostic(Diagnostic.Create(Diagnostics.IncompatibleAssignment,
-                    operation.Syntax.GetLocation(), result, target));
+            {
+                context.ReportDiagnostic(
+                    Diagnostic.Create(
+                        Diagnostics.IncompatibleAssignment,
+                        operation.Syntax.GetLocation(),
+                        result,
+                        target));
+            }
         }
 
         internal void AnalyzeVariable(OperationAnalysisContext context)
@@ -99,11 +120,17 @@ public sealed class DimensionalAnalysisAnalyzer : DiagnosticAnalyzer
             if (operation.Initializer is null)
                 return;
 
-            QuantityValue target = GetSymbolQuantity(operation.Symbol);
-            QuantityValue value = Infer(operation.Initializer.Value);
+            var target = GetSymbolQuantity(operation.Symbol);
+            var value = Infer(operation.Initializer.Value);
             if (AreIncompatible(target, value))
-                context.ReportDiagnostic(Diagnostic.Create(Diagnostics.IncompatibleAssignment,
-                    operation.Initializer.Value.Syntax.GetLocation(), value, target));
+            {
+                context.ReportDiagnostic(
+                    Diagnostic.Create(
+                        Diagnostics.IncompatibleAssignment,
+                        operation.Initializer.Value.Syntax.GetLocation(),
+                        value,
+                        target));
+            }
         }
 
         internal void AnalyzeArgument(OperationAnalysisContext context)
@@ -112,11 +139,18 @@ public sealed class DimensionalAnalysisAnalyzer : DiagnosticAnalyzer
             if (operation.Parameter is null)
                 return;
 
-            QuantityValue expected = GetSymbolQuantity(operation.Parameter);
-            QuantityValue actual = Infer(operation.Value);
+            var expected = GetSymbolQuantity(operation.Parameter);
+            var actual = Infer(operation.Value);
             if (AreIncompatible(expected, actual))
-                context.ReportDiagnostic(Diagnostic.Create(Diagnostics.IncompatibleArgument,
-                    operation.Value.Syntax.GetLocation(), actual, operation.Parameter.Name, expected));
+            {
+                context.ReportDiagnostic(
+                    Diagnostic.Create(
+                        Diagnostics.IncompatibleArgument,
+                        operation.Value.Syntax.GetLocation(),
+                        actual,
+                        operation.Parameter.Name,
+                        expected));
+            }
         }
 
         internal void AnalyzeReturn(OperationAnalysisContext context)
@@ -125,11 +159,17 @@ public sealed class DimensionalAnalysisAnalyzer : DiagnosticAnalyzer
             if (operation.ReturnedValue is null || context.ContainingSymbol is not IMethodSymbol method)
                 return;
 
-            QuantityValue expected = GetMethodReturnQuantity(method);
-            QuantityValue actual = Infer(operation.ReturnedValue);
+            var expected = GetMethodReturnQuantity(method);
+            var actual = Infer(operation.ReturnedValue);
             if (AreIncompatible(expected, actual))
-                context.ReportDiagnostic(Diagnostic.Create(Diagnostics.IncompatibleReturn,
-                    operation.ReturnedValue.Syntax.GetLocation(), actual, expected));
+            {
+                context.ReportDiagnostic(
+                    Diagnostic.Create(
+                        Diagnostics.IncompatibleReturn,
+                        operation.ReturnedValue.Syntax.GetLocation(),
+                        actual,
+                        expected));
+            }
         }
 
         internal void AnalyzeInvocation(OperationAnalysisContext context)
@@ -138,12 +178,13 @@ public sealed class DimensionalAnalysisAnalyzer : DiagnosticAnalyzer
             if (!IsQuantityPreservingMath(operation.TargetMethod))
                 return;
 
-            QuantityValue expected = QuantityValue.Unknown;
-            foreach (IArgumentOperation argument in operation.Arguments)
+            var expected = QuantityValue.Unknown;
+            foreach (var argument in operation.Arguments)
             {
-                QuantityValue actual = Infer(argument.Value);
+                var actual = Infer(argument.Value);
                 if (!actual.IsKnown)
                     continue;
+
                 if (!expected.IsKnown)
                 {
                     expected = actual;
@@ -151,20 +192,33 @@ public sealed class DimensionalAnalysisAnalyzer : DiagnosticAnalyzer
                 }
 
                 if (AreIncompatible(expected, actual))
-                    context.ReportDiagnostic(Diagnostic.Create(Diagnostics.IncompatibleArgument,
-                        argument.Value.Syntax.GetLocation(), actual,
-                        argument.Parameter?.Name ?? "value", expected));
+                {
+                    context.ReportDiagnostic(
+                        Diagnostic.Create(
+                            Diagnostics.IncompatibleArgument,
+                            argument.Value.Syntax.GetLocation(),
+                            actual,
+                            argument.Parameter?.Name ?? "value",
+                            expected));
+                }
             }
         }
 
-        private void ReportAssignmentIfNeeded(OperationAnalysisContext context, IOperation targetOperation,
+        private void ReportAssignmentIfNeeded(
+            OperationAnalysisContext context, IOperation targetOperation,
             IOperation valueOperation, Location location)
         {
-            QuantityValue target = Infer(targetOperation);
-            QuantityValue value = Infer(valueOperation);
+            var target = Infer(targetOperation);
+            var value = Infer(valueOperation);
             if (AreIncompatible(target, value))
-                context.ReportDiagnostic(Diagnostic.Create(Diagnostics.IncompatibleAssignment,
-                    location, value, target));
+            {
+                context.ReportDiagnostic(
+                    Diagnostic.Create(
+                        Diagnostics.IncompatibleAssignment,
+                        location,
+                        value,
+                        target));
+            }
         }
 
         private QuantityValue Infer(IOperation? operation)
@@ -194,12 +248,16 @@ public sealed class DimensionalAnalysisAnalyzer : DiagnosticAnalyzer
                     return GetElementQuantity(arrayElement.ArrayReference);
                 case IInvocationOperation invocation:
                 {
-                    QuantityValue declared = GetMethodReturnQuantity(invocation.TargetMethod);
+                    var declared = GetMethodReturnQuantity(invocation.TargetMethod);
                     if (declared.IsKnown)
                         return declared;
+
                     if (IsQuantityPreservingMath(invocation.TargetMethod))
+                    {
                         return invocation.Arguments.Select(argument => Infer(argument.Value))
                             .FirstOrDefault(quantity => quantity.IsKnown);
+                    }
+
                     return QuantityValue.Unknown;
                 }
                 case IBinaryOperation binary:
@@ -219,14 +277,14 @@ public sealed class DimensionalAnalysisAnalyzer : DiagnosticAnalyzer
 
         private QuantityValue InferBinary(IBinaryOperation binary)
         {
-            QuantityValue left = Infer(binary.LeftOperand);
-            QuantityValue right = Infer(binary.RightOperand);
+            var left = Infer(binary.LeftOperand);
+            var right = Infer(binary.RightOperand);
             return binary.OperatorKind switch
             {
                 BinaryOperatorKind.Add or BinaryOperatorKind.Subtract => Merge(left, right),
                 BinaryOperatorKind.Multiply => left.Multiply(right),
                 BinaryOperatorKind.Divide => left.Divide(right),
-                _ => QuantityValue.Unknown,
+                _ => QuantityValue.Unknown
             };
         }
 
@@ -239,39 +297,43 @@ public sealed class DimensionalAnalysisAnalyzer : DiagnosticAnalyzer
                 IPropertyReferenceOperation property => property.Property,
                 IParameterReferenceOperation parameter => parameter.Parameter,
                 ILocalReferenceOperation local => local.Local,
-                _ => null,
+                _ => null
             };
+
             if (symbol is null)
                 return QuantityValue.Unknown;
 
-            QuantityValue attributed = GetAttributeQuantity(symbol, ElementQuantityAttributeName);
+            var attributed = GetAttributeQuantity(symbol, ElementQuantityAttributeName);
             return attributed.IsKnown ? attributed : GetSyntaxQuantity(symbol, true);
         }
 
         private QuantityValue GetSymbolQuantity(ISymbol symbol)
         {
-            QuantityValue attributed = GetAttributeQuantity(symbol, QuantityAttributeName);
+            var attributed = GetAttributeQuantity(symbol, QuantityAttributeName);
             return attributed.IsKnown ? attributed : GetSyntaxQuantity(symbol, false);
         }
 
         private QuantityValue GetMethodReturnQuantity(IMethodSymbol method)
         {
-            QuantityValue attributed = GetAttributeQuantity(method.GetReturnTypeAttributes(), QuantityAttributeName);
+            var attributed = GetAttributeQuantity(method.GetReturnTypeAttributes(), QuantityAttributeName);
             return attributed.IsKnown ? attributed : GetSyntaxQuantity(method, false);
         }
 
-        private QuantityValue GetAttributeQuantity(ISymbol symbol, string attributeName) =>
-            GetAttributeQuantity(symbol.GetAttributes(), attributeName);
+        private QuantityValue GetAttributeQuantity(ISymbol symbol, string attributeName)
+        {
+            return GetAttributeQuantity(symbol.GetAttributes(), attributeName);
+        }
 
         private QuantityValue GetAttributeQuantity(ImmutableArray<AttributeData> attributes, string attributeName)
         {
-            foreach (AttributeData attribute in attributes)
+            foreach (var attribute in attributes)
             {
                 if (attribute.AttributeClass?.ToDisplayString() != attributeName ||
                     attribute.ConstructorArguments.Length != 1 ||
                     attribute.ConstructorArguments[0].Value is not string id ||
-                    !_catalog.TryGetId(id, out QuantityDefinition definition))
+                    !_catalog.TryGetId(id, out var definition))
                     continue;
+
                 return QuantityValue.From(definition);
             }
 
@@ -280,91 +342,113 @@ public sealed class DimensionalAnalysisAnalyzer : DiagnosticAnalyzer
 
         private QuantityValue GetSyntaxQuantity(ISymbol symbol, bool element)
         {
-            foreach (SyntaxReference syntaxReference in symbol.DeclaringSyntaxReferences)
+            foreach (var syntaxReference in symbol.DeclaringSyntaxReferences)
             {
-                SyntaxNode syntax = syntaxReference.GetSyntax();
-                TypeSyntax? type = GetDeclaredType(syntax);
-                if (type is null)
-                    continue;
-                if (element)
-                    type = GetElementType(type);
+                var syntax = syntaxReference.GetSyntax();
+                var type = GetDeclaredType(syntax);
                 if (type is null)
                     continue;
 
-                SemanticModel semanticModel = _compilation.GetSemanticModel(type.SyntaxTree);
-                IAliasSymbol? alias = semanticModel.GetAliasInfo(type);
+                if (element)
+                    type = GetElementType(type);
+
+                if (type is null)
+                    continue;
+
+                var semanticModel = _compilation.GetSemanticModel(type.SyntaxTree);
+                var alias = semanticModel.GetAliasInfo(type);
                 string aliasName = alias?.Name ?? (type as IdentifierNameSyntax)?.Identifier.ValueText ?? string.Empty;
-                if (_catalog.TryGetAlias(aliasName, out QuantityDefinition definition))
+                if (_catalog.TryGetAlias(aliasName, out var definition))
                     return QuantityValue.From(definition);
             }
 
             return QuantityValue.Unknown;
         }
 
-        private static TypeSyntax? GetDeclaredType(SyntaxNode syntax) => syntax switch
+        private static TypeSyntax? GetDeclaredType(SyntaxNode syntax)
         {
-            ParameterSyntax parameter => parameter.Type,
-            VariableDeclaratorSyntax variable => (variable.Parent as VariableDeclarationSyntax)?.Type,
-            PropertyDeclarationSyntax property => property.Type,
-            IndexerDeclarationSyntax indexer => indexer.Type,
-            MethodDeclarationSyntax method => method.ReturnType,
-            LocalFunctionStatementSyntax localFunction => localFunction.ReturnType,
-            OperatorDeclarationSyntax @operator => @operator.ReturnType,
-            ConversionOperatorDeclarationSyntax conversion => conversion.Type,
-            _ => null,
-        };
+            return syntax switch
+            {
+                ParameterSyntax parameter => parameter.Type,
+                VariableDeclaratorSyntax variable => (variable.Parent as VariableDeclarationSyntax)?.Type,
+                PropertyDeclarationSyntax property => property.Type,
+                IndexerDeclarationSyntax indexer => indexer.Type,
+                MethodDeclarationSyntax method => method.ReturnType,
+                LocalFunctionStatementSyntax localFunction => localFunction.ReturnType,
+                OperatorDeclarationSyntax @operator => @operator.ReturnType,
+                ConversionOperatorDeclarationSyntax conversion => conversion.Type,
+                _ => null
+            };
+        }
 
-        private static TypeSyntax? GetElementType(TypeSyntax type) => type switch
+        private static TypeSyntax? GetElementType(TypeSyntax type)
         {
-            ArrayTypeSyntax array => array.ElementType,
-            GenericNameSyntax generic when generic.TypeArgumentList.Arguments.Count > 0 =>
-                generic.TypeArgumentList.Arguments[generic.TypeArgumentList.Arguments.Count - 1],
-            QualifiedNameSyntax { Right: GenericNameSyntax generic } when
-                generic.TypeArgumentList.Arguments.Count > 0 =>
-                generic.TypeArgumentList.Arguments[generic.TypeArgumentList.Arguments.Count - 1],
-            _ => null,
-        };
+            return type switch
+            {
+                ArrayTypeSyntax array => array.ElementType,
+                GenericNameSyntax generic when generic.TypeArgumentList.Arguments.Count > 0 =>
+                    generic.TypeArgumentList.Arguments[generic.TypeArgumentList.Arguments.Count - 1],
+                QualifiedNameSyntax { Right: GenericNameSyntax generic } when
+                    generic.TypeArgumentList.Arguments.Count > 0 =>
+                    generic.TypeArgumentList.Arguments[generic.TypeArgumentList.Arguments.Count - 1],
+                _ => null
+            };
+        }
 
         private static IOperation? Unwrap(IOperation? operation)
         {
             while (operation is IConversionOperation conversion)
                 operation = conversion.Operand;
+
             return operation;
         }
 
-        private static bool RequiresEqualOperands(BinaryOperatorKind kind) => kind is
-            BinaryOperatorKind.Add or BinaryOperatorKind.Subtract or
-            BinaryOperatorKind.Equals or BinaryOperatorKind.NotEquals or
-            BinaryOperatorKind.LessThan or BinaryOperatorKind.LessThanOrEqual or
-            BinaryOperatorKind.GreaterThan or BinaryOperatorKind.GreaterThanOrEqual;
+        private static bool RequiresEqualOperands(BinaryOperatorKind kind)
+        {
+            return kind is
+                BinaryOperatorKind.Add
+                or BinaryOperatorKind.Subtract
+                or BinaryOperatorKind.Equals
+                or BinaryOperatorKind.NotEquals
+                or BinaryOperatorKind.LessThan
+                or BinaryOperatorKind.LessThanOrEqual
+                or BinaryOperatorKind.GreaterThan
+                or BinaryOperatorKind.GreaterThanOrEqual;
+        }
 
         private static bool IsQuantityPreservingMath(IMethodSymbol method)
         {
             string containingType = method.ContainingType.ToDisplayString();
             if (containingType is not ("System.Math" or "System.MathF"))
                 return false;
-            return method.Name is "Abs" or "Clamp" or "CopySign" or "Max" or "MaxMagnitude" or
-                "Min" or "MinMagnitude";
+
+            return method.Name is "Abs" or "Clamp" or "CopySign" or "Max" or "MaxMagnitude" or "Min" or "MinMagnitude";
         }
 
         private static string GetOperatorText(IBinaryOperation operation)
         {
             if (operation.Syntax is BinaryExpressionSyntax binary)
                 return binary.OperatorToken.Text;
+
             return operation.OperatorKind.ToString();
         }
 
-        private static bool AreIncompatible(QuantityValue left, QuantityValue right) =>
-            left.IsKnown && right.IsKnown && !left.Dimensions!.Equals(right.Dimensions);
+        private static bool AreIncompatible(QuantityValue left, QuantityValue right)
+        {
+            return left.IsKnown && right.IsKnown && !left.Dimensions!.Equals(right.Dimensions);
+        }
 
         private static QuantityValue Merge(QuantityValue left, QuantityValue right)
         {
             if (left.IsLiteralScalar)
                 return right;
+
             if (right.IsLiteralScalar)
                 return left;
+
             if (!left.IsKnown || !right.IsKnown)
                 return QuantityValue.Unknown;
+
             return left.Dimensions!.Equals(right.Dimensions) ? left : QuantityValue.Unknown;
         }
     }
@@ -383,16 +467,22 @@ public sealed class DimensionalAnalysisAnalyzer : DiagnosticAnalyzer
         internal bool IsKnown => Dimensions is not null;
         internal bool IsLiteralScalar { get; }
 
-        internal static QuantityValue From(QuantityDefinition definition) => new(definition.Dimensions);
+        internal static QuantityValue From(QuantityDefinition definition)
+        {
+            return new QuantityValue(definition.Dimensions);
+        }
 
         internal QuantityValue Multiply(QuantityValue other)
         {
             if (IsLiteralScalar)
                 return other;
+
             if (other.IsLiteralScalar)
                 return this;
+
             if (!IsKnown || !other.IsKnown)
                 return Unknown;
+
             return new QuantityValue(Dimensions!.Multiply(other.Dimensions!));
         }
 
@@ -400,14 +490,20 @@ public sealed class DimensionalAnalysisAnalyzer : DiagnosticAnalyzer
         {
             if (IsLiteralScalar)
                 return other.IsKnown ? new QuantityValue(other.Dimensions!.Invert()) : other;
+
             if (other.IsLiteralScalar)
                 return this;
+
             if (!IsKnown || !other.IsKnown)
                 return Unknown;
+
             return new QuantityValue(Dimensions!.Divide(other.Dimensions!));
         }
 
-        public override string ToString() => Dimensions?.ToString() ??
-                                             (IsLiteralScalar ? "numeric literal" : "unannotated scalar");
+        public override string ToString()
+        {
+            return Dimensions?.ToString() ??
+                   (IsLiteralScalar ? "numeric literal" : "unannotated scalar");
+        }
     }
 }

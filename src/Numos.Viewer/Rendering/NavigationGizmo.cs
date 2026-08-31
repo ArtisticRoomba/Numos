@@ -24,11 +24,13 @@ public static class NavigationGizmo
         var forward = camera.Target - camera.Position;
         if (forward.LengthSquared() < 0.0001f)
             forward = -Vector3.UnitZ;
+
         forward = Vector3.Normalize(forward);
 
         var right = Vector3.Cross(forward, camera.Up);
         if (right.LengthSquared() < 0.0001f)
             right = Vector3.Cross(forward, Vector3.UnitZ);
+
         right = Vector3.Normalize(right);
         var up = Vector3.Normalize(Vector3.Cross(right, forward));
 

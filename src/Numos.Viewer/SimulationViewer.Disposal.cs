@@ -7,6 +7,16 @@ public partial class SimulationViewer
 {
     private bool _disposed;
 
+    public void Dispose()
+    {
+        if (_disposed)
+            return;
+
+        _disposed = true;
+        DisposeGraphics();
+        DisposeSimulationProject();
+    }
+
     private void DisposeGraphics()
     {
         _viewport?.Dispose();
@@ -33,15 +43,5 @@ public partial class SimulationViewer
             Raylib.CloseWindow();
             _windowInitialized = false;
         }
-    }
-
-    public void Dispose()
-    {
-        if (_disposed)
-            return;
-
-        _disposed = true;
-        DisposeGraphics();
-        DisposeSimulationProject();
     }
 }

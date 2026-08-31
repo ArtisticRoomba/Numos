@@ -23,7 +23,8 @@ public sealed class SimulationFrameBuilder
         Visualizations = visualizations ?? VisualizationRegistry.CreateDefault(config);
         if (Visualizations.Methods.Count == 0)
         {
-            throw new ArgumentException("At least one visualization method must be registered.",
+            throw new ArgumentException(
+                "At least one visualization method must be registered.",
                 nameof(visualizations));
         }
     }
@@ -42,10 +43,13 @@ public sealed class SimulationFrameBuilder
         var fields = AtmosChunkSnapshotFields.VoxelClassification;
         if ((visualization.RequiredData & VisualizationDataRequirements.Temperature) != 0)
             fields |= AtmosChunkSnapshotFields.Temperature;
+
         if ((visualization.RequiredData & VisualizationDataRequirements.Pressure) != 0)
             fields |= AtmosChunkSnapshotFields.Pressure;
+
         if ((visualization.RequiredData & VisualizationDataRequirements.Gases) != 0)
             fields |= AtmosChunkSnapshotFields.Gases;
+
         return fields;
     }
 
@@ -67,7 +71,9 @@ public sealed class SimulationFrameBuilder
         VisualizationRange? rangeOverride = null)
     {
         ArgumentNullException.ThrowIfNull(snapshots);
-        var snapshotList = snapshots as IReadOnlyCollection<AtmosChunkSnapshot> ?? snapshots.ToArray();
+        IReadOnlyCollection<AtmosChunkSnapshot> snapshotList =
+            snapshots as IReadOnlyCollection<AtmosChunkSnapshot> ?? snapshots.ToArray();
+
         var visualization = Visualizations.GetRequired(visualizationId);
         ulong visualizationMappingRevision = visualization.MappingRevision;
         var range = GetVisualizationRange(
@@ -76,6 +82,7 @@ public sealed class SimulationFrameBuilder
             resolution,
             automaticRangeOffset,
             rangeOverride);
+
         bool rangeChanged = previousFrame == null || previousFrame.Visualization.Range != range;
         var chunks = new Dictionary<Int3, ChunkDrawData>();
         var seenPositions = new HashSet<Int3>();
@@ -95,11 +102,14 @@ public sealed class SimulationFrameBuilder
                 // may not even have been copied for the newly selected visualization.
                 if (TryRetainChunk(previousFrame, snapshot.GridPosition, identity, out var retainedChunk))
                     chunks.Add(snapshot.GridPosition, retainedChunk);
+
                 continue;
             }
 
             AddGasIds(snapshot, activeGasIds);
-            if (!forceRemap && !rangeChanged && CanReuse(
+            if (!forceRemap &&
+                !rangeChanged &&
+                CanReuse(
                     previousFrame,
                     visualizationId,
                     visualizationMappingRevision,
@@ -165,6 +175,7 @@ public sealed class SimulationFrameBuilder
         {
             if ((requirements & VisualizationDataRequirements.Temperature) != 0)
                 IncludeFiniteRange(snapshot.Temperature, ref minimum, ref maximum);
+
             if ((requirements & VisualizationDataRequirements.Pressure) != 0)
                 IncludeFiniteRange(snapshot.TotalPressure, ref minimum, ref maximum);
         }
@@ -175,6 +186,7 @@ public sealed class SimulationFrameBuilder
         float offset = float.IsFinite(automaticRangeOffset)
             ? Math.Max(automaticRangeOffset, 0f)
             : 0f;
+
         return new VisualizationRange(minimum - offset, maximum + offset, safeResolution);
     }
 
@@ -187,6 +199,7 @@ public sealed class SimulationFrameBuilder
         {
             if (!float.IsFinite(value))
                 continue;
+
             minimum = Math.Min(minimum, value);
             maximum = Math.Max(maximum, value);
         }
@@ -208,11 +221,11 @@ public sealed class SimulationFrameBuilder
         int clampedIndex = ClampSliceIndex(chunk.Dimensions, axis, sliceIndex);
         (int width, int height) = GetSliceDimensions(chunk.Dimensions, axis);
         var cells = new List<SliceCellDrawData>(Math.Min(width * height, chunk.VisibleCellCount));
-        var lookup = new int[checked(width * height)];
+        int[] lookup = new int[checked(width * height)];
 
-        for (var v = 0; v < height; v++)
+        for (int v = 0; v < height; v++)
         {
-            for (var u = 0; u < width; u++)
+            for (int u = 0; u < width; u++)
             {
                 (int x, int y, int z) = MapSliceToLocal(axis, clampedIndex, u, v);
                 ushort localIndex = chunk.GetLocalIndex(x, y, z);
@@ -225,6 +238,7 @@ public sealed class SimulationFrameBuilder
                     v,
                     new VoxelAddress(chunk.Identity, localIndex),
                     voxel);
+
                 cells.Add(sliceCell);
                 lookup[u + width * v] = cells.Count;
             }
@@ -296,26 +310,30 @@ public sealed class SimulationFrameBuilder
         topologyHash.Add(snapshot.Dimensions.Z);
         styleHash.Add(visualization.Id);
 
-        var visibleCount = 0;
+        int visibleCount = 0;
         bool summarizeGases = (visualization.RequiredData & VisualizationDataRequirements.Gases) != 0;
-        for (var index = 0; index < voxelCount; index++)
+        for (int index = 0; index < voxelCount; index++)
         {
-            var localIndex = checked((ushort)index);
+            ushort localIndex = checked((ushort)index);
             int roomId = snapshot.VoxelRoomMap[index];
             bool canContainAir = roomId != VoxelClassification.RoomVoid &&
                                  roomId != VoxelClassification.RoomSolid;
+
             bool isInVisualizationDomain = canContainAir ||
                                            visualization.CellDomain == VisualizationCellDomain.AllCells;
 
             (float totalMoles, int primaryGasId) = summarizeGases
                 ? GetGasSummary(snapshot.Gases, localIndex)
                 : (0f, -1);
+
             float temperature = snapshot.Temperature.Length == voxelCount
                 ? snapshot.Temperature[index]
                 : float.NaN;
+
             float pressure = snapshot.TotalPressure.Length == voxelCount
                 ? snapshot.TotalPressure[index]
                 : float.NaN;
+
             var sample = new VoxelSample(
                 localIndex,
                 roomId,
@@ -324,12 +342,14 @@ public sealed class SimulationFrameBuilder
                 totalMoles,
                 primaryGasId,
                 new VoxelGasData(snapshot.Gases, localIndex));
+
             sample = sample with { Range = range };
 
             var color = default(ColorRgba);
             bool visible = isInVisualizationDomain && visualization.TryGetColor(sample, out color);
             if (visible)
                 color = ToOpaqueFiniteColor(color);
+
             cells[index] = new VoxelDrawData(
                 visible,
                 VoxelFaceMask.None,
@@ -373,8 +393,8 @@ public sealed class SimulationFrameBuilder
         // self-contained and can be focused or hidden without remeshing its neighbors. Only
         // intra-chunk faces are removed here; a future seam-occlusion pass can suppress boundary
         // overdraw at draw time without changing this focus contract.
-        var surfaceFaceCount = 0;
-        for (var index = 0; index < cells.Length; index++)
+        int surfaceFaceCount = 0;
+        for (int index = 0; index < cells.Length; index++)
         {
             if (!cells[index].IsVisible)
                 continue;
@@ -387,16 +407,20 @@ public sealed class SimulationFrameBuilder
 
             if (x == 0 || !cells[index - 1].IsVisible)
                 mask |= VoxelFaceMask.NegativeX;
+
             if (x == dimensions.X - 1 || !cells[index + 1].IsVisible)
                 mask |= VoxelFaceMask.PositiveX;
+
             if (y == 0 || !cells[index - dimensions.X].IsVisible)
                 mask |= VoxelFaceMask.NegativeY;
+
             if (y == dimensions.Y - 1 || !cells[index + dimensions.X].IsVisible)
                 mask |= VoxelFaceMask.PositiveY;
 
             int xyStride = dimensions.X * dimensions.Y;
             if (z == 0 || !cells[index - xyStride].IsVisible)
                 mask |= VoxelFaceMask.NegativeZ;
+
             if (z == dimensions.Z - 1 || !cells[index + xyStride].IsVisible)
                 mask |= VoxelFaceMask.PositiveZ;
 
@@ -473,7 +497,8 @@ public sealed class SimulationFrameBuilder
         int voxelCount = checked(snapshot.Dimensions.X * snapshot.Dimensions.Y * snapshot.Dimensions.Z);
         if (voxelCount > ushort.MaxValue)
         {
-            throw new ArgumentException("Snapshot voxel count exceeds the supported ushort index range.",
+            throw new ArgumentException(
+                "Snapshot voxel count exceeds the supported ushort index range.",
                 nameof(snapshot));
         }
 
@@ -486,6 +511,7 @@ public sealed class SimulationFrameBuilder
         if ((requirements & VisualizationDataRequirements.Pressure) != 0 &&
             snapshot.TotalPressure.Length != voxelCount)
             throw new ArgumentException("The visualization requires a complete pressure field.", nameof(snapshot));
+
         if ((requirements & VisualizationDataRequirements.Temperature) != 0 &&
             snapshot.Temperature.Length != voxelCount)
             throw new ArgumentException("The visualization requires a complete temperature field.", nameof(snapshot));
@@ -518,8 +544,8 @@ public sealed class SimulationFrameBuilder
         GasSnapshot[] gases,
         ushort localIndex)
     {
-        var totalMoles = 0f;
-        var maximumMoles = 0f;
+        float totalMoles = 0f;
+        float maximumMoles = 0f;
         int primaryGasId = -1;
 
         foreach (var gas in gases)
@@ -574,7 +600,7 @@ public sealed class SimulationFrameBuilder
     private static int CountFaces(VoxelFaceMask mask)
     {
         int value = (byte)mask;
-        var count = 0;
+        int count = 0;
         while (value != 0)
         {
             count += value & 1;
@@ -617,7 +643,7 @@ public sealed class SimulationFrameBuilder
         public void Add(ulong value)
         {
             EnsureInitialized();
-            for (var shift = 0; shift < 64; shift += 8)
+            for (int shift = 0; shift < 64; shift += 8)
             {
                 _value ^= (byte)(value >> shift);
                 _value *= Prime;
@@ -627,7 +653,7 @@ public sealed class SimulationFrameBuilder
         public void Add(uint value)
         {
             EnsureInitialized();
-            for (var shift = 0; shift < 32; shift += 8)
+            for (int shift = 0; shift < 32; shift += 8)
             {
                 _value ^= (byte)(value >> shift);
                 _value *= Prime;

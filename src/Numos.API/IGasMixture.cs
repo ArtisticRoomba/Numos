@@ -97,11 +97,12 @@ public readonly record struct GasMixtureSnapshot(
     public float GetMoles(int gasId)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(gasId);
-        var gases = Gases ?? [];
-        for (var index = 0; index < gases.Length; index++)
+        GasMixtureGas[] gases = Gases ?? [];
+        for (int index = 0; index < gases.Length; index++)
         {
             if (gases[index].GasId == gasId)
                 return gases[index].Moles;
+
             if (gases[index].GasId > gasId)
                 break;
         }

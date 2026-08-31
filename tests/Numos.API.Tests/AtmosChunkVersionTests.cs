@@ -77,6 +77,7 @@ public sealed class AtmosChunkVersionTests
         var second = simulation.CreateAndRegisterChunk(new Int3(1, 0, 0));
         var fields =
             AtmosChunkSnapshotFields.Temperature | AtmosChunkSnapshotFields.VoxelClassification;
+
         AtmosChunkSnapshotRequest[] requests =
         [
             new(first.Position, default, fields),
@@ -186,14 +187,16 @@ public sealed class AtmosChunkVersionTests
         var first = simulation.CreateAndRegisterChunk(new Int3(2, 0, 0));
         var second = simulation.CreateAndRegisterChunk(new Int3(-1, 0, 0));
 
-        var before = simulation.GetChunkHandles();
+        AtmosChunkHandle[] before = simulation.GetChunkHandles();
         simulation.UnregisterChunk(first);
-        var after = simulation.GetChunkHandles();
+        AtmosChunkHandle[] after = simulation.GetChunkHandles();
 
         Assert.Multiple(() =>
         {
-            Assert.That(before.Select(handle => handle.Position),
+            Assert.That(
+                before.Select(handle => handle.Position),
                 Is.EqualTo(new[] { second.Position, first.Position }));
+
             Assert.That(after.Select(handle => handle.Position), Is.EqualTo(new[] { second.Position }));
         });
     }
@@ -204,8 +207,8 @@ public sealed class AtmosChunkVersionTests
         using var simulation = new AtmosSimulation(1, 1, 1);
         simulation.CreateAndRegisterChunk(default);
 
-        bool firstCreated = simulation.TryGetChunkHandles(-1, out long revision, out var first);
-        bool secondCreated = simulation.TryGetChunkHandles(revision, out long unchangedRevision, out var second);
+        bool firstCreated = simulation.TryGetChunkHandles(-1, out long revision, out AtmosChunkHandle[] first);
+        bool secondCreated = simulation.TryGetChunkHandles(revision, out long unchangedRevision, out AtmosChunkHandle[] second);
 
         Assert.Multiple(() =>
         {
@@ -226,7 +229,7 @@ public sealed class AtmosChunkVersionTests
 
         simulation.UnregisterChunk(original);
         simulation.CreateAndRegisterChunk(default);
-        bool changed = simulation.TryGetChunkHandles(firstRevision, out long secondRevision, out var handles);
+        bool changed = simulation.TryGetChunkHandles(firstRevision, out long secondRevision, out AtmosChunkHandle[] handles);
 
         Assert.Multiple(() =>
         {
@@ -270,6 +273,7 @@ public sealed class AtmosChunkVersionTests
             ThermalConductance = 0.1f,
             VacuumThreshold = 0.1f
         };
+
         using var simulation = new AtmosSimulation(config, 1, 1, 1);
         var hot = simulation.CreateAndRegisterChunk(new Int3(0, 0, 0));
         var cold = simulation.CreateAndRegisterChunk(new Int3(1, 0, 0));

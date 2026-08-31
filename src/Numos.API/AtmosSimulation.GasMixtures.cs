@@ -166,7 +166,7 @@ public sealed partial class AtmosSimulation
         lock (_mixtureGate)
         {
             ThrowIfDisposed();
-            GasMixtureState state = mixture.State;
+            var state = mixture.State;
             float previousVolume = state.Volume;
             state.Volume = volume;
             try
@@ -199,6 +199,7 @@ public sealed partial class AtmosSimulation
                     voxel.ChunkGeneration,
                     voxel.LocalVoxelIndex,
                     temperature);
+
                 return;
             }
 
@@ -227,6 +228,7 @@ public sealed partial class AtmosSimulation
                     voxel.LocalVoxelIndex,
                     gasId,
                     moles);
+
                 return;
             }
 
@@ -248,6 +250,7 @@ public sealed partial class AtmosSimulation
                 float adjusted = owned.State.Moles.GetValueOrDefault(gasId) + deltaMoles;
                 if (!float.IsFinite(adjusted))
                     throw new InvalidOperationException("The adjusted gas amount exceeds the supported range.");
+
                 SetOwnedMixtureMoles(owned.State, gasId, MathF.Max(0f, adjusted));
                 return;
             }
@@ -260,6 +263,7 @@ public sealed partial class AtmosSimulation
                     voxel.LocalVoxelIndex,
                     gasId,
                     deltaMoles);
+
                 return;
             }
 
@@ -291,6 +295,7 @@ public sealed partial class AtmosSimulation
                     gasId,
                     moles,
                     temperature);
+
                 return;
             }
 
@@ -315,6 +320,7 @@ public sealed partial class AtmosSimulation
                     voxel.ChunkPosition,
                     voxel.ChunkGeneration,
                     voxel.LocalVoxelIndex);
+
                 return;
             }
 
@@ -325,44 +331,50 @@ public sealed partial class AtmosSimulation
     internal GasMixture RemoveFromMixture(IInternalGasMixture mixture, float moles)
     {
         ValidateNonnegativeFinite(moles, nameof(moles));
-        return ExecuteMixtureTransaction(mixture is VoxelGasMixture, () =>
-        {
-            var source = CaptureMixtureState(mixture);
-            float totalMoles = source.TotalMoles;
-            float ratio = totalMoles > 0f ? MathF.Min(1f, moles / totalMoles) : 0f;
-            return RemoveRatioCore(mixture, source, ratio);
-        });
+        return ExecuteMixtureTransaction(
+            mixture is VoxelGasMixture,
+            () =>
+            {
+                var source = CaptureMixtureState(mixture);
+                float totalMoles = source.TotalMoles;
+                float ratio = totalMoles > 0f ? MathF.Min(1f, moles / totalMoles) : 0f;
+                return RemoveRatioCore(mixture, source, ratio);
+            });
     }
 
     internal GasMixture RemoveRatioFromMixture(IInternalGasMixture mixture, float ratio)
     {
         ValidateFinite(ratio, nameof(ratio));
-        return ExecuteMixtureTransaction(mixture is VoxelGasMixture, () =>
-        {
-            return RemoveRatioCore(mixture, CaptureMixtureState(mixture), Math.Clamp(ratio, 0f, 1f));
-        });
+        return ExecuteMixtureTransaction(
+            mixture is VoxelGasMixture,
+            () => { return RemoveRatioCore(mixture, CaptureMixtureState(mixture), Math.Clamp(ratio, 0f, 1f)); });
     }
 
     internal GasMixture RemoveVolumeFromMixture(IInternalGasMixture mixture, float volume)
     {
         ValidateNonnegativeFinite(volume, nameof(volume));
-        return ExecuteMixtureTransaction(mixture is VoxelGasMixture, () =>
-        {
-            var source = CaptureMixtureState(mixture);
-            float ratio = Math.Clamp(volume / source.Volume, 0f, 1f);
-            return RemoveRatioCore(mixture, source, ratio);
-        });
+        return ExecuteMixtureTransaction(
+            mixture is VoxelGasMixture,
+            () =>
+            {
+                var source = CaptureMixtureState(mixture);
+                float ratio = Math.Clamp(volume / source.Volume, 0f, 1f);
+                return RemoveRatioCore(mixture, source, ratio);
+            });
     }
 
     internal float TransferMixture(IInternalGasMixture source, IGasMixture destination, float moles)
     {
         ValidateNonnegativeFinite(moles, nameof(moles));
         var internalDestination = GetOwnedMixture(destination, nameof(destination));
-        return ExecuteTransfer(source, internalDestination, state =>
-        {
-            float totalMoles = state.TotalMoles;
-            return totalMoles > 0f ? MathF.Min(1f, moles / totalMoles) : 0f;
-        });
+        return ExecuteTransfer(
+            source,
+            internalDestination,
+            state =>
+            {
+                float totalMoles = state.TotalMoles;
+                return totalMoles > 0f ? MathF.Min(1f, moles / totalMoles) : 0f;
+            });
     }
 
     internal float TransferMixtureRatio(IInternalGasMixture source, IGasMixture destination, float ratio)
@@ -374,29 +386,30 @@ public sealed partial class AtmosSimulation
 
     internal GasMixture CloneMixture(IInternalGasMixture mixture)
     {
-        return ExecuteMixtureTransaction(mixture is VoxelGasMixture, () =>
-        {
-            return new GasMixture(this, CaptureMixtureState(mixture));
-        });
+        return ExecuteMixtureTransaction(
+            mixture is VoxelGasMixture,
+            () => { return new GasMixture(this, CaptureMixtureState(mixture)); });
     }
 
     internal GasMixtureSnapshot GetMixtureSnapshot(IInternalGasMixture mixture)
     {
-        return ExecuteMixtureTransaction(mixture is VoxelGasMixture, () =>
-        {
-            var state = CaptureMixtureState(mixture);
-            var gases = new GasMixtureGas[state.ActiveGasCount];
-            var index = 0;
-            foreach (var (gasId, moles) in state.Moles)
-                gases[index++] = new GasMixtureGas(gasId, moles);
+        return ExecuteMixtureTransaction(
+            mixture is VoxelGasMixture,
+            () =>
+            {
+                var state = CaptureMixtureState(mixture);
+                var gases = new GasMixtureGas[state.ActiveGasCount];
+                int index = 0;
+                foreach ((int gasId, float moles) in state.Moles)
+                    gases[index++] = new GasMixtureGas(gasId, moles);
 
-            return new GasMixtureSnapshot(
-                state.Volume,
-                state.Temperature,
-                CalculateMixturePressure(state),
-                state.TotalMoles,
-                gases);
-        });
+                return new GasMixtureSnapshot(
+                    state.Volume,
+                    state.Temperature,
+                    CalculateMixturePressure(state),
+                    state.TotalMoles,
+                    gases);
+            });
     }
 
     private GasMixture RemoveRatioCore(IInternalGasMixture mixture, GasMixtureState source, float ratio)
@@ -406,12 +419,13 @@ public sealed partial class AtmosSimulation
             return new GasMixture(this, removed);
 
         ValidateMixtureCanMutate(mixture);
-        foreach (var (gasId, sourceMoles) in source.Moles.ToArray())
+        foreach ((int gasId, float sourceMoles) in source.Moles.ToArray())
         {
             float removedMoles = sourceMoles * ratio;
             float remainingMoles = sourceMoles - removedMoles;
             if (removedMoles > 0f)
                 removed.Moles.Add(gasId, removedMoles);
+
             SetStateMoles(source, gasId, remainingMoles);
         }
 
@@ -430,24 +444,26 @@ public sealed partial class AtmosSimulation
             return 0f;
 
         bool usesVoxel = source is VoxelGasMixture || destination is VoxelGasMixture;
-        return ExecuteMixtureTransaction(usesVoxel, () =>
-        {
-            var sourceState = CaptureMixtureState(source);
-            float ratio = getRatio(sourceState);
-            if (ratio <= 0f || sourceState.ActiveGasCount == 0)
-                return 0f;
+        return ExecuteMixtureTransaction(
+            usesVoxel,
+            () =>
+            {
+                var sourceState = CaptureMixtureState(source);
+                float ratio = getRatio(sourceState);
+                if (ratio <= 0f || sourceState.ActiveGasCount == 0)
+                    return 0f;
 
-            ValidateMixturesCanMutate(source, destination);
-            var destinationState = CaptureMixtureState(destination);
-            var removed = RemoveRatioFromState(sourceState, ratio);
-            MergeStates(destinationState, removed);
-            ValidateState(sourceState);
-            ValidateState(destinationState);
+                ValidateMixturesCanMutate(source, destination);
+                var destinationState = CaptureMixtureState(destination);
+                var removed = RemoveRatioFromState(sourceState, ratio);
+                MergeStates(destinationState, removed);
+                ValidateState(sourceState);
+                ValidateState(destinationState);
 
-            ApplyMixtureState(source, sourceState);
-            ApplyMixtureState(destination, destinationState);
-            return removed.TotalMoles;
-        });
+                ApplyMixtureState(source, sourceState);
+                ApplyMixtureState(destination, destinationState);
+                return removed.TotalMoles;
+            });
     }
 
     private TResult ExecuteMixtureTransaction<TResult>(bool usesVoxel, Func<TResult> transaction)
@@ -475,9 +491,11 @@ public sealed partial class AtmosSimulation
                 voxel.ChunkPosition,
                 voxel.ChunkGeneration,
                 voxel.LocalVoxelIndex);
+
             var state = new GasMixtureState(voxelState.Volume, voxelState.Temperature);
-            foreach (var (gasId, moles) in voxelState.Gases)
+            foreach ((int gasId, float moles) in voxelState.Gases)
                 state.Moles.Add(gasId, moles);
+
             return state;
         }
 
@@ -500,6 +518,7 @@ public sealed partial class AtmosSimulation
                 voxel.LocalVoxelIndex,
                 state.Temperature,
                 state.ToGasArray());
+
             return;
         }
 
@@ -510,6 +529,7 @@ public sealed partial class AtmosSimulation
     {
         if (mixture is not VoxelGasMixture voxel)
             return;
+
         _kernel.ValidateVoxelMixtureMutations([GetVoxelAddress(voxel)]);
     }
 
@@ -519,8 +539,7 @@ public sealed partial class AtmosSimulation
     {
         if (first is VoxelGasMixture firstVoxel && second is VoxelGasMixture secondVoxel)
         {
-            _kernel.ValidateVoxelMixtureMutations(
-                [GetVoxelAddress(firstVoxel), GetVoxelAddress(secondVoxel)]);
+            _kernel.ValidateVoxelMixtureMutations([GetVoxelAddress(firstVoxel), GetVoxelAddress(secondVoxel)]);
             return;
         }
 
@@ -550,6 +569,7 @@ public sealed partial class AtmosSimulation
                 state.Moles[gasId] = previousMoles;
             else
                 state.Moles.Remove(gasId);
+
             throw;
         }
     }
@@ -587,6 +607,7 @@ public sealed partial class AtmosSimulation
                 state.Moles[gasId] = previousMoles;
             else
                 state.Moles.Remove(gasId);
+
             state.Temperature = previousTemperature;
             throw;
         }
@@ -610,26 +631,30 @@ public sealed partial class AtmosSimulation
               (incomingTemperature - destinationTemperature) * incomingHeatCapacity / combinedHeatCapacity
             : incoming.Temperature;
 
-        foreach (var (gasId, incomingMoles) in incoming.Moles)
+        foreach ((int gasId, float incomingMoles) in incoming.Moles)
         {
             float combinedMoles = destination.Moles.GetValueOrDefault(gasId) + incomingMoles;
             if (!float.IsFinite(combinedMoles))
                 throw new InvalidOperationException("A merged gas amount exceeds the supported range.");
+
             destination.Moles[gasId] = combinedMoles;
         }
 
         if (!float.IsFinite(mixedTemperature) || mixedTemperature < 0f)
             throw new InvalidOperationException("The merged mixture temperature is outside the supported range.");
+
         destination.Temperature = mixedTemperature;
     }
 
     private float CalculateMixtureHeatCapacity(GasMixtureState state)
     {
-        var total = 0f;
-        foreach (var (gasId, moles) in state.Moles)
+        float total = 0f;
+        foreach ((int gasId, float moles) in state.Moles)
             total += moles * GetMolarHeatCapacityAtConstantVolume(gasId);
+
         if (!float.IsFinite(total))
             throw new InvalidOperationException("The mixture's heat capacity exceeds the supported range.");
+
         return total;
     }
 
@@ -639,7 +664,7 @@ public sealed partial class AtmosSimulation
         if (!float.IsFinite(fallback) || fallback <= 0f)
             fallback = AtmosConfigDefaults.DefaultMolarHeatCapacityAtConstantVolume;
 
-        var registry = Config.GasRegistry;
+        List<GasProperties> registry = Config.GasRegistry;
         if ((uint)gasId < (uint)registry.Count)
         {
             float configured = registry[gasId].MolarHeatCapacityAtConstantVolume;
@@ -654,6 +679,7 @@ public sealed partial class AtmosSimulation
     {
         if (float.IsFinite(temperature) && temperature > 0f)
             return temperature;
+
         float fallback = Config.DefaultTemperatureFallback;
         return float.IsFinite(fallback) && fallback > 0f
             ? fallback
@@ -665,7 +691,10 @@ public sealed partial class AtmosSimulation
         float totalMoles = state.TotalMoles;
         if (totalMoles <= 0f)
             return 0f;
-        return totalMoles / state.Volume * AtmosPhysicalConstants.MolarGasConstant *
+
+        return totalMoles /
+               state.Volume *
+               AtmosPhysicalConstants.MolarGasConstant *
                GetEffectiveMixtureTemperature(state.Temperature);
     }
 
@@ -673,12 +702,13 @@ public sealed partial class AtmosSimulation
     {
         ratio = Math.Clamp(ratio, 0f, 1f);
         var removed = new GasMixtureState(source.Volume, source.Temperature);
-        foreach (var (gasId, sourceMoles) in source.Moles.ToArray())
+        foreach ((int gasId, float sourceMoles) in source.Moles.ToArray())
         {
             float removedMoles = sourceMoles * ratio;
             float remainingMoles = sourceMoles - removedMoles;
             if (removedMoles > 0f)
                 removed.Moles.Add(gasId, removedMoles);
+
             SetStateMoles(source, gasId, remainingMoles);
         }
 
@@ -696,8 +726,8 @@ public sealed partial class AtmosSimulation
     private void ValidateState(GasMixtureState state)
     {
         ValidateVolume(state.Volume);
-        var total = 0f;
-        foreach (var (gasId, moles) in state.Moles)
+        float total = 0f;
+        foreach ((int gasId, float moles) in state.Moles)
         {
             ValidateGasId(gasId);
             ValidatePositiveFinite(moles, nameof(state));
@@ -709,8 +739,11 @@ public sealed partial class AtmosSimulation
 
         CalculateMixtureHeatCapacity(state);
 
-        float pressure = total / state.Volume * AtmosPhysicalConstants.MolarGasConstant *
+        float pressure = total /
+                         state.Volume *
+                         AtmosPhysicalConstants.MolarGasConstant *
                          GetEffectiveMixtureTemperature(state.Temperature);
+
         if (!float.IsFinite(pressure))
             throw new InvalidOperationException("The mixture's pressure exceeds the supported range.");
     }
@@ -720,6 +753,7 @@ public sealed partial class AtmosSimulation
         ArgumentNullException.ThrowIfNull(mixture, parameterName);
         if (mixture is not IInternalGasMixture internalMixture)
             throw CreateUnsupportedMixtureException(parameterName);
+
         ValidateOwnedMixture(internalMixture, parameterName);
         return internalMixture;
     }
@@ -738,7 +772,9 @@ public sealed partial class AtmosSimulation
     {
         if (ReferenceEquals(left, right))
             return true;
-        return left is VoxelGasMixture leftVoxel && right is VoxelGasMixture rightVoxel &&
+
+        return left is VoxelGasMixture leftVoxel &&
+               right is VoxelGasMixture rightVoxel &&
                leftVoxel.ChunkPosition == rightVoxel.ChunkPosition &&
                leftVoxel.ChunkGeneration == rightVoxel.ChunkGeneration &&
                leftVoxel.LocalVoxelIndex == rightVoxel.LocalVoxelIndex;
@@ -766,7 +802,9 @@ public sealed partial class AtmosSimulation
     {
         if (!float.IsFinite(temperature) || temperature < 0f)
         {
-            throw new ArgumentOutOfRangeException(nameof(temperature), temperature,
+            throw new ArgumentOutOfRangeException(
+                nameof(temperature),
+                temperature,
                 "Temperature must be nonnegative and finite.");
         }
     }
@@ -788,5 +826,4 @@ public sealed partial class AtmosSimulation
         if (!float.IsFinite(value))
             throw new ArgumentOutOfRangeException(parameterName, value, "Value must be finite.");
     }
-
 }

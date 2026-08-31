@@ -23,8 +23,10 @@ public sealed class AtmosSimulationTests
         {
             Assert.That(simulation.ChunkCount, Is.EqualTo(1));
             Assert.That(snapshot.GridPosition, Is.EqualTo(chunk.Position));
-            Assert.That(snapshot.VoxelRoomMap,
+            Assert.That(
+                snapshot.VoxelRoomMap,
                 Is.EqualTo(new[] { VoxelClassification.RoomSolid, 7, VoxelClassification.RoomSolid }));
+
             Assert.That(snapshot.Temperature[1], Is.EqualTo(300f));
             Assert.That(snapshot.Gases, Has.Length.EqualTo(1));
             Assert.That(snapshot.Gases[0].Moles[1], Is.EqualTo(2f));
@@ -42,15 +44,20 @@ public sealed class AtmosSimulationTests
 
         var snapshot = simulation.GetChunkSnapshot(chunk);
         var dimensions = snapshot.Dimensions;
-        for (var z = 0; z < dimensions.Z; z++)
-        for (var y = 0; y < dimensions.Y; y++)
-        for (var x = 0; x < dimensions.X; x++)
+        for (int z = 0; z < dimensions.Z; z++)
+        for (int y = 0; y < dimensions.Y; y++)
+        for (int x = 0; x < dimensions.X; x++)
         {
             int index = x + dimensions.X * (y + dimensions.Y * z);
-            bool isBoundary = x == 0 || x == dimensions.X - 1 ||
-                              y == 0 || y == dimensions.Y - 1 ||
-                              z == 0 || z == dimensions.Z - 1;
-            Assert.That(snapshot.VoxelRoomMap[index],
+            bool isBoundary = x == 0 ||
+                              x == dimensions.X - 1 ||
+                              y == 0 ||
+                              y == dimensions.Y - 1 ||
+                              z == 0 ||
+                              z == dimensions.Z - 1;
+
+            Assert.That(
+                snapshot.VoxelRoomMap[index],
                 Is.EqualTo(isBoundary ? VoxelClassification.RoomSolid : 7));
         }
     }
@@ -65,13 +72,15 @@ public sealed class AtmosSimulationTests
         simulation.SetChunkBoundaryClassification(chunk, VoxelClassification.RoomSolid);
 
         var snapshot = simulation.GetChunkSnapshot(chunk);
-        Assert.That(snapshot.VoxelRoomMap,
-            Is.EqualTo(new[]
-            {
-                -2, -2, -2,
-                -2, 7, -2,
-                -2, -2, -2
-            }));
+        Assert.That(
+            snapshot.VoxelRoomMap,
+            Is.EqualTo(
+                new[]
+                {
+                    -2, -2, -2,
+                    -2, 7, -2,
+                    -2, -2, -2
+                }));
     }
 
     [Test]
@@ -83,7 +92,7 @@ public sealed class AtmosSimulationTests
         simulation.SetChunkBoundaryClassification(chunk, VoxelClassification.RoomSolid);
         simulation.AddGasToVoxel(chunk, 8, 8, 0, 0, 500f, 293.15f);
 
-        for (var tick = 0; tick < 20; tick++)
+        for (int tick = 0; tick < 20; tick++)
             simulation.Tick();
 
         var snapshot = simulation.GetChunkSnapshot(chunk);
@@ -126,6 +135,7 @@ public sealed class AtmosSimulationTests
             VacuumThreshold = 0f,
             SleepThreshold = int.MaxValue
         };
+
         using var simulation = new AtmosSimulation(config, 2, 1, 1);
         var chunk = simulation.CreateAndRegisterChunk(new Int3(0, 0, 0));
         simulation.SetChunkClassification(chunk, new VoxelClassification(1));

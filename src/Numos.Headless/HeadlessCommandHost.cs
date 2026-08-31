@@ -13,6 +13,11 @@ internal sealed class HeadlessCommandHost : IDisposable
     private readonly SimulationSession _session = new();
     private bool _exitRequested;
 
+    public void Dispose()
+    {
+        _session.Dispose();
+    }
+
     internal async Task<int> RunAsync(
         TextReader input,
         TextWriter output,
@@ -23,8 +28,8 @@ internal sealed class HeadlessCommandHost : IDisposable
         ArgumentNullException.ThrowIfNull(output);
         ArgumentNullException.ThrowIfNull(error);
 
-        var lineNumber = 0;
-        var hadErrors = false;
+        int lineNumber = 0;
+        bool hadErrors = false;
         while (!_exitRequested)
         {
             string? line = await input.ReadLineAsync(cancellationToken);
@@ -35,7 +40,7 @@ internal sealed class HeadlessCommandHost : IDisposable
             if (string.IsNullOrWhiteSpace(line))
                 continue;
 
-            HeadlessResponse response = ProcessLine(line, lineNumber, error);
+            var response = ProcessLine(line, lineNumber, error);
             if (!response.Ok)
                 hadErrors = true;
 
@@ -43,11 +48,6 @@ internal sealed class HeadlessCommandHost : IDisposable
         }
 
         return hadErrors ? 1 : 0;
-    }
-
-    public void Dispose()
-    {
-        _session.Dispose();
     }
 
     internal static async Task WriteResponseAsync(
@@ -79,70 +79,75 @@ internal sealed class HeadlessCommandHost : IDisposable
         }
 
         using (document)
-        try
         {
-            request = ReadEnvelope(document.RootElement);
-            request = document.RootElement.Deserialize(HeadlessJsonContext.Default.HeadlessRequest);
-            if (request == null)
-                throw new HeadlessRequestException("invalidRequest", "A request must be a JSON object.");
-            if (!request.ProtocolVersion.HasValue)
-                throw new HeadlessRequestException("missingProperty", "The 'protocolVersion' property is required.");
-            if (request.ProtocolVersion.Value != ProtocolVersion)
+            try
             {
-                throw new HeadlessRequestException(
-                    "unsupportedProtocol",
-                    $"protocolVersion must be {ProtocolVersion}; received {request.ProtocolVersion.Value}.");
+                request = ReadEnvelope(document.RootElement);
+                request = document.RootElement.Deserialize(HeadlessJsonContext.Default.HeadlessRequest);
+                if (request == null)
+                    throw new HeadlessRequestException("invalidRequest", "A request must be a JSON object.");
+
+                if (!request.ProtocolVersion.HasValue)
+                    throw new HeadlessRequestException("missingProperty", "The 'protocolVersion' property is required.");
+
+                if (request.ProtocolVersion.Value != ProtocolVersion)
+                {
+                    throw new HeadlessRequestException(
+                        "unsupportedProtocol",
+                        $"protocolVersion must be {ProtocolVersion}; received {request.ProtocolVersion.Value}.");
+                }
+
+                if (string.IsNullOrWhiteSpace(request.Id))
+                    throw new HeadlessRequestException("missingProperty", "The 'id' property is required.");
+
+                if (string.IsNullOrWhiteSpace(request.Op))
+                    throw new HeadlessRequestException("missingProperty", "The 'op' property is required.");
+
+                var execution = _session.Execute(request);
+                _exitRequested = execution.ExitRequested;
+                return new HeadlessResponse
+                {
+                    Id = request.Id,
+                    Op = request.Op,
+                    Ok = true,
+                    State = _session.GetState(),
+                    Result = execution.Result,
+                    Observation = execution.Observation
+                };
             }
-
-            if (string.IsNullOrWhiteSpace(request.Id))
-                throw new HeadlessRequestException("missingProperty", "The 'id' property is required.");
-            if (string.IsNullOrWhiteSpace(request.Op))
-                throw new HeadlessRequestException("missingProperty", "The 'op' property is required.");
-
-            CommandExecution execution = _session.Execute(request);
-            _exitRequested = execution.ExitRequested;
-            return new HeadlessResponse
+            catch (JsonException exception)
             {
-                Id = request.Id,
-                Op = request.Op,
-                Ok = true,
-                State = _session.GetState(),
-                Result = execution.Result,
-                Observation = execution.Observation
-            };
-        }
-        catch (JsonException exception)
-        {
-            return Failure(
-                request,
-                "invalidRequest",
-                exception.Message,
-                lineNumber,
-                nameof(JsonException));
-        }
-        catch (HeadlessRequestException exception)
-        {
-            return Failure(request, exception.Code, exception.Message, lineNumber);
-        }
-        catch (Exception exception) when (
-            exception is ArgumentException or InvalidOperationException or KeyNotFoundException or OverflowException)
-        {
-            return Failure(
-                request,
-                "operationRejected",
-                exception.Message,
-                lineNumber,
-                exception.GetType().Name);
-        }
-        catch (Exception exception)
-        {
-            errorOutput.WriteLine($"Unhandled exception while processing JSONL line {lineNumber}: {exception}");
-            return Failure(
-                request,
-                "internalError",
-                "The operation failed unexpectedly. See stderr for the exception.",
-                lineNumber,
-                exception.GetType().Name);
+                return Failure(
+                    request,
+                    "invalidRequest",
+                    exception.Message,
+                    lineNumber,
+                    nameof(JsonException));
+            }
+            catch (HeadlessRequestException exception)
+            {
+                return Failure(request, exception.Code, exception.Message, lineNumber);
+            }
+            catch (Exception exception) when (
+                exception is ArgumentException or InvalidOperationException or KeyNotFoundException or OverflowException)
+            {
+                return Failure(
+                    request,
+                    "operationRejected",
+                    exception.Message,
+                    lineNumber,
+                    exception.GetType().Name);
+            }
+            catch (Exception exception)
+            {
+                errorOutput.WriteLine($"Unhandled exception while processing JSONL line {lineNumber}: {exception}");
+                return Failure(
+                    request,
+                    "internalError",
+                    "The operation failed unexpectedly. See stderr for the exception.",
+                    lineNumber,
+                    exception.GetType().Name);
+            }
         }
     }
 
@@ -151,19 +156,22 @@ internal sealed class HeadlessCommandHost : IDisposable
         if (root.ValueKind != JsonValueKind.Object)
             return null;
 
-        int? protocolVersion = root.TryGetProperty("protocolVersion", out JsonElement versionElement) &&
+        int? protocolVersion = root.TryGetProperty("protocolVersion", out var versionElement) &&
                                versionElement.ValueKind == JsonValueKind.Number &&
                                versionElement.TryGetInt32(out int parsedVersion)
             ? parsedVersion
             : null;
-        string? id = root.TryGetProperty("id", out JsonElement idElement) &&
+
+        string? id = root.TryGetProperty("id", out var idElement) &&
                      idElement.ValueKind == JsonValueKind.String
             ? idElement.GetString()
             : null;
-        string? op = root.TryGetProperty("op", out JsonElement opElement) &&
+
+        string? op = root.TryGetProperty("op", out var opElement) &&
                      opElement.ValueKind == JsonValueKind.String
             ? opElement.GetString()
             : null;
+
         return new HeadlessRequest
         {
             ProtocolVersion = protocolVersion,

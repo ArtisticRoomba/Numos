@@ -18,6 +18,11 @@ internal sealed class AtmosSolverPipeline : IDisposable
 
     internal int Count => _steps.Count;
 
+    public void Dispose()
+    {
+        _defaultLifetime?.Dispose();
+    }
+
     internal SolverStepInfo[] GetSteps()
     {
         return _steps.Select(static step =>
@@ -25,13 +30,15 @@ internal sealed class AtmosSolverPipeline : IDisposable
             .ToArray();
     }
 
-    internal void Register(string name, SolverStepKind kind,
+    internal void Register(
+        string name, SolverStepKind kind,
         Action<AtmosSolverExecutionContext> solver, int index)
     {
         ValidateName(name);
         ArgumentNullException.ThrowIfNull(solver);
         if (_steps.Any(step => string.Equals(step.Name, name, StringComparison.Ordinal)))
             throw new InvalidOperationException($"A solver named '{name}' is already registered.");
+
         if ((uint)index > (uint)_steps.Count)
             throw new ArgumentOutOfRangeException(nameof(index));
 
@@ -75,13 +82,8 @@ internal sealed class AtmosSolverPipeline : IDisposable
         // A stage may edit the pipeline. Snapshotting makes those edits take effect on the next tick and keeps
         // the current tick deterministic.
         SolverStep[] steps = _steps.Where(static step => step.Enabled).ToArray();
-        foreach (SolverStep step in steps)
+        foreach (var step in steps)
             step.Solver(context);
-    }
-
-    public void Dispose()
-    {
-        _defaultLifetime?.Dispose();
     }
 
     private static void ValidateName(string name)

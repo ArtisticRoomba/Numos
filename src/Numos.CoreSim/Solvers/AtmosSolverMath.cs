@@ -24,7 +24,8 @@ internal static class AtmosSolverMath
     }
 
     /// <summary>Recalculates a voxel pressure and clears values below the configured vacuum threshold.</summary>
-    internal static Pascal CalculatePressureAtVoxel(IAtmosConfig config, AtmosChunk chunk,
+    internal static Pascal CalculatePressureAtVoxel(
+        IAtmosConfig config, AtmosChunk chunk,
         ushort localVoxelIndex)
     {
         Mole totalMoles = GetTotalMoles(chunk, localVoxelIndex);
@@ -44,11 +45,12 @@ internal static class AtmosSolverMath
         return pressure;
     }
 
-    internal static JoulePerKelvin CalculateHeatCapacityAtVoxel(IAtmosConfig config, AtmosChunk chunk,
+    internal static JoulePerKelvin CalculateHeatCapacityAtVoxel(
+        IAtmosConfig config, AtmosChunk chunk,
         ushort localVoxelIndex)
     {
         JoulePerKelvin totalHeatCapacity = 0f;
-        for (var gas = 0; gas < chunk.ActiveGasCount; gas++)
+        for (int gas = 0; gas < chunk.ActiveGasCount; gas++)
         {
             Mole moles = chunk.ActiveGases[gas].Moles[localVoxelIndex];
             if (moles <= 0f)
@@ -61,7 +63,8 @@ internal static class AtmosSolverMath
         return totalHeatCapacity;
     }
 
-    internal static Pascal CalculateBulkPressureTransfer(AtmosSolverConfigSnapshot config,
+    internal static Pascal CalculateBulkPressureTransfer(
+        AtmosSolverConfigSnapshot config,
         Pascal pressureDelta, Pascal currentPressure)
     {
         Scalar maximumFraction = config.MaxPressureTransferFractionPerNeighbor;
@@ -78,7 +81,8 @@ internal static class AtmosSolverMath
     /// <summary>
     ///     Returns the source-relative species imbalance used by explicit Fickian diffusion.
     /// </summary>
-    internal static Mole CalculateMoleImbalance(Mole sourceMoles, Kelvin sourceTemperature,
+    internal static Mole CalculateMoleImbalance(
+        Mole sourceMoles, Kelvin sourceTemperature,
         Mole targetMoles, Kelvin targetTemperature)
     {
         Debug.Assert(sourceMoles >= 0f && targetMoles >= 0f);
@@ -93,7 +97,8 @@ internal static class AtmosSolverMath
         return sourceMoles - targetMoles * (targetTemperature / sourceTemperature);
     }
 
-    internal static JoulePerKelvin CalculateThermalConductance(JoulePerKelvin sourceHeatCapacity,
+    internal static JoulePerKelvin CalculateThermalConductance(
+        JoulePerKelvin sourceHeatCapacity,
         JoulePerKelvin targetHeatCapacity, JoulePerKelvin thermalConductance)
     {
         Debug.Assert(IsFinitePositive(sourceHeatCapacity));
@@ -104,6 +109,7 @@ internal static class AtmosSolverMath
         JoulePerKelvin largerHeatCapacity = MathF.Max(sourceHeatCapacity, targetHeatCapacity);
         JoulePerKelvin equilibriumConductance = smallerHeatCapacity /
                                                 (1f + smallerHeatCapacity / largerHeatCapacity);
+
         return MathF.Min(thermalConductance, equilibriumConductance);
     }
 
@@ -112,6 +118,7 @@ internal static class AtmosSolverMath
         int comparison = left.X.CompareTo(right.X);
         if (comparison != 0)
             return comparison;
+
         comparison = left.Y.CompareTo(right.Y);
         return comparison != 0 ? comparison : left.Z.CompareTo(right.Z);
     }
@@ -124,8 +131,9 @@ internal static class AtmosSolverMath
     internal static Mole GetTotalMoles(AtmosChunk chunk, ushort voxelIndex)
     {
         Mole totalMoles = 0f;
-        for (var gas = 0; gas < chunk.ActiveGasCount; gas++)
+        for (int gas = 0; gas < chunk.ActiveGasCount; gas++)
             totalMoles += chunk.ActiveGases[gas].Moles[voxelIndex];
+
         return totalMoles;
     }
 }

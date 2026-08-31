@@ -13,13 +13,13 @@ namespace Numos.API;
 [PublicAPI]
 public sealed class GasMixture : IInternalGasMixture
 {
-    private GasMixtureState _state;
-
     internal GasMixture(AtmosSimulation owner, GasMixtureState state)
     {
         Owner = owner;
-        _state = state;
+        State = state;
     }
+
+    internal GasMixtureState State { get; private set; }
 
     /// <inheritdoc />
     public AtmosSimulation Owner { get; }
@@ -48,51 +48,84 @@ public sealed class GasMixture : IInternalGasMixture
     public int ActiveGasCount => Owner.GetMixtureActiveGasCount(this);
 
     /// <inheritdoc />
-    public float GetMoles(int gasId) => Owner.GetMixtureMoles(this, gasId);
+    public float GetMoles(int gasId)
+    {
+        return Owner.GetMixtureMoles(this, gasId);
+    }
 
     /// <inheritdoc />
-    public void SetMoles(int gasId, float moles) => Owner.SetMixtureMoles(this, gasId, moles);
+    public void SetMoles(int gasId, float moles)
+    {
+        Owner.SetMixtureMoles(this, gasId, moles);
+    }
 
     /// <inheritdoc />
-    public void AdjustMoles(int gasId, float deltaMoles) =>
+    public void AdjustMoles(int gasId, float deltaMoles)
+    {
         Owner.AdjustMixtureMoles(this, gasId, deltaMoles);
+    }
 
     /// <inheritdoc />
-    public void AddGas(int gasId, float moles, float temperature) =>
+    public void AddGas(int gasId, float moles, float temperature)
+    {
         Owner.AddGasToMixture(this, gasId, moles, temperature);
+    }
 
     /// <inheritdoc />
-    public void Clear() => Owner.ClearMixture(this);
+    public void Clear()
+    {
+        Owner.ClearMixture(this);
+    }
 
     /// <inheritdoc />
-    public GasMixture Remove(float moles) => Owner.RemoveFromMixture(this, moles);
+    public GasMixture Remove(float moles)
+    {
+        return Owner.RemoveFromMixture(this, moles);
+    }
 
     /// <inheritdoc />
-    public GasMixture RemoveRatio(float ratio) => Owner.RemoveRatioFromMixture(this, ratio);
+    public GasMixture RemoveRatio(float ratio)
+    {
+        return Owner.RemoveRatioFromMixture(this, ratio);
+    }
 
     /// <inheritdoc />
-    public GasMixture RemoveVolume(float volume) => Owner.RemoveVolumeFromMixture(this, volume);
+    public GasMixture RemoveVolume(float volume)
+    {
+        return Owner.RemoveVolumeFromMixture(this, volume);
+    }
 
     /// <inheritdoc />
-    public float TransferTo(IGasMixture destination, float moles) =>
-        Owner.TransferMixture(this, destination, moles);
+    public float TransferTo(IGasMixture destination, float moles)
+    {
+        return Owner.TransferMixture(this, destination, moles);
+    }
 
     /// <inheritdoc />
-    public float TransferRatioTo(IGasMixture destination, float ratio) =>
-        Owner.TransferMixtureRatio(this, destination, ratio);
+    public float TransferRatioTo(IGasMixture destination, float ratio)
+    {
+        return Owner.TransferMixtureRatio(this, destination, ratio);
+    }
 
     /// <inheritdoc />
-    public GasMixture Clone() => Owner.CloneMixture(this);
+    public GasMixture Clone()
+    {
+        return Owner.CloneMixture(this);
+    }
 
     /// <inheritdoc />
-    public GasMixtureSnapshot GetSnapshot() => Owner.GetMixtureSnapshot(this);
+    public GasMixtureSnapshot GetSnapshot()
+    {
+        return Owner.GetMixtureSnapshot(this);
+    }
 
-    internal GasMixtureState CaptureState() => _state.Clone();
-
-    internal GasMixtureState State => _state;
+    internal GasMixtureState CaptureState()
+    {
+        return State.Clone();
+    }
 
     internal void ApplyState(GasMixtureState state)
     {
-        _state = state;
+        State = state;
     }
 }

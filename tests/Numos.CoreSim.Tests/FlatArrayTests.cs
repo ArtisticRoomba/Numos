@@ -51,7 +51,7 @@ public sealed class FlatArrayTests
     [Test]
     public void Int3Indexer_WritesBackingArray()
     {
-        var data = new int[24];
+        int[] data = new int[24];
         var array = new FlatArray<int>(data, new Int3(2, 3, 4));
 
         array[new Int3(1, 2, 3)] = 42;
@@ -64,9 +64,9 @@ public sealed class FlatArrayTests
     {
         var array = new FlatArray<int>(new int[24], new Int3(2, 3, 4));
 
-        for (var z = 0; z < 4; z++)
-        for (var y = 0; y < 3; y++)
-        for (var x = 0; x < 2; x++)
+        for (int z = 0; z < 4; z++)
+        for (int y = 0; y < 3; y++)
+        for (int x = 0; x < 2; x++)
         {
             var position = new Int3(x, y, z);
             Assert.That(array.GetPosition(array.GetIndex(position)), Is.EqualTo(position));
@@ -79,7 +79,7 @@ public sealed class FlatArrayTests
         var array = new FlatArray<int>(new int[4]);
         array.Fill(7);
         array.CopyFrom([1, 2]);
-        var destination = new int[4];
+        int[] destination = new int[4];
         array.CopyTo(destination);
 
         Assert.That(destination, Is.EqualTo(new[] { 1, 2, 7, 7 }));

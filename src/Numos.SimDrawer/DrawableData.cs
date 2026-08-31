@@ -250,8 +250,10 @@ public sealed class ChunkDrawData
     {
         if (x < 0 || x >= Dimensions.X)
             throw new ArgumentOutOfRangeException(nameof(x));
+
         if (y < 0 || y >= Dimensions.Y)
             throw new ArgumentOutOfRangeException(nameof(y));
+
         if (z < 0 || z >= Dimensions.Z)
             throw new ArgumentOutOfRangeException(nameof(z));
 
@@ -305,8 +307,7 @@ public sealed class SimulationDrawData
         long sourceVersion,
         long frameVersion)
     {
-        _chunks = new ReadOnlyDictionary<Int3, ChunkDrawData>(
-            new Dictionary<Int3, ChunkDrawData>(chunks));
+        _chunks = new ReadOnlyDictionary<Int3, ChunkDrawData>(new Dictionary<Int3, ChunkDrawData>(chunks));
         Visualization = visualization;
         VisualizationMappingRevision = visualizationMappingRevision;
         SourceVersion = sourceVersion;

@@ -64,6 +64,7 @@ public partial class SimulationViewer
             _projectName = string.IsNullOrWhiteSpace(projectName)
                 ? "Untitled Simulation"
                 : projectName.Trim();
+
             _chunkDimensions = new Int3(chunkWidth, chunkHeight, chunkDepth);
             _isPaused = true;
             _showConfigurationPanel = true;
@@ -169,10 +170,14 @@ public partial class SimulationViewer
             return;
         }
 
-        if (!float.IsFinite(gas.MolarHeatCapacityAtConstantVolume) || gas.MolarHeatCapacityAtConstantVolume < 0f ||
-            !float.IsFinite(gas.BoilingPoint) || gas.BoilingPoint < 0f ||
-            !float.IsFinite(gas.MolarEnthalpyOfVaporization) || gas.MolarEnthalpyOfVaporization < 0f ||
-            !float.IsFinite(gas.DiffusionCoefficient) || gas.DiffusionCoefficient < 0f)
+        if (!float.IsFinite(gas.MolarHeatCapacityAtConstantVolume) ||
+            gas.MolarHeatCapacityAtConstantVolume < 0f ||
+            !float.IsFinite(gas.BoilingPoint) ||
+            gas.BoilingPoint < 0f ||
+            !float.IsFinite(gas.MolarEnthalpyOfVaporization) ||
+            gas.MolarEnthalpyOfVaporization < 0f ||
+            !float.IsFinite(gas.DiffusionCoefficient) ||
+            gas.DiffusionCoefficient < 0f)
         {
             SetProjectMessage("Gas properties must be finite, non-negative values.", true);
             return;
@@ -185,8 +190,10 @@ public partial class SimulationViewer
 
     private void RemoveProjectGas(int gasId)
     {
-        if (_simulation == null || _config == null ||
-            gasId < 0 || gasId >= _config.GasRegistry.Count)
+        if (_simulation == null ||
+            _config == null ||
+            gasId < 0 ||
+            gasId >= _config.GasRegistry.Count)
             return;
 
         foreach (var handle in _simulation.GetChunkHandles())
@@ -198,6 +205,7 @@ public partial class SimulationViewer
                     "That gas cannot be removed because it, or a later gas ID, has already been used by a chunk. " +
                     "Remove the affected chunks first so gas IDs remain stable.",
                     true);
+
                 return;
             }
         }

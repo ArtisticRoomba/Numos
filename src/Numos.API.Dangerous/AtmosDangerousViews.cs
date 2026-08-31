@@ -32,7 +32,11 @@ public readonly ref struct AtmosDangerousChunk
     public bool IsAwake => _chunk.IsAwake;
 
     /// <summary>Gets or sets the unchecked sleep counter.</summary>
-    public int SleepTimer { get => _chunk.SleepTimer; set => _chunk.SleepTimer = value; }
+    public int SleepTimer
+    {
+        get => _chunk.SleepTimer;
+        set => _chunk.SleepTimer = value;
+    }
 
     /// <summary>The number of active gas channels.</summary>
     public int ActiveGasCount => _chunk.ActiveGasCount;
@@ -66,6 +70,7 @@ public readonly ref struct AtmosDangerousChunk
     {
         if ((uint)index >= (uint)_chunk.ActiveGasCount)
             throw new ArgumentOutOfRangeException(nameof(index));
+
         return new AtmosDangerousGasChannel(_chunk.ActiveGases[index], _chunk.VoxelCount);
     }
 

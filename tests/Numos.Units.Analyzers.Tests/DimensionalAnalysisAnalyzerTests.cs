@@ -51,8 +51,9 @@ public sealed class DimensionalAnalysisAnalyzerTests
 
         ImmutableArray<Diagnostic> diagnostics = await Analyze(source, Catalog);
 
-        Diagnostic diagnostic = diagnostics.Single(item => item.Id == "NUMOSUNIT002");
-        Assert.That(diagnostic.GetMessage(),
+        var diagnostic = diagnostics.Single(item => item.Id == "NUMOSUNIT002");
+        Assert.That(
+            diagnostic.GetMessage(),
             Is.EqualTo("Cannot assign 'length^-1 mass^1 time^-2' to 'temperature'"));
     }
 
@@ -76,9 +77,12 @@ public sealed class DimensionalAnalysisAnalyzerTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(diagnostics.Select(diagnostic => diagnostic.Id),
+            Assert.That(
+                diagnostics.Select(diagnostic => diagnostic.Id),
                 Does.Contain("NUMOSUNIT001"));
-            Assert.That(diagnostics.Select(diagnostic => diagnostic.Id),
+
+            Assert.That(
+                diagnostics.Select(diagnostic => diagnostic.Id),
                 Does.Contain("NUMOSUNIT003"));
         });
     }
@@ -92,6 +96,7 @@ public sealed class DimensionalAnalysisAnalyzerTests
                                   internal static PerTick Scale(PerTick value, float ratio) => value * ratio;
                               }
                               """;
+
         const string catalog = "perTick | PerTick | global::System.Single | tick=-1";
 
         ImmutableArray<Diagnostic> diagnostics = await Analyze(source, catalog);
@@ -111,12 +116,15 @@ public sealed class DimensionalAnalysisAnalyzerTests
                                   internal static Pascal Invalid() => UnitConversions.FromCelsius(20f);
                               }
                               """;
-        string catalog = Catalog + Environment.NewLine +
+
+        string catalog = Catalog +
+                         Environment.NewLine +
                          "convert | temperature | Celsius | global::System.Single | 1 | 273.15";
 
         ImmutableArray<Diagnostic> diagnostics = await Analyze(source, catalog);
 
-        Assert.That(diagnostics.Select(diagnostic => diagnostic.Id),
+        Assert.That(
+            diagnostics.Select(diagnostic => diagnostic.Id),
             Is.EquivalentTo(new[] { "NUMOSUNIT004" }));
     }
 
@@ -131,13 +139,15 @@ public sealed class DimensionalAnalysisAnalyzerTests
                               }
                               """;
 
-        Compilation compilation = GenerateAliases(CreateCompilation(source), Catalog, out _);
-        INamedTypeSymbol storage = compilation.GetTypeByMetadataName("Storage")!;
+        var compilation = GenerateAliases(CreateCompilation(source), Catalog, out _);
+        var storage = compilation.GetTypeByMetadataName("Storage")!;
 
         Assert.Multiple(() =>
         {
-            Assert.That(((IFieldSymbol)storage.GetMembers("Value").Single()).Type.SpecialType,
+            Assert.That(
+                ((IFieldSymbol)storage.GetMembers("Value").Single()).Type.SpecialType,
                 Is.EqualTo(SpecialType.System_Single));
+
             var array = (IArrayTypeSymbol)((IFieldSymbol)storage.GetMembers("Values").Single()).Type;
             Assert.That(array.ElementType.SpecialType, Is.EqualTo(SpecialType.System_Single));
         });
@@ -146,10 +156,14 @@ public sealed class DimensionalAnalysisAnalyzerTests
     private static async Task<ImmutableArray<Diagnostic>> Analyze(string source, string catalog)
     {
         var additionalText = new InMemoryAdditionalText("Test.numosunits", catalog);
-        Compilation compilation = GenerateAliases(CreateCompilation(source), catalog,
+        var compilation = GenerateAliases(
+            CreateCompilation(source),
+            catalog,
             out ImmutableArray<Diagnostic> generatorDiagnostics);
+
         Assert.That(generatorDiagnostics, Is.Empty);
-        Assert.That(compilation.GetDiagnostics().Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error),
+        Assert.That(
+            compilation.GetDiagnostics().Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error),
             Is.Empty);
 
         var options = new AnalyzerOptions(ImmutableArray.Create<AdditionalText>(additionalText));
@@ -157,7 +171,8 @@ public sealed class DimensionalAnalysisAnalyzerTests
         return await compilation.WithAnalyzers(analyzers, options).GetAnalyzerDiagnosticsAsync();
     }
 
-    private static Compilation GenerateAliases(CSharpCompilation compilation, string catalog,
+    private static Compilation GenerateAliases(
+        CSharpCompilation compilation, string catalog,
         out ImmutableArray<Diagnostic> diagnostics)
     {
         var additionalText = new InMemoryAdditionalText("Test.numosunits", catalog);
@@ -165,7 +180,8 @@ public sealed class DimensionalAnalysisAnalyzerTests
             [new QuantityAliasGenerator().AsSourceGenerator()],
             [additionalText],
             (CSharpParseOptions)compilation.SyntaxTrees.Single().Options);
-        driver.RunGeneratorsAndUpdateCompilation(compilation, out Compilation output, out diagnostics);
+
+        driver.RunGeneratorsAndUpdateCompilation(compilation, out var output, out diagnostics);
         return output;
     }
 
@@ -173,11 +189,14 @@ public sealed class DimensionalAnalysisAnalyzerTests
     {
         string[] trustedAssemblies = ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!)
             .Split(Path.PathSeparator);
+
         IEnumerable<MetadataReference> references = trustedAssemblies
             .Append(typeof(QuantityAttribute).Assembly.Location)
             .Distinct(StringComparer.Ordinal)
             .Select(path => MetadataReference.CreateFromFile(path));
-        return CSharpCompilation.Create("AnalyzerTest",
+
+        return CSharpCompilation.Create(
+            "AnalyzerTest",
             [CSharpSyntaxTree.ParseText(source, new CSharpParseOptions(LanguageVersion.Latest))],
             references,
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
@@ -194,6 +213,10 @@ public sealed class DimensionalAnalysisAnalyzerTests
         }
 
         public override string Path { get; }
-        public override SourceText GetText(CancellationToken cancellationToken = default) => _text;
+
+        public override SourceText GetText(CancellationToken cancellationToken = default)
+        {
+            return _text;
+        }
     }
 }

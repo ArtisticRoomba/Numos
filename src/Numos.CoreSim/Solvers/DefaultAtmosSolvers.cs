@@ -15,10 +15,21 @@ internal sealed class DefaultAtmosSolvers : IDisposable
         int maximumBoundaryEvents = GetBoundaryVoxelCount(chunkWidth, chunkHeight, chunkDepth);
         _boundaryFlow = new BoundaryFlowSolver();
         _thermalBoundary = new ThermalBoundarySolver();
-        _advection = new AdvectionSolver(maximumBoundaryEvents,
-            _boundaryFlow.ClearPendingEvents, _boundaryFlow.Enqueue);
-        _thermodynamics = new ThermodynamicsSolver(maximumBoundaryEvents,
-            _thermalBoundary.ClearPendingEvents, _thermalBoundary.Enqueue);
+        _advection = new AdvectionSolver(
+            maximumBoundaryEvents,
+            _boundaryFlow.ClearPendingEvents,
+            _boundaryFlow.Enqueue);
+
+        _thermodynamics = new ThermodynamicsSolver(
+            maximumBoundaryEvents,
+            _thermalBoundary.ClearPendingEvents,
+            _thermalBoundary.Enqueue);
+    }
+
+    public void Dispose()
+    {
+        _advection.Dispose();
+        _thermodynamics.Dispose();
     }
 
     internal SolverStep[] CreateSteps()
@@ -30,12 +41,6 @@ internal sealed class DefaultAtmosSolvers : IDisposable
             new SolverStep(AtmosSolverStageNames.Thermodynamics, SolverStepKind.BuiltIn, _thermodynamics.Solve),
             new SolverStep(AtmosSolverStageNames.ThermalBoundary, SolverStepKind.BuiltIn, _thermalBoundary.Solve)
         ];
-    }
-
-    public void Dispose()
-    {
-        _advection.Dispose();
-        _thermodynamics.Dispose();
     }
 
     private static int GetBoundaryVoxelCount(int width, int height, int depth)

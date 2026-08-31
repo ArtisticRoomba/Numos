@@ -13,7 +13,7 @@ public readonly record struct VoxelGasSnapshot(
     [property: Quantity("amount")] Mole Moles);
 
 /// <summary>
-/// Detached values for one voxel, intended for interaction details and tooltips.
+///     Detached values for one voxel, intended for interaction details and tooltips.
 /// </summary>
 /// <param name="ChunkVersion">Version of the source chunk.</param>
 /// <param name="ChunkPosition">Grid position of the source chunk.</param>

@@ -4,8 +4,11 @@ namespace Numos.Units;
 ///     Associates values stored in an array or indexable container with a quantity from the consuming project's
 ///     unit catalog.
 /// </summary>
-[AttributeUsage(AttributeTargets.Field | AttributeTargets.Property | AttributeTargets.Parameter |
-                AttributeTargets.ReturnValue)]
+[AttributeUsage(
+    AttributeTargets.Field |
+    AttributeTargets.Property |
+    AttributeTargets.Parameter |
+    AttributeTargets.ReturnValue)]
 public sealed class ElementQuantityAttribute : Attribute
 {
     /// <summary>Creates an element annotation for a catalog quantity identifier.</summary>

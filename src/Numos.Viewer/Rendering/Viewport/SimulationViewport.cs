@@ -10,10 +10,10 @@ namespace Numos.Viewer.Rendering.Viewport;
 /// </summary>
 public sealed class SimulationViewport : IDisposable
 {
-    private readonly TextureFilter _textureFilter;
     private readonly Color _clearColor;
-    private RenderTexture2D _renderTexture;
+    private readonly TextureFilter _textureFilter;
     private bool _disposed;
+    private RenderTexture2D _renderTexture;
 
     public SimulationViewport(TextureFilter textureFilter, Color clearColor)
     {
@@ -29,6 +29,19 @@ public sealed class SimulationViewport : IDisposable
     public bool IsHovered { get; private set; }
 
     public Vector2 NormalizedMousePosition { get; private set; }
+
+    public void Dispose()
+    {
+        if (_disposed)
+            return;
+
+        _disposed = true;
+        if (_renderTexture.Id != 0)
+        {
+            Raylib.UnloadRenderTexture(_renderTexture);
+            _renderTexture = default;
+        }
+    }
 
     public void Draw(string title, Action renderScene, Vector2 firstUsePosition, Vector2 firstUseSize)
     {
@@ -114,18 +127,5 @@ public sealed class SimulationViewport : IDisposable
 
         Raylib.SetTextureFilter(texture.Texture, _textureFilter);
         return texture;
-    }
-
-    public void Dispose()
-    {
-        if (_disposed)
-            return;
-
-        _disposed = true;
-        if (_renderTexture.Id != 0)
-        {
-            Raylib.UnloadRenderTexture(_renderTexture);
-            _renderTexture = default;
-        }
     }
 }

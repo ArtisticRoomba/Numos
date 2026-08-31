@@ -1,6 +1,6 @@
-using Numos.Units;
 using Numos.CoreSim.Solvers;
 using Numos.Maths;
+using Numos.Units;
 
 namespace Numos.CoreSim;
 
@@ -149,8 +149,10 @@ public class AtmosConfig : IAtmosConfig
     public PascalPerMoleKelvin PressurePerMoleKelvin =>
         AtmosPhysicalConstants.MolarGasConstant / GetVoxelVolume();
 
-    public Kelvin GetValidatedTemp(Kelvin storedTemperature) =>
-        FloatMath.IsFinitePositive(storedTemperature) ? storedTemperature : DefaultTemperatureFallback;
+    public Kelvin GetValidatedTemp(Kelvin storedTemperature)
+    {
+        return FloatMath.IsFinitePositive(storedTemperature) ? storedTemperature : DefaultTemperatureFallback;
+    }
 
     public CubicMetre GetVoxelVolume()
     {
@@ -164,6 +166,7 @@ public class AtmosConfig : IAtmosConfig
         JoulePerMoleKelvin fallback = AtmosSolverMath.IsFinitePositive(DefaultMolarHeatCapacityAtConstantVolume)
             ? DefaultMolarHeatCapacityAtConstantVolume
             : AtmosConfigDefaults.DefaultMolarHeatCapacityAtConstantVolume;
+
         if ((uint)gasId < (uint)GasRegistry.Count)
         {
             JoulePerMoleKelvin configured = GasRegistry[gasId].MolarHeatCapacityAtConstantVolume;
@@ -174,10 +177,12 @@ public class AtmosConfig : IAtmosConfig
         return fallback;
     }
 
-    public Scalar GetDiffusionCoefficient(int gasId) =>
-        (uint)gasId < (uint)GasRegistry.Count
+    public Scalar GetDiffusionCoefficient(int gasId)
+    {
+        return (uint)gasId < (uint)GasRegistry.Count
             ? FloatMath.ClampUnitInterval(GasRegistry[gasId].DiffusionCoefficient)
             : FloatMath.ClampUnitInterval(DefaultDiffusionCoefficient);
+    }
 
     public bool TryGetGasProperties(int gasId, out GasProperties properties)
     {

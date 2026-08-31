@@ -33,7 +33,8 @@ internal struct RoomNode
     /// <summary>Mole amount for each gas ID, in moles (mol).</summary>
     public Mole[] GasMoles;
 
-    public void AddGas(int gasId, Mole addedMoles, Kelvin incomingTemp,
+    public void AddGas(
+        int gasId, Mole addedMoles, Kelvin incomingTemp,
         JoulePerMoleKelvin molarHeatCapacityAtConstantVolume)
     {
         JoulePerKelvin incomingHeatCapacity = addedMoles * molarHeatCapacityAtConstantVolume;
@@ -61,8 +62,10 @@ internal struct RoomNode
 
         Mole newTotalMoles = MathF.Max(0f, TotalMoles - actualRemoved);
         GasMoles[gasId] -= actualRemoved;
-        TotalHeatCapacity = MathF.Max(0f,
+        TotalHeatCapacity = MathF.Max(
+            0f,
             TotalHeatCapacity - actualRemoved * molarHeatCapacityAtConstantVolume);
+
         TotalMoles = newTotalMoles;
 
         if (newTotalMoles > 0)
@@ -73,14 +76,21 @@ internal struct RoomNode
 
     private readonly Pascal CalculatePressure(Mole totalMoles)
     {
-        if (!float.IsFinite(totalMoles) || totalMoles <= 0f ||
-            !float.IsFinite(AverageTemperature) || AverageTemperature <= 0f || VoxelCount <= 0)
+        if (!float.IsFinite(totalMoles) ||
+            totalMoles <= 0f ||
+            !float.IsFinite(AverageTemperature) ||
+            AverageTemperature <= 0f ||
+            VoxelCount <= 0)
             return 0f;
 
         CubicMetre voxelVolume = float.IsFinite(VoxelVolume) && VoxelVolume > 0f
             ? VoxelVolume
             : AtmosConfigDefaults.VoxelVolume;
-        return totalMoles / VoxelCount / voxelVolume *
-               AtmosPhysicalConstants.MolarGasConstant * AverageTemperature;
+
+        return totalMoles /
+               VoxelCount /
+               voxelVolume *
+               AtmosPhysicalConstants.MolarGasConstant *
+               AverageTemperature;
     }
 }

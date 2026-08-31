@@ -80,14 +80,18 @@ public sealed partial class AtmosSimulation : IDisposable
             chunkHeight > AtmosChunkConstants.MaximumVoxelCount ||
             chunkDepth > AtmosChunkConstants.MaximumVoxelCount)
         {
-            throw new ArgumentOutOfRangeException(nameof(chunkWidth), chunkWidth,
+            throw new ArgumentOutOfRangeException(
+                nameof(chunkWidth),
+                chunkWidth,
                 $"No chunk dimension may exceed {AtmosChunkConstants.MaximumVoxelCount}.");
         }
 
         long voxelCount = (long)chunkWidth * chunkHeight * chunkDepth;
         if (voxelCount > AtmosChunkConstants.MaximumVoxelCount)
         {
-            throw new ArgumentOutOfRangeException(nameof(chunkWidth), chunkWidth,
+            throw new ArgumentOutOfRangeException(
+                nameof(chunkWidth),
+                chunkWidth,
                 $"Chunk dimensions contain {voxelCount} voxels, but at most " +
                 $"{AtmosChunkConstants.MaximumVoxelCount} are supported.");
         }
@@ -314,7 +318,7 @@ public sealed partial class AtmosSimulation : IDisposable
     public AtmosChunkHandle[] GetChunkHandles()
     {
         ThrowIfDisposed();
-        var positions = _kernel.GetChunkPositions();
+        Int3[] positions = _kernel.GetChunkPositions();
         return CreateSortedHandles(positions);
     }
 
@@ -332,7 +336,7 @@ public sealed partial class AtmosSimulation : IDisposable
         out AtmosChunkHandle[] handles)
     {
         ThrowIfDisposed();
-        if (!_kernel.TryGetChunkPositions(knownRevision, out revision, out var positions))
+        if (!_kernel.TryGetChunkPositions(knownRevision, out revision, out Int3[] positions))
         {
             handles = [];
             return false;
@@ -344,18 +348,22 @@ public sealed partial class AtmosSimulation : IDisposable
 
     private static AtmosChunkHandle[] CreateSortedHandles(Int3[] positions)
     {
-        Array.Sort(positions, static (left, right) =>
-        {
-            int x = left.X.CompareTo(right.X);
-            if (x != 0)
-                return x;
-            int y = left.Y.CompareTo(right.Y);
-            return y != 0 ? y : left.Z.CompareTo(right.Z);
-        });
+        Array.Sort(
+            positions,
+            static (left, right) =>
+            {
+                int x = left.X.CompareTo(right.X);
+                if (x != 0)
+                    return x;
+
+                int y = left.Y.CompareTo(right.Y);
+                return y != 0 ? y : left.Z.CompareTo(right.Z);
+            });
 
         var handles = new AtmosChunkHandle[positions.Length];
-        for (var index = 0; index < positions.Length; index++)
+        for (int index = 0; index < positions.Length; index++)
             handles[index] = new AtmosChunkHandle(positions[index]);
+
         return handles;
     }
 
@@ -521,7 +529,8 @@ public sealed partial class AtmosSimulation : IDisposable
     /// <exception cref="KeyNotFoundException">No chunk is registered at the handle's position.</exception>
     /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
     [PublicAPI]
-    public void SetVoxelClassification(AtmosChunkHandle chunk, ushort localVoxelIndex,
+    public void SetVoxelClassification(
+        AtmosChunkHandle chunk, ushort localVoxelIndex,
         VoxelClassification classification)
     {
         ThrowIfDisposed();
@@ -540,7 +549,8 @@ public sealed partial class AtmosSimulation : IDisposable
     /// <exception cref="KeyNotFoundException">No chunk is registered at the handle's position.</exception>
     /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
     [PublicAPI]
-    public void SetVoxelClassification(AtmosChunkHandle chunk, int x, int y, int z,
+    public void SetVoxelClassification(
+        AtmosChunkHandle chunk, int x, int y, int z,
         VoxelClassification classification)
     {
         ThrowIfDisposed();
@@ -621,7 +631,8 @@ public sealed partial class AtmosSimulation : IDisposable
     /// <exception cref="KeyNotFoundException">No chunk is registered at the handle's position.</exception>
     /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
     [PublicAPI]
-    public void AddGasToVoxel(AtmosChunkHandle chunk, ushort localVoxelIndex, int gasId, float moles,
+    public void AddGasToVoxel(
+        AtmosChunkHandle chunk, ushort localVoxelIndex, int gasId, float moles,
         float temperature)
     {
         ThrowIfDisposed();
@@ -658,7 +669,8 @@ public sealed partial class AtmosSimulation : IDisposable
     /// <exception cref="KeyNotFoundException">No chunk is registered at the handle's position.</exception>
     /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
     [PublicAPI]
-    public void AddGasToVoxel(AtmosChunkHandle chunk, int x, int y, int z, int gasId, float moles,
+    public void AddGasToVoxel(
+        AtmosChunkHandle chunk, int x, int y, int z, int gasId, float moles,
         float temperature)
     {
         ThrowIfDisposed();

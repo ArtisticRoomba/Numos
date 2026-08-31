@@ -77,8 +77,13 @@ public struct AtmosChunkSnapshot
     ///     Gets whether the snapshot has valid dimensions and required data arrays.
     /// </summary>
     public bool IsSnapshotValid =>
-        Dimensions.X > 0 && Dimensions.Y > 0 && Dimensions.Z > 0 &&
-        TotalPressure != null && Temperature != null && Gases != null && VoxelRoomMap != null;
+        Dimensions.X > 0 &&
+        Dimensions.Y > 0 &&
+        Dimensions.Z > 0 &&
+        TotalPressure != null &&
+        Temperature != null &&
+        Gases != null &&
+        VoxelRoomMap != null;
 
     /// <summary>
     ///     Returns whether this snapshot contains every requested detached field.
@@ -95,10 +100,13 @@ public struct AtmosChunkSnapshot
         {
             if (TotalPressure is { Length: > 0 })
                 available |= AtmosChunkSnapshotFields.Pressure;
+
             if (Temperature is { Length: > 0 })
                 available |= AtmosChunkSnapshotFields.Temperature;
+
             if (Gases != null)
                 available |= AtmosChunkSnapshotFields.Gases;
+
             if (VoxelRoomMap is { Length: > 0 })
                 available |= AtmosChunkSnapshotFields.VoxelClassification;
         }

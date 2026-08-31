@@ -19,6 +19,10 @@ internal sealed class VoxelGasMixture : IInternalGasMixture
         LocalVoxelIndex = localVoxelIndex;
     }
 
+    internal Int3 ChunkPosition { get; }
+    internal long ChunkGeneration { get; }
+    internal ushort LocalVoxelIndex { get; }
+
     public AtmosSimulation Owner { get; }
     public float Volume => Owner.GetMixtureVolume(this);
 
@@ -32,30 +36,63 @@ internal sealed class VoxelGasMixture : IInternalGasMixture
     public float TotalMoles => Owner.GetMixtureTotalMoles(this);
     public int ActiveGasCount => Owner.GetMixtureActiveGasCount(this);
 
-    internal Int3 ChunkPosition { get; }
-    internal long ChunkGeneration { get; }
-    internal ushort LocalVoxelIndex { get; }
+    public float GetMoles(int gasId)
+    {
+        return Owner.GetMixtureMoles(this, gasId);
+    }
 
-    public float GetMoles(int gasId) => Owner.GetMixtureMoles(this, gasId);
-    public void SetMoles(int gasId, float moles) => Owner.SetMixtureMoles(this, gasId, moles);
+    public void SetMoles(int gasId, float moles)
+    {
+        Owner.SetMixtureMoles(this, gasId, moles);
+    }
 
-    public void AdjustMoles(int gasId, float deltaMoles) =>
+    public void AdjustMoles(int gasId, float deltaMoles)
+    {
         Owner.AdjustMixtureMoles(this, gasId, deltaMoles);
+    }
 
-    public void AddGas(int gasId, float moles, float temperature) =>
+    public void AddGas(int gasId, float moles, float temperature)
+    {
         Owner.AddGasToMixture(this, gasId, moles, temperature);
+    }
 
-    public void Clear() => Owner.ClearMixture(this);
-    public GasMixture Remove(float moles) => Owner.RemoveFromMixture(this, moles);
-    public GasMixture RemoveRatio(float ratio) => Owner.RemoveRatioFromMixture(this, ratio);
-    public GasMixture RemoveVolume(float volume) => Owner.RemoveVolumeFromMixture(this, volume);
+    public void Clear()
+    {
+        Owner.ClearMixture(this);
+    }
 
-    public float TransferTo(IGasMixture destination, float moles) =>
-        Owner.TransferMixture(this, destination, moles);
+    public GasMixture Remove(float moles)
+    {
+        return Owner.RemoveFromMixture(this, moles);
+    }
 
-    public float TransferRatioTo(IGasMixture destination, float ratio) =>
-        Owner.TransferMixtureRatio(this, destination, ratio);
+    public GasMixture RemoveRatio(float ratio)
+    {
+        return Owner.RemoveRatioFromMixture(this, ratio);
+    }
 
-    public GasMixture Clone() => Owner.CloneMixture(this);
-    public GasMixtureSnapshot GetSnapshot() => Owner.GetMixtureSnapshot(this);
+    public GasMixture RemoveVolume(float volume)
+    {
+        return Owner.RemoveVolumeFromMixture(this, volume);
+    }
+
+    public float TransferTo(IGasMixture destination, float moles)
+    {
+        return Owner.TransferMixture(this, destination, moles);
+    }
+
+    public float TransferRatioTo(IGasMixture destination, float ratio)
+    {
+        return Owner.TransferMixtureRatio(this, destination, ratio);
+    }
+
+    public GasMixture Clone()
+    {
+        return Owner.CloneMixture(this);
+    }
+
+    public GasMixtureSnapshot GetSnapshot()
+    {
+        return Owner.GetMixtureSnapshot(this);
+    }
 }

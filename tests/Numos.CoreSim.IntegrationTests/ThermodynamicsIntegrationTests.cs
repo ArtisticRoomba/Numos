@@ -1,5 +1,6 @@
 using Numos.API;
 using Numos.CoreSim.Datatypes.Primitives;
+using Numos.CoreSim.Datatypes.Snapshots;
 using Numos.Maths;
 
 namespace Numos.CoreSim.IntegrationTests;
@@ -29,15 +30,24 @@ public sealed class ThermodynamicsIntegrationTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(afterOddTick.Temperature[0],
+            Assert.That(
+                afterOddTick.Temperature[0],
                 Is.EqualTo(400f).Within(SimTestHelpers.Tolerance));
-            Assert.That(afterOddTick.Temperature[1],
+
+            Assert.That(
+                afterOddTick.Temperature[1],
                 Is.EqualTo(200f).Within(SimTestHelpers.Tolerance));
-            Assert.That(afterEvenTick.Temperature[0],
+
+            Assert.That(
+                afterEvenTick.Temperature[0],
                 Is.EqualTo(390f).Within(SimTestHelpers.Tolerance));
-            Assert.That(afterEvenTick.Temperature[1],
+
+            Assert.That(
+                afterEvenTick.Temperature[1],
                 Is.EqualTo(205f).Within(SimTestHelpers.Tolerance));
-            Assert.That(afterNextOddTick.Temperature,
+
+            Assert.That(
+                afterNextOddTick.Temperature,
                 Is.EqualTo(afterEvenTick.Temperature).Within(SimTestHelpers.Tolerance));
         });
     }
@@ -106,9 +116,12 @@ public sealed class ThermodynamicsIntegrationTests
         {
             Assert.That(afterOddHot.Temperature[0], Is.EqualTo(400f));
             Assert.That(afterOddCold.Temperature[0], Is.EqualTo(200f));
-            Assert.That(afterEvenHot.Temperature[0],
+            Assert.That(
+                afterEvenHot.Temperature[0],
                 Is.EqualTo(390f).Within(SimTestHelpers.Tolerance));
-            Assert.That(afterEvenCold.Temperature[0],
+
+            Assert.That(
+                afterEvenCold.Temperature[0],
                 Is.EqualTo(205f).Within(SimTestHelpers.Tolerance));
         });
     }
@@ -129,19 +142,27 @@ public sealed class ThermodynamicsIntegrationTests
         simulation.AddGasToVoxel(cold, 0, 0, 0, SimTestHelpers.FirstGasId, 1f, 200f);
 
         simulation.Tick();
-        float energyBeforeDiffusion = SimTestHelpers.TotalThermalEnergy(config,
-            simulation.GetChunkSnapshot(hot), simulation.GetChunkSnapshot(cold));
+        float energyBeforeDiffusion = SimTestHelpers.TotalThermalEnergy(
+            config,
+            simulation.GetChunkSnapshot(hot),
+            simulation.GetChunkSnapshot(cold));
+
         simulation.Tick();
 
         var hotSnapshot = simulation.GetChunkSnapshot(hot);
         var coldSnapshot = simulation.GetChunkSnapshot(cold);
         Assert.Multiple(() =>
         {
-            Assert.That(hotSnapshot.Temperature[0],
+            Assert.That(
+                hotSnapshot.Temperature[0],
                 Is.EqualTo(300f).Within(SimTestHelpers.Tolerance));
-            Assert.That(coldSnapshot.Temperature[0],
+
+            Assert.That(
+                coldSnapshot.Temperature[0],
                 Is.EqualTo(300f).Within(SimTestHelpers.Tolerance));
-            Assert.That(SimTestHelpers.TotalThermalEnergy(config, hotSnapshot, coldSnapshot),
+
+            Assert.That(
+                SimTestHelpers.TotalThermalEnergy(config, hotSnapshot, coldSnapshot),
                 Is.EqualTo(energyBeforeDiffusion).Within(SimTestHelpers.Tolerance));
         });
     }
@@ -159,27 +180,34 @@ public sealed class ThermodynamicsIntegrationTests
         AtmosChunkHandle[] neighbors = neighborPositions
             .Select(position => SimTestHelpers.CreateOpenChunk(simulation, position))
             .ToArray();
+
         simulation.AddGasToVoxel(center, 0, 0, 0, SimTestHelpers.FirstGasId, 1f, 400f);
         foreach (var neighbor in neighbors)
             simulation.AddGasToVoxel(neighbor, 0, 0, 0, SimTestHelpers.FirstGasId, 1f, 200f);
 
         simulation.Tick();
-        var initialSnapshots = neighbors.Select(simulation.GetChunkSnapshot)
+        AtmosChunkSnapshot[] initialSnapshots = neighbors.Select(simulation.GetChunkSnapshot)
             .Prepend(simulation.GetChunkSnapshot(center))
             .ToArray();
+
         float initialEnergy = SimTestHelpers.TotalThermalEnergy(config, initialSnapshots);
         simulation.Tick();
 
         var centerSnapshot = simulation.GetChunkSnapshot(center);
-        var neighborSnapshots = neighbors.Select(simulation.GetChunkSnapshot).ToArray();
-        var finalSnapshots = neighborSnapshots.Prepend(centerSnapshot).ToArray();
+        AtmosChunkSnapshot[] neighborSnapshots = neighbors.Select(simulation.GetChunkSnapshot).ToArray();
+        AtmosChunkSnapshot[] finalSnapshots = neighborSnapshots.Prepend(centerSnapshot).ToArray();
         Assert.Multiple(() =>
         {
-            Assert.That(centerSnapshot.Temperature[0],
+            Assert.That(
+                centerSnapshot.Temperature[0],
                 Is.EqualTo(200f).Within(SimTestHelpers.Tolerance));
-            Assert.That(neighborSnapshots.Select(snapshot => snapshot.Temperature[0]),
+
+            Assert.That(
+                neighborSnapshots.Select(snapshot => snapshot.Temperature[0]),
                 Is.All.EqualTo(250f).Within(SimTestHelpers.Tolerance));
-            Assert.That(SimTestHelpers.TotalThermalEnergy(config, finalSnapshots),
+
+            Assert.That(
+                SimTestHelpers.TotalThermalEnergy(config, finalSnapshots),
                 Is.EqualTo(initialEnergy).Within(SimTestHelpers.Tolerance));
         });
     }
@@ -216,13 +244,20 @@ public sealed class ThermodynamicsIntegrationTests
         var targetSnapshot = simulation.GetChunkSnapshot(target);
         Assert.Multiple(() =>
         {
-            Assert.That(sourceSnapshot.Temperature[0],
+            Assert.That(
+                sourceSnapshot.Temperature[0],
                 Is.EqualTo(399.197784f).Within(SimTestHelpers.Tolerance));
-            Assert.That(targetSnapshot.Temperature[0],
+
+            Assert.That(
+                targetSnapshot.Temperature[0],
                 Is.EqualTo(307.885376f).Within(SimTestHelpers.Tolerance));
-            Assert.That(SimTestHelpers.TotalMoles(sourceSnapshot, targetSnapshot),
+
+            Assert.That(
+                SimTestHelpers.TotalMoles(sourceSnapshot, targetSnapshot),
                 Is.EqualTo(initialMoles).Within(SimTestHelpers.Tolerance));
-            Assert.That(SimTestHelpers.TotalThermalEnergy(config, sourceSnapshot, targetSnapshot),
+
+            Assert.That(
+                SimTestHelpers.TotalThermalEnergy(config, sourceSnapshot, targetSnapshot),
                 Is.EqualTo(initialEnergy).Within(SimTestHelpers.EnergyTolerance));
         });
     }
@@ -242,14 +277,41 @@ public sealed class ThermodynamicsIntegrationTests
         config.BulkFlowCoefficient = 0f;
         config.MaxPressureTransferFractionPerNeighbor = 0f;
         using var simulation = new AtmosSimulation(config, 3, 3, 3);
-        var source = CreateIsolatedVoxel(simulation, new Int3(0, 0, 0),
-            sourceX, sourceY, sourceZ, SimTestHelpers.RoomId, 400f);
-        var target = CreateIsolatedVoxel(simulation, new Int3(dx, dy, dz),
-            targetX, targetY, targetZ, SimTestHelpers.RoomId + 1, 200f);
-        simulation.AddGasToVoxel(source, sourceX, sourceY, sourceZ,
-            SimTestHelpers.FirstGasId, 1f, 400f);
-        simulation.AddGasToVoxel(target, targetX, targetY, targetZ,
-            SimTestHelpers.FirstGasId, 2f, 200f);
+        var source = CreateIsolatedVoxel(
+            simulation,
+            new Int3(0, 0, 0),
+            sourceX,
+            sourceY,
+            sourceZ,
+            SimTestHelpers.RoomId,
+            400f);
+
+        var target = CreateIsolatedVoxel(
+            simulation,
+            new Int3(dx, dy, dz),
+            targetX,
+            targetY,
+            targetZ,
+            SimTestHelpers.RoomId + 1,
+            200f);
+
+        simulation.AddGasToVoxel(
+            source,
+            sourceX,
+            sourceY,
+            sourceZ,
+            SimTestHelpers.FirstGasId,
+            1f,
+            400f);
+
+        simulation.AddGasToVoxel(
+            target,
+            targetX,
+            targetY,
+            targetZ,
+            SimTestHelpers.FirstGasId,
+            2f,
+            200f);
 
         simulation.Tick();
         simulation.Tick();
@@ -260,9 +322,12 @@ public sealed class ThermodynamicsIntegrationTests
         int targetIndex = SimTestHelpers.Index(targetX, targetY, targetZ, 3, 3);
         Assert.Multiple(() =>
         {
-            Assert.That(sourceSnapshot.Temperature[sourceIndex],
+            Assert.That(
+                sourceSnapshot.Temperature[sourceIndex],
                 Is.EqualTo(390f).Within(SimTestHelpers.Tolerance));
-            Assert.That(targetSnapshot.Temperature[targetIndex],
+
+            Assert.That(
+                targetSnapshot.Temperature[targetIndex],
                 Is.EqualTo(205f).Within(SimTestHelpers.Tolerance));
         });
     }
@@ -282,18 +347,25 @@ public sealed class ThermodynamicsIntegrationTests
         simulation.AddGasToVoxel(chunk, 1, 0, 0, SimTestHelpers.FirstGasId, 1f, 200f);
 
         simulation.Tick();
-        float energyBeforeDiffusion = SimTestHelpers.TotalThermalEnergy(config,
+        float energyBeforeDiffusion = SimTestHelpers.TotalThermalEnergy(
+            config,
             simulation.GetChunkSnapshot(chunk));
+
         simulation.Tick();
 
         var snapshot = simulation.GetChunkSnapshot(chunk);
         Assert.Multiple(() =>
         {
-            Assert.That(snapshot.Temperature[0],
+            Assert.That(
+                snapshot.Temperature[0],
                 Is.EqualTo(300f).Within(SimTestHelpers.Tolerance));
-            Assert.That(snapshot.Temperature[1],
+
+            Assert.That(
+                snapshot.Temperature[1],
                 Is.EqualTo(300f).Within(SimTestHelpers.Tolerance));
-            Assert.That(SimTestHelpers.TotalThermalEnergy(config, snapshot),
+
+            Assert.That(
+                SimTestHelpers.TotalThermalEnergy(config, snapshot),
                 Is.EqualTo(energyBeforeDiffusion).Within(SimTestHelpers.Tolerance));
         });
     }
@@ -313,20 +385,26 @@ public sealed class ThermodynamicsIntegrationTests
         var chunk = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
         (int X, int Y)[] coldNeighbors = [(0, 1), (2, 1), (1, 0), (1, 2)];
         simulation.AddGasToVoxel(chunk, 1, 1, 0, SimTestHelpers.FirstGasId, 1f, 300f);
-        foreach (var (x, y) in coldNeighbors)
+        foreach ((int x, int y) in coldNeighbors)
             simulation.AddGasToVoxel(chunk, x, y, 0, SimTestHelpers.FirstGasId, 1f, 100f);
 
         simulation.Tick();
-        float energyBeforeDiffusion = SimTestHelpers.TotalThermalEnergy(config,
+        float energyBeforeDiffusion = SimTestHelpers.TotalThermalEnergy(
+            config,
             simulation.GetChunkSnapshot(chunk));
+
         simulation.Tick();
 
         var snapshot = simulation.GetChunkSnapshot(chunk);
         Assert.Multiple(() =>
         {
-            Assert.That(snapshot.Temperature.All(temperature =>
-                float.IsFinite(temperature) && temperature >= 0f && temperature <= 300f), Is.True);
-            Assert.That(SimTestHelpers.TotalThermalEnergy(config, snapshot),
+            Assert.That(
+                snapshot.Temperature.All(temperature =>
+                    float.IsFinite(temperature) && temperature >= 0f && temperature <= 300f),
+                Is.True);
+
+            Assert.That(
+                SimTestHelpers.TotalThermalEnergy(config, snapshot),
                 Is.EqualTo(energyBeforeDiffusion).Within(SimTestHelpers.Tolerance));
         });
     }
@@ -345,9 +423,9 @@ public sealed class ThermodynamicsIntegrationTests
 
         using var simulation = new AtmosSimulation(config, size, size, size);
         var chunk = SimTestHelpers.CreateOpenChunk(simulation, default);
-        for (var z = 0; z < size; z++)
-        for (var y = 0; y < size; y++)
-        for (var x = 0; x < size; x++)
+        for (int z = 0; z < size; z++)
+        for (int y = 0; y < size; y++)
+        for (int x = 0; x < size; x++)
         {
             int sequence = x + y * size + z * size * size;
             float moles = 0.5f + sequence % 7 * 0.37f;
@@ -355,13 +433,17 @@ public sealed class ThermodynamicsIntegrationTests
             simulation.AddGasToVoxel(chunk, x, y, z, SimTestHelpers.FirstGasId, moles, temperature);
         }
 
-        double initialEnergy = SimTestHelpers.TotalThermalEnergyPrecise(config,
+        double initialEnergy = SimTestHelpers.TotalThermalEnergyPrecise(
+            config,
             simulation.GetChunkSnapshot(chunk));
-        for (var tick = 0; tick < 200; tick++)
+
+        for (int tick = 0; tick < 200; tick++)
             simulation.Tick();
 
-        double finalEnergy = SimTestHelpers.TotalThermalEnergyPrecise(config,
+        double finalEnergy = SimTestHelpers.TotalThermalEnergyPrecise(
+            config,
             simulation.GetChunkSnapshot(chunk));
+
         double relativeDrift = Math.Abs(finalEnergy - initialEnergy) / initialEnergy;
 
         Assert.That(relativeDrift, Is.LessThan(2e-6d));
@@ -412,9 +494,12 @@ public sealed class ThermodynamicsIntegrationTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(simulation.GetVoxelSnapshot(hot, 0).Temperature,
+            Assert.That(
+                simulation.GetVoxelSnapshot(hot, 0).Temperature,
                 Is.EqualTo(300f).Within(SimTestHelpers.Tolerance));
-            Assert.That(simulation.GetVoxelSnapshot(cold, 0).Temperature,
+
+            Assert.That(
+                simulation.GetVoxelSnapshot(cold, 0).Temperature,
                 Is.EqualTo(300f).Within(SimTestHelpers.Tolerance));
         });
     }
@@ -428,10 +513,24 @@ public sealed class ThermodynamicsIntegrationTests
         config.BulkFlowCoefficient = 0f;
         config.MaxPressureTransferFractionPerNeighbor = 0f;
         using var simulation = new AtmosSimulation(config, width, height, 1);
-        var hot = CreateIsolatedVoxel(simulation, new Int3(0, 0, 0),
-            0, 1, 0, SimTestHelpers.RoomId, 400f);
-        var cold = CreateIsolatedVoxel(simulation, new Int3(0, 0, 1),
-            0, 1, 0, SimTestHelpers.RoomId + 1, 200f);
+        var hot = CreateIsolatedVoxel(
+            simulation,
+            new Int3(0, 0, 0),
+            0,
+            1,
+            0,
+            SimTestHelpers.RoomId,
+            400f);
+
+        var cold = CreateIsolatedVoxel(
+            simulation,
+            new Int3(0, 0, 1),
+            0,
+            1,
+            0,
+            SimTestHelpers.RoomId + 1,
+            200f);
+
         simulation.AddGasToVoxel(hot, 0, 1, 0, SimTestHelpers.FirstGasId, 1f, 400f);
         simulation.AddGasToVoxel(cold, 0, 1, 0, SimTestHelpers.FirstGasId, 2f, 200f);
 
@@ -538,12 +637,17 @@ public sealed class ThermodynamicsIntegrationTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(SimTestHelpers.Moles(afterOddTick, SimTestHelpers.FirstGasId, 0),
+            Assert.That(
+                SimTestHelpers.Moles(afterOddTick, SimTestHelpers.FirstGasId, 0),
                 Is.EqualTo(10f));
+
             Assert.That(afterOddTick.Temperature[0], Is.EqualTo(200f));
-            Assert.That(SimTestHelpers.Moles(afterEvenTick, SimTestHelpers.FirstGasId, 0),
+            Assert.That(
+                SimTestHelpers.Moles(afterEvenTick, SimTestHelpers.FirstGasId, 0),
                 Is.EqualTo(7.5000255f).Within(SimTestHelpers.Tolerance));
-            Assert.That(afterEvenTick.Temperature[0],
+
+            Assert.That(
+                afterEvenTick.Temperature[0],
                 Is.EqualTo(200.6666576f).Within(SimTestHelpers.Tolerance));
         });
     }
@@ -568,9 +672,12 @@ public sealed class ThermodynamicsIntegrationTests
         var snapshot = simulation.GetChunkSnapshot(chunk);
         Assert.Multiple(() =>
         {
-            Assert.That(SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 0),
+            Assert.That(
+                SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 0),
                 Is.EqualTo(7.4996104f).Within(SimTestHelpers.Tolerance));
-            Assert.That(snapshot.Temperature[0],
+
+            Assert.That(
+                snapshot.Temperature[0],
                 Is.EqualTo(201.667013f).Within(SimTestHelpers.Tolerance));
         });
     }
@@ -631,9 +738,12 @@ public sealed class ThermodynamicsIntegrationTests
         var snapshot = simulation.GetChunkSnapshot(chunk);
         Assert.Multiple(() =>
         {
-            Assert.That(SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 0),
+            Assert.That(
+                SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 0),
                 Is.EqualTo(5.000051f).Within(SimTestHelpers.Tolerance));
-            Assert.That(snapshot.Temperature[0],
+
+            Assert.That(
+                snapshot.Temperature[0],
                 Is.EqualTo(201.9999592f).Within(SimTestHelpers.Tolerance));
         });
     }
@@ -659,10 +769,17 @@ public sealed class ThermodynamicsIntegrationTests
                 DiffusionCoefficient = 0f
             }
         ];
+
         using var simulation = new AtmosSimulation(config, 1, 1, 1);
         var chunk = SimTestHelpers.CreateOpenChunk(simulation, default);
-        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasId,
-            initialMoles, initialTemperature);
+        simulation.AddGasToVoxel(
+            chunk,
+            0,
+            0,
+            0,
+            SimTestHelpers.FirstGasId,
+            initialMoles,
+            initialTemperature);
 
         simulation.Tick();
         simulation.Tick();
@@ -670,11 +787,15 @@ public sealed class ThermodynamicsIntegrationTests
         var snapshot = simulation.GetChunkSnapshot(chunk);
         float remainingMoles = SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 0);
         float finalTemperature = snapshot.Temperature[0];
-        double partialPressure = remainingMoles * AtmosPhysicalConstants.MolarGasConstant *
-            finalTemperature / config.VoxelVolume;
+        double partialPressure = remainingMoles *
+                                 AtmosPhysicalConstants.MolarGasConstant *
+                                 finalTemperature /
+                                 config.VoxelVolume;
+
         double exponent = -config.GasRegistry[0].MolarEnthalpyOfVaporization /
                           AtmosPhysicalConstants.MolarGasConstant *
                           (1d / finalTemperature - 1d / config.GasRegistry[0].BoilingPoint);
+
         double saturationPressure = config.SaturationReferencePressure * Math.Exp(exponent);
         double relativeSaturationError = Math.Abs(partialPressure - saturationPressure) /
                                          saturationPressure;
@@ -699,13 +820,17 @@ public sealed class ThermodynamicsIntegrationTests
         const float molarEnthalpyOfVaporization = 5000f;
         const float equilibriumCondensedMoles = 4f;
         const float condensationRateFactor = 0.5f;
-        float molarInternalEnergyOfVaporization = MathF.Max(0f,
+        float molarInternalEnergyOfVaporization = MathF.Max(
+            0f,
             molarEnthalpyOfVaporization -
             AtmosPhysicalConstants.MolarGasConstant * initialTemperature);
+
         float equilibriumRemainingHeatCapacity =
             (initialVaporMoles - equilibriumCondensedMoles + inertMoles) * molarHeatCapacity;
+
         float equilibriumTemperature = initialTemperature +
-                                       equilibriumCondensedMoles / equilibriumRemainingHeatCapacity *
+                                       equilibriumCondensedMoles /
+                                       equilibriumRemainingHeatCapacity *
                                        molarInternalEnergyOfVaporization;
 
         var config = SimTestHelpers.CreateDeterministicConfig();
@@ -714,6 +839,7 @@ public sealed class ThermodynamicsIntegrationTests
             (initialVaporMoles - equilibriumCondensedMoles) *
             (AtmosPhysicalConstants.MolarGasConstant / config.VoxelVolume) *
             equilibriumTemperature;
+
         config.GasRegistry =
         [
             new GasProperties
@@ -732,12 +858,26 @@ public sealed class ThermodynamicsIntegrationTests
                 DiffusionCoefficient = 0f
             }
         ];
+
         using var simulation = new AtmosSimulation(config, 1, 1, 1);
         var chunk = SimTestHelpers.CreateOpenChunk(simulation, default);
-        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasId,
-            initialVaporMoles, initialTemperature);
-        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.SecondGasId,
-            inertMoles, initialTemperature);
+        simulation.AddGasToVoxel(
+            chunk,
+            0,
+            0,
+            0,
+            SimTestHelpers.FirstGasId,
+            initialVaporMoles,
+            initialTemperature);
+
+        simulation.AddGasToVoxel(
+            chunk,
+            0,
+            0,
+            0,
+            SimTestHelpers.SecondGasId,
+            inertMoles,
+            initialTemperature);
 
         simulation.Tick();
         simulation.Tick();
@@ -746,17 +886,25 @@ public sealed class ThermodynamicsIntegrationTests
         float expectedVaporMoles = initialVaporMoles - expectedCondensedMoles;
         float expectedRemainingHeatCapacity =
             (expectedVaporMoles + inertMoles) * molarHeatCapacity;
+
         float expectedTemperature = initialTemperature +
-                                    expectedCondensedMoles / expectedRemainingHeatCapacity *
+                                    expectedCondensedMoles /
+                                    expectedRemainingHeatCapacity *
                                     molarInternalEnergyOfVaporization;
+
         var snapshot = simulation.GetChunkSnapshot(chunk);
         Assert.Multiple(() =>
         {
-            Assert.That(SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 0),
+            Assert.That(
+                SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 0),
                 Is.EqualTo(expectedVaporMoles).Within(0.001f));
-            Assert.That(SimTestHelpers.Moles(snapshot, SimTestHelpers.SecondGasId, 0),
+
+            Assert.That(
+                SimTestHelpers.Moles(snapshot, SimTestHelpers.SecondGasId, 0),
                 Is.EqualTo(inertMoles));
-            Assert.That(snapshot.Temperature[0],
+
+            Assert.That(
+                snapshot.Temperature[0],
                 Is.EqualTo(expectedTemperature).Within(0.001f));
         });
     }
@@ -771,11 +919,18 @@ public sealed class ThermodynamicsIntegrationTests
         gas.MolarHeatCapacityAtConstantVolume = 1e-9f;
         gas.MolarEnthalpyOfVaporization =
             AtmosPhysicalConstants.MolarGasConstant * initialTemperature;
+
         config.GasRegistry[SimTestHelpers.FirstGasId] = gas;
         using var simulation = new AtmosSimulation(config, 1, 1, 1);
         var chunk = SimTestHelpers.CreateOpenChunk(simulation, default);
-        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasId,
-            10f, initialTemperature);
+        simulation.AddGasToVoxel(
+            chunk,
+            0,
+            0,
+            0,
+            SimTestHelpers.FirstGasId,
+            10f,
+            initialTemperature);
 
         simulation.Tick();
         simulation.Tick();
@@ -783,11 +938,15 @@ public sealed class ThermodynamicsIntegrationTests
         var snapshot = simulation.GetChunkSnapshot(chunk);
         Assert.Multiple(() =>
         {
-            Assert.That(gas.MolarEnthalpyOfVaporization -
-                        AtmosPhysicalConstants.MolarGasConstant * initialTemperature,
+            Assert.That(
+                gas.MolarEnthalpyOfVaporization -
+                AtmosPhysicalConstants.MolarGasConstant * initialTemperature,
                 Is.Zero);
-            Assert.That(SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 0),
+
+            Assert.That(
+                SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 0),
                 Is.EqualTo(5f).Within(SimTestHelpers.Tolerance));
+
             Assert.That(snapshot.Temperature[0], Is.EqualTo(initialTemperature));
         });
     }
@@ -808,13 +967,17 @@ public sealed class ThermodynamicsIntegrationTests
         simulation.Tick();
         simulation.Tick();
 
-        double exponent = -gas.MolarEnthalpyOfVaporization / AtmosPhysicalConstants.MolarGasConstant *
+        double exponent = -gas.MolarEnthalpyOfVaporization /
+                          AtmosPhysicalConstants.MolarGasConstant *
                           (1d / temperature - 1d / gas.BoilingPoint);
+
         double saturationPressure = config.SaturationReferencePressure * Math.Exp(exponent);
         double expectedCondensedMoles =
             (initialMoles * temperature - saturationPressure) / temperature * config.CondensationRateFactor;
+
         var snapshot = simulation.GetChunkSnapshot(chunk);
-        Assert.That(SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 0),
+        Assert.That(
+            SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 0),
             Is.EqualTo(initialMoles - expectedCondensedMoles).Within(SimTestHelpers.Tolerance));
     }
 
@@ -837,8 +1000,10 @@ public sealed class ThermodynamicsIntegrationTests
         var snapshot = simulation.GetChunkSnapshot(chunk);
         Assert.Multiple(() =>
         {
-            Assert.That(SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 0),
+            Assert.That(
+                SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 0),
                 Is.EqualTo(1.5f).Within(SimTestHelpers.Tolerance));
+
             Assert.That(snapshot.Temperature[0], Is.EqualTo(200f));
             Assert.That(float.IsFinite(snapshot.Temperature[0]), Is.True);
         });
@@ -859,8 +1024,12 @@ public sealed class ThermodynamicsIntegrationTests
         simulation.Tick();
         simulation.Tick();
 
-        Assert.That(SimTestHelpers.Moles(simulation.GetChunkSnapshot(chunk),
-            SimTestHelpers.FirstGasId, 0), Is.EqualTo(10f));
+        Assert.That(
+            SimTestHelpers.Moles(
+                simulation.GetChunkSnapshot(chunk),
+                SimTestHelpers.FirstGasId,
+                0),
+            Is.EqualTo(10f));
     }
 
     [Test]
@@ -899,10 +1068,12 @@ public sealed class ThermodynamicsIntegrationTests
                 DiffusionCoefficient = 0f
             }
         ];
+
         return config;
     }
 
-    private static AtmosChunkHandle CreateIsolatedVoxel(AtmosSimulation simulation, Int3 position,
+    private static AtmosChunkHandle CreateIsolatedVoxel(
+        AtmosSimulation simulation, Int3 position,
         int x, int y, int z, VoxelClassification classification, float temperature)
     {
         var chunk = simulation.CreateAndRegisterChunk(position);

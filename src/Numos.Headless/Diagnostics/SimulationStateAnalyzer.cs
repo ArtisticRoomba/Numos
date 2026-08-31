@@ -25,14 +25,15 @@ public static class SimulationStateAnalyzer
             options.MaxIssueLocations,
             0,
             SimulationObservationOptions.MaximumMaxIssueLocations);
+
         AtmosChunkHandle[] handles = SelectHandles(simulation.GetChunkHandles(), options.Chunk);
-        var requests = handles
+        AtmosChunkSnapshotRequest[] requests = handles
             .Select(static handle => new AtmosChunkSnapshotRequest(
                 handle.Position,
-                default,
-                AtmosChunkSnapshotFields.All))
+                default))
             .ToArray();
-        AtmosChunkSnapshotBatch batch = simulation.GetChangedChunkSnapshots(requests);
+
+        var batch = simulation.GetChangedChunkSnapshots(requests);
         AtmosChunkSnapshot[] snapshots = batch.ChangedChunks
             .OrderBy(static snapshot => snapshot.GridPosition.X)
             .ThenBy(static snapshot => snapshot.GridPosition.Y)
@@ -44,27 +45,29 @@ public static class SimulationStateAnalyzer
         var global = new SummaryAccumulator(config);
         var chunkReports = new ChunkStateReport[snapshots.Length];
 
-        for (var chunkIndex = 0; chunkIndex < snapshots.Length; chunkIndex++)
+        for (int chunkIndex = 0; chunkIndex < snapshots.Length; chunkIndex++)
         {
-            AtmosChunkSnapshot snapshot = snapshots[chunkIndex];
+            var snapshot = snapshots[chunkIndex];
             var chunkSummary = new SummaryAccumulator(config);
             var voxelReports = new List<VoxelStateReport>();
             selectedVoxels.TryGetValue(snapshot.GridPosition, out HashSet<int>? selectedIndices);
 
             int voxelCount = GetVoxelCount(snapshot.Dimensions);
-            for (var localIndex = 0; localIndex < voxelCount; localIndex++)
+            for (int localIndex = 0; localIndex < voxelCount; localIndex++)
             {
-                Coordinate localPosition = GetCoordinates(localIndex, snapshot.Dimensions);
-                VoxelAnalysis voxel = chunkSummary.AddVoxel(
+                var localPosition = GetCoordinates(localIndex, snapshot.Dimensions);
+                var voxel = chunkSummary.AddVoxel(
                     snapshot,
                     localIndex,
                     localPosition,
                     issues);
+
                 global.AddVoxel(snapshot, localIndex, localPosition, null);
 
                 bool explicitlySelected = selectedIndices?.Contains(localIndex) == true;
                 bool includeFromFullScan = options.IncludeVoxels &&
                                            (!options.OnlyGasBearingVoxels || voxel.IsGasBearing);
+
                 if (explicitlySelected || includeFromFullScan)
                     voxelReports.Add(CreateVoxelReport(snapshot, localIndex, localPosition, voxel, config));
             }
@@ -80,6 +83,7 @@ public static class SimulationStateAnalyzer
                 snapshot.ActiveGasCount,
                 chunkSummary.ToChunkReport(),
                 voxelReports.ToArray());
+
             global.AddChunk(snapshot);
         }
 
@@ -102,8 +106,8 @@ public static class SimulationStateAnalyzer
         if (!selectedChunk.HasValue)
             return handles;
 
-        Int3 position = selectedChunk.Value.ToInt3();
-        foreach (AtmosChunkHandle handle in handles)
+        var position = selectedChunk.Value.ToInt3();
+        foreach (var handle in handles)
         {
             if (handle.Position == position)
                 return [handle];
@@ -120,10 +124,10 @@ public static class SimulationStateAnalyzer
         if (options.Voxels == null || options.Voxels.Count == 0)
             return result;
 
-        var snapshotsByPosition = snapshots.ToDictionary(static snapshot => snapshot.GridPosition);
-        foreach (VoxelSelection selection in options.Voxels)
+        Dictionary<Int3, AtmosChunkSnapshot> snapshotsByPosition = snapshots.ToDictionary(static snapshot => snapshot.GridPosition);
+        foreach (var selection in options.Voxels)
         {
-            Int3 chunkPosition = selection.Chunk.ToInt3();
+            var chunkPosition = selection.Chunk.ToInt3();
             if (options.Chunk.HasValue && options.Chunk.Value.ToInt3() != chunkPosition)
             {
                 throw new ArgumentException(
@@ -131,13 +135,16 @@ public static class SimulationStateAnalyzer
                     nameof(options));
             }
 
-            if (!snapshotsByPosition.TryGetValue(chunkPosition, out AtmosChunkSnapshot snapshot))
+            if (!snapshotsByPosition.TryGetValue(chunkPosition, out var snapshot))
                 throw new KeyNotFoundException($"No chunk is registered at {chunkPosition}.");
 
-            Coordinate voxel = selection.Voxel;
-            if (voxel.X < 0 || voxel.X >= snapshot.Dimensions.X ||
-                voxel.Y < 0 || voxel.Y >= snapshot.Dimensions.Y ||
-                voxel.Z < 0 || voxel.Z >= snapshot.Dimensions.Z)
+            var voxel = selection.Voxel;
+            if (voxel.X < 0 ||
+                voxel.X >= snapshot.Dimensions.X ||
+                voxel.Y < 0 ||
+                voxel.Y >= snapshot.Dimensions.Y ||
+                voxel.Z < 0 ||
+                voxel.Z >= snapshot.Dimensions.Z)
             {
                 throw new ArgumentOutOfRangeException(
                     nameof(options),
@@ -145,8 +152,10 @@ public static class SimulationStateAnalyzer
                     $"{snapshot.Dimensions.X}, {snapshot.Dimensions.Y}, {snapshot.Dimensions.Z}.");
             }
 
-            int localIndex = voxel.X + snapshot.Dimensions.X *
-                (voxel.Y + snapshot.Dimensions.Y * voxel.Z);
+            int localIndex = voxel.X +
+                             snapshot.Dimensions.X *
+                             (voxel.Y + snapshot.Dimensions.Y * voxel.Z);
+
             if (!result.TryGetValue(chunkPosition, out HashSet<int>? indices))
             {
                 indices = [];
@@ -162,9 +171,9 @@ public static class SimulationStateAnalyzer
     private static SimulationConfigurationReport CreateConfigurationReport(AtmosConfig config)
     {
         var gases = new GasConfigurationReport[config.GasRegistry.Count];
-        for (var gasId = 0; gasId < gases.Length; gasId++)
+        for (int gasId = 0; gasId < gases.Length; gasId++)
         {
-            GasProperties gas = config.GasRegistry[gasId];
+            var gas = config.GasRegistry[gasId];
             gases[gasId] = new GasConfigurationReport(
                 gasId,
                 gas.Name,
@@ -204,6 +213,7 @@ public static class SimulationStateAnalyzer
             AtmosSolverKind.Custom => "custom",
             _ => throw new ArgumentOutOfRangeException(nameof(step))
         };
+
         return new SolverStepReport(step.Name, step.IsEnabled, kind);
     }
 
@@ -221,6 +231,7 @@ public static class SimulationStateAnalyzer
                 GetGasName(config, gas.GasId),
                 gas.Moles[localIndex]))
             .ToArray();
+
         return new VoxelStateReport(
             localIndex,
             localPosition,
@@ -255,23 +266,47 @@ public static class SimulationStateAnalyzer
         return new Coordinate(x, y, z);
     }
 
+    private static float GetEffectiveTemperature(AtmosConfig config, float temperature)
+    {
+        if (float.IsFinite(temperature) && temperature > 0f)
+            return temperature;
+
+        return float.IsFinite(config.DefaultTemperatureFallback) && config.DefaultTemperatureFallback > 0f
+            ? config.DefaultTemperatureFallback
+            : AtmosPhysicalConstants.RoomTemperature;
+    }
+
+    private static float GetMolarHeatCapacity(AtmosConfig config, int gasId)
+    {
+        float fallback = float.IsFinite(config.DefaultMolarHeatCapacityAtConstantVolume) &&
+                         config.DefaultMolarHeatCapacityAtConstantVolume > 0f
+            ? config.DefaultMolarHeatCapacityAtConstantVolume
+            : AtmosPhysicalConstants.IdealDiatomicMolarHeatCapacityAtConstantVolume;
+
+        if (gasId < 0 || gasId >= config.GasRegistry.Count)
+            return fallback;
+
+        float configured = config.GasRegistry[gasId].MolarHeatCapacityAtConstantVolume;
+        return float.IsFinite(configured) && configured > 0f ? configured : fallback;
+    }
+
     private sealed class SummaryAccumulator(AtmosConfig config)
     {
+        private readonly AnomalyCountsAccumulator _anomalies = new();
         private readonly Dictionary<int, double> _gasMoles = [];
         private readonly FiniteStatisticsAccumulator _pressure = new();
         private readonly FiniteStatisticsAccumulator _temperature = new();
-        private readonly AnomalyCountsAccumulator _anomalies = new();
-        private int _chunkCount;
-        private int _voxelCount;
-        private int _gasCapableVoxelCount;
-        private int _solidVoxelCount;
-        private int _voidVoxelCount;
-        private int _gasBearingVoxelCount;
         private int _activeAirCount;
         private int _activeGasChannelCount;
         private int _awakeChunkCount;
-        private double _totalMoles;
+        private int _chunkCount;
+        private int _gasBearingVoxelCount;
+        private int _gasCapableVoxelCount;
         private double _sensibleEnergy;
+        private int _solidVoxelCount;
+        private double _totalMoles;
+        private int _voidVoxelCount;
+        private int _voxelCount;
 
         internal VoxelAnalysis AddVoxel(
             AtmosChunkSnapshot snapshot,
@@ -302,7 +337,7 @@ public static class SimulationStateAnalyzer
             double voxelEnergy = 0d;
             bool isGasBearing = false;
             float effectiveTemperature = GetEffectiveTemperature(config, temperature);
-            foreach (GasSnapshot gas in snapshot.Gases)
+            foreach (var gas in snapshot.Gases)
             {
                 float moles = gas.Moles[localIndex];
                 voxelMoles += moles;
@@ -317,6 +352,7 @@ public static class SimulationStateAnalyzer
 
             if (isGasBearing)
                 _gasBearingVoxelCount++;
+
             _totalMoles += voxelMoles;
             _sensibleEnergy += voxelEnergy;
             return new VoxelAnalysis(isGasCapable, isGasBearing, voxelMoles, voxelEnergy);
@@ -388,41 +424,44 @@ public static class SimulationStateAnalyzer
             if (!float.IsFinite(value))
             {
                 _anomalies.AddNonFinite(field);
-                issues?.Add(new AnomalyIssueReport(
-                    $"nonFinite{field}",
-                    Coordinate.From(snapshot.GridPosition),
-                    localPosition,
-                    localIndex,
-                    gasId,
-                    value));
+                issues?.Add(
+                    new AnomalyIssueReport(
+                        $"nonFinite{field}",
+                        Coordinate.From(snapshot.GridPosition),
+                        localPosition,
+                        localIndex,
+                        gasId,
+                        value));
             }
             else if (value < 0f)
             {
                 _anomalies.AddNegative(field);
-                issues?.Add(new AnomalyIssueReport(
-                    $"negative{field}",
-                    Coordinate.From(snapshot.GridPosition),
-                    localPosition,
-                    localIndex,
-                    gasId,
-                    value));
+                issues?.Add(
+                    new AnomalyIssueReport(
+                        $"negative{field}",
+                        Coordinate.From(snapshot.GridPosition),
+                        localPosition,
+                        localIndex,
+                        gasId,
+                        value));
             }
         }
     }
 
     private sealed class FiniteStatisticsAccumulator
     {
-        private int _sampleCount;
         private int _finiteCount;
-        private double _sum;
-        private double _minimum = double.PositiveInfinity;
         private double _maximum = double.NegativeInfinity;
+        private double _minimum = double.PositiveInfinity;
+        private int _sampleCount;
+        private double _sum;
 
         internal void Add(float value)
         {
             _sampleCount++;
             if (!float.IsFinite(value))
                 return;
+
             _finiteCount++;
             _sum += value;
             _minimum = Math.Min(_minimum, value);
@@ -443,12 +482,12 @@ public static class SimulationStateAnalyzer
 
     private sealed class AnomalyCountsAccumulator
     {
-        private int _nonFinitePressure;
+        private int _negativeMoles;
         private int _negativePressure;
-        private int _nonFiniteTemperature;
         private int _negativeTemperature;
         private int _nonFiniteMoles;
-        private int _negativeMoles;
+        private int _nonFinitePressure;
+        private int _nonFiniteTemperature;
 
         internal void AddNonFinite(string field)
         {
@@ -494,27 +533,6 @@ public static class SimulationStateAnalyzer
             else
                 Truncated = true;
         }
-    }
-
-    private static float GetEffectiveTemperature(AtmosConfig config, float temperature)
-    {
-        if (float.IsFinite(temperature) && temperature > 0f)
-            return temperature;
-        return float.IsFinite(config.DefaultTemperatureFallback) && config.DefaultTemperatureFallback > 0f
-            ? config.DefaultTemperatureFallback
-            : AtmosPhysicalConstants.RoomTemperature;
-    }
-
-    private static float GetMolarHeatCapacity(AtmosConfig config, int gasId)
-    {
-        float fallback = float.IsFinite(config.DefaultMolarHeatCapacityAtConstantVolume) &&
-                         config.DefaultMolarHeatCapacityAtConstantVolume > 0f
-            ? config.DefaultMolarHeatCapacityAtConstantVolume
-            : AtmosPhysicalConstants.IdealDiatomicMolarHeatCapacityAtConstantVolume;
-        if (gasId < 0 || gasId >= config.GasRegistry.Count)
-            return fallback;
-        float configured = config.GasRegistry[gasId].MolarHeatCapacityAtConstantVolume;
-        return float.IsFinite(configured) && configured > 0f ? configured : fallback;
     }
 
     private readonly record struct VoxelAnalysis(

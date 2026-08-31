@@ -6,16 +6,16 @@ namespace Numos.Headless;
 internal static class HeadlessApplication
 {
     private const string HelpText = """
-        Numos.Headless - deterministic JSONL access to the Numos simulation
+                                    Numos.Headless - deterministic JSONL access to the Numos simulation
 
-        Usage:
-          dotnet run --project src/Numos.Headless
-          dotnet run --project src/Numos.Headless -- --script <experiment.jsonl>
-          dotnet run --project src/Numos.Headless -- <experiment.jsonl>
+                                    Usage:
+                                      dotnet run --project src/Numos.Headless
+                                      dotnet run --project src/Numos.Headless -- --script <experiment.jsonl>
+                                      dotnet run --project src/Numos.Headless -- <experiment.jsonl>
 
-        With no script, one JSON request is read from stdin per line. Exactly one compact
-        JSON response is written to stdout for each request. See docs/headless_runner.md.
-        """;
+                                    With no script, one JSON request is read from stdin per line. Exactly one compact
+                                    JSON response is written to stdout for each request. See docs/headless_runner.md.
+                                    """;
 
     internal static async Task<int> RunAsync(
         string[] args,
@@ -73,12 +73,15 @@ internal static class HeadlessApplication
                     ExceptionType = exception.GetType().Name
                 }
             };
+
             await HeadlessCommandHost.WriteResponseAsync(output, response, cancellationToken);
             return 2;
         }
 
         using (script)
         using (var host = new HeadlessCommandHost())
+        {
             return await host.RunAsync(script, output, error, cancellationToken);
+        }
     }
 }

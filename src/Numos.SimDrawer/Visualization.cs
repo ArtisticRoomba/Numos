@@ -347,6 +347,7 @@ public sealed class VisualizationRegistry
         ArgumentNullException.ThrowIfNull(method);
         if (string.IsNullOrWhiteSpace(method.Id))
             throw new ArgumentException("A visualization method must have a non-empty ID.", nameof(method));
+
         if (!_byId.TryAdd(method.Id, method))
             throw new InvalidOperationException($"A visualization method with ID '{method.Id}' is already registered.");
 
@@ -385,6 +386,53 @@ public sealed class VisualizationRegistry
         return registry;
     }
 
+    private static float Normalize(float value, VisualizationRange range)
+    {
+        if (!float.IsFinite(value))
+            return value > 0f ? 1f : 0f;
+
+        if (range.Maximum <= range.Minimum)
+            return 0.5f;
+
+        float normalized = Math.Clamp((value - range.Minimum) / (range.Maximum - range.Minimum), 0f, 1f);
+        int resolution = Math.Max(range.Resolution, 1);
+        return resolution == 1
+            ? 0.5f
+            : MathF.Round(normalized * (resolution - 1)) / (resolution - 1);
+    }
+
+    /// <summary>
+    ///     Gets the stable display color for a gas ID.
+    /// </summary>
+    /// <param name="gasId">Gas registry ID.</param>
+    /// <returns>The assigned color.</returns>
+    public static ColorRgba ColorForGasId(int gasId)
+    {
+        uint hash = unchecked((uint)gasId) * 2654435761u;
+        float hue = (hash & 0xFFFF) / 65535f;
+        return HsvToRgb(hue, 0.72f, 0.9f);
+    }
+
+    private static ColorRgba HsvToRgb(float hue, float saturation, float value)
+    {
+        float scaled = hue * 6f;
+        int sector = (int)MathF.Floor(scaled) % 6;
+        float fraction = scaled - MathF.Floor(scaled);
+        float p = value * (1f - saturation);
+        float q = value * (1f - fraction * saturation);
+        float t = value * (1f - (1f - fraction) * saturation);
+
+        return sector switch
+        {
+            0 => new ColorRgba(value, t, p),
+            1 => new ColorRgba(q, value, p),
+            2 => new ColorRgba(p, value, t),
+            3 => new ColorRgba(p, q, value),
+            4 => new ColorRgba(t, p, value),
+            _ => new ColorRgba(value, p, q)
+        };
+    }
+
     private sealed class VoxelClassificationVisualization : IVisualizationMethod
     {
         private readonly static ColorRgba UnassignedColor = new(0.35f, 0.35f, 0.38f);
@@ -408,6 +456,7 @@ public sealed class VisualizationRegistry
                 VoxelClassification.RoomUnassigned => UnassignedColor,
                 _ => ColorForRoom(sample.RoomId)
             };
+
             return true;
         }
 
@@ -435,7 +484,7 @@ public sealed class VisualizationRegistry
                 const float saturation = 0.72f;
                 const float value = 0.9f;
                 float scaled = hue * 6f;
-                var sector = (int)scaled;
+                int sector = (int)scaled;
                 float fraction = scaled - sector;
                 float p = value * (1f - saturation);
                 float q = value * (1f - saturation * fraction);
@@ -471,6 +520,7 @@ public sealed class VisualizationRegistry
             color = normalized < 0.5f
                 ? ColorRgba.Lerp(Cold, Temperate, normalized * 2f)
                 : ColorRgba.Lerp(Temperate, Hot, (normalized - 0.5f) * 2f);
+
             return true;
         }
 
@@ -546,7 +596,7 @@ public sealed class VisualizationRegistry
                 const ulong offsetBasis = 14695981039346656037UL;
                 const ulong prime = 1099511628211UL;
                 ulong hash = offsetBasis;
-                for (var gasId = 0; gasId < config.GasRegistry.Count; gasId++)
+                for (int gasId = 0; gasId < config.GasRegistry.Count; gasId++)
                 {
                     hash ^= unchecked((uint)gasId);
                     hash *= prime;
@@ -570,13 +620,14 @@ public sealed class VisualizationRegistry
             color = sample.PrimaryGasId < 0
                 ? new ColorRgba(0.12f, 0.12f, 0.14f)
                 : ColorForGasId(sample.PrimaryGasId);
+
             return true;
         }
 
         public VisualizationLegend CreateLegend(IReadOnlyCollection<int> activeGasIds)
         {
             var ids = new SortedSet<int>(activeGasIds);
-            for (var gasId = 0; gasId < config.GasRegistry.Count; gasId++)
+            for (int gasId = 0; gasId < config.GasRegistry.Count; gasId++)
                 ids.Add(gasId);
 
             var entries = new List<VisualizationLegendEntry>
@@ -589,6 +640,7 @@ public sealed class VisualizationRegistry
                 string label = gasId >= 0 && gasId < config.GasRegistry.Count
                     ? config.GasRegistry[gasId].Name
                     : $"Gas {gasId}";
+
                 entries.Add(new VisualizationLegendEntry(label, ColorForGasId(gasId), gasId));
             }
 
@@ -622,52 +674,5 @@ public sealed class VisualizationRegistry
                 VisualizationLegendKind.Categories,
                 [new VisualizationLegendEntry("Visible", ActiveColor)]);
         }
-    }
-
-    private static float Normalize(float value, VisualizationRange range)
-    {
-        if (!float.IsFinite(value))
-            return value > 0f ? 1f : 0f;
-
-        if (range.Maximum <= range.Minimum)
-            return 0.5f;
-
-        float normalized = Math.Clamp((value - range.Minimum) / (range.Maximum - range.Minimum), 0f, 1f);
-        int resolution = Math.Max(range.Resolution, 1);
-        return resolution == 1
-            ? 0.5f
-            : MathF.Round(normalized * (resolution - 1)) / (resolution - 1);
-    }
-
-    /// <summary>
-    ///     Gets the stable display color for a gas ID.
-    /// </summary>
-    /// <param name="gasId">Gas registry ID.</param>
-    /// <returns>The assigned color.</returns>
-    public static ColorRgba ColorForGasId(int gasId)
-    {
-        uint hash = unchecked((uint)gasId) * 2654435761u;
-        float hue = (hash & 0xFFFF) / 65535f;
-        return HsvToRgb(hue, 0.72f, 0.9f);
-    }
-
-    private static ColorRgba HsvToRgb(float hue, float saturation, float value)
-    {
-        float scaled = hue * 6f;
-        int sector = (int)MathF.Floor(scaled) % 6;
-        float fraction = scaled - MathF.Floor(scaled);
-        float p = value * (1f - saturation);
-        float q = value * (1f - fraction * saturation);
-        float t = value * (1f - (1f - fraction) * saturation);
-
-        return sector switch
-        {
-            0 => new ColorRgba(value, t, p),
-            1 => new ColorRgba(q, value, p),
-            2 => new ColorRgba(p, value, t),
-            3 => new ColorRgba(p, q, value),
-            4 => new ColorRgba(t, p, value),
-            _ => new ColorRgba(value, p, q)
-        };
     }
 }

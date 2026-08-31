@@ -7,7 +7,8 @@ namespace Numos.CoreSim.Solvers;
 /// </summary>
 internal sealed class AtmosSolverExecutionContext
 {
-    internal AtmosSolverExecutionContext(IAtmosSolverWorld world, AtmosChunk[] chunks,
+    internal AtmosSolverExecutionContext(
+        IAtmosSolverWorld world, AtmosChunk[] chunks,
         AtmosSolverConfigSnapshot config, int tickCount)
     {
         World = world;

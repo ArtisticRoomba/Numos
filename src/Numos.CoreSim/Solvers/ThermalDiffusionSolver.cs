@@ -11,7 +11,8 @@ namespace Numos.CoreSim.Solvers;
 /// </summary>
 internal sealed class ThermalDiffusionSolver
 {
-    internal int Solve(AtmosChunk chunk, AtmosSolverConfigSnapshot config,
+    internal int Solve(
+        AtmosChunk chunk, AtmosSolverConfigSnapshot config,
         ThermalBoundaryEvent[] boundaryBuffer)
     {
         JoulePerKelvin thermalConductance = config.ThermalConductance;
@@ -25,8 +26,7 @@ internal sealed class ThermalDiffusionSolver
 
         try
         {
-            int boundaryCount = AccumulateConductancesAndBoundaries(
-                chunk, config, incidentConductances, boundaryBuffer);
+            int boundaryCount = AccumulateConductancesAndBoundaries(chunk, config, incidentConductances, boundaryBuffer);
             AccumulateEnergyDeltas(chunk, config, incidentConductances, energyDeltas);
             ApplyEnergyDeltas(chunk, config, energyDeltas);
             return boundaryCount;
@@ -38,25 +38,43 @@ internal sealed class ThermalDiffusionSolver
         }
     }
 
-    private static int AccumulateConductancesAndBoundaries(AtmosChunk chunk,
+    private static int AccumulateConductancesAndBoundaries(
+        AtmosChunk chunk,
         AtmosSolverConfigSnapshot config, JoulePerKelvin64[] incidentConductances,
         ThermalBoundaryEvent[] boundaryBuffer)
     {
-        var boundaryCount = 0;
-        for (var activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
+        int boundaryCount = 0;
+        for (int activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
         {
             ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
             if (!TryGetThermalState(chunk, config, voxelIndex, out _, out JoulePerKelvin heatCapacity))
                 continue;
 
-            Int3 position = chunk.GetXyzInt3(voxelIndex);
-            AccumulateConductance(chunk, config, position + Int3.PosX, voxelIndex, heatCapacity,
+            var position = chunk.GetXyzInt3(voxelIndex);
+            AccumulateConductance(
+                chunk,
+                config,
+                position + Int3.PosX,
+                voxelIndex,
+                heatCapacity,
                 incidentConductances);
-            AccumulateConductance(chunk, config, position + Int3.PosY, voxelIndex, heatCapacity,
+
+            AccumulateConductance(
+                chunk,
+                config,
+                position + Int3.PosY,
+                voxelIndex,
+                heatCapacity,
                 incidentConductances);
+
             if (chunk.Depth > 1)
             {
-                AccumulateConductance(chunk, config, position + Int3.PosZ, voxelIndex, heatCapacity,
+                AccumulateConductance(
+                    chunk,
+                    config,
+                    position + Int3.PosZ,
+                    voxelIndex,
+                    heatCapacity,
                     incidentConductances);
             }
 
@@ -67,48 +85,84 @@ internal sealed class ThermalDiffusionSolver
         return boundaryCount;
     }
 
-    private static void AccumulateEnergyDeltas(AtmosChunk chunk, AtmosSolverConfigSnapshot config,
+    private static void AccumulateEnergyDeltas(
+        AtmosChunk chunk, AtmosSolverConfigSnapshot config,
         JoulePerKelvin64[] incidentConductances, Joule64[] energyDeltas)
     {
-        for (var activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
+        for (int activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
         {
             ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
-            if (!TryGetThermalState(chunk, config, voxelIndex, out Kelvin temperature,
+            if (!TryGetThermalState(
+                    chunk,
+                    config,
+                    voxelIndex,
+                    out Kelvin temperature,
                     out JoulePerKelvin heatCapacity))
                 continue;
 
-            Int3 position = chunk.GetXyzInt3(voxelIndex);
-            AccumulateFlux(chunk, config, position + Int3.PosX, voxelIndex, temperature, heatCapacity,
-                incidentConductances, energyDeltas);
-            AccumulateFlux(chunk, config, position + Int3.PosY, voxelIndex, temperature, heatCapacity,
-                incidentConductances, energyDeltas);
+            var position = chunk.GetXyzInt3(voxelIndex);
+            AccumulateFlux(
+                chunk,
+                config,
+                position + Int3.PosX,
+                voxelIndex,
+                temperature,
+                heatCapacity,
+                incidentConductances,
+                energyDeltas);
+
+            AccumulateFlux(
+                chunk,
+                config,
+                position + Int3.PosY,
+                voxelIndex,
+                temperature,
+                heatCapacity,
+                incidentConductances,
+                energyDeltas);
+
             if (chunk.Depth > 1)
             {
-                AccumulateFlux(chunk, config, position + Int3.PosZ, voxelIndex, temperature, heatCapacity,
-                    incidentConductances, energyDeltas);
+                AccumulateFlux(
+                    chunk,
+                    config,
+                    position + Int3.PosZ,
+                    voxelIndex,
+                    temperature,
+                    heatCapacity,
+                    incidentConductances,
+                    energyDeltas);
             }
         }
     }
 
-    private static void ApplyEnergyDeltas(AtmosChunk chunk, AtmosSolverConfigSnapshot config,
+    private static void ApplyEnergyDeltas(
+        AtmosChunk chunk, AtmosSolverConfigSnapshot config,
         Joule64[] energyDeltas)
     {
-        for (var activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
+        for (int activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
         {
             ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
             if (energyDeltas[voxelIndex] == 0f ||
-                !TryGetThermalState(chunk, config, voxelIndex, out Kelvin oldTemperature,
+                !TryGetThermalState(
+                    chunk,
+                    config,
+                    voxelIndex,
+                    out Kelvin oldTemperature,
                     out JoulePerKelvin heatCapacity))
                 continue;
 
-            chunk.Temperature[voxelIndex] = MathF.Max(0f,
+            chunk.Temperature[voxelIndex] = MathF.Max(
+                0f,
                 oldTemperature + (float)(energyDeltas[voxelIndex] / heatCapacity));
+
             chunk.TotalPressure[voxelIndex] =
                 AtmosSolverMath.CalculatePressureAtVoxel(config, chunk, voxelIndex);
         }
     }
 
-    private static void AccumulateConductance(AtmosChunk chunk, AtmosSolverConfigSnapshot config,
+    private static void AccumulateConductance(
+        AtmosChunk chunk, AtmosSolverConfigSnapshot config,
         Int3 neighborPosition, ushort voxelIndex, JoulePerKelvin currentHeatCapacity,
         JoulePerKelvin64[] incidentConductances)
     {
@@ -120,17 +174,26 @@ internal sealed class ThermalDiffusionSolver
         if (neighborRoom == VoxelClassification.RoomSolid ||
             neighborRoom == VoxelClassification.RoomVoid)
             return;
-        if (!TryGetThermalState(chunk, config, neighborIndex, out _,
+
+        if (!TryGetThermalState(
+                chunk,
+                config,
+                neighborIndex,
+                out _,
                 out JoulePerKelvin neighborHeatCapacity))
             return;
 
         JoulePerKelvin conductance = AtmosSolverMath.CalculateThermalConductance(
-            currentHeatCapacity, neighborHeatCapacity, config.ThermalConductance);
+            currentHeatCapacity,
+            neighborHeatCapacity,
+            config.ThermalConductance);
+
         incidentConductances[voxelIndex] += conductance;
         incidentConductances[neighborIndex] += conductance;
     }
 
-    private static void AccumulateFlux(AtmosChunk chunk, AtmosSolverConfigSnapshot config,
+    private static void AccumulateFlux(
+        AtmosChunk chunk, AtmosSolverConfigSnapshot config,
         Int3 neighborPosition, ushort voxelIndex, Kelvin currentTemperature,
         JoulePerKelvin currentHeatCapacity, JoulePerKelvin64[] incidentConductances,
         Joule64[] energyDeltas)
@@ -143,21 +206,34 @@ internal sealed class ThermalDiffusionSolver
         if (neighborRoom == VoxelClassification.RoomSolid ||
             neighborRoom == VoxelClassification.RoomVoid)
             return;
-        if (!TryGetThermalState(chunk, config, neighborIndex, out Kelvin neighborTemperature,
+
+        if (!TryGetThermalState(
+                chunk,
+                config,
+                neighborIndex,
+                out Kelvin neighborTemperature,
                 out JoulePerKelvin neighborHeatCapacity))
             return;
 
         JoulePerKelvin conductance = AtmosSolverMath.CalculateThermalConductance(
-            currentHeatCapacity, neighborHeatCapacity, config.ThermalConductance);
+            currentHeatCapacity,
+            neighborHeatCapacity,
+            config.ThermalConductance);
+
         JoulePerKelvin64 currentIncident = incidentConductances[voxelIndex];
         JoulePerKelvin64 neighborIncident = incidentConductances[neighborIndex];
         Debug.Assert(currentIncident > 0d && neighborIncident > 0d);
 
-        Scalar64 scale = Math.Min(1d, Math.Min(
-            currentHeatCapacity / currentIncident,
-            neighborHeatCapacity / neighborIncident));
-        Joule64 heatTransfer = scale * conductance *
+        Scalar64 scale = Math.Min(
+            1d,
+            Math.Min(
+                currentHeatCapacity / currentIncident,
+                neighborHeatCapacity / neighborIncident));
+
+        Joule64 heatTransfer = scale *
+                               conductance *
                                ((double)currentTemperature - neighborTemperature);
+
         if (heatTransfer == 0d)
             return;
 
@@ -165,7 +241,8 @@ internal sealed class ThermalDiffusionSolver
         energyDeltas[neighborIndex] += heatTransfer;
     }
 
-    private static bool TryGetThermalState(AtmosChunk chunk, AtmosSolverConfigSnapshot config,
+    private static bool TryGetThermalState(
+        AtmosChunk chunk, AtmosSolverConfigSnapshot config,
         ushort voxelIndex, out Kelvin temperature, out JoulePerKelvin heatCapacity)
     {
         heatCapacity = chunk.TotalHeatCapacity[voxelIndex];
@@ -182,12 +259,15 @@ internal sealed class ThermalDiffusionSolver
 
     private static bool IsBoundary(AtmosChunk chunk, Int3 position)
     {
-        return position.X == 0 || position.X == chunk.Width - 1 ||
-               position.Y == 0 || position.Y == chunk.Height - 1 ||
+        return position.X == 0 ||
+               position.X == chunk.Width - 1 ||
+               position.Y == 0 ||
+               position.Y == chunk.Height - 1 ||
                chunk.Depth > 1 && (position.Z == 0 || position.Z == chunk.Depth - 1);
     }
 
-    private static void AppendBoundaryEvent(ThermalBoundaryEvent[] buffer, ref int count,
+    private static void AppendBoundaryEvent(
+        ThermalBoundaryEvent[] buffer, ref int count,
         ushort voxelIndex)
     {
         // DefaultAtmosSolvers allocates one slot for every geometrically distinct boundary voxel.

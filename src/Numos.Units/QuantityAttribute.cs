@@ -7,8 +7,11 @@ namespace Numos.Units;
 ///     The attribute is metadata for compile-time analyzers. It does not wrap, convert, or otherwise alter the
 ///     annotated value at runtime.
 /// </remarks>
-[AttributeUsage(AttributeTargets.Field | AttributeTargets.Property | AttributeTargets.Parameter |
-                AttributeTargets.ReturnValue)]
+[AttributeUsage(
+    AttributeTargets.Field |
+    AttributeTargets.Property |
+    AttributeTargets.Parameter |
+    AttributeTargets.ReturnValue)]
 public sealed class QuantityAttribute : Attribute
 {
     /// <summary>Creates an annotation for a catalog quantity identifier.</summary>
