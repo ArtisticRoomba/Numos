@@ -139,17 +139,61 @@ public sealed class DimensionalAnalysisAnalyzer : DiagnosticAnalyzer
             if (operation.Parameter is null)
                 return;
 
-            var expected = GetSymbolQuantity(operation.Parameter);
-            var actual = Infer(operation.Value);
-            if (IsIncompatibleArgument(expected, actual))
+            var declared = GetSymbolQuantity(operation.Parameter);
+
+            switch (operation.Parameter.RefKind)
             {
-                context.ReportDiagnostic(
-                    Diagnostic.Create(
-                        Diagnostics.IncompatibleArgument,
-                        operation.Value.Syntax.GetLocation(),
-                        actual,
-                        operation.Parameter.Name,
-                        expected));
+                case RefKind.Out:
+                {
+                    if (operation.Value is IDiscardOperation)
+                        return;
+
+                    // Value flows parameter -> argument: does the argument's target
+                    // accept what the parameter is declared to produce?
+                    var target = Infer(operation.Value);
+                    if (IsIncompatibleAssignment(target, declared))
+                    {
+                        context.ReportDiagnostic(
+                            Diagnostic.Create(
+                                Diagnostics.IncompatibleArgument,
+                                operation.Value.Syntax.GetLocation(),
+                                declared,
+                                operation.Parameter.Name,
+                                target));
+                    }
+                    return;
+                }
+                case RefKind.Ref:
+                {
+                    // Value flows both ways: must be compatible in each direction.
+                    var target = Infer(operation.Value);
+                    if (IsIncompatibleAssignment(target, declared) || IsIncompatibleAssignment(declared, target))
+                    {
+                        context.ReportDiagnostic(
+                            Diagnostic.Create(
+                                Diagnostics.IncompatibleArgument,
+                                operation.Value.Syntax.GetLocation(),
+                                target,
+                                operation.Parameter.Name,
+                                declared));
+                    }
+                    return;
+                }
+                default:
+                {
+                    var actual = Infer(operation.Value);
+                    if (IsIncompatibleArgument(declared, actual))
+                    {
+                        context.ReportDiagnostic(
+                            Diagnostic.Create(
+                                Diagnostics.IncompatibleArgument,
+                                operation.Value.Syntax.GetLocation(),
+                                actual,
+                                operation.Parameter.Name,
+                                declared));
+                    }
+                    return;
+                }
             }
         }
 
@@ -272,6 +316,8 @@ public sealed class DimensionalAnalysisAnalyzer : DiagnosticAnalyzer
                     return QuantityValue.LiteralScalar;
                 case IDeclarationExpressionOperation declaration:
                     return Infer(declaration.Expression);
+                case IDiscardOperation:
+                    return QuantityValue.LiteralScalar;
                 default:
                     return QuantityValue.Unknown;
             }
@@ -317,6 +363,9 @@ public sealed class DimensionalAnalysisAnalyzer : DiagnosticAnalyzer
 
         private QuantityValue GetMethodReturnQuantity(IMethodSymbol method)
         {
+            if (method.MethodKind == MethodKind.PropertyGet && method.AssociatedSymbol is IPropertySymbol property)
+                return GetSymbolQuantity(property);
+
             var attributed = GetAttributeQuantity(method.GetReturnTypeAttributes(), QuantityAttributeName);
             return attributed.IsKnown ? attributed : GetSyntaxQuantity(method, false);
         }
