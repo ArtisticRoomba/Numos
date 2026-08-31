@@ -9,10 +9,10 @@
         <Project Path="tests\Numos.SimDrawer.Tests\Numos.SimDrawer.Tests.csproj"/>
         <Project Path="tests\Numos.Units.Analyzers.Tests\Numos.Units.Analyzers.Tests.csproj"/>
     </Folder>
-    
+
     <Project Path="src\Numos.API.Dangerous\Numos.API.Dangerous.csproj"/>
     <Project Path="src\Numos.API\Numos.API.csproj"/>
-    <Project Path="src\Numos.Collections\Numos.Collections.csproj" />
+    <Project Path="src\Numos.Collections\Numos.Collections.csproj"/>
     <Project Path="src\Numos.CoreSim\Numos.CoreSim.csproj"/>
     <Project Path="src\Numos.Headless\Numos.Headless.csproj"/>
     <Project Path="src\Numos.SimDrawer\Numos.SimDrawer.csproj"/>
