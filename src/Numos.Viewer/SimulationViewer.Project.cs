@@ -1,7 +1,7 @@
 using Numos.API;
 using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Primitives;
-using Numos.Collections;
+using Numos.Maths;
 using Numos.SimDrawer;
 
 namespace Numos.Viewer;

@@ -1,6 +1,6 @@
 using System.Collections.Concurrent;
 using Numos.CoreSim.Solvers;
-using Numos.Collections;
+using Numos.Maths;
 
 namespace Numos.CoreSim;
 

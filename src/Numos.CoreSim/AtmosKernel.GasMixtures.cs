@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.Solvers;
-using Numos.Collections;
+using Numos.Maths;
 
 namespace Numos.CoreSim;
 

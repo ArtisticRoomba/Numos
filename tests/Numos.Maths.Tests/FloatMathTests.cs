@@ -1,6 +1,6 @@
 using NUnit.Framework;
 
-namespace Numos.Collections.Tests;
+namespace Numos.Maths.Tests;
 
 [TestFixture]
 public sealed class FloatMathTests

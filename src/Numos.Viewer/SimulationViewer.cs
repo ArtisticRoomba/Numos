@@ -3,7 +3,7 @@ using ImGuiNET;
 using Numos.API;
 using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Snapshots;
-using Numos.Collections;
+using Numos.Maths;
 using Numos.SimDrawer;
 using Numos.Viewer.Rendering;
 using Numos.Viewer.Rendering.Viewport;

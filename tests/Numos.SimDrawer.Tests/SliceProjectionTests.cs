@@ -1,6 +1,6 @@
 using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Snapshots;
-using Numos.Collections;
+using Numos.Maths;
 
 namespace Numos.SimDrawer.Tests;
 

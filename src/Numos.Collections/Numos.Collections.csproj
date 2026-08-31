@@ -6,11 +6,16 @@
         <TargetFramework>net10.0</TargetFramework>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
+        <RootNamespace>Numos.Collections</RootNamespace>
         <PackageId>Numos.Collections</PackageId>
         <Title>Numos Collections</Title>
-        <Description>Collections and mathematical primitives for 3D chunks and floating point math used by Numos.</Description>
-        <PackageTags>simulation;mathematics;collections;voxel;nativeaot</PackageTags>
+        <Description>Collections used by Numos.</Description>
+        <PackageTags>simulation;collections;voxel;nativeaot</PackageTags>
         <GenerateDocumentationFile>true</GenerateDocumentationFile>
     </PropertyGroup>
 
+    <ItemGroup>
+        <ProjectReference Include="..\Numos.Maths\Numos.Maths.csproj" />
+    </ItemGroup>
+    
 </Project>

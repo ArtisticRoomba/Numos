@@ -1,3 +1,4 @@
+using Numos.Maths;
 using NUnit.Framework;
 
 namespace Numos.Collections.Tests;

@@ -1,4 +1,4 @@
-using Numos.Collections;
+using Numos.Maths;
 
 namespace Numos.CoreSim;
 

@@ -1,7 +1,7 @@
 using System.Collections.Concurrent;
 using Numos.CoreSim.Datatypes.Events;
 using Numos.CoreSim.Datatypes.Primitives;
-using Numos.Collections;
+using Numos.Maths;
 
 namespace Numos.CoreSim.Solvers;
 

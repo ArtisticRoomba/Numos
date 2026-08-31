@@ -1,6 +1,6 @@
 using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Primitives;
-using Numos.Collections;
+using Numos.Maths;
 
 namespace Numos.API.Tests;
 

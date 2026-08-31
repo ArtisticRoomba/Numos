@@ -3,7 +3,7 @@ using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.Headless.Diagnostics;
 using Numos.Headless.Protocol;
-using Numos.Collections;
+using Numos.Maths;
 
 namespace Numos.Headless;
 

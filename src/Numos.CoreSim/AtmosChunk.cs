@@ -4,6 +4,7 @@ using JetBrains.Annotations;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.Datatypes.Snapshots;
 using Numos.Collections;
+using Numos.Maths;
 using Numos.Units;
 
 namespace Numos.CoreSim;

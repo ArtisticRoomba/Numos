@@ -1,3 +1,5 @@
+using Numos.Maths;
+
 namespace Numos.Collections;
 
 /// <summary>

@@ -1,5 +1,5 @@
 using System.Collections.ObjectModel;
-using Numos.Collections;
+using Numos.Maths;
 
 namespace Numos.SimDrawer;
 
