@@ -23,6 +23,7 @@ public struct AtmosChunkSnapshot
     [ElementQuantity("pressure")]
     public Pascal[] TotalPressure;
 
+    // TODO check this
     /// <summary>
     ///     Gets detached per-voxel heat capacity values, in pascals (Pa).
     /// </summary>
