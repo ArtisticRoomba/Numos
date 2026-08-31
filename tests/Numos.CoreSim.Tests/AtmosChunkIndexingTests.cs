@@ -79,9 +79,9 @@ public sealed class AtmosChunkIndexingTests
         var chunk = new AtmosChunk(2, 3, 4);
         var observedIndices = new HashSet<ushort>();
 
-        for (var z = 0; z < chunk.Depth; z++)
-        for (var y = 0; y < chunk.Height; y++)
-        for (var x = 0; x < chunk.Width; x++)
+        for (int z = 0; z < chunk.Depth; z++)
+        for (int y = 0; y < chunk.Height; y++)
+        for (int x = 0; x < chunk.Width; x++)
         {
             ushort index = chunk.GetIndex(x, y, z);
             (int actualX, int actualY, int actualZ) = chunk.GetXyz(index);

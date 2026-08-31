@@ -22,6 +22,7 @@ public sealed class SimulationFrameBuilderTests
             BuiltInVisualizationIds.Temperature,
             1,
             automaticRangeOffset: 2f);
+
         var manual = builder.BuildSimulation(
             [snapshot],
             BuiltInVisualizationIds.Temperature,
@@ -66,6 +67,7 @@ public sealed class SimulationFrameBuilderTests
         var snapshot = CreateSnapshot(new Int3(0, 0, 0), new Int3(1, 1, 1));
         snapshot.Fields =
             AtmosChunkSnapshotFields.Temperature | AtmosChunkSnapshotFields.VoxelClassification;
+
         snapshot.TotalPressure = [];
         snapshot.Gases = [];
 
@@ -76,8 +78,10 @@ public sealed class SimulationFrameBuilderTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(builder.GetRequiredSnapshotFields(BuiltInVisualizationIds.Temperature),
+            Assert.That(
+                builder.GetRequiredSnapshotFields(BuiltInVisualizationIds.Temperature),
                 Is.EqualTo(snapshot.Fields));
+
             Assert.That(chunk.GetCell(0).IsVisible, Is.True);
             Assert.That(float.IsNaN(chunk.GetCell(0).Pressure), Is.True);
         });
@@ -102,6 +106,7 @@ public sealed class SimulationFrameBuilderTests
             Assert.That(
                 chunk.GetCell(0).VisibleFaces & VoxelFaceMask.PositiveX,
                 Is.EqualTo(VoxelFaceMask.None));
+
             Assert.That(
                 chunk.GetCell(1).VisibleFaces & VoxelFaceMask.NegativeX,
                 Is.EqualTo(VoxelFaceMask.None));
@@ -192,6 +197,7 @@ public sealed class SimulationFrameBuilderTests
             new Int3(0, 0, 0),
             new Int3(1, 1, 1),
             gases: [gasSeven, gasTwo]);
+
         var second = CreateSnapshot(
             new Int3(1, 0, 0),
             new Int3(1, 1, 1),
@@ -201,6 +207,7 @@ public sealed class SimulationFrameBuilderTests
             [first, second],
             BuiltInVisualizationIds.GasComposition,
             1);
+
         var firstCell = frame.Chunks[first.GridPosition].GetCell(0);
         var secondCell = frame.Chunks[second.GridPosition].GetCell(0);
 
@@ -263,6 +270,7 @@ public sealed class SimulationFrameBuilderTests
             new Int3(1, 1, 1),
             [12f],
             [250f]);
+
         var frame = builder.BuildSimulation(
             [snapshot],
             BuiltInVisualizationIds.Temperature,
@@ -289,10 +297,12 @@ public sealed class SimulationFrameBuilderTests
             new Int3(0, 0, 0),
             new Int3(1, 1, 1),
             version: new AtmosChunkVersion(10, 20));
+
         var first = builder.BuildSimulation(
             [snapshot],
             BuiltInVisualizationIds.Temperature,
             1);
+
         var second = builder.BuildSimulation(
             [snapshot],
             BuiltInVisualizationIds.Temperature,
@@ -310,8 +320,10 @@ public sealed class SimulationFrameBuilderTests
             new Int3(0, 0, 0),
             new Int3(1, 1, 1),
             version: new AtmosChunkVersion(10, 1));
+
         focusedTemperature.Fields =
             AtmosChunkSnapshotFields.Temperature | AtmosChunkSnapshotFields.VoxelClassification;
+
         focusedTemperature.HasExplicitFields = true;
         focusedTemperature.TotalPressure = [];
         focusedTemperature.Gases = [];
@@ -320,6 +332,7 @@ public sealed class SimulationFrameBuilderTests
             new Int3(1, 0, 0),
             new Int3(1, 1, 1),
             version: new AtmosChunkVersion(11, 1));
+
         hiddenTemperature.Fields = focusedTemperature.Fields;
         hiddenTemperature.HasExplicitFields = true;
         hiddenTemperature.TotalPressure = [];
@@ -328,6 +341,7 @@ public sealed class SimulationFrameBuilderTests
         var focusedPressureSnapshot = focusedTemperature;
         focusedPressureSnapshot.Fields =
             AtmosChunkSnapshotFields.Pressure | AtmosChunkSnapshotFields.VoxelClassification;
+
         focusedPressureSnapshot.Temperature = [];
         focusedPressureSnapshot.TotalPressure = [125f];
 
@@ -345,18 +359,29 @@ public sealed class SimulationFrameBuilderTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(focusedPressureFrame.Chunks[focusedPressureSnapshot.GridPosition],
+            Assert.That(
+                focusedPressureFrame.Chunks[focusedPressureSnapshot.GridPosition],
                 Is.Not.SameAs(temperature.Chunks[focusedPressureSnapshot.GridPosition]));
-            Assert.That(focusedPressureFrame.Chunks[focusedPressureSnapshot.GridPosition].VisualizationId,
+
+            Assert.That(
+                focusedPressureFrame.Chunks[focusedPressureSnapshot.GridPosition].VisualizationId,
                 Is.EqualTo(BuiltInVisualizationIds.Pressure));
-            Assert.That(focusedPressureFrame.HasCurrentVisualizationMapping(
-                focusedPressureFrame.Chunks[focusedPressureSnapshot.GridPosition]), Is.True);
-            Assert.That(focusedPressureFrame.Chunks[hiddenTemperature.GridPosition],
+
+            Assert.That(
+                focusedPressureFrame.HasCurrentVisualizationMapping(focusedPressureFrame.Chunks[focusedPressureSnapshot.GridPosition]),
+                Is.True);
+
+            Assert.That(
+                focusedPressureFrame.Chunks[hiddenTemperature.GridPosition],
                 Is.SameAs(temperature.Chunks[hiddenTemperature.GridPosition]));
-            Assert.That(focusedPressureFrame.Chunks[hiddenTemperature.GridPosition].VisualizationId,
+
+            Assert.That(
+                focusedPressureFrame.Chunks[hiddenTemperature.GridPosition].VisualizationId,
                 Is.EqualTo(BuiltInVisualizationIds.Temperature));
-            Assert.That(focusedPressureFrame.HasCurrentVisualizationMapping(
-                focusedPressureFrame.Chunks[hiddenTemperature.GridPosition]), Is.False);
+
+            Assert.That(
+                focusedPressureFrame.HasCurrentVisualizationMapping(focusedPressureFrame.Chunks[hiddenTemperature.GridPosition]),
+                Is.False);
         });
 
         var hiddenPressure = hiddenTemperature;
@@ -372,10 +397,14 @@ public sealed class SimulationFrameBuilderTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(caughtUp.Chunks[hiddenPressure.GridPosition],
+            Assert.That(
+                caughtUp.Chunks[hiddenPressure.GridPosition],
                 Is.Not.SameAs(focusedPressureFrame.Chunks[hiddenPressure.GridPosition]));
-            Assert.That(caughtUp.Chunks[hiddenPressure.GridPosition].VisualizationId,
+
+            Assert.That(
+                caughtUp.Chunks[hiddenPressure.GridPosition].VisualizationId,
                 Is.EqualTo(BuiltInVisualizationIds.Pressure));
+
             Assert.That(caughtUp.Chunks.Values.All(caughtUp.HasCurrentVisualizationMapping), Is.True);
         });
     }
@@ -388,6 +417,7 @@ public sealed class SimulationFrameBuilderTests
             new Int3(0, 0, 0),
             new Int3(1, 1, 1),
             version: new AtmosChunkVersion(10, 1));
+
         var hidden = CreateSnapshot(
             new Int3(1, 0, 0),
             new Int3(1, 1, 1),
@@ -411,10 +441,12 @@ public sealed class SimulationFrameBuilderTests
             new Int3(2, 1, 1),
             [10f, 200f],
             [100f, 300f]);
+
         var temperature = builder.BuildSimulation(
             [snapshot],
             BuiltInVisualizationIds.Temperature,
             1).Chunks[snapshot.GridPosition];
+
         var pressure = builder.BuildSimulation(
             [snapshot],
             BuiltInVisualizationIds.Pressure,
@@ -437,6 +469,7 @@ public sealed class SimulationFrameBuilderTests
             new Int3(1, 1, 1),
             [2f],
             version: new AtmosChunkVersion(3, 7));
+
         var first = builder.BuildSimulation(
             [snapshot],
             BuiltInVisualizationIds.ActiveOnly,
@@ -580,6 +613,7 @@ public sealed class SimulationFrameBuilderTests
             color = sample.RoomId == VoxelClassification.RoomSolid
                 ? new ColorRgba(0.4f, 0.4f, 0.4f)
                 : new ColorRgba(0.1f, 0.1f, 0.1f);
+
             return true;
         }
 

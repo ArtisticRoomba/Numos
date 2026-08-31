@@ -13,9 +13,14 @@ public sealed class SimulationLifecycleIntegrationTests
     {
         Assert.Multiple(() =>
         {
-            Assert.That(FlowsAfterStableTicks(2), Is.True,
+            Assert.That(
+                FlowsAfterStableTicks(2),
+                Is.True,
                 "The chunk must remain awake when SleepTimer equals SleepThreshold.");
-            Assert.That(FlowsAfterStableTicks(3), Is.False,
+
+            Assert.That(
+                FlowsAfterStableTicks(3),
+                Is.False,
                 "The chunk must sleep when SleepTimer becomes greater than SleepThreshold.");
         });
     }
@@ -38,14 +43,21 @@ public sealed class SimulationLifecycleIntegrationTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(SimTestHelpers.Moles(whileSleeping, SimTestHelpers.FirstGasId, 0),
+            Assert.That(
+                SimTestHelpers.Moles(whileSleeping, SimTestHelpers.FirstGasId, 0),
                 Is.EqualTo(2f));
+
             Assert.That(SimTestHelpers.Moles(whileSleeping, SimTestHelpers.FirstGasId, 1), Is.Zero);
-            Assert.That(SimTestHelpers.Moles(afterInjection, SimTestHelpers.FirstGasId, 0),
+            Assert.That(
+                SimTestHelpers.Moles(afterInjection, SimTestHelpers.FirstGasId, 0),
                 Is.EqualTo(2.52f).Within(SimTestHelpers.Tolerance));
-            Assert.That(SimTestHelpers.Moles(afterInjection, SimTestHelpers.FirstGasId, 1),
+
+            Assert.That(
+                SimTestHelpers.Moles(afterInjection, SimTestHelpers.FirstGasId, 1),
                 Is.EqualTo(0.48f).Within(SimTestHelpers.Tolerance));
-            Assert.That(SimTestHelpers.TotalMoles(afterInjection),
+
+            Assert.That(
+                SimTestHelpers.TotalMoles(afterInjection),
                 Is.EqualTo(3f).Within(SimTestHelpers.Tolerance));
         });
     }
@@ -66,8 +78,10 @@ public sealed class SimulationLifecycleIntegrationTests
         Assert.Multiple(() =>
         {
             Assert.That(snapshot.Temperature[0], Is.Zero);
-            Assert.That(snapshot.TotalPressure[0],
+            Assert.That(
+                snapshot.TotalPressure[0],
                 Is.EqualTo(246f).Within(SimTestHelpers.Tolerance));
+
             Assert.That(SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 0), Is.EqualTo(2f));
         });
     }
@@ -86,14 +100,26 @@ public sealed class SimulationLifecycleIntegrationTests
         simulation.SetChunkClassification(chunk, VoxelClassification.RoomSolid);
         foreach ((int x, int y) in openVoxels)
         {
-            simulation.SetVoxelClassification(chunk, x, y, 0,
+            simulation.SetVoxelClassification(
+                chunk,
+                x,
+                y,
+                0,
                 new VoxelClassification(SimTestHelpers.RoomId));
+
             simulation.SetVoxelTemperature(chunk, x, y, 0, SimTestHelpers.DefaultTemperature);
         }
 
-        simulation.AddGasToVoxel(chunk, 0, 0, 0,
-            SimTestHelpers.FirstGasId, openVoxels.Length, SimTestHelpers.DefaultTemperature);
-        for (var i = 0; i < 100; i++)
+        simulation.AddGasToVoxel(
+            chunk,
+            0,
+            0,
+            0,
+            SimTestHelpers.FirstGasId,
+            openVoxels.Length,
+            SimTestHelpers.DefaultTemperature);
+
+        for (int i = 0; i < 100; i++)
             simulation.Tick();
 
         var converged = simulation.GetChunkSnapshot(chunk);
@@ -108,11 +134,16 @@ public sealed class SimulationLifecycleIntegrationTests
         Assert.Multiple(() =>
         {
             Assert.That(convergedMoles.Max() - convergedMoles.Min(), Is.LessThan(0.01f));
-            Assert.That(ReadOpenMoles(stillSleeping, openVoxels, width, height),
+            Assert.That(
+                ReadOpenMoles(stillSleeping, openVoxels, width, height),
                 Is.EqualTo(convergedMoles).Within(SimTestHelpers.Tolerance));
-            Assert.That(ReadOpenMoles(afterWake, openVoxels, width, height),
+
+            Assert.That(
+                ReadOpenMoles(afterWake, openVoxels, width, height),
                 Is.Not.EqualTo(convergedMoles).Within(SimTestHelpers.Tolerance));
-            Assert.That(SimTestHelpers.TotalMoles(afterWake),
+
+            Assert.That(
+                SimTestHelpers.TotalMoles(afterWake),
                 Is.EqualTo(openVoxels.Length).Within(0.002f));
         });
     }
@@ -128,7 +159,7 @@ public sealed class SimulationLifecycleIntegrationTests
         simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasId, 1f, 300f);
         simulation.AddGasToVoxel(chunk, 1, 0, 0, SimTestHelpers.FirstGasId, 1f, 300f);
 
-        for (var i = 0; i < stableTicks; i++)
+        for (int i = 0; i < stableTicks; i++)
             simulation.Tick();
 
         simulation.SetVoxelTemperature(chunk, 0, 0, 0, 600f);
@@ -137,11 +168,14 @@ public sealed class SimulationLifecycleIntegrationTests
         return SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 1) > 1f;
     }
 
-    private static float[] ReadOpenMoles(AtmosChunkSnapshot snapshot, (int X, int Y)[] openVoxels,
+    private static float[] ReadOpenMoles(
+        AtmosChunkSnapshot snapshot, (int X, int Y)[] openVoxels,
         int width, int height)
     {
         return openVoxels
-            .Select(voxel => SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId,
+            .Select(voxel => SimTestHelpers.Moles(
+                snapshot,
+                SimTestHelpers.FirstGasId,
                 SimTestHelpers.Index(voxel.X, voxel.Y, 0, width, height)))
             .ToArray();
     }

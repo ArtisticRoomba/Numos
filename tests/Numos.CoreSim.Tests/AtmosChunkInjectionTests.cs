@@ -10,6 +10,7 @@ public sealed class AtmosChunkInjectionTests
     {
         foreach (var chunk in _chunks)
             chunk.Release();
+
         _chunks.Clear();
     }
 
@@ -128,14 +129,15 @@ public sealed class AtmosChunkInjectionTests
     {
         var chunk = CreateAwakeChunk(1);
         int initialCapacity = chunk.ActiveGases.Length;
-        for (var gasId = 0; gasId <= initialCapacity; gasId++)
+        for (int gasId = 0; gasId <= initialCapacity; gasId++)
             chunk.InjectGasToVoxel(0, gasId, 1f, 300f, 1f, 1f);
 
         Assert.Multiple(() =>
         {
             Assert.That(chunk.ActiveGasCount, Is.EqualTo(initialCapacity + 1));
             Assert.That(chunk.ActiveGases, Has.Length.GreaterThan(initialCapacity));
-            Assert.That(chunk.ActiveGases.Take(chunk.ActiveGasCount).Select(static gas => gas.GasId),
+            Assert.That(
+                chunk.ActiveGases.Take(chunk.ActiveGasCount).Select(static gas => gas.GasId),
                 Is.EqualTo(Enumerable.Range(0, initialCapacity + 1)));
         });
     }

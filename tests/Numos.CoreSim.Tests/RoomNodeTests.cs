@@ -14,7 +14,8 @@ public sealed class RoomNodeTests
         {
             Assert.That(room.GasMoles, Is.EqualTo(new[] { 0f, 4f, 0f }));
             Assert.That(room.AverageTemperature, Is.EqualTo(300f));
-            Assert.That(room.EquilibriumPressure,
+            Assert.That(
+                room.EquilibriumPressure,
                 Is.EqualTo(4f * AtmosPhysicalConstants.MolarGasConstant * 300f / 10f).Within(0.001f));
         });
     }
@@ -31,7 +32,8 @@ public sealed class RoomNodeTests
         {
             Assert.That(room.GasMoles, Is.EqualTo(new[] { 2f, 0f, 1f }));
             Assert.That(room.AverageTemperature, Is.EqualTo(400f).Within(0.0001f));
-            Assert.That(room.EquilibriumPressure,
+            Assert.That(
+                room.EquilibriumPressure,
                 Is.EqualTo(3f * AtmosPhysicalConstants.MolarGasConstant * 400f / 2f).Within(0.001f));
         });
     }
@@ -49,7 +51,8 @@ public sealed class RoomNodeTests
         {
             Assert.That(room.GasMoles, Is.EqualTo(new[] { 1f, 2f }));
             Assert.That(room.AverageTemperature, Is.EqualTo(300f));
-            Assert.That(room.EquilibriumPressure,
+            Assert.That(
+                room.EquilibriumPressure,
                 Is.EqualTo(3f * AtmosPhysicalConstants.MolarGasConstant * 300f / 4f).Within(0.001f));
         });
     }
@@ -67,7 +70,8 @@ public sealed class RoomNodeTests
         {
             Assert.That(room.GasMoles, Is.EqualTo(new[] { 0f, 3f }));
             Assert.That(room.AverageTemperature, Is.EqualTo(300f));
-            Assert.That(room.EquilibriumPressure,
+            Assert.That(
+                room.EquilibriumPressure,
                 Is.EqualTo(3f * AtmosPhysicalConstants.MolarGasConstant * 300f / 2f).Within(0.001f));
         });
     }
@@ -96,7 +100,8 @@ public sealed class RoomNodeTests
 
         room.AddGas(0, 1f, 300f, 1f);
 
-        Assert.That(room.EquilibriumPressure,
+        Assert.That(
+            room.EquilibriumPressure,
             Is.EqualTo(AtmosPhysicalConstants.MolarGasConstant * 300f).Within(0.001f));
     }
 
@@ -112,7 +117,8 @@ public sealed class RoomNodeTests
         {
             Assert.That(room.AverageTemperature, Is.EqualTo(180f).Within(0.0001f));
             Assert.That(room.TotalHeatCapacity, Is.EqualTo(5f));
-            Assert.That(room.EquilibriumPressure,
+            Assert.That(
+                room.EquilibriumPressure,
                 Is.EqualTo(2f * AtmosPhysicalConstants.MolarGasConstant * 180f).Within(0.001f));
         });
     }

@@ -5,6 +5,7 @@ using Numos.CoreSim.Collections;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.Datatypes.Snapshots;
 using Numos.Maths;
+using Numos.Units;
 
 namespace Numos.CoreSim;
 
@@ -54,14 +55,6 @@ internal class AtmosChunk
     public int ActiveRoomCount;
 
     /// <summary>
-    ///     Identity and revision used by conditional snapshot consumers.
-    /// </summary>
-    public AtmosChunkVersion Version => new(_generation, Interlocked.Read(ref _revision));
-
-    private long _generation;
-    private long _revision;
-
-    /// <summary>
     ///     Room IDs currently being processed in this chunk.
     /// </summary>
     /// <remarks>
@@ -71,29 +64,19 @@ internal class AtmosChunk
     public int[] ActiveRoomIds;
 
     /// <summary>
-    /// The number of voxels along the z-axis.
+    ///     The number of voxels along the z-axis.
     /// </summary>
     public int Depth;
-
-    /// <summary>
-    /// The number of voxels along the x-axis.
-    /// </summary>
-    public int Width;
-
-    /// <summary>
-    /// The number of voxels along the y-axis.
-    /// </summary>
-    public int Height;
-
-    /// <summary>
-    ///     The number of voxels along each axis.
-    /// </summary>
-    public Int3 Dimensions => new(Width, Height, Depth);
 
     /// <summary>
     ///     The position of this chunk in the chunk grid.
     /// </summary>
     public Int3 GridPosition;
+
+    /// <summary>
+    ///     The number of voxels along the y-axis.
+    /// </summary>
+    public int Height;
 
     /// <summary>
     ///     Whether this chunk is eligible to be processed by the simulation.
@@ -115,13 +98,8 @@ internal class AtmosChunk
     /// <summary>
     ///     Temperature for each voxel, in kelvins (K), indexed by flat voxel index or local coordinate.
     /// </summary>
-    public FlatArray<float> Temperature;
-
-    /// <summary>
-    ///     Cached pressure for each voxel, in pascals (Pa), indexed by flat voxel index or local coordinate.
-    /// </summary>
-    /// <remarks>These values are recomputed by the simulation each tick.</remarks>
-    public FlatArray<float> TotalPressure;
+    [ElementQuantity("temperature")]
+    public FlatArray<Kelvin> Temperature;
 
     /// <summary>
     ///     Cached total heat capacity for each voxel, in joules per kelvin (J/K).
@@ -132,7 +110,15 @@ internal class AtmosChunk
     ///     <see cref="ActiveAirIndices" /> are not authoritative until that voxel is active and refreshed.
     ///     Values are total heat capacities, not molar quantities.
     /// </remarks>
-    public FlatArray<float> TotalHeatCapacity;
+    [ElementQuantity("heatCapacity")]
+    public FlatArray<JoulePerKelvin> TotalHeatCapacity;
+
+    /// <summary>
+    ///     Cached pressure for each voxel, in pascals (Pa), indexed by flat voxel index or local coordinate.
+    /// </summary>
+    /// <remarks>These values are recomputed by the simulation each tick.</remarks>
+    [ElementQuantity("pressure")]
+    public FlatArray<Pascal> TotalPressure;
 
     /// <summary>
     ///     Total number of voxels in this chunk, equal to <c>Width * Height * Depth</c>.
@@ -152,6 +138,14 @@ internal class AtmosChunk
     /// <seealso cref="VoxelClassification.RoomVoid" />
     /// <seealso cref="VoxelClassification.RoomUnassigned" />
     public FlatArray<int> VoxelRoomMap;
+
+    /// <summary>
+    ///     The number of voxels along the x-axis.
+    /// </summary>
+    public int Width;
+
+    private long _generation;
+    private long _revision;
 
     /// <summary>
     ///     Creates a chunk with the specified dimensions and active-room capacity.
@@ -180,6 +174,16 @@ internal class AtmosChunk
     }
 
     /// <summary>
+    ///     Identity and revision used by conditional snapshot consumers.
+    /// </summary>
+    public AtmosChunkVersion Version => new(_generation, Interlocked.Read(ref _revision));
+
+    /// <summary>
+    ///     The number of voxels along each axis.
+    /// </summary>
+    public Int3 Dimensions => new(Width, Height, Depth);
+
+    /// <summary>
     ///     Ensures that the chunk's per-voxel and active-room arrays are initialized for its current dimensions.
     /// </summary>
     /// <remarks>
@@ -194,11 +198,13 @@ internal class AtmosChunk
         EnsureInitialized(ref VoxelRoomMap, dimensions);
         if (ActiveAirIndices == null || ActiveAirIndices.Length != VoxelCount)
             ActiveAirIndices = new ushort[VoxelCount];
+
         EnsureInitialized(ref TotalPressure, dimensions);
         EnsureInitialized(ref TotalHeatCapacity, dimensions);
         EnsureInitialized(ref Temperature, dimensions);
         if (ActiveGases == null)
             ActiveGases = new GasChannel[AtmosChunkConstants.InitialGasChannelCapacity];
+
         if (ActiveRoomIds == null || ActiveRoomIds.Length != MaxActiveRooms)
             ActiveRoomIds = new int[MaxActiveRooms];
     }
@@ -273,7 +279,7 @@ internal class AtmosChunk
     {
         if (ActiveGases != null)
         {
-            for (var i = 0; i < ActiveGasCount; i++)
+            for (int i = 0; i < ActiveGasCount; i++)
             {
                 ActiveGases[i].Release();
             }
@@ -296,7 +302,7 @@ internal class AtmosChunk
 
         if (IsAwake)
         {
-            for (var r = 0; r < ActiveRoomCount; r++)
+            for (int r = 0; r < ActiveRoomCount; r++)
             {
                 if (ActiveRoomIds[r] == targetRoomId)
                 {
@@ -338,7 +344,7 @@ internal class AtmosChunk
         for (ushort i = 0; i < VoxelCount; i++)
         {
             int roomId = VoxelRoomMap[i];
-            for (var r = 0; r < ActiveRoomCount; r++)
+            for (int r = 0; r < ActiveRoomCount; r++)
             {
                 if (ActiveRoomIds[r] == roomId)
                 {
@@ -372,11 +378,15 @@ internal class AtmosChunk
     /// <param name="pressurePerMoleKelvin">
     ///     The already-resolved ideal-gas coefficient <c>R/V</c>, in Pa/(mol·K).
     /// </param>
-    public void InjectGasToVoxel(ushort localVoxelIndex, int gasId, float molesToAdd, float temperature,
-        float effectiveMolarHeatCapacityAtConstantVolume, float pressurePerMoleKelvin)
+    public void InjectGasToVoxel(
+        ushort localVoxelIndex, int gasId, Mole molesToAdd, Kelvin temperature,
+        JoulePerMoleKelvin effectiveMolarHeatCapacityAtConstantVolume,
+        PascalPerMoleKelvin pressurePerMoleKelvin)
     {
-        Debug.Assert(float.IsFinite(effectiveMolarHeatCapacityAtConstantVolume) &&
-                     effectiveMolarHeatCapacityAtConstantVolume > 0f);
+        Debug.Assert(
+            float.IsFinite(effectiveMolarHeatCapacityAtConstantVolume) &&
+            effectiveMolarHeatCapacityAtConstantVolume > 0f);
+
         Debug.Assert(float.IsFinite(pressurePerMoleKelvin) && pressurePerMoleKelvin > 0f);
 
         if (!IsAwake)
@@ -385,27 +395,28 @@ internal class AtmosChunk
         int room = VoxelRoomMap[localVoxelIndex];
         if (room == VoxelClassification.RoomSolid)
             return;
+
         if (room == VoxelClassification.RoomVoid)
             return;
 
         SleepTimer = 0;
 
-        float currentHeatCapacity = TotalHeatCapacity[localVoxelIndex];
+        JoulePerKelvin currentHeatCapacity = TotalHeatCapacity[localVoxelIndex];
 
         int targetChannelIndex = GetOrCreateGasChannel(gasId);
 
         ActiveGases[targetChannelIndex].Moles[localVoxelIndex] += molesToAdd;
 
-        var currentTotalMoles = 0f;
-        for (var g = 0; g < ActiveGasCount; g++)
+        Mole currentTotalMoles = 0f;
+        for (int g = 0; g < ActiveGasCount; g++)
         {
             currentTotalMoles += ActiveGases[g].Moles[localVoxelIndex];
         }
 
-        float incomingHeatCapacity = molesToAdd * effectiveMolarHeatCapacityAtConstantVolume;
-        float newHeatCapacity = currentHeatCapacity + incomingHeatCapacity;
-        float currentTemp = Temperature[localVoxelIndex];
-        float newTemp = currentHeatCapacity > 0f && newHeatCapacity > 0f
+        JoulePerKelvin incomingHeatCapacity = molesToAdd * effectiveMolarHeatCapacityAtConstantVolume;
+        JoulePerKelvin newHeatCapacity = currentHeatCapacity + incomingHeatCapacity;
+        Kelvin currentTemp = Temperature[localVoxelIndex];
+        Kelvin newTemp = currentHeatCapacity > 0f && newHeatCapacity > 0f
             ? currentTemp == temperature
                 ? currentTemp
                 // Interpolation avoids the overflow-prone sum C1*T1 + C2*T2.
@@ -421,17 +432,19 @@ internal class AtmosChunk
 
 
     /// <summary>
-    ///     Sets a specific voxel to a vacuum. This sets TotalPressure, ActiveGases, and TotalHeatCapacity to 0 and IsVacuum to true.
+    ///     Sets a specific voxel to a vacuum. This sets TotalPressure, ActiveGases, and TotalHeatCapacity to 0 and IsVacuum to
+    ///     true.
     /// </summary>
     /// <param name="idx">Index of voxel</param>
     [PublicAPI]
     public void SetVoxelToVacuum(ushort idx)
     {
         TotalPressure[idx] = 0f;
-        for (var g = 0; g < ActiveGasCount; g++)
+        for (int g = 0; g < ActiveGasCount; g++)
         {
-            ActiveGases[g].Moles[idx] = 0f; 
+            ActiveGases[g].Moles[idx] = 0f;
         }
+
         TotalHeatCapacity[idx] = 0f;
     }
 
@@ -446,6 +459,7 @@ internal class AtmosChunk
         {
             Array.Clear(ActiveGases[g].Moles, 0, ActiveGases[g].Moles.Length);
         }
+
         TotalHeatCapacity.Fill(0f);
     }
 
@@ -461,6 +475,7 @@ internal class AtmosChunk
     {
         if (roomId < 0)
             SetVoxelToVacuum(idx);
+
         VoxelRoomMap[idx] = roomId;
     }
 
@@ -475,10 +490,11 @@ internal class AtmosChunk
     {
         if (classification.IsSolid || classification.IsVoid)
             SetVoxelToVacuum(idx);
+
         VoxelRoomMap[idx] = classification.RoomId;
     }
 
-    
+
     /// <summary>
     ///     Sets a specific voxel to a specific room id.
     ///     If the room id is a wall or void is sets the voxel to a vacuum.
@@ -489,9 +505,9 @@ internal class AtmosChunk
     {
         if (roomId < 0)
             SetChunkToVacuum();
+
         VoxelRoomMap.Fill(roomId);
     }
-
 
 
     /// <summary>
@@ -504,14 +520,14 @@ internal class AtmosChunk
     {
         if (classification.IsSolid || classification.IsVoid)
             SetChunkToVacuum();
+
         VoxelRoomMap.Fill(classification.RoomId);
     }
 
 
-
     internal int GetOrCreateGasChannel(int gasId)
     {
-        for (var index = 0; index < ActiveGasCount; index++)
+        for (int index = 0; index < ActiveGasCount; index++)
         {
             if (ActiveGases[index].GasId == gasId)
                 return index;
@@ -571,13 +587,14 @@ internal class AtmosChunk
 
         if (fields.HasFlag(AtmosChunkSnapshotFields.Gases))
         {
-            for (var g = 0; g < ActiveGasCount; g++)
+            for (int g = 0; g < ActiveGasCount; g++)
             {
                 snapshot.Gases[g] = new GasSnapshot
                 {
                     GasId = ActiveGases[g].GasId,
                     Moles = new float[VoxelCount]
                 };
+
                 Array.Copy(ActiveGases[g].Moles, snapshot.Gases[g].Moles, VoxelCount);
             }
         }
@@ -644,17 +661,22 @@ internal class AtmosChunk
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(width);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(height);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(depth);
-        if (width > AtmosChunkConstants.MaximumVoxelCount || height > AtmosChunkConstants.MaximumVoxelCount ||
+        if (width > AtmosChunkConstants.MaximumVoxelCount ||
+            height > AtmosChunkConstants.MaximumVoxelCount ||
             depth > AtmosChunkConstants.MaximumVoxelCount)
         {
-            throw new ArgumentOutOfRangeException(nameof(width), width,
+            throw new ArgumentOutOfRangeException(
+                nameof(width),
+                width,
                 $"No chunk dimension may exceed {AtmosChunkConstants.MaximumVoxelCount}.");
         }
 
         long voxelCount = (long)width * height * depth;
         if (voxelCount > AtmosChunkConstants.MaximumVoxelCount)
         {
-            throw new ArgumentOutOfRangeException(nameof(width), width,
+            throw new ArgumentOutOfRangeException(
+                nameof(width),
+                width,
                 $"Chunk dimensions contain {voxelCount} voxels, but at most " +
                 $"{AtmosChunkConstants.MaximumVoxelCount} are supported.");
         }

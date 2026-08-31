@@ -65,5 +65,4 @@ public sealed class VoxelClassificationTests
             Assert.That(value, Is.Not.EqualTo(new VoxelClassification(18)));
         });
     }
-
 }

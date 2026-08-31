@@ -1,3 +1,4 @@
+using Numos.CoreSim.Collections;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.Maths;
 
@@ -35,9 +36,12 @@ public sealed class AtmosChunkTopologyTests
     [Test]
     public void Constructor_RejectsVoxelCountBeyondUshortIndexCapacity()
     {
-        Assert.That(() => new AtmosChunk(256, 256, 1),
+        Assert.That(
+            () => new AtmosChunk(256, 256, 1),
             Throws.TypeOf<ArgumentOutOfRangeException>());
-        Assert.That(() => new AtmosChunk(int.MaxValue, int.MaxValue, int.MaxValue),
+
+        Assert.That(
+            () => new AtmosChunk(int.MaxValue, int.MaxValue, int.MaxValue),
             Throws.TypeOf<ArgumentOutOfRangeException>());
     }
 
@@ -46,8 +50,10 @@ public sealed class AtmosChunkTopologyTests
     {
         var chunk = new AtmosChunk(2, 3, 1);
 
-        Assert.That(() => chunk.Initialize(default, 256, 256, 1),
+        Assert.That(
+            () => chunk.Initialize(default, 256, 256, 1),
             Throws.TypeOf<ArgumentOutOfRangeException>());
+
         Assert.Multiple(() =>
         {
             Assert.That(chunk.Dimensions, Is.EqualTo(new Int3(2, 3, 1)));
@@ -68,6 +74,7 @@ public sealed class AtmosChunkTopologyTests
             ActiveRoomCount = 2,
             SleepTimer = 12
         };
+
         chunk.VoxelRoomMap.Fill(8);
         Array.Fill(chunk.ActiveAirIndices, (ushort)1);
         chunk.TotalPressure.Fill(100f);
@@ -104,11 +111,11 @@ public sealed class AtmosChunkTopologyTests
     public void EnsureInitialized_ReusesCorrectlySizedStorageWithoutClearingIt()
     {
         var chunk = new AtmosChunk(2, 2, 1, 3);
-        var roomMap = chunk.VoxelRoomMap;
+        FlatArray<int> roomMap = chunk.VoxelRoomMap;
         ushort[] activeAir = chunk.ActiveAirIndices;
-        var pressure = chunk.TotalPressure;
-        var temperature = chunk.Temperature;
-        var gases = chunk.ActiveGases;
+        FlatArray<float> pressure = chunk.TotalPressure;
+        FlatArray<float> temperature = chunk.Temperature;
+        GasChannel[] gases = chunk.ActiveGases;
         int[] activeRooms = chunk.ActiveRoomIds;
         roomMap[0] = 7;
         activeAir[0] = 3;
@@ -245,8 +252,10 @@ public sealed class AtmosChunkTopologyTests
         chunk.WakeRoom(1);
         chunk.WakeRoom(2);
 
-        Assert.That(() => chunk.WakeRoom(3),
+        Assert.That(
+            () => chunk.WakeRoom(3),
             Throws.Exception.With.Message.EqualTo("Maximum active rooms reached for this chunk!"));
+
         Assert.That(chunk.ActiveRoomCount, Is.EqualTo(2));
     }
 
@@ -283,5 +292,4 @@ public sealed class AtmosChunkTopologyTests
             Assert.That(chunk.ActiveAirCount, Is.EqualTo(2));
         });
     }
-
 }

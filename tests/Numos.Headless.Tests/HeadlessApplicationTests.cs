@@ -14,11 +14,15 @@ public sealed class HeadlessApplicationTests
     {
         var run = await RunAsync(
             CreateSimulationRequest("create", 2, 1, 1),
-            Request("chunk", "addChunk",
+            Request(
+                "chunk",
+                "addChunk",
                 "\"position\":{\"x\":0,\"y\":0,\"z\":0},\"classification\":1"),
             SetTemperatureRequest("temperature-0", 0, 300f),
             SetTemperatureRequest("temperature-1", 1, 300f),
-            Request("inject", "injectGas",
+            Request(
+                "inject",
+                "injectGas",
                 "\"position\":{\"x\":0,\"y\":0,\"z\":0}," +
                 "\"voxel\":{\"x\":0,\"y\":0,\"z\":0}," +
                 "\"gasId\":0,\"moles\":2,\"temperatureK\":300"),
@@ -26,9 +30,9 @@ public sealed class HeadlessApplicationTests
             Request("observe", "observe", "\"includeVoxels\":true"),
             Request("exit", "exit"));
 
-        JsonElement observationResponse = FindResponse(run.Responses, "observe");
-        JsonElement observation = observationResponse.GetProperty("observation");
-        JsonElement voxels = FindArraysNamed(observation, "voxels").Single();
+        var observationResponse = FindResponse(run.Responses, "observe");
+        var observation = observationResponse.GetProperty("observation");
+        var voxels = FindArraysNamed(observation, "voxels").Single();
         float[] gasMoles = voxels.EnumerateArray()
             .Select(ReadGasZeroMoles)
             .ToArray();
@@ -37,8 +41,10 @@ public sealed class HeadlessApplicationTests
         {
             Assert.That(run.ExitCode, Is.Zero);
             Assert.That(observationResponse.GetProperty("ok").GetBoolean(), Is.True);
-            Assert.That(observationResponse.GetProperty("state").GetProperty("tick").GetInt32(),
+            Assert.That(
+                observationResponse.GetProperty("state").GetProperty("tick").GetInt32(),
                 Is.EqualTo(1));
+
             Assert.That(gasMoles, Has.Length.EqualTo(2));
             Assert.That(gasMoles[0], Is.EqualTo(1.68f).Within(Tolerance));
             Assert.That(gasMoles[1], Is.EqualTo(0.32f).Within(Tolerance));
@@ -54,10 +60,11 @@ public sealed class HeadlessApplicationTests
             CreateSimulationRequest("recovered", 1, 1, 1),
             Request("exit", "exit"));
 
-        JsonElement errorResponse = run.Responses.Single(response =>
+        var errorResponse = run.Responses.Single(response =>
             response.TryGetProperty("ok", out var ok) && !ok.GetBoolean());
-        JsonElement error = errorResponse.GetProperty("error");
-        JsonElement recovered = FindResponse(run.Responses, "recovered");
+
+        var error = errorResponse.GetProperty("error");
+        var recovered = FindResponse(run.Responses, "recovered");
 
         Assert.Multiple(() =>
         {
@@ -76,23 +83,28 @@ public sealed class HeadlessApplicationTests
     public async Task JsonlSession_SchemaErrors_ReturnCorrelatedRequestErrors()
     {
         var run = await RunAsync(
-            Request("typo", "createSimulation",
+            Request(
+                "typo",
+                "createSimulation",
                 "\"dimensions\":{\"x\":1,\"y\":1,\"z\":1},\"widht\":1"),
             "{\"id\":\"no-version\",\"op\":\"observe\"}",
             Request("exit", "exit"));
 
-        JsonElement response = FindResponse(run.Responses, "typo");
-        JsonElement missingVersion = FindResponse(run.Responses, "no-version");
+        var response = FindResponse(run.Responses, "typo");
+        var missingVersion = FindResponse(run.Responses, "no-version");
 
         Assert.Multiple(() =>
         {
             Assert.That(run.ExitCode, Is.EqualTo(1));
             Assert.That(response.GetProperty("op").GetString(), Is.EqualTo("createSimulation"));
             Assert.That(response.GetProperty("ok").GetBoolean(), Is.False);
-            Assert.That(response.GetProperty("error").GetProperty("code").GetString(),
+            Assert.That(
+                response.GetProperty("error").GetProperty("code").GetString(),
                 Is.EqualTo("invalidRequest"));
+
             Assert.That(missingVersion.GetProperty("op").GetString(), Is.EqualTo("observe"));
-            Assert.That(missingVersion.GetProperty("error").GetProperty("code").GetString(),
+            Assert.That(
+                missingVersion.GetProperty("error").GetProperty("code").GetString(),
                 Is.EqualTo("missingProperty"));
         });
     }
@@ -106,14 +118,16 @@ public sealed class HeadlessApplicationTests
             Request("observe", "observe"),
             Request("exit", "exit"));
 
-        JsonElement rejected = FindResponse(run.Responses, "incomplete");
-        JsonElement observation = FindResponse(run.Responses, "observe");
+        var rejected = FindResponse(run.Responses, "incomplete");
+        var observation = FindResponse(run.Responses, "observe");
 
         Assert.Multiple(() =>
         {
             Assert.That(rejected.GetProperty("ok").GetBoolean(), Is.False);
-            Assert.That(rejected.GetProperty("error").GetProperty("code").GetString(),
+            Assert.That(
+                rejected.GetProperty("error").GetProperty("code").GetString(),
                 Is.EqualTo("invalidRequest"));
+
             Assert.That(observation.GetProperty("state").GetProperty("chunkCount").GetInt32(), Is.Zero);
             Assert.That(observation.GetProperty("observation").GetProperty("chunks").GetArrayLength(), Is.Zero);
         });
@@ -125,20 +139,24 @@ public sealed class HeadlessApplicationTests
         var run = await RunAsync(
             CreateSimulationRequest("create", 1, 1, 1),
             AddChunkRequest("chunk", 0, 0, 0),
-            Request("inject", "injectGas",
+            Request(
+                "inject",
+                "injectGas",
                 "\"position\":{\"x\":0,\"y\":0,\"z\":0}," +
                 "\"voxel\":{\"x\":0,\"y\":0,\"z\":0}," +
                 "\"gasId\":999,\"moles\":1,\"temperatureK\":300"),
             Request("exit", "exit"));
 
-        JsonElement response = FindResponse(run.Responses, "inject");
+        var response = FindResponse(run.Responses, "inject");
 
         Assert.Multiple(() =>
         {
             Assert.That(run.ExitCode, Is.EqualTo(1));
             Assert.That(response.GetProperty("ok").GetBoolean(), Is.False);
-            Assert.That(response.GetProperty("error").GetProperty("code").GetString(),
+            Assert.That(
+                response.GetProperty("error").GetProperty("code").GetString(),
                 Is.EqualTo("gasNotFound"));
+
             Assert.That(response.GetProperty("state").GetProperty("gasCount").GetInt32(), Is.EqualTo(1));
         });
     }
@@ -156,10 +174,12 @@ public sealed class HeadlessApplicationTests
             UseShellExecute = false,
             CreateNoWindow = true
         };
+
         startInfo.ArgumentList.Add(applicationPath);
 
-        using Process process = Process.Start(startInfo) ??
-                                throw new InvalidOperationException("Could not start the Headless process.");
+        using var process = Process.Start(startInfo) ??
+                            throw new InvalidOperationException("Could not start the Headless process.");
+
         Task<string> standardOutput = process.StandardOutput.ReadToEndAsync();
         Task<string> standardError = process.StandardError.ReadToEndAsync();
         await process.StandardInput.WriteLineAsync(CreateSimulationRequest("process-create", 1, 1, 1));
@@ -198,14 +218,16 @@ public sealed class HeadlessApplicationTests
             output,
             error,
             CancellationToken.None);
-        JsonElement response = ParseJson(output.ToString().Trim());
+
+        var response = ParseJson(output.ToString().Trim());
 
         Assert.Multiple(() =>
         {
             Assert.That(exitCode, Is.EqualTo(2));
             Assert.That(error.ToString(), Is.Empty);
             Assert.That(response.GetProperty("ok").GetBoolean(), Is.False);
-            Assert.That(response.GetProperty("error").GetProperty("code").GetString(),
+            Assert.That(
+                response.GetProperty("error").GetProperty("code").GetString(),
                 Is.EqualTo("scriptUnavailable"));
         });
     }
@@ -215,17 +237,21 @@ public sealed class HeadlessApplicationTests
     {
         var run = await RunAsync(
             CreateSimulationRequest("create", 1, 1, 1),
-            Request("chunk", "addChunk",
+            Request(
+                "chunk",
+                "addChunk",
                 "\"position\":{\"x\":0,\"y\":0,\"z\":0},\"classification\":1"),
-            Request("temperature", "setVoxelTemperature",
+            Request(
+                "temperature",
+                "setVoxelTemperature",
                 "\"position\":{\"x\":0,\"y\":0,\"z\":0}," +
                 "\"voxel\":{\"x\":0,\"y\":0,\"z\":0},\"temperatureK\":\"NaN\""),
             Request("observe", "observe", "\"includeVoxels\":true"),
             Request("exit", "exit"));
 
-        JsonElement observationResponse = FindResponse(run.Responses, "observe");
-        JsonElement observation = observationResponse.GetProperty("observation");
-        JsonElement voxel = observation.GetProperty("chunks")[0].GetProperty("voxels")[0];
+        var observationResponse = FindResponse(run.Responses, "observe");
+        var observation = observationResponse.GetProperty("observation");
+        var voxel = observation.GetProperty("chunks")[0].GetProperty("voxels")[0];
         JsonElement[] namedNonfiniteValues = DescendantsAndSelf(observation)
             .Where(element => element.ValueKind == JsonValueKind.String && element.GetString() == "NaN")
             .ToArray();
@@ -235,10 +261,16 @@ public sealed class HeadlessApplicationTests
             Assert.That(FindResponse(run.Responses, "temperature").GetProperty("ok").GetBoolean(), Is.True);
             Assert.That(observationResponse.GetProperty("ok").GetBoolean(), Is.True);
             Assert.That(voxel.GetProperty("temperatureK").GetString(), Is.EqualTo("NaN"));
-            Assert.That(observation.GetProperty("global").GetProperty("anomalies")
-                .GetProperty("nonFiniteTemperatureCount").GetInt32(), Is.EqualTo(1));
-            Assert.That(namedNonfiniteValues, Is.Not.Empty,
+            Assert.That(
+                observation.GetProperty("global").GetProperty("anomalies")
+                    .GetProperty("nonFiniteTemperatureCount").GetInt32(),
+                Is.EqualTo(1));
+
+            Assert.That(
+                namedNonfiniteValues,
+                Is.Not.Empty,
                 "The diagnostic response must remain serializable when a stored simulation value is NaN.");
+
             Assert.That(run.OutputLines.All(IsValidJson), Is.True);
         });
     }
@@ -254,23 +286,28 @@ public sealed class HeadlessApplicationTests
             Request("observe", "observe", "\"includeVoxels\":false"),
             Request("exit", "exit"));
 
-        JsonElement observation = FindResponse(run.Responses, "observe").GetProperty("observation");
-        JsonElement chunks = FindArraysNamed(observation, "chunks").Single();
+        var observation = FindResponse(run.Responses, "observe").GetProperty("observation");
+        var chunks = FindArraysNamed(observation, "chunks").Single();
         (int X, int Y, int Z)[] positions = chunks.EnumerateArray()
             .Select(chunk => ReadCoordinate(chunk.GetProperty("position")))
             .ToArray();
 
-        Assert.That(positions, Is.EqualTo(new[]
-        {
-            (-1, 3, 5),
-            (-1, 4, 0),
-            (2, 0, 0)
-        }));
+        Assert.That(
+            positions,
+            Is.EqualTo(
+                new[]
+                {
+                    (-1, 3, 5),
+                    (-1, 4, 0),
+                    (2, 0, 0)
+                }));
     }
 
     private static string CreateSimulationRequest(string id, int width, int height, int depth)
     {
-        return Request(id, "createSimulation",
+        return Request(
+            id,
+            "createSimulation",
             $"\"name\":\"Headless tests\"," +
             $"\"dimensions\":{{\"x\":{width},\"y\":{height},\"z\":{depth}}}," +
             "\"config\":{" +
@@ -296,13 +333,17 @@ public sealed class HeadlessApplicationTests
 
     private static string AddChunkRequest(string id, int x, int y, int z)
     {
-        return Request(id, "addChunk",
+        return Request(
+            id,
+            "addChunk",
             $"\"position\":{{\"x\":{x},\"y\":{y},\"z\":{z}}},\"classification\":1");
     }
 
     private static string SetTemperatureRequest(string id, int x, float temperature)
     {
-        return Request(id, "setVoxelTemperature",
+        return Request(
+            id,
+            "setVoxelTemperature",
             "\"position\":{\"x\":0,\"y\":0,\"z\":0}," +
             $"\"voxel\":{{\"x\":{x},\"y\":0,\"z\":0}}," +
             $"\"temperatureK\":{temperature.ToString(CultureInfo.InvariantCulture)}");
@@ -330,6 +371,7 @@ public sealed class HeadlessApplicationTests
 
         string[] lines = output.ToString()
             .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries);
+
         JsonElement[] responses = lines.Select(ParseJson).ToArray();
         return new RunResult(exitCode, lines, responses, error.ToString());
     }
@@ -384,25 +426,26 @@ public sealed class HeadlessApplicationTests
         else if (root.ValueKind == JsonValueKind.Array)
         {
             foreach (var item in root.EnumerateArray())
-                foreach (var match in FindArraysNamed(item, propertyName))
-                    yield return match;
+            foreach (var match in FindArraysNamed(item, propertyName))
+                yield return match;
         }
     }
 
     private static IEnumerable<JsonElement> DescendantsAndSelf(JsonElement root)
     {
         yield return root;
+
         if (root.ValueKind == JsonValueKind.Object)
         {
             foreach (var property in root.EnumerateObject())
-                foreach (var descendant in DescendantsAndSelf(property.Value))
-                    yield return descendant;
+            foreach (var descendant in DescendantsAndSelf(property.Value))
+                yield return descendant;
         }
         else if (root.ValueKind == JsonValueKind.Array)
         {
             foreach (var item in root.EnumerateArray())
-                foreach (var descendant in DescendantsAndSelf(item))
-                    yield return descendant;
+            foreach (var descendant in DescendantsAndSelf(item))
+                yield return descendant;
         }
     }
 

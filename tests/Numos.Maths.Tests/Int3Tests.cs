@@ -170,7 +170,8 @@ public sealed class Int3Tests
     [TestCase(1, 1, 0)]
     public void Remainder_WithZeroCoordinateThrows(int x, int y, int z)
     {
-        Assert.That(() => _ = new Int3(1, 2, 3) % new Int3(x, y, z),
+        Assert.That(
+            () => _ = new Int3(1, 2, 3) % new Int3(x, y, z),
             Throws.TypeOf<DivideByZeroException>());
     }
 

@@ -10,48 +10,48 @@ namespace Numos.Viewer;
 public partial class SimulationViewer
 {
     private const double StepProgressDisplayDuration = 0.8;
-    private double _stepProgressDisplayUntil;
-    private int _completedStepTick;
-
-    private bool _requestOpenCreateProject;
-    private bool _createProjectModalOpen;
-    private bool _requestOpenCloseProject;
     private bool _closeProjectModalOpen;
-
-    private string _projectNameDraft = "Untitled Simulation";
-    private int _projectChunkWidthDraft = AtmosChunkConstants.DefaultWidth;
-    private int _projectChunkHeightDraft = AtmosChunkConstants.DefaultHeight;
-    private int _projectChunkDepthDraft = 1;
-    private bool _includeDefaultGasesDraft = true;
+    private int _completedStepTick;
     private string? _createProjectError;
+    private bool _createProjectModalOpen;
+    private bool _includeDefaultGasesDraft = true;
+
+    private Int3? _injectionChunkPosition;
+    private int _injectionGasId;
+    private float _injectionMoles = 1f;
+    private float _injectionTemperature = AtmosPhysicalConstants.RoomTemperature;
+    private int _injectionX;
+    private int _injectionY;
+    private int _injectionZ;
+    private int _newChunkRoomId = 1;
 
     private int _newChunkX;
     private int _newChunkY;
     private int _newChunkZ;
-    private int _newChunkRoomId = 1;
-    private Int3? _toolChunkPosition;
-    private int _toolClassificationDraft;
-    private int _voxelClassificationDraft;
-
-    private Int3? _injectionChunkPosition;
-    private int _injectionX;
-    private int _injectionY;
-    private int _injectionZ;
-    private int _injectionGasId;
-    private float _injectionMoles = 1f;
-    private float _injectionTemperature = AtmosPhysicalConstants.RoomTemperature;
-
-    private string _newGasName = "New Gas";
-    private float _newGasMolarHeatCapacityAtConstantVolume =
-        AtmosPhysicalConstants.IdealDiatomicMolarHeatCapacityAtConstantVolume;
     private float _newGasBoilingPoint;
     private bool _newGasCondensationEnabled;
+    private float _newGasDiffusionCoefficient = AtmosConfigDefaults.DefaultDiffusionCoefficient;
     private float _newGasEnthalpyOfVaporization;
     private int _newGasLiquidId = -1;
-    private float _newGasDiffusionCoefficient = AtmosConfigDefaults.DefaultDiffusionCoefficient;
+    private float _newGasMolarHeatCapacityAtConstantVolume =
+        AtmosPhysicalConstants.IdealDiatomicMolarHeatCapacityAtConstantVolume;
+
+    private string _newGasName = "New Gas";
+    private int _projectChunkDepthDraft = 1;
+    private int _projectChunkHeightDraft = AtmosChunkConstants.DefaultHeight;
+    private int _projectChunkWidthDraft = AtmosChunkConstants.DefaultWidth;
 
     private string? _projectMessage;
     private bool _projectMessageIsError;
+
+    private string _projectNameDraft = "Untitled Simulation";
+    private bool _requestOpenCloseProject;
+
+    private bool _requestOpenCreateProject;
+    private double _stepProgressDisplayUntil;
+    private Int3? _toolChunkPosition;
+    private int _toolClassificationDraft;
+    private int _voxelClassificationDraft;
 
     private void RequestCreateProject()
     {
@@ -59,9 +59,11 @@ public partial class SimulationViewer
         _projectChunkWidthDraft = _chunkDimensions.X > 0
             ? _chunkDimensions.X
             : AtmosChunkConstants.DefaultWidth;
+
         _projectChunkHeightDraft = _chunkDimensions.Y > 0
             ? _chunkDimensions.Y
             : AtmosChunkConstants.DefaultHeight;
+
         _projectChunkDepthDraft = _chunkDimensions.Z > 0 ? _chunkDimensions.Z : 1;
         _includeDefaultGasesDraft = true;
         _createProjectError = null;
@@ -88,6 +90,7 @@ public partial class SimulationViewer
             viewport.Pos + viewport.Size * 0.5f,
             ImGuiCond.Appearing,
             new Vector2(0.5f, 0.5f));
+
         ImGui.SetNextWindowSize(new Vector2(520, 0), ImGuiCond.Appearing);
         using var modal = ImGuiExtensions.BeginPopupModal(popupId, ref _createProjectModalOpen);
         if (!modal.IsVisible)
@@ -106,9 +109,10 @@ public partial class SimulationViewer
 
         ImGui.Separator();
         ImGui.Checkbox("Include Oxygen and Nitrogen", ref _includeDefaultGasesDraft);
-        ImGui.TextDisabled(_includeDefaultGasesDraft
-            ? "The default gas definitions will be appended to the new project."
-            : "The project will start with a blank gas registry.");
+        ImGui.TextDisabled(
+            _includeDefaultGasesDraft
+                ? "The default gas definitions will be appended to the new project."
+                : "The project will start with a blank gas registry.");
 
         if (_simulation != null)
         {
@@ -135,6 +139,7 @@ public partial class SimulationViewer
                     _projectChunkHeightDraft,
                     _projectChunkDepthDraft,
                     _includeDefaultGasesDraft);
+
                 _createProjectModalOpen = false;
                 ImGui.CloseCurrentPopup();
             }
@@ -163,8 +168,7 @@ public partial class SimulationViewer
         if (!modal.IsVisible)
             return;
 
-        ImGui.TextWrapped(
-            $"Close '{_projectName}' and dispose its simulation? This project only exists in memory.");
+        ImGui.TextWrapped($"Close '{_projectName}' and dispose its simulation? This project only exists in memory.");
         ImGui.Spacing();
         if (ImGui.Button("Close Project", new Vector2(140, 0)))
         {
@@ -191,6 +195,7 @@ public partial class SimulationViewer
             ref _showSolutionPanel,
             new Vector2(10, 40),
             new Vector2(300, 290));
+
         if (!window.IsVisible)
             return;
 
@@ -240,7 +245,7 @@ public partial class SimulationViewer
     {
         const float cycleDuration = 1.25f;
         double now = ImGui.GetTime();
-        var indet = (float)(-1f * (now % (cycleDuration / cycleDuration)));
+        float indet = (float)(-1f * (now % (cycleDuration / cycleDuration)));
 
         if (!_isPaused)
         {
@@ -268,6 +273,7 @@ public partial class SimulationViewer
             _projectMessageIsError
                 ? new Vector4(1f, 0.35f, 0.35f, 1f)
                 : new Vector4(0.4f, 0.85f, 0.5f, 1f));
+
         ImGui.TextWrapped(_projectMessage);
         ImGui.PopStyleColor();
         ImGui.Spacing();
@@ -281,10 +287,8 @@ public partial class SimulationViewer
 
     private void RenderProjectChunkControls()
     {
-        ImGui.TextDisabled(
-            $"Fixed size: {_chunkDimensions.X} x {_chunkDimensions.Y} x {_chunkDimensions.Z}");
-        ImGui.TextDisabled(
-            "Right-click a chunk coordinate for options.");
+        ImGui.TextDisabled($"Fixed size: {_chunkDimensions.X} x {_chunkDimensions.Y} x {_chunkDimensions.Z}");
+        ImGui.TextDisabled("Right-click a chunk coordinate for options.");
 
         AtmosChunkHandle? chunkToRemove = null;
         AtmosChunkHandle? chunkToSeal = null;
@@ -302,6 +306,7 @@ public partial class SimulationViewer
 
                 if (ImGui.MenuItem("Seal With Walls"))
                     chunkToSeal = handle;
+
                 if (ImGui.IsItemHovered())
                     ImGui.SetTooltip("Replace the chunk's simulated outer faces with solid voxels.");
 
@@ -338,7 +343,7 @@ public partial class SimulationViewer
     private void RenderProjectGasControls()
     {
         int gasToRemove = -1;
-        for (var gasId = 0; gasId < _config!.GasRegistry.Count; gasId++)
+        for (int gasId = 0; gasId < _config!.GasRegistry.Count; gasId++)
         {
             var gas = _config.GasRegistry[gasId];
             ImGui.PushID($"gas-{gasId}");
@@ -346,8 +351,10 @@ public partial class SimulationViewer
             ImGui.SameLine();
             if (ImGui.SmallButton("Remove"))
                 gasToRemove = gasId;
+
             if (ImGui.IsItemHovered())
                 ImGui.SetTooltip("Removal is allowed while no stored chunk gas IDs would be shifted.");
+
             ImGui.PopID();
         }
 
@@ -373,16 +380,17 @@ public partial class SimulationViewer
         ImGui.InputFloat("Diffusion coefficient##new-gas", ref _newGasDiffusionCoefficient);
         if (ImGui.Button("Add Gas", new Vector2(120, 0)))
         {
-            AddProjectGas(new GasProperties
-            {
-                Name = _newGasName,
-                MolarHeatCapacityAtConstantVolume = _newGasMolarHeatCapacityAtConstantVolume,
-                BoilingPoint = _newGasBoilingPoint,
-                CondensationEnabled = _newGasCondensationEnabled,
-                MolarEnthalpyOfVaporization = _newGasEnthalpyOfVaporization,
-                LiquidId = _newGasLiquidId,
-                DiffusionCoefficient = _newGasDiffusionCoefficient
-            });
+            AddProjectGas(
+                new GasProperties
+                {
+                    Name = _newGasName,
+                    MolarHeatCapacityAtConstantVolume = _newGasMolarHeatCapacityAtConstantVolume,
+                    BoilingPoint = _newGasBoilingPoint,
+                    CondensationEnabled = _newGasCondensationEnabled,
+                    MolarEnthalpyOfVaporization = _newGasEnthalpyOfVaporization,
+                    LiquidId = _newGasLiquidId,
+                    DiffusionCoefficient = _newGasDiffusionCoefficient
+                });
         }
     }
 
@@ -407,6 +415,7 @@ public partial class SimulationViewer
                 bool selected = handle.Position == _injectionChunkPosition.Value;
                 if (ImGui.Selectable(FormatChunkPosition(handle.Position), selected))
                     _injectionChunkPosition = handle.Position;
+
                 if (selected)
                     ImGui.SetItemDefaultFocus();
             }
@@ -450,11 +459,12 @@ public partial class SimulationViewer
             string gasLabel = FormatGas(_injectionGasId);
             if (ImGui.BeginCombo("Gas##inject", gasLabel))
             {
-                for (var gasId = 0; gasId < _config.GasRegistry.Count; gasId++)
+                for (int gasId = 0; gasId < _config.GasRegistry.Count; gasId++)
                 {
                     bool selected = gasId == _injectionGasId;
                     if (ImGui.Selectable(FormatGas(gasId), selected))
                         _injectionGasId = gasId;
+
                     if (selected)
                         ImGui.SetItemDefaultFocus();
                 }
@@ -475,6 +485,7 @@ public partial class SimulationViewer
         bool canInject = _config.GasRegistry.Count > 0;
         if (!canInject)
             ImGui.BeginDisabled();
+
         if (ImGui.Button("Inject Gas##inject-action", new Vector2(120, 0)) &&
             _injectionChunkPosition.HasValue)
         {

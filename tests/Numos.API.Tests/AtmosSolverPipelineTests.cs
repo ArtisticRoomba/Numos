@@ -12,13 +12,16 @@ public sealed class AtmosSolverPipelineTests
     {
         using var simulation = new AtmosSimulation();
 
-        Assert.That(simulation.Solvers.Steps, Is.EqualTo(new[]
-        {
-            new AtmosSolverStep(AtmosBuiltInSolvers.Advection, true, AtmosSolverKind.BuiltIn),
-            new AtmosSolverStep(AtmosBuiltInSolvers.BoundaryFlow, true, AtmosSolverKind.BuiltIn),
-            new AtmosSolverStep(AtmosBuiltInSolvers.Thermodynamics, true, AtmosSolverKind.BuiltIn),
-            new AtmosSolverStep(AtmosBuiltInSolvers.ThermalBoundary, true, AtmosSolverKind.BuiltIn)
-        }));
+        Assert.That(
+            simulation.Solvers.Steps,
+            Is.EqualTo(
+                new[]
+                {
+                    new AtmosSolverStep(AtmosBuiltInSolvers.Advection, true, AtmosSolverKind.BuiltIn),
+                    new AtmosSolverStep(AtmosBuiltInSolvers.BoundaryFlow, true, AtmosSolverKind.BuiltIn),
+                    new AtmosSolverStep(AtmosBuiltInSolvers.Thermodynamics, true, AtmosSolverKind.BuiltIn),
+                    new AtmosSolverStep(AtmosBuiltInSolvers.ThermalBoundary, true, AtmosSolverKind.BuiltIn)
+                }));
     }
 
     [Test]
@@ -26,8 +29,11 @@ public sealed class AtmosSolverPipelineTests
     {
         using var simulation = new AtmosSimulation();
         var calls = new List<string>();
-        simulation.Solvers.RegisterBefore(AtmosBuiltInSolvers.Advection, "first",
+        simulation.Solvers.RegisterBefore(
+            AtmosBuiltInSolvers.Advection,
+            "first",
             solverSimulation => calls.Add($"first:{solverSimulation.TickCount}"));
+
         simulation.Solvers.RegisterAfter("first", "second", _ => calls.Add("second"));
 
         simulation.Tick();
@@ -43,6 +49,7 @@ public sealed class AtmosSolverPipelineTests
             VacuumThreshold = 0f,
             SleepThreshold = int.MaxValue
         };
+
         using var simulation = new AtmosSimulation(config, 2, 1, 1);
         var chunk = simulation.CreateAndRegisterChunk(default);
         simulation.SetChunkClassification(chunk, new VoxelClassification(1));
@@ -68,12 +75,15 @@ public sealed class AtmosSolverPipelineTests
         using var simulation = new AtmosSimulation(1, 1, 1);
         var chunk = simulation.CreateAndRegisterChunk(default);
         simulation.SetChunkClassification(chunk, new VoxelClassification(7));
-        simulation.Solvers.RegisterBefore(AtmosBuiltInSolvers.Advection, "inject", solverSimulation =>
-        {
-            Assert.That(solverSimulation.GetChunkHandles(), Is.EqualTo(new[] { chunk }));
-            Assert.That(solverSimulation.GetChunkSnapshot(chunk).Gases, Is.Empty);
-            solverSimulation.AddGasToVoxel(chunk, 0, 3, 2f, 350f);
-        });
+        simulation.Solvers.RegisterBefore(
+            AtmosBuiltInSolvers.Advection,
+            "inject",
+            solverSimulation =>
+            {
+                Assert.That(solverSimulation.GetChunkHandles(), Is.EqualTo(new[] { chunk }));
+                Assert.That(solverSimulation.GetChunkSnapshot(chunk).Gases, Is.Empty);
+                solverSimulation.AddGasToVoxel(chunk, 0, 3, 2f, 350f);
+            });
 
         simulation.Tick();
 
@@ -120,15 +130,19 @@ public sealed class AtmosSolverPipelineTests
         var chunk = simulation.CreateAndRegisterChunk(default);
         simulation.SetChunkClassification(chunk, new VoxelClassification(1));
         simulation.AddGasToVoxel(chunk, 0, 0, 2f, 300f);
-        simulation.Solvers.RegisterBefore(AtmosBuiltInSolvers.Advection, "replace-config", solverSimulation =>
-        {
-            if (solverSimulation.TickCount == 1)
-                solverSimulation.SetAtmosConfig(replacement);
-        });
+        simulation.Solvers.RegisterBefore(
+            AtmosBuiltInSolvers.Advection,
+            "replace-config",
+            solverSimulation =>
+            {
+                if (solverSimulation.TickCount == 1)
+                    solverSimulation.SetAtmosConfig(replacement);
+            });
 
         simulation.Tick();
         float firstTickTargetMoles = simulation.GetVoxelSnapshot(chunk, 1).Gases
             .SingleOrDefault().Moles;
+
         simulation.Tick();
         float secondTickTargetMoles = simulation.GetVoxelSnapshot(chunk, 1).Gases
             .Single().Moles;
@@ -146,14 +160,19 @@ public sealed class AtmosSolverPipelineTests
     {
         using var simulation = new AtmosSimulation();
         var calls = new List<int>();
-        simulation.Solvers.RegisterBefore(AtmosBuiltInSolvers.Advection, "register-later", solverSimulation =>
-        {
-            if (solverSimulation.TickCount == 1)
+        simulation.Solvers.RegisterBefore(
+            AtmosBuiltInSolvers.Advection,
+            "register-later",
+            solverSimulation =>
             {
-                solverSimulation.Solvers.RegisterAfter("register-later", "later",
-                    later => calls.Add(later.TickCount));
-            }
-        });
+                if (solverSimulation.TickCount == 1)
+                {
+                    solverSimulation.Solvers.RegisterAfter(
+                        "register-later",
+                        "later",
+                        later => calls.Add(later.TickCount));
+                }
+            });
 
         simulation.Tick();
         simulation.Tick();
@@ -166,22 +185,31 @@ public sealed class AtmosSolverPipelineTests
     {
         using var simulation = new AtmosSimulation(1, 1, 1);
         var chunk = simulation.CreateAndRegisterChunk(default);
-        AtmosConfig originalConfig = simulation.Config;
-        simulation.Solvers.RegisterBefore(AtmosBuiltInSolvers.Advection, "invalid-lifecycle", _ =>
-        {
-            Assert.Multiple(() =>
+        var originalConfig = simulation.Config;
+        simulation.Solvers.RegisterBefore(
+            AtmosBuiltInSolvers.Advection,
+            "invalid-lifecycle",
+            _ =>
             {
-                Assert.That(simulation.Tick, Throws.InvalidOperationException);
-                Assert.That(() => simulation.Update(1f / AtmosSimulation.SimulationRate),
-                    Throws.InvalidOperationException);
-                Assert.That(() => simulation.Update(1f / AtmosSimulation.SimulationRate, new AtmosConfig()),
-                    Throws.InvalidOperationException);
-                Assert.That(() => simulation.CreateAndRegisterChunk(Int3.PosX),
-                    Throws.InvalidOperationException);
-                Assert.That(() => simulation.UnregisterChunk(chunk), Throws.InvalidOperationException);
-                Assert.That(simulation.Dispose, Throws.InvalidOperationException);
+                Assert.Multiple(() =>
+                {
+                    Assert.That(simulation.Tick, Throws.InvalidOperationException);
+                    Assert.That(
+                        () => simulation.Update(1f / AtmosSimulation.SimulationRate),
+                        Throws.InvalidOperationException);
+
+                    Assert.That(
+                        () => simulation.Update(1f / AtmosSimulation.SimulationRate, new AtmosConfig()),
+                        Throws.InvalidOperationException);
+
+                    Assert.That(
+                        () => simulation.CreateAndRegisterChunk(Int3.PosX),
+                        Throws.InvalidOperationException);
+
+                    Assert.That(() => simulation.UnregisterChunk(chunk), Throws.InvalidOperationException);
+                    Assert.That(simulation.Dispose, Throws.InvalidOperationException);
+                });
             });
-        });
 
         simulation.Tick();
 
@@ -204,17 +232,21 @@ public sealed class AtmosSolverPipelineTests
             SleepThreshold = int.MaxValue,
             GasRegistry = [new GasProperties { MolarHeatCapacityAtConstantVolume = 1f }]
         };
+
         using var simulation = new AtmosSimulation(config, 2, 1, 1);
         var chunk = simulation.CreateAndRegisterChunk(default);
         simulation.SetChunkClassification(chunk, new VoxelClassification(1));
         simulation.AddGasToVoxel(chunk, 0, 0, 1f, 300f);
         simulation.AddGasToVoxel(chunk, 1, 0, 1f, 300f);
         simulation.Solvers.SetEnabled(AtmosBuiltInSolvers.Advection, false);
-        simulation.Solvers.RegisterBefore(AtmosBuiltInSolvers.Thermodynamics, "cool", solverSimulation =>
-        {
-            if (solverSimulation.TickCount == 2)
-                solverSimulation.SetVoxelTemperature(chunk, 0, 1f);
-        });
+        simulation.Solvers.RegisterBefore(
+            AtmosBuiltInSolvers.Thermodynamics,
+            "cool",
+            solverSimulation =>
+            {
+                if (solverSimulation.TickCount == 2)
+                    solverSimulation.SetVoxelTemperature(chunk, 0, 1f);
+            });
 
         simulation.Tick();
         simulation.Tick();
@@ -234,6 +266,7 @@ public sealed class AtmosSolverPipelineTests
             SleepThreshold = int.MaxValue,
             GasRegistry = [new GasProperties()]
         };
+
         using var simulation = new AtmosSimulation(config, 1, 1, 1);
         var source = simulation.CreateAndRegisterChunk(default);
         var target = simulation.CreateAndRegisterChunk(new Int3(1, 0, 0));
@@ -271,6 +304,7 @@ public sealed class AtmosSolverPipelineTests
                 }
             ]
         };
+
         using var simulation = new AtmosSimulation(config, 1, 1, 1);
         var hot = simulation.CreateAndRegisterChunk(default);
         var cold = simulation.CreateAndRegisterChunk(Int3.PosX);
@@ -306,15 +340,17 @@ public sealed class AtmosSolverPipelineTests
             SleepThreshold = int.MaxValue,
             GasRegistry = [new GasProperties()]
         };
+
         using var simulation = new AtmosSimulation(config, 1, 1, 1);
         var source = simulation.CreateAndRegisterChunk(default);
         var target = simulation.CreateAndRegisterChunk(Int3.PosX);
         simulation.SetChunkClassification(source, new VoxelClassification(1));
         simulation.SetChunkClassification(target, new VoxelClassification(2));
         simulation.AddGasToVoxel(source, 0, 0, 2f, 300f);
-        simulation.Solvers.RegisterAfter(AtmosBuiltInSolvers.Advection, "seal-source",
-            solverSimulation => solverSimulation.SetVoxelClassification(
-                source, 0, VoxelClassification.RoomSolid));
+        simulation.Solvers.RegisterAfter(
+            AtmosBuiltInSolvers.Advection,
+            "seal-source",
+            solverSimulation => solverSimulation.SetVoxelClassification(source, 0, VoxelClassification.RoomSolid));
 
         simulation.Tick();
 
@@ -333,6 +369,7 @@ public sealed class AtmosSolverPipelineTests
             SleepThreshold = int.MaxValue,
             GasRegistry = [new GasProperties { MolarHeatCapacityAtConstantVolume = 1f }]
         };
+
         using var simulation = new AtmosSimulation(config, 1, 1, 1);
         var hot = simulation.CreateAndRegisterChunk(default);
         var cold = simulation.CreateAndRegisterChunk(Int3.PosX);
@@ -340,11 +377,14 @@ public sealed class AtmosSolverPipelineTests
         simulation.SetChunkClassification(cold, new VoxelClassification(2));
         simulation.AddGasToVoxel(hot, 0, 0, 1f, 400f);
         simulation.AddGasToVoxel(cold, 0, 0, 1f, 200f);
-        simulation.Solvers.RegisterAfter(AtmosBuiltInSolvers.Thermodynamics, "seal-hot", solverSimulation =>
-        {
-            if (solverSimulation.TickCount == 2)
-                solverSimulation.SetVoxelClassification(hot, 0, VoxelClassification.RoomSolid);
-        });
+        simulation.Solvers.RegisterAfter(
+            AtmosBuiltInSolvers.Thermodynamics,
+            "seal-hot",
+            solverSimulation =>
+            {
+                if (solverSimulation.TickCount == 2)
+                    solverSimulation.SetVoxelClassification(hot, 0, VoxelClassification.RoomSolid);
+            });
 
         simulation.Tick();
         simulation.Tick();
@@ -365,14 +405,16 @@ public sealed class AtmosSolverPipelineTests
 
         simulation.Solvers.ResetToDefaults();
 
-        Assert.That(simulation.Solvers.Steps.Select(static step => (step.Name, step.IsEnabled)),
-            Is.EqualTo(new[]
-            {
-                (AtmosBuiltInSolvers.Advection, true),
-                (AtmosBuiltInSolvers.BoundaryFlow, true),
-                (AtmosBuiltInSolvers.Thermodynamics, true),
-                (AtmosBuiltInSolvers.ThermalBoundary, true)
-            }));
+        Assert.That(
+            simulation.Solvers.Steps.Select(static step => (step.Name, step.IsEnabled)),
+            Is.EqualTo(
+                new[]
+                {
+                    (AtmosBuiltInSolvers.Advection, true),
+                    (AtmosBuiltInSolvers.BoundaryFlow, true),
+                    (AtmosBuiltInSolvers.Thermodynamics, true),
+                    (AtmosBuiltInSolvers.ThermalBoundary, true)
+                }));
     }
 
     private static AtmosConfig CreateDiffusionConfig(float diffusionCoefficient)
@@ -409,13 +451,13 @@ public sealed class AtmosSolverPipelineTests
         public object Config { get; } = new();
         internal bool IsDisposed { get; private set; }
 
-        public void Solve(AtmosSimulation simulation)
-        {
-        }
-
         public void Dispose()
         {
             IsDisposed = true;
+        }
+
+        public void Solve(AtmosSimulation simulation)
+        {
         }
     }
 }

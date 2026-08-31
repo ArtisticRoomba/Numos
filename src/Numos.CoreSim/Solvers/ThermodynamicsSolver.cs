@@ -9,19 +9,19 @@ namespace Numos.CoreSim.Solvers;
 /// </summary>
 internal sealed class ThermodynamicsSolver : IAtmosSolverStage, IDisposable
 {
-    private readonly PhaseChangeSolver _phaseChanges = new();
-    private readonly ThermalDiffusionSolver _thermalDiffusion = new();
-    private readonly ThreadLocal<ThermalBoundaryEvent[]> _thermalBoundaryBuffers;
     private readonly Action _clearThermalBoundaryEvents;
     private readonly Action<int, Int3, ThermalBoundaryEvent> _enqueueThermalBoundaryEvent;
+    private readonly PhaseChangeSolver _phaseChanges = new();
+    private readonly ThreadLocal<ThermalBoundaryEvent[]> _thermalBoundaryBuffers;
+    private readonly ThermalDiffusionSolver _thermalDiffusion = new();
 
-    internal ThermodynamicsSolver(int maximumBoundaryEvents, Action clearThermalBoundaryEvents,
+    internal ThermodynamicsSolver(
+        int maximumBoundaryEvents, Action clearThermalBoundaryEvents,
         Action<int, Int3, ThermalBoundaryEvent> enqueueThermalBoundaryEvent)
     {
         _clearThermalBoundaryEvents = clearThermalBoundaryEvents;
         _enqueueThermalBoundaryEvent = enqueueThermalBoundaryEvent;
-        _thermalBoundaryBuffers = new ThreadLocal<ThermalBoundaryEvent[]>(
-            () => new ThermalBoundaryEvent[maximumBoundaryEvents]);
+        _thermalBoundaryBuffers = new ThreadLocal<ThermalBoundaryEvent[]>(() => new ThermalBoundaryEvent[maximumBoundaryEvents]);
     }
 
     public void Solve(AtmosSolverExecutionContext context)
@@ -48,7 +48,7 @@ internal sealed class ThermodynamicsSolver : IAtmosSolverStage, IDisposable
         int boundaryCount = _thermalDiffusion.Solve(chunk, context.TickConfig, boundaryBuffer);
         _phaseChanges.Solve(chunk, context.TickConfig);
 
-        for (var index = 0; index < boundaryCount; index++)
+        for (int index = 0; index < boundaryCount; index++)
             _enqueueThermalBoundaryEvent(context.TickCount, chunk.GridPosition, boundaryBuffer[index]);
     }
 }

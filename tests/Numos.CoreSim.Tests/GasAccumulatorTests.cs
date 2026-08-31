@@ -80,7 +80,7 @@ public sealed class GasAccumulatorTests
     private static GasAccumulator CreateAccumulatorWithTicks(int ticks)
     {
         var accumulator = new GasAccumulator { GasId = 1 };
-        for (var tick = 0; tick < ticks; tick++)
+        for (int tick = 0; tick < ticks; tick++)
             accumulator.AddGas(0.25f, 300f);
 
         return accumulator;

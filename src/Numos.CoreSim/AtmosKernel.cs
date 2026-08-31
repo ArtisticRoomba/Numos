@@ -1,6 +1,5 @@
 using System.Collections.Concurrent;
 using Numos.CoreSim.Solvers;
-using Numos.CoreSim.Datatypes.Primitives;
 using Numos.Maths;
 
 namespace Numos.CoreSim;
@@ -11,14 +10,9 @@ namespace Numos.CoreSim;
 internal sealed partial class AtmosKernel : IDisposable, IAtmosSolverWorld
 {
     private readonly ConcurrentDictionary<Int3, AtmosChunk> _chunkMap = new();
+    private readonly AtmosSolverPipeline _solverPipeline;
     private readonly object _stateGate = new();
     private readonly AtmosSolverConfigSnapshot _tickConfig = new();
-    private readonly AtmosSolverPipeline _solverPipeline;
-
-    private float _accumulator;
-    private long _chunkCollectionRevision;
-    private AtmosConfig _config = new();
-    private bool _isTickExecuting;
 
     /// <summary>
     ///     High-resolution timestamp ticks spent processing boundary flow since the latest elapsed-time update.
@@ -28,6 +22,11 @@ internal sealed partial class AtmosKernel : IDisposable, IAtmosSolverWorld
     /// <summary>Number of fixed simulation ticks processed since construction.</summary>
     internal int TickCount;
 
+    private Second _accumulator;
+    private long _chunkCollectionRevision;
+    private AtmosConfig _config = new();
+    private bool _isTickExecuting;
+
     internal AtmosKernel(
         int chunkWidth = AtmosChunkConstants.DefaultWidth,
         int chunkHeight = AtmosChunkConstants.DefaultHeight,
@@ -35,6 +34,16 @@ internal sealed partial class AtmosKernel : IDisposable, IAtmosSolverWorld
     {
         var defaultSolvers = new DefaultAtmosSolvers(chunkWidth, chunkHeight, chunkDepth);
         _solverPipeline = new AtmosSolverPipeline(defaultSolvers.CreateSteps, defaultSolvers);
+    }
+
+    bool IAtmosSolverWorld.TryGetChunk(Int3 position, out AtmosChunk chunk)
+    {
+        return _chunkMap.TryGetValue(position, out chunk!);
+    }
+
+    void IAtmosSolverWorld.AddBoundaryProcessingTicks(long elapsedTicks)
+    {
+        LastBoundaryTicks += elapsedTicks;
     }
 
     public void Dispose()
@@ -80,21 +89,13 @@ internal sealed partial class AtmosKernel : IDisposable, IAtmosSolverWorld
             throw new InvalidOperationException($"A solver callback cannot {operation}.");
     }
 
-    bool IAtmosSolverWorld.TryGetChunk(Int3 position, out AtmosChunk chunk)
-    {
-        return _chunkMap.TryGetValue(position, out chunk!);
-    }
-
-    void IAtmosSolverWorld.AddBoundaryProcessingTicks(long elapsedTicks)
-    {
-        LastBoundaryTicks += elapsedTicks;
-    }
-
     private readonly record struct ThermalVoxelAddress(Int3 ChunkPosition, ushort LocalVoxelIndex);
 
     private readonly record struct ThermalBoundaryEdge(ThermalVoxelAddress First, ThermalVoxelAddress Second);
 
-    private readonly record struct ThermalBoundaryConductance(ThermalBoundaryEdge Edge, float Conductance);
+    private readonly record struct ThermalBoundaryConductance(
+        ThermalBoundaryEdge Edge,
+        JoulePerKelvin Conductance);
 
-    private readonly record struct ThermalBoundaryState(float Temperature, float HeatCapacity);
+    private readonly record struct ThermalBoundaryState(Kelvin Temperature, JoulePerKelvin HeatCapacity);
 }

@@ -25,6 +25,7 @@ public sealed class SliceProjectionTests
             [snapshot],
             BuiltInVisualizationIds.Temperature,
             1);
+
         var chunk = frame.Chunks[snapshot.GridPosition];
 
         var slice = builder.BuildChunkSlice(frame, chunk.Identity, axis, sliceIndex);
@@ -47,6 +48,7 @@ public sealed class SliceProjectionTests
             [snapshot],
             BuiltInVisualizationIds.Temperature,
             1);
+
         var chunk = frame.Chunks[snapshot.GridPosition];
         var slice = builder.BuildChunkSlice(frame, chunk.Identity, SliceAxis.Z, 0);
         var bounds = slice.GetViewBounds(1f);
@@ -75,6 +77,7 @@ public sealed class SliceProjectionTests
             [snapshot],
             BuiltInVisualizationIds.Temperature,
             1);
+
         var chunk = frame.Chunks[snapshot.GridPosition];
         var slice = builder.BuildChunkSlice(frame, chunk.Identity, SliceAxis.Z, 0);
 
@@ -92,6 +95,7 @@ public sealed class SliceProjectionTests
             [firstSnapshot],
             BuiltInVisualizationIds.Temperature,
             1);
+
         var firstSlice = builder.BuildChunkSlice(
             firstFrame,
             firstFrame.Chunks.Values.Single().Identity,
@@ -106,6 +110,7 @@ public sealed class SliceProjectionTests
             BuiltInVisualizationIds.Temperature,
             2,
             firstFrame);
+
         var secondSlice = builder.BuildChunkSlice(
             secondFrame,
             secondFrame.Chunks.Values.Single().Identity,

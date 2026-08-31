@@ -170,9 +170,12 @@ public sealed record AnomalyCountsReport(
     int NegativeMolesCount)
 {
     public int TotalCount =>
-        NonFinitePressureCount + NegativePressureCount +
-        NonFiniteTemperatureCount + NegativeTemperatureCount +
-        NonFiniteMolesCount + NegativeMolesCount;
+        NonFinitePressureCount +
+        NegativePressureCount +
+        NonFiniteTemperatureCount +
+        NegativeTemperatureCount +
+        NonFiniteMolesCount +
+        NegativeMolesCount;
 }
 
 /// <summary>One bounded, deterministic location for an aggregate anomaly.</summary>

@@ -6,15 +6,15 @@ namespace Numos.CoreSim.Solvers;
 internal sealed class PhaseChangeSolver
 {
     private const int MaximumEquilibriumIterations = 24;
-    private const double MinimumMoleTolerance = 1e-7d;
-    private const double RelativeMoleTolerance = 1d / (1 << 23);
+    private const Mole64 MinimumMoleTolerance = 1e-7d;
+    private const Scalar64 RelativeMoleTolerance = 1d / (1 << 23);
 
     internal void Solve(AtmosChunk chunk, AtmosSolverConfigSnapshot config)
     {
         if (config.CondensationRateFactor <= 0f)
             return;
 
-        for (var gas = 0; gas < chunk.ActiveGasCount; gas++)
+        for (int gas = 0; gas < chunk.ActiveGasCount; gas++)
             ProcessGas(chunk, config, gas);
     }
 
@@ -23,46 +23,66 @@ internal sealed class PhaseChangeSolver
         int gasId = chunk.ActiveGases[gasIndex].GasId;
         if (!config.TryGetGasProperties(gasId, out var properties) || !properties.CondensationEnabled)
             return;
+
         if (!AtmosSolverMath.IsFinitePositive(properties.BoilingPoint) ||
             !AtmosSolverMath.IsFinitePositive(properties.MolarEnthalpyOfVaporization))
             return;
 
-        double inverseBoilingPoint = 1d / properties.BoilingPoint;
-        for (var activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
+        PerKelvin64 inverseBoilingPoint = 1d / properties.BoilingPoint;
+        for (int activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
         {
             ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
-            float gasMoles = chunk.ActiveGases[gasIndex].Moles[voxelIndex];
+            Mole gasMoles = chunk.ActiveGases[gasIndex].Moles[voxelIndex];
             if (gasMoles <= AtmosSolverConstants.MinimumMolesForCondensation)
                 continue;
 
-            float temperature = config.GetValidatedTemp(chunk.Temperature[voxelIndex]);
-            double saturationMoles = CalculateSaturationMoles(
-                config, properties, temperature, inverseBoilingPoint);
+            Kelvin temperature = config.GetValidatedTemp(chunk.Temperature[voxelIndex]);
+            Mole64 saturationMoles = CalculateSaturationMoles(config, properties, temperature, inverseBoilingPoint);
             if (gasMoles <= saturationMoles)
                 continue;
 
-            float molarInternalEnergyOfVaporization = MathF.Max(0f,
+            JoulePerMole molarInternalEnergyOfVaporization = MathF.Max(
+                0f,
                 properties.MolarEnthalpyOfVaporization -
                 AtmosPhysicalConstants.MolarGasConstant * temperature);
 
-            double equilibriumRemainingMoles = CalculateEquilibriumRemainingMoles(
-                chunk, config, gasIndex, voxelIndex, gasMoles, temperature,
-                saturationMoles, molarInternalEnergyOfVaporization, properties,
+            Mole64 equilibriumRemainingMoles = CalculateEquilibriumRemainingMoles(
+                chunk,
+                config,
+                gasIndex,
+                voxelIndex,
+                gasMoles,
+                temperature,
+                saturationMoles,
+                molarInternalEnergyOfVaporization,
+                properties,
                 inverseBoilingPoint);
-            double equilibriumCondensedMoles = gasMoles - equilibriumRemainingMoles;
-            double targetRemainingMoles = gasMoles - Math.Min(gasMoles,
-                equilibriumCondensedMoles * config.CondensationRateFactor);
-            var remainingMoles = (float)targetRemainingMoles;
+
+            Mole64 equilibriumCondensedMoles = gasMoles - equilibriumRemainingMoles;
+            Mole64 targetRemainingMoles = gasMoles -
+                                          Math.Min(
+                                              gasMoles,
+                                              equilibriumCondensedMoles * config.CondensationRateFactor);
+
+            Mole remainingMoles = (float)targetRemainingMoles;
             if (remainingMoles < targetRemainingMoles)
                 remainingMoles = MathF.BitIncrement(remainingMoles);
+
             remainingMoles = Math.Clamp(remainingMoles, 0f, gasMoles);
 
-            float molesToCondense = gasMoles - remainingMoles;
+            Mole molesToCondense = gasMoles - remainingMoles;
             if (molesToCondense <= 0f)
                 continue;
 
-            ApplyCondensation(chunk, config, gasIndex, voxelIndex, temperature,
-                remainingMoles, molesToCondense, molarInternalEnergyOfVaporization);
+            ApplyCondensation(
+                chunk,
+                config,
+                gasIndex,
+                voxelIndex,
+                temperature,
+                remainingMoles,
+                molesToCondense,
+                molarInternalEnergyOfVaporization);
         }
     }
 
@@ -71,37 +91,47 @@ internal sealed class PhaseChangeSolver
     ///     A safeguarded Newton solve operates in log-mole space so large inventories and saturation pressures
     ///     do not require an overflow-prone pressure round trip.
     /// </summary>
-    private static double CalculateEquilibriumRemainingMoles(AtmosChunk chunk,
-        AtmosSolverConfigSnapshot config, int gasIndex, ushort voxelIndex, double gasMoles,
-        double initialTemperature, double initialSaturationMoles,
-        double molarInternalEnergyOfVaporization, GasProperties properties,
-        double inverseBoilingPoint)
+    private static Mole64 CalculateEquilibriumRemainingMoles(
+        AtmosChunk chunk,
+        AtmosSolverConfigSnapshot config, int gasIndex, ushort voxelIndex, Mole64 gasMoles,
+        Kelvin64 initialTemperature, Mole64 initialSaturationMoles,
+        JoulePerMole64 molarInternalEnergyOfVaporization, GasProperties properties,
+        PerKelvin64 inverseBoilingPoint)
     {
-        double molarHeatCapacity =
+        JoulePerMoleKelvin64 molarHeatCapacity =
             config.GetMolarHeatCapacityAtConstantVolume(chunk.ActiveGases[gasIndex].GasId);
-        double otherHeatCapacity = CalculateOtherHeatCapacityAtVoxel(
-            chunk, config, gasIndex, voxelIndex);
-        double initialTotalHeatCapacity = otherHeatCapacity + gasMoles * molarHeatCapacity;
+
+        JoulePerKelvin64 otherHeatCapacity = CalculateOtherHeatCapacityAtVoxel(chunk, config, gasIndex, voxelIndex);
+        JoulePerKelvin64 initialTotalHeatCapacity = otherHeatCapacity + gasMoles * molarHeatCapacity;
 
         if (molarInternalEnergyOfVaporization == 0d)
             return Math.Clamp(initialSaturationMoles, 0d, gasMoles);
 
-        var lowerBound = 0d;
-        double upperBound = gasMoles;
-        double candidate = Math.Clamp(initialSaturationMoles, lowerBound, upperBound);
-        double moleTolerance = Math.Max(MinimumMoleTolerance,
+        Mole64 lowerBound = 0d;
+        Mole64 upperBound = gasMoles;
+        Mole64 candidate = Math.Clamp(initialSaturationMoles, lowerBound, upperBound);
+        Mole64 moleTolerance = Math.Max(
+            MinimumMoleTolerance,
             gasMoles * RelativeMoleTolerance);
 
-        for (var iteration = 0; iteration < MaximumEquilibriumIterations; iteration++)
+        for (int iteration = 0; iteration < MaximumEquilibriumIterations; iteration++)
         {
             if (candidate <= lowerBound || candidate >= upperBound)
                 candidate = (lowerBound + upperBound) * 0.5d;
 
-            double previousWidth = upperBound - lowerBound;
-            double residual = CalculateSaturationLogResidual(config, gasMoles,
-                initialTemperature, initialTotalHeatCapacity, otherHeatCapacity,
-                molarHeatCapacity, molarInternalEnergyOfVaporization, properties,
-                inverseBoilingPoint, candidate, out double residualDerivative);
+            Mole64 previousWidth = upperBound - lowerBound;
+            Scalar64 residual = CalculateSaturationLogResidual(
+                config,
+                gasMoles,
+                initialTemperature,
+                initialTotalHeatCapacity,
+                otherHeatCapacity,
+                molarHeatCapacity,
+                molarInternalEnergyOfVaporization,
+                properties,
+                inverseBoilingPoint,
+                candidate,
+                out PerMole64 residualDerivative);
 
             if (residual > 0d)
                 upperBound = candidate;
@@ -114,10 +144,19 @@ internal sealed class PhaseChangeSolver
             if (upperBound - lowerBound > previousWidth * 0.5d)
             {
                 candidate = (lowerBound + upperBound) * 0.5d;
-                residual = CalculateSaturationLogResidual(config, gasMoles,
-                    initialTemperature, initialTotalHeatCapacity, otherHeatCapacity,
-                    molarHeatCapacity, molarInternalEnergyOfVaporization, properties,
-                    inverseBoilingPoint, candidate, out residualDerivative);
+                residual = CalculateSaturationLogResidual(
+                    config,
+                    gasMoles,
+                    initialTemperature,
+                    initialTotalHeatCapacity,
+                    otherHeatCapacity,
+                    molarHeatCapacity,
+                    molarInternalEnergyOfVaporization,
+                    properties,
+                    inverseBoilingPoint,
+                    candidate,
+                    out residualDerivative);
+
                 if (residual > 0d)
                     upperBound = candidate;
                 else
@@ -128,8 +167,9 @@ internal sealed class PhaseChangeSolver
                 (float)lowerBound == (float)upperBound)
                 break;
 
-            double nextCandidate = double.NaN;
-            if (double.IsFinite(residual) && double.IsFinite(residualDerivative) &&
+            Mole64 nextCandidate = double.NaN;
+            if (double.IsFinite(residual) &&
+                double.IsFinite(residualDerivative) &&
                 residualDerivative != 0d)
                 nextCandidate = candidate - residual / residualDerivative;
 
@@ -143,93 +183,104 @@ internal sealed class PhaseChangeSolver
         return upperBound;
     }
 
-    private static double CalculateSaturationLogResidual(AtmosSolverConfigSnapshot config,
-        double gasMoles, double initialTemperature, double initialTotalHeatCapacity,
-        double otherHeatCapacity, double molarHeatCapacity,
-        double molarInternalEnergyOfVaporization, GasProperties properties,
-        double inverseBoilingPoint, double remainingMoles, out double residualDerivative)
+    private static Scalar64 CalculateSaturationLogResidual(
+        AtmosSolverConfigSnapshot config,
+        Mole64 gasMoles, Kelvin64 initialTemperature, JoulePerKelvin64 initialTotalHeatCapacity,
+        JoulePerKelvin64 otherHeatCapacity, JoulePerMoleKelvin64 molarHeatCapacity,
+        JoulePerMole64 molarInternalEnergyOfVaporization, GasProperties properties,
+        PerKelvin64 inverseBoilingPoint, Mole64 remainingMoles, out PerMole64 residualDerivative)
     {
-        double remainingHeatCapacity = otherHeatCapacity + remainingMoles * molarHeatCapacity;
+        JoulePerKelvin64 remainingHeatCapacity = otherHeatCapacity + remainingMoles * molarHeatCapacity;
         if (remainingHeatCapacity <= 0d || !double.IsFinite(remainingHeatCapacity))
         {
             residualDerivative = double.NaN;
             return double.NegativeInfinity;
         }
 
-        double condensedMoles = gasMoles - remainingMoles;
-        double temperature = initialTemperature +
-                             condensedMoles / remainingHeatCapacity *
-                             molarInternalEnergyOfVaporization;
+        Mole64 condensedMoles = gasMoles - remainingMoles;
+        Kelvin64 temperature = initialTemperature +
+                               condensedMoles /
+                               remainingHeatCapacity *
+                               molarInternalEnergyOfVaporization;
+
         if (temperature <= 0d || !double.IsFinite(temperature))
         {
             residualDerivative = double.NaN;
             return double.NegativeInfinity;
         }
 
-        double logSaturationMoles = Math.Log(config.SaturationReferencePressure) -
-                                    Math.Log(config.PressurePerMoleKelvin) -
-                                    Math.Log(temperature) -
-                                    properties.MolarEnthalpyOfVaporization /
-                                    AtmosPhysicalConstants.MolarGasConstant *
-                                    (1d / temperature - inverseBoilingPoint);
-        double temperatureDerivative = -molarInternalEnergyOfVaporization *
-                                       initialTotalHeatCapacity /
-                                       (remainingHeatCapacity * remainingHeatCapacity);
-        double saturationLogTemperatureDerivative =
+        Scalar64 logSaturationMoles = Math.Log(config.SaturationReferencePressure) -
+                                      Math.Log(config.PressurePerMoleKelvin) -
+                                      Math.Log(temperature) -
+                                      properties.MolarEnthalpyOfVaporization /
+                                      AtmosPhysicalConstants.MolarGasConstant *
+                                      (1d / temperature - inverseBoilingPoint);
+
+        KelvinPerMole64 temperatureDerivative = -molarInternalEnergyOfVaporization *
+                                                initialTotalHeatCapacity /
+                                                (remainingHeatCapacity * remainingHeatCapacity);
+
+        PerKelvin64 saturationLogTemperatureDerivative =
             properties.MolarEnthalpyOfVaporization /
             (AtmosPhysicalConstants.MolarGasConstant * temperature * temperature) -
             1d / temperature;
+
         residualDerivative = 1d / remainingMoles -
                              saturationLogTemperatureDerivative * temperatureDerivative;
+
         return Math.Log(remainingMoles) - logSaturationMoles;
     }
 
-    private static double CalculateOtherHeatCapacityAtVoxel(AtmosChunk chunk,
+    private static JoulePerKelvin64 CalculateOtherHeatCapacityAtVoxel(
+        AtmosChunk chunk,
         AtmosSolverConfigSnapshot config, int excludedGasIndex, ushort voxelIndex)
     {
-        var totalHeatCapacity = 0d;
-        for (var gas = 0; gas < chunk.ActiveGasCount; gas++)
+        JoulePerKelvin64 totalHeatCapacity = 0d;
+        for (int gas = 0; gas < chunk.ActiveGasCount; gas++)
         {
             if (gas == excludedGasIndex)
                 continue;
 
-            float moles = chunk.ActiveGases[gas].Moles[voxelIndex];
+            Mole moles = chunk.ActiveGases[gas].Moles[voxelIndex];
             if (moles <= 0f)
                 continue;
 
             totalHeatCapacity += (double)moles *
-                                 config.GetMolarHeatCapacityAtConstantVolume(
-                                     chunk.ActiveGases[gas].GasId);
+                                 config.GetMolarHeatCapacityAtConstantVolume(chunk.ActiveGases[gas].GasId);
         }
 
         return totalHeatCapacity;
     }
 
-    private static double CalculateSaturationMoles(AtmosSolverConfigSnapshot config,
-        GasProperties properties, double temperature, double inverseBoilingPoint)
+    private static Mole64 CalculateSaturationMoles(
+        AtmosSolverConfigSnapshot config,
+        GasProperties properties, Kelvin64 temperature, PerKelvin64 inverseBoilingPoint)
     {
-        double logSaturationMoles = Math.Log(config.SaturationReferencePressure) -
-                                    Math.Log(config.PressurePerMoleKelvin) -
-                                    Math.Log(temperature) -
-                                    properties.MolarEnthalpyOfVaporization /
-                                    AtmosPhysicalConstants.MolarGasConstant *
-                                    (1d / temperature - inverseBoilingPoint);
+        Scalar64 logSaturationMoles = Math.Log(config.SaturationReferencePressure) -
+                                      Math.Log(config.PressurePerMoleKelvin) -
+                                      Math.Log(temperature) -
+                                      properties.MolarEnthalpyOfVaporization /
+                                      AtmosPhysicalConstants.MolarGasConstant *
+                                      (1d / temperature - inverseBoilingPoint);
+
         return Math.Exp(logSaturationMoles);
     }
 
-    private static void ApplyCondensation(AtmosChunk chunk, AtmosSolverConfigSnapshot config,
-        int gasIndex, ushort voxelIndex, float temperature, float remainingMoles,
-        float condensedMoles, float molarInternalEnergyOfVaporization)
+    private static void ApplyCondensation(
+        AtmosChunk chunk, AtmosSolverConfigSnapshot config,
+        int gasIndex, ushort voxelIndex, Kelvin temperature, Mole remainingMoles,
+        Mole condensedMoles, JoulePerMole molarInternalEnergyOfVaporization)
     {
         chunk.ActiveGases[gasIndex].Moles[voxelIndex] = remainingMoles;
 
-        float newHeatCapacity = AtmosSolverMath.CalculateHeatCapacityAtVoxel(config, chunk, voxelIndex);
+        JoulePerKelvin newHeatCapacity = AtmosSolverMath.CalculateHeatCapacityAtVoxel(config, chunk, voxelIndex);
         chunk.TotalHeatCapacity[voxelIndex] = newHeatCapacity;
         if (newHeatCapacity > 0f)
         {
             // Algebraically this is (T*C_remaining + n_condensed*U_vap) / C_remaining. Dividing
             // before multiplying avoids both C*T overflow and the cancellation of two large energies.
-            chunk.Temperature[voxelIndex] = MathF.Max(0f,
+            chunk.Temperature[voxelIndex] = MathF.Max(
+                0f,
                 temperature + condensedMoles / newHeatCapacity * molarInternalEnergyOfVaporization);
         }
 

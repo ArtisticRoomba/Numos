@@ -8,11 +8,11 @@ namespace Numos.Viewer;
 public partial class SimulationViewer
 {
     private const double ResolutionConfirmationDuration = 15.0;
-    private bool _resolutionConfirmationPending;
-    private bool _requestResolutionConfirmation;
-    private int _previousResolutionWidth;
     private int _previousResolutionHeight;
+    private int _previousResolutionWidth;
+    private bool _requestResolutionConfirmation;
     private double _resolutionChangedAt;
+    private bool _resolutionConfirmationPending;
 
     private void RenderProgramSettingsPanel()
     {
@@ -30,6 +30,7 @@ public partial class SimulationViewer
             ref _showProgramSettingsPanel,
             new Vector2(460, 120),
             new Vector2(760, 430));
+
         if (!window.IsVisible)
             return;
 
@@ -37,12 +38,15 @@ public partial class SimulationViewer
             "SettingsCategories##program-settings",
             new Vector2(180, 0),
             ImGuiChildFlags.Borders);
+
         ImGui.Selectable("Graphics", _programSettingsTab == 0);
         if (ImGui.IsItemClicked())
             _programSettingsTab = 0;
+
         ImGui.Selectable("Interface", _programSettingsTab == 1);
         if (ImGui.IsItemClicked())
             _programSettingsTab = 1;
+
         ImGui.EndChild();
 
         ImGui.SameLine();
@@ -62,24 +66,27 @@ public partial class SimulationViewer
         ImGui.TextDisabled("Display and rendering options.");
         ImGui.Separator();
 
-        var resolutions = GetTargetResolutions();
+        (int Width, int Height)[] resolutions = GetTargetResolutions();
         int currentWidth = Raylib.GetScreenWidth();
         int currentHeight = Raylib.GetScreenHeight();
         int selectedResolution = FindResolutionIndex(resolutions, currentWidth, currentHeight);
         string resolutionLabel = selectedResolution >= 0
             ? FormatResolution(resolutions[selectedResolution])
             : $"{currentWidth} x {currentHeight} (custom)";
+
         bool resolutionSelectorDisabled = _resolutionConfirmationPending;
         if (resolutionSelectorDisabled)
             ImGui.BeginDisabled();
+
         ImGui.SetNextItemWidth(220f);
         if (ImGui.BeginCombo("Target resolution", resolutionLabel))
         {
-            for (var index = 0; index < resolutions.Length; index++)
+            for (int index = 0; index < resolutions.Length; index++)
             {
                 bool selected = index == selectedResolution;
                 if (ImGui.Selectable(FormatResolution(resolutions[index]), selected))
                     ApplyTargetResolution(resolutions[index].Width, resolutions[index].Height);
+
                 if (selected)
                     ImGui.SetItemDefaultFocus();
             }
@@ -98,19 +105,23 @@ public partial class SimulationViewer
         ImGui.Text("Frame pacing");
         if (ImGui.Checkbox("Uncap FPS", ref _uncappedFps))
             Raylib.SetTargetFPS(_uncappedFps ? 0 : _targetFps);
+
         if (ImGui.IsItemHovered())
         {
-            ImGui.SetTooltip("This will casually max out a CPU core while updating the UI if VSync is disabled.\n" +
-                             "Ill-advised to use, made accessible just for the love of the game.");
+            ImGui.SetTooltip(
+                "This will casually max out a CPU core while updating the UI if VSync is disabled.\n" +
+                "Ill-advised to use, made accessible just for the love of the game.");
         }
 
         ImGui.TextDisabled("Uncapped mode lets the renderer run without a software frame limit.");
 
         if (_uncappedFps)
             ImGui.BeginDisabled();
+
         ImGui.SetNextItemWidth(220f);
         if (ImGui.SliderInt("Frame rate limit", ref _targetFps, 30, 240) && !_uncappedFps)
             Raylib.SetTargetFPS(_targetFps);
+
         if (_uncappedFps)
             ImGui.EndDisabled();
 
@@ -139,8 +150,7 @@ public partial class SimulationViewer
         ImGui.TextDisabled("Displays the Numos logo and name in simulation views.");
         ImGui.TextDisabled("How it feels to LARP as an actual CFD tool.");
         ImGui.SetNextItemWidth(220f);
-        ImGui.SliderFloat(
-            "Branding opacity", ref _viewportBrandingOpacityPercent, 0f, 100f, "%.0f%%");
+        ImGui.SliderFloat("Branding opacity", ref _viewportBrandingOpacityPercent, 0f, 100f, "%.0f%%");
         ImGui.SetNextItemWidth(220f);
         if (ImGui.BeginCombo("Corner", GetViewportBrandingCornerLabel(_viewportBrandingCorner)))
         {
@@ -149,6 +159,7 @@ public partial class SimulationViewer
                 bool isSelected = corner == _viewportBrandingCorner;
                 if (ImGui.Selectable(GetViewportBrandingCornerLabel(corner), isSelected))
                     _viewportBrandingCorner = corner;
+
                 if (isSelected)
                     ImGui.SetItemDefaultFocus();
             }
@@ -167,12 +178,14 @@ public partial class SimulationViewer
         ImGui.Text("Window layout");
         if (ImGui.Button("Save Current Layout"))
             SaveCurrentLayout();
+
         ImGui.TextDisabled("Restores this arrangement the next time Numos starts.");
 
 #if DEBUG || TOOLS
         ImGui.Spacing();
         if (ImGui.Button("Save as Default Preset"))
             SavePackagedDefaultLayout();
+
         ImGui.TextDisabled("Saves the default that future publishes use on first launch.");
 #endif
 
@@ -195,7 +208,7 @@ public partial class SimulationViewer
 
     private static int FindResolutionIndex((int Width, int Height)[] resolutions, int width, int height)
     {
-        for (var index = 0; index < resolutions.Length; index++)
+        for (int index = 0; index < resolutions.Length; index++)
         {
             if (resolutions[index].Width == width && resolutions[index].Height == height)
                 return index;
@@ -238,6 +251,7 @@ public partial class SimulationViewer
         int secondsRemaining = Math.Max(
             0,
             (int)Math.Ceiling(ResolutionConfirmationDuration - elapsed));
+
         if (elapsed >= ResolutionConfirmationDuration)
         {
             RevertTargetResolution();
@@ -246,17 +260,17 @@ public partial class SimulationViewer
         }
 
         ImGui.SetNextWindowSize(new Vector2(420, 0), ImGuiCond.Appearing);
-        var modalOpen = true;
+        bool modalOpen = true;
         using var modal = ImGuiExtensions.BeginPopupModal(popupId, ref modalOpen);
         if (!modal.IsVisible)
             return;
 
-        ImGui.TextWrapped(
-            "Keep this resolution? The previous resolution will be restored automatically if you do not confirm.");
+        ImGui.TextWrapped("Keep this resolution? The previous resolution will be restored automatically if you do not confirm.");
         ImGui.Spacing();
         ImGui.TextColored(
             new Vector4(1f, 0.8f, 0.25f, 1f),
             $"Reverting in {secondsRemaining} seconds.");
+
         ImGui.Spacing();
 
         if (ImGui.Button("Keep Resolution", new Vector2(150, 0)))

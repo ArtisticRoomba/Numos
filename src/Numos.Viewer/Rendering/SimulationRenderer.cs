@@ -39,8 +39,8 @@ public static class SimulationRenderer
 
     private static void DrawChunk(ChunkDrawData chunk, Render3DStyleOptions options)
     {
-        var cells = chunk.Cells;
-        for (var localIndex = 0; localIndex < cells.Length; localIndex++)
+        ReadOnlySpan<VoxelDrawData> cells = chunk.Cells;
+        for (int localIndex = 0; localIndex < cells.Length; localIndex++)
         {
             ref readonly var cell = ref cells[localIndex];
             if (!cell.IsVisible || cell.VisibleFaces == VoxelFaceMask.None)
@@ -73,6 +73,7 @@ public static class SimulationRenderer
             chunk.ChunkPosition.X * dimensions.X + dimensions.X * 0.5f,
             chunk.ChunkPosition.Y * dimensions.Y + dimensions.Y * 0.5f,
             chunk.ChunkPosition.Z * dimensions.Z + dimensions.Z * 0.5f);
+
         var size = new Vector3(dimensions.X, dimensions.Y, dimensions.Z);
 
         Raylib.DrawCubeWiresV(center, size, new Color(1f, 1f, 1f, 0.7f));

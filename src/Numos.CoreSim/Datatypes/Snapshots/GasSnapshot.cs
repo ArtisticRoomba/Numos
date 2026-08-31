@@ -1,3 +1,5 @@
+using Numos.Units;
+
 namespace Numos.CoreSim.Datatypes.Snapshots;
 
 /// <summary>
@@ -13,5 +15,6 @@ public struct GasSnapshot
     /// <summary>
     ///     Gets detached per-voxel amounts, in moles (mol).
     /// </summary>
-    public float[] Moles;
+    [ElementQuantity("amount")]
+    public Mole[] Moles;
 }

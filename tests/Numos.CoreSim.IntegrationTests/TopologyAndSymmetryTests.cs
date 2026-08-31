@@ -19,21 +19,33 @@ public sealed class TopologyAndSymmetryTests
 
         simulation.Tick();
         var whileBlocked = simulation.GetChunkSnapshot(chunk);
-        simulation.SetVoxelClassification(chunk, 1, 0, 0,
+        simulation.SetVoxelClassification(
+            chunk,
+            1,
+            0,
+            0,
             new VoxelClassification(SimTestHelpers.RoomId));
+
         simulation.Tick();
         var afterOpening = simulation.GetChunkSnapshot(chunk);
 
         Assert.Multiple(() =>
         {
-            Assert.That(SimTestHelpers.Moles(whileBlocked, SimTestHelpers.FirstGasId, 0),
+            Assert.That(
+                SimTestHelpers.Moles(whileBlocked, SimTestHelpers.FirstGasId, 0),
                 Is.EqualTo(2f));
+
             Assert.That(SimTestHelpers.Moles(whileBlocked, SimTestHelpers.FirstGasId, 1), Is.Zero);
-            Assert.That(SimTestHelpers.Moles(afterOpening, SimTestHelpers.FirstGasId, 0),
+            Assert.That(
+                SimTestHelpers.Moles(afterOpening, SimTestHelpers.FirstGasId, 0),
                 Is.EqualTo(1.68f).Within(SimTestHelpers.Tolerance));
-            Assert.That(SimTestHelpers.Moles(afterOpening, SimTestHelpers.FirstGasId, 1),
+
+            Assert.That(
+                SimTestHelpers.Moles(afterOpening, SimTestHelpers.FirstGasId, 1),
                 Is.EqualTo(0.32f).Within(SimTestHelpers.Tolerance));
-            Assert.That(SimTestHelpers.TotalMoles(afterOpening),
+
+            Assert.That(
+                SimTestHelpers.TotalMoles(afterOpening),
                 Is.EqualTo(2f).Within(SimTestHelpers.Tolerance));
         });
     }
@@ -64,13 +76,20 @@ public sealed class TopologyAndSymmetryTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(forward,
+            Assert.That(
+                forward,
                 Is.EqualTo(new[] { 390f, 210f, 200f }).Within(SimTestHelpers.Tolerance));
-            Assert.That(mirrored,
+
+            Assert.That(
+                mirrored,
                 Is.EqualTo(forward.Reverse()).Within(SimTestHelpers.Tolerance));
-            Assert.That(forward.Sum(),
+
+            Assert.That(
+                forward.Sum(),
                 Is.EqualTo(initialTemperatures.Sum()).Within(SimTestHelpers.Tolerance));
-            Assert.That(mirrored.Sum(),
+
+            Assert.That(
+                mirrored.Sum(),
                 Is.EqualTo(initialTemperatures.Sum()).Within(SimTestHelpers.Tolerance));
         });
     }
@@ -84,12 +103,14 @@ public sealed class TopologyAndSymmetryTests
         var chunk = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
         (int X, int Y)[] neighbors = [(0, 1), (2, 1), (1, 0), (1, 2)];
         simulation.AddGasToVoxel(chunk, 1, 1, 0, SimTestHelpers.FirstGasId, 1f, 400f);
-        foreach (var (x, y) in neighbors)
+        foreach ((int x, int y) in neighbors)
             simulation.AddGasToVoxel(chunk, x, y, 0, SimTestHelpers.FirstGasId, 1f, 200f);
 
         simulation.Tick();
-        float energyBeforeDiffusion = SimTestHelpers.TotalThermalEnergy(config,
+        float energyBeforeDiffusion = SimTestHelpers.TotalThermalEnergy(
+            config,
             simulation.GetChunkSnapshot(chunk));
+
         simulation.Tick();
 
         var snapshot = simulation.GetChunkSnapshot(chunk);
@@ -97,13 +118,19 @@ public sealed class TopologyAndSymmetryTests
         float[] neighborTemperatures = neighbors
             .Select(position => snapshot.Temperature[SimTestHelpers.Index(position.X, position.Y, 0, size, size)])
             .ToArray();
+
         Assert.Multiple(() =>
         {
-            Assert.That(snapshot.Temperature[centerIndex],
+            Assert.That(
+                snapshot.Temperature[centerIndex],
                 Is.EqualTo(360f).Within(SimTestHelpers.Tolerance));
-            Assert.That(neighborTemperatures,
+
+            Assert.That(
+                neighborTemperatures,
                 Is.EqualTo(Enumerable.Repeat(210f, neighbors.Length)).Within(SimTestHelpers.Tolerance));
-            Assert.That(SimTestHelpers.TotalThermalEnergy(config, snapshot),
+
+            Assert.That(
+                SimTestHelpers.TotalThermalEnergy(config, snapshot),
                 Is.EqualTo(energyBeforeDiffusion).Within(SimTestHelpers.Tolerance));
         });
     }
@@ -117,12 +144,14 @@ public sealed class TopologyAndSymmetryTests
         var chunk = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
         (int X, int Y)[] neighbors = [(0, 1), (2, 1), (1, 0), (1, 2)];
         simulation.AddGasToVoxel(chunk, 1, 1, 0, SimTestHelpers.FirstGasId, 1f, 200f);
-        foreach (var (x, y) in neighbors)
+        foreach ((int x, int y) in neighbors)
             simulation.AddGasToVoxel(chunk, x, y, 0, SimTestHelpers.FirstGasId, 1f, 400f);
 
         simulation.Tick();
-        float energyBeforeDiffusion = SimTestHelpers.TotalThermalEnergy(config,
+        float energyBeforeDiffusion = SimTestHelpers.TotalThermalEnergy(
+            config,
             simulation.GetChunkSnapshot(chunk));
+
         simulation.Tick();
 
         var snapshot = simulation.GetChunkSnapshot(chunk);
@@ -132,14 +161,22 @@ public sealed class TopologyAndSymmetryTests
             centerIndex,
             .. neighbors.Select(position => SimTestHelpers.Index(position.X, position.Y, 0, size, size))
         ];
+
         Assert.Multiple(() =>
         {
-            Assert.That(snapshot.Temperature[centerIndex],
+            Assert.That(
+                snapshot.Temperature[centerIndex],
                 Is.EqualTo(400f).Within(SimTestHelpers.Tolerance));
-            Assert.That(populatedIndices.All(index =>
-                float.IsFinite(snapshot.Temperature[index]) && snapshot.Temperature[index] >= 200f &&
-                snapshot.Temperature[index] <= 400f), Is.True);
-            Assert.That(SimTestHelpers.TotalThermalEnergy(config, snapshot),
+
+            Assert.That(
+                populatedIndices.All(index =>
+                    float.IsFinite(snapshot.Temperature[index]) &&
+                    snapshot.Temperature[index] >= 200f &&
+                    snapshot.Temperature[index] <= 400f),
+                Is.True);
+
+            Assert.That(
+                SimTestHelpers.TotalThermalEnergy(config, snapshot),
                 Is.EqualTo(energyBeforeDiffusion).Within(SimTestHelpers.Tolerance));
         });
     }
@@ -161,7 +198,8 @@ public sealed class TopologyAndSymmetryTests
         simulation.Tick();
 
         var snapshot = simulation.GetChunkSnapshot(chunk);
-        Assert.That(snapshot.Temperature,
+        Assert.That(
+            snapshot.Temperature,
             Is.EqualTo(new[] { 400f, 200f }).Within(SimTestHelpers.Tolerance));
     }
 
@@ -170,10 +208,16 @@ public sealed class TopologyAndSymmetryTests
         var config = CreateThermalOnlyConfig(0.05f);
         using var simulation = new AtmosSimulation(config, initialTemperatures.Length, 1, 1);
         var chunk = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
-        for (var x = 0; x < initialTemperatures.Length; x++)
+        for (int x = 0; x < initialTemperatures.Length; x++)
         {
-            simulation.AddGasToVoxel(chunk, x, 0, 0,
-                SimTestHelpers.FirstGasId, 1f, initialTemperatures[x]);
+            simulation.AddGasToVoxel(
+                chunk,
+                x,
+                0,
+                0,
+                SimTestHelpers.FirstGasId,
+                1f,
+                initialTemperatures[x]);
         }
 
         simulation.Tick();
@@ -200,10 +244,16 @@ public sealed class TopologyAndSymmetryTests
         using var simulation = new AtmosSimulation(config, initialMoles.Length, 1, 1);
         var chunk = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
         SimTestHelpers.SetAllTemperatures(simulation, chunk, initialMoles.Length, 1, 1);
-        for (var x = 0; x < initialMoles.Length; x++)
+        for (int x = 0; x < initialMoles.Length; x++)
         {
-            simulation.AddGasToVoxel(chunk, x, 0, 0,
-                SimTestHelpers.FirstGasId, initialMoles[x], SimTestHelpers.DefaultTemperature);
+            simulation.AddGasToVoxel(
+                chunk,
+                x,
+                0,
+                0,
+                SimTestHelpers.FirstGasId,
+                initialMoles[x],
+                SimTestHelpers.DefaultTemperature);
         }
 
         simulation.Tick();

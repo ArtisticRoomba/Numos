@@ -23,9 +23,12 @@ public sealed class IntraChunkFlowTests
         var snapshot = simulation.GetChunkSnapshot(chunk);
         Assert.Multiple(() =>
         {
-            Assert.That(SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 0),
+            Assert.That(
+                SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 0),
                 Is.EqualTo(1.68f).Within(SimTestHelpers.Tolerance));
-            Assert.That(SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 1),
+
+            Assert.That(
+                SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 1),
                 Is.EqualTo(0.32f).Within(SimTestHelpers.Tolerance));
         });
     }
@@ -44,11 +47,16 @@ public sealed class IntraChunkFlowTests
         var snapshot = simulation.GetChunkSnapshot(chunk);
         Assert.Multiple(() =>
         {
-            Assert.That(SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 0),
+            Assert.That(
+                SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 0),
                 Is.EqualTo(1.68f).Within(SimTestHelpers.Tolerance));
-            Assert.That(SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 1),
+
+            Assert.That(
+                SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 1),
                 Is.EqualTo(0.32f).Within(SimTestHelpers.Tolerance));
-            Assert.That(SimTestHelpers.TotalMoles(snapshot),
+
+            Assert.That(
+                SimTestHelpers.TotalMoles(snapshot),
                 Is.EqualTo(2f).Within(SimTestHelpers.Tolerance));
         });
     }
@@ -67,9 +75,12 @@ public sealed class IntraChunkFlowTests
         var snapshot = simulation.GetChunkSnapshot(chunk);
         Assert.Multiple(() =>
         {
-            Assert.That(SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 0),
+            Assert.That(
+                SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 0),
                 Is.EqualTo(0.84f).Within(SimTestHelpers.Tolerance));
-            Assert.That(SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 1),
+
+            Assert.That(
+                SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 1),
                 Is.EqualTo(0.16f).Within(SimTestHelpers.Tolerance));
         });
     }
@@ -89,9 +100,12 @@ public sealed class IntraChunkFlowTests
         var snapshot = simulation.GetChunkSnapshot(chunk);
         Assert.Multiple(() =>
         {
-            Assert.That(SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 0),
+            Assert.That(
+                SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 0),
                 Is.EqualTo(0.99f).Within(SimTestHelpers.Tolerance));
-            Assert.That(SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 1),
+
+            Assert.That(
+                SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 1),
                 Is.EqualTo(0.01f).Within(SimTestHelpers.Tolerance));
         });
     }
@@ -112,9 +126,12 @@ public sealed class IntraChunkFlowTests
         var snapshot = simulation.GetChunkSnapshot(chunk);
         Assert.Multiple(() =>
         {
-            Assert.That(SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 0),
+            Assert.That(
+                SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 0),
                 Is.EqualTo(0.9f).Within(SimTestHelpers.Tolerance));
-            Assert.That(SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 1),
+
+            Assert.That(
+                SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 1),
                 Is.EqualTo(0.1f).Within(SimTestHelpers.Tolerance));
         });
     }
@@ -134,11 +151,16 @@ public sealed class IntraChunkFlowTests
         var snapshot = simulation.GetChunkSnapshot(chunk);
         Assert.Multiple(() =>
         {
-            Assert.That(SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 1),
+            Assert.That(
+                SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 1),
                 Is.EqualTo(0.48f).Within(SimTestHelpers.Tolerance));
-            Assert.That(SimTestHelpers.Moles(snapshot, SimTestHelpers.SecondGasId, 1),
+
+            Assert.That(
+                SimTestHelpers.Moles(snapshot, SimTestHelpers.SecondGasId, 1),
                 Is.EqualTo(0.16f).Within(SimTestHelpers.Tolerance));
-            Assert.That(SimTestHelpers.TotalMoles(snapshot),
+
+            Assert.That(
+                SimTestHelpers.TotalMoles(snapshot),
                 Is.EqualTo(4f).Within(SimTestHelpers.Tolerance));
         });
     }
@@ -160,7 +182,8 @@ public sealed class IntraChunkFlowTests
         simulation.AddGasToVoxel(chunk, 1, 0, 0, SimTestHelpers.FirstGasId, 1f, 200f);
         simulation.SetVoxelTemperature(chunk, 0, 0, 0, 400f);
         simulation.SetVoxelTemperature(chunk, 1, 0, 0, 200f);
-        float initialEnergy = SimTestHelpers.TotalThermalEnergy(config,
+        float initialEnergy = SimTestHelpers.TotalThermalEnergy(
+            config,
             simulation.GetChunkSnapshot(chunk));
 
         simulation.Tick();
@@ -168,11 +191,16 @@ public sealed class IntraChunkFlowTests
         var snapshot = simulation.GetChunkSnapshot(chunk);
         Assert.Multiple(() =>
         {
-            Assert.That(snapshot.Temperature[0],
+            Assert.That(
+                snapshot.Temperature[0],
                 Is.EqualTo(400f).Within(SimTestHelpers.Tolerance));
-            Assert.That(snapshot.Temperature[1],
+
+            Assert.That(
+                snapshot.Temperature[1],
                 Is.EqualTo(305.6604f).Within(SimTestHelpers.Tolerance));
-            Assert.That(SimTestHelpers.TotalThermalEnergy(config, snapshot),
+
+            Assert.That(
+                SimTestHelpers.TotalThermalEnergy(config, snapshot),
                 Is.EqualTo(initialEnergy).Within(SimTestHelpers.Tolerance));
         });
     }
@@ -194,9 +222,11 @@ public sealed class IntraChunkFlowTests
             (1, 0, 1), (1, 2, 1),
             (1, 1, 0), (1, 1, 2)
         ];
+
         simulation.SetVoxelClassification(chunk, 1, 1, 1, SimTestHelpers.RoomId);
-        foreach (var (x, y, z) in neighbors)
+        foreach ((int x, int y, int z) in neighbors)
             simulation.SetVoxelClassification(chunk, x, y, z, SimTestHelpers.RoomId);
+
         simulation.AddGasToVoxel(chunk, 1, 1, 1, SimTestHelpers.FirstGasId, 1f, 4f);
 
         simulation.Tick();
@@ -205,12 +235,18 @@ public sealed class IntraChunkFlowTests
         int center = SimTestHelpers.Index(1, 1, 1, size, size);
         Assert.Multiple(() =>
         {
-            Assert.That(SimTestHelpers.TotalMoles(snapshot),
+            Assert.That(
+                SimTestHelpers.TotalMoles(snapshot),
                 Is.EqualTo(1f).Within(SimTestHelpers.Tolerance));
-            Assert.That(SimTestHelpers.TotalThermalEnergy(config, snapshot),
+
+            Assert.That(
+                SimTestHelpers.TotalThermalEnergy(config, snapshot),
                 Is.EqualTo(4f).Within(SimTestHelpers.Tolerance));
-            Assert.That(SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, center),
+
+            Assert.That(
+                SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, center),
                 Is.GreaterThanOrEqualTo(0f));
+
             Assert.That(snapshot.Temperature.All(float.IsFinite), Is.True);
         });
     }
@@ -221,8 +257,15 @@ public sealed class IntraChunkFlowTests
         var config = SimTestHelpers.CreateDeterministicConfig();
         using var simulation = new AtmosSimulation(config, 2, 1, 1);
         var chunk = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
-        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasId, 1f,
+        simulation.AddGasToVoxel(
+            chunk,
+            0,
+            0,
+            0,
+            SimTestHelpers.FirstGasId,
+            1f,
             config.DefaultTemperatureFallback);
+
         simulation.SetVoxelTemperature(chunk, 0, 0, 0, 0f);
         simulation.SetVoxelTemperature(chunk, 1, 0, 0, 0f);
 
@@ -231,11 +274,16 @@ public sealed class IntraChunkFlowTests
         var snapshot = simulation.GetChunkSnapshot(chunk);
         Assert.Multiple(() =>
         {
-            Assert.That(snapshot.Temperature[0],
+            Assert.That(
+                snapshot.Temperature[0],
                 Is.EqualTo(config.DefaultTemperatureFallback).Within(SimTestHelpers.Tolerance));
-            Assert.That(snapshot.Temperature[1],
+
+            Assert.That(
+                snapshot.Temperature[1],
                 Is.EqualTo(config.DefaultTemperatureFallback).Within(SimTestHelpers.Tolerance));
-            Assert.That(SimTestHelpers.TotalThermalEnergy(config, snapshot),
+
+            Assert.That(
+                SimTestHelpers.TotalThermalEnergy(config, snapshot),
                 Is.EqualTo(config.DefaultTemperatureFallback).Within(SimTestHelpers.Tolerance));
         });
     }
@@ -257,11 +305,16 @@ public sealed class IntraChunkFlowTests
         var snapshot = simulation.GetChunkSnapshot(chunk);
         Assert.Multiple(() =>
         {
-            Assert.That(SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 0),
+            Assert.That(
+                SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 0),
                 Is.EqualTo(1.48f).Within(SimTestHelpers.Tolerance));
-            Assert.That(SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 1),
+
+            Assert.That(
+                SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 1),
                 Is.EqualTo(0.52f).Within(SimTestHelpers.Tolerance));
-            Assert.That(SimTestHelpers.TotalMoles(snapshot),
+
+            Assert.That(
+                SimTestHelpers.TotalMoles(snapshot),
                 Is.EqualTo(2f).Within(SimTestHelpers.Tolerance));
         });
     }
@@ -288,15 +341,24 @@ public sealed class IntraChunkFlowTests
         var snapshot = simulation.GetChunkSnapshot(chunk);
         Assert.Multiple(() =>
         {
-            Assert.That(SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 0),
+            Assert.That(
+                SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 0),
                 Is.EqualTo(0.9f).Within(SimTestHelpers.Tolerance));
-            Assert.That(SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 1),
+
+            Assert.That(
+                SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 1),
                 Is.EqualTo(0.1f).Within(SimTestHelpers.Tolerance));
-            Assert.That(SimTestHelpers.Moles(snapshot, SimTestHelpers.SecondGasId, 0),
+
+            Assert.That(
+                SimTestHelpers.Moles(snapshot, SimTestHelpers.SecondGasId, 0),
                 Is.EqualTo(0.2f).Within(SimTestHelpers.Tolerance));
-            Assert.That(SimTestHelpers.Moles(snapshot, SimTestHelpers.SecondGasId, 1),
+
+            Assert.That(
+                SimTestHelpers.Moles(snapshot, SimTestHelpers.SecondGasId, 1),
                 Is.EqualTo(1.8f).Within(SimTestHelpers.Tolerance));
-            Assert.That(SimTestHelpers.TotalMoles(snapshot),
+
+            Assert.That(
+                SimTestHelpers.TotalMoles(snapshot),
                 Is.EqualTo(3f).Within(SimTestHelpers.Tolerance));
         });
     }
@@ -320,7 +382,8 @@ public sealed class IntraChunkFlowTests
         Assert.Multiple(() =>
         {
             Assert.That(SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 0), Is.Zero);
-            Assert.That(SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 1),
+            Assert.That(
+                SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 1),
                 Is.EqualTo(1f).Within(SimTestHelpers.Tolerance));
         });
     }
@@ -347,6 +410,7 @@ public sealed class IntraChunkFlowTests
             SimTestHelpers.Index(1, 0, 0, width, height),
             SimTestHelpers.Index(1, 2, 0, width, height)
         ];
+
         int[] diagonals =
         [
             SimTestHelpers.Index(0, 0, 0, width, height),
@@ -357,15 +421,22 @@ public sealed class IntraChunkFlowTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, center),
+            Assert.That(
+                SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, center),
                 Is.EqualTo(0.72f).Within(SimTestHelpers.Tolerance));
-            Assert.That(neighbors.Select(index =>
+
+            Assert.That(
+                neighbors.Select(index =>
                     SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, index)),
                 Is.All.EqualTo(0.32f).Within(SimTestHelpers.Tolerance));
-            Assert.That(diagonals.Select(index =>
+
+            Assert.That(
+                diagonals.Select(index =>
                     SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, index)),
                 Is.All.Zero);
-            Assert.That(SimTestHelpers.TotalMoles(snapshot),
+
+            Assert.That(
+                SimTestHelpers.TotalMoles(snapshot),
                 Is.EqualTo(2f).Within(SimTestHelpers.Tolerance));
         });
     }
@@ -393,20 +464,28 @@ public sealed class IntraChunkFlowTests
             SimTestHelpers.Index(1, 1, 0, size, size),
             SimTestHelpers.Index(1, 1, 2, size, size)
         ];
-        var neighborSet = neighbors.ToHashSet();
+
+        HashSet<int> neighborSet = neighbors.ToHashSet();
 
         Assert.Multiple(() =>
         {
-            Assert.That(SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, center),
+            Assert.That(
+                SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, center),
                 Is.EqualTo(0.08f).Within(SimTestHelpers.Tolerance));
-            Assert.That(neighbors.Select(index =>
+
+            Assert.That(
+                neighbors.Select(index =>
                     SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, index)),
                 Is.All.EqualTo(0.32f).Within(SimTestHelpers.Tolerance));
-            Assert.That(Enumerable.Range(0, size * size * size)
+
+            Assert.That(
+                Enumerable.Range(0, size * size * size)
                     .Where(index => index != center && !neighborSet.Contains(index))
                     .Select(index => SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, index)),
                 Is.All.Zero);
-            Assert.That(SimTestHelpers.TotalMoles(snapshot),
+
+            Assert.That(
+                SimTestHelpers.TotalMoles(snapshot),
                 Is.EqualTo(2f).Within(SimTestHelpers.Tolerance));
         });
     }
@@ -451,10 +530,14 @@ public sealed class IntraChunkFlowTests
         var snapshot = simulation.GetChunkSnapshot(chunk);
         Assert.Multiple(() =>
         {
-            Assert.That(snapshot.Temperature[0],
+            Assert.That(
+                snapshot.Temperature[0],
                 Is.EqualTo(400f).Within(SimTestHelpers.Tolerance));
-            Assert.That(snapshot.Temperature[1],
+
+            Assert.That(
+                snapshot.Temperature[1],
                 Is.EqualTo(226.08696f).Within(SimTestHelpers.Tolerance));
+
             Assert.That(snapshot.Temperature.All(float.IsFinite), Is.True);
         });
     }
@@ -474,10 +557,13 @@ public sealed class IntraChunkFlowTests
         var snapshot = simulation.GetChunkSnapshot(chunk);
         Assert.Multiple(() =>
         {
-            Assert.That(SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 0),
+            Assert.That(
+                SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 0),
                 Is.EqualTo(1.68f).Within(SimTestHelpers.Tolerance));
+
             Assert.That(SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 1), Is.Zero);
-            Assert.That(SimTestHelpers.TotalMoles(snapshot),
+            Assert.That(
+                SimTestHelpers.TotalMoles(snapshot),
                 Is.EqualTo(1.68f).Within(SimTestHelpers.Tolerance));
         });
     }
@@ -496,7 +582,8 @@ public sealed class IntraChunkFlowTests
         simulation.Tick();
 
         var snapshot = simulation.GetChunkSnapshot(chunk);
-        Assert.That(SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 0),
+        Assert.That(
+            SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 0),
             Is.EqualTo(expectedMoles).Within(SimTestHelpers.Tolerance));
     }
 }

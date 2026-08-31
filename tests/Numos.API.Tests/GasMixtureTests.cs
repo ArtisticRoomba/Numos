@@ -15,11 +15,16 @@ public sealed class GasMixtureTests
         Assert.Multiple(() =>
         {
             Assert.That(() => simulation.CreateGasMixture(0f), Throws.TypeOf<ArgumentOutOfRangeException>());
-            Assert.That(() => simulation.CreateGasMixture(float.PositiveInfinity),
+            Assert.That(
+                () => simulation.CreateGasMixture(float.PositiveInfinity),
                 Throws.TypeOf<ArgumentOutOfRangeException>());
-            Assert.That(() => simulation.CreateGasMixture(1f, -1f),
+
+            Assert.That(
+                () => simulation.CreateGasMixture(1f, -1f),
                 Throws.TypeOf<ArgumentOutOfRangeException>());
-            Assert.That(() => simulation.CreateGasMixture(1f, float.NaN),
+
+            Assert.That(
+                () => simulation.CreateGasMixture(1f, float.NaN),
                 Throws.TypeOf<ArgumentOutOfRangeException>());
         });
     }
@@ -96,14 +101,15 @@ public sealed class GasMixtureTests
         using var simulation = CreateSimulation();
         var mixture = simulation.CreateGasMixture(1f, 300f);
         mixture.SetMoles(0, 1f);
-        simulation.SetAtmosConfig(new AtmosConfig
-        {
-            GasRegistry =
-            [
-                new GasProperties { Name = "Updated", MolarHeatCapacityAtConstantVolume = 20f },
-                new GasProperties { Name = "Incoming", MolarHeatCapacityAtConstantVolume = 10f }
-            ]
-        });
+        simulation.SetAtmosConfig(
+            new AtmosConfig
+            {
+                GasRegistry =
+                [
+                    new GasProperties { Name = "Updated", MolarHeatCapacityAtConstantVolume = 20f },
+                    new GasProperties { Name = "Incoming", MolarHeatCapacityAtConstantVolume = 10f }
+                ]
+            });
 
         mixture.AddGas(1, 1f, 600f);
 
@@ -195,7 +201,7 @@ public sealed class GasMixtureTests
     [Test]
     public void VoxelMixture_MutatesLiveSoaStateWithoutExposingStorage()
     {
-        using var simulation = CreateSimulation(voxelVolume: 2f);
+        using var simulation = CreateSimulation(2f);
         var chunk = simulation.CreateAndRegisterChunk(default);
         var before = simulation.GetChunkSnapshot(chunk).Version;
         var mixture = simulation.GetVoxelGasMixture(chunk, 0);
@@ -229,14 +235,15 @@ public sealed class GasMixtureTests
         mixture.Temperature = 300f;
 
         int gasCount = AtmosChunkConstants.InitialGasChannelCapacity + 5;
-        for (var gasId = 0; gasId < gasCount; gasId++)
+        for (int gasId = 0; gasId < gasCount; gasId++)
             mixture.SetMoles(gasId, 1f);
 
         Assert.Multiple(() =>
         {
             Assert.That(mixture.ActiveGasCount, Is.EqualTo(gasCount));
             Assert.That(mixture.TotalMoles, Is.EqualTo(gasCount));
-            Assert.That(mixture.GetSnapshot().Gases.Select(static gas => gas.GasId),
+            Assert.That(
+                mixture.GetSnapshot().Gases.Select(static gas => gas.GasId),
                 Is.EqualTo(Enumerable.Range(0, gasCount)));
         });
     }
@@ -270,7 +277,7 @@ public sealed class GasMixtureTests
     public void VoxelMixture_ScalarMutationPreservesRoomCapacityGuard()
     {
         using var simulation = new AtmosSimulation(CreateSimulationConfig(), 2, 1, 1);
-        var chunk = simulation.CreateAndRegisterChunk(default, maxActiveRooms: 1);
+        var chunk = simulation.CreateAndRegisterChunk(default, 1);
         simulation.SetVoxelClassification(chunk, 0, new VoxelClassification(1));
         simulation.SetVoxelClassification(chunk, 1, new VoxelClassification(2));
         var first = simulation.GetVoxelGasMixture(chunk, 0);
@@ -317,7 +324,7 @@ public sealed class GasMixtureTests
     public void TransferTo_ActiveRoomCapacityFailureIsAtomic()
     {
         using var simulation = new AtmosSimulation(CreateSimulationConfig(), 2, 1, 1);
-        var chunk = simulation.CreateAndRegisterChunk(default, maxActiveRooms: 1);
+        var chunk = simulation.CreateAndRegisterChunk(default, 1);
         simulation.SetVoxelClassification(chunk, 0, new VoxelClassification(1));
         simulation.SetVoxelClassification(chunk, 1, new VoxelClassification(2));
         var source = simulation.GetVoxelGasMixture(chunk, 0);
@@ -435,17 +442,65 @@ public sealed class GasMixtureTests
         public float Pressure => 0f;
         public float TotalMoles => 0f;
         public int ActiveGasCount => 0;
-        public float GetMoles(int gasId) => 0f;
-        public void SetMoles(int gasId, float moles) => throw new NotSupportedException();
-        public void AdjustMoles(int gasId, float deltaMoles) => throw new NotSupportedException();
-        public void AddGas(int gasId, float moles, float temperature) => throw new NotSupportedException();
-        public void Clear() => throw new NotSupportedException();
-        public GasMixture Remove(float moles) => throw new NotSupportedException();
-        public GasMixture RemoveRatio(float ratio) => throw new NotSupportedException();
-        public GasMixture RemoveVolume(float volume) => throw new NotSupportedException();
-        public float TransferTo(IGasMixture destination, float moles) => throw new NotSupportedException();
-        public float TransferRatioTo(IGasMixture destination, float ratio) => throw new NotSupportedException();
-        public GasMixture Clone() => throw new NotSupportedException();
-        public GasMixtureSnapshot GetSnapshot() => throw new NotSupportedException();
+
+        public float GetMoles(int gasId)
+        {
+            return 0f;
+        }
+
+        public void SetMoles(int gasId, float moles)
+        {
+            throw new NotSupportedException();
+        }
+
+        public void AdjustMoles(int gasId, float deltaMoles)
+        {
+            throw new NotSupportedException();
+        }
+
+        public void AddGas(int gasId, float moles, float temperature)
+        {
+            throw new NotSupportedException();
+        }
+
+        public void Clear()
+        {
+            throw new NotSupportedException();
+        }
+
+        public GasMixture Remove(float moles)
+        {
+            throw new NotSupportedException();
+        }
+
+        public GasMixture RemoveRatio(float ratio)
+        {
+            throw new NotSupportedException();
+        }
+
+        public GasMixture RemoveVolume(float volume)
+        {
+            throw new NotSupportedException();
+        }
+
+        public float TransferTo(IGasMixture destination, float moles)
+        {
+            throw new NotSupportedException();
+        }
+
+        public float TransferRatioTo(IGasMixture destination, float ratio)
+        {
+            throw new NotSupportedException();
+        }
+
+        public GasMixture Clone()
+        {
+            throw new NotSupportedException();
+        }
+
+        public GasMixtureSnapshot GetSnapshot()
+        {
+            throw new NotSupportedException();
+        }
     }
 }

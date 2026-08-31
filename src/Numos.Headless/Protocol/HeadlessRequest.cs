@@ -97,34 +97,49 @@ internal sealed class ConfigurationPatch
 
         if (GlobalTemperatureK.HasValue)
             config.GlobalTemperature = GlobalTemperatureK.Value;
+
         if (DefaultTemperatureFallbackK.HasValue)
             config.DefaultTemperatureFallback = DefaultTemperatureFallbackK.Value;
+
         if (DefaultMolarHeatCapacityAtConstantVolume.HasValue)
             config.DefaultMolarHeatCapacityAtConstantVolume = DefaultMolarHeatCapacityAtConstantVolume.Value;
+
         if (VoxelVolumeM3.HasValue)
             config.VoxelVolume = VoxelVolumeM3.Value;
+
         if (SaturationReferencePressurePa.HasValue)
             config.SaturationReferencePressure = SaturationReferencePressurePa.Value;
+
         if (DefaultDiffusionCoefficient.HasValue)
             config.DefaultDiffusionCoefficient = DefaultDiffusionCoefficient.Value;
+
         if (SpaceTemperatureK.HasValue)
             config.SpaceTemperature = SpaceTemperatureK.Value;
+
         if (BulkFlowCoefficient.HasValue)
             config.BulkFlowCoefficient = BulkFlowCoefficient.Value;
+
         if (VacuumThresholdPa.HasValue)
             config.VacuumThreshold = VacuumThresholdPa.Value;
+
         if (SleepThreshold.HasValue)
             config.SleepThreshold = SleepThreshold.Value;
+
         if (SleepEpsilonPa.HasValue)
             config.SleepEpsilon = SleepEpsilonPa.Value;
+
         if (ThermalConductance.HasValue)
             config.ThermalConductance = ThermalConductance.Value;
+
         if (CondensationRateFactor.HasValue)
             config.CondensationRateFactor = CondensationRateFactor.Value;
+
         if (MaxPressureTransferFractionPerNeighbor.HasValue)
             config.MaxPressureTransferFractionPerNeighbor = MaxPressureTransferFractionPerNeighbor.Value;
+
         if (AccumulatorWakeThresholdPa.HasValue)
             config.AccumulatorWakeThreshold = AccumulatorWakeThresholdPa.Value;
+
         if (AccumulatorMaxAliveTicks.HasValue)
             config.AccumulatorMaxAliveTicks = AccumulatorMaxAliveTicks.Value;
     }

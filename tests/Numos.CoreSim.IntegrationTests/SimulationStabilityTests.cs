@@ -29,15 +29,24 @@ public sealed class SimulationStabilityTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(SimTestHelpers.Moles(whileSleeping, SimTestHelpers.FirstGasId, 0),
+            Assert.That(
+                SimTestHelpers.Moles(whileSleeping, SimTestHelpers.FirstGasId, 0),
                 Is.EqualTo(1f));
-            Assert.That(SimTestHelpers.Moles(whileSleeping, SimTestHelpers.FirstGasId, 1),
+
+            Assert.That(
+                SimTestHelpers.Moles(whileSleeping, SimTestHelpers.FirstGasId, 1),
                 Is.EqualTo(1f));
-            Assert.That(SimTestHelpers.Moles(afterWake, SimTestHelpers.FirstGasId, 0),
+
+            Assert.That(
+                SimTestHelpers.Moles(afterWake, SimTestHelpers.FirstGasId, 0),
                 Is.EqualTo(0.875f).Within(SimTestHelpers.Tolerance));
-            Assert.That(SimTestHelpers.Moles(afterWake, SimTestHelpers.FirstGasId, 1),
+
+            Assert.That(
+                SimTestHelpers.Moles(afterWake, SimTestHelpers.FirstGasId, 1),
                 Is.EqualTo(1.125f).Within(SimTestHelpers.Tolerance));
-            Assert.That(SimTestHelpers.TotalMoles(afterWake),
+
+            Assert.That(
+                SimTestHelpers.TotalMoles(afterWake),
                 Is.EqualTo(2f).Within(SimTestHelpers.Tolerance));
         });
     }
@@ -45,34 +54,40 @@ public sealed class SimulationStabilityTests
     [Test]
     public void LShapedRoom_ConvergesWithoutLosingMass()
     {
-        AssertGeometryConverges(4, 4,
-        [
-            (0, 0), (1, 0), (2, 0), (3, 0),
-            (0, 1), (0, 2), (0, 3)
-        ]);
+        AssertGeometryConverges(
+            4,
+            4,
+            [
+                (0, 0), (1, 0), (2, 0), (3, 0),
+                (0, 1), (0, 2), (0, 3)
+            ]);
     }
 
     [Test]
     public void DonutShapedRoom_ConvergesWithoutLosingMass()
     {
-        AssertGeometryConverges(3, 3,
-        [
-            (0, 0), (1, 0), (2, 0),
-            (0, 1), (2, 1),
-            (0, 2), (1, 2), (2, 2)
-        ]);
+        AssertGeometryConverges(
+            3,
+            3,
+            [
+                (0, 0), (1, 0), (2, 0),
+                (0, 1), (2, 1),
+                (0, 2), (1, 2), (2, 2)
+            ]);
     }
 
     [Test]
     public void ZigzagRoom_ConvergesWithoutLosingMass()
     {
-        AssertGeometryConverges(4, 4,
-        [
-            (0, 0), (1, 0),
-            (1, 1), (2, 1),
-            (2, 2), (3, 2),
-            (3, 3)
-        ]);
+        AssertGeometryConverges(
+            4,
+            4,
+            [
+                (0, 0), (1, 0),
+                (1, 1), (2, 1),
+                (2, 2), (3, 2),
+                (3, 3)
+            ]);
     }
 
     private static void AssertGeometryConverges(int width, int height, (int X, int Y)[] openVoxels)
@@ -84,21 +99,34 @@ public sealed class SimulationStabilityTests
 
         foreach ((int x, int y) in openVoxels)
         {
-            simulation.SetVoxelClassification(chunk, x, y, 0,
+            simulation.SetVoxelClassification(
+                chunk,
+                x,
+                y,
+                0,
                 new VoxelClassification(SimTestHelpers.RoomId));
+
             simulation.SetVoxelTemperature(chunk, x, y, 0, SimTestHelpers.DefaultTemperature);
         }
 
         (int sourceX, int sourceY) = openVoxels[0];
-        simulation.AddGasToVoxel(chunk, sourceX, sourceY, 0,
-            SimTestHelpers.FirstGasId, openVoxels.Length, SimTestHelpers.DefaultTemperature);
+        simulation.AddGasToVoxel(
+            chunk,
+            sourceX,
+            sourceY,
+            0,
+            SimTestHelpers.FirstGasId,
+            openVoxels.Length,
+            SimTestHelpers.DefaultTemperature);
 
-        for (var i = 0; i < 400; i++)
+        for (int i = 0; i < 400; i++)
             simulation.Tick();
 
         var snapshot = simulation.GetChunkSnapshot(chunk);
         float[] finalMoles = openVoxels
-            .Select(voxel => SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId,
+            .Select(voxel => SimTestHelpers.Moles(
+                snapshot,
+                SimTestHelpers.FirstGasId,
                 SimTestHelpers.Index(voxel.X, voxel.Y, 0, width, height)))
             .ToArray();
 
@@ -106,7 +134,8 @@ public sealed class SimulationStabilityTests
         {
             Assert.That(finalMoles, Is.All.EqualTo(1f).Within(0.002f));
             Assert.That(finalMoles, Is.All.GreaterThanOrEqualTo(0f));
-            Assert.That(SimTestHelpers.TotalMoles(snapshot),
+            Assert.That(
+                SimTestHelpers.TotalMoles(snapshot),
                 Is.EqualTo(openVoxels.Length).Within(0.002f));
         });
     }

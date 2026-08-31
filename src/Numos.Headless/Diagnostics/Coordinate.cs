@@ -22,7 +22,13 @@ public readonly record struct Coordinate
     [JsonRequired]
     public int Z { get; init; }
 
-    internal readonly Int3 ToInt3() => new(X, Y, Z);
+    internal readonly Int3 ToInt3()
+    {
+        return new Int3(X, Y, Z);
+    }
 
-    internal static Coordinate From(Int3 value) => new(value.X, value.Y, value.Z);
+    internal static Coordinate From(Int3 value)
+    {
+        return new Coordinate(value.X, value.Y, value.Z);
+    }
 }

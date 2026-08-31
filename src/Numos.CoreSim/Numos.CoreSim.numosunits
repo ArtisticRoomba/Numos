@@ -1,0 +1,42 @@
+# Numos dimensional-analysis catalog.
+# Format: stable id | C# alias | primitive storage type | base-dimension exponents
+# Base dimensions are extensible strings. Current bases are mass, length, time, temperature, amount and tick.
+
+dimensionless | Scalar | global::System.Single | 1
+dimensionless64 | Scalar64 | global::System.Double | 1
+temperature | Kelvin | global::System.Single | temperature=1
+temperature64 | Kelvin64 | global::System.Double | temperature=1
+pressure | Pascal | global::System.Single | mass=1,length=-1,time=-2
+pressure64 | Pascal64 | global::System.Double | mass=1,length=-1,time=-2
+amount | Mole | global::System.Single | amount=1
+amount64 | Mole64 | global::System.Double | amount=1
+volume | CubicMetre | global::System.Single | length=3
+volume64 | CubicMetre64 | global::System.Double | length=3
+energy | Joule | global::System.Single | mass=1,length=2,time=-2
+energy64 | Joule64 | global::System.Double | mass=1,length=2,time=-2
+heatCapacity | JoulePerKelvin | global::System.Single | mass=1,length=2,time=-2,temperature=-1
+heatCapacity64 | JoulePerKelvin64 | global::System.Double | mass=1,length=2,time=-2,temperature=-1
+molarEnergy | JoulePerMole | global::System.Single | mass=1,length=2,time=-2,amount=-1
+molarEnergy64 | JoulePerMole64 | global::System.Double | mass=1,length=2,time=-2,amount=-1
+molarHeatCapacity | JoulePerMoleKelvin | global::System.Single | mass=1,length=2,time=-2,temperature=-1,amount=-1
+molarHeatCapacity64 | JoulePerMoleKelvin64 | global::System.Double | mass=1,length=2,time=-2,temperature=-1,amount=-1
+pressurePerMoleKelvin | PascalPerMoleKelvin | global::System.Single | mass=1,length=-1,time=-2,temperature=-1,amount=-1
+pressurePerMoleKelvin64 | PascalPerMoleKelvin64 | global::System.Double | mass=1,length=-1,time=-2,temperature=-1,amount=-1
+pressurePerMole | PascalPerMole | global::System.Single | mass=1,length=-1,time=-2,amount=-1
+pressurePerMole64 | PascalPerMole64 | global::System.Double | mass=1,length=-1,time=-2,amount=-1
+inverseTemperature | PerKelvin | global::System.Single | temperature=-1
+inverseTemperature64 | PerKelvin64 | global::System.Double | temperature=-1
+inverseAmount64 | PerMole64 | global::System.Double | amount=-1
+temperaturePerAmount64 | KelvinPerMole64 | global::System.Double | temperature=1,amount=-1
+seconds | Second | global::System.Single | time=1
+seconds64 | Second64 | global::System.Double | time=1
+frequency | PerSecond | global::System.Single | time=-1
+
+# Boundary conversions use: convert | canonical quantity id | unit name | storage type | scale | offset
+# canonical = input * scale + offset
+convert | temperature | Celsius | global::System.Single | 1 | 273.15
+convert | temperature | Fahrenheit | global::System.Single | 0.5555555555555556 | 255.3722222222222
+convert | pressure | Kilopascal | global::System.Single | 1000 | 0
+convert | volume | Litre | global::System.Single | 0.001 | 0
+convert | amount | Kilomole | global::System.Single | 1000 | 0
+convert | molarEnergy | KilojoulePerMole | global::System.Single | 1000 | 0

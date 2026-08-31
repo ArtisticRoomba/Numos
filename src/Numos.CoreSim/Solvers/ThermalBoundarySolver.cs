@@ -12,21 +12,11 @@ internal sealed class ThermalBoundarySolver : IAtmosSolverStage
 {
     private readonly List<ThermalBoundaryConductance> _activeEdges = [];
     private readonly ConcurrentQueue<TickThermalBoundaryEvent> _boundaryEvents = new();
-    private readonly Dictionary<ThermalVoxelAddress, double> _energyDeltas = [];
     private readonly HashSet<ThermalBoundaryEdge> _edges = [];
-    private readonly Dictionary<ThermalVoxelAddress, double> _incidentConductances = [];
+    private readonly Dictionary<ThermalVoxelAddress, Joule64> _energyDeltas = [];
+    private readonly Dictionary<ThermalVoxelAddress, JoulePerKelvin64> _incidentConductances = [];
     private readonly List<ThermalBoundaryEdge> _orderedEdges = [];
     private readonly Dictionary<ThermalVoxelAddress, ThermalBoundaryState> _states = [];
-
-    internal void ClearPendingEvents()
-    {
-        _boundaryEvents.Clear();
-    }
-
-    internal void Enqueue(int tickCount, Int3 key, ThermalBoundaryEvent boundaryEvent)
-    {
-        _boundaryEvents.Enqueue(new TickThermalBoundaryEvent(tickCount, key, boundaryEvent));
-    }
 
     public void Solve(AtmosSolverExecutionContext context)
     {
@@ -48,6 +38,16 @@ internal sealed class ThermalBoundarySolver : IAtmosSolverStage
         ApplyEnergyDeltas(context);
     }
 
+    internal void ClearPendingEvents()
+    {
+        _boundaryEvents.Clear();
+    }
+
+    internal void Enqueue(int tickCount, Int3 key, ThermalBoundaryEvent boundaryEvent)
+    {
+        _boundaryEvents.Enqueue(new TickThermalBoundaryEvent(tickCount, key, boundaryEvent));
+    }
+
     private void ResetWorkspace()
     {
         _edges.Clear();
@@ -67,13 +67,14 @@ internal sealed class ThermalBoundarySolver : IAtmosSolverStage
         }
     }
 
-    private void CollectEdges(AtmosSolverExecutionContext context, Int3 sourcePosition,
+    private void CollectEdges(
+        AtmosSolverExecutionContext context, Int3 sourcePosition,
         ThermalBoundaryEvent boundaryEvent)
     {
         if (!context.World.TryGetChunk(sourcePosition, out var sourceChunk))
             return;
 
-        Int3 localPosition = sourceChunk.GetXyzInt3(boundaryEvent.LocalVoxelIndex);
+        var localPosition = sourceChunk.GetXyzInt3(boundaryEvent.LocalVoxelIndex);
         TryAddEdge(context, sourceChunk, sourcePosition, localPosition + Int3.NegX, Int3.NegX);
         TryAddEdge(context, sourceChunk, sourcePosition, localPosition + Int3.PosX, Int3.PosX);
         TryAddEdge(context, sourceChunk, sourcePosition, localPosition + Int3.NegY, Int3.NegY);
@@ -85,17 +86,18 @@ internal sealed class ThermalBoundarySolver : IAtmosSolverStage
         TryAddEdge(context, sourceChunk, sourcePosition, localPosition + Int3.PosZ, Int3.PosZ);
     }
 
-    private void TryAddEdge(AtmosSolverExecutionContext context, AtmosChunk sourceChunk,
+    private void TryAddEdge(
+        AtmosSolverExecutionContext context, AtmosChunk sourceChunk,
         Int3 sourcePosition, Int3 targetPosition, Int3 direction)
     {
         if (targetPosition.IsWithin(default, sourceChunk.Dimensions))
             return;
 
-        Int3 neighborPosition = sourcePosition + direction;
+        var neighborPosition = sourcePosition + direction;
         if (!context.World.TryGetChunk(neighborPosition, out var neighborChunk))
             return;
 
-        Int3 neighborLocalPosition = (targetPosition + neighborChunk.Dimensions) % neighborChunk.Dimensions;
+        var neighborLocalPosition = (targetPosition + neighborChunk.Dimensions) % neighborChunk.Dimensions;
         ushort neighborIndex = neighborChunk.GetIndex(neighborLocalPosition);
         int neighborRoom = neighborChunk.VoxelRoomMap[neighborIndex];
         if (neighborRoom == VoxelClassification.RoomSolid ||
@@ -109,9 +111,10 @@ internal sealed class ThermalBoundarySolver : IAtmosSolverStage
 
         var source = new ThermalVoxelAddress(sourcePosition, sourceIndex);
         var neighbor = new ThermalVoxelAddress(neighborPosition, neighborIndex);
-        _edges.Add(CompareVoxels(source, neighbor) <= 0
-            ? new ThermalBoundaryEdge(source, neighbor)
-            : new ThermalBoundaryEdge(neighbor, source));
+        _edges.Add(
+            CompareVoxels(source, neighbor) <= 0
+                ? new ThermalBoundaryEdge(source, neighbor)
+                : new ThermalBoundaryEdge(neighbor, source));
     }
 
     private void AccumulateConductances(AtmosSolverExecutionContext context)
@@ -122,64 +125,81 @@ internal sealed class ThermalBoundarySolver : IAtmosSolverStage
                 !TryGetState(context, edge.Second, out var secondState))
                 continue;
 
-            float conductance = AtmosSolverMath.CalculateThermalConductance(
-                firstState.HeatCapacity, secondState.HeatCapacity, context.TickConfig.ThermalConductance);
-            Add(_incidentConductances, edge.First, conductance);
-            Add(_incidentConductances, edge.Second, conductance);
+            JoulePerKelvin conductance = AtmosSolverMath.CalculateThermalConductance(
+                firstState.HeatCapacity,
+                secondState.HeatCapacity,
+                context.TickConfig.ThermalConductance);
+
+            AddConductance(_incidentConductances, edge.First, conductance);
+            AddConductance(_incidentConductances, edge.Second, conductance);
             _activeEdges.Add(new ThermalBoundaryConductance(edge, conductance));
         }
     }
 
     private void AccumulateEnergyDeltas()
     {
-        foreach (var (edge, conductance) in _activeEdges)
+        foreach ((var edge, JoulePerKelvin conductance) in _activeEdges)
         {
-            ThermalBoundaryState firstState = _states[edge.First];
-            ThermalBoundaryState secondState = _states[edge.Second];
-            double scale = Math.Min(1d, Math.Min(
-                firstState.HeatCapacity / _incidentConductances[edge.First],
-                secondState.HeatCapacity / _incidentConductances[edge.Second]));
-            double heatTransfer = scale * conductance *
-                                  ((double)firstState.Temperature - secondState.Temperature);
+            var firstState = _states[edge.First];
+            var secondState = _states[edge.Second];
+            Scalar64 scale = Math.Min(
+                1d,
+                Math.Min(
+                    firstState.HeatCapacity / _incidentConductances[edge.First],
+                    secondState.HeatCapacity / _incidentConductances[edge.Second]));
+
+            Joule64 heatTransfer = scale *
+                                   conductance *
+                                   ((double)firstState.Temperature - secondState.Temperature);
+
             if (heatTransfer == 0d)
                 continue;
 
-            Add(_energyDeltas, edge.First, -heatTransfer);
-            Add(_energyDeltas, edge.Second, heatTransfer);
+            AddEnergy(_energyDeltas, edge.First, -heatTransfer);
+            AddEnergy(_energyDeltas, edge.Second, heatTransfer);
         }
     }
 
     private void ApplyEnergyDeltas(AtmosSolverExecutionContext context)
     {
-        foreach (var (address, energyDelta) in _energyDeltas)
+        foreach ((var address, Joule64 energyDelta) in _energyDeltas)
         {
-            ThermalBoundaryState state = _states[address];
-            float newTemperature = MathF.Max(0f,
+            var state = _states[address];
+            Kelvin newTemperature = MathF.Max(
+                0f,
                 state.Temperature + (float)(energyDelta / state.HeatCapacity));
 
             state.Chunk.Temperature[address.LocalVoxelIndex] = newTemperature;
             state.Chunk.TotalPressure[address.LocalVoxelIndex] = AtmosSolverMath.CalculatePressureAtVoxel(
-                context.TickConfig, state.Chunk, address.LocalVoxelIndex);
+                context.TickConfig,
+                state.Chunk,
+                address.LocalVoxelIndex);
+
             state.Chunk.MarkChanged();
         }
     }
 
-    private bool TryGetState(AtmosSolverExecutionContext context, ThermalVoxelAddress address,
+    private bool TryGetState(
+        AtmosSolverExecutionContext context, ThermalVoxelAddress address,
         out ThermalBoundaryState state)
     {
         if (_states.TryGetValue(address, out state))
             return true;
+
         if (!context.World.TryGetChunk(address.ChunkPosition, out var chunk))
             return false;
 
         ushort voxelIndex = address.LocalVoxelIndex;
-        float heatCapacity = AtmosSolverMath.CalculateHeatCapacityAtVoxel(context.TickConfig, chunk, voxelIndex);
+        JoulePerKelvin heatCapacity = AtmosSolverMath.CalculateHeatCapacityAtVoxel(context.TickConfig, chunk, voxelIndex);
         chunk.TotalHeatCapacity[voxelIndex] = heatCapacity;
         if (!AtmosSolverMath.IsFinitePositive(heatCapacity) || chunk.TotalPressure[voxelIndex] == 0f)
             return false;
 
-        state = new ThermalBoundaryState(chunk,
-            context.TickConfig.GetValidatedTemp(chunk.Temperature[voxelIndex]), heatCapacity);
+        state = new ThermalBoundaryState(
+            chunk,
+            context.TickConfig.GetValidatedTemp(chunk.Temperature[voxelIndex]),
+            heatCapacity);
+
         _states.Add(address, state);
         return true;
     }
@@ -196,8 +216,16 @@ internal sealed class ThermalBoundarySolver : IAtmosSolverStage
         return comparison != 0 ? comparison : CompareVoxels(left.Second, right.Second);
     }
 
-    private static void Add(Dictionary<ThermalVoxelAddress, double> values,
-        ThermalVoxelAddress address, double value)
+    private static void AddConductance(
+        Dictionary<ThermalVoxelAddress, JoulePerKelvin64> values,
+        ThermalVoxelAddress address, JoulePerKelvin64 value)
+    {
+        values[address] = values.GetValueOrDefault(address) + value;
+    }
+
+    private static void AddEnergy(
+        Dictionary<ThermalVoxelAddress, Joule64> values,
+        ThermalVoxelAddress address, Joule64 value)
     {
         values[address] = values.GetValueOrDefault(address) + value;
     }
@@ -206,12 +234,14 @@ internal sealed class ThermalBoundarySolver : IAtmosSolverStage
 
     private readonly record struct ThermalBoundaryEdge(ThermalVoxelAddress First, ThermalVoxelAddress Second);
 
-    private readonly record struct ThermalBoundaryConductance(ThermalBoundaryEdge Edge, float Conductance);
+    private readonly record struct ThermalBoundaryConductance(
+        ThermalBoundaryEdge Edge,
+        JoulePerKelvin Conductance);
 
     private readonly record struct ThermalBoundaryState(
         AtmosChunk Chunk,
-        float Temperature,
-        float HeatCapacity);
+        Kelvin Temperature,
+        JoulePerKelvin HeatCapacity);
 
     private readonly record struct TickThermalBoundaryEvent(
         int TickCount,

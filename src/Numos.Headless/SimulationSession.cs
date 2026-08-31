@@ -13,13 +13,22 @@ namespace Numos.Headless;
 internal sealed class SimulationSession : IDisposable
 {
     private const int MaximumTicksPerRequest = 1_000_000;
-
-    private AtmosSimulation? _simulation;
     private AtmosConfig? _config;
     private Coordinate? _dimensions;
     private string? _name;
 
+    private AtmosSimulation? _simulation;
+
     internal bool HasSimulation => _simulation != null;
+
+    public void Dispose()
+    {
+        _simulation?.Dispose();
+        _simulation = null;
+        _config = null;
+        _dimensions = null;
+        _name = null;
+    }
 
     internal CommandExecution Execute(HeadlessRequest request)
     {
@@ -64,26 +73,18 @@ internal sealed class SimulationSession : IDisposable
         };
     }
 
-    public void Dispose()
-    {
-        _simulation?.Dispose();
-        _simulation = null;
-        _config = null;
-        _dimensions = null;
-        _name = null;
-    }
-
     private CommandExecution CreateSimulation(HeadlessRequest request)
     {
-        Coordinate dimensions = Require(request.Dimensions, "dimensions");
+        var dimensions = Require(request.Dimensions, "dimensions");
         var config = new AtmosConfig();
         request.Config?.ApplyTo(config);
         if (request.Gases != null)
         {
-            foreach (GasDefinition gas in request.Gases)
+            foreach (var gas in request.Gases)
             {
                 if (gas == null)
                     throw new HeadlessRequestException("invalidGas", "The gases array cannot contain null entries.");
+
                 config.GasRegistry.Add(gas.ToGasProperties());
             }
         }
@@ -99,6 +100,7 @@ internal sealed class SimulationSession : IDisposable
             _name = string.IsNullOrWhiteSpace(request.Name)
                 ? "Untitled Simulation"
                 : request.Name.Trim();
+
             replacement = null;
         }
         finally
@@ -117,39 +119,41 @@ internal sealed class SimulationSession : IDisposable
 
     private CommandExecution AddChunk(HeadlessRequest request)
     {
-        AtmosSimulation simulation = RequireSimulation();
-        Coordinate position = Require(request.Position, "position");
+        var simulation = RequireSimulation();
+        var position = Require(request.Position, "position");
         var handle = simulation.CreateAndRegisterChunk(ToInt3(position));
         simulation.SetChunkClassification(
             handle,
             new VoxelClassification(request.Classification ?? VoxelClassification.RoomUnassigned));
+
         return new CommandExecution(new CommandResult { Position = Copy(position) });
     }
 
     private CommandExecution RemoveChunk(HeadlessRequest request)
     {
-        AtmosSimulation simulation = RequireSimulation();
-        Coordinate position = Require(request.Position, "position");
+        var simulation = RequireSimulation();
+        var position = Require(request.Position, "position");
         bool changed = simulation.UnregisterChunk(Handle(position));
-        return new CommandExecution(new CommandResult
-        {
-            Position = Copy(position),
-            Changed = changed
-        });
+        return new CommandExecution(
+            new CommandResult
+            {
+                Position = Copy(position),
+                Changed = changed
+            });
     }
 
     private CommandExecution SealChunk(HeadlessRequest request)
     {
-        AtmosSimulation simulation = RequireSimulation();
-        Coordinate position = Require(request.Position, "position");
+        var simulation = RequireSimulation();
+        var position = Require(request.Position, "position");
         simulation.SetChunkBoundaryClassification(Handle(position), VoxelClassification.RoomSolid);
         return new CommandExecution(new CommandResult { Position = Copy(position) });
     }
 
     private CommandExecution SetChunkClassification(HeadlessRequest request)
     {
-        AtmosSimulation simulation = RequireSimulation();
-        Coordinate position = Require(request.Position, "position");
+        var simulation = RequireSimulation();
+        var position = Require(request.Position, "position");
         int classification = Require(request.Classification, "classification");
         simulation.SetChunkClassification(Handle(position), new VoxelClassification(classification));
         return new CommandExecution(new CommandResult { Position = Copy(position) });
@@ -157,9 +161,9 @@ internal sealed class SimulationSession : IDisposable
 
     private CommandExecution SetVoxelClassification(HeadlessRequest request)
     {
-        AtmosSimulation simulation = RequireSimulation();
-        Coordinate position = Require(request.Position, "position");
-        Coordinate voxel = Require(request.Voxel, "voxel");
+        var simulation = RequireSimulation();
+        var position = Require(request.Position, "position");
+        var voxel = Require(request.Voxel, "voxel");
         int classification = Require(request.Classification, "classification");
         simulation.SetVoxelClassification(
             Handle(position),
@@ -167,14 +171,15 @@ internal sealed class SimulationSession : IDisposable
             voxel.Y,
             voxel.Z,
             new VoxelClassification(classification));
+
         return new CommandExecution();
     }
 
     private CommandExecution SetVoxelTemperature(HeadlessRequest request)
     {
-        AtmosSimulation simulation = RequireSimulation();
-        Coordinate position = Require(request.Position, "position");
-        Coordinate voxel = Require(request.Voxel, "voxel");
+        var simulation = RequireSimulation();
+        var position = Require(request.Position, "position");
+        var voxel = Require(request.Voxel, "voxel");
         float temperature = Require(request.TemperatureK, "temperatureK");
         simulation.SetVoxelTemperature(Handle(position), voxel.X, voxel.Y, voxel.Z, temperature);
         return new CommandExecution();
@@ -183,8 +188,8 @@ internal sealed class SimulationSession : IDisposable
     private CommandExecution AddGas(HeadlessRequest request)
     {
         _ = RequireSimulation();
-        AtmosConfig config = _config!;
-        GasDefinition definition = Require(request.Gas, "gas");
+        var config = _config!;
+        var definition = Require(request.Gas, "gas");
         int gasId = config.GasRegistry.Count;
         config.GasRegistry.Add(definition.ToGasProperties());
         return new CommandExecution(new CommandResult { GasId = gasId });
@@ -192,9 +197,9 @@ internal sealed class SimulationSession : IDisposable
 
     private CommandExecution InjectGas(HeadlessRequest request)
     {
-        AtmosSimulation simulation = RequireSimulation();
-        Coordinate position = Require(request.Position, "position");
-        Coordinate voxel = Require(request.Voxel, "voxel");
+        var simulation = RequireSimulation();
+        var position = Require(request.Position, "position");
+        var voxel = Require(request.Voxel, "voxel");
         int gasId = Require(request.GasId, "gasId");
         if (gasId < 0 || gasId >= _config!.GasRegistry.Count)
         {
@@ -202,6 +207,7 @@ internal sealed class SimulationSession : IDisposable
                 "gasNotFound",
                 $"No gas is registered with ID {gasId}.");
         }
+
         float moles = Require(request.Moles, "moles");
         float temperature = Require(request.TemperatureK, "temperatureK");
         simulation.AddGasToVoxel(
@@ -212,13 +218,14 @@ internal sealed class SimulationSession : IDisposable
             gasId,
             moles,
             temperature);
+
         return new CommandExecution();
     }
 
     private CommandExecution WakeRoom(HeadlessRequest request)
     {
-        AtmosSimulation simulation = RequireSimulation();
-        Coordinate position = Require(request.Position, "position");
+        var simulation = RequireSimulation();
+        var position = Require(request.Position, "position");
         int roomId = Require(request.RoomId, "roomId");
         simulation.WakeRoom(Handle(position), roomId);
         return new CommandExecution();
@@ -226,16 +233,16 @@ internal sealed class SimulationSession : IDisposable
 
     private CommandExecution SleepChunk(HeadlessRequest request)
     {
-        AtmosSimulation simulation = RequireSimulation();
-        Coordinate position = Require(request.Position, "position");
+        var simulation = RequireSimulation();
+        var position = Require(request.Position, "position");
         simulation.SleepChunk(Handle(position));
         return new CommandExecution();
     }
 
     private CommandExecution UpdateConfig(HeadlessRequest request)
     {
-        AtmosSimulation simulation = RequireSimulation();
-        ConfigurationPatch patch = Require(request.Config, "config");
+        var simulation = RequireSimulation();
+        var patch = Require(request.Config, "config");
         patch.ApplyTo(_config!);
         simulation.SetAtmosConfig(_config!);
         return new CommandExecution();
@@ -243,9 +250,10 @@ internal sealed class SimulationSession : IDisposable
 
     private CommandExecution SetSolverEnabled(HeadlessRequest request)
     {
-        AtmosSimulation simulation = RequireSimulation();
+        var simulation = RequireSimulation();
         if (string.IsNullOrWhiteSpace(request.Solver))
             throw Missing("solver");
+
         bool enabled = Require(request.Enabled, "enabled");
         bool changed = simulation.Solvers.SetEnabled(request.Solver, enabled);
         if (!changed)
@@ -260,14 +268,14 @@ internal sealed class SimulationSession : IDisposable
 
     private CommandExecution ResetSolvers()
     {
-        AtmosSimulation simulation = RequireSimulation();
+        var simulation = RequireSimulation();
         simulation.Solvers.ResetToDefaults();
         return new CommandExecution();
     }
 
     private CommandExecution Tick(HeadlessRequest request)
     {
-        AtmosSimulation simulation = RequireSimulation();
+        var simulation = RequireSimulation();
         int count = Require(request.Count, "count");
         if (count <= 0 || count > MaximumTicksPerRequest)
         {
@@ -276,7 +284,7 @@ internal sealed class SimulationSession : IDisposable
                 $"count must be between 1 and {MaximumTicksPerRequest}.");
         }
 
-        for (var index = 0; index < count; index++)
+        for (int index = 0; index < count; index++)
             simulation.Tick();
 
         return new CommandExecution(new CommandResult { TicksExecuted = count });
@@ -284,7 +292,7 @@ internal sealed class SimulationSession : IDisposable
 
     private CommandExecution Observe(HeadlessRequest request)
     {
-        AtmosSimulation simulation = RequireSimulation();
+        var simulation = RequireSimulation();
         if (request.Voxel != null && request.Position == null)
             throw new HeadlessRequestException("missingProperty", "voxel requires a chunk position.");
 
@@ -299,6 +307,7 @@ internal sealed class SimulationSession : IDisposable
             OnlyGasBearingVoxels = request.OnlyGasBearingVoxels ?? false,
             MaxIssueLocations = request.MaxIssueLocations ?? SimulationObservationOptions.DefaultMaxIssueLocations
         };
+
         var observation = SimulationStateAnalyzer.Analyze(simulation, _config!, options);
         return new CommandExecution(Observation: observation);
     }
@@ -311,9 +320,10 @@ internal sealed class SimulationSession : IDisposable
 
     private AtmosSimulation RequireSimulation()
     {
-        return _simulation ?? throw new HeadlessRequestException(
-            "simulationNotCreated",
-            "Create a simulation before running this operation.");
+        return _simulation ??
+               throw new HeadlessRequestException(
+                   "simulationNotCreated",
+                   "Create a simulation before running this operation.");
     }
 
     private static T Require<T>(T? value, string property) where T : class

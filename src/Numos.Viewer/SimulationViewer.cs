@@ -17,68 +17,22 @@ namespace Numos.Viewer;
 /// </summary>
 public partial class SimulationViewer : IDisposable
 {
-    private enum ViewportBrandingCorner
-    {
-        TopLeft,
-        TopRight,
-        BottomLeft,
-        BottomRight
-    }
-
-    private readonly record struct VoxelDetailCacheEntry(
-        AtmosChunkVersion PresentedVersion,
-        bool IsAvailable,
-        AtmosVoxelSnapshot Snapshot);
-
-    private readonly record struct SliceProjectionKey(
-        ChunkIdentity Chunk,
-        ulong TopologyVersion,
-        ulong StyleVersion,
-        SliceAxis Axis,
-        int SliceIndex);
+    private const float CameraMoveDuration = 0.45f;
 
     private readonly Action<VisualizationRegistry>? _configureVisualizations;
-    private bool _windowInitialized;
-    private bool _imguiInitialized;
-    private bool _requestExit;
-
-    private AtmosSimulation? _simulation;
-    private AtmosConfig? _config;
-    private string? _projectName;
+    private readonly List<VoxelHighlight> _highlights = [];
     private readonly List<AtmosChunkHandle> _liveChunkHandles = [];
     private readonly HashSet<Int3> _liveChunkPositions = [];
-    private long _chunkCollectionRevision = -1;
+    private readonly List<AtmosChunkSnapshot> _orderedSnapshots = [];
     private readonly Dictionary<Int3, AtmosChunkSnapshot> _snapshotCache = new();
     private readonly List<AtmosChunkSnapshotRequest> _snapshotRequests = [];
-    private int _snapshotSourceVersion;
-    private readonly List<AtmosChunkSnapshot> _orderedSnapshots = [];
     private readonly List<Int3> _staleSnapshotKeys = [];
-    private SimulationFrameBuilder? _frameBuilder;
-    private SimulationDrawData? _drawData;
-    private SimulationSliceDrawData? _sliceDrawData;
-    private SliceProjectionKey? _sliceProjectionKey;
-    private SliceCellDrawData? _hoveredSliceCell;
-    private VoxelAddress? _selectedCell;
     private readonly Dictionary<VoxelAddress, VoxelDetailCacheEntry> _voxelDetailCache = new();
-    private readonly List<VoxelHighlight> _highlights = [];
-
-    public VoxelAddress? SelectedCell => _selectedCell;
-
-    private bool _isPaused;
-    private string _currentVisualizationId = BuiltInVisualizationIds.Temperature;
-    private bool _legendResolutionEnabled;
-    private int _legendResolution = 32;
-    private bool _legendAutomaticBounds = true;
-    private float _legendAutomaticRangeOffset;
-    private float _legendMinimum;
-    private float _legendMaximum = 1f;
-    private ulong _legendRangeRevision;
     private ulong _appliedLegendRangeRevision = ulong.MaxValue;
-    private ChunkIdentity? _focusedChunk;
-
-    private SimulationViewport? _viewport;
-    private SimulationViewport? _sliceViewport;
-    private Texture2D _viewportBranding;
+    private Camera2D _camera2D = new()
+    {
+        Zoom = 1f
+    };
 
     // Cameras
     private Camera3D _camera3D = new()
@@ -89,46 +43,71 @@ public partial class SimulationViewer : IDisposable
         FovY = 45f,
         Projection = CameraProjection.Perspective
     };
-    private Camera2D _camera2D = new()
-    {
-        Zoom = 1f
-    };
     private bool _cameraInitialized;
-    private bool _frameSceneOnNextPresentation;
-    private Vector3 _cameraMoveStartPosition;
-    private Vector3 _cameraMoveStartTarget;
+    private float _cameraMoveElapsed = CameraMoveDuration;
     private Vector3 _cameraMoveEndPosition;
     private Vector3 _cameraMoveEndTarget;
-    private const float CameraMoveDuration = 0.45f;
-    private float _cameraMoveElapsed = CameraMoveDuration;
+    private Vector3 _cameraMoveStartPosition;
+    private Vector3 _cameraMoveStartTarget;
+    private long _chunkCollectionRevision = -1;
+    private AtmosConfig? _config;
+    private SliceAxis _currentSliceAxis = SliceAxis.Z;
+    private int _currentSliceIndex;
+    private string _currentVisualizationId = BuiltInVisualizationIds.Temperature;
+    private SimulationDrawData? _drawData;
+    private ChunkIdentity? _focusedChunk;
+    private SimulationFrameBuilder? _frameBuilder;
+    private bool _frameSceneOnNextPresentation;
+    private SliceCellDrawData? _hoveredSliceCell;
+    private bool _imguiInitialized;
+
+    private bool _isPaused;
+    private bool _legendAutomaticBounds = true;
+    private float _legendAutomaticRangeOffset;
+    private float _legendMaximum = 1f;
+    private float _legendMinimum;
+    private ulong _legendRangeRevision;
+    private int _legendResolution = 32;
+    private bool _legendResolutionEnabled;
+    private int _programSettingsTab;
+    private string? _projectName;
+    private bool _requestExit;
+    private VoxelAddress? _selectedCell;
+    private Int3? _selectedSliceChunkPosition;
+    private bool _show2DChunkOutlines;
+    private bool _show2DVoxelOutlines = true;
+    private bool _show3DChunkOutlines;
+    private bool _show3DViewport = true;
+    private bool _show3DVoxelOutlines = true;
+    private bool _showConfigurationPanel;
+    private bool _showPerformanceOverlay;
+    private bool _showProgramSettingsPanel;
+    private bool _showSliceViewport = true;
 
     // UI state
     private bool _showSolutionPanel = true;
     private bool _showToolsPanel = true;
     private bool _showViewPanel = true;
-    private bool _showConfigurationPanel;
-    private bool _showProgramSettingsPanel;
-    private bool _showPerformanceOverlay;
     private bool _showViewportBranding = true;
-    private float _viewportBrandingOpacityPercent = 80f;
+
+    private AtmosSimulation? _simulation;
+    private SimulationSliceDrawData? _sliceDrawData;
+    private SliceProjectionKey? _sliceProjectionKey;
+    private SimulationViewport? _sliceViewport;
+    private int _snapshotSourceVersion;
+    private int _targetFps = 144;
+    private bool _transparent2DVoxels;
+    private bool _transparent3DVoxels;
+    private bool _uncappedFps;
+
+    private SimulationViewport? _viewport;
+    private Texture2D _viewportBranding;
     private ViewportBrandingCorner _viewportBrandingCorner = ViewportBrandingCorner.TopLeft;
     private float _viewportBrandingOffsetX = 10f;
     private float _viewportBrandingOffsetY = 10f;
+    private float _viewportBrandingOpacityPercent = 80f;
     private float _viewportBrandingSizePercent = 6f;
-    private int _targetFps = 144;
-    private bool _uncappedFps;
-    private int _programSettingsTab;
-    private bool _show3DViewport = true;
-    private bool _showSliceViewport = true;
-    private bool _show3DChunkOutlines;
-    private bool _show3DVoxelOutlines = true;
-    private bool _transparent3DVoxels;
-    private bool _show2DChunkOutlines;
-    private bool _show2DVoxelOutlines = true;
-    private bool _transparent2DVoxels;
-    private SliceAxis _currentSliceAxis = SliceAxis.Z;
-    private int _currentSliceIndex;
-    private Int3? _selectedSliceChunkPosition;
+    private bool _windowInitialized;
 
     /// <summary>
     ///     Creates a viewer with an optional startup hook for registering application-specific
@@ -139,12 +118,15 @@ public partial class SimulationViewer : IDisposable
         _configureVisualizations = configureVisualizations;
     }
 
+    public VoxelAddress? SelectedCell => _selectedCell;
+
     public void Run()
     {
         Raylib.SetConfigFlags(
             ConfigFlags.ResizableWindow |
             ConfigFlags.Msaa4xHint |
             ConfigFlags.VSyncHint);
+
         Raylib.InitWindow(1400, 900, "Numos Simulation Viewer");
         _windowInitialized = true;
 
@@ -174,6 +156,7 @@ public partial class SimulationViewer : IDisposable
             _viewport = new SimulationViewport(
                 TextureFilter.Bilinear,
                 new Color(0.04f, 0.04f, 0.05f, 1f));
+
             _sliceViewport = new SimulationViewport(
                 TextureFilter.Point,
                 new Color(0.04f, 0.04f, 0.05f, 1f));
@@ -219,6 +202,7 @@ public partial class SimulationViewer : IDisposable
                                     _drawData.VisualizationMappingRevision != visualization.MappingRevision ||
                                     _drawData.Visualization.Range.Resolution != GetLegendResolution() ||
                                     _appliedLegendRangeRevision != _legendRangeRevision;
+
         if (!snapshotsChanged && !visualizationChanged)
         {
             RefreshSliceData();
@@ -243,6 +227,7 @@ public partial class SimulationViewer : IDisposable
             rangeOverride: _legendAutomaticBounds
                 ? null
                 : new VisualizationRange(_legendMinimum, _legendMaximum));
+
         _appliedLegendRangeRevision = _legendRangeRevision;
         NormalizeInteractionState();
         RefreshSliceData();
@@ -266,13 +251,12 @@ public partial class SimulationViewer : IDisposable
         if (_simulation == null)
             return false;
 
-        var changed = false;
-        var requiredFields = _frameBuilder?.GetRequiredSnapshotFields(
-            _currentVisualizationId) ?? AtmosChunkSnapshotFields.All;
+        bool changed = false;
+        var requiredFields = _frameBuilder?.GetRequiredSnapshotFields(_currentVisualizationId) ?? AtmosChunkSnapshotFields.All;
         if (_simulation.TryGetChunkHandles(
                 _chunkCollectionRevision,
                 out long collectionRevision,
-                out var handles))
+                out AtmosChunkHandle[] handles))
         {
             _chunkCollectionRevision = collectionRevision;
             _liveChunkHandles.Clear();
@@ -280,6 +264,7 @@ public partial class SimulationViewer : IDisposable
             _liveChunkPositions.Clear();
             foreach (var handle in handles)
                 _liveChunkPositions.Add(handle.Position);
+
             changed = true;
         }
 
@@ -298,6 +283,7 @@ public partial class SimulationViewer : IDisposable
             var knownVersion = cachedFieldsAreSufficient
                 ? cached.Version
                 : default;
+
             _snapshotRequests.Add(new AtmosChunkSnapshotRequest(handle.Position, knownVersion, requiredFields));
         }
 
@@ -348,6 +334,7 @@ public partial class SimulationViewer : IDisposable
         int maximumSlice = Math.Max(
             SimulationFrameBuilder.GetSliceAxisLength(chunk.Dimensions, _currentSliceAxis) - 1,
             0);
+
         _currentSliceIndex = Math.Clamp(_currentSliceIndex, 0, maximumSlice);
 
         var projectionKey = new SliceProjectionKey(
@@ -356,6 +343,7 @@ public partial class SimulationViewer : IDisposable
             chunk.StyleVersion,
             _currentSliceAxis,
             _currentSliceIndex);
+
         if (_sliceProjectionKey == projectionKey)
             return;
 
@@ -364,6 +352,7 @@ public partial class SimulationViewer : IDisposable
             chunk.Identity,
             _currentSliceAxis,
             _currentSliceIndex);
+
         _sliceProjectionKey = projectionKey;
         _hoveredSliceCell = null;
     }
@@ -419,9 +408,11 @@ public partial class SimulationViewer : IDisposable
             chunk.ChunkPosition.X * chunk.Dimensions.X + chunk.Dimensions.X * 0.5f,
             chunk.ChunkPosition.Y * chunk.Dimensions.Y + chunk.Dimensions.Y * 0.5f,
             chunk.ChunkPosition.Z * chunk.Dimensions.Z + chunk.Dimensions.Z * 0.5f);
+
         float distance = Math.Max(
             5f,
             Math.Max(chunk.Dimensions.X, Math.Max(chunk.Dimensions.Y, chunk.Dimensions.Z)) * 2.5f);
+
         FrameCamera(target, distance);
     }
 
@@ -442,6 +433,7 @@ public partial class SimulationViewer : IDisposable
             chunk.ChunkPosition.X * chunk.Dimensions.X + x + 0.5f,
             chunk.ChunkPosition.Y * chunk.Dimensions.Y + y + 0.5f,
             chunk.ChunkPosition.Z * chunk.Dimensions.Z + z + 0.5f);
+
         FrameCamera(target, Vector3.Distance(_camera3D.Position, _camera3D.Target));
     }
 
@@ -610,13 +602,14 @@ public partial class SimulationViewer : IDisposable
             return;
 
         const string label = "Numos";
-        var coreSimVersionLabel = $"CoreSim v{CoreSimBuildInfo.PackageVersion}";
-        var viewerVersionLabel = $"Viewer v{ViewerBuildInfo.PackageVersion}";
+        string coreSimVersionLabel = $"CoreSim v{CoreSimBuildInfo.PackageVersion}";
+        string viewerVersionLabel = $"Viewer v{ViewerBuildInfo.PackageVersion}";
 
         float smallerViewportDimension = Math.Max(1f, Math.Min(viewportWidth, viewportHeight));
         int requestedLogoSize = Math.Max(
             1,
             (int)MathF.Round(smallerViewportDimension * _viewportBrandingSizePercent / 100f));
+
         int logoSize = Math.Min(requestedLogoSize, Math.Max(1, Math.Min(viewportHeight, viewportWidth / 4)));
         int textLineGap = Math.Max(1, (int)MathF.Round(logoSize * 0.08f));
         int textHeight = Math.Max(3, logoSize - textLineGap * 2);
@@ -629,6 +622,7 @@ public partial class SimulationViewer : IDisposable
             Math.Max(
                 Raylib.MeasureText(coreSimVersionLabel, coreSimVersionTextSize),
                 Raylib.MeasureText(viewerVersionLabel, viewerVersionTextSize)));
+
         int totalWidth = logoSize + logoTextGap + textColumnWidth;
         int offsetX = Math.Max(0, (int)MathF.Round(_viewportBrandingOffsetX));
         int offsetY = Math.Max(0, (int)MathF.Round(_viewportBrandingOffsetY));
@@ -641,6 +635,7 @@ public partial class SimulationViewer : IDisposable
                 (viewportWidth - offsetX - totalWidth, viewportHeight - offsetY - logoSize),
             _ => (offsetX, offsetY)
         };
+
         left = Math.Clamp(left, 0, Math.Max(0, viewportWidth - totalWidth));
         top = Math.Clamp(top, 0, Math.Max(0, viewportHeight - logoSize));
         var tint = new Color(1f, 1f, 1f, _viewportBrandingOpacityPercent / 100f);
@@ -652,6 +647,7 @@ public partial class SimulationViewer : IDisposable
             Vector2.Zero,
             0f,
             tint);
+
         int textLeft = left + logoSize + logoTextGap;
         Raylib.DrawText(label, textLeft, top, titleTextSize, tint);
         Raylib.DrawText(
@@ -660,6 +656,7 @@ public partial class SimulationViewer : IDisposable
             top + titleTextSize + textLineGap,
             coreSimVersionTextSize,
             tint);
+
         Raylib.DrawText(
             viewerVersionLabel,
             textLeft,
@@ -725,6 +722,7 @@ public partial class SimulationViewer : IDisposable
                 SliceAxis.Z => coordinates.Z,
                 _ => -1
             };
+
             if (axisCoordinate == _sliceDrawData.SliceIndex)
             {
                 (selectedU, selectedV) = _sliceDrawData.Axis switch
@@ -765,7 +763,28 @@ public partial class SimulationViewer : IDisposable
         _highlights.Clear();
         if (_selectedCell.HasValue)
             _highlights.Add(new VoxelHighlight(_selectedCell.Value, new ColorRgba(1f, 0.82f, 0.15f)));
+
         if (_hoveredSliceCell.HasValue && _hoveredSliceCell.Value.Address != _selectedCell)
             _highlights.Add(new VoxelHighlight(_hoveredSliceCell.Value.Address, new ColorRgba(1f, 1f, 1f)));
     }
+
+    private enum ViewportBrandingCorner
+    {
+        TopLeft,
+        TopRight,
+        BottomLeft,
+        BottomRight
+    }
+
+    private readonly record struct VoxelDetailCacheEntry(
+        AtmosChunkVersion PresentedVersion,
+        bool IsAvailable,
+        AtmosVoxelSnapshot Snapshot);
+
+    private readonly record struct SliceProjectionKey(
+        ChunkIdentity Chunk,
+        ulong TopologyVersion,
+        ulong StyleVersion,
+        SliceAxis Axis,
+        int SliceIndex);
 }

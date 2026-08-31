@@ -6,12 +6,12 @@ public partial class SimulationViewer
 {
     private const string LayoutFileName = "imgui.ini";
     private const string PackageDefaultLayoutFileName = "imgui-default.ini";
-
-    private string? _userLayoutPath;
     private string? _layoutStatus;
 #if DEBUG || TOOLS
     private string? _packagedDefaultLayoutPath;
 #endif
+
+    private string? _userLayoutPath;
 
     /// <summary>
     ///     Inits ImGui layout persistence,
@@ -22,6 +22,7 @@ public partial class SimulationViewer
         string settingsDirectory = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "Numos");
+
         Directory.CreateDirectory(settingsDirectory);
 
         _userLayoutPath = Path.Combine(settingsDirectory, LayoutFileName);

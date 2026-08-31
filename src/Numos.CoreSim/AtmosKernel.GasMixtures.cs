@@ -9,9 +9,9 @@ namespace Numos.CoreSim;
 ///     Immutable snapshot of one voxel mixture, detached from the kernel's storage arrays.
 /// </summary>
 internal readonly record struct VoxelGasMixtureState(
-    float Volume,
-    float Temperature,
-    KeyValuePair<int, float>[] Gases);
+    CubicMetre Volume,
+    Kelvin Temperature,
+    KeyValuePair<int, Mole>[] Gases);
 
 /// <summary>
 ///     Generation-bound address used to preflight a voxel-mixture transaction.
@@ -73,7 +73,7 @@ internal sealed partial class AtmosKernel
     /// <summary>
     ///     Gets the configured volume of a generation-current voxel.
     /// </summary>
-    internal float GetVoxelMixtureVolume(
+    internal CubicMetre GetVoxelMixtureVolume(
         Int3 position,
         long generation,
         ushort localVoxelIndex)
@@ -88,7 +88,7 @@ internal sealed partial class AtmosKernel
     /// <summary>
     ///     Gets a voxel's stored temperature after validating its generation-bound address.
     /// </summary>
-    internal float GetVoxelMixtureTemperature(
+    internal Kelvin GetVoxelMixtureTemperature(
         Int3 position,
         long generation,
         ushort localVoxelIndex)
@@ -103,7 +103,7 @@ internal sealed partial class AtmosKernel
     /// <summary>
     ///     Calculates a voxel's present pressure from its species amounts and stored temperature.
     /// </summary>
-    internal float GetVoxelMixturePressure(
+    internal Pascal GetVoxelMixturePressure(
         Int3 position,
         long generation,
         ushort localVoxelIndex)
@@ -111,8 +111,10 @@ internal sealed partial class AtmosKernel
         lock (_stateGate)
         {
             var chunk = GetMixtureChunk(position, generation, localVoxelIndex);
-            float totalMoles = GetVoxelTotalMoles(chunk, localVoxelIndex);
-            return AtmosSolverMath.CalculatePressure(_config, totalMoles,
+            Mole totalMoles = GetVoxelTotalMoles(chunk, localVoxelIndex);
+            return AtmosSolverMath.CalculatePressure(
+                _config,
+                totalMoles,
                 chunk.Temperature[localVoxelIndex]);
         }
     }
@@ -120,7 +122,7 @@ internal sealed partial class AtmosKernel
     /// <summary>
     ///     Gets the sum of all gas-channel amounts stored at a voxel.
     /// </summary>
-    internal float GetVoxelMixtureTotalMoles(
+    internal Mole GetVoxelMixtureTotalMoles(
         Int3 position,
         long generation,
         ushort localVoxelIndex)
@@ -143,8 +145,8 @@ internal sealed partial class AtmosKernel
         lock (_stateGate)
         {
             var chunk = GetMixtureChunk(position, generation, localVoxelIndex);
-            var count = 0;
-            for (var gas = 0; gas < chunk.ActiveGasCount; gas++)
+            int count = 0;
+            for (int gas = 0; gas < chunk.ActiveGasCount; gas++)
             {
                 if (chunk.ActiveGases[gas].Moles[localVoxelIndex] > 0f)
                     count++;
@@ -157,7 +159,7 @@ internal sealed partial class AtmosKernel
     /// <summary>
     ///     Gets one gas amount, returning zero when that species has no channel in the chunk.
     /// </summary>
-    internal float GetVoxelMixtureMoles(
+    internal Mole GetVoxelMixtureMoles(
         Int3 position,
         long generation,
         ushort localVoxelIndex,
@@ -166,7 +168,7 @@ internal sealed partial class AtmosKernel
         lock (_stateGate)
         {
             var chunk = GetMixtureChunk(position, generation, localVoxelIndex);
-            for (var gas = 0; gas < chunk.ActiveGasCount; gas++)
+            for (int gas = 0; gas < chunk.ActiveGasCount; gas++)
             {
                 if (chunk.ActiveGases[gas].GasId == gasId)
                     return chunk.ActiveGases[gas].Moles[localVoxelIndex];
@@ -187,18 +189,20 @@ internal sealed partial class AtmosKernel
         lock (_stateGate)
         {
             var chunk = GetMixtureChunk(position, generation, localVoxelIndex);
-            var gases = new KeyValuePair<int, float>[chunk.ActiveGasCount];
-            var gasCount = 0;
-            for (var gas = 0; gas < chunk.ActiveGasCount; gas++)
+            var gases = new KeyValuePair<int, Mole>[chunk.ActiveGasCount];
+            int gasCount = 0;
+            for (int gas = 0; gas < chunk.ActiveGasCount; gas++)
             {
-                float moles = chunk.ActiveGases[gas].Moles[localVoxelIndex];
+                Mole moles = chunk.ActiveGases[gas].Moles[localVoxelIndex];
                 if (moles <= 0f)
                     continue;
-                gases[gasCount++] = new KeyValuePair<int, float>(chunk.ActiveGases[gas].GasId, moles);
+
+                gases[gasCount++] = new KeyValuePair<int, Mole>(chunk.ActiveGases[gas].GasId, moles);
             }
 
             if (gasCount != gases.Length)
                 Array.Resize(ref gases, gasCount);
+
             Array.Sort(gases, static (left, right) => left.Key.CompareTo(right.Key));
 
             return new VoxelGasMixtureState(
@@ -215,7 +219,7 @@ internal sealed partial class AtmosKernel
         Int3 position,
         long generation,
         ushort localVoxelIndex,
-        float temperature)
+        Kelvin temperature)
     {
         lock (_stateGate)
         {
@@ -235,7 +239,7 @@ internal sealed partial class AtmosKernel
         long generation,
         ushort localVoxelIndex,
         int gasId,
-        float moles)
+        Mole moles)
     {
         Debug.Assert(gasId >= 0);
         Debug.Assert(float.IsFinite(moles) && moles >= 0f);
@@ -264,21 +268,21 @@ internal sealed partial class AtmosKernel
         long generation,
         ushort localVoxelIndex,
         int gasId,
-        float deltaMoles)
+        Mole deltaMoles)
     {
         Debug.Assert(gasId >= 0);
         Debug.Assert(float.IsFinite(deltaMoles));
         lock (_stateGate)
         {
             var chunk = GetMixtureChunk(position, generation, localVoxelIndex);
-            float currentMoles = GetVoxelGasMoles(chunk, localVoxelIndex, gasId);
-            float adjusted = currentMoles + deltaMoles;
+            Mole currentMoles = GetVoxelGasMoles(chunk, localVoxelIndex, gasId);
+            Mole adjusted = currentMoles + deltaMoles;
             if (!float.IsFinite(adjusted))
                 throw new InvalidOperationException("The adjusted gas amount exceeds the supported range.");
 
-            float moles = MathF.Max(0f, adjusted);
+            Mole moles = MathF.Max(0f, adjusted);
             int roomId = GetGasRoomId(chunk, localVoxelIndex);
-            VoxelGasMixtureTotals totals = CalculateVoxelMixtureTotals(
+            var totals = CalculateVoxelMixtureTotals(
                 chunk,
                 localVoxelIndex,
                 chunk.Temperature[localVoxelIndex],
@@ -299,8 +303,8 @@ internal sealed partial class AtmosKernel
         long generation,
         ushort localVoxelIndex,
         int gasId,
-        float moles,
-        float temperature)
+        Mole moles,
+        Kelvin temperature)
     {
         Debug.Assert(gasId >= 0);
         Debug.Assert(float.IsFinite(moles) && moles > 0f);
@@ -308,30 +312,31 @@ internal sealed partial class AtmosKernel
         lock (_stateGate)
         {
             var chunk = GetMixtureChunk(position, generation, localVoxelIndex);
-            float currentGasMoles = GetVoxelGasMoles(chunk, localVoxelIndex, gasId);
-            float combinedGasMoles = currentGasMoles + moles;
+            Mole currentGasMoles = GetVoxelGasMoles(chunk, localVoxelIndex, gasId);
+            Mole combinedGasMoles = currentGasMoles + moles;
             if (!float.IsFinite(combinedGasMoles))
                 throw new InvalidOperationException("A merged gas amount exceeds the supported range.");
 
-            VoxelGasMixtureTotals currentTotals = CalculateVoxelMixtureTotals(
+            var currentTotals = CalculateVoxelMixtureTotals(
                 chunk,
                 localVoxelIndex,
                 chunk.Temperature[localVoxelIndex]);
-            float currentHeatCapacity = currentTotals.HeatCapacity;
-            float incomingHeatCapacity = moles * _config.GetMolarHeatCapacityAtConstantVolume(gasId);
-            float combinedHeatCapacity = currentHeatCapacity + incomingHeatCapacity;
+
+            JoulePerKelvin currentHeatCapacity = currentTotals.HeatCapacity;
+            JoulePerKelvin incomingHeatCapacity = moles * _config.GetMolarHeatCapacityAtConstantVolume(gasId);
+            JoulePerKelvin combinedHeatCapacity = currentHeatCapacity + incomingHeatCapacity;
             if (!float.IsFinite(combinedHeatCapacity))
                 throw new InvalidOperationException("The mixture's heat capacity exceeds the supported range.");
 
-            float currentTemperature = _config.GetValidatedTemp(chunk.Temperature[localVoxelIndex]);
-            float incomingTemperature = _config.GetValidatedTemp(temperature);
-            float mixedTemperature = combinedHeatCapacity > 0f
+            Kelvin currentTemperature = _config.GetValidatedTemp(chunk.Temperature[localVoxelIndex]);
+            Kelvin incomingTemperature = _config.GetValidatedTemp(temperature);
+            Kelvin mixedTemperature = combinedHeatCapacity > 0f
                 ? currentTemperature +
                   (incomingTemperature - currentTemperature) * incomingHeatCapacity / combinedHeatCapacity
                 : temperature;
 
             int roomId = GetGasRoomId(chunk, localVoxelIndex);
-            VoxelGasMixtureTotals totals = CalculateVoxelMixtureTotals(
+            var totals = CalculateVoxelMixtureTotals(
                 chunk,
                 localVoxelIndex,
                 mixedTemperature,
@@ -358,7 +363,7 @@ internal sealed partial class AtmosKernel
             var chunk = GetMixtureChunk(position, generation, localVoxelIndex);
             int roomId = GetGasRoomId(chunk, localVoxelIndex);
             chunk.WakeRoom(roomId);
-            for (var gas = 0; gas < chunk.ActiveGasCount; gas++)
+            for (int gas = 0; gas < chunk.ActiveGasCount; gas++)
                 chunk.ActiveGases[gas].Moles[localVoxelIndex] = 0f;
 
             ApplyVoxelMixtureTotals(chunk, localVoxelIndex, default);
@@ -384,17 +389,18 @@ internal sealed partial class AtmosKernel
                     address.ChunkPosition,
                     address.ChunkGeneration,
                     address.LocalVoxelIndex);
+
                 int roomId = chunk.VoxelRoomMap[address.LocalVoxelIndex];
                 if (roomId == VoxelClassification.RoomSolid || roomId == VoxelClassification.RoomVoid)
                     throw new InvalidOperationException("Solid and void voxels cannot contain a gas mixture.");
 
                 var key = (address.ChunkPosition, address.ChunkGeneration);
-                if (!requiredRooms.TryGetValue(key, out var rooms))
+                if (!requiredRooms.TryGetValue(key, out HashSet<int>? rooms))
                 {
                     rooms = [];
                     if (chunk.IsAwake)
                     {
-                        for (var room = 0; room < chunk.ActiveRoomCount; room++)
+                        for (int room = 0; room < chunk.ActiveRoomCount; room++)
                             rooms.Add(chunk.ActiveRoomIds[room]);
                     }
 
@@ -404,8 +410,7 @@ internal sealed partial class AtmosKernel
                 rooms.Add(roomId);
                 if (rooms.Count > chunk.MaxActiveRooms)
                 {
-                    throw new InvalidOperationException(
-                        "The gas-mixture transaction would exceed the chunk's active-room capacity.");
+                    throw new InvalidOperationException("The gas-mixture transaction would exceed the chunk's active-room capacity.");
                 }
             }
         }
@@ -418,8 +423,8 @@ internal sealed partial class AtmosKernel
         Int3 position,
         long generation,
         ushort localVoxelIndex,
-        float temperature,
-        KeyValuePair<int, float>[] gases)
+        Kelvin temperature,
+        KeyValuePair<int, Mole>[] gases)
     {
         Debug.Assert(gases != null);
 
@@ -429,18 +434,22 @@ internal sealed partial class AtmosKernel
             int roomId = chunk.VoxelRoomMap[localVoxelIndex];
             Debug.Assert(roomId != VoxelClassification.RoomSolid && roomId != VoxelClassification.RoomVoid);
 
-            var totalHeatCapacity = 0f;
-            foreach (var (gasId, moles) in gases)
+            Mole totalMoles = 0f;
+            JoulePerKelvin totalHeatCapacity = 0f;
+            foreach ((int gasId, Mole moles) in gases)
             {
-                totalHeatCapacity += moles * _config.GetMolarHeatCapacityAtConstantVolume(gasId);;
+                totalMoles += moles;
+                totalHeatCapacity += moles * _config.GetMolarHeatCapacityAtConstantVolume(gasId);
             }
 
+            Debug.Assert(float.IsFinite(totalMoles));
             Debug.Assert(float.IsFinite(totalHeatCapacity));
 
             chunk.WakeRoom(roomId);
-            chunk.SetVoxelToVacuum(localVoxelIndex);
+            for (int gas = 0; gas < chunk.ActiveGasCount; gas++)
+                chunk.ActiveGases[gas].Moles[localVoxelIndex] = 0f;
 
-            foreach (var (gasId, moles) in gases)
+            foreach ((int gasId, Mole moles) in gases)
             {
                 int gasChannel = chunk.GetOrCreateGasChannel(gasId);
                 chunk.ActiveGases[gasChannel].Moles[localVoxelIndex] = moles;
@@ -448,8 +457,9 @@ internal sealed partial class AtmosKernel
 
             chunk.Temperature[localVoxelIndex] = temperature;
             chunk.TotalHeatCapacity[localVoxelIndex] = totalHeatCapacity;
-            chunk.TotalPressure[localVoxelIndex] = AtmosSolverMath.CalculatePressureAtVoxel(
-                _config, chunk, localVoxelIndex);
+            chunk.TotalPressure[localVoxelIndex] =
+                AtmosSolverMath.CalculatePressure(_config, totalMoles, temperature);
+
             chunk.MarkChanged();
         }
     }
@@ -457,20 +467,21 @@ internal sealed partial class AtmosKernel
     /// <summary>
     ///     Sums all currently allocated gas channels at a voxel.
     /// </summary>
-    private float GetVoxelTotalMoles(AtmosChunk chunk, ushort localVoxelIndex)
+    private Mole GetVoxelTotalMoles(AtmosChunk chunk, ushort localVoxelIndex)
     {
-        var totalMoles = 0f;
-        for (var gas = 0; gas < chunk.ActiveGasCount; gas++)
+        Mole totalMoles = 0f;
+        for (int gas = 0; gas < chunk.ActiveGasCount; gas++)
             totalMoles += chunk.ActiveGases[gas].Moles[localVoxelIndex];
+
         return totalMoles;
     }
 
     /// <summary>
     ///     Finds a gas channel by identifier, treating an unallocated channel as zero moles.
     /// </summary>
-    private static float GetVoxelGasMoles(AtmosChunk chunk, ushort localVoxelIndex, int gasId)
+    private static Mole GetVoxelGasMoles(AtmosChunk chunk, ushort localVoxelIndex, int gasId)
     {
-        for (var gas = 0; gas < chunk.ActiveGasCount; gas++)
+        for (int gas = 0; gas < chunk.ActiveGasCount; gas++)
         {
             if (chunk.ActiveGases[gas].GasId == gasId)
                 return chunk.ActiveGases[gas].Moles[localVoxelIndex];
@@ -482,12 +493,13 @@ internal sealed partial class AtmosKernel
     /// <summary>
     ///     Sets an existing channel or allocates one only when a positive amount must be stored.
     /// </summary>
-    private static void SetVoxelGasMoles(AtmosChunk chunk, ushort localVoxelIndex, int gasId, float moles)
+    private static void SetVoxelGasMoles(AtmosChunk chunk, ushort localVoxelIndex, int gasId, Mole moles)
     {
-        for (var gas = 0; gas < chunk.ActiveGasCount; gas++)
+        for (int gas = 0; gas < chunk.ActiveGasCount; gas++)
         {
             if (chunk.ActiveGases[gas].GasId != gasId)
                 continue;
+
             chunk.ActiveGases[gas].Moles[localVoxelIndex] = moles;
             return;
         }
@@ -510,7 +522,7 @@ internal sealed partial class AtmosKernel
 
         if (chunk.IsAwake)
         {
-            for (var room = 0; room < chunk.ActiveRoomCount; room++)
+            for (int room = 0; room < chunk.ActiveRoomCount; room++)
             {
                 if (chunk.ActiveRoomIds[room] == roomId)
                     return roomId;
@@ -518,8 +530,7 @@ internal sealed partial class AtmosKernel
 
             if (chunk.ActiveRoomCount >= chunk.MaxActiveRooms)
             {
-                throw new InvalidOperationException(
-                    "The gas-mixture operation would exceed the chunk's active-room capacity.");
+                throw new InvalidOperationException("The gas-mixture operation would exceed the chunk's active-room capacity.");
             }
         }
 
@@ -532,39 +543,41 @@ internal sealed partial class AtmosKernel
     private VoxelGasMixtureTotals CalculateVoxelMixtureTotals(
         AtmosChunk chunk,
         ushort localVoxelIndex,
-        float temperature,
+        Kelvin temperature,
         int overrideGasId = -1,
-        float overrideMoles = 0f)
+        Mole overrideMoles = 0f)
     {
-        var totalMoles = 0f;
-        var totalHeatCapacity = 0f;
-        var foundOverride = false;
-        for (var gas = 0; gas < chunk.ActiveGasCount; gas++)
+        Mole totalMoles = 0f;
+        JoulePerKelvin totalHeatCapacity = 0f;
+        bool foundOverride = false;
+        for (int gas = 0; gas < chunk.ActiveGasCount; gas++)
         {
             int gasId = chunk.ActiveGases[gas].GasId;
-            float moles = gasId == overrideGasId
+            Mole moles = gasId == overrideGasId
                 ? overrideMoles
                 : chunk.ActiveGases[gas].Moles[localVoxelIndex];
+
             foundOverride |= gasId == overrideGasId;
             if (moles <= 0f)
                 continue;
 
             totalMoles += moles;
-            totalHeatCapacity += moles * _config.GetMolarHeatCapacityAtConstantVolume(gasId);;
+            totalHeatCapacity += moles * _config.GetMolarHeatCapacityAtConstantVolume(gasId);
         }
 
         if (!foundOverride && overrideGasId >= 0 && overrideMoles > 0f)
         {
             totalMoles += overrideMoles;
-            totalHeatCapacity += overrideMoles * _config.GetMolarHeatCapacityAtConstantVolume(overrideGasId);;
+            totalHeatCapacity += overrideMoles * _config.GetMolarHeatCapacityAtConstantVolume(overrideGasId);
         }
 
         if (!float.IsFinite(totalMoles))
             throw new InvalidOperationException("The mixture's total moles exceed the supported range.");
+
         if (!float.IsFinite(totalHeatCapacity))
             throw new InvalidOperationException("The mixture's heat capacity exceeds the supported range.");
 
-        float pressure = AtmosSolverMath.CalculatePressure(_config, totalMoles, temperature);
+        Pascal pressure = AtmosSolverMath.CalculatePressure(_config, totalMoles, temperature);
         if (!float.IsFinite(pressure))
             throw new InvalidOperationException("The mixture's pressure exceeds the supported range.");
 
@@ -603,6 +616,6 @@ internal sealed partial class AtmosKernel
     }
 
     private readonly record struct VoxelGasMixtureTotals(
-        float HeatCapacity,
-        float Pressure);
+        JoulePerKelvin HeatCapacity,
+        Pascal Pressure);
 }

@@ -45,9 +45,10 @@ internal sealed class GasMixtureState
     {
         get
         {
-            var total = 0f;
+            float total = 0f;
             foreach (float moles in Moles.Values)
                 total += moles;
+
             return total;
         }
     }
@@ -58,8 +59,9 @@ internal sealed class GasMixtureState
     internal GasMixtureState Clone()
     {
         var clone = new GasMixtureState(Volume, Temperature);
-        foreach (var (gasId, moles) in Moles)
+        foreach ((int gasId, float moles) in Moles)
             clone.Moles.Add(gasId, moles);
+
         return clone;
     }
 
@@ -69,9 +71,10 @@ internal sealed class GasMixtureState
     internal KeyValuePair<int, float>[] ToGasArray()
     {
         var gases = new KeyValuePair<int, float>[Moles.Count];
-        var index = 0;
-        foreach (var gas in Moles)
+        int index = 0;
+        foreach (KeyValuePair<int, float> gas in Moles)
             gases[index++] = gas;
+
         return gases;
     }
 }
