@@ -35,8 +35,4 @@
         <AdditionalFiles Include="Numos.CoreSim.numosunits"/>
     </ItemGroup>
 
-    <ItemGroup>
-      <Folder Include="Collections\" />
-    </ItemGroup>
-
 </Project>
