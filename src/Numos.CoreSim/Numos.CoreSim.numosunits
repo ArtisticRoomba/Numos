@@ -24,6 +24,8 @@ pressurePerMoleKelvin | PascalPerMoleKelvin | global::System.Single | mass=1,len
 pressurePerMoleKelvin64 | PascalPerMoleKelvin64 | global::System.Double | mass=1,length=-1,time=-2,temperature=-1,amount=-1
 pressurePerMole | PascalPerMole | global::System.Single | mass=1,length=-1,time=-2,amount=-1
 pressurePerMole64 | PascalPerMole64 | global::System.Double | mass=1,length=-1,time=-2,amount=-1
+molePerPressure | MolePerPascal | global::System.Single | mass=-1,length=1,time=2,amount=1
+molePerPressure64 | MolePerPascal64 | global::System.Double | mass=-1,length=1,time=2,amount=1
 inverseTemperature | PerKelvin | global::System.Single | temperature=-1
 inverseTemperature64 | PerKelvin64 | global::System.Double | temperature=-1
 inverseAmount64 | PerMole64 | global::System.Double | amount=-1
