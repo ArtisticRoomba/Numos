@@ -8,34 +8,33 @@ namespace Numos.CoreSim.Solvers;
 /// </summary>
 internal static class AtmosSolverMath
 {
-    internal static float CalculatePressure(IAtmosConfig config, float moles, float temperature)
+    internal static Pascal CalculatePressure(IAtmosConfig config, Mole moles, Kelvin temperature)
     {
         Debug.Assert(float.IsFinite(moles) && moles >= 0f);
         return moles * config.GetValidatedTemp(temperature) * config.PressurePerMoleKelvin;
     }
 
-    internal static float PressureToMoles(IAtmosConfig config, float pressure, float temperature)
+    internal static Mole PressureToMoles(IAtmosConfig config, Pascal pressure, Kelvin temperature)
     {
         if (pressure <= 0f || float.IsNaN(pressure))
             return 0f;
 
-        float denominator = config.PressurePerMoleKelvin * config.GetValidatedTemp(temperature);
+        PascalPerMole denominator = config.PressurePerMoleKelvin * config.GetValidatedTemp(temperature);
         return pressure / denominator;
     }
 
-    /// <summary>Recalculates a voxel pressure using the normalized values in a live public configuration.</summary>
-    internal static float CalculatePressureAtVoxel(IAtmosConfig config, AtmosChunk chunk,
+    /// <summary>Recalculates a voxel pressure and clears values below the configured vacuum threshold.</summary>
+    internal static Pascal CalculatePressureAtVoxel(IAtmosConfig config, AtmosChunk chunk,
         ushort localVoxelIndex)
     {
-        var totalMoles = GetTotalMoles(chunk, localVoxelIndex);
-
+        Mole totalMoles = GetTotalMoles(chunk, localVoxelIndex);
         if (totalMoles <= 0f)
         {
             chunk.SetVoxelToVacuum(localVoxelIndex);
             return 0f;
         }
 
-        var pressure = CalculatePressure(config, totalMoles, chunk.Temperature[localVoxelIndex]);
+        Pascal pressure = CalculatePressure(config, totalMoles, chunk.Temperature[localVoxelIndex]);
         if (pressure < config.VacuumThreshold)
         {
             chunk.SetVoxelToVacuum(localVoxelIndex);
@@ -45,13 +44,13 @@ internal static class AtmosSolverMath
         return pressure;
     }
 
-    internal static float CalculateHeatCapacityAtVoxel(IAtmosConfig config, AtmosChunk chunk,
+    internal static JoulePerKelvin CalculateHeatCapacityAtVoxel(IAtmosConfig config, AtmosChunk chunk,
         ushort localVoxelIndex)
     {
-        var totalHeatCapacity = 0f;
+        JoulePerKelvin totalHeatCapacity = 0f;
         for (var gas = 0; gas < chunk.ActiveGasCount; gas++)
         {
-            float moles = chunk.ActiveGases[gas].Moles[localVoxelIndex];
+            Mole moles = chunk.ActiveGases[gas].Moles[localVoxelIndex];
             if (moles <= 0f)
                 continue;
 
@@ -62,14 +61,14 @@ internal static class AtmosSolverMath
         return totalHeatCapacity;
     }
 
-    internal static float CalculateBulkPressureTransfer(AtmosSolverConfigSnapshot config,
-        float pressureDelta, float currentPressure)
+    internal static Pascal CalculateBulkPressureTransfer(AtmosSolverConfigSnapshot config,
+        Pascal pressureDelta, Pascal currentPressure)
     {
-        float maximumFraction = config.MaxPressureTransferFractionPerNeighbor;
+        Scalar maximumFraction = config.MaxPressureTransferFractionPerNeighbor;
         if (maximumFraction <= 0f)
             return 0f;
 
-        float pressureTransfer = pressureDelta * config.BulkFlowCoefficient;
+        Pascal pressureTransfer = pressureDelta * config.BulkFlowCoefficient;
         if (pressureTransfer <= 0f)
             return 0f;
 
@@ -79,8 +78,8 @@ internal static class AtmosSolverMath
     /// <summary>
     ///     Returns the source-relative species imbalance used by explicit Fickian diffusion.
     /// </summary>
-    internal static float CalculateMoleImbalance(float sourceMoles, float sourceTemperature,
-        float targetMoles, float targetTemperature)
+    internal static Mole CalculateMoleImbalance(Mole sourceMoles, Kelvin sourceTemperature,
+        Mole targetMoles, Kelvin targetTemperature)
     {
         Debug.Assert(sourceMoles >= 0f && targetMoles >= 0f);
         Debug.Assert(IsFinitePositive(sourceTemperature));
@@ -94,17 +93,17 @@ internal static class AtmosSolverMath
         return sourceMoles - targetMoles * (targetTemperature / sourceTemperature);
     }
 
-    internal static float CalculateThermalConductance(float sourceHeatCapacity, float targetHeatCapacity,
-        float thermalConductance)
+    internal static JoulePerKelvin CalculateThermalConductance(JoulePerKelvin sourceHeatCapacity,
+        JoulePerKelvin targetHeatCapacity, JoulePerKelvin thermalConductance)
     {
         Debug.Assert(IsFinitePositive(sourceHeatCapacity));
         Debug.Assert(IsFinitePositive(targetHeatCapacity));
         Debug.Assert(IsFinitePositive(thermalConductance));
 
-        float smallerHeatCapacity = MathF.Min(sourceHeatCapacity, targetHeatCapacity);
-        float largerHeatCapacity = MathF.Max(sourceHeatCapacity, targetHeatCapacity);
-        float equilibriumConductance = smallerHeatCapacity /
-                                       (1f + smallerHeatCapacity / largerHeatCapacity);
+        JoulePerKelvin smallerHeatCapacity = MathF.Min(sourceHeatCapacity, targetHeatCapacity);
+        JoulePerKelvin largerHeatCapacity = MathF.Max(sourceHeatCapacity, targetHeatCapacity);
+        JoulePerKelvin equilibriumConductance = smallerHeatCapacity /
+                                                (1f + smallerHeatCapacity / largerHeatCapacity);
         return MathF.Min(thermalConductance, equilibriumConductance);
     }
 
@@ -122,12 +121,11 @@ internal static class AtmosSolverMath
         return float.IsFinite(value) && value > 0f;
     }
 
-    internal static float GetTotalMoles(AtmosChunk chunk, ushort voxelIndex)
+    internal static Mole GetTotalMoles(AtmosChunk chunk, ushort voxelIndex)
     {
-        var totalMoles = 0f;
+        Mole totalMoles = 0f;
         for (var gas = 0; gas < chunk.ActiveGasCount; gas++)
             totalMoles += chunk.ActiveGases[gas].Moles[voxelIndex];
         return totalMoles;
     }
-
 }

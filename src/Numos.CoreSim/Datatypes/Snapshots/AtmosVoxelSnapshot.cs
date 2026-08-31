@@ -1,4 +1,5 @@
 using Numos.Maths;
+using Numos.Units;
 
 namespace Numos.CoreSim.Datatypes.Snapshots;
 
@@ -9,7 +10,7 @@ namespace Numos.CoreSim.Datatypes.Snapshots;
 /// <param name="Moles">Sampled amount, in moles (mol).</param>
 public readonly record struct VoxelGasSnapshot(
     int GasId,
-    float Moles);
+    [property: Quantity("amount")] Mole Moles);
 
 /// <summary>
 /// Detached values for one voxel, intended for interaction details and tooltips.
@@ -26,6 +27,6 @@ public readonly record struct AtmosVoxelSnapshot(
     Int3 ChunkPosition,
     ushort LocalIndex,
     int RoomId,
-    float Pressure,
-    float Temperature,
+    [property: Quantity("pressure")] Pascal Pressure,
+    [property: Quantity("temperature")] Kelvin Temperature,
     VoxelGasSnapshot[] Gases);

@@ -24,6 +24,15 @@
 
     <ItemGroup>
         <ProjectReference Include="..\Numos.Maths\Numos.Maths.csproj"/>
+        <ProjectReference Include="..\Numos.Units\Numos.Units.csproj"/>
+        <ProjectReference Include="..\Numos.Units.Analyzers\Numos.Units.Analyzers.csproj"
+                          OutputItemType="Analyzer"
+                          ReferenceOutputAssembly="false"
+                          GlobalPropertiesToRemove="PublishAot;PublishTrimmed;RuntimeIdentifier;SelfContained"/>
+    </ItemGroup>
+
+    <ItemGroup>
+        <AdditionalFiles Include="Numos.CoreSim.numosunits"/>
     </ItemGroup>
 
 </Project>

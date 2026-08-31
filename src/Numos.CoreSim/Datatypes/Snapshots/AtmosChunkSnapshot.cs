@@ -1,4 +1,5 @@
 using Numos.Maths;
+using Numos.Units;
 
 namespace Numos.CoreSim.Datatypes.Snapshots;
 
@@ -19,8 +20,10 @@ public struct AtmosChunkSnapshot
     /// <summary>
     ///     Gets detached per-voxel pressure values, in pascals (Pa).
     /// </summary>
-    public float[] TotalPressure;
+    [ElementQuantity("pressure")]
+    public Pascal[] TotalPressure;
 
+    // TODO check this
     /// <summary>
     ///     Gets detached per-voxel heat capacity values, in pascals (Pa).
     /// </summary>
@@ -29,7 +32,8 @@ public struct AtmosChunkSnapshot
     /// <summary>
     ///     Gets detached per-voxel temperature values, in kelvins (K).
     /// </summary>
-    public float[] Temperature;
+    [ElementQuantity("temperature")]
+    public Kelvin[] Temperature;
     /// <summary>
     ///     Gets detached gas-channel data.
     /// </summary>

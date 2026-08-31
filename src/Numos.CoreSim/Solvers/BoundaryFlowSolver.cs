@@ -90,15 +90,15 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
         if (sourceRoom == VoxelClassification.RoomSolid || sourceRoom == VoxelClassification.RoomVoid)
             return;
 
-        float sourcePressure = sourceChunk.TotalPressure[sourceIndex];
+        Pascal sourcePressure = sourceChunk.TotalPressure[sourceIndex];
         bool isVoid = neighborRoom == VoxelClassification.RoomVoid;
-        float neighborPressure = isVoid ? 0f : neighborChunk.TotalPressure[neighborIndex];
-        float pressureDelta = sourcePressure - neighborPressure;
-        float bulkPressureTransfer = pressureDelta > 0f
+        Pascal neighborPressure = isVoid ? 0f : neighborChunk.TotalPressure[neighborIndex];
+        Pascal pressureDelta = sourcePressure - neighborPressure;
+        Pascal bulkPressureTransfer = pressureDelta > 0f
             ? AtmosSolverMath.CalculateBulkPressureTransfer(context.TickConfig, pressureDelta, sourcePressure)
             : 0f;
 
-        float totalMoles = GetTotalMoles(sourceChunk, sourceIndex);
+        Mole totalMoles = GetTotalMoles(sourceChunk, sourceIndex);
         if (totalMoles <= 0f)
             return;
 
@@ -108,34 +108,34 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
 
     private static void TransferSpecies(AtmosSolverExecutionContext context, AtmosChunk sourceChunk,
         ushort sourceIndex, AtmosChunk neighborChunk, ushort neighborIndex, bool isVoid,
-        float totalMoles, float bulkPressureTransfer)
+        Mole totalMoles, Pascal bulkPressureTransfer)
     {
         AtmosSolverConfigSnapshot config = context.TickConfig;
-        float sourceTemperature = config.GetValidatedTemp(sourceChunk.Temperature[sourceIndex]);
-        float neighborTemperature = isVoid
+        Kelvin sourceTemperature = config.GetValidatedTemp(sourceChunk.Temperature[sourceIndex]);
+        Kelvin neighborTemperature = isVoid
             ? 0f
             : config.GetValidatedTemp(neighborChunk.Temperature[neighborIndex]);
-        float advectedMoles = AtmosSolverMath.PressureToMoles(
+        Mole advectedMoles = AtmosSolverMath.PressureToMoles(
             config, bulkPressureTransfer, sourceTemperature);
         var movedGas = false;
 
         for (var gas = 0; gas < sourceChunk.ActiveGasCount; gas++)
         {
             int gasId = sourceChunk.ActiveGases[gas].GasId;
-            float sourceMoles = sourceChunk.ActiveGases[gas].Moles[sourceIndex];
-            float molesAdvected = advectedMoles * (sourceMoles / totalMoles);
-            float moleImbalance = AtmosSolverMath.CalculateMoleImbalance(
+            Mole sourceMoles = sourceChunk.ActiveGases[gas].Moles[sourceIndex];
+            Mole molesAdvected = advectedMoles * (sourceMoles / totalMoles);
+            Mole moleImbalance = AtmosSolverMath.CalculateMoleImbalance(
                 sourceMoles, sourceTemperature,
                 GetGasMoles(neighborChunk, neighborIndex, gasId, isVoid), neighborTemperature);
-            float molesDiffused = moleImbalance > 0f
+            Mole molesDiffused = moleImbalance > 0f
                 ? moleImbalance * config.GetDiffusionCoefficient(gasId)
                 : 0f;
-            float molesToMove = MathF.Min(sourceMoles, molesAdvected + molesDiffused);
+            Mole molesToMove = MathF.Min(sourceMoles, molesAdvected + molesDiffused);
             if (molesToMove <= 0f)
                 continue;
 
-            float transferredHeatCapacity = molesToMove *
-                                            config.GetMolarHeatCapacityAtConstantVolume(gasId);
+            JoulePerKelvin transferredHeatCapacity = molesToMove *
+                                                     config.GetMolarHeatCapacityAtConstantVolume(gasId);
             sourceChunk.ActiveGases[gas].Moles[sourceIndex] = sourceMoles - molesToMove;
             sourceChunk.TotalHeatCapacity[sourceIndex] = MathF.Max(0f,
                 sourceChunk.TotalHeatCapacity[sourceIndex] - transferredHeatCapacity);
@@ -163,7 +163,7 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
         sourceChunk.MarkChanged();
     }
 
-    private static float GetGasMoles(AtmosChunk chunk, ushort voxelIndex, int gasId, bool isVoid)
+    private static Mole GetGasMoles(AtmosChunk chunk, ushort voxelIndex, int gasId, bool isVoid)
     {
         if (isVoid)
             return 0f;
@@ -177,9 +177,9 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
         return 0f;
     }
 
-    private static float GetTotalMoles(AtmosChunk chunk, ushort voxelIndex)
+    private static Mole GetTotalMoles(AtmosChunk chunk, ushort voxelIndex)
     {
-        var totalMoles = 0f;
+        Mole totalMoles = 0f;
         for (var gas = 0; gas < chunk.ActiveGasCount; gas++)
             totalMoles += chunk.ActiveGases[gas].Moles[voxelIndex];
         return totalMoles;

@@ -11,12 +11,12 @@ namespace Numos.CoreSim;
 /// </remarks>
 internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
 {
-    private float _defaultMolarHeatCapacityAtConstantVolume;
-    private float _defaultDiffusionCoefficient;
-    private float[] _diffusionCoefficients = [];
+    private JoulePerMoleKelvin _defaultMolarHeatCapacityAtConstantVolume;
+    private Scalar _defaultDiffusionCoefficient;
+    private Scalar[] _diffusionCoefficients = [];
     private GasProperties[] _gasRegistry = [];
     private int _gasRegistryCount;
-    private float[] _molarHeatCapacitiesAtConstantVolume = [];
+    private JoulePerMoleKelvin[] _molarHeatCapacitiesAtConstantVolume = [];
 
     internal void Capture(AtmosConfig config)
     {
@@ -84,43 +84,44 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
         AccumulatorMaxAliveTicks = Math.Max(0, config.AccumulatorMaxAliveTicks);
     }
 
-    public float GlobalTemperature { get; private set; }
-    public float DefaultTemperatureFallback { get; private set; }
-    public float VoxelVolume { get; private set; }
-    public float PressurePerMoleKelvin { get; private set; }
-    public float SaturationReferencePressure { get; private set; }
-    public float SpaceTemperature { get; private set; }
-    public float BulkFlowCoefficient { get; private set; }
-    public float VacuumThreshold { get; private set; }
+    public Kelvin GlobalTemperature { get; private set; }
+    public Kelvin DefaultTemperatureFallback { get; private set; }
+    public CubicMetre VoxelVolume { get; private set; }
+    public PascalPerMoleKelvin PressurePerMoleKelvin { get; private set; }
+    public Pascal SaturationReferencePressure { get; private set; }
+    public Kelvin SpaceTemperature { get; private set; }
+    public Scalar BulkFlowCoefficient { get; private set; }
+    public Pascal VacuumThreshold { get; private set; }
     public int SleepThreshold { get; private set; }
-    public float SleepEpsilon { get; private set; }
-    public float ThermalConductance { get; private set; }
-    public float CondensationRateFactor { get; private set; }
-    public float MaxPressureTransferFractionPerNeighbor { get; private set; }
-    public float AccumulatorWakeThreshold { get; private set; }
+    public Pascal SleepEpsilon { get; private set; }
+    public JoulePerKelvin ThermalConductance { get; private set; }
+    public Scalar CondensationRateFactor { get; private set; }
+    public Scalar MaxPressureTransferFractionPerNeighbor { get; private set; }
+    public Pascal AccumulatorWakeThreshold { get; private set; }
     public int AccumulatorMaxAliveTicks { get; private set; }
 
-    public float DefaultMolarHeatCapacityAtConstantVolume => _defaultMolarHeatCapacityAtConstantVolume;
-    public float DefaultDiffusionCoefficient => _defaultDiffusionCoefficient;
+    public JoulePerMoleKelvin DefaultMolarHeatCapacityAtConstantVolume =>
+        _defaultMolarHeatCapacityAtConstantVolume;
+    public Scalar DefaultDiffusionCoefficient => _defaultDiffusionCoefficient;
 
-    public float GetVoxelVolume()
+    public CubicMetre GetVoxelVolume()
     {
         return VoxelVolume;
     }
 
-    public float GetValidatedTemp(float storedTemperature)
+    public Kelvin GetValidatedTemp(Kelvin storedTemperature)
     {
         return FloatMath.IsFinitePositive(storedTemperature) ? storedTemperature : DefaultTemperatureFallback;
     }
 
-    public float GetMolarHeatCapacityAtConstantVolume(int gasId)
+    public JoulePerMoleKelvin GetMolarHeatCapacityAtConstantVolume(int gasId)
     {
         return (uint)gasId < (uint)_gasRegistryCount
             ? _molarHeatCapacitiesAtConstantVolume[gasId]
             : _defaultMolarHeatCapacityAtConstantVolume;
     }
 
-    public float GetDiffusionCoefficient(int gasId)
+    public Scalar GetDiffusionCoefficient(int gasId)
     {
         return (uint)gasId < (uint)_gasRegistryCount
             ? _diffusionCoefficients[gasId]

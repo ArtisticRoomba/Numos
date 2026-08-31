@@ -1,4 +1,5 @@
 using System.Buffers;
+using Numos.Units;
 
 namespace Numos.CoreSim;
 
@@ -34,7 +35,8 @@ internal struct GasChannel
     ///     While this is not marked as nullable, this field
     ///     can be null when the channel is not initialized via <see cref="Initialize" />.
     /// </remarks>
-    public float[] Moles;
+    [ElementQuantity("amount")]
+    public Mole[] Moles;
 
     /// <summary>
     ///     Whether the <see cref="GasChannel" /> has been initialized and is ready for use.
@@ -52,7 +54,7 @@ internal struct GasChannel
     public void Initialize(int gasId, int voxelCount)
     {
         GasId = gasId;
-        Moles = ArrayPool<float>.Shared.Rent(voxelCount);
+        Moles = ArrayPool<Mole>.Shared.Rent(voxelCount);
         Array.Clear(Moles, 0, voxelCount);
     }
 
@@ -63,7 +65,7 @@ internal struct GasChannel
     {
         if (IsInitialized)
         {
-            ArrayPool<float>.Shared.Return(Moles);
+            ArrayPool<Mole>.Shared.Return(Moles);
             Moles = null!;
         }
     }

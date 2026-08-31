@@ -5,6 +5,7 @@ using Numos.CoreSim.Collections;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.Datatypes.Snapshots;
 using Numos.Maths;
+using Numos.Units;
 
 namespace Numos.CoreSim;
 
@@ -115,13 +116,15 @@ internal class AtmosChunk
     /// <summary>
     ///     Temperature for each voxel, in kelvins (K), indexed by flat voxel index or local coordinate.
     /// </summary>
-    public FlatArray<float> Temperature;
+    [ElementQuantity("temperature")]
+    public FlatArray<Kelvin> Temperature;
 
     /// <summary>
     ///     Cached pressure for each voxel, in pascals (Pa), indexed by flat voxel index or local coordinate.
     /// </summary>
     /// <remarks>These values are recomputed by the simulation each tick.</remarks>
-    public FlatArray<float> TotalPressure;
+    [ElementQuantity("pressure")]
+    public FlatArray<Pascal> TotalPressure;
 
     /// <summary>
     ///     Cached total heat capacity for each voxel, in joules per kelvin (J/K).
@@ -132,7 +135,8 @@ internal class AtmosChunk
     ///     <see cref="ActiveAirIndices" /> are not authoritative until that voxel is active and refreshed.
     ///     Values are total heat capacities, not molar quantities.
     /// </remarks>
-    public FlatArray<float> TotalHeatCapacity;
+    [ElementQuantity("heatCapacity")]
+    public FlatArray<JoulePerKelvin> TotalHeatCapacity;
 
     /// <summary>
     ///     Total number of voxels in this chunk, equal to <c>Width * Height * Depth</c>.
@@ -372,8 +376,9 @@ internal class AtmosChunk
     /// <param name="pressurePerMoleKelvin">
     ///     The already-resolved ideal-gas coefficient <c>R/V</c>, in Pa/(mol·K).
     /// </param>
-    public void InjectGasToVoxel(ushort localVoxelIndex, int gasId, float molesToAdd, float temperature,
-        float effectiveMolarHeatCapacityAtConstantVolume, float pressurePerMoleKelvin)
+    public void InjectGasToVoxel(ushort localVoxelIndex, int gasId, Mole molesToAdd, Kelvin temperature,
+        JoulePerMoleKelvin effectiveMolarHeatCapacityAtConstantVolume,
+        PascalPerMoleKelvin pressurePerMoleKelvin)
     {
         Debug.Assert(float.IsFinite(effectiveMolarHeatCapacityAtConstantVolume) &&
                      effectiveMolarHeatCapacityAtConstantVolume > 0f);
@@ -390,22 +395,22 @@ internal class AtmosChunk
 
         SleepTimer = 0;
 
-        float currentHeatCapacity = TotalHeatCapacity[localVoxelIndex];
+        JoulePerKelvin currentHeatCapacity = TotalHeatCapacity[localVoxelIndex];
 
         int targetChannelIndex = GetOrCreateGasChannel(gasId);
 
         ActiveGases[targetChannelIndex].Moles[localVoxelIndex] += molesToAdd;
 
-        var currentTotalMoles = 0f;
+        Mole currentTotalMoles = 0f;
         for (var g = 0; g < ActiveGasCount; g++)
         {
             currentTotalMoles += ActiveGases[g].Moles[localVoxelIndex];
         }
 
-        float incomingHeatCapacity = molesToAdd * effectiveMolarHeatCapacityAtConstantVolume;
-        float newHeatCapacity = currentHeatCapacity + incomingHeatCapacity;
-        float currentTemp = Temperature[localVoxelIndex];
-        float newTemp = currentHeatCapacity > 0f && newHeatCapacity > 0f
+        JoulePerKelvin incomingHeatCapacity = molesToAdd * effectiveMolarHeatCapacityAtConstantVolume;
+        JoulePerKelvin newHeatCapacity = currentHeatCapacity + incomingHeatCapacity;
+        Kelvin currentTemp = Temperature[localVoxelIndex];
+        Kelvin newTemp = currentHeatCapacity > 0f && newHeatCapacity > 0f
             ? currentTemp == temperature
                 ? currentTemp
                 // Interpolation avoids the overflow-prone sum C1*T1 + C2*T2.
@@ -430,7 +435,7 @@ internal class AtmosChunk
         TotalPressure[idx] = 0f;
         for (var g = 0; g < ActiveGasCount; g++)
         {
-            ActiveGases[g].Moles[idx] = 0f; 
+            ActiveGases[g].Moles[idx] = 0f;
         }
         TotalHeatCapacity[idx] = 0f;
     }

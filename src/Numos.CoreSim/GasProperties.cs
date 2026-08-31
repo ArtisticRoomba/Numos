@@ -1,3 +1,5 @@
+using Numos.Units;
+
 namespace Numos.CoreSim;
 
 /// <summary>
@@ -18,13 +20,15 @@ public struct GasProperties
     ///     total heat capacity, and the energy removed during condensation. Non-finite values and values less
     ///     than or equal to zero use <see cref="AtmosConfig.DefaultMolarHeatCapacityAtConstantVolume" />.
     /// </remarks>
-    public float MolarHeatCapacityAtConstantVolume;
+    [Quantity("molarHeatCapacity")]
+    public JoulePerMoleKelvin MolarHeatCapacityAtConstantVolume;
 
     /// <summary>
     ///     Normal boiling temperature, in kelvins (K), at
     ///     <see cref="AtmosConfig.SaturationReferencePressure" />.
     /// </summary>
-    public float BoilingPoint;
+    [Quantity("temperature")]
+    public Kelvin BoilingPoint;
 
     /// <summary>
     ///     Whether this species participates in the condensation model.
@@ -38,7 +42,8 @@ public struct GasProperties
     ///     The phase-equilibrium model uses this value in Clausius–Clapeyron. The constant-volume energy
     ///     balance converts it to an approximate internal-energy change, <c>ΔU_vap = ΔH_vap - RT</c>.
     /// </remarks>
-    public float MolarEnthalpyOfVaporization;
+    [Quantity("molarEnergy")]
+    public JoulePerMole MolarEnthalpyOfVaporization;
 
     /// <summary>
     ///     Reserved ID for a liquid produced by condensation.
@@ -54,5 +59,5 @@ public struct GasProperties
     ///     Dimensionless fraction of the per-species mole imbalance mixed per simulation tick.
     /// </summary>
     /// <remarks>Values are clamped to [0, 1]; non-finite values disable diffusion for this species.</remarks>
-    public float DiffusionCoefficient;
+    public Scalar DiffusionCoefficient;
 }

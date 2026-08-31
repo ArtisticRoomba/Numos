@@ -16,6 +16,7 @@ in the `0.x` series and may be published as prereleases (for others to just impo
 - Solver pipeline, allowing you to write and add your own solvers to be executed on Numos' behalf
 - Ideal-gas based (`PV = nRT`)
 - Includes an external sim viewer and headless runner
+- Static dimensional analysis at compile-time
 - Attempts at being trimmable and Native AOT-compatible
 
 ## Bug Reports & Contributions
@@ -28,8 +29,9 @@ Documentation for APIs and the project itself is available under `/docs`. Also s
 
 - [An Overview of Numos](docs/overview.md)
 - [Using Numos](docs/using.md)
-- [Using the headless runner](docs/headless_runner.md)
+- [Using the Headless Runner](docs/headless_runner.md)
 - [Versioning](docs/versioning.md)
+- [Dimensional Analysis](docs/dimensional_analysis.md)
 
 ## Copyright, Credits & License
 Numos is licensed under the MIT license. See `LICENSE.TXT` for more info.
