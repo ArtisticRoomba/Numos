@@ -1,6 +1,6 @@
-# Dimensional analysis
+# Dimensional Analysis
 
-To prevent developers and engineers from going insane, Numos features a built-in static dimensional analysis Roslyn Analyzer suite that assists in tracking dimensional quantities throughout the solution.
+To prevent developers and engineers from going insane, Numos features a static dimensional analysis Roslyn Analyzer suite that assists in tracking dimensional quantities throughout the solution.
 
 This is done entirely at compile time, and to preserve Native AOT compatibility, will likely never change. Using C# `alias`es allows us to annotate while keeping the underlying types with no overhead, so operations like vectorization are still done in the same manner with no required adjustment.
 A generated alias such as `Kelvin` or `Pascal` that uses `global::System.Single` as the backing is still `System.Single` in CLR metadata, arrays remain primitive arrays, and arithmetic remains ordinary primitive arithmetic.
