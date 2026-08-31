@@ -25,7 +25,6 @@
     <ItemGroup>
         <ProjectReference Include="..\..\src\Numos.API\Numos.API.csproj"/>
         <ProjectReference Include="..\..\src\Numos.CoreSim\Numos.CoreSim.csproj"/>
-        <ProjectReference Include="..\..\src\Numos.Collections\Numos.Collections.csproj"/>
     </ItemGroup>
 
     <ItemGroup>
