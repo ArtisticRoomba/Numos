@@ -36,7 +36,6 @@
               Pack="true"
               PackagePath="analyzers/dotnet/cs"
               Visible="false"/>
-        <None Remove="AnalyzerReleases.Released.md"/>
     </ItemGroup>
 
 </Project>
