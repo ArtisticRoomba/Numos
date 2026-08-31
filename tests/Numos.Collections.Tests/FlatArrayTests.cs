@@ -1,7 +1,6 @@
-using Numos.CoreSim.Collections;
-using Numos.Maths;
+using NUnit.Framework;
 
-namespace Numos.CoreSim.Tests;
+namespace Numos.Collections.Tests;
 
 [TestFixture]
 public sealed class FlatArrayTests

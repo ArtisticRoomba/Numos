@@ -1,6 +1,6 @@
 using System.Diagnostics;
 using Numos.CoreSim.Datatypes.Events;
-using Numos.Maths;
+using Numos.Collections;
 
 namespace Numos.CoreSim.Solvers;
 

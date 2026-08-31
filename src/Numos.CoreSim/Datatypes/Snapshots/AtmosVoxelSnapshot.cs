@@ -1,4 +1,4 @@
-using Numos.Maths;
+using Numos.Collections;
 using Numos.Units;
 
 namespace Numos.CoreSim.Datatypes.Snapshots;

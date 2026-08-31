@@ -1,10 +1,9 @@
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using JetBrains.Annotations;
-using Numos.CoreSim.Collections;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.Datatypes.Snapshots;
-using Numos.Maths;
+using Numos.Collections;
 using Numos.Units;
 
 namespace Numos.CoreSim;

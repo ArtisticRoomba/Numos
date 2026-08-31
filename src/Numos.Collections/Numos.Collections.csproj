@@ -6,11 +6,10 @@
         <TargetFramework>net10.0</TargetFramework>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
-        <RootNamespace>Numos.Maths</RootNamespace>
-        <PackageId>Numos.Maths</PackageId>
-        <Title>Numos Maths</Title>
-        <Description>Mathematical primitives used by Numos.</Description>
-        <PackageTags>simulation;mathematics;voxel;nativeaot</PackageTags>
+        <PackageId>Numos.Collections</PackageId>
+        <Title>Numos Collections</Title>
+        <Description>Collections and mathematical primitives for 3D chunks and floating point math used by Numos.</Description>
+        <PackageTags>simulation;mathematics;collections;voxel;nativeaot</PackageTags>
         <GenerateDocumentationFile>true</GenerateDocumentationFile>
     </PropertyGroup>
 

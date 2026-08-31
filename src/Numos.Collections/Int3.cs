@@ -1,4 +1,4 @@
-namespace Numos.Maths;
+namespace Numos.Collections;
 
 /// <summary>
 ///     3D integer datatype.

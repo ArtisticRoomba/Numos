@@ -2,7 +2,7 @@ using System.Numerics;
 using ImGuiNET;
 using Numos.API;
 using Numos.CoreSim;
-using Numos.Maths;
+using Numos.Collections;
 using Numos.Viewer.Ui;
 
 namespace Numos.Viewer;

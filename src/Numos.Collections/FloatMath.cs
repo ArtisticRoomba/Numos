@@ -1,4 +1,4 @@
-namespace Numos.Maths;
+namespace Numos.Collections;
 
 /// <summary>
 ///     Common operations for finite <see cref="float" /> values.

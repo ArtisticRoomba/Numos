@@ -1,5 +1,5 @@
 using System.Text.Json.Serialization;
-using Numos.Maths;
+using Numos.Collections;
 
 namespace Numos.Headless.Protocol;
 

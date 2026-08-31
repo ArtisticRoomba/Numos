@@ -1,5 +1,5 @@
 using System.Diagnostics;
-using Numos.Maths;
+using Numos.Collections;
 
 namespace Numos.CoreSim.Solvers;
 
