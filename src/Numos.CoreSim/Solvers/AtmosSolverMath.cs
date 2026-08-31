@@ -8,51 +8,13 @@ namespace Numos.CoreSim.Solvers;
 /// </summary>
 internal static class AtmosSolverMath
 {
-    internal static JoulePerMoleKelvin GetMolarHeatCapacity(AtmosConfig config, int gasId)
-    {
-        JoulePerMoleKelvin fallback = IsFinitePositive(config.DefaultMolarHeatCapacityAtConstantVolume)
-            ? config.DefaultMolarHeatCapacityAtConstantVolume
-            : AtmosConfigDefaults.DefaultMolarHeatCapacityAtConstantVolume;
-        if ((uint)gasId < (uint)config.GasRegistry.Count)
-        {
-            JoulePerMoleKelvin configured = config.GasRegistry[gasId].MolarHeatCapacityAtConstantVolume;
-            if (IsFinitePositive(configured))
-                return configured;
-        }
-
-        return fallback;
-    }
-
-    internal static CubicMetre GetVoxelVolume(AtmosConfig config)
-    {
-        return IsFinitePositive(config.VoxelVolume)
-            ? config.VoxelVolume
-            : AtmosConfigDefaults.VoxelVolume;
-    }
-
-    internal static Kelvin GetEffectiveTemperature(AtmosConfig config, Kelvin storedTemperature)
-    {
-        if (IsFinitePositive(storedTemperature))
-            return storedTemperature;
-
-        return IsFinitePositive(config.DefaultTemperatureFallback)
-            ? config.DefaultTemperatureFallback
-            : AtmosConfigDefaults.DefaultTemperatureFallback;
-    }
-
-    internal static Pascal CalculatePressure(AtmosConfig config, Mole moles, Kelvin temperature)
-    {
-        return MathF.Max(0f, moles) * GetEffectiveTemperature(config, temperature) *
-               (AtmosPhysicalConstants.MolarGasConstant / GetVoxelVolume(config));
-    }
-
-    internal static Pascal CalculatePressure(AtmosSolverConfigSnapshot config, Mole moles, Kelvin temperature)
+    internal static Pascal CalculatePressure(IAtmosConfig config, Mole moles, Kelvin temperature)
     {
         Debug.Assert(float.IsFinite(moles) && moles >= 0f);
         return moles * config.GetValidatedTemp(temperature) * config.PressurePerMoleKelvin;
     }
 
-    internal static Mole PressureToMoles(AtmosSolverConfigSnapshot config, Pascal pressure, Kelvin temperature)
+    internal static Mole PressureToMoles(IAtmosConfig config, Pascal pressure, Kelvin temperature)
     {
         if (pressure <= 0f || float.IsNaN(pressure))
             return 0f;
@@ -61,28 +23,28 @@ internal static class AtmosSolverMath
         return pressure / denominator;
     }
 
-    internal static Pascal CalculatePressureAtVoxel(AtmosSolverConfigSnapshot config, AtmosChunk chunk,
+    /// <summary>Recalculates a voxel pressure and clears values below the configured vacuum threshold.</summary>
+    internal static Pascal CalculatePressureAtVoxel(IAtmosConfig config, AtmosChunk chunk,
         ushort localVoxelIndex)
     {
-        Mole totalMoles = 0f;
-        for (var gas = 0; gas < chunk.ActiveGasCount; gas++)
-            totalMoles += chunk.ActiveGases[gas].Moles[localVoxelIndex];
+        Mole totalMoles = GetTotalMoles(chunk, localVoxelIndex);
+        if (totalMoles <= 0f)
+        {
+            chunk.SetVoxelToVacuum(localVoxelIndex);
+            return 0f;
+        }
 
-        return CalculatePressure(config, totalMoles, chunk.Temperature[localVoxelIndex]);
+        Pascal pressure = CalculatePressure(config, totalMoles, chunk.Temperature[localVoxelIndex]);
+        if (pressure < config.VacuumThreshold)
+        {
+            chunk.SetVoxelToVacuum(localVoxelIndex);
+            return 0f;
+        }
+
+        return pressure;
     }
 
-    /// <summary>Recalculates a voxel pressure using the normalized values in a live public configuration.</summary>
-    internal static Pascal CalculatePressureAtVoxel(AtmosConfig config, AtmosChunk chunk,
-        ushort localVoxelIndex)
-    {
-        Mole totalMoles = 0f;
-        for (var gas = 0; gas < chunk.ActiveGasCount; gas++)
-            totalMoles += chunk.ActiveGases[gas].Moles[localVoxelIndex];
-
-        return CalculatePressure(config, totalMoles, chunk.Temperature[localVoxelIndex]);
-    }
-
-    internal static JoulePerKelvin CalculateHeatCapacityAtVoxel(AtmosSolverConfigSnapshot config, AtmosChunk chunk,
+    internal static JoulePerKelvin CalculateHeatCapacityAtVoxel(IAtmosConfig config, AtmosChunk chunk,
         ushort localVoxelIndex)
     {
         JoulePerKelvin totalHeatCapacity = 0f;
@@ -157,5 +119,13 @@ internal static class AtmosSolverMath
     internal static bool IsFinitePositive(float value)
     {
         return float.IsFinite(value) && value > 0f;
+    }
+
+    internal static Mole GetTotalMoles(AtmosChunk chunk, ushort voxelIndex)
+    {
+        Mole totalMoles = 0f;
+        for (var gas = 0; gas < chunk.ActiveGasCount; gas++)
+            totalMoles += chunk.ActiveGases[gas].Moles[voxelIndex];
+        return totalMoles;
     }
 }

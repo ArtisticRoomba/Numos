@@ -27,7 +27,11 @@ public enum AtmosChunkSnapshotFields
     /// </summary>
     VoxelClassification = 1 << 3,
     /// <summary>
+    ///     Selects heat capacity values.
+    /// </summary>
+    TotalHeatCapacity = 1 << 4,
+    /// <summary>
     ///     Selects every detached field.
     /// </summary>
-    All = Pressure | Temperature | Gases | VoxelClassification
+    All = Pressure | Temperature | Gases | VoxelClassification | TotalHeatCapacity
 }

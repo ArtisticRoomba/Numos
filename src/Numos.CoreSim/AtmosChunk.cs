@@ -424,6 +424,22 @@ internal class AtmosChunk
         MarkChanged();
     }
 
+
+    /// <summary>
+    ///     Sets a specific voxel to a vacuum. This sets TotalPressure, ActiveGases, and TotalHeatCapacity to 0 and IsVacuum to true.
+    /// </summary>
+    /// <param name="idx">Index of voxel</param>
+    [PublicAPI]
+    public void SetVoxelToVacuum(ushort idx)
+    {
+        TotalPressure[idx] = 0f;
+        for (var g = 0; g < ActiveGasCount; g++)
+        {
+            ActiveGases[g].Moles[idx] = 0f;
+        }
+        TotalHeatCapacity[idx] = 0f;
+    }
+
     internal int GetOrCreateGasChannel(int gasId)
     {
         for (var index = 0; index < ActiveGasCount; index++)
@@ -468,6 +484,9 @@ internal class AtmosChunk
                 : [],
             Temperature = fields.HasFlag(AtmosChunkSnapshotFields.Temperature)
                 ? Temperature.ToArray()
+                : [],
+            TotalHeatCapacity = fields.HasFlag(AtmosChunkSnapshotFields.TotalHeatCapacity)
+                ? TotalHeatCapacity.ToArray()
                 : [],
             Gases = fields.HasFlag(AtmosChunkSnapshotFields.Gases)
                 ? new GasSnapshot[ActiveGasCount]

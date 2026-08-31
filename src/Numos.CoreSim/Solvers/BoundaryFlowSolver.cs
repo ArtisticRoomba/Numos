@@ -154,8 +154,8 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
 
         if (sourceChunk.TotalHeatCapacity[sourceIndex] > 0f)
             sourceChunk.Temperature[sourceIndex] = sourceTemperature;
-        sourceChunk.TotalPressure[sourceIndex] = AtmosSolverMath.CalculatePressure(
-            config, GetTotalMoles(sourceChunk, sourceIndex), sourceTemperature);
+        sourceChunk.TotalPressure[sourceIndex] = AtmosSolverMath.CalculatePressureAtVoxel(
+            config, sourceChunk, sourceIndex);
         // Intra-chunk sleep detection cannot see cross-chunk gradients. A boundary transfer therefore keeps
         // its source eligible for the next tick, just as injection keeps the target awake.
         sourceChunk.IsAwake = true;

@@ -14,13 +14,14 @@ public sealed class DimensionalAnalysisIntegrationTests
         Type chunkType = assembly.GetType("Numos.CoreSim.AtmosChunk", true)!;
         Type gasChannelType = assembly.GetType("Numos.CoreSim.GasChannel", true)!;
         Type solverMathType = assembly.GetType("Numos.CoreSim.Solvers.AtmosSolverMath", true)!;
+        Type configType = assembly.GetType("Numos.CoreSim.IAtmosConfig", true)!;
 
         FieldInfo temperature = chunkType.GetField("Temperature")!;
         FieldInfo pressure = chunkType.GetField("TotalPressure")!;
         FieldInfo moles = gasChannelType.GetField("Moles")!;
         MethodInfo calculatePressure = solverMathType.GetMethods(BindingFlags.Static | BindingFlags.NonPublic)
             .Single(method => method.Name == "CalculatePressure" &&
-                              method.GetParameters().First().ParameterType == typeof(AtmosConfig));
+                              method.GetParameters().First().ParameterType == configType);
 
         Assert.Multiple(() =>
         {
@@ -29,7 +30,7 @@ public sealed class DimensionalAnalysisIntegrationTests
             Assert.That(moles.FieldType, Is.EqualTo(typeof(float[])));
             Assert.That(calculatePressure.ReturnType, Is.EqualTo(typeof(float)));
             Assert.That(calculatePressure.GetParameters().Select(parameter => parameter.ParameterType),
-                Is.EqualTo(new[] { typeof(AtmosConfig), typeof(float), typeof(float) }));
+                Is.EqualTo(new[] { configType, typeof(float), typeof(float) }));
         });
     }
 

@@ -1,11 +1,13 @@
 using Numos.Units;
+using Numos.CoreSim.Solvers;
+using Numos.Maths;
 
 namespace Numos.CoreSim;
 
 /// <summary>
 ///     Configuration values for the simulation.
 /// </summary>
-public class AtmosConfig
+public class AtmosConfig : IAtmosConfig
 {
     /// <summary>
     ///     List of gases actively registered to the sim.
@@ -143,4 +145,49 @@ public class AtmosConfig
     ///     Maximum number of ticks that an accumulated activity value remains alive.
     /// </summary>
     public int AccumulatorMaxAliveTicks { get; set; } = AtmosConfigDefaults.AccumulatorMaxAliveTicks;
+
+    public PascalPerMoleKelvin PressurePerMoleKelvin =>
+        AtmosPhysicalConstants.MolarGasConstant / GetVoxelVolume();
+
+    public Kelvin GetValidatedTemp(Kelvin storedTemperature) =>
+        FloatMath.IsFinitePositive(storedTemperature) ? storedTemperature : DefaultTemperatureFallback;
+
+    public CubicMetre GetVoxelVolume()
+    {
+        return FloatMath.IsFinitePositive(VoxelVolume)
+            ? VoxelVolume
+            : AtmosConfigDefaults.VoxelVolume;
+    }
+
+    public JoulePerMoleKelvin GetMolarHeatCapacityAtConstantVolume(int gasId)
+    {
+        JoulePerMoleKelvin fallback = AtmosSolverMath.IsFinitePositive(DefaultMolarHeatCapacityAtConstantVolume)
+            ? DefaultMolarHeatCapacityAtConstantVolume
+            : AtmosConfigDefaults.DefaultMolarHeatCapacityAtConstantVolume;
+        if ((uint)gasId < (uint)GasRegistry.Count)
+        {
+            JoulePerMoleKelvin configured = GasRegistry[gasId].MolarHeatCapacityAtConstantVolume;
+            if (AtmosSolverMath.IsFinitePositive(configured))
+                return configured;
+        }
+
+        return fallback;
+    }
+
+    public Scalar GetDiffusionCoefficient(int gasId) =>
+        (uint)gasId < (uint)GasRegistry.Count
+            ? FloatMath.ClampUnitInterval(GasRegistry[gasId].DiffusionCoefficient)
+            : FloatMath.ClampUnitInterval(DefaultDiffusionCoefficient);
+
+    public bool TryGetGasProperties(int gasId, out GasProperties properties)
+    {
+        if ((uint)gasId < (uint)GasRegistry.Count)
+        {
+            properties = GasRegistry[gasId];
+            return true;
+        }
+
+        properties = default;
+        return false;
+    }
 }
