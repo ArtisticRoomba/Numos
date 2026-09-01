@@ -12,6 +12,14 @@ namespace Numos.CoreSim.Solvers;
 internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
 {
     private readonly ThreadLocal<BoundaryFlowEvent[]> _boundaryBuffers;
+
+    // Per-thread scratch buffers holding the resolved neighbor set (index + void flag) for
+    // every active voxel in the chunk currently being solved. Populated once per chunk, per
+    // tick, and reused by AccumulateBulkConductance, ProcessBulkNeighbors, and
+    // ProcessDiffusionNeighbors, instead of each of those independently repeating the
+    // position-addition + bounds-check + room-classification work per neighbor.
+    private readonly ThreadLocal<NeighborCache> _neighborCaches;
+
     private readonly Action _clearBoundaryEvents;
     private readonly Action<int, Int3, BoundaryFlowEvent> _enqueueBoundaryEvent;
 
@@ -25,6 +33,11 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
         Int3.NegZ, Int3.PosZ
     ];
 
+    // NOTE: ResolveNeighbors hardcodes this exact direction order
+    // (NegX, PosX, NegY, PosY, NegZ, PosZ) as scalar bounds checks for
+    // performance. If these arrays change, ResolveNeighbors must change to match.
+    private static readonly int NeighborSlots = HorizontalNeighbors.Length + VerticalNeighbors.Length;
+
     internal AdvectionSolver(
         int maximumBoundaryEvents, Action clearBoundaryEvents,
         Action<int, Int3, BoundaryFlowEvent> enqueueBoundaryEvent)
@@ -32,6 +45,7 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
         _clearBoundaryEvents = clearBoundaryEvents;
         _enqueueBoundaryEvent = enqueueBoundaryEvent;
         _boundaryBuffers = new ThreadLocal<BoundaryFlowEvent[]>(() => new BoundaryFlowEvent[maximumBoundaryEvents]);
+        _neighborCaches = new ThreadLocal<NeighborCache>(() => new NeighborCache());
     }
 
     public void Solve(AtmosSolverExecutionContext context)
@@ -43,6 +57,7 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
     public void Dispose()
     {
         _boundaryBuffers.Dispose();
+        _neighborCaches.Dispose();
     }
 
     private void SolveChunk(AtmosSolverExecutionContext context, AtmosChunk chunk)
@@ -57,10 +72,25 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
         // Advection and Diffusion done separately
         // This prevents any weirdness with them interacting
         // This does mean that gas can move 2 voxels in one tick
-        // TODO Diffusion should maybe not be separate at this tier, either its own solver or sharing some memory with advection
-        // Diffusion could be ran every other tick as it is small gas movements
-        Advect(chunk, context.TickConfig, boundaryBuffer, ref boundaryCount);
-        Diffuse(chunk, context.TickConfig);
+        //
+        // Neighbor geometry (which neighbors exist, and whether each is solid/void) is
+        // invariant for the whole tick, so it's resolved once here and shared by advection's
+        // conductance accumulation, advection's transfer pass, and diffusion below.
+        if (chunk.ActiveGasCount > 0)
+        {
+            NeighborCache cache = _neighborCaches.Value!;
+            cache.EnsureCapacity(chunk.ActiveAirCount);
+            ResolveAllNeighbors(chunk, cache);
+
+            Advect(chunk, context.TickConfig, boundaryBuffer, ref boundaryCount, cache);
+            Diffuse(chunk, context.TickConfig, cache);
+        }
+        else
+        {
+            // Nothing for advection/diffusion to do, but sleep state still needs evaluating
+            // every tick for an awake chunk (matches Advect's unconditional call to this below).
+            UpdateSleepState(chunk, context.TickConfig, 0f);
+        }
 
         for (int index = 0; index < boundaryCount; index++)
             _enqueueBoundaryEvent(context.TickCount, chunk.GridPosition, boundaryBuffer[index]);
@@ -68,33 +98,31 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
 
     private static void Advect(
         AtmosChunk chunk, AtmosSolverConfigSnapshot config,
-        BoundaryFlowEvent[] boundaryBuffer, ref int boundaryEventCount)
+        BoundaryFlowEvent[] boundaryBuffer, ref int boundaryEventCount, NeighborCache cache)
     {
         Pascal maximumPressureDelta = 0f;
-        if (chunk.ActiveGasCount > 0)
-        {
-            // Recalc every voxels pressure and heat capacity
-            RefreshPressureAndHeatCapacity(chunk, config);
-            ProcessBulkAdvection(
-                chunk,
-                config,
-                boundaryBuffer,
-                ref boundaryEventCount,
-                ref maximumPressureDelta);
-        }
+        // Recalc every voxels pressure and heat capacity
+        RefreshPressureAndHeatCapacity(chunk, config);
+        ProcessBulkAdvection(
+            chunk,
+            config,
+            boundaryBuffer,
+            ref boundaryEventCount,
+            ref maximumPressureDelta,
+            cache);
         // If maximumPressureDelta above threshold add to sleep timer
         UpdateSleepState(chunk, config, maximumPressureDelta);
     }
 
-    private static void Diffuse(AtmosChunk chunk, AtmosSolverConfigSnapshot config)
+    private static void Diffuse(AtmosChunk chunk, AtmosSolverConfigSnapshot config, NeighborCache cache)
     {
-        if (chunk.ActiveGasCount > 0)
-            ProcessDiffusion(chunk, config);
+        ProcessDiffusion(chunk, config, cache);
     }
 
     private static void ProcessBulkAdvection(
         AtmosChunk chunk, AtmosSolverConfigSnapshot config,
-        BoundaryFlowEvent[] boundaryBuffer, ref int boundaryEventCount, ref Pascal maximumPressureDelta)
+        BoundaryFlowEvent[] boundaryBuffer, ref int boundaryEventCount, ref Pascal maximumPressureDelta,
+        NeighborCache cache)
     {
         int activeGasCount = chunk.ActiveGasCount;
         // Arrays using this are effectively a 2d matrix with gasses and voxels being the axis but stretched into a 1d array.
@@ -118,7 +146,7 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
         try
         {
             ComputeCapacitance(chunk, capacitance);
-            AccumulateBulkConductance(chunk, config, capacitance, incidentBulkConductance);
+            AccumulateBulkConductance(chunk, config, capacitance, incidentBulkConductance, cache);
 
             for (int activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
             {
@@ -134,17 +162,15 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
                 if (totalMoles <= 0f)
                     continue;
 
-                Int3 position = chunk.GetXyzInt3(voxelIndex);
-
                 // This skips over voxel pairs which are going outside the chunk
                 // This only finds the mole change and energy change
                 // This does not mutate the chunk at all
-                ProcessBulkNeighbors(chunk, config, position, voxelIndex, currentPressure, totalMoles,
+                ProcessBulkNeighbors(chunk, config, voxelIndex, currentPressure, totalMoles,
                     capacitance, incidentBulkConductance, ref maximumPressureDelta, moleDeltas,
-                    energyDeltas);
+                    energyDeltas, cache, activeIndex);
 
                 // This gets all the pairs which are going outside the chunk
-                TryAppendBoundaryEvent(chunk, position, voxelIndex, boundaryBuffer, ref boundaryEventCount);
+                TryAppendBoundaryEvent(chunk, cache.Positions[activeIndex], voxelIndex, boundaryBuffer, ref boundaryEventCount);
             }
 
             // Applies the mole change and energy change to each voxel once accumulated
@@ -159,7 +185,7 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
         }
     }
 
-    private static void ProcessDiffusion(AtmosChunk chunk, AtmosSolverConfigSnapshot config)
+    private static void ProcessDiffusion(AtmosChunk chunk, AtmosSolverConfigSnapshot config, NeighborCache cache)
     {
         int activeGasCount = chunk.ActiveGasCount;
         // Arrays using this are effectively a 2d matrix with gasses and voxels being the axis but stretched into a 1d array.
@@ -170,15 +196,13 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
         // Energy change comes from thermal energy transfer
         // This is how hot moles moving into a neighboring voxel heat up that voxel
         Joule64[] energyDeltas = ArrayPool<Joule64>.Shared.Rent(chunk.VoxelCount);
-        ushort[] neighbors = ArrayPool<ushort>.Shared.Rent(6);
-        Array.Clear(neighbors, 0, 6);
         Array.Clear(moleDeltas, 0, moleDeltaLength);
         Array.Clear(energyDeltas, 0, chunk.VoxelCount);
 
         try
         {
             // This is Area/Distance between voxels
-            float dx = MathF.Pow(config.VoxelVolume, 1f/3f);
+            float dx = MathF.Pow(config.VoxelVolume, 1f / 3f);
             for (var activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
             {
                 // This only accumulates outflows
@@ -187,9 +211,8 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
                 if (chunk.TotalPressure[voxelIndex] <= 0f)
                     continue;
 
-                Int3 position = chunk.GetXyzInt3(voxelIndex);
                 // This does not mutate the chunk at all
-                ProcessDiffusionNeighbors(chunk, config, position, voxelIndex, moleDeltas, energyDeltas, neighbors, dx);
+                ProcessDiffusionNeighbors(chunk, config, voxelIndex, moleDeltas, energyDeltas, cache, activeIndex, dx);
             }
 
             // Applies the mole change and energy change to each voxel once accumulated
@@ -197,7 +220,6 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
         }
         finally
         {
-            ArrayPool<ushort>.Shared.Return(neighbors);
             ArrayPool<Joule64>.Shared.Return(energyDeltas);
             ArrayPool<Mole>.Shared.Return(moleDeltas);
         }
@@ -224,13 +246,14 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
         }
     }
 
-    private static void AccumulateBulkConductance(AtmosChunk chunk, AtmosSolverConfigSnapshot config, MolePerPascal[] capacitance, MolePerPascal[] incidentBulkConductance)
+    private static void AccumulateBulkConductance(
+        AtmosChunk chunk, AtmosSolverConfigSnapshot config,
+        MolePerPascal[] capacitance, MolePerPascal[] incidentBulkConductance,
+        NeighborCache cache)
     {
         for (var activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
         {
             ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
-
-            Int3 position = chunk.GetXyzInt3(voxelIndex);
 
             // Skips voxels with no capacitance
             // Important:
@@ -240,23 +263,17 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
             if (capacitance[voxelIndex] == 0f)
                 continue;
 
-            foreach (var offset in HorizontalNeighbors)
+            int slotBase = activeIndex * NeighborSlots;
+            int neighborCount = cache.Counts[activeIndex];
+            for (int n = 0; n < neighborCount; n++)
             {
-                AccumulateBulkConductanceEdge(chunk, config, position + offset, voxelIndex, incidentBulkConductance);
-            }
-
-            if (chunk.Depth <= 1)
-                return;
-
-            foreach (var offset in VerticalNeighbors)
-            {
-                AccumulateBulkConductanceEdge(chunk, config, position + offset, voxelIndex, incidentBulkConductance);
+                ushort neighborIndex = cache.Indices[slotBase + n];
+                bool isVoid = cache.IsVoid[slotBase + n];
+                AccumulateBulkConductanceEdge(chunk, config, neighborIndex, isVoid, voxelIndex, incidentBulkConductance);
             }
 
             // Adds itself as a draw of pressure
             // This means when splitting pressure it is included, avoiding cases where it over shoots the equilibrium
-            // TODO PERF
-            // This can for sure be simplified
             Pascal bulkPressureTransfer = AtmosSolverMath.CalculateBulkPressureTransfer(config, chunk.TotalPressure[voxelIndex]);
             Kelvin upstreamTemperature = config.GetValidatedTemp(chunk.Temperature[voxelIndex]);
             Mole advectedMoles = AtmosSolverMath.PressureToMoles(config, bulkPressureTransfer, upstreamTemperature);
@@ -265,18 +282,10 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
         }
     }
 
-    private static void AccumulateBulkConductanceEdge(AtmosChunk chunk, AtmosSolverConfigSnapshot config,
-        Int3 neighborPosition, ushort voxelIndex, MolePerPascal[] incidentBulkConductance)
+    private static void AccumulateBulkConductanceEdge(
+        AtmosChunk chunk, AtmosSolverConfigSnapshot config,
+        ushort neighborIndex, bool isVoid, ushort voxelIndex, MolePerPascal[] incidentBulkConductance)
     {
-        if (!neighborPosition.IsWithin(chunk.Dimensions))
-            return;
-
-        ushort neighborIndex = chunk.GetIndex(neighborPosition);
-        int neighborRoom = chunk.VoxelRoomMap[neighborIndex];
-        if (neighborRoom == VoxelClassification.RoomSolid)
-            return;
-
-        bool isVoid = neighborRoom == VoxelClassification.RoomVoid;
         Pascal currentPressure = chunk.TotalPressure[voxelIndex];
         Pascal neighborPressure = isVoid ? 0f : chunk.TotalPressure[neighborIndex];
         Pascal pressureDelta = currentPressure - neighborPressure;
@@ -286,9 +295,6 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
         ushort upstreamIndex = pressureDelta > 0f ? voxelIndex : neighborIndex;
         Pascal absPressureDelta = MathF.Abs(pressureDelta);
 
-        // TODO PERF
-        // This looks like it can be simplified.
-        // Right now it is a copy of CheckNeighborBulk
         Pascal bulkPressureTransfer = AtmosSolverMath.CalculateBulkPressureTransfer(config, absPressureDelta);
         if (bulkPressureTransfer <= 0f)
             return;
@@ -305,45 +311,30 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
 
     private static void ProcessBulkNeighbors(
         AtmosChunk chunk, AtmosSolverConfigSnapshot config,
-        Int3 position, ushort voxelIndex, Pascal currentPressure, Mole totalMoles,
+        ushort voxelIndex, Pascal currentPressure, Mole totalMoles,
         MolePerPascal[] capacitance, MolePerPascal[] incidentBulkConductance, ref Pascal maximumPressureDelta,
-        Mole[] moleDeltas, Joule64[] energyDeltas)
+        Mole[] moleDeltas, Joule64[] energyDeltas, NeighborCache cache, int activeIndex)
     {
-        foreach (var offset in HorizontalNeighbors)
-        {
-            CheckNeighborBulk(chunk, config, position + offset, voxelIndex, currentPressure, totalMoles,
-            capacitance, incidentBulkConductance, ref maximumPressureDelta, moleDeltas, energyDeltas);
-        }
+        int slotBase = activeIndex * NeighborSlots;
+        int neighborCount = cache.Counts[activeIndex];
 
-        if (chunk.Depth <= 1)
-            return;
-
-        foreach (var offset in VerticalNeighbors)
+        for (int n = 0; n < neighborCount; n++)
         {
-            CheckNeighborBulk(chunk, config, position + offset, voxelIndex, currentPressure, totalMoles,
-            capacitance, incidentBulkConductance, ref maximumPressureDelta, moleDeltas, energyDeltas);
+            ushort neighborIndex = cache.Indices[slotBase + n];
+            bool isVoid = cache.IsVoid[slotBase + n];
+            CheckNeighborBulk(chunk, config, neighborIndex, isVoid, voxelIndex, currentPressure, totalMoles,
+                capacitance, incidentBulkConductance, ref maximumPressureDelta, moleDeltas, energyDeltas);
         }
     }
 
     private static void CheckNeighborBulk(
         AtmosChunk chunk, AtmosSolverConfigSnapshot config,
-        Int3 neighborPosition, ushort voxelIndex, Pascal currentPressure, Mole totalMoles,
+        ushort neighborIndex, bool isVoid, ushort voxelIndex, Pascal currentPressure, Mole totalMoles,
         MolePerPascal[] capacitance, MolePerPascal[] incidentBulkConductance, ref Pascal maximumPressureDelta,
         Mole[] moleDeltas, Joule64[] energyDeltas)
     {
-        if (!neighborPosition.IsWithin(chunk.Dimensions))
-            return;
-
-        ushort neighborIndex = chunk.GetIndex(neighborPosition);
-        int neighborRoom = chunk.VoxelRoomMap[neighborIndex];
-
-        // No pressure transfer to the walls
-        if (neighborRoom == VoxelClassification.RoomSolid)
-            return;
-
         // Pressure transfer to void is lost
         // Void has 0 pressure
-        bool isVoid = neighborRoom == VoxelClassification.RoomVoid;
         Pascal neighborPressure = isVoid ? 0f : chunk.TotalPressure[neighborIndex];
 
         Pascal pressureDelta = currentPressure - neighborPressure;
@@ -425,47 +416,13 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
         energyDeltas[neighborIndex] += neighborEnergyAdded;
     }
 
-    private static void ProcessDiffusionNeighbors(AtmosChunk chunk, AtmosSolverConfigSnapshot config,
-        Int3 position, ushort voxelIndex, Mole[] moleDeltas, Joule64[] energyDeltas, ushort[] neighbors, float dx)
+    private static void ProcessDiffusionNeighbors(
+        AtmosChunk chunk, AtmosSolverConfigSnapshot config,
+        ushort voxelIndex, Mole[] moleDeltas, Joule64[] energyDeltas,
+        NeighborCache cache, int activeIndex, float dx)
     {
-        Span<bool> neighborIsVoid = stackalloc bool[neighbors.Length];
-        int validCount = 0;
-
-        for (var i = 0; i < HorizontalNeighbors.Length; i++)
-        {
-            var neighborPosition = position + HorizontalNeighbors[i];
-            if (!neighborPosition.IsWithin(chunk.Dimensions))
-                continue;
-
-            ushort neighborIndex = chunk.GetIndex(neighborPosition);
-            int neighborRoom = chunk.VoxelRoomMap[neighborIndex];
-            if (neighborRoom == VoxelClassification.RoomSolid)
-                return;
-
-            neighbors[validCount] = neighborIndex;
-            neighborIsVoid[validCount] = neighborRoom == VoxelClassification.RoomVoid;
-            validCount++;
-        }
-
-        if (chunk.Depth > 1)
-        {
-            for (var i = 0; i < VerticalNeighbors.Length; i++)
-            {
-                var neighborPosition = position + VerticalNeighbors[i];
-                if (!neighborPosition.IsWithin(chunk.Dimensions))
-                    continue;
-
-                ushort neighborIndex = chunk.GetIndex(neighborPosition);
-                int neighborRoom = chunk.VoxelRoomMap[neighborIndex];
-                if (neighborRoom == VoxelClassification.RoomSolid)
-                    continue;
-
-                neighbors[validCount] = neighborIndex;
-                neighborIsVoid[validCount] = neighborRoom == VoxelClassification.RoomVoid;
-                validCount++;
-            }
-        }
-
+        int slotBase = activeIndex * NeighborSlots;
+        int validCount = cache.Counts[activeIndex];
         if (validCount == 0)
             return;
 
@@ -502,14 +459,95 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
 
             for (int n = 0; n < validCount; n++)
             {
-                if (neighborIsVoid[n])
+                if (cache.IsVoid[slotBase + n])
                     continue;
 
-                var neighborIndex = neighbors[n];
+                ushort neighborIndex = cache.Indices[slotBase + n];
                 moleDeltas[deltaOffset + neighborIndex] += molesDiffused;
                 energyDeltas[neighborIndex] += energyTransferred;
             }
         }
+    }
+
+    /// <summary>
+    ///     Resolves the valid (non-solid) neighbors of every active voxel in the chunk exactly
+    ///     once, writing each voxel's local position and its resolved neighbor set into
+    ///     <paramref name="cache"/> for reuse by the advection and diffusion passes.
+    /// </summary>
+    private static void ResolveAllNeighbors(AtmosChunk chunk, NeighborCache cache)
+    {
+        int activeAirCount = chunk.ActiveAirCount;
+        for (int activeIndex = 0; activeIndex < activeAirCount; activeIndex++)
+        {
+            ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
+            Int3 position = chunk.GetXyzInt3(voxelIndex);
+            cache.Positions[activeIndex] = position;
+            cache.Counts[activeIndex] = ResolveNeighbors(
+                chunk, position, cache.Indices, cache.IsVoid, activeIndex * NeighborSlots);
+        }
+    }
+
+    /// <summary>
+    ///     Resolves one voxel's neighbors. Each direction is a fixed unit-axis offset, so this
+    ///     uses a single scalar bounds check per direction instead of a generic Int3 addition +
+    ///     IsWithin check, and only constructs the neighbor Int3 once a direction is already
+    ///     known to be in bounds. A solid neighbor is simply excluded from the resolved set.
+    /// </summary>
+    private static int ResolveNeighbors(
+        AtmosChunk chunk, Int3 position,
+        ushort[] neighborIndexBuffer, bool[] neighborIsVoidBuffer, int slotBase)
+    {
+        int count = 0;
+        int x = position.X;
+        int y = position.Y;
+        int z = position.Z;
+
+        if (x > 0 && TryClassifyNeighbor(chunk, new Int3(x - 1, y, z), out var negXIndex, out var negXVoid))
+            AppendNeighbor(neighborIndexBuffer, neighborIsVoidBuffer, slotBase, ref count, negXIndex, negXVoid);
+
+        if (x < chunk.Width - 1 && TryClassifyNeighbor(chunk, new Int3(x + 1, y, z), out var posXIndex, out var posXVoid))
+            AppendNeighbor(neighborIndexBuffer, neighborIsVoidBuffer, slotBase, ref count, posXIndex, posXVoid);
+
+        if (y > 0 && TryClassifyNeighbor(chunk, new Int3(x, y - 1, z), out var negYIndex, out var negYVoid))
+            AppendNeighbor(neighborIndexBuffer, neighborIsVoidBuffer, slotBase, ref count, negYIndex, negYVoid);
+
+        if (y < chunk.Height - 1 && TryClassifyNeighbor(chunk, new Int3(x, y + 1, z), out var posYIndex, out var posYVoid))
+            AppendNeighbor(neighborIndexBuffer, neighborIsVoidBuffer, slotBase, ref count, posYIndex, posYVoid);
+
+        if (chunk.Depth > 1)
+        {
+            if (z > 0 && TryClassifyNeighbor(chunk, new Int3(x, y, z - 1), out var negZIndex, out var negZVoid))
+                AppendNeighbor(neighborIndexBuffer, neighborIsVoidBuffer, slotBase, ref count, negZIndex, negZVoid);
+
+            if (z < chunk.Depth - 1 && TryClassifyNeighbor(chunk, new Int3(x, y, z + 1), out var posZIndex, out var posZVoid))
+                AppendNeighbor(neighborIndexBuffer, neighborIsVoidBuffer, slotBase, ref count, posZIndex, posZVoid);
+        }
+
+        return count;
+    }
+
+    private static bool TryClassifyNeighbor(AtmosChunk chunk, Int3 neighborPosition, out ushort neighborIndex, out bool isVoid)
+    {
+        neighborIndex = chunk.GetIndex(neighborPosition);
+        int neighborRoom = chunk.VoxelRoomMap[neighborIndex];
+
+        // No pressure/mole transfer to the walls - exclude from the resolved set entirely.
+        if (neighborRoom == VoxelClassification.RoomSolid)
+        {
+            isVoid = false;
+            return false;
+        }
+
+        isVoid = neighborRoom == VoxelClassification.RoomVoid;
+        return true;
+    }
+
+    private static void AppendNeighbor(
+        ushort[] indexBuffer, bool[] voidBuffer, int slotBase, ref int count, ushort index, bool isVoid)
+    {
+        indexBuffer[slotBase + count] = index;
+        voidBuffer[slotBase + count] = isVoid;
+        count++;
     }
 
     private static void RefreshPressureAndHeatCapacity(AtmosChunk chunk, AtmosSolverConfigSnapshot config)
@@ -628,5 +666,37 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
         chunk.SleepTimer++;
         if (chunk.SleepTimer > config.SleepThreshold)
             chunk.Sleep();
+    }
+
+    /// <summary>
+    ///     Per-thread scratch buffers holding one tick's resolved neighbor geometry for a
+    ///     chunk's active air voxels. Grows on demand and is reused across chunks/ticks
+    ///     processed by the owning thread, avoiding both per-tick allocation and the
+    ///     ArrayPool rent/return churn a fresh buffer set would otherwise incur every tick.
+    /// </summary>
+    private sealed class NeighborCache
+    {
+        public ushort[] Indices = [];
+        public bool[] IsVoid = [];
+        public int[] Counts = [];
+        public Int3[] Positions = [];
+
+        public void EnsureCapacity(int activeAirCount)
+        {
+            if (Counts.Length < activeAirCount)
+            {
+                int newCount = Math.Max(activeAirCount, Counts.Length * 2);
+                Counts = new int[newCount];
+                Positions = new Int3[newCount];
+            }
+
+            int requiredSlots = activeAirCount * NeighborSlots;
+            if (Indices.Length < requiredSlots)
+            {
+                int newSlotCount = Math.Max(requiredSlots, Indices.Length * 2);
+                Indices = new ushort[newSlotCount];
+                IsVoid = new bool[newSlotCount];
+            }
+        }
     }
 }
