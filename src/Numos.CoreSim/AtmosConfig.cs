@@ -16,8 +16,13 @@ public class AtmosConfig : IAtmosConfig
     /// </summary>
     public List<GasProperties> GasRegistry { get; set; } = [];
 
+    /// <summary>
+    /// List of gas reactions using a more efficient but less realistic linear model for rate speed.
+    /// </summary>
     public List<LinearGasReaction> LinearGasReactions { get; set; } = [];
-
+    /// <summary>
+    /// List of gas reactions using the standard rate law.
+    /// </summary>
     public List<StandardGasReaction> StandardGasReactions { get; set; } = [];
 
     /// <summary>

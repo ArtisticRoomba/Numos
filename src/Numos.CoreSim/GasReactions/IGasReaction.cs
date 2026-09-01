@@ -3,7 +3,7 @@ using System.Collections.Frozen;
 namespace Numos.CoreSim.GasReactions;
 
 /// <summary>
-/// Description of a reaction within a solver.
+/// Description of a reaction within the solver.
 /// </summary>
 public interface IGasReaction
 {
@@ -19,7 +19,7 @@ public interface IGasReaction
     /// <summary>
     /// Calculates the reaction speed (Mol/L/s) given a molarityVector (aligned to gas ids) and a temperature value
     /// </summary>
-    /// <param name="molarityVector">Index = GasId, length = number of gases</param>
+    /// <param name="molarityVector">Index = GasId</param>
     /// <param name="temperature"></param>
     /// <returns></returns>
     public PerSecond GetReactionSpeed(Mole[] molarityVector, Kelvin temperature);

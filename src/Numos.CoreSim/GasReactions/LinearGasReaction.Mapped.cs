@@ -5,39 +5,42 @@ namespace Numos.CoreSim.GasReactions;
 
 public readonly partial record struct LinearGasReaction
 {
+    /// <summary>
+    /// The lookup optimized version of a linear gas reaction.
+    /// </summary>
     internal readonly record struct Mapped : IGasReaction
     {
+        /// <summary>
+        /// Setup the wrapping
+        /// </summary>
+        /// <param name="original">The Gas Reaction to wrap</param>
+        /// <param name="properties">The reference of gas properties to derive the gas ids from.</param>
         public Mapped(LinearGasReaction original, IList<GasProperties> properties)
         {
             Original = original;
 
-            MappedInputs = original.Input.ToFrozenDictionary(e => properties.IndexOf(e.Key), e => e.Value);
-            MappedOutputs = original.Output.ToFrozenDictionary(e => properties.IndexOf(e.Key), e => e.Value);
+            var mappedInputs = original.Input.ToFrozenDictionary(e => properties.IndexOf(e.Key), e => e.Value);
+            var mappedOutputs = original.Output.ToFrozenDictionary(e => properties.IndexOf(e.Key), e => e.Value);
             MappedFactors = original.SpeedFactors.Select(e => new Factor(e, properties)).ToFrozenSet();
 
             var changeEquation = new Dictionary<int, float>();
-            foreach (var gas in MappedInputs.Keys.Concat(MappedOutputs.Keys).Distinct())
-                changeEquation[gas] = MappedOutputs.GetValueOrDefault(gas) - MappedInputs.GetValueOrDefault(gas);
+            foreach (var gas in mappedInputs.Keys.Concat(mappedOutputs.Keys).Distinct())
+                changeEquation[gas] = mappedOutputs.GetValueOrDefault(gas) - mappedInputs.GetValueOrDefault(gas);
 
             changeEquation[properties.Count] = original.EnergyBalance;
 
             ChangeEquation = changeEquation.ToFrozenDictionary();
         }
 
-        public FrozenDictionary<int, float> MappedInputs { get; }
+        private LinearGasReaction Original { get; }
+        
+        private FrozenSet<Factor> MappedFactors { get; }
 
-        public FrozenDictionary<int, float> MappedOutputs { get; }
-
-        public LinearGasReaction Original { get; }
-
-        /// <summary>
-        ///     foreach
-        /// </summary>
-        public FrozenSet<Factor> MappedFactors { get; }
-
+        /// <inheritdoc/>
         public FrozenDictionary<int, float> ChangeEquation { get; }
+        /// <inheritdoc/>
         public float EnergyBalance => Original.EnergyBalance;
-
+        /// <inheritdoc/>
         public float GetReactionSpeed(float[] molarityVector, float temperature)
         {
             var result = Original.GetRateConstantForTemperature(temperature);
@@ -66,7 +69,10 @@ public readonly partial record struct LinearGasReaction
             return result;
         }
 
-        public readonly record struct Factor
+        /// <summary>
+        /// A wrapper for factor
+        /// </summary>
+        private readonly record struct Factor
         {
             public Factor(LinearSpeedFactor original, IList<GasProperties> properties)
             {

@@ -10,7 +10,8 @@ namespace Numos.CoreSim.GasReactions;
 /// </summary>
 public readonly partial record struct StandardGasReaction
 {
-    public StandardGasReaction(IDictionary<GasProperties, float> input, IDictionary<GasProperties, float> output,
+    public StandardGasReaction(
+        IDictionary<GasProperties, float> input, IDictionary<GasProperties, float> output,
         float energyBalance, float arrheniusFactor, float activationEnergy,
         IDictionary<GasProperties, float> speedFactors)
     {
@@ -26,35 +27,35 @@ public readonly partial record struct StandardGasReaction
     ///     Input reactants.
     ///     Mol per Reaction
     /// </summary>
-    public FrozenDictionary<GasProperties, float> Input { get; }
+    private FrozenDictionary<GasProperties, Mole> Input { get; }
 
     /// <summary>
     ///     Output reactants
     ///     Mol per Reaction
     /// </summary>
-    public FrozenDictionary<GasProperties, float> Output { get; }
+    private FrozenDictionary<GasProperties, Mole> Output { get; }
 
     /// <summary>
     ///     If this reaction consumes or produces thermal energy.
     ///     In Joules per Reaction
     /// </summary>
-    public float EnergyBalance { get; }
+    private Joule EnergyBalance { get; }
 
     /// <summary>
     ///     Arrhenius factor
     /// </summary>
-    public float ArrheniusFactor { get; }
+    private float ArrheniusFactor { get; }
 
     /// <summary>
     ///     Molar activation energy kJ/mol
     /// </summary>
-    public float ActivationEnergy { get; }
+    private JoulePerMole ActivationEnergy { get; }
 
     /// <summary>
     ///     The exponents of the rate equation:
     ///     k * Gas_1^{a} * Gas_2 ^ {b}...
     /// </summary>
-    public FrozenDictionary<GasProperties, float> SpeedFactors { get; }
+    private FrozenDictionary<GasProperties, float> SpeedFactors { get; }
 
     /// <summary>
     ///     Calculates the reactions rate constant based on temperature using original Arrhenius equation.
@@ -62,9 +63,10 @@ public readonly partial record struct StandardGasReaction
     /// <param name="temperatureKelvin"></param>
     /// <returns>Reactions per seconds.</returns>
     /// <remarks>there are more sophisticated models for k but good luck having anyone setup all the parameters necessary.</remarks>
-    public float GetRateConstant(float temperatureKelvin)
+    private float GetRateConstant(float temperatureKelvin)
     {
-        return ArrheniusFactor * MathF.Exp( -ActivationEnergy / (temperatureKelvin * 8.31446261815324f));
+        return ArrheniusFactor *
+               MathF.Exp((-ActivationEnergy * 0.001f) / (temperatureKelvin * AtmosPhysicalConstants.MolarGasConstant));
     }
 
     /// <summary>
@@ -78,6 +80,7 @@ public readonly partial record struct StandardGasReaction
         var result = GetRateConstant(temperatureKelvin);
         if (result <= 0)
             return 0;
+
         foreach (var factor in SpeedFactors)
         {
             if (!gasMolarities.TryGetValue(factor.Key, out var molar)) molar = 0;

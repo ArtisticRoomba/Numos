@@ -23,13 +23,21 @@ public readonly partial record struct LinearGasReaction
         /// </summary>
         public bool HighStrict { get; } = HighStrict;
 
-        public float BoundaryRange { get; } = HighMolarityBound - LowMolarityBound;
+        private float BoundaryRange { get; } = HighMolarityBound - LowMolarityBound;
 
-        public float FactorRange { get; } = HighMolaritySpeed - LowMolaritySpeed;
+        private float FactorRange { get; } = HighMolaritySpeed - LowMolaritySpeed;
+        private float HighMolaritySpeed { get; } = HighMolaritySpeed;
+        private float HighMolarityBound { get; } = HighMolarityBound;
 
         public float GetFactor(float molarity)
         {
-            return EvalLinear(molarity, BoundaryRange, LowMolarityBound, LowStrict, HighStrict, LowMolaritySpeed,
+            return EvalLinear(
+                molarity,
+                BoundaryRange,
+                LowMolarityBound,
+                LowStrict,
+                HighStrict,
+                LowMolaritySpeed,
                 FactorRange);
         }
     }

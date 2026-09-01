@@ -45,41 +45,41 @@ public readonly partial record struct LinearGasReaction
     ///     Input reactants.
     ///     Mol per Reaction
     /// </summary>
-    public FrozenDictionary<GasProperties, float> Input { get; }
+    private FrozenDictionary<GasProperties, float> Input { get; }
 
     /// <summary>
     ///     Output reactants
     ///     Mol per Reaction
     /// </summary>
-    public FrozenDictionary<GasProperties, float> Output { get; }
+    private FrozenDictionary<GasProperties, float> Output { get; }
 
     /// <summary>
     ///     If this reaction consumes or produces thermal energy.
     ///     In Joules per Reaction
     /// </summary>
-    public Joule EnergyBalance { get; }
+    private Joule EnergyBalance { get; }
 
-    public Kelvin LowTemperatureBound { get; }
-    public Kelvin HighTemperatureBound { get; }
-    
-    public PerSecond LowTempSpeed { get; }
-    public PerSecond HighTempSpeed { get; }
+    private Kelvin LowTemperatureBound { get; }
+    private Kelvin HighTemperatureBound { get; }
 
-    public float BoundaryRange { get; }
+    private PerSecond LowTempSpeed { get; }
+    private PerSecond HighTempSpeed { get; }
 
-    public float SpeedRange { get; }
+    private float BoundaryRange { get; }
+
+    private float SpeedRange { get; }
 
     /// <summary>
     ///     Can the reaction occur below low temperature bound (extending linear graph)
     /// </summary>
-    public bool LowStrict { get; }
+    private bool LowStrict { get; }
 
     /// <summary>
     ///     Can the reaction occur above high temperature bound (extending linear graph)
     /// </summary>
-    public bool HighStrict { get; }
+    private bool HighStrict { get; }
 
-    public FrozenSet<LinearSpeedFactor> SpeedFactors { get; }
+    private FrozenSet<LinearSpeedFactor> SpeedFactors { get; }
 
     private static float EvalLinear(float value, float boundaryRange, float lowBound, bool lowStrict, bool highStrict,
         float valAtLow, float speedRange)
@@ -107,7 +107,7 @@ public readonly partial record struct LinearGasReaction
     /// </summary>
     /// <param name="temperatureKelvin"></param>
     /// <returns></returns>
-    public float GetRateConstantForTemperature(float temperatureKelvin)
+    private float GetRateConstantForTemperature(float temperatureKelvin)
     {
         return EvalLinear(temperatureKelvin, BoundaryRange, LowTemperatureBound, LowStrict, HighStrict, LowTempSpeed,
             SpeedRange);
