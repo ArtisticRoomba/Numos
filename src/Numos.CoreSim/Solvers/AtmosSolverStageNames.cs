@@ -6,4 +6,5 @@ internal static class AtmosSolverStageNames
     internal const string BoundaryFlow = "boundary-flow";
     internal const string Thermodynamics = "thermodynamics";
     internal const string ThermalBoundary = "thermal-boundary";
+    internal const string GasReactions = "gas-reactions";
 }
