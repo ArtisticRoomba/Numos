@@ -57,6 +57,31 @@ internal static class AtmosSolverMath
     }
 
     /// <summary>
+    ///     Returns a voxel's pressure based on ideal gas law
+    ///     If below vacuum threshold sets voxel to a vacuum
+    /// </summary>
+    internal static Pascal CalculatePressureAtVoxel(
+        IAtmosConfig config, AtmosChunk chunk,
+        ushort localVoxelIndex, Mole totalMoles)
+    {
+        if (totalMoles <= 0f)
+        {
+            chunk.SetVoxelToVacuum(localVoxelIndex);
+            return 0f;
+        }
+
+        Pascal pressure = CalculatePressure(config, totalMoles, chunk.Temperature[localVoxelIndex]);
+        if (pressure < config.VacuumThreshold)
+        {
+            chunk.SetVoxelToVacuum(localVoxelIndex);
+            return 0f;
+        }
+
+        return pressure;
+    }
+
+
+    /// <summary>
     ///     Returns heat capacity of all gasses at voxel
     /// </summary>
     internal static JoulePerKelvin CalculateHeatCapacityAtVoxel(

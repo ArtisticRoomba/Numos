@@ -548,9 +548,22 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
         AtmosChunk chunk, AtmosSolverConfigSnapshot config,
         Mole[] moleDeltas, Joule64[] energyDeltas)
     {
+        Mole[] molesChanges = ArrayPool<Mole>.Shared.Rent(chunk.ActiveGasCount);
         for (int activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
         {
             ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
+
+            // Skips any calculations for unchanged voxels
+            Array.Clear(molesChanges, 0, chunk.ActiveGasCount);
+            for (int gas = 0; gas < chunk.ActiveGasCount; gas++)
+            {
+                molesChanges[gas] = moleDeltas[gas * chunk.VoxelCount + voxelIndex];
+            }
+
+            if (molesChanges.Sum() == 0f)
+                continue;
+
+            Mole totalMoles = 0f;
 
             // energy before transfer
             Joule64 oldEnergy = (Kelvin64)config.GetValidatedTemp(chunk.Temperature[voxelIndex]) *
@@ -561,13 +574,15 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
             for (int gas = 0; gas < chunk.ActiveGasCount; gas++)
             {
                 int offset = gas * chunk.VoxelCount;
-                Mole moleDelta = moleDeltas[offset + voxelIndex];
+                Mole moleDelta = molesChanges[gas];
                 stateChanged |= moleDelta != 0f;
 
                 // new moles is current moles + added moles
                 Mole moles = chunk.ActiveGases[gas].Moles[voxelIndex] + moleDelta;
                 if (moles < AtmosSolverConstants.MinimumTrackedMoles)
                     moles = 0f;
+
+                totalMoles += moles;
 
                 chunk.ActiveGases[gas].Moles[voxelIndex] = moles;
                 // new heat cap based on new moles
@@ -582,10 +597,10 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
                     0f,
                     (Joule)((oldEnergy + energyDeltas[voxelIndex]) /
                             chunk.TotalHeatCapacity[voxelIndex]));
+                chunk.TotalPressure[voxelIndex] = AtmosSolverMath.CalculatePressureAtVoxel(config, chunk, voxelIndex, totalMoles);
             }
-
-            chunk.TotalPressure[voxelIndex] = AtmosSolverMath.CalculatePressureAtVoxel(config, chunk, voxelIndex);
         }
+        ArrayPool<Mole>.Shared.Return(molesChanges);
     }
 
     private static void TryAppendBoundaryEvent(
