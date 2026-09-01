@@ -268,7 +268,7 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
     private static void AccumulateBulkConductanceEdge(AtmosChunk chunk, AtmosSolverConfigSnapshot config,
         Int3 neighborPosition, ushort voxelIndex, MolePerPascal[] incidentBulkConductance)
     {
-        if (!neighborPosition.IsWithin(default, chunk.Dimensions))
+        if (!neighborPosition.IsWithin(chunk.Dimensions))
             return;
 
         ushort neighborIndex = chunk.GetIndex(neighborPosition);
@@ -331,7 +331,7 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
         MolePerPascal[] capacitance, MolePerPascal[] incidentBulkConductance, ref Pascal maximumPressureDelta,
         Mole[] moleDeltas, Joule64[] energyDeltas)
     {
-        if (!neighborPosition.IsWithin(default, chunk.Dimensions))
+        if (!neighborPosition.IsWithin(chunk.Dimensions))
             return;
 
         ushort neighborIndex = chunk.GetIndex(neighborPosition);
@@ -434,7 +434,7 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
         for (var i = 0; i < HorizontalNeighbors.Length; i++)
         {
             var neighborPosition = position + HorizontalNeighbors[i];
-            if (!neighborPosition.IsWithin(default, chunk.Dimensions))
+            if (!neighborPosition.IsWithin(chunk.Dimensions))
                 continue;
 
             ushort neighborIndex = chunk.GetIndex(neighborPosition);
@@ -452,7 +452,7 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
             for (var i = 0; i < VerticalNeighbors.Length; i++)
             {
                 var neighborPosition = position + VerticalNeighbors[i];
-                if (!neighborPosition.IsWithin(default, chunk.Dimensions))
+                if (!neighborPosition.IsWithin(chunk.Dimensions))
                     continue;
 
                 ushort neighborIndex = chunk.GetIndex(neighborPosition);
