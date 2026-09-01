@@ -430,6 +430,27 @@ internal class AtmosChunk
         MarkChanged();
     }
 
+    /// <summary>
+    ///     Tries to get the temperatures and heatCapacity of a specific voxel
+    ///     Does not recalculate <see cref="TotalHeatCapacity"/>
+    /// </summary>
+    [PublicAPI]
+    public bool TryGetThermalState(AtmosSolverConfigSnapshot config,
+        ushort voxelIndex, out Kelvin temperature, out JoulePerKelvin heatCapacity)
+    {
+        heatCapacity = TotalHeatCapacity[voxelIndex];
+        if (!float.IsFinite(heatCapacity) || heatCapacity <= 0f || TotalPressure[voxelIndex] == 0f)
+        {
+            temperature = 0f;
+            heatCapacity = 0f;
+            return false;
+        }
+
+        temperature = config.GetValidatedTemp(Temperature[voxelIndex]);
+        return true;
+    }
+
+
 
     /// <summary>
     ///     Sets a specific voxel to a vacuum. This sets TotalPressure, ActiveGases, and TotalHeatCapacity to 0 and IsVacuum to

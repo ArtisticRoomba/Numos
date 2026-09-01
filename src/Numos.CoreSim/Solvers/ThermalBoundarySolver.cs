@@ -189,6 +189,9 @@ internal sealed class ThermalBoundarySolver : IAtmosSolverStage
         if (!context.World.TryGetChunk(address.ChunkPosition, out var chunk))
             return false;
 
+        // TODO
+        // Should maybe use AtmosChunk.TryGetThermalState
+        // Unsure if recalculation of heat cap is required here
         ushort voxelIndex = address.LocalVoxelIndex;
         JoulePerKelvin heatCapacity = AtmosSolverMath.CalculateHeatCapacityAtVoxel(context.TickConfig, chunk, voxelIndex);
         chunk.TotalHeatCapacity[voxelIndex] = heatCapacity;

@@ -36,16 +36,25 @@ internal sealed class PhaseChangeSolver
             if (gasMoles <= AtmosSolverConstants.MinimumMolesForCondensation)
                 continue;
 
+
             Kelvin temperature = config.GetValidatedTemp(chunk.Temperature[voxelIndex]);
+            // Finds the number of moles which if below would cause condensation
+            // This is found from the clausius-clapeyron equation
             Mole64 saturationMoles = CalculateSaturationMoles(config, properties, temperature, inverseBoilingPoint);
+            // If below saturationMoles condensation is not possible (We are ignoring any special cases)
             if (gasMoles <= saturationMoles)
                 continue;
 
+            // This value includes the energy when condensing a gas as a liquid has effectively no volume
             JoulePerMole molarInternalEnergyOfVaporization = MathF.Max(
                 0f,
                 properties.MolarEnthalpyOfVaporization -
                 AtmosPhysicalConstants.MolarGasConstant * temperature);
 
+            // Finding the amount of moles to condense to reach equilibrium at saturation is not possible analytically
+            // It is fine to under estimate the amount of moles which condense as the rest can condense next tick
+            // An over estimation however can easily lead to enough energy released to increase the temperature of the gas well above the boiling point
+            // This is not possible physically and needs to be avoided
             Mole64 equilibriumRemainingMoles = CalculateEquilibriumRemainingMoles(
                 chunk,
                 config,
@@ -59,10 +68,13 @@ internal sealed class PhaseChangeSolver
                 inverseBoilingPoint);
 
             Mole64 equilibriumCondensedMoles = gasMoles - equilibriumRemainingMoles;
-            Mole64 targetRemainingMoles = gasMoles -
-                                          Math.Min(
-                                              gasMoles,
-                                              equilibriumCondensedMoles * config.CondensationRateFactor);
+            // Condensation factor will lead to an exponential decay of equilibriumCondensedMoles
+            Mole64 initialMolesToCondense = equilibriumCondensedMoles * config.CondensationRateFactor;
+            // Cuts off final condensation to happen all at once to prevent repeating this to many times
+            if (equilibriumCondensedMoles - initialMolesToCondense <= AtmosSolverConstants.CondensationFactorCutoff)
+                initialMolesToCondense = equilibriumCondensedMoles;
+
+            Mole64 targetRemainingMoles = gasMoles - Math.Min(gasMoles, initialMolesToCondense);
 
             Mole remainingMoles = (float)targetRemainingMoles;
             if (remainingMoles < targetRemainingMoles)
@@ -98,12 +110,18 @@ internal sealed class PhaseChangeSolver
         JoulePerMole64 molarInternalEnergyOfVaporization, GasProperties properties,
         PerKelvin64 inverseBoilingPoint)
     {
+        // TODO PERF
+        // doubles are used here for higher precision
+        // This means it can't use previously cached values
+        // Check if this is required
         JoulePerMoleKelvin64 molarHeatCapacity =
             config.GetMolarHeatCapacityAtConstantVolume(chunk.ActiveGases[gasIndex].GasId);
 
         JoulePerKelvin64 otherHeatCapacity = CalculateOtherHeatCapacityAtVoxel(chunk, config, gasIndex, voxelIndex);
         JoulePerKelvin64 initialTotalHeatCapacity = otherHeatCapacity + gasMoles * molarHeatCapacity;
 
+        // If it takes no energy to condense, they all condense
+        // This can only happen in specific cases with a very low MolarEnthalpyOfVaporization
         if (molarInternalEnergyOfVaporization == 0d)
             return Math.Clamp(initialSaturationMoles, 0d, gasMoles);
 
@@ -256,6 +274,15 @@ internal sealed class PhaseChangeSolver
         AtmosSolverConfigSnapshot config,
         GasProperties properties, Kelvin64 temperature, PerKelvin64 inverseBoilingPoint)
     {
+        // Clausius-Clapeyron equation for saturation vapor pressure:
+        // P_2 = P_1 \exp{\frac{\Delta H_{vap}}{R}\left( \frac{1}{T_1} - \frac{1}{T_2} \right)}
+        // P_1 and T_1 are the reference pressure and temperature. These should be room pressure and temp
+        // H is the Molar Enthalpy Of Vaporization
+        // R is Molar Gas Constant
+        // T_2 is current temperature
+        // P_2 is the pressure at the current temperature which being above would lead to condensation
+        // This equation has been converted to use moles instead of pressure
+        // TODO PERF
         Scalar64 logSaturationMoles = Math.Log(config.SaturationReferencePressure) -
                                       Math.Log(config.PressurePerMoleKelvin) -
                                       Math.Log(temperature) -
@@ -286,5 +313,17 @@ internal sealed class PhaseChangeSolver
 
         chunk.TotalPressure[voxelIndex] =
             AtmosSolverMath.CalculatePressureAtVoxel(config, chunk, voxelIndex);
+
+        // TODO
+        // This temperature is technically wrong. The temperature of the liquid should be at the equivalent condensation point.
+        // The saturation pressure equation requires the lambertW to invert to find.
+        // This energy which the liquid holds onto also needs to be taken away from the molar Internal Energy Of Vaporization
+        // This could potentially be ignored as it shouldn't make much of a difference. It might come up once the liquid simulation is started.
+        AddPrecipitationEvent(voxelIndex, gasIndex, condensedMoles, temperature);
+    }
+
+    private static void AddPrecipitationEvent(ushort LocalVoxelIndex, int gasIndex, Mole moles, Kelvin temp)
+    {
+        // TODO
     }
 }

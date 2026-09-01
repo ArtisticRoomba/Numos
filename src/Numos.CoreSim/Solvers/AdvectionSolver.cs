@@ -15,6 +15,16 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
     private readonly Action _clearBoundaryEvents;
     private readonly Action<int, Int3, BoundaryFlowEvent> _enqueueBoundaryEvent;
 
+    private static readonly Int3[] HorizontalNeighbors =
+    [
+        Int3.NegX, Int3.PosX, Int3.NegY, Int3.PosY
+    ];
+
+    private static readonly Int3[] VerticalNeighbors =
+    [
+        Int3.NegZ, Int3.PosZ
+    ];
+
     internal AdvectionSolver(
         int maximumBoundaryEvents, Action clearBoundaryEvents,
         Action<int, Int3, BoundaryFlowEvent> enqueueBoundaryEvent)
@@ -56,6 +66,7 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
         Pascal maximumPressureDelta = 0f;
         if (chunk.ActiveGasCount > 0)
         {
+            // Recalc every voxels pressure and heat capacity
             RefreshPressureAndHeatCapacity(chunk, config);
             ProcessActiveVoxels(
                 chunk,
@@ -64,7 +75,7 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
                 ref boundaryEventCount,
                 ref maximumPressureDelta);
         }
-
+        // If maximumPressureDelta above threshold add to sleep timer
         UpdateSleepState(chunk, config, maximumPressureDelta);
     }
 
@@ -73,28 +84,43 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
         BoundaryFlowEvent[] boundaryBuffer, ref int boundaryEventCount, ref Pascal maximumPressureDelta)
     {
         int activeGasCount = chunk.ActiveGasCount;
+        // Arrays using this are effectively a 2d matrix with gasses and voxels being the axis but stretched into a 1d array.
         int moleDeltaLength = activeGasCount * chunk.VoxelCount;
+        // Accumulates the changes in moles per gas per voxel
         Mole[] moleDeltas = ArrayPool<Mole>.Shared.Rent(moleDeltaLength);
+        // Accumulates the changes in energy per voxel
+        // Energy change comes from thermal energy transfer
+        // This is how hot moles moving into a neighboring voxel heat up that voxel
         Joule64[] energyDeltas = ArrayPool<Joule64>.Shared.Rent(chunk.VoxelCount);
+        // Accumulates only the outflows
+        // This is a check to make sure that no voxel is giving away more than it has
+        // An improved method should be used in the future which doesn't require this as it is prone to directional bias
         Mole[] scheduledOutflows = ArrayPool<Mole>.Shared.Rent(activeGasCount * chunk.VoxelCount);
         Array.Clear(moleDeltas, 0, moleDeltaLength);
         Array.Clear(energyDeltas, 0, chunk.VoxelCount);
         Array.Clear(scheduledOutflows, 0, activeGasCount * chunk.VoxelCount);
 
+        // try finally to release array memory even if this throws
         try
         {
             for (int activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
             {
                 ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
+                // CheckNeighbor only cares about outflows
+                // We therefore skip any voxels which can't have an outflow
                 Pascal currentPressure = chunk.TotalPressure[voxelIndex];
                 if (currentPressure == 0f)
                     continue;
 
+                // Dito above
                 Mole totalMoles = AtmosSolverMath.GetTotalMoles(chunk, voxelIndex);
                 if (totalMoles <= 0f)
                     continue;
 
                 var position = chunk.GetXyzInt3(voxelIndex);
+                // This skips over voxel pairs which are going outside the chunk
+                // This only finds the mole change and energy change
+                // This does not mutate the chunk at all
                 ProcessNeighbors(
                     chunk,
                     config,
@@ -107,6 +133,7 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
                     energyDeltas,
                     scheduledOutflows);
 
+                // This gets all the pairs which are going outside the chunk
                 TryAppendBoundaryEvent(
                     chunk,
                     position,
@@ -115,6 +142,7 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
                     ref boundaryEventCount);
             }
 
+            // Applies the mole change and energy change to each voxel once accumulated
             ApplyDeltas(chunk, config, moleDeltas, energyDeltas);
         }
         finally
@@ -131,80 +159,38 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
         ref Pascal maximumPressureDelta, Mole[] moleDeltas, Joule64[] energyDeltas,
         Mole[] scheduledOutflows)
     {
-        CheckNeighbor(
-            chunk,
-            config,
-            position + Int3.NegX,
-            voxelIndex,
-            currentPressure,
-            totalMoles,
-            ref maximumPressureDelta,
-            moleDeltas,
-            energyDeltas,
-            scheduledOutflows);
-
-        CheckNeighbor(
-            chunk,
-            config,
-            position + Int3.PosX,
-            voxelIndex,
-            currentPressure,
-            totalMoles,
-            ref maximumPressureDelta,
-            moleDeltas,
-            energyDeltas,
-            scheduledOutflows);
-
-        CheckNeighbor(
-            chunk,
-            config,
-            position + Int3.NegY,
-            voxelIndex,
-            currentPressure,
-            totalMoles,
-            ref maximumPressureDelta,
-            moleDeltas,
-            energyDeltas,
-            scheduledOutflows);
-
-        CheckNeighbor(
-            chunk,
-            config,
-            position + Int3.PosY,
-            voxelIndex,
-            currentPressure,
-            totalMoles,
-            ref maximumPressureDelta,
-            moleDeltas,
-            energyDeltas,
-            scheduledOutflows);
+        foreach (var offset in HorizontalNeighbors)
+        {
+            CheckNeighbor(
+                chunk,
+                config,
+                position + offset,
+                voxelIndex,
+                currentPressure,
+                totalMoles,
+                ref maximumPressureDelta,
+                moleDeltas,
+                energyDeltas,
+                scheduledOutflows);
+        }
 
         if (chunk.Depth <= 1)
             return;
 
-        CheckNeighbor(
-            chunk,
-            config,
-            position + Int3.NegZ,
-            voxelIndex,
-            currentPressure,
-            totalMoles,
-            ref maximumPressureDelta,
-            moleDeltas,
-            energyDeltas,
-            scheduledOutflows);
-
-        CheckNeighbor(
-            chunk,
-            config,
-            position + Int3.PosZ,
-            voxelIndex,
-            currentPressure,
-            totalMoles,
-            ref maximumPressureDelta,
-            moleDeltas,
-            energyDeltas,
-            scheduledOutflows);
+        foreach (var offset in VerticalNeighbors)
+        {
+            CheckNeighbor(
+                chunk,
+                config,
+                position + offset,
+                voxelIndex,
+                currentPressure,
+                totalMoles,
+                ref maximumPressureDelta,
+                moleDeltas,
+                energyDeltas,
+                scheduledOutflows);
+        }
     }
 
     private static void CheckNeighbor(
@@ -218,19 +204,28 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
 
         ushort neighborIndex = chunk.GetIndex(neighborPosition);
         int neighborRoom = chunk.VoxelRoomMap[neighborIndex];
+
+        // No pressure transfer to the walls
         if (neighborRoom == VoxelClassification.RoomSolid)
             return;
 
+        // Pressure transfer to void is lost
+        // Void has 0 pressure
         bool isVoid = neighborRoom == VoxelClassification.RoomVoid;
         Pascal neighborPressure = isVoid ? 0f : chunk.TotalPressure[neighborIndex];
+
         Pascal pressureDelta = currentPressure - neighborPressure;
+        // Compares this pressure delta to highest found in the chunk so far
         maximumPressureDelta = MathF.Max(maximumPressureDelta, MathF.Abs(pressureDelta));
 
+        // Only checks outflows
         Pascal bulkPressureTransfer = pressureDelta > 0f
             ? AtmosSolverMath.CalculateBulkPressureTransfer(config, pressureDelta, currentPressure)
             : 0f;
 
         Kelvin sourceTemperature = config.GetValidatedTemp(chunk.Temperature[voxelIndex]);
+
+        // pressure transfer can instead be described as number of moles leaving
         Mole advectedMoles = AtmosSolverMath.PressureToMoles(config, bulkPressureTransfer, sourceTemperature);
         Kelvin neighborTemperature = isVoid
             ? 0f
@@ -240,18 +235,26 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
         {
             int gasId = chunk.ActiveGases[gas].GasId;
             Mole sourceMoles = chunk.ActiveGases[gas].Moles[voxelIndex];
+            // Assuming each gas is transferred proportionally to the number of moles present
             Mole molesAdvected = advectedMoles * (sourceMoles / totalMoles);
+
             Mole neighborMoles = isVoid ? 0f : chunk.ActiveGases[gas].Moles[neighborIndex];
+            // Diffusion imbalance ignores total pressure and only cares about concentration gradient of specific gas
             Mole moleImbalance = AtmosSolverMath.CalculateMoleImbalance(
                 sourceMoles,
                 sourceTemperature,
                 neighborMoles,
                 neighborTemperature);
 
+            // Fickian diffusion : J = -D \frac{d \phi}{d x}
+            // Diffusion Coefficient is currently unitless
+            // moleImbalance is source - target so is already negative
+            // TODO Currently possible to double count I think
             Mole molesDiffused = moleImbalance > 0f
                 ? moleImbalance * config.GetDiffusionCoefficient(gasId)
                 : 0f;
 
+            // Checks there are enough moles to move out of the voxel
             int outflowOffset = gas * chunk.VoxelCount + voxelIndex;
             Mole remainingMoles = sourceMoles - scheduledOutflows[outflowOffset];
             Mole molesToMove = MathF.Min(remainingMoles, molesAdvected + molesDiffused);
@@ -259,6 +262,7 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
                 continue;
 
             scheduledOutflows[outflowOffset] += molesToMove;
+            // Energy moved is just thermal energy of the moles moved
             Joule64 energyTransferred = (double)molesToMove *
                                         config.GetMolarHeatCapacityAtConstantVolume(gasId) *
                                         sourceTemperature;
@@ -266,6 +270,9 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
             int deltaOffset = gas * chunk.VoxelCount;
             moleDeltas[deltaOffset + voxelIndex] -= molesToMove;
             energyDeltas[voxelIndex] -= energyTransferred;
+
+            // If void the void voxel doesn't gain the gasses
+            // The gasses are just deleted instead
             if (isVoid)
                 continue;
 
@@ -307,6 +314,8 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
         for (int activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
         {
             ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
+
+            // energy before transfer
             Joule64 oldEnergy = (double)config.GetValidatedTemp(chunk.Temperature[voxelIndex]) *
                                 chunk.TotalHeatCapacity[voxelIndex];
 
@@ -317,17 +326,21 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
                 int offset = gas * chunk.VoxelCount;
                 Mole moleDelta = moleDeltas[offset + voxelIndex];
                 stateChanged |= moleDelta != 0f;
+
+                // new moles is current moles + added moles
                 Mole moles = chunk.ActiveGases[gas].Moles[voxelIndex] + moleDelta;
                 if (moles < AtmosSolverConstants.MinimumTrackedMoles)
                     moles = 0f;
 
                 chunk.ActiveGases[gas].Moles[voxelIndex] = moles;
+                // new heat cap based on new moles
                 chunk.TotalHeatCapacity[voxelIndex] += moles *
                                                        config.GetMolarHeatCapacityAtConstantVolume(chunk.ActiveGases[gas].GasId);
             }
 
             if (stateChanged && chunk.TotalHeatCapacity[voxelIndex] > 0f)
             {
+                // new temp is : total energy / heat cap
                 chunk.Temperature[voxelIndex] = MathF.Max(
                     0f,
                     (float)((oldEnergy + energyDeltas[voxelIndex]) /

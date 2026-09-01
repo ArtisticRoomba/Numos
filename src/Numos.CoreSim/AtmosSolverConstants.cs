@@ -27,4 +27,7 @@ internal static class AtmosSolverConstants
 
     /// <summary>Minimum vapor amount considered by the phase-change solver, in moles (mol).</summary>
     internal const Mole MinimumMolesForCondensation = 0.01f;
+    
+    /// <summary>Minimum vapor amount considered by the phase-change solver, in moles (mol).</summary>
+    internal const Mole64 CondensationFactorCutoff  = 0.1d;
 }

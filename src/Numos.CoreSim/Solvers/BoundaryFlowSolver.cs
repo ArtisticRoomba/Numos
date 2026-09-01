@@ -60,6 +60,11 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
         if (!context.World.TryGetChunk(sourcePosition, out var sourceChunk))
             return;
 
+        // Each boundary voxel will have a BoundaryFlowEvent
+        // Only outflows are cared about to avoid double counting
+        // These functions do mutate, can lead to some directional bias
+        // TODO PERF See if possible to mutate after accumulation similar to advection
+        // Might be expensive
         var localPosition = sourceChunk.GetXyzInt3(boundaryEvent.LocalVoxelIndex);
         TryFlowToNeighbor(context, sourceChunk, sourcePosition, localPosition + Int3.NegX, Int3.NegX);
         TryFlowToNeighbor(context, sourceChunk, sourcePosition, localPosition + Int3.PosX, Int3.PosX);
@@ -93,6 +98,14 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
         if (sourceRoom == VoxelClassification.RoomSolid || sourceRoom == VoxelClassification.RoomVoid)
             return;
 
+        // We only care about outflows
+        // If this voxel can't have any outflow we skip it
+        Mole totalMoles = AtmosSolverMath.GetTotalMoles(sourceChunk, sourceIndex);
+        if (totalMoles <= 0f)
+            return;
+
+        // Same calculation as advection solver
+        // TODO make sure this and advection share some code
         Pascal sourcePressure = sourceChunk.TotalPressure[sourceIndex];
         bool isVoid = neighborRoom == VoxelClassification.RoomVoid;
         Pascal neighborPressure = isVoid ? 0f : neighborChunk.TotalPressure[neighborIndex];
@@ -100,10 +113,6 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
         Pascal bulkPressureTransfer = pressureDelta > 0f
             ? AtmosSolverMath.CalculateBulkPressureTransfer(context.TickConfig, pressureDelta, sourcePressure)
             : 0f;
-
-        Mole totalMoles = GetTotalMoles(sourceChunk, sourceIndex);
-        if (totalMoles <= 0f)
-            return;
 
         TransferSpecies(
             context,
@@ -121,6 +130,8 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
         ushort sourceIndex, AtmosChunk neighborChunk, ushort neighborIndex, bool isVoid,
         Mole totalMoles, Pascal bulkPressureTransfer)
     {
+        // Very similar to advection solver
+        // See there for docs on the maths
         var config = context.TickConfig;
         Kelvin sourceTemperature = config.GetValidatedTemp(sourceChunk.Temperature[sourceIndex]);
         Kelvin neighborTemperature = isVoid
@@ -188,6 +199,8 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
         sourceChunk.MarkChanged();
     }
 
+    // TODO This should be a function on the chunk
+    // Probably an updating dict or similar with the mapping of id to gasIndex
     private static Mole GetGasMoles(AtmosChunk chunk, ushort voxelIndex, int gasId, bool isVoid)
     {
         if (isVoid)
@@ -200,15 +213,6 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
         }
 
         return 0f;
-    }
-
-    private static Mole GetTotalMoles(AtmosChunk chunk, ushort voxelIndex)
-    {
-        Mole totalMoles = 0f;
-        for (int gas = 0; gas < chunk.ActiveGasCount; gas++)
-            totalMoles += chunk.ActiveGases[gas].Moles[voxelIndex];
-
-        return totalMoles;
     }
 
     private static int CompareEvents(

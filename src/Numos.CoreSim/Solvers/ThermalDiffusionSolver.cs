@@ -47,7 +47,7 @@ internal sealed class ThermalDiffusionSolver
         for (int activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
         {
             ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
-            if (!TryGetThermalState(chunk, config, voxelIndex, out _, out JoulePerKelvin heatCapacity))
+            if (!chunk.TryGetThermalState(config, voxelIndex, out _, out JoulePerKelvin heatCapacity))
                 continue;
 
             var position = chunk.GetXyzInt3(voxelIndex);
@@ -92,8 +92,7 @@ internal sealed class ThermalDiffusionSolver
         for (int activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
         {
             ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
-            if (!TryGetThermalState(
-                    chunk,
+            if (!chunk.TryGetThermalState(
                     config,
                     voxelIndex,
                     out Kelvin temperature,
@@ -144,8 +143,7 @@ internal sealed class ThermalDiffusionSolver
         {
             ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
             if (energyDeltas[voxelIndex] == 0f ||
-                !TryGetThermalState(
-                    chunk,
+                !chunk.TryGetThermalState(
                     config,
                     voxelIndex,
                     out Kelvin oldTemperature,
@@ -175,8 +173,7 @@ internal sealed class ThermalDiffusionSolver
             neighborRoom == VoxelClassification.RoomVoid)
             return;
 
-        if (!TryGetThermalState(
-                chunk,
+        if (!chunk.TryGetThermalState(
                 config,
                 neighborIndex,
                 out _,
@@ -207,8 +204,7 @@ internal sealed class ThermalDiffusionSolver
             neighborRoom == VoxelClassification.RoomVoid)
             return;
 
-        if (!TryGetThermalState(
-                chunk,
+        if (!chunk.TryGetThermalState(
                 config,
                 neighborIndex,
                 out Kelvin neighborTemperature,
@@ -239,22 +235,6 @@ internal sealed class ThermalDiffusionSolver
 
         energyDeltas[voxelIndex] -= heatTransfer;
         energyDeltas[neighborIndex] += heatTransfer;
-    }
-
-    private static bool TryGetThermalState(
-        AtmosChunk chunk, AtmosSolverConfigSnapshot config,
-        ushort voxelIndex, out Kelvin temperature, out JoulePerKelvin heatCapacity)
-    {
-        heatCapacity = chunk.TotalHeatCapacity[voxelIndex];
-        if (!AtmosSolverMath.IsFinitePositive(heatCapacity) || chunk.TotalPressure[voxelIndex] == 0f)
-        {
-            temperature = 0f;
-            heatCapacity = 0f;
-            return false;
-        }
-
-        temperature = config.GetValidatedTemp(chunk.Temperature[voxelIndex]);
-        return true;
     }
 
     private static bool IsBoundary(AtmosChunk chunk, Int3 position)

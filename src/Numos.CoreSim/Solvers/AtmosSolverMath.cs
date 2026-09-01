@@ -8,12 +8,20 @@ namespace Numos.CoreSim.Solvers;
 /// </summary>
 internal static class AtmosSolverMath
 {
+    /// <summary>
+    ///     Ideal gas law calculation
+    ///     PressurePerMoleKelvin is R/V
+    /// </summary>
     internal static Pascal CalculatePressure(IAtmosConfig config, Mole moles, Kelvin temperature)
     {
         Debug.Assert(float.IsFinite(moles) && moles >= 0f);
         return moles * config.GetValidatedTemp(temperature) * config.PressurePerMoleKelvin;
     }
 
+    /// <summary>
+    ///     Ideal gas law calculation
+    ///     PressurePerMoleKelvin is R/V
+    /// </summary>
     internal static Mole PressureToMoles(IAtmosConfig config, Pascal pressure, Kelvin temperature)
     {
         if (pressure <= 0f || float.IsNaN(pressure))
@@ -23,7 +31,10 @@ internal static class AtmosSolverMath
         return pressure / denominator;
     }
 
-    /// <summary>Recalculates a voxel pressure and clears values below the configured vacuum threshold.</summary>
+    /// <summary>
+    ///     Returns a voxel's pressure based on ideal gas law
+    ///     If below vacuum threshold sets voxel to a vacuum
+    /// </summary>
     internal static Pascal CalculatePressureAtVoxel(
         IAtmosConfig config, AtmosChunk chunk,
         ushort localVoxelIndex)
@@ -45,6 +56,9 @@ internal static class AtmosSolverMath
         return pressure;
     }
 
+    /// <summary>
+    ///     Returns heat capacity of all gasses at voxel
+    /// </summary>
     internal static JoulePerKelvin CalculateHeatCapacityAtVoxel(
         IAtmosConfig config, AtmosChunk chunk,
         ushort localVoxelIndex)
@@ -63,6 +77,12 @@ internal static class AtmosSolverMath
         return totalHeatCapacity;
     }
 
+    /// <summary>
+    ///     Returns pressure transfer between voxels based on the pressure delta
+    ///     Max transfer of total pressure * maximumFraction
+    ///     maximumFraction default value is 0.16
+    ///     In effect, no voxel can give away all of its gas in one tick
+    /// </summary>
     internal static Pascal CalculateBulkPressureTransfer(
         AtmosSolverConfigSnapshot config,
         Pascal pressureDelta, Pascal currentPressure)
@@ -97,6 +117,10 @@ internal static class AtmosSolverMath
         return sourceMoles - targetMoles * (targetTemperature / sourceTemperature);
     }
 
+    /// <summary>
+    ///     Returns the thermal conductance between voxels
+    ///     It can never be higher than the amount of energy needed to equalize the voxels
+    /// </summary>
     internal static JoulePerKelvin CalculateThermalConductance(
         JoulePerKelvin sourceHeatCapacity,
         JoulePerKelvin targetHeatCapacity, JoulePerKelvin thermalConductance)
@@ -128,6 +152,9 @@ internal static class AtmosSolverMath
         return float.IsFinite(value) && value > 0f;
     }
 
+    /// <summary>
+    ///     Returns the sum of all gas moles in a voxel
+    /// </summary>
     internal static Mole GetTotalMoles(AtmosChunk chunk, ushort voxelIndex)
     {
         Mole totalMoles = 0f;
