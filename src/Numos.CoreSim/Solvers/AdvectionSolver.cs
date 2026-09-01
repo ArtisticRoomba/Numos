@@ -57,7 +57,7 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
         // Advection and Diffusion done separately
         // This prevents any weirdness with them interacting
         // This does mean that gas can move 2 voxels in one tick
-        // TODO Diffusion should maybe not be separate at this tier, either its own solver and sharing some memory with advection
+        // TODO Diffusion should maybe not be separate at this tier, either its own solver or sharing some memory with advection
         // Diffusion could be ran every other tick as it is small gas movements
         Advect(chunk, context.TickConfig, boundaryBuffer, ref boundaryCount);
         Diffuse(chunk, context.TickConfig);
