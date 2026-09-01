@@ -154,7 +154,7 @@ public readonly struct FlatArray<T>
     }
 
     /// <summary>
-    ///     Returns a live span over the backing storage for the opt-in dangerous API.
+    ///     Returns a live span over the backing storage.
     /// </summary>
     /// <remarks>
     ///     This is a dangerous method that bypasses the API, use this method carefully.
