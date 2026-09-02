@@ -646,6 +646,14 @@ internal class AtmosChunk
         return (ushort)VoxelRoomMap.GetIndex(vec);
     }
 
+    /// <inheritdoc cref="GetIndex(int, int, int)" />
+    [PublicAPI]
+    public ushort GetIndexUnsafe(Int3 vec)
+    {
+        return (ushort)VoxelRoomMap.GetIndexUnsafe(vec);
+    }
+
+
     /// <summary>
     ///     Converts a flat voxel index to local x, y, and z coordinates.
     /// </summary>

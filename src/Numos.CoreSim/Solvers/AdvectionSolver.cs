@@ -528,7 +528,7 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
 
     private static bool TryClassifyNeighbor(AtmosChunk chunk, Int3 neighborPosition, out ushort neighborIndex, out bool isVoid)
     {
-        neighborIndex = chunk.GetIndex(neighborPosition);
+        neighborIndex = chunk.GetIndexUnsafe(neighborPosition);
         int neighborRoom = chunk.VoxelRoomMap[neighborIndex];
 
         // No pressure/mole transfer to the walls - exclude from the resolved set entirely.

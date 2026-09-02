@@ -113,11 +113,20 @@ internal readonly struct FlatArray<T>
     /// </summary>
     public int GetIndex(Int3 position)
     {
-        if (!position.IsWithin(default, _dimensions))
+        if (!position.IsWithin(_dimensions))
             throw new IndexOutOfRangeException();
 
         return position.X + position.Y * _dimensions.X + position.Z * _dimensions.X * _dimensions.Y;
     }
+
+    /// <summary>
+    ///     Converts a coordinate to its flat array index.
+    /// </summary>
+    public int GetIndexUnsafe(Int3 position)
+    {
+        return position.X + position.Y * _dimensions.X + position.Z * _dimensions.X * _dimensions.Y;
+    }
+
 
     /// <summary>
     ///     Converts a flat array index to its coordinate.
