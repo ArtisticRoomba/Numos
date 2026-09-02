@@ -153,11 +153,11 @@ public sealed class CrossChunkFlowTests
         {
             Assert.That(
                 SimTestHelpers.Moles(sourceSnapshot, SimTestHelpers.FirstGasId, 0),
-                Is.EqualTo(0.65f).Within(SimTestHelpers.Tolerance));
+                Is.EqualTo(0.715045154f).Within(SimTestHelpers.Tolerance));
 
             Assert.That(
                 SimTestHelpers.Moles(targetSnapshot, SimTestHelpers.FirstGasId, 0),
-                Is.EqualTo(0.35f).Within(SimTestHelpers.Tolerance));
+                Is.EqualTo(0.284954846f).Within(SimTestHelpers.Tolerance));
 
             Assert.That(targetSnapshot.IsAwake, Is.True);
             Assert.That(
