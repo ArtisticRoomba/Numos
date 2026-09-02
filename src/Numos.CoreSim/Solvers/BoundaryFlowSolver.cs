@@ -134,11 +134,15 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
         // See there for docs on the maths
         var config = context.TickConfig;
         Kelvin sourceTemperature = config.GetValidatedTemp(sourceChunk.Temperature[sourceIndex]);
-        Kelvin neighborTemperature = isVoid
-            ? 0f
-            : config.GetValidatedTemp(neighborChunk.Temperature[neighborIndex]);
 
         Mole advectedMoles = AtmosSolverMath.PressureToMoles(config, bulkPressureTransfer, sourceTemperature);
+
+        Pascal sourcePressure = sourceChunk.TotalPressure[sourceIndex];
+        float dx = MathF.Pow(config.VoxelVolume, 1f / 3f);
+        Scalar temperatureRatio = sourceTemperature / config.GlobalTemperature;
+        Scalar pressureRatio = config.SaturationReferencePressure / sourcePressure;
+        float envFactor = MathF.Pow(temperatureRatio, 1.5f) * pressureRatio * dx;
+
         bool movedGas = false;
 
         for (int gas = 0; gas < sourceChunk.ActiveGasCount; gas++)
@@ -146,15 +150,12 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
             int gasId = sourceChunk.ActiveGases[gas].GasId;
             Mole sourceMoles = sourceChunk.ActiveGases[gas].Moles[sourceIndex];
             Mole molesAdvected = advectedMoles * (sourceMoles / totalMoles);
-            Mole moleImbalance = AtmosSolverMath.CalculateMoleImbalance(
-                sourceMoles,
-                sourceTemperature,
-                GetGasMoles(neighborChunk, neighborIndex, gasId, isVoid),
-                neighborTemperature);
 
-            Mole molesDiffused = moleImbalance > 0f
-                ? moleImbalance * config.GetDiffusionCoefficient(gasId)
-                : 0f;
+            float referenceDiffusivity = config.GetDiffusionCoefficient(gasId);
+            float diffusionConstant = referenceDiffusivity * envFactor;
+            Mole molesDiffused = diffusionConstant * sourceMoles * AtmosSolverConstants.FixedTimeStep;
+            if (molesDiffused * 7 > sourceMoles)
+                molesDiffused = sourceMoles / 7;
 
             Mole molesToMove = MathF.Min(sourceMoles, molesAdvected + molesDiffused);
             if (molesToMove <= 0f)
@@ -197,22 +198,6 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
         sourceChunk.IsAwake = true;
         sourceChunk.SleepTimer = 0;
         sourceChunk.MarkChanged();
-    }
-
-    // TODO This should be a function on the chunk
-    // Probably an updating dict or similar with the mapping of id to gasIndex
-    private static Mole GetGasMoles(AtmosChunk chunk, ushort voxelIndex, int gasId, bool isVoid)
-    {
-        if (isVoid)
-            return 0f;
-
-        for (int gas = 0; gas < chunk.ActiveGasCount; gas++)
-        {
-            if (chunk.ActiveGases[gas].GasId == gasId)
-                return chunk.ActiveGases[gas].Moles[voxelIndex];
-        }
-
-        return 0f;
     }
 
     private static int CompareEvents(
