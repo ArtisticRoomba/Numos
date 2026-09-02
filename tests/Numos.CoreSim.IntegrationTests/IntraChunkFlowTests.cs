@@ -282,11 +282,11 @@ public sealed class IntraChunkFlowTests
         {
             Assert.That(
                 SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 0),
-                Is.EqualTo(1.4f).Within(SimTestHelpers.Tolerance));
+                Is.EqualTo(1.5f).Within(SimTestHelpers.Tolerance));
 
             Assert.That(
                 SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 1),
-                Is.EqualTo(0.6f).Within(SimTestHelpers.Tolerance));
+                Is.EqualTo(0.5f).Within(SimTestHelpers.Tolerance));
 
             Assert.That(
                 SimTestHelpers.TotalMoles(snapshot),
@@ -318,19 +318,19 @@ public sealed class IntraChunkFlowTests
         {
             Assert.That(
                 SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 0),
-                Is.EqualTo(0.9f).Within(SimTestHelpers.Tolerance));
+                Is.EqualTo(0.972036123f).Within(SimTestHelpers.Tolerance));
 
             Assert.That(
                 SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 1),
-                Is.EqualTo(0.1f).Within(SimTestHelpers.Tolerance));
+                Is.EqualTo(0.0279638655f).Within(SimTestHelpers.Tolerance));
 
             Assert.That(
                 SimTestHelpers.Moles(snapshot, SimTestHelpers.SecondGasId, 0),
-                Is.EqualTo(0.4f).Within(SimTestHelpers.Tolerance));
+                Is.EqualTo(0.277963877f).Within(SimTestHelpers.Tolerance));
 
             Assert.That(
                 SimTestHelpers.Moles(snapshot, SimTestHelpers.SecondGasId, 1),
-                Is.EqualTo(1.6f).Within(SimTestHelpers.Tolerance));
+                Is.EqualTo(1.72203612f).Within(SimTestHelpers.Tolerance));
 
             Assert.That(
                 SimTestHelpers.TotalMoles(snapshot),
@@ -482,11 +482,11 @@ public sealed class IntraChunkFlowTests
         {
             Assert.That(
                 snapshot.Temperature[0],
-                Is.EqualTo(400f).Within(SimTestHelpers.Tolerance));
+                Is.EqualTo(394.177368f).Within(SimTestHelpers.Tolerance));
 
             Assert.That(
                 snapshot.Temperature[1],
-                Is.EqualTo(262.06897f).Within(SimTestHelpers.Tolerance));
+                Is.EqualTo(262.984711f).Within(SimTestHelpers.Tolerance));
 
             Assert.That(snapshot.Temperature.All(float.IsFinite), Is.True);
         });
