@@ -218,7 +218,7 @@ public class AtmosConfig : IAtmosConfig
             return true;
         }
 
-        reactionId -= StandardGasReactions.Count;
+        reactionId -= LinearGasReactions.Count;
         if (reactionId < StandardGasReactions.Count)
         {
             reaction = new StandardGasReaction.Mapped(StandardGasReactions[reactionId], GasRegistry);
