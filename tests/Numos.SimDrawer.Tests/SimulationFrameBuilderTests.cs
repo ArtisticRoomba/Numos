@@ -494,12 +494,12 @@ public sealed class SimulationFrameBuilderTests
     public void GasComposition_GasRegistryNameChange_AdvancesLegendRevision()
     {
         var config = new AtmosConfig();
-        config.RegisterGas(new GasProperties { Name = "Before" });
+        config.GasRegistry.Add(new GasProperties { Name = "Before" });
         var registry = VisualizationRegistry.CreateDefault(config);
         var visualization = registry.GetRequired(BuiltInVisualizationIds.GasComposition);
         ulong before = visualization.MappingRevision;
 
-        config.GasRegistry[0] = new GasProperties { Name = "After" };
+        config.GasRegistry.Replace(0, new GasProperties { Name = "After" });
 
         Assert.That(visualization.MappingRevision, Is.Not.EqualTo(before));
     }

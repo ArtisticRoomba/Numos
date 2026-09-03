@@ -131,7 +131,7 @@ public sealed class CrossChunkFlowTests
         config.MaxPressureTransferFractionPerNeighbor = 0f;
         var gas = config.GasRegistry[SimTestHelpers.FirstGasId];
         gas.DiffusionCoefficient = 0.1f;
-        config.GasRegistry[SimTestHelpers.FirstGasId] = gas;
+        config.GasRegistry.Replace(SimTestHelpers.FirstGasId, gas);
         using var simulation = new AtmosSimulation(config, 1, 1, 1);
         var source = CreateIsolatedVoxel(simulation, default, 0, 0, 0, SimTestHelpers.RoomId);
         var target = CreateIsolatedVoxel(simulation, Int3.PosX, 0, 0, 0, SimTestHelpers.RoomId + 1);
@@ -209,10 +209,10 @@ public sealed class CrossChunkFlowTests
         var config = SimTestHelpers.CreateDeterministicConfig();
         var first = config.GasRegistry[SimTestHelpers.FirstGasId];
         first.MolarHeatCapacityAtConstantVolume = 1f;
-        config.GasRegistry[SimTestHelpers.FirstGasId] = first;
+        config.GasRegistry.Replace(SimTestHelpers.FirstGasId, first);
         var second = config.GasRegistry[SimTestHelpers.SecondGasId];
         second.MolarHeatCapacityAtConstantVolume = 4f;
-        config.GasRegistry[SimTestHelpers.SecondGasId] = second;
+        config.GasRegistry.Replace(SimTestHelpers.SecondGasId, second);
         using var simulation = new AtmosSimulation(config, 1, 1, 1);
         var source = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
         var target = SimTestHelpers.CreateOpenChunk(simulation, new Int3(1, 0, 0));

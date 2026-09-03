@@ -12,7 +12,7 @@ namespace Numos.CoreSim;
 internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
 {
     private Scalar[] _diffusionCoefficients = [];
-    private GasProperties[] _gasRegistry = [];
+    private GasRegistrySnapshot _gasRegistry = default!;
     private int _gasRegistryCount;
     private JoulePerMoleKelvin[] _molarHeatCapacitiesAtConstantVolume = [];
 
@@ -73,11 +73,10 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
 
     internal void Capture(AtmosConfig config)
     {
-        List<GasProperties> gasRegistry = config.GasRegistry;
+        GasRegistry gasRegistry = config.GasRegistry;
         int previousGasRegistryCount = _gasRegistryCount;
-        if (_gasRegistry.Length < gasRegistry.Count)
+        if (_molarHeatCapacitiesAtConstantVolume.Length < gasRegistry.Count)
         {
-            Array.Resize(ref _gasRegistry, gasRegistry.Count);
             Array.Resize(ref _molarHeatCapacitiesAtConstantVolume, gasRegistry.Count);
             Array.Resize(ref _diffusionCoefficients, gasRegistry.Count);
         }
@@ -110,10 +109,10 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
             ? config.SpaceTemperature
             : AtmosConfigDefaults.SpaceTemperature;
 
+        _gasRegistry = new GasRegistrySnapshot(gasRegistry);
         for (int gasId = 0; gasId < _gasRegistryCount; gasId++)
         {
             var properties = gasRegistry[gasId];
-            _gasRegistry[gasId] = properties;
             _molarHeatCapacitiesAtConstantVolume[gasId] =
                 FloatMath.IsFinitePositive(properties.MolarHeatCapacityAtConstantVolume)
                     ? properties.MolarHeatCapacityAtConstantVolume
@@ -125,7 +124,6 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
         if (_gasRegistryCount < previousGasRegistryCount)
         {
             int removedCount = previousGasRegistryCount - _gasRegistryCount;
-            Array.Clear(_gasRegistry, _gasRegistryCount, removedCount);
             Array.Clear(_molarHeatCapacitiesAtConstantVolume, _gasRegistryCount, removedCount);
             Array.Clear(_diffusionCoefficients, _gasRegistryCount, removedCount);
         }
@@ -146,27 +144,8 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
         AccumulatorMaxAliveTicks = Math.Max(0, config.AccumulatorMaxAliveTicks);
     }
 
-    // Not super efficient
-    // Wont be called much if ever so doesn't matter
-    public int GasIdToIndex(string gasId)
-    {
-        var index = Array.FindIndex(_gasRegistry, gas => gas.Name == gasId);
-
-        if (index == -1)
-            throw new KeyNotFoundException($"No gas registered with id '{gasId}'.");
-
-        return index;
-    }
-
     public void ValidateGasRegistry()
     {
-        var duplicates = _gasRegistry
-            .GroupBy(g => g.Name)
-            .Where(group => group.Count() > 1)
-            .Select(group => group.Key)
-            .ToList();
-
-        if (duplicates.Count > 0)
-            throw new InvalidOperationException($"Duplicate gas names found: {string.Join(", ", duplicates)}");
+        _gasRegistry.ValidateGasRegistry();
     }
 }
