@@ -2,6 +2,7 @@
     <Folder Name="/Tests/">
         <Project Path="tests\Numos.API.Dangerous.Tests\Numos.API.Dangerous.Tests.csproj"/>
         <Project Path="tests\Numos.API.Tests\Numos.API.Tests.csproj"/>
+        <Project Path="tests\Numos.Collections.Tests\Numos.Collections.Tests.csproj"/>
         <Project Path="tests\Numos.CoreSim.IntegrationTests\Numos.CoreSim.IntegrationTests.csproj"/>
         <Project Path="tests\Numos.CoreSim.Tests\Numos.CoreSim.Tests.csproj"/>
         <Project Path="tests\Numos.Headless.Tests\Numos.Headless.Tests.csproj"/>
@@ -12,6 +13,7 @@
 
     <Project Path="src\Numos.API.Dangerous\Numos.API.Dangerous.csproj"/>
     <Project Path="src\Numos.API\Numos.API.csproj"/>
+    <Project Path="src\Numos.Collections\Numos.Collections.csproj"/>
     <Project Path="src\Numos.CoreSim\Numos.CoreSim.csproj"/>
     <Project Path="src\Numos.Headless\Numos.Headless.csproj"/>
     <Project Path="src\Numos.Maths\Numos.Maths.csproj"/>
