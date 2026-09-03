@@ -145,4 +145,28 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
         AccumulatorWakeThreshold = FloatMath.GetNonnegativeFinite(config.AccumulatorWakeThreshold);
         AccumulatorMaxAliveTicks = Math.Max(0, config.AccumulatorMaxAliveTicks);
     }
+
+    // Not super efficient
+    // Wont be called much if ever so doesn't matter
+    public int GasIdToIndex(string gasId)
+    {
+        var index = Array.FindIndex(_gasRegistry, gas => gas.Name == gasId);
+
+        if (index == -1)
+            throw new KeyNotFoundException($"No gas registered with id '{gasId}'.");
+
+        return index;
+    }
+
+    public void ValidateGasRegistry()
+    {
+        var duplicates = _gasRegistry
+            .GroupBy(g => g.Name)
+            .Where(group => group.Count() > 1)
+            .Select(group => group.Key)
+            .ToList();
+
+        if (duplicates.Count > 0)
+            throw new InvalidOperationException($"Duplicate gas names found: {string.Join(", ", duplicates)}");
+    }
 }

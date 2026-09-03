@@ -24,4 +24,6 @@ internal interface IAtmosConfig
     JoulePerMoleKelvin GetMolarHeatCapacityAtConstantVolume(int gasId);
     Scalar GetDiffusionCoefficient(int gasId);
     bool TryGetGasProperties(int gasId, out GasProperties properties);
+    public int GasIdToIndex(string gasId);
+    public void ValidateGasRegistry();
 }

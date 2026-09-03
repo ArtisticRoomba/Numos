@@ -85,7 +85,7 @@ internal sealed class SimulationSession : IDisposable
                 if (gas == null)
                     throw new HeadlessRequestException("invalidGas", "The gases array cannot contain null entries.");
 
-                config.GasRegistry.Add(gas.ToGasProperties());
+                config.RegisterGas(gas.ToGasProperties());
             }
         }
 
@@ -191,7 +191,7 @@ internal sealed class SimulationSession : IDisposable
         var config = _config!;
         var definition = Require(request.Gas, "gas");
         int gasId = config.GasRegistry.Count;
-        config.GasRegistry.Add(definition.ToGasProperties());
+        config.RegisterGas(definition.ToGasProperties());
         return new CommandExecution(new CommandResult { GasId = gasId });
     }
 

@@ -65,6 +65,7 @@ internal sealed partial class AtmosKernel : IDisposable, IAtmosSolverWorld
         _isTickExecuting = true;
         try
         {
+            _config.ValidateGasRegistry();
             _tickConfig.Capture(_config);
             TickCount++;
 

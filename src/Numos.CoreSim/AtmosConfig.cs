@@ -146,6 +146,8 @@ public class AtmosConfig : IAtmosConfig
     /// </summary>
     public int AccumulatorMaxAliveTicks { get; set; } = AtmosConfigDefaults.AccumulatorMaxAliveTicks;
 
+    private Dictionary<string, int> _gasIdMap { get; set; } = [];
+
     public PascalPerMoleKelvin PressurePerMoleKelvin =>
         AtmosPhysicalConstants.MolarGasConstant / GetVoxelVolume();
 
@@ -194,5 +196,39 @@ public class AtmosConfig : IAtmosConfig
 
         properties = default;
         return false;
+    }
+
+    public int GasIdToIndex(string gasId)
+    {
+        if (_gasIdMap.TryGetValue(gasId, out var index))
+            return index;
+
+        index = GasRegistry.FindIndex(gas => gas.Name == gasId);
+
+        if (index == -1)
+            throw new KeyNotFoundException($"No gas registered with id '{gasId}'.");
+
+        _gasIdMap[gasId] = index;
+        return index;
+    }
+
+    public void ValidateGasRegistry()
+    {
+        var duplicates = GasRegistry
+            .GroupBy(g => g.Name)
+            .Where(group => group.Count() > 1)
+            .Select(group => group.Key)
+            .ToList();
+
+        if (duplicates.Count > 0)
+            throw new InvalidOperationException($"Duplicate gas names found: {string.Join(", ", duplicates)}");
+    }
+
+    public void RegisterGas(GasProperties gas)
+    {
+        if (GasRegistry.Any(g => g.Name == gas.Name))
+            throw new InvalidOperationException($"A gas named '{gas.Name}' is already registered.");
+
+        GasRegistry.Add(gas);
     }
 }

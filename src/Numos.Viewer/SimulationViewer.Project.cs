@@ -44,8 +44,8 @@ public partial class SimulationViewer
         var config = new AtmosConfig();
         if (includeDefaultGases)
         {
-            config.GasRegistry.Add(Oxygen);
-            config.GasRegistry.Add(Nitrogen);
+            config.RegisterGas(Oxygen);
+            config.RegisterGas(Nitrogen);
         }
 
         AtmosSimulation? simulation = null;
@@ -184,7 +184,7 @@ public partial class SimulationViewer
         }
 
         gas.Name = name;
-        _config.GasRegistry.Add(gas);
+        _config.RegisterGas(gas);
         SetProjectMessage($"Added gas {name} with ID {_config.GasRegistry.Count - 1}.", false);
     }
 

@@ -494,7 +494,7 @@ public sealed class SimulationFrameBuilderTests
     public void GasComposition_GasRegistryNameChange_AdvancesLegendRevision()
     {
         var config = new AtmosConfig();
-        config.GasRegistry.Add(new GasProperties { Name = "Before" });
+        config.RegisterGas(new GasProperties { Name = "Before" });
         var registry = VisualizationRegistry.CreateDefault(config);
         var visualization = registry.GetRequired(BuiltInVisualizationIds.GasComposition);
         ulong before = visualization.MappingRevision;

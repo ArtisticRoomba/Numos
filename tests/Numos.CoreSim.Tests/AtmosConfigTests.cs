@@ -59,7 +59,7 @@ public sealed class AtmosConfigTests
         var first = new AtmosConfig();
         var second = new AtmosConfig();
 
-        first.GasRegistry.Add(
+        first.RegisterGas(
             new GasProperties
             {
                 Name = "Test gas"
