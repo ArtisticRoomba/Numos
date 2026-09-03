@@ -1,32 +1,20 @@
 using Numos.Maths;
 
-namespace Numos.CoreSim.Collections;
+namespace Numos.Collections;
 
 /// <summary>
 ///     2-3D to 1D mapping for an array.
 /// </summary>
 /// <typeparam name="T">The type of data to store in the array.</typeparam>
-/// <para>
-///     Super basic helper struct that wraps an array and allows for 2D/3D indexing in sim ctx.
-///     Struct so that we don't double-lookup on the reference, as this is basically just an array extension.
-/// </para>
-/// <para>
-///     Because this is wrapped in a struct with a stable surface exposed,
-///     we can technically swap out the underlying impl whenever we want to microopt.
-/// </para>
-internal readonly struct FlatArray<T>
+public readonly struct FlatArray<T>
 {
     /// <summary>
     ///     Internal backing array.
     /// </summary>
-    /// <remarks>
-    ///     Marked as private to prevent sim from relying on whatever mapping is in the array.
-    ///     Sim should access this via an API.
-    /// </remarks>
     private readonly T[] _data;
 
     /// <summary>
-    ///     Number of elements along each axis.
+    ///     Maximum number of elements along each axis.
     /// </summary>
     private readonly Int3 _dimensions;
 
@@ -36,12 +24,12 @@ internal readonly struct FlatArray<T>
     public bool IsInitialized => _data != null;
 
     /// <summary>
-    ///     The number of elements in the array.
+    ///     The total number of elements in the array.
     /// </summary>
     public int Length => _data?.Length ?? 0;
 
     /// <summary>
-    ///     The number of elements along each axis.
+    ///     Maximum number of elements along each axis.
     /// </summary>
     public Int3 Dimensions => _dimensions;
 
@@ -166,9 +154,12 @@ internal readonly struct FlatArray<T>
     }
 
     /// <summary>
-    ///     Returns a live span over the backing storage for the opt-in dangerous API.
+    ///     Returns a live span over the backing storage.
     /// </summary>
-    internal Span<T> AsSpan()
+    /// <remarks>
+    ///     This is a dangerous method that bypasses the API, use this method carefully.
+    /// </remarks>
+    public Span<T> AsSpan()
     {
         return _data.AsSpan();
     }
