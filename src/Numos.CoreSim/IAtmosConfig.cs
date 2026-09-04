@@ -1,3 +1,6 @@
+using System.Diagnostics.CodeAnalysis;
+using Numos.CoreSim.GasReactions;
+
 namespace Numos.CoreSim;
 
 internal interface IAtmosConfig
@@ -24,4 +27,11 @@ internal interface IAtmosConfig
     JoulePerMoleKelvin GetMolarHeatCapacityAtConstantVolume(int gasId);
     Scalar GetDiffusionCoefficient(int gasId);
     bool TryGetGasProperties(int gasId, out GasProperties properties);
+
+    int GasPropertyCount { get; }
+
+    
+    bool TryGetGasReaction(int reactionId, [NotNullWhen(true)] out IGasReaction? reaction);
+
+    int GasReactionCount { get; }
 }

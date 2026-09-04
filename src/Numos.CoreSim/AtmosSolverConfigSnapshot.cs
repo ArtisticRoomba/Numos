@@ -1,3 +1,5 @@
+using System.Diagnostics.CodeAnalysis;
+using Numos.CoreSim.GasReactions;
 using Numos.Maths;
 
 namespace Numos.CoreSim;
@@ -15,6 +17,9 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
     private GasProperties[] _gasRegistry = [];
     private int _gasRegistryCount;
     private JoulePerMoleKelvin[] _molarHeatCapacitiesAtConstantVolume = [];
+
+    private IGasReaction[] _reactionsRegistry = [];
+    private int _reactionRegistryCount;
 
     public Kelvin GlobalTemperature { get; private set; }
     public Kelvin DefaultTemperatureFallback { get; private set; }
@@ -71,6 +76,19 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
         return false;
     }
 
+    public int GasPropertyCount => _gasRegistryCount;
+    public bool TryGetGasReaction(int reactionId, [NotNullWhen(true)] out IGasReaction? reaction)
+    {
+        reaction = null;
+        if (reactionId >= _reactionRegistryCount)
+            return false;
+
+        reaction = _reactionsRegistry[reactionId];
+        return true;
+    }
+
+    public int GasReactionCount => _reactionRegistryCount;
+
     internal void Capture(AtmosConfig config)
     {
         List<GasProperties> gasRegistry = config.GasRegistry;
@@ -81,7 +99,7 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
             Array.Resize(ref _molarHeatCapacitiesAtConstantVolume, gasRegistry.Count);
             Array.Resize(ref _diffusionCoefficients, gasRegistry.Count);
         }
-
+        
         _gasRegistryCount = gasRegistry.Count;
         GlobalTemperature = FloatMath.IsFinitePositive(config.GlobalTemperature)
             ? config.GlobalTemperature
@@ -144,5 +162,21 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
 
         AccumulatorWakeThreshold = FloatMath.GetNonnegativeFinite(config.AccumulatorWakeThreshold);
         AccumulatorMaxAliveTicks = Math.Max(0, config.AccumulatorMaxAliveTicks);
+
+
+        int previousReactionRegistryCount = _reactionRegistryCount;
+
+        if (_reactionRegistryCount < config.GasReactionCount)
+        {
+            Array.Resize(ref _reactionsRegistry, config.GasReactionCount);
+        }
+
+        _reactionRegistryCount = config.GasReactionCount;
+
+        for (int i = 0; i < config.GasReactionCount; i++)
+        {
+            if (config.TryGetGasReaction(i, out var reaction))
+                _reactionsRegistry[i] = reaction;
+        }
     }
 }
