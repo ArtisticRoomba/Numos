@@ -1,4 +1,3 @@
-using System.Collections.Immutable;
 using Numos.CoreSim.GasReactions;
 using Numos.CoreSim.Solvers;
 
@@ -7,9 +6,9 @@ namespace Numos.CoreSim.Tests;
 public class GasReactionTests
 {
     /// <summary>
-    /// Create a random reaction and gas set.
-    /// Fill a chunk with random gas.
-    /// Run reaction over time.
+    ///     Create a random reaction and gas set.
+    ///     Fill a chunk with random gas.
+    ///     Run reaction over time.
     /// </summary>
     [Test]
     public void RandomReactionMatrix()
@@ -17,26 +16,26 @@ public class GasReactionTests
         Random random = new(42);
         //create random gases
         List<GasProperties> gases = [];
-        for (var i = 0; i < 16; i++)
+        for (int i = 0; i < 16; i++)
         {
-            var bp = 10 + random.NextSingle() * 100;
+            float bp = 10 + random.NextSingle() * 100;
             gases.Add(
-                new()
+                new GasProperties
                 {
                     BoilingPoint = bp,
                     MolarEnthalpyOfVaporization = random.NextSingle(),
                     Name = ((char)('a' + i)).ToString(),
-                    MolarHeatCapacityAtConstantVolume = random.NextSingle() * 10000,
+                    MolarHeatCapacityAtConstantVolume = random.NextSingle() * 10000
                 });
         }
 
         //create random reactions.
-        var gasArray = gases.ToArray();
+        GasProperties[] gasArray = gases.ToArray();
         List<StandardGasReaction> standardReactions = [];
-        for (var i = 0; i < 16 * 2; i++)
+        for (int i = 0; i < 16 * 2; i++)
         {
             Dictionary<GasProperties, float> input = [];
-            var inputCounts = random.Next(3) + 2;
+            int inputCounts = random.Next(3) + 2;
             while (inputCounts > 0)
             {
                 if (input.TryAdd(random.GetItems(gasArray, 1)[0], random.NextSingle()))
@@ -44,7 +43,7 @@ public class GasReactionTests
             }
 
             Dictionary<GasProperties, float> output = [];
-            var outputCounts = random.Next(1) + 1;
+            int outputCounts = random.Next(1) + 1;
 
             while (outputCounts > 0)
             {
@@ -62,22 +61,23 @@ public class GasReactionTests
                 speedFactors.Add(gas, random.NextSingle() - 0.5f + random.Next(5) - 2);
             }
 
-            standardReactions.Add(new(input, output, energyBalance, arrheniusFactor, activationEnergy, speedFactors));
+            standardReactions.Add(
+                new StandardGasReaction(input, output, energyBalance, arrheniusFactor, activationEnergy, speedFactors));
         }
 
         //setup simulation
-        var config = new AtmosConfig()
+        var config = new AtmosConfig
         {
-            GasRegistry = gases,
-            StandardGasReactions = standardReactions,
+            GasRegistry = [.. gases],
+            StandardGasReactions = standardReactions
         };
 
         var snapshotConfig = new AtmosSolverConfigSnapshot();
         snapshotConfig.Capture(config);
-        
+
         var solver = new ReactionSolver();
 
-        var chunk = new AtmosChunk(16, 16, 16);
+        var chunk = new AtmosChunk();
 //setup voxel with random shit.
         for (ushort i = 0; i < chunk.VoxelCount && i < chunk.MaxActiveRooms; i++)
         {
@@ -90,68 +90,68 @@ public class GasReactionTests
         }
 
         //run reactions. wheeeeee
-        var totalReactions = new float[standardReactions.Count];
+        float[] totalReactions = new float[standardReactions.Count];
         for (float i = 0; i < 10; i += 0.125f)
             solver.ProcessChunk(chunk, 0.125f, snapshotConfig, totalReactions);
-       
+
 
         Assert.That(totalReactions.All(e => !float.IsNaN(e)));
-        var totalReactionSum = totalReactions.Sum();
-        
+        float totalReactionSum = totalReactions.Sum();
+
         //sum reaction amounts
         foreach (var gc in chunk.ActiveGases)
         {
-            var x = gc.Moles.Where(e => float.IsNaN(e)).ToArray();
+            Single[] x = gc.Moles.Where(e => float.IsNaN(e)).ToArray();
             Assert.That(x.Length == 0);
         }
-        
+
         Assert.That(totalReactionSum > 0);
     }
 
     [Test]
     public void MixingWater()
     {
-        var hydrogen = new GasProperties()
+        var hydrogen = new GasProperties
         {
             BoilingPoint = 20.271f,
             MolarEnthalpyOfVaporization = 0.904f,
             Name = "Hydrogen",
-            MolarHeatCapacityAtConstantVolume = 14303.571f,
+            MolarHeatCapacityAtConstantVolume = 14303.571f
         };
 
-        var oxygen = new GasProperties()
+        var oxygen = new GasProperties
         {
             BoilingPoint = 90.188f,
             MolarEnthalpyOfVaporization = 6.82f,
             Name = "Oxygen",
-            MolarHeatCapacityAtConstantVolume = 918.12f,
+            MolarHeatCapacityAtConstantVolume = 918.12f
         };
 
-        var water = new GasProperties()
+        var water = new GasProperties
         {
             BoilingPoint = 373.13f,
             MolarEnthalpyOfVaporization = 40.65f,
-            Name = "Oxygen",
-            MolarHeatCapacityAtConstantVolume = 36500f,
+            Name = "Water",
+            MolarHeatCapacityAtConstantVolume = 36500f
         };
 
         var waterSynthesis = new StandardGasReaction(
-            new Dictionary<GasProperties, float>()
+            new Dictionary<GasProperties, float>
                 { { hydrogen, 2 }, { oxygen, 1 } },
-            new Dictionary<GasProperties, float>()
+            new Dictionary<GasProperties, float>
             {
                 { water, 2 }
             },
             285.8f,
             1.8e13f,
             146.4f,
-            new Dictionary<GasProperties, float>()
+            new Dictionary<GasProperties, float>
             {
                 { hydrogen, 1 },
                 { oxygen, 0.5f }
             });
 
-        var config = new AtmosConfig()
+        var config = new AtmosConfig
         {
             GasRegistry = [hydrogen, oxygen, water],
             StandardGasReactions = [waterSynthesis]
@@ -159,7 +159,7 @@ public class GasReactionTests
 
         var solver = new ReactionSolver();
 
-        var chunk = new AtmosChunk(16, 16, 16);
+        var chunk = new AtmosChunk();
         for (ushort i = 0; i < 16 * 16 * 16 && i < chunk.MaxActiveRooms; i++)
         {
             chunk.VoxelRoomMap[i] = i;
@@ -170,7 +170,7 @@ public class GasReactionTests
         }
 
         float[] feedback = [0];
-        for (var r = 0; r < 100; r++)
+        for (int r = 0; r < 100; r++)
         {
             solver.ProcessChunk(chunk, 1, config, feedback);
             for (ushort i = 0; i < 16 * 16 * 16 && i < chunk.MaxActiveRooms; i++)

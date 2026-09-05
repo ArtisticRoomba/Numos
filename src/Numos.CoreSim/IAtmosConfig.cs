@@ -30,7 +30,7 @@ internal interface IAtmosConfig
 
     int GasPropertyCount { get; }
 
-    
+
     bool TryGetGasReaction(int reactionId, [NotNullWhen(true)] out IGasReaction? reaction);
 
     int GasReactionCount { get; }

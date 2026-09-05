@@ -4,23 +4,23 @@ using Numos.Units;
 namespace Numos.CoreSim.GasReactions;
 
 /// <summary>
-/// Description of a reaction within the solver.
+///     Description of a reaction within the solver.
 /// </summary>
 public interface IGasReaction
 {
     /// <summary>
-    /// GasID to changes in Mol/L. Positive add, negative subtracts
+    ///     GasID to changes in Mol/L. Positive add, negative subtracts
     /// </summary>
     [ElementQuantity("amount")]
-    public FrozenDictionary<int, Mole> ChangeEquation { get; }
+    FrozenDictionary<int, Mole> ChangeEquation { get; }
     /// <summary>
-    /// The amount of J this reaction produces or consumes.
+    ///     The amount of J this reaction produces or consumes.
     /// </summary>
     [Quantity("energy")]
     Joule EnergyBalance { get; }
 
     /// <summary>
-    /// Calculates the reaction speed (Mol/L/s) given a molarityVector (aligned to gas ids) and a temperature value
+    ///     Calculates the reaction speed (Mol/L/s) given a molarityVector (aligned to gas ids) and a temperature value
     /// </summary>
     /// <param name="molarityVector">Index = GasId</param>
     /// <param name="temperature"></param>

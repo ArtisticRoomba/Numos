@@ -161,6 +161,7 @@ public sealed class DimensionalAnalysisAnalyzer : DiagnosticAnalyzer
                                 operation.Parameter.Name,
                                 target));
                     }
+
                     return;
                 }
                 case RefKind.Ref:
@@ -177,6 +178,7 @@ public sealed class DimensionalAnalysisAnalyzer : DiagnosticAnalyzer
                                 operation.Parameter.Name,
                                 declared));
                     }
+
                     return;
                 }
                 default:
@@ -192,6 +194,7 @@ public sealed class DimensionalAnalysisAnalyzer : DiagnosticAnalyzer
                                 operation.Parameter.Name,
                                 declared));
                     }
+
                     return;
                 }
             }

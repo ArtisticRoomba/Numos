@@ -67,7 +67,7 @@ public readonly partial record struct StandardGasReaction
     private PerSecond GetRateConstant(Kelvin temperatureKelvin)
     {
         return ArrheniusFactor *
-               MathF.Exp((-ActivationEnergy * 0.001f) / (temperatureKelvin * AtmosPhysicalConstants.MolarGasConstant));
+               MathF.Exp(-ActivationEnergy * 0.001f / (temperatureKelvin * AtmosPhysicalConstants.MolarGasConstant));
     }
 
     /// <summary>
@@ -85,9 +85,9 @@ public readonly partial record struct StandardGasReaction
         if (result <= 0)
             return 0;
 
-        foreach (var factor in SpeedFactors)
+        foreach (KeyValuePair<GasProperties, float> factor in SpeedFactors)
         {
-            if (!gasMolarities.TryGetValue(factor.Key, out var molar)) molar = 0;
+            if (!gasMolarities.TryGetValue(factor.Key, out float molar)) molar = 0;
 
             result *= MathF.Pow(molar, factor.Value);
             if (result <= 0)

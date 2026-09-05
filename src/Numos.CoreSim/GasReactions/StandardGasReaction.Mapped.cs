@@ -6,20 +6,28 @@ namespace Numos.CoreSim.GasReactions;
 public readonly partial record struct StandardGasReaction
 {
     /// <summary>
-    /// A wrapper for StandardGasReactions optimized for lookup speed.
+    ///     A wrapper for StandardGasReactions optimized for lookup speed.
     /// </summary>
     internal readonly record struct Mapped : IGasReaction
     {
-        public Mapped(StandardGasReaction original, IList<GasProperties> properties)
+        public Mapped(StandardGasReaction original, IGasRegistry gasRegistry)
         {
             Original = original;
 
-            var mappedInputs = original.Input.ToFrozenDictionary(e => properties.IndexOf(e.Key), e => e.Value);
-            var mappedOutputs = original.Output.ToFrozenDictionary(e => properties.IndexOf(e.Key), e => e.Value);
-            MappedFactors = original.SpeedFactors.ToFrozenDictionary(e => properties.IndexOf(e.Key), e => e.Value);
+            FrozenDictionary<int, Mole> mappedInputs = original.Input.ToFrozenDictionary(
+                e => gasRegistry.GasIdToIndex(e.Key.Name),
+                e => e.Value);
+
+            FrozenDictionary<int, Mole> mappedOutputs = original.Output.ToFrozenDictionary(
+                e => gasRegistry.GasIdToIndex(e.Key.Name),
+                e => e.Value);
+
+            MappedFactors = original.SpeedFactors.ToFrozenDictionary(
+                e => gasRegistry.GasIdToIndex(e.Key.Name),
+                e => e.Value);
 
             var changeEquation = new Dictionary<int, Mole>();
-            foreach (var gas in mappedInputs.Keys.Concat(mappedOutputs.Keys).Distinct())
+            foreach (int gas in mappedInputs.Keys.Concat(mappedOutputs.Keys).Distinct())
                 changeEquation[gas] = mappedOutputs.GetValueOrDefault(gas) - mappedInputs.GetValueOrDefault(gas);
 
             ChangeEquation = changeEquation.ToFrozenDictionary();
@@ -28,12 +36,12 @@ public readonly partial record struct StandardGasReaction
         private StandardGasReaction Original { get; }
 
         private FrozenDictionary<int, float> MappedFactors { get; }
-        /// <inheritdoc/>
+        /// <inheritdoc />
         public Joule EnergyBalance => Original.EnergyBalance;
-        /// <inheritdoc/>
+        /// <inheritdoc />
         public FrozenDictionary<int, Mole> ChangeEquation { get; }
 
-        /// <inheritdoc/>
+        /// <inheritdoc />
         public PerSecond GetReactionSpeed(Mole[] molarityVector, Kelvin temperature)
         {
             PerSecond result = Original.GetRateConstant(temperature);
@@ -46,7 +54,7 @@ public readonly partial record struct StandardGasReaction
                 MappedFactors,
                 (factor, loop) =>
                 {
-                    var f = MathF.Pow(molarityVector[factor.Key], factor.Value);
+                    float f = MathF.Pow(molarityVector[factor.Key], factor.Value);
                     if (!float.IsNormal(f) || f == 0)
                     {
                         loop.Stop();
@@ -59,7 +67,7 @@ public readonly partial record struct StandardGasReaction
             if (!state.IsCompleted)
                 return 0;
 
-            foreach (var p in parts)
+            foreach (float p in parts)
             {
                 result *= p;
             }

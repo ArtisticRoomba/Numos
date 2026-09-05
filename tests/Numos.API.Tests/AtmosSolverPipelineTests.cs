@@ -21,7 +21,7 @@ public sealed class AtmosSolverPipelineTests
                     new AtmosSolverStep(AtmosBuiltInSolvers.BoundaryFlow, true, AtmosSolverKind.BuiltIn),
                     new AtmosSolverStep(AtmosBuiltInSolvers.Thermodynamics, true, AtmosSolverKind.BuiltIn),
                     new AtmosSolverStep(AtmosBuiltInSolvers.ThermalBoundary, true, AtmosSolverKind.BuiltIn),
-                    new AtmosSolverStep(AtmosBuiltInSolvers.GasReactions, true, AtmosSolverKind.BuiltIn),
+                    new AtmosSolverStep(AtmosBuiltInSolvers.GasReactions, true, AtmosSolverKind.BuiltIn)
                 }));
     }
 
@@ -415,7 +415,7 @@ public sealed class AtmosSolverPipelineTests
                     (AtmosBuiltInSolvers.BoundaryFlow, true),
                     (AtmosBuiltInSolvers.Thermodynamics, true),
                     (AtmosBuiltInSolvers.ThermalBoundary, true),
-                    (AtmosBuiltInSolvers.GasReactions, true),
+                    (AtmosBuiltInSolvers.GasReactions, true)
                 }));
     }
 

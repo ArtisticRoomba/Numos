@@ -1,5 +1,5 @@
-using Numos.CoreSim.Datatypes.Primitives;
 using Numos.Collections;
+using Numos.CoreSim.Datatypes.Primitives;
 using Numos.Maths;
 
 namespace Numos.CoreSim.Tests;

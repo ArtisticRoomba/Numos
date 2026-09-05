@@ -92,7 +92,7 @@ public readonly partial record struct LinearGasReaction
         float valAtLow, float speedRange)
     {
         // Normalize value into [0, 1].
-        var t = (value - lowBound) / boundaryRange;
+        float t = (value - lowBound) / boundaryRange;
         // eval boundaries.
         if (float.IsNaN(t)) return 0;
 
@@ -140,7 +140,7 @@ public readonly partial record struct LinearGasReaction
     {
         return SpeedFactors.AsParallel().Select(factor =>
         {
-            gasMolarities.TryGetValue(factor.Gas, out var molarity);
+            gasMolarities.TryGetValue(factor.Gas, out float molarity);
             return factor.GetFactor(molarity);
         }).Append(GetRateConstantForTemperature(temperature)).Aggregate((a, b) => a * b);
     }

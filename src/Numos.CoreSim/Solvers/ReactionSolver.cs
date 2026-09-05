@@ -10,7 +10,7 @@ internal class ReactionSolver : IAtmosSolverStage
         if (context.TickConfig.GasReactionCount == 0 || context.TickConfig.GasPropertyCount == 0)
             return;
 
-        Parallel.ForEach(context.Chunks, (chunk) => ProcessChunk(chunk, AtmosSolverConstants.FixedTimeStep, context.TickConfig, null));
+        Parallel.ForEach(context.Chunks, chunk => ProcessChunk(chunk, AtmosSolverConstants.FixedTimeStep, context.TickConfig));
 
         //foreach (var chunk in context.Chunks)
         {
@@ -19,7 +19,7 @@ internal class ReactionSolver : IAtmosSolverStage
     }
 
     /// <summary>
-    /// wrapping core solver into a chunk.
+    ///     wrapping core solver into a chunk.
     /// </summary>
     /// <param name="chunk"></param>
     /// <param name="deltaTime">Over which timespan reactions should occur.</param>
@@ -38,11 +38,11 @@ internal class ReactionSolver : IAtmosSolverStage
         Parallel.For(
             0,
             voxelCount,
-            (int voxelIndex) =>
+            voxelIndex =>
                 //  for (var voxelIndex = 0; voxelIndex < voxelCount; voxelIndex++)
             {
                 Kelvin temp = chunk.Temperature[voxelIndex];
-                var reactionFeedback = reactionCount == null ? null : ArrayPool<Scalar>.Shared.Rent(config.GasReactionCount);
+                Scalar[]? reactionFeedback = reactionCount == null ? null : ArrayPool<Scalar>.Shared.Rent(config.GasReactionCount);
                 if (reactionFeedback != null)
                     Array.Clear(reactionFeedback, 0, reactionFeedback.Length);
 
@@ -54,7 +54,7 @@ internal class ReactionSolver : IAtmosSolverStage
                 Mole content = 0f;
                 Array.Clear(mixtureVector, 0, mixtureLength);
 
-                for (var i = 0; i < chunk.ActiveGasCount; i++)
+                for (int i = 0; i < chunk.ActiveGasCount; i++)
                 {
                     //check if gas id is outside of config.
                     if (chunk.ActiveGases[i].GasId >= config.GasPropertyCount || chunk.ActiveGases[i].GasId < 0)
@@ -90,7 +90,7 @@ internal class ReactionSolver : IAtmosSolverStage
         for (ushort voxelIndex = 0; voxelIndex < voxelCount; voxelIndex++)
         {
             Mole[] mixtureVector = newMixtures[voxelIndex];
-            var c = chunk.ActiveGasCount;
+            int c = chunk.ActiveGasCount;
             //adjust moles from the mixture vector
             foreach (var gasChannel in chunk.ActiveGases.Take(c))
             {
@@ -137,7 +137,7 @@ internal class ReactionSolver : IAtmosSolverStage
 
         if (reactionCount != null && reactionFeedbacks != null)
         {
-            foreach (var feedback in reactionFeedbacks)
+            foreach (Scalar[] feedback in reactionFeedbacks)
             {
                 for (int i = 0; i < reactionCount.Length; i++)
                 {
@@ -169,7 +169,7 @@ internal class ReactionSolver : IAtmosSolverStage
     }
 
     /// <summary>
-    /// Core solver.
+    ///     Core solver.
     /// </summary>
     /// <param name="deltaTime"></param>
     /// <param name="mixtureVector">a vector describing molarity of the mixture (mol/l)</param>
@@ -185,7 +185,7 @@ internal class ReactionSolver : IAtmosSolverStage
         //make sure in single step we dont overstep.
 
         //split our time interval into smaller steps.
-        var reactionCount = config.GasReactionCount;
+        int reactionCount = config.GasReactionCount;
         Scalar[] reactionSpeeds = ArrayPool<Scalar>.Shared.Rent(reactionCount);
 
         //prep array.
@@ -197,7 +197,7 @@ internal class ReactionSolver : IAtmosSolverStage
         Parallel.For(
             0,
             reactionCount,
-            (int i) =>
+            i =>
             {
                 if (!config.TryGetGasReaction(i, out var e))
                     return;
@@ -217,11 +217,11 @@ internal class ReactionSolver : IAtmosSolverStage
         //adjusts reactions speed as to not consume our available material in a single step.
         while (true)
         {
-            var criticalIndex = -1;
+            int criticalIndex = -1;
             Mole criticalValue = 0;
             Mole criticalConsumption = 0;
             //check which consumption might go over available material
-            for (var i = 0; i < mixtureLength; i++)
+            for (int i = 0; i < mixtureLength; i++)
             {
                 //we calculate total consumption, ignoring production by reactions.
                 Mole consumption = Enumerable.Range(0, config.GasReactionCount).Select(e =>
@@ -289,9 +289,9 @@ internal class ReactionSolver : IAtmosSolverStage
         }
 
         //apply mixture, this also includes heat, since all change equations contain energy balance.
-        for (var i = 0; i < mixtureLength; i++)
+        for (int i = 0; i < mixtureLength; i++)
         {
-            for (var j = 0; j < reactionCount; j++)
+            for (int j = 0; j < reactionCount; j++)
             {
                 config.TryGetGasReaction(j, out var reaction);
                 mixtureVector[i] += reaction!.ChangeEquation.GetValueOrDefault(i) * reactionSpeeds[j];
@@ -307,7 +307,7 @@ internal class ReactionSolver : IAtmosSolverStage
         if (reactionFeedback != null)
         {
             //report feedback
-            for (var j = 0; j < reactionCount; j++)
+            for (int j = 0; j < reactionCount; j++)
             {
                 reactionFeedback[j] += reactionSpeeds[j];
             }
@@ -326,6 +326,6 @@ internal class ReactionSolver : IAtmosSolverStage
         // KE = (3/2) k * T <- see  Kinetic Molecular Theory. k is boltzmann constant, KE is kinetic energy.
         // Solving for T we get:
         // (KE * 2 )/3k = T
-        return (totalKineticEnergy * 2) / constantHelper;
+        return totalKineticEnergy * 2 / constantHelper;
     }
 }

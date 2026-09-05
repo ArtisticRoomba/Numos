@@ -33,7 +33,7 @@ public static class AtmosPhysicalConstants
     public const Kelvin RoomTemperature = 293.15f;
 
     /// <summary>
-    /// Boltzmann constant
+    ///     Boltzmann constant
     /// </summary>
     [Quantity("heatCapacity")]
     public const JoulePerKelvin BoltzmannConstant = 1.380649E-23f;

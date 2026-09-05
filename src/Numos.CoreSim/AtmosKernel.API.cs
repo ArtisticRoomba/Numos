@@ -193,6 +193,7 @@ internal sealed partial class AtmosKernel
     {
         lock (_stateGate)
         {
+            config.ValidateGasRegistry();
             _config = config ?? throw new ArgumentNullException(nameof(config));
             // Makes _tickConfig valid before first tick has been ran.
             if (!_configSet)

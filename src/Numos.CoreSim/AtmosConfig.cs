@@ -14,14 +14,14 @@ public class AtmosConfig : IAtmosConfig
     /// <summary>
     ///     List of gases actively registered to the sim.
     /// </summary>
-    public List<GasProperties> GasRegistry { get; set; } = [];
+    public GasRegistry GasRegistry { get; set; } = [];
 
     /// <summary>
-    /// List of gas reactions using a more efficient but less realistic linear model for rate speed.
+    ///     List of gas reactions using a more efficient but less realistic linear model for rate speed.
     /// </summary>
     public List<LinearGasReaction> LinearGasReactions { get; set; } = [];
     /// <summary>
-    /// List of gas reactions using the standard rate law.
+    ///     List of gas reactions using the standard rate law.
     /// </summary>
     public List<StandardGasReaction> StandardGasReactions { get; set; } = [];
 
@@ -207,6 +207,11 @@ public class AtmosConfig : IAtmosConfig
         return false;
     }
 
+    public void ValidateGasRegistry()
+    {
+        GasRegistry.ValidateGasRegistry();
+    }
+
     public int GasPropertyCount => GasRegistry.Count;
 
     public bool TryGetGasReaction(int reactionId, [NotNullWhen(true)] out IGasReaction? reaction)
@@ -224,6 +229,7 @@ public class AtmosConfig : IAtmosConfig
             reaction = new StandardGasReaction.Mapped(StandardGasReactions[reactionId], GasRegistry);
             return true;
         }
+
         return false;
     }
 

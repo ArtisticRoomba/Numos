@@ -234,7 +234,7 @@ public sealed class TopologyAndSymmetryTests
         config.ThermalConductance = thermalConductance;
         var gas = config.GasRegistry[SimTestHelpers.FirstGasId];
         gas.MolarHeatCapacityAtConstantVolume = 1f;
-        config.GasRegistry[SimTestHelpers.FirstGasId] = gas;
+        config.GasRegistry.Replace(SimTestHelpers.FirstGasId, gas);
         return config;
     }
 

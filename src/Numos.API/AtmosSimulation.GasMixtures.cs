@@ -664,7 +664,7 @@ public sealed partial class AtmosSimulation
         if (!float.IsFinite(fallback) || fallback <= 0f)
             fallback = AtmosConfigDefaults.DefaultMolarHeatCapacityAtConstantVolume;
 
-        List<GasProperties> registry = Config.GasRegistry;
+        GasRegistry registry = Config.GasRegistry;
         if ((uint)gasId < (uint)registry.Count)
         {
             float configured = registry[gasId].MolarHeatCapacityAtConstantVolume;

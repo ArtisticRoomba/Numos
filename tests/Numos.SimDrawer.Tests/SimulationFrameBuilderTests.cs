@@ -499,7 +499,7 @@ public sealed class SimulationFrameBuilderTests
         var visualization = registry.GetRequired(BuiltInVisualizationIds.GasComposition);
         ulong before = visualization.MappingRevision;
 
-        config.GasRegistry[0] = new GasProperties { Name = "After" };
+        config.GasRegistry.Replace(0, new GasProperties { Name = "After" });
 
         Assert.That(visualization.MappingRevision, Is.Not.EqualTo(before));
     }

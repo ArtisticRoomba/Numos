@@ -14,12 +14,10 @@ namespace Numos.CoreSim;
 internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
 {
     private Scalar[] _diffusionCoefficients = [];
-    private GasProperties[] _gasRegistry = [];
-    private int _gasRegistryCount;
+    private GasRegistrySnapshot _gasRegistry = default!;
     private JoulePerMoleKelvin[] _molarHeatCapacitiesAtConstantVolume = [];
 
     private IGasReaction[] _reactionsRegistry = [];
-    private int _reactionRegistryCount;
 
     public Kelvin GlobalTemperature { get; private set; }
     public Kelvin DefaultTemperatureFallback { get; private set; }
@@ -52,21 +50,21 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
 
     public JoulePerMoleKelvin GetMolarHeatCapacityAtConstantVolume(int gasId)
     {
-        return (uint)gasId < (uint)_gasRegistryCount
+        return (uint)gasId < (uint)GasPropertyCount
             ? _molarHeatCapacitiesAtConstantVolume[gasId]
             : DefaultMolarHeatCapacityAtConstantVolume;
     }
 
     public Scalar GetDiffusionCoefficient(int gasId)
     {
-        return (uint)gasId < (uint)_gasRegistryCount
+        return (uint)gasId < (uint)GasPropertyCount
             ? _diffusionCoefficients[gasId]
             : DefaultDiffusionCoefficient;
     }
 
     public bool TryGetGasProperties(int gasId, out GasProperties properties)
     {
-        if ((uint)gasId < (uint)_gasRegistryCount)
+        if ((uint)gasId < (uint)GasPropertyCount)
         {
             properties = _gasRegistry[gasId];
             return true;
@@ -76,31 +74,31 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
         return false;
     }
 
-    public int GasPropertyCount => _gasRegistryCount;
+    public int GasPropertyCount { get; private set; }
+
     public bool TryGetGasReaction(int reactionId, [NotNullWhen(true)] out IGasReaction? reaction)
     {
         reaction = null;
-        if (reactionId >= _reactionRegistryCount)
+        if (reactionId >= GasReactionCount)
             return false;
 
         reaction = _reactionsRegistry[reactionId];
         return true;
     }
 
-    public int GasReactionCount => _reactionRegistryCount;
+    public int GasReactionCount { get; private set; }
 
     internal void Capture(AtmosConfig config)
     {
-        List<GasProperties> gasRegistry = config.GasRegistry;
-        int previousGasRegistryCount = _gasRegistryCount;
-        if (_gasRegistry.Length < gasRegistry.Count)
+        GasRegistry gasRegistry = config.GasRegistry;
+        int previousGasRegistryCount = GasPropertyCount;
+        if (_molarHeatCapacitiesAtConstantVolume.Length < gasRegistry.Count)
         {
-            Array.Resize(ref _gasRegistry, gasRegistry.Count);
             Array.Resize(ref _molarHeatCapacitiesAtConstantVolume, gasRegistry.Count);
             Array.Resize(ref _diffusionCoefficients, gasRegistry.Count);
         }
-        
-        _gasRegistryCount = gasRegistry.Count;
+
+        GasPropertyCount = gasRegistry.Count;
         GlobalTemperature = FloatMath.IsFinitePositive(config.GlobalTemperature)
             ? config.GlobalTemperature
             : AtmosConfigDefaults.GlobalTemperature;
@@ -128,10 +126,10 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
             ? config.SpaceTemperature
             : AtmosConfigDefaults.SpaceTemperature;
 
-        for (int gasId = 0; gasId < _gasRegistryCount; gasId++)
+        _gasRegistry = new GasRegistrySnapshot(gasRegistry);
+        for (int gasId = 0; gasId < GasPropertyCount; gasId++)
         {
             var properties = gasRegistry[gasId];
-            _gasRegistry[gasId] = properties;
             _molarHeatCapacitiesAtConstantVolume[gasId] =
                 FloatMath.IsFinitePositive(properties.MolarHeatCapacityAtConstantVolume)
                     ? properties.MolarHeatCapacityAtConstantVolume
@@ -140,12 +138,11 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
             _diffusionCoefficients[gasId] = FloatMath.ClampUnitInterval(properties.DiffusionCoefficient);
         }
 
-        if (_gasRegistryCount < previousGasRegistryCount)
+        if (GasPropertyCount < previousGasRegistryCount)
         {
-            int removedCount = previousGasRegistryCount - _gasRegistryCount;
-            Array.Clear(_gasRegistry, _gasRegistryCount, removedCount);
-            Array.Clear(_molarHeatCapacitiesAtConstantVolume, _gasRegistryCount, removedCount);
-            Array.Clear(_diffusionCoefficients, _gasRegistryCount, removedCount);
+            int removedCount = previousGasRegistryCount - GasPropertyCount;
+            Array.Clear(_molarHeatCapacitiesAtConstantVolume, GasPropertyCount, removedCount);
+            Array.Clear(_diffusionCoefficients, GasPropertyCount, removedCount);
         }
 
         BulkFlowCoefficient = FloatMath.ClampUnitInterval(config.BulkFlowCoefficient);
@@ -164,19 +161,24 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
         AccumulatorMaxAliveTicks = Math.Max(0, config.AccumulatorMaxAliveTicks);
 
 
-        int previousReactionRegistryCount = _reactionRegistryCount;
+        int previousReactionRegistryCount = GasReactionCount;
 
-        if (_reactionRegistryCount < config.GasReactionCount)
+        if (GasReactionCount < config.GasReactionCount)
         {
             Array.Resize(ref _reactionsRegistry, config.GasReactionCount);
         }
 
-        _reactionRegistryCount = config.GasReactionCount;
+        GasReactionCount = config.GasReactionCount;
 
         for (int i = 0; i < config.GasReactionCount; i++)
         {
             if (config.TryGetGasReaction(i, out var reaction))
                 _reactionsRegistry[i] = reaction;
         }
+    }
+
+    public void ValidateGasRegistry()
+    {
+        _gasRegistry.ValidateGasRegistry();
     }
 }

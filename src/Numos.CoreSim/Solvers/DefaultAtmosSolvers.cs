@@ -26,7 +26,7 @@ internal sealed class DefaultAtmosSolvers : IDisposable
             _thermalBoundary.ClearPendingEvents,
             _thermalBoundary.Enqueue);
 
-        _reactions = new();
+        _reactions = new ReactionSolver();
     }
 
     public void Dispose()
@@ -43,7 +43,7 @@ internal sealed class DefaultAtmosSolvers : IDisposable
             new SolverStep(AtmosSolverStageNames.BoundaryFlow, SolverStepKind.BuiltIn, _boundaryFlow.Solve),
             new SolverStep(AtmosSolverStageNames.Thermodynamics, SolverStepKind.BuiltIn, _thermodynamics.Solve),
             new SolverStep(AtmosSolverStageNames.ThermalBoundary, SolverStepKind.BuiltIn, _thermalBoundary.Solve),
-            new SolverStep(AtmosSolverStageNames.GasReactions,SolverStepKind.BuiltIn,_reactions.Solve),
+            new SolverStep(AtmosSolverStageNames.GasReactions, SolverStepKind.BuiltIn, _reactions.Solve)
         ];
     }
 
