@@ -10,16 +10,21 @@ public readonly partial record struct StandardGasReaction
     /// </summary>
     internal readonly record struct Mapped : IGasReaction
     {
-        public Mapped(StandardGasReaction original, IList<GasProperties> properties)
+        public Mapped(StandardGasReaction original, IGasRegistry gasRegistry)
         {
             Original = original;
 
-            FrozenDictionary<int, Mole> mappedInputs = original.Input.ToFrozenDictionary(e => properties.IndexOf(e.Key), e => e.Value);
-            FrozenDictionary<int, Mole> mappedOutputs = original.Output.ToFrozenDictionary(
-                e => properties.IndexOf(e.Key),
+            FrozenDictionary<int, Mole> mappedInputs = original.Input.ToFrozenDictionary(
+                e => gasRegistry.GasIdToIndex(e.Key.Name),
                 e => e.Value);
 
-            MappedFactors = original.SpeedFactors.ToFrozenDictionary(e => properties.IndexOf(e.Key), e => e.Value);
+            FrozenDictionary<int, Mole> mappedOutputs = original.Output.ToFrozenDictionary(
+                e => gasRegistry.GasIdToIndex(e.Key.Name),
+                e => e.Value);
+
+            MappedFactors = original.SpeedFactors.ToFrozenDictionary(
+                e => gasRegistry.GasIdToIndex(e.Key.Name),
+                e => e.Value);
 
             var changeEquation = new Dictionary<int, Mole>();
             foreach (int gas in mappedInputs.Keys.Concat(mappedOutputs.Keys).Distinct())

@@ -14,17 +14,20 @@ public readonly partial record struct LinearGasReaction
         ///     Setup the wrapping
         /// </summary>
         /// <param name="original">The Gas Reaction to wrap</param>
-        /// <param name="properties">The reference of gas properties to derive the gas ids from.</param>
-        public Mapped(LinearGasReaction original, IList<GasProperties> properties)
+        /// <param name="gasRegistry">The gas registry used to resolve gas ids.</param>
+        public Mapped(LinearGasReaction original, IGasRegistry gasRegistry)
         {
             Original = original;
 
-            FrozenDictionary<int, float> mappedInputs = original.Input.ToFrozenDictionary(e => properties.IndexOf(e.Key), e => e.Value);
-            FrozenDictionary<int, float> mappedOutputs = original.Output.ToFrozenDictionary(
-                e => properties.IndexOf(e.Key),
+            FrozenDictionary<int, float> mappedInputs = original.Input.ToFrozenDictionary(
+                e => gasRegistry.GasIdToIndex(e.Key.Name),
                 e => e.Value);
 
-            MappedFactors = original.SpeedFactors.Select(e => new Factor(e, properties)).ToFrozenSet();
+            FrozenDictionary<int, float> mappedOutputs = original.Output.ToFrozenDictionary(
+                e => gasRegistry.GasIdToIndex(e.Key.Name),
+                e => e.Value);
+
+            MappedFactors = original.SpeedFactors.Select(e => new Factor(e, gasRegistry)).ToFrozenSet();
 
             var changeEquation = new Dictionary<int, Mole>();
             foreach (int gas in mappedInputs.Keys.Concat(mappedOutputs.Keys).Distinct())
@@ -81,10 +84,10 @@ public readonly partial record struct LinearGasReaction
         /// </summary>
         private readonly record struct Factor
         {
-            public Factor(LinearSpeedFactor original, IList<GasProperties> properties)
+            public Factor(LinearSpeedFactor original, IGasRegistry gasRegistry)
             {
                 Original = original;
-                GasId = properties.IndexOf(original.Gas);
+                GasId = gasRegistry.GasIdToIndex(original.Gas.Name);
             }
 
             public LinearSpeedFactor Original { get; }

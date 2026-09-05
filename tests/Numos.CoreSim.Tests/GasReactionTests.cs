@@ -68,7 +68,7 @@ public class GasReactionTests
         //setup simulation
         var config = new AtmosConfig
         {
-            GasRegistry = gases,
+            GasRegistry = [.. gases],
             StandardGasReactions = standardReactions
         };
 
@@ -131,7 +131,7 @@ public class GasReactionTests
         {
             BoilingPoint = 373.13f,
             MolarEnthalpyOfVaporization = 40.65f,
-            Name = "Oxygen",
+            Name = "Water",
             MolarHeatCapacityAtConstantVolume = 36500f
         };
 
