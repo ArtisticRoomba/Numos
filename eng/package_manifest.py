@@ -4,9 +4,8 @@
 from __future__ import annotations
 
 import argparse
-from pathlib import Path
 import re
-
+from pathlib import Path
 
 PACKAGE_DEPENDENCIES = {
     "Numos.Maths": (),

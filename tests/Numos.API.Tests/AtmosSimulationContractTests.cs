@@ -413,7 +413,7 @@ public sealed class AtmosSimulationContractTests
         simulation.AddGasToVoxel(chunk, 0, 0, 0, 0, 1f, 100f);
         var gas = config.GasRegistry[0];
         gas.MolarHeatCapacityAtConstantVolume = 4f;
-        config.GasRegistry[0] = gas;
+        config.GasRegistry.Replace(0, gas);
 
         simulation.AddGasToVoxel(chunk, 0, 0, 0, 0, 1f, 200f);
 

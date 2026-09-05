@@ -146,10 +146,10 @@ public sealed class IntraChunkFlowTests
         var config = SimTestHelpers.CreateDeterministicConfig();
         var first = config.GasRegistry[SimTestHelpers.FirstGasId];
         first.MolarHeatCapacityAtConstantVolume = 1f;
-        config.GasRegistry[SimTestHelpers.FirstGasId] = first;
+        config.GasRegistry.Replace(SimTestHelpers.FirstGasId, first);
         var second = config.GasRegistry[SimTestHelpers.SecondGasId];
         second.MolarHeatCapacityAtConstantVolume = 4f;
-        config.GasRegistry[SimTestHelpers.SecondGasId] = second;
+        config.GasRegistry.Replace(SimTestHelpers.SecondGasId, second);
         using var simulation = new AtmosSimulation(config, 2, 1, 1);
         var chunk = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
         simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasId, 3f, 400f);
@@ -187,7 +187,7 @@ public sealed class IntraChunkFlowTests
         var config = SimTestHelpers.CreateDeterministicConfig();
         var gas = config.GasRegistry[SimTestHelpers.FirstGasId];
         gas.DiffusionCoefficient = 0.02f;
-        config.GasRegistry[SimTestHelpers.FirstGasId] = gas;
+        config.GasRegistry.Replace(SimTestHelpers.FirstGasId, gas);
         using var simulation = new AtmosSimulation(config, size, size, size);
         var chunk = simulation.CreateAndRegisterChunk(new Int3(0, 0, 0));
         simulation.SetChunkClassification(chunk, VoxelClassification.RoomSolid);
@@ -269,7 +269,7 @@ public sealed class IntraChunkFlowTests
         var config = SimTestHelpers.CreateDeterministicConfig();
         var diffusiveGas = config.GasRegistry[SimTestHelpers.FirstGasId];
         diffusiveGas.DiffusionCoefficient = 0.1f;
-        config.GasRegistry[SimTestHelpers.FirstGasId] = diffusiveGas;
+        config.GasRegistry.Replace(SimTestHelpers.FirstGasId, diffusiveGas);
         using var simulation = new AtmosSimulation(config, 2, 1, 1);
         var chunk = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
         SimTestHelpers.SetAllTemperatures(simulation, chunk, 2, 1, 1);
@@ -301,10 +301,10 @@ public sealed class IntraChunkFlowTests
         config.MaxPressureTransferFractionPerNeighbor = 0f;
         var first = config.GasRegistry[SimTestHelpers.FirstGasId];
         first.DiffusionCoefficient = 0.1f;
-        config.GasRegistry[SimTestHelpers.FirstGasId] = first;
+        config.GasRegistry.Replace(SimTestHelpers.FirstGasId, first);
         var second = config.GasRegistry[SimTestHelpers.SecondGasId];
         second.DiffusionCoefficient = 0.1f;
-        config.GasRegistry[SimTestHelpers.SecondGasId] = second;
+        config.GasRegistry.Replace(SimTestHelpers.SecondGasId, second);
         using var simulation = new AtmosSimulation(config, 2, 1, 1);
         var chunk = SimTestHelpers.CreateOpenChunk(simulation, default);
         SimTestHelpers.SetAllTemperatures(simulation, chunk, 2, 1, 1);
@@ -469,7 +469,7 @@ public sealed class IntraChunkFlowTests
         var gas = config.GasRegistry[SimTestHelpers.FirstGasId];
         gas.DiffusionCoefficient = 0.1f;
         gas.MolarHeatCapacityAtConstantVolume = float.MaxValue;
-        config.GasRegistry[SimTestHelpers.FirstGasId] = gas;
+        config.GasRegistry.Replace(SimTestHelpers.FirstGasId, gas);
         using var simulation = new AtmosSimulation(config, 2, 1, 1);
         var chunk = SimTestHelpers.CreateOpenChunk(simulation, default);
         simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasId, 1f, 400f);

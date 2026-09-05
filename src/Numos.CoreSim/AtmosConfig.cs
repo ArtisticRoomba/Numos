@@ -1,3 +1,5 @@
+using System.Diagnostics.CodeAnalysis;
+using Numos.CoreSim.GasReactions;
 using Numos.CoreSim.Solvers;
 using Numos.Maths;
 using Numos.Units;
@@ -12,7 +14,16 @@ public class AtmosConfig : IAtmosConfig
     /// <summary>
     ///     List of gases actively registered to the sim.
     /// </summary>
-    public List<GasProperties> GasRegistry { get; set; } = [];
+    public GasRegistry GasRegistry { get; set; } = [];
+
+    /// <summary>
+    ///     List of gas reactions using a more efficient but less realistic linear model for rate speed.
+    /// </summary>
+    public List<LinearGasReaction> LinearGasReactions { get; set; } = [];
+    /// <summary>
+    ///     List of gas reactions using the standard rate law.
+    /// </summary>
+    public List<StandardGasReaction> StandardGasReactions { get; set; } = [];
 
     /// <summary>
     ///     Reference ambient temperature, in kelvins (K).
@@ -195,4 +206,32 @@ public class AtmosConfig : IAtmosConfig
         properties = default;
         return false;
     }
+
+    public void ValidateGasRegistry()
+    {
+        GasRegistry.ValidateGasRegistry();
+    }
+
+    public int GasPropertyCount => GasRegistry.Count;
+
+    public bool TryGetGasReaction(int reactionId, [NotNullWhen(true)] out IGasReaction? reaction)
+    {
+        reaction = null;
+        if (reactionId < LinearGasReactions.Count)
+        {
+            reaction = new LinearGasReaction.Mapped(LinearGasReactions[reactionId], GasRegistry);
+            return true;
+        }
+
+        reactionId -= LinearGasReactions.Count;
+        if (reactionId < StandardGasReactions.Count)
+        {
+            reaction = new StandardGasReaction.Mapped(StandardGasReactions[reactionId], GasRegistry);
+            return true;
+        }
+
+        return false;
+    }
+
+    public int GasReactionCount => LinearGasReactions.Count + StandardGasReactions.Count;
 }
