@@ -17,8 +17,8 @@ public interface IGasRegistry : IEnumerable<GasProperties>
     /// </summary>
     /// <exception cref="KeyNotFoundException">Thrown if no gas with the given name is registered.</exception>
     int GasIdToIndex(string gasId);
-    void ValidateGasRegistry();
 
+    void ValidateGasRegistry();
 }
 
 /// <summary>
@@ -126,8 +126,8 @@ public sealed class GasRegistry : IGasRegistry
 /// </summary>
 public sealed class GasRegistrySnapshot : IGasRegistry
 {
-    private readonly GasProperties[] _gases = [];
-    private readonly Dictionary<string, int> _idMap = [];
+    private readonly GasProperties[] _gases;
+    private readonly Dictionary<string, int> _idMap;
 
     public GasRegistrySnapshot(IGasRegistry source)
     {
