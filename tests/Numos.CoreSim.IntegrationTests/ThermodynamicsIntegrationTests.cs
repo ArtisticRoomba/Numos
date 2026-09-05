@@ -246,11 +246,11 @@ public sealed class ThermodynamicsIntegrationTests
         {
             Assert.That(
                 sourceSnapshot.Temperature[0],
-                Is.EqualTo(399.197784f).Within(SimTestHelpers.Tolerance));
+                Is.EqualTo(399.277588f).Within(SimTestHelpers.Tolerance));
 
             Assert.That(
                 targetSnapshot.Temperature[0],
-                Is.EqualTo(307.885376f).Within(SimTestHelpers.Tolerance));
+                Is.EqualTo(322.548401f).Within(SimTestHelpers.Tolerance));
 
             Assert.That(
                 SimTestHelpers.TotalMoles(sourceSnapshot, targetSnapshot),

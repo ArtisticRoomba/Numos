@@ -46,8 +46,8 @@ public sealed class HeadlessApplicationTests
                 Is.EqualTo(1));
 
             Assert.That(gasMoles, Has.Length.EqualTo(2));
-            Assert.That(gasMoles[0], Is.EqualTo(1.68f).Within(Tolerance));
-            Assert.That(gasMoles[1], Is.EqualTo(0.32f).Within(Tolerance));
+            Assert.That(gasMoles[0], Is.EqualTo(1.5f).Within(Tolerance));
+            Assert.That(gasMoles[1], Is.EqualTo(0.5f).Within(Tolerance));
             Assert.That(gasMoles.Sum(), Is.EqualTo(2f).Within(Tolerance));
         });
     }

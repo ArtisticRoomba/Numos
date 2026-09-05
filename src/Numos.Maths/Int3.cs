@@ -93,6 +93,17 @@ public struct Int3(int x, int y, int z) : IEquatable<Int3>
                Z < maxExclusive.Z;
     }
 
+    /// <summary>
+    /// Determines whether this coordinate is inside the zero-based, inclusive-minimum,
+    /// exclusive-maximum bounds.
+    /// </summary>
+    public readonly bool IsWithin(Int3 dimensions)
+    {
+        return (uint)X < (uint)dimensions.X &&
+            (uint)Y < (uint)dimensions.Y &&
+            (uint)Z < (uint)dimensions.Z;
+    }
+
     public override string ToString()
     {
         return $"{X}, {Y}, {Z}";

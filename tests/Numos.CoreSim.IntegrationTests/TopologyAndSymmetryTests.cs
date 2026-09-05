@@ -38,11 +38,11 @@ public sealed class TopologyAndSymmetryTests
             Assert.That(SimTestHelpers.Moles(whileBlocked, SimTestHelpers.FirstGasId, 1), Is.Zero);
             Assert.That(
                 SimTestHelpers.Moles(afterOpening, SimTestHelpers.FirstGasId, 0),
-                Is.EqualTo(1.68f).Within(SimTestHelpers.Tolerance));
+                Is.EqualTo(1.5f).Within(SimTestHelpers.Tolerance));
 
             Assert.That(
                 SimTestHelpers.Moles(afterOpening, SimTestHelpers.FirstGasId, 1),
-                Is.EqualTo(0.32f).Within(SimTestHelpers.Tolerance));
+                Is.EqualTo(0.5f).Within(SimTestHelpers.Tolerance));
 
             Assert.That(
                 SimTestHelpers.TotalMoles(afterOpening),

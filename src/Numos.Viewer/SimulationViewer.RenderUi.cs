@@ -696,7 +696,7 @@ public partial class SimulationViewer
                     "config-bulk-flow-coefficient",
                     ref bulkFlowCoefficient,
                     0f,
-                    1f,
+                    0.5f,
                     "Fraction of pressure delta converted to flow per tick."))
                 _config.BulkFlowCoefficient = bulkFlowCoefficient;
 
