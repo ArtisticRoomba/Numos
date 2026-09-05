@@ -45,4 +45,8 @@ public static class AtmosBuiltInSolvers
 
     /// <summary>Cross-chunk thermal diffusion.</summary>
     public const string ThermalBoundary = "thermal-boundary";
+    /// <summary>
+    ///     Gas Reactions
+    /// </summary>
+    public const string GasReactions = "gas-reactions";
 }

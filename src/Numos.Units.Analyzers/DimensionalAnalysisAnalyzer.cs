@@ -103,7 +103,7 @@ public sealed class DimensionalAnalysisAnalyzer : DiagnosticAnalyzer
                 _ => QuantityValue.Unknown
             };
 
-            if (AreIncompatible(target, result))
+            if (IsIncompatibleAssignment(target, result))
             {
                 context.ReportDiagnostic(
                     Diagnostic.Create(
@@ -122,7 +122,7 @@ public sealed class DimensionalAnalysisAnalyzer : DiagnosticAnalyzer
 
             var target = GetSymbolQuantity(operation.Symbol);
             var value = Infer(operation.Initializer.Value);
-            if (AreIncompatible(target, value))
+            if (IsIncompatibleAssignment(target, value))
             {
                 context.ReportDiagnostic(
                     Diagnostic.Create(
@@ -139,17 +139,64 @@ public sealed class DimensionalAnalysisAnalyzer : DiagnosticAnalyzer
             if (operation.Parameter is null)
                 return;
 
-            var expected = GetSymbolQuantity(operation.Parameter);
-            var actual = Infer(operation.Value);
-            if (AreIncompatible(expected, actual))
+            var declared = GetSymbolQuantity(operation.Parameter);
+
+            switch (operation.Parameter.RefKind)
             {
-                context.ReportDiagnostic(
-                    Diagnostic.Create(
-                        Diagnostics.IncompatibleArgument,
-                        operation.Value.Syntax.GetLocation(),
-                        actual,
-                        operation.Parameter.Name,
-                        expected));
+                case RefKind.Out:
+                {
+                    if (operation.Value is IDiscardOperation)
+                        return;
+
+                    // Value flows parameter -> argument: does the argument's target
+                    // accept what the parameter is declared to produce?
+                    var target = Infer(operation.Value);
+                    if (IsIncompatibleAssignment(target, declared))
+                    {
+                        context.ReportDiagnostic(
+                            Diagnostic.Create(
+                                Diagnostics.IncompatibleArgument,
+                                operation.Value.Syntax.GetLocation(),
+                                declared,
+                                operation.Parameter.Name,
+                                target));
+                    }
+
+                    return;
+                }
+                case RefKind.Ref:
+                {
+                    // Value flows both ways: must be compatible in each direction.
+                    var target = Infer(operation.Value);
+                    if (IsIncompatibleAssignment(target, declared) || IsIncompatibleAssignment(declared, target))
+                    {
+                        context.ReportDiagnostic(
+                            Diagnostic.Create(
+                                Diagnostics.IncompatibleArgument,
+                                operation.Value.Syntax.GetLocation(),
+                                target,
+                                operation.Parameter.Name,
+                                declared));
+                    }
+
+                    return;
+                }
+                default:
+                {
+                    var actual = Infer(operation.Value);
+                    if (IsIncompatibleArgument(declared, actual))
+                    {
+                        context.ReportDiagnostic(
+                            Diagnostic.Create(
+                                Diagnostics.IncompatibleArgument,
+                                operation.Value.Syntax.GetLocation(),
+                                actual,
+                                operation.Parameter.Name,
+                                declared));
+                    }
+
+                    return;
+                }
             }
         }
 
@@ -161,7 +208,7 @@ public sealed class DimensionalAnalysisAnalyzer : DiagnosticAnalyzer
 
             var expected = GetMethodReturnQuantity(method);
             var actual = Infer(operation.ReturnedValue);
-            if (AreIncompatible(expected, actual))
+            if (IsIncompatibleAssignment(expected, actual))
             {
                 context.ReportDiagnostic(
                     Diagnostic.Create(
@@ -210,7 +257,7 @@ public sealed class DimensionalAnalysisAnalyzer : DiagnosticAnalyzer
         {
             var target = Infer(targetOperation);
             var value = Infer(valueOperation);
-            if (AreIncompatible(target, value))
+            if (IsIncompatibleAssignment(target, value))
             {
                 context.ReportDiagnostic(
                     Diagnostic.Create(
@@ -270,6 +317,10 @@ public sealed class DimensionalAnalysisAnalyzer : DiagnosticAnalyzer
                 case ILiteralOperation:
                 case IDefaultValueOperation:
                     return QuantityValue.LiteralScalar;
+                case IDeclarationExpressionOperation declaration:
+                    return Infer(declaration.Expression);
+                case IDiscardOperation:
+                    return QuantityValue.LiteralScalar;
                 default:
                     return QuantityValue.Unknown;
             }
@@ -315,6 +366,9 @@ public sealed class DimensionalAnalysisAnalyzer : DiagnosticAnalyzer
 
         private QuantityValue GetMethodReturnQuantity(IMethodSymbol method)
         {
+            if (method.MethodKind == MethodKind.PropertyGet && method.AssociatedSymbol is IPropertySymbol property)
+                return GetSymbolQuantity(property);
+
             var attributed = GetAttributeQuantity(method.GetReturnTypeAttributes(), QuantityAttributeName);
             return attributed.IsKnown ? attributed : GetSyntaxQuantity(method, false);
         }
@@ -371,6 +425,7 @@ public sealed class DimensionalAnalysisAnalyzer : DiagnosticAnalyzer
             {
                 ParameterSyntax parameter => parameter.Type,
                 VariableDeclaratorSyntax variable => (variable.Parent as VariableDeclarationSyntax)?.Type,
+                SingleVariableDesignationSyntax { Parent: DeclarationExpressionSyntax declaration } => declaration.Type,
                 PropertyDeclarationSyntax property => property.Type,
                 IndexerDeclarationSyntax indexer => indexer.Type,
                 MethodDeclarationSyntax method => method.ReturnType,
@@ -438,6 +493,41 @@ public sealed class DimensionalAnalysisAnalyzer : DiagnosticAnalyzer
             return left.IsKnown && right.IsKnown && !left.Dimensions!.Equals(right.Dimensions);
         }
 
+        private static bool IsIncompatibleAssignment(QuantityValue target, QuantityValue value)
+        {
+            // Both sides known: dimensions must match, as before.
+            if (target.IsKnown && value.IsKnown)
+                return !target.Dimensions!.Equals(value.Dimensions);
+
+            // Known target accepting an unknown/unannotated/literal source is fine —
+            // e.g. `Length x = 0f;` or `Length x = someUnannotatedFloat;`.
+            if (target.IsKnown)
+                return false;
+
+            // Unknown (unannotated) target receiving a known, dimensioned value silently
+            // discards its unit information — flag it. Literals are exempt since they
+            // aren't "known" (IsKnown is false for LiteralScalar).
+            return value.IsKnown && !value.IsLiteralScalar;
+        }
+
+        private static bool IsIncompatibleArgument(QuantityValue expected, QuantityValue actual)
+        {
+            // Parameter has no declared dimension — it accepts anything, known or not.
+            // This is what lets Length flow into MathF.Max(float, float) or
+            // IsFinitePositive(float) without any opt-out mechanism.
+            if (!expected.IsKnown)
+                return false;
+
+            // Parameter requires a specific dimension. A literal constant (e.g. `0f`)
+            // is exempt — it carries no conflicting dimension of its own.
+            if (actual.IsLiteralScalar)
+                return false;
+
+            // Anything else — an unannotated scalar, or a known-but-different dimension —
+            // does not satisfy a parameter that requires a specific quantity.
+            return !actual.IsKnown || !expected.Dimensions!.Equals(actual.Dimensions);
+        }
+
         private static QuantityValue Merge(QuantityValue left, QuantityValue right)
         {
             if (left.IsLiteralScalar)
@@ -458,7 +548,10 @@ public sealed class DimensionalAnalysisAnalyzer : DiagnosticAnalyzer
         private QuantityValue(DimensionVector? dimensions, bool isLiteralScalar = false)
         {
             Dimensions = dimensions;
-            IsLiteralScalar = isLiteralScalar;
+            if (dimensions == null)
+                IsLiteralScalar = isLiteralScalar;
+            else
+                IsLiteralScalar = dimensions.IsScalar();
         }
 
         internal static QuantityValue Unknown => default;

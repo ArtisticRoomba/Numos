@@ -24,6 +24,7 @@
 
     <ItemGroup>
         <ProjectReference Include="..\Numos.Maths\Numos.Maths.csproj"/>
+        <ProjectReference Include="..\Numos.Collections\Numos.Collections.csproj"/>
         <ProjectReference Include="..\Numos.Units\Numos.Units.csproj"/>
         <ProjectReference Include="..\Numos.Units.Analyzers\Numos.Units.Analyzers.csproj"
                           OutputItemType="Analyzer"

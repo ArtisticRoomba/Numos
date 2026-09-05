@@ -1,4 +1,4 @@
-using Numos.CoreSim.Collections;
+using Numos.Collections;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.Maths;
 

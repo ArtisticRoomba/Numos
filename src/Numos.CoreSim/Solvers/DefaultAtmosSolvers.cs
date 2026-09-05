@@ -9,6 +9,7 @@ internal sealed class DefaultAtmosSolvers : IDisposable
     private readonly BoundaryFlowSolver _boundaryFlow;
     private readonly ThermalBoundarySolver _thermalBoundary;
     private readonly ThermodynamicsSolver _thermodynamics;
+    private readonly ReactionSolver _reactions;
 
     internal DefaultAtmosSolvers(int chunkWidth, int chunkHeight, int chunkDepth)
     {
@@ -24,6 +25,8 @@ internal sealed class DefaultAtmosSolvers : IDisposable
             maximumBoundaryEvents,
             _thermalBoundary.ClearPendingEvents,
             _thermalBoundary.Enqueue);
+
+        _reactions = new ReactionSolver();
     }
 
     public void Dispose()
@@ -39,7 +42,8 @@ internal sealed class DefaultAtmosSolvers : IDisposable
             new SolverStep(AtmosSolverStageNames.Advection, SolverStepKind.BuiltIn, _advection.Solve),
             new SolverStep(AtmosSolverStageNames.BoundaryFlow, SolverStepKind.BuiltIn, _boundaryFlow.Solve),
             new SolverStep(AtmosSolverStageNames.Thermodynamics, SolverStepKind.BuiltIn, _thermodynamics.Solve),
-            new SolverStep(AtmosSolverStageNames.ThermalBoundary, SolverStepKind.BuiltIn, _thermalBoundary.Solve)
+            new SolverStep(AtmosSolverStageNames.ThermalBoundary, SolverStepKind.BuiltIn, _thermalBoundary.Solve),
+            new SolverStep(AtmosSolverStageNames.GasReactions, SolverStepKind.BuiltIn, _reactions.Solve)
         ];
     }
 

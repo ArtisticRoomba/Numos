@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using JetBrains.Annotations;
-using Numos.CoreSim.Collections;
+using Numos.Collections;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.Datatypes.Snapshots;
 using Numos.Maths;
@@ -435,7 +435,8 @@ internal class AtmosChunk
     ///     Does not recalculate <see cref="TotalHeatCapacity"/>
     /// </summary>
     [PublicAPI]
-    public bool TryGetThermalState(AtmosSolverConfigSnapshot config,
+    public bool TryGetThermalState(
+        AtmosSolverConfigSnapshot config,
         ushort voxelIndex, out Kelvin temperature, out JoulePerKelvin heatCapacity)
     {
         heatCapacity = TotalHeatCapacity[voxelIndex];
@@ -449,7 +450,6 @@ internal class AtmosChunk
         temperature = config.GetValidatedTemp(Temperature[voxelIndex]);
         return true;
     }
-
 
 
     /// <summary>

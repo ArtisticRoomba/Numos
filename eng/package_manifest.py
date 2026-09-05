@@ -4,14 +4,14 @@
 from __future__ import annotations
 
 import argparse
-from pathlib import Path
 import re
-
+from pathlib import Path
 
 PACKAGE_DEPENDENCIES = {
     "Numos.Maths": (),
     "Numos.Units": (),
-    "Numos.CoreSim": ("Numos.Maths", "Numos.Units"),
+    "Numos.Collections": ("Numos.Maths",),
+    "Numos.CoreSim": ("Numos.Maths", "Numos.Collections", "Numos.Units",),
     "Numos.API": ("Numos.CoreSim",),
     "Numos.API.Dangerous": ("Numos.API",),
     "Numos.SimDrawer": ("Numos.CoreSim",),
@@ -19,6 +19,7 @@ PACKAGE_DEPENDENCIES = {
 }
 PACKAGE_VERSION_FILES = {
     "Numos.Maths": Path("src/Numos.CoreSim/Version.props"),
+    "Numos.Collections": Path("src/Numos.CoreSim/Version.props"),
     "Numos.Units": Path("src/Numos.CoreSim/Version.props"),
     "Numos.CoreSim": Path("src/Numos.CoreSim/Version.props"),
     "Numos.API": Path("src/Numos.CoreSim/Version.props"),
@@ -29,6 +30,7 @@ PACKAGE_VERSION_FILES = {
 PACKAGE_FAMILIES = {
     "coresim": (
         "Numos.Maths",
+        "Numos.Collections",
         "Numos.Units",
         "Numos.CoreSim",
         "Numos.API",
