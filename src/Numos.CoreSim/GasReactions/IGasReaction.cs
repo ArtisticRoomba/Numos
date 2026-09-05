@@ -1,4 +1,5 @@
 using System.Collections.Frozen;
+using Numos.Units;
 
 namespace Numos.CoreSim.GasReactions;
 
@@ -10,10 +11,12 @@ public interface IGasReaction
     /// <summary>
     /// GasID to changes in Mol/L. Positive add, negative subtracts
     /// </summary>
+    [ElementQuantity("amount")]
     public FrozenDictionary<int, Mole> ChangeEquation { get; }
     /// <summary>
     /// The amount of J this reaction produces or consumes.
     /// </summary>
+    [Quantity("energy")]
     Joule EnergyBalance { get; }
 
     /// <summary>
@@ -22,5 +25,8 @@ public interface IGasReaction
     /// <param name="molarityVector">Index = GasId</param>
     /// <param name="temperature"></param>
     /// <returns></returns>
-    public PerSecond GetReactionSpeed(Mole[] molarityVector, Kelvin temperature);
+    [return: Quantity("frequency")]
+    PerSecond GetReactionSpeed(
+        [ElementQuantity("amount")] Mole[] molarityVector,
+        [Quantity("temperature")] Kelvin temperature);
 }

@@ -1,4 +1,5 @@
 using System.Collections.Frozen;
+using Numos.Units;
 
 namespace Numos.CoreSim.GasReactions;
 
@@ -23,9 +24,14 @@ public readonly partial record struct LinearGasReaction
     /// <param name="lowStrict">if the linear graph can be extended below low bound</param>
     /// <param name="highStrict">if the graph can be extended above high bound</param>
     /// <param name="speedFactors">the modifies to the base reaction speed based on the presence of certain gases.</param>
-    public LinearGasReaction(IDictionary<GasProperties, float> input, IDictionary<GasProperties, float> output,
-        float energyBalance, float lowTemperatureBound, float highTemperatureBound, float lowTempSpeed,
-        float highTempSpeed, bool lowStrict, bool highStrict, ISet<LinearSpeedFactor> speedFactors)
+    public LinearGasReaction(
+        IDictionary<GasProperties, float> input, IDictionary<GasProperties, float> output,
+        [Quantity("energy")] Joule energyBalance,
+        [Quantity("temperature")] Kelvin lowTemperatureBound,
+        [Quantity("temperature")] Kelvin highTemperatureBound,
+        [Quantity("frequency")] PerSecond lowTempSpeed,
+        [Quantity("frequency")] PerSecond highTempSpeed,
+        bool lowStrict, bool highStrict, ISet<LinearSpeedFactor> speedFactors)
     {
         Input = input.ToFrozenDictionary();
         Output = output.ToFrozenDictionary();
@@ -65,9 +71,9 @@ public readonly partial record struct LinearGasReaction
     private PerSecond LowTempSpeed { get; }
     private PerSecond HighTempSpeed { get; }
 
-    private float BoundaryRange { get; }
+    private Kelvin BoundaryRange { get; }
 
-    private float SpeedRange { get; }
+    private PerSecond SpeedRange { get; }
 
     /// <summary>
     ///     Can the reaction occur below low temperature bound (extending linear graph)
@@ -81,13 +87,15 @@ public readonly partial record struct LinearGasReaction
 
     private FrozenSet<LinearSpeedFactor> SpeedFactors { get; }
 
-    private static float EvalLinear(float value, float boundaryRange, float lowBound, bool lowStrict, bool highStrict,
+    private static float EvalLinear(
+        float value, float boundaryRange, float lowBound, bool lowStrict, bool highStrict,
         float valAtLow, float speedRange)
     {
         // Normalize value into [0, 1].
         var t = (value - lowBound) / boundaryRange;
         // eval boundaries.
         if (float.IsNaN(t)) return 0;
+
         if (t < 0f)
         {
             if (lowStrict)
@@ -107,9 +115,15 @@ public readonly partial record struct LinearGasReaction
     /// </summary>
     /// <param name="temperatureKelvin"></param>
     /// <returns></returns>
-    private float GetRateConstantForTemperature(float temperatureKelvin)
+    private PerSecond GetRateConstantForTemperature(Kelvin temperatureKelvin)
     {
-        return EvalLinear(temperatureKelvin, BoundaryRange, LowTemperatureBound, LowStrict, HighStrict, LowTempSpeed,
+        return EvalLinear(
+            temperatureKelvin,
+            BoundaryRange,
+            LowTemperatureBound,
+            LowStrict,
+            HighStrict,
+            LowTempSpeed,
             SpeedRange);
     }
 
@@ -119,7 +133,10 @@ public readonly partial record struct LinearGasReaction
     /// <param name="gasMolarities">the mixture of gases represented in their molarity (Mol/L)</param>
     /// <param name="temperature">temperature of the mixture in kelvin</param>
     /// <returns>Reactions per Second</returns>
-    public double GetReactionSpeed(IDictionary<GasProperties, float> gasMolarities, float temperature)
+    [return: Quantity("frequency")]
+    public PerSecond GetReactionSpeed(
+        IDictionary<GasProperties, float> gasMolarities,
+        [Quantity("temperature")] Kelvin temperature)
     {
         return SpeedFactors.AsParallel().Select(factor =>
         {

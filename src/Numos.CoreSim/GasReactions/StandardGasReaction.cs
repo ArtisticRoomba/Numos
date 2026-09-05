@@ -1,5 +1,5 @@
-using System.Buffers;
 using System.Collections.Frozen;
+using Numos.Units;
 
 namespace Numos.CoreSim.GasReactions;
 
@@ -12,7 +12,8 @@ public readonly partial record struct StandardGasReaction
 {
     public StandardGasReaction(
         IDictionary<GasProperties, float> input, IDictionary<GasProperties, float> output,
-        float energyBalance, float arrheniusFactor, float activationEnergy,
+        [Quantity("energy")] Joule energyBalance,
+        float arrheniusFactor, float activationEnergy,
         IDictionary<GasProperties, float> speedFactors)
     {
         Input = input.ToFrozenDictionary();
@@ -63,7 +64,7 @@ public readonly partial record struct StandardGasReaction
     /// <param name="temperatureKelvin"></param>
     /// <returns>Reactions per seconds.</returns>
     /// <remarks>there are more sophisticated models for k but good luck having anyone setup all the parameters necessary.</remarks>
-    private float GetRateConstant(float temperatureKelvin)
+    private PerSecond GetRateConstant(Kelvin temperatureKelvin)
     {
         return ArrheniusFactor *
                MathF.Exp((-ActivationEnergy * 0.001f) / (temperatureKelvin * AtmosPhysicalConstants.MolarGasConstant));
@@ -75,9 +76,12 @@ public readonly partial record struct StandardGasReaction
     /// <param name="gasMolarities">molar concentration in moles per litre</param>
     /// <param name="temperatureKelvin"></param>
     /// <returns>reactions per second.</returns>
-    public float GetReactionSpeed(IDictionary<GasProperties, float> gasMolarities, float temperatureKelvin)
+    [return: Quantity("frequency")]
+    public PerSecond GetReactionSpeed(
+        IDictionary<GasProperties, float> gasMolarities,
+        [Quantity("temperature")] Kelvin temperatureKelvin)
     {
-        var result = GetRateConstant(temperatureKelvin);
+        PerSecond result = GetRateConstant(temperatureKelvin);
         if (result <= 0)
             return 0;
 

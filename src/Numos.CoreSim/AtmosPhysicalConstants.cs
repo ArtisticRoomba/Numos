@@ -35,6 +35,6 @@ public static class AtmosPhysicalConstants
     /// <summary>
     /// Boltzmann constant
     /// </summary>
-    [Quantity("boltzmannConstant")]
+    [Quantity("heatCapacity")]
     public const JoulePerKelvin BoltzmannConstant = 1.380649E-23f;
 }

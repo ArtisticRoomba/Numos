@@ -23,49 +23,53 @@ public readonly partial record struct LinearGasReaction
             var mappedOutputs = original.Output.ToFrozenDictionary(e => properties.IndexOf(e.Key), e => e.Value);
             MappedFactors = original.SpeedFactors.Select(e => new Factor(e, properties)).ToFrozenSet();
 
-            var changeEquation = new Dictionary<int, float>();
+            var changeEquation = new Dictionary<int, Mole>();
             foreach (var gas in mappedInputs.Keys.Concat(mappedOutputs.Keys).Distinct())
                 changeEquation[gas] = mappedOutputs.GetValueOrDefault(gas) - mappedInputs.GetValueOrDefault(gas);
-
-            changeEquation[properties.Count] = original.EnergyBalance;
 
             ChangeEquation = changeEquation.ToFrozenDictionary();
         }
 
         private LinearGasReaction Original { get; }
-        
+
         private FrozenSet<Factor> MappedFactors { get; }
 
         /// <inheritdoc/>
-        public FrozenDictionary<int, float> ChangeEquation { get; }
+        public FrozenDictionary<int, Mole> ChangeEquation { get; }
         /// <inheritdoc/>
-        public float EnergyBalance => Original.EnergyBalance;
+        public Joule EnergyBalance => Original.EnergyBalance;
+
         /// <inheritdoc/>
-        public float GetReactionSpeed(float[] molarityVector, float temperature)
+        public PerSecond GetReactionSpeed(Mole[] molarityVector, Kelvin temperature)
         {
-            var result = Original.GetRateConstantForTemperature(temperature);
+            PerSecond result = Original.GetRateConstantForTemperature(temperature);
             if (!float.IsNormal(result) || result <= 0)
                 return 0;
 
             var bag = new ConcurrentBag<float>();
 
-            var response = Parallel.ForEach(MappedFactors, (factor, loopState) =>
-            {
-                var f = factor.Original.GetFactor(molarityVector[factor.GasId]);
-                if (!float.IsNormal(f) || f <= 0)
+            var response = Parallel.ForEach(
+                MappedFactors,
+                (factor, loopState) =>
                 {
-                    loopState.Stop();
-                    return;
-                }
+                    float f = factor.Original.GetFactor(molarityVector[factor.GasId]);
+                    if (!float.IsNormal(f) || f <= 0)
+                    {
+                        loopState.Stop();
+                        return;
+                    }
 
-                bag.Add(f);
-            });
+                    bag.Add(f);
+                });
+
             if (!response.IsCompleted)
                 return 0;
+
             foreach (var f in bag)
             {
                 result *= f;
             }
+
             return result;
         }
 

@@ -18,11 +18,9 @@ public readonly partial record struct StandardGasReaction
             var mappedOutputs = original.Output.ToFrozenDictionary(e => properties.IndexOf(e.Key), e => e.Value);
             MappedFactors = original.SpeedFactors.ToFrozenDictionary(e => properties.IndexOf(e.Key), e => e.Value);
 
-            var changeEquation = new Dictionary<int, float>();
+            var changeEquation = new Dictionary<int, Mole>();
             foreach (var gas in mappedInputs.Keys.Concat(mappedOutputs.Keys).Distinct())
                 changeEquation[gas] = mappedOutputs.GetValueOrDefault(gas) - mappedInputs.GetValueOrDefault(gas);
-
-            changeEquation[properties.Count] = original.EnergyBalance;
 
             ChangeEquation = changeEquation.ToFrozenDictionary();
         }
@@ -31,13 +29,14 @@ public readonly partial record struct StandardGasReaction
 
         private FrozenDictionary<int, float> MappedFactors { get; }
         /// <inheritdoc/>
-        public float EnergyBalance => Original.EnergyBalance;
+        public Joule EnergyBalance => Original.EnergyBalance;
         /// <inheritdoc/>
-        public FrozenDictionary<int, float> ChangeEquation { get; }
+        public FrozenDictionary<int, Mole> ChangeEquation { get; }
+
         /// <inheritdoc/>
-        public float GetReactionSpeed(float[] molarityVector, float temperature)
+        public PerSecond GetReactionSpeed(Mole[] molarityVector, Kelvin temperature)
         {
-            var result = Original.GetRateConstant(temperature);
+            PerSecond result = Original.GetRateConstant(temperature);
             if (result <= 0 || !float.IsNormal(result))
                 return 0;
 
