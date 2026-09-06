@@ -301,6 +301,7 @@ internal sealed partial class AtmosKernel
         _isApplyingOperation = true;
         try
         {
+            // TODO unhardcode this massive switch here, please sourcegen opcodes or something bro
             switch (operation)
             {
                 case SetAtmosConfigOperation op:
