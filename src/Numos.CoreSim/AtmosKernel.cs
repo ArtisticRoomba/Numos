@@ -12,6 +12,7 @@ internal sealed partial class AtmosKernel : IDisposable, IAtmosSolverWorld
 {
     private readonly DefaultAtmosSolvers _defaultSolvers;
     private readonly List<AtmosRecordedOperation> _recordedOperations = [];
+    private readonly SolverDataStorage _solverData = new();
     private readonly AtmosSolverPipeline _solverPipeline;
     private readonly object _stateGate = new();
     private readonly AtmosSolverConfigSnapshot _tickConfig = new();
@@ -66,6 +67,7 @@ internal sealed partial class AtmosKernel : IDisposable, IAtmosSolverWorld
 
             _chunkMap.Clear();
             _tickConfig.ClearGasSolverData();
+            _solverData.Clear();
             _solverPipeline.Dispose();
         }
     }
@@ -86,7 +88,7 @@ internal sealed partial class AtmosKernel : IDisposable, IAtmosSolverWorld
                     chunk.MarkChanged();
             }
 
-            var context = new AtmosSolverExecutionContext(this, chunks, _tickConfig, TickCount);
+            var context = new AtmosSolverExecutionContext(this, chunks, _tickConfig, TickCount, _solverData);
             _solverPipeline.Execute(context);
         }
         finally

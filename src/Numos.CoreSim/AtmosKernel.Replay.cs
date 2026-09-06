@@ -182,6 +182,7 @@ internal sealed partial class AtmosKernel
         _config = checkpoint.Config;
         _tickConfig.Capture(_config);
         _tickConfig.ClearGasSolverData();
+        _solverData.Clear();
         TickCount = checked((int)checkpoint.Position.Tick);
         _lastOperationSequence = checkpoint.Position.OperationSequence;
         _accumulator = checkpoint.ElapsedAccumulator;

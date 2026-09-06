@@ -5,6 +5,14 @@ namespace Numos.CoreSim;
 
 internal sealed partial class AtmosKernel
 {
+    internal T GetOrCreateSolverData<T>(object key, Func<T> factory) where T : notnull
+    {
+        lock (_stateGate)
+        {
+            return _solverData.GetOrCreate(key, factory);
+        }
+    }
+
     internal T GetOrCreateGasSolverData<T>(int gasId, object key, Func<GasProperties, T> factory) where T : notnull
     {
         lock (_stateGate)

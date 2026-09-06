@@ -76,6 +76,48 @@ should populate an `AtmosConfig` before construction. To change it later, edit a
 `new AtmosConfig(simulation.Config)` and apply it with `simulation.SetAtmosConfig(builder)`. The simulation exposes an
 immutable snapshot and does not observe retained builder mutations.
 
+## Sharing dependencies between solvers
+
+`GetOrCreateSolverData<T>` gives cooperating stages a shared object without requiring either solver to hold a reference
+to the other. Each simulation owns its own slots. Solvers agree on a key and an exact type, then supply a factory used
+only on the first request:
+
+```csharp
+simulation.Solvers.Register("produce", world =>
+{
+    var pending = world.GetOrCreateSolverData("custom/pending", static () => new Queue<int>());
+    pending.Clear();
+    pending.Enqueue(world.TickCount);
+});
+simulation.Solvers.RegisterAfter("produce", "consume", world =>
+{
+    var pending = world.GetOrCreateSolverData("custom/pending", static () => new Queue<int>());
+    while (pending.TryDequeue(out int tick))
+        Console.WriteLine(tick);
+});
+```
+
+Strings compare ordinally; other keys use reference identity. A shared private object key avoids collisions with
+unrelated plugins. Values can also be interfaces backed by caller-provided services: request the same interface type
+from every stage. Reference types retain identity; structs are returned by value. Null results, type mismatches, and
+factory cycles throw; failed creation leaves the slot available for a retry. Factories may resolve other slots but must
+not mutate the simulation.
+
+Sharing data does not change execution order. Register producers before consumers, and define how a consumer behaves
+when its producer is disabled or removed. Built-in advection and thermodynamics use shared concurrent queues for their
+boundary stages. Producers clear their queues before parallel chunk work; consumers reject events from earlier ticks and
+sort current events before applying cross-chunk changes sequentially.
+
+Resolve shared data before starting worker tasks: facade calls from workers would block on the tick's state lock. Numos
+serializes lookup and creation; solvers synchronize later access to mutable values. A `ConcurrentQueue<T>` works for
+parallel producers, but consumers still need a stable ordering when processing order affects simulation results.
+
+Shared data survives ticks, configuration changes, solver removal, and pipeline resets. Checkpoint restoration and
+simulation disposal discard it without disposing the values. Reacquire on each callback and keep ownership of disposable
+services in host code. These slots are transient: snapshots, checkpoints, recordings, and state hashes exclude them.
+Rebuild replay-relevant data from authoritative inputs; use captured chunk solver arrays for evolving state that must
+roll back, or gas attachments below for caches invalidated by configuration changes.
+
 ## Attaching solver data to gases
 
 Custom solvers can attach their own data to a registered gas without adding fields to `GasProperties`.

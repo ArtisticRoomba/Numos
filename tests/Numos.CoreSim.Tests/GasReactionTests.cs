@@ -53,6 +53,7 @@ public class GasReactionTests
 
         var tickConfig = new AtmosSolverConfigSnapshot();
         var solver = new ReactionSolver();
+        var sharedData = new SolverDataStorage();
         foreach (var config in configurations)
         {
             tickConfig.Capture(config);
@@ -64,7 +65,7 @@ public class GasReactionTests
                 chunk.WakeRoom(1);
                 int sourceId = config.GasRegistry.GasIdToIndex("A");
                 chunk.InjectGasToVoxel(0, sourceId, 10f, 300f, 10f, 1f);
-                solver.Solve(new AtmosSolverExecutionContext(null!, [chunk], tickConfig, iteration + 1));
+                solver.Solve(new AtmosSolverExecutionContext(null!, [chunk], tickConfig, iteration + 1, sharedData));
 
                 var reactions = GasReactionConfig.Get(config);
                 float[] expectedProducts = new float[config.GasPropertyCount];

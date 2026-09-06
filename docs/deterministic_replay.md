@@ -131,6 +131,8 @@ Some data intentionally remains outside the checkpoint:
 - Custom solver delegates and closure state stay with the existing simulation.
 - Detached `GasMixture` containers, such as canisters, remain host-owned.
 - Per-tick event queues and solver workspaces are transient and are cleared or rebuilt.
+- Shared dependencies created with `GetOrCreateSolverData<T>` are transient too. Restore discards them, including the
+  built-in boundary queues. Solvers reacquire them on each callback and rebuild them from authoritative inputs.
 - Per-gas solver attachments created with `GetOrCreateGasSolverData<T>` are derived or transient data. Restore discards
   them even when the configuration is unchanged; the next request rebuilds them through the solver's factory.
 - Chunk-owned arrays created with `captureForRollback: false` remain transient; restore discards them.

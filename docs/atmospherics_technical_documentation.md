@@ -358,7 +358,8 @@ Each frame:
 under `Numos.CoreSim.Solvers`; the kernel does not contain advection, boundary-flow, thermodynamics, or phase-change
 algorithms. A direct `Tick` snapshots the current chunk set; `Update` snapshots it once for its fixed-step batch.
 Every fixed tick captures normalized built-in settings, increments the tick counter, constructs an internal execution
-context containing only tick-wide inputs, and executes the ordered `simulation.Solvers` pipeline. Its default stages
+context containing tick-wide inputs and shared solver storage, and executes the ordered `simulation.Solvers` pipeline.
+Its default stages
 are:
 
 1. `advection`
@@ -393,12 +394,21 @@ simulation.Solvers.RegisterAfter(AtmosBuiltInSolvers.Advection, "game-reactions"
 simulation.Solvers.SetEnabled(AtmosBuiltInSolvers.Thermodynamics, false);
 ```
 
-Pipeline edits made by a callback take effect on the next tick. Gas and thermal boundary queues belong to their
-consumer solver instances. Producers clear the prior batch and tag every event with its tick; consumers discard any
+Pipeline edits made by a callback take effect on the next tick. Gas and thermal boundary queues live in the simulation's
+shared solver storage. Each stage resolves its queue from the execution context before starting workers; solvers do not
+pass collection callbacks to each other. Producers clear the prior batch and tag every event with its tick; consumers
+discard any
 event not produced for their current tick. Disabling or reordering a consumer therefore cannot replay stale work when
 it is later re-enabled. Recursive `Tick`/`Update`, simulation disposal, and chunk registration/removal are rejected
 during a callback because they would invalidate the current chunk snapshot. Perform those lifecycle operations outside
 the solver tick.
+
+Custom stages share typed dependencies through `simulation.GetOrCreateSolverData<T>(key, factory)`, backed by the same
+storage mechanism. Slots use ordinal string keys or object identity and survive ticks and pipeline edits. Restore
+discards these transient values, so stages must reacquire them on each callback. Shared data does not schedule stages;
+producers and consumers still need explicit pipeline ordering.
+See [sharing dependencies](using.md#sharing-dependencies-between-solvers)
+for examples, ownership, and threading requirements.
 
 Solver-specific settings should remain with a stateful solver object instead of expanding `AtmosConfig` with unrelated
 game configuration. Register its method as the callback:

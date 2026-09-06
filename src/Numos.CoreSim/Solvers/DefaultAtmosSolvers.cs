@@ -16,16 +16,8 @@ internal sealed class DefaultAtmosSolvers : IDisposable
         int maximumBoundaryEvents = GetBoundaryVoxelCount(chunkWidth, chunkHeight, chunkDepth);
         _boundaryFlow = new BoundaryFlowSolver();
         _thermalBoundary = new ThermalBoundarySolver();
-        _advection = new AdvectionSolver(
-            maximumBoundaryEvents,
-            _boundaryFlow.ClearPendingEvents,
-            _boundaryFlow.Enqueue);
-
-        _thermodynamics = new ThermodynamicsSolver(
-            maximumBoundaryEvents,
-            _thermalBoundary.ClearPendingEvents,
-            _thermalBoundary.Enqueue);
-
+        _advection = new AdvectionSolver(maximumBoundaryEvents);
+        _thermodynamics = new ThermodynamicsSolver(maximumBoundaryEvents);
         _reactions = new ReactionSolver();
     }
 
@@ -37,8 +29,8 @@ internal sealed class DefaultAtmosSolvers : IDisposable
 
     internal void ClearTransientState()
     {
-        _boundaryFlow.ClearPendingEvents();
-        _thermalBoundary.ClearPendingEvents();
+        _boundaryFlow.ClearTransientState();
+        _thermalBoundary.ClearTransientState();
     }
 
     internal SolverStep[] CreateSteps()

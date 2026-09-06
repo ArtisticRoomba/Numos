@@ -9,12 +9,13 @@ internal sealed class AtmosSolverExecutionContext
 {
     internal AtmosSolverExecutionContext(
         IAtmosSolverWorld world, AtmosChunk[] chunks,
-        AtmosSolverConfigSnapshot config, int tickCount)
+        AtmosSolverConfigSnapshot config, int tickCount, SolverDataStorage sharedData)
     {
         World = world;
         Chunks = chunks;
         TickConfig = config;
         TickCount = tickCount;
+        SharedData = sharedData;
     }
 
     internal IAtmosSolverWorld World { get; }
@@ -23,6 +24,7 @@ internal sealed class AtmosSolverExecutionContext
     internal AtmosSolverConfigSnapshot TickConfig { get; }
 
     internal int TickCount { get; }
+    internal SolverDataStorage SharedData { get; }
 }
 
 /// <summary>

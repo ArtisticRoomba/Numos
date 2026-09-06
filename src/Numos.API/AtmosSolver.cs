@@ -11,6 +11,7 @@ namespace Numos.API;
 ///     <see cref="AtmosSimulation.GetOrCreateChunkSolverArray{T}" /> and
 ///     <see cref="AtmosSimulation.GetOrCreateChunkSolverFlatArray{T}" />.
 ///     Attach derived data to registered gases with <see cref="AtmosSimulation.GetOrCreateGasSolverData{T}" />.
+///     Share typed dependencies between stages with <see cref="AtmosSimulation.GetOrCreateSolverData{T}" />.
 /// </remarks>
 /// <param name="simulation">The simulation being solved.</param>
 public delegate void AtmosSolver(AtmosSimulation simulation);

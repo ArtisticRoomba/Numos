@@ -7,6 +7,67 @@ namespace Numos.API;
 public sealed partial class AtmosSimulation
 {
     /// <summary>
+    ///     Gets or creates a typed dependency shared by solvers in this simulation.
+    /// </summary>
+    /// <typeparam name="T">The exact stored type, including interfaces, classes, structs, and collections.</typeparam>
+    /// <param name="key">
+    ///     The shared slot identifier. Strings use ordinal equality; other objects use reference identity.
+    ///     Cooperating solvers must agree on both the key and the exact type.
+    /// </param>
+    /// <param name="factory">
+    ///     Creates a non-null value on the first request. Failed creation is not cached. The factory must not
+    ///     mutate the simulation or recursively request this slot; it may resolve other solver data slots.
+    /// </param>
+    /// <returns>The cached value. Reference types retain identity; structs are returned by value.</returns>
+    /// <remarks>
+    ///     <para>
+    ///         Values are isolated per simulation and survive ticks, configuration changes, solver removal, and
+    ///         pipeline resets. Numos discards them on checkpoint restoration and disposal without disposing the
+    ///         values themselves. Reacquire dependencies on each callback; callers own any disposable resources.
+    ///     </para>
+    ///     <para>
+    ///         This is transient storage, excluded from snapshots, checkpoints, recordings, and state hashes.
+    ///         Factories must rebuild replay-relevant data from authoritative inputs. Store evolving state that
+    ///         requires rollback in chunk solver arrays with <c>captureForRollback: true</c>. Use gas solver data
+    ///         for caches that should be invalidated automatically when gas configuration changes.
+    ///     </para>
+    ///     <para>
+    ///         Lookup and factory execution are serialized with simulation operations. Resolve dependencies before
+    ///         dispatching worker tasks inside a callback: workers calling this method would block on the tick's
+    ///         state lock. Callers synchronize mutable values and use the solver pipeline's explicit ordering to
+    ///         run producers before consumers. Sharing data does not schedule stages or enable dependencies.
+    ///     </para>
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="key" /> or <paramref name="factory" /> is null.</exception>
+    /// <exception cref="InvalidOperationException">
+    ///     The slot holds a different type, the factory returns null, or creation recursively requests the same slot.
+    /// </exception>
+    /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
+    /// <example>
+    ///     <code>
+    ///     // Both stages resolve the same queue; the producer runs first.
+    ///     simulation.Solvers.Register("produce", world =>
+    ///     {
+    ///         var pending = world.GetOrCreateSolverData("custom/pending", static () => new Queue&lt;int&gt;());
+    ///         pending.Clear();
+    ///         pending.Enqueue(world.TickCount);
+    ///     });
+    ///     simulation.Solvers.RegisterAfter("produce", "consume", world =>
+    ///     {
+    ///         var pending = world.GetOrCreateSolverData("custom/pending", static () => new Queue&lt;int&gt;());
+    ///         while (pending.TryDequeue(out int tick))
+    ///             Console.WriteLine(tick);
+    ///     });
+    ///     </code>
+    /// </example>
+    [PublicAPI]
+    public T GetOrCreateSolverData<T>(object key, Func<T> factory) where T : notnull
+    {
+        ThrowIfDisposed();
+        return _kernel.GetOrCreateSolverData(key, factory);
+    }
+
+    /// <summary>
     ///     Gets or creates solver-owned data attached to a registered gas.
     /// </summary>
     /// <typeparam name="T">The exact stored type, including custom classes, structs, arrays, or dictionaries.</typeparam>
