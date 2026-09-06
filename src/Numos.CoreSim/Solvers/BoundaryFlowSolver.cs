@@ -24,6 +24,8 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
         ConcurrentQueue<(int TickCount, Int3 Key, BoundaryFlowEvent Event)> boundaryEvents =
             BoundaryEvents<BoundaryFlowEvent>.Get(context);
         _orderedEvents.Clear();
+        _injectionBuffer.Clear();
+        _resyncedVoxels.Clear();
         // TODO PERF properly microopt this
         // This performs a sort op so that indexing the arrays goes from least to greatest, which is better
         // than random access, however the sorting op does a In3 comparison before doing a index comparison
