@@ -32,6 +32,7 @@ public partial class SimulationViewer : IDisposable
     private readonly List<Int3> _staleSnapshotKeys = [];
     private readonly Dictionary<VoxelAddress, VoxelDetailCacheEntry> _voxelDetailCache = new();
     private ulong _appliedLegendRangeRevision = ulong.MaxValue;
+    private int _appliedTargetFps = -1;
     private Camera2D _camera2D = new()
     {
         Zoom = 1f
@@ -58,6 +59,7 @@ public partial class SimulationViewer : IDisposable
     private int _currentSliceIndex;
     private string _currentVisualizationId = BuiltInVisualizationIds.Temperature;
     private SimulationDrawData? _drawData;
+    private bool _eventWaitingEnabled;
     private ChunkIdentity? _focusedChunk;
     private SimulationFrameBuilder? _frameBuilder;
     private bool _frameSceneOnNextPresentation;
@@ -74,6 +76,7 @@ public partial class SimulationViewer : IDisposable
     private ulong _legendRangeRevision;
     private int _legendResolution = 32;
     private bool _legendResolutionEnabled;
+    private bool _limitFpsWhenUnfocused = true;
     private int _programSettingsTab;
     private string? _projectName;
     private bool _requestExit;
@@ -104,6 +107,7 @@ public partial class SimulationViewer : IDisposable
     private bool _transparent2DVoxels;
     private bool _transparent3DVoxels;
     private bool _uncappedFps;
+    private int _unfocusedFps = 15;
 
     private SimulationViewport? _viewport;
     private Texture2D _viewportBranding;
@@ -170,6 +174,8 @@ public partial class SimulationViewer : IDisposable
             _sliceViewport = new SimulationViewport(
                 TextureFilter.Point,
                 new Color(0.04f, 0.04f, 0.05f, 1f));
+
+            ApplyFramePacing();
 
             while (!Raylib.WindowShouldClose() && !_requestExit)
             {
@@ -587,11 +593,49 @@ public partial class SimulationViewer : IDisposable
             rlImGui.Begin(deltaTime);
             RenderUi();
             rlImGui.End();
+            ApplyFramePacing();
         }
         finally
         {
             Raylib.EndDrawing();
         }
+    }
+
+    private void ApplyFramePacing()
+    {
+        bool waitForEvents = !RequiresContinuousFrames();
+        if (waitForEvents != _eventWaitingEnabled)
+        {
+            if (waitForEvents)
+                Raylib.EnableEventWaiting();
+            else
+                Raylib.DisableEventWaiting();
+
+            _eventWaitingEnabled = waitForEvents;
+        }
+
+        int targetFps = !Raylib.IsWindowFocused() && _limitFpsWhenUnfocused
+            ? _unfocusedFps
+            : _uncappedFps
+                ? 0
+                : _targetFps;
+
+        if (targetFps == _appliedTargetFps)
+            return;
+
+        Raylib.SetTargetFPS(targetFps);
+        _appliedTargetFps = targetFps;
+    }
+
+    private bool RequiresContinuousFrames()
+    {
+        if (_resolutionConfirmationPending)
+            return true;
+
+        if (_simulation == null)
+            return false;
+
+        return !_isPaused || _show3DViewport || _showSliceViewport;
     }
 
     private void RenderSimulationScene()

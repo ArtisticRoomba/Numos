@@ -103,8 +103,7 @@ public partial class SimulationViewer
 
         ImGui.Separator();
         ImGui.Text("Frame pacing");
-        if (ImGui.Checkbox("Uncap FPS", ref _uncappedFps))
-            Raylib.SetTargetFPS(_uncappedFps ? 0 : _targetFps);
+        ImGui.Checkbox("Uncap FPS", ref _uncappedFps);
 
         ImGuiExtensions.QuestionTooltip(
             "Removes the software frame limit. If VSync is disabled, this may max out a CPU core while updating the UI.\n" +
@@ -114,10 +113,22 @@ public partial class SimulationViewer
             ImGui.BeginDisabled();
 
         ImGui.SetNextItemWidth(220f);
-        if (ImGui.SliderInt("Frame rate limit", ref _targetFps, 30, 240) && !_uncappedFps)
-            Raylib.SetTargetFPS(_targetFps);
+        ImGui.SliderInt("Frame rate limit", ref _targetFps, 30, 240);
 
         if (_uncappedFps)
+            ImGui.EndDisabled();
+
+        ImGui.Checkbox("Limit FPS when unfocused", ref _limitFpsWhenUnfocused);
+        ImGuiExtensions.QuestionTooltip(
+            "Uses a lower render rate while the viewer is in the background. The simulation keeps running at its normal fixed tick rate.");
+
+        if (!_limitFpsWhenUnfocused)
+            ImGui.BeginDisabled();
+
+        ImGui.SetNextItemWidth(220f);
+        ImGui.SliderInt("Unfocused frame rate", ref _unfocusedFps, 1, 60);
+
+        if (!_limitFpsWhenUnfocused)
             ImGui.EndDisabled();
 
         bool vsyncEnabled = Raylib.IsWindowState(ConfigFlags.VSyncHint);
