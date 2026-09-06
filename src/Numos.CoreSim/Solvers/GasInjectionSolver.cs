@@ -11,22 +11,22 @@ namespace Numos.CoreSim.Solvers;
 /// </remarks>
 internal class GasInjectionSolver
 {
-    private readonly Dictionary<Int3, Queue<InjectionEvent>>  _injectionBuffer = new();
-    
+    private readonly Dictionary<Int3, Queue<InjectionEvent>> _injectionBuffer = new();
+
+    // Scratch set reused across RunQueuedInjections batches to avoid re-deriving heat
+    // capacity from composition for a voxel that's already been touched this batch.
+    private readonly HashSet<ushort> _resyncedVoxels = new();
+
+    /// <summary>
+    ///     Public entry point for injecting gas outside the tick/solver flow (e.g. explosions, tools).
+    ///     Distinct from the instance <see cref="Inject(AtmosChunk, ushort, int, Mole, Kelvin, AtmosSolverConfigSnapshot, bool)" />
+    ///     overload, which is used during ticked solving against a config snapshot.
+    /// </summary>
     internal static void Inject(
         AtmosChunk chunk, ushort localVoxelIndex, int gasId, Mole moles,
         Kelvin temperature, IAtmosConfig config)
     {
-        JoulePerKelvin currentHeatCapacity = 0f;
-        for (int gas = 0; gas < chunk.ActiveGasCount; gas++)
-        {
-            Mole existingMoles = chunk.ActiveGases[gas].Moles[localVoxelIndex];
-            if (existingMoles <= 0f)
-                continue;
-
-            currentHeatCapacity += existingMoles *
-                                   config.GetMolarHeatCapacityAtConstantVolume(chunk.ActiveGases[gas].GasId);
-        }
+        JoulePerKelvin currentHeatCapacity = AtmosSolverMath.CalculateHeatCapacityAtVoxel(config, chunk, localVoxelIndex);
 
         InjectCore(
             chunk,
@@ -55,16 +55,8 @@ internal class GasInjectionSolver
             queue.Enqueue(new InjectionEvent(localVoxelIndex, gasId, moles, temperature));
             return;
         }
-        JoulePerKelvin currentHeatCapacity = 0f;
-        for (int gas = 0; gas < chunk.ActiveGasCount; gas++)
-        {
-            Mole existingMoles = chunk.ActiveGases[gas].Moles[localVoxelIndex];
-            if (existingMoles <= 0f)
-                continue;
 
-            currentHeatCapacity += existingMoles *
-                                   config.GetMolarHeatCapacityAtConstantVolume(chunk.ActiveGases[gas].GasId);
-        }
+        JoulePerKelvin currentHeatCapacity = AtmosSolverMath.CalculateHeatCapacityAtVoxel(config, chunk, localVoxelIndex);
 
         InjectCore(
             chunk,
@@ -84,21 +76,23 @@ internal class GasInjectionSolver
         {
             if (!context.World.TryGetChunk(chunkPosition, out var chunk))
                 continue;
+
+            // A voxel can appear in this queue multiple times in one batch — once per gas
+            // species, once per boundary direction that flowed into/out of it, etc.
+            // InjectCore/InjectGasToVoxel keep TotalHeatCapacity updated incrementally after
+            // every call, so composition only needs to be re-derived from ActiveGases once
+            // per voxel per batch; subsequent events for that voxel can trust the running
+            // total instead of re-summing every active gas from scratch.
+            _resyncedVoxels.Clear();
+
             while (queue.Count > 0)
             {
                 var ev = queue.Dequeue();
 
-                JoulePerKelvin currentHeatCapacity = 0f;
-                for (int gas = 0; gas < chunk.ActiveGasCount; gas++)
-                {
-                    Mole existingMoles = chunk.ActiveGases[gas].Moles[ev.LocalVoxelIndex];
-                    if (existingMoles <= 0f)
-                        continue;
+                JoulePerKelvin currentHeatCapacity = _resyncedVoxels.Add(ev.LocalVoxelIndex)
+                    ? AtmosSolverMath.CalculateHeatCapacityAtVoxel(config, chunk, ev.LocalVoxelIndex)
+                    : chunk.TotalHeatCapacity[ev.LocalVoxelIndex];
 
-                    currentHeatCapacity += existingMoles *
-                                        config.GetMolarHeatCapacityAtConstantVolume(chunk.ActiveGases[gas].GasId);
-                }
-                
                 InjectCore(
                     chunk,
                     ev.LocalVoxelIndex,
