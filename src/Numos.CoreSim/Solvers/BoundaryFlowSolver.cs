@@ -18,6 +18,8 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
     {
         long startedAt = Stopwatch.GetTimestamp();
         _orderedEvents.Clear();
+        GasInjectionSolver gasInjector = new();
+        gasInjector.ClearQueue();
         // TODO PERF properly microopt this
         // This performs a sort op so that indexing the arrays goes from least to greatest, which is better
         // than random access, however the sorting op does a In3 comparison before doing a index comparison
@@ -37,8 +39,9 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
         _orderedEvents.Sort(CompareEvents);
 
         foreach (var (chunkPosition, boundaryEvent) in _orderedEvents)
-            ProcessBoundaryFlow(context, chunkPosition, boundaryEvent);
+            ProcessBoundaryFlow(context, chunkPosition, boundaryEvent, gasInjector);
 
+        gasInjector.RunQueuedInjections(context, context.TickConfig);
         context.World.AddBoundaryProcessingTicks(Stopwatch.GetTimestamp() - startedAt);
     }
 
@@ -56,7 +59,7 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
 
     private static void ProcessBoundaryFlow(
         AtmosSolverExecutionContext context, Int3 sourcePosition,
-        BoundaryFlowEvent boundaryEvent)
+        BoundaryFlowEvent boundaryEvent, GasInjectionSolver gasInjector)
     {
         if (!context.World.TryGetChunk(sourcePosition, out var sourceChunk))
             return;
@@ -67,20 +70,20 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
         // TODO PERF See if possible to mutate after accumulation similar to advection
         // Might be expensive
         var localPosition = sourceChunk.GetXyzInt3(boundaryEvent.LocalVoxelIndex);
-        TryFlowToNeighbor(context, sourceChunk, sourcePosition, localPosition + Int3.NegX, Int3.NegX);
-        TryFlowToNeighbor(context, sourceChunk, sourcePosition, localPosition + Int3.PosX, Int3.PosX);
-        TryFlowToNeighbor(context, sourceChunk, sourcePosition, localPosition + Int3.NegY, Int3.NegY);
-        TryFlowToNeighbor(context, sourceChunk, sourcePosition, localPosition + Int3.PosY, Int3.PosY);
+        TryFlowToNeighbor(context, sourceChunk, sourcePosition, localPosition + Int3.NegX, Int3.NegX, gasInjector);
+        TryFlowToNeighbor(context, sourceChunk, sourcePosition, localPosition + Int3.PosX, Int3.PosX, gasInjector);
+        TryFlowToNeighbor(context, sourceChunk, sourcePosition, localPosition + Int3.NegY, Int3.NegY, gasInjector);
+        TryFlowToNeighbor(context, sourceChunk, sourcePosition, localPosition + Int3.PosY, Int3.PosY, gasInjector);
         if (sourceChunk.Depth <= 1)
             return;
 
-        TryFlowToNeighbor(context, sourceChunk, sourcePosition, localPosition + Int3.NegZ, Int3.NegZ);
-        TryFlowToNeighbor(context, sourceChunk, sourcePosition, localPosition + Int3.PosZ, Int3.PosZ);
+        TryFlowToNeighbor(context, sourceChunk, sourcePosition, localPosition + Int3.NegZ, Int3.NegZ, gasInjector);
+        TryFlowToNeighbor(context, sourceChunk, sourcePosition, localPosition + Int3.PosZ, Int3.PosZ, gasInjector);
     }
 
     private static void TryFlowToNeighbor(
         AtmosSolverExecutionContext context, AtmosChunk sourceChunk,
-        Int3 sourcePosition, Int3 targetPosition, Int3 direction)
+        Int3 sourcePosition, Int3 targetPosition, Int3 direction, GasInjectionSolver gasInjector)
     {
         if (targetPosition.IsWithin(default, sourceChunk.Dimensions))
             return;
@@ -123,13 +126,14 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
             neighborIndex,
             isVoid,
             totalMoles,
-            bulkPressureTransfer);
+            bulkPressureTransfer,
+            gasInjector);
     }
 
     private static void TransferSpecies(
         AtmosSolverExecutionContext context, AtmosChunk sourceChunk,
         ushort sourceIndex, AtmosChunk neighborChunk, ushort neighborIndex, bool isVoid,
-        Mole totalMoles, Pascal bulkPressureTransfer)
+        Mole totalMoles, Pascal bulkPressureTransfer, GasInjectionSolver gasInjector)
     {
         // Very similar to advection solver
         // See there for docs on the maths
@@ -162,13 +166,14 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
             if (molesToMove <= 0f)
                 continue;
 
-            JoulePerKelvin transferredHeatCapacity = molesToMove *
-                                                     config.GetMolarHeatCapacityAtConstantVolume(gasId);
-
-            sourceChunk.ActiveGases[gas].Moles[sourceIndex] = sourceMoles - molesToMove;
-            sourceChunk.TotalHeatCapacity[sourceIndex] = MathF.Max(
-                0f,
-                sourceChunk.TotalHeatCapacity[sourceIndex] - transferredHeatCapacity);
+            gasInjector.Inject(
+                sourceChunk,
+                sourceIndex,
+                gasId,
+                - molesToMove,
+                sourceTemperature,
+                config,
+                true);
 
             movedGas = true;
 
@@ -178,22 +183,19 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
             if (!neighborChunk.IsAwake)
                 neighborChunk.WakeRoom(neighborChunk.VoxelRoomMap[neighborIndex]);
 
-            GasInjectionSolver.InjectDuringTick(
+            gasInjector.Inject(
                 neighborChunk,
                 neighborIndex,
                 gasId,
                 molesToMove,
                 sourceTemperature,
-                config);
+                config,
+                true);
         }
 
         if (!movedGas)
             return;
 
-        if (sourceChunk.TotalHeatCapacity[sourceIndex] > 0f)
-            sourceChunk.Temperature[sourceIndex] = sourceTemperature;
-
-        sourceChunk.TotalPressure[sourceIndex] = AtmosSolverMath.CalculatePressureAtVoxel(config, sourceChunk, sourceIndex);
         // Intra-chunk sleep detection cannot see cross-chunk gradients. A boundary transfer therefore keeps
         // its source eligible for the next tick, just as injection keeps the target awake.
         sourceChunk.IsAwake = true;
