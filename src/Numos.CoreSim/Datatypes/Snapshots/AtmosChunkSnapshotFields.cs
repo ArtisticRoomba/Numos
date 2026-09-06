@@ -31,7 +31,11 @@ public enum AtmosChunkSnapshotFields
     /// </summary>
     TotalHeatCapacity = 1 << 4,
     /// <summary>
+    ///     Selects solver arrays opted into snapshot capture and rollback.
+    /// </summary>
+    SolverArrays = 1 << 5,
+    /// <summary>
     ///     Selects every detached field.
     /// </summary>
-    All = Pressure | Temperature | Gases | VoxelClassification | TotalHeatCapacity
+    All = Pressure | Temperature | Gases | VoxelClassification | TotalHeatCapacity | SolverArrays
 }

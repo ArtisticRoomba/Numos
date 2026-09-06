@@ -39,6 +39,14 @@ public struct AtmosChunkSnapshot
     /// </summary>
     public GasSnapshot[] Gases;
     /// <summary>
+    ///     Gets detached solver arrays whose capture policy is enabled, ordered by ordinal key.
+    /// </summary>
+    /// <remarks>
+    ///     Empty when solver fields were not requested. Legacy hand-built snapshots may leave this null.
+    ///     Rollback uses <see cref="Replay.AtmosSimulationCheckpoint" /> rather than presentation snapshots.
+    /// </remarks>
+    public IReadOnlyList<AtmosSolverArraySnapshot> SolverArrays;
+    /// <summary>
     ///     Gets the room ID for each voxel.
     /// </summary>
     public int[] VoxelRoomMap;
@@ -109,6 +117,9 @@ public struct AtmosChunkSnapshot
 
             if (VoxelRoomMap is { Length: > 0 })
                 available |= AtmosChunkSnapshotFields.VoxelClassification;
+
+            if (SolverArrays != null)
+                available |= AtmosChunkSnapshotFields.SolverArrays;
         }
 
         return (available & fields) == fields;

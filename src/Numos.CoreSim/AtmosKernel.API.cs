@@ -458,7 +458,9 @@ internal sealed partial class AtmosKernel
         lock (_stateGate)
         {
             var chunk = GetChunk(position);
-            if (chunk.Version == knownVersion)
+            // Live solver-array writes cannot increment a revision, so requests including them must copy each time.
+            if (chunk.Version == knownVersion &&
+                !(fields.HasFlag(AtmosChunkSnapshotFields.SolverArrays) && chunk.HasCapturedSolverArrays))
             {
                 snapshot = default;
                 return false;
@@ -499,7 +501,8 @@ internal sealed partial class AtmosKernel
                 // Handle lists are detached. A concurrent unregistration between enumeration
                 // and this batch is represented by the chunk simply not being returned.
                 if (!_chunkMap.TryGetValue(request.Position, out var chunk) ||
-                    chunk.Version == request.KnownVersion)
+                    chunk.Version == request.KnownVersion &&
+                    !(request.Fields.HasFlag(AtmosChunkSnapshotFields.SolverArrays) && chunk.HasCapturedSolverArrays))
                 {
                     continue;
                 }

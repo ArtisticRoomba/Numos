@@ -1,3 +1,4 @@
+using Numos.CoreSim.Datatypes.Snapshots;
 using Numos.Maths;
 
 namespace Numos.CoreSim.Replay;
@@ -15,7 +16,7 @@ public sealed class AtmosSimulationCheckpoint
     /// <summary>
     ///     Identifies the in-memory checkpoint schema used to interpret this data.
     /// </summary>
-    public const int CurrentFormatVersion = 1;
+    public const int CurrentFormatVersion = 2;
 
     /// <summary>
     ///     Identifies the structural and deterministic-math contract required to restore this data.
@@ -32,13 +33,15 @@ public sealed class AtmosSimulationCheckpoint
         Config = config;
         Solvers = Array.AsReadOnly(solvers);
         Chunks = Array.AsReadOnly(chunks);
+        // Retain the existing format and golden hashes when there is no solver-state extension.
+        FormatVersion = chunks.Any(static chunk => chunk.SolverArrays.Count != 0) ? CurrentFormatVersion : 1;
         CompatibilityFingerprint = AtmosStateHasher.HashDefinition(this);
     }
 
     /// <summary>
-    ///     Gets the checkpoint schema version required to interpret these fields.
+    ///     Gets the required schema: 1 for built-in state alone, or 2 when captured solver arrays are present.
     /// </summary>
-    public int FormatVersion => CurrentFormatVersion;
+    public int FormatVersion { get; }
 
     /// <summary>
     ///     Gets the deterministic simulation compatibility version.
@@ -81,7 +84,7 @@ public sealed class AtmosSimulationCheckpoint
     public IReadOnlyList<AtmosChunkCheckpoint> Chunks { get; }
 
     /// <summary>
-    ///     Bytes in copied chunk primitive arrays, excluding managed object headers and shared configuration.
+    ///     Bytes in copied chunk and solver arrays, excluding managed object headers, keys, and shared configuration.
     /// </summary>
     public long PayloadBytes => Chunks.Sum(static chunk => chunk.PayloadBytes);
 
@@ -129,6 +132,8 @@ public sealed class AtmosChunkCheckpoint
         Gases = Array.AsReadOnly(
             Enumerable.Range(0, chunk.ActiveGasCount)
                 .Select(gas => new AtmosGasChannelCheckpoint(chunk.ActiveGases[gas], chunk.VoxelCount)).ToArray());
+
+        SolverArrays = Array.AsReadOnly(chunk.CaptureSolverArrays());
     }
 
     /// <summary>
@@ -192,12 +197,22 @@ public sealed class AtmosChunkCheckpoint
     public IReadOnlyList<AtmosGasChannelCheckpoint> Gases { get; }
 
     /// <summary>
-    ///     Gets bytes occupied by copied primitive arrays, excluding managed object headers.
+    ///     Gets captured solver arrays in ordinal key order, detached from live chunk storage.
+    /// </summary>
+    /// <remarks>
+    ///     Restore recreates these arrays automatically. Reacquire them by the same string key, element type,
+    ///     length, and enabled capture policy; transient arrays are absent.
+    /// </remarks>
+    public IReadOnlyList<AtmosSolverArraySnapshot> SolverArrays { get; }
+
+    /// <summary>
+    ///     Gets bytes occupied by copied chunk and solver values, excluding managed object headers and keys.
     /// </summary>
     public long PayloadBytes => (long)Classifications.Count * 16 +
                                 ActiveRooms.Count * 4L +
                                 ActiveAirIndices.Count * 2L +
-                                Gases.Sum(static gas => 4L + gas.Moles.Count * 4L);
+                                Gases.Sum(static gas => 4L + gas.Moles.Count * 4L) +
+                                SolverArrays.Sum(static array => array.PayloadBytes);
 
     internal AtmosChunk Materialize()
     {
@@ -230,6 +245,7 @@ public sealed class AtmosChunkCheckpoint
 
             chunk.IsAwake = IsAwake;
             chunk.SleepTimer = SleepTimer;
+            chunk.RestoreSolverArrays(SolverArrays);
             return chunk;
         }
         catch

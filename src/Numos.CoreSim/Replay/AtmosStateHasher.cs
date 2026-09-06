@@ -2,7 +2,8 @@ using Numos.Maths;
 
 namespace Numos.CoreSim.Replay;
 
-// Primitive writes use little endian and raw IEEE bits. Never hash CLR identities or pool capacity.
+// Built-in primitive writes use little endian and raw IEEE bits. Solver values retain their native byte layout.
+// Never hash CLR identities or pool capacity.
 internal struct AtmosStateHasher
 {
     public AtmosStateHasher()
@@ -12,7 +13,7 @@ internal struct AtmosStateHasher
 
     internal ulong Value { get; private set; }
 
-    private void AddByte(byte value)
+    internal void AddByte(byte value)
     {
         Value = unchecked((Value ^ value) * 1099511628211UL);
     }
@@ -119,6 +120,13 @@ internal struct AtmosStateHasher
             {
                 hash.Add(gas.GasId);
                 foreach (float value in gas.Moles) hash.Add(value);
+            }
+
+            if (checkpoint.FormatVersion >= 2)
+            {
+                hash.Add(chunk.SolverArrays.Count);
+                foreach (var array in chunk.SolverArrays)
+                    array.AppendHash(ref hash);
             }
         }
 

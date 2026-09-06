@@ -1,9 +1,11 @@
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using System.Runtime.CompilerServices;
 using JetBrains.Annotations;
 using Numos.Collections;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.Datatypes.Snapshots;
+using Numos.CoreSim.Solvers;
 using Numos.Maths;
 using Numos.Units;
 
@@ -146,6 +148,7 @@ internal class AtmosChunk
 
     private long _generation;
     private long _revision;
+    private Dictionary<object, SolverArrayStorage>? _solverArrays;
 
     /// <summary>
     ///     Creates a chunk with the specified dimensions and active-room capacity.
@@ -172,6 +175,8 @@ internal class AtmosChunk
         VoxelCount = voxelCount;
         EnsureInitialized();
     }
+
+    internal bool HasCapturedSolverArrays => _solverArrays?.Values.Any(static array => array.CaptureForRollback) == true;
 
     /// <summary>
     ///     Identity and revision used by conditional snapshot consumers.
@@ -223,7 +228,7 @@ internal class AtmosChunk
     /// </exception>
     /// <remarks>
     ///     Initialization puts the chunk to sleep, resets all active counts and timers, and clears
-    ///     its per-voxel, gas-channel, and active-room data.
+    ///     its per-voxel, gas-channel, and active-room data. Solver arrays are detached.
     /// </remarks>
     [PublicAPI]
     public void Initialize(
@@ -234,6 +239,7 @@ internal class AtmosChunk
         int maxActiveRooms = AtmosChunkConstants.DefaultMaxActiveRooms)
     {
         int voxelCount = GetValidatedVoxelCount(width, height, depth);
+        _solverArrays = null;
         GridPosition = position;
         MaxActiveRooms = maxActiveRooms;
         IsAwake = false;
@@ -277,6 +283,7 @@ internal class AtmosChunk
     /// </remarks>
     public void Release()
     {
+        _solverArrays = null;
         if (ActiveGases != null)
         {
             for (int i = 0; i < ActiveGasCount; i++)
@@ -284,6 +291,91 @@ internal class AtmosChunk
                 ActiveGases[i].Release();
             }
         }
+    }
+
+    /// <summary>
+    ///     Gets solver storage for a key, allocating it on first use in this chunk.
+    /// </summary>
+    /// <typeparam name="T">The exact element type stored under the key.</typeparam>
+    /// <param name="key">An ordinal string key, or a reference-identity object for transient storage.</param>
+    /// <param name="captureForRollback">Whether to capture and restore the array with its chunk.</param>
+    /// <param name="length">The required array length, or null for one element per voxel.</param>
+    /// <returns>The live array, initially filled with default values.</returns>
+    /// <remarks>
+    ///     Access each chunk from one worker at a time. Arrays survive ticks and sleep, but are detached on
+    ///     initialization or release. Captured storage requires a stable string key and reference-free elements.
+    /// </remarks>
+    internal T[] GetOrCreateSolverArray<T>(object key, bool captureForRollback, int? length = null)
+    {
+        ArgumentNullException.ThrowIfNull(key);
+        int arrayLength = length ?? VoxelCount;
+        ArgumentOutOfRangeException.ThrowIfNegative(arrayLength, nameof(length));
+
+        if (captureForRollback)
+        {
+            if (key is not string name || string.IsNullOrWhiteSpace(name))
+                throw new ArgumentException("Captured solver arrays require a nonempty, stable string key.", nameof(key));
+
+            if (RuntimeHelpers.IsReferenceOrContainsReferences<T>())
+            {
+                throw new ArgumentException(
+                    "Captured solver array elements cannot contain managed references.",
+                    nameof(captureForRollback));
+            }
+        }
+
+        if (_solverArrays != null && _solverArrays.TryGetValue(key, out var existing))
+        {
+            if (existing is not SolverArrayStorage<T> typed ||
+                existing.Length != arrayLength ||
+                existing.CaptureForRollback != captureForRollback)
+            {
+                throw new InvalidOperationException(
+                    "The solver array key already has a different element type, length, or capture policy.");
+            }
+
+            return typed.Values;
+        }
+
+        var array = new T[arrayLength];
+        _solverArrays ??= new Dictionary<object, SolverArrayStorage>(SolverArrayKeyComparer.Instance);
+        _solverArrays.Add(key, new SolverArrayStorage<T>(array, captureForRollback));
+        if (captureForRollback)
+            MarkChanged();
+
+        return array;
+    }
+
+    /// <summary>
+    ///     Gets a chunk-shaped view over the same storage used by <see cref="GetOrCreateSolverArray{T}" />.
+    /// </summary>
+    /// <typeparam name="T">The exact element type stored under the key.</typeparam>
+    /// <param name="key">An ordinal string key, or a reference-identity object for transient storage.</param>
+    /// <param name="captureForRollback">Whether to capture and restore the array with its chunk.</param>
+    /// <returns>A live view with one element per voxel and the chunk's coordinate indexing.</returns>
+    internal FlatArray<T> GetOrCreateSolverFlatArray<T>(object key, bool captureForRollback)
+    {
+        return new FlatArray<T>(GetOrCreateSolverArray<T>(key, captureForRollback), Dimensions);
+    }
+
+    internal AtmosSolverArraySnapshot[] CaptureSolverArrays()
+    {
+        if (_solverArrays == null)
+            return [];
+
+        return _solverArrays.Where(static entry => entry.Value.CaptureForRollback)
+            .OrderBy(static entry => (string)entry.Key, StringComparer.Ordinal)
+            .Select(static entry => new AtmosSolverArraySnapshot((string)entry.Key, entry.Value)).ToArray();
+    }
+
+    internal void RestoreSolverArrays(IReadOnlyList<AtmosSolverArraySnapshot> snapshots)
+    {
+        if (snapshots.Count == 0)
+            return;
+
+        _solverArrays = new Dictionary<object, SolverArrayStorage>(SolverArrayKeyComparer.Instance);
+        foreach (var snapshot in snapshots)
+            _solverArrays.Add(snapshot.Key, snapshot.Materialize());
     }
 
     /// <summary>
@@ -586,7 +678,7 @@ internal class AtmosChunk
     /// <summary>
     ///     Creates a snapshot of the chunk's current network state.
     /// </summary>
-    /// <returns>A snapshot containing copies of the chunk's position, pressure, temperature, gas, and room data.</returns>
+    /// <returns>A snapshot containing selected physical fields and solver arrays opted into capture.</returns>
     [PublicAPI]
     public AtmosChunkSnapshot GetNetworkSnapshot(
         AtmosChunkSnapshotFields fields = AtmosChunkSnapshotFields.All)
@@ -615,6 +707,9 @@ internal class AtmosChunk
             VoxelRoomMap = fields.HasFlag(AtmosChunkSnapshotFields.VoxelClassification)
                 ? VoxelRoomMap.ToArray()
                 : [],
+            SolverArrays = fields.HasFlag(AtmosChunkSnapshotFields.SolverArrays)
+                ? Array.AsReadOnly(CaptureSolverArrays())
+                : Array.Empty<AtmosSolverArraySnapshot>(),
             ActiveAirCount = ActiveAirCount,
             ActiveGasCount = ActiveGasCount,
             IsAwake = IsAwake,

@@ -114,24 +114,35 @@ grid state, so retained checkpoint memory generally grows with the captured simu
 | Chunk storage                 | Captures position, dimensions, room capacity, awake state, sleep timer, classifications, temperatures, valid gas channels, and per-voxel moles.                             |
 | Continuation caches           | Captures pressure, heat capacity, active-room order, and the valid active-air prefix exactly. Disabled stages and sleeping chunks can leave meaningful cached state behind. |
 | Solver pipeline               | Captures enable flags and records names, custom/built-in kinds, and execution order for compatibility validation.                                                           |
+| Solver arrays                 | Captures arrays created with `captureForRollback: true`, including stable field names, exact element types, lengths, and values. Transient arrays are excluded.             |
 | Pooled storage                | Copies only valid entries. Pool capacity and unused array tails are not simulation state.                                                                                   |
 
 `AtmosChunkSnapshot` serves presentation and replication reads; it is not a continuation checkpoint. Checkpoints use
 full detached copies. The current implementation has no copy-on-write storage, delta compression, or incremental hash.
-`PayloadBytes` reports bytes in copied primitive chunk arrays and excludes managed object headers and shared
-configuration.
+`PayloadBytes` reports bytes in copied chunk and solver arrays and excludes managed object headers, field names, and
+shared configuration. Checkpoints with captured solver arrays use schema 2; built-in-only checkpoints retain schema 1
+and its existing hashes. Restore accepts both schemas under the same deterministic-math compatibility profile.
 
 Some data intentionally remains outside the checkpoint:
 
 - Custom solver delegates and closure state stay with the existing simulation.
 - Detached `GasMixture` containers, such as canisters, remain host-owned.
 - Per-tick event queues and solver workspaces are transient and are cleared or rebuilt.
+- Chunk-owned arrays created with `captureForRollback: false` remain transient; restore discards them.
 - Profiling values, recorder bookkeeping, object identities, chunk generations, and presentation revisions are not
   authoritative simulation state.
 
 When a detached mixture transfers gas into a voxel, the recording stores the resulting voxel state. Replaying that
 operation does not read, change, or restore the detached container. A custom solver must therefore avoid depending on
-uncheckpointed canister or closure state if its result needs to replay deterministically.
+uncheckpointed canister or closure state if its result needs to replay deterministically. Store persistent solver fields
+using `GetOrCreateChunkSolverArray<T>` or `GetOrCreateChunkSolverFlatArray<T>` with `captureForRollback: true`
+to let Numos capture and restore them automatically. Captured fields use stable string keys and elements containing no
+managed references. Reacquire the arrays each callback because restore replaces their owning chunks.
+
+Captured solver fields are hashed in ordinal key order, independent of allocation order. Their values use the exact
+element representation, including floating-point bits and custom struct padding; compatible solvers need matching types,
+layout, and runtime byte order. Direct writes outside solver callbacks are not recorded operations: initialize state
+before the starting checkpoint, then update it as deterministic solver work.
 
 ## Restore validates the receiving simulation
 

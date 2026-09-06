@@ -432,7 +432,58 @@ reactionSolver.Config.Rate = 0.5f;
 The registered method retains the solver instance, so its typed configuration remains editable after registration.
 The pipeline does not own or dispose custom solvers; callers remain responsible for an `IDisposable` solver's lifetime.
 
-Solvers that have a measured need to avoid snapshot copies can opt into live storage from the same callback:
+#### Chunk-owned solver arrays
+
+Solvers can keep private arrays on each chunk and let Numos roll their state back automatically. Every request must
+choose `captureForRollback`: `true` includes the array in snapshots, checkpoints, restoration, and state hashes;
+`false` keeps it as transient scratch storage.
+
+`GetOrCreateChunkSolverArray<T>(chunk, key, captureForRollback, length)` allocates a regular array on first use and
+returns it on later calls. Omitting `length` allocates one element per voxel; an explicit length can be any nonnegative
+size. `GetOrCreateChunkSolverFlatArray<T>(chunk, key, captureForRollback)` wraps the same storage with the chunk's
+dimensions. A key's element type, length, and capture policy must match on every request.
+
+Captured fields require a nonempty string key, unique to the solver field, such as `fire/burn-count`. Strings use
+ordinal equality, so a compatible solver can reacquire restored data in another simulation without sharing the original
+key object. Transient fields can also use retained object keys, which compare by reference identity.
+
+```csharp
+simulation.Solvers.Register("fire-v1", world =>
+{
+    foreach (var chunk in world.GetChunkHandles())
+    {
+        var exposure = world.GetOrCreateChunkSolverFlatArray<float>(
+            chunk, "fire/exposure", captureForRollback: true);
+        exposure[new Int3(0, 0, 0)] += 1f;
+
+        float[] scratch = world.GetOrCreateChunkSolverArray<float>(
+            chunk, "fire/scratch", captureForRollback: false);
+        Array.Clear(scratch);
+    }
+});
+```
+
+Arrays start with default values and retain their contents across ticks, sleep, and solver removal. On rollback, Numos
+replaces the chunks and restores captured arrays from independent checkpoint copies. Reacquire arrays each callback: old
+references still point to the old chunk's storage. Fields first created after the checkpoint disappear; requesting them
+again allocates default values. Transient fields also start fresh after restore.
+
+Captured elements must contain no managed references. Numeric types, enums, and reference-free custom structs work;
+reference types and structs containing references are rejected before allocation. Numos copies the full value state
+without user-provided cloning code. Hashes include field names, element types, lengths, and exact value bytes. Keep
+custom struct layout, padding, and runtime byte order consistent between compatible solvers.
+
+Lookup and allocation through the facade are serialized with ticks. Array reads and writes are the solver's
+responsibility; fetch buffers before dispatching parallel work and give each worker exclusive access to its chunk.
+Storage does not alias built-in physical fields or wake chunks. Live array writes cannot advance chunk revisions, so
+conditional snapshot requests including `AtmosChunkSnapshotFields.SolverArrays` copy captured fields every time.
+Requests for physical fields alone retain the usual revision check. Snapshot entries expose `CopyValues<T>()` for
+inspection without allowing changes to the saved state.
+
+Initialize captured state before the starting checkpoint and make later changes inside deterministic solver callbacks.
+Direct array writes are not external recorded operations; checkpoints save them, and replay regenerates solver writes.
+
+Solvers that have a measured need to avoid copies of physical fields can opt into live storage from the same callback:
 
 ```csharp
 simulation.Solvers.RegisterAfter(AtmosBuiltInSolvers.Advection, "fast-reaction", solverSimulation =>

@@ -7,6 +7,9 @@ namespace Numos.API;
 ///     Custom solvers inspect detached snapshots and mutate state through the same validated
 ///     <see cref="AtmosSimulation" /> operations as other callers. Use <c>Numos.API.Dangerous</c> only when profiling
 ///     demonstrates that a solver needs direct access to live storage.
+///     Private chunk-owned storage, with an explicit option for automatic rollback, is available through
+///     <see cref="AtmosSimulation.GetOrCreateChunkSolverArray{T}" /> and
+///     <see cref="AtmosSimulation.GetOrCreateChunkSolverFlatArray{T}" />.
 /// </remarks>
 /// <param name="simulation">The simulation being solved.</param>
 public delegate void AtmosSolver(AtmosSimulation simulation);
