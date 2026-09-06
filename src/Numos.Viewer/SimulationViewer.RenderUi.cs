@@ -210,6 +210,12 @@ public partial class SimulationViewer
                 ImGui.EndTabItem();
             }
 
+            if (ImGui.BeginTabItem("Thanks To"))
+            {
+                DrawThanksToTab(tabAreaSize);
+                ImGui.EndTabItem();
+            }
+
             ImGui.EndTabBar();
         }
     }
@@ -331,9 +337,30 @@ public partial class SimulationViewer
 
         ImGui.Text("VeritableCalamity");
         ImGui.TextDisabled("Original author of CoreSim");
+
         ImGui.Separator();
+
         ImGui.Text("ArtisticRoomba");
-        ImGui.TextDisabled("Simulation viewer and renderer, CoreSim maintainer");
+        ImGui.TextDisabled("CoreSim maintainer, Viewer author");
+
+        ImGui.EndChild();
+    }
+
+    private void DrawThanksToTab(Vector2 size)
+    {
+        ImGui.BeginChild(
+            "ThanksToTabContent",
+            size,
+            ImGuiChildFlags.Borders,
+            ImGuiWindowFlags.None);
+
+        ImGui.Text("riccardi48");
+        ImGui.TextDisabled("Numerical methods and physics guidance");
+
+        ImGui.Separator();
+
+        ImGui.Text("Ewanderer");
+        ImGui.TextDisabled("GasReactions solver");
 
         ImGui.EndChild();
     }
