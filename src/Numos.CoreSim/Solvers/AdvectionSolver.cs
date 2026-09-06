@@ -634,8 +634,6 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
 
                 // new moles is current moles + added moles
                 Mole moles = chunk.ActiveGases[gas].Moles[voxelIndex] + moleDelta;
-                if (moles < AtmosSolverConstants.MinimumTrackedMoles)
-                    moles = 0f;
 
                 totalMoles += moles;
 
