@@ -16,7 +16,7 @@ public sealed class AtmosSimulationCheckpoint
     /// <summary>
     ///     Identifies the in-memory checkpoint schema used to interpret this data.
     /// </summary>
-    public const int CurrentFormatVersion = 2;
+    public const int CurrentFormatVersion = 3;
 
     /// <summary>
     ///     Identifies the structural and deterministic-math contract required to restore this data.
@@ -33,13 +33,18 @@ public sealed class AtmosSimulationCheckpoint
         Config = config;
         Solvers = Array.AsReadOnly(solvers);
         Chunks = Array.AsReadOnly(chunks);
-        // Retain the existing format and golden hashes when there is no solver-state extension.
-        FormatVersion = chunks.Any(static chunk => chunk.SolverArrays.Count != 0) ? CurrentFormatVersion : 1;
+        // Existing simulations retain their format and hashes when they do not use solver configurations.
+        FormatVersion = config.SolverConfigurations.Count != 0
+            ? CurrentFormatVersion
+            : chunks.Any(static chunk => chunk.SolverArrays.Count != 0)
+                ? 2
+                : 1;
+
         CompatibilityFingerprint = AtmosStateHasher.HashDefinition(this);
     }
 
     /// <summary>
-    ///     Gets the required schema: 1 for built-in state alone, or 2 when captured solver arrays are present.
+    ///     Gets the required schema: 1 for base state, 2 with captured solver arrays, or 3 with solver configurations.
     /// </summary>
     public int FormatVersion { get; }
 

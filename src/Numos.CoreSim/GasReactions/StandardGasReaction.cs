@@ -41,7 +41,7 @@ public readonly partial record struct StandardGasReaction
     ///     If this reaction consumes or produces thermal energy.
     ///     In Joules per Reaction
     /// </summary>
-    private Joule EnergyBalance { get; }
+    internal Joule EnergyBalance { get; }
 
     /// <summary>
     ///     Arrhenius factor
@@ -120,7 +120,7 @@ public readonly partial record struct StandardGasReaction
     /// <param name="temperatureKelvin"></param>
     /// <returns>Reactions per seconds.</returns>
     /// <remarks>there are more sophisticated models for k but good luck having anyone setup all the parameters necessary.</remarks>
-    private PerSecond GetRateConstant(Kelvin temperatureKelvin)
+    internal PerSecond GetRateConstant(Kelvin temperatureKelvin)
     {
         return ArrheniusFactor *
                MathF.Exp(-ActivationEnergy * 0.001f / (temperatureKelvin * AtmosPhysicalConstants.MolarGasConstant));

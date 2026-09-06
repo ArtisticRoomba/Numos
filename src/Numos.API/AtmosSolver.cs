@@ -10,6 +10,7 @@ namespace Numos.API;
 ///     Private chunk-owned storage, with an explicit option for automatic rollback, is available through
 ///     <see cref="AtmosSimulation.GetOrCreateChunkSolverArray{T}" /> and
 ///     <see cref="AtmosSimulation.GetOrCreateChunkSolverFlatArray{T}" />.
+///     Attach derived data to registered gases with <see cref="AtmosSimulation.GetOrCreateGasSolverData{T}" />.
 /// </remarks>
 /// <param name="simulation">The simulation being solved.</param>
 public delegate void AtmosSolver(AtmosSimulation simulation);

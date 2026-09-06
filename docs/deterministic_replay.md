@@ -110,7 +110,7 @@ grid state, so retained checkpoint memory generally grows with the captured simu
 | State                         | Checkpoint behavior                                                                                                                                                         |
 |-------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | Timeline and fixed-step clock | Captures the completed tick, last operation sequence, and residual `Update` accumulator exactly.                                                                            |
-| Applied configuration         | Captures all normalized scalar settings, ordered gas definitions, and reaction parameters. Gas IDs keep their existing index meaning; restore does not remap them.          |
+| Applied configuration         | Captures normalized scalar settings, ordered gas definitions, and immutable solver configurations. Gas IDs keep their existing index meaning; restore does not remap them.  |
 | Chunk storage                 | Captures position, dimensions, room capacity, awake state, sleep timer, classifications, temperatures, valid gas channels, and per-voxel moles.                             |
 | Continuation caches           | Captures pressure, heat capacity, active-room order, and the valid active-air prefix exactly. Disabled stages and sleeping chunks can leave meaningful cached state behind. |
 | Solver pipeline               | Captures enable flags and records names, custom/built-in kinds, and execution order for compatibility validation.                                                           |
@@ -120,14 +120,19 @@ grid state, so retained checkpoint memory generally grows with the captured simu
 `AtmosChunkSnapshot` serves presentation and replication reads; it is not a continuation checkpoint. Checkpoints use
 full detached copies. The current implementation has no copy-on-write storage, delta compression, or incremental hash.
 `PayloadBytes` reports bytes in copied chunk and solver arrays and excludes managed object headers, field names, and
-shared configuration. Checkpoints with captured solver arrays use schema 2; built-in-only checkpoints retain schema 1
-and its existing hashes. Restore accepts both schemas under the same deterministic-math compatibility profile.
+shared configuration. Checkpoints with solver configurations use schema 3. Without solver configurations, captured
+solver arrays use schema 2 and base-state checkpoints retain schema 1 and its existing hashes. Restore accepts all three
+schemas under the same deterministic-math compatibility profile. Solver configuration keys and deterministic hashes
+contribute to the state hash; their immutable snapshots supply the actual restored settings. A custom configuration must
+capture every authoritative value and keep its snapshot immutable.
 
 Some data intentionally remains outside the checkpoint:
 
 - Custom solver delegates and closure state stay with the existing simulation.
 - Detached `GasMixture` containers, such as canisters, remain host-owned.
 - Per-tick event queues and solver workspaces are transient and are cleared or rebuilt.
+- Per-gas solver attachments created with `GetOrCreateGasSolverData<T>` are derived or transient data. Restore discards
+  them even when the configuration is unchanged; the next request rebuilds them through the solver's factory.
 - Chunk-owned arrays created with `captureForRollback: false` remain transient; restore discards them.
 - Profiling values, recorder bookkeeping, object identities, chunk generations, and presentation revisions are not
   authoritative simulation state.

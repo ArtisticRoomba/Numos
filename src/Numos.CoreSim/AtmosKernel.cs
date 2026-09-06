@@ -65,6 +65,7 @@ internal sealed partial class AtmosKernel : IDisposable, IAtmosSolverWorld
                 chunk.Release();
 
             _chunkMap.Clear();
+            _tickConfig.ClearGasSolverData();
             _solverPipeline.Dispose();
         }
     }

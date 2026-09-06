@@ -1,10 +1,68 @@
 using JetBrains.Annotations;
 using Numos.Collections;
+using Numos.CoreSim;
 
 namespace Numos.API;
 
 public sealed partial class AtmosSimulation
 {
+    /// <summary>
+    ///     Gets or creates solver-owned data attached to a registered gas.
+    /// </summary>
+    /// <typeparam name="T">The exact stored type, including custom classes, structs, arrays, or dictionaries.</typeparam>
+    /// <param name="gasId">The gas index in the applied registry, or the tick-start registry inside a solver callback.</param>
+    /// <param name="key">
+    ///     A solver-owned identifier. Strings use ordinal equality; other objects use reference identity.
+    ///     Use a private object key to keep independent solvers' attachments separate.
+    /// </param>
+    /// <param name="factory">
+    ///     Creates a non-null value from the gas's normalized physical properties on the first request for this slot.
+    ///     The factory must not mutate the simulation or recursively request this slot. Failed creation is not cached.
+    /// </param>
+    /// <returns>The cached value. Reference types retain identity; structs are returned by value.</returns>
+    /// <remarks>
+    ///     <para>
+    ///         Attachments are shared across chunks, isolated per simulation, and survive ticks and solver removal.
+    ///         A configuration change invalidates all attachments, including reaction mappings. During a tick,
+    ///         attachments use the tick-start configuration; configuration changes become visible on the next tick
+    ///         or the next request outside a callback. Reacquire data on each callback.
+    ///     </para>
+    ///     <para>
+    ///         This is derived or transient storage: Numos excludes it from configuration snapshots, checkpoints,
+    ///         recordings, and state hashes, and discards it on checkpoint restoration or disposal. Factories must
+    ///         rebuild any data needed for deterministic replay from configuration or other authoritative inputs.
+    ///         Use captured chunk solver arrays for evolving state that must roll back automatically.
+    ///     </para>
+    ///     <para>
+    ///         Lookup and factory execution are serialized with simulation operations. Callers synchronize subsequent
+    ///         access to mutable values. Acquire attachments before dispatching worker tasks in a solver callback;
+    ///         workers calling this method would block on the tick's state lock.
+    ///     </para>
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="key" /> or <paramref name="factory" /> is null.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="gasId" /> is not registered.</exception>
+    /// <exception cref="InvalidOperationException">
+    ///     The slot holds a different type, the factory returns null, or creation recursively requests the same slot.
+    /// </exception>
+    /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
+    /// <example>
+    ///     <code>
+    ///     private readonly object _coolingKey = new();
+    ///
+    ///     public void Solve(AtmosSimulation simulation)
+    ///     {
+    ///         float coolingFactor = simulation.GetOrCreateGasSolverData(
+    ///             gasId: 0, _coolingKey, gas => 1f / gas.MolarHeatCapacityAtConstantVolume);
+    ///     }
+    ///     </code>
+    /// </example>
+    [PublicAPI]
+    public T GetOrCreateGasSolverData<T>(int gasId, object key, Func<GasProperties, T> factory) where T : notnull
+    {
+        ThrowIfDisposed();
+        return _kernel.GetOrCreateGasSolverData(gasId, key, factory);
+    }
+
     /// <summary>
     ///     Gets or allocates a chunk-owned array for a solver's private storage.
     /// </summary>

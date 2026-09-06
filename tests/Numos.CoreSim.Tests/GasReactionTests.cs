@@ -6,20 +6,107 @@ namespace Numos.CoreSim.Tests;
 public class GasReactionTests
 {
     [Test]
+    public void SolverGasMappings_FollowReactionChangesAndGasRegistryReordering()
+    {
+        var first = new GasProperties { Name = "A", MolarHeatCapacityAtConstantVolume = 10f };
+        var second = new GasProperties { Name = "B", MolarHeatCapacityAtConstantVolume = 10f };
+        var third = new GasProperties { Name = "C", MolarHeatCapacityAtConstantVolume = 10f };
+        var toSecond = new StandardGasReaction(
+            new Dictionary<GasProperties, float> { [first] = 1f },
+            new Dictionary<GasProperties, float> { [second] = 2f },
+            0f,
+            0.25f,
+            0f,
+            new Dictionary<GasProperties, float> { [first] = 1f });
+
+        var toThird = new StandardGasReaction(
+            new Dictionary<GasProperties, float> { [first] = 1f },
+            new Dictionary<GasProperties, float> { [third] = 3f },
+            0f,
+            0.5f,
+            0f,
+            new Dictionary<GasProperties, float> { [first] = 2f });
+
+        AtmosConfigSnapshot[] configurations =
+        [
+            new AtmosConfig
+            {
+                GasRegistry = [first, second, third],
+                SolverConfigurations = [new GasReactionConfig(standardReactions: [toSecond])]
+            }.CreateSnapshot(),
+            new AtmosConfig
+            {
+                GasRegistry = [first, second, third],
+                SolverConfigurations = [new GasReactionConfig(standardReactions: [toThird])]
+            }.CreateSnapshot(),
+            new AtmosConfig
+            {
+                GasRegistry = [third, first, second],
+                SolverConfigurations = [new GasReactionConfig(standardReactions: [toThird, toSecond])]
+            }.CreateSnapshot(),
+            new AtmosConfig
+            {
+                GasRegistry = [third, first, second],
+                SolverConfigurations = [new GasReactionConfig(standardReactions: [toSecond])]
+            }.CreateSnapshot()
+        ];
+
+        var tickConfig = new AtmosSolverConfigSnapshot();
+        var solver = new ReactionSolver();
+        foreach (var config in configurations)
+        {
+            tickConfig.Capture(config);
+            // Repeat each configuration to exercise both creation and reuse of its gas attachments.
+            for (int iteration = 0; iteration < 2; iteration++)
+            {
+                var chunk = new AtmosChunk(1, 1, 1);
+                chunk.VoxelRoomMap[0] = 1;
+                chunk.WakeRoom(1);
+                int sourceId = config.GasRegistry.GasIdToIndex("A");
+                chunk.InjectGasToVoxel(0, sourceId, 10f, 300f, 10f, 1f);
+                solver.Solve(new AtmosSolverExecutionContext(null!, [chunk], tickConfig, iteration + 1));
+
+                var reactions = GasReactionConfig.Get(config);
+                float[] expectedProducts = new float[config.GasPropertyCount];
+                if (reactions.StandardReactions.Contains(toSecond))
+                    expectedProducts[config.GasRegistry.GasIdToIndex("B")] = 2f * (0.25f * 10f * AtmosSolverConstants.FixedTimeStep);
+
+                if (reactions.StandardReactions.Contains(toThird))
+                    expectedProducts[config.GasRegistry.GasIdToIndex("C")] = 3f * (0.5f * 100f * AtmosSolverConstants.FixedTimeStep);
+
+                for (int gasId = 0; gasId < expectedProducts.Length; gasId++)
+                {
+                    if (gasId == sourceId)
+                        continue;
+
+                    var channel = chunk.ActiveGases.Take(chunk.ActiveGasCount).SingleOrDefault(gas => gas.GasId == gasId);
+                    Assert.That(channel.Moles?[0] ?? 0f, Is.EqualTo(expectedProducts[gasId]));
+                }
+
+                chunk.Release();
+            }
+        }
+    }
+
+    [Test]
     public void FeedbackReduction_UsesVoxelCountInsteadOfPooledArrayCapacity()
     {
         var config = new AtmosConfig
         {
             GasRegistry = [new GasProperties { Name = "A" }],
-            StandardGasReactions =
+            SolverConfigurations =
             [
-                new StandardGasReaction(
-                    new Dictionary<GasProperties, float>(),
-                    new Dictionary<GasProperties, float>(),
-                    0f,
-                    0f,
-                    0f,
-                    new Dictionary<GasProperties, float>())
+                new GasReactionConfig(
+                    standardReactions:
+                    [
+                        new StandardGasReaction(
+                            new Dictionary<GasProperties, float>(),
+                            new Dictionary<GasProperties, float>(),
+                            0f,
+                            0f,
+                            0f,
+                            new Dictionary<GasProperties, float>())
+                    ])
             ]
         }.CreateSnapshot();
 
@@ -49,74 +136,92 @@ public class GasReactionTests
             false,
             false)).ToArray();
 
+        factors = [.. factors, new LinearGasReaction.LinearSpeedFactor(gases[0], 0f, 5f, 0.8f, 1.2f, false, false)];
+
         var first = new AtmosConfig
         {
             GasRegistry = [.. gases],
-            StandardGasReactions =
+            SolverConfigurations =
             [
-                new StandardGasReaction(
-                    new Dictionary<GasProperties, float>(),
-                    new Dictionary<GasProperties, float>(),
-                    0f,
-                    1.3f,
-                    5f,
-                    forward.ToDictionary())
+                new GasReactionConfig(
+                    [
+                        new LinearGasReaction(
+                            new Dictionary<GasProperties, float>(),
+                            new Dictionary<GasProperties, float>(),
+                            0f,
+                            200f,
+                            500f,
+                            0.3f,
+                            0.9f,
+                            false,
+                            false,
+                            factors.ToHashSet())
+                    ],
+                    [
+                        new StandardGasReaction(
+                            new Dictionary<GasProperties, float>(),
+                            new Dictionary<GasProperties, float>(),
+                            0f,
+                            1.3f,
+                            5f,
+                            forward.ToDictionary())
+                    ])
             ],
-            LinearGasReactions =
-            [
-                new LinearGasReaction(
-                    new Dictionary<GasProperties, float>(),
-                    new Dictionary<GasProperties, float>(),
-                    0f,
-                    200f,
-                    500f,
-                    0.3f,
-                    0.9f,
-                    false,
-                    false,
-                    factors.ToHashSet())
-            ]
         }.CreateSnapshot();
 
         var second = new AtmosConfig
         {
-            GasRegistry = [.. gases],
-            StandardGasReactions =
+            GasRegistry = [.. gases.Reverse()],
+            SolverConfigurations =
             [
-                new StandardGasReaction(
-                    new Dictionary<GasProperties, float>(),
-                    new Dictionary<GasProperties, float>(),
-                    0f,
-                    1.3f,
-                    5f,
-                    forward.Reverse().ToDictionary())
-            ],
-            LinearGasReactions =
-            [
-                new LinearGasReaction(
-                    new Dictionary<GasProperties, float>(),
-                    new Dictionary<GasProperties, float>(),
-                    0f,
-                    200f,
-                    500f,
-                    0.3f,
-                    0.9f,
-                    false,
-                    false,
-                    factors.Reverse().ToHashSet())
+                new GasReactionConfig(
+                    [
+                        new LinearGasReaction(
+                            new Dictionary<GasProperties, float>(),
+                            new Dictionary<GasProperties, float>(),
+                            0f,
+                            200f,
+                            500f,
+                            0.3f,
+                            0.9f,
+                            false,
+                            false,
+                            factors.Reverse().ToHashSet())
+                    ],
+                    [
+                        new StandardGasReaction(
+                            new Dictionary<GasProperties, float>(),
+                            new Dictionary<GasProperties, float>(),
+                            0f,
+                            1.3f,
+                            5f,
+                            forward.Reverse().ToDictionary())
+                    ])
             ]
         }.CreateSnapshot();
 
-        for (int reaction = 0; reaction < 2; reaction++)
-        {
-            first.TryGetGasReaction(reaction, out var left);
-            second.TryGetGasReaction(reaction, out var right);
-            int expected = BitConverter.SingleToInt32Bits(left!.GetReactionSpeed(molarity, 320f));
-            Parallel.For(
-                0,
-                100,
-                _ => Assert.That(BitConverter.SingleToInt32Bits(right!.GetReactionSpeed(molarity, 320f)), Is.EqualTo(expected)));
-        }
+        Dictionary<GasProperties, float> gasMolarities =
+            gases.Select((gas, index) => KeyValuePair.Create(gas, molarity[index])).ToDictionary();
+
+        var definitions = GasReactionConfig.Get(first);
+        float[] expected =
+        [
+            definitions.LinearReactions[0].GetReactionSpeed(gasMolarities, 320f),
+            definitions.StandardReactions[0].GetReactionSpeed(gasMolarities, 320f)
+        ];
+
+        Parallel.For(
+            0,
+            100,
+            _ =>
+            {
+                float temperature = 320f;
+                float[] feedback = new float[2];
+                new ReactionSolver().ProcessVoxel(1f, molarity.Reverse().ToArray(), ref temperature, feedback, second, gases.Length);
+                Assert.That(
+                    feedback.Select(BitConverter.SingleToInt32Bits),
+                    Is.EqualTo(expected.Select(BitConverter.SingleToInt32Bits)));
+            });
     }
 
     /// <summary>
@@ -183,7 +288,7 @@ public class GasReactionTests
         var config = new AtmosConfig
         {
             GasRegistry = [.. gases],
-            StandardGasReactions = standardReactions
+            SolverConfigurations = [new GasReactionConfig(standardReactions: standardReactions)]
         };
 
         var snapshotConfig = new AtmosSolverConfigSnapshot();
@@ -268,7 +373,7 @@ public class GasReactionTests
         var config = new AtmosConfig
         {
             GasRegistry = [hydrogen, oxygen, water],
-            StandardGasReactions = [waterSynthesis]
+            SolverConfigurations = [new GasReactionConfig(standardReactions: [waterSynthesis])]
         };
 
         var solver = new ReactionSolver();
