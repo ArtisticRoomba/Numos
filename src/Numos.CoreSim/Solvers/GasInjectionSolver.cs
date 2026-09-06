@@ -11,7 +11,7 @@ namespace Numos.CoreSim.Solvers;
 /// </remarks>
 internal class GasInjectionSolver
 {
-    private Dictionary<Int3, Queue<InjectionEvent>> _injectionBuffer = new();
+    private readonly Dictionary<Int3, Queue<InjectionEvent>>  _injectionBuffer = new();
     
     internal static void Inject(
         AtmosChunk chunk, ushort localVoxelIndex, int gasId, Mole moles,

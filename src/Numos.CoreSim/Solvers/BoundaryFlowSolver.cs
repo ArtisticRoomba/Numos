@@ -19,7 +19,6 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
         long startedAt = Stopwatch.GetTimestamp();
         _orderedEvents.Clear();
         GasInjectionSolver gasInjector = new();
-        gasInjector.ClearQueue();
         // TODO PERF properly microopt this
         // This performs a sort op so that indexing the arrays goes from least to greatest, which is better
         // than random access, however the sorting op does a In3 comparison before doing a index comparison
