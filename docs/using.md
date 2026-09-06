@@ -76,6 +76,110 @@ should populate an `AtmosConfig` before construction. To change it later, edit a
 `new AtmosConfig(simulation.Config)` and apply it with `simulation.SetAtmosConfig(builder)`. The simulation exposes an
 immutable snapshot and does not observe retained builder mutations.
 
+## Sharing dependencies between solvers
+
+`GetOrCreateSolverData<T>` gives cooperating stages a shared object without requiring either solver to hold a reference
+to the other. Each simulation owns its own slots. Solvers agree on a key and an exact type, then supply a factory used
+only on the first request:
+
+```csharp
+simulation.Solvers.Register("produce", world =>
+{
+    var pending = world.GetOrCreateSolverData("custom/pending", static () => new Queue<int>());
+    pending.Clear();
+    pending.Enqueue(world.TickCount);
+});
+simulation.Solvers.RegisterAfter("produce", "consume", world =>
+{
+    var pending = world.GetOrCreateSolverData("custom/pending", static () => new Queue<int>());
+    while (pending.TryDequeue(out int tick))
+        Console.WriteLine(tick);
+});
+```
+
+Strings compare ordinally; other keys use reference identity. A shared private object key avoids collisions with
+unrelated plugins. Values can also be interfaces backed by caller-provided services: request the same interface type
+from every stage. Reference types retain identity; structs are returned by value. Null results, type mismatches, and
+factory cycles throw; failed creation leaves the slot available for a retry. Factories may resolve other slots but must
+not mutate the simulation.
+
+Sharing data does not change execution order. Register producers before consumers, and define how a consumer behaves
+when its producer is disabled or removed. Built-in advection and thermodynamics use shared concurrent queues for their
+boundary stages. Producers clear their queues before parallel chunk work; consumers reject events from earlier ticks and
+sort current events before applying cross-chunk changes sequentially.
+
+Resolve shared data before starting worker tasks: facade calls from workers would block on the tick's state lock. Numos
+serializes lookup and creation; solvers synchronize later access to mutable values. A `ConcurrentQueue<T>` works for
+parallel producers, but consumers still need a stable ordering when processing order affects simulation results.
+
+Shared data survives ticks, configuration changes, solver removal, and pipeline resets. Checkpoint restoration and
+simulation disposal discard it without disposing the values. Reacquire on each callback and keep ownership of disposable
+services in host code. These slots are transient: snapshots, checkpoints, recordings, and state hashes exclude them.
+Rebuild replay-relevant data from authoritative inputs; use captured chunk solver arrays for evolving state that must
+roll back, or gas attachments below for caches invalidated by configuration changes.
+
+## Attaching solver data to gases
+
+Custom solvers can attach their own data to a registered gas without adding fields to `GasProperties`.
+`GetOrCreateGasSolverData<T>` stores one value per simulation, gas ID, and key, shared by all chunks:
+
+```csharp
+private readonly object _coolingKey = new();
+
+public void Solve(AtmosSimulation simulation)
+{
+    float coolingFactor = simulation.GetOrCreateGasSolverData(
+        gasId: 0, _coolingKey, gas => 1f / gas.MolarHeatCapacityAtConstantVolume);
+    // Use coolingFactor when processing this gas in any chunk.
+}
+```
+
+The factory receives normalized gas properties and runs only when that attachment is missing. Values can be custom
+classes, structs, arrays, or dictionaries. Request the same exact `T` for a slot on every call; a different type throws.
+Reference types retain identity, while structs are returned by value. Private object keys keep independent solvers
+separate; string keys compare ordinally and allow deliberate sharing.
+
+Attachments survive ticks and solver removal. Applying a changed configuration discards them, even when only reaction
+definitions change. This prevents cached gas or reaction indices from referring to the wrong entry after a registry
+edit. The built-in reaction solver uses this mechanism to cache each gas's coefficients by reaction ID and its linear
+rate factors or standard rate-law exponents before starting its workers. During a callback, attachments use the
+tick-start configuration; a configuration change takes effect on the next tick or the next attachment request outside a
+callback.
+
+Use these attachments for derived data or scratch storage. They are excluded from snapshots, checkpoints, recordings,
+and state hashes, and are discarded on checkpoint restoration. A replayable solver must rebuild them from configuration
+or other authoritative inputs. Evolving state that needs automatic rollback belongs in chunk solver arrays created with
+`captureForRollback: true`.
+
+Reacquire attachments on each callback. Acquire them before dispatching worker tasks, since facade calls from a worker
+would block on the tick's state lock. The factory must not mutate the simulation or recursively request its own slot.
+Numos serializes creation; the solver synchronizes subsequent access to mutable values.
+
+## Configuring solvers without extending AtmosConfig
+
+Solver settings belong in `AtmosConfig.SolverConfigurations`. The simulation captures them through
+`IAtmosSolverConfiguration`, so a custom solver can define its own settings without adding fields to Numos. Keys are
+unique, nonempty strings; snapshots order them ordinally so registration order does not change hashes.
+
+Custom configuration implementations must return immutable, detached snapshots, compare all authoritative settings in
+`SemanticallyEquals`, and provide a deterministic `ComputeStateHash`. Immutable value objects can return themselves from
+`CreateSnapshot`; editable builders must copy their values and collections. For example:
+
+```csharp
+public sealed record FireSettings(int Strength) : IAtmosSolverConfiguration
+{
+    public string Key => "my-game/fire";
+    public IAtmosSolverConfiguration CreateSnapshot(IGasRegistry gases) => this;
+    public bool SemanticallyEquals(IAtmosSolverConfiguration other) => Equals(other);
+    public ulong ComputeStateHash() => unchecked((ulong)Strength);
+}
+```
+
+Register it in `config.SolverConfigurations` and read its applied snapshot from
+`simulation.Config.SolverConfigurations` in the custom solver. Include every execution-relevant field in the hash; do
+not use process-randomized hashes such as `HashCode` or `string.GetHashCode()`. Configuration changes are recorded and
+restored with checkpoints. Derived gas attachments remain transient.
+
 ## Reading Simulation State
 The facade returns detached snapshots for presentation, networking, and gameplay decisions. A snapshot is safe to retain after the call, but it is not live: request another snapshot when a consumer needs newer state.
 

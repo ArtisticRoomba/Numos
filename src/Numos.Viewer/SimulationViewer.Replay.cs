@@ -384,7 +384,7 @@ public partial class SimulationViewer
                 $"Gas {id}: {gas.Name}, Cv={gas.MolarHeatCapacityAtConstantVolume:R}, diffusion={gas.DiffusionCoefficient:R}, boiling={gas.BoilingPoint:R}, condensation={gas.CondensationEnabled}, latent heat={gas.MolarEnthalpyOfVaporization:R}, liquid={gas.LiquidId}");
         }
 
-        ImGui.Text($"Linear reactions: {config.LinearGasReactions.Count}; standard reactions: {config.StandardGasReactions.Count}");
+        ImGui.Text($"Solver configurations: {config.SolverConfigurations.Count}");
         ImGui.TreePop();
     }
 
@@ -649,8 +649,7 @@ public partial class SimulationViewer
         var restored = new AtmosConfig(_simulation!.Config);
         // Visualizations retain this builder; copy restored values into the same instance.
         _config!.GasRegistry = restored.GasRegistry;
-        _config!.LinearGasReactions = restored.LinearGasReactions;
-        _config!.StandardGasReactions = restored.StandardGasReactions;
+        _config!.SolverConfigurations = restored.SolverConfigurations;
         _config!.GlobalTemperature = restored.GlobalTemperature;
         _config!.DefaultTemperatureFallback = restored.DefaultTemperatureFallback;
         _config!.DefaultMolarHeatCapacityAtConstantVolume = restored.DefaultMolarHeatCapacityAtConstantVolume;

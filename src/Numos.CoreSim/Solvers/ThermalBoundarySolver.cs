@@ -11,7 +11,6 @@ namespace Numos.CoreSim.Solvers;
 internal sealed class ThermalBoundarySolver : IAtmosSolverStage
 {
     private readonly List<ThermalBoundaryConductance> _activeEdges = [];
-    private readonly ConcurrentQueue<TickThermalBoundaryEvent> _boundaryEvents = new();
     private readonly HashSet<ThermalBoundaryEdge> _edges = [];
     private readonly Dictionary<ThermalVoxelAddress, Joule64> _energyDeltas = [];
     private readonly Dictionary<ThermalVoxelAddress, JoulePerKelvin64> _incidentConductances = [];
@@ -38,15 +37,9 @@ internal sealed class ThermalBoundarySolver : IAtmosSolverStage
         ApplyEnergyDeltas(context);
     }
 
-    internal void ClearPendingEvents()
+    internal void ClearTransientState()
     {
-        _boundaryEvents.Clear();
         ResetWorkspace();
-    }
-
-    internal void Enqueue(int tickCount, Int3 key, ThermalBoundaryEvent boundaryEvent)
-    {
-        _boundaryEvents.Enqueue(new TickThermalBoundaryEvent(tickCount, key, boundaryEvent));
     }
 
     private void ResetWorkspace()
@@ -61,7 +54,10 @@ internal sealed class ThermalBoundarySolver : IAtmosSolverStage
 
     private void CollectEdges(AtmosSolverExecutionContext context)
     {
-        while (_boundaryEvents.TryDequeue(out var boundaryEvent))
+        ConcurrentQueue<(int TickCount, Int3 Key, ThermalBoundaryEvent Event)> boundaryEvents =
+            BoundaryEvents<ThermalBoundaryEvent>.Get(context);
+
+        while (boundaryEvents.TryDequeue(out var boundaryEvent))
         {
             if (boundaryEvent.TickCount == context.TickCount)
                 CollectEdges(context, boundaryEvent.Key, boundaryEvent.Event);
@@ -246,9 +242,4 @@ internal sealed class ThermalBoundarySolver : IAtmosSolverStage
         AtmosChunk Chunk,
         Kelvin Temperature,
         JoulePerKelvin HeatCapacity);
-
-    private readonly record struct TickThermalBoundaryEvent(
-        int TickCount,
-        Int3 Key,
-        ThermalBoundaryEvent Event);
 }

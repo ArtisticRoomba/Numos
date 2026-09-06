@@ -358,7 +358,8 @@ Each frame:
 under `Numos.CoreSim.Solvers`; the kernel does not contain advection, boundary-flow, thermodynamics, or phase-change
 algorithms. A direct `Tick` snapshots the current chunk set; `Update` snapshots it once for its fixed-step batch.
 Every fixed tick captures normalized built-in settings, increments the tick counter, constructs an internal execution
-context containing only tick-wide inputs, and executes the ordered `simulation.Solvers` pipeline. Its default stages
+context containing tick-wide inputs and shared solver storage, and executes the ordered `simulation.Solvers` pipeline.
+Its default stages
 are:
 
 1. `advection`
@@ -393,12 +394,21 @@ simulation.Solvers.RegisterAfter(AtmosBuiltInSolvers.Advection, "game-reactions"
 simulation.Solvers.SetEnabled(AtmosBuiltInSolvers.Thermodynamics, false);
 ```
 
-Pipeline edits made by a callback take effect on the next tick. Gas and thermal boundary queues belong to their
-consumer solver instances. Producers clear the prior batch and tag every event with its tick; consumers discard any
+Pipeline edits made by a callback take effect on the next tick. Gas and thermal boundary queues live in the simulation's
+shared solver storage. Each stage resolves its queue from the execution context before starting workers; solvers do not
+pass collection callbacks to each other. Producers clear the prior batch and tag every event with its tick; consumers
+discard any
 event not produced for their current tick. Disabling or reordering a consumer therefore cannot replay stale work when
 it is later re-enabled. Recursive `Tick`/`Update`, simulation disposal, and chunk registration/removal are rejected
 during a callback because they would invalidate the current chunk snapshot. Perform those lifecycle operations outside
 the solver tick.
+
+Custom stages share typed dependencies through `simulation.GetOrCreateSolverData<T>(key, factory)`, backed by the same
+storage mechanism. Slots use ordinal string keys or object identity and survive ticks and pipeline edits. Restore
+discards these transient values, so stages must reacquire them on each callback. Shared data does not schedule stages;
+producers and consumers still need explicit pipeline ordering.
+See [sharing dependencies](using.md#sharing-dependencies-between-solvers)
+for examples, ownership, and threading requirements.
 
 Solver-specific settings should remain with a stateful solver object instead of expanding `AtmosConfig` with unrelated
 game configuration. Register its method as the callback:
@@ -432,7 +442,58 @@ reactionSolver.Config.Rate = 0.5f;
 The registered method retains the solver instance, so its typed configuration remains editable after registration.
 The pipeline does not own or dispose custom solvers; callers remain responsible for an `IDisposable` solver's lifetime.
 
-Solvers that have a measured need to avoid snapshot copies can opt into live storage from the same callback:
+#### Chunk-owned solver arrays
+
+Solvers can keep private arrays on each chunk and let Numos roll their state back automatically. Every request must
+choose `captureForRollback`: `true` includes the array in snapshots, checkpoints, restoration, and state hashes;
+`false` keeps it as transient scratch storage.
+
+`GetOrCreateChunkSolverArray<T>(chunk, key, captureForRollback, length)` allocates a regular array on first use and
+returns it on later calls. Omitting `length` allocates one element per voxel; an explicit length can be any nonnegative
+size. `GetOrCreateChunkSolverFlatArray<T>(chunk, key, captureForRollback)` wraps the same storage with the chunk's
+dimensions. A key's element type, length, and capture policy must match on every request.
+
+Captured fields require a nonempty string key, unique to the solver field, such as `fire/burn-count`. Strings use
+ordinal equality, so a compatible solver can reacquire restored data in another simulation without sharing the original
+key object. Transient fields can also use retained object keys, which compare by reference identity.
+
+```csharp
+simulation.Solvers.Register("fire-v1", world =>
+{
+    foreach (var chunk in world.GetChunkHandles())
+    {
+        var exposure = world.GetOrCreateChunkSolverFlatArray<float>(
+            chunk, "fire/exposure", captureForRollback: true);
+        exposure[new Int3(0, 0, 0)] += 1f;
+
+        float[] scratch = world.GetOrCreateChunkSolverArray<float>(
+            chunk, "fire/scratch", captureForRollback: false);
+        Array.Clear(scratch);
+    }
+});
+```
+
+Arrays start with default values and retain their contents across ticks, sleep, and solver removal. On rollback, Numos
+replaces the chunks and restores captured arrays from independent checkpoint copies. Reacquire arrays each callback: old
+references still point to the old chunk's storage. Fields first created after the checkpoint disappear; requesting them
+again allocates default values. Transient fields also start fresh after restore.
+
+Captured elements must contain no managed references. Numeric types, enums, and reference-free custom structs work;
+reference types and structs containing references are rejected before allocation. Numos copies the full value state
+without user-provided cloning code. Hashes include field names, element types, lengths, and exact value bytes. Keep
+custom struct layout, padding, and runtime byte order consistent between compatible solvers.
+
+Lookup and allocation through the facade are serialized with ticks. Array reads and writes are the solver's
+responsibility; fetch buffers before dispatching parallel work and give each worker exclusive access to its chunk.
+Storage does not alias built-in physical fields or wake chunks. Live array writes cannot advance chunk revisions, so
+conditional snapshot requests including `AtmosChunkSnapshotFields.SolverArrays` copy captured fields every time.
+Requests for physical fields alone retain the usual revision check. Snapshot entries expose `CopyValues<T>()` for
+inspection without allowing changes to the saved state.
+
+Initialize captured state before the starting checkpoint and make later changes inside deterministic solver callbacks.
+Direct array writes are not external recorded operations; checkpoints save them, and replay regenerates solver writes.
+
+Solvers that have a measured need to avoid copies of physical fields can opt into live storage from the same callback:
 
 ```csharp
 simulation.Solvers.RegisterAfter(AtmosBuiltInSolvers.Advection, "fast-reaction", solverSimulation =>

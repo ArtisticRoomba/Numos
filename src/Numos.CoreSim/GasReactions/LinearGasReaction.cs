@@ -64,7 +64,7 @@ public readonly partial record struct LinearGasReaction
     ///     If this reaction consumes or produces thermal energy.
     ///     In Joules per Reaction
     /// </summary>
-    private Joule EnergyBalance { get; }
+    internal Joule EnergyBalance { get; }
 
     private Kelvin LowTemperatureBound { get; }
     private Kelvin HighTemperatureBound { get; }
@@ -175,7 +175,7 @@ public readonly partial record struct LinearGasReaction
     /// </summary>
     /// <param name="temperatureKelvin"></param>
     /// <returns></returns>
-    private PerSecond GetRateConstantForTemperature(Kelvin temperatureKelvin)
+    internal PerSecond GetRateConstantForTemperature(Kelvin temperatureKelvin)
     {
         return EvalLinear(
             temperatureKelvin,

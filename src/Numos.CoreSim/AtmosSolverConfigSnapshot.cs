@@ -1,5 +1,4 @@
-using System.Diagnostics.CodeAnalysis;
-using Numos.CoreSim.GasReactions;
+using Numos.CoreSim.Solvers;
 using Numos.Maths;
 
 namespace Numos.CoreSim;
@@ -15,9 +14,12 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
 {
     private Scalar[] _diffusionCoefficients = [];
     private GasRegistrySnapshot _gasRegistry = default!;
+    private GasSolverDataStorage _gasSolverData = new(0);
     private JoulePerMoleKelvin[] _molarHeatCapacitiesAtConstantVolume = [];
 
-    private IGasReaction[] _reactionsRegistry = [];
+    private AtmosConfigSnapshot? _sourceConfig;
+
+    public IReadOnlyList<IAtmosSolverConfiguration> SolverConfigurations { get; private set; } = [];
 
     public Kelvin GlobalTemperature { get; private set; }
     public Kelvin DefaultTemperatureFallback { get; private set; }
@@ -76,20 +78,26 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
 
     public int GasPropertyCount { get; private set; }
 
-    public bool TryGetGasReaction(int reactionId, [NotNullWhen(true)] out IGasReaction? reaction)
+    internal T GetOrCreateGasSolverData<T>(int gasId, object key, Func<GasProperties, T> factory) where T : notnull
     {
-        reaction = null;
-        if (reactionId >= GasReactionCount)
-            return false;
+        if (!TryGetGasProperties(gasId, out var properties))
+            throw new ArgumentOutOfRangeException(nameof(gasId), "The gas is not registered.");
 
-        reaction = _reactionsRegistry[reactionId];
-        return true;
+        return _gasSolverData.GetOrCreate(gasId, key, properties, factory);
     }
 
-    public int GasReactionCount { get; private set; }
+    internal void ClearGasSolverData()
+    {
+        _gasSolverData = new GasSolverDataStorage(GasPropertyCount);
+    }
 
     internal void Capture(IAtmosConfig config)
     {
+        // Only immutable configurations can safely retain derived data across captures.
+        if (config is AtmosConfigSnapshot snapshot && ReferenceEquals(snapshot, _sourceConfig))
+            return;
+
+        _sourceConfig = null;
         int gasPropertyCount = config.GasPropertyCount;
         int previousGasRegistryCount = GasPropertyCount;
         if (_molarHeatCapacitiesAtConstantVolume.Length < gasPropertyCount)
@@ -164,20 +172,10 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
         AccumulatorMaxAliveTicks = Math.Max(0, config.AccumulatorMaxAliveTicks);
 
 
-        int previousReactionRegistryCount = GasReactionCount;
+        SolverConfigurations = config.SolverConfigurations;
 
-        if (GasReactionCount < config.GasReactionCount)
-        {
-            Array.Resize(ref _reactionsRegistry, config.GasReactionCount);
-        }
-
-        GasReactionCount = config.GasReactionCount;
-
-        for (int i = 0; i < config.GasReactionCount; i++)
-        {
-            if (config.TryGetGasReaction(i, out var reaction))
-                _reactionsRegistry[i] = reaction;
-        }
+        ClearGasSolverData();
+        _sourceConfig = config as AtmosConfigSnapshot;
     }
 
     public void ValidateGasRegistry()

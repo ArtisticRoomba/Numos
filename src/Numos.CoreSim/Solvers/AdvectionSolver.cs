@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using Numos.CoreSim.Datatypes.Events;
 using Numos.CoreSim.Datatypes.Primitives;
@@ -27,9 +28,6 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
     private readonly static int NeighborSlots = HorizontalNeighbors.Length + VerticalNeighbors.Length;
     private readonly ThreadLocal<BoundaryFlowEvent[]> _boundaryBuffers;
 
-    private readonly Action _clearBoundaryEvents;
-    private readonly Action<int, Int3, BoundaryFlowEvent> _enqueueBoundaryEvent;
-
     // Per-thread scratch buffers holding the resolved neighbor set (index + void flag) for
     // every active voxel in the chunk currently being solved. Populated once per chunk, per
     // tick, and reused by AccumulateBulkConductance, ProcessBulkNeighbors, and
@@ -37,20 +35,19 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
     // position-addition + bounds-check + room-classification work per neighbor.
     private readonly ThreadLocal<NeighborCache> _neighborCaches;
 
-    internal AdvectionSolver(
-        int maximumBoundaryEvents, Action clearBoundaryEvents,
-        Action<int, Int3, BoundaryFlowEvent> enqueueBoundaryEvent)
+    internal AdvectionSolver(int maximumBoundaryEvents)
     {
-        _clearBoundaryEvents = clearBoundaryEvents;
-        _enqueueBoundaryEvent = enqueueBoundaryEvent;
         _boundaryBuffers = new ThreadLocal<BoundaryFlowEvent[]>(() => new BoundaryFlowEvent[maximumBoundaryEvents]);
         _neighborCaches = new ThreadLocal<NeighborCache>(() => new NeighborCache());
     }
 
     public void Solve(AtmosSolverExecutionContext context)
     {
-        _clearBoundaryEvents();
-        Parallel.ForEach(context.Chunks, chunk => SolveChunk(context, chunk));
+        ConcurrentQueue<(int TickCount, Int3 Key, BoundaryFlowEvent Event)> boundaryEvents =
+            BoundaryEvents<BoundaryFlowEvent>.Get(context);
+
+        boundaryEvents.Clear();
+        Parallel.ForEach(context.Chunks, chunk => SolveChunk(context, chunk, boundaryEvents));
     }
 
     public void Dispose()
@@ -59,7 +56,9 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
         _neighborCaches.Dispose();
     }
 
-    private void SolveChunk(AtmosSolverExecutionContext context, AtmosChunk chunk)
+    private void SolveChunk(
+        AtmosSolverExecutionContext context, AtmosChunk chunk,
+        ConcurrentQueue<(int TickCount, Int3 Key, BoundaryFlowEvent Event)> boundaryEvents)
     {
         if (!chunk.IsAwake)
             return;
@@ -92,7 +91,7 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
         }
 
         for (int index = 0; index < boundaryCount; index++)
-            _enqueueBoundaryEvent(context.TickCount, chunk.GridPosition, boundaryBuffer[index]);
+            boundaryEvents.Enqueue((context.TickCount, chunk.GridPosition, boundaryBuffer[index]));
     }
 
     private static void Advect(

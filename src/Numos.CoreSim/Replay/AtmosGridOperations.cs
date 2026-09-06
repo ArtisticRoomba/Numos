@@ -4,7 +4,7 @@ using Numos.Maths;
 namespace Numos.CoreSim.Replay;
 
 /// <summary>
-///     Creates an empty sleeping chunk using the simulation’s fixed dimensions.
+///     Creates an empty sleeping chunk using the simulation’s fixed dimensions and wakes sleeping face neighbors.
 /// </summary>
 /// <param name="Position">Chunk-grid address to create.</param>
 /// <param name="MaxActiveRooms">Positive active-room capacity for the new chunk.</param>
