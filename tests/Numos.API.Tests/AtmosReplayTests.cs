@@ -288,8 +288,8 @@ public sealed class AtmosReplayTests
         using var first = CreateSimulation();
         using var second = CreateSimulation();
         first.CreateAndRegisterChunk(default);
-        first.CreateAndRegisterChunk(Int3.PosX);
-        second.CreateAndRegisterChunk(Int3.PosX);
+        first.CreateAndRegisterChunk(new Int3(2, 0, 0));
+        second.CreateAndRegisterChunk(new Int3(2, 0, 0));
         second.CreateAndRegisterChunk(default);
         Assert.That(first.ComputeStateHash(), Is.EqualTo(second.ComputeStateHash()));
         second.SetVoxelTemperature(new AtmosChunkHandle(default), 0, BitConverter.Int32BitsToSingle(unchecked((int)0x80000000)));

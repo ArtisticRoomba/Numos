@@ -313,7 +313,8 @@ public sealed partial class AtmosSimulation : IDisposable
     /// <returns>A lightweight handle that identifies the new chunk to this facade.</returns>
     /// <remarks>
     ///     The simulation owns the new chunk. A handle identifies its grid position; it does not provide direct
-    ///     access to mutable kernel state.
+    ///     access to mutable kernel state. Registering the chunk wakes sleeping face neighbors so they can react
+    ///     to the new boundary on the next simulation tick.
     /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="maxActiveRooms" /> is zero or negative.</exception>
     /// <exception cref="InvalidOperationException">

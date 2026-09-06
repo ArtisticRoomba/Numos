@@ -305,6 +305,7 @@ internal sealed partial class AtmosKernel
             if (!_chunkMap.TryAdd(chunk.GridPosition, chunk))
                 throw new InvalidOperationException($"A chunk is already registered at {chunk.GridPosition}.");
 
+            WakeSleepingNeighbors(chunk.GridPosition);
             _chunkCollectionRevision++;
             if (ShouldRecord) RecordOperation(new CreateChunkOperation(chunk.GridPosition, chunk.MaxActiveRooms));
         }
@@ -762,6 +763,25 @@ internal sealed partial class AtmosKernel
     {
         if (chunk.IsAwake)
             chunk.RebuildActiveAirIndices();
+    }
+
+    private void WakeSleepingNeighbors(Int3 position)
+    {
+        WakeSleepingChunk(position + Int3.NegX);
+        WakeSleepingChunk(position + Int3.PosX);
+        WakeSleepingChunk(position + Int3.NegY);
+        WakeSleepingChunk(position + Int3.PosY);
+        if (_dimensions.Z <= 1)
+            return;
+
+        WakeSleepingChunk(position + Int3.NegZ);
+        WakeSleepingChunk(position + Int3.PosZ);
+    }
+
+    private void WakeSleepingChunk(Int3 position)
+    {
+        if (_chunkMap.TryGetValue(position, out var chunk) && !chunk.IsAwake)
+            chunk.Wake();
     }
 
     private static ushort GetValidatedVoxelIndex(AtmosChunk chunk, int x, int y, int z)

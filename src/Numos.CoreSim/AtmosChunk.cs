@@ -332,6 +332,20 @@ internal class AtmosChunk
     }
 
     /// <summary>
+    ///     Wakes the chunk using the active-room topology retained when it went to sleep.
+    /// </summary>
+    /// <remarks>
+    ///     Use this when an external topology change may affect any active room. Use <see cref="WakeRoom" />
+    ///     when only one room needs to become active.
+    /// </remarks>
+    public virtual void Wake()
+    {
+        IsAwake = true;
+        SleepTimer = 0;
+        MarkChanged();
+    }
+
+    /// <summary>
     ///     Rebuilds the dense list of voxel indices belonging to active rooms.
     /// </summary>
     /// <remarks>
