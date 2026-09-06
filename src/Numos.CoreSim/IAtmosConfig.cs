@@ -1,10 +1,8 @@
-using System.Diagnostics.CodeAnalysis;
-using Numos.CoreSim.GasReactions;
-
 namespace Numos.CoreSim;
 
 internal interface IAtmosConfig
 {
+    IReadOnlyList<IAtmosSolverConfiguration> SolverConfigurations { get; }
     Kelvin GlobalTemperature { get; }
     Kelvin DefaultTemperatureFallback { get; }
     JoulePerMoleKelvin DefaultMolarHeatCapacityAtConstantVolume { get; }
@@ -22,16 +20,11 @@ internal interface IAtmosConfig
     Pascal AccumulatorWakeThreshold { get; }
     int AccumulatorMaxAliveTicks { get; }
     PascalPerMoleKelvin PressurePerMoleKelvin { get; }
+
+    int GasPropertyCount { get; }
     Kelvin GetValidatedTemp(Kelvin storedTemperature);
     CubicMetre GetVoxelVolume();
     JoulePerMoleKelvin GetMolarHeatCapacityAtConstantVolume(int gasId);
     Scalar GetDiffusionCoefficient(int gasId);
     bool TryGetGasProperties(int gasId, out GasProperties properties);
-
-    int GasPropertyCount { get; }
-
-
-    bool TryGetGasReaction(int reactionId, [NotNullWhen(true)] out IGasReaction? reaction);
-
-    int GasReactionCount { get; }
 }

@@ -1,6 +1,3 @@
-using System.Collections.ObjectModel;
-using System.Diagnostics.CodeAnalysis;
-using Numos.CoreSim.GasReactions;
 using Numos.CoreSim.Replay;
 using Numos.Maths;
 
@@ -15,21 +12,10 @@ namespace Numos.CoreSim;
 /// </remarks>
 public sealed class AtmosConfigSnapshot : IAtmosConfig
 {
-    private readonly LinearGasReaction[] _linearGasReactions;
-    private readonly IGasReaction[] _mappedGasReactions;
-    private readonly ReadOnlyCollection<LinearGasReaction> _readOnlyLinearGasReactions;
-    private readonly ReadOnlyCollection<StandardGasReaction> _readOnlyStandardGasReactions;
-    private readonly StandardGasReaction[] _standardGasReactions;
-
     internal AtmosConfigSnapshot(AtmosConfig source)
     {
         ArgumentNullException.ThrowIfNull(source);
         source.ValidateGasRegistry();
-
-        _linearGasReactions = source.LinearGasReactions.ToArray();
-        _standardGasReactions = source.StandardGasReactions.ToArray();
-        _readOnlyLinearGasReactions = Array.AsReadOnly(_linearGasReactions);
-        _readOnlyStandardGasReactions = Array.AsReadOnly(_standardGasReactions);
 
         GlobalTemperature = FloatMath.IsFinitePositive(source.GlobalTemperature)
             ? source.GlobalTemperature
@@ -88,18 +74,30 @@ public sealed class AtmosConfigSnapshot : IAtmosConfig
 
         GasRegistry = new GasRegistrySnapshot(gasRegistry);
 
-        _mappedGasReactions = new IGasReaction[_linearGasReactions.Length + _standardGasReactions.Length];
-        int reactionIndex = 0;
-        foreach (var reaction in _linearGasReactions)
-            _mappedGasReactions[reactionIndex++] = new LinearGasReaction.Mapped(reaction, GasRegistry);
+        var settings = new List<IAtmosSolverConfiguration>();
+        var keys = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var configuration in source.SolverConfigurations)
+        {
+            ArgumentNullException.ThrowIfNull(configuration);
+            if (string.IsNullOrWhiteSpace(configuration.Key) || !keys.Add(configuration.Key))
+                throw new ArgumentException("Solver configuration keys must be nonempty and unique.", nameof(source));
 
-        foreach (var reaction in _standardGasReactions)
-            _mappedGasReactions[reactionIndex++] = new StandardGasReaction.Mapped(reaction, GasRegistry);
+            var snapshot = configuration.CreateSnapshot(GasRegistry);
+            if (snapshot == null || snapshot.Key != configuration.Key)
+                throw new InvalidOperationException("Solver configuration snapshots must retain their key.");
+
+            settings.Add(snapshot);
+        }
+
+        SolverConfigurations = Array.AsReadOnly(settings.OrderBy(static value => value.Key, StringComparer.Ordinal).ToArray());
     }
 
     public GasRegistrySnapshot GasRegistry { get; }
-    public IReadOnlyList<LinearGasReaction> LinearGasReactions => _readOnlyLinearGasReactions;
-    public IReadOnlyList<StandardGasReaction> StandardGasReactions => _readOnlyStandardGasReactions;
+
+    /// <summary>
+    ///     Gets immutable solver-owned configurations ordered by their ordinal keys.
+    /// </summary>
+    public IReadOnlyList<IAtmosSolverConfiguration> SolverConfigurations { get; }
     public Kelvin GlobalTemperature { get; }
     public Kelvin DefaultTemperatureFallback { get; }
     public JoulePerMoleKelvin DefaultMolarHeatCapacityAtConstantVolume { get; }
@@ -166,19 +164,6 @@ public sealed class AtmosConfigSnapshot : IAtmosConfig
     }
 
     public int GasPropertyCount => GasRegistry.Count;
-    public int GasReactionCount => _mappedGasReactions.Length;
-
-    public bool TryGetGasReaction(int reactionId, [NotNullWhen(true)] out IGasReaction? reaction)
-    {
-        if ((uint)reactionId < (uint)_mappedGasReactions.Length)
-        {
-            reaction = _mappedGasReactions[reactionId];
-            return true;
-        }
-
-        reaction = null;
-        return false;
-    }
 
     public void ValidateGasRegistry()
     {
@@ -205,10 +190,19 @@ public sealed class AtmosConfigSnapshot : IAtmosConfig
         hash.Add(AccumulatorMaxAliveTicks);
         hash.Add(GasRegistry.Count);
         foreach (var gas in GasRegistry) hash.Add(gas);
-        hash.Add(_linearGasReactions.Length);
-        foreach (var reaction in _linearGasReactions) reaction.AppendHash(ref hash);
-        hash.Add(_standardGasReactions.Length);
-        foreach (var reaction in _standardGasReactions) reaction.AppendHash(ref hash);
+        // Retain the empty extension framing of schema 1/2 for simulations without solver settings.
+        hash.Add(0);
+        hash.Add(0);
+        if (SolverConfigurations.Count != 0)
+        {
+            hash.Add("solver-configurations");
+            hash.Add(SolverConfigurations.Count);
+            foreach (var configuration in SolverConfigurations)
+            {
+                hash.Add(configuration.Key);
+                hash.Add(configuration.ComputeStateHash());
+            }
+        }
     }
 
     internal bool SemanticallyEquals(AtmosConfigSnapshot other)
@@ -230,8 +224,9 @@ public sealed class AtmosConfigSnapshot : IAtmosConfig
                AccumulatorWakeThreshold.Equals(other.AccumulatorWakeThreshold) &&
                AccumulatorMaxAliveTicks == other.AccumulatorMaxAliveTicks &&
                GasRegistriesEqual(GasRegistry, other.GasRegistry) &&
-               ReactionsEqual(_linearGasReactions, other._linearGasReactions) &&
-               ReactionsEqual(_standardGasReactions, other._standardGasReactions);
+               SolverConfigurations.Count == other.SolverConfigurations.Count &&
+               SolverConfigurations.Zip(other.SolverConfigurations).All(static pair =>
+                   pair.First.Key == pair.Second.Key && pair.First.SemanticallyEquals(pair.Second));
     }
 
     private static bool GasRegistriesEqual(IGasRegistry first, IGasRegistry second)
@@ -253,34 +248,6 @@ public sealed class AtmosConfigSnapshot : IAtmosConfig
             {
                 return false;
             }
-        }
-
-        return true;
-    }
-
-    private static bool ReactionsEqual(LinearGasReaction[] first, LinearGasReaction[] second)
-    {
-        if (first.Length != second.Length)
-            return false;
-
-        for (int i = 0; i < first.Length; i++)
-        {
-            if (!first[i].SemanticallyEquals(second[i]))
-                return false;
-        }
-
-        return true;
-    }
-
-    private static bool ReactionsEqual(StandardGasReaction[] first, StandardGasReaction[] second)
-    {
-        if (first.Length != second.Length)
-            return false;
-
-        for (int i = 0; i < first.Length; i++)
-        {
-            if (!first[i].SemanticallyEquals(second[i]))
-                return false;
         }
 
         return true;

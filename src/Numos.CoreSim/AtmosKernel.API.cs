@@ -305,6 +305,7 @@ internal sealed partial class AtmosKernel
             if (!_chunkMap.TryAdd(chunk.GridPosition, chunk))
                 throw new InvalidOperationException($"A chunk is already registered at {chunk.GridPosition}.");
 
+            WakeSleepingNeighbors(chunk.GridPosition);
             _chunkCollectionRevision++;
             if (ShouldRecord) RecordOperation(new CreateChunkOperation(chunk.GridPosition, chunk.MaxActiveRooms));
         }
@@ -457,7 +458,9 @@ internal sealed partial class AtmosKernel
         lock (_stateGate)
         {
             var chunk = GetChunk(position);
-            if (chunk.Version == knownVersion)
+            // Live solver-array writes cannot increment a revision, so requests including them must copy each time.
+            if (chunk.Version == knownVersion &&
+                !(fields.HasFlag(AtmosChunkSnapshotFields.SolverArrays) && chunk.HasCapturedSolverArrays))
             {
                 snapshot = default;
                 return false;
@@ -498,7 +501,8 @@ internal sealed partial class AtmosKernel
                 // Handle lists are detached. A concurrent unregistration between enumeration
                 // and this batch is represented by the chunk simply not being returned.
                 if (!_chunkMap.TryGetValue(request.Position, out var chunk) ||
-                    chunk.Version == request.KnownVersion)
+                    chunk.Version == request.KnownVersion &&
+                    !(request.Fields.HasFlag(AtmosChunkSnapshotFields.SolverArrays) && chunk.HasCapturedSolverArrays))
                 {
                     continue;
                 }
@@ -762,6 +766,25 @@ internal sealed partial class AtmosKernel
     {
         if (chunk.IsAwake)
             chunk.RebuildActiveAirIndices();
+    }
+
+    private void WakeSleepingNeighbors(Int3 position)
+    {
+        WakeSleepingChunk(position + Int3.NegX);
+        WakeSleepingChunk(position + Int3.PosX);
+        WakeSleepingChunk(position + Int3.NegY);
+        WakeSleepingChunk(position + Int3.PosY);
+        if (_dimensions.Z <= 1)
+            return;
+
+        WakeSleepingChunk(position + Int3.NegZ);
+        WakeSleepingChunk(position + Int3.PosZ);
+    }
+
+    private void WakeSleepingChunk(Int3 position)
+    {
+        if (_chunkMap.TryGetValue(position, out var chunk) && !chunk.IsAwake)
+            chunk.Wake();
     }
 
     private static ushort GetValidatedVoxelIndex(AtmosChunk chunk, int x, int y, int z)

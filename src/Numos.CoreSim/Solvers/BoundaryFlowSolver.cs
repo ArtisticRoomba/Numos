@@ -11,12 +11,13 @@ namespace Numos.CoreSim.Solvers;
 /// </summary>
 internal sealed class BoundaryFlowSolver : IAtmosSolverStage
 {
-    private readonly ConcurrentQueue<TickBoundaryFlowEvent> _boundaryEvents = new();
     private readonly List<(Int3 Key, BoundaryFlowEvent Event)> _orderedEvents = [];
 
     public void Solve(AtmosSolverExecutionContext context)
     {
         long startedAt = Stopwatch.GetTimestamp();
+        ConcurrentQueue<(int TickCount, Int3 Key, BoundaryFlowEvent Event)> boundaryEvents =
+            BoundaryEvents<BoundaryFlowEvent>.Get(context);
         _orderedEvents.Clear();
         GasInjectionSolver gasInjector = new();
         // TODO PERF properly microopt this
@@ -28,9 +29,9 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
         // ConcurrentBag gets copied to a working array (not list)
         // Working array gets sorted by event index
         // Working array gets passed to the solver to process in order, which is now a single pass through the array.
-        while (_boundaryEvents.TryDequeue(out var boundaryEvent))
+        while (boundaryEvents.TryDequeue(out var boundaryEvent))
         {
-            // TODO check if this tickcount check really really needs to be here
+            // A disabled producer must not leave work for a consumer that resumes on a later tick.
             if (boundaryEvent.TickCount == context.TickCount)
                 _orderedEvents.Add((boundaryEvent.Key, boundaryEvent.Event));
         }
@@ -44,16 +45,9 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
         context.World.AddBoundaryProcessingTicks(Stopwatch.GetTimestamp() - startedAt);
     }
 
-    // TODO think of a smarter way to do solver callback/dependencies
-    internal void ClearPendingEvents()
+    internal void ClearTransientState()
     {
-        _boundaryEvents.Clear();
         _orderedEvents.Clear();
-    }
-
-    internal void Enqueue(int tickCount, Int3 key, BoundaryFlowEvent boundaryEvent)
-    {
-        _boundaryEvents.Enqueue(new TickBoundaryFlowEvent(tickCount, key, boundaryEvent));
     }
 
     private static void ProcessBoundaryFlow(
@@ -211,9 +205,4 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
             ? comparison
             : left.Event.LocalVoxelIndex.CompareTo(right.Event.LocalVoxelIndex);
     }
-
-    private readonly record struct TickBoundaryFlowEvent(
-        int TickCount,
-        Int3 Key,
-        BoundaryFlowEvent Event);
 }

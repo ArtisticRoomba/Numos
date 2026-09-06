@@ -1,20 +1,45 @@
 using System.Buffers;
+using Numos.CoreSim.GasReactions;
 
 namespace Numos.CoreSim.Solvers;
 
 internal class ReactionSolver : IAtmosSolverStage
 {
+    private readonly object _gasDataKey = new();
+    private GasReactionData[] _gasRateOrder = [];
+    private GasReactionData[] _gasReactionData = [];
+    private IAtmosConfig? _preparedConfig;
+
     public void Solve(AtmosSolverExecutionContext context)
     {
         //fast skip for empty configs.
-        if (context.TickConfig.GasReactionCount == 0 || context.TickConfig.GasPropertyCount == 0)
+        if (GasReactionConfig.Get(context.TickConfig).Count == 0 || context.TickConfig.GasPropertyCount == 0)
             return;
 
-        Parallel.ForEach(context.Chunks, chunk => ProcessChunk(chunk, AtmosSolverConstants.FixedTimeStep, context.TickConfig));
+        // Build once before workers start. Array indices retain the configured reaction order.
+        if (_gasReactionData.Length != context.TickConfig.GasPropertyCount)
+            _gasReactionData = new GasReactionData[context.TickConfig.GasPropertyCount];
 
-        //foreach (var chunk in context.Chunks)
+        for (int gasId = 0; gasId < _gasReactionData.Length; gasId++)
         {
-            //    ProcessChunk(chunk, AtmosSolverConstants.FixedTimeStep, context.TickConfig, null);
+            int registeredGasId = gasId;
+            _gasReactionData[gasId] = context.TickConfig.GetOrCreateGasSolverData(
+                gasId,
+                _gasDataKey,
+                _ => CreateGasReactionData(context.TickConfig, registeredGasId));
+        }
+
+        _gasRateOrder = _gasReactionData.OrderBy(static gas => gas.GasName, StringComparer.Ordinal).ToArray();
+        _preparedConfig = context.TickConfig;
+        try
+        {
+            Parallel.ForEach(context.Chunks, chunk => ProcessChunk(chunk, AtmosSolverConstants.FixedTimeStep, context.TickConfig));
+        }
+        finally
+        {
+            _preparedConfig = null;
+            Array.Clear(_gasReactionData);
+            _gasRateOrder = [];
         }
     }
 
@@ -48,7 +73,9 @@ internal class ReactionSolver : IAtmosSolverStage
                 //  for (var voxelIndex = 0; voxelIndex < voxelCount; voxelIndex++)
             {
                 Kelvin temp = chunk.Temperature[voxelIndex];
-                Scalar[]? reactionFeedback = reactionCount == null ? null : ArrayPool<Scalar>.Shared.Rent(config.GasReactionCount);
+                Scalar[]? reactionFeedback =
+                    reactionCount == null ? null : ArrayPool<Scalar>.Shared.Rent(GasReactionConfig.Get(config).Count);
+
                 if (reactionFeedback != null)
                     Array.Clear(reactionFeedback, 0, reactionFeedback.Length);
 
@@ -177,11 +204,29 @@ internal class ReactionSolver : IAtmosSolverStage
         Second deltaTime, Mole[] mixtureVector, ref Kelvin currentTemperature,
         Scalar[]? reactionFeedback, IAtmosConfig config, int mixtureLength)
     {
+        var reactions = GasReactionConfig.Get(config);
+        GasReactionData[] gasData;
+        GasReactionData[] rateOrder;
+        if (ReferenceEquals(_preparedConfig, config))
+        {
+            gasData = _gasReactionData;
+            rateOrder = _gasRateOrder;
+        }
+        else
+        {
+            // Direct kernel callers can supply editable configurations, so their mappings cannot be cached.
+            gasData = new GasReactionData[mixtureLength];
+            for (int gasId = 0; gasId < mixtureLength; gasId++)
+                gasData[gasId] = CreateGasReactionData(config, gasId);
+
+            rateOrder = gasData.OrderBy(static gas => gas.GasName, StringComparer.Ordinal).ToArray();
+        }
+
         Joule energy = ExtractHeat(mixtureVector, ref currentTemperature, mixtureLength, config);
         //make sure in single step we dont overstep.
 
         //split our time interval into smaller steps.
-        int reactionCount = config.GasReactionCount;
+        int reactionCount = reactions.Count;
         Scalar[] reactionSpeeds = ArrayPool<Scalar>.Shared.Rent(reactionCount);
 
         //prep array.
@@ -195,10 +240,15 @@ internal class ReactionSolver : IAtmosSolverStage
             reactionCount,
             i =>
             {
-                if (!config.TryGetGasReaction(i, out var e))
+                PerSecond rate = reactions.GetRateConstant(i, temperature);
+                if (!float.IsNormal(rate) || rate <= 0f)
                     return;
 
-                Scalar speed = e.GetReactionSpeed(mixtureVector, temperature) * deltaTime;
+                // Preserve canonical gas-name and factor order independently of registry indices.
+                foreach (var gas in rateOrder)
+                    rate = gas.ApplyRateFactors(i, mixtureVector[gas.GasId], rate);
+
+                Scalar speed = rate * deltaTime;
                 if (speed <= 0)
                     return;
 
@@ -223,12 +273,12 @@ internal class ReactionSolver : IAtmosSolverStage
             for (int i = 0; i < mixtureLength; i++)
             {
                 //we calculate total consumption, ignoring production by reactions.
-                Mole consumption = Enumerable.Range(0, config.GasReactionCount).Select(e =>
-                {
-                    config.TryGetGasReaction(e, out var reaction);
-                    return reaction!;
-                }).Select((e, j) =>
-                    MathF.Min(0, e.ChangeEquation.GetValueOrDefault(i)) * reactionSpeeds[j]).Sum();
+                // Match Enumerable.Sum's double accumulator while preserving reaction order and float products.
+                Mole64 accumulatedConsumption = 0d;
+                for (int j = 0; j < reactionCount; j++)
+                    accumulatedConsumption += MathF.Min(0, gasData[i].Changes[j]) * reactionSpeeds[j];
+
+                Mole consumption = (Mole)accumulatedConsumption;
 
                 //check how much moles/joules are left over after all reactions.
                 Mole postReactionMoles = mixtureVector[i] + consumption;
@@ -252,8 +302,7 @@ internal class ReactionSolver : IAtmosSolverStage
 
                 for (int i = 0; i < reactionCount; i++)
                 {
-                    if (!config.TryGetGasReaction(i, out var reaction) ||
-                        !reaction.ChangeEquation.ContainsKey(criticalIndex))
+                    if (!gasData[criticalIndex].Participates[i])
                         continue;
 
                     //select the lower reaction speed.
@@ -268,8 +317,7 @@ internal class ReactionSolver : IAtmosSolverStage
             Joule energyConsumption = 0f;
             for (int i = 0; i < reactionCount; i++)
             {
-                config.TryGetGasReaction(i, out var reaction);
-                energyConsumption += MathF.Min(0, reaction!.EnergyBalance) * reactionSpeeds[i];
+                energyConsumption += MathF.Min(0, reactions.GetEnergyBalance(i)) * reactionSpeeds[i];
             }
 
             if (energy + energyConsumption >= 0)
@@ -278,7 +326,7 @@ internal class ReactionSolver : IAtmosSolverStage
             Scalar energyScale = MathF.Min(1f, MathF.Max(0f, energy / Math.Abs(energyConsumption)));
             for (int i = 0; i < reactionCount; i++)
             {
-                if (!config.TryGetGasReaction(i, out var reaction) || reaction.EnergyBalance >= 0)
+                if (reactions.GetEnergyBalance(i) >= 0)
                     continue;
 
                 reactionSpeeds[i] = MathF.Min(reactionSpeeds[i], reactionSpeeds[i] * energyScale);
@@ -292,15 +340,13 @@ internal class ReactionSolver : IAtmosSolverStage
         {
             for (int j = 0; j < reactionCount; j++)
             {
-                config.TryGetGasReaction(j, out var reaction);
-                mixtureVector[i] += reaction!.ChangeEquation.GetValueOrDefault(i) * reactionSpeeds[j];
+                mixtureVector[i] += gasData[i].Changes[j] * reactionSpeeds[j];
             }
         }
 
         for (int j = 0; j < reactionCount; j++)
         {
-            config.TryGetGasReaction(j, out var reaction);
-            energy += reaction!.EnergyBalance * reactionSpeeds[j];
+            energy += reactions.GetEnergyBalance(j) * reactionSpeeds[j];
         }
 
         if (reactionFeedback != null)
@@ -317,6 +363,12 @@ internal class ReactionSolver : IAtmosSolverStage
         currentTemperature = UpdateTemperature(energy);
         //cleanup speeds.
         ArrayPool<float>.Shared.Return(reactionSpeeds);
+    }
+
+    private static GasReactionData CreateGasReactionData(IAtmosConfig config, int gasId)
+    {
+        config.TryGetGasProperties(gasId, out var gas);
+        return GasReactionConfig.Get(config).CreateGasData(gasId, gas);
     }
 
     private Kelvin UpdateTemperature(Joule totalKineticEnergy)

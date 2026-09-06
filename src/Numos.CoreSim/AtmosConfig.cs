@@ -1,5 +1,3 @@
-using System.Diagnostics.CodeAnalysis;
-using Numos.CoreSim.GasReactions;
 using Numos.CoreSim.Solvers;
 using Numos.Maths;
 using Numos.Units;
@@ -23,8 +21,7 @@ public class AtmosConfig : IAtmosConfig
         foreach (var gas in source.GasRegistry)
             GasRegistry.Add(gas);
 
-        LinearGasReactions = source.LinearGasReactions.ToList();
-        StandardGasReactions = source.StandardGasReactions.ToList();
+        SolverConfigurations = source.SolverConfigurations.ToList();
         GlobalTemperature = source.GlobalTemperature;
         DefaultTemperatureFallback = source.DefaultTemperatureFallback;
         DefaultMolarHeatCapacityAtConstantVolume = source.DefaultMolarHeatCapacityAtConstantVolume;
@@ -49,13 +46,15 @@ public class AtmosConfig : IAtmosConfig
     public GasRegistry GasRegistry { get; set; } = [];
 
     /// <summary>
-    ///     List of gas reactions using a more efficient but less realistic linear model for rate speed.
+    ///     Gets or sets solver-owned settings, captured through each implementation's immutable snapshot contract.
     /// </summary>
-    public List<LinearGasReaction> LinearGasReactions { get; set; } = [];
-    /// <summary>
-    ///     List of gas reactions using the standard rate law.
-    /// </summary>
-    public List<StandardGasReaction> StandardGasReactions { get; set; } = [];
+    /// <remarks>
+    ///     Keys must be unique and nonempty. Register a <c>GasReactionConfig</c> here to configure reactions,
+    ///     or supply an <see cref="IAtmosSolverConfiguration" /> for a custom solver without changing Numos.
+    /// </remarks>
+    public List<IAtmosSolverConfiguration> SolverConfigurations { get; set; } = [];
+
+    IReadOnlyList<IAtmosSolverConfiguration> IAtmosConfig.SolverConfigurations => SolverConfigurations;
 
     /// <summary>
     ///     Reference ambient temperature, in kelvins (K).
@@ -240,27 +239,6 @@ public class AtmosConfig : IAtmosConfig
     }
 
     public int GasPropertyCount => GasRegistry.Count;
-
-    public bool TryGetGasReaction(int reactionId, [NotNullWhen(true)] out IGasReaction? reaction)
-    {
-        reaction = null;
-        if (reactionId < LinearGasReactions.Count)
-        {
-            reaction = new LinearGasReaction.Mapped(LinearGasReactions[reactionId], GasRegistry);
-            return true;
-        }
-
-        reactionId -= LinearGasReactions.Count;
-        if (reactionId < StandardGasReactions.Count)
-        {
-            reaction = new StandardGasReaction.Mapped(StandardGasReactions[reactionId], GasRegistry);
-            return true;
-        }
-
-        return false;
-    }
-
-    public int GasReactionCount => LinearGasReactions.Count + StandardGasReactions.Count;
 
     /// <summary>Captures an immutable, detached copy of this configuration.</summary>
     public AtmosConfigSnapshot CreateSnapshot()

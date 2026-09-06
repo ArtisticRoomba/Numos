@@ -130,7 +130,7 @@ internal sealed partial class AtmosKernel
     private void ValidateCheckpoint(AtmosSimulationCheckpoint checkpoint)
     {
         ArgumentNullException.ThrowIfNull(checkpoint);
-        if (checkpoint.FormatVersion != AtmosSimulationCheckpoint.CurrentFormatVersion ||
+        if (checkpoint.FormatVersion is < 1 or > AtmosSimulationCheckpoint.CurrentFormatVersion ||
             checkpoint.CompatibilityVersion != AtmosSimulationCheckpoint.CurrentCompatibilityVersion ||
             checkpoint.Dimensions != _dimensions ||
             checkpoint.Position.Tick > int.MaxValue)
@@ -181,6 +181,8 @@ internal sealed partial class AtmosKernel
         _chunkMap = replacement;
         _config = checkpoint.Config;
         _tickConfig.Capture(_config);
+        _tickConfig.ClearGasSolverData();
+        _solverData.Clear();
         TickCount = checked((int)checkpoint.Position.Tick);
         _lastOperationSequence = checkpoint.Position.OperationSequence;
         _accumulator = checkpoint.ElapsedAccumulator;

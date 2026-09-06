@@ -9,6 +9,49 @@ public sealed class CrossChunkFlowTests
 {
     private const int ChunkSize = 3;
 
+    [Test]
+    public void AddingAdjacentChunk_WakesSleepingSourceAndAllowsBoundaryFlow()
+    {
+        var config = SimTestHelpers.CreateDeterministicConfig();
+        using var simulation = new AtmosSimulation(config, 1, 1, 1);
+        var source = SimTestHelpers.CreateOpenChunk(simulation, default);
+        simulation.AddGasToVoxel(
+            source,
+            0,
+            0,
+            0,
+            SimTestHelpers.FirstGasId,
+            2f,
+            SimTestHelpers.DefaultTemperature);
+
+        simulation.SleepChunk(source);
+
+        var target = SimTestHelpers.CreateOpenChunk(simulation, Int3.PosX);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(simulation.GetChunkSnapshot(source).IsAwake, Is.True);
+            Assert.That(simulation.GetChunkSnapshot(target).IsAwake, Is.False);
+        });
+
+        simulation.Tick();
+
+        var sourceSnapshot = simulation.GetChunkSnapshot(source);
+        var targetSnapshot = simulation.GetChunkSnapshot(target);
+        Assert.Multiple(() =>
+        {
+            Assert.That(
+                SimTestHelpers.Moles(sourceSnapshot, SimTestHelpers.FirstGasId, 0),
+                Is.EqualTo(1.5f).Within(SimTestHelpers.Tolerance));
+
+            Assert.That(
+                SimTestHelpers.Moles(targetSnapshot, SimTestHelpers.FirstGasId, 0),
+                Is.EqualTo(0.5f).Within(SimTestHelpers.Tolerance));
+
+            Assert.That(targetSnapshot.IsAwake, Is.True);
+        });
+    }
+
     [TestCase(1, 0, 0, 2, 1, 1, 0, 1, 1)]
     [TestCase(-1, 0, 0, 0, 1, 1, 2, 1, 1)]
     [TestCase(0, 1, 0, 1, 2, 1, 1, 0, 1)]
