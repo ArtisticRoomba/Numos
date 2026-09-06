@@ -7,9 +7,9 @@ internal sealed class DefaultAtmosSolvers : IDisposable
 {
     private readonly AdvectionSolver _advection;
     private readonly BoundaryFlowSolver _boundaryFlow;
+    private readonly ReactionSolver _reactions;
     private readonly ThermalBoundarySolver _thermalBoundary;
     private readonly ThermodynamicsSolver _thermodynamics;
-    private readonly ReactionSolver _reactions;
 
     internal DefaultAtmosSolvers(int chunkWidth, int chunkHeight, int chunkDepth)
     {
@@ -33,6 +33,12 @@ internal sealed class DefaultAtmosSolvers : IDisposable
     {
         _advection.Dispose();
         _thermodynamics.Dispose();
+    }
+
+    internal void ClearTransientState()
+    {
+        _boundaryFlow.ClearPendingEvents();
+        _thermalBoundary.ClearPendingEvents();
     }
 
     internal SolverStep[] CreateSteps()

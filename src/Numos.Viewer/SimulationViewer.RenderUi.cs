@@ -45,7 +45,17 @@ public partial class SimulationViewer
                 "Simulation 3D##viewport",
                 RenderSimulationScene,
                 new Vector2(320, 40),
-                new Vector2(660, 510));
+                new Vector2(660, 510),
+                () =>
+                {
+                    Update3DPicking();
+                    Render3DVoxelTooltip();
+                    RenderVoxelContextMenu();
+                });
+        }
+        else
+        {
+            _hovered3DCell = null;
         }
 
         if (_showSliceViewport)
@@ -54,10 +64,13 @@ public partial class SimulationViewer
                 "Simulation Slice 2D##slice-viewport",
                 RenderSimulationSliceScene,
                 new Vector2(320, 560),
-                new Vector2(660, 330));
-
-            UpdateSlicePicking();
-            RenderSliceCellTooltip();
+                new Vector2(660, 330),
+                () =>
+                {
+                    UpdateSlicePicking();
+                    RenderSliceCellTooltip();
+                    RenderVoxelContextMenu();
+                });
         }
         else
         {
@@ -65,10 +78,13 @@ public partial class SimulationViewer
             RebuildHighlights();
         }
 
+        ImGui.BeginDisabled(_replayTimeline?.IsInspecting == true);
         RenderSolutionPanel();
         RenderToolsPanel();
-        RenderViewPanel();
         RenderConfigurationPanel();
+        ImGui.EndDisabled();
+        RenderViewPanel();
+        RenderTimelinePanel();
         DrawCreateProjectModal();
         DrawCloseProjectModal();
         DrawAboutModal();
@@ -103,7 +119,7 @@ public partial class SimulationViewer
         ImGui.PopStyleVar(3);
 
         uint dockspaceId = ImGui.GetID("MainDockspace##main-dockspace-id");
-        ImGui.DockSpace(dockspaceId, Vector2.Zero, ImGuiDockNodeFlags.PassthruCentralNode);
+        ImGui.DockSpace(dockspaceId, Vector2.Zero, ImGuiDockNodeFlags.None);
 
         ImGui.End();
     }
@@ -140,7 +156,7 @@ public partial class SimulationViewer
 
         ImGuiExtensions.TextCentered("No simulation is currently loaded.", ImGui.TextDisabled);
         ImGuiExtensions.TextCentered(
-            "To get started, choose File > New Simulation.",
+            "Choose File > New Simulation to create a workspace.",
             ImGui.TextDisabled);
 
         ImGui.End();
@@ -383,7 +399,7 @@ public partial class SimulationViewer
                 if (ImGui.MenuItem("New Simulation"))
                     RequestCreateProject();
 
-                if (_simulation != null && ImGui.MenuItem("Close Simulation"))
+                if (_simulation != null && ImGui.MenuItem("Close Project"))
                     RequestCloseProject();
 
                 ImGui.Separator();
@@ -406,6 +422,7 @@ public partial class SimulationViewer
                 ImGui.MenuItem("Tools", null, ref _showToolsPanel);
                 ImGui.MenuItem("View", null, ref _showViewPanel);
                 ImGui.MenuItem("Configuration", null, ref _showConfigurationPanel);
+                ImGui.MenuItem("Timeline", null, ref _showTimelinePanel);
                 ImGui.MenuItem("3D Viewport", null, ref _show3DViewport);
                 ImGui.MenuItem("2D Slice Viewport", null, ref _showSliceViewport);
 
@@ -417,7 +434,7 @@ public partial class SimulationViewer
 
             if (ImGui.BeginMenu("Settings"))
             {
-                if (ImGui.MenuItem("Configure..."))
+                if (ImGui.MenuItem("Configure"))
                     _showProgramSettingsPanel = true;
 
                 ImGui.EndMenu();
@@ -469,10 +486,7 @@ public partial class SimulationViewer
                 DrawCellSelectionDetails(_selectedCell.Value);
 
                 if (ImGui.Button("Clear Selection##selected-cell"))
-                {
-                    _selectedCell = null;
-                    RebuildHighlights();
-                }
+                    ClearVoxelSelection();
             }
             else
             {
@@ -628,7 +642,10 @@ public partial class SimulationViewer
                     0f,
                     1000f,
                     "Reference ambient temperature."))
+            {
                 _config.GlobalTemperature = globalTemp;
+                ApplyConfiguration();
+            }
 
             float defaultTemperatureFallback = _config.DefaultTemperatureFallback;
             if (ConfigSlider(
@@ -638,7 +655,10 @@ public partial class SimulationViewer
                     0f,
                     1000f,
                     "Default fallback temperature to set when a voxel has 0 or an uninitialized temperature."))
+            {
                 _config.DefaultTemperatureFallback = defaultTemperatureFallback;
+                ApplyConfiguration();
+            }
 
             float voxelVolume = _config.VoxelVolume;
             if (ConfigSlider(
@@ -648,7 +668,10 @@ public partial class SimulationViewer
                     0.001f,
                     100f,
                     "Physical volume represented by each voxel. Pressure uses P = nRT/V."))
+            {
                 _config.VoxelVolume = voxelVolume;
+                ApplyConfiguration();
+            }
 
             float saturationReferencePressure = _config.SaturationReferencePressure;
             if (ConfigSlider(
@@ -658,7 +681,10 @@ public partial class SimulationViewer
                     100f,
                     200_000f,
                     "Pressure at which each gas's configured boiling point applies."))
+            {
                 _config.SaturationReferencePressure = saturationReferencePressure;
+                ApplyConfiguration();
+            }
 
             float defaultMolarHeatCapacityAtConstantVolume = _config.DefaultMolarHeatCapacityAtConstantVolume;
             if (ConfigSlider(
@@ -668,7 +694,10 @@ public partial class SimulationViewer
                     0.01f,
                     10_000f,
                     "Fallback molar heat capacity at constant volume in J/(mol·K)."))
+            {
                 _config.DefaultMolarHeatCapacityAtConstantVolume = defaultMolarHeatCapacityAtConstantVolume;
+                ApplyConfiguration();
+            }
 
             float defaultDiffusionCoefficient = _config.DefaultDiffusionCoefficient;
             if (ConfigSlider(
@@ -678,7 +707,10 @@ public partial class SimulationViewer
                     0f,
                     1f,
                     "Fallback fraction of the species mole imbalance mixed per tick."))
+            {
                 _config.DefaultDiffusionCoefficient = defaultDiffusionCoefficient;
+                ApplyConfiguration();
+            }
 
             float spaceTemperature = _config.SpaceTemperature;
             if (ConfigSlider(
@@ -688,7 +720,10 @@ public partial class SimulationViewer
                     0f,
                     100f,
                     "Default temperature of space."))
+            {
                 _config.SpaceTemperature = spaceTemperature;
+                ApplyConfiguration();
+            }
 
             float bulkFlowCoefficient = _config.BulkFlowCoefficient;
             if (ConfigSlider(
@@ -698,7 +733,10 @@ public partial class SimulationViewer
                     0f,
                     0.5f,
                     "Fraction of pressure delta converted to flow per tick."))
+            {
                 _config.BulkFlowCoefficient = bulkFlowCoefficient;
+                ApplyConfiguration();
+            }
 
             float vacuumThreshold = _config.VacuumThreshold;
             if (ConfigSlider(
@@ -708,7 +746,10 @@ public partial class SimulationViewer
                     0f,
                     100f,
                     "Below this pressure, voxel contents are zeroed out."))
+            {
                 _config.VacuumThreshold = vacuumThreshold;
+                ApplyConfiguration();
+            }
 
             int sleepThreshold = _config.SleepThreshold;
             if (ConfigSlider(
@@ -718,7 +759,10 @@ public partial class SimulationViewer
                     1,
                     1000,
                     "Consecutive ticks below Sleep Epsilon before a chunk goes to sleep."))
+            {
                 _config.SleepThreshold = sleepThreshold;
+                ApplyConfiguration();
+            }
 
             float sleepEpsilon = _config.SleepEpsilon;
             if (ConfigSlider(
@@ -728,7 +772,10 @@ public partial class SimulationViewer
                     0f,
                     100f,
                     "Maximum pressure delta considered at rest."))
+            {
                 _config.SleepEpsilon = sleepEpsilon;
+                ApplyConfiguration();
+            }
 
             float thermalConductance = _config.ThermalConductance;
             if (ConfigSlider(
@@ -738,7 +785,10 @@ public partial class SimulationViewer
                     0f,
                     1f,
                     "Per-face energy conductance in J/K per thermodynamics tick."))
+            {
                 _config.ThermalConductance = thermalConductance;
+                ApplyConfiguration();
+            }
 
             float condensationRateFactor = _config.CondensationRateFactor;
             if (ConfigSlider(
@@ -748,7 +798,10 @@ public partial class SimulationViewer
                     0f,
                     1f,
                     "Rate multiplier for phase-change condensation."))
+            {
                 _config.CondensationRateFactor = condensationRateFactor;
+                ApplyConfiguration();
+            }
 
             float maxPressureTransferFraction = _config.MaxPressureTransferFractionPerNeighbor;
             if (ConfigSlider(
@@ -758,7 +811,10 @@ public partial class SimulationViewer
                     0f,
                     1f,
                     "Maximum source-pressure fraction requested as bulk flow to one neighbor per tick."))
+            {
                 _config.MaxPressureTransferFractionPerNeighbor = maxPressureTransferFraction;
+                ApplyConfiguration();
+            }
 
             float accumulatorWakeThreshold = _config.AccumulatorWakeThreshold;
             if (ConfigSlider(
@@ -768,7 +824,10 @@ public partial class SimulationViewer
                     0f,
                     100f,
                     "Minimum accumulated flow or pressure activity required to wake a sleeping chunk."))
+            {
                 _config.AccumulatorWakeThreshold = accumulatorWakeThreshold;
+                ApplyConfiguration();
+            }
 
             int accumulatorMaxAliveTicks = _config.AccumulatorMaxAliveTicks;
             if (ConfigSlider(
@@ -778,7 +837,10 @@ public partial class SimulationViewer
                     1,
                     1000,
                     "Maximum number of ticks that an accumulated activity value remains alive."))
+            {
                 _config.AccumulatorMaxAliveTicks = accumulatorMaxAliveTicks;
+                ApplyConfiguration();
+            }
         }
 
         ImGui.Spacing();
@@ -808,28 +870,25 @@ public partial class SimulationViewer
         _config.MaxPressureTransferFractionPerNeighbor = defaults.MaxPressureTransferFractionPerNeighbor;
         _config.AccumulatorWakeThreshold = defaults.AccumulatorWakeThreshold;
         _config.AccumulatorMaxAliveTicks = defaults.AccumulatorMaxAliveTicks;
+        ApplyConfiguration();
     }
 
     private static bool ConfigSlider(string label, string id, ref float value, float min, float max, string tooltip)
     {
-        ImGui.SetNextItemWidth(100f);
-        bool changed = ImGui.SliderFloat($"{label} (?)##{id}", ref value, min, max);
-        SetConfigTooltip(tooltip);
+        ImGui.TextUnformatted(label);
+        ImGuiExtensions.QuestionTooltip(tooltip);
+        ImGui.SetNextItemWidth(-1f);
+        bool changed = ImGui.SliderFloat($"##{id}", ref value, min, max);
         return changed;
     }
 
     private static bool ConfigSlider(string label, string id, ref int value, int min, int max, string tooltip)
     {
-        ImGui.SetNextItemWidth(100f);
-        bool changed = ImGui.SliderInt($"{label} (?)##{id}", ref value, min, max);
-        SetConfigTooltip(tooltip);
+        ImGui.TextUnformatted(label);
+        ImGuiExtensions.QuestionTooltip(tooltip);
+        ImGui.SetNextItemWidth(-1f);
+        bool changed = ImGui.SliderInt($"##{id}", ref value, min, max);
         return changed;
-    }
-
-    private static void SetConfigTooltip(string tooltip)
-    {
-        if (ImGui.IsItemHovered())
-            ImGui.SetTooltip(tooltip);
     }
 
     private void RenderToolsPanel()
@@ -849,7 +908,7 @@ public partial class SimulationViewer
         if (ImGui.CollapsingHeader("Chunks", ImGuiTreeNodeFlags.DefaultOpen))
             RenderProjectChunkControls();
 
-        if (ImGui.CollapsingHeader("Voxel Selection", ImGuiTreeNodeFlags.DefaultOpen))
+        if (ImGui.CollapsingHeader("Voxel Tools", ImGuiTreeNodeFlags.DefaultOpen))
             RenderVoxelTools();
 
         if (ImGui.CollapsingHeader("Inject Gas"))
@@ -906,43 +965,69 @@ public partial class SimulationViewer
             }
         }
 
-        ImGui.Separator();
+        ImGui.SeparatorText("Viewport tool");
+        DrawVoxelToolButton("Select / Box", VoxelEditTool.Select);
+        ImGui.SameLine();
+        DrawVoxelToolButton("Paint Room", VoxelEditTool.PaintClassification);
+        DrawVoxelToolButton("Paint Gas", VoxelEditTool.PaintGas);
+        ImGui.SameLine();
+        DrawVoxelToolButton("Erase Gas", VoxelEditTool.EraseGas);
+
+        ImGui.SetNextItemWidth(NumericInputWidth);
+        ImGui.InputInt("Classification##voxel-edit", ref _voxelClassificationDraft);
+        ImGui.TextDisabled("0 unassigned, -2 solid, -1 void, positive values are room IDs.");
+
+        if (_config!.GasRegistry.Count > 0)
+        {
+            _injectionGasId = Math.Clamp(_injectionGasId, 0, _config.GasRegistry.Count - 1);
+            if (ImGui.BeginCombo("Gas##voxel-edit", FormatGas(_injectionGasId)))
+            {
+                for (int gasId = 0; gasId < _config.GasRegistry.Count; gasId++)
+                {
+                    bool gasSelected = gasId == _injectionGasId;
+                    if (ImGui.Selectable(FormatGas(gasId), gasSelected))
+                        _injectionGasId = gasId;
+                }
+
+                ImGui.EndCombo();
+            }
+        }
+
+        ImGui.SetNextItemWidth(NumericInputWidth);
+        ImGui.InputFloat("Moles##voxel-edit", ref _injectionMoles);
+        ImGui.SetNextItemWidth(NumericInputWidth);
+        ImGui.InputFloat("Temperature (K)##voxel-edit", ref _injectionTemperature);
+
+        ImGui.SeparatorText("Selection");
         if (!_selectedCell.HasValue)
         {
-            ImGui.TextDisabled("Select a voxel in the 3D or 2D view.");
+            ImGui.TextDisabled("No voxels selected.");
             return;
         }
 
-        var selected = _selectedCell.Value;
-        DrawCellSelectionDetails(selected);
+        ImGui.Text($"{_selectedCells.Count} voxel{(_selectedCells.Count == 1 ? string.Empty : "s")} selected");
+        DrawCellSelectionDetails(_selectedCell.Value);
 
+        if (ImGui.Button("Set Classification"))
+            ApplyClassification(_selectedCells, _voxelClassificationDraft);
+
+        ImGui.SameLine();
+        if (ImGui.Button("Inject Gas##selected-voxels"))
+            ApplyGasInjection(_selectedCells);
+
+        if (ImGui.Button("Clear Gas"))
+            ApplyClearGas(_selectedCells);
+
+        ImGui.SameLine();
         if (ImGui.Button("Clear Selection"))
-        {
-            _selectedCell = null;
-            RebuildHighlights();
-            return;
-        }
+            ClearVoxelSelection();
+    }
 
-        ImGui.Separator();
-        ImGui.SetNextItemWidth(NumericInputWidth);
-        if (ImGui.InputInt("VoxelClassification", ref _voxelClassificationDraft))
-        {
-            try
-            {
-                _simulation!.SetVoxelClassification(
-                    new AtmosChunkHandle(selected.Chunk.Position),
-                    selected.LocalIndex,
-                    new VoxelClassification(_voxelClassificationDraft));
-
-                SetProjectMessage($"Changed voxel classification to {_voxelClassificationDraft}.", false);
-            }
-            catch (Exception exception) when (exception is ArgumentOutOfRangeException or KeyNotFoundException)
-            {
-                SetProjectMessage(exception.Message, true);
-            }
-        }
-
-        ImGui.TextDisabled("0 = unassigned, -2 = solid, -1 = void \nPositive values are room IDs.");
+    private void DrawVoxelToolButton(string label, VoxelEditTool tool)
+    {
+        bool active = _voxelEditTool == tool;
+        if (ImGui.RadioButton(label, active))
+            _voxelEditTool = tool;
     }
 
     private void RenderSliceControls()
@@ -950,6 +1035,16 @@ public partial class SimulationViewer
         if (_drawData == null || _drawData.Chunks.Count == 0)
         {
             ImGui.TextDisabled("No chunks available.");
+            return;
+        }
+
+        if (_replayTimeline?.IsInspecting == true &&
+            _selectedSliceChunkPosition.HasValue &&
+            !_drawData.Chunks.ContainsKey(_selectedSliceChunkPosition.Value))
+        {
+            ImGui.TextDisabled(
+                $"Selected chunk {FormatChunkPosition(_selectedSliceChunkPosition.Value)} does not exist at this timeline position.");
+
             return;
         }
 
@@ -1076,8 +1171,7 @@ public partial class SimulationViewer
                 _legendRangeRevision++;
             }
 
-            if (ImGui.IsItemHovered())
-                ImGui.SetTooltip("Expands the automatic minimum and maximum by this amount.");
+            ImGuiExtensions.QuestionTooltip("Expands the automatic minimum and maximum by this amount.");
 
             return;
         }
@@ -1242,7 +1336,6 @@ public partial class SimulationViewer
         ImGui.Separator();
         DrawCellSelectionDetails(_hoveredSliceCell.Value.Address, _hoveredSliceCell.Value.U, _hoveredSliceCell.Value.V);
         ImGui.Separator();
-        ImGui.TextDisabled("Left-click to select");
         ImGui.EndTooltip();
     }
 
@@ -1255,7 +1348,7 @@ public partial class SimulationViewer
 
         if (_drawData == null || !_drawData.TryResolve(address, out _))
         {
-            ImGui.TextDisabled("Cell is not present in the latest frame.");
+            ImGui.TextDisabled("Selected voxel/chunk does not exist at this timeline position.");
             return;
         }
 
@@ -1270,7 +1363,65 @@ public partial class SimulationViewer
         GetGasSummary(details.Gases, out float totalMoles, out int primaryGasId);
         ImGui.Text($"Total Moles: {totalMoles:F2}");
         ImGui.Text($"Primary Gas: {FormatGas(primaryGasId)}");
+        DrawGasMakeupBar(address, details.Gases, totalMoles);
         ImGui.Text($"Room: {details.RoomId}");
+    }
+
+    private void DrawGasMakeupBar(
+        VoxelAddress address,
+        IReadOnlyList<VoxelGasSnapshot> gases,
+        float totalMoles)
+    {
+        ImGui.TextUnformatted("Gas makeup");
+        ImGui.PushID($"gas-makeup-{address.Chunk.Position}-{address.LocalIndex}");
+        Vector2 size = new(Math.Max(ImGui.GetContentRegionAvail().X, 1f), ImGui.GetFrameHeight());
+        ImGui.InvisibleButton("##bar", size);
+        var minimum = ImGui.GetItemRectMin();
+        var maximum = ImGui.GetItemRectMax();
+        var draw = ImGui.GetWindowDrawList();
+        draw.AddRectFilled(minimum, maximum, ImGui.ColorConvertFloat4ToU32(ViewerTheme.RecessedSurface));
+
+        float cursor = minimum.X;
+        if (totalMoles > 0f)
+        {
+            foreach (var gas in gases)
+            {
+                if (!float.IsFinite(gas.Moles) || gas.Moles <= 0f)
+                    continue;
+
+                float fraction = gas.Moles / totalMoles;
+                float right = Math.Min(maximum.X, cursor + size.X * fraction);
+                var color = ViewerTheme.GasPalette[Math.Abs(gas.GasId) % ViewerTheme.GasPalette.Length];
+                draw.AddRectFilled(
+                    new Vector2(cursor, minimum.Y),
+                    new Vector2(right, maximum.Y),
+                    ImGui.ColorConvertFloat4ToU32(color));
+
+                cursor = right;
+            }
+        }
+
+        draw.AddRect(minimum, maximum, ImGui.ColorConvertFloat4ToU32(ViewerTheme.StructuralLine));
+        string overlay = totalMoles > 0f ? $"{gases.Count(gas => gas.Moles > 0f)} gases" : "Vacuum";
+        var textSize = ImGui.CalcTextSize(overlay);
+        draw.AddText(
+            new Vector2(minimum.X + (size.X - textSize.X) * 0.5f, minimum.Y + (size.Y - textSize.Y) * 0.5f),
+            ImGui.ColorConvertFloat4ToU32(ViewerTheme.PrimaryText),
+            overlay);
+
+        if (ImGui.IsItemHovered() && totalMoles > 0f)
+        {
+            ImGui.BeginTooltip();
+            foreach (var gas in gases)
+            {
+                if (gas.Moles > 0f)
+                    ImGui.Text($"{FormatGas(gas.GasId)}: {gas.Moles:F3} mol ({gas.Moles / totalMoles:P1})");
+            }
+
+            ImGui.EndTooltip();
+        }
+
+        ImGui.PopID();
     }
 
     private static void GetGasSummary(

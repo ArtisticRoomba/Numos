@@ -432,7 +432,7 @@ internal class AtmosChunk
 
     /// <summary>
     ///     Tries to get the temperatures and heatCapacity of a specific voxel
-    ///     Does not recalculate <see cref="TotalHeatCapacity"/>
+    ///     Does not recalculate <see cref="TotalHeatCapacity" />
     /// </summary>
     [PublicAPI]
     public bool TryGetThermalState(
@@ -470,13 +470,14 @@ internal class AtmosChunk
     }
 
     /// <summary>
-    ///     Sets a specific voxel to a vacuum. This sets TotalPressure, ActiveGases, and TotalHeatCapacity to 0 and IsVacuum to true.
+    ///     Sets a specific voxel to a vacuum. This sets TotalPressure, ActiveGases, and TotalHeatCapacity to 0 and IsVacuum to
+    ///     true.
     /// </summary>
     [PublicAPI]
     public void SetChunkToVacuum()
     {
         TotalPressure.Fill(0f);
-        for (var g = 0; g < ActiveGasCount; g++)
+        for (int g = 0; g < ActiveGasCount; g++)
         {
             Array.Clear(ActiveGases[g].Moles, 0, ActiveGases[g].Moles.Length);
         }

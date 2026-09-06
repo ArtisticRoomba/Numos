@@ -30,11 +30,17 @@ internal class ReactionSolver : IAtmosSolverStage
         //process each voxel in parallel
         int voxelCount = chunk.VoxelCount;
 
+        // Registry compatibility is uniform across the chunk. Reject before any worker writes temperatures.
+        for (int gas = 0; gas < chunk.ActiveGasCount; gas++)
+        {
+            if ((uint)chunk.ActiveGases[gas].GasId >= (uint)config.GasPropertyCount)
+                return;
+        }
+
         float[][] newMixtures = ArrayPool<float[]>.Shared.Rent(voxelCount);
         Scalar[][]? reactionFeedbacks = reactionCount == null ? null : ArrayPool<Scalar[]>.Shared.Rent(voxelCount);
         Kelvin[] newTemps = ArrayPool<Kelvin>.Shared.Rent(voxelCount);
         int mixtureLength = config.GasPropertyCount;
-        bool badGas = false;
         Parallel.For(
             0,
             voxelCount,
@@ -56,20 +62,13 @@ internal class ReactionSolver : IAtmosSolverStage
 
                 for (int i = 0; i < chunk.ActiveGasCount; i++)
                 {
-                    //check if gas id is outside of config.
-                    if (chunk.ActiveGases[i].GasId >= config.GasPropertyCount || chunk.ActiveGases[i].GasId < 0)
-                    {
-                        badGas = true;
-                        break;
-                    }
-
                     mixtureVector[chunk.ActiveGases[i].GasId] = chunk.ActiveGases[i].Moles[voxelIndex];
                     content += chunk.ActiveGases[i].Moles[voxelIndex];
                 }
 
                 newMixtures[voxelIndex] = mixtureVector;
                 newTemps[voxelIndex] = temp;
-                if (content <= 0.0001 || badGas)
+                if (content <= 0.0001)
                     return;
 
                 //continue;
@@ -81,10 +80,6 @@ internal class ReactionSolver : IAtmosSolverStage
                 chunk.Temperature[voxelIndex] = temp;
                 newTemps[voxelIndex] = temp;
             });
-
-        //do not process bad gas chunk.
-        if (badGas)
-            return;
 
         //put data back in a single thread.
         for (ushort voxelIndex = 0; voxelIndex < voxelCount; voxelIndex++)
@@ -133,12 +128,13 @@ internal class ReactionSolver : IAtmosSolverStage
         }
 
         ArrayPool<float>.Shared.Return(newTemps);
-        ArrayPool<float[]>.Shared.Return(newMixtures);
+        ArrayPool<float[]>.Shared.Return(newMixtures, true);
 
         if (reactionCount != null && reactionFeedbacks != null)
         {
-            foreach (Scalar[] feedback in reactionFeedbacks)
+            for (int voxelIndex = 0; voxelIndex < voxelCount; voxelIndex++)
             {
+                Scalar[] feedback = reactionFeedbacks[voxelIndex];
                 for (int i = 0; i < reactionCount.Length; i++)
                 {
                     reactionCount[i] += feedback[i];
@@ -147,7 +143,7 @@ internal class ReactionSolver : IAtmosSolverStage
                 ArrayPool<float>.Shared.Return(feedback);
             }
 
-            ArrayPool<float[]>.Shared.Return(reactionFeedbacks);
+            ArrayPool<float[]>.Shared.Return(reactionFeedbacks, true);
         }
     }
 
@@ -212,7 +208,10 @@ internal class ReactionSolver : IAtmosSolverStage
 
         //check if there was even a reaction.
         if (!anyReaction)
+        {
+            ArrayPool<float>.Shared.Return(reactionSpeeds);
             return;
+        }
 
         //adjusts reactions speed as to not consume our available material in a single step.
         while (true)

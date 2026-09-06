@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Collections.Frozen;
 
 namespace Numos.CoreSim.GasReactions;
@@ -22,9 +21,8 @@ public readonly partial record struct StandardGasReaction
                 e => gasRegistry.GasIdToIndex(e.Key.Name),
                 e => e.Value);
 
-            MappedFactors = original.SpeedFactors.ToFrozenDictionary(
-                e => gasRegistry.GasIdToIndex(e.Key.Name),
-                e => e.Value);
+            MappedFactors = original.SpeedFactors.OrderBy(static factor => factor.Key.Name, StringComparer.Ordinal)
+                .Select(e => new KeyValuePair<int, float>(gasRegistry.GasIdToIndex(e.Key.Name), e.Value)).ToArray();
 
             var changeEquation = new Dictionary<int, Mole>();
             foreach (int gas in mappedInputs.Keys.Concat(mappedOutputs.Keys).Distinct())
@@ -35,7 +33,7 @@ public readonly partial record struct StandardGasReaction
 
         private StandardGasReaction Original { get; }
 
-        private FrozenDictionary<int, float> MappedFactors { get; }
+        private KeyValuePair<int, float>[] MappedFactors { get; }
         /// <inheritdoc />
         public Joule EnergyBalance => Original.EnergyBalance;
         /// <inheritdoc />
@@ -48,28 +46,13 @@ public readonly partial record struct StandardGasReaction
             if (result <= 0 || !float.IsNormal(result))
                 return 0;
 
-            var parts = new ConcurrentBag<float>();
-
-            var state = Parallel.ForEach(
-                MappedFactors,
-                (factor, loop) =>
-                {
-                    float f = MathF.Pow(molarityVector[factor.Key], factor.Value);
-                    if (!float.IsNormal(f) || f == 0)
-                    {
-                        loop.Stop();
-                        return;
-                    }
-
-                    parts.Add(f);
-                });
-
-            if (!state.IsCompleted)
-                return 0;
-
-            foreach (float p in parts)
+            foreach (KeyValuePair<int, float> factor in MappedFactors)
             {
-                result *= p;
+                float value = MathF.Pow(molarityVector[factor.Key], factor.Value);
+                if (!float.IsNormal(value) || value == 0f)
+                    return 0;
+
+                result *= value;
             }
 
             return result;

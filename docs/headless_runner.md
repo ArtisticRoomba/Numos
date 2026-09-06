@@ -114,26 +114,26 @@ heat capacities are in joules per mole-kelvin.
 Operations that access simulation state require an active simulation. A new `createSimulation` request atomically
 replaces and disposes the current simulation after the replacement has been constructed successfully.
 
-| Operation | Request data | Effect |
-| --- | --- | --- |
-| `createSimulation` | Optional `name`; fixed chunk `dimensions`; optional `config` and `gases` | Creates a new paused, in-memory simulation at tick zero. |
-| `closeSimulation` | None | Disposes the active simulation and clears its state. |
-| `addChunk` | Chunk `position`; optional initial `classification` (default `0`) | Creates a chunk using the simulation's fixed dimensions and fills it with the classification. |
-| `removeChunk` | Chunk `position` | Removes and disposes the chunk at that position. |
-| `sealChunk` | Chunk `position` | Replaces the chunk's simulated outer faces with solid voxels. For depth-one chunks this seals the X/Y perimeter. |
-| `setChunkClassification` | Chunk `position`; `classification` | Fills every voxel in a chunk with one classification. |
-| `setVoxelClassification` | Chunk `position`; local `voxel`; `classification` | Changes one voxel's classification. |
-| `setVoxelTemperature` | Chunk `position`; local `voxel`; `temperatureK` | Sets one voxel's stored temperature in kelvins. |
-| `addGas` | `gas` definition | Appends a gas to the registry. `result.gasId` is its stable zero-based ID. |
-| `injectGas` | Chunk `position`; local `voxel`; registered `gasId`, `moles`, and `temperatureK` | Adds gas to an air voxel and wakes its room. |
-| `wakeRoom` | Chunk `position`; `roomId` | Wakes a room for subsequent simulation ticks. |
-| `sleepChunk` | Chunk `position` | Explicitly puts a chunk to sleep. |
-| `updateConfig` | `config` patch | Updates only the supplied live configuration values for later mutations and ticks. |
-| `setSolverEnabled` | `solver` name; `enabled` | Enables or disables a named solver stage without changing pipeline order. |
-| `resetSolvers` | None | Restores the built-in solver pipeline and its enabled states. |
-| `tick` | `count` from `1` through `1000000` | Runs exactly that many deterministic fixed simulation ticks. |
-| `observe` | Optional `position`, `voxel`, `includeVoxels`, `onlyGasBearingVoxels`, and `maxIssueLocations` | Returns a coherent canonical report for the current tick. Dense per-voxel data is opt-in. |
-| `exit` | None | Disposes the active simulation, responds, and stops reading input. |
+| Operation                | Request data                                                                                   | Effect                                                                                                           |
+|--------------------------|------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------|
+| `createSimulation`       | Optional `name`; fixed chunk `dimensions`; optional `config` and `gases`                       | Creates a new paused, in-memory simulation at tick zero.                                                         |
+| `closeSimulation`        | None                                                                                           | Disposes the active simulation and clears its state.                                                             |
+| `addChunk`               | Chunk `position`; optional initial `classification` (default `0`)                              | Creates a chunk using the simulation's fixed dimensions and fills it with the classification.                    |
+| `removeChunk`            | Chunk `position`                                                                               | Removes and disposes the chunk at that position.                                                                 |
+| `sealChunk`              | Chunk `position`                                                                               | Replaces the chunk's simulated outer faces with solid voxels. For depth-one chunks this seals the X/Y perimeter. |
+| `setChunkClassification` | Chunk `position`; `classification`                                                             | Fills every voxel in a chunk with one classification.                                                            |
+| `setVoxelClassification` | Chunk `position`; local `voxel`; `classification`                                              | Changes one voxel's classification.                                                                              |
+| `setVoxelTemperature`    | Chunk `position`; local `voxel`; `temperatureK`                                                | Sets one voxel's stored temperature in kelvins.                                                                  |
+| `addGas`                 | `gas` definition                                                                               | Appends a gas to the registry. `result.gasId` is its stable zero-based ID.                                       |
+| `injectGas`              | Chunk `position`; local `voxel`; registered `gasId`, `moles`, and `temperatureK`               | Adds gas to an air voxel and wakes its room.                                                                     |
+| `wakeRoom`               | Chunk `position`; `roomId`                                                                     | Wakes a room for subsequent simulation ticks.                                                                    |
+| `sleepChunk`             | Chunk `position`                                                                               | Explicitly puts a chunk to sleep.                                                                                |
+| `updateConfig`           | `config` patch                                                                                 | Applies a detached snapshot containing the supplied configuration changes for later mutations and ticks.         |
+| `setSolverEnabled`       | `solver` name; `enabled`                                                                       | Enables or disables a named solver stage without changing pipeline order.                                        |
+| `resetSolvers`           | None                                                                                           | Restores the built-in solver pipeline and its enabled states.                                                    |
+| `tick`                   | `count` from `1` through `1000000`                                                             | Runs exactly that many deterministic fixed simulation ticks.                                                     |
+| `observe`                | Optional `position`, `voxel`, `includeVoxels`, `onlyGasBearingVoxels`, and `maxIssueLocations` | Returns a coherent canonical report for the current tick. Dense per-voxel data is opt-in.                        |
+| `exit`                   | None                                                                                           | Disposes the active simulation, responds, and stops reading input.                                               |
 
 The built-in solver names accepted by `setSolverEnabled` are `advection`, `boundary-flow`, `thermodynamics`, and
 `thermal-boundary`. A name that is not present in the current pipeline is an error rather than a silent no-op.

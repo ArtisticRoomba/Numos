@@ -28,6 +28,10 @@ public sealed class SimulationViewport : IDisposable
 
     public bool IsHovered { get; private set; }
 
+    internal Vector2 ImageMaximum { get; private set; }
+
+    internal Vector2 ImageMinimum { get; private set; }
+
     public Vector2 NormalizedMousePosition { get; private set; }
 
     public void Dispose()
@@ -43,7 +47,20 @@ public sealed class SimulationViewport : IDisposable
         }
     }
 
-    public void Draw(string title, Action renderScene, Vector2 firstUsePosition, Vector2 firstUseSize)
+    /// <summary>
+    ///     Draws the render texture in an ImGui window and handles interaction after the image item is available.
+    /// </summary>
+    /// <param name="title">ImGui window title and stable identifier.</param>
+    /// <param name="renderScene">Scene callback rendered into the viewport texture.</param>
+    /// <param name="firstUsePosition">Initial window position when no saved layout exists.</param>
+    /// <param name="firstUseSize">Initial window size when no saved layout exists.</param>
+    /// <param name="handleInteraction">Optional callback invoked while the image remains the current ImGui item.</param>
+    public void Draw(
+        string title,
+        Action renderScene,
+        Vector2 firstUsePosition,
+        Vector2 firstUseSize,
+        Action? handleInteraction = null)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(renderScene);
@@ -73,6 +90,7 @@ public sealed class SimulationViewport : IDisposable
         RenderToTexture(renderScene);
         rlImGui.ImageRenderTexture(_renderTexture);
         UpdateMouseState();
+        handleInteraction?.Invoke();
 
         ImGui.End();
     }
@@ -96,6 +114,8 @@ public sealed class SimulationViewport : IDisposable
         IsHovered = ImGui.IsItemHovered();
         var imageMin = ImGui.GetItemRectMin();
         var imageMax = ImGui.GetItemRectMax();
+        ImageMinimum = imageMin;
+        ImageMaximum = imageMax;
         var local = ImGui.GetMousePos() - imageMin;
         float imageWidth = Math.Max(imageMax.X - imageMin.X, 1f);
         float imageHeight = Math.Max(imageMax.Y - imageMin.Y, 1f);

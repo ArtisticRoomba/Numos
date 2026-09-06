@@ -46,6 +46,7 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
     internal void ClearPendingEvents()
     {
         _boundaryEvents.Clear();
+        _orderedEvents.Clear();
     }
 
     internal void Enqueue(int tickCount, Int3 key, BoundaryFlowEvent boundaryEvent)

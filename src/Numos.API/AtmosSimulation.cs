@@ -2,6 +2,7 @@ using JetBrains.Annotations;
 using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.Datatypes.Snapshots;
+using Numos.CoreSim.Replay;
 using Numos.Maths;
 
 namespace Numos.API;
@@ -51,12 +52,11 @@ public sealed partial class AtmosSimulation : IDisposable
     }
 
     /// <summary>
-    ///     Initializes a simulation with a live configuration and fixed chunk dimensions.
+    ///     Initializes a simulation with a detached copy of a configuration and fixed chunk dimensions.
     /// </summary>
     /// <param name="config">
-    ///     The mutable configuration to use. The simulation retains this instance, and its current values affect
-    ///     subsequent simulation operations, including
-    ///     <see cref="AddGasToVoxel(AtmosChunkHandle, ushort, int, float, float)" />.
+    ///     The editable configuration to copy. Later changes to this instance do not affect the simulation until
+    ///     <see cref="SetAtmosConfig(AtmosConfig)" /> is called.
     /// </param>
     /// <param name="chunkWidth">The number of voxels along each chunk's local x-axis.</param>
     /// <param name="chunkHeight">The number of voxels along each chunk's local y-axis.</param>
@@ -96,12 +96,11 @@ public sealed partial class AtmosSimulation : IDisposable
                 $"{AtmosChunkConstants.MaximumVoxelCount} are supported.");
         }
 
-        Config = config;
         _chunkWidth = chunkWidth;
         _chunkHeight = chunkHeight;
         _chunkDepth = chunkDepth;
         _kernel = new AtmosKernel(chunkWidth, chunkHeight, chunkDepth);
-        _kernel.SetAtmosConfig(config);
+        _kernel.SetAtmosConfig(config.CreateSnapshot());
         Solvers = new AtmosSolverPipeline(this);
     }
 
@@ -118,14 +117,32 @@ public sealed partial class AtmosSimulation : IDisposable
     }
 
     /// <summary>
-    ///     Gets the retained, mutable configuration used by subsequent simulation operations.
+    ///     Gets the immutable configuration used by subsequent simulation operations.
     /// </summary>
     /// <remarks>
-    ///     Mutating this instance affects later operations, including gas injection, updates, and direct ticks.
-    ///     Call <see cref="SetAtmosConfig" /> to replace the retained instance.
+    ///     Create an editable copy with <c>new AtmosConfig(simulation.Config)</c>, then call
+    ///     <see cref="SetAtmosConfig(AtmosConfig)" /> to apply it through the deterministic operation boundary.
     /// </remarks>
     [PublicAPI]
-    public AtmosConfig Config { get; private set; }
+    public AtmosConfigSnapshot Config
+    {
+        get
+        {
+            ThrowIfDisposed();
+            return _kernel.GetAtmosConfig();
+        }
+    }
+
+    /// <summary>Gets whether external semantic operations are currently being recorded.</summary>
+    [PublicAPI]
+    public bool IsRecording
+    {
+        get
+        {
+            ThrowIfDisposed();
+            return _kernel.IsRecording;
+        }
+    }
 
     /// <summary>
     ///     Gets the ordered solver pipeline used by subsequent ticks.
@@ -220,11 +237,11 @@ public sealed partial class AtmosSimulation : IDisposable
     }
 
     /// <summary>
-    ///     Replaces the live configuration, then advances the fixed-step simulation.
+    ///     Applies a detached configuration, then advances the fixed-step simulation.
     /// </summary>
     /// <param name="elapsedSeconds">Elapsed real time, in seconds, since the previous update.</param>
     /// <param name="config">
-    ///     The mutable configuration instance to retain and use for this update and subsequent simulation operations.
+    ///     The editable configuration to copy and use for this update and subsequent simulation operations.
     /// </param>
     /// <exception cref="ArgumentNullException"><paramref name="config" /> is <see langword="null" />.</exception>
     /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
@@ -240,24 +257,50 @@ public sealed partial class AtmosSimulation : IDisposable
     }
 
     /// <summary>
-    ///     Changes the live configuration used by subsequent simulation operations.
+    ///     Applies a detached configuration used by subsequent simulation operations.
     /// </summary>
     /// <param name="config">
-    ///     The mutable configuration to use. The simulation retains this instance, and its current values affect
-    ///     subsequent operations, including gas injection, updates, and direct ticks.
+    ///     The editable configuration to copy. Later changes to this instance do not affect the simulation.
     /// </param>
+    /// <returns><see langword="true" /> when the canonical configuration changed; otherwise <see langword="false" />.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="config" /> is <see langword="null" />.</exception>
     /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
     [PublicAPI]
-    public void SetAtmosConfig(AtmosConfig config)
+    public bool SetAtmosConfig(AtmosConfig config)
     {
         ArgumentNullException.ThrowIfNull(config);
         lock (_mixtureGate)
         {
             ThrowIfDisposed();
-            Config = config;
-            _kernel.SetAtmosConfig(config);
+            var snapshot = config.CreateSnapshot();
+            return _kernel.SetAtmosConfig(snapshot);
         }
+    }
+
+    /// <summary>Starts a fresh interval of external semantic operation recording.</summary>
+    /// <exception cref="InvalidOperationException">The simulation is already recording or this is called from a solver.</exception>
+    [PublicAPI]
+    public void StartRecording()
+    {
+        ThrowIfDisposed();
+        _kernel.StartRecording();
+    }
+
+    /// <summary>Captures the current recording without stopping it.</summary>
+    [PublicAPI]
+    public AtmosRecording CaptureRecording()
+    {
+        ThrowIfDisposed();
+        return _kernel.CaptureRecording();
+    }
+
+    /// <summary>Stops recording and returns a detached recording of the interval.</summary>
+    /// <exception cref="InvalidOperationException">The simulation is not recording or this is called from a solver.</exception>
+    [PublicAPI]
+    public AtmosRecording StopRecording()
+    {
+        ThrowIfDisposed();
+        return _kernel.StopRecording();
     }
 
     /// <summary>

@@ -52,6 +52,7 @@ public partial class SimulationViewer
         try
         {
             simulation = new AtmosSimulation(config, chunkWidth, chunkHeight, chunkDepth);
+            simulation.StartRecording();
             var visualizations = VisualizationRegistry.CreateDefault(config);
             _configureVisualizations?.Invoke(visualizations);
             var frameBuilder = new SimulationFrameBuilder(config, visualizations);
@@ -59,6 +60,7 @@ public partial class SimulationViewer
             DisposeSimulationProject();
 
             _simulation = simulation;
+            _replayTimeline = new AtmosReplayTimeline(simulation);
             _config = config;
             _frameBuilder = frameBuilder;
             _projectName = string.IsNullOrWhiteSpace(projectName)
@@ -81,6 +83,12 @@ public partial class SimulationViewer
     {
         _simulation?.Dispose();
         _simulation = null;
+        _replayTimeline = null;
+        _timelineOperation = null;
+        _timelineError = null;
+        _pendingScrubTick = null;
+        _replayElapsed = 0f;
+        _timelineFirstTick = 0;
         _config = null;
         _frameBuilder = null;
         _projectName = null;
@@ -98,7 +106,14 @@ public partial class SimulationViewer
         _sliceDrawData = null;
         _sliceProjectionKey = null;
         _hoveredSliceCell = null;
+        _hovered3DCell = null;
         _selectedCell = null;
+        _selectedCells.Clear();
+        _paintedCells.Clear();
+        _lastPaintedCell = null;
+        _voxelDragStart = null;
+        _voxelDragAnchor = null;
+        _voxelDragViewport = 0;
         _voxelDetailCache.Clear();
         _highlights.Clear();
         _focusedChunk = null;
@@ -185,6 +200,7 @@ public partial class SimulationViewer
 
         gas.Name = name;
         _config.GasRegistry.Add(gas);
+        ApplyConfiguration();
         SetProjectMessage($"Added gas {name} with ID {_config.GasRegistry.Count - 1}.", false);
     }
 
@@ -212,6 +228,7 @@ public partial class SimulationViewer
 
         string name = _config.GasRegistry[gasId].Name;
         _config.GasRegistry.RemoveAt(gasId);
+        ApplyConfiguration();
         SetProjectMessage($"Removed gas {name}.", false);
     }
 
@@ -245,5 +262,11 @@ public partial class SimulationViewer
         {
             SetProjectMessage(exception.Message, true);
         }
+    }
+
+    private void ApplyConfiguration()
+    {
+        if (_simulation != null && _config != null)
+            _simulation.SetAtmosConfig(_config);
     }
 }

@@ -70,7 +70,7 @@ public sealed class AtmosSimulationContractTests
     }
 
     [Test]
-    public void Constructor_RetainsLiveConfigurationInstance()
+    public void Constructor_CapturesDetachedConfigurationSnapshot()
     {
         var config = new AtmosConfig
         {
@@ -83,8 +83,8 @@ public sealed class AtmosSimulationContractTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(simulation.Config, Is.SameAs(config));
-            Assert.That(simulation.Config.BulkFlowCoefficient, Is.EqualTo(0.4f));
+            Assert.That(simulation.Config, Is.Not.SameAs(config));
+            Assert.That(simulation.Config.BulkFlowCoefficient, Is.EqualTo(0.2f));
             Assert.That(simulation.Config.SleepThreshold, Is.EqualTo(12));
         });
     }
@@ -98,20 +98,20 @@ public sealed class AtmosSimulationContractTests
         using var simulation = new AtmosSimulation(initial, 1, 1, 1);
 
         simulation.SetAtmosConfig(explicitReplacement);
-        Assert.That(simulation.Config, Is.SameAs(explicitReplacement));
+        Assert.That(simulation.Config.SleepThreshold, Is.EqualTo(8));
 
         simulation.Update(0f, updateReplacement);
 
         Assert.Multiple(() =>
         {
-            Assert.That(simulation.Config, Is.SameAs(updateReplacement));
+            Assert.That(simulation.Config.SleepThreshold, Is.EqualTo(3));
             Assert.That(simulation.TickCount, Is.Zero);
             Assert.That(
                 () => simulation.SetAtmosConfig(null!),
                 Throws.TypeOf<ArgumentNullException>()
                     .With.Property(nameof(ArgumentNullException.ParamName)).EqualTo("config"));
 
-            Assert.That(simulation.Config, Is.SameAs(updateReplacement));
+            Assert.That(simulation.Config.SleepThreshold, Is.EqualTo(3));
         });
     }
 
@@ -120,6 +120,7 @@ public sealed class AtmosSimulationContractTests
     {
         var config = new AtmosConfig();
         using var simulation = new AtmosSimulation(config, 1, 1, 1);
+        var originalSnapshot = simulation.Config;
 
         Assert.That(
             () => simulation.Update(0f, null!),
@@ -128,7 +129,7 @@ public sealed class AtmosSimulationContractTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(simulation.Config, Is.SameAs(config));
+            Assert.That(simulation.Config, Is.SameAs(originalSnapshot));
             Assert.That(simulation.TickCount, Is.Zero);
         });
     }
@@ -397,7 +398,7 @@ public sealed class AtmosSimulationContractTests
     }
 
     [Test]
-    public void AddGasToVoxel_LiveMolarHeatCapacityAtConstantVolumeChangeRevaluesExistingMixture()
+    public void AddGasToVoxel_AppliedMolarHeatCapacityChangeRevaluesExistingMixture()
     {
         var config = new AtmosConfig
         {
@@ -414,6 +415,7 @@ public sealed class AtmosSimulationContractTests
         var gas = config.GasRegistry[0];
         gas.MolarHeatCapacityAtConstantVolume = 4f;
         config.GasRegistry.Replace(0, gas);
+        simulation.SetAtmosConfig(config);
 
         simulation.AddGasToVoxel(chunk, 0, 0, 0, 0, 1f, 200f);
 
@@ -430,7 +432,7 @@ public sealed class AtmosSimulationContractTests
     }
 
     [Test]
-    public void AddGasToVoxel_LiveDefaultMolarHeatCapacityAtConstantVolumeChangeRevaluesExistingFallbackGas()
+    public void AddGasToVoxel_AppliedDefaultMolarHeatCapacityChangeRevaluesExistingFallbackGas()
     {
         var config = new AtmosConfig
         {
@@ -447,6 +449,7 @@ public sealed class AtmosSimulationContractTests
         simulation.AddGasToVoxel(chunk, 0, 0, 0, 0, 1f, 100f);
 
         config.DefaultMolarHeatCapacityAtConstantVolume = 4f;
+        simulation.SetAtmosConfig(config);
         simulation.AddGasToVoxel(chunk, 0, 0, 0, 1, 1f, 200f);
 
         var snapshot = simulation.GetChunkSnapshot(chunk);

@@ -90,8 +90,8 @@ public sealed class AtmosDangerousApiTests
         {
             GasRegistry =
             [
-                new GasProperties { Name="1", MolarHeatCapacityAtConstantVolume = 10f },
-                new GasProperties { Name="2", MolarHeatCapacityAtConstantVolume = 30f }
+                new GasProperties { Name = "1", MolarHeatCapacityAtConstantVolume = 10f },
+                new GasProperties { Name = "2", MolarHeatCapacityAtConstantVolume = 30f }
             ]
         };
 

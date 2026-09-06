@@ -1,4 +1,5 @@
 using System.Collections.Frozen;
+using Numos.CoreSim.Replay;
 using Numos.Units;
 
 namespace Numos.CoreSim.GasReactions;
@@ -87,6 +88,65 @@ public readonly partial record struct LinearGasReaction
 
     private FrozenSet<LinearSpeedFactor> SpeedFactors { get; }
 
+    internal void AppendHash(ref AtmosStateHasher hash)
+    {
+        hash.Add(EnergyBalance);
+        hash.Add(LowTemperatureBound);
+        hash.Add(HighTemperatureBound);
+        hash.Add(LowTempSpeed);
+        hash.Add(HighTempSpeed);
+        hash.Add(LowStrict);
+        hash.Add(HighStrict);
+        hash.Add(Input.Count);
+        foreach (KeyValuePair<GasProperties, float> entry in Input.OrderBy(static entry => entry.Key.Name, StringComparer.Ordinal))
+        {
+            hash.Add(entry.Key);
+            hash.Add(entry.Value);
+        }
+
+        hash.Add(Output.Count);
+        foreach (KeyValuePair<GasProperties, float> entry in Output.OrderBy(static entry => entry.Key.Name, StringComparer.Ordinal))
+        {
+            hash.Add(entry.Key);
+            hash.Add(entry.Value);
+        }
+
+        hash.Add(SpeedFactors.Count);
+        foreach (var factor in SpeedFactors.OrderBy(static factor => factor.Gas.Name, StringComparer.Ordinal)
+                     .ThenBy(static factor => factor.OrderKey))
+            factor.AppendHash(ref hash);
+    }
+
+    internal bool SemanticallyEquals(LinearGasReaction other)
+    {
+        return EnergyBalance.Equals(other.EnergyBalance) &&
+               LowTemperatureBound.Equals(other.LowTemperatureBound) &&
+               HighTemperatureBound.Equals(other.HighTemperatureBound) &&
+               LowTempSpeed.Equals(other.LowTempSpeed) &&
+               HighTempSpeed.Equals(other.HighTempSpeed) &&
+               LowStrict == other.LowStrict &&
+               HighStrict == other.HighStrict &&
+               DictionaryEquals(Input, other.Input) &&
+               DictionaryEquals(Output, other.Output) &&
+               SpeedFactors.SetEquals(other.SpeedFactors);
+    }
+
+    private static bool DictionaryEquals(
+        IReadOnlyDictionary<GasProperties, float> first,
+        IReadOnlyDictionary<GasProperties, float> second)
+    {
+        if (first.Count != second.Count)
+            return false;
+
+        foreach ((var gas, float amount) in first)
+        {
+            if (!second.TryGetValue(gas, out float otherAmount) || !amount.Equals(otherAmount))
+                return false;
+        }
+
+        return true;
+    }
+
     private static float EvalLinear(
         float value, float boundaryRange, float lowBound, bool lowStrict, bool highStrict,
         float valAtLow, float speedRange)
@@ -138,10 +198,14 @@ public readonly partial record struct LinearGasReaction
         IDictionary<GasProperties, float> gasMolarities,
         [Quantity("temperature")] Kelvin temperature)
     {
-        return SpeedFactors.AsParallel().Select(factor =>
+        PerSecond result = GetRateConstantForTemperature(temperature);
+        foreach (var factor in SpeedFactors.OrderBy(static factor => factor.Gas.Name, StringComparer.Ordinal)
+                     .ThenBy(static factor => factor.OrderKey))
         {
             gasMolarities.TryGetValue(factor.Gas, out float molarity);
-            return factor.GetFactor(molarity);
-        }).Append(GetRateConstantForTemperature(temperature)).Aggregate((a, b) => a * b);
+            result *= factor.GetFactor(molarity);
+        }
+
+        return result;
     }
 }

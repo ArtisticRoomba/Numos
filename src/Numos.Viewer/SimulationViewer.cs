@@ -7,6 +7,7 @@ using Numos.Maths;
 using Numos.SimDrawer;
 using Numos.Viewer.Rendering;
 using Numos.Viewer.Rendering.Viewport;
+using Numos.Viewer.Ui;
 using Raylib_cs;
 using rlImGui_cs;
 
@@ -24,6 +25,8 @@ public partial class SimulationViewer : IDisposable
     private readonly List<AtmosChunkHandle> _liveChunkHandles = [];
     private readonly HashSet<Int3> _liveChunkPositions = [];
     private readonly List<AtmosChunkSnapshot> _orderedSnapshots = [];
+    private readonly HashSet<VoxelAddress> _paintedCells = [];
+    private readonly HashSet<VoxelAddress> _selectedCells = [];
     private readonly Dictionary<Int3, AtmosChunkSnapshot> _snapshotCache = new();
     private readonly List<AtmosChunkSnapshotRequest> _snapshotRequests = [];
     private readonly List<Int3> _staleSnapshotKeys = [];
@@ -58,10 +61,12 @@ public partial class SimulationViewer : IDisposable
     private ChunkIdentity? _focusedChunk;
     private SimulationFrameBuilder? _frameBuilder;
     private bool _frameSceneOnNextPresentation;
+    private VoxelAddress? _hovered3DCell;
     private SliceCellDrawData? _hoveredSliceCell;
     private bool _imguiInitialized;
 
     private bool _isPaused;
+    private VoxelAddress? _lastPaintedCell;
     private bool _legendAutomaticBounds = true;
     private float _legendAutomaticRangeOffset;
     private float _legendMaximum = 1f;
@@ -107,6 +112,10 @@ public partial class SimulationViewer : IDisposable
     private float _viewportBrandingOffsetY = 10f;
     private float _viewportBrandingOpacityPercent = 80f;
     private float _viewportBrandingSizePercent = 6f;
+    private VoxelAddress? _voxelDragAnchor;
+    private Vector2? _voxelDragStart;
+    private int _voxelDragViewport;
+    private VoxelEditTool _voxelEditTool;
     private bool _windowInitialized;
 
     /// <summary>
@@ -150,6 +159,7 @@ public partial class SimulationViewer : IDisposable
             Raylib.SetTargetFPS(144);
             rlImGui.Setup(true, true);
             _imguiInitialized = true;
+            ViewerTheme.Apply();
             ImGui.GetIO().ConfigWindowsMoveFromTitleBarOnly = true;
             ConfigureLayoutPersistence();
 
@@ -179,7 +189,23 @@ public partial class SimulationViewer : IDisposable
         if (_simulation != null && _config != null)
         {
             if (!_isPaused)
-                _simulation.Update(deltaTime, _config);
+            {
+                if (_replayTimeline?.IsInspecting == true)
+                {
+                    _replayElapsed += deltaTime;
+                    if (_replayElapsed >= 1f / AtmosSimulation.SimulationRate)
+                    {
+                        _replayElapsed = 0f;
+                        StepTimelineForward();
+                    }
+                }
+                else
+                {
+                    _simulation.Update(deltaTime);
+                }
+            }
+
+            _replayTimeline?.ObserveLiveState();
 
             RefreshPresentation();
         }
@@ -268,7 +294,10 @@ public partial class SimulationViewer : IDisposable
             changed = true;
         }
 
-        if (_focusedChunk.HasValue && !_liveChunkPositions.Contains(_focusedChunk.Value.Position))
+        if (_focusedChunk.HasValue &&
+            !_liveChunkPositions.Contains(_focusedChunk.Value.Position) &&
+            _replayTimeline?.IsInspecting != true &&
+            !_refreshingReplay)
         {
             _focusedChunk = null;
             _frameSceneOnNextPresentation = true;
@@ -326,6 +355,15 @@ public partial class SimulationViewer : IDisposable
         if (_focusedChunk.HasValue && _selectedSliceChunkPosition != _focusedChunk.Value.Position)
             _selectedSliceChunkPosition = _focusedChunk.Value.Position;
 
+        if (_selectedSliceChunkPosition.HasValue &&
+            !_drawData.Chunks.ContainsKey(_selectedSliceChunkPosition.Value) &&
+            (_replayTimeline?.IsInspecting == true || _refreshingReplay))
+        {
+            _sliceDrawData = null;
+            _sliceProjectionKey = null;
+            return;
+        }
+
         if (!_selectedSliceChunkPosition.HasValue ||
             !_drawData.Chunks.ContainsKey(_selectedSliceChunkPosition.Value))
             _selectedSliceChunkPosition = _focusedChunk?.Position ?? _drawData.Chunks.Keys.First();
@@ -366,7 +404,7 @@ public partial class SimulationViewer : IDisposable
         {
             if (_drawData.Chunks.TryGetValue(_focusedChunk.Value.Position, out var focused))
                 _focusedChunk = focused.Identity;
-            else
+            else if (_replayTimeline?.IsInspecting != true && !_refreshingReplay)
             {
                 _focusedChunk = null;
                 _frameSceneOnNextPresentation = true;
@@ -374,7 +412,21 @@ public partial class SimulationViewer : IDisposable
         }
 
         if (_selectedCell.HasValue && !_drawData.TryResolve(_selectedCell.Value, out _))
-            _selectedCell = null;
+        {
+            if (_replayTimeline?.IsInspecting == true || _refreshingReplay)
+            {
+                var selected = _selectedCell.Value;
+                if (_drawData.Chunks.TryGetValue(selected.Chunk.Position, out var chunk))
+                    _selectedCell = new VoxelAddress(chunk.Identity, selected.LocalIndex);
+            }
+            else _selectedCell = null;
+        }
+
+        _selectedCells.RemoveWhere(address => !_drawData.TryResolve(address, out _));
+        if (_selectedCell.HasValue)
+            _selectedCells.Add(_selectedCell.Value);
+        else
+            _selectedCells.Clear();
     }
 
     private void SetVisualization(string visualizationId)
@@ -478,7 +530,7 @@ public partial class SimulationViewer : IDisposable
         if (_viewport is not { IsHovered: true })
             return;
 
-        if (Raylib.IsMouseButtonDown(MouseButton.Left))
+        if (Raylib.IsMouseButtonDown(MouseButton.Middle))
         {
             CancelCameraMove();
             var mouseDelta = Raylib.GetMouseDelta();
@@ -680,14 +732,16 @@ public partial class SimulationViewer : IDisposable
     private void UpdateSlicePicking()
     {
         _hoveredSliceCell = null;
-        if (_sliceViewport is not { IsHovered: true } viewport || _sliceDrawData == null)
+        if (_sliceViewport == null || _sliceDrawData == null)
         {
             RebuildHighlights();
             return;
         }
 
+        var viewport = _sliceViewport;
         float aspectRatio = viewport.Width / (float)Math.Max(viewport.Height, 1);
-        if (_sliceDrawData.TryPickNormalized(
+        if (viewport.IsHovered &&
+            _sliceDrawData.TryPickNormalized(
                 viewport.NormalizedMousePosition.X,
                 viewport.NormalizedMousePosition.Y,
                 aspectRatio,
@@ -696,50 +750,14 @@ public partial class SimulationViewer : IDisposable
             _hoveredSliceCell = cell;
         }
 
-        if (ImGui.IsMouseClicked(ImGuiMouseButton.Left))
-            _selectedCell = _hoveredSliceCell?.Address;
+        HandleVoxelPointer(viewport, _hoveredSliceCell?.Address, 2);
 
         RebuildHighlights();
     }
 
     private SliceRenderOptions GetSliceRenderOptions()
     {
-        int selectedU = -1;
-        int selectedV = -1;
-
-        if (_selectedCell.HasValue &&
-            _sliceDrawData != null &&
-            _drawData != null &&
-            _selectedCell.Value.Chunk == _sliceDrawData.Chunk &&
-            _drawData.Chunks.TryGetValue(_sliceDrawData.Chunk.Position, out var sliceChunk) &&
-            sliceChunk.Identity == _sliceDrawData.Chunk)
-        {
-            var coordinates = sliceChunk.GetCoordinates(_selectedCell.Value.LocalIndex);
-            int axisCoordinate = _sliceDrawData.Axis switch
-            {
-                SliceAxis.X => coordinates.X,
-                SliceAxis.Y => coordinates.Y,
-                SliceAxis.Z => coordinates.Z,
-                _ => -1
-            };
-
-            if (axisCoordinate == _sliceDrawData.SliceIndex)
-            {
-                (selectedU, selectedV) = _sliceDrawData.Axis switch
-                {
-                    SliceAxis.X => (coordinates.Z, coordinates.Y),
-                    SliceAxis.Y => (coordinates.X, coordinates.Z),
-                    SliceAxis.Z => (coordinates.X, coordinates.Y),
-                    _ => (-1, -1)
-                };
-            }
-        }
-
-        return new SliceRenderOptions(
-            _hoveredSliceCell?.U ?? -1,
-            _hoveredSliceCell?.V ?? -1,
-            selectedU,
-            selectedV);
+        return new SliceRenderOptions(_highlights);
     }
 
     private Render3DStyleOptions Get3DRenderStyleOptions()
@@ -761,11 +779,28 @@ public partial class SimulationViewer : IDisposable
     private void RebuildHighlights()
     {
         _highlights.Clear();
-        if (_selectedCell.HasValue)
-            _highlights.Add(new VoxelHighlight(_selectedCell.Value, new ColorRgba(1f, 0.82f, 0.15f)));
+        foreach (var selected in _selectedCells)
+        {
+            var color = selected == _selectedCell
+                ? new ColorRgba(1f, 0.82f, 0.15f)
+                : new ColorRgba(0.22f, 0.68f, 0.92f);
+
+            _highlights.Add(new VoxelHighlight(selected, color));
+        }
 
         if (_hoveredSliceCell.HasValue && _hoveredSliceCell.Value.Address != _selectedCell)
             _highlights.Add(new VoxelHighlight(_hoveredSliceCell.Value.Address, new ColorRgba(1f, 1f, 1f)));
+
+        if (_hovered3DCell.HasValue && !_selectedCells.Contains(_hovered3DCell.Value))
+            _highlights.Add(new VoxelHighlight(_hovered3DCell.Value, new ColorRgba(1f, 1f, 1f)));
+    }
+
+    private enum VoxelEditTool
+    {
+        Select,
+        PaintClassification,
+        PaintGas,
+        EraseGas
     }
 
     private enum ViewportBrandingCorner

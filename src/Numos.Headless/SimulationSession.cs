@@ -187,11 +187,12 @@ internal sealed class SimulationSession : IDisposable
 
     private CommandExecution AddGas(HeadlessRequest request)
     {
-        _ = RequireSimulation();
+        var simulation = RequireSimulation();
         var config = _config!;
         var definition = Require(request.Gas, "gas");
         int gasId = config.GasRegistry.Count;
         config.GasRegistry.Add(definition.ToGasProperties());
+        simulation.SetAtmosConfig(config);
         return new CommandExecution(new CommandResult { GasId = gasId });
     }
 

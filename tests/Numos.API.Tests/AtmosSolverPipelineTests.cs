@@ -152,7 +152,7 @@ public sealed class AtmosSolverPipelineTests
         {
             Assert.That(firstTickTargetMoles, Is.Zero);
             Assert.That(secondTickTargetMoles, Is.GreaterThan(0f));
-            Assert.That(simulation.Config, Is.SameAs(replacement));
+            Assert.That(simulation.Config.GasRegistry[0].DiffusionCoefficient, Is.EqualTo(1f));
         });
     }
 

@@ -1,4 +1,5 @@
 using System.Collections.Frozen;
+using Numos.CoreSim.Replay;
 using Numos.Units;
 
 namespace Numos.CoreSim.GasReactions;
@@ -58,6 +59,61 @@ public readonly partial record struct StandardGasReaction
     /// </summary>
     private FrozenDictionary<GasProperties, float> SpeedFactors { get; }
 
+    internal void AppendHash(ref AtmosStateHasher hash)
+    {
+        hash.Add(EnergyBalance);
+        hash.Add(ArrheniusFactor);
+        hash.Add(ActivationEnergy);
+        hash.Add(Input.Count);
+        foreach (KeyValuePair<GasProperties, Mole> entry in Input.OrderBy(static entry => entry.Key.Name, StringComparer.Ordinal))
+        {
+            hash.Add(entry.Key);
+            hash.Add(entry.Value);
+        }
+
+        hash.Add(Output.Count);
+        foreach (KeyValuePair<GasProperties, Mole> entry in Output.OrderBy(static entry => entry.Key.Name, StringComparer.Ordinal))
+        {
+            hash.Add(entry.Key);
+            hash.Add(entry.Value);
+        }
+
+        hash.Add(SpeedFactors.Count);
+        foreach (KeyValuePair<GasProperties, float> entry in SpeedFactors.OrderBy(
+                     static entry => entry.Key.Name,
+                     StringComparer.Ordinal))
+        {
+            hash.Add(entry.Key);
+            hash.Add(entry.Value);
+        }
+    }
+
+    internal bool SemanticallyEquals(StandardGasReaction other)
+    {
+        return EnergyBalance.Equals(other.EnergyBalance) &&
+               ArrheniusFactor.Equals(other.ArrheniusFactor) &&
+               ActivationEnergy.Equals(other.ActivationEnergy) &&
+               DictionaryEquals(Input, other.Input) &&
+               DictionaryEquals(Output, other.Output) &&
+               DictionaryEquals(SpeedFactors, other.SpeedFactors);
+    }
+
+    private static bool DictionaryEquals(
+        IReadOnlyDictionary<GasProperties, float> first,
+        IReadOnlyDictionary<GasProperties, float> second)
+    {
+        if (first.Count != second.Count)
+            return false;
+
+        foreach ((var gas, float amount) in first)
+        {
+            if (!second.TryGetValue(gas, out float otherAmount) || !amount.Equals(otherAmount))
+                return false;
+        }
+
+        return true;
+    }
+
     /// <summary>
     ///     Calculates the reactions rate constant based on temperature using original Arrhenius equation.
     /// </summary>
@@ -85,7 +141,9 @@ public readonly partial record struct StandardGasReaction
         if (result <= 0)
             return 0;
 
-        foreach (KeyValuePair<GasProperties, float> factor in SpeedFactors)
+        foreach (KeyValuePair<GasProperties, float> factor in SpeedFactors.OrderBy(
+                     static factor => factor.Key.Name,
+                     StringComparer.Ordinal))
         {
             if (!gasMolarities.TryGetValue(factor.Key, out float molar)) molar = 0;
 

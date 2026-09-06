@@ -11,10 +11,12 @@ in the `0.x` series and may be published as prereleases (for others to just impo
 ## Some Highlights/Lowlights
 
 - First-class 3D support, voxel based
-- Arbritrary gas additions at runtime (SoAs)
+- Arbitrary gas additions at runtime (SoAs)
 - Engine-agnostic, with a supported `Numos.API` facade over an internal simulation kernel
 - Multithreaded intra-chunk advection and thermodynamics
 - Singlethreaded cross-chunk boundary flow
+- A valiant attempt at determinism
+- Full simulation state snapshotting, recording, rewinding, and replays
 - Solver pipeline, allowing you to write and add your own solvers to be executed on Numos' behalf
 - Ideal-gas based (`PV = nRT`)
 - Includes an external sim viewer and headless runner
@@ -33,6 +35,7 @@ Documentation for APIs and the project itself is available under `/docs`. Also s
 - [An Overview of Numos](docs/overview.md)
 - [Using Numos](docs/using.md)
 - [Using the Headless Runner](docs/headless_runner.md)
+- [Determinism and Replays](docs/deterministic_replay.md)
 - [Versioning](docs/versioning.md)
 - [Dimensional Analysis](docs/dimensional_analysis.md)
 

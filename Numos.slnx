@@ -1,4 +1,7 @@
 <Solution>
+    <Folder Name="/Benchmarks/">
+        <Project Path="benchmarks\Numos.Replay.Benchmarks\Numos.Replay.Benchmarks.csproj"/>
+    </Folder>
     <Folder Name="/Tests/">
         <Project Path="tests\Numos.API.Dangerous.Tests\Numos.API.Dangerous.Tests.csproj"/>
         <Project Path="tests\Numos.API.Tests\Numos.API.Tests.csproj"/>

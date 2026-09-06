@@ -99,17 +99,17 @@ public partial class SimulationViewer
         ImGui.InputText("Project name", ref _projectNameDraft, 128);
         ImGui.Separator();
         ImGui.Text("Chunk dimensions");
+        ImGuiExtensions.QuestionTooltip("Every chunk in this project uses these fixed dimensions.");
         ImGui.SetNextItemWidth(NumericInputWidth);
         ImGui.InputInt("Width##project-chunk", ref _projectChunkWidthDraft);
         ImGui.SetNextItemWidth(NumericInputWidth);
         ImGui.InputInt("Height##project-chunk", ref _projectChunkHeightDraft);
         ImGui.SetNextItemWidth(NumericInputWidth);
         ImGui.InputInt("Depth##project-chunk", ref _projectChunkDepthDraft);
-        ImGui.TextDisabled("Every chunk in this project uses these fixed dimensions.");
 
         ImGui.Separator();
         ImGui.Checkbox("Include Oxygen and Nitrogen", ref _includeDefaultGasesDraft);
-        ImGui.TextDisabled(
+        ImGuiExtensions.QuestionTooltip(
             _includeDefaultGasesDraft
                 ? "The default gas definitions will be appended to the new project."
                 : "The project will start with a blank gas registry.");
@@ -118,14 +118,14 @@ public partial class SimulationViewer
         {
             ImGui.Spacing();
             ImGui.TextColored(
-                new Vector4(1f, 0.72f, 0.25f, 1f),
+                ViewerTheme.Caution,
                 "Creating this project will close the current in-memory project.");
         }
 
         if (!string.IsNullOrWhiteSpace(_createProjectError))
         {
             ImGui.Spacing();
-            ImGui.TextColored(new Vector4(1f, 0.35f, 0.35f, 1f), _createProjectError);
+            ImGui.TextColored(ViewerTheme.Error, _createProjectError);
         }
 
         ImGui.Spacing();
@@ -200,15 +200,32 @@ public partial class SimulationViewer
             return;
 
         ImGui.Text(_projectName ?? "Untitled Simulation");
-        ImGui.TextDisabled(
-            $"Chunks: {_simulation.ChunkCount}  |  Gases: {_config.GasRegistry.Count}  |  Ticks: {_simulation.TickCount}");
+        ImGui.TextColored(
+            _isPaused ? ViewerTheme.Caution : ViewerTheme.Running,
+            _isPaused ? "Paused" : "Running");
+
+        if (ImGui.BeginTable(
+                "ProjectStatus##solution",
+                3,
+                ImGuiTableFlags.Borders | ImGuiTableFlags.SizingStretchSame))
+        {
+            ImGui.TableNextColumn();
+            ImGuiExtensions.StatusField("CHUNKS", _simulation.ChunkCount.ToString());
+            ImGui.TableNextColumn();
+            ImGuiExtensions.StatusField("GASES", _config.GasRegistry.Count.ToString());
+            ImGui.TableNextColumn();
+            ImGuiExtensions.StatusField("CURRENT TICK", _simulation.TickCount.ToString());
+            ImGui.EndTable();
+        }
+
+        ImGui.SeparatorText("Simulation controls");
 
         if (_isPaused)
         {
             if (ImGui.Button("Run", new Vector2(90, 0)))
                 _isPaused = false;
         }
-        else if (ImGui.Button("Stop", new Vector2(90, 0)))
+        else if (ImGui.Button("Pause", new Vector2(90, 0)))
         {
             _isPaused = true;
         }
@@ -230,15 +247,15 @@ public partial class SimulationViewer
             ImGui.EndDisabled();
         }
 
-        ImGui.SameLine();
-        if (ImGui.Button("Close Project", new Vector2(130, 0)))
-            RequestCloseProject();
-
         RenderSimulationProgress();
 
         RenderProjectMessage();
         if (ImGui.CollapsingHeader("Simulation Details", ImGuiTreeNodeFlags.DefaultOpen))
             RenderSolutionDetails();
+
+        ImGui.Separator();
+        if (ImGui.Button("Close Project", new Vector2(130, 0)))
+            RequestCloseProject();
     }
 
     private void RenderSimulationProgress()
@@ -271,8 +288,8 @@ public partial class SimulationViewer
         ImGui.PushStyleColor(
             ImGuiCol.Text,
             _projectMessageIsError
-                ? new Vector4(1f, 0.35f, 0.35f, 1f)
-                : new Vector4(0.4f, 0.85f, 0.5f, 1f));
+                ? ViewerTheme.Error
+                : ViewerTheme.Running);
 
         ImGui.TextWrapped(_projectMessage);
         ImGui.PopStyleColor();

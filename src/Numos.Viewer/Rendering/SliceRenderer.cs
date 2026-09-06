@@ -3,11 +3,12 @@ using Raylib_cs;
 
 namespace Numos.Viewer.Rendering;
 
+/// <summary>
+///     Defines voxel overlays for a rendered slice.
+/// </summary>
+/// <param name="Highlights">Voxel highlights to draw when their addresses occur in this slice.</param>
 public readonly record struct SliceRenderOptions(
-    int HoveredU = -1,
-    int HoveredV = -1,
-    int SelectedU = -1,
-    int SelectedV = -1);
+    IReadOnlyList<VoxelHighlight>? Highlights = null);
 
 /// <summary>
 ///     Draws a simulation slice with raylib's two-dimensional camera and shape API.
@@ -42,8 +43,15 @@ public static class SliceRenderer
             if (style.ShowChunkOutlines)
                 Raylib.DrawRectangleLinesEx(new Rectangle(0f, 0f, slice.Width, slice.Height), 0.08f, Color.White);
 
-            DrawHighlight(slice, options.SelectedU, options.SelectedV, 0.08f, new Color(1f, 0.82f, 0.15f, 1f));
-            DrawHighlight(slice, options.HoveredU, options.HoveredV, 0.05f, Color.White);
+            if (options.Highlights != null)
+            {
+                foreach (var cell in slice.Cells)
+                {
+                    foreach (var highlight in options.Highlights)
+                        if (highlight.Address == cell.Address)
+                            DrawHighlight(slice, cell.U, cell.V, 0.06f, SimulationRenderer.ToRaylibColor(highlight.Color));
+                }
+            }
         }
         finally
         {

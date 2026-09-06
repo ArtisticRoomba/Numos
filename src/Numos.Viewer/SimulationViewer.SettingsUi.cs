@@ -106,14 +106,9 @@ public partial class SimulationViewer
         if (ImGui.Checkbox("Uncap FPS", ref _uncappedFps))
             Raylib.SetTargetFPS(_uncappedFps ? 0 : _targetFps);
 
-        if (ImGui.IsItemHovered())
-        {
-            ImGui.SetTooltip(
-                "This will casually max out a CPU core while updating the UI if VSync is disabled.\n" +
-                "Ill-advised to use, made accessible just for the love of the game.");
-        }
-
-        ImGui.TextDisabled("Uncapped mode lets the renderer run without a software frame limit.");
+        ImGuiExtensions.QuestionTooltip(
+            "Removes the software frame limit. If VSync is disabled, this may max out a CPU core while updating the UI.\n" +
+            "Ill-advised to use, made accessible just for the love of the game.");
 
         if (_uncappedFps)
             ImGui.BeginDisabled();
@@ -134,7 +129,7 @@ public partial class SimulationViewer
                 Raylib.ClearWindowState(ConfigFlags.VSyncHint);
         }
 
-        ImGui.TextDisabled("VSync synchronizes presentation to the display refresh rate.");
+        ImGuiExtensions.QuestionTooltip("Synchronizes presentation to the display refresh rate.");
     }
 
     private void RenderInterfaceSettings()
@@ -143,12 +138,14 @@ public partial class SimulationViewer
         ImGui.TextDisabled("Viewer display preferences.");
         ImGui.Separator();
         ImGui.Checkbox("Show FPS overlay", ref _showPerformanceOverlay);
-        ImGui.TextDisabled("Displays the current render rate in the upper-left corner.");
+        ImGuiExtensions.QuestionTooltip("Displays the current render rate in the upper-left corner.");
 
         ImGui.Spacing();
         ImGui.Checkbox("Show viewport branding", ref _showViewportBranding);
-        ImGui.TextDisabled("Displays the Numos logo and name in simulation views.");
-        ImGui.TextDisabled("How it feels to LARP as an actual CFD tool.");
+        ImGuiExtensions.QuestionTooltip(
+            "Displays the Numos logo and name in simulation views.\n" +
+            "How it feels to LARP as an actual CFD tool.");
+
         ImGui.SetNextItemWidth(220f);
         ImGui.SliderFloat("Branding opacity", ref _viewportBrandingOpacityPercent, 0f, 100f, "%.0f%%");
         ImGui.SetNextItemWidth(220f);
@@ -179,14 +176,14 @@ public partial class SimulationViewer
         if (ImGui.Button("Save Current Layout"))
             SaveCurrentLayout();
 
-        ImGui.TextDisabled("Restores this arrangement the next time Numos starts.");
+        ImGuiExtensions.QuestionTooltip("Restores this arrangement the next time Numos starts.");
 
 #if DEBUG || TOOLS
         ImGui.Spacing();
         if (ImGui.Button("Save as Default Preset"))
             SavePackagedDefaultLayout();
 
-        ImGui.TextDisabled("Saves the default that future publishes use on first launch.");
+        ImGuiExtensions.QuestionTooltip("Saves the default that future publishes use on first launch.");
 #endif
 
         if (!string.IsNullOrEmpty(_layoutStatus))
@@ -268,7 +265,7 @@ public partial class SimulationViewer
         ImGui.TextWrapped("Keep this resolution? The previous resolution will be restored automatically if you do not confirm.");
         ImGui.Spacing();
         ImGui.TextColored(
-            new Vector4(1f, 0.8f, 0.25f, 1f),
+            ViewerTheme.Caution,
             $"Reverting in {secondsRemaining} seconds.");
 
         ImGui.Spacing();

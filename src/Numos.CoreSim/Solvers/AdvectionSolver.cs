@@ -11,24 +11,12 @@ namespace Numos.CoreSim.Solvers;
 /// </summary>
 internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
 {
-    private readonly ThreadLocal<BoundaryFlowEvent[]> _boundaryBuffers;
-
-    // Per-thread scratch buffers holding the resolved neighbor set (index + void flag) for
-    // every active voxel in the chunk currently being solved. Populated once per chunk, per
-    // tick, and reused by AccumulateBulkConductance, ProcessBulkNeighbors, and
-    // ProcessDiffusionNeighbors, instead of each of those independently repeating the
-    // position-addition + bounds-check + room-classification work per neighbor.
-    private readonly ThreadLocal<NeighborCache> _neighborCaches;
-
-    private readonly Action _clearBoundaryEvents;
-    private readonly Action<int, Int3, BoundaryFlowEvent> _enqueueBoundaryEvent;
-
-    private static readonly Int3[] HorizontalNeighbors =
+    private readonly static Int3[] HorizontalNeighbors =
     [
         Int3.NegX, Int3.PosX, Int3.NegY, Int3.PosY
     ];
 
-    private static readonly Int3[] VerticalNeighbors =
+    private readonly static Int3[] VerticalNeighbors =
     [
         Int3.NegZ, Int3.PosZ
     ];
@@ -36,7 +24,18 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
     // NOTE: ResolveNeighbors hardcodes this exact direction order
     // (NegX, PosX, NegY, PosY, NegZ, PosZ) as scalar bounds checks for
     // performance. If these arrays change, ResolveNeighbors must change to match.
-    private static readonly int NeighborSlots = HorizontalNeighbors.Length + VerticalNeighbors.Length;
+    private readonly static int NeighborSlots = HorizontalNeighbors.Length + VerticalNeighbors.Length;
+    private readonly ThreadLocal<BoundaryFlowEvent[]> _boundaryBuffers;
+
+    private readonly Action _clearBoundaryEvents;
+    private readonly Action<int, Int3, BoundaryFlowEvent> _enqueueBoundaryEvent;
+
+    // Per-thread scratch buffers holding the resolved neighbor set (index + void flag) for
+    // every active voxel in the chunk currently being solved. Populated once per chunk, per
+    // tick, and reused by AccumulateBulkConductance, ProcessBulkNeighbors, and
+    // ProcessDiffusionNeighbors, instead of each of those independently repeating the
+    // position-addition + bounds-check + room-classification work per neighbor.
+    private readonly ThreadLocal<NeighborCache> _neighborCaches;
 
     internal AdvectionSolver(
         int maximumBoundaryEvents, Action clearBoundaryEvents,
@@ -78,7 +77,7 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
         // conductance accumulation, advection's transfer pass, and diffusion below.
         if (chunk.ActiveGasCount > 0)
         {
-            NeighborCache cache = _neighborCaches.Value!;
+            var cache = _neighborCaches.Value!;
             cache.EnsureCapacity(chunk.ActiveAirCount);
             ResolveAllNeighbors(chunk, cache);
 
@@ -110,6 +109,7 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
             ref boundaryEventCount,
             ref maximumPressureDelta,
             cache);
+
         // If maximumPressureDelta above threshold add to sleep timer
         UpdateSleepState(chunk, config, maximumPressureDelta);
     }
@@ -165,9 +165,19 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
                 // This skips over voxel pairs which are going outside the chunk
                 // This only finds the mole change and energy change
                 // This does not mutate the chunk at all
-                ProcessBulkNeighbors(chunk, config, voxelIndex, currentPressure, totalMoles,
-                    capacitance, incidentBulkConductance, ref maximumPressureDelta, moleDeltas,
-                    energyDeltas, cache, activeIndex);
+                ProcessBulkNeighbors(
+                    chunk,
+                    config,
+                    voxelIndex,
+                    currentPressure,
+                    totalMoles,
+                    capacitance,
+                    incidentBulkConductance,
+                    ref maximumPressureDelta,
+                    moleDeltas,
+                    energyDeltas,
+                    cache,
+                    activeIndex);
 
                 // This gets all the pairs which are going outside the chunk
                 TryAppendBoundaryEvent(chunk, cache.Positions[activeIndex], voxelIndex, boundaryBuffer, ref boundaryEventCount);
@@ -203,7 +213,7 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
         {
             // This is Area/Distance between voxels
             float dx = MathF.Pow(config.VoxelVolume, 1f / 3f);
-            for (var activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
+            for (int activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
             {
                 // This only accumulates outflows
                 // Skips all voxels which can't have an outflow
@@ -231,7 +241,7 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
         // TODO
         // This value is kinda just temp * PressurePerMoleKelvin
         // Should run the maths a bit more properly to check if this can be simplified
-        for (var activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
+        for (int activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
         {
             ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
             Pascal pressure = chunk.TotalPressure[voxelIndex];
@@ -251,7 +261,7 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
         MolePerPascal[] capacitance, MolePerPascal[] incidentBulkConductance,
         NeighborCache cache)
     {
-        for (var activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
+        for (int activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
         {
             ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
 
@@ -322,8 +332,19 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
         {
             ushort neighborIndex = cache.Indices[slotBase + n];
             bool isVoid = cache.IsVoid[slotBase + n];
-            CheckNeighborBulk(chunk, config, neighborIndex, isVoid, voxelIndex, currentPressure, totalMoles,
-                capacitance, incidentBulkConductance, ref maximumPressureDelta, moleDeltas, energyDeltas);
+            CheckNeighborBulk(
+                chunk,
+                config,
+                neighborIndex,
+                isVoid,
+                voxelIndex,
+                currentPressure,
+                totalMoles,
+                capacitance,
+                incidentBulkConductance,
+                ref maximumPressureDelta,
+                moleDeltas,
+                energyDeltas);
         }
     }
 
@@ -383,11 +404,11 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
         Joule64 energyAdded = 0d;
         Joule64 neighborEnergyAdded = 0d;
 
-        var activeGases = chunk.ActiveGases;
+        GasChannel[] activeGases = chunk.ActiveGases;
         int gasCount = chunk.ActiveGasCount;
         int voxelCount = chunk.VoxelCount;
 
-        for (var gas = 0; gas < gasCount; gas++)
+        for (int gas = 0; gas < gasCount; gas++)
         {
             int gasId = activeGases[gas].GasId;
             Mole sourceMoles = activeGases[gas].Moles[voxelIndex];
@@ -398,8 +419,9 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
 
             // Energy moved is just thermal energy of the moles moved
             Joule64 energyTransferred = (Mole64)molesToMove *
-                                       config.GetMolarHeatCapacityAtConstantVolume(gasId) *
-                                       sourceTemperature;
+                                        config.GetMolarHeatCapacityAtConstantVolume(gasId) *
+                                        sourceTemperature;
+
             int deltaOffset = gas * voxelCount;
             moleDeltas[deltaOffset + voxelIndex] -= molesToMove;
             energyAdded -= energyTransferred;
@@ -412,6 +434,7 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
             moleDeltas[deltaOffset + neighborIndex] += molesToMove;
             neighborEnergyAdded += energyTransferred;
         }
+
         energyDeltas[voxelIndex] += energyAdded;
         energyDeltas[neighborIndex] += neighborEnergyAdded;
     }
@@ -472,7 +495,7 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
     /// <summary>
     ///     Resolves the valid (non-solid) neighbors of every active voxel in the chunk exactly
     ///     once, writing each voxel's local position and its resolved neighbor set into
-    ///     <paramref name="cache"/> for reuse by the advection and diffusion passes.
+    ///     <paramref name="cache" /> for reuse by the advection and diffusion passes.
     /// </summary>
     private static void ResolveAllNeighbors(AtmosChunk chunk, NeighborCache cache)
     {
@@ -480,10 +503,9 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
         for (int activeIndex = 0; activeIndex < activeAirCount; activeIndex++)
         {
             ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
-            Int3 position = chunk.GetXyzInt3(voxelIndex);
+            var position = chunk.GetXyzInt3(voxelIndex);
             cache.Positions[activeIndex] = position;
-            cache.Counts[activeIndex] = ResolveNeighbors(
-                chunk, position, cache.Indices, cache.IsVoid, activeIndex * NeighborSlots);
+            cache.Counts[activeIndex] = ResolveNeighbors(chunk, position, cache.Indices, cache.IsVoid, activeIndex * NeighborSlots);
         }
     }
 
@@ -502,24 +524,24 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
         int y = position.Y;
         int z = position.Z;
 
-        if (x > 0 && TryClassifyNeighbor(chunk, new Int3(x - 1, y, z), out var negXIndex, out var negXVoid))
+        if (x > 0 && TryClassifyNeighbor(chunk, new Int3(x - 1, y, z), out ushort negXIndex, out bool negXVoid))
             AppendNeighbor(neighborIndexBuffer, neighborIsVoidBuffer, slotBase, ref count, negXIndex, negXVoid);
 
-        if (x < chunk.Width - 1 && TryClassifyNeighbor(chunk, new Int3(x + 1, y, z), out var posXIndex, out var posXVoid))
+        if (x < chunk.Width - 1 && TryClassifyNeighbor(chunk, new Int3(x + 1, y, z), out ushort posXIndex, out bool posXVoid))
             AppendNeighbor(neighborIndexBuffer, neighborIsVoidBuffer, slotBase, ref count, posXIndex, posXVoid);
 
-        if (y > 0 && TryClassifyNeighbor(chunk, new Int3(x, y - 1, z), out var negYIndex, out var negYVoid))
+        if (y > 0 && TryClassifyNeighbor(chunk, new Int3(x, y - 1, z), out ushort negYIndex, out bool negYVoid))
             AppendNeighbor(neighborIndexBuffer, neighborIsVoidBuffer, slotBase, ref count, negYIndex, negYVoid);
 
-        if (y < chunk.Height - 1 && TryClassifyNeighbor(chunk, new Int3(x, y + 1, z), out var posYIndex, out var posYVoid))
+        if (y < chunk.Height - 1 && TryClassifyNeighbor(chunk, new Int3(x, y + 1, z), out ushort posYIndex, out bool posYVoid))
             AppendNeighbor(neighborIndexBuffer, neighborIsVoidBuffer, slotBase, ref count, posYIndex, posYVoid);
 
         if (chunk.Depth > 1)
         {
-            if (z > 0 && TryClassifyNeighbor(chunk, new Int3(x, y, z - 1), out var negZIndex, out var negZVoid))
+            if (z > 0 && TryClassifyNeighbor(chunk, new Int3(x, y, z - 1), out ushort negZIndex, out bool negZVoid))
                 AppendNeighbor(neighborIndexBuffer, neighborIsVoidBuffer, slotBase, ref count, negZIndex, negZVoid);
 
-            if (z < chunk.Depth - 1 && TryClassifyNeighbor(chunk, new Int3(x, y, z + 1), out var posZIndex, out var posZVoid))
+            if (z < chunk.Depth - 1 && TryClassifyNeighbor(chunk, new Int3(x, y, z + 1), out ushort posZIndex, out bool posZVoid))
                 AppendNeighbor(neighborIndexBuffer, neighborIsVoidBuffer, slotBase, ref count, posZIndex, posZVoid);
         }
 
@@ -621,7 +643,7 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
                 chunk.ActiveGases[gas].Moles[voxelIndex] = moles;
                 // new heat cap based on new moles
                 chunk.TotalHeatCapacity[voxelIndex] += moles *
-                                                    config.GetMolarHeatCapacityAtConstantVolume(chunk.ActiveGases[gas].GasId);
+                                                       config.GetMolarHeatCapacityAtConstantVolume(chunk.ActiveGases[gas].GasId);
             }
 
             if (chunk.TotalHeatCapacity[voxelIndex] > 0f)
@@ -631,6 +653,7 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
                     0f,
                     (Joule)((oldEnergy + energyDeltas[voxelIndex]) /
                             chunk.TotalHeatCapacity[voxelIndex]));
+
                 chunk.TotalPressure[voxelIndex] = AtmosSolverMath.CalculatePressureAtVoxel(config, chunk, voxelIndex, totalMoles);
             }
         }
@@ -676,9 +699,9 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
     /// </summary>
     private sealed class NeighborCache
     {
+        public int[] Counts = [];
         public ushort[] Indices = [];
         public bool[] IsVoid = [];
-        public int[] Counts = [];
         public Int3[] Positions = [];
 
         public void EnsureCapacity(int activeAirCount)

@@ -228,6 +228,7 @@ internal sealed partial class AtmosKernel
             chunk.WakeRoom(roomId);
             chunk.Temperature[localVoxelIndex] = temperature;
             chunk.MarkChanged();
+            RecordVoxelMixture(chunk, localVoxelIndex);
         }
     }
 
@@ -257,6 +258,7 @@ internal sealed partial class AtmosKernel
             chunk.WakeRoom(roomId);
             SetVoxelGasMoles(chunk, localVoxelIndex, gasId, moles);
             ApplyVoxelMixtureTotals(chunk, localVoxelIndex, totals);
+            RecordVoxelMixture(chunk, localVoxelIndex);
         }
     }
 
@@ -292,6 +294,7 @@ internal sealed partial class AtmosKernel
             chunk.WakeRoom(roomId);
             SetVoxelGasMoles(chunk, localVoxelIndex, gasId, moles);
             ApplyVoxelMixtureTotals(chunk, localVoxelIndex, totals);
+            RecordVoxelMixture(chunk, localVoxelIndex);
         }
     }
 
@@ -347,6 +350,7 @@ internal sealed partial class AtmosKernel
             SetVoxelGasMoles(chunk, localVoxelIndex, gasId, combinedGasMoles);
             chunk.Temperature[localVoxelIndex] = mixedTemperature;
             ApplyVoxelMixtureTotals(chunk, localVoxelIndex, totals);
+            RecordVoxelMixture(chunk, localVoxelIndex);
         }
     }
 
@@ -367,6 +371,7 @@ internal sealed partial class AtmosKernel
                 chunk.ActiveGases[gas].Moles[localVoxelIndex] = 0f;
 
             ApplyVoxelMixtureTotals(chunk, localVoxelIndex, default);
+            RecordVoxelMixture(chunk, localVoxelIndex);
         }
     }
 
@@ -461,6 +466,7 @@ internal sealed partial class AtmosKernel
                 AtmosSolverMath.CalculatePressure(_config, totalMoles, temperature);
 
             chunk.MarkChanged();
+            RecordVoxelMixture(chunk, localVoxelIndex);
         }
     }
 

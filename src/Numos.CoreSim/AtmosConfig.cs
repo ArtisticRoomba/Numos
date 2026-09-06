@@ -11,6 +11,38 @@ namespace Numos.CoreSim;
 /// </summary>
 public class AtmosConfig : IAtmosConfig
 {
+    public AtmosConfig()
+    {
+    }
+
+    /// <summary>Creates an editable copy of an immutable simulation configuration.</summary>
+    public AtmosConfig(AtmosConfigSnapshot source)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        GasRegistry = new GasRegistry();
+        foreach (var gas in source.GasRegistry)
+            GasRegistry.Add(gas);
+
+        LinearGasReactions = source.LinearGasReactions.ToList();
+        StandardGasReactions = source.StandardGasReactions.ToList();
+        GlobalTemperature = source.GlobalTemperature;
+        DefaultTemperatureFallback = source.DefaultTemperatureFallback;
+        DefaultMolarHeatCapacityAtConstantVolume = source.DefaultMolarHeatCapacityAtConstantVolume;
+        VoxelVolume = source.VoxelVolume;
+        SaturationReferencePressure = source.SaturationReferencePressure;
+        DefaultDiffusionCoefficient = source.DefaultDiffusionCoefficient;
+        SpaceTemperature = source.SpaceTemperature;
+        BulkFlowCoefficient = source.BulkFlowCoefficient;
+        VacuumThreshold = source.VacuumThreshold;
+        SleepThreshold = source.SleepThreshold;
+        SleepEpsilon = source.SleepEpsilon;
+        ThermalConductance = source.ThermalConductance;
+        CondensationRateFactor = source.CondensationRateFactor;
+        MaxPressureTransferFractionPerNeighbor = source.MaxPressureTransferFractionPerNeighbor;
+        AccumulatorWakeThreshold = source.AccumulatorWakeThreshold;
+        AccumulatorMaxAliveTicks = source.AccumulatorMaxAliveTicks;
+    }
+
     /// <summary>
     ///     List of gases actively registered to the sim.
     /// </summary>
@@ -207,11 +239,6 @@ public class AtmosConfig : IAtmosConfig
         return false;
     }
 
-    public void ValidateGasRegistry()
-    {
-        GasRegistry.ValidateGasRegistry();
-    }
-
     public int GasPropertyCount => GasRegistry.Count;
 
     public bool TryGetGasReaction(int reactionId, [NotNullWhen(true)] out IGasReaction? reaction)
@@ -234,4 +261,15 @@ public class AtmosConfig : IAtmosConfig
     }
 
     public int GasReactionCount => LinearGasReactions.Count + StandardGasReactions.Count;
+
+    /// <summary>Captures an immutable, detached copy of this configuration.</summary>
+    public AtmosConfigSnapshot CreateSnapshot()
+    {
+        return new AtmosConfigSnapshot(this);
+    }
+
+    public void ValidateGasRegistry()
+    {
+        GasRegistry.ValidateGasRegistry();
+    }
 }

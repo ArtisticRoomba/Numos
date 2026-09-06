@@ -83,8 +83,8 @@ graph TD
     THERMO -->|"Tick-tagged events"| THERMAL
     B --> C["GasChannel[] (SoA Gas Data)"]
     B --> D["VoxelRoomMap (Topology)"]
-    G["AtmosConfig (Live Tuning)"] --> API
-    G -->|"Normalized tick snapshot"| CTX
+    G["AtmosConfig (Editable Builder)"] -->|"Explicit immutable snapshot"| API
+    API -->|"Normalized tick inputs"| CTX
     H["GasProperties Registry"] --> G
     I["RoomNode (Macro Layer)"] -.-> B
     J["GasAccumulator"] -.-> I
@@ -241,7 +241,10 @@ The registry is stored as a `List<GasProperties>` indexed by gas ID; zero is a v
 
 ### 3.6 Configuration Parameters
 
-All tunable simulation parameters are centralized in a configuration object:
+All tunable simulation parameters are assembled in an editable `AtmosConfig`. Construction and
+`SetAtmosConfig(...)` capture an immutable `AtmosConfigSnapshot`; later mutation of the editable builder does not change
+the simulation. This explicit apply boundary lets recording assign a deterministic operation sequence to each semantic
+configuration change.
 
 The literals backing these defaults are exposed through `AtmosConfigDefaults`, while immutable SI and reference
 condition values are exposed through `AtmosPhysicalConstants`. Internal fixed-step scheduling values and numerical
@@ -278,8 +281,8 @@ the solver's structure-of-arrays layout:
   storage. Its `Volume` can be changed, and it is suitable for canisters, tanks, pipes, pumps, or temporary parcels.
 - `AtmosSimulation.GetVoxelGasMixture(...)` returns an `IGasMixture` capability over one live voxel. It does not
   contain or expose spans, gas-channel arrays, or references into pooled solver memory.
-- Every mixture retains its owning `AtmosSimulation`. Transfers require both endpoints to have the same owner, so
-  gas IDs and molar heat capacities are interpreted through one live configuration.
+- Every mixture retains its owning `AtmosSimulation`. Transfers require both endpoints to have the same owner, so gas
+  IDs and molar heat capacities are interpreted through one applied configuration snapshot.
 - `IGasMixture` is a common capability surface rather than an extension point. Transfer endpoints must be mixtures
   created by `AtmosSimulation`; external implementations are rejected before either endpoint changes.
 - A voxel capability records the chunk generation at creation. Removing and recreating a chunk at the same position
@@ -299,10 +302,16 @@ The `Temperature` setter stores its raw value for parity with direct voxel tooli
 temperatures are interpreted through `DefaultTemperatureFallback` when pressure or sensible energy is calculated.
 Creation and incoming-gas operations still require finite, nonnegative temperatures.
 
-At the start of each simulation tick, the solver captures a normalized configuration/gas-property snapshot from the
-current `AtmosConfig`. Built-in stages use that normalized snapshot for the whole tick. Custom callbacks receive the
-live `AtmosSimulation`, so `simulation.Config` reflects an immediately replaced configuration for subsequent custom
-callbacks. Mutating or replacing it affects normalized built-in settings on the next tick.
+At the start of each simulation tick, the solver captures normalized inputs from the current immutable
+`AtmosConfigSnapshot`. Built-in stages use those normalized values for the whole tick. Custom callbacks receive the live
+`AtmosSimulation`; applying a new editable config from a callback updates `simulation.Config` immediately and affects
+normalized built-in settings on the next tick. Solver-originated applications are deterministic internal work and are
+not logged as external operations.
+
+Call `StartRecording()` to begin an operation interval. `SetAtmosConfig(...)` records a
+`SetAtmosConfigOperation` only when the applied semantic snapshot changes. `CaptureRecording()` reads the interval
+without stopping it, and `StopRecording()` returns its detached operations. Each operation carries the completed Numos
+tick and a monotonically increasing operation sequence. See [Deterministic replay state model](deterministic_replay.md).
 
 Persistent voxel state and advection work buffers use single precision. Overflow-prone formulas use stable algebraic
 forms: thermal equilibrium conductance is evaluated without forming `C1 * C2`, heat-capacity-weighted mixing uses

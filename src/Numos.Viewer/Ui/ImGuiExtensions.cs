@@ -18,7 +18,11 @@ internal static class ImGuiExtensions
     {
         ImGui.SetNextWindowPos(firstUsePosition, ImGuiCond.FirstUseEver);
         ImGui.SetNextWindowSize(firstUseSize, ImGuiCond.FirstUseEver);
-        return new WindowScope(ImGui.Begin(title, ref isOpen, flags));
+        bool isVisible = ImGui.Begin(title, ref isOpen, flags);
+        if (isVisible)
+            ImGui.PushTextWrapPos(0f);
+
+        return new WindowScope(isVisible);
     }
 
     public static PopupScope BeginPopupModal(
@@ -49,6 +53,20 @@ internal static class ImGuiExtensions
         (renderText ?? ImGui.TextUnformatted)(text);
     }
 
+    public static void StatusField(string label, string value)
+    {
+        ImGui.TextDisabled(label);
+        ImGui.TextUnformatted(value);
+    }
+
+    public static void QuestionTooltip(string tooltip)
+    {
+        ImGui.SameLine();
+        ImGui.TextDisabled("(?)");
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip(tooltip);
+    }
+
     public readonly struct WindowScope : IDisposable
     {
         internal WindowScope(bool isVisible)
@@ -60,6 +78,9 @@ internal static class ImGuiExtensions
 
         public void Dispose()
         {
+            if (IsVisible)
+                ImGui.PopTextWrapPos();
+
             ImGui.End();
         }
     }

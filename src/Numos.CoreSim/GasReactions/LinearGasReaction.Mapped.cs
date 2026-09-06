@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Collections.Frozen;
 
 namespace Numos.CoreSim.GasReactions;
@@ -27,7 +26,8 @@ public readonly partial record struct LinearGasReaction
                 e => gasRegistry.GasIdToIndex(e.Key.Name),
                 e => e.Value);
 
-            MappedFactors = original.SpeedFactors.Select(e => new Factor(e, gasRegistry)).ToFrozenSet();
+            MappedFactors = original.SpeedFactors.OrderBy(static factor => factor.Gas.Name, StringComparer.Ordinal)
+                .ThenBy(static factor => factor.OrderKey).Select(e => new Factor(e, gasRegistry)).ToArray();
 
             var changeEquation = new Dictionary<int, Mole>();
             foreach (int gas in mappedInputs.Keys.Concat(mappedOutputs.Keys).Distinct())
@@ -38,7 +38,7 @@ public readonly partial record struct LinearGasReaction
 
         private LinearGasReaction Original { get; }
 
-        private FrozenSet<Factor> MappedFactors { get; }
+        private Factor[] MappedFactors { get; }
 
         /// <inheritdoc />
         public FrozenDictionary<int, Mole> ChangeEquation { get; }
@@ -52,28 +52,14 @@ public readonly partial record struct LinearGasReaction
             if (!float.IsNormal(result) || result <= 0)
                 return 0;
 
-            var bag = new ConcurrentBag<float>();
-
-            var response = Parallel.ForEach(
-                MappedFactors,
-                (factor, loopState) =>
-                {
-                    float f = factor.Original.GetFactor(molarityVector[factor.GasId]);
-                    if (!float.IsNormal(f) || f <= 0)
-                    {
-                        loopState.Stop();
-                        return;
-                    }
-
-                    bag.Add(f);
-                });
-
-            if (!response.IsCompleted)
-                return 0;
-
-            foreach (float f in bag)
+            // A parallel reduction changes multiplication order with worker scheduling.
+            foreach (var factor in MappedFactors)
             {
-                result *= f;
+                float value = factor.Original.GetFactor(molarityVector[factor.GasId]);
+                if (!float.IsNormal(value) || value <= 0f)
+                    return 0;
+
+                result *= value;
             }
 
             return result;

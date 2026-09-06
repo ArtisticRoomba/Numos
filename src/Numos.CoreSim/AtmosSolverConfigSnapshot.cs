@@ -5,11 +5,11 @@ using Numos.Maths;
 namespace Numos.CoreSim;
 
 /// <summary>
-///     Normalized solver inputs captured from the live configuration at the start of a tick.
+///     Normalized solver inputs captured from the applied immutable configuration at the start of a tick.
 /// </summary>
 /// <remarks>
-///     Public configuration remains mutable. This reusable snapshot remains stable for the duration of a tick,
-///     keeping the tick internally consistent and moving validation out of per-voxel and per-neighbor hot paths.
+///     This reusable snapshot remains stable for the duration of a tick, keeping the tick internally consistent and
+///     moving validation out of per-voxel and per-neighbor hot paths.
 /// </remarks>
 internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
 {
@@ -88,17 +88,17 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
 
     public int GasReactionCount { get; private set; }
 
-    internal void Capture(AtmosConfig config)
+    internal void Capture(IAtmosConfig config)
     {
-        GasRegistry gasRegistry = config.GasRegistry;
+        int gasPropertyCount = config.GasPropertyCount;
         int previousGasRegistryCount = GasPropertyCount;
-        if (_molarHeatCapacitiesAtConstantVolume.Length < gasRegistry.Count)
+        if (_molarHeatCapacitiesAtConstantVolume.Length < gasPropertyCount)
         {
-            Array.Resize(ref _molarHeatCapacitiesAtConstantVolume, gasRegistry.Count);
-            Array.Resize(ref _diffusionCoefficients, gasRegistry.Count);
+            Array.Resize(ref _molarHeatCapacitiesAtConstantVolume, gasPropertyCount);
+            Array.Resize(ref _diffusionCoefficients, gasPropertyCount);
         }
 
-        GasPropertyCount = gasRegistry.Count;
+        GasPropertyCount = gasPropertyCount;
         GlobalTemperature = FloatMath.IsFinitePositive(config.GlobalTemperature)
             ? config.GlobalTemperature
             : AtmosConfigDefaults.GlobalTemperature;
@@ -126,10 +126,11 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
             ? config.SpaceTemperature
             : AtmosConfigDefaults.SpaceTemperature;
 
-        _gasRegistry = new GasRegistrySnapshot(gasRegistry);
+        var gases = new GasRegistry();
         for (int gasId = 0; gasId < GasPropertyCount; gasId++)
         {
-            var properties = gasRegistry[gasId];
+            config.TryGetGasProperties(gasId, out var properties);
+            gases.Add(properties);
             _molarHeatCapacitiesAtConstantVolume[gasId] =
                 FloatMath.IsFinitePositive(properties.MolarHeatCapacityAtConstantVolume)
                     ? properties.MolarHeatCapacityAtConstantVolume
@@ -137,6 +138,8 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
 
             _diffusionCoefficients[gasId] = FloatMath.ClampUnitInterval(properties.DiffusionCoefficient);
         }
+
+        _gasRegistry = new GasRegistrySnapshot(gases);
 
         if (GasPropertyCount < previousGasRegistryCount)
         {

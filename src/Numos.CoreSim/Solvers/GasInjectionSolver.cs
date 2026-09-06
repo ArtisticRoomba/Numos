@@ -11,7 +11,7 @@ internal static class GasInjectionSolver
 {
     internal static void Inject(
         AtmosChunk chunk, ushort localVoxelIndex, int gasId, Mole moles,
-        Kelvin temperature, AtmosConfig config)
+        Kelvin temperature, IAtmosConfig config)
     {
         JoulePerKelvin currentHeatCapacity = 0f;
         for (int gas = 0; gas < chunk.ActiveGasCount; gas++)

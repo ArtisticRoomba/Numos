@@ -238,6 +238,7 @@ public sealed class ThermodynamicsIntegrationTests
         simulation.Tick();
         config.BulkFlowCoefficient = 0.25f;
         config.MaxPressureTransferFractionPerNeighbor = 0.16f;
+        simulation.SetAtmosConfig(config);
         simulation.Tick();
 
         var sourceSnapshot = simulation.GetChunkSnapshot(source);

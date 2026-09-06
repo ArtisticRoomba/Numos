@@ -1,5 +1,6 @@
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.Datatypes.Snapshots;
+using Numos.CoreSim.Replay;
 using Numos.CoreSim.Solvers;
 using Numos.Maths;
 
@@ -7,7 +8,6 @@ namespace Numos.CoreSim;
 
 internal sealed partial class AtmosKernel
 {
-    private bool _configSet;
     /// <summary>
     ///     Gets the number of chunks currently registered with the kernel.
     /// </summary>
@@ -19,6 +19,17 @@ internal sealed partial class AtmosKernel
             lock (_stateGate)
             {
                 return _chunkMap.Count;
+            }
+        }
+    }
+
+    internal bool IsRecording
+    {
+        get
+        {
+            lock (_stateGate)
+            {
+                return _isRecording;
             }
         }
     }
@@ -38,6 +49,7 @@ internal sealed partial class AtmosKernel
     {
         lock (_stateGate)
         {
+            EnsureCanChangeSolverDefinition();
             _solverPipeline.Register(name, SolverStepKind.Custom, solver, _solverPipeline.Count);
         }
     }
@@ -48,6 +60,7 @@ internal sealed partial class AtmosKernel
     {
         lock (_stateGate)
         {
+            EnsureCanChangeSolverDefinition();
             int index = _solverPipeline.IndexOf(existingName);
             if (index < 0)
                 throw new KeyNotFoundException($"No solver named '{existingName}' is registered.");
@@ -62,6 +75,7 @@ internal sealed partial class AtmosKernel
     {
         lock (_stateGate)
         {
+            EnsureCanChangeSolverDefinition();
             int index = _solverPipeline.IndexOf(existingName);
             if (index < 0)
                 throw new KeyNotFoundException($"No solver named '{existingName}' is registered.");
@@ -74,6 +88,7 @@ internal sealed partial class AtmosKernel
     {
         lock (_stateGate)
         {
+            EnsureCanChangeSolverDefinition();
             return _solverPipeline.Unregister(name);
         }
     }
@@ -82,7 +97,16 @@ internal sealed partial class AtmosKernel
     {
         lock (_stateGate)
         {
-            return _solverPipeline.SetEnabled(name, enabled);
+            if (!ShouldRecord)
+                return _solverPipeline.SetEnabled(name, enabled);
+
+            int index = _solverPipeline.IndexOf(name);
+            if (index < 0) return false;
+
+            bool changed = _solverPipeline.GetSteps()[index].Enabled != enabled;
+            _solverPipeline.SetEnabled(name, enabled);
+            if (changed && ShouldRecord) RecordOperation(new SetSolverEnabledOperation(name, enabled));
+            return true;
         }
     }
 
@@ -90,6 +114,7 @@ internal sealed partial class AtmosKernel
     {
         lock (_stateGate)
         {
+            EnsureCanChangeSolverDefinition();
             _solverPipeline.Reset();
         }
     }
@@ -151,6 +176,7 @@ internal sealed partial class AtmosKernel
         lock (_stateGate)
         {
             ThrowIfTickExecuting("update the simulation recursively");
+            Second previousAccumulator = _accumulator;
             _accumulator += elapsedSeconds;
 
             if (_accumulator > AtmosSolverConstants.FixedTimeStep * AtmosSolverConstants.MaximumStepsPerUpdate)
@@ -163,7 +189,7 @@ internal sealed partial class AtmosKernel
 
             // One elapsed-time update is one externally atomic batch. Solver callbacks may edit the pipeline, but
             // chunk lifecycle changes are rejected until the batch completes.
-            AtmosChunk[] chunks = _chunkMap.Values.ToArray();
+            AtmosChunk[] chunks = OrderedChunks();
             int steps = 0;
             while (_accumulator >= AtmosSolverConstants.FixedTimeStep &&
                    steps < AtmosSolverConstants.MaximumStepsPerUpdate)
@@ -172,6 +198,9 @@ internal sealed partial class AtmosKernel
                 steps++;
                 TickSimulation(chunks);
             }
+
+            if (ShouldRecord && BitConverter.SingleToInt32Bits(previousAccumulator) != BitConverter.SingleToInt32Bits(_accumulator))
+                RecordOperation(new SetElapsedAccumulatorOperation(_accumulator));
         }
     }
 
@@ -185,22 +214,76 @@ internal sealed partial class AtmosKernel
     }
 
     /// <summary>
-    ///     Replaces the live configuration used by subsequent simulation ticks.
+    ///     Applies a detached configuration used by subsequent simulation operations.
     /// </summary>
-    /// <param name="config">The configuration instance to use. The instance is retained by reference.</param>
+    /// <param name="config">The detached configuration to apply.</param>
     /// <exception cref="ArgumentNullException"><paramref name="config" /> is <see langword="null" />.</exception>
-    internal void SetAtmosConfig(AtmosConfig config)
+    internal bool SetAtmosConfig(AtmosConfigSnapshot config)
     {
         lock (_stateGate)
         {
+            ArgumentNullException.ThrowIfNull(config);
             config.ValidateGasRegistry();
-            _config = config ?? throw new ArgumentNullException(nameof(config));
-            // Makes _tickConfig valid before first tick has been ran.
-            if (!_configSet)
-            {
-                _tickConfig.Capture(_config);
-                _configSet = true;
-            }
+            if (_config.SemanticallyEquals(config))
+                return false;
+
+            _config = config;
+            if (ShouldRecord) RecordOperation(new SetAtmosConfigOperation(config));
+            return true;
+        }
+    }
+
+    internal AtmosConfigSnapshot GetAtmosConfig()
+    {
+        lock (_stateGate)
+        {
+            return _config;
+        }
+    }
+
+    internal void StartRecording()
+    {
+        lock (_stateGate)
+        {
+            ThrowIfTickExecuting("start recording");
+            if (_isRecording)
+                throw new InvalidOperationException("The simulation is already recording.");
+
+            _recordedOperations.Clear();
+            _recordingStart = new AtmosTimelinePosition(checked((ulong)TickCount), _lastOperationSequence);
+            _recordingHead = _recordingStart;
+            _hasRecording = true;
+            _isRecording = true;
+        }
+    }
+
+    internal AtmosRecording CaptureRecording()
+    {
+        lock (_stateGate)
+        {
+            if (!_hasRecording)
+                throw new InvalidOperationException("The simulation has no recording to capture.");
+
+            var head = _isRecording
+                ? new AtmosTimelinePosition(checked((ulong)TickCount), _lastOperationSequence)
+                : _recordingHead;
+
+            return new AtmosRecording(_recordingStart, head, _recordedOperations);
+        }
+    }
+
+    internal AtmosRecording StopRecording()
+    {
+        lock (_stateGate)
+        {
+            ThrowIfTickExecuting("stop recording");
+            if (!_isRecording)
+                throw new InvalidOperationException("The simulation is not recording.");
+
+            _isRecording = false;
+            _stoppedRecordingHash = ComputeStateHash();
+            _recordingHead = new AtmosTimelinePosition(checked((ulong)TickCount), _lastOperationSequence);
+            return new AtmosRecording(_recordingStart, _recordingHead, _recordedOperations);
         }
     }
 
@@ -215,10 +298,15 @@ internal sealed partial class AtmosKernel
     {
         lock (_stateGate)
         {
+            ThrowIfTickExecuting("register a chunk during the current tick");
+            if (chunk.Dimensions != _dimensions)
+                throw new ArgumentException("Chunk dimensions must match the simulation.", nameof(chunk));
+
             if (!_chunkMap.TryAdd(chunk.GridPosition, chunk))
                 throw new InvalidOperationException($"A chunk is already registered at {chunk.GridPosition}.");
 
             _chunkCollectionRevision++;
+            if (ShouldRecord) RecordOperation(new CreateChunkOperation(chunk.GridPosition, chunk.MaxActiveRooms));
         }
     }
 
@@ -237,6 +325,7 @@ internal sealed partial class AtmosKernel
 
             chunk.Release();
             _chunkCollectionRevision++;
+            if (ShouldRecord) RecordOperation(new RemoveChunkOperation(position));
             return true;
         }
     }
@@ -255,6 +344,10 @@ internal sealed partial class AtmosKernel
         lock (_stateGate)
         {
             ThrowIfTickExecuting("register a chunk during the current tick");
+            if (_chunkMap.ContainsKey(position))
+                throw new InvalidOperationException($"A chunk is already registered at {position}.");
+
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxActiveRooms);
             var chunk = new AtmosChunk(width, height, depth, maxActiveRooms);
             chunk.Initialize(position, width, height, depth, maxActiveRooms);
             RegisterChunk(chunk);
@@ -432,6 +525,7 @@ internal sealed partial class AtmosKernel
             chunk.SetChunkClassification(classification);
             RebuildActiveTopology(chunk);
             chunk.MarkChanged();
+            if (ShouldRecord) RecordOperation(new SetChunkClassificationOperation(position, classification));
         }
     }
 
@@ -466,6 +560,7 @@ internal sealed partial class AtmosKernel
 
             RebuildActiveTopology(chunk);
             chunk.MarkChanged();
+            if (ShouldRecord) RecordOperation(new SetChunkBoundaryClassificationOperation(position, classification));
         }
     }
 
@@ -489,6 +584,7 @@ internal sealed partial class AtmosKernel
             chunk.SetVoxelClassification(localVoxelIndex, classification);
             RebuildActiveTopology(chunk);
             chunk.MarkChanged();
+            if (ShouldRecord) RecordOperation(new SetVoxelClassificationOperation(position, localVoxelIndex, classification));
         }
     }
 
@@ -532,6 +628,7 @@ internal sealed partial class AtmosKernel
                 AtmosSolverMath.CalculatePressureAtVoxel(_config, chunk, localVoxelIndex);
 
             chunk.MarkChanged();
+            if (ShouldRecord) RecordOperation(new SetVoxelTemperatureOperation(position, localVoxelIndex, temperature));
         }
     }
 
@@ -581,6 +678,7 @@ internal sealed partial class AtmosKernel
 
             chunk.WakeRoom(roomId);
             GasInjectionSolver.Inject(chunk, localVoxelIndex, gasId, moles, temperature, _config);
+            if (ShouldRecord) RecordOperation(new AddGasToVoxelOperation(position, localVoxelIndex, gasId, moles, temperature));
         }
     }
 
@@ -620,6 +718,8 @@ internal sealed partial class AtmosKernel
         lock (_stateGate)
         {
             GetChunk(position).WakeRoom(roomId);
+            if (ShouldRecord && roomId != VoxelClassification.RoomSolid && roomId != VoxelClassification.RoomVoid)
+                RecordOperation(new WakeRoomOperation(position, roomId));
         }
     }
 
@@ -633,6 +733,7 @@ internal sealed partial class AtmosKernel
         lock (_stateGate)
         {
             GetChunk(position).Sleep();
+            if (ShouldRecord) RecordOperation(new SleepChunkOperation(position));
         }
     }
 
@@ -644,7 +745,7 @@ internal sealed partial class AtmosKernel
     {
         lock (_stateGate)
         {
-            AtmosChunk[] chunks = _chunkMap.Values.ToArray();
+            AtmosChunk[] chunks = OrderedChunks();
             TickSimulation(chunks);
         }
     }

@@ -41,6 +41,7 @@ internal sealed class ThermalBoundarySolver : IAtmosSolverStage
     internal void ClearPendingEvents()
     {
         _boundaryEvents.Clear();
+        ResetWorkspace();
     }
 
     internal void Enqueue(int tickCount, Int3 key, ThermalBoundaryEvent boundaryEvent)
