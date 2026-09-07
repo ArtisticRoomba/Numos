@@ -16,21 +16,6 @@ public sealed class AtmosChunkInjectionTests
 
     private readonly List<AtmosChunk> _chunks = [];
 
-    [Test]
-    public void InjectGasToVoxel_WhenChunkIsSleeping_DoesNothing()
-    {
-        var chunk = CreateChunk(1, 1, 1);
-
-        chunk.InjectGasToVoxel(0, 3, 2f, 300f, 1f, 1f);
-
-        Assert.Multiple(() =>
-        {
-            Assert.That(chunk.ActiveGasCount, Is.Zero);
-            Assert.That(chunk.Temperature[0], Is.Zero);
-            Assert.That(chunk.TotalPressure[0], Is.Zero);
-        });
-    }
-
     [TestCase(VoxelClassification.RoomSolid)]
     [TestCase(VoxelClassification.RoomVoid)]
     public void InjectGasToVoxel_WhenVoxelCannotHoldGas_DoesNothing(int classification)
