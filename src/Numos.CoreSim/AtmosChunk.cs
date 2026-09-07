@@ -636,6 +636,8 @@ internal class AtmosChunk
             SetChunkToVacuum();
 
         VoxelRoomMap.Fill(roomId);
+        ActiveRoomCount = 1;
+        ActiveRoomIds[0] = roomId;
     }
 
 
@@ -651,6 +653,8 @@ internal class AtmosChunk
             SetChunkToVacuum();
 
         VoxelRoomMap.Fill(classification.RoomId);
+        ActiveRoomCount = 1;
+        ActiveRoomIds[0] = classification.RoomId;
     }
 
 
