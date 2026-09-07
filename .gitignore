@@ -12,3 +12,4 @@ riderModule.iml
 !.vscode/tasks.json
 
 imgui.ini
+BenchmarkDotNet.Artifacts/

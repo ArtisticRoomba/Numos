@@ -1,5 +1,6 @@
 <Solution>
     <Folder Name="/Benchmarks/">
+        <Project Path="benchmarks\Numos.CoreSim.Benchmarks\Numos.CoreSim.Benchmarks.csproj"/>
         <Project Path="benchmarks\Numos.Replay.Benchmarks\Numos.Replay.Benchmarks.csproj"/>
     </Folder>
     <Folder Name="/Tests/">
