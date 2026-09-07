@@ -1,6 +1,7 @@
 using System.Buffers;
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Numerics.Tensors;
 using Numos.CoreSim.Datatypes.Events;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.Maths;
@@ -571,29 +572,59 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
         count++;
     }
 
-    private static void RefreshPressureAndHeatCapacity(AtmosChunk chunk, AtmosSolverConfigSnapshot config)
+    /// <summary>
+    ///     Rebuilds pressure and heat capacity, clearing vacuum species before accumulating heat capacity.
+    /// </summary>
+    internal static void RefreshPressureAndHeatCapacity(AtmosChunk chunk, AtmosSolverConfigSnapshot config)
     {
         chunk.TotalPressure.Clear();
         chunk.TotalHeatCapacity.Clear();
 
-        for (int activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
+        Mole[]? buffer = null;
+        try
         {
-            ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
-            chunk.TotalPressure[voxelIndex] = AtmosSolverMath.CalculatePressureAtVoxel(config, chunk, voxelIndex);
-        }
-
-        for (int gas = 0; gas < chunk.ActiveGasCount; gas++)
-        {
-            JoulePerMoleKelvin molarHeatCapacity =
-                config.GetMolarHeatCapacityAtConstantVolume(chunk.ActiveGases[gas].GasId);
-
-            for (int activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
+            for (int activeIndex = 0; activeIndex < chunk.ActiveAirCount;)
             {
-                ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
-                Mole moles = chunk.ActiveGases[gas].Moles[voxelIndex];
-                if (moles > 0f)
-                    chunk.TotalHeatCapacity[voxelIndex] += molarHeatCapacity * moles;
+                int start = chunk.ActiveAirIndices[activeIndex++];
+                int length = 1;
+                while (activeIndex < chunk.ActiveAirCount && chunk.ActiveAirIndices[activeIndex] == start + length)
+                {
+                    activeIndex++;
+                    length++;
+                }
+
+                buffer ??= ArrayPool<Mole>.Shared.Rent(chunk.VoxelCount);
+                Span<Mole> scratch = buffer.AsSpan(0, length);
+                scratch.Clear();
+
+                // Keep channel order and each voxel's addition order; a horizontal Sum/Dot would change rounding.
+                for (int gas = 0; gas < chunk.ActiveGasCount; gas++)
+                    TensorPrimitives.Add<float>(scratch, chunk.ActiveGases[gas].Moles.AsSpan(start, length), scratch);
+
+                for (int index = 0; index < length; index++)
+                {
+                    ushort voxelIndex = (ushort)(start + index);
+                    chunk.TotalPressure[voxelIndex] =
+                        AtmosSolverMath.CalculatePressureAtVoxel(config, chunk, voxelIndex, scratch[index]);
+                }
+
+                Span<JoulePerKelvin> heatCapacity = chunk.TotalHeatCapacity.AsSpan().Slice(start, length);
+                for (int gas = 0; gas < chunk.ActiveGasCount; gas++)
+                {
+                    JoulePerMoleKelvin molarHeatCapacity =
+                        config.GetMolarHeatCapacityAtConstantVolume(chunk.ActiveGases[gas].GasId);
+
+                    // MaxNumber reproduces the positive-moles guard, including skipping NaN and negative values.
+                    TensorPrimitives.MaxNumber(chunk.ActiveGases[gas].Moles.AsSpan(start, length), 0f, scratch);
+                    // The generic MultiplyAdd uses separate multiply/add rounding, unlike FusedMultiplyAdd.
+                    TensorPrimitives.MultiplyAdd<float>(scratch, molarHeatCapacity, heatCapacity, heatCapacity);
+                }
             }
+        }
+        finally
+        {
+            if (buffer != null)
+                ArrayPool<Mole>.Shared.Return(buffer);
         }
     }
 
