@@ -434,6 +434,7 @@ internal class AtmosChunk
     {
         IsAwake = true;
         SleepTimer = 0;
+        RebuildActiveAirIndices();
         MarkChanged();
     }
 
@@ -497,15 +498,15 @@ internal class AtmosChunk
 
         Debug.Assert(float.IsFinite(pressurePerMoleKelvin) && pressurePerMoleKelvin > 0f);
 
-        if (!IsAwake)
-            return;
-
         int room = VoxelRoomMap[localVoxelIndex];
         if (room == VoxelClassification.RoomSolid)
             return;
 
         if (room == VoxelClassification.RoomVoid)
             return;
+
+        if (!IsAwake)
+            WakeRoom(room);
 
         SleepTimer = 0;
 
@@ -637,6 +638,8 @@ internal class AtmosChunk
             SetChunkToVacuum();
 
         VoxelRoomMap.Fill(roomId);
+        ActiveRoomCount = 1;
+        ActiveRoomIds[0] = roomId;
     }
 
 
@@ -652,6 +655,8 @@ internal class AtmosChunk
             SetChunkToVacuum();
 
         VoxelRoomMap.Fill(classification.RoomId);
+        ActiveRoomCount = 1;
+        ActiveRoomIds[0] = classification.RoomId;
     }
 
 
