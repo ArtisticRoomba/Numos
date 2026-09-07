@@ -1,3 +1,5 @@
+using Numos.Maths;
+
 namespace Numos.CoreSim.Solvers;
 
 /// <summary>
@@ -9,20 +11,16 @@ namespace Numos.CoreSim.Solvers;
 /// </remarks>
 internal static class GasInjectionSolver
 {
+    /// <summary>
+    ///     Public entry point for injecting gas outside the tick/solver flow (e.g. explosions, tools).
+    ///     Distinct from the <see cref="Inject(AtmosChunk, ushort, int, Mole, Kelvin, AtmosSolverConfigSnapshot, JoulePerKelvin)" />
+    ///     overload, which is used during ticked solving against a config snapshot.
+    /// </summary>
     internal static void Inject(
         AtmosChunk chunk, ushort localVoxelIndex, int gasId, Mole moles,
         Kelvin temperature, IAtmosConfig config)
     {
-        JoulePerKelvin currentHeatCapacity = 0f;
-        for (int gas = 0; gas < chunk.ActiveGasCount; gas++)
-        {
-            Mole existingMoles = chunk.ActiveGases[gas].Moles[localVoxelIndex];
-            if (existingMoles <= 0f)
-                continue;
-
-            currentHeatCapacity += existingMoles *
-                                   config.GetMolarHeatCapacityAtConstantVolume(chunk.ActiveGases[gas].GasId);
-        }
+        JoulePerKelvin currentHeatCapacity = AtmosSolverMath.CalculateHeatCapacityAtVoxel(config, chunk, localVoxelIndex);
 
         InjectCore(
             chunk,
@@ -33,24 +31,18 @@ internal static class GasInjectionSolver
             config.GetMolarHeatCapacityAtConstantVolume(gasId),
             currentHeatCapacity,
             config.GetValidatedTemp(chunk.Temperature[localVoxelIndex]),
-            AtmosPhysicalConstants.MolarGasConstant / config.GetVoxelVolume());
+            config.PressurePerMoleKelvin);
     }
 
-    internal static void InjectDuringTick(
+    /// <summary>
+    ///     Injects against a tick config snapshot using an already-known heat capacity. Lets a batched
+    ///     caller (e.g. queued boundary flow injections) skip re-deriving composition for a voxel it has
+    ///     already resynced earlier in the same batch.
+    /// </summary>
+    internal static void Inject(
         AtmosChunk chunk, ushort localVoxelIndex, int gasId, Mole moles,
-        Kelvin temperature, AtmosSolverConfigSnapshot config)
+        Kelvin temperature, AtmosSolverConfigSnapshot config, JoulePerKelvin currentHeatCapacity)
     {
-        JoulePerKelvin currentHeatCapacity = 0f;
-        for (int gas = 0; gas < chunk.ActiveGasCount; gas++)
-        {
-            Mole existingMoles = chunk.ActiveGases[gas].Moles[localVoxelIndex];
-            if (existingMoles <= 0f)
-                continue;
-
-            currentHeatCapacity += existingMoles *
-                                   config.GetMolarHeatCapacityAtConstantVolume(chunk.ActiveGases[gas].GasId);
-        }
-
         InjectCore(
             chunk,
             localVoxelIndex,
@@ -81,3 +73,5 @@ internal static class GasInjectionSolver
             pressurePerMoleKelvin);
     }
 }
+
+internal record InjectionEvent(ushort LocalVoxelIndex, int GasId, Mole Moles, Kelvin Temperature);

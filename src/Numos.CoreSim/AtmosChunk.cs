@@ -484,6 +484,8 @@ internal class AtmosChunk
     /// <param name="pressurePerMoleKelvin">
     ///     The already-resolved ideal-gas coefficient <c>R/V</c>, in Pa/(mol·K).
     /// </param>
+    /// TODO
+    /// molesToAdd can be negative, this is helpful but should have related checks.
     public void InjectGasToVoxel(
         ushort localVoxelIndex, int gasId, Mole molesToAdd, Kelvin temperature,
         JoulePerMoleKelvin effectiveMolarHeatCapacityAtConstantVolume,
