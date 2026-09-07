@@ -45,11 +45,26 @@ public static class SliceRenderer
 
             if (options.Highlights != null)
             {
-                foreach (var cell in slice.Cells)
+                for (int v = 0; v < slice.Height; v++)
                 {
-                    foreach (var highlight in options.Highlights)
-                        if (highlight.Address == cell.Address)
-                            DrawHighlight(slice, cell.U, cell.V, 0.06f, SimulationRenderer.ToRaylibColor(highlight.Color));
+                    for (int u = 0; u < slice.Width; u++)
+                    {
+                        if (!slice.TryGetCell(u, v, out var cell))
+                            continue;
+
+                        foreach (var highlight in options.Highlights)
+                        {
+                            if (highlight.Address == cell.Address)
+                            {
+                                DrawHighlight(
+                                    slice,
+                                    cell.U,
+                                    cell.V,
+                                    0.06f,
+                                    SimulationRenderer.ToRaylibColor(highlight.Color));
+                            }
+                        }
+                    }
                 }
             }
         }

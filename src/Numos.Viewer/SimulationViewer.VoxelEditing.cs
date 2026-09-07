@@ -79,7 +79,7 @@ public partial class SimulationViewer
             for (int localIndex = 0; localIndex < cells.Length; localIndex++)
             {
                 ref readonly var cell = ref cells[localIndex];
-                if (!cell.IsVisible || cell.VisibleFaces == VoxelFaceMask.None)
+                if (!IsSelectableIn3D(cell))
                     continue;
 
                 var world = chunk.GetWorldCoordinates((ushort)localIndex);
@@ -189,16 +189,8 @@ public partial class SimulationViewer
             return;
         }
 
-        SliceCellDrawData? start = null;
-        SliceCellDrawData? end = null;
-        foreach (var cell in _sliceDrawData.Cells)
-        {
-            if (cell.Address == _voxelDragAnchor.Value)
-                start = cell;
-
-            if (hovered.HasValue && cell.Address == hovered.Value)
-                end = cell;
-        }
+        SliceCellDrawData? start = FindSliceCell(_voxelDragAnchor.Value);
+        SliceCellDrawData? end = hovered.HasValue ? FindSliceCell(hovered.Value) : null;
 
         if (!start.HasValue || !end.HasValue)
         {
@@ -211,10 +203,13 @@ public partial class SimulationViewer
         int minimumV = Math.Min(start.Value.V, end.Value.V);
         int maximumV = Math.Max(start.Value.V, end.Value.V);
         var addresses = new List<VoxelAddress>();
-        foreach (var cell in _sliceDrawData.Cells)
+        for (int v = minimumV; v <= maximumV; v++)
         {
-            if (cell.U >= minimumU && cell.U <= maximumU && cell.V >= minimumV && cell.V <= maximumV)
-                addresses.Add(cell.Address);
+            for (int u = minimumU; u <= maximumU; u++)
+            {
+                if (_sliceDrawData.TryGetCell(u, v, out var cell))
+                    addresses.Add(cell.Address);
+            }
         }
 
         SetVoxelSelection(addresses, end.Value.Address, ImGui.GetIO().KeyCtrl);
@@ -255,7 +250,7 @@ public partial class SimulationViewer
             for (int localIndex = 0; localIndex < cells.Length; localIndex++)
             {
                 ref readonly var cell = ref cells[localIndex];
-                if (!cell.IsVisible || cell.VisibleFaces == VoxelFaceMask.None)
+                if (!IsSelectableIn3D(cell))
                     continue;
 
                 var world = chunk.GetWorldCoordinates((ushort)localIndex);
@@ -272,6 +267,30 @@ public partial class SimulationViewer
         }
 
         SetVoxelSelection(addresses, hovered ?? addresses.FirstOrDefault(), ImGui.GetIO().KeyCtrl);
+    }
+
+    private SliceCellDrawData? FindSliceCell(VoxelAddress address)
+    {
+        if (_sliceDrawData == null)
+            return null;
+
+        for (int v = 0; v < _sliceDrawData.Height; v++)
+        {
+            for (int u = 0; u < _sliceDrawData.Width; u++)
+            {
+                if (_sliceDrawData.TryGetCell(u, v, out var cell) && cell.Address == address)
+                    return cell;
+            }
+        }
+
+        return null;
+    }
+
+    private static bool IsSelectableIn3D(in VoxelDrawData cell)
+    {
+        return cell.IsVisible && cell.VisibleFaces != VoxelFaceMask.None ||
+               cell.RoomId == VoxelClassification.RoomSolid ||
+               cell.RoomId == VoxelClassification.RoomVoid;
     }
 
     private void CompleteClickSelection(VoxelAddress? address)

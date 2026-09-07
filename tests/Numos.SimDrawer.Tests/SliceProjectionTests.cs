@@ -1,4 +1,5 @@
 using Numos.CoreSim;
+using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.Datatypes.Snapshots;
 using Numos.Maths;
 
@@ -65,6 +66,33 @@ public sealed class SliceProjectionTests
             Assert.That(cell.U, Is.EqualTo(targetU));
             Assert.That(cell.V, Is.EqualTo(targetV));
             Assert.That(chunk.GetCoordinates(cell.Address.LocalIndex), Is.EqualTo(new Int3(2, 1, 0)));
+        });
+    }
+
+    [TestCase(VoxelClassification.RoomSolid)]
+    [TestCase(VoxelClassification.RoomVoid)]
+    public void TryPickNormalized_FilteredClassification_ReturnsHiddenCell(int classification)
+    {
+        var builder = new SimulationFrameBuilder(new AtmosConfig());
+        var snapshot = CreateSnapshot(new Int3(0, 0, 0), new Int3(1, 1, 1));
+        snapshot.VoxelRoomMap[0] = classification;
+        var frame = builder.BuildSimulation(
+            [snapshot],
+            BuiltInVisualizationIds.Temperature,
+            1);
+
+        var chunk = frame.Chunks[snapshot.GridPosition];
+        var slice = builder.BuildChunkSlice(frame, chunk.Identity, SliceAxis.Z, 0);
+
+        bool found = slice.TryPickNormalized(0.5f, 0.5f, 1f, out var cell);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(slice.Cells.Length, Is.Zero);
+            Assert.That(found, Is.True);
+            Assert.That(cell.Address.LocalIndex, Is.Zero);
+            Assert.That(cell.Voxel.RoomId, Is.EqualTo(classification));
+            Assert.That(cell.Voxel.IsVisible, Is.False);
         });
     }
 

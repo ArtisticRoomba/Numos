@@ -397,7 +397,7 @@ public readonly record struct SliceBounds(float Left, float Right, float Bottom,
 public sealed class SimulationSliceDrawData
 {
     private readonly SliceCellDrawData[] _cells;
-    private readonly int[] _lookup;
+    private readonly SliceCellDrawData[] _pickableCells;
 
     internal SimulationSliceDrawData(
         ChunkIdentity chunk,
@@ -406,7 +406,7 @@ public sealed class SimulationSliceDrawData
         int width,
         int height,
         SliceCellDrawData[] cells,
-        int[] lookup,
+        SliceCellDrawData[] pickableCells,
         ulong renderVersion)
     {
         Chunk = chunk;
@@ -415,7 +415,7 @@ public sealed class SimulationSliceDrawData
         Width = width;
         Height = height;
         _cells = cells;
-        _lookup = lookup;
+        _pickableCells = pickableCells;
         RenderVersion = renderVersion;
     }
 
@@ -455,12 +455,12 @@ public sealed class SimulationSliceDrawData
     public ReadOnlySpan<SliceCellDrawData> Cells => _cells;
 
     /// <summary>
-    ///     Attempts to get a visible cell by slice coordinates.
+    ///     Attempts to get a cell by slice coordinates, including cells filtered from rendering.
     /// </summary>
     /// <param name="u">Horizontal slice coordinate.</param>
     /// <param name="v">Vertical slice coordinate.</param>
     /// <param name="cell">The resolved cell.</param>
-    /// <returns>Whether a visible cell exists at the coordinates.</returns>
+    /// <returns>Whether a cell exists at the coordinates.</returns>
     public bool TryGetCell(int u, int v, out SliceCellDrawData cell)
     {
         if (u < 0 || u >= Width || v < 0 || v >= Height)
@@ -469,14 +469,7 @@ public sealed class SimulationSliceDrawData
             return false;
         }
 
-        int entry = _lookup[u + Width * v];
-        if (entry == 0)
-        {
-            cell = default;
-            return false;
-        }
-
-        cell = _cells[entry - 1];
+        cell = _pickableCells[u + Width * v];
         return true;
     }
 

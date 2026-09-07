@@ -221,7 +221,7 @@ public sealed class SimulationFrameBuilder
         int clampedIndex = ClampSliceIndex(chunk.Dimensions, axis, sliceIndex);
         (int width, int height) = GetSliceDimensions(chunk.Dimensions, axis);
         var cells = new List<SliceCellDrawData>(Math.Min(width * height, chunk.VisibleCellCount));
-        int[] lookup = new int[checked(width * height)];
+        var pickableCells = new SliceCellDrawData[checked(width * height)];
 
         for (int v = 0; v < height; v++)
         {
@@ -230,17 +230,15 @@ public sealed class SimulationFrameBuilder
                 (int x, int y, int z) = MapSliceToLocal(axis, clampedIndex, u, v);
                 ushort localIndex = chunk.GetLocalIndex(x, y, z);
                 ref readonly var voxel = ref chunk.GetCell(localIndex);
-                if (!voxel.IsVisible)
-                    continue;
-
                 var sliceCell = new SliceCellDrawData(
                     u,
                     v,
                     new VoxelAddress(chunk.Identity, localIndex),
                     voxel);
 
-                cells.Add(sliceCell);
-                lookup[u + width * v] = cells.Count;
+                pickableCells[u + width * v] = sliceCell;
+                if (voxel.IsVisible)
+                    cells.Add(sliceCell);
             }
         }
 
@@ -257,7 +255,7 @@ public sealed class SimulationFrameBuilder
             width,
             height,
             cells.ToArray(),
-            lookup,
+            pickableCells,
             hash.Value);
     }
 
