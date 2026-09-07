@@ -508,6 +508,8 @@ internal class AtmosChunk
         if (!IsAwake)
             WakeRoom(room);
 
+        SleepTimer = 0;
+
         JoulePerKelvin currentHeatCapacity = TotalHeatCapacity[localVoxelIndex];
 
         int targetChannelIndex = GetOrCreateGasChannel(gasId);
