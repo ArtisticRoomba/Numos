@@ -1,10 +1,9 @@
-from pathlib import Path
 import importlib.util
 import subprocess
 import sys
 import tempfile
 import unittest
-
+from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parents[1] / "version.py"
 SPEC = importlib.util.spec_from_file_location("numos_version", SCRIPT)
@@ -51,6 +50,17 @@ class SemanticVersionTests(unittest.TestCase):
         self.assertEqual("1.3.0-rc.1", str(current.bump("minor", "rc.1")))
         self.assertEqual("1.2.4", str(current.bump("patch")))
 
+    def test_bump_prerelease_keeps_numeric_version(self) -> None:
+        current = version_tool.SemanticVersion.parse("1.2.3-alpha.1+build.9")
+        self.assertEqual("1.2.3-alpha.2", str(current.bump("prerelease")))
+        self.assertEqual("1.2.3-alpha.1", str(version_tool.SemanticVersion.parse("1.2.3-alpha").bump("prerelease")))
+
+    def test_bump_prerelease_rejects_stable_versions_and_replacement_values(self) -> None:
+        with self.assertRaisesRegex(version_tool.VersionError, "stable version"):
+            version_tool.SemanticVersion.parse("1.2.3").bump("prerelease")
+        with self.assertRaisesRegex(version_tool.VersionError, "replacement prerelease"):
+            version_tool.SemanticVersion.parse("1.2.3-alpha.1").bump("prerelease", "beta.1")
+
     def test_promote_removes_prerelease_and_build_metadata(self) -> None:
         current = version_tool.SemanticVersion.parse("1.2.3-rc.1+build.9")
         self.assertEqual("1.2.3", str(current.promote()))
@@ -71,6 +81,21 @@ class VersionFileTests(unittest.TestCase):
         self.assertIn("<AssemblyVersion>2.0.0.0</AssemblyVersion>", updated)
         self.assertIn("<FileVersion>2.4.6.0</FileVersion>", updated)
         self.assertEqual(contents.count("\n"), updated.count("\n"))
+
+    def test_main_bumps_prerelease_without_changing_numeric_version(self) -> None:
+        contents = """<Project>\n    <PropertyGroup>\n        <Version>0.1.0-alpha.1</Version>\n        <AssemblyVersion>0.0.0.0</AssemblyVersion>\n        <FileVersion>0.1.0.0</FileVersion>\n    </PropertyGroup>\n</Project>\n"""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for relative_path in version_tool.COMPONENT_FILES.values():
+                path = root / relative_path
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(contents, encoding="utf-8")
+
+            self.assertEqual(0, version_tool.main(["--repo", str(root), "bump", "coresim", "prerelease"]))
+            updated = (root / version_tool.COMPONENT_FILES["coresim"]).read_text(encoding="utf-8")
+
+        self.assertIn("<Version>0.1.0-alpha.2</Version>", updated)
+        self.assertIn("<FileVersion>0.1.0.0</FileVersion>", updated)
 
 
 class GitReleaseTests(unittest.TestCase):

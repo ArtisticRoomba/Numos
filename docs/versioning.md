@@ -33,11 +33,19 @@ python3 eng/version.py set coresim 0.1.0-beta.1
 # Begin the next CoreSim patch prerelease.
 python3 eng/version.py bump coresim patch --prerelease rc.1
 
+# Advance the alpha without changing its numeric version.
+python3 eng/version.py bump coresim prerelease
+
 # Produce the stable release from its current prerelease.
 python3 eng/version.py promote viewer
 ```
 
-`bump` accepts `major`, `minor`, or `patch`. It resets lower numeric components as SemVer requires and removes any existing prerelease or build metadata unless a new `--prerelease` value is supplied. `promote` only removes the prerelease and build metadata; it does not advance the numeric version.
+`bump` accepts `major`, `minor`, `patch`, or `prerelease`. Numeric bumps reset lower numeric components as SemVer
+requires and remove any existing prerelease or build metadata unless a new `--prerelease` value is supplied.
+
+A `prerelease` bump keeps the numeric version and increments the final numeric prerelease identifier: `0.1.0-alpha.1`
+becomes `0.1.0-alpha.2`; `0.1.0-alpha` becomes `0.1.0-alpha.1`. It requires a prerelease version and removes build
+metadata. `promote` only removes the prerelease and build metadata; it does not advance the numeric version.
 
 The manager validates the complete SemVer 2.0.0 grammar. .NET assembly metadata has numeric component limits, so the tool rejects version components that cannot be represented by the shipping assemblies.
 

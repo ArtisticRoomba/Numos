@@ -4,12 +4,11 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
-from pathlib import Path
 import re
 import subprocess
 import sys
-
+from dataclasses import dataclass
+from pathlib import Path
 
 COMPONENT_FILES = {
     "coresim": Path("src/Numos.CoreSim/Version.props"),
@@ -73,13 +72,24 @@ class SemanticVersion:
     def bump(self, kind: str, prerelease: str | None = None) -> "SemanticVersion":
         if prerelease is not None:
             SemanticVersion.parse(f"0.0.0-{prerelease}")
+        if kind == "prerelease":
+            if prerelease is not None:
+                raise VersionError("prerelease bumps do not accept a replacement prerelease value")
+            if self.prerelease is None:
+                raise VersionError("cannot bump prerelease for a stable version")
+            identifiers = self.prerelease.split(".")
+            if identifiers[-1].isdigit():
+                identifiers[-1] = str(int(identifiers[-1]) + 1)
+            else:
+                identifiers.append("1")
+            return SemanticVersion(self.major, self.minor, self.patch, ".".join(identifiers))
         if kind == "major":
             return SemanticVersion(self.major + 1, 0, 0, prerelease)
         if kind == "minor":
             return SemanticVersion(self.major, self.minor + 1, 0, prerelease)
         if kind == "patch":
             return SemanticVersion(self.major, self.minor, self.patch + 1, prerelease)
-        raise VersionError("bump kind must be major, minor, or patch")
+        raise VersionError("bump kind must be major, minor, patch, or prerelease")
 
     def promote(self) -> "SemanticVersion":
         return SemanticVersion(self.major, self.minor, self.patch)
@@ -200,7 +210,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     bump_parser = commands.add_parser("bump")
     bump_parser.add_argument("component", choices=COMPONENT_FILES)
-    bump_parser.add_argument("kind", choices=("major", "minor", "patch"))
+    bump_parser.add_argument("kind", choices=("major", "minor", "patch", "prerelease"))
     bump_parser.add_argument("--prerelease")
     return parser
 
