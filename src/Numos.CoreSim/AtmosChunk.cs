@@ -434,6 +434,7 @@ internal class AtmosChunk
     {
         IsAwake = true;
         SleepTimer = 0;
+        RebuildActiveAirIndices();
         MarkChanged();
     }
 
@@ -497,9 +498,6 @@ internal class AtmosChunk
 
         Debug.Assert(float.IsFinite(pressurePerMoleKelvin) && pressurePerMoleKelvin > 0f);
 
-        if (!IsAwake)
-            return;
-
         int room = VoxelRoomMap[localVoxelIndex];
         if (room == VoxelClassification.RoomSolid)
             return;
@@ -507,7 +505,8 @@ internal class AtmosChunk
         if (room == VoxelClassification.RoomVoid)
             return;
 
-        SleepTimer = 0;
+        if (!IsAwake)
+            Wake();
 
         JoulePerKelvin currentHeatCapacity = TotalHeatCapacity[localVoxelIndex];
 
