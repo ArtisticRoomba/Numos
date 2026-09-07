@@ -506,7 +506,7 @@ internal class AtmosChunk
             return;
 
         if (!IsAwake)
-            Wake();
+            WakeRoom(room);
 
         JoulePerKelvin currentHeatCapacity = TotalHeatCapacity[localVoxelIndex];
 
