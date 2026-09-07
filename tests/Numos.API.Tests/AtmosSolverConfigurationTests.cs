@@ -10,7 +10,7 @@ public sealed class AtmosSolverConfigurationTests
     public void CustomSettings_AreDetachedRecordedAndRestored()
     {
         var settings = new MutableSettings { Value = 2 };
-        var config = new AtmosConfig { SolverConfigurations = [settings] };
+        var config = new TestAtmosConfig { SolverConfigurations = [settings] };
         using var simulation = new AtmosSimulation(config, 1, 1, 1);
         var chunk = simulation.CreateAndRegisterChunk(default);
         simulation.Solvers.Register(
@@ -18,7 +18,7 @@ public sealed class AtmosSolverConfigurationTests
             world =>
             {
                 var applied = (SettingsSnapshot)world.Config.SolverConfigurations.Single();
-                world.AddGasToVoxel(chunk, 0, 0, applied.Value, 300f);
+                world.AddGasToVoxel(chunk, 0, "TestGas0", applied.Value, 300f);
             });
 
         var checkpoint = simulation.CaptureCheckpoint();

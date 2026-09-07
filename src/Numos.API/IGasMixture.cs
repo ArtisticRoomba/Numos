@@ -36,16 +36,76 @@ public interface IGasMixture
     /// <summary>The number of gas IDs with a positive amount.</summary>
     int ActiveGasCount { get; }
 
+    /// <summary>
+    ///     Gets the amount of a registered gas, returning zero when absent.
+    /// </summary>
+    /// <param name="gasName">The exact, case-sensitive registered gas name.</param>
+    /// <returns>The amount in moles.</returns>
+    /// <exception cref="KeyNotFoundException">The gas name is not registered.</exception>
+    /// <exception cref="ArgumentNullException">The gas name is null.</exception>
+    /// <exception cref="ArgumentException">The gas name is empty.</exception>
+    /// <exception cref="ObjectDisposedException">The owning simulation has been disposed.</exception>
+    float GetMoles(string gasName);
+
+    /// <summary>
+    ///     Sets a registered gas amount without changing temperature.
+    /// </summary>
+    /// <param name="gasName">The exact, case-sensitive registered gas name.</param>
+    /// <param name="moles">The nonnegative, finite amount to store, in moles.</param>
+    /// <exception cref="KeyNotFoundException">The gas name is not registered.</exception>
+    /// <exception cref="ArgumentNullException">The gas name is null.</exception>
+    /// <exception cref="ArgumentException">The gas name is empty.</exception>
+    /// <exception cref="ObjectDisposedException">The owning simulation has been disposed.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">The amount is negative or non-finite.</exception>
+    void SetMoles(string gasName, float moles);
+
+    /// <summary>
+    ///     Adjusts a registered gas amount without changing temperature.
+    /// </summary>
+    /// <param name="gasName">The exact, case-sensitive registered gas name.</param>
+    /// <param name="deltaMoles">The finite adjustment in moles; the result is clamped to zero.</param>
+    /// <exception cref="KeyNotFoundException">The gas name is not registered.</exception>
+    /// <exception cref="ArgumentNullException">The gas name is null.</exception>
+    /// <exception cref="ArgumentException">The gas name is empty.</exception>
+    /// <exception cref="ObjectDisposedException">The owning simulation has been disposed.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">The adjustment is non-finite.</exception>
+    void AdjustMoles(string gasName, float deltaMoles);
+
+    /// <summary>
+    ///     Adds a registered gas and mixes its sensible internal energy.
+    /// </summary>
+    /// <param name="gasName">The exact, case-sensitive registered gas name.</param>
+    /// <param name="moles">The positive, finite amount to add, in moles.</param>
+    /// <param name="temperature">The nonnegative, finite incoming temperature, in kelvins.</param>
+    /// <exception cref="KeyNotFoundException">The gas name is not registered.</exception>
+    /// <exception cref="ArgumentNullException">The gas name is null.</exception>
+    /// <exception cref="ArgumentException">The gas name is empty.</exception>
+    /// <exception cref="ObjectDisposedException">The owning simulation has been disposed.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">An amount or temperature is invalid.</exception>
+    /// <example>
+    ///     After registering Oxygen, call <c>mixture.AddGas("Oxygen", 2f, 293.15f)</c> to add two moles.
+    /// </example>
+    void AddGas(string gasName, float moles, float temperature);
+
     /// <summary>Gets one gas amount, returning zero when the gas is absent.</summary>
     float GetMoles(int gasId);
 
-    /// <summary>Sets one gas amount without changing the stored temperature.</summary>
+    /// <summary>
+    ///     Sets one registered gas amount without changing the stored temperature.
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">The gas ID is not registered or the amount is invalid.</exception>
     void SetMoles(int gasId, float moles);
 
-    /// <summary>Adjusts one gas amount, clamping the result to zero, without changing the stored temperature.</summary>
+    /// <summary>
+    ///     Adjusts one registered gas amount, clamping the result to zero, without changing the stored temperature.
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">The gas ID is not registered or the adjustment is invalid.</exception>
     void AdjustMoles(int gasId, float deltaMoles);
 
-    /// <summary>Adds gas and mixes its sensible internal energy into this mixture.</summary>
+    /// <summary>
+    ///     Adds a registered gas and mixes its sensible internal energy into this mixture.
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">The gas ID is not registered, or the amount or temperature is invalid.</exception>
     void AddGas(int gasId, float moles, float temperature);
 
     /// <summary>Removes every gas while retaining this mixture's volume and temperature.</summary>

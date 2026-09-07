@@ -27,16 +27,28 @@ Capture the starting checkpoint before recording the changes that must be replay
 
 ```csharp
 using Numos.API;
+using Numos.CoreSim;
 using Numos.CoreSim.Replay;
 
-using var simulation = new AtmosSimulation(4, 4, 1);
+var config = new AtmosConfig
+{
+    GasRegistry =
+    [
+        new GasProperties
+        {
+            Name = "Air",
+            MolarHeatCapacityAtConstantVolume = AtmosPhysicalConstants.IdealDiatomicMolarHeatCapacityAtConstantVolume
+        }
+    ]
+};
+using var simulation = new AtmosSimulation(config, 4, 4, 1);
 var chunk = simulation.CreateAndRegisterChunk(default);
 
 AtmosSimulationCheckpoint start = simulation.CaptureCheckpoint();
 simulation.StartRecording();
 
 // Recorded mutations still take effect immediately.
-simulation.AddGasToVoxel(chunk, 0, gasId: 0, moles: 2f, temperature: 300f);
+simulation.AddGasToVoxel(chunk, 0, gasName: "Air", moles: 2f, temperature: 300f);
 simulation.Tick();
 
 AtmosStateHash expected = simulation.ComputeStateHash();

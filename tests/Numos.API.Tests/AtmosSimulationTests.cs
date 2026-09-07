@@ -8,14 +8,84 @@ namespace Numos.API.Tests;
 public sealed class AtmosSimulationTests
 {
     [Test]
+    public void AddGasToVoxel_ResolvesNamesUsingCurrentRegistrationOrder()
+    {
+        var config = new AtmosConfig
+        {
+            GasRegistry = [TestGases.Create("Second"), TestGases.Create("First")]
+        };
+
+        using var simulation = new AtmosSimulation(config, 1, 1, 1);
+        var chunk = simulation.CreateAndRegisterChunk(default);
+        simulation.SetChunkClassification(chunk, new VoxelClassification(1));
+
+        simulation.AddGasToVoxel(chunk, 0, "First", 2f, 300f);
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, "Second", 3f, 300f);
+
+        var mixture = simulation.GetVoxelGasMixture(chunk, 0);
+        Assert.Multiple(() =>
+        {
+            Assert.That(mixture.GetMoles("First"), Is.EqualTo(2f));
+            Assert.That(mixture.GetMoles("Second"), Is.EqualTo(3f));
+            Assert.That(mixture.GetSnapshot().GetMoles(1), Is.EqualTo(2f));
+        });
+    }
+
+    [TestCase(-1)]
+    [TestCase(0)]
+    [TestCase(7)]
+    [TestCase(int.MaxValue)]
+    public void AddGasToVoxel_RejectsUnregisteredIdsWithoutMutation(int gasId)
+    {
+        using var simulation = new AtmosSimulation(1, 1, 1);
+        var chunk = simulation.CreateAndRegisterChunk(default);
+        simulation.SetChunkClassification(chunk, new VoxelClassification(1));
+        var before = simulation.GetChunkSnapshot(chunk);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(
+                () => simulation.AddGasToVoxel(chunk, 0, gasId, 1f, 300f),
+                Throws.TypeOf<ArgumentOutOfRangeException>());
+
+            Assert.That(
+                () => simulation.AddGasToVoxel(chunk, 0, 0, 0, gasId, 1f, 300f),
+                Throws.TypeOf<ArgumentOutOfRangeException>());
+
+            Assert.That(simulation.GetChunkSnapshot(chunk).Gases, Is.Empty);
+            Assert.That(simulation.GetChunkSnapshot(chunk).Temperature, Is.EqualTo(before.Temperature));
+        });
+    }
+
+    [TestCase("missing")]
+    [TestCase("testgas0")]
+    public void AddGasToVoxel_RejectsUnknownNames(string gasName)
+    {
+        using var simulation = new AtmosSimulation(new TestAtmosConfig(), 1, 1, 1);
+        var chunk = simulation.CreateAndRegisterChunk(default);
+        Assert.Multiple(() =>
+        {
+            Assert.That(
+                () => simulation.AddGasToVoxel(chunk, 0, gasName, 1f, 300f),
+                Throws.TypeOf<KeyNotFoundException>());
+
+            Assert.That(
+                () => simulation.AddGasToVoxel(chunk, 0, 0, 0, gasName, 1f, 300f),
+                Throws.TypeOf<KeyNotFoundException>());
+
+            Assert.That(simulation.GetChunkSnapshot(chunk).Gases, Is.Empty);
+        });
+    }
+
+    [Test]
     public void Facade_CreatesAndMutatesChunkWithoutExposingKernelState()
     {
-        using var simulation = new AtmosSimulation(3, 1, 1);
+        using var simulation = new AtmosSimulation(new TestAtmosConfig(), 3, 1, 1);
         var chunk = simulation.CreateAndRegisterChunk(new Int3(4, 5, 6));
 
         simulation.SetChunkClassification(chunk, VoxelClassification.RoomSolid);
         simulation.SetVoxelClassification(chunk, 1, 0, 0, new VoxelClassification(7));
-        simulation.AddGasToVoxel(chunk, 1, 0, 0, 1, 2f, 300f);
+        simulation.AddGasToVoxel(chunk, 1, 0, 0, "TestGas1", 2f, 300f);
 
         var snapshot = simulation.GetChunkSnapshot(chunk);
 
@@ -86,11 +156,11 @@ public sealed class AtmosSimulationTests
     [Test]
     public void SealedSingleLayerChunk_DoesNotLoseGasThroughZPlane()
     {
-        using var simulation = new AtmosSimulation(16, 16, 1);
+        using var simulation = new AtmosSimulation(new TestAtmosConfig(), 16, 16, 1);
         var chunk = simulation.CreateAndRegisterChunk(default);
         simulation.SetChunkClassification(chunk, new VoxelClassification(1));
         simulation.SetChunkBoundaryClassification(chunk, VoxelClassification.RoomSolid);
-        simulation.AddGasToVoxel(chunk, 8, 8, 0, 0, 500f, 293.15f);
+        simulation.AddGasToVoxel(chunk, 8, 8, 0, "TestGas0", 500f, 293.15f);
 
         for (int tick = 0; tick < 20; tick++)
             simulation.Tick();
@@ -130,7 +200,7 @@ public sealed class AtmosSimulationTests
     [Test]
     public void Tick_DelegatesToKernelUsingTheFacadeConfiguration()
     {
-        var config = new AtmosConfig
+        var config = new TestAtmosConfig
         {
             VacuumThreshold = 0f,
             SleepThreshold = int.MaxValue
@@ -139,7 +209,7 @@ public sealed class AtmosSimulationTests
         using var simulation = new AtmosSimulation(config, 2, 1, 1);
         var chunk = simulation.CreateAndRegisterChunk(new Int3(0, 0, 0));
         simulation.SetChunkClassification(chunk, new VoxelClassification(1));
-        simulation.AddGasToVoxel(chunk, 0, 1, 2f, 300f);
+        simulation.AddGasToVoxel(chunk, 0, "TestGas1", 2f, 300f);
 
         simulation.Tick();
 

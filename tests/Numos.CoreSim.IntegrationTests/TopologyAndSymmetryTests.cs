@@ -14,7 +14,7 @@ public sealed class TopologyAndSymmetryTests
         using var simulation = new AtmosSimulation(config, 3, 1, 1);
         var chunk = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
         SimTestHelpers.SetAllTemperatures(simulation, chunk, 3, 1, 1);
-        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasId, 2f, 300f);
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasName, 2f, 300f);
         simulation.SetVoxelClassification(chunk, 1, 0, 0, VoxelClassification.RoomSolid);
 
         simulation.Tick();
@@ -102,9 +102,9 @@ public sealed class TopologyAndSymmetryTests
         using var simulation = new AtmosSimulation(config, size, size, 1);
         var chunk = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
         (int X, int Y)[] neighbors = [(0, 1), (2, 1), (1, 0), (1, 2)];
-        simulation.AddGasToVoxel(chunk, 1, 1, 0, SimTestHelpers.FirstGasId, 1f, 400f);
+        simulation.AddGasToVoxel(chunk, 1, 1, 0, SimTestHelpers.FirstGasName, 1f, 400f);
         foreach ((int x, int y) in neighbors)
-            simulation.AddGasToVoxel(chunk, x, y, 0, SimTestHelpers.FirstGasId, 1f, 200f);
+            simulation.AddGasToVoxel(chunk, x, y, 0, SimTestHelpers.FirstGasName, 1f, 200f);
 
         simulation.Tick();
         float energyBeforeDiffusion = SimTestHelpers.TotalThermalEnergy(
@@ -143,9 +143,9 @@ public sealed class TopologyAndSymmetryTests
         using var simulation = new AtmosSimulation(config, size, size, 1);
         var chunk = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
         (int X, int Y)[] neighbors = [(0, 1), (2, 1), (1, 0), (1, 2)];
-        simulation.AddGasToVoxel(chunk, 1, 1, 0, SimTestHelpers.FirstGasId, 1f, 200f);
+        simulation.AddGasToVoxel(chunk, 1, 1, 0, SimTestHelpers.FirstGasName, 1f, 200f);
         foreach ((int x, int y) in neighbors)
-            simulation.AddGasToVoxel(chunk, x, y, 0, SimTestHelpers.FirstGasId, 1f, 400f);
+            simulation.AddGasToVoxel(chunk, x, y, 0, SimTestHelpers.FirstGasName, 1f, 400f);
 
         simulation.Tick();
         float energyBeforeDiffusion = SimTestHelpers.TotalThermalEnergy(
@@ -191,8 +191,8 @@ public sealed class TopologyAndSymmetryTests
         var config = CreateThermalOnlyConfig(thermalConductance);
         using var simulation = new AtmosSimulation(config, 2, 1, 1);
         var chunk = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
-        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasId, 1f, 400f);
-        simulation.AddGasToVoxel(chunk, 1, 0, 0, SimTestHelpers.FirstGasId, 1f, 200f);
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasName, 1f, 400f);
+        simulation.AddGasToVoxel(chunk, 1, 0, 0, SimTestHelpers.FirstGasName, 1f, 200f);
 
         simulation.Tick();
         simulation.Tick();
@@ -215,7 +215,7 @@ public sealed class TopologyAndSymmetryTests
                 x,
                 0,
                 0,
-                SimTestHelpers.FirstGasId,
+                SimTestHelpers.FirstGasName,
                 1f,
                 initialTemperatures[x]);
         }
@@ -251,7 +251,7 @@ public sealed class TopologyAndSymmetryTests
                 x,
                 0,
                 0,
-                SimTestHelpers.FirstGasId,
+                SimTestHelpers.FirstGasName,
                 initialMoles[x],
                 SimTestHelpers.DefaultTemperature);
         }

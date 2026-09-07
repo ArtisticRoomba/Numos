@@ -61,10 +61,10 @@ public sealed class AtmosDangerousApiTests
     [Test]
     public void CustomSolver_CanAccessLiveChunkAndGasSpans()
     {
-        using var simulation = new AtmosSimulation(1, 1, 1);
+        using var simulation = new AtmosSimulation(new TestAtmosConfig(), 1, 1, 1);
         var chunk = simulation.CreateAndRegisterChunk(default);
         simulation.SetChunkClassification(chunk, new VoxelClassification(7));
-        simulation.AddGasToVoxel(chunk, 0, 2, 1f, 300f);
+        simulation.AddGasToVoxel(chunk, 0, "TestGas2", 1f, 300f);
         simulation.Solvers.RegisterAfter(
             AtmosBuiltInSolvers.ThermalBoundary,
             "raw-write",
@@ -113,10 +113,10 @@ public sealed class AtmosDangerousApiTests
     [Test]
     public void StatefulDangerousSolver_RetainsEditableConfiguration()
     {
-        using var simulation = new AtmosSimulation(1, 1, 1);
+        using var simulation = new AtmosSimulation(new TestAtmosConfig(), 1, 1, 1);
         var chunk = simulation.CreateAndRegisterChunk(default);
         simulation.SetChunkClassification(chunk, new VoxelClassification(7));
-        simulation.AddGasToVoxel(chunk, 0, 0, 1f, 300f);
+        simulation.AddGasToVoxel(chunk, 0, "TestGas0", 1f, 300f);
         var solver = new ConfiguredDangerousWriter(chunk);
         simulation.Solvers.RegisterAfter(
             AtmosBuiltInSolvers.ThermalBoundary,

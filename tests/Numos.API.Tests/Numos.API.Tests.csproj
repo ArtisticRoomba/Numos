@@ -26,4 +26,9 @@
         <Using Include="NUnit.Framework"/>
     </ItemGroup>
 
+    <ItemGroup>
+        <Compile Include="../Shared/TestAtmosConfig.cs" Link="Shared/TestAtmosConfig.cs"/>
+        <Using Include="Numos.Tests"/>
+    </ItemGroup>
+
 </Project>

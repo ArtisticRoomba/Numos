@@ -16,8 +16,8 @@ public sealed class SimulationStabilityTests
         using var simulation = new AtmosSimulation(config, 2, 1, 1);
         var chunk = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
         SimTestHelpers.SetAllTemperatures(simulation, chunk, 2, 1, 1);
-        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasId, 1f, 300f);
-        simulation.AddGasToVoxel(chunk, 1, 0, 0, SimTestHelpers.FirstGasId, 1f, 300f);
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasName, 1f, 300f);
+        simulation.AddGasToVoxel(chunk, 1, 0, 0, SimTestHelpers.FirstGasName, 1f, 300f);
 
         simulation.Tick();
         simulation.SetVoxelTemperature(chunk, 0, 0, 0, 600f);
@@ -115,7 +115,7 @@ public sealed class SimulationStabilityTests
             sourceX,
             sourceY,
             0,
-            SimTestHelpers.FirstGasId,
+            SimTestHelpers.FirstGasName,
             openVoxels.Length,
             SimTestHelpers.DefaultTemperature);
 

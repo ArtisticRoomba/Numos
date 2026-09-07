@@ -45,7 +45,7 @@ public sealed class AtmosSolverPipelineTests
     [Test]
     public void DisabledBuiltInStage_IsSkippedAndCanBeReenabled()
     {
-        var config = new AtmosConfig
+        var config = new TestAtmosConfig
         {
             VacuumThreshold = 0f,
             SleepThreshold = int.MaxValue
@@ -54,7 +54,7 @@ public sealed class AtmosSolverPipelineTests
         using var simulation = new AtmosSimulation(config, 2, 1, 1);
         var chunk = simulation.CreateAndRegisterChunk(default);
         simulation.SetChunkClassification(chunk, new VoxelClassification(1));
-        simulation.AddGasToVoxel(chunk, 0, 0, 2f, 300f);
+        simulation.AddGasToVoxel(chunk, 0, "TestGas0", 2f, 300f);
         simulation.Solvers.SetEnabled(AtmosBuiltInSolvers.Advection, false);
 
         simulation.Tick();
@@ -73,7 +73,7 @@ public sealed class AtmosSolverPipelineTests
     [Test]
     public void CustomSolver_UsesSimulationSnapshotsAndValidatedMutations()
     {
-        using var simulation = new AtmosSimulation(1, 1, 1);
+        using var simulation = new AtmosSimulation(new TestAtmosConfig(), 1, 1, 1);
         var chunk = simulation.CreateAndRegisterChunk(default);
         simulation.SetChunkClassification(chunk, new VoxelClassification(7));
         simulation.Solvers.RegisterBefore(
@@ -83,7 +83,7 @@ public sealed class AtmosSolverPipelineTests
             {
                 Assert.That(solverSimulation.GetChunkHandles(), Is.EqualTo(new[] { chunk }));
                 Assert.That(solverSimulation.GetChunkSnapshot(chunk).Gases, Is.Empty);
-                solverSimulation.AddGasToVoxel(chunk, 0, 3, 2f, 350f);
+                solverSimulation.AddGasToVoxel(chunk, 0, "TestGas3", 2f, 350f);
             });
 
         simulation.Tick();
@@ -96,7 +96,7 @@ public sealed class AtmosSolverPipelineTests
     [Test]
     public void ConfiguredSolver_RetainsEditableTypedConfiguration()
     {
-        using var simulation = new AtmosSimulation(1, 1, 1);
+        using var simulation = new AtmosSimulation(new TestAtmosConfig(), 1, 1, 1);
         var chunk = simulation.CreateAndRegisterChunk(default);
         simulation.SetChunkClassification(chunk, new VoxelClassification(7));
         var solver = new ConfiguredInjectionSolver();
@@ -231,7 +231,7 @@ public sealed class AtmosSolverPipelineTests
             VacuumThreshold = 100f,
             ThermalConductance = 1f,
             SleepThreshold = int.MaxValue,
-            GasRegistry = [new GasProperties { MolarHeatCapacityAtConstantVolume = 1f }]
+            GasRegistry = [new GasProperties { Name = "TestGas0", MolarHeatCapacityAtConstantVolume = 1f }]
         };
 
         using var simulation = new AtmosSimulation(config, 2, 1, 1);
@@ -265,7 +265,7 @@ public sealed class AtmosSolverPipelineTests
             BulkFlowCoefficient = 0.25f,
             MaxPressureTransferFractionPerNeighbor = 0.16f,
             SleepThreshold = int.MaxValue,
-            GasRegistry = [new GasProperties()]
+            GasRegistry = [TestGases.Create("TestGas0", 0f)]
         };
 
         using var simulation = new AtmosSimulation(config, 1, 1, 1);
@@ -300,6 +300,7 @@ public sealed class AtmosSolverPipelineTests
             [
                 new GasProperties
                 {
+                    Name = "TestGas0",
                     DiffusionCoefficient = 0f,
                     MolarHeatCapacityAtConstantVolume = 1f
                 }
@@ -339,7 +340,7 @@ public sealed class AtmosSolverPipelineTests
             BulkFlowCoefficient = 0.25f,
             MaxPressureTransferFractionPerNeighbor = 0.16f,
             SleepThreshold = int.MaxValue,
-            GasRegistry = [new GasProperties()]
+            GasRegistry = [TestGases.Create("TestGas0", 0f)]
         };
 
         using var simulation = new AtmosSimulation(config, 1, 1, 1);
@@ -368,7 +369,7 @@ public sealed class AtmosSolverPipelineTests
             MaxPressureTransferFractionPerNeighbor = 0f,
             ThermalConductance = 1f,
             SleepThreshold = int.MaxValue,
-            GasRegistry = [new GasProperties { MolarHeatCapacityAtConstantVolume = 1f }]
+            GasRegistry = [new GasProperties { Name = "TestGas0", MolarHeatCapacityAtConstantVolume = 1f }]
         };
 
         using var simulation = new AtmosSimulation(config, 1, 1, 1);
@@ -429,7 +430,7 @@ public sealed class AtmosSolverPipelineTests
             MaxPressureTransferFractionPerNeighbor = 0f,
             DefaultDiffusionCoefficient = 0f,
             SleepThreshold = int.MaxValue,
-            GasRegistry = [new GasProperties { DiffusionCoefficient = diffusionCoefficient }]
+            GasRegistry = [TestGases.Create("TestGas0", diffusionCoefficient)]
         };
     }
 
@@ -439,7 +440,7 @@ public sealed class AtmosSolverPipelineTests
 
         public void Solve(AtmosSimulation simulation)
         {
-            simulation.AddGasToVoxel(simulation.GetChunkHandles()[0], 0, 0, Config.Moles, 300f);
+            simulation.AddGasToVoxel(simulation.GetChunkHandles()[0], 0, "TestGas0", Config.Moles, 300f);
         }
     }
 

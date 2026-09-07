@@ -219,7 +219,7 @@ public sealed class AtmosReplayTests
     public void IncompatibleCheckpointAndInvalidHistory_LeaveStateUnchanged()
     {
         using var simulation = CreateSimulation();
-        using var incompatible = new AtmosSimulation(1, 1, 1);
+        using var incompatible = new AtmosSimulation(new TestAtmosConfig(), 1, 1, 1);
         var chunk = simulation.CreateAndRegisterChunk(default);
         var checkpoint = simulation.CaptureCheckpoint();
         simulation.AddGasToVoxel(chunk, 0, 0, 1f, 300f);

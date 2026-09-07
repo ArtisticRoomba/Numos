@@ -72,6 +72,30 @@ public sealed class GasMixture : IInternalGasMixture
     }
 
     /// <inheritdoc />
+    public float GetMoles(string gasName)
+    {
+        return Owner.GetMixtureMoles(this, gasName);
+    }
+
+    /// <inheritdoc />
+    public void SetMoles(string gasName, float moles)
+    {
+        Owner.SetMixtureMoles(this, gasName, moles);
+    }
+
+    /// <inheritdoc />
+    public void AdjustMoles(string gasName, float deltaMoles)
+    {
+        Owner.AdjustMixtureMoles(this, gasName, deltaMoles);
+    }
+
+    /// <inheritdoc />
+    public void AddGas(string gasName, float moles, float temperature)
+    {
+        Owner.AddGasToMixture(this, gasName, moles, temperature);
+    }
+
+    /// <inheritdoc />
     public void Clear()
     {
         Owner.ClearMixture(this);

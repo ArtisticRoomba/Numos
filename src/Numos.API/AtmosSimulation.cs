@@ -660,7 +660,7 @@ public sealed partial class AtmosSimulation : IDisposable
     /// </summary>
     /// <param name="chunk">A handle identifying the target chunk.</param>
     /// <param name="localVoxelIndex">The voxel's zero-based index in the chunk's flattened storage.</param>
-    /// <param name="gasId">The gas channel identifier.</param>
+    /// <param name="gasId">The registered gas channel identifier. Prefer the gas-name overload for application code.</param>
     /// <param name="moles">The amount of gas to add, in moles.</param>
     /// <param name="temperature">The temperature of the added gas, in kelvins.</param>
     /// <remarks>
@@ -668,8 +668,8 @@ public sealed partial class AtmosSimulation : IDisposable
     ///     void voxel is ignored. The added gas carries sensible internal energy according to its molar heat
     ///     capacity at constant volume, and the stored temperature is updated by energy balance. Before blending, the
     ///     heat
-    ///     capacity of gas already in the voxel is recomputed from the current <see cref="Config" />. A missing
-    ///     registry entry or non-finite or nonpositive configured heat capacity uses
+    ///     capacity of gas already in the voxel is recomputed from the current <see cref="Config" />. A non-finite or
+    ///     nonpositive configured heat capacity uses
     ///     <see cref="AtmosConfig.DefaultMolarHeatCapacityAtConstantVolume" />. When gas is already present, a non-finite or
     ///     nonpositive stored temperature contributes prior sensible energy at
     ///     <see cref="AtmosConfig.DefaultTemperatureFallback" />. An empty voxel instead adopts the incoming
@@ -677,7 +677,7 @@ public sealed partial class AtmosSimulation : IDisposable
     /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="localVoxelIndex" /> is outside the chunk.</exception>
     /// <exception cref="ArgumentOutOfRangeException">
-    ///     <paramref name="gasId" /> is negative, <paramref name="moles" /> is not positive and finite, or
+    ///     <paramref name="gasId" /> is not registered, <paramref name="moles" /> is not positive and finite, or
     ///     <paramref name="temperature" /> is negative or non-finite.
     /// </exception>
     /// <exception cref="KeyNotFoundException">No chunk is registered at the handle's position.</exception>
@@ -687,8 +687,11 @@ public sealed partial class AtmosSimulation : IDisposable
         AtmosChunkHandle chunk, ushort localVoxelIndex, int gasId, float moles,
         float temperature)
     {
-        ThrowIfDisposed();
-        _kernel.AddGasToVoxel(chunk.Position, localVoxelIndex, gasId, moles, temperature);
+        lock (_mixtureGate)
+        {
+            ThrowIfDisposed();
+            _kernel.AddGasToVoxel(chunk.Position, localVoxelIndex, gasId, moles, temperature);
+        }
     }
 
     /// <summary>
@@ -698,7 +701,7 @@ public sealed partial class AtmosSimulation : IDisposable
     /// <param name="x">The zero-based local x-coordinate.</param>
     /// <param name="y">The zero-based local y-coordinate.</param>
     /// <param name="z">The zero-based local z-coordinate.</param>
-    /// <param name="gasId">The gas channel identifier.</param>
+    /// <param name="gasId">The registered gas channel identifier. Prefer the gas-name overload for application code.</param>
     /// <param name="moles">The amount of gas to add, in moles.</param>
     /// <param name="temperature">The temperature of the added gas, in kelvins.</param>
     /// <remarks>
@@ -706,8 +709,8 @@ public sealed partial class AtmosSimulation : IDisposable
     ///     void voxel is ignored. The added gas carries sensible internal energy according to its molar heat
     ///     capacity at constant volume, and the stored temperature is updated by energy balance. Before blending, the
     ///     heat
-    ///     capacity of gas already in the voxel is recomputed from the current <see cref="Config" />. A missing
-    ///     registry entry or non-finite or nonpositive configured heat capacity uses
+    ///     capacity of gas already in the voxel is recomputed from the current <see cref="Config" />. A non-finite or
+    ///     nonpositive configured heat capacity uses
     ///     <see cref="AtmosConfig.DefaultMolarHeatCapacityAtConstantVolume" />. When gas is already present, a non-finite or
     ///     nonpositive stored temperature contributes prior sensible energy at
     ///     <see cref="AtmosConfig.DefaultTemperatureFallback" />. An empty voxel instead adopts the incoming
@@ -715,7 +718,7 @@ public sealed partial class AtmosSimulation : IDisposable
     /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException">A local coordinate is outside the chunk.</exception>
     /// <exception cref="ArgumentOutOfRangeException">
-    ///     <paramref name="gasId" /> is negative, <paramref name="moles" /> is not positive and finite, or
+    ///     <paramref name="gasId" /> is not registered, <paramref name="moles" /> is not positive and finite, or
     ///     <paramref name="temperature" /> is negative or non-finite.
     /// </exception>
     /// <exception cref="KeyNotFoundException">No chunk is registered at the handle's position.</exception>
@@ -725,10 +728,63 @@ public sealed partial class AtmosSimulation : IDisposable
         AtmosChunkHandle chunk, int x, int y, int z, int gasId, float moles,
         float temperature)
     {
-        ThrowIfDisposed();
-        _kernel.AddGasToVoxel(chunk.Position, x, y, z, gasId, moles, temperature);
+        lock (_mixtureGate)
+        {
+            ThrowIfDisposed();
+            _kernel.AddGasToVoxel(chunk.Position, x, y, z, gasId, moles, temperature);
+        }
     }
 
+
+    /// <summary>
+    ///     Adds a registered gas by name to one voxel addressed by its flat local index and wakes its room.
+    /// </summary>
+    /// <param name="chunk">The target chunk.</param>
+    /// <param name="localVoxelIndex">The voxel's zero-based flat index.</param>
+    /// <param name="gasName">The exact, case-sensitive name in the simulation's gas registry.</param>
+    /// <param name="moles">The positive, finite amount to add, in moles.</param>
+    /// <param name="temperature">The nonnegative, finite incoming temperature, in kelvins.</param>
+    /// <remarks>Solid and void voxels ignore injection. Incoming sensible energy is mixed with the voxel's gas.</remarks>
+    /// <exception cref="KeyNotFoundException">The gas name or chunk is not registered.</exception>
+    /// <exception cref="ArgumentException">The gas name is null or empty.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">The voxel address, amount, or temperature is invalid.</exception>
+    /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
+    [PublicAPI]
+    public void AddGasToVoxel(
+        AtmosChunkHandle chunk, ushort localVoxelIndex,
+        string gasName, float moles, float temperature)
+    {
+        lock (_mixtureGate)
+        {
+            AddGasToVoxel(chunk, localVoxelIndex, ResolveGasName(gasName), moles, temperature);
+        }
+    }
+
+    /// <summary>
+    ///     Adds a registered gas by name to one voxel addressed by local coordinates and wakes its room.
+    /// </summary>
+    /// <param name="chunk">The target chunk.</param>
+    /// <param name="x">The local x-coordinate.</param>
+    /// <param name="y">The local y-coordinate.</param>
+    /// <param name="z">The local z-coordinate.</param>
+    /// <param name="gasName">The exact, case-sensitive name in the simulation's gas registry.</param>
+    /// <param name="moles">The positive, finite amount to add, in moles.</param>
+    /// <param name="temperature">The nonnegative, finite incoming temperature, in kelvins.</param>
+    /// <remarks>Solid and void voxels ignore injection. Incoming sensible energy is mixed with the voxel's gas.</remarks>
+    /// <exception cref="KeyNotFoundException">The gas name or chunk is not registered.</exception>
+    /// <exception cref="ArgumentException">The gas name is null or empty.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">The voxel address, amount, or temperature is invalid.</exception>
+    /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
+    [PublicAPI]
+    public void AddGasToVoxel(
+        AtmosChunkHandle chunk, int x, int y, int z,
+        string gasName, float moles, float temperature)
+    {
+        lock (_mixtureGate)
+        {
+            AddGasToVoxel(chunk, x, y, z, ResolveGasName(gasName), moles, temperature);
+        }
+    }
 
     /// <summary>
     ///     Wakes a room so its voxels participate in subsequent simulation ticks.

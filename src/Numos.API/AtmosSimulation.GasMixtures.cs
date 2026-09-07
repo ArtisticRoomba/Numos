@@ -56,6 +56,38 @@ public sealed partial class AtmosSimulation
         }
     }
 
+    internal float GetMixtureMoles(IInternalGasMixture mixture, string gasName)
+    {
+        lock (_mixtureGate)
+        {
+            return GetMixtureMoles(mixture, ResolveGasName(gasName));
+        }
+    }
+
+    internal void SetMixtureMoles(IInternalGasMixture mixture, string gasName, float moles)
+    {
+        lock (_mixtureGate)
+        {
+            SetMixtureMoles(mixture, ResolveGasName(gasName), moles);
+        }
+    }
+
+    internal void AdjustMixtureMoles(IInternalGasMixture mixture, string gasName, float deltaMoles)
+    {
+        lock (_mixtureGate)
+        {
+            AdjustMixtureMoles(mixture, ResolveGasName(gasName), deltaMoles);
+        }
+    }
+
+    internal void AddGasToMixture(IInternalGasMixture mixture, string gasName, float moles, float temperature)
+    {
+        lock (_mixtureGate)
+        {
+            AddGasToMixture(mixture, ResolveGasName(gasName), moles, temperature);
+        }
+    }
+
     internal float GetMixtureVolume(IInternalGasMixture mixture)
     {
         lock (_mixtureGate)
@@ -209,11 +241,11 @@ public sealed partial class AtmosSimulation
 
     internal void SetMixtureMoles(IInternalGasMixture mixture, int gasId, float moles)
     {
-        ValidateGasId(gasId);
         ValidateNonnegativeFinite(moles, nameof(moles));
         lock (_mixtureGate)
         {
             ThrowIfDisposed();
+            ValidateGasId(gasId);
             if (mixture is GasMixture owned)
             {
                 SetOwnedMixtureMoles(owned.State, gasId, moles);
@@ -238,13 +270,13 @@ public sealed partial class AtmosSimulation
 
     internal void AdjustMixtureMoles(IInternalGasMixture mixture, int gasId, float deltaMoles)
     {
-        ValidateGasId(gasId);
         if (!float.IsFinite(deltaMoles))
             throw new ArgumentOutOfRangeException(nameof(deltaMoles), deltaMoles, "Mole adjustment must be finite.");
 
         lock (_mixtureGate)
         {
             ThrowIfDisposed();
+            ValidateGasId(gasId);
             if (mixture is GasMixture owned)
             {
                 float adjusted = owned.State.Moles.GetValueOrDefault(gasId) + deltaMoles;
@@ -273,13 +305,13 @@ public sealed partial class AtmosSimulation
 
     internal void AddGasToMixture(IInternalGasMixture mixture, int gasId, float moles, float temperature)
     {
-        ValidateGasId(gasId);
         ValidatePositiveFinite(moles, nameof(moles));
         ValidateTemperature(temperature);
 
         lock (_mixtureGate)
         {
             ThrowIfDisposed();
+            ValidateGasId(gasId);
             if (mixture is GasMixture owned)
             {
                 AddGasToOwnedMixture(owned.State, gasId, moles, temperature);
@@ -787,9 +819,18 @@ public sealed partial class AtmosSimulation
             parameterName);
     }
 
-    private static void ValidateGasId(int gasId)
+    internal int ResolveGasName(string gasName)
     {
-        ArgumentOutOfRangeException.ThrowIfNegative(gasId);
+        ThrowIfDisposed();
+        ArgumentException.ThrowIfNullOrEmpty(gasName);
+        return Config.GasRegistry.GasIdToIndex(gasName);
+    }
+
+    private void ValidateGasId(int gasId)
+    {
+        ThrowIfDisposed();
+        if ((uint)gasId >= (uint)Config.GasRegistry.Count)
+            throw new ArgumentOutOfRangeException(nameof(gasId), gasId, "Gas ID must refer to a registered gas.");
     }
 
     private static void ValidateVolume(float volume)

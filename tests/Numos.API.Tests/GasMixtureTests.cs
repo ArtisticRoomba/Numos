@@ -7,6 +7,56 @@ namespace Numos.API.Tests;
 [TestFixture]
 public sealed class GasMixtureTests
 {
+    [TestCase(false)]
+    [TestCase(true)]
+    public void NamedMixtureOperations_ResolveRegisteredGases(bool useVoxel)
+    {
+        using var simulation = CreateSimulation();
+        var mixture = useVoxel
+            ? simulation.GetVoxelGasMixture(simulation.CreateAndRegisterChunk(default), 0)
+            : simulation.CreateGasMixture(1f);
+
+        mixture.SetMoles("Light", 2f);
+        mixture.AdjustMoles("Light", -1f);
+        mixture.AddGas("Heavy", 1f, 300f);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(mixture.GetMoles("Light"), Is.EqualTo(1f));
+            Assert.That(mixture.GetMoles("Heavy"), Is.EqualTo(1f));
+        });
+    }
+
+    [TestCase(false)]
+    [TestCase(true)]
+    public void MixtureMutations_RejectUnregisteredGasesWithoutMutation(bool useVoxel)
+    {
+        using var simulation = CreateSimulation();
+        var mixture = useVoxel
+            ? simulation.GetVoxelGasMixture(simulation.CreateAndRegisterChunk(default), 0)
+            : simulation.CreateGasMixture(1f);
+
+        mixture.SetMoles("Light", 2f);
+        float beforeTemperature = mixture.Temperature;
+
+        Assert.Multiple(() =>
+        {
+            foreach (int gasId in new[] { -1, simulation.Config.GasRegistry.Count, int.MaxValue })
+            {
+                Assert.That(() => mixture.SetMoles(gasId, 1f), Throws.TypeOf<ArgumentOutOfRangeException>());
+                Assert.That(() => mixture.AdjustMoles(gasId, 1f), Throws.TypeOf<ArgumentOutOfRangeException>());
+                Assert.That(() => mixture.AddGas(gasId, 1f, 600f), Throws.TypeOf<ArgumentOutOfRangeException>());
+            }
+
+            Assert.That(() => mixture.SetMoles("Unknown", 1f), Throws.TypeOf<KeyNotFoundException>());
+            Assert.That(() => mixture.AdjustMoles("Unknown", 1f), Throws.TypeOf<KeyNotFoundException>());
+            Assert.That(() => mixture.AddGas("Unknown", 1f, 600f), Throws.TypeOf<KeyNotFoundException>());
+            Assert.That(mixture.TotalMoles, Is.EqualTo(2f));
+            Assert.That(mixture.ActiveGasCount, Is.EqualTo(1));
+            Assert.That(mixture.Temperature, Is.EqualTo(beforeTemperature));
+        });
+    }
+
     [Test]
     public void CreateGasMixture_ValidatesVolumeAndTemperature()
     {
@@ -30,7 +80,7 @@ public sealed class GasMixtureTests
     }
 
     [Test]
-    public void OwnedMixture_SupportsSparseArbitraryGasIdsAndDeterministicSnapshots()
+    public void OwnedMixture_SupportsSparseRegisteredGasIdsAndDeterministicSnapshots()
     {
         using var simulation = CreateSimulation();
         var mixture = simulation.CreateGasMixture(2f, 300f);
@@ -423,7 +473,7 @@ public sealed class GasMixtureTests
 
     private static AtmosConfig CreateSimulationConfig(float voxelVolume = 1f)
     {
-        return new AtmosConfig
+        var config = new AtmosConfig
         {
             VoxelVolume = voxelVolume,
             GasRegistry =
@@ -432,11 +482,37 @@ public sealed class GasMixtureTests
                 new GasProperties { Name = "Heavy", MolarHeatCapacityAtConstantVolume = 20f }
             ]
         };
+
+        for (int index = config.GasRegistry.Count; index <= 20; index++)
+            config.GasRegistry.Add(new GasProperties { Name = $"TestGas{index}", MolarHeatCapacityAtConstantVolume = 10f });
+
+        return config;
     }
 
     private sealed class ExternalMixture(AtmosSimulation owner) : IGasMixture
     {
         public AtmosSimulation Owner { get; } = owner;
+
+        public float GetMoles(string gasName)
+        {
+            throw new NotSupportedException();
+        }
+
+        public void SetMoles(string gasName, float moles)
+        {
+            throw new NotSupportedException();
+        }
+
+        public void AdjustMoles(string gasName, float deltaMoles)
+        {
+            throw new NotSupportedException();
+        }
+
+        public void AddGas(string gasName, float moles, float temperature)
+        {
+            throw new NotSupportedException();
+        }
+
         public float Volume => 1f;
         public float Temperature { get; set; }
         public float Pressure => 0f;

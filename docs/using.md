@@ -27,6 +27,7 @@ An `AtmosSimulation` owns the chunks registered with it and the buffers used by 
 
 ```csharp
 using Numos.API;
+using Numos.CoreSim;
 using Numos.Maths;
 
 using var simulation = new AtmosSimulation(
@@ -56,25 +57,43 @@ void UpdateAtmospherics(float deltaSeconds)
 Do not call into one `AtmosSimulation` from unrelated ownership systems without deciding who owns its lifecycle and update order first. Numos parallelizes work inside the simulation; an engine integration should still present one coherent sequence of topology changes, gas injections, and ticks.
 
 ## Chunks, Voxels, and Gas Sources
-Use a chunk handle with local voxel coordinates to add a gas source such as a vent, pipe, fire, or starting atmosphere. Amounts are in moles and temperatures are in kelvins.
+
+Register each gas before injecting it, then use its exact, case-sensitive name. A new `AtmosConfig` has an empty gas
+registry; Numos does not reserve ID 0 for a built-in gas. Applications choose the gases and their physical properties.
+
+This example adds oxygen to the running simulation's configuration and injects it into a voxel. Amounts are in moles and
+temperatures are in kelvins.
 
 ```csharp
+var config = new AtmosConfig(simulation.Config);
+config.GasRegistry.Add(new GasProperties
+{
+    Name = "Oxygen",
+    MolarHeatCapacityAtConstantVolume = AtmosPhysicalConstants.IdealDiatomicMolarHeatCapacityAtConstantVolume,
+    DiffusionCoefficient = 0.02f
+});
+simulation.SetAtmosConfig(config);
+
 simulation.AddGasToVoxel(
     chunk,
     x: 8,
     y: 8,
     z: 0,
-    gasId: 0,
+    gasName: "Oxygen",
     moles: 500f,
     temperature: 293.15f);
 ```
 
-Numos supports adding gases at runtime through a simple API call. Gases have various properties that affect their
-behavior when simulated (ex. advection, thermodynamics), as such integrators should be aware of and fill out their
-configuration options in `GasProperties`. An integration that needs distinct heat capacities or phase-change behavior
-should populate an `AtmosConfig` before construction. To change it later, edit a builder created with
-`new AtmosConfig(simulation.Config)` and apply it with `simulation.SetAtmosConfig(builder)`. The simulation exposes an
-immutable snapshot and does not observe retained builder mutations.
+For initial setup, populate an `AtmosConfig` and pass it to the simulation constructor. Later builder changes only apply
+after `SetAtmosConfig`; the simulation keeps an immutable copy.
+
+`GasMixture` and `IGasMixture` also accept names in `GetMoles`, `SetMoles`, `AdjustMoles`, and `AddGas`. Unknown names
+throw `KeyNotFoundException`. Numeric mutation overloads remain available for existing integrations, but reject negative
+or unregistered IDs with `ArgumentOutOfRangeException` before changing gas state. Prefer names in application code:
+numeric IDs depend on registration order and remain useful for snapshots, replay, and solver storage.
+
+A registered gas can deliberately use the configured heat-capacity fallback by leaving its heat capacity unset. That
+fallback does not make an unregistered ID valid for injection.
 
 ## Sharing dependencies between solvers
 

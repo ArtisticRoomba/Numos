@@ -818,10 +818,10 @@ internal sealed partial class AtmosKernel
         }
     }
 
-    private static void ValidateGasInjection(int gasId, Mole moles, Kelvin temperature)
+    private void ValidateGasInjection(int gasId, Mole moles, Kelvin temperature)
     {
-        if (gasId < 0)
-            throw new ArgumentOutOfRangeException(nameof(gasId), gasId, "Gas ID must be nonnegative.");
+        if ((uint)gasId >= (uint)_config.GasRegistry.Count)
+            throw new ArgumentOutOfRangeException(nameof(gasId), gasId, "Gas ID must refer to a registered gas.");
 
         if (!float.IsFinite(moles) || moles <= 0f)
             throw new ArgumentOutOfRangeException(nameof(moles), moles, "Moles must be positive and finite.");

@@ -7,6 +7,8 @@ namespace Numos.CoreSim.IntegrationTests;
 
 internal static class SimTestHelpers
 {
+    internal const string FirstGasName = "First";
+    internal const string SecondGasName = "Second";
     internal const int FirstGasId = 0;
     internal const int SecondGasId = 1;
     internal const int RoomId = 1;
@@ -32,8 +34,8 @@ internal static class SimTestHelpers
             MaxPressureTransferFractionPerNeighbor = 0.16f,
             GasRegistry =
             [
-                new GasProperties { Name = "First", DiffusionCoefficient = 0f },
-                new GasProperties { Name = "Second", DiffusionCoefficient = 0f }
+                TestGases.Create(FirstGasName, 0f),
+                TestGases.Create(SecondGasName, 0f)
             ]
         };
     }

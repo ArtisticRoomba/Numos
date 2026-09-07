@@ -16,7 +16,7 @@ public sealed class IntraChunkFlowTests
         using var simulation = new AtmosSimulation(config, 2, 1, 1);
         var chunk = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
         SimTestHelpers.SetAllTemperatures(simulation, chunk, 2, 1, 1);
-        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasId, 2f, 300f);
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasName, 2f, 300f);
 
         simulation.Tick();
 
@@ -40,7 +40,7 @@ public sealed class IntraChunkFlowTests
         using var simulation = new AtmosSimulation(config, 2, 1, 1);
         var chunk = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
         SimTestHelpers.SetAllTemperatures(simulation, chunk, 2, 1, 1);
-        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasId, 2f, 300f);
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasName, 2f, 300f);
 
         simulation.Tick();
 
@@ -68,7 +68,7 @@ public sealed class IntraChunkFlowTests
         using var simulation = new AtmosSimulation(config, 2, 1, 1);
         var chunk = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
         SimTestHelpers.SetAllTemperatures(simulation, chunk, 2, 1, 1, 4f);
-        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasId, 1f, 4f);
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasName, 1f, 4f);
 
         simulation.Tick();
 
@@ -94,7 +94,7 @@ public sealed class IntraChunkFlowTests
         using var simulation = new AtmosSimulation(config, 2, 1, 1);
         var chunk = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
         SimTestHelpers.SetAllTemperatures(simulation, chunk, 2, 1, 1, 100f);
-        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasId, 1f, 100f);
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasName, 1f, 100f);
 
         simulation.Tick();
 
@@ -118,8 +118,8 @@ public sealed class IntraChunkFlowTests
         using var simulation = new AtmosSimulation(config, 2, 1, 1);
         var chunk = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
         SimTestHelpers.SetAllTemperatures(simulation, chunk, 2, 1, 1, 100f);
-        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasId, 3f, 100f);
-        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.SecondGasId, 1f, 100f);
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasName, 3f, 100f);
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.SecondGasName, 1f, 100f);
 
         simulation.Tick();
 
@@ -152,9 +152,9 @@ public sealed class IntraChunkFlowTests
         config.GasRegistry.Replace(SimTestHelpers.SecondGasId, second);
         using var simulation = new AtmosSimulation(config, 2, 1, 1);
         var chunk = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
-        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasId, 3f, 400f);
-        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.SecondGasId, 1f, 400f);
-        simulation.AddGasToVoxel(chunk, 1, 0, 0, SimTestHelpers.FirstGasId, 1f, 200f);
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasName, 3f, 400f);
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.SecondGasName, 1f, 400f);
+        simulation.AddGasToVoxel(chunk, 1, 0, 0, SimTestHelpers.FirstGasName, 1f, 200f);
         simulation.SetVoxelTemperature(chunk, 0, 0, 0, 400f);
         simulation.SetVoxelTemperature(chunk, 1, 0, 0, 200f);
         float initialEnergy = SimTestHelpers.TotalThermalEnergy(
@@ -202,7 +202,7 @@ public sealed class IntraChunkFlowTests
         foreach ((int x, int y, int z) in neighbors)
             simulation.SetVoxelClassification(chunk, x, y, z, SimTestHelpers.RoomId);
 
-        simulation.AddGasToVoxel(chunk, 1, 1, 1, SimTestHelpers.FirstGasId, 1f, 4f);
+        simulation.AddGasToVoxel(chunk, 1, 1, 1, SimTestHelpers.FirstGasName, 1f, 4f);
 
         simulation.Tick();
 
@@ -237,7 +237,7 @@ public sealed class IntraChunkFlowTests
             0,
             0,
             0,
-            SimTestHelpers.FirstGasId,
+            SimTestHelpers.FirstGasName,
             1f,
             config.DefaultTemperatureFallback);
 
@@ -273,7 +273,7 @@ public sealed class IntraChunkFlowTests
         using var simulation = new AtmosSimulation(config, 2, 1, 1);
         var chunk = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
         SimTestHelpers.SetAllTemperatures(simulation, chunk, 2, 1, 1);
-        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasId, 2f, 300f);
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasName, 2f, 300f);
 
         simulation.Tick();
 
@@ -308,8 +308,8 @@ public sealed class IntraChunkFlowTests
         using var simulation = new AtmosSimulation(config, 2, 1, 1);
         var chunk = SimTestHelpers.CreateOpenChunk(simulation, default);
         SimTestHelpers.SetAllTemperatures(simulation, chunk, 2, 1, 1);
-        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasId, 1f, 300f);
-        simulation.AddGasToVoxel(chunk, 1, 0, 0, SimTestHelpers.SecondGasId, 2f, 300f);
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasName, 1f, 300f);
+        simulation.AddGasToVoxel(chunk, 1, 0, 0, SimTestHelpers.SecondGasName, 2f, 300f);
 
         simulation.Tick();
 
@@ -347,7 +347,7 @@ public sealed class IntraChunkFlowTests
         using var simulation = new AtmosSimulation(config, width, height, 1);
         var chunk = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
         SimTestHelpers.SetAllTemperatures(simulation, chunk, width, height, 1);
-        simulation.AddGasToVoxel(chunk, 1, 1, 0, SimTestHelpers.FirstGasId, 2f, 300f);
+        simulation.AddGasToVoxel(chunk, 1, 1, 0, SimTestHelpers.FirstGasName, 2f, 300f);
 
         simulation.Tick();
 
@@ -399,7 +399,7 @@ public sealed class IntraChunkFlowTests
         using var simulation = new AtmosSimulation(config, size, size, size);
         var chunk = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
         SimTestHelpers.SetAllTemperatures(simulation, chunk, size, size, size);
-        simulation.AddGasToVoxel(chunk, 1, 1, 1, SimTestHelpers.FirstGasId, 2f, 300f);
+        simulation.AddGasToVoxel(chunk, 1, 1, 1, SimTestHelpers.FirstGasName, 2f, 300f);
 
         simulation.Tick();
 
@@ -448,7 +448,7 @@ public sealed class IntraChunkFlowTests
         var chunk = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
         simulation.SetVoxelClassification(chunk, 1, 0, 0, VoxelClassification.RoomSolid);
         SimTestHelpers.SetAllTemperatures(simulation, chunk, 2, 1, 1);
-        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasId, 2f, 300f);
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasName, 2f, 300f);
 
         simulation.Tick();
 
@@ -472,8 +472,8 @@ public sealed class IntraChunkFlowTests
         config.GasRegistry.Replace(SimTestHelpers.FirstGasId, gas);
         using var simulation = new AtmosSimulation(config, 2, 1, 1);
         var chunk = SimTestHelpers.CreateOpenChunk(simulation, default);
-        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasId, 1f, 400f);
-        simulation.AddGasToVoxel(chunk, 1, 0, 0, SimTestHelpers.FirstGasId, 0.5f, 200f);
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasName, 1f, 400f);
+        simulation.AddGasToVoxel(chunk, 1, 0, 0, SimTestHelpers.FirstGasName, 0.5f, 200f);
 
         simulation.Tick();
 
@@ -500,7 +500,7 @@ public sealed class IntraChunkFlowTests
         var chunk = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
         simulation.SetVoxelClassification(chunk, 1, 0, 0, VoxelClassification.RoomVoid);
         SimTestHelpers.SetAllTemperatures(simulation, chunk, 2, 1, 1);
-        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasId, 2f, 300f);
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasName, 2f, 300f);
 
         simulation.Tick();
 
@@ -527,7 +527,7 @@ public sealed class IntraChunkFlowTests
         using var simulation = new AtmosSimulation(config, 1, 1, 1);
         var chunk = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
         simulation.SetVoxelTemperature(chunk, 0, 0, 0, 300f);
-        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasId, initialMoles, 300f);
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasName, initialMoles, 300f);
 
         simulation.Tick();
 

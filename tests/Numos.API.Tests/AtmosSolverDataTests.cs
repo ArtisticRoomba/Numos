@@ -10,7 +10,7 @@ public sealed class AtmosSolverDataTests
     [Test]
     public void CustomSolvers_ShareDataAcrossStagesChunksAndTicks()
     {
-        using var simulation = new AtmosSimulation(1, 1, 1);
+        using var simulation = new AtmosSimulation(new TestAtmosConfig(), 1, 1, 1);
         var first = simulation.CreateAndRegisterChunk(default);
         var second = simulation.CreateAndRegisterChunk(new Int3(2, 0, 0));
         object key = new();
@@ -38,7 +38,7 @@ public sealed class AtmosSolverDataTests
                 Queue<int> pending = world.GetOrCreateSolverData(key, CreateQueue);
                 while (pending.TryDequeue(out int tick))
                     foreach (var chunk in world.GetChunkHandles())
-                        world.AddGasToVoxel(chunk, 0, 0, tick, 300f);
+                        world.AddGasToVoxel(chunk, 0, "TestGas0", tick, 300f);
             });
 
         simulation.Tick();
@@ -133,7 +133,7 @@ public sealed class AtmosSolverDataTests
     [Test]
     public void Replay_RebuildsSharedDataAndReproducesProducerConsumerEffects()
     {
-        using var simulation = new AtmosSimulation(1, 1, 1);
+        using var simulation = new AtmosSimulation(new TestAtmosConfig(), 1, 1, 1);
         var chunk = simulation.CreateAndRegisterChunk(default);
         simulation.SetChunkClassification(chunk, new VoxelClassification(1));
         int creations = 0;
@@ -156,7 +156,7 @@ public sealed class AtmosSolverDataTests
             {
                 Queue<int> pending = world.GetOrCreateSolverData("pending", CreateQueue);
                 while (pending.TryDequeue(out int moles))
-                    world.AddGasToVoxel(chunk, 0, 0, moles, 300f);
+                    world.AddGasToVoxel(chunk, 0, "TestGas0", moles, 300f);
             });
 
         var checkpoint = simulation.CaptureCheckpoint();

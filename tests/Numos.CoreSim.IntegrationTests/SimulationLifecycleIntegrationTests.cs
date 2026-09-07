@@ -32,12 +32,12 @@ public sealed class SimulationLifecycleIntegrationTests
         using var simulation = new AtmosSimulation(config, 2, 1, 1);
         var chunk = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
         SimTestHelpers.SetAllTemperatures(simulation, chunk, 2, 1, 1);
-        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasId, 2f, 300f);
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasName, 2f, 300f);
         simulation.SleepChunk(chunk);
 
         simulation.Tick();
         var whileSleeping = simulation.GetChunkSnapshot(chunk);
-        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasId, 1f, 300f);
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasName, 1f, 300f);
         simulation.Tick();
         var afterInjection = simulation.GetChunkSnapshot(chunk);
 
@@ -69,7 +69,7 @@ public sealed class SimulationLifecycleIntegrationTests
         config.DefaultTemperatureFallback = 123f;
         using var simulation = new AtmosSimulation(config, 1, 1, 1);
         var chunk = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
-        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasId, 2f, 300f);
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasName, 2f, 300f);
         simulation.SetVoxelTemperature(chunk, 0, 0, 0, 0f);
 
         simulation.Tick();
@@ -115,7 +115,7 @@ public sealed class SimulationLifecycleIntegrationTests
             0,
             0,
             0,
-            SimTestHelpers.FirstGasId,
+            SimTestHelpers.FirstGasName,
             openVoxels.Length,
             SimTestHelpers.DefaultTemperature);
 
@@ -156,8 +156,8 @@ public sealed class SimulationLifecycleIntegrationTests
         using var simulation = new AtmosSimulation(config, 2, 1, 1);
         var chunk = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
         SimTestHelpers.SetAllTemperatures(simulation, chunk, 2, 1, 1);
-        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasId, 1f, 300f);
-        simulation.AddGasToVoxel(chunk, 1, 0, 0, SimTestHelpers.FirstGasId, 1f, 300f);
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasName, 1f, 300f);
+        simulation.AddGasToVoxel(chunk, 1, 0, 0, SimTestHelpers.FirstGasName, 1f, 300f);
 
         for (int i = 0; i < stableTicks; i++)
             simulation.Tick();

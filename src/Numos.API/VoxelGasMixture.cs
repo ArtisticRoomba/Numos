@@ -56,6 +56,30 @@ internal sealed class VoxelGasMixture : IInternalGasMixture
         Owner.AddGasToMixture(this, gasId, moles, temperature);
     }
 
+    /// <inheritdoc />
+    public float GetMoles(string gasName)
+    {
+        return Owner.GetMixtureMoles(this, gasName);
+    }
+
+    /// <inheritdoc />
+    public void SetMoles(string gasName, float moles)
+    {
+        Owner.SetMixtureMoles(this, gasName, moles);
+    }
+
+    /// <inheritdoc />
+    public void AdjustMoles(string gasName, float deltaMoles)
+    {
+        Owner.AdjustMixtureMoles(this, gasName, deltaMoles);
+    }
+
+    /// <inheritdoc />
+    public void AddGas(string gasName, float moles, float temperature)
+    {
+        Owner.AddGasToMixture(this, gasName, moles, temperature);
+    }
+
     public void Clear()
     {
         Owner.ClearMixture(this);

@@ -20,7 +20,7 @@ public sealed class CrossChunkFlowTests
             0,
             0,
             0,
-            SimTestHelpers.FirstGasId,
+            SimTestHelpers.FirstGasName,
             2f,
             SimTestHelpers.DefaultTemperature);
 
@@ -86,7 +86,7 @@ public sealed class CrossChunkFlowTests
             sourceX,
             sourceY,
             sourceZ,
-            SimTestHelpers.FirstGasId,
+            SimTestHelpers.FirstGasName,
             2f,
             SimTestHelpers.DefaultTemperature);
 
@@ -133,8 +133,8 @@ public sealed class CrossChunkFlowTests
             1,
             SimTestHelpers.RoomId + 1);
 
-        simulation.AddGasToVoxel(source, 2, 1, 1, SimTestHelpers.FirstGasId, 3f, 100f);
-        simulation.AddGasToVoxel(source, 2, 1, 1, SimTestHelpers.SecondGasId, 1f, 100f);
+        simulation.AddGasToVoxel(source, 2, 1, 1, SimTestHelpers.FirstGasName, 3f, 100f);
+        simulation.AddGasToVoxel(source, 2, 1, 1, SimTestHelpers.SecondGasName, 1f, 100f);
         simulation.SetVoxelTemperature(target, 0, 1, 1, 100f);
 
         simulation.Tick();
@@ -183,7 +183,7 @@ public sealed class CrossChunkFlowTests
             0,
             0,
             0,
-            SimTestHelpers.FirstGasId,
+            SimTestHelpers.FirstGasName,
             1f,
             SimTestHelpers.DefaultTemperature);
 
@@ -222,7 +222,7 @@ public sealed class CrossChunkFlowTests
             0,
             0,
             0,
-            SimTestHelpers.FirstGasId,
+            SimTestHelpers.FirstGasName,
             2f,
             SimTestHelpers.DefaultTemperature);
 
@@ -259,9 +259,9 @@ public sealed class CrossChunkFlowTests
         using var simulation = new AtmosSimulation(config, 1, 1, 1);
         var source = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
         var target = SimTestHelpers.CreateOpenChunk(simulation, new Int3(1, 0, 0));
-        simulation.AddGasToVoxel(source, 0, 0, 0, SimTestHelpers.FirstGasId, 3f, 400f);
-        simulation.AddGasToVoxel(source, 0, 0, 0, SimTestHelpers.SecondGasId, 1f, 400f);
-        simulation.AddGasToVoxel(target, 0, 0, 0, SimTestHelpers.FirstGasId, 1f, 200f);
+        simulation.AddGasToVoxel(source, 0, 0, 0, SimTestHelpers.FirstGasName, 3f, 400f);
+        simulation.AddGasToVoxel(source, 0, 0, 0, SimTestHelpers.SecondGasName, 1f, 400f);
+        simulation.AddGasToVoxel(target, 0, 0, 0, SimTestHelpers.FirstGasName, 1f, 200f);
         simulation.SetVoxelTemperature(source, 0, 0, 0, 400f);
         simulation.SetVoxelTemperature(target, 0, 0, 0, 200f);
         float initialEnergy = SimTestHelpers.TotalThermalEnergy(
@@ -307,7 +307,7 @@ public sealed class CrossChunkFlowTests
             2,
             1,
             1,
-            SimTestHelpers.FirstGasId,
+            SimTestHelpers.FirstGasName,
             2f,
             SimTestHelpers.DefaultTemperature);
 
@@ -340,7 +340,7 @@ public sealed class CrossChunkFlowTests
             2,
             1,
             1,
-            SimTestHelpers.FirstGasId,
+            SimTestHelpers.FirstGasName,
             2f,
             SimTestHelpers.DefaultTemperature);
 
@@ -385,7 +385,7 @@ public sealed class CrossChunkFlowTests
             2,
             1,
             1,
-            SimTestHelpers.FirstGasId,
+            SimTestHelpers.FirstGasName,
             2f,
             SimTestHelpers.DefaultTemperature);
 
@@ -439,7 +439,7 @@ public sealed class CrossChunkFlowTests
             0,
             1,
             0,
-            SimTestHelpers.FirstGasId,
+            SimTestHelpers.FirstGasName,
             2f,
             SimTestHelpers.DefaultTemperature);
 
@@ -480,7 +480,7 @@ public sealed class CrossChunkFlowTests
                     x,
                     y,
                     z,
-                    SimTestHelpers.FirstGasId,
+                    SimTestHelpers.FirstGasName,
                     2f,
                     SimTestHelpers.DefaultTemperature);
             }
@@ -531,7 +531,7 @@ public sealed class CrossChunkFlowTests
                     x,
                     y,
                     0,
-                    SimTestHelpers.FirstGasId,
+                    SimTestHelpers.FirstGasName,
                     2f,
                     SimTestHelpers.DefaultTemperature);
             }

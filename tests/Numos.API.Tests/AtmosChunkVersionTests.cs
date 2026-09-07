@@ -1,4 +1,3 @@
-using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.Datatypes.Snapshots;
 using Numos.Maths;
@@ -101,10 +100,10 @@ public sealed class AtmosChunkVersionTests
     [Test]
     public void GetVoxelSnapshot_CopiesOnlyOneVoxelsGasValues()
     {
-        using var simulation = new AtmosSimulation(2, 1, 1);
+        using var simulation = new AtmosSimulation(new TestAtmosConfig(), 2, 1, 1);
         var chunk = simulation.CreateAndRegisterChunk(default);
         simulation.SetChunkClassification(chunk, new VoxelClassification(1));
-        simulation.AddGasToVoxel(chunk, 1, 4, 3f, 250f);
+        simulation.AddGasToVoxel(chunk, 1, "TestGas4", 3f, 250f);
 
         var first = simulation.GetVoxelSnapshot(chunk, 1);
         first.Gases[0] = new VoxelGasSnapshot(99, 99f);
@@ -122,10 +121,10 @@ public sealed class AtmosChunkVersionTests
     [Test]
     public void TryGetVoxelSnapshot_OnlyCopiesDetailsForExactPresentedVersion()
     {
-        using var simulation = new AtmosSimulation(1, 1, 1);
+        using var simulation = new AtmosSimulation(new TestAtmosConfig(), 1, 1, 1);
         var chunk = simulation.CreateAndRegisterChunk(default);
         simulation.SetChunkClassification(chunk, new VoxelClassification(1));
-        simulation.AddGasToVoxel(chunk, 0, 7, 2f, 275f);
+        simulation.AddGasToVoxel(chunk, 0, "TestGas7", 2f, 275f);
         var presentedVersion = simulation.GetChunkSnapshot(chunk).Version;
 
         bool matched = simulation.TryGetVoxelSnapshot(chunk, 0, presentedVersion, out var details);
@@ -242,10 +241,10 @@ public sealed class AtmosChunkVersionTests
     [Test]
     public void TryGetChunkSnapshot_AwakeSimulationTick_AdvancesRevision()
     {
-        using var simulation = new AtmosSimulation(1, 1, 1);
+        using var simulation = new AtmosSimulation(new TestAtmosConfig(), 1, 1, 1);
         var chunk = simulation.CreateAndRegisterChunk(new Int3(0, 0, 0));
         simulation.SetChunkClassification(chunk, new VoxelClassification(1));
-        simulation.AddGasToVoxel(chunk, 0, 0, 1f, 293.15f);
+        simulation.AddGasToVoxel(chunk, 0, "TestGas0", 1f, 293.15f);
         var before = simulation.GetChunkSnapshot(chunk);
 
         simulation.Tick();
@@ -268,7 +267,7 @@ public sealed class AtmosChunkVersionTests
     [Test]
     public void TryGetChunkSnapshot_ThermalFlowIntoSleepingNeighbor_AdvancesNeighborRevision()
     {
-        var config = new AtmosConfig
+        var config = new TestAtmosConfig
         {
             ThermalConductance = 0.1f,
             VacuumThreshold = 0.1f
@@ -282,8 +281,8 @@ public sealed class AtmosChunkVersionTests
 
         // Equal pressure prevents advection from waking the neighbor. Different temperature
         // still produces boundary heat transfer on the second (thermodynamic) tick.
-        simulation.AddGasToVoxel(hot, 0, 0, 0.00125f, 400f);
-        simulation.AddGasToVoxel(cold, 0, 0, 0.0025f, 200f);
+        simulation.AddGasToVoxel(hot, 0, "TestGas0", 0.00125f, 400f);
+        simulation.AddGasToVoxel(cold, 0, "TestGas0", 0.0025f, 200f);
         simulation.SleepChunk(cold);
         simulation.Tick();
         var before = simulation.GetChunkSnapshot(cold);

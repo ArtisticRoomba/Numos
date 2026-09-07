@@ -292,6 +292,10 @@ the solver's structure-of-arrays layout:
 - Solid and void voxels can be inspected but reject mutation. Disposing the owner invalidates both container and
   voxel mixtures.
 
+Application code identifies gases by their registered names. Injection and mixture mutation reject unregistered gases;
+the numeric overloads also validate registry membership. Names resolve against the owner's current configuration, while
+snapshots and replay retain numeric IDs. The example below assumes `"Oxygen"` has been registered.
+
 The common surface exposes volume, temperature, pressure, total moles, sparse gas lookup, snapshots, proportional
 removal, and transfer operations. `SetMoles` and `AdjustMoles` intentionally preserve the stored temperature for
 low-level tooling parity. `AddGas` and transfers instead conserve sensible internal energy using each gas's effective
@@ -322,7 +326,7 @@ being lost when an intermediate `C * ΔT` exceeds the `float` range.
 
 ```csharp
 var canister = simulation.CreateGasMixture(volume: 0.07f, temperature: 293.15f);
-canister.AddGas(oxygenId, moles: 2f, temperature: 293.15f);
+canister.AddGas("Oxygen", moles: 2f, temperature: 293.15f);
 
 IGasMixture voxel = simulation.GetVoxelGasMixture(chunk, x: 4, y: 3, z: 0);
 float moved = canister.TransferTo(voxel, moles: 0.5f);

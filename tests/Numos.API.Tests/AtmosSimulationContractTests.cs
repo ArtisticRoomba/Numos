@@ -42,7 +42,7 @@ public sealed class AtmosSimulationContractTests
                     .With.Property(nameof(ArgumentOutOfRangeException.ParamName)).EqualTo(parameterName));
 
             Assert.That(
-                () => new AtmosSimulation(new AtmosConfig(), width, height, depth),
+                () => new AtmosSimulation(width, height, depth),
                 Throws.TypeOf<ArgumentOutOfRangeException>()
                     .With.Property(nameof(ArgumentOutOfRangeException.ParamName)).EqualTo(parameterName));
         });
@@ -59,7 +59,7 @@ public sealed class AtmosSimulationContractTests
                     .With.Property(nameof(ArgumentOutOfRangeException.ParamName)).EqualTo("chunkWidth"));
 
             Assert.That(
-                () => new AtmosSimulation(new AtmosConfig(), 256, 256, 1),
+                () => new AtmosSimulation(256, 256, 1),
                 Throws.TypeOf<ArgumentOutOfRangeException>()
                     .With.Property(nameof(ArgumentOutOfRangeException.ParamName)).EqualTo("chunkWidth"));
 
@@ -265,7 +265,7 @@ public sealed class AtmosSimulationContractTests
     [Test]
     public void CoordinateAndFlatOverloads_AddressDocumentedFlattenedIndices()
     {
-        using var simulation = new AtmosSimulation(3, 2, 2);
+        using var simulation = new AtmosSimulation(new TestAtmosConfig(), 3, 2, 2);
         var chunk = simulation.CreateAndRegisterChunk(default);
         simulation.SetChunkClassification(chunk, VoxelClassification.RoomSolid);
 
@@ -273,7 +273,7 @@ public sealed class AtmosSimulationContractTests
         simulation.SetVoxelClassification(chunk, 2, 1, 1, new VoxelClassification(23));
         simulation.SetVoxelTemperature(chunk, 5, 275f);
         simulation.SetVoxelTemperature(chunk, 1, 0, 1, 325f);
-        simulation.AddGasToVoxel(chunk, 2, 1, 1, 4, 2f, 300f);
+        simulation.AddGasToVoxel(chunk, 2, 1, 1, "TestGas4", 2f, 300f);
 
         var snapshot = simulation.GetChunkSnapshot(chunk);
 
@@ -297,7 +297,7 @@ public sealed class AtmosSimulationContractTests
     [Test]
     public void CoordinateOverloads_RejectCoordinatesOutsideEveryAxis()
     {
-        using var simulation = new AtmosSimulation(3, 2, 2);
+        using var simulation = new AtmosSimulation(new TestAtmosConfig(), 3, 2, 2);
         var chunk = simulation.CreateAndRegisterChunk(default);
 
         Assert.Multiple(() =>
@@ -313,7 +313,7 @@ public sealed class AtmosSimulationContractTests
     [Test]
     public void FlatIndexOverloads_RejectIndexAtVoxelCount()
     {
-        using var simulation = new AtmosSimulation(3, 2, 2);
+        using var simulation = new AtmosSimulation(new TestAtmosConfig(), 3, 2, 2);
         var chunk = simulation.CreateAndRegisterChunk(default);
         const ushort invalidIndex = 12;
 
@@ -339,15 +339,15 @@ public sealed class AtmosSimulationContractTests
     [Test]
     public void ClassificationControlsWhetherGasCanBeAdded()
     {
-        using var simulation = new AtmosSimulation(3, 1, 1);
+        using var simulation = new AtmosSimulation(new TestAtmosConfig(), 3, 1, 1);
         var chunk = simulation.CreateAndRegisterChunk(default);
         simulation.SetChunkClassification(chunk, new VoxelClassification(7));
         simulation.SetVoxelClassification(chunk, 0, 0, 0, VoxelClassification.RoomSolid);
         simulation.SetVoxelClassification(chunk, 1, 0, 0, VoxelClassification.RoomVoid);
 
-        simulation.AddGasToVoxel(chunk, 0, 0, 0, 1, 2f, 300f);
-        simulation.AddGasToVoxel(chunk, 1, 0, 0, 1, 2f, 300f);
-        simulation.AddGasToVoxel(chunk, 2, 0, 0, 1, 2f, 300f);
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, "TestGas1", 2f, 300f);
+        simulation.AddGasToVoxel(chunk, 1, 0, 0, "TestGas1", 2f, 300f);
+        simulation.AddGasToVoxel(chunk, 2, 0, 0, "TestGas1", 2f, 300f);
 
         var snapshot = simulation.GetChunkSnapshot(chunk);
 
@@ -465,7 +465,7 @@ public sealed class AtmosSimulationContractTests
     }
 
     [Test]
-    public void AddGasToVoxel_UnregisteredGasUsesConfiguredDefaultMolarHeatCapacityAtConstantVolume()
+    public void AddGasToVoxel_RegisteredGasWithUnsetHeatCapacityUsesConfiguredDefault()
     {
         var config = new AtmosConfig
         {
@@ -476,12 +476,13 @@ public sealed class AtmosSimulationContractTests
             ]
         };
 
+        config.GasRegistry.Add(TestGases.Create("Fallback"));
         using var simulation = new AtmosSimulation(config, 1, 1, 1);
         var chunk = simulation.CreateAndRegisterChunk(default);
         simulation.SetChunkClassification(chunk, new VoxelClassification(7));
 
-        simulation.AddGasToVoxel(chunk, 0, 0, 0, 3, 1f, 100f);
-        simulation.AddGasToVoxel(chunk, 0, 0, 0, 0, 1f, 200f);
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, "Fallback", 1f, 100f);
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, "Registered", 1f, 200f);
 
         var snapshot = simulation.GetChunkSnapshot(chunk);
         Assert.Multiple(() =>
@@ -509,12 +510,13 @@ public sealed class AtmosSimulationContractTests
             ]
         };
 
+        config.GasRegistry.Add(TestGases.Create("Fallback"));
         using var simulation = new AtmosSimulation(config, 1, 1, 1);
         var chunk = simulation.CreateAndRegisterChunk(default);
         simulation.SetChunkClassification(chunk, new VoxelClassification(7));
 
-        simulation.AddGasToVoxel(chunk, 0, 0, 0, 3, 1f, 100f);
-        simulation.AddGasToVoxel(chunk, 0, 0, 0, 0, 1f, 200f);
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, "Fallback", 1f, 100f);
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, "Registered", 1f, 200f);
 
         var snapshot = simulation.GetChunkSnapshot(chunk);
         Assert.Multiple(() =>
@@ -531,12 +533,12 @@ public sealed class AtmosSimulationContractTests
     [Test]
     public void AddGasToVoxel_FirstInjectionReplacesNaNEmptyVoxelTemperature()
     {
-        using var simulation = new AtmosSimulation(1, 1, 1);
+        using var simulation = new AtmosSimulation(new TestAtmosConfig(), 1, 1, 1);
         var chunk = simulation.CreateAndRegisterChunk(default);
         simulation.SetChunkClassification(chunk, new VoxelClassification(7));
         simulation.SetVoxelTemperature(chunk, 0, 0, 0, float.NaN);
 
-        simulation.AddGasToVoxel(chunk, 0, 0, 0, 0, 2f, 250f);
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, "TestGas0", 2f, 250f);
 
         var snapshot = simulation.GetChunkSnapshot(chunk);
         Assert.Multiple(() =>
@@ -554,15 +556,15 @@ public sealed class AtmosSimulationContractTests
     [TestCase(VoxelClassification.RoomVoid)]
     public void AddGasToVoxel_DisallowedClassificationDoesNotNormalizeTemperature(int roomId)
     {
-        using var simulation = new AtmosSimulation(1, 1, 1);
+        using var simulation = new AtmosSimulation(new TestAtmosConfig(), 1, 1, 1);
         var chunk = simulation.CreateAndRegisterChunk(default);
         simulation.SetChunkClassification(chunk, new VoxelClassification(7));
-        simulation.AddGasToVoxel(chunk, 0, 0, 0, 0, 1f, 300f);
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, "TestGas0", 1f, 300f);
         simulation.SetVoxelClassification(chunk, 0, 0, 0, new VoxelClassification(roomId));
         simulation.SetVoxelTemperature(chunk, 0, 0, 0, 0f);
         var beforeIgnoredInjection = simulation.GetChunkSnapshot(chunk);
 
-        simulation.AddGasToVoxel(chunk, 0, 0, 0, 0, 1f, 600f);
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, "TestGas0", 1f, 600f);
 
         var afterIgnoredInjection = simulation.GetChunkSnapshot(chunk);
         Assert.Multiple(() =>
@@ -584,7 +586,7 @@ public sealed class AtmosSimulationContractTests
     [Test]
     public void AddGasToVoxel_RejectsInvalidPhysicalInputs()
     {
-        using var simulation = new AtmosSimulation(1, 1, 1);
+        using var simulation = new AtmosSimulation(new TestAtmosConfig(), 1, 1, 1);
         var chunk = simulation.CreateAndRegisterChunk(default);
         simulation.SetChunkClassification(chunk, new VoxelClassification(7));
 
@@ -622,11 +624,11 @@ public sealed class AtmosSimulationContractTests
     [Test]
     public void GetChunkSnapshot_ReturnsDeepDetachedCopies()
     {
-        using var simulation = new AtmosSimulation(2, 1, 1);
+        using var simulation = new AtmosSimulation(new TestAtmosConfig(), 2, 1, 1);
         var chunk = simulation.CreateAndRegisterChunk(new Int3(3, 4, 5));
         simulation.SetChunkClassification(chunk, new VoxelClassification(9));
-        simulation.AddGasToVoxel(chunk, 0, 3, 2f, 300f);
-        simulation.AddGasToVoxel(chunk, 0, 7, 1f, 300f);
+        simulation.AddGasToVoxel(chunk, 0, "TestGas3", 2f, 300f);
+        simulation.AddGasToVoxel(chunk, 0, "TestGas7", 1f, 300f);
 
         var first = simulation.GetChunkSnapshot(chunk);
         first.TotalPressure[0] = -10f;
@@ -664,7 +666,7 @@ public sealed class AtmosSimulationContractTests
     [Test]
     public void ChunkOperations_WithMissingPosition_ThrowKeyNotFoundException()
     {
-        using var simulation = new AtmosSimulation(2, 2, 1);
+        using var simulation = new AtmosSimulation(new TestAtmosConfig(), 2, 2, 1);
         var missing = new AtmosChunkHandle(new Int3(91, -37, 12));
 
         Assert.Multiple(() =>
@@ -707,7 +709,7 @@ public sealed class AtmosSimulationContractTests
     [Test]
     public void Dispose_IsIdempotentAndRejectsFurtherKernelAccess()
     {
-        var simulation = new AtmosSimulation(1, 1, 1);
+        var simulation = new AtmosSimulation(new TestAtmosConfig(), 1, 1, 1);
         var chunk = simulation.CreateAndRegisterChunk(default);
         simulation.Dispose();
 
@@ -718,8 +720,8 @@ public sealed class AtmosSimulationContractTests
             Assert.That(() => { _ = simulation.TickCount; }, Throws.TypeOf<ObjectDisposedException>());
             Assert.That(() => { _ = simulation.LastBoundaryTicks; }, Throws.TypeOf<ObjectDisposedException>());
             Assert.That(() => simulation.Update(0f), Throws.TypeOf<ObjectDisposedException>());
-            Assert.That(() => simulation.Update(0f, new AtmosConfig()), Throws.TypeOf<ObjectDisposedException>());
-            Assert.That(() => simulation.SetAtmosConfig(new AtmosConfig()), Throws.TypeOf<ObjectDisposedException>());
+            Assert.That(() => simulation.Update(0f, new TestAtmosConfig()), Throws.TypeOf<ObjectDisposedException>());
+            Assert.That(() => simulation.SetAtmosConfig(new TestAtmosConfig()), Throws.TypeOf<ObjectDisposedException>());
             Assert.That(
                 () => simulation.CreateAndRegisterChunk(new Int3(1, 0, 0)),
                 Throws.TypeOf<ObjectDisposedException>());
@@ -784,12 +786,12 @@ public sealed class AtmosSimulationContractTests
     [Test]
     public void AddGasToVoxel_ConfiguredVoxelVolumeControlsPressureInPascals()
     {
-        var config = new AtmosConfig { VoxelVolume = 2f };
+        var config = new TestAtmosConfig { VoxelVolume = 2f };
         using var simulation = new AtmosSimulation(config, 1, 1, 1);
         var chunk = simulation.CreateAndRegisterChunk(default);
         simulation.SetChunkClassification(chunk, new VoxelClassification(1));
 
-        simulation.AddGasToVoxel(chunk, 0, 0, 0, 0, 3f, 400f);
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, "TestGas0", 3f, 400f);
 
         Assert.That(
             simulation.GetChunkSnapshot(chunk).TotalPressure[0],
@@ -802,12 +804,12 @@ public sealed class AtmosSimulationContractTests
     [TestCase(float.PositiveInfinity)]
     public void AddGasToVoxel_InvalidVoxelVolumeUsesOneCubicMetreFallback(float voxelVolume)
     {
-        var config = new AtmosConfig { VoxelVolume = voxelVolume };
+        var config = new TestAtmosConfig { VoxelVolume = voxelVolume };
         using var simulation = new AtmosSimulation(config, 1, 1, 1);
         var chunk = simulation.CreateAndRegisterChunk(default);
         simulation.SetChunkClassification(chunk, new VoxelClassification(1));
 
-        simulation.AddGasToVoxel(chunk, 0, 0, 0, 0, 1f, 300f);
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, "TestGas0", 1f, 300f);
 
         Assert.That(
             simulation.GetChunkSnapshot(chunk).TotalPressure[0],
