@@ -486,6 +486,16 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
                     continue;
 
                 ushort neighborIndex = cache.Indices[slotBase + n];
+                // This is to stop infinite spread of low amounts of gas
+                // Only for diffusion
+                if (molesDiffused < AtmosSolverConstants.MinimumTrackedMoles 
+                    && chunk.ActiveGases[gas].Moles?[neighborIndex] + molesDiffused < AtmosSolverConstants.MinimumTrackedMoles)
+                {
+                    // Undo movement out of voxel
+                    moleDeltas[deltaOffset + voxelIndex] += molesDiffused;
+                    energyDeltas[voxelIndex] += energyTransferred;
+                    continue;
+                }
                 moleDeltas[deltaOffset + neighborIndex] += molesDiffused;
                 energyDeltas[neighborIndex] += energyTransferred;
             }
