@@ -64,6 +64,7 @@ internal class ReactionSolver : IAtmosSolverStage
 
         Scalar[][]? reactionFeedbacks = reactionCount == null ? null : ArrayPool<Scalar[]>.Shared.Rent(voxelCount);
         int mixtureLength = config.GasPropertyCount;
+        Mole[] mixtureVector = ArrayPool<Mole>.Shared.Rent(mixtureLength);
         for(var voxelIndex = 0; voxelIndex < voxelCount; voxelIndex++)
                 //  for (var voxelIndex = 0; voxelIndex < voxelCount; voxelIndex++)
             {
@@ -79,7 +80,6 @@ internal class ReactionSolver : IAtmosSolverStage
                     reactionFeedbacks[voxelIndex] = reactionFeedback;
 
                 // get the mixture
-                Mole[] mixtureVector = ArrayPool<Mole>.Shared.Rent(mixtureLength);
                 Mole content = 0f;
                 Array.Clear(mixtureVector, 0, mixtureLength);
 
@@ -112,9 +112,8 @@ internal class ReactionSolver : IAtmosSolverStage
                     var channel = chunk.GetOrCreateGasChannel(i);
                     chunk.ActiveGases[channel].Moles[voxelIndex] = MathF.Max(mixtureVector[i], 0f);
                 }
-                
-                ArrayPool<float>.Shared.Return(mixtureVector);
             }
+        ArrayPool<float>.Shared.Return(mixtureVector);
 
         if (reactionCount != null && reactionFeedbacks != null)
         {
