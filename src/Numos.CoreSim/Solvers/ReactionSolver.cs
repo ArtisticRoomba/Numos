@@ -112,6 +112,8 @@ internal class ReactionSolver : IAtmosSolverStage
                     var channel = chunk.GetOrCreateGasChannel(i);
                     chunk.ActiveGases[channel].Moles[voxelIndex] = MathF.Max(mixtureVector[i], 0f);
                 }
+                
+                ArrayPool<float>.Shared.Return(mixtureVector);
             }
 
         if (reactionCount != null && reactionFeedbacks != null)
