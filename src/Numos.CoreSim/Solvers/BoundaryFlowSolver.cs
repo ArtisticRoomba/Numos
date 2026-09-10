@@ -215,6 +215,11 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
             if (molesDiffused * 7 > sourceMoles)
                 molesDiffused = sourceMoles / 7;
 
+            if (molesDiffused < AtmosSolverConstants.MinimumTrackedMoles 
+                && (neighborChunk.ActiveGases[gas].Moles?[neighborIndex] + molesDiffused < AtmosSolverConstants.MinimumTrackedMoles))
+                molesDiffused = 0;
+
+
             Mole molesToMove = MathF.Min(sourceMoles, molesAdvected + molesDiffused);
             if (molesToMove <= 0f)
                 continue;
