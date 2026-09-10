@@ -190,7 +190,7 @@ internal class ReactionSolver : IAtmosSolverStage
                     rate = gas.ApplyRateFactors(i, mixtureVector[gas.GasId], rate);
 
                 Scalar speed = rate * deltaTime;
-                if (speed <= 0)
+                if (speed <= 0 || !float.IsFinite(speed))
                     return;
 
                 reactionSpeeds[i] = speed;

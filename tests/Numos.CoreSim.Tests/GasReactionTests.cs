@@ -279,7 +279,7 @@ public class GasReactionTests
 
             foreach (var gas in input.Keys)
             {
-                speedFactors.Add(gas, MathF.Max(random.NextSingle() - 0.5f + random.Next(5) - 2, 0f));
+                speedFactors.Add(gas, random.NextSingle() - 0.5f + random.Next(5) - 2);
             }
 
             standardReactions.Add(
