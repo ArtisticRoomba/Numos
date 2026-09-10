@@ -218,7 +218,8 @@ public class GasReactionTests
             {
                 float temperature = 320f;
                 float[] feedback = new float[2];
-                new ReactionSolver().ProcessVoxel(1f, molarity.Reverse().ToArray(), ref temperature, feedback, second, gases.Length);
+                var SHC = molarity.Sum(m => m * AtmosConfigDefaults.DefaultMolarHeatCapacityAtConstantVolume);
+                new ReactionSolver().ProcessVoxel(1f, molarity.Reverse().ToArray(), ref temperature, feedback, second, gases.Length, ref SHC);
                 Assert.That(
                     feedback.Select(BitConverter.SingleToInt32Bits),
                     Is.EqualTo(expected.Select(BitConverter.SingleToInt32Bits)));
@@ -278,7 +279,7 @@ public class GasReactionTests
 
             foreach (var gas in input.Keys)
             {
-                speedFactors.Add(gas, random.NextSingle() - 0.5f + random.Next(5) - 2);
+                speedFactors.Add(gas, MathF.Max(random.NextSingle() - 0.5f + random.Next(5) - 2, 0f));
             }
 
             standardReactions.Add(
@@ -305,7 +306,7 @@ public class GasReactionTests
             chunk.WakeRoom(i);
             for (int j = 0; j < gases.Count; j++)
             {
-                chunk.InjectGasToVoxel(i, j, Math.Max(0, random.NextSingle() * 10 - 3), random.Next(500), 1, 1);
+                chunk.InjectGasToVoxel(i, j, MathF.Max(0, random.NextSingle() * 10 - 3), random.Next(500), 1, 1);
             }
         }
 
