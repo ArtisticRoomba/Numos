@@ -1,5 +1,3 @@
-using Numos.Maths;
-
 namespace Numos.CoreSim.Solvers;
 
 /// <summary>
@@ -74,4 +72,4 @@ internal static class GasInjectionSolver
     }
 }
 
-internal record InjectionEvent(ushort LocalVoxelIndex, int GasId, Mole Moles, Kelvin Temperature);
+internal readonly record struct InjectionEvent(ushort LocalVoxelIndex, int GasId, Mole Moles, Kelvin Temperature);
