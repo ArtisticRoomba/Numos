@@ -1,5 +1,6 @@
 using Numos.API;
 using Numos.CoreSim.Datatypes.Primitives;
+using Numos.CoreSim.Datatypes.Snapshots;
 using Numos.Maths;
 
 namespace Numos.CoreSim.IntegrationTests;
@@ -287,6 +288,86 @@ public sealed class CrossChunkFlowTests
                 SimTestHelpers.TotalThermalEnergy(config, sourceSnapshot, targetSnapshot),
                 Is.EqualTo(initialEnergy).Within(SimTestHelpers.Tolerance));
         });
+    }
+
+    [Test]
+    public void BoundaryFlow_ParallelInjectionBatchesRemainDeterministic()
+    {
+        ulong? expectedDigest = null;
+
+        for (int run = 0; run < 16; run++)
+        {
+            var config = SimTestHelpers.CreateDeterministicConfig();
+            using var simulation = new AtmosSimulation(config, 1, 1, 1);
+            var center = SimTestHelpers.CreateOpenChunk(simulation, default);
+            simulation.AddGasToVoxel(center, 0, 0, 0, SimTestHelpers.FirstGasName, 0.75f, 200f);
+            simulation.AddGasToVoxel(center, 0, 0, 0, SimTestHelpers.SecondGasName, 0.25f, 200f);
+
+            Int3[] sourcePositions = [Int3.NegX, Int3.PosX, Int3.NegY, Int3.PosY];
+            float[] sourceTemperatures = [250f, 300f, 350f, 400f];
+            var sources = new AtmosChunkHandle[sourcePositions.Length];
+            for (int sourceIndex = 0; sourceIndex < sourcePositions.Length; sourceIndex++)
+            {
+                sources[sourceIndex] = SimTestHelpers.CreateOpenChunk(simulation, sourcePositions[sourceIndex]);
+                simulation.AddGasToVoxel(
+                    sources[sourceIndex],
+                    0,
+                    0,
+                    0,
+                    SimTestHelpers.FirstGasName,
+                    3f,
+                    sourceTemperatures[sourceIndex]);
+
+                simulation.AddGasToVoxel(
+                    sources[sourceIndex],
+                    0,
+                    0,
+                    0,
+                    SimTestHelpers.SecondGasName,
+                    1f,
+                    sourceTemperatures[sourceIndex]);
+            }
+
+            simulation.Solvers.SetEnabled(AtmosBuiltInSolvers.Thermodynamics, false);
+            simulation.Solvers.SetEnabled(AtmosBuiltInSolvers.ThermalBoundary, false);
+            simulation.Solvers.SetEnabled(AtmosBuiltInSolvers.GasReactions, false);
+
+            AtmosChunkSnapshot[] initialSnapshots =
+            [
+                simulation.GetChunkSnapshot(center),
+                .. sources.Select(simulation.GetChunkSnapshot)
+            ];
+
+            float initialEnergy = SimTestHelpers.TotalThermalEnergy(config, initialSnapshots);
+            simulation.Tick();
+
+            AtmosChunkSnapshot[] finalSnapshots =
+            [
+                simulation.GetChunkSnapshot(center),
+                .. sources.Select(simulation.GetChunkSnapshot)
+            ];
+
+            ulong digest = simulation.ComputeStateHash().Digest;
+            expectedDigest ??= digest;
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(digest, Is.EqualTo(expectedDigest.Value), $"Run {run}");
+                Assert.That(
+                    SimTestHelpers.TotalMoles(finalSnapshots),
+                    Is.EqualTo(17f).Within(SimTestHelpers.Tolerance));
+
+                Assert.That(
+                    SimTestHelpers.TotalThermalEnergy(config, finalSnapshots),
+                    Is.EqualTo(initialEnergy).Within(SimTestHelpers.EnergyTolerance));
+
+                Assert.That(
+                    SimTestHelpers.TotalMoles(finalSnapshots[0]),
+                    Is.GreaterThan(SimTestHelpers.TotalMoles(initialSnapshots[0])));
+
+                Assert.That(finalSnapshots.All(static snapshot => snapshot.IsAwake), Is.True);
+            });
+        }
     }
 
     [Test]

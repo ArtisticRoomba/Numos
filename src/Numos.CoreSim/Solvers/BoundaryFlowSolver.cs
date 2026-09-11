@@ -7,16 +7,12 @@ using Numos.Maths;
 namespace Numos.CoreSim.Solvers;
 
 /// <summary>
-///     Applies deterministic, sequential gas flow across chunk boundaries.
+///     Applies deterministic gas flow across chunk boundaries.
 /// </summary>
 internal sealed class BoundaryFlowSolver : IAtmosSolverStage
 {
     private readonly InjectionBuffer _injectionBuffer = new();
     private readonly List<(Int3 Key, BoundaryFlowEvent Event)> _orderedEvents = [];
-
-    // Scratch set reused across RunQueuedInjections batches to avoid re-deriving heat
-    // capacity from composition for a voxel that's already been touched this batch.
-    private readonly HashSet<ushort> _resyncedVoxels = new();
 
     public void Solve(AtmosSolverExecutionContext context)
     {
@@ -26,7 +22,6 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
 
         _orderedEvents.Clear();
         _injectionBuffer.Clear();
-        _resyncedVoxels.Clear();
         while (boundaryEvents.TryDequeue(out var boundaryEvent))
         {
             // A disabled producer must not leave work for a consumer that resumes on a later tick.
@@ -41,7 +36,7 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
         foreach (var (chunkPosition, boundaryEvent) in _orderedEvents)
             ProcessBoundaryFlow(context, chunkPosition, boundaryEvent, _injectionBuffer);
 
-        RunQueuedInjections(context, context.TickConfig, _injectionBuffer, _resyncedVoxels);
+        RunQueuedInjections(context, context.TickConfig, _injectionBuffer);
         context.World.AddBoundaryProcessingTicks(Stopwatch.GetTimestamp() - startedAt);
     }
 
@@ -49,46 +44,51 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
     {
         _orderedEvents.Clear();
         _injectionBuffer.Clear();
-        _resyncedVoxels.Clear();
     }
 
     private static void RunQueuedInjections(
         AtmosSolverExecutionContext context, AtmosSolverConfigSnapshot config,
-        InjectionBuffer injectionBuffer, HashSet<ushort> resyncedVoxels)
+        InjectionBuffer injectionBuffer)
     {
-        for (int batchIndex = 0; batchIndex < injectionBuffer.Count; batchIndex++)
-        {
-            var batch = injectionBuffer[batchIndex];
-            var chunkPosition = batch.ChunkPosition;
-            if (!context.World.TryGetChunk(chunkPosition, out var chunk))
-                continue;
-
-            // A voxel can appear in this batch multiple times — once per gas
-            // species, once per boundary direction that flowed into/out of it, etc.
-            // InjectCore/InjectGasToVoxel keep TotalHeatCapacity updated incrementally after
-            // every call, so composition only needs to be re-derived from ActiveGases once
-            // per voxel per batch; subsequent events for that voxel can trust the running
-            // total instead of re-summing every active gas from scratch.
-            resyncedVoxels.Clear();
-
-            foreach (var ev in batch.Events)
-            {
-                JoulePerKelvin currentHeatCapacity = resyncedVoxels.Add(ev.LocalVoxelIndex)
-                    ? AtmosSolverMath.CalculateHeatCapacityAtVoxel(config, chunk, ev.LocalVoxelIndex)
-                    : chunk.TotalHeatCapacity[ev.LocalVoxelIndex];
-
-                GasInjectionSolver.Inject(
-                    chunk,
-                    ev.LocalVoxelIndex,
-                    ev.GasId,
-                    ev.Moles,
-                    ev.Temperature,
-                    config,
-                    currentHeatCapacity);
-            }
-        }
+        Parallel.For(
+            0,
+            injectionBuffer.Count,
+            batchIndex =>
+                RunInjectionBatch(context, config, injectionBuffer[batchIndex]));
 
         injectionBuffer.Clear();
+    }
+
+    private static void RunInjectionBatch(
+        AtmosSolverExecutionContext context, AtmosSolverConfigSnapshot config,
+        InjectionBatch batch)
+    {
+        if (!context.World.TryGetChunk(batch.ChunkPosition, out var chunk))
+            return;
+
+        // A voxel can appear in this batch multiple times — once per gas
+        // species, once per boundary direction that flowed into/out of it, etc.
+        // InjectCore/InjectGasToVoxel keep TotalHeatCapacity updated incrementally after
+        // every call, so composition only needs to be re-derived from ActiveGases once
+        // per voxel per batch; subsequent events for that voxel can trust the running
+        // total instead of re-summing every active gas from scratch.
+        batch.ResyncedVoxels.Clear();
+
+        foreach (var ev in batch.Events)
+        {
+            JoulePerKelvin currentHeatCapacity = batch.ResyncedVoxels.Add(ev.LocalVoxelIndex)
+                ? AtmosSolverMath.CalculateHeatCapacityAtVoxel(config, chunk, ev.LocalVoxelIndex)
+                : chunk.TotalHeatCapacity[ev.LocalVoxelIndex];
+
+            GasInjectionSolver.Inject(
+                chunk,
+                ev.LocalVoxelIndex,
+                ev.GasId,
+                ev.Moles,
+                ev.Temperature,
+                config,
+                currentHeatCapacity);
+        }
     }
 
     private static void QueueInjection(
@@ -296,6 +296,7 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
     private sealed class InjectionBatch
     {
         internal readonly List<InjectionEvent> Events = [];
+        internal readonly HashSet<ushort> ResyncedVoxels = [];
         internal Int3 ChunkPosition;
     }
 }
