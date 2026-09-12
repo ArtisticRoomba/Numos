@@ -5,10 +5,6 @@ namespace Numos.CoreSim.Solvers;
 /// <summary>
 ///     Applies one gas injection while keeping mixture SHC, temperature, and pressure coherent.
 /// </summary>
-/// <remarks>
-///     Callers validate the target and wake its room before entry. <see cref="AtmosChunk.InjectGasToVoxel" />
-///     remains the single invariant guard at the storage boundary.
-/// </remarks>
 internal static class GasInjectionSolver
 {
     /// <summary>
