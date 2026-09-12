@@ -99,25 +99,25 @@ public partial class SimulationViewer
             config.GasRegistry.Add(CarbonDioxide);
             config.GasRegistry.Add(NitrousOxide);
             config.GasRegistry.Add(Water);
+
+            var waterSynthesis = new StandardGasReaction(
+                new Dictionary<GasProperties, float>
+                    { { Hydrogen, 2 }, { Oxygen, 1 } },
+                new Dictionary<GasProperties, float>
+                {
+                    { Water, 2 }
+                },
+                285.8f,
+                1.8e13f,
+                146.4f,
+                new Dictionary<GasProperties, float>
+                {
+                    { Hydrogen, 1 },
+                    { Oxygen, 0.5f }
+                });
+
+                config.SolverConfigurations = [new GasReactionConfig(standardReactions: [waterSynthesis])];
         }
-
-        var waterSynthesis = new StandardGasReaction(
-            new Dictionary<GasProperties, float>
-                { { Hydrogen, 2 }, { Oxygen, 1 } },
-            new Dictionary<GasProperties, float>
-            {
-                { Water, 2 }
-            },
-            285.8f,
-            1.8e13f,
-            146.4f,
-            new Dictionary<GasProperties, float>
-            {
-                { Hydrogen, 1 },
-                { Oxygen, 0.5f }
-            });
-
-        config.SolverConfigurations = [new GasReactionConfig(standardReactions: [waterSynthesis])];
 
         AtmosSimulation? simulation = null;
         try
