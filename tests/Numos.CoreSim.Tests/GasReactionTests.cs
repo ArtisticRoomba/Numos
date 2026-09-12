@@ -219,7 +219,7 @@ public class GasReactionTests
                 float temperature = 320f;
                 float[] feedback = new float[2];
                 var SHC = molarity.Sum(m => m * AtmosConfigDefaults.DefaultMolarHeatCapacityAtConstantVolume);
-                new ReactionSolver().ProcessVoxel(1f, molarity.Reverse().ToArray(), ref temperature, feedback, second, gases.Length, ref SHC);
+                new ReactionSolver().ProcessVoxel(1f, molarity.Reverse().ToArray(), ref temperature, feedback, second, gases.Length, SHC);
                 Assert.That(
                     feedback.Select(BitConverter.SingleToInt32Bits),
                     Is.EqualTo(expected.Select(BitConverter.SingleToInt32Bits)));

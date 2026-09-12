@@ -65,7 +65,8 @@ internal class ReactionSolver : IAtmosSolverStage
         Scalar[][]? reactionFeedbacks = reactionCount == null ? null : ArrayPool<Scalar[]>.Shared.Rent(voxelCount);
         int mixtureLength = config.GasPropertyCount;
         Mole[] mixtureVector = ArrayPool<Mole>.Shared.Rent(mixtureLength);
-        for(var voxelIndex = 0; voxelIndex < voxelCount; voxelIndex++)
+        Mole[] oldMixtureVector = ArrayPool<Mole>.Shared.Rent(mixtureLength);
+        for(ushort voxelIndex = 0; voxelIndex < voxelCount; voxelIndex++)
                 //  for (var voxelIndex = 0; voxelIndex < voxelCount; voxelIndex++)
             {
                 Kelvin temp = chunk.Temperature[voxelIndex];
@@ -82,6 +83,7 @@ internal class ReactionSolver : IAtmosSolverStage
                 // get the mixture
                 Mole content = 0f;
                 Array.Clear(mixtureVector, 0, mixtureLength);
+                Array.Clear(oldMixtureVector, 0, mixtureLength);
 
                 for (int i = 0; i < chunk.ActiveGasCount; i++)
                 {
@@ -94,26 +96,26 @@ internal class ReactionSolver : IAtmosSolverStage
 
                 //continue;
 
-                // do actual evaluation of the mixture for reactions.
-                ProcessVoxel(deltaTime, mixtureVector, ref temp, reactionFeedback, config, mixtureLength, ref totalHeatCapacity);
-
-                // adjust temperature of the voxel.
-                chunk.Temperature[voxelIndex] = temp;
-                chunk.TotalHeatCapacity[voxelIndex] = totalHeatCapacity;
-                for (int i = 0; i < chunk.ActiveGasCount; i++)
-                {
-                    chunk.ActiveGases[i].Moles[voxelIndex] = MathF.Max(mixtureVector[chunk.ActiveGases[i].GasId], 0f) ;
-                    mixtureVector[chunk.ActiveGases[i].GasId] = 0f;
-                }
                 for (int i = 0; i < mixtureLength; i++)
                 {
-                    if (mixtureVector[i] == 0f)
-                        continue;
-                    var channel = chunk.GetOrCreateGasChannel(i);
-                    chunk.ActiveGases[channel].Moles[voxelIndex] = MathF.Max(mixtureVector[i], 0f);
+                    oldMixtureVector[i] = mixtureVector[i];
                 }
+                
+                // do actual evaluation of the mixture for reactions.
+                ProcessVoxel(deltaTime, mixtureVector, ref temp, reactionFeedback, config, mixtureLength, totalHeatCapacity);
+
+                List<(int gasId, Mole molesToAdd)> deltas = Enumerable.Range(0, mixtureLength)
+                    .Select(i => (gasId: i, molesToAdd: mixtureVector[i] - oldMixtureVector[i]))
+                    .ToList();
+
+                chunk.InjectGasesToVoxel(
+                        voxelIndex,
+                        deltas,
+                        temp,
+                        config);
             }
         ArrayPool<float>.Shared.Return(mixtureVector);
+        ArrayPool<float>.Shared.Return(oldMixtureVector);
 
         if (reactionCount != null && reactionFeedbacks != null)
         {
@@ -144,7 +146,7 @@ internal class ReactionSolver : IAtmosSolverStage
     /// <param name="totalHeatCapacity"></param>
     internal void ProcessVoxel(
         Second deltaTime, Mole[] mixtureVector, ref Kelvin currentTemperature,
-        Scalar[]? reactionFeedback, IAtmosConfig config, int mixtureLength, ref JoulePerKelvin totalHeatCapacity)
+        Scalar[]? reactionFeedback, IAtmosConfig config, int mixtureLength, JoulePerKelvin totalHeatCapacity)
     {
         var reactions = GasReactionConfig.Get(config);
         GasReactionData[] gasData;
@@ -277,6 +279,8 @@ internal class ReactionSolver : IAtmosSolverStage
             }
         }
 
+        JoulePerKelvin addedHeatCap = 0f;
+
         //apply mixture, this also includes heat, since all change equations contain energy balance.
         for (int i = 0; i < mixtureLength; i++)
         {
@@ -284,9 +288,11 @@ internal class ReactionSolver : IAtmosSolverStage
             {
                 Mole moleChange = gasData[i].Changes[j] * reactionSpeeds[j];
                 mixtureVector[i] = MathF.Max(moleChange + mixtureVector[i], 0f);
-                totalHeatCapacity += moleChange * config.GetMolarHeatCapacityAtConstantVolume(i);
+                addedHeatCap += moleChange > 0f ? moleChange * config.GetMolarHeatCapacityAtConstantVolume(i) : 0f ;
             }
         }
+
+        energy = addedHeatCap * currentTemperature;
 
         for (int j = 0; j < reactionCount; j++)
         {
@@ -304,7 +310,8 @@ internal class ReactionSolver : IAtmosSolverStage
 
         energy = Math.Max(0, energy);
         //adjust temperature based on heat value.
-        currentTemperature = energy / totalHeatCapacity;
+        if (addedHeatCap > 0f)
+            currentTemperature = energy / addedHeatCap;
         //cleanup speeds.
         ArrayPool<float>.Shared.Return(reactionSpeeds);
     }
