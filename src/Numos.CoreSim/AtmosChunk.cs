@@ -500,7 +500,7 @@ internal class AtmosChunk
         if (molesToAdd < 0f && -molesToAdd > currentMoles)
             molesToAdd = -currentMoles;
 
-        ActiveGases[targetChannelIndex].Moles[localVoxelIndex] = currentMoles + molesToAdd;
+        ActiveGases[targetChannelIndex].Moles[localVoxelIndex] = MathF.Max(0f, currentMoles + molesToAdd);
 
         JoulePerKelvin heatCapacityDelta = molesToAdd * effectiveMolarHeatCapacityAtConstantVolume;
 
@@ -566,7 +566,7 @@ internal class AtmosChunk
             if (molesToAdd < 0f && -molesToAdd > currentMoles)
                 molesToAdd = -currentMoles;
 
-            ActiveGases[targetChannelIndex].Moles[localVoxelIndex] = currentMoles + molesToAdd;
+            ActiveGases[targetChannelIndex].Moles[localVoxelIndex] = MathF.Max(0f, currentMoles + molesToAdd);
 
             JoulePerKelvin heatCapacityDelta = molesToAdd * config.GetMolarHeatCapacityAtConstantVolume(gasId);
             totalHeatCapacityDelta += heatCapacityDelta;

@@ -306,7 +306,7 @@ public class GasReactionTests
             chunk.WakeRoom(i);
             for (int j = 0; j < gases.Count; j++)
             {
-                chunk.InjectGasToVoxel(i, j, MathF.Max(0, random.NextSingle() * 10 - 3), random.Next(500), 1, 1);
+                chunk.InjectGasToVoxel(i, j, MathF.Max(0, random.NextSingle() * 10 - 3), random.Next(500), config);
             }
         }
 
