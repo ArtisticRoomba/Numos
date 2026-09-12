@@ -1,6 +1,7 @@
 using Numos.API;
 using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Primitives;
+using Numos.CoreSim.GasReactions;
 using Numos.Maths;
 using Numos.SimDrawer;
 
@@ -8,6 +9,18 @@ namespace Numos.Viewer;
 
 public partial class SimulationViewer
 {
+    private readonly static GasProperties Hydrogen = new()
+    {
+        Name = "Hydrogen",
+        MolarHeatCapacityAtConstantVolume =
+            AtmosPhysicalConstants.IdealDiatomicMolarHeatCapacityAtConstantVolume,
+        BoilingPoint = 20.4f,
+        CondensationEnabled = true,
+        MolarEnthalpyOfVaporization = 904f,
+        LiquidId = 0,
+        DiffusionCoefficient = 0.02f
+    };
+
     private readonly static GasProperties Oxygen = new()
     {
         Name = "Oxygen",
@@ -32,6 +45,42 @@ public partial class SimulationViewer
         DiffusionCoefficient = 0.02f
     };
 
+    private readonly static GasProperties CarbonDioxide = new()
+    {
+        Name = "Carbon Dioxide",
+        MolarHeatCapacityAtConstantVolume = 28.2f,
+        BoilingPoint = 194.7f,
+        CondensationEnabled = true,
+        MolarEnthalpyOfVaporization = 9800f,
+        LiquidId = 0,
+        DiffusionCoefficient = 0.02f
+    };
+
+    private readonly static GasProperties NitrousOxide = new()
+    {
+        Name = "Nitrous Oxide",
+        MolarHeatCapacityAtConstantVolume = 30.3f ,
+        BoilingPoint = 184.71f,
+        CondensationEnabled = true,
+        MolarEnthalpyOfVaporization = 16_540f,
+        LiquidId = 0,
+        DiffusionCoefficient = 0.02f
+    };
+
+    private readonly static GasProperties Water = new()
+    {
+        Name = "Water Vapour",
+        MolarHeatCapacityAtConstantVolume = 28f ,
+        BoilingPoint = 373.15f,
+        CondensationEnabled = true,
+        MolarEnthalpyOfVaporization = 40_657f,
+        LiquidId = 0,
+        DiffusionCoefficient = 0.02f
+    };
+
+
+
+
     private Int3 _chunkDimensions;
 
     private void CreateSimulationProject(
@@ -44,8 +93,30 @@ public partial class SimulationViewer
         var config = new AtmosConfig();
         if (includeDefaultGases)
         {
+            config.GasRegistry.Add(Hydrogen);
             config.GasRegistry.Add(Oxygen);
             config.GasRegistry.Add(Nitrogen);
+            config.GasRegistry.Add(CarbonDioxide);
+            config.GasRegistry.Add(NitrousOxide);
+            config.GasRegistry.Add(Water);
+
+            var waterSynthesis = new StandardGasReaction(
+                new Dictionary<GasProperties, float>
+                    { { Hydrogen, 2 }, { Oxygen, 1 } },
+                new Dictionary<GasProperties, float>
+                {
+                    { Water, 2 }
+                },
+                285.8f,
+                1.8e13f,
+                146.4f,
+                new Dictionary<GasProperties, float>
+                {
+                    { Hydrogen, 1 },
+                    { Oxygen, 0.5f }
+                });
+
+                config.SolverConfigurations = [new GasReactionConfig(standardReactions: [waterSynthesis])];
         }
 
         AtmosSimulation? simulation = null;

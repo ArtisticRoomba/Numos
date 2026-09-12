@@ -477,44 +477,135 @@ internal class AtmosChunk
     /// </summary>
     /// <param name="localVoxelIndex">The flat index of the target voxel within this chunk.</param>
     /// <param name="gasId">The ID of the gas to add.</param>
-    /// <param name="molesToAdd">The number of moles to add.</param>
+    /// <param name="molesToAdd">
+    ///     The number of moles to add. If negative, removes moles instead; the removal is clamped so the
+    ///     voxel's moles of this gas never go below zero, and the removed moles are treated as leaving at
+    ///     the voxel's current temperature rather than <paramref name="temperature"/>.
+    /// </param>
     /// <param name="temperature">The temperature of the injected gas, in kelvins (K).</param>
-    /// <param name="effectiveMolarHeatCapacityAtConstantVolume">
-    ///     The already-resolved, finite, positive molar heat capacity at constant volume, in J/(mol·K).
-    /// </param>
-    /// <param name="pressurePerMoleKelvin">
-    ///     The already-resolved ideal-gas coefficient <c>R/V</c>, in Pa/(mol·K).
-    /// </param>
-    /// TODO
-    /// molesToAdd can be negative, this is helpful but should have related checks.
+    /// <param name="effectiveMolarHeatCapacityAtConstantVolume">The molar heat capacity at constant volume for the injected gas.</param>
+    /// <param name="pressurePerMoleKelvin">The ideal-gas pressure coefficient to use.</param>
     public void InjectGasToVoxel(
         ushort localVoxelIndex, int gasId, Mole molesToAdd, Kelvin temperature,
         JoulePerMoleKelvin effectiveMolarHeatCapacityAtConstantVolume,
         PascalPerMoleKelvin pressurePerMoleKelvin)
     {
-        Debug.Assert(
-            float.IsFinite(effectiveMolarHeatCapacityAtConstantVolume) &&
-            effectiveMolarHeatCapacityAtConstantVolume > 0f);
+        if (!TryBeginGasInjection(localVoxelIndex, out JoulePerKelvin currentHeatCapacity))
+            return;
 
-        Debug.Assert(float.IsFinite(pressurePerMoleKelvin) && pressurePerMoleKelvin > 0f);
+        int targetChannelIndex = GetOrCreateGasChannel(gasId);
+        Mole currentMoles = ActiveGases[targetChannelIndex].Moles[localVoxelIndex];
+
+        // Can't remove more moles than are present.
+        if (molesToAdd < 0f && -molesToAdd > currentMoles)
+            molesToAdd = -currentMoles;
+
+        ActiveGases[targetChannelIndex].Moles[localVoxelIndex] = MathF.Max(0f, currentMoles + molesToAdd);
+
+        JoulePerKelvin heatCapacityDelta = molesToAdd * effectiveMolarHeatCapacityAtConstantVolume;
+
+        // Removed moles were already at the voxel's current temperature, so they shouldn't
+        // pull the temperature blend; only added moles carry the stated temperature.
+        JoulePerKelvin heatCapacityAtStatedTemp = molesToAdd > 0f ? heatCapacityDelta : 0f;
+
+        if (molesToAdd < 0f)
+            temperature = Temperature[localVoxelIndex];
+
+        FinishGasInjection(
+            localVoxelIndex, currentHeatCapacity, heatCapacityDelta, heatCapacityAtStatedTemp, temperature,
+            pressurePerMoleKelvin);
+    }
+
+    /// <summary>
+    ///     Adds gas to a voxel and updates pressure with the supplied ideal-gas pressure coefficient.
+    /// </summary>
+    /// <param name="localVoxelIndex">The flat index of the target voxel within this chunk.</param>
+    /// <param name="gasId">The ID of the gas to add.</param>
+    /// <param name="molesToAdd">
+    ///     The number of moles to add. If negative, removes moles instead; see the coefficient overload
+    ///     for how removals are clamped and treated for temperature purposes.
+    /// </param>
+    /// <param name="temperature">The temperature of the injected gas, in kelvins (K).</param>
+    /// <param name="config"> AtmosConfig containing gas information </param>
+    public void InjectGasToVoxel(
+        ushort localVoxelIndex, int gasId, Mole molesToAdd, Kelvin temperature, IAtmosConfig config)
+    {
+        InjectGasToVoxel(
+            localVoxelIndex, gasId, molesToAdd, temperature,
+            config.GetMolarHeatCapacityAtConstantVolume(gasId), config.PressurePerMoleKelvin);
+    }
+
+    /// <summary>
+    ///     Adds gas to a voxel and updates pressure with the supplied ideal-gas pressure coefficient.
+    /// </summary>
+    /// <param name="localVoxelIndex">The flat index of the target voxel within this chunk.</param>
+    /// <param name="gasesToAdd">
+    ///     gasId to add and amount of moles of each. A negative amount removes moles instead, clamped so
+    ///     that gas never goes below zero; removed moles are treated as leaving at the voxel's current
+    ///     temperature, while added moles carry <paramref name="temperature"/>.
+    /// </param>
+    /// <param name="temperature">The temperature of the injected gas, in kelvins (K).</param>
+    /// <param name="config"> AtmosConfig containing gas information </param>
+    public void InjectGasesToVoxel(
+        ushort localVoxelIndex, List<(int gasId, Mole molesToAdd)> gasesToAdd, Kelvin temperature,
+        IAtmosConfig config)
+    {
+        if (!TryBeginGasInjection(localVoxelIndex, out JoulePerKelvin currentHeatCapacity))
+            return;
+
+        JoulePerKelvin totalHeatCapacityDelta = 0f;
+        JoulePerKelvin heatCapacityAtStatedTemp = 0f;
+
+        foreach (var (gasId, requestedMolesToAdd) in gasesToAdd)
+        {
+            int targetChannelIndex = GetOrCreateGasChannel(gasId);
+            Mole currentMoles = ActiveGases[targetChannelIndex].Moles[localVoxelIndex];
+
+            Mole molesToAdd = requestedMolesToAdd;
+            // Can't remove more moles than are present.
+            if (molesToAdd < 0f && -molesToAdd > currentMoles)
+                molesToAdd = -currentMoles;
+
+            ActiveGases[targetChannelIndex].Moles[localVoxelIndex] = MathF.Max(0f, currentMoles + molesToAdd);
+
+            JoulePerKelvin heatCapacityDelta = molesToAdd * config.GetMolarHeatCapacityAtConstantVolume(gasId);
+            totalHeatCapacityDelta += heatCapacityDelta;
+
+            // Removed moles leave at the voxel's current temperature, so only added
+            // moles contribute heat capacity at the stated injection temperature.
+            if (molesToAdd > 0f)
+                heatCapacityAtStatedTemp += heatCapacityDelta;
+        }
+
+        FinishGasInjection(
+            localVoxelIndex, currentHeatCapacity, totalHeatCapacityDelta, heatCapacityAtStatedTemp, temperature,
+            config.PressurePerMoleKelvin);
+    }
+
+    /// <summary>
+    ///     Checks whether a voxel can receive gas and, if so, wakes its room and returns its current heat capacity.
+    /// </summary>
+    private bool TryBeginGasInjection(ushort localVoxelIndex, out JoulePerKelvin currentHeatCapacity)
+    {
+        currentHeatCapacity = default;
 
         int room = VoxelRoomMap[localVoxelIndex];
-        if (room == VoxelClassification.RoomSolid)
-            return;
-
-        if (room == VoxelClassification.RoomVoid)
-            return;
+        if (room is VoxelClassification.RoomSolid or VoxelClassification.RoomVoid)
+            return false;
 
         if (!IsAwake)
             WakeRoom(room);
 
         SleepTimer = 0;
+        currentHeatCapacity = TotalHeatCapacity[localVoxelIndex];
+        return true;
+    }
 
-        JoulePerKelvin currentHeatCapacity = TotalHeatCapacity[localVoxelIndex];
-
-        int targetChannelIndex = GetOrCreateGasChannel(gasId);
-
-        ActiveGases[targetChannelIndex].Moles[localVoxelIndex] += molesToAdd;
+    private void FinishGasInjection(
+        ushort localVoxelIndex, JoulePerKelvin currentHeatCapacity, JoulePerKelvin totalHeatCapacityDelta,
+        JoulePerKelvin heatCapacityAtStatedTemp, Kelvin temperature, PascalPerMoleKelvin pressurePerMoleKelvin)
+    {
+        JoulePerKelvin newHeatCapacity = currentHeatCapacity + totalHeatCapacityDelta;
 
         Mole currentTotalMoles = 0f;
         for (int g = 0; g < ActiveGasCount; g++)
@@ -522,14 +613,14 @@ internal class AtmosChunk
             currentTotalMoles += ActiveGases[g].Moles[localVoxelIndex];
         }
 
-        JoulePerKelvin incomingHeatCapacity = molesToAdd * effectiveMolarHeatCapacityAtConstantVolume;
-        JoulePerKelvin newHeatCapacity = currentHeatCapacity + incomingHeatCapacity;
         Kelvin currentTemp = Temperature[localVoxelIndex];
         Kelvin newTemp = currentHeatCapacity > 0f && newHeatCapacity > 0f
             ? currentTemp == temperature
                 ? currentTemp
                 // Interpolation avoids the overflow-prone sum C1*T1 + C2*T2.
-                : currentTemp + (temperature - currentTemp) * incomingHeatCapacity / newHeatCapacity
+                // Only heat capacity added at `temperature` shifts the blend; removed
+                // moles leave at the voxel's current temperature and don't affect it.
+                : currentTemp + (temperature - currentTemp) * heatCapacityAtStatedTemp / newHeatCapacity
             : temperature;
 
         TotalHeatCapacity[localVoxelIndex] = newHeatCapacity;
