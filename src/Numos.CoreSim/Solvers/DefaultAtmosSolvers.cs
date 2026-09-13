@@ -23,7 +23,6 @@ internal sealed class DefaultAtmosSolvers : IDisposable
 
     public void Dispose()
     {
-        _advection.Dispose();
         _thermodynamics.Dispose();
     }
 

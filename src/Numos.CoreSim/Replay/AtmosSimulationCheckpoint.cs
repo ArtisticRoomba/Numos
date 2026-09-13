@@ -21,7 +21,7 @@ public sealed class AtmosSimulationCheckpoint
     /// <summary>
     ///     Identifies the structural and deterministic-math contract required to restore this data.
     /// </summary>
-    public const int CurrentCompatibilityVersion = 1;
+    public const int CurrentCompatibilityVersion = 2;
 
     internal AtmosSimulationCheckpoint(
         Int3 dimensions, AtmosTimelinePosition position, Second elapsedAccumulator,

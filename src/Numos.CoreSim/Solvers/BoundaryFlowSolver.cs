@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Diagnostics;
 using CommunityToolkit.HighPerformance.Helpers;
 using Numos.CoreSim.Datatypes.Events;
@@ -13,29 +12,37 @@ namespace Numos.CoreSim.Solvers;
 internal sealed class BoundaryFlowSolver : IAtmosSolverStage
 {
     private readonly InjectionBuffer _injectionBuffer = new();
-    private readonly List<(Int3 Key, BoundaryFlowEvent Event)> _orderedEvents = [];
+    private readonly List<BoundaryEventBatch<BoundaryFlowEvent>> _orderedBatches = [];
 
     public void Solve(AtmosSolverExecutionContext context)
     {
         long startedAt = Stopwatch.GetTimestamp();
-        ConcurrentQueue<(int TickCount, Int3 Key, BoundaryFlowEvent Event)> boundaryEvents =
-            BoundaryEvents<BoundaryFlowEvent>.Get(context);
+        BoundaryEventBatchStorage<BoundaryFlowEvent> boundaryBatches =
+            BoundaryEventBatches<BoundaryFlowEvent>.Get(context);
 
-        _orderedEvents.Clear();
+        _orderedBatches.Clear();
         _injectionBuffer.Clear();
-        while (boundaryEvents.TryDequeue(out var boundaryEvent))
+        if (!boundaryBatches.TryConsume(context.TickCount))
         {
-            // A disabled producer must not leave work for a consumer that resumes on a later tick.
-            if (boundaryEvent.TickCount == context.TickCount)
-                _orderedEvents.Add((boundaryEvent.Key, boundaryEvent.Event));
+            context.World.AddBoundaryProcessingTicks(Stopwatch.GetTimestamp() - startedAt);
+            return;
         }
 
-        // presort events by chunk position and voxel index.
-        // helps with determinism and makes memory access more cache-friendly when processing events in order.
-        _orderedEvents.Sort(CompareEvents);
+        for (int batchIndex = 0; batchIndex < boundaryBatches.Count; batchIndex++)
+        {
+            BoundaryEventBatch<BoundaryFlowEvent> batch = boundaryBatches[batchIndex];
+            if (batch.Count > 0)
+                _orderedBatches.Add(batch);
+        }
 
-        foreach (var (chunkPosition, boundaryEvent) in _orderedEvents)
-            ProcessBoundaryFlow(context, chunkPosition, boundaryEvent, _injectionBuffer);
+        // Workers preserve ActiveAirIndices order inside each batch. Sorting only the batch headers therefore
+        // produces the same chunk-position and voxel-index order without copying and sorting every event.
+        _orderedBatches.Sort(CompareBatches);
+        foreach (BoundaryEventBatch<BoundaryFlowEvent> batch in _orderedBatches)
+        {
+            for (int eventIndex = 0; eventIndex < batch.Count; eventIndex++)
+                ProcessBoundaryFlow(context, batch.Key, batch[eventIndex], _injectionBuffer);
+        }
 
         RunQueuedInjections(context, context.TickConfig, _injectionBuffer);
         context.World.AddBoundaryProcessingTicks(Stopwatch.GetTimestamp() - startedAt);
@@ -43,7 +50,7 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
 
     internal void ClearTransientState()
     {
-        _orderedEvents.Clear();
+        _orderedBatches.Clear();
         _injectionBuffer.Clear();
     }
 
@@ -238,15 +245,11 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
         sourceChunk.MarkChanged();
     }
 
-    // TODO comparison should likely compare index instead of int3 position
-    private static int CompareEvents(
-        (Int3 Key, BoundaryFlowEvent Event) left,
-        (Int3 Key, BoundaryFlowEvent Event) right)
+    private static int CompareBatches(
+        BoundaryEventBatch<BoundaryFlowEvent> left,
+        BoundaryEventBatch<BoundaryFlowEvent> right)
     {
-        int comparison = AtmosSolverMath.CompareChunkPositions(left.Key, right.Key);
-        return comparison != 0
-            ? comparison
-            : left.Event.LocalVoxelIndex.CompareTo(right.Event.LocalVoxelIndex);
+        return AtmosSolverMath.CompareChunkPositions(left.Key, right.Key);
     }
 
     /// <summary>

@@ -215,7 +215,9 @@ next state. Numos fixes the order wherever concurrent scheduling could otherwise
 
 - Solver stages run in their configured pipeline order.
 - Each tick receives chunks ordered by grid X, then Y, then Z.
-- Work inside separate chunks can run in parallel because each chunk owns its local writes.
+- Advection runs ordered phases. A gas job owns one delta row, a voxel tile owns its persistent voxel writes, and shared
+  values are gathered in fixed direction or gas order.
+- Work inside separate chunks can run in parallel because each chunk owns its local state.
 - Cross-chunk flow and thermal boundary work are collected and sorted before the single-threaded application step.
 - Reaction factors use stable ordinal gas-name and parameter order instead of parallel completion order.
 
@@ -282,18 +284,14 @@ Profiling data, unused pooled storage, delegates, object identities, and present
 digest is also not a serialized checkpoint format; matching hashes only show that the states covered by this contract
 match.
 
-`AtmosReplayGoldenCorpusTests.GoldenGridV1_HashesAndReplayRemainStable` fixes the initial schema/profile 1 corpus on
-.NET 10 Linux x64:
-
-| Completed tick | Digest             |
-|----------------|--------------------|
-| 4              | `44ef7f5394f7ab04` |
-| 8              | `0c801ac53607d4b3` |
-| 12             | `878c59b9a9ee02ae` |
+Compatibility profile 2 begins with the phase-parallel advection reduction order. Profile 1 checkpoints are rejected
+because their floating-point accumulation order can produce different continuation state. The
+`AdvectionParallelDeterminismTests.Advection_ParallelPhasesMatchGoldenHash` regression fixes the profile 2 advection
+digest to `cfe55817a0f6269e` and is run in separate processes with 1, 2, 4, 8, and 16 reported processors.
 
 The test suite also exercises concurrent capture, cross-chunk flow, multiple gases, configuration and registry changes,
 sleep and wake state, topology replacement, mixture transfers, exact same-tick sequences, custom solvers, late inputs,
-invalid histories, and repeated backward and forward reconstruction. Run the golden corpus on a new runtime or
+invalid histories, and repeated backward and forward reconstruction. Run the determinism tests on a new runtime or
 instruction-set architecture before claiming bitwise compatibility there. Investigate the first divergent position
 before changing a golden value.
 

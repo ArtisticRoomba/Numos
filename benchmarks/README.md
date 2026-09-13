@@ -46,6 +46,19 @@ dotnet run -c Release --project benchmarks/Numos.CoreSim.Benchmarks -- --anyCate
 NUMOS_BENCHMARK_FULL=1 dotnet run -c Release --project benchmarks/Numos.CoreSim.Benchmarks -- --anyCategories Scaling --exporters csv
 ```
 
+The parallel advection sweep runs two fixed transient workloads at 1, 2, 4, 8, and 16 reported processors: 128 dense
+8×8×8 chunks with 32 gases, and one dense 16×16×16 chunk with 32 gases. Both cases invoke only the advection stage.
+
+```bash
+dotnet run -c Release --project benchmarks/Numos.CoreSim.Benchmarks -- \
+  --filter '*ParallelScalingBenchmarks*' --exporters csv
+```
+
+Compare each workload's worker jobs against `Workers=1`. The primary 128-chunk gate expects at least 3× speedup at four
+workers, the eight-worker result to be no slower than four workers, and the one-worker result to remain within 10% of
+the prior baseline. The dense single-chunk case tracks the intra-chunk gain separately and catches a return to
+chunk-only scheduling.
+
 ## Analyze scaling output
 
 The plotting script reads the dimensions embedded in BenchmarkDotNet CSV output and creates linear, log-log, normalized
