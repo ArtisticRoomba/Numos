@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using CommunityToolkit.HighPerformance.Helpers;
 using Numos.CoreSim.Datatypes.Events;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.Maths;
@@ -50,11 +51,10 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
         AtmosSolverExecutionContext context, AtmosSolverConfigSnapshot config,
         InjectionBuffer injectionBuffer)
     {
-        Parallel.For(
+        ParallelHelper.For(
             0,
             injectionBuffer.Count,
-            batchIndex =>
-                RunInjectionBatch(context, config, injectionBuffer[batchIndex]));
+            new RunInjectionBatchAction(context, config, injectionBuffer));
 
         injectionBuffer.Clear();
     }
@@ -298,5 +298,16 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
         internal readonly List<InjectionEvent> Events = [];
         internal readonly HashSet<ushort> ResyncedVoxels = [];
         internal Int3 ChunkPosition;
+    }
+
+    private readonly struct RunInjectionBatchAction(
+        AtmosSolverExecutionContext context,
+        AtmosSolverConfigSnapshot config,
+        InjectionBuffer injectionBuffer) : IAction
+    {
+        public void Invoke(int index)
+        {
+            RunInjectionBatch(context, config, injectionBuffer[index]);
+        }
     }
 }

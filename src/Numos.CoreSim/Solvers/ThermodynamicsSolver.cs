@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using CommunityToolkit.HighPerformance.Helpers;
 using Numos.CoreSim.Datatypes.Events;
 using Numos.Maths;
 
@@ -28,7 +29,9 @@ internal sealed class ThermodynamicsSolver : IAtmosSolverStage, IDisposable
             BoundaryEvents<ThermalBoundaryEvent>.Get(context);
 
         boundaryEvents.Clear();
-        Parallel.ForEach(context.Chunks, chunk => SolveChunk(context, chunk, boundaryEvents));
+        ParallelHelper.ForEach<AtmosChunk, SolveChunkAction>(
+            context.Chunks,
+            new SolveChunkAction(this, context, boundaryEvents));
     }
 
     public void Dispose()
@@ -50,5 +53,16 @@ internal sealed class ThermodynamicsSolver : IAtmosSolverStage, IDisposable
 
         for (int index = 0; index < boundaryCount; index++)
             boundaryEvents.Enqueue((context.TickCount, chunk.GridPosition, boundaryBuffer[index]));
+    }
+
+    private readonly struct SolveChunkAction(
+        ThermodynamicsSolver solver,
+        AtmosSolverExecutionContext context,
+        ConcurrentQueue<(int TickCount, Int3 Key, ThermalBoundaryEvent Event)> boundaryEvents) : IInAction<AtmosChunk>
+    {
+        public void Invoke(in AtmosChunk chunk)
+        {
+            solver.SolveChunk(context, chunk, boundaryEvents);
+        }
     }
 }

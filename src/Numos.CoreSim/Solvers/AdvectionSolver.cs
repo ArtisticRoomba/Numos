@@ -2,6 +2,7 @@ using System.Buffers;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Numerics.Tensors;
+using CommunityToolkit.HighPerformance.Helpers;
 using Numos.CoreSim.Datatypes.Events;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.Maths;
@@ -48,7 +49,9 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
             BoundaryEvents<BoundaryFlowEvent>.Get(context);
 
         boundaryEvents.Clear();
-        Parallel.ForEach(context.Chunks, chunk => SolveChunk(context, chunk, boundaryEvents));
+        ParallelHelper.ForEach<AtmosChunk, SolveChunkAction>(
+            context.Chunks,
+            new SolveChunkAction(this, context, boundaryEvents));
     }
 
     public void Dispose()
@@ -488,14 +491,15 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
                 ushort neighborIndex = cache.Indices[slotBase + n];
                 // This is to stop infinite spread of low amounts of gas
                 // Only for diffusion
-                if (molesDiffused < AtmosSolverConstants.MinimumTrackedMoles 
-                    && chunk.ActiveGases[gas].Moles?[neighborIndex] + molesDiffused < AtmosSolverConstants.MinimumTrackedMoles)
+                if (molesDiffused < AtmosSolverConstants.MinimumTrackedMoles &&
+                    chunk.ActiveGases[gas].Moles?[neighborIndex] + molesDiffused < AtmosSolverConstants.MinimumTrackedMoles)
                 {
                     // Undo movement out of voxel
                     moleDeltas[deltaOffset + voxelIndex] += molesDiffused;
                     energyDeltas[voxelIndex] += energyTransferred;
                     continue;
                 }
+
                 moleDeltas[deltaOffset + neighborIndex] += molesDiffused;
                 energyDeltas[neighborIndex] += energyTransferred;
             }
@@ -758,6 +762,17 @@ internal sealed class AdvectionSolver : IAtmosSolverStage, IDisposable
                 Indices = new ushort[newSlotCount];
                 IsVoid = new bool[newSlotCount];
             }
+        }
+    }
+
+    private readonly struct SolveChunkAction(
+        AdvectionSolver solver,
+        AtmosSolverExecutionContext context,
+        ConcurrentQueue<(int TickCount, Int3 Key, BoundaryFlowEvent Event)> boundaryEvents) : IInAction<AtmosChunk>
+    {
+        public void Invoke(in AtmosChunk chunk)
+        {
+            solver.SolveChunk(context, chunk, boundaryEvents);
         }
     }
 }
