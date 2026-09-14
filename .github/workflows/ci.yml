@@ -95,13 +95,18 @@ jobs:
           dotnet new console --framework net10.0 --output "$consumer"
           dotnet package add Numos.CoreSim --version "$(python3 eng/version.py get coresim)" --no-restore --project "$consumer"
           dotnet package add Numos.API.Dangerous --version "$(python3 eng/version.py get coresim)" --no-restore --project "$consumer"
+          dotnet package add Numos.Serialization.FileSystem --version "$(python3 eng/version.py get coresim)" --no-restore --project "$consumer"
           dotnet package add Numos.Viewer --version "$(python3 eng/version.py get viewer)" --no-restore --project "$consumer"
           cat > "$consumer/Program.cs" <<'EOF'
           using Numos.API;
           using Numos.API.Dangerous;
+          using Numos.Serialization;
+          using Numos.Serialization.FileSystem;
 
           using var simulation = new AtmosSimulation();
           _ = simulation.Dangerous();
+          _ = typeof(NumosReplaySerializer);
+          _ = typeof(NumosReplayFile);
           EOF
           dotnet restore "$consumer" \
             --source "$GITHUB_WORKSPACE/artifacts/packages" \

@@ -137,7 +137,7 @@ public partial class SimulationViewer
         catch (Exception exception) when (
             exception is ArgumentOutOfRangeException or InvalidOperationException)
         {
-            SetProjectMessage(exception.Message, true);
+            WriteException("Could not add the chunk", exception);
         }
     }
 
@@ -169,7 +169,7 @@ public partial class SimulationViewer
         }
         catch (KeyNotFoundException exception)
         {
-            SetProjectMessage(exception.Message, true);
+            WriteException("Could not seal the chunk", exception);
         }
     }
 
@@ -276,7 +276,7 @@ public partial class SimulationViewer
         catch (Exception exception) when (
             exception is ArgumentOutOfRangeException or KeyNotFoundException or InvalidOperationException)
         {
-            SetProjectMessage(exception.Message, true);
+            WriteException("Could not inject gas", exception);
         }
     }
 

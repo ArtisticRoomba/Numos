@@ -71,6 +71,7 @@ The main replay types have separate jobs:
 | `AtmosStateHash`            | A timeline position and non-cryptographic digest used to detect divergent continuation state. |
 | `AtmosReplayResult`         | Reconstruction diagnostics from a successful `ReplayTo` or timeline seek.                     |
 | `AtmosReplayTimeline`       | An in-memory controller that retains checkpoints and history for inspection or branching.     |
+| `AtmosReplayArchive`        | One initial checkpoint, semantic operations, bounds, and initial/final verification hashes.   |
 
 ## A position needs both tick and sequence
 
@@ -119,22 +120,22 @@ replaying from inside a solver tick are rejected.
 Checkpoints are complete continuation states that Numos can restore and resimulate from. They copy the authoritative
 grid state, so retained checkpoint memory generally grows with the captured simulation.
 
-| State                         | Checkpoint behavior                                                                                                                                                        |
-|-------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Timeline and fixed-step clock | Captures the completed tick, last operation sequence, and residual `Update` accumulator exactly.                                                                           |
-| Applied configuration         | Captures normalized scalar settings, ordered gas definitions, and immutable solver configurations. Gas IDs keep their existing index meaning; restore does not remap them. |
-| Chunk storage                 | Captures position, dimensions, awake state, sleep timer, classifications, temperatures, valid gas channels, and per-voxel moles.                                           |
-| Continuation caches           | Captures pressure, heat capacity, and the valid active-air prefix exactly. Disabled stages and sleeping chunks can leave meaningful cached state behind.                   |
-| Solver pipeline               | Captures enable flags and records names, custom/built-in kinds, and execution order for compatibility validation.                                                          |
-| Solver arrays                 | Captures arrays created with `captureForRollback: true`, including stable field names, exact element types, lengths, and values. Transient arrays are excluded.            |
-| Pooled storage                | Copies only valid entries. Pool capacity and unused array tails are not simulation state.                                                                                  |
+| State                 | Checkpoint behavior                                                                                                                                                        |
+|-----------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Timeline              | Captures the completed tick and last semantic operation sequence.                                                                                                          |
+| Applied configuration | Captures normalized scalar settings, ordered gas definitions, and immutable solver configurations. Gas IDs keep their existing index meaning; restore does not remap them. |
+| Chunk storage         | Captures position, dimensions, awake state, sleep timer, classifications, temperatures, valid gas channels, and per-voxel moles.                                           |
+| Continuation caches   | Captures pressure, heat capacity, and the valid active-air prefix exactly. Disabled stages and sleeping chunks can leave meaningful cached state behind.                   |
+| Solver pipeline       | Captures enable flags and records names, custom/built-in kinds, and execution order for compatibility validation.                                                          |
+| Solver arrays         | Captures arrays created with `captureForRollback: true`, including stable field names, exact element types, lengths, and values. Transient arrays are excluded.            |
+| Pooled storage        | Copies only valid entries. Pool capacity and unused array tails are not simulation state.                                                                                  |
 
 `AtmosChunkSnapshot` serves presentation and replication reads; it is not a continuation checkpoint. Checkpoints use
 full detached copies. The current implementation has no copy-on-write storage, delta compression, or incremental hash.
 `PayloadBytes` reports bytes in copied chunk and solver arrays and excludes managed object headers, field names, and
-shared configuration. Checkpoints with solver configurations use schema 3. Without solver configurations, captured
-solver arrays use schema 2 and base-state checkpoints retain schema 1 and its existing hashes. Restore accepts all three
-schemas under the same deterministic-math compatibility profile. Solver configuration keys and deterministic hashes
+shared configuration. The current clock-free checkpoint schema is version 4 and compatibility profile 2. Replay remains
+experimental, so older in-memory checkpoint schemas are rejected rather than translated. Solver configuration keys and
+deterministic hashes
 contribute to the state hash; their immutable snapshots supply the actual restored settings. A custom configuration must
 capture every authoritative value and keep its snapshot immutable.
 
@@ -259,8 +260,8 @@ while live also allocates a detached recording batch.
 the timeline's initial checkpoint remain incorporated at its start tick. Use `SeekPosition` when a UI or debugger must
 select the state after a particular operation at that same tick.
 
-The first seek stops recording and preserves the live head. `ReturnToHead()` restores that checkpoint, including the
-elapsed-time remainder, and resumes the same recording. `SimulateFromHere()` is destructive to the controller's
+The first seek stops recording and preserves the live head. `ReturnToHead()` restores that checkpoint and resumes the
+same recording. `SimulateFromHere()` is destructive to the controller's
 in-memory future: it removes later operations and checkpoints, makes the selected state the new head, and resumes
 recording there.
 
@@ -274,7 +275,7 @@ exact checkpoint seek, the UI reports whether reconstruction matched that refere
 digest. `AtmosSimulationCheckpoint.ComputeStateHash()` produces the same result without accessing a live simulation. The
 hash is a fast regression and replay check, not a cryptographic authenticity mechanism.
 
-The canonical encoding includes checkpoint and compatibility metadata, timeline position, elapsed accumulator,
+The canonical encoding includes checkpoint and compatibility metadata, timeline position,
 normalized configuration, solver enable flags, and all chunk continuation data. Chunks are sorted by X, then Y, then Z.
 Gas-channel order is preserved because it can affect floating-point reductions. Integers and
 raw IEEE 754 single-precision bits use explicit little-endian encoding. Strings use length-prefixed little-endian UTF-16
@@ -284,12 +285,7 @@ Profiling data, unused pooled storage, delegates, object identities, and present
 digest is also not a serialized checkpoint format; matching hashes only show that the states covered by this contract
 match.
 
-Compatibility profile 2 begins with the phase-parallel advection reduction order. Profile 1 checkpoints are rejected
-because their floating-point accumulation order can produce different continuation state. The
-`AdvectionParallelDeterminismTests.Advection_ParallelPhasesMatchGoldenHash` regression fixes the profile 2 advection
-digest to `cfe55817a0f6269e` and is run in separate processes with 1, 2, 4, 8, and 16 reported processors.
-
-The test suite also exercises concurrent capture, cross-chunk flow, multiple gases, configuration and registry changes,
+The test suite exercises concurrent capture, cross-chunk flow, multiple gases, configuration and registry changes,
 sleep and wake state, topology replacement, mixture transfers, exact same-tick sequences, custom solvers, late inputs,
 invalid histories, and repeated backward and forward reconstruction. Run the determinism tests on a new runtime or
 instruction-set architecture before claiming bitwise compatibility there. Investigate the first divergent position
@@ -313,6 +309,34 @@ dotnet run --project benchmarks/Numos.Replay.Benchmarks -c Release
 dotnet run --project benchmarks/Numos.Replay.Benchmarks -c Release -- --quick
 ```
 
-The current replay surface is in-memory. Numos does not yet provide versioned binary serialization, network transport,
-compressed checkpoints, incremental hashing, replay of dynamic solver-definition changes, restoration of detached
-mixture identity, or certified bitwise compatibility across runtime and CPU architectures.
+## Save portable replay files
+
+`Numos.Serialization` turns an `AtmosReplayArchive` into a versioned binary stream without opening files. The separate
+`Numos.Serialization.FileSystem` package adds path-based load and atomic save helpers.
+
+```csharp
+using Numos.Serialization;
+
+AtmosReplayArchive replay = timeline.CaptureReplay();
+var metadata = new NumosReplayMetadata(
+    "Pressure test",
+    DateTimeOffset.UtcNow,
+    "MyGame",
+    "1.0.0",
+    CoreSimBuildInfo.PackageVersion);
+
+using Stream destination = GetHostOwnedStream();
+NumosReplaySerializer.Serialize(destination, new NumosReplayDocument(metadata, replay));
+```
+
+A `.numos` replay contains a small provenance header, one complete initial checkpoint, and length-prefixed semantic
+opcodes. It stores initial and final state hashes. The Viewer verifies both and generates scrub checkpoints every 50
+ticks after loading, so those large acceleration snapshots never enter the file.
+
+The first file format supports built-in Numos simulation state. Saving or loading reports and rejects custom solver
+delegates, solver configurations, and captured solver arrays because a standalone viewer cannot reconstruct their host
+implementations. Unknown required versions, sections, and opcodes are rejected; optional length-prefixed metadata can be
+skipped by future readers. Payload limits are configurable through `NumosReplayReadOptions`.
+
+Numos does not yet provide compression, network transport, replay of dynamic solver-definition changes, restoration of
+detached mixture identity, or certified bitwise compatibility across runtime and CPU architectures.

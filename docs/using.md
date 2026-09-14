@@ -235,4 +235,5 @@ The dangerous surface may bypass validation and is allowed to change more aggres
 simulation, exact tick/sequence replay and stable state hashes. `AtmosReplayTimeline` retains history for inspection,
 can continue simulation from a selected historical state, and drives the Viewer’s horizontal Timeline panel.
 See [deterministic replay](deterministic_replay.md)
-for examples, compatibility rules, detached-mixture scope and benchmark commands.
+for examples, the optional `Numos.Serialization` and `Numos.Serialization.FileSystem` packages, compatibility rules,
+detached-mixture scope and benchmark commands.

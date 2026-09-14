@@ -14,7 +14,6 @@ public partial class SimulationViewer
     private bool _refreshingReplay;
     private float _replayElapsed;
     private AtmosReplayTimeline? _replayTimeline;
-    private bool _showClockOperations;
     private bool _showTimelinePanel = true;
     private bool _simulateWhileScrubbing = true;
     private string? _timelineError;
@@ -98,18 +97,7 @@ public partial class SimulationViewer
                 ? "The simulation updates whenever the scrubber crosses a tick."
                 : "The simulation updates when the scrubber is released.");
 
-        ImGui.SameLine();
-        ImGui.Checkbox("Show clock bookkeeping", ref _showClockOperations);
-        ImGuiExtensions.QuestionTooltip(
-            "Elapsed-time accumulator updates are required for exact continuation, but are hidden by default because they are not host-authored simulation operations.");
-
-        IReadOnlyList<AtmosRecordedOperation> operations = _showClockOperations
-            ? timeline.Operations
-            : timeline.Operations.Where(static operation =>
-                operation.Code != AtmosOperationCode.SetElapsedAccumulator).ToArray();
-
-        if (!_showClockOperations && _timelineOperation?.Code == AtmosOperationCode.SetElapsedAccumulator)
-            _timelineOperation = null;
+        IReadOnlyList<AtmosRecordedOperation> operations = timeline.Operations;
 
         DrawTimelineTrack(timeline, operations);
         if (_pendingScrubTick.HasValue && ImGui.IsMouseReleased(ImGuiMouseButton.Left))
@@ -212,6 +200,7 @@ public partial class SimulationViewer
             catch (Exception exception)
             {
                 _timelineError = exception.Message;
+                WriteException("Could not branch the replay timeline", exception);
             }
 
             _isPaused = true;
@@ -226,9 +215,6 @@ public partial class SimulationViewer
 
     private void DrawReplayStatus(AtmosReplayTimeline timeline)
     {
-        if (_timelineError != null)
-            ImGui.TextColored(ViewerTheme.Error, $"Replay failed: {_timelineError}");
-
         if (timeline.LastReplay is { } replay)
         {
             if (ImGui.BeginTable(
@@ -599,6 +585,7 @@ public partial class SimulationViewer
         catch (Exception exception)
         {
             _timelineError = exception.Message;
+            WriteException($"Could not seek the replay to tick {tick}", exception);
         }
 
         RefreshReplayPresentation();
@@ -615,6 +602,7 @@ public partial class SimulationViewer
         catch (Exception exception)
         {
             _timelineError = exception.Message;
+            WriteException("Could not seek the replay", exception);
         }
 
         RefreshReplayPresentation();

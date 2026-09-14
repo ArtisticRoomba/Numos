@@ -176,7 +176,6 @@ internal sealed partial class AtmosKernel
         lock (_stateGate)
         {
             ThrowIfTickExecuting("update the simulation recursively");
-            Second previousAccumulator = _accumulator;
             _accumulator += elapsedSeconds;
 
             if (_accumulator > AtmosSolverConstants.FixedTimeStep * AtmosSolverConstants.MaximumStepsPerUpdate)
@@ -198,9 +197,6 @@ internal sealed partial class AtmosKernel
                 steps++;
                 TickSimulation(chunks);
             }
-
-            if (ShouldRecord && BitConverter.SingleToInt32Bits(previousAccumulator) != BitConverter.SingleToInt32Bits(_accumulator))
-                RecordOperation(new SetElapsedAccumulatorOperation(_accumulator));
         }
     }
 

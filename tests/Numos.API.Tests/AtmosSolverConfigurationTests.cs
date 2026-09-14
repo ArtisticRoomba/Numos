@@ -1,5 +1,6 @@
 using Numos.CoreSim;
 using Numos.CoreSim.GasReactions;
+using Numos.CoreSim.Replay;
 
 namespace Numos.API.Tests;
 
@@ -24,7 +25,9 @@ public sealed class AtmosSolverConfigurationTests
         var checkpoint = simulation.CaptureCheckpoint();
         settings.Value = 9;
         Assert.That(((SettingsSnapshot)simulation.Config.SolverConfigurations.Single()).Value, Is.EqualTo(2));
-        Assert.That(checkpoint.FormatVersion, Is.EqualTo(3));
+        Assert.That(
+            checkpoint.FormatVersion,
+            Is.EqualTo(AtmosSimulationCheckpoint.CurrentFormatVersion));
 
         simulation.StartRecording();
         simulation.Tick();

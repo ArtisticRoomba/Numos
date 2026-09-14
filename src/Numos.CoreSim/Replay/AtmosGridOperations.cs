@@ -134,6 +134,23 @@ public sealed record SetVoxelMixtureOperation : AtmosOperation
                 .ToArray());
     }
 
+    internal SetVoxelMixtureOperation(
+        Int3 position,
+        ushort localVoxelIndex,
+        Kelvin temperature,
+        Pascal pressure,
+        JoulePerKelvin heatCapacity,
+        IEnumerable<AtmosGasAmount> gases)
+    {
+        ArgumentNullException.ThrowIfNull(gases);
+        Position = position;
+        LocalVoxelIndex = localVoxelIndex;
+        Temperature = temperature;
+        Pressure = pressure;
+        HeatCapacity = heatCapacity;
+        Gases = Array.AsReadOnly(gases.ToArray());
+    }
+
     /// <inheritdoc />
     public override AtmosOperationCode Code => AtmosOperationCode.SetVoxelMixture;
 
@@ -174,14 +191,3 @@ public sealed record SetVoxelMixtureOperation : AtmosOperation
 /// <param name="GasId">Nonnegative simulation gas ID.</param>
 /// <param name="Moles">Stored amount in moles, including zero for retained channels.</param>
 public readonly record struct AtmosGasAmount(int GasId, Mole Moles);
-
-/// <summary>
-///     Preserves the residual Update clock without replaying host frame cadence.
-/// </summary>
-/// <param name="Seconds">Residual elapsed seconds after an authoritative elapsed-time update.</param>
-/// TODO nuke this, this spams opcode logs, no need to preserve this in replay really.
-public sealed record SetElapsedAccumulatorOperation(Second Seconds) : AtmosOperation
-{
-    /// <inheritdoc />
-    public override AtmosOperationCode Code => AtmosOperationCode.SetElapsedAccumulator;
-}

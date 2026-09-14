@@ -22,6 +22,8 @@
     <Project Path="src\Numos.Headless\Numos.Headless.csproj"/>
     <Project Path="src\Numos.Maths\Numos.Maths.csproj"/>
     <Project Path="src\Numos.SimDrawer\Numos.SimDrawer.csproj"/>
+    <Project Path="src\Numos.Serialization\Numos.Serialization.csproj"/>
+    <Project Path="src\Numos.Serialization.FileSystem\Numos.Serialization.FileSystem.csproj"/>
     <Project Path="src\Numos.Units\Numos.Units.csproj"/>
     <Project Path="src\Numos.Units.Analyzers\Numos.Units.Analyzers.csproj"/>
     <Project Path="src\Numos.Viewer\Numos.Viewer.csproj"/>

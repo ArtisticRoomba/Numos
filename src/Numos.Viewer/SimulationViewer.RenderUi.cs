@@ -29,6 +29,8 @@ public partial class SimulationViewer
         RenderProgramSettingsPanel();
         RenderResolutionConfirmationModal();
         RenderPerformanceOverlay();
+        DrawReplayFileModals();
+        RenderMessagesPanel();
 
         if (_simulation == null)
         {
@@ -426,6 +428,15 @@ public partial class SimulationViewer
                 if (ImGui.MenuItem("New Simulation"))
                     RequestCreateProject();
 
+                if (ImGui.MenuItem("Open Replay..."))
+                    RequestOpenReplay();
+
+                ImGui.BeginDisabled(_simulation == null);
+                if (ImGui.MenuItem("Save Replay..."))
+                    RequestSaveReplay();
+
+                ImGui.EndDisabled();
+
                 if (_simulation != null && ImGui.MenuItem("Close Project"))
                     RequestCloseProject();
 
@@ -438,6 +449,9 @@ public partial class SimulationViewer
 
             if (ImGui.BeginMenu("View"))
             {
+                ImGui.MenuItem("Messages / Logs", null, ref _showMessagesPanel);
+                ImGui.Separator();
+
                 // The empty workspace does not render any of these panes. Keep their
                 // entries in the menu for consistency, but prevent toggling them until
                 // a simulation has been created.
@@ -987,7 +1001,7 @@ public partial class SimulationViewer
                 }
                 catch (Exception exception) when (exception is ArgumentOutOfRangeException or KeyNotFoundException)
                 {
-                    SetProjectMessage(exception.Message, true);
+                    WriteException("Could not fill the chunk", exception);
                 }
             }
         }

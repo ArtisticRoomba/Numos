@@ -66,7 +66,6 @@ internal sealed partial class AtmosKernel
             return new AtmosSimulationCheckpoint(
                 _dimensions,
                 TimelinePosition,
-                _accumulator,
                 _config,
                 _solverPipeline.GetSteps().Select(static step =>
                     new AtmosSolverCheckpoint(step.Name, step.Kind == SolverStepKind.Custom, step.Enabled)).ToArray(),
@@ -130,7 +129,7 @@ internal sealed partial class AtmosKernel
     private void ValidateCheckpoint(AtmosSimulationCheckpoint checkpoint)
     {
         ArgumentNullException.ThrowIfNull(checkpoint);
-        if (checkpoint.FormatVersion is < 1 or > AtmosSimulationCheckpoint.CurrentFormatVersion ||
+        if (checkpoint.FormatVersion != AtmosSimulationCheckpoint.CurrentFormatVersion ||
             checkpoint.CompatibilityVersion != AtmosSimulationCheckpoint.CurrentCompatibilityVersion ||
             checkpoint.Dimensions != _dimensions ||
             checkpoint.Position.Tick > int.MaxValue)
@@ -185,7 +184,7 @@ internal sealed partial class AtmosKernel
         _solverData.Clear();
         TickCount = checked((int)checkpoint.Position.Tick);
         _lastOperationSequence = checkpoint.Position.OperationSequence;
-        _accumulator = checkpoint.ElapsedAccumulator;
+        _accumulator = 0f;
         foreach (var step in checkpoint.Solvers)
             _solverPipeline.SetEnabled(step.Name, step.Enabled);
 
@@ -351,9 +350,6 @@ internal sealed partial class AtmosKernel
                     chunk.TotalHeatCapacity[op.LocalVoxelIndex] = op.HeatCapacity;
                     chunk.IsVacuum[op.LocalVoxelIndex] = op.Pressure <= 0f;
                     chunk.MarkChanged();
-                    break;
-                case SetElapsedAccumulatorOperation op:
-                    _accumulator = op.Seconds;
                     break;
                 default: throw new ArgumentException($"Unsupported replay operation code {operation.Code}.", nameof(operation));
             }

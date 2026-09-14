@@ -604,7 +604,7 @@ public partial class SimulationViewer
         catch (Exception exception) when (
             exception is ArgumentException or InvalidOperationException or KeyNotFoundException)
         {
-            SetProjectMessage($"Could not edit voxel selection: {exception.Message}", true);
+            WriteException("Could not edit the voxel selection", exception);
         }
     }
 }

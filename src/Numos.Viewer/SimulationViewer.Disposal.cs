@@ -12,9 +12,29 @@ public partial class SimulationViewer
         if (_disposed)
             return;
 
+        _replayFileCancellation?.Cancel();
+        Task<LoadedReplay>? replayLoadTask = _replayLoadTask;
+        if (replayLoadTask?.IsCompletedSuccessfully == true)
+            replayLoadTask.Result.Simulation.Dispose();
+        else if (replayLoadTask != null)
+        {
+            _ = replayLoadTask.ContinueWith(
+                static task => task.Result.Simulation.Dispose(),
+                CancellationToken.None,
+                TaskContinuationOptions.ExecuteSynchronously | TaskContinuationOptions.OnlyOnRanToCompletion,
+                TaskScheduler.Default);
+        }
+
         _disposed = true;
-        DisposeGraphics();
-        DisposeSimulationProject();
+        try
+        {
+            DisposeGraphics();
+            DisposeSimulationProject();
+        }
+        finally
+        {
+            StopMessageCapture();
+        }
     }
 
     private void DisposeGraphics()

@@ -94,7 +94,6 @@ internal struct AtmosStateHasher
         hash.Add(checkpoint.CompatibilityFingerprint);
         hash.Add(checkpoint.Position.Tick);
         hash.Add(checkpoint.Position.OperationSequence);
-        hash.Add(checkpoint.ElapsedAccumulator);
         checkpoint.Config.AppendHash(ref hash);
         foreach (var solver in checkpoint.Solvers)
             hash.Add(solver.Enabled);
@@ -119,12 +118,9 @@ internal struct AtmosStateHasher
                 foreach (float value in gas.Moles) hash.Add(value);
             }
 
-            if (checkpoint.FormatVersion >= 2)
-            {
-                hash.Add(chunk.SolverArrays.Count);
-                foreach (var array in chunk.SolverArrays)
-                    array.AppendHash(ref hash);
-            }
+            hash.Add(chunk.SolverArrays.Count);
+            foreach (var array in chunk.SolverArrays)
+                array.AppendHash(ref hash);
         }
 
         return new AtmosStateHash(checkpoint.Position, hash.Value);

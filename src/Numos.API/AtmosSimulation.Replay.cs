@@ -35,10 +35,11 @@ public sealed partial class AtmosSimulation
     /// <summary>
     ///     Captures the complete continuation state at an idle simulation boundary.
     /// </summary>
-    /// <returns>Immutable grid, configuration, solver-enable and elapsed-clock continuation data.</returns>
+    /// <returns>Immutable grid, configuration, solver-enable and timeline continuation data.</returns>
     /// <remarks>
-    ///     The checkpoint can restore Numos into a compatible existing simulation. Detached containers and custom-solver
-    ///     closure state remain host-owned. Chunk solver arrays opted into capture are copied and restored automatically.
+    /// The checkpoint can restore Numos into a compatible existing simulation. Detached containers and custom-solver
+    /// closure state remain host-owned. Chunk solver arrays opted into capture are copied and restored automatically.
+    /// The host-facing elapsed-time accumulator is reset when this checkpoint is restored.
     /// </remarks>
     /// <exception cref="InvalidOperationException">Called during a solver tick.</exception>
     public AtmosSimulationCheckpoint CaptureCheckpoint()

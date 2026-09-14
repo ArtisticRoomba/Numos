@@ -196,9 +196,6 @@ public partial class SimulationViewer
 
         ImGuiExtensions.QuestionTooltip("Saves the default that future publishes use on first launch.");
 #endif
-
-        if (!string.IsNullOrEmpty(_layoutStatus))
-            ImGui.TextDisabled(_layoutStatus);
     }
 
     private static (int Width, int Height)[] GetTargetResolutions()

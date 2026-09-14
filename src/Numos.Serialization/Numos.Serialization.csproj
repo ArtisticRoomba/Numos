@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <Import Project="..\Numos.CoreSim\Version.props"/>
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <PackageId>Numos.Serialization</PackageId>
+        <Title>Numos Serialization</Title>
+        <Description>Portable binary serialization for Numos replay archives.</Description>
+        <PackageTags>simulation;atmospherics;replay;serialization;nativeaot</PackageTags>
+        <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    </PropertyGroup>
+    <ItemGroup>
+        <ProjectReference Include="..\Numos.API\Numos.API.csproj"/>
+    </ItemGroup>
+</Project>
