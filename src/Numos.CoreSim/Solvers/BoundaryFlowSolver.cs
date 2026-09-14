@@ -124,9 +124,6 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
         TryFlowToNeighbor(context, sourceChunk, sourcePosition, localPosition + Int3.PosX, Int3.PosX, injectionBuffer);
         TryFlowToNeighbor(context, sourceChunk, sourcePosition, localPosition + Int3.NegY, Int3.NegY, injectionBuffer);
         TryFlowToNeighbor(context, sourceChunk, sourcePosition, localPosition + Int3.PosY, Int3.PosY, injectionBuffer);
-        if (sourceChunk.Depth <= 1)
-            return;
-
         TryFlowToNeighbor(context, sourceChunk, sourcePosition, localPosition + Int3.NegZ, Int3.NegZ, injectionBuffer);
         TryFlowToNeighbor(context, sourceChunk, sourcePosition, localPosition + Int3.PosZ, Int3.PosZ, injectionBuffer);
     }
