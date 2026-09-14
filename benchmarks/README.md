@@ -46,15 +46,17 @@ dotnet run -c Release --project benchmarks/Numos.CoreSim.Benchmarks -- --anyCate
 NUMOS_BENCHMARK_FULL=1 dotnet run -c Release --project benchmarks/Numos.CoreSim.Benchmarks -- --anyCategories Scaling --exporters csv
 ```
 
-The parallel advection sweep runs two fixed transient workloads at 1, 2, 4, 8, and 16 reported processors: 128 dense
-8×8×8 chunks with 32 gases, and one dense 16×16×16 chunk with 32 gases. Both cases invoke only the advection stage.
+The parallel sweep runs fixed transient workloads at 1, 2, 4, 8, and 16 reported processors. Advection, thermodynamics,
+and reactions each have a 128-chunk throughput case and a dense single-chunk case. The paired shapes show whether a
+solver scales across chunks, inside one chunk, or both. Tiered compilation is disabled for these jobs because iteration
+setup limits each sample to one solve and worker-dependent promotion timing distorts the comparison.
 
 ```bash
 dotnet run -c Release --project benchmarks/Numos.CoreSim.Benchmarks -- \
   --filter '*ParallelScalingBenchmarks*' --exporters csv
 ```
 
-Compare each workload's worker jobs against `Workers=1`. The primary 128-chunk gate expects at least 3× speedup at four
+Compare each workload's worker jobs against `Workers=1`. The advection gate expects at least 3× speedup at four
 workers, the eight-worker result to be no slower than four workers, and the one-worker result to remain within 10% of
 the prior baseline. The dense single-chunk case tracks the intra-chunk gain separately and catches a return to
 chunk-only scheduling.

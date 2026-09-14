@@ -14,7 +14,10 @@ internal sealed class ParallelScalingConfigAttribute : Attribute, IConfigSource
             config.AddJob(
                 Job.Default
                     .WithId($"Workers={workers}")
-                    .WithEnvironmentVariable("DOTNET_PROCESSOR_COUNT", workers.ToString()));
+                    .WithEnvironmentVariable("DOTNET_PROCESSOR_COUNT", workers.ToString())
+                    // Iteration setup limits each sample to one solve. Disable tiering so worker-dependent
+                    // promotion timing cannot masquerade as solver scaling.
+                    .WithEnvironmentVariable("DOTNET_TieredCompilation", "0"));
         }
 
         Config = config;
