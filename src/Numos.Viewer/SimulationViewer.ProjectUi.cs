@@ -309,6 +309,7 @@ public partial class SimulationViewer
 
         AtmosChunkHandle? chunkToRemove = null;
         AtmosChunkHandle? chunkToSeal = null;
+        AtmosChunkHandle? chunkToUnsleep = null;
         foreach (var handle in _liveChunkHandles)
         {
             ImGui.PushID($"chunk-{handle.Position.X}-{handle.Position.Y}-{handle.Position.Z}");
@@ -327,6 +328,12 @@ public partial class SimulationViewer
                 if (ImGui.IsItemHovered())
                     ImGui.SetTooltip("Replace the chunk's simulated outer faces with solid voxels.");
 
+                if (ImGui.MenuItem("Unsleep"))
+                    chunkToUnsleep = handle;
+
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip("Wake the chunk so it participates in subsequent simulation ticks.");
+
                 if (ImGui.MenuItem("Remove"))
                     chunkToRemove = handle;
 
@@ -340,6 +347,8 @@ public partial class SimulationViewer
             RemoveProjectChunk(chunkToRemove.Value);
         else if (chunkToSeal.HasValue)
             SealProjectChunk(chunkToSeal.Value);
+        else if (chunkToUnsleep.HasValue)
+            UnsleepProjectChunk(chunkToUnsleep.Value);
 
         if (_liveChunkHandles.Count == 0)
             ImGui.TextDisabled("No chunks. Add one at a chunk-grid position.");

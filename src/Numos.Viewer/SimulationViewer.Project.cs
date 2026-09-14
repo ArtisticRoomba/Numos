@@ -173,6 +173,22 @@ public partial class SimulationViewer
         }
     }
 
+    private void UnsleepProjectChunk(AtmosChunkHandle chunk)
+    {
+        if (_simulation == null)
+            return;
+
+        try
+        {
+            _simulation.WakeChunk(chunk);
+            SetProjectMessage($"Unslept chunk {FormatChunkPosition(chunk.Position)}.", false);
+        }
+        catch (KeyNotFoundException exception)
+        {
+            SetProjectMessage(exception.Message, true);
+        }
+    }
+
     private void AddProjectGas(GasProperties gas)
     {
         if (_config == null)
