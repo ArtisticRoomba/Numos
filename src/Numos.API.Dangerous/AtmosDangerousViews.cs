@@ -44,9 +44,6 @@ public readonly ref struct AtmosDangerousChunk
     /// <summary>The number of valid active-air indices.</summary>
     public int ActiveAirCount => _chunk.ActiveAirCount;
 
-    /// <summary>The number of active room IDs.</summary>
-    public int ActiveRoomCount => _chunk.ActiveRoomCount;
-
     /// <summary>Live per-voxel temperature storage.</summary>
     public Span<float> Temperature => _chunk.Temperature.AsSpan();
 
@@ -61,9 +58,6 @@ public readonly ref struct AtmosDangerousChunk
 
     /// <summary>Live active-air indices, limited to the current valid count.</summary>
     public Span<ushort> ActiveAirIndices => _chunk.ActiveAirIndices.AsSpan(0, _chunk.ActiveAirCount);
-
-    /// <summary>Live active-room IDs, limited to the current valid count.</summary>
-    public Span<int> ActiveRoomIds => _chunk.ActiveRoomIds.AsSpan(0, _chunk.ActiveRoomCount);
 
     /// <summary>Returns a live gas-channel view by active-channel index.</summary>
     public AtmosDangerousGasChannel GetGasChannel(int index)
@@ -80,10 +74,10 @@ public readonly ref struct AtmosDangerousChunk
         return _chunk.GetIndex(x, y, z);
     }
 
-    /// <summary>Wakes and activates a room using the chunk topology operation.</summary>
-    public void WakeRoom(int roomId)
+    /// <summary>Wakes the chunk using the chunk lifecycle operation.</summary>
+    public void Wake()
     {
-        _chunk.WakeRoom(roomId);
+        _chunk.Wake();
     }
 
     /// <summary>Puts the chunk to sleep using the chunk lifecycle operation.</summary>

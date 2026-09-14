@@ -16,10 +16,9 @@
    - 3.1 [Voxel Grid & Chunk](#31-voxel-grid--chunk)
    - 3.2 [Gas Channels (Structure of Arrays)](#32-gas-channels-structure-of-arrays)
    - 3.3 [Voxel Classification](#33-voxel-classification)
-   - 3.4 [Room Nodes (Macro Layer)](#34-room-nodes-macro-layer)
-   - 3.5 [Gas Properties Registry](#35-gas-properties-registry)
-   - 3.6 [Configuration Parameters](#36-configuration-parameters)
-   - 3.7 [Container and Voxel Gas Mixtures](#37-container-and-voxel-gas-mixtures)
+   - 3.4 [Gas Properties Registry](#34-gas-properties-registry)
+   - 3.5 [Configuration Parameters](#35-configuration-parameters)
+   - 3.6 [Container and Voxel Gas Mixtures](#36-container-and-voxel-gas-mixtures)
 4. [Simulation Loop](#4-simulation-loop)
    - 4.1 [Fixed Timestep Accumulator](#41-fixed-timestep-accumulator)
    - 4.2 [Solver Pipeline](#42-solver-pipeline)
@@ -33,7 +32,6 @@
    - 5.4 [Vacuum Cleanup](#54-vacuum-cleanup)
    - 5.5 [Delta Buffers (Ordering Scope)](#55-delta-buffers-ordering-scope)
 6. [Sleep System](#6-sleep-system)
-7. [The Leaky Faucet Problem & GasAccumulator](#7-the-leaky-faucet-problem--gasaccumulator)
 8. [Phase Changes (Condensation)](#8-phase-changes-condensation)
    - 8.1 [Clausius-Clapeyron Saturation Model](#81-clausius-clapeyron-saturation-model)
    - 8.2 [Phase-Change Internal-Energy Balance](#82-phase-change-internal-energy-balance)
@@ -56,14 +54,8 @@ The system is built to simulate atmospheric gas dynamics in the context of a spa
 
 ## 2. Architecture Overview
 
-The system uses a two-layer Level of Detail (LOD) model:
-
-| Layer | Name | Granularity | Cost | When Active |
-|-------|------|-------------|------|-------------|
-| **Macro** | Room Node | Whole-room aggregate | O(1) per room | Room is at equilibrium (sleeping) |
-| **Micro** | Atmos Chunk | Per-voxel cellular automata | O(n) per active voxel | Room has turbulent pressure gradients |
-
-When a disturbance exceeds a configurable threshold (the "Threshold of Violence"), the macro-layer room transitions to the micro-layer voxel grid. When the voxel grid reaches equilibrium, it goes back to sleep and the macro layer resumes responsibility.
+Numos simulates gas at voxel resolution. A chunk sleeps when its pressure deltas remain below the configured threshold,
+and wakes as a whole when it receives a mutation or boundary flow.
 
 ### Component Relationships
 
@@ -86,9 +78,6 @@ graph TD
     G["AtmosConfig (Editable Builder)"] -->|"Explicit immutable snapshot"| API
     API -->|"Normalized tick inputs"| CTX
     H["GasProperties Registry"] --> G
-    I["RoomNode (Macro Layer)"] -.-> B
-    J["GasAccumulator"] -.-> I
-    J -.-> B
 ```
 
 ### 2.1 Public and Dangerous API Boundaries
@@ -105,7 +94,7 @@ The dangerous package must be referenced separately and imported through `Numos.
 `AtmosSimulation` facade. Most solvers use its detached snapshots and validated mutations; a measured hot path can call
 `simulation.Dangerous().GetChunk(handle)` from that callback to obtain stack-scoped live chunk and gas-channel spans.
 
-Validated simulation mutations keep pressure/heat-capacity caches, room activation, topology indices, sleep state,
+Validated simulation mutations keep pressure/heat-capacity caches, active-voxel indices, sleep state,
 and observable revisions coherent as applicable. A solver should use the dangerous package only when it must directly
 traverse or mutate backing storage and can maintain those coupled invariants itself. The dangerous views are
 `ref struct` values and never expose the internal `AtmosChunk` or `GasChannel` CLR types. They are safest inside a
@@ -135,14 +124,14 @@ z = index / (Width * Height)
 
 Each chunk stores:
 
-| Array | Type | Description |
-|-------|------|-------------|
-| `VoxelRoomMap` | `int[]` | Classifies each voxel (see §3.3) |
-| `TotalPressure` | `float[]` | Cached pressure per voxel in pascals (Pa), recalculated at advection start and refreshed as state changes |
-| `Temperature` | `float[]` | Temperature in kelvins (K) per voxel |
-| `TotalHeatCapacity` | `float[]` | Cached total heat capacity per voxel, in J/K |
-| `ActiveAirIndices` | `ushort[]` | Dense list of voxel indices belonging to the currently active rooms |
-| `ActiveGases` | `GasChannel[]` | Sparse array of gas-specific mole data (see §3.2) |
+| Array               | Type           | Description                                                                                               |
+|---------------------|----------------|-----------------------------------------------------------------------------------------------------------|
+| `VoxelRoomMap`      | `int[]`        | Classifies each voxel (see §3.3)                                                                          |
+| `TotalPressure`     | `float[]`      | Cached pressure per voxel in pascals (Pa), recalculated at advection start and refreshed as state changes |
+| `Temperature`       | `float[]`      | Temperature in kelvins (K) per voxel                                                                      |
+| `TotalHeatCapacity` | `float[]`      | Cached total heat capacity per voxel, in J/K                                                              |
+| `ActiveAirIndices`  | `ushort[]`     | Dense list of non-solid, non-void voxel indices in an awake chunk                                         |
+| `ActiveGases`       | `GasChannel[]` | Sparse array of gas-specific mole data (see §3.2)                                                         |
 
 For thermodynamic calculations, each gas uses an effective molar heat capacity at constant volume:
 
@@ -164,7 +153,10 @@ The gas-constant value and SI relationship follow the [NIST reference constants]
 
 Chunks are identified by an `Int3 GridPosition` in a spatial map (e.g. a `ConcurrentDictionary<Int3, AtmosChunk>`).
 
-**Active Air Optimization**: Steady-state physics loops iterate the dense `ActiveAirIndices` list rather than every voxel. `WakeRoom(roomId)` adds the room to `ActiveRoomIds` up to the configured `MaxActiveRooms`, then `RebuildActiveAirIndices` scans all `VoxelCount` entries and rebuilds the list with voxels from every active room. The rebuild is therefore O(`VoxelCount`) (4,096 entries for a default 16×16×16 chunk), while subsequent physics work is proportional to the active list.
+**Active Air Optimization**: Physics loops iterate the dense `ActiveAirIndices` list rather than every voxel.
+`WakeChunk` rebuilds the list by scanning all `VoxelCount` entries and retaining every non-solid, non-void voxel. The
+rebuild is O (`VoxelCount`) (4,096 entries for a default 16×16×16 chunk), while subsequent physics work is proportional
+to the active list.
 
 ### 3.2 Gas Channels (Structure of Arrays)
 
@@ -190,40 +182,14 @@ Key properties:
 
 Each voxel in `VoxelRoomMap` is assigned an integer value that determines its behavior:
 
-| Value | Constant | Behavior |
-|-------|----------|----------|
-| `0` | `RoomUnassigned` | Open, pressurizable volume not yet assigned to a room. Gas can exist here. |
-| `> 0` | *(Room ID)* | Belongs to a specific named room. Participates in simulation when that room is awake. |
-| `-1` | `RoomVoid` | Infinite sink / true vacuum. Gas entering this voxel is destroyed. Used for map boundaries or active vents. Pressure is always treated as 0. |
-| `-2` | `RoomSolid` | Solid obstruction (wall/floor). Blocks gas flow completely. |
+| Value | Constant              | Behavior                                                                                                                                     |
+|-------|-----------------------|----------------------------------------------------------------------------------------------------------------------------------------------|
+| `0`   | `RoomUnassigned`      | Open, pressurizable volume. Gas can exist here.                                                                                              |
+| `> 0` | *(classification ID)* | Open, pressurizable volume. IDs are retained as topology metadata and do not partition solver work.                                          |
+| `-1`  | `RoomVoid`            | Infinite sink / true vacuum. Gas entering this voxel is destroyed. Used for map boundaries or active vents. Pressure is always treated as 0. |
+| `-2`  | `RoomSolid`           | Solid obstruction (wall/floor). Blocks gas flow completely.                                                                                  |
 
-### 3.4 Room Nodes (Macro Layer)
-
-When a room is at equilibrium (sleeping), it is represented by a `RoomNode`:
-
-```
-struct RoomNode {
-    int RoomId;
-    bool IsAsleep;
-    int VoxelCount;
-    float VoxelVolume;
-    float EquilibriumPressure;
-    float AverageTemperature;
-    float TotalHeatCapacity;
-    float TotalMoles;
-    float[] GasMoles;  // Total moles of each gas in the entire room
-}
-```
-
-The `RoomNode` provides O(1) gas addition/removal using the ideal gas law:
-
-- **AddGas**: Recalculates `AverageTemperature` by conserving sensible internal energy with the incoming species' `C_v`, then updates `EquilibriumPressure = TotalMoles * R * AverageTemperature / (VoxelCount * VoxelVolume)`.
-- **RemoveGas**: Clamps removal to available moles, removes the species' heat capacity, and recalculates pressure. Temperature is not changed on removal (assumes a uniform mixture).
-
-> [!IMPORTANT]
-> The `RoomNode` is defined with complete logic but is **not wired into the simulation loop**. `AtmosSimulation` operates exclusively at the voxel (micro) level. The `RoomNode` and `GasAccumulator` exist as data structures with complete logic, but the orchestration that transitions between macro and micro layers is not implemented. An integrator must build this transition logic.
-
-### 3.5 Gas Properties Registry
+### 3.4 Gas Properties Registry
 
 Each gas species is defined by a `GasProperties` struct:
 
@@ -239,7 +205,7 @@ Each gas species is defined by a `GasProperties` struct:
 
 The registry is stored as a `List<GasProperties>` indexed by gas ID; zero is a valid gas ID.
 
-### 3.6 Configuration Parameters
+### 3.5 Configuration Parameters
 
 All tunable simulation parameters are assembled in an editable `AtmosConfig`. Construction and
 `SetAtmosConfig(...)` capture an immutable `AtmosConfigSnapshot`; later mutation of the editable builder does not change
@@ -272,7 +238,7 @@ single definition in `VoxelClassification`.
 | `CondensationRateFactor` | 0.5 | Dimensionless fraction of the heat-coupled equilibrium condensation amount applied per thermodynamics tick. Finite values are clamped to [0, 1]; non-finite values disable condensation. |
 | `MaxPressureTransferFractionPerNeighbor` | 0.16 | Maximum fraction of a voxel's pressure requested as bulk flow to one neighbor per tick. Finite values are clamped to [0, 1]; non-finite values disable bulk flow. |
 
-### 3.7 Container and Voxel Gas Mixtures
+### 3.6 Container and Voxel Gas Mixtures
 
 `IGasMixture` provides one public interaction model for portable containers and individual voxels while preserving
 the solver's structure-of-arrays layout:
@@ -685,7 +651,7 @@ Each chunk maintains a `SleepTimer` counter. After each advection pass:
 
 A sleeping chunk is woken when:
 - `InjectGasToVoxel` is called on it (the sleep timer is reset).
-- A boundary flow event targets one of its voxels (the target room is woken via `WakeRoom`).
+- A boundary flow event targets one of its voxels.
 
 A chunk that sends gas across a boundary is kept awake and has its sleep timer reset. The sleep criterion itself is
 pressure-based; a temperature gradient alone does not wake or keep a chunk active.
@@ -693,54 +659,6 @@ pressure-based; a temperature gradient alone does not wake or keep a chunk activ
 The sleep system is the primary mechanism for achieving the "work-proportional cost" goal. In a station with 500 chunks, only the handful with active pressure gradients consume CPU.
 
 Unit tests confirm convergence to sleep for L-shaped, donut-shaped, and zigzag room geometries, with pressure equilibrating to within 1.0 moles of the average across all voxels.
-
----
-
-## 7. The Leaky Faucet Problem & GasAccumulator
-
-### The Problem
-
-A slow, continuous gas leak (e.g., a cracked pipe) produces a flow rate below the "Threshold of Violence" that would wake the voxel grid. Without mitigation, there are two bad outcomes:
-1. **Wake the grid every tick**: The voxel simulation runs continuously for a negligible leak, wasting CPU.
-2. **Ignore it**: The leak is never simulated, producing incorrect atmospheric state.
-
-### The Solution: GasAccumulator
-
-The `GasAccumulator` acts as a buffer between a gas source and the simulation:
-
-```
-struct GasAccumulator {
-    int GasId;
-    float AccumulatedMoles;
-    float OutputTemperature;  // Mole-weighted running average
-    int TicksAlive;
-    const int MaxAliveTimeBeforeReset = 20;
-}
-```
-
-Each tick, the leaking source calls `AddGas(moles, temperature)`, which accumulates mass and tracks a weighted-average temperature.
-
-The caller then evaluates the accumulator state:
-
-```
-EvaluateState(currentPressureDelta, wakeThreshold) → Hold | Diffuse | Inject
-```
-
-| State | Condition | Action |
-|-------|-----------|--------|
-| **Hold** | Delta < threshold AND ticks < max | Continue accumulating. Do nothing. |
-| **Diffuse** | Delta < threshold AND ticks ≥ max (20) | Release accumulated gas into the `RoomNode` (macro layer). The leak is too slow to matter at the voxel level. |
-| **Inject** | Delta ≥ threshold | Wake the chunk and inject accumulated gas into the voxel grid (micro layer). The leak has built up enough pressure to warrant full simulation. |
-
-After either `Diffuse` or `Inject`, the accumulator is reset.
-
-Unit tests confirm:
-- A 0.5 Pa delta holds.
-- A 5.0 Pa delta after 20 ticks diffuses to the macro layer.
-- A 150.0 Pa spike injects immediately.
-
-> [!IMPORTANT]
-> As with the `RoomNode`, the `GasAccumulator` is **fully implemented as a data structure** but is **not wired into the simulation loop**. `AtmosSimulation` does not reference it. An integrator must build the orchestration that feeds gas sources into accumulators and dispatches the resulting `Diffuse` or `Inject` actions. The unit tests for `GasAccumulator` test the struct in isolation.
 
 ---
 
@@ -855,10 +773,6 @@ All networking methods are stubs with comments indicating where real implementat
 
 ## 10. Known Flaws & Limitations
 
-### Structural
-
-1. **Macro-micro transition not implemented.** The `RoomNode`, `GasAccumulator`, and the transition logic between macro (sleeping room) and micro (active voxel grid) layers are defined as data structures but are not orchestrated by the simulation loop. An integrator must implement: (a) how a sleeping room's aggregate state seeds the voxel grid on wake, (b) how a sleeping voxel grid's state is collapsed back into a `RoomNode`, and (c) how `GasAccumulator` feeds into this process.
-
 ### Numerical
 
 2. **Unidirectional flow in advection.** The advection loop only processes flow from high pressure to low (`pressureDelta > 0`). Due to the delta buffer, each voxel-pair transfer is computed from the higher-pressure side and applied after the neighbor scan.
@@ -883,7 +797,7 @@ To implement this system in another engine or language, start from the core modu
 - `Numos.CoreSim.Solvers` — atomic physics stages and shared solver math.
 - `AtmosChunk` — the parameterized voxel grid.
 - `AtmosConfig` — all tunable parameters.
-- `GasChannel`, `GasProperties`, `RoomNode` — all data structures.
+- `GasChannel` and `GasProperties` — simulation data structures.
 - `Types.cs` — standalone `Int3`, `Vector3`, event structs.
 
 ### What to build
@@ -893,9 +807,6 @@ To implement this system in another engine or language, start from the core modu
 | Tick driver integration | ✅ Complete | Call `AtmosSimulation.Update(deltaSeconds)` from your engine's update loop. |
 | Chunk lifecycle | ✅ Complete | Call `CreateAndRegisterChunk` / `UnregisterChunk`; chunks remain owned by the simulation. |
 | Voxel topology | ✅ API provided | Populate topology through `SetChunkClassification` and `SetVoxelClassification`. |
-| Room detection | ❌ Not provided | You must implement flood-fill or connected-component analysis to assign room IDs to contiguous open volumes in `VoxelRoomMap`. |
-| Macro-micro transition | ❌ Not provided | You must implement the logic that seeds voxel grids from `RoomNode` state on wake, and collapses back on sleep. |
-| GasAccumulator orchestration | ❌ Not provided | You must implement the per-source accumulator loop and dispatch `Diffuse`/`Inject` actions. |
 | Gas source API | ✅ API provided | Use `AddGasToVoxel` for game-side sources such as pipes, vents, and fires. |
 | Liquid system | ❌ Not provided | Condensation updates atmospheric state only. Build liquid state and integration if needed. |
 | Visualization | ❌ Not provided | Pressure, temperature, and gas composition are available per-voxel. You must build rendering (overlays, particle effects, fog). |

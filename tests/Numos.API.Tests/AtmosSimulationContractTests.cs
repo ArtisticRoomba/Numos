@@ -210,20 +210,6 @@ public sealed class AtmosSimulationContractTests
         });
     }
 
-    [TestCase(0)]
-    [TestCase(-1)]
-    public void CreateAndRegisterChunk_WithNonPositiveRoomCapacity_Throws(int maxActiveRooms)
-    {
-        using var simulation = new AtmosSimulation(1, 1, 1);
-
-        Assert.That(
-            () => simulation.CreateAndRegisterChunk(default, maxActiveRooms),
-            Throws.TypeOf<ArgumentOutOfRangeException>()
-                .With.Property(nameof(ArgumentOutOfRangeException.ParamName)).EqualTo("maxActiveRooms"));
-
-        Assert.That(simulation.ChunkCount, Is.Zero);
-    }
-
     [Test]
     public void UnregisterChunk_ReturnsWhetherAChunkWasRemoved()
     {
@@ -700,7 +686,7 @@ public sealed class AtmosSimulationContractTests
                 () => simulation.AddGasToVoxel(missing, 0, 0, 0, 1, 1f, 300f),
                 Throws.TypeOf<KeyNotFoundException>());
 
-            Assert.That(() => simulation.WakeRoom(missing, 1), Throws.TypeOf<KeyNotFoundException>());
+            Assert.That(() => simulation.WakeChunk(missing), Throws.TypeOf<KeyNotFoundException>());
             Assert.That(() => simulation.SleepChunk(missing), Throws.TypeOf<KeyNotFoundException>());
             Assert.That(simulation.UnregisterChunk(missing), Is.False);
         });
@@ -744,7 +730,7 @@ public sealed class AtmosSimulationContractTests
                 () => simulation.AddGasToVoxel(chunk, 0, 1, 1f, 300f),
                 Throws.TypeOf<ObjectDisposedException>());
 
-            Assert.That(() => simulation.WakeRoom(chunk, 1), Throws.TypeOf<ObjectDisposedException>());
+            Assert.That(() => simulation.WakeChunk(chunk), Throws.TypeOf<ObjectDisposedException>());
             Assert.That(() => simulation.SleepChunk(chunk), Throws.TypeOf<ObjectDisposedException>());
             Assert.That(simulation.Tick, Throws.TypeOf<ObjectDisposedException>());
         });

@@ -49,7 +49,7 @@ public enum AtmosOperationCode : ushort
     /// <summary>
     ///     Wake a room and reset its sleep timer.
     /// </summary>
-    WakeRoom = 9,
+    WakeChunk = 9,
     /// <summary>
     ///     Put a chunk to sleep without discarding its stored state.
     /// </summary>

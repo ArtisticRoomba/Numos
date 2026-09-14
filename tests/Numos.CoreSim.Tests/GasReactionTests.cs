@@ -62,7 +62,7 @@ public class GasReactionTests
             {
                 var chunk = new AtmosChunk(1, 1, 1);
                 chunk.VoxelRoomMap[0] = 1;
-                chunk.WakeRoom(1);
+                chunk.Wake();
                 int sourceId = config.GasRegistry.GasIdToIndex("A");
                 chunk.InjectGasToVoxel(0, sourceId, 10f, 300f, 10f, 1f);
                 solver.Solve(new AtmosSolverExecutionContext(null!, [chunk], tickConfig, iteration + 1, sharedData));
@@ -299,10 +299,9 @@ public class GasReactionTests
 
         var chunk = new AtmosChunk();
         //setup voxel with random shit.
-        for (ushort i = 0; i < chunk.VoxelCount && i < chunk.MaxActiveRooms; i++)
+        for (ushort i = 0; i < chunk.VoxelCount && i < 64; i++)
         {
             chunk.VoxelRoomMap[i] = i;
-            chunk.WakeRoom(i);
             for (int j = 0; j < gases.Count; j++)
             {
                 chunk.InjectGasToVoxel(i, j, Math.Max(0, random.NextSingle() * 10 - 3), random.Next(500), 1, 1);
@@ -380,10 +379,9 @@ public class GasReactionTests
         var solver = new ReactionSolver();
 
         var chunk = new AtmosChunk();
-        for (ushort i = 0; i < 16 * 16 * 16 && i < chunk.MaxActiveRooms; i++)
+        for (ushort i = 0; i < 64; i++)
         {
             chunk.VoxelRoomMap[i] = i;
-            chunk.WakeRoom(i);
             chunk.InjectGasToVoxel(i, 0, 0.001f, 1, 1, 1);
             chunk.InjectGasToVoxel(i, 1, 0.002f, 1, 1, 1);
             Assert.That(chunk.ActiveGasCount == 2);
@@ -393,7 +391,7 @@ public class GasReactionTests
         for (int r = 0; r < 100; r++)
         {
             solver.ProcessChunk(chunk, 1, config, feedback);
-            for (ushort i = 0; i < 16 * 16 * 16 && i < chunk.MaxActiveRooms; i++)
+            for (ushort i = 0; i < 64; i++)
             {
                 chunk.InjectGasToVoxel(i, 0, 0.000005f, 1, 1, 1);
                 chunk.InjectGasToVoxel(i, 1, 0.000002f, 1, 1, 1);

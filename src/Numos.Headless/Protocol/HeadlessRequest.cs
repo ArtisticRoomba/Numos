@@ -21,7 +21,6 @@ internal sealed class HeadlessRequest
     public Coordinate? Position { get; init; }
     public Coordinate? Voxel { get; init; }
     public int? Classification { get; init; }
-    public int? RoomId { get; init; }
 
     // Gas operations.
     public GasDefinition? Gas { get; init; }

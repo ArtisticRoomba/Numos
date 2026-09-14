@@ -8,7 +8,7 @@ namespace Numos.CoreSim.IntegrationTests;
 public sealed class AdvectionParallelDeterminismTests
 {
     private const ulong Arm64ExpectedDigest = 15643557825930699840UL;
-    private const ulong X64ExpectedDigest = 14980476594025801374UL;
+    private const ulong X64ExpectedDigest = 5182992794561060750UL;
 
     [Test]
     public void Advection_ParallelPhasesMatchGoldenHash()

@@ -308,7 +308,7 @@ internal sealed partial class AtmosKernel
                     SetAtmosConfig(op.Config);
                     break;
                 case CreateChunkOperation op:
-                    CreateAndRegisterChunk(op.Position, _dimensions.X, _dimensions.Y, _dimensions.Z, op.MaxActiveRooms);
+                    CreateAndRegisterChunk(op.Position, _dimensions.X, _dimensions.Y, _dimensions.Z);
                     break;
                 case RemoveChunkOperation op:
                     UnregisterChunk(op.Position);
@@ -328,8 +328,8 @@ internal sealed partial class AtmosKernel
                 case AddGasToVoxelOperation op:
                     AddGasToVoxel(op.Position, op.LocalVoxelIndex, op.GasId, op.Moles, op.Temperature);
                     break;
-                case WakeRoomOperation op:
-                    WakeRoom(op.Position, op.RoomId);
+                case WakeChunkOperation op:
+                    WakeChunk(op.Position);
                     break;
                 case SleepChunkOperation op:
                     SleepChunk(op.Position);
@@ -342,7 +342,7 @@ internal sealed partial class AtmosKernel
                 case SetVoxelMixtureOperation op:
                     var chunk = GetChunk(op.Position);
                     ValidateVoxelIndex(chunk, op.LocalVoxelIndex);
-                    chunk.WakeRoom(GetGasRoomId(chunk, op.LocalVoxelIndex));
+                    chunk.Wake();
                     foreach (var gas in op.Gases)
                         chunk.ActiveGases[chunk.GetOrCreateGasChannel(gas.GasId)].Moles[op.LocalVoxelIndex] = gas.Moles;
 

@@ -119,15 +119,15 @@ replaying from inside a solver tick are rejected.
 Checkpoints are complete continuation states that Numos can restore and resimulate from. They copy the authoritative
 grid state, so retained checkpoint memory generally grows with the captured simulation.
 
-| State                         | Checkpoint behavior                                                                                                                                                         |
-|-------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Timeline and fixed-step clock | Captures the completed tick, last operation sequence, and residual `Update` accumulator exactly.                                                                            |
-| Applied configuration         | Captures normalized scalar settings, ordered gas definitions, and immutable solver configurations. Gas IDs keep their existing index meaning; restore does not remap them.  |
-| Chunk storage                 | Captures position, dimensions, room capacity, awake state, sleep timer, classifications, temperatures, valid gas channels, and per-voxel moles.                             |
-| Continuation caches           | Captures pressure, heat capacity, active-room order, and the valid active-air prefix exactly. Disabled stages and sleeping chunks can leave meaningful cached state behind. |
-| Solver pipeline               | Captures enable flags and records names, custom/built-in kinds, and execution order for compatibility validation.                                                           |
-| Solver arrays                 | Captures arrays created with `captureForRollback: true`, including stable field names, exact element types, lengths, and values. Transient arrays are excluded.             |
-| Pooled storage                | Copies only valid entries. Pool capacity and unused array tails are not simulation state.                                                                                   |
+| State                         | Checkpoint behavior                                                                                                                                                        |
+|-------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Timeline and fixed-step clock | Captures the completed tick, last operation sequence, and residual `Update` accumulator exactly.                                                                           |
+| Applied configuration         | Captures normalized scalar settings, ordered gas definitions, and immutable solver configurations. Gas IDs keep their existing index meaning; restore does not remap them. |
+| Chunk storage                 | Captures position, dimensions, awake state, sleep timer, classifications, temperatures, valid gas channels, and per-voxel moles.                                           |
+| Continuation caches           | Captures pressure, heat capacity, and the valid active-air prefix exactly. Disabled stages and sleeping chunks can leave meaningful cached state behind.                   |
+| Solver pipeline               | Captures enable flags and records names, custom/built-in kinds, and execution order for compatibility validation.                                                          |
+| Solver arrays                 | Captures arrays created with `captureForRollback: true`, including stable field names, exact element types, lengths, and values. Transient arrays are excluded.            |
+| Pooled storage                | Copies only valid entries. Pool capacity and unused array tails are not simulation state.                                                                                  |
 
 `AtmosChunkSnapshot` serves presentation and replication reads; it is not a continuation checkpoint. Checkpoints use
 full detached copies. The current implementation has no copy-on-write storage, delta compression, or incremental hash.
@@ -276,7 +276,7 @@ hash is a fast regression and replay check, not a cryptographic authenticity mec
 
 The canonical encoding includes checkpoint and compatibility metadata, timeline position, elapsed accumulator,
 normalized configuration, solver enable flags, and all chunk continuation data. Chunks are sorted by X, then Y, then Z.
-Gas-channel and active-room order are preserved because those orders can affect floating-point reductions. Integers and
+Gas-channel order is preserved because it can affect floating-point reductions. Integers and
 raw IEEE 754 single-precision bits use explicit little-endian encoding. Strings use length-prefixed little-endian UTF-16
 code units.
 

@@ -23,7 +23,7 @@ public sealed class SimulationStabilityTests
         simulation.SetVoxelTemperature(chunk, 0, 0, 0, 600f);
         simulation.Tick();
         var whileSleeping = simulation.GetChunkSnapshot(chunk);
-        simulation.WakeRoom(chunk, SimTestHelpers.RoomId);
+        simulation.WakeChunk(chunk);
         simulation.Tick();
         var afterWake = simulation.GetChunkSnapshot(chunk);
 

@@ -230,7 +230,7 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
                 continue;
 
             if (!neighborChunk.IsAwake)
-                neighborChunk.WakeRoom(neighborChunk.VoxelRoomMap[neighborIndex]);
+                neighborChunk.Wake();
 
             QueueInjection(injectionBuffer, neighborChunk, neighborIndex, gasId, molesToMove, sourceTemperature);
         }

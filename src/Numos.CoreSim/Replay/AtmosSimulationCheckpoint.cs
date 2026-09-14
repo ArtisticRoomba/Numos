@@ -115,7 +115,7 @@ public readonly record struct AtmosSolverCheckpoint(string Name, bool IsCustom, 
 ///     Holds the exact continuation data for one chunk.
 /// </summary>
 /// <remarks>
-///     Note that gas channels and active room order are retained because floating-point reductions can observe that order.
+///     Gas-channel order is retained because floating-point reductions can observe that order.
 ///     This is continuation data, not a compact presentation snapshot, so don't use it for display, use something from
 ///     the viewer instead.
 /// </remarks>
@@ -125,14 +125,12 @@ public sealed class AtmosChunkCheckpoint
     {
         Position = chunk.GridPosition;
         Dimensions = chunk.Dimensions;
-        MaxActiveRooms = chunk.MaxActiveRooms;
         IsAwake = chunk.IsAwake;
         SleepTimer = chunk.SleepTimer;
         Classifications = Array.AsReadOnly(chunk.VoxelRoomMap.ToArray());
         Temperatures = Array.AsReadOnly(chunk.Temperature.ToArray());
         Pressures = Array.AsReadOnly(chunk.TotalPressure.ToArray());
         HeatCapacities = Array.AsReadOnly(chunk.TotalHeatCapacity.ToArray());
-        ActiveRooms = Array.AsReadOnly(chunk.ActiveRoomIds.AsSpan(0, chunk.ActiveRoomCount).ToArray());
         ActiveAirIndices = Array.AsReadOnly(chunk.ActiveAirIndices.AsSpan(0, chunk.ActiveAirCount).ToArray());
         Gases = Array.AsReadOnly(
             Enumerable.Range(0, chunk.ActiveGasCount)
@@ -150,11 +148,6 @@ public sealed class AtmosChunkCheckpoint
     ///     Gets the number of local voxels along each axis.
     /// </summary>
     public Int3 Dimensions { get; }
-
-    /// <summary>
-    ///     Gets the room capacity required when materializing this chunk.
-    /// </summary>
-    public int MaxActiveRooms { get; }
 
     /// <summary>
     ///     Gets whether the chunk is eligible for solver processing.
@@ -187,11 +180,6 @@ public sealed class AtmosChunkCheckpoint
     public IReadOnlyList<float> HeatCapacities { get; }
 
     /// <summary>
-    ///     Gets the active room IDs in their original processing order, including retained sleeping-room state.
-    /// </summary>
-    public IReadOnlyList<int> ActiveRooms { get; }
-
-    /// <summary>
     ///     Gets the valid prefix of active flat voxel indices, preserving inactive topology exactly.
     /// </summary>
     public IReadOnlyList<ushort> ActiveAirIndices { get; }
@@ -214,15 +202,14 @@ public sealed class AtmosChunkCheckpoint
     ///     Gets bytes occupied by copied chunk and solver values, excluding managed object headers and keys.
     /// </summary>
     public long PayloadBytes => (long)Classifications.Count * 16 +
-                                ActiveRooms.Count * 4L +
                                 ActiveAirIndices.Count * 2L +
                                 Gases.Sum(static gas => 4L + gas.Moles.Count * 4L) +
                                 SolverArrays.Sum(static array => array.PayloadBytes);
 
     internal AtmosChunk Materialize()
     {
-        var chunk = new AtmosChunk(Dimensions.X, Dimensions.Y, Dimensions.Z, MaxActiveRooms);
-        chunk.Initialize(Position, Dimensions.X, Dimensions.Y, Dimensions.Z, MaxActiveRooms);
+        var chunk = new AtmosChunk(Dimensions.X, Dimensions.Y, Dimensions.Z);
+        chunk.Initialize(Position, Dimensions.X, Dimensions.Y, Dimensions.Z);
         try
         {
             for (int index = 0; index < chunk.VoxelCount; index++)
@@ -239,10 +226,6 @@ public sealed class AtmosChunkCheckpoint
                 for (int index = 0; index < chunk.VoxelCount; index++)
                     chunk.ActiveGases[channel].Moles[index] = gas.Moles[index];
             }
-
-            chunk.ActiveRoomCount = ActiveRooms.Count;
-            for (int index = 0; index < ActiveRooms.Count; index++)
-                chunk.ActiveRoomIds[index] = ActiveRooms[index];
 
             chunk.ActiveAirCount = ActiveAirIndices.Count;
             for (int index = 0; index < ActiveAirIndices.Count; index++)

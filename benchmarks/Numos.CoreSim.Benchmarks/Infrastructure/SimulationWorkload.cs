@@ -151,7 +151,7 @@ internal sealed class SimulationWorkload : IDisposable
 
     private void CreateChunk(ScalingWorkloadOptions options, Int3 position, int chunkIndex, bool awake)
     {
-        Kernel.CreateAndRegisterChunk(position, options.ChunkWidth, options.ChunkHeight, options.ChunkDepth, 1);
+        Kernel.CreateAndRegisterChunk(position, options.ChunkWidth, options.ChunkHeight, options.ChunkDepth);
         var chunk = Kernel.GetChunkForDangerousAccess(position);
         if (!awake)
         {

@@ -23,7 +23,7 @@ public sealed class AtmosChunkInjectionTests
         var chunk = CreateChunk(2, 1, 1);
         chunk.VoxelRoomMap[0] = 7;
         chunk.VoxelRoomMap[1] = classification;
-        chunk.WakeRoom(7);
+        chunk.Wake();
 
         chunk.InjectGasToVoxel(1, 3, 2f, 300f, 1f, 1f);
 
@@ -138,7 +138,7 @@ public sealed class AtmosChunkInjectionTests
     {
         var chunk = CreateChunk(width, 1, 1);
         chunk.VoxelRoomMap.Fill(7);
-        chunk.WakeRoom(7);
+        chunk.Wake();
         return chunk;
     }
 }
