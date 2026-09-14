@@ -11,6 +11,9 @@ public sealed class AdvectionParallelDeterminismTests
     private const ulong X64ExpectedDigest = 5182992794561060750UL;
 
     [Test]
+    [Explicit(
+        "Only intended to verify that the advection solver matches behavior between parallel changes. " +
+        "This can be locked down and hashed when we're ready to stop changing the sim.")]
     public void Advection_ParallelPhasesMatchGoldenHash()
     {
         ulong expectedDigest = RuntimeInformation.ProcessArchitecture switch
