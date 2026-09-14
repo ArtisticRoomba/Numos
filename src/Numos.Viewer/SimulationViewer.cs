@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Numerics;
 using ImGuiNET;
 using Numos.API;
@@ -19,6 +20,8 @@ namespace Numos.Viewer;
 public partial class SimulationViewer : IDisposable
 {
     private const float CameraMoveDuration = 0.45f;
+    private readonly static TimeSpan ImGuiTransitionRenderDuration = TimeSpan.FromMilliseconds(250);
+    private readonly static TimeSpan StartupRenderDuration = TimeSpan.FromMilliseconds(250);
 
     private readonly Action<VisualizationRegistry>? _configureVisualizations;
     private readonly List<VoxelHighlight> _highlights = [];
@@ -55,14 +58,17 @@ public partial class SimulationViewer : IDisposable
     private Vector3 _cameraMoveStartTarget;
     private long _chunkCollectionRevision = -1;
     private AtmosConfig? _config;
+    private long _continuousRenderingUntilTimestamp;
     private SliceAxis _currentSliceAxis = SliceAxis.Z;
     private int _currentSliceIndex;
     private string _currentVisualizationId = BuiltInVisualizationIds.Temperature;
     private SimulationDrawData? _drawData;
+    private bool _eventBasedRenderingEnabled;
     private bool _eventWaitingEnabled;
     private ChunkIdentity? _focusedChunk;
     private SimulationFrameBuilder? _frameBuilder;
     private bool _frameSceneOnNextPresentation;
+    private bool _hadOpenImGuiPopup;
     private VoxelAddress? _hovered3DCell;
     private SliceCellDrawData? _hoveredSliceCell;
     private bool _imguiInitialized;
@@ -77,6 +83,7 @@ public partial class SimulationViewer : IDisposable
     private int _legendResolution = 32;
     private bool _legendResolutionEnabled;
     private bool _limitFpsWhenUnfocused = true;
+    private bool _nextFrameRequested;
     private int _programSettingsTab;
     private string? _projectName;
     private bool _requestExit;
@@ -129,6 +136,7 @@ public partial class SimulationViewer : IDisposable
     public SimulationViewer(Action<VisualizationRegistry>? configureVisualizations = null)
     {
         _configureVisualizations = configureVisualizations;
+        StartMessageCapture();
     }
 
     public VoxelAddress? SelectedCell => _selectedCell;
@@ -175,10 +183,12 @@ public partial class SimulationViewer : IDisposable
                 TextureFilter.Point,
                 new Color(0.04f, 0.04f, 0.05f, 1f));
 
+            RequestRenderingFor(StartupRenderDuration);
             ApplyFramePacing();
 
             while (!Raylib.WindowShouldClose() && !_requestExit)
             {
+                _nextFrameRequested = false;
                 float deltaTime = Raylib.GetFrameTime();
                 Update(deltaTime);
                 Draw(deltaTime);
@@ -192,6 +202,9 @@ public partial class SimulationViewer : IDisposable
 
     private void Update(float deltaTime)
     {
+        UpdateReplayFileOperations();
+        HandleReplayFileDrop();
+
         if (_simulation != null && _config != null)
         {
             if (!_isPaused)
@@ -565,6 +578,7 @@ public partial class SimulationViewer : IDisposable
         _cameraMoveEndTarget = target;
         _cameraMoveEndPosition = target + direction * Math.Max(distance, 0.1f);
         _cameraMoveElapsed = 0f;
+        RequestNextFrame();
     }
 
     private void UpdateCameraMove(float deltaTime)
@@ -577,6 +591,9 @@ public partial class SimulationViewer : IDisposable
         amount = amount * amount * (3f - 2f * amount);
         _camera3D.Position = Vector3.Lerp(_cameraMoveStartPosition, _cameraMoveEndPosition, amount);
         _camera3D.Target = Vector3.Lerp(_cameraMoveStartTarget, _cameraMoveEndTarget, amount);
+
+        if (_cameraMoveElapsed < CameraMoveDuration)
+            RequestNextFrame();
     }
 
     private void CancelCameraMove()
@@ -592,6 +609,8 @@ public partial class SimulationViewer : IDisposable
             Raylib.ClearBackground(new Color(0.1f, 0.1f, 0.1f, 1f));
             rlImGui.Begin(deltaTime);
             RenderUi();
+            UpdateImGuiFrameDemand();
+
             rlImGui.End();
             ApplyFramePacing();
         }
@@ -603,7 +622,7 @@ public partial class SimulationViewer : IDisposable
 
     private void ApplyFramePacing()
     {
-        bool waitForEvents = !RequiresContinuousFrames();
+        bool waitForEvents = _eventBasedRenderingEnabled && !RequiresContinuousFrames();
         if (waitForEvents != _eventWaitingEnabled)
         {
             if (waitForEvents)
@@ -629,13 +648,71 @@ public partial class SimulationViewer : IDisposable
 
     private bool RequiresContinuousFrames()
     {
-        if (_resolutionConfirmationPending)
+        if (_nextFrameRequested ||
+            Stopwatch.GetTimestamp() < _continuousRenderingUntilTimestamp ||
+            _resolutionConfirmationPending)
             return true;
 
         if (_simulation == null)
             return false;
 
-        return !_isPaused || _show3DViewport || _showSliceViewport;
+        return !_isPaused;
+    }
+
+    /// <summary>
+    ///     Requests one more rendered frame before the viewer returns to waiting for window events.
+    /// </summary>
+    /// <remarks>
+    ///     Call this during every frame in which an animation or other time-dependent UI state remains active.
+    ///     A single call schedules only the next frame, so the viewer becomes idle automatically when the caller
+    ///     stops renewing the request.
+    /// </remarks>
+    private void RequestNextFrame()
+    {
+        _nextFrameRequested = true;
+    }
+
+    /// <summary>
+    ///     Requests continuous rendering for at least the specified duration.
+    /// </summary>
+    /// <param name="duration">
+    ///     The minimum time before the viewer may return to waiting for window events.
+    /// </param>
+    /// <remarks>
+    ///     Use this for short transitions that need several cleanup frames after the triggering input has ended.
+    ///     Animations with an explicit active state should call <see cref="RequestNextFrame" /> on every frame instead.
+    /// </remarks>
+    private void RequestRenderingFor(TimeSpan duration)
+    {
+        long durationTicks = (long)Math.Ceiling(duration.TotalSeconds * Stopwatch.Frequency);
+        long requestedDeadline = Stopwatch.GetTimestamp() + durationTicks;
+        _continuousRenderingUntilTimestamp = Math.Max(_continuousRenderingUntilTimestamp, requestedDeadline);
+    }
+
+    private void UpdateImGuiFrameDemand()
+    {
+        if (ImGui.IsAnyItemActive())
+            RequestNextFrame();
+
+        bool hasOpenPopup = ImGui.IsPopupOpen(string.Empty, ImGuiPopupFlags.AnyPopupId);
+        bool pointerTransition =
+            ImGui.IsMouseClicked(ImGuiMouseButton.Left) ||
+            ImGui.IsMouseClicked(ImGuiMouseButton.Middle) ||
+            ImGui.IsMouseClicked(ImGuiMouseButton.Right) ||
+            ImGui.IsMouseReleased(ImGuiMouseButton.Left) ||
+            ImGui.IsMouseReleased(ImGuiMouseButton.Middle) ||
+            ImGui.IsMouseReleased(ImGuiMouseButton.Right);
+
+        var io = ImGui.GetIO();
+        if (pointerTransition ||
+            io.MouseWheel != 0f ||
+            io.MouseWheelH != 0f ||
+            hasOpenPopup != _hadOpenImGuiPopup)
+        {
+            RequestRenderingFor(ImGuiTransitionRenderDuration);
+        }
+
+        _hadOpenImGuiPopup = hasOpenPopup;
     }
 
     private void RenderSimulationScene()

@@ -1,4 +1,5 @@
 using ImGuiNET;
+using Numos.Viewer.Ui;
 
 namespace Numos.Viewer;
 
@@ -6,7 +7,6 @@ public partial class SimulationViewer
 {
     private const string LayoutFileName = "imgui.ini";
     private const string PackageDefaultLayoutFileName = "imgui-default.ini";
-    private string? _layoutStatus;
 #if DEBUG || TOOLS
     private string? _packagedDefaultLayoutPath;
 #endif
@@ -45,19 +45,18 @@ public partial class SimulationViewer
     {
         if (_userLayoutPath == null)
         {
-            _layoutStatus = "The ImGui layout has not been initialized yet.";
+            WriteMessage(ViewerLogLevel.Error, "Layout", "The ImGui layout has not been initialized yet.");
             return;
         }
 
         try
         {
             ImGui.SaveIniSettingsToDisk(_userLayoutPath);
-            _layoutStatus = "Saved. This layout will be restored at the next launch.";
+            WriteMessage(ViewerLogLevel.Info, "Layout", "Saved. This layout will be restored at the next launch.");
         }
         catch (Exception ex)
         {
-            // TODO error handling make this prettier
-            _layoutStatus = $"Could not save the layout: {ex.Message}";
+            WriteException("Could not save the layout", ex);
         }
     }
 
@@ -70,19 +69,18 @@ public partial class SimulationViewer
     {
         if (_packagedDefaultLayoutPath == null)
         {
-            _layoutStatus = "The packaged default layout has not been initialized yet.";
+            WriteMessage(ViewerLogLevel.Error, "Layout", "The packaged default layout has not been initialized yet.");
             return;
         }
 
         try
         {
             ImGui.SaveIniSettingsToDisk(_packagedDefaultLayoutPath);
-            _layoutStatus = "Saved as the packaged default for first-time launches.";
+            WriteMessage(ViewerLogLevel.Info, "Layout", "Saved as the packaged default for first-time launches.");
         }
         catch (Exception ex)
         {
-            // TODO error handling make this prettier
-            _layoutStatus = $"Could not save the packaged default layout: {ex.Message}";
+            WriteException("Could not save the packaged default layout", ex);
         }
     }
 

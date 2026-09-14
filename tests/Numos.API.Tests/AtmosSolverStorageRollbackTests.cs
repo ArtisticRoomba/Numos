@@ -1,5 +1,6 @@
 using Numos.Collections;
 using Numos.CoreSim.Datatypes.Snapshots;
+using Numos.CoreSim.Replay;
 using Numos.Maths;
 
 namespace Numos.API.Tests;
@@ -29,7 +30,10 @@ public sealed class AtmosSolverStorageRollbackTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(checkpoint.FormatVersion, Is.EqualTo(2));
+            Assert.That(
+                checkpoint.FormatVersion,
+                Is.EqualTo(AtmosSimulationCheckpoint.CurrentFormatVersion));
+
             Assert.That(saved.Select(array => array.Key), Is.EqualTo(new[] { "heat/counts", "heat/exposure" }));
             Assert.That(
                 snapshot.SolverArrays.Single(array => array.Key == "heat/exposure").CopyValues<float>()[23],

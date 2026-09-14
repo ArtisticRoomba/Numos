@@ -44,7 +44,7 @@ internal sealed class SimulationSession : IDisposable
             "setVoxelTemperature" => SetVoxelTemperature(request),
             "addGas" => AddGas(request),
             "injectGas" => InjectGas(request),
-            "wakeRoom" => WakeRoom(request),
+            "wakeChunk" => WakeChunk(request),
             "sleepChunk" => SleepChunk(request),
             "updateConfig" => UpdateConfig(request),
             "setSolverEnabled" => SetSolverEnabled(request),
@@ -223,12 +223,11 @@ internal sealed class SimulationSession : IDisposable
         return new CommandExecution();
     }
 
-    private CommandExecution WakeRoom(HeadlessRequest request)
+    private CommandExecution WakeChunk(HeadlessRequest request)
     {
         var simulation = RequireSimulation();
         var position = Require(request.Position, "position");
-        int roomId = Require(request.RoomId, "roomId");
-        simulation.WakeRoom(Handle(position), roomId);
+        simulation.WakeChunk(Handle(position));
         return new CommandExecution();
     }
 

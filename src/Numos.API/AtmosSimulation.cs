@@ -309,26 +309,21 @@ public sealed partial class AtmosSimulation : IDisposable
     /// <param name="position">
     ///     The chunk's position in the chunk grid. This is not a voxel-space position.
     /// </param>
-    /// <param name="maxActiveRooms">The maximum number of room IDs that may be active simultaneously.</param>
     /// <returns>A lightweight handle that identifies the new chunk to this facade.</returns>
     /// <remarks>
     ///     The simulation owns the new chunk. A handle identifies its grid position; it does not provide direct
     ///     access to mutable kernel state. Registering the chunk wakes sleeping face neighbors so they can react
     ///     to the new boundary on the next simulation tick.
     /// </remarks>
-    /// <exception cref="ArgumentOutOfRangeException"><paramref name="maxActiveRooms" /> is zero or negative.</exception>
     /// <exception cref="InvalidOperationException">
     ///     A chunk is already registered at <paramref name="position" />, or this is called from a solver callback.
     /// </exception>
     /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
     [PublicAPI]
-    public AtmosChunkHandle CreateAndRegisterChunk(
-        Int3 position,
-        int maxActiveRooms = AtmosChunkConstants.DefaultMaxActiveRooms)
+    public AtmosChunkHandle CreateAndRegisterChunk(Int3 position)
     {
         ThrowIfDisposed();
-        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxActiveRooms);
-        _kernel.CreateAndRegisterChunk(position, _chunkWidth, _chunkHeight, _chunkDepth, maxActiveRooms);
+        _kernel.CreateAndRegisterChunk(position, _chunkWidth, _chunkHeight, _chunkDepth);
         return new AtmosChunkHandle(position);
     }
 
@@ -538,7 +533,7 @@ public sealed partial class AtmosSimulation : IDisposable
     ///     Assigns one classification to every voxel in a chunk.
     /// </summary>
     /// <param name="chunk">A handle identifying the target chunk.</param>
-    /// <param name="classification">The room, solid, or void classification to assign.</param>
+    /// <param name="classification">The air, solid, or void classification to assign.</param>
     /// <remarks>If the chunk is awake, its active-voxel topology is rebuilt immediately.</remarks>
     /// <exception cref="KeyNotFoundException">No chunk is registered at the handle's position.</exception>
     /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
@@ -553,7 +548,7 @@ public sealed partial class AtmosSimulation : IDisposable
     ///     Assigns one classification to the voxels on every simulated outer face of a chunk.
     /// </summary>
     /// <param name="chunk">A handle identifying the target chunk.</param>
-    /// <param name="classification">The room, solid, or void classification to assign.</param>
+    /// <param name="classification">The air, solid, or void classification to assign.</param>
     /// <remarks>
     ///     X and Y faces are always included. Z faces are included only when the chunk has more than one
     ///     layer, so a two-dimensional chunk receives a perimeter instead of becoming entirely classified.
@@ -575,7 +570,7 @@ public sealed partial class AtmosSimulation : IDisposable
     /// </summary>
     /// <param name="chunk">A handle identifying the target chunk.</param>
     /// <param name="localVoxelIndex">The voxel's zero-based index in the chunk's flattened storage.</param>
-    /// <param name="classification">The room, solid, or void classification to assign.</param>
+    /// <param name="classification">The air, solid, or void classification to assign.</param>
     /// <remarks>If the chunk is awake, its active-voxel topology is rebuilt immediately.</remarks>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="localVoxelIndex" /> is outside the chunk.</exception>
     /// <exception cref="KeyNotFoundException">No chunk is registered at the handle's position.</exception>
@@ -596,7 +591,7 @@ public sealed partial class AtmosSimulation : IDisposable
     /// <param name="x">The zero-based local x-coordinate.</param>
     /// <param name="y">The zero-based local y-coordinate.</param>
     /// <param name="z">The zero-based local z-coordinate.</param>
-    /// <param name="classification">The room, solid, or void classification to assign.</param>
+    /// <param name="classification">The air, solid, or void classification to assign.</param>
     /// <exception cref="ArgumentOutOfRangeException">A local coordinate is outside the chunk.</exception>
     /// <exception cref="KeyNotFoundException">No chunk is registered at the handle's position.</exception>
     /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
@@ -656,7 +651,7 @@ public sealed partial class AtmosSimulation : IDisposable
     }
 
     /// <summary>
-    ///     Adds gas to one voxel addressed by its flat local index and wakes its room.
+    ///     Adds gas to one voxel addressed by its flat local index and wakes its chunk.
     /// </summary>
     /// <param name="chunk">A handle identifying the target chunk.</param>
     /// <param name="localVoxelIndex">The voxel's zero-based index in the chunk's flattened storage.</param>
@@ -664,8 +659,7 @@ public sealed partial class AtmosSimulation : IDisposable
     /// <param name="moles">The amount of gas to add, in moles.</param>
     /// <param name="temperature">The temperature of the added gas, in kelvins.</param>
     /// <remarks>
-    ///     The room classification containing the voxel is activated before injection. Injection into a solid or
-    ///     void voxel is ignored. The added gas carries sensible internal energy according to its molar heat
+    ///     The chunk is activated before injection. Injection into a solid or void voxel is ignored. The added gas carries sensible internal energy according to its molar heat
     ///     capacity at constant volume, and the stored temperature is updated by energy balance. Before blending, the
     ///     heat
     ///     capacity of gas already in the voxel is recomputed from the current <see cref="Config" />. A non-finite or
@@ -695,7 +689,7 @@ public sealed partial class AtmosSimulation : IDisposable
     }
 
     /// <summary>
-    ///     Adds gas to one voxel addressed by local coordinates and wakes its room.
+    ///     Adds gas to one voxel addressed by local coordinates and wakes its chunk.
     /// </summary>
     /// <param name="chunk">A handle identifying the target chunk.</param>
     /// <param name="x">The zero-based local x-coordinate.</param>
@@ -705,8 +699,7 @@ public sealed partial class AtmosSimulation : IDisposable
     /// <param name="moles">The amount of gas to add, in moles.</param>
     /// <param name="temperature">The temperature of the added gas, in kelvins.</param>
     /// <remarks>
-    ///     The room classification containing the voxel is activated before injection. Injection into a solid or
-    ///     void voxel is ignored. The added gas carries sensible internal energy according to its molar heat
+    ///     The chunk is activated before injection. Injection into a solid or void voxel is ignored. The added gas carries sensible internal energy according to its molar heat
     ///     capacity at constant volume, and the stored temperature is updated by energy balance. Before blending, the
     ///     heat
     ///     capacity of gas already in the voxel is recomputed from the current <see cref="Config" />. A non-finite or
@@ -737,7 +730,7 @@ public sealed partial class AtmosSimulation : IDisposable
 
 
     /// <summary>
-    ///     Adds a registered gas by name to one voxel addressed by its flat local index and wakes its room.
+    ///     Adds a registered gas by name to one voxel addressed by its flat local index and wakes its chunk.
     /// </summary>
     /// <param name="chunk">The target chunk.</param>
     /// <param name="localVoxelIndex">The voxel's zero-based flat index.</param>
@@ -761,7 +754,7 @@ public sealed partial class AtmosSimulation : IDisposable
     }
 
     /// <summary>
-    ///     Adds a registered gas by name to one voxel addressed by local coordinates and wakes its room.
+    ///     Adds a registered gas by name to one voxel addressed by local coordinates and wakes its chunk.
     /// </summary>
     /// <param name="chunk">The target chunk.</param>
     /// <param name="x">The local x-coordinate.</param>
@@ -787,27 +780,23 @@ public sealed partial class AtmosSimulation : IDisposable
     }
 
     /// <summary>
-    ///     Wakes a room so its voxels participate in subsequent simulation ticks.
+    ///     Wakes a chunk so its gas-bearing voxels participate in subsequent simulation ticks.
     /// </summary>
     /// <param name="chunk">A handle identifying the target chunk.</param>
-    /// <param name="roomId">The classification ID of the room to activate.</param>
-    /// <remarks>
-    ///     Waking an already active room resets its sleep timer. Solid and void classification IDs are ignored.
-    /// </remarks>
     /// <exception cref="KeyNotFoundException">No chunk is registered at the handle's position.</exception>
     /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
     [PublicAPI]
-    public void WakeRoom(AtmosChunkHandle chunk, int roomId)
+    public void WakeChunk(AtmosChunkHandle chunk)
     {
         ThrowIfDisposed();
-        _kernel.WakeRoom(chunk.Position, roomId);
+        _kernel.WakeChunk(chunk.Position);
     }
 
     /// <summary>
     ///     Puts a chunk to sleep so it is skipped by subsequent simulation ticks.
     /// </summary>
     /// <param name="chunk">A handle identifying the target chunk.</param>
-    /// <remarks>Calling <see cref="WakeRoom" /> or adding gas to a non-solid, non-void room wakes it again.</remarks>
+    /// <remarks>Calling <see cref="WakeChunk" /> or adding gas to a non-solid, non-void voxel wakes it again.</remarks>
     /// <exception cref="KeyNotFoundException">No chunk is registered at the handle's position.</exception>
     /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
     [PublicAPI]

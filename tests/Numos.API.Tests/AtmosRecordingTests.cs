@@ -7,6 +7,23 @@ namespace Numos.API.Tests;
 public sealed class AtmosRecordingTests
 {
     [Test]
+    public void Update_DoesNotRecordHostFrameTimingAndRestoreResetsClockPhase()
+    {
+        using var simulation = new AtmosSimulation(1, 1, 1);
+        simulation.StartRecording();
+        simulation.Update(0.025f);
+        var checkpoint = simulation.CaptureCheckpoint();
+        simulation.Update(0.025f);
+        Assert.That(simulation.TickCount, Is.EqualTo(1));
+        var recording = simulation.StopRecording();
+        Assert.That(recording.Operations, Is.Empty);
+
+        simulation.RestoreCheckpoint(checkpoint);
+        simulation.Update(0.025f);
+        Assert.That(simulation.TickCount, Is.Zero);
+    }
+
+    [Test]
     public void SetAtmosConfig_RecordsChangedSnapshotsInTickAndSequenceOrder()
     {
         using var simulation = new AtmosSimulation(1, 1, 1);

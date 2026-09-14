@@ -208,7 +208,7 @@ public partial class SimulationViewer
         catch (Exception exception) when (
             exception is ArgumentOutOfRangeException or InvalidOperationException)
         {
-            SetProjectMessage(exception.Message, true);
+            WriteException("Could not add the chunk", exception);
         }
     }
 
@@ -237,6 +237,22 @@ public partial class SimulationViewer
             SetProjectMessage(
                 $"Replaced the outer faces of chunk {FormatChunkPosition(chunk.Position)} with solid walls.",
                 false);
+        }
+        catch (KeyNotFoundException exception)
+        {
+            WriteException("Could not seal the chunk", exception);
+        }
+    }
+
+    private void UnsleepProjectChunk(AtmosChunkHandle chunk)
+    {
+        if (_simulation == null)
+            return;
+
+        try
+        {
+            _simulation.WakeChunk(chunk);
+            SetProjectMessage($"Unslept chunk {FormatChunkPosition(chunk.Position)}.", false);
         }
         catch (KeyNotFoundException exception)
         {
@@ -331,7 +347,7 @@ public partial class SimulationViewer
         catch (Exception exception) when (
             exception is ArgumentOutOfRangeException or KeyNotFoundException or InvalidOperationException)
         {
-            SetProjectMessage(exception.Message, true);
+            WriteException("Could not inject gas", exception);
         }
     }
 

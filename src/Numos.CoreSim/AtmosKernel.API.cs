@@ -176,7 +176,6 @@ internal sealed partial class AtmosKernel
         lock (_stateGate)
         {
             ThrowIfTickExecuting("update the simulation recursively");
-            Second previousAccumulator = _accumulator;
             _accumulator += elapsedSeconds;
 
             if (_accumulator > AtmosSolverConstants.FixedTimeStep * AtmosSolverConstants.MaximumStepsPerUpdate)
@@ -198,9 +197,6 @@ internal sealed partial class AtmosKernel
                 steps++;
                 TickSimulation(chunks);
             }
-
-            if (ShouldRecord && BitConverter.SingleToInt32Bits(previousAccumulator) != BitConverter.SingleToInt32Bits(_accumulator))
-                RecordOperation(new SetElapsedAccumulatorOperation(_accumulator));
         }
     }
 
@@ -307,7 +303,7 @@ internal sealed partial class AtmosKernel
 
             WakeSleepingNeighbors(chunk.GridPosition);
             _chunkCollectionRevision++;
-            if (ShouldRecord) RecordOperation(new CreateChunkOperation(chunk.GridPosition, chunk.MaxActiveRooms));
+            if (ShouldRecord) RecordOperation(new CreateChunkOperation(chunk.GridPosition));
         }
     }
 
@@ -338,9 +334,8 @@ internal sealed partial class AtmosKernel
     /// <param name="width">The number of voxels along the local x-axis.</param>
     /// <param name="height">The number of voxels along the local y-axis.</param>
     /// <param name="depth">The number of voxels along the local z-axis.</param>
-    /// <param name="maxActiveRooms">The maximum number of room IDs that may be active simultaneously.</param>
     /// <exception cref="InvalidOperationException">A chunk is already registered at <paramref name="position" />.</exception>
-    internal void CreateAndRegisterChunk(Int3 position, int width, int height, int depth, int maxActiveRooms)
+    internal void CreateAndRegisterChunk(Int3 position, int width, int height, int depth)
     {
         lock (_stateGate)
         {
@@ -348,9 +343,8 @@ internal sealed partial class AtmosKernel
             if (_chunkMap.ContainsKey(position))
                 throw new InvalidOperationException($"A chunk is already registered at {position}.");
 
-            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxActiveRooms);
-            var chunk = new AtmosChunk(width, height, depth, maxActiveRooms);
-            chunk.Initialize(position, width, height, depth, maxActiveRooms);
+            var chunk = new AtmosChunk(width, height, depth);
+            chunk.Initialize(position, width, height, depth);
             RegisterChunk(chunk);
         }
     }
@@ -656,7 +650,7 @@ internal sealed partial class AtmosKernel
     }
 
     /// <summary>
-    ///     Adds gas to one voxel addressed by its flat local index and wakes its room.
+    ///     Adds gas to one voxel addressed by its flat local index and wakes its chunk.
     /// </summary>
     /// <param name="position">The target chunk's grid position.</param>
     /// <param name="localVoxelIndex">The voxel's zero-based index in the chunk's flattened storage.</param>
@@ -676,18 +670,18 @@ internal sealed partial class AtmosKernel
             ValidateVoxelIndex(chunk, localVoxelIndex);
             ValidateGasInjection(gasId, moles, temperature);
 
-            int roomId = chunk.VoxelRoomMap[localVoxelIndex];
-            if (roomId == VoxelClassification.RoomSolid || roomId == VoxelClassification.RoomVoid)
+            int classification = chunk.VoxelRoomMap[localVoxelIndex];
+            if (classification == VoxelClassification.RoomSolid || classification == VoxelClassification.RoomVoid)
                 return;
 
-            chunk.WakeRoom(roomId);
+            chunk.Wake();
             GasInjectionSolver.Inject(chunk, localVoxelIndex, gasId, moles, temperature, _config);
             if (ShouldRecord) RecordOperation(new AddGasToVoxelOperation(position, localVoxelIndex, gasId, moles, temperature));
         }
     }
 
     /// <summary>
-    ///     Adds gas to one voxel addressed by local coordinates and wakes its room.
+    ///     Adds gas to one voxel addressed by local coordinates and wakes its chunk.
     /// </summary>
     /// <param name="position">The target chunk's grid position.</param>
     /// <param name="x">The zero-based local x-coordinate.</param>
@@ -711,19 +705,16 @@ internal sealed partial class AtmosKernel
     }
 
     /// <summary>
-    ///     Wakes a room so its voxels participate in subsequent simulation ticks.
+    ///     Wakes a chunk so its gas-bearing voxels participate in subsequent simulation ticks.
     /// </summary>
     /// <param name="position">The target chunk's grid position.</param>
-    /// <param name="roomId">The classification ID of the room to activate.</param>
-    /// <remarks>Solid and void IDs are ignored. Waking an active room resets its sleep timer.</remarks>
     /// <exception cref="KeyNotFoundException">No chunk is registered at <paramref name="position" />.</exception>
-    internal void WakeRoom(Int3 position, int roomId)
+    internal void WakeChunk(Int3 position)
     {
         lock (_stateGate)
         {
-            GetChunk(position).WakeRoom(roomId);
-            if (ShouldRecord && roomId != VoxelClassification.RoomSolid && roomId != VoxelClassification.RoomVoid)
-                RecordOperation(new WakeRoomOperation(position, roomId));
+            GetChunk(position).Wake();
+            if (ShouldRecord) RecordOperation(new WakeChunkOperation(position));
         }
     }
 

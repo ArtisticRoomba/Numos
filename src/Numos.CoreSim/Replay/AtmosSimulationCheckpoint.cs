@@ -16,35 +16,29 @@ public sealed class AtmosSimulationCheckpoint
     /// <summary>
     ///     Identifies the in-memory checkpoint schema used to interpret this data.
     /// </summary>
-    public const int CurrentFormatVersion = 3;
+    public const int CurrentFormatVersion = 4;
 
     /// <summary>
     ///     Identifies the structural and deterministic-math contract required to restore this data.
     /// </summary>
-    public const int CurrentCompatibilityVersion = 1;
+    public const int CurrentCompatibilityVersion = 2;
 
     internal AtmosSimulationCheckpoint(
-        Int3 dimensions, AtmosTimelinePosition position, Second elapsedAccumulator,
+        Int3 dimensions, AtmosTimelinePosition position,
         AtmosConfigSnapshot config, AtmosSolverCheckpoint[] solvers, AtmosChunkCheckpoint[] chunks)
     {
         Dimensions = dimensions;
         Position = position;
-        ElapsedAccumulator = elapsedAccumulator;
         Config = config;
         Solvers = Array.AsReadOnly(solvers);
         Chunks = Array.AsReadOnly(chunks);
-        // Existing simulations retain their format and hashes when they do not use solver configurations.
-        FormatVersion = config.SolverConfigurations.Count != 0
-            ? CurrentFormatVersion
-            : chunks.Any(static chunk => chunk.SolverArrays.Count != 0)
-                ? 2
-                : 1;
+        FormatVersion = CurrentFormatVersion;
 
         CompatibilityFingerprint = AtmosStateHasher.HashDefinition(this);
     }
 
     /// <summary>
-    ///     Gets the required schema: 1 for base state, 2 with captured solver arrays, or 3 with solver configurations.
+    ///     Gets the checkpoint schema version.
     /// </summary>
     public int FormatVersion { get; }
 
@@ -67,11 +61,6 @@ public sealed class AtmosSimulationCheckpoint
     ///     Gets the completed tick and highest external operation already incorporated.
     /// </summary>
     public AtmosTimelinePosition Position { get; }
-
-    /// <summary>
-    ///     Gets the residual elapsed time, in seconds, retained for subsequent elapsed-time updates.
-    /// </summary>
-    public Second ElapsedAccumulator { get; }
 
     /// <summary>
     ///     Gets the immutable applied configuration, including gas definitions and reaction parameters.
@@ -115,7 +104,7 @@ public readonly record struct AtmosSolverCheckpoint(string Name, bool IsCustom, 
 ///     Holds the exact continuation data for one chunk.
 /// </summary>
 /// <remarks>
-///     Note that gas channels and active room order are retained because floating-point reductions can observe that order.
+///     Gas-channel order is retained because floating-point reductions can observe that order.
 ///     This is continuation data, not a compact presentation snapshot, so don't use it for display, use something from
 ///     the viewer instead.
 /// </remarks>
@@ -125,20 +114,43 @@ public sealed class AtmosChunkCheckpoint
     {
         Position = chunk.GridPosition;
         Dimensions = chunk.Dimensions;
-        MaxActiveRooms = chunk.MaxActiveRooms;
         IsAwake = chunk.IsAwake;
         SleepTimer = chunk.SleepTimer;
         Classifications = Array.AsReadOnly(chunk.VoxelRoomMap.ToArray());
         Temperatures = Array.AsReadOnly(chunk.Temperature.ToArray());
         Pressures = Array.AsReadOnly(chunk.TotalPressure.ToArray());
         HeatCapacities = Array.AsReadOnly(chunk.TotalHeatCapacity.ToArray());
-        ActiveRooms = Array.AsReadOnly(chunk.ActiveRoomIds.AsSpan(0, chunk.ActiveRoomCount).ToArray());
         ActiveAirIndices = Array.AsReadOnly(chunk.ActiveAirIndices.AsSpan(0, chunk.ActiveAirCount).ToArray());
         Gases = Array.AsReadOnly(
             Enumerable.Range(0, chunk.ActiveGasCount)
                 .Select(gas => new AtmosGasChannelCheckpoint(chunk.ActiveGases[gas], chunk.VoxelCount)).ToArray());
 
         SolverArrays = Array.AsReadOnly(chunk.CaptureSolverArrays());
+    }
+
+    internal AtmosChunkCheckpoint(
+        Int3 position,
+        Int3 dimensions,
+        bool isAwake,
+        int sleepTimer,
+        int[] classifications,
+        float[] temperatures,
+        float[] pressures,
+        float[] heatCapacities,
+        ushort[] activeAirIndices,
+        AtmosGasChannelCheckpoint[] gases)
+    {
+        Position = position;
+        Dimensions = dimensions;
+        IsAwake = isAwake;
+        SleepTimer = sleepTimer;
+        Classifications = Array.AsReadOnly(classifications);
+        Temperatures = Array.AsReadOnly(temperatures);
+        Pressures = Array.AsReadOnly(pressures);
+        HeatCapacities = Array.AsReadOnly(heatCapacities);
+        ActiveAirIndices = Array.AsReadOnly(activeAirIndices);
+        Gases = Array.AsReadOnly(gases);
+        SolverArrays = Array.Empty<AtmosSolverArraySnapshot>();
     }
 
     /// <summary>
@@ -150,11 +162,6 @@ public sealed class AtmosChunkCheckpoint
     ///     Gets the number of local voxels along each axis.
     /// </summary>
     public Int3 Dimensions { get; }
-
-    /// <summary>
-    ///     Gets the room capacity required when materializing this chunk.
-    /// </summary>
-    public int MaxActiveRooms { get; }
 
     /// <summary>
     ///     Gets whether the chunk is eligible for solver processing.
@@ -187,11 +194,6 @@ public sealed class AtmosChunkCheckpoint
     public IReadOnlyList<float> HeatCapacities { get; }
 
     /// <summary>
-    ///     Gets the active room IDs in their original processing order, including retained sleeping-room state.
-    /// </summary>
-    public IReadOnlyList<int> ActiveRooms { get; }
-
-    /// <summary>
     ///     Gets the valid prefix of active flat voxel indices, preserving inactive topology exactly.
     /// </summary>
     public IReadOnlyList<ushort> ActiveAirIndices { get; }
@@ -214,15 +216,14 @@ public sealed class AtmosChunkCheckpoint
     ///     Gets bytes occupied by copied chunk and solver values, excluding managed object headers and keys.
     /// </summary>
     public long PayloadBytes => (long)Classifications.Count * 16 +
-                                ActiveRooms.Count * 4L +
                                 ActiveAirIndices.Count * 2L +
                                 Gases.Sum(static gas => 4L + gas.Moles.Count * 4L) +
                                 SolverArrays.Sum(static array => array.PayloadBytes);
 
     internal AtmosChunk Materialize()
     {
-        var chunk = new AtmosChunk(Dimensions.X, Dimensions.Y, Dimensions.Z, MaxActiveRooms);
-        chunk.Initialize(Position, Dimensions.X, Dimensions.Y, Dimensions.Z, MaxActiveRooms);
+        var chunk = new AtmosChunk(Dimensions.X, Dimensions.Y, Dimensions.Z);
+        chunk.Initialize(Position, Dimensions.X, Dimensions.Y, Dimensions.Z);
         try
         {
             for (int index = 0; index < chunk.VoxelCount; index++)
@@ -231,6 +232,7 @@ public sealed class AtmosChunkCheckpoint
                 chunk.Temperature[index] = Temperatures[index];
                 chunk.TotalPressure[index] = Pressures[index];
                 chunk.TotalHeatCapacity[index] = HeatCapacities[index];
+                chunk.IsVacuum[index] = Pressures[index] <= 0f;
             }
 
             foreach (var gas in Gases)
@@ -239,10 +241,6 @@ public sealed class AtmosChunkCheckpoint
                 for (int index = 0; index < chunk.VoxelCount; index++)
                     chunk.ActiveGases[channel].Moles[index] = gas.Moles[index];
             }
-
-            chunk.ActiveRoomCount = ActiveRooms.Count;
-            for (int index = 0; index < ActiveRooms.Count; index++)
-                chunk.ActiveRoomIds[index] = ActiveRooms[index];
 
             chunk.ActiveAirCount = ActiveAirIndices.Count;
             for (int index = 0; index < ActiveAirIndices.Count; index++)
@@ -270,6 +268,12 @@ public sealed class AtmosGasChannelCheckpoint
     {
         GasId = channel.GasId;
         Moles = Array.AsReadOnly(channel.Moles.AsSpan(0, voxelCount).ToArray());
+    }
+
+    internal AtmosGasChannelCheckpoint(int gasId, float[] moles)
+    {
+        GasId = gasId;
+        Moles = Array.AsReadOnly(moles);
     }
 
     /// <summary>

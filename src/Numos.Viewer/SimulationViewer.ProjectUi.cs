@@ -41,9 +41,6 @@ public partial class SimulationViewer
     private int _projectChunkHeightDraft = AtmosChunkConstants.DefaultHeight;
     private int _projectChunkWidthDraft = AtmosChunkConstants.DefaultWidth;
 
-    private string? _projectMessage;
-    private bool _projectMessageIsError;
-
     private string _projectNameDraft = "Untitled Simulation";
     private bool _requestOpenCloseProject;
 
@@ -147,6 +144,7 @@ public partial class SimulationViewer
                 exception is ArgumentException or InvalidOperationException)
             {
                 _createProjectError = exception.Message;
+                WriteException("Could not create the simulation", exception);
             }
         }
 
@@ -172,7 +170,9 @@ public partial class SimulationViewer
         ImGui.Spacing();
         if (ImGui.Button("Close Project", new Vector2(140, 0)))
         {
+            string projectName = _projectName ?? "Untitled Simulation";
             DisposeSimulationProject();
+            WriteMessage(ViewerLogLevel.Info, "Simulation", $"Closed project '{projectName}'.");
             _closeProjectModalOpen = false;
             ImGui.CloseCurrentPopup();
         }
@@ -249,7 +249,6 @@ public partial class SimulationViewer
 
         RenderSimulationProgress();
 
-        RenderProjectMessage();
         if (ImGui.CollapsingHeader("Simulation Details", ImGuiTreeNodeFlags.DefaultOpen))
             RenderSolutionDetails();
 
@@ -272,6 +271,7 @@ public partial class SimulationViewer
 
         if (now < _stepProgressDisplayUntil)
         {
+            RequestNextFrame();
             ImGui.ProgressBar(0f, new Vector2(-1, 0), $"Step complete - Tick {_completedStepTick}");
             return;
         }
@@ -279,27 +279,9 @@ public partial class SimulationViewer
         ImGui.ProgressBar(0f, new Vector2(-1, 0), "Paused");
     }
 
-    private void RenderProjectMessage()
-    {
-        if (string.IsNullOrWhiteSpace(_projectMessage))
-            return;
-
-        ImGui.Spacing();
-        ImGui.PushStyleColor(
-            ImGuiCol.Text,
-            _projectMessageIsError
-                ? ViewerTheme.Error
-                : ViewerTheme.Running);
-
-        ImGui.TextWrapped(_projectMessage);
-        ImGui.PopStyleColor();
-        ImGui.Spacing();
-    }
-
     private void SetProjectMessage(string message, bool isError)
     {
-        _projectMessage = message;
-        _projectMessageIsError = isError;
+        WriteMessage(isError ? ViewerLogLevel.Error : ViewerLogLevel.Info, "Simulation", message);
     }
 
     private void RenderProjectChunkControls()
@@ -309,6 +291,7 @@ public partial class SimulationViewer
 
         AtmosChunkHandle? chunkToRemove = null;
         AtmosChunkHandle? chunkToSeal = null;
+        AtmosChunkHandle? chunkToUnsleep = null;
         foreach (var handle in _liveChunkHandles)
         {
             ImGui.PushID($"chunk-{handle.Position.X}-{handle.Position.Y}-{handle.Position.Z}");
@@ -327,6 +310,12 @@ public partial class SimulationViewer
                 if (ImGui.IsItemHovered())
                     ImGui.SetTooltip("Replace the chunk's simulated outer faces with solid voxels.");
 
+                if (ImGui.MenuItem("Unsleep"))
+                    chunkToUnsleep = handle;
+
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip("Wake the chunk so it participates in subsequent simulation ticks.");
+
                 if (ImGui.MenuItem("Remove"))
                     chunkToRemove = handle;
 
@@ -340,6 +329,8 @@ public partial class SimulationViewer
             RemoveProjectChunk(chunkToRemove.Value);
         else if (chunkToSeal.HasValue)
             SealProjectChunk(chunkToSeal.Value);
+        else if (chunkToUnsleep.HasValue)
+            UnsleepProjectChunk(chunkToUnsleep.Value);
 
         if (_liveChunkHandles.Count == 0)
             ImGui.TextDisabled("No chunks. Add one at a chunk-grid position.");

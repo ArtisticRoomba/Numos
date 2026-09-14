@@ -49,7 +49,7 @@ public enum AtmosOperationCode : ushort
     /// <summary>
     ///     Wake a room and reset its sleep timer.
     /// </summary>
-    WakeRoom = 9,
+    WakeChunk = 9,
     /// <summary>
     ///     Put a chunk to sleep without discarding its stored state.
     /// </summary>
@@ -61,11 +61,7 @@ public enum AtmosOperationCode : ushort
     /// <summary>
     ///     Apply resolved voxel gas and thermal state independent of detached container identity.
     /// </summary>
-    SetVoxelMixture = 12,
-    /// <summary>
-    ///     Restore the elapsed-time update remainder without reproducing host frame cadence.
-    /// </summary>
-    SetElapsedAccumulator = 13
+    SetVoxelMixture = 12
 }
 
 /// <summary>
@@ -126,6 +122,7 @@ public sealed class AtmosRecording
         AtmosTimelinePosition head,
         IEnumerable<AtmosRecordedOperation> operations)
     {
+        ArgumentNullException.ThrowIfNull(operations);
         Start = start;
         Head = head;
         Operations = new ReadOnlyCollection<AtmosRecordedOperation>(operations.ToArray());

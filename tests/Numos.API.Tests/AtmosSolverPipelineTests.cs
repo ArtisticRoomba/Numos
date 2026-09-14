@@ -223,7 +223,7 @@ public sealed class AtmosSolverPipelineTests
     }
 
     [Test]
-    public void StandardTemperatureMutation_RefreshesPressureBeforeThermodynamics()
+    public void StandardTemperatureMutation_SubThresholdVoxelStillConductsNextToPressurizedVoxel()
     {
         var config = new AtmosConfig
         {
@@ -252,7 +252,7 @@ public sealed class AtmosSolverPipelineTests
         simulation.Tick();
         simulation.Tick();
 
-        Assert.That(simulation.GetVoxelSnapshot(chunk, 0).Temperature, Is.EqualTo(1f));
+        Assert.That(simulation.GetVoxelSnapshot(chunk, 0).Temperature, Is.EqualTo(150.5f));
     }
 
     [Test]

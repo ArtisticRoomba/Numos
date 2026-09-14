@@ -9,6 +9,7 @@ The project has two places for benchmarks:
   axes.
 - `Micro/`: focused comparisons with a baseline and equivalent inputs. The initial comparison measures ordinary
   configuration gas-property lookup against the tick's captured tables when reducing heat capacity.
+- `Scaling/`: one-axis sweeps used to measure wall-clock growth.
 
 ## Run a useful subset
 
@@ -35,6 +36,41 @@ dotnet run -c Release --project benchmarks/Numos.CoreSim.Benchmarks -- --anyCate
 
 # Exercise every method with a short adaptive run using two chunks, 64 active voxels each, and two gases.
 NUMOS_BENCHMARK_SMOKE=1 dotnet run -c Release --project benchmarks/Numos.CoreSim.Benchmarks -- --filter '*' --warmupCount 1 --iterationCount 1 --iterationTime 250
+```
+
+The routine scaling sweep uses the `PR` category. Set `NUMOS_BENCHMARK_FULL=1` to expand power-of-two ranges in classes
+that have both routine and full parameter sets:
+
+```bash
+dotnet run -c Release --project benchmarks/Numos.CoreSim.Benchmarks -- --anyCategories PR --exporters csv
+NUMOS_BENCHMARK_FULL=1 dotnet run -c Release --project benchmarks/Numos.CoreSim.Benchmarks -- --anyCategories Scaling --exporters csv
+```
+
+The parallel sweep runs fixed transient workloads at 1, 2, 4, 8, and 16 reported processors. Advection, thermodynamics,
+and reactions each have a 128-chunk throughput case and a dense single-chunk case. The paired shapes show whether a
+solver scales across chunks, inside one chunk, or both. Tiered compilation is disabled for these jobs because iteration
+setup limits each sample to one solve and worker-dependent promotion timing distorts the comparison.
+
+```bash
+dotnet run -c Release --project benchmarks/Numos.CoreSim.Benchmarks -- \
+  --filter '*ParallelScalingBenchmarks*' --exporters csv
+```
+
+Compare each workload's worker jobs against `Workers=1`. The advection gate expects at least 3× speedup at four
+workers, the eight-worker result to be no slower than four workers, and the one-worker result to remain within 10% of
+the prior baseline. The dense single-chunk case tracks the intra-chunk gain separately and catches a return to
+chunk-only scheduling.
+
+## Analyze scaling output
+
+The plotting script reads the dimensions embedded in BenchmarkDotNet CSV output and creates linear, log-log, normalized
+cost, and adjacent log-log slope graphs. Parallel runs also produce speedup and efficiency graphs. Run it using python
+and pass in a `csv` to analyze:
+
+```bash
+python3 benchmarks/analysis/analyze_scaling.py \
+  BenchmarkDotNet.Artifacts/results/*ScalingBenchmarks-report.csv \
+  --output BenchmarkDotNet.Artifacts/scaling-graphs
 ```
 
 ## Select one solver group

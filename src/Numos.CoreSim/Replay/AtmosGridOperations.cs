@@ -7,8 +7,7 @@ namespace Numos.CoreSim.Replay;
 ///     Creates an empty sleeping chunk using the simulation’s fixed dimensions and wakes sleeping face neighbors.
 /// </summary>
 /// <param name="Position">Chunk-grid address to create.</param>
-/// <param name="MaxActiveRooms">Positive active-room capacity for the new chunk.</param>
-public sealed record CreateChunkOperation(Int3 Position, int MaxActiveRooms) : AtmosOperation
+public sealed record CreateChunkOperation(Int3 Position) : AtmosOperation
 {
     /// <inheritdoc />
     public override AtmosOperationCode Code => AtmosOperationCode.CreateChunk;
@@ -28,7 +27,7 @@ public sealed record RemoveChunkOperation(Int3 Position) : AtmosOperation
 ///     Classifies every voxel, clearing gas in solid or void voxels and refreshing awake topology.
 /// </summary>
 /// <param name="Position">Target chunk-grid address.</param>
-/// <param name="Classification">Room ID or reserved voxel classification.</param>
+/// <param name="Classification">Air classification value or reserved voxel classification.</param>
 public sealed record SetChunkClassificationOperation(Int3 Position, VoxelClassification Classification) : AtmosOperation
 {
     /// <inheritdoc />
@@ -39,7 +38,7 @@ public sealed record SetChunkClassificationOperation(Int3 Position, VoxelClassif
 ///     Classifies outer chunk faces; single-layer chunks use only the X/Y perimeter.
 /// </summary>
 /// <param name="Position">Target chunk-grid address.</param>
-/// <param name="Classification">Room ID or reserved voxel classification.</param>
+/// <param name="Classification">Air classification value or reserved voxel classification.</param>
 public sealed record SetChunkBoundaryClassificationOperation(Int3 Position, VoxelClassification Classification) : AtmosOperation
 {
     /// <inheritdoc />
@@ -51,7 +50,7 @@ public sealed record SetChunkBoundaryClassificationOperation(Int3 Position, Voxe
 /// </summary>
 /// <param name="Position">Target chunk-grid address.</param>
 /// <param name="LocalVoxelIndex">Canonical flat local voxel index.</param>
-/// <param name="Classification">Room ID or reserved voxel classification.</param>
+/// <param name="Classification">Air classification value or reserved voxel classification.</param>
 public sealed record SetVoxelClassificationOperation(Int3 Position, ushort LocalVoxelIndex, VoxelClassification Classification)
     : AtmosOperation
 {
@@ -72,7 +71,7 @@ public sealed record SetVoxelTemperatureOperation(Int3 Position, ushort LocalVox
 }
 
 /// <summary>
-///     Injects gas immediately using heat-capacity-weighted temperature mixing and wakes its room.
+///     Injects gas immediately using heat-capacity-weighted temperature mixing and wakes its chunk.
 /// </summary>
 /// <param name="Position">Target chunk-grid address.</param>
 /// <param name="LocalVoxelIndex">Canonical flat local voxel index.</param>
@@ -87,14 +86,13 @@ public sealed record AddGasToVoxelOperation(Int3 Position, ushort LocalVoxelInde
 }
 
 /// <summary>
-///     Activates a room or resets its sleep timer; solid and void IDs are ignored.
+///     Wakes a chunk and resets its sleep timer.
 /// </summary>
 /// <param name="Position">Target chunk-grid address.</param>
-/// <param name="RoomId">Room classification ID to wake.</param>
-public sealed record WakeRoomOperation(Int3 Position, int RoomId) : AtmosOperation
+public sealed record WakeChunkOperation(Int3 Position) : AtmosOperation
 {
     /// <inheritdoc />
-    public override AtmosOperationCode Code => AtmosOperationCode.WakeRoom;
+    public override AtmosOperationCode Code => AtmosOperationCode.WakeChunk;
 }
 
 /// <summary>
@@ -134,6 +132,23 @@ public sealed record SetVoxelMixtureOperation : AtmosOperation
             Enumerable.Range(0, chunk.ActiveGasCount)
                 .Select(gas => new AtmosGasAmount(chunk.ActiveGases[gas].GasId, chunk.ActiveGases[gas].Moles[index]))
                 .ToArray());
+    }
+
+    internal SetVoxelMixtureOperation(
+        Int3 position,
+        ushort localVoxelIndex,
+        Kelvin temperature,
+        Pascal pressure,
+        JoulePerKelvin heatCapacity,
+        IEnumerable<AtmosGasAmount> gases)
+    {
+        ArgumentNullException.ThrowIfNull(gases);
+        Position = position;
+        LocalVoxelIndex = localVoxelIndex;
+        Temperature = temperature;
+        Pressure = pressure;
+        HeatCapacity = heatCapacity;
+        Gases = Array.AsReadOnly(gases.ToArray());
     }
 
     /// <inheritdoc />
@@ -176,14 +191,3 @@ public sealed record SetVoxelMixtureOperation : AtmosOperation
 /// <param name="GasId">Nonnegative simulation gas ID.</param>
 /// <param name="Moles">Stored amount in moles, including zero for retained channels.</param>
 public readonly record struct AtmosGasAmount(int GasId, Mole Moles);
-
-/// <summary>
-///     Preserves the residual Update clock without replaying host frame cadence.
-/// </summary>
-/// <param name="Seconds">Residual elapsed seconds after an authoritative elapsed-time update.</param>
-/// TODO nuke this, this spams opcode logs, no need to preserve this in replay really.
-public sealed record SetElapsedAccumulatorOperation(Second Seconds) : AtmosOperation
-{
-    /// <inheritdoc />
-    public override AtmosOperationCode Code => AtmosOperationCode.SetElapsedAccumulator;
-}

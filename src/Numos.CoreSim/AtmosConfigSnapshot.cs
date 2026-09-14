@@ -108,7 +108,7 @@ public sealed class AtmosConfigSnapshot : IAtmosConfig
     public Scalar BulkFlowCoefficient { get; }
     public Pascal VacuumThreshold { get; }
     public int SleepThreshold { get; }
-    public Pascal SleepEpsilon { get; }
+    public Scalar SleepEpsilon { get; }
     public JoulePerKelvin ThermalConductance { get; }
     public Scalar CondensationRateFactor { get; }
     public Scalar MaxPressureTransferFractionPerNeighbor { get; }
@@ -190,9 +190,6 @@ public sealed class AtmosConfigSnapshot : IAtmosConfig
         hash.Add(AccumulatorMaxAliveTicks);
         hash.Add(GasRegistry.Count);
         foreach (var gas in GasRegistry) hash.Add(gas);
-        // Retain the empty extension framing of schema 1/2 for simulations without solver settings.
-        hash.Add(0);
-        hash.Add(0);
         if (SolverConfigurations.Count != 0)
         {
             hash.Add("solver-configurations");

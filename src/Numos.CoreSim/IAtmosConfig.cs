@@ -13,7 +13,7 @@ internal interface IAtmosConfig
     Scalar BulkFlowCoefficient { get; }
     Pascal VacuumThreshold { get; }
     int SleepThreshold { get; }
-    Pascal SleepEpsilon { get; }
+    Scalar SleepEpsilon { get; }
     JoulePerKelvin ThermalConductance { get; }
     Scalar CondensationRateFactor { get; }
     Scalar MaxPressureTransferFractionPerNeighbor { get; }

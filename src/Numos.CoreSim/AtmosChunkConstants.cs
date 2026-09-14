@@ -14,8 +14,6 @@ public static class AtmosChunkConstants
     /// <summary>Default number of voxels along a chunk's z-axis.</summary>
     public const int DefaultDepth = 16;
 
-    /// <summary>Default maximum number of simultaneously active rooms in a chunk.</summary>
-    public const int DefaultMaxActiveRooms = 64;
 
     /// <summary>Initial number of distinct gas-channel slots allocated by a chunk.</summary>
     /// <remarks>The channel table grows when a mixture introduces additional gas IDs.</remarks>

@@ -43,7 +43,7 @@ public sealed class AtmosChunkSnapshotTests
         {
             chunk.Initialize(new Int3(4, -5, 6), 2, 1, 1);
             chunk.VoxelRoomMap.Fill(7);
-            chunk.WakeRoom(7);
+            chunk.Wake();
             chunk.InjectGasToVoxel(0, 3, 2f, 300f, 1f, 1f);
             chunk.InjectGasToVoxel(1, 8, 1f, 400f, 1f, 1f);
 

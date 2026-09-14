@@ -213,7 +213,7 @@ internal sealed partial class AtmosKernel
     }
 
     /// <summary>
-    ///     Sets a voxel's temperature, wakes its room, and marks its chunk changed.
+    ///     Sets a voxel's temperature, wakes its chunk, and marks its chunk changed.
     /// </summary>
     internal void SetVoxelMixtureTemperature(
         Int3 position,
@@ -224,8 +224,8 @@ internal sealed partial class AtmosKernel
         lock (_stateGate)
         {
             var chunk = GetMixtureChunk(position, generation, localVoxelIndex);
-            int roomId = GetGasRoomId(chunk, localVoxelIndex);
-            chunk.WakeRoom(roomId);
+            ValidateGasVoxel(chunk, localVoxelIndex);
+            chunk.Wake();
             chunk.Temperature[localVoxelIndex] = temperature;
             chunk.MarkChanged();
             RecordVoxelMixture(chunk, localVoxelIndex);
@@ -247,7 +247,7 @@ internal sealed partial class AtmosKernel
         lock (_stateGate)
         {
             var chunk = GetMixtureChunk(position, generation, localVoxelIndex);
-            int roomId = GetGasRoomId(chunk, localVoxelIndex);
+            ValidateGasVoxel(chunk, localVoxelIndex);
             var totals = CalculateVoxelMixtureTotals(
                 chunk,
                 localVoxelIndex,
@@ -255,7 +255,7 @@ internal sealed partial class AtmosKernel
                 gasId,
                 moles);
 
-            chunk.WakeRoom(roomId);
+            chunk.Wake();
             SetVoxelGasMoles(chunk, localVoxelIndex, gasId, moles);
             ApplyVoxelMixtureTotals(chunk, localVoxelIndex, totals);
             RecordVoxelMixture(chunk, localVoxelIndex);
@@ -283,7 +283,7 @@ internal sealed partial class AtmosKernel
                 throw new InvalidOperationException("The adjusted gas amount exceeds the supported range.");
 
             Mole moles = MathF.Max(0f, adjusted);
-            int roomId = GetGasRoomId(chunk, localVoxelIndex);
+            ValidateGasVoxel(chunk, localVoxelIndex);
             var totals = CalculateVoxelMixtureTotals(
                 chunk,
                 localVoxelIndex,
@@ -291,7 +291,7 @@ internal sealed partial class AtmosKernel
                 gasId,
                 moles);
 
-            chunk.WakeRoom(roomId);
+            chunk.Wake();
             SetVoxelGasMoles(chunk, localVoxelIndex, gasId, moles);
             ApplyVoxelMixtureTotals(chunk, localVoxelIndex, totals);
             RecordVoxelMixture(chunk, localVoxelIndex);
@@ -338,7 +338,7 @@ internal sealed partial class AtmosKernel
                   (incomingTemperature - currentTemperature) * incomingHeatCapacity / combinedHeatCapacity
                 : temperature;
 
-            int roomId = GetGasRoomId(chunk, localVoxelIndex);
+            ValidateGasVoxel(chunk, localVoxelIndex);
             var totals = CalculateVoxelMixtureTotals(
                 chunk,
                 localVoxelIndex,
@@ -346,7 +346,7 @@ internal sealed partial class AtmosKernel
                 gasId,
                 combinedGasMoles);
 
-            chunk.WakeRoom(roomId);
+            chunk.Wake();
             SetVoxelGasMoles(chunk, localVoxelIndex, gasId, combinedGasMoles);
             chunk.Temperature[localVoxelIndex] = mixedTemperature;
             ApplyVoxelMixtureTotals(chunk, localVoxelIndex, totals);
@@ -365,8 +365,8 @@ internal sealed partial class AtmosKernel
         lock (_stateGate)
         {
             var chunk = GetMixtureChunk(position, generation, localVoxelIndex);
-            int roomId = GetGasRoomId(chunk, localVoxelIndex);
-            chunk.WakeRoom(roomId);
+            ValidateGasVoxel(chunk, localVoxelIndex);
+            chunk.Wake();
             for (int gas = 0; gas < chunk.ActiveGasCount; gas++)
                 chunk.ActiveGases[gas].Moles[localVoxelIndex] = 0f;
 
@@ -376,18 +376,13 @@ internal sealed partial class AtmosKernel
     }
 
     /// <summary>
-    ///     Validates a multi-voxel mutation for generation validity, gas-bearing voxel eligibility, and room capacity.
+    ///     Validates a multi-voxel mutation for generation validity and gas-bearing voxel eligibility.
     /// </summary>
-    /// <remarks>
-    ///     This performs no writes. It accounts for rooms already awake in each affected chunk so a subsequent
-    ///     transaction can wake all requested rooms without partially applying a mutation.
-    /// </remarks>
     internal void ValidateVoxelMixtureMutations(VoxelGasMixtureAddress[] addresses)
     {
         ArgumentNullException.ThrowIfNull(addresses);
         lock (_stateGate)
         {
-            var requiredRooms = new Dictionary<(Int3 Position, long Generation), HashSet<int>>();
             foreach (var address in addresses)
             {
                 var chunk = GetMixtureChunk(
@@ -395,28 +390,9 @@ internal sealed partial class AtmosKernel
                     address.ChunkGeneration,
                     address.LocalVoxelIndex);
 
-                int roomId = chunk.VoxelRoomMap[address.LocalVoxelIndex];
-                if (roomId == VoxelClassification.RoomSolid || roomId == VoxelClassification.RoomVoid)
+                int classification = chunk.VoxelRoomMap[address.LocalVoxelIndex];
+                if (classification == VoxelClassification.RoomSolid || classification == VoxelClassification.RoomVoid)
                     throw new InvalidOperationException("Solid and void voxels cannot contain a gas mixture.");
-
-                var key = (address.ChunkPosition, address.ChunkGeneration);
-                if (!requiredRooms.TryGetValue(key, out HashSet<int>? rooms))
-                {
-                    rooms = [];
-                    if (chunk.IsAwake)
-                    {
-                        for (int room = 0; room < chunk.ActiveRoomCount; room++)
-                            rooms.Add(chunk.ActiveRoomIds[room]);
-                    }
-
-                    requiredRooms.Add(key, rooms);
-                }
-
-                rooms.Add(roomId);
-                if (rooms.Count > chunk.MaxActiveRooms)
-                {
-                    throw new InvalidOperationException("The gas-mixture transaction would exceed the chunk's active-room capacity.");
-                }
             }
         }
     }
@@ -436,8 +412,8 @@ internal sealed partial class AtmosKernel
         lock (_stateGate)
         {
             var chunk = GetMixtureChunk(position, generation, localVoxelIndex);
-            int roomId = chunk.VoxelRoomMap[localVoxelIndex];
-            Debug.Assert(roomId != VoxelClassification.RoomSolid && roomId != VoxelClassification.RoomVoid);
+            int classification = chunk.VoxelRoomMap[localVoxelIndex];
+            Debug.Assert(classification != VoxelClassification.RoomSolid && classification != VoxelClassification.RoomVoid);
 
             Mole totalMoles = 0f;
             JoulePerKelvin totalHeatCapacity = 0f;
@@ -450,7 +426,7 @@ internal sealed partial class AtmosKernel
             Debug.Assert(float.IsFinite(totalMoles));
             Debug.Assert(float.IsFinite(totalHeatCapacity));
 
-            chunk.WakeRoom(roomId);
+            chunk.Wake();
             for (int gas = 0; gas < chunk.ActiveGasCount; gas++)
                 chunk.ActiveGases[gas].Moles[localVoxelIndex] = 0f;
 
@@ -464,6 +440,8 @@ internal sealed partial class AtmosKernel
             chunk.TotalHeatCapacity[localVoxelIndex] = totalHeatCapacity;
             chunk.TotalPressure[localVoxelIndex] =
                 AtmosSolverMath.CalculatePressure(_config, totalMoles, temperature);
+
+            chunk.IsVacuum[localVoxelIndex] = chunk.TotalPressure[localVoxelIndex] <= 0f;
 
             chunk.MarkChanged();
             RecordVoxelMixture(chunk, localVoxelIndex);
@@ -518,29 +496,13 @@ internal sealed partial class AtmosKernel
     }
 
     /// <summary>
-    ///     Verifies that a voxel belongs to a gas room and that waking that room would not exceed chunk capacity.
+    ///     Verifies that a voxel can contain a gas mixture.
     /// </summary>
-    private static int GetGasRoomId(AtmosChunk chunk, ushort localVoxelIndex)
+    private static void ValidateGasVoxel(AtmosChunk chunk, ushort localVoxelIndex)
     {
-        int roomId = chunk.VoxelRoomMap[localVoxelIndex];
-        if (roomId == VoxelClassification.RoomSolid || roomId == VoxelClassification.RoomVoid)
+        int classification = chunk.VoxelRoomMap[localVoxelIndex];
+        if (classification == VoxelClassification.RoomSolid || classification == VoxelClassification.RoomVoid)
             throw new InvalidOperationException("Solid and void voxels cannot contain a gas mixture.");
-
-        if (chunk.IsAwake)
-        {
-            for (int room = 0; room < chunk.ActiveRoomCount; room++)
-            {
-                if (chunk.ActiveRoomIds[room] == roomId)
-                    return roomId;
-            }
-
-            if (chunk.ActiveRoomCount >= chunk.MaxActiveRooms)
-            {
-                throw new InvalidOperationException("The gas-mixture operation would exceed the chunk's active-room capacity.");
-            }
-        }
-
-        return roomId;
     }
 
     /// <summary>
@@ -602,6 +564,7 @@ internal sealed partial class AtmosKernel
     {
         chunk.TotalHeatCapacity[localVoxelIndex] = totals.HeatCapacity;
         chunk.TotalPressure[localVoxelIndex] = totals.Pressure;
+        chunk.IsVacuum[localVoxelIndex] = totals.Pressure <= 0f;
         chunk.MarkChanged();
     }
 

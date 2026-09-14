@@ -42,16 +42,18 @@ public static class AtmosConfigDefaults
     /// <summary>Default fraction of a pressure delta requested as bulk flow per tick.</summary>
     public const Scalar BulkFlowCoefficient = 0.125f;
 
-    /// <summary>Default pressure below which a voxel is treated as vacuum, in pascals (Pa).</summary>
+    /// <summary>
+    ///     Default pressure below which a voxel surrounded by low-pressure neighbors is treated as vacuum, in pascals
+    ///     (Pa).
+    /// </summary>
     [Quantity("pressure")]
     public const Pascal VacuumThreshold = 1f;
 
     /// <summary>Default consecutive quiet ticks required before a chunk sleeps.</summary>
     public const int SleepThreshold = 100;
 
-    /// <summary>Default maximum pressure delta considered at rest, in pascals (Pa).</summary>
-    [Quantity("pressure")]
-    public const Pascal SleepEpsilon = 3.5f;
+    /// <summary>Default maximum relative pressure difference considered at rest, as a percentage.</summary>
+    public const Scalar SleepEpsilon = 3.5f;
 
     /// <summary>Default effective per-face thermal conductance, in joules per kelvin per thermodynamics tick.</summary>
     [Quantity("heatCapacity")]

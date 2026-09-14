@@ -7,7 +7,7 @@ namespace Numos.CoreSim.Datatypes.Primitives;
 /// </summary>
 /// <para>
 ///     In Numos, voxels are grouped together to form rooms,
-///     which can thus be used to form <see cref="RoomNode" />s in the future.
+///     IDs beyond the reserved solid and void values are topology metadata only; they do not partition solver work.
 ///     For now, their usage is similar to SS14 Atmospherics' AirtightData,
 ///     which stores data on whether a tile is airtight or not.
 /// </para>

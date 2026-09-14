@@ -5,3 +5,4 @@ using System.Runtime.CompilerServices;
 [assembly: InternalsVisibleTo("Numos.CoreSim.Tests")]
 [assembly: InternalsVisibleTo("Numos.CoreSim.IntegrationTests")]
 [assembly: InternalsVisibleTo("Numos.CoreSim.Benchmarks")]
+[assembly: InternalsVisibleTo("Numos.Serialization")]

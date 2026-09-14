@@ -319,7 +319,7 @@ public sealed class HeadlessApplicationTests
             "\"bulkFlowCoefficient\":0.25," +
             "\"vacuumThresholdPa\":0," +
             "\"sleepThreshold\":2147483647," +
-            "\"sleepEpsilonPa\":0," +
+            "\"sleepEpsilonPercent\":0," +
             "\"thermalConductance\":0.05," +
             "\"condensationRateFactor\":0.5," +
             "\"maxPressureTransferFractionPerNeighbor\":0.16" +

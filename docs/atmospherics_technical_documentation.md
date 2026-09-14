@@ -3,7 +3,7 @@
 > [!NOTE]
 > Pressure, thermodynamics, phase changes, and energy transfer use the explicit SI unit model described below. Other legacy sections may not reflect every current implementation detail.
 
-> **Revision**: 2026-08-19
+> **Revision**: 2026-09-13
 > **Scope**: Engine-agnostic specification.
 ---
 
@@ -16,10 +16,9 @@
    - 3.1 [Voxel Grid & Chunk](#31-voxel-grid--chunk)
    - 3.2 [Gas Channels (Structure of Arrays)](#32-gas-channels-structure-of-arrays)
    - 3.3 [Voxel Classification](#33-voxel-classification)
-   - 3.4 [Room Nodes (Macro Layer)](#34-room-nodes-macro-layer)
-   - 3.5 [Gas Properties Registry](#35-gas-properties-registry)
-   - 3.6 [Configuration Parameters](#36-configuration-parameters)
-   - 3.7 [Container and Voxel Gas Mixtures](#37-container-and-voxel-gas-mixtures)
+   - 3.4 [Gas Properties Registry](#34-gas-properties-registry)
+   - 3.5 [Configuration Parameters](#35-configuration-parameters)
+   - 3.6 [Container and Voxel Gas Mixtures](#36-container-and-voxel-gas-mixtures)
 4. [Simulation Loop](#4-simulation-loop)
    - 4.1 [Fixed Timestep Accumulator](#41-fixed-timestep-accumulator)
    - 4.2 [Solver Pipeline](#42-solver-pipeline)
@@ -33,7 +32,6 @@
    - 5.4 [Vacuum Cleanup](#54-vacuum-cleanup)
    - 5.5 [Delta Buffers (Ordering Scope)](#55-delta-buffers-ordering-scope)
 6. [Sleep System](#6-sleep-system)
-7. [The Leaky Faucet Problem & GasAccumulator](#7-the-leaky-faucet-problem--gasaccumulator)
 8. [Phase Changes (Condensation)](#8-phase-changes-condensation)
    - 8.1 [Clausius-Clapeyron Saturation Model](#81-clausius-clapeyron-saturation-model)
    - 8.2 [Phase-Change Internal-Energy Balance](#82-phase-change-internal-energy-balance)
@@ -56,14 +54,8 @@ The system is built to simulate atmospheric gas dynamics in the context of a spa
 
 ## 2. Architecture Overview
 
-The system uses a two-layer Level of Detail (LOD) model:
-
-| Layer | Name | Granularity | Cost | When Active |
-|-------|------|-------------|------|-------------|
-| **Macro** | Room Node | Whole-room aggregate | O(1) per room | Room is at equilibrium (sleeping) |
-| **Micro** | Atmos Chunk | Per-voxel cellular automata | O(n) per active voxel | Room has turbulent pressure gradients |
-
-When a disturbance exceeds a configurable threshold (the "Threshold of Violence"), the macro-layer room transitions to the micro-layer voxel grid. When the voxel grid reaches equilibrium, it goes back to sleep and the macro layer resumes responsibility.
+Numos simulates gas at voxel resolution. A chunk sleeps when its pressure deltas remain below the configured threshold,
+and wakes as a whole when it receives a mutation or boundary flow.
 
 ### Component Relationships
 
@@ -86,9 +78,6 @@ graph TD
     G["AtmosConfig (Editable Builder)"] -->|"Explicit immutable snapshot"| API
     API -->|"Normalized tick inputs"| CTX
     H["GasProperties Registry"] --> G
-    I["RoomNode (Macro Layer)"] -.-> B
-    J["GasAccumulator"] -.-> I
-    J -.-> B
 ```
 
 ### 2.1 Public and Dangerous API Boundaries
@@ -105,7 +94,7 @@ The dangerous package must be referenced separately and imported through `Numos.
 `AtmosSimulation` facade. Most solvers use its detached snapshots and validated mutations; a measured hot path can call
 `simulation.Dangerous().GetChunk(handle)` from that callback to obtain stack-scoped live chunk and gas-channel spans.
 
-Validated simulation mutations keep pressure/heat-capacity caches, room activation, topology indices, sleep state,
+Validated simulation mutations keep pressure/heat-capacity caches, active-voxel indices, sleep state,
 and observable revisions coherent as applicable. A solver should use the dangerous package only when it must directly
 traverse or mutate backing storage and can maintain those coupled invariants itself. The dangerous views are
 `ref struct` values and never expose the internal `AtmosChunk` or `GasChannel` CLR types. They are safest inside a
@@ -135,14 +124,14 @@ z = index / (Width * Height)
 
 Each chunk stores:
 
-| Array | Type | Description |
-|-------|------|-------------|
-| `VoxelRoomMap` | `int[]` | Classifies each voxel (see §3.3) |
-| `TotalPressure` | `float[]` | Cached pressure per voxel in pascals (Pa), recalculated at advection start and refreshed as state changes |
-| `Temperature` | `float[]` | Temperature in kelvins (K) per voxel |
-| `TotalHeatCapacity` | `float[]` | Cached total heat capacity per voxel, in J/K |
-| `ActiveAirIndices` | `ushort[]` | Dense list of voxel indices belonging to the currently active rooms |
-| `ActiveGases` | `GasChannel[]` | Sparse array of gas-specific mole data (see §3.2) |
+| Array               | Type           | Description                                                                                               |
+|---------------------|----------------|-----------------------------------------------------------------------------------------------------------|
+| `VoxelRoomMap`      | `int[]`        | Classifies each voxel (see §3.3)                                                                          |
+| `TotalPressure`     | `float[]`      | Cached pressure per voxel in pascals (Pa), recalculated at advection start and refreshed as state changes |
+| `Temperature`       | `float[]`      | Temperature in kelvins (K) per voxel                                                                      |
+| `TotalHeatCapacity` | `float[]`      | Cached total heat capacity per voxel, in J/K                                                              |
+| `ActiveAirIndices`  | `ushort[]`     | Dense list of non-solid, non-void voxel indices in an awake chunk                                         |
+| `ActiveGases`       | `GasChannel[]` | Sparse array of gas-specific mole data (see §3.2)                                                         |
 
 For thermodynamic calculations, each gas uses an effective molar heat capacity at constant volume:
 
@@ -164,7 +153,10 @@ The gas-constant value and SI relationship follow the [NIST reference constants]
 
 Chunks are identified by an `Int3 GridPosition` in a spatial map (e.g. a `ConcurrentDictionary<Int3, AtmosChunk>`).
 
-**Active Air Optimization**: Steady-state physics loops iterate the dense `ActiveAirIndices` list rather than every voxel. `WakeRoom(roomId)` adds the room to `ActiveRoomIds` up to the configured `MaxActiveRooms`, then `RebuildActiveAirIndices` scans all `VoxelCount` entries and rebuilds the list with voxels from every active room. The rebuild is therefore O(`VoxelCount`) (4,096 entries for a default 16×16×16 chunk), while subsequent physics work is proportional to the active list.
+**Active Air Optimization**: Physics loops iterate the dense `ActiveAirIndices` list rather than every voxel.
+`WakeChunk` rebuilds the list by scanning all `VoxelCount` entries and retaining every non-solid, non-void voxel. The
+rebuild is O (`VoxelCount`) (4,096 entries for a default 16×16×16 chunk), while subsequent physics work is proportional
+to the active list.
 
 ### 3.2 Gas Channels (Structure of Arrays)
 
@@ -190,40 +182,14 @@ Key properties:
 
 Each voxel in `VoxelRoomMap` is assigned an integer value that determines its behavior:
 
-| Value | Constant | Behavior |
-|-------|----------|----------|
-| `0` | `RoomUnassigned` | Open, pressurizable volume not yet assigned to a room. Gas can exist here. |
-| `> 0` | *(Room ID)* | Belongs to a specific named room. Participates in simulation when that room is awake. |
-| `-1` | `RoomVoid` | Infinite sink / true vacuum. Gas entering this voxel is destroyed. Used for map boundaries or active vents. Pressure is always treated as 0. |
-| `-2` | `RoomSolid` | Solid obstruction (wall/floor). Blocks gas flow completely. |
+| Value | Constant              | Behavior                                                                                                                                     |
+|-------|-----------------------|----------------------------------------------------------------------------------------------------------------------------------------------|
+| `0`   | `RoomUnassigned`      | Open, pressurizable volume. Gas can exist here.                                                                                              |
+| `> 0` | *(classification ID)* | Open, pressurizable volume. IDs are retained as topology metadata and do not partition solver work.                                          |
+| `-1`  | `RoomVoid`            | Infinite sink / true vacuum. Gas entering this voxel is destroyed. Used for map boundaries or active vents. Pressure is always treated as 0. |
+| `-2`  | `RoomSolid`           | Solid obstruction (wall/floor). Blocks gas flow completely.                                                                                  |
 
-### 3.4 Room Nodes (Macro Layer)
-
-When a room is at equilibrium (sleeping), it is represented by a `RoomNode`:
-
-```
-struct RoomNode {
-    int RoomId;
-    bool IsAsleep;
-    int VoxelCount;
-    float VoxelVolume;
-    float EquilibriumPressure;
-    float AverageTemperature;
-    float TotalHeatCapacity;
-    float TotalMoles;
-    float[] GasMoles;  // Total moles of each gas in the entire room
-}
-```
-
-The `RoomNode` provides O(1) gas addition/removal using the ideal gas law:
-
-- **AddGas**: Recalculates `AverageTemperature` by conserving sensible internal energy with the incoming species' `C_v`, then updates `EquilibriumPressure = TotalMoles * R * AverageTemperature / (VoxelCount * VoxelVolume)`.
-- **RemoveGas**: Clamps removal to available moles, removes the species' heat capacity, and recalculates pressure. Temperature is not changed on removal (assumes a uniform mixture).
-
-> [!IMPORTANT]
-> The `RoomNode` is defined with complete logic but is **not wired into the simulation loop**. `AtmosSimulation` operates exclusively at the voxel (micro) level. The `RoomNode` and `GasAccumulator` exist as data structures with complete logic, but the orchestration that transitions between macro and micro layers is not implemented. An integrator must build this transition logic.
-
-### 3.5 Gas Properties Registry
+### 3.4 Gas Properties Registry
 
 Each gas species is defined by a `GasProperties` struct:
 
@@ -239,7 +205,7 @@ Each gas species is defined by a `GasProperties` struct:
 
 The registry is stored as a `List<GasProperties>` indexed by gas ID; zero is a valid gas ID.
 
-### 3.6 Configuration Parameters
+### 3.5 Configuration Parameters
 
 All tunable simulation parameters are assembled in an editable `AtmosConfig`. Construction and
 `SetAtmosConfig(...)` capture an immutable `AtmosConfigSnapshot`; later mutation of the editable builder does not change
@@ -252,27 +218,27 @@ cutoffs live in `AtmosSolverConstants`; they are deliberately not presented as r
 dimensions and initial chunk capacities are exposed through `AtmosChunkConstants`, while reserved room IDs have a
 single definition in `VoxelClassification`.
 
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `GlobalTemperature` | 293.15 | Reference ambient temperature (K). Not actively used in the simulation loop. |
-| `DefaultTemperatureFallback` | 293.15 | Starting effective temperature (K) used for pressure and sensible energy when a gas-bearing voxel stores a non-finite or nonpositive temperature. Invalid values normalize to 293.15 K. |
-| `DefaultMolarHeatCapacityAtConstantVolume` | `5R/2` | Ideal-diatomic molar `C_v` in J/(mol·K), used for missing registry entries and non-finite or nonpositive gas heat capacities. A non-finite or nonpositive fallback value is normalized to the same value. |
-| `VoxelVolume` | 1 | Physical volume represented by each voxel (m³). Invalid values normalize to 1 m³. |
-| `SaturationReferencePressure` | 101325 | Pressure (Pa) at which each gas's `BoilingPoint` applies. Invalid values normalize to one standard atmosphere. |
-| `DefaultDiffusionCoefficient` | 0.02 | Dimensionless per-tick mixing fraction for unregistered gas IDs. Finite values are clamped to [0, 1]; non-finite values disable fallback diffusion. |
-| `SpaceTemperature` | 2.7 | Temperature of space (K). Not actively used in the simulation loop. |
-| `BulkFlowCoefficient` | 0.25 | Dimensionless fraction of pressure delta requested as bulk flow per tick. Finite values are clamped to [0, 1]; non-finite values disable the large-delta branch. |
-| `BulkFlowDamping` | 0.5 | Multiplier applied to `BulkFlowCoefficient` during large-delta advection to reduce oscillation. Finite values are clamped to [0, 1]; non-finite values disable the large-delta branch. |
-| `LowPressureDeltaThreshold` | 5.0 | Below this pressure delta (Pa), flow uses `MaxPressureTransferFractionPerNeighbor` directly instead of `BulkFlowCoefficient * BulkFlowDamping`. Invalid or negative values normalize to zero. |
-| `MinimumPressureTransfer` | 0.1 | Candidate pressure transfers below this magnitude (Pa/tick) are discarded ("stiction"). Invalid or negative values normalize to zero. |
-| `VacuumThreshold` | 1.0 | Below this pressure (Pa), voxel contents are zeroed out. Invalid or negative values normalize to zero. |
-| `SleepThreshold` | 100 | Consecutive ticks below `SleepEpsilon` before a chunk goes to sleep. Negative values normalize to zero. |
-| `SleepEpsilon` | 3.5 | Maximum pressure delta considered "at rest" (Pa). Invalid or negative values normalize to zero. |
-| `ThermalConductance` | 0.05 | Effective per-face conductance in J/K per thermodynamics tick. Multiplying it by a temperature difference produces a candidate energy transfer, which is bounded for explicit-solver stability. Invalid or nonpositive values disable thermal diffusion. |
-| `CondensationRateFactor` | 0.5 | Dimensionless fraction of the heat-coupled equilibrium condensation amount applied per thermodynamics tick. Finite values are clamped to [0, 1]; non-finite values disable condensation. |
-| `MaxPressureTransferFractionPerNeighbor` | 0.16 | Maximum fraction of a voxel's pressure requested as bulk flow to one neighbor per tick. Finite values are clamped to [0, 1]; non-finite values disable bulk flow. |
+| Parameter                                  | Default | Description                                                                                                                                                                                                                                              |
+|--------------------------------------------|---------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `GlobalTemperature`                        | 293.15  | Reference ambient temperature (K). Not actively used in the simulation loop.                                                                                                                                                                             |
+| `DefaultTemperatureFallback`               | 293.15  | Starting effective temperature (K) used for pressure and sensible energy when a gas-bearing voxel stores a non-finite or nonpositive temperature. Invalid values normalize to 293.15 K.                                                                  |
+| `DefaultMolarHeatCapacityAtConstantVolume` | `5R/2`  | Ideal-diatomic molar `C_v` in J/(mol·K), used for missing registry entries and non-finite or nonpositive gas heat capacities. A non-finite or nonpositive fallback value is normalized to the same value.                                                |
+| `VoxelVolume`                              | 1       | Physical volume represented by each voxel (m³). Invalid values normalize to 1 m³.                                                                                                                                                                        |
+| `SaturationReferencePressure`              | 101325  | Pressure (Pa) at which each gas's `BoilingPoint` applies. Invalid values normalize to one standard atmosphere.                                                                                                                                           |
+| `DefaultDiffusionCoefficient`              | 0.02    | Dimensionless per-tick mixing fraction for unregistered gas IDs. Finite values are clamped to [0, 1]; non-finite values disable fallback diffusion.                                                                                                      |
+| `SpaceTemperature`                         | 2.7     | Temperature of space (K). Not actively used in the simulation loop.                                                                                                                                                                                      |
+| `BulkFlowCoefficient`                      | 0.25    | Dimensionless fraction of pressure delta requested as bulk flow per tick. Finite values are clamped to [0, 1]; non-finite values disable the large-delta branch.                                                                                         |
+| `BulkFlowDamping`                          | 0.5     | Multiplier applied to `BulkFlowCoefficient` during large-delta advection to reduce oscillation. Finite values are clamped to [0, 1]; non-finite values disable the large-delta branch.                                                                   |
+| `LowPressureDeltaThreshold`                | 5.0     | Below this pressure delta (Pa), flow uses `MaxPressureTransferFractionPerNeighbor` directly instead of `BulkFlowCoefficient * BulkFlowDamping`. Invalid or negative values normalize to zero.                                                            |
+| `MinimumPressureTransfer`                  | 0.1     | Candidate pressure transfers below this magnitude (Pa/tick) are discarded ("stiction"). Invalid or negative values normalize to zero.                                                                                                                    |
+| `VacuumThreshold`                          | 1.0     | Below this pressure (Pa), voxel contents are zeroed out when every neighboring air voxel is also below the threshold. Invalid or negative values normalize to zero.                                                                                      |
+| `SleepThreshold`                           | 100     | Consecutive ticks below `SleepEpsilon` before a chunk goes to sleep. Negative values normalize to zero.                                                                                                                                                  |
+| `SleepEpsilon`                             | 3.5     | Maximum relative pressure difference considered "at rest" (% of the higher neighboring pressure). Invalid or negative values normalize to zero.                                                                                                          |
+| `ThermalConductance`                       | 0.05    | Effective per-face conductance in J/K per thermodynamics tick. Multiplying it by a temperature difference produces a candidate energy transfer, which is bounded for explicit-solver stability. Invalid or nonpositive values disable thermal diffusion. |
+| `CondensationRateFactor`                   | 0.5     | Dimensionless fraction of the heat-coupled equilibrium condensation amount applied per thermodynamics tick. Finite values are clamped to [0, 1]; non-finite values disable condensation.                                                                 |
+| `MaxPressureTransferFractionPerNeighbor`   | 0.16    | Maximum fraction of a voxel's pressure requested as bulk flow to one neighbor per tick. Finite values are clamped to [0, 1]; non-finite values disable bulk flow.                                                                                        |
 
-### 3.7 Container and Voxel Gas Mixtures
+### 3.6 Container and Voxel Gas Mixtures
 
 `IGasMixture` provides one public interaction model for portable containers and individual voxels while preserving
 the solver's structure-of-arrays layout:
@@ -519,39 +485,44 @@ The four default stages are described below.
 
 ### 4.3 Stage 1 — Pressure Advection
 
-This is the core fluid dynamics step. It runs in parallel across chunks.
+This is the core fluid dynamics step. When the awake chunk count is smaller than the worker count, it builds one work
+list across those chunks and runs ordered parallel phases. Voxel work is split into tiles of 64 active indices, so one
+dense chunk can occupy several workers. Species transfer is split by `(chunk, gas)`, which gives one worker exclusive
+ownership of each gas-major delta row.
 
-**For each awake chunk:**
+When there are already enough awake chunks to occupy every worker, the solver runs the same phases sequentially inside
+each chunk and assigns whole chunks to workers. This avoids global barriers and lets a worker return a chunk's scratch
+buffers before taking another chunk. Both schedules use the same source, direction, gas, and reduction order, so the
+choice does not change simulation results.
 
-1. **Recalculate pressure and heat capacity**: For every active voxel, `TotalPressure[i] = TotalMoles[i] * R * effectiveTemperature[i] / VoxelVolume`. `effectiveTemperature` is the stored temperature when it is finite and positive, otherwise the normalized `DefaultTemperatureFallback`. The advection stage also caches `TotalHeatCapacity[i] = sum(moles[g] * c_effective[g])` for energy calculations.
+Each phase finishes before the next begins:
 
-2. **Compute flow deltas**: For every active voxel, examine each Von Neumann neighbor (±X, ±Y, ±Z — 4 neighbors for 2D chunks, 6 for 3D):
-   - Skip solid neighbors.
-   - Treat void neighbors as pressure 0.
-   - Calculate `pressureDelta = currentPressure - neighborPressure`.
-   - If `pressureDelta > 0` (flow is outward):
-     - If `pressureDelta < LowPressureDeltaThreshold`: use `flow = pressureDelta * MaxPressureTransferFractionPerNeighbor`.
-     - Else: use `flow = pressureDelta * BulkFlowCoefficient * BulkFlowDamping`.
-     - Discard if `flow < MinimumPressureTransfer`.
-     - Clamp: `flow = min(flow, currentPressure * MaxPressureTransferFractionPerNeighbor)`.
-     - Convert the pressure transfer to moles: `advectedMoles = flow * VoxelVolume / (R * sourceEffectiveTemperature)`, then multiply by each species' mole fraction.
-     - Compute the sensible energy carried by each species: `energyToMove = molesToMove * c_effective * sourceEffectiveTemperature`.
-     - Cap each species' combined scheduled outflow across all neighbors to the moles present at the start of the pass.
-     - Accumulate mole and energy changes into flat delta buffers (not applied immediately). Gas entering a void contributes no target delta, so both its moles and energy leave the simulation.
+1. **Refresh voxel state and topology.** Every tile rebuilds pressure, total moles, heat capacity, capacitance, and its
+   six fixed neighbor slots. Solid directions stay empty; void directions are marked as sinks. Fixed slots preserve the
+   order `-X, +X, -Y, +Y, -Z, +Z` even when some directions are unavailable.
+2. **Compute and gather conductance.** A source tile writes six directed edge slots indexed by voxel and direction. A
+   second phase lets each destination tile gather its own edge and the opposite edge of each active neighbor in fixed
+   direction order. The gather avoids concurrent additions to a shared voxel.
+3. **Compute bulk-flow fractions.** Tiles calculate outward pressure transfer with the configured damping, cutoff,
+   per-neighbor cap, and conductance limiter. They also record the maximum relative bulk pressure difference used by the
+   sleep system.
+4. **Accumulate bulk transfer.** Each `(chunk, gas)` job walks source voxels and fixed directions in ascending order,
+   writing only that gas's mole and sensible-energy rows. Transfers into void have a source delta and no destination
+   delta.
+5. **Apply bulk deltas.** Each voxel tile owns all persistent writes for its voxels. It reduces per-gas energy rows in
+   gas order, updates composition, heat capacity, temperature, and pressure, then prepares diffusion factors from this
+   post-bulk state. The chunk's sleep decision uses the bulk pressure delta before diffusion starts.
+6. **Accumulate diffusion.** A gas job distributes
+   `DiffusionCoefficient * environmentFactor * sourceMoles * FixedTimeStep` to valid neighbors, capped at one seventh of
+   the source inventory. The environment factor scales with temperature, inverse pressure, and voxel edge length. Tiny
+   transfers into an air voxel are suppressed when both the existing and transferred amounts remain below
+   `MinimumTrackedMoles`; transfers into void are lost.
+7. **Apply diffusion and publish boundaries.** Voxel tiles apply the second delta set with the same energy reduction.
+   Boundary events are then published in parallel by chunk. `BoundaryFlowSolver` sorts them by chunk and voxel before
+   applying any cross-chunk flow, so queue insertion order is not observable simulation state.
 
-3. **Fickian Diffusion**: Independently of the total-pressure gradient and bulk-flow cutoff, a species diffusion term based on partial-pressure imbalance is applied:
-   ```
-   deltaN = moles[src] - moles[neighbor] * (neighborTemp / srcTemp)
-   molesDiffused = deltaN * DiffusionCoefficient
-   ```
-   This allows gases with different diffusion rates to mix after bulk pressure has equalized and permits one species to counter-diffuse against the net bulk-flow direction. Coefficients are clamped to [0, 1] for explicit-step stability. The Z-axis is checked conditionally, only when `Depth > 1`, allowing efficient 2D operation.
-
-4. **Apply deltas**: After all voxels have been processed, the accumulated mole deltas are applied and per-species amounts below `AtmosSolverConstants.MinimumTrackedMoles` (currently 0.0001 mol) are snapped to 0. Each voxel's heat capacity is recalculated from its new composition, then its temperature is recovered from `newTemperature = (oldTotalHeatCapacity * oldEffectiveTemperature + energyDelta) / newTotalHeatCapacity`. A voxel with no heat capacity retains its stored temperature. The pressure cache is refreshed from the resulting moles and temperature before boundary processing.
-
-5. **Emit boundary events**: Every gas-bearing voxel that survives vacuum cleanup and lies on a chunk edge
-   (coordinate is 0 or `Size - 1`) emits one `BoundaryFlowEvent`. Eligibility is based on gas inventory rather than
-   a second positive-pressure check: an extremely small representable pressure can underflow to zero while the
-   species mole imbalance still supports diffusion.
+Bulk application must remain before diffusion because diffusion reads the pressure, composition, and temperature that
+bulk flow produced. Likewise, no delta row may be reused until its apply phase has completed.
 
 ### 4.4 Stage 2 — Cross-Chunk Boundary Flow
 
@@ -607,7 +578,12 @@ temperature extrema. Voxels with zero heat capacity do not participate and retai
 
 **Phase Changes (Condensation)**: See §8. These run after intra-chunk thermal temperatures have been applied and before thermal-boundary events are drained.
 
-**Cross-Chunk Thermal Diffusion**: Boundary faces are deduplicated, their post-phase-change temperatures and heat capacities are snapshotted, and the same `g`, `G`, `s`, and `Q` equations are applied across the entire boundary set. Equal-and-opposite energy deltas are buffered before any boundary temperature is written, eliminating concurrent-queue traversal bias. Solid and void voxels do not conduct, voxels below `VacuumThreshold` are excluded, and a missing adjacent chunk receives no heat. Depth-one chunks do not conduct through their Z faces. Thermal transfer can update a sleeping neighbor without waking it.
+**Cross-Chunk Thermal Diffusion**: Boundary faces are deduplicated, their post-phase-change temperatures and heat
+capacities are snapshotted, and the same `g`, `G`, `s`, and `Q` equations are applied across the entire boundary set.
+Equal-and-opposite energy deltas are buffered before any boundary temperature is written, eliminating concurrent-queue
+traversal bias. Solid, void, and vacuum-classified voxels do not conduct, and a missing adjacent chunk receives no heat.
+Depth-one chunks do not conduct through their Z faces. Thermal transfer can update a sleeping neighbor without waking
+it.
 
 ---
 
@@ -642,20 +618,32 @@ Flows below `MinimumPressureTransfer` (0.1) are discarded entirely. This prevent
 
 ### 5.4 Vacuum Cleanup
 
-Voxels with `TotalPressure < VacuumThreshold` (1.0) have all gas moles zeroed out. This prevents the accumulation of trace gas amounts that would otherwise never fully equalize and would keep chunks awake.
+Voxels with `TotalPressure < VacuumThreshold` (1.0) have all gas moles zeroed out only when every orthogonally adjacent
+air voxel is also below the threshold. Solid walls, void voxels, and missing chunks do not prevent cleanup. The solver
+classifies the complete pressure field before removing any gas, so traversal order cannot turn neighboring trace voxels
+into a cascading cleanup.
+
+This preserves a low-pressure expansion front while it remains next to pressurized gas. Once an isolated region and all
+of its neighbors fall below the threshold, cleanup removes the trace gas that would otherwise keep chunks awake.
 
 ### 5.5 Delta Buffers (Ordering Scope)
 
 Mole and sensible-energy transfers within a chunk are not applied directly during the neighbor scan. Gas-major mole
-deltas are accumulated in a rented `float[]` at `gasIndex * VoxelCount + voxelIndex`. Equal-and-opposite sensible
-energy deltas use a separate rented `double[]`, preventing a representable final temperature from being lost when an
-intermediate `moles * C_v * temperature` exceeds the `float` range. After every active source voxel has been scanned,
-the mole and energy deltas are applied together in a single pass and persistent state is stored as `float`.
+deltas are accumulated at `gasIndex * VoxelCount + voxelIndex`. Sensible-energy deltas use the same gas-major layout
+with `double` elements, preventing a representable final temperature from being lost when an intermediate
+`moles * C_v * temperature` exceeds the `float` range.
 
-This buffering prevents an earlier voxel's applied result from changing the snapshot read by a later voxel, so results do not depend on active-voxel iteration order when the neighbor order is held fixed. It does not make every permutation equivalent: the separate `scheduledOutflows` safety cap is consumed in fixed neighbor order, as described in §5.1, and can favor earlier directions when a source saturates.
+One `(chunk, gas)` job owns each pair of delta rows for an entire accumulation phase. Several jobs may target the same
+voxel, but they write different rows. The apply phase changes ownership: a 64-entry tile owns every gas, temperature,
+pressure, and heat-capacity write for its voxels. These two layouts keep workers from overwriting each other without
+locks or atomics.
 
-The mole-delta and gas-major `scheduledOutflows` arrays are rented from `ArrayPool<float>`; the energy-delta array is
-rented from `ArrayPool<double>`. All are returned after application.
+Floating-point order is fixed where several values meet. A gas row scans sources and directions in ascending order;
+incident conductance gathers fixed direction slots; and energy rows are reduced in gas order. Parallel completion order
+therefore cannot change a result. Phase barriers also keep bulk advection ahead of diffusion and prevent an apply pass
+from seeing a half-written row.
+
+All workspace arrays are rented from `ArrayPool<T>` and returned even when a phase throws.
 
 > [!NOTE]
 > Cross-chunk gas flow is deterministic but sequential and updates current state immediately, so a later boundary
@@ -668,69 +656,23 @@ rented from `ArrayPool<double>`. All are returned after application.
 
 Each chunk maintains a `SleepTimer` counter. After each advection pass:
 
-1. The maximum pressure delta across all neighbor pairs in the chunk (`maxPressureDelta`) is tracked.
-2. If `maxPressureDelta < SleepEpsilon` (3.5): increment `SleepTimer`.
+1. For each neighbor pair, divide the absolute pressure difference by the higher pressure. The largest percentage in the
+   chunk (`maxRelativePressureDelta`) is tracked. A gas-to-vacuum edge has a 100% difference.
+2. If `maxRelativePressureDelta < SleepEpsilon` (3.5%): increment `SleepTimer`.
 3. If `SleepTimer > SleepThreshold` (100): set `IsAwake = false`. The chunk ceases all processing.
-4. If `maxPressureDelta ≥ SleepEpsilon`: reset `SleepTimer` to 0.
+4. If `maxRelativePressureDelta ≥ SleepEpsilon`: reset `SleepTimer` to 0.
 
 A sleeping chunk is woken when:
 - `InjectGasToVoxel` is called on it (the sleep timer is reset).
-- A boundary flow event targets one of its voxels (the target room is woken via `WakeRoom`).
+- A boundary flow event targets one of its voxels.
 
 A chunk that sends gas across a boundary is kept awake and has its sleep timer reset. The sleep criterion itself is
-pressure-based; a temperature gradient alone does not wake or keep a chunk active.
+pressure-based; scaling every pressure in a chunk by the same amount does not change its sleep decision. A temperature
+gradient alone does not wake or keep a chunk active.
 
 The sleep system is the primary mechanism for achieving the "work-proportional cost" goal. In a station with 500 chunks, only the handful with active pressure gradients consume CPU.
 
 Unit tests confirm convergence to sleep for L-shaped, donut-shaped, and zigzag room geometries, with pressure equilibrating to within 1.0 moles of the average across all voxels.
-
----
-
-## 7. The Leaky Faucet Problem & GasAccumulator
-
-### The Problem
-
-A slow, continuous gas leak (e.g., a cracked pipe) produces a flow rate below the "Threshold of Violence" that would wake the voxel grid. Without mitigation, there are two bad outcomes:
-1. **Wake the grid every tick**: The voxel simulation runs continuously for a negligible leak, wasting CPU.
-2. **Ignore it**: The leak is never simulated, producing incorrect atmospheric state.
-
-### The Solution: GasAccumulator
-
-The `GasAccumulator` acts as a buffer between a gas source and the simulation:
-
-```
-struct GasAccumulator {
-    int GasId;
-    float AccumulatedMoles;
-    float OutputTemperature;  // Mole-weighted running average
-    int TicksAlive;
-    const int MaxAliveTimeBeforeReset = 20;
-}
-```
-
-Each tick, the leaking source calls `AddGas(moles, temperature)`, which accumulates mass and tracks a weighted-average temperature.
-
-The caller then evaluates the accumulator state:
-
-```
-EvaluateState(currentPressureDelta, wakeThreshold) → Hold | Diffuse | Inject
-```
-
-| State | Condition | Action |
-|-------|-----------|--------|
-| **Hold** | Delta < threshold AND ticks < max | Continue accumulating. Do nothing. |
-| **Diffuse** | Delta < threshold AND ticks ≥ max (20) | Release accumulated gas into the `RoomNode` (macro layer). The leak is too slow to matter at the voxel level. |
-| **Inject** | Delta ≥ threshold | Wake the chunk and inject accumulated gas into the voxel grid (micro layer). The leak has built up enough pressure to warrant full simulation. |
-
-After either `Diffuse` or `Inject`, the accumulator is reset.
-
-Unit tests confirm:
-- A 0.5 Pa delta holds.
-- A 5.0 Pa delta after 20 ticks diffuses to the macro layer.
-- A 150.0 Pa spike injects immediately.
-
-> [!IMPORTANT]
-> As with the `RoomNode`, the `GasAccumulator` is **fully implemented as a data structure** but is **not wired into the simulation loop**. `AtmosSimulation` does not reference it. An integrator must build the orchestration that feeds gas sources into accumulators and dispatches the resulting `Diffuse` or `Inject` actions. The unit tests for `GasAccumulator` test the struct in isolation.
 
 ---
 
@@ -845,10 +787,6 @@ All networking methods are stubs with comments indicating where real implementat
 
 ## 10. Known Flaws & Limitations
 
-### Structural
-
-1. **Macro-micro transition not implemented.** The `RoomNode`, `GasAccumulator`, and the transition logic between macro (sleeping room) and micro (active voxel grid) layers are defined as data structures but are not orchestrated by the simulation loop. An integrator must implement: (a) how a sleeping room's aggregate state seeds the voxel grid on wake, (b) how a sleeping voxel grid's state is collapsed back into a `RoomNode`, and (c) how `GasAccumulator` feeds into this process.
-
 ### Numerical
 
 2. **Unidirectional flow in advection.** The advection loop only processes flow from high pressure to low (`pressureDelta > 0`). Due to the delta buffer, each voxel-pair transfer is computed from the higher-pressure side and applied after the neighbor scan.
@@ -873,7 +811,7 @@ To implement this system in another engine or language, start from the core modu
 - `Numos.CoreSim.Solvers` — atomic physics stages and shared solver math.
 - `AtmosChunk` — the parameterized voxel grid.
 - `AtmosConfig` — all tunable parameters.
-- `GasChannel`, `GasProperties`, `RoomNode` — all data structures.
+- `GasChannel` and `GasProperties` — simulation data structures.
 - `Types.cs` — standalone `Int3`, `Vector3`, event structs.
 
 ### What to build
@@ -883,9 +821,6 @@ To implement this system in another engine or language, start from the core modu
 | Tick driver integration | ✅ Complete | Call `AtmosSimulation.Update(deltaSeconds)` from your engine's update loop. |
 | Chunk lifecycle | ✅ Complete | Call `CreateAndRegisterChunk` / `UnregisterChunk`; chunks remain owned by the simulation. |
 | Voxel topology | ✅ API provided | Populate topology through `SetChunkClassification` and `SetVoxelClassification`. |
-| Room detection | ❌ Not provided | You must implement flood-fill or connected-component analysis to assign room IDs to contiguous open volumes in `VoxelRoomMap`. |
-| Macro-micro transition | ❌ Not provided | You must implement the logic that seeds voxel grids from `RoomNode` state on wake, and collapses back on sleep. |
-| GasAccumulator orchestration | ❌ Not provided | You must implement the per-source accumulator loop and dispatch `Diffuse`/`Inject` actions. |
 | Gas source API | ✅ API provided | Use `AddGasToVoxel` for game-side sources such as pipes, vents, and fires. |
 | Liquid system | ❌ Not provided | Condensation updates atmospheric state only. Build liquid state and integration if needed. |
 | Visualization | ❌ Not provided | Pressure, temperature, and gas composition are available per-voxel. You must build rendering (overlays, particle effects, fog). |
@@ -894,11 +829,16 @@ To implement this system in another engine or language, start from the core modu
 ### Parallelism
 
 The simulation assumes parallel execution:
-- **Intra-chunk advection and thermodynamics** are dispatched in parallel across chunks (e.g. via a `Parallel.ForEach`-style construct).
-- **Gas and thermal boundary processing** is sequential and must remain so to avoid race conditions when two chunks write to each other's voxels.
-- **Thread-local buffers** (`ThreadLocal<T>`) are owned by the producer stages for gas- and thermal-boundary events to avoid contention.
 
-If your target platform does not support threading (e.g., single-threaded WASM), the simulation will still function correctly when run sequentially — the parallel regions have no ordering dependencies within them.
+- **Advection** dispatches voxel tiles and gas rows across all awake chunks. A single dense chunk can therefore use
+  multiple workers. Once the awake chunks already saturate the worker pool, it dispatches whole chunks to avoid extra
+  barriers.
+- **Thermodynamics** dispatches independent chunks in parallel.
+- **Gas and thermal boundary processing** is sequential and must remain so to avoid race conditions when two chunks write to each other's voxels.
+- **Boundary event production** can run in parallel because the consumer sorts events before applying cross-chunk work.
+
+If your target platform does not support threading (e.g., single-threaded WASM), the simulation still functions
+sequentially. The same phase barriers and reduction order apply at every worker count.
 
 ### Memory
 

@@ -324,18 +324,18 @@ public sealed class GasMixtureTests
     }
 
     [Test]
-    public void VoxelMixture_ScalarMutationPreservesRoomCapacityGuard()
+    public void VoxelMixture_ScalarMutationWakesEveryAirClassification()
     {
         using var simulation = new AtmosSimulation(CreateSimulationConfig(), 2, 1, 1);
-        var chunk = simulation.CreateAndRegisterChunk(default, 1);
+        var chunk = simulation.CreateAndRegisterChunk(default);
         simulation.SetVoxelClassification(chunk, 0, new VoxelClassification(1));
         simulation.SetVoxelClassification(chunk, 1, new VoxelClassification(2));
         var first = simulation.GetVoxelGasMixture(chunk, 0);
         var second = simulation.GetVoxelGasMixture(chunk, 1);
         first.SetMoles(0, 1f);
 
-        Assert.That(() => second.SetMoles(0, 1f), Throws.InvalidOperationException);
-        Assert.That(second.TotalMoles, Is.Zero);
+        second.SetMoles(0, 1f);
+        Assert.That(second.TotalMoles, Is.EqualTo(1f));
     }
 
     [Test]
@@ -371,21 +371,21 @@ public sealed class GasMixtureTests
     }
 
     [Test]
-    public void TransferTo_ActiveRoomCapacityFailureIsAtomic()
+    public void TransferTo_DifferentAirClassificationsIsConservative()
     {
         using var simulation = new AtmosSimulation(CreateSimulationConfig(), 2, 1, 1);
-        var chunk = simulation.CreateAndRegisterChunk(default, 1);
+        var chunk = simulation.CreateAndRegisterChunk(default);
         simulation.SetVoxelClassification(chunk, 0, new VoxelClassification(1));
         simulation.SetVoxelClassification(chunk, 1, new VoxelClassification(2));
         var source = simulation.GetVoxelGasMixture(chunk, 0);
         var destination = simulation.GetVoxelGasMixture(chunk, 1);
         source.AddGas(0, 2f, 300f);
 
-        Assert.That(() => source.TransferTo(destination, 1f), Throws.InvalidOperationException);
+        source.TransferTo(destination, 1f);
         Assert.Multiple(() =>
         {
-            Assert.That(source.TotalMoles, Is.EqualTo(2f));
-            Assert.That(destination.TotalMoles, Is.Zero);
+            Assert.That(source.TotalMoles, Is.EqualTo(1f));
+            Assert.That(destination.TotalMoles, Is.EqualTo(1f));
         });
     }
 

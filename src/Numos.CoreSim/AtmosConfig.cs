@@ -128,9 +128,12 @@ public class AtmosConfig : IAtmosConfig
     public Scalar BulkFlowCoefficient { get; set; } = AtmosConfigDefaults.BulkFlowCoefficient;
 
     /// <summary>
-    ///     Below this pressure, in pascals (Pa), voxel contents are zeroed out.
+    ///     Pressure below which a voxel is eligible for vacuum cleanup, in pascals (Pa).
     /// </summary>
-    /// <remarks>Non-finite and negative values are normalized to zero.</remarks>
+    /// <remarks>
+    ///     Cleanup removes the voxel's gas only when every orthogonally adjacent air voxel is also below this
+    ///     threshold. Non-finite and negative values are normalized to zero.
+    /// </remarks>
     [Quantity("pressure")]
     public Pascal VacuumThreshold { get; set; } = AtmosConfigDefaults.VacuumThreshold;
 
@@ -141,11 +144,14 @@ public class AtmosConfig : IAtmosConfig
     public int SleepThreshold { get; set; } = AtmosConfigDefaults.SleepThreshold;
 
     /// <summary>
-    ///     Maximum pressure delta considered "at rest", in pascals (Pa).
+    ///     Maximum relative pressure difference considered "at rest", as a percentage of the higher neighboring
+    ///     pressure.
     /// </summary>
-    /// <remarks>Non-finite and negative values are normalized to zero.</remarks>
-    [Quantity("pressure")]
-    public Pascal SleepEpsilon { get; set; } = AtmosConfigDefaults.SleepEpsilon;
+    /// <remarks>
+    ///     For example, <c>3.5</c> allows a neighboring pressure difference below 3.5%. Non-finite and negative values
+    ///     are normalized to zero.
+    /// </remarks>
+    public Scalar SleepEpsilon { get; set; } = AtmosConfigDefaults.SleepEpsilon;
 
     /// <summary>
     ///     Effective thermal conductance between adjacent voxels, in joules per kelvin (J/K) per

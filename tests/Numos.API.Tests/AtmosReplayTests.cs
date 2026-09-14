@@ -71,7 +71,7 @@ public sealed class AtmosReplayTests
         {
             if (tick == 2) simulation.SetVoxelTemperature(first, 3, 1, 0, 330f);
             if (tick == 4) simulation.SleepChunk(second);
-            if (tick == 6) simulation.WakeRoom(second, 0);
+            if (tick == 6) simulation.WakeChunk(second);
             if (tick == 8) simulation.SetChunkBoundaryClassification(first, VoxelClassification.RoomSolid);
             if (tick == 10) simulation.SetVoxelClassification(first, 3, 1, 0, VoxelClassification.RoomUnassigned);
             if (tick == 12) simulation.SetAtmosConfig(new AtmosConfig(simulation.Config) { ThermalConductance = 0.3f });

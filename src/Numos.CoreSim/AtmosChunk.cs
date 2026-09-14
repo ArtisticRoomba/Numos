@@ -29,11 +29,11 @@ internal class AtmosChunk
     public int ActiveAirCount;
 
     /// <summary>
-    ///     Flat voxel indices belonging to active rooms in this chunk.
+    ///     Flat indices of gas-bearing voxels in this chunk while it is awake.
     /// </summary>
     /// <remarks>
     ///     Only the first <see cref="ActiveAirCount" /> entries are valid. Rebuild this list with
-    ///     <see cref="RebuildActiveAirIndices" /> after changing <see cref="VoxelRoomMap" /> or the active rooms.
+    ///     <see cref="RebuildActiveAirIndices" /> after changing <see cref="VoxelRoomMap" />.
     /// </remarks>
     public ushort[] ActiveAirIndices;
 
@@ -51,19 +51,6 @@ internal class AtmosChunk
     /// </remarks>
     public GasChannel[] ActiveGases;
 
-    /// <summary>
-    ///     Number of valid room IDs at the beginning of <see cref="ActiveRoomIds" />.
-    /// </summary>
-    public int ActiveRoomCount;
-
-    /// <summary>
-    ///     Room IDs currently being processed in this chunk.
-    /// </summary>
-    /// <remarks>
-    ///     Only the first <see cref="ActiveRoomCount" /> entries are valid. The number of active rooms
-    ///     cannot exceed <see cref="MaxActiveRooms" />.
-    /// </remarks>
-    public int[] ActiveRoomIds;
 
     /// <summary>
     ///     The number of voxels along the z-axis.
@@ -87,9 +74,13 @@ internal class AtmosChunk
     public bool IsAwake;
 
     /// <summary>
-    ///     Maximum number of rooms that can be active in this chunk simultaneously.
+    ///     Whether each voxel currently represents vacuum.
     /// </summary>
-    public int MaxActiveRooms;
+    /// <remarks>
+    ///     The advection stage derives this state from the complete pressure field before vacuum cleanup.
+    ///     Consumers should use it instead of interpreting a vacuum voxel's temperature.
+    /// </remarks>
+    public FlatArray<bool> IsVacuum;
 
     /// <summary>
     ///     Number of consecutive simulation ticks for which this chunk has remained below the sleep threshold.
@@ -151,12 +142,11 @@ internal class AtmosChunk
     private Dictionary<object, SolverArrayStorage>? _solverArrays;
 
     /// <summary>
-    ///     Creates a chunk with the specified dimensions and active-room capacity.
+    ///     Creates a chunk with the specified dimensions.
     /// </summary>
     /// <param name="width">The number of voxels along the x axis.</param>
     /// <param name="height">The number of voxels along the y axis.</param>
     /// <param name="depth">The number of voxels along the z axis.</param>
-    /// <param name="maxActiveRooms">The maximum number of rooms that can be active at once.</param>
     /// <exception cref="ArgumentOutOfRangeException">
     ///     A dimension is non-positive or the combined voxel count exceeds
     ///     <see cref="AtmosChunkConstants.MaximumVoxelCount" />.
@@ -164,16 +154,15 @@ internal class AtmosChunk
     public AtmosChunk(
         int width = AtmosChunkConstants.DefaultWidth,
         int height = AtmosChunkConstants.DefaultHeight,
-        int depth = AtmosChunkConstants.DefaultDepth,
-        int maxActiveRooms = AtmosChunkConstants.DefaultMaxActiveRooms)
+        int depth = AtmosChunkConstants.DefaultDepth)
     {
         int voxelCount = GetValidatedVoxelCount(width, height, depth);
-        MaxActiveRooms = maxActiveRooms;
         Width = width;
         Height = height;
         Depth = depth;
         VoxelCount = voxelCount;
         EnsureInitialized();
+        IsVacuum.Fill(true);
     }
 
     internal bool HasCapturedSolverArrays => _solverArrays?.Values.Any(static array => array.CaptureForRollback) == true;
@@ -189,13 +178,13 @@ internal class AtmosChunk
     public Int3 Dimensions => new(Width, Height, Depth);
 
     /// <summary>
-    ///     Ensures that the chunk's per-voxel and active-room arrays are initialized for its current dimensions.
+    ///     Ensures that the chunk's per-voxel arrays are initialized for its current dimensions.
     /// </summary>
     /// <remarks>
     ///     Existing arrays are reused when they already have the required length. This method does not
     ///     clear existing values or reset active counts; use <see cref="Initialize" /> to reset the chunk.
     /// </remarks>
-    [MemberNotNull(nameof(ActiveAirIndices), nameof(ActiveGases), nameof(ActiveRoomIds))]
+    [MemberNotNull(nameof(ActiveAirIndices), nameof(ActiveGases))]
     [PublicAPI]
     public void EnsureInitialized()
     {
@@ -207,11 +196,9 @@ internal class AtmosChunk
         EnsureInitialized(ref TotalPressure, dimensions);
         EnsureInitialized(ref TotalHeatCapacity, dimensions);
         EnsureInitialized(ref Temperature, dimensions);
+        EnsureInitialized(ref IsVacuum, dimensions);
         if (ActiveGases == null)
             ActiveGases = new GasChannel[AtmosChunkConstants.InitialGasChannelCapacity];
-
-        if (ActiveRoomIds == null || ActiveRoomIds.Length != MaxActiveRooms)
-            ActiveRoomIds = new int[MaxActiveRooms];
     }
 
     /// <summary>
@@ -221,27 +208,24 @@ internal class AtmosChunk
     /// <param name="width">The width of the chunk.</param>
     /// <param name="height">The height of the chunk.</param>
     /// <param name="depth">The depth of the chunk.</param>
-    /// <param name="maxActiveRooms">The maximum number of rooms that can be active in this chunk simultaneously.</param>
     /// <exception cref="ArgumentOutOfRangeException">
     ///     A dimension is non-positive or the combined voxel count exceeds
     ///     <see cref="AtmosChunkConstants.MaximumVoxelCount" />.
     /// </exception>
     /// <remarks>
     ///     Initialization puts the chunk to sleep, resets all active counts and timers, and clears
-    ///     its per-voxel, gas-channel, and active-room data. Solver arrays are detached.
+    ///     its per-voxel and gas-channel data. Solver arrays are detached.
     /// </remarks>
     [PublicAPI]
     public void Initialize(
         Int3 position,
         int width = AtmosChunkConstants.DefaultWidth,
         int height = AtmosChunkConstants.DefaultHeight,
-        int depth = AtmosChunkConstants.DefaultDepth,
-        int maxActiveRooms = AtmosChunkConstants.DefaultMaxActiveRooms)
+        int depth = AtmosChunkConstants.DefaultDepth)
     {
         int voxelCount = GetValidatedVoxelCount(width, height, depth);
         _solverArrays = null;
         GridPosition = position;
-        MaxActiveRooms = maxActiveRooms;
         IsAwake = false;
         Width = width;
         Height = height;
@@ -251,7 +235,6 @@ internal class AtmosChunk
         EnsureInitialized();
 
         ActiveAirCount = 0;
-        ActiveRoomCount = 0;
         ActiveGasCount = 0;
         SleepTimer = 0;
 
@@ -260,8 +243,8 @@ internal class AtmosChunk
         TotalPressure.Clear();
         TotalHeatCapacity.Clear();
         Temperature.Clear();
+        IsVacuum.Fill(true);
         Array.Clear(ActiveGases, 0, ActiveGases.Length);
-        Array.Clear(ActiveRoomIds, 0, ActiveRoomIds.Length);
 
         _generation = Interlocked.Increment(ref _nextGeneration);
         Interlocked.Exchange(ref _revision, 1);
@@ -379,56 +362,11 @@ internal class AtmosChunk
     }
 
     /// <summary>
-    ///     Wakes the chunk and activates the specified room for simulation.
-    /// </summary>
-    /// <param name="targetRoomId">The room ID to activate.</param>
-    /// <remarks>
-    ///     Solid and void classifications are ignored. Activating an already active room only resets
-    ///     the sleep timer. When a new room is activated, <see cref="ActiveAirIndices" /> is rebuilt.
-    /// </remarks>
-    /// <exception cref="Exception">Thrown when <paramref name="targetRoomId" /> would exceed <see cref="MaxActiveRooms" />.</exception>
-    public virtual void WakeRoom(int targetRoomId)
-    {
-        if (targetRoomId == VoxelClassification.RoomSolid || targetRoomId == VoxelClassification.RoomVoid)
-            return;
-
-        if (IsAwake)
-        {
-            for (int r = 0; r < ActiveRoomCount; r++)
-            {
-                if (ActiveRoomIds[r] == targetRoomId)
-                {
-                    SleepTimer = 0;
-                    MarkChanged();
-                    return;
-                }
-            }
-        }
-
-        if (!IsAwake)
-        {
-            ActiveRoomCount = 0;
-            IsAwake = true;
-        }
-
-        if (ActiveRoomCount >= MaxActiveRooms)
-        {
-            throw new Exception("Maximum active rooms reached for this chunk!");
-        }
-
-        ActiveRoomIds[ActiveRoomCount] = targetRoomId;
-        ActiveRoomCount++;
-        SleepTimer = 0;
-        RebuildActiveAirIndices();
-        MarkChanged();
-    }
-
-    /// <summary>
-    ///     Wakes the chunk using the active-room topology retained when it went to sleep.
+    ///     Wakes the chunk and rebuilds its active gas-bearing voxel index.
     /// </summary>
     /// <remarks>
-    ///     Use this when an external topology change may affect any active room. Use <see cref="WakeRoom" />
-    ///     when only one room needs to become active.
+    ///     Every non-solid, non-void voxel participates while the chunk is awake. Classification IDs do not
+    ///     partition simulation work.
     /// </remarks>
     public virtual void Wake()
     {
@@ -439,27 +377,23 @@ internal class AtmosChunk
     }
 
     /// <summary>
-    ///     Rebuilds the dense list of voxel indices belonging to active rooms.
+    ///     Rebuilds the dense list of gas-bearing voxel indices.
     /// </summary>
     /// <remarks>
     ///     The resulting list is stored in <see cref="ActiveAirIndices" /> and its valid length is written
-    ///     to <see cref="ActiveAirCount" />. Call this after modifying room classifications or active room IDs.
+    ///     to <see cref="ActiveAirCount" />. Call this after modifying voxel classifications.
     /// </remarks>
     public void RebuildActiveAirIndices()
     {
         ActiveAirCount = 0;
         for (ushort i = 0; i < VoxelCount; i++)
         {
-            int roomId = VoxelRoomMap[i];
-            for (int r = 0; r < ActiveRoomCount; r++)
-            {
-                if (ActiveRoomIds[r] == roomId)
-                {
-                    ActiveAirIndices[ActiveAirCount] = i;
-                    ActiveAirCount++;
-                    break;
-                }
-            }
+            int classification = VoxelRoomMap[i];
+            if (classification == VoxelClassification.RoomSolid || classification == VoxelClassification.RoomVoid)
+                continue;
+
+            ActiveAirIndices[ActiveAirCount] = i;
+            ActiveAirCount++;
         }
     }
 
@@ -498,15 +432,15 @@ internal class AtmosChunk
 
         Debug.Assert(float.IsFinite(pressurePerMoleKelvin) && pressurePerMoleKelvin > 0f);
 
-        int room = VoxelRoomMap[localVoxelIndex];
-        if (room == VoxelClassification.RoomSolid)
+        int classification = VoxelRoomMap[localVoxelIndex];
+        if (classification == VoxelClassification.RoomSolid)
             return;
 
-        if (room == VoxelClassification.RoomVoid)
+        if (classification == VoxelClassification.RoomVoid)
             return;
 
         if (!IsAwake)
-            WakeRoom(room);
+            Wake();
 
         SleepTimer = 0;
 
@@ -536,6 +470,7 @@ internal class AtmosChunk
         Temperature[localVoxelIndex] = newTemp;
 
         TotalPressure[localVoxelIndex] = currentTotalMoles * newTemp * pressurePerMoleKelvin;
+        IsVacuum[localVoxelIndex] = TotalPressure[localVoxelIndex] <= 0f;
         MarkChanged();
     }
 
@@ -549,7 +484,7 @@ internal class AtmosChunk
         ushort voxelIndex, out Kelvin temperature, out JoulePerKelvin heatCapacity)
     {
         heatCapacity = TotalHeatCapacity[voxelIndex];
-        if (!float.IsFinite(heatCapacity) || heatCapacity <= 0f || TotalPressure[voxelIndex] == 0f)
+        if (!float.IsFinite(heatCapacity) || heatCapacity <= 0f || IsVacuum[voxelIndex])
         {
             temperature = 0f;
             heatCapacity = 0f;
@@ -576,6 +511,7 @@ internal class AtmosChunk
         }
 
         TotalHeatCapacity[idx] = 0f;
+        IsVacuum[idx] = true;
     }
 
     /// <summary>
@@ -592,15 +528,15 @@ internal class AtmosChunk
         }
 
         TotalHeatCapacity.Fill(0f);
+        IsVacuum.Fill(true);
     }
 
 
     /// <summary>
-    ///     Sets a specific voxel to a specific room id.
-    ///     If the room id is a wall or void is sets the voxel to a vacuum.
+    ///     Sets a specific voxel classification. Solid and void classifications clear the voxel to vacuum.
     /// </summary>
     /// <param name="idx">Index of voxel</param>
-    /// <param name="roomId">room id to set the room to</param>
+    /// <param name="roomId">Classification value to assign.</param>
     [PublicAPI]
     public void SetVoxelClassification(ushort idx, int roomId)
     {
@@ -611,11 +547,10 @@ internal class AtmosChunk
     }
 
     /// <summary>
-    ///     Sets a specific voxel to a specific room id.
-    ///     If the room id is a wall or void is sets the voxel to a vacuum.
+    ///     Sets a specific voxel classification. Solid and void classifications clear the voxel to vacuum.
     /// </summary>
     /// <param name="idx">Index of voxel</param>
-    /// <param name="classification">VoxelClassification to set room id to</param>
+    /// <param name="classification">Classification value to assign.</param>
     [PublicAPI]
     public void SetVoxelClassification(ushort idx, VoxelClassification classification)
     {
@@ -627,10 +562,9 @@ internal class AtmosChunk
 
 
     /// <summary>
-    ///     Sets a specific voxel to a specific room id.
-    ///     If the room id is a wall or void is sets the voxel to a vacuum.
+    ///     Sets every voxel classification. Solid and void classifications clear the chunk to vacuum.
     /// </summary>
-    /// <param name="roomId">room id to set the room to</param>
+    /// <param name="roomId">Classification value to assign.</param>
     [PublicAPI]
     public void SetChunkClassification(int roomId)
     {
@@ -638,16 +572,13 @@ internal class AtmosChunk
             SetChunkToVacuum();
 
         VoxelRoomMap.Fill(roomId);
-        ActiveRoomCount = 1;
-        ActiveRoomIds[0] = roomId;
     }
 
 
     /// <summary>
-    ///     Sets the entire chunk to a specific room id
-    ///     If the room id is a wall or void is sets the voxel to a vacuum.
+    ///     Sets the entire chunk classification. Solid and void classifications clear the chunk to vacuum.
     /// </summary>
-    /// <param name="classification">VoxelClassification to set room id to</param>
+    /// <param name="classification">Classification value to assign.</param>
     [PublicAPI]
     public void SetChunkClassification(VoxelClassification classification)
     {
@@ -655,8 +586,6 @@ internal class AtmosChunk
             SetChunkToVacuum();
 
         VoxelRoomMap.Fill(classification.RoomId);
-        ActiveRoomCount = 1;
-        ActiveRoomIds[0] = classification.RoomId;
     }
 
 

@@ -94,7 +94,6 @@ internal struct AtmosStateHasher
         hash.Add(checkpoint.CompatibilityFingerprint);
         hash.Add(checkpoint.Position.Tick);
         hash.Add(checkpoint.Position.OperationSequence);
-        hash.Add(checkpoint.ElapsedAccumulator);
         checkpoint.Config.AppendHash(ref hash);
         foreach (var solver in checkpoint.Solvers)
             hash.Add(solver.Enabled);
@@ -104,15 +103,12 @@ internal struct AtmosStateHasher
         {
             hash.Add(chunk.Position);
             hash.Add(chunk.Dimensions);
-            hash.Add(chunk.MaxActiveRooms);
             hash.Add(chunk.IsAwake);
             hash.Add(chunk.SleepTimer);
             foreach (int value in chunk.Classifications) hash.Add(value);
             foreach (float value in chunk.Temperatures) hash.Add(value);
             foreach (float value in chunk.Pressures) hash.Add(value);
             foreach (float value in chunk.HeatCapacities) hash.Add(value);
-            hash.Add(chunk.ActiveRooms.Count);
-            foreach (int value in chunk.ActiveRooms) hash.Add(value);
             hash.Add(chunk.ActiveAirIndices.Count);
             foreach (ushort value in chunk.ActiveAirIndices) hash.Add(value);
             hash.Add(chunk.Gases.Count);
@@ -122,12 +118,9 @@ internal struct AtmosStateHasher
                 foreach (float value in gas.Moles) hash.Add(value);
             }
 
-            if (checkpoint.FormatVersion >= 2)
-            {
-                hash.Add(chunk.SolverArrays.Count);
-                foreach (var array in chunk.SolverArrays)
-                    array.AppendHash(ref hash);
-            }
+            hash.Add(chunk.SolverArrays.Count);
+            foreach (var array in chunk.SolverArrays)
+                array.AppendHash(ref hash);
         }
 
         return new AtmosStateHash(checkpoint.Position, hash.Value);

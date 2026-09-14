@@ -1,5 +1,5 @@
-using System.Collections.Concurrent;
 using System.Diagnostics;
+using CommunityToolkit.HighPerformance.Helpers;
 using Numos.CoreSim.Datatypes.Events;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.Maths;
@@ -7,111 +7,109 @@ using Numos.Maths;
 namespace Numos.CoreSim.Solvers;
 
 /// <summary>
-///     Applies deterministic, sequential gas flow across chunk boundaries.
+///     Applies deterministic gas flow across chunk boundaries.
 /// </summary>
 internal sealed class BoundaryFlowSolver : IAtmosSolverStage
 {
-    private readonly List<(Int3 Key, BoundaryFlowEvent Event)> _orderedEvents = [];
-    private readonly Dictionary<Int3, Queue<InjectionEvent>> _injectionBuffer = new();
-
-    // Scratch set reused across RunQueuedInjections batches to avoid re-deriving heat
-    // capacity from composition for a voxel that's already been touched this batch.
-    private readonly HashSet<ushort> _resyncedVoxels = new();
+    private readonly InjectionBuffer _injectionBuffer = new();
+    private readonly List<BoundaryEventBatch<BoundaryFlowEvent>> _orderedBatches = [];
 
     public void Solve(AtmosSolverExecutionContext context)
     {
         long startedAt = Stopwatch.GetTimestamp();
-        ConcurrentQueue<(int TickCount, Int3 Key, BoundaryFlowEvent Event)> boundaryEvents =
-            BoundaryEvents<BoundaryFlowEvent>.Get(context);
-        _orderedEvents.Clear();
+        BoundaryEventBatchStorage<BoundaryFlowEvent> boundaryBatches =
+            BoundaryEventBatches<BoundaryFlowEvent>.Get(context);
+
+        _orderedBatches.Clear();
         _injectionBuffer.Clear();
-        _resyncedVoxels.Clear();
-        // TODO PERF properly microopt this
-        // This performs a sort op so that indexing the arrays goes from least to greatest, which is better
-        // than random access, however the sorting op does a In3 comparison before doing a index comparison
-        // when the index comparison is extremely cheap so it's kinda nil.
-        // Ideally:
-        // Boundary events get queued into a ConcurrentBag so collection is still thread-safe and can be added to from multiple threads.
-        // ConcurrentBag gets copied to a working array (not list)
-        // Working array gets sorted by event index
-        // Working array gets passed to the solver to process in order, which is now a single pass through the array.
-        while (boundaryEvents.TryDequeue(out var boundaryEvent))
+        if (!boundaryBatches.TryConsume(context.TickCount))
         {
-            // A disabled producer must not leave work for a consumer that resumes on a later tick.
-            if (boundaryEvent.TickCount == context.TickCount)
-                _orderedEvents.Add((boundaryEvent.Key, boundaryEvent.Event));
+            context.World.AddBoundaryProcessingTicks(Stopwatch.GetTimestamp() - startedAt);
+            return;
         }
 
-        _orderedEvents.Sort(CompareEvents);
+        for (int batchIndex = 0; batchIndex < boundaryBatches.Count; batchIndex++)
+        {
+            BoundaryEventBatch<BoundaryFlowEvent> batch = boundaryBatches[batchIndex];
+            if (batch.Count > 0)
+                _orderedBatches.Add(batch);
+        }
 
-        foreach (var (chunkPosition, boundaryEvent) in _orderedEvents)
-            ProcessBoundaryFlow(context, chunkPosition, boundaryEvent, _injectionBuffer);
+        // Workers preserve ActiveAirIndices order inside each batch. Sorting only the batch headers therefore
+        // produces the same chunk-position and voxel-index order without copying and sorting every event.
+        _orderedBatches.Sort(CompareBatches);
+        foreach (BoundaryEventBatch<BoundaryFlowEvent> batch in _orderedBatches)
+        {
+            for (int eventIndex = 0; eventIndex < batch.Count; eventIndex++)
+                ProcessBoundaryFlow(context, batch.Key, batch[eventIndex], _injectionBuffer);
+        }
 
-        RunQueuedInjections(context, context.TickConfig, _injectionBuffer, _resyncedVoxels);
+        RunQueuedInjections(context, context.TickConfig, _injectionBuffer);
         context.World.AddBoundaryProcessingTicks(Stopwatch.GetTimestamp() - startedAt);
     }
 
     internal void ClearTransientState()
     {
-        _orderedEvents.Clear();
+        _orderedBatches.Clear();
         _injectionBuffer.Clear();
     }
 
     private static void RunQueuedInjections(
         AtmosSolverExecutionContext context, AtmosSolverConfigSnapshot config,
-        Dictionary<Int3, Queue<InjectionEvent>> injectionBuffer, HashSet<ushort> resyncedVoxels)
+        InjectionBuffer injectionBuffer)
     {
-        foreach (var (chunkPosition, queue) in injectionBuffer)
-        {
-            if (!context.World.TryGetChunk(chunkPosition, out var chunk))
-                continue;
-
-            // A voxel can appear in this queue multiple times in one batch — once per gas
-            // species, once per boundary direction that flowed into/out of it, etc.
-            // InjectCore/InjectGasToVoxel keep TotalHeatCapacity updated incrementally after
-            // every call, so composition only needs to be re-derived from ActiveGases once
-            // per voxel per batch; subsequent events for that voxel can trust the running
-            // total instead of re-summing every active gas from scratch.
-            resyncedVoxels.Clear();
-
-            while (queue.Count > 0)
-            {
-                var ev = queue.Dequeue();
-
-                JoulePerKelvin currentHeatCapacity = resyncedVoxels.Add(ev.LocalVoxelIndex)
-                    ? AtmosSolverMath.CalculateHeatCapacityAtVoxel(config, chunk, ev.LocalVoxelIndex)
-                    : chunk.TotalHeatCapacity[ev.LocalVoxelIndex];
-
-                GasInjectionSolver.Inject(
-                    chunk,
-                    ev.LocalVoxelIndex,
-                    ev.GasId,
-                    ev.Moles,
-                    ev.Temperature,
-                    config,
-                    currentHeatCapacity);
-            }
-        }
+        ParallelHelper.For(
+            0,
+            injectionBuffer.Count,
+            new RunInjectionBatchAction(context, config, injectionBuffer));
 
         injectionBuffer.Clear();
     }
 
+    private static void RunInjectionBatch(
+        AtmosSolverExecutionContext context, AtmosSolverConfigSnapshot config,
+        InjectionBatch batch)
+    {
+        if (!context.World.TryGetChunk(batch.ChunkPosition, out var chunk))
+            return;
+
+        // A voxel can appear in this batch multiple times — once per gas
+        // species, once per boundary direction that flowed into/out of it, etc.
+        // InjectCore/InjectGasToVoxel keep TotalHeatCapacity updated incrementally after
+        // every call, so composition only needs to be re-derived from ActiveGases once
+        // per voxel per batch; subsequent events for that voxel can trust the running
+        // total instead of re-summing every active gas from scratch.
+        batch.ResyncedVoxels.Clear();
+
+        foreach (var ev in batch.Events)
+        {
+            JoulePerKelvin currentHeatCapacity = batch.ResyncedVoxels.Add(ev.LocalVoxelIndex)
+                ? AtmosSolverMath.CalculateHeatCapacityAtVoxel(config, chunk, ev.LocalVoxelIndex)
+                : chunk.TotalHeatCapacity[ev.LocalVoxelIndex];
+
+            GasInjectionSolver.Inject(
+                chunk,
+                ev.LocalVoxelIndex,
+                ev.GasId,
+                ev.Moles,
+                ev.Temperature,
+                config,
+                currentHeatCapacity);
+        }
+    }
+
     private static void QueueInjection(
-        Dictionary<Int3, Queue<InjectionEvent>> injectionBuffer, AtmosChunk chunk,
+        InjectionBuffer injectionBuffer, AtmosChunk chunk,
         ushort localVoxelIndex, int gasId, Mole moles, Kelvin temperature)
     {
-        var gridPosition = chunk.GridPosition;
-        if (!injectionBuffer.TryGetValue(gridPosition, out var queue))
-        {
-            queue = new Queue<InjectionEvent>();
-            injectionBuffer.Add(gridPosition, queue);
-        }
-        queue.Enqueue(new InjectionEvent(localVoxelIndex, gasId, moles, temperature));
+        injectionBuffer.Add(
+            chunk.GridPosition,
+            new InjectionEvent(localVoxelIndex, gasId, moles, temperature));
     }
 
     private static void ProcessBoundaryFlow(
         AtmosSolverExecutionContext context, Int3 sourcePosition, BoundaryFlowEvent boundaryEvent,
-        Dictionary<Int3, Queue<InjectionEvent>> injectionBuffer)
+        InjectionBuffer injectionBuffer)
     {
         if (!context.World.TryGetChunk(sourcePosition, out var sourceChunk))
             return;
@@ -136,7 +134,7 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
     private static void TryFlowToNeighbor(
         AtmosSolverExecutionContext context, AtmosChunk sourceChunk,
         Int3 sourcePosition, Int3 targetPosition, Int3 direction,
-        Dictionary<Int3, Queue<InjectionEvent>> injectionBuffer)
+        InjectionBuffer injectionBuffer)
     {
         if (targetPosition.IsWithin(default, sourceChunk.Dimensions))
             return;
@@ -186,7 +184,7 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
     private static void TransferSpecies(
         AtmosSolverExecutionContext context, AtmosChunk sourceChunk,
         ushort sourceIndex, AtmosChunk neighborChunk, ushort neighborIndex, bool isVoid,
-        Mole totalMoles, Pascal bulkPressureTransfer, Dictionary<Int3, Queue<InjectionEvent>> injectionBuffer)
+        Mole totalMoles, Pascal bulkPressureTransfer, InjectionBuffer injectionBuffer)
     {
         // Very similar to advection solver
         // See there for docs on the maths
@@ -215,8 +213,8 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
             if (molesDiffused * 7 > sourceMoles)
                 molesDiffused = sourceMoles / 7;
 
-            if (molesDiffused < AtmosSolverConstants.MinimumTrackedMoles 
-                && (neighborChunk.ActiveGases[gas].Moles?[neighborIndex] + molesDiffused < AtmosSolverConstants.MinimumTrackedMoles))
+            if (molesDiffused < AtmosSolverConstants.MinimumTrackedMoles &&
+                neighborChunk.ActiveGases[gas].Moles?[neighborIndex] + molesDiffused < AtmosSolverConstants.MinimumTrackedMoles)
                 molesDiffused = 0;
 
 
@@ -232,7 +230,7 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
                 continue;
 
             if (!neighborChunk.IsAwake)
-                neighborChunk.WakeRoom(neighborChunk.VoxelRoomMap[neighborIndex]);
+                neighborChunk.Wake();
 
             QueueInjection(injectionBuffer, neighborChunk, neighborIndex, gasId, molesToMove, sourceTemperature);
         }
@@ -247,13 +245,72 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
         sourceChunk.MarkChanged();
     }
 
-    private static int CompareEvents(
-        (Int3 Key, BoundaryFlowEvent Event) left,
-        (Int3 Key, BoundaryFlowEvent Event) right)
+    private static int CompareBatches(
+        BoundaryEventBatch<BoundaryFlowEvent> left,
+        BoundaryEventBatch<BoundaryFlowEvent> right)
     {
-        int comparison = AtmosSolverMath.CompareChunkPositions(left.Key, right.Key);
-        return comparison != 0
-            ? comparison
-            : left.Event.LocalVoxelIndex.CompareTo(right.Event.LocalVoxelIndex);
+        return AtmosSolverMath.CompareChunkPositions(left.Key, right.Key);
+    }
+
+    /// <summary>
+    ///     Local injection buffer for boundary advection. Injection positive/negative deltas are queued up here
+    ///     and then applied in a single pass in <see cref="RunQueuedInjections" />.
+    /// </summary>
+    /// TODO multithreaded boundary flow. This buffer can technically belong to a worker's work so a single worker can get
+    /// an isolated chunk and process it without worrying about other workers boundaries.
+    ///
+    /// Also this buffer could be made smarter, per-voxel edge storage perhaps?
+    private sealed class InjectionBuffer
+    {
+        private readonly Dictionary<Int3, int> _batchIndices = [];
+        private readonly List<InjectionBatch> _batches = [];
+
+        internal int Count { get; private set; }
+
+        internal InjectionBatch this[int index] => _batches[index];
+
+        internal void Add(Int3 chunkPosition, InjectionEvent injection)
+        {
+            if (!_batchIndices.TryGetValue(chunkPosition, out int batchIndex))
+            {
+                batchIndex = Count;
+                Count++;
+
+                if (batchIndex == _batches.Count)
+                    _batches.Add(new InjectionBatch());
+
+                _batches[batchIndex].ChunkPosition = chunkPosition;
+                _batchIndices.Add(chunkPosition, batchIndex);
+            }
+
+            _batches[batchIndex].Events.Add(injection);
+        }
+
+        internal void Clear()
+        {
+            for (int index = 0; index < Count; index++)
+                _batches[index].Events.Clear();
+
+            _batchIndices.Clear();
+            Count = 0;
+        }
+    }
+
+    private sealed class InjectionBatch
+    {
+        internal readonly List<InjectionEvent> Events = [];
+        internal readonly HashSet<ushort> ResyncedVoxels = [];
+        internal Int3 ChunkPosition;
+    }
+
+    private readonly struct RunInjectionBatchAction(
+        AtmosSolverExecutionContext context,
+        AtmosSolverConfigSnapshot config,
+        InjectionBuffer injectionBuffer) : IAction
+    {
+        public void Invoke(int index)
+        {
+            RunInjectionBatch(context, config, injectionBuffer[index]);
+        }
     }
 }

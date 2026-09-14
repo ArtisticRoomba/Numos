@@ -125,8 +125,8 @@ replaces and disposes the current simulation after the replacement has been cons
 | `setVoxelClassification` | Chunk `position`; local `voxel`; `classification`                                              | Changes one voxel's classification.                                                                              |
 | `setVoxelTemperature`    | Chunk `position`; local `voxel`; `temperatureK`                                                | Sets one voxel's stored temperature in kelvins.                                                                  |
 | `addGas`                 | `gas` definition                                                                               | Appends a gas to the registry. `result.gasId` is its stable zero-based ID.                                       |
-| `injectGas`              | Chunk `position`; local `voxel`; registered `gasId`, `moles`, and `temperatureK`               | Adds gas to an air voxel and wakes its room.                                                                     |
-| `wakeRoom`               | Chunk `position`; `roomId`                                                                     | Wakes a room for subsequent simulation ticks.                                                                    |
+| `injectGas`              | Chunk `position`; local `voxel`; registered `gasId`, `moles`, and `temperatureK`               | Adds gas to an air voxel and wakes its chunk.                                                                    |
+| `wakeChunk`              | Chunk `position`                                                                               | Wakes every gas-bearing voxel in a chunk for subsequent simulation ticks.                                        |
 | `sleepChunk`             | Chunk `position`                                                                               | Explicitly puts a chunk to sleep.                                                                                |
 | `updateConfig`           | `config` patch                                                                                 | Applies a detached snapshot containing the supplied configuration changes for later mutations and ticks.         |
 | `setSolverEnabled`       | `solver` name; `enabled`                                                                       | Enables or disables a named solver stage without changing pipeline order.                                        |
@@ -152,7 +152,7 @@ The built-in solver names accepted by `setSolverEnabled` are `advection`, `bound
 - `bulkFlowCoefficient`
 - `vacuumThresholdPa`
 - `sleepThreshold`
-- `sleepEpsilonPa`
+- `sleepEpsilonPercent`
 - `thermalConductance`
 - `condensationRateFactor`
 - `maxPressureTransferFractionPerNeighbor`

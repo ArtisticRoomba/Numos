@@ -24,6 +24,24 @@ public static class SolverBenchmarks
         {
             Workload.Kernel.Tick();
         }
+
+        /// <summary>
+        ///     Restores the representative initial state before a transient tick.
+        /// </summary>
+        [IterationSetup(Target = nameof(Tick_Transient))]
+        public void ResetTransient()
+        {
+            Workload.Reset();
+        }
+
+        /// <summary>
+        ///     Measures a representative tick from a fixed initial state.
+        /// </summary>
+        [Benchmark]
+        public void Tick_Transient()
+        {
+            Workload.Kernel.Tick();
+        }
     }
 
     /// <summary>
@@ -52,6 +70,24 @@ public static class SolverBenchmarks
         {
             Workload.Steps[0].Solver(Workload.Context);
             Workload.Steps[1].Solver(Workload.Context);
+        }
+
+        /// <summary>
+        ///     Restores the initial gradients before transient advection.
+        /// </summary>
+        [IterationSetup(Target = nameof(Advection_Transient))]
+        public void ResetTransient()
+        {
+            Workload.Reset();
+        }
+
+        /// <summary>
+        ///     Measures advection from fixed initial gradients.
+        /// </summary>
+        [Benchmark]
+        public void Advection_Transient()
+        {
+            Workload.Steps[0].Solver(Workload.Context);
         }
     }
 
@@ -82,6 +118,24 @@ public static class SolverBenchmarks
             Workload.Steps[2].Solver(Workload.Context);
             Workload.Steps[3].Solver(Workload.Context);
         }
+
+        /// <summary>
+        ///     Restores initial temperature and saturation gradients before thermodynamics.
+        /// </summary>
+        [IterationSetup(Target = nameof(Thermodynamics_Transient))]
+        public void ResetTransient()
+        {
+            Workload.Reset();
+        }
+
+        /// <summary>
+        ///     Measures thermodynamics from a fixed initial state.
+        /// </summary>
+        [Benchmark]
+        public void Thermodynamics_Transient()
+        {
+            Workload.Steps[2].Solver(Workload.Context);
+        }
     }
 
     /// <summary>
@@ -95,6 +149,24 @@ public static class SolverBenchmarks
         /// </summary>
         [Benchmark]
         public void Reactions()
+        {
+            Workload.Steps[4].Solver(Workload.Context);
+        }
+
+        /// <summary>
+        ///     Restores reactants before a transient reaction solve.
+        /// </summary>
+        [IterationSetup(Target = nameof(Reactions_Transient))]
+        public void ResetTransient()
+        {
+            Workload.Reset();
+        }
+
+        /// <summary>
+        ///     Measures reactions from a fixed initial mixture.
+        /// </summary>
+        [Benchmark]
+        public void Reactions_Transient()
         {
             Workload.Steps[4].Solver(Workload.Context);
         }

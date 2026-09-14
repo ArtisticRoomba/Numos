@@ -66,7 +66,6 @@ internal sealed partial class AtmosKernel
             return new AtmosSimulationCheckpoint(
                 _dimensions,
                 TimelinePosition,
-                _accumulator,
                 _config,
                 _solverPipeline.GetSteps().Select(static step =>
                     new AtmosSolverCheckpoint(step.Name, step.Kind == SolverStepKind.Custom, step.Enabled)).ToArray(),
@@ -130,7 +129,7 @@ internal sealed partial class AtmosKernel
     private void ValidateCheckpoint(AtmosSimulationCheckpoint checkpoint)
     {
         ArgumentNullException.ThrowIfNull(checkpoint);
-        if (checkpoint.FormatVersion is < 1 or > AtmosSimulationCheckpoint.CurrentFormatVersion ||
+        if (checkpoint.FormatVersion != AtmosSimulationCheckpoint.CurrentFormatVersion ||
             checkpoint.CompatibilityVersion != AtmosSimulationCheckpoint.CurrentCompatibilityVersion ||
             checkpoint.Dimensions != _dimensions ||
             checkpoint.Position.Tick > int.MaxValue)
@@ -185,7 +184,7 @@ internal sealed partial class AtmosKernel
         _solverData.Clear();
         TickCount = checked((int)checkpoint.Position.Tick);
         _lastOperationSequence = checkpoint.Position.OperationSequence;
-        _accumulator = checkpoint.ElapsedAccumulator;
+        _accumulator = 0f;
         foreach (var step in checkpoint.Solvers)
             _solverPipeline.SetEnabled(step.Name, step.Enabled);
 
@@ -308,7 +307,7 @@ internal sealed partial class AtmosKernel
                     SetAtmosConfig(op.Config);
                     break;
                 case CreateChunkOperation op:
-                    CreateAndRegisterChunk(op.Position, _dimensions.X, _dimensions.Y, _dimensions.Z, op.MaxActiveRooms);
+                    CreateAndRegisterChunk(op.Position, _dimensions.X, _dimensions.Y, _dimensions.Z);
                     break;
                 case RemoveChunkOperation op:
                     UnregisterChunk(op.Position);
@@ -328,8 +327,8 @@ internal sealed partial class AtmosKernel
                 case AddGasToVoxelOperation op:
                     AddGasToVoxel(op.Position, op.LocalVoxelIndex, op.GasId, op.Moles, op.Temperature);
                     break;
-                case WakeRoomOperation op:
-                    WakeRoom(op.Position, op.RoomId);
+                case WakeChunkOperation op:
+                    WakeChunk(op.Position);
                     break;
                 case SleepChunkOperation op:
                     SleepChunk(op.Position);
@@ -342,17 +341,15 @@ internal sealed partial class AtmosKernel
                 case SetVoxelMixtureOperation op:
                     var chunk = GetChunk(op.Position);
                     ValidateVoxelIndex(chunk, op.LocalVoxelIndex);
-                    chunk.WakeRoom(GetGasRoomId(chunk, op.LocalVoxelIndex));
+                    chunk.Wake();
                     foreach (var gas in op.Gases)
                         chunk.ActiveGases[chunk.GetOrCreateGasChannel(gas.GasId)].Moles[op.LocalVoxelIndex] = gas.Moles;
 
                     chunk.Temperature[op.LocalVoxelIndex] = op.Temperature;
                     chunk.TotalPressure[op.LocalVoxelIndex] = op.Pressure;
                     chunk.TotalHeatCapacity[op.LocalVoxelIndex] = op.HeatCapacity;
+                    chunk.IsVacuum[op.LocalVoxelIndex] = op.Pressure <= 0f;
                     chunk.MarkChanged();
-                    break;
-                case SetElapsedAccumulatorOperation op:
-                    _accumulator = op.Seconds;
                     break;
                 default: throw new ArgumentException($"Unsupported replay operation code {operation.Code}.", nameof(operation));
             }

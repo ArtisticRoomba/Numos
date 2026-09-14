@@ -164,14 +164,14 @@ public sealed class SimulationFrameBuilderTests
     }
 
     [Test]
-    public void ActiveOnly_AtOrBelowVacuumThreshold_FiltersCellsInsteadOfDarkeningThem()
+    public void ActiveOnly_IncludesPositivePressureBelowConfiguredVacuumThreshold()
     {
         var config = new AtmosConfig { VacuumThreshold = 1f };
         var builder = new SimulationFrameBuilder(config);
         var snapshot = CreateSnapshot(
             new Int3(0, 0, 0),
             new Int3(3, 1, 1),
-            [0.5f, 1f, 1.01f]);
+            [0f, 0.5f, 1f]);
 
         var chunk = builder.BuildSimulation(
             [snapshot],
@@ -181,9 +181,9 @@ public sealed class SimulationFrameBuilderTests
         Assert.Multiple(() =>
         {
             Assert.That(chunk.GetCell(0).IsVisible, Is.False);
-            Assert.That(chunk.GetCell(1).IsVisible, Is.False);
+            Assert.That(chunk.GetCell(1).IsVisible, Is.True);
             Assert.That(chunk.GetCell(2).IsVisible, Is.True);
-            Assert.That(chunk.VisibleCellCount, Is.EqualTo(1));
+            Assert.That(chunk.VisibleCellCount, Is.EqualTo(2));
         });
     }
 
@@ -460,7 +460,7 @@ public sealed class SimulationFrameBuilderTests
     }
 
     [Test]
-    public void BuildSimulation_VisualizationSettingRevision_InvalidatesReusedChunk()
+    public void BuildSimulation_VacuumThresholdChange_DoesNotInvalidateActiveOnlyChunk()
     {
         var config = new AtmosConfig { VacuumThreshold = 1f };
         var builder = new SimulationFrameBuilder(config);
@@ -484,9 +484,9 @@ public sealed class SimulationFrameBuilderTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(second.Chunks[snapshot.GridPosition], Is.Not.SameAs(first.Chunks[snapshot.GridPosition]));
+            Assert.That(second.Chunks[snapshot.GridPosition], Is.SameAs(first.Chunks[snapshot.GridPosition]));
             Assert.That(first.Chunks[snapshot.GridPosition].GetCell(0).IsVisible, Is.True);
-            Assert.That(second.Chunks[snapshot.GridPosition].GetCell(0).IsVisible, Is.False);
+            Assert.That(second.Chunks[snapshot.GridPosition].GetCell(0).IsVisible, Is.True);
         });
     }
 

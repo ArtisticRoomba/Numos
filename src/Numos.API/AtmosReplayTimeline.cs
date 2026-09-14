@@ -4,95 +4,188 @@ using Numos.CoreSim.Replay;
 namespace Numos.API;
 
 /// <summary>
-///     Retains in-memory checkpoints and history for inspection and optional branching of one existing simulation.
+/// Retains runtime checkpoints and semantic operation history for inspection and branching.
 /// </summary>
-/// <remarks>
-///     The owning host serializes calls to this controller with its simulation loop and disables mutation while
-///     inspecting. History is retained for this controller's lifetime; branching discards the future after the selected
-///     position and continues recording from that state.
-/// </remarks>
 public sealed class AtmosReplayTimeline
 {
     private readonly ReadOnlyCollection<AtmosReplayVerificationPoint> _checkpointView;
     private readonly List<AtmosReplayVerificationPoint> _checkpoints = [];
     private readonly AtmosSimulation _simulation;
+    private AtmosRecordedOperation[] _committedPrefix = [];
     private AtmosSimulationCheckpoint? _headCheckpoint;
     private AtmosRecording? _history;
+    private bool _isImportedReadOnly;
 
     /// <summary>
-    ///     Starts inspection history at the supplied simulation’s current state.
+    /// Starts inspection history at the supplied simulation's current state.
     /// </summary>
-    /// <remarks>
-    ///     Starts recording if needed, or adopts the existing recording. Call outside solver callbacks.
-    ///     The caller must keep the simulation definition compatible throughout this controller’s lifetime.
-    /// </remarks>
     /// <param name="simulation">The existing simulation to observe; its lifetime remains owned by the caller.</param>
-    /// <param name="checkpointInterval">Minimum completed ticks between samples; must be positive.</param>
-    /// <exception cref="ArgumentNullException">The simulation is null.</exception>
-    /// <exception cref="ArgumentOutOfRangeException">The checkpoint interval is zero.</exception>
-    /// <exception cref="InvalidOperationException">Called during a simulation tick.</exception>
-    /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
+    /// <param name="checkpointInterval">Minimum completed ticks between runtime checkpoint samples.</param>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="checkpointInterval" /> is zero.</exception>
     public AtmosReplayTimeline(AtmosSimulation simulation, ulong checkpointInterval = 50)
+        : this(simulation, checkpointInterval, true)
+    {
+    }
+
+    private AtmosReplayTimeline(AtmosSimulation simulation, ulong checkpointInterval, bool initializeLive)
     {
         ArgumentNullException.ThrowIfNull(simulation);
         ArgumentOutOfRangeException.ThrowIfZero(checkpointInterval);
         _simulation = simulation;
         CheckpointInterval = checkpointInterval;
         _checkpointView = _checkpoints.AsReadOnly();
-        if (!simulation.IsRecording) simulation.StartRecording();
+        if (!initializeLive)
+            return;
+
+        if (!simulation.IsRecording)
+            simulation.StartRecording();
+
         AddCheckpoint();
     }
 
     /// <summary>
-    ///     Gets the minimum completed-tick interval between automatic checkpoint samples.
+    /// Gets the minimum completed-tick interval between automatic checkpoint samples.
     /// </summary>
     public ulong CheckpointInterval { get; }
 
     /// <summary>
-    ///     Gets the first inspectable position, including operations already applied when this controller was created.
+    /// Gets the first inspectable position.
     /// </summary>
     public AtmosTimelinePosition Start => _checkpoints[0].Checkpoint.Position;
 
     /// <summary>
-    ///     Gets the newest recorded position, which remains fixed while inspecting older history.
+    /// Gets the newest recorded position.
     /// </summary>
     public AtmosTimelinePosition Head => IsInspecting ? _history!.Head : _simulation.TimelinePosition;
 
     /// <summary>
-    ///     Gets the current inspection cursor or, while live, the simulation’s current position.
+    /// Gets the current inspection cursor or live simulation position.
     /// </summary>
     public AtmosTimelinePosition Position => _simulation.TimelinePosition;
 
     /// <summary>
-    ///     Gets whether recording is stopped for inspection. The host must disable external simulation mutations in this mode.
+    /// Gets whether the timeline is inspecting retained history.
     /// </summary>
     public bool IsInspecting { get; private set; }
 
     /// <summary>
-    ///     Gets diagnostics from the last successful seek, or null before the first seek.
+    /// Gets whether the current inspection session came directly from a replay archive.
+    /// </summary>
+    public bool IsImported => _isImportedReadOnly;
+
+    /// <summary>
+    /// Gets diagnostics from the last successful seek.
     /// </summary>
     public AtmosReplayResult? LastReplay { get; private set; }
 
     /// <summary>
-    ///     Gets the last seek’s hash comparison: true for a match, false for divergence, or null without a reference hash.
+    /// Gets the last seek's hash comparison, or null when no reference exists.
     /// </summary>
     public bool? IsVerified { get; private set; }
 
     /// <summary>
-    ///     Gets a read-only view of retained checkpoints and reference hashes in timeline order.
+    /// Gets retained runtime verification checkpoints.
     /// </summary>
     public IReadOnlyList<AtmosReplayVerificationPoint> Checkpoints => _checkpointView;
 
     /// <summary>
-    ///     Gets ordered immutable operation envelopes; during live recording this property allocates a detached batch.
+    /// Gets the complete ordered operation history, including an imported or retained prefix.
     /// </summary>
-    public IReadOnlyList<AtmosRecordedOperation> Operations =>
-        IsInspecting ? _history!.Operations : _simulation.CaptureRecording().Operations;
+    public IReadOnlyList<AtmosRecordedOperation> Operations => IsInspecting
+        ? _history!.Operations
+        : CombineOperations(_committedPrefix, _simulation.CaptureRecording().Operations);
 
     /// <summary>
-    ///     Samples a checkpoint after a live frame when the configured tick interval has elapsed.
+    ///     Restores, verifies and indexes a portable archive in a compatible simulation.
     /// </summary>
-    /// <remarks>Call after live advancement on the host loop thread. This does nothing during inspection.</remarks>
+    /// <param name="simulation">A stopped simulation with matching dimensions and built-in solver definitions.</param>
+    /// <param name="archive">The portable archive to import.</param>
+    /// <param name="checkpointInterval">Number of completed ticks between runtime scrub checkpoints.</param>
+    /// <param name="progress">Optional progress receiver called after indexing advances.</param>
+    /// <param name="cancellationToken">Cancellation observed between reconstruction intervals.</param>
+    /// <returns>A read-only imported timeline positioned at its initial state.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="checkpointInterval" /> is zero.</exception>
+    /// <exception cref="InvalidOperationException"><paramref name="simulation" /> is recording.</exception>
+    /// <exception cref="InvalidDataException">A reference hash does not match the reconstructed state.</exception>
+    /// <exception cref="NotSupportedException"><paramref name="archive" /> contains host-defined solver state.</exception>
+    public static AtmosReplayTimeline Import(
+        AtmosSimulation simulation,
+        AtmosReplayArchive archive,
+        ulong checkpointInterval = 50,
+        IProgress<AtmosReplayIndexProgress>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(simulation);
+        ArgumentNullException.ThrowIfNull(archive);
+        archive.EnsurePortable();
+        if (simulation.IsRecording)
+            throw new InvalidOperationException("Stop recording before importing a replay archive.");
+
+        var timeline = new AtmosReplayTimeline(simulation, checkpointInterval, false);
+        var initial = archive.InitialCheckpoint;
+        if (initial.ComputeStateHash() != archive.InitialStateHash)
+            throw new InvalidDataException("The replay's initial checkpoint does not match its reference hash.");
+
+        simulation.RestoreCheckpoint(initial);
+        timeline._checkpoints.Add(new AtmosReplayVerificationPoint(initial, archive.InitialStateHash));
+
+        ulong totalTicks = archive.Recording.Head.Tick - archive.Recording.Start.Tick;
+        var source = initial;
+        for (ulong tick = checked(initial.Position.Tick + checkpointInterval);
+             tick < archive.Recording.Head.Tick;
+             tick = checked(tick + checkpointInterval))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var target = PositionBeforeOperationsAtTick(initial.Position, archive.Recording.Operations, tick);
+            simulation.ReplayTo(source, archive.Recording.Operations, target);
+            source = simulation.CaptureCheckpoint();
+            timeline._checkpoints.Add(new AtmosReplayVerificationPoint(source, source.ComputeStateHash()));
+            progress?.Report(new AtmosReplayIndexProgress(tick - initial.Position.Tick, totalTicks));
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        var finalReplay = simulation.ReplayTo(source, archive.Recording.Operations, archive.Recording.Head);
+        var finalHash = simulation.ComputeStateHash();
+        if (finalHash != archive.HeadStateHash)
+            throw new InvalidDataException("The replay diverged from its final reference hash.");
+
+        timeline._headCheckpoint = simulation.CaptureCheckpoint();
+        if (timeline._checkpoints[^1].Checkpoint.Position != timeline._headCheckpoint.Position)
+            timeline._checkpoints.Add(new AtmosReplayVerificationPoint(timeline._headCheckpoint, finalHash));
+
+        simulation.RestoreCheckpoint(initial);
+        timeline._history = archive.Recording;
+        timeline._committedPrefix = archive.Recording.Operations.ToArray();
+        timeline._isImportedReadOnly = true;
+        timeline.IsInspecting = true;
+        timeline.IsVerified = true;
+        timeline.LastReplay = finalReplay;
+        progress?.Report(new AtmosReplayIndexProgress(totalTicks, totalTicks));
+        return timeline;
+    }
+
+    /// <summary>
+    /// Captures the complete retained timeline through its live or preserved head.
+    /// </summary>
+    /// <returns>A detached archive containing one initial checkpoint and the complete retained operation history.</returns>
+    public AtmosReplayArchive CaptureReplay()
+    {
+        var head = IsInspecting ? _headCheckpoint! : _simulation.CaptureCheckpoint();
+        return CreateArchive(head);
+    }
+
+    /// <summary>
+    /// Captures retained history through the current inspection position.
+    /// </summary>
+    /// <returns>A detached archive whose head is the current simulation position.</returns>
+    public AtmosReplayArchive CaptureReplayThroughCurrentPosition()
+    {
+        return CreateArchive(_simulation.CaptureCheckpoint());
+    }
+
+    /// <summary>
+    ///     Samples a runtime checkpoint after live advancement when the interval has elapsed.
+    /// </summary>
     public void ObserveLiveState()
     {
         if (!IsInspecting && Position.Tick - _checkpoints[^1].Checkpoint.Position.Tick >= CheckpointInterval)
@@ -100,37 +193,26 @@ public sealed class AtmosReplayTimeline
     }
 
     /// <summary>
-    ///     Selects the completed-tick boundary, before external operations stamped after that tick.
+    /// Selects a completed-tick boundary before operations stamped after that tick.
     /// </summary>
-    /// <param name="tick">Completed Numos tick within the retained start/head interval.</param>
-    /// <returns>The checkpoint used, simulated tick count, target and elapsed reconstruction time.</returns>
-    /// <remarks>The start tick retains operations already incorporated into the initial checkpoint.</remarks>
-    /// <exception cref="ArgumentOutOfRangeException">The tick is outside retained history.</exception>
-    /// <exception cref="InvalidOperationException">The host changed recording ownership or called during a solver tick.</exception>
+    /// <param name="tick">Completed tick to reconstruct.</param>
+    /// <returns>Diagnostics for the reconstruction work.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="tick" /> lies outside the retained interval.</exception>
     public AtmosReplayResult SeekTick(ulong tick)
     {
-        if (tick < Start.Tick || tick > Head.Tick) throw new ArgumentOutOfRangeException(nameof(tick));
+        if (tick < Start.Tick || tick > Head.Tick)
+            throw new ArgumentOutOfRangeException(nameof(tick));
 
         BeginInspection();
-        ulong sequence = Start.OperationSequence;
-        foreach (var operation in _history!.Operations)
-        {
-            if (operation.AfterTick >= tick) break;
-
-            sequence = Math.Max(sequence, operation.Sequence);
-        }
-
-        return SeekPosition(new AtmosTimelinePosition(tick, sequence));
+        return SeekPosition(PositionBeforeOperationsAtTick(Start, _history!.Operations, tick));
     }
 
     /// <summary>
-    ///     Selects an exact operation or verification point while retaining the recorded future.
+    /// Selects an exact operation or verification point while retaining the recorded future.
     /// </summary>
-    /// <param name="target">Exact completed tick and highest operation sequence to incorporate.</param>
-    /// <returns>Diagnostics for the successful reconstruction.</returns>
-    /// <exception cref="ArgumentOutOfRangeException">The target is outside retained history.</exception>
-    /// <exception cref="ArgumentException">The target omits an operation preceding its tick, or the solver definition changed.</exception>
-    /// <remarks>Solver failures propagate after grid state is restored to its pre-seek state. Inspection remains active.</remarks>
+    /// <param name="target">Exact tick and operation sequence to reconstruct.</param>
+    /// <returns>Diagnostics for the reconstruction work.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="target" /> lies outside the retained interval.</exception>
     public AtmosReplayResult SeekPosition(AtmosTimelinePosition target)
     {
         if (target.Tick < Start.Tick ||
@@ -140,7 +222,7 @@ public sealed class AtmosReplayTimeline
             throw new ArgumentOutOfRangeException(nameof(target));
 
         BeginInspection();
-        var checkpoint = _checkpoints.Last(point =>
+        AtmosSimulationCheckpoint checkpoint = _checkpoints.Last(point =>
             point.Checkpoint.Position.Tick <= target.Tick &&
             point.Checkpoint.Position.OperationSequence <= target.OperationSequence).Checkpoint;
 
@@ -151,54 +233,70 @@ public sealed class AtmosReplayTimeline
     }
 
     /// <summary>
-    ///     Restores the preserved latest state and resumes appending to the same recording.
+    /// Returns to the preserved head. Imported archives remain read-only until explicitly branched.
     /// </summary>
-    /// <remarks>Does nothing while already live. Restores the saved elapsed-time accumulator as well as grid state.</remarks>
-    /// <exception cref="ArgumentException">The host changed the solver definition during inspection.</exception>
-    /// <exception cref="InvalidOperationException">The stopped recording head cannot be resumed.</exception>
     public void ReturnToHead()
     {
-        if (!IsInspecting) return;
+        if (!IsInspecting)
+            return;
 
         _simulation.RestoreCheckpoint(_headCheckpoint!);
+        if (_isImportedReadOnly)
+        {
+            IsVerified = true;
+            return;
+        }
+
         _simulation.ResumeRecording();
         IsInspecting = false;
         IsVerified = true;
     }
 
     /// <summary>
-    ///     Discards history after the selected position and resumes live recording from that reconstructed state.
+    /// Discards history after the selected position and resumes live recording from that state.
     /// </summary>
-    /// <remarks>
-    ///     Does nothing while already live. The current selection becomes the new recording head, so future ticks and
-    ///     external operations cannot be returned to. Hosts may re-enable simulation mutation after this call.
-    /// </remarks>
-    /// <exception cref="InvalidOperationException">The stopped recording cannot be branched from the selected state.</exception>
     public void SimulateFromHere()
     {
-        if (!IsInspecting) return;
+        if (!IsInspecting)
+            return;
 
         var position = Position;
-        _simulation.ResumeRecordingFromCurrentPosition();
-        _checkpoints.RemoveAll(point => point.Checkpoint.Position.Tick > position.Tick ||
-                                        point.Checkpoint.Position.Tick == position.Tick &&
-                                        point.Checkpoint.Position.OperationSequence > position.OperationSequence);
+        _committedPrefix = _history!.Operations
+            .Where(operation => operation.Sequence <= position.OperationSequence)
+            .ToArray();
 
+        _simulation.StartRecording();
+        _checkpoints.RemoveAll(point => IsAfter(point.Checkpoint.Position, position));
         if (_checkpoints[^1].Checkpoint.Position != position)
             AddCheckpoint();
 
         _history = null;
         _headCheckpoint = null;
+        _isImportedReadOnly = false;
         LastReplay = null;
         IsInspecting = false;
         IsVerified = true;
     }
 
+    private AtmosReplayArchive CreateArchive(AtmosSimulationCheckpoint head)
+    {
+        var initial = _checkpoints[0].Checkpoint;
+        AtmosRecordedOperation[] operations = Operations
+            .Where(operation => operation.Sequence > initial.Position.OperationSequence &&
+                                operation.Sequence <= head.Position.OperationSequence)
+            .ToArray();
+
+        var recording = new AtmosRecording(initial.Position, head.Position, operations);
+        return new AtmosReplayArchive(initial, recording, initial.ComputeStateHash(), head.ComputeStateHash());
+    }
+
     private void BeginInspection()
     {
-        if (IsInspecting) return;
+        if (IsInspecting)
+            return;
 
-        _history = _simulation.StopRecording();
+        var tail = _simulation.StopRecording();
+        _history = new AtmosRecording(Start, tail.Head, CombineOperations(_committedPrefix, tail.Operations));
         _headCheckpoint = _simulation.CaptureCheckpoint();
         if (_checkpoints[^1].Checkpoint.Position != _headCheckpoint.Position)
             _checkpoints.Add(new AtmosReplayVerificationPoint(_headCheckpoint, _headCheckpoint.ComputeStateHash()));
@@ -211,11 +309,48 @@ public sealed class AtmosReplayTimeline
         var checkpoint = _simulation.CaptureCheckpoint();
         _checkpoints.Add(new AtmosReplayVerificationPoint(checkpoint, checkpoint.ComputeStateHash()));
     }
+
+    private static AtmosTimelinePosition PositionBeforeOperationsAtTick(
+        AtmosTimelinePosition start,
+        IReadOnlyList<AtmosRecordedOperation> operations,
+        ulong tick)
+    {
+        ulong sequence = start.OperationSequence;
+        foreach (var operation in operations)
+        {
+            if (operation.AfterTick >= tick)
+                break;
+
+            sequence = operation.Sequence;
+        }
+
+        return new AtmosTimelinePosition(tick, sequence);
+    }
+
+    private static AtmosRecordedOperation[] CombineOperations(
+        IReadOnlyList<AtmosRecordedOperation> prefix,
+        IReadOnlyList<AtmosRecordedOperation> tail)
+    {
+        var combined = new AtmosRecordedOperation[prefix.Count + tail.Count];
+        for (int index = 0; index < prefix.Count; index++)
+            combined[index] = prefix[index];
+
+        for (int index = 0; index < tail.Count; index++)
+            combined[prefix.Count + index] = tail[index];
+
+        return combined;
+    }
+
+    private static bool IsAfter(AtmosTimelinePosition candidate, AtmosTimelinePosition position)
+    {
+        return candidate.Tick > position.Tick ||
+               candidate.Tick == position.Tick && candidate.OperationSequence > position.OperationSequence;
+    }
 }
 
 /// <summary>
-///     A retained checkpoint and reference digest captured from the same continuation state.
+/// A retained checkpoint and reference digest captured from the same continuation state.
 /// </summary>
 /// <param name="Checkpoint">Immutable grid continuation state.</param>
-/// <param name="Hash">Digest and timeline position used to verify a reconstruction.</param>
+/// <param name="Hash">Digest and timeline position used to verify reconstruction.</param>
 public sealed record AtmosReplayVerificationPoint(AtmosSimulationCheckpoint Checkpoint, AtmosStateHash Hash);
