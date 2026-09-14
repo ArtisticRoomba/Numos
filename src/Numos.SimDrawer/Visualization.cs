@@ -381,7 +381,7 @@ public sealed class VisualizationRegistry
         registry.Register(new TemperatureVisualization());
         registry.Register(new PressureVisualization());
         registry.Register(new GasCompositionVisualization(config));
-        registry.Register(new ActiveOnlyVisualization(config));
+        registry.Register(new ActiveOnlyVisualization());
         registry.Register(new VoxelClassificationVisualization());
         return registry;
     }
@@ -648,7 +648,7 @@ public sealed class VisualizationRegistry
         }
     }
 
-    private sealed class ActiveOnlyVisualization(AtmosConfig config) : IVisualizationMethod
+    private sealed class ActiveOnlyVisualization : IVisualizationMethod
     {
         private readonly static ColorRgba ActiveColor = new(0.3f, 0.7f, 1f);
 
@@ -656,21 +656,21 @@ public sealed class VisualizationRegistry
 
         public string DisplayName => "Active Air";
 
-        public ulong MappingRevision => BitConverter.SingleToUInt32Bits(config.VacuumThreshold);
+        public ulong MappingRevision => 0;
 
         public VisualizationDataRequirements RequiredData => VisualizationDataRequirements.Pressure;
 
         public bool TryGetColor(in VoxelSample sample, out ColorRgba color)
         {
             color = ActiveColor;
-            return float.IsFinite(sample.Pressure) && sample.Pressure > config.VacuumThreshold;
+            return float.IsFinite(sample.Pressure) && sample.Pressure > 0f;
         }
 
         public VisualizationLegend CreateLegend(IReadOnlyCollection<int> activeGasIds)
         {
             return new VisualizationLegend(
                 "Active air",
-                $"> {config.VacuumThreshold:G} pressure",
+                "> 0 pressure",
                 VisualizationLegendKind.Categories,
                 [new VisualizationLegendEntry("Visible", ActiveColor)]);
         }

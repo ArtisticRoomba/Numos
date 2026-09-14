@@ -74,6 +74,15 @@ internal class AtmosChunk
     public bool IsAwake;
 
     /// <summary>
+    ///     Whether each voxel currently represents vacuum.
+    /// </summary>
+    /// <remarks>
+    ///     The advection stage derives this state from the complete pressure field before vacuum cleanup.
+    ///     Consumers should use it instead of interpreting a vacuum voxel's temperature.
+    /// </remarks>
+    public FlatArray<bool> IsVacuum;
+
+    /// <summary>
     ///     Number of consecutive simulation ticks for which this chunk has remained below the sleep threshold.
     /// </summary>
     /// <seealso cref="AtmosConfig.SleepThreshold" />
@@ -153,6 +162,7 @@ internal class AtmosChunk
         Depth = depth;
         VoxelCount = voxelCount;
         EnsureInitialized();
+        IsVacuum.Fill(true);
     }
 
     internal bool HasCapturedSolverArrays => _solverArrays?.Values.Any(static array => array.CaptureForRollback) == true;
@@ -186,6 +196,7 @@ internal class AtmosChunk
         EnsureInitialized(ref TotalPressure, dimensions);
         EnsureInitialized(ref TotalHeatCapacity, dimensions);
         EnsureInitialized(ref Temperature, dimensions);
+        EnsureInitialized(ref IsVacuum, dimensions);
         if (ActiveGases == null)
             ActiveGases = new GasChannel[AtmosChunkConstants.InitialGasChannelCapacity];
     }
@@ -232,6 +243,7 @@ internal class AtmosChunk
         TotalPressure.Clear();
         TotalHeatCapacity.Clear();
         Temperature.Clear();
+        IsVacuum.Fill(true);
         Array.Clear(ActiveGases, 0, ActiveGases.Length);
 
         _generation = Interlocked.Increment(ref _nextGeneration);
@@ -458,6 +470,7 @@ internal class AtmosChunk
         Temperature[localVoxelIndex] = newTemp;
 
         TotalPressure[localVoxelIndex] = currentTotalMoles * newTemp * pressurePerMoleKelvin;
+        IsVacuum[localVoxelIndex] = TotalPressure[localVoxelIndex] <= 0f;
         MarkChanged();
     }
 
@@ -471,7 +484,7 @@ internal class AtmosChunk
         ushort voxelIndex, out Kelvin temperature, out JoulePerKelvin heatCapacity)
     {
         heatCapacity = TotalHeatCapacity[voxelIndex];
-        if (!float.IsFinite(heatCapacity) || heatCapacity <= 0f || TotalPressure[voxelIndex] == 0f)
+        if (!float.IsFinite(heatCapacity) || heatCapacity <= 0f || IsVacuum[voxelIndex])
         {
             temperature = 0f;
             heatCapacity = 0f;
@@ -498,6 +511,7 @@ internal class AtmosChunk
         }
 
         TotalHeatCapacity[idx] = 0f;
+        IsVacuum[idx] = true;
     }
 
     /// <summary>
@@ -514,6 +528,7 @@ internal class AtmosChunk
         }
 
         TotalHeatCapacity.Fill(0f);
+        IsVacuum.Fill(true);
     }
 
 

@@ -562,4 +562,33 @@ public sealed class IntraChunkFlowTests
             SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 0),
             Is.EqualTo(expectedMoles).Within(SimTestHelpers.Tolerance));
     }
+
+    [Test]
+    public void VacuumCleanup_PreservesSubThresholdExpansionFrontNextToPressurizedVoxel()
+    {
+        var config = SimTestHelpers.CreateDeterministicConfig();
+        config.VacuumThreshold = 100f;
+        using var simulation = new AtmosSimulation(config, 2, 1, 1);
+        var chunk = SimTestHelpers.CreateOpenChunk(simulation, default);
+        SimTestHelpers.SetAllTemperatures(simulation, chunk, 2, 1, 1);
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasName, 0.5f, 300f);
+
+        simulation.Tick();
+
+        var snapshot = simulation.GetChunkSnapshot(chunk);
+        Assert.Multiple(() =>
+        {
+            Assert.That(
+                SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 0),
+                Is.EqualTo(0.375f).Within(SimTestHelpers.Tolerance));
+
+            Assert.That(
+                SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 1),
+                Is.EqualTo(0.125f).Within(SimTestHelpers.Tolerance));
+
+            Assert.That(
+                SimTestHelpers.TotalMoles(snapshot),
+                Is.EqualTo(0.5f).Within(SimTestHelpers.Tolerance));
+        });
+    }
 }

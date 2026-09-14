@@ -128,9 +128,12 @@ public class AtmosConfig : IAtmosConfig
     public Scalar BulkFlowCoefficient { get; set; } = AtmosConfigDefaults.BulkFlowCoefficient;
 
     /// <summary>
-    ///     Below this pressure, in pascals (Pa), voxel contents are zeroed out.
+    ///     Pressure below which a voxel is eligible for vacuum cleanup, in pascals (Pa).
     /// </summary>
-    /// <remarks>Non-finite and negative values are normalized to zero.</remarks>
+    /// <remarks>
+    ///     Cleanup removes the voxel's gas only when every orthogonally adjacent air voxel is also below this
+    ///     threshold. Non-finite and negative values are normalized to zero.
+    /// </remarks>
     [Quantity("pressure")]
     public Pascal VacuumThreshold { get; set; } = AtmosConfigDefaults.VacuumThreshold;
 

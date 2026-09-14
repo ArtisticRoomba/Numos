@@ -42,7 +42,10 @@ public static class AtmosConfigDefaults
     /// <summary>Default fraction of a pressure delta requested as bulk flow per tick.</summary>
     public const Scalar BulkFlowCoefficient = 0.125f;
 
-    /// <summary>Default pressure below which a voxel is treated as vacuum, in pascals (Pa).</summary>
+    /// <summary>
+    ///     Default pressure below which a voxel surrounded by low-pressure neighbors is treated as vacuum, in pascals
+    ///     (Pa).
+    /// </summary>
     [Quantity("pressure")]
     public const Pascal VacuumThreshold = 1f;
 

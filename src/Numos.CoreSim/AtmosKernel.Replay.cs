@@ -349,6 +349,7 @@ internal sealed partial class AtmosKernel
                     chunk.Temperature[op.LocalVoxelIndex] = op.Temperature;
                     chunk.TotalPressure[op.LocalVoxelIndex] = op.Pressure;
                     chunk.TotalHeatCapacity[op.LocalVoxelIndex] = op.HeatCapacity;
+                    chunk.IsVacuum[op.LocalVoxelIndex] = op.Pressure <= 0f;
                     chunk.MarkChanged();
                     break;
                 case SetElapsedAccumulatorOperation op:

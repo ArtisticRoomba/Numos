@@ -637,6 +637,31 @@ public sealed class CrossChunkFlowTests
             Is.EqualTo(0.5f).Within(SimTestHelpers.Tolerance));
     }
 
+    [Test]
+    public void VacuumCleanup_UsesPressurizedNeighborAcrossChunkBoundary()
+    {
+        var config = SimTestHelpers.CreateDeterministicConfig();
+        config.BulkFlowCoefficient = 0f;
+        config.MaxPressureTransferFractionPerNeighbor = 0f;
+        config.VacuumThreshold = 100f;
+        using var simulation = new AtmosSimulation(config, 1, 1, 1);
+        var pressurized = SimTestHelpers.CreateOpenChunk(simulation, default);
+        var lowPressure = SimTestHelpers.CreateOpenChunk(simulation, Int3.PosX);
+        simulation.SetVoxelTemperature(pressurized, 0, 0, 0, 300f);
+        simulation.SetVoxelTemperature(lowPressure, 0, 0, 0, 300f);
+        simulation.AddGasToVoxel(pressurized, 0, 0, 0, SimTestHelpers.FirstGasName, 0.5f, 300f);
+        simulation.AddGasToVoxel(lowPressure, 0, 0, 0, SimTestHelpers.FirstGasName, 0.1f, 300f);
+
+        simulation.Tick();
+
+        Assert.That(
+            SimTestHelpers.Moles(
+                simulation.GetChunkSnapshot(lowPressure),
+                SimTestHelpers.FirstGasId,
+                0),
+            Is.EqualTo(0.1f).Within(SimTestHelpers.Tolerance));
+    }
+
     private static AtmosChunkHandle CreateIsolatedVoxel(
         AtmosSimulation simulation, Int3 position,
         int x, int y, int z, VoxelClassification classification)

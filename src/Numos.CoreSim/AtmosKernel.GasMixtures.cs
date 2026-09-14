@@ -441,6 +441,8 @@ internal sealed partial class AtmosKernel
             chunk.TotalPressure[localVoxelIndex] =
                 AtmosSolverMath.CalculatePressure(_config, totalMoles, temperature);
 
+            chunk.IsVacuum[localVoxelIndex] = chunk.TotalPressure[localVoxelIndex] <= 0f;
+
             chunk.MarkChanged();
             RecordVoxelMixture(chunk, localVoxelIndex);
         }
@@ -562,6 +564,7 @@ internal sealed partial class AtmosKernel
     {
         chunk.TotalHeatCapacity[localVoxelIndex] = totals.HeatCapacity;
         chunk.TotalPressure[localVoxelIndex] = totals.Pressure;
+        chunk.IsVacuum[localVoxelIndex] = totals.Pressure <= 0f;
         chunk.MarkChanged();
     }
 

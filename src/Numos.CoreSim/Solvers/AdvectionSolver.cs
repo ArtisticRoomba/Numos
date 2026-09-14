@@ -110,6 +110,7 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
                         context.TickConfig));
 
                 workspacesReleased = true;
+                ApplyVacuumThreshold(context);
                 return;
             }
 
@@ -169,6 +170,8 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
                 0,
                 workspaceCount,
                 new PublishBoundaryEventsAction(workspaces));
+
+            ApplyVacuumThreshold(context);
         }
         finally
         {
@@ -183,6 +186,100 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
 
             ArrayPool<ChunkWorkspace>.Shared.Return(workspaces, true);
         }
+    }
+
+    /// <summary>
+    ///     Removes sub-threshold gas only when every neighboring air voxel is also below the threshold.
+    /// </summary>
+    /// <param name="context">The complete pressure field and world topology for this tick.</param>
+    /// <remarks>
+    ///     Classification and removal are separate passes. This keeps the result independent of chunk and
+    ///     voxel traversal order, because every neighbor comparison observes the same pressure field.
+    /// </remarks>
+    private static void ApplyVacuumThreshold(AtmosSolverExecutionContext context)
+    {
+        if (context.Chunks.Length == 0)
+            return;
+
+        ParallelHelper.For(0, context.Chunks.Length, new ClassifyVacuumAction(context));
+        ParallelHelper.For(0, context.Chunks.Length, new ApplyVacuumCleanupAction(context.Chunks));
+    }
+
+    private static void ClassifyVacuumChunk(AtmosSolverExecutionContext context, int chunkIndex)
+    {
+        var chunk = context.Chunks[chunkIndex];
+        if (!chunk.IsAwake)
+            return;
+
+        Pascal vacuumThreshold = context.TickConfig.VacuumThreshold;
+        for (int activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
+        {
+            ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
+            Pascal pressure = chunk.TotalPressure[voxelIndex];
+            if (pressure <= 0f)
+            {
+                chunk.IsVacuum[voxelIndex] = true;
+                continue;
+            }
+
+            var position = chunk.GetXyzInt3(voxelIndex);
+            chunk.IsVacuum[voxelIndex] = pressure < vacuumThreshold &&
+                                         !HasNeighborAtOrAboveVacuumThreshold(
+                                             context,
+                                             chunk,
+                                             position,
+                                             vacuumThreshold);
+        }
+    }
+
+    private static void ApplyVacuumCleanup(AtmosChunk chunk)
+    {
+        if (!chunk.IsAwake)
+            return;
+
+        for (int activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
+        {
+            ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
+            if (chunk.IsVacuum[voxelIndex] && chunk.TotalPressure[voxelIndex] > 0f)
+                chunk.SetVoxelToVacuum(voxelIndex);
+        }
+    }
+
+    /// <summary>
+    ///     Returns whether an orthogonally adjacent air voxel prevents vacuum cleanup.
+    /// </summary>
+    private static bool HasNeighborAtOrAboveVacuumThreshold(
+        AtmosSolverExecutionContext context,
+        AtmosChunk chunk,
+        Int3 position,
+        Pascal vacuumThreshold)
+    {
+        for (int directionIndex = 0; directionIndex < NeighborDirections.Length; directionIndex++)
+        {
+            var direction = NeighborDirections[directionIndex];
+            if (chunk.Depth == 1 && direction.Z != 0)
+                continue;
+
+            var neighborPosition = position + direction;
+            var neighborChunk = chunk;
+            if (!neighborPosition.IsWithin(default, chunk.Dimensions))
+            {
+                if (!context.World.TryGetChunk(chunk.GridPosition + direction, out neighborChunk))
+                    continue;
+
+                neighborPosition = (neighborPosition + neighborChunk.Dimensions) % neighborChunk.Dimensions;
+            }
+
+            ushort neighborIndex = neighborChunk.GetIndexUnsafe(neighborPosition);
+            int classification = neighborChunk.VoxelRoomMap[neighborIndex];
+            if (classification is VoxelClassification.RoomSolid or VoxelClassification.RoomVoid)
+                continue;
+
+            if (neighborChunk.TotalPressure[neighborIndex] >= vacuumThreshold)
+                return true;
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -1325,6 +1422,22 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
         {
             var workItem = workItems[index];
             ProcessDiffusionGas(ref workspaces[workItem.WorkspaceIndex], workItem.Gas, config);
+        }
+    }
+
+    private readonly struct ClassifyVacuumAction(AtmosSolverExecutionContext context) : IAction
+    {
+        public void Invoke(int index)
+        {
+            ClassifyVacuumChunk(context, index);
+        }
+    }
+
+    private readonly struct ApplyVacuumCleanupAction(AtmosChunk[] chunks) : IAction
+    {
+        public void Invoke(int index)
+        {
+            ApplyVacuumCleanup(chunks[index]);
         }
     }
 }

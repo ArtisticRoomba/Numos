@@ -218,6 +218,7 @@ public sealed class AtmosChunkCheckpoint
                 chunk.Temperature[index] = Temperatures[index];
                 chunk.TotalPressure[index] = Pressures[index];
                 chunk.TotalHeatCapacity[index] = HeatCapacities[index];
+                chunk.IsVacuum[index] = Pressures[index] <= 0f;
             }
 
             foreach (var gas in Gases)

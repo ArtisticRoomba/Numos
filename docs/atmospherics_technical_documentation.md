@@ -218,25 +218,25 @@ cutoffs live in `AtmosSolverConstants`; they are deliberately not presented as r
 dimensions and initial chunk capacities are exposed through `AtmosChunkConstants`, while reserved room IDs have a
 single definition in `VoxelClassification`.
 
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `GlobalTemperature` | 293.15 | Reference ambient temperature (K). Not actively used in the simulation loop. |
-| `DefaultTemperatureFallback` | 293.15 | Starting effective temperature (K) used for pressure and sensible energy when a gas-bearing voxel stores a non-finite or nonpositive temperature. Invalid values normalize to 293.15 K. |
-| `DefaultMolarHeatCapacityAtConstantVolume` | `5R/2` | Ideal-diatomic molar `C_v` in J/(mol·K), used for missing registry entries and non-finite or nonpositive gas heat capacities. A non-finite or nonpositive fallback value is normalized to the same value. |
-| `VoxelVolume` | 1 | Physical volume represented by each voxel (m³). Invalid values normalize to 1 m³. |
-| `SaturationReferencePressure` | 101325 | Pressure (Pa) at which each gas's `BoilingPoint` applies. Invalid values normalize to one standard atmosphere. |
-| `DefaultDiffusionCoefficient` | 0.02 | Dimensionless per-tick mixing fraction for unregistered gas IDs. Finite values are clamped to [0, 1]; non-finite values disable fallback diffusion. |
-| `SpaceTemperature` | 2.7 | Temperature of space (K). Not actively used in the simulation loop. |
-| `BulkFlowCoefficient` | 0.25 | Dimensionless fraction of pressure delta requested as bulk flow per tick. Finite values are clamped to [0, 1]; non-finite values disable the large-delta branch. |
-| `BulkFlowDamping` | 0.5 | Multiplier applied to `BulkFlowCoefficient` during large-delta advection to reduce oscillation. Finite values are clamped to [0, 1]; non-finite values disable the large-delta branch. |
-| `LowPressureDeltaThreshold` | 5.0 | Below this pressure delta (Pa), flow uses `MaxPressureTransferFractionPerNeighbor` directly instead of `BulkFlowCoefficient * BulkFlowDamping`. Invalid or negative values normalize to zero. |
-| `MinimumPressureTransfer` | 0.1 | Candidate pressure transfers below this magnitude (Pa/tick) are discarded ("stiction"). Invalid or negative values normalize to zero. |
-| `VacuumThreshold` | 1.0 | Below this pressure (Pa), voxel contents are zeroed out. Invalid or negative values normalize to zero. |
-| `SleepThreshold` | 100 | Consecutive ticks below `SleepEpsilon` before a chunk goes to sleep. Negative values normalize to zero. |
-| `SleepEpsilon` | 3.5 | Maximum pressure delta considered "at rest" (Pa). Invalid or negative values normalize to zero. |
-| `ThermalConductance` | 0.05 | Effective per-face conductance in J/K per thermodynamics tick. Multiplying it by a temperature difference produces a candidate energy transfer, which is bounded for explicit-solver stability. Invalid or nonpositive values disable thermal diffusion. |
-| `CondensationRateFactor` | 0.5 | Dimensionless fraction of the heat-coupled equilibrium condensation amount applied per thermodynamics tick. Finite values are clamped to [0, 1]; non-finite values disable condensation. |
-| `MaxPressureTransferFractionPerNeighbor` | 0.16 | Maximum fraction of a voxel's pressure requested as bulk flow to one neighbor per tick. Finite values are clamped to [0, 1]; non-finite values disable bulk flow. |
+| Parameter                                  | Default | Description                                                                                                                                                                                                                                              |
+|--------------------------------------------|---------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `GlobalTemperature`                        | 293.15  | Reference ambient temperature (K). Not actively used in the simulation loop.                                                                                                                                                                             |
+| `DefaultTemperatureFallback`               | 293.15  | Starting effective temperature (K) used for pressure and sensible energy when a gas-bearing voxel stores a non-finite or nonpositive temperature. Invalid values normalize to 293.15 K.                                                                  |
+| `DefaultMolarHeatCapacityAtConstantVolume` | `5R/2`  | Ideal-diatomic molar `C_v` in J/(mol·K), used for missing registry entries and non-finite or nonpositive gas heat capacities. A non-finite or nonpositive fallback value is normalized to the same value.                                                |
+| `VoxelVolume`                              | 1       | Physical volume represented by each voxel (m³). Invalid values normalize to 1 m³.                                                                                                                                                                        |
+| `SaturationReferencePressure`              | 101325  | Pressure (Pa) at which each gas's `BoilingPoint` applies. Invalid values normalize to one standard atmosphere.                                                                                                                                           |
+| `DefaultDiffusionCoefficient`              | 0.02    | Dimensionless per-tick mixing fraction for unregistered gas IDs. Finite values are clamped to [0, 1]; non-finite values disable fallback diffusion.                                                                                                      |
+| `SpaceTemperature`                         | 2.7     | Temperature of space (K). Not actively used in the simulation loop.                                                                                                                                                                                      |
+| `BulkFlowCoefficient`                      | 0.25    | Dimensionless fraction of pressure delta requested as bulk flow per tick. Finite values are clamped to [0, 1]; non-finite values disable the large-delta branch.                                                                                         |
+| `BulkFlowDamping`                          | 0.5     | Multiplier applied to `BulkFlowCoefficient` during large-delta advection to reduce oscillation. Finite values are clamped to [0, 1]; non-finite values disable the large-delta branch.                                                                   |
+| `LowPressureDeltaThreshold`                | 5.0     | Below this pressure delta (Pa), flow uses `MaxPressureTransferFractionPerNeighbor` directly instead of `BulkFlowCoefficient * BulkFlowDamping`. Invalid or negative values normalize to zero.                                                            |
+| `MinimumPressureTransfer`                  | 0.1     | Candidate pressure transfers below this magnitude (Pa/tick) are discarded ("stiction"). Invalid or negative values normalize to zero.                                                                                                                    |
+| `VacuumThreshold`                          | 1.0     | Below this pressure (Pa), voxel contents are zeroed out when every neighboring air voxel is also below the threshold. Invalid or negative values normalize to zero.                                                                                      |
+| `SleepThreshold`                           | 100     | Consecutive ticks below `SleepEpsilon` before a chunk goes to sleep. Negative values normalize to zero.                                                                                                                                                  |
+| `SleepEpsilon`                             | 3.5     | Maximum pressure delta considered "at rest" (Pa). Invalid or negative values normalize to zero.                                                                                                                                                          |
+| `ThermalConductance`                       | 0.05    | Effective per-face conductance in J/K per thermodynamics tick. Multiplying it by a temperature difference produces a candidate energy transfer, which is bounded for explicit-solver stability. Invalid or nonpositive values disable thermal diffusion. |
+| `CondensationRateFactor`                   | 0.5     | Dimensionless fraction of the heat-coupled equilibrium condensation amount applied per thermodynamics tick. Finite values are clamped to [0, 1]; non-finite values disable condensation.                                                                 |
+| `MaxPressureTransferFractionPerNeighbor`   | 0.16    | Maximum fraction of a voxel's pressure requested as bulk flow to one neighbor per tick. Finite values are clamped to [0, 1]; non-finite values disable bulk flow.                                                                                        |
 
 ### 3.6 Container and Voxel Gas Mixtures
 
@@ -577,7 +577,12 @@ temperature extrema. Voxels with zero heat capacity do not participate and retai
 
 **Phase Changes (Condensation)**: See §8. These run after intra-chunk thermal temperatures have been applied and before thermal-boundary events are drained.
 
-**Cross-Chunk Thermal Diffusion**: Boundary faces are deduplicated, their post-phase-change temperatures and heat capacities are snapshotted, and the same `g`, `G`, `s`, and `Q` equations are applied across the entire boundary set. Equal-and-opposite energy deltas are buffered before any boundary temperature is written, eliminating concurrent-queue traversal bias. Solid and void voxels do not conduct, voxels below `VacuumThreshold` are excluded, and a missing adjacent chunk receives no heat. Depth-one chunks do not conduct through their Z faces. Thermal transfer can update a sleeping neighbor without waking it.
+**Cross-Chunk Thermal Diffusion**: Boundary faces are deduplicated, their post-phase-change temperatures and heat
+capacities are snapshotted, and the same `g`, `G`, `s`, and `Q` equations are applied across the entire boundary set.
+Equal-and-opposite energy deltas are buffered before any boundary temperature is written, eliminating concurrent-queue
+traversal bias. Solid, void, and vacuum-classified voxels do not conduct, and a missing adjacent chunk receives no heat.
+Depth-one chunks do not conduct through their Z faces. Thermal transfer can update a sleeping neighbor without waking
+it.
 
 ---
 
@@ -612,7 +617,13 @@ Flows below `MinimumPressureTransfer` (0.1) are discarded entirely. This prevent
 
 ### 5.4 Vacuum Cleanup
 
-Voxels with `TotalPressure < VacuumThreshold` (1.0) have all gas moles zeroed out. This prevents the accumulation of trace gas amounts that would otherwise never fully equalize and would keep chunks awake.
+Voxels with `TotalPressure < VacuumThreshold` (1.0) have all gas moles zeroed out only when every orthogonally adjacent
+air voxel is also below the threshold. Solid walls, void voxels, and missing chunks do not prevent cleanup. The solver
+classifies the complete pressure field before removing any gas, so traversal order cannot turn neighboring trace voxels
+into a cascading cleanup.
+
+This preserves a low-pressure expansion front while it remains next to pressurized gas. Once an isolated region and all
+of its neighbors fall below the threshold, cleanup removes the trace gas that would otherwise keep chunks awake.
 
 ### 5.5 Delta Buffers (Ordering Scope)
 
