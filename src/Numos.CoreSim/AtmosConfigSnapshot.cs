@@ -108,7 +108,7 @@ public sealed class AtmosConfigSnapshot : IAtmosConfig
     public Scalar BulkFlowCoefficient { get; }
     public Pascal VacuumThreshold { get; }
     public int SleepThreshold { get; }
-    public Pascal SleepEpsilon { get; }
+    public Scalar SleepEpsilon { get; }
     public JoulePerKelvin ThermalConductance { get; }
     public Scalar CondensationRateFactor { get; }
     public Scalar MaxPressureTransferFractionPerNeighbor { get; }

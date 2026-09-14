@@ -64,7 +64,7 @@ public sealed record SimulationConfigurationReport(
     float BulkFlowCoefficient,
     float VacuumThresholdPa,
     int SleepThreshold,
-    float SleepEpsilonPa,
+    float SleepEpsilonPercent,
     float ThermalConductance,
     float CondensationRateFactor,
     float MaxPressureTransferFractionPerNeighbor,

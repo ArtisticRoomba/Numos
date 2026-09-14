@@ -798,7 +798,7 @@ public partial class SimulationViewer
                     ref sleepEpsilon,
                     0f,
                     100f,
-                    "Maximum pressure delta considered at rest."))
+                    "Maximum relative pressure difference considered at rest, as a percentage."))
             {
                 _config.SleepEpsilon = sleepEpsilon;
                 ApplyConfiguration();

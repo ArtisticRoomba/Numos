@@ -83,7 +83,7 @@ internal sealed class ConfigurationPatch
     public float? BulkFlowCoefficient { get; init; }
     public float? VacuumThresholdPa { get; init; }
     public int? SleepThreshold { get; init; }
-    public float? SleepEpsilonPa { get; init; }
+    public float? SleepEpsilonPercent { get; init; }
     public float? ThermalConductance { get; init; }
     public float? CondensationRateFactor { get; init; }
     public float? MaxPressureTransferFractionPerNeighbor { get; init; }
@@ -124,8 +124,8 @@ internal sealed class ConfigurationPatch
         if (SleepThreshold.HasValue)
             config.SleepThreshold = SleepThreshold.Value;
 
-        if (SleepEpsilonPa.HasValue)
-            config.SleepEpsilon = SleepEpsilonPa.Value;
+        if (SleepEpsilonPercent.HasValue)
+            config.SleepEpsilon = SleepEpsilonPercent.Value;
 
         if (ThermalConductance.HasValue)
             config.ThermalConductance = ThermalConductance.Value;

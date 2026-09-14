@@ -7,6 +7,38 @@ namespace Numos.CoreSim.IntegrationTests;
 [TestFixture]
 public sealed class SimulationStabilityTests
 {
+    [TestCase(0.001f, 0.98f, false)]
+    [TestCase(1000f, 0.98f, false)]
+    [TestCase(0.001f, 0.96f, true)]
+    [TestCase(1000f, 0.96f, true)]
+    public void SleepEpsilon_UsesRelativePressureDifference(
+        float pressureScale,
+        float lowerPressureFraction,
+        bool expectedAwake)
+    {
+        var config = SimTestHelpers.CreateDeterministicConfig();
+        config.SleepThreshold = 0;
+        config.SleepEpsilon = 3.5f;
+        config.BulkFlowCoefficient = 0f;
+        config.MaxPressureTransferFractionPerNeighbor = 0f;
+        using var simulation = new AtmosSimulation(config, 2, 1, 1);
+        var chunk = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
+        SimTestHelpers.SetAllTemperatures(simulation, chunk, 2, 1, 1);
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasName, pressureScale, 300f);
+        simulation.AddGasToVoxel(
+            chunk,
+            1,
+            0,
+            0,
+            SimTestHelpers.FirstGasName,
+            pressureScale * lowerPressureFraction,
+            300f);
+
+        simulation.Tick();
+
+        Assert.That(simulation.GetChunkSnapshot(chunk).IsAwake, Is.EqualTo(expectedAwake));
+    }
+
     [Test]
     public void StableChunk_SleepsAtConfiguredThresholdUntilExplicitlyWoken()
     {

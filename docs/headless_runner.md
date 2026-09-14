@@ -152,7 +152,7 @@ The built-in solver names accepted by `setSolverEnabled` are `advection`, `bound
 - `bulkFlowCoefficient`
 - `vacuumThresholdPa`
 - `sleepThreshold`
-- `sleepEpsilonPa`
+- `sleepEpsilonPercent`
 - `thermalConductance`
 - `condensationRateFactor`
 - `maxPressureTransferFractionPerNeighbor`

@@ -371,7 +371,7 @@ public partial class SimulationViewer
         ImGui.TextUnformatted($"BulkFlowCoefficient: {config.BulkFlowCoefficient}");
         ImGui.TextUnformatted($"VacuumThreshold: {config.VacuumThreshold}");
         ImGui.TextUnformatted($"SleepThreshold: {config.SleepThreshold}");
-        ImGui.TextUnformatted($"SleepEpsilon: {config.SleepEpsilon}");
+        ImGui.TextUnformatted($"SleepEpsilon: {config.SleepEpsilon}%");
         ImGui.TextUnformatted($"ThermalConductance: {config.ThermalConductance}");
         ImGui.TextUnformatted($"CondensationRateFactor: {config.CondensationRateFactor}");
         ImGui.TextUnformatted($"MaxPressureTransferFractionPerNeighbor: {config.MaxPressureTransferFractionPerNeighbor}");

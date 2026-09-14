@@ -233,7 +233,7 @@ single definition in `VoxelClassification`.
 | `MinimumPressureTransfer`                  | 0.1     | Candidate pressure transfers below this magnitude (Pa/tick) are discarded ("stiction"). Invalid or negative values normalize to zero.                                                                                                                    |
 | `VacuumThreshold`                          | 1.0     | Below this pressure (Pa), voxel contents are zeroed out when every neighboring air voxel is also below the threshold. Invalid or negative values normalize to zero.                                                                                      |
 | `SleepThreshold`                           | 100     | Consecutive ticks below `SleepEpsilon` before a chunk goes to sleep. Negative values normalize to zero.                                                                                                                                                  |
-| `SleepEpsilon`                             | 3.5     | Maximum pressure delta considered "at rest" (Pa). Invalid or negative values normalize to zero.                                                                                                                                                          |
+| `SleepEpsilon`                             | 3.5     | Maximum relative pressure difference considered "at rest" (% of the higher neighboring pressure). Invalid or negative values normalize to zero.                                                                                                          |
 | `ThermalConductance`                       | 0.05    | Effective per-face conductance in J/K per thermodynamics tick. Multiplying it by a temperature difference produces a candidate energy transfer, which is bounded for explicit-solver stability. Invalid or nonpositive values disable thermal diffusion. |
 | `CondensationRateFactor`                   | 0.5     | Dimensionless fraction of the heat-coupled equilibrium condensation amount applied per thermodynamics tick. Finite values are clamped to [0, 1]; non-finite values disable condensation.                                                                 |
 | `MaxPressureTransferFractionPerNeighbor`   | 0.16    | Maximum fraction of a voxel's pressure requested as bulk flow to one neighbor per tick. Finite values are clamped to [0, 1]; non-finite values disable bulk flow.                                                                                        |
@@ -504,7 +504,8 @@ Each phase finishes before the next begins:
    second phase lets each destination tile gather its own edge and the opposite edge of each active neighbor in fixed
    direction order. The gather avoids concurrent additions to a shared voxel.
 3. **Compute bulk-flow fractions.** Tiles calculate outward pressure transfer with the configured damping, cutoff,
-   per-neighbor cap, and conductance limiter. They also record the maximum bulk pressure delta used by the sleep system.
+   per-neighbor cap, and conductance limiter. They also record the maximum relative bulk pressure difference used by the
+   sleep system.
 4. **Accumulate bulk transfer.** Each `(chunk, gas)` job walks source voxels and fixed directions in ascending order,
    writing only that gas's mole and sensible-energy rows. Transfers into void have a source delta and no destination
    delta.
@@ -655,17 +656,19 @@ All workspace arrays are rented from `ArrayPool<T>` and returned even when a pha
 
 Each chunk maintains a `SleepTimer` counter. After each advection pass:
 
-1. The maximum pressure delta across all neighbor pairs in the chunk (`maxPressureDelta`) is tracked.
-2. If `maxPressureDelta < SleepEpsilon` (3.5): increment `SleepTimer`.
+1. For each neighbor pair, divide the absolute pressure difference by the higher pressure. The largest percentage in the
+   chunk (`maxRelativePressureDelta`) is tracked. A gas-to-vacuum edge has a 100% difference.
+2. If `maxRelativePressureDelta < SleepEpsilon` (3.5%): increment `SleepTimer`.
 3. If `SleepTimer > SleepThreshold` (100): set `IsAwake = false`. The chunk ceases all processing.
-4. If `maxPressureDelta ≥ SleepEpsilon`: reset `SleepTimer` to 0.
+4. If `maxRelativePressureDelta ≥ SleepEpsilon`: reset `SleepTimer` to 0.
 
 A sleeping chunk is woken when:
 - `InjectGasToVoxel` is called on it (the sleep timer is reset).
 - A boundary flow event targets one of its voxels.
 
 A chunk that sends gas across a boundary is kept awake and has its sleep timer reset. The sleep criterion itself is
-pressure-based; a temperature gradient alone does not wake or keep a chunk active.
+pressure-based; scaling every pressure in a chunk by the same amount does not change its sleep decision. A temperature
+gradient alone does not wake or keep a chunk active.
 
 The sleep system is the primary mechanism for achieving the "work-proportional cost" goal. In a station with 500 chunks, only the handful with active pressure gradients consume CPU.
 

@@ -689,7 +689,7 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
             int slotBase = activeIndex * NeighborDirections.Length;
             bool isBoundary = workspace.BoundaryEligible![activeIndex];
             Array.Clear(workspace.BulkMoleFractions!, slotBase, NeighborDirections.Length);
-            workspace.MaximumPressureDeltas![activeIndex] = 0f;
+            workspace.MaximumRelativePressureDeltas![activeIndex] = 0f;
             workspace.BoundaryEligible[activeIndex] = false;
 
             Pascal currentPressure = chunk.TotalPressure[voxelIndex];
@@ -700,7 +700,7 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
             if (totalMoles <= 0f)
                 continue;
 
-            Pascal maximumPressureDelta = 0f;
+            Scalar maximumRelativePressureDelta = 0f;
             for (int direction = 0; direction < NeighborDirections.Length; direction++)
             {
                 var neighborKind = workspace.NeighborKinds![slotBase + direction];
@@ -710,7 +710,9 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
                 ushort neighborIndex = workspace.NeighborIndices![slotBase + direction];
                 Pascal neighborPressure = neighborKind == NeighborKind.Void ? 0f : chunk.TotalPressure[neighborIndex];
                 Pascal pressureDelta = currentPressure - neighborPressure;
-                maximumPressureDelta = MathF.Max(maximumPressureDelta, MathF.Abs(pressureDelta));
+                Pascal referencePressure = MathF.Max(currentPressure, neighborPressure);
+                Scalar relativePressureDelta = MathF.Abs(pressureDelta) / referencePressure * 100f;
+                maximumRelativePressureDelta = MathF.Max(maximumRelativePressureDelta, relativePressureDelta);
 
                 Pascal bulkPressureTransfer = pressureDelta > 0f
                     ? AtmosSolverMath.CalculateBulkPressureTransfer(config, pressureDelta)
@@ -743,7 +745,7 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
                     workspace.BulkMoleFractions[slotBase + direction] = advectedMoles / totalMoles;
             }
 
-            workspace.MaximumPressureDeltas[activeIndex] = maximumPressureDelta;
+            workspace.MaximumRelativePressureDeltas[activeIndex] = maximumRelativePressureDelta;
             workspace.BoundaryEligible[activeIndex] = isBoundary;
         }
     }
@@ -909,20 +911,24 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
     }
 
     /// <summary>
-    ///     Reduces per-voxel pressure activity and advances the chunk sleep state once per tick.
+    ///     Reduces per-voxel relative pressure activity and advances the chunk sleep state once per tick.
     /// </summary>
-    /// <param name="workspace">The workspace containing pressure deltas for the chunk.</param>
+    /// <param name="workspace">The workspace containing relative pressure differences for the chunk.</param>
     /// <param name="config">The immutable configuration snapshot for the tick.</param>
     private static void UpdateWorkspaceSleepState(
         ref ChunkWorkspace workspace,
         AtmosSolverConfigSnapshot config)
     {
-        Pascal maximumPressureDelta = 0f;
+        Scalar maximumRelativePressureDelta = 0f;
         var chunk = workspace.Chunk!;
         for (int activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
-            maximumPressureDelta = MathF.Max(maximumPressureDelta, workspace.MaximumPressureDeltas![activeIndex]);
+        {
+            maximumRelativePressureDelta = MathF.Max(
+                maximumRelativePressureDelta,
+                workspace.MaximumRelativePressureDeltas![activeIndex]);
+        }
 
-        UpdateSleepState(chunk, config, maximumPressureDelta);
+        UpdateSleepState(chunk, config, maximumRelativePressureDelta);
     }
 
     /// <summary>
@@ -1071,17 +1077,19 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
     }
 
     /// <summary>
-    ///     Resets or advances a chunk's sleep timer from its greatest pressure difference this tick.
+    ///     Resets or advances a chunk's sleep timer from its greatest relative pressure difference this tick.
     /// </summary>
     /// <param name="chunk">The chunk whose sleep state will be updated.</param>
     /// <param name="config">The immutable configuration snapshot containing sleep thresholds.</param>
-    /// <param name="maximumPressureDelta">The greatest absolute neighbor pressure difference in the chunk.</param>
+    /// <param name="maximumRelativePressureDelta">
+    ///     The greatest neighbor pressure difference in the chunk, as a percentage of the higher pressure.
+    /// </param>
     private static void UpdateSleepState(
         AtmosChunk chunk,
         AtmosSolverConfigSnapshot config,
-        Pascal maximumPressureDelta)
+        Scalar maximumRelativePressureDelta)
     {
-        if (maximumPressureDelta >= config.SleepEpsilon)
+        if (maximumRelativePressureDelta >= config.SleepEpsilon)
         {
             chunk.SleepTimer = 0;
             return;
@@ -1233,7 +1241,7 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
         public Joule64[] EnergyDeltasByGas;
         public Mole[] HeatScratch;
         public MolePerPascal[] IncidentConductance;
-        public Pascal[] MaximumPressureDeltas;
+        public Scalar[] MaximumRelativePressureDeltas;
         public Mole[] MoleDeltas;
         public int[] NeighborCounts;
         public ushort[] NeighborIndices;
@@ -1266,7 +1274,7 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
                 EnergyDeltasByGas = ArrayPool<Joule64>.Shared.Rent(gasVoxelCount);
                 HeatScratch = ArrayPool<Mole>.Shared.Rent(voxelCount);
                 IncidentConductance = ArrayPool<MolePerPascal>.Shared.Rent(voxelCount);
-                MaximumPressureDeltas = ArrayPool<Pascal>.Shared.Rent(Math.Max(1, activeAirCount));
+                MaximumRelativePressureDeltas = ArrayPool<Scalar>.Shared.Rent(Math.Max(1, activeAirCount));
                 MoleDeltas = ArrayPool<Mole>.Shared.Rent(gasVoxelCount);
                 NeighborCounts = ArrayPool<int>.Shared.Rent(Math.Max(1, activeAirCount));
                 NeighborIndices = ArrayPool<ushort>.Shared.Rent(Math.Max(1, slotCount));
@@ -1298,7 +1306,7 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
             Return(EnergyDeltasByGas);
             Return(HeatScratch);
             Return(IncidentConductance);
-            Return(MaximumPressureDeltas);
+            Return(MaximumRelativePressureDeltas);
             Return(MoleDeltas);
             Return(NeighborCounts);
             Return(NeighborIndices);
