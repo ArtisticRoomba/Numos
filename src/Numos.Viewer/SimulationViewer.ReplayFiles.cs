@@ -137,6 +137,7 @@ public partial class SimulationViewer
     {
         const string popupId = "Open Replay##replay-file";
         ImGuiExtensions.OpenPopupWhenRequested(popupId, ref _requestOpenReplayModal);
+        CenterNextReplayModal();
         bool open = true;
         using var modal = ImGuiExtensions.BeginPopupModal(popupId, ref open);
         if (!modal.IsVisible) return;
@@ -166,6 +167,7 @@ public partial class SimulationViewer
     {
         const string popupId = "Save Replay##replay-file";
         ImGuiExtensions.OpenPopupWhenRequested(popupId, ref _requestSaveReplayModal);
+        CenterNextReplayModal();
         bool open = true;
         using var modal = ImGuiExtensions.BeginPopupModal(popupId, ref open);
         if (!modal.IsVisible || _replayTimeline == null) return;
@@ -232,6 +234,15 @@ public partial class SimulationViewer
     private void DrawReplayFileError()
     {
         if (_replayFileError != null) ImGui.TextColored(ViewerTheme.Error, _replayFileError);
+    }
+
+    private static void CenterNextReplayModal()
+    {
+        var viewport = ImGui.GetMainViewport();
+        ImGui.SetNextWindowPos(
+            viewport.Pos + viewport.Size * 0.5f,
+            ImGuiCond.Always,
+            new Vector2(0.5f, 0.5f));
     }
 
     private void StartReplayLoad(string path)
