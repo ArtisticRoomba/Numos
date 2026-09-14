@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Numos.API;
 using Numos.Maths;
 
@@ -6,11 +7,19 @@ namespace Numos.CoreSim.IntegrationTests;
 [TestFixture]
 public sealed class AdvectionParallelDeterminismTests
 {
-    private const ulong ExpectedDigest = 14980476594025801374UL;
+    private const ulong Arm64ExpectedDigest = 15643557825930699840UL;
+    private const ulong X64ExpectedDigest = 14980476594025801374UL;
 
     [Test]
     public void Advection_ParallelPhasesMatchGoldenHash()
     {
+        ulong expectedDigest = RuntimeInformation.ProcessArchitecture switch
+        {
+            Architecture.Arm64 => Arm64ExpectedDigest,
+            Architecture.X64 => X64ExpectedDigest,
+            var architecture => throw new PlatformNotSupportedException($"Advection profile 2 has no golden digest for {architecture}.")
+        };
+
         for (int run = 0; run < 4; run++)
         {
             using var simulation = CreateSimulation();
@@ -19,8 +28,9 @@ public sealed class AdvectionParallelDeterminismTests
 
             Assert.That(
                 simulation.ComputeStateHash().Digest,
-                Is.EqualTo(ExpectedDigest),
-                $"Run {run}; DOTNET_PROCESSOR_COUNT={Environment.ProcessorCount}");
+                Is.EqualTo(expectedDigest),
+                $"Run {run}; architecture={RuntimeInformation.ProcessArchitecture}; " +
+                $"DOTNET_PROCESSOR_COUNT={Environment.ProcessorCount}");
         }
     }
 
