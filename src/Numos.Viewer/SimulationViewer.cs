@@ -63,6 +63,7 @@ public partial class SimulationViewer : IDisposable
     private int _currentSliceIndex;
     private string _currentVisualizationId = BuiltInVisualizationIds.Temperature;
     private SimulationDrawData? _drawData;
+    private bool _eventBasedRenderingEnabled;
     private bool _eventWaitingEnabled;
     private ChunkIdentity? _focusedChunk;
     private SimulationFrameBuilder? _frameBuilder;
@@ -621,7 +622,7 @@ public partial class SimulationViewer : IDisposable
 
     private void ApplyFramePacing()
     {
-        bool waitForEvents = !RequiresContinuousFrames();
+        bool waitForEvents = _eventBasedRenderingEnabled && !RequiresContinuousFrames();
         if (waitForEvents != _eventWaitingEnabled)
         {
             if (waitForEvents)

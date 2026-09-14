@@ -62,9 +62,7 @@ public partial class SimulationViewer
 
     private void RenderGraphicsSettings()
     {
-        ImGui.Text("Graphics");
-        ImGui.TextDisabled("Display and rendering options.");
-        ImGui.Separator();
+        ImGui.SeparatorText("Graphics");
 
         (int Width, int Height)[] resolutions = GetTargetResolutions();
         int currentWidth = Raylib.GetScreenWidth();
@@ -101,8 +99,8 @@ public partial class SimulationViewer
         if (ImGui.Checkbox("Fullscreen", ref fullscreen))
             Raylib.ToggleFullscreen();
 
-        ImGui.Separator();
-        ImGui.Text("Frame pacing");
+        ImGui.SeparatorText("Frame pacing");
+
         ImGui.Checkbox("Uncap FPS", ref _uncappedFps);
 
         ImGuiExtensions.QuestionTooltip(
@@ -141,13 +139,17 @@ public partial class SimulationViewer
         }
 
         ImGuiExtensions.QuestionTooltip("Synchronizes presentation to the display refresh rate.");
+
+        ImGui.Checkbox("Use event-based rendering", ref _eventBasedRenderingEnabled);
+        ImGuiExtensions.QuestionTooltip(
+            "When enabled, the viewer waits for window events while the simulation is paused.\n" +
+            "Helps reduce CPU usage for drawing the UI when the simulation is paused, but may cause the viewer to not redraw when expected.\n" +
+            "Note that this is generally buggy as it's hard to do EBR to be honest.");
     }
 
     private void RenderInterfaceSettings()
     {
-        ImGui.Text("Interface");
-        ImGui.TextDisabled("Viewer display preferences.");
-        ImGui.Separator();
+        ImGui.SeparatorText("Interface");
         ImGui.Checkbox("Show FPS overlay", ref _showPerformanceOverlay);
         ImGuiExtensions.QuestionTooltip("Displays the current render rate in the upper-left corner.");
 
@@ -182,8 +184,7 @@ public partial class SimulationViewer
         ImGui.SetNextItemWidth(220f);
         ImGui.SliderFloat("Logo size", ref _viewportBrandingSizePercent, 1f, 25f, "%.0f%%");
 
-        ImGui.Separator();
-        ImGui.Text("Window layout");
+        ImGui.SeparatorText("Window layout");
         if (ImGui.Button("Save Current Layout"))
             SaveCurrentLayout();
 
