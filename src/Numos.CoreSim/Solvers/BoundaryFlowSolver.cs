@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using CommunityToolkit.HighPerformance.Helpers;
 using Numos.CoreSim.Datatypes.Events;
 using Numos.CoreSim.Datatypes.Primitives;
@@ -16,17 +15,13 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
 
     public void Solve(AtmosSolverExecutionContext context)
     {
-        long startedAt = Stopwatch.GetTimestamp();
         BoundaryEventBatchStorage<BoundaryFlowEvent> boundaryBatches =
             BoundaryEventBatches<BoundaryFlowEvent>.Get(context);
 
         _orderedBatches.Clear();
         _injectionBuffer.Clear();
         if (!boundaryBatches.TryConsume(context.TickCount))
-        {
-            context.World.AddBoundaryProcessingTicks(Stopwatch.GetTimestamp() - startedAt);
             return;
-        }
 
         for (int batchIndex = 0; batchIndex < boundaryBatches.Count; batchIndex++)
         {
@@ -45,7 +40,6 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
         }
 
         RunQueuedInjections(context, context.TickConfig, _injectionBuffer);
-        context.World.AddBoundaryProcessingTicks(Stopwatch.GetTimestamp() - startedAt);
     }
 
     internal void ClearTransientState()

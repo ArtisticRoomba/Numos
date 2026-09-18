@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using Numos.CoreSim.Replay;
 using Numos.CoreSim.Solvers;
 using Numos.Maths;
@@ -8,7 +9,7 @@ namespace Numos.CoreSim;
 /// <summary>
 ///     Owns simulation state, serialization, and the configured solver pipeline.
 /// </summary>
-internal sealed partial class AtmosKernel : IDisposable, IAtmosSolverWorld
+internal sealed partial class AtmosKernel : IDisposable
 {
     private readonly DefaultAtmosSolvers _defaultSolvers;
     private readonly List<AtmosRecordedOperation> _recordedOperations = [];
@@ -55,14 +56,9 @@ internal sealed partial class AtmosKernel : IDisposable, IAtmosSolverWorld
     /// </summary>
     internal AtmosSolverConfigSnapshot CurrentTickConfig { get; } = new();
 
-    bool IAtmosSolverWorld.TryGetChunk(Int3 position, out AtmosChunk chunk)
+    internal bool TryGetChunk(Int3 position, out AtmosChunk chunk)
     {
         return _chunkMap.TryGetValue(position, out chunk!);
-    }
-
-    void IAtmosSolverWorld.AddBoundaryProcessingTicks(long elapsedTicks)
-    {
-        LastBoundaryTicks += elapsedTicks;
     }
 
     public void Dispose()
@@ -179,7 +175,9 @@ internal sealed partial class AtmosKernel : IDisposable, IAtmosSolverWorld
 
     internal void SolveBoundaryFlow(AtmosSolverExecutionContext context)
     {
+        long startedAt = Stopwatch.GetTimestamp();
         _defaultSolvers.SolveBoundaryFlow(context);
+        LastBoundaryTicks += Stopwatch.GetTimestamp() - startedAt;
     }
 
     internal void SolveThermodynamics(AtmosSolverExecutionContext context)
