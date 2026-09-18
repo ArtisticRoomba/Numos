@@ -52,6 +52,13 @@ public readonly record struct AtmosExplicitLinkInfo(
 /// <param name="key">A stable identifier describing the selection policy for checkpoint compatibility.</param>
 /// <param name="includeCartesian">Whether ordinary Cartesian neighbors participate.</param>
 /// <param name="explicitLinks">The selector evaluated for active explicit links.</param>
+/// <remarks>
+///     Set <paramref name="includeCartesian" /> to <see langword="false" /> for a solver that only interacts with
+///     portals, docks, or other explicit links: it keeps the compiled view limited to the sparse explicit edge set
+///     instead of re-deriving all six ordinary neighbors of every voxel in every chunk. Reach for
+///     <see langword="true" /> only when the same stage genuinely needs to traverse ordinary walls too, such as fire
+///     or sound propagating through both open doorways and portals.
+/// </remarks>
 public sealed class AtmosNeighborSelection(
     string key,
     bool includeCartesian,
@@ -60,6 +67,12 @@ public sealed class AtmosNeighborSelection(
     /// <summary>
     ///     Gets the stable compatibility key for this selection policy.
     /// </summary>
+    /// <remarks>
+    ///     This string is checkpointed alongside the solver's registration and folded into world state hashing, so a
+    ///     restored checkpoint compiles topology using the key it was captured with. Give a selection a new key when
+    ///     its <see cref="AtmosExplicitLinkSelector" /> changes what it matches; reusing a key for a semantically
+    ///     different selection lets a restored checkpoint silently compile the wrong edges for it.
+    /// </remarks>
     public string Key { get; } = string.IsNullOrWhiteSpace(key)
         ? throw new ArgumentException("A neighbor selection key cannot be empty.", nameof(key))
         : key;
@@ -125,6 +138,12 @@ public sealed class AtmosWorldSolverContext
     /// <summary>
     ///     Gets the solver-specific compiled neighborhood view.
     /// </summary>
+    /// <remarks>
+    ///     A stage registered through a plain <see cref="AtmosWorldSolverPipeline.Register" /> call (rather than one
+    ///     of the <c>RegisterNeighborSolver*</c> overloads) receives an empty view here: no exception, no Cartesian
+    ///     neighbors, no explicit edges. Use <see cref="AtmosWorldSolverPipeline.RegisterNeighborSolver" /> whenever
+    ///     the callback needs this property.
+    /// </remarks>
     public AtmosWorldNeighborTopology Topology { get; }
 }
 

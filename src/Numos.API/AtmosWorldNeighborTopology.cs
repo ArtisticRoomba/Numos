@@ -147,8 +147,14 @@ public sealed class AtmosWorldNeighborTopology
     /// </summary>
     /// <returns>Canonical Cartesian edges followed by selected explicit edges.</returns>
     /// <remarks>
-    ///     This convenience traversal discovers current chunk membership when enumeration begins. Performance-sensitive
-    ///     tiled solvers should acquire <see cref="AtmosChunkNeighborView" /> once per chunk instead.
+    ///     This is the convenient shape for a conservative transfer, where something removed from one endpoint must
+    ///     be added to the other exactly once regardless of which side you started from. It re-derives current chunk
+    ///     membership on every call, and when the selection includes Cartesian neighbors it walks all six directions
+    ///     of every voxel in every chunk in the world to find them — for a selection built with
+    ///     <c>includeCartesian: false</c>, it only walks the sparse explicit edge list instead. A
+    ///     performance-sensitive tiled solver should acquire <see cref="AtmosChunkNeighborView" /> once per chunk via
+    ///     <see cref="GetChunk" /> and call <see cref="AtmosChunkNeighborView.GetNeighbors" /> per voxel instead of
+    ///     calling this every tick.
     /// </remarks>
     public IEnumerable<AtmosNeighborEdge> GetOwnedEdges()
     {

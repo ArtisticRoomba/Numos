@@ -96,8 +96,11 @@ for the full pattern, including replacing default transport entirely or per-link
 
 ## Use portals from a custom solver
 
-Neighbor-aware custom solvers belong to the world because an explicit edge can join two simulations. Register one
-callback with a stable selection key and a selector describing which links carry the custom interaction:
+A plain `world.Solvers.Register(...)` stage cannot see portals or docks at all: `context.Topology` compiles to an
+empty view for it, so `GetOwnedEdges()` quietly returns nothing. To see explicit links, register through
+`RegisterNeighborSolver` (or its `Before`/`After` variants) with an `AtmosNeighborSelection`, since an explicit edge
+can join cells in two different simulations and the world — not either simulation — is what compiles the combined
+view:
 
 ```csharp
 world.Solvers.RegisterNeighborSolverAfter(
@@ -114,17 +117,51 @@ world.Solvers.RegisterNeighborSolverAfter(
     });
 ```
 
+Fire wants `includeCartesian: true` because it spreads through ordinary open doorways as well as portals. A solver
+that only cares about the portals and docks themselves should say so explicitly instead:
+
+```csharp
+world.Solvers.RegisterNeighborSolver(
+    "game/pressure-valve",
+    new AtmosNeighborSelection(
+        "game/pressure-valve/v1",
+        includeCartesian: false, // no ordinary walls — this only ever acts on explicit links
+        static link => (link.Flags & ExplicitLinkFlags.GasTransport) != 0),
+    context =>
+    {
+        foreach (AtmosNeighborEdge edge in context.Topology.GetOwnedEdges())
+            ProcessValveEdge(edge.First, edge.Second);
+    });
+```
+
+`includeCartesian: true` makes `GetOwnedEdges()` walk all six directions of every voxel in every chunk in the world to
+find the ordinary boundaries too; `false` limits it to the sparse explicit edge list. Pick the one that matches what
+the stage actually needs to see, since the wasted Cartesian walk is easy to miss until you profile it.
+
 `GetOwnedEdges` visits each physical adjacency once, which is the useful form for conservative transfer. Stencil
 solvers can instead acquire a chunk view once and call `GetNeighborCount` or `GetNeighbors` for each source cell. Both
 forms emit Cartesian and selected explicit adjacency through the same solver code.
 
-Numos evaluates the link selector when topology changes and compiles sparse incident indexes only for chunks containing
-selected explicit endpoints. Stable ticks do not rediscover portals or call the selector. The topology view describes
-structural adjacency; inspect current voxel classification when the solver needs to reject solid or void cells.
+Numos evaluates the link selector when topology or solver registration changes and compiles sparse incident indexes
+only for chunks containing selected explicit endpoints. Stable ticks do not rediscover portals or call the selector
+again, which is also why the selector itself must be a pure function of the link's flags and endpoints — it cannot
+read per-tick state. The topology view describes structural adjacency only; it does not filter out solid or void
+endpoints, so a solver that moves gas or heat must check current voxel classification itself before touching an edge,
+the same way the built-in transport stages do.
+
+A cell can carry any number of explicit links, unlike a Cartesian voxel's fixed six neighbors. A solver that mutates
+gas or energy across links needs the same shape the built-in stages use: compute every edge's request from one
+unchanged snapshot of the tick's starting state, cap everything leaving one cell for one gas with a single shared
+limiter, then commit. Reading and writing one edge at a time lets edge order decide who drains a shared cell first,
+which breaks Numos' determinism guarantees. See
+[Writing a custom solver that touches portals](atmospherics_technical_documentation.md#writing-a-custom-solver-that-touches-portals)
+for the full reasoning and the obligations (skip solid/void endpoints, call `Wake()` after a raw mutation) a solver
+needs to satisfy on its own.
 
 The supported view returns value-only cell references. A measured hot path can reference `Numos.API.Dangerous` and call
 `context.Dangerous().GetChunk(cell)` inside the callback to resolve live structure-of-arrays storage. As with other
-dangerous APIs, the solver must repair every cache, sleep, and revision invariant affected by raw writes.
+dangerous APIs, the solver must repair every cache, sleep, and revision invariant affected by raw writes — including
+waking any chunk it touched, since a raw span write does not do that automatically.
 
 World checkpoints include each simulation checkpoint, link-set generations and lifecycle state, and the applied topology
 version:

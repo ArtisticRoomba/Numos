@@ -58,6 +58,15 @@ public sealed class AtmosWorldSolverPipeline
     /// <param name="selection">The Cartesian and explicit adjacency included in the callback's view.</param>
     /// <param name="solver">The caller-owned callback.</param>
     /// <exception cref="ArgumentException">The name is empty or duplicated.</exception>
+    /// <remarks>
+    ///     Use this overload (or <see cref="RegisterNeighborSolverBefore" />/<see cref="RegisterNeighborSolverAfter" />)
+    ///     whenever the callback reads <see cref="AtmosWorldSolverContext.Topology" />. A stage registered through
+    ///     <see cref="Register" /> instead gets an empty topology view: <c>GetOwnedEdges()</c> yields nothing and
+    ///     <c>GetNeighbors</c> reports no explicit neighbors, silently, with no exception to flag the missing
+    ///     selection. Set <paramref name="selection" />'s <c>includeCartesian</c> to <see langword="false" /> for a
+    ///     stage that only cares about portals and docks — that keeps the compiled view limited to the sparse
+    ///     explicit edge list instead of also re-deriving every ordinary chunk boundary.
+    /// </remarks>
     [PublicAPI]
     public void RegisterNeighborSolver(
         string name,
@@ -179,7 +188,8 @@ public sealed class AtmosWorldSolverPipeline
     }
 
     /// <summary>
-    ///     Restores the three built-in stages in their default order and enabled state.
+    ///     Restores the built-in stages in their default order and enabled state, discarding any custom
+    ///     registrations.
     /// </summary>
     [PublicAPI]
     public void ResetToDefaults()
