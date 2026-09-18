@@ -14,12 +14,12 @@ public sealed class AtmosSolverConfigurationTests
         var config = new TestAtmosConfig { SolverConfigurations = [settings] };
         using var simulation = new AtmosSimulation(config, 1, 1, 1);
         var chunk = simulation.CreateAndRegisterChunk(default);
-        simulation.Solvers.Register(
+        simulation.World.Solvers.Register(
             "custom",
-            world =>
+            _ =>
             {
-                var applied = (SettingsSnapshot)world.Config.SolverConfigurations.Single();
-                world.AddGasToVoxel(chunk, 0, "TestGas0", applied.Value, 300f);
+                var applied = (SettingsSnapshot)simulation.Config.SolverConfigurations.Single();
+                simulation.AddGasToVoxel(chunk, 0, "TestGas0", applied.Value, 300f);
             });
 
         var checkpoint = simulation.CaptureCheckpoint();
@@ -126,8 +126,8 @@ public sealed class AtmosSolverConfigurationTests
 
         var config = new AtmosConfig { GasRegistry = [fuel, product], SolverConfigurations = [CreateReactions(1f)] };
         using var simulation = new AtmosSimulation(config, 1, 1, 1);
-        foreach (var step in simulation.Solvers.Steps)
-            simulation.Solvers.SetEnabled(step.Name, step.Name == AtmosBuiltInSolvers.GasReactions);
+        foreach (var step in simulation.World.Solvers.Steps)
+            simulation.World.Solvers.SetEnabled(step.Name, step.Name == AtmosBuiltInSolvers.GasReactions);
 
         var chunk = simulation.CreateAndRegisterChunk(default);
         simulation.AddGasToVoxel(chunk, 0, 0, 2f, 300f);

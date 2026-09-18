@@ -92,7 +92,7 @@ public static class SimulationStateAnalyzer
             AtmosSimulation.SimulationRate,
             simulation.ChunkCount,
             CreateConfigurationReport(config),
-            simulation.Solvers.Steps.Select(CreateSolverReport).ToArray(),
+            simulation.World.Solvers.Steps.Select(CreateSolverReport).ToArray(),
             global.ToGlobalReport(),
             chunkReports,
             issues.Items.ToArray(),
@@ -205,12 +205,12 @@ public static class SimulationStateAnalyzer
             gases);
     }
 
-    private static SolverStepReport CreateSolverReport(AtmosSolverStep step)
+    private static SolverStepReport CreateSolverReport(AtmosWorldSolverStep step)
     {
         string kind = step.Kind switch
         {
-            AtmosSolverKind.BuiltIn => "builtIn",
-            AtmosSolverKind.Custom => "custom",
+            AtmosWorldSolverKind.BuiltIn => "builtIn",
+            AtmosWorldSolverKind.Custom => "custom",
             _ => throw new ArgumentOutOfRangeException(nameof(step))
         };
 

@@ -32,16 +32,29 @@ internal sealed class DefaultAtmosSolvers : IDisposable
         _thermalBoundary.ClearTransientState();
     }
 
-    internal SolverStep[] CreateSteps()
+    internal void SolveAdvection(AtmosSolverExecutionContext context)
     {
-        return
-        [
-            new SolverStep(AtmosSolverStageNames.Advection, SolverStepKind.BuiltIn, _advection.Solve),
-            new SolverStep(AtmosSolverStageNames.BoundaryFlow, SolverStepKind.BuiltIn, _boundaryFlow.Solve),
-            new SolverStep(AtmosSolverStageNames.Thermodynamics, SolverStepKind.BuiltIn, _thermodynamics.Solve),
-            new SolverStep(AtmosSolverStageNames.ThermalBoundary, SolverStepKind.BuiltIn, _thermalBoundary.Solve),
-            new SolverStep(AtmosSolverStageNames.GasReactions, SolverStepKind.BuiltIn, _reactions.Solve)
-        ];
+        _advection.Solve(context);
+    }
+
+    internal void SolveBoundaryFlow(AtmosSolverExecutionContext context)
+    {
+        _boundaryFlow.Solve(context);
+    }
+
+    internal void SolveThermodynamics(AtmosSolverExecutionContext context)
+    {
+        _thermodynamics.Solve(context);
+    }
+
+    internal void SolveThermalBoundary(AtmosSolverExecutionContext context)
+    {
+        _thermalBoundary.Solve(context);
+    }
+
+    internal void SolveGasReactions(AtmosSolverExecutionContext context)
+    {
+        _reactions.Solve(context);
     }
 
     private static int GetBoundaryVoxelCount(int width, int height, int depth)

@@ -54,6 +54,61 @@ The system is built to simulate atmospheric gas dynamics in the context of a spa
 
 ## 2. Architecture Overview
 
+### Why interacting simulations share a world
+
+`AtmosWorld` is the root of an interacting atmospheric system. It owns fixed-step time, one shared immutable physics
+configuration, stable simulation registrations, and sparse topology. Each `AtmosSimulation` remains a separate storage
+domain whose chunks have exactly one owner. A compatibility simulation constructor creates a private one-simulation
+world, while multi-grid integrations create their simulations through a shared world.
+
+### Why topology has two representations
+
+Neighborhood topology has two deliberate representations. Ordinary ±X/±Y/±Z adjacency stays implicit in the optimized
+chunk solvers. Portals, docks, and future arbitrary connections are canonical value-type edges in a sparse world
+overlay. Portal and dock managers differ only in lifecycle: a portal normally owns one link, while a dock owns a batch.
+The solver sees the same edge and capability flags in both cases.
+
+Topology changes are queued during a tick and compiled in stable cell-address order at the next tick boundary. The dense
+solver view stays immutable during traversal. Reverse simulation and chunk indexes keep removal work local to the link
+sets that touch the removed owner.
+
+Generational simulation and link-set IDs prevent stale references from naming reused registry slots. An explicit edge
+may not duplicate an ordinary Cartesian neighbor edge. `ExplicitLinkSetKind` records whether a set came from the portal,
+dock, or generic link API. Detached snapshots give tools the handle, pending or active state, kind, and ordered cells
+without exposing mutable kernel storage.
+
+### How the Viewer presents a world
+
+The Viewer presents every registered simulation in its own dockable 3D surface with an independent camera. One active
+simulation supplies the shared 2D slice and editing panels. Its World & Topology panel creates or removes simulations,
+captures two selected voxels for portals, and maps complete rectangular chunk faces into docks with quarter-turn and
+axis-flip controls.
+
+Inter-simulation connections use matching colored endpoint markers; intra-simulation connections also draw a local line.
+These displays do not imply shared chunk ownership. Every chunk still belongs to exactly one simulation, and a dock
+remains a sparse batch of cell links.
+
+### Why explicit transport runs at shared stage barriers
+
+A world tick captures every simulation pipeline before running callbacks, advances every simulation through its
+advection barrier, applies explicit gas transport once across the compiled world edge set, then advances every
+simulation through thermodynamics and applies enabled explicit thermal transport on the same cadence. Remaining stages
+execute only after those shared barriers.
+
+Later custom and reaction stages therefore see the same completed cross-simulation transfers. Registration order cannot
+decide which endpoint gets updated first because the explicit solver calculates every request before committing any of
+them.
+
+Custom neighbor solvers use the same world boundary. `AtmosWorld.Solvers` invokes a callback once with every simulation
+locked at one tick state and supplies a solver-specific compiled topology view. Ordinary adjacency remains implicit.
+Selected explicit links are compiled into sparse per-chunk incident ranges when topology changes, so a portal-free chunk
+does not gain a per-voxel portal lookup. Conservative solvers traverse canonical owned edges; stencil solvers enumerate
+all incident neighbors of a cell.
+
+The selector key is authoritative pipeline metadata and participates in world checkpoint compatibility and state
+hashing. The compiled ranges are derived acceleration data: checkpoints store link sets and rebuild the ranges after
+restore.
+
 Numos simulates gas at voxel resolution. A chunk sleeps when its pressure deltas remain below the configured threshold,
 and wakes as a whole when it receives a mutation or boundary flow.
 
@@ -90,9 +145,10 @@ Numos deliberately exposes two package-level integration surfaces:
 | `Numos.API.Dangerous` | Measured performance-critical solver code | No compatibility guarantee (for now) | Handle-addressed live spans and unchecked state views |
 
 The dangerous package must be referenced separately and imported through `Numos.API.Dangerous`. Access begins with
-`simulation.Dangerous()`. Every custom solver is registered through `simulation.Solvers` and receives the same
-`AtmosSimulation` facade. Most solvers use its detached snapshots and validated mutations; a measured hot path can call
-`simulation.Dangerous().GetChunk(handle)` from that callback to obtain stack-scoped live chunk and gas-channel spans.
+`simulation.Dangerous()`. Every custom solver is registered through `simulation.World.Solvers` and receives an
+`AtmosWorldSolverContext`. Most solvers use its simulations' detached snapshots and validated mutations; a measured hot
+path can call `simulation.Dangerous().GetChunk(handle)` from that callback to obtain stack-scoped live chunk and
+gas-channel spans.
 
 Validated simulation mutations keep pressure/heat-capacity caches, active-voxel indices, sleep state,
 and observable revisions coherent as applicable. A solver should use the dangerous package only when it must directly
@@ -324,54 +380,51 @@ Each frame:
 
 ### 4.2 Solver Pipeline
 
-`AtmosKernel` owns chunk lifecycle, tick state, and pipeline execution. Physics is implemented by focused components
-under `Numos.CoreSim.Solvers`; the kernel does not contain advection, boundary-flow, thermodynamics, or phase-change
-algorithms. A direct `Tick` snapshots the current chunk set; `Update` snapshots it once for its fixed-step batch.
-Every fixed tick captures normalized built-in settings, increments the tick counter, constructs an internal execution
-context containing tick-wide inputs and shared solver storage, and executes the ordered `simulation.Solvers` pipeline.
-Its default stages
-are:
+`AtmosWorld` owns pipeline execution and `AtmosKernel` owns each simulation's chunk lifecycle and tick-local solver
+context. Physics remains implemented by focused components under `Numos.CoreSim.Solvers`. A world tick snapshots the
+enabled world stages, then each registration executes once with all simulations at the same tick boundary.
 
-1. `advection`
-2. `boundary-flow`
-3. `thermodynamics`
-4. `thermal-boundary`
+The default pipeline has seven stages, each an ordinary registered stage that a host can independently disable,
+reorder, or replace:
 
-| Stage | Reads / writes | Tick-scoped output consumed by |
-|-------|----------------|---------------------------------|
-| `advection` | Refreshes pressure/heat-capacity caches; applies intra-chunk gas and energy deltas | Gas boundary events → `boundary-flow` |
-| `boundary-flow` | Applies deterministic cross-chunk gas transfers and refreshes affected caches | None |
-| `thermodynamics` | On even ticks, applies intra-chunk thermal diffusion and condensation | Thermal boundary events → `thermal-boundary` |
-| `thermal-boundary` | On even ticks, applies simultaneous cross-chunk thermal diffusion | None |
+| Stage                        | Work performed                                                                                                             |
+|------------------------------|----------------------------------------------------------------------------------------------------------------------------|
+| `advection`                  | Intra-chunk gas advection                                                                                                  |
+| `explicit-gas-transport`     | Sparse gas transport across explicit links flagged `GasTransport`                                                          |
+| `boundary-flow`              | Cartesian gas transport across ordinary chunk boundaries                                                                   |
+| `thermodynamics`             | Intra-chunk thermal diffusion and phase changes                                                                            |
+| `explicit-thermal-transport` | Sparse thermal transport across explicit links flagged `ThermalTransport`, on the same reduced cadence as `thermodynamics` |
+| `thermal-boundary`           | Cartesian thermal transport across ordinary chunk boundaries                                                               |
+| `gas-reactions`              | Per-cell configured gas reactions                                                                                          |
 
-The producer/consumer order is part of the default contract. Removing or disabling a producer makes its consumer a
-no-op for that tick. Moving a consumer before its producer also makes it observe an empty queue; events are never
-carried into a later tick.
+The relative order of these seven stages is what the default pipeline ships with, not a numerical requirement — a
+host is free to reorder, disable, or unregister any of them. Because `explicit-gas-transport` and
+`explicit-thermal-transport` are ordinary stages rather than a side effect of `advection`/`thermodynamics`, a host
+can disable Numos' own portal/dock physics without touching intra-chunk advection or boundary flow at all, and
+register a replacement in its place. See [Extending portal and dock transport](#extending-portal-and-dock-transport)
+below.
 
 Stages can be enabled, disabled, removed, or restored with `ResetToDefaults`. Custom delegates can be appended or
-inserted before/after any named stage:
+inserted before or after any registered stage:
 
 ```csharp
-simulation.Solvers.RegisterAfter(AtmosBuiltInSolvers.Advection, "game-reactions", solverSimulation =>
+simulation.World.Solvers.RegisterAfter(AtmosBuiltInSolvers.Advection, "game-reactions", context =>
 {
-    foreach (AtmosChunkHandle chunk in solverSimulation.GetChunkHandles())
+    AtmosSimulation simulation = context.Simulations[0];
+    foreach (AtmosChunkHandle chunk in simulation.GetChunkHandles())
     {
-        AtmosChunkSnapshot snapshot = solverSimulation.GetChunkSnapshot(chunk);
+        AtmosChunkSnapshot snapshot = simulation.GetChunkSnapshot(chunk);
         // Inspect the detached snapshot and apply results through validated simulation methods.
     }
 });
 
-simulation.Solvers.SetEnabled(AtmosBuiltInSolvers.Thermodynamics, false);
+simulation.World.Solvers.SetEnabled(AtmosBuiltInSolvers.Thermodynamics, false);
 ```
 
-Pipeline edits made by a callback take effect on the next tick. Gas and thermal boundary queues live in the simulation's
-shared solver storage. Each stage resolves its queue from the execution context before starting workers; solvers do not
-pass collection callbacks to each other. Producers clear the prior batch and tag every event with its tick; consumers
-discard any
-event not produced for their current tick. Disabling or reordering a consumer therefore cannot replay stale work when
-it is later re-enabled. Recursive `Tick`/`Update`, simulation disposal, and chunk registration/removal are rejected
-during a callback because they would invalidate the current chunk snapshot. Perform those lifecycle operations outside
-the solver tick.
+Pipeline edits made by a callback take effect on the next tick. The built-in domains retain their internal boundary
+queues and producer/consumer ordering, but that implementation detail is not a public stage boundary. Recursive
+`Tick`/`Update`, simulation disposal, and chunk registration/removal are rejected during a callback because they would
+invalidate the current chunk snapshot. Perform those lifecycle operations outside the solver tick.
 
 Custom stages share typed dependencies through `simulation.GetOrCreateSolverData<T>(key, factory)`, backed by the same
 storage mechanism. Slots use ordinal string keys or object identity and survive ticks and pipeline edits. Restore
@@ -393,15 +446,16 @@ public sealed class ReactionSolver
 {
     public ReactionSolverConfig Config { get; } = new();
 
-    public void Solve(AtmosSimulation simulation)
+    public void Solve(AtmosWorldSolverContext context)
     {
+        AtmosSimulation simulation = context.Simulations[0];
         // Read snapshots and apply validated mutations through simulation.
     }
 }
 
 var reactionSolver = new ReactionSolver();
 
-simulation.Solvers.RegisterAfter(
+simulation.World.Solvers.RegisterAfter(
     AtmosBuiltInSolvers.Advection,
     "game-reactions",
     reactionSolver.Solve);
@@ -411,6 +465,50 @@ reactionSolver.Config.Rate = 0.5f;
 
 The registered method retains the solver instance, so its typed configuration remains editable after registration.
 The pipeline does not own or dispose custom solvers; callers remain responsible for an `IDisposable` solver's lifetime.
+
+#### Extending portal and dock transport
+
+`explicit-gas-transport` and `explicit-thermal-transport` are Numos' default implementation of transport across
+explicit links (portals, docks, and arbitrary `CreateLinks` batches) — they are not a special case the pipeline
+hardcodes. A host can replace them the same way it would replace any other stage:
+
+```csharp
+// Disable Numos' own portal/dock gas physics world-wide. Advection and boundary flow keep running unaffected.
+simulation.World.Solvers.SetEnabled(AtmosBuiltInSolvers.ExplicitGasTransport, false);
+
+simulation.World.Solvers.RegisterNeighborSolver(
+    "custom-portal-gas",
+    AtmosNeighborSelection.All("game/custom-portal-gas-v1"),
+    context =>
+    {
+        foreach (AtmosNeighborEdge edge in context.Topology.GetOwnedEdges())
+        {
+            if (edge.Kind != AtmosNeighborKind.Explicit ||
+                (edge.Flags & ExplicitLinkFlags.GasTransport) == 0)
+            {
+                continue;
+            }
+
+            AtmosDangerousChunk first = context.Dangerous().GetChunk(edge.First);
+            AtmosDangerousChunk second = context.Dangerous().GetChunk(edge.Second);
+            // Read and mutate both endpoints directly to implement custom valve, filter, or reaction behavior.
+        }
+    });
+```
+
+`ExplicitLinkFlags` reserves `GasTransport` and `ThermalTransport` for Numos' own stages, but a `[Flags] byte` has
+six more bits available. A link can carry a host-defined bit — `(ExplicitLinkFlags)(1 << 2)`, for example — purely
+so a host-registered `AtmosExplicitLinkSelector` can pick it out. Numos' built-in stages only ever look at the bits
+they know about, so a link can:
+
+- mix a built-in capability with a host-defined one (default gas physics plus a custom effect layered on top with
+  `RegisterAfter`),
+- use only a host-defined bit to opt out of default physics entirely for that one link while every other portal
+  keeps using Numos' implementation, or
+- disable a built-in stage world-wide (as above) and implement every portal's physics from scratch.
+
+This makes portal and dock transport a genuine extension point rather than a fixed behavior: a host is never stuck
+choosing between Numos' bulk-pressure model and no transport at all.
 
 #### Chunk-owned solver arrays
 
@@ -428,15 +526,16 @@ ordinal equality, so a compatible solver can reacquire restored data in another 
 key object. Transient fields can also use retained object keys, which compare by reference identity.
 
 ```csharp
-simulation.Solvers.Register("fire-v1", world =>
+simulation.World.Solvers.Register("fire-v1", context =>
 {
-    foreach (var chunk in world.GetChunkHandles())
+    AtmosSimulation simulation = context.Simulations[0];
+    foreach (var chunk in simulation.GetChunkHandles())
     {
-        var exposure = world.GetOrCreateChunkSolverFlatArray<float>(
+        var exposure = simulation.GetOrCreateChunkSolverFlatArray<float>(
             chunk, "fire/exposure", captureForRollback: true);
         exposure[new Int3(0, 0, 0)] += 1f;
 
-        float[] scratch = world.GetOrCreateChunkSolverArray<float>(
+        float[] scratch = simulation.GetOrCreateChunkSolverArray<float>(
             chunk, "fire/scratch", captureForRollback: false);
         Array.Clear(scratch);
     }
@@ -466,11 +565,12 @@ Direct array writes are not external recorded operations; checkpoints save them,
 Solvers that have a measured need to avoid copies of physical fields can opt into live storage from the same callback:
 
 ```csharp
-simulation.Solvers.RegisterAfter(AtmosBuiltInSolvers.Advection, "fast-reaction", solverSimulation =>
+simulation.World.Solvers.RegisterAfter(AtmosBuiltInSolvers.Advection, "fast-reaction", context =>
 {
-    foreach (AtmosChunkHandle handle in solverSimulation.GetChunkHandles())
+    AtmosSimulation simulation = context.Simulations[0];
+    foreach (AtmosChunkHandle handle in simulation.GetChunkHandles())
     {
-        AtmosDangerousChunk chunk = solverSimulation.Dangerous().GetChunk(handle);
+        AtmosDangerousChunk chunk = simulation.Dangerous().GetChunk(handle);
         Span<float> oxygen = chunk.GetGasChannel(0).Moles;
         // Raw writes are unchecked. Repair affected caches/topology and call MarkChanged as required.
     }
@@ -481,7 +581,7 @@ Gas injection through `AtmosSimulation.AddGasToVoxel` recalculates the target vo
 composition before temperature mixing. Internal boundary flow uses the same atomic injection operation with the
 normalized gas properties and pressure coefficient captured for that tick.
 
-The four default stages are described below.
+The three default domains are described below; their internal solver phases remain ordered as shown where relevant.
 
 ### 4.3 Stage 1 — Pressure Advection
 

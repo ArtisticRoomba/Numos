@@ -42,17 +42,120 @@ The `Int3` passed to `CreateAndRegisterChunk` is a position in the chunk grid, n
 
 Register chunks when world regions become relevant and call `UnregisterChunk` when they are no longer needed and should be disposed.
 
+The constructor above creates a private, one-simulation `AtmosWorld` for compatibility. Integrations with multiple
+grids, portals, or docking should create one world explicitly and create each storage domain through it:
+
+```csharp
+using var world = new AtmosWorld(config);
+AtmosSimulation station = world.CreateSimulation(16, 16, 16);
+AtmosSimulation shuttle = world.CreateSimulation(16, 16, 16);
+```
+
+Every simulation in a world receives the same immutable configuration snapshot. Calling `SetAtmosConfig` through the
+world or any registered simulation replaces that shared snapshot for all of them. Chunks remain owned by exactly one
+simulation; docking never copies, shares, or migrates chunk storage.
+
+## Connect cells with portals and docks
+
+Ordinary neighbors remain implicit Cartesian neighbors. A sparse explicit link connects cells that cannot be inferred
+from chunk coordinates, including cells in different simulations. Obtain stable value-only cell references from their
+owners and create a portal like this:
+
+```csharp
+AtmosCellRef stationCell = station.GetCellRef(stationChunk, stationVoxelIndex);
+AtmosCellRef shuttleCell = shuttle.GetCellRef(shuttleChunk, shuttleVoxelIndex);
+
+AtmosPortalHandle portal = world.CreatePortal(stationCell, shuttleCell);
+```
+
+`CreatePortal`, `CreateDock`, and `CreateLinks` all compile to the same undirected solver edge representation. A dock is
+a batch of corresponding surface-cell links and is removed as one unit:
+
+```csharp
+AtmosDockHandle dock = world.CreateDock(surfaceLinks);
+// Later:
+world.DestroyDock(dock);
+```
+
+Creation and removal are queued. They take effect at the start of the next world tick, when `TopologyVersion` advances.
+Endpoint order is canonicalized, a physical edge can be registered only once, and stale handles are rejected after the
+removal boundary. Removing a chunk or simulation invalidates only link sets indexed to that owner. Link activation wakes
+the endpoint chunks locally so a pressurized cell cannot be hidden by a sleeping peer.
+
+`ExplicitLinkFlags.GasTransport` permits pressure flow, diffusion, and the thermal energy carried by gas.
+`ThermalTransport` permits conductive heat transfer independently of gas movement. Combine them with `All` for an open
+atmospheric connection. Numos' default `explicit-gas-transport` and `explicit-thermal-transport` pipeline stages
+evaluate every active edge carrying the matching flag from an unchanged input state, limit all outgoing requests for
+each cell and species together, accumulate equal-and-opposite deltas, and commit each participating cell once.
+
+Those two stages are ordinary pipeline stages, not special-cased behavior: `world.Solvers.SetEnabled` can turn either
+one off world-wide, and a link can carry a host-defined flag bit beyond `GasTransport`/`ThermalTransport` purely so a
+host-registered solver's selector can pick it out instead. See
+[Extending portal and dock transport](atmospherics_technical_documentation.md#extending-portal-and-dock-transport)
+for the full pattern, including replacing default transport entirely or per-link.
+
+## Use portals from a custom solver
+
+Neighbor-aware custom solvers belong to the world because an explicit edge can join two simulations. Register one
+callback with a stable selection key and a selector describing which links carry the custom interaction:
+
+```csharp
+world.Solvers.RegisterNeighborSolverAfter(
+    AtmosBuiltInSolvers.Advection,
+    "game/fire-spread",
+    new AtmosNeighborSelection(
+        "game/fire-spread/v1",
+        includeCartesian: true,
+        static link => (link.Flags & ExplicitLinkFlags.GasTransport) != 0),
+    context =>
+    {
+        foreach (AtmosNeighborEdge edge in context.Topology.GetOwnedEdges())
+            ProcessFireEdge(edge.First, edge.Second);
+    });
+```
+
+`GetOwnedEdges` visits each physical adjacency once, which is the useful form for conservative transfer. Stencil
+solvers can instead acquire a chunk view once and call `GetNeighborCount` or `GetNeighbors` for each source cell. Both
+forms emit Cartesian and selected explicit adjacency through the same solver code.
+
+Numos evaluates the link selector when topology changes and compiles sparse incident indexes only for chunks containing
+selected explicit endpoints. Stable ticks do not rediscover portals or call the selector. The topology view describes
+structural adjacency; inspect current voxel classification when the solver needs to reject solid or void cells.
+
+The supported view returns value-only cell references. A measured hot path can reference `Numos.API.Dangerous` and call
+`context.Dangerous().GetChunk(cell)` inside the callback to resolve live structure-of-arrays storage. As with other
+dangerous APIs, the solver must repair every cache, sleep, and revision invariant affected by raw writes.
+
+World checkpoints include each simulation checkpoint, link-set generations and lifecycle state, and the applied topology
+version:
+
+```csharp
+AtmosWorldCheckpoint checkpoint = world.CaptureCheckpoint();
+// mutate and tick the world
+world.RestoreCheckpoint(checkpoint);
+```
+
+Restore keeps matching registrations in place, disposes registrations absent from the checkpoint, and recreates missing
+registrations that use only built-in solvers. A retained registration must still have compatible chunk dimensions and a
+compatible solver pipeline. Numos cannot recreate a missing custom solver because its host delegate is not checkpointed.
+Restore rebuilds sparse indexes and resets the elapsed-time accumulator.
+
 ## Driving the Solver
+
 Numos uses a fixed simulation rate. In a normal engine loop, give the facade the elapsed real time and let it retain partial steps and process complete ticks.
 
 ```csharp
 void UpdateAtmospherics(float deltaSeconds)
 {
-    simulation.Update(deltaSeconds);
+    world.Update(deltaSeconds);
 }
 ```
 
-`AtmosSimulation.Update` limits catch-up work so a long frame does not create an unbounded solver stall. If an integration needs deterministic step-by-step control, for example in a test or a lockstep simulation, call `Tick()` instead. `Tick()` runs exactly one fixed solver tick and does not use the elapsed-time accumulator.
+`AtmosWorld.Update` limits catch-up work so a long frame does not create an unbounded solver stall. If an integration
+needs deterministic step-by-step control, for example in a test or a lockstep simulation, call `Tick()` instead.
+`Tick()` runs exactly one fixed solver tick and does not use the elapsed-time accumulator. Compatibility calls through
+`AtmosSimulation.Update` and `AtmosSimulation.Tick` drive that simulation's owning world, so use the world directly
+whenever it contains multiple simulations.
 
 Do not call into one `AtmosSimulation` from unrelated ownership systems without deciding who owns its lifecycle and update order first. Numos parallelizes work inside the simulation; an engine integration should still present one coherent sequence of topology changes, gas injections, and ticks.
 
@@ -102,15 +205,15 @@ to the other. Each simulation owns its own slots. Solvers agree on a key and an 
 only on the first request:
 
 ```csharp
-simulation.Solvers.Register("produce", world =>
+simulation.World.Solvers.Register("produce", _ =>
 {
-    var pending = world.GetOrCreateSolverData("custom/pending", static () => new Queue<int>());
+    var pending = simulation.GetOrCreateSolverData("custom/pending", static () => new Queue<int>());
     pending.Clear();
-    pending.Enqueue(world.TickCount);
+    pending.Enqueue(simulation.TickCount);
 });
-simulation.Solvers.RegisterAfter("produce", "consume", world =>
+simulation.World.Solvers.RegisterAfter("produce", "consume", _ =>
 {
-    var pending = world.GetOrCreateSolverData("custom/pending", static () => new Queue<int>());
+    var pending = simulation.GetOrCreateSolverData("custom/pending", static () => new Queue<int>());
     while (pending.TryDequeue(out int tick))
         Console.WriteLine(tick);
 });
@@ -232,8 +335,9 @@ The dangerous surface may bypass validation and is allowed to change more aggres
 ## Recording and deterministic replay
 
 `AtmosSimulation` supports synchronous mutation recording, full grid checkpoints, restore into an existing compatible
-simulation, exact tick/sequence replay and stable state hashes. `AtmosReplayTimeline` retains history for inspection,
-can continue simulation from a selected historical state, and drives the Viewer’s horizontal Timeline panel.
+simulation, exact tick/sequence replay and stable state hashes. `AtmosReplayTimeline` retains history for inspection and
+can continue simulation from a selected historical state. The Viewer layers session-only branches over the world
+timeline and can export the selected branch as a linear replay.
 See [deterministic replay](deterministic_replay.md)
 for examples, the optional `Numos.Serialization` and `Numos.Serialization.FileSystem` packages, compatibility rules,
 detached-mixture scope and benchmark commands.

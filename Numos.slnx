@@ -13,6 +13,7 @@
         <Project Path="tests\Numos.Maths.Tests\Numos.Maths.Tests.csproj"/>
         <Project Path="tests\Numos.SimDrawer.Tests\Numos.SimDrawer.Tests.csproj"/>
         <Project Path="tests\Numos.Units.Analyzers.Tests\Numos.Units.Analyzers.Tests.csproj"/>
+        <Project Path="tests\Numos.Viewer.Tests\Numos.Viewer.Tests.csproj"/>
     </Folder>
 
     <Project Path="src\Numos.API.Dangerous\Numos.API.Dangerous.csproj"/>

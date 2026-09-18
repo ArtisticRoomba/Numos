@@ -7,6 +7,7 @@ public sealed partial class AtmosSimulation
     /// <summary>
     ///     Gets the exact current position: completed ticks and the highest incorporated recorded operation.
     /// </summary>
+    /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
     public AtmosTimelinePosition TimelinePosition
     {
         get
@@ -23,12 +24,13 @@ public sealed partial class AtmosSimulation
     ///     Custom solvers still run during replay. Use this flag to suppress host side effects such as audio, gameplay
     ///     events, and telemetry while preserving their deterministic simulation mutations.
     /// </remarks>
+    /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
     public bool IsReplaying
     {
         get
         {
             ThrowIfDisposed();
-            return _kernel.IsReplaying;
+            return _kernel.IsReplaying || World.IsReplaying;
         }
     }
 
@@ -37,10 +39,11 @@ public sealed partial class AtmosSimulation
     /// </summary>
     /// <returns>Immutable grid, configuration, solver-enable and timeline continuation data.</returns>
     /// <remarks>
-    /// The checkpoint can restore Numos into a compatible existing simulation. Detached containers and custom-solver
-    /// closure state remain host-owned. Chunk solver arrays opted into capture are copied and restored automatically.
-    /// The host-facing elapsed-time accumulator is reset when this checkpoint is restored.
+    ///     The checkpoint can restore Numos into a compatible existing simulation. Detached containers and custom-solver
+    ///     closure state remain host-owned. Chunk solver arrays opted into capture are copied and restored automatically.
+    ///     The host-facing elapsed-time accumulator is reset when this checkpoint is restored.
     /// </remarks>
+    /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
     /// <exception cref="InvalidOperationException">Called during a solver tick.</exception>
     public AtmosSimulationCheckpoint CaptureCheckpoint()
     {
@@ -60,11 +63,24 @@ public sealed partial class AtmosSimulation
     /// </remarks>
     /// <exception cref="ArgumentNullException">The checkpoint is null.</exception>
     /// <exception cref="ArgumentException">The checkpoint is incompatible with this simulation.</exception>
-    /// <exception cref="InvalidOperationException">Recording is active, or called during a solver tick.</exception>
+    /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
+    /// <exception cref="InvalidOperationException">
+    ///     Recording is active, this is called during a solver tick, or the simulation belongs to a world whose other
+    ///     simulations or explicit topology require <see cref="AtmosWorld.RestoreCheckpoint" />.
+    /// </exception>
     public void RestoreCheckpoint(AtmosSimulationCheckpoint checkpoint)
     {
         ThrowIfDisposed();
-        _kernel.RestoreCheckpoint(checkpoint);
+        // Hold World.Gate for the whole call so the lock order matches AtmosWorld.TickCore's Gate-then-StateGate
+        // order. Releasing Gate before taking the kernel's StateGate (as EnsureSimulationRestoreAllowed does on its
+        // own) would let a concurrent world tick acquire Gate then block on this simulation's StateGate while this
+        // call holds StateGate and blocks on Gate inside a solver-enablement callback -- an AB-BA deadlock.
+        lock (World.Gate)
+        {
+            World.EnsureSimulationRestoreAllowed(this);
+            _kernel.RestoreCheckpoint(checkpoint);
+            World.SynchronizeRestoredConfig(this, _kernel.GetAtmosConfig());
+        }
     }
 
     /// <summary>
@@ -83,13 +99,25 @@ public sealed partial class AtmosSimulation
     /// <exception cref="ArgumentNullException">The checkpoint or operation history is null.</exception>
     /// <exception cref="ArgumentOutOfRangeException">The target precedes the checkpoint or exceeds the supported tick range.</exception>
     /// <exception cref="ArgumentException">Compatibility, operation ordering, sequence coverage, or the target is invalid.</exception>
-    /// <exception cref="InvalidOperationException">Recording is active, replay is recursive, or called during a solver tick.</exception>
+    /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
+    /// <exception cref="InvalidOperationException">
+    ///     Recording is active, replay is recursive, this is called during a solver tick, or world-owned state requires
+    ///     world-level checkpoint restoration.
+    /// </exception>
     public AtmosReplayResult ReplayTo(
         AtmosSimulationCheckpoint checkpoint,
         IReadOnlyList<AtmosRecordedOperation> operations, AtmosTimelinePosition target)
     {
         ThrowIfDisposed();
-        return _kernel.ReplayTo(checkpoint, operations, target);
+        // See RestoreCheckpoint: Gate must be held across the kernel call (which re-enters World.Tick for catch-up
+        // ticks and calls back into world solver enablement) so the lock order stays Gate-then-StateGate everywhere.
+        lock (World.Gate)
+        {
+            World.EnsureSimulationRestoreAllowed(this);
+            var result = _kernel.ReplayTo(checkpoint, operations, target);
+            World.SynchronizeRestoredConfig(this, _kernel.GetAtmosConfig());
+            return result;
+        }
     }
 
     /// <summary>
@@ -100,6 +128,7 @@ public sealed partial class AtmosSimulation
     ///     The digest excludes presentation identities and profiling data. It captures a coherent checkpoint and hashes
     ///     raw floating-point bits in canonical order, which makes it useful for replay verification but not authentication.
     /// </remarks>
+    /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
     /// <exception cref="InvalidOperationException">Called during a solver tick.</exception>
     public AtmosStateHash ComputeStateHash()
     {
@@ -111,6 +140,7 @@ public sealed partial class AtmosSimulation
     ///     Resumes the retained recording at its unchanged stopped head.
     /// </summary>
     /// <remarks>Appends to retained history without clearing earlier operations or allocating a new simulation.</remarks>
+    /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
     /// <exception cref="InvalidOperationException">
     ///     Recording is already active, no stopped recording exists, the state hash differs from the stopped head,
     ///     or this is called during a solver tick.
@@ -118,6 +148,7 @@ public sealed partial class AtmosSimulation
     public void ResumeRecording()
     {
         ThrowIfDisposed();
+        World.EnsureComponentRecordingAllowed(this);
         _kernel.ResumeRecording();
     }
 

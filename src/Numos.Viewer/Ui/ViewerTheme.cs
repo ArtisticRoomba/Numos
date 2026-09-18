@@ -22,6 +22,15 @@ internal static class ViewerTheme
         new(0.88f, 0.40f, 0.42f, 1f),
         new(0.28f, 0.75f, 0.70f, 1f)
     ];
+    public readonly static Vector4[] TopologyPalette =
+    [
+        new(0.74f, 0.48f, 0.92f, 1f),
+        new(0.22f, 0.76f, 0.82f, 1f),
+        new(0.93f, 0.45f, 0.72f, 1f),
+        new(0.51f, 0.59f, 0.94f, 1f),
+        new(0.76f, 0.72f, 0.31f, 1f),
+        new(0.88f, 0.52f, 0.38f, 1f)
+    ];
 
     public static void Apply()
     {

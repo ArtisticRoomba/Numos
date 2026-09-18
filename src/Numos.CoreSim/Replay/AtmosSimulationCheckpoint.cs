@@ -16,12 +16,12 @@ public sealed class AtmosSimulationCheckpoint
     /// <summary>
     ///     Identifies the in-memory checkpoint schema used to interpret this data.
     /// </summary>
-    public const int CurrentFormatVersion = 4;
+    public const int CurrentFormatVersion = 5;
 
     /// <summary>
     ///     Identifies the structural and deterministic-math contract required to restore this data.
     /// </summary>
-    public const int CurrentCompatibilityVersion = 2;
+    public const int CurrentCompatibilityVersion = 3;
 
     internal AtmosSimulationCheckpoint(
         Int3 dimensions, AtmosTimelinePosition position,
@@ -98,7 +98,12 @@ public sealed class AtmosSimulationCheckpoint
 /// <param name="Name">Ordinal stable name identifying a compatible host-provided implementation.</param>
 /// <param name="IsCustom">Whether the step is supplied by the host rather than Numos.</param>
 /// <param name="Enabled">Whether the step participates in subsequent ticks.</param>
-public readonly record struct AtmosSolverCheckpoint(string Name, bool IsCustom, bool Enabled);
+/// <param name="NeighborSelectionKey">The compiled-neighborhood policy key, or <see langword="null" />.</param>
+public readonly record struct AtmosSolverCheckpoint(
+    string Name,
+    bool IsCustom,
+    bool Enabled,
+    string? NeighborSelectionKey);
 
 /// <summary>
 ///     Holds the exact continuation data for one chunk.

@@ -12,14 +12,118 @@ namespace Numos.Serialization;
 /// </summary>
 public static class NumosReplaySerializer
 {
-    private const ushort ContainerVersion = 1;
-    private const ushort ReplayContentKind = 1;
-    private const ushort MetadataSection = 1;
-    private const ushort CheckpointSection = 2;
-    private const ushort OperationsSection = 3;
-    private const ushort RequiredSection = 1;
-    private readonly static byte[] Magic = [0x4e, 0x55, 0x4d, 0x4f, 0x53, 0x0d, 0x0a, 0x1a];
-    private readonly static Encoding Utf8 = new UTF8Encoding(false, true);
+    internal const ushort ContainerVersion = 1;
+    internal const ushort ReplayContentKind = 1;
+    internal const ushort WorldReplayContentKind = 2;
+    internal const ushort MetadataSection = 1;
+    internal const ushort CheckpointSection = 2;
+    internal const ushort OperationsSection = 3;
+    internal const ushort RequiredSection = 1;
+    internal readonly static byte[] Magic = [0x4e, 0x55, 0x4d, 0x4f, 0x53, 0x0d, 0x0a, 0x1a];
+    internal readonly static Encoding Utf8 = new UTF8Encoding(false, true);
+
+    /// <summary>
+    ///     Writes any supported replay document to a writable stream and leaves the stream open.
+    /// </summary>
+    /// <param name="destination">The stream that receives the complete Numos container.</param>
+    /// <param name="document">A component or complete-world replay document.</param>
+    /// <exception cref="ArgumentNullException">A required argument is <see langword="null" />.</exception>
+    /// <exception cref="ArgumentException">The stream is not writable.</exception>
+    /// <exception cref="NotSupportedException">The document type or host-defined replay state is unsupported.</exception>
+    public static void Serialize(Stream destination, INumosReplayDocument document)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        switch (document)
+        {
+            case NumosReplayDocument component:
+                Serialize(destination, component);
+                break;
+            case NumosWorldReplayDocument world:
+                NumosWorldReplaySerializer.Serialize(destination, world);
+                break;
+            default:
+                throw new NotSupportedException($"Replay document type '{document.GetType().FullName}' is unsupported.");
+        }
+    }
+
+    /// <summary>
+    ///     Reads either supported replay content kind and leaves the source stream open.
+    /// </summary>
+    /// <param name="source">The readable stream containing exactly one Numos container.</param>
+    /// <param name="options">Optional allocation and payload limits for untrusted input.</param>
+    /// <returns>A component or complete-world replay document selected by the content discriminator.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="source" /> is <see langword="null" />.</exception>
+    /// <exception cref="ArgumentException">The stream is not readable.</exception>
+    /// <exception cref="InvalidDataException">The container is malformed, unsupported, or inconsistent.</exception>
+    /// <exception cref="NotSupportedException">The replay contains host-defined state.</exception>
+    public static INumosReplayDocument DeserializeDocument(Stream source, NumosReplayReadOptions? options = null)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        if (!source.CanRead)
+            throw new ArgumentException("The source stream must be readable.", nameof(source));
+
+        options ??= new NumosReplayReadOptions();
+        ValidateOptions(options);
+
+        var readable = source;
+        MemoryStream? buffered = null;
+        long origin = 0;
+        if (source.CanSeek)
+        {
+            origin = source.Position;
+        }
+        else
+        {
+            buffered = new MemoryStream();
+            try
+            {
+                long maximumBufferedBytes = options.MaxPayloadBytes > long.MaxValue - 16L * 1024
+                    ? long.MaxValue
+                    : options.MaxPayloadBytes + 16L * 1024;
+
+                Span<byte> copyBuffer = stackalloc byte[8192];
+                int read;
+                while ((read = source.Read(copyBuffer)) != 0)
+                {
+                    if (buffered.Length + read > maximumBufferedBytes)
+                        throw new InvalidDataException("The Numos file exceeds the configured payload limit.");
+
+                    buffered.Write(copyBuffer[..read]);
+                }
+
+                buffered.Position = 0;
+                readable = buffered;
+            }
+            catch
+            {
+                buffered.Dispose();
+                throw;
+            }
+        }
+
+        try
+        {
+            using var reader = new BinaryReader(readable, Utf8, true);
+            if (!reader.ReadBytes(Magic.Length).SequenceEqual(Magic))
+                throw new InvalidDataException("The stream is not a Numos file.");
+
+            if (reader.ReadUInt16() != ContainerVersion)
+                throw new InvalidDataException("The Numos container version is unsupported.");
+
+            ushort kind = reader.ReadUInt16();
+            readable.Position = source.CanSeek ? origin : 0;
+            return kind switch
+            {
+                ReplayContentKind => Deserialize(readable, options),
+                WorldReplayContentKind => NumosWorldReplaySerializer.Deserialize(readable, options),
+                _ => throw new InvalidDataException($"Numos content kind {kind} is unsupported.")
+            };
+        }
+        finally
+        {
+            buffered?.Dispose();
+        }
+    }
 
     /// <summary>
     ///     Writes a replay document to a writable stream and leaves the stream open.
@@ -146,7 +250,7 @@ public static class NumosReplaySerializer
         return new NumosReplayDocument(metadata.Metadata, archive);
     }
 
-    private static void WriteSection(BinaryWriter writer, ushort id, ushort flags, Action<BinaryWriter> write)
+    internal static void WriteSection(BinaryWriter writer, ushort id, ushort flags, Action<BinaryWriter> write)
     {
         var counter = new CountingWriteStream();
         using (var countWriter = new BinaryWriter(counter, Utf8, true))
@@ -221,6 +325,7 @@ public static class NumosReplaySerializer
             WriteString(writer, solver.Name);
             writer.Write(solver.IsCustom);
             writer.Write(solver.Enabled);
+            WriteNullableString(writer, solver.NeighborSelectionKey);
         }
 
         writer.Write(checkpoint.Chunks.Count);
@@ -230,7 +335,13 @@ public static class NumosReplaySerializer
     private static CheckpointPayload ReadCheckpoint(BinaryReader reader, NumosReplayReadOptions options)
     {
         int format = reader.ReadInt32();
+        if (format != AtmosSimulationCheckpoint.CurrentFormatVersion)
+            throw new InvalidDataException("The checkpoint schema is unsupported.");
+
         int compatibility = reader.ReadInt32();
+        if (compatibility != AtmosSimulationCheckpoint.CurrentCompatibilityVersion)
+            throw new InvalidDataException("The checkpoint compatibility version is unsupported.");
+
         ulong fingerprint = reader.ReadUInt64();
         var dimensions = ReadInt3(reader);
         var position = ReadPosition(reader);
@@ -240,15 +351,22 @@ public static class NumosReplaySerializer
         int solverCount = ReadCount(reader, 1024, "solver");
         var solvers = new AtmosSolverCheckpoint[solverCount];
         for (int index = 0; index < solverCount; index++)
-            solvers[index] = new AtmosSolverCheckpoint(ReadString(reader, options), reader.ReadBoolean(), reader.ReadBoolean());
+        {
+            string name = ReadString(reader, options);
+            bool isCustom = reader.ReadBoolean();
+            bool enabled = reader.ReadBoolean();
+            string? selectionKey = ReadNullableString(reader, options);
+            if (string.IsNullOrWhiteSpace(name) || selectionKey != null && string.IsNullOrWhiteSpace(selectionKey))
+                throw new InvalidDataException("The solver checkpoint metadata is invalid.");
+
+            solvers[index] = new AtmosSolverCheckpoint(name, isCustom, enabled, selectionKey);
+        }
 
         int chunkCount = ReadCount(reader, 1_000_000, "chunk");
         var chunks = new AtmosChunkCheckpoint[chunkCount];
         for (int index = 0; index < chunkCount; index++) chunks[index] = ReadChunk(reader);
         var checkpoint = new AtmosSimulationCheckpoint(dimensions, position, config, solvers, chunks);
-        if (format != checkpoint.FormatVersion ||
-            compatibility != checkpoint.CompatibilityVersion ||
-            fingerprint != checkpoint.CompatibilityFingerprint)
+        if (fingerprint != checkpoint.CompatibilityFingerprint)
             throw new InvalidDataException("The checkpoint schema or compatibility fingerprint is invalid.");
 
         if (initialHash.Position != position) throw new InvalidDataException("The initial hash position is invalid.");
@@ -256,7 +374,7 @@ public static class NumosReplaySerializer
         return new CheckpointPayload(checkpoint, initialHash, headHash);
     }
 
-    private static void WriteConfig(BinaryWriter writer, AtmosConfigSnapshot config)
+    internal static void WriteConfig(BinaryWriter writer, AtmosConfigSnapshot config)
     {
         writer.Write(config.GlobalTemperature);
         writer.Write(config.DefaultTemperatureFallback);
@@ -279,7 +397,7 @@ public static class NumosReplaySerializer
         writer.Write(config.SolverConfigurations.Count);
     }
 
-    private static AtmosConfigSnapshot ReadConfig(BinaryReader reader, NumosReplayReadOptions options)
+    internal static AtmosConfigSnapshot ReadConfig(BinaryReader reader, NumosReplayReadOptions options)
     {
         var config = new AtmosConfig
         {
@@ -323,7 +441,7 @@ public static class NumosReplaySerializer
         };
     }
 
-    private static void WriteChunk(BinaryWriter writer, AtmosChunkCheckpoint chunk)
+    internal static void WriteChunk(BinaryWriter writer, AtmosChunkCheckpoint chunk)
     {
         WriteInt3(writer, chunk.Position);
         WriteInt3(writer, chunk.Dimensions);
@@ -346,7 +464,7 @@ public static class NumosReplaySerializer
         writer.Write(chunk.SolverArrays.Count);
     }
 
-    private static AtmosChunkCheckpoint ReadChunk(BinaryReader reader)
+    internal static AtmosChunkCheckpoint ReadChunk(BinaryReader reader)
     {
         var position = ReadInt3(reader);
         var dimensions = ReadInt3(reader);
@@ -436,7 +554,7 @@ public static class NumosReplaySerializer
         return new AtmosRecording(start, head, operations);
     }
 
-    private static void WriteOperation(BinaryWriter writer, AtmosOperation operation)
+    internal static void WriteOperation(BinaryWriter writer, AtmosOperation operation)
     {
         switch (operation)
         {
@@ -496,7 +614,7 @@ public static class NumosReplaySerializer
         }
     }
 
-    private static AtmosOperation ReadOperation(BinaryReader reader, ushort rawCode, NumosReplayReadOptions options)
+    internal static AtmosOperation ReadOperation(BinaryReader reader, ushort rawCode, NumosReplayReadOptions options)
     {
         if (!Enum.IsDefined((AtmosOperationCode)rawCode)) throw new InvalidDataException($"Replay opcode {rawCode} is unsupported.");
 
@@ -558,30 +676,30 @@ public static class NumosReplaySerializer
         return new AtmosStateHash(ReadPosition(reader), reader.ReadUInt64());
     }
 
-    private static void WritePosition(BinaryWriter writer, AtmosTimelinePosition position)
+    internal static void WritePosition(BinaryWriter writer, AtmosTimelinePosition position)
     {
         writer.Write(position.Tick);
         writer.Write(position.OperationSequence);
     }
 
-    private static AtmosTimelinePosition ReadPosition(BinaryReader reader)
+    internal static AtmosTimelinePosition ReadPosition(BinaryReader reader)
     {
         return new AtmosTimelinePosition(reader.ReadUInt64(), reader.ReadUInt64());
     }
 
-    private static void WriteInt3(BinaryWriter writer, Int3 value)
+    internal static void WriteInt3(BinaryWriter writer, Int3 value)
     {
         writer.Write(value.X);
         writer.Write(value.Y);
         writer.Write(value.Z);
     }
 
-    private static Int3 ReadInt3(BinaryReader reader)
+    internal static Int3 ReadInt3(BinaryReader reader)
     {
         return new Int3(reader.ReadInt32(), reader.ReadInt32(), reader.ReadInt32());
     }
 
-    private static void WriteString(BinaryWriter writer, string value)
+    internal static void WriteString(BinaryWriter writer, string value)
     {
         ArgumentNullException.ThrowIfNull(value);
         byte[] bytes = Utf8.GetBytes(value);
@@ -589,7 +707,7 @@ public static class NumosReplaySerializer
         writer.Write(bytes);
     }
 
-    private static string ReadString(BinaryReader reader, NumosReplayReadOptions options)
+    internal static string ReadString(BinaryReader reader, NumosReplayReadOptions options)
     {
         int length = ReadCount(reader, options.MaxStringBytes, "string byte");
         byte[] bytes = reader.ReadBytes(length);
@@ -598,18 +716,18 @@ public static class NumosReplaySerializer
         return Utf8.GetString(bytes);
     }
 
-    private static void WriteNullableString(BinaryWriter writer, string? value)
+    internal static void WriteNullableString(BinaryWriter writer, string? value)
     {
         writer.Write(value != null);
         if (value != null) WriteString(writer, value);
     }
 
-    private static string? ReadNullableString(BinaryReader reader, NumosReplayReadOptions options)
+    internal static string? ReadNullableString(BinaryReader reader, NumosReplayReadOptions options)
     {
         return reader.ReadBoolean() ? ReadString(reader, options) : null;
     }
 
-    private static int ReadCount(BinaryReader reader, int maximum, string name)
+    internal static int ReadCount(BinaryReader reader, int maximum, string name)
     {
         int count = reader.ReadInt32();
         if (count < 0 || count > maximum) throw new InvalidDataException($"The {name} count is invalid.");
@@ -624,7 +742,7 @@ public static class NumosReplaySerializer
         return values;
     }
 
-    private static void Drain(Stream stream)
+    internal static void Drain(Stream stream)
     {
         Span<byte> buffer = stackalloc byte[4096];
         while (stream.Read(buffer) != 0)
@@ -632,7 +750,7 @@ public static class NumosReplaySerializer
         }
     }
 
-    private static void ValidateOptions(NumosReplayReadOptions options)
+    internal static void ValidateOptions(NumosReplayReadOptions options)
     {
         if (options.MaxPayloadBytes <= 0 || options.MaxOperations < 0 || options.MaxStringBytes < 0 || options.MaxMetadataBytes < 0)
             throw new ArgumentOutOfRangeException(nameof(options));

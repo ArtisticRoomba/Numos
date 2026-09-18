@@ -145,20 +145,20 @@ public sealed class AtmosReplayTests
         using var simulation = CreateSimulation();
         var chunk = simulation.CreateAndRegisterChunk(default);
         int hostEffects = 0;
-        simulation.Solvers.Register(
+        simulation.World.Solvers.Register(
             "host-v1",
-            world =>
+            _ =>
             {
-                world.AddGasToVoxel(chunk, 0, 0, 0.25f, 300f);
-                if (!world.IsReplaying) hostEffects++;
+                simulation.AddGasToVoxel(chunk, 0, 0, 0.25f, 300f);
+                if (!simulation.IsReplaying) hostEffects++;
             });
 
         var initial = simulation.CaptureCheckpoint();
         simulation.StartRecording();
         simulation.Tick();
         simulation.Tick();
-        simulation.Solvers.SetEnabled("host-v1", false);
-        simulation.Solvers.SetEnabled("host-v1", false);
+        simulation.World.Solvers.SetEnabled("host-v1", false);
+        simulation.World.Solvers.SetEnabled("host-v1", false);
         simulation.Tick();
         var hash = simulation.ComputeStateHash();
         var recording = simulation.StopRecording();
@@ -235,7 +235,7 @@ public sealed class AtmosReplayTests
             Throws.TypeOf<KeyNotFoundException>());
 
         Assert.That(simulation.ComputeStateHash(), Is.EqualTo(hash));
-        simulation.Solvers.Register("incompatible", _ => { });
+        simulation.World.Solvers.Register("incompatible", _ => { });
         hash = simulation.ComputeStateHash();
         Assert.That(() => simulation.RestoreCheckpoint(checkpoint), Throws.ArgumentException);
         Assert.That(simulation.ComputeStateHash(), Is.EqualTo(hash));
@@ -267,10 +267,10 @@ public sealed class AtmosReplayTests
     public void DefinitionChangesDuringRecording_AndCaptureInsideTick_AreRejected()
     {
         using var simulation = CreateSimulation();
-        simulation.Solvers.Register("probe", world => Assert.That(world.CaptureCheckpoint, Throws.InvalidOperationException));
+        simulation.World.Solvers.Register("probe", _ => Assert.That(simulation.CaptureCheckpoint, Throws.InvalidOperationException));
         simulation.StartRecording();
-        Assert.That(() => simulation.Solvers.Register("new", _ => { }), Throws.InvalidOperationException);
-        Assert.That(() => simulation.Solvers.Unregister("probe"), Throws.InvalidOperationException);
+        Assert.That(() => simulation.World.Solvers.Register("new", _ => { }), Throws.InvalidOperationException);
+        Assert.That(() => simulation.World.Solvers.Unregister("probe"), Throws.InvalidOperationException);
         simulation.Tick();
         var hash = simulation.ComputeStateHash();
         var checkpoint = simulation.CaptureCheckpoint();
@@ -302,7 +302,7 @@ public sealed class AtmosReplayTests
         using var simulation = CreateSimulation();
         var chunk = simulation.CreateAndRegisterChunk(default);
         simulation.AddGasToVoxel(chunk, 0, 0, 2f, 320f);
-        simulation.Solvers.SetEnabled(AtmosBuiltInSolvers.Advection, false);
+        simulation.World.Solvers.SetEnabled(AtmosBuiltInSolvers.Advection, false);
         simulation.GetVoxelGasMixture(chunk, 0).Temperature = 280f;
         var checkpoint = simulation.CaptureCheckpoint();
         var oldVersion = simulation.GetChunkSnapshot(chunk).Version;

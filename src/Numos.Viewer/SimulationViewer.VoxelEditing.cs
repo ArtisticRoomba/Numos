@@ -422,6 +422,8 @@ public partial class SimulationViewer
 
         RenderContextInjectionMenu();
 
+        RenderContextPortalMenu();
+
         if (ImGui.MenuItem("Clear Gas"))
             ApplyClearGas(_selectedCells);
 
@@ -462,6 +464,41 @@ public partial class SimulationViewer
         }
 
         ImGui.EndPopup();
+    }
+
+    private void RenderContextPortalMenu()
+    {
+        AtmosCellRef? selected = GetSelectedAtmosCell();
+        if (!selected.HasValue || !ImGui.BeginMenu("Portal"))
+            return;
+
+        if (ImGui.MenuItem("Start Portal Here"))
+        {
+            _portalFirst = selected;
+            _portalSecond = null;
+            _topologyFeedback = null;
+        }
+
+        bool canCreate = _portalFirst.HasValue && GetTopologyFlags() != ExplicitLinkFlags.None;
+        ImGui.BeginDisabled(!canCreate);
+        if (ImGui.MenuItem("Create Portal to Here"))
+        {
+            _portalSecond = selected;
+            CreatePortalFromCapturedEndpoints();
+        }
+
+        ImGui.EndDisabled();
+
+        ImGui.Separator();
+        if (_portalFirst.HasValue)
+            ImGui.TextDisabled($"From: {FormatCell(_portalFirst.Value).Replace('\n', ' ')}");
+        else
+            ImGui.TextDisabled("Start a portal at its first endpoint.");
+
+        if (GetTopologyFlags() == ExplicitLinkFlags.None)
+            ImGui.TextDisabled("Enable a transport mode in World & Topology.");
+
+        ImGui.EndMenu();
     }
 
     private void RenderContextInjectionMenu()

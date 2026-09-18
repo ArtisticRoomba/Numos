@@ -1,57 +1,49 @@
 namespace Numos.API;
 
 /// <summary>
-///     A user-defined stage in an <see cref="AtmosSimulation" /> tick.
+///     Stable names of the default world solver stages.
 /// </summary>
 /// <remarks>
-///     Custom solvers inspect detached snapshots and mutate state through the same validated
-///     <see cref="AtmosSimulation" /> operations as other callers. Use <c>Numos.API.Dangerous</c> only when profiling
-///     demonstrates that a solver needs direct access to live storage.
-///     Private chunk-owned storage, with an explicit option for automatic rollback, is available through
-///     <see cref="AtmosSimulation.GetOrCreateChunkSolverArray{T}" /> and
-///     <see cref="AtmosSimulation.GetOrCreateChunkSolverFlatArray{T}" />.
-///     Attach derived data to registered gases with <see cref="AtmosSimulation.GetOrCreateGasSolverData{T}" />.
-///     Share typed dependencies between stages with <see cref="AtmosSimulation.GetOrCreateSolverData{T}" />.
+///     Every stage below is an ordinary registered stage — a host can disable, reorder, or replace any of them with
+///     <see cref="AtmosWorldSolverPipeline" /> exactly as it would its own custom stage.
 /// </remarks>
-/// <param name="simulation">The simulation being solved.</param>
-public delegate void AtmosSolver(AtmosSimulation simulation);
-// TODO AtmosSolver add custom config options that are registered with the solver
-
-/// <summary>
-///     Identifies whether a registered solver stage is built in or caller provided.
-/// </summary>
-public enum AtmosSolverKind
-{
-    /// <summary>A built-in Numos stage.</summary>
-    BuiltIn,
-
-    /// <summary>A caller-provided solver.</summary>
-    Custom
-}
-
-/// <summary>
-///     Detached metadata for one registered solver stage.
-/// </summary>
-public readonly record struct AtmosSolverStep(string Name, bool IsEnabled, AtmosSolverKind Kind);
-
-/// <summary>
-///     Stable names of the default Numos solver stages.
-/// </summary>
 public static class AtmosBuiltInSolvers
 {
-    /// <summary>Parallel intra-chunk pressure advection and species diffusion.</summary>
+    /// <summary>
+    ///     Intra-chunk gas advection.
+    /// </summary>
     public const string Advection = "advection";
 
-    /// <summary>Sequential cross-chunk pressure flow.</summary>
+    /// <summary>
+    ///     Sparse gas transport across explicit portal, dock, and arbitrary links whose flags include
+    ///     <see cref="ExplicitLinkFlags.GasTransport" />.
+    /// </summary>
+    public const string ExplicitGasTransport = "explicit-gas-transport";
+
+    /// <summary>
+    ///     Cartesian gas transport across ordinary chunk boundaries.
+    /// </summary>
     public const string BoundaryFlow = "boundary-flow";
 
-    /// <summary>Intra-chunk thermal diffusion and phase changes.</summary>
+    /// <summary>
+    ///     Intra-chunk thermal diffusion and phase changes.
+    /// </summary>
     public const string Thermodynamics = "thermodynamics";
 
-    /// <summary>Cross-chunk thermal diffusion.</summary>
-    public const string ThermalBoundary = "thermal-boundary";
     /// <summary>
-    ///     Gas Reactions
+    ///     Sparse thermal transport across explicit portal, dock, and arbitrary links whose flags include
+    ///     <see cref="ExplicitLinkFlags.ThermalTransport" />. Runs on the same cadence as
+    ///     <see cref="Thermodynamics" /> (see <c>AtmosSolverConstants.ThermodynamicsTickInterval</c>).
+    /// </summary>
+    public const string ExplicitThermalTransport = "explicit-thermal-transport";
+
+    /// <summary>
+    ///     Cartesian thermal transport across ordinary chunk boundaries.
+    /// </summary>
+    public const string ThermalBoundary = "thermal-boundary";
+
+    /// <summary>
+    ///     Per-cell gas reactions.
     /// </summary>
     public const string GasReactions = "gas-reactions";
 }

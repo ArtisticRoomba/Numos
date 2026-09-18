@@ -66,12 +66,12 @@ public sealed class AtmosRecordingTests
     {
         using var simulation = new AtmosSimulation(1, 1, 1);
         var replacement = new AtmosConfig(simulation.Config) { SleepThreshold = 17 };
-        simulation.Solvers.Register(
+        simulation.World.Solvers.Register(
             "set-config",
-            solverSimulation =>
+            _ =>
             {
-                if (solverSimulation.TickCount == 1)
-                    solverSimulation.SetAtmosConfig(replacement);
+                if (simulation.TickCount == 1)
+                    simulation.SetAtmosConfig(replacement);
             });
 
         simulation.StartRecording();

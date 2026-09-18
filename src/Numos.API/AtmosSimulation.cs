@@ -13,7 +13,9 @@ namespace Numos.API;
 /// <remarks>
 ///     The simulation owns every chunk created through <see cref="CreateAndRegisterChunk" />. Call
 ///     <see cref="Dispose" /> when the simulation is no longer needed to release those chunks and its
-///     worker-local buffers. Unless otherwise noted, members that access kernel state throw
+///     worker-local buffers. Its <see cref="World" /> owns fixed-step time, shared physics configuration, and
+///     explicit links to other simulations. Compatibility constructors create a private one-simulation world.
+///     Unless otherwise noted, members that access kernel state throw
 ///     <see cref="ObjectDisposedException" /> after disposal. A solver callback may use the simulation API and edit
 ///     the solver pipeline, but it must not recursively execute or dispose the simulation or change chunk ownership
 ///     during the current tick.
@@ -31,6 +33,7 @@ public sealed partial class AtmosSimulation : IDisposable
     private readonly int _chunkHeight;
     private readonly int _chunkWidth;
     private readonly AtmosKernel _kernel;
+    private readonly bool _ownsWorld;
     private bool _disposed;
 
     /// <summary>
@@ -71,8 +74,22 @@ public sealed partial class AtmosSimulation : IDisposable
         int chunkWidth = AtmosChunkConstants.DefaultWidth,
         int chunkHeight = AtmosChunkConstants.DefaultHeight,
         int chunkDepth = AtmosChunkConstants.DefaultDepth)
+        : this(new AtmosWorld(config), true, chunkWidth, chunkHeight, chunkDepth)
     {
-        ArgumentNullException.ThrowIfNull(config);
+    }
+
+    /// <summary>
+    ///     Initializes storage for a simulation registered in an existing world.
+    /// </summary>
+    internal AtmosSimulation(
+        AtmosWorld world,
+        bool ownsWorld,
+        int chunkWidth,
+        int chunkHeight,
+        int chunkDepth,
+        AtmosSimulationId? requestedRegistration = null)
+    {
+        ArgumentNullException.ThrowIfNull(world);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(chunkWidth);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(chunkHeight);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(chunkDepth);
@@ -99,9 +116,45 @@ public sealed partial class AtmosSimulation : IDisposable
         _chunkWidth = chunkWidth;
         _chunkHeight = chunkHeight;
         _chunkDepth = chunkDepth;
+        _ownsWorld = ownsWorld;
+        World = world;
         _kernel = new AtmosKernel(chunkWidth, chunkHeight, chunkDepth);
-        _kernel.SetAtmosConfig(config.CreateSnapshot());
-        Solvers = new AtmosSolverPipeline(this);
+        _kernel.SetAtmosConfig(world.Config);
+        Id = world.RegisterSimulation(this, requestedRegistration);
+        _kernel.ConfigureWorldSolverServices(
+            world.CreateSolverCheckpoints,
+            world.Solvers.SetEnabled,
+            world.Tick);
+    }
+
+    /// <summary>
+    ///     Gets the world that owns shared time, configuration, and cross-simulation topology.
+    /// </summary>
+    [PublicAPI]
+    public AtmosWorld World { get; }
+
+    /// <summary>
+    ///     Gets this simulation's stable generational identifier within <see cref="World" />.
+    /// </summary>
+    [PublicAPI]
+    public AtmosSimulationId Id { get; }
+
+    /// <summary>
+    ///     Gets the fixed dimensions used by every chunk owned by this simulation.
+    /// </summary>
+    /// <remarks>
+    ///     Simulations in the same <see cref="AtmosWorld" /> may use different chunk dimensions.
+    ///     The dimensions cannot change after the simulation has been created.
+    /// </remarks>
+    /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
+    [PublicAPI]
+    public Int3 ChunkDimensions
+    {
+        get
+        {
+            ThrowIfDisposed();
+            return new Int3(_chunkWidth, _chunkHeight, _chunkDepth);
+        }
     }
 
     /// <summary>
@@ -121,7 +174,8 @@ public sealed partial class AtmosSimulation : IDisposable
     /// </summary>
     /// <remarks>
     ///     Create an editable copy with <c>new AtmosConfig(simulation.Config)</c>, then call
-    ///     <see cref="SetAtmosConfig(AtmosConfig)" /> to apply it through the deterministic operation boundary.
+    ///     <see cref="SetAtmosConfig(AtmosConfig)" /> to apply it to every simulation in <see cref="World" /> through
+    ///     the deterministic operation boundary.
     /// </remarks>
     [PublicAPI]
     public AtmosConfigSnapshot Config
@@ -129,26 +183,26 @@ public sealed partial class AtmosSimulation : IDisposable
         get
         {
             ThrowIfDisposed();
+            // Kernel replay applies recorded configuration opcodes internally. Returning the kernel's canonical
+            // reference keeps solver callbacks on the replayed tick-start state; normal world propagation still
+            // gives every registered kernel the exact same snapshot instance.
             return _kernel.GetAtmosConfig();
         }
     }
 
-    /// <summary>Gets whether external semantic operations are currently being recorded.</summary>
+    /// <summary>
+    ///     Gets whether this simulation or its owning world is recording external semantic operations.
+    /// </summary>
+    /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
     [PublicAPI]
     public bool IsRecording
     {
         get
         {
             ThrowIfDisposed();
-            return _kernel.IsRecording;
+            return _kernel.IsRecording || World.IsRecording;
         }
     }
-
-    /// <summary>
-    ///     Gets the ordered solver pipeline used by subsequent ticks.
-    /// </summary>
-    [PublicAPI]
-    public AtmosSolverPipeline Solvers { get; }
 
     /// <summary>
     ///     Gets the number of chunks currently owned by the simulation.
@@ -166,9 +220,12 @@ public sealed partial class AtmosSimulation : IDisposable
     }
 
     /// <summary>
-    ///     Gets the number of fixed simulation ticks processed since construction.
+    ///     Gets the owning world's completed fixed-tick count.
     /// </summary>
-    /// <remarks>Both <see cref="Update(float)" /> and <see cref="Tick" /> contribute to this count.</remarks>
+    /// <remarks>
+    ///     A simulation created after its world has advanced starts at the current world count. Both
+    ///     <see cref="Update(float)" /> and <see cref="Tick" /> advance every simulation in that world together.
+    /// </remarks>
     /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
     [PublicAPI]
     public int TickCount
@@ -214,18 +271,40 @@ public sealed partial class AtmosSimulation : IDisposable
             if (_disposed)
                 return;
 
+            _kernel.EnsureCanExecuteTick();
+            World.UnregisterSimulation(this);
+            _kernel.Dispose();
+            _disposed = true;
+
+            if (_ownsWorld)
+                World.Dispose();
+        }
+    }
+
+    /// <summary>
+    ///     Disposes storage while the containing world already owns registry teardown.
+    /// </summary>
+    internal void DisposeFromWorld()
+    {
+        lock (_mixtureGate)
+        {
+            if (_disposed)
+                return;
+
             _kernel.Dispose();
             _disposed = true;
         }
     }
 
     /// <summary>
-    ///     Adds elapsed real time to the fixed-step accumulator and processes complete simulation ticks.
+    ///     Adds elapsed real time to the owning world's fixed-step accumulator and processes complete world ticks.
     /// </summary>
     /// <param name="elapsedSeconds">Elapsed real time, in seconds, since the previous update.</param>
     /// <remarks>
     ///     Fractions of a fixed step are retained for later calls. To prevent an unbounded catch-up loop, one
-    ///     update processes at most five fixed steps and discards time beyond that backlog limit.
+    ///     update processes at most five fixed steps and discards time beyond that backlog limit. If the world owns
+    ///     multiple simulations, this method advances all of them; prefer calling <see cref="AtmosWorld.Update" />
+    ///     directly in that case.
     /// </remarks>
     /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
     /// <exception cref="InvalidOperationException">Called recursively from a solver callback.</exception>
@@ -233,7 +312,7 @@ public sealed partial class AtmosSimulation : IDisposable
     public void Update(float elapsedSeconds)
     {
         ThrowIfDisposed();
-        _kernel.Update(elapsedSeconds);
+        World.Update(elapsedSeconds);
     }
 
     /// <summary>
@@ -243,6 +322,12 @@ public sealed partial class AtmosSimulation : IDisposable
     /// <param name="config">
     ///     The editable configuration to copy and use for this update and subsequent simulation operations.
     /// </param>
+    /// <remarks>
+    ///     The configuration is shared by every simulation in the owning <see cref="AtmosWorld" />: this replaces the
+    ///     single world-wide configuration, not a per-simulation override, and the subsequent tick advances every
+    ///     simulation the world owns. Prefer <see cref="AtmosWorld.SetAtmosConfig" /> and <see cref="AtmosWorld.Update" />
+    ///     directly when the world owns multiple simulations.
+    /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="config" /> is <see langword="null" />.</exception>
     /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
     /// <exception cref="InvalidOperationException">Called recursively from a solver callback.</exception>
@@ -257,7 +342,7 @@ public sealed partial class AtmosSimulation : IDisposable
     }
 
     /// <summary>
-    ///     Applies a detached configuration used by subsequent simulation operations.
+    ///     Applies a detached configuration shared by subsequent operations in the owning world.
     /// </summary>
     /// <param name="config">
     ///     The editable configuration to copy. Later changes to this instance do not affect the simulation.
@@ -272,34 +357,54 @@ public sealed partial class AtmosSimulation : IDisposable
         lock (_mixtureGate)
         {
             ThrowIfDisposed();
-            var snapshot = config.CreateSnapshot();
-            return _kernel.SetAtmosConfig(snapshot);
+            return World.SetAtmosConfig(config);
         }
     }
 
-    /// <summary>Starts a fresh interval of external semantic operation recording.</summary>
-    /// <exception cref="InvalidOperationException">The simulation is already recording or this is called from a solver.</exception>
+    /// <summary>
+    ///     Starts a fresh interval of external semantic operation recording for this simulation.
+    /// </summary>
+    /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
+    /// <exception cref="InvalidOperationException">
+    ///     The simulation is already recording, its world is recording, or this is called from a solver.
+    /// </exception>
     [PublicAPI]
     public void StartRecording()
     {
         ThrowIfDisposed();
+        World.EnsureComponentRecordingAllowed(this);
         _kernel.StartRecording();
     }
 
-    /// <summary>Captures the current recording without stopping it.</summary>
+    /// <summary>
+    ///     Captures the current simulation recording without stopping it.
+    /// </summary>
+    /// <returns>A detached recording through the current simulation position.</returns>
+    /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
+    /// <exception cref="InvalidOperationException">
+    ///     No simulation recording exists, or the owning world is recording.
+    /// </exception>
     [PublicAPI]
     public AtmosRecording CaptureRecording()
     {
         ThrowIfDisposed();
+        World.EnsureComponentRecordingAllowed(this);
         return _kernel.CaptureRecording();
     }
 
-    /// <summary>Stops recording and returns a detached recording of the interval.</summary>
-    /// <exception cref="InvalidOperationException">The simulation is not recording or this is called from a solver.</exception>
+    /// <summary>
+    ///     Stops simulation recording and returns a detached copy of the interval.
+    /// </summary>
+    /// <returns>The complete detached simulation recording.</returns>
+    /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
+    /// <exception cref="InvalidOperationException">
+    ///     The simulation is not recording, its world is recording, or this is called from a solver.
+    /// </exception>
     [PublicAPI]
     public AtmosRecording StopRecording()
     {
         ThrowIfDisposed();
+        World.EnsureComponentRecordingAllowed(this);
         return _kernel.StopRecording();
     }
 
@@ -342,7 +447,35 @@ public sealed partial class AtmosSimulation : IDisposable
     public bool UnregisterChunk(AtmosChunkHandle chunk)
     {
         ThrowIfDisposed();
-        return _kernel.UnregisterChunk(chunk.Position);
+        bool removed = _kernel.UnregisterChunk(chunk.Position);
+        if (removed)
+            World.InvalidateLinksForChunk(this, chunk);
+
+        return removed;
+    }
+
+    /// <summary>
+    ///     Creates a stable reference to one voxel for use in explicit world topology.
+    /// </summary>
+    /// <param name="chunk">The chunk that owns the voxel.</param>
+    /// <param name="localVoxelIndex">The flat local voxel index.</param>
+    /// <returns>A value-only cell reference scoped to <see cref="World" />.</returns>
+    /// <exception cref="KeyNotFoundException">The chunk is not registered.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">The local voxel index is outside the chunk.</exception>
+    /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
+    [PublicAPI]
+    public AtmosCellRef GetCellRef(AtmosChunkHandle chunk, ushort localVoxelIndex)
+    {
+        ThrowIfDisposed();
+        if (!_kernel.TryResolveExplicitEndpoint(chunk.Position, localVoxelIndex, out _))
+        {
+            if (!_kernel.GetChunkPositions().Contains(chunk.Position))
+                throw new KeyNotFoundException($"No atmospheric chunk is registered at ({chunk.Position}).");
+
+            throw new ArgumentOutOfRangeException(nameof(localVoxelIndex));
+        }
+
+        return new AtmosCellRef(Id, chunk, localVoxelIndex);
     }
 
     /// <summary>
@@ -807,11 +940,12 @@ public sealed partial class AtmosSimulation : IDisposable
     }
 
     /// <summary>
-    ///     Runs exactly one fixed simulation tick using the current <see cref="Config" />.
+    ///     Runs exactly one fixed tick for every simulation in the owning <see cref="World" />.
     /// </summary>
     /// <remarks>
     ///     This bypasses the elapsed-time accumulator. It is useful for deterministic driving and tests, and
-    ///     increments <see cref="TickCount" /> by one.
+    ///     increments <see cref="TickCount" /> by one. Prefer <see cref="AtmosWorld.Tick" /> when the world owns
+    ///     multiple simulations.
     /// </remarks>
     /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
     /// <exception cref="InvalidOperationException">Called recursively from a solver callback.</exception>
@@ -819,7 +953,7 @@ public sealed partial class AtmosSimulation : IDisposable
     public void Tick()
     {
         ThrowIfDisposed();
-        _kernel.Tick();
+        World.Tick();
     }
 
     private void ThrowIfDisposed()

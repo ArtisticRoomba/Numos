@@ -7,7 +7,27 @@ namespace Numos.Serialization;
 /// </summary>
 /// <param name="Metadata">Information about the producer and simulation project.</param>
 /// <param name="Replay">The replay payload.</param>
-public sealed record NumosReplayDocument(NumosReplayMetadata Metadata, AtmosReplayArchive Replay);
+public sealed record NumosReplayDocument(NumosReplayMetadata Metadata, AtmosReplayArchive Replay) : INumosReplayDocument;
+
+/// <summary>
+///     Marks a supported payload carried by the versioned Numos replay container.
+/// </summary>
+public interface INumosReplayDocument
+{
+    /// <summary>
+    ///     Gets human-facing producer and project provenance.
+    /// </summary>
+    NumosReplayMetadata Metadata { get; }
+}
+
+/// <summary>
+///     Combines a portable multi-simulation world replay with file provenance.
+/// </summary>
+/// <param name="Metadata">Information about the producer and simulation project.</param>
+/// <param name="Replay">The complete world replay payload.</param>
+public sealed record NumosWorldReplayDocument(
+    NumosReplayMetadata Metadata,
+    AtmosWorldReplayArchive Replay) : INumosReplayDocument;
 
 /// <summary>
 ///     Describes who produced a replay file and when it was exported.

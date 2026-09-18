@@ -20,7 +20,9 @@ internal sealed class AtmosSolverExecutionContext
 
     internal IAtmosSolverWorld World { get; }
     internal AtmosChunk[] Chunks { get; }
-    /// <summary>Normalized built-in solver settings captured before this tick began.</summary>
+    /// <summary>
+    ///     Normalized built-in solver settings captured before this tick began.
+    /// </summary>
     internal AtmosSolverConfigSnapshot TickConfig { get; }
 
     internal int TickCount { get; }
@@ -39,3 +41,9 @@ internal interface IAtmosSolverWorld
     // this doesnt really belong here
     void AddBoundaryProcessingTicks(long elapsedTicks);
 }
+
+/// <summary>
+///     Holds one kernel's immutable inputs and callback snapshot during a coordinated world tick.
+/// </summary>
+internal readonly record struct AtmosWorldTickExecution(
+    AtmosSolverExecutionContext Context);

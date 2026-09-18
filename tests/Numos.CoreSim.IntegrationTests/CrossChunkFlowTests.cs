@@ -328,9 +328,8 @@ public sealed class CrossChunkFlowTests
                     sourceTemperatures[sourceIndex]);
             }
 
-            simulation.Solvers.SetEnabled(AtmosBuiltInSolvers.Thermodynamics, false);
-            simulation.Solvers.SetEnabled(AtmosBuiltInSolvers.ThermalBoundary, false);
-            simulation.Solvers.SetEnabled(AtmosBuiltInSolvers.GasReactions, false);
+            simulation.World.Solvers.SetEnabled(AtmosBuiltInSolvers.Thermodynamics, false);
+            simulation.World.Solvers.SetEnabled(AtmosBuiltInSolvers.GasReactions, false);
 
             AtmosChunkSnapshot[] initialSnapshots =
             [

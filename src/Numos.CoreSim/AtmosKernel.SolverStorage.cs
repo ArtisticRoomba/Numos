@@ -7,7 +7,7 @@ internal sealed partial class AtmosKernel
 {
     internal T GetOrCreateSolverData<T>(object key, Func<T> factory) where T : notnull
     {
-        lock (_stateGate)
+        lock (StateGate)
         {
             return _solverData.GetOrCreate(key, factory);
         }
@@ -15,18 +15,18 @@ internal sealed partial class AtmosKernel
 
     internal T GetOrCreateGasSolverData<T>(int gasId, object key, Func<GasProperties, T> factory) where T : notnull
     {
-        lock (_stateGate)
+        lock (StateGate)
         {
             if (!_isTickExecuting)
-                _tickConfig.Capture(_config);
+                CurrentTickConfig.Capture(_config);
 
-            return _tickConfig.GetOrCreateGasSolverData(gasId, key, factory);
+            return CurrentTickConfig.GetOrCreateGasSolverData(gasId, key, factory);
         }
     }
 
     internal T[] GetOrCreateChunkSolverArray<T>(Int3 position, object key, bool captureForRollback, int? length)
     {
-        lock (_stateGate)
+        lock (StateGate)
         {
             return GetChunk(position).GetOrCreateSolverArray<T>(key, captureForRollback, length);
         }
@@ -34,7 +34,7 @@ internal sealed partial class AtmosKernel
 
     internal FlatArray<T> GetOrCreateChunkSolverFlatArray<T>(Int3 position, object key, bool captureForRollback)
     {
-        lock (_stateGate)
+        lock (StateGate)
         {
             return GetChunk(position).GetOrCreateSolverFlatArray<T>(key, captureForRollback);
         }

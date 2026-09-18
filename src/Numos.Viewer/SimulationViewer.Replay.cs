@@ -12,18 +12,20 @@ public partial class SimulationViewer
     private bool _keepTimelinePlayheadCentered;
     private int? _pendingScrubTick;
     private bool _refreshingReplay;
+    private ReplayBranchSession? _replayBranches;
     private float _replayElapsed;
-    private AtmosReplayTimeline? _replayTimeline;
+    private AtmosWorldReplayTimeline? _replayTimeline;
+    private bool _showBranchHistory;
     private bool _showTimelinePanel = true;
     private bool _simulateWhileScrubbing = true;
     private string? _timelineError;
     private int _timelineFirstTick;
-    private AtmosRecordedOperation? _timelineOperation;
+    private AtmosWorldRecordedOperation? _timelineOperation;
     private int _timelineVisibleTicks = 200;
 
     private void RenderTimelinePanel()
     {
-        if (!_showTimelinePanel || _replayTimeline == null)
+        if (!_showTimelinePanel || _replayTimeline == null || _replayBranches == null)
             return;
 
         var timeline = _replayTimeline;
@@ -37,7 +39,11 @@ public partial class SimulationViewer
         if (!window.IsVisible)
             return;
 
-        DrawTimelinePositionReadout(timeline);
+        DrawTimelinePositionReadout(timeline, _replayBranches.SelectedBranch);
+        ImGui.SeparatorText("Branches");
+        DrawTimelineBranchControls();
+        timeline = _replayTimeline;
+
         ImGui.SeparatorText("Transport");
         DrawTimelineTransport(timeline);
 
@@ -67,7 +73,11 @@ public partial class SimulationViewer
                 "##timeline-visible-ticks",
                 ref _timelineVisibleTicks,
                 10,
-                Math.Max(10, (int)timeline.Head.Tick + 1));
+                Math.Max(
+                    10,
+                    _replayBranches.MaximumHeadTick >= int.MaxValue
+                        ? int.MaxValue
+                        : checked((int)_replayBranches.MaximumHeadTick + 1)));
 
             ImGui.EndTable();
         }
@@ -85,7 +95,7 @@ public partial class SimulationViewer
             "##timeline-first-visible-tick",
             ref _timelineFirstTick,
             (int)timeline.Start.Tick,
-            Math.Max((int)timeline.Start.Tick, (int)timeline.Head.Tick));
+            Math.Max((int)timeline.Start.Tick, checked((int)_replayBranches.MaximumHeadTick)));
 
         ImGui.EndDisabled();
 
@@ -97,9 +107,18 @@ public partial class SimulationViewer
                 ? "The simulation updates whenever the scrubber crosses a tick."
                 : "The simulation updates when the scrubber is released.");
 
-        IReadOnlyList<AtmosRecordedOperation> operations = timeline.Operations;
+        ImGui.SameLine();
+        ImGui.Checkbox("Show branch history", ref _showBranchHistory);
+        ImGuiExtensions.QuestionTooltip(
+            "Shows every session branch as an aligned history lane. Operation and checkpoint detail remains on the selected branch.");
 
-        DrawTimelineTrack(timeline, operations);
+        IReadOnlyList<AtmosWorldRecordedOperation> operations = timeline.Operations;
+
+        if (_showBranchHistory)
+            DrawBranchHistoryTrack(timeline, operations);
+        else
+            DrawTimelineTrack(timeline, operations);
+
         if (_pendingScrubTick.HasValue && ImGui.IsMouseReleased(ImGuiMouseButton.Left))
         {
             if (!_simulateWhileScrubbing)
@@ -112,16 +131,22 @@ public partial class SimulationViewer
         DrawTimelineOperations(timeline, operations);
     }
 
-    private static void DrawTimelinePositionReadout(AtmosReplayTimeline timeline)
+    private static void DrawTimelinePositionReadout(
+        AtmosWorldReplayTimeline timeline,
+        ReplayBranchInfo branch)
     {
         if (!ImGui.BeginTable(
                 "TimelinePositions##replay",
-                4,
+                5,
                 ImGuiTableFlags.Borders | ImGuiTableFlags.SizingStretchSame))
         {
             return;
         }
 
+        ImGui.TableNextColumn();
+        ImGui.TextDisabled("BRANCH");
+        ImGui.TextUnformatted(branch.Name);
+        ImGui.TextDisabled($"Fork tick {branch.Fork.Tick}");
         ImGui.TableNextColumn();
         DrawTimelinePositionField("START", timeline.Start);
         ImGui.TableNextColumn();
@@ -140,6 +165,45 @@ public partial class SimulationViewer
         ImGui.EndTable();
     }
 
+    private void DrawTimelineBranchControls()
+    {
+        var branches = _replayBranches!;
+        var selected = branches.SelectedBranch;
+        ImGui.SetNextItemWidth(190f);
+        if (ImGui.BeginCombo("Selected branch", $"{selected.Name}  ·  head {selected.Head.Tick}"))
+        {
+            foreach (var branch in branches.Branches)
+            {
+                if (ImGui.Selectable(
+                        $"{branch.Name}  ·  fork {branch.Fork.Tick}  ·  head {branch.Head.Tick}##branch-{branch.Id}",
+                        branch.IsSelected))
+                {
+                    SelectTimelineBranch(branch.Id);
+                }
+
+                if (branch.IsSelected)
+                    ImGui.SetItemDefaultFocus();
+            }
+
+            ImGui.EndCombo();
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("Branch from Tick", new Vector2(132f, 0f)))
+            CreateTimelineBranch();
+
+        ImGuiExtensions.QuestionTooltip(
+            "Preserves this branch and starts a new branch before operations recorded at the selected tick.");
+
+        ImGui.SameLine();
+        ImGui.BeginDisabled(!branches.CanContinueSelectedBranch);
+        if (ImGui.Button("Continue Branch", new Vector2(130f, 0f)))
+            ContinueTimelineBranch();
+
+        ImGui.EndDisabled();
+        ImGuiExtensions.QuestionTooltip("Resumes live recording at the selected branch head.");
+    }
+
     private static void DrawTimelinePositionField(string label, AtmosTimelinePosition position)
     {
         ImGui.TextDisabled(label);
@@ -147,10 +211,11 @@ public partial class SimulationViewer
         ImGui.TextDisabled($"Through operation #{position.OperationSequence}");
     }
 
-    private void DrawTimelineTransport(AtmosReplayTimeline timeline)
+    private void DrawTimelineTransport(AtmosWorldReplayTimeline timeline)
     {
         bool atStart = timeline.Position.Tick <= timeline.Start.Tick;
-        bool atHead = !timeline.IsInspecting;
+        bool atHead = timeline.Position == timeline.Head;
+        bool isLive = !timeline.IsInspecting;
 
         ImGui.BeginDisabled(atStart);
         if (ImGui.Button("Start", new Vector2(76f, 0f)))
@@ -167,7 +232,11 @@ public partial class SimulationViewer
             _isPaused = !_isPaused;
 
         ImGui.SameLine();
-        ImGui.BeginDisabled(atHead && !_isPaused);
+
+        // Disable Forward only while live playback is actively running; a live+paused branch, or any point while
+        // inspecting history (including its own head, where StepTimelineForward already no-ops), can still be
+        // single-stepped. `atHead` alone would keep this disabled whenever the timeline is live, regardless of pause.
+        ImGui.BeginDisabled(isLive && !_isPaused);
         if (ImGui.Button("Forward", new Vector2(76f, 0f)))
         {
             _isPaused = true;
@@ -177,7 +246,7 @@ public partial class SimulationViewer
         ImGui.EndDisabled();
 
         ImGui.SameLine();
-        ImGui.BeginDisabled(atHead);
+        ImGui.BeginDisabled(isLive || atHead);
         if (ImGui.Button("Return to Head", new Vector2(120f, 0f)))
         {
             timeline.ReturnToHead();
@@ -186,34 +255,9 @@ public partial class SimulationViewer
         }
 
         ImGui.EndDisabled();
-
-        ImGui.SameLine();
-        ImGui.BeginDisabled(!timeline.IsInspecting);
-        if (ImGui.Button("Simulate from Here", new Vector2(140f, 0f)))
-        {
-            try
-            {
-                timeline.SimulateFromHere();
-                _timelineError = null;
-                _timelineOperation = null;
-            }
-            catch (Exception exception)
-            {
-                _timelineError = exception.Message;
-                WriteException("Could not branch the replay timeline", exception);
-            }
-
-            _isPaused = true;
-            RefreshReplayPresentation();
-        }
-
-        ImGui.EndDisabled();
-
-        if (timeline.IsInspecting)
-            ImGui.TextDisabled("Simulate from Here replaces the live head with the selected historical state.");
     }
 
-    private void DrawReplayStatus(AtmosReplayTimeline timeline)
+    private void DrawReplayStatus(AtmosWorldReplayTimeline timeline)
     {
         if (timeline.LastReplay is { } replay)
         {
@@ -253,10 +297,10 @@ public partial class SimulationViewer
     }
 
     private void DrawTimelineOperations(
-        AtmosReplayTimeline timeline,
-        IReadOnlyList<AtmosRecordedOperation> operations)
+        AtmosWorldReplayTimeline timeline,
+        IReadOnlyList<AtmosWorldRecordedOperation> operations)
     {
-        AtmosRecordedOperation[] tickOperations = operations
+        AtmosWorldRecordedOperation[] tickOperations = operations
             .Where(operation => operation.AfterTick == timeline.Position.Tick)
             .OrderBy(operation => operation.Sequence)
             .ToArray();
@@ -311,13 +355,13 @@ public partial class SimulationViewer
             }
 
             ImGui.TextWrapped(selected.Operation.ToString());
-            if (selected.Operation is SetVoxelMixtureOperation mixture)
+            if (selected.Operation is AtmosWorldSimulationOperation { Operation: SetVoxelMixtureOperation mixture })
             {
                 foreach (var gas in mixture.Gases)
                     ImGui.TextDisabled($"Gas {gas.GasId}: {gas.Moles:R} mol");
             }
 
-            if (selected.Operation is SetAtmosConfigOperation config)
+            if (selected.Operation is SetAtmosWorldConfigOperation config)
                 DrawRecordedConfiguration(config.Config);
 
             if (ImGui.Button("Inspect After Operation"))
@@ -326,8 +370,8 @@ public partial class SimulationViewer
     }
 
     private static int GetOperationOrder(
-        IReadOnlyList<AtmosRecordedOperation> operations,
-        AtmosRecordedOperation selected)
+        IReadOnlyList<AtmosWorldRecordedOperation> operations,
+        AtmosWorldRecordedOperation selected)
     {
         int order = 0;
         foreach (var operation in operations)
@@ -374,7 +418,7 @@ public partial class SimulationViewer
         ImGui.TreePop();
     }
 
-    private void DrawTimelineTrack(AtmosReplayTimeline timeline, IReadOnlyList<AtmosRecordedOperation> operations)
+    private void DrawTimelineTrack(AtmosWorldReplayTimeline timeline, IReadOnlyList<AtmosWorldRecordedOperation> operations)
     {
         var origin = ImGui.GetCursorScreenPos();
         float width = Math.Max(1f, ImGui.GetContentRegionAvail().X);
@@ -538,7 +582,185 @@ public partial class SimulationViewer
         draw.PopClipRect();
     }
 
-    private int GetScrubTick(AtmosReplayTimeline timeline, float trackOriginX, float trackWidth)
+    private void DrawBranchHistoryTrack(
+        AtmosWorldReplayTimeline timeline,
+        IReadOnlyList<AtmosWorldRecordedOperation> operations)
+    {
+        IReadOnlyList<ReplayBranchInfo> branches = _replayBranches!.Branches;
+        const float headerHeight = 24f;
+        const float rowHeight = 28f;
+        const float axisHeight = 24f;
+        float contentHeight = headerHeight + branches.Count * rowHeight + axisHeight;
+        float childHeight = Math.Min(contentHeight + 2f, 220f);
+        ImGui.BeginChild(
+            "BranchHistoryScroll##replay",
+            new Vector2(0f, childHeight),
+            ImGuiChildFlags.Borders);
+
+        var origin = ImGui.GetCursorScreenPos();
+        float width = Math.Max(1f, ImGui.GetContentRegionAvail().X);
+        float labelWidth = Math.Clamp(width * 0.22f, 108f, 170f);
+        float graphLeft = origin.X + labelWidth;
+        float graphWidth = Math.Max(1f, width - labelWidth - 6f);
+        var draw = ImGui.GetWindowDrawList();
+        uint recessedSurface = ImGui.ColorConvertFloat4ToU32(ViewerTheme.RecessedSurface);
+        uint structuralLine = ImGui.ColorConvertFloat4ToU32(ViewerTheme.StructuralLine);
+        uint secondaryText = ImGui.ColorConvertFloat4ToU32(ViewerTheme.SecondaryText);
+        uint primaryText = ImGui.ColorConvertFloat4ToU32(ViewerTheme.PrimaryText);
+        uint selection = ImGui.ColorConvertFloat4ToU32(ViewerTheme.Selection);
+        uint operationColor = ImGui.ColorConvertFloat4ToU32(ViewerTheme.Caution);
+        uint checkpointColor = ImGui.ColorConvertFloat4ToU32(ViewerTheme.Running);
+        ImGui.InvisibleButton("##branch-history-track", new Vector2(width, contentHeight));
+        bool hovered = ImGui.IsItemHovered();
+        draw.AddRectFilled(origin, origin + new Vector2(width, contentHeight), recessedSurface);
+
+        float Map(double tick)
+        {
+            return graphLeft + (float)((tick - _timelineFirstTick) / _timelineVisibleTicks * graphWidth);
+        }
+
+        draw.AddText(origin + new Vector2(6f, 4f), secondaryText, "SESSION BRANCHES");
+        draw.AddText(new Vector2(graphLeft + 4f, origin.Y + 4f), secondaryText, "TICK / SIMULATION TIME");
+        double lastVisibleTick = _timelineFirstTick + _timelineVisibleTicks;
+        int tickStep = GetTimelineTickStep(_timelineVisibleTicks);
+        double firstTick = Math.Ceiling(_timelineFirstTick / (double)tickStep) * tickStep;
+        float graphBottom = origin.Y + headerHeight + branches.Count * rowHeight;
+        for (double tick = firstTick; tick <= lastVisibleTick; tick += tickStep)
+        {
+            float x = Map(tick);
+            draw.AddLine(
+                new Vector2(x, origin.Y + headerHeight),
+                new Vector2(x, graphBottom),
+                structuralLine);
+
+            string label = $"{tick:0} · {tick / AtmosSimulation.SimulationRate:0.00}s";
+            if (x + ImGui.CalcTextSize(label).X <= origin.X + width - 3f)
+                draw.AddText(new Vector2(x + 3f, graphBottom + 4f), secondaryText, label);
+        }
+
+        var rowById = new Dictionary<int, int>();
+        for (int index = 0; index < branches.Count; index++)
+            rowById.Add(branches[index].Id, index);
+
+        float selectedY = 0f;
+        for (int index = 0; index < branches.Count; index++)
+        {
+            var branch = branches[index];
+            float y = origin.Y + headerHeight + rowHeight * index + rowHeight * 0.5f;
+            uint branchColor = branch.IsSelected ? selection : secondaryText;
+            string branchLabel = branch.IsSelected ? $"> {branch.Name}" : $"  {branch.Name}";
+            draw.AddText(new Vector2(origin.X + 6f, y - ImGui.GetTextLineHeight() * 0.5f), branchColor, branchLabel);
+
+            float startX = Math.Clamp(Map(branch.Fork.Tick), graphLeft, graphLeft + graphWidth);
+            float headX = Math.Clamp(Map(branch.Head.Tick), graphLeft, graphLeft + graphWidth);
+            if (branch.Head.Tick >= (ulong)_timelineFirstTick && branch.Fork.Tick <= lastVisibleTick)
+                draw.AddLine(new Vector2(startX, y), new Vector2(headX, y), branchColor, branch.IsSelected ? 4f : 2f);
+
+            bool forkVisible = branch.Fork.Tick >= (ulong)_timelineFirstTick && branch.Fork.Tick <= lastVisibleTick;
+            if (forkVisible &&
+                branch.ParentId is { } parentId &&
+                rowById.TryGetValue(parentId, out int parentIndex))
+            {
+                float parentY = origin.Y + headerHeight + rowHeight * parentIndex + rowHeight * 0.5f;
+                draw.AddLine(new Vector2(startX, parentY), new Vector2(startX, y), branchColor, 1.5f);
+                draw.AddCircleFilled(new Vector2(startX, y), 4f, branchColor);
+            }
+
+            if (branch.Head.Tick >= (ulong)_timelineFirstTick && branch.Head.Tick <= lastVisibleTick)
+            {
+                draw.AddRectFilled(
+                    new Vector2(headX - 4f, y - 4f),
+                    new Vector2(headX + 4f, y + 4f),
+                    branchColor);
+            }
+
+            if (branch.IsSelected)
+                selectedY = y;
+        }
+
+        foreach (var operation in operations)
+        {
+            float x = Map(operation.AfterTick + 0.5);
+            if (x < graphLeft || x > graphLeft + graphWidth)
+                continue;
+
+            draw.AddLine(
+                new Vector2(x, selectedY - 9f),
+                new Vector2(x, selectedY + 9f),
+                operationColor,
+                2f);
+        }
+
+        foreach (var point in timeline.Checkpoints)
+        {
+            float x = Map(point.Checkpoint.Position.Tick);
+            if (x < graphLeft || x > graphLeft + graphWidth)
+                continue;
+
+            draw.AddTriangleFilled(
+                new Vector2(x - 4f, selectedY - 10f),
+                new Vector2(x + 4f, selectedY - 10f),
+                new Vector2(x, selectedY - 2f),
+                checkpointColor);
+        }
+
+        float playheadX = Map(_pendingScrubTick ?? (double)timeline.Position.Tick);
+        if (playheadX >= graphLeft && playheadX <= graphLeft + graphWidth)
+        {
+            draw.AddLine(
+                new Vector2(playheadX, selectedY - rowHeight * 0.45f),
+                new Vector2(playheadX, selectedY + rowHeight * 0.45f),
+                primaryText,
+                2f);
+        }
+
+        if (hovered)
+        {
+            var mouse = ImGui.GetMousePos();
+            int hoveredRow = (int)((mouse.Y - origin.Y - headerHeight) / rowHeight);
+            if ((uint)hoveredRow < (uint)branches.Count)
+            {
+                var hoveredBranch = branches[hoveredRow];
+                ImGui.SetTooltip(
+                    $"{hoveredBranch.Name}\nFork tick {hoveredBranch.Fork.Tick}\nHead tick {hoveredBranch.Head.Tick}" +
+                    (hoveredBranch.IsSelected ? "\nSelected branch" : "\nClick to inspect this tick"));
+
+                if (mouse.X >= graphLeft && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
+                {
+                    int tick = GetBranchHistoryTick(hoveredBranch, mouse.X, graphLeft, graphWidth);
+                    if (hoveredBranch.IsSelected)
+                        ScrubTimelineTo(tick);
+                    else
+                        SelectTimelineBranch(hoveredBranch.Id, (ulong)tick);
+                }
+                else if (hoveredBranch.IsSelected &&
+                         mouse.X >= graphLeft &&
+                         ImGui.IsItemActive() &&
+                         ImGui.IsMouseDragging(ImGuiMouseButton.Left))
+                {
+                    ScrubTimelineTo(GetBranchHistoryTick(hoveredBranch, mouse.X, graphLeft, graphWidth));
+                }
+            }
+        }
+
+        ImGui.EndChild();
+    }
+
+    private int GetBranchHistoryTick(
+        ReplayBranchInfo branch,
+        float mouseX,
+        float graphLeft,
+        float graphWidth)
+    {
+        return Math.Clamp(
+            (int)Math.Round(
+                _timelineFirstTick +
+                (mouseX - graphLeft) / graphWidth * _timelineVisibleTicks),
+            checked((int)branch.Fork.Tick),
+            checked((int)branch.Head.Tick));
+    }
+
+    private int GetScrubTick(AtmosWorldReplayTimeline timeline, float trackOriginX, float trackWidth)
     {
         return Math.Clamp(
             (int)Math.Round(
@@ -548,7 +770,7 @@ public partial class SimulationViewer
             (int)timeline.Head.Tick);
     }
 
-    private void CenterTimelinePlayhead(AtmosReplayTimeline timeline)
+    private void CenterTimelinePlayhead(AtmosWorldReplayTimeline timeline)
     {
         int playheadTick = checked((int)timeline.Position.Tick);
         _timelineFirstTick = Math.Max(
@@ -572,6 +794,73 @@ public partial class SimulationViewer
         double normalized = roughStep / magnitude;
         double step = normalized <= 1d ? 1d : normalized <= 2d ? 2d : normalized <= 5d ? 5d : 10d;
         return checked((int)(step * magnitude));
+    }
+
+    private void CreateTimelineBranch()
+    {
+        _isPaused = true;
+        try
+        {
+            var branch = _replayBranches!.CreateBranchFromCurrentTick();
+            _replayTimeline = _replayBranches.Timeline;
+            _timelineOperation = null;
+            _timelineError = null;
+            WriteMessage(
+                ViewerLogLevel.Info,
+                "Replay",
+                $"Created {branch.Name} from tick {branch.Fork.Tick}.");
+        }
+        catch (Exception exception)
+        {
+            _timelineError = exception.Message;
+            WriteException("Could not create the replay branch", exception);
+        }
+
+        RefreshReplayPresentation();
+    }
+
+    private void SelectTimelineBranch(int branchId, ulong? tick = null)
+    {
+        _isPaused = true;
+        try
+        {
+            _replayBranches!.SelectBranch(branchId, tick);
+            _replayTimeline = _replayBranches.Timeline;
+            _timelineOperation = null;
+            _pendingScrubTick = null;
+            _timelineError = null;
+            var branch = _replayBranches.SelectedBranch;
+            WriteMessage(
+                ViewerLogLevel.Info,
+                "Replay",
+                $"Selected {branch.Name} on tick {_replayTimeline.Position.Tick}.");
+        }
+        catch (Exception exception)
+        {
+            _replayTimeline = _replayBranches!.Timeline;
+            _timelineError = exception.Message;
+            WriteException("Could not select the replay branch", exception);
+        }
+
+        RefreshReplayPresentation();
+    }
+
+    private void ContinueTimelineBranch()
+    {
+        _isPaused = true;
+        try
+        {
+            _replayBranches!.ContinueSelectedBranch();
+            _replayTimeline = _replayBranches.Timeline;
+            _timelineError = null;
+        }
+        catch (Exception exception)
+        {
+            _timelineError = exception.Message;
+            WriteException("Could not continue the replay branch", exception);
+        }
+
+        RefreshReplayPresentation();
     }
 
     private void SeekTimelineTick(ulong tick)
@@ -610,7 +899,7 @@ public partial class SimulationViewer
 
     private void StepTimelineForward()
     {
-        if (_replayTimeline == null || _simulation == null) return;
+        if (_replayTimeline == null || _world == null) return;
 
         if (_replayTimeline.IsInspecting)
         {
@@ -626,7 +915,7 @@ public partial class SimulationViewer
         }
         else
         {
-            _simulation.Tick();
+            _world.Tick();
             _replayTimeline.ObserveLiveState();
             RefreshPresentation();
         }
@@ -634,7 +923,8 @@ public partial class SimulationViewer
 
     private void RefreshReplayPresentation()
     {
-        var restored = new AtmosConfig(_simulation!.Config);
+        ReconcileSimulationSurfaces();
+        var restored = new AtmosConfig(_world!.Config);
         // Visualizations retain this builder; copy restored values into the same instance.
         _config!.GasRegistry = restored.GasRegistry;
         _config!.SolverConfigurations = restored.SolverConfigurations;

@@ -255,7 +255,7 @@ internal sealed class SimulationSession : IDisposable
             throw Missing("solver");
 
         bool enabled = Require(request.Enabled, "enabled");
-        bool changed = simulation.Solvers.SetEnabled(request.Solver, enabled);
+        bool changed = simulation.World.Solvers.SetEnabled(request.Solver, enabled);
         if (!changed)
         {
             throw new HeadlessRequestException(
@@ -269,7 +269,7 @@ internal sealed class SimulationSession : IDisposable
     private CommandExecution ResetSolvers()
     {
         var simulation = RequireSimulation();
-        simulation.Solvers.ResetToDefaults();
+        simulation.World.Solvers.ResetToDefaults();
         return new CommandExecution();
     }
 

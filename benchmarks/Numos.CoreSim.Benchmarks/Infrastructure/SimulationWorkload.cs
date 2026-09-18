@@ -48,7 +48,15 @@ internal sealed class SimulationWorkload : IDisposable
         for (int index = 0; index < positions.Length; index++)
             CreateChunk(options, positions[index], index, index < options.AwakeChunkCount);
 
-        Steps = _solvers.CreateSteps();
+        Steps =
+        [
+            new BenchmarkSolverStep(_solvers.SolveAdvection),
+            new BenchmarkSolverStep(_solvers.SolveBoundaryFlow),
+            new BenchmarkSolverStep(_solvers.SolveThermodynamics),
+            new BenchmarkSolverStep(_solvers.SolveThermalBoundary),
+            new BenchmarkSolverStep(_solvers.SolveGasReactions)
+        ];
+
         Kernel.TickCount = AtmosSolverConstants.ThermodynamicsTickInterval - 1;
         Initial = Kernel.CaptureCheckpoint();
         RefreshContext();
@@ -61,7 +69,7 @@ internal sealed class SimulationWorkload : IDisposable
     internal AtmosSolverConfigSnapshot Config { get; } = new();
     internal AtmosChunk[] Chunks { get; private set; } = [];
     internal AtmosSolverExecutionContext Context { get; private set; } = null!;
-    internal SolverStep[] Steps { get; }
+    internal BenchmarkSolverStep[] Steps { get; }
     internal AtmosSimulationCheckpoint Initial { get; }
     internal int BoundaryEventCount { get; }
     internal int ThermalBoundaryEdgeCount { get; }
@@ -273,3 +281,5 @@ internal sealed class SimulationWorkload : IDisposable
         Context = new AtmosSolverExecutionContext(Kernel, Chunks, Config, Kernel.TickCount + 1, _sharedData);
     }
 }
+
+internal readonly record struct BenchmarkSolverStep(Action<AtmosSolverExecutionContext> Solver);

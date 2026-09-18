@@ -82,6 +82,7 @@ internal struct AtmosStateHasher
         {
             hash.Add(solver.Name);
             hash.Add(solver.IsCustom);
+            hash.Add(solver.NeighborSelectionKey);
         }
 
         return hash.Value;

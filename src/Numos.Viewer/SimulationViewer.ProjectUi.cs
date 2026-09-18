@@ -52,7 +52,7 @@ public partial class SimulationViewer
 
     private void RequestCreateProject()
     {
-        _projectNameDraft = _simulation == null ? "Untitled Simulation" : $"{_projectName} Copy";
+        _projectNameDraft = _world == null ? "Untitled Simulation" : $"{_projectName} Copy";
         _projectChunkWidthDraft = _chunkDimensions.X > 0
             ? _chunkDimensions.X
             : AtmosChunkConstants.DefaultWidth;
@@ -70,7 +70,7 @@ public partial class SimulationViewer
 
     private void RequestCloseProject()
     {
-        if (_simulation == null)
+        if (_world == null)
             return;
 
         _requestOpenCloseProject = true;
@@ -111,12 +111,14 @@ public partial class SimulationViewer
                 ? "The default gas definitions will be appended to the new project."
                 : "The project will start with a blank gas registry.");
 
-        if (_simulation != null)
+        if (_world != null)
         {
             ImGui.Spacing();
             ImGui.TextColored(
                 ViewerTheme.Caution,
-                "Creating this project will close the current in-memory project.");
+                _replayBranches?.BranchCount > 1
+                    ? $"Creating this project will discard all {_replayBranches.BranchCount} in-memory branches."
+                    : "Creating this project will close the current in-memory project.");
         }
 
         if (!string.IsNullOrWhiteSpace(_createProjectError))
@@ -166,7 +168,13 @@ public partial class SimulationViewer
         if (!modal.IsVisible)
             return;
 
-        ImGui.TextWrapped($"Close '{_projectName}' and dispose its simulation? This project only exists in memory.");
+        string branchWarning = _replayBranches?.BranchCount > 1
+            ? $" All {_replayBranches.BranchCount} session branches will be discarded; save selected branches individually first."
+            : string.Empty;
+
+        ImGui.TextWrapped(
+            $"Close '{_projectName}' and dispose its world and simulations? This project only exists in memory.{branchWarning}");
+
         ImGui.Spacing();
         if (ImGui.Button("Close Project", new Vector2(140, 0)))
         {
@@ -200,21 +208,24 @@ public partial class SimulationViewer
             return;
 
         ImGui.Text(_projectName ?? "Untitled Simulation");
+        ImGui.TextDisabled($"Active simulation: {GetSimulationName(_simulation.Id)}");
         ImGui.TextColored(
             _isPaused ? ViewerTheme.Caution : ViewerTheme.Running,
             _isPaused ? "Paused" : "Running");
 
         if (ImGui.BeginTable(
                 "ProjectStatus##solution",
-                3,
+                2,
                 ImGuiTableFlags.Borders | ImGuiTableFlags.SizingStretchSame))
         {
             ImGui.TableNextColumn();
-            ImGuiExtensions.StatusField("CHUNKS", _simulation.ChunkCount.ToString());
+            ImGuiExtensions.StatusField("SIMULATIONS", (_world?.Simulations.Count ?? 0).ToString());
+            ImGui.TableNextColumn();
+            ImGuiExtensions.StatusField("ACTIVE CHUNKS", _simulation.ChunkCount.ToString());
             ImGui.TableNextColumn();
             ImGuiExtensions.StatusField("GASES", _config.GasRegistry.Count.ToString());
             ImGui.TableNextColumn();
-            ImGuiExtensions.StatusField("CURRENT TICK", _simulation.TickCount.ToString());
+            ImGuiExtensions.StatusField("CURRENT TICK", (_world?.TickCount ?? 0).ToString());
             ImGui.EndTable();
         }
 
@@ -235,8 +246,8 @@ public partial class SimulationViewer
         {
             if (ImGui.Button("Step", new Vector2(90, 0)))
             {
-                _simulation.Tick();
-                _completedStepTick = _simulation.TickCount;
+                _world!.Tick();
+                _completedStepTick = _world.TickCount;
                 _stepProgressDisplayUntil = ImGui.GetTime() + StepProgressDisplayDuration;
             }
         }

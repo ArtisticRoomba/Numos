@@ -32,7 +32,7 @@ internal sealed partial class AtmosKernel
     internal void ExecuteMixtureTransaction(Action transaction)
     {
         ArgumentNullException.ThrowIfNull(transaction);
-        lock (_stateGate)
+        lock (StateGate)
         {
             transaction();
         }
@@ -45,7 +45,7 @@ internal sealed partial class AtmosKernel
         Int3 position,
         ushort localVoxelIndex)
     {
-        lock (_stateGate)
+        lock (StateGate)
         {
             var chunk = GetChunk(position);
             ValidateVoxelIndex(chunk, localVoxelIndex);
@@ -62,7 +62,7 @@ internal sealed partial class AtmosKernel
         int y,
         int z)
     {
-        lock (_stateGate)
+        lock (StateGate)
         {
             var chunk = GetChunk(position);
             ushort localVoxelIndex = GetValidatedVoxelIndex(chunk, x, y, z);
@@ -78,7 +78,7 @@ internal sealed partial class AtmosKernel
         long generation,
         ushort localVoxelIndex)
     {
-        lock (_stateGate)
+        lock (StateGate)
         {
             GetMixtureChunk(position, generation, localVoxelIndex);
             return _config.GetVoxelVolume();
@@ -93,7 +93,7 @@ internal sealed partial class AtmosKernel
         long generation,
         ushort localVoxelIndex)
     {
-        lock (_stateGate)
+        lock (StateGate)
         {
             var chunk = GetMixtureChunk(position, generation, localVoxelIndex);
             return chunk.Temperature[localVoxelIndex];
@@ -108,7 +108,7 @@ internal sealed partial class AtmosKernel
         long generation,
         ushort localVoxelIndex)
     {
-        lock (_stateGate)
+        lock (StateGate)
         {
             var chunk = GetMixtureChunk(position, generation, localVoxelIndex);
             Mole totalMoles = GetVoxelTotalMoles(chunk, localVoxelIndex);
@@ -127,7 +127,7 @@ internal sealed partial class AtmosKernel
         long generation,
         ushort localVoxelIndex)
     {
-        lock (_stateGate)
+        lock (StateGate)
         {
             var chunk = GetMixtureChunk(position, generation, localVoxelIndex);
             return GetVoxelTotalMoles(chunk, localVoxelIndex);
@@ -142,7 +142,7 @@ internal sealed partial class AtmosKernel
         long generation,
         ushort localVoxelIndex)
     {
-        lock (_stateGate)
+        lock (StateGate)
         {
             var chunk = GetMixtureChunk(position, generation, localVoxelIndex);
             int count = 0;
@@ -165,7 +165,7 @@ internal sealed partial class AtmosKernel
         ushort localVoxelIndex,
         int gasId)
     {
-        lock (_stateGate)
+        lock (StateGate)
         {
             var chunk = GetMixtureChunk(position, generation, localVoxelIndex);
             for (int gas = 0; gas < chunk.ActiveGasCount; gas++)
@@ -186,7 +186,7 @@ internal sealed partial class AtmosKernel
         long generation,
         ushort localVoxelIndex)
     {
-        lock (_stateGate)
+        lock (StateGate)
         {
             var chunk = GetMixtureChunk(position, generation, localVoxelIndex);
             var gases = new KeyValuePair<int, Mole>[chunk.ActiveGasCount];
@@ -221,7 +221,7 @@ internal sealed partial class AtmosKernel
         ushort localVoxelIndex,
         Kelvin temperature)
     {
-        lock (_stateGate)
+        lock (StateGate)
         {
             var chunk = GetMixtureChunk(position, generation, localVoxelIndex);
             ValidateGasVoxel(chunk, localVoxelIndex);
@@ -244,7 +244,7 @@ internal sealed partial class AtmosKernel
     {
         Debug.Assert(gasId >= 0);
         Debug.Assert(float.IsFinite(moles) && moles >= 0f);
-        lock (_stateGate)
+        lock (StateGate)
         {
             var chunk = GetMixtureChunk(position, generation, localVoxelIndex);
             ValidateGasVoxel(chunk, localVoxelIndex);
@@ -274,7 +274,7 @@ internal sealed partial class AtmosKernel
     {
         Debug.Assert(gasId >= 0);
         Debug.Assert(float.IsFinite(deltaMoles));
-        lock (_stateGate)
+        lock (StateGate)
         {
             var chunk = GetMixtureChunk(position, generation, localVoxelIndex);
             Mole currentMoles = GetVoxelGasMoles(chunk, localVoxelIndex, gasId);
@@ -312,7 +312,7 @@ internal sealed partial class AtmosKernel
         Debug.Assert(gasId >= 0);
         Debug.Assert(float.IsFinite(moles) && moles > 0f);
         Debug.Assert(float.IsFinite(temperature) && temperature >= 0f);
-        lock (_stateGate)
+        lock (StateGate)
         {
             var chunk = GetMixtureChunk(position, generation, localVoxelIndex);
             Mole currentGasMoles = GetVoxelGasMoles(chunk, localVoxelIndex, gasId);
@@ -362,7 +362,7 @@ internal sealed partial class AtmosKernel
         long generation,
         ushort localVoxelIndex)
     {
-        lock (_stateGate)
+        lock (StateGate)
         {
             var chunk = GetMixtureChunk(position, generation, localVoxelIndex);
             ValidateGasVoxel(chunk, localVoxelIndex);
@@ -381,7 +381,7 @@ internal sealed partial class AtmosKernel
     internal void ValidateVoxelMixtureMutations(VoxelGasMixtureAddress[] addresses)
     {
         ArgumentNullException.ThrowIfNull(addresses);
-        lock (_stateGate)
+        lock (StateGate)
         {
             foreach (var address in addresses)
             {
@@ -409,7 +409,7 @@ internal sealed partial class AtmosKernel
     {
         Debug.Assert(gases != null);
 
-        lock (_stateGate)
+        lock (StateGate)
         {
             var chunk = GetMixtureChunk(position, generation, localVoxelIndex);
             int classification = chunk.VoxelRoomMap[localVoxelIndex];

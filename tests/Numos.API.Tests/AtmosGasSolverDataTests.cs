@@ -17,13 +17,13 @@ public sealed class AtmosGasSolverDataTests
         int creations = 0;
         Dictionary<string, float>? original = null;
         int reads = 0;
-        simulation.Solvers.Register(
+        simulation.World.Solvers.Register(
             "custom",
-            world =>
+            _ =>
             {
-                foreach (var chunk in world.GetChunkHandles())
+                foreach (var chunk in simulation.GetChunkHandles())
                 {
-                    Dictionary<string, float> data = world.GetOrCreateGasSolverData(
+                    Dictionary<string, float> data = simulation.GetOrCreateGasSolverData(
                         0,
                         key,
                         gas =>
@@ -115,12 +115,12 @@ public sealed class AtmosGasSolverDataTests
         object key = new();
         var original = simulation.GetOrCreateGasSolverData(0, key, gas => new GasData(gas.Name));
         config.GasRegistry.Replace(0, new GasProperties { Name = "Replacement" });
-        simulation.Solvers.Register("replace-config", world => world.SetAtmosConfig(config));
+        simulation.World.Solvers.Register("replace-config", _ => simulation.SetAtmosConfig(config));
         var observed = new List<GasData>();
-        simulation.Solvers.Register(
+        simulation.World.Solvers.Register(
             "read-data",
-            world =>
-                observed.Add(world.GetOrCreateGasSolverData(0, key, gas => new GasData(gas.Name))));
+            _ =>
+                observed.Add(simulation.GetOrCreateGasSolverData(0, key, gas => new GasData(gas.Name))));
 
         simulation.Tick();
         simulation.Tick();
@@ -157,11 +157,11 @@ public sealed class AtmosGasSolverDataTests
         var chunk = simulation.CreateAndRegisterChunk(default);
         object key = new();
         int creations = 0;
-        simulation.Solvers.Register(
+        simulation.World.Solvers.Register(
             "inject",
-            world =>
+            _ =>
             {
-                float[] data = world.GetOrCreateGasSolverData(
+                float[] data = simulation.GetOrCreateGasSolverData(
                     0,
                     key,
                     gas =>
@@ -170,7 +170,7 @@ public sealed class AtmosGasSolverDataTests
                         return new[] { gas.MolarHeatCapacityAtConstantVolume };
                     });
 
-                world.AddGasToVoxel(chunk, 0, 0, data[0], 300f);
+                simulation.AddGasToVoxel(chunk, 0, 0, data[0], 300f);
             });
 
         var checkpoint = simulation.CaptureCheckpoint();

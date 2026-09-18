@@ -30,9 +30,10 @@ public partial class SimulationViewer
         RenderResolutionConfirmationModal();
         RenderPerformanceOverlay();
         DrawReplayFileModals();
+        DrawWorldModals();
         RenderMessagesPanel();
 
-        if (_simulation == null)
+        if (_world == null)
         {
             RenderEmptyWorkspaceMessage();
             DrawCreateProjectModal();
@@ -41,26 +42,9 @@ public partial class SimulationViewer
             return;
         }
 
-        if (_show3DViewport)
-        {
-            _viewport?.Draw(
-                "Simulation 3D##viewport",
-                RenderSimulationScene,
-                new Vector2(320, 40),
-                new Vector2(660, 510),
-                () =>
-                {
-                    Update3DPicking();
-                    Render3DVoxelTooltip();
-                    RenderVoxelContextMenu();
-                });
-        }
-        else
-        {
-            _hovered3DCell = null;
-        }
+        RenderSimulationViewports();
 
-        if (_showSliceViewport)
+        if (_showSliceViewport && _simulation != null)
         {
             _sliceViewport?.Draw(
                 "Simulation Slice 2D##slice-viewport",
@@ -84,6 +68,7 @@ public partial class SimulationViewer
         RenderSolutionPanel();
         RenderToolsPanel();
         RenderConfigurationPanel();
+        RenderWorldPanel();
         ImGui.EndDisabled();
         RenderViewPanel();
         RenderTimelinePanel();
@@ -431,13 +416,13 @@ public partial class SimulationViewer
                 if (ImGui.MenuItem("Open Replay..."))
                     RequestOpenReplay();
 
-                ImGui.BeginDisabled(_simulation == null);
+                ImGui.BeginDisabled(_world == null);
                 if (ImGui.MenuItem("Save Replay..."))
                     RequestSaveReplay();
 
                 ImGui.EndDisabled();
 
-                if (_simulation != null && ImGui.MenuItem("Close Project"))
+                if (_world != null && ImGui.MenuItem("Close Project"))
                     RequestCloseProject();
 
                 ImGui.Separator();
@@ -452,23 +437,25 @@ public partial class SimulationViewer
                 ImGui.MenuItem("Messages / Logs", null, ref _showMessagesPanel);
                 ImGui.Separator();
 
-                // The empty workspace does not render any of these panes. Keep their
-                // entries in the menu for consistency, but prevent toggling them until
-                // a simulation has been created.
-                bool panesAvailable = _simulation != null && _config != null;
-                if (!panesAvailable)
-                    ImGui.BeginDisabled();
+                bool simulationAvailable = _simulation != null && _config != null;
+                ImGui.BeginDisabled(!simulationAvailable);
 
                 ImGui.MenuItem("Solution", null, ref _showSolutionPanel);
                 ImGui.MenuItem("Tools", null, ref _showToolsPanel);
                 ImGui.MenuItem("View", null, ref _showViewPanel);
+                ImGui.EndDisabled();
+
+                bool worldAvailable = _world != null && _config != null;
+                ImGui.BeginDisabled(!worldAvailable);
                 ImGui.MenuItem("Configuration", null, ref _showConfigurationPanel);
                 ImGui.MenuItem("Timeline", null, ref _showTimelinePanel);
+                ImGui.MenuItem("World & Topology", null, ref _showWorldPanel);
+                ImGui.EndDisabled();
+
+                ImGui.BeginDisabled(!simulationAvailable);
                 ImGui.MenuItem("3D Viewport", null, ref _show3DViewport);
                 ImGui.MenuItem("2D Slice Viewport", null, ref _showSliceViewport);
-
-                if (!panesAvailable)
-                    ImGui.EndDisabled();
+                ImGui.EndDisabled();
 
                 ImGui.EndMenu();
             }
@@ -945,6 +932,8 @@ public partial class SimulationViewer
 
         if (!window.IsVisible)
             return;
+
+        ImGui.TextDisabled($"Editing {GetSimulationName(_simulation.Id)}");
 
         if (ImGui.CollapsingHeader("Chunks", ImGuiTreeNodeFlags.DefaultOpen))
             RenderProjectChunkControls();

@@ -85,7 +85,7 @@ public partial class SimulationViewer
 
     private void RequestSaveReplay()
     {
-        if (_simulation == null) return;
+        if (_world == null || _replayTimeline == null || _replayBranches == null) return;
 
         if (string.IsNullOrWhiteSpace(_replaySavePath))
             _replaySavePath = SanitizeReplayName(_projectName ?? "simulation") + ReplayExtension;
@@ -147,8 +147,14 @@ public partial class SimulationViewer
         ImGui.InputText("Path", ref _replayOpenPath, 4096);
         ImGui.SameLine();
         if (ImGui.Button("Browse...")) PickReplayFile();
-        if (_simulation != null)
-            ImGui.TextColored(ViewerTheme.Caution, "Loading successfully will close the current in-memory project.");
+        if (_world != null)
+        {
+            ImGui.TextColored(
+                ViewerTheme.Caution,
+                _replayBranches?.BranchCount > 1
+                    ? $"Loading successfully will discard all {_replayBranches.BranchCount} in-memory branches."
+                    : "Loading successfully will close the current in-memory project.");
+        }
 
         DrawReplayFileError();
         ImGui.BeginDisabled(string.IsNullOrWhiteSpace(_replayOpenPath) || _replayLoadTask != null);
@@ -178,13 +184,20 @@ public partial class SimulationViewer
         if (ImGui.Button("Browse...##save-replay")) PickReplaySaveFile();
         if (_replayTimeline.IsInspecting)
         {
-            ImGui.RadioButton("Save full history", ref _replaySaveRange, 0);
-            ImGui.RadioButton("Save up to here", ref _replaySaveRange, 1);
+            ImGui.RadioButton("Save full selected branch", ref _replaySaveRange, 0);
+            ImGui.RadioButton("Save selected branch up to here", ref _replaySaveRange, 1);
         }
         else
         {
             _replaySaveRange = 0;
-            ImGui.TextDisabled("The live replay will be saved through its current head.");
+            ImGui.TextDisabled("The selected live branch will be saved through its current head.");
+        }
+
+        if (_replayBranches?.BranchCount > 1)
+        {
+            ImGui.TextColored(
+                ViewerTheme.Caution,
+                $"Only '{_replayBranches.SelectedBranch.Name}' will be saved. Other session branches remain in memory.");
         }
 
         DrawReplayFileError();
@@ -258,25 +271,30 @@ public partial class SimulationViewer
 
     private LoadedReplay LoadReplay(string path, CancellationToken cancellation)
     {
-        var document = NumosReplayFile.Load(path);
+        var decoded = NumosReplayFile.LoadDocument(path);
+        if (decoded is not NumosWorldReplayDocument document)
+        {
+            throw new NotSupportedException(
+                "This viewer workspace expects a complete-world replay. The file is a legacy single-simulation replay.");
+        }
+
         var replay = document.Replay;
         var config = new AtmosConfig(replay.InitialCheckpoint.Config);
-        var dimensions = replay.InitialCheckpoint.Dimensions;
-        AtmosSimulation? simulation = null;
+        AtmosWorld? world = null;
         try
         {
-            simulation = new AtmosSimulation(config, dimensions.X, dimensions.Y, dimensions.Z);
-            var progress = new InlineProgress<AtmosReplayIndexProgress>(value =>
+            world = new AtmosWorld(config);
+            var progress = new InlineProgress<AtmosWorldReplayIndexProgress>(value =>
                 _replayFileProgress = value.TotalTicks == 0 ? 1f : (float)value.CompletedTicks / value.TotalTicks);
 
-            var timeline = AtmosReplayTimeline.Import(simulation, replay, 50, progress, cancellation);
-            var result = new LoadedReplay(path, document, simulation, config, timeline);
-            simulation = null;
+            var timeline = AtmosWorldReplayTimeline.Import(world, replay, 50, progress, cancellation);
+            var result = new LoadedReplay(path, document, world, config, timeline);
+            world = null;
             return result;
         }
         finally
         {
-            simulation?.Dispose();
+            world?.Dispose();
         }
     }
 
@@ -285,9 +303,7 @@ public partial class SimulationViewer
         try
         {
             _isPaused = true;
-            var replay = _replaySaveRange == 1
-                ? _replayTimeline!.CaptureReplayThroughCurrentPosition()
-                : _replayTimeline!.CaptureReplay();
+            var replay = _replayBranches!.CaptureSelectedBranch(_replaySaveRange == 1);
 
             replay.EnsurePortable();
             var metadata = new NumosReplayMetadata(
@@ -298,7 +314,7 @@ public partial class SimulationViewer
                 CoreSimBuildInfo.PackageVersion,
                 CoreSimBuildInfo.GitCommit ?? CoreSimBuildInfo.SourceReference);
 
-            var document = new NumosReplayDocument(metadata, replay);
+            var document = new NumosWorldReplayDocument(metadata, replay);
             _replaySaveTask = Task.Run(() => NumosReplayFile.Save(path, document, overwrite));
             _replayFileError = null;
         }
@@ -334,7 +350,7 @@ public partial class SimulationViewer
             }
             finally
             {
-                loaded?.Simulation.Dispose();
+                loaded?.World.Dispose();
             }
 
             _replayFileCancellation?.Dispose();
@@ -369,12 +385,15 @@ public partial class SimulationViewer
 
         int timelineFirstTick = checked((int)loaded.Timeline.Start.Tick);
         DisposeSimulationProject();
-        _simulation = loaded.Simulation;
+        _world = loaded.World;
         _replayTimeline = loaded.Timeline;
+        _replayBranches = new ReplayBranchSession(loaded.World, loaded.Timeline);
         _config = loaded.Config;
         _frameBuilder = frameBuilder;
         _projectName = projectName;
-        _chunkDimensions = loaded.Document.Replay.InitialCheckpoint.Dimensions;
+        _knownSimulationRevision = -1;
+        _activeSimulationId = null;
+        ReconcileSimulationSurfaces();
         _isPaused = true;
         _showTimelinePanel = true;
         _timelineFirstTick = timelineFirstTick;
@@ -422,10 +441,10 @@ public partial class SimulationViewer
 
     private sealed record LoadedReplay(
         string Path,
-        NumosReplayDocument Document,
-        AtmosSimulation Simulation,
+        NumosWorldReplayDocument Document,
+        AtmosWorld World,
         AtmosConfig Config,
-        AtmosReplayTimeline Timeline);
+        AtmosWorldReplayTimeline Timeline);
 
     private sealed class InlineProgress<T>(Action<T> report) : IProgress<T>
     {

@@ -21,6 +21,48 @@ Internally, Numos reconstructs an earlier simulation state from two pieces of in
 full continuation state, and an ordered recording of external mutations made after that checkpoint. Numos restores the
 checkpoint, reapplies each mutation at its original position, and runs the fixed solver ticks between them.
 
+## Record and reconstruct a complete world
+
+Use the world-level replay API whenever more than one `AtmosSimulation` shares an `AtmosWorld`, or when explicit portals
+and docks exist. `AtmosWorld.StartRecording()` installs one recorder across every registered simulation. Its single
+operation sequence includes component mutations, shared configuration changes, simulation creation and destruction, and
+explicit link-set creation and removal:
+
+```csharp
+using Numos.API;
+using Numos.Maths;
+
+using var world = new AtmosWorld();
+AtmosSimulation cabin = world.CreateSimulation(8, 8, 1);
+AtmosChunkHandle cabinChunk = cabin.CreateAndRegisterChunk(new Int3(0, 0, 0));
+AtmosCellRef cabinCell = cabin.GetCellRef(cabinChunk, 0);
+AtmosWorldCheckpoint start = world.CaptureCheckpoint();
+world.StartRecording();
+
+AtmosSimulation airlock = world.CreateSimulation(8, 8, 1);
+AtmosChunkHandle airlockChunk = airlock.CreateAndRegisterChunk(new Int3(0, 0, 0));
+AtmosCellRef airlockCell = airlock.GetCellRef(airlockChunk, 0);
+AtmosPortalHandle portal = world.CreatePortal(cabinCell, airlockCell);
+world.Tick();
+
+AtmosWorldStateHash expected = world.ComputeStateHash();
+AtmosWorldRecording recording = world.StopRecording();
+world.ReplayTo(start, recording.Operations, recording.Head);
+bool matches = world.ComputeStateHash() == expected;
+```
+
+`AtmosWorldCheckpoint` captures registry generations and pending or active topology as well as each component
+checkpoint. Restore preserves matching simulation objects, disposes registrations absent from the checkpoint, and
+recreates missing built-in-only simulations with their recorded identifiers. A missing simulation that used a custom
+solver cannot be recreated because Numos deliberately does not capture host delegates; restore rejects that case.
+Custom world solver names, phases, enablement, and neighbor-selection keys are part of checkpoint compatibility and the
+world state hash. Register matching callbacks before restoring or replaying a checkpoint that uses them.
+
+`AtmosWorldReplayTimeline` provides the same inspect, seek, return-to-head, and branch workflow as the component
+timeline, but keeps membership and topology coherent. Component-only recording and restore remain available for a
+one-simulation world with no explicit topology. Numos rejects component-only use once world-owned state would be left
+inconsistent.
+
 ## Record and reconstruct a simulation
 
 Capture the starting checkpoint before recording the changes that must be replayed:
@@ -197,11 +239,11 @@ exception. It cannot undo side effects in host code. Custom solvers should use `
 damage, audio, spawning, telemetry, and similar effects while still performing the same Numos mutations:
 
 ```csharp
-simulation.Solvers.Register("life-support-v1", world =>
+simulation.World.Solvers.Register("life-support-v1", _ =>
 {
-    RunDeterministicAtmosLogic(world);
+    RunDeterministicAtmosLogic(simulation);
 
-    if (!world.IsReplaying)
+    if (!simulation.IsReplaying)
         EmitHostEffects();
 });
 ```
@@ -311,6 +353,13 @@ dotnet run --project benchmarks/Numos.Replay.Benchmarks -c Release -- --quick
 
 ## Save portable replay files
 
+The `.numos` container has two content discriminators. Kind 1 is the existing single-simulation replay and remains byte
+compatible. Kind 2 stores a complete world checkpoint and globally ordered world operations. Use
+`NumosReplaySerializer.DeserializeDocument` or `NumosReplayFile.LoadDocument` when either kind is accepted, and use
+`NumosWorldReplaySerializer` when the caller specifically requires a complete-world replay. Viewer project names are
+metadata; viewport layout, per-simulation display names, colors, and camera state are presentation preferences and are
+not deterministic replay state.
+
 `Numos.Serialization` turns an `AtmosReplayArchive` into a versioned binary stream without opening files. The separate
 `Numos.Serialization.FileSystem` package adds path-based load and atomic save helpers.
 
@@ -333,10 +382,15 @@ A `.numos` replay contains a small provenance header, one complete initial check
 opcodes. It stores initial and final state hashes. The Viewer verifies both and generates scrub checkpoints every 50
 ticks after loading, so those large acceleration snapshots never enter the file.
 
-The first file format supports built-in Numos simulation state. Saving or loading reports and rejects custom solver
-delegates, solver configurations, and captured solver arrays because a standalone viewer cannot reconstruct their host
-implementations. Unknown required versions, sections, and opcodes are rejected; optional length-prefixed metadata can be
-skipped by future readers. Payload limits are configurable through `NumosReplayReadOptions`.
+Viewer branch graphs are session state. Saving writes the selected branch, either through its preserved head or through
+the current inspection position. Save branches individually when more than one future needs to survive closing the
+project.
+
+The first file format supports built-in Numos simulation state. Saving or loading reports and rejects custom simulation
+or world solver delegates, solver configurations, and captured solver arrays because a standalone viewer cannot
+reconstruct their host implementations. Unknown required versions, sections, and opcodes are rejected; optional
+length-prefixed metadata can be skipped by future readers. Payload limits are configurable through
+`NumosReplayReadOptions`.
 
 Numos does not yet provide compression, network transport, replay of dynamic solver-definition changes, restoration of
 detached mixture identity, or certified bitwise compatibility across runtime and CPU architectures.

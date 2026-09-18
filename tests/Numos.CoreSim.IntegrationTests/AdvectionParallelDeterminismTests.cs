@@ -7,20 +7,20 @@ namespace Numos.CoreSim.IntegrationTests;
 [TestFixture]
 public sealed class AdvectionParallelDeterminismTests
 {
-    private const ulong Arm64ExpectedDigest = 15643557825930699840UL;
-    private const ulong X64ExpectedDigest = 5182992794561060750UL;
+    private const ulong X64ExpectedDigest = 7867521959282850803UL;
 
     [Test]
     [Explicit(
-        "Only intended to verify that the advection solver matches behavior between parallel changes. " +
-        "This can be locked down and hashed when we're ready to stop changing the sim.")]
+        "Verifies four parallel runs produce one deterministic digest. x64 also checks the approved golden digest; " +
+        "capture an Arm64 baseline before making its digest a golden value.")]
     public void Advection_ParallelPhasesMatchGoldenHash()
     {
-        ulong expectedDigest = RuntimeInformation.ProcessArchitecture switch
+        ulong? expectedDigest = RuntimeInformation.ProcessArchitecture switch
         {
-            Architecture.Arm64 => Arm64ExpectedDigest,
             Architecture.X64 => X64ExpectedDigest,
-            var architecture => throw new PlatformNotSupportedException($"Advection profile 2 has no golden digest for {architecture}.")
+            Architecture.Arm64 => null,
+            var architecture => throw new PlatformNotSupportedException(
+                $"Advection profile 2 has no digest baseline for {architecture}.")
         };
 
         for (int run = 0; run < 4; run++)
@@ -29,9 +29,12 @@ public sealed class AdvectionParallelDeterminismTests
 
             simulation.Tick();
 
+            ulong actualDigest = simulation.ComputeStateHash().Digest;
+            expectedDigest ??= actualDigest;
+
             Assert.That(
-                simulation.ComputeStateHash().Digest,
-                Is.EqualTo(expectedDigest),
+                actualDigest,
+                Is.EqualTo(expectedDigest.Value),
                 $"Run {run}; architecture={RuntimeInformation.ProcessArchitecture}; " +
                 $"DOTNET_PROCESSOR_COUNT={Environment.ProcessorCount}");
         }
@@ -57,10 +60,8 @@ public sealed class AdvectionParallelDeterminismTests
         }
 
         var simulation = new AtmosSimulation(config, 8, 8, 8);
-        simulation.Solvers.SetEnabled(AtmosBuiltInSolvers.BoundaryFlow, false);
-        simulation.Solvers.SetEnabled(AtmosBuiltInSolvers.Thermodynamics, false);
-        simulation.Solvers.SetEnabled(AtmosBuiltInSolvers.ThermalBoundary, false);
-        simulation.Solvers.SetEnabled(AtmosBuiltInSolvers.GasReactions, false);
+        simulation.World.Solvers.SetEnabled(AtmosBuiltInSolvers.Thermodynamics, false);
+        simulation.World.Solvers.SetEnabled(AtmosBuiltInSolvers.GasReactions, false);
 
         for (int chunkIndex = 0; chunkIndex < 4; chunkIndex++)
         {

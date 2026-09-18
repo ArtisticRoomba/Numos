@@ -207,16 +207,16 @@ public sealed class AtmosSolverStorageRollbackTests
         using var simulation = new AtmosSimulation(1, 1, 1);
         var chunk = simulation.CreateAndRegisterChunk(default);
         bool failReplay = false;
-        simulation.Solvers.Register(
+        simulation.World.Solvers.Register(
             "counter-v1",
-            world =>
+            _ =>
             {
-                int[] counter = world.GetOrCreateChunkSolverArray<int>(chunk, "counter/count", true);
-                FlatArray<float> history = world.GetOrCreateChunkSolverFlatArray<float>(chunk, "counter/history", true);
+                int[] counter = simulation.GetOrCreateChunkSolverArray<int>(chunk, "counter/count", true);
+                FlatArray<float> history = simulation.GetOrCreateChunkSolverFlatArray<float>(chunk, "counter/history", true);
                 counter[0]++;
                 history[0] += counter[0];
-                world.SetVoxelTemperature(chunk, 0, 300f + history[0]);
-                if (world.IsReplaying && failReplay)
+                simulation.SetVoxelTemperature(chunk, 0, 300f + history[0]);
+                if (simulation.IsReplaying && failReplay)
                     throw new InvalidOperationException("Replay failure after mutating captured arrays.");
             });
 

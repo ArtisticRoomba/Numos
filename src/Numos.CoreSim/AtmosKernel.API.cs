@@ -16,7 +16,7 @@ internal sealed partial class AtmosKernel
     {
         get
         {
-            lock (_stateGate)
+            lock (StateGate)
             {
                 return _chunkMap.Count;
             }
@@ -27,95 +27,10 @@ internal sealed partial class AtmosKernel
     {
         get
         {
-            lock (_stateGate)
+            lock (StateGate)
             {
                 return _isRecording;
             }
-        }
-    }
-
-    /// <summary>
-    ///     Returns a detached description of the currently configured solver pipeline.
-    /// </summary>
-    internal SolverStepInfo[] GetSolverSteps()
-    {
-        lock (_stateGate)
-        {
-            return _solverPipeline.GetSteps();
-        }
-    }
-
-    internal void RegisterSolver(string name, Action<AtmosSolverExecutionContext> solver)
-    {
-        lock (_stateGate)
-        {
-            EnsureCanChangeSolverDefinition();
-            _solverPipeline.Register(name, SolverStepKind.Custom, solver, _solverPipeline.Count);
-        }
-    }
-
-    internal void RegisterSolverBefore(
-        string existingName, string name,
-        Action<AtmosSolverExecutionContext> solver)
-    {
-        lock (_stateGate)
-        {
-            EnsureCanChangeSolverDefinition();
-            int index = _solverPipeline.IndexOf(existingName);
-            if (index < 0)
-                throw new KeyNotFoundException($"No solver named '{existingName}' is registered.");
-
-            _solverPipeline.Register(name, SolverStepKind.Custom, solver, index);
-        }
-    }
-
-    internal void RegisterSolverAfter(
-        string existingName, string name,
-        Action<AtmosSolverExecutionContext> solver)
-    {
-        lock (_stateGate)
-        {
-            EnsureCanChangeSolverDefinition();
-            int index = _solverPipeline.IndexOf(existingName);
-            if (index < 0)
-                throw new KeyNotFoundException($"No solver named '{existingName}' is registered.");
-
-            _solverPipeline.Register(name, SolverStepKind.Custom, solver, index + 1);
-        }
-    }
-
-    internal bool UnregisterSolver(string name)
-    {
-        lock (_stateGate)
-        {
-            EnsureCanChangeSolverDefinition();
-            return _solverPipeline.Unregister(name);
-        }
-    }
-
-    internal bool SetSolverEnabled(string name, bool enabled)
-    {
-        lock (_stateGate)
-        {
-            if (!ShouldRecord)
-                return _solverPipeline.SetEnabled(name, enabled);
-
-            int index = _solverPipeline.IndexOf(name);
-            if (index < 0) return false;
-
-            bool changed = _solverPipeline.GetSteps()[index].Enabled != enabled;
-            _solverPipeline.SetEnabled(name, enabled);
-            if (changed && ShouldRecord) RecordOperation(new SetSolverEnabledOperation(name, enabled));
-            return true;
-        }
-    }
-
-    internal void ResetSolverPipeline()
-    {
-        lock (_stateGate)
-        {
-            EnsureCanChangeSolverDefinition();
-            _solverPipeline.Reset();
         }
     }
 
@@ -124,16 +39,18 @@ internal sealed partial class AtmosKernel
     /// </summary>
     internal Int3[] GetChunkPositions()
     {
-        lock (_stateGate)
+        lock (StateGate)
         {
             return _chunkMap.Keys.ToArray();
         }
     }
 
-    /// <summary>Returns live chunk storage for the opt-in Dangerous API.</summary>
+    /// <summary>
+    ///     Returns live chunk storage for the opt-in Dangerous API.
+    /// </summary>
     internal AtmosChunk GetChunkForDangerousAccess(Int3 position)
     {
-        lock (_stateGate)
+        lock (StateGate)
         {
             return GetChunk(position);
         }
@@ -147,7 +64,7 @@ internal sealed partial class AtmosKernel
         out long revision,
         out Int3[] positions)
     {
-        lock (_stateGate)
+        lock (StateGate)
         {
             revision = _chunkCollectionRevision;
             if (revision == knownRevision)
@@ -173,7 +90,7 @@ internal sealed partial class AtmosKernel
     /// </remarks>
     internal void Update(Second elapsedSeconds)
     {
-        lock (_stateGate)
+        lock (StateGate)
         {
             ThrowIfTickExecuting("update the simulation recursively");
             _accumulator += elapsedSeconds;
@@ -200,10 +117,12 @@ internal sealed partial class AtmosKernel
         }
     }
 
-    /// <summary>Rejects public operations that would begin another tick from a running solver callback.</summary>
+    /// <summary>
+    ///     Rejects public operations that would begin another tick from a running solver callback.
+    /// </summary>
     internal void EnsureCanExecuteTick()
     {
-        lock (_stateGate)
+        lock (StateGate)
         {
             ThrowIfTickExecuting("update the simulation recursively");
         }
@@ -216,30 +135,76 @@ internal sealed partial class AtmosKernel
     /// <exception cref="ArgumentNullException"><paramref name="config" /> is <see langword="null" />.</exception>
     internal bool SetAtmosConfig(AtmosConfigSnapshot config)
     {
-        lock (_stateGate)
+        lock (StateGate)
         {
             ArgumentNullException.ThrowIfNull(config);
             config.ValidateGasRegistry();
-            if (_config.SemanticallyEquals(config))
-                return false;
-
+            bool changed = !_config.SemanticallyEquals(config);
             _config = config;
-            if (ShouldRecord) RecordOperation(new SetAtmosConfigOperation(config));
-            return true;
+            if (changed && ShouldRecord)
+                RecordOperation(new SetAtmosConfigOperation(config));
+
+            return changed;
+        }
+    }
+
+    /// <summary>
+    ///     Applies world-shared configuration without recording a second host operation.
+    /// </summary>
+    /// <param name="config">The detached canonical configuration.</param>
+    /// <returns><see langword="true" /> when the configuration changed.</returns>
+    /// <remarks>
+    ///     World recording owns one shared configuration operation. Applying the same snapshot to each kernel through
+    ///     this path prevents the component recorder from emitting a duplicate operation for every simulation.
+    /// </remarks>
+    internal bool SetAtmosConfigWithoutRecording(AtmosConfigSnapshot config)
+    {
+        lock (StateGate)
+        {
+            ArgumentNullException.ThrowIfNull(config);
+            config.ValidateGasRegistry();
+            bool changed = !_config.SemanticallyEquals(config);
+            _config = config;
+            return changed;
+        }
+    }
+
+    /// <summary>
+    ///     Aligns a newly registered kernel with its containing world's completed-tick count.
+    /// </summary>
+    /// <param name="tickCount">The nonnegative world tick at registration time.</param>
+    internal void SetInitialWorldTickCount(int tickCount)
+    {
+        lock (StateGate)
+        {
+            ArgumentOutOfRangeException.ThrowIfNegative(tickCount);
+            if (TickCount != 0)
+                throw new InvalidOperationException("Only a new simulation can be aligned with world time.");
+
+            TickCount = tickCount;
         }
     }
 
     internal AtmosConfigSnapshot GetAtmosConfig()
     {
-        lock (_stateGate)
+        lock (StateGate)
         {
             return _config;
         }
     }
 
+    internal void RecordSolverEnablement(string name, bool enabled)
+    {
+        lock (StateGate)
+        {
+            if (_isRecording && !_isApplyingOperation && !_isTickExecuting)
+                RecordOperation(new SetSolverEnabledOperation(name, enabled));
+        }
+    }
+
     internal void StartRecording()
     {
-        lock (_stateGate)
+        lock (StateGate)
         {
             ThrowIfTickExecuting("start recording");
             if (_isRecording)
@@ -255,7 +220,7 @@ internal sealed partial class AtmosKernel
 
     internal AtmosRecording CaptureRecording()
     {
-        lock (_stateGate)
+        lock (StateGate)
         {
             if (!_hasRecording)
                 throw new InvalidOperationException("The simulation has no recording to capture.");
@@ -270,7 +235,7 @@ internal sealed partial class AtmosKernel
 
     internal AtmosRecording StopRecording()
     {
-        lock (_stateGate)
+        lock (StateGate)
         {
             ThrowIfTickExecuting("stop recording");
             if (!_isRecording)
@@ -292,7 +257,7 @@ internal sealed partial class AtmosKernel
     /// </exception>
     internal void RegisterChunk(AtmosChunk chunk)
     {
-        lock (_stateGate)
+        lock (StateGate)
         {
             ThrowIfTickExecuting("register a chunk during the current tick");
             if (chunk.Dimensions != _dimensions)
@@ -314,7 +279,7 @@ internal sealed partial class AtmosKernel
     /// <returns><see langword="true" /> if a chunk was removed; otherwise, <see langword="false" />.</returns>
     internal bool UnregisterChunk(Int3 position)
     {
-        lock (_stateGate)
+        lock (StateGate)
         {
             ThrowIfTickExecuting("unregister a chunk used by the current tick");
             if (!_chunkMap.TryRemove(position, out var chunk))
@@ -337,7 +302,7 @@ internal sealed partial class AtmosKernel
     /// <exception cref="InvalidOperationException">A chunk is already registered at <paramref name="position" />.</exception>
     internal void CreateAndRegisterChunk(Int3 position, int width, int height, int depth)
     {
-        lock (_stateGate)
+        lock (StateGate)
         {
             ThrowIfTickExecuting("register a chunk during the current tick");
             if (_chunkMap.ContainsKey(position))
@@ -357,7 +322,7 @@ internal sealed partial class AtmosKernel
     /// <exception cref="KeyNotFoundException">No chunk is registered at <paramref name="position" />.</exception>
     internal AtmosChunkSnapshot GetChunkSnapshot(Int3 position)
     {
-        lock (_stateGate)
+        lock (StateGate)
         {
             return GetChunk(position).GetNetworkSnapshot();
         }
@@ -368,7 +333,7 @@ internal sealed partial class AtmosKernel
     /// </summary>
     internal AtmosVoxelSnapshot GetVoxelSnapshot(Int3 position, ushort localVoxelIndex)
     {
-        lock (_stateGate)
+        lock (StateGate)
         {
             var chunk = GetChunk(position);
             return CreateVoxelSnapshot(chunk, position, localVoxelIndex);
@@ -384,7 +349,7 @@ internal sealed partial class AtmosKernel
         AtmosChunkVersion expectedVersion,
         out AtmosVoxelSnapshot snapshot)
     {
-        lock (_stateGate)
+        lock (StateGate)
         {
             var chunk = GetChunk(position);
             if (chunk.Version != expectedVersion)
@@ -449,7 +414,7 @@ internal sealed partial class AtmosKernel
         if ((fields & ~AtmosChunkSnapshotFields.All) != 0)
             throw new ArgumentOutOfRangeException(nameof(fields));
 
-        lock (_stateGate)
+        lock (StateGate)
         {
             var chunk = GetChunk(position);
             // Live solver-array writes cannot increment a revision, so requests including them must copy each time.
@@ -471,7 +436,7 @@ internal sealed partial class AtmosKernel
     internal AtmosChunkSnapshotBatch GetChangedChunkSnapshots(
         IReadOnlyList<AtmosChunkSnapshotRequest> requests)
     {
-        lock (_stateGate)
+        lock (StateGate)
         {
             var positions = new HashSet<Int3>();
             for (int index = 0; index < requests.Count; index++)
@@ -517,7 +482,7 @@ internal sealed partial class AtmosKernel
     /// <exception cref="KeyNotFoundException">No chunk is registered at <paramref name="position" />.</exception>
     internal void SetChunkClassification(Int3 position, VoxelClassification classification)
     {
-        lock (_stateGate)
+        lock (StateGate)
         {
             var chunk = GetChunk(position);
             chunk.SetChunkClassification(classification);
@@ -536,7 +501,7 @@ internal sealed partial class AtmosKernel
     /// </remarks>
     internal void SetChunkBoundaryClassification(Int3 position, VoxelClassification classification)
     {
-        lock (_stateGate)
+        lock (StateGate)
         {
             var chunk = GetChunk(position);
             var dimensions = chunk.Dimensions;
@@ -575,7 +540,7 @@ internal sealed partial class AtmosKernel
         Int3 position, ushort localVoxelIndex,
         VoxelClassification classification)
     {
-        lock (_stateGate)
+        lock (StateGate)
         {
             var chunk = GetChunk(position);
             ValidateVoxelIndex(chunk, localVoxelIndex);
@@ -600,7 +565,7 @@ internal sealed partial class AtmosKernel
         Int3 position, int x, int y, int z,
         VoxelClassification classification)
     {
-        lock (_stateGate)
+        lock (StateGate)
         {
             var chunk = GetChunk(position);
             SetVoxelClassification(position, GetValidatedVoxelIndex(chunk, x, y, z), classification);
@@ -617,7 +582,7 @@ internal sealed partial class AtmosKernel
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="localVoxelIndex" /> is outside the chunk.</exception>
     internal void SetVoxelTemperature(Int3 position, ushort localVoxelIndex, Kelvin temperature)
     {
-        lock (_stateGate)
+        lock (StateGate)
         {
             var chunk = GetChunk(position);
             ValidateVoxelIndex(chunk, localVoxelIndex);
@@ -642,7 +607,7 @@ internal sealed partial class AtmosKernel
     /// <exception cref="ArgumentOutOfRangeException">A local coordinate is outside the chunk.</exception>
     internal void SetVoxelTemperature(Int3 position, int x, int y, int z, Kelvin temperature)
     {
-        lock (_stateGate)
+        lock (StateGate)
         {
             var chunk = GetChunk(position);
             SetVoxelTemperature(position, GetValidatedVoxelIndex(chunk, x, y, z), temperature);
@@ -664,7 +629,7 @@ internal sealed partial class AtmosKernel
         Int3 position, ushort localVoxelIndex, int gasId, Mole moles,
         Kelvin temperature)
     {
-        lock (_stateGate)
+        lock (StateGate)
         {
             var chunk = GetChunk(position);
             ValidateVoxelIndex(chunk, localVoxelIndex);
@@ -697,7 +662,7 @@ internal sealed partial class AtmosKernel
         Int3 position, int x, int y, int z, int gasId, Mole moles,
         Kelvin temperature)
     {
-        lock (_stateGate)
+        lock (StateGate)
         {
             var chunk = GetChunk(position);
             AddGasToVoxel(position, GetValidatedVoxelIndex(chunk, x, y, z), gasId, moles, temperature);
@@ -711,7 +676,7 @@ internal sealed partial class AtmosKernel
     /// <exception cref="KeyNotFoundException">No chunk is registered at <paramref name="position" />.</exception>
     internal void WakeChunk(Int3 position)
     {
-        lock (_stateGate)
+        lock (StateGate)
         {
             GetChunk(position).Wake();
             if (ShouldRecord) RecordOperation(new WakeChunkOperation(position));
@@ -725,7 +690,7 @@ internal sealed partial class AtmosKernel
     /// <exception cref="KeyNotFoundException">No chunk is registered at <paramref name="position" />.</exception>
     internal void SleepChunk(Int3 position)
     {
-        lock (_stateGate)
+        lock (StateGate)
         {
             GetChunk(position).Sleep();
             if (ShouldRecord) RecordOperation(new SleepChunkOperation(position));
@@ -738,7 +703,7 @@ internal sealed partial class AtmosKernel
     /// <remarks>This bypasses the elapsed-time accumulator and is useful for deterministic driving and tests.</remarks>
     internal void Tick()
     {
-        lock (_stateGate)
+        lock (StateGate)
         {
             AtmosChunk[] chunks = OrderedChunks();
             TickSimulation(chunks);

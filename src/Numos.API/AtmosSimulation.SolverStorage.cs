@@ -46,15 +46,15 @@ public sealed partial class AtmosSimulation
     /// <example>
     ///     <code>
     ///     // Both stages resolve the same queue; the producer runs first.
-    ///     simulation.Solvers.Register("produce", world =>
+    ///     simulation.World.Solvers.Register("produce", _ =>
     ///     {
-    ///         var pending = world.GetOrCreateSolverData("custom/pending", static () => new Queue&lt;int&gt;());
+    ///         var pending = simulation.GetOrCreateSolverData("custom/pending", static () => new Queue&lt;int&gt;());
     ///         pending.Clear();
-    ///         pending.Enqueue(world.TickCount);
+    ///         pending.Enqueue(simulation.TickCount);
     ///     });
-    ///     simulation.Solvers.RegisterAfter("produce", "consume", world =>
+    ///     simulation.World.Solvers.RegisterAfter("produce", "consume", _ =>
     ///     {
-    ///         var pending = world.GetOrCreateSolverData("custom/pending", static () => new Queue&lt;int&gt;());
+    ///         var pending = simulation.GetOrCreateSolverData("custom/pending", static () => new Queue&lt;int&gt;());
     ///         while (pending.TryDequeue(out int tick))
     ///             Console.WriteLine(tick);
     ///     });

@@ -1,7 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using Numos.CoreSim.Replay;
-using Numos.CoreSim.Solvers;
 using Numos.Maths;
 
 namespace Numos.CoreSim;
@@ -9,17 +8,24 @@ namespace Numos.CoreSim;
 internal sealed partial class AtmosKernel
 {
     private readonly Int3 _dimensions;
+    private Action<AtmosOperation>? _externalOperationSink;
     private bool _isApplyingOperation;
     private bool _isReplaying;
+    private Action _replayTick = null!;
+    private Func<string, bool, bool> _setWorldSolverEnabled = null!;
+    private Func<AtmosSolverCheckpoint[]> _solverCheckpointProvider = static () => [];
     private AtmosStateHash? _stoppedRecordingHash;
 
-    private bool ShouldRecord => _isRecording && !_isTickExecuting && !_isApplyingOperation;
+    private bool ShouldRecord =>
+        (_isRecording || _externalOperationSink != null) &&
+        !_isTickExecuting &&
+        !_isApplyingOperation;
 
     internal AtmosTimelinePosition TimelinePosition
     {
         get
         {
-            lock (_stateGate)
+            lock (StateGate)
             {
                 return new AtmosTimelinePosition(checked((ulong)TickCount), _lastOperationSequence);
             }
@@ -30,7 +36,7 @@ internal sealed partial class AtmosKernel
     {
         get
         {
-            lock (_stateGate)
+            lock (StateGate)
             {
                 return _isReplaying;
             }
@@ -39,8 +45,31 @@ internal sealed partial class AtmosKernel
 
     private void RecordOperation(AtmosOperation operation)
     {
+        if (_externalOperationSink != null)
+        {
+            _externalOperationSink(operation);
+            return;
+        }
+
         _lastOperationSequence = checked(_lastOperationSequence + 1);
         _recordedOperations.Add(new AtmosRecordedOperation(TimelinePosition, operation));
+    }
+
+    /// <summary>
+    ///     Routes external semantic mutations to a world-owned recorder without coupling the kernel to API identities.
+    /// </summary>
+    internal void SetExternalOperationSink(Action<AtmosOperation>? sink)
+    {
+        lock (StateGate)
+        {
+            ThrowIfTickExecuting("change the external operation recorder");
+            if (_isRecording)
+            {
+                throw new InvalidOperationException("Stop component recording before attaching a world operation recorder.");
+            }
+
+            _externalOperationSink = sink;
+        }
     }
 
     private void RecordVoxelMixture(AtmosChunk chunk, ushort index)
@@ -49,33 +78,33 @@ internal sealed partial class AtmosKernel
             RecordOperation(new SetVoxelMixtureOperation(chunk, index));
     }
 
-    private void EnsureCanChangeSolverDefinition()
+    internal void ConfigureWorldSolverServices(
+        Func<AtmosSolverCheckpoint[]> solverCheckpointProvider,
+        Func<string, bool, bool> setWorldSolverEnabled,
+        Action replayTick)
     {
-        if (_isRecording || _isReplaying)
-        {
-            throw new InvalidOperationException(
-                "Solver registration, removal and reset are unavailable during recording or replay. Register compatible named solvers before starting the session.");
-        }
+        _solverCheckpointProvider = solverCheckpointProvider;
+        _setWorldSolverEnabled = setWorldSolverEnabled;
+        _replayTick = replayTick;
     }
 
     internal AtmosSimulationCheckpoint CaptureCheckpoint()
     {
-        lock (_stateGate)
+        lock (StateGate)
         {
             ThrowIfTickExecuting("capture a checkpoint during a tick");
             return new AtmosSimulationCheckpoint(
                 _dimensions,
                 TimelinePosition,
                 _config,
-                _solverPipeline.GetSteps().Select(static step =>
-                    new AtmosSolverCheckpoint(step.Name, step.Kind == SolverStepKind.Custom, step.Enabled)).ToArray(),
+                _solverCheckpointProvider(),
                 OrderedChunks().Select(static chunk => new AtmosChunkCheckpoint(chunk)).ToArray());
         }
     }
 
     internal AtmosStateHash ComputeStateHash()
     {
-        lock (_stateGate)
+        lock (StateGate)
         {
             return AtmosStateHasher.Hash(CaptureCheckpoint());
         }
@@ -83,7 +112,7 @@ internal sealed partial class AtmosKernel
 
     internal void ResumeRecording()
     {
-        lock (_stateGate)
+        lock (StateGate)
         {
             ThrowIfTickExecuting("resume recording");
             if (_isRecording || !_hasRecording || _stoppedRecordingHash != ComputeStateHash())
@@ -95,7 +124,7 @@ internal sealed partial class AtmosKernel
 
     internal void ResumeRecordingFromCurrentPosition()
     {
-        lock (_stateGate)
+        lock (StateGate)
         {
             ThrowIfTickExecuting("resume recording from the current position");
             if (_isRecording ||
@@ -115,7 +144,7 @@ internal sealed partial class AtmosKernel
 
     internal void RestoreCheckpoint(AtmosSimulationCheckpoint checkpoint)
     {
-        lock (_stateGate)
+        lock (StateGate)
         {
             ThrowIfTickExecuting("restore a checkpoint during a tick");
             if (_isRecording)
@@ -126,7 +155,7 @@ internal sealed partial class AtmosKernel
         }
     }
 
-    private void ValidateCheckpoint(AtmosSimulationCheckpoint checkpoint)
+    internal void ValidateCheckpoint(AtmosSimulationCheckpoint checkpoint)
     {
         ArgumentNullException.ThrowIfNull(checkpoint);
         if (checkpoint.FormatVersion != AtmosSimulationCheckpoint.CurrentFormatVersion ||
@@ -139,14 +168,16 @@ internal sealed partial class AtmosKernel
                 nameof(checkpoint));
         }
 
-        SolverStepInfo[] steps = _solverPipeline.GetSteps();
-        if (steps.Length != checkpoint.Solvers.Count ||
-            steps.Where((step, index) =>
-                step.Name != checkpoint.Solvers[index].Name ||
-                step.Kind == SolverStepKind.Custom != checkpoint.Solvers[index].IsCustom).Any())
+        AtmosSolverCheckpoint[] steps = _solverCheckpointProvider();
+        if (steps.Length != 0 &&
+            (steps.Length != checkpoint.Solvers.Count ||
+             steps.Where((step, index) =>
+                 step.Name != checkpoint.Solvers[index].Name ||
+                 step.IsCustom != checkpoint.Solvers[index].IsCustom ||
+                 step.NeighborSelectionKey != checkpoint.Solvers[index].NeighborSelectionKey).Any()))
         {
             throw new ArgumentException(
-                "The checkpoint requires the same solver names, kinds and order. Custom names identify host-supplied compatible implementations.",
+                "The checkpoint requires the same solver names, kinds, order, and neighbor selections.",
                 nameof(checkpoint));
         }
 
@@ -179,14 +210,14 @@ internal sealed partial class AtmosKernel
         ConcurrentDictionary<Int3, AtmosChunk> previous = _chunkMap;
         _chunkMap = replacement;
         _config = checkpoint.Config;
-        _tickConfig.Capture(_config);
-        _tickConfig.ClearGasSolverData();
+        CurrentTickConfig.Capture(_config);
+        CurrentTickConfig.ClearGasSolverData();
         _solverData.Clear();
         TickCount = checked((int)checkpoint.Position.Tick);
         _lastOperationSequence = checkpoint.Position.OperationSequence;
         _accumulator = 0f;
         foreach (var step in checkpoint.Solvers)
-            _solverPipeline.SetEnabled(step.Name, step.Enabled);
+            _setWorldSolverEnabled(step.Name, step.Enabled);
 
         _defaultSolvers.ClearTransientState();
         _chunkCollectionRevision++;
@@ -202,7 +233,7 @@ internal sealed partial class AtmosKernel
         ArgumentNullException.ThrowIfNull(operations);
         // Detach the host's batch before validation and application.
         AtmosRecordedOperation[] history = operations.ToArray();
-        lock (_stateGate)
+        lock (StateGate)
         {
             ThrowIfTickExecuting("replay during a tick");
             if (_isRecording || _isReplaying)
@@ -222,14 +253,14 @@ internal sealed partial class AtmosKernel
                         continue;
 
                     while ((ulong)TickCount < operation.AfterTick)
-                        Tick();
+                        _replayTick();
 
                     ApplyOperation(operation.Operation);
                     _lastOperationSequence = operation.Sequence;
                 }
 
                 while ((ulong)TickCount < target.Tick)
-                    Tick();
+                    _replayTick();
 
                 return new AtmosReplayResult(
                     checkpoint.Position,
@@ -295,7 +326,7 @@ internal sealed partial class AtmosKernel
             throw new ArgumentException("The history does not contain the target operation sequence.", nameof(history));
     }
 
-    private void ApplyOperation(AtmosOperation operation)
+    internal void ApplyRecordedOperation(AtmosOperation operation)
     {
         _isApplyingOperation = true;
         try
@@ -334,7 +365,7 @@ internal sealed partial class AtmosKernel
                     SleepChunk(op.Position);
                     break;
                 case SetSolverEnabledOperation op:
-                    if (!SetSolverEnabled(op.Name, op.Enabled))
+                    if (!_setWorldSolverEnabled(op.Name, op.Enabled))
                         throw new ArgumentException($"Unknown solver '{op.Name}'.");
 
                     break;
@@ -358,6 +389,11 @@ internal sealed partial class AtmosKernel
         {
             _isApplyingOperation = false;
         }
+    }
+
+    private void ApplyOperation(AtmosOperation operation)
+    {
+        ApplyRecordedOperation(operation);
     }
 
     private AtmosChunk[] OrderedChunks()

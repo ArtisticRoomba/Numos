@@ -128,6 +128,7 @@ public partial class SimulationViewer : IDisposable
     private int _voxelDragViewport;
     private VoxelEditTool _voxelEditTool;
     private bool _windowInitialized;
+    private AtmosWorld? _world;
 
     /// <summary>
     ///     Creates a viewer with an optional startup hook for registering application-specific
@@ -175,10 +176,6 @@ public partial class SimulationViewer : IDisposable
             ImGui.GetIO().ConfigWindowsMoveFromTitleBarOnly = true;
             ConfigureLayoutPersistence();
 
-            _viewport = new SimulationViewport(
-                TextureFilter.Bilinear,
-                new Color(0.04f, 0.04f, 0.05f, 1f));
-
             _sliceViewport = new SimulationViewport(
                 TextureFilter.Point,
                 new Color(0.04f, 0.04f, 0.05f, 1f));
@@ -205,7 +202,7 @@ public partial class SimulationViewer : IDisposable
         UpdateReplayFileOperations();
         HandleReplayFileDrop();
 
-        if (_simulation != null && _config != null)
+        if (_world != null && _config != null)
         {
             if (!_isPaused)
             {
@@ -220,13 +217,16 @@ public partial class SimulationViewer : IDisposable
                 }
                 else
                 {
-                    _simulation.Update(deltaTime);
+                    _world.Update(deltaTime);
                 }
             }
 
             _replayTimeline?.ObserveLiveState();
+            ReconcileSimulationSurfaces();
+            if (_simulation != null)
+                RefreshPresentation();
 
-            RefreshPresentation();
+            RefreshSimulationSurfaces();
         }
 
         UpdateCamera(deltaTime);
@@ -727,6 +727,8 @@ public partial class SimulationViewer : IDisposable
                     _focusedChunk,
                     _highlights,
                     Get3DRenderStyleOptions());
+
+                DrawTopologyOverlay();
             }
             finally
             {

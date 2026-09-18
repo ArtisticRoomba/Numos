@@ -59,7 +59,7 @@ public partial class SimulationViewer
     private readonly static GasProperties NitrousOxide = new()
     {
         Name = "Nitrous Oxide",
-        MolarHeatCapacityAtConstantVolume = 30.3f ,
+        MolarHeatCapacityAtConstantVolume = 30.3f,
         BoilingPoint = 184.71f,
         CondensationEnabled = true,
         MolarEnthalpyOfVaporization = 16_540f,
@@ -70,15 +70,13 @@ public partial class SimulationViewer
     private readonly static GasProperties Water = new()
     {
         Name = "Water Vapour",
-        MolarHeatCapacityAtConstantVolume = 28f ,
+        MolarHeatCapacityAtConstantVolume = 28f,
         BoilingPoint = 373.15f,
         CondensationEnabled = true,
         MolarEnthalpyOfVaporization = 40_657f,
         LiquidId = 0,
         DiffusionCoefficient = 0.02f
     };
-
-
 
 
     private Int3 _chunkDimensions;
@@ -101,37 +99,39 @@ public partial class SimulationViewer
             config.GasRegistry.Add(Water);
 
             var waterSynthesis = new StandardGasReaction(
-            new Dictionary<GasProperties, float>
-                { { Hydrogen, 2 }, { Oxygen, 1 } },
-            new Dictionary<GasProperties, float>
-            {
-                { Water, 2 }
-            },
-            285.8f,
-            1.8e13f,
-            146.4f,
-            new Dictionary<GasProperties, float>
-            {
-                { Hydrogen, 1 },
-                { Oxygen, 0.5f }
-            });
+                new Dictionary<GasProperties, float>
+                    { { Hydrogen, 2 }, { Oxygen, 1 } },
+                new Dictionary<GasProperties, float>
+                {
+                    { Water, 2 }
+                },
+                285.8f,
+                1.8e13f,
+                146.4f,
+                new Dictionary<GasProperties, float>
+                {
+                    { Hydrogen, 1 },
+                    { Oxygen, 0.5f }
+                });
 
             config.SolverConfigurations = [new GasReactionConfig(standardReactions: [waterSynthesis])];
         }
 
-        AtmosSimulation? simulation = null;
+        AtmosWorld? world = null;
         try
         {
-            simulation = new AtmosSimulation(config, chunkWidth, chunkHeight, chunkDepth);
-            simulation.StartRecording();
+            world = new AtmosWorld(config);
+            var simulation = world.CreateSimulation(chunkWidth, chunkHeight, chunkDepth);
             var visualizations = VisualizationRegistry.CreateDefault(config);
             _configureVisualizations?.Invoke(visualizations);
             var frameBuilder = new SimulationFrameBuilder(config, visualizations);
 
             DisposeSimulationProject();
 
+            _world = world;
             _simulation = simulation;
-            _replayTimeline = new AtmosReplayTimeline(simulation);
+            _replayTimeline = new AtmosWorldReplayTimeline(world);
+            _replayBranches = new ReplayBranchSession(world, _replayTimeline);
             _config = config;
             _frameBuilder = frameBuilder;
             _projectName = string.IsNullOrWhiteSpace(projectName)
@@ -141,20 +141,45 @@ public partial class SimulationViewer
             _chunkDimensions = new Int3(chunkWidth, chunkHeight, chunkDepth);
             _isPaused = true;
             _showConfigurationPanel = true;
-            simulation = null;
+            _knownSimulationRevision = -1;
+            _activeSimulationId = simulation.Id;
+            ReconcileSimulationSurfaces();
+            world = null;
             SetProjectMessage($"Created project '{_projectName}'.", false);
         }
         finally
         {
-            simulation?.Dispose();
+            world?.Dispose();
         }
     }
 
     private void DisposeSimulationProject()
     {
-        _simulation?.Dispose();
+        SaveActiveSurfaceState();
+        foreach (var surface in _simulationSurfaces)
+            surface.Dispose();
+
+        _simulationSurfaces.Clear();
+        _simulationNames.Clear();
+        _viewport = null;
+        _world?.Dispose();
+        _world = null;
         _simulation = null;
+        _activeSimulationId = null;
+        _knownSimulationRevision = -1;
+        _simulationFeedback = null;
+        _simulationPendingRemoval = null;
+        _removeSimulationModalOpen = false;
+        _requestRemoveSimulation = false;
+        _selectedLinkSet = null;
+        _topologyFeedback = null;
+        _topologyPendingRemoval = null;
+        _removeTopologyModalOpen = false;
+        _requestRemoveTopology = false;
+        _portalFirst = null;
+        _portalSecond = null;
         _replayTimeline = null;
+        _replayBranches = null;
         _timelineOperation = null;
         _timelineError = null;
         _pendingScrubTick = null;
@@ -293,15 +318,16 @@ public partial class SimulationViewer
 
     private void RemoveProjectGas(int gasId)
     {
-        if (_simulation == null ||
+        if (_world == null ||
             _config == null ||
             gasId < 0 ||
             gasId >= _config.GasRegistry.Count)
             return;
 
-        foreach (var handle in _simulation.GetChunkHandles())
+        foreach (var simulation in _world.Simulations)
+        foreach (var handle in simulation.GetChunkHandles())
         {
-            var snapshot = _simulation.GetChunkSnapshot(handle);
+            var snapshot = simulation.GetChunkSnapshot(handle);
             if (snapshot.Gases.Any(gas => gas.GasId >= gasId))
             {
                 SetProjectMessage(
@@ -353,7 +379,7 @@ public partial class SimulationViewer
 
     private void ApplyConfiguration()
     {
-        if (_simulation != null && _config != null)
-            _simulation.SetAtmosConfig(_config);
+        if (_world != null && _config != null)
+            _world.SetAtmosConfig(_config);
     }
 }

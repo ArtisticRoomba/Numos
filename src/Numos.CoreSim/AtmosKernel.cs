@@ -13,16 +13,15 @@ internal sealed partial class AtmosKernel : IDisposable, IAtmosSolverWorld
     private readonly DefaultAtmosSolvers _defaultSolvers;
     private readonly List<AtmosRecordedOperation> _recordedOperations = [];
     private readonly SolverDataStorage _solverData = new();
-    private readonly AtmosSolverPipeline _solverPipeline;
-    private readonly object _stateGate = new();
-    private readonly AtmosSolverConfigSnapshot _tickConfig = new();
 
     /// <summary>
     ///     High-resolution timestamp ticks spent processing boundary flow since the latest elapsed-time update.
     /// </summary>
     internal long LastBoundaryTicks;
 
-    /// <summary>Number of fixed simulation ticks processed since construction.</summary>
+    /// <summary>
+    ///     Number of completed fixed ticks on the owning world timeline.
+    /// </summary>
     internal int TickCount;
 
     private Second _accumulator;
@@ -43,9 +42,18 @@ internal sealed partial class AtmosKernel : IDisposable, IAtmosSolverWorld
     {
         _dimensions = new Int3(chunkWidth, chunkHeight, chunkDepth);
         _defaultSolvers = new DefaultAtmosSolvers(chunkWidth, chunkHeight, chunkDepth);
-        _solverPipeline = new AtmosSolverPipeline(_defaultSolvers.CreateSteps, _defaultSolvers);
-        _tickConfig.Capture(_config);
+        CurrentTickConfig.Capture(_config);
     }
+
+    /// <summary>
+    ///     Gets the state gate used by a containing world to make a multi-kernel tick externally atomic.
+    /// </summary>
+    internal object StateGate { get; } = new();
+
+    /// <summary>
+    ///     Gets the normalized configuration captured by the most recent kernel tick.
+    /// </summary>
+    internal AtmosSolverConfigSnapshot CurrentTickConfig { get; } = new();
 
     bool IAtmosSolverWorld.TryGetChunk(Int3 position, out AtmosChunk chunk)
     {
@@ -59,27 +67,93 @@ internal sealed partial class AtmosKernel : IDisposable, IAtmosSolverWorld
 
     public void Dispose()
     {
-        lock (_stateGate)
+        lock (StateGate)
         {
             ThrowIfTickExecuting("dispose the simulation");
             foreach (var chunk in _chunkMap.Values)
                 chunk.Release();
 
             _chunkMap.Clear();
-            _tickConfig.ClearGasSolverData();
+            CurrentTickConfig.ClearGasSolverData();
             _solverData.Clear();
-            _solverPipeline.Dispose();
+            _defaultSolvers.Dispose();
+        }
+    }
+
+    /// <summary>
+    ///     Resolves a cell for a world-owned explicit topology edge.
+    /// </summary>
+    /// <param name="chunkPosition">The owning chunk's grid position.</param>
+    /// <param name="localVoxelIndex">The flat local voxel index.</param>
+    /// <param name="endpoint">The resolved solver endpoint.</param>
+    /// <returns><see langword="true" /> when the chunk and voxel still exist.</returns>
+    internal bool TryResolveExplicitEndpoint(
+        Int3 chunkPosition,
+        ushort localVoxelIndex,
+        out ExplicitTransportEndpoint endpoint)
+    {
+        lock (StateGate)
+        {
+            if (!_chunkMap.TryGetValue(chunkPosition, out var chunk) ||
+                localVoxelIndex >= chunk.VoxelCount)
+            {
+                endpoint = default;
+                return false;
+            }
+
+            endpoint = new ExplicitTransportEndpoint(chunk, localVoxelIndex);
+            return true;
         }
     }
 
     private void TickSimulation(AtmosChunk[] chunks)
+    {
+        var context = BeginTickSimulation(chunks);
+        try
+        {
+            SolveAdvection(context);
+            SolveBoundaryFlow(context);
+            SolveThermodynamics(context);
+            SolveThermalBoundary(context);
+            SolveGasReactions(context);
+        }
+        finally
+        {
+            CompleteWorldTick();
+        }
+    }
+
+    /// <summary>
+    ///     Begins one tick whose pipeline stages will be coordinated by a containing world.
+    /// </summary>
+    /// <returns>The immutable context and enabled pipeline snapshot for this tick.</returns>
+    internal AtmosWorldTickExecution BeginWorldTick()
+    {
+        lock (StateGate)
+        {
+            return new AtmosWorldTickExecution(BeginTickSimulation(OrderedChunks()));
+        }
+    }
+
+    /// <summary>
+    ///     Ends a world-coordinated tick after every selected callback has run.
+    /// </summary>
+    internal void CompleteWorldTick()
+    {
+        lock (StateGate)
+        {
+            _isTickExecuting = false;
+        }
+    }
+
+    private AtmosSolverExecutionContext BeginTickSimulation(AtmosChunk[] chunks)
     {
         ThrowIfTickExecuting("run a recursive simulation tick");
         _isTickExecuting = true;
         try
         {
             _config.ValidateGasRegistry();
-            _tickConfig.Capture(_config);
+            CurrentTickConfig.Capture(_config);
             TickCount = checked(TickCount + 1);
 
             foreach (var chunk in chunks)
@@ -88,13 +162,39 @@ internal sealed partial class AtmosKernel : IDisposable, IAtmosSolverWorld
                     chunk.MarkChanged();
             }
 
-            var context = new AtmosSolverExecutionContext(this, chunks, _tickConfig, TickCount, _solverData);
-            _solverPipeline.Execute(context);
+            var context = new AtmosSolverExecutionContext(this, chunks, CurrentTickConfig, TickCount, _solverData);
+            return context;
         }
-        finally
+        catch
         {
             _isTickExecuting = false;
+            throw;
         }
+    }
+
+    internal void SolveAdvection(AtmosSolverExecutionContext context)
+    {
+        _defaultSolvers.SolveAdvection(context);
+    }
+
+    internal void SolveBoundaryFlow(AtmosSolverExecutionContext context)
+    {
+        _defaultSolvers.SolveBoundaryFlow(context);
+    }
+
+    internal void SolveThermodynamics(AtmosSolverExecutionContext context)
+    {
+        _defaultSolvers.SolveThermodynamics(context);
+    }
+
+    internal void SolveThermalBoundary(AtmosSolverExecutionContext context)
+    {
+        _defaultSolvers.SolveThermalBoundary(context);
+    }
+
+    internal void SolveGasReactions(AtmosSolverExecutionContext context)
+    {
+        _defaultSolvers.SolveGasReactions(context);
     }
 
     private void ThrowIfTickExecuting(string operation)

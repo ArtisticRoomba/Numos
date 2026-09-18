@@ -15,11 +15,11 @@ public partial class SimulationViewer
         _replayFileCancellation?.Cancel();
         Task<LoadedReplay>? replayLoadTask = _replayLoadTask;
         if (replayLoadTask?.IsCompletedSuccessfully == true)
-            replayLoadTask.Result.Simulation.Dispose();
+            replayLoadTask.Result.World.Dispose();
         else if (replayLoadTask != null)
         {
             _ = replayLoadTask.ContinueWith(
-                static task => task.Result.Simulation.Dispose(),
+                static task => task.Result.World.Dispose(),
                 CancellationToken.None,
                 TaskContinuationOptions.ExecuteSynchronously | TaskContinuationOptions.OnlyOnRanToCompletion,
                 TaskScheduler.Default);
@@ -39,7 +39,9 @@ public partial class SimulationViewer
 
     private void DisposeGraphics()
     {
-        _viewport?.Dispose();
+        foreach (var surface in _simulationSurfaces)
+            surface.Dispose();
+
         _viewport = null;
 
         _sliceViewport?.Dispose();

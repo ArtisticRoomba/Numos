@@ -13,6 +13,7 @@ in the `0.x` series and may be published as prereleases (for others to just impo
 - First-class 3D support, voxel based
 - Arbitrary gas additions at runtime (SoAs)
 - Engine-agnostic, with a supported `Numos.API` facade over an internal simulation kernel
+- World-owned sparse portals and docks between arbitrary cells and independent simulations
 - Multithreaded intra-chunk advection and thermodynamics
 - Singlethreaded cross-chunk boundary flow
 - A valiant attempt at determinism

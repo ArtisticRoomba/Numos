@@ -15,11 +15,11 @@ public sealed class AtmosSolverStorageTests
         int[] original = simulation.GetOrCreateChunkSolverArray<int>(chunk, key, false);
         Assert.That(original, Is.EqualTo(new int[24]));
 
-        simulation.Solvers.Register(
+        simulation.World.Solvers.Register(
             "scratch",
-            world =>
+            _ =>
             {
-                FlatArray<int> flat = world.GetOrCreateChunkSolverFlatArray<int>(chunk, key, false);
+                FlatArray<int> flat = simulation.GetOrCreateChunkSolverFlatArray<int>(chunk, key, false);
                 Assert.That(flat.Dimensions, Is.EqualTo(new Int3(2, 3, 4)));
                 flat[new Int3(1, 2, 3)]++;
             });

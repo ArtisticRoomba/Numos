@@ -22,23 +22,23 @@ public sealed class AtmosSolverDataTests
             return new Queue<int>();
         }
 
-        simulation.Solvers.Register(
+        simulation.World.Solvers.Register(
             "produce",
-            world =>
+            _ =>
             {
-                Queue<int> pending = world.GetOrCreateSolverData(key, CreateQueue);
-                pending.Enqueue(world.TickCount);
+                Queue<int> pending = simulation.GetOrCreateSolverData(key, CreateQueue);
+                pending.Enqueue(simulation.TickCount);
             });
 
-        simulation.Solvers.RegisterAfter(
+        simulation.World.Solvers.RegisterAfter(
             "produce",
             "consume",
-            world =>
+            _ =>
             {
-                Queue<int> pending = world.GetOrCreateSolverData(key, CreateQueue);
+                Queue<int> pending = simulation.GetOrCreateSolverData(key, CreateQueue);
                 while (pending.TryDequeue(out int tick))
-                    foreach (var chunk in world.GetChunkHandles())
-                        world.AddGasToVoxel(chunk, 0, "TestGas0", tick, 300f);
+                    foreach (var chunk in simulation.GetChunkHandles())
+                        simulation.AddGasToVoxel(chunk, 0, "TestGas0", tick, 300f);
             });
 
         simulation.Tick();
@@ -78,11 +78,11 @@ public sealed class AtmosSolverDataTests
         using var simulation = new AtmosSimulation(1, 1, 1);
         var service = new List<int>();
         simulation.GetOrCreateSolverData<ICollection<int>>("service", () => service);
-        simulation.Solvers.Register(
+        simulation.World.Solvers.Register(
             "use-service",
-            world =>
-                world.GetOrCreateSolverData<ICollection<int>>("service", static () => throw new InvalidOperationException())
-                    .Add(world.TickCount));
+            _ =>
+                simulation.GetOrCreateSolverData<ICollection<int>>("service", static () => throw new InvalidOperationException())
+                    .Add(simulation.TickCount));
 
         simulation.Tick();
 
@@ -98,10 +98,10 @@ public sealed class AtmosSolverDataTests
         using var simulation = new AtmosSimulation(1, 1, 1);
         object key = new();
         object data = simulation.GetOrCreateSolverData(key, static () => new object());
-        simulation.Solvers.Register("custom", _ => { });
+        simulation.World.Solvers.Register("custom", _ => { });
         simulation.SetAtmosConfig(new AtmosConfig { ThermalConductance = 0f });
-        simulation.Solvers.Unregister("custom");
-        simulation.Solvers.ResetToDefaults();
+        simulation.World.Solvers.Unregister("custom");
+        simulation.World.Solvers.ResetToDefaults();
         simulation.Tick();
 
         Assert.That(simulation.GetOrCreateSolverData(key, static () => new object()), Is.SameAs(data));
@@ -144,19 +144,19 @@ public sealed class AtmosSolverDataTests
             return new Queue<int>();
         }
 
-        simulation.Solvers.Register(
+        simulation.World.Solvers.Register(
             "produce",
-            world =>
-                world.GetOrCreateSolverData("pending", CreateQueue).Enqueue(world.TickCount));
+            _ =>
+                simulation.GetOrCreateSolverData("pending", CreateQueue).Enqueue(simulation.TickCount));
 
-        simulation.Solvers.RegisterAfter(
+        simulation.World.Solvers.RegisterAfter(
             "produce",
             "consume",
-            world =>
+            _ =>
             {
-                Queue<int> pending = world.GetOrCreateSolverData("pending", CreateQueue);
+                Queue<int> pending = simulation.GetOrCreateSolverData("pending", CreateQueue);
                 while (pending.TryDequeue(out int moles))
-                    world.AddGasToVoxel(chunk, 0, "TestGas0", moles, 300f);
+                    simulation.AddGasToVoxel(chunk, 0, "TestGas0", moles, 300f);
             });
 
         var checkpoint = simulation.CaptureCheckpoint();
