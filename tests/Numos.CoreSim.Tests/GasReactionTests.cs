@@ -1,5 +1,6 @@
 using Numos.CoreSim.GasReactions;
 using Numos.CoreSim.Solvers;
+using Numos.Units.Generated;
 
 namespace Numos.CoreSim.Tests;
 
@@ -363,7 +364,7 @@ public class GasReactionTests
             },
             285.8f,
             1.8e13f,
-            146.4f,
+            UnitConversions.FromKilojoulePerMole(146.4f),
             new Dictionary<GasProperties, float>
             {
                 { hydrogen, 1 },
@@ -382,8 +383,10 @@ public class GasReactionTests
         for (ushort i = 0; i < 64; i++)
         {
             chunk.VoxelRoomMap[i] = i;
-            chunk.InjectGasToVoxel(i, 0, 0.001f, 1, 1, 1);
-            chunk.InjectGasToVoxel(i, 1, 0.002f, 1, 1, 1);
+            // Seed an ignition-temperature spark: the reaction has a real activation energy (146.4 kJ/mol),
+            // so at room temperature it won't proceed at any meaningful rate.
+            chunk.InjectGasToVoxel(i, 0, 0.001f, 900, 1, 1);
+            chunk.InjectGasToVoxel(i, 1, 0.002f, 900, 1, 1);
             Assert.That(chunk.ActiveGasCount == 2);
         }
 
@@ -393,12 +396,62 @@ public class GasReactionTests
             solver.ProcessChunk(chunk, 1, config, feedback);
             for (ushort i = 0; i < 64; i++)
             {
-                chunk.InjectGasToVoxel(i, 0, 0.000005f, 1, 1, 1);
-                chunk.InjectGasToVoxel(i, 1, 0.000002f, 1, 1, 1);
+                chunk.InjectGasToVoxel(i, 0, 0.000005f, 293, 1, 1);
+                chunk.InjectGasToVoxel(i, 1, 0.000002f, 293, 1, 1);
             }
         }
 
         Assert.That(chunk.ActiveGasCount == 3);
         Assert.That(feedback[0] > 0);
+        // Regression guard: a broken energy<->temperature round trip previously sent this to ~7.9e23 K
+        // and then NaN the moment the reaction fired, instead of settling on a plausible flame temperature.
+        Assert.That(chunk.Temperature[0], Is.InRange(1f, 5000f));
+    }
+
+    [Test]
+    public void MaterialLimiter_DoesNotThrottleAReactionThatOnlyProducesTheScarceGas()
+    {
+        var a = new GasProperties { Name = "A", MolarHeatCapacityAtConstantVolume = 10f };
+        var b = new GasProperties { Name = "B", MolarHeatCapacityAtConstantVolume = 10f };
+        var c = new GasProperties { Name = "C", MolarHeatCapacityAtConstantVolume = 10f };
+        var d = new GasProperties { Name = "D", MolarHeatCapacityAtConstantVolume = 10f };
+
+        // Consumes the scarce gas A (alongside abundant B).
+        var consumesA = new StandardGasReaction(
+            new Dictionary<GasProperties, float> { { a, 1 }, { b, 1 } },
+            new Dictionary<GasProperties, float> { { d, 1 } },
+            0f,
+            10f,
+            0f,
+            new Dictionary<GasProperties, float> { { a, 1 }, { b, 1 } });
+
+        // Only produces A (consumes abundant C). Must not be throttled just because A is scarce elsewhere.
+        var producesA = new StandardGasReaction(
+            new Dictionary<GasProperties, float> { { c, 1 } },
+            new Dictionary<GasProperties, float> { { a, 1 } },
+            0f,
+            10f,
+            0f,
+            new Dictionary<GasProperties, float> { { c, 1 } });
+
+        var config = new AtmosConfig
+        {
+            GasRegistry = [a, b, c, d],
+            SolverConfigurations = [new GasReactionConfig(standardReactions: [consumesA, producesA])]
+        };
+
+        var solver = new ReactionSolver();
+        var chunk = new AtmosChunk();
+        chunk.VoxelRoomMap[0] = 0;
+        chunk.InjectGasToVoxel(0, 0, 0.001f, 293, 1, 1); // A: scarce
+        chunk.InjectGasToVoxel(0, 1, 1000f, 293, 1, 1); // B: abundant
+        chunk.InjectGasToVoxel(0, 2, 1000f, 293, 1, 1); // C: abundant
+
+        float[] feedback = [0, 0];
+        solver.ProcessChunk(chunk, 1, config, feedback);
+
+        // A's scarcity must only throttle the reaction that consumes it (consumesA), never producesA,
+        // which only ever adds A to the mixture and so can't be responsible for depleting it.
+        Assert.That(feedback[1], Is.GreaterThan(10f));
     }
 }

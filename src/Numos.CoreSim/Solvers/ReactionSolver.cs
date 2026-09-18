@@ -166,6 +166,20 @@ internal class ReactionSolver : IAtmosSolverStage
         return result;
     }
 
+    private static JoulePerKelvin ComputeHeatCapacity(Mole[] mixtureVector, int mixtureLength, IAtmosConfig config)
+    {
+        JoulePerKelvin result = 0f;
+        for (int i = 0; i < mixtureLength; i++)
+        {
+            if (mixtureVector[i] == 0)
+                continue;
+
+            result += mixtureVector[i] * config.GetMolarHeatCapacityAtConstantVolume(i);
+        }
+
+        return result;
+    }
+
     /// <summary>
     ///     Core solver.
     /// </summary>
@@ -237,7 +251,12 @@ internal class ReactionSolver : IAtmosSolverStage
         }
 
         //adjusts reactions speed as to not consume our available material in a single step.
-        while (true)
+        // Bounded defensively: each pass either zeroes out a reaction's speed or converges, so this many
+        // iterations is far more than any real mixture needs, but guarantees termination even in a
+        // pathological state (e.g. moles already negative from upstream float drift) that would otherwise
+        // never find scale > 0 and loop forever.
+        int maxIterations = mixtureLength + reactionCount + 8;
+        for (int iteration = 0; iteration < maxIterations; iteration++)
         {
             int criticalIndex = -1;
             Mole criticalValue = 0;
@@ -245,11 +264,12 @@ internal class ReactionSolver : IAtmosSolverStage
             //check which consumption might go over available material
             for (int i = 0; i < mixtureLength; i++)
             {
-                //we calculate total consumption, ignoring production by reactions.
+                //we calculate total gross consumption, ignoring any offsetting production of the same gas
+                //by the same reaction (Changes is produced-consumed net, which would hide real overdraw).
                 // Match Enumerable.Sum's double accumulator while preserving reaction order and float products.
                 Mole64 accumulatedConsumption = 0d;
                 for (int j = 0; j < reactionCount; j++)
-                    accumulatedConsumption += MathF.Min(0, gasData[i].Changes[j]) * reactionSpeeds[j];
+                    accumulatedConsumption += gasData[i].Consumed[j] * reactionSpeeds[j];
 
                 Mole consumption = (Mole)accumulatedConsumption;
 
@@ -275,7 +295,7 @@ internal class ReactionSolver : IAtmosSolverStage
 
                 for (int i = 0; i < reactionCount; i++)
                 {
-                    if (!gasData[criticalIndex].Participates[i])
+                    if (!gasData[criticalIndex].Consumes[i])
                         continue;
 
                     //select the lower reaction speed.
@@ -332,8 +352,11 @@ internal class ReactionSolver : IAtmosSolverStage
         }
 
         energy = Math.Max(0, energy);
-        //adjust temperature based on heat value.
-        currentTemperature = UpdateTemperature(energy);
+        //adjust temperature based on heat value, using the post-reaction mixture's heat capacity
+        //(composition changed above, so the capacity used to extract heat no longer applies).
+        JoulePerKelvin heatCapacity = ComputeHeatCapacity(mixtureVector, mixtureLength, config);
+        if (heatCapacity > 0f)
+            currentTemperature = energy / heatCapacity;
         //cleanup speeds.
         ArrayPool<float>.Shared.Return(reactionSpeeds);
     }
@@ -342,15 +365,6 @@ internal class ReactionSolver : IAtmosSolverStage
     {
         config.TryGetGasProperties(gasId, out var gas);
         return GasReactionConfig.Get(config).CreateGasData(gasId, gas);
-    }
-
-    private Kelvin UpdateTemperature(Joule totalKineticEnergy)
-    {
-        const JoulePerKelvin constantHelper = 3 * AtmosPhysicalConstants.BoltzmannConstant;
-        // KE = (3/2) k * T <- see  Kinetic Molecular Theory. k is boltzmann constant, KE is kinetic energy.
-        // Solving for T we get:
-        // (KE * 2 )/3k = T
-        return totalKineticEnergy * 2 / constantHelper;
     }
 
     private readonly struct ProcessChunkAction(

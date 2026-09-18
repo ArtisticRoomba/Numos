@@ -49,7 +49,9 @@ public readonly partial record struct StandardGasReaction
     private float ArrheniusFactor { get; }
 
     /// <summary>
-    ///     Molar activation energy kJ/mol
+    ///     Molar activation energy, in J/mol. Used directly against <see cref="AtmosPhysicalConstants.MolarGasConstant" />
+    ///     (J/(mol*K)) in the Arrhenius exponent, so values authored in kJ/mol must be converted at the call site,
+    ///     e.g. via <see cref="Numos.Units.Generated.UnitConversions.FromKilojoulePerMole" />.
     /// </summary>
     private JoulePerMole ActivationEnergy { get; }
 
@@ -123,7 +125,7 @@ public readonly partial record struct StandardGasReaction
     internal PerSecond GetRateConstant(Kelvin temperatureKelvin)
     {
         return ArrheniusFactor *
-               MathF.Exp(-ActivationEnergy * 0.001f / (temperatureKelvin * AtmosPhysicalConstants.MolarGasConstant));
+               MathF.Exp(-ActivationEnergy / (temperatureKelvin * AtmosPhysicalConstants.MolarGasConstant));
     }
 
     /// <summary>

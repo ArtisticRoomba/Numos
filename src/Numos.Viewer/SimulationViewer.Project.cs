@@ -4,6 +4,7 @@ using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.GasReactions;
 using Numos.Maths;
 using Numos.SimDrawer;
+using Numos.Units.Generated;
 
 namespace Numos.Viewer;
 
@@ -107,7 +108,7 @@ public partial class SimulationViewer
                 },
                 285.8f,
                 1.8e13f,
-                146.4f,
+                UnitConversions.FromKilojoulePerMole(146.4f),
                 new Dictionary<GasProperties, float>
                 {
                     { Hydrogen, 1 },
