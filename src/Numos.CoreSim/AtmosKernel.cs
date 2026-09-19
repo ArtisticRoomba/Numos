@@ -33,6 +33,7 @@ internal sealed partial class AtmosKernel : IDisposable
     private bool _isRecording;
     private bool _isTickExecuting;
     private ulong _lastOperationSequence;
+    private int _nextChunkDenseId;
     private AtmosTimelinePosition _recordingHead;
     private AtmosTimelinePosition _recordingStart;
 

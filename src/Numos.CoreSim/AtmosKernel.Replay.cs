@@ -196,8 +196,14 @@ internal sealed partial class AtmosKernel
         var replacement = new ConcurrentDictionary<Int3, AtmosChunk>();
         try
         {
+            int denseId = 0;
             foreach (var chunk in checkpoint.Chunks)
-                replacement[chunk.Position] = chunk.Materialize();
+            {
+                var materialized = chunk.Materialize();
+                // This bypasses RegisterChunk, which normally assigns DenseId, so it must be assigned here too.
+                materialized.DenseId = denseId++;
+                replacement[chunk.Position] = materialized;
+            }
         }
         catch
         {
@@ -209,6 +215,9 @@ internal sealed partial class AtmosKernel
 
         ConcurrentDictionary<Int3, AtmosChunk> previous = _chunkMap;
         _chunkMap = replacement;
+        // Rebase on the restored chunk count instead of continuing to grow across repeated restores
+        // (e.g. replay scrubbing), which would otherwise leave DenseId-indexed lookup tables oversized.
+        _nextChunkDenseId = replacement.Count;
         _config = checkpoint.Config;
         CurrentTickConfig.Capture(_config);
         CurrentTickConfig.ClearGasSolverData();

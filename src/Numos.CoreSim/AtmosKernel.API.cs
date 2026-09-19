@@ -266,6 +266,7 @@ internal sealed partial class AtmosKernel
             if (!_chunkMap.TryAdd(chunk.GridPosition, chunk))
                 throw new InvalidOperationException($"A chunk is already registered at {chunk.GridPosition}.");
 
+            chunk.DenseId = _nextChunkDenseId++;
             WakeSleepingNeighbors(chunk.GridPosition);
             _chunkCollectionRevision++;
             if (ShouldRecord) RecordOperation(new CreateChunkOperation(chunk.GridPosition));

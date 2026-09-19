@@ -51,6 +51,17 @@ internal class AtmosChunk
     /// </remarks>
     public GasChannel[] ActiveGases;
 
+    /// <summary>
+    ///     A process-local index assigned once when this chunk is registered.
+    /// </summary>
+    /// <remarks>
+    ///     Lets hot per-tick solver lookups (e.g. boundary flow's cross-chunk injection buffer) use array
+    ///     indexing instead of a dictionary keyed on <see cref="GridPosition" />. Unique only among currently
+    ///     registered chunks — never reused after this chunk is unregistered — and not part of the
+    ///     simulation's observable state, so it is absent from <see cref="AtmosChunkVersion" /> and the state
+    ///     hash. Do not use it for anything but indexing a solver-owned lookup table.
+    /// </remarks>
+    public int DenseId;
 
     /// <summary>
     ///     The number of voxels along the z-axis.

@@ -38,6 +38,38 @@ public class ParallelScalingBenchmarks : ScalingBenchmarkBase
 }
 
 /// <summary>
+///     Measures boundary-flow scaling while the runtime exposes different processor counts.
+/// </summary>
+[ParallelScalingConfig]
+[BenchmarkCategory("Full", "ParallelScaling", "BoundaryScaling")]
+public class BoundaryParallelScalingBenchmarks : ScalingBenchmarkBase
+{
+    internal override ScalingWorkloadOptions Options => new()
+    {
+        RegisteredChunkCount = 128, AwakeChunkCount = 128, GasCount = 32,
+        BoundaryTopology = BoundaryTopology.Grid3D
+    };
+
+    /// <summary>
+    ///     Restores state and produces boundary events outside the measurement.
+    /// </summary>
+    [IterationSetup]
+    public void PrepareBoundaryEvents()
+    {
+        Workload.Reset(1);
+    }
+
+    /// <summary>
+    ///     Measures transient boundary flow across 128 dense 8×8×8 chunks with 32 gases.
+    /// </summary>
+    [Benchmark]
+    public void Boundary_MultiChunkParallelWorkerScaling_Transient()
+    {
+        Workload.Steps[1].Solver(Workload.Context);
+    }
+}
+
+/// <summary>
 ///     Measures whether one dense chunk supplies enough independent advection work to occupy multiple workers.
 /// </summary>
 [ParallelScalingConfig]
