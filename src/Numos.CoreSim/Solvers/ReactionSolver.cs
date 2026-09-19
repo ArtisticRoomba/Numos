@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Numerics.Tensors;
 using CommunityToolkit.HighPerformance.Helpers;
 using Numos.CoreSim.GasReactions;
 
@@ -9,12 +10,15 @@ internal class ReactionSolver : IAtmosSolverStage
     private readonly object _gasDataKey = new();
     private GasReactionData[] _gasRateOrder = [];
     private GasReactionData[] _gasReactionData = [];
+    private GasReactionMatrix? _changesMatrix;
     private IAtmosConfig? _preparedConfig;
 
     public void Solve(AtmosSolverExecutionContext context)
     {
+        int reactionCount = GasReactionConfig.Get(context.TickConfig).Count;
+
         //fast skip for empty configs.
-        if (GasReactionConfig.Get(context.TickConfig).Count == 0 || context.TickConfig.GasPropertyCount == 0)
+        if (reactionCount == 0 || context.TickConfig.GasPropertyCount == 0)
             return;
 
         // Build once before workers start. Array indices retain the configured reaction order.
@@ -31,6 +35,7 @@ internal class ReactionSolver : IAtmosSolverStage
         }
 
         _gasRateOrder = _gasReactionData.OrderBy(static gas => gas.GasName, StringComparer.Ordinal).ToArray();
+        _changesMatrix = new GasReactionMatrix(_gasReactionData, reactionCount);
         _preparedConfig = context.TickConfig;
         try
         {
@@ -41,6 +46,7 @@ internal class ReactionSolver : IAtmosSolverStage
         finally
         {
             _preparedConfig = null;
+            _changesMatrix = null;
             Array.Clear(_gasReactionData);
             _gasRateOrder = [];
         }
@@ -196,10 +202,12 @@ internal class ReactionSolver : IAtmosSolverStage
         var reactions = GasReactionConfig.Get(config);
         GasReactionData[] gasData;
         GasReactionData[] rateOrder;
+        GasReactionMatrix changesMatrix;
         if (ReferenceEquals(_preparedConfig, config))
         {
             gasData = _gasReactionData;
             rateOrder = _gasRateOrder;
+            changesMatrix = _changesMatrix!;
         }
         else
         {
@@ -209,6 +217,7 @@ internal class ReactionSolver : IAtmosSolverStage
                 gasData[gasId] = CreateGasReactionData(config, gasId);
 
             rateOrder = gasData.OrderBy(static gas => gas.GasName, StringComparer.Ordinal).ToArray();
+            changesMatrix = new GasReactionMatrix(gasData, reactions.Count);
         }
 
         Joule energy = ExtractHeat(mixtureVector, ref currentTemperature, mixtureLength, config);
@@ -220,18 +229,24 @@ internal class ReactionSolver : IAtmosSolverStage
 
         //prep array.
         Array.Clear(reactionSpeeds, 0, reactionCount);
-        //get all reaction speeds
+        //get all reaction speeds. Sequential: reactionCount is typically a handful of items, far too
+        //small to justify a parallel dispatch, especially one issued once per voxel from inside an
+        //already-parallel voxel worker.
         Kelvin temperature = currentTemperature; //to stop warning about the later change of currentTemperature.
-        ParallelHelper.For(
-            0,
-            reactionCount,
-            new CalculateReactionSpeedAction(
-                reactions,
-                temperature,
-                rateOrder,
-                mixtureVector,
-                deltaTime,
-                reactionSpeeds));
+        for (int reactionId = 0; reactionId < reactionCount; reactionId++)
+        {
+            PerSecond rate = reactions.GetRateConstant(reactionId, temperature);
+            if (!float.IsNormal(rate) || rate <= 0f)
+                continue;
+
+            // Preserve canonical gas-name and factor order independently of registry indices.
+            foreach (var gas in rateOrder)
+                rate = gas.ApplyRateFactors(reactionId, mixtureVector[gas.GasId], rate);
+
+            Scalar speed = rate * deltaTime;
+            if (speed > 0f)
+                reactionSpeeds[reactionId] = speed;
+        }
 
         bool anyReaction = false;
         for (int i = 0; i < reactionCount; i++)
@@ -329,13 +344,13 @@ internal class ReactionSolver : IAtmosSolverStage
         }
 
         //apply mixture, this also includes heat, since all change equations contain energy balance.
-        for (int i = 0; i < mixtureLength; i++)
-        {
-            for (int j = 0; j < reactionCount; j++)
-            {
-                mixtureVector[i] += gasData[i].Changes[j] * reactionSpeeds[j];
-            }
-        }
+        //dN/dt = S * reactionSpeeds: walk one reaction (matrix row) at a time and fold its whole gas
+        //column into the mixture with one lane-independent vector add. This visits the exact same
+        //(gas, reaction) terms in the exact same order as a per-gas accumulation would, so it is
+        //bit-exact regardless of hardware SIMD width.
+        Span<Mole> mixture = mixtureVector.AsSpan(0, mixtureLength);
+        for (int j = 0; j < reactionCount; j++)
+            TensorPrimitives.MultiplyAdd(changesMatrix.GetReactionRow(j), reactionSpeeds[j], mixture, mixture);
 
         for (int j = 0; j < reactionCount; j++)
         {
@@ -419,30 +434,6 @@ internal class ReactionSolver : IAtmosSolverStage
 
             chunk.Temperature[voxelIndex] = temp;
             newTemps[voxelIndex] = temp;
-        }
-    }
-
-    private readonly struct CalculateReactionSpeedAction(
-        GasReactionConfig reactions,
-        Kelvin temperature,
-        GasReactionData[] rateOrder,
-        Mole[] mixtureVector,
-        Second deltaTime,
-        Scalar[] reactionSpeeds) : IAction
-    {
-        public void Invoke(int index)
-        {
-            PerSecond rate = reactions.GetRateConstant(index, temperature);
-            if (!float.IsNormal(rate) || rate <= 0f)
-                return;
-
-            // Preserve canonical gas-name and factor order independently of registry indices.
-            foreach (var gas in rateOrder)
-                rate = gas.ApplyRateFactors(index, mixtureVector[gas.GasId], rate);
-
-            Scalar speed = rate * deltaTime;
-            if (speed > 0f)
-                reactionSpeeds[index] = speed;
         }
     }
 }
