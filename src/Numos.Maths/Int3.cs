@@ -26,7 +26,6 @@ public struct Int3(int x, int y, int z) : IEquatable<Int3>
         return X == other.X && Y == other.Y && Z == other.Z;
     }
 
-    // TODO PERF replace with native xxh3
     public override int GetHashCode()
     {
         return HashCode.Combine(X, Y, Z);
