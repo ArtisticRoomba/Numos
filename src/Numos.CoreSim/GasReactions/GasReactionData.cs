@@ -8,15 +8,16 @@ internal sealed class GasReactionData(int gasId, string gasName, int reactionCou
     internal int GasId { get; } = gasId;
     internal string GasName { get; } = gasName;
     internal Mole[] Changes { get; } = new Mole[reactionCount];
-    // Gross consumption (<= 0) for this gas in this reaction, independent of any offsetting production
-    // of the same gas. Used by the material-limiting loop, which must not net input against output.
-    internal Mole[] Consumed { get; } = new Mole[reactionCount];
-    // An explicit zero coefficient still participates in the existing speed-limiting rule.
-    internal bool[] Participates { get; } = new bool[reactionCount];
-    // True only if this gas is an input of the reaction. Distinct from Participates (input OR output):
-    // the limiting loop must only throttle reactions that actually consume the critical gas, not ones
-    // that merely produce it.
-    internal bool[] Consumes { get; } = new bool[reactionCount];
+
+    // Sparse: only the reactions that actually take this gas as an input, in reaction-ID order (the
+    // order SetChanges is called in). The material limiter needs "how much does this gas lose, and
+    // to which reactions" -- walking only the reactions that touch this gas, instead of every
+    // registered reaction, turns its per-gas scan from O(reactionCount) into O(reactions that
+    // actually consume it). Coefficient is gross consumption (<= 0), independent of any offsetting
+    // production of the same gas by the same reaction -- the limiter must not net input against
+    // output, or it would hide a real overdraw.
+    internal List<(int ReactionId, Mole Consumed)> ConsumingReactions { get; } = [];
+
     internal LinearGasReaction.LinearSpeedFactor[][] LinearFactors { get; } = new LinearGasReaction.LinearSpeedFactor[reactionCount][];
     internal float?[] StandardExponents { get; } = new float?[reactionCount];
 
@@ -25,14 +26,14 @@ internal sealed class GasReactionData(int gasId, string gasName, int reactionCou
     {
         Mole consumed = 0f;
         Mole produced = 0f;
+        bool isInput = false;
         foreach (KeyValuePair<GasProperties, Mole> entry in input)
         {
             if (entry.Key.Name != GasName)
                 continue;
 
             consumed = entry.Value;
-            Participates[reactionId] = true;
-            Consumes[reactionId] = true;
+            isInput = true;
         }
 
         foreach (KeyValuePair<GasProperties, Mole> entry in output)
@@ -41,11 +42,11 @@ internal sealed class GasReactionData(int gasId, string gasName, int reactionCou
                 continue;
 
             produced = entry.Value;
-            Participates[reactionId] = true;
         }
 
         Changes[reactionId] = produced - consumed;
-        Consumed[reactionId] = -consumed;
+        if (isInput)
+            ConsumingReactions.Add((reactionId, -consumed));
     }
 
     internal static void ValidateNames(IEnumerable<GasProperties> gases, IGasRegistry registry, bool unique = true)

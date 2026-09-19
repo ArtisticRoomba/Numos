@@ -281,10 +281,12 @@ internal class ReactionSolver : IAtmosSolverStage
             {
                 //we calculate total gross consumption, ignoring any offsetting production of the same gas
                 //by the same reaction (Changes is produced-consumed net, which would hide real overdraw).
+                // Only reactions that actually consume this gas can contribute, so ConsumingReactions
+                // already excludes every zero term a dense reactionCount scan would've added for nothing.
                 // Match Enumerable.Sum's double accumulator while preserving reaction order and float products.
                 Mole64 accumulatedConsumption = 0d;
-                for (int j = 0; j < reactionCount; j++)
-                    accumulatedConsumption += gasData[i].Consumed[j] * reactionSpeeds[j];
+                foreach (var (reactionId, consumed) in gasData[i].ConsumingReactions)
+                    accumulatedConsumption += consumed * reactionSpeeds[reactionId];
 
                 Mole consumption = (Mole)accumulatedConsumption;
 
@@ -308,15 +310,12 @@ internal class ReactionSolver : IAtmosSolverStage
                     1f,
                     MathF.Max(0f, mixtureVector[criticalIndex] / Math.Abs(criticalConsumption)));
 
-                for (int i = 0; i < reactionCount; i++)
+                foreach (var (reactionId, _) in gasData[criticalIndex].ConsumingReactions)
                 {
-                    if (!gasData[criticalIndex].Consumes[i])
-                        continue;
-
                     //select the lower reaction speed.
-                    reactionSpeeds[i] = MathF.Min(reactionSpeeds[i], reactionSpeeds[i] * scale);
-                    if (reactionSpeeds[i] < 1e-10f)
-                        reactionSpeeds[i] = 0;
+                    reactionSpeeds[reactionId] = MathF.Min(reactionSpeeds[reactionId], reactionSpeeds[reactionId] * scale);
+                    if (reactionSpeeds[reactionId] < 1e-10f)
+                        reactionSpeeds[reactionId] = 0;
                 }
 
                 continue;
