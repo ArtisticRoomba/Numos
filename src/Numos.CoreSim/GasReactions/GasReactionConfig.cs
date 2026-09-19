@@ -139,6 +139,8 @@ public sealed class GasReactionConfig : IAtmosSolverConfiguration
 
     internal Joule GetEnergyBalance(int reactionId) => _energyBalances[reactionId];
 
+    // Unlike GetEnergyBalance, this can't be precomputed once at construction: it depends on the
+    // caller's temperature, which changes every voxel.
     internal PerSecond GetRateConstant(int reactionId, Kelvin temperature)
     {
         return reactionId < LinearReactions.Count

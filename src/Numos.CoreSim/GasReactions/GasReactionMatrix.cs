@@ -4,10 +4,13 @@ namespace Numos.CoreSim.GasReactions;
 
 /// <summary>
 ///     The dense stoichiometric matrix S behind a tick's reaction set: mixture change per unit time is
-///     <c>S &#183; reactionSpeeds</c>, one column per reaction and one row per registered gas. Rebuilt once
-///     per solve from the per-gas <see cref="GasReactionData.Changes" /> columns so the per-voxel hot loop
-///     can apply a whole reaction (one matrix row, since storage is reaction-major) as a single
-///     order-preserving vector add instead of walking every gas's reaction array by hand.
+///     <c>S &#183; reactionSpeeds</c>, conceptually one row per registered gas and one column per reaction.
+///     Storage is the transpose of that (reaction-major, so <see cref="GetReactionRow" /> returns one
+///     reaction's whole column of S as a contiguous span), because the per-voxel hot loop applies one
+///     reaction at a time to every gas -- a single lane-independent vector add per reaction, visiting
+///     every (gas, reaction) term in the same order a per-gas accumulation would, instead of walking
+///     every gas's reaction array by hand. Rebuilt once per solve from the per-gas
+///     <see cref="GasReactionData.Changes" /> columns.
 /// </summary>
 internal sealed class GasReactionMatrix
 {

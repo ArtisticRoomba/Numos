@@ -1,7 +1,8 @@
 namespace Numos.CoreSim.GasReactions;
 
 /// <summary>
-///     Reaction-ID-indexed coefficients and rate factors attached to one registered gas.
+///     Per-registered-gas reaction coefficients and rate factors: dense, reaction-ID-indexed arrays for
+///     "what does every reaction do to this gas", plus a sparse list of just the reactions that consume it.
 /// </summary>
 internal sealed class GasReactionData(int gasId, string gasName, int reactionCount)
 {

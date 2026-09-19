@@ -53,12 +53,15 @@ internal class ReactionSolver : IAtmosSolverStage
     }
 
     /// <summary>
-    ///     wrapping core solver into a chunk.
+    ///     Runs the reaction solver over every voxel in one chunk and writes the results back.
     /// </summary>
-    /// <param name="chunk"></param>
+    /// <param name="chunk">The chunk whose voxels should react.</param>
     /// <param name="deltaTime">Over which timespan reactions should occur.</param>
-    /// <param name="config"></param>
-    /// <param name="reactionCount"></param>
+    /// <param name="config">The gas registry and reaction definitions to react against.</param>
+    /// <param name="reactionCount">
+    ///     Optional accumulator, index = reaction ID, incremented by how many times each reaction fired
+    ///     across the whole chunk. Pass null to skip collecting this.
+    /// </param>
     internal void ProcessChunk(AtmosChunk chunk, Second deltaTime, IAtmosConfig config, Scalar[]? reactionCount = null)
     {
         //process each voxel in parallel
@@ -155,23 +158,24 @@ internal class ReactionSolver : IAtmosSolverStage
         }
     }
 
+    // Total thermal energy the mixture holds at its current temperature: for each gas, moles * heat
+    // capacity gives Joules-per-Kelvin, times temperature gives Joules.
     private Joule ExtractHeat(ReadOnlySpan<Mole> mixtureVector, ref readonly Kelvin temperature, int mixtureLength, IAtmosConfig config)
     {
         Joule result = 0f;
-        // Use specific heat capacity of each gas to calculate the necessary energy to keep at temperature
         for (int i = 0; i < mixtureLength; i++)
         {
             if (mixtureVector[i] == 0)
                 continue;
 
-            // multiply by mole amounts
-            //sum together
             result += mixtureVector[i] * temperature * config.GetMolarHeatCapacityAtConstantVolume(i);
         }
 
         return result;
     }
 
+    // Same per-gas sum as ExtractHeat, minus the temperature factor -- used after the mixture's
+    // composition has changed, to convert the (unchanged) total energy back into a temperature.
     private static JoulePerKelvin ComputeHeatCapacity(ReadOnlySpan<Mole> mixtureVector, int mixtureLength, IAtmosConfig config)
     {
         JoulePerKelvin result = 0f;
@@ -187,14 +191,17 @@ internal class ReactionSolver : IAtmosSolverStage
     }
 
     /// <summary>
-    ///     Core solver.
+    ///     Reacts one voxel's gas mixture over <paramref name="deltaTime" />, in place.
     /// </summary>
-    /// <param name="deltaTime"></param>
-    /// <param name="mixtureVector">a vector describing molarity of the mixture (mol/l)</param>
-    /// <param name="currentTemperature">temperature, which will be adjusted to reflect final temperature of the mixture</param>
+    /// <param name="deltaTime">Over which timespan reactions should occur.</param>
+    /// <param name="mixtureVector">
+    ///     The voxel's mole amount for every registered gas, indexed by gas ID; updated in place to
+    ///     reflect the reactions that occurred.
+    /// </param>
+    /// <param name="currentTemperature">Temperature, updated in place to reflect the post-reaction mixture.</param>
     /// <param name="reactionFeedback">optional array to which we write how often each reaction occured, index = reaction id</param>
-    /// <param name="config"></param>
-    /// <param name="mixtureLength"></param>
+    /// <param name="config">The gas registry and reaction definitions to react against.</param>
+    /// <param name="mixtureLength">The number of registered gases, i.e. the valid length of <paramref name="mixtureVector" />.</param>
     internal void ProcessVoxel(
         Second deltaTime, Span<Mole> mixtureVector, ref Kelvin currentTemperature,
         Scalar[]? reactionFeedback, IAtmosConfig config, int mixtureLength)
@@ -221,9 +228,6 @@ internal class ReactionSolver : IAtmosSolverStage
         }
 
         Joule energy = ExtractHeat(mixtureVector, ref currentTemperature, mixtureLength, config);
-        //make sure in single step we dont overstep.
-
-        //split our time interval into smaller steps.
         int reactionCount = reactions.Count;
         Scalar[] reactionSpeeds = ArrayPool<Scalar>.Shared.Rent(reactionCount);
 
@@ -265,7 +269,7 @@ internal class ReactionSolver : IAtmosSolverStage
             return;
         }
 
-        //adjusts reactions speed as to not consume our available material in a single step.
+        // Adjust reaction speeds so they don't consume more material than is available in a single step.
         // Bounded defensively: each pass either zeroes out a reaction's speed or converges, so this many
         // iterations is far more than any real mixture needs, but guarantees termination even in a
         // pathological state (e.g. moles already negative from upstream float drift) that would otherwise
@@ -303,9 +307,9 @@ internal class ReactionSolver : IAtmosSolverStage
 
             if (criticalIndex != -1)
             {
-                // adjust reaction speeds so our post reaction moles are 0.
-                // our equation we try to optimize looks like this (((change * speed)/total change in scaled reaction)*available moles)/(change * speed) = (available volume)/(total change in scaled reaction)
-                // so we calculate the scale, to scale reaction speeds down to balance the equation of consumption.
+                // Scale every reaction consuming the critical gas down by the same factor, just enough
+                // that its post-reaction moles land at exactly 0: scale = available / |consumption|,
+                // clamped to [0, 1] so a gas with moles to spare never gets sped up.
                 Scalar scale = MathF.Min(
                     1f,
                     MathF.Max(0f, mixtureVector[criticalIndex] / Math.Abs(criticalConsumption)));
@@ -321,6 +325,8 @@ internal class ReactionSolver : IAtmosSolverStage
                 continue;
             }
 
+            // Material is no longer overdrawn. Now the same idea applied to heat: endothermic reactions
+            // (negative energy balance) can't draw more energy than the mixture actually has.
             Joule energyConsumption = 0f;
             for (int i = 0; i < reactionCount; i++)
             {
@@ -330,6 +336,8 @@ internal class ReactionSolver : IAtmosSolverStage
             if (energy + energyConsumption >= 0)
                 break;
 
+            // Scale down just the endothermic reactions, same "clamp to exactly enough" shape as the
+            // material-limiter scale above.
             Scalar energyScale = MathF.Min(1f, MathF.Max(0f, energy / Math.Abs(energyConsumption)));
             for (int i = 0; i < reactionCount; i++)
             {
