@@ -71,10 +71,13 @@ internal class ReactionSolver : IAtmosSolverStage
                 return;
         }
 
-        float[][] newMixtures = ArrayPool<float[]>.Shared.Rent(voxelCount);
+        int mixtureLength = config.GasPropertyCount;
+        // One chunk-wide voxel-by-gas matrix instead of a separately pooled array per voxel: this is
+        // the same "stop renting per item, slice a shared buffer instead" move as the reaction matrix,
+        // and it collapses voxelCount pool round-trips into one.
+        Mole[] mixtures = ArrayPool<Mole>.Shared.Rent(checked(voxelCount * mixtureLength));
         Scalar[][]? reactionFeedbacks = reactionCount == null ? null : ArrayPool<Scalar[]>.Shared.Rent(voxelCount);
         Kelvin[] newTemps = ArrayPool<Kelvin>.Shared.Rent(voxelCount);
-        int mixtureLength = config.GasPropertyCount;
         ParallelHelper.For(
             0,
             voxelCount,
@@ -85,14 +88,14 @@ internal class ReactionSolver : IAtmosSolverStage
                 config,
                 reactionCount,
                 reactionFeedbacks,
-                newMixtures,
+                mixtures,
                 newTemps,
                 mixtureLength));
 
         //put data back in a single thread.
         for (ushort voxelIndex = 0; voxelIndex < voxelCount; voxelIndex++)
         {
-            Mole[] mixtureVector = newMixtures[voxelIndex];
+            Span<Mole> mixtureVector = mixtures.AsSpan(voxelIndex * mixtureLength, mixtureLength);
             int c = chunk.ActiveGasCount;
             //adjust moles from the mixture vector
             foreach (var gasChannel in chunk.ActiveGases.Take(c))
@@ -130,13 +133,10 @@ internal class ReactionSolver : IAtmosSolverStage
                     config.GetMolarHeatCapacityAtConstantVolume(i),
                     config.PressurePerMoleKelvin);
             }
-
-            //collect feedbacks and respond back.
-            ArrayPool<float>.Shared.Return(mixtureVector);
         }
 
         ArrayPool<float>.Shared.Return(newTemps);
-        ArrayPool<float[]>.Shared.Return(newMixtures, true);
+        ArrayPool<float>.Shared.Return(mixtures);
 
         if (reactionCount != null && reactionFeedbacks != null)
         {
@@ -155,7 +155,7 @@ internal class ReactionSolver : IAtmosSolverStage
         }
     }
 
-    private Joule ExtractHeat(Mole[] mixtureVector, ref readonly Kelvin temperature, int mixtureLength, IAtmosConfig config)
+    private Joule ExtractHeat(ReadOnlySpan<Mole> mixtureVector, ref readonly Kelvin temperature, int mixtureLength, IAtmosConfig config)
     {
         Joule result = 0f;
         // Use specific heat capacity of each gas to calculate the necessary energy to keep at temperature
@@ -172,7 +172,7 @@ internal class ReactionSolver : IAtmosSolverStage
         return result;
     }
 
-    private static JoulePerKelvin ComputeHeatCapacity(Mole[] mixtureVector, int mixtureLength, IAtmosConfig config)
+    private static JoulePerKelvin ComputeHeatCapacity(ReadOnlySpan<Mole> mixtureVector, int mixtureLength, IAtmosConfig config)
     {
         JoulePerKelvin result = 0f;
         for (int i = 0; i < mixtureLength; i++)
@@ -196,7 +196,7 @@ internal class ReactionSolver : IAtmosSolverStage
     /// <param name="config"></param>
     /// <param name="mixtureLength"></param>
     internal void ProcessVoxel(
-        Second deltaTime, Mole[] mixtureVector, ref Kelvin currentTemperature,
+        Second deltaTime, Span<Mole> mixtureVector, ref Kelvin currentTemperature,
         Scalar[]? reactionFeedback, IAtmosConfig config, int mixtureLength)
     {
         var reactions = GasReactionConfig.Get(config);
@@ -348,7 +348,7 @@ internal class ReactionSolver : IAtmosSolverStage
         //column into the mixture with one lane-independent vector add. This visits the exact same
         //(gas, reaction) terms in the exact same order as a per-gas accumulation would, so it is
         //bit-exact regardless of hardware SIMD width.
-        Span<Mole> mixture = mixtureVector.AsSpan(0, mixtureLength);
+        Span<Mole> mixture = mixtureVector[..mixtureLength];
         for (int j = 0; j < reactionCount; j++)
             TensorPrimitives.MultiplyAdd(changesMatrix.GetReactionRow(j), reactionSpeeds[j], mixture, mixture);
 
@@ -399,7 +399,7 @@ internal class ReactionSolver : IAtmosSolverStage
         IAtmosConfig config,
         Scalar[]? reactionCount,
         Scalar[][]? reactionFeedbacks,
-        float[][] newMixtures,
+        Mole[] mixtures,
         Kelvin[] newTemps,
         int mixtureLength) : IAction
     {
@@ -415,9 +415,9 @@ internal class ReactionSolver : IAtmosSolverStage
             if (reactionFeedbacks != null && reactionFeedback != null)
                 reactionFeedbacks[voxelIndex] = reactionFeedback;
 
-            Mole[] mixtureVector = ArrayPool<Mole>.Shared.Rent(mixtureLength);
+            Span<Mole> mixtureVector = mixtures.AsSpan(voxelIndex * mixtureLength, mixtureLength);
             Mole content = 0f;
-            Array.Clear(mixtureVector, 0, mixtureLength);
+            mixtureVector.Clear();
 
             for (int i = 0; i < chunk.ActiveGasCount; i++)
             {
@@ -425,7 +425,6 @@ internal class ReactionSolver : IAtmosSolverStage
                 content += chunk.ActiveGases[i].Moles[voxelIndex];
             }
 
-            newMixtures[voxelIndex] = mixtureVector;
             newTemps[voxelIndex] = temp;
             if (content <= 0.0001)
                 return;

@@ -24,6 +24,11 @@ public sealed class GasReactionConfig : IAtmosSolverConfiguration
 
     internal readonly static GasReactionConfig Empty = new();
 
+    // Reaction-ID-indexed, built once at construction since reaction definitions never change after
+    // capture. Spares the per-reaction-per-iteration caller from a Linear-vs-Standard branch and an
+    // IReadOnlyList indexer call every time it needs a reaction's energy balance.
+    private readonly Joule[] _energyBalances;
+
     /// <summary>
     ///     Captures ordered reaction definitions without retaining mutable source collections.
     /// </summary>
@@ -36,6 +41,12 @@ public sealed class GasReactionConfig : IAtmosSolverConfiguration
     {
         LinearReactions = Array.AsReadOnly(linearReactions?.ToArray() ?? []);
         StandardReactions = Array.AsReadOnly(standardReactions?.ToArray() ?? []);
+
+        _energyBalances = new Joule[LinearReactions.Count + StandardReactions.Count];
+        for (int i = 0; i < LinearReactions.Count; i++)
+            _energyBalances[i] = LinearReactions[i].EnergyBalance;
+        for (int i = 0; i < StandardReactions.Count; i++)
+            _energyBalances[LinearReactions.Count + i] = StandardReactions[i].EnergyBalance;
     }
 
     /// <summary>
@@ -126,12 +137,7 @@ public sealed class GasReactionConfig : IAtmosSolverConfiguration
         return Empty;
     }
 
-    internal Joule GetEnergyBalance(int reactionId)
-    {
-        return reactionId < LinearReactions.Count
-            ? LinearReactions[reactionId].EnergyBalance
-            : StandardReactions[reactionId - LinearReactions.Count].EnergyBalance;
-    }
+    internal Joule GetEnergyBalance(int reactionId) => _energyBalances[reactionId];
 
     internal PerSecond GetRateConstant(int reactionId, Kelvin temperature)
     {
