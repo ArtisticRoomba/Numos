@@ -21,4 +21,4 @@ A list of improvements over the previous system is below:
   - `AS` is only multithreaded in `DeltaPressure`, however all other important, compute-heavy solver stages were not multithreaded.
   - Numos can also run on its own thread if you'd like to do that in your game.
 
-A deeper and more formal overview is available in [the tehcnical docs.](atmospherics_technical_documentation.md)
+A deeper and more formal overview is available in [the technical docs.](atmospherics_technical_documentation.md)
