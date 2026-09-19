@@ -326,6 +326,22 @@ public class GasReactionTests
         }
 
         Assert.That(totalReactionSum > 0);
+
+        // Golden baseline captured from the current implementation: pins the exact numeric outcome of
+        // this deterministic random scenario (fixed seed, sequential per-voxel writeback) so a change to
+        // the material-limiter or the reaction-application math that alters results -- not just one that
+        // introduces NaNs -- shows up here, even if the new result still "looks" plausible.
+        Assert.That(totalReactionSum, Is.EqualTo(54699.562f));
+
+        float[] expectedGasSums =
+        [
+            214.18805f, 165.98767f, 175.9431f, 342.46832f, 153.91702f, 144.54675f, 3798.6301f, 1537.6663f,
+            727.5402f, 1548.2734f, 547.46625f, 175.2266f, 164.27475f, 1126.8424f, 210.39911f, 173.7023f
+        ];
+        foreach (var gc in chunk.ActiveGases.Take(chunk.ActiveGasCount).OrderBy(g => g.GasId))
+            Assert.That(gc.Moles.Sum(), Is.EqualTo(expectedGasSums[gc.GasId]));
+
+        Assert.That(chunk.Temperature[0], Is.EqualTo(108564.51f));
     }
 
     [Test]
@@ -453,5 +469,110 @@ public class GasReactionTests
         // A's scarcity must only throttle the reaction that consumes it (consumesA), never producesA,
         // which only ever adds A to the mixture and so can't be responsible for depleting it.
         Assert.That(feedback[1], Is.GreaterThan(10f));
+    }
+
+    [Test]
+    public void MaterialLimiter_ConvergesAcrossIterationsForIndependentlyScarceGases()
+    {
+        var a = new GasProperties { Name = "A", MolarHeatCapacityAtConstantVolume = 10f };
+        var b = new GasProperties { Name = "B", MolarHeatCapacityAtConstantVolume = 10f };
+        var d = new GasProperties { Name = "D", MolarHeatCapacityAtConstantVolume = 10f };
+        var e = new GasProperties { Name = "E", MolarHeatCapacityAtConstantVolume = 10f };
+
+        // Would consume 20 mol of A (only 5 available) and produce D. Unrelated to B/R2.
+        var consumesA = new StandardGasReaction(
+            new Dictionary<GasProperties, float> { { a, 1f } },
+            new Dictionary<GasProperties, float> { { d, 1f } },
+            0f, 20f, 0f,
+            new Dictionary<GasProperties, float>());
+
+        // Would consume 8 mol of B (only 2 available) and produce E. Unrelated to A/R1.
+        var consumesB = new StandardGasReaction(
+            new Dictionary<GasProperties, float> { { b, 1f } },
+            new Dictionary<GasProperties, float> { { e, 1f } },
+            0f, 8f, 0f,
+            new Dictionary<GasProperties, float>());
+
+        var config = new AtmosConfig
+        {
+            GasRegistry = [a, b, d, e],
+            SolverConfigurations = [new GasReactionConfig(standardReactions: [consumesA, consumesB])]
+        }.CreateSnapshot();
+
+        // A's overdraw (5 - 20 = -15) is worse than B's (2 - 8 = -6), so the limiter clamps A first,
+        // leaving B still overdrawn -- it only resolves B on the following iteration, once A's fix no
+        // longer masks it. This scenario requires that second pass to reach the values asserted below;
+        // a limiter that only ever ran once would leave B unclamped.
+        float[] mixture = [5f, 2f, 0f, 0f];
+        float temperature = 300f;
+        float[] feedback = [0f, 0f];
+
+        var solver = new ReactionSolver();
+        solver.ProcessVoxel(1f, mixture, ref temperature, feedback, config, 4);
+
+        Assert.Multiple(() =>
+        {
+            // Every value here is an exact power-of-two fraction (0.25) of exact integers, so this is
+            // bit-exact, not approximate.
+            Assert.That(mixture[0], Is.EqualTo(0f), "A should be exactly exhausted, not overdrawn");
+            Assert.That(mixture[1], Is.EqualTo(0f), "B should be exactly exhausted, not overdrawn");
+            Assert.That(mixture[2], Is.EqualTo(5f), "D should reflect R1's clamped speed (20 -> 5)");
+            Assert.That(mixture[3], Is.EqualTo(2f), "E should reflect R2's clamped speed (8 -> 2)");
+            Assert.That(feedback[0], Is.EqualTo(5f), "R1 should be scaled from 20 to 5 by A's scarcity");
+            Assert.That(feedback[1], Is.EqualTo(2f), "R2 should be scaled from 8 to 2 by B's scarcity");
+            // No reaction here carries an energy balance, and total heat capacity is unchanged (same
+            // total moles, uniform per-gas heat capacity), so temperature must be exactly conserved.
+            Assert.That(temperature, Is.EqualTo(300f));
+        });
+    }
+
+    [Test]
+    public void MaterialLimiter_AccumulatesGrossConsumptionInDoublePrecision()
+    {
+        // A single reaction wants to consume far more of A than is available, so the limiter must clamp
+        // it. Three more reactions each nibble an additional 0.03 mol of A. At this magnitude (~1e6),
+        // float32's ULP is 0.0625, so summing three 0.03 terms sequentially in float32 rounds every one
+        // of them away to nothing (each individual addition is below half a ULP) -- a naive float-only
+        // rewrite of the consumption accumulator would see exactly 1,000,000 consumed against exactly
+        // 1,000,000 available, conclude nothing is overdrawn, and skip clamping the big reaction entirely.
+        // Accumulating in double (the documented contract) correctly sees 1,000,000.09-ish consumed
+        // against 1,000,000 available, and clamps it.
+        var a = new GasProperties { Name = "A", MolarHeatCapacityAtConstantVolume = 10f };
+
+        var bigConsumer = new StandardGasReaction(
+            new Dictionary<GasProperties, float> { { a, 1f } },
+            new Dictionary<GasProperties, float>(),
+            0f, 1_000_000f, 0f,
+            new Dictionary<GasProperties, float>());
+
+        StandardGasReaction MakeTinyConsumer() =>
+            new(
+                new Dictionary<GasProperties, float> { { a, 0.03f } },
+                new Dictionary<GasProperties, float>(),
+                0f, 1f, 0f,
+                new Dictionary<GasProperties, float>());
+
+        var config = new AtmosConfig
+        {
+            GasRegistry = [a],
+            SolverConfigurations =
+                [new GasReactionConfig(standardReactions: [bigConsumer, MakeTinyConsumer(), MakeTinyConsumer(), MakeTinyConsumer()])]
+        }.CreateSnapshot();
+
+        float[] mixture = [1_000_000f];
+        float temperature = 300f;
+        float[] feedback = [0f, 0f, 0f, 0f];
+
+        var solver = new ReactionSolver();
+        solver.ProcessVoxel(1f, mixture, ref temperature, feedback, config, 1);
+
+        Assert.Multiple(() =>
+        {
+            // The decisive check: the big reaction must actually get throttled. A float-only accumulator
+            // would leave it at exactly 1,000,000 (unclamped) because it can't see the three 0.03 terms.
+            Assert.That(feedback[0], Is.LessThan(1_000_000f).And.GreaterThan(0f));
+            // Secondary sanity check: A shouldn't be driven meaningfully negative by the clamp.
+            Assert.That(mixture[0], Is.GreaterThanOrEqualTo(-0.1f).And.LessThanOrEqualTo(0.1f));
+        });
     }
 }
