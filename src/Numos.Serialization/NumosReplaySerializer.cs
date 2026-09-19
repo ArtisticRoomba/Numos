@@ -4,13 +4,45 @@ using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.Replay;
 using Numos.Maths;
+using Numos.Replay.SourceGen;
 
 namespace Numos.Serialization;
 
 /// <summary>
 ///     Reads and writes the portable Numos binary replay container without accessing filesystem paths.
 /// </summary>
-public static class NumosReplaySerializer
+/// <remarks>
+///     The <c>[WireOperation]</c> attributes below register every <see cref="AtmosOperationCode" /> with
+///     Numos.Replay.SourceGen, which generates this class's <c>TryWriteGeneratedOperation</c>/
+///     <c>TryReadGeneratedOperation</c> partial-class members. Field order for the mechanical ones is exactly
+///     constructor-declaration order; see <c>tests/Numos.API.Tests/ReplayWireFormatGoldenTests.cs</c> for the
+///     byte-level pin that codec must not silently drift from.
+///     <para>
+///         <see cref="SetAtmosConfigOperation" /> (nested config snapshot) and
+///         <see cref="SetVoxelMixtureOperation" /> (variable-length gas list) don't fit the generator's mechanical
+///         field-order mapping, so they register as <c>Custom</c>: the generator plugs calls to the hand-written
+///         <c>Write{Name}</c>/<c>Read{Name}</c> methods below into the same generated dispatch table, rather than
+///         generating their bodies.
+///     </para>
+///     <para>
+///         Nothing yet enforces that every <see cref="AtmosOperationCode" /> member has one of these
+///         registrations -- forgetting one fails at replay time, not at build time. That consistency check is
+///         Phase 5's analyzer.
+///     </para>
+/// </remarks>
+[WireOperation(typeof(CreateChunkOperation), AtmosOperationCode.CreateChunk)]
+[WireOperation(typeof(RemoveChunkOperation), AtmosOperationCode.RemoveChunk)]
+[WireOperation(typeof(SetChunkClassificationOperation), AtmosOperationCode.SetChunkClassification)]
+[WireOperation(typeof(SetChunkBoundaryClassificationOperation), AtmosOperationCode.SetChunkBoundaryClassification)]
+[WireOperation(typeof(SetVoxelClassificationOperation), AtmosOperationCode.SetVoxelClassification)]
+[WireOperation(typeof(SetVoxelTemperatureOperation), AtmosOperationCode.SetVoxelTemperature)]
+[WireOperation(typeof(AddGasToVoxelOperation), AtmosOperationCode.AddGasToVoxel)]
+[WireOperation(typeof(WakeChunkOperation), AtmosOperationCode.WakeChunk)]
+[WireOperation(typeof(SleepChunkOperation), AtmosOperationCode.SleepChunk)]
+[WireOperation(typeof(SetSolverEnabledOperation), AtmosOperationCode.SetSolverEnabled)]
+[WireOperation(typeof(SetAtmosConfigOperation), AtmosOperationCode.SetAtmosConfig, Custom = true)]
+[WireOperation(typeof(SetVoxelMixtureOperation), AtmosOperationCode.SetVoxelMixture, Custom = true)]
+public static partial class NumosReplaySerializer
 {
     internal const ushort ContainerVersion = 1;
     internal const ushort ReplayContentKind = 1;
@@ -556,103 +588,45 @@ public static class NumosReplaySerializer
 
     internal static void WriteOperation(BinaryWriter writer, AtmosOperation operation)
     {
-        switch (operation)
-        {
-            case SetAtmosConfigOperation op: WriteConfig(writer, op.Config); break;
-            case CreateChunkOperation op:
-                WriteInt3(writer, op.Position);
-                break;
-            case RemoveChunkOperation op: WriteInt3(writer, op.Position); break;
-            case SetChunkClassificationOperation op:
-                WriteInt3(writer, op.Position);
-                writer.Write(op.Classification.RoomId);
-                break;
-            case SetChunkBoundaryClassificationOperation op:
-                WriteInt3(writer, op.Position);
-                writer.Write(op.Classification.RoomId);
-                break;
-            case SetVoxelClassificationOperation op:
-                WriteInt3(writer, op.Position);
-                writer.Write(op.LocalVoxelIndex);
-                writer.Write(op.Classification.RoomId);
-                break;
-            case SetVoxelTemperatureOperation op:
-                WriteInt3(writer, op.Position);
-                writer.Write(op.LocalVoxelIndex);
-                writer.Write(op.Temperature);
-                break;
-            case AddGasToVoxelOperation op:
-                WriteInt3(writer, op.Position);
-                writer.Write(op.LocalVoxelIndex);
-                writer.Write(op.GasId);
-                writer.Write(op.Moles);
-                writer.Write(op.Temperature);
-                break;
-            case WakeChunkOperation op:
-                WriteInt3(writer, op.Position);
-                break;
-            case SleepChunkOperation op: WriteInt3(writer, op.Position); break;
-            case SetSolverEnabledOperation op:
-                WriteString(writer, op.Name);
-                writer.Write(op.Enabled);
-                break;
-            case SetVoxelMixtureOperation op:
-                WriteInt3(writer, op.Position);
-                writer.Write(op.LocalVoxelIndex);
-                writer.Write(op.Temperature);
-                writer.Write(op.Pressure);
-                writer.Write(op.HeatCapacity);
-                writer.Write(op.Gases.Count);
-                foreach (var gas in op.Gases)
-                {
-                    writer.Write(gas.GasId);
-                    writer.Write(gas.Moles);
-                }
-
-                break;
-            default: throw new NotSupportedException($"Replay opcode {operation.Code} is not serializable.");
-        }
+        if (!TryWriteGeneratedOperation(writer, operation))
+            throw new NotSupportedException($"Replay opcode {operation.Code} is not serializable.");
     }
 
     internal static AtmosOperation ReadOperation(BinaryReader reader, ushort rawCode, NumosReplayReadOptions options)
     {
         if (!Enum.IsDefined((AtmosOperationCode)rawCode)) throw new InvalidDataException($"Replay opcode {rawCode} is unsupported.");
 
-        var code = (AtmosOperationCode)rawCode;
-        return code switch
-        {
-            AtmosOperationCode.SetAtmosConfig => new SetAtmosConfigOperation(ReadConfig(reader, options)),
-            AtmosOperationCode.CreateChunk => new CreateChunkOperation(ReadInt3(reader)),
-            AtmosOperationCode.RemoveChunk => new RemoveChunkOperation(ReadInt3(reader)),
-            AtmosOperationCode.SetChunkClassification => new SetChunkClassificationOperation(
-                ReadInt3(reader),
-                new VoxelClassification(reader.ReadInt32())),
-            AtmosOperationCode.SetChunkBoundaryClassification => new SetChunkBoundaryClassificationOperation(
-                ReadInt3(reader),
-                new VoxelClassification(reader.ReadInt32())),
-            AtmosOperationCode.SetVoxelClassification => new SetVoxelClassificationOperation(
-                ReadInt3(reader),
-                reader.ReadUInt16(),
-                new VoxelClassification(reader.ReadInt32())),
-            AtmosOperationCode.SetVoxelTemperature => new SetVoxelTemperatureOperation(
-                ReadInt3(reader),
-                reader.ReadUInt16(),
-                reader.ReadSingle()),
-            AtmosOperationCode.AddGasToVoxel => new AddGasToVoxelOperation(
-                ReadInt3(reader),
-                reader.ReadUInt16(),
-                reader.ReadInt32(),
-                reader.ReadSingle(),
-                reader.ReadSingle()),
-            AtmosOperationCode.WakeChunk => new WakeChunkOperation(ReadInt3(reader)),
-            AtmosOperationCode.SleepChunk => new SleepChunkOperation(ReadInt3(reader)),
-            AtmosOperationCode.SetSolverEnabled => new SetSolverEnabledOperation(ReadString(reader, options), reader.ReadBoolean()),
-            AtmosOperationCode.SetVoxelMixture => ReadMixture(reader),
-            _ => throw new InvalidDataException($"Replay opcode {rawCode} is unsupported.")
-        };
+        if (TryReadGeneratedOperation(reader, rawCode, options, out var generated)) return generated!;
+
+        throw new InvalidDataException($"Replay opcode {rawCode} is unsupported.");
     }
 
-    private static SetVoxelMixtureOperation ReadMixture(BinaryReader reader)
+    private static void WriteSetAtmosConfigOperation(BinaryWriter writer, SetAtmosConfigOperation operation)
+    {
+        WriteConfig(writer, operation.Config);
+    }
+
+    private static SetAtmosConfigOperation ReadSetAtmosConfigOperation(BinaryReader reader, NumosReplayReadOptions options)
+    {
+        return new SetAtmosConfigOperation(ReadConfig(reader, options));
+    }
+
+    private static void WriteSetVoxelMixtureOperation(BinaryWriter writer, SetVoxelMixtureOperation operation)
+    {
+        WriteInt3(writer, operation.Position);
+        writer.Write(operation.LocalVoxelIndex);
+        writer.Write(operation.Temperature);
+        writer.Write(operation.Pressure);
+        writer.Write(operation.HeatCapacity);
+        writer.Write(operation.Gases.Count);
+        foreach (var gas in operation.Gases)
+        {
+            writer.Write(gas.GasId);
+            writer.Write(gas.Moles);
+        }
+    }
+
+    private static SetVoxelMixtureOperation ReadSetVoxelMixtureOperation(BinaryReader reader, NumosReplayReadOptions options)
     {
         var position = ReadInt3(reader);
         ushort voxel = reader.ReadUInt16();

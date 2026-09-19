@@ -351,6 +351,45 @@ dotnet run --project benchmarks/Numos.Replay.Benchmarks -c Release
 dotnet run --project benchmarks/Numos.Replay.Benchmarks -c Release -- --quick
 ```
 
+### Adding a new replay opcode
+
+Both operation families (`AtmosOperation`/`AtmosOperationCode` for per-simulation mutations,
+`AtmosWorldOperation`/`AtmosWorldOperationCode` for world-level mutations) follow the same five-step recipe. Most of
+the ways to get this wrong are caught automatically, either at build time or by the existing test suite -- but not
+all of them, so don't skip steps on the assumption that a missing one will always be loud.
+
+1. Add the enum member (`AtmosOperationCode`/`AtmosWorldOperationCode`) and the operation record deriving from
+   `AtmosOperation`/`AtmosWorldOperation`, overriding `Code` to return it. An enum member with no registration at
+   all is caught in step 2 below. What isn't caught: if `Code`'s override isn't a plain `=> SomeCode.Member;`
+   expression (e.g. a computed value), the Apply-switch check in step 4 silently skips that operation instead of
+   reporting on it -- keep the override a direct constant reference.
+2. Register the operation's wire codec with a `[WireOperation(typeof(YourOperation), YourOperationCode.Member)]`
+   attribute, stacked on `NumosReplaySerializer` or `NumosWorldReplaySerializer` alongside the existing ones. Forget
+   this (or forget it for a whole new enum member) and `NUMOSREPLAYGEN008` fails the `Numos.Serialization` build,
+   pointing at the registration host class.
+3. Most operations need nothing else here -- the field order in the record's primary constructor becomes the wire
+   layout, mapped through `Numos.Replay.SourceGen`'s fixed set of recognized field types (primitives, `Int3`,
+   `VoxelClassification`, `AtmosSimulationId`, `ExplicitLinkSetHandle`, and a nested-operation kind for a world
+   operation embedding a whole `AtmosOperation`). An unrecognized field type fails the build with
+   `NUMOSREPLAYGEN001` rather than silently miscoding.
+
+   If the shape doesn't fit that mapping -- a nested snapshot (`SetAtmosConfigOperation`,
+   `SetAtmosWorldConfigOperation`), or a variable-length list (`SetVoxelMixtureOperation`, its gas list;
+   `CreateAtmosLinkSetOperation`, its link list) -- add `Custom = true` to the registration and hand-write static
+   `Write{OperationName}`/`Read{OperationName}` methods on the same host class. The generator validates their
+   signatures and plugs calls to them into the same dispatch table; a missing or mismatched method fails the build
+   with `NUMOSREPLAYGEN007`. Those four operations are the worked examples to copy from.
+4. Add the case to the family's Apply switch (`AtmosKernel.ApplyRecordedOperation` for simulation operations,
+   `AtmosWorld.ApplyWorldOperation` for world operations) that actually mutates live state when the operation
+   replays. Forget this and `NUMOSREPLAYGEN009` fails the `Numos.CoreSim`/`Numos.API` build, pointing at the
+   operation's `Code` override (subject to the caveat in step 1).
+5. Update the golden wire-format fixtures in `tests/Numos.API.Tests/ReplayWireFormatGoldenTests.cs` to exercise the
+   new opcode, and regenerate the pinned base64 constants using the `[Explicit] PrintGoldenBytes` test in the same
+   file. No *build* step catches a forgotten update here, but
+   `SimReplay_GoldenBytesDeserializeToTheFullOpcodeSet`/`WorldReplay_GoldenBytesDeserializeToTheFullOpcodeSet` assert
+   the fixture's decoded operations cover every member of the enum, so a new opcode absent from the fixture shows up
+   as a test failure, not a silent gap -- just not until you run the suite.
+
 ## Save portable replay files
 
 The `.numos` container has two content discriminators. Kind 1 is the existing single-simulation replay and remains byte

@@ -1,12 +1,43 @@
 using Numos.API;
 using Numos.CoreSim.Replay;
+using Numos.Replay.SourceGen;
 
 namespace Numos.Serialization;
 
 /// <summary>
 ///     Reads and writes complete multi-simulation world replay documents.
 /// </summary>
-public static class NumosWorldReplaySerializer
+/// <remarks>
+///     The <c>[WireOperation]</c> attributes below register every <see cref="AtmosWorldOperationCode" /> with
+///     Numos.Replay.SourceGen, which generates this class's <c>TryWriteGeneratedOperation</c>/
+///     <c>TryReadGeneratedOperation</c> partial-class members. Field order for the mechanical ones is exactly
+///     constructor-declaration order; see <c>tests/Numos.API.Tests/ReplayWireFormatGoldenTests.cs</c> for the
+///     byte-level pin that codec must not silently drift from.
+///     <para>
+///         <see cref="AtmosWorldSimulationOperation" />'s <c>Operation</c> field is a nested simulation operation --
+///         the generator writes its opcode and then delegates to <see cref="NumosReplaySerializer" />'s own codec
+///         for the payload, rather than treating it as an opaque unsupported type.
+///     </para>
+///     <para>
+///         <see cref="SetAtmosWorldConfigOperation" /> (nested config snapshot) and
+///         <see cref="CreateAtmosLinkSetOperation" /> (variable-length link list) don't fit the generator's
+///         mechanical field-order mapping, so they register as <c>Custom</c>, same as their sim-family
+///         counterparts.
+///     </para>
+///     <para>
+///         Nothing yet enforces that every <see cref="AtmosWorldOperationCode" /> member has one of these
+///         registrations -- forgetting one fails at replay time, not at build time. That consistency check is
+///         Phase 5's analyzer.
+///     </para>
+/// </remarks>
+[WireOperation(typeof(AtmosWorldSimulationOperation), AtmosWorldOperationCode.SimulationOperation)]
+[WireOperation(typeof(CreateAtmosSimulationOperation), AtmosWorldOperationCode.CreateSimulation)]
+[WireOperation(typeof(DestroyAtmosSimulationOperation), AtmosWorldOperationCode.DestroySimulation)]
+[WireOperation(typeof(DestroyAtmosLinkSetOperation), AtmosWorldOperationCode.DestroyLinkSet)]
+[WireOperation(typeof(SetAtmosWorldSolverEnabledOperation), AtmosWorldOperationCode.SetSolverEnabled)]
+[WireOperation(typeof(SetAtmosWorldConfigOperation), AtmosWorldOperationCode.SetAtmosConfig, Custom = true)]
+[WireOperation(typeof(CreateAtmosLinkSetOperation), AtmosWorldOperationCode.CreateLinkSet, Custom = true)]
+public static partial class NumosWorldReplaySerializer
 {
     /// <summary>
     ///     Writes a complete-world replay document and leaves the destination open.
@@ -444,69 +475,37 @@ public static class NumosWorldReplaySerializer
 
     private static void WriteOperation(BinaryWriter writer, AtmosWorldOperation operation)
     {
-        switch (operation)
-        {
-            case AtmosWorldSimulationOperation simulation:
-                WriteSimulationId(writer, simulation.Simulation);
-                writer.Write((ushort)simulation.Operation.Code);
-                NumosReplaySerializer.WriteOperation(writer, simulation.Operation);
-                break;
-            case SetAtmosWorldConfigOperation config:
-                NumosReplaySerializer.WriteConfig(writer, config.Config);
-                break;
-            case CreateAtmosSimulationOperation create:
-                WriteSimulationId(writer, create.Simulation);
-                NumosReplaySerializer.WriteInt3(writer, create.ChunkDimensions);
-                break;
-            case DestroyAtmosSimulationOperation destroy:
-                WriteSimulationId(writer, destroy.Simulation);
-                break;
-            case CreateAtmosLinkSetOperation create:
-                WriteHandle(writer, create.Handle);
-                writer.Write((byte)create.Kind);
-                writer.Write(create.Links.Count);
-                foreach (var link in create.Links)
-                    WriteLink(writer, link);
-
-                break;
-            case DestroyAtmosLinkSetOperation destroy:
-                WriteHandle(writer, destroy.Handle);
-                break;
-            case SetAtmosWorldSolverEnabledOperation solver:
-                NumosReplaySerializer.WriteString(writer, solver.Name);
-                writer.Write(solver.Enabled);
-                break;
-            default:
-                throw new NotSupportedException($"World replay opcode {operation.Code} is not serializable.");
-        }
+        if (!TryWriteGeneratedOperation(writer, operation))
+            throw new NotSupportedException($"World replay opcode {operation.Code} is not serializable.");
     }
 
     private static AtmosWorldOperation ReadOperation(BinaryReader reader, ushort rawCode, NumosReplayReadOptions options)
     {
-        if (!Enum.IsDefined((AtmosWorldOperationCode)rawCode))
-            throw new InvalidDataException($"World replay opcode {rawCode} is unsupported.");
-
-        return (AtmosWorldOperationCode)rawCode switch
-        {
-            AtmosWorldOperationCode.SimulationOperation => new AtmosWorldSimulationOperation(
-                ReadSimulationId(reader),
-                NumosReplaySerializer.ReadOperation(reader, reader.ReadUInt16(), options)),
-            AtmosWorldOperationCode.SetAtmosConfig => new SetAtmosWorldConfigOperation(
-                NumosReplaySerializer.ReadConfig(reader, options)),
-            AtmosWorldOperationCode.CreateSimulation => new CreateAtmosSimulationOperation(
-                ReadSimulationId(reader),
-                NumosReplaySerializer.ReadInt3(reader)),
-            AtmosWorldOperationCode.DestroySimulation => new DestroyAtmosSimulationOperation(ReadSimulationId(reader)),
-            AtmosWorldOperationCode.CreateLinkSet => ReadCreateLinkSet(reader),
-            AtmosWorldOperationCode.DestroyLinkSet => new DestroyAtmosLinkSetOperation(ReadHandle(reader)),
-            AtmosWorldOperationCode.SetSolverEnabled => new SetAtmosWorldSolverEnabledOperation(
-                NumosReplaySerializer.ReadString(reader, options),
-                reader.ReadBoolean()),
-            _ => throw new InvalidDataException($"World replay opcode {rawCode} is unsupported.")
-        };
+        if (!Enum.IsDefined((AtmosWorldOperationCode)rawCode)) throw new InvalidDataException($"World replay opcode {rawCode} is unsupported.");
+        if (TryReadGeneratedOperation(reader, rawCode, options, out var generated)) return generated!;
+        throw new InvalidDataException($"World replay opcode {rawCode} is unsupported.");
     }
 
-    private static CreateAtmosLinkSetOperation ReadCreateLinkSet(BinaryReader reader)
+    private static void WriteSetAtmosWorldConfigOperation(BinaryWriter writer, SetAtmosWorldConfigOperation operation)
+    {
+        NumosReplaySerializer.WriteConfig(writer, operation.Config);
+    }
+
+    private static SetAtmosWorldConfigOperation ReadSetAtmosWorldConfigOperation(BinaryReader reader, NumosReplayReadOptions options)
+    {
+        return new SetAtmosWorldConfigOperation(NumosReplaySerializer.ReadConfig(reader, options));
+    }
+
+    private static void WriteCreateAtmosLinkSetOperation(BinaryWriter writer, CreateAtmosLinkSetOperation operation)
+    {
+        WriteHandle(writer, operation.Handle);
+        writer.Write((byte)operation.Kind);
+        writer.Write(operation.Links.Count);
+        foreach (var link in operation.Links)
+            WriteLink(writer, link);
+    }
+
+    private static CreateAtmosLinkSetOperation ReadCreateAtmosLinkSetOperation(BinaryReader reader, NumosReplayReadOptions options)
     {
         var handle = ReadHandle(reader);
         var kind = (ExplicitLinkSetKind)reader.ReadByte();

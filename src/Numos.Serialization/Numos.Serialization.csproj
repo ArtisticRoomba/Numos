@@ -12,5 +12,13 @@
     </PropertyGroup>
     <ItemGroup>
         <ProjectReference Include="..\Numos.API\Numos.API.csproj"/>
+        <ProjectReference Include="..\Numos.Replay.SourceGen\Numos.Replay.SourceGen.csproj"
+                          OutputItemType="Analyzer"
+                          ReferenceOutputAssembly="false"
+                          GlobalPropertiesToRemove="PublishAot;PublishTrimmed;RuntimeIdentifier;SelfContained"/>
+        <ProjectReference Include="..\Numos.Replay.Analyzers\Numos.Replay.Analyzers.csproj"
+                          OutputItemType="Analyzer"
+                          ReferenceOutputAssembly="false"
+                          GlobalPropertiesToRemove="PublishAot;PublishTrimmed;RuntimeIdentifier;SelfContained"/>
     </ItemGroup>
 </Project>

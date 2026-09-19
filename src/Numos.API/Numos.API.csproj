@@ -16,6 +16,10 @@
 
     <ItemGroup>
         <ProjectReference Include="..\Numos.CoreSim\Numos.CoreSim.csproj"/>
+        <ProjectReference Include="..\Numos.Replay.Analyzers\Numos.Replay.Analyzers.csproj"
+                          OutputItemType="Analyzer"
+                          ReferenceOutputAssembly="false"
+                          GlobalPropertiesToRemove="PublishAot;PublishTrimmed;RuntimeIdentifier;SelfContained"/>
     </ItemGroup>
 
 </Project>

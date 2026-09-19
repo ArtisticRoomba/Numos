@@ -13,3 +13,6 @@ riderModule.iml
 
 imgui.ini
 BenchmarkDotNet.Artifacts/
+
+# EmitCompilerGeneratedFiles debugging output for source generators.
+GeneratedFiles/

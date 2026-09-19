@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk"
+         TreatAsLocalProperty="PublishAot;PublishTrimmed;RuntimeIdentifier;SelfContained">
+
+    <Import Project="..\Numos.CoreSim\Version.props"/>
+
+    <PropertyGroup>
+        <TargetFramework>netstandard2.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <LangVersion>latest</LangVersion>
+        <RootNamespace>Numos.Replay.SourceGen</RootNamespace>
+        <PackageId>Numos.Replay.Analyzers</PackageId>
+        <Title>Numos Replay Opcode Consistency Analyzer</Title>
+        <Description>Cross-checks replay opcode enums, wire codec registrations, and Apply-switch coverage at build time.</Description>
+        <PackageTags>roslyn;analyzer;replay;serialization</PackageTags>
+        <DevelopmentDependency>true</DevelopmentDependency>
+        <IncludeBuildOutput>false</IncludeBuildOutput>
+        <IncludeSymbols>false</IncludeSymbols>
+        <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
+        <IsAotCompatible>false</IsAotCompatible>
+        <IsTrimmable>false</IsTrimmable>
+        <PublishAot>false</PublishAot>
+        <PublishTrimmed>false</PublishTrimmed>
+        <SelfContained>false</SelfContained>
+        <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
+        <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.0.0" PrivateAssets="all"/>
+        <PackageReference Include="Microsoft.CodeAnalysis.Analyzers" Version="3.11.0" PrivateAssets="all"/>
+    </ItemGroup>
+
+    <ItemGroup>
+        <None Include="$(OutputPath)$(AssemblyName).dll"
+              Pack="true"
+              PackagePath="analyzers/dotnet/cs"
+              Visible="false"/>
+    </ItemGroup>
+
+</Project>
