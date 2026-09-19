@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Diagnostics;
 using System.Numerics.Tensors;
 using CommunityToolkit.HighPerformance.Helpers;
 using Numos.CoreSim.GasReactions;
@@ -7,12 +8,6 @@ namespace Numos.CoreSim.Solvers;
 
 internal class ReactionSolver : IAtmosSolverStage
 {
-    private readonly object _gasDataKey = new();
-    private GasReactionData[] _gasRateOrder = [];
-    private GasReactionData[] _gasReactionData = [];
-    private GasReactionMatrix? _changesMatrix;
-    private IAtmosConfig? _preparedConfig;
-
     // ProcessVoxel is invoked once per voxel from an already-parallel worker (thousands of calls per
     // chunk per tick), and reactionCount is typically a handful of entries. Renting/returning that tiny
     // array from ArrayPool<T>.Shared on every call adds pool bookkeeping to the hottest part of the loop
@@ -20,18 +15,11 @@ internal class ReactionSolver : IAtmosSolverStage
     // buffer that just grows to the high-water mark removes that round trip entirely.
     [ThreadStatic]
     private static Scalar[]? _reactionSpeedsScratch;
-
-    private static Scalar[] RentReactionSpeeds(int reactionCount)
-    {
-        Scalar[]? scratch = _reactionSpeedsScratch;
-        if (scratch == null || scratch.Length < reactionCount)
-        {
-            scratch = new Scalar[Math.Max(reactionCount, 16)];
-            _reactionSpeedsScratch = scratch;
-        }
-
-        return scratch;
-    }
+    private readonly object _gasDataKey = new();
+    private GasReactionMatrix? _changesMatrix;
+    private GasReactionData[] _gasRateOrder = [];
+    private GasReactionData[] _gasReactionData = [];
+    private IAtmosConfig? _preparedConfig;
 
     public void Solve(AtmosSolverExecutionContext context)
     {
@@ -59,6 +47,20 @@ internal class ReactionSolver : IAtmosSolverStage
         _preparedConfig = context.TickConfig;
         try
         {
+            // TODO PERF: a single dense chunk (16^3, sparse reactions) is ~12% efficient at 16 workers
+            // (measured in DenseChunkReactionParallelScalingBenchmarks). An earlier note here blamed
+            // ThreadPool wake/dispatch overhead, based on a dotnet-trace showing ~74% of sampled time
+            // outside solver code -- that number turned out to be a harness artifact: the trace looped
+            // Reset()+Solve() back to back, and Reset() (a serial checkpoint restore) left idle pool
+            // workers spin-waiting for a large share of the trace's wall clock, inflating the "wait"
+            // bucket. A direct microbenchmark of ParallelHelper.For itself measured ~2.4us per dispatch
+            // at 16 workers; this method issues one ForEach (chunks) plus one nested For (voxels) per
+            // tick, so real dispatch overhead is on the order of 5us, not the dominant cost.
+            // Fitting Solve-only timings (3.70ms at 1 worker, 0.89ms at 16) to Amdahl's law implies an
+            // ~19% effective serial fraction. The likely concrete source is ProcessChunk's "put data back
+            // in a single thread" loop below: it is a genuine single-threaded pass over every voxel and
+            // every gas channel that never shrinks with worker count. That loop, not dispatch overhead,
+            // is the better place to look before trying anything here again.
             ParallelHelper.ForEach<AtmosChunk, ProcessChunkAction>(
                 context.Chunks,
                 new ProcessChunkAction(this, context.TickConfig));
@@ -72,8 +74,20 @@ internal class ReactionSolver : IAtmosSolverStage
         }
     }
 
+    private static Scalar[] RentReactionSpeeds(int reactionCount)
+    {
+        Scalar[]? scratch = _reactionSpeedsScratch;
+        if (scratch == null || scratch.Length < reactionCount)
+        {
+            scratch = new Scalar[Math.Max(reactionCount, 16)];
+            _reactionSpeedsScratch = scratch;
+        }
+
+        return scratch;
+    }
+
     /// <summary>
-    ///     Runs the reaction solver over every voxel in one chunk and writes the results back.
+    ///     Runs the reaction solver over every active-air voxel in one chunk and writes the results back.
     /// </summary>
     /// <param name="chunk">The chunk whose voxels should react.</param>
     /// <param name="deltaTime">Over which timespan reactions should occur.</param>
@@ -84,8 +98,10 @@ internal class ReactionSolver : IAtmosSolverStage
     /// </param>
     internal void ProcessChunk(AtmosChunk chunk, Second deltaTime, IAtmosConfig config, Scalar[]? reactionCount = null)
     {
-        //process each voxel in parallel
-        int voxelCount = chunk.VoxelCount;
+        // Restricted to ActiveAirIndices, like ThermalDiffusionSolver and PhaseChangeSolver.
+        int activeAirCount = chunk.ActiveAirCount;
+        if (activeAirCount == 0)
+            return;
 
         // Registry compatibility is uniform across the chunk. Reject before any worker writes temperatures.
         for (int gas = 0; gas < chunk.ActiveGasCount; gas++)
@@ -95,15 +111,24 @@ internal class ReactionSolver : IAtmosSolverStage
         }
 
         int mixtureLength = config.GasPropertyCount;
+        // Resolved once for the whole chunk instead of once per voxel.
+        ResolveReactionState(
+            config,
+            mixtureLength,
+            out var reactions,
+            out GasReactionData[] gasData,
+            out GasReactionData[] rateOrder,
+            out var changesMatrix);
+
         // One chunk-wide voxel-by-gas matrix instead of a separately pooled array per voxel: this is
         // the same "stop renting per item, slice a shared buffer instead" move as the reaction matrix,
-        // and it collapses voxelCount pool round-trips into one.
-        Mole[] mixtures = ArrayPool<Mole>.Shared.Rent(checked(voxelCount * mixtureLength));
-        Scalar[][]? reactionFeedbacks = reactionCount == null ? null : ArrayPool<Scalar[]>.Shared.Rent(voxelCount);
-        Kelvin[] newTemps = ArrayPool<Kelvin>.Shared.Rent(voxelCount);
+        // and it collapses activeAirCount pool round-trips into one.
+        Mole[] mixtures = ArrayPool<Mole>.Shared.Rent(checked(activeAirCount * mixtureLength));
+        Scalar[][]? reactionFeedbacks = reactionCount == null ? null : ArrayPool<Scalar[]>.Shared.Rent(activeAirCount);
+        Kelvin[] newTemps = ArrayPool<Kelvin>.Shared.Rent(activeAirCount);
         ParallelHelper.For(
             0,
-            voxelCount,
+            activeAirCount,
             new ProcessVoxelAction(
                 this,
                 chunk,
@@ -113,12 +138,19 @@ internal class ReactionSolver : IAtmosSolverStage
                 reactionFeedbacks,
                 mixtures,
                 newTemps,
-                mixtureLength));
+                mixtureLength,
+                reactions,
+                gasData,
+                rateOrder,
+                changesMatrix));
 
-        //put data back in a single thread.
-        for (ushort voxelIndex = 0; voxelIndex < voxelCount; voxelIndex++)
+        // put data back in a single thread. TODO PERF: see the dense-chunk TODO on the ForEach call in
+        // Solve() above -- this loop is the leading suspect for that scaling ceiling, since its cost is
+        // O(activeAirCount * mixtureLength) and independent of worker count.
+        for (int activeIndex = 0; activeIndex < activeAirCount; activeIndex++)
         {
-            Span<Mole> mixtureVector = mixtures.AsSpan(voxelIndex * mixtureLength, mixtureLength);
+            ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
+            Span<Mole> mixtureVector = mixtures.AsSpan(activeIndex * mixtureLength, mixtureLength);
             int c = chunk.ActiveGasCount;
             //adjust moles from the mixture vector
             foreach (var gasChannel in chunk.ActiveGases.Take(c))
@@ -130,7 +162,7 @@ internal class ReactionSolver : IAtmosSolverStage
                         voxelIndex,
                         gasChannel.GasId,
                         diff,
-                        newTemps[voxelIndex],
+                        newTemps[activeIndex],
                         config.GetMolarHeatCapacityAtConstantVolume(gasChannel.GasId),
                         config.PressurePerMoleKelvin);
 
@@ -152,7 +184,7 @@ internal class ReactionSolver : IAtmosSolverStage
                     voxelIndex,
                     i,
                     mixtureVector[i],
-                    newTemps[voxelIndex],
+                    newTemps[activeIndex],
                     config.GetMolarHeatCapacityAtConstantVolume(i),
                     config.PressurePerMoleKelvin);
             }
@@ -163,9 +195,9 @@ internal class ReactionSolver : IAtmosSolverStage
 
         if (reactionCount != null && reactionFeedbacks != null)
         {
-            for (int voxelIndex = 0; voxelIndex < voxelCount; voxelIndex++)
+            for (int activeIndex = 0; activeIndex < activeAirCount; activeIndex++)
             {
-                Scalar[] feedback = reactionFeedbacks[voxelIndex];
+                Scalar[] feedback = reactionFeedbacks[activeIndex];
                 for (int i = 0; i < reactionCount.Length; i++)
                 {
                     reactionCount[i] += feedback[i];
@@ -176,6 +208,33 @@ internal class ReactionSolver : IAtmosSolverStage
 
             ArrayPool<float[]>.Shared.Return(reactionFeedbacks, true);
         }
+    }
+
+    /// <summary>
+    ///     Resolves the per-gas reaction data, canonical rate-factor order, and change matrix for a
+    ///     configuration, reusing this tick's prepared arrays when possible. A config other than the one
+    ///     <see cref="Solve" /> prepared (e.g. from a direct kernel caller) is rebuilt instead of cached.
+    /// </summary>
+    private void ResolveReactionState(
+        IAtmosConfig config, int mixtureLength,
+        out GasReactionConfig reactions, out GasReactionData[] gasData,
+        out GasReactionData[] rateOrder, out GasReactionMatrix changesMatrix)
+    {
+        reactions = GasReactionConfig.Get(config);
+        if (ReferenceEquals(_preparedConfig, config))
+        {
+            gasData = _gasReactionData;
+            rateOrder = _gasRateOrder;
+            changesMatrix = _changesMatrix!;
+            return;
+        }
+
+        gasData = new GasReactionData[mixtureLength];
+        for (int gasId = 0; gasId < mixtureLength; gasId++)
+            gasData[gasId] = CreateGasReactionData(config, gasId);
+
+        rateOrder = gasData.OrderBy(static gas => gas.GasName, StringComparer.Ordinal).ToArray();
+        changesMatrix = new GasReactionMatrix(gasData, reactions.Count);
     }
 
     // Total thermal energy the mixture holds at its current temperature: for each gas, moles * heat
@@ -226,27 +285,36 @@ internal class ReactionSolver : IAtmosSolverStage
         Second deltaTime, Span<Mole> mixtureVector, ref Kelvin currentTemperature,
         Scalar[]? reactionFeedback, IAtmosConfig config, int mixtureLength)
     {
-        var reactions = GasReactionConfig.Get(config);
-        GasReactionData[] gasData;
-        GasReactionData[] rateOrder;
-        GasReactionMatrix changesMatrix;
-        if (ReferenceEquals(_preparedConfig, config))
-        {
-            gasData = _gasReactionData;
-            rateOrder = _gasRateOrder;
-            changesMatrix = _changesMatrix!;
-        }
-        else
-        {
-            // Direct kernel callers can supply editable configurations, so their mappings cannot be cached.
-            gasData = new GasReactionData[mixtureLength];
-            for (int gasId = 0; gasId < mixtureLength; gasId++)
-                gasData[gasId] = CreateGasReactionData(config, gasId);
+        ResolveReactionState(
+            config,
+            mixtureLength,
+            out var reactions,
+            out GasReactionData[] gasData,
+            out GasReactionData[] rateOrder,
+            out var changesMatrix);
 
-            rateOrder = gasData.OrderBy(static gas => gas.GasName, StringComparer.Ordinal).ToArray();
-            changesMatrix = new GasReactionMatrix(gasData, reactions.Count);
-        }
+        ProcessVoxelCore(
+            deltaTime,
+            mixtureVector,
+            ref currentTemperature,
+            reactionFeedback,
+            config,
+            mixtureLength,
+            reactions,
+            gasData,
+            rateOrder,
+            changesMatrix);
+    }
 
+    /// <summary>
+    ///     Does the actual per-voxel reaction work once the caller has resolved <paramref name="reactions" />,
+    ///     <paramref name="gasData" />, <paramref name="rateOrder" />, and <paramref name="changesMatrix" />.
+    /// </summary>
+    private void ProcessVoxelCore(
+        Second deltaTime, Span<Mole> mixtureVector, ref Kelvin currentTemperature,
+        Scalar[]? reactionFeedback, IAtmosConfig config, int mixtureLength,
+        GasReactionConfig reactions, GasReactionData[] gasData, GasReactionData[] rateOrder, GasReactionMatrix changesMatrix)
+    {
         Joule energy = ExtractHeat(mixtureVector, ref currentTemperature, mixtureLength, config);
         int reactionCount = reactions.Count;
         Scalar[] reactionSpeeds = RentReactionSpeeds(reactionCount);
@@ -294,6 +362,7 @@ internal class ReactionSolver : IAtmosSolverStage
         // pathological state (e.g. moles already negative from upstream float drift) that would otherwise
         // never find scale > 0 and loop forever.
         int maxIterations = mixtureLength + reactionCount + 8;
+        bool converged = false;
         for (int iteration = 0; iteration < maxIterations; iteration++)
         {
             int criticalIndex = -1;
@@ -353,7 +422,10 @@ internal class ReactionSolver : IAtmosSolverStage
             }
 
             if (energy + energyConsumption >= 0)
+            {
+                converged = true;
                 break;
+            }
 
             // Scale down just the endothermic reactions, same "clamp to exactly enough" shape as the
             // material-limiter scale above.
@@ -367,6 +439,14 @@ internal class ReactionSolver : IAtmosSolverStage
                 if (reactionSpeeds[i] < 1e-10f)
                     reactionSpeeds[i] = 0;
             }
+        }
+
+        if (!converged)
+        {
+            // Didn't reach a non-overdrawn state in budget -- skip this voxel's reactions this tick
+            // rather than risk overdraw. Retried next tick.
+            Debug.Assert(false, "Reaction material/energy limiter failed to converge within its iteration budget.");
+            return;
         }
 
         //apply mixture, this also includes heat, since all change equations contain energy balance.
@@ -425,21 +505,26 @@ internal class ReactionSolver : IAtmosSolverStage
         Scalar[][]? reactionFeedbacks,
         Mole[] mixtures,
         Kelvin[] newTemps,
-        int mixtureLength) : IAction
+        int mixtureLength,
+        GasReactionConfig reactions,
+        GasReactionData[] gasData,
+        GasReactionData[] rateOrder,
+        GasReactionMatrix changesMatrix) : IAction
     {
-        public void Invoke(int voxelIndex)
+        public void Invoke(int activeIndex)
         {
+            ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
             Kelvin temp = chunk.Temperature[voxelIndex];
             Scalar[]? reactionFeedback =
-                reactionCount == null ? null : ArrayPool<Scalar>.Shared.Rent(GasReactionConfig.Get(config).Count);
+                reactionCount == null ? null : ArrayPool<Scalar>.Shared.Rent(reactions.Count);
 
             if (reactionFeedback != null)
                 Array.Clear(reactionFeedback, 0, reactionFeedback.Length);
 
             if (reactionFeedbacks != null && reactionFeedback != null)
-                reactionFeedbacks[voxelIndex] = reactionFeedback;
+                reactionFeedbacks[activeIndex] = reactionFeedback;
 
-            Span<Mole> mixtureVector = mixtures.AsSpan(voxelIndex * mixtureLength, mixtureLength);
+            Span<Mole> mixtureVector = mixtures.AsSpan(activeIndex * mixtureLength, mixtureLength);
             Mole content = 0f;
             mixtureVector.Clear();
 
@@ -449,14 +534,24 @@ internal class ReactionSolver : IAtmosSolverStage
                 content += chunk.ActiveGases[i].Moles[voxelIndex];
             }
 
-            newTemps[voxelIndex] = temp;
+            newTemps[activeIndex] = temp;
             if (content <= 0.0001)
                 return;
 
-            solver.ProcessVoxel(deltaTime, mixtureVector, ref temp, reactionFeedback, config, mixtureLength);
+            solver.ProcessVoxelCore(
+                deltaTime,
+                mixtureVector,
+                ref temp,
+                reactionFeedback,
+                config,
+                mixtureLength,
+                reactions,
+                gasData,
+                rateOrder,
+                changesMatrix);
 
             chunk.Temperature[voxelIndex] = temp;
-            newTemps[voxelIndex] = temp;
+            newTemps[activeIndex] = temp;
         }
     }
 }

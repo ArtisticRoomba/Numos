@@ -217,7 +217,9 @@ internal sealed partial class AtmosKernel
         _chunkMap = replacement;
         // Rebase on the restored chunk count instead of continuing to grow across repeated restores
         // (e.g. replay scrubbing), which would otherwise leave DenseId-indexed lookup tables oversized.
+        // Ids are reassigned densely as 0..replacement.Count above, so none are free.
         _nextChunkDenseId = replacement.Count;
+        _freeChunkDenseIds.Clear();
         _config = checkpoint.Config;
         CurrentTickConfig.Capture(_config);
         CurrentTickConfig.ClearGasSolverData();

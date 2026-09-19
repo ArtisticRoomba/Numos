@@ -264,8 +264,10 @@ not mutate the simulation.
 
 Sharing data does not change execution order. Register producers before consumers, and define how a consumer behaves
 when its producer is disabled or removed. Built-in advection and thermodynamics use shared concurrent queues for their
-boundary stages. Producers clear their queues before parallel chunk work; consumers reject events from earlier ticks and
-sort current events before applying cross-chunk changes sequentially.
+boundary stages. Producers clear their queues before parallel chunk work; consumers reject events from earlier ticks
+and sort current events before applying cross-chunk changes. Thermal boundary work then applies sequentially; gas
+boundary flow reserves each source's write range sequentially, in sorted order, but scatters and applies in parallel
+once every range is reserved (see `docs/atmospherics_technical_documentation.md` §4.4).
 
 Resolve shared data before starting worker tasks: facade calls from workers would block on the tick's state lock. Numos
 serializes lookup and creation; solvers synchronize later access to mutable values. A `ConcurrentQueue<T>` works for

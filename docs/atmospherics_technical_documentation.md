@@ -717,15 +717,21 @@ bulk flow produced. Likewise, no delta row may be reused until its apply phase h
 
 ### 4.4 Stage 2 — Cross-Chunk Boundary Flow
 
-Boundary events are collected into a `ConcurrentQueue` during the parallel advection phase, then processed **sequentially** afterward.
+Boundary events are collected into a `ConcurrentQueue` during the parallel advection phase, then grouped into one
+batch per source chunk and sorted by chunk position, so the result matches a fully sequential merge no matter how
+many workers ran. Processing then runs in three phases: **compute** (parallel, one worker per source chunk, writing
+into a worker-exclusive pending buffer), **reserve** (single-threaded, walking sources in canonical order to claim
+each source's disjoint write range within every target chunk's batch — this is what keeps the result deterministic),
+and **scatter/apply** (parallel — every reserved range is disjoint, so writing and applying can't conflict).
 
-For each boundary event:
+For each boundary event, during the compute phase:
 1. Determine the source voxel's coordinates.
 2. For each of the 6 directions, check if the neighbor coordinate is outside the chunk bounds.
 3. If outside: look up the neighboring chunk at `GridPosition + direction`.
 4. Map the out-of-bounds coordinate into the neighbor's local space using modular arithmetic: `nX = (targetX + neighborWidth) % neighborWidth`.
 5. If the neighbor voxel is solid, skip.
-6. Calculate any outward bulk pressure transfer with the same limiter used by intra-chunk advection, including damping, the low-delta branch, minimum-transfer cutoff, and the per-neighbor cap. A sleeping target is woken only if a positive mole transfer will actually be injected.
+6. Calculate any outward bulk pressure transfer with the same limiter used by intra-chunk advection, including damping,
+   the low-delta branch, minimum-transfer cutoff, and the per-neighbor cap.
 7. For each source species, combine bulk advection with the same positive partial-pressure diffusion term used inside a chunk. Diffusion is evaluated even when bulk flow is zero or points in the opposite direction:
    ```
    molesAdvected = (flow * VoxelVolume / (R * sourceEffectiveTemperature)) * moleFraction
@@ -734,9 +740,16 @@ For each boundary event:
    molesMoved = min(sourceMoles, molesAdvected + molesDiffused)
    ```
    For a void target, neighbor moles and temperature are treated as zero. An unregistered gas uses `DefaultDiffusionCoefficient`.
-8. Transfer the capped moles directly (no delta buffer — this is sequential).
+8. Queue the capped moles as a pending transfer against the source, and against the neighbor unless it is void. Nothing
+   is applied yet.
 
-Each species carries `molesMoved * c_effective * sourceEffectiveTemperature` of sensible energy during the direct transfer. The source and target heat-capacity caches, temperatures, and pressures are updated immediately by energy balance. Before injection, the target voxel's existing heat capacity is recalculated from its current moles and the normalized gas registry captured for the tick, including for a target chunk that was sleeping before the transfer.
+A target chunk is woken during the reservation phase, the first time anything reserves space in its batch, so a
+sleeping target is still only woken when a positive transfer actually reaches it.
+
+Each species carries `molesMoved * c_effective * sourceEffectiveTemperature` of sensible energy during the transfer. The
+source and target heat-capacity caches, temperatures, and pressures are updated immediately by energy balance. Before
+injection, the target voxel's existing heat capacity is recalculated from its current moles and the normalized gas
+registry captured for the tick, including for a target chunk that was sleeping before the transfer.
 
 If the adjacent chunk is not registered or the mapped target is solid, no transfer occurs. A non-void target room is
 woken before it receives gas. Any source that moves gas is also kept awake with its sleep timer reset, because the
@@ -1025,7 +1038,11 @@ The simulation assumes parallel execution:
   multiple workers. Once the awake chunks already saturate the worker pool, it dispatches whole chunks to avoid extra
   barriers.
 - **Thermodynamics** dispatches independent chunks in parallel.
-- **Gas and thermal boundary processing** is sequential and must remain so to avoid race conditions when two chunks write to each other's voxels.
+- **Thermal boundary processing** is sequential and must remain so to avoid race conditions when two chunks write to
+  each other's voxels.
+- **Gas boundary processing** computes and applies transfers in parallel, but reserves each source chunk's disjoint
+  write range within a target's batch in a single-threaded pass first — that ordered reservation is what avoids the
+  same race without giving up the parallel apply. See §4.4 for the full compute/reserve/scatter/apply sequence.
 - **Boundary event production** can run in parallel because the consumer sorts events before applying cross-chunk work.
 
 If your target platform does not support threading (e.g., single-threaded WASM), the simulation still functions

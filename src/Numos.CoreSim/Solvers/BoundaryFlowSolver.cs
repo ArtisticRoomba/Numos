@@ -198,7 +198,7 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
         AtmosSolverExecutionContext context, AtmosSolverConfigSnapshot config,
         InjectionBatch batch)
     {
-        if (!context.World.TryGetChunk(batch.ChunkPosition, out var chunk))
+        if (!context.TryGetChunk(batch.ChunkPosition, out var chunk))
             return;
 
         // A voxel can appear in this batch multiple times — once per gas
@@ -238,7 +238,7 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
         AtmosSolverExecutionContext context, Int3 sourcePosition, BoundaryFlowEvent boundaryEvent,
         PendingTransferBuffer pending)
     {
-        if (!context.World.TryGetChunk(sourcePosition, out var sourceChunk))
+        if (!context.TryGetChunk(sourcePosition, out var sourceChunk))
             return;
 
         // Each boundary voxel will have a BoundaryFlowEvent
@@ -266,7 +266,7 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
         if (targetPosition.IsWithin(default, sourceChunk.Dimensions))
             return;
 
-        if (!context.World.TryGetChunk(sourcePosition + direction, out var neighborChunk))
+        if (!context.TryGetChunk(sourcePosition + direction, out var neighborChunk))
             return;
 
         var neighborPosition = (targetPosition + neighborChunk.Dimensions) % neighborChunk.Dimensions;
@@ -398,6 +398,13 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
         /// </summary>
         private int[] _batchIndexByChunkDenseId = [];
 
+        /// <summary>
+        ///     The chunk each <see cref="_batchIndexByChunkDenseId" /> slot was last resolved for. Since
+        ///     <see cref="AtmosChunk.DenseId" /> is recycled, a slot's batch index is only trusted when this
+        ///     still matches the chunk being looked up.
+        /// </summary>
+        private AtmosChunk?[] _ownerByChunkDenseId = [];
+
         internal int Count { get; private set; }
 
         internal InjectionBatch this[int index] => _batches[index];
@@ -410,24 +417,28 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
         internal int GetOrCreateBatchIndex(AtmosChunk chunk)
         {
             EnsureCapacityFor(chunk.DenseId);
-            int batchIndex = _batchIndexByChunkDenseId[chunk.DenseId];
-            if (batchIndex >= 0)
-                return batchIndex;
+            if (ReferenceEquals(_ownerByChunkDenseId[chunk.DenseId], chunk))
+            {
+                int batchIndex = _batchIndexByChunkDenseId[chunk.DenseId];
+                if (batchIndex >= 0)
+                    return batchIndex;
+            }
 
             if (!chunk.IsAwake)
                 chunk.Wake();
 
-            batchIndex = Count;
+            int newBatchIndex = Count;
             Count++;
 
-            if (batchIndex == _batches.Count)
+            if (newBatchIndex == _batches.Count)
                 _batches.Add(new InjectionBatch());
 
-            _batches[batchIndex].ChunkPosition = chunk.GridPosition;
-            _batches[batchIndex].ChunkDenseId = chunk.DenseId;
-            _batches[batchIndex].Count = 0;
-            _batchIndexByChunkDenseId[chunk.DenseId] = batchIndex;
-            return batchIndex;
+            _batches[newBatchIndex].ChunkPosition = chunk.GridPosition;
+            _batches[newBatchIndex].ChunkDenseId = chunk.DenseId;
+            _batches[newBatchIndex].Count = 0;
+            _batchIndexByChunkDenseId[chunk.DenseId] = newBatchIndex;
+            _ownerByChunkDenseId[chunk.DenseId] = chunk;
+            return newBatchIndex;
         }
 
         /// <summary>
@@ -468,8 +479,8 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
         }
 
         /// <summary>
-        ///     Grows the dense-id lookup table to cover a chunk id, filling new slots with the
-        ///     "no batch yet" sentinel.
+        ///     Grows the dense-id lookup tables to cover a chunk id, filling new slots with the
+        ///     "no batch yet" sentinel and no owner.
         /// </summary>
         private void EnsureCapacityFor(int denseId)
         {
@@ -480,6 +491,7 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
             int newLength = Math.Max(denseId + 1, Math.Max(4, oldLength * 2));
             Array.Resize(ref _batchIndexByChunkDenseId, newLength);
             Array.Fill(_batchIndexByChunkDenseId, -1, oldLength, newLength - oldLength);
+            Array.Resize(ref _ownerByChunkDenseId, newLength);
         }
     }
 
@@ -531,8 +543,6 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
         /// </summary>
         private const int MaxDistinctTargets = 7;
 
-        private PendingTransferEvent[] _events = [];
-
         /// <summary>
         ///     Per-summary-slot batch index, resolved once by the sequential reservation pass and then read
         ///     repeatedly by the parallel scatter pass — never written concurrently with a read.
@@ -547,6 +557,8 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
         private readonly int[] _summaryCursor = new int[MaxDistinctTargets];
 
         private readonly AtmosChunk?[] _summaryTargets = new AtmosChunk?[MaxDistinctTargets];
+
+        private PendingTransferEvent[] _events = [];
 
         internal int Count { get; private set; }
         internal int DistinctTargetCount { get; private set; }

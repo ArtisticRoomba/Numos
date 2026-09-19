@@ -29,9 +29,19 @@ internal sealed class ThermodynamicsSolver : IAtmosSolverStage, IDisposable
             BoundaryEvents<ThermalBoundaryEvent>.Get(context);
 
         boundaryEvents.Clear();
+
+        // Told to PhaseChangeSolver so it knows whether this outer per-chunk dispatch already
+        // saturates the worker pool, to avoid oversubscribing with its own per-voxel parallelism.
+        int awakeChunkCount = 0;
+        for (int i = 0; i < context.Chunks.Length; i++)
+        {
+            if (context.Chunks[i].IsAwake && context.Chunks[i].ActiveGasCount > 0)
+                awakeChunkCount++;
+        }
+
         ParallelHelper.ForEach<AtmosChunk, SolveChunkAction>(
             context.Chunks,
-            new SolveChunkAction(this, context, boundaryEvents));
+            new SolveChunkAction(this, context, boundaryEvents, awakeChunkCount));
     }
 
     public void Dispose()
@@ -41,7 +51,8 @@ internal sealed class ThermodynamicsSolver : IAtmosSolverStage, IDisposable
 
     private void SolveChunk(
         AtmosSolverExecutionContext context, AtmosChunk chunk,
-        ConcurrentQueue<(int TickCount, Int3 Key, ThermalBoundaryEvent Event)> boundaryEvents)
+        ConcurrentQueue<(int TickCount, Int3 Key, ThermalBoundaryEvent Event)> boundaryEvents,
+        int awakeChunkCount)
     {
         if (!chunk.IsAwake || chunk.ActiveGasCount == 0)
             return;
@@ -49,7 +60,7 @@ internal sealed class ThermodynamicsSolver : IAtmosSolverStage, IDisposable
         ThermalBoundaryEvent[]? boundaryBuffer = _thermalBoundaryBuffers.Value;
         Debug.Assert(boundaryBuffer != null);
         int boundaryCount = _thermalDiffusion.Solve(chunk, context.TickConfig, boundaryBuffer);
-        _phaseChanges.Solve(chunk, context.TickConfig);
+        _phaseChanges.Solve(chunk, context.TickConfig, awakeChunkCount);
 
         for (int index = 0; index < boundaryCount; index++)
             boundaryEvents.Enqueue((context.TickCount, chunk.GridPosition, boundaryBuffer[index]));
@@ -58,11 +69,12 @@ internal sealed class ThermodynamicsSolver : IAtmosSolverStage, IDisposable
     private readonly struct SolveChunkAction(
         ThermodynamicsSolver solver,
         AtmosSolverExecutionContext context,
-        ConcurrentQueue<(int TickCount, Int3 Key, ThermalBoundaryEvent Event)> boundaryEvents) : IInAction<AtmosChunk>
+        ConcurrentQueue<(int TickCount, Int3 Key, ThermalBoundaryEvent Event)> boundaryEvents,
+        int awakeChunkCount) : IInAction<AtmosChunk>
     {
         public void Invoke(in AtmosChunk chunk)
         {
-            solver.SolveChunk(context, chunk, boundaryEvents);
+            solver.SolveChunk(context, chunk, boundaryEvents, awakeChunkCount);
         }
     }
 }

@@ -45,10 +45,55 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
     /// </summary>
     /// <param name="context">The chunks, configuration snapshot, and tick state for this solver stage.</param>
     /// <remarks>
-    ///     With enough chunks to occupy the worker pool, each worker owns a complete chunk solve.
-    ///     Smaller workloads use voxel and gas work items separated by phase barriers. In either
-    ///     schedule, pressure refresh and neighbor resolution precede conductance, bulk deltas are
-    ///     fully accumulated before application, and diffusion begins only after bulk application.
+    ///     <para>
+    ///         With enough chunks to occupy the worker pool, each worker owns a complete chunk solve.
+    ///         Smaller workloads use voxel and gas work items separated by phase barriers. In either
+    ///         schedule, pressure refresh and neighbor resolution precede conductance, bulk deltas are
+    ///         fully accumulated before application, and diffusion begins only after bulk application.
+    ///     </para>
+    ///     <para>
+    ///         TODO PERF: the tiled schedule below issues ten separate <c>ParallelHelper.For</c>/<c>RunPhase</c>
+    ///         dispatches per tick (Initialize, RefreshAndResolve, ComputeConductance, ReduceConductance,
+    ///         ComputeBulkFlow, ProcessBulkGas, ApplyBulkDeltas, ProcessDiffusionGas, ApplyDiffusionDeltas,
+    ///         PublishBoundaryEvents). Every one of those barriers is load-bearing: each phase transition
+    ///         has a genuine cross-tile or cross-gas-row read-after-write dependency on shared workspace
+    ///         state (e.g. <see cref="ReduceIncidentConductance" /> reads a neighbor tile's
+    ///         <c>EdgeConductance</c>, <see cref="ApplyDeltas" /> needs every gas row <see cref="ProcessBulkGas" />
+    ///         wrote). <see cref="ApplyDeltas" /> and <see cref="PrepareDiffusion" /> are already fused into
+    ///         one dispatch (<c>ApplyBulkDeltasAction</c>) because that's the one adjacent pair without such
+    ///         a dependency; there is no further free fusion available under this algorithm.
+    ///     </para>
+    ///     <para>
+    ///         An earlier version of this note blamed those ten barriers directly, based on a dotnet-trace
+    ///         showing ~84% of sampled time in ThreadPool wake/spin and GC-safepoint polling. That figure
+    ///         was a measurement artifact: the trace looped Reset()+Solve() back to back, and the serial
+    ///         Reset() (checkpoint restore) left idle pool workers spin-waiting for a large share of the
+    ///         trace's wall clock, inflating the "wait" bucket independent of anything Solve() itself does.
+    ///         A direct microbenchmark of ten consecutive <c>ParallelHelper.For</c> calls (no solver logic)
+    ///         measured ~2.4us per dispatch at 16 workers -- roughly 24us total, against a measured
+    ///         Solve()-only cost of ~585us at 16 workers on the single dense 16&#179;-chunk benchmark. Dispatch
+    ///         overhead is therefore ~4% of Solve(), not the dominant cost, and a persistent-worker/Barrier
+    ///         rewrite to avoid it was evaluated and not built: it would put a hand-rolled concurrency
+    ///         primitive into determinism-critical code to chase a 4% ceiling.
+    ///     </para>
+    ///     <para>
+    ///         Fitting Solve-only timings (~2650us at 1 worker, ~585us at 16) to Amdahl's law implies an
+    ///         ~17% effective serial fraction. Directly measured fixed-cost sections -- workspace
+    ///         setup/<c>PopulateWorkItems</c>, the single-threaded <see cref="UpdateWorkspaceSleepState" />
+    ///         reduction loop, <c>PublishBoundaryEvents</c>, <see cref="ApplyVacuumThreshold" /> (its two
+    ///         <c>ParallelHelper.For</c> calls only have one work item each when there is one chunk, so
+    ///         they never parallelize), and workspace release -- sum to only ~27-31us regardless of
+    ///         worker count, roughly 1-5% of total. That leaves most of the 17% unaccounted for by any
+    ///         fixed section: it comes from uneven scaling <em>inside</em> the parallel phases themselves.
+    ///         The bulk-flow phase group (RefreshAndResolve through ApplyBulkDeltas) measured only 3.99x
+    ///         speedup (~25% efficient) at 16 workers; the diffusion phase group (ProcessDiffusionGas,
+    ///         ApplyDiffusionDeltas) measured 5.61x (~35% efficient) over the same range, despite being
+    ///         built the same way (gas-row dispatch then voxel-tile dispatch). That asymmetry is not yet
+    ///         root-caused -- load imbalance across voxel tiles and memory/cache-locality effects (this
+    ///         machine has two L3 domains the OS reports as one NUMA node) are both plausible and neither
+    ///         has been measured directly. If this is revisited, start there -- profile why the bulk-flow
+    ///         phases specifically scale worse, not the barrier count.
+    ///     </para>
     /// </remarks>
     public void Solve(AtmosSolverExecutionContext context)
     {
@@ -264,7 +309,7 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
             var neighborChunk = chunk;
             if (!neighborPosition.IsWithin(default, chunk.Dimensions))
             {
-                if (!context.World.TryGetChunk(chunk.GridPosition + direction, out neighborChunk))
+                if (!context.TryGetChunk(chunk.GridPosition + direction, out neighborChunk))
                     continue;
 
                 neighborPosition = (neighborPosition + neighborChunk.Dimensions) % neighborChunk.Dimensions;

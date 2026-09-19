@@ -15,7 +15,8 @@ in the `0.x` series and may be published as prereleases (for others to just impo
 - Arbitrary gas additions at runtime (SoAs)
 - Engine-agnostic, with a supported `Numos.API` facade over an internal simulation kernel
 - Multithreaded intra-chunk advection and thermodynamics
-- Singlethreaded cross-chunk boundary flow
+- Multithreaded cross-chunk boundary flow
+- Singlethreaded explicit-link (portal/dock) transport
 - A valiant attempt at determinism
 - Full simulation state snapshotting, recording, rewinding, and replays
 - Solver pipeline, allowing you to write and add your own solvers to be executed on Numos' behalf

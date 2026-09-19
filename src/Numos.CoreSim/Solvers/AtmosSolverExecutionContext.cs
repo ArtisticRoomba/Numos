@@ -7,18 +7,19 @@ namespace Numos.CoreSim.Solvers;
 /// </summary>
 internal sealed class AtmosSolverExecutionContext
 {
+    private readonly AtmosKernel _world;
+
     internal AtmosSolverExecutionContext(
         AtmosKernel world, AtmosChunk[] chunks,
         AtmosSolverConfigSnapshot config, int tickCount, SolverDataStorage sharedData)
     {
-        World = world;
+        _world = world;
         Chunks = chunks;
         TickConfig = config;
         TickCount = tickCount;
         SharedData = sharedData;
     }
 
-    internal AtmosKernel World { get; }
     internal AtmosChunk[] Chunks { get; }
     /// <summary>
     ///     Normalized built-in solver settings captured before this tick began.
@@ -27,6 +28,18 @@ internal sealed class AtmosSolverExecutionContext
 
     internal int TickCount { get; }
     internal SolverDataStorage SharedData { get; }
+
+    /// <summary>
+    ///     Looks up a chunk by its grid position.
+    /// </summary>
+    /// <remarks>
+    ///     The only kernel operation cross-chunk solvers need — deliberately narrow rather than exposing
+    ///     <see cref="AtmosKernel" /> itself, since parallel solver stages must not touch its other members.
+    /// </remarks>
+    internal bool TryGetChunk(Int3 position, out AtmosChunk chunk)
+    {
+        return _world.TryGetChunk(position, out chunk);
+    }
 }
 
 /// <summary>

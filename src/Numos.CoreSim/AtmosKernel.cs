@@ -12,6 +12,9 @@ namespace Numos.CoreSim;
 internal sealed partial class AtmosKernel : IDisposable
 {
     private readonly DefaultAtmosSolvers _defaultSolvers;
+    // Reused before minting a new id, so DenseId stays bounded by peak concurrent chunk count rather
+    // than growing forever. See AtmosChunk.DenseId's remarks on why recycling ids is safe.
+    private readonly Stack<int> _freeChunkDenseIds = new();
     private readonly List<AtmosRecordedOperation> _recordedOperations = [];
     private readonly SolverDataStorage _solverData = new();
 
@@ -57,11 +60,6 @@ internal sealed partial class AtmosKernel : IDisposable
     /// </summary>
     internal AtmosSolverConfigSnapshot CurrentTickConfig { get; } = new();
 
-    internal bool TryGetChunk(Int3 position, out AtmosChunk chunk)
-    {
-        return _chunkMap.TryGetValue(position, out chunk!);
-    }
-
     public void Dispose()
     {
         lock (StateGate)
@@ -75,6 +73,11 @@ internal sealed partial class AtmosKernel : IDisposable
             _solverData.Clear();
             _defaultSolvers.Dispose();
         }
+    }
+
+    internal bool TryGetChunk(Int3 position, out AtmosChunk chunk)
+    {
+        return _chunkMap.TryGetValue(position, out chunk!);
     }
 
     /// <summary>

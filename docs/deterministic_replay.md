@@ -261,7 +261,9 @@ next state. Numos fixes the order wherever concurrent scheduling could otherwise
 - Advection runs ordered phases. A gas job owns one delta row, a voxel tile owns its persistent voxel writes, and shared
   values are gathered in fixed direction or gas order.
 - Work inside separate chunks can run in parallel because each chunk owns its local state.
-- Cross-chunk flow and thermal boundary work are collected and sorted before the single-threaded application step.
+- Thermal boundary work is collected and sorted before a single-threaded application step. Cross-chunk gas flow
+  computes and applies transfers in parallel, but reserves each source chunk's disjoint write range within a target's
+  batch in a single-threaded pass, in canonical source order, before any of those writes happen.
 - Reaction factors use stable ordinal gas-name and parameter order instead of parallel completion order.
 
 The kernel retains native floating-point operations, so these ordering rules do not by themselves certify bitwise

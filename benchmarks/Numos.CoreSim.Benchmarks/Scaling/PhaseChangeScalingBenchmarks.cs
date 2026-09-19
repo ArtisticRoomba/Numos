@@ -57,7 +57,7 @@ public class PhaseChangeScalingBenchmarks : ScalingBenchmarkBase
     public void PhaseChange_CondensingSpeciesScaling_Transient()
     {
         foreach (var chunk in Workload.Chunks)
-            _solver.Solve(chunk, Workload.Config);
+            _solver.Solve(chunk, Workload.Config, 1);
     }
 }
 
@@ -114,6 +114,6 @@ public class PhaseChangeGasScalingBenchmarks : ScalingBenchmarkBase
     public void PhaseChange_GasScaling_Transient()
     {
         foreach (var chunk in Workload.Chunks)
-            _solver.Solve(chunk, Workload.Config);
+            _solver.Solve(chunk, Workload.Config, 1);
     }
 }

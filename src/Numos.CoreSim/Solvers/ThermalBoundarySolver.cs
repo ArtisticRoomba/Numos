@@ -68,7 +68,7 @@ internal sealed class ThermalBoundarySolver : IAtmosSolverStage
         AtmosSolverExecutionContext context, Int3 sourcePosition,
         ThermalBoundaryEvent boundaryEvent)
     {
-        if (!context.World.TryGetChunk(sourcePosition, out var sourceChunk))
+        if (!context.TryGetChunk(sourcePosition, out var sourceChunk))
             return;
 
         var localPosition = sourceChunk.GetXyzInt3(boundaryEvent.LocalVoxelIndex);
@@ -91,7 +91,7 @@ internal sealed class ThermalBoundarySolver : IAtmosSolverStage
             return;
 
         var neighborPosition = sourcePosition + direction;
-        if (!context.World.TryGetChunk(neighborPosition, out var neighborChunk))
+        if (!context.TryGetChunk(neighborPosition, out var neighborChunk))
             return;
 
         var neighborLocalPosition = (targetPosition + neighborChunk.Dimensions) % neighborChunk.Dimensions;
@@ -183,7 +183,7 @@ internal sealed class ThermalBoundarySolver : IAtmosSolverStage
         if (_states.TryGetValue(address, out state))
             return true;
 
-        if (!context.World.TryGetChunk(address.ChunkPosition, out var chunk))
+        if (!context.TryGetChunk(address.ChunkPosition, out var chunk))
             return false;
 
         // TODO

@@ -19,7 +19,14 @@ internal sealed class PhaseChangeSolver
     ///     shift that voxel's temperature before gas <c>g+1</c> reads it, and preserving that order keeps
     ///     the result bit-identical to processing one gas at a time across every voxel.
     /// </summary>
-    internal void Solve(AtmosChunk chunk, AtmosSolverConfigSnapshot config)
+    /// <param name="chunk">The chunk whose voxels should be checked for condensation.</param>
+    /// <param name="config">The solver settings captured for this tick.</param>
+    /// <param name="awakeChunkCount">
+    ///     How many awake, gas-bearing chunks <see cref="ThermodynamicsSolver" /> is dispatching this tick.
+    ///     Below worker count, per-voxel parallelism here helps fill idle workers; at or above it, the
+    ///     outer per-chunk dispatch already saturates the pool, so this runs sequentially instead.
+    /// </param>
+    internal void Solve(AtmosChunk chunk, AtmosSolverConfigSnapshot config, int awakeChunkCount)
     {
         if (config.CondensationRateFactor <= 0f || chunk.ActiveAirCount == 0)
             return;
@@ -57,10 +64,20 @@ internal sealed class PhaseChangeSolver
             // split happens, without changing which voxel does what: it is a bijection over
             // [0, ActiveAirCount), so every voxel is still visited exactly once.
             int stride = ChooseStride(chunk.ActiveAirCount);
-            ParallelHelper.For(
-                0,
-                chunk.ActiveAirCount,
-                new ProcessVoxelAction(chunk, config, condensingGases, condensingCount, stride));
+            var action = new ProcessVoxelAction(chunk, config, condensingGases, condensingCount, stride);
+
+            // See the awakeChunkCount doc above: only add per-voxel parallelism when ThermodynamicsSolver's
+            // outer per-chunk dispatch isn't already using every worker.
+            int workerCount = Math.Max(1, Environment.ProcessorCount);
+            if (awakeChunkCount < workerCount)
+            {
+                ParallelHelper.For(0, chunk.ActiveAirCount, action);
+            }
+            else
+            {
+                for (int activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
+                    action.Invoke(activeIndex);
+            }
         }
         finally
         {
