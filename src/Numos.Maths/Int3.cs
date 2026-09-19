@@ -1,5 +1,3 @@
-using System.Collections.Immutable;
-
 namespace Numos.Maths;
 
 /// <summary>
@@ -21,9 +19,9 @@ public struct Int3(int x, int y, int z) : IEquatable<Int3>
     public readonly static Int3 PosZ = new(0, 0, 1);
 
     /// <summary>
-    /// Cardinal offsets in all 6 directions
+    /// Cardinal offsets in all 6 directions.
     /// </summary>
-    public readonly static ImmutableArray<Int3> CardinalOffsets =
+    public readonly static Int3[] CardinalOffsets =
     [
         PosX, NegX, PosY, NegY, PosZ, NegZ
     ];

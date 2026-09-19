@@ -17,15 +17,7 @@ namespace Numos.CoreSim.Solvers;
 /// </remarks>
 internal sealed class AdvectionSolver : IAtmosSolverStage
 {
-    private readonly static Int3[] NeighborDirections =
-    [
-        Int3.NegX,
-        Int3.PosX,
-        Int3.NegY,
-        Int3.PosY,
-        Int3.NegZ,
-        Int3.PosZ
-    ];
+    private readonly static Int3[] NeighborDirections = Int3.CardinalOffsets;
     private readonly static int[] OppositeNeighborDirections = CreateOppositeNeighborDirections();
     private readonly int _maximumBoundaryEvents;
 
