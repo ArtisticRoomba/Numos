@@ -9,12 +9,22 @@ public struct Int3(int x, int y, int z) : IEquatable<Int3>
     public int Y = y;
     public int Z = z;
 
+    public readonly static Int3 Zero = new(0, 0, 0);
+
     public readonly static Int3 NegX = new(-1, 0, 0);
     public readonly static Int3 PosX = new(1, 0, 0);
     public readonly static Int3 NegY = new(0, -1, 0);
     public readonly static Int3 PosY = new(0, 1, 0);
     public readonly static Int3 NegZ = new(0, 0, -1);
     public readonly static Int3 PosZ = new(0, 0, 1);
+
+    /// <summary>
+    ///     Cardinal offsets in all 6 directions.
+    /// </summary>
+    public readonly static Int3[] CardinalOffsets =
+    [
+        PosX, NegX, PosY, NegY, PosZ, NegZ
+    ];
 
     public override bool Equals(object? obj)
     {

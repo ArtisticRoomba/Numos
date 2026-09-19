@@ -22,16 +22,6 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
     /// </summary>
     private const int SelfSourceSlot = -1;
 
-    private readonly static Int3[] NeighborDirections =
-    [
-        Int3.NegX,
-        Int3.PosX,
-        Int3.NegY,
-        Int3.PosY,
-        Int3.NegZ,
-        Int3.PosZ
-    ];
-
     /// <summary>
     ///     Orders the seven voxels that can feed a destination by ascending voxel index: the three
     ///     negative-offset neighbor slots, the destination itself, then the three positive-offset slots.
@@ -45,6 +35,7 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
     ///     changing it would change floating-point rounding and therefore deterministic replay state.
     /// </remarks>
     private readonly static int[] AscendingSourceSlots = [4, 2, 0, SelfSourceSlot, 1, 3, 5];
+    private readonly static Int3[] NeighborDirections = Int3.CardinalOffsets;
     private readonly static int[] OppositeNeighborDirections = CreateOppositeNeighborDirections();
     private readonly int _maximumBoundaryEvents;
 
