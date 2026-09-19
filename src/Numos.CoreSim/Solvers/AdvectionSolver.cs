@@ -1072,8 +1072,8 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
         return position.X == 0 ||
                position.X == chunk.Width - 1 ||
                position.Y == 0 ||
-               position.Y == chunk.Height - 1 ||
-               chunk.Depth > 1 && (position.Z == 0 || position.Z == chunk.Depth - 1);
+               position.Z == 0 ||
+               position.Z == chunk.Depth - 1;
     }
 
     /// <summary>

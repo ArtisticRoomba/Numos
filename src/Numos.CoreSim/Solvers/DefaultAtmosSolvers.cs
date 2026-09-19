@@ -62,7 +62,7 @@ internal sealed class DefaultAtmosSolvers : IDisposable
         int voxelCount = checked(width * height * depth);
         int interiorWidth = Math.Max(0, width - 2);
         int interiorHeight = Math.Max(0, height - 2);
-        int interiorDepth = depth > 1 ? Math.Max(0, depth - 2) : 1;
+        int interiorDepth = Math.Max(0, depth - 2);
         int interiorVoxelCount = checked(interiorWidth * interiorHeight * interiorDepth);
         return voxelCount - interiorVoxelCount;
     }
