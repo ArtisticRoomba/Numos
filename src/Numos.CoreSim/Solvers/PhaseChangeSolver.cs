@@ -1,3 +1,6 @@
+using System.Buffers;
+using CommunityToolkit.HighPerformance.Helpers;
+
 namespace Numos.CoreSim.Solvers;
 
 /// <summary>
@@ -9,93 +12,128 @@ internal sealed class PhaseChangeSolver
     private const Mole64 MinimumMoleTolerance = 1e-7d;
     private const Scalar64 RelativeMoleTolerance = 1d / (1 << 23);
 
+    /// <summary>
+    ///     Every voxel is independent (condensation reads and writes only its own <see cref="AtmosChunk" />
+    ///     column), so voxels are parallelized. Within one voxel the gases are still walked in ascending
+    ///     registry order, exactly as the fully sequential form would: gas <c>g</c>'s condensation can
+    ///     shift that voxel's temperature before gas <c>g+1</c> reads it, and preserving that order keeps
+    ///     the result bit-identical to processing one gas at a time across every voxel.
+    /// </summary>
     internal void Solve(AtmosChunk chunk, AtmosSolverConfigSnapshot config)
     {
-        if (config.CondensationRateFactor <= 0f)
+        if (config.CondensationRateFactor <= 0f || chunk.ActiveAirCount == 0)
             return;
 
-        for (int gas = 0; gas < chunk.ActiveGasCount; gas++)
-            ProcessGas(chunk, config, gas);
+        int gasCount = chunk.ActiveGasCount;
+        if (gasCount == 0)
+            return;
+
+        CondensingGas[] condensingGases = ArrayPool<CondensingGas>.Shared.Rent(gasCount);
+        int condensingCount = 0;
+        try
+        {
+            for (int gas = 0; gas < gasCount; gas++)
+            {
+                int gasId = chunk.ActiveGases[gas].GasId;
+                if (!config.TryGetGasProperties(gasId, out var properties) || !properties.CondensationEnabled)
+                    continue;
+
+                if (!AtmosSolverMath.IsFinitePositive(properties.BoilingPoint) ||
+                    !AtmosSolverMath.IsFinitePositive(properties.MolarEnthalpyOfVaporization))
+                    continue;
+
+                condensingGases[condensingCount++] =
+                    new CondensingGas(gas, properties, 1d / properties.BoilingPoint);
+            }
+
+            if (condensingCount == 0)
+                return;
+
+            // ParallelHelper.For splits [0, ActiveAirCount) into contiguous static blocks. Condensing
+            // (expensive) voxels tend to be spatially clustered -- a foggy room, a steam vent -- which
+            // clusters together in ActiveAirIndices too, so a plain contiguous split can dump nearly all
+            // the real work on one worker while the rest sit idle. A coprime-stride permutation of the
+            // work-item index spreads any contiguous run evenly across the whole range before the block
+            // split happens, without changing which voxel does what: it is a bijection over
+            // [0, ActiveAirCount), so every voxel is still visited exactly once.
+            int stride = ChooseStride(chunk.ActiveAirCount);
+            ParallelHelper.For(
+                0,
+                chunk.ActiveAirCount,
+                new ProcessVoxelAction(chunk, config, condensingGases, condensingCount, stride));
+        }
+        finally
+        {
+            ArrayPool<CondensingGas>.Shared.Return(condensingGases);
+        }
     }
 
-    private static void ProcessGas(AtmosChunk chunk, AtmosSolverConfigSnapshot config, int gasIndex)
+    private static void ProcessVoxelForGas(
+        AtmosChunk chunk, AtmosSolverConfigSnapshot config, int gasIndex,
+        GasProperties properties, PerKelvin64 inverseBoilingPoint, ushort voxelIndex)
     {
-        int gasId = chunk.ActiveGases[gasIndex].GasId;
-        if (!config.TryGetGasProperties(gasId, out var properties) || !properties.CondensationEnabled)
+        Mole gasMoles = chunk.ActiveGases[gasIndex].Moles[voxelIndex];
+        if (gasMoles <= AtmosSolverConstants.MinimumMolesForCondensation)
             return;
 
-        if (!AtmosSolverMath.IsFinitePositive(properties.BoilingPoint) ||
-            !AtmosSolverMath.IsFinitePositive(properties.MolarEnthalpyOfVaporization))
+        Kelvin temperature = config.GetValidatedTemp(chunk.Temperature[voxelIndex]);
+        // Finds the number of moles which if below would cause condensation
+        // This is found from the clausius-clapeyron equation
+        Mole64 saturationMoles = CalculateSaturationMoles(config, properties, temperature, inverseBoilingPoint);
+        // If below saturationMoles condensation is not possible (We are ignoring any special cases)
+        if (gasMoles <= saturationMoles)
             return;
 
-        PerKelvin64 inverseBoilingPoint = 1d / properties.BoilingPoint;
-        for (int activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
-        {
-            ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
-            Mole gasMoles = chunk.ActiveGases[gasIndex].Moles[voxelIndex];
-            if (gasMoles <= AtmosSolverConstants.MinimumMolesForCondensation)
-                continue;
+        // This value includes the energy when condensing a gas as a liquid has effectively no volume
+        JoulePerMole molarInternalEnergyOfVaporization = MathF.Max(
+            0f,
+            properties.MolarEnthalpyOfVaporization -
+            AtmosPhysicalConstants.MolarGasConstant * temperature);
 
+        // Finding the amount of moles to condense to reach equilibrium at saturation is not possible analytically
+        // It is fine to under estimate the amount of moles which condense as the rest can condense next tick
+        // An over estimation however can easily lead to enough energy released to increase the temperature of the gas well above the boiling point
+        // This is not possible physically and needs to be avoided
+        Mole64 equilibriumRemainingMoles = CalculateEquilibriumRemainingMoles(
+            chunk,
+            config,
+            gasIndex,
+            voxelIndex,
+            gasMoles,
+            temperature,
+            saturationMoles,
+            molarInternalEnergyOfVaporization,
+            properties,
+            inverseBoilingPoint);
 
-            Kelvin temperature = config.GetValidatedTemp(chunk.Temperature[voxelIndex]);
-            // Finds the number of moles which if below would cause condensation
-            // This is found from the clausius-clapeyron equation
-            Mole64 saturationMoles = CalculateSaturationMoles(config, properties, temperature, inverseBoilingPoint);
-            // If below saturationMoles condensation is not possible (We are ignoring any special cases)
-            if (gasMoles <= saturationMoles)
-                continue;
+        Mole64 equilibriumCondensedMoles = gasMoles - equilibriumRemainingMoles;
+        // Condensation factor will lead to an exponential decay of equilibriumCondensedMoles
+        Mole64 initialMolesToCondense = equilibriumCondensedMoles * config.CondensationRateFactor;
+        // Cuts off final condensation to happen all at once to prevent repeating this to many times
+        if (equilibriumCondensedMoles - initialMolesToCondense <= AtmosSolverConstants.CondensationFactorCutoff)
+            initialMolesToCondense = equilibriumCondensedMoles;
 
-            // This value includes the energy when condensing a gas as a liquid has effectively no volume
-            JoulePerMole molarInternalEnergyOfVaporization = MathF.Max(
-                0f,
-                properties.MolarEnthalpyOfVaporization -
-                AtmosPhysicalConstants.MolarGasConstant * temperature);
+        Mole64 targetRemainingMoles = gasMoles - Math.Min(gasMoles, initialMolesToCondense);
 
-            // Finding the amount of moles to condense to reach equilibrium at saturation is not possible analytically
-            // It is fine to under estimate the amount of moles which condense as the rest can condense next tick
-            // An over estimation however can easily lead to enough energy released to increase the temperature of the gas well above the boiling point
-            // This is not possible physically and needs to be avoided
-            Mole64 equilibriumRemainingMoles = CalculateEquilibriumRemainingMoles(
-                chunk,
-                config,
-                gasIndex,
-                voxelIndex,
-                gasMoles,
-                temperature,
-                saturationMoles,
-                molarInternalEnergyOfVaporization,
-                properties,
-                inverseBoilingPoint);
+        Mole remainingMoles = (float)targetRemainingMoles;
+        if (remainingMoles < targetRemainingMoles)
+            remainingMoles = MathF.BitIncrement(remainingMoles);
 
-            Mole64 equilibriumCondensedMoles = gasMoles - equilibriumRemainingMoles;
-            // Condensation factor will lead to an exponential decay of equilibriumCondensedMoles
-            Mole64 initialMolesToCondense = equilibriumCondensedMoles * config.CondensationRateFactor;
-            // Cuts off final condensation to happen all at once to prevent repeating this to many times
-            if (equilibriumCondensedMoles - initialMolesToCondense <= AtmosSolverConstants.CondensationFactorCutoff)
-                initialMolesToCondense = equilibriumCondensedMoles;
+        remainingMoles = Math.Clamp(remainingMoles, 0f, gasMoles);
 
-            Mole64 targetRemainingMoles = gasMoles - Math.Min(gasMoles, initialMolesToCondense);
+        Mole molesToCondense = gasMoles - remainingMoles;
+        if (molesToCondense <= 0f)
+            return;
 
-            Mole remainingMoles = (float)targetRemainingMoles;
-            if (remainingMoles < targetRemainingMoles)
-                remainingMoles = MathF.BitIncrement(remainingMoles);
-
-            remainingMoles = Math.Clamp(remainingMoles, 0f, gasMoles);
-
-            Mole molesToCondense = gasMoles - remainingMoles;
-            if (molesToCondense <= 0f)
-                continue;
-
-            ApplyCondensation(
-                chunk,
-                config,
-                gasIndex,
-                voxelIndex,
-                temperature,
-                remainingMoles,
-                molesToCondense,
-                molarInternalEnergyOfVaporization);
-        }
+        ApplyCondensation(
+            chunk,
+            config,
+            gasIndex,
+            voxelIndex,
+            temperature,
+            remainingMoles,
+            molesToCondense,
+            molarInternalEnergyOfVaporization);
     }
 
     /// <summary>
@@ -196,7 +234,7 @@ internal sealed class PhaseChangeSolver
                 : (lowerBound + upperBound) * 0.5d;
         }
 
-        // Return the supersaturated side of the bracket. ProcessGas also rounds the target toward
+        // Return the supersaturated side of the bracket. ProcessVoxelForGas also rounds the target toward
         // more remaining vapor when converting it back to the float-backed simulation state.
         return upperBound;
     }
@@ -325,5 +363,60 @@ internal sealed class PhaseChangeSolver
     private static void AddPrecipitationEvent(ushort LocalVoxelIndex, int gasIndex, Mole moles, Kelvin temp)
     {
         // TODO
+    }
+
+    /// <summary>
+    ///     Picks a stride coprime with <paramref name="n" /> so that <c>(i * stride) % n</c> is a bijection
+    ///     over <c>[0, n)</c> in which a contiguous run of <c>i</c> lands roughly evenly spread across the
+    ///     whole range. The golden-ratio-derived starting point is a standard Fibonacci-hashing choice for
+    ///     even spread; nudging by 2 (staying odd) until it is coprime with <paramref name="n" /> guarantees
+    ///     termination in at most a handful of steps for the chunk sizes this solver sees.
+    /// </summary>
+    private static int ChooseStride(int n)
+    {
+        if (n <= 2)
+            return 1;
+
+        int stride = (int)(n * 0.6180339887498949) | 1;
+        while (Gcd(stride, n) != 1)
+            stride += 2;
+
+        return stride;
+    }
+
+    private static int Gcd(int a, int b)
+    {
+        while (b != 0)
+            (a, b) = (b, a % b);
+
+        return a;
+    }
+
+    private readonly record struct CondensingGas(int GasIndex, GasProperties Properties, PerKelvin64 InverseBoilingPoint);
+
+    /// <summary>
+    ///     One work item per active-air voxel. Each voxel owns its own <see cref="AtmosChunk" /> columns
+    ///     (moles, temperature, heat capacity, pressure), so distinct voxels never write the same slot and
+    ///     no synchronization is needed between workers. <paramref name="stride" /> permutes which voxel a
+    ///     given work-item index maps to (see <see cref="ChooseStride" />) purely for load balancing; every
+    ///     voxel is still visited exactly once, so results are unaffected.
+    /// </summary>
+    private readonly struct ProcessVoxelAction(
+        AtmosChunk chunk,
+        AtmosSolverConfigSnapshot config,
+        CondensingGas[] condensingGases,
+        int condensingCount,
+        int stride) : IAction
+    {
+        public void Invoke(int activeIndex)
+        {
+            int permutedIndex = (int)((long)activeIndex * stride % chunk.ActiveAirCount);
+            ushort voxelIndex = chunk.ActiveAirIndices[permutedIndex];
+            for (int i = 0; i < condensingCount; i++)
+            {
+                CondensingGas gas = condensingGases[i];
+                ProcessVoxelForGas(chunk, config, gas.GasIndex, gas.Properties, gas.InverseBoilingPoint, voxelIndex);
+            }
+        }
     }
 }

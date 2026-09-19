@@ -13,6 +13,26 @@ internal class ReactionSolver : IAtmosSolverStage
     private GasReactionMatrix? _changesMatrix;
     private IAtmosConfig? _preparedConfig;
 
+    // ProcessVoxel is invoked once per voxel from an already-parallel worker (thousands of calls per
+    // chunk per tick), and reactionCount is typically a handful of entries. Renting/returning that tiny
+    // array from ArrayPool<T>.Shared on every call adds pool bookkeeping to the hottest part of the loop
+    // for no benefit, since the buffer never needs to be seen by another thread. A per-thread scratch
+    // buffer that just grows to the high-water mark removes that round trip entirely.
+    [ThreadStatic]
+    private static Scalar[]? _reactionSpeedsScratch;
+
+    private static Scalar[] RentReactionSpeeds(int reactionCount)
+    {
+        Scalar[]? scratch = _reactionSpeedsScratch;
+        if (scratch == null || scratch.Length < reactionCount)
+        {
+            scratch = new Scalar[Math.Max(reactionCount, 16)];
+            _reactionSpeedsScratch = scratch;
+        }
+
+        return scratch;
+    }
+
     public void Solve(AtmosSolverExecutionContext context)
     {
         int reactionCount = GasReactionConfig.Get(context.TickConfig).Count;
@@ -229,7 +249,7 @@ internal class ReactionSolver : IAtmosSolverStage
 
         Joule energy = ExtractHeat(mixtureVector, ref currentTemperature, mixtureLength, config);
         int reactionCount = reactions.Count;
-        Scalar[] reactionSpeeds = ArrayPool<Scalar>.Shared.Rent(reactionCount);
+        Scalar[] reactionSpeeds = RentReactionSpeeds(reactionCount);
 
         //prep array.
         Array.Clear(reactionSpeeds, 0, reactionCount);
@@ -265,7 +285,6 @@ internal class ReactionSolver : IAtmosSolverStage
         //check if there was even a reaction.
         if (!anyReaction)
         {
-            ArrayPool<float>.Shared.Return(reactionSpeeds);
             return;
         }
 
@@ -379,8 +398,6 @@ internal class ReactionSolver : IAtmosSolverStage
         JoulePerKelvin heatCapacity = ComputeHeatCapacity(mixtureVector, mixtureLength, config);
         if (heatCapacity > 0f)
             currentTemperature = energy / heatCapacity;
-        //cleanup speeds.
-        ArrayPool<float>.Shared.Return(reactionSpeeds);
     }
 
     private static GasReactionData CreateGasReactionData(IAtmosConfig config, int gasId)
