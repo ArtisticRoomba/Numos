@@ -1,3 +1,4 @@
+using Numos.Chunks;
 using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.Maths;
@@ -54,7 +55,7 @@ public sealed class AtmosDangerousApiTests
         using var simulation = new AtmosSimulation();
 
         Assert.That(
-            () => simulation.Dangerous().GetChunk(new AtmosChunkHandle(Int3.PosX)),
+            () => simulation.Dangerous().GetChunk(new ChunkHandle(Int3.PosX)),
             Throws.TypeOf<KeyNotFoundException>());
     }
 
@@ -160,7 +161,7 @@ public sealed class AtmosDangerousApiTests
         Assert.That(simulation.GetChunkSnapshot(chunk).Gases.Single().Moles[0], Is.EqualTo(3f));
     }
 
-    private sealed class ConfiguredDangerousWriter(AtmosChunkHandle chunk)
+    private sealed class ConfiguredDangerousWriter(ChunkHandle chunk)
     {
         public DangerousWriterConfig Config { get; } = new();
 

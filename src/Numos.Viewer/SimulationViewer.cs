@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Numerics;
 using ImGuiNET;
 using Numos.API;
+using Numos.Chunks;
 using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Snapshots;
 using Numos.Maths;
@@ -25,7 +26,7 @@ public partial class SimulationViewer : IDisposable
 
     private readonly Action<VisualizationRegistry>? _configureVisualizations;
     private readonly List<VoxelHighlight> _highlights = [];
-    private readonly List<AtmosChunkHandle> _liveChunkHandles = [];
+    private readonly List<ChunkHandle> _liveChunkHandles = [];
     private readonly HashSet<Int3> _liveChunkPositions = [];
     private readonly List<AtmosChunkSnapshot> _orderedSnapshots = [];
     private readonly HashSet<VoxelAddress> _paintedCells = [];
@@ -302,7 +303,7 @@ public partial class SimulationViewer : IDisposable
         if (_simulation.TryGetChunkHandles(
                 _chunkCollectionRevision,
                 out long collectionRevision,
-                out AtmosChunkHandle[] handles))
+                out ChunkHandle[] handles))
         {
             _chunkCollectionRevision = collectionRevision;
             _liveChunkHandles.Clear();

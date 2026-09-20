@@ -1,5 +1,6 @@
 using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Primitives;
+using Numos.Chunks;
 
 namespace Numos.API.Tests;
 
@@ -154,8 +155,8 @@ public sealed class AtmosWorldPipelineTests
     }
 
     private static AtmosWorld CreateTransportWorld(
-        out (AtmosSimulation Simulation, AtmosChunkHandle Chunk) source,
-        out (AtmosSimulation Simulation, AtmosChunkHandle Chunk) target)
+        out (AtmosSimulation Simulation, ChunkHandle Chunk) source,
+        out (AtmosSimulation Simulation, ChunkHandle Chunk) target)
     {
         var config = new AtmosConfig
         {
@@ -179,7 +180,7 @@ public sealed class AtmosWorldPipelineTests
         return world;
     }
 
-    private static float TotalMoles(AtmosSimulation simulation, AtmosChunkHandle chunk)
+    private static float TotalMoles(AtmosSimulation simulation, ChunkHandle chunk)
     {
         return simulation.GetVoxelSnapshot(chunk, 0).Gases.Sum(static gas => gas.Moles);
     }

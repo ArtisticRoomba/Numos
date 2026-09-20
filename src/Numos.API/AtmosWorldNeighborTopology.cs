@@ -1,3 +1,4 @@
+using Numos.Chunks;
 using Numos.Maths;
 
 namespace Numos.API;
@@ -78,7 +79,7 @@ public sealed class AtmosWorldNeighborTopology
     /// <param name="simulation">The simulation that owns the chunk.</param>
     /// <param name="chunk">The chunk to inspect.</param>
     /// <returns>An allocation-free chunk-local neighborhood view.</returns>
-    public AtmosChunkNeighborView GetChunk(AtmosSimulation simulation, AtmosChunkHandle chunk)
+    public AtmosChunkNeighborView GetChunk(AtmosSimulation simulation, ChunkHandle chunk)
     {
         ArgumentNullException.ThrowIfNull(simulation);
         var world = GetWorld();
@@ -97,7 +98,7 @@ public sealed class AtmosWorldNeighborTopology
 
             var adjacentPosition = chunk.Position + GetDirection(direction);
             if (world.TryResolveCell(
-                    new AtmosCellRef(simulation.Id, new AtmosChunkHandle(adjacentPosition), 0),
+                    new AtmosCellRef(simulation.Id, new ChunkHandle(adjacentPosition), 0),
                     out _))
             {
                 adjacentChunkMask |= checked((byte)(1 << direction));
@@ -303,13 +304,13 @@ public readonly struct AtmosChunkNeighborView
     private readonly CompiledChunkAdjacency? _explicitAdjacency;
     private readonly byte _adjacentChunkMask;
     private readonly bool _includeCartesian;
-    private readonly AtmosChunkHandle _chunk;
+    private readonly ChunkHandle _chunk;
     private readonly Int3 _dimensions;
     private readonly AtmosSimulationId _simulation;
 
     internal AtmosChunkNeighborView(
         AtmosSimulationId simulation,
-        AtmosChunkHandle chunk,
+        ChunkHandle chunk,
         Int3 dimensions,
         bool includeCartesian,
         CompiledChunkAdjacency? explicitAdjacency,
@@ -466,7 +467,7 @@ public readonly struct AtmosChunkNeighborView
         }
 
         ushort targetIndex = checked((ushort)(x + y * _dimensions.X + z * plane));
-        neighbor = new AtmosCellRef(_simulation, new AtmosChunkHandle(chunkPosition), targetIndex);
+        neighbor = new AtmosCellRef(_simulation, new ChunkHandle(chunkPosition), targetIndex);
         return true;
     }
 
@@ -571,7 +572,7 @@ public struct AtmosNeighborEnumerator
 
 internal readonly record struct CompiledChunkKey(
     AtmosSimulationId Simulation,
-    AtmosChunkHandle Chunk);
+    ChunkHandle Chunk);
 
 internal readonly record struct CompiledNeighborEntry(
     ushort SourceIndex,

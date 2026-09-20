@@ -1,3 +1,4 @@
+using Numos.Chunks;
 using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.Maths;
@@ -298,14 +299,14 @@ public sealed class AtmosWorldTests
         using var secondWorld = new AtmosWorld(CreateConfig());
         var firstSimulation = firstWorld.CreateSimulation(1, 1, 1);
         var secondSimulation = secondWorld.CreateSimulation(1, 1, 1);
-        AtmosChunkHandle[] firstChunks =
+        ChunkHandle[] firstChunks =
         [
             CreateOpenChunk(firstSimulation),
             CreateOpenChunk(firstSimulation, new Int3(2, 0, 0)),
             CreateOpenChunk(firstSimulation, new Int3(4, 0, 0))
         ];
 
-        AtmosChunkHandle[] secondChunks =
+        ChunkHandle[] secondChunks =
         [
             CreateOpenChunk(secondSimulation),
             CreateOpenChunk(secondSimulation, new Int3(2, 0, 0)),
@@ -583,7 +584,7 @@ public sealed class AtmosWorldTests
         return config;
     }
 
-    private static AtmosChunkHandle CreateOpenChunk(
+    private static ChunkHandle CreateOpenChunk(
         AtmosSimulation simulation,
         Int3 position = default)
     {
@@ -593,7 +594,7 @@ public sealed class AtmosWorldTests
         return chunk;
     }
 
-    private static float TotalMoles(AtmosSimulation simulation, AtmosChunkHandle chunk)
+    private static float TotalMoles(AtmosSimulation simulation, ChunkHandle chunk)
     {
         return simulation.GetChunkSnapshot(chunk).Gases.Sum(gas => gas.Moles.Sum());
     }

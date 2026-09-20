@@ -1,4 +1,5 @@
 using Numos.API;
+using Numos.Chunks;
 using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.Headless.Diagnostics;
@@ -341,9 +342,9 @@ internal sealed class SimulationSession : IDisposable
         return new HeadlessRequestException("missingProperty", $"The '{property}' property is required.");
     }
 
-    private static AtmosChunkHandle Handle(Coordinate position)
+    private static ChunkHandle Handle(Coordinate position)
     {
-        return new AtmosChunkHandle(ToInt3(position));
+        return new ChunkHandle(ToInt3(position));
     }
 
     private static Int3 ToInt3(Coordinate value)

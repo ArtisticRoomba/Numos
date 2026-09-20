@@ -1,3 +1,4 @@
+using Numos.Chunks;
 using Numos.Collections;
 using Numos.Maths;
 
@@ -108,7 +109,7 @@ public sealed class AtmosSolverStorageTests
         using var simulation = new AtmosSimulation(1, 1, 1);
         var chunk = simulation.CreateAndRegisterChunk(default);
         object key = new();
-        var missing = new AtmosChunkHandle(Int3.PosX);
+        var missing = new ChunkHandle(Int3.PosX);
 
         Assert.Multiple(() =>
         {

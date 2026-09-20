@@ -101,10 +101,7 @@ public readonly struct FlatArray<T>
     /// </summary>
     public int GetIndex(Int3 position)
     {
-        if (!position.IsWithin(_dimensions))
-            throw new IndexOutOfRangeException();
-
-        return position.X + position.Y * _dimensions.X + position.Z * _dimensions.X * _dimensions.Y;
+        return FlatArrayHelpers.GetIndex(position, _dimensions);
     }
 
     /// <summary>
@@ -112,10 +109,9 @@ public readonly struct FlatArray<T>
     /// </summary>
     public int GetIndexUnsafe(Int3 position)
     {
-        return position.X + position.Y * _dimensions.X + position.Z * _dimensions.X * _dimensions.Y;
+        return FlatArrayHelpers.GetIndexUnsafe(position, _dimensions);
     }
-
-
+    
     /// <summary>
     ///     Converts a flat array index to its coordinate.
     /// </summary>
@@ -123,11 +119,8 @@ public readonly struct FlatArray<T>
     {
         if ((uint)index >= (uint)Length)
             throw new IndexOutOfRangeException();
-
-        return new Int3(
-            index % _dimensions.X,
-            index / _dimensions.X % _dimensions.Y,
-            index / (_dimensions.X * _dimensions.Y));
+        
+        return FlatArrayHelpers.GetPosition(index, _dimensions);
     }
 
     /// <summary>
@@ -187,5 +180,38 @@ public readonly struct FlatArray<T>
     public T[] ToArray()
     {
         return [.. _data];
+    }
+}
+
+public static class FlatArrayHelpers
+{
+    /// <summary>
+    ///     Converts a coordinate to its flat array index.
+    /// </summary>
+    public static int GetIndex(Int3 position, Int3 dimensions)
+    {
+        if (!position.IsWithin(dimensions))
+            throw new IndexOutOfRangeException();
+
+        return position.X + position.Y * dimensions.X + position.Z * dimensions.X * dimensions.Y;
+    }
+
+    /// <summary>
+    ///     Converts a coordinate to its flat array index.
+    /// </summary>
+    public static int GetIndexUnsafe(Int3 position, Int3 dimensions)
+    {
+        return position.X + position.Y * dimensions.X + position.Z * dimensions.X * dimensions.Y;
+    }
+    
+    /// <summary>
+    ///     Converts a flat array index to its coordinate.
+    /// </summary>
+    public static Int3 GetPosition(int index, Int3 dimensions)
+    {
+        return new Int3(
+            index % dimensions.X,
+            index / dimensions.X % dimensions.Y,
+            index / (dimensions.X * dimensions.Y));
     }
 }

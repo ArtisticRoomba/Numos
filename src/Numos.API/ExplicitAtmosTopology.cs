@@ -1,3 +1,4 @@
+using Numos.Chunks;
 using Numos.Maths;
 
 namespace Numos.API;
@@ -45,7 +46,7 @@ public readonly record struct AtmosSimulationId(int Index, uint Generation) : IC
 /// </remarks>
 public readonly record struct AtmosCellRef(
     AtmosSimulationId Simulation,
-    AtmosChunkHandle Chunk,
+    ChunkHandle Chunk,
     ushort LocalVoxelIndex) : IComparable<AtmosCellRef>
 {
     /// <summary>

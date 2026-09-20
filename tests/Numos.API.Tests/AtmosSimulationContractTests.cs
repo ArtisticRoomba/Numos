@@ -1,3 +1,4 @@
+using Numos.Chunks;
 using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.Maths;
@@ -186,7 +187,7 @@ public sealed class AtmosSimulationContractTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(handle, Is.EqualTo(new AtmosChunkHandle(position)));
+            Assert.That(handle, Is.EqualTo(new ChunkHandle(position)));
             Assert.That(handle.Position, Is.EqualTo(position));
             Assert.That(simulation.ChunkCount, Is.EqualTo(1));
             Assert.That(simulation.GetChunkSnapshot(handle).GridPosition, Is.EqualTo(position));
@@ -653,7 +654,7 @@ public sealed class AtmosSimulationContractTests
     public void ChunkOperations_WithMissingPosition_ThrowKeyNotFoundException()
     {
         using var simulation = new AtmosSimulation(new TestAtmosConfig(), 2, 2, 1);
-        var missing = new AtmosChunkHandle(new Int3(91, -37, 12));
+        var missing = new ChunkHandle(new Int3(91, -37, 12));
 
         Assert.Multiple(() =>
         {

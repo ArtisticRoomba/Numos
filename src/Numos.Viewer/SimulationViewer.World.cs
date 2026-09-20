@@ -161,7 +161,7 @@ public partial class SimulationViewer
     private void RefreshSimulationSurface(SimulationSurface surface)
     {
         var fields = _frameBuilder!.GetRequiredSnapshotFields(_currentVisualizationId);
-        if (surface.Simulation.TryGetChunkHandles(surface.ChunkRevision, out long revision, out AtmosChunkHandle[] handles))
+        if (surface.Simulation.TryGetChunkHandles(surface.ChunkRevision, out long revision, out ChunkHandle[] handles))
         {
             surface.ChunkRevision = revision;
             surface.Handles = handles;
@@ -462,7 +462,7 @@ public partial class SimulationViewer
             Projection = CameraProjection.Perspective
         };
         internal long ChunkRevision { get; set; } = -1;
-        internal AtmosChunkHandle[] Handles { get; set; } = [];
+        internal ChunkHandle[] Handles { get; set; } = [];
         internal Dictionary<Int3, AtmosChunkSnapshot> Snapshots { get; } = [];
         internal SimulationDrawData? DrawData { get; set; }
 

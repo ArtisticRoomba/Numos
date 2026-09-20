@@ -1,4 +1,5 @@
 using Numos.API;
+using Numos.Chunks;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.Datatypes.Snapshots;
 using Numos.Maths;
@@ -177,7 +178,7 @@ public sealed class ThermodynamicsIntegrationTests
         using var simulation = new AtmosSimulation(config, 1, 1, 1);
         var center = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
         Int3[] neighborPositions = [Int3.NegX, Int3.PosX, Int3.NegY, Int3.PosY];
-        AtmosChunkHandle[] neighbors = neighborPositions
+        ChunkHandle[] neighbors = neighborPositions
             .Select(position => SimTestHelpers.CreateOpenChunk(simulation, position))
             .ToArray();
 
@@ -1076,7 +1077,7 @@ public sealed class ThermodynamicsIntegrationTests
         return config;
     }
 
-    private static AtmosChunkHandle CreateIsolatedVoxel(
+    private static ChunkHandle CreateIsolatedVoxel(
         AtmosSimulation simulation, Int3 position,
         int x, int y, int z, VoxelClassification classification, float temperature)
     {

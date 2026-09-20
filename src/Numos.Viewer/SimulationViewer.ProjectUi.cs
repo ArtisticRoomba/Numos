@@ -301,9 +301,9 @@ public partial class SimulationViewer
         ImGui.TextDisabled($"Fixed size: {_chunkDimensions.X} x {_chunkDimensions.Y} x {_chunkDimensions.Z}");
         ImGui.TextDisabled("Right-click a chunk coordinate for options.");
 
-        AtmosChunkHandle? chunkToRemove = null;
-        AtmosChunkHandle? chunkToSeal = null;
-        AtmosChunkHandle? chunkToUnsleep = null;
+        ChunkHandle? chunkToRemove = null;
+        ChunkHandle? chunkToSeal = null;
+        ChunkHandle? chunkToUnsleep = null;
         foreach (var handle in _liveChunkHandles)
         {
             ImGui.PushID($"chunk-{handle.Position.X}-{handle.Position.Y}-{handle.Position.Z}");
@@ -510,7 +510,7 @@ public partial class SimulationViewer
             _injectionChunkPosition.HasValue)
         {
             InjectProjectGas(
-                new AtmosChunkHandle(_injectionChunkPosition.Value),
+                new ChunkHandle(_injectionChunkPosition.Value),
                 _injectionX,
                 _injectionY,
                 _injectionZ,

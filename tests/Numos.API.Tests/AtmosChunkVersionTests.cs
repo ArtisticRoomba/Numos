@@ -1,3 +1,4 @@
+using Numos.Chunks;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.Datatypes.Snapshots;
 using Numos.Maths;
@@ -186,9 +187,9 @@ public sealed class AtmosChunkVersionTests
         var first = simulation.CreateAndRegisterChunk(new Int3(2, 0, 0));
         var second = simulation.CreateAndRegisterChunk(new Int3(-1, 0, 0));
 
-        AtmosChunkHandle[] before = simulation.GetChunkHandles();
+        ChunkHandle[] before = simulation.GetChunkHandles();
         simulation.UnregisterChunk(first);
-        AtmosChunkHandle[] after = simulation.GetChunkHandles();
+        ChunkHandle[] after = simulation.GetChunkHandles();
 
         Assert.Multiple(() =>
         {
@@ -206,8 +207,8 @@ public sealed class AtmosChunkVersionTests
         using var simulation = new AtmosSimulation(1, 1, 1);
         simulation.CreateAndRegisterChunk(default);
 
-        bool firstCreated = simulation.TryGetChunkHandles(-1, out long revision, out AtmosChunkHandle[] first);
-        bool secondCreated = simulation.TryGetChunkHandles(revision, out long unchangedRevision, out AtmosChunkHandle[] second);
+        bool firstCreated = simulation.TryGetChunkHandles(-1, out long revision, out ChunkHandle[] first);
+        bool secondCreated = simulation.TryGetChunkHandles(revision, out long unchangedRevision, out ChunkHandle[] second);
 
         Assert.Multiple(() =>
         {
@@ -228,7 +229,7 @@ public sealed class AtmosChunkVersionTests
 
         simulation.UnregisterChunk(original);
         simulation.CreateAndRegisterChunk(default);
-        bool changed = simulation.TryGetChunkHandles(firstRevision, out long secondRevision, out AtmosChunkHandle[] handles);
+        bool changed = simulation.TryGetChunkHandles(firstRevision, out long secondRevision, out ChunkHandle[] handles);
 
         Assert.Multiple(() =>
         {

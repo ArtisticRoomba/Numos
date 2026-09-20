@@ -1,6 +1,7 @@
 using System.Numerics;
 using ImGuiNET;
 using Numos.API;
+using Numos.Chunks;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.SimDrawer;
 using Numos.Viewer.Rendering.Viewport;
@@ -553,7 +554,7 @@ public partial class SimulationViewer
         ApplyVoxelMutation(
             addresses,
             address => _simulation!.SetVoxelClassification(
-                new AtmosChunkHandle(address.Chunk.Position),
+                new ChunkHandle(address.Chunk.Position),
                 address.LocalIndex,
                 new VoxelClassification(classification)),
             $"Set classification {classification}");
@@ -580,7 +581,7 @@ public partial class SimulationViewer
         ApplyVoxelMutation(
             addresses,
             address => _simulation!.AddGasToVoxel(
-                new AtmosChunkHandle(address.Chunk.Position),
+                new ChunkHandle(address.Chunk.Position),
                 address.LocalIndex,
                 gasId,
                 moles,
@@ -593,7 +594,7 @@ public partial class SimulationViewer
         ApplyVoxelMutation(
             addresses,
             address => _simulation!.GetVoxelGasMixture(
-                new AtmosChunkHandle(address.Chunk.Position),
+                new ChunkHandle(address.Chunk.Position),
                 address.LocalIndex).Clear(),
             "Cleared gas from");
     }
@@ -604,7 +605,7 @@ public partial class SimulationViewer
             addresses,
             address =>
             {
-                var handle = new AtmosChunkHandle(address.Chunk.Position);
+                var handle = new ChunkHandle(address.Chunk.Position);
                 _simulation!.GetVoxelGasMixture(handle, address.LocalIndex).Clear();
                 _simulation.SetVoxelClassification(
                     handle,
@@ -619,7 +620,7 @@ public partial class SimulationViewer
         ApplyVoxelMutation(
             addresses,
             address => _simulation!.SetVoxelTemperature(
-                new AtmosChunkHandle(address.Chunk.Position),
+                new ChunkHandle(address.Chunk.Position),
                 address.LocalIndex,
                 temperature),
             $"Set temperature to {temperature:F1} K for");

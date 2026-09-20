@@ -1,4 +1,5 @@
 using Numos.API;
+using Numos.Chunks;
 using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.Datatypes.Snapshots;
@@ -26,7 +27,7 @@ public static class SimulationStateAnalyzer
             0,
             SimulationObservationOptions.MaximumMaxIssueLocations);
 
-        AtmosChunkHandle[] handles = SelectHandles(simulation.GetChunkHandles(), options.Chunk);
+        ChunkHandle[] handles = SelectHandles(simulation.GetChunkHandles(), options.Chunk);
         AtmosChunkSnapshotRequest[] requests = handles
             .Select(static handle => new AtmosChunkSnapshotRequest(
                 handle.Position,
@@ -99,8 +100,8 @@ public static class SimulationStateAnalyzer
             issues.Truncated);
     }
 
-    private static AtmosChunkHandle[] SelectHandles(
-        AtmosChunkHandle[] handles,
+    private static ChunkHandle[] SelectHandles(
+        ChunkHandle[] handles,
         Coordinate? selectedChunk)
     {
         if (!selectedChunk.HasValue)

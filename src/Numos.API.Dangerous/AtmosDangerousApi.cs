@@ -1,3 +1,5 @@
+using Numos.Chunks;
+
 namespace Numos.API.Dangerous;
 
 /// <summary>
@@ -34,7 +36,7 @@ public readonly struct AtmosDangerousApi
     /// </remarks>
     /// <exception cref="KeyNotFoundException">No chunk is registered at the handle's position.</exception>
     /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
-    public AtmosDangerousChunk GetChunk(AtmosChunkHandle chunk)
+    public AtmosDangerousChunk GetChunk(ChunkHandle chunk)
     {
         return new AtmosDangerousChunk(_simulation.Kernel.GetChunkForDangerousAccess(chunk.Position));
     }

@@ -1,4 +1,5 @@
 using JetBrains.Annotations;
+using Numos.Chunks;
 using Numos.Collections;
 using Numos.CoreSim;
 
@@ -183,7 +184,7 @@ public sealed partial class AtmosSimulation
     /// </example>
     [PublicAPI]
     public T[] GetOrCreateChunkSolverArray<T>(
-        AtmosChunkHandle chunk, object key, bool captureForRollback, int? length = null)
+        ChunkHandle chunk, object key, bool captureForRollback, int? length = null)
     {
         ThrowIfDisposed();
         return _kernel.GetOrCreateChunkSolverArray<T>(chunk.Position, key, captureForRollback, length);
@@ -224,7 +225,7 @@ public sealed partial class AtmosSimulation
     ///     </code>
     /// </example>
     [PublicAPI]
-    public FlatArray<T> GetOrCreateChunkSolverFlatArray<T>(AtmosChunkHandle chunk, object key, bool captureForRollback)
+    public FlatArray<T> GetOrCreateChunkSolverFlatArray<T>(ChunkHandle chunk, object key, bool captureForRollback)
     {
         ThrowIfDisposed();
         return _kernel.GetOrCreateChunkSolverFlatArray<T>(chunk.Position, key, captureForRollback);

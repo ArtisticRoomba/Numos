@@ -23,8 +23,8 @@ namespace Numos.API;
 ///     AtmosSimulation station = world.CreateSimulation(16, 16, 16);
 ///     AtmosSimulation shuttle = world.CreateSimulation(8, 8, 8);
 /// 
-///     AtmosChunkHandle stationChunk = station.CreateAndRegisterChunk(new Int3(0, 0, 0));
-///     AtmosChunkHandle shuttleChunk = shuttle.CreateAndRegisterChunk(new Int3(0, 0, 0));
+///     ChunkHandle stationChunk = station.CreateAndRegisterChunk(new Int3(0, 0, 0));
+///     ChunkHandle shuttleChunk = shuttle.CreateAndRegisterChunk(new Int3(0, 0, 0));
 ///     AtmosCellRef stationCell = station.GetCellRef(stationChunk, 0);
 ///     AtmosCellRef shuttleCell = shuttle.GetCellRef(shuttleChunk, 0);
 ///     AtmosPortalHandle portal = world.CreatePortal(stationCell, shuttleCell);
@@ -589,7 +589,7 @@ public sealed partial class AtmosWorld : IDisposable
     /// <exception cref="ArgumentNullException"><paramref name="simulation" /> is <see langword="null" />.</exception>
     /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
     [PublicAPI]
-    public bool HasExplicitLinks(AtmosSimulation simulation, AtmosChunkHandle chunk)
+    public bool HasExplicitLinks(AtmosSimulation simulation, ChunkHandle chunk)
     {
         ArgumentNullException.ThrowIfNull(simulation);
         lock (Gate)
@@ -938,7 +938,7 @@ public sealed partial class AtmosWorld : IDisposable
     /// <summary>
     ///     Invalidates link sets that reference a chunk removed from its owning simulation.
     /// </summary>
-    internal void InvalidateLinksForChunk(AtmosSimulation simulation, AtmosChunkHandle chunk)
+    internal void InvalidateLinksForChunk(AtmosSimulation simulation, ChunkHandle chunk)
     {
         lock (Gate)
         {
