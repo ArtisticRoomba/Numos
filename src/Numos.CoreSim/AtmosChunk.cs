@@ -12,6 +12,14 @@ using Numos.Units;
 
 namespace Numos.CoreSim;
 
+/// <summary>
+///     Represents the simulation state for a fixed-size voxel chunk.
+/// </summary>
+/// <remarks>
+///     Chunk-owned per-voxel data supports both flat-index and <see cref="Int3" /> coordinate access.
+///     Use <see cref="Chunk.GetIndex(int,int,int)" /> and <see cref="Chunk.GetXyzInt3" /> when converting indices
+///     for scalar-indexed storage such as gas channels (because... you know.... they aren't physical).
+/// </remarks>
 internal class AtmosChunk : Chunk
 {
     private static long _nextGeneration;

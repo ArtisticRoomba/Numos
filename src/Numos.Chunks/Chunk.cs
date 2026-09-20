@@ -71,7 +71,6 @@ public abstract class Chunk
         return (ushort)FlatArrayHelpers.GetIndexUnsafe(vec, Dimensions);
     }
 
-
     /// <summary>
     ///     Converts a flat voxel index to local x, y, and z coordinates.
     /// </summary>
@@ -95,6 +94,12 @@ public abstract class Chunk
         return FlatArrayHelpers.GetPosition(index, Dimensions);
     }
     
+    /// <summary>
+    ///     Ensures that a chunk's <see cref="FlatArray{T}"/> has specified dimensions.
+    /// </summary>
+    /// <param name="array">The target flat array.</param>
+    /// <param name="dimensions">Dimensions to ensure on the flat array.</param>
+    /// <typeparam name="T">Type parameter of the flat array.</typeparam>
     protected void EnsureInitialized<T>(ref FlatArray<T> array, Int3 dimensions)
     {
         if (!array.IsInitialized || array.Length != VoxelCount)
@@ -103,6 +108,16 @@ public abstract class Chunk
             array = array.Reshape(dimensions);
     }
 
+    /// <summary>
+    ///     Validates the specified dimensions and returns the total voxel count of the chunk.
+    /// </summary>
+    /// <param name="width">Width of the chunk.</param>
+    /// <param name="height">Height of the chunk.</param>
+    /// <param name="depth">Depth of the chunk.</param>
+    /// <returns>Total voxel count of the chunk.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">
+    ///     One of the dimensions is not in the supported size range.
+    /// </exception>
     protected static int GetValidatedVoxelCount(int width, int height, int depth)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(width);
