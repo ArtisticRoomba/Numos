@@ -677,9 +677,9 @@ the pipeline-stage level only — see `AtmosBuiltInSolvers.GasReactions`.
 ### 4.3 Stage 1 — Pressure Advection
 
 This is the core fluid dynamics step. When the awake chunk count is smaller than the worker count, it builds one work
-list across those chunks and runs ordered parallel phases. Voxel work is split into tiles of 64 active indices, so one
-dense chunk can occupy several workers. Species transfer is split by `(chunk, gas)`, which gives one worker exclusive
-ownership of each gas-major delta row.
+list across those chunks and runs ordered parallel phases. Every phase partitions active voxels into tiles, sized so
+the awake chunks' active voxels divide evenly across `Environment.ProcessorCount` workers, which lets one dense chunk
+occupy several workers. There is no separate per-gas dispatch: a tile handles every gas for the voxels it owns.
 
 When there are already enough awake chunks to occupy every worker, the solver runs the same phases sequentially inside
 each chunk and assigns whole chunks to workers. This avoids global barriers and lets a worker return a chunk's scratch
@@ -697,23 +697,30 @@ Each phase finishes before the next begins:
 3. **Compute bulk-flow fractions.** Tiles calculate outward pressure transfer with the configured damping, cutoff,
    per-neighbor cap, and conductance limiter. They also record the maximum relative bulk pressure difference used by the
    sleep system.
-4. **Accumulate bulk transfer.** Each `(chunk, gas)` job walks source voxels and fixed directions in ascending order,
-   writing only that gas's mole and sensible-energy rows. Transfers into void have a source delta and no destination
-   delta.
-5. **Apply bulk deltas.** Each voxel tile owns all persistent writes for its voxels. It reduces per-gas energy rows in
-   gas order, updates composition, heat capacity, temperature, and pressure, then prepares diffusion factors from this
-   post-bulk state. The chunk's sleep decision uses the bulk pressure delta before diffusion starts.
-6. **Accumulate diffusion.** A gas job distributes
-   `DiffusionCoefficient * environmentFactor * sourceMoles * FixedTimeStep` to valid neighbors, capped at one seventh of
-   the source inventory. The environment factor scales with temperature, inverse pressure, and voxel edge length. Tiny
-   transfers into an air voxel are suppressed when both the existing and transferred amounts remain below
-   `MinimumTrackedMoles`; transfers into void are lost.
-7. **Apply diffusion and publish boundaries.** Voxel tiles apply the second delta set with the same energy reduction.
-   Boundary events are then published in parallel by chunk. `BoundaryFlowSolver` sorts them by chunk and voxel before
-   applying any cross-chunk flow, so queue insertion order is not observable simulation state.
+4. **Gather bulk transfer.** Each tile computes, for every gas, the net mole and sensible-energy delta of the voxels it
+   owns. A destination is credited by each air neighbor whose outgoing fraction points at it and debited once per
+   direction it sends gas in. Transfers into void produce that debit but no matching credit, which is how gas leaves
+   the chunk. Sources are visited in ascending voxel index (the three negative neighbor offsets, the voxel itself,
+   then the three positive offsets), and per-gas energy is folded into one `double` per voxel in gas order.
+5. **Apply bulk deltas and fix diffusion transfers.** The same tile that gathered a voxel's delta performs all its
+   persistent writes: composition, heat capacity, temperature, and pressure. It then computes, from that post-bulk
+   state, how many moles of each gas the voxel will diffuse: `DiffusionCoefficient * environmentFactor * sourceMoles *
+   FixedTimeStep`, capped at one seventh of the voxel's inventory, or zero if the voxel has no pressure, no neighbors,
+   or none of that gas. The environment factor scales with temperature, inverse pressure, and voxel edge length. Every
+   input is local to the voxel and final at this point, which is why the amount is fixed here rather than recomputed
+   by each of the seven destinations that read it. The chunk's sleep decision uses the bulk pressure delta before
+   diffusion starts.
+6. **Gather diffusion.** Each destination sums the transfers of its air neighbors and pays its own once per non-solid
+   neighbor; the phase only adds, it does not recompute amounts. Tiny deposits into an air voxel are suppressed when
+   both the existing and transferred amounts remain below `MinimumTrackedMoles`, and the corresponding share of the
+   source's debit is refunded; transfers into void are lost. Source order and the energy fold match the bulk gather.
+7. **Apply diffusion and publish boundaries.** Voxel tiles apply the second delta set exactly as they applied the
+   first. Boundary events are then published in parallel by chunk. `BoundaryFlowSolver` sorts them by chunk and voxel
+   before applying any cross-chunk flow, so queue insertion order is not observable simulation state.
 
 Bulk application must remain before diffusion because diffusion reads the pressure, composition, and temperature that
-bulk flow produced. Likewise, no delta row may be reused until its apply phase has completed.
+bulk flow produced. Each gather is also a barrier away from its apply phase, because a destination reads its
+neighbors' fractions, moles, and temperatures, and those neighbors may belong to another tile.
 
 ### 4.4 Stage 2 — Cross-Chunk Boundary Flow
 
@@ -825,27 +832,30 @@ Flows below `MinimumPressureTransfer` (0.1) are discarded entirely. This prevent
 Voxels with `TotalPressure < VacuumThreshold` (1.0) have all gas moles zeroed out only when every orthogonally adjacent
 air voxel is also below the threshold. Solid walls, void voxels, and missing chunks do not prevent cleanup. The solver
 classifies the complete pressure field before removing any gas, so traversal order cannot turn neighboring trace voxels
-into a cascading cleanup.
+into a cascading cleanup. That split is also what lets both passes run as voxel tiles across workers instead of one
+work item per chunk.
 
 This preserves a low-pressure expansion front while it remains next to pressurized gas. Once an isolated region and all
 of its neighbors fall below the threshold, cleanup removes the trace gas that would otherwise keep chunks awake.
 
 ### 5.5 Delta Buffers (Ordering Scope)
 
-Mole and sensible-energy transfers within a chunk are not applied directly during the neighbor scan. Gas-major mole
-deltas are accumulated at `gasIndex * VoxelCount + voxelIndex`. Sensible-energy deltas use the same gas-major layout
-with `double` elements, preventing a representable final temperature from being lost when an intermediate
-`moles * C_v * temperature` exceeds the `float` range.
+Mole and sensible-energy transfers within a chunk are not applied directly during the neighbor scan. Mole deltas are
+voxel-major, stored at `activeIndex * ActiveGasCount + gasIndex`, so one voxel's whole composition delta is contiguous.
+Sensible energy is a single `double` per active voxel, already summed over gases; `double` keeps a representable final
+temperature from being lost when an intermediate `moles * C_v * temperature` exceeds the `float` range.
 
-One `(chunk, gas)` job owns each pair of delta rows for an entire accumulation phase. Several jobs may target the same
-voxel, but they write different rows. The apply phase changes ownership: a 64-entry tile owns every gas, temperature,
-pressure, and heat-capacity write for its voxels. These two layouts keep workers from overwriting each other without
-locks or atomics.
+One voxel tile owns both the gather and the apply for its voxels, so a delta slot is written by exactly one worker and
+read by that same worker — no locks, no atomics, and no full-buffer clears between phases, because the gather writes
+every slot it owns rather than accumulating into it. The diffusion transfer buffer is the one piece of scratch a tile
+writes for others to read; it is voxel-indexed at `voxelIndex * ActiveGasCount + gasIndex` and, like the fraction and
+neighbor-count buffers, is written before the barrier and only read after it.
 
-Floating-point order is fixed where several values meet. A gas row scans sources and directions in ascending order;
-incident conductance gathers fixed direction slots; and energy rows are reduced in gas order. Parallel completion order
-therefore cannot change a result. Phase barriers also keep bulk advection ahead of diffusion and prevent an apply pass
-from seeing a half-written row.
+Floating-point order is fixed where several values meet. Each destination visits its sources in ascending voxel index
+and each source's own contributions in fixed direction order, which is the order a single-threaded scatter over
+`ActiveAirIndices` would have produced; incident conductance gathers fixed direction slots; and per-gas energy is
+folded in gas order. Parallel completion order therefore cannot change a result. Phase barriers keep bulk advection
+ahead of diffusion and keep a gather from reading a neighbor's half-written fractions or moles.
 
 All workspace arrays are rented from `ArrayPool<T>` and returned even when a phase throws.
 
@@ -1034,9 +1044,8 @@ To implement this system in another engine or language, start from the core modu
 
 The simulation assumes parallel execution:
 
-- **Advection** dispatches voxel tiles and gas rows across all awake chunks. A single dense chunk can therefore use
-  multiple workers. Once the awake chunks already saturate the worker pool, it dispatches whole chunks to avoid extra
-  barriers.
+- **Advection** dispatches voxel tiles across all awake chunks. A single dense chunk can therefore use multiple
+  workers. Once the awake chunks already saturate the worker pool, it dispatches whole chunks to avoid extra barriers.
 - **Thermodynamics** dispatches independent chunks in parallel.
 - **Thermal boundary processing** is sequential and must remain so to avoid race conditions when two chunks write to
   each other's voxels.

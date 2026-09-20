@@ -258,8 +258,8 @@ next state. Numos fixes the order wherever concurrent scheduling could otherwise
 
 - Solver stages run in their configured pipeline order.
 - Each tick receives chunks ordered by grid X, then Y, then Z.
-- Advection runs ordered phases. A gas job owns one delta row, a voxel tile owns its persistent voxel writes, and shared
-  values are gathered in fixed direction or gas order.
+- Advection runs ordered phases. A voxel tile owns both its delta accumulation and its persistent voxel writes, and
+  shared values are gathered in fixed source and gas order.
 - Work inside separate chunks can run in parallel because each chunk owns its local state.
 - Thermal boundary work is collected and sorted before a single-threaded application step. Cross-chunk gas flow
   computes and applies transfers in parallel, but reserves each source chunk's disjoint write range within a target's
