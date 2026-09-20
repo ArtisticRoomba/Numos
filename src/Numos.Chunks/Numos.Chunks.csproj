@@ -10,7 +10,7 @@
         <PackageId>Numos.Chunks</PackageId>
         <Title>Numos Chunks</Title>
         <Description>Voxel Chunk utilities used by Numos.</Description>
-        <PackageTags>simulation;collections;voxel;nativeaot</PackageTags>
+        <PackageTags>simulation;chunks;voxel;nativeaot</PackageTags>
         <GenerateDocumentationFile>true</GenerateDocumentationFile>
     </PropertyGroup>
 
