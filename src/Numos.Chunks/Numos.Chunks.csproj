@@ -15,6 +15,7 @@
     </PropertyGroup>
 
     <ItemGroup>
+        <ProjectReference Include="..\Numos.Maths\Numos.Maths.csproj"/>
         <ProjectReference Include="..\Numos.Collections\Numos.Collections.csproj"/>
     </ItemGroup>
 
