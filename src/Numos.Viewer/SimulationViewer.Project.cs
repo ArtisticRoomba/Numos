@@ -143,7 +143,6 @@ public partial class SimulationViewer
             _isPaused = true;
             _showConfigurationPanel = true;
             _knownSimulationRevision = -1;
-            _activeSimulationId = simulation.Id;
             ReconcileSimulationSurfaces();
             world = null;
             SetProjectMessage($"Created project '{_projectName}'.", false);

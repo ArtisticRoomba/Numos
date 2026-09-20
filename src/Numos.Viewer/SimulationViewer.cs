@@ -73,6 +73,7 @@ public partial class SimulationViewer : IDisposable
     private SliceCellDrawData? _hoveredSliceCell;
     private bool _imguiInitialized;
 
+    private bool _isOrbiting;
     private bool _isPaused;
     private VoxelAddress? _lastPaintedCell;
     private bool _legendAutomaticBounds = true;
@@ -546,16 +547,24 @@ public partial class SimulationViewer : IDisposable
     {
         UpdateCameraMove(deltaTime);
 
-        if (_viewport is not { IsHovered: true })
-            return;
+        bool hovered = _viewport is { IsHovered: true };
+        bool middleDown = Raylib.IsMouseButtonDown(MouseButton.Middle);
 
-        if (Raylib.IsMouseButtonDown(MouseButton.Middle))
+        if (middleDown && (hovered || _isOrbiting))
         {
+            _isOrbiting = true;
             CancelCameraMove();
             var mouseDelta = Raylib.GetMouseDelta();
             Raylib.CameraYaw(ref _camera3D, -mouseDelta.X * 0.01f, true);
             Raylib.CameraPitch(ref _camera3D, -mouseDelta.Y * 0.01f, true, true, false);
         }
+        else
+        {
+            _isOrbiting = false;
+        }
+
+        if (!hovered)
+            return;
 
         float wheel = Raylib.GetMouseWheelMove();
         if (wheel != 0f)
