@@ -1,0 +1,25 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+    <Import Project="..\Numos.CoreSim\Version.props"/>
+
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <RootNamespace>Numos.Chunks</RootNamespace>
+        <PackageId>Numos.Chunks</PackageId>
+        <Title>Numos Chunks</Title>
+        <Description>Voxel Chunk utilities used by Numos.</Description>
+        <PackageTags>simulation;collections;voxel;nativeaot</PackageTags>
+        <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\Numos.Collections\Numos.Collections.csproj"/>
+    </ItemGroup>
+
+    <ItemGroup>
+      <PackageReference Include="JetBrains.Annotations" Version="2026.2.0" />
+    </ItemGroup>
+
+</Project>

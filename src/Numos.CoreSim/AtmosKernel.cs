@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using Numos.Chunks;
 using Numos.CoreSim.Replay;
 using Numos.CoreSim.Solvers;
 using Numos.Maths;
@@ -41,9 +42,9 @@ internal sealed partial class AtmosKernel : IDisposable
     private AtmosTimelinePosition _recordingStart;
 
     internal AtmosKernel(
-        int chunkWidth = AtmosChunkConstants.DefaultWidth,
-        int chunkHeight = AtmosChunkConstants.DefaultHeight,
-        int chunkDepth = AtmosChunkConstants.DefaultDepth)
+        int chunkWidth = ChunkConstants.DefaultWidth,
+        int chunkHeight = ChunkConstants.DefaultHeight,
+        int chunkDepth = ChunkConstants.DefaultDepth)
     {
         _dimensions = new Int3(chunkWidth, chunkHeight, chunkDepth);
         _defaultSolvers = new DefaultAtmosSolvers(chunkWidth, chunkHeight, chunkDepth);

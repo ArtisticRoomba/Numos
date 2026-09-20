@@ -1,5 +1,6 @@
 using System.Buffers;
 using JetBrains.Annotations;
+using Numos.Chunks;
 using Numos.CoreSim;
 using Numos.CoreSim.Replay;
 using Numos.CoreSim.Solvers;
@@ -330,9 +331,9 @@ public sealed partial class AtmosWorld : IDisposable
     /// <exception cref="ArgumentOutOfRangeException">A chunk dimension or combined voxel count is invalid.</exception>
     [PublicAPI]
     public AtmosSimulation CreateSimulation(
-        int chunkWidth = AtmosChunkConstants.DefaultWidth,
-        int chunkHeight = AtmosChunkConstants.DefaultHeight,
-        int chunkDepth = AtmosChunkConstants.DefaultDepth)
+        int chunkWidth = ChunkConstants.DefaultWidth,
+        int chunkHeight = ChunkConstants.DefaultHeight,
+        int chunkDepth = ChunkConstants.DefaultDepth)
     {
         lock (Gate)
         {

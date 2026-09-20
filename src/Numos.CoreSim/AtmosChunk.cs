@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using JetBrains.Annotations;
+using Numos.Chunks;
 using Numos.Collections;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.Datatypes.Snapshots;
@@ -162,12 +163,12 @@ internal class AtmosChunk
     /// <param name="depth">The number of voxels along the z axis.</param>
     /// <exception cref="ArgumentOutOfRangeException">
     ///     A dimension is non-positive or the combined voxel count exceeds
-    ///     <see cref="AtmosChunkConstants.MaximumVoxelCount" />.
+    ///     <see cref="ChunkConstants.MaximumVoxelCount" />.
     /// </exception>
     public AtmosChunk(
-        int width = AtmosChunkConstants.DefaultWidth,
-        int height = AtmosChunkConstants.DefaultHeight,
-        int depth = AtmosChunkConstants.DefaultDepth)
+        int width = ChunkConstants.DefaultWidth,
+        int height = ChunkConstants.DefaultHeight,
+        int depth = ChunkConstants.DefaultDepth)
     {
         int voxelCount = GetValidatedVoxelCount(width, height, depth);
         Width = width;
@@ -223,7 +224,7 @@ internal class AtmosChunk
     /// <param name="depth">The depth of the chunk.</param>
     /// <exception cref="ArgumentOutOfRangeException">
     ///     A dimension is non-positive or the combined voxel count exceeds
-    ///     <see cref="AtmosChunkConstants.MaximumVoxelCount" />.
+    ///     <see cref="ChunkConstants.MaximumVoxelCount" />.
     /// </exception>
     /// <remarks>
     ///     Initialization puts the chunk to sleep, resets all active counts and timers, and clears
@@ -232,9 +233,9 @@ internal class AtmosChunk
     [PublicAPI]
     public void Initialize(
         Int3 position,
-        int width = AtmosChunkConstants.DefaultWidth,
-        int height = AtmosChunkConstants.DefaultHeight,
-        int depth = AtmosChunkConstants.DefaultDepth)
+        int width = ChunkConstants.DefaultWidth,
+        int height = ChunkConstants.DefaultHeight,
+        int depth = ChunkConstants.DefaultDepth)
     {
         int voxelCount = GetValidatedVoxelCount(width, height, depth);
         _solverArrays = null;
@@ -749,24 +750,24 @@ internal class AtmosChunk
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(width);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(height);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(depth);
-        if (width > AtmosChunkConstants.MaximumVoxelCount ||
-            height > AtmosChunkConstants.MaximumVoxelCount ||
-            depth > AtmosChunkConstants.MaximumVoxelCount)
+        if (width > ChunkConstants.MaximumVoxelCount ||
+            height > ChunkConstants.MaximumVoxelCount ||
+            depth > ChunkConstants.MaximumVoxelCount)
         {
             throw new ArgumentOutOfRangeException(
                 nameof(width),
                 width,
-                $"No chunk dimension may exceed {AtmosChunkConstants.MaximumVoxelCount}.");
+                $"No chunk dimension may exceed {ChunkConstants.MaximumVoxelCount}.");
         }
 
         long voxelCount = (long)width * height * depth;
-        if (voxelCount > AtmosChunkConstants.MaximumVoxelCount)
+        if (voxelCount > ChunkConstants.MaximumVoxelCount)
         {
             throw new ArgumentOutOfRangeException(
                 nameof(width),
                 width,
                 $"Chunk dimensions contain {voxelCount} voxels, but at most " +
-                $"{AtmosChunkConstants.MaximumVoxelCount} are supported.");
+                $"{ChunkConstants.MaximumVoxelCount} are supported.");
         }
 
         return (int)voxelCount;

@@ -22,6 +22,7 @@
     <Project Path="src\Numos.API\Numos.API.csproj"/>
     <Project Path="src\Numos.Collections\Numos.Collections.csproj"/>
     <Project Path="src\Numos.CoreSim\Numos.CoreSim.csproj"/>
+    <Project Path="src\Numos.Chunks\Numos.Chunks.csproj" />
     <Project Path="src\Numos.Headless\Numos.Headless.csproj"/>
     <Project Path="src\Numos.Maths\Numos.Maths.csproj"/>
     <Project Path="src\Numos.Replay.Analyzers\Numos.Replay.Analyzers.csproj"/>

@@ -1,7 +1,7 @@
 using System.Numerics;
 using ImGuiNET;
 using Numos.API;
-using Numos.CoreSim;
+using Numos.Chunks;
 using Numos.CoreSim.Datatypes.Snapshots;
 using Numos.Maths;
 using Numos.SimDrawer;
@@ -18,8 +18,8 @@ public partial class SimulationViewer
     private AtmosSimulationId? _activeSimulationId;
     private long _knownSimulationRevision = -1;
     private int _newSimulationDepth = 1;
-    private int _newSimulationHeight = AtmosChunkConstants.DefaultHeight;
-    private int _newSimulationWidth = AtmosChunkConstants.DefaultWidth;
+    private int _newSimulationHeight = ChunkConstants.DefaultHeight;
+    private int _newSimulationWidth = ChunkConstants.DefaultWidth;
     private bool _removeSimulationModalOpen;
     private bool _requestRemoveSimulation;
     private bool _showWorldPanel = true;

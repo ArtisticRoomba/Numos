@@ -1,3 +1,4 @@
+using Numos.Chunks;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.GasReactions;
 using Numos.CoreSim.Replay;
@@ -34,7 +35,7 @@ internal sealed class SimulationWorkload : IDisposable
         if (options.GasCount <= 0 || options.CondensingGasCount < 0 || options.CondensingGasCount > options.GasCount)
             throw new ArgumentException("Gas dimensions are invalid.", nameof(options));
 
-        if (options.ActiveVoxelCount is < 0 or > AtmosChunkConstants.MaximumVoxelCount)
+        if (options.ActiveVoxelCount is < 0 or > ChunkConstants.MaximumVoxelCount)
             throw new ArgumentException("Active voxel count is invalid.", nameof(options));
 
         Options = options;

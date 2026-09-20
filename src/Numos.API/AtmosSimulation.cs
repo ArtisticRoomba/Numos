@@ -1,4 +1,5 @@
 using JetBrains.Annotations;
+using Numos.Chunks;
 using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.Datatypes.Snapshots;
@@ -47,9 +48,9 @@ public sealed partial class AtmosSimulation : IDisposable
     ///     <see cref="ushort.MaxValue" />.
     /// </exception>
     public AtmosSimulation(
-        int chunkWidth = AtmosChunkConstants.DefaultWidth,
-        int chunkHeight = AtmosChunkConstants.DefaultHeight,
-        int chunkDepth = AtmosChunkConstants.DefaultDepth)
+        int chunkWidth = ChunkConstants.DefaultWidth,
+        int chunkHeight = ChunkConstants.DefaultHeight,
+        int chunkDepth = ChunkConstants.DefaultDepth)
         : this(new AtmosConfig(), chunkWidth, chunkHeight, chunkDepth)
     {
     }
@@ -71,9 +72,9 @@ public sealed partial class AtmosSimulation : IDisposable
     /// </exception>
     public AtmosSimulation(
         AtmosConfig config,
-        int chunkWidth = AtmosChunkConstants.DefaultWidth,
-        int chunkHeight = AtmosChunkConstants.DefaultHeight,
-        int chunkDepth = AtmosChunkConstants.DefaultDepth)
+        int chunkWidth = ChunkConstants.DefaultWidth,
+        int chunkHeight = ChunkConstants.DefaultHeight,
+        int chunkDepth = ChunkConstants.DefaultDepth)
         : this(new AtmosWorld(config), true, chunkWidth, chunkHeight, chunkDepth)
     {
     }
@@ -93,24 +94,24 @@ public sealed partial class AtmosSimulation : IDisposable
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(chunkWidth);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(chunkHeight);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(chunkDepth);
-        if (chunkWidth > AtmosChunkConstants.MaximumVoxelCount ||
-            chunkHeight > AtmosChunkConstants.MaximumVoxelCount ||
-            chunkDepth > AtmosChunkConstants.MaximumVoxelCount)
+        if (chunkWidth > ChunkConstants.MaximumVoxelCount ||
+            chunkHeight > ChunkConstants.MaximumVoxelCount ||
+            chunkDepth > ChunkConstants.MaximumVoxelCount)
         {
             throw new ArgumentOutOfRangeException(
                 nameof(chunkWidth),
                 chunkWidth,
-                $"No chunk dimension may exceed {AtmosChunkConstants.MaximumVoxelCount}.");
+                $"No chunk dimension may exceed {ChunkConstants.MaximumVoxelCount}.");
         }
 
         long voxelCount = (long)chunkWidth * chunkHeight * chunkDepth;
-        if (voxelCount > AtmosChunkConstants.MaximumVoxelCount)
+        if (voxelCount > ChunkConstants.MaximumVoxelCount)
         {
             throw new ArgumentOutOfRangeException(
                 nameof(chunkWidth),
                 chunkWidth,
                 $"Chunk dimensions contain {voxelCount} voxels, but at most " +
-                $"{AtmosChunkConstants.MaximumVoxelCount} are supported.");
+                $"{ChunkConstants.MaximumVoxelCount} are supported.");
         }
 
         _chunkWidth = chunkWidth;
