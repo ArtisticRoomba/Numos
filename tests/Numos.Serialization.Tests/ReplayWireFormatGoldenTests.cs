@@ -1,10 +1,11 @@
+using Numos.API;
 using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.Replay;
 using Numos.Maths;
 using Numos.Serialization;
 
-namespace Numos.API.Tests;
+namespace Numos.Serialization.Tests;
 
 /// <summary>
 ///     Pins the exact bytes of the Numos replay wire format against a fixed scenario that exercises every

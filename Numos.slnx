@@ -13,6 +13,7 @@
         <Project Path="tests\Numos.Maths.Tests\Numos.Maths.Tests.csproj"/>
         <Project Path="tests\Numos.Replay.Analyzers.Tests\Numos.Replay.Analyzers.Tests.csproj"/>
         <Project Path="tests\Numos.Replay.SourceGen.Tests\Numos.Replay.SourceGen.Tests.csproj"/>
+        <Project Path="tests\Numos.Serialization.Tests\Numos.Serialization.Tests.csproj"/>
         <Project Path="tests\Numos.SimDrawer.Tests\Numos.SimDrawer.Tests.csproj"/>
         <Project Path="tests\Numos.Units.Analyzers.Tests\Numos.Units.Analyzers.Tests.csproj"/>
         <Project Path="tests\Numos.Viewer.Tests\Numos.Viewer.Tests.csproj"/>
