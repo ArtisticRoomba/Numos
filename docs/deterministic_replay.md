@@ -175,11 +175,22 @@ grid state, so retained checkpoint memory generally grows with the captured simu
 `AtmosChunkSnapshot` serves presentation and replication reads; it is not a continuation checkpoint. Checkpoints use
 full detached copies. The current implementation has no copy-on-write storage, delta compression, or incremental hash.
 `PayloadBytes` reports bytes in copied chunk and solver arrays and excludes managed object headers, field names, and
-shared configuration. The current clock-free checkpoint schema is version 4 and compatibility profile 2. Replay remains
+shared configuration. The current clock-free checkpoint schema is version 5 and compatibility profile 3 (world
+checkpoints are versioned separately; see `AtmosWorldCheckpoint.CurrentFormatVersion`). Replay remains
 experimental, so older in-memory checkpoint schemas are rejected rather than translated. Solver configuration keys and
 deterministic hashes
 contribute to the state hash; their immutable snapshots supply the actual restored settings. A custom configuration must
 capture every authoritative value and keep its snapshot immutable.
+
+The built-in per-voxel chunk arrays (`AtmosChunkCheckpoint.Classifications`/`Temperatures`/`Pressures`/
+`HeatCapacities`), `AtmosConfigSnapshot`'s flat scalar fields, and `GasProperties`'s fields are tagged with
+`[ChunkCheckpointField]`/`[ConfigCheckpointField]`/`[GasCheckpointField]` (`Numos.CoreSim.Replay`). `Numos.Replay.
+CheckpointGen` generates their capture, restore, hashing, and wire read/write code from those attributes, so adding a
+new field in one of these three uniform shapes only means declaring the property/field and tagging it with the next
+`Order` value -- not hand-editing the checkpoint constructor, `Materialize()`, `AtmosStateHasher`, and the wire codec
+separately. Fields with an irregular shape (a companion count, a nested per-gas-channel array, host-owned solver
+arrays) stay untagged and hand-written, the same way `Custom = true` opts an operation out of the wire-operation
+generator below.
 
 Some data intentionally remains outside the checkpoint:
 
@@ -362,9 +373,7 @@ all of them, so don't skip steps on the assumption that a missing one will alway
 
 1. Add the enum member (`AtmosOperationCode`/`AtmosWorldOperationCode`) and the operation record deriving from
    `AtmosOperation`/`AtmosWorldOperation`, overriding `Code` to return it. An enum member with no registration at
-   all is caught in step 2 below. What isn't caught: if `Code`'s override isn't a plain `=> SomeCode.Member;`
-   expression (e.g. a computed value), the Apply-switch check in step 4 silently skips that operation instead of
-   reporting on it -- keep the override a direct constant reference.
+   all is caught in step 2 below.
 2. Register the operation's wire codec with a `[WireOperation(typeof(YourOperation), YourOperationCode.Member)]`
    attribute, stacked on `NumosReplaySerializer` or `NumosWorldReplaySerializer` alongside the existing ones. Forget
    this (or forget it for a whole new enum member) and `NUMOSREPLAYGEN008` fails the `Numos.Serialization` build,
@@ -381,13 +390,16 @@ all of them, so don't skip steps on the assumption that a missing one will alway
    `Write{OperationName}`/`Read{OperationName}` methods on the same host class. The generator validates their
    signatures and plugs calls to them into the same dispatch table; a missing or mismatched method fails the build
    with `NUMOSREPLAYGEN007`. Those four operations are the worked examples to copy from.
-4. Add the case to the family's Apply switch (`AtmosKernel.ApplyRecordedOperation` for simulation operations,
-   `AtmosWorld.ApplyWorldOperation` for world operations) that actually mutates live state when the operation
-   replays. Forget this and `NUMOSREPLAYGEN009` fails the `Numos.CoreSim`/`Numos.API` build, pointing at the
-   operation's `Code` override (subject to the caveat in step 1).
-5. Update the golden wire-format fixtures in `tests/Numos.API.Tests/ReplayWireFormatGoldenTests.cs` to exercise the
-   new opcode, and regenerate the pinned base64 constants using the `[Explicit] PrintGoldenBytes` test in the same
-   file. No *build* step catches a forgotten update here, but
+4. Add a `private void Apply(YourOperation op)` overload on the family's host (`AtmosKernel` for simulation
+   operations, `AtmosWorld` for world operations) that actually mutates live state when the operation replays.
+   `ApplySwitchGenerator` (`Numos.Replay.Analyzers`) finds every concrete operation type deriving from
+   `AtmosOperation`/`AtmosWorldOperation` and generates the dispatch switch that calls into it -- `AtmosKernel.
+   ApplyRecordedOperation`/`AtmosWorld.ApplyWorldOperation` themselves are thin wrappers around that generated
+   method, not hand-written switches anymore. Forget the overload (or get its parameter type wrong) and
+   `NUMOSREPLAYGEN010` fails the `Numos.CoreSim`/`Numos.API` build, naming the operation and host type.
+5. Update the golden wire-format fixtures in `tests/Numos.Serialization.Tests/ReplayWireFormatGoldenTests.cs` to
+   exercise the new opcode, and regenerate the pinned base64 constants using the `[Explicit] PrintGoldenBytes` test
+   in the same file. No *build* step catches a forgotten update here, but
    `SimReplay_GoldenBytesDeserializeToTheFullOpcodeSet`/`WorldReplay_GoldenBytesDeserializeToTheFullOpcodeSet` assert
    the fixture's decoded operations cover every member of the enum, so a new opcode absent from the fixture shows up
    as a test failure, not a silent gap -- just not until you run the suite.
