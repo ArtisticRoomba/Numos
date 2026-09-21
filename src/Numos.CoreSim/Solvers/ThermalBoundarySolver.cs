@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using Numos.CoreSim.Datatypes.Events;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.Maths;
@@ -54,13 +53,20 @@ internal sealed class ThermalBoundarySolver : IAtmosSolverStage
 
     private void CollectEdges(AtmosSolverExecutionContext context)
     {
-        ConcurrentQueue<(int TickCount, Int3 Key, ThermalBoundaryEvent Event)> boundaryEvents =
-            BoundaryEvents<ThermalBoundaryEvent>.Get(context);
+        BoundaryEventBatchStorage<ThermalBoundaryEvent> boundaryBatches =
+            BoundaryEventBatches<ThermalBoundaryEvent>.Get(context);
 
-        while (boundaryEvents.TryDequeue(out var boundaryEvent))
+        if (!boundaryBatches.TryConsume(context.TickCount))
+            return;
+
+        // Batch order does not need to match production order: every event this produces only
+        // ever feeds the _edges HashSet, which CollectEdges below immediately deduplicates, and
+        // Solve sorts _orderedEdges from it before anything downstream reads edge order.
+        for (int batchIndex = 0; batchIndex < boundaryBatches.Count; batchIndex++)
         {
-            if (boundaryEvent.TickCount == context.TickCount)
-                CollectEdges(context, boundaryEvent.Key, boundaryEvent.Event);
+            BoundaryEventBatch<ThermalBoundaryEvent> batch = boundaryBatches[batchIndex];
+            for (int eventIndex = 0; eventIndex < batch.Count; eventIndex++)
+                CollectEdges(context, batch.Key, batch[eventIndex]);
         }
     }
 
