@@ -86,7 +86,7 @@ internal sealed class ThermodynamicsSolver : IAtmosSolverStage, IDisposable
 
         ThermalBoundaryEvent[]? boundaryBuffer = _thermalBoundaryBuffers.Value;
         Debug.Assert(boundaryBuffer != null);
-        int boundaryCount = _thermalDiffusion.Solve(chunk, context.TickConfig, boundaryBuffer);
+        int boundaryCount = _thermalDiffusion.Solve(chunk, context.TickConfig, boundaryBuffer, awakeChunkCount);
         _phaseChanges.Solve(chunk, context.TickConfig, awakeChunkCount);
 
         Debug.Assert(boundaryCount == 0 || boundaryBatch != null);

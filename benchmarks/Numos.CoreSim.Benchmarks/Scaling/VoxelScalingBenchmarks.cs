@@ -54,7 +54,7 @@ public class VoxelScalingBenchmarks : ScalingBenchmarkBase
     public void ThermalDiffusion_VoxelScaling()
     {
         foreach (var chunk in Workload.Chunks)
-            _thermal.Solve(chunk, Workload.Config, _events);
+            _thermal.Solve(chunk, Workload.Config, _events, int.MaxValue);
     }
 }
 
