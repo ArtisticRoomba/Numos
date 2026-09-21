@@ -1,3 +1,4 @@
+using Numos.CoreSim.Replay;
 using Numos.Units;
 
 namespace Numos.CoreSim;
@@ -10,6 +11,7 @@ public struct GasProperties
     /// <summary>
     ///     Display name of the gas.
     /// </summary>
+    [GasCheckpointField(0)]
     public string Name;
 
     /// <summary>
@@ -21,6 +23,7 @@ public struct GasProperties
     ///     than or equal to zero use <see cref="AtmosConfig.DefaultMolarHeatCapacityAtConstantVolume" />.
     /// </remarks>
     [Quantity("molarHeatCapacity")]
+    [GasCheckpointField(1)]
     public JoulePerMoleKelvin MolarHeatCapacityAtConstantVolume;
 
     /// <summary>
@@ -28,11 +31,13 @@ public struct GasProperties
     ///     <see cref="AtmosConfig.SaturationReferencePressure" />.
     /// </summary>
     [Quantity("temperature")]
+    [GasCheckpointField(2)]
     public Kelvin BoilingPoint;
 
     /// <summary>
     ///     Whether this species participates in the condensation model.
     /// </summary>
+    [GasCheckpointField(3)]
     public bool CondensationEnabled;
 
     /// <summary>
@@ -43,6 +48,7 @@ public struct GasProperties
     ///     balance converts it to an approximate internal-energy change, <c>ΔU_vap = ΔH_vap - RT</c>.
     /// </remarks>
     [Quantity("molarEnergy")]
+    [GasCheckpointField(4)]
     public JoulePerMole MolarEnthalpyOfVaporization;
 
     /// <summary>
@@ -53,11 +59,13 @@ public struct GasProperties
     ///     not consumed by the built-in solver. A custom liquid integration may interpret it.
     /// </remarks>
     /// TODO FAR FUTURE fluid sim :godo:
+    [GasCheckpointField(5)]
     public int LiquidId;
 
     /// <summary>
     ///     Dimensionless fraction of the per-species mole imbalance mixed per simulation tick.
     /// </summary>
     /// <remarks>Values are clamped to [0, 1]; non-finite values disable diffusion for this species.</remarks>
+    [GasCheckpointField(6)]
     public Scalar DiffusionCoefficient;
 }

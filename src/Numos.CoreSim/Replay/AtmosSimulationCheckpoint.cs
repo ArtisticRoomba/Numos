@@ -121,10 +121,7 @@ public sealed class AtmosChunkCheckpoint
         Dimensions = chunk.Dimensions;
         IsAwake = chunk.IsAwake;
         SleepTimer = chunk.SleepTimer;
-        Classifications = Array.AsReadOnly(chunk.VoxelRoomMap.ToArray());
-        Temperatures = Array.AsReadOnly(chunk.Temperature.ToArray());
-        Pressures = Array.AsReadOnly(chunk.TotalPressure.ToArray());
-        HeatCapacities = Array.AsReadOnly(chunk.TotalHeatCapacity.ToArray());
+        (Classifications, Temperatures, Pressures, HeatCapacities) = GeneratedCheckpointFields.CaptureChunkArrays(chunk);
         ActiveAirIndices = Array.AsReadOnly(chunk.ActiveAirIndices.AsSpan(0, chunk.ActiveAirCount).ToArray());
         Gases = Array.AsReadOnly(
             Enumerable.Range(0, chunk.ActiveGasCount)
@@ -181,21 +178,25 @@ public sealed class AtmosChunkCheckpoint
     /// <summary>
     ///     Gets flat voxel room IDs, including reserved solid, void and unassigned classifications.
     /// </summary>
+    [ChunkCheckpointField(nameof(AtmosChunk.VoxelRoomMap), 0)]
     public IReadOnlyList<int> Classifications { get; }
 
     /// <summary>
     ///     Gets raw stored kelvins in flat voxel order, preserving non-finite values and their bit patterns.
     /// </summary>
+    [ChunkCheckpointField(nameof(AtmosChunk.Temperature), 1)]
     public IReadOnlyList<float> Temperatures { get; }
 
     /// <summary>
     ///     Gets cached pascals in flat voxel order, including values not refreshed by disabled solver stages.
     /// </summary>
+    [ChunkCheckpointField(nameof(AtmosChunk.TotalPressure), 2)]
     public IReadOnlyList<float> Pressures { get; }
 
     /// <summary>
     ///     Gets cached joules per kelvin in flat voxel order.
     /// </summary>
+    [ChunkCheckpointField(nameof(AtmosChunk.TotalHeatCapacity), 3)]
     public IReadOnlyList<float> HeatCapacities { get; }
 
     /// <summary>
@@ -233,10 +234,7 @@ public sealed class AtmosChunkCheckpoint
         {
             for (int index = 0; index < chunk.VoxelCount; index++)
             {
-                chunk.VoxelRoomMap[index] = Classifications[index];
-                chunk.Temperature[index] = Temperatures[index];
-                chunk.TotalPressure[index] = Pressures[index];
-                chunk.TotalHeatCapacity[index] = HeatCapacities[index];
+                GeneratedCheckpointFields.RestoreChunkArrays(chunk, index, this);
                 chunk.IsVacuum[index] = Pressures[index] <= 0f;
             }
 

@@ -408,22 +408,7 @@ public static partial class NumosReplaySerializer
 
     internal static void WriteConfig(BinaryWriter writer, AtmosConfigSnapshot config)
     {
-        writer.Write(config.GlobalTemperature);
-        writer.Write(config.DefaultTemperatureFallback);
-        writer.Write(config.DefaultMolarHeatCapacityAtConstantVolume);
-        writer.Write(config.VoxelVolume);
-        writer.Write(config.SaturationReferencePressure);
-        writer.Write(config.DefaultDiffusionCoefficient);
-        writer.Write(config.SpaceTemperature);
-        writer.Write(config.BulkFlowCoefficient);
-        writer.Write(config.VacuumThreshold);
-        writer.Write(config.SleepThreshold);
-        writer.Write(config.SleepEpsilon);
-        writer.Write(config.ThermalConductance);
-        writer.Write(config.CondensationRateFactor);
-        writer.Write(config.MaxPressureTransferFractionPerNeighbor);
-        writer.Write(config.AccumulatorWakeThreshold);
-        writer.Write(config.AccumulatorMaxAliveTicks);
+        WriteGeneratedConfigFields(writer, config);
         writer.Write(config.GasRegistry.Count);
         foreach (var gas in config.GasRegistry) WriteGas(writer, gas);
         writer.Write(config.SolverConfigurations.Count);
@@ -431,16 +416,8 @@ public static partial class NumosReplaySerializer
 
     internal static AtmosConfigSnapshot ReadConfig(BinaryReader reader, NumosReplayReadOptions options)
     {
-        var config = new AtmosConfig
-        {
-            GlobalTemperature = reader.ReadSingle(), DefaultTemperatureFallback = reader.ReadSingle(),
-            DefaultMolarHeatCapacityAtConstantVolume = reader.ReadSingle(), VoxelVolume = reader.ReadSingle(),
-            SaturationReferencePressure = reader.ReadSingle(), DefaultDiffusionCoefficient = reader.ReadSingle(),
-            SpaceTemperature = reader.ReadSingle(), BulkFlowCoefficient = reader.ReadSingle(), VacuumThreshold = reader.ReadSingle(),
-            SleepThreshold = reader.ReadInt32(), SleepEpsilon = reader.ReadSingle(), ThermalConductance = reader.ReadSingle(),
-            CondensationRateFactor = reader.ReadSingle(), MaxPressureTransferFractionPerNeighbor = reader.ReadSingle(),
-            AccumulatorWakeThreshold = reader.ReadSingle(), AccumulatorMaxAliveTicks = reader.ReadInt32()
-        };
+        var config = new AtmosConfig();
+        ReadGeneratedConfigFields(reader, config);
 
         int gasCount = ReadCount(reader, 1_000_000, "gas");
         for (int index = 0; index < gasCount; index++) config.GasRegistry.Add(ReadGas(reader, options));
@@ -453,24 +430,12 @@ public static partial class NumosReplaySerializer
 
     private static void WriteGas(BinaryWriter writer, GasProperties gas)
     {
-        WriteNullableString(writer, gas.Name);
-        writer.Write(gas.MolarHeatCapacityAtConstantVolume);
-        writer.Write(gas.BoilingPoint);
-        writer.Write(gas.CondensationEnabled);
-        writer.Write(gas.MolarEnthalpyOfVaporization);
-        writer.Write(gas.LiquidId);
-        writer.Write(gas.DiffusionCoefficient);
+        WriteGeneratedGasFields(writer, gas);
     }
 
     private static GasProperties ReadGas(BinaryReader reader, NumosReplayReadOptions options)
     {
-        return new GasProperties
-        {
-            Name = ReadNullableString(reader, options)!, MolarHeatCapacityAtConstantVolume = reader.ReadSingle(),
-            BoilingPoint = reader.ReadSingle(), CondensationEnabled = reader.ReadBoolean(),
-            MolarEnthalpyOfVaporization = reader.ReadSingle(), LiquidId = reader.ReadInt32(),
-            DiffusionCoefficient = reader.ReadSingle()
-        };
+        return ReadGeneratedGasFields(reader, options);
     }
 
     internal static void WriteChunk(BinaryWriter writer, AtmosChunkCheckpoint chunk)
@@ -480,10 +445,7 @@ public static partial class NumosReplaySerializer
         writer.Write(chunk.IsAwake);
         writer.Write(chunk.SleepTimer);
         writer.Write(chunk.Classifications.Count);
-        foreach (int value in chunk.Classifications) writer.Write(value);
-        foreach (float value in chunk.Temperatures) writer.Write(value);
-        foreach (float value in chunk.Pressures) writer.Write(value);
-        foreach (float value in chunk.HeatCapacities) writer.Write(value);
+        WriteGeneratedChunkFields(writer, chunk);
         writer.Write(chunk.ActiveAirIndices.Count);
         foreach (ushort value in chunk.ActiveAirIndices) writer.Write(value);
         writer.Write(chunk.Gases.Count);
@@ -518,10 +480,7 @@ public static partial class NumosReplaySerializer
 
         if (voxels != expected || voxels <= 0) throw new InvalidDataException("Chunk voxel data does not match its dimensions.");
 
-        int[] classifications = ReadArray(reader, voxels, static r => r.ReadInt32());
-        float[] temperatures = ReadArray(reader, voxels, static r => r.ReadSingle());
-        float[] pressures = ReadArray(reader, voxels, static r => r.ReadSingle());
-        float[] capacities = ReadArray(reader, voxels, static r => r.ReadSingle());
+        var (classifications, temperatures, pressures, capacities) = ReadGeneratedChunkFields(reader, voxels);
         ushort[] air = ReadArray(reader, ReadCount(reader, voxels, "active air voxel"), static r => r.ReadUInt16());
         int gasCount = ReadCount(reader, 1_000_000, "gas channel");
         var gases = new AtmosGasChannelCheckpoint[gasCount];

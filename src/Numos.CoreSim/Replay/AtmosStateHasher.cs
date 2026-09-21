@@ -63,13 +63,7 @@ internal struct AtmosStateHasher
 
     internal void Add(GasProperties gas)
     {
-        Add(gas.Name);
-        Add(gas.MolarHeatCapacityAtConstantVolume);
-        Add(gas.BoilingPoint);
-        Add(gas.CondensationEnabled);
-        Add(gas.MolarEnthalpyOfVaporization);
-        Add(gas.LiquidId);
-        Add(gas.DiffusionCoefficient);
+        GeneratedCheckpointFields.AppendGasFields(ref this, gas);
     }
 
     internal static ulong HashDefinition(AtmosSimulationCheckpoint checkpoint)
@@ -106,10 +100,7 @@ internal struct AtmosStateHasher
             hash.Add(chunk.Dimensions);
             hash.Add(chunk.IsAwake);
             hash.Add(chunk.SleepTimer);
-            foreach (int value in chunk.Classifications) hash.Add(value);
-            foreach (float value in chunk.Temperatures) hash.Add(value);
-            foreach (float value in chunk.Pressures) hash.Add(value);
-            foreach (float value in chunk.HeatCapacities) hash.Add(value);
+            GeneratedCheckpointFields.AppendChunkFields(ref hash, chunk);
             hash.Add(chunk.ActiveAirIndices.Count);
             foreach (ushort value in chunk.ActiveAirIndices) hash.Add(value);
             hash.Add(chunk.Gases.Count);
