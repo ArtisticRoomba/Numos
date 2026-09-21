@@ -47,23 +47,22 @@ internal class ReactionSolver : IAtmosSolverStage
         _preparedConfig = context.TickConfig;
         try
         {
-            // TODO PERF: a single dense chunk (16^3, sparse reactions) is ~12% efficient at 16 workers
-            // (measured in DenseChunkReactionParallelScalingBenchmarks). An earlier note here blamed
-            // ThreadPool wake/dispatch overhead, based on a dotnet-trace showing ~74% of sampled time
-            // outside solver code -- that number turned out to be a harness artifact: the trace looped
-            // Reset()+Solve() back to back, and Reset() (a serial checkpoint restore) left idle pool
-            // workers spin-waiting for a large share of the trace's wall clock, inflating the "wait"
-            // bucket. A direct microbenchmark of ParallelHelper.For itself measured ~2.4us per dispatch
-            // at 16 workers; this method issues one ForEach (chunks) plus one nested For (voxels) per
-            // tick, so real dispatch overhead is on the order of 5us, not the dominant cost.
-            // Fitting Solve-only timings (3.70ms at 1 worker, 0.89ms at 16) to Amdahl's law implies an
-            // ~19% effective serial fraction. The likely concrete source is ProcessChunk's "put data back
-            // in a single thread" loop below: it is a genuine single-threaded pass over every voxel and
-            // every gas channel that never shrinks with worker count. That loop, not dispatch overhead,
-            // is the better place to look before trying anything here again.
+            // Told to ProcessChunk so it knows whether this outer per-chunk dispatch already saturates
+            // the worker pool, mirroring ThermodynamicsSolver/PhaseChangeSolver's awakeChunkCount gate:
+            // a single dense chunk only has per-voxel work to offer, so its write-back pass (see the
+            // ProcessChunk doc) needs its own parallelism to use the other workers; once there are
+            // enough awake chunks to occupy every worker on their own, adding a second layer of
+            // parallelism inside each chunk would just add dispatch overhead for no benefit.
+            int awakeChunkCount = 0;
+            for (int i = 0; i < context.Chunks.Length; i++)
+            {
+                if (context.Chunks[i].IsAwake && context.Chunks[i].ActiveAirCount > 0)
+                    awakeChunkCount++;
+            }
+
             ParallelHelper.ForEach<AtmosChunk, ProcessChunkAction>(
                 context.Chunks,
-                new ProcessChunkAction(this, context.TickConfig));
+                new ProcessChunkAction(this, context.TickConfig, awakeChunkCount));
         }
         finally
         {
@@ -96,7 +95,15 @@ internal class ReactionSolver : IAtmosSolverStage
     ///     Optional accumulator, index = reaction ID, incremented by how many times each reaction fired
     ///     across the whole chunk. Pass null to skip collecting this.
     /// </param>
-    internal void ProcessChunk(AtmosChunk chunk, Second deltaTime, IAtmosConfig config, Scalar[]? reactionCount = null)
+    /// <param name="awakeChunkCount">
+    ///     How many awake, gas-bearing chunks <see cref="Solve" /> is dispatching this tick. Below worker
+    ///     count, this chunk's write-back pass parallelizes across voxels to help fill idle workers; at or
+    ///     above it, the outer per-chunk dispatch already saturates the pool, so it runs sequentially
+    ///     instead. Defaults to 1 (i.e. "parallelize") for callers processing a single chunk directly.
+    /// </param>
+    internal void ProcessChunk(
+        AtmosChunk chunk, Second deltaTime, IAtmosConfig config, Scalar[]? reactionCount = null,
+        int awakeChunkCount = 1)
     {
         // Restricted to ActiveAirIndices, like ThermalDiffusionSolver and PhaseChangeSolver.
         int activeAirCount = chunk.ActiveAirCount;
@@ -144,49 +151,82 @@ internal class ReactionSolver : IAtmosSolverStage
                 rateOrder,
                 changesMatrix));
 
-        // put data back in a single thread. TODO PERF: see the dense-chunk TODO on the ForEach call in
-        // Solve() above -- this loop is the leading suspect for that scaling ceiling, since its cost is
-        // O(activeAirCount * mixtureLength) and independent of worker count.
-        for (int activeIndex = 0; activeIndex < activeAirCount; activeIndex++)
+        // Put data back. This is a genuine O(activeAirCount * mixtureLength) pass that never shrinks
+        // with worker count, so on a chunk that's the only source of parallel work (the dense-chunk
+        // case: no other chunk-level dispatch to fill the pool), this used to be the scaling ceiling
+        // (DenseChunkReactionParallelScalingBenchmarks: ~12% efficient at 16 workers). Each voxel's
+        // diffing/injection only touches its own slot in every per-gas array, so voxels are independent
+        // of each other; the one thing that isn't voxel-independent is GetOrCreateGasChannel's
+        // first-time channel creation (it mutates the chunk's shared ActiveGases/ActiveGasCount) and
+        // Wake() (it rebuilds the chunk's shared
+        // ActiveAirIndices) -- both are resolved once, serially, below before any worker touches a voxel,
+        // so parallelizing is only attempted once neither can fire mid-loop.
+        int workerCount = Math.Max(1, Environment.ProcessorCount);
+        if (awakeChunkCount < workerCount && chunk.IsAwake)
         {
-            ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
-            Span<Mole> mixtureVector = mixtures.AsSpan(activeIndex * mixtureLength, mixtureLength);
-            int c = chunk.ActiveGasCount;
-            //adjust moles from the mixture vector
-            foreach (var gasChannel in chunk.ActiveGases.Take(c))
+            // Mirrors the discovery order the fully serial loop below used to walk (voxel-major, then
+            // ascending gas id), so a chunk's channel-append order -- and therefore the per-voxel
+            // summation order InjectGasToVoxel uses when it recomputes total moles/heat capacity --
+            // stays identical to before this pass was split off the write-back it used to be part of.
+            for (int activeIndex = 0; activeIndex < activeAirCount && chunk.ActiveGasCount < mixtureLength; activeIndex++)
             {
-                Mole diff = mixtureVector[gasChannel.GasId] - gasChannel.Moles[voxelIndex];
-                if (diff > 0)
+                int offset = activeIndex * mixtureLength;
+                for (int gasId = 0; gasId < mixtureLength; gasId++)
                 {
-                    chunk.InjectGasToVoxel(
-                        voxelIndex,
-                        gasChannel.GasId,
-                        diff,
-                        newTemps[activeIndex],
-                        config.GetMolarHeatCapacityAtConstantVolume(gasChannel.GasId),
-                        config.PressurePerMoleKelvin);
-
-                    //fix rounding errors causing bad value.
-                    if (gasChannel.Moles[voxelIndex] < 1e-10)
-                        gasChannel.Moles[voxelIndex] = 0;
+                    if (mixtures[offset + gasId] > 0f)
+                        chunk.GetOrCreateGasChannel(gasId);
                 }
-
-                //set gas to 0.
-                mixtureVector[gasChannel.GasId] = 0;
             }
 
-            //inject remaining gases
-            for (int i = 0; i < mixtureLength; i++)
+            int trackedChannels = chunk.ActiveGasCount;
+            ParallelHelper.For(
+                0,
+                activeAirCount,
+                new WriteBackAction(chunk, mixtures, newTemps, mixtureLength, config, trackedChannels));
+        }
+        else
+        {
+            for (int activeIndex = 0; activeIndex < activeAirCount; activeIndex++)
             {
-                if (mixtureVector[i] <= 0) continue;
+                ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
+                Span<Mole> mixtureVector = mixtures.AsSpan(activeIndex * mixtureLength, mixtureLength);
+                int c = chunk.ActiveGasCount;
+                //adjust moles from the mixture vector
+                foreach (var gasChannel in chunk.ActiveGases.Take(c))
+                {
+                    Mole diff = mixtureVector[gasChannel.GasId] - gasChannel.Moles[voxelIndex];
+                    if (diff > 0)
+                    {
+                        chunk.InjectGasToVoxel(
+                            voxelIndex,
+                            gasChannel.GasId,
+                            diff,
+                            newTemps[activeIndex],
+                            config.GetMolarHeatCapacityAtConstantVolume(gasChannel.GasId),
+                            config.PressurePerMoleKelvin);
 
-                chunk.InjectGasToVoxel(
-                    voxelIndex,
-                    i,
-                    mixtureVector[i],
-                    newTemps[activeIndex],
-                    config.GetMolarHeatCapacityAtConstantVolume(i),
-                    config.PressurePerMoleKelvin);
+                        //fix rounding errors causing bad value.
+                        if (gasChannel.Moles[voxelIndex] < 1e-10)
+                            gasChannel.Moles[voxelIndex] = 0;
+                    }
+
+                    //set gas to 0.
+                    mixtureVector[gasChannel.GasId] = 0;
+                }
+
+                //inject remaining gases
+                for (int i = 0; i < mixtureLength; i++)
+                {
+                    if (mixtureVector[i] <= 0) continue;
+
+                    chunk.InjectGasToVoxel(
+                        voxelIndex,
+                        i,
+                        mixtureVector[i],
+                        newTemps[activeIndex],
+                        config.GetMolarHeatCapacityAtConstantVolume(i),
+                        config.PressurePerMoleKelvin);
+                }
             }
         }
 
@@ -488,11 +528,51 @@ internal class ReactionSolver : IAtmosSolverStage
 
     private readonly struct ProcessChunkAction(
         ReactionSolver solver,
-        IAtmosConfig config) : IInAction<AtmosChunk>
+        IAtmosConfig config,
+        int awakeChunkCount) : IInAction<AtmosChunk>
     {
         public void Invoke(in AtmosChunk chunk)
         {
-            solver.ProcessChunk(chunk, AtmosSolverConstants.FixedTimeStep, config);
+            solver.ProcessChunk(chunk, AtmosSolverConstants.FixedTimeStep, config, awakeChunkCount: awakeChunkCount);
+        }
+    }
+
+    /// <summary>
+    ///     Applies one voxel's post-reaction mixture back to its chunk. Requires every gas id present in
+    ///     <c>mixtures</c> to already have a channel (see the write-back parallel branch in
+    ///     <see cref="ProcessChunk" />), so every call here is a pure, voxel-disjoint read/write and safe
+    ///     to run across workers.
+    /// </summary>
+    private readonly struct WriteBackAction(
+        AtmosChunk chunk,
+        Mole[] mixtures,
+        Kelvin[] newTemps,
+        int mixtureLength,
+        IAtmosConfig config,
+        int trackedChannels) : IAction
+    {
+        public void Invoke(int activeIndex)
+        {
+            ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
+            Span<Mole> mixtureVector = mixtures.AsSpan(activeIndex * mixtureLength, mixtureLength);
+            foreach (var gasChannel in chunk.ActiveGases.AsSpan(0, trackedChannels))
+            {
+                Mole diff = mixtureVector[gasChannel.GasId] - gasChannel.Moles[voxelIndex];
+                if (diff > 0)
+                {
+                    chunk.InjectGasToVoxel(
+                        voxelIndex,
+                        gasChannel.GasId,
+                        diff,
+                        newTemps[activeIndex],
+                        config.GetMolarHeatCapacityAtConstantVolume(gasChannel.GasId),
+                        config.PressurePerMoleKelvin);
+
+                    //fix rounding errors causing bad value.
+                    if (gasChannel.Moles[voxelIndex] < 1e-10)
+                        gasChannel.Moles[voxelIndex] = 0;
+                }
+            }
         }
     }
 

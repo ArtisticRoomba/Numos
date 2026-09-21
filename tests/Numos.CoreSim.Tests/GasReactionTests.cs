@@ -424,6 +424,122 @@ public class GasReactionTests
         Assert.That(chunk.Temperature[0], Is.InRange(1f, 5000f));
     }
 
+    /// <summary>
+    ///     <see cref="ReactionSolver.ProcessChunk" /> picks between a parallel and a fully sequential
+    ///     write-back based on <c>awakeChunkCount</c>; this reruns <see cref="MixingWater" />'s scenario
+    ///     (water synthesis creates a gas channel the chunk didn't start with) once on each branch and
+    ///     requires the two chunks to end up bit-identical, since the parallel branch's channel pre-create
+    ///     pass exists specifically to keep the channel-append order -- and so the floating-point
+    ///     summation order <see cref="AtmosChunk.InjectGasToVoxel" /> uses -- the same as the sequential one.
+    /// </summary>
+    [Test]
+    public void ProcessChunk_ParallelWriteBackMatchesSequential_WhenReactionCreatesANewChannel()
+    {
+        var hydrogen = new GasProperties
+        {
+            BoilingPoint = 20.271f,
+            MolarEnthalpyOfVaporization = 0.904f,
+            Name = "Hydrogen",
+            MolarHeatCapacityAtConstantVolume = 14303.571f
+        };
+
+        var oxygen = new GasProperties
+        {
+            BoilingPoint = 90.188f,
+            MolarEnthalpyOfVaporization = 6.82f,
+            Name = "Oxygen",
+            MolarHeatCapacityAtConstantVolume = 918.12f
+        };
+
+        var water = new GasProperties
+        {
+            BoilingPoint = 373.13f,
+            MolarEnthalpyOfVaporization = 40.65f,
+            Name = "Water",
+            MolarHeatCapacityAtConstantVolume = 36500f
+        };
+
+        var waterSynthesis = new StandardGasReaction(
+            new Dictionary<GasProperties, float>
+                { { hydrogen, 2 }, { oxygen, 1 } },
+            new Dictionary<GasProperties, float>
+            {
+                { water, 2 }
+            },
+            285.8f,
+            1.8e13f,
+            UnitConversions.FromKilojoulePerMole(146.4f),
+            new Dictionary<GasProperties, float>
+            {
+                { hydrogen, 1 },
+                { oxygen, 0.5f }
+            });
+
+        var config = new AtmosConfig
+        {
+            GasRegistry = [hydrogen, oxygen, water],
+            SolverConfigurations = [new GasReactionConfig(standardReactions: [waterSynthesis])]
+        };
+
+        AtmosChunk BuildIgnitedChunk()
+        {
+            var chunk = new AtmosChunk();
+            for (ushort i = 0; i < 64; i++)
+            {
+                chunk.VoxelRoomMap[i] = i;
+                chunk.InjectGasToVoxel(i, 0, 0.001f, 900, 1, 1);
+                chunk.InjectGasToVoxel(i, 1, 0.002f, 900, 1, 1);
+            }
+
+            return chunk;
+        }
+
+        var solver = new ReactionSolver();
+        var sequentialChunk = BuildIgnitedChunk();
+        var parallelChunk = BuildIgnitedChunk();
+        float[] sequentialFeedback = [0];
+        float[] parallelFeedback = [0];
+
+        for (int r = 0; r < 100; r++)
+        {
+            // awakeChunkCount >= worker count always takes the sequential branch; 1 always takes the
+            // parallel one (a real chunk count can never be below 1), regardless of the machine's core count.
+            solver.ProcessChunk(sequentialChunk, 1, config, sequentialFeedback, awakeChunkCount: int.MaxValue);
+            solver.ProcessChunk(parallelChunk, 1, config, parallelFeedback, awakeChunkCount: 1);
+
+            for (ushort i = 0; i < 64; i++)
+            {
+                sequentialChunk.InjectGasToVoxel(i, 0, 0.000005f, 293, 1, 1);
+                sequentialChunk.InjectGasToVoxel(i, 1, 0.000002f, 293, 1, 1);
+                parallelChunk.InjectGasToVoxel(i, 0, 0.000005f, 293, 1, 1);
+                parallelChunk.InjectGasToVoxel(i, 1, 0.000002f, 293, 1, 1);
+            }
+        }
+
+        Assert.That(parallelChunk.ActiveGasCount, Is.EqualTo(sequentialChunk.ActiveGasCount));
+        Assert.That(parallelFeedback[0], Is.EqualTo(sequentialFeedback[0]));
+
+        for (int g = 0; g < sequentialChunk.ActiveGasCount; g++)
+        {
+            Assert.That(
+                parallelChunk.ActiveGases[g].GasId,
+                Is.EqualTo(sequentialChunk.ActiveGases[g].GasId),
+                $"channel order diverged at index {g}");
+        }
+
+        for (ushort i = 0; i < 64; i++)
+        {
+            Assert.That(parallelChunk.Temperature[i], Is.EqualTo(sequentialChunk.Temperature[i]), $"voxel {i} temperature");
+            for (int g = 0; g < sequentialChunk.ActiveGasCount; g++)
+            {
+                Assert.That(
+                    parallelChunk.ActiveGases[g].Moles[i],
+                    Is.EqualTo(sequentialChunk.ActiveGases[g].Moles[i]),
+                    $"voxel {i} gas {sequentialChunk.ActiveGases[g].GasId} moles");
+            }
+        }
+    }
+
     [Test]
     public void MaterialLimiter_DoesNotThrottleAReactionThatOnlyProducesTheScarceGas()
     {
