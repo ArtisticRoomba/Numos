@@ -342,64 +342,83 @@ internal sealed partial class AtmosKernel
         _isApplyingOperation = true;
         try
         {
-            // TODO unhardcode this massive switch here, please sourcegen opcodes or something bro
-            switch (operation)
-            {
-                case SetAtmosConfigOperation op:
-                    SetAtmosConfig(op.Config);
-                    break;
-                case CreateChunkOperation op:
-                    CreateAndRegisterChunk(op.Position, _dimensions.X, _dimensions.Y, _dimensions.Z);
-                    break;
-                case RemoveChunkOperation op:
-                    UnregisterChunk(op.Position);
-                    break;
-                case SetChunkClassificationOperation op:
-                    SetChunkClassification(op.Position, op.Classification);
-                    break;
-                case SetChunkBoundaryClassificationOperation op:
-                    SetChunkBoundaryClassification(op.Position, op.Classification);
-                    break;
-                case SetVoxelClassificationOperation op:
-                    SetVoxelClassification(op.Position, op.LocalVoxelIndex, op.Classification);
-                    break;
-                case SetVoxelTemperatureOperation op:
-                    SetVoxelTemperature(op.Position, op.LocalVoxelIndex, op.Temperature);
-                    break;
-                case AddGasToVoxelOperation op:
-                    AddGasToVoxel(op.Position, op.LocalVoxelIndex, op.GasId, op.Moles, op.Temperature);
-                    break;
-                case WakeChunkOperation op:
-                    WakeChunk(op.Position);
-                    break;
-                case SleepChunkOperation op:
-                    SleepChunk(op.Position);
-                    break;
-                case SetSolverEnabledOperation op:
-                    if (!_setWorldSolverEnabled(op.Name, op.Enabled))
-                        throw new ArgumentException($"Unknown solver '{op.Name}'.");
-
-                    break;
-                case SetVoxelMixtureOperation op:
-                    var chunk = GetChunk(op.Position);
-                    ValidateVoxelIndex(chunk, op.LocalVoxelIndex);
-                    chunk.Wake();
-                    foreach (var gas in op.Gases)
-                        chunk.ActiveGases[chunk.GetOrCreateGasChannel(gas.GasId)].Moles[op.LocalVoxelIndex] = gas.Moles;
-
-                    chunk.Temperature[op.LocalVoxelIndex] = op.Temperature;
-                    chunk.TotalPressure[op.LocalVoxelIndex] = op.Pressure;
-                    chunk.TotalHeatCapacity[op.LocalVoxelIndex] = op.HeatCapacity;
-                    chunk.IsVacuum[op.LocalVoxelIndex] = op.Pressure <= 0f;
-                    chunk.MarkChanged();
-                    break;
-                default: throw new ArgumentException($"Unsupported replay operation code {operation.Code}.", nameof(operation));
-            }
+            ApplyRecordedOperationGenerated(operation);
         }
         finally
         {
             _isApplyingOperation = false;
         }
+    }
+
+    private void Apply(SetAtmosConfigOperation op)
+    {
+        SetAtmosConfig(op.Config);
+    }
+
+    private void Apply(CreateChunkOperation op)
+    {
+        CreateAndRegisterChunk(op.Position, _dimensions.X, _dimensions.Y, _dimensions.Z);
+    }
+
+    private void Apply(RemoveChunkOperation op)
+    {
+        UnregisterChunk(op.Position);
+    }
+
+    private void Apply(SetChunkClassificationOperation op)
+    {
+        SetChunkClassification(op.Position, op.Classification);
+    }
+
+    private void Apply(SetChunkBoundaryClassificationOperation op)
+    {
+        SetChunkBoundaryClassification(op.Position, op.Classification);
+    }
+
+    private void Apply(SetVoxelClassificationOperation op)
+    {
+        SetVoxelClassification(op.Position, op.LocalVoxelIndex, op.Classification);
+    }
+
+    private void Apply(SetVoxelTemperatureOperation op)
+    {
+        SetVoxelTemperature(op.Position, op.LocalVoxelIndex, op.Temperature);
+    }
+
+    private void Apply(AddGasToVoxelOperation op)
+    {
+        AddGasToVoxel(op.Position, op.LocalVoxelIndex, op.GasId, op.Moles, op.Temperature);
+    }
+
+    private void Apply(WakeChunkOperation op)
+    {
+        WakeChunk(op.Position);
+    }
+
+    private void Apply(SleepChunkOperation op)
+    {
+        SleepChunk(op.Position);
+    }
+
+    private void Apply(SetSolverEnabledOperation op)
+    {
+        if (!_setWorldSolverEnabled(op.Name, op.Enabled))
+            throw new ArgumentException($"Unknown solver '{op.Name}'.");
+    }
+
+    private void Apply(SetVoxelMixtureOperation op)
+    {
+        var chunk = GetChunk(op.Position);
+        ValidateVoxelIndex(chunk, op.LocalVoxelIndex);
+        chunk.Wake();
+        foreach (var gas in op.Gases)
+            chunk.ActiveGases[chunk.GetOrCreateGasChannel(gas.GasId)].Moles[op.LocalVoxelIndex] = gas.Moles;
+
+        chunk.Temperature[op.LocalVoxelIndex] = op.Temperature;
+        chunk.TotalPressure[op.LocalVoxelIndex] = op.Pressure;
+        chunk.TotalHeatCapacity[op.LocalVoxelIndex] = op.HeatCapacity;
+        chunk.IsVacuum[op.LocalVoxelIndex] = op.Pressure <= 0f;
+        chunk.MarkChanged();
     }
 
     private void ApplyOperation(AtmosOperation operation)

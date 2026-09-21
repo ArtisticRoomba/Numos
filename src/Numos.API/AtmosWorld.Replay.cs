@@ -371,65 +371,66 @@ public sealed partial class AtmosWorld
     private void ApplyWorldOperation(AtmosWorldOperation operation)
     {
         ArgumentNullException.ThrowIfNull(operation);
-        switch (operation)
+        ApplyWorldOperationGenerated(operation);
+    }
+
+    private void Apply(AtmosWorldSimulationOperation simulationOperation)
+    {
+        var simulation = TryGetSimulationCore(simulationOperation.Simulation);
+        if (simulation == null)
         {
-            case AtmosWorldSimulationOperation simulationOperation:
-            {
-                var simulation = TryGetSimulationCore(simulationOperation.Simulation);
-                if (simulation == null)
-                    throw new ArgumentException("A recorded operation targets a simulation that is not registered.", nameof(operation));
-
-                simulation.Kernel.ApplyRecordedOperation(simulationOperation.Operation);
-                if (simulationOperation.Operation is RemoveChunkOperation removed)
-                    InvalidateLinksForChunk(simulation, new AtmosChunkHandle(removed.Position));
-
-                break;
-            }
-            case SetAtmosWorldConfigOperation config:
-                ApplyConfig(config.Config, false);
-                break;
-            case CreateAtmosSimulationOperation create:
-            {
-                var simulation = new AtmosSimulation(
-                    this,
-                    false,
-                    create.ChunkDimensions.X,
-                    create.ChunkDimensions.Y,
-                    create.ChunkDimensions.Z);
-
-                if (simulation.Id != create.Simulation)
-                    throw new ArgumentException("Simulation allocation diverged from recorded history.", nameof(operation));
-
-                break;
-            }
-            case DestroyAtmosSimulationOperation destroy:
-            {
-                var simulation = TryGetSimulationCore(destroy.Simulation);
-                if (simulation == null || !UnregisterSimulationCore(simulation, false))
-                    throw new ArgumentException("A recorded simulation destruction targets a stale registration.", nameof(operation));
-
-                simulation.DisposeFromWorld();
-                break;
-            }
-            case CreateAtmosLinkSetOperation create:
-            {
-                var actual = CreateLinksCore(create.Links.ToArray(), create.Kind);
-                if (actual != create.Handle)
-                    throw new ArgumentException("Link-set allocation diverged from recorded history.", nameof(operation));
-
-                break;
-            }
-            case DestroyAtmosLinkSetOperation destroy:
-                DestroyLinksCore(destroy.Handle);
-                break;
-            case SetAtmosWorldSolverEnabledOperation solver:
-                if (!Solvers.SetEnabled(solver.Name, solver.Enabled))
-                    throw new ArgumentException($"Unknown world solver '{solver.Name}'.", nameof(operation));
-
-                break;
-            default:
-                throw new ArgumentException($"Unsupported world replay operation code {operation.Code}.", nameof(operation));
+            throw new ArgumentException(
+                "A recorded operation targets a simulation that is not registered.", nameof(simulationOperation));
         }
+
+        simulation.Kernel.ApplyRecordedOperation(simulationOperation.Operation);
+        if (simulationOperation.Operation is RemoveChunkOperation removed)
+            InvalidateLinksForChunk(simulation, new AtmosChunkHandle(removed.Position));
+    }
+
+    private void Apply(SetAtmosWorldConfigOperation config)
+    {
+        ApplyConfig(config.Config, false);
+    }
+
+    private void Apply(CreateAtmosSimulationOperation create)
+    {
+        var simulation = new AtmosSimulation(
+            this,
+            false,
+            create.ChunkDimensions.X,
+            create.ChunkDimensions.Y,
+            create.ChunkDimensions.Z);
+
+        if (simulation.Id != create.Simulation)
+            throw new ArgumentException("Simulation allocation diverged from recorded history.", nameof(create));
+    }
+
+    private void Apply(DestroyAtmosSimulationOperation destroy)
+    {
+        var simulation = TryGetSimulationCore(destroy.Simulation);
+        if (simulation == null || !UnregisterSimulationCore(simulation, false))
+            throw new ArgumentException("A recorded simulation destruction targets a stale registration.", nameof(destroy));
+
+        simulation.DisposeFromWorld();
+    }
+
+    private void Apply(CreateAtmosLinkSetOperation create)
+    {
+        var actual = CreateLinksCore(create.Links.ToArray(), create.Kind);
+        if (actual != create.Handle)
+            throw new ArgumentException("Link-set allocation diverged from recorded history.", nameof(create));
+    }
+
+    private void Apply(DestroyAtmosLinkSetOperation destroy)
+    {
+        DestroyLinksCore(destroy.Handle);
+    }
+
+    private void Apply(SetAtmosWorldSolverEnabledOperation solver)
+    {
+        if (!Solvers.SetEnabled(solver.Name, solver.Enabled))
+            throw new ArgumentException($"Unknown world solver '{solver.Name}'.", nameof(solver));
     }
 
     private static void ValidateWorldHistory(
