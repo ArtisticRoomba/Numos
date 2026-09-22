@@ -499,7 +499,8 @@ internal sealed partial class AtmosKernel
     /// </summary>
     /// <remarks>
     ///     X and Y faces are always included. Z faces are included only for chunks with more than one
-    ///     layer, matching the kernel's two-dimensional boundary behavior for single-layer chunks.
+    ///     layer, since sealing a single-layer chunk's only Z layer would classify every voxel in it
+    ///     rather than just its perimeter.
     /// </remarks>
     internal void SetChunkBoundaryClassification(Int3 position, VoxelClassification classification)
     {

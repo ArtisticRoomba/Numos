@@ -505,7 +505,7 @@ public sealed class ThermodynamicsIntegrationTests
     }
 
     [Test]
-    public void DepthOneChunks_DoNotTreatZAsAThermalFlowPlaneWhenAnotherEdgeEmitsAnEvent()
+    public void DepthOneChunks_ConductThermalEnergyAcrossZBoundaryWhenAnotherEdgeAlsoEmitsAnEvent()
     {
         const int width = 3;
         const int height = 3;
@@ -533,6 +533,10 @@ public sealed class ThermodynamicsIntegrationTests
 
         simulation.AddGasToVoxel(hot, 0, 1, 0, SimTestHelpers.FirstGasName, 1f, 400f);
         simulation.AddGasToVoxel(cold, 0, 1, 0, SimTestHelpers.FirstGasName, 2f, 200f);
+        float initialEnergy = SimTestHelpers.TotalThermalEnergy(
+            config,
+            simulation.GetChunkSnapshot(hot),
+            simulation.GetChunkSnapshot(cold));
 
         simulation.Tick();
         simulation.Tick();
@@ -542,8 +546,14 @@ public sealed class ThermodynamicsIntegrationTests
         var coldSnapshot = simulation.GetChunkSnapshot(cold);
         Assert.Multiple(() =>
         {
-            Assert.That(hotSnapshot.Temperature[index], Is.EqualTo(400f));
-            Assert.That(coldSnapshot.Temperature[index], Is.EqualTo(200f));
+            // The voxel at (0, 1, 0) sits on the chunk's X edge, so it already emits a boundary
+            // event regardless of depth. This confirms the Z boundary conducts too, rather than
+            // being skipped just because an X-facing event happened to fire for the same voxel.
+            Assert.That(hotSnapshot.Temperature[index], Is.LessThan(400f));
+            Assert.That(coldSnapshot.Temperature[index], Is.GreaterThan(200f));
+            Assert.That(
+                SimTestHelpers.TotalThermalEnergy(config, hotSnapshot, coldSnapshot),
+                Is.EqualTo(initialEnergy).Within(SimTestHelpers.EnergyTolerance));
         });
     }
 

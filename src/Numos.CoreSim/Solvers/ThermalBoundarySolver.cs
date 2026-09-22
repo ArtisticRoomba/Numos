@@ -82,9 +82,6 @@ internal sealed class ThermalBoundarySolver : IAtmosSolverStage
         TryAddEdge(context, sourceChunk, sourcePosition, localPosition + Int3.PosX, Int3.PosX);
         TryAddEdge(context, sourceChunk, sourcePosition, localPosition + Int3.NegY, Int3.NegY);
         TryAddEdge(context, sourceChunk, sourcePosition, localPosition + Int3.PosY, Int3.PosY);
-        if (sourceChunk.Depth <= 1)
-            return;
-
         TryAddEdge(context, sourceChunk, sourcePosition, localPosition + Int3.NegZ, Int3.NegZ);
         TryAddEdge(context, sourceChunk, sourcePosition, localPosition + Int3.PosZ, Int3.PosZ);
     }

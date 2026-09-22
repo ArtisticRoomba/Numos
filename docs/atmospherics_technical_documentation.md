@@ -793,8 +793,8 @@ temperature extrema. Voxels with zero heat capacity do not participate and retai
 capacities are snapshotted, and the same `g`, `G`, `s`, and `Q` equations are applied across the entire boundary set.
 Equal-and-opposite energy deltas are buffered before any boundary temperature is written, eliminating concurrent-queue
 traversal bias. Solid, void, and vacuum-classified voxels do not conduct, and a missing adjacent chunk receives no heat.
-Depth-one chunks do not conduct through their Z faces. Thermal transfer can update a sleeping neighbor without waking
-it.
+A depth-one chunk's single layer is both its top and bottom Z face, so it conducts through both simultaneously when a
+neighbor is stacked there. Thermal transfer can update a sleeping neighbor without waking it.
 
 ---
 
