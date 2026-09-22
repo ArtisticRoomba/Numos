@@ -104,7 +104,7 @@ public readonly struct FlatArray<T>
         if (!position.IsWithin(_dimensions))
             throw new IndexOutOfRangeException();
 
-        return position.X + position.Y * _dimensions.X + position.Z * _dimensions.X * _dimensions.Y;
+        return GetIndexUnsafe(position);
     }
 
     /// <summary>
