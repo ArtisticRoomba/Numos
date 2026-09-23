@@ -733,9 +733,6 @@ internal sealed partial class AtmosKernel
         WakeSleepingChunk(position + Int3.PosX);
         WakeSleepingChunk(position + Int3.NegY);
         WakeSleepingChunk(position + Int3.PosY);
-        if (_dimensions.Z <= 1)
-            return;
-
         WakeSleepingChunk(position + Int3.NegZ);
         WakeSleepingChunk(position + Int3.PosZ);
     }
