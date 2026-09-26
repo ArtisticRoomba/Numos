@@ -429,7 +429,7 @@ public sealed partial class AtmosSimulation : IDisposable
     public ChunkHandle CreateAndRegisterChunk(Int3 position)
     {
         ThrowIfDisposed();
-        _kernel.CreateAndRegisterChunk(position, _chunkWidth, _chunkHeight, _chunkDepth);
+        _kernel.CreateAndRegisterChunk(position);
         return new ChunkHandle(position);
     }
 

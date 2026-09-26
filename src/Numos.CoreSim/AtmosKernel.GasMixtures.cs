@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Numos.Chunks;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.Solvers;
 using Numos.Maths;
@@ -48,7 +49,7 @@ internal sealed partial class AtmosKernel
         lock (StateGate)
         {
             var chunk = GetChunk(position);
-            ValidateVoxelIndex(chunk, localVoxelIndex);
+            ChunkMap<AtmosChunk>.ValidateVoxelIndex(chunk, localVoxelIndex);
             return (chunk.Version.Generation, localVoxelIndex);
         }
     }
@@ -65,7 +66,7 @@ internal sealed partial class AtmosKernel
         lock (StateGate)
         {
             var chunk = GetChunk(position);
-            ushort localVoxelIndex = GetValidatedVoxelIndex(chunk, x, y, z);
+            ushort localVoxelIndex = ChunkMap<AtmosChunk>.GetValidatedVoxelIndex(chunk, x, y, z);
             return (chunk.Version.Generation, localVoxelIndex);
         }
     }
@@ -580,7 +581,7 @@ internal sealed partial class AtmosKernel
                 "The voxel gas mixture is stale because its original chunk was unregistered or replaced.");
         }
 
-        ValidateVoxelIndex(chunk, localVoxelIndex);
+        ChunkMap<AtmosChunk>.ValidateVoxelIndex(chunk, localVoxelIndex);
         return chunk;
     }
 

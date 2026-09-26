@@ -386,7 +386,7 @@ public sealed partial class AtmosWorld
 
         simulation.Kernel.ApplyRecordedOperation(simulationOperation.Operation);
         if (simulationOperation.Operation is RemoveChunkOperation removed)
-            InvalidateLinksForChunk(simulation, new AtmosChunkHandle(removed.Position));
+            InvalidateLinksForChunk(simulation, new ChunkHandle(removed.Position));
     }
 
     private void Apply(SetAtmosWorldConfigOperation config)

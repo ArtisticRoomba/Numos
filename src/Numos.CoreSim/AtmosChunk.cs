@@ -20,7 +20,7 @@ namespace Numos.CoreSim;
 ///     Use <see cref="Chunk.GetIndex(int,int,int)" /> and <see cref="Chunk.GetXyzInt3" /> when converting indices
 ///     for scalar-indexed storage such as gas channels (because... you know.... they aren't physical).
 /// </remarks>
-internal class AtmosChunk : Chunk
+internal sealed class AtmosChunk : Chunk, IChunkInitializer<AtmosChunk>
 {
     private static long _nextGeneration;
 
@@ -51,21 +51,7 @@ internal class AtmosChunk : Chunk
     ///     one moles value for every voxel in the chunk.
     /// </remarks>
     public GasChannel[] ActiveGases;
-
-    /// <summary>
-    ///     A process-local index assigned when this chunk is registered.
-    /// </summary>
-    /// <remarks>
-    ///     Lets hot per-tick solver lookups (e.g. boundary flow's cross-chunk injection buffer) use array
-    ///     indexing instead of a dictionary keyed on <see cref="Chunk.GridPosition" />. Unique only among currently
-    ///     registered chunks, and not part of the simulation's observable state, so it is absent from
-    ///     <see cref="AtmosChunkVersion" /> and the state hash. Do not use it for anything but indexing a
-    ///     solver-owned lookup table.
-    ///     Ids are recycled after a chunk is unregistered, so a DenseId-keyed lookup table must track which
-    ///     chunk currently owns each slot and validate that before trusting stale contents.
-    /// </remarks>
-    public int DenseId;
-
+    
     /// <summary>
     ///     Whether this chunk is eligible to be processed by the simulation.
     ///     A sleeping chunk is skipped during simulation ticks.
@@ -248,7 +234,7 @@ internal class AtmosChunk : Chunk
     /// <remarks>
     ///     After releasing a chunk, do not use its active gas channels until they have been initialized again.
     /// </remarks>
-    public void Release()
+    public override void Release()
     {
         _solverArrays = null;
         if (ActiveGases != null)
@@ -352,7 +338,7 @@ internal class AtmosChunk : Chunk
     ///     Every non-solid, non-void voxel participates while the chunk is awake. Classification IDs do not
     ///     partition simulation work.
     /// </remarks>
-    public virtual void Wake()
+    public void Wake()
     {
         IsAwake = true;
         SleepTimer = 0;
@@ -384,7 +370,7 @@ internal class AtmosChunk : Chunk
     /// <summary>
     ///     Marks the chunk as sleeping so that it is skipped by simulation ticks.
     /// </summary>
-    public virtual void Sleep()
+    public void Sleep()
     {
         IsAwake = false;
         MarkChanged();
@@ -650,5 +636,16 @@ internal class AtmosChunk : Chunk
         // Capture the version after all requested fields have been detached.
         snapshot.Version = Version;
         return snapshot;
+    }
+
+    public static AtmosChunk CreateInitializeChunk(
+        Int3 position,
+        int width = ChunkConstants.DefaultWidth,
+        int height = ChunkConstants.DefaultHeight,
+        int depth = ChunkConstants.DefaultDepth)
+    {
+        var chunk = new AtmosChunk(width, height, depth);
+        chunk.Initialize(position, width, height, depth);
+        return chunk;
     }
 }

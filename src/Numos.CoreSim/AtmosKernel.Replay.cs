@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using Numos.Chunks;
 using Numos.CoreSim.Replay;
 using Numos.Maths;
 
@@ -7,7 +8,6 @@ namespace Numos.CoreSim;
 
 internal sealed partial class AtmosKernel
 {
-    private readonly Int3 _dimensions;
     private Action<AtmosOperation>? _externalOperationSink;
     private bool _isApplyingOperation;
     private bool _isReplaying;
@@ -94,11 +94,11 @@ internal sealed partial class AtmosKernel
         {
             ThrowIfTickExecuting("capture a checkpoint during a tick");
             return new AtmosSimulationCheckpoint(
-                _dimensions,
+                _chunkMap.Dimensions,
                 TimelinePosition,
                 _config,
                 _solverCheckpointProvider(),
-                OrderedChunks().Select(static chunk => new AtmosChunkCheckpoint(chunk)).ToArray());
+                _chunkMap.OrderedChunks().Select(static chunk => new AtmosChunkCheckpoint(chunk)).ToArray());
         }
     }
 
@@ -160,7 +160,7 @@ internal sealed partial class AtmosKernel
         ArgumentNullException.ThrowIfNull(checkpoint);
         if (checkpoint.FormatVersion != AtmosSimulationCheckpoint.CurrentFormatVersion ||
             checkpoint.CompatibilityVersion != AtmosSimulationCheckpoint.CurrentCompatibilityVersion ||
-            checkpoint.Dimensions != _dimensions ||
+            checkpoint.Dimensions != _chunkMap.Dimensions ||
             checkpoint.Position.Tick > int.MaxValue)
         {
             throw new ArgumentException(
@@ -185,7 +185,7 @@ internal sealed partial class AtmosKernel
         var positions = new HashSet<Int3>();
         foreach (var chunk in checkpoint.Chunks)
         {
-            if (chunk.Dimensions != _dimensions || !positions.Add(chunk.Position))
+            if (chunk.Dimensions != _chunkMap.Dimensions || !positions.Add(chunk.Position))
                 throw new ArgumentException("The checkpoint contains incompatible or duplicate chunks.", nameof(checkpoint));
         }
     }
@@ -213,13 +213,13 @@ internal sealed partial class AtmosKernel
             throw;
         }
 
-        ConcurrentDictionary<Int3, AtmosChunk> previous = _chunkMap;
-        _chunkMap = replacement;
+        ConcurrentDictionary<Int3, AtmosChunk> previous = _chunkMap.UnsafeGetStorage();
+        _chunkMap.UnsafeReplaceStorage(replacement);
         // Rebase on the restored chunk count instead of continuing to grow across repeated restores
         // (e.g. replay scrubbing), which would otherwise leave DenseId-indexed lookup tables oversized.
         // Ids are reassigned densely as 0..replacement.Count above, so none are free.
-        _nextChunkDenseId = replacement.Count;
-        _freeChunkDenseIds.Clear();
+        _chunkMap.NextDenseId = replacement.Count;
+        _chunkMap.FreeDenseIds.Clear();
         _config = checkpoint.Config;
         CurrentTickConfig.Capture(_config);
         CurrentTickConfig.ClearGasSolverData();
@@ -231,7 +231,7 @@ internal sealed partial class AtmosKernel
             _setWorldSolverEnabled(step.Name, step.Enabled);
 
         _defaultSolvers.ClearTransientState();
-        _chunkCollectionRevision++;
+        _chunkMap.CollectionRevision++;
         LastBoundaryTicks = 0;
         foreach (var chunk in previous.Values)
             chunk.Release();
@@ -357,7 +357,7 @@ internal sealed partial class AtmosKernel
 
     private void Apply(CreateChunkOperation op)
     {
-        CreateAndRegisterChunk(op.Position, _dimensions.X, _dimensions.Y, _dimensions.Z);
+        CreateAndRegisterChunk(op.Position);
     }
 
     private void Apply(RemoveChunkOperation op)
@@ -409,7 +409,7 @@ internal sealed partial class AtmosKernel
     private void Apply(SetVoxelMixtureOperation op)
     {
         var chunk = GetChunk(op.Position);
-        ValidateVoxelIndex(chunk, op.LocalVoxelIndex);
+        ChunkMap<AtmosChunk>.ValidateVoxelIndex(chunk, op.LocalVoxelIndex);
         chunk.Wake();
         foreach (var gas in op.Gases)
             chunk.ActiveGases[chunk.GetOrCreateGasChannel(gas.GasId)].Moles[op.LocalVoxelIndex] = gas.Moles;
@@ -424,13 +424,5 @@ internal sealed partial class AtmosKernel
     private void ApplyOperation(AtmosOperation operation)
     {
         ApplyRecordedOperation(operation);
-    }
-
-    private AtmosChunk[] OrderedChunks()
-    {
-        return _chunkMap.Values
-            .OrderBy(static chunk => chunk.GridPosition.X)
-            .ThenBy(static chunk => chunk.GridPosition.Y)
-            .ThenBy(static chunk => chunk.GridPosition.Z).ToArray();
     }
 }

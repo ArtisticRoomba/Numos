@@ -45,6 +45,19 @@ public abstract class Chunk
     public Int3 Dimensions => new(Width, Height, Depth);
     
     /// <summary>
+    ///     A process-local index assigned when this chunk is registered.
+    /// </summary>
+    /// <remarks>
+    ///     Lets hot per-tick solver lookups (e.g. boundary flow's cross-chunk injection buffer) use array
+    ///     indexing instead of a dictionary keyed on <see cref="GridPosition" />. Unique only among currently
+    ///     registered chunks, and not part of the simulation's observable state.
+    ///     Do not use it for anything but indexing a solver-owned lookup table.
+    ///     Ids are recycled after a chunk is unregistered, so a DenseId-keyed lookup table must track which
+    ///     chunk currently owns each slot and validate that before trusting stale contents.
+    /// </remarks>
+    public int DenseId;
+    
+    /// <summary>
     ///     Converts local voxel coordinates to an index into the chunk's flat arrays.
     /// </summary>
     /// <param name="x">The local x coordinate, from zero through <see cref="Width" /> minus one.</param>
@@ -93,6 +106,12 @@ public abstract class Chunk
     {
         return FlatArrayHelpers.GetPosition(index, Dimensions);
     }
+
+    /// <summary>
+    /// Method that is called before the chunk is released from the chunk map.
+    /// Here it must release all of its disposable resources.
+    /// </summary>
+    public virtual void Release() { }
     
     /// <summary>
     ///     Ensures that a chunk's <see cref="FlatArray{T}"/> has specified dimensions.

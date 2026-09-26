@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Diagnostics;
 using Numos.Chunks;
 using Numos.CoreSim.Replay;
@@ -13,9 +12,6 @@ namespace Numos.CoreSim;
 internal sealed partial class AtmosKernel : IDisposable
 {
     private readonly DefaultAtmosSolvers _defaultSolvers;
-    // Reused before minting a new id, so DenseId stays bounded by peak concurrent chunk count rather
-    // than growing forever. See AtmosChunk.DenseId's remarks on why recycling ids is safe.
-    private readonly Stack<int> _freeChunkDenseIds = new();
     private readonly List<AtmosRecordedOperation> _recordedOperations = [];
     private readonly SolverDataStorage _solverData = new();
 
@@ -28,16 +24,14 @@ internal sealed partial class AtmosKernel : IDisposable
     ///     Number of completed fixed ticks on the owning world timeline.
     /// </summary>
     internal int TickCount;
-
     private Second _accumulator;
-    private long _chunkCollectionRevision;
-    private ConcurrentDictionary<Int3, AtmosChunk> _chunkMap = new();
+    private ChunkMap<AtmosChunk> _chunkMap;
     private AtmosConfigSnapshot _config = new AtmosConfig().CreateSnapshot();
     private bool _hasRecording;
     private bool _isRecording;
     private bool _isTickExecuting;
     private ulong _lastOperationSequence;
-    private int _nextChunkDenseId;
+
     private AtmosTimelinePosition _recordingHead;
     private AtmosTimelinePosition _recordingStart;
 
@@ -46,7 +40,7 @@ internal sealed partial class AtmosKernel : IDisposable
         int chunkHeight = ChunkConstants.DefaultHeight,
         int chunkDepth = ChunkConstants.DefaultDepth)
     {
-        _dimensions = new Int3(chunkWidth, chunkHeight, chunkDepth);
+        _chunkMap = new ChunkMap<AtmosChunk>(chunkWidth, chunkHeight, chunkDepth);
         _defaultSolvers = new DefaultAtmosSolvers(chunkWidth, chunkHeight, chunkDepth);
         CurrentTickConfig.Capture(_config);
     }
@@ -66,10 +60,8 @@ internal sealed partial class AtmosKernel : IDisposable
         lock (StateGate)
         {
             ThrowIfTickExecuting("dispose the simulation");
-            foreach (var chunk in _chunkMap.Values)
-                chunk.Release();
-
-            _chunkMap.Clear();
+            
+            _chunkMap.Dispose();
             CurrentTickConfig.ClearGasSolverData();
             _solverData.Clear();
             _defaultSolvers.Dispose();
@@ -78,7 +70,7 @@ internal sealed partial class AtmosKernel : IDisposable
 
     internal bool TryGetChunk(Int3 position, out AtmosChunk chunk)
     {
-        return _chunkMap.TryGetValue(position, out chunk!);
+        return _chunkMap.TryGetChunk(position, out chunk!);
     }
 
     /// <summary>
@@ -95,7 +87,7 @@ internal sealed partial class AtmosKernel : IDisposable
     {
         lock (StateGate)
         {
-            if (!_chunkMap.TryGetValue(chunkPosition, out var chunk) ||
+            if (!_chunkMap.TryGetChunk(chunkPosition, out var chunk) ||
                 localVoxelIndex >= chunk.VoxelCount)
             {
                 endpoint = default;
@@ -132,7 +124,7 @@ internal sealed partial class AtmosKernel : IDisposable
     {
         lock (StateGate)
         {
-            return new AtmosWorldTickExecution(BeginTickSimulation(OrderedChunks()));
+            return new AtmosWorldTickExecution(BeginTickSimulation(_chunkMap.OrderedChunks()));
         }
     }
 
