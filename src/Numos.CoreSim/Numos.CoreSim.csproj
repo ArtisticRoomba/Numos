@@ -37,6 +37,10 @@
                           OutputItemType="Analyzer"
                           ReferenceOutputAssembly="false"
                           GlobalPropertiesToRemove="PublishAot;PublishTrimmed;RuntimeIdentifier;SelfContained"/>
+        <ProjectReference Include="..\Numos.Replay.CheckpointGen\Numos.Replay.CheckpointGen.csproj"
+                          OutputItemType="Analyzer"
+                          ReferenceOutputAssembly="false"
+                          GlobalPropertiesToRemove="PublishAot;PublishTrimmed;RuntimeIdentifier;SelfContained"/>
     </ItemGroup>
 
     <ItemGroup>

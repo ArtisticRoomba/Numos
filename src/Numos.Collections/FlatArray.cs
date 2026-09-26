@@ -101,7 +101,10 @@ public readonly struct FlatArray<T>
     /// </summary>
     public int GetIndex(Int3 position)
     {
-        return FlatArrayHelpers.GetIndex(position, _dimensions);
+        if (!position.IsWithin(_dimensions))
+            throw new IndexOutOfRangeException();
+
+        return GetIndexUnsafe(position);
     }
 
     /// <summary>

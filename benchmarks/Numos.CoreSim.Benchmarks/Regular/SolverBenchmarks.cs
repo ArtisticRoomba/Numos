@@ -188,7 +188,7 @@ public static class SolverBenchmarks
         public void ThermalDiffusion()
         {
             foreach (var chunk in Workload.Chunks)
-                _solver.Solve(chunk, Workload.Config, _boundaryEvents);
+                _solver.Solve(chunk, Workload.Config, _boundaryEvents, int.MaxValue);
         }
     }
 

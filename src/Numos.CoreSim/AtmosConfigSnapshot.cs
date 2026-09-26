@@ -98,22 +98,22 @@ public sealed class AtmosConfigSnapshot : IAtmosConfig
     ///     Gets immutable solver-owned configurations ordered by their ordinal keys.
     /// </summary>
     public IReadOnlyList<IAtmosSolverConfiguration> SolverConfigurations { get; }
-    public Kelvin GlobalTemperature { get; }
-    public Kelvin DefaultTemperatureFallback { get; }
-    public JoulePerMoleKelvin DefaultMolarHeatCapacityAtConstantVolume { get; }
-    public CubicMetre VoxelVolume { get; }
-    public Pascal SaturationReferencePressure { get; }
-    public Scalar DefaultDiffusionCoefficient { get; }
-    public Kelvin SpaceTemperature { get; }
-    public Scalar BulkFlowCoefficient { get; }
-    public Pascal VacuumThreshold { get; }
-    public int SleepThreshold { get; }
-    public Scalar SleepEpsilon { get; }
-    public JoulePerKelvin ThermalConductance { get; }
-    public Scalar CondensationRateFactor { get; }
-    public Scalar MaxPressureTransferFractionPerNeighbor { get; }
-    public Pascal AccumulatorWakeThreshold { get; }
-    public int AccumulatorMaxAliveTicks { get; }
+    [ConfigCheckpointField(0)] public Kelvin GlobalTemperature { get; }
+    [ConfigCheckpointField(1)] public Kelvin DefaultTemperatureFallback { get; }
+    [ConfigCheckpointField(2)] public JoulePerMoleKelvin DefaultMolarHeatCapacityAtConstantVolume { get; }
+    [ConfigCheckpointField(3)] public CubicMetre VoxelVolume { get; }
+    [ConfigCheckpointField(4)] public Pascal SaturationReferencePressure { get; }
+    [ConfigCheckpointField(5)] public Scalar DefaultDiffusionCoefficient { get; }
+    [ConfigCheckpointField(6)] public Kelvin SpaceTemperature { get; }
+    [ConfigCheckpointField(7)] public Scalar BulkFlowCoefficient { get; }
+    [ConfigCheckpointField(8)] public Pascal VacuumThreshold { get; }
+    [ConfigCheckpointField(9)] public int SleepThreshold { get; }
+    [ConfigCheckpointField(10)] public Scalar SleepEpsilon { get; }
+    [ConfigCheckpointField(11)] public JoulePerKelvin ThermalConductance { get; }
+    [ConfigCheckpointField(12)] public Scalar CondensationRateFactor { get; }
+    [ConfigCheckpointField(13)] public Scalar MaxPressureTransferFractionPerNeighbor { get; }
+    [ConfigCheckpointField(14)] public Pascal AccumulatorWakeThreshold { get; }
+    [ConfigCheckpointField(15)] public int AccumulatorMaxAliveTicks { get; }
 
     public PascalPerMoleKelvin PressurePerMoleKelvin =>
         AtmosPhysicalConstants.MolarGasConstant / GetVoxelVolume();
@@ -172,22 +172,7 @@ public sealed class AtmosConfigSnapshot : IAtmosConfig
 
     internal void AppendHash(ref AtmosStateHasher hash)
     {
-        hash.Add(GlobalTemperature);
-        hash.Add(DefaultTemperatureFallback);
-        hash.Add(DefaultMolarHeatCapacityAtConstantVolume);
-        hash.Add(VoxelVolume);
-        hash.Add(SaturationReferencePressure);
-        hash.Add(DefaultDiffusionCoefficient);
-        hash.Add(SpaceTemperature);
-        hash.Add(BulkFlowCoefficient);
-        hash.Add(VacuumThreshold);
-        hash.Add(SleepThreshold);
-        hash.Add(SleepEpsilon);
-        hash.Add(ThermalConductance);
-        hash.Add(CondensationRateFactor);
-        hash.Add(MaxPressureTransferFractionPerNeighbor);
-        hash.Add(AccumulatorWakeThreshold);
-        hash.Add(AccumulatorMaxAliveTicks);
+        GeneratedCheckpointFields.AppendConfigFields(ref hash, this);
         hash.Add(GasRegistry.Count);
         foreach (var gas in GasRegistry) hash.Add(gas);
         if (SolverConfigurations.Count != 0)

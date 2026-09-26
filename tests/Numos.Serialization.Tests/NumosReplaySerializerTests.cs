@@ -1,3 +1,4 @@
+using Numos.API;
 using Numos.Chunks;
 using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Primitives;
@@ -6,7 +7,7 @@ using Numos.Maths;
 using Numos.Serialization;
 using Numos.Serialization.FileSystem;
 
-namespace Numos.API.Tests;
+namespace Numos.Serialization.Tests;
 
 [TestFixture]
 public sealed class NumosReplaySerializerTests
