@@ -10,7 +10,7 @@ namespace Numos.Chunks;
 /// <remarks>
 ///     Chunk-owned per-voxel data supports both flat-index and <see cref="Int3" /> coordinate access.
 ///     Use <see cref="GetIndex(Int3)" /> and <see cref="GetXyzInt3(ushort)" /> when converting indices
-///     for scalar-indexed storage such as gas channels (because... you know.... they aren't physical).
+///     for scalar-indexed storage.
 /// </remarks>
 public abstract class Chunk
 {

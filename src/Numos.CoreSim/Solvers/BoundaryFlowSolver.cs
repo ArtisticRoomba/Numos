@@ -1,4 +1,5 @@
 using CommunityToolkit.HighPerformance.Helpers;
+using Numos.Chunks;
 using Numos.CoreSim.Datatypes.Events;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.Maths;
@@ -388,7 +389,7 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
         private readonly List<InjectionBatch> _batches = [];
 
         /// <summary>
-        ///     Maps <see cref="AtmosChunk.DenseId" /> to this tick's batch index for that chunk, or -1 if the
+        ///     Maps <see cref="Chunk.DenseId" /> to this tick's batch index for that chunk, or -1 if the
         ///     chunk has no batch yet. A flat array indexed by dense id is a direct replacement for a
         ///     dictionary keyed on grid position — this lookup runs once per boundary-flow transfer and the
         ///     dictionary hash/probe was the dominant cost of that hot loop.
@@ -397,7 +398,7 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
 
         /// <summary>
         ///     The chunk each <see cref="_batchIndexByChunkDenseId" /> slot was last resolved for. Since
-        ///     <see cref="AtmosChunk.DenseId" /> is recycled, a slot's batch index is only trusted when this
+        ///     <see cref="Chunk.DenseId" /> is recycled, a slot's batch index is only trusted when this
         ///     still matches the chunk being looked up.
         /// </summary>
         private AtmosChunk?[] _ownerByChunkDenseId = [];

@@ -4,12 +4,15 @@ using Numos.Maths;
 namespace Numos.Chunks;
 
 /// <summary>
-/// Represents a voxel chunk map.
+/// A chunk map of voxel chunks where each chunk has fixed dimensions.
 /// </summary>
-/// <typeparam name="T"></typeparam>
+/// <typeparam name="T">
+/// Chunk type that also implements an <see cref="IChunkInitializer{T}"/>
+/// interface to initialize newly created instances of this chunk.
+/// </typeparam>
 public sealed class ChunkMap<T>(int x, int y, int z) : IDisposable where T : Chunk, IChunkInitializer<T>
 {
-    public readonly Int3 Dimensions = new Int3(x, y, z);
+    public readonly Int3 Dimensions = new(x, y, z);
     
     private ConcurrentDictionary<Int3, T> _chunkMap = new();
     

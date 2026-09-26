@@ -1,5 +1,8 @@
 ﻿namespace Numos.Chunks;
 
+/// <summary>
+/// Default constants for Numos chunks.
+/// </summary>
 public static class ChunkConstants
 {
     /// <summary>Default number of voxels along a chunk's x-axis.</summary>
