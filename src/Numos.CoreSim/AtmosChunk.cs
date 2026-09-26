@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using JetBrains.Annotations;
+using Numos.Chunks;
 using Numos.Collections;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.Datatypes.Snapshots;
@@ -16,10 +17,10 @@ namespace Numos.CoreSim;
 /// </summary>
 /// <remarks>
 ///     Chunk-owned per-voxel data supports both flat-index and <see cref="Int3" /> coordinate access.
-///     Use <see cref="GetIndex(Int3)" /> and <see cref="GetXyzInt3(ushort)" /> when converting indices
+///     Use <see cref="Chunk.GetIndex(int,int,int)" /> and <see cref="Chunk.GetXyzInt3" /> when converting indices
 ///     for scalar-indexed storage such as gas channels (because... you know.... they aren't physical).
 /// </remarks>
-internal class AtmosChunk
+internal sealed class AtmosChunk : Chunk, IChunkInitializer<AtmosChunk>
 {
     private static long _nextGeneration;
 
@@ -50,36 +51,7 @@ internal class AtmosChunk
     ///     one moles value for every voxel in the chunk.
     /// </remarks>
     public GasChannel[] ActiveGases;
-
-    /// <summary>
-    ///     A process-local index assigned when this chunk is registered.
-    /// </summary>
-    /// <remarks>
-    ///     Lets hot per-tick solver lookups (e.g. boundary flow's cross-chunk injection buffer) use array
-    ///     indexing instead of a dictionary keyed on <see cref="GridPosition" />. Unique only among currently
-    ///     registered chunks, and not part of the simulation's observable state, so it is absent from
-    ///     <see cref="AtmosChunkVersion" /> and the state hash. Do not use it for anything but indexing a
-    ///     solver-owned lookup table.
-    ///     Ids are recycled after a chunk is unregistered, so a DenseId-keyed lookup table must track which
-    ///     chunk currently owns each slot and validate that before trusting stale contents.
-    /// </remarks>
-    public int DenseId;
-
-    /// <summary>
-    ///     The number of voxels along the z-axis.
-    /// </summary>
-    public int Depth;
-
-    /// <summary>
-    ///     The position of this chunk in the chunk grid.
-    /// </summary>
-    public Int3 GridPosition;
-
-    /// <summary>
-    ///     The number of voxels along the y-axis.
-    /// </summary>
-    public int Height;
-
+    
     /// <summary>
     ///     Whether this chunk is eligible to be processed by the simulation.
     ///     A sleeping chunk is skipped during simulation ticks.
@@ -127,11 +99,6 @@ internal class AtmosChunk
     public FlatArray<Pascal> TotalPressure;
 
     /// <summary>
-    ///     Total number of voxels in this chunk, equal to <c>Width * Height * Depth</c>.
-    /// </summary>
-    public int VoxelCount;
-
-    /// <summary>
     ///     Room classification for each voxel, indexed by flat voxel index or local coordinate.
     /// </summary>
     /// <remarks>
@@ -145,11 +112,6 @@ internal class AtmosChunk
     /// <seealso cref="VoxelClassification.RoomUnassigned" />
     public FlatArray<int> VoxelRoomMap;
 
-    /// <summary>
-    ///     The number of voxels along the x-axis.
-    /// </summary>
-    public int Width;
-
     private long _generation;
     private long _revision;
     private Dictionary<object, SolverArrayStorage>? _solverArrays;
@@ -162,12 +124,12 @@ internal class AtmosChunk
     /// <param name="depth">The number of voxels along the z axis.</param>
     /// <exception cref="ArgumentOutOfRangeException">
     ///     A dimension is non-positive or the combined voxel count exceeds
-    ///     <see cref="AtmosChunkConstants.MaximumVoxelCount" />.
+    ///     <see cref="ChunkConstants.MaximumVoxelCount" />.
     /// </exception>
     public AtmosChunk(
-        int width = AtmosChunkConstants.DefaultWidth,
-        int height = AtmosChunkConstants.DefaultHeight,
-        int depth = AtmosChunkConstants.DefaultDepth)
+        int width = ChunkConstants.DefaultWidth,
+        int height = ChunkConstants.DefaultHeight,
+        int depth = ChunkConstants.DefaultDepth)
     {
         int voxelCount = GetValidatedVoxelCount(width, height, depth);
         Width = width;
@@ -184,11 +146,6 @@ internal class AtmosChunk
     ///     Identity and revision used by conditional snapshot consumers.
     /// </summary>
     public AtmosChunkVersion Version => new(_generation, Interlocked.Read(ref _revision));
-
-    /// <summary>
-    ///     The number of voxels along each axis.
-    /// </summary>
-    public Int3 Dimensions => new(Width, Height, Depth);
 
     /// <summary>
     ///     Ensures that the chunk's per-voxel arrays are initialized for its current dimensions.
@@ -223,7 +180,7 @@ internal class AtmosChunk
     /// <param name="depth">The depth of the chunk.</param>
     /// <exception cref="ArgumentOutOfRangeException">
     ///     A dimension is non-positive or the combined voxel count exceeds
-    ///     <see cref="AtmosChunkConstants.MaximumVoxelCount" />.
+    ///     <see cref="ChunkConstants.MaximumVoxelCount" />.
     /// </exception>
     /// <remarks>
     ///     Initialization puts the chunk to sleep, resets all active counts and timers, and clears
@@ -232,9 +189,9 @@ internal class AtmosChunk
     [PublicAPI]
     public void Initialize(
         Int3 position,
-        int width = AtmosChunkConstants.DefaultWidth,
-        int height = AtmosChunkConstants.DefaultHeight,
-        int depth = AtmosChunkConstants.DefaultDepth)
+        int width = ChunkConstants.DefaultWidth,
+        int height = ChunkConstants.DefaultHeight,
+        int depth = ChunkConstants.DefaultDepth)
     {
         int voxelCount = GetValidatedVoxelCount(width, height, depth);
         _solverArrays = null;
@@ -277,7 +234,7 @@ internal class AtmosChunk
     /// <remarks>
     ///     After releasing a chunk, do not use its active gas channels until they have been initialized again.
     /// </remarks>
-    public void Release()
+    public override void Release()
     {
         _solverArrays = null;
         if (ActiveGases != null)
@@ -381,7 +338,7 @@ internal class AtmosChunk
     ///     Every non-solid, non-void voxel participates while the chunk is awake. Classification IDs do not
     ///     partition simulation work.
     /// </remarks>
-    public virtual void Wake()
+    public void Wake()
     {
         IsAwake = true;
         SleepTimer = 0;
@@ -413,7 +370,7 @@ internal class AtmosChunk
     /// <summary>
     ///     Marks the chunk as sleeping so that it is skipped by simulation ticks.
     /// </summary>
-    public virtual void Sleep()
+    public void Sleep()
     {
         IsAwake = false;
         MarkChanged();
@@ -508,7 +465,6 @@ internal class AtmosChunk
         return true;
     }
 
-
     /// <summary>
     ///     Sets a specific voxel to a vacuum. This sets TotalPressure, ActiveGases, and TotalHeatCapacity to 0 and IsVacuum to
     ///     true.
@@ -544,7 +500,6 @@ internal class AtmosChunk
         IsVacuum.Fill(true);
     }
 
-
     /// <summary>
     ///     Sets a specific voxel classification. Solid and void classifications clear the voxel to vacuum.
     /// </summary>
@@ -573,7 +528,6 @@ internal class AtmosChunk
         VoxelRoomMap[idx] = classification.RoomId;
     }
 
-
     /// <summary>
     ///     Sets every voxel classification. Solid and void classifications clear the chunk to vacuum.
     /// </summary>
@@ -586,7 +540,6 @@ internal class AtmosChunk
 
         VoxelRoomMap.Fill(roomId);
     }
-
 
     /// <summary>
     ///     Sets the entire chunk classification. Solid and void classifications clear the chunk to vacuum.
@@ -685,90 +638,14 @@ internal class AtmosChunk
         return snapshot;
     }
 
-    /// <summary>
-    ///     Converts local voxel coordinates to an index into the chunk's flat arrays.
-    /// </summary>
-    /// <param name="x">The local x coordinate, from zero through <see cref="Width" /> minus one.</param>
-    /// <param name="y">The local y coordinate, from zero through <see cref="Height" /> minus one.</param>
-    /// <param name="z">The local z coordinate, from zero through <see cref="Depth" /> minus one.</param>
-    /// <returns>The flat voxel index.</returns>
-    [PublicAPI]
-    public ushort GetIndex(int x, int y, int z)
+    public static AtmosChunk CreateInitializeChunk(
+        Int3 position,
+        int width = ChunkConstants.DefaultWidth,
+        int height = ChunkConstants.DefaultHeight,
+        int depth = ChunkConstants.DefaultDepth)
     {
-        return GetIndex(new Int3(x, y, z));
-    }
-
-    /// <inheritdoc cref="GetIndex(int, int, int)" />
-    [PublicAPI]
-    public ushort GetIndex(Int3 vec)
-    {
-        return (ushort)VoxelRoomMap.GetIndex(vec);
-    }
-
-    /// <inheritdoc cref="GetIndex(int, int, int)" />
-    [PublicAPI]
-    public ushort GetIndexUnsafe(Int3 vec)
-    {
-        return (ushort)VoxelRoomMap.GetIndexUnsafe(vec);
-    }
-
-
-    /// <summary>
-    ///     Converts a flat voxel index to local x, y, and z coordinates.
-    /// </summary>
-    /// <param name="index">The flat voxel index.</param>
-    /// <returns>The local coordinates as an <c>(x, y, z)</c> tuple.</returns>
-    [PublicAPI]
-    public (int x, int y, int z) GetXyz(ushort index)
-    {
-        var position = GetXyzInt3(index);
-        return (position.X, position.Y, position.Z);
-    }
-
-    /// <summary>
-    ///     Converts a flat voxel index to local coordinates as an <see cref="Int3" />.
-    /// </summary>
-    /// <param name="index">The flat voxel index.</param>
-    /// <returns>The local voxel coordinates.</returns>
-    [PublicAPI]
-    public Int3 GetXyzInt3(ushort index)
-    {
-        return VoxelRoomMap.GetPosition(index);
-    }
-
-    private void EnsureInitialized<T>(ref FlatArray<T> array, Int3 dimensions)
-    {
-        if (!array.IsInitialized || array.Length != VoxelCount)
-            array = new FlatArray<T>(new T[VoxelCount], dimensions);
-        else if (array.Dimensions != dimensions)
-            array = array.Reshape(dimensions);
-    }
-
-    private static int GetValidatedVoxelCount(int width, int height, int depth)
-    {
-        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(width);
-        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(height);
-        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(depth);
-        if (width > AtmosChunkConstants.MaximumVoxelCount ||
-            height > AtmosChunkConstants.MaximumVoxelCount ||
-            depth > AtmosChunkConstants.MaximumVoxelCount)
-        {
-            throw new ArgumentOutOfRangeException(
-                nameof(width),
-                width,
-                $"No chunk dimension may exceed {AtmosChunkConstants.MaximumVoxelCount}.");
-        }
-
-        long voxelCount = (long)width * height * depth;
-        if (voxelCount > AtmosChunkConstants.MaximumVoxelCount)
-        {
-            throw new ArgumentOutOfRangeException(
-                nameof(width),
-                width,
-                $"Chunk dimensions contain {voxelCount} voxels, but at most " +
-                $"{AtmosChunkConstants.MaximumVoxelCount} are supported.");
-        }
-
-        return (int)voxelCount;
+        var chunk = new AtmosChunk(width, height, depth);
+        chunk.Initialize(position, width, height, depth);
+        return chunk;
     }
 }

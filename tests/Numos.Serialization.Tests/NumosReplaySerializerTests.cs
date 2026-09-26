@@ -1,4 +1,5 @@
 using Numos.API;
+using Numos.Chunks;
 using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.Replay;
@@ -98,7 +99,7 @@ public sealed class NumosReplaySerializerTests
             operation.Sequence <= imported.Position.OperationSequence);
 
         imported.SimulateFromHere();
-        replaySimulation.SetVoxelTemperature(new AtmosChunkHandle(default), 1, 350f);
+        replaySimulation.SetVoxelTemperature(new ChunkHandle(default), 1, 350f);
         var branch = imported.CaptureReplay();
         Assert.Multiple(() =>
         {

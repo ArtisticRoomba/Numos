@@ -1,6 +1,7 @@
 using System.Numerics;
 using ImGuiNET;
 using Numos.API;
+using Numos.Chunks;
 using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.Datatypes.Snapshots;
@@ -980,7 +981,7 @@ public partial class SimulationViewer
                 try
                 {
                     _simulation!.SetChunkClassification(
-                        new AtmosChunkHandle(_toolChunkPosition.Value),
+                        new ChunkHandle(_toolChunkPosition.Value),
                         new VoxelClassification(_toolClassificationDraft));
 
                     SetProjectMessage(
@@ -1503,7 +1504,7 @@ public partial class SimulationViewer
         try
         {
             bool available = _simulation.TryGetVoxelSnapshot(
-                new AtmosChunkHandle(address.Chunk.Position),
+                new ChunkHandle(address.Chunk.Position),
                 address.LocalIndex,
                 presentedVersion,
                 out snapshot);

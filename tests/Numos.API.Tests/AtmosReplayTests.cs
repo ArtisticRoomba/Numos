@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using Numos.Chunks;
 using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.Replay;
@@ -292,7 +293,7 @@ public sealed class AtmosReplayTests
         second.CreateAndRegisterChunk(new Int3(2, 0, 0));
         second.CreateAndRegisterChunk(default);
         Assert.That(first.ComputeStateHash(), Is.EqualTo(second.ComputeStateHash()));
-        second.SetVoxelTemperature(new AtmosChunkHandle(default), 0, BitConverter.Int32BitsToSingle(unchecked((int)0x80000000)));
+        second.SetVoxelTemperature(new ChunkHandle(default), 0, BitConverter.Int32BitsToSingle(unchecked((int)0x80000000)));
         Assert.That(first.ComputeStateHash(), Is.Not.EqualTo(second.ComputeStateHash()));
     }
 

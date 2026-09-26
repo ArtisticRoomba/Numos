@@ -1,4 +1,5 @@
 using Numos.API;
+using Numos.Chunks;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.Datatypes.Snapshots;
 using Numos.Maths;
@@ -348,7 +349,7 @@ public sealed class CrossChunkFlowTests
 
             Int3[] sourcePositions = [Int3.NegX, Int3.PosX, Int3.NegY, Int3.PosY];
             float[] sourceTemperatures = [250f, 300f, 350f, 400f];
-            var sources = new AtmosChunkHandle[sourcePositions.Length];
+            var sources = new ChunkHandle[sourcePositions.Length];
             for (int sourceIndex = 0; sourceIndex < sourcePositions.Length; sourceIndex++)
             {
                 sources[sourceIndex] = SimTestHelpers.CreateOpenChunk(simulation, sourcePositions[sourceIndex]);
@@ -861,7 +862,7 @@ public sealed class CrossChunkFlowTests
             Is.EqualTo(0.1f).Within(SimTestHelpers.Tolerance));
     }
 
-    private static AtmosChunkHandle CreateIsolatedVoxel(
+    private static ChunkHandle CreateIsolatedVoxel(
         AtmosSimulation simulation, Int3 position,
         int x, int y, int z, VoxelClassification classification)
     {

@@ -1,4 +1,5 @@
 using Numos.API;
+using Numos.Chunks;
 using Numos.CoreSim.Replay;
 using Numos.Replay.SourceGen;
 
@@ -540,7 +541,7 @@ public static partial class NumosWorldReplaySerializer
     {
         return new AtmosCellRef(
             ReadSimulationId(reader),
-            new AtmosChunkHandle(NumosReplaySerializer.ReadInt3(reader)),
+            new ChunkHandle(NumosReplaySerializer.ReadInt3(reader)),
             reader.ReadUInt16());
     }
 

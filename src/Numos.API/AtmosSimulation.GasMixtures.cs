@@ -1,4 +1,5 @@
 using JetBrains.Annotations;
+using Numos.Chunks;
 using Numos.CoreSim;
 
 namespace Numos.API;
@@ -34,7 +35,7 @@ public sealed partial class AtmosSimulation
     ///     becomes stale if that chunk is removed or replaced at the same grid position.
     /// </remarks>
     [PublicAPI]
-    public IGasMixture GetVoxelGasMixture(AtmosChunkHandle chunk, ushort localVoxelIndex)
+    public IGasMixture GetVoxelGasMixture(ChunkHandle chunk, ushort localVoxelIndex)
     {
         lock (_mixtureGate)
         {
@@ -46,7 +47,7 @@ public sealed partial class AtmosSimulation
 
     /// <summary>Creates sandboxed live access to one voxel addressed by local coordinates.</summary>
     [PublicAPI]
-    public IGasMixture GetVoxelGasMixture(AtmosChunkHandle chunk, int x, int y, int z)
+    public IGasMixture GetVoxelGasMixture(ChunkHandle chunk, int x, int y, int z)
     {
         lock (_mixtureGate)
         {

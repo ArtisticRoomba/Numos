@@ -1,3 +1,4 @@
+using Numos.Chunks;
 using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.GasReactions;
@@ -197,7 +198,7 @@ public sealed class AtmosWorldReplayTests
         };
     }
 
-    private static AtmosChunkHandle CreateOpenChunk(AtmosSimulation simulation, Int3 position)
+    private static ChunkHandle CreateOpenChunk(AtmosSimulation simulation, Int3 position)
     {
         var chunk = simulation.CreateAndRegisterChunk(position);
         simulation.SetChunkClassification(chunk, new VoxelClassification(1));

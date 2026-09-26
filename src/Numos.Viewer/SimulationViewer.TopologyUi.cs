@@ -1,6 +1,7 @@
 using System.Numerics;
 using ImGuiNET;
 using Numos.API;
+using Numos.Chunks;
 using Numos.Maths;
 using Numos.Viewer.Ui;
 using Raylib_cs;
@@ -274,7 +275,7 @@ public partial class SimulationViewer
             ImGui.EndCombo();
         }
 
-        AtmosChunkHandle[] chunks = _simulationSurfaces[simulationIndex].Simulation.GetChunkHandles().ToArray();
+        ChunkHandle[] chunks = _simulationSurfaces[simulationIndex].Simulation.GetChunkHandles().ToArray();
         chunkIndex = chunks.Length == 0 ? 0 : Math.Clamp(chunkIndex, 0, chunks.Length - 1);
         string chunkLabel = chunks.Length == 0 ? "No chunks" : FormatChunkPosition(chunks[chunkIndex].Position);
         if (ImGui.BeginCombo($"{label} chunk", chunkLabel))
@@ -363,8 +364,8 @@ public partial class SimulationViewer
     {
         var firstSurface = _simulationSurfaces[Math.Clamp(_dockFirstSimulation, 0, _simulationSurfaces.Count - 1)];
         var secondSurface = _simulationSurfaces[Math.Clamp(_dockSecondSimulation, 0, _simulationSurfaces.Count - 1)];
-        AtmosChunkHandle[] firstChunks = firstSurface.Simulation.GetChunkHandles().ToArray();
-        AtmosChunkHandle[] secondChunks = secondSurface.Simulation.GetChunkHandles().ToArray();
+        ChunkHandle[] firstChunks = firstSurface.Simulation.GetChunkHandles().ToArray();
+        ChunkHandle[] secondChunks = secondSurface.Simulation.GetChunkHandles().ToArray();
         if (firstChunks.Length == 0 || secondChunks.Length == 0)
             throw new InvalidOperationException("Each dock endpoint needs a chunk.");
 
@@ -408,7 +409,7 @@ public partial class SimulationViewer
 
         return new AtmosCellRef(
             _simulation.Id,
-            new AtmosChunkHandle(_selectedCell.Value.Chunk.Position),
+            new ChunkHandle(_selectedCell.Value.Chunk.Position),
             _selectedCell.Value.LocalIndex);
     }
 

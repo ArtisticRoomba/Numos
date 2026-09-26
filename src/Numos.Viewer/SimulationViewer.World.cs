@@ -1,7 +1,7 @@
 using System.Numerics;
 using ImGuiNET;
 using Numos.API;
-using Numos.CoreSim;
+using Numos.Chunks;
 using Numos.CoreSim.Datatypes.Snapshots;
 using Numos.Maths;
 using Numos.SimDrawer;
@@ -18,8 +18,8 @@ public partial class SimulationViewer
     private AtmosSimulationId? _activeSimulationId;
     private long _knownSimulationRevision = -1;
     private int _newSimulationDepth = 1;
-    private int _newSimulationHeight = AtmosChunkConstants.DefaultHeight;
-    private int _newSimulationWidth = AtmosChunkConstants.DefaultWidth;
+    private int _newSimulationHeight = ChunkConstants.DefaultHeight;
+    private int _newSimulationWidth = ChunkConstants.DefaultWidth;
     private bool _removeSimulationModalOpen;
     private bool _requestRemoveSimulation;
     private bool _showWorldPanel = true;
@@ -161,7 +161,7 @@ public partial class SimulationViewer
     private void RefreshSimulationSurface(SimulationSurface surface)
     {
         var fields = _frameBuilder!.GetRequiredSnapshotFields(_currentVisualizationId);
-        if (surface.Simulation.TryGetChunkHandles(surface.ChunkRevision, out long revision, out AtmosChunkHandle[] handles))
+        if (surface.Simulation.TryGetChunkHandles(surface.ChunkRevision, out long revision, out ChunkHandle[] handles))
         {
             surface.ChunkRevision = revision;
             surface.Handles = handles;
@@ -462,7 +462,7 @@ public partial class SimulationViewer
             Projection = CameraProjection.Perspective
         };
         internal long ChunkRevision { get; set; } = -1;
-        internal AtmosChunkHandle[] Handles { get; set; } = [];
+        internal ChunkHandle[] Handles { get; set; } = [];
         internal Dictionary<Int3, AtmosChunkSnapshot> Snapshots { get; } = [];
         internal SimulationDrawData? DrawData { get; set; }
 

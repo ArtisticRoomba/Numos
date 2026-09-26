@@ -1,4 +1,5 @@
 using Numos.API;
+using Numos.Chunks;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.Datatypes.Snapshots;
 using Numos.Maths;
@@ -40,7 +41,7 @@ internal static class SimTestHelpers
         };
     }
 
-    internal static AtmosChunkHandle CreateOpenChunk(
+    internal static ChunkHandle CreateOpenChunk(
         AtmosSimulation simulation, Int3 position,
         VoxelClassification? classification = null)
     {
@@ -50,7 +51,7 @@ internal static class SimTestHelpers
     }
 
     internal static void SetAllTemperatures(
-        AtmosSimulation simulation, AtmosChunkHandle chunk,
+        AtmosSimulation simulation, ChunkHandle chunk,
         int width, int height, int depth, float temperature = DefaultTemperature)
     {
         for (int z = 0; z < depth; z++)

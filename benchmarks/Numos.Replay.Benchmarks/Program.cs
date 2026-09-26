@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.InteropServices;
 using Numos.API;
+using Numos.Chunks;
 using Numos.CoreSim;
 using Numos.CoreSim.Replay;
 using Numos.Maths;
@@ -65,7 +66,7 @@ foreach (int chunkCount in quick ? new[] { 1, 8 } : new[] { 1, 8, 32 })
     var timeline = new AtmosReplayTimeline(simulation);
     for (int tick = 0; tick < 200; tick++)
     {
-        if (tick % 17 == 0) simulation.AddGasToVoxel(new AtmosChunkHandle(default), 0, 0, 0.25f, 300f);
+        if (tick % 17 == 0) simulation.AddGasToVoxel(new ChunkHandle(default), 0, 0, 0.25f, 300f);
         simulation.Tick();
         timeline.ObserveLiveState();
     }

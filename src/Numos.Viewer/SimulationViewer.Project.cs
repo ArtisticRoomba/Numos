@@ -1,4 +1,5 @@
 using Numos.API;
+using Numos.Chunks;
 using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.GasReactions;
@@ -237,7 +238,7 @@ public partial class SimulationViewer
         }
     }
 
-    private void RemoveProjectChunk(AtmosChunkHandle chunk)
+    private void RemoveProjectChunk(ChunkHandle chunk)
     {
         if (_simulation == null)
             return;
@@ -251,7 +252,7 @@ public partial class SimulationViewer
         SetProjectMessage($"Chunk {FormatChunkPosition(chunk.Position)} no longer exists.", true);
     }
 
-    private void SealProjectChunk(AtmosChunkHandle chunk)
+    private void SealProjectChunk(ChunkHandle chunk)
     {
         if (_simulation == null)
             return;
@@ -269,7 +270,7 @@ public partial class SimulationViewer
         }
     }
 
-    private void UnsleepProjectChunk(AtmosChunkHandle chunk)
+    private void UnsleepProjectChunk(ChunkHandle chunk)
     {
         if (_simulation == null)
             return;
@@ -346,7 +347,7 @@ public partial class SimulationViewer
     }
 
     private void InjectProjectGas(
-        AtmosChunkHandle chunk,
+        ChunkHandle chunk,
         int x,
         int y,
         int z,

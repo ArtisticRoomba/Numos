@@ -1,6 +1,7 @@
 using System.Numerics;
 using ImGuiNET;
 using Numos.API;
+using Numos.Chunks;
 using Numos.CoreSim;
 using Numos.Maths;
 using Numos.Viewer.Ui;
@@ -38,8 +39,8 @@ public partial class SimulationViewer
 
     private string _newGasName = "New Gas";
     private int _projectChunkDepthDraft = 1;
-    private int _projectChunkHeightDraft = AtmosChunkConstants.DefaultHeight;
-    private int _projectChunkWidthDraft = AtmosChunkConstants.DefaultWidth;
+    private int _projectChunkHeightDraft = ChunkConstants.DefaultHeight;
+    private int _projectChunkWidthDraft = ChunkConstants.DefaultWidth;
 
     private string _projectNameDraft = "Untitled Simulation";
     private bool _requestOpenCloseProject;
@@ -55,11 +56,11 @@ public partial class SimulationViewer
         _projectNameDraft = _world == null ? "Untitled Simulation" : $"{_projectName} Copy";
         _projectChunkWidthDraft = _chunkDimensions.X > 0
             ? _chunkDimensions.X
-            : AtmosChunkConstants.DefaultWidth;
+            : ChunkConstants.DefaultWidth;
 
         _projectChunkHeightDraft = _chunkDimensions.Y > 0
             ? _chunkDimensions.Y
-            : AtmosChunkConstants.DefaultHeight;
+            : ChunkConstants.DefaultHeight;
 
         _projectChunkDepthDraft = _chunkDimensions.Z > 0 ? _chunkDimensions.Z : 1;
         _includeDefaultGasesDraft = true;
@@ -300,9 +301,9 @@ public partial class SimulationViewer
         ImGui.TextDisabled($"Fixed size: {_chunkDimensions.X} x {_chunkDimensions.Y} x {_chunkDimensions.Z}");
         ImGui.TextDisabled("Right-click a chunk coordinate for options.");
 
-        AtmosChunkHandle? chunkToRemove = null;
-        AtmosChunkHandle? chunkToSeal = null;
-        AtmosChunkHandle? chunkToUnsleep = null;
+        ChunkHandle? chunkToRemove = null;
+        ChunkHandle? chunkToSeal = null;
+        ChunkHandle? chunkToUnsleep = null;
         foreach (var handle in _liveChunkHandles)
         {
             ImGui.PushID($"chunk-{handle.Position.X}-{handle.Position.Y}-{handle.Position.Z}");
@@ -509,7 +510,7 @@ public partial class SimulationViewer
             _injectionChunkPosition.HasValue)
         {
             InjectProjectGas(
-                new AtmosChunkHandle(_injectionChunkPosition.Value),
+                new ChunkHandle(_injectionChunkPosition.Value),
                 _injectionX,
                 _injectionY,
                 _injectionZ,

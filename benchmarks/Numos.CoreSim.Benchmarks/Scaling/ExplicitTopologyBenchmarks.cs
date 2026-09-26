@@ -1,5 +1,6 @@
 using BenchmarkDotNet.Attributes;
 using Numos.API;
+using Numos.Chunks;
 using Numos.CoreSim.Datatypes.Primitives;
 
 namespace Numos.CoreSim.Benchmarks.Scaling;
@@ -15,7 +16,7 @@ namespace Numos.CoreSim.Benchmarks.Scaling;
 [BenchmarkCategory("Scaling", "ExplicitTopology")]
 public class ExplicitTopologyBenchmarks
 {
-    private AtmosChunkHandle _chunk;
+    private ChunkHandle _chunk;
     private ExplicitLinkDefinition[] _definitions = [];
     private ExplicitLinkSetHandle _links;
     private AtmosSimulation _simulation = null!;
