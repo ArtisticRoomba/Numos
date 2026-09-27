@@ -99,13 +99,12 @@ public sealed class ChunkMap<T>(int x, int y, int z) : IDisposable where T : Chu
     /// </summary>
     /// <param name="position">The chunk's position in the chunk grid.</param>
     /// <exception cref="InvalidOperationException">A chunk is already registered at <paramref name="position" />.</exception>
-    public void CreateAndRegisterChunk(Int3 position)
+    public T CreateAndRegisterChunk(Int3 position)
     {
         if (_chunkMap.ContainsKey(position))
             throw new InvalidOperationException($"A chunk is already registered at {position}.");
 
-        var chunk = T.CreateInitializeChunk(position, Dimensions.X, Dimensions.Y, Dimensions.Z);
-        RegisterChunk(chunk);
+        return T.CreateInitializeChunk(position, Dimensions.X, Dimensions.Y, Dimensions.Z);
     }
     
     public T GetChunk(Int3 position)

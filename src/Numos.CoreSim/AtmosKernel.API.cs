@@ -295,7 +295,8 @@ internal sealed partial class AtmosKernel
         lock (StateGate)
         {
             ThrowIfTickExecuting("register a chunk during the current tick");
-            _chunkMap.CreateAndRegisterChunk(position);
+            var chunk = _chunkMap.CreateAndRegisterChunk(position);
+            RegisterChunk(chunk);
         }
     }
 
