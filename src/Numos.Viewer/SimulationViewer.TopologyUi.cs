@@ -2,6 +2,7 @@ using System.Numerics;
 using ImGuiNET;
 using Numos.API;
 using Numos.Chunks;
+using Numos.Chunks.Topology;
 using Numos.Maths;
 using Numos.Viewer.Ui;
 using Raylib_cs;
@@ -19,8 +20,8 @@ public partial class SimulationViewer
     private int _dockSecondChunk;
     private int _dockSecondFace;
     private int _dockSecondSimulation;
-    private AtmosCellRef? _portalFirst;
-    private AtmosCellRef? _portalSecond;
+    private VoxelRef? _portalFirst;
+    private VoxelRef? _portalSecond;
     private bool _removeTopologyModalOpen;
     private bool _requestRemoveTopology;
     private ExplicitLinkSetHandle? _selectedLinkSet;
@@ -190,7 +191,7 @@ public partial class SimulationViewer
                 ImGui.EndTable();
             }
 
-            ImGui.BeginDisabled(!_portalFirst.HasValue || !_portalSecond.HasValue || GetTopologyFlags() == ExplicitLinkFlags.None);
+            ImGui.BeginDisabled(!_portalFirst.HasValue || !_portalSecond.HasValue || GetTopologyFlags() == AtmosLinkFlags.None);
             if (ImGui.Button("Create Portal"))
                 CreatePortalFromCapturedEndpoints();
 
@@ -219,12 +220,12 @@ public partial class SimulationViewer
             if (dockInputChanged)
                 _topologyFeedback = null;
 
-            ImGui.BeginDisabled(GetTopologyFlags() == ExplicitLinkFlags.None || _simulationSurfaces.Count == 0);
+            ImGui.BeginDisabled(GetTopologyFlags() == AtmosLinkFlags.None || _simulationSurfaces.Count == 0);
             if (ImGui.Button("Create Dock"))
             {
                 try
                 {
-                    ExplicitLinkDefinition[] links = BuildDockLinks();
+                    ExplicitLinkDefinition<AtmosLinkFlags>[] links = BuildDockLinks();
                     var dock = _world.CreateDock(links);
                     _selectedLinkSet = dock.Links;
                     SetTopologyFeedback(
@@ -360,7 +361,7 @@ public partial class SimulationViewer
         ImGui.SetItemDefaultFocus();
     }
 
-    private ExplicitLinkDefinition[] BuildDockLinks()
+    private ExplicitLinkDefinition<AtmosLinkFlags>[] BuildDockLinks()
     {
         var firstSurface = _simulationSurfaces[Math.Clamp(_dockFirstSimulation, 0, _simulationSurfaces.Count - 1)];
         var secondSurface = _simulationSurfaces[Math.Clamp(_dockSecondSimulation, 0, _simulationSurfaces.Count - 1)];
@@ -378,7 +379,7 @@ public partial class SimulationViewer
             firstSize.Height != (quarterTurn ? secondSize.Width : secondSize.Height))
             throw new InvalidOperationException("The selected faces do not have matching dimensions after rotation.");
 
-        var links = new ExplicitLinkDefinition[firstSize.Width * firstSize.Height];
+        var links = new ExplicitLinkDefinition<AtmosLinkFlags>[firstSize.Width * firstSize.Height];
         int destination = 0;
         for (int v = 0; v < firstSize.Height; v++)
         for (int u = 0; u < firstSize.Width; u++)
@@ -393,30 +394,30 @@ public partial class SimulationViewer
                 secondU,
                 secondV);
 
-            links[destination++] = new ExplicitLinkDefinition(
-                new AtmosCellRef(firstSurface.Simulation.Id, firstChunk, firstIndex),
-                new AtmosCellRef(secondSurface.Simulation.Id, secondChunk, secondIndex),
+            links[destination++] = new ExplicitLinkDefinition<AtmosLinkFlags>(
+                new VoxelRef(firstSurface.Simulation.Id, firstChunk, firstIndex),
+                new VoxelRef(secondSurface.Simulation.Id, secondChunk, secondIndex),
                 GetTopologyFlags());
         }
 
         return links;
     }
 
-    private AtmosCellRef? GetSelectedAtmosCell()
+    private VoxelRef? GetSelectedAtmosCell()
     {
         if (_simulation == null || !_selectedCell.HasValue)
             return null;
 
-        return new AtmosCellRef(
+        return new VoxelRef(
             _simulation.Id,
             new ChunkHandle(_selectedCell.Value.Chunk.Position),
             _selectedCell.Value.LocalIndex);
     }
 
-    private ExplicitLinkFlags GetTopologyFlags()
+    private AtmosLinkFlags GetTopologyFlags()
     {
-        return (_topologyGas ? ExplicitLinkFlags.GasTransport : ExplicitLinkFlags.None) |
-               (_topologyThermal ? ExplicitLinkFlags.ThermalTransport : ExplicitLinkFlags.None);
+        return (_topologyGas ? AtmosLinkFlags.GasTransport : AtmosLinkFlags.None) |
+               (_topologyThermal ? AtmosLinkFlags.ThermalTransport : AtmosLinkFlags.None);
     }
 
     private void CreatePortalFromCapturedEndpoints()
@@ -465,7 +466,7 @@ public partial class SimulationViewer
         }
     }
 
-    private bool TryGetCellCenter(AtmosCellRef cell, out Vector3 center)
+    private bool TryGetCellCenter(VoxelRef cell, out Vector3 center)
     {
         if (_drawData!.Chunks.TryGetValue(cell.Chunk.Position, out var chunk) && cell.LocalVoxelIndex < chunk.CellCount)
         {
@@ -487,7 +488,7 @@ public partial class SimulationViewer
         return color;
     }
 
-    private string FormatCell(AtmosCellRef cell)
+    private string FormatCell(VoxelRef cell)
     {
         return $"{GetSimulationName(cell.Simulation)}\n{FormatChunkPosition(cell.Chunk.Position)}, voxel {cell.LocalVoxelIndex}";
     }

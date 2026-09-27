@@ -446,14 +446,14 @@ public sealed class ReplayCodecGenerator : IIncrementalGenerator
                 writeTemplate = "writer.Write({0}.RoomId);";
                 readExpression = "new global::Numos.CoreSim.Datatypes.Primitives.VoxelClassification(reader.ReadInt32())";
                 return true;
-            case "global::Numos.API.AtmosSimulationId":
+            case "global::Numos.Chunks.Topology.SimulationId":
                 // WriteSimulationId/ReadSimulationId are private helpers already declared directly on
                 // NumosWorldReplaySerializer (shared with its hand-written checkpoint codec) -- only world
                 // operations ever have a field of this type, so calling them unqualified is safe.
                 writeTemplate = "WriteSimulationId(writer, {0});";
                 readExpression = "ReadSimulationId(reader)";
                 return true;
-            case "global::Numos.API.ExplicitLinkSetHandle":
+            case "global::Numos.Chunks.Topology.ExplicitLinkSetHandle":
                 writeTemplate = "WriteHandle(writer, {0});";
                 readExpression = "ReadHandle(reader)";
                 return true;

@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using Numos.Chunks;
+using Numos.Chunks.Topology;
 using Numos.CoreSim.Replay;
 
 namespace Numos.API;
@@ -242,7 +243,7 @@ public sealed partial class AtmosWorld
     /// <remarks>
     ///     The operation is atomic with respect to deterministic world state. If validation or application fails,
     ///     the state present before this call is restored. Simulation objects created after the source checkpoint
-    ///     may be replaced; reacquire them by <see cref="AtmosSimulationId" /> after seeking.
+    ///     may be replaced; reacquire them by <see cref="SimulationId" /> after seeking.
     /// </remarks>
     /// <exception cref="ArgumentNullException">A required argument is <see langword="null" />.</exception>
     /// <exception cref="ArgumentException">The history is malformed or incompatible with the checkpoint.</exception>
@@ -534,7 +535,7 @@ internal static class AtmosWorldCheckpointHasher
         return new AtmosWorldStateHash(checkpoint.Position, hash.Value);
     }
 
-    private static void AddCell(ref AtmosStateHasher hash, AtmosCellRef cell)
+    private static void AddCell(ref AtmosStateHasher hash, VoxelRef cell)
     {
         hash.Add(cell.Simulation.Index);
         hash.Add(cell.Simulation.Generation);

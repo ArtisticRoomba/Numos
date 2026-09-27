@@ -1,5 +1,6 @@
 using JetBrains.Annotations;
 using Numos.Chunks;
+using Numos.Chunks.Topology;
 using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.Datatypes.Snapshots;
@@ -88,7 +89,7 @@ public sealed partial class AtmosSimulation : IDisposable
         int chunkWidth,
         int chunkHeight,
         int chunkDepth,
-        AtmosSimulationId? requestedRegistration = null)
+        SimulationId? requestedRegistration = null)
     {
         ArgumentNullException.ThrowIfNull(world);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(chunkWidth);
@@ -138,7 +139,7 @@ public sealed partial class AtmosSimulation : IDisposable
     ///     Gets this simulation's stable generational identifier within <see cref="World" />.
     /// </summary>
     [PublicAPI]
-    public AtmosSimulationId Id { get; }
+    public SimulationId Id { get; }
 
     /// <summary>
     ///     Gets the fixed dimensions used by every chunk owned by this simulation.
@@ -465,7 +466,7 @@ public sealed partial class AtmosSimulation : IDisposable
     /// <exception cref="ArgumentOutOfRangeException">The local voxel index is outside the chunk.</exception>
     /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
     [PublicAPI]
-    public AtmosCellRef GetCellRef(ChunkHandle chunk, ushort localVoxelIndex)
+    public VoxelRef GetCellRef(ChunkHandle chunk, ushort localVoxelIndex)
     {
         ThrowIfDisposed();
         if (!_kernel.TryResolveExplicitEndpoint(chunk.Position, localVoxelIndex, out _))
@@ -476,7 +477,7 @@ public sealed partial class AtmosSimulation : IDisposable
             throw new ArgumentOutOfRangeException(nameof(localVoxelIndex));
         }
 
-        return new AtmosCellRef(Id, chunk, localVoxelIndex);
+        return new VoxelRef(Id, chunk, localVoxelIndex);
     }
 
     /// <summary>

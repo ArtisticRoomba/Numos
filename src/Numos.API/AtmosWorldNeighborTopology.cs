@@ -1,4 +1,5 @@
 using Numos.Chunks;
+using Numos.Chunks.Topology;
 using Numos.Maths;
 
 namespace Numos.API;
@@ -24,11 +25,11 @@ public enum AtmosNeighborKind : byte
 /// </summary>
 /// <param name="Cell">The neighboring cell.</param>
 /// <param name="Kind">How the adjacency was discovered.</param>
-/// <param name="Flags">The explicit-link capabilities, or <see cref="ExplicitLinkFlags.None" /> for Cartesian adjacency.</param>
+/// <param name="Flags">The explicit-link capabilities, or <see cref="AtmosLinkFlags.None" /> for Cartesian adjacency.</param>
 public readonly record struct AtmosNeighbor(
-    AtmosCellRef Cell,
+    VoxelRef Cell,
     AtmosNeighborKind Kind,
-    ExplicitLinkFlags Flags);
+    AtmosLinkFlags Flags);
 
 /// <summary>
 ///     Describes one canonically owned solver edge.
@@ -36,12 +37,12 @@ public readonly record struct AtmosNeighbor(
 /// <param name="First">The canonical first endpoint.</param>
 /// <param name="Second">The canonical second endpoint.</param>
 /// <param name="Kind">How the adjacency was discovered.</param>
-/// <param name="Flags">The explicit-link capabilities, or <see cref="ExplicitLinkFlags.None" /> for Cartesian adjacency.</param>
+/// <param name="Flags">The explicit-link capabilities, or <see cref="AtmosLinkFlags.None" /> for Cartesian adjacency.</param>
 public readonly record struct AtmosNeighborEdge(
-    AtmosCellRef First,
-    AtmosCellRef Second,
+    VoxelRef First,
+    VoxelRef Second,
     AtmosNeighborKind Kind,
-    ExplicitLinkFlags Flags);
+    AtmosLinkFlags Flags);
 
 /// <summary>
 ///     Provides a solver-specific, immutable view of Cartesian and compiled explicit topology.
@@ -49,7 +50,7 @@ public readonly record struct AtmosNeighborEdge(
 public sealed class AtmosWorldNeighborTopology
 {
     private readonly Dictionary<CompiledChunkKey, CompiledChunkAdjacency> _explicitByChunk;
-    private readonly ExplicitLinkDefinition[] _explicitEdges;
+    private readonly ExplicitLinkDefinition<AtmosLinkFlags>[] _explicitEdges;
     private readonly bool _includeCartesian;
     private readonly AtmosWorld? _world;
 
@@ -57,7 +58,7 @@ public sealed class AtmosWorldNeighborTopology
         AtmosWorld? world,
         bool includeCartesian,
         Dictionary<CompiledChunkKey, CompiledChunkAdjacency> explicitByChunk,
-        ExplicitLinkDefinition[] explicitEdges)
+        ExplicitLinkDefinition<AtmosLinkFlags>[] explicitEdges)
     {
         _world = world;
         _includeCartesian = includeCartesian;
@@ -84,7 +85,7 @@ public sealed class AtmosWorldNeighborTopology
         ArgumentNullException.ThrowIfNull(simulation);
         var world = GetWorld();
         if (!ReferenceEquals(simulation.World, world) ||
-            !world.TryResolveCell(new AtmosCellRef(simulation.Id, chunk, 0), out _))
+            !world.TryResolveCell(new VoxelRef(simulation.Id, chunk, 0), out _))
         {
             throw new ArgumentException("The chunk is not registered in this world.", nameof(chunk));
         }
@@ -98,7 +99,7 @@ public sealed class AtmosWorldNeighborTopology
 
             var adjacentPosition = chunk.Position + GetDirection(direction);
             if (world.TryResolveCell(
-                    new AtmosCellRef(simulation.Id, new ChunkHandle(adjacentPosition), 0),
+                    new VoxelRef(simulation.Id, new ChunkHandle(adjacentPosition), 0),
                     out _))
             {
                 adjacentChunkMask |= checked((byte)(1 << direction));
@@ -120,7 +121,7 @@ public sealed class AtmosWorldNeighborTopology
     /// <param name="cell">A live cell in the callback's world.</param>
     /// <returns>The number of selected Cartesian and explicit neighbors.</returns>
     /// <remarks>Solid and void classifications do not remove structural adjacency.</remarks>
-    public int GetNeighborCount(AtmosCellRef cell)
+    public int GetNeighborCount(VoxelRef cell)
     {
         var world = GetWorld();
         if (!world.TryGetSimulation(cell.Simulation, out var simulation) || simulation == null)
@@ -134,7 +135,7 @@ public sealed class AtmosWorldNeighborTopology
     /// </summary>
     /// <param name="cell">A live cell in the callback's world.</param>
     /// <returns>An allocation-free incident-neighbor enumerable.</returns>
-    public AtmosNeighborEnumerable GetNeighbors(AtmosCellRef cell)
+    public AtmosNeighborEnumerable GetNeighbors(VoxelRef cell)
     {
         var world = GetWorld();
         if (!world.TryGetSimulation(cell.Simulation, out var simulation) || simulation == null)
@@ -174,7 +175,7 @@ public sealed class AtmosWorldNeighborTopology
 
                     for (ushort voxelIndex = 0; voxelIndex < voxelCount; voxelIndex++)
                     {
-                        AtmosCellRef first = new(simulation.Id, chunk, voxelIndex);
+                        VoxelRef first = new(simulation.Id, chunk, voxelIndex);
                         for (int direction = 1; direction < 6; direction += 2)
                         {
                             if (!view.TryGetCartesianNeighbor(voxelIndex, direction, out var second))
@@ -184,7 +185,7 @@ public sealed class AtmosWorldNeighborTopology
                                 first,
                                 second,
                                 AtmosNeighborKind.Cartesian,
-                                ExplicitLinkFlags.None);
+                                AtmosLinkFlags.None);
                         }
                     }
                 }
@@ -204,9 +205,9 @@ public sealed class AtmosWorldNeighborTopology
     internal static AtmosWorldNeighborTopology Compile(
         AtmosWorld world,
         AtmosNeighborSelection selection,
-        IReadOnlyList<ExplicitLinkDefinition> links)
+        IReadOnlyList<ExplicitLinkDefinition<AtmosLinkFlags>> links)
     {
-        var selected = new List<ExplicitLinkDefinition>(links.Count);
+        var selected = new List<ExplicitLinkDefinition<AtmosLinkFlags>>(links.Count);
         foreach (var link in links)
         {
             if (selection.ExplicitLinks(new AtmosExplicitLinkInfo(link.First, link.Second, link.Flags)))
@@ -259,9 +260,9 @@ public sealed class AtmosWorldNeighborTopology
 
     private static void Add(
         Dictionary<CompiledChunkKey, List<CompiledNeighborEntry>> entries,
-        AtmosCellRef source,
-        AtmosCellRef neighbor,
-        ExplicitLinkFlags flags)
+        VoxelRef source,
+        VoxelRef neighbor,
+        AtmosLinkFlags flags)
     {
         var key = new CompiledChunkKey(source.Simulation, source.Chunk);
         if (!entries.TryGetValue(key, out List<CompiledNeighborEntry>? values))
@@ -306,10 +307,10 @@ public readonly struct AtmosChunkNeighborView
     private readonly bool _includeCartesian;
     private readonly ChunkHandle _chunk;
     private readonly Int3 _dimensions;
-    private readonly AtmosSimulationId _simulation;
+    private readonly SimulationId _simulation;
 
     internal AtmosChunkNeighborView(
-        AtmosSimulationId simulation,
+        SimulationId simulation,
         ChunkHandle chunk,
         Int3 dimensions,
         bool includeCartesian,
@@ -366,7 +367,7 @@ public readonly struct AtmosChunkNeighborView
     internal bool TryGetCartesianNeighbor(
         ushort localVoxelIndex,
         int direction,
-        out AtmosCellRef neighbor)
+        out VoxelRef neighbor)
     {
         if (!_includeCartesian)
         {
@@ -467,7 +468,7 @@ public readonly struct AtmosChunkNeighborView
         }
 
         ushort targetIndex = checked((ushort)(x + y * _dimensions.X + z * plane));
-        neighbor = new AtmosCellRef(_simulation, new ChunkHandle(chunkPosition), targetIndex);
+        neighbor = new VoxelRef(_simulation, new ChunkHandle(chunkPosition), targetIndex);
         return true;
     }
 
@@ -558,7 +559,7 @@ public struct AtmosNeighborEnumerator
             if (!_view.TryGetCartesianNeighbor(_localVoxelIndex, direction, out var cell))
                 continue;
 
-            Current = new AtmosNeighbor(cell, AtmosNeighborKind.Cartesian, ExplicitLinkFlags.None);
+            Current = new AtmosNeighbor(cell, AtmosNeighborKind.Cartesian, AtmosLinkFlags.None);
             return true;
         }
 
@@ -571,7 +572,7 @@ public struct AtmosNeighborEnumerator
 }
 
 internal readonly record struct CompiledChunkKey(
-    AtmosSimulationId Simulation,
+    SimulationId Simulation,
     ChunkHandle Chunk);
 
 internal readonly record struct CompiledNeighborEntry(

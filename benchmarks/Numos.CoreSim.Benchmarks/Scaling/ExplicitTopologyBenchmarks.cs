@@ -1,6 +1,7 @@
 using BenchmarkDotNet.Attributes;
 using Numos.API;
 using Numos.Chunks;
+using Numos.Chunks.Topology;
 using Numos.CoreSim.Datatypes.Primitives;
 
 namespace Numos.CoreSim.Benchmarks.Scaling;
@@ -17,7 +18,7 @@ namespace Numos.CoreSim.Benchmarks.Scaling;
 public class ExplicitTopologyBenchmarks
 {
     private ChunkHandle _chunk;
-    private ExplicitLinkDefinition[] _definitions = [];
+    private ExplicitLinkDefinition<AtmosLinkFlags>[] _definitions = [];
     private ExplicitLinkSetHandle _links;
     private AtmosSimulation _simulation = null!;
     private AtmosWorld _world = null!;
@@ -57,13 +58,13 @@ public class ExplicitTopologyBenchmarks
 
         _simulation.AddGasToVoxel(_chunk, 0, "BenchmarkGas", EdgeCount, 300f);
         var source = _simulation.GetCellRef(_chunk, 0);
-        _definitions = new ExplicitLinkDefinition[EdgeCount];
+        _definitions = new ExplicitLinkDefinition<AtmosLinkFlags>[EdgeCount];
         for (int index = 0; index < EdgeCount; index++)
         {
-            _definitions[index] = new ExplicitLinkDefinition(
+            _definitions[index] = new ExplicitLinkDefinition<AtmosLinkFlags>(
                 source,
                 _simulation.GetCellRef(_chunk, checked((ushort)(index + 1))),
-                ExplicitLinkFlags.GasTransport);
+                AtmosLinkFlags.GasTransport);
         }
 
         _links = _world.CreateLinks(_definitions);

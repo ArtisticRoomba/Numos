@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using Numos.Chunks.Topology;
 using Numos.CoreSim;
 using Numos.CoreSim.Replay;
 using Numos.Maths;
@@ -63,7 +64,7 @@ public abstract record AtmosWorldOperation
 /// <param name="Simulation">The exact simulation registration that receives the operation.</param>
 /// <param name="Operation">The immutable component operation payload.</param>
 public sealed record AtmosWorldSimulationOperation(
-    AtmosSimulationId Simulation,
+    SimulationId Simulation,
     AtmosOperation Operation) : AtmosWorldOperation
 {
     /// <inheritdoc />
@@ -86,7 +87,7 @@ public sealed record SetAtmosWorldConfigOperation(AtmosConfigSnapshot Config) : 
 /// <param name="Simulation">The identifier issued by the simulation registry.</param>
 /// <param name="ChunkDimensions">The fixed dimensions used by chunks in the new simulation.</param>
 public sealed record CreateAtmosSimulationOperation(
-    AtmosSimulationId Simulation,
+    SimulationId Simulation,
     Int3 ChunkDimensions) : AtmosWorldOperation
 {
     /// <inheritdoc />
@@ -97,7 +98,7 @@ public sealed record CreateAtmosSimulationOperation(
 ///     Records destruction of one simulation and the automatic invalidation of incident topology.
 /// </summary>
 /// <param name="Simulation">The registration that was removed.</param>
-public sealed record DestroyAtmosSimulationOperation(AtmosSimulationId Simulation) : AtmosWorldOperation
+public sealed record DestroyAtmosSimulationOperation(SimulationId Simulation) : AtmosWorldOperation
 {
     /// <inheritdoc />
     public override AtmosWorldOperationCode Code => AtmosWorldOperationCode.DestroySimulation;
@@ -118,12 +119,12 @@ public sealed record CreateAtmosLinkSetOperation : AtmosWorldOperation
     public CreateAtmosLinkSetOperation(
         ExplicitLinkSetHandle handle,
         ExplicitLinkSetKind kind,
-        IEnumerable<ExplicitLinkDefinition> links)
+        IEnumerable<ExplicitLinkDefinition<AtmosLinkFlags>> links)
     {
         ArgumentNullException.ThrowIfNull(links);
         Handle = handle;
         Kind = kind;
-        Links = new ReadOnlyCollection<ExplicitLinkDefinition>(links.ToArray());
+        Links = new ReadOnlyCollection<ExplicitLinkDefinition<AtmosLinkFlags>>(links.ToArray());
     }
 
     /// <inheritdoc />
@@ -142,7 +143,7 @@ public sealed record CreateAtmosLinkSetOperation : AtmosWorldOperation
     /// <summary>
     ///     Gets immutable canonical links owned by the set.
     /// </summary>
-    public IReadOnlyList<ExplicitLinkDefinition> Links { get; }
+    public IReadOnlyList<ExplicitLinkDefinition<AtmosLinkFlags>> Links { get; }
 }
 
 /// <summary>

@@ -1,6 +1,7 @@
 using System.Buffers;
 using JetBrains.Annotations;
 using Numos.Chunks;
+using Numos.Chunks.Topology;
 using Numos.CoreSim;
 using Numos.CoreSim.Replay;
 using Numos.CoreSim.Solvers;
@@ -25,8 +26,8 @@ namespace Numos.API;
 /// 
 ///     ChunkHandle stationChunk = station.CreateAndRegisterChunk(new Int3(0, 0, 0));
 ///     ChunkHandle shuttleChunk = shuttle.CreateAndRegisterChunk(new Int3(0, 0, 0));
-///     AtmosCellRef stationCell = station.GetCellRef(stationChunk, 0);
-///     AtmosCellRef shuttleCell = shuttle.GetCellRef(shuttleChunk, 0);
+///     VoxelRef stationCell = station.GetCellRef(stationChunk, 0);
+///     VoxelRef shuttleCell = shuttle.GetCellRef(shuttleChunk, 0);
 ///     AtmosPortalHandle portal = world.CreatePortal(stationCell, shuttleCell);
 ///     world.Tick(); // Activates the portal, then advances both simulations.
 ///     </code>
@@ -38,7 +39,7 @@ public sealed partial class AtmosWorld : IDisposable
     private readonly SortedSet<int> _freeSimulationSlots = [];
     private readonly List<LinkSetSlot> _linkSlots = [];
     private readonly Dictionary<AtmosChunkKey, HashSet<int>> _linkSlotsByChunk = [];
-    private readonly Dictionary<AtmosSimulationId, HashSet<int>> _linkSlotsBySimulation = [];
+    private readonly Dictionary<SimulationId, HashSet<int>> _linkSlotsBySimulation = [];
     private readonly SortedSet<int> _pendingLinkSlots = [];
     private readonly HashSet<ExplicitEdgeKey> _reservedEdges = [];
     private readonly List<SimulationSlot> _simulationSlots = [];
@@ -306,7 +307,7 @@ public sealed partial class AtmosWorld : IDisposable
     /// <returns>Canonical definitions ordered by their complete stable endpoint addresses.</returns>
     /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
     [PublicAPI]
-    public IReadOnlyList<ExplicitLinkDefinition> GetActiveLinks()
+    public IReadOnlyList<ExplicitLinkDefinition<AtmosLinkFlags>> GetActiveLinks()
     {
         lock (Gate)
         {
@@ -404,13 +405,13 @@ public sealed partial class AtmosWorld : IDisposable
     /// </exception>
     /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
     [PublicAPI]
-    public ExplicitLinkSetHandle CreateLinks(ReadOnlySpan<ExplicitLinkDefinition> links)
+    public ExplicitLinkSetHandle CreateLinks(ReadOnlySpan<ExplicitLinkDefinition<AtmosLinkFlags>> links)
     {
         return CreateLinksCore(links, ExplicitLinkSetKind.Arbitrary);
     }
 
     private ExplicitLinkSetHandle CreateLinksCore(
-        ReadOnlySpan<ExplicitLinkDefinition> links,
+        ReadOnlySpan<ExplicitLinkDefinition<AtmosLinkFlags>> links,
         ExplicitLinkSetKind kind)
     {
         lock (Gate)
@@ -501,13 +502,13 @@ public sealed partial class AtmosWorld : IDisposable
     /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
     [PublicAPI]
     public AtmosPortalHandle CreatePortal(
-        AtmosCellRef first,
-        AtmosCellRef second,
-        ExplicitLinkFlags flags = ExplicitLinkFlags.All)
+        VoxelRef first,
+        VoxelRef second,
+        AtmosLinkFlags flags = AtmosLinkFlags.All)
     {
-        ExplicitLinkDefinition definition = new(first, second, flags);
+        ExplicitLinkDefinition<AtmosLinkFlags> definition = new(first, second, flags);
         return new AtmosPortalHandle(
-            CreateLinksCore(new ReadOnlySpan<ExplicitLinkDefinition>(in definition), ExplicitLinkSetKind.Portal));
+            CreateLinksCore(new ReadOnlySpan<ExplicitLinkDefinition<AtmosLinkFlags>>(in definition), ExplicitLinkSetKind.Portal));
     }
 
     /// <summary>
@@ -536,7 +537,7 @@ public sealed partial class AtmosWorld : IDisposable
     /// </exception>
     /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
     [PublicAPI]
-    public AtmosDockHandle CreateDock(ReadOnlySpan<ExplicitLinkDefinition> surfaceLinks)
+    public AtmosDockHandle CreateDock(ReadOnlySpan<ExplicitLinkDefinition<AtmosLinkFlags>> surfaceLinks)
     {
         return new AtmosDockHandle(CreateLinksCore(surfaceLinks, ExplicitLinkSetKind.Dock));
     }
@@ -562,17 +563,17 @@ public sealed partial class AtmosWorld : IDisposable
     /// <exception cref="ArgumentException">The handle is invalid or stale.</exception>
     /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
     [PublicAPI]
-    public IReadOnlyList<ExplicitLinkDefinition> GetLinks(ExplicitLinkSetHandle handle)
+    public IReadOnlyList<ExplicitLinkDefinition<AtmosLinkFlags>> GetLinks(ExplicitLinkSetHandle handle)
     {
         lock (Gate)
         {
             ThrowIfDisposed();
             var slot = GetLinkSlot(handle);
-            var result = new ExplicitLinkDefinition[slot.Edges.Length];
+            var result = new ExplicitLinkDefinition<AtmosLinkFlags>[slot.Edges.Length];
             for (int index = 0; index < result.Length; index++)
             {
                 var edge = slot.Edges[index];
-                result[index] = new ExplicitLinkDefinition(edge.First, edge.Second, edge.Flags);
+                result[index] = new ExplicitLinkDefinition<AtmosLinkFlags>(edge.First, edge.Second, edge.Flags);
             }
 
             return result;
@@ -634,7 +635,7 @@ public sealed partial class AtmosWorld : IDisposable
                 for (int index = 0; index < _linkSlots.Count; index++)
                 {
                     var slot = _linkSlots[index];
-                    ExplicitLinkDefinition[] definitions = ToDefinitions(slot.Edges);
+                    ExplicitLinkDefinition<AtmosLinkFlags>[] definitions = ToDefinitions(slot.Edges);
                     slotCheckpoints[index] = new AtmosWorldLinkSlotCheckpoint(
                         slot.Generation,
                         (byte)slot.State,
@@ -852,9 +853,9 @@ public sealed partial class AtmosWorld : IDisposable
     /// <summary>
     ///     Registers a fully initialized simulation and returns its stable world identifier.
     /// </summary>
-    internal AtmosSimulationId RegisterSimulation(
+    internal SimulationId RegisterSimulation(
         AtmosSimulation simulation,
-        AtmosSimulationId? requestedRegistration = null)
+        SimulationId? requestedRegistration = null)
     {
         lock (Gate)
         {
@@ -900,7 +901,7 @@ public sealed partial class AtmosWorld : IDisposable
             _simulationSlots[index] = slot;
             RebuildOrderedSimulations();
             IncrementSimulationCollectionRevision();
-            return new AtmosSimulationId(index, slot.Generation);
+            return new SimulationId(index, slot.Generation);
         }
     }
 
@@ -1127,8 +1128,8 @@ public sealed partial class AtmosWorld : IDisposable
                 nameof(checkpoint));
         }
 
-        var validCells = new Dictionary<AtmosSimulationId, Dictionary<Int3, int>>();
-        AtmosSimulationId? previousSimulation = null;
+        var validCells = new Dictionary<SimulationId, Dictionary<Int3, int>>();
+        SimulationId? previousSimulation = null;
         foreach (var saved in checkpoint.Simulations)
         {
             if (!saved.Simulation.IsValid ||
@@ -1410,7 +1411,7 @@ public sealed partial class AtmosWorld : IDisposable
         }
     }
 
-    private void WakeEndpoint(AtmosCellRef cell)
+    private void WakeEndpoint(VoxelRef cell)
     {
         var simulation = TryGetSimulationCore(cell.Simulation);
         if (simulation != null &&
@@ -1512,7 +1513,7 @@ public sealed partial class AtmosWorld : IDisposable
         }
     }
 
-    private void IndexLinkSlot(int slotIndex, AtmosCellRef cell)
+    private void IndexLinkSlot(int slotIndex, VoxelRef cell)
     {
         AddIndex(_linkSlotsBySimulation, cell.Simulation, slotIndex);
         AddIndex(_linkSlotsByChunk, new AtmosChunkKey(cell.Simulation, cell.Chunk.Position), slotIndex);
@@ -1544,7 +1545,7 @@ public sealed partial class AtmosWorld : IDisposable
             index.Remove(key);
     }
 
-    private void InvalidateLinksForSimulation(AtmosSimulationId simulationId)
+    private void InvalidateLinksForSimulation(SimulationId simulationId)
     {
         if (!_linkSlotsBySimulation.TryGetValue(simulationId, out HashSet<int>? slots))
             return;
@@ -1554,7 +1555,7 @@ public sealed partial class AtmosWorld : IDisposable
             DestroyLinkSlot(slotIndex);
     }
 
-    private void ValidateCell(AtmosCellRef cell, string parameterName)
+    private void ValidateCell(VoxelRef cell, string parameterName)
     {
         var simulation = TryGetSimulationCore(cell.Simulation);
         if (simulation == null ||
@@ -1567,12 +1568,12 @@ public sealed partial class AtmosWorld : IDisposable
         }
     }
 
-    private static void ValidateFlags(ExplicitLinkFlags flags, string parameterName)
+    private static void ValidateFlags(AtmosLinkFlags flags, string parameterName)
     {
         // Bits outside GasTransport|ThermalTransport are reserved for host-defined capabilities: a link can carry
         // them so a host-registered solver's AtmosExplicitLinkSelector can pick it out, without engaging Numos'
         // built-in transport stages, which only ever look at the bits they know about.
-        if (flags == ExplicitLinkFlags.None)
+        if (flags == AtmosLinkFlags.None)
             throw new ArgumentException("An explicit link must select at least one transport capability.", parameterName);
     }
 
@@ -1603,7 +1604,7 @@ public sealed partial class AtmosWorld : IDisposable
     /// </remarks>
     /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
     [PublicAPI]
-    public bool TryGetSimulation(AtmosSimulationId id, out AtmosSimulation? simulation)
+    public bool TryGetSimulation(SimulationId id, out AtmosSimulation? simulation)
     {
         lock (Gate)
         {
@@ -1613,7 +1614,7 @@ public sealed partial class AtmosWorld : IDisposable
         }
     }
 
-    private AtmosSimulation? TryGetSimulationCore(AtmosSimulationId id)
+    private AtmosSimulation? TryGetSimulationCore(SimulationId id)
     {
         if (!id.IsValid || (uint)id.Index >= (uint)_simulationSlots.Count)
             return null;
@@ -1622,7 +1623,7 @@ public sealed partial class AtmosWorld : IDisposable
         return slot.Generation == id.Generation ? slot.Simulation : null;
     }
 
-    internal bool TryResolveCell(AtmosCellRef cell, out AtmosSimulation? simulation)
+    internal bool TryResolveCell(VoxelRef cell, out AtmosSimulation? simulation)
     {
         lock (Gate)
         {
@@ -1635,7 +1636,7 @@ public sealed partial class AtmosWorld : IDisposable
         }
     }
 
-    internal IReadOnlyList<ExplicitLinkDefinition> GetActiveLinksCore()
+    internal IReadOnlyList<ExplicitLinkDefinition<AtmosLinkFlags>> GetActiveLinksCore()
     {
         return ToDefinitions(_activeEdges);
     }
@@ -1654,7 +1655,7 @@ public sealed partial class AtmosWorld : IDisposable
             if (slot.State == LinkSetState.Free)
                 continue;
 
-            ExplicitLinkDefinition[] definitions = ToDefinitions(slot.Edges);
+            ExplicitLinkDefinition<AtmosLinkFlags>[] definitions = ToDefinitions(slot.Edges);
             result.Add(
                 new AtmosWorldLinkSetSnapshot(
                     new ExplicitLinkSetHandle(index, slot.Generation),
@@ -1666,7 +1667,7 @@ public sealed partial class AtmosWorld : IDisposable
         return result.ToArray();
     }
 
-    private bool AreImplicitNeighbors(AtmosCellRef first, AtmosCellRef second)
+    private bool AreImplicitNeighbors(VoxelRef first, VoxelRef second)
     {
         if (first.Simulation != second.Simulation)
             return false;
@@ -1728,7 +1729,7 @@ public sealed partial class AtmosWorld : IDisposable
         _linkSetCollectionRevision = checked(_linkSetCollectionRevision + 1);
     }
 
-    private static void AddChunkEdgeCount(Dictionary<AtmosChunkKey, int> counts, AtmosCellRef cell)
+    private static void AddChunkEdgeCount(Dictionary<AtmosChunkKey, int> counts, VoxelRef cell)
     {
         var key = new AtmosChunkKey(cell.Simulation, cell.Chunk.Position);
         counts.TryGetValue(key, out int count);
@@ -1736,8 +1737,8 @@ public sealed partial class AtmosWorld : IDisposable
     }
 
     private static bool CheckpointContainsCell(
-        Dictionary<AtmosSimulationId, Dictionary<Int3, int>> validCells,
-        AtmosCellRef cell)
+        Dictionary<SimulationId, Dictionary<Int3, int>> validCells,
+        VoxelRef cell)
     {
         return validCells.TryGetValue(cell.Simulation, out Dictionary<Int3, int>? chunks) &&
                chunks.TryGetValue(cell.Chunk.Position, out int voxelCount) &&
@@ -1756,13 +1757,13 @@ public sealed partial class AtmosWorld : IDisposable
             : IsSolverActive(state);
     }
 
-    private static ExplicitLinkDefinition[] ToDefinitions(ExplicitAtmosEdge[] edges)
+    private static ExplicitLinkDefinition<AtmosLinkFlags>[] ToDefinitions(ExplicitAtmosEdge[] edges)
     {
-        var result = new ExplicitLinkDefinition[edges.Length];
+        var result = new ExplicitLinkDefinition<AtmosLinkFlags>[edges.Length];
         for (int index = 0; index < result.Length; index++)
         {
             var edge = edges[index];
-            result[index] = new ExplicitLinkDefinition(edge.First, edge.Second, edge.Flags);
+            result[index] = new ExplicitLinkDefinition<AtmosLinkFlags>(edge.First, edge.Second, edge.Flags);
         }
 
         return result;
@@ -1822,14 +1823,14 @@ public sealed partial class AtmosWorld : IDisposable
 
     private readonly record struct SimulationSlot(AtmosSimulation? Simulation, uint Generation);
 
-    private readonly record struct AtmosChunkKey(AtmosSimulationId Simulation, Int3 ChunkPosition);
+    private readonly record struct AtmosChunkKey(SimulationId Simulation, Int3 ChunkPosition);
 
-    private readonly record struct ExplicitEdgeKey(AtmosCellRef First, AtmosCellRef Second);
+    private readonly record struct ExplicitEdgeKey(VoxelRef First, VoxelRef Second);
 
     private readonly record struct ExplicitAtmosEdge(
-        AtmosCellRef First,
-        AtmosCellRef Second,
-        ExplicitLinkFlags Flags);
+        VoxelRef First,
+        VoxelRef Second,
+        AtmosLinkFlags Flags);
 
     private sealed class ExplicitAtmosEdgeComparer : IComparer<ExplicitAtmosEdge>
     {

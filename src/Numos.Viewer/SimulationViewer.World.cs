@@ -2,6 +2,7 @@ using System.Numerics;
 using ImGuiNET;
 using Numos.API;
 using Numos.Chunks;
+using Numos.Chunks.Topology;
 using Numos.CoreSim.Datatypes.Snapshots;
 using Numos.Maths;
 using Numos.SimDrawer;
@@ -13,9 +14,9 @@ namespace Numos.Viewer;
 
 public partial class SimulationViewer
 {
-    private readonly Dictionary<AtmosSimulationId, string> _simulationNames = [];
+    private readonly Dictionary<SimulationId, string> _simulationNames = [];
     private readonly List<SimulationSurface> _simulationSurfaces = [];
-    private AtmosSimulationId? _activeSimulationId;
+    private SimulationId? _activeSimulationId;
     private long _knownSimulationRevision = -1;
     private int _newSimulationDepth = 1;
     private int _newSimulationHeight = ChunkConstants.DefaultHeight;
@@ -25,7 +26,7 @@ public partial class SimulationViewer
     private bool _showWorldPanel = true;
     private string? _simulationFeedback;
     private bool _simulationFeedbackIsError;
-    private AtmosSimulationId? _simulationPendingRemoval;
+    private SimulationId? _simulationPendingRemoval;
 
     private void ReconcileSimulationSurfaces()
     {
@@ -33,7 +34,7 @@ public partial class SimulationViewer
             return;
 
         _knownSimulationRevision = revision;
-        HashSet<AtmosSimulationId> liveIds = simulations.Select(static simulation => simulation.Id).ToHashSet();
+        HashSet<SimulationId> liveIds = simulations.Select(static simulation => simulation.Id).ToHashSet();
         if (_portalFirst is { } firstPortal && !liveIds.Contains(firstPortal.Simulation))
             _portalFirst = null;
 
@@ -69,14 +70,14 @@ public partial class SimulationViewer
         }
 
         _simulationSurfaces.Sort(static (left, right) => left.Simulation.Id.CompareTo(right.Simulation.Id));
-        AtmosSimulationId? nextActive = _activeSimulationId is { } active && liveIds.Contains(active)
+        SimulationId? nextActive = _activeSimulationId is { } active && liveIds.Contains(active)
             ? active
             : simulations.FirstOrDefault()?.Id;
 
         SetActiveSimulation(nextActive);
     }
 
-    private void SetActiveSimulation(AtmosSimulationId? id)
+    private void SetActiveSimulation(SimulationId? id)
     {
         if (_world == null || id == null || !_world.TryGetSimulation(id.Value, out var simulation))
         {
@@ -204,7 +205,7 @@ public partial class SimulationViewer
         if (!_show3DViewport)
             return;
 
-        AtmosSimulationId? requestedActive = null;
+        SimulationId? requestedActive = null;
         foreach (var surface in _simulationSurfaces)
         {
             if (surface.Viewport == null)
@@ -433,7 +434,7 @@ public partial class SimulationViewer
         ImGui.SetItemDefaultFocus();
     }
 
-    private string GetSimulationName(AtmosSimulationId id)
+    private string GetSimulationName(SimulationId id)
     {
         return _simulationNames.GetValueOrDefault(id, $"Simulation {id.Index + 1}");
     }

@@ -1,4 +1,5 @@
 using Numos.Chunks;
+using Numos.Chunks.Topology;
 using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.GasReactions;

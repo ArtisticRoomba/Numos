@@ -16,7 +16,7 @@ public static class AtmosBuiltInSolvers
 
     /// <summary>
     ///     Sparse gas transport across explicit portal, dock, and arbitrary links whose flags include
-    ///     <see cref="ExplicitLinkFlags.GasTransport" />.
+    ///     <see cref="AtmosLinkFlags.GasTransport" />.
     /// </summary>
     public const string ExplicitGasTransport = "explicit-gas-transport";
 
@@ -32,7 +32,7 @@ public static class AtmosBuiltInSolvers
 
     /// <summary>
     ///     Sparse thermal transport across explicit portal, dock, and arbitrary links whose flags include
-    ///     <see cref="ExplicitLinkFlags.ThermalTransport" />. Runs on the same cadence as
+    ///     <see cref="AtmosLinkFlags.ThermalTransport" />. Runs on the same cadence as
     ///     <see cref="Thermodynamics" /> (see <c>AtmosSolverConstants.ThermodynamicsTickInterval</c>).
     /// </summary>
     public const string ExplicitThermalTransport = "explicit-thermal-transport";

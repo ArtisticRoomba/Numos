@@ -1,4 +1,5 @@
 using JetBrains.Annotations;
+using Numos.Chunks.Topology;
 using Numos.CoreSim.Replay;
 using Numos.CoreSim.Solvers;
 
@@ -215,7 +216,7 @@ public sealed class AtmosWorldSolverPipeline
             step.Execute(context);
     }
 
-    internal void RecompileTopology(IReadOnlyList<ExplicitLinkDefinition> links)
+    internal void RecompileTopology(IReadOnlyList<ExplicitLinkDefinition<AtmosLinkFlags>> links)
     {
         var compiled = new AtmosWorldNeighborTopology[_steps.Count];
         for (int index = 0; index < _steps.Count; index++)
@@ -391,7 +392,7 @@ internal sealed class WorldSolverRegistration
 
     internal AtmosWorldNeighborTopology BuildTopology(
         AtmosWorld world,
-        IReadOnlyList<ExplicitLinkDefinition> links)
+        IReadOnlyList<ExplicitLinkDefinition<AtmosLinkFlags>> links)
     {
         return Selection == null
             ? AtmosWorldNeighborTopology.EmptyFor(world)

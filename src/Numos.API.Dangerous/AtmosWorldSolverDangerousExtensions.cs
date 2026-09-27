@@ -1,3 +1,5 @@
+using Numos.Chunks.Topology;
+
 namespace Numos.API.Dangerous;
 
 /// <summary>
@@ -35,7 +37,7 @@ public readonly ref struct AtmosDangerousWorldSolverApi
     /// <param name="cell">A current cell reference from the callback's world.</param>
     /// <returns>The unchecked live chunk view.</returns>
     /// <exception cref="ArgumentException">The cell does not identify live storage in this world.</exception>
-    public AtmosDangerousChunk GetChunk(AtmosCellRef cell)
+    public AtmosDangerousChunk GetChunk(VoxelRef cell)
     {
         if (!_context.World.TryGetSimulation(cell.Simulation, out var simulation) || simulation == null)
             throw new ArgumentException("The cell does not identify a live simulation in this world.", nameof(cell));

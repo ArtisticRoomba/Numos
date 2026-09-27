@@ -2,6 +2,7 @@ using System.Numerics;
 using ImGuiNET;
 using Numos.API;
 using Numos.Chunks;
+using Numos.Chunks.Topology;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.SimDrawer;
 using Numos.Viewer.Rendering.Viewport;
@@ -469,7 +470,7 @@ public partial class SimulationViewer
 
     private void RenderContextPortalMenu()
     {
-        AtmosCellRef? selected = GetSelectedAtmosCell();
+        VoxelRef? selected = GetSelectedAtmosCell();
         if (!selected.HasValue || !ImGui.BeginMenu("Portal"))
             return;
 
@@ -480,7 +481,7 @@ public partial class SimulationViewer
             _topologyFeedback = null;
         }
 
-        bool canCreate = _portalFirst.HasValue && GetTopologyFlags() != ExplicitLinkFlags.None;
+        bool canCreate = _portalFirst.HasValue && GetTopologyFlags() != AtmosLinkFlags.None;
         ImGui.BeginDisabled(!canCreate);
         if (ImGui.MenuItem("Create Portal to Here"))
         {
@@ -496,7 +497,7 @@ public partial class SimulationViewer
         else
             ImGui.TextDisabled("Start a portal at its first endpoint.");
 
-        if (GetTopologyFlags() == ExplicitLinkFlags.None)
+        if (GetTopologyFlags() == AtmosLinkFlags.None)
             ImGui.TextDisabled("Enable a transport mode in World & Topology.");
 
         ImGui.EndMenu();

@@ -1,3 +1,4 @@
+using Numos.Chunks.Topology;
 using Numos.CoreSim;
 
 namespace Numos.API;
@@ -42,9 +43,9 @@ public enum AtmosWorldSolverKind : byte
 /// <param name="Second">The canonical second endpoint.</param>
 /// <param name="Flags">The interactions enabled by the link.</param>
 public readonly record struct AtmosExplicitLinkInfo(
-    AtmosCellRef First,
-    AtmosCellRef Second,
-    ExplicitLinkFlags Flags);
+    VoxelRef First,
+    VoxelRef Second,
+    AtmosLinkFlags Flags);
 
 /// <summary>
 ///     Configures the neighborhood compiled for one custom world solver.

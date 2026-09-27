@@ -1,3 +1,4 @@
+using Numos.Chunks.Topology;
 using Numos.CoreSim;
 using Numos.CoreSim.Replay;
 
@@ -110,7 +111,7 @@ public readonly record struct AtmosWorldSolverCheckpoint(
 /// <param name="Simulation">The stable simulation registration.</param>
 /// <param name="Checkpoint">The simulation-owned chunk and solver continuation state.</param>
 public sealed record AtmosWorldSimulationCheckpoint(
-    AtmosSimulationId Simulation,
+    SimulationId Simulation,
     AtmosSimulationCheckpoint Checkpoint);
 
 /// <summary>
@@ -145,10 +146,10 @@ public sealed record AtmosWorldLinkSetCheckpoint(
     ExplicitLinkSetHandle Handle,
     ExplicitLinkSetKind Kind,
     AtmosWorldLinkSetState State,
-    IReadOnlyList<ExplicitLinkDefinition> Links);
+    IReadOnlyList<ExplicitLinkDefinition<AtmosLinkFlags>> Links);
 
 internal readonly record struct AtmosWorldLinkSlotCheckpoint(
     uint Generation,
     byte State,
     ExplicitLinkSetKind Kind,
-    ExplicitLinkDefinition[] Links);
+    ExplicitLinkDefinition<AtmosLinkFlags>[] Links);

@@ -1,5 +1,6 @@
 using Numos.API;
 using Numos.Chunks;
+using Numos.Chunks.Topology;
 using Numos.CoreSim.Replay;
 using Numos.Replay.SourceGen;
 
@@ -337,7 +338,7 @@ public static partial class NumosWorldReplaySerializer
             byte state = reader.ReadByte();
             var kind = (ExplicitLinkSetKind)reader.ReadByte();
             int linkCount = NumosReplaySerializer.ReadCount(reader, 10_000_000, "explicit link");
-            var links = new ExplicitLinkDefinition[linkCount];
+            var links = new ExplicitLinkDefinition<AtmosLinkFlags>[linkCount];
             for (int linkIndex = 0; linkIndex < linkCount; linkIndex++)
                 links[linkIndex] = ReadLink(reader);
 
@@ -511,49 +512,49 @@ public static partial class NumosWorldReplaySerializer
         var handle = ReadHandle(reader);
         var kind = (ExplicitLinkSetKind)reader.ReadByte();
         int count = NumosReplaySerializer.ReadCount(reader, 10_000_000, "explicit link");
-        var links = new ExplicitLinkDefinition[count];
+        var links = new ExplicitLinkDefinition<AtmosLinkFlags>[count];
         for (int index = 0; index < count; index++)
             links[index] = ReadLink(reader);
 
         return new CreateAtmosLinkSetOperation(handle, kind, links);
     }
 
-    private static void WriteLink(BinaryWriter writer, ExplicitLinkDefinition link)
+    private static void WriteLink(BinaryWriter writer, ExplicitLinkDefinition<AtmosLinkFlags> link)
     {
         WriteCell(writer, link.First);
         WriteCell(writer, link.Second);
         writer.Write((byte)link.Flags);
     }
 
-    private static ExplicitLinkDefinition ReadLink(BinaryReader reader)
+    private static ExplicitLinkDefinition<AtmosLinkFlags> ReadLink(BinaryReader reader)
     {
-        return new ExplicitLinkDefinition(ReadCell(reader), ReadCell(reader), (ExplicitLinkFlags)reader.ReadByte());
+        return new ExplicitLinkDefinition<AtmosLinkFlags>(ReadCell(reader), ReadCell(reader), (AtmosLinkFlags)reader.ReadByte());
     }
 
-    private static void WriteCell(BinaryWriter writer, AtmosCellRef cell)
+    private static void WriteCell(BinaryWriter writer, VoxelRef cell)
     {
         WriteSimulationId(writer, cell.Simulation);
         NumosReplaySerializer.WriteInt3(writer, cell.Chunk.Position);
         writer.Write(cell.LocalVoxelIndex);
     }
 
-    private static AtmosCellRef ReadCell(BinaryReader reader)
+    private static VoxelRef ReadCell(BinaryReader reader)
     {
-        return new AtmosCellRef(
+        return new VoxelRef(
             ReadSimulationId(reader),
             new ChunkHandle(NumosReplaySerializer.ReadInt3(reader)),
             reader.ReadUInt16());
     }
 
-    private static void WriteSimulationId(BinaryWriter writer, AtmosSimulationId id)
+    private static void WriteSimulationId(BinaryWriter writer, SimulationId id)
     {
         writer.Write(id.Index);
         writer.Write(id.Generation);
     }
 
-    private static AtmosSimulationId ReadSimulationId(BinaryReader reader)
+    private static SimulationId ReadSimulationId(BinaryReader reader)
     {
-        return new AtmosSimulationId(reader.ReadInt32(), reader.ReadUInt32());
+        return new SimulationId(reader.ReadInt32(), reader.ReadUInt32());
     }
 
     private static void WriteHandle(BinaryWriter writer, ExplicitLinkSetHandle handle)

@@ -1,3 +1,4 @@
+using Numos.Chunks.Topology;
 using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.Maths;
@@ -19,7 +20,7 @@ public sealed class AtmosWorldSolverPipelineTests
         second.SetChunkClassification(secondChunk, new VoxelClassification(1));
         var source = first.GetCellRef(firstChunk, 0);
         var target = second.GetCellRef(secondChunk, 0);
-        world.CreatePortal(source, target, ExplicitLinkFlags.GasTransport);
+        world.CreatePortal(source, target, AtmosLinkFlags.GasTransport);
 
         int neighborCount = -1;
         AtmosNeighbor[] neighbors = [];
@@ -28,7 +29,7 @@ public sealed class AtmosWorldSolverPipelineTests
             new AtmosNeighborSelection(
                 "tests/gas-neighbors-v1",
                 true,
-                static link => (link.Flags & ExplicitLinkFlags.GasTransport) != 0),
+                static link => (link.Flags & AtmosLinkFlags.GasTransport) != 0),
             context =>
             {
                 neighborCount = context.Topology.GetNeighborCount(source);
@@ -71,7 +72,7 @@ public sealed class AtmosWorldSolverPipelineTests
             Is.EqualTo(
                 new[]
                 {
-                    new AtmosNeighbor(target, AtmosNeighborKind.Cartesian, ExplicitLinkFlags.None)
+                    new AtmosNeighbor(target, AtmosNeighborKind.Cartesian, AtmosLinkFlags.None)
                 }));
     }
 
@@ -131,9 +132,10 @@ public sealed class AtmosWorldSolverPipelineTests
 
         var links = world.CreateLinks(
         [
-            new ExplicitLinkDefinition(
+            new ExplicitLinkDefinition<AtmosLinkFlags>(
                 simulation.GetCellRef(first, 0),
-                simulation.GetCellRef(second, 0))
+                simulation.GetCellRef(second, 0),
+                AtmosLinkFlags.All)
         ]);
 
         Assert.That(() => world.Tick(), Throws.InvalidOperationException);
@@ -309,7 +311,7 @@ public sealed class AtmosWorldSolverPipelineTests
 
         // A capability bit outside GasTransport/ThermalTransport: Numos' built-in transport stages must ignore it,
         // while a host-registered selector can still pick the link out by it.
-        const ExplicitLinkFlags customCapability = (ExplicitLinkFlags)(1 << 2);
+        const AtmosLinkFlags customCapability = (AtmosLinkFlags)(1 << 2);
         world.CreatePortal(
             first.GetCellRef(firstChunk, 0),
             second.GetCellRef(secondChunk, 0),
@@ -344,14 +346,14 @@ public sealed class AtmosWorldSolverPipelineTests
         var simulation = world.CreateSimulation(2, 2, 1);
         var chunk = simulation.CreateAndRegisterChunk(default);
         simulation.SetChunkClassification(chunk, new VoxelClassification(1));
-        const ExplicitLinkFlags customCapability = (ExplicitLinkFlags)(1 << 3);
+        const AtmosLinkFlags customCapability = (AtmosLinkFlags)(1 << 3);
 
         Assert.Multiple(() =>
         {
             Assert.That(
                 () => world.CreateLinks(
                 [
-                    new ExplicitLinkDefinition(
+                    new ExplicitLinkDefinition<AtmosLinkFlags>(
                         simulation.GetCellRef(chunk, 0),
                         simulation.GetCellRef(chunk, 3),
                         customCapability)
@@ -366,7 +368,7 @@ public sealed class AtmosWorldSolverPipelineTests
                 Throws.Nothing);
 
             Assert.That(
-                () => world.CreatePortal(simulation.GetCellRef(chunk, 0), simulation.GetCellRef(chunk, 1), ExplicitLinkFlags.None),
+                () => world.CreatePortal(simulation.GetCellRef(chunk, 0), simulation.GetCellRef(chunk, 1), AtmosLinkFlags.None),
                 Throws.ArgumentException);
         });
     }
@@ -399,14 +401,14 @@ public sealed class AtmosWorldSolverPipelineTests
         world.CreatePortal(
             reversePortal ? target : source,
             reversePortal ? source : target,
-            ExplicitLinkFlags.GasTransport);
+            AtmosLinkFlags.GasTransport);
 
         world.Solvers.RegisterNeighborSolver(
             "deterministic-observer",
             new AtmosNeighborSelection(
                 "tests/deterministic-observer-v1",
                 true,
-                static link => (link.Flags & ExplicitLinkFlags.GasTransport) != 0),
+                static link => (link.Flags & AtmosLinkFlags.GasTransport) != 0),
             context =>
             {
                 // Traverse the complete view so ordering bugs are observable to this fixture without mutating state.

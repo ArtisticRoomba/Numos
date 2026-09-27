@@ -380,7 +380,7 @@ all of them, so don't skip steps on the assumption that a missing one will alway
    pointing at the registration host class.
 3. Most operations need nothing else here -- the field order in the record's primary constructor becomes the wire
    layout, mapped through `Numos.Replay.SourceGen`'s fixed set of recognized field types (primitives, `Int3`,
-   `VoxelClassification`, `AtmosSimulationId`, `ExplicitLinkSetHandle`, and a nested-operation kind for a world
+   `VoxelClassification`, `SimulationId`, `ExplicitLinkSetHandle`, and a nested-operation kind for a world
    operation embedding a whole `AtmosOperation`). An unrecognized field type fails the build with
    `NUMOSREPLAYGEN001` rather than silently miscoding.
 
