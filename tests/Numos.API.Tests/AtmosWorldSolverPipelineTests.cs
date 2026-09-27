@@ -1,3 +1,4 @@
+using Numos.Chunks;
 using Numos.Chunks.Topology;
 using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Primitives;
@@ -23,10 +24,10 @@ public sealed class AtmosWorldSolverPipelineTests
         world.CreatePortal(source, target, AtmosLinkFlags.GasTransport);
 
         int neighborCount = -1;
-        AtmosNeighbor[] neighbors = [];
+        VoxelNeighbor<AtmosLinkFlags>[] neighbors = [];
         world.Solvers.RegisterNeighborSolver(
             "inspect-neighbors",
-            new AtmosNeighborSelection(
+            new VoxelNeighborSelection<AtmosLinkFlags>(
                 "tests/gas-neighbors-v1",
                 true,
                 static link => (link.Flags & AtmosLinkFlags.GasTransport) != 0),
@@ -41,9 +42,9 @@ public sealed class AtmosWorldSolverPipelineTests
         Assert.Multiple(() =>
         {
             Assert.That(neighborCount, Is.EqualTo(3));
-            Assert.That(neighbors.Count(static neighbor => neighbor.Kind == AtmosNeighborKind.Cartesian), Is.EqualTo(2));
-            Assert.That(neighbors.Count(static neighbor => neighbor.Kind == AtmosNeighborKind.Explicit), Is.EqualTo(1));
-            Assert.That(neighbors.Single(static neighbor => neighbor.Kind == AtmosNeighborKind.Explicit).Cell, Is.EqualTo(target));
+            Assert.That(neighbors.Count(static neighbor => neighbor.Kind == VoxelNeighborKind.Cartesian), Is.EqualTo(2));
+            Assert.That(neighbors.Count(static neighbor => neighbor.Kind == VoxelNeighborKind.Explicit), Is.EqualTo(1));
+            Assert.That(neighbors.Single(static neighbor => neighbor.Kind == VoxelNeighborKind.Explicit).Cell, Is.EqualTo(target));
         });
     }
 
@@ -58,11 +59,11 @@ public sealed class AtmosWorldSolverPipelineTests
         simulation.SetChunkClassification(second, new VoxelClassification(1));
         var source = simulation.GetCellRef(first, 0);
         var target = simulation.GetCellRef(second, 0);
-        AtmosNeighbor[] neighbors = [];
+        VoxelNeighbor<AtmosLinkFlags>[] neighbors = [];
 
         world.Solvers.RegisterNeighborSolver(
             "inspect-chunk-boundary",
-            AtmosNeighborSelection.All("tests/chunk-boundary-v1"),
+            VoxelNeighborSelection<AtmosLinkFlags>.All("tests/chunk-boundary-v1"),
             context => neighbors = context.Topology.GetNeighbors(source).ToArray());
 
         world.Tick();
@@ -72,7 +73,7 @@ public sealed class AtmosWorldSolverPipelineTests
             Is.EqualTo(
                 new[]
                 {
-                    new AtmosNeighbor(target, AtmosNeighborKind.Cartesian, AtmosLinkFlags.None)
+                    new VoxelNeighbor<AtmosLinkFlags>(target, VoxelNeighborKind.Cartesian, AtmosLinkFlags.None)
                 }));
     }
 
@@ -89,7 +90,7 @@ public sealed class AtmosWorldSolverPipelineTests
 
         world.Solvers.RegisterNeighborSolver(
             "compiled-selector",
-            new AtmosNeighborSelection(
+            new VoxelNeighborSelection<AtmosLinkFlags>(
                 "tests/compiled-selector-v1",
                 false,
                 _ =>
@@ -122,7 +123,7 @@ public sealed class AtmosWorldSolverPipelineTests
 
         world.Solvers.RegisterNeighborSolver(
             "fallible-selector",
-            new AtmosNeighborSelection(
+            new VoxelNeighborSelection<AtmosLinkFlags>(
                 "tests/fallible-selector-v1",
                 false,
                 _ => failCompilation
@@ -224,19 +225,19 @@ public sealed class AtmosWorldSolverPipelineTests
         first.SetChunkClassification(firstChunk, new VoxelClassification(1));
         second.SetChunkClassification(secondChunk, new VoxelClassification(1));
         world.CreatePortal(first.GetCellRef(firstChunk, 0), second.GetCellRef(secondChunk, 0));
-        AtmosNeighborEdge[] edges = [];
+        VoxelNeighborEdge<AtmosLinkFlags>[] edges = [];
 
         world.Solvers.RegisterNeighborSolver(
             "owned-edges",
-            AtmosNeighborSelection.All("tests/owned-edges-v1"),
+            VoxelNeighborSelection<AtmosLinkFlags>.All("tests/owned-edges-v1"),
             context => edges = context.Topology.GetOwnedEdges().ToArray());
 
         world.Tick();
 
         Assert.Multiple(() =>
         {
-            Assert.That(edges.Count(static edge => edge.Kind == AtmosNeighborKind.Cartesian), Is.EqualTo(1));
-            Assert.That(edges.Count(static edge => edge.Kind == AtmosNeighborKind.Explicit), Is.EqualTo(1));
+            Assert.That(edges.Count(static edge => edge.Kind == VoxelNeighborKind.Cartesian), Is.EqualTo(1));
+            Assert.That(edges.Count(static edge => edge.Kind == VoxelNeighborKind.Explicit), Is.EqualTo(1));
         });
     }
 
@@ -246,7 +247,7 @@ public sealed class AtmosWorldSolverPipelineTests
         using var world = new AtmosWorld(CreateConfig());
         world.Solvers.RegisterNeighborSolver(
             "authoritative-custom",
-            AtmosNeighborSelection.All("tests/authoritative-custom-v1"),
+            VoxelNeighborSelection<AtmosLinkFlags>.All("tests/authoritative-custom-v1"),
             _ => { });
 
         var checkpoint = world.CaptureCheckpoint();
@@ -320,7 +321,7 @@ public sealed class AtmosWorldSolverPipelineTests
         bool customSolverSawLink = false;
         world.Solvers.RegisterNeighborSolver(
             "custom-capability-observer",
-            new AtmosNeighborSelection(
+            new VoxelNeighborSelection<AtmosLinkFlags>(
                 "tests/custom-capability-v1",
                 false,
                 link => (link.Flags & customCapability) != 0),
@@ -405,7 +406,7 @@ public sealed class AtmosWorldSolverPipelineTests
 
         world.Solvers.RegisterNeighborSolver(
             "deterministic-observer",
-            new AtmosNeighborSelection(
+            new VoxelNeighborSelection<AtmosLinkFlags>(
                 "tests/deterministic-observer-v1",
                 true,
                 static link => (link.Flags & AtmosLinkFlags.GasTransport) != 0),
@@ -423,9 +424,9 @@ public sealed class AtmosWorldSolverPipelineTests
 
 internal static class AtmosNeighborTestExtensions
 {
-    internal static AtmosNeighbor[] ToArray(this AtmosNeighborEnumerable neighbors)
+    internal static VoxelNeighbor<AtmosLinkFlags>[] ToArray(this VoxelNeighborEnumerable<AtmosLinkFlags> neighbors)
     {
-        var result = new List<AtmosNeighbor>();
+        var result = new List<VoxelNeighbor<AtmosLinkFlags>>();
         foreach (var neighbor in neighbors)
             result.Add(neighbor);
 

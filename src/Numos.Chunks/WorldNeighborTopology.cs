@@ -1,13 +1,12 @@
-using Numos.Chunks;
 using Numos.Chunks.Topology;
 using Numos.Maths;
 
-namespace Numos.API;
+namespace Numos.Chunks;
 
 /// <summary>
 ///     Identifies how a solver-facing neighboring cell was discovered.
 /// </summary>
-public enum AtmosNeighborKind : byte
+public enum VoxelNeighborKind : byte
 {
     /// <summary>
     ///     The cells are ordinary Cartesian neighbors.
@@ -25,11 +24,11 @@ public enum AtmosNeighborKind : byte
 /// </summary>
 /// <param name="Cell">The neighboring cell.</param>
 /// <param name="Kind">How the adjacency was discovered.</param>
-/// <param name="Flags">The explicit-link capabilities, or <see cref="AtmosLinkFlags.None" /> for Cartesian adjacency.</param>
-public readonly record struct AtmosNeighbor(
+/// <param name="Flags">The explicit-link capabilities, or default enum value for Cartesian adjacency.</param>
+public readonly record struct VoxelNeighbor<T>(
     VoxelRef Cell,
-    AtmosNeighborKind Kind,
-    AtmosLinkFlags Flags);
+    VoxelNeighborKind Kind,
+    T Flags) where T : struct, Enum;
 
 /// <summary>
 ///     Describes one canonically owned solver edge.
@@ -37,28 +36,78 @@ public readonly record struct AtmosNeighbor(
 /// <param name="First">The canonical first endpoint.</param>
 /// <param name="Second">The canonical second endpoint.</param>
 /// <param name="Kind">How the adjacency was discovered.</param>
-/// <param name="Flags">The explicit-link capabilities, or <see cref="AtmosLinkFlags.None" /> for Cartesian adjacency.</param>
-public readonly record struct AtmosNeighborEdge(
+/// <param name="Flags">The explicit-link capabilities, or default enum value for Cartesian adjacency.</param>
+public readonly record struct VoxelNeighborEdge<T>(
     VoxelRef First,
     VoxelRef Second,
-    AtmosNeighborKind Kind,
-    AtmosLinkFlags Flags);
+    VoxelNeighborKind Kind,
+    T Flags) where T : struct, Enum;
+
+/// <summary>
+///     Configures the neighborhood compiled for one custom world solver.
+/// </summary>
+/// <param name="key">A stable identifier describing the selection policy for checkpoint compatibility.</param>
+/// <param name="includeCartesian">Whether ordinary Cartesian neighbors participate.</param>
+/// <param name="explicitLinks">The selector evaluated for active explicit links.</param>
+/// <remarks>
+///     Set <paramref name="includeCartesian" /> to <see langword="false" /> for a solver that only interacts with
+///     portals, docks, or other explicit links: it keeps the compiled view limited to the sparse explicit edge set
+///     instead of re-deriving all six ordinary neighbors of every voxel in every chunk. Reach for
+///     <see langword="true" /> only when the same stage genuinely needs to traverse ordinary walls too, such as fire
+///     or sound propagating through both open doorways and portals.
+/// </remarks>
+public sealed class VoxelNeighborSelection<T>(
+    string key,
+    bool includeCartesian,
+    ExplicitLinkSelector<T> explicitLinks) where T : struct, Enum
+{
+    /// <summary>
+    ///     Gets the stable compatibility key for this selection policy.
+    /// </summary>
+    /// <remarks>
+    ///     This string is checkpointed alongside the solver's registration and folded into world state hashing, so a
+    ///     restored checkpoint compiles topology using the key it was captured with. Give a selection a new key when
+    ///     its <see cref="ExplicitLinkSelector{T}" /> changes what it matches; reusing a key for a semantically
+    ///     different selection lets a restored checkpoint silently compile the wrong edges for it.
+    /// </remarks>
+    public string Key { get; } = string.IsNullOrWhiteSpace(key)
+        ? throw new ArgumentException("A neighbor selection key cannot be empty.", nameof(key))
+        : key;
+
+    /// <summary>
+    ///     Gets whether ordinary Cartesian neighbors participate.
+    /// </summary>
+    public bool IncludeCartesian { get; } = includeCartesian;
+
+    internal ExplicitLinkSelector<T> ExplicitLinks { get; } =
+        explicitLinks ?? throw new ArgumentNullException(nameof(explicitLinks));
+
+    /// <summary>
+    ///     Creates a selection that includes Cartesian neighbors and every active explicit link.
+    /// </summary>
+    /// <param name="key">The stable compatibility key for the consuming solver.</param>
+    /// <returns>A selection covering the complete world topology.</returns>
+    public static VoxelNeighborSelection<T> All(string key)
+    {
+        return new VoxelNeighborSelection<T>(key, true, static _ => true);
+    }
+}
 
 /// <summary>
 ///     Provides a solver-specific, immutable view of Cartesian and compiled explicit topology.
 /// </summary>
-public sealed class AtmosWorldNeighborTopology
+public sealed class WorldNeighborTopology<T> where T : struct, Enum
 {
-    private readonly Dictionary<CompiledChunkKey, CompiledChunkAdjacency> _explicitByChunk;
-    private readonly ExplicitLinkDefinition<AtmosLinkFlags>[] _explicitEdges;
+    private readonly Dictionary<CompiledChunkKey, CompiledChunkAdjacency<T>> _explicitByChunk;
+    private readonly ExplicitLinkDefinition<T>[] _explicitEdges;
     private readonly bool _includeCartesian;
-    private readonly AtmosWorld? _world;
+    private readonly IChunkWorld? _world;
 
-    private AtmosWorldNeighborTopology(
-        AtmosWorld? world,
+    private WorldNeighborTopology(
+        IChunkWorld? world,
         bool includeCartesian,
-        Dictionary<CompiledChunkKey, CompiledChunkAdjacency> explicitByChunk,
-        ExplicitLinkDefinition<AtmosLinkFlags>[] explicitEdges)
+        Dictionary<CompiledChunkKey, CompiledChunkAdjacency<T>> explicitByChunk,
+        ExplicitLinkDefinition<T>[] explicitEdges)
     {
         _world = world;
         _includeCartesian = includeCartesian;
@@ -66,12 +115,12 @@ public sealed class AtmosWorldNeighborTopology
         _explicitEdges = explicitEdges;
     }
 
-    internal static AtmosWorldNeighborTopology Empty { get; } =
+    public static WorldNeighborTopology<T> Empty { get; } =
         new(null, false, [], []);
 
-    internal static AtmosWorldNeighborTopology EmptyFor(AtmosWorld world)
+    public static WorldNeighborTopology<T> EmptyFor(IChunkWorld world)
     {
-        return new AtmosWorldNeighborTopology(world, false, [], []);
+        return new WorldNeighborTopology<T>(world, false, [], []);
     }
 
     /// <summary>
@@ -80,12 +129,12 @@ public sealed class AtmosWorldNeighborTopology
     /// <param name="simulation">The simulation that owns the chunk.</param>
     /// <param name="chunk">The chunk to inspect.</param>
     /// <returns>An allocation-free chunk-local neighborhood view.</returns>
-    public AtmosChunkNeighborView GetChunk(AtmosSimulation simulation, ChunkHandle chunk)
+    public VoxelChunkNeighborView<T> GetChunk(IChunkSimulation simulation, ChunkHandle chunk)
     {
         ArgumentNullException.ThrowIfNull(simulation);
         var world = GetWorld();
-        if (!ReferenceEquals(simulation.World, world) ||
-            !world.TryResolveCell(new VoxelRef(simulation.Id, chunk, 0), out _))
+        if (!ReferenceEquals(simulation.ChunkWorld, world) ||
+            !world.TryResolveCell(new VoxelRef(simulation.Id, chunk, 0)))
         {
             throw new ArgumentException("The chunk is not registered in this world.", nameof(chunk));
         }
@@ -99,14 +148,13 @@ public sealed class AtmosWorldNeighborTopology
 
             var adjacentPosition = chunk.Position + GetDirection(direction);
             if (world.TryResolveCell(
-                    new VoxelRef(simulation.Id, new ChunkHandle(adjacentPosition), 0),
-                    out _))
+                    new VoxelRef(simulation.Id, new ChunkHandle(adjacentPosition), 0)))
             {
                 adjacentChunkMask |= checked((byte)(1 << direction));
             }
         }
 
-        return new AtmosChunkNeighborView(
+        return new VoxelChunkNeighborView<T>(
             simulation.Id,
             chunk,
             simulation.ChunkDimensions,
@@ -124,7 +172,7 @@ public sealed class AtmosWorldNeighborTopology
     public int GetNeighborCount(VoxelRef cell)
     {
         var world = GetWorld();
-        if (!world.TryGetSimulation(cell.Simulation, out var simulation) || simulation == null)
+        if (!world.TryGetChunkSimulation(cell.Simulation, out var simulation) || simulation == null)
             throw new ArgumentException("The cell does not identify a live simulation in this world.", nameof(cell));
 
         return GetChunk(simulation, cell.Chunk).GetNeighborCount(cell.LocalVoxelIndex);
@@ -135,10 +183,10 @@ public sealed class AtmosWorldNeighborTopology
     /// </summary>
     /// <param name="cell">A live cell in the callback's world.</param>
     /// <returns>An allocation-free incident-neighbor enumerable.</returns>
-    public AtmosNeighborEnumerable GetNeighbors(VoxelRef cell)
+    public VoxelNeighborEnumerable<T> GetNeighbors(VoxelRef cell)
     {
         var world = GetWorld();
-        if (!world.TryGetSimulation(cell.Simulation, out var simulation) || simulation == null)
+        if (!world.TryGetChunkSimulation(cell.Simulation, out var simulation) || simulation == null)
             throw new ArgumentException("The cell does not identify a live simulation in this world.", nameof(cell));
 
         return GetChunk(simulation, cell.Chunk).GetNeighbors(cell.LocalVoxelIndex);
@@ -154,16 +202,16 @@ public sealed class AtmosWorldNeighborTopology
     ///     membership on every call, and when the selection includes Cartesian neighbors it walks all six directions
     ///     of every voxel in every chunk in the world to find them — for a selection built with
     ///     <c>includeCartesian: false</c>, it only walks the sparse explicit edge list instead. A
-    ///     performance-sensitive tiled solver should acquire <see cref="AtmosChunkNeighborView" /> once per chunk via
-    ///     <see cref="GetChunk" /> and call <see cref="AtmosChunkNeighborView.GetNeighbors" /> per voxel instead of
+    ///     performance-sensitive tiled solver should acquire <see cref="VoxelChunkNeighborView{T}" /> once per chunk via
+    ///     <see cref="GetChunk" /> and call <see cref="VoxelChunkNeighborView{T}.GetNeighbors" /> per voxel instead of
     ///     calling this every tick.
     /// </remarks>
-    public IEnumerable<AtmosNeighborEdge> GetOwnedEdges()
+    public IEnumerable<VoxelNeighborEdge<T>> GetOwnedEdges()
     {
         var world = GetWorld();
         if (_includeCartesian)
         {
-            foreach (var simulation in world.Simulations)
+            foreach (var simulation in world.ChunkSimulations)
             {
                 foreach (var chunk in simulation.GetChunkHandles())
                 {
@@ -181,11 +229,11 @@ public sealed class AtmosWorldNeighborTopology
                             if (!view.TryGetCartesianNeighbor(voxelIndex, direction, out var second))
                                 continue;
 
-                            yield return new AtmosNeighborEdge(
+                            yield return new VoxelNeighborEdge<T>(
                                 first,
                                 second,
-                                AtmosNeighborKind.Cartesian,
-                                AtmosLinkFlags.None);
+                                VoxelNeighborKind.Cartesian,
+                                default);
                         }
                     }
                 }
@@ -194,23 +242,23 @@ public sealed class AtmosWorldNeighborTopology
 
         foreach (var edge in _explicitEdges)
         {
-            yield return new AtmosNeighborEdge(
+            yield return new VoxelNeighborEdge<T>(
                 edge.First,
                 edge.Second,
-                AtmosNeighborKind.Explicit,
+                VoxelNeighborKind.Explicit,
                 edge.Flags);
         }
     }
 
-    internal static AtmosWorldNeighborTopology Compile(
-        AtmosWorld world,
-        AtmosNeighborSelection selection,
-        IReadOnlyList<ExplicitLinkDefinition<AtmosLinkFlags>> links)
+    public static WorldNeighborTopology<T> Compile(
+        IChunkWorld world,
+        VoxelNeighborSelection<T> selection,
+        IReadOnlyList<ExplicitLinkDefinition<T>> links)
     {
-        var selected = new List<ExplicitLinkDefinition<AtmosLinkFlags>>(links.Count);
+        var selected = new List<ExplicitLinkDefinition<T>>(links.Count);
         foreach (var link in links)
         {
-            if (selection.ExplicitLinks(new AtmosExplicitLinkInfo(link.First, link.Second, link.Flags)))
+            if (selection.ExplicitLinks(new ExplicitLinkDefinition<T>(link.First, link.Second, link.Flags)))
                 selected.Add(link);
         }
 
@@ -221,10 +269,10 @@ public sealed class AtmosWorldNeighborTopology
             Add(entries, link.Second, link.First, link.Flags);
         }
 
-        var chunks = new Dictionary<CompiledChunkKey, CompiledChunkAdjacency>(entries.Count);
+        var chunks = new Dictionary<CompiledChunkKey, CompiledChunkAdjacency<T>>(entries.Count);
         foreach ((var key, List<CompiledNeighborEntry> neighbors) in entries)
         {
-            if (!world.TryGetSimulation(key.Simulation, out var simulation) || simulation == null)
+            if (!world.TryGetChunkSimulation(key.Simulation, out var simulation) || simulation == null)
                 continue;
 
             int voxelCount = checked(
@@ -239,7 +287,7 @@ public sealed class AtmosWorldNeighborTopology
             });
 
             int[] starts = new int[voxelCount + 1];
-            var values = new AtmosNeighbor[neighbors.Count];
+            var values = new VoxelNeighbor<T>[neighbors.Count];
             int neighborIndex = 0;
             for (int voxelIndex = 0; voxelIndex < voxelCount; voxelIndex++)
             {
@@ -252,17 +300,17 @@ public sealed class AtmosWorldNeighborTopology
             }
 
             starts[voxelCount] = neighborIndex;
-            chunks.Add(key, new CompiledChunkAdjacency(starts, values));
+            chunks.Add(key, new CompiledChunkAdjacency<T>(starts, values));
         }
 
-        return new AtmosWorldNeighborTopology(world, selection.IncludeCartesian, chunks, selected.ToArray());
+        return new WorldNeighborTopology<T>(world, selection.IncludeCartesian, chunks, selected.ToArray());
     }
 
     private static void Add(
         Dictionary<CompiledChunkKey, List<CompiledNeighborEntry>> entries,
         VoxelRef source,
         VoxelRef neighbor,
-        AtmosLinkFlags flags)
+        T flags)
     {
         var key = new CompiledChunkKey(source.Simulation, source.Chunk);
         if (!entries.TryGetValue(key, out List<CompiledNeighborEntry>? values))
@@ -274,10 +322,10 @@ public sealed class AtmosWorldNeighborTopology
         values.Add(
             new CompiledNeighborEntry(
                 source.LocalVoxelIndex,
-                new AtmosNeighbor(neighbor, AtmosNeighborKind.Explicit, flags)));
+                new VoxelNeighbor<T>(neighbor, VoxelNeighborKind.Explicit, flags)));
     }
 
-    private AtmosWorld GetWorld()
+    private IChunkWorld GetWorld()
     {
         return _world ?? throw new InvalidOperationException("This solver was not registered with a neighbor selection.");
     }
@@ -295,26 +343,34 @@ public sealed class AtmosWorldNeighborTopology
             _ => throw new ArgumentOutOfRangeException(nameof(direction))
         };
     }
+    
+    private readonly record struct CompiledChunkKey(
+        SimulationId Simulation,
+        ChunkHandle Chunk);
+
+    private readonly record struct CompiledNeighborEntry(
+        ushort SourceIndex,
+        VoxelNeighbor<T> Neighbor);
 }
 
 /// <summary>
 ///     Reusable topology view for one chunk.
 /// </summary>
-public readonly struct AtmosChunkNeighborView
+public readonly struct VoxelChunkNeighborView<T> where T : struct, Enum
 {
-    private readonly CompiledChunkAdjacency? _explicitAdjacency;
+    private readonly CompiledChunkAdjacency<T>? _explicitAdjacency;
     private readonly byte _adjacentChunkMask;
     private readonly bool _includeCartesian;
     private readonly ChunkHandle _chunk;
     private readonly Int3 _dimensions;
     private readonly SimulationId _simulation;
 
-    internal AtmosChunkNeighborView(
+    internal VoxelChunkNeighborView(
         SimulationId simulation,
         ChunkHandle chunk,
         Int3 dimensions,
         bool includeCartesian,
-        CompiledChunkAdjacency? explicitAdjacency,
+        CompiledChunkAdjacency<T>? explicitAdjacency,
         byte adjacentChunkMask)
     {
         _simulation = simulation;
@@ -356,12 +412,12 @@ public readonly struct AtmosChunkNeighborView
     /// </summary>
     /// <param name="localVoxelIndex">The source voxel's chunk-local index.</param>
     /// <returns>An allocation-free incident-neighbor enumerable.</returns>
-    public AtmosNeighborEnumerable GetNeighbors(ushort localVoxelIndex)
+    public VoxelNeighborEnumerable<T> GetNeighbors(ushort localVoxelIndex)
     {
         ValidateIndex(localVoxelIndex);
         int explicitStart = _explicitAdjacency?.Starts[localVoxelIndex] ?? 0;
         int explicitEnd = _explicitAdjacency?.Starts[localVoxelIndex + 1] ?? 0;
-        return new AtmosNeighborEnumerable(this, localVoxelIndex, explicitStart, explicitEnd);
+        return new VoxelNeighborEnumerable<T>(this, localVoxelIndex, explicitStart, explicitEnd);
     }
 
     internal bool TryGetCartesianNeighbor(
@@ -472,7 +528,7 @@ public readonly struct AtmosChunkNeighborView
         return true;
     }
 
-    internal AtmosNeighbor GetExplicitNeighbor(int index)
+    internal VoxelNeighbor<T> GetExplicitNeighbor(int index)
     {
         return _explicitAdjacency!.Neighbors[index];
     }
@@ -488,15 +544,15 @@ public readonly struct AtmosChunkNeighborView
 /// <summary>
 ///     Allocation-free enumerable over one cell's structural neighbors.
 /// </summary>
-public readonly struct AtmosNeighborEnumerable
+public readonly struct VoxelNeighborEnumerable<T> where T : struct, Enum
 {
     private readonly int _explicitEnd;
     private readonly int _explicitStart;
     private readonly ushort _localVoxelIndex;
-    private readonly AtmosChunkNeighborView _view;
+    private readonly VoxelChunkNeighborView<T> _view;
 
-    internal AtmosNeighborEnumerable(
-        AtmosChunkNeighborView view,
+    internal VoxelNeighborEnumerable(
+        VoxelChunkNeighborView<T> view,
         ushort localVoxelIndex,
         int explicitStart,
         int explicitEnd)
@@ -511,25 +567,25 @@ public readonly struct AtmosNeighborEnumerable
     ///     Creates an enumerator.
     /// </summary>
     /// <returns>An allocation-free enumerator over this cell's neighbors.</returns>
-    public AtmosNeighborEnumerator GetEnumerator()
+    public VoxelNeighborEnumerator<T> GetEnumerator()
     {
-        return new AtmosNeighborEnumerator(_view, _localVoxelIndex, _explicitStart, _explicitEnd);
+        return new VoxelNeighborEnumerator<T>(_view, _localVoxelIndex, _explicitStart, _explicitEnd);
     }
 }
 
 /// <summary>
 ///     Allocation-free enumerator over one cell's structural neighbors.
 /// </summary>
-public struct AtmosNeighborEnumerator
+public struct VoxelNeighborEnumerator<T> where T : struct, Enum
 {
     private readonly int _explicitEnd;
     private readonly ushort _localVoxelIndex;
-    private readonly AtmosChunkNeighborView _view;
+    private readonly VoxelChunkNeighborView<T> _view;
     private int _direction;
     private int _explicitIndex;
 
-    internal AtmosNeighborEnumerator(
-        AtmosChunkNeighborView view,
+    internal VoxelNeighborEnumerator(
+        VoxelChunkNeighborView<T> view,
         ushort localVoxelIndex,
         int explicitStart,
         int explicitEnd)
@@ -545,7 +601,7 @@ public struct AtmosNeighborEnumerator
     /// <summary>
     ///     Gets the current neighbor.
     /// </summary>
-    public AtmosNeighbor Current { get; private set; }
+    public VoxelNeighbor<T> Current { get; private set; }
 
     /// <summary>
     ///     Advances to the next neighbor.
@@ -559,7 +615,7 @@ public struct AtmosNeighborEnumerator
             if (!_view.TryGetCartesianNeighbor(_localVoxelIndex, direction, out var cell))
                 continue;
 
-            Current = new AtmosNeighbor(cell, AtmosNeighborKind.Cartesian, AtmosLinkFlags.None);
+            Current = new VoxelNeighbor<T>(cell, VoxelNeighborKind.Cartesian, default);
             return true;
         }
 
@@ -571,20 +627,12 @@ public struct AtmosNeighborEnumerator
     }
 }
 
-internal readonly record struct CompiledChunkKey(
-    SimulationId Simulation,
-    ChunkHandle Chunk);
-
-internal readonly record struct CompiledNeighborEntry(
-    ushort SourceIndex,
-    AtmosNeighbor Neighbor);
-
-internal sealed class CompiledChunkAdjacency(
+internal sealed class CompiledChunkAdjacency<T>(
     int[] starts,
-    AtmosNeighbor[] neighbors)
+    VoxelNeighbor<T>[] neighbors) where T : struct, Enum
 {
     internal int[] Starts { get; } = starts;
-    internal AtmosNeighbor[] Neighbors { get; } = neighbors;
+    internal VoxelNeighbor<T>[] Neighbors { get; } = neighbors;
 
     internal int GetCount(ushort localVoxelIndex)
     {

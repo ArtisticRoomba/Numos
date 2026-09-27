@@ -22,7 +22,7 @@ namespace Numos.API;
 ///     the solver pipeline, but it must not recursively execute or dispose the simulation or change chunk ownership
 ///     during the current tick.
 /// </remarks>
-public sealed partial class AtmosSimulation : IDisposable
+public sealed partial class AtmosSimulation : IChunkSimulation, IDisposable
 {
     /// <summary>
     ///     The fixed simulation rate, in ticks per second.
@@ -134,6 +134,12 @@ public sealed partial class AtmosSimulation : IDisposable
     /// </summary>
     [PublicAPI]
     public AtmosWorld World { get; }
+    
+    /// <summary>
+    ///     Gets the world that owns shared time, configuration, and cross-simulation topology.
+    /// </summary>
+    [PublicAPI]
+    public IChunkWorld ChunkWorld => World;
 
     /// <summary>
     ///     Gets this simulation's stable generational identifier within <see cref="World" />.

@@ -1,4 +1,5 @@
 using JetBrains.Annotations;
+using Numos.Chunks;
 using Numos.Chunks.Topology;
 using Numos.CoreSim.Replay;
 using Numos.CoreSim.Solvers;
@@ -71,7 +72,7 @@ public sealed class AtmosWorldSolverPipeline
     [PublicAPI]
     public void RegisterNeighborSolver(
         string name,
-        AtmosNeighborSelection selection,
+        VoxelNeighborSelection<AtmosLinkFlags> selection,
         AtmosWorldSolver solver)
     {
         ArgumentNullException.ThrowIfNull(selection);
@@ -101,7 +102,7 @@ public sealed class AtmosWorldSolverPipeline
     public void RegisterNeighborSolverBefore(
         string existingName,
         string name,
-        AtmosNeighborSelection selection,
+        VoxelNeighborSelection<AtmosLinkFlags> selection,
         AtmosWorldSolver solver)
     {
         ArgumentNullException.ThrowIfNull(selection);
@@ -131,7 +132,7 @@ public sealed class AtmosWorldSolverPipeline
     public void RegisterNeighborSolverAfter(
         string existingName,
         string name,
-        AtmosNeighborSelection selection,
+        VoxelNeighborSelection<AtmosLinkFlags> selection,
         AtmosWorldSolver solver)
     {
         ArgumentNullException.ThrowIfNull(selection);
@@ -218,7 +219,7 @@ public sealed class AtmosWorldSolverPipeline
 
     internal void RecompileTopology(IReadOnlyList<ExplicitLinkDefinition<AtmosLinkFlags>> links)
     {
-        var compiled = new AtmosWorldNeighborTopology[_steps.Count];
+        var compiled = new WorldNeighborTopology<AtmosLinkFlags>[_steps.Count];
         for (int index = 0; index < _steps.Count; index++)
             compiled[index] = _steps[index].BuildTopology(_world, links);
 
@@ -234,7 +235,7 @@ public sealed class AtmosWorldSolverPipeline
     private void RegisterCore(
         string name,
         AtmosWorldSolver solver,
-        AtmosNeighborSelection? selection,
+        VoxelNeighborSelection<AtmosLinkFlags>? selection,
         int insertionIndex)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
@@ -258,7 +259,7 @@ public sealed class AtmosWorldSolverPipeline
         string existingName,
         string name,
         AtmosWorldSolver solver,
-        AtmosNeighborSelection? selection,
+        VoxelNeighborSelection<AtmosLinkFlags>? selection,
         bool before)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(existingName);
@@ -343,14 +344,14 @@ internal sealed class WorldSolverRegistration
 {
     private readonly Action<AtmosWorldExecutionContext>? _builtInSolver;
     private readonly AtmosWorldSolver? _customSolver;
-    private AtmosWorldNeighborTopology _topology = AtmosWorldNeighborTopology.Empty;
+    private WorldNeighborTopology<AtmosLinkFlags> _topology = WorldNeighborTopology<AtmosLinkFlags>.Empty;
 
     private WorldSolverRegistration(
         string name,
         AtmosWorldSolverKind kind,
         Action<AtmosWorldExecutionContext>? builtInSolver,
         AtmosWorldSolver? customSolver,
-        AtmosNeighborSelection? selection)
+        VoxelNeighborSelection<AtmosLinkFlags>? selection)
     {
         Name = name;
         Kind = kind;
@@ -361,7 +362,7 @@ internal sealed class WorldSolverRegistration
 
     internal string Name { get; }
     internal AtmosWorldSolverKind Kind { get; }
-    internal AtmosNeighborSelection? Selection { get; }
+    internal VoxelNeighborSelection<AtmosLinkFlags>? Selection { get; }
     internal bool IsEnabled { get; set; } = true;
 
     internal static WorldSolverRegistration CreateBuiltIn(
@@ -374,7 +375,7 @@ internal sealed class WorldSolverRegistration
     internal static WorldSolverRegistration CreateCustom(
         string name,
         AtmosWorldSolver solver,
-        AtmosNeighborSelection? selection)
+        VoxelNeighborSelection<AtmosLinkFlags>? selection)
     {
         return new WorldSolverRegistration(name, AtmosWorldSolverKind.Custom, null, solver, selection);
     }
@@ -390,16 +391,16 @@ internal sealed class WorldSolverRegistration
         _builtInSolver!(context);
     }
 
-    internal AtmosWorldNeighborTopology BuildTopology(
+    internal WorldNeighborTopology<AtmosLinkFlags> BuildTopology(
         AtmosWorld world,
         IReadOnlyList<ExplicitLinkDefinition<AtmosLinkFlags>> links)
     {
         return Selection == null
-            ? AtmosWorldNeighborTopology.EmptyFor(world)
-            : AtmosWorldNeighborTopology.Compile(world, Selection, links);
+            ? WorldNeighborTopology<AtmosLinkFlags>.EmptyFor(world)
+            : WorldNeighborTopology<AtmosLinkFlags>.Compile(world, Selection, links);
     }
 
-    internal void InstallTopology(AtmosWorldNeighborTopology topology)
+    internal void InstallTopology(WorldNeighborTopology<AtmosLinkFlags> topology)
     {
         _topology = topology;
     }

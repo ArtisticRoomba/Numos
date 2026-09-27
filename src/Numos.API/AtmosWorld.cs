@@ -32,7 +32,7 @@ namespace Numos.API;
 ///     world.Tick(); // Activates the portal, then advances both simulations.
 ///     </code>
 /// </example>
-public sealed partial class AtmosWorld : IDisposable
+public sealed partial class AtmosWorld : IChunkWorld, IDisposable
 {
     private readonly ExplicitAtmosTransportSolver _explicitTransport = new();
     private readonly SortedSet<int> _freeLinkSlots = [];
@@ -132,6 +132,13 @@ public sealed partial class AtmosWorld : IDisposable
             }
         }
     }
+
+    /// <summary>
+    ///     Gets a detached, stable-ID-ordered list of registered chunk simulations.
+    /// </summary>
+    /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
+    [PublicAPI]
+    public IReadOnlyList<IChunkSimulation> ChunkSimulations => Simulations;
 
     /// <summary>
     ///     Gets a monotonic revision that changes whenever simulation membership changes.
@@ -1571,7 +1578,7 @@ public sealed partial class AtmosWorld : IDisposable
     private static void ValidateFlags(AtmosLinkFlags flags, string parameterName)
     {
         // Bits outside GasTransport|ThermalTransport are reserved for host-defined capabilities: a link can carry
-        // them so a host-registered solver's AtmosExplicitLinkSelector can pick it out, without engaging Numos'
+        // them so a host-registered solver's ExplicitLinkSelector can pick it out, without engaging Numos'
         // built-in transport stages, which only ever look at the bits they know about.
         if (flags == AtmosLinkFlags.None)
             throw new ArgumentException("An explicit link must select at least one transport capability.", parameterName);
@@ -1613,6 +1620,13 @@ public sealed partial class AtmosWorld : IDisposable
             return simulation != null;
         }
     }
+    
+    public bool TryGetChunkSimulation(SimulationId id, out IChunkSimulation? simulation)
+    {
+        var success = TryGetSimulation(id, out var sim);
+        simulation = sim;
+        return success;
+    }
 
     private AtmosSimulation? TryGetSimulationCore(SimulationId id)
     {
@@ -1621,6 +1635,11 @@ public sealed partial class AtmosWorld : IDisposable
 
         var slot = _simulationSlots[id.Index];
         return slot.Generation == id.Generation ? slot.Simulation : null;
+    }
+
+    public bool TryResolveCell(VoxelRef cell)
+    {
+        return TryResolveCell(cell, out _);
     }
 
     internal bool TryResolveCell(VoxelRef cell, out AtmosSimulation? simulation)

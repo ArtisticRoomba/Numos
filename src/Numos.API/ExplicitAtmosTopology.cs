@@ -10,7 +10,7 @@ namespace Numos.API;
 ///     <see cref="AtmosBuiltInSolvers.ExplicitGasTransport" />/<see cref="AtmosBuiltInSolvers.ExplicitThermalTransport" />
 ///     stages act on. The remaining bits of this <see langword="byte" />-backed flag set are reserved for hosts: a
 ///     link can carry a host-defined bit (for example <c>(AtmosLinkFlags)(1 &lt;&lt; 2)</c>) purely so a
-///     host-registered <see cref="AtmosExplicitLinkSelector" /> can pick it out. Numos' built-in stages ignore bits
+///     host-registered <see cref="ExplicitLinkSelector{T}" /> can pick it out. Numos' built-in stages ignore bits
 ///     they do not recognize, so a link can mix built-in capabilities with host-defined ones, or use only
 ///     host-defined ones to opt out of default physics entirely while still participating in checkpointing,
 ///     recording, and topology enumeration like any other link.

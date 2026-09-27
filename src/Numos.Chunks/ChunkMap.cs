@@ -12,6 +12,9 @@ namespace Numos.Chunks;
 /// </typeparam>
 public sealed class ChunkMap<T>(int x, int y, int z) : IDisposable where T : Chunk, IChunkInitializer<T>
 {
+    /// <summary>
+    /// Dimensions of every chunk stored in this chunk map.
+    /// </summary>
     public readonly Int3 Dimensions = new(x, y, z);
     
     private ConcurrentDictionary<Int3, T> _chunkMap = new();
