@@ -1,7 +1,7 @@
 ﻿namespace Numos.Chunks.Topology;
 
 /// <summary>
-///     Defines one undirected sparse atmospheric adjacency.
+///     Defines one undirected sparse voxel adjacency.
 /// </summary>
 /// <param name="First">One endpoint. Registration canonicalizes endpoint orientation.</param>
 /// <param name="Second">The other endpoint.</param>

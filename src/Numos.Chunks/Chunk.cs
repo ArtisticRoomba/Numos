@@ -108,8 +108,8 @@ public abstract class Chunk
     }
 
     /// <summary>
-    /// Method that is called before the chunk is released from the chunk map.
-    /// Here it must release all of its disposable resources.
+    ///     Method that is called before the chunk is released from the chunk map.
+    ///     Here it must release all of its disposable resources.
     /// </summary>
     public virtual void Release() { }
     

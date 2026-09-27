@@ -1,7 +1,7 @@
 ﻿namespace Numos.Chunks;
 
 /// <summary>
-/// Default constants for Numos chunks.
+///     Default constants for Numos chunks.
 /// </summary>
 public static class ChunkConstants
 {

@@ -28,7 +28,7 @@ namespace Numos.API;
 ///     ChunkHandle shuttleChunk = shuttle.CreateAndRegisterChunk(new Int3(0, 0, 0));
 ///     VoxelRef stationCell = station.GetCellRef(stationChunk, 0);
 ///     VoxelRef shuttleCell = shuttle.GetCellRef(shuttleChunk, 0);
-///     AtmosPortalHandle portal = world.CreatePortal(stationCell, shuttleCell);
+///     PortalHandle portal = world.CreatePortal(stationCell, shuttleCell);
 ///     world.Tick(); // Activates the portal, then advances both simulations.
 ///     </code>
 /// </example>
@@ -501,13 +501,13 @@ public sealed partial class AtmosWorld : IDisposable
     /// </exception>
     /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
     [PublicAPI]
-    public AtmosPortalHandle CreatePortal(
+    public PortalHandle CreatePortal(
         VoxelRef first,
         VoxelRef second,
         AtmosLinkFlags flags = AtmosLinkFlags.All)
     {
         ExplicitLinkDefinition<AtmosLinkFlags> definition = new(first, second, flags);
-        return new AtmosPortalHandle(
+        return new PortalHandle(
             CreateLinksCore(new ReadOnlySpan<ExplicitLinkDefinition<AtmosLinkFlags>>(in definition), ExplicitLinkSetKind.Portal));
     }
 
@@ -519,7 +519,7 @@ public sealed partial class AtmosWorld : IDisposable
     /// <exception cref="InvalidOperationException">Removal of this portal is already pending.</exception>
     /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
     [PublicAPI]
-    public void DestroyPortal(AtmosPortalHandle portal)
+    public void DestroyPortal(PortalHandle portal)
     {
         DestroyLinks(portal.Links);
     }
@@ -537,9 +537,9 @@ public sealed partial class AtmosWorld : IDisposable
     /// </exception>
     /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
     [PublicAPI]
-    public AtmosDockHandle CreateDock(ReadOnlySpan<ExplicitLinkDefinition<AtmosLinkFlags>> surfaceLinks)
+    public DockHandle CreateDock(ReadOnlySpan<ExplicitLinkDefinition<AtmosLinkFlags>> surfaceLinks)
     {
-        return new AtmosDockHandle(CreateLinksCore(surfaceLinks, ExplicitLinkSetKind.Dock));
+        return new DockHandle(CreateLinksCore(surfaceLinks, ExplicitLinkSetKind.Dock));
     }
 
     /// <summary>
@@ -550,7 +550,7 @@ public sealed partial class AtmosWorld : IDisposable
     /// <exception cref="InvalidOperationException">Removal of this dock is already pending.</exception>
     /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
     [PublicAPI]
-    public void DestroyDock(AtmosDockHandle dock)
+    public void DestroyDock(DockHandle dock)
     {
         DestroyLinks(dock.Links);
     }

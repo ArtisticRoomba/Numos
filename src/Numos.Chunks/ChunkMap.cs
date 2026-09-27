@@ -66,6 +66,12 @@ public sealed class ChunkMap<T>(int x, int y, int z) : IDisposable where T : Chu
         return true;
     }
     
+    /// <summary>
+    ///     Adds the specified chunk to the chunk map internal dictionary and reserves a <see cref="Chunk.DenseId"/>.
+    /// </summary>
+    /// <param name="chunk">The chunk object to register.</param>
+    /// <exception cref="ArgumentException">Chunk dimensions didn't match the dimensions of the chunk map.</exception>
+    /// <exception cref="InvalidOperationException">A chunk is already registered at the specified position.</exception>
     public void RegisterChunk(T chunk)
     {
         if (chunk.Dimensions != Dimensions)
@@ -107,6 +113,12 @@ public sealed class ChunkMap<T>(int x, int y, int z) : IDisposable where T : Chu
         return T.CreateInitializeChunk(position, Dimensions.X, Dimensions.Y, Dimensions.Z);
     }
     
+    /// <summary>
+    ///     Gets a chunk from the chunk map at a specific position.
+    /// </summary>
+    /// <param name="position">Position to get the chunk at.</param>
+    /// <returns>Chunk object stored at that position.</returns>
+    /// <exception cref="KeyNotFoundException">Specified position doesn't have a chunk.</exception>
     public T GetChunk(Int3 position)
     {
         if (_chunkMap.TryGetValue(position, out var chunk))
@@ -115,6 +127,9 @@ public sealed class ChunkMap<T>(int x, int y, int z) : IDisposable where T : Chu
         throw new KeyNotFoundException($"No atmospheric chunk is registered at ({position.X}, {position.Y}, {position.Z}).");
     }
     
+    /// <summary>
+    ///     Returns an array of all chunks ordered by their position.
+    /// </summary>
     public T[] OrderedChunks()
     {
         return _chunkMap.Values
@@ -123,16 +138,33 @@ public sealed class ChunkMap<T>(int x, int y, int z) : IDisposable where T : Chu
             .ThenBy(static chunk => chunk.GridPosition.Z).ToArray();
     }
 
+    /// <summary>
+    ///     An unsafe method to access the chunk map dictionary directly.
+    ///     Used by replays to set a new state.
+    /// </summary>
     public ConcurrentDictionary<Int3, T> UnsafeGetStorage()
     {
         return _chunkMap;
     }
     
+    /// <summary>
+    ///     An unsafe method to replace the chunk map dictionary.
+    ///     Used by replays to set a new state.
+    /// </summary>
     public void UnsafeReplaceStorage(ConcurrentDictionary<Int3, T> replacement)
     {
         _chunkMap = replacement;
     }
     
+    /// <summary>
+    ///     Gets a voxel index in the array while validating its position.
+    /// </summary>
+    /// <param name="chunk">A chunk to get the voxel index from.</param>
+    /// <param name="x">The X coordinate of the voxel.</param>
+    /// <param name="y">The Y coordinate of the voxel.</param>
+    /// <param name="z">The Z coordinate of the voxel.</param>
+    /// <returns>A voxel index that is guaranteed to be valid for this chunk.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">X, Y, or Z coordinate isn't in the dimensions of the chunk.</exception>
     public static ushort GetValidatedVoxelIndex(T chunk, int x, int y, int z)
     {
         if (x < 0 || x >= chunk.Width)
@@ -164,6 +196,9 @@ public sealed class ChunkMap<T>(int x, int y, int z) : IDisposable where T : Chu
         }
     }
 
+    /// <summary>
+    ///     Calls <see cref="Chunk.Release"/> on all chunks on the map.
+    /// </summary>
     public void Dispose()
     {
         foreach (var chunk in _chunkMap.Values)

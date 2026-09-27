@@ -20,10 +20,10 @@ public readonly record struct ExplicitLinkSetHandle(int Index, uint Generation)
 ///     Identifies a one-edge portal in the world's explicit topology.
 /// </summary>
 /// <param name="Links">The underlying generic link set.</param>
-public readonly record struct AtmosPortalHandle(ExplicitLinkSetHandle Links);
+public readonly record struct PortalHandle(ExplicitLinkSetHandle Links);
 
 /// <summary>
 ///     Identifies a dock surface in the world's explicit topology.
 /// </summary>
 /// <param name="Links">The underlying generic link set.</param>
-public readonly record struct AtmosDockHandle(ExplicitLinkSetHandle Links);
+public readonly record struct DockHandle(ExplicitLinkSetHandle Links);
