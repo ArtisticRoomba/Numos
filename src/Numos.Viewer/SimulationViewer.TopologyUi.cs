@@ -109,10 +109,11 @@ public partial class SimulationViewer
                     ImGui.TableHeadersRow();
                     foreach (var link in selected.Links.Take(24))
                     {
+                        var definition = link.Definition;
                         ImGui.TableNextColumn();
-                        ImGui.TextUnformatted(FormatCell(link.First));
+                        ImGui.TextUnformatted(FormatCell(definition.First));
                         ImGui.TableNextColumn();
-                        ImGui.TextUnformatted(FormatCell(link.Second));
+                        ImGui.TextUnformatted(FormatCell(definition.Second));
                     }
 
                     ImGui.EndTable();
@@ -457,8 +458,9 @@ public partial class SimulationViewer
             {
                 Vector3 first = default;
                 Vector3 second = default;
-                bool firstHere = link.First.Simulation == _simulation.Id && TryGetCellCenter(link.First, out first);
-                bool secondHere = link.Second.Simulation == _simulation.Id && TryGetCellCenter(link.Second, out second);
+                var definition = link.Definition;
+                bool firstHere = definition.First.Simulation == _simulation.Id && TryGetCellCenter(definition.First, out first);
+                bool secondHere = definition.Second.Simulation == _simulation.Id && TryGetCellCenter(definition.Second, out second);
                 if (firstHere) Raylib.DrawCubeWiresV(first, new Vector3(1.12f), color);
                 if (secondHere) Raylib.DrawCubeWiresV(second, new Vector3(1.12f), color);
                 if (firstHere && secondHere)
