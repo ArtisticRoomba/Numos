@@ -1,6 +1,8 @@
-﻿using Numos.Maths;
+﻿using Numos.Chunks.Topology;
+using Numos.Chunks.World;
+using Numos.Maths;
 
-namespace Numos.Chunks.Topology;
+namespace Numos.Chunks.Voxels;
 
 /// <summary>
 ///     Stably identifies one voxel within some holder simulation of a <see cref="ChunkMap{T}"/>.

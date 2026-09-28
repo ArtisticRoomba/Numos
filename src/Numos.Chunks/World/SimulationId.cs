@@ -1,4 +1,4 @@
-﻿namespace Numos.Chunks.Topology;
+﻿namespace Numos.Chunks.World;
 
 /// <summary>
 ///     Identifies one simulation registration that owns a <see cref="ChunkMap{T}"/>.

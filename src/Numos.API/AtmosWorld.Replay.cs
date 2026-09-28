@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using Numos.Chunks;
-using Numos.Chunks.Topology;
+using Numos.Chunks.Voxels;
+using Numos.Chunks.World;
 using Numos.CoreSim.Replay;
 
 namespace Numos.API;
@@ -526,9 +527,9 @@ internal static class AtmosWorldCheckpointHasher
             hash.Add(slot.Links.Length);
             foreach (var link in slot.Links)
             {
-                AddCell(ref hash, link.First);
-                AddCell(ref hash, link.Second);
-                hash.AddByte((byte)link.Flags);
+                AddCell(ref hash, link.Definition.First);
+                AddCell(ref hash, link.Definition.Second);
+                hash.AddByte((byte)link.Definition.Data.Flags);
             }
         }
 

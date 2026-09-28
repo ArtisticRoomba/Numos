@@ -1,6 +1,8 @@
 using JetBrains.Annotations;
 using Numos.Chunks;
 using Numos.Chunks.Topology;
+using Numos.Chunks.Voxels;
+using Numos.Chunks.World;
 using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.Datatypes.Snapshots;

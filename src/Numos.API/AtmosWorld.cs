@@ -2,6 +2,8 @@ using System.Buffers;
 using JetBrains.Annotations;
 using Numos.Chunks;
 using Numos.Chunks.Topology;
+using Numos.Chunks.Voxels;
+using Numos.Chunks.World;
 using Numos.CoreSim;
 using Numos.CoreSim.Replay;
 using Numos.CoreSim.Solvers;
@@ -314,7 +316,7 @@ public sealed partial class AtmosWorld : IChunkWorld, IDisposable
     /// <returns>Canonical definitions ordered by their complete stable endpoint addresses.</returns>
     /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
     [PublicAPI]
-    public IReadOnlyList<ExplicitLinkDefinition<AtmosLinkFlags>> GetActiveLinks()
+    public IReadOnlyList<AtmosLinkDefinition> GetActiveLinks()
     {
         lock (Gate)
         {
@@ -412,13 +414,13 @@ public sealed partial class AtmosWorld : IChunkWorld, IDisposable
     /// </exception>
     /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
     [PublicAPI]
-    public ExplicitLinkSetHandle CreateLinks(ReadOnlySpan<ExplicitLinkDefinition<AtmosLinkFlags>> links)
+    public ExplicitLinkSetHandle CreateLinks(ReadOnlySpan<AtmosLinkDefinition> links)
     {
         return CreateLinksCore(links, ExplicitLinkSetKind.Arbitrary);
     }
 
     private ExplicitLinkSetHandle CreateLinksCore(
-        ReadOnlySpan<ExplicitLinkDefinition<AtmosLinkFlags>> links,
+        ReadOnlySpan<AtmosLinkDefinition> links,
         ExplicitLinkSetKind kind)
     {
         lock (Gate)
@@ -432,8 +434,8 @@ public sealed partial class AtmosWorld : IChunkWorld, IDisposable
             var batchKeys = new HashSet<ExplicitEdgeKey>();
             for (int index = 0; index < links.Length; index++)
             {
-                var definition = links[index];
-                ValidateFlags(definition.Flags, nameof(links));
+                var definition = links[index].Definition;
+                ValidateFlags(definition.Data.Flags, nameof(links));
                 ValidateCell(definition.First, nameof(links));
                 ValidateCell(definition.Second, nameof(links));
                 if (definition.First == definition.Second)
@@ -455,7 +457,7 @@ public sealed partial class AtmosWorld : IChunkWorld, IDisposable
                 if (!batchKeys.Add(key) || _reservedEdges.Contains(key))
                     throw new ArgumentException("A physical explicit edge may be registered only once.", nameof(links));
 
-                canonical[index] = new ExplicitAtmosEdge(first, second, definition.Flags);
+                canonical[index] = new ExplicitAtmosEdge(first, second, definition.Data);
             }
 
             Array.Sort(canonical, ExplicitAtmosEdgeComparer.Instance);
@@ -513,9 +515,9 @@ public sealed partial class AtmosWorld : IChunkWorld, IDisposable
         VoxelRef second,
         AtmosLinkFlags flags = AtmosLinkFlags.All)
     {
-        ExplicitLinkDefinition<AtmosLinkFlags> definition = new(first, second, flags);
+        AtmosLinkDefinition definition = new(first, second, flags);
         return new PortalHandle(
-            CreateLinksCore(new ReadOnlySpan<ExplicitLinkDefinition<AtmosLinkFlags>>(in definition), ExplicitLinkSetKind.Portal));
+            CreateLinksCore(new ReadOnlySpan<AtmosLinkDefinition>(in definition), ExplicitLinkSetKind.Portal));
     }
 
     /// <summary>
@@ -544,7 +546,7 @@ public sealed partial class AtmosWorld : IChunkWorld, IDisposable
     /// </exception>
     /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
     [PublicAPI]
-    public DockHandle CreateDock(ReadOnlySpan<ExplicitLinkDefinition<AtmosLinkFlags>> surfaceLinks)
+    public DockHandle CreateDock(ReadOnlySpan<AtmosLinkDefinition> surfaceLinks)
     {
         return new DockHandle(CreateLinksCore(surfaceLinks, ExplicitLinkSetKind.Dock));
     }
@@ -570,17 +572,17 @@ public sealed partial class AtmosWorld : IChunkWorld, IDisposable
     /// <exception cref="ArgumentException">The handle is invalid or stale.</exception>
     /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
     [PublicAPI]
-    public IReadOnlyList<ExplicitLinkDefinition<AtmosLinkFlags>> GetLinks(ExplicitLinkSetHandle handle)
+    public IReadOnlyList<ExplicitLinkDefinition<AtmosLinkData>> GetLinks(ExplicitLinkSetHandle handle)
     {
         lock (Gate)
         {
             ThrowIfDisposed();
             var slot = GetLinkSlot(handle);
-            var result = new ExplicitLinkDefinition<AtmosLinkFlags>[slot.Edges.Length];
+            var result = new ExplicitLinkDefinition<AtmosLinkData>[slot.Edges.Length];
             for (int index = 0; index < result.Length; index++)
             {
                 var edge = slot.Edges[index];
-                result[index] = new ExplicitLinkDefinition<AtmosLinkFlags>(edge.First, edge.Second, edge.Flags);
+                result[index] = new ExplicitLinkDefinition<AtmosLinkData>(edge.First, edge.Second, edge.Data);
             }
 
             return result;
@@ -642,7 +644,7 @@ public sealed partial class AtmosWorld : IChunkWorld, IDisposable
                 for (int index = 0; index < _linkSlots.Count; index++)
                 {
                     var slot = _linkSlots[index];
-                    ExplicitLinkDefinition<AtmosLinkFlags>[] definitions = ToDefinitions(slot.Edges);
+                    AtmosLinkDefinition[] definitions = ToDefinitions(slot.Edges);
                     slotCheckpoints[index] = new AtmosWorldLinkSlotCheckpoint(
                         slot.Generation,
                         (byte)slot.State,
@@ -1198,9 +1200,10 @@ public sealed partial class AtmosWorld : IChunkWorld, IDisposable
                 throw new ArgumentException("The world checkpoint contains inconsistent free link storage.", nameof(checkpoint));
 
             ExplicitAtmosEdge? previous = null;
-            foreach (var definition in slot.Links)
+            foreach (var link in slot.Links)
             {
-                ValidateFlags(definition.Flags, nameof(checkpoint));
+                var definition = link.Definition;
+                ValidateFlags(definition.Data.Flags, nameof(checkpoint));
                 bool requiresLiveEndpoints = state is LinkSetState.PendingCreate or LinkSetState.Active;
                 if (definition.First.CompareTo(definition.Second) >= 0 ||
                     requiresLiveEndpoints &&
@@ -1210,7 +1213,7 @@ public sealed partial class AtmosWorld : IChunkWorld, IDisposable
                     throw new ArgumentException("The world checkpoint contains an invalid or noncanonical edge.", nameof(checkpoint));
                 }
 
-                var edge = new ExplicitAtmosEdge(definition.First, definition.Second, definition.Flags);
+                var edge = new ExplicitAtmosEdge(definition.First, definition.Second, definition.Data);
                 var edgeKey = new ExplicitEdgeKey(edge.First, edge.Second);
                 bool duplicateInCurrent = IsSolverActive(state) && !currentPhysicalEdges.Add(edgeKey);
                 bool duplicateAfterBoundary =
@@ -1243,7 +1246,8 @@ public sealed partial class AtmosWorld : IChunkWorld, IDisposable
             var checkpoint = checkpoints[slotIndex];
             var state = (LinkSetState)checkpoint.State;
             ExplicitAtmosEdge[] edges = checkpoint.Links
-                .Select(static link => new ExplicitAtmosEdge(link.First, link.Second, link.Flags))
+                .Select(static link => link.Definition)
+                .Select(static link => new ExplicitAtmosEdge(link.First, link.Second, link.Data))
                 .ToArray();
 
             _linkSlots.Add(new LinkSetSlot(checkpoint.Generation, state, checkpoint.Kind, edges));
@@ -1284,7 +1288,7 @@ public sealed partial class AtmosWorld : IChunkWorld, IDisposable
         {
             foreach (var edge in _activeEdges)
             {
-                if (((ExplicitTransportCapabilities)edge.Flags & capabilities) == 0)
+                if (((ExplicitTransportCapabilities)edge.Data.Flags & capabilities) == 0)
                     continue;
 
                 var firstSimulation = TryGetSimulationCore(edge.First.Simulation);
@@ -1306,7 +1310,7 @@ public sealed partial class AtmosWorld : IChunkWorld, IDisposable
                 resolved[count++] = new ExplicitTransportEdge(
                     first,
                     second,
-                    (ExplicitTransportCapabilities)edge.Flags);
+                    (ExplicitTransportCapabilities)edge.Data.Flags);
             }
 
             if (count > 0)
@@ -1404,7 +1408,7 @@ public sealed partial class AtmosWorld : IChunkWorld, IDisposable
                 AddChunkEdgeCount(chunkCounts, edge.Second);
         }
 
-        Solvers.RecompileTopology(ToDefinitions(edges));
+        Solvers.RecompileTopology(ToExplicitDefinitions(edges));
         _activeEdges = edges;
         _activeEdgesByChunk = chunkCounts;
     }
@@ -1655,9 +1659,9 @@ public sealed partial class AtmosWorld : IChunkWorld, IDisposable
         }
     }
 
-    internal IReadOnlyList<ExplicitLinkDefinition<AtmosLinkFlags>> GetActiveLinksCore()
+    internal IReadOnlyList<ExplicitLinkDefinition<AtmosLinkData>> GetActiveLinksCore()
     {
-        return ToDefinitions(_activeEdges);
+        return ToExplicitDefinitions(_activeEdges);
     }
 
     internal void ThrowIfDisposedForPipeline()
@@ -1674,7 +1678,7 @@ public sealed partial class AtmosWorld : IChunkWorld, IDisposable
             if (slot.State == LinkSetState.Free)
                 continue;
 
-            ExplicitLinkDefinition<AtmosLinkFlags>[] definitions = ToDefinitions(slot.Edges);
+            AtmosLinkDefinition[] definitions = ToDefinitions(slot.Edges);
             result.Add(
                 new AtmosWorldLinkSetSnapshot(
                     new ExplicitLinkSetHandle(index, slot.Generation),
@@ -1776,13 +1780,25 @@ public sealed partial class AtmosWorld : IChunkWorld, IDisposable
             : IsSolverActive(state);
     }
 
-    private static ExplicitLinkDefinition<AtmosLinkFlags>[] ToDefinitions(ExplicitAtmosEdge[] edges)
+    private static AtmosLinkDefinition[] ToDefinitions(ExplicitAtmosEdge[] edges)
     {
-        var result = new ExplicitLinkDefinition<AtmosLinkFlags>[edges.Length];
+        var result = new AtmosLinkDefinition[edges.Length];
         for (int index = 0; index < result.Length; index++)
         {
             var edge = edges[index];
-            result[index] = new ExplicitLinkDefinition<AtmosLinkFlags>(edge.First, edge.Second, edge.Flags);
+            result[index] = new AtmosLinkDefinition(edge.First, edge.Second, edge.Data);
+        }
+
+        return result;
+    }
+    
+    private static ExplicitLinkDefinition<AtmosLinkData>[] ToExplicitDefinitions(ExplicitAtmosEdge[] edges)
+    {
+        var result = new ExplicitLinkDefinition<AtmosLinkData>[edges.Length];
+        for (int index = 0; index < result.Length; index++)
+        {
+            var edge = edges[index];
+            result[index] = new ExplicitLinkDefinition<AtmosLinkData>(edge.First, edge.Second, edge.Data);
         }
 
         return result;
@@ -1849,7 +1865,7 @@ public sealed partial class AtmosWorld : IChunkWorld, IDisposable
     private readonly record struct ExplicitAtmosEdge(
         VoxelRef First,
         VoxelRef Second,
-        AtmosLinkFlags Flags);
+        AtmosLinkData Data);
 
     private sealed class ExplicitAtmosEdgeComparer : IComparer<ExplicitAtmosEdge>
     {
@@ -1862,7 +1878,7 @@ public sealed partial class AtmosWorld : IChunkWorld, IDisposable
                 return comparison;
 
             comparison = left.Second.CompareTo(right.Second);
-            return comparison != 0 ? comparison : left.Flags.CompareTo(right.Flags);
+            return comparison != 0 ? comparison : left.Data.Flags.CompareTo(right.Data.Flags);
         }
     }
 

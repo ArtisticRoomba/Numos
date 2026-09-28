@@ -3,6 +3,7 @@ using ImGuiNET;
 using Numos.API;
 using Numos.Chunks;
 using Numos.Chunks.Topology;
+using Numos.Chunks.Voxels;
 using Numos.Maths;
 using Numos.Viewer.Ui;
 using Raylib_cs;
@@ -225,7 +226,7 @@ public partial class SimulationViewer
             {
                 try
                 {
-                    ExplicitLinkDefinition<AtmosLinkFlags>[] links = BuildDockLinks();
+                    AtmosLinkDefinition[] links = BuildDockLinks();
                     var dock = _world.CreateDock(links);
                     _selectedLinkSet = dock.Links;
                     SetTopologyFeedback(
@@ -361,7 +362,7 @@ public partial class SimulationViewer
         ImGui.SetItemDefaultFocus();
     }
 
-    private ExplicitLinkDefinition<AtmosLinkFlags>[] BuildDockLinks()
+    private AtmosLinkDefinition[] BuildDockLinks()
     {
         var firstSurface = _simulationSurfaces[Math.Clamp(_dockFirstSimulation, 0, _simulationSurfaces.Count - 1)];
         var secondSurface = _simulationSurfaces[Math.Clamp(_dockSecondSimulation, 0, _simulationSurfaces.Count - 1)];
@@ -379,7 +380,7 @@ public partial class SimulationViewer
             firstSize.Height != (quarterTurn ? secondSize.Width : secondSize.Height))
             throw new InvalidOperationException("The selected faces do not have matching dimensions after rotation.");
 
-        var links = new ExplicitLinkDefinition<AtmosLinkFlags>[firstSize.Width * firstSize.Height];
+        var links = new AtmosLinkDefinition[firstSize.Width * firstSize.Height];
         int destination = 0;
         for (int v = 0; v < firstSize.Height; v++)
         for (int u = 0; u < firstSize.Width; u++)
@@ -394,7 +395,7 @@ public partial class SimulationViewer
                 secondU,
                 secondV);
 
-            links[destination++] = new ExplicitLinkDefinition<AtmosLinkFlags>(
+            links[destination++] = new AtmosLinkDefinition(
                 new VoxelRef(firstSurface.Simulation.Id, firstChunk, firstIndex),
                 new VoxelRef(secondSurface.Simulation.Id, secondChunk, secondIndex),
                 GetTopologyFlags());

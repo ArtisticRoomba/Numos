@@ -1,6 +1,6 @@
-﻿using Numos.Chunks.Topology;
+﻿using Numos.Chunks.Voxels;
 
-namespace Numos.Chunks;
+namespace Numos.Chunks.World;
 
 /// <summary>
 /// An interface for objects that hold multiple <see cref="ChunkMap{T}"/>s

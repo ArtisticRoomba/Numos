@@ -1,4 +1,5 @@
 using Numos.Chunks.Topology;
+using Numos.Chunks.Voxels;
 
 namespace Numos.API.Dangerous;
 

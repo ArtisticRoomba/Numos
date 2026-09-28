@@ -1,4 +1,5 @@
 using Numos.Chunks.Topology;
+using Numos.Chunks.World;
 using Numos.CoreSim;
 using Numos.CoreSim.Replay;
 
@@ -146,10 +147,10 @@ public sealed record AtmosWorldLinkSetCheckpoint(
     ExplicitLinkSetHandle Handle,
     ExplicitLinkSetKind Kind,
     AtmosWorldLinkSetState State,
-    IReadOnlyList<ExplicitLinkDefinition<AtmosLinkFlags>> Links);
+    IReadOnlyList<AtmosLinkDefinition> Links);
 
 internal readonly record struct AtmosWorldLinkSlotCheckpoint(
     uint Generation,
     byte State,
     ExplicitLinkSetKind Kind,
-    ExplicitLinkDefinition<AtmosLinkFlags>[] Links);
+    AtmosLinkDefinition[] Links);

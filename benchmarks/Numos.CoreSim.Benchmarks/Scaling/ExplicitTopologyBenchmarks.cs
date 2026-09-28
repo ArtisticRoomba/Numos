@@ -18,7 +18,7 @@ namespace Numos.CoreSim.Benchmarks.Scaling;
 public class ExplicitTopologyBenchmarks
 {
     private ChunkHandle _chunk;
-    private ExplicitLinkDefinition<AtmosLinkFlags>[] _definitions = [];
+    private AtmosLinkDefinition[] _definitions = [];
     private ExplicitLinkSetHandle _links;
     private AtmosSimulation _simulation = null!;
     private AtmosWorld _world = null!;
@@ -58,10 +58,10 @@ public class ExplicitTopologyBenchmarks
 
         _simulation.AddGasToVoxel(_chunk, 0, "BenchmarkGas", EdgeCount, 300f);
         var source = _simulation.GetCellRef(_chunk, 0);
-        _definitions = new ExplicitLinkDefinition<AtmosLinkFlags>[EdgeCount];
+        _definitions = new AtmosLinkDefinition[EdgeCount];
         for (int index = 0; index < EdgeCount; index++)
         {
-            _definitions[index] = new ExplicitLinkDefinition<AtmosLinkFlags>(
+            _definitions[index] = new AtmosLinkDefinition(
                 source,
                 _simulation.GetCellRef(_chunk, checked((ushort)(index + 1))),
                 AtmosLinkFlags.GasTransport);

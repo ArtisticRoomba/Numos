@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using Numos.Chunks.Topology;
+using Numos.Chunks.World;
 using Numos.CoreSim;
 using Numos.CoreSim.Replay;
 using Numos.Maths;
@@ -119,12 +120,12 @@ public sealed record CreateAtmosLinkSetOperation : AtmosWorldOperation
     public CreateAtmosLinkSetOperation(
         ExplicitLinkSetHandle handle,
         ExplicitLinkSetKind kind,
-        IEnumerable<ExplicitLinkDefinition<AtmosLinkFlags>> links)
+        IEnumerable<AtmosLinkDefinition> links)
     {
         ArgumentNullException.ThrowIfNull(links);
         Handle = handle;
         Kind = kind;
-        Links = new ReadOnlyCollection<ExplicitLinkDefinition<AtmosLinkFlags>>(links.ToArray());
+        Links = new ReadOnlyCollection<AtmosLinkDefinition>(links.ToArray());
     }
 
     /// <inheritdoc />
@@ -143,7 +144,7 @@ public sealed record CreateAtmosLinkSetOperation : AtmosWorldOperation
     /// <summary>
     ///     Gets immutable canonical links owned by the set.
     /// </summary>
-    public IReadOnlyList<ExplicitLinkDefinition<AtmosLinkFlags>> Links { get; }
+    public IReadOnlyList<AtmosLinkDefinition> Links { get; }
 }
 
 /// <summary>

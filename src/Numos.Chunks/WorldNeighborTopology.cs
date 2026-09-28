@@ -1,4 +1,6 @@
 using Numos.Chunks.Topology;
+using Numos.Chunks.Voxels;
+using Numos.Chunks.World;
 using Numos.Maths;
 
 namespace Numos.Chunks;
@@ -28,7 +30,7 @@ public enum VoxelNeighborKind : byte
 public readonly record struct VoxelNeighbor<T>(
     VoxelRef Cell,
     VoxelNeighborKind Kind,
-    T Flags) where T : struct, Enum;
+    T Flags) where T : struct, IVoxelLinkData;
 
 /// <summary>
 ///     Describes one canonically owned solver edge.
@@ -41,7 +43,7 @@ public readonly record struct VoxelNeighborEdge<T>(
     VoxelRef First,
     VoxelRef Second,
     VoxelNeighborKind Kind,
-    T Flags) where T : struct, Enum;
+    T Flags) where T : struct, IVoxelLinkData;
 
 /// <summary>
 ///     Configures the neighborhood compiled for one custom world solver.
@@ -59,7 +61,7 @@ public readonly record struct VoxelNeighborEdge<T>(
 public sealed class VoxelNeighborSelection<T>(
     string key,
     bool includeCartesian,
-    ExplicitLinkSelector<T> explicitLinks) where T : struct, Enum
+    ExplicitLinkSelector<T> explicitLinks) where T : struct, IVoxelLinkData
 {
     /// <summary>
     ///     Gets the stable compatibility key for this selection policy.
@@ -96,7 +98,7 @@ public sealed class VoxelNeighborSelection<T>(
 /// <summary>
 ///     Provides a solver-specific, immutable view of Cartesian and compiled explicit topology.
 /// </summary>
-public sealed class WorldNeighborTopology<T> where T : struct, Enum
+public sealed class WorldNeighborTopology<T> where T : struct, IVoxelLinkData
 {
     private readonly Dictionary<CompiledChunkKey, CompiledChunkAdjacency<T>> _explicitByChunk;
     private readonly ExplicitLinkDefinition<T>[] _explicitEdges;
@@ -246,7 +248,7 @@ public sealed class WorldNeighborTopology<T> where T : struct, Enum
                 edge.First,
                 edge.Second,
                 VoxelNeighborKind.Explicit,
-                edge.Flags);
+                edge.Data);
         }
     }
 
@@ -258,15 +260,15 @@ public sealed class WorldNeighborTopology<T> where T : struct, Enum
         var selected = new List<ExplicitLinkDefinition<T>>(links.Count);
         foreach (var link in links)
         {
-            if (selection.ExplicitLinks(new ExplicitLinkDefinition<T>(link.First, link.Second, link.Flags)))
+            if (selection.ExplicitLinks(new ExplicitLinkDefinition<T>(link.First, link.Second, link.Data)))
                 selected.Add(link);
         }
 
         var entries = new Dictionary<CompiledChunkKey, List<CompiledNeighborEntry>>();
         foreach (var link in selected)
         {
-            Add(entries, link.First, link.Second, link.Flags);
-            Add(entries, link.Second, link.First, link.Flags);
+            Add(entries, link.First, link.Second, link.Data);
+            Add(entries, link.Second, link.First, link.Data);
         }
 
         var chunks = new Dictionary<CompiledChunkKey, CompiledChunkAdjacency<T>>(entries.Count);
@@ -356,7 +358,7 @@ public sealed class WorldNeighborTopology<T> where T : struct, Enum
 /// <summary>
 ///     Reusable topology view for one chunk.
 /// </summary>
-public readonly struct VoxelChunkNeighborView<T> where T : struct, Enum
+public readonly struct VoxelChunkNeighborView<T> where T : struct, IVoxelLinkData
 {
     private readonly CompiledChunkAdjacency<T>? _explicitAdjacency;
     private readonly byte _adjacentChunkMask;
@@ -544,7 +546,7 @@ public readonly struct VoxelChunkNeighborView<T> where T : struct, Enum
 /// <summary>
 ///     Allocation-free enumerable over one cell's structural neighbors.
 /// </summary>
-public readonly struct VoxelNeighborEnumerable<T> where T : struct, Enum
+public readonly struct VoxelNeighborEnumerable<T> where T : struct, IVoxelLinkData
 {
     private readonly int _explicitEnd;
     private readonly int _explicitStart;
@@ -576,7 +578,7 @@ public readonly struct VoxelNeighborEnumerable<T> where T : struct, Enum
 /// <summary>
 ///     Allocation-free enumerator over one cell's structural neighbors.
 /// </summary>
-public struct VoxelNeighborEnumerator<T> where T : struct, Enum
+public struct VoxelNeighborEnumerator<T> where T : struct, IVoxelLinkData
 {
     private readonly int _explicitEnd;
     private readonly ushort _localVoxelIndex;
@@ -629,7 +631,7 @@ public struct VoxelNeighborEnumerator<T> where T : struct, Enum
 
 internal sealed class CompiledChunkAdjacency<T>(
     int[] starts,
-    VoxelNeighbor<T>[] neighbors) where T : struct, Enum
+    VoxelNeighbor<T>[] neighbors) where T : struct, IVoxelLinkData
 {
     internal int[] Starts { get; } = starts;
     internal VoxelNeighbor<T>[] Neighbors { get; } = neighbors;

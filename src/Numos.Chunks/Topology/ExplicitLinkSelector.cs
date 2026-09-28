@@ -1,4 +1,6 @@
-﻿namespace Numos.Chunks.Topology;
+﻿using Numos.Chunks.Voxels;
+
+namespace Numos.Chunks.Topology;
 
 /// <summary>
 ///     Selects an explicit link while Numos compiles a custom solver's neighborhood view.
@@ -9,4 +11,4 @@
 ///     Numos calls selectors only when topology or solver registration changes. Selectors must be deterministic and must
 ///     not mutate their world.
 /// </remarks>
-public delegate bool ExplicitLinkSelector<T>(ExplicitLinkDefinition<T> link) where T : struct, Enum;
+public delegate bool ExplicitLinkSelector<T>(ExplicitLinkDefinition<T> link) where T : struct, IVoxelLinkData;

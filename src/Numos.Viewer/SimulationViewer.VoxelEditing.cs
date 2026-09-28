@@ -3,6 +3,7 @@ using ImGuiNET;
 using Numos.API;
 using Numos.Chunks;
 using Numos.Chunks.Topology;
+using Numos.Chunks.Voxels;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.SimDrawer;
 using Numos.Viewer.Rendering.Viewport;

@@ -38,7 +38,7 @@ public sealed class AtmosWorldSolverContext
     internal AtmosWorldSolverContext(
         AtmosWorld world,
         IReadOnlyList<AtmosSimulation> simulations,
-        WorldNeighborTopology<AtmosLinkFlags> topology)
+        WorldNeighborTopology<AtmosLinkData> topology)
     {
         World = world;
         Simulations = simulations;
@@ -74,7 +74,7 @@ public sealed class AtmosWorldSolverContext
     ///     neighbors, no explicit edges. Use <see cref="AtmosWorldSolverPipeline.RegisterNeighborSolver" /> whenever
     ///     the callback needs this property.
     /// </remarks>
-    public WorldNeighborTopology<AtmosLinkFlags> Topology { get; }
+    public WorldNeighborTopology<AtmosLinkData> Topology { get; }
 }
 
 /// <summary>

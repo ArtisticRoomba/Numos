@@ -1,4 +1,5 @@
 using Numos.Chunks.Topology;
+using Numos.Chunks.Voxels;
 
 namespace Numos.API;
 
@@ -40,6 +41,33 @@ public enum AtmosLinkFlags : byte
 }
 
 /// <summary>
+/// A wrapper struct for <see cref="AtmosLinkFlags"/>.
+/// </summary>
+public record struct AtmosLinkData(AtmosLinkFlags Flags) : IVoxelLinkData;
+
+/// <summary>
+/// A wrapper struct for <see cref="ExplicitLinkDefinition{AtmosLinkData}"/> with a convenient constructor.
+/// </summary>
+public record struct AtmosLinkDefinition(ExplicitLinkDefinition<AtmosLinkData> Definition)
+{
+    public AtmosLinkDefinition(
+        VoxelRef first,
+        VoxelRef second,
+        AtmosLinkFlags flags)
+        : this(Definition:new ExplicitLinkDefinition<AtmosLinkData>(first, second, new AtmosLinkData(flags)))
+    {
+    }
+    
+    public AtmosLinkDefinition(
+        VoxelRef first,
+        VoxelRef second,
+        AtmosLinkData data)
+        : this(Definition:new ExplicitLinkDefinition<AtmosLinkData>(first, second, data))
+    {
+    }
+}
+
+/// <summary>
 ///     Captures a detached inspection view of one current or pending explicit link set.
 /// </summary>
 /// <param name="Handle">The exact generational handle used to mutate the set.</param>
@@ -54,4 +82,4 @@ public sealed record AtmosWorldLinkSetSnapshot(
     ExplicitLinkSetHandle Handle,
     ExplicitLinkSetKind Kind,
     AtmosWorldLinkSetState State,
-    IReadOnlyList<ExplicitLinkDefinition<AtmosLinkFlags>> Links);
+    IReadOnlyList<AtmosLinkDefinition> Links);

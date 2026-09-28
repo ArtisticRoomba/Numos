@@ -3,6 +3,7 @@ using ImGuiNET;
 using Numos.API;
 using Numos.Chunks;
 using Numos.Chunks.Topology;
+using Numos.Chunks.World;
 using Numos.CoreSim.Datatypes.Snapshots;
 using Numos.Maths;
 using Numos.SimDrawer;

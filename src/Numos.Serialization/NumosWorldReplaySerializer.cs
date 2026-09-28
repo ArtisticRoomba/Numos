@@ -1,6 +1,8 @@
 using Numos.API;
 using Numos.Chunks;
 using Numos.Chunks.Topology;
+using Numos.Chunks.Voxels;
+using Numos.Chunks.World;
 using Numos.CoreSim.Replay;
 using Numos.Replay.SourceGen;
 
@@ -338,7 +340,7 @@ public static partial class NumosWorldReplaySerializer
             byte state = reader.ReadByte();
             var kind = (ExplicitLinkSetKind)reader.ReadByte();
             int linkCount = NumosReplaySerializer.ReadCount(reader, 10_000_000, "explicit link");
-            var links = new ExplicitLinkDefinition<AtmosLinkFlags>[linkCount];
+            var links = new AtmosLinkDefinition[linkCount];
             for (int linkIndex = 0; linkIndex < linkCount; linkIndex++)
                 links[linkIndex] = ReadLink(reader);
 
@@ -512,23 +514,27 @@ public static partial class NumosWorldReplaySerializer
         var handle = ReadHandle(reader);
         var kind = (ExplicitLinkSetKind)reader.ReadByte();
         int count = NumosReplaySerializer.ReadCount(reader, 10_000_000, "explicit link");
-        var links = new ExplicitLinkDefinition<AtmosLinkFlags>[count];
+        var links = new AtmosLinkDefinition[count];
         for (int index = 0; index < count; index++)
             links[index] = ReadLink(reader);
 
         return new CreateAtmosLinkSetOperation(handle, kind, links);
     }
 
-    private static void WriteLink(BinaryWriter writer, ExplicitLinkDefinition<AtmosLinkFlags> link)
+    private static void WriteLink(BinaryWriter writer, AtmosLinkDefinition link)
     {
-        WriteCell(writer, link.First);
-        WriteCell(writer, link.Second);
-        writer.Write((byte)link.Flags);
+        WriteCell(writer, link.Definition.First);
+        WriteCell(writer, link.Definition.Second);
+        writer.Write((byte)link.Definition.Data.Flags);
     }
 
-    private static ExplicitLinkDefinition<AtmosLinkFlags> ReadLink(BinaryReader reader)
+    private static AtmosLinkDefinition ReadLink(BinaryReader reader)
     {
-        return new ExplicitLinkDefinition<AtmosLinkFlags>(ReadCell(reader), ReadCell(reader), (AtmosLinkFlags)reader.ReadByte());
+        return new AtmosLinkDefinition(
+            new ExplicitLinkDefinition<AtmosLinkData>(
+                ReadCell(reader),
+                ReadCell(reader),
+                new AtmosLinkData((AtmosLinkFlags)reader.ReadByte())));
     }
 
     private static void WriteCell(BinaryWriter writer, VoxelRef cell)

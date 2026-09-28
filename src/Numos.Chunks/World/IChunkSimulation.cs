@@ -1,7 +1,6 @@
-﻿using Numos.Chunks.Topology;
-using Numos.Maths;
+﻿using Numos.Maths;
 
-namespace Numos.Chunks;
+namespace Numos.Chunks.World;
 
 public interface IChunkSimulation
 {

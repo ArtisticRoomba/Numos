@@ -1,5 +1,4 @@
 using Numos.Chunks;
-using Numos.Chunks.Topology;
 using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.Maths;
@@ -100,7 +99,7 @@ public sealed class AtmosWorldTests
         var first = simulation.GetCellRef(firstChunk, 0);
         var second = simulation.GetCellRef(secondChunk, 0);
 
-        var handle = world.CreateLinks([new ExplicitLinkDefinition<AtmosLinkFlags>(second, first, AtmosLinkFlags.GasTransport)]);
+        var handle = world.CreateLinks([new AtmosLinkDefinition(second, first, AtmosLinkFlags.GasTransport)]);
 
         var link = world.GetLinks(handle).Single();
         Assert.Multiple(() =>
@@ -108,7 +107,7 @@ public sealed class AtmosWorldTests
             Assert.That(link.First, Is.EqualTo(first));
             Assert.That(link.Second, Is.EqualTo(second));
             Assert.That(
-                () => world.CreateLinks([new ExplicitLinkDefinition<AtmosLinkFlags>(first, second, AtmosLinkFlags.All)]),
+                () => world.CreateLinks([new AtmosLinkDefinition(first, second, AtmosLinkFlags.All)]),
                 Throws.ArgumentException);
         });
     }
@@ -124,7 +123,7 @@ public sealed class AtmosWorldTests
         first.AddGasToVoxel(source, 0, GasName, 1f, 300f);
         var handle = world.CreateLinks(
         [
-            new ExplicitLinkDefinition<AtmosLinkFlags>(
+            new AtmosLinkDefinition(
                 first.GetCellRef(source, 0),
                 second.GetCellRef(target, 0),
                 AtmosLinkFlags.All)
@@ -159,8 +158,8 @@ public sealed class AtmosWorldTests
         var sourceCell = simulation.GetCellRef(source, 0);
         world.CreateLinks(
         [
-            new ExplicitLinkDefinition<AtmosLinkFlags>(sourceCell, simulation.GetCellRef(firstTarget, 0), AtmosLinkFlags.All),
-            new ExplicitLinkDefinition<AtmosLinkFlags>(sourceCell, simulation.GetCellRef(secondTarget, 0), AtmosLinkFlags.All)
+            new AtmosLinkDefinition(sourceCell, simulation.GetCellRef(firstTarget, 0), AtmosLinkFlags.All),
+            new AtmosLinkDefinition(sourceCell, simulation.GetCellRef(secondTarget, 0), AtmosLinkFlags.All)
         ]);
 
         world.Tick();
@@ -183,7 +182,8 @@ public sealed class AtmosWorldTests
         var simulation = world.CreateSimulation(1, 1, 1);
         var first = CreateOpenChunk(simulation);
         var second = CreateOpenChunk(simulation, new Int3(2, 0, 0));
-        var handle = world.CreateLinks([new ExplicitLinkDefinition<AtmosLinkFlags>(simulation.GetCellRef(first, 0), simulation.GetCellRef(second, 0), AtmosLinkFlags.All)]);
+        var handle = world.CreateLinks([new AtmosLinkDefinition(simulation.GetCellRef(first, 0), simulation.GetCellRef(second, 0),
+            AtmosLinkFlags.All)]);
 
         world.Tick();
 
@@ -206,7 +206,8 @@ public sealed class AtmosWorldTests
         var source = CreateOpenChunk(first);
         var target = CreateOpenChunk(second);
         first.AddGasToVoxel(source, 0, GasName, 1f, 300f);
-        var handle = world.CreateLinks([new ExplicitLinkDefinition<AtmosLinkFlags>(first.GetCellRef(source, 0), second.GetCellRef(target, 0), AtmosLinkFlags.All)]);
+        var handle = world.CreateLinks([new AtmosLinkDefinition(first.GetCellRef(source, 0), second.GetCellRef(target, 0),
+            AtmosLinkFlags.All)]);
 
         world.Tick();
         var checkpoint = world.CaptureCheckpoint();
@@ -242,7 +243,8 @@ public sealed class AtmosWorldTests
         var source = CreateOpenChunk(first);
         var target = CreateOpenChunk(second);
         first.AddGasToVoxel(source, 0, GasName, 1f, 300f);
-        var handle = world.CreateLinks([new ExplicitLinkDefinition<AtmosLinkFlags>(first.GetCellRef(source, 0), second.GetCellRef(target, 0), AtmosLinkFlags.All)]);
+        var handle = world.CreateLinks([new AtmosLinkDefinition(first.GetCellRef(source, 0), second.GetCellRef(target, 0),
+            AtmosLinkFlags.All)]);
 
         var checkpoint = world.CaptureCheckpoint();
 
@@ -274,7 +276,8 @@ public sealed class AtmosWorldTests
         var source = CreateOpenChunk(first);
         var target = CreateOpenChunk(second);
         first.AddGasToVoxel(source, 0, GasName, 1f, 300f);
-        var handle = world.CreateLinks([new ExplicitLinkDefinition<AtmosLinkFlags>(first.GetCellRef(source, 0), second.GetCellRef(target, 0), AtmosLinkFlags.All)]);
+        var handle = world.CreateLinks([new AtmosLinkDefinition(first.GetCellRef(source, 0), second.GetCellRef(target, 0),
+            AtmosLinkFlags.All)]);
 
         world.Tick();
         world.DestroyLinks(handle);
@@ -322,18 +325,18 @@ public sealed class AtmosWorldTests
 
         firstWorld.CreateLinks(
         [
-            new ExplicitLinkDefinition<AtmosLinkFlags>(firstSimulation.GetCellRef(firstChunks[1], 0), firstSimulation.GetCellRef(firstChunks[2], 0), AtmosLinkFlags.All),
-            new ExplicitLinkDefinition<AtmosLinkFlags>(firstSimulation.GetCellRef(firstChunks[0], 0), firstSimulation.GetCellRef(firstChunks[1], 0), AtmosLinkFlags.All)
+            new AtmosLinkDefinition(firstSimulation.GetCellRef(firstChunks[1], 0), firstSimulation.GetCellRef(firstChunks[2], 0), AtmosLinkFlags.All),
+            new AtmosLinkDefinition(firstSimulation.GetCellRef(firstChunks[0], 0), firstSimulation.GetCellRef(firstChunks[1], 0), AtmosLinkFlags.All)
         ]);
 
         secondWorld.CreateLinks(
         [
-            new ExplicitLinkDefinition<AtmosLinkFlags>(secondSimulation.GetCellRef(secondChunks[0], 0), secondSimulation.GetCellRef(secondChunks[1], 0), AtmosLinkFlags.All)
+            new AtmosLinkDefinition(secondSimulation.GetCellRef(secondChunks[0], 0), secondSimulation.GetCellRef(secondChunks[1], 0), AtmosLinkFlags.All)
         ]);
 
         secondWorld.CreateLinks(
         [
-            new ExplicitLinkDefinition<AtmosLinkFlags>(secondSimulation.GetCellRef(secondChunks[2], 0), secondSimulation.GetCellRef(secondChunks[1], 0), AtmosLinkFlags.All)
+            new AtmosLinkDefinition(secondSimulation.GetCellRef(secondChunks[2], 0), secondSimulation.GetCellRef(secondChunks[1], 0), AtmosLinkFlags.All)
         ]);
 
         firstWorld.Tick();
@@ -392,8 +395,8 @@ public sealed class AtmosWorldTests
 
         var dock = world.CreateDock(
         [
-            new ExplicitLinkDefinition<AtmosLinkFlags>(first.GetCellRef(firstChunk, 0), second.GetCellRef(secondChunk, 0), AtmosLinkFlags.All),
-            new ExplicitLinkDefinition<AtmosLinkFlags>(first.GetCellRef(firstChunk, 1), second.GetCellRef(secondChunk, 1), AtmosLinkFlags.All)
+            new AtmosLinkDefinition(first.GetCellRef(firstChunk, 0), second.GetCellRef(secondChunk, 0), AtmosLinkFlags.All),
+            new AtmosLinkDefinition(first.GetCellRef(firstChunk, 1), second.GetCellRef(secondChunk, 1), AtmosLinkFlags.All)
         ]);
 
         world.Tick();
@@ -419,7 +422,7 @@ public sealed class AtmosWorldTests
         var second = world.CreateSimulation(1, 1, 1);
         var firstChunk = CreateOpenChunk(first);
         var secondChunk = CreateOpenChunk(second);
-        var links = world.CreateLinks([new ExplicitLinkDefinition<AtmosLinkFlags>(first.GetCellRef(firstChunk, 0), second.GetCellRef(secondChunk, 0), AtmosLinkFlags.All)]);
+        var links = world.CreateLinks([new AtmosLinkDefinition(first.GetCellRef(firstChunk, 0), second.GetCellRef(secondChunk, 0), AtmosLinkFlags.All)]);
 
         world.Tick();
         var removedId = second.Id;

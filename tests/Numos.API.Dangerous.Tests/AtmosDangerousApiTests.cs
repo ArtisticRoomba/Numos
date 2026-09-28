@@ -101,7 +101,7 @@ public sealed class AtmosDangerousApiTests
 
         world.Solvers.RegisterNeighborSolver(
             "dangerous-neighbor",
-            VoxelNeighborSelection<AtmosLinkFlags>.All("tests/dangerous-neighbor-v1"),
+            VoxelNeighborSelection<AtmosLinkData>.All("tests/dangerous-neighbor-v1"),
             context =>
             {
                 foreach (var neighbor in context.Topology.GetNeighbors(source))
