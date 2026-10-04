@@ -3,19 +3,17 @@ using Numos.Maths;
 namespace Numos.Collections;
 
 /// <summary>
-///     2-3D to 1D mapping for an array.
+///     Indexes a flat backing array by 3D coordinate, X fastest: <c>index = x + y * X + z * X * Y</c>.
 /// </summary>
 /// <typeparam name="T">The type of data to store in the array.</typeparam>
+/// <remarks>
+///     This is a view, not an owner. Copies of the struct share one backing array, and <see langword="default" />
+///     has no storage at all (<see cref="IsInitialized" /> is <see langword="false" />).
+/// </remarks>
 public readonly struct FlatArray<T>
 {
-    /// <summary>
-    ///     Internal backing array.
-    /// </summary>
     private readonly T[] _data;
 
-    /// <summary>
-    ///     Maximum number of elements along each axis.
-    /// </summary>
     private readonly Int3 _dimensions;
 
     /// <summary>
@@ -80,6 +78,7 @@ public readonly struct FlatArray<T>
     ///     Gets or sets an element by its flat array index.
     /// </summary>
     /// <param name="index">The zero-based flat array index.</param>
+    /// <exception cref="IndexOutOfRangeException"><paramref name="index" /> is outside the backing array.</exception>
     public T this[int index]
     {
         get => _data[index];
@@ -90,6 +89,9 @@ public readonly struct FlatArray<T>
     ///     Gets or sets an element by an <see cref="Int3" />.
     /// </summary>
     /// <param name="position">The zero-based coordinate of the element.</param>
+    /// <exception cref="IndexOutOfRangeException">
+    ///     <paramref name="position" /> is outside <see cref="Dimensions" />.
+    /// </exception>
     public T this[Int3 position]
     {
         get => _data[GetIndex(position)];
@@ -99,6 +101,11 @@ public readonly struct FlatArray<T>
     /// <summary>
     ///     Converts a coordinate to its flat array index.
     /// </summary>
+    /// <param name="position">The zero-based coordinate.</param>
+    /// <returns>The flat index of <paramref name="position" />.</returns>
+    /// <exception cref="IndexOutOfRangeException">
+    ///     <paramref name="position" /> is outside <see cref="Dimensions" />.
+    /// </exception>
     public int GetIndex(Int3 position)
     {
         if (!position.IsWithin(_dimensions))
@@ -108,8 +115,14 @@ public readonly struct FlatArray<T>
     }
 
     /// <summary>
-    ///     Converts a coordinate to its flat array index.
+    ///     Converts a coordinate to its flat array index without a bounds check.
     /// </summary>
+    /// <param name="position">The zero-based coordinate.</param>
+    /// <returns>The flat index of <paramref name="position" />.</returns>
+    /// <remarks>
+    ///     An out-of-range component isn't caught here. It either produces an index outside the array or silently
+    ///     aliases a different element (for example <c>x == Dimensions.X</c> lands on <c>(0, y + 1, z)</c>).
+    /// </remarks>
     public int GetIndexUnsafe(Int3 position)
     {
         return position.X + position.Y * _dimensions.X + position.Z * _dimensions.X * _dimensions.Y;
@@ -119,6 +132,9 @@ public readonly struct FlatArray<T>
     /// <summary>
     ///     Converts a flat array index to its coordinate.
     /// </summary>
+    /// <param name="index">The zero-based flat array index.</param>
+    /// <returns>The coordinate stored at <paramref name="index" />.</returns>
+    /// <exception cref="IndexOutOfRangeException"><paramref name="index" /> is outside the backing array.</exception>
     public Int3 GetPosition(int index)
     {
         if ((uint)index >= (uint)Length)
@@ -141,6 +157,7 @@ public readonly struct FlatArray<T>
     /// <summary>
     ///     Sets every element in the array to the supplied value.
     /// </summary>
+    /// <param name="value">The value to store in every element.</param>
     public void Fill(T value)
     {
         _data.AsSpan().Fill(value);
@@ -149,6 +166,8 @@ public readonly struct FlatArray<T>
     /// <summary>
     ///     Copies the array into the supplied destination.
     /// </summary>
+    /// <param name="destination">The span to copy into. It must be at least <see cref="Length" /> long.</param>
+    /// <exception cref="ArgumentException"><paramref name="destination" /> is shorter than this array.</exception>
     public void CopyTo(Span<T> destination)
     {
         _data.AsSpan().CopyTo(destination);
@@ -157,6 +176,8 @@ public readonly struct FlatArray<T>
     /// <summary>
     ///     Copies the supplied values into the beginning of this array.
     /// </summary>
+    /// <param name="source">The values to copy. Elements past its length are left unchanged.</param>
+    /// <exception cref="ArgumentException"><paramref name="source" /> is longer than this array.</exception>
     public void CopyFrom(ReadOnlySpan<T> source)
     {
         source.CopyTo(_data);
@@ -166,7 +187,7 @@ public readonly struct FlatArray<T>
     ///     Returns a live span over the backing storage.
     /// </summary>
     /// <remarks>
-    ///     This is a dangerous method that bypasses the API, use this method carefully.
+    ///     The span aliases the backing array, so writes through it are visible to every copy of this struct.
     /// </remarks>
     public Span<T> AsSpan()
     {
@@ -176,6 +197,10 @@ public readonly struct FlatArray<T>
     /// <summary>
     ///     Returns a wrapper over the same storage using new dimensions.
     /// </summary>
+    /// <param name="dimensions">The new dimensions. Their product must equal <see cref="Length" />.</param>
+    /// <returns>A view sharing this instance's backing array.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">Any dimension is zero or negative.</exception>
+    /// <exception cref="ArgumentException">The product of <paramref name="dimensions" /> is not <see cref="Length" />.</exception>
     public FlatArray<T> Reshape(Int3 dimensions)
     {
         return new FlatArray<T>(_data, dimensions);

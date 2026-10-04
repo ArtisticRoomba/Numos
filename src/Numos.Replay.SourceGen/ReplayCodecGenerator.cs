@@ -9,7 +9,7 @@ namespace Numos.Replay.SourceGen;
 
 /// <summary>
 ///     Generates the paired read/write wire codec for Numos replay operations from <c>[WireOperation]</c>-annotated
-///     descriptors, replacing the hand-written per-opcode switch statements in the replay serializers.
+///     descriptors.
 /// </summary>
 /// <remarks>
 ///     Covers both the simulation-level <c>AtmosOperation</c> family and the world-level <c>AtmosWorldOperation</c>
@@ -17,16 +17,21 @@ namespace Numos.Replay.SourceGen;
 ///     class that should receive that family's generated codec (<c>NumosReplaySerializer</c> or
 ///     <c>NumosWorldReplaySerializer</c>) -- there is nowhere else to look, which is also what lets this generator
 ///     use the fully-incremental <c>ForAttributeWithMetadataName</c> API instead of re-scanning the whole
-///     compilation on every edit. Most operations' fields map onto a small, fixed set of recognized wire
-///     primitives (see <see cref="TryGetWireKind" />), including one nested-operation kind that lets a world
-///     operation embed a whole simulation operation (its opcode plus a delegated call into the sim family's own
-///     codec); their codec bodies are fully generated from the record's primary-constructor shape. Operations with
-///     bespoke serialization (a nested config snapshot, a variable-length list) set <c>Custom = true</c> instead --
-///     the generator validates their hand-written <c>Write{Name}</c>/<c>Read{Name}</c> methods' signatures and
-///     plugs calls to them into the same generated dispatch table, rather than guessing at the bespoke shape
-///     itself. Each family's codec is emitted into whichever namespace/class its own registrations are actually
-///     stacked on (not a hardcoded name), so misplacing a registration fails where it was placed instead of
-///     silently landing in the other family's file.
+///     compilation on every edit.
+///     <para>
+///         Most operations' fields map onto a small, fixed set of recognized wire primitives (see
+///         <see cref="TryGetWireKind" />), including one nested-operation kind that lets a world operation embed a
+///         whole simulation operation (its opcode plus a delegated call into the sim family's own codec); their codec
+///         bodies are fully generated from the record's primary-constructor shape. Operations with bespoke
+///         serialization (a nested config snapshot, a variable-length list) set <c>Custom = true</c> instead -- the
+///         generator validates their hand-written <c>Write{Name}</c>/<c>Read{Name}</c> methods' signatures and plugs
+///         calls to them into the same generated dispatch table, rather than guessing at the bespoke shape itself.
+///     </para>
+///     <para>
+///         Each family's codec is emitted into whichever namespace/class its own registrations are actually stacked
+///         on (not a hardcoded name), so misplacing a registration fails where it was placed instead of silently
+///         landing in the other family's file.
+///     </para>
 /// </remarks>
 [Generator(LanguageNames.CSharp)]
 public sealed class ReplayCodecGenerator : IIncrementalGenerator
@@ -58,10 +63,14 @@ public sealed class ReplayCodecGenerator : IIncrementalGenerator
                                                         Code = code;
                                                     }
 
-                                                    /// <summary>Gets the annotated operation record.</summary>
+                                                    /// <summary>
+                                                    ///     Gets the annotated operation record.
+                                                    /// </summary>
                                                     public global::System.Type OperationType { get; }
 
-                                                    /// <summary>Gets the record's stable opcode discriminator.</summary>
+                                                    /// <summary>
+                                                    ///     Gets the record's stable opcode discriminator.
+                                                    /// </summary>
                                                     public object Code { get; }
 
                                                     /// <summary>
@@ -335,8 +344,8 @@ public sealed class ReplayCodecGenerator : IIncrementalGenerator
     private static bool TryReserveCode(
         INamedTypeSymbol codeEnum, TypedConstant codeConstant, HashSet<string> seenCodes, Location location, List<Diagnostic> diagnostics)
     {
-        // Prefixed with the enum's own name: AtmosOperationCode and (once Phase 4 adds the world family) an
-        // AtmosWorldOperationCode member can share the same underlying numeric value without colliding here.
+        // Prefixed with the enum's own name: an AtmosOperationCode and an AtmosWorldOperationCode member can share
+        // the same underlying numeric value without colliding here.
         string codeKey = codeEnum.ToDisplayString(FullyQualified) + ":" +
                           (Convert.ToString(codeConstant.Value, CultureInfo.InvariantCulture) ?? "null");
         if (seenCodes.Add(codeKey))
@@ -586,7 +595,9 @@ public sealed class ReplayCodecGenerator : IIncrementalGenerator
         public INamedTypeSymbol? WorldHostType { get; }
     }
 
-    /// <summary>Mutable scratch state threaded through one <see cref="Collect" /> run.</summary>
+    /// <summary>
+    ///     Mutable scratch state threaded through one <see cref="Collect" /> run.
+    /// </summary>
     private sealed class CollectionState
     {
         public CollectionState(List<Diagnostic> diagnostics, List<OperationPlan> simOperations, List<OperationPlan> worldOperations)
@@ -618,9 +629,11 @@ public sealed class ReplayCodecGenerator : IIncrementalGenerator
 
         public INamedTypeSymbol? ReadOptionsType { get; set; }
 
-        /// <summary>The class the first registration of each family was found on; used to emit that family's codec
-        /// into the same namespace/class rather than a hardcoded name, so a misplaced registration fails where it
-        /// was placed instead of silently landing in the other family's file.</summary>
+        /// <summary>
+        ///     The class the first registration of each family was found on; used to emit that family's codec into
+        ///     the same namespace/class rather than a hardcoded name, so a misplaced registration fails where it was
+        ///     placed instead of silently landing in the other family's file.
+        /// </summary>
         public INamedTypeSymbol? SimHostType { get; set; }
 
         public INamedTypeSymbol? WorldHostType { get; set; }
@@ -647,13 +660,19 @@ public sealed class ReplayCodecGenerator : IIncrementalGenerator
 
         public string CaseLabel { get; }
 
-        /// <summary>Field-order wire schema for a generated codec body; <see langword="null" /> for a Custom operation.</summary>
+        /// <summary>
+        ///     Field-order wire schema for a generated codec body; <see langword="null" /> for a Custom operation.
+        /// </summary>
         public List<FieldPlan>? Fields { get; }
 
-        /// <summary>Hand-written writer to call for a Custom operation; <see langword="null" /> for a generated codec body.</summary>
+        /// <summary>
+        ///     Hand-written writer to call for a Custom operation; <see langword="null" /> for a generated codec body.
+        /// </summary>
         public string? CustomWriteMethod { get; }
 
-        /// <summary>Hand-written reader to call for a Custom operation; <see langword="null" /> for a generated codec body.</summary>
+        /// <summary>
+        ///     Hand-written reader to call for a Custom operation; <see langword="null" /> for a generated codec body.
+        /// </summary>
         public string? CustomReadMethod { get; }
 
         public static OperationPlan Mechanical(string fullyQualifiedTypeName, string caseLabel, List<FieldPlan> fields)

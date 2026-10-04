@@ -5,7 +5,9 @@ using Microsoft.CodeAnalysis.Text;
 
 namespace Numos.Units.Analyzers;
 
-/// <summary>Generates zero-cost global aliases from <c>*.numosunits</c> additional files.</summary>
+/// <summary>
+///     Generates zero-cost global aliases from <c>*.numosunits</c> additional files.
+/// </summary>
 [Generator(LanguageNames.CSharp)]
 public sealed class QuantityAliasGenerator : IIncrementalGenerator
 {
@@ -39,7 +41,9 @@ public sealed class QuantityAliasGenerator : IIncrementalGenerator
                     source.AppendLine()
                         .AppendLine("namespace Numos.Units.Generated")
                         .AppendLine("{")
-                        .AppendLine("    /// <summary>Catalog-generated conversions to and from canonical solver units.</summary>")
+                        .AppendLine("    /// <summary>")
+                        .AppendLine("    ///     Catalog-generated conversions to and from canonical solver units.")
+                        .AppendLine("    /// </summary>")
                         .AppendLine("    public static class UnitConversions")
                         .AppendLine("    {");
 

@@ -6,7 +6,9 @@ using Microsoft.CodeAnalysis.Operations;
 
 namespace Numos.Units.Analyzers;
 
-/// <summary>Checks dimensional compatibility while leaving all runtime numeric types unchanged.</summary>
+/// <summary>
+///     Checks dimensional compatibility while leaving all runtime numeric types unchanged.
+/// </summary>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
 public sealed class DimensionalAnalysisAnalyzer : DiagnosticAnalyzer
 {
@@ -495,7 +497,7 @@ public sealed class DimensionalAnalysisAnalyzer : DiagnosticAnalyzer
 
         private static bool IsIncompatibleAssignment(QuantityValue target, QuantityValue value)
         {
-            // Both sides known: dimensions must match, as before.
+            // Both sides known: dimensions must match.
             if (target.IsKnown && value.IsKnown)
                 return !target.Dimensions!.Equals(value.Dimensions);
 
@@ -505,8 +507,8 @@ public sealed class DimensionalAnalysisAnalyzer : DiagnosticAnalyzer
                 return false;
 
             // Unknown (unannotated) target receiving a known, dimensioned value silently
-            // discards its unit information — flag it. Literals are exempt since they
-            // aren't "known" (IsKnown is false for LiteralScalar).
+            // discards its unit information — flag it. Literals aren't known to begin with, and
+            // IsLiteralScalar is also true for known dimensionless values, so those pass too.
             return value.IsKnown && !value.IsLiteralScalar;
         }
 
@@ -518,8 +520,8 @@ public sealed class DimensionalAnalysisAnalyzer : DiagnosticAnalyzer
             if (!expected.IsKnown)
                 return false;
 
-            // Parameter requires a specific dimension. A literal constant (e.g. `0f`)
-            // is exempt — it carries no conflicting dimension of its own.
+            // Parameter requires a specific dimension. A literal constant (e.g. `0f`) or a
+            // dimensionless value is exempt — it carries no conflicting dimension of its own.
             if (actual.IsLiteralScalar)
                 return false;
 

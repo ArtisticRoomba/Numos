@@ -2,7 +2,9 @@ using Numos.Headless.Protocol;
 
 namespace Numos.Headless;
 
-/// <summary>Command-line entry point with injectable streams for contract tests.</summary>
+/// <summary>
+///     Command-line entry point with injectable streams for contract tests.
+/// </summary>
 internal static class HeadlessApplication
 {
     private const string HelpText = """

@@ -12,7 +12,7 @@ public static class NumosReplayFile
     /// <param name="options">Optional allocation and payload limits for untrusted files.</param>
     /// <returns>The decoded replay document.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="path" /> is <see langword="null" />.</exception>
-    /// <exception cref="ArgumentException"><paramref name="path" /> is empty.</exception>
+    /// <exception cref="ArgumentException"><paramref name="path" /> is empty or whitespace.</exception>
     /// <exception cref="IOException">The file cannot be read.</exception>
     /// <exception cref="InvalidDataException">The file is malformed, unsupported, or inconsistent.</exception>
     /// <exception cref="NotSupportedException">The replay contains host-defined state.</exception>
@@ -24,13 +24,14 @@ public static class NumosReplayFile
     }
 
     /// <summary>
-    ///     Loads a replay from a path.
+    ///     Loads a single-simulation replay from a path. Use <see cref="LoadDocument" /> when the file may hold a
+    ///     complete-world replay; this overload rejects one as <see cref="InvalidDataException" />.
     /// </summary>
     /// <param name="path">Path to the Numos replay container.</param>
     /// <param name="options">Optional allocation and payload limits for untrusted files.</param>
     /// <returns>The decoded metadata and detached replay archive.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="path" /> is <see langword="null" />.</exception>
-    /// <exception cref="ArgumentException"><paramref name="path" /> is empty.</exception>
+    /// <exception cref="ArgumentException"><paramref name="path" /> is empty or whitespace.</exception>
     /// <exception cref="IOException">The file cannot be read.</exception>
     /// <exception cref="InvalidDataException">The file is malformed, unsupported, or internally inconsistent.</exception>
     /// <exception cref="NotSupportedException">The replay contains host-defined state.</exception>
@@ -47,7 +48,7 @@ public static class NumosReplayFile
     /// <param name="path">Destination path.</param>
     /// <param name="document">Replay document to save.</param>
     /// <param name="overwrite">Whether an existing destination may be replaced.</param>
-    /// <exception cref="ArgumentException"><paramref name="path" /> is empty.</exception>
+    /// <exception cref="ArgumentException"><paramref name="path" /> is empty or whitespace.</exception>
     /// <exception cref="ArgumentNullException">
     ///     <paramref name="path" /> or <paramref name="document" /> is <see langword="null" />.
     /// </exception>
@@ -71,7 +72,7 @@ public static class NumosReplayFile
     /// <param name="path">Destination path.</param>
     /// <param name="document">Complete-world replay document to save.</param>
     /// <param name="overwrite">Whether an existing destination may be replaced.</param>
-    /// <exception cref="ArgumentException"><paramref name="path" /> is empty.</exception>
+    /// <exception cref="ArgumentException"><paramref name="path" /> is empty or whitespace.</exception>
     /// <exception cref="ArgumentNullException">
     ///     <paramref name="path" /> or <paramref name="document" /> is <see langword="null" />.
     /// </exception>
@@ -89,7 +90,7 @@ public static class NumosReplayFile
     /// <param name="path">Destination path.</param>
     /// <param name="document">Component or complete-world replay document.</param>
     /// <param name="overwrite">Whether an existing destination may be replaced.</param>
-    /// <exception cref="ArgumentException"><paramref name="path" /> is empty.</exception>
+    /// <exception cref="ArgumentException"><paramref name="path" /> is empty or whitespace.</exception>
     /// <exception cref="ArgumentNullException">
     ///     <paramref name="path" /> or <paramref name="document" /> is <see langword="null" />.
     /// </exception>

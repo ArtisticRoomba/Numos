@@ -10,7 +10,7 @@ namespace Numos.Replay.SourceGen;
 
 /// <summary>
 ///     Cross-checks that every <c>AtmosOperationCode</c>/<c>AtmosWorldOperationCode</c> member has both a
-///     <c>[WireOperation]</c> wire codec registration and a case in its family's hand-written "Apply" switch
+///     <c>[WireOperation]</c> wire codec registration and a case in its family's "Apply" switch
 ///     (<c>AtmosKernel.ApplyRecordedOperation</c>, <c>AtmosWorld.ApplyWorldOperation</c>), so forgetting either one
 ///     is a build error instead of a runtime replay failure.
 /// </summary>
@@ -47,8 +47,13 @@ namespace Numos.Replay.SourceGen;
 ///         renamed Apply method (above), and an operation whose <c>Code</c> override isn't one of the recognized
 ///         constant-expression shapes (<see cref="TryGetCodeOverrideValue" />) -- e.g. a computed value instead of
 ///         a plain <c>=&gt; SomeCode.Member;</c>. Both trade a rare false negative for avoiding false positives on
-///         unusual but valid code; neither is enforced elsewhere, so don't assume "no NUMOSREPLAYGEN009" means
-///         every opcode was actually checked.
+///         unusual but valid code, so don't assume "no NUMOSREPLAYGEN009" means every opcode was actually checked.
+///     </para>
+///     <para>
+///         In the current tree both Apply methods delegate to a dispatch emitted by
+///         <see cref="ApplySwitchGenerator" /> and contain no switch statement of their own, so the Apply-switch
+///         check finds nothing to inspect and returns early. A missing Apply overload is caught by that generator's
+///         NUMOSREPLAYGEN010 instead.
 ///     </para>
 /// </remarks>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
@@ -311,9 +316,11 @@ public sealed class ReplayOpcodeConsistencyAnalyzer : DiagnosticAnalyzer
         return false;
     }
 
-    /// <summary>Mutable, concurrency-safe scratch state for one operation family, accumulated across the
-    /// compilation's <see cref="SymbolKind.NamedType" /> symbol actions (which <c>EnableConcurrentExecution</c> may
-    /// run on multiple threads) and consumed once, single-threaded, from the compilation-end action.</summary>
+    /// <summary>
+    ///     Mutable, concurrency-safe scratch state for one operation family, accumulated across the compilation's
+    ///     <see cref="SymbolKind.NamedType" /> symbol actions (which <c>EnableConcurrentExecution</c> may run on
+    ///     multiple threads) and consumed once, single-threaded, from the compilation-end action.
+    /// </summary>
     private sealed class FamilyState
     {
         private FamilyState(INamedTypeSymbol @base, INamedTypeSymbol codeEnum)
@@ -330,9 +337,11 @@ public sealed class ReplayOpcodeConsistencyAnalyzer : DiagnosticAnalyzer
 
         public ConcurrentBag<INamedTypeSymbol> ConcreteOperationCandidates { get; } = new();
 
-        /// <summary>Any one registration host's location, used to anchor a missing-registration diagnostic
-        /// somewhere fixable in source. Which host wins under a benign race is irrelevant -- they're all equally
-        /// correct places to point a developer at.</summary>
+        /// <summary>
+        ///     Any one registration host's location, used to anchor a missing-registration diagnostic somewhere
+        ///     fixable in source. Which host wins under a benign race is irrelevant -- they're all equally correct
+        ///     places to point a developer at.
+        /// </summary>
         public Location? RegistrationHostLocation { get; set; }
 
         public static FamilyState? Resolve(Compilation compilation, string baseMetadataName, string codeEnumMetadataName)

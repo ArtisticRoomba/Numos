@@ -1,7 +1,7 @@
 namespace Numos.Maths;
 
 /// <summary>
-///     3D integer datatype.
+///     Mutable three-component integer vector used for chunk grid positions, local voxel coordinates, and dimensions.
 /// </summary>
 public struct Int3(int x, int y, int z) : IEquatable<Int3>
 {
@@ -19,8 +19,11 @@ public struct Int3(int x, int y, int z) : IEquatable<Int3>
     public readonly static Int3 PosZ = new(0, 0, 1);
 
     /// <summary>
-    ///     Cardinal offsets in all 6 directions.
+    ///     The six unit face offsets, ordered +X, -X, +Y, -Y, +Z, -Z.
     /// </summary>
+    /// <remarks>
+    ///     This is one shared array. Don't write to it.
+    /// </remarks>
     public readonly static Int3[] CardinalOffsets =
     [
         PosX, NegX, PosY, NegY, PosZ, NegZ
@@ -76,11 +79,23 @@ public struct Int3(int x, int y, int z) : IEquatable<Int3>
         return value * scalar;
     }
 
+    /// <summary>
+    ///     Divides each component by <paramref name="scalar" /> using C# integer division, which truncates toward zero.
+    /// </summary>
+    /// <remarks>
+    ///     Truncation is not floor division: <c>new Int3(-1, 0, 0) / 16</c> is <see cref="Zero" />, not
+    ///     <c>(-1, 0, 0)</c>.
+    /// </remarks>
+    /// <exception cref="DivideByZeroException"><paramref name="scalar" /> is zero.</exception>
     public static Int3 operator /(Int3 value, int scalar)
     {
         return new Int3(value.X / scalar, value.Y / scalar, value.Z / scalar);
     }
 
+    /// <summary>
+    ///     Computes the component-wise C# remainder, whose sign follows <paramref name="left" />.
+    /// </summary>
+    /// <exception cref="DivideByZeroException">Any component of <paramref name="right" /> is zero.</exception>
     public static Int3 operator %(Int3 left, Int3 right)
     {
         return new Int3(left.X % right.X, left.Y % right.Y, left.Z % right.Z);
@@ -106,6 +121,8 @@ public struct Int3(int x, int y, int z) : IEquatable<Int3>
     ///     Determines whether this coordinate is inside the zero-based, inclusive-minimum,
     ///     exclusive-maximum bounds.
     /// </summary>
+    /// <param name="dimensions">The exclusive upper bound for every coordinate; the lower bound is zero.</param>
+    /// <returns><see langword="true" /> when <c>0 &lt;= X &lt; dimensions.X</c> and likewise for Y and Z.</returns>
     public readonly bool IsWithin(Int3 dimensions)
     {
         return (uint)X < (uint)dimensions.X &&

@@ -39,7 +39,9 @@ internal sealed class HeadlessRequest
     public int? MaxIssueLocations { get; init; }
 }
 
-/// <summary>JSON representation of one gas registry entry.</summary>
+/// <summary>
+///     JSON representation of one gas registry entry.
+/// </summary>
 internal sealed class GasDefinition
 {
     public string? Name { get; init; }

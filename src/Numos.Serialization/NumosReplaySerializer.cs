@@ -25,9 +25,8 @@ namespace Numos.Serialization;
 ///         generating their bodies.
 ///     </para>
 ///     <para>
-///         Nothing yet enforces that every <see cref="AtmosOperationCode" /> member has one of these
-///         registrations -- forgetting one fails at replay time, not at build time. That consistency check is
-///         Phase 5's analyzer.
+///         Every <see cref="AtmosOperationCode" /> member needs one of these registrations. A missing one is a
+///         NUMOSREPLAYGEN008 build error from <c>ReplayOpcodeConsistencyAnalyzer</c> in Numos.Replay.Analyzers.
 ///     </para>
 /// </remarks>
 [WireOperation(typeof(CreateChunkOperation), AtmosOperationCode.CreateChunk)]
@@ -162,6 +161,7 @@ public static partial class NumosReplaySerializer
     /// </summary>
     /// <param name="destination">The stream that receives the complete replay container.</param>
     /// <param name="document">Replay state and provenance metadata to write.</param>
+    /// <exception cref="ArgumentNullException">A required argument is <see langword="null" />.</exception>
     /// <exception cref="ArgumentException">The stream is not writable.</exception>
     /// <exception cref="NotSupportedException">
     ///     The replay contains host-defined state that the portable format cannot
@@ -191,6 +191,7 @@ public static partial class NumosReplaySerializer
     /// <param name="source">The stream containing exactly one Numos replay container.</param>
     /// <param name="options">Optional allocation and payload limits for untrusted input.</param>
     /// <returns>The decoded metadata and detached replay archive.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="source" /> is <see langword="null" />.</exception>
     /// <exception cref="ArgumentException">The stream is not readable.</exception>
     /// <exception cref="InvalidDataException">The container is malformed, unsupported, or internally inconsistent.</exception>
     /// <exception cref="NotSupportedException">

@@ -5,9 +5,8 @@ namespace Numos.Replay.SourceGen;
 
 /// <summary>
 ///     Generates the Apply-switch dispatch for both replay operation families
-///     (<c>AtmosKernel.ApplyRecordedOperation</c>, <c>AtmosWorld.ApplyWorldOperation</c>) from their concrete
-///     operation types and each host's hand-written <c>Apply(TOperation)</c> overloads, replacing the two
-///     hand-maintained exhaustive switch statements those methods used to contain.
+///     (<c>AtmosKernel.ApplyRecordedOperationGenerated</c>, <c>AtmosWorld.ApplyWorldOperationGenerated</c>) from their
+///     concrete operation types and each host's hand-written <c>Apply(TOperation)</c> overloads.
 /// </summary>
 /// <remarks>
 ///     Lives in <c>Numos.Replay.Analyzers</c> rather than <c>Numos.Replay.SourceGen</c> purely so it needs no new
@@ -18,12 +17,13 @@ namespace Numos.Replay.SourceGen;
 ///     <c>Numos.API</c> for the world family) gets a dispatch generated; <c>Numos.Serialization</c> sees both types
 ///     only as compiled metadata and is skipped.
 ///     <para>
-///         Only the dispatch itself is generated (the switch, plus each host's existing wrapping behavior around
-///         it) -- each case's actual logic stays hand-written as an <c>Apply(TOperation)</c> overload, found by
-///         exact parameter-type match the same way <c>ReplayCodecGenerator.FindMatchingMethod</c> resolves
-///         <c>Write{Name}</c>/<c>Read{Name}</c> methods for custom wire operations. A concrete operation type with no
-///         matching overload is <see cref="MissingApplyOverload" />, a build error, instead of a runtime
-///         <see cref="ArgumentException" /> from a forgotten hand-written case.
+///         Only the switch is generated. The hand-written <c>ApplyRecordedOperation</c>/<c>ApplyWorldOperation</c>
+///         wrappers keep their own guards and call into it, and each case's actual logic stays hand-written as an
+///         <c>Apply(TOperation)</c> overload, found by exact parameter-type match the same way
+///         <c>ReplayCodecGenerator.FindMatchingMethod</c> resolves <c>Write{Name}</c>/<c>Read{Name}</c> methods for
+///         custom wire operations. A concrete operation type with no matching overload is
+///         <see cref="MissingApplyOverload" />, a build error, instead of a runtime <see cref="ArgumentException" />
+///         from the generated <c>default</c> case.
 ///     </para>
 /// </remarks>
 [Generator(LanguageNames.CSharp)]

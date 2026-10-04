@@ -12,6 +12,19 @@ namespace Numos.Headless.Diagnostics;
 /// </summary>
 public static class SimulationStateAnalyzer
 {
+    /// <summary>
+    ///     Snapshots every selected chunk and builds a report with chunks ordered by X, then Y, then Z.
+    /// </summary>
+    /// <param name="simulation">The simulation to observe. Only detached snapshots are read from it.</param>
+    /// <param name="config">The live configuration, used for gas names, heat capacities, and the config section.</param>
+    /// <param name="options">Scope and detail controls; <see langword="null" /> uses the defaults.</param>
+    /// <returns>A detached report that doesn't reference live simulation storage.</returns>
+    /// <exception cref="ArgumentNullException">
+    ///     <paramref name="simulation" /> or <paramref name="config" /> is <see langword="null" />.
+    /// </exception>
+    /// <exception cref="KeyNotFoundException">A requested chunk or voxel-selection chunk isn't registered.</exception>
+    /// <exception cref="ArgumentException">A voxel selection falls outside the requested chunk scope.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">A voxel selection is outside its chunk's dimensions.</exception>
     public static SimulationStateReport Analyze(
         AtmosSimulation simulation,
         AtmosConfig config,

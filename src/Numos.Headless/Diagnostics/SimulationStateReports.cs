@@ -2,32 +2,48 @@ using Numos.Headless.Protocol;
 
 namespace Numos.Headless.Diagnostics;
 
-/// <summary>Controls the scope and detail of one detached simulation observation.</summary>
+/// <summary>
+///     Controls the scope and detail of one detached simulation observation.
+/// </summary>
 public sealed class SimulationObservationOptions
 {
     public const int DefaultMaxIssueLocations = 32;
     public const int MaximumMaxIssueLocations = 1_024;
 
-    /// <summary>Limits the report to one chunk. A missing chunk is rejected.</summary>
+    /// <summary>
+    ///     Limits the report to one chunk. A position with no registered chunk throws
+    ///     <see cref="KeyNotFoundException" /> from <see cref="SimulationStateAnalyzer.Analyze" />.
+    /// </summary>
     public Coordinate? Chunk { get; init; }
 
-    /// <summary>Specific voxels to include even when <see cref="IncludeVoxels" /> is false.</summary>
+    /// <summary>
+    ///     Specific voxels to include even when <see cref="IncludeVoxels" /> is <see langword="false" />. Each one
+    ///     must lie inside <see cref="Chunk" /> when that is set.
+    /// </summary>
     public IReadOnlyList<VoxelSelection>? Voxels { get; init; }
 
-    /// <summary>Includes detailed voxel reports for every voxel in the selected chunk scope.</summary>
+    /// <summary>
+    ///     Includes detailed voxel reports for every voxel in the selected chunk scope.
+    /// </summary>
     public bool IncludeVoxels { get; init; }
 
     /// <summary>
-    ///     When full voxel detail is enabled, omits voxels without a positive gas amount. Explicit
-    ///     <see cref="Voxels" /> selections are still returned.
+    ///     When full voxel detail is enabled, omits voxels whose gas amounts are all exactly zero. Negative and
+    ///     non-finite amounts still count as gas-bearing so they stay visible. Explicit <see cref="Voxels" />
+    ///     selections are always returned.
     /// </summary>
     public bool OnlyGasBearingVoxels { get; init; }
 
-    /// <summary>Maximum number of deterministic anomaly locations returned with the aggregate counts.</summary>
+    /// <summary>
+    ///     Maximum number of deterministic anomaly locations returned with the aggregate counts. Clamped to
+    ///     <c>[0, <see cref="MaximumMaxIssueLocations" />]</c>.
+    /// </summary>
     public int MaxIssueLocations { get; init; } = DefaultMaxIssueLocations;
 }
 
-/// <summary>Identifies one local voxel in a chunk.</summary>
+/// <summary>
+///     Identifies one local voxel in a chunk.
+/// </summary>
 public sealed class VoxelSelection
 {
     public VoxelSelection(Coordinate? chunk, Coordinate? voxel)
@@ -40,7 +56,9 @@ public sealed class VoxelSelection
     public Coordinate Voxel { get; }
 }
 
-/// <summary>A coherent detached observation of a simulation state.</summary>
+/// <summary>
+///     A coherent detached observation of a simulation state.
+/// </summary>
 public sealed record SimulationStateReport(
     int Tick,
     float SimulationRate,
@@ -52,7 +70,9 @@ public sealed record SimulationStateReport(
     AnomalyIssueReport[] IssueLocations,
     bool IssueLocationsTruncated);
 
-/// <summary>The live configuration values associated with an observation.</summary>
+/// <summary>
+///     The live configuration values associated with an observation.
+/// </summary>
 public sealed record SimulationConfigurationReport(
     float GlobalTemperatureK,
     float DefaultTemperatureFallbackK,
@@ -72,7 +92,9 @@ public sealed record SimulationConfigurationReport(
     int AccumulatorMaxAliveTicks,
     GasConfigurationReport[] Gases);
 
-/// <summary>One indexed gas definition captured from the configuration registry.</summary>
+/// <summary>
+///     One indexed gas definition captured from the configuration registry.
+/// </summary>
 public sealed record GasConfigurationReport(
     int GasId,
     string? Name,
@@ -83,10 +105,14 @@ public sealed record GasConfigurationReport(
     int LiquidId,
     float DiffusionCoefficient);
 
-/// <summary>Wire metadata for one solver stage, in execution order.</summary>
+/// <summary>
+///     Wire metadata for one solver stage, in execution order.
+/// </summary>
 public sealed record SolverStepReport(string Name, bool IsEnabled, string Kind);
 
-/// <summary>Aggregate values across the chunks selected for an observation.</summary>
+/// <summary>
+///     Aggregate values across the chunks selected for an observation.
+/// </summary>
 public sealed record SimulationSummaryReport(
     int ChunkCount,
     int VoxelCount,
@@ -105,7 +131,9 @@ public sealed record SimulationSummaryReport(
     GasTotalReport[] Gases,
     AnomalyCountsReport Anomalies);
 
-/// <summary>Detached state and aggregate values for one chunk.</summary>
+/// <summary>
+///     Detached state and aggregate values for one chunk.
+/// </summary>
 public sealed record ChunkStateReport(
     Coordinate Position,
     Coordinate Dimensions,
@@ -118,7 +146,9 @@ public sealed record ChunkStateReport(
     ChunkSummaryReport Summary,
     VoxelStateReport[] Voxels);
 
-/// <summary>Aggregate values for one chunk.</summary>
+/// <summary>
+///     Aggregate values for one chunk.
+/// </summary>
 public sealed record ChunkSummaryReport(
     int VoxelCount,
     int GasCapableVoxelCount,
@@ -132,7 +162,10 @@ public sealed record ChunkSummaryReport(
     GasTotalReport[] Gases,
     AnomalyCountsReport Anomalies);
 
-/// <summary>Finite-value statistics while retaining the size of the complete sampled field.</summary>
+/// <summary>
+///     Statistics over the finite samples of a field. <c>SampleCount</c> still counts every sample, and the
+///     minimum, maximum, and mean are <see langword="null" /> when no sample is finite.
+/// </summary>
 public sealed record FiniteStatisticsReport(
     int SampleCount,
     int FiniteCount,
@@ -141,13 +174,19 @@ public sealed record FiniteStatisticsReport(
     double? Maximum,
     double? Mean);
 
-/// <summary>Total amount for one gas, ordered by gas ID.</summary>
+/// <summary>
+///     Total amount for one gas, ordered by gas ID.
+/// </summary>
 public sealed record GasTotalReport(int GasId, string? Name, double Moles);
 
-/// <summary>Raw amount for one gas in one detailed voxel.</summary>
+/// <summary>
+///     Raw amount for one gas in one detailed voxel.
+/// </summary>
 public sealed record VoxelGasReport(int GasId, string? Name, float Moles);
 
-/// <summary>Detailed raw and derived values for one voxel.</summary>
+/// <summary>
+///     Detailed raw and derived values for one voxel.
+/// </summary>
 public sealed record VoxelStateReport(
     int LocalIndex,
     Coordinate Position,
@@ -160,7 +199,9 @@ public sealed record VoxelStateReport(
     double SensibleEnergyJ,
     VoxelGasReport[] Gases);
 
-/// <summary>Counts of physical-value anomalies found while scanning an observation.</summary>
+/// <summary>
+///     Counts of physical-value anomalies found while scanning an observation.
+/// </summary>
 public sealed record AnomalyCountsReport(
     int NonFinitePressureCount,
     int NegativePressureCount,
@@ -178,7 +219,9 @@ public sealed record AnomalyCountsReport(
         NegativeMolesCount;
 }
 
-/// <summary>One bounded, deterministic location for an aggregate anomaly.</summary>
+/// <summary>
+///     One bounded, deterministic location for an aggregate anomaly.
+/// </summary>
 public sealed record AnomalyIssueReport(
     string Kind,
     Coordinate Chunk,

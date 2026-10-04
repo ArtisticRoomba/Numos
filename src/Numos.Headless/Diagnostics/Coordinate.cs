@@ -3,7 +3,9 @@ using Numos.Maths;
 
 namespace Numos.Headless.Protocol;
 
-/// <summary>A JSON-friendly three-dimensional integer coordinate.</summary>
+/// <summary>
+///     A JSON-friendly three-dimensional integer coordinate.
+/// </summary>
 public readonly record struct Coordinate
 {
     public Coordinate(int x, int y, int z)

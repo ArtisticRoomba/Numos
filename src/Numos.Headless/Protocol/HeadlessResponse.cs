@@ -2,7 +2,9 @@ using Numos.Headless.Diagnostics;
 
 namespace Numos.Headless.Protocol;
 
-/// <summary>One compact JSON object emitted for an input request.</summary>
+/// <summary>
+///     One compact JSON object emitted for an input request.
+/// </summary>
 internal sealed class HeadlessResponse
 {
     public int ProtocolVersion { get; init; } = HeadlessCommandHost.ProtocolVersion;

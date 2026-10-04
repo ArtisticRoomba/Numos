@@ -25,9 +25,8 @@ namespace Numos.Serialization;
 ///         counterparts.
 ///     </para>
 ///     <para>
-///         Nothing yet enforces that every <see cref="AtmosWorldOperationCode" /> member has one of these
-///         registrations -- forgetting one fails at replay time, not at build time. That consistency check is
-///         Phase 5's analyzer.
+///         Every <see cref="AtmosWorldOperationCode" /> member needs one of these registrations. A missing one is a
+///         NUMOSREPLAYGEN008 build error from <c>ReplayOpcodeConsistencyAnalyzer</c> in Numos.Replay.Analyzers.
 ///     </para>
 /// </remarks>
 [WireOperation(typeof(AtmosWorldSimulationOperation), AtmosWorldOperationCode.SimulationOperation)]
