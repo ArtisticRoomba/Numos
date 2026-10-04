@@ -36,7 +36,7 @@ public readonly record struct VisualizationLegendEntry(
 /// </summary>
 /// <param name="Minimum">Minimum mapped value.</param>
 /// <param name="Maximum">Maximum mapped value.</param>
-/// <param name="Resolution">Number of quantization steps.</param>
+/// <param name="Resolution">Number of color levels mapped values are snapped to.</param>
 public readonly record struct VisualizationRange(float Minimum, float Maximum, int Resolution = 32)
 {
     /// <summary>
@@ -163,6 +163,9 @@ public readonly struct VoxelGasData
     /// </summary>
     /// <param name="channel">Gas-channel index.</param>
     /// <returns>The gas registry ID.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">
+    ///     <paramref name="channel" /> is outside [0, <see cref="Count" />).
+    /// </exception>
     public int GetGasId(int channel)
     {
         if (_channels == null || (uint)channel >= (uint)_channels.Length)
@@ -176,6 +179,9 @@ public readonly struct VoxelGasData
     /// </summary>
     /// <param name="channel">Gas-channel index.</param>
     /// <returns>The sampled moles.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">
+    ///     <paramref name="channel" /> is outside [0, <see cref="Count" />).
+    /// </exception>
     public float GetMoles(int channel)
     {
         if (_channels == null || (uint)channel >= (uint)_channels.Length)
@@ -275,7 +281,7 @@ public interface IVisualizationMethod
 
     /// <summary>
     ///     Expensive source fields that must be summarized while mapping every voxel.
-    ///     Custom visualizations default to all fields for compatibility and correctness.
+    ///     Defaults to all fields, so a custom visualization that does not override this always gets what it reads.
     /// </summary>
     VisualizationDataRequirements RequiredData => VisualizationDataRequirements.All;
 
@@ -334,14 +340,19 @@ public sealed class VisualizationRegistry
     }
 
     /// <summary>
-    ///     Gets registered visualization methods in order.
+    ///     Gets registered visualization methods in registration order.
     /// </summary>
     public IReadOnlyList<IVisualizationMethod> Methods => _readOnlyMethods;
 
     /// <summary>
-    ///     Registers a visualization method.
+    ///     Appends a visualization method to the registry.
     /// </summary>
     /// <param name="method">Method to register.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="method" /> is <see langword="null" />.</exception>
+    /// <exception cref="ArgumentException"><paramref name="method" /> has an empty or whitespace ID.</exception>
+    /// <exception cref="InvalidOperationException">
+    ///     A method with the same ID is already registered. IDs are compared case-insensitively.
+    /// </exception>
     public void Register(IVisualizationMethod method)
     {
         ArgumentNullException.ThrowIfNull(method);
@@ -357,8 +368,10 @@ public sealed class VisualizationRegistry
     /// <summary>
     ///     Gets a registered visualization method by ID.
     /// </summary>
-    /// <param name="id">Visualization ID.</param>
+    /// <param name="id">Visualization ID, compared case-insensitively.</param>
     /// <returns>The registered method.</returns>
+    /// <exception cref="ArgumentException"><paramref name="id" /> is null, empty, or whitespace.</exception>
+    /// <exception cref="KeyNotFoundException">No method is registered under <paramref name="id" />.</exception>
     public IVisualizationMethod GetRequired(string id)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(id);
@@ -369,9 +382,10 @@ public sealed class VisualizationRegistry
     }
 
     /// <summary>
-    ///     Creates a registry containing built-in visualizations.
+    ///     Creates a registry containing the built-in visualizations, in the order temperature, pressure, gas
+    ///     composition, active air, voxel classification.
     /// </summary>
-    /// <param name="config">Simulation configuration.</param>
+    /// <param name="config">Simulation configuration; the gas-composition visualization reads its gas registry.</param>
     /// <returns>The configured registry.</returns>
     public static VisualizationRegistry CreateDefault(AtmosConfig config)
     {
@@ -402,8 +416,12 @@ public sealed class VisualizationRegistry
     }
 
     /// <summary>
-    ///     Gets the stable display color for a gas ID.
+    ///     Gets the display color for a gas ID.
     /// </summary>
+    /// <remarks>
+    ///     The hue is a hash of <paramref name="gasId" /> alone, so an ID gets the same color regardless of which other
+    ///     gases are registered. Nothing prevents two IDs from landing on similar hues.
+    /// </remarks>
     /// <param name="gasId">Gas registry ID.</param>
     /// <returns>The assigned color.</returns>
     public static ColorRgba ColorForGasId(int gasId)

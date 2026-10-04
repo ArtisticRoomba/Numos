@@ -276,9 +276,8 @@ public partial class SimulationViewer
 
         ImGui.SameLine();
 
-        // Disable Forward only while live playback is actively running; a live+paused branch, or any point while
-        // inspecting history (including its own head, where StepTimelineForward already no-ops), can still be
-        // single-stepped. `atHead` alone would keep this disabled whenever the timeline is live, regardless of pause.
+        // Forward is disabled only while live playback is running. A paused live branch, or any inspected position
+        // (including the head, where StepTimelineForward no-ops), can still be single-stepped.
         ImGui.BeginDisabled(isLive && !_isPaused);
         if (ImGui.Button("Forward", new Vector2(76f, 0f)))
         {
@@ -818,8 +817,8 @@ public partial class SimulationViewer
             var branch = branches[index];
             float y = origin.Y + headerHeight + rowHeight * index + rowHeight * 0.5f;
 
-            // The label sits on the recessed surface, so it stays in primary text; the lane itself carries the
-            // selection colour.
+            // The selected label sits on the recessed surface, so it uses primary text and leaves the selection
+            // colour to the lane.
             uint labelColor = branch.IsSelected ? primaryText : secondaryText;
             uint laneColor = branch.IsSelected ? selectionHighlight : secondaryText;
             string branchLabel = branch.IsSelected ? $"> {branch.Name}" : $"  {branch.Name}";

@@ -15,6 +15,15 @@ public sealed class SimulationViewport : IDisposable
     private bool _disposed;
     private RenderTexture2D _renderTexture;
 
+    /// <summary>
+    ///     Creates the viewport with a 1x1 render texture; <see cref="Draw" /> resizes it to the window on first use.
+    /// </summary>
+    /// <param name="textureFilter">Filter applied when ImGui scales the texture onto the window.</param>
+    /// <param name="clearColor">Background cleared before each scene render.</param>
+    /// <exception cref="InvalidOperationException">raylib could not create the render texture.</exception>
+    /// <remarks>
+    ///     Requires an initialized raylib window, since the render texture is a GPU resource.
+    /// </remarks>
     public SimulationViewport(TextureFilter textureFilter, Color clearColor)
     {
         _textureFilter = textureFilter;
@@ -22,18 +31,35 @@ public sealed class SimulationViewport : IDisposable
         _renderTexture = CreateRenderTexture(Width, Height);
     }
 
+    /// <summary>
+    ///     Render texture width in pixels, matching the window's content region as of the last <see cref="Draw" />.
+    /// </summary>
     public int Width { get; private set; } = 1;
 
+    /// <summary>
+    ///     Render texture height in pixels, matching the window's content region as of the last <see cref="Draw" />.
+    /// </summary>
     public int Height { get; private set; } = 1;
 
+    /// <summary>
+    ///     Whether the mouse was over the viewport image during the last <see cref="Draw" />. Cleared when the window
+    ///     is collapsed or hidden.
+    /// </summary>
     public bool IsHovered { get; private set; }
 
     internal Vector2 ImageMaximum { get; private set; }
 
     internal Vector2 ImageMinimum { get; private set; }
 
+    /// <summary>
+    ///     Mouse position over the image in [0, 1] on both axes, clamped to the image, with Y growing upward to match
+    ///     the rendered scene. Updated only while the window is open.
+    /// </summary>
     public Vector2 NormalizedMousePosition { get; private set; }
 
+    /// <summary>
+    ///     Unloads the render texture. Call it before the raylib window closes.
+    /// </summary>
     public void Dispose()
     {
         if (_disposed)

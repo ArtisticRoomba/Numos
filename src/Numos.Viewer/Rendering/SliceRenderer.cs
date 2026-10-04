@@ -17,6 +17,15 @@ public static class SliceRenderer
 {
     private readonly static Color CellBorder = new(0f, 0f, 0f, 0.5f);
 
+    /// <summary>
+    ///     Draws <paramref name="slice" /> in one-unit cells under <paramref name="camera" />, with V flipped so the
+    ///     slice reads with its origin at the bottom left.
+    /// </summary>
+    /// <param name="slice">Slice to draw.</param>
+    /// <param name="camera">2D camera for the slice; this method begins and ends its 2D mode.</param>
+    /// <param name="options">Voxel highlights to outline.</param>
+    /// <param name="style">Outline and transparency treatments.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="slice" /> is <see langword="null" />.</exception>
     public static void Draw(
         SimulationSliceDrawData slice,
         Camera2D camera,

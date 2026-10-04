@@ -143,8 +143,19 @@ public partial class SimulationViewer : IDisposable
         StartMessageCapture();
     }
 
+    /// <summary>
+    ///     Primary selected voxel, or <see langword="null" /> when nothing is selected.
+    /// </summary>
     public VoxelAddress? SelectedCell => _selectedCell;
 
+    /// <summary>
+    ///     Opens the window and runs the frame loop on the calling thread until the window is closed or the viewer
+    ///     requests exit.
+    /// </summary>
+    /// <remarks>
+    ///     Graphics resources, including the window, are released when this returns. The simulation project stays
+    ///     loaded until <see cref="Dispose" />.
+    /// </remarks>
     public void Run()
     {
         Raylib.SetConfigFlags(

@@ -945,7 +945,8 @@ public partial class SimulationViewer
     }
 
     /// <summary>
-    ///     Validation domain for an <c>AtmosConfig</c> field, matching what <c>AtmosConfigSnapshot</c> keeps as-is.
+    ///     Validation domain for an <see cref="AtmosConfig" /> field, matching what <see cref="AtmosConfigSnapshot" />
+    ///     keeps as-is.
     ///     Values outside the domain are silently replaced or clamped by the snapshot, so the panel rejects them
     ///     instead of recording a value that means something else.
     /// </summary>

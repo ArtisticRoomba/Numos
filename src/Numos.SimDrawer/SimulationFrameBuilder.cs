@@ -16,7 +16,10 @@ public sealed class SimulationFrameBuilder
     ///     Creates a presentation-frame builder.
     /// </summary>
     /// <param name="config">Simulation configuration used by default visualizations.</param>
-    /// <param name="visualizations">Optional visualization registry.</param>
+    /// <param name="visualizations">
+    ///     Registry to draw from, or <see langword="null" /> for <see cref="VisualizationRegistry.CreateDefault" />.
+    /// </param>
+    /// <exception cref="ArgumentException"><paramref name="visualizations" /> has no registered methods.</exception>
     public SimulationFrameBuilder(AtmosConfig config, VisualizationRegistry? visualizations = null)
     {
         ArgumentNullException.ThrowIfNull(config);
@@ -37,6 +40,14 @@ public sealed class SimulationFrameBuilder
     /// <summary>
     ///     Returns the minimal detached snapshot fields needed to map one visualization.
     /// </summary>
+    /// <param name="visualizationId">Registered visualization ID, compared case-insensitively.</param>
+    /// <returns>
+    ///     Voxel classification plus whichever of temperature, pressure, and gases the visualization declares in
+    ///     <see cref="IVisualizationMethod.RequiredData" />.
+    /// </returns>
+    /// <exception cref="KeyNotFoundException">
+    ///     No visualization is registered under <paramref name="visualizationId" />.
+    /// </exception>
     public AtmosChunkSnapshotFields GetRequiredSnapshotFields(string visualizationId)
     {
         var visualization = Visualizations.GetRequired(visualizationId);
@@ -59,6 +70,37 @@ public sealed class SimulationFrameBuilder
     ///     previous immutable mapping and incur no visualization work until the scope expands. An
     ///     out-of-scope chunk without a previous mapping is omitted until it enters a later scope.
     /// </summary>
+    /// <param name="snapshots">
+    ///     One snapshot per chunk, carrying at least <see cref="GetRequiredSnapshotFields" />.
+    /// </param>
+    /// <param name="visualizationId">Registered visualization ID, compared case-insensitively.</param>
+    /// <param name="sourceVersion">
+    ///     Caller-defined version stamped onto the frame as <see cref="SimulationDrawData.SourceVersion" />.
+    /// </param>
+    /// <param name="previousFrame">Frame whose chunks may be reused or retained.</param>
+    /// <param name="mappingScope">Chunk positions to map, or <see langword="null" /> to map every chunk.</param>
+    /// <param name="forceRemap">Rebuilds every in-scope chunk even when its previous mapping is still valid.</param>
+    /// <param name="resolution">Color quantization steps for the range; values below 1 are treated as 1.</param>
+    /// <param name="automaticRangeOffset">
+    ///     Padding added to both ends of the automatic range. Negative or non-finite values are treated as zero.
+    /// </param>
+    /// <param name="rangeOverride">
+    ///     Fixed range to use instead of the automatic one. Its resolution is replaced by
+    ///     <paramref name="resolution" />.
+    /// </param>
+    /// <returns>A new frame with a fresh <see cref="SimulationDrawData.FrameVersion" />.</returns>
+    /// <exception cref="ArgumentException">
+    ///     Two snapshots share a grid position, or <paramref name="rangeOverride" /> is not finite and increasing.
+    /// </exception>
+    /// <exception cref="KeyNotFoundException">
+    ///     No visualization is registered under <paramref name="visualizationId" />.
+    /// </exception>
+    /// <remarks>
+    ///     The automatic range spans the finite temperature or pressure values in <paramref name="snapshots" />,
+    ///     depending on what the visualization requires. A chunk is reused only when its identity, visualization,
+    ///     mapping revision, and snapshot revision all match and the range is unchanged, so a range change remaps every
+    ///     in-scope chunk.
+    /// </remarks>
     public SimulationDrawData BuildSimulation(
         IEnumerable<AtmosChunkSnapshot> snapshots,
         string visualizationId,
@@ -208,6 +250,15 @@ public sealed class SimulationFrameBuilder
     /// <summary>
     ///     Projects one local slice from a focused chunk without reading the simulation again.
     /// </summary>
+    /// <param name="frame">Frame that holds the chunk's presentation data.</param>
+    /// <param name="chunkIdentity">Chunk to slice; its generation must match the frame's chunk.</param>
+    /// <param name="axis">Axis normal to the slice.</param>
+    /// <param name="sliceIndex">Local index along <paramref name="axis" />, clamped into the chunk.</param>
+    /// <returns>The slice, including filtered cells for picking.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="frame" /> is <see langword="null" />.</exception>
+    /// <exception cref="KeyNotFoundException">
+    ///     The frame has no chunk with <paramref name="chunkIdentity" />.
+    /// </exception>
     public SimulationSliceDrawData BuildChunkSlice(
         SimulationDrawData frame,
         ChunkIdentity chunkIdentity,
@@ -260,11 +311,12 @@ public sealed class SimulationFrameBuilder
     }
 
     /// <summary>
-    ///     Gets the dimension length along a slice axis.
+    ///     Gets the number of slices a chunk has along <paramref name="axis" />.
     /// </summary>
     /// <param name="dimensions">Chunk dimensions.</param>
     /// <param name="axis">Slice axis.</param>
-    /// <returns>The selected axis length.</returns>
+    /// <returns>The component of <paramref name="dimensions" /> along <paramref name="axis" />.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="axis" /> is not a defined axis.</exception>
     public static int GetSliceAxisLength(Int3 dimensions, SliceAxis axis)
     {
         return axis switch

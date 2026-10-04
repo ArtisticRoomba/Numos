@@ -19,6 +19,17 @@ public static class NavigationGizmo
     private readonly static Color ZColor = new(0.3f, 0.55f, 1f, 1f);
     private readonly static Color BackdropColor = new(0.02f, 0.02f, 0.025f, 0.7f);
 
+    /// <summary>
+    ///     Draws the indicator in the bottom-right corner of the current render target, with each axis projected onto
+    ///     the screen plane of <paramref name="camera" />.
+    /// </summary>
+    /// <param name="camera">Camera whose orientation the indicator follows.</param>
+    /// <param name="viewportWidth">Render target width in pixels.</param>
+    /// <param name="viewportHeight">Render target height in pixels.</param>
+    /// <remarks>
+    ///     An axis that points almost straight at or away from the camera is drawn as a short oblique stub instead of
+    ///     collapsing to a point.
+    /// </remarks>
     public static void Draw3D(Camera3D camera, int viewportWidth, int viewportHeight)
     {
         var forward = camera.Target - camera.Position;
@@ -42,6 +53,14 @@ public static class NavigationGizmo
             ProjectAxis(Vector3.UnitZ, right, up));
     }
 
+    /// <summary>
+    ///     Draws the indicator for a slice view: the two in-plane axes follow the slice's U (right) and V (up)
+    ///     directions, and <paramref name="sliceAxis" /> is drawn as an oblique spoke.
+    /// </summary>
+    /// <param name="sliceAxis">World axis the slice is taken along.</param>
+    /// <param name="viewportWidth">Render target width in pixels.</param>
+    /// <param name="viewportHeight">Render target height in pixels.</param>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="sliceAxis" /> is not a defined axis.</exception>
     public static void Draw2D(SliceAxis sliceAxis, int viewportWidth, int viewportHeight)
     {
         // U points right and V points up in the rendered slice. Keep the sliced axis

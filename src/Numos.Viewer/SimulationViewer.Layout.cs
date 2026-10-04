@@ -14,8 +14,8 @@ public partial class SimulationViewer
     private string? _userLayoutPath;
 
     /// <summary>
-    ///     Inits ImGui layout persistence,
-    ///     loads a default if no previously saved layout file is present.
+    ///     Loads the per-user ImGui layout, first copying the packaged default into place when the user has no saved
+    ///     layout yet.
     /// </summary>
     private void ConfigureLayoutPersistence()
     {

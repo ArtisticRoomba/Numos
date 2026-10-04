@@ -7,6 +7,12 @@ public partial class SimulationViewer
 {
     private bool _disposed;
 
+    /// <summary>
+    ///     Cancels pending replay file work, releases graphics and the loaded world, and restores the console writers.
+    /// </summary>
+    /// <remarks>
+    ///     A replay still loading in the background is disposed when it finishes rather than awaited here.
+    /// </remarks>
     public void Dispose()
     {
         if (_disposed)

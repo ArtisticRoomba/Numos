@@ -4,6 +4,11 @@ using Raylib_cs;
 
 namespace Numos.Viewer.Rendering;
 
+/// <summary>
+///     Wireframe outline drawn around one voxel on top of the visualization colours.
+/// </summary>
+/// <param name="Address">Voxel to outline. Ignored when its chunk generation no longer matches the frame.</param>
+/// <param name="Color">Outline colour.</param>
 public readonly record struct VoxelHighlight(VoxelAddress Address, ColorRgba Color);
 
 /// <summary>
@@ -14,6 +19,18 @@ public static class SimulationRenderer
     private readonly static Vector3 VoxelSize = Vector3.One;
     private readonly static Vector3 HighlightSize = new(1.04f);
 
+    /// <summary>
+    ///     Draws the visible voxels of <paramref name="frame" /> as cubes, then the requested highlights. Must be
+    ///     called inside a raylib 3D mode.
+    /// </summary>
+    /// <param name="frame">
+    ///     Frame to draw. Chunks whose colours were built for a different visualization mapping are skipped.
+    /// </param>
+    /// <param name="focusedChunk">When set, only this chunk and its highlights are drawn.</param>
+    /// <param name="highlights">
+    ///     Voxel outlines to draw; entries that do not resolve to a drawn chunk are ignored.
+    /// </param>
+    /// <param name="options">Outline and transparency treatments.</param>
     public static void Draw(
         SimulationDrawData frame,
         ChunkIdentity? focusedChunk,

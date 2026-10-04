@@ -163,7 +163,8 @@ public sealed class ChunkDrawData
     public Int3 Dimensions { get; }
 
     /// <summary>
-    ///     Gets the source revision used to create this data.
+    ///     Chunk snapshot revision the cells were mapped from. The builder reuses this chunk only while the snapshot
+    ///     revision is unchanged.
     /// </summary>
     public long SourceRevision { get; }
 
@@ -330,12 +331,12 @@ public sealed class SimulationDrawData
     public ulong VisualizationMappingRevision { get; }
 
     /// <summary>
-    ///     Gets the source simulation version.
+    ///     Caller-supplied version passed to <see cref="SimulationFrameBuilder.BuildSimulation" />.
     /// </summary>
     public long SourceVersion { get; }
 
     /// <summary>
-    ///     Gets the retained frame version.
+    ///     Increases with every frame its builder produces.
     /// </summary>
     public long FrameVersion { get; }
 
@@ -510,6 +511,16 @@ public sealed class SimulationSliceDrawData
     /// <summary>
     ///     Picks a cell from bottom-left-origin normalized viewport coordinates.
     /// </summary>
+    /// <param name="normalizedX">Horizontal viewport position in [0, 1].</param>
+    /// <param name="normalizedY">Vertical viewport position in [0, 1], growing upward.</param>
+    /// <param name="viewportAspectRatio">
+    ///     Viewport width divided by height, as passed to <see cref="GetViewBounds" />.
+    /// </param>
+    /// <param name="cell">The picked cell, including cells filtered from rendering.</param>
+    /// <returns>Whether the position lands on a cell of the slice.</returns>
+    /// <remarks>
+    ///     Picking assumes the slice is shown with <see cref="GetViewBounds" /> and its default margin.
+    /// </remarks>
     public bool TryPickNormalized(
         float normalizedX,
         float normalizedY,

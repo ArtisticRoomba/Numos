@@ -1,7 +1,7 @@
 namespace Numos.Viewer.Ui;
 
 /// <summary>
-///     Display wording for one <c>AtmosConfig</c> field.
+///     Display wording for one <see cref="Numos.CoreSim.AtmosConfig" /> field.
 /// </summary>
 /// <param name="Label">Sentence-case label without the unit.</param>
 /// <param name="Unit">Unit symbol, or an empty string when the field is dimensionless or a count.</param>
@@ -12,11 +12,12 @@ internal readonly record struct AtmosConfigFieldInfo(string Label, string Unit, 
 }
 
 /// <summary>
-///     Shared labels, units, and tooltips for <c>AtmosConfig</c> fields, so the Configuration panel and replay
-///     inspection describe a setting the same way.
+///     Shared labels, units, and tooltips for <see cref="Numos.CoreSim.AtmosConfig" /> fields, so the Configuration
+///     panel and replay inspection describe a setting the same way.
 /// </summary>
 /// <remarks>
-///     Units follow the quantity types on <c>AtmosConfig</c>. Keep them in step if a field's type changes.
+///     Units follow the quantity types on <see cref="Numos.CoreSim.AtmosConfig" />. Keep them in step if a field's
+///     type changes.
 /// </remarks>
 internal static class AtmosConfigFields
 {
