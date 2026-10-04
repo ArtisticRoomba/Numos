@@ -10,6 +10,12 @@ public static class AtmosWorldSolverDangerousExtensions
     /// </summary>
     /// <param name="context">The active world solver context.</param>
     /// <returns>A resolver for live chunk storage addressed by world cell references.</returns>
+    /// <remarks>
+    ///     Writes made through the returned views are not recorded. They stay replay-safe only because replay re-runs
+    ///     the callback, so they must be deterministic. Do not keep the resolver or its views after the callback
+    ///     returns.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="context" /> is <see langword="null" />.</exception>
     public static AtmosDangerousWorldSolverApi Dangerous(this AtmosWorldSolverContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
@@ -34,7 +40,14 @@ public readonly ref struct AtmosDangerousWorldSolverApi
     /// </summary>
     /// <param name="cell">A current cell reference from the callback's world.</param>
     /// <returns>The unchecked live chunk view.</returns>
-    /// <exception cref="ArgumentException">The cell does not identify live storage in this world.</exception>
+    /// <remarks>
+    ///     The returned view covers the whole chunk. Index it with <see cref="AtmosCellRef.LocalVoxelIndex" /> to reach
+    ///     the cell itself.
+    /// </remarks>
+    /// <exception cref="ArgumentException">
+    ///     The cell's simulation is not registered in this world, its local voxel index is outside the chunk, or no
+    ///     chunk is registered at its position.
+    /// </exception>
     public AtmosDangerousChunk GetChunk(AtmosCellRef cell)
     {
         if (!_context.World.TryGetSimulation(cell.Simulation, out var simulation) || simulation == null)

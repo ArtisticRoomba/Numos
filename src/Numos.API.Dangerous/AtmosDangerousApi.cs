@@ -5,7 +5,11 @@ namespace Numos.API.Dangerous;
 /// </summary>
 /// <remarks>
 ///     <para>
-///         These APIs generally grant you access to internal state and allow you to forego validation checks.
+///         These APIs grant access to internal state and skip validation checks.
+///     </para>
+///     <para>
+///         Mutations made through them bypass recording. They break the replay guarantee unless they are deterministic
+///         work inside a solver callback, which replay re-runs, or the host captures a fresh checkpoint afterward.
 ///     </para>
 ///     <para>
 ///         We trust you have received the usual lecture from the local Atmospherics Maintainer:
@@ -28,9 +32,12 @@ public readonly struct AtmosDangerousApi
     /// <summary>
     ///     Returns an unchecked live view of a registered chunk.
     /// </summary>
+    /// <param name="chunk">A chunk registered with this simulation.</param>
+    /// <returns>A view over the chunk's live storage arrays.</returns>
     /// <remarks>
     ///     The caller is responsible for preventing concurrent simulation or chunk-lifecycle operations while using
-    ///     the returned view. A custom solver callback provides that synchronization automatically.
+    ///     the returned view. A custom solver callback provides that synchronization automatically, because the tick
+    ///     holds the simulation's state lock.
     /// </remarks>
     /// <exception cref="KeyNotFoundException">No chunk is registered at the handle's position.</exception>
     /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
