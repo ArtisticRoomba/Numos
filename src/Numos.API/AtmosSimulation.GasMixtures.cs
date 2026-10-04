@@ -7,9 +7,16 @@ public sealed partial class AtmosSimulation
 {
     private readonly object _mixtureGate = new();
 
-    /// <summary>Creates an empty, independently stored gas mixture owned by this simulation.</summary>
+    /// <summary>
+    ///     Creates an empty, independently stored gas mixture owned by this simulation.
+    /// </summary>
     /// <param name="volume">Container volume in cubic metres (m³).</param>
     /// <param name="temperature">Initial temperature in kelvins (K).</param>
+    /// <returns>A new empty <see cref="GasMixture" /> that uses this simulation's gas registry and configuration.</returns>
+    /// <remarks>
+    ///     The mixture lives outside the chunk grid. It is not recorded, checkpointed, or restored by replay, so
+    ///     hosts that need it to survive a rollback must persist it themselves.
+    /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException">
     ///     The volume is not positive and finite, or the temperature is negative or non-finite.
     /// </exception>
@@ -28,11 +35,22 @@ public sealed partial class AtmosSimulation
         }
     }
 
-    /// <summary>Creates sandboxed live access to one voxel's gas mixture.</summary>
+    /// <summary>
+    ///     Creates sandboxed live access to one voxel's gas mixture.
+    /// </summary>
+    /// <param name="chunk">A chunk registered with this simulation.</param>
+    /// <param name="localVoxelIndex">The voxel's index within the chunk.</param>
+    /// <returns>A live mixture whose reads and writes go straight to the voxel's stored state.</returns>
     /// <remarks>
     ///     The returned capability never exposes solver arrays. It is bound to the current chunk generation and
-    ///     becomes stale if that chunk is removed or replaced at the same grid position.
+    ///     becomes stale if that chunk is removed or replaced at the same grid position. Mutations through it are
+    ///     recorded like any other external voxel edit. Solid and void voxels can be read but reject mutation.
     /// </remarks>
+    /// <exception cref="KeyNotFoundException">No chunk is registered at <paramref name="chunk" />.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    ///     <paramref name="localVoxelIndex" /> is not less than the chunk's voxel count.
+    /// </exception>
+    /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
     [PublicAPI]
     public IGasMixture GetVoxelGasMixture(AtmosChunkHandle chunk, ushort localVoxelIndex)
     {
@@ -44,7 +62,21 @@ public sealed partial class AtmosSimulation
         }
     }
 
-    /// <summary>Creates sandboxed live access to one voxel addressed by local coordinates.</summary>
+    /// <summary>
+    ///     Creates sandboxed live access to one voxel addressed by local coordinates.
+    /// </summary>
+    /// <param name="chunk">A chunk registered with this simulation.</param>
+    /// <param name="x">The voxel's local X coordinate, in [0, width).</param>
+    /// <param name="y">The voxel's local Y coordinate, in [0, height).</param>
+    /// <param name="z">The voxel's local Z coordinate, in [0, depth).</param>
+    /// <returns>A live mixture whose reads and writes go straight to the voxel's stored state.</returns>
+    /// <remarks>
+    ///     Behaves like <see cref="GetVoxelGasMixture(AtmosChunkHandle, ushort)" /> after converting the coordinates
+    ///     to a local voxel index.
+    /// </remarks>
+    /// <exception cref="KeyNotFoundException">No chunk is registered at <paramref name="chunk" />.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">A coordinate is outside the chunk's dimensions.</exception>
+    /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
     [PublicAPI]
     public IGasMixture GetVoxelGasMixture(AtmosChunkHandle chunk, int x, int y, int z)
     {

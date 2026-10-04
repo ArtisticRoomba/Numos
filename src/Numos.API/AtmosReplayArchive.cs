@@ -15,6 +15,9 @@ public sealed class AtmosReplayArchive
     /// <param name="recording">Ordered operations and the interval they cover.</param>
     /// <param name="initialStateHash">Reference hash for <paramref name="initialCheckpoint" />.</param>
     /// <param name="headStateHash">Reference hash for the state reconstructed at the recording head.</param>
+    /// <exception cref="ArgumentNullException">
+    ///     <paramref name="initialCheckpoint" /> or <paramref name="recording" /> is <see langword="null" />.
+    /// </exception>
     /// <exception cref="ArgumentException">The checkpoint, recording, or hashes describe different timeline positions.</exception>
     public AtmosReplayArchive(
         AtmosSimulationCheckpoint initialCheckpoint,
@@ -59,7 +62,8 @@ public sealed class AtmosReplayArchive
     public AtmosStateHash HeadStateHash { get; }
 
     /// <summary>
-    ///     Gets host-defined state that the standard replay file format cannot reconstruct.
+    ///     Gets human-readable descriptions of host-defined state that the standard replay file format cannot
+    ///     reconstruct. Empty when the archive is portable.
     /// </summary>
     public IReadOnlyList<string> UnsupportedFeatures { get; }
 

@@ -24,7 +24,17 @@ public sealed class GasMixture : IInternalGasMixture
     /// <inheritdoc />
     public AtmosSimulation Owner { get; }
 
-    /// <inheritdoc />
+    /// <summary>
+    ///     The container volume, in cubic metres (m³).
+    /// </summary>
+    /// <remarks>
+    ///     Changing the volume keeps the stored gas and temperature, so pressure scales inversely with it.
+    /// </remarks>
+    /// <exception cref="ArgumentOutOfRangeException">The assigned volume is not positive and finite.</exception>
+    /// <exception cref="InvalidOperationException">
+    ///     The resulting pressure is not finite. The previous volume is kept.
+    /// </exception>
+    /// <exception cref="ObjectDisposedException">The owning simulation has been disposed.</exception>
     public float Volume
     {
         get => Owner.GetMixtureVolume(this);

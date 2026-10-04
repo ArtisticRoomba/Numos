@@ -45,6 +45,12 @@ public readonly record struct AtmosNeighborEdge(
 /// <summary>
 ///     Provides a solver-specific, immutable view of Cartesian and compiled explicit topology.
 /// </summary>
+/// <remarks>
+///     Explicit edges are compiled from the stage's <see cref="AtmosNeighborSelection" /> whenever the applied
+///     topology or the stage registration changes.
+///     Cartesian adjacency is not precompiled: it is derived from chunk dimensions and whichever neighboring chunks
+///     are registered when a query runs. Adjacency is structural, so solid and void voxels still have neighbors.
+/// </remarks>
 public sealed class AtmosWorldNeighborTopology
 {
     private readonly Dictionary<CompiledChunkKey, CompiledChunkAdjacency> _explicitByChunk;
@@ -78,6 +84,11 @@ public sealed class AtmosWorldNeighborTopology
     /// <param name="simulation">The simulation that owns the chunk.</param>
     /// <param name="chunk">The chunk to inspect.</param>
     /// <returns>An allocation-free chunk-local neighborhood view.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="simulation" /> is <see langword="null" />.</exception>
+    /// <exception cref="ArgumentException">
+    ///     <paramref name="simulation" /> belongs to another world, or no chunk is registered at
+    ///     <paramref name="chunk" />.
+    /// </exception>
     public AtmosChunkNeighborView GetChunk(AtmosSimulation simulation, AtmosChunkHandle chunk)
     {
         ArgumentNullException.ThrowIfNull(simulation);
@@ -119,6 +130,8 @@ public sealed class AtmosWorldNeighborTopology
     /// <param name="cell">A live cell in the callback's world.</param>
     /// <returns>The number of selected Cartesian and explicit neighbors.</returns>
     /// <remarks>Solid and void classifications do not remove structural adjacency.</remarks>
+    /// <exception cref="ArgumentException">The cell's simulation or chunk is not registered in this world.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">The cell's local voxel index is outside its chunk.</exception>
     public int GetNeighborCount(AtmosCellRef cell)
     {
         var world = GetWorld();
@@ -133,6 +146,12 @@ public sealed class AtmosWorldNeighborTopology
     /// </summary>
     /// <param name="cell">A live cell in the callback's world.</param>
     /// <returns>An allocation-free incident-neighbor enumerable.</returns>
+    /// <remarks>
+    ///     Each call builds a chunk view first. When visiting many cells in one chunk, get the view once with
+    ///     <see cref="GetChunk" /> and use <see cref="AtmosChunkNeighborView.GetNeighbors" />.
+    /// </remarks>
+    /// <exception cref="ArgumentException">The cell's simulation or chunk is not registered in this world.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">The cell's local voxel index is outside its chunk.</exception>
     public AtmosNeighborEnumerable GetNeighbors(AtmosCellRef cell)
     {
         var world = GetWorld();
@@ -298,6 +317,10 @@ public sealed class AtmosWorldNeighborTopology
 /// <summary>
 ///     Reusable topology view for one chunk.
 /// </summary>
+/// <remarks>
+///     The view records which face-adjacent chunks were registered when it was created. Use it within the current
+///     solver callback and get a new one on the next tick.
+/// </remarks>
 public readonly struct AtmosChunkNeighborView
 {
     private readonly CompiledChunkAdjacency? _explicitAdjacency;
@@ -333,6 +356,7 @@ public readonly struct AtmosChunkNeighborView
     /// </summary>
     /// <param name="localVoxelIndex">The source voxel's chunk-local index.</param>
     /// <returns>The number of selected Cartesian and explicit neighbors.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="localVoxelIndex" /> is outside the chunk.</exception>
     public int GetNeighborCount(ushort localVoxelIndex)
     {
         ValidateIndex(localVoxelIndex);
@@ -354,6 +378,11 @@ public readonly struct AtmosChunkNeighborView
     /// </summary>
     /// <param name="localVoxelIndex">The source voxel's chunk-local index.</param>
     /// <returns>An allocation-free incident-neighbor enumerable.</returns>
+    /// <remarks>
+    ///     Cartesian neighbors come first in -X, +X, -Y, +Y, -Z, +Z order, skipping faces with no registered chunk
+    ///     beyond them and the Z faces of single-layer chunks. Explicit neighbors follow, sorted by cell address.
+    /// </remarks>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="localVoxelIndex" /> is outside the chunk.</exception>
     public AtmosNeighborEnumerable GetNeighbors(ushort localVoxelIndex)
     {
         ValidateIndex(localVoxelIndex);

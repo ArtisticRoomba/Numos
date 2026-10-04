@@ -285,7 +285,8 @@ public sealed class AtmosWorldReplayTimeline
     }
 
     /// <summary>
-    ///     Selects a completed-tick boundary before operations stamped at that tick are applied.
+    ///     Reconstructs the state right after <paramref name="tick" /> completed, before any operation recorded at that
+    ///     boundary.
     /// </summary>
     /// <param name="tick">Completed tick to reconstruct.</param>
     /// <returns>Diagnostics for the reconstruction.</returns>
@@ -336,9 +337,13 @@ public sealed class AtmosWorldReplayTimeline
     }
 
     /// <summary>
-    ///     Returns to the preserved head. Imported archives remain read-only until explicitly branched.
+    ///     Restores the preserved head.
     /// </summary>
-    /// <remarks>This method has no effect while the timeline is already live.</remarks>
+    /// <remarks>
+    ///     A live timeline resumes world recording and leaves inspection mode. An imported or restored timeline stays in
+    ///     read-only inspection until <see cref="SimulateFromHere" /> branches from it. This method has no effect while
+    ///     the timeline is already live.
+    /// </remarks>
     /// <exception cref="ObjectDisposedException">The observed world has been disposed.</exception>
     public void ReturnToHead()
     {

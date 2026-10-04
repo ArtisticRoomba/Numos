@@ -500,7 +500,11 @@ public sealed partial class AtmosSimulation : IDisposable
     /// <param name="knownRevision">The collection revision held by the caller, or a negative value for none.</param>
     /// <param name="revision">The current collection revision.</param>
     /// <param name="handles">The current sorted handles when the method returns <see langword="true" />.</param>
-    /// <returns><see langword="true" /> when the collection changed.</returns>
+    /// <returns>
+    ///     <see langword="true" /> when the collection revision differs from <paramref name="knownRevision" />;
+    ///     otherwise <see langword="false" /> and <paramref name="handles" /> is empty.
+    /// </returns>
+    /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
     [PublicAPI]
     public bool TryGetChunkHandles(
         long knownRevision,
@@ -562,6 +566,9 @@ public sealed partial class AtmosSimulation : IDisposable
     /// <param name="chunk">The chunk containing the voxel.</param>
     /// <param name="localVoxelIndex">The voxel's flat local index.</param>
     /// <returns>Scalar values plus one moles value per active gas channel.</returns>
+    /// <exception cref="KeyNotFoundException">No chunk is registered at the handle's position.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="localVoxelIndex" /> is outside the chunk.</exception>
+    /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
     [PublicAPI]
     public AtmosVoxelSnapshot GetVoxelSnapshot(
         AtmosChunkHandle chunk,
@@ -584,6 +591,11 @@ public sealed partial class AtmosSimulation : IDisposable
     /// <param name="expectedVersion">The exact chunk version represented by the caller's frame.</param>
     /// <param name="snapshot">The detached values when this method returns <see langword="true" />.</param>
     /// <returns><see langword="true" /> only when the expected version is still current.</returns>
+    /// <exception cref="KeyNotFoundException">No chunk is registered at the handle's position.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    ///     <paramref name="localVoxelIndex" /> is outside the chunk and the version matched.
+    /// </exception>
+    /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
     [PublicAPI]
     public bool TryGetVoxelSnapshot(
         AtmosChunkHandle chunk,
@@ -606,6 +618,8 @@ public sealed partial class AtmosSimulation : IDisposable
     /// <param name="knownVersion">The version held by the caller, or <see langword="default" /> for no version.</param>
     /// <param name="snapshot">The new detached snapshot when this method returns <see langword="true" />.</param>
     /// <returns><see langword="true" /> when a new snapshot was created; otherwise <see langword="false" />.</returns>
+    /// <exception cref="KeyNotFoundException">No chunk is registered at the handle's position.</exception>
+    /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
     [PublicAPI]
     public bool TryGetChunkSnapshot(
         AtmosChunkHandle chunk,
@@ -631,6 +645,9 @@ public sealed partial class AtmosSimulation : IDisposable
     /// <param name="fields">Per-voxel fields to detach. Metadata and version are always included.</param>
     /// <param name="snapshot">The new detached snapshot when this method returns <see langword="true" />.</param>
     /// <returns><see langword="true" /> when a new snapshot was created; otherwise <see langword="false" />.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="fields" /> contains undefined flags.</exception>
+    /// <exception cref="KeyNotFoundException">No chunk is registered at the handle's position.</exception>
+    /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
     [PublicAPI]
     public bool TryGetChunkSnapshot(
         AtmosChunkHandle chunk,
@@ -653,6 +670,10 @@ public sealed partial class AtmosSimulation : IDisposable
     /// </remarks>
     /// <param name="requests">Conditional per-chunk field requests.</param>
     /// <returns>The coherent tick count and changed detached chunk snapshots.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="requests" /> is <see langword="null" />.</exception>
+    /// <exception cref="ArgumentException">Two requests name the same chunk position.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">A request contains undefined field flags.</exception>
+    /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
     [PublicAPI]
     public AtmosChunkSnapshotBatch GetChangedChunkSnapshots(
         IReadOnlyList<AtmosChunkSnapshotRequest> requests)
@@ -792,13 +813,12 @@ public sealed partial class AtmosSimulation : IDisposable
     /// <param name="moles">The amount of gas to add, in moles.</param>
     /// <param name="temperature">The temperature of the added gas, in kelvins.</param>
     /// <remarks>
-    ///     The chunk is activated before injection. Injection into a solid or void voxel is ignored. The added gas carries sensible internal energy according to its molar heat
-    ///     capacity at constant volume, and the stored temperature is updated by energy balance. Before blending, the
-    ///     heat
-    ///     capacity of gas already in the voxel is recomputed from the current <see cref="Config" />. A non-finite or
-    ///     nonpositive configured heat capacity uses
-    ///     <see cref="AtmosConfig.DefaultMolarHeatCapacityAtConstantVolume" />. When gas is already present, a non-finite or
-    ///     nonpositive stored temperature contributes prior sensible energy at
+    ///     Injection into a solid or void voxel is silently ignored and does not wake the chunk. The added gas carries
+    ///     sensible internal energy according to its molar heat capacity at constant volume, and the stored
+    ///     temperature is updated by energy balance. Before blending, the heat capacity of gas already in the voxel is
+    ///     recomputed from the current <see cref="Config" />. A non-finite or nonpositive configured heat capacity
+    ///     uses <see cref="AtmosConfig.DefaultMolarHeatCapacityAtConstantVolume" />. When gas is already present, a
+    ///     non-finite or nonpositive stored temperature contributes prior sensible energy at
     ///     <see cref="AtmosConfig.DefaultTemperatureFallback" />. An empty voxel instead adopts the incoming
     ///     temperature.
     /// </remarks>
@@ -832,13 +852,12 @@ public sealed partial class AtmosSimulation : IDisposable
     /// <param name="moles">The amount of gas to add, in moles.</param>
     /// <param name="temperature">The temperature of the added gas, in kelvins.</param>
     /// <remarks>
-    ///     The chunk is activated before injection. Injection into a solid or void voxel is ignored. The added gas carries sensible internal energy according to its molar heat
-    ///     capacity at constant volume, and the stored temperature is updated by energy balance. Before blending, the
-    ///     heat
-    ///     capacity of gas already in the voxel is recomputed from the current <see cref="Config" />. A non-finite or
-    ///     nonpositive configured heat capacity uses
-    ///     <see cref="AtmosConfig.DefaultMolarHeatCapacityAtConstantVolume" />. When gas is already present, a non-finite or
-    ///     nonpositive stored temperature contributes prior sensible energy at
+    ///     Injection into a solid or void voxel is silently ignored and does not wake the chunk. The added gas carries
+    ///     sensible internal energy according to its molar heat capacity at constant volume, and the stored
+    ///     temperature is updated by energy balance. Before blending, the heat capacity of gas already in the voxel is
+    ///     recomputed from the current <see cref="Config" />. A non-finite or nonpositive configured heat capacity
+    ///     uses <see cref="AtmosConfig.DefaultMolarHeatCapacityAtConstantVolume" />. When gas is already present, a
+    ///     non-finite or nonpositive stored temperature contributes prior sensible energy at
     ///     <see cref="AtmosConfig.DefaultTemperatureFallback" />. An empty voxel instead adopts the incoming
     ///     temperature.
     /// </remarks>
@@ -870,7 +889,10 @@ public sealed partial class AtmosSimulation : IDisposable
     /// <param name="gasName">The exact, case-sensitive name in the simulation's gas registry.</param>
     /// <param name="moles">The positive, finite amount to add, in moles.</param>
     /// <param name="temperature">The nonnegative, finite incoming temperature, in kelvins.</param>
-    /// <remarks>Solid and void voxels ignore injection. Incoming sensible energy is mixed with the voxel's gas.</remarks>
+    /// <remarks>
+    ///     Resolves <paramref name="gasName" /> and forwards to the gas-ID overload, so solid and void voxels ignore
+    ///     the injection and incoming sensible energy is mixed with the voxel's gas the same way.
+    /// </remarks>
     /// <exception cref="KeyNotFoundException">The gas name or chunk is not registered.</exception>
     /// <exception cref="ArgumentException">The gas name is null or empty.</exception>
     /// <exception cref="ArgumentOutOfRangeException">The voxel address, amount, or temperature is invalid.</exception>
@@ -896,7 +918,10 @@ public sealed partial class AtmosSimulation : IDisposable
     /// <param name="gasName">The exact, case-sensitive name in the simulation's gas registry.</param>
     /// <param name="moles">The positive, finite amount to add, in moles.</param>
     /// <param name="temperature">The nonnegative, finite incoming temperature, in kelvins.</param>
-    /// <remarks>Solid and void voxels ignore injection. Incoming sensible energy is mixed with the voxel's gas.</remarks>
+    /// <remarks>
+    ///     Resolves <paramref name="gasName" /> and forwards to the gas-ID overload, so solid and void voxels ignore
+    ///     the injection and incoming sensible energy is mixed with the voxel's gas the same way.
+    /// </remarks>
     /// <exception cref="KeyNotFoundException">The gas name or chunk is not registered.</exception>
     /// <exception cref="ArgumentException">The gas name is null or empty.</exception>
     /// <exception cref="ArgumentOutOfRangeException">The voxel address, amount, or temperature is invalid.</exception>

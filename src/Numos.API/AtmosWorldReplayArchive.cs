@@ -60,7 +60,8 @@ public sealed class AtmosWorldReplayArchive
     public AtmosWorldStateHash HeadStateHash { get; }
 
     /// <summary>
-    ///     Gets host-defined state that the standard replay file cannot reconstruct.
+    ///     Gets human-readable descriptions of host-defined state that the standard replay file cannot reconstruct.
+    ///     Empty when the archive is portable.
     /// </summary>
     public IReadOnlyList<string> UnsupportedFeatures { get; }
 

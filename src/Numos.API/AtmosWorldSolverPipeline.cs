@@ -10,6 +10,9 @@ namespace Numos.API;
 /// <remarks>
 ///     The enabled stage list is captured before each tick. Pipeline edits made by a running stage take effect on the
 ///     next tick. Solver delegates remain caller-owned.
+///     Stage names, kinds, order, and neighbor-selection keys are checkpointed and must match on restore, so adding,
+///     removing, or resetting stages is rejected while the world or any of its simulations is recording or replaying.
+///     Enabling and disabling stages is allowed then and is recorded.
 /// </remarks>
 public sealed class AtmosWorldSolverPipeline
 {
@@ -44,7 +47,14 @@ public sealed class AtmosWorldSolverPipeline
     /// </summary>
     /// <param name="name">A nonempty name unique within the pipeline.</param>
     /// <param name="solver">The caller-owned callback.</param>
-    /// <exception cref="ArgumentException">The name is empty or duplicated.</exception>
+    /// <remarks>
+    ///     The callback receives an empty <see cref="AtmosWorldSolverContext.Topology" />. Use
+    ///     <see cref="RegisterNeighborSolver" /> when it needs adjacency.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException">An argument is <see langword="null" />.</exception>
+    /// <exception cref="ArgumentException">The name is blank or already registered.</exception>
+    /// <exception cref="InvalidOperationException">The world or one of its simulations is recording or replaying.</exception>
+    /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
     [PublicAPI]
     public void Register(string name, AtmosWorldSolver solver)
     {
@@ -57,7 +67,10 @@ public sealed class AtmosWorldSolverPipeline
     /// <param name="name">A nonempty name unique within the pipeline.</param>
     /// <param name="selection">The Cartesian and explicit adjacency included in the callback's view.</param>
     /// <param name="solver">The caller-owned callback.</param>
-    /// <exception cref="ArgumentException">The name is empty or duplicated.</exception>
+    /// <exception cref="ArgumentNullException">An argument is <see langword="null" />.</exception>
+    /// <exception cref="ArgumentException">The name is blank or already registered.</exception>
+    /// <exception cref="InvalidOperationException">The world or one of its simulations is recording or replaying.</exception>
+    /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
     /// <remarks>
     ///     Use this overload (or <see cref="RegisterNeighborSolverBefore" />/<see cref="RegisterNeighborSolverAfter" />)
     ///     whenever the callback reads <see cref="AtmosWorldSolverContext.Topology" />. A stage registered through
@@ -83,6 +96,11 @@ public sealed class AtmosWorldSolverPipeline
     /// <param name="existingName">The name of the stage that will follow the new stage.</param>
     /// <param name="name">A nonempty name unique within the pipeline.</param>
     /// <param name="solver">The caller-owned callback.</param>
+    /// <exception cref="ArgumentNullException">An argument is <see langword="null" />.</exception>
+    /// <exception cref="ArgumentException">A name is blank, or <paramref name="name" /> is already registered.</exception>
+    /// <exception cref="KeyNotFoundException">No stage named <paramref name="existingName" /> is registered.</exception>
+    /// <exception cref="InvalidOperationException">The world or one of its simulations is recording or replaying.</exception>
+    /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
     [PublicAPI]
     public void RegisterBefore(string existingName, string name, AtmosWorldSolver solver)
     {
@@ -96,6 +114,11 @@ public sealed class AtmosWorldSolverPipeline
     /// <param name="name">A nonempty name unique within the pipeline.</param>
     /// <param name="selection">The Cartesian and explicit adjacency included in the callback's view.</param>
     /// <param name="solver">The caller-owned callback.</param>
+    /// <exception cref="ArgumentNullException">An argument is <see langword="null" />.</exception>
+    /// <exception cref="ArgumentException">A name is blank, or <paramref name="name" /> is already registered.</exception>
+    /// <exception cref="KeyNotFoundException">No stage named <paramref name="existingName" /> is registered.</exception>
+    /// <exception cref="InvalidOperationException">The world or one of its simulations is recording or replaying.</exception>
+    /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
     [PublicAPI]
     public void RegisterNeighborSolverBefore(
         string existingName,
@@ -113,6 +136,11 @@ public sealed class AtmosWorldSolverPipeline
     /// <param name="existingName">The name of the stage that will precede the new stage.</param>
     /// <param name="name">A nonempty name unique within the pipeline.</param>
     /// <param name="solver">The caller-owned callback.</param>
+    /// <exception cref="ArgumentNullException">An argument is <see langword="null" />.</exception>
+    /// <exception cref="ArgumentException">A name is blank, or <paramref name="name" /> is already registered.</exception>
+    /// <exception cref="KeyNotFoundException">No stage named <paramref name="existingName" /> is registered.</exception>
+    /// <exception cref="InvalidOperationException">The world or one of its simulations is recording or replaying.</exception>
+    /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
     [PublicAPI]
     public void RegisterAfter(string existingName, string name, AtmosWorldSolver solver)
     {
@@ -126,6 +154,11 @@ public sealed class AtmosWorldSolverPipeline
     /// <param name="name">A nonempty name unique within the pipeline.</param>
     /// <param name="selection">The Cartesian and explicit adjacency included in the callback's view.</param>
     /// <param name="solver">The caller-owned callback.</param>
+    /// <exception cref="ArgumentNullException">An argument is <see langword="null" />.</exception>
+    /// <exception cref="ArgumentException">A name is blank, or <paramref name="name" /> is already registered.</exception>
+    /// <exception cref="KeyNotFoundException">No stage named <paramref name="existingName" /> is registered.</exception>
+    /// <exception cref="InvalidOperationException">The world or one of its simulations is recording or replaying.</exception>
+    /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
     [PublicAPI]
     public void RegisterNeighborSolverAfter(
         string existingName,
@@ -142,6 +175,14 @@ public sealed class AtmosWorldSolverPipeline
     /// </summary>
     /// <param name="name">The registered stage name.</param>
     /// <returns><see langword="true" /> when a stage was removed.</returns>
+    /// <remarks>
+    ///     Removing a built-in stage drops that physics from every subsequent tick; <see cref="ResetToDefaults" />
+    ///     brings it back.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="name" /> is <see langword="null" />.</exception>
+    /// <exception cref="ArgumentException"><paramref name="name" /> is empty or whitespace.</exception>
+    /// <exception cref="InvalidOperationException">The world or one of its simulations is recording or replaying.</exception>
+    /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
     [PublicAPI]
     public bool Unregister(string name)
     {
@@ -166,6 +207,13 @@ public sealed class AtmosWorldSolverPipeline
     /// <param name="name">The registered stage name.</param>
     /// <param name="enabled">Whether the stage participates in subsequent ticks.</param>
     /// <returns><see langword="true" /> when the named stage exists.</returns>
+    /// <remarks>
+    ///     Unlike registration, this is allowed during recording. An actual change is recorded as an external operation
+    ///     so replay reproduces it at the same position.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="name" /> is <see langword="null" />.</exception>
+    /// <exception cref="ArgumentException"><paramref name="name" /> is empty or whitespace.</exception>
+    /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
     [PublicAPI]
     public bool SetEnabled(string name, bool enabled)
     {
@@ -191,6 +239,8 @@ public sealed class AtmosWorldSolverPipeline
     ///     Restores the built-in stages in their default order and enabled state, discarding any custom
     ///     registrations.
     /// </summary>
+    /// <exception cref="InvalidOperationException">The world or one of its simulations is recording or replaying.</exception>
+    /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
     [PublicAPI]
     public void ResetToDefaults()
     {

@@ -6,6 +6,13 @@ namespace Numos.API;
 /// <summary>
 /// Retains runtime checkpoints and semantic operation history for inspection and branching.
 /// </summary>
+/// <remarks>
+/// A live timeline keeps the simulation recording and samples a checkpoint every
+/// <see cref="CheckpointInterval" /> ticks when the host calls <see cref="ObserveLiveState" />. The first seek stops
+/// recording and switches to inspection, where seeks replay from the nearest retained checkpoint.
+/// <see cref="ReturnToHead" /> resumes live recording at the preserved head; <see cref="SimulateFromHere" /> discards
+/// the recorded future and branches from the inspected state.
+/// </remarks>
 public sealed class AtmosReplayTimeline
 {
     private readonly ReadOnlyCollection<AtmosReplayVerificationPoint> _checkpointView;
@@ -21,7 +28,16 @@ public sealed class AtmosReplayTimeline
     /// </summary>
     /// <param name="simulation">The existing simulation to observe; its lifetime remains owned by the caller.</param>
     /// <param name="checkpointInterval">Minimum completed ticks between runtime checkpoint samples.</param>
+    /// <remarks>
+    /// Starts simulation recording if it is not already running and captures the first checkpoint immediately. The
+    /// timeline assumes it owns that recording from then on.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="simulation" /> is <see langword="null" />.</exception>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="checkpointInterval" /> is zero.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// The simulation cannot record on its own, for example because its world is recording or has several
+    /// simulations or explicit links.
+    /// </exception>
     public AtmosReplayTimeline(AtmosSimulation simulation, ulong checkpointInterval = 50)
         : this(simulation, checkpointInterval, true)
     {
@@ -79,7 +95,8 @@ public sealed class AtmosReplayTimeline
     public AtmosReplayResult? LastReplay { get; private set; }
 
     /// <summary>
-    /// Gets the last seek's hash comparison, or null when no reference exists.
+    /// Gets whether the last seek matched a retained reference hash, or <see langword="null" /> when no verification
+    /// point exists at that position.
     /// </summary>
     public bool? IsVerified { get; private set; }
 
@@ -104,8 +121,21 @@ public sealed class AtmosReplayTimeline
     /// <param name="progress">Optional progress receiver called after indexing advances.</param>
     /// <param name="cancellationToken">Cancellation observed between reconstruction intervals.</param>
     /// <returns>A read-only imported timeline positioned at its initial state.</returns>
+    /// <remarks>
+    ///     The whole archive is replayed once up front to verify both reference hashes and to build scrub checkpoints,
+    ///     so the cost is proportional to the recording length. The imported timeline stays read-only until
+    ///     <see cref="SimulateFromHere" /> branches from it.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException">
+    ///     <paramref name="simulation" /> or <paramref name="archive" /> is <see langword="null" />.
+    /// </exception>
+    /// <exception cref="ArgumentException">The archive's checkpoint is incompatible with <paramref name="simulation" />.</exception>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="checkpointInterval" /> is zero.</exception>
-    /// <exception cref="InvalidOperationException"><paramref name="simulation" /> is recording.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken" /> was canceled.</exception>
+    /// <exception cref="InvalidOperationException">
+    ///     <paramref name="simulation" /> is recording, or its world has several simulations or explicit links and
+    ///     must use <see cref="AtmosWorldReplayTimeline" /> instead.
+    /// </exception>
     /// <exception cref="InvalidDataException">A reference hash does not match the reconstructed state.</exception>
     /// <exception cref="NotSupportedException"><paramref name="archive" /> contains host-defined solver state.</exception>
     public static AtmosReplayTimeline Import(
@@ -168,6 +198,10 @@ public sealed class AtmosReplayTimeline
     /// Captures the complete retained timeline through its live or preserved head.
     /// </summary>
     /// <returns>A detached archive containing one initial checkpoint and the complete retained operation history.</returns>
+    /// <remarks>
+    /// While inspecting, the archive still ends at the preserved head, not at the inspected position. Use
+    /// <see cref="CaptureReplayThroughCurrentPosition" /> to cut it at the cursor.
+    /// </remarks>
     public AtmosReplayArchive CaptureReplay()
     {
         var head = IsInspecting ? _headCheckpoint! : _simulation.CaptureCheckpoint();
@@ -186,6 +220,9 @@ public sealed class AtmosReplayTimeline
     /// <summary>
     ///     Samples a runtime checkpoint after live advancement when the interval has elapsed.
     /// </summary>
+    /// <remarks>
+    ///     Call this after ticking the simulation. It does nothing while inspecting.
+    /// </remarks>
     public void ObserveLiveState()
     {
         if (!IsInspecting && Position.Tick - _checkpoints[^1].Checkpoint.Position.Tick >= CheckpointInterval)
@@ -193,10 +230,14 @@ public sealed class AtmosReplayTimeline
     }
 
     /// <summary>
-    /// Selects a completed-tick boundary before operations stamped after that tick.
+    /// Reconstructs the state right after <paramref name="tick" /> completed, before any operation recorded at that
+    /// boundary.
     /// </summary>
     /// <param name="tick">Completed tick to reconstruct.</param>
     /// <returns>Diagnostics for the reconstruction work.</returns>
+    /// <remarks>
+    /// Enters inspection mode, stopping live recording, if the timeline is not already inspecting.
+    /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="tick" /> lies outside the retained interval.</exception>
     public AtmosReplayResult SeekTick(ulong tick)
     {
@@ -212,6 +253,9 @@ public sealed class AtmosReplayTimeline
     /// </summary>
     /// <param name="target">Exact tick and operation sequence to reconstruct.</param>
     /// <returns>Diagnostics for the reconstruction work.</returns>
+    /// <remarks>
+    /// Enters inspection mode if needed and updates <see cref="LastReplay" /> and <see cref="IsVerified" />.
+    /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="target" /> lies outside the retained interval.</exception>
     public AtmosReplayResult SeekPosition(AtmosTimelinePosition target)
     {
@@ -233,8 +277,12 @@ public sealed class AtmosReplayTimeline
     }
 
     /// <summary>
-    /// Returns to the preserved head. Imported archives remain read-only until explicitly branched.
+    /// Restores the preserved head. Does nothing when the timeline is not inspecting.
     /// </summary>
+    /// <remarks>
+    /// A live timeline resumes recording and leaves inspection mode. An imported timeline stays in read-only
+    /// inspection until <see cref="SimulateFromHere" /> branches from it.
+    /// </remarks>
     public void ReturnToHead()
     {
         if (!IsInspecting)
@@ -255,6 +303,11 @@ public sealed class AtmosReplayTimeline
     /// <summary>
     /// Discards history after the selected position and resumes live recording from that state.
     /// </summary>
+    /// <remarks>
+    /// Operations up to the cursor are kept as a committed prefix, so <see cref="CaptureReplay" /> still starts from
+    /// the original first checkpoint. This also turns an imported timeline into a live one. Does nothing when the
+    /// timeline is not inspecting.
+    /// </remarks>
     public void SimulateFromHere()
     {
         if (!IsInspecting)

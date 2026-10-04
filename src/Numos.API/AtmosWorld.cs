@@ -398,9 +398,11 @@ public sealed partial class AtmosWorld : IDisposable
     ///     The returned handle can inspect or remove the pending batch before it becomes active.
     /// </remarks>
     /// <exception cref="ArgumentException">
-    ///     The batch is empty, contains an invalid endpoint, a self-edge, unsupported flags, a duplicate edge, or
-    ///     references a simulation or cell outside this world.
+    ///     The batch is empty, or an edge has an endpoint outside this world, connects a cell to itself or to one of
+    ///     its ordinary Cartesian neighbors, has <see cref="ExplicitLinkFlags.None" />, or duplicates an edge already
+    ///     in this batch or in another link set that is active or pending activation.
     /// </exception>
+    /// <exception cref="InvalidOperationException">Called from a solver callback.</exception>
     /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
     [PublicAPI]
     public ExplicitLinkSetHandle CreateLinks(ReadOnlySpan<ExplicitLinkDefinition> links)
@@ -471,8 +473,14 @@ public sealed partial class AtmosWorld : IDisposable
     ///     Queues removal of a complete link set at the next world tick boundary.
     /// </summary>
     /// <param name="handle">The current generational handle returned by <see cref="CreateLinks" />.</param>
+    /// <remarks>
+    ///     The edges stop being reserved immediately, so the same physical edges can be queued again in a new link set
+    ///     before the next tick.
+    /// </remarks>
     /// <exception cref="ArgumentException">The handle is invalid or stale.</exception>
-    /// <exception cref="InvalidOperationException">Removal of this set is already pending.</exception>
+    /// <exception cref="InvalidOperationException">
+    ///     Removal of this set is already pending, or this is called from a solver callback.
+    /// </exception>
     /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
     [PublicAPI]
     public void DestroyLinks(ExplicitLinkSetHandle handle)
@@ -487,16 +495,22 @@ public sealed partial class AtmosWorld : IDisposable
     }
 
     /// <summary>
-    ///     Creates a one-edge portal in the world's explicit topology.
+    ///     Queues a one-edge portal for activation at the next world tick.
     /// </summary>
     /// <param name="first">One portal endpoint.</param>
     /// <param name="second">The other portal endpoint.</param>
     /// <param name="flags">The physical interactions permitted through the portal.</param>
     /// <returns>A portal handle that removes the underlying link as one unit.</returns>
+    /// <remarks>
+    ///     Equivalent to <see cref="CreateLinks" /> with a single definition, except that the link set is tagged as a
+    ///     portal in snapshots and recordings.
+    /// </remarks>
     /// <exception cref="ArgumentException">
-    ///     An endpoint is invalid, both endpoints identify the same cell, the flags are unsupported, or the physical
-    ///     edge is already registered.
+    ///     An endpoint is outside this world, both endpoints identify the same cell or ordinary Cartesian neighbors,
+    ///     <paramref name="flags" /> is <see cref="ExplicitLinkFlags.None" />, or the physical edge is already
+    ///     registered.
     /// </exception>
+    /// <exception cref="InvalidOperationException">Called from a solver callback.</exception>
     /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
     [PublicAPI]
     public AtmosPortalHandle CreatePortal(
@@ -514,7 +528,9 @@ public sealed partial class AtmosWorld : IDisposable
     /// </summary>
     /// <param name="portal">The portal to remove.</param>
     /// <exception cref="ArgumentException">The underlying link-set handle is invalid or stale.</exception>
-    /// <exception cref="InvalidOperationException">Removal of this portal is already pending.</exception>
+    /// <exception cref="InvalidOperationException">
+    ///     Removal of this portal is already pending, or this is called from a solver callback.
+    /// </exception>
     /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
     [PublicAPI]
     public void DestroyPortal(AtmosPortalHandle portal)
@@ -523,16 +539,21 @@ public sealed partial class AtmosWorld : IDisposable
     }
 
     /// <summary>
-    ///     Creates a dock whose corresponding surface cells are supplied as one link batch.
+    ///     Queues a dock, supplied as one batch of corresponding surface cells, for activation at the next world tick.
     /// </summary>
     /// <param name="surfaceLinks">
     ///     Corresponding cell pairs across the dock. Cost is proportional to this interface, not either grid's size.
     /// </param>
     /// <returns>A dock handle that owns every generated edge.</returns>
+    /// <remarks>
+    ///     Validation matches <see cref="CreateLinks" />; the link set is tagged as a dock in snapshots and recordings.
+    /// </remarks>
     /// <exception cref="ArgumentException">
-    ///     The surface is empty, contains an invalid endpoint, a self-edge, unsupported flags, a duplicate edge, or
-    ///     references a simulation or cell outside this world.
+    ///     The surface is empty, or an edge has an endpoint outside this world, connects a cell to itself or to one
+    ///     of its ordinary Cartesian neighbors, has <see cref="ExplicitLinkFlags.None" />, or duplicates an edge
+    ///     already in this batch or in another link set that is active or pending activation.
     /// </exception>
+    /// <exception cref="InvalidOperationException">Called from a solver callback.</exception>
     /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
     [PublicAPI]
     public AtmosDockHandle CreateDock(ReadOnlySpan<ExplicitLinkDefinition> surfaceLinks)
@@ -545,7 +566,9 @@ public sealed partial class AtmosWorld : IDisposable
     /// </summary>
     /// <param name="dock">The dock to remove.</param>
     /// <exception cref="ArgumentException">The underlying link-set handle is invalid or stale.</exception>
-    /// <exception cref="InvalidOperationException">Removal of this dock is already pending.</exception>
+    /// <exception cref="InvalidOperationException">
+    ///     Removal of this dock is already pending, or this is called from a solver callback.
+    /// </exception>
     /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
     [PublicAPI]
     public void DestroyDock(AtmosDockHandle dock)
