@@ -549,8 +549,7 @@ public sealed class AtmosWorldTests
             second.GetCellRef(secondChunk, 0),
             ExplicitLinkFlags.ThermalTransport);
 
-        // Disabling intra-chunk thermodynamics no longer disables portal thermal transport: the two stages are
-        // independent now, unlike the pre-split fused domain.
+        // Portal thermal transport is its own stage, so disabling intra-chunk thermodynamics must leave it running.
         world.Solvers.SetEnabled(AtmosBuiltInSolvers.Thermodynamics, false);
 
         world.Tick();

@@ -46,7 +46,7 @@ public class ChunkMathBenchmarks
     }
 
     /// <summary>
-    ///     Runs the original scalar traversal over active voxels and gas channels.
+    ///     Runs a plain scalar traversal over active voxels and gas channels as the baseline.
     /// </summary>
     [Benchmark(Baseline = true)]
     public void Scalar()

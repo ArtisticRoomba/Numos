@@ -60,7 +60,7 @@ public static class SolverBenchmarks
         }
 
         /// <summary>
-        ///     Measures intra-chunk transport followed by serial cross-chunk transport.
+        ///     Measures intra-chunk transport followed by cross-chunk boundary flow.
         /// </summary>
         /// <remarks>
         ///     Boundary flow consumes transient events, so its repeatable benchmark includes advection as its producer.

@@ -82,8 +82,8 @@ public sealed class AtmosWorldPipelineTests
     {
         using var world = CreateTransportWorld(out var source, out var target);
 
-        // Advection and explicit-gas-transport are independent stages now: disabling intra-chunk advection must not
-        // silently take portal transport down with it, unlike the pre-split fused domain.
+        // Advection and explicit-gas-transport are independent stages: disabling intra-chunk advection must not
+        // silently take portal transport down with it.
         world.Solvers.SetEnabled(AtmosBuiltInSolvers.Advection, false);
 
         world.Tick();

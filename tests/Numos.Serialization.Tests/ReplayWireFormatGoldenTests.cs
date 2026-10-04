@@ -24,9 +24,8 @@ namespace Numos.Serialization.Tests;
 ///         default) and pasting its two output lines in.
 ///     </para>
 ///     <para>
-///         During the opcode source-generation refactor, a failure here means the generated codec disagrees with this
-///         pinned layout — that is a regression to fix, not a signal to regenerate. Only regenerate alongside an
-///         intentional format change.
+///         Any other failure, such as one after a codec refactor, means the codec disagrees with the pinned layout.
+///         That is a regression to fix, not a reason to regenerate.
 ///     </para>
 ///     <para>
 ///         The scenarios below tick the simulation/world so link and simulation lifecycle transitions stay valid,
@@ -40,8 +39,8 @@ namespace Numos.Serialization.Tests;
 [TestFixture]
 public sealed class ReplayWireFormatGoldenTests
 {
-    // Captured by running PrintGoldenBytes against the serializer implementation as of the AtmosKernel.Replay.cs
-    // switch-based codec (pre-source-generation refactor). Do not hand-edit; regenerate deliberately only.
+    // Captured with PrintGoldenBytes from the hand-written switch-based codec that preceded the generated one, so
+    // these bytes also hold the generated codec to the original layout. Do not hand-edit.
     private const string GoldenSimReplayBase64 =
         "TlVNT1MNChoBAAEAAwAAAAEAAACNAAAAAAAAAA4AAABHb2xkZW4gZml4dHVyZQCAtff1f58IDAAAAG51bW9zLWdvbGRlbgwAAAAxLjAuMC1nb2xkZW4MAAAAMS4wLjAtZ29sZGVuAQ4AAABwaGFzZTAtZml4dHVyZQAAAAAAAAAAAAAAAAAAAAACAAAAAAAAAA0AAAAAAAAADQAAAAAAAAAAAAAAAAAAAAIAAQCKAQAAAAAAAAUAAAADAAAAZUU1/gKyPXwDAAAAAgAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPAL1dD5e6YbAgAAAAAAAAANAAAAAAAAAFKbS5YIhny+M5OSQzOTkkMMSqZBAACAP4DmxUcK16M8zcwsQAAAAD4AAIA/BwAAAAAAYECamRk+AAAAPwrXIz4AAHBBFAAAAAIAAAABAwAAAEFpcgxKpkEAAAAAAAAAAAAAAAAACtejPAEFAAAAVG94aW4MSqZBAAAAAAAAAAAAAAAAAM3MTD0AAAAABwAAAAkAAABhZHZlY3Rpb24AAQAWAAAAZXhwbGljaXQtZ2FzLXRyYW5zcG9ydAABAA0AAABib3VuZGFyeS1mbG93AAEADgAAAHRoZXJtb2R5bmFtaWNzAAEAGgAAAGV4cGxpY2l0LXRoZXJtYWwtdHJhbnNwb3J0AAEAEAAAAHRoZXJtYWwtYm91bmRhcnkAAQANAAAAZ2FzLXJlYWN0aW9ucwABAAAAAAADAAEAnAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAAAAAAAANAAAAAAAAAA0AAAAAAAAAAAAAAAEAAAAAAAAAAgAMAAAAAQAAAAIAAAADAAAAAAAAAAAAAAACAAAAAAAAAAQAEAAAAAEAAAACAAAAAwAAAAQAAAAAAAAAAAAAAAMAAAAAAAAABQAQAAAAAQAAAAIAAAADAAAABQAAAAAAAAAAAAAABAAAAAAAAAAGABIAAAABAAAAAgAAAAMAAAAEAAYAAAAAAAAAAAAAAAUAAAAAAAAACAAaAAAAAQAAAAIAAAADAAAABQABAAAAAAAAQACAnUMAAAAAAAAAAAYAAAAAAAAACQAMAAAAAQAAAAIAAAADAAAAAAAAAAAAAAAHAAAAAAAAAAoADAAAAAEAAAACAAAAAwAAAAAAAAAAAAAACAAAAAAAAAALAA4AAAAJAAAAYWR2ZWN0aW9uAAAAAAAAAAAACQAAAAAAAAABAIQAAAAzk5JDM5OSQwxKpkEAAIA/gObFRwrXozzNzCxAAAAAPgAAgD8IAAAAAABgQJqZGT4AAAA/CtcjPgAAcEEUAAAAAgAAAAEDAAAAQWlyDEqmQQAAAAAAAAAAAAAAAAAK16M8AQUAAABUb3hpbgxKpkEAAAAAAAAAAAAAAAAAzcxMPQAAAAAAAAAAAAAAAAoAAAAAAAAADAAuAAAAAQAAAAIAAAADAAAAAgAAAKVDXXyrRAxKJkECAAAAAQAAAAAAAAAAAAAAAAAAPwAAAAAAAAAACwAAAAAAAAACAAwAAAAEAAAABQAAAAYAAAAAAAAAAAAAAAwAAAAAAAAAAwAMAAAABAAAAAUAAAAGAAAAAQAAAAAAAAANAAAAAAAAAAcAEgAAAAEAAAACAAAAAwAAAAEAAICgQw==";
 
@@ -124,8 +123,7 @@ public sealed class ReplayWireFormatGoldenTests
         // Chunk dimensions, chunk-grid positions, voxel indices, gas IDs, and classification IDs are all chosen to be
         // nonzero and mutually distinct within each operation's field list. A codec that silently swaps two
         // same-record fields of matching width (e.g. LocalVoxelIndex and GasId) is only invisible in the resulting
-        // bytes when the swapped values are equal — most easily when both happen to be zero. See the golden-byte gap
-        // this file's remarks describe.
+        // bytes when the swapped values are equal, most easily when both happen to be zero.
         var config = new AtmosConfig
         {
             GasRegistry =
@@ -172,10 +170,9 @@ public sealed class ReplayWireFormatGoldenTests
 
     private static NumosWorldReplayDocument BuildGoldenWorldReplayDocument()
     {
-        // As in BuildGoldenSimReplayDocument: chunk dimensions, chunk-grid positions, and voxel indices are chosen
-        // nonzero and mutually distinct (rather than the both-default (1,1,1)/(0,0,0) shape a minimal scenario would
-        // use) so a codec bug that swaps two same-width fields changes the resulting bytes instead of hiding behind a
-        // coincidental zero.
+        // As in BuildGoldenSimReplayDocument, chunk dimensions, chunk-grid positions, and voxel indices are nonzero
+        // and mutually distinct so a codec that swaps two same-width fields changes the bytes instead of hiding
+        // behind a coincidental zero.
         var config = new AtmosConfig
         {
             GasRegistry =

@@ -125,9 +125,8 @@ public sealed class ReplayCodecGeneratorTests
 
         var compilation = RunGenerator(out var diagnostics, DomainSource, SerializerStubSource, registration);
 
-        // Now a plain C# compiler error (CS0592, "attribute is not valid on this declaration type"), not a
-        // generator diagnostic -- the AttributeUsage restriction makes the wrong-placement mistake impossible to
-        // reach generator logic at all, rather than needing the generator to detect and report it itself.
+        // A plain C# compiler error (CS0592, "attribute is not valid on this declaration type"), not a generator
+        // diagnostic: AttributeUsage rejects the wrong placement before generator logic ever sees it.
         Assert.That(diagnostics, Is.Empty);
         Assert.That(compilation.GetDiagnostics().Select(static d => d.Id), Does.Contain("CS0592"));
     }
@@ -152,8 +151,8 @@ public sealed class ReplayCodecGeneratorTests
 
         Assert.That(diagnostics, Is.Empty);
 
-        // The strongest available check: the generated switch statements must type-check against the domain types
-        // and the serializer stub, not merely look plausible as text.
+        // The generated switch statements must type-check against the domain types and the serializer stub, not
+        // merely look plausible as text.
         var compileErrors = compilation.GetDiagnostics().Where(static d => d.Severity == DiagnosticSeverity.Error).ToList();
         Assert.That(compileErrors, Is.Empty, string.Join("\n", compileErrors));
 

@@ -10,13 +10,15 @@ public sealed class BoundaryFlowParallelDeterminismTests
     private const ulong X64ExpectedDigest = 15020874777508700793UL;
 
     /// <summary>
-    ///     The golden digest above was captured once by diffing this exact scenario's
-    ///     <c>ComputeStateHash()</c> against the pre-refactor sequential <c>BoundaryFlowSolver</c> (the version at
-    ///     the commit that introduced <c>PendingTransferBuffer</c>) at both the default processor count and with
-    ///     <c>DOTNET_PROCESSOR_COUNT=2</c>. All three runs produced this identical digest, which is the intended
-    ///     property of the refactor: parallel boundary-flow computation is bit-identical to the sequential
-    ///     algorithm it replaced, not merely stable across repeated parallel runs.
+    ///     Requires repeated runs of this scenario to produce one digest, which on x64 must also equal
+    ///     <see cref="X64ExpectedDigest" />.
     /// </summary>
+    /// <remarks>
+    ///     The x64 digest came from the fully sequential <c>BoundaryFlowSolver</c> that predates
+    ///     <c>PendingTransferBuffer</c>, and the parallel solver reproduced it at both the default processor count and
+    ///     <c>DOTNET_PROCESSOR_COUNT=2</c>. Matching it shows parallel boundary flow is bit-identical to the sequential
+    ///     algorithm, not merely stable across repeated parallel runs.
+    /// </remarks>
     [Test]
     [Explicit(
         "Verifies four runs at the current processor count produce one deterministic digest that also matches the " +

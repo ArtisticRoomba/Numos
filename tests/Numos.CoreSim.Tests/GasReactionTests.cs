@@ -327,10 +327,10 @@ public class GasReactionTests
 
         Assert.That(totalReactionSum > 0);
 
-        // Golden baseline captured from the current implementation: pins the exact numeric outcome of
-        // this deterministic random scenario (fixed seed, sequential per-voxel writeback) so a change to
-        // the material-limiter or the reaction-application math that alters results -- not just one that
-        // introduces NaNs -- shows up here, even if the new result still "looks" plausible.
+        // Golden baseline: pins the exact numeric outcome of this deterministic random scenario (fixed seed,
+        // sequential per-voxel writeback) so a change to the material-limiter or the reaction-application math that
+        // alters results -- not just one that introduces NaNs -- shows up here, even if the new result still "looks"
+        // plausible.
         Assert.That(totalReactionSum, Is.EqualTo(54699.562f));
 
         float[] expectedGasSums =
