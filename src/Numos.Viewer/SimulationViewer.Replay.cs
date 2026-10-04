@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Numerics;
 using ImGuiNET;
 using Numos.API;
@@ -9,6 +10,24 @@ namespace Numos.Viewer;
 
 public partial class SimulationViewer
 {
+    private const ImGuiTableFlags ReplayRecordTableFlags =
+        ImGuiTableFlags.Borders |
+        ImGuiTableFlags.RowBg |
+        ImGuiTableFlags.SizingFixedFit |
+        ImGuiTableFlags.NoSavedSettings;
+
+    /// <summary>
+    ///     Track legend entries in display order. Lower <c>Priority</c> values are kept first when the header is narrow.
+    /// </summary>
+    private readonly static (TimelineLegendMarker Marker, string Label, int Priority)[] TimelineLegendEntries =
+    [
+        (TimelineLegendMarker.Checkpoint, "Checkpoint", 1),
+        (TimelineLegendMarker.Operation, "Operation", 2),
+        (TimelineLegendMarker.Restorable, "Restorable", 4),
+        (TimelineLegendMarker.Playhead, "Selected tick", 3),
+        (TimelineLegendMarker.Divergence, "Divergent", 0)
+    ];
+
     private bool _keepTimelinePlayheadCentered;
     private int? _pendingScrubTick;
     private bool _refreshingReplay;
@@ -46,6 +65,7 @@ public partial class SimulationViewer
 
         ImGui.SeparatorText("Transport");
         DrawTimelineTransport(timeline);
+        ImGuiExtensions.Feedback(_timelineError, true);
 
         ImGui.SeparatorText("Range");
         int selectedTick = checked((int)timeline.Position.Tick);
@@ -155,12 +175,15 @@ public partial class SimulationViewer
         DrawTimelinePositionField("SELECTED", timeline.Position);
         ImGui.TableNextColumn();
         ImGui.TextDisabled("MODE");
-        ImGui.TextColored(
-            timeline.IsInspecting ? ViewerTheme.Caution : ViewerTheme.Running,
-            timeline.IsInspecting ? "Inspecting history" : "Live recording");
-
         if (timeline.IsInspecting)
+        {
+            ImGui.TextUnformatted("Inspecting history");
             ImGui.TextDisabled("Read-only");
+        }
+        else
+        {
+            ImGui.TextColored(ViewerTheme.Running, "Live recording");
+        }
 
         ImGui.EndTable();
     }
@@ -170,19 +193,34 @@ public partial class SimulationViewer
         var branches = _replayBranches!;
         var selected = branches.SelectedBranch;
         ImGui.SetNextItemWidth(190f);
-        if (ImGui.BeginCombo("Selected branch", $"{selected.Name}  ·  head {selected.Head.Tick}"))
+        if (ImGui.BeginCombo("Selected branch", selected.Name))
         {
-            foreach (var branch in branches.Branches)
+            IReadOnlyList<ReplayBranchInfo> branchList = branches.Branches;
+            float nameWidth = 0f;
+            float forkWidth = 0f;
+            foreach (var branch in branchList)
             {
-                if (ImGui.Selectable(
-                        $"{branch.Name}  ·  fork {branch.Fork.Tick}  ·  head {branch.Head.Tick}##branch-{branch.Id}",
-                        branch.IsSelected))
-                {
-                    SelectTimelineBranch(branch.Id);
-                }
+                nameWidth = MathF.Max(nameWidth, ImGui.CalcTextSize(branch.Name).X);
+                forkWidth = MathF.Max(forkWidth, ImGui.CalcTextSize(FormatForkTick(branch)).X);
+            }
+
+            float columnGap = ImGui.GetStyle().ItemSpacing.X * 3f;
+            foreach (var branch in branchList)
+            {
+                float rowStartX = ImGui.GetCursorPosX();
+                bool clicked = ImGui.Selectable($"{branch.Name}##branch-{branch.Id}", branch.IsSelected);
 
                 if (branch.IsSelected)
                     ImGui.SetItemDefaultFocus();
+
+                float forkX = rowStartX + nameWidth + columnGap;
+                ImGui.SameLine(forkX);
+                ImGui.TextDisabled(FormatForkTick(branch));
+                ImGui.SameLine(forkX + forkWidth + columnGap);
+                ImGui.TextDisabled($"Head tick {branch.Head.Tick}");
+
+                if (clicked)
+                    SelectTimelineBranch(branch.Id);
             }
 
             ImGui.EndCombo();
@@ -202,6 +240,11 @@ public partial class SimulationViewer
 
         ImGui.EndDisabled();
         ImGuiExtensions.QuestionTooltip("Resumes live recording at the selected branch head.");
+    }
+
+    private static string FormatForkTick(ReplayBranchInfo branch)
+    {
+        return $"Fork tick {branch.Fork.Tick}";
     }
 
     private static void DrawTimelinePositionField(string label, AtmosTimelinePosition position)
@@ -248,11 +291,7 @@ public partial class SimulationViewer
         ImGui.SameLine();
         ImGui.BeginDisabled(isLive || atHead);
         if (ImGui.Button("Return to Head", new Vector2(120f, 0f)))
-        {
-            timeline.ReturnToHead();
-            RefreshReplayPresentation();
-            _isPaused = true;
-        }
+            ReturnTimelineToHead();
 
         ImGui.EndDisabled();
     }
@@ -267,33 +306,28 @@ public partial class SimulationViewer
                     ImGuiTableFlags.Borders | ImGuiTableFlags.SizingStretchSame))
             {
                 ImGui.TableNextColumn();
-                ImGuiExtensions.StatusField(
-                    "CHECKPOINT",
-                    $"Tick {replay.Checkpoint.Tick} · operation #{replay.Checkpoint.OperationSequence}");
-
+                DrawTimelinePositionField("CHECKPOINT", replay.Checkpoint);
                 ImGui.TableNextColumn();
-                ImGuiExtensions.StatusField("RE-SIMULATED", $"{replay.SimulatedTicks} ticks");
+                ImGuiExtensions.StatusField(
+                    "RE-SIMULATED",
+                    QuantityFormat.Ticks(checked((long)replay.SimulatedTicks)));
+
                 ImGui.TableNextColumn();
                 ImGuiExtensions.StatusField("ELAPSED", $"{replay.Elapsed.TotalMilliseconds:F2} ms");
                 ImGui.EndTable();
             }
         }
 
-        string verification = timeline.IsVerified switch
+        (string state, string explanation, var stateColor) = timeline.IsVerified switch
         {
-            true => "Verified: replay matches the reference hash.",
-            false => "Divergent: replay does not match the reference hash.",
-            null => "Unverified: no reference hash is available."
+            true => ("Verified", "Replay matches the reference hash.", ViewerTheme.Running),
+            false => ("Divergent", "Replay does not match the reference hash.", ViewerTheme.ReplayDivergence),
+            null => ("Unverified", "No reference hash is available.", ViewerTheme.SecondaryText)
         };
 
-        var verificationColor = timeline.IsVerified switch
-        {
-            true => ViewerTheme.Running,
-            false => ViewerTheme.Error,
-            null => ViewerTheme.SecondaryText
-        };
-
-        ImGui.TextColored(verificationColor, verification);
+        ImGui.TextDisabled("VERIFICATION");
+        ImGui.TextColored(stateColor, state);
+        ImGui.TextDisabled(explanation);
     }
 
     private void DrawTimelineOperations(
@@ -356,10 +390,7 @@ public partial class SimulationViewer
 
             ImGui.TextWrapped(selected.Operation.ToString());
             if (selected.Operation is AtmosWorldSimulationOperation { Operation: SetVoxelMixtureOperation mixture })
-            {
-                foreach (var gas in mixture.Gases)
-                    ImGui.TextDisabled($"Gas {gas.GasId}: {gas.Moles:R} mol");
-            }
+                DrawRecordedMixture(mixture);
 
             if (selected.Operation is SetAtmosWorldConfigOperation config)
                 DrawRecordedConfiguration(config.Config);
@@ -387,51 +418,177 @@ public partial class SimulationViewer
         return order;
     }
 
+    private void DrawRecordedMixture(SetVoxelMixtureOperation mixture)
+    {
+        if (mixture.Gases.Count == 0)
+        {
+            ImGui.TextDisabled("The recorded mixture is empty.");
+            return;
+        }
+
+        using var table = ImGuiExtensions.BeginTable("RecordedMixture##replay", 2, ReplayRecordTableFlags);
+        if (!table.IsVisible)
+            return;
+
+        ImGui.TableSetupColumn("Gas");
+        ImGui.TableSetupColumn("Amount");
+        ImGui.TableHeadersRow();
+        foreach (var gas in mixture.Gases)
+        {
+            ImGui.TableNextRow();
+            ImGui.TableSetColumnIndex(0);
+            ImGui.TextUnformatted(FormatGas(gas.GasId));
+            ImGui.TableSetColumnIndex(1);
+            ImGuiExtensions.TextRightAligned(QuantityFormat.Amount(gas.Moles));
+
+            // The cell is rounded for reading; replay compares the exact recorded value.
+            if (ImGui.IsItemHovered(ImGuiHoveredFlags.ForTooltip))
+                ImGui.SetTooltip($"Recorded amount {FormatRecordedFloat(gas.Moles)} mol");
+        }
+    }
+
     private static void DrawRecordedConfiguration(AtmosConfigSnapshot config)
     {
         if (!ImGui.TreeNode("Applied configuration")) return;
 
-        ImGui.TextUnformatted($"GlobalTemperature: {config.GlobalTemperature}");
-        ImGui.TextUnformatted($"DefaultTemperatureFallback: {config.DefaultTemperatureFallback}");
-        ImGui.TextUnformatted($"DefaultMolarHeatCapacityAtConstantVolume: {config.DefaultMolarHeatCapacityAtConstantVolume}");
-        ImGui.TextUnformatted($"VoxelVolume: {config.VoxelVolume}");
-        ImGui.TextUnformatted($"SaturationReferencePressure: {config.SaturationReferencePressure}");
-        ImGui.TextUnformatted($"DefaultDiffusionCoefficient: {config.DefaultDiffusionCoefficient}");
-        ImGui.TextUnformatted($"SpaceTemperature: {config.SpaceTemperature}");
-        ImGui.TextUnformatted($"BulkFlowCoefficient: {config.BulkFlowCoefficient}");
-        ImGui.TextUnformatted($"VacuumThreshold: {config.VacuumThreshold}");
-        ImGui.TextUnformatted($"SleepThreshold: {config.SleepThreshold}");
-        ImGui.TextUnformatted($"SleepEpsilon: {config.SleepEpsilon}%");
-        ImGui.TextUnformatted($"ThermalConductance: {config.ThermalConductance}");
-        ImGui.TextUnformatted($"CondensationRateFactor: {config.CondensationRateFactor}");
-        ImGui.TextUnformatted($"MaxPressureTransferFractionPerNeighbor: {config.MaxPressureTransferFractionPerNeighbor}");
-        ImGui.TextUnformatted($"AccumulatorWakeThreshold: {config.AccumulatorWakeThreshold}");
-        ImGui.TextUnformatted($"AccumulatorMaxAliveTicks: {config.AccumulatorMaxAliveTicks}");
-        for (int id = 0; id < config.GasRegistry.Count; id++)
+        (AtmosConfigFieldInfo Field, string Value)[] settings =
+        [
+            (AtmosConfigFields.GlobalTemperature, FormatRecordedFloat(config.GlobalTemperature)),
+            (AtmosConfigFields.DefaultTemperatureFallback, FormatRecordedFloat(config.DefaultTemperatureFallback)),
+            (AtmosConfigFields.DefaultMolarHeatCapacityAtConstantVolume,
+                FormatRecordedFloat(config.DefaultMolarHeatCapacityAtConstantVolume)),
+            (AtmosConfigFields.VoxelVolume, FormatRecordedFloat(config.VoxelVolume)),
+            (AtmosConfigFields.SaturationReferencePressure, FormatRecordedPressure(config.SaturationReferencePressure)),
+            (AtmosConfigFields.DefaultDiffusionCoefficient, FormatRecordedFloat(config.DefaultDiffusionCoefficient)),
+            (AtmosConfigFields.SpaceTemperature, FormatRecordedFloat(config.SpaceTemperature)),
+            (AtmosConfigFields.BulkFlowCoefficient, FormatRecordedFloat(config.BulkFlowCoefficient)),
+            (AtmosConfigFields.VacuumThreshold, FormatRecordedPressure(config.VacuumThreshold)),
+            (AtmosConfigFields.SleepThreshold, config.SleepThreshold.ToString(CultureInfo.InvariantCulture)),
+            (AtmosConfigFields.SleepEpsilon, FormatRecordedFloat(config.SleepEpsilon)),
+            (AtmosConfigFields.ThermalConductance, FormatRecordedFloat(config.ThermalConductance)),
+            (AtmosConfigFields.CondensationRateFactor, FormatRecordedFloat(config.CondensationRateFactor)),
+            (AtmosConfigFields.MaxPressureTransferFractionPerNeighbor,
+                FormatRecordedFloat(config.MaxPressureTransferFractionPerNeighbor)),
+            (AtmosConfigFields.AccumulatorWakeThreshold, FormatRecordedPressure(config.AccumulatorWakeThreshold)),
+            (AtmosConfigFields.AccumulatorMaxAliveTicks,
+                config.AccumulatorMaxAliveTicks.ToString(CultureInfo.InvariantCulture))
+        ];
+
+        using (var configTable = ImGuiExtensions.BeginTable("RecordedConfig##replay", 3, ReplayRecordTableFlags))
         {
-            var gas = config.GasRegistry[id];
-            ImGui.TextWrapped(
-                $"Gas {id}: {gas.Name}, Cv={gas.MolarHeatCapacityAtConstantVolume:R}, diffusion={gas.DiffusionCoefficient:R}, boiling={gas.BoilingPoint:R}, condensation={gas.CondensationEnabled}, latent heat={gas.MolarEnthalpyOfVaporization:R}, liquid={gas.LiquidId}");
+            if (configTable.IsVisible)
+            {
+                ImGui.TableSetupColumn("Setting");
+                ImGui.TableSetupColumn("Value");
+                ImGui.TableSetupColumn("Unit");
+                ImGui.TableHeadersRow();
+                foreach ((var field, string value) in settings)
+                {
+                    ImGui.TableNextRow();
+                    ImGui.TableSetColumnIndex(0);
+                    ImGui.TextUnformatted(field.Label);
+                    ImGui.TableSetColumnIndex(1);
+                    ImGuiExtensions.TextRightAligned(value);
+                    ImGui.TableSetColumnIndex(2);
+                    ImGui.TextDisabled(field.Unit);
+                }
+            }
         }
 
-        ImGui.Text($"Solver configurations: {config.SolverConfigurations.Count}");
+        ImGui.TextDisabled("Gas registry");
+        if (config.GasRegistry.Count == 0)
+        {
+            ImGui.TextDisabled("No gases are registered.");
+        }
+        else
+        {
+            using var registryTable = ImGuiExtensions.BeginTable(
+                "RecordedGasRegistry##replay",
+                8,
+                ReplayRecordTableFlags);
+
+            if (registryTable.IsVisible)
+            {
+                ImGui.TableSetupColumn("ID");
+                ImGui.TableSetupColumn("Name");
+                ImGui.TableSetupColumn("Cv (J/(mol·K))");
+                ImGui.TableSetupColumn("Diffusion");
+                ImGui.TableSetupColumn("Boiling point (K)");
+                ImGui.TableSetupColumn("Condensation");
+                ImGui.TableSetupColumn("Latent heat (J/mol)");
+                ImGui.TableSetupColumn("Liquid ID");
+                ImGui.TableHeadersRow();
+                for (int id = 0; id < config.GasRegistry.Count; id++)
+                {
+                    var gas = config.GasRegistry[id];
+                    ImGui.TableNextRow();
+                    ImGui.TableSetColumnIndex(0);
+                    ImGuiExtensions.TextRightAligned(id.ToString(CultureInfo.InvariantCulture));
+                    ImGui.TableSetColumnIndex(1);
+                    ImGui.TextUnformatted(gas.Name);
+                    ImGui.TableSetColumnIndex(2);
+                    ImGuiExtensions.TextRightAligned(FormatRecordedFloat(gas.MolarHeatCapacityAtConstantVolume));
+                    ImGui.TableSetColumnIndex(3);
+                    ImGuiExtensions.TextRightAligned(FormatRecordedFloat(gas.DiffusionCoefficient));
+                    ImGui.TableSetColumnIndex(4);
+                    ImGuiExtensions.TextRightAligned(FormatRecordedFloat(gas.BoilingPoint));
+                    ImGui.TableSetColumnIndex(5);
+                    ImGui.TextUnformatted(gas.CondensationEnabled ? "Yes" : "No");
+                    ImGui.TableSetColumnIndex(6);
+                    ImGuiExtensions.TextRightAligned(FormatRecordedFloat(gas.MolarEnthalpyOfVaporization));
+                    ImGui.TableSetColumnIndex(7);
+                    ImGuiExtensions.TextRightAligned(gas.LiquidId.ToString(CultureInfo.InvariantCulture));
+                }
+            }
+        }
+
+        using (var solverTable = ImGuiExtensions.BeginDefinitionTable("RecordedSolvers##replay"))
+        {
+            if (solverTable.IsVisible)
+            {
+                ImGuiExtensions.DefinitionRow(
+                    "Solver configurations",
+                    config.SolverConfigurations.Count.ToString(CultureInfo.InvariantCulture));
+            }
+        }
+
         ImGui.TreePop();
+    }
+
+    /// <summary>
+    ///     Shortest text that parses back to the same float, for views of recorded state where rounding could hide a
+    ///     mismatch.
+    /// </summary>
+    private static string FormatRecordedPressure(float pascals)
+    {
+        return (pascals * (double)QuantityFormat.KilopascalsPerPascal).ToString("R", CultureInfo.InvariantCulture);
+    }
+
+    private static string FormatRecordedFloat(float value)
+    {
+        return value.ToString("R", CultureInfo.InvariantCulture);
     }
 
     private void DrawTimelineTrack(AtmosWorldReplayTimeline timeline, IReadOnlyList<AtmosWorldRecordedOperation> operations)
     {
         var origin = ImGui.GetCursorScreenPos();
         float width = Math.Max(1f, ImGui.GetContentRegionAvail().X);
-        const float height = 88f;
-        const float plotBottom = 58f;
+        float lineHeight = ImGui.GetTextLineHeight();
+
+        // Bands from the top: header and legend, checkpoint markers, operation ticks, the restorable bar on the
+        // plot baseline, then two axis label lines. The hit tests below use the same bands.
+        float markerTop = MathF.Max(18f, lineHeight + 5f);
+        float plotBottom = markerTop + 40f;
+        float axisTop = plotBottom + 5f;
+        float height = axisTop + lineHeight * 2f + 5f;
         var draw = ImGui.GetWindowDrawList();
         uint recessedSurface = ImGui.ColorConvertFloat4ToU32(ViewerTheme.RecessedSurface);
         uint structuralLine = ImGui.ColorConvertFloat4ToU32(ViewerTheme.StructuralLine);
         uint secondaryText = ImGui.ColorConvertFloat4ToU32(ViewerTheme.SecondaryText);
         uint primaryText = ImGui.ColorConvertFloat4ToU32(ViewerTheme.PrimaryText);
-        uint operationColor = ImGui.ColorConvertFloat4ToU32(ViewerTheme.Caution);
-        uint checkpointColor = ImGui.ColorConvertFloat4ToU32(ViewerTheme.Running);
-        uint errorColor = ImGui.ColorConvertFloat4ToU32(ViewerTheme.Error);
+        uint operationColor = ImGui.ColorConvertFloat4ToU32(ViewerTheme.ReplayOperation);
+        uint checkpointColor = ImGui.ColorConvertFloat4ToU32(ViewerTheme.ReplayCheckpoint);
+        uint divergenceColor = ImGui.ColorConvertFloat4ToU32(ViewerTheme.ReplayDivergence);
         ImGui.InvisibleButton("##timeline-track", new Vector2(width, height));
         bool hovered = ImGui.IsItemHovered();
         draw.PushClipRect(origin, origin + new Vector2(width, height), true);
@@ -443,17 +600,16 @@ public partial class SimulationViewer
             return origin.X + (float)((tick - _timelineFirstTick) / _timelineVisibleTicks * width);
         }
 
-        draw.AddText(origin + new Vector2(8f, 4f), secondaryText, "TICK / SIMULATION TIME");
-        const string restorableLabel = "RESTORABLE";
-        float restorableLabelWidth = ImGui.CalcTextSize(restorableLabel).X;
-        float restorableLabelX = origin.X + width - restorableLabelWidth - 8f;
-        draw.AddLine(
-            new Vector2(restorableLabelX - 18f, origin.Y + 10f),
-            new Vector2(restorableLabelX - 6f, origin.Y + 10f),
-            checkpointColor,
-            3f);
+        const string trackTitle = "TICK / SIMULATION TIME";
+        draw.AddText(origin + new Vector2(8f, 4f), secondaryText, trackTitle);
+        DrawTimelineLegend(
+            draw,
+            origin.X + 8f + ImGui.CalcTextSize(trackTitle).X + 16f,
+            origin.X + width - 8f,
+            origin.Y + 4f,
+            true,
+            timeline.IsVerified == false);
 
-        draw.AddText(new Vector2(restorableLabelX, origin.Y + 4f), secondaryText, restorableLabel);
         int tickStep = GetTimelineTickStep(_timelineVisibleTicks);
         double lastVisibleTick = _timelineFirstTick + _timelineVisibleTicks;
         double firstTick = Math.Ceiling(_timelineFirstTick / (double)tickStep) * tickStep;
@@ -461,15 +617,11 @@ public partial class SimulationViewer
         {
             float x = Map(tick);
             draw.AddLine(
-                new Vector2(x, origin.Y + 18f),
+                new Vector2(x, origin.Y + markerTop),
                 new Vector2(x, origin.Y + plotBottom),
                 structuralLine);
 
-            string tickLabel = $"{tick:0}  ·  {tick / AtmosSimulation.SimulationRate:0.00}s";
-            float tickLabelWidth = ImGui.CalcTextSize(tickLabel).X;
-            float tickLabelX = x + 3f;
-            if (tickLabelX + tickLabelWidth <= origin.X + width - 3f)
-                draw.AddText(new Vector2(tickLabelX, origin.Y + 64f), secondaryText, tickLabel);
+            DrawTimelineAxisLabel(draw, tick, x + 3f, origin.Y + axisTop, origin.X + width - 3f, secondaryText);
         }
 
         draw.AddLine(
@@ -515,17 +667,17 @@ public partial class SimulationViewer
             if (x < origin.X || x > origin.X + width) continue;
 
             draw.AddLine(
-                new Vector2(x, origin.Y + 34f),
-                new Vector2(x, origin.Y + 54f),
+                new Vector2(x, origin.Y + markerTop + 16f),
+                new Vector2(x, origin.Y + markerTop + 36f),
                 operationColor,
                 2f);
 
             if (hovered &&
                 Math.Abs(ImGui.GetMousePos().X - x) < 4 &&
-                ImGui.GetMousePos().Y > origin.Y + 30f &&
+                ImGui.GetMousePos().Y > origin.Y + markerTop + 12f &&
                 ImGui.GetMousePos().Y < origin.Y + plotBottom)
             {
-                ImGui.SetTooltip($"{operation.Code}\nDone in tick {operation.AfterTick} · order {operationOrder}");
+                ImGui.SetTooltip($"{operation.Code}\nDone in tick {operation.AfterTick}\nOrder {operationOrder}");
                 if (ImGui.IsMouseClicked(ImGuiMouseButton.Left)) _timelineOperation = operation;
             }
         }
@@ -536,24 +688,33 @@ public partial class SimulationViewer
             float x = Map(point.Checkpoint.Position.Tick);
             if (x < origin.X || x > origin.X + width) continue;
 
-            uint color = timeline.Position == point.Hash.Position && timeline.IsVerified == false
-                ? errorColor
-                : checkpointColor;
-
-            draw.AddTriangleFilled(
-                new Vector2(x - 5f, origin.Y + 18f),
-                new Vector2(x + 5f, origin.Y + 18f),
-                new Vector2(x, origin.Y + 30f),
-                color);
+            bool divergent = timeline.Position == point.Hash.Position && timeline.IsVerified == false;
+            float halfWidth = divergent ? 6f : 5f;
+            if (divergent)
+            {
+                DrawDivergenceMarker(draw, new Vector2(x, origin.Y + markerTop + 6f), halfWidth, divergenceColor);
+            }
+            else
+            {
+                draw.AddTriangleFilled(
+                    new Vector2(x - halfWidth, origin.Y + markerTop),
+                    new Vector2(x + halfWidth, origin.Y + markerTop),
+                    new Vector2(x, origin.Y + markerTop + 12f),
+                    checkpointColor);
+            }
 
             if (hovered &&
-                Math.Abs(ImGui.GetMousePos().X - x) < 5 &&
-                ImGui.GetMousePos().Y > origin.Y + 18f &&
-                ImGui.GetMousePos().Y < origin.Y + 32f)
+                Math.Abs(ImGui.GetMousePos().X - x) < halfWidth &&
+                ImGui.GetMousePos().Y > origin.Y + markerTop &&
+                ImGui.GetMousePos().Y < origin.Y + markerTop + 14f)
             {
-                ImGui.SetTooltip(
-                    $"Checkpoint at tick {point.Hash.Position.Tick}, after operation #{point.Hash.Position.OperationSequence}\nReference hash {point.Hash.Digest:x16}");
+                string tooltip =
+                    $"Checkpoint at tick {point.Hash.Position.Tick}, after operation #{point.Hash.Position.OperationSequence}\nReference hash {point.Hash.Digest:x16}";
 
+                if (divergent)
+                    tooltip += "\nDivergent: the replayed state does not match this reference hash.";
+
+                ImGui.SetTooltip(tooltip);
                 if (ImGui.IsMouseClicked(ImGuiMouseButton.Left)) checkpointTarget = point.Hash.Position;
             }
         }
@@ -563,7 +724,7 @@ public partial class SimulationViewer
         if (cursor >= origin.X && cursor <= origin.X + width)
         {
             draw.AddLine(
-                new Vector2(cursor, origin.Y + 18f),
+                new Vector2(cursor, origin.Y + markerTop),
                 new Vector2(cursor, origin.Y + plotBottom),
                 primaryText,
                 2f);
@@ -587,11 +748,12 @@ public partial class SimulationViewer
         IReadOnlyList<AtmosWorldRecordedOperation> operations)
     {
         IReadOnlyList<ReplayBranchInfo> branches = _replayBranches!.Branches;
-        const float headerHeight = 24f;
+        float lineHeight = ImGui.GetTextLineHeight();
+        float headerHeight = MathF.Max(24f, lineHeight + 11f);
         const float rowHeight = 28f;
-        const float axisHeight = 24f;
+        float axisHeight = lineHeight * 2f + 8f;
         float contentHeight = headerHeight + branches.Count * rowHeight + axisHeight;
-        float childHeight = Math.Min(contentHeight + 2f, 220f);
+        float childHeight = Math.Min(contentHeight + 2f, 230f);
         ImGui.BeginChild(
             "BranchHistoryScroll##replay",
             new Vector2(0f, childHeight),
@@ -607,9 +769,10 @@ public partial class SimulationViewer
         uint structuralLine = ImGui.ColorConvertFloat4ToU32(ViewerTheme.StructuralLine);
         uint secondaryText = ImGui.ColorConvertFloat4ToU32(ViewerTheme.SecondaryText);
         uint primaryText = ImGui.ColorConvertFloat4ToU32(ViewerTheme.PrimaryText);
-        uint selection = ImGui.ColorConvertFloat4ToU32(ViewerTheme.Selection);
-        uint operationColor = ImGui.ColorConvertFloat4ToU32(ViewerTheme.Caution);
-        uint checkpointColor = ImGui.ColorConvertFloat4ToU32(ViewerTheme.Running);
+        uint selectionHighlight = ImGui.ColorConvertFloat4ToU32(ViewerTheme.SelectionHighlight);
+        uint operationColor = ImGui.ColorConvertFloat4ToU32(ViewerTheme.ReplayOperation);
+        uint checkpointColor = ImGui.ColorConvertFloat4ToU32(ViewerTheme.ReplayCheckpoint);
+        uint divergenceColor = ImGui.ColorConvertFloat4ToU32(ViewerTheme.ReplayDivergence);
         ImGui.InvisibleButton("##branch-history-track", new Vector2(width, contentHeight));
         bool hovered = ImGui.IsItemHovered();
         draw.AddRectFilled(origin, origin + new Vector2(width, contentHeight), recessedSurface);
@@ -619,8 +782,17 @@ public partial class SimulationViewer
             return graphLeft + (float)((tick - _timelineFirstTick) / _timelineVisibleTicks * graphWidth);
         }
 
+        const string trackTitle = "TICK / SIMULATION TIME";
         draw.AddText(origin + new Vector2(6f, 4f), secondaryText, "SESSION BRANCHES");
-        draw.AddText(new Vector2(graphLeft + 4f, origin.Y + 4f), secondaryText, "TICK / SIMULATION TIME");
+        draw.AddText(new Vector2(graphLeft + 4f, origin.Y + 4f), secondaryText, trackTitle);
+        DrawTimelineLegend(
+            draw,
+            graphLeft + 4f + ImGui.CalcTextSize(trackTitle).X + 16f,
+            origin.X + width - 6f,
+            origin.Y + 4f,
+            false,
+            timeline.IsVerified == false);
+
         double lastVisibleTick = _timelineFirstTick + _timelineVisibleTicks;
         int tickStep = GetTimelineTickStep(_timelineVisibleTicks);
         double firstTick = Math.Ceiling(_timelineFirstTick / (double)tickStep) * tickStep;
@@ -633,9 +805,7 @@ public partial class SimulationViewer
                 new Vector2(x, graphBottom),
                 structuralLine);
 
-            string label = $"{tick:0} · {tick / AtmosSimulation.SimulationRate:0.00}s";
-            if (x + ImGui.CalcTextSize(label).X <= origin.X + width - 3f)
-                draw.AddText(new Vector2(x + 3f, graphBottom + 4f), secondaryText, label);
+            DrawTimelineAxisLabel(draw, tick, x + 3f, graphBottom + 4f, origin.X + width - 3f, secondaryText);
         }
 
         var rowById = new Dictionary<int, int>();
@@ -647,14 +817,18 @@ public partial class SimulationViewer
         {
             var branch = branches[index];
             float y = origin.Y + headerHeight + rowHeight * index + rowHeight * 0.5f;
-            uint branchColor = branch.IsSelected ? selection : secondaryText;
+
+            // The label sits on the recessed surface, so it stays in primary text; the lane itself carries the
+            // selection colour.
+            uint labelColor = branch.IsSelected ? primaryText : secondaryText;
+            uint laneColor = branch.IsSelected ? selectionHighlight : secondaryText;
             string branchLabel = branch.IsSelected ? $"> {branch.Name}" : $"  {branch.Name}";
-            draw.AddText(new Vector2(origin.X + 6f, y - ImGui.GetTextLineHeight() * 0.5f), branchColor, branchLabel);
+            draw.AddText(new Vector2(origin.X + 6f, y - lineHeight * 0.5f), labelColor, branchLabel);
 
             float startX = Math.Clamp(Map(branch.Fork.Tick), graphLeft, graphLeft + graphWidth);
             float headX = Math.Clamp(Map(branch.Head.Tick), graphLeft, graphLeft + graphWidth);
             if (branch.Head.Tick >= (ulong)_timelineFirstTick && branch.Fork.Tick <= lastVisibleTick)
-                draw.AddLine(new Vector2(startX, y), new Vector2(headX, y), branchColor, branch.IsSelected ? 4f : 2f);
+                draw.AddLine(new Vector2(startX, y), new Vector2(headX, y), laneColor, branch.IsSelected ? 4f : 2f);
 
             bool forkVisible = branch.Fork.Tick >= (ulong)_timelineFirstTick && branch.Fork.Tick <= lastVisibleTick;
             if (forkVisible &&
@@ -662,8 +836,8 @@ public partial class SimulationViewer
                 rowById.TryGetValue(parentId, out int parentIndex))
             {
                 float parentY = origin.Y + headerHeight + rowHeight * parentIndex + rowHeight * 0.5f;
-                draw.AddLine(new Vector2(startX, parentY), new Vector2(startX, y), branchColor, 1.5f);
-                draw.AddCircleFilled(new Vector2(startX, y), 4f, branchColor);
+                draw.AddLine(new Vector2(startX, parentY), new Vector2(startX, y), laneColor, 1.5f);
+                draw.AddCircleFilled(new Vector2(startX, y), 4f, laneColor);
             }
 
             if (branch.Head.Tick >= (ulong)_timelineFirstTick && branch.Head.Tick <= lastVisibleTick)
@@ -671,7 +845,7 @@ public partial class SimulationViewer
                 draw.AddRectFilled(
                     new Vector2(headX - 4f, y - 4f),
                     new Vector2(headX + 4f, y + 4f),
-                    branchColor);
+                    laneColor);
             }
 
             if (branch.IsSelected)
@@ -697,6 +871,12 @@ public partial class SimulationViewer
             if (x < graphLeft || x > graphLeft + graphWidth)
                 continue;
 
+            if (timeline.Position == point.Hash.Position && timeline.IsVerified == false)
+            {
+                DrawDivergenceMarker(draw, new Vector2(x, selectedY - 6f), 5f, divergenceColor);
+                continue;
+            }
+
             draw.AddTriangleFilled(
                 new Vector2(x - 4f, selectedY - 10f),
                 new Vector2(x + 4f, selectedY - 10f),
@@ -718,7 +898,7 @@ public partial class SimulationViewer
         {
             var mouse = ImGui.GetMousePos();
             int hoveredRow = (int)((mouse.Y - origin.Y - headerHeight) / rowHeight);
-            if ((uint)hoveredRow < (uint)branches.Count)
+            if (mouse.Y >= origin.Y + headerHeight && (uint)hoveredRow < (uint)branches.Count)
             {
                 var hoveredBranch = branches[hoveredRow];
                 ImGui.SetTooltip(
@@ -744,6 +924,156 @@ public partial class SimulationViewer
         }
 
         ImGui.EndChild();
+    }
+
+    private static void DrawTimelineAxisLabel(
+        ImDrawListPtr draw,
+        double tick,
+        float x,
+        float top,
+        float right,
+        uint color)
+    {
+        string tickLabel = tick.ToString("0", CultureInfo.InvariantCulture);
+        string timeLabel = QuantityFormat.Format(tick / AtmosSimulation.SimulationRate, "s");
+        float labelWidth = MathF.Max(ImGui.CalcTextSize(tickLabel).X, ImGui.CalcTextSize(timeLabel).X);
+        if (x + labelWidth > right)
+            return;
+
+        draw.AddText(new Vector2(x, top), color, tickLabel);
+        draw.AddText(new Vector2(x, top + ImGui.GetTextLineHeight()), color, timeLabel);
+    }
+
+    /// <summary>
+    ///     Draws the track legend right-aligned in the header strip, using the same marker shapes as the track.
+    /// </summary>
+    /// <remarks>
+    ///     Entries that do not fit between <paramref name="left" /> and <paramref name="right" /> are dropped in
+    ///     reverse <see cref="TimelineLegendEntries" /> priority, so a narrow panel keeps the divergence and checkpoint
+    ///     entries longest.
+    /// </remarks>
+    private static void DrawTimelineLegend(
+        ImDrawListPtr draw,
+        float left,
+        float right,
+        float top,
+        bool showRestorable,
+        bool showDivergence)
+    {
+        const float swatchWidth = 12f;
+        const float swatchGap = 4f;
+        const float entryGap = 14f;
+
+        int count = TimelineLegendEntries.Length;
+        Span<bool> included = stackalloc bool[count];
+        Span<float> labelWidths = stackalloc float[count];
+        float available = right - left;
+        float used = 0f;
+        for (int priority = 0; priority < count; priority++)
+        {
+            for (int index = 0; index < count; index++)
+            {
+                var entry = TimelineLegendEntries[index];
+                if (entry.Priority != priority ||
+                    entry.Marker == TimelineLegendMarker.Restorable && !showRestorable ||
+                    entry.Marker == TimelineLegendMarker.Divergence && !showDivergence)
+                {
+                    continue;
+                }
+
+                labelWidths[index] = ImGui.CalcTextSize(entry.Label).X;
+                float entryWidth = swatchWidth + swatchGap + labelWidths[index];
+                float needed = used == 0f ? entryWidth : used + entryGap + entryWidth;
+                if (needed > available)
+                    continue;
+
+                included[index] = true;
+                used = needed;
+            }
+        }
+
+        uint labelColor = ImGui.ColorConvertFloat4ToU32(ViewerTheme.SecondaryText);
+        var swatchSize = new Vector2(swatchWidth, ImGui.GetTextLineHeight());
+        float x = right;
+        for (int index = count - 1; index >= 0; index--)
+        {
+            if (!included[index])
+                continue;
+
+            var entry = TimelineLegendEntries[index];
+            x -= labelWidths[index];
+            draw.AddText(new Vector2(x, top), labelColor, entry.Label);
+            x -= swatchGap + swatchWidth;
+            DrawTimelineLegendSwatch(draw, entry.Marker, new Vector2(x, top), swatchSize);
+            x -= entryGap;
+        }
+    }
+
+    private static void DrawTimelineLegendSwatch(
+        ImDrawListPtr draw,
+        TimelineLegendMarker marker,
+        Vector2 min,
+        Vector2 size)
+    {
+        var center = min + size * 0.5f;
+        float halfHeight = size.Y * 0.45f;
+        switch (marker)
+        {
+            case TimelineLegendMarker.Checkpoint:
+                draw.AddTriangleFilled(
+                    new Vector2(center.X - 5f, center.Y - halfHeight),
+                    new Vector2(center.X + 5f, center.Y - halfHeight),
+                    new Vector2(center.X, center.Y + halfHeight),
+                    ImGui.ColorConvertFloat4ToU32(ViewerTheme.ReplayCheckpoint));
+
+                break;
+            case TimelineLegendMarker.Operation:
+                draw.AddLine(
+                    new Vector2(center.X, center.Y - halfHeight),
+                    new Vector2(center.X, center.Y + halfHeight),
+                    ImGui.ColorConvertFloat4ToU32(ViewerTheme.ReplayOperation),
+                    2f);
+
+                break;
+            case TimelineLegendMarker.Restorable:
+                draw.AddRectFilled(
+                    new Vector2(min.X, center.Y - 2f),
+                    new Vector2(min.X + size.X, center.Y + 2f),
+                    ImGui.ColorConvertFloat4ToU32(ViewerTheme.ReplayCheckpoint));
+
+                break;
+            case TimelineLegendMarker.Playhead:
+                draw.AddLine(
+                    new Vector2(center.X, min.Y),
+                    new Vector2(center.X, min.Y + size.Y),
+                    ImGui.ColorConvertFloat4ToU32(ViewerTheme.PrimaryText),
+                    2f);
+
+                break;
+            case TimelineLegendMarker.Divergence:
+                DrawDivergenceMarker(
+                    draw,
+                    center,
+                    MathF.Min(6f, halfHeight),
+                    ImGui.ColorConvertFloat4ToU32(ViewerTheme.ReplayDivergence));
+
+                break;
+        }
+    }
+
+    /// <summary>
+    ///     Outlined diamond drawn in place of the checkpoint triangle when the replay fails that checkpoint's reference
+    ///     hash, so divergence reads by shape as well as colour.
+    /// </summary>
+    private static void DrawDivergenceMarker(ImDrawListPtr draw, Vector2 center, float radius, uint color)
+    {
+        draw.AddQuad(
+            new Vector2(center.X, center.Y - radius),
+            new Vector2(center.X + radius, center.Y),
+            new Vector2(center.X, center.Y + radius),
+            new Vector2(center.X - radius, center.Y),
+            color,
+            2f);
     }
 
     private int GetBranchHistoryTick(
@@ -812,8 +1142,7 @@ public partial class SimulationViewer
         }
         catch (Exception exception)
         {
-            _timelineError = exception.Message;
-            WriteException("Could not create the replay branch", exception);
+            SetTimelineError("Could not create the replay branch", exception);
         }
 
         RefreshReplayPresentation();
@@ -838,8 +1167,7 @@ public partial class SimulationViewer
         catch (Exception exception)
         {
             _replayTimeline = _replayBranches!.Timeline;
-            _timelineError = exception.Message;
-            WriteException("Could not select the replay branch", exception);
+            SetTimelineError("Could not select the replay branch", exception);
         }
 
         RefreshReplayPresentation();
@@ -856,8 +1184,7 @@ public partial class SimulationViewer
         }
         catch (Exception exception)
         {
-            _timelineError = exception.Message;
-            WriteException("Could not continue the replay branch", exception);
+            SetTimelineError("Could not continue the replay branch", exception);
         }
 
         RefreshReplayPresentation();
@@ -873,8 +1200,7 @@ public partial class SimulationViewer
         }
         catch (Exception exception)
         {
-            _timelineError = exception.Message;
-            WriteException($"Could not seek the replay to tick {tick}", exception);
+            SetTimelineError($"Could not seek the replay to tick {tick}", exception);
         }
 
         RefreshReplayPresentation();
@@ -890,11 +1216,36 @@ public partial class SimulationViewer
         }
         catch (Exception exception)
         {
-            _timelineError = exception.Message;
-            WriteException("Could not seek the replay", exception);
+            SetTimelineError("Could not seek the replay", exception);
         }
 
         RefreshReplayPresentation();
+    }
+
+    private void ReturnTimelineToHead()
+    {
+        _isPaused = true;
+        try
+        {
+            _replayTimeline!.ReturnToHead();
+            _timelineError = null;
+        }
+        catch (Exception exception)
+        {
+            SetTimelineError("Could not return the replay to its head", exception);
+        }
+
+        RefreshReplayPresentation();
+    }
+
+    /// <summary>
+    ///     Records a failed timeline action for the Timeline panel and the log. The panel keeps showing it until the
+    ///     next successful timeline action clears it.
+    /// </summary>
+    private void SetTimelineError(string action, Exception exception)
+    {
+        _timelineError = $"{action}. {exception.Message}";
+        WriteException(action, exception);
     }
 
     private void StepTimelineForward()
@@ -954,5 +1305,14 @@ public partial class SimulationViewer
         {
             _refreshingReplay = false;
         }
+    }
+
+    private enum TimelineLegendMarker
+    {
+        Checkpoint,
+        Operation,
+        Restorable,
+        Playhead,
+        Divergence
     }
 }

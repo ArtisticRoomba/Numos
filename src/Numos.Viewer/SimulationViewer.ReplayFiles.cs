@@ -166,7 +166,8 @@ public partial class SimulationViewer
 
         ImGui.EndDisabled();
         ImGui.SameLine();
-        if (ImGui.Button("Cancel")) ImGui.CloseCurrentPopup();
+        if (ImGui.Button("Cancel", new Vector2(120f, 0f))) ImGui.CloseCurrentPopup();
+        ImGui.SetItemDefaultFocus();
     }
 
     private void DrawSaveReplayModal()
@@ -200,9 +201,12 @@ public partial class SimulationViewer
                 $"Only '{_replayBranches.SelectedBranch.Name}' will be saved. Other session branches remain in memory.");
         }
 
-        DrawReplayFileError();
         string normalized = NormalizeReplayPath(_replaySavePath);
         bool overwrite = File.Exists(normalized);
+        if (overwrite)
+            ImGui.TextColored(ViewerTheme.Caution, "The existing file will be replaced.");
+
+        DrawReplayFileError();
         ImGui.BeginDisabled(string.IsNullOrWhiteSpace(_replaySavePath) || _replaySaveTask != null);
         if (ImGui.Button(overwrite ? "Overwrite" : "Save", new Vector2(120f, 0f)))
         {
@@ -211,14 +215,9 @@ public partial class SimulationViewer
         }
 
         ImGui.EndDisabled();
-        if (overwrite)
-        {
-            ImGui.SameLine();
-            ImGui.TextColored(ViewerTheme.Caution, "The existing file will be replaced.");
-        }
-
         ImGui.SameLine();
-        if (ImGui.Button("Cancel")) ImGui.CloseCurrentPopup();
+        if (ImGui.Button("Cancel", new Vector2(120f, 0f))) ImGui.CloseCurrentPopup();
+        ImGui.SetItemDefaultFocus();
     }
 
     private void DrawReplayProgressModal()
@@ -235,7 +234,7 @@ public partial class SimulationViewer
         {
             ImGui.TextUnformatted("Loading, verifying, and indexing replay...");
             ImGui.ProgressBar(Math.Clamp(_replayFileProgress, 0f, 1f), new Vector2(420f, 0f));
-            if (ImGui.Button("Cancel")) _replayFileCancellation?.Cancel();
+            if (ImGui.Button("Cancel", new Vector2(120f, 0f))) _replayFileCancellation?.Cancel();
         }
         else
         {
@@ -246,7 +245,7 @@ public partial class SimulationViewer
 
     private void DrawReplayFileError()
     {
-        if (_replayFileError != null) ImGui.TextColored(ViewerTheme.Error, _replayFileError);
+        ImGuiExtensions.Feedback(_replayFileError, true);
     }
 
     private static void CenterNextReplayModal()

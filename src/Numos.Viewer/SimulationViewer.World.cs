@@ -263,6 +263,7 @@ public partial class SimulationViewer
         if (!window.IsVisible)
             return;
 
+        bool inspecting = DrawInspectionNotice();
         if (ImGui.BeginTable(
                 "WorldStatus##world",
                 3,
@@ -314,7 +315,7 @@ public partial class SimulationViewer
         if (_simulationSurfaces.Count == 0)
             ImGui.TextDisabled("This world has no simulations.");
 
-        ImGui.BeginDisabled(_activeSimulationId == null);
+        ImGui.BeginDisabled(_activeSimulationId == null || inspecting);
         if (ImGui.Button("Remove Simulation..."))
         {
             _simulationPendingRemoval = _activeSimulationId;
@@ -334,6 +335,7 @@ public partial class SimulationViewer
 
         ImGui.SeparatorText("New Simulation");
         bool dimensionsChanged = false;
+        ImGui.BeginDisabled(inspecting);
         ImGui.SetNextItemWidth(NumericInputWidth);
         dimensionsChanged |= ImGui.InputInt("Chunk width", ref _newSimulationWidth);
         ImGui.SetNextItemWidth(NumericInputWidth);
@@ -359,15 +361,18 @@ public partial class SimulationViewer
             }
         }
 
+        ImGui.EndDisabled();
         ImGuiExtensions.QuestionTooltip("Creates another simulation in this world using the shared atmosphere configuration.");
 
-        RenderTopologyControls();
+        RenderTopologyControls(inspecting);
     }
 
     private void DrawWorldModals()
     {
         DrawRemoveSimulationModal();
         DrawRemoveTopologyModal();
+        DrawRemoveChunkModal();
+        DrawResetConfigurationModal();
     }
 
     private void DrawRemoveSimulationModal()

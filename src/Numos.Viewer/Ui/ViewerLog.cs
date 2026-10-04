@@ -25,6 +25,18 @@ internal sealed class ViewerLog
     private readonly List<ViewerLogEntry> _entries = [];
     private readonly Lock _sync = new();
     private long _nextSequence;
+    private int _unseenErrorCount;
+    private int _unseenWarningCount;
+
+    /// <summary>
+    ///     Errors and fatal entries written since the last <see cref="MarkSeen" />. Cheap enough to poll every frame.
+    /// </summary>
+    public int UnseenErrorCount => Volatile.Read(ref _unseenErrorCount);
+
+    /// <summary>
+    ///     Warnings written since the last <see cref="MarkSeen" />.
+    /// </summary>
+    public int UnseenWarningCount => Volatile.Read(ref _unseenWarningCount);
 
     public void Write(ViewerLogLevel level, string source, string message, string? details = null)
     {
@@ -45,6 +57,20 @@ internal sealed class ViewerLog
             if (_entries.Count > MaximumEntries)
                 _entries.RemoveRange(0, _entries.Count - MaximumEntries);
         }
+
+        if (level >= ViewerLogLevel.Error)
+            Interlocked.Increment(ref _unseenErrorCount);
+        else if (level == ViewerLogLevel.Warn)
+            Interlocked.Increment(ref _unseenWarningCount);
+    }
+
+    /// <summary>
+    ///     Resets the unseen counters once the log is actually on screen.
+    /// </summary>
+    public void MarkSeen()
+    {
+        Interlocked.Exchange(ref _unseenErrorCount, 0);
+        Interlocked.Exchange(ref _unseenWarningCount, 0);
     }
 
     public ViewerLogEntry[] Snapshot()

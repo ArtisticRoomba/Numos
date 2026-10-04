@@ -573,7 +573,7 @@ public sealed class VisualizationRegistry
             float midpoint = range.Minimum + (range.Maximum - range.Minimum) * 0.5f;
             return new VisualizationLegend(
                 "Pressure",
-                "simulation units",
+                "Pa",
                 VisualizationLegendKind.Gradient,
                 [
                     new VisualizationLegendEntry($"{range.Minimum:G6}", new ColorRgba(0f, 0f, 0f), range.Minimum),

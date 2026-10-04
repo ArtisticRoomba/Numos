@@ -216,6 +216,21 @@ public partial class SimulationViewer
         _selectedSliceChunkPosition = null;
         _cameraInitialized = false;
         _frameSceneOnNextPresentation = false;
+
+        _steppedToTick = null;
+        _toolChunkPosition = null;
+        _chunkPendingRemoval = null;
+        _removeChunkModalOpen = false;
+        _requestRemoveChunk = false;
+        _resetConfigurationModalOpen = false;
+        _requestResetConfiguration = false;
+        _chunkFeedback = null;
+        _voxelFeedback = null;
+        _injectionFeedback = null;
+        _gasRegistryFeedback = null;
+        _newGasFeedback = null;
+        _configurationFeedback = null;
+        ClearConfigurationDrafts();
     }
 
     private void AddProjectChunk(Int3 position, int roomId)
@@ -228,12 +243,12 @@ public partial class SimulationViewer
             var chunk = _simulation.CreateAndRegisterChunk(position);
             _simulation.SetChunkClassification(chunk, new VoxelClassification(roomId));
             _frameSceneOnNextPresentation = true;
-            SetProjectMessage($"Added chunk {FormatChunkPosition(position)}.", false);
+            _chunkFeedback = Report($"Added chunk {FormatChunkPosition(position)}.", false);
         }
         catch (Exception exception) when (
             exception is ArgumentOutOfRangeException or InvalidOperationException)
         {
-            WriteException("Could not add the chunk", exception);
+            _chunkFeedback = ReportException($"Could not add chunk {FormatChunkPosition(position)}", exception);
         }
     }
 
@@ -244,11 +259,11 @@ public partial class SimulationViewer
 
         if (_simulation.UnregisterChunk(chunk))
         {
-            SetProjectMessage($"Removed chunk {FormatChunkPosition(chunk.Position)}.", false);
+            _chunkFeedback = Report($"Removed chunk {FormatChunkPosition(chunk.Position)}.", false);
             return;
         }
 
-        SetProjectMessage($"Chunk {FormatChunkPosition(chunk.Position)} no longer exists.", true);
+        _chunkFeedback = Report($"Chunk {FormatChunkPosition(chunk.Position)} no longer exists.", true);
     }
 
     private void SealProjectChunk(AtmosChunkHandle chunk)
@@ -259,13 +274,13 @@ public partial class SimulationViewer
         try
         {
             _simulation.SetChunkBoundaryClassification(chunk, VoxelClassification.RoomSolid);
-            SetProjectMessage(
+            _chunkFeedback = Report(
                 $"Replaced the outer faces of chunk {FormatChunkPosition(chunk.Position)} with solid walls.",
                 false);
         }
         catch (KeyNotFoundException exception)
         {
-            WriteException("Could not seal the chunk", exception);
+            _chunkFeedback = ReportException($"Could not seal chunk {FormatChunkPosition(chunk.Position)}", exception);
         }
     }
 
@@ -277,11 +292,29 @@ public partial class SimulationViewer
         try
         {
             _simulation.WakeChunk(chunk);
-            SetProjectMessage($"Unslept chunk {FormatChunkPosition(chunk.Position)}.", false);
+            _chunkFeedback = Report($"Unslept chunk {FormatChunkPosition(chunk.Position)}.", false);
         }
         catch (KeyNotFoundException exception)
         {
-            SetProjectMessage(exception.Message, true);
+            _chunkFeedback = Report(exception.Message, true);
+        }
+    }
+
+    private void FillProjectChunk(AtmosChunkHandle chunk, int classification)
+    {
+        if (_simulation == null)
+            return;
+
+        try
+        {
+            _simulation.SetChunkClassification(chunk, new VoxelClassification(classification));
+            _chunkFeedback = Report(
+                $"Filled chunk {FormatChunkPosition(chunk.Position)} with classification {classification}.",
+                false);
+        }
+        catch (Exception exception) when (exception is ArgumentOutOfRangeException or KeyNotFoundException)
+        {
+            _chunkFeedback = ReportException($"Could not fill chunk {FormatChunkPosition(chunk.Position)}", exception);
         }
     }
 
@@ -293,7 +326,7 @@ public partial class SimulationViewer
         string name = gas.Name?.Trim() ?? string.Empty;
         if (name.Length == 0)
         {
-            SetProjectMessage("A gas name is required.", true);
+            _newGasFeedback = Report("Could not add the gas: a name is required.", true);
             return;
         }
 
@@ -306,14 +339,33 @@ public partial class SimulationViewer
             !float.IsFinite(gas.DiffusionCoefficient) ||
             gas.DiffusionCoefficient < 0f)
         {
-            SetProjectMessage("Gas properties must be finite, non-negative values.", true);
+            _newGasFeedback = Report(
+                $"Could not add {name}: molar Cv, boiling point, vaporization enthalpy, and diffusion coefficient " +
+                "must be finite and at least 0.",
+                true);
+
             return;
+        }
+
+        foreach (var registered in _config.GasRegistry)
+        {
+            if (registered.Name == name)
+            {
+                _newGasFeedback = Report($"Could not add {name}: a gas with that name is already registered.", true);
+                return;
+            }
         }
 
         gas.Name = name;
         _config.GasRegistry.Add(gas);
-        ApplyConfiguration();
-        SetProjectMessage($"Added gas {name} with ID {_config.GasRegistry.Count - 1}.", false);
+        if (!TryApplyConfiguration(out string? error))
+        {
+            _config.GasRegistry.RemoveAt(_config.GasRegistry.Count - 1);
+            _newGasFeedback = new FeedbackMessage($"Could not add {name}: {error}", true);
+            return;
+        }
+
+        _newGasFeedback = Report($"Added gas {name} with ID {_config.GasRegistry.Count - 1}.", false);
     }
 
     private void RemoveProjectGas(int gasId)
@@ -330,9 +382,9 @@ public partial class SimulationViewer
             var snapshot = simulation.GetChunkSnapshot(handle);
             if (snapshot.Gases.Any(gas => gas.GasId >= gasId))
             {
-                SetProjectMessage(
-                    "That gas cannot be removed because it, or a later gas ID, has already been used by a chunk. " +
-                    "Remove the affected chunks first so gas IDs remain stable.",
+                _gasRegistryFeedback = Report(
+                    $"Could not remove {_config.GasRegistry[gasId].Name}: it, or a later gas ID, has already been " +
+                    "used by a chunk. Remove the affected chunks first so gas IDs remain stable.",
                     true);
 
                 return;
@@ -340,9 +392,19 @@ public partial class SimulationViewer
         }
 
         string name = _config.GasRegistry[gasId].Name;
+        var previous = new GasRegistry();
+        foreach (var gas in _config.GasRegistry)
+            previous.Add(gas);
+
         _config.GasRegistry.RemoveAt(gasId);
-        ApplyConfiguration();
-        SetProjectMessage($"Removed gas {name}.", false);
+        if (!TryApplyConfiguration(out string? error))
+        {
+            _config.GasRegistry = previous;
+            _gasRegistryFeedback = new FeedbackMessage($"Could not remove {name}: {error}", true);
+            return;
+        }
+
+        _gasRegistryFeedback = Report($"Removed gas {name}.", false);
     }
 
     private void InjectProjectGas(
@@ -359,21 +421,21 @@ public partial class SimulationViewer
 
         if (gasId < 0 || gasId >= _config.GasRegistry.Count)
         {
-            SetProjectMessage("Select a registered gas before injecting.", true);
+            _injectionFeedback = Report("Select a registered gas before injecting.", true);
             return;
         }
 
         try
         {
             _simulation.AddGasToVoxel(chunk, x, y, z, gasId, moles, temperature);
-            SetProjectMessage(
+            _injectionFeedback = Report(
                 $"Injected {moles:G} mol of {_config.GasRegistry[gasId].Name} into ({x}, {y}, {z}).",
                 false);
         }
         catch (Exception exception) when (
             exception is ArgumentOutOfRangeException or KeyNotFoundException or InvalidOperationException)
         {
-            WriteException("Could not inject gas", exception);
+            _injectionFeedback = ReportException("Could not inject gas", exception);
         }
     }
 
@@ -382,4 +444,80 @@ public partial class SimulationViewer
         if (_world != null && _config != null)
             _world.SetAtmosConfig(_config);
     }
+
+    /// <summary>
+    ///     Applies <see cref="_config" /> to the world, reporting the failure instead of throwing.
+    /// </summary>
+    /// <param name="error">Why the world rejected the configuration, or <see langword="null" /> on success.</param>
+    /// <returns><see langword="true" /> when the world accepted the configuration.</returns>
+    /// <remarks>
+    ///     On failure the world keeps its previous configuration, so the caller must undo its change to
+    ///     <see cref="_config" /> or the panel will show values the simulation is not using.
+    /// </remarks>
+    private bool TryApplyConfiguration(out string? error)
+    {
+        try
+        {
+            ApplyConfiguration();
+            error = null;
+            return true;
+        }
+        catch (KeyNotFoundException exception)
+        {
+            // Gas reactions resolve their species by name when the config is captured.
+            error = $"a gas reaction still refers to a gas that would not be registered ({exception.Message})";
+            WriteException("Could not apply the atmosphere configuration", exception);
+            return false;
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
+        {
+            error = exception.Message;
+            WriteException("Could not apply the atmosphere configuration", exception);
+            return false;
+        }
+    }
+
+    /// <summary>
+    ///     Copies every scalar <see cref="AtmosConfig" /> setting, leaving the gas registry and solver configurations
+    ///     alone.
+    /// </summary>
+    private static void CopyScalarSettings(AtmosConfig source, AtmosConfig destination)
+    {
+        destination.GlobalTemperature = source.GlobalTemperature;
+        destination.DefaultTemperatureFallback = source.DefaultTemperatureFallback;
+        destination.DefaultMolarHeatCapacityAtConstantVolume = source.DefaultMolarHeatCapacityAtConstantVolume;
+        destination.VoxelVolume = source.VoxelVolume;
+        destination.SaturationReferencePressure = source.SaturationReferencePressure;
+        destination.DefaultDiffusionCoefficient = source.DefaultDiffusionCoefficient;
+        destination.SpaceTemperature = source.SpaceTemperature;
+        destination.BulkFlowCoefficient = source.BulkFlowCoefficient;
+        destination.VacuumThreshold = source.VacuumThreshold;
+        destination.SleepThreshold = source.SleepThreshold;
+        destination.SleepEpsilon = source.SleepEpsilon;
+        destination.ThermalConductance = source.ThermalConductance;
+        destination.CondensationRateFactor = source.CondensationRateFactor;
+        destination.MaxPressureTransferFractionPerNeighbor = source.MaxPressureTransferFractionPerNeighbor;
+        destination.AccumulatorWakeThreshold = source.AccumulatorWakeThreshold;
+        destination.AccumulatorMaxAliveTicks = source.AccumulatorMaxAliveTicks;
+    }
+
+    /// <summary>
+    ///     Logs <paramref name="message" /> and returns it for display beside the control that caused it.
+    /// </summary>
+    private FeedbackMessage Report(string message, bool isError)
+    {
+        SetProjectMessage(message, isError);
+        return new FeedbackMessage(message, isError);
+    }
+
+    /// <summary>
+    ///     Logs <paramref name="exception" /> with its stack trace and returns a short local error for the panel.
+    /// </summary>
+    private FeedbackMessage ReportException(string context, Exception exception)
+    {
+        WriteException(context, exception);
+        return new FeedbackMessage($"{context}: {exception.Message}", true);
+    }
+
+    private readonly record struct FeedbackMessage(string Message, bool IsError);
 }

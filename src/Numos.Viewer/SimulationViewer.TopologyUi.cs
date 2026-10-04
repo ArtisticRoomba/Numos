@@ -29,7 +29,7 @@ public partial class SimulationViewer
     private ExplicitLinkSetHandle? _topologyPendingRemoval;
     private bool _topologyThermal = true;
 
-    private void RenderTopologyControls()
+    private void RenderTopologyControls(bool inspecting)
     {
         if (_world == null)
             return;
@@ -119,7 +119,7 @@ public partial class SimulationViewer
                     ImGui.TextDisabled($"Showing 24 of {selected.Links.Count} links.");
             }
 
-            ImGui.BeginDisabled(selected.State == AtmosWorldLinkSetState.PendingRemoval);
+            ImGui.BeginDisabled(selected.State == AtmosWorldLinkSetState.PendingRemoval || inspecting);
             if (ImGui.Button("Remove Connection..."))
             {
                 _topologyPendingRemoval = selected.Handle;
@@ -138,13 +138,17 @@ public partial class SimulationViewer
         }
 
         ImGui.SeparatorText("New Connection");
+        ImGui.BeginDisabled(inspecting);
         if (ImGui.Checkbox("Gas transport", ref _topologyGas))
             _topologyFeedback = null;
 
+        ImGui.EndDisabled();
         ImGuiExtensions.QuestionTooltip("Allows pressure flow, gas diffusion, and the thermal energy carried by moving gas.");
+        ImGui.BeginDisabled(inspecting);
         if (ImGui.Checkbox("Thermal conduction", ref _topologyThermal))
             _topologyFeedback = null;
 
+        ImGui.EndDisabled();
         ImGuiExtensions.QuestionTooltip("Allows conductive heat transfer even when no gas crosses the connection.");
 
         if (!_topologyGas && !_topologyThermal)
@@ -154,7 +158,7 @@ public partial class SimulationViewer
         {
             ImGui.TextWrapped("Activate a 3D viewport, select a voxel, then capture each endpoint.");
             bool canCapture = GetSelectedAtmosCell().HasValue;
-            ImGui.BeginDisabled(!canCapture);
+            ImGui.BeginDisabled(!canCapture || inspecting);
             if (ImGui.Button("Capture Endpoint 1"))
             {
                 _portalFirst = GetSelectedAtmosCell();
@@ -189,7 +193,12 @@ public partial class SimulationViewer
                 ImGui.EndTable();
             }
 
-            ImGui.BeginDisabled(!_portalFirst.HasValue || !_portalSecond.HasValue || GetTopologyFlags() == ExplicitLinkFlags.None);
+            ImGui.BeginDisabled(
+                !_portalFirst.HasValue ||
+                !_portalSecond.HasValue ||
+                GetTopologyFlags() == ExplicitLinkFlags.None ||
+                inspecting);
+
             if (ImGui.Button("Create Portal"))
                 CreatePortalFromCapturedEndpoints();
 
@@ -198,6 +207,7 @@ public partial class SimulationViewer
 
         if (ImGui.CollapsingHeader("New Rectangular Face Dock"))
         {
+            ImGui.BeginDisabled(inspecting);
             bool dockInputChanged = DrawDockEndpoint(
                 "First",
                 ref _dockFirstSimulation,
@@ -218,7 +228,12 @@ public partial class SimulationViewer
             if (dockInputChanged)
                 _topologyFeedback = null;
 
-            ImGui.BeginDisabled(GetTopologyFlags() == ExplicitLinkFlags.None || _simulationSurfaces.Count == 0);
+            ImGui.EndDisabled();
+            ImGui.BeginDisabled(
+                GetTopologyFlags() == ExplicitLinkFlags.None ||
+                _simulationSurfaces.Count == 0 ||
+                inspecting);
+
             if (ImGui.Button("Create Dock"))
             {
                 try

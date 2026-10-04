@@ -20,10 +20,12 @@ namespace Numos.Viewer;
 public partial class SimulationViewer : IDisposable
 {
     private const float CameraMoveDuration = 0.45f;
+    private const int DefaultLegendResolution = 8;
     private readonly static TimeSpan ImGuiTransitionRenderDuration = TimeSpan.FromMilliseconds(250);
     private readonly static TimeSpan StartupRenderDuration = TimeSpan.FromMilliseconds(250);
 
     private readonly Action<VisualizationRegistry>? _configureVisualizations;
+    private readonly List<VoxelGasSnapshot> _gasMakeupRows = [];
     private readonly List<VoxelHighlight> _highlights = [];
     private readonly List<AtmosChunkHandle> _liveChunkHandles = [];
     private readonly HashSet<Int3> _liveChunkPositions = [];
@@ -150,7 +152,7 @@ public partial class SimulationViewer : IDisposable
             ConfigFlags.Msaa4xHint |
             ConfigFlags.VSyncHint);
 
-        Raylib.InitWindow(1400, 900, "Numos Simulation Viewer");
+        Raylib.InitWindow(1400, 900, "Numos.Viewer");
         _windowInitialized = true;
 
         string iconPath = Path.Combine(
@@ -171,10 +173,16 @@ public partial class SimulationViewer : IDisposable
         try
         {
             Raylib.SetTargetFPS(144);
+
+            // Escape belongs to ImGui for closing popups and backing out of keyboard navigation; raylib's default
+            // exit key would otherwise drop an unsaved in-memory project without asking.
+            Raylib.SetExitKey(KeyboardKey.Null);
             rlImGui.Setup(true, true);
             _imguiInitialized = true;
             ViewerTheme.Apply();
-            ImGui.GetIO().ConfigWindowsMoveFromTitleBarOnly = true;
+            var io = ImGui.GetIO();
+            io.ConfigFlags |= ImGuiConfigFlags.NavEnableKeyboard;
+            io.ConfigWindowsMoveFromTitleBarOnly = true;
             ConfigureLayoutPersistence();
 
             _sliceViewport = new SimulationViewport(

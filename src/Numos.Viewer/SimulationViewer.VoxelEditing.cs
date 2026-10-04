@@ -164,12 +164,12 @@ public partial class SimulationViewer
         var draw = ImGui.GetForegroundDrawList();
         uint fill = ImGui.ColorConvertFloat4ToU32(
             new Vector4(
-                ViewerTheme.Selection.X,
-                ViewerTheme.Selection.Y,
-                ViewerTheme.Selection.Z,
+                ViewerTheme.SelectionHighlight.X,
+                ViewerTheme.SelectionHighlight.Y,
+                ViewerTheme.SelectionHighlight.Z,
                 0.18f));
 
-        uint border = ImGui.ColorConvertFloat4ToU32(ViewerTheme.Selection);
+        uint border = ImGui.ColorConvertFloat4ToU32(ViewerTheme.SelectionHighlight);
         draw.AddRectFilled(minimum, maximum, fill);
         draw.AddRect(minimum, maximum, border);
     }
@@ -563,7 +563,7 @@ public partial class SimulationViewer
     {
         if (_config == null || _config.GasRegistry.Count == 0)
         {
-            SetProjectMessage("Register a gas before injecting voxels.", true);
+            _voxelFeedback = Report("Register a gas before injecting voxels.", true);
             return;
         }
 
@@ -636,7 +636,7 @@ public partial class SimulationViewer
             foreach (var address in targets)
                 mutation(address);
 
-            SetProjectMessage($"{action} {targets.Length} voxel{(targets.Length == 1 ? string.Empty : "s")}.", false);
+            _voxelFeedback = Report($"{action} {targets.Length} voxel{(targets.Length == 1 ? string.Empty : "s")}.", false);
         }
         catch (Exception exception) when (
             exception is ArgumentException or InvalidOperationException or KeyNotFoundException)

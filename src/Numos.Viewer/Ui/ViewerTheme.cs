@@ -3,16 +3,53 @@ using ImGuiNET;
 
 namespace Numos.Viewer.Ui;
 
+/// <summary>
+///     Workbench colour roles and the ImGui style built from them. See docs/BRAND.md section 4 before changing a value.
+/// </summary>
 internal static class ViewerTheme
 {
     public readonly static Vector4 PrimaryText = new(0.88f, 0.90f, 0.92f, 1f);
     public readonly static Vector4 SecondaryText = new(0.62f, 0.66f, 0.70f, 1f);
-    public readonly static Vector4 Selection = new(0.16f, 0.43f, 0.62f, 1f);
+
+    /// <summary>
+    ///     Backing for selected rows, headers, and selected text. Dark enough to keep primary text above 4.5:1.
+    /// </summary>
+    public readonly static Vector4 Selection = new(40f / 255f, 90f / 255f, 130f / 255f, 1f);
+
+    /// <summary>
+    ///     Brighter selection blue for viewport overlays that never carry text, such as the drag rectangle.
+    /// </summary>
+    public readonly static Vector4 SelectionHighlight = new(0.16f, 0.43f, 0.62f, 1f);
+
     public readonly static Vector4 Running = new(0.34f, 0.72f, 0.43f, 1f);
     public readonly static Vector4 Caution = new(0.90f, 0.66f, 0.24f, 1f);
-    public readonly static Vector4 Error = new(0.90f, 0.30f, 0.30f, 1f);
+    public readonly static Vector4 Error = new(242f / 255f, 139f / 255f, 130f / 255f, 1f);
     public readonly static Vector4 RecessedSurface = new(0.095f, 0.11f, 0.13f, 1f);
     public readonly static Vector4 StructuralLine = new(0.25f, 0.28f, 0.31f, 1f);
+
+    /// <summary>
+    ///     Border for controls that must be recognizable as controls. Keeps at least 3:1 against the window face and
+    ///     the recessed input face; separators and table grids stay on the quieter lines.
+    /// </summary>
+    public readonly static Vector4 ControlOutline = new(0.46f, 0.49f, 0.53f, 1f);
+
+    /// <summary>
+    ///     Identity accent for the Numos mark. Not an interface state colour; keep it out of the ImGui style.
+    /// </summary>
+    public readonly static Vector4 BrandOrange = new(1f, 153f / 255f, 0f, 1f);
+
+    /// <summary>
+    ///     Replay marker colours. These start out matching the state colours but are separate values on purpose:
+    ///     an operation is not a warning and a checkpoint is not a success, so retuning one role must not move the other.
+    /// </summary>
+    public readonly static Vector4 ReplayOperation = new(0.90f, 0.66f, 0.24f, 1f);
+
+    /// <inheritdoc cref="ReplayOperation" />
+    public readonly static Vector4 ReplayCheckpoint = new(0.34f, 0.72f, 0.43f, 1f);
+
+    /// <inheritdoc cref="ReplayOperation" />
+    public readonly static Vector4 ReplayDivergence = new(242f / 255f, 139f / 255f, 130f / 255f, 1f);
+
     public readonly static Vector4[] GasPalette =
     [
         new(0.24f, 0.67f, 0.90f, 1f),
@@ -64,7 +101,7 @@ internal static class ViewerTheme
         colors[(int)ImGuiCol.WindowBg] = new Vector4(0.145f, 0.16f, 0.18f, 1f);
         colors[(int)ImGuiCol.ChildBg] = new Vector4(0.115f, 0.13f, 0.15f, 1f);
         colors[(int)ImGuiCol.PopupBg] = new Vector4(0.16f, 0.175f, 0.195f, 1f);
-        colors[(int)ImGuiCol.Border] = new Vector4(0.34f, 0.37f, 0.40f, 1f);
+        colors[(int)ImGuiCol.Border] = ControlOutline;
         colors[(int)ImGuiCol.BorderShadow] = new Vector4(0.035f, 0.04f, 0.05f, 0.9f);
         colors[(int)ImGuiCol.FrameBg] = RecessedSurface;
         colors[(int)ImGuiCol.FrameBgHovered] = new Vector4(0.13f, 0.18f, 0.22f, 1f);
@@ -103,7 +140,7 @@ internal static class ViewerTheme
         colors[(int)ImGuiCol.TableBorderStrong] = new Vector4(0.36f, 0.39f, 0.42f, 1f);
         colors[(int)ImGuiCol.TableBorderLight] = new Vector4(0.25f, 0.28f, 0.31f, 1f);
         colors[(int)ImGuiCol.TableRowBgAlt] = new Vector4(0.19f, 0.205f, 0.22f, 0.45f);
-        colors[(int)ImGuiCol.TextSelectedBg] = new Vector4(0.16f, 0.43f, 0.62f, 0.65f);
+        colors[(int)ImGuiCol.TextSelectedBg] = Selection with { W = 0.65f };
         colors[(int)ImGuiCol.NavCursor] = new Vector4(0.52f, 0.80f, 0.96f, 1f);
     }
 }

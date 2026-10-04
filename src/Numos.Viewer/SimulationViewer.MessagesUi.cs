@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Numerics;
 using System.Text;
 using ImGuiNET;
@@ -9,10 +10,15 @@ namespace Numos.Viewer;
 public partial class SimulationViewer
 {
     private readonly ViewerLog _messages = new();
+    private bool _focusMessagesPanelRequested;
     private bool _messageAutoScroll = true;
     private string _messageFilter = string.Empty;
     private int _messageMinimumLevel;
     private long _messagesLastRenderedSequence;
+
+    // Whether the Messages panel was on screen last frame. The menu bar is drawn before the panel, so it reads the
+    // previous frame's value; that keeps the unseen indicator from flashing while the log is already visible.
+    private bool _messagesPanelVisible;
     private TextWriter? _originalConsoleError;
     private TextWriter? _originalConsoleOut;
     private bool _showMessagesPanel;
@@ -29,7 +35,7 @@ public partial class SimulationViewer
         Console.SetError(_viewerConsoleError);
         AppDomain.CurrentDomain.UnhandledException += HandleUnhandledException;
         TaskScheduler.UnobservedTaskException += HandleUnobservedTaskException;
-        WriteMessage(ViewerLogLevel.Info, "Viewer", $"Numos Viewer {ViewerBuildInfo.PackageVersion} started.");
+        WriteMessage(ViewerLogLevel.Info, "Viewer", $"Numos.Viewer {ViewerBuildInfo.PackageVersion} started.");
     }
 
     private void StopMessageCapture()
@@ -80,10 +86,70 @@ public partial class SimulationViewer
         RequestNextFrame();
     }
 
+    /// <summary>
+    ///     Opens the Messages panel and brings it to the front, including when it is docked behind another tab.
+    /// </summary>
+    private void ShowMessagesPanel()
+    {
+        _showMessagesPanel = true;
+        _focusMessagesPanelRequested = true;
+    }
+
+    /// <summary>
+    ///     Draws a right-aligned menu-bar item for warnings and errors logged while the Messages panel was not on
+    ///     screen. It stays until the panel is shown, since the panel is hidden by default and a failure would
+    ///     otherwise go unnoticed.
+    /// </summary>
+    private void RenderUnseenMessagesIndicator()
+    {
+        if (_messagesPanelVisible)
+            return;
+
+        int errors = _messages.UnseenErrorCount;
+        int warnings = _messages.UnseenWarningCount;
+        if (errors == 0 && warnings == 0)
+            return;
+
+        string label = errors > 0 && warnings > 0
+            ? $"{FormatCount(errors, "error")}, {FormatCount(warnings, "warning")}"
+            : errors > 0
+                ? FormatCount(errors, "error")
+                : FormatCount(warnings, "warning");
+
+        // A menu-bar MenuItem is as wide as its label plus one item spacing on either side.
+        float itemWidth = ImGui.CalcTextSize(label).X + ImGui.GetStyle().ItemSpacing.X * 2f;
+        float cursorX = ImGui.GetCursorPosX();
+        float right = cursorX + ImGui.GetContentRegionAvail().X;
+        ImGui.SetCursorPosX(Math.Max(cursorX, right - itemWidth));
+
+        ImGui.PushStyleColor(ImGuiCol.Text, errors > 0 ? ViewerTheme.Error : ViewerTheme.Caution);
+        bool clicked = ImGui.MenuItem($"{label}##unseen-messages");
+        ImGui.PopStyleColor();
+
+        if (ImGui.IsItemHovered(ImGuiHoveredFlags.ForTooltip))
+            ImGui.SetTooltip("Open Messages / Logs.");
+
+        if (clicked)
+            ShowMessagesPanel();
+    }
+
+    private static string FormatCount(int count, string noun)
+    {
+        string number = count.ToString(CultureInfo.InvariantCulture);
+        return count == 1 ? $"{number} {noun}" : $"{number} {noun}s";
+    }
+
     private void RenderMessagesPanel()
     {
+        _messagesPanelVisible = false;
         if (!_showMessagesPanel)
             return;
+
+        if (_focusMessagesPanelRequested)
+        {
+            ImGui.SetNextWindowFocus();
+            _focusMessagesPanelRequested = false;
+        }
 
         using var window = ImGuiExtensions.BeginWindow(
             "Messages / Logs##messages",
@@ -93,6 +159,9 @@ public partial class SimulationViewer
 
         if (!window.IsVisible)
             return;
+
+        _messagesPanelVisible = true;
+        _messages.MarkSeen();
 
         ViewerLogEntry[] entries = _messages.Snapshot();
         ImGui.SetNextItemWidth(230f);
@@ -119,30 +188,64 @@ public partial class SimulationViewer
 
         ImGui.SameLine();
         ImGui.TextDisabled($"{visibleEntries.Length} shown / {entries.Length} total");
-        ImGui.Separator();
-
-        ImGui.BeginChild(
-            "MessageLog##messages",
-            Vector2.Zero,
-            ImGuiChildFlags.None,
-            ImGuiWindowFlags.HorizontalScrollbar);
-
-        foreach (var entry in visibleEntries)
-        {
-            ImGui.PushStyleColor(ImGuiCol.Text, GetMessageColor(entry.Level));
-            ImGui.TextUnformatted(FormatMessage(entry));
-            if (!string.IsNullOrWhiteSpace(entry.Details))
-                ImGui.TextUnformatted(entry.Details);
-
-            ImGui.PopStyleColor();
-        }
 
         long lastSequence = entries.Length == 0 ? 0 : entries[^1].Sequence;
-        if (_messageAutoScroll && lastSequence != _messagesLastRenderedSequence)
+        RenderMessageTable(visibleEntries, _messageAutoScroll && lastSequence != _messagesLastRenderedSequence);
+        _messagesLastRenderedSequence = lastSequence;
+    }
+
+    private static void RenderMessageTable(ViewerLogEntry[] entries, bool scrollToBottom)
+    {
+        const ImGuiTableFlags flags =
+            ImGuiTableFlags.RowBg |
+            ImGuiTableFlags.ScrollY |
+            ImGuiTableFlags.SizingFixedFit |
+            ImGuiTableFlags.BordersInnerV |
+            ImGuiTableFlags.BordersOuter |
+            ImGuiTableFlags.Resizable;
+
+        if (!ImGui.BeginTable("MessageLog##messages", 4, flags))
+            return;
+
+        ImGui.TableSetupScrollFreeze(0, 1);
+        ImGui.TableSetupColumn("Time", ImGuiTableColumnFlags.WidthFixed);
+        ImGui.TableSetupColumn("Level", ImGuiTableColumnFlags.WidthFixed);
+        ImGui.TableSetupColumn("Source", ImGuiTableColumnFlags.WidthFixed);
+        ImGui.TableSetupColumn("Message", ImGuiTableColumnFlags.WidthStretch);
+        ImGui.TableHeadersRow();
+
+        foreach (var entry in entries)
+        {
+            ImGui.TableNextRow();
+            ImGui.TableSetColumnIndex(0);
+            ImGui.TextUnformatted(entry.Timestamp.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture));
+
+            ImGui.TableSetColumnIndex(1);
+            ImGui.PushStyleColor(ImGuiCol.Text, GetMessageColor(entry.Level));
+            ImGui.TextUnformatted(GetMessageLevelLabel(entry.Level));
+            ImGui.PopStyleColor();
+
+            ImGui.TableSetColumnIndex(2);
+            ImGui.TextUnformatted(entry.Source);
+
+            // The scrolling table is its own child window, so the panel's wrap position does not reach in here.
+            ImGui.TableSetColumnIndex(3);
+            ImGui.PushTextWrapPos(0f);
+            ImGui.TextUnformatted(entry.Message);
+            if (!string.IsNullOrWhiteSpace(entry.Details))
+            {
+                ImGui.PushStyleColor(ImGuiCol.Text, ViewerTheme.SecondaryText);
+                ImGui.TextUnformatted(entry.Details);
+                ImGui.PopStyleColor();
+            }
+
+            ImGui.PopTextWrapPos();
+        }
+
+        if (scrollToBottom && entries.Length > 0)
             ImGui.SetScrollHereY(1f);
 
-        _messagesLastRenderedSequence = lastSequence;
-        ImGui.EndChild();
+        ImGui.EndTable();
     }
 
     private bool IsMessageVisible(ViewerLogEntry entry)
@@ -195,7 +298,7 @@ public partial class SimulationViewer
             ViewerLogLevel.Info => ViewerTheme.PrimaryText,
             ViewerLogLevel.Warn => ViewerTheme.Caution,
             ViewerLogLevel.Error => ViewerTheme.Error,
-            ViewerLogLevel.Fatal => new Vector4(1f, 0.18f, 0.68f, 1f),
+            ViewerLogLevel.Fatal => ViewerTheme.Error,
             _ => ViewerTheme.PrimaryText
         };
     }

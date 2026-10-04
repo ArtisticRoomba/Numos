@@ -39,12 +39,10 @@ public partial class SimulationViewer
             new Vector2(180, 0),
             ImGuiChildFlags.Borders);
 
-        ImGui.Selectable("Graphics", _programSettingsTab == 0);
-        if (ImGui.IsItemClicked())
+        if (ImGui.Selectable("Graphics", _programSettingsTab == 0))
             _programSettingsTab = 0;
 
-        ImGui.Selectable("Interface", _programSettingsTab == 1);
-        if (ImGui.IsItemClicked())
+        if (ImGui.Selectable("Interface", _programSettingsTab == 1))
             _programSettingsTab = 1;
 
         ImGui.EndChild();
@@ -143,8 +141,8 @@ public partial class SimulationViewer
         ImGui.Checkbox("Use event-based rendering", ref _eventBasedRenderingEnabled);
         ImGuiExtensions.QuestionTooltip(
             "When enabled, the viewer waits for window events while the simulation is paused.\n" +
-            "Helps reduce CPU usage for drawing the UI when the simulation is paused, but may cause the viewer to not redraw when expected.\n" +
-            "Note that this is generally buggy as it's hard to do EBR to be honest.");
+            "Reduces CPU usage for drawing the UI while the simulation is paused.\n" +
+            "Experimental: the viewer may miss redraws in some cases.");
     }
 
     private void RenderInterfaceSettings()
@@ -286,7 +284,11 @@ public partial class SimulationViewer
         }
 
         ImGui.SameLine();
-        if (ImGui.Button("Revert", new Vector2(120, 0)))
+        bool revert = ImGui.Button("Revert", new Vector2(120, 0));
+
+        // Reverting is the safe choice if the new mode left the window unusable.
+        ImGui.SetItemDefaultFocus();
+        if (revert)
         {
             RevertTargetResolution();
             ImGui.CloseCurrentPopup();
@@ -317,7 +319,7 @@ public partial class SimulationViewer
             ImGuiWindowFlags.NoNav;
 
         ImGui.Begin("Performance##performance-overlay", flags);
-        ImGui.TextDisabled($"FPS: {ImGui.GetIO().Framerate:F1}");
+        ImGui.TextDisabled($"{ImGui.GetIO().Framerate:F1} FPS");
         ImGui.End();
     }
 }

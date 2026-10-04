@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Numerics;
 using ImGuiNET;
 using Numos.API;
@@ -64,12 +65,12 @@ public partial class SimulationViewer
             RebuildHighlights();
         }
 
-        ImGui.BeginDisabled(_replayTimeline?.IsInspecting == true);
+        // Each of these panels disables only its own editing controls while the Timeline inspects history, so
+        // readouts stay legible.
         RenderSolutionPanel();
         RenderToolsPanel();
         RenderConfigurationPanel();
         RenderWorldPanel();
-        ImGui.EndDisabled();
         RenderViewPanel();
         RenderTimelinePanel();
         DrawCreateProjectModal();
@@ -220,13 +221,14 @@ public partial class SimulationViewer
 
         ImGui.Spacing();
 
-        ImGui.Text("© 2026 Numos contributors");
-
-        ImGui.Spacing();
-
-        ImGui.TextColored(
-            new Vector4(0.2f, 0.6f, 1.0f, 1.0f),
-            "License: MIT");
+        using (var legal = ImGuiExtensions.BeginDefinitionTable("about-legal"))
+        {
+            if (legal.IsVisible)
+            {
+                ImGuiExtensions.DefinitionRow("Copyright", "© 2026 Numos contributors");
+                ImGuiExtensions.DefinitionRow("License", "MIT");
+            }
+        }
 
         ImGui.Spacing();
         ImGui.SeparatorText("Build provenance");
@@ -271,9 +273,17 @@ public partial class SimulationViewer
         string? commitUrl)
     {
         ImGui.TextUnformatted($"{component} {version}");
-        ImGui.TextDisabled($"Source: {sourceReference}");
-        ImGui.TextDisabled($"Commit: {shortCommit}");
-        ImGui.TextDisabled($"Build: {configuration} / {targetFramework} / SDK {sdkVersion}");
+        using (var table = ImGuiExtensions.BeginDefinitionTable($"provenance-{component}"))
+        {
+            if (table.IsVisible)
+            {
+                ImGuiExtensions.DefinitionRow("Source", sourceReference);
+                ImGuiExtensions.DefinitionRow("Commit", shortCommit);
+                ImGuiExtensions.DefinitionRow("Configuration", configuration);
+                ImGuiExtensions.DefinitionRow("Framework", targetFramework);
+                ImGuiExtensions.DefinitionRow("SDK", sdkVersion);
+            }
+        }
 
         bool hasRepository = IsKnownBuildValue(repositoryUrl);
         if (!hasRepository)
@@ -368,7 +378,7 @@ public partial class SimulationViewer
         }
 
         ImGui.BeginGroup();
-        ImGui.TextUnformatted("Numos Simulation Viewer");
+        ImGui.TextUnformatted("Numos.Viewer");
         ImGui.TextDisabled($"CoreSim v{CoreSimBuildInfo.PackageVersion}");
         ImGui.TextDisabled($"Viewer v{ViewerBuildInfo.PackageVersion}");
         ImGui.EndGroup();
@@ -420,10 +430,10 @@ public partial class SimulationViewer
                 if (ImGui.MenuItem("Save Replay..."))
                     RequestSaveReplay();
 
-                ImGui.EndDisabled();
-
-                if (_world != null && ImGui.MenuItem("Close Project"))
+                if (ImGui.MenuItem("Close Project"))
                     RequestCloseProject();
+
+                ImGui.EndDisabled();
 
                 ImGui.Separator();
                 if (ImGui.MenuItem("Exit", "Alt+F4"))
@@ -479,60 +489,8 @@ public partial class SimulationViewer
                 ImGui.EndMenu();
             }
 
+            RenderUnseenMessagesIndicator();
             ImGui.EndMainMenuBar();
-        }
-    }
-
-    private void RenderSolutionDiagnostics()
-    {
-        ImGui.Text($"FPS: {ImGui.GetIO().Framerate:F1}");
-        ImGui.Text($"Simulation Ticks: {_simulation?.TickCount ?? 0}");
-
-        if (ImGui.CollapsingHeader("Camera"))
-        {
-            ImGui.Text($"Position: {_camera3D.Position.X:F1}, {_camera3D.Position.Y:F1}, {_camera3D.Position.Z:F1}");
-            ImGui.Text($"Target: {_camera3D.Target.X:F1}, {_camera3D.Target.Y:F1}, {_camera3D.Target.Z:F1}");
-            ImGui.Text($"Distance: {Vector3.Distance(_camera3D.Position, _camera3D.Target):F1}");
-        }
-
-        if (ImGui.CollapsingHeader("2D Slice"))
-        {
-            ImGui.Text($"Axis: {_currentSliceAxis}");
-            ImGui.Text($"Slice Index: {_currentSliceIndex}");
-            ImGui.Text($"Visible Cells: {(_sliceDrawData == null ? 0 : _sliceDrawData.Cells.Length)}");
-
-            if (_hoveredSliceCell.HasValue)
-                ImGui.Text($"Hovered Cell: {FormatCellCoordinates(_hoveredSliceCell.Value.Address)}");
-            else
-                ImGui.TextDisabled("Hovered Cell: none");
-        }
-
-        if (ImGui.CollapsingHeader("Selection"))
-        {
-            if (_selectedCell.HasValue)
-            {
-                DrawCellSelectionDetails(_selectedCell.Value);
-
-                if (ImGui.Button("Clear Selection##selected-cell"))
-                    ClearVoxelSelection();
-            }
-            else
-            {
-                ImGui.TextDisabled("No selected cell.");
-            }
-        }
-
-        if (ImGui.CollapsingHeader("Chunks"))
-        {
-            ImGui.Text($"Presented Chunks: {_drawData?.Chunks.Count ?? 0}");
-            if (_drawData != null)
-            {
-                foreach (var chunk in _drawData.Chunks.Values)
-                {
-                    ImGui.BulletText(
-                        $"Chunk {chunk.ChunkPosition}: {chunk.VisibleCellCount} visible cells, {chunk.SurfaceFaceCount} faces");
-                }
-            }
         }
     }
 
@@ -550,7 +508,7 @@ public partial class SimulationViewer
         if (!window.IsVisible)
             return;
 
-        ImGui.Text("Visualization");
+        ImGui.SeparatorText("Visualization");
 
         if (_frameBuilder != null)
         {
@@ -577,22 +535,19 @@ public partial class SimulationViewer
 
         RenderVisualizationLegend();
 
-        ImGui.Separator();
+        ImGui.SeparatorText("Rendering style");
         RenderRenderingStyleTable();
 
-        ImGui.Separator();
+        ImGui.SeparatorText("3D focus");
         RenderChunkFocusControls();
 
-        ImGui.Separator();
-        ImGui.Text("2D Slice View");
-        ImGui.Checkbox("Show Slice Viewport", ref _showSliceViewport);
+        ImGui.SeparatorText("2D slice");
+        ImGui.Checkbox("Show slice viewport", ref _showSliceViewport);
         RenderSliceControls();
     }
 
     private void RenderRenderingStyleTable()
     {
-        ImGui.Text("Rendering Style");
-
         if (!ImGui.BeginTable(
                 "RenderingStyleTable##render-style",
                 3,
@@ -607,19 +562,19 @@ public partial class SimulationViewer
         ImGui.TableHeadersRow();
 
         RenderRenderingStyleRow(
-            "Chunk Outlines",
+            "Chunk outlines",
             "chunk-outlines",
             ref _show3DChunkOutlines,
             ref _show2DChunkOutlines);
 
         RenderRenderingStyleRow(
-            "Voxel Outlines",
+            "Voxel outlines",
             "voxel-outlines",
             ref _show3DVoxelOutlines,
             ref _show2DVoxelOutlines);
 
         RenderRenderingStyleRow(
-            "Transparent Voxels",
+            "Transparent voxels",
             "transparent-voxels",
             ref _transparent3DVoxels,
             ref _transparent2DVoxels);
@@ -635,7 +590,7 @@ public partial class SimulationViewer
     {
         ImGui.TableNextRow();
         ImGui.TableSetColumnIndex(0);
-        ImGui.Text(label);
+        ImGui.TextUnformatted(label);
         ImGui.TableSetColumnIndex(1);
         ImGui.Checkbox($"##{id}-3d", ref show3D);
         ImGui.TableSetColumnIndex(2);
@@ -656,224 +611,169 @@ public partial class SimulationViewer
         if (!window.IsVisible)
             return;
 
+        bool inspecting = DrawInspectionNotice();
+        if (inspecting)
+            ClearConfigurationDrafts();
+
         if (ImGui.CollapsingHeader("AtmosConfig", ImGuiTreeNodeFlags.DefaultOpen))
         {
-            if (ImGui.Button("Reset to Defaults##config-reset"))
-                ResetConfigurationValues();
+            ImGui.BeginDisabled(inspecting);
+            if (ImGui.Button("Reset to Defaults...##config-reset"))
+                RequestResetConfiguration();
 
+            ImGui.EndDisabled();
+
+            // Every apply is a recorded replay operation, so typed values wait for Enter or focus loss instead of
+            // recording each keystroke.
+            if (!inspecting)
+                ImGui.TextDisabled("Values apply on Enter, when a field loses focus, or when a slider is released.");
+
+            DrawFeedback(_configurationFeedback);
             ImGui.Separator();
-            float globalTemp = _config.GlobalTemperature;
-            if (ConfigSlider(
-                    "Global Temperature",
-                    "config-global-temperature",
-                    ref globalTemp,
-                    0f,
-                    1000f,
-                    "Reference ambient temperature."))
-            {
-                _config.GlobalTemperature = globalTemp;
-                ApplyConfiguration();
-            }
 
-            float defaultTemperatureFallback = _config.DefaultTemperatureFallback;
-            if (ConfigSlider(
-                    "Default Temperature Fallback",
-                    "config-default-temperature-fallback",
-                    ref defaultTemperatureFallback,
-                    0f,
-                    1000f,
-                    "Default fallback temperature to set when a voxel has 0 or an uninitialized temperature."))
-            {
-                _config.DefaultTemperatureFallback = defaultTemperatureFallback;
-                ApplyConfiguration();
-            }
+            ConfigFloatInput(
+                AtmosConfigFields.GlobalTemperature,
+                "config-global-temperature",
+                _config.GlobalTemperature,
+                ConfigDomain.Positive,
+                inspecting,
+                static (config, value) => config.GlobalTemperature = value);
 
-            float voxelVolume = _config.VoxelVolume;
-            if (ConfigSlider(
-                    "Voxel Volume (m³)",
-                    "config-voxel-volume",
-                    ref voxelVolume,
-                    0.001f,
-                    100f,
-                    "Physical volume represented by each voxel. Pressure uses P = nRT/V."))
-            {
-                _config.VoxelVolume = voxelVolume;
-                ApplyConfiguration();
-            }
+            ConfigFloatInput(
+                AtmosConfigFields.DefaultTemperatureFallback,
+                "config-default-temperature-fallback",
+                _config.DefaultTemperatureFallback,
+                ConfigDomain.Positive,
+                inspecting,
+                static (config, value) => config.DefaultTemperatureFallback = value);
 
-            float saturationReferencePressure = _config.SaturationReferencePressure;
-            if (ConfigSlider(
-                    "Saturation Reference Pressure (Pa)",
-                    "config-saturation-reference-pressure",
-                    ref saturationReferencePressure,
-                    100f,
-                    200_000f,
-                    "Pressure at which each gas's configured boiling point applies."))
-            {
-                _config.SaturationReferencePressure = saturationReferencePressure;
-                ApplyConfiguration();
-            }
+            ConfigFloatInput(
+                AtmosConfigFields.VoxelVolume,
+                "config-voxel-volume",
+                _config.VoxelVolume,
+                ConfigDomain.Positive,
+                inspecting,
+                static (config, value) => config.VoxelVolume = value);
 
-            float defaultMolarHeatCapacityAtConstantVolume = _config.DefaultMolarHeatCapacityAtConstantVolume;
-            if (ConfigSlider(
-                    "Default Molar Cv",
-                    "config-default-molar-cv",
-                    ref defaultMolarHeatCapacityAtConstantVolume,
-                    0.01f,
-                    10_000f,
-                    "Fallback molar heat capacity at constant volume in J/(mol·K)."))
-            {
-                _config.DefaultMolarHeatCapacityAtConstantVolume = defaultMolarHeatCapacityAtConstantVolume;
-                ApplyConfiguration();
-            }
+            ConfigFloatInput(
+                AtmosConfigFields.SaturationReferencePressure,
+                "config-saturation-reference-pressure",
+                _config.SaturationReferencePressure,
+                ConfigDomain.Positive,
+                inspecting,
+                static (config, value) => config.SaturationReferencePressure = value,
+                QuantityFormat.KilopascalsPerPascal);
 
-            float defaultDiffusionCoefficient = _config.DefaultDiffusionCoefficient;
-            if (ConfigSlider(
-                    "Default Diffusion Coefficient",
-                    "config-default-diffusion-coefficient",
-                    ref defaultDiffusionCoefficient,
-                    0f,
-                    1f,
-                    "Fallback fraction of the species mole imbalance mixed per tick."))
-            {
-                _config.DefaultDiffusionCoefficient = defaultDiffusionCoefficient;
-                ApplyConfiguration();
-            }
+            ConfigFloatInput(
+                AtmosConfigFields.DefaultMolarHeatCapacityAtConstantVolume,
+                "config-default-molar-cv",
+                _config.DefaultMolarHeatCapacityAtConstantVolume,
+                ConfigDomain.Positive,
+                inspecting,
+                static (config, value) => config.DefaultMolarHeatCapacityAtConstantVolume = value);
 
-            float spaceTemperature = _config.SpaceTemperature;
-            if (ConfigSlider(
-                    "Space Temperature",
-                    "config-space-temperature",
-                    ref spaceTemperature,
-                    0f,
-                    100f,
-                    "Default temperature of space."))
-            {
-                _config.SpaceTemperature = spaceTemperature;
-                ApplyConfiguration();
-            }
+            ConfigFloatSlider(
+                AtmosConfigFields.DefaultDiffusionCoefficient,
+                "config-default-diffusion-coefficient",
+                _config.DefaultDiffusionCoefficient,
+                0f,
+                1f,
+                ConfigDomain.UnitInterval,
+                inspecting,
+                static (config, value) => config.DefaultDiffusionCoefficient = value);
 
-            float bulkFlowCoefficient = _config.BulkFlowCoefficient;
-            if (ConfigSlider(
-                    "Bulk Flow Coefficient",
-                    "config-bulk-flow-coefficient",
-                    ref bulkFlowCoefficient,
-                    0f,
-                    0.5f,
-                    "Fraction of pressure delta converted to flow per tick."))
-            {
-                _config.BulkFlowCoefficient = bulkFlowCoefficient;
-                ApplyConfiguration();
-            }
+            ConfigFloatInput(
+                AtmosConfigFields.SpaceTemperature,
+                "config-space-temperature",
+                _config.SpaceTemperature,
+                ConfigDomain.Positive,
+                inspecting,
+                static (config, value) => config.SpaceTemperature = value);
 
-            float vacuumThreshold = _config.VacuumThreshold;
-            if (ConfigSlider(
-                    "Vacuum Threshold",
-                    "config-vacuum-threshold",
-                    ref vacuumThreshold,
-                    0f,
-                    100f,
-                    "Below this pressure, voxel contents are zeroed out."))
-            {
-                _config.VacuumThreshold = vacuumThreshold;
-                ApplyConfiguration();
-            }
+            ConfigFloatSlider(
+                AtmosConfigFields.BulkFlowCoefficient,
+                "config-bulk-flow-coefficient",
+                _config.BulkFlowCoefficient,
+                0f,
+                0.5f,
+                ConfigDomain.UnitInterval,
+                inspecting,
+                static (config, value) => config.BulkFlowCoefficient = value);
 
-            int sleepThreshold = _config.SleepThreshold;
-            if (ConfigSlider(
-                    "Sleep Threshold",
-                    "config-sleep-threshold",
-                    ref sleepThreshold,
-                    1,
-                    1000,
-                    "Consecutive ticks below Sleep Epsilon before a chunk goes to sleep."))
-            {
-                _config.SleepThreshold = sleepThreshold;
-                ApplyConfiguration();
-            }
+            ConfigFloatInput(
+                AtmosConfigFields.VacuumThreshold,
+                "config-vacuum-threshold",
+                _config.VacuumThreshold,
+                ConfigDomain.NonNegative,
+                inspecting,
+                static (config, value) => config.VacuumThreshold = value,
+                QuantityFormat.KilopascalsPerPascal);
 
-            float sleepEpsilon = _config.SleepEpsilon;
-            if (ConfigSlider(
-                    "Sleep Epsilon",
-                    "config-sleep-epsilon",
-                    ref sleepEpsilon,
-                    0f,
-                    100f,
-                    "Maximum relative pressure difference considered at rest, as a percentage."))
-            {
-                _config.SleepEpsilon = sleepEpsilon;
-                ApplyConfiguration();
-            }
+            ConfigIntInput(
+                AtmosConfigFields.SleepThreshold,
+                "config-sleep-threshold",
+                _config.SleepThreshold,
+                inspecting,
+                static (config, value) => config.SleepThreshold = value);
 
-            float thermalConductance = _config.ThermalConductance;
-            if (ConfigSlider(
-                    "Thermal Conductance",
-                    "config-thermal-conductance",
-                    ref thermalConductance,
-                    0f,
-                    1f,
-                    "Per-face energy conductance in J/K per thermodynamics tick."))
-            {
-                _config.ThermalConductance = thermalConductance;
-                ApplyConfiguration();
-            }
+            ConfigFloatSlider(
+                AtmosConfigFields.SleepEpsilon,
+                "config-sleep-epsilon",
+                _config.SleepEpsilon,
+                0f,
+                100f,
+                ConfigDomain.NonNegative,
+                inspecting,
+                static (config, value) => config.SleepEpsilon = value);
 
-            float condensationRateFactor = _config.CondensationRateFactor;
-            if (ConfigSlider(
-                    "Condensation Rate Factor",
-                    "config-condensation-rate-factor",
-                    ref condensationRateFactor,
-                    0f,
-                    1f,
-                    "Rate multiplier for phase-change condensation."))
-            {
-                _config.CondensationRateFactor = condensationRateFactor;
-                ApplyConfiguration();
-            }
+            ConfigFloatInput(
+                AtmosConfigFields.ThermalConductance,
+                "config-thermal-conductance",
+                _config.ThermalConductance,
+                ConfigDomain.NonNegative,
+                inspecting,
+                static (config, value) => config.ThermalConductance = value);
 
-            float maxPressureTransferFraction = _config.MaxPressureTransferFractionPerNeighbor;
-            if (ConfigSlider(
-                    "Max Pressure Transfer / Neighbor",
-                    "config-max-pressure-transfer-fraction",
-                    ref maxPressureTransferFraction,
-                    0f,
-                    1f,
-                    "Maximum source-pressure fraction requested as bulk flow to one neighbor per tick."))
-            {
-                _config.MaxPressureTransferFractionPerNeighbor = maxPressureTransferFraction;
-                ApplyConfiguration();
-            }
+            ConfigFloatSlider(
+                AtmosConfigFields.CondensationRateFactor,
+                "config-condensation-rate-factor",
+                _config.CondensationRateFactor,
+                0f,
+                1f,
+                ConfigDomain.UnitInterval,
+                inspecting,
+                static (config, value) => config.CondensationRateFactor = value);
 
-            float accumulatorWakeThreshold = _config.AccumulatorWakeThreshold;
-            if (ConfigSlider(
-                    "Accumulator Wake Threshold",
-                    "config-accumulator-wake-threshold",
-                    ref accumulatorWakeThreshold,
-                    0f,
-                    100f,
-                    "Minimum accumulated flow or pressure activity required to wake a sleeping chunk."))
-            {
-                _config.AccumulatorWakeThreshold = accumulatorWakeThreshold;
-                ApplyConfiguration();
-            }
+            ConfigFloatSlider(
+                AtmosConfigFields.MaxPressureTransferFractionPerNeighbor,
+                "config-max-pressure-transfer-fraction",
+                _config.MaxPressureTransferFractionPerNeighbor,
+                0f,
+                1f,
+                ConfigDomain.UnitInterval,
+                inspecting,
+                static (config, value) => config.MaxPressureTransferFractionPerNeighbor = value);
 
-            int accumulatorMaxAliveTicks = _config.AccumulatorMaxAliveTicks;
-            if (ConfigSlider(
-                    "Accumulator Max Alive Ticks",
-                    "config-accumulator-max-alive-ticks",
-                    ref accumulatorMaxAliveTicks,
-                    1,
-                    1000,
-                    "Maximum number of ticks that an accumulated activity value remains alive."))
-            {
-                _config.AccumulatorMaxAliveTicks = accumulatorMaxAliveTicks;
-                ApplyConfiguration();
-            }
+            ConfigFloatInput(
+                AtmosConfigFields.AccumulatorWakeThreshold,
+                "config-accumulator-wake-threshold",
+                _config.AccumulatorWakeThreshold,
+                ConfigDomain.NonNegative,
+                inspecting,
+                static (config, value) => config.AccumulatorWakeThreshold = value,
+                QuantityFormat.KilopascalsPerPascal);
+
+            ConfigIntInput(
+                AtmosConfigFields.AccumulatorMaxAliveTicks,
+                "config-accumulator-max-alive-ticks",
+                _config.AccumulatorMaxAliveTicks,
+                inspecting,
+                static (config, value) => config.AccumulatorMaxAliveTicks = value);
         }
 
         ImGui.Spacing();
         if (ImGui.CollapsingHeader("Gas Registry", ImGuiTreeNodeFlags.DefaultOpen))
-            RenderProjectGasControls();
+            RenderProjectGasControls(inspecting);
     }
 
     private void ResetConfigurationValues()
@@ -881,42 +781,202 @@ public partial class SimulationViewer
         if (_config == null)
             return;
 
-        var defaults = new AtmosConfig();
-        _config.GlobalTemperature = defaults.GlobalTemperature;
-        _config.DefaultTemperatureFallback = defaults.DefaultTemperatureFallback;
-        _config.DefaultMolarHeatCapacityAtConstantVolume = defaults.DefaultMolarHeatCapacityAtConstantVolume;
-        _config.VoxelVolume = defaults.VoxelVolume;
-        _config.SaturationReferencePressure = defaults.SaturationReferencePressure;
-        _config.DefaultDiffusionCoefficient = defaults.DefaultDiffusionCoefficient;
-        _config.SpaceTemperature = defaults.SpaceTemperature;
-        _config.BulkFlowCoefficient = defaults.BulkFlowCoefficient;
-        _config.VacuumThreshold = defaults.VacuumThreshold;
-        _config.SleepThreshold = defaults.SleepThreshold;
-        _config.SleepEpsilon = defaults.SleepEpsilon;
-        _config.ThermalConductance = defaults.ThermalConductance;
-        _config.CondensationRateFactor = defaults.CondensationRateFactor;
-        _config.MaxPressureTransferFractionPerNeighbor = defaults.MaxPressureTransferFractionPerNeighbor;
-        _config.AccumulatorWakeThreshold = defaults.AccumulatorWakeThreshold;
-        _config.AccumulatorMaxAliveTicks = defaults.AccumulatorMaxAliveTicks;
-        ApplyConfiguration();
+        ClearConfigurationDrafts();
+        var previous = new AtmosConfig();
+        CopyScalarSettings(_config, previous);
+        CopyScalarSettings(new AtmosConfig(), _config);
+
+        // One SetAtmosConfig call, so the Timeline records the whole reset as a single operation.
+        if (TryApplyConfiguration(out string? error))
+        {
+            _configurationFeedback = new FeedbackMessage("Reset every AtmosConfig setting to the library defaults.", false);
+            return;
+        }
+
+        CopyScalarSettings(previous, _config);
+        _configurationFeedback = new FeedbackMessage($"Could not reset the settings: {error}", true);
     }
 
-    private static bool ConfigSlider(string label, string id, ref float value, float min, float max, string tooltip)
+    private static void DrawConfigFieldLabel(AtmosConfigFieldInfo field)
     {
-        ImGui.TextUnformatted(label);
-        ImGuiExtensions.QuestionTooltip(tooltip);
+        ImGui.TextUnformatted(field.LabelWithUnit);
+        ImGuiExtensions.QuestionTooltip(field.Tooltip);
         ImGui.SetNextItemWidth(-1f);
-        bool changed = ImGui.SliderFloat($"##{id}", ref value, min, max);
-        return changed;
     }
 
-    private static bool ConfigSlider(string label, string id, ref int value, int min, int max, string tooltip)
+    /// <summary>
+    ///     Draws a typed numeric field that holds its edit as a draft and applies it once the field is deactivated.
+    /// </summary>
+    /// <param name="field">Shared label, unit, and tooltip for the setting.</param>
+    /// <param name="id">ImGui ID and draft key, unique within the Configuration panel.</param>
+    /// <param name="current">The value currently in <see cref="_config" />.</param>
+    /// <param name="domain">Values the snapshot keeps unchanged; anything else is rejected with a message.</param>
+    /// <param name="readOnly">Shows <paramref name="current" /> without allowing edits.</param>
+    /// <param name="assign">Writes an accepted value into the editable configuration.</param>
+    private void ConfigFloatInput(
+        AtmosConfigFieldInfo field,
+        string id,
+        float current,
+        ConfigDomain domain,
+        bool readOnly,
+        Action<AtmosConfig, float> assign,
+        float displayScale = 1f)
     {
-        ImGui.TextUnformatted(label);
-        ImGuiExtensions.QuestionTooltip(tooltip);
-        ImGui.SetNextItemWidth(-1f);
-        bool changed = ImGui.SliderInt($"##{id}", ref value, min, max);
-        return changed;
+        DrawConfigFieldLabel(field);
+        float shown = current * displayScale;
+        if (readOnly)
+        {
+            ImGui.InputFloat($"##{id}", ref shown, 0f, 0f, "%g", ImGuiInputTextFlags.ReadOnly);
+            return;
+        }
+
+        float value = _configFloatDrafts.GetValueOrDefault(id, shown);
+        if (ImGui.InputFloat($"##{id}", ref value, 0f, 0f, "%g"))
+            SetConfigDraft(_configFloatDrafts, id, value);
+
+        if (ImGui.IsItemDeactivatedAfterEdit())
+            CommitConfigFloat(field, id, current, domain, assign, displayScale);
+
+        ImGuiExtensions.Feedback(_configFieldErrors.GetValueOrDefault(id), true);
+    }
+
+    /// <summary>
+    ///     Draws a slider for a bounded setting. The value is held as a draft while dragging and applied on release.
+    /// </summary>
+    /// <remarks>
+    ///     Ctrl+click typing can still enter a value outside the slider's range; <paramref name="domain" /> decides
+    ///     whether that value is accepted.
+    /// </remarks>
+    private void ConfigFloatSlider(
+        AtmosConfigFieldInfo field,
+        string id,
+        float current,
+        float minimum,
+        float maximum,
+        ConfigDomain domain,
+        bool readOnly,
+        Action<AtmosConfig, float> assign)
+    {
+        DrawConfigFieldLabel(field);
+        if (readOnly)
+        {
+            ImGui.InputFloat($"##{id}", ref current, 0f, 0f, "%.3f", ImGuiInputTextFlags.ReadOnly);
+            return;
+        }
+
+        float value = _configFloatDrafts.GetValueOrDefault(id, current);
+        if (ImGui.SliderFloat($"##{id}", ref value, minimum, maximum, "%.3f"))
+            SetConfigDraft(_configFloatDrafts, id, value);
+
+        if (ImGui.IsItemDeactivatedAfterEdit())
+            CommitConfigFloat(field, id, current, domain, assign);
+
+        ImGuiExtensions.Feedback(_configFieldErrors.GetValueOrDefault(id), true);
+    }
+
+    private void ConfigIntInput(
+        AtmosConfigFieldInfo field,
+        string id,
+        int current,
+        bool readOnly,
+        Action<AtmosConfig, int> assign)
+    {
+        DrawConfigFieldLabel(field);
+        if (readOnly)
+        {
+            ImGui.InputInt($"##{id}", ref current, 0, 0, ImGuiInputTextFlags.ReadOnly);
+            return;
+        }
+
+        // No step buttons: they are separate items and would make "deactivated after edit" unreliable.
+        int value = _configIntDrafts.GetValueOrDefault(id, current);
+        if (ImGui.InputInt($"##{id}", ref value, 0, 0))
+            SetConfigDraft(_configIntDrafts, id, value);
+
+        if (ImGui.IsItemDeactivatedAfterEdit() && _configIntDrafts.Remove(id, out int draft))
+        {
+            if (draft < 0)
+            {
+                _configIntDrafts[id] = draft;
+                _configFieldErrors[id] = $"{field.Label} must be 0 or more. The previous value is still applied.";
+            }
+            else if (draft != current)
+            {
+                assign(_config!, draft);
+                if (!TryCommitConfigurationField(field, FormatConfigValue(draft, field.Unit)))
+                    assign(_config!, current);
+            }
+        }
+
+        ImGuiExtensions.Feedback(_configFieldErrors.GetValueOrDefault(id), true);
+    }
+
+    private void SetConfigDraft<T>(Dictionary<string, T> drafts, string id, T value)
+    {
+        drafts[id] = value;
+        _configFieldErrors.Remove(id);
+        _configurationFeedback = null;
+    }
+
+    private void CommitConfigFloat(
+        AtmosConfigFieldInfo field,
+        string id,
+        float current,
+        ConfigDomain domain,
+        Action<AtmosConfig, float> assign,
+        float displayScale = 1f)
+    {
+        if (!_configFloatDrafts.TryGetValue(id, out float draft))
+            return;
+
+        string? error = ValidateConfigValue(field, draft, domain);
+        if (error != null)
+        {
+            // Keep the rejected draft on screen so it can be corrected rather than retyped.
+            _configFieldErrors[id] = error;
+            return;
+        }
+
+        _configFloatDrafts.Remove(id);
+        if (draft.Equals(current * displayScale))
+            return;
+
+        assign(_config!, draft / displayScale);
+        if (!TryCommitConfigurationField(field, FormatConfigValue(draft, field.Unit)))
+            assign(_config!, current);
+    }
+
+    private bool TryCommitConfigurationField(AtmosConfigFieldInfo field, string formattedValue)
+    {
+        if (TryApplyConfiguration(out string? error))
+        {
+            _configurationFeedback = new FeedbackMessage($"{field.Label} set to {formattedValue}.", false);
+            return true;
+        }
+
+        _configurationFeedback = new FeedbackMessage($"Could not apply {field.Label}: {error}", true);
+        return false;
+    }
+
+    private static string? ValidateConfigValue(AtmosConfigFieldInfo field, float value, ConfigDomain domain)
+    {
+        string unit = field.Unit.Length == 0 ? string.Empty : " " + field.Unit;
+        return domain switch
+        {
+            ConfigDomain.Positive when !float.IsFinite(value) || value <= 0f =>
+                $"{field.Label} must be finite and above 0{unit}. The previous value is still applied.",
+            ConfigDomain.NonNegative when !float.IsFinite(value) || value < 0f =>
+                $"{field.Label} must be finite and at least 0{unit}. The previous value is still applied.",
+            ConfigDomain.UnitInterval when !float.IsFinite(value) || value < 0f || value > 1f =>
+                $"{field.Label} must be between 0 and 1. The previous value is still applied.",
+            _ => null
+        };
+    }
+
+    private static string FormatConfigValue(double value, string unit)
+    {
+        string number = value.ToString("G6", CultureInfo.InvariantCulture);
+        return unit.Length == 0 ? number : $"{number} {unit}";
     }
 
     private void RenderToolsPanel()
@@ -933,68 +993,21 @@ public partial class SimulationViewer
         if (!window.IsVisible)
             return;
 
-        ImGui.TextDisabled($"Editing {GetSimulationName(_simulation.Id)}");
+        bool inspecting = DrawInspectionNotice();
+        ImGui.TextDisabled($"{(inspecting ? "Viewing" : "Editing")} {GetSimulationName(_simulation.Id)}");
 
         if (ImGui.CollapsingHeader("Chunks", ImGuiTreeNodeFlags.DefaultOpen))
-            RenderProjectChunkControls();
+            RenderProjectChunkControls(inspecting);
 
         if (ImGui.CollapsingHeader("Voxel Tools", ImGuiTreeNodeFlags.DefaultOpen))
-            RenderVoxelTools();
+            RenderVoxelTools(inspecting);
 
         if (ImGui.CollapsingHeader("Inject Gas"))
-            RenderProjectInjectionControls();
+            RenderProjectInjectionControls(inspecting);
     }
 
-    private void RenderVoxelTools()
+    private void RenderVoxelTools(bool inspecting)
     {
-        ImGui.Text("Chunk operations");
-        if (_liveChunkHandles.Count == 0)
-        {
-            ImGui.TextDisabled("Add a chunk before editing classifications.");
-        }
-        else
-        {
-            if (!_toolChunkPosition.HasValue || !_liveChunkPositions.Contains(_toolChunkPosition.Value))
-                _toolChunkPosition = _liveChunkHandles[0].Position;
-
-            string chunkLabel = FormatChunkPosition(_toolChunkPosition.Value);
-            if (ImGui.BeginCombo("Chunk##tool-classification", chunkLabel))
-            {
-                foreach (var handle in _liveChunkHandles)
-                {
-                    bool chunkSelected = handle.Position == _toolChunkPosition.Value;
-                    if (ImGui.Selectable(FormatChunkPosition(handle.Position), chunkSelected))
-                        _toolChunkPosition = handle.Position;
-
-                    if (chunkSelected)
-                        ImGui.SetItemDefaultFocus();
-                }
-
-                ImGui.EndCombo();
-            }
-
-            ImGui.SetNextItemWidth(NumericInputWidth);
-            ImGui.InputInt("Fill VoxelClassification", ref _toolClassificationDraft);
-            if (ImGui.Button("Fill Selected Chunk"))
-            {
-                try
-                {
-                    _simulation!.SetChunkClassification(
-                        new AtmosChunkHandle(_toolChunkPosition.Value),
-                        new VoxelClassification(_toolClassificationDraft));
-
-                    SetProjectMessage(
-                        $"Filled chunk {FormatChunkPosition(_toolChunkPosition.Value)} with classification " +
-                        $"{_toolClassificationDraft}.",
-                        false);
-                }
-                catch (Exception exception) when (exception is ArgumentOutOfRangeException or KeyNotFoundException)
-                {
-                    WriteException("Could not fill the chunk", exception);
-                }
-            }
-        }
-
         ImGui.SeparatorText("Viewport tool");
         DrawVoxelToolButton("Select / Box", VoxelEditTool.Select);
         ImGui.SameLine();
@@ -1003,10 +1016,14 @@ public partial class SimulationViewer
         ImGui.SameLine();
         DrawVoxelToolButton("Erase Gas", VoxelEditTool.EraseGas);
 
+        bool draftChanged = false;
+        ImGui.BeginDisabled(inspecting);
         ImGui.SetNextItemWidth(NumericInputWidth);
-        ImGui.InputInt("Classification##voxel-edit", ref _voxelClassificationDraft);
-        ImGui.TextDisabled("0 unassigned, -2 solid, -1 void, positive values are room IDs.");
+        draftChanged |= ImGui.InputInt("Classification##voxel-edit", ref _voxelClassificationDraft);
+        ImGui.EndDisabled();
+        ImGui.TextDisabled(ClassificationFormatHelp);
 
+        ImGui.BeginDisabled(inspecting);
         if (_config!.GasRegistry.Count > 0)
         {
             _injectionGasId = Math.Clamp(_injectionGasId, 0, _config.GasRegistry.Count - 1);
@@ -1016,7 +1033,10 @@ public partial class SimulationViewer
                 {
                     bool gasSelected = gasId == _injectionGasId;
                     if (ImGui.Selectable(FormatGas(gasId), gasSelected))
+                    {
                         _injectionGasId = gasId;
+                        draftChanged = true;
+                    }
                 }
 
                 ImGui.EndCombo();
@@ -1024,33 +1044,42 @@ public partial class SimulationViewer
         }
 
         ImGui.SetNextItemWidth(NumericInputWidth);
-        ImGui.InputFloat("Moles##voxel-edit", ref _injectionMoles);
+        draftChanged |= ImGui.InputFloat("Amount (mol)##voxel-edit", ref _injectionMoles);
         ImGui.SetNextItemWidth(NumericInputWidth);
-        ImGui.InputFloat("Temperature (K)##voxel-edit", ref _injectionTemperature);
+        draftChanged |= ImGui.InputFloat("Temperature (K)##voxel-edit", ref _injectionTemperature);
+        ImGui.EndDisabled();
+
+        if (draftChanged)
+            _voxelFeedback = null;
 
         ImGui.SeparatorText("Selection");
         if (!_selectedCell.HasValue)
         {
             ImGui.TextDisabled("No voxels selected.");
-            return;
+        }
+        else
+        {
+            ImGui.Text($"{_selectedCells.Count} voxel{(_selectedCells.Count == 1 ? string.Empty : "s")} selected");
+            DrawCellSelectionDetails(_selectedCell.Value);
+
+            ImGui.BeginDisabled(inspecting);
+            if (ImGui.Button("Set Classification"))
+                ApplyClassification(_selectedCells, _voxelClassificationDraft);
+
+            ImGui.SameLine();
+            if (ImGui.Button("Inject Gas##selected-voxels"))
+                ApplyGasInjection(_selectedCells);
+
+            if (ImGui.Button("Clear Gas"))
+                ApplyClearGas(_selectedCells);
+
+            ImGui.EndDisabled();
+            ImGui.SameLine();
+            if (ImGui.Button("Clear Selection"))
+                ClearVoxelSelection();
         }
 
-        ImGui.Text($"{_selectedCells.Count} voxel{(_selectedCells.Count == 1 ? string.Empty : "s")} selected");
-        DrawCellSelectionDetails(_selectedCell.Value);
-
-        if (ImGui.Button("Set Classification"))
-            ApplyClassification(_selectedCells, _voxelClassificationDraft);
-
-        ImGui.SameLine();
-        if (ImGui.Button("Inject Gas##selected-voxels"))
-            ApplyGasInjection(_selectedCells);
-
-        if (ImGui.Button("Clear Gas"))
-            ApplyClearGas(_selectedCells);
-
-        ImGui.SameLine();
-        if (ImGui.Button("Clear Selection"))
-            ClearVoxelSelection();
+        DrawFeedback(_voxelFeedback);
     }
 
     private void DrawVoxelToolButton(string label, VoxelEditTool tool)
@@ -1083,11 +1112,11 @@ public partial class SimulationViewer
             _selectedSliceChunkPosition = _drawData.Chunks.Keys.First();
 
         string selectedChunkLabel = FormatChunkPosition(_selectedSliceChunkPosition.Value);
-        if (_focusedChunk.HasValue)
+        bool followsFocus = _focusedChunk.HasValue;
+        if (_focusedChunk is { } focusedChunk)
         {
-            _selectedSliceChunkPosition = _focusedChunk.Value.Position;
+            _selectedSliceChunkPosition = focusedChunk.Position;
             selectedChunkLabel = FormatChunkPosition(_selectedSliceChunkPosition.Value);
-            ImGui.TextDisabled($"Chunk: {selectedChunkLabel} (focused)");
         }
         else if (ImGui.BeginCombo("Chunk##slice-chunk", selectedChunkLabel))
         {
@@ -1128,7 +1157,14 @@ public partial class SimulationViewer
 
         ImGui.SliderInt("Slice##slice-index", ref _currentSliceIndex, 0, maxSliceIndex);
 
-        ImGui.TextDisabled($"Viewing {_currentSliceAxis}={_currentSliceIndex} on chunk {selectedChunkLabel}");
+        using var readout = ImGuiExtensions.BeginDefinitionTable("slice-readout");
+        if (!readout.IsVisible)
+            return;
+
+        ImGuiExtensions.DefinitionRow("Showing", $"{_currentSliceAxis} = {_currentSliceIndex} of 0-{maxSliceIndex}");
+        ImGuiExtensions.DefinitionRow(
+            "Chunk",
+            followsFocus ? $"{selectedChunkLabel}, from 3D focus" : selectedChunkLabel);
     }
 
     private void RenderVisualizationLegend()
@@ -1137,46 +1173,69 @@ public partial class SimulationViewer
             return;
 
         var legend = _drawData.Visualization.Legend;
-        ImGui.TextDisabled(
-            string.IsNullOrWhiteSpace(legend.Units)
+
+        // Pressure legends arrive in pascals; the viewer shows and edits them in kilopascals.
+        bool inKilopascals = legend.Units == "Pa";
+        float scale = inKilopascals ? QuantityFormat.KilopascalsPerPascal : 1f;
+        string units = inKilopascals ? "kPa" : legend.Units;
+        ImGui.TextUnformatted(
+            string.IsNullOrWhiteSpace(units)
                 ? legend.Title
-                : $"{legend.Title} ({legend.Units})");
+                : $"{legend.Title} ({units})");
 
         if (legend.Kind == VisualizationLegendKind.Gradient && legend.Entries.Count > 0)
         {
-            RenderLegendBoundsControls(legend.Range);
+            RenderGradientLegend(legend, units, scale);
 
-            ImGui.Checkbox("Resolution##legend-resolution-enabled", ref _legendResolutionEnabled);
+            using (var readout = ImGuiExtensions.BeginDefinitionTable("legend-readout"))
+            {
+                if (readout.IsVisible)
+                {
+                    var range = legend.Range;
+                    ImGuiExtensions.DefinitionRow("Range", FormatLegendRangeMode(units, scale));
+                    ImGuiExtensions.DefinitionRow("Minimum", QuantityFormat.Format(range.Minimum * scale, units));
+                    ImGuiExtensions.DefinitionRow("Maximum", QuantityFormat.Format(range.Maximum * scale, units));
+                }
+            }
+
+            RenderLegendBoundsControls(legend.Range, scale);
+
+            ImGui.Checkbox("Custom resolution##legend-resolution-enabled", ref _legendResolutionEnabled);
+            ImGui.SameLine();
             if (_legendResolutionEnabled)
             {
-                ImGui.SameLine();
                 ImGui.SetNextItemWidth(-1f);
-                ImGui.SliderInt("##legend-resolution", ref _legendResolution, 1, 256);
+                ImGui.SliderInt("##legend-resolution", ref _legendResolution, 1, 256, "%d levels");
             }
             else
-                ImGui.SameLine();
+            {
+                ImGui.TextDisabled($"{DefaultLegendResolution} levels (default)");
+            }
 
-            ImGui.TextDisabled(_legendResolutionEnabled ? $"{_legendResolution} levels" : "Off (coarse)");
-            RenderGradientLegend(legend);
             return;
         }
 
-        for (int index = 0; index < legend.Entries.Count; index++)
+        float swatchSize = ImGui.GetTextLineHeight();
+        foreach (var entry in legend.Entries)
         {
-            var entry = legend.Entries[index];
             var color = entry.Color;
-            ImGui.ColorButton(
-                $"##legend-{index}",
-                new Vector4(color.R, color.G, color.B, color.A),
-                ImGuiColorEditFlags.NoTooltip,
-                new Vector2(16, 16));
-
+            ImGuiExtensions.ColorSwatch(new Vector4(color.R, color.G, color.B, color.A), swatchSize);
             ImGui.SameLine();
             ImGui.TextUnformatted(entry.Label);
         }
     }
 
-    private void RenderLegendBoundsControls(VisualizationRange currentRange)
+    private string FormatLegendRangeMode(string units, float scale)
+    {
+        if (!_legendAutomaticBounds)
+            return "Fixed";
+
+        return _legendAutomaticRangeOffset > 0f
+            ? $"Automatic ± {QuantityFormat.Format(_legendAutomaticRangeOffset * scale, units)}, recomputed each frame"
+            : "Automatic, recomputed each frame";
+    }
+
+    private void RenderLegendBoundsControls(VisualizationRange currentRange, float scale)
     {
         bool automaticBounds = _legendAutomaticBounds;
         if (ImGui.Checkbox("Automatic bounds##legend-automatic-bounds", ref automaticBounds))
@@ -1194,10 +1253,10 @@ public partial class SimulationViewer
         if (_legendAutomaticBounds)
         {
             ImGui.SetNextItemWidth(NumericInputWidth);
-            float offset = _legendAutomaticRangeOffset;
+            float offset = _legendAutomaticRangeOffset * scale;
             if (ImGui.InputFloat("± Offset##legend-range-offset", ref offset))
             {
-                _legendAutomaticRangeOffset = Math.Max(offset, 0f);
+                _legendAutomaticRangeOffset = Math.Max(offset / scale, 0f);
                 _legendRangeRevision++;
             }
 
@@ -1207,19 +1266,19 @@ public partial class SimulationViewer
         }
 
         ImGui.SetNextItemWidth(NumericInputWidth);
-        float minimum = _legendMinimum;
+        float minimum = _legendMinimum * scale;
         if (ImGui.InputFloat("Min##legend-minimum", ref minimum))
         {
-            _legendMinimum = Math.Min(minimum, _legendMaximum);
+            _legendMinimum = Math.Min(minimum / scale, _legendMaximum);
             _legendRangeRevision++;
         }
 
         ImGui.SameLine();
         ImGui.SetNextItemWidth(NumericInputWidth);
-        float maximum = _legendMaximum;
+        float maximum = _legendMaximum * scale;
         if (ImGui.InputFloat("Max##legend-maximum", ref maximum))
         {
-            _legendMaximum = Math.Max(maximum, _legendMinimum);
+            _legendMaximum = Math.Max(maximum / scale, _legendMinimum);
             _legendRangeRevision++;
         }
 
@@ -1230,7 +1289,7 @@ public partial class SimulationViewer
         }
     }
 
-    private static void RenderGradientLegend(VisualizationLegend legend)
+    private static void RenderGradientLegend(VisualizationLegend legend, string units, float scale)
     {
         const int segmentCount = 256;
         const float barHeight = 18f;
@@ -1250,22 +1309,86 @@ public partial class SimulationViewer
                 ImGui.GetColorU32(new Vector4(color.R, color.G, color.B, color.A)));
         }
 
+        drawList.AddRect(topLeft, bottomRight, ImGui.ColorConvertFloat4ToU32(ViewerTheme.StructuralLine));
         ImGui.Dummy(new Vector2(width, barHeight + labelHeight));
-        uint textColor = ImGui.GetColorU32(ImGuiCol.Text);
-        foreach (var entry in legend.Entries)
+
+        // The end labels always draw; interior labels are dropped when they would collide with a neighbour, which
+        // happens once units are appended on a narrow panel.
+        IReadOnlyList<VisualizationLegendEntry> entries = legend.Entries;
+        int first = -1;
+        int last = -1;
+        for (int index = 0; index < entries.Count; index++)
         {
-            if (!entry.Value.HasValue)
+            if (!entries[index].Value.HasValue)
                 continue;
 
-            float position = NormalizeLegendValue(entry.Value.Value, legend);
-            float textWidth = ImGui.CalcTextSize(entry.Label).X;
-            float x = Math.Clamp(
-                topLeft.X + width * position - textWidth * position,
-                topLeft.X,
-                bottomRight.X - textWidth);
+            if (first < 0)
+                first = index;
 
-            drawList.AddText(new Vector2(x, bottomRight.Y + 1f), textColor, entry.Label);
+            last = index;
         }
+
+        if (first < 0)
+            return;
+
+        const float labelGap = 8f;
+        uint textColor = ImGui.GetColorU32(ImGuiCol.Text);
+        float labelY = bottomRight.Y + 1f;
+
+        string firstLabel = GetGradientLabel(entries[first], units, scale);
+        float firstX = GetGradientLabelX(entries[first], firstLabel, legend, topLeft.X, bottomRight.X, width);
+        float firstEnd = firstX + ImGui.CalcTextSize(firstLabel).X;
+        drawList.AddText(new Vector2(firstX, labelY), textColor, firstLabel);
+        if (last == first)
+            return;
+
+        string lastLabel = GetGradientLabel(entries[last], units, scale);
+        float lastX = GetGradientLabelX(entries[last], lastLabel, legend, topLeft.X, bottomRight.X, width);
+        if (lastX < firstEnd + labelGap)
+            return;
+
+        drawList.AddText(new Vector2(lastX, labelY), textColor, lastLabel);
+
+        float previousEnd = firstEnd;
+        for (int index = first + 1; index < last; index++)
+        {
+            if (!entries[index].Value.HasValue)
+                continue;
+
+            string label = GetGradientLabel(entries[index], units, scale);
+            float x = GetGradientLabelX(entries[index], label, legend, topLeft.X, bottomRight.X, width);
+            float end = x + ImGui.CalcTextSize(label).X;
+            if (x < previousEnd + labelGap || end + labelGap > lastX)
+                continue;
+
+            drawList.AddText(new Vector2(x, labelY), textColor, label);
+            previousEnd = end;
+        }
+    }
+
+    private static string GetGradientLabel(VisualizationLegendEntry entry, string units, float scale)
+    {
+        if (scale != 1f && entry.Value.HasValue)
+            return $"{(entry.Value.Value * scale).ToString("G6", CultureInfo.InvariantCulture)} {units}";
+
+        // Built-in legends differ: temperature labels already carry "K", pressure labels are bare numbers.
+        if (string.IsNullOrWhiteSpace(units) || entry.Label.EndsWith(units, StringComparison.Ordinal))
+            return entry.Label;
+
+        return $"{entry.Label} {units}";
+    }
+
+    private static float GetGradientLabelX(
+        VisualizationLegendEntry entry,
+        string label,
+        VisualizationLegend legend,
+        float left,
+        float right,
+        float width)
+    {
+        float position = NormalizeLegendValue(entry.Value ?? 0f, legend);
+        float textWidth = ImGui.CalcTextSize(label).X;
+        return Math.Clamp(left + width * position - textWidth * position, left, Math.Max(left, right - textWidth));
     }
 
     private static ColorRgba InterpolateLegendColor(VisualizationLegend legend, float position)
@@ -1303,12 +1426,11 @@ public partial class SimulationViewer
 
     private int GetLegendResolution()
     {
-        return _legendResolutionEnabled ? _legendResolution : 8;
+        return _legendResolutionEnabled ? _legendResolution : DefaultLegendResolution;
     }
 
     private void RenderChunkFocusControls()
     {
-        ImGui.Text("3D Focus");
         string currentLabel = _focusedChunk.HasValue
             ? FormatChunkPosition(_focusedChunk.Value.Position)
             : "All chunks";
@@ -1338,7 +1460,7 @@ public partial class SimulationViewer
             ImGui.EndCombo();
         }
 
-        if (ImGui.Button("Frame current view"))
+        if (ImGui.Button("Frame View"))
         {
             if (_focusedChunk.HasValue &&
                 _drawData != null &&
@@ -1351,7 +1473,7 @@ public partial class SimulationViewer
         if (_focusedChunk.HasValue)
         {
             ImGui.SameLine();
-            if (ImGui.Button("Reset focus"))
+            if (ImGui.Button("Show All Chunks"))
                 SetFocusedChunk(null);
         }
     }
@@ -1365,108 +1487,203 @@ public partial class SimulationViewer
         ImGui.Text("2D Slice Cell");
         ImGui.Separator();
         DrawCellSelectionDetails(_hoveredSliceCell.Value.Address, _hoveredSliceCell.Value.U, _hoveredSliceCell.Value.V);
-        ImGui.Separator();
         ImGui.EndTooltip();
     }
 
     private void DrawCellSelectionDetails(VoxelAddress address, int? sliceU = null, int? sliceV = null)
     {
-        ImGui.Text($"Chunk: {FormatChunkPosition(address.Chunk.Position)}");
-        ImGui.Text($"Cell: {FormatCellCoordinates(address)}");
-        if (sliceU.HasValue && sliceV.HasValue)
-            ImGui.Text($"Slice UV: {sliceU.Value}, {sliceV.Value}");
+        // The ID must not depend on the voxel: a new table ID restarts column auto-fit, and a hover tooltip that
+        // moves between voxels every frame would keep showing a half-measured table. The Tools panel and the
+        // tooltips are separate windows, so their table IDs already differ.
+        ImGui.PushID("voxel-details");
 
-        if (_drawData == null || !_drawData.TryResolve(address, out _))
+        bool exists = _drawData != null && _drawData.TryResolve(address, out _);
+        AtmosVoxelSnapshot details = default;
+        bool hasDetails = exists && TryGetVoxelDetails(address, out details);
+        var summary = hasDetails ? GetGasSummary(details.Gases) : default;
+
+        using (var table = ImGuiExtensions.BeginDefinitionTable("voxel-details"))
         {
+            if (table.IsVisible)
+            {
+                ImGuiExtensions.DefinitionRow("Chunk", FormatChunkPosition(address.Chunk.Position));
+                ImGuiExtensions.DefinitionRow("Cell", FormatCellCoordinates(address));
+                if (sliceU.HasValue && sliceV.HasValue)
+                    ImGuiExtensions.DefinitionRow("Slice UV", $"({sliceU.Value}, {sliceV.Value})");
+
+                if (hasDetails)
+                {
+                    ImGuiExtensions.DefinitionRow("Temperature", QuantityFormat.Temperature(details.Temperature));
+                    ImGuiExtensions.DefinitionRow("Pressure", QuantityFormat.Pressure(details.Pressure));
+                    ImGuiExtensions.DefinitionRow(
+                        "Total amount",
+                        summary.InvalidCount > 0
+                            ? $"{QuantityFormat.Amount(summary.TotalMoles)}, excluding invalid amounts"
+                            : QuantityFormat.Amount(summary.TotalMoles));
+
+                    ImGuiExtensions.DefinitionRow("Primary gas", FormatGas(summary.PrimaryGasId));
+                    ImGuiExtensions.DefinitionRow("Room", FormatRoomId(details.RoomId));
+                }
+            }
+        }
+
+        if (!exists)
             ImGui.TextDisabled("Selected voxel/chunk does not exist at this timeline position.");
-            return;
-        }
-
-        if (!TryGetVoxelDetails(address, out var details))
-        {
+        else if (!hasDetails)
             ImGui.TextDisabled("Details are unavailable for this presented revision.");
-            return;
-        }
+        else
+            DrawGasMakeupBar(details.Gases, summary);
 
-        ImGui.Text($"Temperature: {details.Temperature:F2} K");
-        ImGui.Text($"Pressure: {details.Pressure:F2} Pa");
-        GetGasSummary(details.Gases, out float totalMoles, out int primaryGasId);
-        ImGui.Text($"Total Moles: {totalMoles:F2}");
-        ImGui.Text($"Primary Gas: {FormatGas(primaryGasId)}");
-        DrawGasMakeupBar(address, details.Gases, totalMoles);
-        ImGui.Text($"Room: {details.RoomId}");
+        ImGui.PopID();
     }
 
     private void DrawGasMakeupBar(
-        VoxelAddress address,
         IReadOnlyList<VoxelGasSnapshot> gases,
-        float totalMoles)
+        GasSummary summary)
     {
         ImGui.TextUnformatted("Gas makeup");
-        ImGui.PushID($"gas-makeup-{address.Chunk.Position}-{address.LocalIndex}");
+        ImGui.PushID("gas-makeup");
         Vector2 size = new(Math.Max(ImGui.GetContentRegionAvail().X, 1f), ImGui.GetFrameHeight());
-        ImGui.InvisibleButton("##bar", size);
-        var minimum = ImGui.GetItemRectMin();
-        var maximum = ImGui.GetItemRectMax();
+        var minimum = ImGui.GetCursorScreenPos();
+        var maximum = minimum + size;
+        ImGui.Dummy(size);
         var draw = ImGui.GetWindowDrawList();
         draw.AddRectFilled(minimum, maximum, ImGui.ColorConvertFloat4ToU32(ViewerTheme.RecessedSurface));
 
+        float totalMoles = summary.TotalMoles;
         float cursor = minimum.X;
         if (totalMoles > 0f)
         {
             foreach (var gas in gases)
             {
-                if (!float.IsFinite(gas.Moles) || gas.Moles <= 0f)
+                if (!IsValidGasAmount(gas.Moles) || gas.Moles == 0f)
                     continue;
 
                 float fraction = gas.Moles / totalMoles;
                 float right = Math.Min(maximum.X, cursor + size.X * fraction);
-                var color = ViewerTheme.GasPalette[Math.Abs(gas.GasId) % ViewerTheme.GasPalette.Length];
                 draw.AddRectFilled(
                     new Vector2(cursor, minimum.Y),
                     new Vector2(right, maximum.Y),
-                    ImGui.ColorConvertFloat4ToU32(color));
+                    ImGui.ColorConvertFloat4ToU32(GetGasColor(gas.GasId)));
 
                 cursor = right;
             }
         }
 
         draw.AddRect(minimum, maximum, ImGui.ColorConvertFloat4ToU32(ViewerTheme.StructuralLine));
-        string overlay = totalMoles > 0f ? $"{gases.Count(gas => gas.Moles > 0f)} gases" : "Vacuum";
+        string overlay = totalMoles > 0f
+            ? summary.GasCount == 1 ? "1 gas" : $"{summary.GasCount} gases"
+            : summary.InvalidCount > 0
+                ? "No valid amounts"
+                : "Vacuum";
+
         var textSize = ImGui.CalcTextSize(overlay);
         draw.AddText(
             new Vector2(minimum.X + (size.X - textSize.X) * 0.5f, minimum.Y + (size.Y - textSize.Y) * 0.5f),
             ImGui.ColorConvertFloat4ToU32(ViewerTheme.PrimaryText),
             overlay);
 
-        if (ImGui.IsItemHovered() && totalMoles > 0f)
-        {
-            ImGui.BeginTooltip();
-            foreach (var gas in gases)
-            {
-                if (gas.Moles > 0f)
-                    ImGui.Text($"{FormatGas(gas.GasId)}: {gas.Moles:F3} mol ({gas.Moles / totalMoles:P1})");
-            }
-
-            ImGui.EndTooltip();
-        }
+        if (summary.GasCount + summary.InvalidCount > 0)
+            DrawGasMakeupTable(gases, totalMoles);
 
         ImGui.PopID();
     }
 
-    private static void GetGasSummary(
-        IReadOnlyList<VoxelGasSnapshot> gases,
-        out float totalMoles,
-        out int primaryGasId)
+    /// <summary>
+    ///     Lists every gas present at the voxel so the composition reads without colour or hovering. Invalid amounts
+    ///     (non-finite or negative) are listed and flagged rather than dropped, since they are left out of the bar.
+    /// </summary>
+    private void DrawGasMakeupTable(IReadOnlyList<VoxelGasSnapshot> gases, float totalMoles)
     {
-        totalMoles = 0f;
-        primaryGasId = -1;
+        _gasMakeupRows.Clear();
+        foreach (var gas in gases)
+        {
+            if (!IsValidGasAmount(gas.Moles) || gas.Moles != 0f)
+                _gasMakeupRows.Add(gas);
+        }
+
+        _gasMakeupRows.Sort(static (left, right) => left.GasId.CompareTo(right.GasId));
+
+        using var table = ImGuiExtensions.BeginTable("gas-makeup-table", 4, ImGuiExtensions.ReadoutTableFlags);
+        if (!table.IsVisible)
+            return;
+
+        float swatchSize = ImGui.GetTextLineHeight();
+        ImGui.TableSetupColumn("", ImGuiTableColumnFlags.WidthFixed, swatchSize);
+        ImGui.TableSetupColumn("Gas", ImGuiTableColumnFlags.WidthFixed);
+        ImGui.TableSetupColumn("Amount", ImGuiTableColumnFlags.WidthFixed);
+        ImGui.TableSetupColumn("Share", ImGuiTableColumnFlags.WidthFixed);
+        ImGui.TableHeadersRow();
+
+        foreach (var gas in _gasMakeupRows)
+        {
+            bool valid = IsValidGasAmount(gas.Moles);
+            ImGui.TableNextRow();
+
+            ImGui.TableSetColumnIndex(0);
+            ImGuiExtensions.ColorSwatch(GetGasColor(gas.GasId), swatchSize);
+
+            ImGui.TableSetColumnIndex(1);
+            ImGui.TextUnformatted(FormatGas(gas.GasId));
+
+            ImGui.TableSetColumnIndex(2);
+            if (!valid)
+                ImGui.PushStyleColor(ImGuiCol.Text, ViewerTheme.Error);
+
+            ImGuiExtensions.TextRightAligned(QuantityFormat.Amount(gas.Moles));
+            if (!valid)
+                ImGui.PopStyleColor();
+
+            ImGui.TableSetColumnIndex(3);
+            if (valid && totalMoles > 0f)
+                ImGuiExtensions.TextRightAligned(QuantityFormat.Percent(gas.Moles / totalMoles));
+            else
+                ImGui.TextDisabled("invalid, not in bar");
+        }
+    }
+
+    private static Vector4 GetGasColor(int gasId)
+    {
+        return ViewerTheme.GasPalette[Math.Abs(gasId) % ViewerTheme.GasPalette.Length];
+    }
+
+    private static bool IsValidGasAmount(float moles)
+    {
+        return float.IsFinite(moles) && moles >= 0f;
+    }
+
+    private static string FormatRoomId(int roomId)
+    {
+        return roomId switch
+        {
+            VoxelClassification.RoomSolid => $"Solid ({roomId})",
+            VoxelClassification.RoomVoid => $"Void ({roomId})",
+            VoxelClassification.RoomUnassigned => $"Unassigned ({roomId})",
+            _ => roomId.ToString(CultureInfo.InvariantCulture)
+        };
+    }
+
+    private static GasSummary GetGasSummary(IReadOnlyList<VoxelGasSnapshot> gases)
+    {
+        float totalMoles = 0f;
+        int primaryGasId = -1;
+        int gasCount = 0;
+        int invalidCount = 0;
         float maximumMoles = 0f;
         foreach (var gas in gases)
         {
             float moles = gas.Moles;
-            if (float.IsFinite(moles) && moles > 0f)
+            if (!IsValidGasAmount(moles))
+            {
+                invalidCount++;
+                continue;
+            }
+
+            if (moles > 0f)
+            {
                 totalMoles += moles;
+                gasCount++;
+            }
 
             if (moles > maximumMoles ||
                 moles == maximumMoles && moles > 0f && (primaryGasId < 0 || gas.GasId < primaryGasId))
@@ -1475,6 +1692,8 @@ public partial class SimulationViewer
                 primaryGasId = gas.GasId;
             }
         }
+
+        return new GasSummary(totalMoles, primaryGasId, gasCount, invalidCount);
     }
 
     private bool TryGetVoxelDetails(VoxelAddress address, out AtmosVoxelSnapshot snapshot)
@@ -1566,37 +1785,103 @@ public partial class SimulationViewer
     {
         if (ImGui.CollapsingHeader("Simulation State", ImGuiTreeNodeFlags.DefaultOpen))
         {
-            if (_simulation != null)
+            if (_simulation == null)
+                return;
+
+            if (!TryGetDetailChunk(out var snapshot, out string source))
             {
-                AtmosChunkSnapshot? chunk = _snapshotCache.Count > 0 ? _snapshotCache.Values.First() : null;
-                if (chunk.HasValue)
+                ImGui.TextDisabled(
+                    _liveChunkHandles.Count == 0
+                        ? "No chunks in this simulation."
+                        : "Waiting for a chunk snapshot.");
+
+                return;
+            }
+
+            using var table = ImGuiExtensions.BeginDefinitionTable("SimulationState##solution");
+            if (!table.IsVisible)
+                return;
+
+            var dimensions = snapshot.Dimensions;
+            ImGuiExtensions.DefinitionRow("Chunk", FormatChunkPosition(snapshot.GridPosition));
+            ImGuiExtensions.DefinitionRow("Source", source);
+            ImGuiExtensions.DefinitionRow("Dimensions", $"{dimensions.X} × {dimensions.Y} × {dimensions.Z} voxels");
+            ImGuiExtensions.DefinitionRow("Total voxels", (dimensions.X * dimensions.Y * dimensions.Z).ToString());
+            ImGuiExtensions.DefinitionRow("Active voxels", snapshot.ActiveAirCount.ToString());
+            ImGuiExtensions.DefinitionRow("Active gases", snapshot.ActiveGasCount.ToString());
+            ImGuiExtensions.DefinitionRow("State", snapshot.IsAwake ? "Awake" : "Sleeping");
+            ImGuiExtensions.DefinitionRow("Sleep timer", QuantityFormat.Ticks(snapshot.SleepTimer));
+
+            // Zero entries are solid or empty voxels, so the average and minimum skip them.
+            if (snapshot.TotalPressure is { Length: > 0 } pressures)
+            {
+                float maximum = pressures[0];
+                double sum = 0d;
+                int count = 0;
+                foreach (float pressure in pressures)
                 {
-                    var snapshot = chunk.Value;
-                    ImGui.Text($"Chunk Position: {snapshot.GridPosition.X}x{snapshot.GridPosition.Y}x{snapshot.GridPosition.Z}");
-                    ImGui.Text($"Dimensions: {snapshot.Dimensions.X}x{snapshot.Dimensions.Y}x{snapshot.Dimensions.Z}");
-                    ImGui.Text($"Total Voxels: {snapshot.VoxelRoomMap.Length}");
-                    ImGui.Text($"Active Voxels: {snapshot.ActiveAirCount}");
-                    ImGui.Text($"Active Gases: {snapshot.ActiveGasCount}");
-                    ImGui.Text($"Awake: {snapshot.IsAwake}");
-                    ImGui.Text($"Sleep Timer: {snapshot.SleepTimer}");
+                    if (pressure > maximum || float.IsNaN(maximum))
+                        maximum = pressure;
 
-                    if (snapshot.TotalPressure is { Length: > 0 })
+                    if (pressure > 0f)
                     {
-                        float maxPressure = snapshot.TotalPressure.Max();
-                        float avgPressure = snapshot.TotalPressure.Where(p => p > 0).DefaultIfEmpty(0).Average();
-                        ImGui.Text($"Max Pressure: {maxPressure:F2} Pa");
-                        ImGui.Text($"Avg Pressure: {avgPressure:F2} Pa");
-                    }
-
-                    if (snapshot.Temperature is { Length: > 0 })
-                    {
-                        float maxTemp = snapshot.Temperature.Max();
-                        float minTemp = snapshot.Temperature.Where(t => t > 0).DefaultIfEmpty(0).Min();
-                        ImGui.Text($"Min Temp: {minTemp:F2}K");
-                        ImGui.Text($"Max Temp: {maxTemp:F2}K");
+                        sum += pressure;
+                        count++;
                     }
                 }
+
+                ImGuiExtensions.DefinitionRow("Max pressure", QuantityFormat.Pressure(maximum));
+                ImGuiExtensions.DefinitionRow(
+                    "Avg pressure (non-zero voxels)",
+                    QuantityFormat.Pressure(count == 0 ? 0d : sum / count));
+            }
+            else
+            {
+                ImGuiExtensions.DefinitionRow(
+                    "Pressure",
+                    "Not captured for the current visualization",
+                    ViewerTheme.SecondaryText);
+            }
+
+            if (snapshot.Temperature is { Length: > 0 } temperatures)
+            {
+                float maximum = temperatures[0];
+                float minimum = 0f;
+                bool hasPositive = false;
+                foreach (float temperature in temperatures)
+                {
+                    if (temperature > maximum || float.IsNaN(maximum))
+                        maximum = temperature;
+
+                    if (temperature > 0f && (!hasPositive || temperature < minimum))
+                    {
+                        minimum = temperature;
+                        hasPositive = true;
+                    }
+                }
+
+                ImGuiExtensions.DefinitionRow(
+                    "Min temperature (non-zero voxels)",
+                    QuantityFormat.Temperature(minimum));
+
+                ImGuiExtensions.DefinitionRow("Max temperature", QuantityFormat.Temperature(maximum));
+            }
+            else
+            {
+                ImGuiExtensions.DefinitionRow(
+                    "Temperature",
+                    "Not captured for the current visualization",
+                    ViewerTheme.SecondaryText);
             }
         }
     }
+
+    /// <summary>
+    ///     Per-voxel gas totals shared by the details table, the makeup bar, and the makeup table.
+    /// </summary>
+    /// <param name="TotalMoles">Sum of the valid, positive amounts; this is what the makeup bar divides.</param>
+    /// <param name="PrimaryGasId">Gas with the largest valid amount, or -1 when there is none.</param>
+    /// <param name="GasCount">Gases with a valid, positive amount.</param>
+    /// <param name="InvalidCount">Gases whose amount is NaN, infinite, or negative.</param>
+    private readonly record struct GasSummary(float TotalMoles, int PrimaryGasId, int GasCount, int InvalidCount);
 }
