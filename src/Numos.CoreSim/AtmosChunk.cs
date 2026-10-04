@@ -191,7 +191,7 @@ internal class AtmosChunk
     public Int3 Dimensions => new(Width, Height, Depth);
 
     /// <summary>
-    ///     Ensures that the chunk's per-voxel arrays are initialized for its current dimensions.
+    ///     Allocates any per-voxel array that is missing or sized for different dimensions.
     /// </summary>
     /// <remarks>
     ///     Existing arrays are reused when they already have the required length. This method does not
@@ -218,9 +218,9 @@ internal class AtmosChunk
     ///     Initializes or reinitializes the chunk with the specified position and dimensions.
     /// </summary>
     /// <param name="position">The chunk's position in the grid of chunks.</param>
-    /// <param name="width">The width of the chunk.</param>
-    /// <param name="height">The height of the chunk.</param>
-    /// <param name="depth">The depth of the chunk.</param>
+    /// <param name="width">The number of voxels along the x axis.</param>
+    /// <param name="height">The number of voxels along the y axis.</param>
+    /// <param name="depth">The number of voxels along the z axis.</param>
     /// <exception cref="ArgumentOutOfRangeException">
     ///     A dimension is non-positive or the combined voxel count exceeds
     ///     <see cref="AtmosChunkConstants.MaximumVoxelCount" />.
@@ -420,7 +420,8 @@ internal class AtmosChunk
     }
 
     /// <summary>
-    ///     Adds gas to a voxel and updates pressure with the supplied ideal-gas pressure coefficient.
+    ///     Adds gas at <paramref name="temperature" /> to a voxel, blending the voxel's temperature by heat
+    ///     capacity and recomputing its pressure. Solid and void voxels are ignored; a sleeping chunk is woken.
     /// </summary>
     /// <param name="localVoxelIndex">The flat index of the target voxel within this chunk.</param>
     /// <param name="gasId">The ID of the gas to add.</param>
@@ -488,9 +489,15 @@ internal class AtmosChunk
     }
 
     /// <summary>
-    ///     Tries to get the temperatures and heatCapacity of a specific voxel
-    ///     Does not recalculate <see cref="TotalHeatCapacity" />
+    ///     Reads a voxel's validated temperature and cached <see cref="TotalHeatCapacity" /> without recomputing it.
     /// </summary>
+    /// <param name="config">Supplies the fallback for an invalid stored temperature.</param>
+    /// <param name="voxelIndex">The flat voxel index.</param>
+    /// <param name="temperature">The validated temperature, or zero when this returns <see langword="false" />.</param>
+    /// <param name="heatCapacity">The cached heat capacity, or zero when this returns <see langword="false" />.</param>
+    /// <returns>
+    ///     <see langword="false" /> for a vacuum voxel or one whose cached heat capacity is non-finite or nonpositive.
+    /// </returns>
     [PublicAPI]
     public bool TryGetThermalState(
         AtmosSolverConfigSnapshot config,
@@ -510,10 +517,11 @@ internal class AtmosChunk
 
 
     /// <summary>
-    ///     Sets a specific voxel to a vacuum. This sets TotalPressure, ActiveGases, and TotalHeatCapacity to 0 and IsVacuum to
-    ///     true.
+    ///     Clears one voxel to vacuum: zeroes <see cref="TotalPressure" />, every gas channel, and
+    ///     <see cref="TotalHeatCapacity" />, and sets <see cref="IsVacuum" />.
     /// </summary>
     /// <param name="idx">Index of voxel</param>
+    /// <remarks>Temperature is left as is, and the chunk revision is not advanced.</remarks>
     [PublicAPI]
     public void SetVoxelToVacuum(ushort idx)
     {
@@ -528,8 +536,7 @@ internal class AtmosChunk
     }
 
     /// <summary>
-    ///     Sets a specific voxel to a vacuum. This sets TotalPressure, ActiveGases, and TotalHeatCapacity to 0 and IsVacuum to
-    ///     true.
+    ///     Clears every voxel in the chunk to vacuum, as <see cref="SetVoxelToVacuum" /> does for one voxel.
     /// </summary>
     [PublicAPI]
     public void SetChunkToVacuum()
@@ -625,9 +632,11 @@ internal class AtmosChunk
     }
 
     /// <summary>
-    ///     Creates a snapshot of the chunk's current network state.
+    ///     Creates a detached snapshot of the chunk's current state.
     /// </summary>
+    /// <param name="fields">The per-voxel fields to copy.</param>
     /// <returns>A snapshot containing selected physical fields and solver arrays opted into capture.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="fields" /> contains undefined flags.</exception>
     [PublicAPI]
     public AtmosChunkSnapshot GetNetworkSnapshot(
         AtmosChunkSnapshotFields fields = AtmosChunkSnapshotFields.All)

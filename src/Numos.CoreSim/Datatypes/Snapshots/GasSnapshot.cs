@@ -8,12 +8,12 @@ namespace Numos.CoreSim.Datatypes.Snapshots;
 public struct GasSnapshot
 {
     /// <summary>
-    ///     Gets the gas registry ID.
+    ///     Gas registry ID.
     /// </summary>
     public int GasId;
 
     /// <summary>
-    ///     Gets detached per-voxel amounts, in moles (mol).
+    ///     Detached per-voxel amounts, in moles (mol).
     /// </summary>
     [ElementQuantity("amount")]
     public Mole[] Moles;

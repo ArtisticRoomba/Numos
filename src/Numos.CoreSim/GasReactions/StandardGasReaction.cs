@@ -5,12 +5,24 @@ using Numos.Units;
 namespace Numos.CoreSim.GasReactions;
 
 /// <summary>
-///     A gas reaction using standard rate equation and Arrhenius equation to calculate its reaction speed.
-///     These are much slower to evaluate than <see cref="LinearGasReaction" /> because of the <see cref="Math.Pow" />
-///     involved.
+///     A gas reaction whose speed follows a standard rate equation with an Arrhenius rate constant.
 /// </summary>
+/// <remarks>
+///     Much slower to evaluate than <see cref="LinearGasReaction" /> because of the exponentials and powers involved.
+/// </remarks>
 public readonly partial record struct StandardGasReaction
 {
+    /// <summary>
+    ///     Creates a reaction with speed <c>k(T) · Π [gas]^exponent</c>, where <c>k(T) = A · exp(-Ea / (R·T))</c>.
+    /// </summary>
+    /// <param name="input">Moles of each reactant consumed per reaction.</param>
+    /// <param name="output">Moles of each product produced per reaction.</param>
+    /// <param name="energyBalance">Joules released (positive) or absorbed (negative) per reaction.</param>
+    /// <param name="arrheniusFactor">Pre-exponential factor <c>A</c>, in reactions per second.</param>
+    /// <param name="activationEnergy">
+    ///     Molar activation energy <c>Ea</c>, in J/mol. Convert values authored in kJ/mol first.
+    /// </param>
+    /// <param name="speedFactors">Rate-equation exponent for each gas that affects the speed.</param>
     public StandardGasReaction(
         IDictionary<GasProperties, float> input, IDictionary<GasProperties, float> output,
         [Quantity("energy")] Joule energyBalance,
@@ -26,25 +38,22 @@ public readonly partial record struct StandardGasReaction
     }
 
     /// <summary>
-    ///     Input reactants.
-    ///     Mol per Reaction
+    ///     Moles of each reactant consumed per reaction.
     /// </summary>
     private FrozenDictionary<GasProperties, Mole> Input { get; }
 
     /// <summary>
-    ///     Output reactants
-    ///     Mol per Reaction
+    ///     Moles of each product produced per reaction.
     /// </summary>
     private FrozenDictionary<GasProperties, Mole> Output { get; }
 
     /// <summary>
-    ///     If this reaction consumes or produces thermal energy.
-    ///     In Joules per Reaction
+    ///     Joules released (positive) or absorbed (negative) per reaction.
     /// </summary>
     internal Joule EnergyBalance { get; }
 
     /// <summary>
-    ///     Arrhenius factor
+    ///     Arrhenius pre-exponential factor, in reactions per second.
     /// </summary>
     private float ArrheniusFactor { get; }
 
@@ -117,10 +126,10 @@ public readonly partial record struct StandardGasReaction
     }
 
     /// <summary>
-    ///     Calculates the reactions rate constant based on temperature using original Arrhenius equation.
+    ///     Calculates the rate constant at a temperature using the original Arrhenius equation.
     /// </summary>
-    /// <param name="temperatureKelvin"></param>
-    /// <returns>Reactions per seconds.</returns>
+    /// <param name="temperatureKelvin">Mixture temperature, in kelvins (K).</param>
+    /// <returns>Reactions per second.</returns>
     /// <remarks>there are more sophisticated models for k but good luck having anyone setup all the parameters necessary.</remarks>
     internal PerSecond GetRateConstant(Kelvin temperatureKelvin)
     {
@@ -129,11 +138,11 @@ public readonly partial record struct StandardGasReaction
     }
 
     /// <summary>
-    ///     Calculate the reaction speed given gas molarities and temperature of a gas mixture.
+    ///     Computes the reaction speed for a mixture.
     /// </summary>
-    /// <param name="gasMolarities">molar concentration in moles per litre</param>
-    /// <param name="temperatureKelvin"></param>
-    /// <returns>reactions per second.</returns>
+    /// <param name="gasMolarities">Amount of each gas. Gases missing from the dictionary count as zero.</param>
+    /// <param name="temperatureKelvin">Mixture temperature, in kelvins (K).</param>
+    /// <returns>Reactions per second, or zero when any factor drives the speed to zero or below.</returns>
     [return: Quantity("frequency")]
     public PerSecond GetReactionSpeed(
         IDictionary<GasProperties, float> gasMolarities,

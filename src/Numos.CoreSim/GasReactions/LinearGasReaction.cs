@@ -5,26 +5,35 @@ using Numos.Units;
 namespace Numos.CoreSim.GasReactions;
 
 /// <summary>
-///     A linear gas reaction in which the reaction speed doesn't use standard rate equation, but a series of linear
-///     functions.
-///     To reduce computational load and make setting them up easier, at the cost of realism.
+///     A gas reaction whose speed comes from piecewise-linear functions of temperature and gas amount instead of a
+///     standard rate equation.
 /// </summary>
+/// <remarks>
+///     Cheaper to evaluate and easier to set up than <see cref="StandardGasReaction" />, at the cost of realism.
+/// </remarks>
 public readonly partial record struct LinearGasReaction
 {
     /// <summary>
-    ///     Main Constructor. For a case study on how the temperature graph is evaluated and thus should be parametrized see
-    ///     <see cref="GetRateConstantForTemperature" />
+    ///     Creates a linear reaction. The rate constant is a straight line through
+    ///     (<paramref name="lowTemperatureBound" />, <paramref name="lowTempSpeed" />) and
+    ///     (<paramref name="highTemperatureBound" />, <paramref name="highTempSpeed" />).
     /// </summary>
-    /// <param name="input">Input reactants. Mol/Reaction</param>
-    /// <param name="output">Output reactants. Mol/Reaction</param>
-    /// <param name="energyBalance">Joules produced or consumed per reaction</param>
-    /// <param name="lowTemperatureBound">Kelvin for the temperatures linear graphs lower boundary</param>
-    /// <param name="highTemperatureBound">Kelvin for the temperature linear graphs upper boundary</param>
-    /// <param name="lowTempSpeed">reactions per second at low bound</param>
-    /// <param name="highTempSpeed">reactions per second at high bound</param>
-    /// <param name="lowStrict">if the linear graph can be extended below low bound</param>
-    /// <param name="highStrict">if the graph can be extended above high bound</param>
-    /// <param name="speedFactors">the modifies to the base reaction speed based on the presence of certain gases.</param>
+    /// <param name="input">Moles of each reactant consumed per reaction.</param>
+    /// <param name="output">Moles of each product produced per reaction.</param>
+    /// <param name="energyBalance">Joules released (positive) or absorbed (negative) per reaction.</param>
+    /// <param name="lowTemperatureBound">Temperature of the line's lower point, in kelvins (K).</param>
+    /// <param name="highTemperatureBound">Temperature of the line's upper point, in kelvins (K).</param>
+    /// <param name="lowTempSpeed">Reactions per second at <paramref name="lowTemperatureBound" />.</param>
+    /// <param name="highTempSpeed">Reactions per second at <paramref name="highTemperatureBound" />.</param>
+    /// <param name="lowStrict">
+    ///     When <see langword="true" />, the reaction stops below <paramref name="lowTemperatureBound" />; when
+    ///     <see langword="false" />, the line is extrapolated.
+    /// </param>
+    /// <param name="highStrict">
+    ///     When <see langword="true" />, the reaction stops above <paramref name="highTemperatureBound" />; when
+    ///     <see langword="false" />, the line is extrapolated.
+    /// </param>
+    /// <param name="speedFactors">Multipliers on the rate constant that depend on the amount of specific gases.</param>
     public LinearGasReaction(
         IDictionary<GasProperties, float> input, IDictionary<GasProperties, float> output,
         [Quantity("energy")] Joule energyBalance,
@@ -49,20 +58,17 @@ public readonly partial record struct LinearGasReaction
     }
 
     /// <summary>
-    ///     Input reactants.
-    ///     Mol per Reaction
+    ///     Moles of each reactant consumed per reaction.
     /// </summary>
     private FrozenDictionary<GasProperties, float> Input { get; }
 
     /// <summary>
-    ///     Output reactants
-    ///     Mol per Reaction
+    ///     Moles of each product produced per reaction.
     /// </summary>
     private FrozenDictionary<GasProperties, float> Output { get; }
 
     /// <summary>
-    ///     If this reaction consumes or produces thermal energy.
-    ///     In Joules per Reaction
+    ///     Joules released (positive) or absorbed (negative) per reaction.
     /// </summary>
     internal Joule EnergyBalance { get; }
 
@@ -77,12 +83,12 @@ public readonly partial record struct LinearGasReaction
     private PerSecond SpeedRange { get; }
 
     /// <summary>
-    ///     Can the reaction occur below low temperature bound (extending linear graph)
+    ///     Whether the rate is zero below <see cref="LowTemperatureBound" /> instead of extrapolated.
     /// </summary>
     private bool LowStrict { get; }
 
     /// <summary>
-    ///     Can the reaction occur above high temperature bound (extending linear graph)
+    ///     Whether the rate is zero above <see cref="HighTemperatureBound" /> instead of extrapolated.
     /// </summary>
     private bool HighStrict { get; }
 
@@ -151,9 +157,8 @@ public readonly partial record struct LinearGasReaction
         float value, float boundaryRange, float lowBound, bool lowStrict, bool highStrict,
         float valAtLow, float speedRange)
     {
-        // Normalize value into [0, 1].
+        // t is 0 at the low bound and 1 at the high bound; outside [0, 1] the line is extrapolated unless strict.
         float t = (value - lowBound) / boundaryRange;
-        // eval boundaries.
         if (float.IsNaN(t)) return 0;
 
         if (t < 0f)
@@ -171,10 +176,13 @@ public readonly partial record struct LinearGasReaction
     }
 
     /// <summary>
-    ///     Calculate the Rate Constant of this reaction given a temperature value.
+    ///     Evaluates the temperature line at <paramref name="temperatureKelvin" />, before any speed factors.
     /// </summary>
-    /// <param name="temperatureKelvin"></param>
-    /// <returns></returns>
+    /// <param name="temperatureKelvin">Mixture temperature, in kelvins (K).</param>
+    /// <returns>
+    ///     Reactions per second, or zero outside a strict bound. Can be negative if the line is extrapolated past
+    ///     zero; the reaction solver treats nonpositive rates as no reaction.
+    /// </returns>
     internal PerSecond GetRateConstantForTemperature(Kelvin temperatureKelvin)
     {
         return EvalLinear(
@@ -188,11 +196,11 @@ public readonly partial record struct LinearGasReaction
     }
 
     /// <summary>
-    ///     Gives Reaction speed in units of reaction per second given a mixture and temperature.
+    ///     Computes the reaction speed for a mixture: the temperature rate constant multiplied by every speed factor.
     /// </summary>
-    /// <param name="gasMolarities">the mixture of gases represented in their molarity (Mol/L)</param>
-    /// <param name="temperature">temperature of the mixture in kelvin</param>
-    /// <returns>Reactions per Second</returns>
+    /// <param name="gasMolarities">Amount of each gas, in the units the speed factors' bounds were authored in.</param>
+    /// <param name="temperature">Mixture temperature, in kelvins (K).</param>
+    /// <returns>Reactions per second.</returns>
     [return: Quantity("frequency")]
     public PerSecond GetReactionSpeed(
         IDictionary<GasProperties, float> gasMolarities,

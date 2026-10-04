@@ -1,19 +1,18 @@
 namespace Numos.CoreSim.Datatypes.Events;
 
 /// <summary>
-///     Identifies a boundary voxel for later batched flow processing.
+///     Identifies a chunk-boundary voxel whose cross-chunk flow is deferred to a later batched pass.
 /// </summary>
-/// <para>
-///     This event is used to store data on the flow of air across a voxel that sits on the boundary of a chunk.
-///     Boundary voxels are deferred into per-chunk batches of these events, processed by
-///     <see cref="Numos.CoreSim.Solvers.BoundaryFlowSolver" /> after all threads have completed their work
-///     processing non-boundary voxels. That solver computes each source chunk's transfers concurrently, then
-///     reserves and scatters them into target chunks' injection buffers without locking.
-/// </para>
+/// <remarks>
+///     Boundary voxels are collected into per-chunk batches of these events and processed by
+///     <see cref="Numos.CoreSim.Solvers.BoundaryFlowSolver" /> once every chunk's interior work has finished. That
+///     solver computes each source chunk's transfers concurrently, then reserves and scatters them into target
+///     chunks' injection buffers without locking.
+/// </remarks>
 internal struct BoundaryFlowEvent
 {
     /// <summary>
-    ///     The location of the event in the chunk as a 1D lookup.
+    ///     Flat index of the boundary voxel within its chunk.
     /// </summary>
     public ushort LocalVoxelIndex;
 }

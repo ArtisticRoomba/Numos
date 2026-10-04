@@ -3,20 +3,17 @@ using JetBrains.Annotations;
 namespace Numos.CoreSim.Datatypes.Primitives;
 
 /// <summary>
-///     Prim datatype that represents the classification of a voxel in the simulation.
+///     Classification of a voxel: a room ID, or one of the reserved solid and void values.
 /// </summary>
-/// <para>
-///     In Numos, voxels are grouped together to form rooms,
-///     IDs beyond the reserved solid and void values are topology metadata only; they do not partition solver work.
-///     For now, their usage is similar to SS14 Atmospherics' AirtightData,
-///     which stores data on whether a tile is airtight or not.
-/// </para>
+/// <remarks>
+///     In Numos, voxels are grouped together to form rooms, but IDs other than the reserved solid and void values are
+///     topology metadata only; they do not partition solver work. For now, their usage is similar to SS14
+///     Atmospherics' AirtightData, which stores whether a tile is airtight.
+/// </remarks>
 public readonly record struct VoxelClassification(int RoomId)
 {
     /// <summary>
-    ///     Voxel is unassigned to any room.
-    ///     This is the default value for a voxel.
-    ///     This can also store gas.
+    ///     Voxel is not assigned to any room. This is the default, and the voxel still stores gas.
     /// </summary>
     public const int RoomUnassigned = 0;
 

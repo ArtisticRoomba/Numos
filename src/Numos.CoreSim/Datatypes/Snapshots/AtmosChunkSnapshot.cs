@@ -25,7 +25,7 @@ public struct AtmosChunkSnapshot
 
     // TODO check this
     /// <summary>
-    ///     Gets detached per-voxel heat capacity values, in pascals (Pa).
+    ///     Gets detached per-voxel total heat capacity values, in joules per kelvin (J/K).
     /// </summary>
     public float[] TotalHeatCapacity;
 
@@ -63,7 +63,7 @@ public struct AtmosChunkSnapshot
     /// </summary>
     public bool IsAwake;
     /// <summary>
-    ///     Gets the remaining sleep timer.
+    ///     Gets the number of consecutive quiet ticks counted toward sleep.
     /// </summary>
     public int SleepTimer;
     /// <summary>
@@ -96,6 +96,8 @@ public struct AtmosChunkSnapshot
     /// <summary>
     ///     Returns whether this snapshot contains every requested detached field.
     /// </summary>
+    /// <param name="fields">The fields to check for.</param>
+    /// <returns><see langword="true" /> if every flag in <paramref name="fields" /> is available.</returns>
     public readonly bool HasFields(AtmosChunkSnapshotFields fields)
     {
         if (fields == AtmosChunkSnapshotFields.None)

@@ -18,7 +18,7 @@ namespace Numos.CoreSim.Replay;
 /// </param>
 /// <param name="order">
 ///     Emission order relative to other <see cref="ChunkCheckpointFieldAttribute" />-tagged properties. Wire bytes are
-///     golden-pinned, so this must reproduce today's exact field order, not just be internally consistent.
+///     golden-pinned, so this must reproduce the existing field order exactly, not just be internally consistent.
 /// </param>
 [AttributeUsage(AttributeTargets.Property)]
 internal sealed class ChunkCheckpointFieldAttribute(string liveMember, int order) : Attribute
@@ -40,7 +40,7 @@ internal sealed class ChunkCheckpointFieldAttribute(string liveMember, int order
 /// </remarks>
 /// <param name="order">
 ///     Emission order relative to other <see cref="ConfigCheckpointFieldAttribute" />-tagged properties. Wire bytes
-///     are golden-pinned, so this must reproduce today's exact field order.
+///     are golden-pinned, so this must reproduce the existing field order exactly.
 /// </param>
 [AttributeUsage(AttributeTargets.Property)]
 internal sealed class ConfigCheckpointFieldAttribute(int order) : Attribute
@@ -54,7 +54,7 @@ internal sealed class ConfigCheckpointFieldAttribute(int order) : Attribute
 /// </summary>
 /// <param name="order">
 ///     Emission order relative to other <see cref="GasCheckpointFieldAttribute" />-tagged fields. Wire bytes are
-///     golden-pinned, so this must reproduce today's exact field order.
+///     golden-pinned, so this must reproduce the existing field order exactly.
 /// </param>
 [AttributeUsage(AttributeTargets.Field)]
 internal sealed class GasCheckpointFieldAttribute(int order) : Attribute

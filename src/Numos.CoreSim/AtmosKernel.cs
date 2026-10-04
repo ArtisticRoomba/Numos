@@ -7,7 +7,7 @@ using Numos.Maths;
 namespace Numos.CoreSim;
 
 /// <summary>
-///     Owns simulation state, serialization, and the configured solver pipeline.
+///     Owns one simulation's chunk storage, recording and checkpoint state, and built-in solver stages.
 /// </summary>
 internal sealed partial class AtmosKernel : IDisposable
 {
@@ -126,7 +126,7 @@ internal sealed partial class AtmosKernel : IDisposable
     /// <summary>
     ///     Begins one tick whose pipeline stages will be coordinated by a containing world.
     /// </summary>
-    /// <returns>The immutable context and enabled pipeline snapshot for this tick.</returns>
+    /// <returns>The tick's solver execution context.</returns>
     internal AtmosWorldTickExecution BeginWorldTick()
     {
         lock (StateGate)
@@ -136,7 +136,7 @@ internal sealed partial class AtmosKernel : IDisposable
     }
 
     /// <summary>
-    ///     Ends a world-coordinated tick after every selected callback has run.
+    ///     Ends a world-coordinated tick after the world has run every enabled stage.
     /// </summary>
     internal void CompleteWorldTick()
     {

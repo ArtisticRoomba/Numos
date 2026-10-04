@@ -110,8 +110,8 @@ public readonly record struct AtmosSolverCheckpoint(
 /// </summary>
 /// <remarks>
 ///     Gas-channel order is retained because floating-point reductions can observe that order.
-///     This is continuation data, not a compact presentation snapshot, so don't use it for display, use something from
-///     the viewer instead.
+///     This is continuation data, not a compact presentation snapshot, so don't use it for display; use
+///     <see cref="AtmosChunkSnapshot" /> instead.
 /// </remarks>
 public sealed class AtmosChunkCheckpoint
 {

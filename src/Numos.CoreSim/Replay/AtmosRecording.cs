@@ -47,7 +47,7 @@ public enum AtmosOperationCode : ushort
     /// </summary>
     AddGasToVoxel = 8,
     /// <summary>
-    ///     Wake a room and reset its sleep timer.
+    ///     Wake a chunk and reset its sleep timer.
     /// </summary>
     WakeChunk = 9,
     /// <summary>

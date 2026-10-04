@@ -79,7 +79,7 @@ internal sealed partial class AtmosKernel
     }
 
     /// <summary>
-    ///     Updates the simulation.
+    ///     Advances the simulation by elapsed real time, running as many whole fixed ticks as it covers.
     /// </summary>
     /// <param name="elapsedSeconds">Elapsed real time, in seconds, since the previous update.</param>
     /// <remarks>
@@ -132,6 +132,7 @@ internal sealed partial class AtmosKernel
     ///     Applies a detached configuration used by subsequent simulation operations.
     /// </summary>
     /// <param name="config">The detached configuration to apply.</param>
+    /// <returns><see langword="true" /> when the configuration changed; only a change is recorded.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="config" /> is <see langword="null" />.</exception>
     internal bool SetAtmosConfig(AtmosConfigSnapshot config)
     {
@@ -320,7 +321,7 @@ internal sealed partial class AtmosKernel
     ///     Creates a detached snapshot of the chunk at a grid position.
     /// </summary>
     /// <param name="position">The chunk-grid position to inspect.</param>
-    /// <returns>Copies of the chunk's pressure, temperature, gas, and voxel-classification data.</returns>
+    /// <returns>A snapshot with every detached field (<see cref="AtmosChunkSnapshotFields.All" />).</returns>
     /// <exception cref="KeyNotFoundException">No chunk is registered at <paramref name="position" />.</exception>
     internal AtmosChunkSnapshot GetChunkSnapshot(Int3 position)
     {
@@ -625,9 +626,11 @@ internal sealed partial class AtmosKernel
     /// <param name="gasId">The gas channel identifier.</param>
     /// <param name="moles">The amount of gas to add, in moles.</param>
     /// <param name="temperature">The temperature of the added gas, in kelvins.</param>
-    /// <remarks>Injection into a solid or void voxel is ignored by the chunk.</remarks>
+    /// <remarks>Injection into a solid or void voxel is ignored and not recorded.</remarks>
     /// <exception cref="KeyNotFoundException">No chunk is registered at <paramref name="position" />.</exception>
-    /// <exception cref="ArgumentOutOfRangeException"><paramref name="localVoxelIndex" /> is outside the chunk.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    ///     <paramref name="localVoxelIndex" /> is outside the chunk, or the gas ID, amount, or temperature is invalid.
+    /// </exception>
     internal void AddGasToVoxel(
         Int3 position, ushort localVoxelIndex, int gasId, Mole moles,
         Kelvin temperature)
@@ -658,9 +661,11 @@ internal sealed partial class AtmosKernel
     /// <param name="gasId">The gas channel identifier.</param>
     /// <param name="moles">The amount of gas to add, in moles.</param>
     /// <param name="temperature">The temperature of the added gas, in kelvins.</param>
-    /// <remarks>Injection into a solid or void voxel is ignored by the chunk.</remarks>
+    /// <remarks>Injection into a solid or void voxel is ignored and not recorded.</remarks>
     /// <exception cref="KeyNotFoundException">No chunk is registered at <paramref name="position" />.</exception>
-    /// <exception cref="ArgumentOutOfRangeException">A local coordinate is outside the chunk.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    ///     A local coordinate is outside the chunk, or the gas ID, amount, or temperature is invalid.
+    /// </exception>
     internal void AddGasToVoxel(
         Int3 position, int x, int y, int z, int gasId, Mole moles,
         Kelvin temperature)

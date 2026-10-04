@@ -117,7 +117,8 @@ public sealed record SetSolverEnabledOperation(string Name, bool Enabled) : Atmo
 }
 
 /// <summary>
-///     Resolved voxel state, including caches and channel order, independent of detached mixture identity.
+///     Sets a voxel's resolved gas and thermal state, including caches and channel order, independent of detached
+///     mixture identity.
 /// </summary>
 public sealed record SetVoxelMixtureOperation : AtmosOperation
 {
