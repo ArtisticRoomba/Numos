@@ -813,6 +813,7 @@ public partial class SimulationViewer
     /// <param name="domain">Values the snapshot keeps unchanged; anything else is rejected with a message.</param>
     /// <param name="readOnly">Shows <paramref name="current" /> without allowing edits.</param>
     /// <param name="assign">Writes an accepted value into the editable configuration.</param>
+    /// <param name="displayScale">Factor from the stored value to the value shown in the field.</param>
     private void ConfigFloatInput(
         AtmosConfigFieldInfo field,
         string id,
