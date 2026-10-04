@@ -4,18 +4,15 @@
 > Be aware that Replay is an experimental feature, just like everything else in Numos.
 > As such, the ways that Numos captures, replays, and saves simulations will probably change.
 
-Numos treats multithreaded determinism as a core feature that we plan to support as much as possible, while still
-preserving performance. As a result of this, Numos is capable of snapshotting, checkpointing, recording, and replaying
-Numos simulations. A client or server can choose to start a recording at any time, capture state, roll back and
-resimulate to a previous tick that happened in the past, or rewrite the future from the past given new operations.
-Numos's replay system is similar in concept and theory
-to [Box2D's Replay system](https://box2d.org/posts/2026/06/replay/).
+Numos treats multithreaded determinism as a core feature, as far as it can without giving up performance. Because the
+same inputs produce the same ticks, a host can start a recording at any time, capture state, roll back to an earlier
+tick and resimulate, or rewrite the future from that point with new operations. The idea is similar to
+[Box2D's Replay system](https://box2d.org/posts/2026/06/replay/).
 
-This allows developers to replay events that have already occurred over and over again without having to re-setup the
-testing enviornment or relaunch `Numos.Viewer`. It also has the potential for a remote client to recieve an initial
-snapshot of state and a list of mutations, allowing the client to simulate a Numos simulation up to the present.
-Similarily, any differences between the client and server can be resolved by the client rolling back their simulation to
-the previous checkpoint and resimulating up to the current time with the new information.
+For development, this means a bug can be replayed over and over without rebuilding the test setup or relaunching
+`Numos.Viewer`. For networking, a remote client could receive an initial snapshot plus a list of mutations and simulate
+forward to the present, and when client and server disagree, the client can roll back to the last checkpoint and
+resimulate with the corrected inputs.
 
 Internally, Numos reconstructs an earlier simulation state from two pieces of information: a checkpoint containing the
 full continuation state, and an ordered recording of external mutations made after that checkpoint. Numos restores the
@@ -175,17 +172,16 @@ grid state, so retained checkpoint memory generally grows with the captured simu
 `AtmosChunkSnapshot` serves presentation and replication reads; it is not a continuation checkpoint. Checkpoints use
 full detached copies. The current implementation has no copy-on-write storage, delta compression, or incremental hash.
 `PayloadBytes` reports bytes in copied chunk and solver arrays and excludes managed object headers, field names, and
-shared configuration. The current clock-free checkpoint schema is version 5 and compatibility profile 3 (world
+shared configuration. The current clock-free checkpoint schema is format version 5 and compatibility version 3 (world
 checkpoints are versioned separately; see `AtmosWorldCheckpoint.CurrentFormatVersion`). Replay remains
 experimental, so older in-memory checkpoint schemas are rejected rather than translated. Solver configuration keys and
-deterministic hashes
-contribute to the state hash; their immutable snapshots supply the actual restored settings. A custom configuration must
+deterministic hashes contribute to the state hash; their immutable snapshots supply the actual restored settings. A custom configuration must
 capture every authoritative value and keep its snapshot immutable.
 
 The built-in per-voxel chunk arrays (`AtmosChunkCheckpoint.Classifications`/`Temperatures`/`Pressures`/
 `HeatCapacities`), `AtmosConfigSnapshot`'s flat scalar fields, and `GasProperties`'s fields are tagged with
-`[ChunkCheckpointField]`/`[ConfigCheckpointField]`/`[GasCheckpointField]` (`Numos.CoreSim.Replay`). `Numos.Replay.
-CheckpointGen` generates their capture, restore, hashing, and wire read/write code from those attributes, so adding a
+`[ChunkCheckpointField]`/`[ConfigCheckpointField]`/`[GasCheckpointField]` (`Numos.CoreSim.Replay`).
+`Numos.Replay.CheckpointGen` generates their capture, restore, hashing, and wire read/write code from those attributes, so adding a
 new field in one of these three uniform shapes only means declaring the property/field and tagging it with the next
 `Order` value -- not hand-editing the checkpoint constructor, `Materialize()`, `AtmosStateHasher`, and the wire codec
 separately. Fields with an irregular shape (a companion count, a nested per-gas-channel array, host-owned solver
@@ -198,7 +194,7 @@ Some data intentionally remains outside the checkpoint:
 - Detached `GasMixture` containers, such as canisters, remain host-owned.
 - Per-tick event queues and solver workspaces are transient and are cleared or rebuilt.
 - Shared dependencies created with `GetOrCreateSolverData<T>` are transient too. Restore discards them, including the
-  built-in boundary queues. Solvers reacquire them on each callback and rebuild them from authoritative inputs.
+  built-in boundary event batches. Solvers reacquire them on each callback and rebuild them from authoritative inputs.
 - Per-gas solver attachments created with `GetOrCreateGasSolverData<T>` are derived or transient data. Restore discards
   them even when the configuration is unchanged; the next request rebuilds them through the solver's factory.
 - Chunk-owned arrays created with `captureForRollback: false` remain transient; restore discards them.
@@ -393,9 +389,9 @@ all of them, so don't skip steps on the assumption that a missing one will alway
 4. Add a `private void Apply(YourOperation op)` overload on the family's host (`AtmosKernel` for simulation
    operations, `AtmosWorld` for world operations) that actually mutates live state when the operation replays.
    `ApplySwitchGenerator` (`Numos.Replay.Analyzers`) finds every concrete operation type deriving from
-   `AtmosOperation`/`AtmosWorldOperation` and generates the dispatch switch that calls into it -- `AtmosKernel.
-   ApplyRecordedOperation`/`AtmosWorld.ApplyWorldOperation` themselves are thin wrappers around that generated
-   method, not hand-written switches anymore. Forget the overload (or get its parameter type wrong) and
+   `AtmosOperation`/`AtmosWorldOperation` and generates the dispatch switch that calls into it.
+   `AtmosKernel.ApplyRecordedOperation` and `AtmosWorld.ApplyWorldOperation` are thin wrappers around that generated
+   method, so there is no hand-written switch to update. Forget the overload (or get its parameter type wrong) and
    `NUMOSREPLAYGEN010` fails the `Numos.CoreSim`/`Numos.API` build, naming the operation and host type.
 5. Update the golden wire-format fixtures in `tests/Numos.Serialization.Tests/ReplayWireFormatGoldenTests.cs` to
    exercise the new opcode, and regenerate the pinned base64 constants using the `[Explicit] PrintGoldenBytes` test
@@ -406,8 +402,8 @@ all of them, so don't skip steps on the assumption that a missing one will alway
 
 ## Save portable replay files
 
-The `.numos` container has two content discriminators. Kind 1 is the existing single-simulation replay and remains byte
-compatible. Kind 2 stores a complete world checkpoint and globally ordered world operations. Use
+The `.numos` container has two content discriminators. Kind 1 is the single-simulation replay and stays byte
+compatible with files written before world replays existed. Kind 2 stores a complete world checkpoint and globally ordered world operations. Use
 `NumosReplaySerializer.DeserializeDocument` or `NumosReplayFile.LoadDocument` when either kind is accepted, and use
 `NumosWorldReplaySerializer` when the caller specifically requires a complete-world replay. Viewer project names are
 metadata; viewport layout, per-simulation display names, colors, and camera state are presentation preferences and are
@@ -417,6 +413,8 @@ not deterministic replay state.
 `Numos.Serialization.FileSystem` package adds path-based load and atomic save helpers.
 
 ```csharp
+using Numos.API;
+using Numos.CoreSim;
 using Numos.Serialization;
 
 AtmosReplayArchive replay = timeline.CaptureReplay();
@@ -439,7 +437,7 @@ Viewer branch graphs are session state. Saving writes the selected branch, eithe
 the current inspection position. Save branches individually when more than one future needs to survive closing the
 project.
 
-The first file format supports built-in Numos simulation state. Saving or loading reports and rejects custom simulation
+The current file format supports built-in Numos simulation state only. Saving or loading reports and rejects custom simulation
 or world solver delegates, solver configurations, and captured solver arrays because a standalone viewer cannot
 reconstruct their host implementations. Unknown required versions, sections, and opcodes are rejected; optional
 length-prefixed metadata can be skipped by future readers. Payload limits are configurable through

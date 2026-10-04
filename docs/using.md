@@ -1,8 +1,5 @@
 # Using Numos
-Numos is intentionally designed to be engine-agnostic and self-contained.
-As such, creating and performing operations on the simulation is relatively simple.
-
-For almost every game or engine integration, `Numos.API` is the package to start with. It is the supported facade around the simulator and is deliberately shaped around handles, validated operations, and detached snapshots instead of direct access to the kernel's mutable data. Interacting with the sim is done entirely through this API surface.
+For almost every game or engine integration, `Numos.API` is the package to start with. It is the supported facade around the simulator and is deliberately shaped around handles, validated operations, and detached snapshots instead of direct access to the kernel's mutable data. Numos has no engine dependencies, so an integration is mostly a matter of mapping your world onto chunks and driving ticks from your game loop.
 
 > [!WARNING]
 > The packages are still prerelease while Numos is a prototype. Include prerelease versions when installing them, and expect the `0.x` API surface to continue moving as the simulation matures.
@@ -263,11 +260,13 @@ factory cycles throw; failed creation leaves the slot available for a retry. Fac
 not mutate the simulation.
 
 Sharing data does not change execution order. Register producers before consumers, and define how a consumer behaves
-when its producer is disabled or removed. Built-in advection and thermodynamics use shared concurrent queues for their
-boundary stages. Producers clear their queues before parallel chunk work; consumers reject events from earlier ticks
-and sort current events before applying cross-chunk changes. Thermal boundary work then applies sequentially; gas
-boundary flow reserves each source's write range sequentially, in sorted order, but scatters and applies in parallel
-once every range is reserved (see `docs/atmospherics_technical_documentation.md` §4.4).
+when its producer is disabled or removed. The built-in boundary stages work this way: advection and thermodynamics
+publish per-chunk boundary event batches through a shared slot, reserving one batch per chunk before parallel work
+starts so each worker writes only to its own. The consumers ignore batches left over from an earlier tick and put the
+current events in canonical order before applying cross-chunk changes. Thermal boundary work then applies
+sequentially; gas boundary flow reserves each source's write range sequentially, in sorted order, but scatters and
+applies in parallel once every range is reserved (see Cross-Chunk Boundary Flow in the
+[technical documentation](atmospherics_technical_documentation.md)).
 
 Resolve shared data before starting worker tasks: facade calls from workers would block on the tick's state lock. Numos
 serializes lookup and creation; solvers synchronize later access to mutable values. A `ConcurrentQueue<T>` works for

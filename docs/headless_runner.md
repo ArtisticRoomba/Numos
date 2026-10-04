@@ -135,8 +135,10 @@ replaces and disposes the current simulation after the replacement has been cons
 | `observe`                | Optional `position`, `voxel`, `includeVoxels`, `onlyGasBearingVoxels`, and `maxIssueLocations` | Returns a coherent canonical report for the current tick. Dense per-voxel data is opt-in.                        |
 | `exit`                   | None                                                                                           | Disposes the active simulation, responds, and stops reading input.                                               |
 
-The built-in solver names accepted by `setSolverEnabled` are `advection`, `boundary-flow`, `thermodynamics`, and
-`thermal-boundary`. A name that is not present in the current pipeline is an error rather than a silent no-op.
+`setSolverEnabled` accepts any stage name in the current pipeline. The built-in stages, in default order, are
+`advection`, `explicit-gas-transport`, `boundary-flow`, `thermodynamics`, `explicit-thermal-transport`,
+`thermal-boundary`, and `gas-reactions`. The runner has no operations for portals or docks, so the two explicit-link
+stages never have work here. A name that is not present in the current pipeline is an error rather than a silent no-op.
 
 ### Configuration fields
 
@@ -159,8 +161,8 @@ The built-in solver names accepted by `setSolverEnabled` are `advection`, `bound
 - `accumulatorWakeThresholdPa`
 - `accumulatorMaxAliveTicks`
 
-Omitted fields retain their current values. Keeping experiment configuration explicit is recommended when the output
-will be compared across commits, because production defaults can evolve.
+Omitted fields retain their current values. Production defaults change over time, so set every field an experiment
+depends on when its output will be compared across commits.
 
 ### Gas definitions
 
@@ -199,10 +201,10 @@ coordinate samples attached to invalid-value diagnostics (default `32`, maximum 
 local index and local coordinates, classification, gas-capable/gas-bearing flags, raw pressure and temperature, total
 moles, estimated sensible energy, and per-gas moles.
 
-IEEE-754 non-finite values are encoded as the JSON strings `"NaN"`, `"Infinity"`, and `"-Infinity"`. The same strings
-are accepted for floating-point request fields. Finite values remain JSON numbers. This keeps every response valid JSON
-while preserving the invalid values most useful during debugging. Consumers should accept either a number or one of
-those three strings for floating-point fields.
+IEEE-754 non-finite values are encoded as the JSON strings `"NaN"`, `"Infinity"`, and `"-Infinity"`, and the same
+strings are accepted for floating-point request fields. Finite values remain JSON numbers. JSON has no literal for NaN,
+so this keeps every response parseable without throwing away the values most useful during debugging. Consumers should
+accept either a number or one of those three strings for any floating-point field.
 
 ## Determinism and comparison
 
@@ -212,11 +214,10 @@ order, and timing measurements are excluded from canonical observations.
 
 For useful diffs:
 
-1. Specify all configuration values that matter to the experiment.
-2. Add gases in an explicit order and refer to their returned IDs.
-3. Build topology before injecting gas.
-4. Insert named `observe` requests before and after the ticks under investigation.
-5. Compare parsed JSON rather than relying on whitespace.
+1. Add gases in an explicit order and refer to their returned IDs.
+2. Build topology before injecting gas.
+3. Insert named `observe` requests before and after the ticks under investigation.
+4. Compare parsed JSON rather than relying on whitespace.
 
 The runner reports state; it does not automatically assert universal mass or energy conservation. Void flow, vacuum
 cleanup, phase changes, and thermal boundaries can intentionally remove mass or energy, so invariants depend on the
@@ -234,5 +235,4 @@ Replay it with:
 dotnet run --project src/Numos.Headless -- --script examples/headless/two-voxel-flow.jsonl
 ```
 
-The file is intentionally ordinary NDJSON, so it is also a starting point for generated experiments and regression
-fixtures.
+It is ordinary NDJSON, so it also works as a template for generated experiments and regression fixtures.

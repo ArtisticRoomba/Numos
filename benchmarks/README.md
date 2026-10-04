@@ -3,12 +3,12 @@
 Use `Numos.CoreSim.Benchmarks` to measure solver costs and check whether an optimization helps. It targets .NET 10 and
 uses BenchmarkDotNet 0.15.8.
 
-The project has two places for benchmarks:
+Benchmarks live in three folders:
 
 - `Regular/`: representative solver stages, complete ticks, and expensive state operations, with independent scaling
   axes.
-- `Micro/`: focused comparisons with a baseline and equivalent inputs. The initial comparison measures ordinary
-  configuration gas-property lookup against the tick's captured tables when reducing heat capacity.
+- `Micro/`: focused comparisons against a baseline on identical inputs, such as the SoA chunk math against a plain
+  scalar loop, or configuration gas-property lookup against the tick's captured tables when reducing heat capacity.
 - `Scaling/`: one-axis sweeps used to measure wall-clock growth.
 
 ## Run a useful subset
@@ -64,8 +64,8 @@ chunk-only scheduling.
 ## Analyze scaling output
 
 The plotting script reads the dimensions embedded in BenchmarkDotNet CSV output and creates linear, log-log, normalized
-cost, and adjacent log-log slope graphs. Parallel runs also produce speedup and efficiency graphs. Run it using python
-and pass in a `csv` to analyze:
+cost, and adjacent log-log slope graphs. Parallel runs also produce speedup and efficiency graphs. Pass it one or more
+report CSVs:
 
 ```bash
 python3 benchmarks/analysis/analyze_scaling.py \

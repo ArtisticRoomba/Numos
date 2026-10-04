@@ -50,7 +50,7 @@ metadata. `promote` only removes the prerelease and build metadata; it does not 
 The manager validates the complete SemVer 2.0.0 grammar. .NET assembly metadata has numeric component limits, so the tool rejects version components that cannot be represented by the shipping assemblies.
 
 ## Reviewing and Tagging a Release
-A version bump edits sourcegenned version properties. Review the result, build the packages, and commit it before creating a tag. A tag should always point at the commit that contains the version it names.
+A version bump edits the family's `Version.props`. Review the result, build the packages, and commit it before creating a tag. A tag should always point at the commit that contains the version it names.
 
 ```shell
 python3 eng/version.py verify coresim
@@ -67,12 +67,10 @@ The CI package job builds the solution with warnings treated as errors, packs ea
 
 Pushing a `coresim/v*` or `viewer/v*` tag starts `.github/workflows/publish.yml`. The workflow verifies that the tag exactly matches the committed family version, repeats the build and package checks, and publishes only that family. CoreSim-family packages are pushed in dependency order. Matching `.snupkg` files are published with the primary packages.
 
-## Viewer Application Releases
-
-The publishing workflow does not create a GitHub Release for the Viewer application, rather it will append builds to a draft release it creates on its own accord. After pushing an annotated Viewer tag, run **Build Viewer release** from the Actions tab and enter that exact tag (for example, `viewer/v0.1.0`). The workflow validates the tag, builds and tests the solution on Linux, Windows, and macOS, then publishes self-contained NativeAOT application archives for `linux-x64`, `win-x64`, and `osx-arm64`.
-
-The GH action refuses to modify an already-published release.
-
 Publishing uses NuGet trusted publishing and GitHub OIDC. Configure the repository variable `NUGET_USER` with the NuGet.org account name used by the trusted-publishing policy. This is an account name, not an API key. Package building and validation run in a job without OIDC permission. A separate job downloads only the reviewed artifacts and requests a short-lived credential immediately before publishing; do not create or store a long-lived `NUGET_API_KEY` repository secret.
 
-A release is not just a version number. Before pushing a public package, confirm that the package family has a clear change summary, its API changes match the chosen SemVer increment, the generated artifacts are from a clean checkout, and the annotated tag points to the reviewed commit. After a stable baseline exists, add package/API compatibility validation against the previous release so accidental breaking changes are caught before publishing.
+Before pushing a public package, confirm that the package family has a clear change summary, its API changes match the chosen SemVer increment, the generated artifacts are from a clean checkout, and the annotated tag points to the reviewed commit. Once a stable baseline exists, add package/API compatibility validation against the previous release so accidental breaking changes are caught before publishing.
+
+## Viewer Application Releases
+
+Publishing the NuGet packages does not produce downloadable Viewer builds; that is a separate, manually triggered workflow. After pushing an annotated Viewer tag, run **Build Viewer release** from the Actions tab and enter that exact tag (for example, `viewer/v0.1.0`). The workflow validates the tag, builds and tests the solution on Linux, Windows, and macOS, then builds self-contained NativeAOT application archives for `linux-x64`, `win-x64`, and `osx-arm64` and attaches them to a draft GitHub Release for the tag, creating the draft if it does not exist yet. It refuses to touch a release that has already been published.
