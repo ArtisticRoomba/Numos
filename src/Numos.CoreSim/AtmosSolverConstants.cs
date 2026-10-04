@@ -10,24 +10,39 @@ namespace Numos.CoreSim;
 /// </remarks>
 internal static class AtmosSolverConstants
 {
-    /// <summary>Number of fixed simulation ticks processed per simulated second.</summary>
+    /// <summary>
+    ///     Number of fixed simulation ticks processed per simulated second.
+    /// </summary>
     internal const PerSecond SimulationRate = 20f;
 
-    /// <summary>Duration of one fixed simulation tick, in seconds.</summary>
+    /// <summary>
+    ///     Duration of one fixed simulation tick, in seconds.
+    /// </summary>
     internal const Second FixedTimeStep = 1f / SimulationRate;
 
-    /// <summary>Maximum fixed ticks consumed by one elapsed-time update.</summary>
+    /// <summary>
+    ///     Maximum fixed ticks consumed by one elapsed-time update.
+    /// </summary>
     internal const int MaximumStepsPerUpdate = 5;
 
-    /// <summary>Number of simulation ticks between thermodynamics passes.</summary>
+    /// <summary>
+    ///     Number of simulation ticks between thermodynamics passes.
+    /// </summary>
     internal const int ThermodynamicsTickInterval = 2;
 
-    /// <summary>Per-species amount below which residual gas is discarded, in moles (mol).</summary>
+    /// <summary>
+    ///     Per-species amount below which residual gas is discarded, in moles (mol).
+    /// </summary>
     internal const Mole MinimumTrackedMoles = 0.0001f;
 
-    /// <summary>Minimum vapor amount considered by the phase-change solver, in moles (mol).</summary>
+    /// <summary>
+    ///     Minimum vapor amount considered by the phase-change solver, in moles (mol).
+    /// </summary>
     internal const Mole MinimumMolesForCondensation = 0.01f;
 
-    /// <summary>Minimum vapor amount considered by the phase-change solver, in moles (mol).</summary>
+    /// <summary>
+    ///     Equilibrium condensation left over after a rate-limited step, in moles (mol), at or below which the
+    ///     phase-change solver condenses the whole equilibrium amount in one tick instead.
+    /// </summary>
     internal const Mole64 CondensationFactorCutoff = 0.1d;
 }

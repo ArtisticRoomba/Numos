@@ -9,6 +9,8 @@ namespace Numos.CoreSim;
 /// <remarks>
 ///     Create an editable <see cref="AtmosConfig" />, then apply it with
 ///     <c>AtmosSimulation.SetAtmosConfig</c>. Retaining or changing the editable object cannot mutate this snapshot.
+///     Every value has already been normalized by the rules documented on the matching <see cref="AtmosConfig" />
+///     member.
 /// </remarks>
 public sealed class AtmosConfigSnapshot : IAtmosConfig
 {
@@ -92,42 +94,66 @@ public sealed class AtmosConfigSnapshot : IAtmosConfig
         SolverConfigurations = Array.AsReadOnly(settings.OrderBy(static value => value.Key, StringComparer.Ordinal).ToArray());
     }
 
+    /// <summary>
+    ///     Gets the registered gases, with invalid heat capacities replaced by
+    ///     <see cref="DefaultMolarHeatCapacityAtConstantVolume" /> and diffusion coefficients clamped to [0, 1].
+    /// </summary>
     public GasRegistrySnapshot GasRegistry { get; }
 
     /// <summary>
     ///     Gets immutable solver-owned configurations ordered by their ordinal keys.
     /// </summary>
     public IReadOnlyList<IAtmosSolverConfiguration> SolverConfigurations { get; }
+    /// <inheritdoc cref="AtmosConfig.GlobalTemperature" />
     [ConfigCheckpointField(0)] public Kelvin GlobalTemperature { get; }
+    /// <inheritdoc cref="AtmosConfig.DefaultTemperatureFallback" />
     [ConfigCheckpointField(1)] public Kelvin DefaultTemperatureFallback { get; }
+    /// <inheritdoc cref="AtmosConfig.DefaultMolarHeatCapacityAtConstantVolume" />
     [ConfigCheckpointField(2)] public JoulePerMoleKelvin DefaultMolarHeatCapacityAtConstantVolume { get; }
+    /// <inheritdoc cref="AtmosConfig.VoxelVolume" />
     [ConfigCheckpointField(3)] public CubicMetre VoxelVolume { get; }
+    /// <inheritdoc cref="AtmosConfig.SaturationReferencePressure" />
     [ConfigCheckpointField(4)] public Pascal SaturationReferencePressure { get; }
+    /// <inheritdoc cref="AtmosConfig.DefaultDiffusionCoefficient" />
     [ConfigCheckpointField(5)] public Scalar DefaultDiffusionCoefficient { get; }
+    /// <inheritdoc cref="AtmosConfig.SpaceTemperature" />
     [ConfigCheckpointField(6)] public Kelvin SpaceTemperature { get; }
+    /// <inheritdoc cref="AtmosConfig.BulkFlowCoefficient" />
     [ConfigCheckpointField(7)] public Scalar BulkFlowCoefficient { get; }
+    /// <inheritdoc cref="AtmosConfig.VacuumThreshold" />
     [ConfigCheckpointField(8)] public Pascal VacuumThreshold { get; }
+    /// <inheritdoc cref="AtmosConfig.SleepThreshold" />
     [ConfigCheckpointField(9)] public int SleepThreshold { get; }
+    /// <inheritdoc cref="AtmosConfig.SleepEpsilon" />
     [ConfigCheckpointField(10)] public Scalar SleepEpsilon { get; }
+    /// <inheritdoc cref="AtmosConfig.ThermalConductance" />
     [ConfigCheckpointField(11)] public JoulePerKelvin ThermalConductance { get; }
+    /// <inheritdoc cref="AtmosConfig.CondensationRateFactor" />
     [ConfigCheckpointField(12)] public Scalar CondensationRateFactor { get; }
+    /// <inheritdoc cref="AtmosConfig.MaxPressureTransferFractionPerNeighbor" />
     [ConfigCheckpointField(13)] public Scalar MaxPressureTransferFractionPerNeighbor { get; }
+    /// <inheritdoc cref="AtmosConfig.AccumulatorWakeThreshold" />
     [ConfigCheckpointField(14)] public Pascal AccumulatorWakeThreshold { get; }
+    /// <inheritdoc cref="AtmosConfig.AccumulatorMaxAliveTicks" />
     [ConfigCheckpointField(15)] public int AccumulatorMaxAliveTicks { get; }
 
+    /// <inheritdoc cref="AtmosConfig.PressurePerMoleKelvin" />
     public PascalPerMoleKelvin PressurePerMoleKelvin =>
         AtmosPhysicalConstants.MolarGasConstant / GetVoxelVolume();
 
+    /// <inheritdoc cref="AtmosConfig.GetValidatedTemp" />
     public Kelvin GetValidatedTemp(Kelvin storedTemperature)
     {
         return FloatMath.IsFinitePositive(storedTemperature) ? storedTemperature : DefaultTemperatureFallback;
     }
 
+    /// <inheritdoc cref="AtmosConfig.GetVoxelVolume" />
     public CubicMetre GetVoxelVolume()
     {
         return FloatMath.IsFinitePositive(VoxelVolume) ? VoxelVolume : AtmosConfigDefaults.VoxelVolume;
     }
 
+    /// <inheritdoc cref="AtmosConfig.GetMolarHeatCapacityAtConstantVolume" />
     public JoulePerMoleKelvin GetMolarHeatCapacityAtConstantVolume(int gasId)
     {
         JoulePerMoleKelvin fallback = FloatMath.IsFinitePositive(DefaultMolarHeatCapacityAtConstantVolume)
@@ -144,6 +170,7 @@ public sealed class AtmosConfigSnapshot : IAtmosConfig
         return fallback;
     }
 
+    /// <inheritdoc cref="AtmosConfig.GetDiffusionCoefficient" />
     public Scalar GetDiffusionCoefficient(int gasId)
     {
         return (uint)gasId < (uint)GasRegistry.Count
@@ -151,6 +178,7 @@ public sealed class AtmosConfigSnapshot : IAtmosConfig
             : FloatMath.ClampUnitInterval(DefaultDiffusionCoefficient);
     }
 
+    /// <inheritdoc cref="AtmosConfig.TryGetGasProperties" />
     public bool TryGetGasProperties(int gasId, out GasProperties properties)
     {
         if ((uint)gasId < (uint)GasRegistry.Count)
@@ -163,8 +191,10 @@ public sealed class AtmosConfigSnapshot : IAtmosConfig
         return false;
     }
 
+    /// <inheritdoc cref="AtmosConfig.GasPropertyCount" />
     public int GasPropertyCount => GasRegistry.Count;
 
+    /// <inheritdoc cref="AtmosConfig.ValidateGasRegistry" />
     public void ValidateGasRegistry()
     {
         GasRegistry.ValidateGasRegistry();

@@ -5,15 +5,27 @@ using Numos.Units;
 namespace Numos.CoreSim;
 
 /// <summary>
-///     Configuration values for the simulation.
+///     Editable simulation configuration.
 /// </summary>
+/// <remarks>
+///     Nothing here is validated on assignment. <see cref="CreateSnapshot" /> normalizes out-of-range values and
+///     produces the immutable <see cref="AtmosConfigSnapshot" /> a simulation actually runs with.
+/// </remarks>
 public class AtmosConfig : IAtmosConfig
 {
+    /// <summary>
+    ///     Creates a configuration with no registered gases and every setting at its <see cref="AtmosConfigDefaults" />
+    ///     value.
+    /// </summary>
     public AtmosConfig()
     {
     }
 
-    /// <summary>Creates an editable copy of an immutable simulation configuration.</summary>
+    /// <summary>
+    ///     Creates an editable copy of an immutable simulation configuration.
+    /// </summary>
+    /// <param name="source">The configuration to copy. Its values are already normalized.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="source" /> is <see langword="null" />.</exception>
     public AtmosConfig(AtmosConfigSnapshot source)
     {
         ArgumentNullException.ThrowIfNull(source);
@@ -41,7 +53,7 @@ public class AtmosConfig : IAtmosConfig
     }
 
     /// <summary>
-    ///     List of gases actively registered to the sim.
+    ///     Gases registered to the simulation. A gas's index in this registry is its gas ID.
     /// </summary>
     public GasRegistry GasRegistry { get; set; } = [];
 
@@ -59,6 +71,7 @@ public class AtmosConfig : IAtmosConfig
     /// <summary>
     ///     Reference ambient temperature, in kelvins (K).
     /// </summary>
+    /// <remarks>Non-finite and nonpositive values are normalized to <see cref="AtmosConfigDefaults.GlobalTemperature" />.</remarks>
     [Quantity("temperature")]
     public Kelvin GlobalTemperature { get; set; } = AtmosConfigDefaults.GlobalTemperature;
 
@@ -110,21 +123,28 @@ public class AtmosConfig : IAtmosConfig
         AtmosConfigDefaults.SaturationReferencePressure;
 
     /// <summary>
-    ///     Per-tick Fickian mixing fraction used for gas IDs missing from <see cref="GasRegistry" />.
+    ///     Reference diffusivity used for gas IDs missing from <see cref="GasRegistry" />.
     /// </summary>
-    /// <remarks>Values are clamped to [0, 1]; non-finite values disable fallback diffusion.</remarks>
+    /// <remarks>
+    ///     Scaled the same way as <see cref="GasProperties.DiffusionCoefficient" />; it is not a per-tick fraction.
+    ///     Values are clamped to [0, 1]; non-finite values disable fallback diffusion.
+    /// </remarks>
     public Scalar DefaultDiffusionCoefficient { get; set; } = AtmosConfigDefaults.DefaultDiffusionCoefficient;
 
     /// <summary>
-    ///     Default temperature of space, in kelvins (K).
+    ///     Modeled temperature of space, in kelvins (K).
     /// </summary>
+    /// <remarks>Non-finite and nonpositive values are normalized to <see cref="AtmosConfigDefaults.SpaceTemperature" />.</remarks>
     [Quantity("temperature")]
     public Kelvin SpaceTemperature { get; set; } = AtmosConfigDefaults.SpaceTemperature;
 
     /// <summary>
     ///     Dimensionless fraction of a pressure delta requested as bulk flow per simulation tick.
     /// </summary>
-    /// <remarks>Values are clamped to [0, 1]; non-finite values disable large-delta bulk flow.</remarks>
+    /// <remarks>
+    ///     Values are clamped to [0, 1]; non-finite values disable large-delta bulk flow. The solvers cap the
+    ///     effective coefficient at 0.5.
+    /// </remarks>
     public Scalar BulkFlowCoefficient { get; set; } = AtmosConfigDefaults.BulkFlowCoefficient;
 
     /// <summary>
@@ -177,8 +197,8 @@ public class AtmosConfig : IAtmosConfig
     ///     Maximum fraction of a source voxel's pressure used by the bulk-advection term for one neighbor per tick.
     /// </summary>
     /// <remarks>
-    ///     Values are clamped to [0, 1]; non-finite values disable bulk flow. Passive Fickian diffusion is
-    ///     calculated separately and is not capped by this value.
+    ///     Values are clamped to [0, 1]. Passive Fickian diffusion is calculated separately and is not capped by this
+    ///     value. The built-in solvers don't currently read this setting; it is still captured, hashed, and recorded.
     /// </remarks>
     public Scalar MaxPressureTransferFractionPerNeighbor { get; set; } =
         AtmosConfigDefaults.MaxPressureTransferFractionPerNeighbor;
@@ -186,22 +206,44 @@ public class AtmosConfig : IAtmosConfig
     /// <summary>
     ///     Minimum accumulated pressure activity required to wake a sleeping chunk, in pascals (Pa).
     /// </summary>
+    /// <remarks>
+    ///     Non-finite and negative values are normalized to zero. The built-in solvers don't currently read this
+    ///     setting; it is still captured, hashed, and recorded.
+    /// </remarks>
     [Quantity("pressure")]
     public Pascal AccumulatorWakeThreshold { get; set; } = AtmosConfigDefaults.AccumulatorWakeThreshold;
 
     /// <summary>
     ///     Maximum number of ticks that an accumulated activity value remains alive.
     /// </summary>
+    /// <remarks>
+    ///     Negative values are normalized to zero. The built-in solvers don't currently read this setting; it is still
+    ///     captured, hashed, and recorded.
+    /// </remarks>
     public int AccumulatorMaxAliveTicks { get; set; } = AtmosConfigDefaults.AccumulatorMaxAliveTicks;
 
+    /// <summary>
+    ///     Ideal-gas pressure coefficient <c>R/V</c> for one voxel, in pascals per mole-kelvin (Pa/(mol·K)).
+    /// </summary>
     public PascalPerMoleKelvin PressurePerMoleKelvin =>
         AtmosPhysicalConstants.MolarGasConstant / GetVoxelVolume();
 
+    /// <summary>
+    ///     Returns the temperature the solvers use for a stored voxel temperature.
+    /// </summary>
+    /// <param name="storedTemperature">A voxel's stored temperature, in kelvins (K).</param>
+    /// <returns>
+    ///     <paramref name="storedTemperature" /> when it is finite and positive; otherwise
+    ///     <see cref="DefaultTemperatureFallback" />.
+    /// </returns>
     public Kelvin GetValidatedTemp(Kelvin storedTemperature)
     {
         return FloatMath.IsFinitePositive(storedTemperature) ? storedTemperature : DefaultTemperatureFallback;
     }
 
+    /// <summary>
+    ///     Returns <see cref="VoxelVolume" />, or the default of <c>1 m³</c> when it is non-finite or nonpositive.
+    /// </summary>
     public CubicMetre GetVoxelVolume()
     {
         return FloatMath.IsFinitePositive(VoxelVolume)
@@ -209,6 +251,14 @@ public class AtmosConfig : IAtmosConfig
             : AtmosConfigDefaults.VoxelVolume;
     }
 
+    /// <summary>
+    ///     Resolves the molar heat capacity at constant volume used for a gas, in J/(mol·K).
+    /// </summary>
+    /// <param name="gasId">The gas ID. Unregistered IDs are allowed.</param>
+    /// <returns>
+    ///     The gas's configured value when it is finite and positive; otherwise
+    ///     <see cref="DefaultMolarHeatCapacityAtConstantVolume" />, or the ideal-diatomic value if that is invalid too.
+    /// </returns>
     public JoulePerMoleKelvin GetMolarHeatCapacityAtConstantVolume(int gasId)
     {
         JoulePerMoleKelvin fallback = AtmosSolverMath.IsFinitePositive(DefaultMolarHeatCapacityAtConstantVolume)
@@ -225,6 +275,10 @@ public class AtmosConfig : IAtmosConfig
         return fallback;
     }
 
+    /// <summary>
+    ///     Resolves the reference diffusivity for a gas, clamped to [0, 1].
+    /// </summary>
+    /// <param name="gasId">The gas ID. Unregistered IDs use <see cref="DefaultDiffusionCoefficient" />.</param>
     public Scalar GetDiffusionCoefficient(int gasId)
     {
         return (uint)gasId < (uint)GasRegistry.Count
@@ -232,6 +286,12 @@ public class AtmosConfig : IAtmosConfig
             : FloatMath.ClampUnitInterval(DefaultDiffusionCoefficient);
     }
 
+    /// <summary>
+    ///     Looks up a registered gas by ID.
+    /// </summary>
+    /// <param name="gasId">The gas ID.</param>
+    /// <param name="properties">The registered properties, or <see langword="default" /> when not found.</param>
+    /// <returns><see langword="true" /> if <paramref name="gasId" /> is registered.</returns>
     public bool TryGetGasProperties(int gasId, out GasProperties properties)
     {
         if ((uint)gasId < (uint)GasRegistry.Count)
@@ -244,14 +304,28 @@ public class AtmosConfig : IAtmosConfig
         return false;
     }
 
+    /// <summary>
+    ///     Number of registered gases; valid gas IDs are <c>0</c> through <c>GasPropertyCount - 1</c>.
+    /// </summary>
     public int GasPropertyCount => GasRegistry.Count;
 
-    /// <summary>Captures an immutable, detached copy of this configuration.</summary>
+    /// <summary>
+    ///     Captures an immutable, detached, normalized copy of this configuration.
+    /// </summary>
+    /// <returns>A snapshot unaffected by later changes to this object.</returns>
+    /// <exception cref="InvalidOperationException">
+    ///     <see cref="GasRegistry" /> contains duplicate names, or a solver configuration snapshot changed its key.
+    /// </exception>
+    /// <exception cref="ArgumentException">Solver configuration keys are empty or not unique.</exception>
     public AtmosConfigSnapshot CreateSnapshot()
     {
         return new AtmosConfigSnapshot(this);
     }
 
+    /// <summary>
+    ///     Checks <see cref="GasRegistry" /> for duplicate gas names.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">Two or more gases share a name.</exception>
     public void ValidateGasRegistry()
     {
         GasRegistry.ValidateGasRegistry();

@@ -6,21 +6,18 @@ namespace Numos.CoreSim;
 /// <summary>
 ///     Represents a single gas type within an <see cref="AtmosChunk" /> using a Structure of Arrays (SoA) layout.
 /// </summary>
+/// <remarks>
 /// <para>
-///     If you've worked with old SS14 Atmospherics/SSAir, you are probably familiar with the concept of a GasMixture
-///     and the underlying fixed-size array Moles.
-///     In old Atmos, gases were stored in the structure of Tiles dictionary -> TileAtmosphere -> GasMixture -> Moles.
-///     This wasn't cache-friendly and made iterating over all gases in a given area slow, since you had to do
-///     a lot of object lookups.
+///     If you've worked with old SS14 Atmospherics/SSAir, you are probably familiar with GasMixture and its
+///     fixed-size Moles array. Old Atmos stored gases as Tiles dictionary -> TileAtmosphere -> GasMixture -> Moles,
+///     which wasn't cache-friendly and made iterating over all gases in an area slow because of all the object
+///     lookups.
 /// </para>
 /// <para>
-///     An SoA layout is a way of organizing data in memory such that all the values
-///     of a single field are stored contiguously.
-///     This can improve cache performance and make it easier to perform operations on large datasets
-///     (since memory access patterns are more predictable).
-///     This is that implementation.
-///     Looking at adjacent tiles is, after all, a fairly common op in Atmos.
+///     A channel instead keeps one gas's amount for every voxel of a chunk in a single contiguous array, so memory
+///     access is predictable. Looking at adjacent tiles is, after all, a fairly common op in Atmos.
 /// </para>
+/// </remarks>
 internal struct GasChannel
 {
     /// <summary>
@@ -33,7 +30,9 @@ internal struct GasChannel
     /// </summary>
     /// <remarks>
     ///     While this is not marked as nullable, this field
-    ///     can be null when the channel is not initialized via <see cref="Initialize" />.
+    ///     can be null when the channel is not initialized via <see cref="Initialize" />. The array is rented from
+    ///     <see cref="ArrayPool{T}.Shared" />, so it can be longer than the chunk's voxel count; only the first
+    ///     voxel-count entries are meaningful.
     /// </remarks>
     [ElementQuantity("amount")]
     public Mole[] Moles;

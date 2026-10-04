@@ -8,16 +8,29 @@ namespace Numos.CoreSim;
 /// </summary>
 public interface IGasRegistry : IEnumerable<GasProperties>
 {
+    /// <summary>
+    ///     Gets the number of registered gases.
+    /// </summary>
     int Count { get; }
 
+    /// <summary>
+    ///     Gets the gas at an index. The index is the gas ID used by chunks and solvers.
+    /// </summary>
+    /// <param name="index">The gas ID, from zero through <see cref="Count" /> minus one.</param>
     GasProperties this[int index] { get; }
 
     /// <summary>
     ///     Resolves a gas name to its index.
     /// </summary>
+    /// <param name="gasId">The gas's <see cref="GasProperties.Name" />, compared ordinally.</param>
+    /// <returns>The gas ID.</returns>
     /// <exception cref="KeyNotFoundException">Thrown if no gas with the given name is registered.</exception>
     int GasIdToIndex(string gasId);
 
+    /// <summary>
+    ///     Checks the registry for duplicate gas names.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">Two or more gases share a name.</exception>
     void ValidateGasRegistry();
 }
 
@@ -30,14 +43,13 @@ public sealed class GasRegistry : IGasRegistry
     private readonly List<GasProperties> _gases = [];
     private readonly Dictionary<string, int> _idMap = [];
 
+    /// <inheritdoc />
     public int Count => _gases.Count;
 
+    /// <inheritdoc />
     public GasProperties this[int index] => _gases[index];
 
-    /// <summary>
-    ///     Resolves a gas name to its index. O(1) via the cached id map.
-    /// </summary>
-    /// <exception cref="KeyNotFoundException">Thrown if no gas with the given name is registered.</exception>
+    /// <inheritdoc />
     public int GasIdToIndex(string gasId)
     {
         if (_idMap.TryGetValue(gasId, out int index))
@@ -46,6 +58,7 @@ public sealed class GasRegistry : IGasRegistry
         throw new KeyNotFoundException($"No gas registered with id '{gasId}'.");
     }
 
+    /// <inheritdoc />
     public void ValidateGasRegistry()
     {
         List<string> duplicates = _gases
@@ -58,6 +71,9 @@ public sealed class GasRegistry : IGasRegistry
             throw new InvalidOperationException($"Duplicate gas names found: {string.Join(", ", duplicates)}");
     }
 
+    /// <summary>
+    ///     Enumerates gases in gas-ID order.
+    /// </summary>
     public IEnumerator<GasProperties> GetEnumerator()
     {
         return _gases.GetEnumerator();
@@ -69,13 +85,13 @@ public sealed class GasRegistry : IGasRegistry
     }
 
     /// <summary>
-    ///     Registers a new gas. Throws if a gas with the same name is already registered.
+    ///     Registers a gas with the next gas ID.
     /// </summary>
+    /// <param name="gas">The gas to register.</param>
     /// <exception cref="InvalidOperationException">A gas with this name is already registered.</exception>
     public void Add(GasProperties gas)
     {
-        // Multiple gasses with null can be added
-        // Should be avoid outside of tests
+        // Gases with a null name skip the uniqueness check and can't be looked up by name. Tests only.
         if (gas.Name != null)
         {
             if (_idMap.ContainsKey(gas.Name))
@@ -88,9 +104,10 @@ public sealed class GasRegistry : IGasRegistry
     }
 
     /// <summary>
-    ///     Removes the gas at the given index. Invalidates cached indices for every gas after it,
-    ///     so the id map is rebuilt.
+    ///     Removes the gas at the given index.
     /// </summary>
+    /// <param name="index">The gas ID to remove.</param>
+    /// <remarks>Every later gas shifts down one ID, so IDs captured before the removal are stale.</remarks>
     public void RemoveAt(int index)
     {
         string removedName = _gases[index].Name;
@@ -103,9 +120,10 @@ public sealed class GasRegistry : IGasRegistry
     }
 
     /// <summary>
-    ///     Replaces the gas at the given index with a new one, re-validating name uniqueness
-    ///     and updating the id map accordingly.
+    ///     Replaces the gas at the given index, keeping its gas ID.
     /// </summary>
+    /// <param name="index">The gas ID to replace.</param>
+    /// <param name="gas">The new properties.</param>
     /// <exception cref="InvalidOperationException">
     ///     Thrown if <paramref name="gas" />'s name is already used by a different gas in the registry.
     /// </exception>
@@ -135,6 +153,11 @@ public sealed class GasRegistrySnapshot : IGasRegistry
     private readonly GasProperties[] _gases;
     private readonly Dictionary<string, int> _idMap;
 
+    /// <summary>
+    ///     Copies the gases from <paramref name="source" />.
+    /// </summary>
+    /// <param name="source">The registry to copy.</param>
+    /// <remarks>Duplicate names are not rejected here; call <see cref="ValidateGasRegistry" /> to check.</remarks>
     public GasRegistrySnapshot(IGasRegistry source)
     {
         _gases = source.ToArray();
@@ -147,10 +170,13 @@ public sealed class GasRegistrySnapshot : IGasRegistry
         }
     }
 
+    /// <inheritdoc />
     public int Count => _gases.Length;
 
+    /// <inheritdoc />
     public GasProperties this[int index] => _gases[index];
 
+    /// <inheritdoc />
     public int GasIdToIndex(string gasId)
     {
         if (_idMap.TryGetValue(gasId, out int index))
@@ -159,6 +185,7 @@ public sealed class GasRegistrySnapshot : IGasRegistry
         throw new KeyNotFoundException($"No gas registered with id '{gasId}'.");
     }
 
+    /// <inheritdoc />
     public void ValidateGasRegistry()
     {
         List<string> duplicates = _gases
@@ -171,6 +198,9 @@ public sealed class GasRegistrySnapshot : IGasRegistry
             throw new InvalidOperationException($"Duplicate gas names found: {string.Join(", ", duplicates)}");
     }
 
+    /// <summary>
+    ///     Enumerates gases in gas-ID order.
+    /// </summary>
     public IEnumerator<GasProperties> GetEnumerator()
     {
         return ((IEnumerable<GasProperties>)_gases).GetEnumerator();
