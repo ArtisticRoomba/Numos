@@ -1,7 +1,7 @@
 namespace Numos.CoreSim.Solvers;
 
 /// <summary>
-///     Applies one gas injection while keeping mixture SHC, temperature, and pressure coherent.
+///     Applies one gas injection while keeping the voxel's heat capacity, temperature, and pressure coherent.
 /// </summary>
 /// <remarks>
 ///     Callers validate the target and wake its chunk before entry. <see cref="AtmosChunk.InjectGasToVoxel" />
@@ -10,10 +10,14 @@ namespace Numos.CoreSim.Solvers;
 internal static class GasInjectionSolver
 {
     /// <summary>
-    ///     Public entry point for injecting gas outside the tick/solver flow (e.g. explosions, tools).
-    ///     Distinct from the <see cref="Inject(AtmosChunk, ushort, int, Mole, Kelvin, AtmosSolverConfigSnapshot, JoulePerKelvin)" />
-    ///     overload, which is used during ticked solving against a config snapshot.
+    ///     Injects gas outside a tick (direct API mutations such as explosions or tools), recomputing the voxel's
+    ///     heat capacity from its current composition first.
     /// </summary>
+    /// <remarks>
+    ///     Solver stages use the
+    ///     <see cref="Inject(AtmosChunk, ushort, int, Mole, Kelvin, AtmosSolverConfigSnapshot, JoulePerKelvin)" />
+    ///     overload against the tick's config snapshot instead.
+    /// </remarks>
     internal static void Inject(
         AtmosChunk chunk, ushort localVoxelIndex, int gasId, Mole moles,
         Kelvin temperature, IAtmosConfig config)

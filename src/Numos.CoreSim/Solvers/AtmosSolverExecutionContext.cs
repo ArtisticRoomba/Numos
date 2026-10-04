@@ -43,7 +43,7 @@ internal sealed class AtmosSolverExecutionContext
 }
 
 /// <summary>
-///     Holds one kernel's immutable inputs and callback snapshot during a coordinated world tick.
+///     Holds one kernel's tick context during a coordinated world tick.
 /// </summary>
 internal readonly record struct AtmosWorldTickExecution(
     AtmosSolverExecutionContext Context);

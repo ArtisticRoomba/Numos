@@ -33,10 +33,9 @@ internal sealed class ThermodynamicsSolver : IAtmosSolverStage, IDisposable
 
         AtmosChunk[] chunks = context.Chunks;
 
-        // Batches are reserved here, single-threaded, before any worker starts. Each worker below
-        // then only ever writes into the one batch reserved for its own chunk, replacing the old
-        // shared ConcurrentQueue enqueue -- which every worker contended on for every boundary
-        // voxel -- with a per-chunk exclusive write, matching AdvectionSolver/BoundaryFlowSolver.
+        // Batches are reserved here, single-threaded, before any worker starts, so each worker only
+        // writes into the batch reserved for its own chunk instead of contending on a shared queue
+        // for every boundary voxel. Same pattern as AdvectionSolver/BoundaryFlowSolver.
         BoundaryEventBatch<ThermalBoundaryEvent>?[] batches =
             ArrayPool<BoundaryEventBatch<ThermalBoundaryEvent>?>.Shared.Rent(Math.Max(1, chunks.Length));
 

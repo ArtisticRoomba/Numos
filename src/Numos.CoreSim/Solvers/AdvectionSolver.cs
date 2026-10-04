@@ -50,8 +50,8 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
     }
 
     /// <summary>
-    ///     Advances advection for every awake chunk and publishes candidates for the later
-    ///     single-threaded boundary-flow stage.
+    ///     Advances advection for every awake chunk and publishes boundary voxels for the later
+    ///     boundary-flow stage.
     /// </summary>
     /// <param name="context">The chunks, configuration snapshot, and tick state for this solver stage.</param>
     /// <remarks>
@@ -62,7 +62,7 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
     ///         and consumed by the tile that owns it, including the bulk and diffusion delta gathers.
     ///     </para>
     ///     <para>
-    ///         Each remaining barrier guards a real cross-tile read-after-write, so none of them can be
+    ///         Each barrier guards a real cross-tile read-after-write, so none of them can be
     ///         dropped: conductance needs the neighbor's refreshed pressure, the incident reduction needs
     ///         the neighbor's edge conductance, bulk flow needs the neighbor's incident conductance, the
     ///         bulk gather needs the neighbor's outgoing fractions, and the diffusion gather needs the
@@ -1192,7 +1192,7 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
                     var source = sources[index];
                     Mole molesDiffused = workspace.DiffusionTransfers![source.Voxel * gasCount + gas];
 
-                    // Zero stands in for the eligibility tests this phase used to run itself, and
+                    // Zero stands in for the eligibility tests PrepareDiffusion already ran, and
                     // skipping it is exact even for a source that really did diffuse nothing: every
                     // term here is non-negative and both accumulators start at +0, so neither can
                     // hold -0, and x - 0 and x + 0 are then bit-for-bit x. NaN is not zero and still

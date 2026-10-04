@@ -3,7 +3,7 @@ using Numos.Maths;
 namespace Numos.CoreSim.Solvers;
 
 /// <summary>
-///     Connects parallel chunk producers to a later sequential boundary stage without a shared per-event write.
+///     Connects parallel chunk producers to a later boundary stage without a shared per-event write.
 /// </summary>
 internal static class BoundaryEventBatches<T> where T : struct
 {
@@ -46,7 +46,7 @@ internal sealed class BoundaryEventBatchStorage<T> where T : struct
     /// </summary>
     /// <param name="key">The chunk position associated with the batch.</param>
     /// <param name="capacity">The maximum event count the producer may append.</param>
-    /// <returns>The reusable batch assigned to the next workspace.</returns>
+    /// <returns>The reset batch, owned by a single producer until the consumer stage runs.</returns>
     internal BoundaryEventBatch<T> AddBatch(Int3 key, int capacity)
     {
         if (Count == _batches.Length)

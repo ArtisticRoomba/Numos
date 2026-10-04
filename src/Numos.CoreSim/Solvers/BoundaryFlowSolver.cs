@@ -59,12 +59,12 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
                     ProcessBoundaryChunk(context, _orderedBatches[i], _pendingBuffers[i]);
             }
 
-            // Reserving in the same source-chunk order the original sequential path used keeps this
-            // bit-identical to it: each source's reserved range within a target's batch still lands at the
-            // same relative position the old single-threaded merge would have appended it to, which is what
-            // the resync-on-first-touch heat-capacity logic in RunInjectionBatch depends on. Each source
-            // touches at most itself plus six neighbors, so this pass is O(batches) rather than O(events) —
-            // the actual per-event work moves to the parallel scatter below.
+            // Reserving in canonical source-chunk order keeps this bit-identical to a fully sequential
+            // merge: each source's reserved range within a target's batch lands at the same relative
+            // position a single-threaded append would give it, which is what the resync-on-first-touch
+            // heat-capacity logic in RunInjectionBatch depends on. Each source touches at most itself plus
+            // six neighbors, so this pass is O(batches) rather than O(events) — the per-event work happens
+            // in the parallel scatter below.
             for (int i = 0; i < batchCount; i++)
                 ReserveTransferRanges(_pendingBuffers[i], _injectionBuffer);
 
@@ -241,11 +241,8 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
         if (!context.TryGetChunk(sourcePosition, out var sourceChunk))
             return;
 
-        // Each boundary voxel will have a BoundaryFlowEvent
-        // Only outflows are cared about to avoid double counting
-        // These functions do mutate, can lead to some directional bias
-        // TODO PERF See if possible to mutate after accumulation similar to advection
-        // Might be expensive
+        // Only outflows are handled here, so each directed transfer is counted once. Nothing is mutated
+        // yet: transfers go into the pending buffer and are applied later by RunQueuedInjections.
         var localPosition = sourceChunk.GetXyzInt3(boundaryEvent.LocalVoxelIndex);
         TryFlowToNeighbor(context, sourceChunk, sourcePosition, localPosition + Int3.NegX, Int3.NegX, pending);
         TryFlowToNeighbor(context, sourceChunk, sourcePosition, localPosition + Int3.PosX, Int3.PosX, pending);
@@ -389,9 +386,8 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
 
         /// <summary>
         ///     Maps <see cref="AtmosChunk.DenseId" /> to this tick's batch index for that chunk, or -1 if the
-        ///     chunk has no batch yet. A flat array indexed by dense id is a direct replacement for a
-        ///     dictionary keyed on grid position — this lookup runs once per boundary-flow transfer and the
-        ///     dictionary hash/probe was the dominant cost of that hot loop.
+        ///     chunk has no batch yet. Indexed by dense id rather than a dictionary keyed on grid position so
+        ///     the lookup is a plain array read.
         /// </summary>
         private int[] _batchIndexByChunkDenseId = [];
 
@@ -442,7 +438,7 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
         ///     Reserves <paramref name="count" /> consecutive event slots at the end of a batch's array for
         ///     one source chunk's exclusive use, growing the array as needed, and returns where that range
         ///     starts. Must be called sequentially — different sources' ranges are reserved back-to-back in
-        ///     canonical source order so their relative order matches the original sequential merge — but the
+        ///     canonical source order so their relative order matches a fully sequential merge — but the
         ///     writes into those ranges happen later, in parallel, once every range across every source has
         ///     been reserved.
         /// </summary>

@@ -59,9 +59,8 @@ internal sealed class ThermalBoundarySolver : IAtmosSolverStage
         if (!boundaryBatches.TryConsume(context.TickCount))
             return;
 
-        // Batch order does not need to match production order: every event this produces only
-        // ever feeds the _edges HashSet, which CollectEdges below immediately deduplicates, and
-        // Solve sorts _orderedEdges from it before anything downstream reads edge order.
+        // Batch order doesn't matter here: events only feed the _edges set, which deduplicates them,
+        // and Solve sorts _orderedEdges from it before anything downstream reads edge order.
         for (int batchIndex = 0; batchIndex < boundaryBatches.Count; batchIndex++)
         {
             BoundaryEventBatch<ThermalBoundaryEvent> batch = boundaryBatches[batchIndex];

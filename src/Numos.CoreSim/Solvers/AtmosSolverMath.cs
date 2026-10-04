@@ -4,13 +4,12 @@ using Numos.Maths;
 namespace Numos.CoreSim.Solvers;
 
 /// <summary>
-///     Shared, side-effect-free atmospheric calculations used across solver stages and mixture operations.
+///     Shared atmospheric calculations used across solver stages and mixture operations.
 /// </summary>
 internal static class AtmosSolverMath
 {
     /// <summary>
-    ///     Ideal gas law calculation
-    ///     PressurePerMoleKelvin is R/V
+    ///     Ideal-gas pressure <c>P = nRT/V</c>, using the validated temperature.
     /// </summary>
     internal static Pascal CalculatePressure(IAtmosConfig config, Mole moles, Kelvin temperature)
     {
@@ -19,8 +18,7 @@ internal static class AtmosSolverMath
     }
 
     /// <summary>
-    ///     Ideal gas law calculation
-    ///     PressurePerMoleKelvin is R/V
+    ///     Inverse of <see cref="CalculatePressure" />: <c>n = PV/(RT)</c>. Nonpositive or NaN pressure gives zero.
     /// </summary>
     internal static Mole PressureToMoles(IAtmosConfig config, Pascal pressure, Kelvin temperature)
     {
@@ -32,8 +30,12 @@ internal static class AtmosSolverMath
     }
 
     /// <summary>
-    ///     Returns a voxel's pressure based on the ideal gas law.
+    ///     Returns a voxel's ideal-gas pressure from its current gas amounts.
     /// </summary>
+    /// <remarks>
+    ///     Not a pure function: it updates <see cref="AtmosChunk.IsVacuum" />, and a voxel with no gas is cleared
+    ///     through <see cref="AtmosChunk.SetVoxelToVacuum" />.
+    /// </remarks>
     internal static Pascal CalculatePressureAtVoxel(
         IAtmosConfig config, AtmosChunk chunk,
         ushort localVoxelIndex)
@@ -50,7 +52,8 @@ internal static class AtmosSolverMath
     }
 
     /// <summary>
-    ///     Returns a voxel's pressure based on the ideal gas law.
+    ///     Same as <see cref="CalculatePressureAtVoxel(IAtmosConfig, AtmosChunk, ushort)" />, with the voxel's total
+    ///     moles already summed by the caller.
     /// </summary>
     internal static Pascal CalculatePressureAtVoxel(
         IAtmosConfig config, AtmosChunk chunk,
@@ -68,7 +71,8 @@ internal static class AtmosSolverMath
 
 
     /// <summary>
-    ///     Returns heat capacity of all gasses at voxel
+    ///     Sums <c>moles × Cv</c> over a voxel's positive gas amounts, in J/K. Does not read or write
+    ///     <see cref="AtmosChunk.TotalHeatCapacity" />.
     /// </summary>
     internal static JoulePerKelvin CalculateHeatCapacityAtVoxel(
         IAtmosConfig config, AtmosChunk chunk,
@@ -89,10 +93,9 @@ internal static class AtmosSolverMath
     }
 
     /// <summary>
-    ///     Returns pressure transfer between voxels based on the pressure delta
-    ///     Max transfer of total pressure * maximumFraction
-    ///     maximumFraction default value is 0.16
-    ///     In effect, no voxel can give away all of its gas in one tick
+    ///     Returns the bulk-flow pressure requested for a pressure delta:
+    ///     <c>pressureDelta × BulkFlowCoefficient</c>, with the coefficient capped at 0.5 so a transfer never asks
+    ///     for more than half the delta.
     /// </summary>
     internal static Pascal CalculateBulkPressureTransfer(
         AtmosSolverConfigSnapshot config,
@@ -106,8 +109,9 @@ internal static class AtmosSolverMath
     }
 
     /// <summary>
-    ///     Returns the source-relative species imbalance used by explicit Fickian diffusion.
+    ///     Returns the source-relative species imbalance <c>n_s - n_t · (T_t / T_s)</c>.
     /// </summary>
+    /// <remarks>No solver currently calls this; diffusion is driven by the source amount alone.</remarks>
     internal static Mole CalculateMoleImbalance(
         Mole sourceMoles, Kelvin sourceTemperature,
         Mole targetMoles, Kelvin targetTemperature)
@@ -125,8 +129,9 @@ internal static class AtmosSolverMath
     }
 
     /// <summary>
-    ///     Returns the thermal conductance between voxels
-    ///     It can never be higher than the amount of energy needed to equalize the voxels
+    ///     Returns the effective conductance between two voxels: the configured conductance capped at
+    ///     <c>C1·C2 / (C1 + C2)</c>, the value that would exactly equalize their temperatures in one step, so a
+    ///     transfer can't overshoot equilibrium.
     /// </summary>
     internal static JoulePerKelvin CalculateThermalConductance(
         JoulePerKelvin sourceHeatCapacity,

@@ -48,11 +48,10 @@ internal class ReactionSolver : IAtmosSolverStage
         try
         {
             // Told to ProcessChunk so it knows whether this outer per-chunk dispatch already saturates
-            // the worker pool, mirroring ThermodynamicsSolver/PhaseChangeSolver's awakeChunkCount gate:
-            // a single dense chunk only has per-voxel work to offer, so its write-back pass (see the
-            // ProcessChunk doc) needs its own parallelism to use the other workers; once there are
-            // enough awake chunks to occupy every worker on their own, adding a second layer of
-            // parallelism inside each chunk would just add dispatch overhead for no benefit.
+            // the worker pool, mirroring ThermodynamicsSolver/PhaseChangeSolver's awakeChunkCount gate.
+            // A single dense chunk only has per-voxel work to offer, so its write-back pass needs its
+            // own parallelism to use the other workers; once enough awake chunks occupy every worker,
+            // a second layer of parallelism inside each chunk is just dispatch overhead.
             int awakeChunkCount = 0;
             for (int i = 0; i < context.Chunks.Length; i++)
             {
@@ -151,23 +150,20 @@ internal class ReactionSolver : IAtmosSolverStage
                 rateOrder,
                 changesMatrix));
 
-        // Put data back. This is a genuine O(activeAirCount * mixtureLength) pass that never shrinks
-        // with worker count, so on a chunk that's the only source of parallel work (the dense-chunk
-        // case: no other chunk-level dispatch to fill the pool), this used to be the scaling ceiling
-        // (DenseChunkReactionParallelScalingBenchmarks: ~12% efficient at 16 workers). Each voxel's
-        // diffing/injection only touches its own slot in every per-gas array, so voxels are independent
-        // of each other; the one thing that isn't voxel-independent is GetOrCreateGasChannel's
-        // first-time channel creation (it mutates the chunk's shared ActiveGases/ActiveGasCount) and
-        // Wake() (it rebuilds the chunk's shared
-        // ActiveAirIndices) -- both are resolved once, serially, below before any worker touches a voxel,
-        // so parallelizing is only attempted once neither can fire mid-loop.
+        // Put data back. This is an O(activeAirCount * mixtureLength) pass that doesn't shrink with
+        // worker count, so run serially it caps scaling for a dense chunk that is the only source of
+        // parallel work (see DenseChunkReactionParallelScalingBenchmarks). Each voxel's diffing/injection
+        // only touches its own slot in every per-gas array, so voxels are independent, except for two
+        // chunk-shared side effects of InjectGasToVoxel: GetOrCreateGasChannel's first-time channel
+        // creation (mutates ActiveGases/ActiveGasCount) and Wake() (rebuilds ActiveAirIndices). The
+        // parallel branch only runs on an awake chunk, so Wake() can't fire, and it creates every
+        // missing channel serially before any worker touches a voxel.
         int workerCount = Math.Max(1, Environment.ProcessorCount);
         if (awakeChunkCount < workerCount && chunk.IsAwake)
         {
-            // Mirrors the discovery order the fully serial loop below used to walk (voxel-major, then
-            // ascending gas id), so a chunk's channel-append order -- and therefore the per-voxel
-            // summation order InjectGasToVoxel uses when it recomputes total moles/heat capacity --
-            // stays identical to before this pass was split off the write-back it used to be part of.
+            // Same discovery order as the serial branch below (voxel-major, then ascending gas id), so
+            // the chunk's channel-append order -- and with it the per-voxel summation order
+            // InjectGasToVoxel uses when it recomputes total moles -- matches the serial path exactly.
             for (int activeIndex = 0; activeIndex < activeAirCount && chunk.ActiveGasCount < mixtureLength; activeIndex++)
             {
                 int offset = activeIndex * mixtureLength;
@@ -277,8 +273,7 @@ internal class ReactionSolver : IAtmosSolverStage
         changesMatrix = new GasReactionMatrix(gasData, reactions.Count);
     }
 
-    // Total thermal energy the mixture holds at its current temperature: for each gas, moles * heat
-    // capacity gives Joules-per-Kelvin, times temperature gives Joules.
+    // Sensible energy of the mixture at its current temperature: sum of moles * Cv * T over gases.
     private Joule ExtractHeat(ReadOnlySpan<Mole> mixtureVector, ref readonly Kelvin temperature, int mixtureLength, IAtmosConfig config)
     {
         Joule result = 0f;
@@ -318,7 +313,9 @@ internal class ReactionSolver : IAtmosSolverStage
     ///     reflect the reactions that occurred.
     /// </param>
     /// <param name="currentTemperature">Temperature, updated in place to reflect the post-reaction mixture.</param>
-    /// <param name="reactionFeedback">optional array to which we write how often each reaction occured, index = reaction id</param>
+    /// <param name="reactionFeedback">
+    ///     Optional accumulator, indexed by reaction ID, incremented by how many times each reaction fired.
+    /// </param>
     /// <param name="config">The gas registry and reaction definitions to react against.</param>
     /// <param name="mixtureLength">The number of registered gases, i.e. the valid length of <paramref name="mixtureVector" />.</param>
     internal void ProcessVoxel(
@@ -359,7 +356,6 @@ internal class ReactionSolver : IAtmosSolverStage
         int reactionCount = reactions.Count;
         Scalar[] reactionSpeeds = RentReactionSpeeds(reactionCount);
 
-        //prep array.
         Array.Clear(reactionSpeeds, 0, reactionCount);
         //get all reaction speeds. Sequential: reactionCount is typically a handful of items, far too
         //small to justify a parallel dispatch, especially one issued once per voxel from inside an
@@ -390,7 +386,6 @@ internal class ReactionSolver : IAtmosSolverStage
             break;
         }
 
-        //check if there was even a reaction.
         if (!anyReaction)
         {
             return;
@@ -505,7 +500,6 @@ internal class ReactionSolver : IAtmosSolverStage
 
         if (reactionFeedback != null)
         {
-            //report feedback
             for (int j = 0; j < reactionCount; j++)
             {
                 reactionFeedback[j] += reactionSpeeds[j];

@@ -21,12 +21,12 @@ internal sealed class ThermalDiffusionSolver
     /// <param name="awakeChunkCount">
     ///     How many awake, gas-bearing chunks <see cref="ThermodynamicsSolver" /> is dispatching this tick.
     ///     At or above worker count, the outer per-chunk dispatch already saturates the pool, so this runs
-    ///     the original sequential scatter form unchanged. Below worker count -- a single dense chunk, most
-    ///     often -- there aren't enough chunks to fill idle workers, so this instead runs a per-voxel gather
-    ///     form that reproduces the same floating-point summation order without any cross-voxel write to
-    ///     race on. Mirrors the same gate <see cref="PhaseChangeSolver" /> and <see cref="ReactionSolver" />
-    ///     use.
+    ///     the sequential scatter form. Below worker count -- a single dense chunk, most often -- there
+    ///     aren't enough chunks to fill idle workers, so this instead runs a per-voxel gather form that
+    ///     reproduces the same floating-point summation order without any cross-voxel write to race on.
+    ///     Same gate as <see cref="PhaseChangeSolver" /> and <see cref="ReactionSolver" />.
     /// </param>
+    /// <returns>The number of events written to <paramref name="boundaryBuffer" />.</returns>
     internal int Solve(
         AtmosChunk chunk, AtmosSolverConfigSnapshot config,
         ThermalBoundaryEvent[] boundaryBuffer, int awakeChunkCount)
@@ -68,7 +68,7 @@ internal sealed class ThermalDiffusionSolver
         }
     }
 
-    // ----- Sequential scatter form: unchanged, used once enough chunks already fill the pool. -----
+    // ----- Sequential scatter form: used once enough chunks already fill the pool. -----
 
     private static int AccumulateConductancesAndBoundaries(
         AtmosChunk chunk,
@@ -280,11 +280,11 @@ internal sealed class ThermalDiffusionSolver
     ///     The scatter form's per-voxel accumulation order -- visiting ascending voxel index, so a voxel
     ///     receives its -Z, -Y, -X neighbors' contributions when <em>they</em> are processed, then adds
     ///     its own +X, +Y, +Z contributions when it is processed -- is reproduced here by summing in that
-    ///     same NegZ, NegY, NegX, PosX, PosY, PosZ order, so floating-point rounding is unchanged and every
-    ///     voxel now only ever writes its own slot. <see cref="AtmosSolverMath.CalculateThermalConductance" />
+    ///     same NegZ, NegY, NegX, PosX, PosY, PosZ order, so floating-point rounding matches and every
+    ///     voxel only ever writes its own slot. <see cref="AtmosSolverMath.CalculateThermalConductance" />
     ///     is symmetric in its two heat-capacity arguments (built from <see cref="MathF.Min" />/
     ///     <see cref="MathF.Max" />), so gathering a conductance from either endpoint produces the same
-    ///     bits the scatter form's single shared computation did.
+    ///     bits as the scatter form's single shared computation.
     /// </remarks>
     private readonly struct GatherIncidentConductanceAction(
         AtmosChunk chunk, AtmosSolverConfigSnapshot config,
@@ -432,7 +432,7 @@ internal sealed class ThermalDiffusionSolver
 
     /// <summary>
     ///     Every voxel reads and writes only its own <see cref="AtmosChunk" /> columns, so this is safe to
-    ///     run per-voxel in parallel unchanged; the sequential branch just invokes it in a plain loop.
+    ///     run per-voxel in parallel; the sequential branch just invokes it in a plain loop.
     /// </summary>
     private readonly struct ApplyEnergyDeltaAction(
         AtmosChunk chunk, AtmosSolverConfigSnapshot config,

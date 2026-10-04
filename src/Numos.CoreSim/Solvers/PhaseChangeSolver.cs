@@ -13,12 +13,15 @@ internal sealed class PhaseChangeSolver
     private const Scalar64 RelativeMoleTolerance = 1d / (1 << 23);
 
     /// <summary>
+    ///     Condenses supersaturated vapor in every active voxel of one chunk.
+    /// </summary>
+    /// <remarks>
     ///     Every voxel is independent (condensation reads and writes only its own <see cref="AtmosChunk" />
     ///     column), so voxels are parallelized. Within one voxel the gases are still walked in ascending
-    ///     registry order, exactly as the fully sequential form would: gas <c>g</c>'s condensation can
+    ///     channel order, exactly as the fully sequential form would: gas <c>g</c>'s condensation can
     ///     shift that voxel's temperature before gas <c>g+1</c> reads it, and preserving that order keeps
     ///     the result bit-identical to processing one gas at a time across every voxel.
-    /// </summary>
+    /// </remarks>
     /// <param name="chunk">The chunk whose voxels should be checked for condensation.</param>
     /// <param name="config">The solver settings captured for this tick.</param>
     /// <param name="awakeChunkCount">
@@ -94,22 +97,21 @@ internal sealed class PhaseChangeSolver
             return;
 
         Kelvin temperature = config.GetValidatedTemp(chunk.Temperature[voxelIndex]);
-        // Finds the number of moles which if below would cause condensation
-        // This is found from the clausius-clapeyron equation
+        // Saturation amount from the Clausius-Clapeyron equation; any vapor above it can condense.
         Mole64 saturationMoles = CalculateSaturationMoles(config, properties, temperature, inverseBoilingPoint);
         // If below saturationMoles condensation is not possible (We are ignoring any special cases)
         if (gasMoles <= saturationMoles)
             return;
 
-        // This value includes the energy when condensing a gas as a liquid has effectively no volume
+        // ΔU_vap = ΔH_vap - RT, since the condensed liquid has effectively no volume.
         JoulePerMole molarInternalEnergyOfVaporization = MathF.Max(
             0f,
             properties.MolarEnthalpyOfVaporization -
             AtmosPhysicalConstants.MolarGasConstant * temperature);
 
         // Finding the amount of moles to condense to reach equilibrium at saturation is not possible analytically
-        // It is fine to under estimate the amount of moles which condense as the rest can condense next tick
-        // An over estimation however can easily lead to enough energy released to increase the temperature of the gas well above the boiling point
+        // It is fine to underestimate the amount of moles which condense as the rest can condense next tick
+        // An overestimate however can easily lead to enough energy released to increase the temperature of the gas well above the boiling point
         // This is not possible physically and needs to be avoided
         Mole64 equilibriumRemainingMoles = CalculateEquilibriumRemainingMoles(
             chunk,
@@ -126,7 +128,7 @@ internal sealed class PhaseChangeSolver
         Mole64 equilibriumCondensedMoles = gasMoles - equilibriumRemainingMoles;
         // Condensation factor will lead to an exponential decay of equilibriumCondensedMoles
         Mole64 initialMolesToCondense = equilibriumCondensedMoles * config.CondensationRateFactor;
-        // Cuts off final condensation to happen all at once to prevent repeating this to many times
+        // Once the leftover is small, condense all of it now instead of decaying toward it over many more ticks
         if (equilibriumCondensedMoles - initialMolesToCondense <= AtmosSolverConstants.CondensationFactorCutoff)
             initialMolesToCondense = equilibriumCondensedMoles;
 
@@ -331,7 +333,7 @@ internal sealed class PhaseChangeSolver
     {
         // Clausius-Clapeyron equation for saturation vapor pressure:
         // P_2 = P_1 \exp{\frac{\Delta H_{vap}}{R}\left( \frac{1}{T_1} - \frac{1}{T_2} \right)}
-        // P_1 and T_1 are the reference pressure and temperature. These should be room pressure and temp
+        // P_1 is SaturationReferencePressure and T_1 is the gas's BoilingPoint at that pressure
         // H is the Molar Enthalpy Of Vaporization
         // R is Molar Gas Constant
         // T_2 is current temperature
