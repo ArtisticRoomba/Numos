@@ -861,6 +861,84 @@ public sealed class CrossChunkFlowTests
             Is.EqualTo(0.1f).Within(SimTestHelpers.Tolerance));
     }
 
+    /// <summary>
+    ///     The source holds Second then First; the neighbor holds First then Second, so the channel index of
+    ///     First in the source is Second's index in the neighbor. Trace amounts of First sit on both sides and
+    ///     must stay put, which only happens if suppression reads First in the neighbor rather than Second.
+    /// </summary>
+    [Test]
+    public void BoundaryDiffusion_SuppressesTraceGasByIdWhenChannelOrdersDiffer()
+    {
+        // Powers of two keep these exact. Both are below MinimumTrackedMoles, and so is either side plus
+        // anything the other could diffuse into it.
+        const float sourceTrace = 1f / 16384f;
+        const float neighborTrace = 1f / 65536f;
+        var config = CreateTraceDiffusionConfig();
+        using var simulation = new AtmosSimulation(config, 1, 1, 1);
+        var source = SimTestHelpers.CreateOpenChunk(simulation, default);
+        var neighbor = SimTestHelpers.CreateOpenChunk(simulation, Int3.PosX);
+        simulation.AddGasToVoxel(source, 0, 0, 0, SimTestHelpers.SecondGasName, 1f, SimTestHelpers.DefaultTemperature);
+        simulation.AddGasToVoxel(source, 0, 0, 0, SimTestHelpers.FirstGasName, sourceTrace, SimTestHelpers.DefaultTemperature);
+        simulation.AddGasToVoxel(neighbor, 0, 0, 0, SimTestHelpers.FirstGasName, neighborTrace, SimTestHelpers.DefaultTemperature);
+        simulation.AddGasToVoxel(neighbor, 0, 0, 0, SimTestHelpers.SecondGasName, 1f, SimTestHelpers.DefaultTemperature);
+
+        simulation.Tick();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(
+                SimTestHelpers.Moles(simulation.GetChunkSnapshot(source), SimTestHelpers.FirstGasId, 0),
+                Is.EqualTo(sourceTrace));
+
+            Assert.That(
+                SimTestHelpers.Moles(simulation.GetChunkSnapshot(neighbor), SimTestHelpers.FirstGasId, 0),
+                Is.EqualTo(neighborTrace));
+        });
+    }
+
+    /// <summary>
+    ///     A neighbor that has never held First has no channel for it, and must count as zero moles of it.
+    /// </summary>
+    [Test]
+    public void BoundaryDiffusion_TreatsMissingNeighborChannelAsZeroMoles()
+    {
+        const float sourceTrace = 1f / 16384f;
+        var config = CreateTraceDiffusionConfig();
+        using var simulation = new AtmosSimulation(config, 1, 1, 1);
+        var source = SimTestHelpers.CreateOpenChunk(simulation, default);
+        var neighbor = SimTestHelpers.CreateOpenChunk(simulation, Int3.PosX);
+        simulation.AddGasToVoxel(source, 0, 0, 0, SimTestHelpers.SecondGasName, 1f, SimTestHelpers.DefaultTemperature);
+        simulation.AddGasToVoxel(source, 0, 0, 0, SimTestHelpers.FirstGasName, sourceTrace, SimTestHelpers.DefaultTemperature);
+        simulation.AddGasToVoxel(neighbor, 0, 0, 0, SimTestHelpers.SecondGasName, 1f, SimTestHelpers.DefaultTemperature);
+
+        simulation.Tick();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(
+                SimTestHelpers.Moles(simulation.GetChunkSnapshot(source), SimTestHelpers.FirstGasId, 0),
+                Is.EqualTo(sourceTrace));
+
+            Assert.That(
+                SimTestHelpers.Moles(simulation.GetChunkSnapshot(neighbor), SimTestHelpers.FirstGasId, 0),
+                Is.Zero);
+        });
+    }
+
+    /// <summary>
+    ///     Bulk flow off and only First diffusing, so the only thing that can move First across the boundary is
+    ///     its own diffusion term.
+    /// </summary>
+    private static AtmosConfig CreateTraceDiffusionConfig()
+    {
+        var config = SimTestHelpers.CreateDeterministicConfig();
+        config.BulkFlowCoefficient = 0f;
+        var gas = config.GasRegistry[SimTestHelpers.FirstGasId];
+        gas.DiffusionCoefficient = 0.1f;
+        config.GasRegistry.Replace(SimTestHelpers.FirstGasId, gas);
+        return config;
+    }
+
     private static AtmosChunkHandle CreateIsolatedVoxel(
         AtmosSimulation simulation, Int3 position,
         int x, int y, int z, VoxelClassification classification)

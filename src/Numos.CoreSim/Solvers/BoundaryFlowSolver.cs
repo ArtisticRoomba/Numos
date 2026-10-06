@@ -335,9 +335,9 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
                 molesDiffused = sourceMoles / 7;
 
             if (molesDiffused < AtmosSolverConstants.MinimumTrackedMoles &&
-                neighborChunk.ActiveGases[gas].Moles?[neighborIndex] + molesDiffused < AtmosSolverConstants.MinimumTrackedMoles)
+                GetGasMoles(neighborChunk, neighborIndex, gasId) + molesDiffused <
+                AtmosSolverConstants.MinimumTrackedMoles)
                 molesDiffused = 0;
-
 
             Mole molesToMove = MathF.Min(sourceMoles, molesAdvected + molesDiffused);
             if (molesToMove <= 0f)
@@ -365,6 +365,19 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
         sourceChunk.IsAwake = true;
         sourceChunk.SleepTimer = 0;
         sourceChunk.MarkChanged();
+    }
+
+    /// <summary>
+    ///     Reads one gas at a voxel by id, treating a missing channel as zero moles.
+    /// </summary>
+    /// <remarks>
+    ///     Used on the neighbor chunk, whose channel order need not match the source's. Runs during the parallel
+    ///     compute pass, which is safe only because nothing allocates channels until the injections are applied.
+    /// </remarks>
+    private static Mole GetGasMoles(AtmosChunk chunk, ushort localVoxelIndex, int gasId)
+    {
+        int channel = chunk.FindGasChannel(gasId);
+        return channel >= 0 ? chunk.ActiveGases[channel].Moles[localVoxelIndex] : 0f;
     }
 
     private static int CompareBatches(

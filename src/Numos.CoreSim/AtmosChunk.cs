@@ -609,13 +609,29 @@ internal class AtmosChunk
     }
 
 
-    internal int GetOrCreateGasChannel(int gasId)
+    /// <summary>
+    ///     Finds the channel index holding <paramref name="gasId" />, or -1 if this chunk has no channel for it.
+    /// </summary>
+    /// <remarks>
+    ///     Channels are appended in the order gases first reach the chunk, so the same index can hold different
+    ///     gases in different chunks. Anything comparing gas across chunks has to look it up by id.
+    /// </remarks>
+    internal int FindGasChannel(int gasId)
     {
         for (int index = 0; index < ActiveGasCount; index++)
         {
             if (ActiveGases[index].GasId == gasId)
                 return index;
         }
+
+        return -1;
+    }
+
+    internal int GetOrCreateGasChannel(int gasId)
+    {
+        int existing = FindGasChannel(gasId);
+        if (existing >= 0)
+            return existing;
 
         if (ActiveGasCount == ActiveGases.Length)
         {
