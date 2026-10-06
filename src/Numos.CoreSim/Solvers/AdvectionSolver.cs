@@ -35,7 +35,25 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
     ///     changing it would change floating-point rounding and therefore deterministic replay state.
     /// </remarks>
     private readonly static int[] AscendingSourceSlots = [4, 2, 0, SelfSourceSlot, 1, 3, 5];
-    private readonly static Int3[] NeighborDirections = Int3.CardinalOffsets;
+
+    /// <summary>
+    ///     Neighbor offsets indexed by direction slot.
+    /// </summary>
+    /// <remarks>
+    ///     <see cref="AscendingSourceSlots" /> and every per-direction accumulation depend on this exact
+    ///     order, so the solver keeps its own copy rather than sharing <see cref="Int3.CardinalOffsets" />,
+    ///     which uses a different order and is publicly writable.
+    /// </remarks>
+    private readonly static Int3[] NeighborDirections =
+    [
+        Int3.NegX,
+        Int3.PosX,
+        Int3.NegY,
+        Int3.PosY,
+        Int3.NegZ,
+        Int3.PosZ
+    ];
+
     private readonly static int[] OppositeNeighborDirections = CreateOppositeNeighborDirections();
     private readonly int _maximumBoundaryEvents;
 
