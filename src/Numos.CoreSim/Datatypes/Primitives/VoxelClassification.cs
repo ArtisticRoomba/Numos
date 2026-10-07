@@ -18,7 +18,14 @@ public readonly record struct VoxelClassification(int RoomId)
     ///     This is the default value for a voxel.
     ///     This can also store gas.
     /// </summary>
+    /// 
     public const int RoomUnassigned = 0;
+
+    /// <summary>
+    ///     Voxel presents a fixed, externally supplied gas mixture instead of simulated storage.
+    ///     See <see cref="Datatypes.Primitives.EnvironmentalMixture" />.
+    /// </summary>
+    public const int RoomEnvironment = -3;
 
     /// <summary>
     ///     Voxel is solid and cannot store gas, blocks any flow.
@@ -48,6 +55,12 @@ public readonly record struct VoxelClassification(int RoomId)
     /// </summary>
     [PublicAPI]
     public bool IsUnassigned => RoomId == RoomUnassigned;
+
+    /// <summary>
+    ///     Returns true if the voxel presents a fixed environmental mixture instead of simulated gas storage.
+    /// </summary>
+    [PublicAPI]
+    public bool IsEnvironmental => RoomId == RoomEnvironment;
 
     /// <summary>
     ///     Returns true if the voxel is solid and cannot store gas.

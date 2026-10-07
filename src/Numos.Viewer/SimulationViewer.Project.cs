@@ -116,6 +116,13 @@ public partial class SimulationViewer
                 });
 
             config.SolverConfigurations = [new GasReactionConfig(standardReactions: [waterSynthesis])];
+
+            KeyValuePair<int, float>[] gasFractions =
+            [
+                KeyValuePair.Create(config.GasRegistry.GasIdToIndex(Nitrogen.Name), 0.79f),
+                KeyValuePair.Create(config.GasRegistry.GasIdToIndex(Oxygen.Name), 0.21f)
+            ];
+            config.DefaultEnvironmentalMixture = new EnvironmentalMixture(100000f, 300, gasFractions);
         }
 
         AtmosWorld? world = null;
