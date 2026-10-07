@@ -562,6 +562,7 @@ internal class AtmosChunk
     /// </summary>
     /// <param name="idx">Index of voxel</param>
     /// <param name="roomId">Classification value to assign.</param>
+    /// <param name="config"></param>
     [PublicAPI]
     public void SetVoxelClassification(ushort idx, int roomId, IAtmosConfig? config = null)
     {
