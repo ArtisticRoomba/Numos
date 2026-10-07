@@ -391,8 +391,10 @@ internal sealed partial class AtmosKernel
                     address.LocalVoxelIndex);
 
                 int classification = chunk.VoxelRoomMap[address.LocalVoxelIndex];
-                if (classification == VoxelClassification.RoomSolid || classification == VoxelClassification.RoomVoid)
-                    throw new InvalidOperationException("Solid and void voxels cannot contain a gas mixture.");
+                if (classification == VoxelClassification.RoomSolid ||
+                    classification == VoxelClassification.RoomVoid ||
+                    classification == VoxelClassification.RoomEnvironment)
+                    throw new InvalidOperationException("Solid, void, and environmental voxels cannot contain a gas mixture.");
             }
         }
     }
@@ -413,7 +415,10 @@ internal sealed partial class AtmosKernel
         {
             var chunk = GetMixtureChunk(position, generation, localVoxelIndex);
             int classification = chunk.VoxelRoomMap[localVoxelIndex];
-            Debug.Assert(classification != VoxelClassification.RoomSolid && classification != VoxelClassification.RoomVoid);
+            Debug.Assert(
+                classification != VoxelClassification.RoomSolid &&
+                classification != VoxelClassification.RoomVoid &&
+                classification != VoxelClassification.RoomEnvironment);
 
             Mole totalMoles = 0f;
             JoulePerKelvin totalHeatCapacity = 0f;
@@ -501,8 +506,10 @@ internal sealed partial class AtmosKernel
     private static void ValidateGasVoxel(AtmosChunk chunk, ushort localVoxelIndex)
     {
         int classification = chunk.VoxelRoomMap[localVoxelIndex];
-        if (classification == VoxelClassification.RoomSolid || classification == VoxelClassification.RoomVoid)
-            throw new InvalidOperationException("Solid and void voxels cannot contain a gas mixture.");
+        if (classification == VoxelClassification.RoomSolid ||
+            classification == VoxelClassification.RoomVoid ||
+            classification == VoxelClassification.RoomEnvironment)
+            throw new InvalidOperationException("Solid, void, and environmental voxels cannot contain a gas mixture.");
     }
 
     /// <summary>

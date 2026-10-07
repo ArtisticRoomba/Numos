@@ -1,3 +1,5 @@
+using Numos.CoreSim.Datatypes.Primitives;
+
 namespace Numos.CoreSim;
 
 internal interface IAtmosConfig
@@ -10,6 +12,7 @@ internal interface IAtmosConfig
     Pascal SaturationReferencePressure { get; }
     Scalar DefaultDiffusionCoefficient { get; }
     Kelvin SpaceTemperature { get; }
+    EnvironmentalMixture DefaultEnvironmentalMixture { get; }
     Scalar BulkFlowCoefficient { get; }
     Pascal VacuumThreshold { get; }
     int SleepThreshold { get; }

@@ -19,12 +19,13 @@ public sealed class VoxelClassificationTests
         });
     }
 
-    [TestCase(VoxelClassification.RoomUnassigned, true, false, false)]
-    [TestCase(VoxelClassification.RoomSolid, false, true, false)]
-    [TestCase(VoxelClassification.RoomVoid, false, false, true)]
-    [TestCase(42, false, false, false)]
+    [TestCase(VoxelClassification.RoomUnassigned, true, false, false, false)]
+    [TestCase(VoxelClassification.RoomSolid, false, true, false, false)]
+    [TestCase(VoxelClassification.RoomVoid, false, false, true, false)]
+    [TestCase(VoxelClassification.RoomEnvironment, false, false, false, true)]
+    [TestCase(42, false, false, false, false)]
     public void Predicates_RecognizeOnlyTheirReservedClassification(
-        int roomId, bool isUnassigned, bool isSolid, bool isVoid)
+        int roomId, bool isUnassigned, bool isSolid, bool isVoid, bool isEnvironmental)
     {
         var classification = new VoxelClassification(roomId);
 
@@ -34,12 +35,14 @@ public sealed class VoxelClassificationTests
             Assert.That(classification.IsUnassigned, Is.EqualTo(isUnassigned));
             Assert.That(classification.IsSolid, Is.EqualTo(isSolid));
             Assert.That(classification.IsVoid, Is.EqualTo(isVoid));
+            Assert.That(classification.IsEnvironmental, Is.EqualTo(isEnvironmental));
         });
     }
 
     [TestCase(int.MinValue)]
     [TestCase(VoxelClassification.RoomSolid)]
     [TestCase(VoxelClassification.RoomVoid)]
+    [TestCase(VoxelClassification.RoomEnvironment)]
     [TestCase(VoxelClassification.RoomUnassigned)]
     [TestCase(int.MaxValue)]
     public void ImplicitConversions_RoundTripEveryIntegerRoomId(int roomId)

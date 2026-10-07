@@ -1,3 +1,4 @@
+using Numos.CoreSim.Datatypes.Primitives;
 using Numos.Units;
 
 namespace Numos.CoreSim;
@@ -38,6 +39,12 @@ public static class AtmosConfigDefaults
     /// <summary>Default modeled temperature of space, in kelvins (K).</summary>
     [Quantity("temperature")]
     public const Kelvin SpaceTemperature = 2.7f;
+    
+    /// <summary>
+    ///     Default mixture presented by <see cref="VoxelClassification.RoomEnvironment" /> voxels: inert vacuum.
+    /// </summary>
+    /// <remarks>Not a <c>const</c> since <see cref="EnvironmentalMixture" /> is a composite value.</remarks>
+    public static EnvironmentalMixture DefaultEnvironmentalMixture => EnvironmentalMixture.Vacuum;
 
     /// <summary>Default fraction of a pressure delta requested as bulk flow per tick.</summary>
     public const Scalar BulkFlowCoefficient = 0.125f;

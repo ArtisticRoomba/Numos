@@ -1,3 +1,4 @@
+using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.Solvers;
 using Numos.Maths;
 
@@ -27,6 +28,7 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
     public PascalPerMoleKelvin PressurePerMoleKelvin { get; private set; }
     public Pascal SaturationReferencePressure { get; private set; }
     public Kelvin SpaceTemperature { get; private set; }
+    public EnvironmentalMixture DefaultEnvironmentalMixture { get; private set; }
     public Scalar BulkFlowCoefficient { get; private set; }
     public Pascal VacuumThreshold { get; private set; }
     public int SleepThreshold { get; private set; }
@@ -133,6 +135,7 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
         SpaceTemperature = FloatMath.IsFinitePositive(config.SpaceTemperature)
             ? config.SpaceTemperature
             : AtmosConfigDefaults.SpaceTemperature;
+        DefaultEnvironmentalMixture = EnvironmentalMixture.Validate(config.DefaultEnvironmentalMixture);
 
         var gases = new GasRegistry();
         for (int gasId = 0; gasId < GasPropertyCount; gasId++)

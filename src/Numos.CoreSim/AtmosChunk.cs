@@ -136,19 +136,27 @@ internal class AtmosChunk
     /// </summary>
     /// <remarks>
     ///     Positive IDs identify rooms. The reserved values
-    ///     <see cref="VoxelClassification.RoomUnassigned" />, <see cref="VoxelClassification.RoomVoid" />, and
-    ///     <see cref="VoxelClassification.RoomSolid" />
-    ///     identify unassigned, void, and solid voxels respectively.
+    ///     <see cref="VoxelClassification.RoomUnassigned" />, <see cref="VoxelClassification.RoomVoid" />,
+    ///     <see cref="VoxelClassification.RoomSolid" />, and <see cref="VoxelClassification.RoomEnvironment" />
+    ///     identify unassigned, void, solid, and environmental voxels respectively.
     /// </remarks>
     /// <seealso cref="VoxelClassification.RoomSolid" />
     /// <seealso cref="VoxelClassification.RoomVoid" />
     /// <seealso cref="VoxelClassification.RoomUnassigned" />
+    /// <seealso cref="VoxelClassification.RoomEnvironment" />
     public FlatArray<int> VoxelRoomMap;
 
     /// <summary>
     ///     The number of voxels along the x-axis.
     /// </summary>
     public int Width;
+
+    /// <summary>
+    ///     Environmental Mixture used in this voxel
+    ///     If not set, it will use the configs Environmental Mixture instead
+    /// </summary>
+    private EnvironmentalMixture? EnvironmentalOverride;
+
 
     private long _generation;
     private long _revision;
@@ -244,6 +252,7 @@ internal class AtmosChunk
         Height = height;
         Depth = depth;
         VoxelCount = voxelCount;
+        EnvironmentalOverride = null;
 
         EnsureInitialized();
 
@@ -452,6 +461,9 @@ internal class AtmosChunk
         if (classification == VoxelClassification.RoomVoid)
             return;
 
+        if (classification == VoxelClassification.RoomEnvironment)
+            return;
+
         if (!IsAwake)
             Wake();
 
@@ -550,13 +562,11 @@ internal class AtmosChunk
     /// </summary>
     /// <param name="idx">Index of voxel</param>
     /// <param name="roomId">Classification value to assign.</param>
+    /// <param name="config"></param>
     [PublicAPI]
-    public void SetVoxelClassification(ushort idx, int roomId)
+    public void SetVoxelClassification(ushort idx, int roomId, IAtmosConfig? config = null)
     {
-        if (roomId < 0)
-            SetVoxelToVacuum(idx);
-
-        VoxelRoomMap[idx] = roomId;
+        SetVoxelClassification(idx, new VoxelClassification(roomId), config);
     }
 
     /// <summary>
@@ -564,11 +574,21 @@ internal class AtmosChunk
     /// </summary>
     /// <param name="idx">Index of voxel</param>
     /// <param name="classification">Classification value to assign.</param>
+    /// <param name="config"></param>
     [PublicAPI]
-    public void SetVoxelClassification(ushort idx, VoxelClassification classification)
+    public void SetVoxelClassification(ushort idx, VoxelClassification classification, IAtmosConfig? config = null)
     {
         if (classification.IsSolid || classification.IsVoid)
             SetVoxelToVacuum(idx);
+
+        if (classification.IsEnvironmental)
+        {
+            SetVoxelToVacuum(idx);
+            if (!IsAwake)
+                Wake();
+            if (config != null)
+                MaterializeEnvironmentalMixture(idx, config);
+        }
 
         VoxelRoomMap[idx] = classification.RoomId;
     }
@@ -578,28 +598,90 @@ internal class AtmosChunk
     ///     Sets every voxel classification. Solid and void classifications clear the chunk to vacuum.
     /// </summary>
     /// <param name="roomId">Classification value to assign.</param>
+    /// <param name="config"></param>
     [PublicAPI]
-    public void SetChunkClassification(int roomId)
+    public void SetChunkClassification(int roomId, IAtmosConfig? config = null)
     {
-        if (roomId < 0)
-            SetChunkToVacuum();
-
-        VoxelRoomMap.Fill(roomId);
+        SetChunkClassification(new VoxelClassification(roomId), config);
     }
-
 
     /// <summary>
     ///     Sets the entire chunk classification. Solid and void classifications clear the chunk to vacuum.
     /// </summary>
     /// <param name="classification">Classification value to assign.</param>
+    /// <param name="config"></param>
     [PublicAPI]
-    public void SetChunkClassification(VoxelClassification classification)
+    public void SetChunkClassification(VoxelClassification classification, IAtmosConfig? config = null)
     {
         if (classification.IsSolid || classification.IsVoid)
             SetChunkToVacuum();
 
+        if (classification.IsEnvironmental)
+        {
+            if (!IsAwake)
+                Wake();
+
+            for (ushort idx = 0; idx < ActiveAirCount; idx++)
+            {
+                SetVoxelToVacuum(idx);
+                if (config != null)
+                    MaterializeEnvironmentalMixture(idx, config);
+            }
+        }
+
         VoxelRoomMap.Fill(classification.RoomId);
     }
+
+    /// <summary>
+    ///     Sets a per-voxel environmental mixture override, replacing the configured default for that voxel.
+    /// </summary>
+    [PublicAPI]
+    public void SetEnvironmentalMixture(EnvironmentalMixture mixture, IAtmosConfig config)
+    {
+        EnvironmentalOverride = mixture;
+        for (ushort idx = 0; idx < ActiveAirCount; idx++)
+        {
+            if (VoxelRoomMap[idx] == VoxelClassification.RoomEnvironment)
+                MaterializeEnvironmentalMixture(idx, config);
+        }
+    }
+
+    /// <summary>
+    ///     Gets the  environmental mixture for a voxel: its override if one is set, otherwise the
+    ///     configured default.
+    /// </summary>
+    [PublicAPI]
+    public EnvironmentalMixture GetEnvironmentalMixture(IAtmosConfig config)
+    {
+        return EnvironmentalOverride != null
+            ? EnvironmentalOverride.Value
+            : config.DefaultEnvironmentalMixture;
+    }
+
+    /// <summary>
+    ///     Writes an environmental voxel's per-gas moles, pressure, and temperature from its <see cref="EnvironmentalMixture" />.
+    /// </summary>
+    [PublicAPI]
+    public void MaterializeEnvironmentalMixture(ushort idx, IAtmosConfig config)
+    {
+        var mixture = GetEnvironmentalMixture(config);
+        Mole totalMoles = AtmosSolverMath.PressureToMoles(config, mixture.Pressure, mixture.Temperature);
+
+        // Ensure every gas the mixture names has a channel before touching any moles below.
+        foreach (var (gasId, _) in mixture.GasFractions)
+            GetOrCreateGasChannel(gasId);
+
+        for (int gas = 0; gas < ActiveGasCount; gas++)
+        {
+            int gasId = ActiveGases[gas].GasId;
+            ActiveGases[gas].Moles[idx] = mixture.GetFraction(gasId) * totalMoles;
+        }
+
+        TotalPressure[idx] = mixture.Pressure;
+        Temperature[idx] = mixture.Temperature;
+        MarkChanged();
+    }
+
 
 
     internal int GetOrCreateGasChannel(int gasId)

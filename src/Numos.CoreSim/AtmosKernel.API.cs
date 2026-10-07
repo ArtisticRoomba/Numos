@@ -487,7 +487,7 @@ internal sealed partial class AtmosKernel
         lock (StateGate)
         {
             var chunk = GetChunk(position);
-            chunk.SetChunkClassification(classification);
+            chunk.SetChunkClassification(classification, _config);
             RebuildActiveTopology(chunk);
             chunk.MarkChanged();
             if (ShouldRecord) RecordOperation(new SetChunkClassificationOperation(position, classification));
@@ -521,7 +521,7 @@ internal sealed partial class AtmosKernel
                     dimensions.Z > 1 && (z == 0 || z == dimensions.Z - 1);
 
                 if (isBoundary)
-                    chunk.SetVoxelClassification(chunk.GetIndex(new Int3(x, y, z)), classification);
+                    chunk.SetVoxelClassification(chunk.GetIndex(new Int3(x, y, z)), classification, _config);
             }
 
             RebuildActiveTopology(chunk);
@@ -547,7 +547,7 @@ internal sealed partial class AtmosKernel
         {
             var chunk = GetChunk(position);
             ValidateVoxelIndex(chunk, localVoxelIndex);
-            chunk.SetVoxelClassification(localVoxelIndex, classification);
+            chunk.SetVoxelClassification(localVoxelIndex, classification, _config);
             RebuildActiveTopology(chunk);
             chunk.MarkChanged();
             if (ShouldRecord) RecordOperation(new SetVoxelClassificationOperation(position, localVoxelIndex, classification));
@@ -625,7 +625,7 @@ internal sealed partial class AtmosKernel
     /// <param name="gasId">The gas channel identifier.</param>
     /// <param name="moles">The amount of gas to add, in moles.</param>
     /// <param name="temperature">The temperature of the added gas, in kelvins.</param>
-    /// <remarks>Injection into a solid or void voxel is ignored by the chunk.</remarks>
+    /// <remarks>Injection into a solid, void, or environmental voxel is ignored by the chunk.</remarks>
     /// <exception cref="KeyNotFoundException">No chunk is registered at <paramref name="position" />.</exception>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="localVoxelIndex" /> is outside the chunk.</exception>
     internal void AddGasToVoxel(
@@ -639,7 +639,9 @@ internal sealed partial class AtmosKernel
             ValidateGasInjection(gasId, moles, temperature);
 
             int classification = chunk.VoxelRoomMap[localVoxelIndex];
-            if (classification == VoxelClassification.RoomSolid || classification == VoxelClassification.RoomVoid)
+            if (classification == VoxelClassification.RoomSolid ||
+                classification == VoxelClassification.RoomVoid ||
+                classification == VoxelClassification.RoomEnvironment)
                 return;
 
             chunk.Wake();

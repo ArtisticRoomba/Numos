@@ -1,3 +1,4 @@
+using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.Replay;
 using Numos.Maths;
 
@@ -43,6 +44,7 @@ public sealed class AtmosConfigSnapshot : IAtmosConfig
             ? source.SpaceTemperature
             : AtmosConfigDefaults.SpaceTemperature;
 
+        DefaultEnvironmentalMixture = EnvironmentalMixture.Validate(source.DefaultEnvironmentalMixture);
         BulkFlowCoefficient = FloatMath.ClampUnitInterval(source.BulkFlowCoefficient);
         VacuumThreshold = FloatMath.GetNonnegativeFinite(source.VacuumThreshold);
         SleepThreshold = Math.Max(0, source.SleepThreshold);
@@ -105,6 +107,7 @@ public sealed class AtmosConfigSnapshot : IAtmosConfig
     [ConfigCheckpointField(4)] public Pascal SaturationReferencePressure { get; }
     [ConfigCheckpointField(5)] public Scalar DefaultDiffusionCoefficient { get; }
     [ConfigCheckpointField(6)] public Kelvin SpaceTemperature { get; }
+    public EnvironmentalMixture DefaultEnvironmentalMixture { get; }
     [ConfigCheckpointField(7)] public Scalar BulkFlowCoefficient { get; }
     [ConfigCheckpointField(8)] public Pascal VacuumThreshold { get; }
     [ConfigCheckpointField(9)] public int SleepThreshold { get; }
@@ -196,6 +199,7 @@ public sealed class AtmosConfigSnapshot : IAtmosConfig
                SaturationReferencePressure.Equals(other.SaturationReferencePressure) &&
                DefaultDiffusionCoefficient.Equals(other.DefaultDiffusionCoefficient) &&
                SpaceTemperature.Equals(other.SpaceTemperature) &&
+               EnvironmentalMixturesEqual(DefaultEnvironmentalMixture, other.DefaultEnvironmentalMixture) &&
                BulkFlowCoefficient.Equals(other.BulkFlowCoefficient) &&
                VacuumThreshold.Equals(other.VacuumThreshold) &&
                SleepThreshold == other.SleepThreshold &&
@@ -234,4 +238,25 @@ public sealed class AtmosConfigSnapshot : IAtmosConfig
 
         return true;
     }
+    
+    private static bool EnvironmentalMixturesEqual(EnvironmentalMixture first, EnvironmentalMixture second)
+    {
+        if (!first.Pressure.Equals(second.Pressure) || !first.Temperature.Equals(second.Temperature))
+            return false;
+
+        if (first.GasFractions.Length != second.GasFractions.Length)
+            return false;
+
+        for (int i = 0; i < first.GasFractions.Length; i++)
+        {
+            if (first.GasFractions[i].Key != second.GasFractions[i].Key ||
+                !first.GasFractions[i].Value.Equals(second.GasFractions[i].Value))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
 }
