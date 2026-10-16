@@ -17,7 +17,7 @@ internal sealed class GasReactionData(int gasId, string gasName, int reactionCou
     // actually consume it). Coefficient is gross consumption (<= 0), independent of any offsetting
     // production of the same gas by the same reaction -- the limiter must not net input against
     // output, or it would hide a real overdraw.
-    internal List<(int ReactionId, Mole Consumed)> ConsumingReactions { get; } = [];
+    internal List<(int ReactionId, float Consumed)> ConsumingReactions { get; } = [];
 
     internal LinearGasReaction.LinearSpeedFactor[][] LinearFactors { get; } = new LinearGasReaction.LinearSpeedFactor[reactionCount][];
     internal float?[] StandardExponents { get; } = new float?[reactionCount];
@@ -61,7 +61,7 @@ internal sealed class GasReactionData(int gasId, string gasName, int reactionCou
         }
     }
 
-    internal PerSecond ApplyRateFactors(int reactionId, Mole moles, PerSecond speed)
+    internal ConcentrationPerSecond ApplyRateFactors(int reactionId, MolePerCubicMetre moles, ConcentrationPerSecond speed)
     {
         if (LinearFactors[reactionId] is { } factors)
         {
