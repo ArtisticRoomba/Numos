@@ -25,7 +25,7 @@ public readonly partial record struct StandardGasReaction
     /// <param name="speedFactors">Rate-equation exponent for each gas that affects the speed.</param>
     public StandardGasReaction(
         IDictionary<GasProperties, float> input, IDictionary<GasProperties, float> output,
-        JoulePerMole energyBalance,
+        [Quantity("molarEnergy")] JoulePerMole energyBalance,
         float arrheniusFactor, float activationEnergy,
         IDictionary<GasProperties, float> speedFactors)
     {
@@ -146,6 +146,7 @@ public readonly partial record struct StandardGasReaction
     /// <param name="gasMolarities">Amount of each gas. Gases missing from the dictionary count as zero.</param>
     /// <param name="temperatureKelvin">Mixture temperature, in kelvins (K).</param>
     /// <returns>Reactions per second, or zero when any factor drives the speed to zero or below.</returns>
+    [return: Quantity("concentrationPerSecond")]
     public ConcentrationPerSecond GetReactionSpeed(
         IDictionary<GasProperties, float> gasMolarities,
         [Quantity("temperature")] Kelvin temperatureKelvin)

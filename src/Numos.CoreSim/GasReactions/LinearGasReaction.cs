@@ -36,7 +36,7 @@ public readonly partial record struct LinearGasReaction
     /// <param name="speedFactors">Multipliers on the rate constant that depend on the amount of specific gases.</param>
     public LinearGasReaction(
         IDictionary<GasProperties, float> input, IDictionary<GasProperties, float> output,
-        JoulePerMole energyBalance,
+        [Quantity("molarEnergy")] JoulePerMole energyBalance,
         [Quantity("temperature")] Kelvin lowTemperatureBound,
         [Quantity("temperature")] Kelvin highTemperatureBound,
         [Quantity("frequency")] PerSecond lowTempSpeed,
@@ -205,6 +205,7 @@ public readonly partial record struct LinearGasReaction
     /// <param name="gasMolarities">Amount of each gas, in the units the speed factors' bounds were authored in.</param>
     /// <param name="temperature">Mixture temperature, in kelvins (K).</param>
     /// <returns>Reactions per second.</returns>
+    [return: Quantity("concentrationPerSecond")]
     public ConcentrationPerSecond GetReactionSpeed(
         IDictionary<GasProperties, float> gasMolarities,
         [Quantity("temperature")] Kelvin temperature)
