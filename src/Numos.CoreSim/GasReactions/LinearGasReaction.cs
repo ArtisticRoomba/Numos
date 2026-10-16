@@ -68,8 +68,12 @@ public readonly partial record struct LinearGasReaction
     private FrozenDictionary<GasProperties, float> Output { get; }
 
     /// <summary>
-    ///     Joules released (positive) or absorbed (negative) per reaction.
+    ///     Joules released (positive) or absorbed (negative) per Mole.
     /// </summary>
+    /// <remarks>
+    ///     It is per Mole of which ever reactant is normalized to one. So in a 2H_2 + O_2 -> 2H_0 reaction, it is the energy released per mole of oxygen consumed.
+    /// </remarks>
+
     internal JoulePerMole EnergyBalance { get; }
 
     private Kelvin LowTemperatureBound { get; }
