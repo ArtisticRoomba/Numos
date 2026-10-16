@@ -106,9 +106,9 @@ public partial class SimulationViewer
                 {
                     { Water, 2 }
                 },
-                483600f,
+                UnitConversions.FromKilojoulePerMole(483.6f),
                 1.8e13f,
-                UnitConversions.FromKilojoulePerMole(241.8f),
+                UnitConversions.FromKilojoulePerMole(256f),
                 new Dictionary<GasProperties, float>
                 {
                     { Hydrogen, 1 },
