@@ -27,7 +27,7 @@ public sealed class GasReactionConfig : IAtmosSolverConfiguration
     // Reaction-ID-indexed, built once at construction since reaction definitions never change after
     // capture. Spares the per-reaction-per-iteration caller from a Linear-vs-Standard branch and an
     // IReadOnlyList indexer call every time it needs a reaction's energy balance.
-    private readonly Joule[] _energyBalances;
+    private readonly JoulePerMole[] _energyBalances;
 
     /// <summary>
     ///     Captures ordered reaction definitions without retaining mutable source collections.
@@ -137,11 +137,11 @@ public sealed class GasReactionConfig : IAtmosSolverConfiguration
         return Empty;
     }
 
-    internal Joule GetEnergyBalance(int reactionId) => _energyBalances[reactionId];
+    internal JoulePerMole GetEnergyBalance(int reactionId) => _energyBalances[reactionId];
 
     // Unlike GetEnergyBalance, this can't be precomputed once at construction: it depends on the
     // caller's temperature, which changes every voxel.
-    internal PerSecond GetRateConstant(int reactionId, Kelvin temperature)
+    internal ConcentrationPerSecond GetRateConstant(int reactionId, Kelvin temperature)
     {
         return reactionId < LinearReactions.Count
             ? LinearReactions[reactionId].GetRateConstantForTemperature(temperature)

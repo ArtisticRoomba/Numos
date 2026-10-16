@@ -354,26 +354,27 @@ internal class ReactionSolver : IAtmosSolverStage
     {
         Joule energy = ExtractHeat(mixtureVector, ref currentTemperature, mixtureLength, config);
         int reactionCount = reactions.Count;
-        Scalar[] reactionSpeeds = RentReactionSpeeds(reactionCount);
+        Mole[] reactionSpeeds = RentReactionSpeeds(reactionCount);
 
         Array.Clear(reactionSpeeds, 0, reactionCount);
         //get all reaction speeds. Sequential: reactionCount is typically a handful of items, far too
         //small to justify a parallel dispatch, especially one issued once per voxel from inside an
         //already-parallel voxel worker.
         Kelvin temperature = currentTemperature; //to stop warning about the later change of currentTemperature.
+        CubicMetre voxelVolume = config.GetVoxelVolume();
         for (int reactionId = 0; reactionId < reactionCount; reactionId++)
         {
-            PerSecond rate = reactions.GetRateConstant(reactionId, temperature);
+            ConcentrationPerSecond rate = reactions.GetRateConstant(reactionId, temperature);
             if (!float.IsNormal(rate) || rate <= 0f)
                 continue;
 
             // Preserve canonical gas-name and factor order independently of registry indices.
             foreach (var gas in rateOrder)
-                rate = gas.ApplyRateFactors(reactionId, mixtureVector[gas.GasId], rate);
+                rate = gas.ApplyRateFactors(reactionId, mixtureVector[gas.GasId]/voxelVolume, rate);
 
-            Scalar speed = rate * deltaTime;
+            MolePerCubicMetre speed = rate * deltaTime;
             if (speed > 0f)
-                reactionSpeeds[reactionId] = speed;
+                reactionSpeeds[reactionId] = speed * voxelVolume;
         }
 
         bool anyReaction = false;
@@ -552,7 +553,7 @@ internal class ReactionSolver : IAtmosSolverStage
             foreach (var gasChannel in chunk.ActiveGases.AsSpan(0, trackedChannels))
             {
                 Mole diff = mixtureVector[gasChannel.GasId] - gasChannel.Moles[voxelIndex];
-                if (diff > 0)
+                if (diff != 0f)
                 {
                     chunk.InjectGasToVoxel(
                         voxelIndex,

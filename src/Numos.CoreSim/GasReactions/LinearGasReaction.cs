@@ -36,7 +36,7 @@ public readonly partial record struct LinearGasReaction
     /// <param name="speedFactors">Multipliers on the rate constant that depend on the amount of specific gases.</param>
     public LinearGasReaction(
         IDictionary<GasProperties, float> input, IDictionary<GasProperties, float> output,
-        [Quantity("energy")] Joule energyBalance,
+        JoulePerMole energyBalance,
         [Quantity("temperature")] Kelvin lowTemperatureBound,
         [Quantity("temperature")] Kelvin highTemperatureBound,
         [Quantity("frequency")] PerSecond lowTempSpeed,
@@ -70,7 +70,7 @@ public readonly partial record struct LinearGasReaction
     /// <summary>
     ///     Joules released (positive) or absorbed (negative) per reaction.
     /// </summary>
-    internal Joule EnergyBalance { get; }
+    internal JoulePerMole EnergyBalance { get; }
 
     private Kelvin LowTemperatureBound { get; }
     private Kelvin HighTemperatureBound { get; }
@@ -183,7 +183,7 @@ public readonly partial record struct LinearGasReaction
     ///     Reactions per second, or zero outside a strict bound. Can be negative if the line is extrapolated past
     ///     zero; the reaction solver treats nonpositive rates as no reaction.
     /// </returns>
-    internal PerSecond GetRateConstantForTemperature(Kelvin temperatureKelvin)
+    internal ConcentrationPerSecond GetRateConstantForTemperature(Kelvin temperatureKelvin)
     {
         return EvalLinear(
             temperatureKelvin,
@@ -201,12 +201,11 @@ public readonly partial record struct LinearGasReaction
     /// <param name="gasMolarities">Amount of each gas, in the units the speed factors' bounds were authored in.</param>
     /// <param name="temperature">Mixture temperature, in kelvins (K).</param>
     /// <returns>Reactions per second.</returns>
-    [return: Quantity("frequency")]
-    public PerSecond GetReactionSpeed(
+    public ConcentrationPerSecond GetReactionSpeed(
         IDictionary<GasProperties, float> gasMolarities,
         [Quantity("temperature")] Kelvin temperature)
     {
-        PerSecond result = GetRateConstantForTemperature(temperature);
+        ConcentrationPerSecond result = GetRateConstantForTemperature(temperature);
         foreach (var factor in SpeedFactors.OrderBy(static factor => factor.Gas.Name, StringComparer.Ordinal)
                      .ThenBy(static factor => factor.OrderKey))
         {
