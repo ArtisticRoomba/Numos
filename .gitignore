@@ -11,6 +11,9 @@ riderModule.iml
 !.vscode/launch.json
 !.vscode/tasks.json
 
+# Visual Studio workspace settings.
+.vs/*
+
 imgui.ini
 BenchmarkDotNet.Artifacts/
 
