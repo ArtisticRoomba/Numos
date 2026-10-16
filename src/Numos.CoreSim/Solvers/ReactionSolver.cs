@@ -191,7 +191,7 @@ internal class ReactionSolver : IAtmosSolverStage
                 foreach (var gasChannel in chunk.ActiveGases.Take(c))
                 {
                     Mole diff = mixtureVector[gasChannel.GasId] - gasChannel.Moles[voxelIndex];
-                    if (diff > 0)
+                    if (diff != 0)
                     {
                         chunk.InjectGasToVoxel(
                             voxelIndex,
