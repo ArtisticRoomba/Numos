@@ -25,7 +25,7 @@ public readonly partial record struct StandardGasReaction
     /// <param name="speedFactors">Rate-equation exponent for each gas that affects the speed.</param>
     public StandardGasReaction(
         IDictionary<GasProperties, float> input, IDictionary<GasProperties, float> output,
-        [Quantity("energy")] Joule energyBalance,
+        JoulePerMole energyBalance,
         float arrheniusFactor, float activationEnergy,
         IDictionary<GasProperties, float> speedFactors)
     {
@@ -50,10 +50,10 @@ public readonly partial record struct StandardGasReaction
     /// <summary>
     ///     Joules released (positive) or absorbed (negative) per reaction.
     /// </summary>
-    internal Joule EnergyBalance { get; }
+    internal JoulePerMole EnergyBalance { get; }
 
     /// <summary>
-    ///     Arrhenius pre-exponential factor, in reactions per second.
+    ///     Arrhenius pre-exponential factor, in reactions per second.. The units of this changed based on the specific reaction.
     /// </summary>
     private float ArrheniusFactor { get; }
 
@@ -131,10 +131,10 @@ public readonly partial record struct StandardGasReaction
     /// <param name="temperatureKelvin">Mixture temperature, in kelvins (K).</param>
     /// <returns>Reactions per second.</returns>
     /// <remarks>there are more sophisticated models for k but good luck having anyone setup all the parameters necessary.</remarks>
-    internal PerSecond GetRateConstant(Kelvin temperatureKelvin)
+    internal ConcentrationPerSecond GetRateConstant(Kelvin temperatureKelvin)
     {
-        return ArrheniusFactor *
-               MathF.Exp(-ActivationEnergy / (temperatureKelvin * AtmosPhysicalConstants.MolarGasConstant));
+        var exponent = MathF.Exp(-ActivationEnergy / (temperatureKelvin * AtmosPhysicalConstants.MolarGasConstant));
+        return ArrheniusFactor * exponent;
     }
 
     /// <summary>
@@ -143,12 +143,11 @@ public readonly partial record struct StandardGasReaction
     /// <param name="gasMolarities">Amount of each gas. Gases missing from the dictionary count as zero.</param>
     /// <param name="temperatureKelvin">Mixture temperature, in kelvins (K).</param>
     /// <returns>Reactions per second, or zero when any factor drives the speed to zero or below.</returns>
-    [return: Quantity("frequency")]
-    public PerSecond GetReactionSpeed(
+    public ConcentrationPerSecond GetReactionSpeed(
         IDictionary<GasProperties, float> gasMolarities,
         [Quantity("temperature")] Kelvin temperatureKelvin)
     {
-        PerSecond result = GetRateConstant(temperatureKelvin);
+        ConcentrationPerSecond result = GetRateConstant(temperatureKelvin);
         if (result <= 0)
             return 0;
 

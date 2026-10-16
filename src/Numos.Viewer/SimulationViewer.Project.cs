@@ -99,23 +99,23 @@ public partial class SimulationViewer
             config.GasRegistry.Add(NitrousOxide);
             config.GasRegistry.Add(Water);
 
-            var waterSynthesis = new StandardGasReaction(
+            var hydrogenFire = new StandardGasReaction(
                 new Dictionary<GasProperties, float>
                     { { Hydrogen, 2 }, { Oxygen, 1 } },
                 new Dictionary<GasProperties, float>
                 {
                     { Water, 2 }
                 },
-                285.8f,
+                483600f,
                 1.8e13f,
-                UnitConversions.FromKilojoulePerMole(146.4f),
+                UnitConversions.FromKilojoulePerMole(241.8f),
                 new Dictionary<GasProperties, float>
                 {
                     { Hydrogen, 1 },
                     { Oxygen, 0.5f }
                 });
 
-            config.SolverConfigurations = [new GasReactionConfig(standardReactions: [waterSynthesis])];
+            config.SolverConfigurations = [new GasReactionConfig(standardReactions: [hydrogenFire])];
         }
 
         AtmosWorld? world = null;
