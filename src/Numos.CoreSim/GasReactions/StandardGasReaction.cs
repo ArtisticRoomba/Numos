@@ -133,8 +133,8 @@ public readonly partial record struct StandardGasReaction
     /// <remarks>there are more sophisticated models for k but good luck having anyone setup all the parameters necessary.</remarks>
     internal ConcentrationPerSecond GetRateConstant(Kelvin temperatureKelvin)
     {
-        var exponent = MathF.Exp(-ActivationEnergy / (temperatureKelvin * AtmosPhysicalConstants.MolarGasConstant));
-        return ArrheniusFactor * exponent;
+        return ArrheniusFactor *
+               MathF.Exp(-ActivationEnergy / (temperatureKelvin * AtmosPhysicalConstants.MolarGasConstant));
     }
 
     /// <summary>
