@@ -274,7 +274,7 @@ internal class ReactionSolver : IAtmosSolverStage
     }
 
     // Sensible energy of the mixture at its current temperature: sum of moles * Cv * T over gases.
-    private Joule ExtractHeat(ReadOnlySpan<Mole> mixtureVector, ref readonly Kelvin temperature, int mixtureLength, IAtmosConfig config)
+    private static Joule ExtractHeat(ReadOnlySpan<Mole> mixtureVector, ref readonly Kelvin temperature, int mixtureLength, IAtmosConfig config)
     {
         Joule result = 0f;
         for (int i = 0; i < mixtureLength; i++)
@@ -330,10 +330,13 @@ internal class ReactionSolver : IAtmosSolverStage
             out GasReactionData[] rateOrder,
             out var changesMatrix);
 
-        ProcessVoxelCore(
+        CubicMetre volume = config.GetVoxelVolume();
+
+        ProcessMixture(
             deltaTime,
             mixtureVector,
             ref currentTemperature,
+            volume,
             reactionFeedback,
             config,
             mixtureLength,
@@ -347,8 +350,8 @@ internal class ReactionSolver : IAtmosSolverStage
     ///     Does the actual per-voxel reaction work once the caller has resolved <paramref name="reactions" />,
     ///     <paramref name="gasData" />, <paramref name="rateOrder" />, and <paramref name="changesMatrix" />.
     /// </summary>
-    private void ProcessVoxelCore(
-        Second deltaTime, Span<Mole> mixtureVector, ref Kelvin currentTemperature,
+    private static void ProcessMixture(
+        Second deltaTime, Span<Mole> mixtureVector, ref Kelvin currentTemperature, CubicMetre volume,
         Scalar[]? reactionFeedback, IAtmosConfig config, int mixtureLength,
         GasReactionConfig reactions, GasReactionData[] gasData, GasReactionData[] rateOrder, GasReactionMatrix changesMatrix)
     {
@@ -361,7 +364,6 @@ internal class ReactionSolver : IAtmosSolverStage
         //small to justify a parallel dispatch, especially one issued once per voxel from inside an
         //already-parallel voxel worker.
         Kelvin temperature = currentTemperature; //to stop warning about the later change of currentTemperature.
-        CubicMetre voxelVolume = config.GetVoxelVolume();
         for (int reactionId = 0; reactionId < reactionCount; reactionId++)
         {
             ConcentrationPerSecond rate = reactions.GetRateConstant(reactionId, temperature);
@@ -370,11 +372,11 @@ internal class ReactionSolver : IAtmosSolverStage
 
             // Preserve canonical gas-name and factor order independently of registry indices.
             foreach (var gas in rateOrder)
-                rate = gas.ApplyRateFactors(reactionId, mixtureVector[gas.GasId]/voxelVolume, rate);
+                rate = gas.ApplyRateFactors(reactionId, mixtureVector[gas.GasId]/volume, rate);
 
             MolePerCubicMetre speed = rate * deltaTime;
             if (speed > 0f)
-                reactionSpeeds[reactionId] = speed * voxelVolume;
+                reactionSpeeds[reactionId] = speed * volume;
         }
 
         bool anyReaction = false;
@@ -613,10 +615,13 @@ internal class ReactionSolver : IAtmosSolverStage
             if (content <= 0.0001)
                 return;
 
-            solver.ProcessVoxelCore(
+            CubicMetre volume = config.GetVoxelVolume();
+
+            ProcessMixture(
                 deltaTime,
                 mixtureVector,
                 ref temp,
+                volume,
                 reactionFeedback,
                 config,
                 mixtureLength,
