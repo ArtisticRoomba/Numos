@@ -1,4 +1,5 @@
 using JetBrains.Annotations;
+using Numos.CoreSim.Datatypes.Snapshots;
 
 namespace Numos.API;
 

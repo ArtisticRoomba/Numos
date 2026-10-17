@@ -1,4 +1,5 @@
 using JetBrains.Annotations;
+using Numos.CoreSim.Datatypes.Snapshots;
 
 namespace Numos.API;
 
@@ -263,55 +264,6 @@ public interface IGasMixture
     /// <returns>The current values, with gases ordered by ID and only positive amounts included.</returns>
     /// <exception cref="ObjectDisposedException">The owning simulation has been disposed.</exception>
     GasMixtureSnapshot GetSnapshot();
-}
-
-/// <summary>
-///     A gas ID and its positive amount in a mixture snapshot.
-/// </summary>
-/// <param name="GasId">Simulation gas ID.</param>
-/// <param name="Moles">Amount in moles (mol).</param>
-public readonly record struct GasMixtureGas(int GasId, float Moles);
-
-/// <summary>
-///     Detached scalar and composition values captured from an <see cref="IGasMixture" />.
-/// </summary>
-/// <param name="Volume">Volume in cubic metres (m³).</param>
-/// <param name="Temperature">Stored temperature in kelvins (K).</param>
-/// <param name="Pressure">Ideal-gas pressure in pascals (Pa).</param>
-/// <param name="TotalMoles">Total amount in moles (mol).</param>
-/// <param name="Gases">Positive gas amounts ordered by gas ID.</param>
-public readonly record struct GasMixtureSnapshot(
-    float Volume,
-    float Temperature,
-    float Pressure,
-    float TotalMoles,
-    GasMixtureGas[] Gases)
-{
-    /// <summary>
-    ///     Gets one captured gas amount, returning zero when the gas is absent.
-    /// </summary>
-    /// <param name="gasId">The simulation gas ID.</param>
-    /// <returns>The captured amount in moles.</returns>
-    /// <remarks>
-    ///     The lookup relies on <see cref="Gases" /> being sorted by ID, which snapshots from
-    ///     <see cref="IGasMixture.GetSnapshot" /> always are. A null <see cref="Gases" /> array reads as empty.
-    /// </remarks>
-    /// <exception cref="ArgumentOutOfRangeException"><paramref name="gasId" /> is negative.</exception>
-    public float GetMoles(int gasId)
-    {
-        ArgumentOutOfRangeException.ThrowIfNegative(gasId);
-        GasMixtureGas[] gases = Gases ?? [];
-        for (int index = 0; index < gases.Length; index++)
-        {
-            if (gases[index].GasId == gasId)
-                return gases[index].Moles;
-
-            if (gases[index].GasId > gasId)
-                break;
-        }
-
-        return 0f;
-    }
 }
 
 internal interface IInternalGasMixture : IGasMixture
