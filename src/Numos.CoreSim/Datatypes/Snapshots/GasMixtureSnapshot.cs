@@ -19,9 +19,6 @@ public readonly record struct GasMixtureSnapshot(
         {
             if (id == gasId)
                 return moles;
-
-            if (id > gasId)
-                break;
         }
 
         return 0f;
