@@ -332,7 +332,7 @@ internal class ReactionSolver : IAtmosSolverStage
 
         CubicMetre volume = config.GetVoxelVolume();
 
-        ProcessMixture(
+        ProcessMixtureCore(
             deltaTime,
             mixtureVector,
             ref currentTemperature,
@@ -350,7 +350,7 @@ internal class ReactionSolver : IAtmosSolverStage
     ///     Does the actual per-voxel reaction work once the caller has resolved <paramref name="reactions" />,
     ///     <paramref name="gasData" />, <paramref name="rateOrder" />, and <paramref name="changesMatrix" />.
     /// </summary>
-    private static void ProcessMixture(
+    private static void ProcessMixtureCore(
         Second deltaTime, Span<Mole> mixtureVector, ref Kelvin currentTemperature, CubicMetre volume,
         Scalar[]? reactionFeedback, IAtmosConfig config, int mixtureLength,
         GasReactionConfig reactions, GasReactionData[] gasData, GasReactionData[] rateOrder, GasReactionMatrix changesMatrix)
@@ -617,7 +617,7 @@ internal class ReactionSolver : IAtmosSolverStage
 
             CubicMetre volume = config.GetVoxelVolume();
 
-            ProcessMixture(
+            ProcessMixtureCore(
                 deltaTime,
                 mixtureVector,
                 ref temp,
