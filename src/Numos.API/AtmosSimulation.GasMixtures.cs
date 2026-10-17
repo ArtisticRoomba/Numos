@@ -1,5 +1,6 @@
 using JetBrains.Annotations;
 using Numos.CoreSim;
+using Numos.CoreSim.Datatypes.Snapshots;
 
 namespace Numos.API;
 
@@ -462,10 +463,10 @@ public sealed partial class AtmosSimulation
             () =>
             {
                 var state = CaptureMixtureState(mixture);
-                var gases = new GasMixtureGas[state.ActiveGasCount];
+                var gases = new KeyValuePair<int, float>[state.ActiveGasCount];
                 int index = 0;
                 foreach ((int gasId, float moles) in state.Moles)
-                    gases[index++] = new GasMixtureGas(gasId, moles);
+                    gases[index++] = new (gasId, moles);
 
                 return new GasMixtureSnapshot(
                     state.Volume,

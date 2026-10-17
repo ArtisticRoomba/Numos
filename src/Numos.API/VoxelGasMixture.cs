@@ -1,3 +1,4 @@
+using Numos.CoreSim.Datatypes.Snapshots;
 using Numos.Maths;
 
 namespace Numos.API;

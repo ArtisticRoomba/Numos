@@ -1,5 +1,6 @@
 using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Primitives;
+using Numos.CoreSim.Datatypes.Snapshots;
 using Numos.Maths;
 
 namespace Numos.API.Tests;
@@ -99,12 +100,12 @@ public sealed class GasMixtureTests
             Assert.That(mixture.TotalMoles, Is.EqualTo(3f));
             Assert.That(mixture.GetMoles(999), Is.Zero);
             Assert.That(mixture.Pressure, Is.EqualTo(expectedPressure).Within(0.001f));
-            Assert.That(snapshot.Gases.Select(static gas => gas.GasId), Is.EqualTo(new[] { 3, 20 }));
+            Assert.That(snapshot.Gases.Select(static gas => gas.Key), Is.EqualTo(new[] { 3, 20 }));
             Assert.That(snapshot.GetMoles(3), Is.EqualTo(2f));
             Assert.That(snapshot.GetMoles(20), Is.EqualTo(1f));
         });
 
-        snapshot.Gases[0] = new GasMixtureGas(3, 100f);
+        snapshot.Gases[0] = new (3, 100f);
         Assert.That(mixture.GetMoles(3), Is.EqualTo(2f));
     }
 
@@ -293,7 +294,7 @@ public sealed class GasMixtureTests
             Assert.That(mixture.ActiveGasCount, Is.EqualTo(gasCount));
             Assert.That(mixture.TotalMoles, Is.EqualTo(gasCount));
             Assert.That(
-                mixture.GetSnapshot().Gases.Select(static gas => gas.GasId),
+                mixture.GetSnapshot().Gases.Select(static gas => gas.Key),
                 Is.EqualTo(Enumerable.Range(0, gasCount)));
         });
     }
