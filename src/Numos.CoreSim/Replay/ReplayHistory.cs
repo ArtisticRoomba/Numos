@@ -20,7 +20,7 @@ internal enum ReplayHistoryError : byte
     MissingTarget
 }
 
-internal static class ReplayHistoryValidator
+internal static class ReplayHistory
 {
     /// <summary>
     ///     Checks that <paramref name="history" /> carries every sequence after <paramref name="start" /> through
@@ -85,6 +85,55 @@ internal static class ReplayHistoryValidator
         }
 
         return sequence == target.OperationSequence ? ReplayHistoryError.None : ReplayHistoryError.MissingTarget;
+    }
+
+    /// <summary>
+    ///     Counts the leading entries of a strictly sequence-ordered history whose sequence is at most
+    ///     <paramref name="sequence" />.
+    /// </summary>
+    internal static int CountThrough<T>(IReadOnlyList<T> history, ulong sequence)
+        where T : class, IReplayHistoryEntry
+    {
+        int low = 0;
+        int high = history.Count;
+        while (low < high)
+        {
+            int middle = low + (high - low) / 2;
+            if (history[middle].Position.OperationSequence <= sequence)
+                low = middle + 1;
+            else
+                high = middle;
+        }
+
+        return low;
+    }
+
+    /// <summary>
+    ///     Copies the entries with sequences in (<paramref name="after" />, <paramref name="through" />] out of a
+    ///     strictly sequence-ordered history.
+    /// </summary>
+    internal static T[] Slice<T>(IReadOnlyList<T> history, ulong after, ulong through)
+        where T : class, IReplayHistoryEntry
+    {
+        return CopyRange(history, CountThrough(history, after), CountThrough(history, through));
+    }
+
+    /// <summary>
+    ///     Copies the leading entries of a strictly sequence-ordered history through <paramref name="through" />.
+    /// </summary>
+    internal static T[] TakeThrough<T>(IReadOnlyList<T> history, ulong through)
+        where T : class, IReplayHistoryEntry
+    {
+        return CopyRange(history, 0, CountThrough(history, through));
+    }
+
+    private static T[] CopyRange<T>(IReadOnlyList<T> history, int first, int end)
+    {
+        var range = new T[Math.Max(0, end - first)];
+        for (int index = 0; index < range.Length; index++)
+            range[index] = history[first + index];
+
+        return range;
     }
 
     /// <summary>

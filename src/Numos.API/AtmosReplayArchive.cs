@@ -8,6 +8,9 @@ namespace Numos.API;
 /// </summary>
 public sealed class AtmosReplayArchive
 {
+    // Scanning every chunk and operation is only needed when something asks, which is mostly saving and importing.
+    private IReadOnlyList<string>? _unsupportedFeatures;
+
     /// <summary>
     ///     Creates a detached replay archive independent of any storage format.
     /// </summary>
@@ -38,7 +41,6 @@ public sealed class AtmosReplayArchive
         Recording = recording;
         InitialStateHash = initialStateHash;
         HeadStateHash = headStateHash;
-        UnsupportedFeatures = new ReadOnlyCollection<string>(FindUnsupportedFeatures(initialCheckpoint, recording).ToArray());
     }
 
     /// <summary>
@@ -65,7 +67,9 @@ public sealed class AtmosReplayArchive
     ///     Gets human-readable descriptions of host-defined state that the standard replay file format cannot
     ///     reconstruct. Empty when the archive is portable.
     /// </summary>
-    public IReadOnlyList<string> UnsupportedFeatures { get; }
+    public IReadOnlyList<string> UnsupportedFeatures =>
+        _unsupportedFeatures ??= new ReadOnlyCollection<string>(
+            FindUnsupportedFeatures(InitialCheckpoint, Recording).ToArray());
 
     /// <summary>
     ///     Throws when this archive depends on host-defined solver state.

@@ -21,6 +21,10 @@ public sealed class AtmosReplayTimeline
     private AtmosRecordedOperation[] _committedPrefix = [];
     private AtmosSimulationCheckpoint? _headCheckpoint;
     private AtmosRecording? _history;
+
+    // Live history for Operations. Recording only appends, and each append advances the operation sequence, so the
+    // copy stays valid until the sequence moves or a branch replaces the prefix.
+    private (ulong Sequence, IReadOnlyList<AtmosRecordedOperation> Operations)? _liveOperations;
     private bool _isImportedReadOnly;
 
     /// <summary>
@@ -108,9 +112,7 @@ public sealed class AtmosReplayTimeline
     /// <summary>
     /// Gets the complete ordered operation history, including an imported or retained prefix.
     /// </summary>
-    public IReadOnlyList<AtmosRecordedOperation> Operations => IsInspecting
-        ? _history!.Operations
-        : CombineOperations(_committedPrefix, _simulation.CaptureRecording().Operations);
+    public IReadOnlyList<AtmosRecordedOperation> Operations => IsInspecting ? _history!.Operations : LiveOperations();
 
     /// <summary>
     ///     Restores, verifies and indexes a portable archive in a compatible simulation.
@@ -167,14 +169,14 @@ public sealed class AtmosReplayTimeline
         {
             cancellationToken.ThrowIfCancellationRequested();
             var target = PositionBeforeOperationsAtTick(initial.Position, archive.Recording.Operations, tick);
-            simulation.ReplayTo(source, archive.Recording.Operations, target);
+            simulation.ReplayRecordingTo(source, archive.Recording, target);
             source = simulation.CaptureCheckpoint();
             timeline._checkpoints.Add(new AtmosReplayVerificationPoint(source, source.ComputeStateHash()));
             progress?.Report(new AtmosReplayIndexProgress(tick - initial.Position.Tick, totalTicks));
         }
 
         cancellationToken.ThrowIfCancellationRequested();
-        var finalReplay = simulation.ReplayTo(source, archive.Recording.Operations, archive.Recording.Head);
+        var finalReplay = simulation.ReplayRecordingTo(source, archive.Recording, archive.Recording.Head);
         timeline._headCheckpoint = simulation.CaptureCheckpoint();
         var finalHash = timeline._headCheckpoint.ComputeStateHash();
         if (finalHash != archive.HeadStateHash)
@@ -266,12 +268,9 @@ public sealed class AtmosReplayTimeline
             throw new ArgumentOutOfRangeException(nameof(target));
 
         BeginInspection();
-        AtmosSimulationCheckpoint checkpoint = _checkpoints.Last(point =>
-            point.Checkpoint.Position.Tick <= target.Tick &&
-            point.Checkpoint.Position.OperationSequence <= target.OperationSequence).Checkpoint;
-
-        LastReplay = _simulation.ReplayTo(checkpoint, _history!.Operations, target);
-        var reference = _checkpoints.FirstOrDefault(point => point.Checkpoint.Position == target);
+        var source = _checkpoints[LastCheckpointNotAfter(target)];
+        LastReplay = _simulation.ReplayRecordingTo(source.Checkpoint, _history!, target);
+        var reference = source.Checkpoint.Position == target ? source : null;
         IsVerified = reference == null ? null : _simulation.ComputeStateHash() == reference.Hash;
         return LastReplay.Value;
     }
@@ -314,9 +313,7 @@ public sealed class AtmosReplayTimeline
             return;
 
         var position = Position;
-        _committedPrefix = _history!.Operations
-            .Where(operation => operation.Sequence <= position.OperationSequence)
-            .ToArray();
+        _committedPrefix = ReplayHistory.TakeThrough(_history!.Operations, position.OperationSequence);
 
         _simulation.StartRecording();
         _checkpoints.RemoveAll(point => IsAfter(point.Checkpoint.Position, position));
@@ -324,6 +321,7 @@ public sealed class AtmosReplayTimeline
             AddCheckpoint();
 
         _history = null;
+        _liveOperations = null;
         _headCheckpoint = null;
         _isImportedReadOnly = false;
         LastReplay = null;
@@ -334,12 +332,12 @@ public sealed class AtmosReplayTimeline
     private AtmosReplayArchive CreateArchive(AtmosSimulationCheckpoint head)
     {
         var initial = _checkpoints[0].Checkpoint;
-        AtmosRecordedOperation[] operations = Operations
-            .Where(operation => operation.Sequence > initial.Position.OperationSequence &&
-                                operation.Sequence <= head.Position.OperationSequence)
-            .ToArray();
+        var operations = ReplayHistory.Slice(
+            Operations,
+            initial.Position.OperationSequence,
+            head.Position.OperationSequence);
 
-        var recording = new AtmosRecording(initial.Position, head.Position, operations);
+        var recording = AtmosRecording.Adopt(initial.Position, head.Position, operations);
         return new AtmosReplayArchive(initial, recording, initial.ComputeStateHash(), head.ComputeStateHash());
     }
 
@@ -349,7 +347,7 @@ public sealed class AtmosReplayTimeline
             return;
 
         var tail = _simulation.StopRecording(out var head);
-        _history = new AtmosRecording(Start, tail.Head, CombineOperations(_committedPrefix, tail.Operations));
+        _history = AtmosRecording.Adopt(Start, tail.Head, CombineOperations(_committedPrefix, tail.Operations));
         _headCheckpoint = head;
         if (_checkpoints[^1].Checkpoint.Position != head.Position)
             _checkpoints.Add(new AtmosReplayVerificationPoint(head, head.ComputeStateHash()));
@@ -361,6 +359,38 @@ public sealed class AtmosReplayTimeline
     {
         var checkpoint = _simulation.CaptureCheckpoint();
         _checkpoints.Add(new AtmosReplayVerificationPoint(checkpoint, checkpoint.ComputeStateHash()));
+    }
+
+    private IReadOnlyList<AtmosRecordedOperation> LiveOperations()
+    {
+        ulong sequence = _simulation.TimelinePosition.OperationSequence;
+        if (_liveOperations is not { } live || live.Sequence != sequence)
+        {
+            var combined = CombineOperations(_committedPrefix, _simulation.CaptureRecording().Operations);
+            live = (sequence, Array.AsReadOnly(combined));
+            _liveOperations = live;
+        }
+
+        return live.Operations;
+    }
+
+    // Retained checkpoints only move forward in both tick and sequence, so the ones not after the target form a
+    // prefix. The first checkpoint is the timeline start, which every valid target follows.
+    private int LastCheckpointNotAfter(AtmosTimelinePosition target)
+    {
+        int low = 0;
+        int high = _checkpoints.Count;
+        while (low < high)
+        {
+            int middle = low + (high - low) / 2;
+            var position = _checkpoints[middle].Checkpoint.Position;
+            if (position.Tick <= target.Tick && position.OperationSequence <= target.OperationSequence)
+                low = middle + 1;
+            else
+                high = middle;
+        }
+
+        return low - 1;
     }
 
     private static AtmosTimelinePosition PositionBeforeOperationsAtTick(

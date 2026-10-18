@@ -295,7 +295,23 @@ public sealed partial class AtmosWorld
     {
         ArgumentNullException.ThrowIfNull(checkpoint);
         ArgumentNullException.ThrowIfNull(operations);
-        AtmosWorldRecordedOperation[] history = operations.ToArray();
+        return ReplayToCore(checkpoint, operations.ToArray(), target);
+    }
+
+    /// <summary>
+    ///     Replays a recording's own operations, which are already detached and immutable, without copying them.
+    /// </summary>
+    internal AtmosWorldReplayResult ReplayRecordingTo(
+        AtmosWorldCheckpoint checkpoint, AtmosWorldRecording recording, AtmosTimelinePosition target)
+    {
+        return ReplayToCore(checkpoint, recording.Operations, target);
+    }
+
+    private AtmosWorldReplayResult ReplayToCore(
+        AtmosWorldCheckpoint checkpoint,
+        IReadOnlyList<AtmosWorldRecordedOperation> history,
+        AtmosTimelinePosition target)
+    {
         lock (Gate)
         {
             ThrowIfDisposed();
@@ -306,7 +322,7 @@ public sealed partial class AtmosWorld
                     throw new InvalidOperationException("Stop recording before replaying; recursive replay is unavailable.");
             }
 
-            ReplayHistoryValidator.ThrowIfInvalidReplay(checkpoint.Position, history, target);
+            ReplayHistory.ThrowIfInvalidReplay(checkpoint.Position, history, target);
             var previous = CaptureCheckpoint();
             long started = Stopwatch.GetTimestamp();
             lock (_recordingGate)
@@ -318,8 +334,9 @@ public sealed partial class AtmosWorld
             try
             {
                 RestoreCheckpoint(checkpoint);
-                foreach (var operation in history)
+                for (int index = 0; index < history.Count; index++)
                 {
+                    var operation = history[index];
                     if (operation.Sequence <= checkpoint.Position.OperationSequence ||
                         operation.Sequence > target.OperationSequence)
                         continue;

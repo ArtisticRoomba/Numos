@@ -117,13 +117,31 @@ public sealed partial class AtmosSimulation
         AtmosSimulationCheckpoint checkpoint,
         IReadOnlyList<AtmosRecordedOperation> operations, AtmosTimelinePosition target)
     {
+        return ReplayToCore(checkpoint, operations, target, false);
+    }
+
+    /// <summary>
+    ///     Replays a recording's own operations without the defensive copy the public overload makes.
+    /// </summary>
+    internal AtmosReplayResult ReplayRecordingTo(
+        AtmosSimulationCheckpoint checkpoint, AtmosRecording recording, AtmosTimelinePosition target)
+    {
+        return ReplayToCore(checkpoint, recording.Operations, target, true);
+    }
+
+    private AtmosReplayResult ReplayToCore(
+        AtmosSimulationCheckpoint checkpoint,
+        IReadOnlyList<AtmosRecordedOperation> operations,
+        AtmosTimelinePosition target,
+        bool detached)
+    {
         ThrowIfDisposed();
         // See RestoreCheckpoint: Gate must be held across the kernel call (which re-enters World.Tick for catch-up
         // ticks and calls back into world solver enablement) so the lock order stays Gate-then-StateGate everywhere.
         lock (World.Gate)
         {
             World.EnsureSimulationRestoreAllowed(this);
-            var result = _kernel.ReplayTo(checkpoint, operations, target);
+            var result = _kernel.ReplayTo(checkpoint, operations, target, detached);
             World.SynchronizeRestoredConfig(this, _kernel.GetAtmosConfig());
             return result;
         }

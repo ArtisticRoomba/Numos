@@ -133,10 +133,12 @@ public sealed class AtmosChunkCheckpoint
         IsAwake = chunk.IsAwake;
         SleepTimer = chunk.SleepTimer;
         (Classifications, Temperatures, Pressures, HeatCapacities) = GeneratedCheckpointFields.CaptureChunkArrays(chunk);
-        ActiveAirIndices = Array.AsReadOnly(chunk.ActiveAirIndices.AsSpan(0, chunk.ActiveAirCount).ToArray());
-        Gases = Array.AsReadOnly(
-            Enumerable.Range(0, chunk.ActiveGasCount)
-                .Select(gas => new AtmosGasChannelCheckpoint(chunk.ActiveGases[gas], chunk.VoxelCount)).ToArray());
+        ActiveAirIndices = new CheckpointArray<ushort>(chunk.ActiveAirIndices.AsSpan(0, chunk.ActiveAirCount).ToArray());
+        var gases = new AtmosGasChannelCheckpoint[chunk.ActiveGasCount];
+        for (int gas = 0; gas < gases.Length; gas++)
+            gases[gas] = new AtmosGasChannelCheckpoint(chunk.ActiveGases[gas], chunk.VoxelCount);
+
+        Gases = Array.AsReadOnly(gases);
 
         SolverArrays = Array.AsReadOnly(chunk.CaptureSolverArrays());
     }
@@ -157,11 +159,11 @@ public sealed class AtmosChunkCheckpoint
         Dimensions = dimensions;
         IsAwake = isAwake;
         SleepTimer = sleepTimer;
-        Classifications = Array.AsReadOnly(classifications);
-        Temperatures = Array.AsReadOnly(temperatures);
-        Pressures = Array.AsReadOnly(pressures);
-        HeatCapacities = Array.AsReadOnly(heatCapacities);
-        ActiveAirIndices = Array.AsReadOnly(activeAirIndices);
+        Classifications = new CheckpointArray<int>(classifications);
+        Temperatures = new CheckpointArray<float>(temperatures);
+        Pressures = new CheckpointArray<float>(pressures);
+        HeatCapacities = new CheckpointArray<float>(heatCapacities);
+        ActiveAirIndices = new CheckpointArray<ushort>(activeAirIndices);
         Gases = Array.AsReadOnly(gases);
         SolverArrays = Array.Empty<AtmosSolverArraySnapshot>();
     }
@@ -240,25 +242,24 @@ public sealed class AtmosChunkCheckpoint
     internal AtmosChunk Materialize()
     {
         var chunk = new AtmosChunk(Dimensions.X, Dimensions.Y, Dimensions.Z);
-        chunk.Initialize(Position, Dimensions.X, Dimensions.Y, Dimensions.Z);
+        chunk.InitializeConstructed(Position);
         try
         {
-            for (int index = 0; index < chunk.VoxelCount; index++)
-            {
-                GeneratedCheckpointFields.RestoreChunkArrays(chunk, index, this);
-                chunk.IsVacuum[index] = Pressures[index] <= 0f;
-            }
+            // Every captured per-voxel array is exactly VoxelCount long, and the active-air prefix never exceeds it.
+            GeneratedCheckpointFields.RestoreChunkArrays(chunk, this);
+            ReadOnlySpan<float> pressures = chunk.TotalPressure.AsSpan();
+            Span<bool> isVacuum = chunk.IsVacuum.AsSpan();
+            for (int index = 0; index < pressures.Length; index++)
+                isVacuum[index] = pressures[index] <= 0f;
 
             foreach (var gas in Gases)
             {
                 int channel = chunk.GetOrCreateGasChannel(gas.GasId);
-                for (int index = 0; index < chunk.VoxelCount; index++)
-                    chunk.ActiveGases[channel].Moles[index] = gas.Moles[index];
+                CheckpointArray.CopyTo(gas.Moles, chunk.ActiveGases[channel].Moles.AsSpan(0, chunk.VoxelCount));
             }
 
             chunk.ActiveAirCount = ActiveAirIndices.Count;
-            for (int index = 0; index < ActiveAirIndices.Count; index++)
-                chunk.ActiveAirIndices[index] = ActiveAirIndices[index];
+            CheckpointArray.CopyTo(ActiveAirIndices, chunk.ActiveAirIndices);
 
             chunk.IsAwake = IsAwake;
             chunk.SleepTimer = SleepTimer;
@@ -281,13 +282,13 @@ public sealed class AtmosGasChannelCheckpoint
     internal AtmosGasChannelCheckpoint(GasChannel channel, int voxelCount)
     {
         GasId = channel.GasId;
-        Moles = Array.AsReadOnly(channel.Moles.AsSpan(0, voxelCount).ToArray());
+        Moles = new CheckpointArray<float>(channel.Moles.AsSpan(0, voxelCount).ToArray());
     }
 
     internal AtmosGasChannelCheckpoint(int gasId, float[] moles)
     {
         GasId = gasId;
-        Moles = Array.AsReadOnly(moles);
+        Moles = new CheckpointArray<float>(moles);
     }
 
     /// <summary>

@@ -318,7 +318,7 @@ timeline.SimulateFromHere(); // Discard the later future and record a new contin
 The host must serialize timeline calls with its simulation loop and disable external mutations while
 `IsInspecting` is true. The controller is not an independently synchronized scheduler. It retains checkpoints and
 operation history for its lifetime, so memory grows with the recorded world and session length. Reading `Operations`
-while live also allocates a detached recording batch.
+while live copies the recorded history again whenever new operations have arrived since the last read.
 
 `SeekTick` selects a completed-tick boundary before operations stamped after that tick. Operations already present in
 the timeline's initial checkpoint remain incorporated at its start tick. Use `SeekPosition` when a UI or debugger must

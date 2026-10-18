@@ -268,6 +268,17 @@ internal class AtmosChunk
     }
 
     /// <summary>
+    ///     Gives a chunk straight out of the constructor its position and a fresh generation. It is equivalent to
+    ///     <see cref="Initialize" /> with the constructor's dimensions, minus clearing arrays that were just allocated.
+    /// </summary>
+    internal void InitializeConstructed(Int3 position)
+    {
+        GridPosition = position;
+        _generation = Interlocked.Increment(ref _nextGeneration);
+        Interlocked.Exchange(ref _revision, 1);
+    }
+
+    /// <summary>
     ///     Marks the externally observable state as potentially changed.
     /// </summary>
     public void MarkChanged()

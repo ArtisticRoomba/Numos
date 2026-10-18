@@ -106,12 +106,17 @@ internal sealed partial class AtmosKernel
         lock (StateGate)
         {
             ThrowIfTickExecuting("capture a checkpoint during a tick");
+            AtmosChunk[] chunks = OrderedChunks();
+            var chunkCheckpoints = new AtmosChunkCheckpoint[chunks.Length];
+            for (int index = 0; index < chunks.Length; index++)
+                chunkCheckpoints[index] = new AtmosChunkCheckpoint(chunks[index]);
+
             return new AtmosSimulationCheckpoint(
                 _dimensions,
                 TimelinePosition,
                 _config,
                 _solverCheckpointProvider(),
-                OrderedChunks().Select(static chunk => new AtmosChunkCheckpoint(chunk)).ToArray());
+                chunkCheckpoints);
         }
     }
 
@@ -240,13 +245,23 @@ internal sealed partial class AtmosKernel
         _solversRestored();
     }
 
+    /// <summary>
+    ///     Restores <paramref name="checkpoint" /> and reapplies ticks and operations up to <paramref name="target" />,
+    ///     putting the previous state back if anything fails.
+    /// </summary>
+    /// <param name="checkpoint">The state replay starts from.</param>
+    /// <param name="operations">Ordered history covering the checkpoint through the target.</param>
+    /// <param name="target">The exact position to reconstruct.</param>
+    /// <param name="detached">
+    ///     Set when <paramref name="operations" /> is already an immutable detached list, such as
+    ///     <see cref="AtmosRecording.Operations" />; otherwise the host's batch is copied first.
+    /// </param>
     internal AtmosReplayResult ReplayTo(
         AtmosSimulationCheckpoint checkpoint, IReadOnlyList<AtmosRecordedOperation> operations,
-        AtmosTimelinePosition target)
+        AtmosTimelinePosition target, bool detached = false)
     {
         ArgumentNullException.ThrowIfNull(operations);
-        // Detach the host's batch before validation and application.
-        AtmosRecordedOperation[] history = operations.ToArray();
+        IReadOnlyList<AtmosRecordedOperation> history = detached ? operations : operations.ToArray();
         lock (StateGate)
         {
             ThrowIfTickExecuting("replay during a tick");
@@ -254,15 +269,16 @@ internal sealed partial class AtmosKernel
                 throw new InvalidOperationException("Stop recording before replaying; recursive replay is unavailable.");
 
             ValidateCheckpoint(checkpoint);
-            ReplayHistoryValidator.ThrowIfInvalidReplay(checkpoint.Position, history, target);
+            ReplayHistory.ThrowIfInvalidReplay(checkpoint.Position, history, target);
             var previous = CaptureCheckpoint();
             long started = Stopwatch.GetTimestamp();
             _isReplaying = true;
             try
             {
                 InstallCheckpoint(checkpoint);
-                foreach (var operation in history)
+                for (int index = 0; index < history.Count; index++)
                 {
+                    var operation = history[index];
                     if (operation.Sequence <= checkpoint.Position.OperationSequence || operation.Sequence > target.OperationSequence)
                         continue;
 
@@ -380,9 +396,17 @@ internal sealed partial class AtmosKernel
 
     private AtmosChunk[] OrderedChunks()
     {
-        return _chunkMap.Values
-            .OrderBy(static chunk => chunk.GridPosition.X)
-            .ThenBy(static chunk => chunk.GridPosition.Y)
-            .ThenBy(static chunk => chunk.GridPosition.Z).ToArray();
+        // Positions are the map's keys, so this order is total and doesn't depend on sort stability.
+        AtmosChunk[] chunks = _chunkMap.Values.ToArray();
+        Array.Sort(chunks, static (first, second) =>
+        {
+            int order = first.GridPosition.X.CompareTo(second.GridPosition.X);
+            if (order == 0)
+                order = first.GridPosition.Y.CompareTo(second.GridPosition.Y);
+
+            return order != 0 ? order : first.GridPosition.Z.CompareTo(second.GridPosition.Z);
+        });
+
+        return chunks;
     }
 }

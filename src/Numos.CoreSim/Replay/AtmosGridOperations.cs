@@ -129,10 +129,11 @@ public sealed record SetVoxelMixtureOperation : AtmosOperation
         Temperature = chunk.Temperature[index];
         Pressure = chunk.TotalPressure[index];
         HeatCapacity = chunk.TotalHeatCapacity[index];
-        Gases = Array.AsReadOnly(
-            Enumerable.Range(0, chunk.ActiveGasCount)
-                .Select(gas => new AtmosGasAmount(chunk.ActiveGases[gas].GasId, chunk.ActiveGases[gas].Moles[index]))
-                .ToArray());
+        var gases = new AtmosGasAmount[chunk.ActiveGasCount];
+        for (int gas = 0; gas < gases.Length; gas++)
+            gases[gas] = new AtmosGasAmount(chunk.ActiveGases[gas].GasId, chunk.ActiveGases[gas].Moles[index]);
+
+        Gases = Array.AsReadOnly(gases);
     }
 
     internal SetVoxelMixtureOperation(

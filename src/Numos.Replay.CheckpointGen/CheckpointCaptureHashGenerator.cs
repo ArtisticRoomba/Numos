@@ -232,7 +232,8 @@ public sealed class CheckpointCaptureHashGenerator : IIncrementalGenerator
             for (int i = 0; i < chunkFields.Count; i++)
             {
                 string comma = i == chunkFields.Count - 1 ? "" : ",";
-                builder.Append("                global::System.Array.AsReadOnly(chunk.").Append(chunkFields[i].LiveMember)
+                builder.Append("                new global::Numos.CoreSim.Replay.CheckpointArray<")
+                    .Append(chunkFields[i].ElementTypeKeyword).Append(">(chunk.").Append(chunkFields[i].LiveMember)
                     .Append(".ToArray())").AppendLine(comma);
             }
 
@@ -241,12 +242,12 @@ public sealed class CheckpointCaptureHashGenerator : IIncrementalGenerator
             builder.AppendLine();
 
             builder.AppendLine(
-                "        internal static void RestoreChunkArrays(global::Numos.CoreSim.AtmosChunk chunk, int index, global::Numos.CoreSim.Replay.AtmosChunkCheckpoint source)");
+                "        internal static void RestoreChunkArrays(global::Numos.CoreSim.AtmosChunk chunk, global::Numos.CoreSim.Replay.AtmosChunkCheckpoint source)");
             builder.AppendLine("        {");
             foreach (var field in chunkFields)
             {
-                builder.Append("            chunk.").Append(field.LiveMember).Append("[index] = source.")
-                    .Append(field.PropertyName).AppendLine("[index];");
+                builder.Append("            global::Numos.CoreSim.Replay.CheckpointArray.CopyTo(source.")
+                    .Append(field.PropertyName).Append(", chunk.").Append(field.LiveMember).AppendLine(".AsSpan());");
             }
 
             builder.AppendLine("        }");

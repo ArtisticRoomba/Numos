@@ -378,7 +378,7 @@ public static partial class NumosWorldReplaySerializer
 
     private static void ValidateRecording(AtmosWorldRecording recording)
     {
-        switch (ReplayHistoryValidator.Validate(recording.Start, recording.Operations, recording.Head, true))
+        switch (ReplayHistory.Validate(recording.Start, recording.Operations, recording.Head, true))
         {
             case ReplayHistoryError.None:
                 return;

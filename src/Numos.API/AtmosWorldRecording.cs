@@ -202,11 +202,16 @@ public sealed class AtmosWorldRecording
         AtmosTimelinePosition start,
         AtmosTimelinePosition head,
         IEnumerable<AtmosWorldRecordedOperation> operations)
+        : this(start, head, (operations ?? throw new ArgumentNullException(nameof(operations))).ToArray())
     {
-        ArgumentNullException.ThrowIfNull(operations);
+    }
+
+    private AtmosWorldRecording(
+        AtmosTimelinePosition start, AtmosTimelinePosition head, AtmosWorldRecordedOperation[] owned)
+    {
         Start = start;
         Head = head;
-        Operations = new ReadOnlyCollection<AtmosWorldRecordedOperation>(operations.ToArray());
+        Operations = new ReadOnlyCollection<AtmosWorldRecordedOperation>(owned);
     }
 
     /// <summary>
@@ -223,6 +228,15 @@ public sealed class AtmosWorldRecording
     ///     Gets operations in strictly increasing sequence and nondecreasing tick order.
     /// </summary>
     public IReadOnlyList<AtmosWorldRecordedOperation> Operations { get; }
+
+    /// <summary>
+    ///     Wraps an array nobody else holds a reference to, skipping the defensive copy.
+    /// </summary>
+    internal static AtmosWorldRecording Adopt(
+        AtmosTimelinePosition start, AtmosTimelinePosition head, AtmosWorldRecordedOperation[] owned)
+    {
+        return new AtmosWorldRecording(start, head, owned);
+    }
 }
 
 /// <summary>
