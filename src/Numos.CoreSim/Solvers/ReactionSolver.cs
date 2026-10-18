@@ -374,9 +374,9 @@ internal class ReactionSolver : IAtmosSolverStage
             foreach (var gas in rateOrder)
                 rate = gas.ApplyRateFactors(reactionId, mixtureVector[gas.GasId]/volume, rate);
 
-            MolePerCubicMetre speed = rate * deltaTime;
-            if (speed > 0f)
-                reactionSpeeds[reactionId] = speed * volume;
+            Mole speed = rate * deltaTime * volume;
+            if (float.IsFinite(speed) && speed > 0f)
+                reactionSpeeds[reactionId] = speed;
         }
 
         bool anyReaction = false;
