@@ -80,13 +80,29 @@ internal static class ImGuiExtensions
         const string glyph = "(?)";
         const float horizontalPadding = 4f;
 
+        var previousItemHeight = ImGui.GetItemRectSize().Y;
+
         ImGui.SameLine();
         ImGui.PushID(tooltip);
 
         var glyphSize = ImGui.CalcTextSize(glyph);
-        var buttonSize = new Vector2(
-            glyphSize.X + horizontalPadding * 2f,
-            MathF.Max(glyphSize.Y, ImGui.GetFrameHeight()));
+        var frameHeight = ImGui.GetFrameHeight();
+
+        float buttonHeight;
+        if (previousItemHeight < frameHeight)
+        {
+            // Make the button only as tall as the glyph
+            // so it doesn't make the line taller.
+            buttonHeight = glyphSize.Y;
+        }
+        else
+        {
+            // Use frame height so the glyph is
+            // centered on the widget's label.
+            buttonHeight = MathF.Max(glyphSize.Y, frameHeight);
+        }
+
+        var buttonSize = new Vector2(glyphSize.X + horizontalPadding * 2f, buttonHeight);
 
         var origin = ImGui.GetCursorScreenPos();
         ImGui.InvisibleButton("##question-tooltip", buttonSize);
