@@ -63,6 +63,11 @@ internal class ReactionSolver : IAtmosSolverStage
     // buffer that just grows to the high-water mark removes that round trip entirely.
     [ThreadStatic]
     private static Scalar[]? _reactionSpeedsScratch;
+
+    // Per-thread scratch for the intrinsic (unscaled) rate of every ignition reaction, same reasoning as
+    // _reactionSpeedsScratch above.
+    [ThreadStatic]
+    private static ConcentrationPerSecond[]? _intrinsicRatesScratch;
     private readonly object _gasDataKey = new();
     private GasReactionMatrix? _changesMatrix;
     private GasReactionData[] _gasRateOrder = [];
@@ -152,6 +157,18 @@ internal class ReactionSolver : IAtmosSolverStage
         return scratch;
     }
 
+    private static ConcentrationPerSecond[] RentIntrinsicRates(int reactionCount)
+    {
+        ConcentrationPerSecond[]? scratch = _intrinsicRatesScratch;
+        if (scratch == null || scratch.Length < reactionCount)
+        {
+            scratch = new ConcentrationPerSecond[Math.Max(reactionCount, 16)];
+            _intrinsicRatesScratch = scratch;
+        }
+
+        return scratch;
+    }
+
     /// <summary>
     ///     Requests an ignition source in one voxel for the next reaction pass: a very small volume at a
     ///     specific temperature. It starts a flame in that voxel even when the gas itself is far below the
@@ -232,7 +249,7 @@ internal class ReactionSolver : IAtmosSolverStage
     ///     where the rate is how fast the limiting reactant is being used up.
     /// </summary>
     /// <param name="depletionRate">Fractional depletion rate of the limiting reactant, see <see cref="ComputeDepletionRate" />.</param>
-    /// <param name="thermalDiffusivity"></param>
+    /// <param name="thermalDiffusivity">Thermal diffusivity of the gas, see <see cref="ComputeThermalDiffusivity" />.</param>
     internal MeterPerSecond ComputeFlameSpeed(PerSecond depletionRate, SquareMetrePerSecond thermalDiffusivity)
     {
         if (!(depletionRate > 0f))
@@ -242,20 +259,23 @@ internal class ReactionSolver : IAtmosSolverStage
     }
 
     /// <summary>
-    ///     Fractional rate at which the limiting reactant of the ignition reactions is being used up, from
-    ///     the reaction speeds of one tick. Fuel running out lowers the (limiter-scaled) speeds, so it
-    ///     lowers the flame speed with it.
+    ///     Fractional rate at which the limiting reactant is used up by the ignition reactions, in 1/s.
+    ///     It comes from the intrinsic rates (rate constant at the flame temperature times the concentration
+    ///     factors), not from how much a tick managed to burn: that is capped at 1 / deltaTime and would cap
+    ///     the flame speed with it. It still follows the fuel running out, because the concentration factors
+    ///     fall with the concentrations.
     /// </summary>
     /// <param name="mixtureVector">Moles of every gas before the reactions are applied.</param>
     /// <param name="mixtureLength">The number of registered gases.</param>
+    /// <param name="volume">Volume of the voxel, to turn moles into concentrations.</param>
     /// <param name="reactions">The reaction definitions.</param>
     /// <param name="gasData">The per-gas reaction data, for the reactions that consume each gas.</param>
-    /// <param name="reactionSpeeds">Moles each reaction converts this tick, indexed by reaction ID.</param>
-    /// <param name="burningFraction">Fraction of the voxel the reactions take place in.</param>
-    /// <param name="deltaTime">The timespan the reaction speeds cover.</param>
+    /// <param name="intrinsicRates">
+    ///     Rate of every ignition reaction inside the burning region, indexed by reaction ID.
+    /// </param>
     private static PerSecond ComputeDepletionRate(
-        ReadOnlySpan<Mole> mixtureVector, int mixtureLength, GasReactionConfig reactions,
-        GasReactionData[] gasData, Mole[] reactionSpeeds, Scalar burningFraction, Second deltaTime)
+        ReadOnlySpan<Mole> mixtureVector, int mixtureLength, CubicMetre volume, GasReactionConfig reactions,
+        GasReactionData[] gasData, ConcentrationPerSecond[] intrinsicRates)
     {
         PerSecond result = 0f;
         for (int gasId = 0; gasId < mixtureLength; gasId++)
@@ -263,18 +283,18 @@ internal class ReactionSolver : IAtmosSolverStage
             if (!(mixtureVector[gasId] > 0f))
                 continue;
 
-            Mole consumption = 0f;
+            ConcentrationPerSecond consumption = 0f;
             foreach (var (reactionId, consumed) in gasData[gasId].ConsumingReactions)
             {
                 if (reactions.GetReactionIsIgnition(reactionId))
-                    consumption -= consumed * reactionSpeeds[reactionId];
+                    consumption -= consumed * intrinsicRates[reactionId];
             }
 
             if (consumption <= 0f)
                 continue;
 
-            PerSecond depletionRate = consumption / (mixtureVector[gasId] * burningFraction * deltaTime);
-            result = MathF.Max(result, depletionRate);
+            MolePerCubicMetre concentration = mixtureVector[gasId] / volume;
+            result = MathF.Max(result, consumption / concentration);
         }
 
         return result;
@@ -720,8 +740,10 @@ internal class ReactionSolver : IAtmosSolverStage
         Joule initialEnergy = ExtractHeat(mixtureVector, ref currentTemperature, mixtureLength, config);
         int reactionCount = reactions.Count;
         Mole[] reactionSpeeds = RentReactionSpeeds(reactionCount);
+        ConcentrationPerSecond[] intrinsicRates = RentIntrinsicRates(reactionCount);
 
         Array.Clear(reactionSpeeds, 0, reactionCount);
+        Array.Clear(intrinsicRates, 0, reactionCount);
         //get all reaction speeds. Sequential: reactionCount is typically a handful of items, far too
         //small to justify a parallel dispatch, especially one issued once per voxel from inside an
         //already-parallel voxel worker.
@@ -729,12 +751,53 @@ internal class ReactionSolver : IAtmosSolverStage
         bool flameActive = ignitionPercent > 0f;
         // Stays true unless an ignition reaction burns faster inside the flame than across the whole voxel.
         bool bulkDominates = flameActive;
+
+        // How fast a flame can move through this gas, from the intrinsic rate at which its limiting
+        // reactant is used up at the flame temperature. Needs the mixture from before the reactions are
+        // applied. Only worked out when it matters, so voxels without any ignition keep the original cost.
+        MeterPerSecond flameSpeed = 0f;
+        bool sustained = false;
+        // The flame moves while the reactions run, so they take place across the average of the burning
+        // fraction at the start and at the end of the tick, not just the fraction the flame started with.
+        Scalar burningFraction = ignitionPercent;
+        Scalar grownIgnitionPercent = ignitionPercent;
+        if (flameActive)
+        {
+            for (int reactionId = 0; reactionId < reactionCount; reactionId++)
+            {
+                if (!reactions.GetReactionIsIgnition(reactionId))
+                    continue;
+
+                ConcentrationPerSecond intrinsicRate = reactions.GetRateConstant(reactionId, ignitedVolumeTemp);
+                if (!float.IsNormal(intrinsicRate) || intrinsicRate <= 0f)
+                    continue;
+
+                foreach (var gas in rateOrder)
+                    intrinsicRate = gas.ApplyRateFactors(reactionId, mixtureVector[gas.GasId]/volume, intrinsicRate);
+
+                intrinsicRates[reactionId] = intrinsicRate;
+            }
+
+            PerSecond depletionRate = ComputeDepletionRate(mixtureVector, mixtureLength, volume, reactions, gasData, intrinsicRates);
+            Kelvin conductivityTemperature = (currentTemperature + ignitedVolumeTemp) / 2f;
+            SquareMetrePerSecond thermalDiffusivity = ComputeThermalDiffusivity(mixtureVector, mixtureLength, volume, conductivityTemperature, config);
+            flameSpeed = ComputeFlameSpeed(depletionRate, thermalDiffusivity);
+            sustained = flameSpeed >= MinimumFlameSpeed;
+
+            // Signed front advance in voxel edge lengths: the flame grows at the flame speed while it is
+            // sustained, and recedes by how far the speed falls short of the minimum otherwise.
+            MeterPerSecond frontSpeed = sustained ? flameSpeed : flameSpeed - MinimumFlameSpeed;
+            Scalar frontAdvance = frontSpeed * deltaTime / MathF.Cbrt(volume);
+            grownIgnitionPercent = GrowIgnition(ignitionPercent, frontAdvance);
+            burningFraction = (ignitionPercent + grownIgnitionPercent) / 2f;
+        }
+
         for (int reactionId = 0; reactionId < reactionCount; reactionId++)
         {
             ConcentrationPerSecond rate = reactions.GetRateConstant(reactionId, temperature);
             if (flameActive)
             {
-                ConcentrationPerSecond flameRate = reactions.GetRateConstant(reactionId, ignitedVolumeTemp) * ignitionPercent;
+                ConcentrationPerSecond flameRate = reactions.GetRateConstant(reactionId, ignitedVolumeTemp) * burningFraction;
                 if (flameRate > rate && reactions.GetReactionIsIgnition(reactionId))
                     bulkDominates = false;
 
@@ -746,6 +809,10 @@ internal class ReactionSolver : IAtmosSolverStage
             // Preserve canonical gas-name and factor order independently of registry indices.
             foreach (var gas in rateOrder)
                 rate = gas.ApplyRateFactors(reactionId, mixtureVector[gas.GasId]/volume, rate);
+
+            // Without a flame the whole voxel is reacting, so this is the rate a flame would have to beat.
+            if (!flameActive && reactions.GetReactionIsIgnition(reactionId))
+                intrinsicRates[reactionId] = rate;
 
             Mole64 speed = (ConcentrationPerSecond64)rate * deltaTime * volume;
             if (!double.IsFinite(speed) || speed <= 0.0)
@@ -796,8 +863,10 @@ internal class ReactionSolver : IAtmosSolverStage
                 foreach (var (reactionId, consumed) in gasData[i].ConsumingReactions)
                 {
                     Mole speed = reactionSpeeds[reactionId];
+                    // A flame can only burn the reactant inside it: weigh its speed against the burning
+                    // share of the gas, so a small flame can't use up the whole voxel's fuel in one tick.
                     if (flameActive && !bulkDominates && reactions.GetReactionIsIgnition(reactionId))
-                        speed *= 1 / ignitionPercent;
+                        speed /= burningFraction;
                     accumulatedConsumption += consumed * speed;
                 }   
 
@@ -878,26 +947,14 @@ internal class ReactionSolver : IAtmosSolverStage
             ignitionEnergyDelta += reactions.GetReactionIsIgnition(j) ? reactions.GetEnergyBalance(j) * reactionSpeeds[j] : 0;
         }
 
-        // How fast a flame could move through this gas, from how fast its limiting reactant is used up.
-        // Needs the mixture from before the reactions are applied. Only worked out when it matters, so
-        // voxels without any ignition keep the original cost.
-        MeterPerSecond flameSpeed = 0f;
-        if (flameActive || ignitionEnergyDelta > 0f)
+        // Without a flame, check whether the reactions that are running could keep one going. This also
+        // needs the mixture from before the reactions are applied.
+        if (!flameActive && ignitionEnergyDelta > 0f)
         {
-            Scalar burningFraction = flameActive && !bulkDominates ? ignitionPercent : 1f;
-            PerSecond depletionRate = ComputeDepletionRate(
-                mixtureVector,
-                mixtureLength,
-                reactions,
-                gasData,
-                reactionSpeeds,
-                burningFraction,
-                deltaTime);
-            Kelvin conductivityTemperature = flameActive
-                ? (currentTemperature + ignitedVolumeTemp) / 2f
-                : currentTemperature;
-            SquareMetrePerSecond thermalDiffusivity = ComputeThermalDiffusivity(mixtureVector, mixtureLength, volume, conductivityTemperature, config);
+            PerSecond depletionRate = ComputeDepletionRate(mixtureVector, mixtureLength, volume, reactions, gasData, intrinsicRates);
+            SquareMetrePerSecond thermalDiffusivity = ComputeThermalDiffusivity(mixtureVector, mixtureLength, volume, currentTemperature, config);
             flameSpeed = ComputeFlameSpeed(depletionRate, thermalDiffusivity);
+            sustained = flameSpeed >= MinimumFlameSpeed;
         }
 
         //apply mixture, this also includes heat, since all change equations contain energy balance.
@@ -924,7 +981,6 @@ internal class ReactionSolver : IAtmosSolverStage
         if (heatCapacity > 0f)
             currentTemperature = energy / heatCapacity;
 
-        bool sustained = flameSpeed >= MinimumFlameSpeed;
         if (ignitionPercent > 0f)
         {
             if (ignitionEnergyDelta <= 0f || !(heatCapacity > 0f) || (bulkDominates && !sustained))
@@ -941,27 +997,19 @@ internal class ReactionSolver : IAtmosSolverStage
                 ignitionPercent = 1f;
                 ignitedVolumeTemp = currentTemperature;
             }
+            else if (grownIgnitionPercent <= MinimumIgnitionPercent)
+            {
+                ignitionPercent = 0f;
+                ignitedVolumeTemp = 0f;
+            }
             else
             {
-                // Signed front advance in voxel edge lengths: the flame grows at the flame speed while it
-                // is sustained, and recedes by how far the speed falls short of the minimum otherwise.
-                MeterPerSecond frontSpeed = sustained ? flameSpeed : flameSpeed - MinimumFlameSpeed;
-                Scalar frontAdvance = frontSpeed * deltaTime / MathF.Cbrt(volume);
-                Scalar newIgnitionPercent = GrowIgnition(ignitionPercent, frontAdvance);
-                if (newIgnitionPercent <= MinimumIgnitionPercent)
-                {
-                    ignitionPercent = 0f;
-                    ignitedVolumeTemp = 0f;
-                }
-                else
-                {
-                    // The burning sub-volume gets its share of the voxel's energy plus all the energy the
-                    // ignition reactions released, which only ever happens inside the flame.
-                    Joule ignitionEnergy = initialEnergy * newIgnitionPercent + (energyDelta - ignitionEnergyDelta) * newIgnitionPercent + ignitionEnergyDelta;
-                    JoulePerKelvin ignitionHeatCapacity = heatCapacity * newIgnitionPercent;
-                    ignitedVolumeTemp = ignitionEnergy / ignitionHeatCapacity;
-                    ignitionPercent = newIgnitionPercent;
-                }
+                // The burning sub-volume gets its share of the voxel's energy plus all the energy the
+                // ignition reactions released, which only ever happens inside the flame.
+                Joule ignitionEnergy = initialEnergy * grownIgnitionPercent + (energyDelta - ignitionEnergyDelta) * grownIgnitionPercent + ignitionEnergyDelta;
+                JoulePerKelvin ignitionHeatCapacity = heatCapacity * grownIgnitionPercent;
+                ignitedVolumeTemp = ignitionEnergy / ignitionHeatCapacity;
+                ignitionPercent = grownIgnitionPercent;
             }
         }
         else if (ignitionEnergyDelta > 0f && sustained)
