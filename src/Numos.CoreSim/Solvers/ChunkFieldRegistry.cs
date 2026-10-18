@@ -7,8 +7,7 @@ namespace Numos.CoreSim.Solvers;
 /// </summary>
 /// <remarks>
 ///     <para>
-///         Descriptors are process-wide and never removed. A registered descriptor owns its <see cref="Key" />; a private
-///         descriptor is only reachable through the instance that created it.
+///         Descriptors are process-wide and never removed, and each one owns its <see cref="Key" />.
 ///     </para>
 ///     <para>
 ///         <see cref="Slot" /> is a process-local index assigned in registration order, which depends on static
@@ -20,17 +19,16 @@ internal abstract class ChunkFieldDescriptor
 {
     private object? _publicHandle;
 
-    private protected ChunkFieldDescriptor(string key, int slot, bool captureForRollback, int? fixedLength, bool isPrivate)
+    private protected ChunkFieldDescriptor(string key, int slot, bool captureForRollback, int? fixedLength)
     {
         Key = key;
         Slot = slot;
         CaptureForRollback = captureForRollback;
         FixedLength = fixedLength;
-        IsPrivate = isPrivate;
     }
 
     /// <summary>
-    ///     Gets the ordinal key for registered fields, or the debug name for private fields.
+    ///     Gets the ordinal key.
     /// </summary>
     internal string Key { get; }
 
@@ -47,8 +45,6 @@ internal abstract class ChunkFieldDescriptor
     ///     Gets the array length, or null for one element per voxel.
     /// </summary>
     internal int? FixedLength { get; }
-
-    internal bool IsPrivate { get; }
 
     /// <summary>
     ///     Gets the public wrapper published for this descriptor, if any.
@@ -85,8 +81,8 @@ internal abstract class ChunkFieldDescriptor
 /// <inheritdoc />
 internal sealed class ChunkFieldDescriptor<T> : ChunkFieldDescriptor
 {
-    internal ChunkFieldDescriptor(string key, int slot, bool captureForRollback, int? fixedLength, bool isPrivate)
-        : base(key, slot, captureForRollback, fixedLength, isPrivate)
+    internal ChunkFieldDescriptor(string key, int slot, bool captureForRollback, int? fixedLength)
+        : base(key, slot, captureForRollback, fixedLength)
     {
     }
 
@@ -158,39 +154,11 @@ internal static class ChunkFieldRegistry
                     $"again as {ChunkFieldDescriptor.Describe(typeof(T), captureForRollback, length)}.");
             }
 
-            var descriptor = new ChunkFieldDescriptor<T>(key, NextSlot(), captureForRollback, length, false);
+            int slot = _slotCount;
+            Volatile.Write(ref _slotCount, slot + 1);
+            var descriptor = new ChunkFieldDescriptor<T>(key, slot, captureForRollback, length);
             ByKey.Add(key, descriptor);
             return descriptor;
         }
-    }
-
-    /// <summary>
-    ///     Creates a transient field that is only reachable through the returned descriptor.
-    /// </summary>
-    /// <param name="debugName">A name for diagnostics. It is not a key and may repeat.</param>
-    /// <param name="length">The array length, or null for one element per voxel.</param>
-    /// <returns>A new descriptor with its own slot.</returns>
-    /// <remarks>
-    ///     Every call consumes a slot for the life of the process, so create private fields once rather than per tick or
-    ///     per simulation.
-    /// </remarks>
-    internal static ChunkFieldDescriptor<T> CreatePrivate<T>(string debugName, int? length)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(debugName);
-        if (length is { } count)
-            ArgumentOutOfRangeException.ThrowIfNegative(count, nameof(length));
-
-        lock (Gate)
-        {
-            return new ChunkFieldDescriptor<T>(debugName, NextSlot(), false, length, true);
-        }
-    }
-
-    // Caller holds Gate.
-    private static int NextSlot()
-    {
-        int slot = _slotCount;
-        Volatile.Write(ref _slotCount, slot + 1);
-        return slot;
     }
 }

@@ -1002,13 +1002,14 @@ static class FireData
     public static readonly ChunkField<int> BurnCount =
         ChunkField<int>.Register("my-mod/fire/burn-count", rollback: true, length: 1);
 
-    // Scratch storage nobody else can look up. Never captured.
-    public static readonly ChunkField<float> Scratch = ChunkField<float>.CreatePrivate("fire scratch");
+    // Scratch storage. Never captured.
+    public static readonly ChunkField<float> Scratch = ChunkField<float>.Register("my-mod/fire/scratch");
 }
 ```
 
 Solvers reach the storage through the tick context. `context.Chunks(simulation)` returns a view per chunk, and
-`chunk.Get(field)` or `chunk.GetSpan(field)` returns the live array:
+`chunk.Get(field)` returns the live array as a `FlatArray<T>`: shaped like the chunk for per-voxel fields,
+one-dimensional for fixed-length ones. `AsSpan()` on it is the cheapest way to sweep the whole field.
 
 ```csharp
 world.Solvers.Register("my-mod/fire", context =>
@@ -1019,13 +1020,12 @@ world.Solvers.Register("my-mod/fire", context =>
         Parallel.For(0, chunks.Count, index =>
         {
             AtmosSolverChunk chunk = chunks[index];
-            Span<float> exposure = chunk.GetSpan(FireData.Exposure);
-            Span<float> scratch = chunk.GetSpan(FireData.Scratch);
-            scratch.Clear();
+            Span<float> exposure = chunk.Get(FireData.Exposure).AsSpan();
+            chunk.Get(FireData.Scratch).Clear();
             for (int voxel = 0; voxel < exposure.Length; voxel++)
                 exposure[voxel] += 1f;
 
-            chunk.GetSpan(FireData.BurnCount)[0]++;
+            chunk.Get(FireData.BurnCount)[0]++;
         });
     }
 });
@@ -1059,9 +1059,8 @@ mod is the same field everywhere. Namespace keys (`my-mod/fire/exposure`, not `e
 
 Registering a key that already exists returns the same `ChunkField<T>` if the definition matches: element type, length,
 and rollback policy. Any difference throws `InvalidOperationException`, naming both definitions, rather than letting two
-solvers share incompatible storage. `CreatePrivate` fields never enter the registry, so two private fields with the
-same debug name are still separate. Each registration or private field holds a slot for the life of the process, so
-create fields once, not per tick or per simulation.
+solvers share incompatible storage. Each key holds a slot for the life of the process, so register fields once, not per
+tick or per simulation.
 
 #### Rollback keys are a compatibility contract
 
@@ -1122,9 +1121,8 @@ The attribute maps onto `Register` like this:
   `AtmosSolverChunk` or with another field's accessor in the same namespace.
 
 For each declaring type the generator also emits a `{Type}ChunkAccessors` class in the same namespace (a nested
-`Outer.Inner` gets `OuterInnerChunkAccessors`). It holds extension properties on `AtmosSolverChunk`, and on
-`AtmosDangerousChunk` too when `Numos.API.Dangerous` is referenced. Per-voxel fields come back as `FlatArray<T>`,
-fixed-length ones as `Span<T>`:
+`Outer.Inner` gets `OuterInnerChunkAccessors`). It holds extension properties on `AtmosSolverChunk` that return the
+same `FlatArray<T>` as `chunk.Get(field)`:
 
 ```csharp
 Parallel.For(0, chunks.Count, index =>
@@ -1135,15 +1133,14 @@ Parallel.For(0, chunks.Count, index =>
         exposure[voxel] += 1f;
 
     chunk.BurnCount[0]++;
-    FlatArray<float> live = chunk.Dangerous().Exposure; // same storage
 });
 ```
 
 `FlatArray<T>` indexers return by reference, so a one-off write like `chunk.Exposure[voxel] += 1f` goes straight to
 the chunk's storage. Every accessor call looks the field up again, though, so hoist it out of a voxel loop as above.
 
-Extension properties need C# 14, the default for `net10.0`. On C# 13 the generator falls back to extension methods
-named `Get{Name}` (`chunk.GetExposure()`) and says so with an info diagnostic.
+Extension properties need C# 14, the default for `net10.0`. A project pinned to an older `LangVersion` gets a
+`NUMOSCHUNK013` error and no accessors.
 
 The generator catches most mistakes at compile time instead of leaving them to throw at registration:
 
@@ -1161,7 +1158,7 @@ The generator catches most mistakes at compile time instead of leaving them to t
 | `NUMOSCHUNK010` | Error    | The property or a containing type isn't `public` or `internal`, so the accessors can't reach it. |
 | `NUMOSCHUNK011` | Error    | Two declarations share a key with different element types, lengths, or rollback settings.        |
 | `NUMOSCHUNK012` | Warning  | Two declarations share a key with identical definitions; one is redundant.                       |
-| `NUMOSCHUNK013` | Info     | C# 13 or earlier, so accessors are extension methods.                                            |
+| `NUMOSCHUNK013` | Error    | The project uses C# 13 or earlier; the accessors are C# 14 extension properties.                 |
 | `NUMOSCHUNK014` | Warning  | An accessor name collides with a chunk view member or another accessor.                          |
 | `NUMOSCHUNK015` | Error    | `AccessorName` isn't a valid C# identifier.                                                      |
 
@@ -1194,16 +1191,16 @@ simulation.World.Solvers.Register(
     after: AtmosBuiltInSolvers.Advection);
 ```
 
-From a `ChunkField<T>` view, `chunk.Dangerous()` gives the same live chunk without a handle lookup. It is safe on
-`Parallel.For` workers, and `Get`/`GetSpan` on the dangerous chunk reach the same field storage as the safe view:
+From an `AtmosSolverChunk` view, `chunk.Dangerous()` gives the same live chunk without a handle lookup, and it's safe
+on `Parallel.For` workers. The dangerous chunk only adds built-in storage; custom fields stay on the safe view it came
+from:
 
 ```csharp
 var chunks = context.Chunks(simulation);
 Parallel.For(0, chunks.Count, index =>
 {
-    AtmosDangerousChunk live = chunks[index].Dangerous();
-    Span<float> exposure = live.GetSpan(FireData.Exposure);
-    Span<float> temperature = live.Temperature;
+    Span<float> exposure = chunks[index].Get(FireData.Exposure).AsSpan();
+    Span<float> temperature = chunks[index].Dangerous().Temperature;
     for (int voxel = 0; voxel < exposure.Length; voxel++)
         exposure[voxel] += temperature[voxel] > 500f ? 1f : 0f;
 });

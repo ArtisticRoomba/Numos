@@ -43,30 +43,12 @@ internal sealed record ChunkDataDeclaration(
 }
 
 /// <summary>
-///     Member names already taken on the chunk view types, plus whether the Dangerous view exists at all.
+///     One property in a generated file, and whether its chunk accessor survived the name checks.
 /// </summary>
-internal sealed record ChunkViewInfo(
-    bool HasDangerous,
-    EquatableArray<string> SolverChunkMembers,
-    EquatableArray<string> DangerousChunkMembers);
-
-/// <summary>
-///     Which chunk views get an accessor for one property, and under what member name.
-/// </summary>
-internal readonly record struct AccessorTargets(string MemberName, bool OnSolverChunk, bool OnDangerousChunk);
-
-/// <summary>
-///     One property in a generated file, with its accessor if one survived the collision checks.
-/// </summary>
-internal sealed record ChunkDataMemberModel(ChunkDataPropertyModel Property, AccessorTargets? Accessor);
+internal sealed record ChunkDataMemberModel(ChunkDataPropertyModel Property, bool HasAccessor);
 
 /// <summary>
 ///     The generated file for one declaring type.
 /// </summary>
 /// <param name="Members">The type's properties that passed every check, in source order.</param>
-/// <param name="UseExtensionBlocks">Whether C# 14 extension properties are available.</param>
-/// <param name="HasDangerous">Whether <c>Numos.API.Dangerous</c> is referenced.</param>
-internal sealed record ChunkDataTypeModel(
-    EquatableArray<ChunkDataMemberModel> Members,
-    bool UseExtensionBlocks,
-    bool HasDangerous);
+internal sealed record ChunkDataTypeModel(EquatableArray<ChunkDataMemberModel> Members);

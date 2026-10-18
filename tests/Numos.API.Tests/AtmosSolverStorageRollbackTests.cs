@@ -196,7 +196,6 @@ public sealed class AtmosSolverStorageRollbackTests
                 () => ChunkField<ReferenceValue>.Register(KeyPrefix + "references", true),
                 Throws.ArgumentException);
 
-            Assert.That(ChunkField<int>.CreatePrivate(KeyPrefix + "private").Rollback, Is.False);
             Assert.That(simulation.ComputeStateHash(), Is.EqualTo(hash));
         });
 
@@ -259,7 +258,7 @@ public sealed class AtmosSolverStorageRollbackTests
             context =>
             {
                 var view = context.Chunks(simulation)[0];
-                Span<int> counter = view.GetSpan(ReplayCount);
+                Span<int> counter = view.Get(ReplayCount).AsSpan();
                 FlatArray<float> history = view.Get(ReplayHistory);
                 counter[0]++;
                 history[0] += counter[0];

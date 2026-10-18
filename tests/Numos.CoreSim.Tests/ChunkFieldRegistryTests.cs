@@ -101,28 +101,9 @@ public sealed class ChunkFieldRegistryTests
     }
 
     [Test]
-    public void CreatePrivate_StaysOutOfKeyMap()
-    {
-        string name = Key("private");
-        var first = ChunkFieldRegistry.CreatePrivate<int>(name, null);
-        var second = ChunkFieldRegistry.CreatePrivate<int>(name, null);
-
-        Assert.Multiple(() =>
-        {
-            Assert.That(first.IsPrivate, Is.True);
-            Assert.That(first.CaptureForRollback, Is.False);
-            Assert.That(second, Is.Not.SameAs(first));
-            Assert.That(second.Slot, Is.Not.EqualTo(first.Slot));
-        });
-
-        var registered = ChunkFieldRegistry.Register<float>(name, false, null);
-        Assert.That(registered.Slot, Is.Not.EqualTo(first.Slot).And.Not.EqualTo(second.Slot));
-    }
-
-    [Test]
     public void PublicHandle_FirstPublisherWins()
     {
-        var field = ChunkFieldRegistry.CreatePrivate<int>(Key("public-handle"), null);
+        var field = ChunkFieldRegistry.Register<int>(Key("public-handle"), false, null);
         object first = new();
         object second = new();
 

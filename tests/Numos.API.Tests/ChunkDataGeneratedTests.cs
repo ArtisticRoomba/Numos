@@ -28,7 +28,7 @@ public sealed class ChunkDataGeneratedTests
         {
             Assert.That(GeneratedFireData.Exposure.Key, Is.EqualTo("tests/chunk-data-generated/exposure"));
             Assert.That(GeneratedFireData.Exposure.Rollback, Is.True);
-            Assert.That(GeneratedFireData.Exposure.IsPerVoxel, Is.True);
+            Assert.That(GeneratedFireData.Exposure.Length, Is.Null);
             Assert.That(GeneratedFireData.BurnCount.Length, Is.EqualTo(2));
             Assert.That(GeneratedFireData.Scratch.Key, Is.EqualTo(typeof(GeneratedFireData).FullName + ".Scratch"));
             Assert.That(GeneratedFireData.Scratch.Rollback, Is.False);
@@ -58,7 +58,7 @@ public sealed class ChunkDataGeneratedTests
                 for (int voxel = 0; voxel < chunk.VoxelCount; voxel++)
                     exposure[voxel] += voxel;
 
-                Span<int> burnCount = chunk.BurnCount;
+                FlatArray<int> burnCount = chunk.BurnCount;
                 burnCount[0]++;
                 burnCount[1] = chunk.Position.X + 10 * chunk.Position.Y;
             });
@@ -93,7 +93,7 @@ public sealed class ChunkDataGeneratedTests
         {
             foreach (var chunk in context.Chunks(simulation))
             {
-                Span<int> burnCount = chunk.BurnCount;
+                FlatArray<int> burnCount = chunk.BurnCount;
                 burnCount[0]++;
                 chunk.Exposure[1] += burnCount[0];
                 chunk.Scratch[0] = burnCount[0];

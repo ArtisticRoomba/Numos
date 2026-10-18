@@ -384,7 +384,7 @@ public sealed class SolverDependencyGeneratorTests
 
         CSharpParseOptions parseOptions = GeneratorHarness.ParseOptions()
             .WithDocumentationMode(DocumentationMode.Diagnose);
-        CSharpCompilation compilation = GeneratorHarness.CreateCompilation(true, parseOptions, source);
+        CSharpCompilation compilation = GeneratorHarness.CreateCompilation(parseOptions, source);
         GeneratorHarness.CreateDriver(parseOptions, generator: new SolverDependencyGenerator())
             .RunGeneratorsAndUpdateCompilation(compilation, out Compilation output, out var diagnostics);
 
@@ -396,7 +396,7 @@ public sealed class SolverDependencyGeneratorTests
     public void UnrelatedEdit_LeavesModelStepsCached()
     {
         CSharpParseOptions parseOptions = GeneratorHarness.ParseOptions();
-        CSharpCompilation compilation = GeneratorHarness.CreateCompilation(true, parseOptions, FireSource);
+        CSharpCompilation compilation = GeneratorHarness.CreateCompilation(parseOptions, FireSource);
         GeneratorDriver driver = GeneratorHarness.CreateDriver(parseOptions, trackSteps: true,
             generator: new SolverDependencyGenerator());
         driver = driver.RunGenerators(compilation);
@@ -426,7 +426,7 @@ public sealed class SolverDependencyGeneratorTests
     public void ShiftedDeclarations_LeaveGeneratedFileCached()
     {
         CSharpParseOptions parseOptions = GeneratorHarness.ParseOptions();
-        CSharpCompilation compilation = GeneratorHarness.CreateCompilation(true, parseOptions, FireSource);
+        CSharpCompilation compilation = GeneratorHarness.CreateCompilation(parseOptions, FireSource);
         GeneratorDriver driver = GeneratorHarness.CreateDriver(parseOptions, trackSteps: true,
             generator: new SolverDependencyGenerator());
         driver = driver.RunGenerators(compilation);
@@ -455,7 +455,7 @@ public sealed class SolverDependencyGeneratorTests
     private static MetadataReference CompileLibrary(string source, bool runGenerator)
     {
         CSharpParseOptions parseOptions = GeneratorHarness.ParseOptions();
-        Compilation compilation = GeneratorHarness.CreateCompilation(true, parseOptions, source);
+        Compilation compilation = GeneratorHarness.CreateCompilation(parseOptions, source);
         if (runGenerator)
         {
             GeneratorHarness.CreateDriver(parseOptions, generator: new SolverDependencyGenerator())

@@ -6,7 +6,7 @@ namespace Numos.CoreSim.Tests;
 public sealed class AtmosChunkSolverStorageTests
 {
     private readonly static ChunkFieldDescriptor<int> Field =
-        ChunkFieldRegistry.CreatePrivate<int>($"{typeof(AtmosChunkSolverStorageTests).FullName}/scratch", null);
+        ChunkFieldRegistry.Register<int>($"{typeof(AtmosChunkSolverStorageTests).FullName}/scratch", false, null);
 
     [Test]
     public void EnsureInitialized_PreservesSolverStorage()

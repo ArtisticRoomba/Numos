@@ -195,12 +195,10 @@ Some data intentionally remains outside the checkpoint:
   fields and reset it in `OnRestored`.
 - Detached `GasMixture` containers, such as canisters, remain host-owned.
 - Per-tick event queues and solver workspaces are transient and are cleared or rebuilt.
-- Values cached under a `SolverDataKey<T>` are transient too, whatever their `SolverDataLifetime`. Restore discards
-  them, including the built-in boundary event batches and the reaction solver's per-gas data, even when the
-  configuration is unchanged. Solvers reacquire them on each callback and the key's factory rebuilds them from
-  authoritative inputs.
-- `ChunkField<T>` storage registered without `rollback: true`, and every `ChunkField<T>.CreatePrivate` field, is
-  transient; restore discards it.
+- Values cached under a `SolverDataKey<T>` are transient too. Restore and configuration changes discard them, including
+  the built-in boundary event batches and the reaction solver's per-gas data, even when the configuration is unchanged.
+  Solvers reacquire them on each callback and the key's factory rebuilds them from authoritative inputs.
+- `ChunkField<T>` storage registered without `rollback: true` is transient; restore discards it.
 - Profiling values, recorder bookkeeping, object identities, chunk generations, and presentation revisions are not
   authoritative simulation state.
 

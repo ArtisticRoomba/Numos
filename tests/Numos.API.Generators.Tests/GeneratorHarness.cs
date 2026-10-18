@@ -20,17 +20,16 @@ internal static class GeneratorHarness
         return new CSharpParseOptions(version);
     }
 
-    public static CSharpCompilation CreateCompilation(bool withDangerous, CSharpParseOptions parseOptions,
-        params string[] sources)
+    public static CSharpCompilation CreateCompilation(CSharpParseOptions parseOptions, params string[] sources)
     {
-        return CreateCompilation(withDangerous, parseOptions, [], sources);
+        return CreateCompilation(parseOptions, [], sources);
     }
 
-    public static CSharpCompilation CreateCompilation(bool withDangerous, CSharpParseOptions parseOptions,
+    public static CSharpCompilation CreateCompilation(CSharpParseOptions parseOptions,
         IEnumerable<MetadataReference> extraReferences, params string[] sources)
     {
         IEnumerable<MetadataReference> references = FrameworkReferences
-            .Concat(NumosReferences(withDangerous))
+            .Concat(NumosReferences())
             .Select(static path => (MetadataReference)MetadataReference.CreateFromFile(path))
             .Concat(extraReferences);
 
@@ -44,10 +43,10 @@ internal static class GeneratorHarness
     }
 
     public static GeneratorRunResult Run(out Compilation output, out ImmutableArray<Diagnostic> diagnostics,
-        bool withDangerous = true, LanguageVersion version = LanguageVersion.CSharp14, params string[] sources)
+        LanguageVersion version = LanguageVersion.CSharp14, params string[] sources)
     {
         CSharpParseOptions parseOptions = ParseOptions(version);
-        CSharpCompilation compilation = CreateCompilation(withDangerous, parseOptions, sources);
+        CSharpCompilation compilation = CreateCompilation(parseOptions, sources);
         GeneratorDriver driver = CreateDriver(parseOptions);
         driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out output, out diagnostics);
         return driver.GetRunResult().Results.Single();
@@ -64,7 +63,7 @@ internal static class GeneratorHarness
         params string[] sources)
     {
         CSharpParseOptions parseOptions = ParseOptions();
-        CSharpCompilation compilation = CreateCompilation(true, parseOptions, extraReferences, sources);
+        CSharpCompilation compilation = CreateCompilation(parseOptions, extraReferences, sources);
         GeneratorDriver driver = CreateDriver(parseOptions, generator: new SolverDependency.SolverDependencyGenerator());
         driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out output, out diagnostics);
         return driver.GetRunResult().Results.Single();
@@ -97,18 +96,12 @@ internal static class GeneratorHarness
         return diagnostics.Select(static diagnostic => diagnostic.Id).ToArray();
     }
 
-    private static IEnumerable<string> NumosReferences(bool withDangerous)
+    private static IEnumerable<string> NumosReferences()
     {
-        // The test project references Numos.API and Numos.API.Dangerous, so their closures sit next to this
-        // assembly. Dangerous is opt-in to cover the generator's "no Dangerous referenced" path.
+        // The test project references Numos.API and Numos.API.Dangerous, so their closures sit next to this assembly.
         return Directory.EnumerateFiles(AppContext.BaseDirectory, "Numos.*.dll")
-            .Where(path =>
-            {
-                string name = Path.GetFileNameWithoutExtension(path);
-                if (name.StartsWith("Numos.API.Generators", StringComparison.Ordinal))
-                    return false;
-                return withDangerous || name != "Numos.API.Dangerous";
-            })
+            .Where(static path => !Path.GetFileNameWithoutExtension(path)
+                .StartsWith("Numos.API.Generators", StringComparison.Ordinal))
             .OrderBy(static path => path, StringComparer.Ordinal);
     }
 }

@@ -38,7 +38,7 @@ namespace Numos.API;
 ///         var chunks = context.Chunks(simulation);
 ///         Parallel.For(0, chunks.Count, index =>
 ///         {
-///             Span&lt;float&gt; exposure = chunks[index].GetSpan(FireData.Exposure);
+///             Span&lt;float&gt; exposure = chunks[index].Get(FireData.Exposure).AsSpan();
 ///             for (int voxel = 0; voxel &lt; exposure.Length; voxel++)
 ///                 exposure[voxel] *= 0.9f;
 ///         });
@@ -146,12 +146,13 @@ public readonly struct AtmosSolverChunk
     /// <param name="field">The field to read.</param>
     /// <returns>
     ///     A live view of the chunk's array. Per-voxel fields use the chunk's <see cref="Dimensions" />, so they can be
-    ///     indexed by local coordinate; fixed-length fields are one-dimensional.
+    ///     indexed by local coordinate; fixed-length fields are one-dimensional, <see cref="ChunkField{T}.Length" />
+    ///     elements long.
     /// </returns>
     /// <remarks>
     ///     Every call for the same chunk and field returns a view over the same array until the chunk is unregistered
     ///     or a checkpoint is restored. Rollback fields are restored to their saved values; transient fields start
-    ///     empty again.
+    ///     empty again. Use <see cref="FlatArray{T}.AsSpan" /> for the cheapest sweep over the whole field.
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="field" /> is <see langword="null" />.</exception>
     /// <exception cref="InvalidOperationException">The view is default or its tick has ended.</exception>
@@ -164,26 +165,6 @@ public readonly struct AtmosSolverChunk
     {
         ArgumentNullException.ThrowIfNull(field);
         return field.View(Chunk);
-    }
-
-    /// <summary>
-    ///     Gets this chunk's storage for a field as a span, creating it on first use.
-    /// </summary>
-    /// <typeparam name="T">The field's element type.</typeparam>
-    /// <param name="field">The field to read.</param>
-    /// <returns>
-    ///     A live span over the chunk's array. Its length is <see cref="VoxelCount" /> for a per-voxel field or
-    ///     <see cref="ChunkField{T}.Length" /> for a fixed-length one.
-    /// </returns>
-    /// <remarks>
-    ///     This is the cheapest way to sweep a field. The span shares storage with <see cref="Get{T}" />.
-    /// </remarks>
-    /// <exception cref="ArgumentNullException"><paramref name="field" /> is <see langword="null" />.</exception>
-    /// <exception cref="InvalidOperationException">The view is default or its tick has ended.</exception>
-    public Span<T> GetSpan<T>(ChunkField<T> field)
-    {
-        ArgumentNullException.ThrowIfNull(field);
-        return Chunk.GetOrCreateField(field.Descriptor);
     }
 
     /// <summary>
@@ -217,7 +198,7 @@ public readonly struct AtmosSolverChunk
 /// <example>
 ///     <code>
 ///     foreach (AtmosSolverChunk chunk in context.Chunks(simulation))
-///         chunk.GetSpan(FireData.Exposure).Clear();
+///         chunk.Get(FireData.Exposure).Clear();
 ///     </code>
 /// </example>
 [PublicAPI]

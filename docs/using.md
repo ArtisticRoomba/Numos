@@ -274,7 +274,7 @@ along with the gas. Without it the field is scratch space that starts zeroed aft
 is stored in checkpoints, so it has to be given explicitly; treat it like a save-format name and prefix it with your
 mod.
 
-The accessors are C# 14 extension properties. On C# 13 you get `chunk.GetExposure()` methods instead. The
+The accessors are C# 14 extension properties, so a project pinned to an older `LangVersion` gets an error instead. The
 [technical documentation](atmospherics_technical_documentation.md#123-per-chunk-solver-state-with-chunkfieldt) covers
 keys, allocation, the generator's diagnostics, and the hand-written `ChunkField<T>.Register` equivalent.
 

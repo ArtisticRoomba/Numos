@@ -8,33 +8,28 @@ public sealed class AtmosSolverChunkDangerousTests
     private static readonly ChunkField<float> Exposure =
         ChunkField<float>.Register("tests/dangerous-solver-chunk/exposure");
 
-    private static readonly ChunkField<long> Totals =
-        ChunkField<long>.Register("tests/dangerous-solver-chunk/totals", length: 2);
-
     [Test]
-    public void Dangerous_SharesFieldStorageWithTheSolverView()
+    public void Dangerous_ViewsTheSameChunkAsTheSolverView()
     {
         using var world = new AtmosWorld(new TestAtmosConfig());
         var simulation = world.CreateSimulation(2, 2, 2);
         var handle = simulation.CreateAndRegisterChunk(default);
+        simulation.AddGasToVoxel(handle, 3, "TestGas0", 1f, 450f);
         int temperatureLength = -1;
-        Int3 dimensions = default;
-        int fixedLength = -1;
+        Int3 position = new(int.MinValue, int.MinValue, int.MinValue);
 
         world.Solvers.Register("tests/dangerous-solver-chunk/shared", context =>
         {
             var chunks = context.Chunks(simulation);
             Parallel.For(0, chunks.Count, index =>
             {
-                var live = chunks[index].Dangerous();
-                live.GetSpan(Exposure)[3] = 4f;
-                live.Get(Totals)[1] = 9;
+                // Custom fields stay on the safe view; the dangerous one adds the built-in storage.
+                var chunk = chunks[index];
+                var live = chunk.Dangerous();
+                chunk.Get(Exposure)[3] = live.Temperature[3];
                 temperatureLength = live.Temperature.Length;
-                dimensions = live.Get(Exposure).Dimensions;
-                fixedLength = live.GetSpan(Totals).Length;
+                position = live.Position;
             });
-
-            Assert.That(chunks[0].GetSpan(Exposure)[3], Is.EqualTo(4f));
         });
 
         world.Tick();
@@ -42,11 +37,10 @@ public sealed class AtmosSolverChunkDangerousTests
         Assert.Multiple(() =>
         {
             Assert.That(temperatureLength, Is.EqualTo(8));
-            Assert.That(dimensions, Is.EqualTo(new Int3(2, 2, 2)));
-            Assert.That(fixedLength, Is.EqualTo(2));
-            Assert.That(simulation.GetChunkField(handle, Exposure)[3], Is.EqualTo(4f));
-            Assert.That(simulation.GetChunkField(handle, Totals)[1], Is.EqualTo(9));
-            Assert.That(simulation.Dangerous().GetChunk(handle).GetSpan(Totals)[1], Is.EqualTo(9));
+            Assert.That(position, Is.EqualTo(handle.Position));
+            Assert.That(
+                simulation.GetChunkField(handle, Exposure)[3],
+                Is.EqualTo(simulation.GetChunkSnapshot(handle).Temperature[3]).And.GreaterThan(0f));
         });
     }
 

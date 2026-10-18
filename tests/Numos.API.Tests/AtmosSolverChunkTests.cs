@@ -21,18 +21,13 @@ public sealed class AtmosSolverChunkTests
     public void Register_SameDefinition_ReturnsSameInstance()
     {
         var again = ChunkField<float>.Register("tests/solver-chunk/exposure", rollback: true);
-        var first = ChunkField<int>.CreatePrivate("tests/solver-chunk/private");
-        var second = ChunkField<int>.CreatePrivate("tests/solver-chunk/private");
 
         Assert.Multiple(() =>
         {
             Assert.That(again, Is.SameAs(Exposure));
-            Assert.That(Exposure.IsPerVoxel, Is.True);
+            Assert.That(Exposure.Length, Is.Null);
             Assert.That(Counters.Length, Is.EqualTo(3));
-            Assert.That(Counters.IsPerVoxel, Is.False);
-            Assert.That(first, Is.Not.SameAs(second));
-            Assert.That(first.IsPrivate, Is.True);
-            Assert.That(first.Rollback, Is.False);
+            Assert.That(Scratch.Rollback, Is.False);
             Assert.That(
                 () => ChunkField<float>.Register("tests/solver-chunk/exposure"),
                 Throws.InvalidOperationException);
@@ -92,8 +87,8 @@ public sealed class AtmosSolverChunkTests
             missing = chunks.TryGet(new AtmosChunkHandle(Int3.PosX), out _);
             perVoxelDimensions = chunk.Get(Exposure).Dimensions;
             fixedDimensions = chunk.Get(Counters).Dimensions;
-            perVoxelSpan = chunk.GetSpan(Exposure).Length;
-            fixedSpan = chunk.GetSpan(Counters).Length;
+            perVoxelSpan = chunk.Get(Exposure).Length;
+            fixedSpan = chunk.Get(Counters).Length;
             cell = chunk.GetCellRef(7);
             Assert.That(() => chunk.GetCellRef(24), Throws.TypeOf<ArgumentOutOfRangeException>());
             Assert.That(chunk.Simulation, Is.SameAs(simulation));
@@ -123,8 +118,8 @@ public sealed class AtmosSolverChunkTests
         for (int x = 0; x < 4; x++)
             simulation.CreateAndRegisterChunk(new Int3(x, 0, 0));
 
-        // A private field guarantees that the first touch happens on the workers.
-        var hits = ChunkField<int>.CreatePrivate("tests/solver-chunk/parallel-hits");
+        // The chunks are fresh, so the first touch of each array happens on the workers.
+        var hits = ChunkField<int>.Register("tests/solver-chunk/parallel-hits");
         const int workers = 256;
 
         world.Solvers.Register("tests/solver-chunk/parallel", context =>
@@ -136,7 +131,7 @@ public sealed class AtmosSolverChunkTests
                 new ParallelOptions { MaxDegreeOfParallelism = Environment.ProcessorCount },
                 index =>
                 {
-                    Span<int> span = chunks[index % chunks.Count].GetSpan(hits);
+                    Span<int> span = chunks[index % chunks.Count].Get(hits).AsSpan();
                     Interlocked.Increment(ref span[index % span.Length]);
                 });
         });
@@ -205,7 +200,7 @@ public sealed class AtmosSolverChunkTests
             retainedContext = context;
             retainedList = context.Chunks(simulation);
             retained = retainedList[0];
-            Assert.That(retained.GetSpan(Exposure).Length, Is.EqualTo(1));
+            Assert.That(retained.Get(Exposure).Length, Is.EqualTo(1));
         });
 
         world.Tick();
@@ -213,7 +208,7 @@ public sealed class AtmosSolverChunkTests
         Assert.Multiple(() =>
         {
             Assert.That(() => retained.Get(Exposure), Throws.InvalidOperationException);
-            Assert.That(() => retained.GetSpan(Exposure).Length, Throws.InvalidOperationException);
+            Assert.That(() => retained.Get(Exposure).Length, Throws.InvalidOperationException);
             Assert.That(() => retained.VoxelCount, Throws.InvalidOperationException);
             Assert.That(() => retained.Simulation, Throws.InvalidOperationException);
             Assert.That(() => retainedList.Count, Throws.InvalidOperationException);
@@ -236,7 +231,7 @@ public sealed class AtmosSolverChunkTests
         Assert.Multiple(() =>
         {
             Assert.That(() => chunk.Handle, Throws.InvalidOperationException);
-            Assert.That(() => chunk.GetSpan(Exposure).Length, Throws.InvalidOperationException);
+            Assert.That(() => chunk.Get(Exposure).Length, Throws.InvalidOperationException);
             Assert.That(() => chunks.Count, Throws.InvalidOperationException);
             Assert.That(() => chunks.TryGet(default, out _), Throws.InvalidOperationException);
         });
@@ -294,7 +289,7 @@ public sealed class AtmosSolverChunkTests
                 foreach (var neighbor in context.Topology.GetNeighbors(source))
                 {
                     Assert.That(context.TryGetChunk(neighbor.Cell, out var chunk), Is.True);
-                    chunk.GetSpan(Exposure)[neighbor.Cell.LocalVoxelIndex] = 5f;
+                    chunk.Get(Exposure)[neighbor.Cell.LocalVoxelIndex] = 5f;
                     resolved.Add((chunk.Simulation, chunk.Handle, chunk.GetCellRef(neighbor.Cell.LocalVoxelIndex)));
                 }
 
@@ -360,9 +355,9 @@ public sealed class AtmosSolverChunkTests
         {
             foreach (var chunk in context.Chunks(simulation))
             {
-                chunk.GetSpan(Counters)[1]++;
-                chunk.GetSpan(Exposure)[2] += 0.5f;
-                chunk.GetSpan(Scratch)[0]++;
+                chunk.Get(Counters)[1]++;
+                chunk.Get(Exposure)[2] += 0.5f;
+                chunk.Get(Scratch)[0]++;
             }
         });
 

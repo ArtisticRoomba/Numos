@@ -35,34 +35,18 @@ public sealed class ChunkDataGeneratorTests
                                                public static float Read(Numos.API.AtmosSolverChunk chunk)
                                                {
                                                    Numos.Collections.FlatArray<float> exposure = chunk.Exposure;
-                                                   System.Span<int> burnCount = chunk.BurnCount;
+                                                   Numos.Collections.FlatArray<int> burnCount = chunk.BurnCount;
                                                    Numos.Collections.FlatArray<float> scratch = chunk.FireScratch;
                                                    return exposure[0] + burnCount[0] + scratch[0];
                                                }
                                            }
                                            """;
 
-    private const string DangerousUsageSource = """
-                                                using Numos.API.Dangerous;
-
-                                                namespace MyMod.Fire;
-
-                                                internal static class DangerousUsage
-                                                {
-                                                    public static float Read(Numos.API.AtmosSolverChunk chunk)
-                                                    {
-                                                        AtmosDangerousChunk live = chunk.Dangerous();
-                                                        System.Span<int> burnCount = live.BurnCount;
-                                                        return live.Exposure[0] + burnCount[0];
-                                                    }
-                                                }
-                                                """;
-
     [Test]
     public void FireData_GeneratesCompilingPropertyBodiesAndAccessors()
     {
         GeneratorRunResult result = GeneratorHarness.Run(out Compilation output, out var diagnostics,
-            sources: [FireSource, FireUsageSource, DangerousUsageSource]);
+            sources: [FireSource, FireUsageSource]);
 
         Assert.That(diagnostics, Is.Empty);
         Assert.That(GeneratorHarness.Errors(output), Is.Empty);
@@ -82,11 +66,11 @@ public sealed class ChunkDataGeneratorTests
                 "global::Numos.API.ChunkField<float>.Register(\"MyMod.Fire.FireChunkData.Scratch\", rollback: false, length: null);"));
             Assert.That(source, Does.Contain("public static partial class FireChunkDataChunkAccessors"));
             Assert.That(source, Does.Contain("extension(global::Numos.API.AtmosSolverChunk chunk)"));
-            Assert.That(source, Does.Contain("extension(global::Numos.API.Dangerous.AtmosDangerousChunk chunk)"));
+            Assert.That(source, Does.Not.Contain("AtmosDangerousChunk"));
             Assert.That(source, Does.Contain(
                 "public global::Numos.Collections.FlatArray<float> Exposure => chunk.Get(global::MyMod.Fire.FireChunkData.Exposure);"));
             Assert.That(source, Does.Contain(
-                "public global::System.Span<int> BurnCount => chunk.GetSpan(global::MyMod.Fire.FireChunkData.BurnCount);"));
+                "public global::Numos.Collections.FlatArray<int> BurnCount => chunk.Get(global::MyMod.Fire.FireChunkData.BurnCount);"));
             Assert.That(source, Does.Contain(
                 "internal global::Numos.Collections.FlatArray<float> FireScratch => chunk.Get(global::MyMod.Fire.FireChunkData.Scratch);"));
             Assert.That(source, Does.Contain("/// <inheritdoc cref=\"global::MyMod.Fire.FireChunkData.Exposure\" />"));
@@ -115,25 +99,12 @@ public sealed class ChunkDataGeneratorTests
 
         CSharpParseOptions parseOptions = GeneratorHarness.ParseOptions()
             .WithDocumentationMode(DocumentationMode.Diagnose);
-        CSharpCompilation compilation = GeneratorHarness.CreateCompilation(true, parseOptions, source);
+        CSharpCompilation compilation = GeneratorHarness.CreateCompilation(parseOptions, source);
         GeneratorHarness.CreateDriver(parseOptions)
             .RunGeneratorsAndUpdateCompilation(compilation, out Compilation output, out var diagnostics);
 
         Assert.That(diagnostics, Is.Empty);
         Assert.That(output.GetDiagnostics().Where(static d => d.Severity >= DiagnosticSeverity.Warning), Is.Empty);
-    }
-
-    [Test]
-    public void WithoutDangerous_OmitsDangerousExtensionBlock()
-    {
-        GeneratorRunResult result = GeneratorHarness.Run(out Compilation output, out var diagnostics,
-            withDangerous: false, sources: [FireSource, FireUsageSource]);
-
-        Assert.That(diagnostics, Is.Empty);
-        Assert.That(GeneratorHarness.Errors(output), Is.Empty);
-        string source = GeneratorHarness.GeneratedSource(result, "MyMod.Fire.FireChunkData.ChunkData.g.cs");
-        Assert.That(source, Does.Not.Contain("AtmosDangerousChunk"));
-        Assert.That(source, Does.Contain("extension(global::Numos.API.AtmosSolverChunk chunk)"));
     }
 
     [Test]
@@ -222,46 +193,10 @@ public sealed class ChunkDataGeneratorTests
     }
 
     [Test]
-    public void CSharp13_FallsBackToExtensionMethods()
-    {
-        const string usage = """
-                             using Numos.API.Dangerous;
-
-                             namespace MyMod.Fire;
-
-                             internal static class Usage
-                             {
-                                 public static float Read(Numos.API.AtmosSolverChunk chunk)
-                                 {
-                                     System.Span<int> burnCount = chunk.GetBurnCount();
-                                     return chunk.GetExposure()[0] + burnCount[0] + chunk.Dangerous().GetFireScratch()[0];
-                                 }
-                             }
-                             """;
-
-        GeneratorRunResult result = GeneratorHarness.Run(out Compilation output, out var diagnostics,
-            version: LanguageVersion.CSharp13, sources: [FireSource, usage]);
-
-        Assert.That(GeneratorHarness.Ids(diagnostics), Is.EqualTo(new[] { "NUMOSCHUNK013" }));
-        Assert.That(diagnostics[0].Severity, Is.EqualTo(DiagnosticSeverity.Info));
-        Assert.That(GeneratorHarness.Errors(output), Is.Empty);
-
-        string source = GeneratorHarness.GeneratedSource(result, "MyMod.Fire.FireChunkData.ChunkData.g.cs");
-        Assert.Multiple(() =>
-        {
-            Assert.That(source, Does.Not.Contain("extension("));
-            Assert.That(source, Does.Contain(
-                "public static global::Numos.Collections.FlatArray<float> GetExposure(this global::Numos.API.AtmosSolverChunk chunk)"));
-            Assert.That(source, Does.Contain(
-                "public static global::System.Span<int> GetBurnCount(this global::Numos.API.Dangerous.AtmosDangerousChunk chunk)"));
-        });
-    }
-
-    [Test]
     public void UnrelatedEdit_LeavesModelStepsCached()
     {
         CSharpParseOptions parseOptions = GeneratorHarness.ParseOptions();
-        CSharpCompilation compilation = GeneratorHarness.CreateCompilation(true, parseOptions, FireSource);
+        CSharpCompilation compilation = GeneratorHarness.CreateCompilation(parseOptions, FireSource);
         GeneratorDriver driver = GeneratorHarness.CreateDriver(parseOptions, trackSteps: true);
         driver = driver.RunGenerators(compilation);
 
@@ -301,10 +236,10 @@ public sealed class ChunkDataGeneratorTests
     [Test]
     public void ShiftedDeclarations_LeaveGeneratedFileCached()
     {
-        // C# 13 so the type also gets a located diagnostic, which has to follow the declaration while the file
-        // itself stays cached.
+        // C# 13 so the compilation also gets a located diagnostic, which has to follow the declaration while the
+        // file itself stays cached.
         CSharpParseOptions parseOptions = GeneratorHarness.ParseOptions(LanguageVersion.CSharp13);
-        CSharpCompilation compilation = GeneratorHarness.CreateCompilation(true, parseOptions, FireSource);
+        CSharpCompilation compilation = GeneratorHarness.CreateCompilation(parseOptions, FireSource);
         GeneratorDriver driver = GeneratorHarness.CreateDriver(parseOptions, trackSteps: true);
         driver = driver.RunGenerators(compilation);
 
@@ -324,8 +259,8 @@ public sealed class ChunkDataGeneratorTests
             Is.Not.Empty.And.All.Matches<IncrementalStepRunReason>(static reason =>
                 reason is IncrementalStepRunReason.Cached or IncrementalStepRunReason.Unchanged));
 
-        Diagnostic fallback = result.Diagnostics.Single(static diagnostic => diagnostic.Id == "NUMOSCHUNK013");
-        Assert.That(fallback.Location.GetLineSpan().StartLinePosition.Line, Is.EqualTo(9));
+        Diagnostic languageVersion = result.Diagnostics.Single(static diagnostic => diagnostic.Id == "NUMOSCHUNK013");
+        Assert.That(languageVersion.Location.GetLineSpan().StartLinePosition.Line, Is.EqualTo(9));
     }
 
     [Test]
@@ -372,7 +307,7 @@ public sealed class ChunkDataGeneratorTests
             var scratch = (ChunkField<long>)type.GetProperty("Scratch")!.GetValue(null)!;
             Assert.That(scratch.Key, Is.EqualTo("Smoke.SmokeData.Scratch"));
             Assert.That(scratch.Rollback, Is.False);
-            Assert.That(scratch.IsPerVoxel, Is.True);
+            Assert.That(scratch.Length, Is.Null);
         }
         finally
         {

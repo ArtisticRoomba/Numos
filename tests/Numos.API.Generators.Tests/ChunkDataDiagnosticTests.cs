@@ -22,7 +22,7 @@ public sealed class ChunkDataDiagnosticTests
                                   public static partial Numos.API.ChunkField<float> Value { get; }
 
                                   public static partial Numos.API.ChunkField<float> Value =>
-                                      Numos.API.ChunkField<float>.CreatePrivate("value");
+                                      Numos.API.ChunkField<float>.Register("value");
                               }
                               """;
 
@@ -190,20 +190,34 @@ public sealed class ChunkDataDiagnosticTests
     }
 
     [Test]
-    public void OldLanguageVersion_Reports013()
+    public void OldLanguageVersion_Reports013OnceAndGeneratesNoAccessors()
     {
-        GeneratorHarness.Run(out Compilation output, out var diagnostics,
-            version: Microsoft.CodeAnalysis.CSharp.LanguageVersion.CSharp13,
-            sources: Wrap("public static partial Numos.API.ChunkField<float> Value { get; }"));
+        const string source = """
+                              public static partial class Data
+                              {
+                                  [Numos.API.ChunkData]
+                                  public static partial Numos.API.ChunkField<float> First { get; }
+
+                                  [Numos.API.ChunkData]
+                                  public static partial Numos.API.ChunkField<int> Second { get; }
+                              }
+                              """;
+
+        GeneratorRunResult result = GeneratorHarness.Run(out Compilation output, out var diagnostics,
+            version: Microsoft.CodeAnalysis.CSharp.LanguageVersion.CSharp13, sources: [source]);
 
         Assert.That(GeneratorHarness.Ids(diagnostics), Is.EqualTo(new[] { "NUMOSCHUNK013" }));
-        Assert.That(diagnostics[0].Severity, Is.EqualTo(DiagnosticSeverity.Info));
+        Assert.That(diagnostics[0].Severity, Is.EqualTo(DiagnosticSeverity.Error));
+        Assert.That(diagnostics[0].GetMessage(), Does.Contain("C# 13"));
+
+        // The property bodies are still generated, so the error above is the only one the project sees.
         Assert.That(GeneratorHarness.Errors(output), Is.Empty);
+        Assert.That(GeneratorHarness.GeneratedSource(result, "Data.ChunkData.g.cs"), Does.Not.Contain("extension("));
     }
 
     [TestCase("Position")]
     [TestCase("Dangerous")]
-    [TestCase("Temperature")]
+    [TestCase("Get")]
     public void AccessorNamedLikeViewMember_Reports014(string name)
     {
         GeneratorRunResult result = GeneratorHarness.Run(out Compilation output, out var diagnostics,
@@ -213,17 +227,13 @@ public sealed class ChunkDataDiagnosticTests
         Assert.That(GeneratorHarness.Ids(diagnostics), Is.EqualTo(new[] { "NUMOSCHUNK014" }));
         Assert.That(diagnostics[0].Severity, Is.EqualTo(DiagnosticSeverity.Warning));
         Assert.That(GeneratorHarness.Errors(output), Is.Empty);
-
-        // Temperature only exists on the Dangerous view, so the plain view still gets its accessor.
-        string generated = GeneratorHarness.GeneratedSource(result, "Data.ChunkData.g.cs");
-        Assert.That(generated.Contains("extension(global::Numos.API.AtmosSolverChunk chunk)"),
-            Is.EqualTo(name == "Temperature"));
+        Assert.That(GeneratorHarness.GeneratedSource(result, "Data.ChunkData.g.cs"), Does.Not.Contain("extension("));
     }
 
     [Test]
-    public void TemperatureWithoutDangerous_DoesNotReport014()
+    public void DangerousViewMemberName_DoesNotReport014()
     {
-        GeneratorHarness.Run(out _, out var diagnostics, withDangerous: false,
+        GeneratorHarness.Run(out _, out var diagnostics,
             sources: Wrap("public static partial Numos.API.ChunkField<float> Temperature { get; }"));
 
         Assert.That(diagnostics, Is.Empty);

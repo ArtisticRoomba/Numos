@@ -50,7 +50,7 @@ public delegate void AtmosWorldSolver(AtmosWorldSolverContext context);
 ///                 var chunks = context.Chunks(simulation);
 ///                 Parallel.For(0, chunks.Count, index =>
 ///                 {
-///                     Span&lt;float&gt; exposure = chunks[index].GetSpan(FireData.Exposure);
+///                     Span&lt;float&gt; exposure = chunks[index].Get(FireData.Exposure).AsSpan();
 ///                     for (int voxel = 0; voxel &lt; exposure.Length; voxel++)
 ///                         exposure[voxel] *= 0.9f;
 ///                 });
@@ -250,7 +250,7 @@ public sealed class AtmosWorldSolverContext
     ///     foreach (var simulation in context.Simulations)
     ///     {
     ///         var chunks = context.Chunks(simulation);
-    ///         Parallel.For(0, chunks.Count, index => chunks[index].GetSpan(FireData.Exposure).Clear());
+    ///         Parallel.For(0, chunks.Count, index => chunks[index].Get(FireData.Exposure).Clear());
     ///     }
     ///     </code>
     /// </example>
@@ -283,7 +283,7 @@ public sealed class AtmosWorldSolverContext
     ///     foreach (var neighbor in context.Topology.GetNeighbors(cell))
     ///     {
     ///         if (context.TryGetChunk(neighbor.Cell, out var other))
-    ///             other.GetSpan(FireData.Exposure)[neighbor.Cell.LocalVoxelIndex] += 0.1f;
+    ///             other.Get(FireData.Exposure)[neighbor.Cell.LocalVoxelIndex] += 0.1f;
     ///     }
     ///     </code>
     /// </example>

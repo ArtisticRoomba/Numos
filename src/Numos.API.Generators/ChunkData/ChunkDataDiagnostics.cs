@@ -109,12 +109,13 @@ internal static class ChunkDataDiagnostics
         DiagnosticSeverity.Warning,
         true);
 
-    public static readonly DiagnosticDescriptor ExtensionMethodFallback = new(
+    public static readonly DiagnosticDescriptor RequiresCSharp14 = new(
         "NUMOSCHUNK013",
-        "Chunk data accessors fall back to extension methods",
-        "C# 14 is required for chunk accessor properties; '{0}' gets Get{{Name}}() extension methods instead",
+        "Chunk data requires C# 14",
+        "[ChunkData] generates C# 14 extension properties, but this project uses C# {0}; set LangVersion to 14 or " +
+        "later",
         Category,
-        DiagnosticSeverity.Info,
+        DiagnosticSeverity.Error,
         true);
 
     public static readonly DiagnosticDescriptor AccessorNameCollision = new(

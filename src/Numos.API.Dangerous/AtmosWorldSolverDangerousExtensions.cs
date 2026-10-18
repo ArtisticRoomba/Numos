@@ -48,9 +48,8 @@ public static class AtmosWorldSolverDangerousExtensions
     ///     var chunks = context.Chunks(simulation);
     ///     Parallel.For(0, chunks.Count, index =>
     ///     {
-    ///         var live = chunks[index].Dangerous();
-    ///         Span&lt;float&gt; exposure = live.GetSpan(FireData.Exposure);
-    ///         Span&lt;float&gt; temperature = live.Temperature;
+    ///         Span&lt;float&gt; exposure = chunks[index].Get(FireData.Exposure).AsSpan();
+    ///         Span&lt;float&gt; temperature = chunks[index].Dangerous().Temperature;
     ///         for (int voxel = 0; voxel &lt; exposure.Length; voxel++)
     ///             exposure[voxel] += temperature[voxel] &gt; 500f ? 1f : 0f;
     ///     });

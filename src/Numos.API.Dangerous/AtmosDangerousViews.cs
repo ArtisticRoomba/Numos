@@ -1,4 +1,3 @@
-using Numos.Collections;
 using Numos.CoreSim;
 using Numos.Maths;
 
@@ -20,6 +19,10 @@ namespace Numos.API.Dangerous;
 ///     <para>
 ///         The view points at the chunk's storage at the time it was obtained. Do not use it after the chunk is
 ///         unregistered or a checkpoint is restored; reacquire it instead.
+///     </para>
+///     <para>
+///         Custom <see cref="ChunkField{T}" /> storage isn't exposed here. Read it through the
+///         <see cref="AtmosSolverChunk" /> the view came from, which is just as live and lock-free.
 ///     </para>
 /// </remarks>
 public readonly ref struct AtmosDangerousChunk
@@ -187,42 +190,6 @@ public readonly ref struct AtmosDangerousChunk
     public void MarkChanged()
     {
         _chunk.MarkChanged();
-    }
-
-    /// <summary>
-    ///     Gets this chunk's storage for a custom field, creating it on first use.
-    /// </summary>
-    /// <typeparam name="T">The field's element type.</typeparam>
-    /// <param name="field">The field to read.</param>
-    /// <returns>
-    ///     A live view of the same array <see cref="AtmosSolverChunk.Get{T}" /> returns. Per-voxel fields use
-    ///     <see cref="Dimensions" />; fixed-length fields are one-dimensional.
-    /// </returns>
-    /// <remarks>
-    ///     Unlike the facade, this takes no simulation lock and does not check for a running tick. First use from
-    ///     parallel workers is still safe.
-    /// </remarks>
-    /// <exception cref="ArgumentNullException"><paramref name="field" /> is <see langword="null" />.</exception>
-    public FlatArray<T> Get<T>(ChunkField<T> field)
-    {
-        ArgumentNullException.ThrowIfNull(field);
-        return field.View(_chunk);
-    }
-
-    /// <summary>
-    ///     Gets this chunk's storage for a custom field as a span, creating it on first use.
-    /// </summary>
-    /// <typeparam name="T">The field's element type.</typeparam>
-    /// <param name="field">The field to read.</param>
-    /// <returns>
-    ///     A live span over the field's array: <see cref="VoxelCount" /> elements for a per-voxel field, or
-    ///     <see cref="ChunkField{T}.Length" /> for a fixed-length one.
-    /// </returns>
-    /// <exception cref="ArgumentNullException"><paramref name="field" /> is <see langword="null" />.</exception>
-    public Span<T> GetSpan<T>(ChunkField<T> field)
-    {
-        ArgumentNullException.ThrowIfNull(field);
-        return _chunk.GetOrCreateField(field.Descriptor);
     }
 }
 

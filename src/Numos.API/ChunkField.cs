@@ -15,16 +15,15 @@ namespace Numos.API;
 /// <remarks>
 ///     <para>
 ///         A field is a typed key, not storage. Each chunk allocates its own array the first time the field is read
-///         through <see cref="AtmosSolverChunk.Get{T}" />, <see cref="AtmosSolverChunk.GetSpan{T}" />, or
-///         <see cref="AtmosSimulation.GetChunkField{T}" />, and the array starts filled with default values. Allocation
-///         is lazy so that a field nobody touches adds nothing to checkpoints or state hashes.
+///         through <see cref="AtmosSolverChunk.Get{T}" /> or <see cref="AtmosSimulation.GetChunkField{T}" />, and the
+///         array starts filled with default values. Allocation is lazy so that a field nobody touches adds nothing to
+///         checkpoints or state hashes.
 ///     </para>
 ///     <para>
 ///         Fields are process-wide. Every simulation, world, and assembly in the process shares one registry, so a
 ///         <see cref="Key" /> registered by one mod is the same field everywhere. Namespace keys (for example
-///         <c>my-mod/fire/exposure</c>) and store fields in <see langword="static readonly" /> members. Each
-///         registration or <see cref="CreatePrivate" /> call consumes a slot that is never reclaimed, so don't create
-///         fields per tick or per simulation.
+///         <c>my-mod/fire/exposure</c>) and store fields in <see langword="static readonly" /> members. Each new key
+///         consumes a slot that is never reclaimed, so don't register fields per tick or per simulation.
 ///     </para>
 ///     <para>
 ///         Rollback fields are captured in checkpoints and state hashes by <see cref="Key" />, so the key, element
@@ -46,7 +45,7 @@ namespace Numos.API;
 ///         {
 ///             foreach (var chunk in context.Chunks(simulation))
 ///             {
-///                 Span&lt;float&gt; exposure = chunk.GetSpan(FireData.Exposure);
+///                 Span&lt;float&gt; exposure = chunk.Get(FireData.Exposure).AsSpan();
 ///                 for (int voxel = 0; voxel &lt; exposure.Length; voxel++)
 ///                     exposure[voxel] += 1f;
 ///             }
@@ -63,7 +62,7 @@ public sealed class ChunkField<T>
     }
 
     /// <summary>
-    ///     Gets the registered key, or the debug name of a private field.
+    ///     Gets the registered key.
     /// </summary>
     public string Key => Descriptor.Key;
 
@@ -76,16 +75,6 @@ public sealed class ChunkField<T>
     ///     Gets the fixed array length, or <see langword="null" /> when the field holds one element per voxel.
     /// </summary>
     public int? Length => Descriptor.FixedLength;
-
-    /// <summary>
-    ///     Gets whether the field holds one element per voxel.
-    /// </summary>
-    public bool IsPerVoxel => Descriptor.FixedLength == null;
-
-    /// <summary>
-    ///     Gets whether the field was created by <see cref="CreatePrivate" /> and has no registered key.
-    /// </summary>
-    public bool IsPrivate => Descriptor.IsPrivate;
 
     internal ChunkFieldDescriptor<T> Descriptor { get; }
 
@@ -132,25 +121,6 @@ public sealed class ChunkField<T>
     }
 
     /// <summary>
-    ///     Creates a transient field that only the returned instance can reach.
-    /// </summary>
-    /// <param name="debugName">A name for diagnostics. It is not a key and may repeat.</param>
-    /// <param name="length">
-    ///     The array length for a fixed-size field, or <see langword="null" /> for one element per voxel.
-    /// </param>
-    /// <returns>A new field that no other caller can look up.</returns>
-    /// <remarks>
-    ///     Private fields are never captured for rollback, since there is no stable key to restore them by. Use them
-    ///     for solver scratch storage you don't want other code to share.
-    /// </remarks>
-    /// <exception cref="ArgumentException"><paramref name="debugName" /> is null, empty, or whitespace.</exception>
-    /// <exception cref="ArgumentOutOfRangeException"><paramref name="length" /> is negative.</exception>
-    public static ChunkField<T> CreatePrivate(string debugName, int? length = null)
-    {
-        return Wrap(ChunkFieldRegistry.CreatePrivate<T>(debugName, length));
-    }
-
-    /// <summary>
     ///     Returns the key and definition of this field.
     /// </summary>
     public override string ToString()
@@ -163,7 +133,7 @@ public sealed class ChunkField<T>
     /// </summary>
     internal FlatArray<T> CreateView(T[] values, Int3 chunkDimensions)
     {
-        return IsPerVoxel ? new FlatArray<T>(values, chunkDimensions) : new FlatArray<T>(values);
+        return Length is null ? new FlatArray<T>(values, chunkDimensions) : new FlatArray<T>(values);
     }
 
     /// <summary>

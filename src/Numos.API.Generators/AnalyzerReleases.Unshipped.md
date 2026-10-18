@@ -17,7 +17,7 @@ NUMOSCHUNK009 | Numos.API.ChunkData | Error | Chunk data length is negative
 NUMOSCHUNK010 | Numos.API.ChunkData | Error | Chunk data property must be visible to its namespace
 NUMOSCHUNK011 | Numos.API.ChunkData | Error | Chunk data key registered with conflicting definitions
 NUMOSCHUNK012 | Numos.API.ChunkData | Warning | Chunk data key declared more than once
-NUMOSCHUNK013 | Numos.API.ChunkData | Info | Chunk data accessors fall back to extension methods
+NUMOSCHUNK013 | Numos.API.ChunkData | Error | Chunk data requires C# 14
 NUMOSCHUNK014 | Numos.API.ChunkData | Warning | Chunk data accessor name collides with another member
 NUMOSCHUNK015 | Numos.API.ChunkData | Error | Chunk data accessor name is not a valid identifier
 NUMOSDEP001 | Numos.API.SolverDependency | Error | Type containing solver dependencies must be partial
