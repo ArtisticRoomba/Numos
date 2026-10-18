@@ -1,4 +1,5 @@
 using Numos.Collections;
+using Numos.CoreSim.Solvers;
 using Numos.Maths;
 
 namespace Numos.CoreSim;
@@ -37,6 +38,14 @@ internal sealed partial class AtmosKernel
         lock (StateGate)
         {
             return GetChunk(position).GetOrCreateSolverFlatArray<T>(key, captureForRollback);
+        }
+    }
+
+    internal T[] GetOrCreateChunkField<T>(Int3 position, ChunkFieldDescriptor<T> field)
+    {
+        lock (StateGate)
+        {
+            return GetChunk(position).GetOrCreateField(field);
         }
     }
 }

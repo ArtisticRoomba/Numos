@@ -154,6 +154,12 @@ internal class AtmosChunk
     private long _revision;
     private Dictionary<object, SolverArrayStorage>? _solverArrays;
 
+    // Indexed by ChunkFieldDescriptor.Slot. Readers load the array without a lock; writers hold _fieldGate and
+    // publish a grown copy instead of resizing in place.
+    private SolverArrayStorage?[]? _fields;
+    private readonly Lock _fieldGate = new();
+    private int _capturedFieldCount;
+
     /// <summary>
     ///     Creates a chunk with the specified dimensions.
     /// </summary>
@@ -178,7 +184,8 @@ internal class AtmosChunk
         IsVacuum.Fill(true);
     }
 
-    internal bool HasCapturedSolverArrays => _solverArrays?.Values.Any(static array => array.CaptureForRollback) == true;
+    internal bool HasCapturedSolverArrays => Volatile.Read(ref _capturedFieldCount) > 0 ||
+                                             _solverArrays?.Values.Any(static array => array.CaptureForRollback) == true;
 
     /// <summary>
     ///     Identity and revision used by conditional snapshot consumers.
@@ -238,6 +245,7 @@ internal class AtmosChunk
     {
         int voxelCount = GetValidatedVoxelCount(width, height, depth);
         _solverArrays = null;
+        ResetFields();
         GridPosition = position;
         IsAwake = false;
         Width = width;
@@ -280,6 +288,7 @@ internal class AtmosChunk
     public void Release()
     {
         _solverArrays = null;
+        ResetFields();
         if (ActiveGases != null)
         {
             for (int i = 0; i < ActiveGasCount; i++)
@@ -354,14 +363,127 @@ internal class AtmosChunk
         return new FlatArray<T>(GetOrCreateSolverArray<T>(key, captureForRollback), Dimensions);
     }
 
+    /// <summary>
+    ///     Gets a field's storage, allocating it on first use in this chunk.
+    /// </summary>
+    /// <typeparam name="T">The field's element type.</typeparam>
+    /// <param name="field">The field descriptor.</param>
+    /// <returns>The live array, initially filled with default values.</returns>
+    /// <remarks>
+    ///     Safe to call from parallel workers, including the first touch of a field. Storage stays lazy on purpose:
+    ///     allocating every registered field up front would add zero-filled captured arrays to every checkpoint and
+    ///     change state hashes. Arrays survive ticks and sleep, but are detached on initialization or release.
+    /// </remarks>
+    internal T[] GetOrCreateField<T>(ChunkFieldDescriptor<T> field)
+    {
+        var fields = Volatile.Read(ref _fields);
+        int slot = field.Slot;
+        if (fields != null && (uint)slot < (uint)fields.Length && fields[slot] is SolverArrayStorage<T> storage)
+            return storage.Values;
+
+        return CreateField(field);
+    }
+
+    /// <summary>
+    ///     Gets a field's storage if this chunk has already allocated it.
+    /// </summary>
+    internal bool TryGetField<T>(ChunkFieldDescriptor<T> field, [NotNullWhen(true)] out T[]? values)
+    {
+        var fields = Volatile.Read(ref _fields);
+        int slot = field.Slot;
+        if (fields != null && (uint)slot < (uint)fields.Length && fields[slot] is SolverArrayStorage<T> storage)
+        {
+            values = storage.Values;
+            return true;
+        }
+
+        values = null;
+        return false;
+    }
+
+    private T[] CreateField<T>(ChunkFieldDescriptor<T> field)
+    {
+        lock (_fieldGate)
+        {
+            var fields = _fields;
+            int slot = field.Slot;
+            if (fields != null && (uint)slot < (uint)fields.Length && fields[slot] is SolverArrayStorage<T> existing)
+                return existing.Values;
+
+            var storage = (SolverArrayStorage<T>)field.Allocate(VoxelCount);
+            PublishField(slot, storage);
+            if (field.CaptureForRollback)
+            {
+                Interlocked.Increment(ref _capturedFieldCount);
+                MarkChanged();
+            }
+
+            return storage.Values;
+        }
+    }
+
+    // Caller holds _fieldGate.
+    private void PublishField(int slot, SolverArrayStorage storage)
+    {
+        var fields = _fields;
+        if (fields == null || slot >= fields.Length)
+        {
+            var grown = new SolverArrayStorage?[Math.Max(slot + 1, ChunkFieldRegistry.SlotCount)];
+            fields?.CopyTo(grown, 0);
+            grown[slot] = storage;
+            Volatile.Write(ref _fields, grown);
+            return;
+        }
+
+        Volatile.Write(ref fields[slot], storage);
+    }
+
+    private void ResetFields()
+    {
+        lock (_fieldGate)
+        {
+            Volatile.Write(ref _fields, null);
+            Volatile.Write(ref _capturedFieldCount, 0);
+        }
+    }
+
     internal AtmosSolverArraySnapshot[] CaptureSolverArrays()
     {
-        if (_solverArrays == null)
+        var fields = Volatile.Read(ref _fields);
+        List<AtmosSolverArraySnapshot>? captured = null;
+        if (fields != null)
+        {
+            foreach (var storage in fields)
+            {
+                if (storage is { CaptureForRollback: true, Field: { } field })
+                    (captured ??= []).Add(new AtmosSolverArraySnapshot(field.Key, storage));
+            }
+        }
+
+        if (_solverArrays != null)
+        {
+            foreach (var (key, storage) in _solverArrays)
+            {
+                if (storage.CaptureForRollback)
+                    (captured ??= []).Add(new AtmosSolverArraySnapshot((string)key, storage));
+            }
+        }
+
+        if (captured == null)
             return [];
 
-        return _solverArrays.Where(static entry => entry.Value.CaptureForRollback)
-            .OrderBy(static entry => (string)entry.Key, StringComparer.Ordinal)
-            .Select(static entry => new AtmosSolverArraySnapshot((string)entry.Key, entry.Value)).ToArray();
+        // Slot order follows static initialization order, so it must never leak into checkpoints or hashes.
+        captured.Sort(static (left, right) => string.CompareOrdinal(left.Key, right.Key));
+        for (int index = 1; index < captured.Count; index++)
+        {
+            if (string.Equals(captured[index - 1].Key, captured[index].Key, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    $"Solver array key '{captured[index].Key}' is used by both a chunk field and an object-keyed array.");
+            }
+        }
+
+        return captured.ToArray();
     }
 
     internal void RestoreSolverArrays(IReadOnlyList<AtmosSolverArraySnapshot> snapshots)
@@ -369,9 +491,29 @@ internal class AtmosChunk
         if (snapshots.Count == 0)
             return;
 
-        _solverArrays = new Dictionary<object, SolverArrayStorage>(SolverArrayKeyComparer.Instance);
-        foreach (var snapshot in snapshots)
-            _solverArrays.Add(snapshot.Key, snapshot.Materialize());
+        lock (_fieldGate)
+        {
+            _solverArrays = null;
+            SolverArrayStorage?[]? fields = null;
+            int capturedFieldCount = 0;
+            foreach (var snapshot in snapshots)
+            {
+                var storage = snapshot.Materialize();
+                if (storage.Field is not { } field)
+                {
+                    _solverArrays ??= new Dictionary<object, SolverArrayStorage>(SolverArrayKeyComparer.Instance);
+                    _solverArrays.Add(snapshot.Key, storage);
+                    continue;
+                }
+
+                fields ??= new SolverArrayStorage?[ChunkFieldRegistry.SlotCount];
+                fields[field.Slot] = storage;
+                capturedFieldCount++;
+            }
+
+            Volatile.Write(ref _fields, fields);
+            Volatile.Write(ref _capturedFieldCount, capturedFieldCount);
+        }
     }
 
     /// <summary>
