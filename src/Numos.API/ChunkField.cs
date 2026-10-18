@@ -1,5 +1,6 @@
 using JetBrains.Annotations;
 using Numos.Collections;
+using Numos.CoreSim;
 using Numos.CoreSim.Solvers;
 using Numos.Maths;
 
@@ -163,6 +164,15 @@ public sealed class ChunkField<T>
     internal FlatArray<T> CreateView(T[] values, Int3 chunkDimensions)
     {
         return IsPerVoxel ? new FlatArray<T>(values, chunkDimensions) : new FlatArray<T>(values);
+    }
+
+    /// <summary>
+    ///     Gets a view of this field's array in <paramref name="chunk" />, creating the array on first use.
+    /// </summary>
+    /// <remarks>Takes no lock; the caller is responsible for the chunk being safe to touch.</remarks>
+    internal FlatArray<T> View(AtmosChunk chunk)
+    {
+        return CreateView(chunk.GetOrCreateField(Descriptor), chunk.Dimensions);
     }
 
     private static ChunkField<T> Wrap(ChunkFieldDescriptor<T> descriptor)

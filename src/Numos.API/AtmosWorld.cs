@@ -91,6 +91,16 @@ public sealed partial class AtmosWorld : IDisposable
     internal bool IsTickExecuting => _isTickExecuting;
 
     /// <summary>
+    ///     Gets the epoch that solver dependency injection is current against.
+    /// </summary>
+    /// <remarks>
+    ///     Advances whenever a service or solver is registered or removed, since either can change what a dependency
+    ///     resolves to. Enabling and disabling don't count: a disabled solver is skipped by injection, so it's already
+    ///     stale when it comes back if anything changed meanwhile. Only touched under <see cref="Gate" />.
+    /// </remarks>
+    internal int SolverDependencyEpoch { get; private set; }
+
+    /// <summary>
     ///     Gets the ordered solver pipeline used by subsequent world ticks.
     /// </summary>
     [PublicAPI]
@@ -1098,19 +1108,15 @@ public sealed partial class AtmosWorld : IDisposable
         AtmosSimulation[] simulations = _orderedSimulations;
         int enteredGates = 0;
         int begunTicks = 0;
-        AtmosWorldTickExecution[] executions = simulations.Length == 0
-            ? []
-            : ArrayPool<AtmosWorldTickExecution>.Shared.Rent(simulations.Length);
-
-        WorldSolverRegistration[] worldSteps = Solvers.CaptureEnabled();
-        IReadOnlyList<AtmosSimulation> publicSimulations = Array.AsReadOnly(simulations);
+        var contexts = new AtmosSolverExecutionContext[simulations.Length];
+        WorldSolverRegistration[] worldSteps = Solvers.EnabledSteps;
         AtmosSolverTickScope? solverScope = null;
 
         try
         {
             // Before anything changes: a missing dependency abandons the tick with the world as it was, and the next
             // tick retries because the failed registration is still stale.
-            Solvers.InjectDependencies(worldSteps, false);
+            Solvers.InjectDependencies(false);
 
             if (_pendingConfig != null)
             {
@@ -1124,17 +1130,10 @@ public sealed partial class AtmosWorld : IDisposable
 
             ApplyPendingTopology();
             for (; begunTicks < simulations.Length; begunTicks++)
-                executions[begunTicks] = simulations[begunTicks].Kernel.BeginWorldTick();
+                contexts[begunTicks] = simulations[begunTicks].Kernel.BeginWorldTick();
 
-            solverScope = new AtmosSolverTickScope(simulations, executions);
-            var executionContext = new AtmosWorldExecutionContext(
-                this,
-                simulations,
-                executions,
-                publicSimulations,
-                solverScope);
-
-            Solvers.Execute(worldSteps, executionContext);
+            solverScope = new AtmosSolverTickScope(this, simulations, Array.AsReadOnly(simulations), contexts);
+            Solvers.Execute(worldSteps, solverScope);
 
             if (_pendingConfig != null)
             {
@@ -1157,11 +1156,16 @@ public sealed partial class AtmosWorld : IDisposable
             for (int index = enteredGates - 1; index >= 0; index--)
                 Monitor.Exit(simulations[index].Kernel.StateGate);
 
-            if (simulations.Length > 0)
-                ArrayPool<AtmosWorldTickExecution>.Shared.Return(executions, true);
-
             _isTickExecuting = false;
         }
+    }
+
+    /// <summary>
+    ///     Marks every class solver's injected dependencies as stale. The caller holds <see cref="Gate" />.
+    /// </summary>
+    internal void InvalidateSolverDependencies()
+    {
+        SolverDependencyEpoch++;
     }
 
     /// <summary>
@@ -1187,7 +1191,7 @@ public sealed partial class AtmosWorld : IDisposable
         _isTickExecuting = true;
         try
         {
-            Solvers.InjectDependencies(Solvers.CaptureEnabled(), force);
+            Solvers.InjectDependencies(force);
         }
         finally
         {
@@ -1195,49 +1199,49 @@ public sealed partial class AtmosWorld : IDisposable
         }
     }
 
-    internal void SolveAdvectionStage(AtmosWorldExecutionContext context)
+    internal void SolveAdvectionStage(AtmosSolverTickScope scope)
     {
-        for (int index = 0; index < context.Simulations.Length; index++)
-            context.Simulations[index].Kernel.SolveAdvection(context.Executions[index].Context);
+        for (int index = 0; index < scope.Simulations.Length; index++)
+            scope.Simulations[index].Kernel.SolveAdvection(scope.Contexts[index]);
     }
 
-    internal void SolveExplicitGasTransportStage(AtmosWorldExecutionContext context)
+    internal void SolveExplicitGasTransportStage(AtmosSolverTickScope scope)
     {
         // Every kernel reaches the same stage barrier before sparse transport runs. This prevents registration
         // order from deciding whether an endpoint sees pre-transfer or post-transfer state.
-        SolveExplicitTransport(context.Simulations, ExplicitTransportCapabilities.Gas);
+        SolveExplicitTransport(scope.Simulations, ExplicitTransportCapabilities.Gas);
     }
 
-    internal void SolveBoundaryFlowStage(AtmosWorldExecutionContext context)
+    internal void SolveBoundaryFlowStage(AtmosSolverTickScope scope)
     {
-        for (int index = 0; index < context.Simulations.Length; index++)
-            context.Simulations[index].Kernel.SolveBoundaryFlow(context.Executions[index].Context);
+        for (int index = 0; index < scope.Simulations.Length; index++)
+            scope.Simulations[index].Kernel.SolveBoundaryFlow(scope.Contexts[index]);
     }
 
-    internal void SolveThermodynamicsStage(AtmosWorldExecutionContext context)
+    internal void SolveThermodynamicsStage(AtmosSolverTickScope scope)
     {
-        for (int index = 0; index < context.Simulations.Length; index++)
-            context.Simulations[index].Kernel.SolveThermodynamics(context.Executions[index].Context);
+        for (int index = 0; index < scope.Simulations.Length; index++)
+            scope.Simulations[index].Kernel.SolveThermodynamics(scope.Contexts[index]);
     }
 
-    internal void SolveExplicitThermalTransportStage(AtmosWorldExecutionContext context)
+    internal void SolveExplicitThermalTransportStage(AtmosSolverTickScope scope)
     {
         // Thermal transport shares thermodynamics' reduced cadence so a disabled or replaced stage still runs on the
         // same tick pattern the default implementation used.
         if (checked(TickCount + 1) % AtmosSolverConstants.ThermodynamicsTickInterval == 0)
-            SolveExplicitTransport(context.Simulations, ExplicitTransportCapabilities.Thermal);
+            SolveExplicitTransport(scope.Simulations, ExplicitTransportCapabilities.Thermal);
     }
 
-    internal void SolveThermalBoundaryStage(AtmosWorldExecutionContext context)
+    internal void SolveThermalBoundaryStage(AtmosSolverTickScope scope)
     {
-        for (int index = 0; index < context.Simulations.Length; index++)
-            context.Simulations[index].Kernel.SolveThermalBoundary(context.Executions[index].Context);
+        for (int index = 0; index < scope.Simulations.Length; index++)
+            scope.Simulations[index].Kernel.SolveThermalBoundary(scope.Contexts[index]);
     }
 
-    internal void SolveGasReactionsStage(AtmosWorldExecutionContext context)
+    internal void SolveGasReactionsStage(AtmosSolverTickScope scope)
     {
-        for (int index = 0; index < context.Simulations.Length; index++)
-            context.Simulations[index].Kernel.SolveGasReactions(context.Executions[index].Context);
+        for (int index = 0; index < scope.Simulations.Length; index++)
+            scope.Simulations[index].Kernel.SolveGasReactions(scope.Contexts[index]);
     }
 
     private void ValidateCheckpoint(AtmosWorldCheckpoint checkpoint)

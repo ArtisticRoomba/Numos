@@ -196,22 +196,16 @@ public sealed class AtmosWorldSolverContext
 {
     private readonly AtmosSolverTickScope _solverScope;
 
-    internal AtmosWorldSolverContext(
-        AtmosWorld world,
-        IReadOnlyList<AtmosSimulation> simulations,
-        AtmosWorldNeighborTopology topology,
-        AtmosSolverTickScope solverScope)
+    internal AtmosWorldSolverContext(AtmosSolverTickScope solverScope, AtmosWorldNeighborTopology topology)
     {
-        World = world;
-        Simulations = simulations;
-        Topology = topology;
         _solverScope = solverScope;
+        Topology = topology;
     }
 
     /// <summary>
     ///     Gets the world executing this callback.
     /// </summary>
-    public AtmosWorld World { get; }
+    public AtmosWorld World => _solverScope.World;
 
     /// <summary>
     ///     Gets the one-based world tick currently being executed.
@@ -226,7 +220,7 @@ public sealed class AtmosWorldSolverContext
     /// <summary>
     ///     Gets simulations in stable registration order.
     /// </summary>
-    public IReadOnlyList<AtmosSimulation> Simulations { get; }
+    public IReadOnlyList<AtmosSimulation> Simulations => _solverScope.PublicSimulations;
 
     /// <summary>
     ///     Gets the solver-specific compiled neighborhood view.
@@ -300,10 +294,9 @@ public sealed class AtmosWorldSolverContext
         _solverScope.ThrowIfClosed();
         int index = _solverScope.IndexOf(cell.Simulation);
         if (index >= 0 &&
-            _solverScope.Contexts[index].TryGetChunk(cell.Chunk.Position, out var found) &&
-            cell.LocalVoxelIndex < found.VoxelCount)
+            new AtmosSolverChunks(_solverScope, index).TryGet(cell.Chunk, out chunk) &&
+            cell.LocalVoxelIndex < chunk.VoxelCount)
         {
-            chunk = new AtmosSolverChunk(_solverScope, index, found);
             return true;
         }
 

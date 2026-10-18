@@ -292,6 +292,29 @@ public sealed partial class AtmosSolverDependencyTests
     }
 
     [Test]
+    public void SolverReenabledAfterAServiceChange_IsReinjected()
+    {
+        using var world = CreateWorld();
+        var consumer = new HandWrittenConsumer();
+        world.Services.Register<IClock>(new Clock());
+        world.Solvers.Register("producer", new ProducerSolver());
+        world.Solvers.Register("consumer", consumer);
+        world.Tick();
+
+        world.Solvers.SetEnabled("consumer", false);
+        world.Services.Register(new ExtraService());
+        world.Tick(); // injection pass completes without the disabled consumer
+        world.Solvers.SetEnabled("consumer", true);
+        world.Tick();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(consumer.Extra, Is.Not.Null);
+            Assert.That(consumer.Injections, Is.EqualTo(2));
+        });
+    }
+
+    [Test]
     public void SolverDependingOnItsOwnType_ResolvesOtherInstancesOnly()
     {
         using var world = CreateWorld();

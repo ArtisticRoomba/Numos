@@ -126,11 +126,11 @@ internal sealed partial class AtmosKernel : IDisposable
     ///     Begins one tick whose pipeline stages will be coordinated by a containing world.
     /// </summary>
     /// <returns>The tick's solver execution context.</returns>
-    internal AtmosWorldTickExecution BeginWorldTick()
+    internal AtmosSolverExecutionContext BeginWorldTick()
     {
         lock (StateGate)
         {
-            return new AtmosWorldTickExecution(BeginTickSimulation(OrderedChunks()));
+            return BeginTickSimulation(OrderedChunks());
         }
     }
 

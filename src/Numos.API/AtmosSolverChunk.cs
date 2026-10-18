@@ -163,8 +163,7 @@ public readonly struct AtmosSolverChunk
     public FlatArray<T> Get<T>(ChunkField<T> field)
     {
         ArgumentNullException.ThrowIfNull(field);
-        var chunk = Chunk;
-        return field.CreateView(chunk.GetOrCreateField(field.Descriptor), chunk.Dimensions);
+        return field.View(Chunk);
     }
 
     /// <summary>
@@ -373,7 +372,7 @@ public readonly struct AtmosSolverChunks : IReadOnlyList<AtmosSolverChunk>
 }
 
 /// <summary>
-///     Ties solver chunk views to the world tick that created them.
+///     The state of one running world tick: what built-in stages read, and what solver chunk views are tied to.
 /// </summary>
 /// <remarks>
 ///     The views hold raw chunk references taken from each kernel's execution context on the tick thread. Those
@@ -382,18 +381,36 @@ public readonly struct AtmosSolverChunks : IReadOnlyList<AtmosSolverChunk>
 /// </remarks>
 internal sealed class AtmosSolverTickScope
 {
+    // Tick index for each simulation slot index, or -1; lookups still compare the full id to reject stale generations.
+    private readonly int[] _indexBySlot;
     private volatile bool _closed;
 
-    internal AtmosSolverTickScope(AtmosSimulation[] simulations, AtmosWorldTickExecution[] executions)
+    internal AtmosSolverTickScope(
+        AtmosWorld world,
+        AtmosSimulation[] simulations,
+        IReadOnlyList<AtmosSimulation> publicSimulations,
+        AtmosSolverExecutionContext[] contexts)
     {
+        World = world;
         Simulations = simulations;
-        // The world rents the executions array from a pool, so copy the contexts instead of keeping the array.
-        Contexts = new AtmosSolverExecutionContext[simulations.Length];
-        for (int index = 0; index < Contexts.Length; index++)
-            Contexts[index] = executions[index].Context;
+        PublicSimulations = publicSimulations;
+        Contexts = contexts;
+
+        int slotCount = 0;
+        foreach (var simulation in simulations)
+            slotCount = Math.Max(slotCount, simulation.Id.Index + 1);
+
+        _indexBySlot = new int[slotCount];
+        Array.Fill(_indexBySlot, -1);
+        for (int index = 0; index < simulations.Length; index++)
+            _indexBySlot[simulations[index].Id.Index] = index;
     }
 
+    internal AtmosWorld World { get; }
+
     internal AtmosSimulation[] Simulations { get; }
+
+    internal IReadOnlyList<AtmosSimulation> PublicSimulations { get; }
 
     internal AtmosSolverExecutionContext[] Contexts { get; }
 
@@ -422,23 +439,16 @@ internal sealed class AtmosSolverTickScope
 
     internal int IndexOf(AtmosSimulation simulation)
     {
-        for (int index = 0; index < Simulations.Length; index++)
-        {
-            if (ReferenceEquals(Simulations[index], simulation))
-                return index;
-        }
-
-        return -1;
+        int index = IndexOf(simulation.Id);
+        return index >= 0 && ReferenceEquals(Simulations[index], simulation) ? index : -1;
     }
 
     internal int IndexOf(AtmosSimulationId id)
     {
-        for (int index = 0; index < Simulations.Length; index++)
-        {
-            if (Simulations[index].Id == id)
-                return index;
-        }
+        if ((uint)id.Index >= (uint)_indexBySlot.Length)
+            return -1;
 
-        return -1;
+        int index = _indexBySlot[id.Index];
+        return index >= 0 && Simulations[index].Id == id ? index : -1;
     }
 }

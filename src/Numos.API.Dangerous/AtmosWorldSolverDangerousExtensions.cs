@@ -81,32 +81,18 @@ public readonly ref struct AtmosDangerousWorldSolverApi
     /// <returns>The unchecked live chunk view.</returns>
     /// <remarks>
     ///     The returned view covers the whole chunk. Index it with <see cref="AtmosCellRef.LocalVoxelIndex" /> to reach
-    ///     the cell itself.
+    ///     the cell itself. Like <see cref="AtmosWorldSolverContext.TryGetChunk" />, this takes no simulation lock.
     /// </remarks>
     /// <exception cref="ArgumentException">
     ///     The cell's simulation is not registered in this world, its local voxel index is outside the chunk, or no
     ///     chunk is registered at its position.
     /// </exception>
+    /// <exception cref="InvalidOperationException">The callback's tick has ended.</exception>
     public AtmosDangerousChunk GetChunk(AtmosCellRef cell)
     {
-        if (!_context.World.TryGetSimulation(cell.Simulation, out var simulation) || simulation == null)
-            throw new ArgumentException("The cell does not identify a live simulation in this world.", nameof(cell));
+        if (!_context.TryGetChunk(cell, out var chunk))
+            throw new ArgumentException("The cell does not identify a live chunk in this world.", nameof(cell));
 
-        int voxelCount = checked(
-            simulation.ChunkDimensions.X *
-            simulation.ChunkDimensions.Y *
-            simulation.ChunkDimensions.Z);
-
-        if (cell.LocalVoxelIndex >= voxelCount)
-            throw new ArgumentException("The cell's local voxel index is outside its chunk.", nameof(cell));
-
-        try
-        {
-            return simulation.Dangerous().GetChunk(cell.Chunk);
-        }
-        catch (KeyNotFoundException exception)
-        {
-            throw new ArgumentException("The cell does not identify a live chunk in this world.", nameof(cell), exception);
-        }
+        return chunk.Dangerous();
     }
 }

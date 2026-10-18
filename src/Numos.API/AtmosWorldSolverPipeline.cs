@@ -19,17 +19,17 @@ public sealed class AtmosWorldSolverPipeline
     private readonly List<WorldSolverRegistration> _steps = [];
     private readonly AtmosWorld _world;
     private AtmosSolverCheckpoint[] _checkpointSteps = [];
+    private WorldSolverRegistration[] _enabledSteps = [];
 
-    // Advances whenever the set of registered solvers changes, which can change what a dependency resolves to.
-    // Enabling and disabling don't count: a disabled solver is skipped by injection, so it's already stale when it
-    // comes back if anything changed meanwhile.
-    private int _dependencyEpoch;
+    // The world dependency epoch every registration in _enabledSteps was injected at, or -1. Republishing the steps
+    // clears it, so enabling a solver that sat out an epoch change gets it injected before it runs.
+    private int _injectedEpoch = -1;
 
     internal AtmosWorldSolverPipeline(AtmosWorld world)
     {
         _world = world;
         AddDefaults();
-        PublishCheckpointSteps();
+        PublishSteps();
     }
 
     /// <summary>
@@ -346,8 +346,8 @@ public sealed class AtmosWorldSolverPipeline
                 return false;
 
             _steps.RemoveAt(index);
-            _dependencyEpoch++;
-            PublishCheckpointSteps();
+            _world.InvalidateSolverDependencies();
+            PublishSteps();
             return true;
         }
     }
@@ -380,7 +380,7 @@ public sealed class AtmosWorldSolverPipeline
                 return true;
 
             _steps[index].IsEnabled = enabled;
-            PublishCheckpointSteps();
+            PublishSteps();
             _world.RecordWorldSolverEnablement(name, enabled);
             return true;
         }
@@ -401,8 +401,8 @@ public sealed class AtmosWorldSolverPipeline
             _world.EnsureCanChangeWorldSolverDefinition();
             _steps.Clear();
             AddDefaults();
-            _dependencyEpoch++;
-            PublishCheckpointSteps();
+            _world.InvalidateSolverDependencies();
+            PublishSteps();
         }
     }
 
@@ -439,26 +439,28 @@ public sealed class AtmosWorldSolverPipeline
     }
 
     /// <summary>
-    ///     Injects dependencies into the class solvers in <paramref name="steps" />, in order.
+    ///     Injects dependencies into the enabled class solvers, in pipeline order.
     /// </summary>
-    /// <param name="steps">The enabled registrations about to run.</param>
     /// <param name="force">Whether to inject solvers that are already up to date.</param>
     /// <remarks>
-    ///     The caller holds <see cref="AtmosWorld.Gate" /> and has marked the world as ticking, so services and the
-    ///     pipeline can't change underneath the pass. A registration is stamped only after its injection returns, so
-    ///     a failure leaves it stale for the next attempt.
+    ///     The caller holds <see cref="AtmosWorld.Gate" /> and has marked the world as ticking, so services can't
+    ///     change underneath the pass. A registration is stamped only after its injection returns, so a failure leaves
+    ///     it stale for the next attempt.
     /// </remarks>
-    internal void InjectDependencies(WorldSolverRegistration[] steps, bool force)
+    internal void InjectDependencies(bool force)
     {
-        int epoch = _dependencyEpoch;
-        int servicesVersion = _world.Services.Version;
+        int epoch = _world.SolverDependencyEpoch;
+        if (!force && _injectedEpoch == epoch)
+            return;
+
+        WorldSolverRegistration[] steps = _enabledSteps;
         (string Name, IAtmosWorldSolver Solver)[]? candidates = null;
         foreach (var step in steps)
         {
             if (step.CustomSolver is not IAtmosSolverDependencies dependent)
                 continue;
 
-            if (!force && step.IsInjected(epoch, servicesVersion))
+            if (!force && step.InjectedEpoch == epoch)
                 continue;
 
             candidates ??= _steps
@@ -467,19 +469,27 @@ public sealed class AtmosWorldSolverPipeline
                 .ToArray();
 
             dependent.InjectDependencies(new AtmosSolverDependencyResolver(_world, step.Name, step.CustomSolver, candidates));
-            step.MarkInjected(epoch, servicesVersion);
+            step.InjectedEpoch = epoch;
         }
+
+        // Pipeline edits aren't blocked here, so an injection could have republished the steps. Leave the pass
+        // unstamped then, so the next one looks at the new set.
+        if (ReferenceEquals(steps, _enabledSteps))
+            _injectedEpoch = epoch;
     }
 
-    internal WorldSolverRegistration[] CaptureEnabled()
-    {
-        return _steps.Where(static step => step.IsEnabled).ToArray();
-    }
+    /// <summary>
+    ///     Gets the enabled stages in execution order.
+    /// </summary>
+    /// <remarks>
+    ///     The array is replaced, never mutated, so a tick can keep running it while a stage edits the pipeline.
+    /// </remarks>
+    internal WorldSolverRegistration[] EnabledSteps => _enabledSteps;
 
-    internal void Execute(WorldSolverRegistration[] steps, AtmosWorldExecutionContext context)
+    internal void Execute(WorldSolverRegistration[] steps, AtmosSolverTickScope scope)
     {
         foreach (var step in steps)
-            step.Execute(context);
+            step.Execute(scope);
     }
 
     internal void RecompileTopology(IReadOnlyList<ExplicitLinkDefinition> links)
@@ -542,8 +552,8 @@ public sealed class AtmosWorldSolverPipeline
             var registration = WorldSolverRegistration.CreateCustom(name, solver, selection);
             registration.InstallTopology(registration.BuildTopology(_world, _world.GetActiveLinksCore()));
             _steps.Insert(insertionIndex < 0 ? _steps.Count : insertionIndex, registration);
-            _dependencyEpoch++;
-            PublishCheckpointSteps();
+            _world.InvalidateSolverDependencies();
+            PublishSteps();
         }
     }
 
@@ -575,41 +585,43 @@ public sealed class AtmosWorldSolverPipeline
         _steps.Add(
             WorldSolverRegistration.CreateBuiltIn(
                 AtmosBuiltInSolvers.Advection,
-                static context => context.World.SolveAdvectionStage(context)));
+                static scope => scope.World.SolveAdvectionStage(scope)));
 
         _steps.Add(
             WorldSolverRegistration.CreateBuiltIn(
                 AtmosBuiltInSolvers.ExplicitGasTransport,
-                static context => context.World.SolveExplicitGasTransportStage(context)));
+                static scope => scope.World.SolveExplicitGasTransportStage(scope)));
 
         _steps.Add(
             WorldSolverRegistration.CreateBuiltIn(
                 AtmosBuiltInSolvers.BoundaryFlow,
-                static context => context.World.SolveBoundaryFlowStage(context)));
+                static scope => scope.World.SolveBoundaryFlowStage(scope)));
 
         _steps.Add(
             WorldSolverRegistration.CreateBuiltIn(
                 AtmosBuiltInSolvers.Thermodynamics,
-                static context => context.World.SolveThermodynamicsStage(context)));
+                static scope => scope.World.SolveThermodynamicsStage(scope)));
 
         _steps.Add(
             WorldSolverRegistration.CreateBuiltIn(
                 AtmosBuiltInSolvers.ExplicitThermalTransport,
-                static context => context.World.SolveExplicitThermalTransportStage(context)));
+                static scope => scope.World.SolveExplicitThermalTransportStage(scope)));
 
         _steps.Add(
             WorldSolverRegistration.CreateBuiltIn(
                 AtmosBuiltInSolvers.ThermalBoundary,
-                static context => context.World.SolveThermalBoundaryStage(context)));
+                static scope => scope.World.SolveThermalBoundaryStage(scope)));
 
         _steps.Add(
             WorldSolverRegistration.CreateBuiltIn(
                 AtmosBuiltInSolvers.GasReactions,
-                static context => context.World.SolveGasReactionsStage(context)));
+                static scope => scope.World.SolveGasReactionsStage(scope)));
     }
 
-    private void PublishCheckpointSteps()
+    private void PublishSteps()
     {
+        _enabledSteps = _steps.Where(static step => step.IsEnabled).ToArray();
+        _injectedEpoch = -1;
         Volatile.Write(
             ref _checkpointSteps,
             _steps.Select(static step => new AtmosSolverCheckpoint(
@@ -620,31 +632,15 @@ public sealed class AtmosWorldSolverPipeline
     }
 }
 
-internal sealed class AtmosWorldExecutionContext(
-    AtmosWorld world,
-    AtmosSimulation[] simulations,
-    AtmosWorldTickExecution[] executions,
-    IReadOnlyList<AtmosSimulation> publicSimulations,
-    AtmosSolverTickScope solverScope)
-{
-    internal AtmosWorld World { get; } = world;
-    internal AtmosSimulation[] Simulations { get; } = simulations;
-    internal AtmosWorldTickExecution[] Executions { get; } = executions;
-    internal IReadOnlyList<AtmosSimulation> PublicSimulations { get; } = publicSimulations;
-    internal AtmosSolverTickScope SolverScope { get; } = solverScope;
-}
-
 internal sealed class WorldSolverRegistration
 {
-    private readonly Action<AtmosWorldExecutionContext>? _builtInSolver;
-    private int _injectedPipelineEpoch = -1;
-    private int _injectedServicesVersion = -1;
+    private readonly Action<AtmosSolverTickScope>? _builtInSolver;
     private AtmosWorldNeighborTopology _topology = AtmosWorldNeighborTopology.Empty;
 
     private WorldSolverRegistration(
         string name,
         AtmosWorldSolverKind kind,
-        Action<AtmosWorldExecutionContext>? builtInSolver,
+        Action<AtmosSolverTickScope>? builtInSolver,
         IAtmosWorldSolver? customSolver,
         AtmosNeighborSelection? selection)
     {
@@ -661,13 +657,18 @@ internal sealed class WorldSolverRegistration
     internal bool IsEnabled { get; set; } = true;
 
     /// <summary>
+    ///     Gets or sets the world dependency epoch this solver was last injected at, or -1.
+    /// </summary>
+    internal int InjectedEpoch { get; set; } = -1;
+
+    /// <summary>
     ///     Gets the class solver instance, or the delegate adapter, for a custom stage.
     /// </summary>
     internal IAtmosWorldSolver? CustomSolver { get; }
 
     internal static WorldSolverRegistration CreateBuiltIn(
         string name,
-        Action<AtmosWorldExecutionContext> solver)
+        Action<AtmosSolverTickScope> solver)
     {
         return new WorldSolverRegistration(name, AtmosWorldSolverKind.BuiltIn, solver, null, null);
     }
@@ -680,26 +681,15 @@ internal sealed class WorldSolverRegistration
         return new WorldSolverRegistration(name, AtmosWorldSolverKind.Custom, null, solver, selection);
     }
 
-    internal void Execute(AtmosWorldExecutionContext context)
+    internal void Execute(AtmosSolverTickScope scope)
     {
         if (CustomSolver != null)
         {
-            CustomSolver.Solve(new AtmosWorldSolverContext(context.World, context.PublicSimulations, _topology, context.SolverScope));
+            CustomSolver.Solve(new AtmosWorldSolverContext(scope, _topology));
             return;
         }
 
-        _builtInSolver!(context);
-    }
-
-    internal bool IsInjected(int pipelineEpoch, int servicesVersion)
-    {
-        return _injectedPipelineEpoch == pipelineEpoch && _injectedServicesVersion == servicesVersion;
-    }
-
-    internal void MarkInjected(int pipelineEpoch, int servicesVersion)
-    {
-        _injectedPipelineEpoch = pipelineEpoch;
-        _injectedServicesVersion = servicesVersion;
+        _builtInSolver!(scope);
     }
 
     internal void NotifyRestored()

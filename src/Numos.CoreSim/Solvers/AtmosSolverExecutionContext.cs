@@ -56,9 +56,3 @@ internal sealed class AtmosSolverExecutionContext
         return _world.TryGetChunk(position, out chunk);
     }
 }
-
-/// <summary>
-///     Holds one kernel's tick context during a coordinated world tick.
-/// </summary>
-internal readonly record struct AtmosWorldTickExecution(
-    AtmosSolverExecutionContext Context);

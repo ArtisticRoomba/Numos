@@ -206,7 +206,7 @@ public readonly ref struct AtmosDangerousChunk
     public FlatArray<T> Get<T>(ChunkField<T> field)
     {
         ArgumentNullException.ThrowIfNull(field);
-        return field.CreateView(_chunk.GetOrCreateField(field.Descriptor), _chunk.Dimensions);
+        return field.View(_chunk);
     }
 
     /// <summary>

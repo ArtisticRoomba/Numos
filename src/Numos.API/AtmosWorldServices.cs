@@ -43,18 +43,11 @@ public sealed class AtmosWorldServices
 {
     private readonly AtmosWorld _world;
     private Dictionary<Type, object> _services = [];
-    private int _version;
 
     internal AtmosWorldServices(AtmosWorld world)
     {
         _world = world;
     }
-
-    /// <summary>
-    ///     Advances on every successful <see cref="Register{T}" /> and <see cref="Unregister{T}" />, so consumers can
-    ///     tell a cached lookup is stale without comparing tables.
-    /// </summary>
-    internal int Version => Volatile.Read(ref _version);
 
     /// <summary>
     ///     Registers a service under the exact type <typeparamref name="T" />.
@@ -179,7 +172,7 @@ public sealed class AtmosWorldServices
         // Readers never lock, so the table is replaced rather than mutated: a reader sees the old table or the new
         // one, never a dictionary halfway through a resize.
         Volatile.Write(ref _services, next);
-        Interlocked.Increment(ref _version);
+        _world.InvalidateSolverDependencies();
     }
 
     private void ThrowIfTickExecuting()
