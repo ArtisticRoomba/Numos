@@ -30,6 +30,21 @@ internal sealed class AtmosSolverExecutionContext
     internal SolverDataStorage SharedData { get; }
 
     /// <summary>
+    ///     Gets a built-in stage's shared data, creating it on first use.
+    /// </summary>
+    /// <param name="slot">
+    ///     The slot. Config-scoped slots live in <see cref="TickConfig" />, the rest in <see cref="SharedData" />.
+    /// </param>
+    /// <returns>The cached value.</returns>
+    /// <remarks>Call this on the tick thread before dispatching workers; the storage is not thread-safe.</remarks>
+    internal T GetSolverData<T>(SolverDataSlot<T> slot) where T : class
+    {
+        var storage = slot.ResetOnConfigChange ? TickConfig.ConfigScopedData : SharedData;
+        return storage.GetOrCreate(
+            slot.Id, slot.Name, (Context: this, Slot: slot), static state => state.Slot.Factory(state.Context));
+    }
+
+    /// <summary>
     ///     Looks up a chunk by its grid position.
     /// </summary>
     /// <remarks>

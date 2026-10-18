@@ -18,13 +18,16 @@ public sealed class AtmosSolverConfigurationTests
             "custom",
             _ =>
             {
-                var applied = (SettingsSnapshot)simulation.Config.SolverConfigurations.Single();
-                simulation.AddGasToVoxel(chunk, 0, "TestGas0", applied.Value, 300f);
+                Assert.That(
+                    simulation.Config.TryGetSolverConfiguration("custom", out SettingsSnapshot? applied),
+                    Is.True);
+
+                simulation.AddGasToVoxel(chunk, 0, "TestGas0", applied!.Value, 300f);
             });
 
         var checkpoint = simulation.CaptureCheckpoint();
         settings.Value = 9;
-        Assert.That(((SettingsSnapshot)simulation.Config.SolverConfigurations.Single()).Value, Is.EqualTo(2));
+        Assert.That(GetSettings(simulation.Config).Value, Is.EqualTo(2));
         Assert.That(
             checkpoint.FormatVersion,
             Is.EqualTo(AtmosSimulationCheckpoint.CurrentFormatVersion));
@@ -40,7 +43,56 @@ public sealed class AtmosSolverConfigurationTests
         simulation.ReplayTo(checkpoint, recording.Operations, recording.Head);
         Assert.That(simulation.ComputeStateHash(), Is.EqualTo(expected));
         simulation.RestoreCheckpoint(checkpoint);
-        Assert.That(((SettingsSnapshot)simulation.Config.SolverConfigurations.Single()).Value, Is.EqualTo(2));
+        Assert.That(GetSettings(simulation.Config).Value, Is.EqualTo(2));
+    }
+
+    [Test]
+    public void TypedLookup_FindsByTypeAndKey()
+    {
+        var config = new AtmosConfig
+        {
+            SolverConfigurations = [new SettingsSnapshot("z", 1), new MutableSettings { Value = 2 }]
+        }.CreateSnapshot();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(config.TryGetSolverConfiguration("custom", out SettingsSnapshot? byKey), Is.True);
+            Assert.That(byKey!.Value, Is.EqualTo(2));
+            Assert.That(config.TryGetSolverConfiguration("z", out SettingsSnapshot? other), Is.True);
+            Assert.That(other!.Value, Is.EqualTo(1));
+            Assert.That(config.TryGetSolverConfiguration("missing", out SettingsSnapshot? missing), Is.False);
+            Assert.That(missing, Is.Null);
+            Assert.That(config.TryGetSolverConfiguration(out GasReactionConfig? absent), Is.False);
+            Assert.That(absent, Is.Null);
+
+            // MutableSettings captures to a SettingsSnapshot, so the lookup sees the snapshot type.
+            Assert.That(config.TryGetSolverConfiguration(out MutableSettings? source), Is.False);
+            Assert.That(source, Is.Null);
+        });
+    }
+
+    [Test]
+    public void TypedLookup_RejectsWrongTypesAndAmbiguousMatches()
+    {
+        var config = new AtmosConfig
+        {
+            SolverConfigurations = [new SettingsSnapshot("a", 1), new SettingsSnapshot("b", 2)]
+        }.CreateSnapshot();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(
+                () => config.TryGetSolverConfiguration("a", out GasReactionConfig? _),
+                Throws.InvalidOperationException.With.Message.Contains("'a'"));
+
+            Assert.That(
+                () => config.TryGetSolverConfiguration(out SettingsSnapshot? _),
+                Throws.InvalidOperationException.With.Message.Contains("'a'").And.Message.Contains("'b'"));
+
+            Assert.That(
+                () => config.TryGetSolverConfiguration(null!, out SettingsSnapshot? _),
+                Throws.ArgumentNullException);
+        });
     }
 
     [Test]
@@ -100,7 +152,8 @@ public sealed class AtmosSolverConfigurationTests
         Assert.That(() => config.CreateSnapshot(), Throws.TypeOf<KeyNotFoundException>());
         config.GasRegistry.Add(gas);
         var snapshot = config.CreateSnapshot();
-        Assert.That(((GasReactionConfig)snapshot.SolverConfigurations.Single()).Count, Is.EqualTo(1));
+        Assert.That(snapshot.TryGetSolverConfiguration(out GasReactionConfig? reactions), Is.True);
+        Assert.That(reactions!.Count, Is.EqualTo(1));
     }
 
     [Test]
@@ -143,6 +196,12 @@ public sealed class AtmosSolverConfigurationTests
         simulation.ReplayTo(checkpoint, recording.Operations, recording.Head);
         Assert.That(simulation.ComputeStateHash(), Is.EqualTo(expected));
         Assert.That(recording.Operations, Has.Count.EqualTo(1));
+    }
+
+    private static SettingsSnapshot GetSettings(AtmosConfigSnapshot config)
+    {
+        Assert.That(config.TryGetSolverConfiguration(out SettingsSnapshot? settings), Is.True);
+        return settings!;
     }
 
     private sealed class MutableSettings : IAtmosSolverConfiguration

@@ -60,20 +60,3 @@ internal sealed class SolverArrayStorage<T>(T[] values, bool captureForRollback)
         }
     }
 }
-
-internal sealed class SolverArrayKeyComparer : IEqualityComparer<object>
-{
-    internal readonly static SolverArrayKeyComparer Instance = new();
-
-    public new bool Equals(object? x, object? y)
-    {
-        return x is string left && y is string right
-            ? StringComparer.Ordinal.Equals(left, right)
-            : ReferenceEquals(x, y);
-    }
-
-    public int GetHashCode(object obj)
-    {
-        return obj is string name ? StringComparer.Ordinal.GetHashCode(name) : RuntimeHelpers.GetHashCode(obj);
-    }
-}

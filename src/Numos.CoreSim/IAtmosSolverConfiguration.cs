@@ -6,7 +6,7 @@ namespace Numos.CoreSim;
 /// <remarks>
 ///     Add implementations to <see cref="AtmosConfig.SolverConfigurations" />. Numos does not inspect their fields
 ///     or use reflection to copy them. Each implementation owns its validation, immutable snapshot, and deterministic
-///     hash. Derived gas attachments and runtime workspaces do not belong in this configuration.
+///     hash. Derived caches and runtime workspaces do not belong in this configuration.
 /// </remarks>
 public interface IAtmosSolverConfiguration
 {

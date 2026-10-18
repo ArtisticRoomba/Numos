@@ -7,11 +7,12 @@ namespace Numos.CoreSim.Solvers;
 /// </summary>
 internal static class BoundaryEventBatches<T> where T : struct
 {
-    private readonly static object Key = new();
+    private readonly static SolverDataSlot<BoundaryEventBatchStorage<T>> Slot =
+        new($"boundary-events/{typeof(T).Name}", static _ => new BoundaryEventBatchStorage<T>());
 
     internal static BoundaryEventBatchStorage<T> Get(AtmosSolverExecutionContext context)
     {
-        return context.SharedData.GetOrCreate(Key, static () => new BoundaryEventBatchStorage<T>());
+        return context.GetSolverData(Slot);
     }
 }
 

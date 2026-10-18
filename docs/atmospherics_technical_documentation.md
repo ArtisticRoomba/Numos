@@ -881,9 +881,11 @@ Host stages are registered and run exactly like the built-in ones; §4.2 shows t
 
 ### 12.1 Sharing data between stages
 
-Custom stages share typed dependencies through `simulation.GetOrCreateSolverData<T>(key, factory)`. Slots use ordinal
-string keys or object identity and survive ticks and pipeline edits. Restore discards these transient values, so stages
-must reacquire them on each callback. Per-chunk state that has to roll back belongs in a `ChunkField<T>` instead (§12.3).
+Custom stages share typed dependencies through `simulation.GetSolverData(key)`, where `key` is a `static readonly`
+`SolverDataKey<T>` that carries its factory. Identity is the key instance. Values survive ticks and pipeline edits;
+`SolverDataLifetime.UntilConfigChange` keys are also rebuilt after a configuration change. Restore discards these
+transient values, so stages must reacquire them on each callback. Per-chunk state that has to roll back belongs in a
+`ChunkField<T>` instead (§12.3).
 
 Shared data does not schedule stages; producers and consumers still need explicit pipeline ordering. See
 [sharing dependencies](using.md#sharing-dependencies-between-solvers) for examples, ownership, and threading

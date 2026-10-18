@@ -222,7 +222,7 @@ internal sealed partial class AtmosKernel
         _freeChunkDenseIds.Clear();
         _config = checkpoint.Config;
         CurrentTickConfig.Capture(_config);
-        CurrentTickConfig.ClearGasSolverData();
+        CurrentTickConfig.ClearConfigScopedData();
         _solverData.Clear();
         TickCount = checked((int)checkpoint.Position.Tick);
         _lastOperationSequence = checkpoint.Position.OperationSequence;

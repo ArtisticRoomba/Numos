@@ -279,30 +279,31 @@ keys, allocation, the generator's diagnostics, and the hand-written `ChunkField<
 
 ## Sharing dependencies between solvers
 
-`GetOrCreateSolverData<T>` gives cooperating stages a shared object without requiring either solver to hold a reference
-to the other. Each simulation owns its own slots. Solvers agree on a key and an exact type, then supply a factory used
-only on the first request:
+A `SolverDataKey<T>` gives cooperating stages a shared object without requiring either solver to hold a reference to
+the other. The key carries the factory, so there is one definition; declare it as a `static readonly` field and have
+every stage read it through `simulation.GetSolverData(key)`. Each simulation caches its own value:
 
 ```csharp
+static readonly SolverDataKey<Queue<int>> Pending = new("my-mod/pending", static _ => new Queue<int>());
+
 simulation.World.Solvers.Register("produce", _ =>
 {
-    var pending = simulation.GetOrCreateSolverData("custom/pending", static () => new Queue<int>());
+    var pending = simulation.GetSolverData(Pending);
     pending.Clear();
     pending.Enqueue(simulation.TickCount);
 });
 simulation.World.Solvers.RegisterAfter("produce", "consume", _ =>
 {
-    var pending = simulation.GetOrCreateSolverData("custom/pending", static () => new Queue<int>());
+    var pending = simulation.GetSolverData(Pending);
     while (pending.TryDequeue(out int tick))
         Console.WriteLine(tick);
 });
 ```
 
-Strings compare ordinally; other keys use reference identity. A shared private object key avoids collisions with
-unrelated plugins. Values can also be interfaces backed by caller-provided services: request the same interface type
-from every stage. Reference types retain identity; structs are returned by value. Null results, type mismatches, and
-factory cycles throw; failed creation leaves the slot available for a retry. Factories may resolve other slots but must
-not mutate the simulation.
+The key instance is the identity: two keys with the same name are different slots, so unrelated plugins can't collide.
+`T` can be an interface backed by a caller-provided service, with a factory that returns the service. Null results and
+factory cycles throw; failed creation leaves the slot available for a retry. Factories may read other keys but must not
+mutate the simulation.
 
 Sharing data does not change execution order. Register producers before consumers, and define how a consumer behaves
 when its producer is disabled or removed. The built-in boundary stages work this way: advection and thermodynamics
@@ -313,54 +314,43 @@ sequentially; gas boundary flow reserves each source's write range sequentially,
 applies in parallel once every range is reserved (see Cross-Chunk Boundary Flow in the
 [technical documentation](atmospherics_technical_documentation.md)).
 
-Resolve shared data before starting worker tasks: facade calls from workers would block on the tick's state lock. Numos
-serializes lookup and creation; solvers synchronize later access to mutable values. A `ConcurrentQueue<T>` works for
-parallel producers, but consumers still need a stable ordering when processing order affects simulation results.
+Resolve shared data before starting worker tasks: during a tick, `GetSolverData` throws on any thread other than the
+tick's own. Numos serializes lookup and creation; solvers synchronize later access to mutable values. A
+`ConcurrentQueue<T>` works for parallel producers, but consumers still need a stable ordering when processing order
+affects simulation results.
 
-Shared data survives ticks, configuration changes, solver removal, and pipeline resets. Checkpoint restoration and
-simulation disposal discard it without disposing the values. Reacquire on each callback and keep ownership of disposable
-services in host code. These slots are transient: snapshots, checkpoints, recordings, and state hashes exclude them.
-Rebuild replay-relevant data from authoritative inputs. Evolving per-chunk state that must roll back belongs in a
-`ChunkField<T>` registered with `rollback: true` (see
-[per-chunk solver state](atmospherics_technical_documentation.md#123-per-chunk-solver-state-with-chunkfieldt)); caches
-invalidated by configuration changes belong in the gas attachments below.
+With the default `SolverDataLifetime.UntilRestore`, values survive ticks, configuration changes, solver removal, and
+pipeline resets. Checkpoint restoration and simulation disposal discard them without disposing the values. Reacquire on
+each callback and keep ownership of disposable services in host code. These values are transient: snapshots,
+checkpoints, recordings, and state hashes exclude them, so factories must rebuild replay-relevant data from
+authoritative inputs. Evolving per-chunk state that must roll back belongs in a `ChunkField<T>` registered with
+`rollback: true` (see
+[per-chunk solver state](atmospherics_technical_documentation.md#123-per-chunk-solver-state-with-chunkfieldt)).
 
-## Attaching solver data to gases
+## Caching data derived from the configuration
 
-Custom solvers can attach their own data to a registered gas without adding fields to `GasProperties`.
-`GetOrCreateGasSolverData<T>` stores one value per simulation, gas ID, and key, shared by all chunks:
+Keys created with `SolverDataLifetime.UntilConfigChange` are also dropped whenever the applied configuration changes,
+which makes them the place for per-gas tables and other data derived from the gas registry or solver settings:
 
 ```csharp
-private readonly object _coolingKey = new();
+static readonly SolverDataKey<float[]> CoolingFactors = new(
+    "my-mod/cooling-factors",
+    static simulation =>
+    {
+        var gases = simulation.Config.GasRegistry;
+        var factors = new float[gases.Count];
+        for (int gasId = 0; gasId < factors.Length; gasId++)
+            factors[gasId] = 1f / gases[gasId].MolarHeatCapacityAtConstantVolume;
 
-public void Solve(AtmosSimulation simulation)
-{
-    float coolingFactor = simulation.GetOrCreateGasSolverData(
-        gasId: 0, _coolingKey, gas => 1f / gas.MolarHeatCapacityAtConstantVolume);
-    // Use coolingFactor when processing this gas in any chunk.
-}
+        return factors;
+    },
+    SolverDataLifetime.UntilConfigChange);
 ```
 
-The factory receives normalized gas properties and runs only when that attachment is missing. Values can be custom
-classes, structs, arrays, or dictionaries. Request the same exact `T` for a slot on every call; a different type throws.
-Reference types retain identity, while structs are returned by value. Private object keys keep independent solvers
-separate; string keys compare ordinally and allow deliberate sharing.
-
-Attachments survive ticks and solver removal. Applying a changed configuration discards them, even when only reaction
-definitions change. This prevents cached gas or reaction indices from referring to the wrong entry after a registry
-edit. The built-in reaction solver uses this mechanism to cache each gas's coefficients by reaction ID and its linear
-rate factors or standard rate-law exponents before starting its workers. During a callback, attachments use the
-tick-start configuration; a configuration change takes effect on the next tick or the next attachment request outside a
-callback.
-
-Use these attachments for derived data or scratch storage. They are excluded from snapshots, checkpoints, recordings,
-and state hashes, and are discarded on checkpoint restoration. A replayable solver must rebuild them from configuration
-or other authoritative inputs. Evolving state that needs automatic rollback belongs in a `ChunkField<T>` registered with
-`rollback: true`.
-
-Reacquire attachments on each callback. Acquire them before dispatching worker tasks, since facade calls from a worker
-would block on the tick's state lock. The factory must not mutate the simulation or recursively request its own slot.
-Numos serializes creation; the solver synchronizes subsequent access to mutable values.
+Any configuration change drops the value, even when only reaction definitions change, so cached gas or reaction indices
+can't point at the wrong entry after a registry edit. The built-in reaction solver caches its per-gas coefficients this
+way. A configuration applied from a solver callback takes effect at the next tick, so inside a callback the factory sees
+the tick-start configuration through `simulation.Config`. Restore drops these values too.
 
 ## Configuring solvers without extending AtmosConfig
 
@@ -382,10 +372,12 @@ public sealed record FireSettings(int Strength) : IAtmosSolverConfiguration
 }
 ```
 
-Register it in `config.SolverConfigurations` and read its applied snapshot from
-`simulation.Config.SolverConfigurations` in the custom solver. Include every execution-relevant field in the hash; do
-not use process-randomized hashes such as `HashCode` or `string.GetHashCode()`. Configuration changes are recorded and
-restored with checkpoints. Derived gas attachments remain transient.
+Register it in `config.SolverConfigurations` and read its applied snapshot in the custom solver with
+`simulation.Config.TryGetSolverConfiguration(out FireSettings? fire)`, or by key with
+`TryGetSolverConfiguration("my-game/fire", out FireSettings? fire)` when the type can appear more than once. The lookup
+sees the captured snapshots, so ask for the type `CreateSnapshot` returns. Include every execution-relevant field in the
+hash; do not use process-randomized hashes such as `HashCode` or `string.GetHashCode()`. Configuration changes are
+recorded and restored with checkpoints. Data cached under `UntilConfigChange` keys remains transient.
 
 ## Reading Simulation State
 The facade returns detached snapshots for presentation, networking, and gameplay decisions. A snapshot is safe to retain after the call, but it is not live: request another snapshot when a consumer needs newer state.

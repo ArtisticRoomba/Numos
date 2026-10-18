@@ -78,7 +78,7 @@ internal sealed class SimulationWorkload : IDisposable
     {
         _solvers.Dispose();
         _sharedData.Clear();
-        Config.ClearGasSolverData();
+        Config.ClearConfigScopedData();
         Kernel.Dispose();
     }
 

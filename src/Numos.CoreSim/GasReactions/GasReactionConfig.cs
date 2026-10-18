@@ -7,7 +7,8 @@ namespace Numos.CoreSim.GasReactions;
 /// </summary>
 /// <remarks>
 ///     Register this object in <see cref="AtmosConfig.SolverConfigurations" />. Reaction IDs follow list order:
-///     linear reactions first, then standard reactions. Changing definitions invalidates derived gas attachments.
+///     linear reactions first, then standard reactions. Changing definitions invalidates data derived from the
+///     configuration.
 /// </remarks>
 /// <example>
 ///     <code>

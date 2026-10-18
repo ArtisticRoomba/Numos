@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using Numos.CoreSim.Solvers;
 using Numos.Maths;
 
@@ -14,7 +15,6 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
 {
     private Scalar[] _diffusionCoefficients = [];
     private GasRegistrySnapshot _gasRegistry = default!;
-    private GasSolverDataStorage _gasSolverData = new(0);
     private JoulePerMoleKelvin[] _molarHeatCapacitiesAtConstantVolume = [];
 
     private AtmosConfigSnapshot? _sourceConfig;
@@ -78,17 +78,28 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
 
     public int GasPropertyCount { get; private set; }
 
-    internal T GetOrCreateGasSolverData<T>(int gasId, object key, Func<GasProperties, T> factory) where T : notnull
-    {
-        if (!TryGetGasProperties(gasId, out var properties))
-            throw new ArgumentOutOfRangeException(nameof(gasId), "The gas is not registered.");
+    /// <summary>
+    ///     Gets solver data derived from this configuration. Every capture of a different configuration clears it.
+    /// </summary>
+    internal SolverDataStorage ConfigScopedData { get; } = new();
 
-        return _gasSolverData.GetOrCreate(gasId, key, properties, factory);
+    /// <inheritdoc cref="AtmosConfigSnapshot.TryGetSolverConfiguration{T}(out T)" />
+    internal bool TryGetSolverConfiguration<T>([NotNullWhen(true)] out T? configuration)
+        where T : class, IAtmosSolverConfiguration
+    {
+        return SolverConfigurationLookup.TryGet(SolverConfigurations, out configuration);
     }
 
-    internal void ClearGasSolverData()
+    /// <inheritdoc cref="AtmosConfigSnapshot.TryGetSolverConfiguration{T}(string, out T)" />
+    internal bool TryGetSolverConfiguration<T>(string key, [NotNullWhen(true)] out T? configuration)
+        where T : class, IAtmosSolverConfiguration
     {
-        _gasSolverData = new GasSolverDataStorage(GasPropertyCount);
+        return SolverConfigurationLookup.TryGet(SolverConfigurations, key, out configuration);
+    }
+
+    internal void ClearConfigScopedData()
+    {
+        ConfigScopedData.Clear();
     }
 
     internal void Capture(IAtmosConfig config)
@@ -174,7 +185,7 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
 
         SolverConfigurations = config.SolverConfigurations;
 
-        ClearGasSolverData();
+        ClearConfigScopedData();
         _sourceConfig = config as AtmosConfigSnapshot;
     }
 

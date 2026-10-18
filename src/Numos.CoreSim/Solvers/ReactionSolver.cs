@@ -21,7 +21,19 @@ internal class ReactionSolver : IAtmosSolverStage
     // buffer that just grows to the high-water mark removes that round trip entirely.
     [ThreadStatic]
     private static Mole[]? _reactionSpeedsScratch;
-    private readonly object _gasDataKey = new();
+    // Per-gas reaction data for the tick configuration, rebuilt when the configuration changes.
+    private readonly static SolverDataSlot<GasReactionData[]> GasDataSlot = new(
+        "gas-reactions/gas-data",
+        static context =>
+        {
+            var data = new GasReactionData[context.TickConfig.GasPropertyCount];
+            for (int gasId = 0; gasId < data.Length; gasId++)
+                data[gasId] = CreateGasReactionData(context.TickConfig, gasId);
+
+            return data;
+        },
+        resetOnConfigChange: true);
+
     private GasReactionMatrix? _changesMatrix;
     private GasReactionData[] _gasRateOrder = [];
     private GasReactionData[] _gasReactionData = [];
@@ -39,14 +51,8 @@ internal class ReactionSolver : IAtmosSolverStage
         if (_gasReactionData.Length != context.TickConfig.GasPropertyCount)
             _gasReactionData = new GasReactionData[context.TickConfig.GasPropertyCount];
 
-        for (int gasId = 0; gasId < _gasReactionData.Length; gasId++)
-        {
-            int registeredGasId = gasId;
-            _gasReactionData[gasId] = context.TickConfig.GetOrCreateGasSolverData(
-                gasId,
-                _gasDataKey,
-                _ => CreateGasReactionData(context.TickConfig, registeredGasId));
-        }
+        // Copy rather than alias: the finally block below clears this working array.
+        Array.Copy(context.GetSolverData(GasDataSlot), _gasReactionData, _gasReactionData.Length);
 
         _gasRateOrder = _gasReactionData.OrderBy(static gas => gas.GasName, StringComparer.Ordinal).ToArray();
         _changesMatrix = new GasReactionMatrix(_gasReactionData, reactionCount);

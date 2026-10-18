@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using Numos.CoreSim.Replay;
 using Numos.Maths;
 
@@ -104,6 +105,58 @@ public sealed class AtmosConfigSnapshot : IAtmosConfig
     ///     Gets immutable solver-owned configurations ordered by their ordinal keys.
     /// </summary>
     public IReadOnlyList<IAtmosSolverConfiguration> SolverConfigurations { get; }
+
+    /// <summary>
+    ///     Finds the only solver configuration of type <typeparamref name="T" />.
+    /// </summary>
+    /// <typeparam name="T">
+    ///     The captured configuration type: whatever <see cref="IAtmosSolverConfiguration.CreateSnapshot" /> returned,
+    ///     which need not be the type added to <see cref="AtmosConfig.SolverConfigurations" />.
+    /// </typeparam>
+    /// <param name="configuration">The match, or <see langword="null" /> when there is none.</param>
+    /// <returns><see langword="true" /> when exactly one configuration is a <typeparamref name="T" />.</returns>
+    /// <remarks>
+    ///     Use this when a configuration type is only ever registered once. Types that can appear under several keys
+    ///     should use <see cref="TryGetSolverConfiguration{T}(string, out T)" /> instead.
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">
+    ///     More than one configuration is a <typeparamref name="T" />.
+    /// </exception>
+    /// <example>
+    ///     <code>
+    ///     if (simulation.Config.TryGetSolverConfiguration(out HeaterSettings? heater))
+    ///         rate = heater.Rate;
+    ///     </code>
+    /// </example>
+    public bool TryGetSolverConfiguration<T>([NotNullWhen(true)] out T? configuration)
+        where T : class, IAtmosSolverConfiguration
+    {
+        return SolverConfigurationLookup.TryGet(SolverConfigurations, out configuration);
+    }
+
+    /// <summary>
+    ///     Finds the solver configuration registered under <paramref name="key" />.
+    /// </summary>
+    /// <typeparam name="T">The captured configuration type expected under <paramref name="key" />.</typeparam>
+    /// <param name="key">The configuration's <see cref="IAtmosSolverConfiguration.Key" />, compared ordinally.</param>
+    /// <param name="configuration">The match, or <see langword="null" /> when no configuration uses the key.</param>
+    /// <returns><see langword="true" /> when a configuration uses <paramref name="key" />.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="key" /> is <see langword="null" />.</exception>
+    /// <exception cref="InvalidOperationException">
+    ///     The configuration under <paramref name="key" /> is not a <typeparamref name="T" />.
+    /// </exception>
+    /// <example>
+    ///     <code>
+    ///     if (simulation.Config.TryGetSolverConfiguration("my-mod/heater", out HeaterSettings? heater))
+    ///         rate = heater.Rate;
+    ///     </code>
+    /// </example>
+    public bool TryGetSolverConfiguration<T>(string key, [NotNullWhen(true)] out T? configuration)
+        where T : class, IAtmosSolverConfiguration
+    {
+        return SolverConfigurationLookup.TryGet(SolverConfigurations, key, out configuration);
+    }
+
     /// <inheritdoc cref="AtmosConfig.GlobalTemperature" />
     [ConfigCheckpointField(0)] public Kelvin GlobalTemperature { get; }
     /// <inheritdoc cref="AtmosConfig.DefaultTemperatureFallback" />
