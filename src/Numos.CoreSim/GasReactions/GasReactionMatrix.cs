@@ -10,8 +10,8 @@ namespace Numos.CoreSim.GasReactions;
 ///     Storage is the transpose of that (reaction-major, so <see cref="GetReactionRow" /> returns one
 ///     reaction's whole column of S as a contiguous span), because the per-voxel hot loop applies one
 ///     reaction at a time to every gas -- a single lane-independent vector add per reaction, visiting
-///     every (gas, reaction) term in the same order a per-gas accumulation would. Rebuilt once per solve from the
-///     per-gas <see cref="GasReactionData.Changes" /> columns.
+///     every (gas, reaction) term in the same order a per-gas accumulation would. Built once per configuration from
+///     the per-gas <see cref="GasReactionData.Changes" /> columns and read-only afterwards, so workers share it.
 /// </remarks>
 internal sealed class GasReactionMatrix
 {
@@ -40,5 +40,5 @@ internal sealed class GasReactionMatrix
     /// <summary>
     ///     Every gas's mole change for one reaction, in gas-ID order.
     /// </summary>
-    internal Span<Mole> GetReactionRow(int reactionId) => _changesByReaction.AsSpan(reactionId * GasCount, GasCount);
+    internal ReadOnlySpan<Mole> GetReactionRow(int reactionId) => _changesByReaction.AsSpan(reactionId * GasCount, GasCount);
 }

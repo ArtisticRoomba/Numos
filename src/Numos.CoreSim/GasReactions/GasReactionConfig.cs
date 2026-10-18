@@ -124,18 +124,9 @@ public sealed class GasReactionConfig : IAtmosSolverConfiguration
 
     internal static GasReactionConfig Get(IAtmosConfig config)
     {
-        for (int i = 0; i < config.SolverConfigurations.Count; i++)
-        {
-            var settings = config.SolverConfigurations[i];
-            if (settings.Key == ConfigurationKey)
-            {
-                return settings as GasReactionConfig ??
-                       throw new InvalidOperationException(
-                           $"Configuration '{ConfigurationKey}' must be a {nameof(GasReactionConfig)}.");
-            }
-        }
-
-        return Empty;
+        return SolverConfigurationLookup.TryGet(config.SolverConfigurations, ConfigurationKey, out GasReactionConfig? reactions)
+            ? reactions
+            : Empty;
     }
 
     internal JoulePerMole GetEnergyBalance(int reactionId) => _energyBalances[reactionId];

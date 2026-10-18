@@ -115,7 +115,7 @@ public class GasReactionTests
         var chunk = new AtmosChunk(3, 1, 1);
         float[] feedback = [0f];
         var solver = new ReactionSolver();
-        Assert.That(() => solver.ProcessChunk(chunk, 0.1f, config, feedback), Throws.Nothing);
+        Assert.That(() => solver.ProcessChunk(chunk, 0.1f, config, ReactionTables.Create(config), feedback), Throws.Nothing);
         Assert.That(feedback, Is.EqualTo(new[] { 0f }));
     }
 
@@ -311,8 +311,9 @@ public class GasReactionTests
 
         //run reactions. wheeeeee
         float[] totalReactions = new float[standardReactions.Count];
+        var tables = ReactionTables.Create(snapshotConfig);
         for (float i = 0; i < 10; i += 0.125f)
-            solver.ProcessChunk(chunk, 0.125f, snapshotConfig, totalReactions);
+            solver.ProcessChunk(chunk, 0.125f, snapshotConfig, tables, totalReactions);
 
 
         Assert.That(totalReactions.All(e => !float.IsNaN(e)));
@@ -412,9 +413,10 @@ public class GasReactionTests
         }
 
         float[] feedback = [0];
+        var tables = ReactionTables.Create(config);
         for (int r = 0; r < 100; r++)
         {
-            solver.ProcessChunk(chunk, 1, config, feedback);
+            solver.ProcessChunk(chunk, 1, config, tables, feedback);
             for (ushort i = 0; i < 64; i++)
             {
                 chunk.InjectGasToVoxel(i, 0, 0.000005f, 293, 1, 1);
@@ -501,6 +503,7 @@ public class GasReactionTests
         }
 
         var solver = new ReactionSolver();
+        var tables = ReactionTables.Create(config);
         var sequentialChunk = BuildIgnitedChunk();
         var parallelChunk = BuildIgnitedChunk();
         float[] sequentialFeedback = [0];
@@ -510,8 +513,8 @@ public class GasReactionTests
         {
             // awakeChunkCount >= worker count always takes the sequential branch; 1 always takes the
             // parallel one (a real chunk count can never be below 1), regardless of the machine's core count.
-            solver.ProcessChunk(sequentialChunk, 1, config, sequentialFeedback, awakeChunkCount: int.MaxValue);
-            solver.ProcessChunk(parallelChunk, 1, config, parallelFeedback, awakeChunkCount: 1);
+            solver.ProcessChunk(sequentialChunk, 1, config, tables, sequentialFeedback, awakeChunkCount: int.MaxValue);
+            solver.ProcessChunk(parallelChunk, 1, config, tables, parallelFeedback, awakeChunkCount: 1);
 
             for (ushort i = 0; i < 64; i++)
             {
@@ -586,7 +589,7 @@ public class GasReactionTests
         chunk.InjectGasToVoxel(0, 2, 1000f, 293, 1, 1); // C: abundant
 
         float[] feedback = [0, 0];
-        solver.ProcessChunk(chunk, 1, config, feedback);
+        solver.ProcessChunk(chunk, 1, config, ReactionTables.Create(config), feedback);
 
         // A's scarcity must only throttle the reaction that consumes it (consumesA), never producesA,
         // which only ever adds A to the mixture and so can't be responsible for depleting it.

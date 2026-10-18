@@ -21,67 +21,35 @@ internal class ReactionSolver : IAtmosSolverStage
     // buffer that just grows to the high-water mark removes that round trip entirely.
     [ThreadStatic]
     private static Mole[]? _reactionSpeedsScratch;
-    // Per-gas reaction data for the tick configuration, rebuilt when the configuration changes.
-    private readonly static SolverDataSlot<GasReactionData[]> GasDataSlot = new(
-        "gas-reactions/gas-data",
-        static context =>
-        {
-            var data = new GasReactionData[context.TickConfig.GasPropertyCount];
-            for (int gasId = 0; gasId < data.Length; gasId++)
-                data[gasId] = CreateGasReactionData(context.TickConfig, gasId);
-
-            return data;
-        },
+    // Reaction tables for the tick configuration, rebuilt when the configuration changes.
+    private readonly static SolverDataSlot<ReactionTables> TablesSlot = new(
+        "gas-reactions/tables",
+        static context => ReactionTables.Create(context.TickConfig),
         resetOnConfigChange: true);
-
-    private GasReactionMatrix? _changesMatrix;
-    private GasReactionData[] _gasRateOrder = [];
-    private GasReactionData[] _gasReactionData = [];
-    private IAtmosConfig? _preparedConfig;
 
     public void Solve(AtmosSolverExecutionContext context)
     {
-        int reactionCount = GasReactionConfig.Get(context.TickConfig).Count;
-
         //fast skip for empty configs.
-        if (reactionCount == 0 || context.TickConfig.GasPropertyCount == 0)
+        if (GasReactionConfig.Get(context.TickConfig).Count == 0 || context.TickConfig.GasPropertyCount == 0)
             return;
 
-        // Build once before workers start. Array indices retain the configured reaction order.
-        if (_gasReactionData.Length != context.TickConfig.GasPropertyCount)
-            _gasReactionData = new GasReactionData[context.TickConfig.GasPropertyCount];
+        ReactionTables tables = context.GetSolverData(TablesSlot);
 
-        // Copy rather than alias: the finally block below clears this working array.
-        Array.Copy(context.GetSolverData(GasDataSlot), _gasReactionData, _gasReactionData.Length);
-
-        _gasRateOrder = _gasReactionData.OrderBy(static gas => gas.GasName, StringComparer.Ordinal).ToArray();
-        _changesMatrix = new GasReactionMatrix(_gasReactionData, reactionCount);
-        _preparedConfig = context.TickConfig;
-        try
+        // Told to ProcessChunk so it knows whether this outer per-chunk dispatch already saturates
+        // the worker pool, mirroring ThermodynamicsSolver/PhaseChangeSolver's awakeChunkCount gate.
+        // A single dense chunk only has per-voxel work to offer, so its write-back pass needs its
+        // own parallelism to use the other workers; once enough awake chunks occupy every worker,
+        // a second layer of parallelism inside each chunk is just dispatch overhead.
+        int awakeChunkCount = 0;
+        for (int i = 0; i < context.Chunks.Length; i++)
         {
-            // Told to ProcessChunk so it knows whether this outer per-chunk dispatch already saturates
-            // the worker pool, mirroring ThermodynamicsSolver/PhaseChangeSolver's awakeChunkCount gate.
-            // A single dense chunk only has per-voxel work to offer, so its write-back pass needs its
-            // own parallelism to use the other workers; once enough awake chunks occupy every worker,
-            // a second layer of parallelism inside each chunk is just dispatch overhead.
-            int awakeChunkCount = 0;
-            for (int i = 0; i < context.Chunks.Length; i++)
-            {
-                if (context.Chunks[i].IsAwake && context.Chunks[i].ActiveAirCount > 0)
-                    awakeChunkCount++;
-            }
+            if (context.Chunks[i].IsAwake && context.Chunks[i].ActiveAirCount > 0)
+                awakeChunkCount++;
+        }
 
-            ParallelHelper.ForEach<AtmosChunk, ProcessChunkAction>(
-                context.Chunks,
-                new ProcessChunkAction(this, context.TickConfig, awakeChunkCount));
-        }
-        finally
-        {
-            _preparedConfig = null;
-            _changesMatrix = null;
-            Array.Clear(_gasReactionData);
-            _gasRateOrder = [];
-        }
+        ParallelHelper.ForEach<AtmosChunk, ProcessChunkAction>(
+            context.Chunks,
+            new ProcessChunkAction(this, context.TickConfig, tables, awakeChunkCount));
     }
 
     private static Mole[] RentReactionSpeeds(int reactionCount)
@@ -102,6 +70,7 @@ internal class ReactionSolver : IAtmosSolverStage
     /// <param name="chunk">The chunk whose voxels should react.</param>
     /// <param name="deltaTime">Over which timespan reactions should occur.</param>
     /// <param name="config">The gas registry and reaction definitions to react against.</param>
+    /// <param name="tables">The reaction tables built from <paramref name="config" />.</param>
     /// <param name="reactionCount">
     ///     Optional accumulator, index = reaction ID, incremented by how many times each reaction fired
     ///     across the whole chunk. Pass null to skip collecting this.
@@ -113,9 +82,11 @@ internal class ReactionSolver : IAtmosSolverStage
     ///     instead. Defaults to 1 (i.e. "parallelize") for callers processing a single chunk directly.
     /// </param>
     internal void ProcessChunk(
-        AtmosChunk chunk, Second deltaTime, IAtmosConfig config, Scalar[]? reactionCount = null,
+        AtmosChunk chunk, Second deltaTime, IAtmosConfig config, ReactionTables tables, Scalar[]? reactionCount = null,
         int awakeChunkCount = 1)
     {
+        Debug.Assert(tables.GasData.Length == config.GasPropertyCount, "Reaction tables were built from another config.");
+
         // Restricted to ActiveAirIndices, like ThermalDiffusionSolver and PhaseChangeSolver.
         int activeAirCount = chunk.ActiveAirCount;
         if (activeAirCount == 0)
@@ -130,14 +101,6 @@ internal class ReactionSolver : IAtmosSolverStage
 
         int mixtureLength = config.GasPropertyCount;
         CubicMetre volume = config.GetVoxelVolume();
-        // Resolved once for the whole chunk instead of once per voxel.
-        ResolveReactionState(
-            config,
-            mixtureLength,
-            out var reactions,
-            out GasReactionData[] gasData,
-            out GasReactionData[] rateOrder,
-            out var changesMatrix);
 
         // One chunk-wide voxel-by-gas matrix instead of a separately pooled array per voxel: this is
         // the same "stop renting per item, slice a shared buffer instead" move as the reaction matrix,
@@ -158,10 +121,7 @@ internal class ReactionSolver : IAtmosSolverStage
                 mixtures,
                 newTemps,
                 mixtureLength,
-                reactions,
-                gasData,
-                rateOrder,
-                changesMatrix));
+                tables));
 
         // Put data back. This is an O(activeAirCount * mixtureLength) pass that doesn't shrink with
         // worker count, so run serially it caps scaling for a dense chunk that is the only source of
@@ -259,33 +219,6 @@ internal class ReactionSolver : IAtmosSolverStage
         }
     }
 
-    /// <summary>
-    ///     Resolves the per-gas reaction data, canonical rate-factor order, and change matrix for a
-    ///     configuration, reusing this tick's prepared arrays when possible. A config other than the one
-    ///     <see cref="Solve" /> prepared (e.g. from a direct kernel caller) is rebuilt instead of cached.
-    /// </summary>
-    private void ResolveReactionState(
-        IAtmosConfig config, int mixtureLength,
-        out GasReactionConfig reactions, out GasReactionData[] gasData,
-        out GasReactionData[] rateOrder, out GasReactionMatrix changesMatrix)
-    {
-        reactions = GasReactionConfig.Get(config);
-        if (ReferenceEquals(_preparedConfig, config))
-        {
-            gasData = _gasReactionData;
-            rateOrder = _gasRateOrder;
-            changesMatrix = _changesMatrix!;
-            return;
-        }
-
-        gasData = new GasReactionData[mixtureLength];
-        for (int gasId = 0; gasId < mixtureLength; gasId++)
-            gasData[gasId] = CreateGasReactionData(config, gasId);
-
-        rateOrder = gasData.OrderBy(static gas => gas.GasName, StringComparer.Ordinal).ToArray();
-        changesMatrix = new GasReactionMatrix(gasData, reactions.Count);
-    }
-
     // Sensible energy of the mixture at its current temperature: sum of moles * Cv * T over gases.
     private static Joule ExtractHeat(
         ReadOnlySpan<Mole> mixtureVector, ref readonly Kelvin temperature, int mixtureLength, IAtmosConfig config)
@@ -336,39 +269,27 @@ internal class ReactionSolver : IAtmosSolverStage
         Second deltaTime, Span<Mole> mixtureVector, ref Kelvin currentTemperature,
         Scalar[]? reactionFeedback, IAtmosConfig config, int mixtureLength)
     {
-        ResolveReactionState(
-            config,
-            mixtureLength,
-            out var reactions,
-            out GasReactionData[] gasData,
-            out GasReactionData[] rateOrder,
-            out var changesMatrix);
-
-        CubicMetre volume = config.GetVoxelVolume();
-
         ProcessMixtureCore(
             deltaTime,
             mixtureVector,
             ref currentTemperature,
-            volume,
+            config.GetVoxelVolume(),
             reactionFeedback,
             config,
             mixtureLength,
-            reactions,
-            gasData,
-            rateOrder,
-            changesMatrix);
+            ReactionTables.Create(config));
     }
 
     /// <summary>
-    ///     Does the actual per-voxel reaction work once the caller has resolved <paramref name="reactions" />,
-    ///     <paramref name="gasData" />, <paramref name="rateOrder" />, and <paramref name="changesMatrix" />.
+    ///     Does the actual per-voxel reaction work against prebuilt <paramref name="tables" />.
     /// </summary>
     private static void ProcessMixtureCore(
         Second deltaTime, Span<Mole> mixtureVector, ref Kelvin currentTemperature, CubicMetre volume,
-        Scalar[]? reactionFeedback, IAtmosConfig config, int mixtureLength,
-        GasReactionConfig reactions, GasReactionData[] gasData, GasReactionData[] rateOrder, GasReactionMatrix changesMatrix)
+        Scalar[]? reactionFeedback, IAtmosConfig config, int mixtureLength, ReactionTables tables)
     {
+        GasReactionConfig reactions = tables.Reactions;
+        GasReactionData[] gasData = tables.GasData;
+
         // GetVoxelVolume always returns a finite positive volume, so only the timestep needs checking.
         if (!float.IsFinite(deltaTime))
             return;
@@ -390,7 +311,7 @@ internal class ReactionSolver : IAtmosSolverStage
 
             // Preserve canonical gas-name and factor order independently of registry indices.
             ConcentrationPerSecond64 rate64 = rate;
-            foreach (var gas in rateOrder)
+            foreach (var gas in tables.RateOrder)
                 rate64 = gas.ApplyRateFactors(reactionId, (Mole64)mixtureVector[gas.GasId] / volume, rate64);
 
             // +inf is a legitimate overflow here and saturates below.
@@ -524,7 +445,7 @@ internal class ReactionSolver : IAtmosSolverStage
         //bit-exact regardless of hardware SIMD width.
         Span<Mole> mixture = mixtureVector[..mixtureLength];
         for (int j = 0; j < reactionCount; j++)
-            TensorPrimitives.MultiplyAdd(changesMatrix.GetReactionRow(j), reactionSpeeds[j], mixture, mixture);
+            TensorPrimitives.MultiplyAdd(tables.Matrix.GetReactionRow(j), reactionSpeeds[j], mixture, mixture);
 
         for (int j = 0; j < reactionCount; j++)
         {
@@ -562,20 +483,15 @@ internal class ReactionSolver : IAtmosSolverStage
         return false;
     }
 
-    private static GasReactionData CreateGasReactionData(IAtmosConfig config, int gasId)
-    {
-        config.TryGetGasProperties(gasId, out var gas);
-        return GasReactionConfig.Get(config).CreateGasData(gasId, gas);
-    }
-
     private readonly struct ProcessChunkAction(
         ReactionSolver solver,
         IAtmosConfig config,
+        ReactionTables tables,
         int awakeChunkCount) : IInAction<AtmosChunk>
     {
         public void Invoke(in AtmosChunk chunk)
         {
-            solver.ProcessChunk(chunk, AtmosSolverConstants.FixedTimeStep, config, awakeChunkCount: awakeChunkCount);
+            solver.ProcessChunk(chunk, AtmosSolverConstants.FixedTimeStep, config, tables, awakeChunkCount: awakeChunkCount);
         }
     }
 
@@ -628,17 +544,14 @@ internal class ReactionSolver : IAtmosSolverStage
         Mole[] mixtures,
         Kelvin[] newTemps,
         int mixtureLength,
-        GasReactionConfig reactions,
-        GasReactionData[] gasData,
-        GasReactionData[] rateOrder,
-        GasReactionMatrix changesMatrix) : IAction
+        ReactionTables tables) : IAction
     {
         public void Invoke(int activeIndex)
         {
             ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
             Kelvin temp = chunk.Temperature[voxelIndex];
             Scalar[]? reactionFeedback =
-                reactionCount == null ? null : ArrayPool<Scalar>.Shared.Rent(reactions.Count);
+                reactionCount == null ? null : ArrayPool<Scalar>.Shared.Rent(tables.Reactions.Count);
 
             if (reactionFeedback != null)
                 Array.Clear(reactionFeedback, 0, reactionFeedback.Length);
@@ -668,10 +581,7 @@ internal class ReactionSolver : IAtmosSolverStage
                 reactionFeedback,
                 config,
                 mixtureLength,
-                reactions,
-                gasData,
-                rateOrder,
-                changesMatrix);
+                tables);
 
             chunk.Temperature[voxelIndex] = temp;
             newTemps[activeIndex] = temp;
