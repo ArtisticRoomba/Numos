@@ -136,7 +136,6 @@ internal class ReactionSolver : IAtmosSolverStage
             0,
             activeAirCount,
             new ProcessVoxelAction(
-                this,
                 chunk,
                 deltaTime,
                 config,
@@ -577,7 +576,6 @@ internal class ReactionSolver : IAtmosSolverStage
     }
 
     private readonly struct ProcessVoxelAction(
-        ReactionSolver solver,
         AtmosChunk chunk,
         Second deltaTime,
         IAtmosConfig config,
