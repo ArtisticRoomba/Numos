@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk"
+         TreatAsLocalProperty="PublishAot;PublishTrimmed;RuntimeIdentifier;SelfContained">
+
+    <Import Project="..\Numos.CoreSim\Version.props"/>
+
+    <PropertyGroup>
+        <TargetFramework>netstandard2.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <LangVersion>latest</LangVersion>
+        <RootNamespace>Numos.API.Generators</RootNamespace>
+        <Description>Source generators shipped inside the Numos.API package.</Description>
+        <!-- Shipped as an analyzer inside the Numos.API package rather than as a package of its own. -->
+        <IsPackable>false</IsPackable>
+        <!-- IDEs cache analyzer assemblies by identity, so the version has to move with every release. -->
+        <AssemblyVersion>$(FileVersion)</AssemblyVersion>
+        <IsAotCompatible>false</IsAotCompatible>
+        <IsTrimmable>false</IsTrimmable>
+        <PublishAot>false</PublishAot>
+        <PublishTrimmed>false</PublishTrimmed>
+        <SelfContained>false</SelfContained>
+        <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
+        <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <InternalsVisibleTo Include="Numos.API.Generators.Tests"/>
+    </ItemGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.0.0" PrivateAssets="all"/>
+        <PackageReference Include="Microsoft.CodeAnalysis.Analyzers" Version="3.11.0" PrivateAssets="all"/>
+    </ItemGroup>
+
+</Project>
