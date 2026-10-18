@@ -119,6 +119,7 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
         {
             Array.Resize(ref _molarHeatCapacitiesAtConstantVolume, gasPropertyCount);
             Array.Resize(ref _diffusionCoefficients, gasPropertyCount);
+            Array.Resize(ref _thermalConductivities, gasPropertyCount);
         }
 
         GasPropertyCount = gasPropertyCount;
