@@ -123,6 +123,7 @@ internal class ReactionSolver : IAtmosSolverStage
         }
 
         int mixtureLength = config.GasPropertyCount;
+        CubicMetre volume = config.GetVoxelVolume();
         // Resolved once for the whole chunk instead of once per voxel.
         ResolveReactionState(
             config,
@@ -144,6 +145,7 @@ internal class ReactionSolver : IAtmosSolverStage
             new ProcessVoxelAction(
                 chunk,
                 deltaTime,
+                volume,
                 config,
                 reactionCount,
                 reactionFeedbacks,
@@ -361,7 +363,8 @@ internal class ReactionSolver : IAtmosSolverStage
         Scalar[]? reactionFeedback, IAtmosConfig config, int mixtureLength,
         GasReactionConfig reactions, GasReactionData[] gasData, GasReactionData[] rateOrder, GasReactionMatrix changesMatrix)
     {
-        if (!float.IsFinite(volume) || volume <= 0f || !float.IsFinite(deltaTime))
+        // GetVoxelVolume always returns a finite positive volume, so only the timestep needs checking.
+        if (!float.IsFinite(deltaTime))
             return;
 
         Joule energy = ExtractHeat(mixtureVector, ref currentTemperature, mixtureLength, config);
@@ -612,6 +615,7 @@ internal class ReactionSolver : IAtmosSolverStage
     private readonly struct ProcessVoxelAction(
         AtmosChunk chunk,
         Second deltaTime,
+        CubicMetre volume,
         IAtmosConfig config,
         Scalar[]? reactionCount,
         Scalar[][]? reactionFeedbacks,
@@ -649,8 +653,6 @@ internal class ReactionSolver : IAtmosSolverStage
             newTemps[activeIndex] = temp;
             if (content <= 0.0001)
                 return;
-
-            CubicMetre volume = config.GetVoxelVolume();
 
             ProcessMixtureCore(
                 deltaTime,
