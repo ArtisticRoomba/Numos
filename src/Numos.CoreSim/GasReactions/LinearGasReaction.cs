@@ -210,7 +210,7 @@ public readonly partial record struct LinearGasReaction
         IDictionary<GasProperties, float> gasMolarities,
         [Quantity("temperature")] Kelvin temperature)
     {
-        ConcentrationPerSecond result = GetRateConstantForTemperature(temperature);
+        ConcentrationPerSecond64 result = GetRateConstantForTemperature(temperature);
         foreach (var factor in SpeedFactors.OrderBy(static factor => factor.Gas.Name, StringComparer.Ordinal)
                      .ThenBy(static factor => factor.OrderKey))
         {
@@ -218,6 +218,6 @@ public readonly partial record struct LinearGasReaction
             result *= factor.GetFactor(molarity);
         }
 
-        return result;
+        return (ConcentrationPerSecond)result;
     }
 }

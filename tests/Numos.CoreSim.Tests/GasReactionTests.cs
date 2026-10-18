@@ -332,12 +332,12 @@ public class GasReactionTests
         // sequential per-voxel writeback) so a change to the material-limiter or the reaction-application math that
         // alters results -- not just one that introduces NaNs -- shows up here, even if the new result still "looks"
         // plausible.
-        Assert.That(totalReactionSum, Is.EqualTo(1761.50867f));
+        Assert.That(totalReactionSum, Is.EqualTo(1748.375f));
 
         float[] expectedGasSums =
         [
-            115.87315f, 88.2810822f, 73.1871414f, 54.6985245f, 32.2045975f, 26.4554863f, 152.032593f, 92.033844f,
-            160.813126f, 205.469788f, 119.662415f, 172.016541f, 24.7143288f, 145.924271f, 93.1175461f, 29.038166f
+            117.509941f, 89.0192337f, 73.2357712f, 53.959713f, 32.20401f, 27.7848625f, 154.733566f, 92.7390213f,
+            160.163467f, 205.674927f, 120.063652f, 172.131424f, 26.0361919f, 145.68103f, 93.1283493f, 27.7838879f
         ];
         Assert.Multiple(() => {
         foreach (var gc in chunk.ActiveGases.Take(chunk.ActiveGasCount).OrderBy(g => g.GasId))
