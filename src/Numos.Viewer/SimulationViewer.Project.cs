@@ -113,7 +113,8 @@ public partial class SimulationViewer
                 {
                     { Hydrogen, 1 },
                     { Oxygen, 0.5f }
-                });
+                },
+                true);
 
             config.SolverConfigurations = [new GasReactionConfig(standardReactions: [hydrogenFire])];
         }

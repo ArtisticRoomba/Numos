@@ -219,8 +219,10 @@ public class GasReactionTests
             _ =>
             {
                 float temperature = 320f;
+                float ignitionPercent = 0f;
+                float ignitedVolumeTemp = 0f;
                 float[] feedback = new float[2];
-                new ReactionSolver().ProcessVoxel(1f, molarity.Reverse().ToArray(), ref temperature, feedback, second, gases.Length);
+                new ReactionSolver().ProcessVoxel(1f, molarity.Reverse().ToArray(), ref temperature, ref ignitionPercent, ref ignitedVolumeTemp, feedback, second, gases.Length);
                 Assert.That(
                     feedback.Select(BitConverter.SingleToInt32Bits),
                     Is.EqualTo(expected.Select(BitConverter.SingleToInt32Bits)));
@@ -625,9 +627,12 @@ public class GasReactionTests
         float[] mixture = [5f, 2f, 0f, 0f];
         float temperature = 300f;
         float[] feedback = [0f, 0f];
+        float ignitionPercent = 0f;
+        float ignitedVolumeTemp = 0f;
+
 
         var solver = new ReactionSolver();
-        solver.ProcessVoxel(1f, mixture, ref temperature, feedback, config, 4);
+        solver.ProcessVoxel(1f, mixture, ref temperature, ref ignitionPercent, ref ignitedVolumeTemp, feedback, config, 4);
 
         Assert.Multiple(() =>
         {
@@ -681,9 +686,11 @@ public class GasReactionTests
         float[] mixture = [1_000_000f];
         float temperature = 300f;
         float[] feedback = [0f, 0f, 0f, 0f];
+        float ignitionPercent = 0f;
+        float ignitedVolumeTemp = 0f;
 
         var solver = new ReactionSolver();
-        solver.ProcessVoxel(1f, mixture, ref temperature, feedback, config, 1);
+        solver.ProcessVoxel(1f, mixture, ref temperature, ref ignitionPercent, ref ignitedVolumeTemp, feedback, config, 1);
 
         Assert.Multiple(() =>
         {

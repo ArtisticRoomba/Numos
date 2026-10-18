@@ -36,7 +36,8 @@ frequency | PerSecond | global::System.Single | time=-1
 molarConcentration | MolePerCubicMetre | global::System.Single | amount=1,length=-3
 concentrationPerSecond | ConcentrationPerSecond | global::System.Single | amount=1,length=-3,time=-1
 concentrationPerSecond64 | ConcentrationPerSecond64 | global::System.Double | amount=1,length=-3,time=-1
-
+velocity | MeterPerSecond | global::System.Single | length=1,time=-1
+thermalDiffusivity | SquareMetrePerSecond | global::System.Single | length=2,time=-1
 
 # Boundary conversions use: convert | canonical quantity id | unit name | storage type | scale | offset
 # canonical = input * scale + offset

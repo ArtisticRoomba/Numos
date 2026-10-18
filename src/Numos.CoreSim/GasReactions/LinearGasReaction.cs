@@ -98,6 +98,8 @@ public readonly partial record struct LinearGasReaction
 
     private FrozenSet<LinearSpeedFactor> SpeedFactors { get; }
 
+    internal bool RequiresIgnition { get; }
+
     internal void AppendHash(ref AtmosStateHasher hash)
     {
         hash.Add(EnergyBalance);
