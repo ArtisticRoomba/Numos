@@ -25,7 +25,6 @@ internal sealed partial class AtmosKernel : IDisposable
     /// </summary>
     internal int TickCount;
 
-    private Second _accumulator;
     private long _chunkCollectionRevision;
     private ConcurrentDictionary<Int3, AtmosChunk> _chunkMap = new();
     private AtmosConfigSnapshot _config = new AtmosConfig().CreateSnapshot();

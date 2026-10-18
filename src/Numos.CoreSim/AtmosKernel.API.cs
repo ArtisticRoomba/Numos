@@ -68,45 +68,6 @@ internal sealed partial class AtmosKernel
     }
 
     /// <summary>
-    ///     Advances the simulation by elapsed real time, running as many whole fixed ticks as it covers.
-    /// </summary>
-    /// <param name="elapsedSeconds">Elapsed real time, in seconds, since the previous update.</param>
-    /// <remarks>
-    ///     The kernel runs at <see cref="AtmosSolverConstants.SimulationRate" />. At most
-    ///     <see cref="AtmosSolverConstants.MaximumStepsPerUpdate" /> ticks are processed by one call; excess
-    ///     accumulated time is discarded to prevent an unbounded catch-up loop. Values smaller than one fixed
-    ///     step remain in the accumulator for a later call.
-    /// </remarks>
-    internal void Update(Second elapsedSeconds)
-    {
-        lock (StateGate)
-        {
-            ThrowIfTickExecuting("update the simulation recursively");
-            _accumulator += elapsedSeconds;
-
-            if (_accumulator > AtmosSolverConstants.FixedTimeStep * AtmosSolverConstants.MaximumStepsPerUpdate)
-            {
-                _accumulator =
-                    AtmosSolverConstants.FixedTimeStep * AtmosSolverConstants.MaximumStepsPerUpdate;
-            }
-
-            LastBoundaryTicks = 0;
-
-            // One elapsed-time update is one externally atomic batch. Solver callbacks may edit the pipeline, but
-            // chunk lifecycle changes are rejected until the batch completes.
-            AtmosChunk[] chunks = OrderedChunks();
-            int steps = 0;
-            while (_accumulator >= AtmosSolverConstants.FixedTimeStep &&
-                   steps < AtmosSolverConstants.MaximumStepsPerUpdate)
-            {
-                _accumulator -= AtmosSolverConstants.FixedTimeStep;
-                steps++;
-                TickSimulation(chunks);
-            }
-        }
-    }
-
-    /// <summary>
     ///     Rejects public operations that would begin another tick from a running solver callback.
     /// </summary>
     internal void EnsureCanExecuteTick()
@@ -616,7 +577,7 @@ internal sealed partial class AtmosKernel
     /// <summary>
     ///     Runs exactly one fixed simulation tick using the current configuration.
     /// </summary>
-    /// <remarks>This bypasses the elapsed-time accumulator and is useful for deterministic driving and tests.</remarks>
+    /// <remarks>Elapsed-time accumulation lives on the owning world; this is for deterministic driving and benchmarks.</remarks>
     internal void Tick()
     {
         lock (StateGate)

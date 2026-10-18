@@ -3,7 +3,7 @@ using Numos.CoreSim.Replay;
 namespace Numos.API.Tests;
 
 [TestFixture]
-public sealed class AtmosReplayTimelineTests
+public sealed class AtmosWorldReplayTimelineTests
 {
     [Test]
     public void Scrub_UsesTickBoundaryRetainsFutureAndReturnsToHeadWithoutBranching()

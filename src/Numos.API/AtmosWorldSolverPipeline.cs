@@ -76,7 +76,7 @@ public sealed class AtmosWorldSolverPipeline
     ///     <paramref name="after" /> are given.
     /// </exception>
     /// <exception cref="KeyNotFoundException">The <paramref name="before" /> or <paramref name="after" /> stage is not registered.</exception>
-    /// <exception cref="InvalidOperationException">The world or one of its simulations is recording or replaying.</exception>
+    /// <exception cref="InvalidOperationException">The world is recording or replaying.</exception>
     /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
     /// <example>
     ///     <code>
@@ -121,7 +121,7 @@ public sealed class AtmosWorldSolverPipeline
     ///     <paramref name="after" /> are given.
     /// </exception>
     /// <exception cref="KeyNotFoundException">The <paramref name="before" /> or <paramref name="after" /> stage is not registered.</exception>
-    /// <exception cref="InvalidOperationException">The world or one of its simulations is recording or replaying.</exception>
+    /// <exception cref="InvalidOperationException">The world is recording or replaying.</exception>
     /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
     [PublicAPI]
     public void Register(

@@ -131,7 +131,6 @@ internal sealed partial class AtmosKernel
         CurrentTickConfig.Capture(_config);
         ClearSolverData();
         TickCount = tickCount;
-        _accumulator = 0f;
         _defaultSolvers.ClearTransientState();
         _chunkCollectionRevision++;
         LastBoundaryTicks = 0;
