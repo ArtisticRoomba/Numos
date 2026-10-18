@@ -42,13 +42,6 @@ internal class ReactionSolver : IAtmosSolverStage
     internal MeterPerSecond MinimumFlameSpeed { get; set; } = 0.01f;
 
     /// <summary>
-    ///     Thermal diffusivity of the gas, used by the flame speed estimate.
-    ///     TODO: derive this from the mixture (thermal conductivity / (density * heat capacity)) instead of
-    ///     using a constant. The default is air at room temperature.
-    /// </summary>
-    internal SquareMetrePerSecond ThermalDiffusivity { get; set; } = 2.2e-5f;
-
-    /// <summary>
     ///     Whether a fully ignited voxel may start a flame kernel in its face neighbors. Heat transfer is
     ///     the main way fire spreads between voxels; this is only a supplement.
     /// </summary>
@@ -239,12 +232,13 @@ internal class ReactionSolver : IAtmosSolverStage
     ///     where the rate is how fast the limiting reactant is being used up.
     /// </summary>
     /// <param name="depletionRate">Fractional depletion rate of the limiting reactant, see <see cref="ComputeDepletionRate" />.</param>
-    internal MeterPerSecond ComputeFlameSpeed(PerSecond depletionRate)
+    /// <param name="thermalDiffusivity"></param>
+    internal MeterPerSecond ComputeFlameSpeed(PerSecond depletionRate, SquareMetrePerSecond thermalDiffusivity)
     {
         if (!(depletionRate > 0f))
             return 0f;
 
-        return FlameSpeedScale * MathF.Sqrt(ThermalDiffusivity * depletionRate);
+        return FlameSpeedScale * MathF.Sqrt(thermalDiffusivity * depletionRate);
     }
 
     /// <summary>
@@ -630,6 +624,32 @@ internal class ReactionSolver : IAtmosSolverStage
         return result;
     }
 
+    private static SquareMetrePerSecond ComputeThermalDiffusivity(ReadOnlySpan<Mole> mixtureVector, int mixtureLength, CubicMetre volume, IAtmosConfig config)
+    {
+        SquareMetrePerSecond result = 0f;
+        JoulePerKelvin oldHeatCapacity = ComputeHeatCapacity(mixtureVector, mixtureLength, config);
+        Mole totalMoles = 0f;
+        MoleWattsPerMeterKelvin moleWeightedConductivity = 0f;
+        for (int i = 0; i < mixtureLength; i++)
+        {
+            if (!(mixtureVector[i] > 0f))
+                continue;
+
+            totalMoles += mixtureVector[i];
+            moleWeightedConductivity += mixtureVector[i] * config.GetThermalConductivity(i);
+        }
+
+        // No gas, no heat capacity or no volume means there is nothing to diffuse through.
+        if (!(totalMoles > 0f) || !(oldHeatCapacity > 0f) || !(volume > 0f))
+            return result;
+
+        // Mole-fraction weighted conductivity of the mixture, divided by the volumetric heat capacity
+        // (oldHeatCapacity / volume).
+        WattsPerMeterKelvin conductivity = moleWeightedConductivity / totalMoles;
+        result = conductivity * volume / (oldHeatCapacity + AtmosPhysicalConstants.MolarGasConstant*totalMoles);
+        return result;
+    }
+
     /// <summary>
     ///     Reacts one voxel's gas mixture over <paramref name="deltaTime" />, in place.
     /// </summary>
@@ -872,7 +892,8 @@ internal class ReactionSolver : IAtmosSolverStage
                 reactionSpeeds,
                 burningFraction,
                 deltaTime);
-            flameSpeed = ComputeFlameSpeed(depletionRate);
+            SquareMetrePerSecond thermalDiffusivity = ComputeThermalDiffusivity(mixtureVector, mixtureLength, volume, config);
+            flameSpeed = ComputeFlameSpeed(depletionRate, thermalDiffusivity);
         }
 
         //apply mixture, this also includes heat, since all change equations contain energy balance.

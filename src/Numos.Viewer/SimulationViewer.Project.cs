@@ -19,7 +19,8 @@ public partial class SimulationViewer
         CondensationEnabled = true,
         MolarEnthalpyOfVaporization = 904f,
         LiquidId = 0,
-        DiffusionCoefficient = 0.02f
+        DiffusionCoefficient = 0.02f,
+        ThermalConductivity = 0.168f
     };
 
     private readonly static GasProperties Oxygen = new()
@@ -31,7 +32,8 @@ public partial class SimulationViewer
         CondensationEnabled = true,
         MolarEnthalpyOfVaporization = 6_820f,
         LiquidId = 0,
-        DiffusionCoefficient = 0.02f
+        DiffusionCoefficient = 0.02f,
+        ThermalConductivity = 0.024f
     };
 
     private readonly static GasProperties Nitrogen = new()
@@ -43,7 +45,8 @@ public partial class SimulationViewer
         CondensationEnabled = true,
         MolarEnthalpyOfVaporization = 5_600f,
         LiquidId = 1,
-        DiffusionCoefficient = 0.02f
+        DiffusionCoefficient = 0.02f,
+        ThermalConductivity = 0.024f
     };
 
     private readonly static GasProperties CarbonDioxide = new()
@@ -54,7 +57,8 @@ public partial class SimulationViewer
         CondensationEnabled = true,
         MolarEnthalpyOfVaporization = 9800f,
         LiquidId = 0,
-        DiffusionCoefficient = 0.02f
+        DiffusionCoefficient = 0.02f,
+        ThermalConductivity = 0.016f
     };
 
     private readonly static GasProperties NitrousOxide = new()
@@ -65,7 +69,8 @@ public partial class SimulationViewer
         CondensationEnabled = true,
         MolarEnthalpyOfVaporization = 16_540f,
         LiquidId = 0,
-        DiffusionCoefficient = 0.02f
+        DiffusionCoefficient = 0.02f,
+        ThermalConductivity = 0.016f
     };
 
     private readonly static GasProperties Water = new()
@@ -76,7 +81,8 @@ public partial class SimulationViewer
         CondensationEnabled = true,
         MolarEnthalpyOfVaporization = 40_657f,
         LiquidId = 0,
-        DiffusionCoefficient = 0.02f
+        DiffusionCoefficient = 0.02f,
+        ThermalConductivity = 0.0245f
     };
 
 

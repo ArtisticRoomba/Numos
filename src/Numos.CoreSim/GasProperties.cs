@@ -73,4 +73,16 @@ public struct GasProperties
     /// </remarks>
     [GasCheckpointField(6)]
     public Scalar DiffusionCoefficient;
+
+    /// <summary>
+    ///     Reference diffusivity for this species at <see cref="AtmosConfig.GlobalTemperature" /> and
+    ///     <see cref="AtmosConfig.SaturationReferencePressure" />.
+    /// </summary>
+    /// <remarks>
+    ///     Values are clamped to [0, 1]; non-finite values disable diffusion for this species. The diffusion solvers
+    ///     scale this by <c>(T / GlobalTemperature)^1.5 * (SaturationReferencePressure / P) * dx * dt</c> and the
+    ///     source moles, then cap each neighbor's share at a seventh of the source.
+    /// </remarks>
+    [GasCheckpointField(7)]
+    public WattsPerMeterKelvin ThermalConductivity;
 }

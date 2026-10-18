@@ -41,6 +41,9 @@ public sealed class AtmosConfigSnapshot : IAtmosConfig
             : AtmosConfigDefaults.SaturationReferencePressure;
 
         DefaultDiffusionCoefficient = FloatMath.ClampUnitInterval(source.DefaultDiffusionCoefficient);
+        DefaultThermalConductivity = FloatMath.IsFinitePositive(source.DefaultThermalConductivity)
+            ? source.DefaultThermalConductivity
+            : AtmosConfigDefaults.DefaultThermalConductivity;
         SpaceTemperature = FloatMath.IsFinitePositive(source.SpaceTemperature)
             ? source.SpaceTemperature
             : AtmosConfigDefaults.SpaceTemperature;
@@ -116,26 +119,29 @@ public sealed class AtmosConfigSnapshot : IAtmosConfig
     [ConfigCheckpointField(4)] public Pascal SaturationReferencePressure { get; }
     /// <inheritdoc cref="AtmosConfig.DefaultDiffusionCoefficient" />
     [ConfigCheckpointField(5)] public Scalar DefaultDiffusionCoefficient { get; }
+    /// <inheritdoc cref="AtmosConfig.DefaultThermalConductivity" />
+
+    [ConfigCheckpointField(6)] public WattsPerMeterKelvin DefaultThermalConductivity { get; }
     /// <inheritdoc cref="AtmosConfig.SpaceTemperature" />
-    [ConfigCheckpointField(6)] public Kelvin SpaceTemperature { get; }
+    [ConfigCheckpointField(7)] public Kelvin SpaceTemperature { get; }
     /// <inheritdoc cref="AtmosConfig.BulkFlowCoefficient" />
-    [ConfigCheckpointField(7)] public Scalar BulkFlowCoefficient { get; }
+    [ConfigCheckpointField(8)] public Scalar BulkFlowCoefficient { get; }
     /// <inheritdoc cref="AtmosConfig.VacuumThreshold" />
-    [ConfigCheckpointField(8)] public Pascal VacuumThreshold { get; }
+    [ConfigCheckpointField(9)] public Pascal VacuumThreshold { get; }
     /// <inheritdoc cref="AtmosConfig.SleepThreshold" />
-    [ConfigCheckpointField(9)] public int SleepThreshold { get; }
+    [ConfigCheckpointField(10)] public int SleepThreshold { get; }
     /// <inheritdoc cref="AtmosConfig.SleepEpsilon" />
-    [ConfigCheckpointField(10)] public Scalar SleepEpsilon { get; }
+    [ConfigCheckpointField(11)] public Scalar SleepEpsilon { get; }
     /// <inheritdoc cref="AtmosConfig.ThermalConductance" />
-    [ConfigCheckpointField(11)] public JoulePerKelvin ThermalConductance { get; }
+    [ConfigCheckpointField(12)] public JoulePerKelvin ThermalConductance { get; }
     /// <inheritdoc cref="AtmosConfig.CondensationRateFactor" />
-    [ConfigCheckpointField(12)] public Scalar CondensationRateFactor { get; }
+    [ConfigCheckpointField(13)] public Scalar CondensationRateFactor { get; }
     /// <inheritdoc cref="AtmosConfig.MaxPressureTransferFractionPerNeighbor" />
-    [ConfigCheckpointField(13)] public Scalar MaxPressureTransferFractionPerNeighbor { get; }
+    [ConfigCheckpointField(14)] public Scalar MaxPressureTransferFractionPerNeighbor { get; }
     /// <inheritdoc cref="AtmosConfig.AccumulatorWakeThreshold" />
-    [ConfigCheckpointField(14)] public Pascal AccumulatorWakeThreshold { get; }
+    [ConfigCheckpointField(15)] public Pascal AccumulatorWakeThreshold { get; }
     /// <inheritdoc cref="AtmosConfig.AccumulatorMaxAliveTicks" />
-    [ConfigCheckpointField(15)] public int AccumulatorMaxAliveTicks { get; }
+    [ConfigCheckpointField(16)] public int AccumulatorMaxAliveTicks { get; }
 
     /// <inheritdoc cref="AtmosConfig.PressurePerMoleKelvin" />
     public PascalPerMoleKelvin PressurePerMoleKelvin =>
@@ -177,6 +183,15 @@ public sealed class AtmosConfigSnapshot : IAtmosConfig
             ? FloatMath.ClampUnitInterval(GasRegistry[gasId].DiffusionCoefficient)
             : FloatMath.ClampUnitInterval(DefaultDiffusionCoefficient);
     }
+
+    /// <inheritdoc cref="AtmosConfig.GetThermalConductivity" />
+    public Scalar GetThermalConductivity(int gasId)
+    {
+        return (uint)gasId < (uint)GasRegistry.Count
+            ? FloatMath.ClampUnitInterval(GasRegistry[gasId].ThermalConductivity)
+            : FloatMath.ClampUnitInterval(DefaultThermalConductivity);
+    }
+
 
     /// <inheritdoc cref="AtmosConfig.TryGetGasProperties" />
     public bool TryGetGasProperties(int gasId, out GasProperties properties)
