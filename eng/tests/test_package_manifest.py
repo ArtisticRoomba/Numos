@@ -37,6 +37,21 @@ class PackageManifestTests(unittest.TestCase):
                     (ROOT / package_manifest.PACKAGE_VERSION_FILES[package_id]).is_file()
                 )
 
+    def test_analyzer_projects_exist_and_belong_to_published_packages(self) -> None:
+        for package_id, analyzers in package_manifest.PACKAGE_ANALYZERS.items():
+            self.assertIn(package_id, package_manifest.PACKAGE_DEPENDENCIES)
+            for analyzer in analyzers:
+                with self.subTest(package=package_id, analyzer=analyzer):
+                    self.assertNotIn(analyzer, package_manifest.PACKAGE_DEPENDENCIES)
+                    self.assertTrue((ROOT / package_manifest.project_file(analyzer)).is_file())
+
+    def test_analyzers_reach_every_package_built_on_numos_api(self) -> None:
+        self.assertTrue(package_manifest.carries_analyzers("Numos.API"))
+        self.assertTrue(package_manifest.carries_analyzers("Numos.Serialization.FileSystem"))
+        self.assertTrue(package_manifest.carries_analyzers("Numos.Viewer"))
+        self.assertFalse(package_manifest.carries_analyzers("Numos.CoreSim"))
+        self.assertFalse(package_manifest.carries_analyzers("Numos.SimDrawer"))
+
 
 if __name__ == "__main__":
     unittest.main()

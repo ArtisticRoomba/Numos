@@ -19,6 +19,10 @@ PACKAGE_DEPENDENCIES = {
     "Numos.SimDrawer": ("Numos.CoreSim",),
     "Numos.Viewer": ("Numos.API", "Numos.SimDrawer", "Numos.Serialization.FileSystem"),
 }
+# Analyzer projects packed into a package under analyzers/dotnet/cs instead of being published on their own.
+PACKAGE_ANALYZERS = {
+    "Numos.API": ("Numos.API.Generators",),
+}
 PACKAGE_VERSION_FILES = {
     "Numos.Maths": Path("src/Numos.CoreSim/Version.props"),
     "Numos.Collections": Path("src/Numos.CoreSim/Version.props"),
@@ -57,6 +61,13 @@ def package_ids(family: str) -> tuple[str, ...]:
 
 def project_file(package_id: str) -> Path:
     return Path("src") / package_id / f"{package_id}.csproj"
+
+
+def carries_analyzers(package_id: str) -> bool:
+    """Return whether the package or anything it depends on ships analyzers to consumers."""
+    return package_id in PACKAGE_ANALYZERS or any(
+        carries_analyzers(dependency) for dependency in PACKAGE_DEPENDENCIES.get(package_id, ())
+    )
 
 
 def package_version(root: Path, package_id: str) -> str:

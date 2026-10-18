@@ -1022,6 +1022,98 @@ Field writes can't advance chunk revisions, so conditional snapshot requests inc
 usual revision check. Snapshot entries expose `Key` and `CopyValues<T>()`, which returns a copy, so inspecting a
 snapshot can't change the saved state.
 
+#### Declaring fields with `[ChunkData]`
+
+Calling `ChunkField<T>.Register` and then `chunk.Get(FireData.Exposure)` everywhere gets old. `Numos.API` ships a
+source generator that writes both halves: put `[ChunkData]` on a `static partial` property and it supplies the
+registration and a typed accessor on the chunk view.
+
+```csharp
+namespace MyMod;
+
+public static partial class FireChunkData
+{
+    [ChunkData("my-mod/fire/exposure", Rollback = true)]
+    public static partial ChunkField<float> Exposure { get; }
+
+    [ChunkData("my-mod/fire/burn-count", Rollback = true, Length = 1)]
+    public static partial ChunkField<int> BurnCount { get; }
+
+    // Keyed "MyMod.FireChunkData.Scratch", transient.
+    [ChunkData]
+    public static partial ChunkField<float> Scratch { get; }
+}
+```
+
+The generated property body calls `ChunkField<T>.Register` with the same arguments you would pass by hand, so
+`[ChunkData("my-mod/fire/exposure", Rollback = true)]` and `ChunkField<float>.Register("my-mod/fire/exposure",
+rollback: true)` return the same instance. Mods can mix the two styles freely. Registration lives in a nested holder
+class that initializes on first access, so the property is never null, even from one of the type's own static
+initializers.
+
+The attribute maps onto `Register` like this:
+
+- The constructor argument is the key. Leave it out and the key becomes the property's full name,
+  `{Namespace}.{Type}.{Property}`. That's fine for scratch storage, but it moves whenever someone renames the type or
+  namespace, so `Rollback = true` requires an explicit key.
+- `Rollback` is `rollback:`, with the same unmanaged-element rule.
+- `Length` makes a fixed-size field. The generator checks whether it was assigned, not its value, so leaving it out
+  means per-voxel and `Length = 0` is a valid empty field.
+- `AccessorName` renames the generated accessor, for when the property name clashes with a member of
+  `AtmosSolverChunk` or with another field's accessor in the same namespace.
+
+For each declaring type the generator also emits a `{Type}ChunkAccessors` class in the same namespace (a nested
+`Outer.Inner` gets `OuterInnerChunkAccessors`). It holds extension properties on `AtmosSolverChunk`, and on
+`AtmosDangerousChunk` too when `Numos.API.Dangerous` is referenced. Per-voxel fields come back as `FlatArray<T>`,
+fixed-length ones as `Span<T>`:
+
+```csharp
+Parallel.For(0, chunks.Count, index =>
+{
+    AtmosSolverChunk chunk = chunks[index];
+    FlatArray<float> exposure = chunk.Exposure;
+    for (int voxel = 0; voxel < chunk.VoxelCount; voxel++)
+        exposure[voxel] += 1f;
+
+    chunk.BurnCount[0]++;
+    FlatArray<float> live = chunk.Dangerous().Exposure; // same storage
+});
+```
+
+`FlatArray<T>` has a get/set indexer rather than a `ref` one, so `chunk.Exposure[voxel] += 1f` doesn't compile
+(CS1612). Take a local first. The `Span<T>` accessors don't have that problem.
+
+Extension properties need C# 14, the default for `net10.0`. On C# 13 the generator falls back to extension methods
+named `Get{Name}` (`chunk.GetExposure()`) and says so with an info diagnostic.
+
+The generator catches most mistakes at compile time instead of leaving them to throw at registration:
+
+| ID | Severity | Raised when |
+| --- | --- | --- |
+| `NUMOSCHUNK001` | Error | The property isn't a bodiless `partial` declaration with only a `get` accessor. |
+| `NUMOSCHUNK002` | Error | The property isn't `static`. |
+| `NUMOSCHUNK003` | Error | The property type isn't `ChunkField<T>`. |
+| `NUMOSCHUNK004` | Error | The containing type, or a type it's nested in, isn't `partial`. |
+| `NUMOSCHUNK005` | Error | A containing type is generic, which would register one field per construction. |
+| `NUMOSCHUNK006` | Error | The key is blank. |
+| `NUMOSCHUNK007` | Error | `Rollback` is set without an explicit key. |
+| `NUMOSCHUNK008` | Error | `Rollback` is set and the element type isn't unmanaged. |
+| `NUMOSCHUNK009` | Error | `Length` is negative. |
+| `NUMOSCHUNK010` | Error | The property or a containing type isn't `public` or `internal`, so the accessors can't reach it. |
+| `NUMOSCHUNK011` | Error | Two declarations share a key with different element types, lengths, or rollback settings. |
+| `NUMOSCHUNK012` | Warning | Two declarations share a key with identical definitions; one is redundant. |
+| `NUMOSCHUNK013` | Info | C# 13 or earlier, so accessors are extension methods. |
+| `NUMOSCHUNK014` | Warning | An accessor name collides with a chunk view member or another accessor. |
+| `NUMOSCHUNK015` | Error | `AccessorName` isn't a valid C# identifier. |
+
+The key checks only see one compilation. A conflict between two assemblies still throws `InvalidOperationException`
+when the second one registers.
+
+The generator ships inside the `Numos.API` package under `analyzers/dotnet/cs`, and `Numos.API.Dangerous`,
+`Numos.Serialization`, and `Numos.Viewer` pass it on. Projects in this repository that reference `src/Numos.API` with a
+`ProjectReference` don't get it that way; they reference `src/Numos.API.Generators` with `OutputItemType="Analyzer"`
+directly, as `tests/Numos.API.Tests` does.
+
 ### 12.4 Live storage through Numos.API.Dangerous
 
 Solvers with a measured need to avoid copying physical fields can opt into live storage from the same callback (§2.3

@@ -7,6 +7,8 @@ There are two release families, each with its own version and Git tag.
 - CoreSim releases version `Numos.Maths`, `Numos.CoreSim`, `Numos.API`, and `Numos.API.Dangerous` together.
 - Viewer releases version `Numos.SimDrawer` and `Numos.Viewer` together.
 
+The `[ChunkData]` source generator (`src/Numos.API.Generators`) isn't a package of its own. It ships inside `Numos.API` under `analyzers/dotnet/cs`, so it always carries the CoreSim version.
+
 `Numos.Viewer` can depend on a CoreSim-family release, but releasing a new Viewer does not by itself require a new `Numos.CoreSim` version.
 
 ## Semantic Versions
@@ -63,7 +65,7 @@ git push origin coresim/v0.1.0
 CoreSim tags use `coresim/vX.Y.Z`; Viewer tags use `viewer/vX.Y.Z`. The tag name includes the complete SemVer string, including a prerelease suffix when one exists.
 
 ## Shipping Checks
-The CI package job builds the solution with warnings treated as errors, packs each published package, and validates NuGet metadata, dependencies, runtime assets, symbols, and source provenance. It also restores a clean consumer using only the generated Numos packages and publishes the Viewer with NativeAOT for Linux.
+The CI package job builds the solution with warnings treated as errors, packs each published package, and validates NuGet metadata, dependencies, runtime assets, packed analyzers, symbols, and source provenance. Packages that depend on `Numos.API` must not exclude its analyzers, or the generator would stop at them. It also restores a clean consumer using only the generated Numos packages and publishes the Viewer with NativeAOT for Linux.
 
 Pushing a `coresim/v*` or `viewer/v*` tag starts `.github/workflows/publish.yml`. The workflow verifies that the tag exactly matches the committed family version, repeats the build and package checks, and publishes only that family. CoreSim-family packages are pushed in dependency order. Matching `.snupkg` files are published with the primary packages.
 

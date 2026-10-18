@@ -15,7 +15,8 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <ProjectReference Include="..\Numos.API\Numos.API.csproj"/>
+        <!-- PrivateAssets="none" lets the Numos.API source generator reach consumers of this package. -->
+        <ProjectReference Include="..\Numos.API\Numos.API.csproj" PrivateAssets="none"/>
     </ItemGroup>
 
 </Project>

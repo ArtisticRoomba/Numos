@@ -20,6 +20,10 @@
 
     <ItemGroup>
         <ProjectReference Include="..\..\src\Numos.API.Dangerous\Numos.API.Dangerous.csproj"/>
+        <ProjectReference Include="..\..\src\Numos.API.Generators\Numos.API.Generators.csproj"
+                          OutputItemType="Analyzer"
+                          ReferenceOutputAssembly="false"
+                          GlobalPropertiesToRemove="PublishAot;PublishTrimmed;RuntimeIdentifier;SelfContained"/>
     </ItemGroup>
 
     <ItemGroup>

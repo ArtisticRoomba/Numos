@@ -10,8 +10,10 @@ import xml.etree.ElementTree as ET
 from zipfile import ZipFile
 
 from package_manifest import (
+    PACKAGE_ANALYZERS,
     PACKAGE_DEPENDENCIES,
     PACKAGE_FAMILIES,
+    carries_analyzers,
     package_version,
     package_ids,
 )
@@ -28,6 +30,37 @@ def find_package(directory: Path, package_id: str, version: str, suffix: str) ->
     if not path.is_file():
         raise ValueError(f"missing artifact {path.name}")
     return path
+
+
+def check_analyzers(package_name: str, package_id: str, names: set[str]) -> None:
+    for analyzer in PACKAGE_ANALYZERS.get(package_id, ()):
+        path = f"analyzers/dotnet/cs/{analyzer}.dll"
+        if path not in names:
+            raise ValueError(f"{package_name}: missing analyzer {path}")
+
+
+def flows_analyzers(dependency: dict[str, str]) -> bool:
+    def assets(name: str) -> set[str] | None:
+        value = dependency.get(name)
+        if value is None:
+            return None
+        return {asset.strip().lower() for asset in value.split(",") if asset.strip()}
+
+    include = assets("include")
+    exclude = assets("exclude") or set()
+    if include is not None and not include & {"all", "analyzers"}:
+        return False
+    return not exclude & {"all", "analyzers"}
+
+
+def check_dependency_assets(package_name: str, dependencies: dict[str, dict[str, str]]) -> None:
+    for dependency_id, dependency in dependencies.items():
+        if dependency_id.startswith("Numos.") and dependency_id not in PACKAGE_DEPENDENCIES:
+            raise ValueError(f"{package_name}: depends on unpublished package {dependency_id}")
+        # NuGet excludes Build and Analyzers by default, which would stop the Numos.API generator at this package.
+        if dependency_id in PACKAGE_DEPENDENCIES and carries_analyzers(dependency_id):
+            if not flows_analyzers(dependency):
+                raise ValueError(f"{package_name}: {dependency_id} dependency must not exclude analyzers")
 
 
 def validate_package(root: Path, directory: Path, package_id: str) -> None:
@@ -79,17 +112,19 @@ def validate_package(root: Path, directory: Path, package_id: str) -> None:
             raise ValueError(f"{package.name}: repository branch/commit is missing")
 
         dependencies = {
-            dependency.get("id"): dependency.get("version")
+            dependency.get("id", ""): dict(dependency.attrib)
             for dependency in metadata.findall("n:dependencies/n:group/n:dependency", namespace)
         }
         for dependency_id in PACKAGE_DEPENDENCIES[package_id]:
             if dependency_id not in dependencies:
                 raise ValueError(f"{package.name}: missing dependency {dependency_id}")
             expected_dependency_version = package_version(root, dependency_id).partition("+")[0]
-            if dependencies[dependency_id] != expected_dependency_version:
+            if dependencies[dependency_id].get("version") != expected_dependency_version:
                 raise ValueError(
                     f"{package.name}: {dependency_id} dependency must be {expected_dependency_version}"
                 )
+        check_dependency_assets(package.name, dependencies)
+        check_analyzers(package.name, package_id, names)
 
         if package_id == "Numos.Viewer":
             for asset in (

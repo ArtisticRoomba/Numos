@@ -11,6 +11,7 @@
         <GenerateDocumentationFile>true</GenerateDocumentationFile>
     </PropertyGroup>
     <ItemGroup>
-        <ProjectReference Include="..\Numos.Serialization\Numos.Serialization.csproj"/>
+        <!-- PrivateAssets="none" lets the Numos.API source generator reach consumers of this package. -->
+        <ProjectReference Include="..\Numos.Serialization\Numos.Serialization.csproj" PrivateAssets="none"/>
     </ItemGroup>
 </Project>

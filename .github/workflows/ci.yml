@@ -100,6 +100,7 @@ jobs:
           cat > "$consumer/Program.cs" <<'EOF'
           using Numos.API;
           using Numos.API.Dangerous;
+          using Numos.Collections;
           using Numos.Serialization;
           using Numos.Serialization.FileSystem;
 
@@ -107,6 +108,28 @@ jobs:
           _ = simulation.Dangerous();
           _ = typeof(NumosReplaySerializer);
           _ = typeof(NumosReplayFile);
+
+          // The ChunkData generator ships inside Numos.API, which this project only references transitively.
+          simulation.World.Solvers.Register("consumer/fire", context =>
+          {
+              foreach (var chunk in context.Chunks(simulation))
+              {
+                  FlatArray<float> exposure = chunk.Exposure;
+                  FlatArray<float> live = chunk.Dangerous().Exposure;
+                  Span<int> burnCount = chunk.BurnCount;
+                  burnCount[0] += exposure.Length + live.Length;
+              }
+          });
+          simulation.Tick();
+
+          static partial class FireChunkData
+          {
+              [ChunkData("consumer/fire/exposure", Rollback = true)]
+              public static partial ChunkField<float> Exposure { get; }
+
+              [ChunkData("consumer/fire/burn-count", Rollback = true, Length = 1)]
+              public static partial ChunkField<int> BurnCount { get; }
+          }
           EOF
           dotnet restore "$consumer" \
             --source "$GITHUB_WORKSPACE/artifacts/packages" \

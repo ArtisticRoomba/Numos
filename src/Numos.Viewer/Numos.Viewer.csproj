@@ -20,10 +20,11 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <ProjectReference Include="..\Numos.API\Numos.API.csproj"/>
+        <!-- PrivateAssets="none" lets the Numos.API source generator reach consumers of this package. -->
+        <ProjectReference Include="..\Numos.API\Numos.API.csproj" PrivateAssets="none"/>
         <ProjectReference Include="..\Numos.SimDrawer\Numos.SimDrawer.csproj"/>
-        <ProjectReference Include="..\Numos.Serialization\Numos.Serialization.csproj"/>
-        <ProjectReference Include="..\Numos.Serialization.FileSystem\Numos.Serialization.FileSystem.csproj"/>
+        <ProjectReference Include="..\Numos.Serialization\Numos.Serialization.csproj" PrivateAssets="none"/>
+        <ProjectReference Include="..\Numos.Serialization.FileSystem\Numos.Serialization.FileSystem.csproj" PrivateAssets="none"/>
     </ItemGroup>
 
     <ItemGroup>

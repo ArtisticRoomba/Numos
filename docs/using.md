@@ -16,6 +16,8 @@ Consumers should generally add only `Numos.API` and go from there. NuGet restore
 dotnet add package Numos.API --prerelease
 ```
 
+`Numos.API` also carries the `[ChunkData]` source generator (see [Chunk data fields](#chunk-data-fields)). `Numos.API.Dangerous` and the serialization packages pass it through, so referencing any of them is enough.
+
 `Numos.Maths` is generally restored as a dependency, though an engine adapter may want to reference it explicitly for Numos' `Int3`,
 which is used in the API.
 
@@ -231,6 +233,49 @@ numeric IDs depend on registration order and remain useful for snapshots, replay
 
 A registered gas can deliberately use the configured heat-capacity fallback by leaving its heat capacity unset. That
 fallback does not make an unregistered ID valid for injection.
+
+## Chunk data fields
+
+Custom solvers usually need state of their own: fire exposure per voxel, a burn counter per chunk. Declare it as a
+`[ChunkData]` property and the source generator in `Numos.API` registers the field and adds a typed accessor to the
+chunk view your solver gets each tick:
+
+```csharp
+using Numos.API;
+using Numos.Collections;
+
+public static partial class FireChunkData
+{
+    [ChunkData("my-mod/fire/exposure", Rollback = true)]
+    public static partial ChunkField<float> Exposure { get; }
+
+    [ChunkData("my-mod/fire/burn-count", Rollback = true, Length = 1)]
+    public static partial ChunkField<int> BurnCount { get; }
+}
+
+world.Solvers.Register("my-mod/fire", context =>
+{
+    foreach (AtmosSimulation simulation in context.Simulations)
+    {
+        foreach (AtmosSolverChunk chunk in context.Chunks(simulation))
+        {
+            FlatArray<float> exposure = chunk.Exposure; // one value per voxel
+            for (int voxel = 0; voxel < chunk.VoxelCount; voxel++)
+                exposure[voxel] += 1f;
+
+            chunk.BurnCount[0]++; // Length = 1: one value per chunk
+        }
+    }
+});
+```
+
+`Rollback = true` puts the field in checkpoints and state hashes, so `RestoreCheckpoint` and `ReplayTo` bring it back
+along with the gas. Without it the field is scratch space that starts zeroed after every restore. A rollback field's key
+is stored in checkpoints, so it has to be given explicitly; treat it like a save-format name and prefix it with your mod.
+
+The accessors are C# 14 extension properties. On C# 13 you get `chunk.GetExposure()` methods instead. The
+[technical documentation](atmospherics_technical_documentation.md#123-per-chunk-solver-state-with-chunkfieldt) covers
+keys, allocation, the generator's diagnostics, and the hand-written `ChunkField<T>.Register` equivalent.
 
 ## Sharing dependencies between solvers
 

@@ -20,6 +20,28 @@
                           OutputItemType="Analyzer"
                           ReferenceOutputAssembly="false"
                           GlobalPropertiesToRemove="PublishAot;PublishTrimmed;RuntimeIdentifier;SelfContained"/>
+        <!-- Built here so pack can ship it under analyzers/; it isn't a dependency of the package. -->
+        <ProjectReference Include="..\Numos.API.Generators\Numos.API.Generators.csproj"
+                          ReferenceOutputAssembly="false"
+                          PrivateAssets="all"
+                          GlobalPropertiesToRemove="PublishAot;PublishTrimmed;RuntimeIdentifier;SelfContained"/>
     </ItemGroup>
+
+    <PropertyGroup>
+        <TargetsForTfmSpecificContentInPackage>$(TargetsForTfmSpecificContentInPackage);_PackNumosApiGenerators</TargetsForTfmSpecificContentInPackage>
+    </PropertyGroup>
+
+    <!-- Pack calls this with TargetFramework set globally, so strip it before asking the netstandard2.0 generator
+         project where its output is. -->
+    <Target Name="_PackNumosApiGenerators">
+        <MSBuild Projects="..\Numos.API.Generators\Numos.API.Generators.csproj"
+                 Targets="GetTargetPath"
+                 RemoveProperties="TargetFramework;RuntimeIdentifier;PublishAot;PublishTrimmed;SelfContained">
+            <Output TaskParameter="TargetOutputs" ItemName="_NumosApiGeneratorAssembly"/>
+        </MSBuild>
+        <ItemGroup>
+            <TfmSpecificPackageFile Include="@(_NumosApiGeneratorAssembly)" PackagePath="analyzers/dotnet/cs"/>
+        </ItemGroup>
+    </Target>
 
 </Project>
