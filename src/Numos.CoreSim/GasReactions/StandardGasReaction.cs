@@ -151,21 +151,23 @@ public readonly partial record struct StandardGasReaction
         IDictionary<GasProperties, float> gasMolarities,
         [Quantity("temperature")] Kelvin temperatureKelvin)
     {
-        ConcentrationPerSecond result = GetRateConstant(temperatureKelvin);
-        if (result <= 0)
+        ConcentrationPerSecond rateConstant = GetRateConstant(temperatureKelvin);
+        if (rateConstant <= 0)
             return 0;
 
+        // Accumulated in double to match the reaction solver bit-for-bit.
+        ConcentrationPerSecond64 result = rateConstant;
         foreach (KeyValuePair<GasProperties, float> factor in SpeedFactors.OrderBy(
                      static factor => factor.Key.Name,
                      StringComparer.Ordinal))
         {
             if (!gasMolarities.TryGetValue(factor.Key, out float molar)) molar = 0;
 
-            result *= MathF.Pow(molar, factor.Value);
+            result *= Math.Pow(molar, factor.Value);
             if (result <= 0)
                 return 0;
         }
 
-        return result;
+        return (ConcentrationPerSecond)result;
     }
 }

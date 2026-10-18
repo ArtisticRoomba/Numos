@@ -8,6 +8,10 @@ namespace Numos.CoreSim.Solvers;
 
 internal class ReactionSolver : IAtmosSolverStage
 {
+    // Rates that overflow (trace gases with negative exponents) saturate here instead of being dropped, and the
+    // material limiter then scales them back to what's actually available. Must stay below float.MaxValue so the
+    // stored speed is still finite.
+    private const double MaxReactionSpeed = 1e30;
     // ProcessVoxel is invoked once per voxel from an already-parallel worker (thousands of calls per
     // chunk per tick), and reactionCount is typically a handful of entries. Renting/returning that tiny
     // array from ArrayPool<T>.Shared on every call adds pool bookkeeping to the hottest part of the loop
@@ -20,8 +24,6 @@ internal class ReactionSolver : IAtmosSolverStage
     private GasReactionData[] _gasRateOrder = [];
     private GasReactionData[] _gasReactionData = [];
     private IAtmosConfig? _preparedConfig;
-    // Below float.MaxValue
-    const double MaxReactionSpeed = 1e30;
 
     public void Solve(AtmosSolverExecutionContext context)
     {
@@ -275,7 +277,8 @@ internal class ReactionSolver : IAtmosSolverStage
     }
 
     // Sensible energy of the mixture at its current temperature: sum of moles * Cv * T over gases.
-    private static Joule ExtractHeat(ReadOnlySpan<Mole> mixtureVector, ref readonly Kelvin temperature, int mixtureLength, IAtmosConfig config)
+    private static Joule ExtractHeat(
+        ReadOnlySpan<Mole> mixtureVector, ref readonly Kelvin temperature, int mixtureLength, IAtmosConfig config)
     {
         Joule result = 0f;
         for (int i = 0; i < mixtureLength; i++)
@@ -375,11 +378,13 @@ internal class ReactionSolver : IAtmosSolverStage
                 continue;
 
             // Preserve canonical gas-name and factor order independently of registry indices.
+            ConcentrationPerSecond64 rate64 = rate;
             foreach (var gas in rateOrder)
-                rate = gas.ApplyRateFactors(reactionId, mixtureVector[gas.GasId]/volume, rate);
+                rate64 = gas.ApplyRateFactors(reactionId, (Mole64)mixtureVector[gas.GasId] / volume, rate64);
 
-            Mole64 speed = (ConcentrationPerSecond64)rate * deltaTime * volume;
-            if (!double.IsFinite(speed) || speed <= 0.0)
+            // +inf is a legitimate overflow here and saturates below.
+            Mole64 speed = rate64 * deltaTime * volume;
+            if (double.IsNaN(speed) || speed <= 0.0)
                 continue;
 
             reactionSpeeds[reactionId] = (Mole)Math.Min(speed, MaxReactionSpeed);

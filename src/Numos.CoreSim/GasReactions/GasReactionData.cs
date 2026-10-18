@@ -61,15 +61,24 @@ internal sealed class GasReactionData(int gasId, string gasName, int reactionCou
         }
     }
 
-    internal ConcentrationPerSecond ApplyRateFactors(int reactionId, MolePerCubicMetre moles, ConcentrationPerSecond speed)
+    /// <summary>
+    ///     Multiplies <paramref name="speed" /> by this gas's rate factors for <paramref name="reactionId" />.
+    /// </summary>
+    /// <remarks>
+    ///     Accumulates in double so a trace gas with a negative exponent can push the product past float range
+    ///     without being mistaken for a broken rate. The result may still overflow to positive infinity so the
+    ///     solver just saturates the rate instead.
+    /// </remarks>
+    internal ConcentrationPerSecond64 ApplyRateFactors(
+        int reactionId, MolePerCubicMetre64 concentration, ConcentrationPerSecond64 speed)
     {
         if (LinearFactors[reactionId] is { } factors)
         {
             foreach (var factor in factors)
             {
-                float value = factor.GetFactor(moles);
+                float value = factor.GetFactor((MolePerCubicMetre)concentration);
                 if (!float.IsNormal(value) || value <= 0f)
-                    return 0f;
+                    return 0;
 
                 speed *= value;
             }
@@ -77,9 +86,9 @@ internal sealed class GasReactionData(int gasId, string gasName, int reactionCou
 
         if (StandardExponents[reactionId] is float exponent)
         {
-            float value = MathF.Pow(moles, exponent);
-            if (!float.IsNormal(value) || value == 0f)
-                return 0f;
+            double value = Math.Pow(concentration, exponent);
+            if (double.IsNaN(value) || value <= 0 || double.IsPositiveInfinity(value) && concentration <= 0)
+                return 0;
 
             speed *= value;
         }

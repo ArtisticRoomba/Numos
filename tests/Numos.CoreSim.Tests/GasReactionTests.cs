@@ -1,7 +1,6 @@
 using Numos.CoreSim.GasReactions;
 using Numos.CoreSim.Solvers;
 using Numos.Units.Generated;
-using NUnit.Framework.Internal;
 
 namespace Numos.CoreSim.Tests;
 
@@ -332,17 +331,19 @@ public class GasReactionTests
         // sequential per-voxel writeback) so a change to the material-limiter or the reaction-application math that
         // alters results -- not just one that introduces NaNs -- shows up here, even if the new result still "looks"
         // plausible.
-        Assert.That(totalReactionSum, Is.EqualTo(1761.50867f));
+        Assert.That(totalReactionSum, Is.EqualTo(1748.375f));
 
         float[] expectedGasSums =
         [
-            115.87315f, 88.2810822f, 73.1871414f, 54.6985245f, 32.2045975f, 26.4554863f, 152.032593f, 92.033844f,
-            160.813126f, 205.469788f, 119.662415f, 172.016541f, 24.7143288f, 145.924271f, 93.1175461f, 29.038166f
+            117.50994f, 89.01923f, 73.23577f, 53.959713f, 32.20401f, 27.784863f, 154.73357f, 92.73902f,
+            160.16347f, 205.67493f, 120.06365f, 172.13142f, 26.036192f, 145.68103f, 93.12835f, 27.783888f
         ];
-        Assert.Multiple(() => {
-        foreach (var gc in chunk.ActiveGases.Take(chunk.ActiveGasCount).OrderBy(g => g.GasId))
-            Assert.That(gc.Moles.Sum(), Is.EqualTo(expectedGasSums[gc.GasId]));
-        });     
+
+        Assert.Multiple(() =>
+        {
+            foreach (var gc in chunk.ActiveGases.Take(chunk.ActiveGasCount).OrderBy(g => g.GasId))
+                Assert.That(gc.Moles.Sum(), Is.EqualTo(expectedGasSums[gc.GasId]));
+        });
 
         Assert.That(chunk.Temperature[0], Is.EqualTo(265.408966f));
     }
@@ -381,7 +382,8 @@ public class GasReactionTests
             {
                 { water, 2 }
             },
-            285.8f,
+            // Per mole of O2, the reactant normalized to one: 2 * 285.8 kJ/mol of water formed.
+            UnitConversions.FromKilojoulePerMole(571.6f),
             1.8e13f,
             UnitConversions.FromKilojoulePerMole(146.4f),
             new Dictionary<GasProperties, float>
@@ -469,7 +471,8 @@ public class GasReactionTests
             {
                 { water, 2 }
             },
-            285.8f,
+            // Per mole of O2, the reactant normalized to one: 2 * 285.8 kJ/mol of water formed.
+            UnitConversions.FromKilojoulePerMole(571.6f),
             1.8e13f,
             UnitConversions.FromKilojoulePerMole(146.4f),
             new Dictionary<GasProperties, float>
@@ -602,14 +605,18 @@ public class GasReactionTests
         var consumesA = new StandardGasReaction(
             new Dictionary<GasProperties, float> { { a, 1f } },
             new Dictionary<GasProperties, float> { { d, 1f } },
-            0f, 20f, 0f,
+            0f,
+            20f,
+            0f,
             new Dictionary<GasProperties, float>());
 
         // Would consume 8 mol of B (only 2 available) and produce E. Unrelated to A/R1.
         var consumesB = new StandardGasReaction(
             new Dictionary<GasProperties, float> { { b, 1f } },
             new Dictionary<GasProperties, float> { { e, 1f } },
-            0f, 8f, 0f,
+            0f,
+            8f,
+            0f,
             new Dictionary<GasProperties, float>());
 
         var config = new AtmosConfig
@@ -645,6 +652,49 @@ public class GasReactionTests
         });
     }
 
+    /// <summary>
+    ///     Negative exponents on trace gases blow the rate up past float range (-3) or past double range (-20).
+    ///     Either way the reaction is effectively instantaneous and must saturate, letting the material limiter
+    ///     consume all of A, rather than being dropped as a non-finite speed.
+    /// </summary>
+    [TestCase(-3f)]
+    [TestCase(-20f)]
+    public void MaterialLimiter_SaturatesOverflowingRate(float exponent)
+    {
+        var a = new GasProperties { Name = "A", MolarHeatCapacityAtConstantVolume = 10f };
+        var b = new GasProperties { Name = "B", MolarHeatCapacityAtConstantVolume = 10f };
+        var c = new GasProperties { Name = "C", MolarHeatCapacityAtConstantVolume = 10f };
+
+        var reaction = new StandardGasReaction(
+            new Dictionary<GasProperties, float> { { a, 1f } },
+            new Dictionary<GasProperties, float> { { b, 1f } },
+            0f,
+            1f,
+            0f,
+            new Dictionary<GasProperties, float> { { a, exponent }, { c, exponent } });
+
+        var config = new AtmosConfig
+        {
+            GasRegistry = [a, b, c],
+            SolverConfigurations = [new GasReactionConfig(standardReactions: [reaction])]
+        }.CreateSnapshot();
+
+        float[] mixture = [1e-8f, 0f, 1e-8f];
+        float temperature = 300f;
+        float[] feedback = [0f];
+
+        var solver = new ReactionSolver();
+        solver.ProcessVoxel(1f, mixture, ref temperature, feedback, config, 3);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(mixture[0], Is.EqualTo(0f).Within(1e-12f), "A should be consumed");
+            Assert.That(mixture[1], Is.EqualTo(1e-8f).Within(1e-12f), "B should receive all of A");
+            Assert.That(mixture[2], Is.EqualTo(1e-8f), "C only sets the rate and is never consumed");
+            Assert.That(feedback[0], Is.EqualTo(1e-8f).Within(1e-12f));
+        });
+    }
+
     [Test]
     public void MaterialLimiter_AccumulatesGrossConsumptionInDoublePrecision()
     {
@@ -661,14 +711,18 @@ public class GasReactionTests
         var bigConsumer = new StandardGasReaction(
             new Dictionary<GasProperties, float> { { a, 1f } },
             new Dictionary<GasProperties, float>(),
-            0f, 1_000_000f, 0f,
+            0f,
+            1_000_000f,
+            0f,
             new Dictionary<GasProperties, float>());
 
         StandardGasReaction MakeTinyConsumer() =>
             new(
                 new Dictionary<GasProperties, float> { { a, 0.03f } },
                 new Dictionary<GasProperties, float>(),
-                0f, 1f, 0f,
+                0f,
+                1f,
+                0f,
                 new Dictionary<GasProperties, float>());
 
         var config = new AtmosConfig
