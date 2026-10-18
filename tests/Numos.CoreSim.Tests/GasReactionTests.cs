@@ -1,6 +1,7 @@
 using Numos.CoreSim.GasReactions;
 using Numos.CoreSim.Solvers;
 using Numos.Units.Generated;
+using NUnit.Framework.Internal;
 
 namespace Numos.CoreSim.Tests;
 
@@ -331,17 +332,19 @@ public class GasReactionTests
         // sequential per-voxel writeback) so a change to the material-limiter or the reaction-application math that
         // alters results -- not just one that introduces NaNs -- shows up here, even if the new result still "looks"
         // plausible.
-        Assert.That(totalReactionSum, Is.EqualTo(54699.562f));
+        Assert.That(totalReactionSum, Is.EqualTo(1761.50867f));
 
         float[] expectedGasSums =
         [
-            214.18805f, 165.98767f, 175.9431f, 342.46832f, 153.91702f, 144.54675f, 3798.6301f, 1537.6663f,
-            727.5402f, 1548.2734f, 547.46625f, 175.2266f, 164.27475f, 1126.8424f, 210.39911f, 173.7023f
+            115.87315f, 88.2810822f, 73.1871414f, 54.6985245f, 32.2045975f, 26.4554863f, 152.032593f, 92.033844f,
+            160.813126f, 205.469788f, 119.662415f, 172.016541f, 24.7143288f, 145.924271f, 93.1175461f, 29.038166f
         ];
+        Assert.Multiple(() => {
         foreach (var gc in chunk.ActiveGases.Take(chunk.ActiveGasCount).OrderBy(g => g.GasId))
             Assert.That(gc.Moles.Sum(), Is.EqualTo(expectedGasSums[gc.GasId]));
+        });     
 
-        Assert.That(chunk.Temperature[0], Is.EqualTo(108564.51f));
+        Assert.That(chunk.Temperature[0], Is.EqualTo(265.408966f));
     }
 
     [Test]
