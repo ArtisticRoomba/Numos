@@ -69,7 +69,7 @@ public readonly partial record struct LinearGasReaction
         /// </summary>
         /// <param name="molarity">Amount of <see cref="Gas" />, in the same units as the bounds.</param>
         /// <returns>The rate multiplier, or zero outside a strict bound.</returns>
-        public float GetFactor(float molarity)
+        public double GetFactor(float molarity)
         {
             return EvalLinear(
                 molarity,
