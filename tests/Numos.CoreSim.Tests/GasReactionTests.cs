@@ -695,6 +695,44 @@ public class GasReactionTests
         });
     }
 
+    /// <summary>
+    ///     A reaction with no consumed input has nothing to limit it, so an overflowing rate must be dropped rather
+    ///     than saturated into an enormous amount of product.
+    /// </summary>
+    [Test]
+    public void OverflowingRateWithoutInputs_IsDropped()
+    {
+        var b = new GasProperties { Name = "B", MolarHeatCapacityAtConstantVolume = 10f };
+        var c = new GasProperties { Name = "C", MolarHeatCapacityAtConstantVolume = 10f };
+
+        var reaction = new StandardGasReaction(
+            new Dictionary<GasProperties, float>(),
+            new Dictionary<GasProperties, float> { { b, 1f } },
+            0f,
+            1f,
+            0f,
+            new Dictionary<GasProperties, float> { { c, -20f } });
+
+        var config = new AtmosConfig
+        {
+            GasRegistry = [b, c],
+            SolverConfigurations = [new GasReactionConfig(standardReactions: [reaction])]
+        }.CreateSnapshot();
+
+        float[] mixture = [0f, 1e-8f];
+        float temperature = 300f;
+        float[] feedback = [0f];
+
+        new ReactionSolver().ProcessVoxel(1f, mixture, ref temperature, feedback, config, 2);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(mixture[0], Is.EqualTo(0f));
+            Assert.That(feedback[0], Is.EqualTo(0f));
+            Assert.That(temperature, Is.EqualTo(300f));
+        });
+    }
+
     [Test]
     public void MaterialLimiter_AccumulatesGrossConsumptionInDoublePrecision()
     {

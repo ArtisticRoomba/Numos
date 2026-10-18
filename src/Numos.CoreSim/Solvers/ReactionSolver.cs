@@ -10,8 +10,10 @@ internal class ReactionSolver : IAtmosSolverStage
 {
     // Rates that overflow (trace gases with negative exponents) saturate here instead of being dropped, and the
     // material limiter then scales them back to what's actually available. Must stay below float.MaxValue so the
-    // stored speed is still finite.
+    // stored speed is still finite. Only reactions with a consumed input saturate, since nothing else would limit
+    // them.
     private const double MaxReactionSpeed = 1e30;
+
     // ProcessVoxel is invoked once per voxel from an already-parallel worker (thousands of calls per
     // chunk per tick), and reactionCount is typically a handful of entries. Renting/returning that tiny
     // array from ArrayPool<T>.Shared on every call adds pool bookkeeping to the hottest part of the loop
@@ -387,7 +389,15 @@ internal class ReactionSolver : IAtmosSolverStage
             if (double.IsNaN(speed) || speed <= 0.0)
                 continue;
 
-            reactionSpeeds[reactionId] = (Mole)Math.Min(speed, MaxReactionSpeed);
+            if (speed > MaxReactionSpeed)
+            {
+                if (!ConsumesAnything(gasData, reactionId))
+                    continue;
+
+                speed = MaxReactionSpeed;
+            }
+
+            reactionSpeeds[reactionId] = (Mole)speed;
         }
 
         bool anyReaction = false;
@@ -526,6 +536,21 @@ internal class ReactionSolver : IAtmosSolverStage
         JoulePerKelvin heatCapacity = ComputeHeatCapacity(mixtureVector, mixtureLength, config);
         if (heatCapacity > 0f)
             currentTemperature = energy / heatCapacity;
+    }
+
+    // Only reached for an overflowing rate, so the per-gas scan stays off the normal path.
+    private static bool ConsumesAnything(GasReactionData[] gasData, int reactionId)
+    {
+        foreach (var gas in gasData)
+        {
+            foreach (var (consumingId, consumed) in gas.ConsumingReactions)
+            {
+                if (consumingId == reactionId && consumed < 0f)
+                    return true;
+            }
+        }
+
+        return false;
     }
 
     private static GasReactionData CreateGasReactionData(IAtmosConfig config, int gasId)
