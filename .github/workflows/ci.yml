@@ -115,9 +115,8 @@ jobs:
               foreach (var chunk in context.Chunks(simulation))
               {
                   FlatArray<float> exposure = chunk.Exposure;
-                  FlatArray<float> live = chunk.Dangerous().Exposure;
-                  Span<int> burnCount = chunk.BurnCount;
-                  burnCount[0] += exposure.Length + live.Length;
+                  FlatArray<int> burnCount = chunk.BurnCount;
+                  burnCount[0] += exposure.Length;
                   chunk.Exposure[0] += 1f;
               }
           });
