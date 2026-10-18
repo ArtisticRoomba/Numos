@@ -684,26 +684,14 @@ public sealed partial class AtmosWorld : IDisposable
                     .ToArray();
 
                 var slotCheckpoints = new AtmosWorldLinkSlotCheckpoint[_linkSlots.Count];
-                var publicLinkSets = new List<AtmosWorldLinkSetCheckpoint>();
                 for (int index = 0; index < _linkSlots.Count; index++)
                 {
                     var slot = _linkSlots[index];
-                    ExplicitLinkDefinition[] definitions = ToDefinitions(slot.Edges);
                     slotCheckpoints[index] = new AtmosWorldLinkSlotCheckpoint(
                         slot.Generation,
                         (byte)slot.State,
                         slot.Kind,
-                        definitions);
-
-                    if (slot.State == LinkSetState.Free)
-                        continue;
-
-                    publicLinkSets.Add(
-                        new AtmosWorldLinkSetCheckpoint(
-                            new ExplicitLinkSetHandle(index, slot.Generation),
-                            slot.Kind,
-                            ToPublicState(slot.State),
-                            Array.AsReadOnly(definitions.ToArray())));
+                        ToDefinitions(slot.Edges));
                 }
 
                 return new AtmosWorldCheckpoint(
@@ -716,7 +704,6 @@ public sealed partial class AtmosWorld : IDisposable
                         step.IsEnabled,
                         step.NeighborSelectionKey)).ToArray(),
                     simulationCheckpoints,
-                    publicLinkSets.ToArray(),
                     simulationGenerations,
                     slotCheckpoints);
             }

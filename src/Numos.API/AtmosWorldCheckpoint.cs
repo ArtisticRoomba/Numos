@@ -17,13 +17,17 @@ public sealed class AtmosWorldCheckpoint
     /// </summary>
     public const int CurrentFormatVersion = 4;
 
+    // See AtmosSimulationCheckpoint: immutable after construction, so the digest is computed once.
+    private ulong _digest;
+    private volatile bool _hasDigest;
+    private IReadOnlyList<AtmosWorldLinkSetCheckpoint>? _linkSets;
+
     internal AtmosWorldCheckpoint(
         AtmosTimelinePosition position,
         ulong topologyVersion,
         AtmosConfigSnapshot config,
         AtmosWorldSolverCheckpoint[] solvers,
         AtmosWorldSimulationCheckpoint[] simulations,
-        AtmosWorldLinkSetCheckpoint[] linkSets,
         uint[] simulationGenerations,
         AtmosWorldLinkSlotCheckpoint[] linkSlots)
     {
@@ -32,7 +36,6 @@ public sealed class AtmosWorldCheckpoint
         Config = config;
         Solvers = Array.AsReadOnly(solvers);
         Simulations = Array.AsReadOnly(simulations);
-        LinkSets = Array.AsReadOnly(linkSets);
         SimulationGenerations = simulationGenerations;
         LinkSlots = linkSlots;
     }
@@ -75,7 +78,7 @@ public sealed class AtmosWorldCheckpoint
     /// <summary>
     ///     Gets non-free link sets, including topology mutations waiting for a tick boundary.
     /// </summary>
-    public IReadOnlyList<AtmosWorldLinkSetCheckpoint> LinkSets { get; }
+    public IReadOnlyList<AtmosWorldLinkSetCheckpoint> LinkSets => _linkSets ??= CreateLinkSets(LinkSlots);
 
     internal uint[] SimulationGenerations { get; }
 
@@ -87,7 +90,40 @@ public sealed class AtmosWorldCheckpoint
     /// <returns>The checkpoint position and a deterministic non-cryptographic 64-bit digest.</returns>
     public AtmosWorldStateHash ComputeStateHash()
     {
-        return AtmosWorldCheckpointHasher.Hash(this);
+        if (!_hasDigest)
+        {
+            _digest = AtmosWorldCheckpointHasher.Hash(this);
+            _hasDigest = true;
+        }
+
+        return new AtmosWorldStateHash(Position, _digest);
+    }
+
+    // The public view shares each slot's definitions array; the read-only wrapper keeps it immutable.
+    private static IReadOnlyList<AtmosWorldLinkSetCheckpoint> CreateLinkSets(AtmosWorldLinkSlotCheckpoint[] slots)
+    {
+        var linkSets = new List<AtmosWorldLinkSetCheckpoint>();
+        for (int index = 0; index < slots.Length; index++)
+        {
+            var slot = slots[index];
+            if (slot.State == 0)
+                continue;
+
+            linkSets.Add(
+                new AtmosWorldLinkSetCheckpoint(
+                    new ExplicitLinkSetHandle(index, slot.Generation),
+                    slot.Kind,
+                    slot.State switch
+                    {
+                        1 => AtmosWorldLinkSetState.PendingActivation,
+                        2 => AtmosWorldLinkSetState.Active,
+                        3 or 4 => AtmosWorldLinkSetState.PendingRemoval,
+                        _ => throw new InvalidOperationException("The checkpoint contains an unknown link-set state.")
+                    },
+                    Array.AsReadOnly(slot.Links)));
+        }
+
+        return linkSets.AsReadOnly();
     }
 }
 

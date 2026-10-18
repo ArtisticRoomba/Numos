@@ -119,38 +119,25 @@ internal sealed partial class AtmosKernel
     {
         lock (StateGate)
         {
-            return AtmosStateHasher.Hash(CaptureCheckpoint());
+            return CaptureCheckpoint().ComputeStateHash();
         }
     }
 
-    internal void ResumeRecording()
+    /// <summary>
+    ///     Resumes the stopped recording if the live state still matches its head.
+    /// </summary>
+    /// <param name="current">
+    ///     The live state's hash when the caller already knows it, such as right after restoring a checkpoint whose
+    ///     digest is cached; otherwise the state is captured and hashed here.
+    /// </param>
+    internal void ResumeRecording(AtmosStateHash? current = null)
     {
         lock (StateGate)
         {
             ThrowIfTickExecuting("resume recording");
-            if (_isRecording || !_hasRecording || _stoppedRecordingHash != ComputeStateHash())
+            if (_isRecording || !_hasRecording || _stoppedRecordingHash != (current ?? ComputeStateHash()))
                 throw new InvalidOperationException("Recording can only resume at the unchanged, stopped recording head.");
 
-            _isRecording = true;
-        }
-    }
-
-    internal void ResumeRecordingFromCurrentPosition()
-    {
-        lock (StateGate)
-        {
-            ThrowIfTickExecuting("resume recording from the current position");
-            if (_isRecording ||
-                !_hasRecording ||
-                TimelinePosition.Tick < _recordingStart.Tick ||
-                TimelinePosition.Tick > _recordingHead.Tick ||
-                _lastOperationSequence < _recordingStart.OperationSequence ||
-                _lastOperationSequence > _recordingHead.OperationSequence)
-                throw new InvalidOperationException("Recording can only branch from a position in its stopped history.");
-
-            _recordedOperations.RemoveAll(operation => operation.Sequence > _lastOperationSequence);
-            _recordingHead = TimelinePosition;
-            _stoppedRecordingHash = null;
             _isRecording = true;
         }
     }
@@ -267,7 +254,7 @@ internal sealed partial class AtmosKernel
                 throw new InvalidOperationException("Stop recording before replaying; recursive replay is unavailable.");
 
             ValidateCheckpoint(checkpoint);
-            ValidateHistory(checkpoint.Position, history, target);
+            ReplayHistoryValidator.ThrowIfInvalidReplay(checkpoint.Position, history, target);
             var previous = CaptureCheckpoint();
             long started = Stopwatch.GetTimestamp();
             _isReplaying = true;
@@ -282,7 +269,7 @@ internal sealed partial class AtmosKernel
                     while ((ulong)TickCount < operation.AfterTick)
                         _replayTick();
 
-                    ApplyOperation(operation.Operation);
+                    ApplyRecordedOperation(operation.Operation);
                     _lastOperationSequence = operation.Sequence;
                 }
 
@@ -305,52 +292,6 @@ internal sealed partial class AtmosKernel
                 _isReplaying = false;
             }
         }
-    }
-
-    private static void ValidateHistory(
-        AtmosTimelinePosition start, AtmosRecordedOperation[] history, AtmosTimelinePosition target)
-    {
-        if (target.Tick < start.Tick || target.Tick > int.MaxValue || target.OperationSequence < start.OperationSequence)
-            throw new ArgumentOutOfRangeException(nameof(target), "The target must follow the checkpoint.");
-
-        ulong sequence = start.OperationSequence;
-        ulong tick = start.Tick;
-        AtmosRecordedOperation? previous = null;
-        foreach (var operation in history)
-        {
-            if (operation == null ||
-                operation.Operation == null ||
-                previous != null && (operation.Sequence <= previous.Sequence || operation.AfterTick < previous.AfterTick))
-            {
-                throw new ArgumentException(
-                    "Operations must be non-null and ordered by strictly increasing sequence and nondecreasing tick.",
-                    nameof(history));
-            }
-
-            previous = operation;
-            if (operation.Sequence <= start.OperationSequence) continue;
-
-            if (operation.Sequence > target.OperationSequence)
-            {
-                if (operation.AfterTick < target.Tick)
-                    throw new ArgumentException("The target omits an operation preceding its tick.", nameof(target));
-
-                continue;
-            }
-
-            if (operation.Sequence != checked(sequence + 1) || operation.AfterTick < tick || operation.AfterTick > target.Tick)
-            {
-                throw new ArgumentException(
-                    "The history has a sequence gap or an operation outside the replay interval.",
-                    nameof(history));
-            }
-
-            sequence = operation.Sequence;
-            tick = operation.AfterTick;
-        }
-
-        if (sequence != target.OperationSequence)
-            throw new ArgumentException("The history does not contain the target operation sequence.", nameof(history));
     }
 
     internal void ApplyRecordedOperation(AtmosOperation operation)
@@ -435,11 +376,6 @@ internal sealed partial class AtmosKernel
         chunk.TotalHeatCapacity[op.LocalVoxelIndex] = op.HeatCapacity;
         chunk.IsVacuum[op.LocalVoxelIndex] = op.Pressure <= 0f;
         chunk.MarkChanged();
-    }
-
-    private void ApplyOperation(AtmosOperation operation)
-    {
-        ApplyRecordedOperation(operation);
     }
 
     private AtmosChunk[] OrderedChunks()

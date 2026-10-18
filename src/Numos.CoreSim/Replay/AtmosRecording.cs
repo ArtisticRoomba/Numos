@@ -91,6 +91,7 @@ public sealed record SetAtmosConfigOperation(AtmosConfigSnapshot Config) : Atmos
 /// <param name="Position">Completed tick after which the operation occurred and its unique sequence.</param>
 /// <param name="Operation">Immutable replay payload. CLR call metadata is not recorded.</param>
 public sealed record AtmosRecordedOperation(AtmosTimelinePosition Position, AtmosOperation Operation)
+    : IReplayHistoryEntry
 {
     /// <summary>
     ///     Gets the payload’s explicit replay discriminator.
@@ -106,6 +107,8 @@ public sealed record AtmosRecordedOperation(AtmosTimelinePosition Position, Atmo
     ///     Gets the unique total-order external-operation sequence.
     /// </summary>
     public ulong Sequence => Position.OperationSequence;
+
+    bool IReplayHistoryEntry.HasOperation => Operation != null;
 }
 
 /// <summary>

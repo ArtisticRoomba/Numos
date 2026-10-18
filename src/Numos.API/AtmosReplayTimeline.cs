@@ -175,11 +175,11 @@ public sealed class AtmosReplayTimeline
 
         cancellationToken.ThrowIfCancellationRequested();
         var finalReplay = simulation.ReplayTo(source, archive.Recording.Operations, archive.Recording.Head);
-        var finalHash = simulation.ComputeStateHash();
+        timeline._headCheckpoint = simulation.CaptureCheckpoint();
+        var finalHash = timeline._headCheckpoint.ComputeStateHash();
         if (finalHash != archive.HeadStateHash)
             throw new InvalidDataException("The replay diverged from its final reference hash.");
 
-        timeline._headCheckpoint = simulation.CaptureCheckpoint();
         if (timeline._checkpoints[^1].Checkpoint.Position != timeline._headCheckpoint.Position)
             timeline._checkpoints.Add(new AtmosReplayVerificationPoint(timeline._headCheckpoint, finalHash));
 
@@ -295,7 +295,7 @@ public sealed class AtmosReplayTimeline
             return;
         }
 
-        _simulation.ResumeRecording();
+        _simulation.ResumeRecordingAt(_headCheckpoint!);
         IsInspecting = false;
         IsVerified = true;
     }
@@ -348,11 +348,11 @@ public sealed class AtmosReplayTimeline
         if (IsInspecting)
             return;
 
-        var tail = _simulation.StopRecording();
+        var tail = _simulation.StopRecording(out var head);
         _history = new AtmosRecording(Start, tail.Head, CombineOperations(_committedPrefix, tail.Operations));
-        _headCheckpoint = _simulation.CaptureCheckpoint();
-        if (_checkpoints[^1].Checkpoint.Position != _headCheckpoint.Position)
-            _checkpoints.Add(new AtmosReplayVerificationPoint(_headCheckpoint, _headCheckpoint.ComputeStateHash()));
+        _headCheckpoint = head;
+        if (_checkpoints[^1].Checkpoint.Position != head.Position)
+            _checkpoints.Add(new AtmosReplayVerificationPoint(head, head.ComputeStateHash()));
 
         IsInspecting = true;
     }

@@ -173,7 +173,7 @@ public sealed record SetAtmosWorldSolverEnabledOperation(string Name, bool Enabl
 /// <param name="Operation">The detached immutable operation payload.</param>
 public sealed record AtmosWorldRecordedOperation(
     AtmosTimelinePosition Position,
-    AtmosWorldOperation Operation)
+    AtmosWorldOperation Operation) : IReplayHistoryEntry
 {
     /// <summary>
     ///     Gets the number of completed ticks after which the operation occurred.
@@ -189,6 +189,8 @@ public sealed record AtmosWorldRecordedOperation(
     ///     Gets the operation's stable code.
     /// </summary>
     public AtmosWorldOperationCode Code => Operation.Code;
+
+    bool IReplayHistoryEntry.HasOperation => Operation != null;
 }
 
 /// <summary>

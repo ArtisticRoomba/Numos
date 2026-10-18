@@ -161,9 +161,24 @@ public sealed partial class AtmosSimulation
         _kernel.ResumeRecording();
     }
 
-    internal void ResumeRecordingFromCurrentPosition()
+    /// <summary>
+    ///     Resumes recording right after <paramref name="head" /> was restored, trusting its cached digest instead of
+    ///     capturing the live state again.
+    /// </summary>
+    internal void ResumeRecordingAt(AtmosSimulationCheckpoint head)
     {
         ThrowIfDisposed();
-        _kernel.ResumeRecordingFromCurrentPosition();
+        World.EnsureComponentRecordingAllowed(this);
+        _kernel.ResumeRecording(head.ComputeStateHash());
+    }
+
+    /// <summary>
+    ///     Stops recording and also returns the head checkpoint the stop captured anyway.
+    /// </summary>
+    internal AtmosRecording StopRecording(out AtmosSimulationCheckpoint head)
+    {
+        ThrowIfDisposed();
+        World.EnsureComponentRecordingAllowed(this);
+        return _kernel.StopRecording(out head);
     }
 }

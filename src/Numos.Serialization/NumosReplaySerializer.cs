@@ -886,26 +886,17 @@ public static partial class NumosReplaySerializer
 
     private static void ValidateRecording(AtmosRecording recording)
     {
-        if (recording.Head.Tick < recording.Start.Tick ||
-            recording.Head.OperationSequence < recording.Start.OperationSequence)
-            throw new InvalidDataException("The replay recording bounds are invalid.");
-
-        ulong sequence = recording.Start.OperationSequence;
-        ulong tick = recording.Start.Tick;
-        foreach (var operation in recording.Operations)
+        switch (ReplayHistoryValidator.Validate(recording.Start, recording.Operations, recording.Head, true))
         {
-            if (operation.Sequence != checked(sequence + 1) ||
-                operation.AfterTick < tick ||
-                operation.AfterTick > recording.Head.Tick ||
-                operation.Sequence > recording.Head.OperationSequence)
+            case ReplayHistoryError.None:
+                return;
+            case ReplayHistoryError.TargetBeforeStart:
+                throw new InvalidDataException("The replay recording bounds are invalid.");
+            case ReplayHistoryError.MissingTarget:
+                throw new InvalidDataException("The replay operation history does not reach its declared head.");
+            default:
                 throw new InvalidDataException("Replay operations are not contiguous and ordered within the recording bounds.");
-
-            sequence = operation.Sequence;
-            tick = operation.AfterTick;
         }
-
-        if (sequence != recording.Head.OperationSequence)
-            throw new InvalidDataException("The replay operation history does not reach its declared head.");
     }
 
     private sealed record CheckpointPayload(AtmosSimulationCheckpoint Checkpoint, AtmosStateHash InitialHash, AtmosStateHash HeadHash);

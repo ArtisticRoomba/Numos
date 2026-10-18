@@ -23,6 +23,11 @@ public sealed class AtmosSimulationCheckpoint
     /// </summary>
     public const int CurrentCompatibilityVersion = 3;
 
+    // Every member is immutable once constructed, so the digest only needs computing once. The flag is written after
+    // the digest so a reader that sees it set also sees the digest.
+    private ulong _digest;
+    private volatile bool _hasDigest;
+
     internal AtmosSimulationCheckpoint(
         Int3 dimensions, AtmosTimelinePosition position,
         AtmosConfigSnapshot config, AtmosSolverCheckpoint[] solvers, AtmosChunkCheckpoint[] chunks)
@@ -88,7 +93,13 @@ public sealed class AtmosSimulationCheckpoint
     /// <returns>The checkpoint position and non-cryptographic canonical state digest.</returns>
     public AtmosStateHash ComputeStateHash()
     {
-        return AtmosStateHasher.Hash(this);
+        if (!_hasDigest)
+        {
+            _digest = AtmosStateHasher.Hash(this);
+            _hasDigest = true;
+        }
+
+        return new AtmosStateHash(Position, _digest);
     }
 }
 

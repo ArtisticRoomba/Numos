@@ -207,7 +207,6 @@ public static partial class NumosWorldReplaySerializer
 
         int linkSlotCount = NumosReplaySerializer.ReadCount(reader, 10_000_000, "link-set slot");
         var slots = new AtmosWorldLinkSlotCheckpoint[linkSlotCount];
-        var publicSets = new List<AtmosWorldLinkSetCheckpoint>();
         for (int index = 0; index < linkSlotCount; index++)
         {
             uint generation = reader.ReadUInt32();
@@ -219,15 +218,9 @@ public static partial class NumosWorldReplaySerializer
                 links[linkIndex] = ReadLink(reader);
 
             slots[index] = new AtmosWorldLinkSlotCheckpoint(generation, state, kind, links);
+            // The checkpoint maps states for its public view lazily, so reject unknown ones while reading.
             if (state != 0)
-            {
-                publicSets.Add(
-                    new AtmosWorldLinkSetCheckpoint(
-                        new ExplicitLinkSetHandle(index, generation),
-                        kind,
-                        ToPublicState(state),
-                        Array.AsReadOnly(links.ToArray())));
-            }
+                _ = ToPublicState(state);
         }
 
         var checkpoint = new AtmosWorldCheckpoint(
@@ -236,7 +229,6 @@ public static partial class NumosWorldReplaySerializer
             config,
             solvers,
             simulations,
-            publicSets.ToArray(),
             generations,
             slots);
 
@@ -386,26 +378,17 @@ public static partial class NumosWorldReplaySerializer
 
     private static void ValidateRecording(AtmosWorldRecording recording)
     {
-        if (recording.Head.Tick < recording.Start.Tick ||
-            recording.Head.OperationSequence < recording.Start.OperationSequence)
-            throw new InvalidDataException("The world replay bounds are invalid.");
-
-        ulong sequence = recording.Start.OperationSequence;
-        ulong tick = recording.Start.Tick;
-        foreach (var operation in recording.Operations)
+        switch (ReplayHistoryValidator.Validate(recording.Start, recording.Operations, recording.Head, true))
         {
-            if (operation.Sequence != checked(sequence + 1) ||
-                operation.AfterTick < tick ||
-                operation.AfterTick > recording.Head.Tick ||
-                operation.Sequence > recording.Head.OperationSequence)
+            case ReplayHistoryError.None:
+                return;
+            case ReplayHistoryError.TargetBeforeStart:
+                throw new InvalidDataException("The world replay bounds are invalid.");
+            case ReplayHistoryError.MissingTarget:
+                throw new InvalidDataException("World operation history does not reach its declared head.");
+            default:
                 throw new InvalidDataException("World operations are not contiguous and ordered within the recording bounds.");
-
-            sequence = operation.Sequence;
-            tick = operation.AfterTick;
         }
-
-        if (sequence != recording.Head.OperationSequence)
-            throw new InvalidDataException("World operation history does not reach its declared head.");
     }
 
     private sealed record WorldCheckpointPayload(

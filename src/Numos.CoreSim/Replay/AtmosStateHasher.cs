@@ -82,7 +82,7 @@ internal struct AtmosStateHasher
         return hash.Value;
     }
 
-    internal static AtmosStateHash Hash(AtmosSimulationCheckpoint checkpoint)
+    internal static ulong Hash(AtmosSimulationCheckpoint checkpoint)
     {
         var hash = new AtmosStateHasher();
         hash.Add(checkpoint.FormatVersion);
@@ -115,6 +115,6 @@ internal struct AtmosStateHasher
                 array.AppendHash(ref hash);
         }
 
-        return new AtmosStateHash(checkpoint.Position, hash.Value);
+        return hash.Value;
     }
 }

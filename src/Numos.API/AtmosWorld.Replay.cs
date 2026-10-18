@@ -181,6 +181,14 @@ public sealed partial class AtmosWorld
     /// <exception cref="InvalidOperationException">The world is not recording or this is called during a tick.</exception>
     public AtmosWorldRecording StopRecording()
     {
+        return StopRecording(out _);
+    }
+
+    /// <summary>
+    ///     Stops recording and also returns the head checkpoint the stop captures for its resume guard.
+    /// </summary>
+    internal AtmosWorldRecording StopRecording(out AtmosWorldCheckpoint head)
+    {
         lock (Gate)
         {
             ThrowIfDisposed();
@@ -197,7 +205,8 @@ public sealed partial class AtmosWorld
             foreach (var simulation in _orderedSimulations)
                 simulation.Kernel.SetExternalOperationSink(null);
 
-            _stoppedWorldRecordingHash = ComputeStateHashCore();
+            head = CaptureCheckpoint();
+            _stoppedWorldRecordingHash = head.ComputeStateHash();
             return CaptureRecording();
         }
     }
@@ -211,11 +220,25 @@ public sealed partial class AtmosWorld
     /// </exception>
     public void ResumeRecording()
     {
+        ResumeRecordingCore(null);
+    }
+
+    /// <summary>
+    ///     Resumes recording right after <paramref name="head" /> was restored, trusting its cached digest instead of
+    ///     capturing the live state again.
+    /// </summary>
+    internal void ResumeRecordingAt(AtmosWorldCheckpoint head)
+    {
+        ResumeRecordingCore(head);
+    }
+
+    private void ResumeRecordingCore(AtmosWorldCheckpoint? restoredHead)
+    {
         lock (Gate)
         {
             ThrowIfDisposed();
             ThrowIfTickExecuting("resume recording");
-            var current = ComputeStateHashCore();
+            var current = restoredHead?.ComputeStateHash() ?? ComputeStateHashCore();
             lock (_recordingGate)
             {
                 if (_isWorldRecording || !_hasWorldRecording || _stoppedWorldRecordingHash != current)
@@ -283,7 +306,7 @@ public sealed partial class AtmosWorld
                     throw new InvalidOperationException("Stop recording before replaying; recursive replay is unavailable.");
             }
 
-            ValidateWorldHistory(checkpoint.Position, history, target);
+            ReplayHistoryValidator.ThrowIfInvalidReplay(checkpoint.Position, history, target);
             var previous = CaptureCheckpoint();
             long started = Stopwatch.GetTimestamp();
             lock (_recordingGate)
@@ -381,8 +404,7 @@ public sealed partial class AtmosWorld
 
     private AtmosWorldStateHash ComputeStateHashCore()
     {
-        var checkpoint = CaptureCheckpoint();
-        return AtmosWorldCheckpointHasher.Hash(checkpoint);
+        return CaptureCheckpoint().ComputeStateHash();
     }
 
     private void ApplyWorldOperation(AtmosWorldOperation operation)
@@ -450,60 +472,11 @@ public sealed partial class AtmosWorld
         if (!Solvers.SetEnabled(solver.Name, solver.Enabled))
             throw new ArgumentException($"Unknown world solver '{solver.Name}'.", nameof(solver));
     }
-
-    private static void ValidateWorldHistory(
-        AtmosTimelinePosition start,
-        AtmosWorldRecordedOperation[] history,
-        AtmosTimelinePosition target)
-    {
-        if (target.Tick < start.Tick || target.Tick > int.MaxValue || target.OperationSequence < start.OperationSequence)
-            throw new ArgumentOutOfRangeException(nameof(target), "The target must follow the checkpoint.");
-
-        ulong sequence = start.OperationSequence;
-        ulong tick = start.Tick;
-        AtmosWorldRecordedOperation? previous = null;
-        foreach (var operation in history)
-        {
-            if (operation == null ||
-                operation.Operation == null ||
-                previous != null && (operation.Sequence <= previous.Sequence || operation.AfterTick < previous.AfterTick))
-            {
-                throw new ArgumentException(
-                    "Operations must be non-null and ordered by strictly increasing sequence and nondecreasing tick.",
-                    nameof(history));
-            }
-
-            previous = operation;
-            if (operation.Sequence <= start.OperationSequence)
-                continue;
-
-            if (operation.Sequence > target.OperationSequence)
-            {
-                if (operation.AfterTick < target.Tick)
-                    throw new ArgumentException("The target omits an operation preceding its tick.", nameof(target));
-
-                continue;
-            }
-
-            if (operation.Sequence != checked(sequence + 1) || operation.AfterTick < tick || operation.AfterTick > target.Tick)
-            {
-                throw new ArgumentException(
-                    "The history has a sequence gap or an operation outside the replay interval.",
-                    nameof(history));
-            }
-
-            sequence = operation.Sequence;
-            tick = operation.AfterTick;
-        }
-
-        if (sequence != target.OperationSequence)
-            throw new ArgumentException("The history does not contain the target operation sequence.", nameof(history));
-    }
 }
 
 internal static class AtmosWorldCheckpointHasher
 {
-    internal static AtmosWorldStateHash Hash(AtmosWorldCheckpoint checkpoint)
+    internal static ulong Hash(AtmosWorldCheckpoint checkpoint)
     {
         var hash = new AtmosStateHasher();
         hash.Add(checkpoint.FormatVersion);
@@ -529,8 +502,7 @@ internal static class AtmosWorldCheckpointHasher
         {
             hash.Add(simulation.Simulation.Index);
             hash.Add(simulation.Simulation.Generation);
-            var child = simulation.Checkpoint.ComputeStateHash();
-            hash.Add(child.Digest);
+            hash.Add(simulation.Checkpoint.ComputeStateHash().Digest);
         }
 
         hash.Add(checkpoint.LinkSlots.Length);
@@ -548,7 +520,7 @@ internal static class AtmosWorldCheckpointHasher
             }
         }
 
-        return new AtmosWorldStateHash(checkpoint.Position, hash.Value);
+        return hash.Value;
     }
 
     private static void AddCell(ref AtmosStateHasher hash, AtmosCellRef cell)

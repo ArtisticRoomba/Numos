@@ -236,6 +236,15 @@ internal sealed partial class AtmosKernel
 
     internal AtmosRecording StopRecording()
     {
+        return StopRecording(out _);
+    }
+
+    /// <summary>
+    ///     Stops recording and hands back the head checkpoint captured for the resume guard, so a caller that needs it
+    ///     doesn't capture the grid a second time.
+    /// </summary>
+    internal AtmosRecording StopRecording(out AtmosSimulationCheckpoint head)
+    {
         lock (StateGate)
         {
             ThrowIfTickExecuting("stop recording");
@@ -243,7 +252,8 @@ internal sealed partial class AtmosKernel
                 throw new InvalidOperationException("The simulation is not recording.");
 
             _isRecording = false;
-            _stoppedRecordingHash = ComputeStateHash();
+            head = CaptureCheckpoint();
+            _stoppedRecordingHash = head.ComputeStateHash();
             _recordingHead = new AtmosTimelinePosition(checked((ulong)TickCount), _lastOperationSequence);
             return new AtmosRecording(_recordingStart, _recordingHead, _recordedOperations);
         }
