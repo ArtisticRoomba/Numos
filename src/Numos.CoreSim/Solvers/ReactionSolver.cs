@@ -58,7 +58,7 @@ internal class ReactionSolver : IAtmosSolverStage
     ///     Fraction of a voxel that a transferred flame kernel starts with. After that the kernel grows or
     ///     recedes by the same flame speed rules as any other flame. Capped below 1.
     /// </summary>
-    internal Scalar TransferSeedFraction { get; set; } = 0.001f;
+    internal Scalar TransferSeedFraction { get; set; } = 0.01f;
 
     // Set by the voxel pass if any voxel is completely ignited, so the transfer stage costs nothing otherwise.
     private volatile bool _anyFullyIgnited;
