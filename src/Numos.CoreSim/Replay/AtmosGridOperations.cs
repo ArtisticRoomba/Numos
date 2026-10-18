@@ -163,8 +163,6 @@ public sealed record SetVoxelMixtureOperation : AtmosOperation
     /// <inheritdoc />
     public override AtmosOperationCode Code => AtmosOperationCode.SetVoxelMixture;
 
-    internal override void Apply(AtmosKernel kernel) => kernel.Apply(this);
-
     /// <summary>
     ///     Gets the chunk-grid address receiving the resolved mutation.
     /// </summary>
@@ -194,6 +192,8 @@ public sealed record SetVoxelMixtureOperation : AtmosOperation
     ///     Gets all allocated channels at the affected voxel in reduction order, including zero amounts.
     /// </summary>
     public IReadOnlyList<AtmosGasAmount> Gases { get; }
+
+    internal override void Apply(AtmosKernel kernel) => kernel.Apply(this);
 }
 
 /// <summary>

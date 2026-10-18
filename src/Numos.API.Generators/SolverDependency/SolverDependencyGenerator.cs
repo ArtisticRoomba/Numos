@@ -52,11 +52,16 @@ public sealed class SolverDependencyGenerator : IIncrementalGenerator
             .Collect()
             .Select(static (declarations, _) => Analyze(declarations));
 
-        GeneratorOutput.Register(context, output, TypesStepName, static type =>
-            (type.Type.HintName + ".SolverDependencies.g.cs", SolverDependencyEmitter.Emit(type)));
+        GeneratorOutput.Register(
+            context,
+            output,
+            TypesStepName,
+            static type =>
+                (type.Type.HintName + ".SolverDependencies.g.cs", SolverDependencyEmitter.Emit(type)));
     }
 
-    private static SolverDependencyDeclaration? CreateModel(GeneratorAttributeSyntaxContext context,
+    private static SolverDependencyDeclaration? CreateModel(
+        GeneratorAttributeSyntaxContext context,
         CancellationToken cancellationToken)
     {
         if (context.TargetSymbol is not IPropertySymbol property || context.Attributes.IsDefaultOrEmpty)
@@ -71,6 +76,7 @@ public sealed class SolverDependencyGenerator : IIncrementalGenerator
         LocationInfo? location = LocationInfo.From(syntax.Identifier.GetLocation());
         LocationInfo? attributeLocation =
             LocationInfo.From(attribute.ApplicationSyntaxReference?.GetSyntax(cancellationToken)) ?? location;
+
         LocationInfo? typeLocation = syntax.Parent is BaseTypeDeclarationSyntax declaration
             ? LocationInfo.From(declaration.Identifier.GetLocation())
             : location;
@@ -82,24 +88,38 @@ public sealed class SolverDependencyGenerator : IIncrementalGenerator
         {
             if (!isPartial)
             {
-                typeDiagnostics.Add(DiagnosticInfo.Create(SolverDependencyDiagnostics.TypeNotPartial, typeLocation,
-                    containing.ToDisplayString(), displayName));
+                typeDiagnostics.Add(
+                    DiagnosticInfo.Create(
+                        SolverDependencyDiagnostics.TypeNotPartial,
+                        typeLocation,
+                        containing.ToDisplayString(),
+                        displayName));
             }
         }
 
         bool isClass = type.TypeKind == TypeKind.Class;
         if (!isClass)
         {
-            typeDiagnostics.Add(DiagnosticInfo.Create(SolverDependencyDiagnostics.NotClass, typeLocation,
-                displayName, typeDisplayName));
+            typeDiagnostics.Add(
+                DiagnosticInfo.Create(
+                    SolverDependencyDiagnostics.NotClass,
+                    typeLocation,
+                    displayName,
+                    typeDisplayName));
         }
 
-        if (!property.IsPartialDefinition || property.PartialImplementationPart is not null ||
-            property.SetMethod is not null || property.IsIndexer || property.ReturnsByRef ||
+        if (!property.IsPartialDefinition ||
+            property.PartialImplementationPart is not null ||
+            property.SetMethod is not null ||
+            property.IsIndexer ||
+            property.ReturnsByRef ||
             property.ReturnsByRefReadonly)
         {
-            diagnostics.Add(DiagnosticInfo.Create(SolverDependencyDiagnostics.NotPartialDefinition, location,
-                displayName));
+            diagnostics.Add(
+                DiagnosticInfo.Create(
+                    SolverDependencyDiagnostics.NotPartialDefinition,
+                    location,
+                    displayName));
         }
 
         if (property.IsStatic)
@@ -107,8 +127,12 @@ public sealed class SolverDependencyGenerator : IIncrementalGenerator
 
         if (!property.Type.IsReferenceType)
         {
-            diagnostics.Add(DiagnosticInfo.Create(SolverDependencyDiagnostics.NotReferenceType, location,
-                displayName, property.Type.ToDisplayString()));
+            diagnostics.Add(
+                DiagnosticInfo.Create(
+                    SolverDependencyDiagnostics.NotReferenceType,
+                    location,
+                    displayName,
+                    property.Type.ToDisplayString()));
         }
 
         bool optional = false;
@@ -122,13 +146,21 @@ public sealed class SolverDependencyGenerator : IIncrementalGenerator
         NullableAnnotation annotation = property.NullableAnnotation;
         if (optional && annotation == NullableAnnotation.NotAnnotated)
         {
-            diagnostics.Add(DiagnosticInfo.Create(SolverDependencyDiagnostics.OptionalMismatch, attributeLocation,
-                displayName, "is Optional but its type is not nullable; declare the type with '?'"));
+            diagnostics.Add(
+                DiagnosticInfo.Create(
+                    SolverDependencyDiagnostics.OptionalMismatch,
+                    attributeLocation,
+                    displayName,
+                    "is Optional but its type is not nullable; declare the type with '?'"));
         }
         else if (!optional && annotation == NullableAnnotation.Annotated)
         {
-            diagnostics.Add(DiagnosticInfo.Create(SolverDependencyDiagnostics.OptionalMismatch, location,
-                displayName, "has a nullable type but is required; set Optional = true or remove the '?'"));
+            diagnostics.Add(
+                DiagnosticInfo.Create(
+                    SolverDependencyDiagnostics.OptionalMismatch,
+                    location,
+                    displayName,
+                    "has a nullable type but is required; set Optional = true or remove the '?'"));
         }
 
         INamedTypeSymbol? attributeType = attribute.AttributeClass;
@@ -163,7 +195,8 @@ public sealed class SolverDependencyGenerator : IIncrementalGenerator
     ///     base chain and bind attributes on base members. Gating them on one property keeps that to once per type.
     ///     Indexers are skipped because the syntax predicate never sees them.
     /// </remarks>
-    private static bool IsFirstDependency(IPropertySymbol property, INamedTypeSymbol type,
+    private static bool IsFirstDependency(
+        IPropertySymbol property, INamedTypeSymbol type,
         INamedTypeSymbol? attributeType)
     {
         IPropertySymbol definition = property.PartialDefinitionPart ?? property;
@@ -176,12 +209,14 @@ public sealed class SolverDependencyGenerator : IIncrementalGenerator
         return true;
     }
 
-    private static DependencyTypeAnalysis AnalyzeType(INamedTypeSymbol type, Compilation compilation,
+    private static DependencyTypeAnalysis AnalyzeType(
+        INamedTypeSymbol type, Compilation compilation,
         INamedTypeSymbol? attributeType, string typeDisplayName)
     {
         if (type.TypeKind != TypeKind.Class)
         {
-            return new DependencyTypeAnalysis(new DependencyHookModel(false, "private", false),
+            return new DependencyTypeAnalysis(
+                new DependencyHookModel(false, "private", false),
                 EquatableArray<DiagnosticInfo>.Empty);
         }
 
@@ -190,7 +225,8 @@ public sealed class SolverDependencyGenerator : IIncrementalGenerator
         INamedTypeSymbol? resolver = compilation.GetTypeByMetadataName(ResolverMetadataName);
         var diagnostics = new List<DiagnosticInfo>();
 
-        if (!type.IsAbstract && worldSolver is not null &&
+        if (!type.IsAbstract &&
+            worldSolver is not null &&
             !type.AllInterfaces.Contains(worldSolver, SymbolEqualityComparer.Default))
         {
             diagnostics.Add(DiagnosticInfo.Create(SolverDependencyDiagnostics.NotWorldSolver, null, typeDisplayName));
@@ -198,12 +234,21 @@ public sealed class SolverDependencyGenerator : IIncrementalGenerator
 
         if (dependenciesInterface is not null && DeclaresOwnInjection(type, dependenciesInterface))
         {
-            diagnostics.Add(DiagnosticInfo.Create(SolverDependencyDiagnostics.AlreadyImplemented, null,
-                typeDisplayName));
+            diagnostics.Add(
+                DiagnosticInfo.Create(
+                    SolverDependencyDiagnostics.AlreadyImplemented,
+                    null,
+                    typeDisplayName));
         }
 
-        DependencyHookModel hook = FindHook(type, dependenciesInterface, resolver, attributeType, typeDisplayName,
+        DependencyHookModel hook = FindHook(
+            type,
+            dependenciesInterface,
+            resolver,
+            attributeType,
+            typeDisplayName,
             diagnostics);
+
         return new DependencyTypeAnalysis(hook, diagnostics.ToEquatableArray());
     }
 
@@ -216,7 +261,8 @@ public sealed class SolverDependencyGenerator : IIncrementalGenerator
     ///     <c>[SolverDependency]</c> properties will get a generated hook, or one that implements the interface with
     ///     no hook to extend.
     /// </remarks>
-    private static DependencyHookModel FindHook(INamedTypeSymbol type, INamedTypeSymbol? dependenciesInterface,
+    private static DependencyHookModel FindHook(
+        INamedTypeSymbol type, INamedTypeSymbol? dependenciesInterface,
         INamedTypeSymbol? resolver, INamedTypeSymbol? attributeType, string typeDisplayName,
         List<DiagnosticInfo> typeDiagnostics)
     {
@@ -231,12 +277,19 @@ public sealed class SolverDependencyGenerator : IIncrementalGenerator
             // A hook that exists but can't be overridden (sealed, private, non-virtual) on a class that injects
             // means the chain is closed here, even if a class further up still has a virtual one.
             bool implementsInterface = dependenciesInterface is not null &&
-                                       current.AllInterfaces.Contains(dependenciesInterface,
+                                       current.AllInterfaces.Contains(
+                                           dependenciesInterface,
                                            SymbolEqualityComparer.Default);
+
             if (implementsInterface && !current.GetMembers(HookName).IsEmpty)
             {
-                typeDiagnostics.Add(DiagnosticInfo.Create(SolverDependencyDiagnostics.BaseNotOverridable, null,
-                    current.ToDisplayString(), typeDisplayName));
+                typeDiagnostics.Add(
+                    DiagnosticInfo.Create(
+                        SolverDependencyDiagnostics.BaseNotOverridable,
+                        null,
+                        current.ToDisplayString(),
+                        typeDisplayName));
+
                 return new DependencyHookModel(true, "protected", false);
             }
 
@@ -246,8 +299,13 @@ public sealed class SolverDependencyGenerator : IIncrementalGenerator
             if (dependenciesInterface is not null &&
                 current.Interfaces.Contains(dependenciesInterface, SymbolEqualityComparer.Default))
             {
-                typeDiagnostics.Add(DiagnosticInfo.Create(SolverDependencyDiagnostics.BaseNotOverridable, null,
-                    current.ToDisplayString(), typeDisplayName));
+                typeDiagnostics.Add(
+                    DiagnosticInfo.Create(
+                        SolverDependencyDiagnostics.BaseNotOverridable,
+                        null,
+                        current.ToDisplayString(),
+                        typeDisplayName));
+
                 return new DependencyHookModel(true, "protected", false);
             }
         }
@@ -255,13 +313,15 @@ public sealed class SolverDependencyGenerator : IIncrementalGenerator
         return new DependencyHookModel(false, type.IsSealed ? "private" : "protected", false);
     }
 
-    private static IMethodSymbol? FindOverridableHook(INamedTypeSymbol baseType, INamedTypeSymbol derived,
+    private static IMethodSymbol? FindOverridableHook(
+        INamedTypeSymbol baseType, INamedTypeSymbol derived,
         INamedTypeSymbol? resolver)
     {
         foreach (ISymbol member in baseType.GetMembers(HookName))
         {
             if (member is not IMethodSymbol { IsStatic: false, ReturnsVoid: true, Parameters.Length: 1 } method ||
-                method.IsSealed || !(method.IsVirtual || method.IsOverride || method.IsAbstract) ||
+                method.IsSealed ||
+                !(method.IsVirtual || method.IsOverride || method.IsAbstract) ||
                 method.TypeParameters.Length > 0)
             {
                 continue;
@@ -273,8 +333,10 @@ public sealed class SolverDependencyGenerator : IIncrementalGenerator
                 continue;
             }
 
-            bool sameAssembly = SymbolEqualityComparer.Default.Equals(baseType.ContainingAssembly,
+            bool sameAssembly = SymbolEqualityComparer.Default.Equals(
+                baseType.ContainingAssembly,
                 derived.ContainingAssembly);
+
             bool visible = method.DeclaredAccessibility switch
             {
                 Accessibility.Public or Accessibility.Protected or Accessibility.ProtectedOrInternal => true,
@@ -380,8 +442,9 @@ public sealed class SolverDependencyGenerator : IIncrementalGenerator
                 if (i == 0 && analysis is not null)
                 {
                     LocationInfo? typeLocation = declaration.TypeLocation;
-                    typeDiagnostics = typeDiagnostics.Concat(analysis.Diagnostics
-                        .Select(diagnostic => diagnostic with { Location = typeLocation }));
+                    typeDiagnostics = typeDiagnostics.Concat(
+                        analysis.Diagnostics
+                            .Select(diagnostic => diagnostic with { Location = typeLocation }));
                 }
 
                 foreach (DiagnosticInfo diagnostic in typeDiagnostics)

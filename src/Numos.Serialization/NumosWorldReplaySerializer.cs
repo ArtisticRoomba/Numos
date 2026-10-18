@@ -51,10 +51,19 @@ public static class NumosWorldReplaySerializer
         using var scratch = destination.CanSeek ? null : new MemoryStream();
         WriteSection(destination, writer, scratch, MetadataSection, 0, section => WriteMetadata(section, document.Metadata, replay));
         WriteSection(
-            destination, writer, scratch, CheckpointSection, RequiredSection,
+            destination,
+            writer,
+            scratch,
+            CheckpointSection,
+            RequiredSection,
             section => AtmosWorldReplayCodec.WriteCheckpoint(section, replay));
+
         WriteSection(
-            destination, writer, scratch, OperationsSection, RequiredSection,
+            destination,
+            writer,
+            scratch,
+            OperationsSection,
+            RequiredSection,
             section => WriteOperations(section, replay.Recording));
     }
 
@@ -160,6 +169,7 @@ public static class NumosWorldReplaySerializer
         using var reader = new BinaryReader(source, AtmosReplayCodec.Utf8, true);
         if (!reader.ReadBytes(Magic.Length).SequenceEqual(Magic)) throw new InvalidDataException("The stream is not a Numos file.");
         if (reader.ReadUInt16() != ContainerVersion) throw new InvalidDataException("The Numos container version is unsupported.");
+
         ushort kind = reader.ReadUInt16();
         if (kind == SimulationReplayContentKind)
         {
@@ -317,7 +327,9 @@ public static class NumosWorldReplaySerializer
             ushort code = reader.ReadUInt16();
             limited.Reset(reader.ReadUInt32());
             operations[index] = new AtmosWorldRecordedOperation(
-                position, AtmosWorldReplayCodec.ReadOperation(payload, code, options.MaxStringBytes));
+                position,
+                AtmosWorldReplayCodec.ReadOperation(payload, code, options.MaxStringBytes));
+
             if (limited.Remaining != 0) throw new InvalidDataException($"World replay opcode {code} has unexpected trailing data.");
         }
 

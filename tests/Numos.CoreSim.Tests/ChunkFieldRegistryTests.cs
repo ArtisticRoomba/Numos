@@ -49,6 +49,7 @@ public sealed class ChunkFieldRegistryTests
         {
             Assert.Throws<InvalidOperationException>(() =>
                 ChunkFieldRegistry.Register<int>(Key("conflict-length"), false, 5));
+
             Assert.Throws<InvalidOperationException>(() =>
                 ChunkFieldRegistry.Register<int>(Key("conflict-length"), false, null));
         });
@@ -70,6 +71,7 @@ public sealed class ChunkFieldRegistryTests
         {
             Assert.Throws<ArgumentException>(() =>
                 ChunkFieldRegistry.Register<string>(Key("rollback-string"), true, null));
+
             Assert.Throws<ArgumentException>(() =>
                 ChunkFieldRegistry.Register<ReferenceHolder>(Key("rollback-holder"), true, null));
         });

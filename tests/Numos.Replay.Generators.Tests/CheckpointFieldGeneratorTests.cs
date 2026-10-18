@@ -59,8 +59,10 @@ public sealed class CheckpointFieldGeneratorTests
                               }
                               """;
 
-        Compilation output = GeneratorHarness.Run(new CheckpointFieldGenerator(),
-            GeneratorHarness.CreateCompilation("Sim", [], Attributes, domain), out var diagnostics,
+        Compilation output = GeneratorHarness.Run(
+            new CheckpointFieldGenerator(),
+            GeneratorHarness.CreateCompilation("Sim", [], Attributes, domain),
+            out var diagnostics,
             GeneratorHarness.Catalog("temperature | Kelvin | global::System.Single | temperature=1"));
 
         Assert.That(diagnostics, Is.Empty);
@@ -68,20 +70,26 @@ public sealed class CheckpointFieldGeneratorTests
         Assert.Multiple(() =>
         {
             // Order comes from the attribute, not declaration order.
-            Assert.That(generated, Does.Contain(
-                "CaptureChunkArrays(global::Numos.CoreSim.AtmosChunk chunk)"));
-            Assert.That(generated.IndexOf("chunk.VoxelRoomMap.ToArray()", StringComparison.Ordinal),
+            Assert.That(generated, Does.Contain("CaptureChunkArrays(global::Numos.CoreSim.AtmosChunk chunk)"));
+            Assert.That(
+                generated.IndexOf("chunk.VoxelRoomMap.ToArray()", StringComparison.Ordinal),
                 Is.LessThan(generated.IndexOf("chunk.Temperature.ToArray()", StringComparison.Ordinal)));
+
             Assert.That(generated, Does.Contain("foreach (int value in chunk.Classifications) hash.Add(value);"));
             Assert.That(generated, Does.Contain("AtmosReplayCodec.ReadArray<float>(reader, voxels)"));
 
-            Assert.That(generated.IndexOf("hash.Add(config.GlobalTemperature);", StringComparison.Ordinal),
+            Assert.That(
+                generated.IndexOf("hash.Add(config.GlobalTemperature);", StringComparison.Ordinal),
                 Is.LessThan(generated.IndexOf("hash.Add(config.SleepThreshold);", StringComparison.Ordinal)));
+
             Assert.That(generated, Does.Contain("config.GlobalTemperature = reader.ReadSingle();"));
             Assert.That(generated, Does.Contain("config.SleepThreshold = reader.ReadInt32();"));
 
             Assert.That(generated, Does.Contain("AtmosReplayCodec.WriteNullableString(writer, gas.Name);"));
-            Assert.That(generated, Does.Contain("gas.Name = global::Numos.CoreSim.Replay.AtmosReplayCodec.ReadNullableString(reader, maxStringBytes)!;"));
+            Assert.That(
+                generated,
+                Does.Contain("gas.Name = global::Numos.CoreSim.Replay.AtmosReplayCodec.ReadNullableString(reader, maxStringBytes)!;"));
+
             Assert.That(generated, Does.Contain("gas.CondensationEnabled = reader.ReadBoolean();"));
         });
     }
@@ -106,10 +114,13 @@ public sealed class CheckpointFieldGeneratorTests
                               }
                               """;
 
-        GeneratorHarness.Run(new CheckpointFieldGenerator(),
-            GeneratorHarness.CreateCompilation("Sim", [], Attributes, domain), out var diagnostics);
+        GeneratorHarness.Run(
+            new CheckpointFieldGenerator(),
+            GeneratorHarness.CreateCompilation("Sim", [], Attributes, domain),
+            out var diagnostics);
 
-        Assert.That(diagnostics.Select(static diagnostic => diagnostic.Id),
+        Assert.That(
+            diagnostics.Select(static diagnostic => diagnostic.Id),
             Is.EquivalentTo(new[] { "NUMOSCHECKPTGEN002", "NUMOSCHECKPTGEN001" }));
     }
 }

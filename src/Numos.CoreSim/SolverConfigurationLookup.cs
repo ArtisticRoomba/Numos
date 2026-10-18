@@ -41,8 +41,9 @@ internal static class SolverConfigurationLookup
             if (!StringComparer.Ordinal.Equals(candidate.Key, key))
                 continue;
 
-            configuration = candidate as T ?? throw new InvalidOperationException(
-                $"Solver configuration '{key}' is a {candidate.GetType()}, not a {typeof(T)}.");
+            configuration = candidate as T ??
+                            throw new InvalidOperationException(
+                                $"Solver configuration '{key}' is a {candidate.GetType()}, not a {typeof(T)}.");
 
             return true;
         }

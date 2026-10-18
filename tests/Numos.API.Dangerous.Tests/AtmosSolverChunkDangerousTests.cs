@@ -18,19 +18,24 @@ public sealed class AtmosSolverChunkDangerousTests
         int temperatureLength = -1;
         Int3 position = new(int.MinValue, int.MinValue, int.MinValue);
 
-        world.Solvers.Register("tests/dangerous-solver-chunk/shared", context =>
-        {
-            var chunks = context.Chunks(simulation);
-            Parallel.For(0, chunks.Count, index =>
+        world.Solvers.Register(
+            "tests/dangerous-solver-chunk/shared",
+            context =>
             {
-                // Custom fields stay on the safe view; the dangerous one adds the built-in storage.
-                var chunk = chunks[index];
-                var live = chunk.Dangerous();
-                chunk.Get(Exposure)[3] = live.Temperature[3];
-                temperatureLength = live.Temperature.Length;
-                position = live.Position;
+                var chunks = context.Chunks(simulation);
+                Parallel.For(
+                    0,
+                    chunks.Count,
+                    index =>
+                    {
+                        // Custom fields stay on the safe view; the dangerous one adds the built-in storage.
+                        var chunk = chunks[index];
+                        var live = chunk.Dangerous();
+                        chunk.Get(Exposure)[3] = live.Temperature[3];
+                        temperatureLength = live.Temperature.Length;
+                        position = live.Position;
+                    });
             });
-        });
 
         world.Tick();
 

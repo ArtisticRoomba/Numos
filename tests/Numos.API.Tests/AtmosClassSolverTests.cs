@@ -21,6 +21,7 @@ public sealed class AtmosClassSolverTests
             "class-after-advection",
             new RecordingSolver("class-after-advection", order),
             after: AtmosBuiltInSolvers.Advection);
+
         world.Solvers.Register(
             "class-first",
             new RecordingSolver("class-first", order),
@@ -32,11 +33,13 @@ public sealed class AtmosClassSolverTests
             .Where(static step => step.Kind == AtmosWorldSolverKind.Custom)
             .Select(static step => step.Name)
             .ToArray();
+
         Assert.Multiple(() =>
         {
             Assert.That(
                 order,
                 Is.EqualTo(new[] { "class-first", "class-after-advection", "delegate-tail", "delegate-middle", "class-tail" }));
+
             Assert.That(customNames, Is.EqualTo(order));
             Assert.That(world.Solvers.Steps[0].Name, Is.EqualTo("class-first"));
             Assert.That(world.Solvers.Steps[2].Name, Is.EqualTo("class-after-advection"));
@@ -86,12 +89,14 @@ public sealed class AtmosClassSolverTests
             _ => { },
             AtmosNeighborSelection.All("tests/metadata-v1"),
             after: AtmosBuiltInSolvers.Advection);
+
         delegateWorld.Solvers.Register("custom-tail", _ => { });
         classWorld.Solvers.Register(
             "custom-neighbors",
             new RecordingSolver("unused", []),
             AtmosNeighborSelection.All("tests/metadata-v1"),
             after: AtmosBuiltInSolvers.Advection);
+
         classWorld.Solvers.Register("custom-tail", new RecordingSolver("unused", []));
 
         var delegateCheckpoint = delegateWorld.CaptureCheckpoint();

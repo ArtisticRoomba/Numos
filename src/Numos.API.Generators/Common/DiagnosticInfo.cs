@@ -8,7 +8,9 @@ namespace Numos.API.Generators.Common;
 /// <remarks>
 ///     Descriptors are static singletons with value equality, so holding one keeps the model equatable.
 /// </remarks>
-internal sealed record DiagnosticInfo(DiagnosticDescriptor Descriptor, LocationInfo? Location,
+internal sealed record DiagnosticInfo(
+    DiagnosticDescriptor Descriptor,
+    LocationInfo? Location,
     EquatableArray<string> Arguments)
 {
     public static DiagnosticInfo Create(DiagnosticDescriptor descriptor, LocationInfo? location, params string[] arguments)
@@ -18,7 +20,9 @@ internal sealed record DiagnosticInfo(DiagnosticDescriptor Descriptor, LocationI
 
     public Diagnostic ToDiagnostic()
     {
-        return Diagnostic.Create(Descriptor, Location?.ToLocation() ?? Microsoft.CodeAnalysis.Location.None,
+        return Diagnostic.Create(
+            Descriptor,
+            Location?.ToLocation() ?? Microsoft.CodeAnalysis.Location.None,
             Arguments.Cast<object?>().ToArray());
     }
 }

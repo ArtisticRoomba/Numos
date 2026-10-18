@@ -48,24 +48,29 @@ public sealed class ChunkDataGeneratedTests
         ];
 
         Int3 dimensions = default;
-        world.Solvers.Register("tests/chunk-data-generated/parallel", context =>
-        {
-            var chunks = context.Chunks(simulation);
-            Parallel.For(0, chunks.Count, index =>
+        world.Solvers.Register(
+            "tests/chunk-data-generated/parallel",
+            context =>
             {
-                var chunk = chunks[index];
-                FlatArray<float> exposure = chunk.Exposure;
-                for (int voxel = 0; voxel < chunk.VoxelCount; voxel++)
-                    exposure[voxel] += voxel;
+                var chunks = context.Chunks(simulation);
+                Parallel.For(
+                    0,
+                    chunks.Count,
+                    index =>
+                    {
+                        var chunk = chunks[index];
+                        FlatArray<float> exposure = chunk.Exposure;
+                        for (int voxel = 0; voxel < chunk.VoxelCount; voxel++)
+                            exposure[voxel] += voxel;
 
-                FlatArray<int> burnCount = chunk.BurnCount;
-                burnCount[0]++;
-                burnCount[1] = chunk.Position.X + 10 * chunk.Position.Y;
+                        FlatArray<int> burnCount = chunk.BurnCount;
+                        burnCount[0]++;
+                        burnCount[1] = chunk.Position.X + 10 * chunk.Position.Y;
+                    });
+
+                foreach (var chunk in chunks)
+                    dimensions = chunk.Exposure.Dimensions;
             });
-
-            foreach (var chunk in chunks)
-                dimensions = chunk.Exposure.Dimensions;
-        });
 
         world.Tick();
         world.Tick();
@@ -89,16 +94,18 @@ public sealed class ChunkDataGeneratedTests
     {
         using var simulation = new AtmosSimulation(2, 1, 1);
         var handle = simulation.CreateAndRegisterChunk(default);
-        simulation.World.Solvers.Register("tests/chunk-data-generated/replay", context =>
-        {
-            foreach (var chunk in context.Chunks(simulation))
+        simulation.World.Solvers.Register(
+            "tests/chunk-data-generated/replay",
+            context =>
             {
-                FlatArray<int> burnCount = chunk.BurnCount;
-                burnCount[0]++;
-                chunk.Exposure[1] += burnCount[0];
-                chunk.Scratch[0] = burnCount[0];
-            }
-        });
+                foreach (var chunk in context.Chunks(simulation))
+                {
+                    FlatArray<int> burnCount = chunk.BurnCount;
+                    burnCount[0]++;
+                    chunk.Exposure[1] += burnCount[0];
+                    chunk.Scratch[0] = burnCount[0];
+                }
+            });
 
         simulation.Tick();
         var checkpoint = simulation.World.CaptureCheckpoint();
@@ -139,13 +146,15 @@ public sealed class ChunkDataGeneratedTests
         simulation.GetChunkField(handle, exposure)[0] = 5f;
         float seen = 0f;
 
-        world.Solvers.Register("tests/chunk-data-generated/shared", context =>
-        {
-            var chunk = context.Chunks(simulation)[0];
-            seen = chunk.Exposure[0];
-            chunk.Exposure[new Int3(0, 0, 0)] += 2f;
-            chunk.BurnCount[1] = 8;
-        });
+        world.Solvers.Register(
+            "tests/chunk-data-generated/shared",
+            context =>
+            {
+                var chunk = context.Chunks(simulation)[0];
+                seen = chunk.Exposure[0];
+                chunk.Exposure[new Int3(0, 0, 0)] += 2f;
+                chunk.BurnCount[1] = 8;
+            });
 
         world.Tick();
 

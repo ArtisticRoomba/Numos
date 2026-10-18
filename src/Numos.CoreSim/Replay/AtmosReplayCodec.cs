@@ -284,7 +284,8 @@ internal static partial class AtmosReplayCodec
             if (values is ICollection<T> collection)
                 collection.CopyTo(buffer, 0);
             else
-                for (int index = 0; index < span.Length; index++) span[index] = values[index];
+                for (int index = 0; index < span.Length; index++)
+                    span[index] = values[index];
 
             var bytes = MemoryMarshal.AsBytes(span);
             if (!BitConverter.IsLittleEndian) ReverseElementBytes(bytes, Unsafe.SizeOf<T>());

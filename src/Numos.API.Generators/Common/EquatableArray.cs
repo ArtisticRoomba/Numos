@@ -63,6 +63,7 @@ internal readonly struct EquatableArray<T> : IEquatable<EquatableArray<T>>, IRea
             int hash = 17;
             foreach (T item in _items)
                 hash = hash * 31 + (item?.GetHashCode() ?? 0);
+
             return hash;
         }
     }

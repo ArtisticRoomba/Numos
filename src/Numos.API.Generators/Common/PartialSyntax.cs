@@ -21,7 +21,8 @@ internal static class PartialSyntax
     ///     Only the declarations around <paramref name="member" /> are read. Mixing partial and non-partial
     ///     declarations of one type is already CS0260, so the type's other declarations can't disagree.
     /// </remarks>
-    public static List<(INamedTypeSymbol Type, bool IsPartial)> GetContainingChain(INamedTypeSymbol type,
+    public static List<(INamedTypeSymbol Type, bool IsPartial)> GetContainingChain(
+        INamedTypeSymbol type,
         SyntaxNode member)
     {
         var chain = new List<(INamedTypeSymbol Type, bool IsPartial)>();
@@ -31,8 +32,10 @@ internal static class PartialSyntax
             while (node is not null and not TypeDeclarationSyntax)
                 node = node.Parent;
 
-            chain.Add((current, node is TypeDeclarationSyntax declaration &&
-                                declaration.Modifiers.Any(SyntaxKind.PartialKeyword)));
+            chain.Add(
+                (current, node is TypeDeclarationSyntax declaration &&
+                          declaration.Modifiers.Any(SyntaxKind.PartialKeyword)));
+
             node = node?.Parent;
         }
 
@@ -45,9 +48,11 @@ internal static class PartialSyntax
     /// </summary>
     public static string ModifiersWithoutPartial(SyntaxTokenList modifiers)
     {
-        return string.Join(" ", modifiers
-            .Where(static modifier => !modifier.IsKind(SyntaxKind.PartialKeyword))
-            .Select(static modifier => modifier.Text));
+        return string.Join(
+            " ",
+            modifiers
+                .Where(static modifier => !modifier.IsKind(SyntaxKind.PartialKeyword))
+                .Select(static modifier => modifier.Text));
     }
 
     /// <summary>

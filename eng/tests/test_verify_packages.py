@@ -2,7 +2,6 @@ from pathlib import Path
 import sys
 import unittest
 
-
 ENG = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ENG))
 
@@ -38,9 +37,9 @@ class DependencyAssetTests(unittest.TestCase):
 
     def test_rejects_numos_api_without_analyzers(self) -> None:
         for attributes in (
-            {"exclude": "Build,Analyzers"},
-            {"exclude": "all"},
-            {"include": "Compile,Runtime"},
+                {"exclude": "Build,Analyzers"},
+                {"exclude": "all"},
+                {"include": "Compile,Runtime"},
         ):
             with self.subTest(attributes=attributes), self.assertRaisesRegex(ValueError, "must not exclude analyzers"):
                 self.check({"Numos.API": attributes})

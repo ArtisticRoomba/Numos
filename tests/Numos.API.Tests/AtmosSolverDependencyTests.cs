@@ -102,6 +102,7 @@ public sealed partial class AtmosSolverDependencyTests
             world.Solvers.ResolveDependencies,
             Throws.InvalidOperationException.With.Message.StartsWith(
                 $"Solver 'consumer' member 'Producer' depends on '{typeof(ProducerSolver)}'"));
+
         Assert.Multiple(() =>
         {
             Assert.That(world.TickCount, Is.Zero);
@@ -135,17 +136,19 @@ public sealed partial class AtmosSolverDependencyTests
     {
         using var world = CreateWorld();
         Exception? failure = null;
-        world.Solvers.Register("resolver", context =>
-        {
-            try
+        world.Solvers.Register(
+            "resolver",
+            context =>
             {
-                context.World.Solvers.ResolveDependencies();
-            }
-            catch (Exception exception)
-            {
-                failure = exception;
-            }
-        });
+                try
+                {
+                    context.World.Solvers.ResolveDependencies();
+                }
+                catch (Exception exception)
+                {
+                    failure = exception;
+                }
+            });
 
         world.Tick();
 
@@ -167,6 +170,7 @@ public sealed partial class AtmosSolverDependencyTests
             Throws.InvalidOperationException.With.Message.StartsWith(
                 $"Solver 'consumer' member 'Producer' matches multiple solvers of type '{typeof(ProducerSolver)}': " +
                 "'producer-a', 'producer-b'."));
+
         Assert.That(world.TickCount, Is.Zero);
     }
 
@@ -448,6 +452,7 @@ public sealed partial class AtmosSolverDependencyTests
         Assert.That(
             () => simulation.World.ReplayTo(checkpoint, recording.Operations, recording.Head),
             Throws.InvalidOperationException.With.Message.Contains("member 'Clock'"));
+
         Assert.Multiple(() =>
         {
             Assert.That(simulation.TickCount, Is.EqualTo(2));
@@ -457,10 +462,12 @@ public sealed partial class AtmosSolverDependencyTests
 
     private static AtmosWorld CreateWorld()
     {
-        var world = new AtmosWorld(new AtmosConfig
-        {
-            GasRegistry = [new GasProperties { Name = "TestGas", MolarHeatCapacityAtConstantVolume = 20f }]
-        });
+        var world = new AtmosWorld(
+            new AtmosConfig
+            {
+                GasRegistry = [new GasProperties { Name = "TestGas", MolarHeatCapacityAtConstantVolume = 20f }]
+            });
+
         var simulation = world.CreateSimulation(2, 1, 1);
         var chunk = simulation.CreateAndRegisterChunk(default);
         simulation.SetChunkClassification(chunk, new VoxelClassification(1));
@@ -521,10 +528,6 @@ public sealed partial class AtmosSolverDependencyTests
 
     private sealed class HandWrittenConsumer : IConsumer, IAtmosSolverDependencies
     {
-        public IClock? Clock { get; private set; }
-        public ProducerSolver? Producer { get; private set; }
-        public ExtraService? Extra { get; private set; }
-        public int Solves { get; private set; }
         public int Injections { get; private set; }
 
         public void InjectDependencies(AtmosSolverDependencyResolver resolver)
@@ -534,6 +537,11 @@ public sealed partial class AtmosSolverDependencyTests
             Extra = resolver.ResolveOptional<ExtraService>();
             Injections++;
         }
+
+        public IClock? Clock { get; private set; }
+        public ProducerSolver? Producer { get; private set; }
+        public ExtraService? Extra { get; private set; }
+        public int Solves { get; private set; }
 
         public void Solve(AtmosWorldSolverContext context)
         {

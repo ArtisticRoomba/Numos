@@ -145,16 +145,16 @@ grid state, so retained checkpoint memory generally grows with the captured worl
 A world checkpoint holds world-owned state once, and one `AtmosSimulationCheckpoint` per simulation holds that grid's
 data:
 
-| State                 | Where              | Checkpoint behavior                                                                                                                                                        |
-|-----------------------|--------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Timeline              | World              | Captures the completed tick and last semantic operation sequence.                                                                                                          |
-| Applied configuration | World              | Captures normalized scalar settings, ordered gas definitions, and immutable solver configurations. Gas IDs keep their existing index meaning; restore does not remap them. |
-| Solver pipeline       | World              | Captures enable flags and records names, custom/built-in kinds, execution order, and neighbor-selection keys for compatibility validation.                                |
-| Membership, topology  | World              | Captures simulation registry generations, link-set slots in every lifecycle state, and the applied topology version.                                                      |
-| Chunk storage         | Simulation         | Captures position, dimensions, awake state, sleep timer, classifications, temperatures, valid gas channels, and per-voxel moles.                                           |
-| Continuation caches   | Simulation         | Captures pressure, heat capacity, and the valid active-air prefix exactly. Disabled stages and sleeping chunks can leave meaningful cached state behind.                   |
-| Solver arrays         | Simulation         | Captures `ChunkField<T>` storage registered with `rollback: true`: keys, exact element types, lengths, and values. Transient and private fields are excluded.              |
-| Pooled storage        | Simulation         | Copies only valid entries. Pool capacity and unused array tails are not simulation state.                                                                                  |
+| State                 | Where      | Checkpoint behavior                                                                                                                                                        |
+|-----------------------|------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Timeline              | World      | Captures the completed tick and last semantic operation sequence.                                                                                                          |
+| Applied configuration | World      | Captures normalized scalar settings, ordered gas definitions, and immutable solver configurations. Gas IDs keep their existing index meaning; restore does not remap them. |
+| Solver pipeline       | World      | Captures enable flags and records names, custom/built-in kinds, execution order, and neighbor-selection keys for compatibility validation.                                 |
+| Membership, topology  | World      | Captures simulation registry generations, link-set slots in every lifecycle state, and the applied topology version.                                                       |
+| Chunk storage         | Simulation | Captures position, dimensions, awake state, sleep timer, classifications, temperatures, valid gas channels, and per-voxel moles.                                           |
+| Continuation caches   | Simulation | Captures pressure, heat capacity, and the valid active-air prefix exactly. Disabled stages and sleeping chunks can leave meaningful cached state behind.                   |
+| Solver arrays         | Simulation | Captures `ChunkField<T>` storage registered with `rollback: true`: keys, exact element types, lengths, and values. Transient and private fields are excluded.              |
+| Pooled storage        | Simulation | Copies only valid entries. Pool capacity and unused array tails are not simulation state.                                                                                  |
 
 `AtmosChunkSnapshot` serves presentation and replication reads; it is not a continuation checkpoint. Checkpoints use
 full detached copies. The current implementation has no copy-on-write storage, delta compression, or incremental hash.

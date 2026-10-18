@@ -101,6 +101,7 @@ public sealed class AtmosChunkFieldStorageTests
                     start.Wait();
                     results[index] = chunk.GetOrCreateField(fields[index % fields.Length]);
                 });
+
                 workers[index].Start();
             }
 
@@ -128,12 +129,15 @@ public sealed class AtmosChunkFieldStorageTests
 
         string[] keys = chunk.CaptureSolverArrays().Select(static array => array.Key).ToArray();
 
-        Assert.That(keys, Is.EqualTo(new[]
-        {
-            Key("order/Alpha"),
-            Key("order/alpha"),
-            Key("order/zeta")
-        }));
+        Assert.That(
+            keys,
+            Is.EqualTo(
+                new[]
+                {
+                    Key("order/Alpha"),
+                    Key("order/alpha"),
+                    Key("order/zeta")
+                }));
     }
 
     [Test]

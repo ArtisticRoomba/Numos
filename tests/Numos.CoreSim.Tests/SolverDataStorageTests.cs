@@ -57,7 +57,8 @@ public sealed class SolverDataStorageTests
         var self = Descriptor("self");
         Assert.That(
             () => storage.GetOrCreate(
-                self, (Storage: storage, Slot: self),
+                self,
+                (Storage: storage, Slot: self),
                 static state => state.Storage.GetOrCreate(state.Slot, 0, static _ => new object())),
             Throws.InvalidOperationException.With.Message.Contains("'self'"));
 

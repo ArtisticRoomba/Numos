@@ -122,6 +122,7 @@ internal sealed record WireType(WireTypeKind Kind, string Name)
             string storage = parts[2].Trim();
             if (storage.StartsWith("global::", StringComparison.Ordinal))
                 storage = storage.Substring("global::".Length);
+
             if (storage.StartsWith("System.", StringComparison.Ordinal))
                 storage = storage.Substring("System.".Length);
 

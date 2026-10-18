@@ -10,7 +10,8 @@ internal sealed class CodeWriter
 {
     public static readonly string GeneratedCodeAttribute =
         "[global::System.CodeDom.Compiler.GeneratedCode(\"Numos.API.Generators\", \"" +
-        typeof(CodeWriter).Assembly.GetName().Version + "\")]";
+        typeof(CodeWriter).Assembly.GetName().Version +
+        "\")]";
 
     private readonly StringBuilder _builder = new();
     private int _indent;
@@ -19,6 +20,7 @@ internal sealed class CodeWriter
     {
         if (text.Length > 0)
             _builder.Append(' ', _indent * 4).Append(text);
+
         _builder.Append('\n');
     }
 

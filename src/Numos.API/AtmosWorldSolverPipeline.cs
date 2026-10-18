@@ -1,5 +1,4 @@
 using JetBrains.Annotations;
-using Numos.CoreSim.Solvers;
 
 namespace Numos.API;
 
@@ -44,6 +43,14 @@ public sealed class AtmosWorldSolverPipeline
             }
         }
     }
+
+    /// <summary>
+    ///     Gets the enabled stages in execution order.
+    /// </summary>
+    /// <remarks>
+    ///     The array is replaced, never mutated, so a tick can keep running it while a stage edits the pipeline.
+    /// </remarks>
+    internal WorldSolverRegistration[] EnabledSteps => _enabledSteps;
 
     /// <summary>
     ///     Registers a custom stage.
@@ -291,14 +298,6 @@ public sealed class AtmosWorldSolverPipeline
         if (ReferenceEquals(steps, _enabledSteps))
             _injectedEpoch = epoch;
     }
-
-    /// <summary>
-    ///     Gets the enabled stages in execution order.
-    /// </summary>
-    /// <remarks>
-    ///     The array is replaced, never mutated, so a tick can keep running it while a stage edits the pipeline.
-    /// </remarks>
-    internal WorldSolverRegistration[] EnabledSteps => _enabledSteps;
 
     internal void Execute(WorldSolverRegistration[] steps, AtmosSolverTickScope scope)
     {

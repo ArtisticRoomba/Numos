@@ -30,6 +30,7 @@ internal sealed record PartialTypeModel(
         var chain = new List<INamedTypeSymbol>();
         for (INamedTypeSymbol? current = type; current is not null; current = current.ContainingType)
             chain.Add(current);
+
         chain.Reverse();
 
         string @namespace = type.ContainingNamespace.IsGlobalNamespace ? "" : type.ContainingNamespace.ToDisplayString();
@@ -64,7 +65,11 @@ internal sealed record PartialTypeModel(
         if (type.TypeParameters.Length == 0)
             return name;
 
-        return name + "<" + string.Join(", ",
-            type.TypeParameters.Select(static parameter => CodeWriter.Escape(parameter.Name))) + ">";
+        return name +
+               "<" +
+               string.Join(
+                   ", ",
+                   type.TypeParameters.Select(static parameter => CodeWriter.Escape(parameter.Name))) +
+               ">";
     }
 }

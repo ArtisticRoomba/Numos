@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Globalization;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Numos.API.Generators.Common;
@@ -24,19 +25,31 @@ public sealed class CheckpointFieldGenerator : IIncrementalGenerator
     /// <inheritdoc />
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
-        IncrementalValueProvider<ImmutableArray<CheckpointField>> chunks = Collect(context, ChunkFieldAttribute,
-            CheckpointGroup.Chunk, static node => node is PropertyDeclarationSyntax);
-        IncrementalValueProvider<ImmutableArray<CheckpointField>> configs = Collect(context, ConfigFieldAttribute,
-            CheckpointGroup.Config, static node => node is PropertyDeclarationSyntax);
-        IncrementalValueProvider<ImmutableArray<CheckpointField>> gases = Collect(context, GasFieldAttribute,
-            CheckpointGroup.Gas, static node => node is VariableDeclaratorSyntax);
+        IncrementalValueProvider<ImmutableArray<CheckpointField>> chunks = Collect(
+            context,
+            ChunkFieldAttribute,
+            CheckpointGroup.Chunk,
+            static node => node is PropertyDeclarationSyntax);
+
+        IncrementalValueProvider<ImmutableArray<CheckpointField>> configs = Collect(
+            context,
+            ConfigFieldAttribute,
+            CheckpointGroup.Config,
+            static node => node is PropertyDeclarationSyntax);
+
+        IncrementalValueProvider<ImmutableArray<CheckpointField>> gases = Collect(
+            context,
+            GasFieldAttribute,
+            CheckpointGroup.Gas,
+            static node => node is VariableDeclaratorSyntax);
 
         IncrementalValueProvider<GeneratorOutput<CheckpointPlan>> output = chunks
             .Combine(configs)
             .Combine(gases)
             .Combine(WireType.QuantityAliases(context))
             .Select(static (input, _) => Plan(
-                input.Left.Left.Left.AddRange(input.Left.Left.Right).AddRange(input.Left.Right), input.Right));
+                input.Left.Left.Left.AddRange(input.Left.Left.Right).AddRange(input.Left.Right),
+                input.Right));
 
         GeneratorOutput.Register(context, output, "CheckpointFields", Emit);
     }
@@ -46,7 +59,9 @@ public sealed class CheckpointFieldGenerator : IIncrementalGenerator
         Func<SyntaxNode, bool> predicate)
     {
         return context.SyntaxProvider
-            .ForAttributeWithMetadataName(attribute, (node, _) => predicate(node),
+            .ForAttributeWithMetadataName(
+                attribute,
+                (node, _) => predicate(node),
                 (syntaxContext, _) => Transform(syntaxContext, group))
             .Collect();
     }
@@ -62,13 +77,21 @@ public sealed class CheckpointFieldGenerator : IIncrementalGenerator
         if (group != CheckpointGroup.Chunk)
         {
             int order = attribute.ConstructorArguments.Length == 1 && attribute.ConstructorArguments[0].Value is int value ? value : 0;
-            return new CheckpointField(group, member.Name, member.Name, order, WireType.From(type),
-                type.ToDisplayString(), containing, location);
+            return new CheckpointField(
+                group,
+                member.Name,
+                member.Name,
+                order,
+                WireType.From(type),
+                type.ToDisplayString(),
+                containing,
+                location);
         }
 
         string liveMember = attribute.ConstructorArguments.Length == 2
             ? attribute.ConstructorArguments[0].Value as string ?? member.Name
             : member.Name;
+
         int chunkOrder = attribute.ConstructorArguments.Length == 2 && attribute.ConstructorArguments[1].Value is int chunkValue
             ? chunkValue
             : 0;
@@ -78,17 +101,26 @@ public sealed class CheckpointFieldGenerator : IIncrementalGenerator
             ? WireType.From(list.TypeArguments[0])
             : new WireType(WireTypeKind.Other, type.ToDisplayString());
 
-        return new CheckpointField(group, member.Name, liveMember, chunkOrder, element, type.ToDisplayString(),
-            containing, location);
+        return new CheckpointField(
+            group,
+            member.Name,
+            liveMember,
+            chunkOrder,
+            element,
+            type.ToDisplayString(),
+            containing,
+            location);
     }
 
-    private static GeneratorOutput<CheckpointPlan> Plan(ImmutableArray<CheckpointField> fields,
+    private static GeneratorOutput<CheckpointPlan> Plan(
+        ImmutableArray<CheckpointField> fields,
         EquatableArray<QuantityAlias> aliases)
     {
         if (fields.IsEmpty)
             return GeneratorOutput<CheckpointPlan>.Empty;
 
         var diagnostics = new List<DiagnosticInfo>();
+
         EquatableArray<PlannedField> PlanGroup(CheckpointGroup group)
         {
             var planned = new List<(int Order, PlannedField Field)>();
@@ -97,22 +129,32 @@ public sealed class CheckpointFieldGenerator : IIncrementalGenerator
             {
                 if (!orders.Add(field.Order))
                 {
-                    diagnostics.Add(DiagnosticInfo.Create(ReplayDiagnostics.DuplicateCheckpointOrder, field.Location,
-                        field.ContainingType, field.Order.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+                    diagnostics.Add(
+                        DiagnosticInfo.Create(
+                            ReplayDiagnostics.DuplicateCheckpointOrder,
+                            field.Location,
+                            field.ContainingType,
+                            field.Order.ToString(CultureInfo.InvariantCulture)));
                 }
 
                 WireType type = field.Type.Resolve(aliases);
                 bool supported = type.Kind switch
                 {
-                    WireTypeKind.Primitive => type.Name is "Int32" or "Single" || group != CheckpointGroup.Chunk && type.Name == "Boolean",
+                    WireTypeKind.Primitive => type.Name is "Int32" or "Single" ||
+                                              group != CheckpointGroup.Chunk && type.Name == "Boolean",
                     WireTypeKind.String => group != CheckpointGroup.Chunk,
                     _ => false
                 };
 
                 if (!supported)
                 {
-                    diagnostics.Add(DiagnosticInfo.Create(ReplayDiagnostics.UnsupportedCheckpointField, field.Location,
-                        field.Member, field.TypeDisplay));
+                    diagnostics.Add(
+                        DiagnosticInfo.Create(
+                            ReplayDiagnostics.UnsupportedCheckpointField,
+                            field.Location,
+                            field.Member,
+                            field.TypeDisplay));
+
                     continue;
                 }
 
@@ -127,7 +169,8 @@ public sealed class CheckpointFieldGenerator : IIncrementalGenerator
             PlanGroup(CheckpointGroup.Config),
             PlanGroup(CheckpointGroup.Gas));
 
-        return new GeneratorOutput<CheckpointPlan>(diagnostics.ToEquatableArray(),
+        return new GeneratorOutput<CheckpointPlan>(
+            diagnostics.ToEquatableArray(),
             new EquatableArray<CheckpointPlan>(new[] { plan }));
     }
 
@@ -142,8 +185,10 @@ public sealed class CheckpointFieldGenerator : IIncrementalGenerator
 
         if (plan.Chunk.Count > 0)
             EmitChunk(writer, plan.Chunk);
+
         if (plan.Config.Count > 0)
             EmitConfig(writer, plan.Config);
+
         if (plan.Gas.Count > 0)
             EmitGas(writer, plan.Gas);
 
@@ -154,42 +199,56 @@ public sealed class CheckpointFieldGenerator : IIncrementalGenerator
 
     private static void EmitChunk(CodeWriter writer, EquatableArray<PlannedField> fields)
     {
-        string tuple = string.Join(", ", fields.Select(static field =>
-            $"global::System.Collections.Generic.IReadOnlyList<{field.Type.Keyword}> {field.Member}"));
+        string tuple = string.Join(
+            ", ",
+            fields.Select(static field =>
+                $"global::System.Collections.Generic.IReadOnlyList<{field.Type.Keyword}> {field.Member}"));
+
         writer.Line($"internal static ({tuple}) CaptureChunkArrays(global::Numos.CoreSim.AtmosChunk chunk)");
         writer.Open();
         writer.Line("return (");
         for (int index = 0; index < fields.Count; index++)
         {
-            writer.Line($"    new global::Numos.CoreSim.Replay.CheckpointArray<{fields[index].Type.Keyword}>" +
-                        $"(chunk.{fields[index].LiveMember}.ToArray()){(index == fields.Count - 1 ? "" : ",")}");
+            writer.Line(
+                $"    new global::Numos.CoreSim.Replay.CheckpointArray<{fields[index].Type.Keyword}>" +
+                $"(chunk.{fields[index].LiveMember}.ToArray()){(index == fields.Count - 1 ? "" : ",")}");
         }
 
         writer.Line(");");
         writer.Close();
         writer.Line();
 
-        writer.Line("internal static void RestoreChunkArrays(global::Numos.CoreSim.AtmosChunk chunk, " +
-                    "global::Numos.CoreSim.Replay.AtmosChunkCheckpoint source)");
+        writer.Line(
+            "internal static void RestoreChunkArrays(global::Numos.CoreSim.AtmosChunk chunk, " +
+            "global::Numos.CoreSim.Replay.AtmosChunkCheckpoint source)");
+
         writer.Open();
         foreach (PlannedField field in fields)
-            writer.Line($"global::Numos.CoreSim.Replay.CheckpointArray.CopyTo(source.{field.Member}, chunk.{field.LiveMember}.AsSpan());");
+            writer.Line(
+                $"global::Numos.CoreSim.Replay.CheckpointArray.CopyTo(source.{field.Member}, chunk.{field.LiveMember}.AsSpan());");
+
         writer.Close();
         writer.Line();
 
-        writer.Line("internal static void AppendChunkFields(ref global::Numos.CoreSim.Replay.AtmosStateHasher hash, " +
-                    "global::Numos.CoreSim.Replay.AtmosChunkCheckpoint chunk)");
+        writer.Line(
+            "internal static void AppendChunkFields(ref global::Numos.CoreSim.Replay.AtmosStateHasher hash, " +
+            "global::Numos.CoreSim.Replay.AtmosChunkCheckpoint chunk)");
+
         writer.Open();
         foreach (PlannedField field in fields)
             writer.Line($"foreach ({field.Type.Keyword} value in chunk.{field.Member}) hash.Add(value);");
+
         writer.Close();
         writer.Line();
 
-        writer.Line("internal static void WriteChunkFields(global::System.IO.BinaryWriter writer, " +
-                    "global::Numos.CoreSim.Replay.AtmosChunkCheckpoint chunk)");
+        writer.Line(
+            "internal static void WriteChunkFields(global::System.IO.BinaryWriter writer, " +
+            "global::Numos.CoreSim.Replay.AtmosChunkCheckpoint chunk)");
+
         writer.Open();
         foreach (PlannedField field in fields)
             writer.Line($"{Codec}.WriteArray(writer, chunk.{field.Member});");
+
         writer.Close();
         writer.Line();
 
@@ -199,8 +258,9 @@ public sealed class CheckpointFieldGenerator : IIncrementalGenerator
         writer.Line("return (");
         for (int index = 0; index < fields.Count; index++)
         {
-            writer.Line($"    {Codec}.ReadArray<{fields[index].Type.Keyword}>(reader, voxels)" +
-                        (index == fields.Count - 1 ? "" : ","));
+            writer.Line(
+                $"    {Codec}.ReadArray<{fields[index].Type.Keyword}>(reader, voxels)" +
+                (index == fields.Count - 1 ? "" : ","));
         }
 
         writer.Line(");");
@@ -210,55 +270,73 @@ public sealed class CheckpointFieldGenerator : IIncrementalGenerator
 
     private static void EmitConfig(CodeWriter writer, EquatableArray<PlannedField> fields)
     {
-        writer.Line("internal static void AppendConfigFields(ref global::Numos.CoreSim.Replay.AtmosStateHasher hash, " +
-                    "global::Numos.CoreSim.AtmosConfigSnapshot config)");
+        writer.Line(
+            "internal static void AppendConfigFields(ref global::Numos.CoreSim.Replay.AtmosStateHasher hash, " +
+            "global::Numos.CoreSim.AtmosConfigSnapshot config)");
+
         writer.Open();
         foreach (PlannedField field in fields)
             writer.Line($"hash.Add(config.{field.Member});");
+
         writer.Close();
         writer.Line();
 
-        writer.Line("internal static void WriteConfigFields(global::System.IO.BinaryWriter writer, " +
-                    "global::Numos.CoreSim.AtmosConfigSnapshot config)");
+        writer.Line(
+            "internal static void WriteConfigFields(global::System.IO.BinaryWriter writer, " +
+            "global::Numos.CoreSim.AtmosConfigSnapshot config)");
+
         writer.Open();
         foreach (PlannedField field in fields)
             writer.Line(WriteScalar("config." + field.Member, field.Type));
+
         writer.Close();
         writer.Line();
 
-        writer.Line("internal static void ReadConfigFields(global::System.IO.BinaryReader reader, " +
-                    "global::Numos.CoreSim.AtmosConfig config, int maxStringBytes)");
+        writer.Line(
+            "internal static void ReadConfigFields(global::System.IO.BinaryReader reader, " +
+            "global::Numos.CoreSim.AtmosConfig config, int maxStringBytes)");
+
         writer.Open();
         foreach (PlannedField field in fields)
             writer.Line($"config.{field.Member} = {ReadScalar(field.Type)};");
+
         writer.Close();
         writer.Line();
     }
 
     private static void EmitGas(CodeWriter writer, EquatableArray<PlannedField> fields)
     {
-        writer.Line("internal static void AppendGasFields(ref global::Numos.CoreSim.Replay.AtmosStateHasher hash, " +
-                    "global::Numos.CoreSim.GasProperties gas)");
+        writer.Line(
+            "internal static void AppendGasFields(ref global::Numos.CoreSim.Replay.AtmosStateHasher hash, " +
+            "global::Numos.CoreSim.GasProperties gas)");
+
         writer.Open();
         foreach (PlannedField field in fields)
             writer.Line($"hash.Add(gas.{field.Member});");
+
         writer.Close();
         writer.Line();
 
-        writer.Line("internal static void WriteGasFields(global::System.IO.BinaryWriter writer, " +
-                    "global::Numos.CoreSim.GasProperties gas)");
+        writer.Line(
+            "internal static void WriteGasFields(global::System.IO.BinaryWriter writer, " +
+            "global::Numos.CoreSim.GasProperties gas)");
+
         writer.Open();
         foreach (PlannedField field in fields)
             writer.Line(WriteScalar("gas." + field.Member, field.Type));
+
         writer.Close();
         writer.Line();
 
-        writer.Line("internal static global::Numos.CoreSim.GasProperties ReadGasFields(" +
-                    "global::System.IO.BinaryReader reader, int maxStringBytes)");
+        writer.Line(
+            "internal static global::Numos.CoreSim.GasProperties ReadGasFields(" +
+            "global::System.IO.BinaryReader reader, int maxStringBytes)");
+
         writer.Open();
         writer.Line("var gas = new global::Numos.CoreSim.GasProperties();");
         foreach (PlannedField field in fields)
             writer.Line($"gas.{field.Member} = {ReadScalar(field.Type)};");
+
         writer.Line("return gas;");
         writer.Close();
     }

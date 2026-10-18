@@ -143,8 +143,6 @@ public sealed record CreateAtmosLinkSetOperation : AtmosWorldOperation
     /// <inheritdoc />
     public override AtmosWorldOperationCode Code => AtmosWorldOperationCode.CreateLinkSet;
 
-    internal override void Apply(AtmosWorld world) => world.Apply(this);
-
     /// <summary>
     ///     Gets the exact generational handle allocated by the operation.
     /// </summary>
@@ -159,6 +157,8 @@ public sealed record CreateAtmosLinkSetOperation : AtmosWorldOperation
     ///     Gets immutable canonical links owned by the set.
     /// </summary>
     public IReadOnlyList<ExplicitLinkDefinition> Links { get; }
+
+    internal override void Apply(AtmosWorld world) => world.Apply(this);
 }
 
 /// <summary>

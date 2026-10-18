@@ -1,4 +1,5 @@
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 
 namespace Numos.API.Generators.Tests;
 
@@ -46,7 +47,9 @@ public sealed class ChunkDataDiagnosticTests
     [Test]
     public void WrongPropertyType_Reports003()
     {
-        AssertReports("NUMOSCHUNK003", DiagnosticSeverity.Error,
+        AssertReports(
+            "NUMOSCHUNK003",
+            DiagnosticSeverity.Error,
             Wrap("public static partial int Value { get; }"));
     }
 
@@ -87,31 +90,43 @@ public sealed class ChunkDataDiagnosticTests
     [TestCase("null!")]
     public void BlankKey_Reports006(string key)
     {
-        AssertReports("NUMOSCHUNK006", DiagnosticSeverity.Error,
-            Wrap($"[Numos.API.ChunkData({key})] public static partial Numos.API.ChunkField<float> Value {{ get; }}",
+        AssertReports(
+            "NUMOSCHUNK006",
+            DiagnosticSeverity.Error,
+            Wrap(
+                $"[Numos.API.ChunkData({key})] public static partial Numos.API.ChunkField<float> Value {{ get; }}",
                 attribute: false));
     }
 
     [Test]
     public void RollbackWithoutKey_Reports007()
     {
-        AssertReports("NUMOSCHUNK007", DiagnosticSeverity.Error,
-            Wrap("[Numos.API.ChunkData(Rollback = true)] public static partial Numos.API.ChunkField<float> Value { get; }",
+        AssertReports(
+            "NUMOSCHUNK007",
+            DiagnosticSeverity.Error,
+            Wrap(
+                "[Numos.API.ChunkData(Rollback = true)] public static partial Numos.API.ChunkField<float> Value { get; }",
                 attribute: false));
     }
 
     [Test]
     public void RollbackWithManagedElement_Reports008()
     {
-        AssertReports("NUMOSCHUNK008", DiagnosticSeverity.Error,
-            Wrap("[Numos.API.ChunkData(\"tests/managed\", Rollback = true)] " +
-                 "public static partial Numos.API.ChunkField<string> Value { get; }", attribute: false));
+        AssertReports(
+            "NUMOSCHUNK008",
+            DiagnosticSeverity.Error,
+            Wrap(
+                "[Numos.API.ChunkData(\"tests/managed\", Rollback = true)] " +
+                "public static partial Numos.API.ChunkField<string> Value { get; }",
+                attribute: false));
     }
 
     [Test]
     public void TransientManagedElement_IsAllowed()
     {
-        GeneratorHarness.Run(out Compilation output, out var diagnostics,
+        GeneratorHarness.Run(
+            out Compilation output,
+            out var diagnostics,
             sources: Wrap("public static partial Numos.API.ChunkField<string?> Value { get; }"));
 
         Assert.That(diagnostics, Is.Empty);
@@ -121,8 +136,11 @@ public sealed class ChunkDataDiagnosticTests
     [Test]
     public void NegativeLength_Reports009()
     {
-        AssertReports("NUMOSCHUNK009", DiagnosticSeverity.Error,
-            Wrap("[Numos.API.ChunkData(Length = -1)] public static partial Numos.API.ChunkField<float> Value { get; }",
+        AssertReports(
+            "NUMOSCHUNK009",
+            DiagnosticSeverity.Error,
+            Wrap(
+                "[Numos.API.ChunkData(Length = -1)] public static partial Numos.API.ChunkField<float> Value { get; }",
                 attribute: false));
     }
 
@@ -203,8 +221,11 @@ public sealed class ChunkDataDiagnosticTests
                               }
                               """;
 
-        GeneratorRunResult result = GeneratorHarness.Run(out Compilation output, out var diagnostics,
-            version: Microsoft.CodeAnalysis.CSharp.LanguageVersion.CSharp13, sources: [source]);
+        GeneratorRunResult result = GeneratorHarness.Run(
+            out Compilation output,
+            out var diagnostics,
+            version: LanguageVersion.CSharp13,
+            sources: [source]);
 
         Assert.That(GeneratorHarness.Ids(diagnostics), Is.EqualTo(new[] { "NUMOSCHUNK013" }));
         Assert.That(diagnostics[0].Severity, Is.EqualTo(DiagnosticSeverity.Error));
@@ -220,9 +241,13 @@ public sealed class ChunkDataDiagnosticTests
     [TestCase("Get")]
     public void AccessorNamedLikeViewMember_Reports014(string name)
     {
-        GeneratorRunResult result = GeneratorHarness.Run(out Compilation output, out var diagnostics,
-            sources: Wrap($"[Numos.API.ChunkData(AccessorName = \"{name}\")] " +
-                          "public static partial Numos.API.ChunkField<float> Value { get; }", attribute: false));
+        GeneratorRunResult result = GeneratorHarness.Run(
+            out Compilation output,
+            out var diagnostics,
+            sources: Wrap(
+                $"[Numos.API.ChunkData(AccessorName = \"{name}\")] " +
+                "public static partial Numos.API.ChunkField<float> Value { get; }",
+                attribute: false));
 
         Assert.That(GeneratorHarness.Ids(diagnostics), Is.EqualTo(new[] { "NUMOSCHUNK014" }));
         Assert.That(diagnostics[0].Severity, Is.EqualTo(DiagnosticSeverity.Warning));
@@ -233,7 +258,9 @@ public sealed class ChunkDataDiagnosticTests
     [Test]
     public void DangerousViewMemberName_DoesNotReport014()
     {
-        GeneratorHarness.Run(out _, out var diagnostics,
+        GeneratorHarness.Run(
+            out _,
+            out var diagnostics,
             sources: Wrap("public static partial Numos.API.ChunkField<float> Temperature { get; }"));
 
         Assert.That(diagnostics, Is.Empty);
@@ -289,9 +316,13 @@ public sealed class ChunkDataDiagnosticTests
     [Test]
     public void InvalidAccessorName_Reports015()
     {
-        AssertReports("NUMOSCHUNK015", DiagnosticSeverity.Error,
-            Wrap("[Numos.API.ChunkData(AccessorName = \"not valid\")] " +
-                 "public static partial Numos.API.ChunkField<float> Value { get; }", attribute: false));
+        AssertReports(
+            "NUMOSCHUNK015",
+            DiagnosticSeverity.Error,
+            Wrap(
+                "[Numos.API.ChunkData(AccessorName = \"not valid\")] " +
+                "public static partial Numos.API.ChunkField<float> Value { get; }",
+                attribute: false));
     }
 
     [Test]
@@ -315,7 +346,8 @@ public sealed class ChunkDataDiagnosticTests
         Assert.That(generated, Does.Not.Contain("Broken"));
 
         // Only the unimplemented partial is left; the generator itself adds nothing that fails to compile.
-        Assert.That(GeneratorHarness.Errors(output).Select(static d => d.Id).Distinct(),
+        Assert.That(
+            GeneratorHarness.Errors(output).Select(static d => d.Id).Distinct(),
             Is.EqualTo(new[] { "CS9248" }));
     }
 

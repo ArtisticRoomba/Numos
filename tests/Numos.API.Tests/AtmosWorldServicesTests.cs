@@ -152,6 +152,7 @@ public sealed class AtmosWorldServicesTests
             Assert.That(() => world.Services.Unregister<GameClock>(), Throws.InvalidOperationException);
             Assert.That(world.Services.Get<GameClock>(), Is.Not.Null);
         });
+
         world.StopRecording();
 
         simulation.World.StartRecording();

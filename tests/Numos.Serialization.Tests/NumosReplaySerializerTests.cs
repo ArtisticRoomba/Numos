@@ -3,7 +3,6 @@ using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.Replay;
 using Numos.Maths;
-using Numos.Serialization;
 using Numos.Serialization.FileSystem;
 
 namespace Numos.Serialization.Tests;

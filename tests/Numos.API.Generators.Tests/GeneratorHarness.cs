@@ -1,6 +1,8 @@
 using System.Collections.Immutable;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
+using Numos.API.Generators.ChunkData;
+using Numos.API.Generators.SolverDependency;
 
 namespace Numos.API.Generators.Tests;
 
@@ -25,7 +27,8 @@ internal static class GeneratorHarness
         return CreateCompilation(parseOptions, [], sources);
     }
 
-    public static CSharpCompilation CreateCompilation(CSharpParseOptions parseOptions,
+    public static CSharpCompilation CreateCompilation(
+        CSharpParseOptions parseOptions,
         IEnumerable<MetadataReference> extraReferences, params string[] sources)
     {
         IEnumerable<MetadataReference> references = FrameworkReferences
@@ -38,11 +41,13 @@ internal static class GeneratorHarness
             sources.Select((source, index) =>
                 CSharpSyntaxTree.ParseText(source, parseOptions, path: $"Source{index}.cs")),
             references,
-            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary,
+            new CSharpCompilationOptions(
+                OutputKind.DynamicallyLinkedLibrary,
                 nullableContextOptions: NullableContextOptions.Enable));
     }
 
-    public static GeneratorRunResult Run(out Compilation output, out ImmutableArray<Diagnostic> diagnostics,
+    public static GeneratorRunResult Run(
+        out Compilation output, out ImmutableArray<Diagnostic> diagnostics,
         LanguageVersion version = LanguageVersion.CSharp14, params string[] sources)
     {
         CSharpParseOptions parseOptions = ParseOptions(version);
@@ -52,28 +57,31 @@ internal static class GeneratorHarness
         return driver.GetRunResult().Results.Single();
     }
 
-    public static GeneratorRunResult RunDependencies(out Compilation output,
+    public static GeneratorRunResult RunDependencies(
+        out Compilation output,
         out ImmutableArray<Diagnostic> diagnostics, params string[] sources)
     {
         return RunDependencies(out output, out diagnostics, [], sources);
     }
 
-    public static GeneratorRunResult RunDependencies(out Compilation output,
+    public static GeneratorRunResult RunDependencies(
+        out Compilation output,
         out ImmutableArray<Diagnostic> diagnostics, IEnumerable<MetadataReference> extraReferences,
         params string[] sources)
     {
         CSharpParseOptions parseOptions = ParseOptions();
         CSharpCompilation compilation = CreateCompilation(parseOptions, extraReferences, sources);
-        GeneratorDriver driver = CreateDriver(parseOptions, generator: new SolverDependency.SolverDependencyGenerator());
+        GeneratorDriver driver = CreateDriver(parseOptions, generator: new SolverDependencyGenerator());
         driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out output, out diagnostics);
         return driver.GetRunResult().Results.Single();
     }
 
-    public static GeneratorDriver CreateDriver(CSharpParseOptions parseOptions, bool trackSteps = false,
+    public static GeneratorDriver CreateDriver(
+        CSharpParseOptions parseOptions, bool trackSteps = false,
         IIncrementalGenerator? generator = null)
     {
         return CSharpGeneratorDriver.Create(
-            [(generator ?? new ChunkData.ChunkDataGenerator()).AsSourceGenerator()],
+            [(generator ?? new ChunkDataGenerator()).AsSourceGenerator()],
             parseOptions: parseOptions,
             driverOptions: new GeneratorDriverOptions(IncrementalGeneratorOutputKind.None, trackSteps));
     }

@@ -56,8 +56,14 @@ public sealed class OperationCodecGeneratorTests
             Assert.That(codec, Does.Contain("case global::Numos.CoreSim.Replay.CreateChunkOperation op:"));
             Assert.That(codec, Does.Contain("global::Numos.CoreSim.Replay.AtmosReplayCodec.WriteInt3(writer, op.Position);"));
             Assert.That(codec, Does.Contain("writer.Write(op.LocalVoxelIndex);"));
-            Assert.That(codec, Does.Contain("global::Numos.CoreSim.Replay.AtmosReplayCodec.WriteVoxelClassification(writer, op.Classification);"));
-            Assert.That(codec, Does.Contain("global::Numos.CoreSim.Replay.AtmosReplayCodec.ReadString(reader, maxStringBytes), reader.ReadBoolean()"));
+            Assert.That(
+                codec,
+                Does.Contain("global::Numos.CoreSim.Replay.AtmosReplayCodec.WriteVoxelClassification(writer, op.Classification);"));
+
+            Assert.That(
+                codec,
+                Does.Contain("global::Numos.CoreSim.Replay.AtmosReplayCodec.ReadString(reader, maxStringBytes), reader.ReadBoolean()"));
+
             Assert.That(codec, Does.Contain("case global::Numos.CoreSim.Replay.AtmosOperationCode.SetSolverEnabled:"));
         });
     }
@@ -90,9 +96,11 @@ public sealed class OperationCodecGeneratorTests
                                amount64 | Mole64 | global::System.Double | amount=1
                                """;
 
-        Compilation output = GeneratorHarness.Run(new OperationCodecGenerator(),
+        Compilation output = GeneratorHarness.Run(
+            new OperationCodecGenerator(),
             GeneratorHarness.CreateCompilation("Sim", [], Primitives, SimDomain(operation)),
-            out var diagnostics, GeneratorHarness.Catalog(catalog));
+            out var diagnostics,
+            GeneratorHarness.Catalog(catalog));
 
         Assert.That(diagnostics, Is.Empty);
         string codec = GeneratorHarness.Generated(output, SimHint);
@@ -141,7 +149,9 @@ public sealed class OperationCodecGeneratorTests
     [Test]
     public void OpcodeWithoutOperation_ReportsMissingOperation()
     {
-        RunSim(out var diagnostics, StandardOperations,
+        RunSim(
+            out var diagnostics,
+            StandardOperations,
             members: "CreateChunk = 2, SetVoxelClassification = 6, SetSolverEnabled = 11, SleepChunk = 10");
 
         Assert.That(diagnostics.Select(static diagnostic => diagnostic.Id), Is.EqualTo(new[] { "NUMOSREPLAYGEN008" }));
@@ -163,7 +173,8 @@ public sealed class OperationCodecGeneratorTests
         RunSim(out var diagnostics, computed, members: "CreateChunk = 2");
 
         // The opcode stays unclaimed too, so the enum member is reported as well.
-        Assert.That(diagnostics.Select(static diagnostic => diagnostic.Id),
+        Assert.That(
+            diagnostics.Select(static diagnostic => diagnostic.Id),
             Is.EquivalentTo(new[] { "NUMOSREPLAYGEN011", "NUMOSREPLAYGEN008" }));
     }
 
@@ -186,7 +197,9 @@ public sealed class OperationCodecGeneratorTests
         Assert.Multiple(() =>
         {
             Assert.That(codec, Does.Contain("AtmosReplayCodec.WriteSetVoxelClassificationOperation(writer, op);"));
-            Assert.That(codec, Does.Contain("return global::Numos.CoreSim.Replay.AtmosReplayCodec.ReadSetVoxelClassificationOperation(reader);"));
+            Assert.That(
+                codec,
+                Does.Contain("return global::Numos.CoreSim.Replay.AtmosReplayCodec.ReadSetVoxelClassificationOperation(reader);"));
         });
     }
 
@@ -228,9 +241,13 @@ public sealed class OperationCodecGeneratorTests
     public void WorldFamily_UsesSimulationCodecHelpersAcrossAssemblies()
     {
         // Numos.CoreSim is compiled first and referenced as metadata, the way Numos.API sees it.
-        CSharpCompilation sim = GeneratorHarness.CreateCompilation("Sim", [],
-            "[assembly: System.Runtime.CompilerServices.InternalsVisibleTo(\"World\")]", Primitives,
+        CSharpCompilation sim = GeneratorHarness.CreateCompilation(
+            "Sim",
+            [],
+            "[assembly: System.Runtime.CompilerServices.InternalsVisibleTo(\"World\")]",
+            Primitives,
             SimDomain(StandardOperations));
+
         Compilation simOutput = GeneratorHarness.Run(new OperationCodecGenerator(), sim, out var simDiagnostics);
         Assert.That(simDiagnostics, Is.Empty);
         MetadataReference simReference = Emit(simOutput);
@@ -272,13 +289,17 @@ public sealed class OperationCodecGeneratorTests
                              }
                              """;
 
-        Compilation output = GeneratorHarness.Run(new OperationCodecGenerator(),
-            GeneratorHarness.CreateCompilation("World", [simReference], world), out var diagnostics);
+        Compilation output = GeneratorHarness.Run(
+            new OperationCodecGenerator(),
+            GeneratorHarness.CreateCompilation("World", [simReference], world),
+            out var diagnostics);
 
         Assert.That(diagnostics, Is.Empty);
         Assert.That(GeneratorHarness.Errors(output), Is.Empty, string.Join("\n", GeneratorHarness.Errors(output)));
-        Assert.That(output.SyntaxTrees.Any(static tree => tree.FilePath.EndsWith(SimHint, StringComparison.Ordinal)),
-            Is.False, "the simulation codec belongs to the compilation that declares AtmosOperation");
+        Assert.That(
+            output.SyntaxTrees.Any(static tree => tree.FilePath.EndsWith(SimHint, StringComparison.Ordinal)),
+            Is.False,
+            "the simulation codec belongs to the compilation that declares AtmosOperation");
 
         string codec = GeneratorHarness.Generated(output, WorldHint);
         Assert.Multiple(() =>
@@ -289,14 +310,19 @@ public sealed class OperationCodecGeneratorTests
         });
     }
 
-    private static Compilation RunSim(out ImmutableArray<Diagnostic> diagnostics, string operations,
+    private static Compilation RunSim(
+        out ImmutableArray<Diagnostic> diagnostics, string operations,
         string members = "CreateChunk = 2, SetVoxelClassification = 6, SetSolverEnabled = 11", string codecMembers = "")
     {
-        return GeneratorHarness.Run(new OperationCodecGenerator(), out diagnostics, Primitives,
+        return GeneratorHarness.Run(
+            new OperationCodecGenerator(),
+            out diagnostics,
+            Primitives,
             SimDomain(operations, members, codecMembers));
     }
 
-    private static string SimDomain(string operations,
+    private static string SimDomain(
+        string operations,
         string members = "CreateChunk = 2, SetVoxelClassification = 6, SetSolverEnabled = 11", string codecMembers = "")
     {
         return $$"""

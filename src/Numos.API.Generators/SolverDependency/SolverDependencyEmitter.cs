@@ -33,8 +33,15 @@ internal static class SolverDependencyEmitter
         foreach (SolverDependencyPropertyModel model in members)
         {
             string modifiers = model.PropertyModifiers.Length > 0 ? model.PropertyModifiers + " " : "";
-            writer.Line(modifiers + "partial " + model.PropertyTypeDisplay + " " +
-                        CodeWriter.Escape(model.PropertyName) + " => " + FieldName(model) + ";");
+            writer.Line(
+                modifiers +
+                "partial " +
+                model.PropertyTypeDisplay +
+                " " +
+                CodeWriter.Escape(model.PropertyName) +
+                " => " +
+                FieldName(model) +
+                ";");
         }
 
         writer.Line();
@@ -51,15 +58,22 @@ internal static class SolverDependencyEmitter
             writer.Line("/// </summary>");
             writer.Line("/// <param name=\"resolver\">Looks up the services and solvers being injected.</param>");
             writer.Line(CodeWriter.GeneratedCodeAttribute);
-            writer.Line(hook.Accessibility + (hook.Accessibility == "private" ? "" : " virtual") +
-                        " void InjectSolverDependencies(" + ResolverType + " resolver)");
+            writer.Line(
+                hook.Accessibility +
+                (hook.Accessibility == "private" ? "" : " virtual") +
+                " void InjectSolverDependencies(" +
+                ResolverType +
+                " resolver)");
         }
         else
         {
             writer.Line("/// <inheritdoc />");
             writer.Line(CodeWriter.GeneratedCodeAttribute);
-            writer.Line(hook.Accessibility + " override void InjectSolverDependencies(" + ResolverType +
-                        " resolver)");
+            writer.Line(
+                hook.Accessibility +
+                " override void InjectSolverDependencies(" +
+                ResolverType +
+                " resolver)");
         }
 
         writer.Open();
@@ -84,8 +98,11 @@ internal static class SolverDependencyEmitter
     {
         if (!model.Optional)
         {
-            return "resolver.Resolve<" + model.ResolveTypeDisplay + ">(" +
-                   SymbolDisplay.FormatLiteral(model.PropertyName, true) + ")";
+            return "resolver.Resolve<" +
+                   model.ResolveTypeDisplay +
+                   ">(" +
+                   SymbolDisplay.FormatLiteral(model.PropertyName, true) +
+                   ")";
         }
 
         // A non-nullable optional property already earned NUMOSDEP006; the '!' keeps that the only warning.

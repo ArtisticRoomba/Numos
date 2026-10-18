@@ -36,8 +36,11 @@ public sealed class SolverDependencyDiagnosticTests
     [Test]
     public void NonPartialType_ReportsNumosDep001AndGeneratesNothing()
     {
-        GeneratorRunResult result = GeneratorHarness.RunDependencies(out _, out var diagnostics,
-            Solver("[SolverDependency] private partial IService Service { get; }",
+        GeneratorRunResult result = GeneratorHarness.RunDependencies(
+            out _,
+            out var diagnostics,
+            Solver(
+                "[SolverDependency] private partial IService Service { get; }",
                 "public sealed class Solver : IAtmosWorldSolver"));
 
         Assert.That(GeneratorHarness.Ids(diagnostics), Is.EqualTo(new[] { "NUMOSDEP001" }));
@@ -89,50 +92,60 @@ public sealed class SolverDependencyDiagnosticTests
     [Test]
     public void PropertyWithSetter_ReportsNumosDep003()
     {
-        Assert.That(GeneratorIds(Solver("[SolverDependency] private partial IService Service { get; set; }")),
+        Assert.That(
+            GeneratorIds(Solver("[SolverDependency] private partial IService Service { get; set; }")),
             Is.EqualTo(new[] { "NUMOSDEP003" }));
     }
 
     [Test]
     public void PropertyWithInit_ReportsNumosDep003()
     {
-        Assert.That(GeneratorIds(Solver("[SolverDependency] private partial IService Service { get; init; }")),
+        Assert.That(
+            GeneratorIds(Solver("[SolverDependency] private partial IService Service { get; init; }")),
             Is.EqualTo(new[] { "NUMOSDEP003" }));
     }
 
     [Test]
     public void NonPartialProperty_ReportsNumosDep003()
     {
-        Assert.That(GeneratorIds(Solver("[SolverDependency] private IService Service { get; } = null!;")),
+        Assert.That(
+            GeneratorIds(Solver("[SolverDependency] private IService Service { get; } = null!;")),
             Is.EqualTo(new[] { "NUMOSDEP003" }));
     }
 
     [Test]
     public void StaticProperty_ReportsNumosDep004()
     {
-        Assert.That(GeneratorIds(Solver("[SolverDependency] private static partial IService Service { get; }")),
+        Assert.That(
+            GeneratorIds(Solver("[SolverDependency] private static partial IService Service { get; }")),
             Is.EqualTo(new[] { "NUMOSDEP004" }));
     }
 
     [Test]
     public void ValueTypeProperty_ReportsNumosDep005()
     {
-        Assert.That(GeneratorIds(Solver("[SolverDependency] private partial int Count { get; }")),
+        Assert.That(
+            GeneratorIds(Solver("[SolverDependency] private partial int Count { get; }")),
             Is.EqualTo(new[] { "NUMOSDEP005" }));
     }
 
     [Test]
     public void UnconstrainedTypeParameter_ReportsNumosDep005()
     {
-        Assert.That(GeneratorIds(Solver("[SolverDependency] private partial T Value { get; }",
-                "public sealed partial class Solver<T> : IAtmosWorldSolver")),
+        Assert.That(
+            GeneratorIds(
+                Solver(
+                    "[SolverDependency] private partial T Value { get; }",
+                    "public sealed partial class Solver<T> : IAtmosWorldSolver")),
             Is.EqualTo(new[] { "NUMOSDEP005" }));
     }
 
     [Test]
     public void OptionalWithoutNullableType_WarnsNumosDep006AndStillCompiles()
     {
-        GeneratorHarness.RunDependencies(out Compilation output, out var diagnostics,
+        GeneratorHarness.RunDependencies(
+            out Compilation output,
+            out var diagnostics,
             Solver("[SolverDependency(Optional = true)] private partial IService Service { get; }"));
 
         Assert.That(GeneratorHarness.Ids(diagnostics), Is.EqualTo(new[] { "NUMOSDEP006" }));
@@ -144,7 +157,9 @@ public sealed class SolverDependencyDiagnosticTests
     [Test]
     public void RequiredWithNullableType_WarnsNumosDep006AndStillCompiles()
     {
-        GeneratorHarness.RunDependencies(out Compilation output, out var diagnostics,
+        GeneratorHarness.RunDependencies(
+            out Compilation output,
+            out var diagnostics,
             Solver("[SolverDependency] private partial IService? Service { get; }"));
 
         Assert.That(GeneratorHarness.Ids(diagnostics), Is.EqualTo(new[] { "NUMOSDEP006" }));
@@ -154,8 +169,10 @@ public sealed class SolverDependencyDiagnosticTests
     [Test]
     public void NullableDisabled_DoesNotWarnNumosDep006()
     {
-        Assert.That(GeneratorIds("#nullable disable\n" +
-                                 Solver("[SolverDependency(Optional = true)] private partial IService Service { get; }")),
+        Assert.That(
+            GeneratorIds(
+                "#nullable disable\n" +
+                Solver("[SolverDependency(Optional = true)] private partial IService Service { get; }")),
             Is.Empty);
     }
 
@@ -175,8 +192,11 @@ public sealed class SolverDependencyDiagnosticTests
                               }
                               """;
 
-        GeneratorRunResult result = GeneratorHarness.RunDependencies(out Compilation output, out var diagnostics,
+        GeneratorRunResult result = GeneratorHarness.RunDependencies(
+            out Compilation output,
+            out var diagnostics,
             source);
+
         Assert.That(GeneratorHarness.Ids(diagnostics), Is.EqualTo(new[] { "NUMOSDEP007" }));
         Assert.That(GeneratorHarness.Errors(output), Is.Empty);
         Assert.That(result.GeneratedSources, Has.Length.EqualTo(1));
@@ -196,6 +216,7 @@ public sealed class SolverDependencyDiagnosticTests
                                  private partial System.IServiceProvider First { get; }
                              }
                              """;
+
         const string second = """
                               namespace MyMod;
 
@@ -206,8 +227,12 @@ public sealed class SolverDependencyDiagnosticTests
                               }
                               """;
 
-        GeneratorRunResult result = GeneratorHarness.RunDependencies(out Compilation output, out var diagnostics,
-            second, first);
+        GeneratorRunResult result = GeneratorHarness.RunDependencies(
+            out Compilation output,
+            out var diagnostics,
+            second,
+            first);
+
         Assert.That(GeneratorHarness.Ids(diagnostics), Is.EqualTo(new[] { "NUMOSDEP007" }));
         Assert.That(diagnostics[0].Location.GetLineSpan().Path, Is.EqualTo("Source0.cs"));
         Assert.That(GeneratorHarness.Errors(output), Is.Empty);
@@ -311,38 +336,47 @@ public sealed class SolverDependencyDiagnosticTests
     [Test]
     public void HandWrittenHookOnSameType_ReportsNumosDep009()
     {
-        Assert.That(GeneratorIds(Solver("""
-                                        [SolverDependency] private partial IService Service { get; }
+        Assert.That(
+            GeneratorIds(
+                Solver(
+                    """
+                    [SolverDependency] private partial IService Service { get; }
 
-                                        private void InjectSolverDependencies(AtmosSolverDependencyResolver resolver)
-                                        {
-                                        }
-                                        """)),
+                    private void InjectSolverDependencies(AtmosSolverDependencyResolver resolver)
+                    {
+                    }
+                    """)),
             Is.EqualTo(new[] { "NUMOSDEP009" }));
     }
 
     [Test]
     public void HandWrittenInterfaceOnSameType_ReportsNumosDep009()
     {
-        Assert.That(GeneratorIds(Solver("""
-                                        [SolverDependency] private partial IService Service { get; }
+        Assert.That(
+            GeneratorIds(
+                Solver(
+                    """
+                    [SolverDependency] private partial IService Service { get; }
 
-                                        void IAtmosSolverDependencies.InjectDependencies(AtmosSolverDependencyResolver resolver)
-                                        {
-                                        }
-                                        """,
-                "public sealed partial class Solver : IAtmosSolverDependencies, IAtmosWorldSolver")),
+                    void IAtmosSolverDependencies.InjectDependencies(AtmosSolverDependencyResolver resolver)
+                    {
+                    }
+                    """,
+                    "public sealed partial class Solver : IAtmosSolverDependencies, IAtmosWorldSolver")),
             Is.EqualTo(new[] { "NUMOSDEP009" }));
     }
 
     [Test]
     public void InvalidProperty_DoesNotBlockValidSiblings()
     {
-        GeneratorRunResult result = GeneratorHarness.RunDependencies(out _, out var diagnostics,
-            Solver("""
-                   [SolverDependency] private partial IService Good { get; }
-                   [SolverDependency] private static partial IService Bad { get; }
-                   """));
+        GeneratorRunResult result = GeneratorHarness.RunDependencies(
+            out _,
+            out var diagnostics,
+            Solver(
+                """
+                [SolverDependency] private partial IService Good { get; }
+                [SolverDependency] private static partial IService Bad { get; }
+                """));
 
         Assert.That(GeneratorHarness.Ids(diagnostics), Is.EqualTo(new[] { "NUMOSDEP004" }));
         string source = result.GeneratedSources.Single().SourceText.ToString();

@@ -20,7 +20,8 @@ internal static class GeneratorHarness
 
     private static readonly CSharpParseOptions ParseOptions = new(LanguageVersion.Latest);
 
-    public static CSharpCompilation CreateCompilation(string assemblyName, IEnumerable<MetadataReference> references,
+    public static CSharpCompilation CreateCompilation(
+        string assemblyName, IEnumerable<MetadataReference> references,
         params string[] sources)
     {
         return CSharpCompilation.Create(
@@ -30,7 +31,8 @@ internal static class GeneratorHarness
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary, nullableContextOptions: NullableContextOptions.Enable));
     }
 
-    public static Compilation Run(IIncrementalGenerator generator, CSharpCompilation compilation,
+    public static Compilation Run(
+        IIncrementalGenerator generator, CSharpCompilation compilation,
         out ImmutableArray<Diagnostic> diagnostics, params AdditionalText[] additionalTexts)
     {
         GeneratorDriver driver = CSharpGeneratorDriver.Create(
@@ -42,7 +44,8 @@ internal static class GeneratorHarness
         return output;
     }
 
-    public static Compilation Run(IIncrementalGenerator generator, out ImmutableArray<Diagnostic> diagnostics,
+    public static Compilation Run(
+        IIncrementalGenerator generator, out ImmutableArray<Diagnostic> diagnostics,
         params string[] sources)
     {
         return Run(generator, CreateCompilation("ReplayGeneratorTest", [], sources), out diagnostics);

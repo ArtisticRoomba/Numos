@@ -1,6 +1,5 @@
 using Numos.CoreSim;
 using Numos.CoreSim.GasReactions;
-using Numos.CoreSim.Replay;
 
 namespace Numos.API.Tests;
 

@@ -30,10 +30,16 @@ public sealed class OperationCodecGenerator : IIncrementalGenerator
 
     private static readonly OperationFamily[] Families =
     [
-        new("Numos.CoreSim.Replay.AtmosOperation", "Numos.CoreSim.Replay.AtmosOperationCode",
-            "Numos.CoreSim.Replay.AtmosReplayCodec", "Replay opcode"),
-        new("Numos.API.AtmosWorldOperation", "Numos.API.AtmosWorldOperationCode",
-            "Numos.API.AtmosWorldReplayCodec", "World replay opcode"),
+        new(
+            "Numos.CoreSim.Replay.AtmosOperation",
+            "Numos.CoreSim.Replay.AtmosOperationCode",
+            "Numos.CoreSim.Replay.AtmosReplayCodec",
+            "Replay opcode"),
+        new(
+            "Numos.API.AtmosWorldOperation",
+            "Numos.API.AtmosWorldOperationCode",
+            "Numos.API.AtmosWorldReplayCodec",
+            "World replay opcode"),
     ];
 
     /// <inheritdoc />
@@ -85,8 +91,12 @@ public sealed class OperationCodecGenerator : IIncrementalGenerator
         (string? codeMember, ulong codeValue) = ReadCode(type, family, context.SemanticModel, cancellationToken);
         if (codeMember is null)
         {
-            diagnostics.Add(DiagnosticInfo.Create(ReplayDiagnostics.NonConstantCode, location, display,
-                ShortName(family.CodeEnum)));
+            diagnostics.Add(
+                DiagnosticInfo.Create(
+                    ReplayDiagnostics.NonConstantCode,
+                    location,
+                    display,
+                    ShortName(family.CodeEnum)));
         }
 
         string? customWrite = null;
@@ -103,8 +113,15 @@ public sealed class OperationCodecGenerator : IIncrementalGenerator
                 string expected = write is null
                     ? $"static void {name}(BinaryWriter writer, {type.Name} operation)"
                     : $"static {type.Name} {name}(BinaryReader reader[, int maxStringBytes])";
-                diagnostics.Add(DiagnosticInfo.Create(ReplayDiagnostics.MismatchedCustomMethod, location, display, name,
-                    codec.Name, expected));
+
+                diagnostics.Add(
+                    DiagnosticInfo.Create(
+                        ReplayDiagnostics.MismatchedCustomMethod,
+                        location,
+                        display,
+                        name,
+                        codec.Name,
+                        expected));
             }
             else
             {
@@ -121,8 +138,12 @@ public sealed class OperationCodecGenerator : IIncrementalGenerator
 
             if (constructors.Length != 1)
             {
-                diagnostics.Add(DiagnosticInfo.Create(ReplayDiagnostics.AmbiguousConstructor, location, display,
-                    type.Name));
+                diagnostics.Add(
+                    DiagnosticInfo.Create(
+                        ReplayDiagnostics.AmbiguousConstructor,
+                        location,
+                        display,
+                        type.Name));
             }
             else
             {
@@ -143,9 +164,17 @@ public sealed class OperationCodecGenerator : IIncrementalGenerator
 
                     if (helper is null)
                     {
-                        diagnostics.Add(DiagnosticInfo.Create(ReplayDiagnostics.UnsupportedFieldType, location, display,
-                            parameter.Name, parameter.Type.ToDisplayString(), parameter.Type.Name,
-                            ShortName(family.Codec), type.Name));
+                        diagnostics.Add(
+                            DiagnosticInfo.Create(
+                                ReplayDiagnostics.UnsupportedFieldType,
+                                location,
+                                display,
+                                parameter.Name,
+                                parameter.Type.ToDisplayString(),
+                                parameter.Type.Name,
+                                ShortName(family.Codec),
+                                type.Name));
+
                         continue;
                     }
 
@@ -185,7 +214,8 @@ public sealed class OperationCodecGenerator : IIncrementalGenerator
         return -1;
     }
 
-    private static (string? Member, ulong Value) ReadCode(INamedTypeSymbol type, OperationFamily family,
+    private static (string? Member, ulong Value) ReadCode(
+        INamedTypeSymbol type, OperationFamily family,
         SemanticModel model, CancellationToken cancellationToken)
     {
         foreach (IPropertySymbol property in type.GetMembers("Code").OfType<IPropertySymbol>())
@@ -216,7 +246,8 @@ public sealed class OperationCodecGenerator : IIncrementalGenerator
         return (null, 0);
     }
 
-    private static (string Write, string Read)? FindHelper(INamedTypeSymbol container, ITypeSymbol type,
+    private static (string Write, string Read)? FindHelper(
+        INamedTypeSymbol container, ITypeSymbol type,
         INamedTypeSymbol? writerType, INamedTypeSymbol? readerType)
     {
         IMethodSymbol? write = FindWrite(container, "Write" + type.Name, type, writerType);
@@ -227,7 +258,8 @@ public sealed class OperationCodecGenerator : IIncrementalGenerator
         return (Qualified(container) + "." + write.Name, ReadCall(container, read));
     }
 
-    private static IMethodSymbol? FindWrite(INamedTypeSymbol container, string name, ITypeSymbol type,
+    private static IMethodSymbol? FindWrite(
+        INamedTypeSymbol container, string name, ITypeSymbol type,
         INamedTypeSymbol? writerType)
     {
         return container.GetMembers(name).OfType<IMethodSymbol>().FirstOrDefault(method =>
@@ -242,7 +274,8 @@ public sealed class OperationCodecGenerator : IIncrementalGenerator
     ///     Finds a static reader that takes the <see cref="System.IO.BinaryReader" /> and, if it reads strings, the
     ///     caller's string byte limit.
     /// </summary>
-    private static IMethodSymbol? FindRead(INamedTypeSymbol container, string name, ITypeSymbol type,
+    private static IMethodSymbol? FindRead(
+        INamedTypeSymbol container, string name, ITypeSymbol type,
         INamedTypeSymbol? readerType)
     {
         return container.GetMembers(name).OfType<IMethodSymbol>().FirstOrDefault(method =>
@@ -255,7 +288,9 @@ public sealed class OperationCodecGenerator : IIncrementalGenerator
 
     private static string ReadCall(INamedTypeSymbol container, IMethodSymbol read)
     {
-        return Qualified(container) + "." + read.Name +
+        return Qualified(container) +
+               "." +
+               read.Name +
                (read.Parameters.Length == 1 ? "(reader)" : "(reader, maxStringBytes)");
     }
 
@@ -278,20 +313,24 @@ public sealed class OperationCodecGenerator : IIncrementalGenerator
             if (codeEnum is null || !codeEnum.Locations.Any(static location => location.IsInSource))
                 continue;
 
-            families.Add(new FamilyCodes(index, codeEnum.GetMembers()
-                .OfType<IFieldSymbol>()
-                .Where(static member => member.HasConstantValue)
-                .Select(static member => new CodeMember(
-                    member.Name,
-                    Convert.ToUInt64(member.ConstantValue, CultureInfo.InvariantCulture),
-                    LocationInfo.From(member.Locations.FirstOrDefault())))
-                .ToEquatableArray()));
+            families.Add(
+                new FamilyCodes(
+                    index,
+                    codeEnum.GetMembers()
+                        .OfType<IFieldSymbol>()
+                        .Where(static member => member.HasConstantValue)
+                        .Select(static member => new CodeMember(
+                            member.Name,
+                            Convert.ToUInt64(member.ConstantValue, CultureInfo.InvariantCulture),
+                            LocationInfo.From(member.Locations.FirstOrDefault())))
+                        .ToEquatableArray()));
         }
 
         return families.ToEquatableArray();
     }
 
-    private static GeneratorOutput<FamilyCodec> Plan(ImmutableArray<OperationModel> operations,
+    private static GeneratorOutput<FamilyCodec> Plan(
+        ImmutableArray<OperationModel> operations,
         EquatableArray<FamilyCodes> codes, EquatableArray<QuantityAlias> aliases)
     {
         var diagnostics = new List<DiagnosticInfo>();
@@ -314,8 +353,14 @@ public sealed class OperationCodecGenerator : IIncrementalGenerator
 
                 if (claimed.TryGetValue(operation.CodeValue, out OperationModel? first))
                 {
-                    diagnostics.Add(DiagnosticInfo.Create(ReplayDiagnostics.DuplicateCode, operation.Location,
-                        operation.DisplayName, ShortName(info.CodeEnum) + "." + operation.CodeMember, first.DisplayName));
+                    diagnostics.Add(
+                        DiagnosticInfo.Create(
+                            ReplayDiagnostics.DuplicateCode,
+                            operation.Location,
+                            operation.DisplayName,
+                            ShortName(info.CodeEnum) + "." + operation.CodeMember,
+                            first.DisplayName));
+
                     continue;
                 }
 
@@ -328,8 +373,12 @@ public sealed class OperationCodecGenerator : IIncrementalGenerator
             {
                 if (!claimed.ContainsKey(member.Value))
                 {
-                    diagnostics.Add(DiagnosticInfo.Create(ReplayDiagnostics.CodeWithoutOperation, member.Location,
-                        ShortName(info.CodeEnum), member.Name));
+                    diagnostics.Add(
+                        DiagnosticInfo.Create(
+                            ReplayDiagnostics.CodeWithoutOperation,
+                            member.Location,
+                            ShortName(info.CodeEnum),
+                            member.Name));
                 }
             }
 
@@ -340,14 +389,18 @@ public sealed class OperationCodecGenerator : IIncrementalGenerator
         return new GeneratorOutput<FamilyCodec>(diagnostics.ToEquatableArray(), codecs.ToEquatableArray());
     }
 
-    private static OperationCase? TryBuildCase(OperationModel operation, OperationFamily family,
+    private static OperationCase? TryBuildCase(
+        OperationModel operation, OperationFamily family,
         EquatableArray<QuantityAlias> aliases, List<DiagnosticInfo> diagnostics)
     {
         string codeLabel = "global::" + family.CodeEnum + "." + operation.CodeMember;
         if (operation.CustomWrite is not null)
         {
-            return new OperationCase(operation.TypeName, codeLabel,
-                new EquatableArray<string>(new[] { operation.CustomWrite + "(writer, op);" }), operation.CustomRead!);
+            return new OperationCase(
+                operation.TypeName,
+                codeLabel,
+                new EquatableArray<string>(new[] { operation.CustomWrite + "(writer, op);" }),
+                operation.CustomRead!);
         }
 
         var writes = new List<string>();
@@ -364,9 +417,17 @@ public sealed class OperationCodecGenerator : IIncrementalGenerator
             WireType type = field.Type.Resolve(aliases);
             if (type.Kind != WireTypeKind.Primitive)
             {
-                diagnostics.Add(DiagnosticInfo.Create(ReplayDiagnostics.UnsupportedFieldType, operation.Location,
-                    operation.DisplayName, field.Name, type.Name, type.Name, ShortName(family.Codec),
-                    operation.Name));
+                diagnostics.Add(
+                    DiagnosticInfo.Create(
+                        ReplayDiagnostics.UnsupportedFieldType,
+                        operation.Location,
+                        operation.DisplayName,
+                        field.Name,
+                        type.Name,
+                        type.Name,
+                        ShortName(family.Codec),
+                        operation.Name));
+
                 return null;
             }
 
@@ -374,7 +435,10 @@ public sealed class OperationCodecGenerator : IIncrementalGenerator
             reads.Add("reader.Read" + type.Name + "()");
         }
 
-        return new OperationCase(operation.TypeName, codeLabel, writes.ToEquatableArray(),
+        return new OperationCase(
+            operation.TypeName,
+            codeLabel,
+            writes.ToEquatableArray(),
             "new " + operation.TypeName + "(" + string.Join(", ", reads) + ")");
     }
 
@@ -399,18 +463,25 @@ public sealed class OperationCodecGenerator : IIncrementalGenerator
             writer.Line("case " + operation.TypeName + " op:");
             foreach (string line in operation.WriteLines)
                 writer.Line("    " + line);
+
             writer.Line("    return;");
         }
 
         writer.Line("default:");
-        writer.Line("    throw new global::System.NotSupportedException($\"" + family.Label +
-                    " {operation.Code} is not serializable.\");");
+        writer.Line(
+            "    throw new global::System.NotSupportedException($\"" +
+            family.Label +
+            " {operation.Code} is not serializable.\");");
+
         writer.Close();
         writer.Close();
         writer.Line();
 
-        writer.Line("internal static " + baseType +
-                    " ReadOperation(global::System.IO.BinaryReader reader, ushort code, int maxStringBytes)");
+        writer.Line(
+            "internal static " +
+            baseType +
+            " ReadOperation(global::System.IO.BinaryReader reader, ushort code, int maxStringBytes)");
+
         writer.Open();
         writer.Line("switch ((global::" + family.CodeEnum + ")code)");
         writer.Open();

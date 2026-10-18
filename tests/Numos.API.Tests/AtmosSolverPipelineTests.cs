@@ -91,9 +91,11 @@ public sealed class AtmosWorldPipelineTests
                     before: AtmosBuiltInSolvers.Thermodynamics,
                     after: AtmosBuiltInSolvers.Advection),
                 Throws.ArgumentException);
+
             Assert.That(
                 () => world.Solvers.Register("orphan", _ => { }, after: "missing"),
                 Throws.TypeOf<KeyNotFoundException>());
+
             Assert.That(world.Solvers.Steps, Has.Count.EqualTo(7));
         });
     }

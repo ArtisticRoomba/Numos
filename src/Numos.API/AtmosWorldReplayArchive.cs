@@ -1,5 +1,4 @@
 using System.Collections.ObjectModel;
-using Numos.CoreSim.Replay;
 
 namespace Numos.API;
 
@@ -66,8 +65,7 @@ public sealed class AtmosWorldReplayArchive
     ///     Empty when the archive is portable.
     /// </summary>
     public IReadOnlyList<string> UnsupportedFeatures =>
-        _unsupportedFeatures ??= new ReadOnlyCollection<string>(
-            FindUnsupportedFeatures(InitialCheckpoint, Recording).ToArray());
+        _unsupportedFeatures ??= new ReadOnlyCollection<string>(FindUnsupportedFeatures(InitialCheckpoint, Recording).ToArray());
 
     /// <summary>
     ///     Throws when this archive depends on host-defined solver state.

@@ -17,10 +17,10 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
     private GasRegistrySnapshot _gasRegistry = default!;
     private JoulePerMoleKelvin[] _molarHeatCapacitiesAtConstantVolume = [];
 
-    private AtmosConfigSnapshot? _sourceConfig;
-
     // Only used when the captured configuration is not an AtmosConfigSnapshot, which has its own shared copy.
     private ReactionTables? _reactionTables;
+
+    private AtmosConfigSnapshot? _sourceConfig;
 
     /// <summary>
     ///     Gets the simulation's solver data. Every capture of a different configuration clears it, so values must be

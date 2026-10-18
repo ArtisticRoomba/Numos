@@ -37,15 +37,25 @@ internal static class ChunkDataEmitter
         return writer.ToString();
     }
 
-    private static void WriteDeclaringType(CodeWriter writer, PartialTypeModel type,
+    private static void WriteDeclaringType(
+        CodeWriter writer, PartialTypeModel type,
         IReadOnlyList<ChunkDataPropertyModel> members)
     {
         writer.OpenTypeChain(type);
 
         foreach (ChunkDataPropertyModel model in members)
         {
-            writer.Line(model.PropertyModifiers + " partial " + model.PropertyTypeDisplay + " " +
-                        Escape(model.PropertyName) + " => " + HolderName + "." + Escape(model.PropertyName) + ";");
+            writer.Line(
+                model.PropertyModifiers +
+                " partial " +
+                model.PropertyTypeDisplay +
+                " " +
+                Escape(model.PropertyName) +
+                " => " +
+                HolderName +
+                "." +
+                Escape(model.PropertyName) +
+                ";");
         }
 
         // Static initializer order across partial declarations is unspecified, so a backing field on the declaring
@@ -62,16 +72,26 @@ internal static class ChunkDataEmitter
             string length = model.Length?.ToString(CultureInfo.InvariantCulture) ?? "null";
             if (i > 0)
                 writer.Line();
+
             writer.Line("internal static readonly " + fieldType + " " + Escape(model.PropertyName) + " =");
-            writer.Line("    " + fieldType + ".Register(" + SymbolDisplay.FormatLiteral(model.Key!, true) +
-                        ", rollback: " + (model.Rollback ? "true" : "false") + ", length: " + length + ");");
+            writer.Line(
+                "    " +
+                fieldType +
+                ".Register(" +
+                SymbolDisplay.FormatLiteral(model.Key!, true) +
+                ", rollback: " +
+                (model.Rollback ? "true" : "false") +
+                ", length: " +
+                length +
+                ");");
         }
 
         writer.Close();
         writer.CloseTypeChain(type);
     }
 
-    private static void WriteAccessorClass(CodeWriter writer, ChunkDataPropertyModel first,
+    private static void WriteAccessorClass(
+        CodeWriter writer, ChunkDataPropertyModel first,
         List<ChunkDataPropertyModel> accessors)
     {
         bool isPublic = accessors.Any(static accessor => accessor.AccessorIsPublic);
@@ -92,9 +112,19 @@ internal static class ChunkDataEmitter
 
             if (i > 0)
                 writer.Line();
+
             writer.Line("/// <inheritdoc cref=\"" + model.TypeDisplay + "." + Escape(model.PropertyName) + "\" />");
-            writer.Line((model.AccessorIsPublic ? "public" : "internal") + " " + FlatArrayType + "<" +
-                        model.ElementTypeDisplay + "> " + Escape(model.AccessorName) + " => chunk.Get(" + field + ");");
+            writer.Line(
+                (model.AccessorIsPublic ? "public" : "internal") +
+                " " +
+                FlatArrayType +
+                "<" +
+                model.ElementTypeDisplay +
+                "> " +
+                Escape(model.AccessorName) +
+                " => chunk.Get(" +
+                field +
+                ");");
         }
 
         writer.Close();

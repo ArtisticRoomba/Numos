@@ -82,7 +82,9 @@ internal sealed partial class AtmosKernel
         if (checkpoint.FormatVersion != AtmosSimulationCheckpoint.CurrentFormatVersion ||
             checkpoint.CompatibilityVersion != AtmosSimulationCheckpoint.CurrentCompatibilityVersion ||
             checkpoint.Dimensions != dimensions ||
-            dimensions.X <= 0 || dimensions.Y <= 0 || dimensions.Z <= 0 ||
+            dimensions.X <= 0 ||
+            dimensions.Y <= 0 ||
+            dimensions.Z <= 0 ||
             (long)dimensions.X * dimensions.Y * dimensions.Z > AtmosChunkConstants.MaximumVoxelCount)
         {
             throw new ArgumentException(
@@ -215,14 +217,16 @@ internal sealed partial class AtmosKernel
     {
         // Positions are the map's keys, so this order is total and doesn't depend on sort stability.
         AtmosChunk[] chunks = _chunkMap.Values.ToArray();
-        Array.Sort(chunks, static (first, second) =>
-        {
-            int order = first.GridPosition.X.CompareTo(second.GridPosition.X);
-            if (order == 0)
-                order = first.GridPosition.Y.CompareTo(second.GridPosition.Y);
+        Array.Sort(
+            chunks,
+            static (first, second) =>
+            {
+                int order = first.GridPosition.X.CompareTo(second.GridPosition.X);
+                if (order == 0)
+                    order = first.GridPosition.Y.CompareTo(second.GridPosition.Y);
 
-            return order != 0 ? order : first.GridPosition.Z.CompareTo(second.GridPosition.Z);
-        });
+                return order != 0 ? order : first.GridPosition.Z.CompareTo(second.GridPosition.Z);
+            });
 
         return chunks;
     }

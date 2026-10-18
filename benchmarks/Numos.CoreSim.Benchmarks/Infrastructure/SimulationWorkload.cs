@@ -8,6 +8,10 @@ namespace Numos.CoreSim.Benchmarks.Infrastructure;
 
 internal sealed class SimulationWorkload : IDisposable
 {
+    /// <summary>
+    ///     The tick <see cref="Initial" /> is restored at, one short of a thermodynamics tick.
+    /// </summary>
+    internal const int InitialTickCount = AtmosSolverConstants.ThermodynamicsTickInterval - 1;
     private readonly DefaultAtmosSolvers _solvers;
 
     internal SimulationWorkload(int chunks, int activeVoxels, int gases, bool reactions = false, bool condensation = false)
@@ -62,11 +66,6 @@ internal sealed class SimulationWorkload : IDisposable
         BoundaryEventCount = GetBoundaryEventCount(options);
         ThermalBoundaryEdgeCount = GetThermalBoundaryEdgeCount(options);
     }
-
-    /// <summary>
-    ///     The tick <see cref="Initial" /> is restored at, one short of a thermodynamics tick.
-    /// </summary>
-    internal const int InitialTickCount = AtmosSolverConstants.ThermodynamicsTickInterval - 1;
 
     internal ScalingWorkloadOptions Options { get; }
     internal AtmosKernel Kernel { get; }
