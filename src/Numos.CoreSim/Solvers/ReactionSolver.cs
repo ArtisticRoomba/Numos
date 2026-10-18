@@ -368,17 +368,17 @@ internal class ReactionSolver : IAtmosSolverStage
         Kelvin temperature = currentTemperature; //to stop warning about the later change of currentTemperature.
         for (int reactionId = 0; reactionId < reactionCount; reactionId++)
         {
-            ConcentrationPerSecond64 rate = reactions.GetRateConstant(reactionId, temperature);
-            if (!double.IsNormal(rate) || rate <= 0f)
+            ConcentrationPerSecond rate = reactions.GetRateConstant(reactionId, temperature);
+            if (!float.IsNormal(rate) || rate <= 0f)
                 continue;
 
             // Preserve canonical gas-name and factor order independently of registry indices.
             foreach (var gas in rateOrder)
                 rate = gas.ApplyRateFactors(reactionId, mixtureVector[gas.GasId]/volume, rate);
 
-            Mole64 speed = rate * (double)deltaTime * (double)volume;
-            if (double.IsFinite(speed) && speed > 1e-10d)
-                reactionSpeeds[reactionId] = (Mole)speed;
+            Mole speed = rate * deltaTime * volume;
+            if (float.IsFinite(speed) && speed > 0f)
+                reactionSpeeds[reactionId] = speed;
         }
 
         bool anyReaction = false;
