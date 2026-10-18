@@ -157,8 +157,7 @@ public readonly struct AtmosSolverChunk
     /// <exception cref="InvalidOperationException">The view is default or its tick has ended.</exception>
     /// <example>
     ///     <code>
-    ///     FlatArray&lt;float&gt; exposure = chunk.Get(FireData.Exposure);
-    ///     exposure[new Int3(1, 0, 2)] += 0.5f;
+    ///     chunk.Get(FireData.Exposure)[new Int3(1, 0, 2)] += 0.5f;
     ///     </code>
     /// </example>
     public FlatArray<T> Get<T>(ChunkField<T> field)

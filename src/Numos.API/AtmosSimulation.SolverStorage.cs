@@ -159,8 +159,7 @@ public sealed partial class AtmosSimulation
     /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
     /// <example>
     ///     <code>
-    ///     FlatArray&lt;float&gt; exposure = simulation.GetChunkField(chunk, FireData.Exposure);
-    ///     exposure[new Int3(0, 0, 0)] = 1f;
+    ///     simulation.GetChunkField(chunk, FireData.Exposure)[new Int3(0, 0, 0)] = 1f;
     ///     var checkpoint = simulation.CaptureCheckpoint(); // includes the seeded value for rollback fields
     ///     </code>
     /// </example>

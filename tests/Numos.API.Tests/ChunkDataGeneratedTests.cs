@@ -95,10 +95,8 @@ public sealed class ChunkDataGeneratedTests
             {
                 Span<int> burnCount = chunk.BurnCount;
                 burnCount[0]++;
-                FlatArray<float> exposure = chunk.Exposure;
-                FlatArray<int> scratch = chunk.Scratch;
-                exposure[1] += burnCount[0];
-                scratch[0] = burnCount[0];
+                chunk.Exposure[1] += burnCount[0];
+                chunk.Scratch[0] = burnCount[0];
             }
         });
 
@@ -145,6 +143,7 @@ public sealed class ChunkDataGeneratedTests
         {
             var chunk = context.Chunks(simulation)[0];
             seen = chunk.Exposure[0];
+            chunk.Exposure[new Int3(0, 0, 0)] += 2f;
             chunk.BurnCount[1] = 8;
         });
 
@@ -155,6 +154,7 @@ public sealed class ChunkDataGeneratedTests
             Assert.That(exposure, Is.SameAs(GeneratedFireData.Exposure));
             Assert.That(burnCount, Is.SameAs(GeneratedFireData.BurnCount));
             Assert.That(seen, Is.EqualTo(5f));
+            Assert.That(simulation.GetChunkField(handle, exposure)[0], Is.EqualTo(7f));
             Assert.That(simulation.GetChunkField(handle, burnCount)[1], Is.EqualTo(8));
             Assert.That(
                 () => ChunkField<float>.Register(GeneratedFireData.KeyPrefix + "exposure"),

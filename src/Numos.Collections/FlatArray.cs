@@ -75,28 +75,24 @@ public readonly struct FlatArray<T>
     }
 
     /// <summary>
-    ///     Gets or sets an element by its flat array index.
+    ///     Returns a reference to an element by its flat array index.
     /// </summary>
     /// <param name="index">The zero-based flat array index.</param>
     /// <exception cref="IndexOutOfRangeException"><paramref name="index" /> is outside the backing array.</exception>
-    public T this[int index]
-    {
-        get => _data[index];
-        set => _data[index] = value;
-    }
+    /// <remarks>
+    ///     The indexer returns by reference, so <c>flat[i] = v</c> and <c>flat[i] += v</c> write straight into the
+    ///     backing array even when <c>flat</c> is a property or method result.
+    /// </remarks>
+    public ref T this[int index] => ref _data[index];
 
     /// <summary>
-    ///     Gets or sets an element by an <see cref="Int3" />.
+    ///     Returns a reference to an element by its <see cref="Int3" /> coordinate.
     /// </summary>
     /// <param name="position">The zero-based coordinate of the element.</param>
     /// <exception cref="IndexOutOfRangeException">
     ///     <paramref name="position" /> is outside <see cref="Dimensions" />.
     /// </exception>
-    public T this[Int3 position]
-    {
-        get => _data[GetIndex(position)];
-        set => _data[GetIndex(position)] = value;
-    }
+    public ref T this[Int3 position] => ref _data[GetIndex(position)];
 
     /// <summary>
     ///     Converts a coordinate to its flat array index.

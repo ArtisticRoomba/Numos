@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using Numos.Maths;
 using NUnit.Framework;
 
@@ -57,6 +58,29 @@ public sealed class FlatArrayTests
         array[new Int3(1, 2, 3)] = 42;
 
         Assert.That(data[23], Is.EqualTo(42));
+    }
+
+    [Test]
+    public void Indexers_ReturnReferencesIntoBackingArray()
+    {
+        int[] data = new int[24];
+        var array = new FlatArray<int>(data, new Int3(2, 3, 4));
+        FlatArray<int> View() => array;
+
+        // A method result isn't a variable, so these only compile because the indexers return by ref.
+        View()[3] = 7;
+        View()[new Int3(1, 2, 3)] += 5;
+        ref int element = ref array[10];
+        element = 9;
+        bool aliased = Unsafe.AreSame(ref element, ref array[new Int3(0, 2, 1)]);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(data[3], Is.EqualTo(7));
+            Assert.That(data[23], Is.EqualTo(5));
+            Assert.That(data[10], Is.EqualTo(9));
+            Assert.That(aliased, Is.True);
+        });
     }
 
     [Test]

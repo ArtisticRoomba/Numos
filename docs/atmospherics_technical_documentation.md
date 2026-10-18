@@ -1080,8 +1080,8 @@ Parallel.For(0, chunks.Count, index =>
 });
 ```
 
-`FlatArray<T>` has a get/set indexer rather than a `ref` one, so `chunk.Exposure[voxel] += 1f` doesn't compile
-(CS1612). Take a local first. The `Span<T>` accessors don't have that problem.
+`FlatArray<T>` indexers return by reference, so a one-off write like `chunk.Exposure[voxel] += 1f` goes straight to
+the chunk's storage. Every accessor call looks the field up again, though, so hoist it out of a voxel loop as above.
 
 Extension properties need C# 14, the default for `net10.0`. On C# 13 the generator falls back to extension methods
 named `Get{Name}` (`chunk.GetExposure()`) and says so with an info diagnostic.
