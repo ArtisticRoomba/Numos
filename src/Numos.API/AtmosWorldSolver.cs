@@ -20,9 +20,10 @@ public delegate void AtmosWorldSolver(AtmosWorldSolverContext context);
 ///         same name, so switching between the two forms keeps old checkpoints compatible.
 ///     </para>
 ///     <para>
-///         Fields on the instance are invisible to replay. Anything that has to survive a checkpoint restore belongs in
-///         a rollback <see cref="ChunkField{T}" /> or a <see cref="SolverDataKey{T}" />; fields should only hold
-///         transient work that <see cref="OnRestored" /> can throw away, plus references to services and fields.
+///         Fields on the instance are invisible to replay. State that has to roll back with a checkpoint belongs in a
+///         rollback <see cref="ChunkField{T}" />, and caches rebuilt from authoritative inputs can live under a
+///         <see cref="SolverDataKey{T}" />. Fields should only hold transient work that <see cref="OnRestored" /> can
+///         throw away, plus references to services, other solvers, and chunk fields.
 ///     </para>
 ///     <para>
 ///         Configuration is not pushed to the solver. Read <see cref="AtmosWorldSolverContext.Config" /> each tick, and

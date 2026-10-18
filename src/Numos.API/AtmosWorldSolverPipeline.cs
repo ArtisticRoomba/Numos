@@ -212,6 +212,10 @@ public sealed class AtmosWorldSolverPipeline
     /// <param name="name">A nonempty name unique within the pipeline.</param>
     /// <param name="selection">The Cartesian and explicit adjacency included in the solver's view.</param>
     /// <param name="solver">The caller-owned solver instance.</param>
+    /// <remarks>
+    ///     Identical to the <see cref="AtmosWorldSolver" /> overload in pipeline order and checkpoint metadata. The
+    ///     instance is caller-owned and also receives <see cref="IAtmosWorldSolver.OnRestored" />.
+    /// </remarks>
     /// <exception cref="ArgumentNullException">An argument is <see langword="null" />.</exception>
     /// <exception cref="ArgumentException">A name is blank, or <paramref name="name" /> is already registered.</exception>
     /// <exception cref="KeyNotFoundException">No stage named <paramref name="existingName" /> is registered.</exception>
@@ -296,6 +300,10 @@ public sealed class AtmosWorldSolverPipeline
     /// <param name="name">A nonempty name unique within the pipeline.</param>
     /// <param name="selection">The Cartesian and explicit adjacency included in the solver's view.</param>
     /// <param name="solver">The caller-owned solver instance.</param>
+    /// <remarks>
+    ///     Identical to the <see cref="AtmosWorldSolver" /> overload in pipeline order and checkpoint metadata. The
+    ///     instance is caller-owned and also receives <see cref="IAtmosWorldSolver.OnRestored" />.
+    /// </remarks>
     /// <exception cref="ArgumentNullException">An argument is <see langword="null" />.</exception>
     /// <exception cref="ArgumentException">A name is blank, or <paramref name="name" /> is already registered.</exception>
     /// <exception cref="KeyNotFoundException">No stage named <paramref name="existingName" /> is registered.</exception>

@@ -277,65 +277,54 @@ The accessors are C# 14 extension properties. On C# 13 you get `chunk.GetExposur
 [technical documentation](atmospherics_technical_documentation.md#123-per-chunk-solver-state-with-chunkfieldt) covers
 keys, allocation, the generator's diagnostics, and the hand-written `ChunkField<T>.Register` equivalent.
 
-## Sharing dependencies between solvers
+## Solver settings belong in the configuration
 
-A `SolverDataKey<T>` gives cooperating stages a shared object without requiring either solver to hold a reference to
-the other. The key carries the factory, so there is one definition; declare it as a `static readonly` field and have
-every stage read it through `simulation.GetSolverData(key)`. Each simulation caches its own value:
+A custom solver's tunables, such as an ignition temperature or a spread rate, go in `AtmosConfig.SolverConfigurations`
+rather than in fields on the solver. Configuration changes are recorded and checkpointed, so a replay sees the same
+settings at the same tick. A field the host edits on a solver object is invisible to both, and replay quietly runs
+with whatever value the field holds now.
+
+Each entry implements `IAtmosSolverConfiguration`. Numos captures a snapshot when the configuration is applied, so
+`CreateSnapshot` must return an immutable, detached copy, `SemanticallyEquals` must compare every authoritative
+setting, and `ComputeStateHash` must be deterministic. An immutable record can return itself:
 
 ```csharp
-static readonly SolverDataKey<Queue<int>> Pending = new("my-mod/pending", static _ => new Queue<int>());
+public sealed record FireSettings(float IgnitionTemperature) : IAtmosSolverConfiguration
+{
+    public string Key => "my-mod/fire";
+    public IAtmosSolverConfiguration CreateSnapshot(IGasRegistry gases) => this;
+    public bool SemanticallyEquals(IAtmosSolverConfiguration other) => Equals(other);
+    public ulong ComputeStateHash() => BitConverter.SingleToUInt32Bits(IgnitionTemperature);
+}
 
-simulation.World.Solvers.Register("produce", _ =>
-{
-    var pending = simulation.GetSolverData(Pending);
-    pending.Clear();
-    pending.Enqueue(simulation.TickCount);
-});
-simulation.World.Solvers.RegisterAfter("produce", "consume", _ =>
-{
-    var pending = simulation.GetSolverData(Pending);
-    while (pending.TryDequeue(out int tick))
-        Console.WriteLine(tick);
-});
+var config = new AtmosConfig(world.Config);
+config.SolverConfigurations.Add(new FireSettings(IgnitionTemperature: 600f));
+world.SetAtmosConfig(config);
 ```
 
-The key instance is the identity: two keys with the same name are different slots, so unrelated plugins can't collide.
-For a host object that every solver should see, such as a game clock or an event bus, use a
-[world service](#class-solvers-and-world-services) instead. Null results and factory cycles throw; failed creation leaves the slot available for a retry. Factories may read other keys but must not
-mutate the simulation.
+Solvers read the applied snapshot from the tick context:
 
-Sharing data does not change execution order. Register producers before consumers, and define how a consumer behaves
-when its producer is disabled or removed. The built-in boundary stages work this way: advection and thermodynamics
-publish per-chunk boundary event batches through a shared slot, reserving one batch per chunk before parallel work
-starts so each worker writes only to its own. The consumers ignore batches left over from an earlier tick and put the
-current events in canonical order before applying cross-chunk changes. Thermal boundary work then applies
-sequentially; gas boundary flow reserves each source's write range sequentially, in sorted order, but scatters and
-applies in parallel once every range is reserved (see Cross-Chunk Boundary Flow in the
-[technical documentation](atmospherics_technical_documentation.md)).
+```csharp
+if (context.Config.TryGetSolverConfiguration(out FireSettings? fire))
+    ignitionTemperature = fire.IgnitionTemperature;
+```
 
-Resolve shared data before starting worker tasks: during a tick, `GetSolverData` throws on any thread other than the
-tick's own. Numos serializes lookup and creation; solvers synchronize later access to mutable values. A
-`ConcurrentQueue<T>` works for parallel producers, but consumers still need a stable ordering when processing order
-affects simulation results.
+The by-type lookup throws if two entries share a type; a type registered under several keys is read with
+`TryGetSolverConfiguration("my-mod/fire", out FireSettings? fire)` instead. Both search the captured snapshots, so ask
+for the type `CreateSnapshot` returns. Keys are unique, nonempty strings, and snapshots order them ordinally so
+registration order doesn't change hashes. Put every execution-relevant field in the hash, and don't use
+process-randomized hashes such as `HashCode` or `string.GetHashCode()`.
 
-With the default `SolverDataLifetime.UntilRestore`, values survive ticks, configuration changes, solver removal, and
-pipeline resets. Checkpoint restoration and simulation disposal discard them without disposing the values. Reacquire on
-each callback and keep ownership of disposable services in host code. These values are transient: snapshots,
-checkpoints, recordings, and state hashes exclude them, so factories must rebuild replay-relevant data from
-authoritative inputs. Evolving per-chunk state that must roll back belongs in a `ChunkField<T>` registered with
-`rollback: true` (see
-[per-chunk solver state](atmospherics_technical_documentation.md#123-per-chunk-solver-state-with-chunkfieldt)).
-
-## Class solvers and world services
+## Class solvers
 
 A stage can be a class instead of a lambda. Implement `IAtmosWorldSolver` and pass an instance to the same `Register`,
 `RegisterBefore`, `RegisterAfter`, and `RegisterNeighborSolver*` calls. Pipeline order and checkpoint metadata are the
-same as for a delegate with the same name, so swapping one form for the other keeps old checkpoints loading.
+same as for a delegate with the same name, so switching forms keeps old checkpoints loading.
 
-The instance is yours and its fields are not checkpointed. Keep only scratch state there and clear it in `OnRestored`,
-which Numos calls after every checkpoint restore and before the first replayed tick. It can run more than once for a
-single host call, so make it idempotent:
+The instance is yours. Numos never checkpoints, clones, or disposes it, so its fields should only hold scratch state
+and references. `OnRestored` is where scratch state gets thrown away: Numos calls it on every class solver, enabled or
+not, after a checkpoint restore and before the first replayed tick. One host call can trigger it more than once (a
+failed `ReplayTo` restores twice), so make it idempotent.
 
 ```csharp
 sealed class FireSolver : IAtmosWorldSolver
@@ -345,7 +334,10 @@ sealed class FireSolver : IAtmosWorldSolver
     public void Solve(AtmosWorldSolverContext context)
     {
         _ignitedThisTick.Clear();
-        // ...
+        if (!context.Config.TryGetSolverConfiguration(out FireSettings? settings))
+            return;
+
+        // ...collect voxels hotter than settings.IgnitionTemperature...
     }
 
     public void OnRestored() => _ignitedThisTick.Clear();
@@ -354,25 +346,30 @@ sealed class FireSolver : IAtmosWorldSolver
 world.Solvers.RegisterAfter(AtmosBuiltInSolvers.Thermodynamics, "my-mod/fire", new FireSolver());
 ```
 
-`world.Services` holds host objects that solvers look up by type. The key is the exact type argument, so register
-through the interface you want solvers to ask for:
+## World services
+
+`world.Services` holds host objects that solvers look up by type: a game clock, an event bus, a shared lookup table.
+The key is the exact type argument, so register through the interface solvers will ask for:
 
 ```csharp
 world.Services.Register<IFireEvents>(fireBus);
 
 // Inside Solve, on any thread:
-context.World.Services.Get<IFireEvents>().Ignited(cell);
+context.World.Services.Get<IFireEvents>().Publish(context.TickCount);
 ```
 
-Lookups never lock, so they are fine from `Parallel.For` workers. Registering and unregistering are rejected during a
-tick and while recording or replaying. Services survive restores, and the world never disposes them.
+Lookups never lock, so they're fine from `Parallel.For` workers. Registering and unregistering are rejected during a
+tick and while recording or replaying. Services survive checkpoint restores, and the world never disposes them.
 
-A class solver can also have its services and the other solvers it talks to handed to it. Make the class `partial` and
-declare each dependency as a `[SolverDependency]` partial property; the `Numos.API` generator implements
-`IAtmosSolverDependencies` and assigns them before the solver's first tick, and again after the pipeline or the
-services change. A lookup takes the service registered under exactly that type, otherwise another registered solver of
-that type. A missing required dependency makes `Tick` throw before anything changes; call
-`world.Solvers.ResolveDependencies()` after setup to find out earlier.
+Services sit outside replay, the same as solver instances. A service whose answers feed into simulation state is
+covered by the promise a custom solver name makes: the host that replays must supply one that behaves identically. An
+output-only service like an event bus is fine, as long as the solver skips host effects while
+`simulation.IsReplaying` is set.
+
+## Declaring dependencies with `[SolverDependency]`
+
+Rather than looking services up each tick, a class solver can have them handed to it, along with any other class
+solvers it talks to. Make the class `partial` and declare each dependency as a get-only partial property:
 
 ```csharp
 sealed partial class FireSolver : IAtmosWorldSolver
@@ -383,14 +380,141 @@ sealed partial class FireSolver : IAtmosWorldSolver
     [SolverDependency(Optional = true)]
     private partial ExposureSolver? Exposure { get; }
 
-    public void Solve(AtmosWorldSolverContext context) => Events.Publish(context.TickCount);
+    public void Solve(AtmosWorldSolverContext context)
+    {
+        Events.Publish(context.TickCount);
+        // Exposure is null when no ExposureSolver is registered.
+    }
 }
 ```
 
+The `Numos.API` generator implements `IAtmosSolverDependencies` for the class. A dependency of type `T` resolves to:
+
+1. the service registered under exactly `T`, if there is one;
+2. otherwise, another registered class solver that is a `T`. Disabled solvers are still candidates, so a resolved
+   producer isn't proof it ran this tick. A solver never resolves to itself, and one instance registered under two
+   names counts once. Two different instances are ambiguous and throw; register a service under `T` to pick one.
+
+Numos injects at the start of a tick, before anything changes: the first time a solver runs, and again after any
+`Register*`, `Unregister`, `ResetToDefaults`, or service change. A solver that is disabled at that point is injected
+when it's next enabled and ticked. In practice:
+
+- Dependency properties are null until the first injection, so don't read them from the constructor.
+- Re-injection can turn an optional dependency null when its service or solver is removed. Check it every tick.
+- A missing or ambiguous required dependency makes `Tick` throw with the world untouched, and the next tick retries.
+  Call `world.Solvers.ResolveDependencies()` after setup to get that error straight away.
+
+The [technical documentation](atmospherics_technical_documentation.md#declaring-solver-dependencies-with-solverdependency)
+covers the generated code, inheritance, and the `NUMOSDEP` diagnostics.
+
+## Sharing data between solvers
+
+Two solvers that exchange data every tick can do it in two ways: the consumer depends on the producer directly, or
+both sides share a `SolverDataKey<T>`. Neither one orders stages. Register producers before consumers, and decide what
+the consumer does when its producer is disabled.
+
+### Depend on the producer
+
+When the two solvers are one feature split into stages, the consumer can declare the producer as a dependency and
+call its public members:
+
+```csharp
+sealed class ExposureSolver : IAtmosWorldSolver
+{
+    public void Solve(AtmosWorldSolverContext context)
+    {
+        // ...accumulate FireChunkData.Exposure...
+    }
+
+    public bool IsExposed(AtmosSolverChunk chunk, int voxel) => chunk.Exposure[voxel] > 1f;
+}
+
+sealed partial class FireSolver : IAtmosWorldSolver
+{
+    [SolverDependency]
+    private partial ExposureSolver Exposure { get; }
+
+    public void Solve(AtmosWorldSolverContext context)
+    {
+        foreach (AtmosSimulation simulation in context.Simulations)
+        foreach (AtmosSolverChunk chunk in context.Chunks(simulation))
+        {
+            for (int voxel = 0; voxel < chunk.VoxelCount; voxel++)
+            {
+                if (Exposure.IsExposed(chunk, voxel))
+                    Ignite(chunk, voxel);
+            }
+        }
+    }
+}
+
+world.Solvers.RegisterAfter(AtmosBuiltInSolvers.Thermodynamics, "my-mod/exposure", new ExposureSolver());
+world.Solvers.RegisterAfter("my-mod/exposure", "my-mod/fire", new FireSolver());
+```
+
+This gives a typed API, and a missing producer fails on the first tick (or in `ResolveDependencies`) instead of the
+consumer silently reading nothing.
+
+### Share a `SolverDataKey`
+
+When the two sides shouldn't know about each other, such as two mods, a delegate stage, or several producers feeding
+one consumer, share a key instead. A `SolverDataKey<T>` carries its factory, and each simulation builds and caches its
+own value on first read:
+
+```csharp
+public static class FireData
+{
+    public static readonly SolverDataKey<Queue<AtmosCellRef>> Ignitions =
+        new("my-mod/fire/ignitions", static _ => new Queue<AtmosCellRef>());
+}
+
+// my-mod/fire, a FireSolver method:
+public void Solve(AtmosWorldSolverContext context)
+{
+    foreach (AtmosSimulation simulation in context.Simulations)
+    {
+        Queue<AtmosCellRef> ignitions = simulation.GetSolverData(FireData.Ignitions);
+        ignitions.Clear();
+        // ...enqueue the cells that caught fire this tick...
+    }
+}
+
+// Another mod, registered after my-mod/fire:
+world.Solvers.RegisterAfter("my-mod/fire", "other-mod/smoke", context =>
+{
+    foreach (AtmosSimulation simulation in context.Simulations)
+    {
+        Queue<AtmosCellRef> ignitions = simulation.GetSolverData(FireData.Ignitions);
+        while (ignitions.TryDequeue(out AtmosCellRef cell))
+            EmitSmoke(simulation, cell);
+    }
+});
+```
+
+The built-in stages share data the same way: advection and thermodynamics publish per-chunk boundary event batches
+that the boundary stages consume.
+
+Keys have a few rules:
+
+- The key instance is the identity. Two keys with the same name are different slots, so unrelated mods can't collide.
+  Each key holds its slot for the life of the process, so declare keys as `static readonly` fields, never per tick or
+  per simulation.
+- During a tick, `GetSolverData` only works on the tick's own thread. Resolve values before starting worker tasks and
+  synchronize access to mutable values yourself. A `ConcurrentQueue<T>` works for parallel producers, but consumers
+  still need a stable order when processing order affects results.
+- Factories run under the simulation's lock and must not mutate the simulation. They can read other keys. A cycle
+  throws, and a factory that throws or returns null caches nothing, so the next read tries again.
+- Values are transient. Snapshots, checkpoints, recordings, and state hashes leave them out, and a restore drops them
+  without disposing them, so reacquire them on each callback and rebuild anything replay-relevant from authoritative
+  inputs. State that has to roll back belongs in a `Rollback = true` [chunk data field](#chunk-data-fields).
+
+With the default `SolverDataLifetime.UntilRestore`, values survive ticks, configuration changes, solver removal, and
+pipeline resets.
+
 ## Caching data derived from the configuration
 
-Keys created with `SolverDataLifetime.UntilConfigChange` are also dropped whenever the applied configuration changes,
-which makes them the place for per-gas tables and other data derived from the gas registry or solver settings:
+Keys created with `SolverDataLifetime.UntilConfigChange` are also dropped whenever the applied configuration changes.
+That makes them the place for per-gas tables and anything else derived from the gas registry or solver settings:
 
 ```csharp
 static readonly SolverDataKey<float[]> CoolingFactors = new(
@@ -405,39 +529,14 @@ static readonly SolverDataKey<float[]> CoolingFactors = new(
         return factors;
     },
     SolverDataLifetime.UntilConfigChange);
+
+float[] factors = simulation.GetSolverData(CoolingFactors);
 ```
 
-Any configuration change drops the value, even when only reaction definitions change, so cached gas or reaction indices
-can't point at the wrong entry after a registry edit. The built-in reaction solver caches its per-gas coefficients this
-way. A configuration applied from a solver callback takes effect at the next tick, so inside a callback the factory sees
-the tick-start configuration through `simulation.Config`. Restore drops these values too.
-
-## Configuring solvers without extending AtmosConfig
-
-Solver settings belong in `AtmosConfig.SolverConfigurations`. The simulation captures them through
-`IAtmosSolverConfiguration`, so a custom solver can define its own settings without adding fields to Numos. Keys are
-unique, nonempty strings; snapshots order them ordinally so registration order does not change hashes.
-
-Custom configuration implementations must return immutable, detached snapshots, compare all authoritative settings in
-`SemanticallyEquals`, and provide a deterministic `ComputeStateHash`. Immutable value objects can return themselves from
-`CreateSnapshot`; editable builders must copy their values and collections. For example:
-
-```csharp
-public sealed record FireSettings(int Strength) : IAtmosSolverConfiguration
-{
-    public string Key => "my-game/fire";
-    public IAtmosSolverConfiguration CreateSnapshot(IGasRegistry gases) => this;
-    public bool SemanticallyEquals(IAtmosSolverConfiguration other) => Equals(other);
-    public ulong ComputeStateHash() => unchecked((ulong)Strength);
-}
-```
-
-Register it in `config.SolverConfigurations` and read its applied snapshot in the custom solver with
-`simulation.Config.TryGetSolverConfiguration(out FireSettings? fire)`, or by key with
-`TryGetSolverConfiguration("my-game/fire", out FireSettings? fire)` when the type can appear more than once. The lookup
-sees the captured snapshots, so ask for the type `CreateSnapshot` returns. Include every execution-relevant field in the
-hash; do not use process-randomized hashes such as `HashCode` or `string.GetHashCode()`. Configuration changes are
-recorded and restored with checkpoints. Data cached under `UntilConfigChange` keys remains transient.
+Any configuration change drops the value, even one that only touches reaction definitions, so a cached gas index can't
+point at the wrong entry after a registry edit. The built-in reaction solver caches its per-gas tables this way. A
+configuration applied from a solver callback takes effect at the next tick, so inside a tick the factory always sees
+the tick-start configuration through `simulation.Config`.
 
 ## Reading Simulation State
 The facade returns detached snapshots for presentation, networking, and gameplay decisions. A snapshot is safe to retain after the call, but it is not live: request another snapshot when a consumer needs newer state.

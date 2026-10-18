@@ -881,49 +881,103 @@ Host stages are registered and run exactly like the built-in ones; §4.2 shows t
 
 ### 12.1 Sharing data between stages
 
-Custom stages share typed dependencies through `simulation.GetSolverData(key)`, where `key` is a `static readonly`
-`SolverDataKey<T>` that carries its factory. Identity is the key instance. Values survive ticks and pipeline edits;
-`SolverDataLifetime.UntilConfigChange` keys are also rebuilt after a configuration change. Restore discards these
-transient values, so stages must reacquire them on each callback. Per-chunk state that has to roll back belongs in a
-`ChunkField<T>` instead (§12.3).
+Custom stages have three ways to reach things outside their own chunk fields:
 
-Shared data does not schedule stages; producers and consumers still need explicit pipeline ordering. See
-[sharing dependencies](using.md#sharing-dependencies-between-solvers) for examples, ownership, and threading
-requirements.
+- A `SolverDataKey<T>` names a transient per-simulation value, read with `simulation.GetSolverData(key)`. The key
+  instance is the identity and carries the factory. Values survive ticks and pipeline edits, keys with
+  `SolverDataLifetime.UntilConfigChange` are also rebuilt after a configuration change, and restore drops both.
+  Per-chunk state that has to roll back belongs in a `ChunkField<T>` instead (§12.3).
+- `AtmosWorld.Services` holds host objects keyed by exact type. Lookups are lock-free, and services are never
+  checkpointed or disposed by the world.
+- A class solver (`IAtmosWorldSolver`) can declare services and other class solvers as `[SolverDependency]`
+  properties and have them injected, as described below.
+
+None of these schedule stages; producers and consumers still need explicit pipeline ordering.
+[Using Numos](using.md#sharing-data-between-solvers) walks through when to depend on a producer solver and when to
+share a key, with the ownership and threading rules for each.
+
+#### Declaring solver dependencies with `[SolverDependency]`
+
+A class solver can declare the world services and other class solvers it needs as instance partial properties. The
+`Numos.API` source generator, the same one behind `[ChunkData]` (§12.3), fills them in:
+
+```csharp
+public sealed partial class FireSolver : IAtmosWorldSolver
+{
+    [SolverDependency]
+    private partial IFireEvents Events { get; }
+
+    [SolverDependency(Optional = true)]
+    private partial ExposureSolver? Exposure { get; }
+
+    public void Solve(AtmosWorldSolverContext context) => Events.Publish(context.TickCount);
+}
+```
+
+For each class the generator emits a private `__numosDependency_{Name}` field per property, a getter that returns it
+with no null check, and an `InjectSolverDependencies(AtmosSolverDependencyResolver)` method that assigns them through
+`resolver.Resolve<T>("Name")` or `resolver.ResolveOptional<T>()`. A class with no injecting base implements
+`IAtmosSolverDependencies` explicitly and introduces the method as `protected virtual` (`private` when sealed). A class
+deriving from one, whether the base is in the same project or a referenced assembly, emits `protected override` and
+calls `base.InjectSolverDependencies` first, so base and derived dependencies are both assigned. Generic and nested
+classes work as long as every containing type is `partial`.
+
+Injection is lazy. Every `Register*`, `Unregister`, and `ResetToDefaults` bumps a pipeline epoch, every service change
+bumps the services version, and each registration remembers the pair it was last injected against. At the start of a
+tick, before pending configuration is applied or any stage runs, Numos injects the enabled registrations that are
+stale, so a missing dependency throws with the world untouched. A registration is stamped only after its injection
+returns, which is why the next tick retries a failure. The resolution order and what it means for solver code are in
+[Using Numos](using.md#declaring-dependencies-with-solverdependency).
+
+| ID | Severity | Raised when |
+| --- | --- | --- |
+| `NUMOSDEP001` | Error | The class, or a type it's nested in, isn't `partial`. |
+| `NUMOSDEP002` | Error | The property is declared in a struct, record struct, or interface. |
+| `NUMOSDEP003` | Error | The property isn't a bodiless `partial` declaration with only a `get` accessor (no `set`/`init`, not an indexer or `ref` return). |
+| `NUMOSDEP004` | Error | The property is `static`. |
+| `NUMOSDEP005` | Error | The property type isn't a reference type. |
+| `NUMOSDEP006` | Warning | `Optional` and the `?` annotation disagree. Not reported when nullable annotations are disabled. |
+| `NUMOSDEP007` | Warning | A non-abstract class doesn't implement `IAtmosWorldSolver`, so nothing will inject it. |
+| `NUMOSDEP008` | Error | A base class implements `IAtmosSolverDependencies` with no overridable `InjectSolverDependencies`, so generated injection would hide the base's. |
+| `NUMOSDEP009` | Error | The class already declares `InjectSolverDependencies` or implements `IAtmosSolverDependencies.InjectDependencies` itself. |
 
 ### 12.2 Solver-specific configuration
 
-Solver-specific settings belong on a stateful solver object rather than in `AtmosConfig`. Register its method as the
-callback:
+Solver settings go in `AtmosConfig.SolverConfigurations`, not on the solver object. Configuration changes are recorded
+and restored with checkpoints. A property the host sets on a solver instance is neither, so replay re-runs the
+recorded ticks with whatever value the instance holds at replay time, and the result diverges. A class solver reads
+its settings from the tick context instead:
 
 ```csharp
-public sealed class ReactionSolverConfig
+public sealed record CombustionSettings(float Rate) : IAtmosSolverConfiguration
 {
-    public float Rate { get; set; } = 0.25f;
+    public string Key => "game/combustion";
+    public IAtmosSolverConfiguration CreateSnapshot(IGasRegistry gases) => this;
+    public bool SemanticallyEquals(IAtmosSolverConfiguration other) => Equals(other);
+    public ulong ComputeStateHash() => BitConverter.SingleToUInt32Bits(Rate);
 }
 
-public sealed class ReactionSolver
+public sealed class CombustionSolver : IAtmosWorldSolver
 {
-    public ReactionSolverConfig Config { get; } = new();
-
     public void Solve(AtmosWorldSolverContext context)
     {
-        AtmosSimulation simulation = context.Simulations[0];
-        // Read snapshots and apply validated mutations through simulation.
+        if (!context.Config.TryGetSolverConfiguration(out CombustionSettings? settings))
+            return;
+
+        // Read snapshots and apply validated mutations, scaled by settings.Rate.
     }
 }
 
-var reactionSolver = new ReactionSolver();
+world.Solvers.RegisterAfter(AtmosBuiltInSolvers.Advection, "game/combustion", new CombustionSolver());
 
-simulation.World.Solvers.RegisterAfter(
-    AtmosBuiltInSolvers.Advection,
-    "game-reactions",
-    reactionSolver.Solve);
-
-reactionSolver.Config.Rate = 0.5f;
+var config = new AtmosConfig(world.Config);
+config.SolverConfigurations.Add(new CombustionSettings(Rate: 0.5f));
+world.SetAtmosConfig(config); // recorded, so replay changes the rate at the same tick
 ```
 
-The registered method retains the solver instance, so its typed configuration stays editable after registration.
+Anything derived from the settings or the gas registry can be cached under a `SolverDataLifetime.UntilConfigChange`
+key, which Numos drops whenever the configuration changes.
+
 The pipeline does not own or dispose custom solvers; callers remain responsible for an `IDisposable` solver's lifetime.
 
 ### 12.3 Per-chunk solver state with `ChunkField<T>`
@@ -1115,50 +1169,6 @@ The generator ships inside the `Numos.API` package under `analyzers/dotnet/cs`, 
 `Numos.Serialization`, and `Numos.Viewer` pass it on. Projects in this repository that reference `src/Numos.API` with a
 `ProjectReference` don't get it that way; they reference `src/Numos.API.Generators` with `OutputItemType="Analyzer"`
 directly, as `tests/Numos.API.Tests` does.
-
-#### Declaring solver dependencies with `[SolverDependency]`
-
-A class solver (`IAtmosWorldSolver`) can declare the world services and other solvers it needs as instance partial
-properties. The same generator fills them in:
-
-```csharp
-public sealed partial class FireSolver : IAtmosWorldSolver
-{
-    [SolverDependency]
-    private partial IFireEvents Events { get; }
-
-    [SolverDependency(Optional = true)]
-    private partial ExposureSolver? Exposure { get; }
-
-    public void Solve(AtmosWorldSolverContext context) => Events.Publish(context.TickCount);
-}
-```
-
-For each class the generator emits a private `__numosDependency_{Name}` field per property, a getter that returns it
-with no null check, and an `InjectSolverDependencies(AtmosSolverDependencyResolver)` method that assigns them through
-`resolver.Resolve<T>("Name")` or `resolver.ResolveOptional<T>()`. A class with no injecting base implements
-`IAtmosSolverDependencies` explicitly and introduces the method as `protected virtual` (`private` when sealed). A class
-deriving from one, whether the base is in the same project or a referenced assembly, emits `protected override` and
-calls `base.InjectSolverDependencies` first, so base and derived dependencies are both assigned. Generic and nested
-classes work as long as every containing type is `partial`.
-
-A lookup for `T` takes the service registered under exactly `T` first, then any other registered class solver that is
-a `T`. One instance registered under two names counts once; two different instances throw. Numos injects stale
-solvers at the start of `Tick`, before any state changes, after any `Register*`, `Unregister`, `ResetToDefaults`, or
-service change. A missing or ambiguous dependency throws `InvalidOperationException` with the world untouched, and the
-next tick retries. `world.Solvers.ResolveDependencies()` runs the same pass on demand.
-
-| ID | Severity | Raised when |
-| --- | --- | --- |
-| `NUMOSDEP001` | Error | The class, or a type it's nested in, isn't `partial`. |
-| `NUMOSDEP002` | Error | The property is declared in a struct, record struct, or interface. |
-| `NUMOSDEP003` | Error | The property isn't a bodiless `partial` declaration with only a `get` accessor (no `set`/`init`, not an indexer or `ref` return). |
-| `NUMOSDEP004` | Error | The property is `static`. |
-| `NUMOSDEP005` | Error | The property type isn't a reference type. |
-| `NUMOSDEP006` | Warning | `Optional` and the `?` annotation disagree. Not reported when nullable annotations are disabled. |
-| `NUMOSDEP007` | Warning | A non-abstract class doesn't implement `IAtmosWorldSolver`, so nothing will inject it. |
-| `NUMOSDEP008` | Error | A base class implements `IAtmosSolverDependencies` with no overridable `InjectSolverDependencies`, so generated injection would hide the base's. |
-| `NUMOSDEP009` | Error | The class already declares `InjectSolverDependencies` or implements `IAtmosSolverDependencies.InjectDependencies` itself. |
 
 ### 12.4 Live storage through Numos.API.Dangerous
 
