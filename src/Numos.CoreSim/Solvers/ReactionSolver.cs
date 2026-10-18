@@ -1099,6 +1099,12 @@ internal class ReactionSolver : IAtmosSolverStage
 
             chunk.Temperature[voxelIndex] = temp;
             newTemps[activeIndex] = temp;
+            ignitionPercents[voxelIndex] = ignitionPercent;
+            ignitedVolumeTemps[voxelIndex] = ignitedVolumeTemp;
+
+            // Benign race: every writer stores true.
+            if (ignitionPercent >= 1f)
+                solver._anyFullyIgnited = true;
         }
     }
 }

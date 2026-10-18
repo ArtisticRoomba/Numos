@@ -10,7 +10,7 @@ public class IgnitionTests
     [Test]
     public void GrowIgnition_ZeroAdvance_KeepsFraction()
     {
-        Scalar result = ReactionSolver.GrowIgnition(0.25f, 0f);
+        float result = ReactionSolver.GrowIgnition(0.25f, 0f);
 
         Assert.That(result, Is.EqualTo(0.25f).Within(Tolerance));
     }
@@ -18,7 +18,7 @@ public class IgnitionTests
     [Test]
     public void GrowIgnition_SmallKernel_GrowsSlowerThanPlanarFront()
     {
-        Scalar result = ReactionSolver.GrowIgnition(0.001f, 0.05f);
+        float result = ReactionSolver.GrowIgnition(0.001f, 0.05f);
 
         Assert.That(result, Is.GreaterThan(0.001f));
         Assert.That(result, Is.LessThan(0.001f + 0.05f));
@@ -27,7 +27,7 @@ public class IgnitionTests
     [Test]
     public void GrowIgnition_LargeFlame_GrowsLinearly()
     {
-        Scalar result = ReactionSolver.GrowIgnition(0.5f, 0.1f);
+        float result = ReactionSolver.GrowIgnition(0.5f, 0.1f);
 
         Assert.That(result, Is.EqualTo(0.6f).Within(Tolerance));
     }
@@ -35,7 +35,7 @@ public class IgnitionTests
     [Test]
     public void GrowIgnition_NeverExceedsWholeVoxel()
     {
-        Scalar result = ReactionSolver.GrowIgnition(0.9f, 5f);
+        float result = ReactionSolver.GrowIgnition(0.9f, 5f);
 
         Assert.That(result, Is.EqualTo(1f));
     }
@@ -43,8 +43,8 @@ public class IgnitionTests
     [Test]
     public void GrowIgnition_NegativeAdvance_RecedesAndStopsAtZero()
     {
-        Scalar receded = ReactionSolver.GrowIgnition(0.5f, -0.1f);
-        Scalar gone = ReactionSolver.GrowIgnition(0.5f, -5f);
+        float receded = ReactionSolver.GrowIgnition(0.5f, -0.1f);
+        float gone = ReactionSolver.GrowIgnition(0.5f, -5f);
 
         Assert.That(receded, Is.LessThan(0.5f));
         Assert.That(receded, Is.GreaterThan(0f));
@@ -54,8 +54,8 @@ public class IgnitionTests
     [Test]
     public void ApplyIgnitionSource_StartsFlameInSourceVolume()
     {
-        Scalar ignitionPercent = 0f;
-        Kelvin ignitedVolumeTemp = 0f;
+        float ignitionPercent = 0f;
+        float ignitedVolumeTemp = 0f;
 
         ReactionSolver.ApplyIgnitionSource(ref ignitionPercent, ref ignitedVolumeTemp, 1500f, 0.002f, 1f);
 
@@ -66,8 +66,8 @@ public class IgnitionTests
     [Test]
     public void ApplyIgnitionSource_ReassertedSource_DoesNotInflateFlame()
     {
-        Scalar ignitionPercent = 0f;
-        Kelvin ignitedVolumeTemp = 0f;
+        float ignitionPercent = 0f;
+        float ignitedVolumeTemp = 0f;
         ReactionSolver.ApplyIgnitionSource(ref ignitionPercent, ref ignitedVolumeTemp, 1500f, 0.002f, 1f);
 
         ReactionSolver.ApplyIgnitionSource(ref ignitionPercent, ref ignitedVolumeTemp, 1500f, 0.002f, 1f);
@@ -78,8 +78,8 @@ public class IgnitionTests
     [Test]
     public void ApplyIgnitionSource_SmallerThanExistingFlame_ChangesNothing()
     {
-        Scalar ignitionPercent = 0.4f;
-        Kelvin ignitedVolumeTemp = 900f;
+        float ignitionPercent = 0.4f;
+        float ignitedVolumeTemp = 900f;
 
         ReactionSolver.ApplyIgnitionSource(ref ignitionPercent, ref ignitedVolumeTemp, 3000f, 0.01f, 1f);
 
@@ -90,8 +90,8 @@ public class IgnitionTests
     [Test]
     public void ApplyIgnitionSource_LargerThanExistingFlame_MixesTemperatureByVolume()
     {
-        Scalar ignitionPercent = 0.1f;
-        Kelvin ignitedVolumeTemp = 1000f;
+        float ignitionPercent = 0.1f;
+        float ignitedVolumeTemp = 1000f;
 
         ReactionSolver.ApplyIgnitionSource(ref ignitionPercent, ref ignitedVolumeTemp, 2000f, 0.2f, 1f);
 
@@ -107,8 +107,8 @@ public class IgnitionTests
     [TestCase(float.NaN, 0.002f, 1f)]
     public void ApplyIgnitionSource_InvalidInput_IsIgnored(float temperature, float volume, float voxelVolume)
     {
-        Scalar ignitionPercent = 0f;
-        Kelvin ignitedVolumeTemp = 0f;
+        float ignitionPercent = 0f;
+        float ignitedVolumeTemp = 0f;
 
         ReactionSolver.ApplyIgnitionSource(ref ignitionPercent, ref ignitedVolumeTemp, temperature, volume, voxelVolume);
 
@@ -121,7 +121,7 @@ public class IgnitionTests
     {
         ReactionSolver solver = new();
 
-        MeterPerSecond result = solver.ComputeFlameSpeed(0f);
+        float result = solver.ComputeFlameSpeed(0f);
 
         Assert.That(result, Is.EqualTo(0f));
     }
@@ -131,8 +131,8 @@ public class IgnitionTests
     {
         ReactionSolver solver = new();
 
-        MeterPerSecond slow = solver.ComputeFlameSpeed(100f);
-        MeterPerSecond fast = solver.ComputeFlameSpeed(400f);
+        float slow = solver.ComputeFlameSpeed(100f);
+        float fast = solver.ComputeFlameSpeed(400f);
 
         Assert.That(slow, Is.GreaterThan(0f));
         Assert.That(fast, Is.EqualTo(slow * 2f).Within(Tolerance));
@@ -143,7 +143,7 @@ public class IgnitionTests
     {
         ReactionSolver solver = new() { ThermalDiffusivity = 1e-4f, FlameSpeedScale = 2f };
 
-        MeterPerSecond result = solver.ComputeFlameSpeed(100f);
+        float result = solver.ComputeFlameSpeed(100f);
 
         // 2 * sqrt(1e-4 m^2/s * 100 1/s) = 0.2 m/s
         Assert.That(result, Is.EqualTo(0.2f).Within(Tolerance));
