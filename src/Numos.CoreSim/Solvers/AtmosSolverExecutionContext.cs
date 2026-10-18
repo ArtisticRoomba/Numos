@@ -11,13 +11,12 @@ internal sealed class AtmosSolverExecutionContext
 
     internal AtmosSolverExecutionContext(
         AtmosKernel world, AtmosChunk[] chunks,
-        AtmosSolverConfigSnapshot config, int tickCount, SolverDataStorage sharedData)
+        AtmosSolverConfigSnapshot config, int tickCount)
     {
         _world = world;
         Chunks = chunks;
         TickConfig = config;
         TickCount = tickCount;
-        SharedData = sharedData;
     }
 
     internal AtmosChunk[] Chunks { get; }
@@ -27,21 +26,20 @@ internal sealed class AtmosSolverExecutionContext
     internal AtmosSolverConfigSnapshot TickConfig { get; }
 
     internal int TickCount { get; }
-    internal SolverDataStorage SharedData { get; }
 
     /// <summary>
-    ///     Gets a built-in stage's shared data, creating it on first use.
+    ///     Gets a built-in stage's shared data from <see cref="AtmosSolverConfigSnapshot.SolverData" />, creating it
+    ///     on first use.
     /// </summary>
-    /// <param name="slot">
-    ///     The slot. Config-scoped slots live in <see cref="TickConfig" />, the rest in <see cref="SharedData" />.
-    /// </param>
+    /// <param name="slot">The slot.</param>
     /// <returns>The cached value.</returns>
     /// <remarks>Call this on the tick thread before dispatching workers; the storage is not thread-safe.</remarks>
     internal T GetSolverData<T>(SolverDataSlot<T> slot) where T : class
     {
-        var descriptor = slot.Descriptor;
-        return descriptor.SelectStorage(TickConfig, SharedData)
-            .GetOrCreate(descriptor, (Context: this, Slot: slot), static state => state.Slot.Factory(state.Context));
+        return TickConfig.SolverData.GetOrCreate(
+            slot.Descriptor,
+            (Context: this, Slot: slot),
+            static state => state.Slot.Factory(state.Context));
     }
 
     /// <summary>

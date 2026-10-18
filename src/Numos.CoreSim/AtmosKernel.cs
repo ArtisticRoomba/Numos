@@ -16,7 +16,6 @@ internal sealed partial class AtmosKernel : IDisposable
     // than growing forever. See AtmosChunk.DenseId's remarks on why recycling ids is safe.
     private readonly Stack<int> _freeChunkDenseIds = new();
     private readonly List<AtmosRecordedOperation> _recordedOperations = [];
-    private readonly SolverDataStorage _solverData = new();
 
     /// <summary>
     ///     High-resolution timestamp ticks spent processing boundary flow since the latest elapsed-time update.
@@ -161,7 +160,7 @@ internal sealed partial class AtmosKernel : IDisposable
                     chunk.MarkChanged();
             }
 
-            var context = new AtmosSolverExecutionContext(this, chunks, CurrentTickConfig, TickCount, _solverData);
+            var context = new AtmosSolverExecutionContext(this, chunks, CurrentTickConfig, TickCount);
             return context;
         }
         catch

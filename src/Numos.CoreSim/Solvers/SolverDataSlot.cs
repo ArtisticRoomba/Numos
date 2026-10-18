@@ -16,31 +16,15 @@ internal sealed class SolverDataDescriptor
     ///     Creates a descriptor with its own id.
     /// </summary>
     /// <param name="name">A diagnostic name, used in error messages only.</param>
-    /// <param name="resetOnConfigChange">
-    ///     <see langword="true" /> to store the value with the tick configuration, so a configuration change drops it;
-    ///     <see langword="false" /> to keep it until restore or disposal.
-    /// </param>
-    internal SolverDataDescriptor(string name, bool resetOnConfigChange)
+    internal SolverDataDescriptor(string name)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         Id = Interlocked.Increment(ref _nextId);
         Name = name;
-        ResetOnConfigChange = resetOnConfigChange;
     }
 
     internal int Id { get; }
     internal string Name { get; }
-    internal bool ResetOnConfigChange { get; }
-
-    /// <summary>
-    ///     Picks the storage this descriptor's values live in.
-    /// </summary>
-    /// <param name="tickConfig">The tick configuration that owns config-scoped values.</param>
-    /// <param name="untilRestore">The simulation's storage for everything else.</param>
-    internal SolverDataStorage SelectStorage(AtmosSolverConfigSnapshot tickConfig, SolverDataStorage untilRestore)
-    {
-        return ResetOnConfigChange ? tickConfig.ConfigScopedData : untilRestore;
-    }
 }
 
 /// <summary>
@@ -58,11 +42,10 @@ internal sealed class SolverDataSlot<T> where T : class
     /// </summary>
     /// <param name="name">A diagnostic name, used in error messages only.</param>
     /// <param name="factory">Builds the value from the current tick's inputs. Must not return null.</param>
-    /// <param name="resetOnConfigChange">See <see cref="SolverDataDescriptor" />.</param>
-    internal SolverDataSlot(string name, Func<AtmosSolverExecutionContext, T> factory, bool resetOnConfigChange = false)
+    internal SolverDataSlot(string name, Func<AtmosSolverExecutionContext, T> factory)
     {
         ArgumentNullException.ThrowIfNull(factory);
-        Descriptor = new SolverDataDescriptor(name, resetOnConfigChange);
+        Descriptor = new SolverDataDescriptor(name);
         Factory = factory;
     }
 

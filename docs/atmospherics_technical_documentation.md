@@ -887,8 +887,8 @@ Host stages are registered and run exactly like the built-in ones; §4.2 shows t
 Custom stages have three ways to reach things outside their own chunk fields:
 
 - A `SolverDataKey<T>` names a transient per-simulation value, read with `simulation.GetSolverData(key)`. The key
-  instance is the identity and carries the factory. Values survive ticks and pipeline edits, keys with
-  `SolverDataLifetime.UntilConfigChange` are also rebuilt after a configuration change, and restore drops both.
+  instance is the identity and carries the factory. Values survive ticks and pipeline edits, and are rebuilt after a
+  configuration change or a restore.
   Per-chunk state that has to roll back belongs in a `ChunkField<T>` instead (§12.3).
 - `AtmosWorld.Services` holds host objects keyed by exact type. Lookups are lock-free, and services are never
   checkpointed or disposed by the world.
@@ -978,8 +978,8 @@ config.SolverConfigurations.Add(new CombustionSettings(Rate: 0.5f));
 world.SetAtmosConfig(config); // recorded, so replay changes the rate at the same tick
 ```
 
-Anything derived from the settings or the gas registry can be cached under a `SolverDataLifetime.UntilConfigChange`
-key, which Numos drops whenever the configuration changes.
+Anything derived from the settings or the gas registry can be cached under a `SolverDataKey<T>`, which Numos drops
+whenever the configuration changes.
 
 The pipeline does not own or dispose custom solvers; callers remain responsible for an `IDisposable` solver's lifetime.
 

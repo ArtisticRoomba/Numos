@@ -14,8 +14,9 @@ public delegate void AtmosWorldSolver(AtmosWorldSolverContext context);
 /// </summary>
 /// <remarks>
 ///     <para>
-///         Register an instance through the <see cref="IAtmosWorldSolver" /> overloads on
-///         <see cref="AtmosWorldSolverPipeline" />. The instance stays caller-owned: Numos never checkpoints, clones,
+///         Register an instance with
+///         <see cref="AtmosWorldSolverPipeline.Register(string, IAtmosWorldSolver, AtmosNeighborSelection?, string?, string?)" />.
+///         The instance stays caller-owned: Numos never checkpoints, clones,
 ///         or disposes it, and the pipeline's checkpoint metadata is the same as for a delegate registered under the
 ///         same name, so switching between the two forms keeps old checkpoints compatible.
 ///     </para>
@@ -27,7 +28,7 @@ public delegate void AtmosWorldSolver(AtmosWorldSolverContext context);
 ///     </para>
 ///     <para>
 ///         Configuration is not pushed to the solver. Read <see cref="AtmosWorldSolverContext.Config" /> each tick, and
-///         cache anything derived from it under a <see cref="SolverDataLifetime.UntilConfigChange" /> key.
+///         cache anything derived from it under a <see cref="SolverDataKey{T}" />, which is rebuilt when it changes.
 ///     </para>
 /// </remarks>
 /// <example>

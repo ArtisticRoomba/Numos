@@ -7,7 +7,7 @@ public sealed class SolverDataStorageTests
 {
     private static SolverDataDescriptor Descriptor(string name)
     {
-        return new SolverDataDescriptor(name, false);
+        return new SolverDataDescriptor(name);
     }
 
     [Test]
@@ -118,20 +118,20 @@ public sealed class SolverDataStorageTests
     }
 
     [Test]
-    public void ConfigScopedData_IsClearedWhenADifferentConfigurationIsCaptured()
+    public void SolverData_IsClearedOnlyWhenADifferentConfigurationIsCaptured()
     {
         var tickConfig = new AtmosSolverConfigSnapshot();
         var first = new AtmosConfig().CreateSnapshot();
-        var slot = new SolverDataDescriptor("data", true);
+        var slot = new SolverDataDescriptor("data");
         tickConfig.Capture(first);
-        object value = tickConfig.ConfigScopedData.GetOrCreate(slot, 0, static _ => new object());
+        object value = tickConfig.SolverData.GetOrCreate(slot, 0, static _ => new object());
 
         tickConfig.Capture(first);
-        Assert.That(tickConfig.ConfigScopedData.GetOrCreate(slot, 0, static _ => new object()), Is.SameAs(value));
+        Assert.That(tickConfig.SolverData.GetOrCreate(slot, 0, static _ => new object()), Is.SameAs(value));
 
         tickConfig.Capture(new AtmosConfig().CreateSnapshot());
         Assert.That(
-            tickConfig.ConfigScopedData.GetOrCreate(slot, 0, static _ => new object()),
+            tickConfig.SolverData.GetOrCreate(slot, 0, static _ => new object()),
             Is.Not.SameAs(value));
     }
 }

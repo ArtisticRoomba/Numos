@@ -13,34 +13,28 @@ internal sealed partial class AtmosKernel
     /// <param name="factory">Builds the value on a miss.</param>
     /// <returns>The cached value.</returns>
     /// <remarks>
-    ///     Outside a tick, config-scoped data first catches the tick configuration up with the applied one, so the
-    ///     value matches what the next tick would see. During a tick the applied configuration can't change (the
-    ///     world defers it to the next tick boundary), so both agree there too.
+    ///     Outside a tick this first catches the tick configuration up with the applied one, dropping the data if the
+    ///     configuration changed, so the value matches what the next tick would see. During a tick the applied
+    ///     configuration can't change (the world defers it to the next tick boundary), so both agree there too.
     /// </remarks>
     internal T GetSolverData<T, TState>(SolverDataDescriptor descriptor, TState state, Func<TState, T> factory)
         where T : class
     {
         lock (StateGate)
         {
-            if (descriptor.ResetOnConfigChange && !_isTickExecuting)
+            if (!_isTickExecuting)
                 CurrentTickConfig.Capture(_config);
 
-            return StorageFor(descriptor).GetOrCreate(descriptor, state, factory);
+            return CurrentTickConfig.SolverData.GetOrCreate(descriptor, state, factory);
         }
     }
 
-    private SolverDataStorage StorageFor(SolverDataDescriptor descriptor)
-    {
-        return descriptor.SelectStorage(CurrentTickConfig, _solverData);
-    }
-
     /// <summary>
-    ///     Drops all solver data, config-scoped or not, without disposing it.
+    ///     Drops all solver data without disposing it.
     /// </summary>
     private void ClearSolverData()
     {
-        CurrentTickConfig.ConfigScopedData.Clear();
-        _solverData.Clear();
+        CurrentTickConfig.SolverData.Clear();
     }
 
     internal T[] GetOrCreateChunkField<T>(Int3 position, ChunkFieldDescriptor<T> field)

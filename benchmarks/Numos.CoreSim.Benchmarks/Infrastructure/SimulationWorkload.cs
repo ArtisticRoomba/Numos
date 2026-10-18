@@ -8,7 +8,6 @@ namespace Numos.CoreSim.Benchmarks.Infrastructure;
 
 internal sealed class SimulationWorkload : IDisposable
 {
-    private readonly SolverDataStorage _sharedData = new();
     private readonly DefaultAtmosSolvers _solvers;
 
     internal SimulationWorkload(int chunks, int activeVoxels, int gases, bool reactions = false, bool condensation = false)
@@ -77,8 +76,7 @@ internal sealed class SimulationWorkload : IDisposable
     public void Dispose()
     {
         _solvers.Dispose();
-        _sharedData.Clear();
-        Config.ConfigScopedData.Clear();
+        Config.SolverData.Clear();
         Kernel.Dispose();
     }
 
@@ -86,7 +84,7 @@ internal sealed class SimulationWorkload : IDisposable
     {
         Kernel.RestoreCheckpoint(Initial);
         _solvers.ClearTransientState();
-        _sharedData.Clear();
+        Config.SolverData.Clear();
         RefreshContext();
         for (int stage = 0; stage < precedingStages; stage++)
             Steps[stage].Solver(Context);
@@ -278,7 +276,7 @@ internal sealed class SimulationWorkload : IDisposable
     private void RefreshContext()
     {
         Chunks = Kernel.GetChunkPositions().Select(Kernel.GetChunkForDangerousAccess).ToArray();
-        Context = new AtmosSolverExecutionContext(Kernel, Chunks, Config, Kernel.TickCount + 1, _sharedData);
+        Context = new AtmosSolverExecutionContext(Kernel, Chunks, Config, Kernel.TickCount + 1);
     }
 }
 

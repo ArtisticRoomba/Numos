@@ -64,18 +64,17 @@ public sealed class AtmosSolverDataTests
             Assert.That(simulation.GetSolverData(sameName), Is.Not.SameAs(data));
             Assert.That(other.GetSolverData(key), Is.Not.SameAs(data));
             Assert.That(key.Name, Is.EqualTo("test/data"));
-            Assert.That(key.Lifetime, Is.EqualTo(SolverDataLifetime.UntilRestore));
         });
     }
 
     [Test]
-    public void UntilRestoreData_SurvivesConfigurationChangesSolverRemovalAndPipelineReset()
+    public void Data_SurvivesTicksSolverRemovalAndPipelineReset()
     {
         using var simulation = new AtmosSimulation(1, 1, 1);
         var key = new SolverDataKey<object>("test/data", static _ => new object());
         object data = simulation.GetSolverData(key);
         simulation.World.Solvers.Register("custom", _ => { });
-        simulation.SetAtmosConfig(new AtmosConfig { ThermalConductance = 0f });
+        simulation.Tick();
         simulation.World.Solvers.Unregister("custom");
         simulation.World.Solvers.ResetToDefaults();
         simulation.Tick();
@@ -84,11 +83,10 @@ public sealed class AtmosSolverDataTests
     }
 
     [Test]
-    public void Restore_DiscardsDataWithoutChangingHashesOrRecording(
-        [Values] SolverDataLifetime lifetime)
+    public void Restore_DiscardsDataWithoutChangingHashesOrRecording()
     {
         using var simulation = new AtmosSimulation(1, 1, 1);
-        var key = new SolverDataKey<int[]>("test/data", static _ => [42], lifetime);
+        var key = new SolverDataKey<int[]>("test/data", static _ => [42]);
         var hash = simulation.ComputeStateHash();
         simulation.StartRecording();
         int[] original = simulation.GetSolverData(key);
@@ -160,14 +158,11 @@ public sealed class AtmosSolverDataTests
             Assert.That(() => simulation.GetSolverData<object>(null!), Throws.ArgumentNullException);
             Assert.That(() => new SolverDataKey<object>(" ", static _ => new object()), Throws.ArgumentException);
             Assert.That(() => new SolverDataKey<object>("test/data", null!), Throws.ArgumentNullException);
-            Assert.That(
-                () => new SolverDataKey<object>("test/data", static _ => new object(), (SolverDataLifetime)7),
-                Throws.TypeOf<ArgumentOutOfRangeException>());
         });
     }
 
     [Test]
-    public void FailedFactories_ReleaseTheirSlotsForRetry([Values] SolverDataLifetime lifetime)
+    public void FailedFactories_ReleaseTheirSlotsForRetry()
     {
         using var simulation = new AtmosSimulation(1, 1, 1);
         int attempt = 0;
@@ -180,8 +175,7 @@ public sealed class AtmosSolverDataTests
                 2 => null!,
                 3 => sim.GetSolverData(key!),
                 _ => "value"
-            },
-            lifetime);
+            });
 
         Assert.That(() => simulation.GetSolverData(key), Throws.TypeOf<FormatException>());
         Assert.That(
@@ -212,7 +206,7 @@ public sealed class AtmosSolverDataTests
     }
 
     [Test]
-    public void ConcurrentRequests_CreateOneSharedInstance([Values] SolverDataLifetime lifetime)
+    public void ConcurrentRequests_CreateOneSharedInstance()
     {
         using var simulation = new AtmosSimulation(1, 1, 1);
         object[] values = new object[32];
@@ -223,8 +217,7 @@ public sealed class AtmosSolverDataTests
             {
                 Interlocked.Increment(ref creations);
                 return new object();
-            },
-            lifetime);
+            });
 
         Parallel.For(0, values.Length, index => values[index] = simulation.GetSolverData(key));
 
@@ -277,7 +270,7 @@ public sealed class AtmosSolverDataTests
     }
 
     [Test]
-    public void UntilConfigChangeData_IsSharedAcrossChunksAndTicks()
+    public void Data_IsSharedAcrossChunksAndTicks()
     {
         using var simulation = new AtmosSimulation(CreateGasConfig(), 1, 1, 1);
         simulation.CreateAndRegisterChunk(default);
@@ -289,8 +282,7 @@ public sealed class AtmosSolverDataTests
             {
                 creations++;
                 return sim.Config.GasRegistry.Select(gas => gas.MolarHeatCapacityAtConstantVolume).ToArray();
-            },
-            SolverDataLifetime.UntilConfigChange);
+            });
 
         float[]? original = null;
         int reads = 0;
@@ -316,14 +308,13 @@ public sealed class AtmosSolverDataTests
     }
 
     [Test]
-    public void UntilConfigChangeData_IsRebuiltOnlyWhenTheConfigurationChanges()
+    public void Data_IsRebuiltOnlyWhenTheConfigurationChanges()
     {
         var config = CreateGasConfig();
         using var simulation = new AtmosSimulation(config, 1, 1, 1);
         var key = new SolverDataKey<string[]>(
             "test/gas-names",
-            static sim => sim.Config.GasRegistry.Select(gas => gas.Name).ToArray(),
-            SolverDataLifetime.UntilConfigChange);
+            static sim => sim.Config.GasRegistry.Select(gas => gas.Name).ToArray());
 
         string[] first = simulation.GetSolverData(key);
         Assert.That(simulation.SetAtmosConfig(config), Is.False);
@@ -358,20 +349,18 @@ public sealed class AtmosSolverDataTests
     }
 
     [Test]
-    public void UntilConfigChangeData_UsesTheTickStartConfigurationInsideCallbacks()
+    public void Data_UsesTheTickStartConfigurationInsideCallbacks()
     {
         var config = CreateGasConfig();
         using var simulation = new AtmosSimulation(config, 1, 1, 1);
         simulation.CreateAndRegisterChunk(default);
         var cached = new SolverDataKey<string[]>(
             "test/cached-names",
-            static sim => sim.Config.GasRegistry.Select(gas => gas.Name).ToArray(),
-            SolverDataLifetime.UntilConfigChange);
+            static sim => sim.Config.GasRegistry.Select(gas => gas.Name).ToArray());
 
         var lazy = new SolverDataKey<string[]>(
             "test/lazy-names",
-            static sim => sim.Config.GasRegistry.Select(gas => gas.Name).ToArray(),
-            SolverDataLifetime.UntilConfigChange);
+            static sim => sim.Config.GasRegistry.Select(gas => gas.Name).ToArray());
 
         string[] original = simulation.GetSolverData(cached);
         config.GasRegistry.Replace(0, new GasProperties { Name = "Replacement" });
@@ -403,7 +392,7 @@ public sealed class AtmosSolverDataTests
     }
 
     [Test]
-    public void UntilConfigChangeData_RebuildsDuringReplayAndReproducesSolverEffects()
+    public void Data_RebuildsDuringReplayAndReproducesSolverEffects()
     {
         using var simulation = new AtmosSimulation(CreateGasConfig(), 1, 1, 1);
         var chunk = simulation.CreateAndRegisterChunk(default);
@@ -414,8 +403,7 @@ public sealed class AtmosSolverDataTests
             {
                 creations++;
                 return [sim.Config.GasRegistry[0].MolarHeatCapacityAtConstantVolume];
-            },
-            SolverDataLifetime.UntilConfigChange);
+            });
 
         simulation.World.Solvers.Register(
             "inject",

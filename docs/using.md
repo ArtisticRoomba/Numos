@@ -508,17 +508,17 @@ Keys have a few rules:
   still need a stable order when processing order affects results.
 - Factories run under the simulation's lock and must not mutate the simulation. They can read other keys. A cycle
   throws, and a factory that throws or returns null caches nothing, so the next read tries again.
-- Values are transient. Snapshots, checkpoints, recordings, and state hashes leave them out, and a restore drops them
-  without disposing them, so reacquire them on each callback and rebuild anything replay-relevant from authoritative
-  inputs. State that has to roll back belongs in a `Rollback = true` [chunk data field](#chunk-data-fields).
+- Values are transient. Snapshots, checkpoints, recordings, and state hashes leave them out, and a restore or a
+  configuration change drops them without disposing them, so reacquire them on each callback and rebuild anything
+  replay-relevant from authoritative inputs. State that has to roll back belongs in a `Rollback = true`
+  [chunk data field](#chunk-data-fields).
 
-With the default `SolverDataLifetime.UntilRestore`, values survive ticks, configuration changes, solver removal, and
-pipeline resets.
+Values survive ticks, solver removal, and pipeline resets.
 
 ## Caching data derived from the configuration
 
-Keys created with `SolverDataLifetime.UntilConfigChange` are also dropped whenever the applied configuration changes.
-That makes them the place for per-gas tables and anything else derived from the gas registry or solver settings:
+Since every key is dropped whenever the applied configuration changes, a key is also the place for per-gas tables and
+anything else derived from the gas registry or solver settings:
 
 ```csharp
 static readonly SolverDataKey<float[]> CoolingFactors = new(
@@ -531,14 +531,13 @@ static readonly SolverDataKey<float[]> CoolingFactors = new(
             factors[gasId] = 1f / gases[gasId].MolarHeatCapacityAtConstantVolume;
 
         return factors;
-    },
-    SolverDataLifetime.UntilConfigChange);
+    });
 
 float[] factors = simulation.GetSolverData(CoolingFactors);
 ```
 
 Any configuration change drops the value, even one that only touches reaction definitions, so a cached gas index can't
-point at the wrong entry after a registry edit. The built-in reaction solver caches its per-gas tables this way. A
+point at the wrong entry after a registry edit. The built-in reaction solver's per-gas tables follow the same rule. A
 configuration applied from a solver callback takes effect at the next tick, so inside a tick the factory always sees
 the tick-start configuration through `simulation.Config`.
 

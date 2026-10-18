@@ -15,16 +15,14 @@ public sealed partial class AtmosSimulation
     /// <returns>The cached value, the same instance on every call until it is dropped.</returns>
     /// <remarks>
     ///     <para>
-    ///         Values are isolated per simulation. <see cref="SolverDataLifetime.UntilRestore" /> values survive
-    ///         ticks, configuration changes, solver removal, and pipeline resets;
-    ///         <see cref="SolverDataLifetime.UntilConfigChange" /> values are also rebuilt after the configuration
-    ///         changes. Restore and disposal drop both without
-    ///         disposing them, so reacquire values on each callback rather than holding them across ticks.
+    ///         Values are isolated per simulation. They survive ticks, solver removal, and pipeline resets, and are
+    ///         dropped without being disposed when the configuration changes, a checkpoint is restored, or the
+    ///         simulation is disposed. Reacquire values on each callback rather than holding them across ticks.
     ///     </para>
     ///     <para>
-    ///         <see cref="SolverDataLifetime.UntilConfigChange" /> values belong to the configuration
-    ///         <see cref="Config" /> reports when they are built. A configuration applied from a solver callback takes
-    ///         effect at the next tick, so inside a tick that is always the tick-start configuration.
+    ///         A value belongs to the configuration <see cref="Config" /> reports when it is built. A configuration
+    ///         applied from a solver callback takes effect at the next tick, so inside a tick that is always the
+    ///         tick-start configuration.
     ///     </para>
     ///     <para>
     ///         Lookup and factory execution are serialized with simulation operations. Resolve values before

@@ -23,9 +23,15 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
     private ReactionTables? _reactionTables;
 
     /// <summary>
-    ///     Gets solver data derived from this configuration. Every capture of a different configuration clears it.
+    ///     Gets the simulation's solver data. Every capture of a different configuration clears it, so values must be
+    ///     caches a factory can rebuild from the configuration and authoritative state.
     /// </summary>
-    internal SolverDataStorage ConfigScopedData { get; } = new();
+    /// <remarks>
+    ///     Living here rather than on the kernel is what ties the data to the configuration it was built from.
+    ///     Recapturing the same <see cref="AtmosConfigSnapshot" /> returns early, so a kernel that only ever holds
+    ///     snapshots keeps the data from tick to tick.
+    /// </remarks>
+    internal SolverDataStorage SolverData { get; } = new();
 
     public IReadOnlyList<IAtmosSolverConfiguration> SolverConfigurations { get; private set; } = [];
 
@@ -169,7 +175,7 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
 
         SolverConfigurations = config.SolverConfigurations;
 
-        ConfigScopedData.Clear();
+        SolverData.Clear();
         _reactionTables = null;
         _sourceConfig = config as AtmosConfigSnapshot;
     }

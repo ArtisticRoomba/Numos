@@ -4,27 +4,6 @@ using Numos.CoreSim.Solvers;
 namespace Numos.API;
 
 /// <summary>
-///     Says when Numos drops a value cached under a <see cref="SolverDataKey{T}" />.
-/// </summary>
-[PublicAPI]
-public enum SolverDataLifetime : byte
-{
-    /// <summary>
-    ///     Kept across ticks and configuration changes; dropped when a checkpoint is restored or the simulation is
-    ///     disposed.
-    /// </summary>
-    UntilRestore,
-
-    /// <summary>
-    ///     Also dropped when the simulation's configuration changes. During a tick the value belongs to the
-    ///     tick-start configuration, so a configuration applied by a solver callback takes effect on the next tick.
-    ///     Use this for caches derived from the gas registry or <see cref="Numos.CoreSim.IAtmosSolverConfiguration" />
-    ///     settings.
-    /// </summary>
-    UntilConfigChange
-}
-
-/// <summary>
 ///     Names one piece of transient data shared by solvers in a simulation, together with the factory that builds it.
 /// </summary>
 /// <typeparam name="T">The stored reference type. Interfaces, classes, arrays, and collections all work.</typeparam>
@@ -36,10 +15,10 @@ public enum SolverDataLifetime : byte
 ///     </para>
 ///     <para>
 ///         Values are cached per simulation and read with <see cref="AtmosSimulation.GetSolverData{T}" />. They are
-///         excluded from snapshots, checkpoints, recordings, and state hashes, and dropped on restore, so the factory
-///         must be a deterministic function of authoritative inputs such as <see cref="AtmosSimulation.Config" />.
-///         Evolving state that has to roll back belongs in a <see cref="ChunkField{T}" /> registered with
-///         <c>rollback: true</c>.
+///         excluded from snapshots, checkpoints, recordings, and state hashes, and dropped on restore and whenever the
+///         configuration changes, so the factory must be a deterministic function of authoritative inputs such as
+///         <see cref="AtmosSimulation.Config" />. Evolving state that has to roll back belongs in a
+///         <see cref="ChunkField{T}" /> registered with <c>rollback: true</c>.
 ///     </para>
 ///     <para>
 ///         A factory may read other keys. Requesting its own key, directly or through another factory, throws instead
@@ -61,8 +40,7 @@ public enum SolverDataLifetime : byte
 ///                     coefficients[gasId] = 1f / gases[gasId].MolarHeatCapacityAtConstantVolume;
 ///
 ///                 return coefficients;
-///             },
-///             SolverDataLifetime.UntilConfigChange);
+///             });
 ///     }
 ///
 ///     float[] coefficients = simulation.GetSolverData(HeaterData.Coefficients);
@@ -79,19 +57,13 @@ public sealed class SolverDataKey<T> where T : class
     ///     Builds the value the first time a simulation reads the key, or the first time after the value was dropped.
     ///     It runs under the simulation's state lock, must not mutate the simulation, and must not return null.
     /// </param>
-    /// <param name="lifetime">When cached values are dropped.</param>
     /// <exception cref="ArgumentException"><paramref name="name" /> is null, empty, or whitespace.</exception>
     /// <exception cref="ArgumentNullException"><paramref name="factory" /> is null.</exception>
-    /// <exception cref="ArgumentOutOfRangeException"><paramref name="lifetime" /> is not a defined value.</exception>
-    public SolverDataKey(
-        string name, Func<AtmosSimulation, T> factory, SolverDataLifetime lifetime = SolverDataLifetime.UntilRestore)
+    public SolverDataKey(string name, Func<AtmosSimulation, T> factory)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ArgumentNullException.ThrowIfNull(factory);
-        if (lifetime is not (SolverDataLifetime.UntilRestore or SolverDataLifetime.UntilConfigChange))
-            throw new ArgumentOutOfRangeException(nameof(lifetime), lifetime, "Unknown solver data lifetime.");
-
-        Descriptor = new SolverDataDescriptor(name, lifetime == SolverDataLifetime.UntilConfigChange);
+        Descriptor = new SolverDataDescriptor(name);
         Factory = factory;
     }
 
@@ -99,12 +71,6 @@ public sealed class SolverDataKey<T> where T : class
     ///     Gets the diagnostic name.
     /// </summary>
     public string Name => Descriptor.Name;
-
-    /// <summary>
-    ///     Gets when cached values are dropped.
-    /// </summary>
-    public SolverDataLifetime Lifetime =>
-        Descriptor.ResetOnConfigChange ? SolverDataLifetime.UntilConfigChange : SolverDataLifetime.UntilRestore;
 
     internal SolverDataDescriptor Descriptor { get; }
     internal Func<AtmosSimulation, T> Factory { get; }
