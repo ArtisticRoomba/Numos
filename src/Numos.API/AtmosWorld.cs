@@ -1,7 +1,6 @@
 using System.Buffers;
 using JetBrains.Annotations;
 using Numos.CoreSim;
-using Numos.CoreSim.Replay;
 using Numos.CoreSim.Solvers;
 using Numos.Maths;
 
@@ -46,7 +45,6 @@ public sealed partial class AtmosWorld : IDisposable
     private ExplicitAtmosEdge[] _activeEdges = [];
     private Dictionary<AtmosChunkKey, int> _activeEdgesByChunk = [];
     private AtmosConfigSnapshot _config;
-    private bool _deferSolverRestoreNotification;
     private bool _disposed;
     private volatile bool _isTickExecuting;
     private long _linkSetCollectionRevision;
@@ -253,11 +251,6 @@ public sealed partial class AtmosWorld : IDisposable
             simulation.DisposeFromWorld();
     }
 
-    internal AtmosSolverCheckpoint[] CreateSolverCheckpoints()
-    {
-        return Solvers.CaptureCheckpointSteps();
-    }
-
     /// <summary>
     ///     Returns simulation membership only when it changed after a caller's retained revision.
     /// </summary>
@@ -406,16 +399,8 @@ public sealed partial class AtmosWorld : IDisposable
                 return true;
             }
 
-            bool recordAtWorldScope;
-            lock (_recordingGate)
-            {
-                recordAtWorldScope = _isWorldRecording;
-            }
-
-            ApplyConfig(snapshot, !recordAtWorldScope);
-            if (recordAtWorldScope)
-                RecordWorldOperation(new SetAtmosWorldConfigOperation(snapshot));
-
+            ApplyConfig(snapshot);
+            RecordWorldOperation(new SetAtmosWorldConfigOperation(snapshot));
             return true;
         }
     }
@@ -731,7 +716,7 @@ public sealed partial class AtmosWorld : IDisposable
     /// <exception cref="ArgumentNullException"><paramref name="checkpoint" /> is <see langword="null" />.</exception>
     /// <exception cref="ArgumentException">The checkpoint is malformed or incompatible with this world.</exception>
     /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
-    /// <exception cref="InvalidOperationException">Called from a solver callback or while a simulation is recording.</exception>
+    /// <exception cref="InvalidOperationException">Called from a solver callback or while the world is recording.</exception>
     [PublicAPI]
     public void RestoreCheckpoint(AtmosWorldCheckpoint checkpoint)
     {
@@ -747,45 +732,10 @@ public sealed partial class AtmosWorld : IDisposable
             }
 
             ValidateCheckpoint(checkpoint);
-            RestoreThenNotifySolvers(checkpoint, static (world, saved) => world.RestoreCheckpointCore(saved));
-        }
-    }
-
-    /// <summary>
-    ///     Runs a restore with kernel notifications held back, then tells world solvers once the world's own time,
-    ///     configuration, and topology match the restored state.
-    /// </summary>
-    /// <remarks>
-    ///     The caller holds <see cref="Gate" />. A world restore would otherwise notify once per simulation, before
-    ///     topology is back, and a component restore would notify before world time is synchronized.
-    /// </remarks>
-    internal void RestoreThenNotifySolvers<TState>(TState state, Action<AtmosWorld, TState> restore)
-    {
-        bool outermost = !_deferSolverRestoreNotification;
-        _deferSolverRestoreNotification = true;
-        try
-        {
-            restore(this, state);
-        }
-        finally
-        {
-            if (outermost)
-                _deferSolverRestoreNotification = false;
-        }
-
-        if (outermost)
+            RestoreCheckpointCore(checkpoint);
+            // Last, so every hook sees the world's time, configuration, and topology already restored.
             Solvers.NotifyRestored();
-    }
-
-    /// <summary>
-    ///     Receives every kernel checkpoint install. Restores that started at the world or component API are reported
-    ///     by <see cref="RestoreThenNotifySolvers{TState}" /> instead; what reaches the pipeline here is the install
-    ///     inside a component <see cref="AtmosSimulation.ReplayTo" />, which has to notify before its replayed ticks.
-    /// </summary>
-    internal void NotifySimulationRestored()
-    {
-        if (!_deferSolverRestoreNotification)
-            Solvers.NotifyRestored();
+        }
     }
 
     private void RestoreCheckpointCore(AtmosWorldCheckpoint checkpoint)
@@ -821,7 +771,8 @@ public sealed partial class AtmosWorld : IDisposable
                 _freeSimulationSlots.Add(index);
         }
 
-        _config = checkpoint.Config;
+        // Simulations recreated below copy the restored configuration in their constructor.
+        ApplyConfig(checkpoint.Config);
         foreach (var saved in checkpoint.Simulations)
         {
             if (TryGetSimulationCore(saved.Simulation) != null)
@@ -839,11 +790,7 @@ public sealed partial class AtmosWorld : IDisposable
 
         RebuildOrderedSimulations();
         foreach (var saved in checkpoint.Simulations)
-        {
-            var simulation = TryGetSimulationCore(saved.Simulation)!;
-            simulation.Kernel.RestoreCheckpoint(saved.Checkpoint);
-            simulation.Kernel.SetAtmosConfigWithoutRecording(_config);
-        }
+            TryGetSimulationCore(saved.Simulation)!.Kernel.RestoreCheckpoint(saved.Checkpoint, checkpoint.TickCount);
 
         RestoreTopology(checkpoint.LinkSlots);
         TickCount = checkpoint.TickCount;
@@ -1052,22 +999,8 @@ public sealed partial class AtmosWorld : IDisposable
     }
 
     /// <summary>
-    ///     Reconciles world configuration after a standalone simulation restore or replay operation.
-    /// </summary>
-    internal void SynchronizeRestoredConfig(AtmosSimulation simulation, AtmosConfigSnapshot config)
-    {
-        lock (Gate)
-        {
-            ThrowIfDisposed();
-            ValidateSimulation(simulation, nameof(simulation));
-            ApplyConfig(config);
-            _accumulator = 0f;
-            TickCount = simulation.TickCount;
-        }
-    }
-
-    /// <summary>
-    ///     Rejects a component-only restore when world time or topology would be left inconsistent.
+    ///     Rejects a grid-only restore while the world is recording or replaying, or when other simulations or explicit
+    ///     links could be left pointing at chunks that no longer exist.
     /// </summary>
     internal void EnsureSimulationRestoreAllowed(AtmosSimulation simulation)
     {
@@ -1083,7 +1016,7 @@ public sealed partial class AtmosWorld : IDisposable
                     _linkSlots.Any(static slot => slot.State != LinkSetState.Free))
                 {
                     throw new InvalidOperationException(
-                        "Restore the AtmosWorld checkpoint when a world has multiple simulations, explicit topology, or an active world timeline.");
+                        "Restore the AtmosWorld checkpoint when a world has multiple simulations, explicit topology, or an active recording or replay.");
                 }
             }
         }
@@ -1126,7 +1059,7 @@ public sealed partial class AtmosWorld : IDisposable
             {
                 var pending = _pendingConfig;
                 _pendingConfig = null;
-                ApplyConfig(pending, false);
+                ApplyConfig(pending);
             }
 
             TickCount = checked(TickCount + 1);
@@ -1266,40 +1199,23 @@ public sealed partial class AtmosWorld : IDisposable
             if (!saved.Simulation.IsValid ||
                 (uint)saved.Simulation.Index >= (uint)checkpoint.SimulationGenerations.Length ||
                 checkpoint.SimulationGenerations[saved.Simulation.Index] != saved.Simulation.Generation ||
-                previousSimulation is { } previous && previous.CompareTo(saved.Simulation) >= 0 ||
-                !saved.Checkpoint.Config.SemanticallyEquals(checkpoint.Config))
+                previousSimulation is { } previous && previous.CompareTo(saved.Simulation) >= 0)
             {
-                throw new ArgumentException(
-                    "The world checkpoint has incompatible simulation identities or configuration.",
-                    nameof(checkpoint));
+                throw new ArgumentException("The world checkpoint has incompatible simulation identities.", nameof(checkpoint));
             }
 
             previousSimulation = saved.Simulation;
             var current = TryGetSimulationCore(saved.Simulation);
-            if (current != null)
-            {
-                if (current.Kernel.IsRecording)
-                    throw new InvalidOperationException("Stop every simulation recording before restoring a world checkpoint.");
+            if (current != null && current.ChunkDimensions != saved.Checkpoint.Dimensions)
+                throw new ArgumentException("A retained simulation has incompatible chunk dimensions.", nameof(checkpoint));
 
-                if (current.ChunkDimensions != saved.Checkpoint.Dimensions)
-                    throw new ArgumentException("A retained simulation has incompatible chunk dimensions.", nameof(checkpoint));
-
-                current.Kernel.ValidateCheckpoint(saved.Checkpoint);
-            }
-            else
-            {
-                var dimensions = saved.Checkpoint.Dimensions;
-                using var validator = new AtmosKernel(dimensions.X, dimensions.Y, dimensions.Z);
-                validator.ValidateCheckpoint(saved.Checkpoint);
-            }
-
+            // Also rejects duplicate chunk positions, so the map below can't collide.
+            AtmosKernel.ValidateCheckpoint(saved.Checkpoint, saved.Checkpoint.Dimensions);
+            var dimensions = saved.Checkpoint.Dimensions;
+            int voxelCount = dimensions.X * dimensions.Y * dimensions.Z;
             var chunks = new Dictionary<Int3, int>();
             foreach (var chunk in saved.Checkpoint.Chunks)
-            {
-                int voxelCount = checked(chunk.Dimensions.X * chunk.Dimensions.Y * chunk.Dimensions.Z);
-                if (!chunks.TryAdd(chunk.Position, voxelCount))
-                    throw new ArgumentException("The world checkpoint contains duplicate chunks.", nameof(checkpoint));
-            }
+                chunks.Add(chunk.Position, voxelCount);
 
             validCells.Add(saved.Simulation, chunks);
         }
@@ -1447,16 +1363,11 @@ public sealed partial class AtmosWorld : IDisposable
         }
     }
 
-    private void ApplyConfig(AtmosConfigSnapshot snapshot, bool record = true)
+    private void ApplyConfig(AtmosConfigSnapshot snapshot)
     {
         _config = snapshot;
         foreach (var simulation in _orderedSimulations)
-        {
-            if (record)
-                simulation.Kernel.SetAtmosConfig(snapshot);
-            else
-                simulation.Kernel.SetAtmosConfigWithoutRecording(snapshot);
-        }
+            simulation.Kernel.SetAtmosConfig(snapshot);
     }
 
     private void ApplyPendingTopology()

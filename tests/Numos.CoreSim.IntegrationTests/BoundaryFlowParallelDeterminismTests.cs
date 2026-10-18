@@ -7,7 +7,7 @@ namespace Numos.CoreSim.IntegrationTests;
 [TestFixture]
 public sealed class BoundaryFlowParallelDeterminismTests
 {
-    private const ulong X64ExpectedDigest = 15020874777508700793UL;
+    private const ulong X64ExpectedDigest = 2688148414183633200UL;
 
     /// <summary>
     ///     Requires repeated runs of this scenario to produce one digest, which on x64 must also equal
@@ -17,7 +17,9 @@ public sealed class BoundaryFlowParallelDeterminismTests
     ///     The x64 digest came from the fully sequential <c>BoundaryFlowSolver</c> that predates
     ///     <c>PendingTransferBuffer</c>, and the parallel solver reproduced it at both the default processor count and
     ///     <c>DOTNET_PROCESSOR_COUNT=2</c>. Matching it shows parallel boundary flow is bit-identical to the sequential
-    ///     algorithm, not merely stable across repeated parallel runs.
+    ///     algorithm, not merely stable across repeated parallel runs. The value was re-captured as a grid-only
+    ///     <see cref="Numos.CoreSim.Replay.AtmosSimulationCheckpoint" /> digest once the sequential-era digest had
+    ///     passed on the same code.
     /// </remarks>
     [Test]
     [Explicit(
@@ -40,7 +42,7 @@ public sealed class BoundaryFlowParallelDeterminismTests
             for (int tick = 0; tick < 3; tick++)
                 simulation.Tick();
 
-            ulong actualDigest = simulation.ComputeStateHash().Digest;
+            ulong actualDigest = simulation.CaptureCheckpoint().ComputeStateHash();
             expectedDigest ??= actualDigest;
 
             Assert.That(

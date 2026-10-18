@@ -2,7 +2,6 @@ using JetBrains.Annotations;
 using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.Datatypes.Snapshots;
-using Numos.CoreSim.Replay;
 using Numos.Maths;
 
 namespace Numos.API;
@@ -121,11 +120,6 @@ public sealed partial class AtmosSimulation : IDisposable
         _kernel = new AtmosKernel(chunkWidth, chunkHeight, chunkDepth);
         _kernel.SetAtmosConfig(world.Config);
         Id = world.RegisterSimulation(this, requestedRegistration);
-        _kernel.ConfigureWorldCallbacks(
-            world.CreateSolverCheckpoints,
-            world.Solvers.SetEnabled,
-            world.Tick,
-            world.NotifySimulationRestored);
     }
 
     /// <summary>
@@ -184,16 +178,15 @@ public sealed partial class AtmosSimulation : IDisposable
         get
         {
             ThrowIfDisposed();
-            // Kernel replay applies recorded configuration opcodes internally. Returning the kernel's canonical
-            // reference keeps solver callbacks on the replayed tick-start state; normal world propagation still
-            // gives every registered kernel the exact same snapshot instance.
+            // The world gives every registered kernel the exact same snapshot instance.
             return _kernel.GetAtmosConfig();
         }
     }
 
     /// <summary>
-    ///     Gets whether this simulation or its owning world is recording external semantic operations.
+    ///     Gets whether the owning world is recording external semantic operations.
     /// </summary>
+    /// <remarks>Recording always covers the whole <see cref="World" />; see <see cref="AtmosWorld.StartRecording" />.</remarks>
     /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
     [PublicAPI]
     public bool IsRecording
@@ -201,7 +194,7 @@ public sealed partial class AtmosSimulation : IDisposable
         get
         {
             ThrowIfDisposed();
-            return _kernel.IsRecording || World.IsRecording;
+            return World.IsRecording;
         }
     }
 
@@ -360,53 +353,6 @@ public sealed partial class AtmosSimulation : IDisposable
             ThrowIfDisposed();
             return World.SetAtmosConfig(config);
         }
-    }
-
-    /// <summary>
-    ///     Starts a fresh interval of external semantic operation recording for this simulation.
-    /// </summary>
-    /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
-    /// <exception cref="InvalidOperationException">
-    ///     The simulation is already recording, its world is recording, or this is called from a solver.
-    /// </exception>
-    [PublicAPI]
-    public void StartRecording()
-    {
-        ThrowIfDisposed();
-        World.EnsureComponentRecordingAllowed(this);
-        _kernel.StartRecording();
-    }
-
-    /// <summary>
-    ///     Captures the current simulation recording without stopping it.
-    /// </summary>
-    /// <returns>A detached recording through the current simulation position.</returns>
-    /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
-    /// <exception cref="InvalidOperationException">
-    ///     No simulation recording exists, or the owning world is recording.
-    /// </exception>
-    [PublicAPI]
-    public AtmosRecording CaptureRecording()
-    {
-        ThrowIfDisposed();
-        World.EnsureComponentRecordingAllowed(this);
-        return _kernel.CaptureRecording();
-    }
-
-    /// <summary>
-    ///     Stops simulation recording and returns a detached copy of the interval.
-    /// </summary>
-    /// <returns>The complete detached simulation recording.</returns>
-    /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
-    /// <exception cref="InvalidOperationException">
-    ///     The simulation is not recording, its world is recording, or this is called from a solver.
-    /// </exception>
-    [PublicAPI]
-    public AtmosRecording StopRecording()
-    {
-        ThrowIfDisposed();
-        World.EnsureComponentRecordingAllowed(this);
-        return _kernel.StopRecording();
     }
 
     /// <summary>

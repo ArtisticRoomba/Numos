@@ -87,22 +87,22 @@ public sealed class AtmosSolverDataTests
     {
         using var simulation = new AtmosSimulation(1, 1, 1);
         var key = new SolverDataKey<int[]>("test/data", static _ => [42]);
-        var hash = simulation.ComputeStateHash();
-        simulation.StartRecording();
+        var hash = simulation.World.ComputeStateHash();
+        simulation.World.StartRecording();
         int[] original = simulation.GetSolverData(key);
-        var checkpoint = simulation.CaptureCheckpoint();
+        var checkpoint = simulation.World.CaptureCheckpoint();
         original[0] = 99;
 
-        Assert.That(simulation.ComputeStateHash(), Is.EqualTo(hash));
-        Assert.That(simulation.StopRecording().Operations, Is.Empty);
-        simulation.RestoreCheckpoint(checkpoint);
+        Assert.That(simulation.World.ComputeStateHash(), Is.EqualTo(hash));
+        Assert.That(simulation.World.StopRecording().Operations, Is.Empty);
+        simulation.World.RestoreCheckpoint(checkpoint);
 
         int[] restored = simulation.GetSolverData(key);
         Assert.Multiple(() =>
         {
             Assert.That(restored, Is.Not.SameAs(original));
             Assert.That(restored[0], Is.EqualTo(42));
-            Assert.That(simulation.ComputeStateHash(), Is.EqualTo(hash));
+            Assert.That(simulation.World.ComputeStateHash(), Is.EqualTo(hash));
         });
     }
 
@@ -135,18 +135,18 @@ public sealed class AtmosSolverDataTests
             },
             after: "produce");
 
-        var checkpoint = simulation.CaptureCheckpoint();
-        simulation.StartRecording();
+        var checkpoint = simulation.World.CaptureCheckpoint();
+        simulation.World.StartRecording();
         simulation.Tick();
         simulation.Tick();
-        var expected = simulation.ComputeStateHash();
-        var recording = simulation.StopRecording();
+        var expected = simulation.World.ComputeStateHash();
+        var recording = simulation.World.StopRecording();
         simulation.GetSolverData(pendingKey).Enqueue(1000);
 
-        simulation.ReplayTo(checkpoint, recording.Operations, recording.Head);
+        simulation.World.ReplayTo(checkpoint, recording.Operations, recording.Head);
 
         Assert.That(creations, Is.EqualTo(2));
-        Assert.That(simulation.ComputeStateHash(), Is.EqualTo(expected));
+        Assert.That(simulation.World.ComputeStateHash(), Is.EqualTo(expected));
     }
 
     [Test]
@@ -257,7 +257,7 @@ public sealed class AtmosSolverDataTests
         var service = new DisposableService();
         var key = new SolverDataKey<DisposableService>("test/service", _ => service);
         simulation.GetSolverData(key);
-        simulation.RestoreCheckpoint(simulation.CaptureCheckpoint());
+        simulation.World.RestoreCheckpoint(simulation.World.CaptureCheckpoint());
         Assert.That(service.IsDisposed, Is.False);
         Assert.That(simulation.GetSolverData(key), Is.SameAs(service));
 
@@ -409,17 +409,17 @@ public sealed class AtmosSolverDataTests
             "inject",
             _ => simulation.AddGasToVoxel(chunk, 0, 0, simulation.GetSolverData(key)[0], 300f));
 
-        var checkpoint = simulation.CaptureCheckpoint();
-        simulation.StartRecording();
+        var checkpoint = simulation.World.CaptureCheckpoint();
+        simulation.World.StartRecording();
         simulation.Tick();
         simulation.Tick();
-        var expected = simulation.ComputeStateHash();
-        var recording = simulation.StopRecording();
+        var expected = simulation.World.ComputeStateHash();
+        var recording = simulation.World.StopRecording();
 
-        simulation.ReplayTo(checkpoint, recording.Operations, recording.Head);
+        simulation.World.ReplayTo(checkpoint, recording.Operations, recording.Head);
 
         Assert.That(creations, Is.EqualTo(2));
-        Assert.That(simulation.ComputeStateHash(), Is.EqualTo(expected));
+        Assert.That(simulation.World.ComputeStateHash(), Is.EqualTo(expected));
     }
 
     private static AtmosConfig CreateGasConfig()

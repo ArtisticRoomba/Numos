@@ -13,29 +13,30 @@ public sealed class AtmosReplayTests
     public void ConcurrentCaptureAndMutations_HaveOneCoherentReplayOrder()
     {
         using var simulation = CreateSimulation();
+        var world = simulation.World;
         var chunk = simulation.CreateAndRegisterChunk(default);
-        var initial = simulation.CaptureCheckpoint();
-        simulation.StartRecording();
-        var checkpoints = new ConcurrentBag<AtmosSimulationCheckpoint>();
+        var initial = world.CaptureCheckpoint();
+        world.StartRecording();
+        var checkpoints = new ConcurrentBag<AtmosWorldCheckpoint>();
         Parallel.For(
             0,
             32,
             index =>
             {
                 simulation.SetVoxelTemperature(chunk, 0, 270f + index);
-                simulation.Tick();
-                checkpoints.Add(simulation.CaptureCheckpoint());
+                world.Tick();
+                checkpoints.Add(world.CaptureCheckpoint());
             });
 
-        var recording = simulation.StopRecording();
+        var recording = world.StopRecording();
         Assert.That(
             recording.Operations.Select(static operation => operation.Sequence),
             Is.EqualTo(Enumerable.Range(1, 32).Select(static sequence => (ulong)sequence)));
 
         foreach (var checkpoint in checkpoints)
         {
-            simulation.ReplayTo(initial, recording.Operations, checkpoint.Position);
-            Assert.That(simulation.ComputeStateHash(), Is.EqualTo(checkpoint.ComputeStateHash()));
+            world.ReplayTo(initial, recording.Operations, checkpoint.Position);
+            Assert.That(world.ComputeStateHash(), Is.EqualTo(checkpoint.ComputeStateHash()));
         }
     }
 
@@ -60,13 +61,14 @@ public sealed class AtmosReplayTests
     public void Corpus_ReplaysEveryPositionAndContinuesFromSleepingAndAwakeCheckpoints()
     {
         using var simulation = CreateSimulation();
+        var world = simulation.World;
         var first = simulation.CreateAndRegisterChunk(default);
         var second = simulation.CreateAndRegisterChunk(Int3.PosX);
         simulation.AddGasToVoxel(first, 3, 1, 0, 1, 2.25f, 420f);
         simulation.AddGasToVoxel(first, 3, 1, 0, 0, 8f, 250f);
-        var start = simulation.CaptureCheckpoint();
-        simulation.StartRecording();
-        var references = new List<(AtmosSimulationCheckpoint Checkpoint, AtmosStateHash Hash)>();
+        var start = world.CaptureCheckpoint();
+        world.StartRecording();
+        var references = new List<(AtmosWorldCheckpoint Checkpoint, AtmosWorldStateHash Hash)>();
         for (int tick = 0; tick < 24; tick++)
         {
             if (tick == 2) simulation.SetVoxelTemperature(first, 3, 1, 0, 330f);
@@ -74,26 +76,29 @@ public sealed class AtmosReplayTests
             if (tick == 6) simulation.WakeChunk(second);
             if (tick == 8) simulation.SetChunkBoundaryClassification(first, VoxelClassification.RoomSolid);
             if (tick == 10) simulation.SetVoxelClassification(first, 3, 1, 0, VoxelClassification.RoomUnassigned);
-            if (tick == 12) simulation.SetAtmosConfig(new AtmosConfig(simulation.Config) { ThermalConductance = 0.3f });
+            if (tick == 12) world.SetAtmosConfig(new AtmosConfig(world.Config) { ThermalConductance = 0.3f });
             if (tick == 14) simulation.UnregisterChunk(second);
             if (tick == 16) second = simulation.CreateAndRegisterChunk(Int3.PosX);
-            simulation.Tick();
-            references.Add((simulation.CaptureCheckpoint(), simulation.ComputeStateHash()));
+            world.Tick();
+            references.Add((world.CaptureCheckpoint(), world.ComputeStateHash()));
         }
 
-        var recording = simulation.StopRecording();
-        Assert.That(references[1].Checkpoint.Chunks[1].Gases, Is.Not.Empty, "The corpus must exercise cross-chunk flow.");
+        var recording = world.StopRecording();
+        Assert.That(
+            references[1].Checkpoint.Simulations[0].Checkpoint.Chunks[1].Gases,
+            Is.Not.Empty,
+            "The corpus must exercise cross-chunk flow.");
 
         foreach (var reference in references.AsEnumerable().Reverse().Concat(references))
         {
-            simulation.ReplayTo(start, recording.Operations, reference.Hash.Position);
-            Assert.That(simulation.ComputeStateHash(), Is.EqualTo(reference.Hash), $"Replay at {reference.Hash.Position}");
-            simulation.Tick();
-            var continued = simulation.ComputeStateHash();
-            simulation.RestoreCheckpoint(reference.Checkpoint);
-            Assert.That(simulation.ComputeStateHash(), Is.EqualTo(reference.Hash));
-            simulation.Tick();
-            Assert.That(simulation.ComputeStateHash(), Is.EqualTo(continued), "Immediate continuation must match.");
+            world.ReplayTo(start, recording.Operations, reference.Hash.Position);
+            Assert.That(world.ComputeStateHash(), Is.EqualTo(reference.Hash), $"Replay at {reference.Hash.Position}");
+            world.Tick();
+            var continued = world.ComputeStateHash();
+            world.RestoreCheckpoint(reference.Checkpoint);
+            Assert.That(world.ComputeStateHash(), Is.EqualTo(reference.Hash));
+            world.Tick();
+            Assert.That(world.ComputeStateHash(), Is.EqualTo(continued), "Immediate continuation must match.");
         }
     }
 
@@ -101,38 +106,39 @@ public sealed class AtmosReplayTests
     public void MixtureOperations_ReplayResolvedGridEffectsWithoutDetachedContainerState()
     {
         using var simulation = CreateSimulation();
+        var world = simulation.World;
         var chunk = simulation.CreateAndRegisterChunk(default);
-        var initial = simulation.CaptureCheckpoint();
+        var initial = world.CaptureCheckpoint();
         var voxel = simulation.GetVoxelGasMixture(chunk, 0);
         var other = simulation.GetVoxelGasMixture(chunk, 1);
         var canister = simulation.CreateGasMixture(2f, 280f);
         canister.SetMoles(1, 3f);
         canister.SetMoles(0, 8f);
-        simulation.StartRecording();
-        var hashes = new List<AtmosStateHash>();
+        world.StartRecording();
+        var hashes = new List<AtmosWorldStateHash>();
         voxel.SetMoles(1, 2f);
-        hashes.Add(simulation.ComputeStateHash());
+        hashes.Add(world.ComputeStateHash());
         voxel.AdjustMoles(1, -0.1f);
-        hashes.Add(simulation.ComputeStateHash());
+        hashes.Add(world.ComputeStateHash());
         voxel.AddGas(0, 3f, 400f);
-        hashes.Add(simulation.ComputeStateHash());
+        hashes.Add(world.ComputeStateHash());
         voxel.Temperature = 340f;
-        hashes.Add(simulation.ComputeStateHash());
+        hashes.Add(world.ComputeStateHash());
         canister.TransferRatioTo(voxel, 0.25f);
-        hashes.Add(simulation.ComputeStateHash());
+        hashes.Add(world.ComputeStateHash());
         voxel.TransferTo(other, 0.5f);
-        hashes.Add(simulation.ComputeStateHash());
+        hashes.Add(world.ComputeStateHash());
         voxel.RemoveRatio(0.1f);
-        hashes.Add(simulation.ComputeStateHash());
+        hashes.Add(world.ComputeStateHash());
         other.Clear();
-        hashes.Add(simulation.ComputeStateHash());
-        var recording = simulation.StopRecording();
+        hashes.Add(world.ComputeStateHash());
+        var recording = world.StopRecording();
         canister.Clear();
 
         foreach (var hash in hashes)
         {
-            simulation.ReplayTo(initial, recording.Operations, hash.Position);
-            Assert.That(simulation.ComputeStateHash(), Is.EqualTo(hash));
+            world.ReplayTo(initial, recording.Operations, hash.Position);
+            Assert.That(world.ComputeStateHash(), Is.EqualTo(hash));
         }
 
         Assert.That(() => voxel.TotalMoles, Throws.InvalidOperationException);
@@ -143,9 +149,10 @@ public sealed class AtmosReplayTests
     public void CustomSolver_UsesNormalApiWithoutRecordingAndCanSuppressHostEffects()
     {
         using var simulation = CreateSimulation();
+        var world = simulation.World;
         var chunk = simulation.CreateAndRegisterChunk(default);
         int hostEffects = 0;
-        simulation.World.Solvers.Register(
+        world.Solvers.Register(
             "host-v1",
             _ =>
             {
@@ -153,19 +160,19 @@ public sealed class AtmosReplayTests
                 if (!simulation.IsReplaying) hostEffects++;
             });
 
-        var initial = simulation.CaptureCheckpoint();
-        simulation.StartRecording();
-        simulation.Tick();
-        simulation.Tick();
-        simulation.World.Solvers.SetEnabled("host-v1", false);
-        simulation.World.Solvers.SetEnabled("host-v1", false);
-        simulation.Tick();
-        var hash = simulation.ComputeStateHash();
-        var recording = simulation.StopRecording();
-        simulation.ReplayTo(initial, recording.Operations, recording.Head);
+        var initial = world.CaptureCheckpoint();
+        world.StartRecording();
+        world.Tick();
+        world.Tick();
+        world.Solvers.SetEnabled("host-v1", false);
+        world.Solvers.SetEnabled("host-v1", false);
+        world.Tick();
+        var hash = world.ComputeStateHash();
+        var recording = world.StopRecording();
+        world.ReplayTo(initial, recording.Operations, recording.Head);
         Assert.Multiple(() =>
         {
-            Assert.That(simulation.ComputeStateHash(), Is.EqualTo(hash));
+            Assert.That(world.ComputeStateHash(), Is.EqualTo(hash));
             Assert.That(recording.Operations, Has.Count.EqualTo(1));
             Assert.That(hostEffects, Is.EqualTo(2));
             Assert.That(simulation.IsReplaying, Is.False);
@@ -176,24 +183,25 @@ public sealed class AtmosReplayTests
     public void ConfigRegistryAndUpdateResidual_AreReplayedAndRestoreContinuesTheClock()
     {
         using var simulation = CreateSimulation();
-        var initial = simulation.CaptureCheckpoint();
-        simulation.StartRecording();
-        simulation.Update(0.017f);
-        simulation.Update(0.187f);
-        var config = new AtmosConfig(simulation.Config);
+        var world = simulation.World;
+        var initial = world.CaptureCheckpoint();
+        world.StartRecording();
+        world.Update(0.017f);
+        world.Update(0.187f);
+        var config = new AtmosConfig(world.Config);
         config.GasRegistry.Add(new GasProperties { Name = "Later" });
-        simulation.SetAtmosConfig(config);
-        simulation.Update(0.001f);
-        var checkpoint = simulation.CaptureCheckpoint();
-        var hash = simulation.ComputeStateHash();
-        var recording = simulation.StopRecording();
-        simulation.Update(0.075f);
-        var continued = simulation.ComputeStateHash();
-        simulation.ReplayTo(initial, recording.Operations, recording.Head);
-        Assert.That(simulation.ComputeStateHash(), Is.EqualTo(hash));
-        simulation.Update(0.075f);
-        Assert.That(simulation.ComputeStateHash(), Is.EqualTo(continued));
-        simulation.RestoreCheckpoint(checkpoint);
+        world.SetAtmosConfig(config);
+        world.Update(0.001f);
+        var checkpoint = world.CaptureCheckpoint();
+        var hash = world.ComputeStateHash();
+        var recording = world.StopRecording();
+        world.Update(0.075f);
+        var continued = world.ComputeStateHash();
+        world.ReplayTo(initial, recording.Operations, recording.Head);
+        Assert.That(world.ComputeStateHash(), Is.EqualTo(hash));
+        world.Update(0.075f);
+        Assert.That(world.ComputeStateHash(), Is.EqualTo(continued));
+        world.RestoreCheckpoint(checkpoint);
         Assert.That(simulation.Config.GasRegistry, Has.Count.EqualTo(3));
     }
 
@@ -201,18 +209,19 @@ public sealed class AtmosReplayTests
     public void ExactSequence_ExcludesLaterOperationsAtSameTick_AndOverloadsCanonicalize()
     {
         using var simulation = CreateSimulation();
+        var world = simulation.World;
         var chunk = simulation.CreateAndRegisterChunk(default);
-        var initial = simulation.CaptureCheckpoint();
-        simulation.StartRecording();
+        var initial = world.CaptureCheckpoint();
+        world.StartRecording();
         simulation.SetVoxelTemperature(chunk, 1, 2, 0, 333f);
-        var firstHash = simulation.ComputeStateHash();
+        var firstHash = world.ComputeStateHash();
         simulation.SetVoxelTemperature(chunk, 9, 333f);
         Assert.That(() => simulation.AddGasToVoxel(chunk, 0, -1, 1f, 300f), Throws.TypeOf<ArgumentOutOfRangeException>());
-        var recording = simulation.StopRecording();
+        var recording = world.StopRecording();
         Assert.That(recording.Operations, Has.Count.EqualTo(2));
         Assert.That(recording.Operations[0].Operation, Is.EqualTo(recording.Operations[1].Operation));
-        simulation.ReplayTo(initial, recording.Operations, firstHash.Position);
-        Assert.That(simulation.ComputeStateHash(), Is.EqualTo(firstHash));
+        world.ReplayTo(initial, recording.Operations, firstHash.Position);
+        Assert.That(world.ComputeStateHash(), Is.EqualTo(firstHash));
     }
 
     [Test]
@@ -220,25 +229,35 @@ public sealed class AtmosReplayTests
     {
         using var simulation = CreateSimulation();
         using var incompatible = new AtmosSimulation(new TestAtmosConfig(), 1, 1, 1);
+        var world = simulation.World;
         var chunk = simulation.CreateAndRegisterChunk(default);
-        var checkpoint = simulation.CaptureCheckpoint();
+        var checkpoint = world.CaptureCheckpoint();
         simulation.AddGasToVoxel(chunk, 0, 0, 1f, 300f);
-        var hash = simulation.ComputeStateHash();
+        var hash = world.ComputeStateHash();
         Assert.That(() => simulation.RestoreCheckpoint(incompatible.CaptureCheckpoint()), Throws.ArgumentException);
-        Assert.That(simulation.ComputeStateHash(), Is.EqualTo(hash));
-        AtmosRecordedOperation[] gap = [new(new AtmosTimelinePosition(0, 2), new SleepChunkOperation(default))];
-        Assert.That(() => simulation.ReplayTo(checkpoint, gap, new AtmosTimelinePosition(1, 2)), Throws.ArgumentException);
-        Assert.That(simulation.ComputeStateHash(), Is.EqualTo(hash));
-        AtmosRecordedOperation[] invalid = [new(new AtmosTimelinePosition(0, 1), new SleepChunkOperation(Int3.PosX))];
+        Assert.That(() => world.RestoreCheckpoint(incompatible.World.CaptureCheckpoint()), Throws.ArgumentException);
+        Assert.That(world.ComputeStateHash(), Is.EqualTo(hash));
+        AtmosWorldRecordedOperation[] gap =
+        [
+            new(new AtmosTimelinePosition(0, 2), new AtmosWorldSimulationOperation(simulation.Id, new SleepChunkOperation(default)))
+        ];
+
+        Assert.That(() => world.ReplayTo(checkpoint, gap, new AtmosTimelinePosition(1, 2)), Throws.ArgumentException);
+        Assert.That(world.ComputeStateHash(), Is.EqualTo(hash));
+        AtmosWorldRecordedOperation[] invalid =
+        [
+            new(new AtmosTimelinePosition(0, 1), new AtmosWorldSimulationOperation(simulation.Id, new SleepChunkOperation(Int3.PosX)))
+        ];
+
         Assert.That(
-            () => simulation.ReplayTo(checkpoint, invalid, new AtmosTimelinePosition(0, 1)),
+            () => world.ReplayTo(checkpoint, invalid, new AtmosTimelinePosition(0, 1)),
             Throws.TypeOf<KeyNotFoundException>());
 
-        Assert.That(simulation.ComputeStateHash(), Is.EqualTo(hash));
-        simulation.World.Solvers.Register("incompatible", _ => { });
-        hash = simulation.ComputeStateHash();
-        Assert.That(() => simulation.RestoreCheckpoint(checkpoint), Throws.ArgumentException);
-        Assert.That(simulation.ComputeStateHash(), Is.EqualTo(hash));
+        Assert.That(world.ComputeStateHash(), Is.EqualTo(hash));
+        world.Solvers.Register("incompatible", _ => { });
+        hash = world.ComputeStateHash();
+        Assert.That(() => world.RestoreCheckpoint(checkpoint), Throws.ArgumentException);
+        Assert.That(world.ComputeStateHash(), Is.EqualTo(hash));
     }
 
     [Test]
@@ -247,39 +266,48 @@ public sealed class AtmosReplayTests
         using var authority = CreateSimulation();
         using var replica = CreateSimulation();
         var chunk = authority.CreateAndRegisterChunk(default);
-        var initial = authority.CaptureCheckpoint();
-        replica.RestoreCheckpoint(initial);
-        authority.StartRecording();
+        var initial = authority.World.CaptureCheckpoint();
+        replica.World.RestoreCheckpoint(initial);
+        authority.World.StartRecording();
         for (int tick = 0; tick < 8; tick++)
         {
             if (tick == 3) authority.AddGasToVoxel(chunk, 0, 0, 5f, 310f);
-            authority.Tick();
-            replica.Tick();
+            authority.World.Tick();
+            replica.World.Tick();
         }
 
-        var recording = authority.StopRecording();
-        Assert.That(replica.ComputeStateHash(), Is.Not.EqualTo(authority.ComputeStateHash()));
-        replica.ReplayTo(initial, recording.Operations, recording.Head);
-        Assert.That(replica.ComputeStateHash(), Is.EqualTo(authority.ComputeStateHash()));
+        var recording = authority.World.StopRecording();
+        Assert.That(replica.World.ComputeStateHash(), Is.Not.EqualTo(authority.World.ComputeStateHash()));
+        replica.World.ReplayTo(initial, recording.Operations, recording.Head);
+        Assert.That(replica.World.ComputeStateHash(), Is.EqualTo(authority.World.ComputeStateHash()));
     }
 
     [Test]
     public void DefinitionChangesDuringRecording_AndCaptureInsideTick_AreRejected()
     {
         using var simulation = CreateSimulation();
-        simulation.World.Solvers.Register("probe", _ => Assert.That(simulation.CaptureCheckpoint, Throws.InvalidOperationException));
-        simulation.StartRecording();
-        Assert.That(() => simulation.World.Solvers.Register("new", _ => { }), Throws.InvalidOperationException);
-        Assert.That(() => simulation.World.Solvers.Unregister("probe"), Throws.InvalidOperationException);
-        simulation.Tick();
-        var hash = simulation.ComputeStateHash();
-        var checkpoint = simulation.CaptureCheckpoint();
-        simulation.StopRecording();
-        simulation.Tick();
-        Assert.That(simulation.ResumeRecording, Throws.InvalidOperationException);
-        simulation.RestoreCheckpoint(checkpoint);
-        simulation.ResumeRecording();
-        Assert.That(simulation.ComputeStateHash(), Is.EqualTo(hash));
+        var world = simulation.World;
+        world.Solvers.Register(
+            "probe",
+            _ =>
+            {
+                Assert.That(simulation.CaptureCheckpoint, Throws.InvalidOperationException);
+                Assert.That(world.CaptureCheckpoint, Throws.InvalidOperationException);
+            });
+
+        world.StartRecording();
+        Assert.That(() => world.Solvers.Register("new", _ => { }), Throws.InvalidOperationException);
+        Assert.That(() => world.Solvers.Unregister("probe"), Throws.InvalidOperationException);
+        Assert.That(() => simulation.RestoreCheckpoint(simulation.CaptureCheckpoint()), Throws.InvalidOperationException);
+        world.Tick();
+        var hash = world.ComputeStateHash();
+        var checkpoint = world.CaptureCheckpoint();
+        world.StopRecording();
+        world.Tick();
+        Assert.That(world.ResumeRecording, Throws.InvalidOperationException);
+        world.RestoreCheckpoint(checkpoint);
+        world.ResumeRecording();
+        Assert.That(world.ComputeStateHash(), Is.EqualTo(hash));
     }
 
     [Test]
@@ -291,26 +319,54 @@ public sealed class AtmosReplayTests
         first.CreateAndRegisterChunk(new Int3(2, 0, 0));
         second.CreateAndRegisterChunk(new Int3(2, 0, 0));
         second.CreateAndRegisterChunk(default);
-        Assert.That(first.ComputeStateHash(), Is.EqualTo(second.ComputeStateHash()));
+        Assert.That(first.World.ComputeStateHash(), Is.EqualTo(second.World.ComputeStateHash()));
+        Assert.That(first.CaptureCheckpoint().ComputeStateHash(), Is.EqualTo(second.CaptureCheckpoint().ComputeStateHash()));
         second.SetVoxelTemperature(new AtmosChunkHandle(default), 0, BitConverter.Int32BitsToSingle(unchecked((int)0x80000000)));
-        Assert.That(first.ComputeStateHash(), Is.Not.EqualTo(second.ComputeStateHash()));
+        Assert.That(first.World.ComputeStateHash(), Is.Not.EqualTo(second.World.ComputeStateHash()));
+        Assert.That(first.CaptureCheckpoint().ComputeStateHash(), Is.Not.EqualTo(second.CaptureCheckpoint().ComputeStateHash()));
     }
 
     [Test]
     public void Restore_InvalidatesPresentationVersionsAndRetainsDisabledStageCaches()
     {
         using var simulation = CreateSimulation();
+        var world = simulation.World;
         var chunk = simulation.CreateAndRegisterChunk(default);
         simulation.AddGasToVoxel(chunk, 0, 0, 2f, 320f);
-        simulation.World.Solvers.SetEnabled(AtmosBuiltInSolvers.Advection, false);
+        world.Solvers.SetEnabled(AtmosBuiltInSolvers.Advection, false);
         simulation.GetVoxelGasMixture(chunk, 0).Temperature = 280f;
-        var checkpoint = simulation.CaptureCheckpoint();
+        var checkpoint = world.CaptureCheckpoint();
         var oldVersion = simulation.GetChunkSnapshot(chunk).Version;
-        simulation.Tick();
-        var hash = simulation.ComputeStateHash();
-        simulation.RestoreCheckpoint(checkpoint);
+        world.Tick();
+        var hash = world.ComputeStateHash();
+        world.RestoreCheckpoint(checkpoint);
         Assert.That(simulation.TryGetChunkSnapshot(chunk, oldVersion, out _), Is.True);
-        simulation.Tick();
-        Assert.That(simulation.ComputeStateHash(), Is.EqualTo(hash));
+        world.Tick();
+        Assert.That(world.ComputeStateHash(), Is.EqualTo(hash));
+    }
+
+    [Test]
+    public void SimulationCheckpoint_RestoresGridOnlyAndLeavesWorldStateAlone()
+    {
+        using var simulation = CreateSimulation();
+        var world = simulation.World;
+        var chunk = simulation.CreateAndRegisterChunk(default);
+        simulation.AddGasToVoxel(chunk, 0, 0, 2f, 320f);
+        var grid = simulation.CaptureCheckpoint();
+        world.Tick();
+        world.Solvers.SetEnabled(AtmosBuiltInSolvers.Advection, false);
+        world.SetAtmosConfig(new AtmosConfig(world.Config) { ThermalConductance = 0.4f });
+        simulation.SetVoxelTemperature(chunk, 0, 400f);
+
+        simulation.RestoreCheckpoint(grid);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(simulation.CaptureCheckpoint().ComputeStateHash(), Is.EqualTo(grid.ComputeStateHash()));
+            Assert.That(world.TickCount, Is.EqualTo(1));
+            Assert.That(simulation.TickCount, Is.EqualTo(1));
+            Assert.That(world.Config.ThermalConductance, Is.EqualTo(0.4f));
+            Assert.That(world.Solvers.Steps.Single(step => step.Name == AtmosBuiltInSolvers.Advection).IsEnabled, Is.False);
+        });
     }
 }

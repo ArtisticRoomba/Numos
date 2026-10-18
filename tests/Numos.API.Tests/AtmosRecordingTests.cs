@@ -9,36 +9,38 @@ public sealed class AtmosRecordingTests
     [Test]
     public void Update_DoesNotRecordHostFrameTimingAndRestoreResetsClockPhase()
     {
-        using var simulation = new AtmosSimulation(1, 1, 1);
-        simulation.StartRecording();
-        simulation.Update(0.025f);
-        var checkpoint = simulation.CaptureCheckpoint();
-        simulation.Update(0.025f);
+        using var world = new AtmosWorld();
+        var simulation = world.CreateSimulation(1, 1, 1);
+        world.StartRecording();
+        world.Update(0.025f);
+        var checkpoint = world.CaptureCheckpoint();
+        world.Update(0.025f);
         Assert.That(simulation.TickCount, Is.EqualTo(1));
-        var recording = simulation.StopRecording();
+        var recording = world.StopRecording();
         Assert.That(recording.Operations, Is.Empty);
 
-        simulation.RestoreCheckpoint(checkpoint);
-        simulation.Update(0.025f);
+        world.RestoreCheckpoint(checkpoint);
+        world.Update(0.025f);
         Assert.That(simulation.TickCount, Is.Zero);
     }
 
     [Test]
     public void SetAtmosConfig_RecordsChangedSnapshotsInTickAndSequenceOrder()
     {
-        using var simulation = new AtmosSimulation(1, 1, 1);
-        simulation.StartRecording();
-        simulation.Tick();
+        using var world = new AtmosWorld();
+        var simulation = world.CreateSimulation(1, 1, 1);
+        world.StartRecording();
+        world.Tick();
 
-        var config = new AtmosConfig(simulation.Config) { SleepThreshold = 10 };
-        Assert.That(simulation.SetAtmosConfig(config), Is.True);
-        Assert.That(simulation.SetAtmosConfig(new AtmosConfig(simulation.Config)), Is.False);
+        var config = new AtmosConfig(world.Config) { SleepThreshold = 10 };
+        Assert.That(world.SetAtmosConfig(config), Is.True);
+        Assert.That(world.SetAtmosConfig(new AtmosConfig(world.Config)), Is.False);
 
-        simulation.Tick();
+        world.Tick();
         config.SleepThreshold = 20;
-        Assert.That(simulation.SetAtmosConfig(config), Is.True);
+        Assert.That(world.SetAtmosConfig(config), Is.True);
 
-        var recording = simulation.StopRecording();
+        var recording = world.StopRecording();
         Assert.Multiple(() =>
         {
             Assert.That(recording.Start, Is.EqualTo(new AtmosTimelinePosition(0, 0)));
@@ -48,11 +50,11 @@ public sealed class AtmosRecordingTests
             Assert.That(recording.Operations[1].Position, Is.EqualTo(new AtmosTimelinePosition(2, 2)));
             Assert.That(
                 recording.Operations.Select(operation => operation.Code),
-                Is.All.EqualTo(AtmosOperationCode.SetAtmosConfig));
+                Is.All.EqualTo(AtmosWorldOperationCode.SetAtmosConfig));
         });
 
-        var first = (SetAtmosConfigOperation)recording.Operations[0].Operation;
-        var second = (SetAtmosConfigOperation)recording.Operations[1].Operation;
+        var first = (SetAtmosWorldConfigOperation)recording.Operations[0].Operation;
+        var second = (SetAtmosWorldConfigOperation)recording.Operations[1].Operation;
         Assert.Multiple(() =>
         {
             Assert.That(first.Config.SleepThreshold, Is.EqualTo(10));
@@ -64,19 +66,20 @@ public sealed class AtmosRecordingTests
     [Test]
     public void SetAtmosConfig_FromSolverIsAppliedWithoutRecordingExternalOperation()
     {
-        using var simulation = new AtmosSimulation(1, 1, 1);
-        var replacement = new AtmosConfig(simulation.Config) { SleepThreshold = 17 };
-        simulation.World.Solvers.Register(
+        using var world = new AtmosWorld();
+        var simulation = world.CreateSimulation(1, 1, 1);
+        var replacement = new AtmosConfig(world.Config) { SleepThreshold = 17 };
+        world.Solvers.Register(
             "set-config",
             _ =>
             {
                 if (simulation.TickCount == 1)
-                    simulation.SetAtmosConfig(replacement);
+                    world.SetAtmosConfig(replacement);
             });
 
-        simulation.StartRecording();
-        simulation.Tick();
-        var recording = simulation.StopRecording();
+        world.StartRecording();
+        world.Tick();
+        var recording = world.StopRecording();
 
         Assert.Multiple(() =>
         {
@@ -110,15 +113,16 @@ public sealed class AtmosRecordingTests
     [Test]
     public void SetAtmosConfig_CanonicalEquivalentValuesAreOneSemanticChange()
     {
-        using var simulation = new AtmosSimulation(1, 1, 1);
-        simulation.StartRecording();
-        var config = new AtmosConfig(simulation.Config) { ThermalConductance = float.NaN };
+        using var world = new AtmosWorld();
+        var simulation = world.CreateSimulation(1, 1, 1);
+        world.StartRecording();
+        var config = new AtmosConfig(world.Config) { ThermalConductance = float.NaN };
 
-        Assert.That(simulation.SetAtmosConfig(config), Is.True);
+        Assert.That(world.SetAtmosConfig(config), Is.True);
         config.ThermalConductance = -10f;
-        Assert.That(simulation.SetAtmosConfig(config), Is.False);
+        Assert.That(world.SetAtmosConfig(config), Is.False);
 
-        var recording = simulation.StopRecording();
+        var recording = world.StopRecording();
         Assert.Multiple(() =>
         {
             Assert.That(simulation.Config.ThermalConductance, Is.Zero);
@@ -129,14 +133,15 @@ public sealed class AtmosRecordingTests
     [Test]
     public void CaptureRecording_AfterStopKeepsTheStoppedHead()
     {
-        using var simulation = new AtmosSimulation(1, 1, 1);
-        Assert.That(simulation.CaptureRecording, Throws.InvalidOperationException);
+        using var world = new AtmosWorld();
+        var simulation = world.CreateSimulation(1, 1, 1);
+        Assert.That(world.CaptureRecording, Throws.InvalidOperationException);
 
-        simulation.StartRecording();
-        simulation.Tick();
-        var stopped = simulation.StopRecording();
-        simulation.Tick();
-        var captured = simulation.CaptureRecording();
+        world.StartRecording();
+        world.Tick();
+        var stopped = world.StopRecording();
+        world.Tick();
+        var captured = world.CaptureRecording();
 
         Assert.Multiple(() =>
         {

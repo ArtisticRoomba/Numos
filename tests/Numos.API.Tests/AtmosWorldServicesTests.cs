@@ -154,9 +154,9 @@ public sealed class AtmosWorldServicesTests
         });
         world.StopRecording();
 
-        simulation.StartRecording();
+        simulation.World.StartRecording();
         Assert.That(() => world.Services.Register<IGameClock>(new GameClock()), Throws.InvalidOperationException);
-        simulation.StopRecording();
+        simulation.World.StopRecording();
 
         Assert.That(() => world.Services.Register<IGameClock>(new GameClock()), Throws.Nothing);
     }
@@ -198,9 +198,9 @@ public sealed class AtmosWorldServicesTests
         world.RestoreCheckpoint(worldCheckpoint);
         Assert.That(world.Services.Get<DisposableService>(), Is.SameAs(service));
 
-        var simulationCheckpoint = simulation.CaptureCheckpoint();
+        var simulationCheckpoint = simulation.World.CaptureCheckpoint();
         simulation.Tick();
-        simulation.RestoreCheckpoint(simulationCheckpoint);
+        simulation.World.RestoreCheckpoint(simulationCheckpoint);
         Assert.That(world.Services.Get<DisposableService>(), Is.SameAs(service));
 
         world.Dispose();

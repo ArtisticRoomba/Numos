@@ -11,10 +11,10 @@ public sealed class AdvectionParallelDeterminismTests
     ///     The approved x64 digest for advection profile 2.
     /// </summary>
     /// <remarks>
-    ///     Update this only together with a deliberate physics change, and confirm the new value is stable across
-    ///     worker counts before approving it.
+    ///     Update this only together with a deliberate physics or digest-format change, and confirm the new value is
+    ///     stable across worker counts before approving it. It is a grid-only checkpoint digest.
     /// </remarks>
-    private const ulong X64ExpectedDigest = 7544779294751503140UL;
+    private const ulong X64ExpectedDigest = 998283263411882128UL;
 
     [Test]
     [Explicit(
@@ -36,7 +36,7 @@ public sealed class AdvectionParallelDeterminismTests
 
             simulation.Tick();
 
-            ulong actualDigest = simulation.ComputeStateHash().Digest;
+            ulong actualDigest = simulation.CaptureCheckpoint().ComputeStateHash();
             expectedDigest ??= actualDigest;
 
             Assert.That(

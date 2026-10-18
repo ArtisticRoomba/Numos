@@ -1,14 +1,6 @@
-namespace Numos.CoreSim.Replay;
+using Numos.CoreSim.Replay;
 
-/// <summary>
-///     A recorded-operation envelope, so simulation and world histories share one validator.
-/// </summary>
-internal interface IReplayHistoryEntry
-{
-    AtmosTimelinePosition Position { get; }
-
-    bool HasOperation { get; }
-}
+namespace Numos.API;
 
 internal enum ReplayHistoryError : byte
 {
@@ -35,12 +27,11 @@ internal static class ReplayHistory
     ///     are allowed as long as they were stamped at or after the target tick, which is what replay accepts.
     /// </param>
     /// <returns>The first problem found, or <see cref="ReplayHistoryError.None" />.</returns>
-    internal static ReplayHistoryError Validate<T>(
+    internal static ReplayHistoryError Validate(
         AtmosTimelinePosition start,
-        IReadOnlyList<T> history,
+        IReadOnlyList<AtmosWorldRecordedOperation> history,
         AtmosTimelinePosition target,
         bool exact)
-        where T : class, IReplayHistoryEntry
     {
         if (target.Tick < start.Tick || target.OperationSequence < start.OperationSequence)
             return ReplayHistoryError.TargetBeforeStart;
@@ -50,8 +41,8 @@ internal static class ReplayHistory
         AtmosTimelinePosition? previous = null;
         for (int index = 0; index < history.Count; index++)
         {
-            T? entry = history[index];
-            if (entry == null || !entry.HasOperation)
+            var entry = history[index];
+            if (entry?.Operation == null)
                 return ReplayHistoryError.Unordered;
 
             var position = entry.Position;
@@ -91,8 +82,7 @@ internal static class ReplayHistory
     ///     Counts the leading entries of a strictly sequence-ordered history whose sequence is at most
     ///     <paramref name="sequence" />.
     /// </summary>
-    internal static int CountThrough<T>(IReadOnlyList<T> history, ulong sequence)
-        where T : class, IReplayHistoryEntry
+    internal static int CountThrough(IReadOnlyList<AtmosWorldRecordedOperation> history, ulong sequence)
     {
         int low = 0;
         int high = history.Count;
@@ -112,8 +102,8 @@ internal static class ReplayHistory
     ///     Copies the entries with sequences in (<paramref name="after" />, <paramref name="through" />] out of a
     ///     strictly sequence-ordered history.
     /// </summary>
-    internal static T[] Slice<T>(IReadOnlyList<T> history, ulong after, ulong through)
-        where T : class, IReplayHistoryEntry
+    internal static AtmosWorldRecordedOperation[] Slice(
+        IReadOnlyList<AtmosWorldRecordedOperation> history, ulong after, ulong through)
     {
         return CopyRange(history, CountThrough(history, after), CountThrough(history, through));
     }
@@ -121,15 +111,16 @@ internal static class ReplayHistory
     /// <summary>
     ///     Copies the leading entries of a strictly sequence-ordered history through <paramref name="through" />.
     /// </summary>
-    internal static T[] TakeThrough<T>(IReadOnlyList<T> history, ulong through)
-        where T : class, IReplayHistoryEntry
+    internal static AtmosWorldRecordedOperation[] TakeThrough(
+        IReadOnlyList<AtmosWorldRecordedOperation> history, ulong through)
     {
         return CopyRange(history, 0, CountThrough(history, through));
     }
 
-    private static T[] CopyRange<T>(IReadOnlyList<T> history, int first, int end)
+    private static AtmosWorldRecordedOperation[] CopyRange(
+        IReadOnlyList<AtmosWorldRecordedOperation> history, int first, int end)
     {
-        var range = new T[Math.Max(0, end - first)];
+        var range = new AtmosWorldRecordedOperation[Math.Max(0, end - first)];
         for (int index = 0; index < range.Length; index++)
             range[index] = history[first + index];
 
@@ -139,11 +130,10 @@ internal static class ReplayHistory
     /// <summary>
     ///     Validates a <c>ReplayTo</c> batch, throwing the argument exception that describes the first problem.
     /// </summary>
-    internal static void ThrowIfInvalidReplay<T>(
+    internal static void ThrowIfInvalidReplay(
         AtmosTimelinePosition start,
-        IReadOnlyList<T> history,
+        IReadOnlyList<AtmosWorldRecordedOperation> history,
         AtmosTimelinePosition target)
-        where T : class, IReplayHistoryEntry
     {
         var error = target.Tick > int.MaxValue
             ? ReplayHistoryError.TargetBeforeStart

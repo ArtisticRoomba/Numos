@@ -1322,10 +1322,11 @@ Numos has no networking layer. What it does provide are the pieces a host would 
   state plus the external operations since it, and `Numos.Serialization` encodes them in the versioned `.numos` binary
   format. Replaying operations against a shared checkpoint is an alternative to streaming voxel state.
 
-Call `StartRecording()` to begin an operation interval. `SetAtmosConfig(...)` records a `SetAtmosConfigOperation`
-only when the applied semantic snapshot changes (§3.5). `CaptureRecording()` reads the interval without stopping it,
-and `StopRecording()` returns its detached operations. Each operation carries the completed Numos tick and a
-monotonically increasing operation sequence. See [Deterministic replay state model](deterministic_replay.md).
+Recording belongs to `AtmosWorld`. Call `world.StartRecording()` to begin an operation interval across every
+registered simulation. `SetAtmosConfig(...)` records a `SetAtmosWorldConfigOperation` only when the applied semantic
+snapshot changes (§3.5). `CaptureRecording()` reads the interval without stopping it, and `StopRecording()` returns
+its detached operations. Each operation carries the completed world tick and a monotonically increasing operation
+sequence. See [Deterministic replay state model](deterministic_replay.md).
 
 Serialization of individual snapshots for the wire, transport, quantization, and client reconciliation are left to the
 host. `Numos.CoreSim` also contains an internal `GasInjectionEvent` struct (position, gas, moles, temperature) that

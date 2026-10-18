@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Diagnostics;
 using Numos.CoreSim.Replay;
 using Numos.Maths;
 
@@ -10,65 +9,26 @@ internal sealed partial class AtmosKernel
     private readonly Int3 _dimensions;
     private Action<AtmosOperation>? _externalOperationSink;
     private bool _isApplyingOperation;
-    private bool _isReplaying;
-    private Action _replayTick = null!;
-    private Func<string, bool, bool> _setWorldSolverEnabled = null!;
-    private Func<AtmosSolverCheckpoint[]> _solverCheckpointProvider = static () => [];
-    private Action _solversRestored = static () => { };
-    private AtmosStateHash? _stoppedRecordingHash;
 
     private bool ShouldRecord =>
-        (_isRecording || _externalOperationSink != null) &&
+        _externalOperationSink != null &&
         !_isTickExecuting &&
         !_isApplyingOperation;
 
-    internal AtmosTimelinePosition TimelinePosition
-    {
-        get
-        {
-            lock (StateGate)
-            {
-                return new AtmosTimelinePosition(checked((ulong)TickCount), _lastOperationSequence);
-            }
-        }
-    }
-
-    internal bool IsReplaying
-    {
-        get
-        {
-            lock (StateGate)
-            {
-                return _isReplaying;
-            }
-        }
-    }
-
     private void RecordOperation(AtmosOperation operation)
     {
-        if (_externalOperationSink != null)
-        {
-            _externalOperationSink(operation);
-            return;
-        }
-
-        _lastOperationSequence = checked(_lastOperationSequence + 1);
-        _recordedOperations.Add(new AtmosRecordedOperation(TimelinePosition, operation));
+        _externalOperationSink!(operation);
     }
 
     /// <summary>
-    ///     Routes external semantic mutations to a world-owned recorder without coupling the kernel to API identities.
+    ///     Routes external semantic mutations to the owning world's recorder without coupling the kernel to API
+    ///     identities. A <see langword="null" /> sink stops recording.
     /// </summary>
     internal void SetExternalOperationSink(Action<AtmosOperation>? sink)
     {
         lock (StateGate)
         {
             ThrowIfTickExecuting("change the external operation recorder");
-            if (_isRecording)
-            {
-                throw new InvalidOperationException("Stop component recording before attaching a world operation recorder.");
-            }
-
             _externalOperationSink = sink;
         }
     }
@@ -77,28 +37,6 @@ internal sealed partial class AtmosKernel
     {
         if (ShouldRecord)
             RecordOperation(new SetVoxelMixtureOperation(chunk, index));
-    }
-
-    /// <summary>
-    ///     Connects the kernel to the world that owns its solver pipeline and tick loop.
-    /// </summary>
-    /// <param name="solverCheckpointProvider">Supplies the pipeline metadata stored in and validated against checkpoints.</param>
-    /// <param name="setWorldSolverEnabled">Applies checkpointed and recorded solver enablement.</param>
-    /// <param name="replayTick">Advances the owning world by one tick during replay.</param>
-    /// <param name="solversRestored">
-    ///     Runs at the end of every checkpoint install, including the one inside <see cref="ReplayTo" /> before any
-    ///     replayed tick and the one that puts the previous state back after a failed replay.
-    /// </param>
-    internal void ConfigureWorldCallbacks(
-        Func<AtmosSolverCheckpoint[]> solverCheckpointProvider,
-        Func<string, bool, bool> setWorldSolverEnabled,
-        Action replayTick,
-        Action solversRestored)
-    {
-        _solverCheckpointProvider = solverCheckpointProvider;
-        _setWorldSolverEnabled = setWorldSolverEnabled;
-        _replayTick = replayTick;
-        _solversRestored = solversRestored;
     }
 
     internal AtmosSimulationCheckpoint CaptureCheckpoint()
@@ -111,91 +49,56 @@ internal sealed partial class AtmosKernel
             for (int index = 0; index < chunks.Length; index++)
                 chunkCheckpoints[index] = new AtmosChunkCheckpoint(chunks[index]);
 
-            return new AtmosSimulationCheckpoint(
-                _dimensions,
-                TimelinePosition,
-                _config,
-                _solverCheckpointProvider(),
-                chunkCheckpoints);
-        }
-    }
-
-    internal AtmosStateHash ComputeStateHash()
-    {
-        lock (StateGate)
-        {
-            return CaptureCheckpoint().ComputeStateHash();
+            return new AtmosSimulationCheckpoint(_dimensions, chunkCheckpoints);
         }
     }
 
     /// <summary>
-    ///     Resumes the stopped recording if the live state still matches its head.
+    ///     Replaces the grid with a checkpoint's chunks and moves the kernel to the owning world's tick.
     /// </summary>
-    /// <param name="current">
-    ///     The live state's hash when the caller already knows it, such as right after restoring a checkpoint whose
-    ///     digest is cached; otherwise the state is captured and hashed here.
-    /// </param>
-    internal void ResumeRecording(AtmosStateHash? current = null)
-    {
-        lock (StateGate)
-        {
-            ThrowIfTickExecuting("resume recording");
-            if (_isRecording || !_hasRecording || _stoppedRecordingHash != (current ?? ComputeStateHash()))
-                throw new InvalidOperationException("Recording can only resume at the unchanged, stopped recording head.");
-
-            _isRecording = true;
-        }
-    }
-
-    internal void RestoreCheckpoint(AtmosSimulationCheckpoint checkpoint)
+    /// <param name="checkpoint">Grid state to install.</param>
+    /// <param name="tickCount">The world's completed-tick count once the restore finishes.</param>
+    /// <remarks>
+    ///     Configuration and solver enablement belong to the world, which applies its own before or after this call.
+    ///     Transient solver data is discarded either way.
+    /// </remarks>
+    internal void RestoreCheckpoint(AtmosSimulationCheckpoint checkpoint, int tickCount)
     {
         lock (StateGate)
         {
             ThrowIfTickExecuting("restore a checkpoint during a tick");
-            if (_isRecording)
-                throw new InvalidOperationException("Stop recording before restoring a checkpoint.");
-
-            ValidateCheckpoint(checkpoint);
-            InstallCheckpoint(checkpoint);
+            ValidateCheckpoint(checkpoint, _dimensions);
+            InstallCheckpoint(checkpoint, tickCount);
         }
     }
 
-    internal void ValidateCheckpoint(AtmosSimulationCheckpoint checkpoint)
+    /// <summary>
+    ///     Checks that a checkpoint can be installed in a simulation whose chunks have <paramref name="dimensions" />,
+    ///     without needing a live kernel.
+    /// </summary>
+    internal static void ValidateCheckpoint(AtmosSimulationCheckpoint checkpoint, Int3 dimensions)
     {
         ArgumentNullException.ThrowIfNull(checkpoint);
         if (checkpoint.FormatVersion != AtmosSimulationCheckpoint.CurrentFormatVersion ||
             checkpoint.CompatibilityVersion != AtmosSimulationCheckpoint.CurrentCompatibilityVersion ||
-            checkpoint.Dimensions != _dimensions ||
-            checkpoint.Position.Tick > int.MaxValue)
+            checkpoint.Dimensions != dimensions ||
+            dimensions.X <= 0 || dimensions.Y <= 0 || dimensions.Z <= 0 ||
+            (long)dimensions.X * dimensions.Y * dimensions.Z > AtmosChunkConstants.MaximumVoxelCount)
         {
             throw new ArgumentException(
                 "The checkpoint format or dimensions are incompatible with this simulation.",
                 nameof(checkpoint));
         }
 
-        AtmosSolverCheckpoint[] steps = _solverCheckpointProvider();
-        if (steps.Length != 0 &&
-            (steps.Length != checkpoint.Solvers.Count ||
-             steps.Where((step, index) =>
-                 step.Name != checkpoint.Solvers[index].Name ||
-                 step.IsCustom != checkpoint.Solvers[index].IsCustom ||
-                 step.NeighborSelectionKey != checkpoint.Solvers[index].NeighborSelectionKey).Any()))
-        {
-            throw new ArgumentException(
-                "The checkpoint requires the same solver names, kinds, order, and neighbor selections.",
-                nameof(checkpoint));
-        }
-
-        checkpoint.Config.ValidateGasRegistry();
         var positions = new HashSet<Int3>();
         foreach (var chunk in checkpoint.Chunks)
         {
-            if (chunk.Dimensions != _dimensions || !positions.Add(chunk.Position))
+            if (chunk.Dimensions != dimensions || !positions.Add(chunk.Position))
                 throw new ArgumentException("The checkpoint contains incompatible or duplicate chunks.", nameof(checkpoint));
         }
     }
 
-    private void InstallCheckpoint(AtmosSimulationCheckpoint checkpoint)
+    private void InstallCheckpoint(AtmosSimulationCheckpoint checkpoint, int tickCount)
     {
         // Materialize all pooled storage before replacing anything observable.
         var replacement = new ConcurrentDictionary<Int3, AtmosChunk>();
@@ -225,89 +128,15 @@ internal sealed partial class AtmosKernel
         // Ids are reassigned densely as 0..replacement.Count above, so none are free.
         _nextChunkDenseId = replacement.Count;
         _freeChunkDenseIds.Clear();
-        _config = checkpoint.Config;
         CurrentTickConfig.Capture(_config);
         ClearSolverData();
-        TickCount = checked((int)checkpoint.Position.Tick);
-        _lastOperationSequence = checkpoint.Position.OperationSequence;
+        TickCount = tickCount;
         _accumulator = 0f;
-        foreach (var step in checkpoint.Solvers)
-            _setWorldSolverEnabled(step.Name, step.Enabled);
-
         _defaultSolvers.ClearTransientState();
         _chunkCollectionRevision++;
         LastBoundaryTicks = 0;
         foreach (var chunk in previous.Values)
             chunk.Release();
-
-        // Host solvers reset their own transient state last, so a throw from one leaves a fully installed
-        // checkpoint behind rather than a half-swapped kernel.
-        _solversRestored();
-    }
-
-    /// <summary>
-    ///     Restores <paramref name="checkpoint" /> and reapplies ticks and operations up to <paramref name="target" />,
-    ///     putting the previous state back if anything fails.
-    /// </summary>
-    /// <param name="checkpoint">The state replay starts from.</param>
-    /// <param name="operations">Ordered history covering the checkpoint through the target.</param>
-    /// <param name="target">The exact position to reconstruct.</param>
-    /// <param name="detached">
-    ///     Set when <paramref name="operations" /> is already an immutable detached list, such as
-    ///     <see cref="AtmosRecording.Operations" />; otherwise the host's batch is copied first.
-    /// </param>
-    internal AtmosReplayResult ReplayTo(
-        AtmosSimulationCheckpoint checkpoint, IReadOnlyList<AtmosRecordedOperation> operations,
-        AtmosTimelinePosition target, bool detached = false)
-    {
-        ArgumentNullException.ThrowIfNull(operations);
-        IReadOnlyList<AtmosRecordedOperation> history = detached ? operations : operations.ToArray();
-        lock (StateGate)
-        {
-            ThrowIfTickExecuting("replay during a tick");
-            if (_isRecording || _isReplaying)
-                throw new InvalidOperationException("Stop recording before replaying; recursive replay is unavailable.");
-
-            ValidateCheckpoint(checkpoint);
-            ReplayHistory.ThrowIfInvalidReplay(checkpoint.Position, history, target);
-            var previous = CaptureCheckpoint();
-            long started = Stopwatch.GetTimestamp();
-            _isReplaying = true;
-            try
-            {
-                InstallCheckpoint(checkpoint);
-                for (int index = 0; index < history.Count; index++)
-                {
-                    var operation = history[index];
-                    if (operation.Sequence <= checkpoint.Position.OperationSequence || operation.Sequence > target.OperationSequence)
-                        continue;
-
-                    while ((ulong)TickCount < operation.AfterTick)
-                        _replayTick();
-
-                    ApplyRecordedOperation(operation.Operation);
-                    _lastOperationSequence = operation.Sequence;
-                }
-
-                while ((ulong)TickCount < target.Tick)
-                    _replayTick();
-
-                return new AtmosReplayResult(
-                    checkpoint.Position,
-                    TimelinePosition,
-                    target.Tick - checkpoint.Position.Tick,
-                    Stopwatch.GetElapsedTime(started));
-            }
-            catch
-            {
-                InstallCheckpoint(previous);
-                throw;
-            }
-            finally
-            {
-                _isReplaying = false;
-            }
-        }
     }
 
     internal void ApplyRecordedOperation(AtmosOperation operation)
@@ -321,11 +150,6 @@ internal sealed partial class AtmosKernel
         {
             _isApplyingOperation = false;
         }
-    }
-
-    private void Apply(SetAtmosConfigOperation op)
-    {
-        SetAtmosConfig(op.Config);
     }
 
     private void Apply(CreateChunkOperation op)
@@ -371,12 +195,6 @@ internal sealed partial class AtmosKernel
     private void Apply(SleepChunkOperation op)
     {
         SleepChunk(op.Position);
-    }
-
-    private void Apply(SetSolverEnabledOperation op)
-    {
-        if (!_setWorldSolverEnabled(op.Name, op.Enabled))
-            throw new ArgumentException($"Unknown solver '{op.Name}'.");
     }
 
     private void Apply(SetVoxelMixtureOperation op)

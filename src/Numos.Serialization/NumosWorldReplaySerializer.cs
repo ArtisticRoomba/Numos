@@ -21,8 +21,8 @@ namespace Numos.Serialization;
 ///     <para>
 ///         <see cref="SetAtmosWorldConfigOperation" /> (nested config snapshot) and
 ///         <see cref="CreateAtmosLinkSetOperation" /> (variable-length link list) don't fit the generator's
-///         mechanical field-order mapping, so they register as <c>Custom</c>, same as their sim-family
-///         counterparts.
+///         mechanical field-order mapping, so they register as <c>Custom</c>, same as
+///         <see cref="SetVoxelMixtureOperation" /> in the simulation family.
 ///     </para>
 ///     <para>
 ///         Every <see cref="AtmosWorldOperationCode" /> member needs one of these registrations. A missing one is a
@@ -197,7 +197,7 @@ public static partial class NumosWorldReplaySerializer
         {
             simulations[index] = new AtmosWorldSimulationCheckpoint(
                 ReadSimulationId(reader),
-                NumosReplaySerializer.ReadSimulationCheckpoint(reader, options));
+                NumosReplaySerializer.ReadSimulationCheckpoint(reader));
         }
 
         int linkSlotCount = NumosReplaySerializer.ReadCount(reader, 10_000_000, "link-set slot");

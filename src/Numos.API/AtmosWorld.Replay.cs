@@ -69,7 +69,7 @@ public sealed partial class AtmosWorld
 
     internal void EnsureCanChangeWorldSolverDefinition()
     {
-        if (IsRecordingOrReplayingAnywhere())
+        if (IsRecordingOrReplaying())
         {
             throw new InvalidOperationException(
                 "World solver registration and removal are unavailable during recording or replay. " +
@@ -79,7 +79,7 @@ public sealed partial class AtmosWorld
 
     internal void EnsureCanChangeWorldServices()
     {
-        if (IsRecordingOrReplayingAnywhere())
+        if (IsRecordingOrReplaying())
         {
             throw new InvalidOperationException(
                 "World service registration and removal are unavailable during recording or replay. " +
@@ -87,42 +87,32 @@ public sealed partial class AtmosWorld
         }
     }
 
-    private bool IsRecordingOrReplayingAnywhere()
+    private bool IsRecordingOrReplaying()
     {
         lock (_recordingGate)
         {
-            return _isWorldRecording ||
-                   _isReplayingWorld ||
-                   _orderedSimulations.Any(static simulation =>
-                       simulation.Kernel.IsRecording || simulation.Kernel.IsReplaying);
+            return _isWorldRecording || _isReplayingWorld;
         }
     }
 
     internal void RecordWorldSolverEnablement(string name, bool enabled)
     {
-        lock (_recordingGate)
-        {
-            if (_isWorldRecording && !_isApplyingWorldOperation && !_isTickExecuting)
-            {
-                RecordWorldOperation(new SetAtmosWorldSolverEnabledOperation(name, enabled));
-                return;
-            }
-        }
-
-        if (_orderedSimulations.Length == 1)
-            _orderedSimulations[0].Kernel.RecordSolverEnablement(name, enabled);
+        // A solver toggling the pipeline from inside a tick is derived work that replay reproduces on its own.
+        if (!_isTickExecuting)
+            RecordWorldOperation(new SetAtmosWorldSolverEnabledOperation(name, enabled));
     }
 
     /// <summary>
     ///     Starts a fresh interval of globally ordered world operation recording.
     /// </summary>
     /// <remarks>
-    ///     Recording covers simulation creation and destruction, shared configuration, topology, and supported
-    ///     component mutations. Solver registration cannot change until recording stops.
+    ///     Recording covers simulation creation and destruction, shared configuration, solver enablement, topology,
+    ///     and supported grid mutations on every registered simulation. Solver registration cannot change until
+    ///     recording stops.
     /// </remarks>
     /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
     /// <exception cref="InvalidOperationException">
-    ///     Recording or replay is active, a component recorder is active, or this is called during a tick.
+    ///     Recording or replay is active, or this is called during a tick.
     /// </exception>
     public void StartRecording()
     {
@@ -134,9 +124,6 @@ public sealed partial class AtmosWorld
             {
                 if (_isWorldRecording || _isReplayingWorld)
                     throw new InvalidOperationException("The world is already recording or replaying.");
-
-                if (_orderedSimulations.Any(static simulation => simulation.Kernel.IsRecording))
-                    throw new InvalidOperationException("Stop component recording before starting world recording.");
 
                 _recordedWorldOperations.Clear();
                 _worldRecordingStart = new AtmosTimelinePosition(checked((ulong)TickCount), _lastWorldOperationSequence);
@@ -373,26 +360,6 @@ public sealed partial class AtmosWorld
         }
     }
 
-    internal void EnsureComponentRecordingAllowed(AtmosSimulation simulation)
-    {
-        lock (Gate)
-        {
-            ThrowIfDisposed();
-            ValidateSimulation(simulation, nameof(simulation));
-            lock (_recordingGate)
-            {
-                if (_isWorldRecording ||
-                    _isReplayingWorld ||
-                    _orderedSimulations.Length != 1 ||
-                    _linkSlots.Any(static slot => slot.State != LinkSetState.Free))
-                {
-                    throw new InvalidOperationException(
-                        "Use world recording when a world has multiple simulations, explicit topology, or an active world timeline.");
-                }
-            }
-        }
-    }
-
     private void AttachWorldRecorder(AtmosSimulation simulation)
     {
         lock (_recordingGate)
@@ -447,7 +414,7 @@ public sealed partial class AtmosWorld
 
     private void Apply(SetAtmosWorldConfigOperation config)
     {
-        ApplyConfig(config.Config, false);
+        ApplyConfig(config.Config);
     }
 
     private void Apply(CreateAtmosSimulationOperation create)
@@ -519,7 +486,7 @@ internal static class AtmosWorldCheckpointHasher
         {
             hash.Add(simulation.Simulation.Index);
             hash.Add(simulation.Simulation.Generation);
-            hash.Add(simulation.Checkpoint.ComputeStateHash().Digest);
+            hash.Add(simulation.Checkpoint.ComputeStateHash());
         }
 
         hash.Add(checkpoint.LinkSlots.Length);

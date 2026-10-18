@@ -168,36 +168,19 @@ public sealed class AtmosClassSolverTests
     }
 
     [Test]
-    public void OnRestored_SeesWorldTimeAlreadySynchronizedOnComponentRestore()
+    public void OnRestored_SeesWorldTimeAlreadyRestored()
     {
-        using var simulation = new AtmosSimulation(1, 1, 1);
+        using var world = new AtmosWorld();
+        world.CreateSimulation(1, 1, 1);
         int observedTick = -1;
-        simulation.World.Solvers.Register("observer", new RestoreObserver(() => observedTick = simulation.World.TickCount));
-        var checkpoint = simulation.CaptureCheckpoint();
-        simulation.Tick();
-        simulation.Tick();
+        world.Solvers.Register("observer", new RestoreObserver(() => observedTick = world.TickCount));
+        var checkpoint = world.CaptureCheckpoint();
+        world.Tick();
+        world.Tick();
 
-        simulation.RestoreCheckpoint(checkpoint);
+        world.RestoreCheckpoint(checkpoint);
 
         Assert.That(observedTick, Is.Zero);
-    }
-
-    [Test]
-    public void SimulationReplay_ResetsTransientStateBeforeTheFirstReplayedTick()
-    {
-        using var simulation = new AtmosSimulation(1, 1, 1);
-        var solver = new TransientSolver();
-        simulation.World.Solvers.Register("transient", solver);
-        var checkpoint = simulation.CaptureCheckpoint();
-        simulation.StartRecording();
-        simulation.Tick();
-        simulation.Tick();
-        var recording = simulation.StopRecording();
-        solver.Log.Clear();
-
-        simulation.ReplayTo(checkpoint, recording.Operations, recording.Head);
-
-        Assert.That(solver.Log, Is.EqualTo(new[] { "restored", "solve 1", "solve 2" }));
     }
 
     [Test]
@@ -223,19 +206,20 @@ public sealed class AtmosClassSolverTests
     [Test]
     public void FailedReplay_NotifiesAgainWhenThePreviousStateIsPutBack()
     {
-        using var simulation = new AtmosSimulation(1, 1, 1);
+        using var world = new AtmosWorld();
+        var simulation = world.CreateSimulation(1, 1, 1);
         var solver = new TransientSolver();
-        simulation.World.Solvers.Register("transient", solver);
-        var checkpoint = simulation.CaptureCheckpoint();
-        simulation.StartRecording();
-        simulation.Tick();
-        simulation.Tick();
-        var recording = simulation.StopRecording();
+        world.Solvers.Register("transient", solver);
+        var checkpoint = world.CaptureCheckpoint();
+        world.StartRecording();
+        world.Tick();
+        world.Tick();
+        var recording = world.StopRecording();
         solver.Log.Clear();
         solver.ThrowOnReplayedSolve = 2;
 
         Assert.That(
-            () => simulation.ReplayTo(checkpoint, recording.Operations, recording.Head),
+            () => world.ReplayTo(checkpoint, recording.Operations, recording.Head),
             Throws.InvalidOperationException.With.Message.EqualTo("replay failure"));
 
         Assert.Multiple(() =>
@@ -337,11 +321,8 @@ public sealed class AtmosClassSolverTests
         {
             SolvesSinceRestore++;
             Log.Add($"solve {SolvesSinceRestore}");
-            if (context.World.IsReplaying || IsComponentReplay(context))
-            {
-                if (SolvesSinceRestore == ThrowOnReplayedSolve)
-                    throw new InvalidOperationException("replay failure");
-            }
+            if (context.World.IsReplaying && SolvesSinceRestore == ThrowOnReplayedSolve)
+                throw new InvalidOperationException("replay failure");
         }
 
         public void OnRestored()
@@ -349,11 +330,6 @@ public sealed class AtmosClassSolverTests
             Restores++;
             SolvesSinceRestore = 0;
             Log.Add("restored");
-        }
-
-        private static bool IsComponentReplay(AtmosWorldSolverContext context)
-        {
-            return context.Simulations.Any(static simulation => simulation.IsReplaying);
         }
     }
 }

@@ -246,16 +246,16 @@ public sealed class AtmosChunkFieldStorageTests
         captured[0] = 11;
         kernel.GetOrCreateChunkField(Int3.Zero, Transient)[0] = 3f;
         var checkpoint = kernel.CaptureCheckpoint();
-        var hash = kernel.ComputeStateHash();
+        var hash = checkpoint.ComputeStateHash();
 
         captured[0] = 12;
-        kernel.RestoreCheckpoint(checkpoint);
+        kernel.RestoreCheckpoint(checkpoint, kernel.TickCount);
 
         Assert.Multiple(() =>
         {
             Assert.That(kernel.GetOrCreateChunkField(Int3.Zero, Captured)[0], Is.EqualTo(11));
             Assert.That(kernel.GetOrCreateChunkField(Int3.Zero, Transient)[0], Is.Zero);
-            Assert.That(kernel.ComputeStateHash(), Is.EqualTo(hash));
+            Assert.That(kernel.CaptureCheckpoint().ComputeStateHash(), Is.EqualTo(hash));
         });
     }
 

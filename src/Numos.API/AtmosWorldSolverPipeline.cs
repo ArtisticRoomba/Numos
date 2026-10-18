@@ -1,5 +1,4 @@
 using JetBrains.Annotations;
-using Numos.CoreSim.Replay;
 using Numos.CoreSim.Solvers;
 
 namespace Numos.API;
@@ -11,14 +10,13 @@ namespace Numos.API;
 ///     The enabled stage list is captured before each tick. Pipeline edits made by a running stage take effect on the
 ///     next tick. Solver delegates and <see cref="IAtmosWorldSolver" /> instances remain caller-owned.
 ///     Stage names, kinds, order, and neighbor-selection keys are checkpointed and must match on restore, so adding,
-///     removing, or resetting stages is rejected while the world or any of its simulations is recording or replaying.
+///     removing, or resetting stages is rejected while the world is recording or replaying.
 ///     Enabling and disabling stages is allowed then and is recorded.
 /// </remarks>
 public sealed class AtmosWorldSolverPipeline
 {
     private readonly List<WorldSolverRegistration> _steps = [];
     private readonly AtmosWorld _world;
-    private AtmosSolverCheckpoint[] _checkpointSteps = [];
     private WorldSolverRegistration[] _enabledSteps = [];
 
     // The world dependency epoch every registration in _enabledSteps was injected at, or -1. Republishing the steps
@@ -147,7 +145,7 @@ public sealed class AtmosWorldSolverPipeline
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="name" /> is <see langword="null" />.</exception>
     /// <exception cref="ArgumentException"><paramref name="name" /> is empty or whitespace.</exception>
-    /// <exception cref="InvalidOperationException">The world or one of its simulations is recording or replaying.</exception>
+    /// <exception cref="InvalidOperationException">The world is recording or replaying.</exception>
     /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
     [PublicAPI]
     public bool Unregister(string name)
@@ -206,7 +204,7 @@ public sealed class AtmosWorldSolverPipeline
     ///     Restores the built-in stages in their default order and enabled state, discarding any custom
     ///     registrations.
     /// </summary>
-    /// <exception cref="InvalidOperationException">The world or one of its simulations is recording or replaying.</exception>
+    /// <exception cref="InvalidOperationException">The world is recording or replaying.</exception>
     /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
     [PublicAPI]
     public void ResetToDefaults()
@@ -318,11 +316,6 @@ public sealed class AtmosWorldSolverPipeline
             _steps[index].InstallTopology(compiled[index]);
     }
 
-    internal AtmosSolverCheckpoint[] CaptureCheckpointSteps()
-    {
-        return Volatile.Read(ref _checkpointSteps);
-    }
-
     /// <summary>
     ///     Calls <see cref="IAtmosWorldSolver.OnRestored" /> on every custom class solver, enabled or not, in pipeline
     ///     order.
@@ -431,13 +424,6 @@ public sealed class AtmosWorldSolverPipeline
     {
         _enabledSteps = _steps.Where(static step => step.IsEnabled).ToArray();
         _injectedEpoch = -1;
-        Volatile.Write(
-            ref _checkpointSteps,
-            _steps.Select(static step => new AtmosSolverCheckpoint(
-                step.Name,
-                step.Kind == AtmosWorldSolverKind.Custom,
-                step.IsEnabled,
-                step.Selection?.Key)).ToArray());
     }
 }
 

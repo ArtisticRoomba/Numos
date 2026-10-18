@@ -1,13 +1,12 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
-using Numos.CoreSim.Replay;
 using Numos.CoreSim.Solvers;
 using Numos.Maths;
 
 namespace Numos.CoreSim;
 
 /// <summary>
-///     Owns one simulation's chunk storage, recording and checkpoint state, and built-in solver stages.
+///     Owns one simulation's chunk storage, grid checkpoints, and built-in solver stages.
 /// </summary>
 internal sealed partial class AtmosKernel : IDisposable
 {
@@ -15,7 +14,6 @@ internal sealed partial class AtmosKernel : IDisposable
     // Reused before minting a new id, so DenseId stays bounded by peak concurrent chunk count rather
     // than growing forever. See AtmosChunk.DenseId's remarks on why recycling ids is safe.
     private readonly Stack<int> _freeChunkDenseIds = new();
-    private readonly List<AtmosRecordedOperation> _recordedOperations = [];
 
     /// <summary>
     ///     High-resolution timestamp ticks spent processing boundary flow since the latest elapsed-time update.
@@ -31,13 +29,8 @@ internal sealed partial class AtmosKernel : IDisposable
     private long _chunkCollectionRevision;
     private ConcurrentDictionary<Int3, AtmosChunk> _chunkMap = new();
     private AtmosConfigSnapshot _config = new AtmosConfig().CreateSnapshot();
-    private bool _hasRecording;
-    private bool _isRecording;
     private bool _isTickExecuting;
-    private ulong _lastOperationSequence;
     private int _nextChunkDenseId;
-    private AtmosTimelinePosition _recordingHead;
-    private AtmosTimelinePosition _recordingStart;
 
     internal AtmosKernel(
         int chunkWidth = AtmosChunkConstants.DefaultWidth,

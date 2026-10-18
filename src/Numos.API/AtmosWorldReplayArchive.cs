@@ -93,31 +93,19 @@ public sealed class AtmosWorldReplayArchive
             yield return $"custom world solver '{solver.Name}'";
 
         foreach (var simulation in checkpoint.Simulations)
-        {
-            foreach (var configuration in simulation.Checkpoint.Config.SolverConfigurations)
-                yield return $"solver configuration '{configuration.Key}' in simulation {simulation.Simulation}";
-
-            foreach (var chunk in simulation.Checkpoint.Chunks)
-            foreach (var array in chunk.SolverArrays)
-                yield return $"solver array '{array.Key}' in simulation {simulation.Simulation}, chunk {chunk.Position}";
-        }
+        foreach (var chunk in simulation.Checkpoint.Chunks)
+        foreach (var array in chunk.SolverArrays)
+            yield return $"solver array '{array.Key}' in simulation {simulation.Simulation}, chunk {chunk.Position}";
 
         foreach (var configuration in checkpoint.Config.SolverConfigurations)
             yield return $"world solver configuration '{configuration.Key}'";
 
         foreach (var recorded in recording.Operations)
         {
-            var config = recorded.Operation switch
-            {
-                SetAtmosWorldConfigOperation worldConfig => worldConfig.Config,
-                AtmosWorldSimulationOperation { Operation: SetAtmosConfigOperation simulationConfig } => simulationConfig.Config,
-                _ => null
-            };
-
-            if (config == null)
+            if (recorded.Operation is not SetAtmosWorldConfigOperation config)
                 continue;
 
-            foreach (var configuration in config.SolverConfigurations)
+            foreach (var configuration in config.Config.SolverConfigurations)
                 yield return $"recorded solver configuration '{configuration.Key}'";
         }
     }

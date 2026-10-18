@@ -15,7 +15,7 @@ public sealed class AtmosWorldCheckpoint
     /// <summary>
     ///     Identifies the in-memory world checkpoint schema.
     /// </summary>
-    public const int CurrentFormatVersion = 4;
+    public const int CurrentFormatVersion = 5;
 
     // See AtmosSimulationCheckpoint: immutable after construction, so the digest is computed once.
     private ulong _digest;
@@ -144,7 +144,7 @@ public readonly record struct AtmosWorldSolverCheckpoint(
 ///     Associates one stable world registration with its independent voxel-storage checkpoint.
 /// </summary>
 /// <param name="Simulation">The stable simulation registration.</param>
-/// <param name="Checkpoint">The simulation-owned chunk and solver continuation state.</param>
+/// <param name="Checkpoint">The simulation-owned grid state: chunk data and rollback solver arrays.</param>
 public sealed record AtmosWorldSimulationCheckpoint(
     AtmosSimulationId Simulation,
     AtmosSimulationCheckpoint Checkpoint);

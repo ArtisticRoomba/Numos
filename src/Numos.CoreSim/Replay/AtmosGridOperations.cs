@@ -106,17 +106,6 @@ public sealed record SleepChunkOperation(Int3 Position) : AtmosOperation
 }
 
 /// <summary>
-///     Changes participation of a pre-registered solver without changing its definition or order.
-/// </summary>
-/// <param name="Name">Ordinal stable solver identity.</param>
-/// <param name="Enabled">Whether the solver should run in subsequent ticks.</param>
-public sealed record SetSolverEnabledOperation(string Name, bool Enabled) : AtmosOperation
-{
-    /// <inheritdoc />
-    public override AtmosOperationCode Code => AtmosOperationCode.SetSolverEnabled;
-}
-
-/// <summary>
 ///     Sets a voxel's resolved gas and thermal state, including caches and channel order, independent of detached
 ///     mixture identity.
 /// </summary>

@@ -35,11 +35,11 @@ public class StateBenchmarks : ScalingBenchmark
     /// <summary>
     ///     Hashes authoritative state in canonical order.
     /// </summary>
-    /// <returns>The computed state hash.</returns>
+    /// <returns>The computed grid digest.</returns>
     [Benchmark]
-    public AtmosStateHash Hash()
+    public ulong Hash()
     {
-        return _workload.Kernel.ComputeStateHash();
+        return _workload.Kernel.CaptureCheckpoint().ComputeStateHash();
     }
 
     /// <summary>
@@ -48,7 +48,7 @@ public class StateBenchmarks : ScalingBenchmark
     [Benchmark]
     public void Restore()
     {
-        _workload.Kernel.RestoreCheckpoint(_workload.Initial);
+        _workload.Kernel.RestoreCheckpoint(_workload.Initial, SimulationWorkload.InitialTickCount);
     }
 
     /// <summary>

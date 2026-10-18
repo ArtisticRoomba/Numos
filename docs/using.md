@@ -162,8 +162,8 @@ The supported view returns value-only cell references. A measured hot path can r
 dangerous APIs, the solver must repair every cache, sleep, and revision invariant affected by raw writes — including
 waking any chunk it touched, since a raw span write does not do that automatically.
 
-World checkpoints include each simulation checkpoint, link-set generations and lifecycle state, and the applied topology
-version:
+World checkpoints include time, configuration, solver enablement, each simulation's grid checkpoint, link-set
+generations and lifecycle state, and the applied topology version:
 
 ```csharp
 AtmosWorldCheckpoint checkpoint = world.CaptureCheckpoint();
@@ -573,10 +573,13 @@ The dangerous surface may bypass validation and is allowed to change more aggres
 
 ## Recording and deterministic replay
 
-`AtmosSimulation` supports synchronous mutation recording, full grid checkpoints, restore into an existing compatible
-simulation, exact tick/sequence replay and stable state hashes. `AtmosReplayTimeline` retains history for inspection and
-can continue simulation from a selected historical state. The Viewer layers session-only branches over the world
-timeline and can export the selected branch as a linear replay.
+`AtmosWorld` owns recording and replay: synchronous mutation recording across every registered simulation, complete
+checkpoints, restore into an existing compatible world, exact tick/sequence replay and stable state hashes. A single
+grid is just a one-simulation world, so use `simulation.World` (or create the world yourself). `AtmosSimulation`
+still has grid-only `CaptureCheckpoint` and `RestoreCheckpoint` for quick rollback of one grid outside a recording.
+`AtmosWorldReplayTimeline` retains history for inspection and can continue simulation from a selected historical
+state. The Viewer layers session-only branches over the world timeline and can export the selected branch as a linear
+replay.
 See [deterministic replay](deterministic_replay.md)
 for examples, the optional `Numos.Serialization` and `Numos.Serialization.FileSystem` packages, compatibility rules,
 detached-mixture scope and benchmark commands.

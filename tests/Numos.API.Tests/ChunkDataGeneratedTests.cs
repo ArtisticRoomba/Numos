@@ -101,28 +101,28 @@ public sealed class ChunkDataGeneratedTests
         });
 
         simulation.Tick();
-        var checkpoint = simulation.CaptureCheckpoint();
-        simulation.StartRecording();
+        var checkpoint = simulation.World.CaptureCheckpoint();
+        simulation.World.StartRecording();
         simulation.Tick();
         simulation.Tick();
-        var recording = simulation.StopRecording();
-        var expected = simulation.ComputeStateHash();
+        var recording = simulation.World.StopRecording();
+        var expected = simulation.World.ComputeStateHash();
 
-        var keys = checkpoint.Chunks.Single().SolverArrays.Select(array => array.Key).ToList();
+        var keys = checkpoint.Simulations.Single().Checkpoint.Chunks.Single().SolverArrays.Select(array => array.Key).ToList();
         Assert.That(keys, Does.Contain(GeneratedFireData.Exposure.Key));
         Assert.That(keys, Does.Contain(GeneratedFireData.BurnCount.Key));
         Assert.That(keys, Does.Not.Contain(GeneratedFireData.Scratch.Key));
         Assert.That(simulation.GetChunkField(handle, GeneratedFireData.Scratch)[0], Is.EqualTo(3));
 
-        simulation.RestoreCheckpoint(checkpoint);
+        simulation.World.RestoreCheckpoint(checkpoint);
         Assert.That(simulation.GetChunkField(handle, GeneratedFireData.Scratch)[0], Is.Zero);
         Assert.That(simulation.GetChunkField(handle, GeneratedFireData.BurnCount)[0], Is.EqualTo(1));
 
-        simulation.ReplayTo(checkpoint, recording.Operations, expected.Position);
+        simulation.World.ReplayTo(checkpoint, recording.Operations, expected.Position);
 
         Assert.Multiple(() =>
         {
-            Assert.That(simulation.ComputeStateHash(), Is.EqualTo(expected));
+            Assert.That(simulation.World.ComputeStateHash(), Is.EqualTo(expected));
             Assert.That(simulation.GetChunkField(handle, GeneratedFireData.BurnCount)[0], Is.EqualTo(3));
             Assert.That(simulation.GetChunkField(handle, GeneratedFireData.Exposure)[1], Is.EqualTo(6f));
         });

@@ -24,8 +24,8 @@ namespace Numos.API;
 ///         Lookups never lock: each change publishes a new immutable table, and <see cref="Get{T}" /> and
 ///         <see cref="TryGet{T}" /> read whichever table is current. That makes them safe from any thread, including
 ///         <c>Parallel.For</c> workers inside a solver callback. Changes take <see cref="AtmosWorld" />'s lock and are
-///         rejected during a tick and while the world or any of its simulations is recording or replaying, because a
-///         solver that resolves a different service halfway through a recording would not replay the same way.
+///         rejected during a tick and while the world is recording or replaying, because a solver that resolves a
+///         different service halfway through a recording would not replay the same way.
 ///     </para>
 /// </remarks>
 /// <example>
@@ -60,7 +60,7 @@ public sealed class AtmosWorldServices
     /// <exception cref="ArgumentNullException"><paramref name="instance" /> is <see langword="null" />.</exception>
     /// <exception cref="ArgumentException">A service is already registered under <typeparamref name="T" />.</exception>
     /// <exception cref="InvalidOperationException">
-    ///     A tick is running, or the world or one of its simulations is recording or replaying.
+    ///     A tick is running, or the world is recording or replaying.
     /// </exception>
     /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
     /// <example>
@@ -100,7 +100,7 @@ public sealed class AtmosWorldServices
     ///     holding it.
     /// </remarks>
     /// <exception cref="InvalidOperationException">
-    ///     A tick is running, or the world or one of its simulations is recording or replaying.
+    ///     A tick is running, or the world is recording or replaying.
     /// </exception>
     /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
     [PublicAPI]

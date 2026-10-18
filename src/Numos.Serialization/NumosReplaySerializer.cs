@@ -23,9 +23,8 @@ namespace Numos.Serialization;
 ///     <c>tests/Numos.Serialization.Tests/ReplayWireFormatGoldenTests.cs</c> for the byte-level pin that codec must not
 ///     silently drift from.
 ///     <para>
-///         <see cref="SetAtmosConfigOperation" /> (nested config snapshot) and
-///         <see cref="SetVoxelMixtureOperation" /> (variable-length gas list) don't fit the generator's mechanical
-///         field-order mapping, so they register as <c>Custom</c>: the generator plugs calls to the hand-written
+///         <see cref="SetVoxelMixtureOperation" /> (variable-length gas list) doesn't fit the generator's mechanical
+///         field-order mapping, so it registers as <c>Custom</c>: the generator plugs calls to the hand-written
 ///         <c>Write{Name}</c>/<c>Read{Name}</c> methods below into the same generated dispatch table, rather than
 ///         generating their bodies.
 ///     </para>
@@ -43,8 +42,6 @@ namespace Numos.Serialization;
 [WireOperation(typeof(AddGasToVoxelOperation), AtmosOperationCode.AddGasToVoxel)]
 [WireOperation(typeof(WakeChunkOperation), AtmosOperationCode.WakeChunk)]
 [WireOperation(typeof(SleepChunkOperation), AtmosOperationCode.SleepChunk)]
-[WireOperation(typeof(SetSolverEnabledOperation), AtmosOperationCode.SetSolverEnabled)]
-[WireOperation(typeof(SetAtmosConfigOperation), AtmosOperationCode.SetAtmosConfig, Custom = true)]
 [WireOperation(typeof(SetVoxelMixtureOperation), AtmosOperationCode.SetVoxelMixture, Custom = true)]
 internal static partial class NumosReplaySerializer
 {
@@ -261,7 +258,7 @@ internal static partial class NumosReplaySerializer
     }
 
     /// <summary>
-    ///     Writes one simulation checkpoint nested in a world checkpoint.
+    ///     Writes one simulation's grid checkpoint nested in a world checkpoint.
     /// </summary>
     internal static void WriteSimulationCheckpoint(BinaryWriter writer, AtmosSimulationCheckpoint checkpoint)
     {
@@ -269,17 +266,6 @@ internal static partial class NumosReplaySerializer
         writer.Write(checkpoint.CompatibilityVersion);
         writer.Write(checkpoint.CompatibilityFingerprint);
         WriteInt3(writer, checkpoint.Dimensions);
-        WritePosition(writer, checkpoint.Position);
-        WriteConfig(writer, checkpoint.Config);
-        writer.Write(checkpoint.Solvers.Count);
-        foreach (var solver in checkpoint.Solvers)
-        {
-            WriteString(writer, solver.Name);
-            writer.Write(solver.IsCustom);
-            writer.Write(solver.Enabled);
-            WriteNullableString(writer, solver.NeighborSelectionKey);
-        }
-
         writer.Write(checkpoint.Chunks.Count);
         foreach (var chunk in checkpoint.Chunks) WriteChunk(writer, chunk);
     }
@@ -287,7 +273,7 @@ internal static partial class NumosReplaySerializer
     /// <summary>
     ///     Reads one simulation checkpoint written by <see cref="WriteSimulationCheckpoint" />.
     /// </summary>
-    internal static AtmosSimulationCheckpoint ReadSimulationCheckpoint(BinaryReader reader, NumosReplayReadOptions options)
+    internal static AtmosSimulationCheckpoint ReadSimulationCheckpoint(BinaryReader reader)
     {
         int format = reader.ReadInt32();
         if (format != AtmosSimulationCheckpoint.CurrentFormatVersion)
@@ -299,26 +285,10 @@ internal static partial class NumosReplaySerializer
 
         ulong fingerprint = reader.ReadUInt64();
         var dimensions = ReadInt3(reader);
-        var position = ReadPosition(reader);
-        var config = ReadConfig(reader, options);
-        int solverCount = ReadCount(reader, 1024, "solver");
-        var solvers = new AtmosSolverCheckpoint[solverCount];
-        for (int index = 0; index < solverCount; index++)
-        {
-            string name = ReadString(reader, options);
-            bool isCustom = reader.ReadBoolean();
-            bool enabled = reader.ReadBoolean();
-            string? selectionKey = ReadNullableString(reader, options);
-            if (string.IsNullOrWhiteSpace(name) || selectionKey != null && string.IsNullOrWhiteSpace(selectionKey))
-                throw new InvalidDataException("The solver checkpoint metadata is invalid.");
-
-            solvers[index] = new AtmosSolverCheckpoint(name, isCustom, enabled, selectionKey);
-        }
-
         int chunkCount = ReadCount(reader, 1_000_000, "chunk");
         var chunks = new AtmosChunkCheckpoint[chunkCount];
         for (int index = 0; index < chunkCount; index++) chunks[index] = ReadChunk(reader);
-        var checkpoint = new AtmosSimulationCheckpoint(dimensions, position, config, solvers, chunks);
+        var checkpoint = new AtmosSimulationCheckpoint(dimensions, chunks);
         if (fingerprint != checkpoint.CompatibilityFingerprint)
             throw new InvalidDataException("The simulation checkpoint schema or compatibility fingerprint is invalid.");
 
@@ -435,16 +405,6 @@ internal static partial class NumosReplaySerializer
         if (TryReadGeneratedOperation(reader, rawCode, options, out var generated)) return generated!;
 
         throw new InvalidDataException($"Replay opcode {rawCode} is unsupported.");
-    }
-
-    private static void WriteSetAtmosConfigOperation(BinaryWriter writer, SetAtmosConfigOperation operation)
-    {
-        WriteConfig(writer, operation.Config);
-    }
-
-    private static SetAtmosConfigOperation ReadSetAtmosConfigOperation(BinaryReader reader, NumosReplayReadOptions options)
-    {
-        return new SetAtmosConfigOperation(ReadConfig(reader, options));
     }
 
     private static void WriteSetVoxelMixtureOperation(BinaryWriter writer, SetVoxelMixtureOperation operation)

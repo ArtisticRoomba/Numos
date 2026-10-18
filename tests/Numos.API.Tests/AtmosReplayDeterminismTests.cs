@@ -1,6 +1,5 @@
 using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Primitives;
-using Numos.CoreSim.Replay;
 using Numos.Maths;
 
 namespace Numos.API.Tests;
@@ -11,7 +10,7 @@ public sealed class AtmosReplayDeterminismTests
     [Test]
     public void Replay_ReproducesRecordedStateHashes()
     {
-        using var simulation = new AtmosSimulation(
+        using var world = new AtmosWorld(
             new AtmosConfig
             {
                 GasRegistry =
@@ -20,34 +19,32 @@ public sealed class AtmosReplayDeterminismTests
                     new GasProperties { Name = "B", MolarHeatCapacityAtConstantVolume = 30f }
                 ],
                 SleepThreshold = 8
-            },
-            4,
-            3,
-            2);
+            });
 
-        var initial = simulation.CaptureCheckpoint();
-        simulation.StartRecording();
+        var simulation = world.CreateSimulation(4, 3, 2);
+        var initial = world.CaptureCheckpoint();
+        world.StartRecording();
         var first = simulation.CreateAndRegisterChunk(default);
         var second = simulation.CreateAndRegisterChunk(Int3.NegX);
         simulation.AddGasToVoxel(first, 0, 1, 1f, 410f);
         simulation.AddGasToVoxel(first, 0, 0, 5f, 290f);
         simulation.AddGasToVoxel(second, 3, 0, 2f, 310f);
-        var references = new List<AtmosStateHash>();
+        var references = new List<AtmosWorldStateHash>();
         for (int tick = 0; tick < 12; tick++)
         {
             if (tick == 3) simulation.SetVoxelTemperature(first, 1, 350f);
             if (tick == 5) simulation.SetVoxelClassification(second, 4, VoxelClassification.RoomSolid);
-            if (tick == 7) simulation.SetAtmosConfig(new AtmosConfig(simulation.Config) { ThermalConductance = 0.2f });
+            if (tick == 7) world.SetAtmosConfig(new AtmosConfig(world.Config) { ThermalConductance = 0.2f });
             if (tick == 9) simulation.SleepChunk(second);
-            simulation.Tick();
-            if (tick % 4 == 3) references.Add(simulation.ComputeStateHash());
+            world.Tick();
+            if (tick % 4 == 3) references.Add(world.ComputeStateHash());
         }
 
-        var recording = simulation.StopRecording();
+        var recording = world.StopRecording();
         foreach (var hash in references)
         {
-            simulation.ReplayTo(initial, recording.Operations, hash.Position);
-            Assert.That(simulation.ComputeStateHash(), Is.EqualTo(hash));
+            world.ReplayTo(initial, recording.Operations, hash.Position);
+            Assert.That(world.ComputeStateHash(), Is.EqualTo(hash));
         }
     }
 }

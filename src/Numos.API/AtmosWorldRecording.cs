@@ -58,10 +58,10 @@ public abstract record AtmosWorldOperation
 }
 
 /// <summary>
-///     Qualifies an existing component operation with its owning simulation.
+///     Qualifies a grid operation with the simulation it applies to.
 /// </summary>
 /// <param name="Simulation">The exact simulation registration that receives the operation.</param>
-/// <param name="Operation">The immutable component operation payload.</param>
+/// <param name="Operation">The immutable grid operation payload.</param>
 public sealed record AtmosWorldSimulationOperation(
     AtmosSimulationId Simulation,
     AtmosOperation Operation) : AtmosWorldOperation
@@ -173,7 +173,7 @@ public sealed record SetAtmosWorldSolverEnabledOperation(string Name, bool Enabl
 /// <param name="Operation">The detached immutable operation payload.</param>
 public sealed record AtmosWorldRecordedOperation(
     AtmosTimelinePosition Position,
-    AtmosWorldOperation Operation) : IReplayHistoryEntry
+    AtmosWorldOperation Operation)
 {
     /// <summary>
     ///     Gets the number of completed ticks after which the operation occurred.
@@ -189,8 +189,6 @@ public sealed record AtmosWorldRecordedOperation(
     ///     Gets the operation's stable code.
     /// </summary>
     public AtmosWorldOperationCode Code => Operation.Code;
-
-    bool IReplayHistoryEntry.HasOperation => Operation != null;
 }
 
 /// <summary>

@@ -23,17 +23,6 @@ internal sealed partial class AtmosKernel
         }
     }
 
-    internal bool IsRecording
-    {
-        get
-        {
-            lock (StateGate)
-            {
-                return _isRecording;
-            }
-        }
-    }
-
     /// <summary>
     ///     Returns a detached list of the currently registered chunk-grid positions.
     /// </summary>
@@ -129,44 +118,18 @@ internal sealed partial class AtmosKernel
     }
 
     /// <summary>
-    ///     Applies a detached configuration used by subsequent simulation operations.
-    /// </summary>
-    /// <param name="config">The detached configuration to apply.</param>
-    /// <returns><see langword="true" /> when the configuration changed; only a change is recorded.</returns>
-    /// <exception cref="ArgumentNullException"><paramref name="config" /> is <see langword="null" />.</exception>
-    internal bool SetAtmosConfig(AtmosConfigSnapshot config)
-    {
-        lock (StateGate)
-        {
-            ArgumentNullException.ThrowIfNull(config);
-            config.ValidateGasRegistry();
-            bool changed = !_config.SemanticallyEquals(config);
-            _config = config;
-            if (changed && ShouldRecord)
-                RecordOperation(new SetAtmosConfigOperation(config));
-
-            return changed;
-        }
-    }
-
-    /// <summary>
-    ///     Applies world-shared configuration without recording a second host operation.
+    ///     Applies the owning world's detached configuration to subsequent simulation operations.
     /// </summary>
     /// <param name="config">The detached canonical configuration.</param>
-    /// <returns><see langword="true" /> when the configuration changed.</returns>
-    /// <remarks>
-    ///     World recording owns one shared configuration operation. Applying the same snapshot to each kernel through
-    ///     this path prevents the component recorder from emitting a duplicate operation for every simulation.
-    /// </remarks>
-    internal bool SetAtmosConfigWithoutRecording(AtmosConfigSnapshot config)
+    /// <remarks>Configuration is world state, so the world records the change, not the kernel.</remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="config" /> is <see langword="null" />.</exception>
+    internal void SetAtmosConfig(AtmosConfigSnapshot config)
     {
         lock (StateGate)
         {
             ArgumentNullException.ThrowIfNull(config);
             config.ValidateGasRegistry();
-            bool changed = !_config.SemanticallyEquals(config);
             _config = config;
-            return changed;
         }
     }
 
@@ -191,71 +154,6 @@ internal sealed partial class AtmosKernel
         lock (StateGate)
         {
             return _config;
-        }
-    }
-
-    internal void RecordSolverEnablement(string name, bool enabled)
-    {
-        lock (StateGate)
-        {
-            if (_isRecording && !_isApplyingOperation && !_isTickExecuting)
-                RecordOperation(new SetSolverEnabledOperation(name, enabled));
-        }
-    }
-
-    internal void StartRecording()
-    {
-        lock (StateGate)
-        {
-            ThrowIfTickExecuting("start recording");
-            if (_isRecording)
-                throw new InvalidOperationException("The simulation is already recording.");
-
-            _recordedOperations.Clear();
-            _recordingStart = new AtmosTimelinePosition(checked((ulong)TickCount), _lastOperationSequence);
-            _recordingHead = _recordingStart;
-            _hasRecording = true;
-            _isRecording = true;
-        }
-    }
-
-    internal AtmosRecording CaptureRecording()
-    {
-        lock (StateGate)
-        {
-            if (!_hasRecording)
-                throw new InvalidOperationException("The simulation has no recording to capture.");
-
-            var head = _isRecording
-                ? new AtmosTimelinePosition(checked((ulong)TickCount), _lastOperationSequence)
-                : _recordingHead;
-
-            return new AtmosRecording(_recordingStart, head, _recordedOperations);
-        }
-    }
-
-    internal AtmosRecording StopRecording()
-    {
-        return StopRecording(out _);
-    }
-
-    /// <summary>
-    ///     Stops recording and hands back the head checkpoint captured for the resume guard, so a caller that needs it
-    ///     doesn't capture the grid a second time.
-    /// </summary>
-    internal AtmosRecording StopRecording(out AtmosSimulationCheckpoint head)
-    {
-        lock (StateGate)
-        {
-            ThrowIfTickExecuting("stop recording");
-            if (!_isRecording)
-                throw new InvalidOperationException("The simulation is not recording.");
-
-            _isRecording = false;
-            head = CaptureCheckpoint();
-            _stoppedRecordingHash = head.ComputeStateHash();
-            _recordingHead = new AtmosTimelinePosition(checked((ulong)TickCount), _lastOperationSequence);
-            return new AtmosRecording(_recordingStart, _recordingHead, _recordedOperations);
         }
     }
 

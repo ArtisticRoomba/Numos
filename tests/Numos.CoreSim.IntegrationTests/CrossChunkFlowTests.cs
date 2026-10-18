@@ -389,7 +389,7 @@ public sealed class CrossChunkFlowTests
                 .. sources.Select(simulation.GetChunkSnapshot)
             ];
 
-            ulong digest = simulation.ComputeStateHash().Digest;
+            ulong digest = simulation.CaptureCheckpoint().ComputeStateHash();
             expectedDigest ??= digest;
 
             Assert.Multiple(() =>

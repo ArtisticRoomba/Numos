@@ -4,19 +4,20 @@ using Numos.Maths;
 namespace Numos.CoreSim.Replay;
 
 /// <summary>
-///     Holds the detached state needed to continue a simulation from one exact timeline position.
+///     Holds the detached grid state of one simulation: its chunk dimensions and every chunk's continuation data.
 /// </summary>
 /// <remarks>
-///     Restore uses this data with an existing compatible simulation, keeping host integrations and custom solver
-///     implementations in place. The checkpoint deliberately excludes delegates, detached mixture identity, presentation
-///     state, and other host-owned state.
+///     Time, configuration, and the solver pipeline belong to the world, so they live in the containing world
+///     checkpoint rather than here. Restore uses this data with an existing compatible simulation, keeping host
+///     integrations and custom solver implementations in place. The checkpoint deliberately excludes delegates,
+///     detached mixture identity, presentation state, and other host-owned state.
 /// </remarks>
 public sealed class AtmosSimulationCheckpoint
 {
     /// <summary>
     ///     Identifies the in-memory checkpoint schema used to interpret this data.
     /// </summary>
-    public const int CurrentFormatVersion = 5;
+    public const int CurrentFormatVersion = 6;
 
     /// <summary>
     ///     Identifies the structural and deterministic-math contract required to restore this data.
@@ -28,14 +29,9 @@ public sealed class AtmosSimulationCheckpoint
     private ulong _digest;
     private volatile bool _hasDigest;
 
-    internal AtmosSimulationCheckpoint(
-        Int3 dimensions, AtmosTimelinePosition position,
-        AtmosConfigSnapshot config, AtmosSolverCheckpoint[] solvers, AtmosChunkCheckpoint[] chunks)
+    internal AtmosSimulationCheckpoint(Int3 dimensions, AtmosChunkCheckpoint[] chunks)
     {
         Dimensions = dimensions;
-        Position = position;
-        Config = config;
-        Solvers = Array.AsReadOnly(solvers);
         Chunks = Array.AsReadOnly(chunks);
         FormatVersion = CurrentFormatVersion;
 
@@ -53,7 +49,7 @@ public sealed class AtmosSimulationCheckpoint
     public int CompatibilityVersion => CurrentCompatibilityVersion;
 
     /// <summary>
-    ///     Gets the fingerprint of dimensions, compatibility version, and ordered solver identities.
+    ///     Gets the fingerprint of the compatibility version and chunk dimensions.
     /// </summary>
     public ulong CompatibilityFingerprint { get; }
 
@@ -63,35 +59,24 @@ public sealed class AtmosSimulationCheckpoint
     public Int3 Dimensions { get; }
 
     /// <summary>
-    ///     Gets the completed tick and highest external operation already incorporated.
-    /// </summary>
-    public AtmosTimelinePosition Position { get; }
-
-    /// <summary>
-    ///     Gets the immutable applied configuration, including gas definitions and reaction parameters.
-    /// </summary>
-    public AtmosConfigSnapshot Config { get; }
-
-    /// <summary>
-    ///     Gets solver identities and enable states in execution order; implementations remain host-owned.
-    /// </summary>
-    public IReadOnlyList<AtmosSolverCheckpoint> Solvers { get; }
-
-    /// <summary>
     ///     Gets complete chunk continuation data in lexicographic chunk-position order.
     /// </summary>
     public IReadOnlyList<AtmosChunkCheckpoint> Chunks { get; }
 
     /// <summary>
-    ///     Bytes in copied chunk and solver arrays, excluding managed object headers, keys, and shared configuration.
+    ///     Bytes in copied chunk and solver arrays, excluding managed object headers and keys.
     /// </summary>
     public long PayloadBytes => Chunks.Sum(static chunk => chunk.PayloadBytes);
 
     /// <summary>
-    ///     Computes this checkpoint's state hash without accessing a live simulation.
+    ///     Computes a digest of this grid state without accessing a live simulation.
     /// </summary>
-    /// <returns>The checkpoint position and non-cryptographic canonical state digest.</returns>
-    public AtmosStateHash ComputeStateHash()
+    /// <returns>A non-cryptographic FNV-1a 64-bit digest, for divergence detection rather than authentication.</returns>
+    /// <remarks>
+    ///     The digest covers grid state only. Use the owning world's state hash when timeline position, configuration,
+    ///     solver enablement, or topology must match too.
+    /// </remarks>
+    public ulong ComputeStateHash()
     {
         if (!_hasDigest)
         {
@@ -99,22 +84,9 @@ public sealed class AtmosSimulationCheckpoint
             _hasDigest = true;
         }
 
-        return new AtmosStateHash(Position, _digest);
+        return _digest;
     }
 }
-
-/// <summary>
-///     Compatible solver identity and mutable enable state; no delegate or closure is captured.
-/// </summary>
-/// <param name="Name">Ordinal stable name identifying a compatible host-provided implementation.</param>
-/// <param name="IsCustom">Whether the step is supplied by the host rather than Numos.</param>
-/// <param name="Enabled">Whether the step participates in subsequent ticks.</param>
-/// <param name="NeighborSelectionKey">The compiled-neighborhood policy key, or <see langword="null" />.</param>
-public readonly record struct AtmosSolverCheckpoint(
-    string Name,
-    bool IsCustom,
-    bool Enabled,
-    string? NeighborSelectionKey);
 
 /// <summary>
 ///     Holds the exact continuation data for one chunk.
@@ -301,23 +273,3 @@ public sealed class AtmosGasChannelCheckpoint
     /// </summary>
     public IReadOnlyList<float> Moles { get; }
 }
-
-/// <summary>
-///     Pairs a timeline position with its FNV-1a 64-bit continuation-state digest.
-/// </summary>
-/// <param name="Position">Exact timeline position incorporated into the digest.</param>
-/// <param name="Digest">Non-cryptographic FNV-1a 64-bit digest. It is for divergence detection, not authentication.</param>
-public readonly record struct AtmosStateHash(AtmosTimelinePosition Position, ulong Digest);
-
-/// <summary>
-///     Reports the work completed by a successful fixed-tick reconstruction.
-/// </summary>
-/// <param name="Checkpoint">Position of the checkpoint restored before applying history.</param>
-/// <param name="Target">Exact reconstructed position.</param>
-/// <param name="SimulatedTicks">Number of solver ticks executed during reconstruction.</param>
-/// <param name="Elapsed">Wall-clock reconstruction time, excluded from simulation state.</param>
-public readonly record struct AtmosReplayResult(
-    AtmosTimelinePosition Checkpoint,
-    AtmosTimelinePosition Target,
-    ulong SimulatedTicks,
-    TimeSpan Elapsed);

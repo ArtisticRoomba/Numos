@@ -434,24 +434,24 @@ public sealed partial class AtmosSolverDependencyTests
         world.Solvers.Register("producer", new ProducerSolver());
         var consumer = new HandWrittenConsumer();
         world.Solvers.Register("consumer", consumer);
-        var checkpoint = simulation.CaptureCheckpoint();
-        simulation.StartRecording();
+        var checkpoint = simulation.World.CaptureCheckpoint();
+        simulation.World.StartRecording();
         simulation.Tick();
         simulation.Tick();
-        var recording = simulation.StopRecording();
-        var hash = simulation.ComputeStateHash();
+        var recording = simulation.World.StopRecording();
+        var hash = simulation.World.ComputeStateHash();
 
-        simulation.ReplayTo(checkpoint, recording.Operations, recording.Head);
-        Assert.That(simulation.ComputeStateHash(), Is.EqualTo(hash));
+        simulation.World.ReplayTo(checkpoint, recording.Operations, recording.Head);
+        Assert.That(simulation.World.ComputeStateHash(), Is.EqualTo(hash));
 
         world.Services.Unregister<IClock>();
         Assert.That(
-            () => simulation.ReplayTo(checkpoint, recording.Operations, recording.Head),
+            () => simulation.World.ReplayTo(checkpoint, recording.Operations, recording.Head),
             Throws.InvalidOperationException.With.Message.Contains("member 'Clock'"));
         Assert.Multiple(() =>
         {
             Assert.That(simulation.TickCount, Is.EqualTo(2));
-            Assert.That(simulation.ComputeStateHash(), Is.EqualTo(hash));
+            Assert.That(simulation.World.ComputeStateHash(), Is.EqualTo(hash));
         });
     }
 

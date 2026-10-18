@@ -166,23 +166,23 @@ public sealed class AtmosSolverStorageTests
         var chunk = simulation.CreateAndRegisterChunk(default);
         ChunkField<float> field = ChunkField<float>.Register(KeyPrefix + "scratch");
         var version = simulation.GetChunkSnapshot(chunk).Version;
-        var hash = simulation.ComputeStateHash();
-        simulation.StartRecording();
+        var hash = simulation.World.ComputeStateHash();
+        simulation.World.StartRecording();
 
         FlatArray<float> data = simulation.GetChunkField(chunk, field);
         data.Fill(42f);
-        var checkpoint = simulation.CaptureCheckpoint();
+        var checkpoint = simulation.World.CaptureCheckpoint();
 
         Assert.Multiple(() =>
         {
             Assert.That(simulation.GetChunkSnapshot(chunk).Version, Is.EqualTo(version));
             Assert.That(simulation.GetChunkSnapshot(chunk).IsAwake, Is.False);
             Assert.That(simulation.GetChunkSnapshot(chunk).Temperature, Is.EqualTo(new float[2]));
-            Assert.That(simulation.ComputeStateHash(), Is.EqualTo(hash));
-            Assert.That(simulation.StopRecording().Operations, Is.Empty);
+            Assert.That(simulation.World.ComputeStateHash(), Is.EqualTo(hash));
+            Assert.That(simulation.World.StopRecording().Operations, Is.Empty);
         });
 
-        simulation.RestoreCheckpoint(checkpoint);
+        simulation.World.RestoreCheckpoint(checkpoint);
         FlatArray<float> restored = simulation.GetChunkField(chunk, field);
         Assert.That(restored[0], Is.Zero);
         data[0] = 99f;

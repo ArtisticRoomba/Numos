@@ -56,12 +56,17 @@ internal sealed class SimulationWorkload : IDisposable
             new BenchmarkSolverStep(_solvers.SolveGasReactions)
         ];
 
-        Kernel.TickCount = AtmosSolverConstants.ThermodynamicsTickInterval - 1;
+        Kernel.TickCount = InitialTickCount;
         Initial = Kernel.CaptureCheckpoint();
         RefreshContext();
         BoundaryEventCount = GetBoundaryEventCount(options);
         ThermalBoundaryEdgeCount = GetThermalBoundaryEdgeCount(options);
     }
+
+    /// <summary>
+    ///     The tick <see cref="Initial" /> is restored at, one short of a thermodynamics tick.
+    /// </summary>
+    internal const int InitialTickCount = AtmosSolverConstants.ThermodynamicsTickInterval - 1;
 
     internal ScalingWorkloadOptions Options { get; }
     internal AtmosKernel Kernel { get; }
@@ -82,7 +87,7 @@ internal sealed class SimulationWorkload : IDisposable
 
     internal void Reset(int precedingStages = 0)
     {
-        Kernel.RestoreCheckpoint(Initial);
+        Kernel.RestoreCheckpoint(Initial, InitialTickCount);
         _solvers.ClearTransientState();
         Config.SolverData.Clear();
         RefreshContext();

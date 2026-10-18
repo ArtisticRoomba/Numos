@@ -71,14 +71,6 @@ internal struct AtmosStateHasher
         var hash = new AtmosStateHasher();
         hash.Add(checkpoint.CompatibilityVersion);
         hash.Add(checkpoint.Dimensions);
-        hash.Add(checkpoint.Solvers.Count);
-        foreach (var solver in checkpoint.Solvers)
-        {
-            hash.Add(solver.Name);
-            hash.Add(solver.IsCustom);
-            hash.Add(solver.NeighborSelectionKey);
-        }
-
         return hash.Value;
     }
 
@@ -87,12 +79,6 @@ internal struct AtmosStateHasher
         var hash = new AtmosStateHasher();
         hash.Add(checkpoint.FormatVersion);
         hash.Add(checkpoint.CompatibilityFingerprint);
-        hash.Add(checkpoint.Position.Tick);
-        hash.Add(checkpoint.Position.OperationSequence);
-        checkpoint.Config.AppendHash(ref hash);
-        foreach (var solver in checkpoint.Solvers)
-            hash.Add(solver.Enabled);
-
         hash.Add(checkpoint.Chunks.Count);
         foreach (var chunk in checkpoint.Chunks)
         {
