@@ -1,4 +1,3 @@
-using Numos.Collections;
 using Numos.CoreSim.Solvers;
 using Numos.Maths;
 
@@ -22,22 +21,6 @@ internal sealed partial class AtmosKernel
                 CurrentTickConfig.Capture(_config);
 
             return CurrentTickConfig.GetOrCreateGasSolverData(gasId, key, factory);
-        }
-    }
-
-    internal T[] GetOrCreateChunkSolverArray<T>(Int3 position, object key, bool captureForRollback, int? length)
-    {
-        lock (StateGate)
-        {
-            return GetChunk(position).GetOrCreateSolverArray<T>(key, captureForRollback, length);
-        }
-    }
-
-    internal FlatArray<T> GetOrCreateChunkSolverFlatArray<T>(Int3 position, object key, bool captureForRollback)
-    {
-        lock (StateGate)
-        {
-            return GetChunk(position).GetOrCreateSolverFlatArray<T>(key, captureForRollback);
         }
     }
 

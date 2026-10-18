@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
-using System.Runtime.CompilerServices;
 using JetBrains.Annotations;
 using Numos.Collections;
 using Numos.CoreSim.Datatypes.Primitives;
@@ -152,7 +151,6 @@ internal class AtmosChunk
 
     private long _generation;
     private long _revision;
-    private Dictionary<object, SolverArrayStorage>? _solverArrays;
 
     // Indexed by ChunkFieldDescriptor.Slot. Readers load the array without a lock; writers hold _fieldGate and
     // publish a grown copy instead of resizing in place.
@@ -184,8 +182,7 @@ internal class AtmosChunk
         IsVacuum.Fill(true);
     }
 
-    internal bool HasCapturedSolverArrays => Volatile.Read(ref _capturedFieldCount) > 0 ||
-                                             _solverArrays?.Values.Any(static array => array.CaptureForRollback) == true;
+    internal bool HasCapturedSolverArrays => Volatile.Read(ref _capturedFieldCount) > 0;
 
     /// <summary>
     ///     Identity and revision used by conditional snapshot consumers.
@@ -244,7 +241,6 @@ internal class AtmosChunk
         int depth = AtmosChunkConstants.DefaultDepth)
     {
         int voxelCount = GetValidatedVoxelCount(width, height, depth);
-        _solverArrays = null;
         ResetFields();
         GridPosition = position;
         IsAwake = false;
@@ -287,7 +283,6 @@ internal class AtmosChunk
     /// </remarks>
     public void Release()
     {
-        _solverArrays = null;
         ResetFields();
         if (ActiveGases != null)
         {
@@ -296,71 +291,6 @@ internal class AtmosChunk
                 ActiveGases[i].Release();
             }
         }
-    }
-
-    /// <summary>
-    ///     Gets solver storage for a key, allocating it on first use in this chunk.
-    /// </summary>
-    /// <typeparam name="T">The exact element type stored under the key.</typeparam>
-    /// <param name="key">An ordinal string key, or a reference-identity object for transient storage.</param>
-    /// <param name="captureForRollback">Whether to capture and restore the array with its chunk.</param>
-    /// <param name="length">The required array length, or null for one element per voxel.</param>
-    /// <returns>The live array, initially filled with default values.</returns>
-    /// <remarks>
-    ///     Access each chunk from one worker at a time. Arrays survive ticks and sleep, but are detached on
-    ///     initialization or release. Captured storage requires a stable string key and reference-free elements.
-    /// </remarks>
-    internal T[] GetOrCreateSolverArray<T>(object key, bool captureForRollback, int? length = null)
-    {
-        ArgumentNullException.ThrowIfNull(key);
-        int arrayLength = length ?? VoxelCount;
-        ArgumentOutOfRangeException.ThrowIfNegative(arrayLength, nameof(length));
-
-        if (captureForRollback)
-        {
-            if (key is not string name || string.IsNullOrWhiteSpace(name))
-                throw new ArgumentException("Captured solver arrays require a nonempty, stable string key.", nameof(key));
-
-            if (RuntimeHelpers.IsReferenceOrContainsReferences<T>())
-            {
-                throw new ArgumentException(
-                    "Captured solver array elements cannot contain managed references.",
-                    nameof(captureForRollback));
-            }
-        }
-
-        if (_solverArrays != null && _solverArrays.TryGetValue(key, out var existing))
-        {
-            if (existing is not SolverArrayStorage<T> typed ||
-                existing.Length != arrayLength ||
-                existing.CaptureForRollback != captureForRollback)
-            {
-                throw new InvalidOperationException(
-                    "The solver array key already has a different element type, length, or capture policy.");
-            }
-
-            return typed.Values;
-        }
-
-        var array = new T[arrayLength];
-        _solverArrays ??= new Dictionary<object, SolverArrayStorage>(SolverArrayKeyComparer.Instance);
-        _solverArrays.Add(key, new SolverArrayStorage<T>(array, captureForRollback));
-        if (captureForRollback)
-            MarkChanged();
-
-        return array;
-    }
-
-    /// <summary>
-    ///     Gets a chunk-shaped view over the same storage used by <see cref="GetOrCreateSolverArray{T}" />.
-    /// </summary>
-    /// <typeparam name="T">The exact element type stored under the key.</typeparam>
-    /// <param name="key">An ordinal string key, or a reference-identity object for transient storage.</param>
-    /// <param name="captureForRollback">Whether to capture and restore the array with its chunk.</param>
-    /// <returns>A live view with one element per voxel and the chunk's coordinate indexing.</returns>
-    internal FlatArray<T> GetOrCreateSolverFlatArray<T>(object key, bool captureForRollback)
-    {
-        return new FlatArray<T>(GetOrCreateSolverArray<T>(key, captureForRollback), Dimensions);
     }
 
     /// <summary>
@@ -460,29 +390,11 @@ internal class AtmosChunk
             }
         }
 
-        if (_solverArrays != null)
-        {
-            foreach (var (key, storage) in _solverArrays)
-            {
-                if (storage.CaptureForRollback)
-                    (captured ??= []).Add(new AtmosSolverArraySnapshot((string)key, storage));
-            }
-        }
-
         if (captured == null)
             return [];
 
         // Slot order follows static initialization order, so it must never leak into checkpoints or hashes.
         captured.Sort(static (left, right) => string.CompareOrdinal(left.Key, right.Key));
-        for (int index = 1; index < captured.Count; index++)
-        {
-            if (string.Equals(captured[index - 1].Key, captured[index].Key, StringComparison.Ordinal))
-            {
-                throw new InvalidOperationException(
-                    $"Solver array key '{captured[index].Key}' is used by both a chunk field and an object-keyed array.");
-            }
-        }
-
         return captured.ToArray();
     }
 
@@ -493,27 +405,36 @@ internal class AtmosChunk
 
         lock (_fieldGate)
         {
-            _solverArrays = null;
-            SolverArrayStorage?[]? fields = null;
-            int capturedFieldCount = 0;
+            var fields = new SolverArrayStorage?[ChunkFieldRegistry.SlotCount];
             foreach (var snapshot in snapshots)
             {
                 var storage = snapshot.Materialize();
-                if (storage.Field is not { } field)
-                {
-                    _solverArrays ??= new Dictionary<object, SolverArrayStorage>(SolverArrayKeyComparer.Instance);
-                    _solverArrays.Add(snapshot.Key, storage);
-                    continue;
-                }
+                if (storage.Field == null)
+                    storage = storage.WithField(ResolveField(snapshot.Key, storage));
 
-                fields ??= new SolverArrayStorage?[ChunkFieldRegistry.SlotCount];
-                fields[field.Slot] = storage;
-                capturedFieldCount++;
+                fields[storage.Field!.Slot] = storage;
             }
 
             Volatile.Write(ref _fields, fields);
-            Volatile.Write(ref _capturedFieldCount, capturedFieldCount);
+            Volatile.Write(ref _capturedFieldCount, snapshots.Count);
         }
+    }
+
+    // Snapshots captured in this process carry their descriptor. One built from saved data only has its key, so it
+    // can only come back if something in this process registered a matching rollback field.
+    private ChunkFieldDescriptor ResolveField(string key, SolverArrayStorage storage)
+    {
+        if (!ChunkFieldRegistry.TryGetByKey(key, out var field) ||
+            field.ElementType != storage.ElementType ||
+            !field.CaptureForRollback ||
+            field.GetLength(VoxelCount) != storage.Length)
+        {
+            throw new InvalidOperationException(
+                $"Captured solver array '{key}' ({storage.ElementType.FullName}, {storage.Length} elements) " +
+                "does not match a registered rollback chunk field.");
+        }
+
+        return field;
     }
 
     /// <summary>

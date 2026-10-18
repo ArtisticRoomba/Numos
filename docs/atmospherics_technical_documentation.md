@@ -101,7 +101,8 @@ The dangerous package must be referenced separately and imported through `Numos.
 `simulation.Dangerous()`. Every custom solver is registered through `simulation.World.Solvers` and receives an
 `AtmosWorldSolverContext`. Most solvers use its simulations' detached snapshots and validated mutations; a measured hot
 path can call `simulation.Dangerous().GetChunk(handle)` from that callback to obtain stack-scoped live chunk and
-gas-channel spans (example in §12.4).
+gas-channel spans, or `chunk.Dangerous()` on an `AtmosSolverChunk` view from `context.Chunks(simulation)` (examples in
+§12.4).
 
 The dangerous views are `ref struct` values and never expose the internal `AtmosChunk` or `GasChannel` CLR types. They
 are safest inside a solver callback, where the simulation already prevents concurrent tick and chunk-lifecycle
@@ -882,7 +883,7 @@ Host stages are registered and run exactly like the built-in ones; §4.2 shows t
 
 Custom stages share typed dependencies through `simulation.GetOrCreateSolverData<T>(key, factory)`. Slots use ordinal
 string keys or object identity and survive ticks and pipeline edits. Restore discards these transient values, so stages
-must reacquire them on each callback.
+must reacquire them on each callback. Per-chunk state that has to roll back belongs in a `ChunkField<T>` instead (§12.3).
 
 Shared data does not schedule stages; producers and consumers still need explicit pipeline ordering. See
 [sharing dependencies](using.md#sharing-dependencies-between-solvers) for examples, ownership, and threading
@@ -923,59 +924,103 @@ reactionSolver.Config.Rate = 0.5f;
 The registered method retains the solver instance, so its typed configuration stays editable after registration.
 The pipeline does not own or dispose custom solvers; callers remain responsible for an `IDisposable` solver's lifetime.
 
-### 12.3 Chunk-owned solver arrays
+### 12.3 Per-chunk solver state with `ChunkField<T>`
 
-Solvers can keep private arrays on each chunk and let Numos roll their state back automatically. Every request must
-choose `captureForRollback`: `true` includes the array in snapshots, checkpoints, restoration, and state hashes;
-`false` keeps it as transient scratch storage.
+Solvers often need their own per-voxel or per-chunk state, such as fire exposure or a burn counter. A `ChunkField<T>`
+names one kind of that storage. Each chunk gets its own array for the field, and rollback fields come back
+automatically on restore.
 
-`GetOrCreateChunkSolverArray<T>(chunk, key, captureForRollback, length)` allocates a regular array on first use and
-returns it on later calls. Omitting `length` allocates one element per voxel; an explicit length can be any nonnegative
-size. `GetOrCreateChunkSolverFlatArray<T>(chunk, key, captureForRollback)` wraps the same storage with the chunk's
-dimensions. A key's element type, length, and capture policy must match on every request.
-
-Captured fields require a nonempty string key, unique to the solver field, such as `fire/burn-count`. Strings use
-ordinal equality, so a compatible solver can reacquire restored data in another simulation without sharing the original
-key object. Transient fields can also use retained object keys, which compare by reference identity.
+Declare fields once, in `static readonly` members:
 
 ```csharp
-simulation.World.Solvers.Register("fire-v1", context =>
+static class FireData
 {
-    AtmosSimulation simulation = context.Simulations[0];
-    foreach (var chunk in simulation.GetChunkHandles())
-    {
-        var exposure = simulation.GetOrCreateChunkSolverFlatArray<float>(
-            chunk, "fire/exposure", captureForRollback: true);
-        exposure[new Int3(0, 0, 0)] += 1f;
+    // Captured in checkpoints and state hashes, restored on rollback.
+    public static readonly ChunkField<float> Exposure =
+        ChunkField<float>.Register("my-mod/fire/exposure", rollback: true);
 
-        float[] scratch = simulation.GetOrCreateChunkSolverArray<float>(
-            chunk, "fire/scratch", captureForRollback: false);
-        Array.Clear(scratch);
+    // One fixed-size array per chunk instead of one element per voxel.
+    public static readonly ChunkField<int> BurnCount =
+        ChunkField<int>.Register("my-mod/fire/burn-count", rollback: true, length: 1);
+
+    // Scratch storage nobody else can look up. Never captured.
+    public static readonly ChunkField<float> Scratch = ChunkField<float>.CreatePrivate("fire scratch");
+}
+```
+
+Solvers reach the storage through the tick context. `context.Chunks(simulation)` returns a view per chunk, and
+`chunk.Get(field)` or `chunk.GetSpan(field)` returns the live array:
+
+```csharp
+world.Solvers.Register("my-mod/fire", context =>
+{
+    foreach (AtmosSimulation simulation in context.Simulations)
+    {
+        AtmosSolverChunks chunks = context.Chunks(simulation);
+        Parallel.For(0, chunks.Count, index =>
+        {
+            AtmosSolverChunk chunk = chunks[index];
+            Span<float> exposure = chunk.GetSpan(FireData.Exposure);
+            Span<float> scratch = chunk.GetSpan(FireData.Scratch);
+            scratch.Clear();
+            for (int voxel = 0; voxel < exposure.Length; voxel++)
+                exposure[voxel] += 1f;
+
+            chunk.GetSpan(FireData.BurnCount)[0]++;
+        });
     }
 });
 ```
 
-Arrays start with default values and retain their contents across ticks, sleep, and solver removal. On rollback, Numos
-replaces the chunks and restores captured arrays from independent checkpoint copies. Reacquire arrays each callback,
-because old references still point to the old chunk's storage. Fields first created after the checkpoint disappear;
-requesting them again allocates default values. Transient fields also start fresh after restore.
+The views never take the simulation's state lock, so handing them to `Parallel.For` workers is fine. The facade does
+take that lock, which is why calling it from a worker mid-tick throws instead. Several workers touching the same
+field on the same chunk for the first time still get one shared array. Synchronizing writes to that array is the
+solver's job. Views are only valid until the tick ends, and using one later throws, so ask the context again each
+callback rather than keeping them.
 
-Captured elements must contain no managed references. Numeric types, enums, and reference-free custom structs work;
-reference types and structs containing references are rejected before allocation. Numos copies the full value state
-without user-provided cloning code. Hashes include field names, element types, lengths, and exact value bytes. Keep
-custom struct layout, padding, and runtime byte order consistent between compatible solvers.
+Outside a tick, `simulation.GetChunkField(handle, field)` returns the same storage, which is how host code seeds or
+inspects it. Seed rollback fields before capturing the starting checkpoint. Field writes are not recorded operations,
+so after that point only deterministic solver callbacks should change them; replay re-runs the solver to regenerate
+its writes.
 
-Lookup and allocation through the facade are serialized with ticks. Array reads and writes are the solver's
-responsibility; fetch buffers before dispatching parallel work and give each worker exclusive access to its chunk.
-Storage does not alias built-in physical fields or wake chunks.
+#### Lifetime and allocation
 
-Live array writes cannot advance chunk revisions, so conditional snapshot requests including
-`AtmosChunkSnapshotFields.SolverArrays` copy captured fields every time. Requests for physical fields alone retain the
-usual revision check. Snapshot entries expose `CopyValues<T>()` for inspection without allowing changes to the saved
-state.
+A chunk allocates a field's array the first time anything reads it, filled with default values. It doesn't allocate up
+front for every registered field, because zero-filled rollback arrays would then show up in every checkpoint and change
+state hashes for chunks no solver touched. Arrays survive ticks, sleep, and solver removal. Unregistering a chunk or
+restoring a checkpoint detaches them, so references from before still point at the old storage.
 
-Initialize captured state before the starting checkpoint and make later changes inside deterministic solver callbacks.
-Direct array writes are not external recorded operations; checkpoints save them, and replay regenerates solver writes.
+On restore, rollback fields get independent copies of their checkpoint values. Fields first created after the
+checkpoint disappear, and asking for them again allocates fresh defaults. Transient fields always start fresh.
+
+#### Keys and registration conflicts
+
+The field registry is process-wide. Every simulation, world, and loaded assembly shares it, so a key registered by one
+mod is the same field everywhere. Namespace keys (`my-mod/fire/exposure`, not `exposure`).
+
+Registering a key that already exists returns the same `ChunkField<T>` if the definition matches: element type, length,
+and rollback policy. Any difference throws `InvalidOperationException`, naming both definitions, rather than letting two
+solvers share incompatible storage. `CreatePrivate` fields never enter the registry, so two private fields with the
+same debug name are still separate. Each registration or private field holds a slot for the life of the process, so
+create fields once, not per tick or per simulation.
+
+#### Rollback keys are a compatibility contract
+
+Rollback fields are captured by key. Checkpoints and state hashes include the key, element type, length, and the exact
+bytes of every element, so changing any of those breaks compatibility with saved checkpoints and recorded hashes.
+Elements must contain no managed references; numeric types, enums, and reference-free structs work, and registration
+rejects anything else. Keep custom struct layout, padding, and byte order stable too.
+
+Captured arrays are ordered by ordinal key. Internally each field also has a slot index in every chunk, assigned in
+registration order, which depends on static initialization order. Slots are never written to checkpoints or hashes and
+never affect their order.
+
+#### Snapshots
+
+Field writes can't advance chunk revisions, so conditional snapshot requests including
+`AtmosChunkSnapshotFields.SolverArrays` copy rollback fields every time. Requests for physical fields alone keep the
+usual revision check. Snapshot entries expose `Key` and `CopyValues<T>()`, which returns a copy, so inspecting a
+snapshot can't change the saved state.
 
 ### 12.4 Live storage through Numos.API.Dangerous
 
@@ -992,6 +1037,21 @@ simulation.World.Solvers.RegisterAfter(AtmosBuiltInSolvers.Advection, "fast-reac
         Span<float> oxygen = chunk.GetGasChannel(0).Moles;
         // Raw writes are unchecked. Repair affected caches/topology and call MarkChanged as required.
     }
+});
+```
+
+From a `ChunkField<T>` view, `chunk.Dangerous()` gives the same live chunk without a handle lookup. It is safe on
+`Parallel.For` workers, and `Get`/`GetSpan` on the dangerous chunk reach the same field storage as the safe view:
+
+```csharp
+var chunks = context.Chunks(simulation);
+Parallel.For(0, chunks.Count, index =>
+{
+    AtmosDangerousChunk live = chunks[index].Dangerous();
+    Span<float> exposure = live.GetSpan(FireData.Exposure);
+    Span<float> temperature = live.Temperature;
+    for (int voxel = 0; voxel < exposure.Length; voxel++)
+        exposure[voxel] += temperature[voxel] > 500f ? 1f : 0f;
 });
 ```
 
@@ -1105,8 +1165,8 @@ physics with theirs:
 Numos has no networking layer. What it does provide are the pieces a host would build replication from:
 
 - `AtmosChunkSnapshot` is a detached copy of a chunk's state: grid position, dimensions, pressure, heat capacity,
-  temperature, per-gas moles, classification, sleep state, and optionally captured solver arrays. Snapshots carry a
-  chunk version, so a host can skip chunks that haven't changed since the last send.
+  temperature, per-gas moles, classification, sleep state, and optionally rollback `ChunkField<T>` storage. Snapshots
+  carry a chunk version, so a host can skip chunks that haven't changed since the last send.
 - Checkpoints and recordings (see [deterministic_replay.md](deterministic_replay.md)) describe a full continuation
   state plus the external operations since it, and `Numos.Serialization` encodes them in the versioned `.numos` binary
   format. Replaying operations against a shared checkpoint is an alternative to streaming voxel state.

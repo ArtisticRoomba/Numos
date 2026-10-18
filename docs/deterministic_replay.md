@@ -166,7 +166,7 @@ grid state, so retained checkpoint memory generally grows with the captured simu
 | Chunk storage         | Captures position, dimensions, awake state, sleep timer, classifications, temperatures, valid gas channels, and per-voxel moles.                                           |
 | Continuation caches   | Captures pressure, heat capacity, and the valid active-air prefix exactly. Disabled stages and sleeping chunks can leave meaningful cached state behind.                   |
 | Solver pipeline       | Captures enable flags and records names, custom/built-in kinds, and execution order for compatibility validation.                                                          |
-| Solver arrays         | Captures arrays created with `captureForRollback: true`, including stable field names, exact element types, lengths, and values. Transient arrays are excluded.            |
+| Solver arrays         | Captures `ChunkField<T>` storage registered with `rollback: true`: keys, exact element types, lengths, and values. Transient and private fields are excluded.              |
 | Pooled storage        | Copies only valid entries. Pool capacity and unused array tails are not simulation state.                                                                                  |
 
 `AtmosChunkSnapshot` serves presentation and replication reads; it is not a continuation checkpoint. Checkpoints use
@@ -197,21 +197,25 @@ Some data intentionally remains outside the checkpoint:
   built-in boundary event batches. Solvers reacquire them on each callback and rebuild them from authoritative inputs.
 - Per-gas solver attachments created with `GetOrCreateGasSolverData<T>` are derived or transient data. Restore discards
   them even when the configuration is unchanged; the next request rebuilds them through the solver's factory.
-- Chunk-owned arrays created with `captureForRollback: false` remain transient; restore discards them.
+- `ChunkField<T>` storage registered without `rollback: true`, and every `ChunkField<T>.CreatePrivate` field, is
+  transient; restore discards it.
 - Profiling values, recorder bookkeeping, object identities, chunk generations, and presentation revisions are not
   authoritative simulation state.
 
 When a detached mixture transfers gas into a voxel, the recording stores the resulting voxel state. Replaying that
 operation does not read, change, or restore the detached container. A custom solver must therefore avoid depending on
-uncheckpointed canister or closure state if its result needs to replay deterministically. Store persistent solver fields
-using `GetOrCreateChunkSolverArray<T>` or `GetOrCreateChunkSolverFlatArray<T>` with `captureForRollback: true`
-to let Numos capture and restore them automatically. Captured fields use stable string keys and elements containing no
-managed references. Reacquire the arrays each callback because restore replaces their owning chunks.
+uncheckpointed canister or closure state if its result needs to replay deterministically. Store persistent per-chunk
+solver state in a `ChunkField<T>` registered with `ChunkField<T>.Register(key, rollback: true)` so Numos captures and
+restores it automatically. Rollback fields need a stable key and elements containing no managed references. Reach them
+through `context.Chunks(simulation)` each callback rather than keeping arrays, because restore replaces their owning
+chunks. See §12.3 of the [technical documentation](atmospherics_technical_documentation.md) for the full API.
 
-Captured solver fields are hashed in ordinal key order, independent of allocation order. Their values use the exact
-element representation, including floating-point bits and custom struct padding; compatible solvers need matching types,
-layout, and runtime byte order. Direct writes outside solver callbacks are not recorded operations: initialize state
-before the starting checkpoint, then update it as deterministic solver work.
+Captured fields are hashed in ordinal key order, independent of registration and allocation order. Each field also has a
+process-local slot index inside every chunk, but slots are never persisted, hashed, or used for ordering, so two
+processes that registered fields in different orders still produce identical checkpoint contents and hashes. Values use
+the exact element representation, including floating-point bits and custom struct padding; compatible solvers need
+matching types, layout, and runtime byte order. Direct writes outside solver callbacks are not recorded operations:
+initialize state before the starting checkpoint, then update it as deterministic solver work.
 
 ## Restore validates the receiving simulation
 

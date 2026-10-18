@@ -12,11 +12,17 @@ internal abstract class SolverArrayStorage
     internal abstract bool CaptureForRollback { get; }
 
     /// <summary>
-    ///     Gets the descriptor that owns this storage, or null for storage keyed through the object-keyed API.
+    ///     Gets the descriptor that owns this storage. Only storage rebuilt from a snapshot that carries no descriptor
+    ///     can be null, and restore binds it by key before the chunk sees it.
     /// </summary>
     internal ChunkFieldDescriptor? Field { get; init; }
 
     internal abstract SolverArrayStorage Clone();
+
+    /// <summary>
+    ///     Returns storage sharing these values but owned by <paramref name="field" />.
+    /// </summary>
+    internal abstract SolverArrayStorage WithField(ChunkFieldDescriptor field);
     internal abstract void AppendHash(ref AtmosStateHasher hash);
 }
 
@@ -32,6 +38,11 @@ internal sealed class SolverArrayStorage<T>(T[] values, bool captureForRollback)
     {
         // Captured elements contain no references, so an array clone detaches their entire state.
         return new SolverArrayStorage<T>((T[])Values.Clone(), CaptureForRollback) { Field = Field };
+    }
+
+    internal override SolverArrayStorage WithField(ChunkFieldDescriptor field)
+    {
+        return new SolverArrayStorage<T>(Values, CaptureForRollback) { Field = field };
     }
 
     internal override void AppendHash(ref AtmosStateHasher hash)

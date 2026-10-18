@@ -275,8 +275,10 @@ parallel producers, but consumers still need a stable ordering when processing o
 Shared data survives ticks, configuration changes, solver removal, and pipeline resets. Checkpoint restoration and
 simulation disposal discard it without disposing the values. Reacquire on each callback and keep ownership of disposable
 services in host code. These slots are transient: snapshots, checkpoints, recordings, and state hashes exclude them.
-Rebuild replay-relevant data from authoritative inputs; use captured chunk solver arrays for evolving state that must
-roll back, or gas attachments below for caches invalidated by configuration changes.
+Rebuild replay-relevant data from authoritative inputs. Evolving per-chunk state that must roll back belongs in a
+`ChunkField<T>` registered with `rollback: true` (see
+[per-chunk solver state](atmospherics_technical_documentation.md#123-per-chunk-solver-state-with-chunkfieldt)); caches
+invalidated by configuration changes belong in the gas attachments below.
 
 ## Attaching solver data to gases
 
@@ -308,8 +310,8 @@ callback.
 
 Use these attachments for derived data or scratch storage. They are excluded from snapshots, checkpoints, recordings,
 and state hashes, and are discarded on checkpoint restoration. A replayable solver must rebuild them from configuration
-or other authoritative inputs. Evolving state that needs automatic rollback belongs in chunk solver arrays created with
-`captureForRollback: true`.
+or other authoritative inputs. Evolving state that needs automatic rollback belongs in a `ChunkField<T>` registered with
+`rollback: true`.
 
 Reacquire attachments on each callback. Acquire them before dispatching worker tasks, since facade calls from a worker
 would block on the tick's state lock. The factory must not mutate the simulation or recursively request its own slot.

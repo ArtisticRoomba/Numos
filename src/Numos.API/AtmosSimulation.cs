@@ -548,7 +548,7 @@ public sealed partial class AtmosSimulation : IDisposable
     /// </summary>
     /// <param name="chunk">A handle identifying the chunk to inspect.</param>
     /// <returns>
-    ///     A snapshot containing copied physical fields and solver arrays opted into capture.
+    ///     A snapshot containing copied physical fields and the chunk's rollback <see cref="ChunkField{T}" /> storage.
     /// </returns>
     /// <remarks>Mutating the returned arrays does not mutate the simulation.</remarks>
     /// <exception cref="KeyNotFoundException">No chunk is registered at the handle's position.</exception>
@@ -608,11 +608,12 @@ public sealed partial class AtmosSimulation : IDisposable
     }
 
     /// <summary>
-    ///     Returns a detached snapshot when a chunk changed or has captured solver arrays.
+    ///     Returns a detached snapshot when a chunk changed or holds rollback chunk field storage.
     /// </summary>
     /// <remarks>
-    ///     Live solver-array writes cannot advance chunk revisions. Chunks with captured solver arrays are therefore
-    ///     copied on every request; use the field-selecting overload to retain revision filtering for physical fields.
+    ///     Writes to <see cref="ChunkField{T}" /> storage cannot advance chunk revisions. Chunks holding rollback fields
+    ///     are therefore copied on every request; use the field-selecting overload to retain revision filtering for
+    ///     physical fields.
     /// </remarks>
     /// <param name="chunk">A handle identifying the chunk to inspect.</param>
     /// <param name="knownVersion">The version held by the caller, or <see langword="default" /> for no version.</param>
@@ -637,8 +638,8 @@ public sealed partial class AtmosSimulation : IDisposable
     ///     Version comparison and field copies are serialized with simulation ticks and direct API mutations,
     ///     so a successful result is a consistent snapshot for the returned version. Pass a default known
     ///     version when expanding a cached snapshot with additional fields.
-    ///     Requests including <see cref="AtmosChunkSnapshotFields.SolverArrays" /> copy chunks with captured solver
-    ///     storage on every call because writes through retained arrays cannot update chunk revisions.
+    ///     Requests including <see cref="AtmosChunkSnapshotFields.SolverArrays" /> copy chunks holding rollback
+    ///     <see cref="ChunkField{T}" /> storage on every call, because field writes cannot update chunk revisions.
     /// </remarks>
     /// <param name="chunk">A handle identifying the chunk to inspect.</param>
     /// <param name="knownVersion">The version held by the caller, or <see langword="default" /> for no version.</param>
@@ -665,8 +666,8 @@ public sealed partial class AtmosSimulation : IDisposable
     /// <remarks>
     ///     Version checks and requested field copies occur under one state gate. Handles that were
     ///     unregistered after a detached handle enumeration are omitted. Duplicate positions are rejected.
-    ///     Requests including captured solver arrays are copied even when the known version matches, since live
-    ///     array writes cannot advance chunk revisions.
+    ///     Requests including rollback chunk field storage are copied even when the known version matches, since
+    ///     field writes cannot advance chunk revisions.
     /// </remarks>
     /// <param name="requests">Conditional per-chunk field requests.</param>
     /// <returns>The coherent tick count and changed detached chunk snapshots.</returns>

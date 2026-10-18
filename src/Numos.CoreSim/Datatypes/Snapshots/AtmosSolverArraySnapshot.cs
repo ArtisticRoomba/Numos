@@ -21,12 +21,12 @@ public sealed class AtmosSolverArraySnapshot
     }
 
     /// <summary>
-    ///     Gets the ordinal field name used to reacquire this array after rollback.
+    ///     Gets the registered key of the rollback <c>ChunkField&lt;T&gt;</c> this array was captured from.
     /// </summary>
     public string Key { get; }
 
     /// <summary>
-    ///     Gets the exact element type required when reacquiring or reading this array.
+    ///     Gets the field's exact element type, required when reading this array.
     /// </summary>
     public Type ElementType => _storage.ElementType;
 

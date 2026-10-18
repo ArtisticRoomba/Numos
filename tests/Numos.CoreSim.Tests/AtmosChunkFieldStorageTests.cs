@@ -1,3 +1,5 @@
+using Numos.CoreSim.Datatypes.Snapshots;
+using Numos.CoreSim.Replay;
 using Numos.CoreSim.Solvers;
 using Numos.Maths;
 
@@ -19,6 +21,28 @@ public sealed class AtmosChunkFieldStorageTests
     private static readonly ChunkFieldDescriptor<int> Zeta = ChunkFieldRegistry.Register<int>(Key("order/zeta"), true, null);
     private static readonly ChunkFieldDescriptor<int> Lower = ChunkFieldRegistry.Register<int>(Key("order/alpha"), true, null);
     private static readonly ChunkFieldDescriptor<int> Upper = ChunkFieldRegistry.Register<int>(Key("order/Alpha"), true, null);
+
+    // Registered out of ordinal order. Keys, types and lengths are pinned by the hash format test, so leave them be.
+    private static readonly ChunkFieldDescriptor<HashValue> HashValueField =
+        ChunkFieldRegistry.Register<HashValue>(Key("hash/value"), true, 1);
+
+    private static readonly ChunkFieldDescriptor<long> HashTotals =
+        ChunkFieldRegistry.Register<long>(Key("hash/Totals"), true, 3);
+
+    private static readonly ChunkFieldDescriptor<float> HashFloats =
+        ChunkFieldRegistry.Register<float>(Key("hash/floats"), true, null);
+
+    private static readonly ChunkFieldDescriptor<int> HashCounts =
+        ChunkFieldRegistry.Register<int>(Key("hash/counts"), true, null);
+
+    private static readonly ChunkFieldDescriptor<int> HashScratch =
+        ChunkFieldRegistry.Register<int>(Key("hash/scratch"), false, null);
+
+    private struct HashValue
+    {
+        public int Flag;
+        public float Amount;
+    }
 
     // The registry is process-wide, so every key here is namespaced to this fixture.
     private static string Key(string name)
@@ -103,7 +127,6 @@ public sealed class AtmosChunkFieldStorageTests
         chunk.GetOrCreateField(Zeta);
         chunk.GetOrCreateField(Transient);
         chunk.GetOrCreateField(Upper);
-        chunk.GetOrCreateSolverArray<int>(Key("order/legacy"), true);
         chunk.GetOrCreateField(Lower);
 
         string[] keys = chunk.CaptureSolverArrays().Select(static array => array.Key).ToArray();
@@ -112,19 +135,8 @@ public sealed class AtmosChunkFieldStorageTests
         {
             Key("order/Alpha"),
             Key("order/alpha"),
-            Key("order/legacy"),
             Key("order/zeta")
         }));
-    }
-
-    [Test]
-    public void CaptureSolverArrays_RejectsKeyUsedByBothApis()
-    {
-        var chunk = new AtmosChunk(1, 1, 1);
-        chunk.GetOrCreateField(Captured);
-        chunk.GetOrCreateSolverArray<int>(Captured.Key, true);
-
-        Assert.Throws<InvalidOperationException>(() => chunk.CaptureSolverArrays());
     }
 
     [Test]
@@ -188,7 +200,6 @@ public sealed class AtmosChunkFieldStorageTests
         var source = new AtmosChunk(2, 1, 1);
         source.GetOrCreateField(Captured)[1] = 7;
         source.GetOrCreateField(Transient)[1] = 1f;
-        source.GetOrCreateSolverArray<int>(Key("restore/legacy"), true)[0] = 9;
         var snapshots = source.CaptureSolverArrays();
 
         var target = new AtmosChunk(2, 1, 1);
@@ -201,23 +212,72 @@ public sealed class AtmosChunkFieldStorageTests
             Assert.That(restored, Is.Not.SameAs(source.GetOrCreateField(Captured)));
             Assert.That(target.GetOrCreateField(Captured), Is.SameAs(restored));
             Assert.That(target.TryGetField(Transient, out _), Is.False);
-            Assert.That(target.GetOrCreateSolverArray<int>(Key("restore/legacy"), true)[0], Is.EqualTo(9));
             Assert.That(target.HasCapturedSolverArrays, Is.True);
         });
     }
 
     [Test]
-    public void ComputeStateHash_MatchesObjectKeyedStorage()
+    public void RestoreSolverArrays_BindsSnapshotsWithoutDescriptorByKey()
     {
-        using var legacy = CreateKernel();
-        using var slotted = CreateKernel();
-        legacy.GetOrCreateChunkSolverArray<int>(Int3.Zero, Captured.Key, true, null)[2] = 5;
-        legacy.GetOrCreateChunkSolverArray<long>(Int3.Zero, FixedLength.Key, true, 3)[1] = -3;
-        slotted.GetOrCreateChunkField(Int3.Zero, FixedLength)[1] = -3;
-        slotted.GetOrCreateChunkField(Int3.Zero, Captured)[2] = 5;
-        slotted.GetOrCreateChunkField(Int3.Zero, Transient)[0] = 2f;
+        var snapshot = new AtmosSolverArraySnapshot(Captured.Key, new SolverArrayStorage<int>([4, 6], true));
+        var chunk = new AtmosChunk(2, 1, 1);
 
-        Assert.That(slotted.ComputeStateHash(), Is.EqualTo(legacy.ComputeStateHash()));
+        chunk.RestoreSolverArrays([snapshot]);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(chunk.TryGetField(Captured, out int[]? restored), Is.True);
+            Assert.That(restored, Is.EqualTo(new[] { 4, 6 }));
+            Assert.That(
+                chunk.CaptureSolverArrays().Select(static array => array.Key),
+                Is.EqualTo(new[] { Captured.Key }));
+        });
+    }
+
+    [Test]
+    public void RestoreSolverArrays_RejectsSnapshotsWithoutMatchingField()
+    {
+        var chunk = new AtmosChunk(2, 1, 1);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(
+                () => chunk.RestoreSolverArrays([Detached(Key("restore/unregistered"), new int[2])]),
+                Throws.InvalidOperationException);
+            Assert.That(
+                () => chunk.RestoreSolverArrays([Detached(Captured.Key, new long[2])]),
+                Throws.InvalidOperationException);
+            Assert.That(
+                () => chunk.RestoreSolverArrays([Detached(Captured.Key, new int[3])]),
+                Throws.InvalidOperationException);
+            Assert.That(
+                () => chunk.RestoreSolverArrays([Detached(Transient.Key, new float[2])]),
+                Throws.InvalidOperationException);
+        });
+    }
+
+    [Test]
+    public void SolverArrayHash_MatchesObjectKeyedFormat()
+    {
+        // The expected value was computed with the object-keyed GetOrCreateSolverArray path this storage replaced,
+        // using the same keys, element types, lengths and values. A change here breaks every saved state hash that
+        // includes rollback fields.
+        const ulong expected = 0x357B98807B35979FUL;
+        var chunk = new AtmosChunk(2, 1, 1);
+        chunk.GetOrCreateField(HashValueField)[0] = new HashValue { Flag = 3, Amount = 1.5f };
+        chunk.GetOrCreateField(HashTotals)[1] = -3;
+        chunk.GetOrCreateField(HashFloats)[0] = -0f;
+        chunk.GetOrCreateField(HashFloats)[1] = BitConverter.Int32BitsToSingle(0x7FC00123);
+        chunk.GetOrCreateField(HashCounts)[1] = 5;
+        chunk.GetOrCreateField(HashScratch)[0] = 9;
+
+        var snapshots = chunk.CaptureSolverArrays();
+        var hash = new AtmosStateHasher();
+        hash.Add(snapshots.Length);
+        foreach (var snapshot in snapshots)
+            snapshot.AppendHash(ref hash);
+
+        Assert.That(hash.Value, Is.EqualTo(expected));
     }
 
     [Test]
@@ -239,6 +299,11 @@ public sealed class AtmosChunkFieldStorageTests
             Assert.That(kernel.GetOrCreateChunkField(Int3.Zero, Transient)[0], Is.Zero);
             Assert.That(kernel.ComputeStateHash(), Is.EqualTo(hash));
         });
+    }
+
+    private static AtmosSolverArraySnapshot Detached<T>(string key, T[] values)
+    {
+        return new AtmosSolverArraySnapshot(key, new SolverArrayStorage<T>(values, true));
     }
 
     private static AtmosKernel CreateKernel()

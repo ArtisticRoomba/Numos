@@ -40,7 +40,8 @@ public sealed partial class AtmosSimulation
     /// <returns>Immutable grid, configuration, solver-enable and timeline continuation data.</returns>
     /// <remarks>
     ///     The checkpoint can restore Numos into a compatible existing simulation. Detached containers and custom-solver
-    ///     closure state remain host-owned. Chunk solver arrays opted into capture are copied and restored automatically.
+    ///     closure state remain host-owned. Rollback <see cref="ChunkField{T}" /> storage is copied and restored
+    ///     automatically.
     ///     The host-facing elapsed-time accumulator is reset when this checkpoint is restored.
     /// </remarks>
     /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>

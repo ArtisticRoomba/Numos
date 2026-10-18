@@ -213,8 +213,8 @@ public sealed class AtmosChunkCheckpoint
     ///     Gets captured solver arrays in ordinal key order, detached from live chunk storage.
     /// </summary>
     /// <remarks>
-    ///     Restore recreates these arrays automatically. Reacquire them by the same string key, element type,
-    ///     length, and enabled capture policy; transient arrays are absent.
+    ///     Restore recreates these arrays automatically. Reacquire them through the same <c>ChunkField&lt;T&gt;</c>, whose
+    ///     key, element type, and length must match the captured array. Transient fields are absent.
     /// </remarks>
     public IReadOnlyList<AtmosSolverArraySnapshot> SolverArrays { get; }
 

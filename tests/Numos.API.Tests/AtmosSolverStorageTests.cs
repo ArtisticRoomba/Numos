@@ -6,20 +6,23 @@ namespace Numos.API.Tests;
 [TestFixture]
 public sealed class AtmosSolverStorageTests
 {
+    // The registry is process-wide and shared by every test in this assembly, so keys are namespaced to this fixture.
+    private const string KeyPrefix = "tests/solver-storage/";
+
     [Test]
-    public void CustomSolver_ReusesRegularAndFlatStorageAcrossTicks()
+    public void CustomSolver_ReusesStorageAcrossTicks()
     {
         using var simulation = new AtmosSimulation(2, 3, 4);
         var chunk = simulation.CreateAndRegisterChunk(default);
-        object key = new();
-        int[] original = simulation.GetOrCreateChunkSolverArray<int>(chunk, key, false);
-        Assert.That(original, Is.EqualTo(new int[24]));
+        var field = ChunkField<int>.CreatePrivate(KeyPrefix + "reuse");
+        FlatArray<int> original = simulation.GetChunkField(chunk, field);
+        Assert.That(original.ToArray(), Is.EqualTo(new int[24]));
 
         simulation.World.Solvers.Register(
-            "scratch",
-            _ =>
+            KeyPrefix + "reuse",
+            context =>
             {
-                FlatArray<int> flat = simulation.GetOrCreateChunkSolverFlatArray<int>(chunk, key, false);
+                FlatArray<int> flat = context.Chunks(simulation)[0].Get(field);
                 Assert.That(flat.Dimensions, Is.EqualTo(new Int3(2, 3, 4)));
                 flat[new Int3(1, 2, 3)]++;
             });
@@ -29,128 +32,117 @@ public sealed class AtmosSolverStorageTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(simulation.GetOrCreateChunkSolverArray<int>(chunk, key, false), Is.SameAs(original));
+            Assert.That(SameStorage(simulation.GetChunkField(chunk, field), original), Is.True);
             Assert.That(original[23], Is.EqualTo(2));
         });
     }
 
     [Test]
-    public void Storage_IsIsolatedByChunkSimulationAndKeyIdentity()
+    public void Storage_IsIsolatedByChunkSimulationAndPrivateField()
     {
         using var simulation = new AtmosSimulation(1, 1, 1);
         using var other = new AtmosSimulation(1, 1, 1);
         var first = simulation.CreateAndRegisterChunk(default);
         var second = simulation.CreateAndRegisterChunk(Int3.PosX);
         var otherChunk = other.CreateAndRegisterChunk(default);
-        var key = new EqualKey(1);
-        var equalKey = new EqualKey(1);
-        simulation.GetOrCreateChunkSolverArray<int>(first, key, false)[0] = 42;
+        var field = ChunkField<int>.CreatePrivate(KeyPrefix + "isolated");
+        var sameName = ChunkField<int>.CreatePrivate(KeyPrefix + "isolated");
+        simulation.GetChunkField(first, field)[0] = 42;
 
         Assert.Multiple(() =>
         {
-            Assert.That(simulation.GetOrCreateChunkSolverArray<int>(first, key, false)[0], Is.EqualTo(42));
-            Assert.That(simulation.GetOrCreateChunkSolverArray<int>(first, equalKey, false)[0], Is.Zero);
-            Assert.That(simulation.GetOrCreateChunkSolverArray<int>(second, key, false)[0], Is.Zero);
-            Assert.That(other.GetOrCreateChunkSolverArray<int>(otherChunk, key, false)[0], Is.Zero);
+            Assert.That(simulation.GetChunkField(first, field)[0], Is.EqualTo(42));
+            Assert.That(simulation.GetChunkField(first, sameName)[0], Is.Zero);
+            Assert.That(simulation.GetChunkField(second, field)[0], Is.Zero);
+            Assert.That(other.GetChunkField(otherChunk, field)[0], Is.Zero);
         });
     }
 
     [TestCase(0)]
     [TestCase(7)]
-    public void RegularArray_AllowsNonVoxelLengths(int length)
+    public void FixedLengthField_AllowsNonVoxelLengths(int length)
     {
         using var simulation = new AtmosSimulation(2, 3, 4);
         var chunk = simulation.CreateAndRegisterChunk(default);
-        object key = new();
-        int[] data = simulation.GetOrCreateChunkSolverArray<int>(chunk, key, false, length);
+        var field = ChunkField<int>.CreatePrivate(KeyPrefix + "fixed-length", length);
+        FlatArray<int> data = simulation.GetChunkField(chunk, field);
 
         Assert.Multiple(() =>
         {
-            Assert.That(data, Has.Length.EqualTo(length));
-            Assert.That(simulation.GetOrCreateChunkSolverArray<int>(chunk, key, false, length), Is.SameAs(data));
-            Assert.That(
-                () => simulation.GetOrCreateChunkSolverFlatArray<int>(chunk, key, false),
-                Throws.InvalidOperationException);
+            Assert.That(field.IsPerVoxel, Is.False);
+            Assert.That(data.Length, Is.EqualTo(length));
+            Assert.That(SameStorage(simulation.GetChunkField(chunk, field), data), Is.True);
         });
     }
 
     [Test]
-    public void ExistingKey_RejectsDifferentTypesAndLengthsWithoutReplacingData()
+    public void ConflictingRegistration_ThrowsWithoutReplacingData()
     {
         using var simulation = new AtmosSimulation(2, 1, 1);
         var chunk = simulation.CreateAndRegisterChunk(default);
-        object key = new();
-        string[] data = simulation.GetOrCreateChunkSolverArray<string>(chunk, key, false);
+        const string key = KeyPrefix + "conflict";
+        var field = ChunkField<string>.Register(key);
+        FlatArray<string> data = simulation.GetChunkField(chunk, field);
         data[0] = "retained";
 
         Assert.Multiple(() =>
         {
-            Assert.That(
-                () => simulation.GetOrCreateChunkSolverArray<object>(chunk, key, false),
-                Throws.InvalidOperationException);
-
-            Assert.That(
-                () => simulation.GetOrCreateChunkSolverArray<int>(chunk, key, false),
-                Throws.InvalidOperationException);
-
-            Assert.That(
-                () => simulation.GetOrCreateChunkSolverArray<string>(chunk, key, false, 3),
-                Throws.InvalidOperationException);
-
-            Assert.That(simulation.GetOrCreateChunkSolverArray<string>(chunk, key, false), Is.SameAs(data));
+            Assert.That(() => ChunkField<object>.Register(key), Throws.InvalidOperationException);
+            Assert.That(() => ChunkField<int>.Register(key), Throws.InvalidOperationException);
+            Assert.That(() => ChunkField<string>.Register(key, length: 3), Throws.InvalidOperationException);
+            Assert.That(ChunkField<string>.Register(key), Is.SameAs(field));
+            Assert.That(SameStorage(simulation.GetChunkField(chunk, field), data), Is.True);
             Assert.That(data[0], Is.EqualTo("retained"));
         });
     }
 
     [Test]
-    public void InvalidRequests_RejectNullKeysNegativeLengthsAndMissingChunks()
+    public void InvalidRequests_RejectNullFieldsBadDefinitionsAndMissingChunks()
     {
         using var simulation = new AtmosSimulation(1, 1, 1);
         var chunk = simulation.CreateAndRegisterChunk(default);
-        object key = new();
+        var field = ChunkField<int>.CreatePrivate(KeyPrefix + "invalid");
         var missing = new AtmosChunkHandle(Int3.PosX);
 
         Assert.Multiple(() =>
         {
+            Assert.That(() => simulation.GetChunkField<int>(chunk, null!), Throws.ArgumentNullException);
+            Assert.That(() => ChunkField<int>.Register(null!), Throws.ArgumentNullException);
+            Assert.That(() => ChunkField<int>.Register("  "), Throws.ArgumentException);
             Assert.That(
-                () => simulation.GetOrCreateChunkSolverArray<int>(chunk, null!, false),
-                Throws.ArgumentNullException);
-
-            Assert.That(
-                () => simulation.GetOrCreateChunkSolverFlatArray<int>(chunk, null!, false),
-                Throws.ArgumentNullException);
-
-            Assert.That(
-                () => simulation.GetOrCreateChunkSolverArray<int>(chunk, key, false, -1),
+                () => ChunkField<int>.Register(KeyPrefix + "negative", length: -1),
                 Throws.TypeOf<ArgumentOutOfRangeException>());
 
             Assert.That(
-                () => simulation.GetOrCreateChunkSolverArray<int>(missing, key, false),
-                Throws.TypeOf<KeyNotFoundException>());
+                () => ChunkField<int>.CreatePrivate(KeyPrefix + "negative", -1),
+                Throws.TypeOf<ArgumentOutOfRangeException>());
 
-            Assert.That(
-                () => simulation.GetOrCreateChunkSolverFlatArray<int>(missing, key, false),
-                Throws.TypeOf<KeyNotFoundException>());
+            Assert.That(() => simulation.GetChunkField(missing, field), Throws.TypeOf<KeyNotFoundException>());
         });
 
-        Assert.That(simulation.GetOrCreateChunkSolverArray<int>(chunk, key, false), Has.Length.EqualTo(1));
+        Assert.That(simulation.GetChunkField(chunk, field).Length, Is.EqualTo(1));
     }
 
     [Test]
-    public void ConcurrentRequests_ReturnOneArrayForTheSameSlot()
+    public void ConcurrentFirstTouch_ThroughViews_ReturnsOneArray()
     {
         using var simulation = new AtmosSimulation(2, 3, 4);
         var chunk = simulation.CreateAndRegisterChunk(default);
-        object key = new();
-        int[][] arrays = new int[32][];
+        var field = ChunkField<int>.CreatePrivate(KeyPrefix + "concurrent");
+        var views = new FlatArray<int>[32];
 
-        Parallel.For(
-            0,
-            arrays.Length,
-            index =>
-                arrays[index] = simulation.GetOrCreateChunkSolverArray<int>(chunk, key, false));
+        simulation.World.Solvers.Register(
+            KeyPrefix + "concurrent",
+            context =>
+            {
+                var chunks = context.Chunks(simulation);
+                Parallel.For(0, views.Length, index => views[index] = chunks[0].Get(field));
+            });
 
-        Assert.That(arrays.All(array => ReferenceEquals(array, arrays[0])), Is.True);
+        simulation.Tick();
+
+        FlatArray<int> stored = simulation.GetChunkField(chunk, field);
+        Assert.That(views.All(view => SameStorage(view, stored)), Is.True);
     }
 
     [Test]
@@ -158,18 +150,18 @@ public sealed class AtmosSolverStorageTests
     {
         using var simulation = new AtmosSimulation(1, 1, 1);
         var chunk = simulation.CreateAndRegisterChunk(default);
-        object key = new();
-        int[] previous = simulation.GetOrCreateChunkSolverArray<int>(chunk, key, false);
+        var field = ChunkField<int>.CreatePrivate(KeyPrefix + "replacement");
+        FlatArray<int> previous = simulation.GetChunkField(chunk, field);
         previous[0] = 42;
 
         simulation.UnregisterChunk(chunk);
         simulation.CreateAndRegisterChunk(chunk.Position);
-        int[] replacement = simulation.GetOrCreateChunkSolverArray<int>(chunk, key, false);
+        FlatArray<int> replacement = simulation.GetChunkField(chunk, field);
         previous[0] = 99;
 
         Assert.Multiple(() =>
         {
-            Assert.That(replacement, Is.Not.SameAs(previous));
+            Assert.That(SameStorage(replacement, previous), Is.False);
             Assert.That(replacement[0], Is.Zero);
         });
     }
@@ -179,12 +171,12 @@ public sealed class AtmosSolverStorageTests
     {
         using var simulation = new AtmosSimulation(2, 1, 1);
         var chunk = simulation.CreateAndRegisterChunk(default);
-        object key = new();
+        var field = ChunkField<float>.CreatePrivate(KeyPrefix + "scratch");
         var version = simulation.GetChunkSnapshot(chunk).Version;
         var hash = simulation.ComputeStateHash();
         simulation.StartRecording();
 
-        FlatArray<float> data = simulation.GetOrCreateChunkSolverFlatArray<float>(chunk, key, false);
+        FlatArray<float> data = simulation.GetChunkField(chunk, field);
         data.Fill(42f);
         var checkpoint = simulation.CaptureCheckpoint();
 
@@ -198,7 +190,7 @@ public sealed class AtmosSolverStorageTests
         });
 
         simulation.RestoreCheckpoint(checkpoint);
-        FlatArray<float> restored = simulation.GetOrCreateChunkSolverFlatArray<float>(chunk, key, false);
+        FlatArray<float> restored = simulation.GetChunkField(chunk, field);
         Assert.That(restored[0], Is.Zero);
         data[0] = 99f;
         Assert.That(restored[0], Is.Zero);
@@ -209,21 +201,15 @@ public sealed class AtmosSolverStorageTests
     {
         var simulation = new AtmosSimulation(1, 1, 1);
         var chunk = simulation.CreateAndRegisterChunk(default);
-        object key = new();
-        simulation.GetOrCreateChunkSolverArray<int>(chunk, key, false);
+        var field = ChunkField<int>.CreatePrivate(KeyPrefix + "disposed");
+        simulation.GetChunkField(chunk, field);
         simulation.Dispose();
 
-        Assert.Multiple(() =>
-        {
-            Assert.That(
-                () => simulation.GetOrCreateChunkSolverArray<int>(chunk, key, false),
-                Throws.TypeOf<ObjectDisposedException>());
-
-            Assert.That(
-                () => simulation.GetOrCreateChunkSolverFlatArray<int>(chunk, key, false),
-                Throws.TypeOf<ObjectDisposedException>());
-        });
+        Assert.That(() => simulation.GetChunkField(chunk, field), Throws.TypeOf<ObjectDisposedException>());
     }
 
-    private sealed record EqualKey(int Value);
+    private static bool SameStorage<T>(FlatArray<T> left, FlatArray<T> right)
+    {
+        return left.AsSpan() == right.AsSpan();
+    }
 }
