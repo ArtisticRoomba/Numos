@@ -33,7 +33,7 @@ internal class ReactionSolver : IAtmosSolverStage
     ///     Calibration factor for the flame speed estimate <c>sqrt(thermal diffusivity * depletion rate)</c>.
     ///     Tune it against known laminar flame speeds of the mixtures in use.
     /// </summary>
-    internal Scalar FlameSpeedScale { get; set; } = 100f;
+    internal Scalar FlameSpeedScale { get; set; } = 1f;
 
     /// <summary>
     ///     Slowest flame speed that still sustains a flame. Below it a flame kernel recedes, and a voxel that
@@ -624,7 +624,8 @@ internal class ReactionSolver : IAtmosSolverStage
         return result;
     }
 
-    private static SquareMetrePerSecond ComputeThermalDiffusivity(ReadOnlySpan<Mole> mixtureVector, int mixtureLength, CubicMetre volume, IAtmosConfig config)
+    private static SquareMetrePerSecond ComputeThermalDiffusivity(
+        ReadOnlySpan<Mole> mixtureVector, int mixtureLength, CubicMetre volume, Kelvin temperature, IAtmosConfig config)
     {
         SquareMetrePerSecond result = 0f;
         JoulePerKelvin oldHeatCapacity = ComputeHeatCapacity(mixtureVector, mixtureLength, config);
@@ -636,7 +637,7 @@ internal class ReactionSolver : IAtmosSolverStage
                 continue;
 
             totalMoles += mixtureVector[i];
-            moleWeightedConductivity += mixtureVector[i] * config.GetThermalConductivity(i);
+            moleWeightedConductivity += mixtureVector[i] * config.GetThermalConductivity(i, temperature);
         }
 
         // No gas, no heat capacity or no volume means there is nothing to diffuse through.
@@ -892,7 +893,10 @@ internal class ReactionSolver : IAtmosSolverStage
                 reactionSpeeds,
                 burningFraction,
                 deltaTime);
-            SquareMetrePerSecond thermalDiffusivity = ComputeThermalDiffusivity(mixtureVector, mixtureLength, volume, config);
+            Kelvin conductivityTemperature = flameActive
+                ? (currentTemperature + ignitedVolumeTemp) / 2f
+                : currentTemperature;
+            SquareMetrePerSecond thermalDiffusivity = ComputeThermalDiffusivity(mixtureVector, mixtureLength, volume, conductivityTemperature, config);
             flameSpeed = ComputeFlameSpeed(depletionRate, thermalDiffusivity);
         }
 

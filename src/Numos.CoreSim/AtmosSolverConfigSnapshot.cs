@@ -66,11 +66,16 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
             : DefaultDiffusionCoefficient;
     }
 
-    public WattsPerMeterKelvin GetThermalConductivity(int gasId)
+    public WattsPerMeterKelvin GetThermalConductivity(int gasId, Kelvin temperature)
     {
-        return (uint)gasId < (uint)GasPropertyCount
+        WattsPerMeterKelvin referenceThermalConductivity = (uint)gasId < (uint)GasPropertyCount
             ? _thermalConductivities[gasId]
             : DefaultThermalConductivity;
+        float ReferenceConductivityTemperature = 300f;
+        float ThermalConductivityExponent = 0.7f;
+        // Conductivity rises roughly as a power of temperature. The stored value is the one at the reference temperature.
+        Scalar temperatureRatio = temperature / ReferenceConductivityTemperature;
+        return referenceThermalConductivity * MathF.Pow(temperatureRatio, ThermalConductivityExponent);
     }
 
 
