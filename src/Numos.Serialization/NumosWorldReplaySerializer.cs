@@ -1,6 +1,5 @@
 using Numos.API;
 using Numos.CoreSim.Replay;
-using Numos.Replay.SourceGen;
 
 namespace Numos.Serialization;
 
@@ -8,36 +7,23 @@ namespace Numos.Serialization;
 ///     Reads and writes <c>.numos</c> world replay documents without accessing filesystem paths.
 /// </summary>
 /// <remarks>
-///     The <c>[WireOperation]</c> attributes below register every <see cref="AtmosWorldOperationCode" /> with
-///     Numos.Replay.SourceGen, which generates this class's <c>TryWriteGeneratedOperation</c>/
-///     <c>TryReadGeneratedOperation</c> partial-class members. Field order for the mechanical ones is exactly
-///     constructor-declaration order; see <c>tests/Numos.Serialization.Tests/ReplayWireFormatGoldenTests.cs</c> for
-///     the byte-level pin that codec must not silently drift from.
-///     <para>
-///         <see cref="AtmosWorldSimulationOperation" />'s <c>Operation</c> field is a nested simulation operation --
-///         the generator writes its opcode and then delegates to the internal <c>NumosReplaySerializer</c>'s own codec
-///         for the payload, rather than treating it as an opaque unsupported type.
-///     </para>
-///     <para>
-///         <see cref="SetAtmosWorldConfigOperation" /> (nested config snapshot) and
-///         <see cref="CreateAtmosLinkSetOperation" /> (variable-length link list) don't fit the generator's
-///         mechanical field-order mapping, so they register as <c>Custom</c>, same as
-///         <see cref="SetVoxelMixtureOperation" /> in the simulation family.
-///     </para>
-///     <para>
-///         Every <see cref="AtmosWorldOperationCode" /> member needs one of these registrations. A missing one is a
-///         NUMOSREPLAYGEN008 build error from <c>ReplayOpcodeConsistencyAnalyzer</c> in Numos.Replay.Analyzers.
-///     </para>
+///     This owns the container: magic, version, sections, metadata, and read limits. Checkpoint and operation
+///     payloads are encoded by the internal codecs that live next to their types, <c>AtmosWorldReplayCodec</c> in
+///     Numos.API and <c>AtmosReplayCodec</c> in Numos.CoreSim. See
+///     <c>tests/Numos.Serialization.Tests/ReplayWireFormatGoldenTests.cs</c> for the byte-level pin.
 /// </remarks>
-[WireOperation(typeof(AtmosWorldSimulationOperation), AtmosWorldOperationCode.SimulationOperation)]
-[WireOperation(typeof(CreateAtmosSimulationOperation), AtmosWorldOperationCode.CreateSimulation)]
-[WireOperation(typeof(DestroyAtmosSimulationOperation), AtmosWorldOperationCode.DestroySimulation)]
-[WireOperation(typeof(DestroyAtmosLinkSetOperation), AtmosWorldOperationCode.DestroyLinkSet)]
-[WireOperation(typeof(SetAtmosWorldSolverEnabledOperation), AtmosWorldOperationCode.SetSolverEnabled)]
-[WireOperation(typeof(SetAtmosWorldConfigOperation), AtmosWorldOperationCode.SetAtmosConfig, Custom = true)]
-[WireOperation(typeof(CreateAtmosLinkSetOperation), AtmosWorldOperationCode.CreateLinkSet, Custom = true)]
-public static partial class NumosWorldReplaySerializer
+public static class NumosWorldReplaySerializer
 {
+    private const ushort ContainerVersion = 1;
+    // Kind 1 was the single-simulation replay. Readers recognize it only to reject it with a clear message.
+    private const ushort SimulationReplayContentKind = 1;
+    private const ushort WorldReplayContentKind = 2;
+    private const ushort MetadataSection = 1;
+    private const ushort CheckpointSection = 2;
+    private const ushort OperationsSection = 3;
+    private const ushort RequiredSection = 1;
+    private static readonly byte[] Magic = [0x4e, 0x55, 0x4d, 0x4f, 0x53, 0x0d, 0x0a, 0x1a];
+
     /// <summary>
     ///     Writes a complete-world replay document and leaves the destination open.
     /// </summary>
@@ -56,17 +42,19 @@ public static partial class NumosWorldReplaySerializer
         document.Replay.EnsurePortable();
 
         var replay = document.Replay;
-        NumosReplaySerializer.WriteContainer(
-            destination,
-            section => NumosReplaySerializer.WriteMetadata(
-                section,
-                document.Metadata,
-                replay.Recording.Start,
-                replay.Recording.Head,
-                replay.Recording.Operations.Count,
-                replay.InitialCheckpoint.Simulations.Count,
-                replay.InitialCheckpoint.LinkSets.Count),
-            section => WriteCheckpoint(section, replay),
+        using var writer = new BinaryWriter(destination, AtmosReplayCodec.Utf8, true);
+        writer.Write(Magic);
+        writer.Write(ContainerVersion);
+        writer.Write(WorldReplayContentKind);
+        writer.Write(3u);
+
+        using var scratch = destination.CanSeek ? null : new MemoryStream();
+        WriteSection(destination, writer, scratch, MetadataSection, 0, section => WriteMetadata(section, document.Metadata, replay));
+        WriteSection(
+            destination, writer, scratch, CheckpointSection, RequiredSection,
+            section => AtmosWorldReplayCodec.WriteCheckpoint(section, replay));
+        WriteSection(
+            destination, writer, scratch, OperationsSection, RequiredSection,
             section => WriteOperations(section, replay.Recording));
     }
 
@@ -85,7 +73,7 @@ public static partial class NumosWorldReplaySerializer
     /// <exception cref="NotSupportedException">The replay contains host-defined state.</exception>
     public static NumosWorldReplayDocument Deserialize(Stream source, NumosReplayReadOptions? options = null)
     {
-        var (metadata, checkpoint, recording) = NumosReplaySerializer.ReadContainer(source, options);
+        var (metadata, checkpoint, recording) = ReadContainer(source, options);
 
         if (recording.Start != checkpoint.Checkpoint.Position)
             throw new InvalidDataException("The world recording does not begin at its initial checkpoint.");
@@ -108,129 +96,181 @@ public static partial class NumosWorldReplaySerializer
             checkpoint.HeadHash);
 
         archive.EnsurePortable();
-        NumosReplaySerializer.EnsureEndOfContainer(source);
+        if (source.ReadByte() != -1) throw new InvalidDataException("The Numos file has trailing data.");
+
         return new NumosWorldReplayDocument(metadata.Metadata, archive);
     }
 
-    private static void WriteCheckpoint(BinaryWriter writer, AtmosWorldReplayArchive archive)
+    /// <summary>
+    ///     Writes one section header and payload, encoding the payload exactly once.
+    /// </summary>
+    /// <remarks>
+    ///     A seekable destination gets a placeholder length that is patched after the payload is written. Anything else
+    ///     has the payload staged in <paramref name="scratch" /> first, because the length precedes the payload on the
+    ///     wire.
+    /// </remarks>
+    private static void WriteSection(
+        Stream destination,
+        BinaryWriter writer,
+        MemoryStream? scratch,
+        ushort id,
+        ushort flags,
+        Action<BinaryWriter> write)
     {
-        var checkpoint = archive.InitialCheckpoint;
-        writer.Write(checkpoint.FormatVersion);
-        NumosReplaySerializer.WritePosition(writer, checkpoint.Position);
-        writer.Write(checkpoint.TopologyVersion);
-        WriteHash(writer, archive.InitialStateHash);
-        WriteHash(writer, archive.HeadStateHash);
-        NumosReplaySerializer.WriteConfig(writer, checkpoint.Config);
-        writer.Write(checkpoint.Solvers.Count);
-        foreach (var solver in checkpoint.Solvers)
+        writer.Write(id);
+        writer.Write(flags);
+        if (scratch == null)
         {
-            NumosReplaySerializer.WriteString(writer, solver.Name);
-            writer.Write((byte)solver.Kind);
-            writer.Write(solver.Enabled);
-            NumosReplaySerializer.WriteNullableString(writer, solver.NeighborSelectionKey);
+            long lengthPosition = destination.Position;
+            writer.Write(0UL);
+            write(writer);
+            long end = destination.Position;
+            destination.Position = lengthPosition;
+            writer.Write(checked((ulong)(end - lengthPosition - sizeof(ulong))));
+            destination.Position = end;
+            return;
         }
 
-        writer.Write(checkpoint.SimulationGenerations.Length);
-        foreach (uint generation in checkpoint.SimulationGenerations)
-            writer.Write(generation);
-
-        writer.Write(checkpoint.Simulations.Count);
-        foreach (var simulation in checkpoint.Simulations)
+        scratch.SetLength(0);
+        using (var sectionWriter = new BinaryWriter(scratch, AtmosReplayCodec.Utf8, true))
         {
-            WriteSimulationId(writer, simulation.Simulation);
-            NumosReplaySerializer.WriteSimulationCheckpoint(writer, simulation.Checkpoint);
+            write(sectionWriter);
         }
 
-        writer.Write(checkpoint.LinkSlots.Length);
-        foreach (var slot in checkpoint.LinkSlots)
-        {
-            writer.Write(slot.Generation);
-            writer.Write(slot.State);
-            writer.Write((byte)slot.Kind);
-            writer.Write(slot.Links.Length);
-            foreach (var link in slot.Links)
-                WriteLink(writer, link);
-        }
+        writer.Write(checked((ulong)scratch.Length));
+        destination.Write(scratch.GetBuffer(), 0, (int)scratch.Length);
     }
 
-    internal static WorldCheckpointPayload ReadCheckpoint(BinaryReader reader, NumosReplayReadOptions options)
+    /// <summary>
+    ///     Validates the container header and decodes the metadata, checkpoint, and operation sections. Unknown optional
+    ///     sections are skipped.
+    /// </summary>
+    private static (MetadataPayload Metadata,
+        (AtmosWorldCheckpoint Checkpoint, AtmosWorldStateHash InitialHash, AtmosWorldStateHash HeadHash) Checkpoint,
+        AtmosWorldRecording Recording)
+        ReadContainer(Stream source, NumosReplayReadOptions? options)
     {
-        int format = reader.ReadInt32();
-        if (format != AtmosWorldCheckpoint.CurrentFormatVersion)
-            throw new InvalidDataException("The world checkpoint schema is unsupported.");
+        ArgumentNullException.ThrowIfNull(source);
+        if (!source.CanRead) throw new ArgumentException("The source stream must be readable.", nameof(source));
 
-        var position = NumosReplaySerializer.ReadPosition(reader);
-        ulong topologyVersion = reader.ReadUInt64();
-        var initialHash = ReadHash(reader);
-        var headHash = ReadHash(reader);
-        var config = NumosReplaySerializer.ReadConfig(reader, options);
-        int solverCount = NumosReplaySerializer.ReadCount(reader, 1024, "world solver");
-        var solvers = new AtmosWorldSolverCheckpoint[solverCount];
-        for (int index = 0; index < solverCount; index++)
+        options ??= new NumosReplayReadOptions();
+        if (options.MaxPayloadBytes <= 0 || options.MaxOperations < 0 || options.MaxStringBytes < 0 || options.MaxMetadataBytes < 0)
+            throw new ArgumentOutOfRangeException(nameof(options));
+
+        using var reader = new BinaryReader(source, AtmosReplayCodec.Utf8, true);
+        if (!reader.ReadBytes(Magic.Length).SequenceEqual(Magic)) throw new InvalidDataException("The stream is not a Numos file.");
+        if (reader.ReadUInt16() != ContainerVersion) throw new InvalidDataException("The Numos container version is unsupported.");
+        ushort kind = reader.ReadUInt16();
+        if (kind == SimulationReplayContentKind)
         {
-            string name = NumosReplaySerializer.ReadString(reader, options);
-            var kind = (AtmosWorldSolverKind)reader.ReadByte();
-            bool enabled = reader.ReadBoolean();
-            string? selectionKey = NumosReplaySerializer.ReadNullableString(reader, options);
-            if (string.IsNullOrWhiteSpace(name) ||
-                !Enum.IsDefined(kind) ||
-                selectionKey != null && string.IsNullOrWhiteSpace(selectionKey))
+            throw new InvalidDataException(
+                "Single-simulation replay files (content kind 1) are no longer supported. Record the simulation's world instead.");
+        }
+
+        if (kind != WorldReplayContentKind) throw new InvalidDataException($"Numos content kind {kind} is unsupported.");
+
+        uint sectionCount = reader.ReadUInt32();
+        if (sectionCount > 1024) throw new InvalidDataException("The Numos file declares too many sections.");
+
+        MetadataPayload? metadata = null;
+        (AtmosWorldCheckpoint, AtmosWorldStateHash, AtmosWorldStateHash)? checkpoint = null;
+        AtmosWorldRecording? recording = null;
+        long totalPayload = 0;
+        for (uint index = 0; index < sectionCount; index++)
+        {
+            ushort id = reader.ReadUInt16();
+            ushort flags = reader.ReadUInt16();
+            ulong rawLength = reader.ReadUInt64();
+            if (rawLength > long.MaxValue || checked(totalPayload + (long)rawLength) > options.MaxPayloadBytes)
+                throw new InvalidDataException("The Numos file exceeds the configured payload limit.");
+
+            totalPayload += (long)rawLength;
+            if (id == MetadataSection && rawLength > (ulong)options.MaxMetadataBytes)
+                throw new InvalidDataException("The replay metadata exceeds the configured limit.");
+
+            var limited = new LimitedReadStream(source, (long)rawLength);
+            using var section = new BinaryReader(limited, AtmosReplayCodec.Utf8, true);
+            switch (id)
             {
-                throw new InvalidDataException("The world solver metadata is invalid.");
+                case MetadataSection:
+                    if (metadata != null) throw new InvalidDataException("The replay contains duplicate metadata sections.");
+
+                    metadata = ReadMetadata(section, options.MaxStringBytes);
+                    break;
+                case CheckpointSection:
+                    if (checkpoint != null) throw new InvalidDataException("The replay contains duplicate checkpoint sections.");
+
+                    checkpoint = AtmosWorldReplayCodec.ReadCheckpoint(section, options.MaxStringBytes);
+                    break;
+                case OperationsSection:
+                    if (recording != null) throw new InvalidDataException("The replay contains duplicate operation sections.");
+
+                    recording = ReadOperations(section, options);
+                    break;
+                default:
+                    if ((flags & RequiredSection) != 0) throw new InvalidDataException($"Required Numos section {id} is unsupported.");
+
+                    Drain(limited);
+                    break;
             }
 
-            solvers[index] = new AtmosWorldSolverCheckpoint(
-                name,
-                kind,
-                enabled,
-                selectionKey);
+            if (limited.Remaining != 0) throw new InvalidDataException($"Numos section {id} has unexpected trailing data.");
         }
 
-        int generationCount = NumosReplaySerializer.ReadCount(reader, 1_000_000, "simulation generation");
-        uint[] generations = new uint[generationCount];
-        for (int index = 0; index < generationCount; index++)
-            generations[index] = reader.ReadUInt32();
+        if (metadata == null || checkpoint == null || recording == null)
+            throw new InvalidDataException("The world replay is missing a required section.");
 
-        int simulationCount = NumosReplaySerializer.ReadCount(reader, 1_000_000, "simulation");
-        var simulations = new AtmosWorldSimulationCheckpoint[simulationCount];
-        for (int index = 0; index < simulationCount; index++)
+        return (metadata, checkpoint.Value, recording);
+    }
+
+    /// <summary>
+    ///     Writes the metadata section, including redundant bounds and counts the reader checks against the payload.
+    /// </summary>
+    private static void WriteMetadata(BinaryWriter writer, NumosReplayMetadata metadata, AtmosWorldReplayArchive replay)
+    {
+        AtmosReplayCodec.WriteString(writer, metadata.ProjectName);
+        writer.Write(metadata.CreatedUtc.UtcTicks);
+        AtmosReplayCodec.WriteString(writer, metadata.ProducerName);
+        AtmosReplayCodec.WriteString(writer, metadata.ProducerVersion);
+        AtmosReplayCodec.WriteString(writer, metadata.CoreSimVersion);
+        AtmosReplayCodec.WriteNullableString(writer, metadata.SourceReference);
+        AtmosReplayCodec.WritePosition(writer, replay.Recording.Start);
+        AtmosReplayCodec.WritePosition(writer, replay.Recording.Head);
+        writer.Write(checked((ulong)replay.Recording.Operations.Count));
+        writer.Write(checked((ulong)replay.InitialCheckpoint.Simulations.Count));
+        writer.Write(checked((ulong)replay.InitialCheckpoint.LinkSets.Count));
+    }
+
+    private static MetadataPayload ReadMetadata(BinaryReader reader, int maxStringBytes)
+    {
+        string projectName = AtmosReplayCodec.ReadString(reader, maxStringBytes);
+        long utcTicks = reader.ReadInt64();
+        string producerName = AtmosReplayCodec.ReadString(reader, maxStringBytes);
+        string producerVersion = AtmosReplayCodec.ReadString(reader, maxStringBytes);
+        string coreVersion = AtmosReplayCodec.ReadString(reader, maxStringBytes);
+        string? sourceReference = AtmosReplayCodec.ReadNullableString(reader, maxStringBytes);
+        var start = AtmosReplayCodec.ReadPosition(reader);
+        var head = AtmosReplayCodec.ReadPosition(reader);
+        ulong operationCount = reader.ReadUInt64();
+        ulong simulationCount = reader.ReadUInt64();
+        ulong linkSetCount = reader.ReadUInt64();
+        DateTimeOffset created;
+        try
         {
-            simulations[index] = new AtmosWorldSimulationCheckpoint(
-                ReadSimulationId(reader),
-                NumosReplaySerializer.ReadSimulationCheckpoint(reader));
+            created = new DateTimeOffset(utcTicks, TimeSpan.Zero);
         }
-
-        int linkSlotCount = NumosReplaySerializer.ReadCount(reader, 10_000_000, "link-set slot");
-        var slots = new AtmosWorldLinkSlotCheckpoint[linkSlotCount];
-        for (int index = 0; index < linkSlotCount; index++)
+        catch (ArgumentOutOfRangeException exception)
         {
-            uint generation = reader.ReadUInt32();
-            byte state = reader.ReadByte();
-            var kind = (ExplicitLinkSetKind)reader.ReadByte();
-            int linkCount = NumosReplaySerializer.ReadCount(reader, 10_000_000, "explicit link");
-            var links = new ExplicitLinkDefinition[linkCount];
-            for (int linkIndex = 0; linkIndex < linkCount; linkIndex++)
-                links[linkIndex] = ReadLink(reader);
-
-            slots[index] = new AtmosWorldLinkSlotCheckpoint(generation, state, kind, links);
-            // The checkpoint maps states for its public view lazily, so reject unknown ones while reading.
-            if (state != 0)
-                _ = ToPublicState(state);
+            throw new InvalidDataException("The replay creation time is invalid.", exception);
         }
 
-        var checkpoint = new AtmosWorldCheckpoint(
-            position,
-            topologyVersion,
-            config,
-            solvers,
-            simulations,
-            generations,
-            slots);
-
-        if (initialHash.Position != position)
-            throw new InvalidDataException("The world checkpoint schema or initial digest position is invalid.");
-
-        return new WorldCheckpointPayload(checkpoint, initialHash, headHash);
+        return new MetadataPayload(
+            new NumosReplayMetadata(projectName, created, producerName, producerVersion, coreVersion, sourceReference),
+            start,
+            head,
+            operationCount,
+            simulationCount,
+            linkSetCount);
     }
 
     /// <summary>
@@ -243,17 +283,17 @@ public static partial class NumosWorldReplaySerializer
     /// </remarks>
     private static void WriteOperations(BinaryWriter writer, AtmosWorldRecording recording)
     {
-        NumosReplaySerializer.WritePosition(writer, recording.Start);
-        NumosReplaySerializer.WritePosition(writer, recording.Head);
+        AtmosReplayCodec.WritePosition(writer, recording.Start);
+        AtmosReplayCodec.WritePosition(writer, recording.Head);
         writer.Write(recording.Operations.Count);
         using var payload = new MemoryStream();
-        using var payloadWriter = new BinaryWriter(payload, NumosReplaySerializer.Utf8, true);
+        using var payloadWriter = new BinaryWriter(payload, AtmosReplayCodec.Utf8, true);
         foreach (var recorded in recording.Operations)
         {
-            NumosReplaySerializer.WritePosition(writer, recorded.Position);
+            AtmosReplayCodec.WritePosition(writer, recorded.Position);
             writer.Write((ushort)recorded.Code);
             payload.SetLength(0);
-            WriteOperation(payloadWriter, recorded.Operation);
+            AtmosWorldReplayCodec.WriteOperation(payloadWriter, recorded.Operation);
             writer.Write(checked((uint)payload.Length));
             writer.Write(payload.GetBuffer(), 0, (int)payload.Length);
         }
@@ -263,139 +303,33 @@ public static partial class NumosWorldReplaySerializer
     ///     Reads an operations section written by <see cref="WriteOperations" />, bounding each payload to its declared
     ///     length.
     /// </summary>
-    internal static AtmosWorldRecording ReadOperations(BinaryReader reader, NumosReplayReadOptions options)
+    private static AtmosWorldRecording ReadOperations(BinaryReader reader, NumosReplayReadOptions options)
     {
-        var start = NumosReplaySerializer.ReadPosition(reader);
-        var head = NumosReplaySerializer.ReadPosition(reader);
-        int count = NumosReplaySerializer.ReadCount(reader, options.MaxOperations, "world operation");
+        var start = AtmosReplayCodec.ReadPosition(reader);
+        var head = AtmosReplayCodec.ReadPosition(reader);
+        int count = AtmosReplayCodec.ReadCount(reader, options.MaxOperations, "world operation");
         var operations = new AtmosWorldRecordedOperation[count];
         var limited = new LimitedReadStream(reader.BaseStream, 0);
-        using var payload = new BinaryReader(limited, NumosReplaySerializer.Utf8, true);
+        using var payload = new BinaryReader(limited, AtmosReplayCodec.Utf8, true);
         for (int index = 0; index < count; index++)
         {
-            var position = NumosReplaySerializer.ReadPosition(reader);
+            var position = AtmosReplayCodec.ReadPosition(reader);
             ushort code = reader.ReadUInt16();
             limited.Reset(reader.ReadUInt32());
-            operations[index] = new AtmosWorldRecordedOperation(position, ReadOperation(payload, code, options));
+            operations[index] = new AtmosWorldRecordedOperation(
+                position, AtmosWorldReplayCodec.ReadOperation(payload, code, options.MaxStringBytes));
             if (limited.Remaining != 0) throw new InvalidDataException($"World replay opcode {code} has unexpected trailing data.");
         }
 
         return AtmosWorldRecording.Adopt(start, head, operations);
     }
 
-    private static void WriteOperation(BinaryWriter writer, AtmosWorldOperation operation)
+    private static void Drain(Stream stream)
     {
-        if (!TryWriteGeneratedOperation(writer, operation))
-            throw new NotSupportedException($"World replay opcode {operation.Code} is not serializable.");
-    }
-
-    private static AtmosWorldOperation ReadOperation(BinaryReader reader, ushort rawCode, NumosReplayReadOptions options)
-    {
-        if (!Enum.IsDefined((AtmosWorldOperationCode)rawCode)) throw new InvalidDataException($"World replay opcode {rawCode} is unsupported.");
-        if (TryReadGeneratedOperation(reader, rawCode, options, out var generated)) return generated!;
-        throw new InvalidDataException($"World replay opcode {rawCode} is unsupported.");
-    }
-
-    private static void WriteSetAtmosWorldConfigOperation(BinaryWriter writer, SetAtmosWorldConfigOperation operation)
-    {
-        NumosReplaySerializer.WriteConfig(writer, operation.Config);
-    }
-
-    private static SetAtmosWorldConfigOperation ReadSetAtmosWorldConfigOperation(BinaryReader reader, NumosReplayReadOptions options)
-    {
-        return new SetAtmosWorldConfigOperation(NumosReplaySerializer.ReadConfig(reader, options));
-    }
-
-    private static void WriteCreateAtmosLinkSetOperation(BinaryWriter writer, CreateAtmosLinkSetOperation operation)
-    {
-        WriteHandle(writer, operation.Handle);
-        writer.Write((byte)operation.Kind);
-        writer.Write(operation.Links.Count);
-        foreach (var link in operation.Links)
-            WriteLink(writer, link);
-    }
-
-    private static CreateAtmosLinkSetOperation ReadCreateAtmosLinkSetOperation(BinaryReader reader, NumosReplayReadOptions options)
-    {
-        var handle = ReadHandle(reader);
-        var kind = (ExplicitLinkSetKind)reader.ReadByte();
-        int count = NumosReplaySerializer.ReadCount(reader, 10_000_000, "explicit link");
-        var links = new ExplicitLinkDefinition[count];
-        for (int index = 0; index < count; index++)
-            links[index] = ReadLink(reader);
-
-        return new CreateAtmosLinkSetOperation(handle, kind, links);
-    }
-
-    private static void WriteLink(BinaryWriter writer, ExplicitLinkDefinition link)
-    {
-        WriteCell(writer, link.First);
-        WriteCell(writer, link.Second);
-        writer.Write((byte)link.Flags);
-    }
-
-    private static ExplicitLinkDefinition ReadLink(BinaryReader reader)
-    {
-        return new ExplicitLinkDefinition(ReadCell(reader), ReadCell(reader), (ExplicitLinkFlags)reader.ReadByte());
-    }
-
-    private static void WriteCell(BinaryWriter writer, AtmosCellRef cell)
-    {
-        WriteSimulationId(writer, cell.Simulation);
-        NumosReplaySerializer.WriteInt3(writer, cell.Chunk.Position);
-        writer.Write(cell.LocalVoxelIndex);
-    }
-
-    private static AtmosCellRef ReadCell(BinaryReader reader)
-    {
-        return new AtmosCellRef(
-            ReadSimulationId(reader),
-            new AtmosChunkHandle(NumosReplaySerializer.ReadInt3(reader)),
-            reader.ReadUInt16());
-    }
-
-    private static void WriteSimulationId(BinaryWriter writer, AtmosSimulationId id)
-    {
-        writer.Write(id.Index);
-        writer.Write(id.Generation);
-    }
-
-    private static AtmosSimulationId ReadSimulationId(BinaryReader reader)
-    {
-        return new AtmosSimulationId(reader.ReadInt32(), reader.ReadUInt32());
-    }
-
-    private static void WriteHandle(BinaryWriter writer, ExplicitLinkSetHandle handle)
-    {
-        writer.Write(handle.Index);
-        writer.Write(handle.Generation);
-    }
-
-    private static ExplicitLinkSetHandle ReadHandle(BinaryReader reader)
-    {
-        return new ExplicitLinkSetHandle(reader.ReadInt32(), reader.ReadUInt32());
-    }
-
-    private static void WriteHash(BinaryWriter writer, AtmosWorldStateHash hash)
-    {
-        NumosReplaySerializer.WritePosition(writer, hash.Position);
-        writer.Write(hash.Digest);
-    }
-
-    private static AtmosWorldStateHash ReadHash(BinaryReader reader)
-    {
-        return new AtmosWorldStateHash(NumosReplaySerializer.ReadPosition(reader), reader.ReadUInt64());
-    }
-
-    private static AtmosWorldLinkSetState ToPublicState(byte state)
-    {
-        return state switch
+        Span<byte> buffer = stackalloc byte[4096];
+        while (stream.Read(buffer) != 0)
         {
-            1 => AtmosWorldLinkSetState.PendingActivation,
-            2 => AtmosWorldLinkSetState.Active,
-            3 or 4 => AtmosWorldLinkSetState.PendingRemoval,
-            _ => throw new InvalidDataException("The world checkpoint contains an invalid link-set state.")
-        };
+        }
     }
 
     private static void ValidateRecording(AtmosWorldRecording recording)
@@ -413,8 +347,29 @@ public static partial class NumosWorldReplaySerializer
         }
     }
 
-    internal sealed record WorldCheckpointPayload(
-        AtmosWorldCheckpoint Checkpoint,
-        AtmosWorldStateHash InitialHash,
-        AtmosWorldStateHash HeadHash);
+    private sealed record MetadataPayload(
+        NumosReplayMetadata Metadata,
+        AtmosTimelinePosition Start,
+        AtmosTimelinePosition Head,
+        ulong OperationCount,
+        ulong SimulationCount,
+        ulong LinkSetCount)
+    {
+        /// <summary>
+        ///     Checks the metadata's redundant bounds and counts against the decoded payload.
+        /// </summary>
+        public bool Matches(
+            AtmosTimelinePosition start,
+            AtmosTimelinePosition head,
+            int operationCount,
+            int simulationCount,
+            int linkSetCount)
+        {
+            return Start == start &&
+                   Head == head &&
+                   OperationCount == (ulong)operationCount &&
+                   SimulationCount == (ulong)simulationCount &&
+                   LinkSetCount == (ulong)linkSetCount;
+        }
+    }
 }

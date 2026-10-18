@@ -6,7 +6,7 @@
         <Nullable>enable</Nullable>
         <IsPackable>false</IsPackable>
         <IsTestProject>true</IsTestProject>
-        <RootNamespace>Numos.Replay.SourceGen.Tests</RootNamespace>
+        <RootNamespace>Numos.Replay.Generators.Tests</RootNamespace>
     </PropertyGroup>
 
     <ItemGroup>
@@ -20,7 +20,7 @@
     </ItemGroup>
 
     <ItemGroup>
-        <ProjectReference Include="..\..\src\Numos.Replay.Analyzers\Numos.Replay.Analyzers.csproj"/>
+        <ProjectReference Include="..\..\src\Numos.Replay.Generators\Numos.Replay.Generators.csproj"/>
     </ItemGroup>
 
     <ItemGroup>

@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk"
+         TreatAsLocalProperty="PublishAot;PublishTrimmed;RuntimeIdentifier;SelfContained">
+
+    <Import Project="..\Numos.CoreSim\Version.props"/>
+
+    <PropertyGroup>
+        <TargetFramework>netstandard2.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <LangVersion>latest</LangVersion>
+        <RootNamespace>Numos.Replay.Generators</RootNamespace>
+        <Description>Build-time generators for the replay operation and checkpoint codecs in Numos.CoreSim and Numos.API.</Description>
+        <!-- Only Numos's own projects run these; nothing ships them. -->
+        <IsPackable>false</IsPackable>
+        <IsAotCompatible>false</IsAotCompatible>
+        <IsTrimmable>false</IsTrimmable>
+        <PublishAot>false</PublishAot>
+        <PublishTrimmed>false</PublishTrimmed>
+        <SelfContained>false</SelfContained>
+        <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
+        <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <InternalsVisibleTo Include="Numos.Replay.Generators.Tests"/>
+    </ItemGroup>
+
+    <ItemGroup>
+        <Compile Include="..\Numos.API.Generators\Common\CodeWriter.cs" Link="Common\CodeWriter.cs"/>
+        <Compile Include="..\Numos.API.Generators\Common\DiagnosticInfo.cs" Link="Common\DiagnosticInfo.cs"/>
+        <Compile Include="..\Numos.API.Generators\Common\EquatableArray.cs" Link="Common\EquatableArray.cs"/>
+        <Compile Include="..\Numos.API.Generators\Common\GeneratorOutput.cs" Link="Common\GeneratorOutput.cs"/>
+        <Compile Include="..\Numos.API.Generators\Common\IsExternalInit.cs" Link="Common\IsExternalInit.cs"/>
+        <Compile Include="..\Numos.API.Generators\Common\LocationInfo.cs" Link="Common\LocationInfo.cs"/>
+        <Compile Include="..\Numos.API.Generators\Common\PartialTypeModel.cs" Link="Common\PartialTypeModel.cs"/>
+    </ItemGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.0.0" PrivateAssets="all"/>
+        <PackageReference Include="Microsoft.CodeAnalysis.Analyzers" Version="3.11.0" PrivateAssets="all"/>
+    </ItemGroup>
+
+</Project>

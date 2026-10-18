@@ -106,7 +106,7 @@ jobs:
 
           using var simulation = new AtmosSimulation();
           _ = simulation.Dangerous();
-          _ = typeof(NumosReplaySerializer);
+          _ = typeof(NumosWorldReplaySerializer);
           _ = typeof(NumosReplayFile);
 
           // The ChunkData generator ships inside Numos.API, which this project only references transitively.

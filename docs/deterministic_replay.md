@@ -168,12 +168,12 @@ every authoritative value and keep its snapshot immutable.
 The built-in per-voxel chunk arrays (`AtmosChunkCheckpoint.Classifications`/`Temperatures`/`Pressures`/
 `HeatCapacities`), `AtmosConfigSnapshot`'s flat scalar fields, and `GasProperties`'s fields are tagged with
 `[ChunkCheckpointField]`/`[ConfigCheckpointField]`/`[GasCheckpointField]` (`Numos.CoreSim.Replay`).
-`Numos.Replay.CheckpointGen` generates their capture, restore, hashing, and wire read/write code from those attributes, so adding a
-new field in one of these three uniform shapes only means declaring the property/field and tagging it with the next
-`Order` value -- not hand-editing the checkpoint constructor, `Materialize()`, `AtmosStateHasher`, and the wire codec
-separately. Fields with an irregular shape (a companion count, a nested per-gas-channel array, host-owned solver
-arrays) stay untagged and hand-written, the same way `Custom = true` opts an operation out of the wire-operation
-generator below.
+`Numos.Replay.Generators` turns those tags into one ordered field list per group and generates capture, restore,
+hashing, and the wire encoding from it, so adding a field in one of these shapes means declaring it and tagging it with
+the next `Order` value. Because the hash and the codec come from the same list, they can't drift apart. Fields with an
+irregular shape (a companion count, a nested per-gas-channel array, host-owned solver arrays) stay untagged and
+hand-written in `AtmosReplayCodec`, the same way a hand-written `Write{Name}`/`Read{Name}` pair takes an operation out
+of the generated operation codec below.
 
 Some data intentionally remains outside the checkpoint:
 
@@ -364,43 +364,47 @@ dotnet run --project benchmarks/Numos.Replay.Benchmarks -c Release -- --quick
 
 Both operation families (`AtmosOperation`/`AtmosOperationCode` for grid mutations, which a world recording wraps in
 `AtmosWorldSimulationOperation`, and `AtmosWorldOperation`/`AtmosWorldOperationCode` for world-level mutations) follow
-the same five-step recipe. Configuration and solver enablement are world state, so they only exist as world
-operations; simulation opcodes 1 and 11 used to carry them and stay unassigned. Most of
-the ways to get this wrong are caught automatically, either at build time or by the existing test suite -- but not
-all of them, so don't skip steps on the assumption that a missing one will always be loud.
+the same recipe. Configuration and solver enablement are world state, so they only exist as world operations;
+simulation opcodes 1 and 11 used to carry them and stay unassigned.
 
-1. Add the enum member (`AtmosOperationCode`/`AtmosWorldOperationCode`) and the operation record deriving from
-   `AtmosOperation`/`AtmosWorldOperation`, overriding `Code` to return it. An enum member with no registration at
-   all is caught in step 2 below.
-2. Register the operation's wire codec with a `[WireOperation(typeof(YourOperation), YourOperationCode.Member)]`
-   attribute, stacked on `NumosReplaySerializer` or `NumosWorldReplaySerializer` alongside the existing ones. Forget
-   this (or forget it for a whole new enum member) and `NUMOSREPLAYGEN008` fails the `Numos.Serialization` build,
-   pointing at the registration host class.
-3. Most operations need nothing else here -- the field order in the record's primary constructor becomes the wire
-   layout, mapped through `Numos.Replay.SourceGen`'s fixed set of recognized field types (primitives, `Int3`,
-   `VoxelClassification`, `AtmosSimulationId`, `ExplicitLinkSetHandle`, and a nested-operation kind for a world
-   operation embedding a whole `AtmosOperation`). An unrecognized field type fails the build with
-   `NUMOSREPLAYGEN001` rather than silently miscoding.
+1. Add the enum member to `AtmosOperationCode` or `AtmosWorldOperationCode`.
+2. Add the operation record deriving from `AtmosOperation` or `AtmosWorldOperation`, with two overrides:
 
-   If the shape doesn't fit that mapping -- a nested snapshot (`SetAtmosWorldConfigOperation`), or a variable-length
-   list (`SetVoxelMixtureOperation`, its gas list; `CreateAtmosLinkSetOperation`, its link list) -- add
-   `Custom = true` to the registration and hand-write static `Write{OperationName}`/`Read{OperationName}` methods on
-   the same host class. The generator validates their signatures and plugs calls to them into the same dispatch
-   table; a missing or mismatched method fails the build with `NUMOSREPLAYGEN007`. Those three operations are the
-   worked examples to copy from.
-4. Add a `private void Apply(YourOperation op)` overload on the family's host (`AtmosKernel` for simulation
-   operations, `AtmosWorld` for world operations) that actually mutates live state when the operation replays.
-   `ApplySwitchGenerator` (`Numos.Replay.Analyzers`) finds every concrete operation type deriving from
-   `AtmosOperation`/`AtmosWorldOperation` and generates the dispatch switch that calls into it.
-   `AtmosKernel.ApplyRecordedOperation` and `AtmosWorld.ApplyWorldOperation` are thin wrappers around that generated
-   method, so there is no hand-written switch to update. Forget the overload (or get its parameter type wrong) and
-   `NUMOSREPLAYGEN010` fails the `Numos.CoreSim`/`Numos.API` build, naming the operation and host type.
-5. Update the golden wire-format fixture in `tests/Numos.Serialization.Tests/ReplayWireFormatGoldenTests.cs` to
-   exercise the new opcode, and regenerate the pinned base64 constant using the `[Explicit] PrintGoldenBytes` test in
-   the same file. No *build* step catches a forgotten update here, but
-   `WorldReplay_GoldenBytesDeserializeToTheFullOpcodeSet` asserts the fixture's decoded operations cover every member
-   of both enums, so a new opcode absent from the fixture shows up as a test failure, not a silent gap -- just not
-   until you run the suite.
+   ```csharp
+   public sealed record VentChunkOperation(Int3 Position, Kelvin Temperature) : AtmosOperation
+   {
+       public override AtmosOperationCode Code => AtmosOperationCode.VentChunk;
+
+       internal override void Apply(AtmosKernel kernel) => kernel.Apply(this);
+   }
+   ```
+
+   `Code` has to be a plain enum member like that, because the codec generator reads the opcode from it
+   (`NUMOSREPLAYGEN011` otherwise). `Apply` is abstract, so forgetting it doesn't compile; world operations take an
+   `AtmosWorld` instead.
+3. Add the `internal void Apply(VentChunkOperation op)` overload on `AtmosKernel` or `AtmosWorld` that mutates live
+   state when the operation replays.
+4. Extend the golden wire-format fixture in `tests/Numos.Serialization.Tests/ReplayWireFormatGoldenTests.cs` to
+   exercise the new opcode and regenerate the pinned base64 constant with the `[Explicit] PrintGoldenBytes` test in the
+   same file. `WorldReplay_GoldenBytesDeserializeToTheFullOpcodeSet` checks that the fixture covers every member of both
+   enums, so skipping this fails the suite rather than the build.
+
+There is no codec step for most operations. `Numos.Replay.Generators` finds every concrete operation type and
+generates `WriteOperation`/`ReadOperation` on the family's codec (`AtmosReplayCodec` in Numos.CoreSim,
+`AtmosWorldReplayCodec` in Numos.API), writing fields in primary-constructor order. Primitives and Numos.Units quantity
+aliases go straight through `BinaryWriter`. Any other field type needs a `Write{TypeName}`/`Read{TypeName}` pair on the
+family's codec or on `AtmosReplayCodec`; `Int3`, `string`, `VoxelClassification`, `AtmosSimulationId`,
+`ExplicitLinkSetHandle`, and a nested `AtmosOperation` already have one. A field type without one fails the build with
+`NUMOSREPLAYGEN001`.
+
+When the record's shape doesn't fit (a nested snapshot, a variable-length list), hand-write
+`static void Write{OperationName}(BinaryWriter, TOperation)` and
+`static TOperation Read{OperationName}(BinaryReader[, int maxStringBytes])` on the family's codec and the generator
+calls those instead. A mismatched signature is `NUMOSREPLAYGEN007`. `SetVoxelMixtureOperation`,
+`SetAtmosWorldConfigOperation`, and `CreateAtmosLinkSetOperation` are the worked examples.
+
+The generator also fails the build for an enum member no operation returns (`NUMOSREPLAYGEN008`) and for two
+operations returning the same code (`NUMOSREPLAYGEN004`).
 
 ## Save portable replay files
 

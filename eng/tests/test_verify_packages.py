@@ -59,7 +59,7 @@ class DependencyAssetTests(unittest.TestCase):
         )
 
     def test_rejects_unpublished_numos_packages(self) -> None:
-        for dependency_id in ("Numos.API.Generators", "Numos.Replay.SourceGen"):
+        for dependency_id in ("Numos.API.Generators", "Numos.Replay.Generators"):
             with self.subTest(dependency=dependency_id), self.assertRaisesRegex(ValueError, "unpublished"):
                 self.check({dependency_id: {}})
 

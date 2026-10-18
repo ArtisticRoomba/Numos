@@ -2,7 +2,7 @@ namespace Numos.CoreSim.Replay;
 
 /// <summary>
 ///     Marks an <see cref="AtmosChunkCheckpoint" /> property as one of the flat per-voxel arrays copied from a live
-///     <see cref="AtmosChunk" />, so <c>Numos.Replay.CheckpointGen</c> can generate its capture, restore, hashing, and
+///     <see cref="AtmosChunk" />, so <c>Numos.Replay.Generators</c> can generate its capture, restore, hashing, and
 ///     wire read/write code from this one declaration instead of by hand in each of those places.
 /// </summary>
 /// <remarks>

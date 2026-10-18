@@ -19,7 +19,7 @@ namespace Numos.Serialization.Tests;
 ///     loudly here even when every other replay test still passes.
 ///     <para>
 ///         A deliberate wire-format change (e.g. a real new field, not a refactor) must bump
-///         <c>NumosReplaySerializer.ContainerVersion</c> or the relevant format/compatibility version, then
+///         <c>NumosWorldReplaySerializer.ContainerVersion</c> or the relevant format/compatibility version, then
 ///         regenerate the world constant below by running <see cref="PrintGoldenBytes" /> (an explicit test, skipped
 ///         by default) and pasting its output line in.
 ///     </para>
