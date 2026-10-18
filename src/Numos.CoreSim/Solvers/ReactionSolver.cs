@@ -33,7 +33,7 @@ internal class ReactionSolver : IAtmosSolverStage
     ///     Calibration factor for the flame speed estimate <c>sqrt(thermal diffusivity * depletion rate)</c>.
     ///     Tune it against known laminar flame speeds of the mixtures in use.
     /// </summary>
-    internal Scalar FlameSpeedScale { get; set; } = 1f;
+    internal Scalar FlameSpeedScale { get; set; } = 100f;
 
     /// <summary>
     ///     Slowest flame speed that still sustains a flame. Below it a flame kernel recedes, and a voxel that
@@ -773,7 +773,12 @@ internal class ReactionSolver : IAtmosSolverStage
                 // Match Enumerable.Sum's double accumulator while preserving reaction order and float products.
                 Mole64 accumulatedConsumption = 0d;
                 foreach (var (reactionId, consumed) in gasData[i].ConsumingReactions)
-                    accumulatedConsumption += consumed * reactionSpeeds[reactionId];
+                {
+                    Mole speed = reactionSpeeds[reactionId];
+                    if (flameActive && !bulkDominates && reactions.GetReactionIsIgnition(reactionId))
+                        speed *= 1 / ignitionPercent;
+                    accumulatedConsumption += consumed * speed;
+                }   
 
                 Mole consumption = (Mole)accumulatedConsumption;
 
