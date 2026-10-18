@@ -21,8 +21,9 @@ public sealed class NumosReplaySerializerTests
             ThermalConductance = 0.15f
         };
 
-        using var source = new AtmosSimulation(config, 2, 2, 1);
-        var timeline = new AtmosReplayTimeline(source, 1);
+        using var world = new AtmosWorld(config);
+        var source = world.CreateSimulation(2, 2, 1);
+        var timeline = new AtmosWorldReplayTimeline(world, 1);
         var chunk = source.CreateAndRegisterChunk(default);
         source.SetChunkClassification(chunk, new VoxelClassification(1));
         source.SetChunkBoundaryClassification(chunk, new VoxelClassification(1));
@@ -30,17 +31,17 @@ public sealed class NumosReplaySerializerTests
         source.AddGasToVoxel(chunk, 0, 0, 0, 0, 2f, 315f);
         source.WakeChunk(chunk);
         source.SleepChunk(chunk);
-        source.World.Solvers.SetEnabled(AtmosBuiltInSolvers.Advection, false);
-        source.SetAtmosConfig(new AtmosConfig(source.Config) { SleepThreshold = 8 });
+        world.Solvers.SetEnabled(AtmosBuiltInSolvers.Advection, false);
+        world.SetAtmosConfig(new AtmosConfig(world.Config) { SleepThreshold = 8 });
         var canister = source.CreateGasMixture(1f, 330f);
         canister.SetMoles(0, 1f);
         canister.TransferTo(source.GetVoxelGasMixture(chunk, 0), 0.5f);
         var removed = source.CreateAndRegisterChunk(new Int3(1, 0, 0));
         source.UnregisterChunk(removed);
-        source.Tick();
+        world.Tick();
         timeline.ObserveLiveState();
         source.SetVoxelTemperature(chunk, 1, 321f);
-        source.Tick();
+        world.Tick();
         var archive = timeline.CaptureReplay();
         var metadata = new NumosReplayMetadata(
             "Round trip",
@@ -50,38 +51,29 @@ public sealed class NumosReplaySerializerTests
             CoreSimBuildInfo.PackageVersion,
             "fixture");
 
-        var document = new NumosReplayDocument(metadata, archive);
+        var document = new NumosWorldReplayDocument(metadata, archive);
 
         using var first = new MemoryStream();
         using var second = new MemoryStream();
-        NumosReplaySerializer.Serialize(first, document);
-        NumosReplaySerializer.Serialize(second, document);
+        NumosWorldReplaySerializer.Serialize(first, document);
+        NumosWorldReplaySerializer.Serialize(second, document);
         Assert.That(first.ToArray(), Is.EqualTo(second.ToArray()));
 
         first.Position = 0;
-        var restored = NumosReplaySerializer.Deserialize(first);
+        var restored = NumosWorldReplaySerializer.Deserialize(first);
         Assert.Multiple(() =>
         {
             Assert.That(restored.Metadata, Is.EqualTo(metadata));
             Assert.That(
-                restored.Replay.Recording.Operations.Select(static op => op.Code),
-                Is.EqualTo(archive.Recording.Operations.Select(static op => op.Code)));
+                restored.Replay.Recording.Operations.Select(Codes),
+                Is.EqualTo(archive.Recording.Operations.Select(Codes)));
 
             Assert.That(restored.Replay.InitialStateHash, Is.EqualTo(archive.InitialStateHash));
             Assert.That(restored.Replay.HeadStateHash, Is.EqualTo(archive.HeadStateHash));
-            Assert.That(
-                restored.Replay.Recording.Operations.Select(static operation => operation.Code).Distinct(),
-                Is.EquivalentTo(Enum.GetValues<AtmosOperationCode>()));
         });
 
-        var dimensions = restored.Replay.InitialCheckpoint.Dimensions;
-        using var replaySimulation = new AtmosSimulation(
-            new AtmosConfig(restored.Replay.InitialCheckpoint.Config),
-            dimensions.X,
-            dimensions.Y,
-            dimensions.Z);
-
-        var imported = AtmosReplayTimeline.Import(replaySimulation, restored.Replay, 1);
+        using var replayWorld = new AtmosWorld(new AtmosConfig(restored.Replay.InitialCheckpoint.Config));
+        var imported = AtmosWorldReplayTimeline.Import(replayWorld, restored.Replay, 1);
         Assert.Multiple(() =>
         {
             Assert.That(imported.IsImported, Is.True);
@@ -90,7 +82,7 @@ public sealed class NumosReplaySerializerTests
         });
 
         imported.ReturnToHead();
-        Assert.That(replaySimulation.ComputeStateHash(), Is.EqualTo(archive.HeadStateHash));
+        Assert.That(replayWorld.ComputeStateHash(), Is.EqualTo(archive.HeadStateHash));
         Assert.That(imported.IsInspecting, Is.True);
 
         imported.SeekTick(1);
@@ -98,14 +90,16 @@ public sealed class NumosReplaySerializerTests
             operation.Sequence <= imported.Position.OperationSequence);
 
         imported.SimulateFromHere();
-        replaySimulation.SetVoxelTemperature(new AtmosChunkHandle(default), 1, 350f);
+        replayWorld.Simulations[0].SetVoxelTemperature(new AtmosChunkHandle(default), 1, 350f);
         var branch = imported.CaptureReplay();
         Assert.Multiple(() =>
         {
             Assert.That(imported.IsImported, Is.False);
             Assert.That(imported.IsInspecting, Is.False);
             Assert.That(branch.Recording.Operations, Has.Count.EqualTo(retainedOperations + 1));
-            Assert.That(branch.Recording.Operations[^1].Code, Is.EqualTo(AtmosOperationCode.SetVoxelTemperature));
+            Assert.That(
+                ((AtmosWorldSimulationOperation)branch.Recording.Operations[^1].Operation).Operation.Code,
+                Is.EqualTo(AtmosOperationCode.SetVoxelTemperature));
         });
     }
 
@@ -114,15 +108,15 @@ public sealed class NumosReplaySerializerTests
     {
         var document = CreateEmptyDocument();
         using var stream = new MemoryStream();
-        NumosReplaySerializer.Serialize(stream, document);
+        NumosWorldReplaySerializer.Serialize(stream, document);
         byte[] bytes = stream.ToArray();
 
         Assert.That(
-            () => NumosReplaySerializer.Deserialize(new MemoryStream(bytes[..^1])),
+            () => NumosWorldReplaySerializer.Deserialize(new MemoryStream(bytes[..^1])),
             Throws.InstanceOf<EndOfStreamException>().Or.InstanceOf<InvalidDataException>());
 
         Assert.That(
-            () => NumosReplaySerializer.Deserialize(new MemoryStream(bytes), new NumosReplayReadOptions { MaxPayloadBytes = 1 }),
+            () => NumosWorldReplaySerializer.Deserialize(new MemoryStream(bytes), new NumosReplayReadOptions { MaxPayloadBytes = 1 }),
             Throws.InstanceOf<InvalidDataException>());
     }
 
@@ -130,17 +124,18 @@ public sealed class NumosReplaySerializerTests
     public void RoundTrip_PreservesUnnamedGasDefinition()
     {
         var config = new AtmosConfig { GasRegistry = [new GasProperties()] };
-        using var simulation = new AtmosSimulation(config, 1, 1, 1);
-        var timeline = new AtmosReplayTimeline(simulation);
-        var document = new NumosReplayDocument(
+        using var world = new AtmosWorld(config);
+        world.CreateSimulation(1, 1, 1);
+        var timeline = new AtmosWorldReplayTimeline(world);
+        var document = new NumosWorldReplayDocument(
             new NumosReplayMetadata("Unnamed gas", DateTimeOffset.UnixEpoch, "tests", "1", "1"),
             timeline.CaptureReplay());
 
         using var stream = new MemoryStream();
 
-        NumosReplaySerializer.Serialize(stream, document);
+        NumosWorldReplaySerializer.Serialize(stream, document);
         stream.Position = 0;
-        var restored = NumosReplaySerializer.Deserialize(stream);
+        var restored = NumosWorldReplaySerializer.Deserialize(stream);
 
         Assert.That(restored.Replay.InitialCheckpoint.Config.GasRegistry[0].Name, Is.Null);
     }
@@ -169,13 +164,14 @@ public sealed class NumosReplaySerializerTests
     [Test]
     public void CaptureReplayThroughCurrentPosition_TruncatesWithoutChangingPreservedFuture()
     {
-        using var simulation = new AtmosSimulation(1, 1, 1);
+        using var world = new AtmosWorld();
+        var simulation = world.CreateSimulation(1, 1, 1);
         var chunk = simulation.CreateAndRegisterChunk(default);
-        var timeline = new AtmosReplayTimeline(simulation, 1);
+        var timeline = new AtmosWorldReplayTimeline(world, 1);
         simulation.SetVoxelTemperature(chunk, 0, 300f);
-        simulation.Tick();
+        world.Tick();
         simulation.SetVoxelTemperature(chunk, 0, 310f);
-        simulation.Tick();
+        world.Tick();
         var originalHead = timeline.Head;
 
         timeline.SeekTick(1);
@@ -190,11 +186,19 @@ public sealed class NumosReplaySerializerTests
         });
     }
 
-    private static NumosReplayDocument CreateEmptyDocument()
+    private static NumosWorldReplayDocument CreateEmptyDocument()
     {
-        using var simulation = new AtmosSimulation(1, 1, 1);
-        var timeline = new AtmosReplayTimeline(simulation);
+        using var world = new AtmosWorld();
+        world.CreateSimulation(1, 1, 1);
+        var timeline = new AtmosWorldReplayTimeline(world);
         var archive = timeline.CaptureReplay();
-        return new NumosReplayDocument(new NumosReplayMetadata("Empty", DateTimeOffset.UnixEpoch, "tests", "1", "1"), archive);
+        return new NumosWorldReplayDocument(
+            new NumosReplayMetadata("Empty", DateTimeOffset.UnixEpoch, "tests", "1", "1"),
+            archive);
+    }
+
+    private static (AtmosWorldOperationCode World, AtmosOperationCode? Simulation) Codes(AtmosWorldRecordedOperation recorded)
+    {
+        return (recorded.Code, (recorded.Operation as AtmosWorldSimulationOperation)?.Operation.Code);
     }
 }

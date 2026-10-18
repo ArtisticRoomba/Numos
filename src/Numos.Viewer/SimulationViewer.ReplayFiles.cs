@@ -270,13 +270,7 @@ public partial class SimulationViewer
 
     private LoadedReplay LoadReplay(string path, CancellationToken cancellation)
     {
-        var decoded = NumosReplayFile.LoadDocument(path);
-        if (decoded is not NumosWorldReplayDocument document)
-        {
-            throw new NotSupportedException(
-                "This viewer workspace expects a complete-world replay. The file is a legacy single-simulation replay.");
-        }
-
+        var document = NumosReplayFile.Load(path);
         var replay = document.Replay;
         var config = new AtmosConfig(replay.InitialCheckpoint.Config);
         AtmosWorld? world = null;

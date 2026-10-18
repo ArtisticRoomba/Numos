@@ -508,7 +508,8 @@ public sealed class ReplayCodecGenerator : IIncrementalGenerator
         builder.AppendLine();
         builder.Append("namespace ").AppendLine(hostNamespace);
         builder.AppendLine("{");
-        builder.Append("    public static partial class ").AppendLine(hostName);
+        // No accessibility modifier, so the hand-written host declaration decides it.
+        builder.Append("    static partial class ").AppendLine(hostName);
         builder.AppendLine("    {");
         builder.Append(
             "        private static bool TryWriteGeneratedOperation(global::System.IO.BinaryWriter writer, ").Append(baseTypeFqn).AppendLine(" operation)");

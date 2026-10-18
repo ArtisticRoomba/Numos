@@ -8,8 +8,8 @@ using Numos.Serialization;
 namespace Numos.Serialization.Tests;
 
 /// <summary>
-///     Pins the exact bytes of the Numos replay wire format against a fixed scenario that exercises every
-///     <see cref="AtmosOperationCode" /> and <see cref="AtmosWorldOperationCode" />.
+///     Pins the exact bytes of the Numos replay wire format against a fixed world scenario that exercises every
+///     <see cref="AtmosWorldOperationCode" />, and every <see cref="AtmosOperationCode" /> nested inside one.
 /// </summary>
 /// <remarks>
 ///     Round-trip tests elsewhere (write, then read the same bytes back) cannot catch a codec change that reorders or
@@ -19,16 +19,16 @@ namespace Numos.Serialization.Tests;
 ///     loudly here even when every other replay test still passes.
 ///     <para>
 ///         A deliberate wire-format change (e.g. a real new field, not a refactor) must bump
-///         <see cref="NumosReplaySerializer.ContainerVersion" /> or the relevant format/compatibility version, then
-///         regenerate the constants below by running <see cref="PrintGoldenBytes" /> (an explicit test, skipped by
-///         default) and pasting its two output lines in.
+///         <c>NumosReplaySerializer.ContainerVersion</c> or the relevant format/compatibility version, then
+///         regenerate the world constant below by running <see cref="PrintGoldenBytes" /> (an explicit test, skipped
+///         by default) and pasting its output line in.
 ///     </para>
 ///     <para>
 ///         Any other failure, such as one after a codec refactor, means the codec disagrees with the pinned layout.
 ///         That is a regression to fix, not a reason to regenerate.
 ///     </para>
 ///     <para>
-///         The scenarios below tick the simulation/world so link and simulation lifecycle transitions stay valid,
+///         The scenario below ticks the world so link and simulation lifecycle transitions stay valid,
 ///         which pulls solver-computed floats into the pinned checkpoint bytes. Those floats come from straightforward
 ///         scalar mixing arithmetic, not vectorized reductions, so they are expected to be bit-identical across the
 ///         CI matrix (ubuntu/windows/macos) — but that has not been empirically verified on non-Linux runners. If this
@@ -39,43 +39,23 @@ namespace Numos.Serialization.Tests;
 [TestFixture]
 public sealed class ReplayWireFormatGoldenTests
 {
-    // Captured with PrintGoldenBytes from the hand-written switch-based codec that preceded the generated one, so
-    // these bytes also hold the generated codec to the original layout. Do not hand-edit.
-    private const string GoldenSimReplayBase64 =
+    // A single-simulation (content kind 1) file from before world replays became the only kind. Kept to pin the
+    // rejection, not the layout.
+    private const string LegacySimReplayBase64 =
         "TlVNT1MNChoBAAEAAwAAAAEAAACNAAAAAAAAAA4AAABHb2xkZW4gZml4dHVyZQCAtff1f58IDAAAAG51bW9zLWdvbGRlbgwAAAAxLjAuMC1nb2xkZW4MAAAAMS4wLjAtZ29sZGVuAQ4AAABwaGFzZTAtZml4dHVyZQAAAAAAAAAAAAAAAAAAAAACAAAAAAAAAA0AAAAAAAAADQAAAAAAAAAAAAAAAAAAAAIAAQCKAQAAAAAAAAUAAAADAAAAZUU1/gKyPXwDAAAAAgAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPAL1dD5e6YbAgAAAAAAAAANAAAAAAAAAFKbS5YIhny+M5OSQzOTkkMMSqZBAACAP4DmxUcK16M8zcwsQAAAAD4AAIA/BwAAAAAAYECamRk+AAAAPwrXIz4AAHBBFAAAAAIAAAABAwAAAEFpcgxKpkEAAAAAAAAAAAAAAAAACtejPAEFAAAAVG94aW4MSqZBAAAAAAAAAAAAAAAAAM3MTD0AAAAABwAAAAkAAABhZHZlY3Rpb24AAQAWAAAAZXhwbGljaXQtZ2FzLXRyYW5zcG9ydAABAA0AAABib3VuZGFyeS1mbG93AAEADgAAAHRoZXJtb2R5bmFtaWNzAAEAGgAAAGV4cGxpY2l0LXRoZXJtYWwtdHJhbnNwb3J0AAEAEAAAAHRoZXJtYWwtYm91bmRhcnkAAQANAAAAZ2FzLXJlYWN0aW9ucwABAAAAAAADAAEAnAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAAAAAAAANAAAAAAAAAA0AAAAAAAAAAAAAAAEAAAAAAAAAAgAMAAAAAQAAAAIAAAADAAAAAAAAAAAAAAACAAAAAAAAAAQAEAAAAAEAAAACAAAAAwAAAAQAAAAAAAAAAAAAAAMAAAAAAAAABQAQAAAAAQAAAAIAAAADAAAABQAAAAAAAAAAAAAABAAAAAAAAAAGABIAAAABAAAAAgAAAAMAAAAEAAYAAAAAAAAAAAAAAAUAAAAAAAAACAAaAAAAAQAAAAIAAAADAAAABQABAAAAAAAAQACAnUMAAAAAAAAAAAYAAAAAAAAACQAMAAAAAQAAAAIAAAADAAAAAAAAAAAAAAAHAAAAAAAAAAoADAAAAAEAAAACAAAAAwAAAAAAAAAAAAAACAAAAAAAAAALAA4AAAAJAAAAYWR2ZWN0aW9uAAAAAAAAAAAACQAAAAAAAAABAIQAAAAzk5JDM5OSQwxKpkEAAIA/gObFRwrXozzNzCxAAAAAPgAAgD8IAAAAAABgQJqZGT4AAAA/CtcjPgAAcEEUAAAAAgAAAAEDAAAAQWlyDEqmQQAAAAAAAAAAAAAAAAAK16M8AQUAAABUb3hpbgxKpkEAAAAAAAAAAAAAAAAAzcxMPQAAAAAAAAAAAAAAAAoAAAAAAAAADAAuAAAAAQAAAAIAAAADAAAAAgAAAKVDXXyrRAxKJkECAAAAAQAAAAAAAAAAAAAAAAAAPwAAAAAAAAAACwAAAAAAAAACAAwAAAAEAAAABQAAAAYAAAAAAAAAAAAAAAwAAAAAAAAAAwAMAAAABAAAAAUAAAAGAAAAAQAAAAAAAAANAAAAAAAAAAcAEgAAAAEAAAACAAAAAwAAAAEAAICgQw==";
 
+    // Captured with PrintGoldenBytes. Do not hand-edit.
     private const string GoldenWorldReplayBase64 =
-        "TlVNT1MNChoBAAIAAwAAAAEAAACbAAAAAAAAABQAAABHb2xkZW4gd29ybGQgZml4dHVyZQCAtff1f58IDAAAAG51bW9zLWdvbGRlbgwAAAAxLjAuMC1nb2xkZW4MAAAAMS4wLjAtZ29sZGVuAQ4AAABwaGFzZTAtZml4dHVyZQAAAAAAAAAAAAAAAAAAAAACAAAAAAAAAAwAAAAAAAAADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgABAIIBAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAANeUPqo2UcxQIAAAAAAAAADAAAAAAAAAA5PvATsYXIYjOTkkMzk5JDDEqmQQAAgD+A5sVHCtejPM3MLEAAAAA+AACAP2QAAAAAAGBAzcxMPQAAAD8K1yM+AABwQRQAAAACAAAAAQMAAABBaXIMSqZBAAAAAAAAAAAAAAAAAArXozwBBQAAAFRveGluDEqmQQAAAAAAAAAAAAAAAADNzEw9AAAAAAcAAAAJAAAAYWR2ZWN0aW9uAAEAFgAAAGV4cGxpY2l0LWdhcy10cmFuc3BvcnQAAQANAAAAYm91bmRhcnktZmxvdwABAA4AAAB0aGVybW9keW5hbWljcwABABoAAABleHBsaWNpdC10aGVybWFsLXRyYW5zcG9ydAABABAAAAB0aGVybWFsLWJvdW5kYXJ5AAEADQAAAGdhcy1yZWFjdGlvbnMAAQAAAAAAAAAAAAAAAAADAAEAtAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAAAAAAAAMAAAAAAAAAAwAAAAAAAAAAAAAAAEAAAAAAAAAAwAUAAAAAAAAAAEAAAACAAAAAwAAAAEAAAAAAAAAAAAAAAIAAAAAAAAAAQAWAAAAAAAAAAEAAAACAAEAAAACAAAAAAAAAAAAAAAAAAAAAwAAAAAAAAABABoAAAAAAAAAAQAAAAQAAQAAAAIAAAAAAAAAAQAAAAAAAAAAAAAABAAAAAAAAAADABQAAAABAAAAAQAAAAEAAAADAAAAAgAAAAAAAAAAAAAABQAAAAAAAAABABYAAAABAAAAAQAAAAIAAAAAAAMAAAAEAAAAAAAAAAAAAAAGAAAAAAAAAAEAGgAAAAEAAAABAAAABAAAAAAAAwAAAAQAAAABAAAAAAAAAAAAAAAHAAAAAAAAAAEAJAAAAAAAAAABAAAACAABAAAAAgAAAAAAAAADAAEAAAAAAABAAICYQwAAAAAAAAAACAAAAAAAAAAFADoAAAAAAAAAAQAAAAEBAAAAAAAAAAEAAAABAAAAAgAAAAAAAAAEAAEAAAABAAAAAAAAAAMAAAAEAAAABQADAAAAAAAAAAAJAAAAAAAAAAcADgAAAAkAAABhZHZlY3Rpb24AAAAAAAAAAAAKAAAAAAAAAAIAhAAAADOTkkMzk5JDDEqmQQAAgD+A5sVHCtejPM3MLEAAAAA+AACAPwkAAAAAAGBAzcxMPQAAAD8K1yM+AABwQRQAAAACAAAAAQMAAABBaXIMSqZBAAAAAAAAAAAAAAAAAArXozwBBQAAAFRveGluDEqmQQAAAAAAAAAAAAAAAADNzEw9AAAAAAEAAAAAAAAACwAAAAAAAAAGAAgAAAAAAAAAAQAAAAIAAAAAAAAADAAAAAAAAAAEAAgAAAABAAAAAQAAAA==";
+        "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";
 
     [Test]
-    public void SimReplay_MatchesGoldenBytes()
+    public void LegacySimReplay_IsRejectedAsUnsupportedContent()
     {
-        using var stream = new MemoryStream();
-        NumosReplaySerializer.Serialize(stream, BuildGoldenSimReplayDocument());
-
-        Assert.That(stream.ToArray(), Is.EqualTo(Convert.FromBase64String(GoldenSimReplayBase64)));
-    }
-
-    [Test]
-    public void SimReplay_GoldenBytesDeserializeToTheFullOpcodeSet()
-    {
-        var bytes = Convert.FromBase64String(GoldenSimReplayBase64);
-        var restored = NumosReplaySerializer.Deserialize(new MemoryStream(bytes));
+        var bytes = Convert.FromBase64String(LegacySimReplayBase64);
 
         Assert.That(
-            restored.Replay.Recording.Operations.Select(static op => op.Code).Distinct(),
-            Is.EquivalentTo(Enum.GetValues<AtmosOperationCode>()));
-
-        var dimensions = restored.Replay.InitialCheckpoint.Dimensions;
-        using var replaySimulation = new AtmosSimulation(
-            new AtmosConfig(restored.Replay.InitialCheckpoint.Config),
-            dimensions.X,
-            dimensions.Y,
-            dimensions.Z);
-
-        var imported = AtmosReplayTimeline.Import(replaySimulation, restored.Replay, 1);
-        imported.ReturnToHead();
-        Assert.That(replaySimulation.ComputeStateHash(), Is.EqualTo(restored.Replay.HeadStateHash));
+            () => NumosWorldReplaySerializer.Deserialize(new MemoryStream(bytes)),
+            Throws.InstanceOf<InvalidDataException>().With.Message.Contains("no longer supported"));
     }
 
     [Test]
@@ -91,12 +71,21 @@ public sealed class ReplayWireFormatGoldenTests
     public void WorldReplay_GoldenBytesDeserializeToTheFullOpcodeSet()
     {
         var bytes = Convert.FromBase64String(GoldenWorldReplayBase64);
-        var decoded = NumosReplaySerializer.DeserializeDocument(new MemoryStream(bytes));
-        var restored = (NumosWorldReplayDocument)decoded;
+        var restored = NumosWorldReplaySerializer.Deserialize(new MemoryStream(bytes));
 
         Assert.That(
             restored.Replay.Recording.Operations.Select(static op => op.Code).Distinct(),
             Is.EquivalentTo(Enum.GetValues<AtmosWorldOperationCode>()));
+
+        Assert.That(
+            restored.Replay.Recording.Operations
+                .Select(static op => op.Operation)
+                .OfType<AtmosWorldSimulationOperation>()
+                .Select(static op => op.Operation.Code)
+                .Distinct(),
+            Is.EquivalentTo(
+                Enum.GetValues<AtmosOperationCode>()
+                    .Except([AtmosOperationCode.SetAtmosConfig, AtmosOperationCode.SetSolverEnabled])));
 
         var config = new AtmosConfig(restored.Replay.InitialCheckpoint.Config);
         using var replayWorld = new AtmosWorld(config);
@@ -107,18 +96,6 @@ public sealed class ReplayWireFormatGoldenTests
 
     // Seekable destinations backpatch section lengths in place; anything else stages each section in memory. Both
     // must produce the pinned bytes, including when the seekable stream doesn't start at offset zero.
-    [Test]
-    public void SimReplay_MatchesGoldenBytesThroughEveryDestinationKind()
-    {
-        byte[] golden = Convert.FromBase64String(GoldenSimReplayBase64);
-        var document = BuildGoldenSimReplayDocument();
-        Assert.Multiple(() =>
-        {
-            Assert.That(SerializeNonSeekable(stream => NumosReplaySerializer.Serialize(stream, document)), Is.EqualTo(golden));
-            Assert.That(SerializeAtOffset(stream => NumosReplaySerializer.Serialize(stream, document)), Is.EqualTo(golden));
-        });
-    }
-
     [Test]
     public void WorldReplay_MatchesGoldenBytesThroughEveryDestinationKind()
     {
@@ -135,70 +112,16 @@ public sealed class ReplayWireFormatGoldenTests
     [Explicit("Prints the current wire bytes as base64 so the golden constants above can be regenerated deliberately.")]
     public void PrintGoldenBytes()
     {
-        using var simStream = new MemoryStream();
-        NumosReplaySerializer.Serialize(simStream, BuildGoldenSimReplayDocument());
-        TestContext.WriteLine("SIM:" + Convert.ToBase64String(simStream.ToArray()));
-
         using var worldStream = new MemoryStream();
         NumosWorldReplaySerializer.Serialize(worldStream, BuildGoldenWorldReplayDocument());
         TestContext.WriteLine("WORLD:" + Convert.ToBase64String(worldStream.ToArray()));
     }
 
-    private static NumosReplayDocument BuildGoldenSimReplayDocument()
-    {
-        // Chunk dimensions, chunk-grid positions, voxel indices, gas IDs, and classification IDs are all chosen to be
-        // nonzero and mutually distinct within each operation's field list. A codec that silently swaps two
-        // same-record fields of matching width (e.g. LocalVoxelIndex and GasId) is only invisible in the resulting
-        // bytes when the swapped values are equal, most easily when both happen to be zero.
-        var config = new AtmosConfig
-        {
-            GasRegistry =
-            [
-                new GasProperties { Name = "Air", DiffusionCoefficient = 0.02f },
-                new GasProperties { Name = "Toxin", DiffusionCoefficient = 0.05f }
-            ],
-            SleepThreshold = 7,
-            ThermalConductance = 0.15f
-        };
-
-        using var source = new AtmosSimulation(config, 3, 2, 1);
-        var timeline = new AtmosReplayTimeline(source, 1);
-        var chunk = source.CreateAndRegisterChunk(new Int3(1, 2, 3));
-        source.SetChunkClassification(chunk, new VoxelClassification(4));
-        source.SetChunkBoundaryClassification(chunk, new VoxelClassification(5));
-        source.SetVoxelClassification(chunk, 4, new VoxelClassification(6));
-        source.AddGasToVoxel(chunk, 5, 1, 2f, 315f);
-        source.WakeChunk(chunk);
-        source.SleepChunk(chunk);
-        source.World.Solvers.SetEnabled(AtmosBuiltInSolvers.Advection, false);
-        source.SetAtmosConfig(new AtmosConfig(source.Config) { SleepThreshold = 8 });
-        var canister = source.CreateGasMixture(1f, 330f);
-        canister.SetMoles(0, 1f);
-        canister.TransferTo(source.GetVoxelGasMixture(chunk, 2), 0.5f);
-        var removed = source.CreateAndRegisterChunk(new Int3(4, 5, 6));
-        source.UnregisterChunk(removed);
-        source.Tick();
-        timeline.ObserveLiveState();
-        source.SetVoxelTemperature(chunk, 1, 321f);
-        source.Tick();
-        var archive = timeline.CaptureReplay();
-
-        var metadata = new NumosReplayMetadata(
-            "Golden fixture",
-            DateTimeOffset.UnixEpoch,
-            "numos-golden",
-            "1.0.0-golden",
-            "1.0.0-golden",
-            "phase0-fixture");
-
-        return new NumosReplayDocument(metadata, archive);
-    }
-
     private static NumosWorldReplayDocument BuildGoldenWorldReplayDocument()
     {
-        // As in BuildGoldenSimReplayDocument, chunk dimensions, chunk-grid positions, and voxel indices are nonzero
-        // and mutually distinct so a codec that swaps two same-width fields changes the bytes instead of hiding
-        // behind a coincidental zero.
+        // Chunk dimensions, chunk-grid positions, voxel indices, gas IDs, and classification IDs are nonzero and
+        // mutually distinct within each operation's field list, so a codec that swaps two same-width fields (e.g.
+        // LocalVoxelIndex and GasId) changes the bytes instead of hiding behind a coincidental zero.
         var config = new AtmosConfig
         {
             GasRegistry =
@@ -221,6 +144,16 @@ public sealed class ReplayWireFormatGoldenTests
         world.Tick();
         world.DestroyPortal(portal);
         world.Tick();
+        first.SetChunkBoundaryClassification(firstChunk, new VoxelClassification(5));
+        first.SetVoxelClassification(firstChunk, 2, new VoxelClassification(6));
+        first.SetVoxelTemperature(firstChunk, 1, 321f);
+        first.WakeChunk(firstChunk);
+        first.SleepChunk(firstChunk);
+        var canister = first.CreateGasMixture(1f, 330f);
+        canister.SetMoles(0, 1f);
+        canister.TransferTo(first.GetVoxelGasMixture(firstChunk, 5), 0.5f);
+        var removed = first.CreateAndRegisterChunk(new Int3(4, 5, 6));
+        first.UnregisterChunk(removed);
         world.DestroySimulation(second);
 
         var archive = timeline.CaptureReplay();

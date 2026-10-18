@@ -128,7 +128,7 @@ public sealed class AtmosWorldReplayTests
     }
 
     [Test]
-    public void WorldReplaySerializer_RoundTripsContentKindAndDeterministicBytes()
+    public void WorldReplaySerializer_RoundTripsDeterministicBytes()
     {
         using var world = new AtmosWorld(CreateConfig());
         var first = world.CreateSimulation(1, 1, 1);
@@ -151,13 +151,11 @@ public sealed class AtmosWorldReplayTests
         using var firstBytes = new MemoryStream();
         using var secondBytes = new MemoryStream();
         NumosWorldReplaySerializer.Serialize(firstBytes, document);
-        NumosReplaySerializer.Serialize(secondBytes, document);
+        NumosWorldReplaySerializer.Serialize(secondBytes, document);
         Assert.That(firstBytes.ToArray(), Is.EqualTo(secondBytes.ToArray()));
 
         firstBytes.Position = 0;
-        var decoded = NumosReplaySerializer.DeserializeDocument(firstBytes);
-        Assert.That(decoded, Is.TypeOf<NumosWorldReplayDocument>());
-        var restored = (NumosWorldReplayDocument)decoded;
+        var restored = NumosWorldReplaySerializer.Deserialize(firstBytes);
         Assert.Multiple(() =>
         {
             Assert.That(restored.Metadata, Is.EqualTo(metadata));

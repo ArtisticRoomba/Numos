@@ -177,7 +177,8 @@ public sealed class CheckpointWireCodecGenerator : IIncrementalGenerator
         builder.AppendLine();
         builder.AppendLine("namespace Numos.Serialization");
         builder.AppendLine("{");
-        builder.AppendLine("    public static partial class NumosReplaySerializer");
+        // No accessibility modifier, so the hand-written declaration decides it.
+        builder.AppendLine("    static partial class NumosReplaySerializer");
         builder.AppendLine("    {");
 
         if (chunkFields.Count > 0)

@@ -233,8 +233,8 @@ public sealed class ReplayCodecGeneratorTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(simCodec.ToString(), Does.Contain("public static partial class NumosReplaySerializer"));
-            Assert.That(worldCodec.ToString(), Does.Contain("public static partial class NumosWorldReplaySerializer"));
+            Assert.That(simCodec.ToString(), Does.Contain("static partial class NumosReplaySerializer"));
+            Assert.That(worldCodec.ToString(), Does.Contain("static partial class NumosWorldReplaySerializer"));
             Assert.That(worldCodec.ToString(), Does.Contain("switch ((global::Numos.API.AtmosWorldOperationCode)code)"));
 
             // Nested operation field: writes/reads its own opcode, then delegates into the sim family's codec for
