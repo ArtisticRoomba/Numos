@@ -69,17 +69,32 @@ public sealed partial class AtmosWorld
 
     internal void EnsureCanChangeWorldSolverDefinition()
     {
+        if (IsRecordingOrReplayingAnywhere())
+        {
+            throw new InvalidOperationException(
+                "World solver registration and removal are unavailable during recording or replay. " +
+                "Register compatible named solvers before starting the session.");
+        }
+    }
+
+    internal void EnsureCanChangeWorldServices()
+    {
+        if (IsRecordingOrReplayingAnywhere())
+        {
+            throw new InvalidOperationException(
+                "World service registration and removal are unavailable during recording or replay. " +
+                "Register services before starting the session.");
+        }
+    }
+
+    private bool IsRecordingOrReplayingAnywhere()
+    {
         lock (_recordingGate)
         {
-            if (_isWorldRecording ||
-                _isReplayingWorld ||
-                _orderedSimulations.Any(static simulation =>
-                    simulation.Kernel.IsRecording || simulation.Kernel.IsReplaying))
-            {
-                throw new InvalidOperationException(
-                    "World solver registration and removal are unavailable during recording or replay. " +
-                    "Register compatible named solvers before starting the session.");
-            }
+            return _isWorldRecording ||
+                   _isReplayingWorld ||
+                   _orderedSimulations.Any(static simulation =>
+                       simulation.Kernel.IsRecording || simulation.Kernel.IsReplaying);
         }
     }
 
@@ -242,6 +257,8 @@ public sealed partial class AtmosWorld
     ///     The operation is atomic with respect to deterministic world state. If validation or application fails,
     ///     the state present before this call is restored. Simulation objects created after the source checkpoint
     ///     may be replaced; reacquire them by <see cref="AtmosSimulationId" /> after seeking.
+    ///     <see cref="IAtmosWorldSolver.OnRestored" /> runs after the checkpoint is installed and before the first
+    ///     replayed tick, and again when a failure puts the pre-call state back.
     /// </remarks>
     /// <exception cref="ArgumentNullException">A required argument is <see langword="null" />.</exception>
     /// <exception cref="ArgumentException">The history is malformed or incompatible with the checkpoint.</exception>

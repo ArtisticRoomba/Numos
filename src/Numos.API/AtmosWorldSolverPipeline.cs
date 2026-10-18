@@ -9,7 +9,7 @@ namespace Numos.API;
 /// </summary>
 /// <remarks>
 ///     The enabled stage list is captured before each tick. Pipeline edits made by a running stage take effect on the
-///     next tick. Solver delegates remain caller-owned.
+///     next tick. Solver delegates and <see cref="IAtmosWorldSolver" /> instances remain caller-owned.
 ///     Stage names, kinds, order, and neighbor-selection keys are checkpointed and must match on restore, so adding,
 ///     removing, or resetting stages is rejected while the world or any of its simulations is recording or replaying.
 ///     Enabling and disabling stages is allowed then and is recorded.
@@ -49,7 +49,8 @@ public sealed class AtmosWorldSolverPipeline
     /// <param name="solver">The caller-owned callback.</param>
     /// <remarks>
     ///     The callback receives an empty <see cref="AtmosWorldSolverContext.Topology" />. Use
-    ///     <see cref="RegisterNeighborSolver" /> when it needs adjacency.
+    ///     <see cref="RegisterNeighborSolver(string, AtmosNeighborSelection, AtmosWorldSolver)" /> when it needs
+    ///     adjacency.
     /// </remarks>
     /// <exception cref="ArgumentNullException">An argument is <see langword="null" />.</exception>
     /// <exception cref="ArgumentException">The name is blank or already registered.</exception>
@@ -58,6 +59,25 @@ public sealed class AtmosWorldSolverPipeline
     [PublicAPI]
     public void Register(string name, AtmosWorldSolver solver)
     {
+        RegisterCore(name, WrapDelegate(solver), null, -1);
+    }
+
+    /// <summary>
+    ///     Registers a custom class solver at the end of the pipeline.
+    /// </summary>
+    /// <param name="name">A nonempty name unique within the pipeline.</param>
+    /// <param name="solver">The caller-owned solver instance.</param>
+    /// <remarks>
+    ///     Identical to the <see cref="AtmosWorldSolver" /> overload in pipeline order and checkpoint metadata. The
+    ///     instance is caller-owned and also receives <see cref="IAtmosWorldSolver.OnRestored" />.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException">An argument is <see langword="null" />.</exception>
+    /// <exception cref="ArgumentException">The name is blank or already registered.</exception>
+    /// <exception cref="InvalidOperationException">The world or one of its simulations is recording or replaying.</exception>
+    /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
+    [PublicAPI]
+    public void Register(string name, IAtmosWorldSolver solver)
+    {
         RegisterCore(name, solver, null, -1);
     }
 
@@ -65,26 +85,55 @@ public sealed class AtmosWorldSolverPipeline
     ///     Registers a custom stage with a topology view compiled for its selection policy.
     /// </summary>
     /// <param name="name">A nonempty name unique within the pipeline.</param>
-    /// <param name="selection">The Cartesian and explicit adjacency included in the callback's view.</param>
+    /// <param name="selection">The Cartesian and explicit adjacency included in the solver's view.</param>
     /// <param name="solver">The caller-owned callback.</param>
-    /// <exception cref="ArgumentNullException">An argument is <see langword="null" />.</exception>
-    /// <exception cref="ArgumentException">The name is blank or already registered.</exception>
-    /// <exception cref="InvalidOperationException">The world or one of its simulations is recording or replaying.</exception>
-    /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
     /// <remarks>
-    ///     Use this overload (or <see cref="RegisterNeighborSolverBefore" />/<see cref="RegisterNeighborSolverAfter" />)
-    ///     whenever the callback reads <see cref="AtmosWorldSolverContext.Topology" />. A stage registered through
-    ///     <see cref="Register" /> instead gets an empty topology view: <c>GetOwnedEdges()</c> yields nothing and
+    ///     Use this overload (or the <c>RegisterNeighborSolverBefore</c>/<c>RegisterNeighborSolverAfter</c> variants)
+    ///     whenever the solver reads <see cref="AtmosWorldSolverContext.Topology" />. A stage registered through
+    ///     <c>Register</c> instead gets an empty topology view: <c>GetOwnedEdges()</c> yields nothing and
     ///     <c>GetNeighbors</c> reports no explicit neighbors, silently, with no exception to flag the missing
     ///     selection. Set <paramref name="selection" />'s <c>includeCartesian</c> to <see langword="false" /> for a
     ///     stage that only cares about portals and docks — that keeps the compiled view limited to the sparse
     ///     explicit edge list instead of also re-deriving every ordinary chunk boundary.
     /// </remarks>
+    /// <exception cref="ArgumentNullException">An argument is <see langword="null" />.</exception>
+    /// <exception cref="ArgumentException">The name is blank or already registered.</exception>
+    /// <exception cref="InvalidOperationException">The world or one of its simulations is recording or replaying.</exception>
+    /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
     [PublicAPI]
     public void RegisterNeighborSolver(
         string name,
         AtmosNeighborSelection selection,
         AtmosWorldSolver solver)
+    {
+        ArgumentNullException.ThrowIfNull(selection);
+        RegisterCore(name, WrapDelegate(solver), selection, -1);
+    }
+
+    /// <summary>
+    ///     Registers a custom class solver with a topology view compiled for its selection policy.
+    /// </summary>
+    /// <param name="name">A nonempty name unique within the pipeline.</param>
+    /// <param name="selection">The Cartesian and explicit adjacency included in the solver's view.</param>
+    /// <param name="solver">The caller-owned solver instance.</param>
+    /// <remarks>
+    ///     Use this overload (or the <c>RegisterNeighborSolverBefore</c>/<c>RegisterNeighborSolverAfter</c> variants)
+    ///     whenever the solver reads <see cref="AtmosWorldSolverContext.Topology" />. A stage registered through
+    ///     <c>Register</c> instead gets an empty topology view: <c>GetOwnedEdges()</c> yields nothing and
+    ///     <c>GetNeighbors</c> reports no explicit neighbors, silently, with no exception to flag the missing
+    ///     selection. Set <paramref name="selection" />'s <c>includeCartesian</c> to <see langword="false" /> for a
+    ///     stage that only cares about portals and docks — that keeps the compiled view limited to the sparse
+    ///     explicit edge list instead of also re-deriving every ordinary chunk boundary.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException">An argument is <see langword="null" />.</exception>
+    /// <exception cref="ArgumentException">The name is blank or already registered.</exception>
+    /// <exception cref="InvalidOperationException">The world or one of its simulations is recording or replaying.</exception>
+    /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
+    [PublicAPI]
+    public void RegisterNeighborSolver(
+        string name,
+        AtmosNeighborSelection selection,
+        IAtmosWorldSolver solver)
     {
         ArgumentNullException.ThrowIfNull(selection);
         RegisterCore(name, solver, selection, -1);
@@ -104,6 +153,27 @@ public sealed class AtmosWorldSolverPipeline
     [PublicAPI]
     public void RegisterBefore(string existingName, string name, AtmosWorldSolver solver)
     {
+        RegisterRelative(existingName, name, WrapDelegate(solver), null, true);
+    }
+
+    /// <summary>
+    ///     Registers a custom class solver immediately before another registered stage.
+    /// </summary>
+    /// <param name="existingName">The name of the stage that will follow the new stage.</param>
+    /// <param name="name">A nonempty name unique within the pipeline.</param>
+    /// <param name="solver">The caller-owned solver instance.</param>
+    /// <remarks>
+    ///     Identical to the <see cref="AtmosWorldSolver" /> overload in pipeline order and checkpoint metadata. The
+    ///     instance is caller-owned and also receives <see cref="IAtmosWorldSolver.OnRestored" />.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException">An argument is <see langword="null" />.</exception>
+    /// <exception cref="ArgumentException">A name is blank, or <paramref name="name" /> is already registered.</exception>
+    /// <exception cref="KeyNotFoundException">No stage named <paramref name="existingName" /> is registered.</exception>
+    /// <exception cref="InvalidOperationException">The world or one of its simulations is recording or replaying.</exception>
+    /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
+    [PublicAPI]
+    public void RegisterBefore(string existingName, string name, IAtmosWorldSolver solver)
+    {
         RegisterRelative(existingName, name, solver, null, true);
     }
 
@@ -112,7 +182,7 @@ public sealed class AtmosWorldSolverPipeline
     /// </summary>
     /// <param name="existingName">The name of the stage that will follow the new stage.</param>
     /// <param name="name">A nonempty name unique within the pipeline.</param>
-    /// <param name="selection">The Cartesian and explicit adjacency included in the callback's view.</param>
+    /// <param name="selection">The Cartesian and explicit adjacency included in the solver's view.</param>
     /// <param name="solver">The caller-owned callback.</param>
     /// <exception cref="ArgumentNullException">An argument is <see langword="null" />.</exception>
     /// <exception cref="ArgumentException">A name is blank, or <paramref name="name" /> is already registered.</exception>
@@ -125,6 +195,29 @@ public sealed class AtmosWorldSolverPipeline
         string name,
         AtmosNeighborSelection selection,
         AtmosWorldSolver solver)
+    {
+        ArgumentNullException.ThrowIfNull(selection);
+        RegisterRelative(existingName, name, WrapDelegate(solver), selection, true);
+    }
+
+    /// <summary>
+    ///     Registers a neighbor-aware custom class solver immediately before another registered stage.
+    /// </summary>
+    /// <param name="existingName">The name of the stage that will follow the new stage.</param>
+    /// <param name="name">A nonempty name unique within the pipeline.</param>
+    /// <param name="selection">The Cartesian and explicit adjacency included in the solver's view.</param>
+    /// <param name="solver">The caller-owned solver instance.</param>
+    /// <exception cref="ArgumentNullException">An argument is <see langword="null" />.</exception>
+    /// <exception cref="ArgumentException">A name is blank, or <paramref name="name" /> is already registered.</exception>
+    /// <exception cref="KeyNotFoundException">No stage named <paramref name="existingName" /> is registered.</exception>
+    /// <exception cref="InvalidOperationException">The world or one of its simulations is recording or replaying.</exception>
+    /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
+    [PublicAPI]
+    public void RegisterNeighborSolverBefore(
+        string existingName,
+        string name,
+        AtmosNeighborSelection selection,
+        IAtmosWorldSolver solver)
     {
         ArgumentNullException.ThrowIfNull(selection);
         RegisterRelative(existingName, name, solver, selection, true);
@@ -144,6 +237,27 @@ public sealed class AtmosWorldSolverPipeline
     [PublicAPI]
     public void RegisterAfter(string existingName, string name, AtmosWorldSolver solver)
     {
+        RegisterRelative(existingName, name, WrapDelegate(solver), null, false);
+    }
+
+    /// <summary>
+    ///     Registers a custom class solver immediately after another registered stage.
+    /// </summary>
+    /// <param name="existingName">The name of the stage that will precede the new stage.</param>
+    /// <param name="name">A nonempty name unique within the pipeline.</param>
+    /// <param name="solver">The caller-owned solver instance.</param>
+    /// <remarks>
+    ///     Identical to the <see cref="AtmosWorldSolver" /> overload in pipeline order and checkpoint metadata. The
+    ///     instance is caller-owned and also receives <see cref="IAtmosWorldSolver.OnRestored" />.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException">An argument is <see langword="null" />.</exception>
+    /// <exception cref="ArgumentException">A name is blank, or <paramref name="name" /> is already registered.</exception>
+    /// <exception cref="KeyNotFoundException">No stage named <paramref name="existingName" /> is registered.</exception>
+    /// <exception cref="InvalidOperationException">The world or one of its simulations is recording or replaying.</exception>
+    /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
+    [PublicAPI]
+    public void RegisterAfter(string existingName, string name, IAtmosWorldSolver solver)
+    {
         RegisterRelative(existingName, name, solver, null, false);
     }
 
@@ -152,7 +266,7 @@ public sealed class AtmosWorldSolverPipeline
     /// </summary>
     /// <param name="existingName">The name of the stage that will precede the new stage.</param>
     /// <param name="name">A nonempty name unique within the pipeline.</param>
-    /// <param name="selection">The Cartesian and explicit adjacency included in the callback's view.</param>
+    /// <param name="selection">The Cartesian and explicit adjacency included in the solver's view.</param>
     /// <param name="solver">The caller-owned callback.</param>
     /// <exception cref="ArgumentNullException">An argument is <see langword="null" />.</exception>
     /// <exception cref="ArgumentException">A name is blank, or <paramref name="name" /> is already registered.</exception>
@@ -165,6 +279,29 @@ public sealed class AtmosWorldSolverPipeline
         string name,
         AtmosNeighborSelection selection,
         AtmosWorldSolver solver)
+    {
+        ArgumentNullException.ThrowIfNull(selection);
+        RegisterRelative(existingName, name, WrapDelegate(solver), selection, false);
+    }
+
+    /// <summary>
+    ///     Registers a neighbor-aware custom class solver immediately after another registered stage.
+    /// </summary>
+    /// <param name="existingName">The name of the stage that will precede the new stage.</param>
+    /// <param name="name">A nonempty name unique within the pipeline.</param>
+    /// <param name="selection">The Cartesian and explicit adjacency included in the solver's view.</param>
+    /// <param name="solver">The caller-owned solver instance.</param>
+    /// <exception cref="ArgumentNullException">An argument is <see langword="null" />.</exception>
+    /// <exception cref="ArgumentException">A name is blank, or <paramref name="name" /> is already registered.</exception>
+    /// <exception cref="KeyNotFoundException">No stage named <paramref name="existingName" /> is registered.</exception>
+    /// <exception cref="InvalidOperationException">The world or one of its simulations is recording or replaying.</exception>
+    /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
+    [PublicAPI]
+    public void RegisterNeighborSolverAfter(
+        string existingName,
+        string name,
+        AtmosNeighborSelection selection,
+        IAtmosWorldSolver solver)
     {
         ArgumentNullException.ThrowIfNull(selection);
         RegisterRelative(existingName, name, solver, selection, false);
@@ -280,9 +417,35 @@ public sealed class AtmosWorldSolverPipeline
         return Volatile.Read(ref _checkpointSteps);
     }
 
+    /// <summary>
+    ///     Calls <see cref="IAtmosWorldSolver.OnRestored" /> on every custom class solver, enabled or not, in pipeline
+    ///     order.
+    /// </summary>
+    /// <remarks>
+    ///     Iterates a snapshot so a solver that edits the pipeline from its hook doesn't break the loop. The first
+    ///     exception stops the pass and propagates to the restore's caller.
+    /// </remarks>
+    internal void NotifyRestored()
+    {
+        WorldSolverRegistration[] steps;
+        lock (_world.Gate)
+        {
+            steps = _steps.ToArray();
+        }
+
+        foreach (var step in steps)
+            step.NotifyRestored();
+    }
+
+    private static DelegateWorldSolver WrapDelegate(AtmosWorldSolver solver)
+    {
+        ArgumentNullException.ThrowIfNull(solver);
+        return new DelegateWorldSolver(solver);
+    }
+
     private void RegisterCore(
         string name,
-        AtmosWorldSolver solver,
+        IAtmosWorldSolver solver,
         AtmosNeighborSelection? selection,
         int insertionIndex)
     {
@@ -306,7 +469,7 @@ public sealed class AtmosWorldSolverPipeline
     private void RegisterRelative(
         string existingName,
         string name,
-        AtmosWorldSolver solver,
+        IAtmosWorldSolver solver,
         AtmosNeighborSelection? selection,
         bool before)
     {
@@ -393,14 +556,14 @@ internal sealed class AtmosWorldExecutionContext(
 internal sealed class WorldSolverRegistration
 {
     private readonly Action<AtmosWorldExecutionContext>? _builtInSolver;
-    private readonly AtmosWorldSolver? _customSolver;
+    private readonly IAtmosWorldSolver? _customSolver;
     private AtmosWorldNeighborTopology _topology = AtmosWorldNeighborTopology.Empty;
 
     private WorldSolverRegistration(
         string name,
         AtmosWorldSolverKind kind,
         Action<AtmosWorldExecutionContext>? builtInSolver,
-        AtmosWorldSolver? customSolver,
+        IAtmosWorldSolver? customSolver,
         AtmosNeighborSelection? selection)
     {
         Name = name;
@@ -424,7 +587,7 @@ internal sealed class WorldSolverRegistration
 
     internal static WorldSolverRegistration CreateCustom(
         string name,
-        AtmosWorldSolver solver,
+        IAtmosWorldSolver solver,
         AtmosNeighborSelection? selection)
     {
         return new WorldSolverRegistration(name, AtmosWorldSolverKind.Custom, null, solver, selection);
@@ -434,12 +597,19 @@ internal sealed class WorldSolverRegistration
     {
         if (_customSolver != null)
         {
-            _customSolver(new AtmosWorldSolverContext(
+            _customSolver.Solve(new AtmosWorldSolverContext(
                 context.World, context.PublicSimulations, _topology, context.SolverScope));
             return;
         }
 
         _builtInSolver!(context);
+    }
+
+    internal void NotifyRestored()
+    {
+        // Delegates have nowhere to keep state of their own, so the default no-op is skipped without a virtual call.
+        if (_customSolver is not null and not DelegateWorldSolver)
+            _customSolver.OnRestored();
     }
 
     internal AtmosWorldNeighborTopology BuildTopology(
@@ -459,5 +629,16 @@ internal sealed class WorldSolverRegistration
     internal AtmosWorldSolverStep ToPublic()
     {
         return new AtmosWorldSolverStep(Name, Kind, IsEnabled, Selection?.Key);
+    }
+}
+
+/// <summary>
+///     Adapts a delegate registration to <see cref="IAtmosWorldSolver" /> so the pipeline stores one solver shape.
+/// </summary>
+internal sealed class DelegateWorldSolver(AtmosWorldSolver solver) : IAtmosWorldSolver
+{
+    public void Solve(AtmosWorldSolverContext context)
+    {
+        solver(context);
     }
 }

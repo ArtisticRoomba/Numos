@@ -201,6 +201,8 @@ Some data intentionally remains outside the checkpoint:
   transient; restore discards it.
 - Profiling values, recorder bookkeeping, object identities, chunk generations, and presentation revisions are not
   authoritative simulation state.
+- `IAtmosWorldSolver` instances and `world.Services` entries belong to the host. Numos never checkpoints, clears, or
+  disposes them, so a solver class should keep only scratch state in its fields and reset it in `OnRestored`.
 
 When a detached mixture transfers gas into a voxel, the recording stores the resulting voxel state. Replaying that
 operation does not read, change, or restore the detached container. A custom solver must therefore avoid depending on
@@ -227,7 +229,8 @@ deterministic implementation.
 Numos validates compatibility and materializes all replacement chunk storage before making the new state observable. A
 compatibility or allocation failure therefore leaves the previous grid installed. Restore keeps the existing simulation
 object and host integrations, applies the checkpoint's solver enable flags, clears transient solver state, and resets
-profiling data.
+profiling data. Last, it calls `OnRestored()` on every `IAtmosWorldSolver` in the pipeline, enabled or not. An exception
+from that hook propagates with the restored state already in place.
 
 Address-only `AtmosChunkHandle` values can still identify the same chunk positions after restore. Voxel mixture objects
 are bound to a chunk generation and become stale; reacquire them from the simulation. Chunk presentation versions and
@@ -240,13 +243,14 @@ checkpoint are skipped.
 
 After validation, replay follows this order:
 
-1. Restore the starting checkpoint.
+1. Restore the starting checkpoint, including the `OnRestored()` calls, so class solvers start the first replayed tick
+   with clean scratch state.
 2. Run `Tick()` until the completed tick stamped on the next operation.
 3. Apply that operation and advance the incorporated sequence.
 4. Repeat until the target sequence is incorporated, then run ticks up to the target tick.
 
-If an operation or solver throws, Numos restores the grid state from before the `ReplayTo` call and propagates the
-exception. It cannot undo side effects in host code. Custom solvers should use `simulation.IsReplaying` to suppress
+If an operation or solver throws, Numos restores the grid state from before the `ReplayTo` call (calling `OnRestored()`
+again) and propagates the exception. It cannot undo side effects in host code. Custom solvers should use `simulation.IsReplaying` to suppress
 damage, audio, spawning, telemetry, and similar effects while still performing the same Numos mutations:
 
 ```csharp
@@ -260,7 +264,9 @@ simulation.World.Solvers.Register("life-support-v1", _ =>
 ```
 
 Registering, removing, or resetting solver definitions is rejected while recording or replaying. Enable-state changes
-remain supported because they are recorded against an existing stable solver identity.
+remain supported because they are recorded against an existing stable solver identity. World services follow the
+registration rule: a solver that resolved a different service halfway through a recording would not replay the same
+way, so `world.Services.Register` and `Unregister` are rejected then too.
 
 ## Why regenerated ticks can match
 

@@ -60,7 +60,9 @@ public sealed partial class AtmosSimulation
     ///     Stop recording before restoring. Numos validates compatibility and replacement storage before changing live
     ///     state, then keeps existing integration objects and delegates attached. Address-only chunk handles still identify
     ///     positions, while generation-bound voxel mixtures must be reacquired. Gas definitions and reaction parameters
-    ///     are restored with the configuration.
+    ///     are restored with the configuration. Custom <see cref="IAtmosWorldSolver" /> stages get
+    ///     <see cref="IAtmosWorldSolver.OnRestored" /> after the state is in place; an exception from it propagates
+    ///     with the restored state kept.
     /// </remarks>
     /// <exception cref="ArgumentNullException">The checkpoint is null.</exception>
     /// <exception cref="ArgumentException">The checkpoint is incompatible with this simulation.</exception>
@@ -79,8 +81,13 @@ public sealed partial class AtmosSimulation
         lock (World.Gate)
         {
             World.EnsureSimulationRestoreAllowed(this);
-            _kernel.RestoreCheckpoint(checkpoint);
-            World.SynchronizeRestoredConfig(this, _kernel.GetAtmosConfig());
+            World.RestoreThenNotifySolvers(
+                (Simulation: this, Checkpoint: checkpoint),
+                static (world, state) =>
+                {
+                    state.Simulation._kernel.RestoreCheckpoint(state.Checkpoint);
+                    world.SynchronizeRestoredConfig(state.Simulation, state.Simulation._kernel.GetAtmosConfig());
+                });
         }
     }
 
@@ -95,7 +102,8 @@ public sealed partial class AtmosSimulation
     ///     Replay advances fixed ticks instead of driving elapsed time. Custom solvers run normally and should use
     ///     <see cref="IsReplaying" /> to suppress host side effects. Numos rejects invalid histories before restoring; if an
     ///     operation or solver fails, it restores the pre-call grid state and propagates the failure. Host side effects
-    ///     cannot be undone by this method.
+    ///     cannot be undone by this method. <see cref="IAtmosWorldSolver.OnRestored" /> runs after the checkpoint is
+    ///     installed and before the first replayed tick, and again when a failure puts the pre-call state back.
     /// </remarks>
     /// <exception cref="ArgumentNullException">The checkpoint or operation history is null.</exception>
     /// <exception cref="ArgumentOutOfRangeException">The target precedes the checkpoint or exceeds the supported tick range.</exception>

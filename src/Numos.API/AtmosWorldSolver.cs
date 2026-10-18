@@ -9,6 +9,94 @@ namespace Numos.API;
 public delegate void AtmosWorldSolver(AtmosWorldSolverContext context);
 
 /// <summary>
+///     A caller-provided world stage written as a class, for solvers that keep host-side state between ticks or need
+///     to react to checkpoint restores.
+/// </summary>
+/// <remarks>
+///     <para>
+///         Register an instance through the <see cref="IAtmosWorldSolver" /> overloads on
+///         <see cref="AtmosWorldSolverPipeline" />. The instance stays caller-owned: Numos never checkpoints, clones,
+///         or disposes it, and the pipeline's checkpoint metadata is the same as for a delegate registered under the
+///         same name, so switching between the two forms keeps old checkpoints compatible.
+///     </para>
+///     <para>
+///         Fields on the instance are invisible to replay. Anything that has to survive a checkpoint restore belongs in
+///         a rollback <see cref="ChunkField{T}" /> or a <see cref="SolverDataKey{T}" />; fields should only hold
+///         transient work that <see cref="OnRestored" /> can throw away, plus references to services and fields.
+///     </para>
+///     <para>
+///         Configuration is not pushed to the solver. Read <see cref="AtmosWorldSolverContext.Config" /> each tick, and
+///         cache anything derived from it under a <see cref="SolverDataLifetime.UntilConfigChange" /> key.
+///     </para>
+/// </remarks>
+/// <example>
+///     A solver that ages per-voxel heat exposure and keeps a transient per-tick counter:
+///     <code>
+///     public static partial class FireData
+///     {
+///         [ChunkData("my-mod/fire/exposure", Rollback = true)]
+///         public static partial ChunkField&lt;float&gt; Exposure { get; }
+///     }
+///
+///     public sealed class ExposureDecaySolver : IAtmosWorldSolver
+///     {
+///         private int _chunksVisited; // transient; reset on restore
+///
+///         public void Solve(AtmosWorldSolverContext context)
+///         {
+///             foreach (var simulation in context.Simulations)
+///             {
+///                 var chunks = context.Chunks(simulation);
+///                 Parallel.For(0, chunks.Count, index =>
+///                 {
+///                     Span&lt;float&gt; exposure = chunks[index].GetSpan(FireData.Exposure);
+///                     for (int voxel = 0; voxel &lt; exposure.Length; voxel++)
+///                         exposure[voxel] *= 0.9f;
+///                 });
+///                 _chunksVisited += chunks.Count;
+///             }
+///         }
+///
+///         public void OnRestored() =&gt; _chunksVisited = 0;
+///     }
+///
+///     world.Solvers.RegisterAfter(AtmosBuiltInSolvers.Thermodynamics, "my-mod/exposure-decay", new ExposureDecaySolver());
+///     </code>
+/// </example>
+public interface IAtmosWorldSolver
+{
+    /// <summary>
+    ///     Runs this stage for one world tick.
+    /// </summary>
+    /// <param name="context">The tick-wide simulations, configuration, and compiled neighborhood view.</param>
+    /// <remarks>
+    ///     Called on the tick's thread with every simulation's state lock held. Do not retain
+    ///     <paramref name="context" /> or the chunk views it hands out after returning.
+    /// </remarks>
+    void Solve(AtmosWorldSolverContext context);
+
+    /// <summary>
+    ///     Discards transient state after a checkpoint has been restored into the world.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         Numos calls this on every custom class solver, enabled or not, in pipeline order, once the restored
+    ///         state is fully installed and before any replayed tick. That covers
+    ///         <see cref="AtmosWorld.RestoreCheckpoint" />, <see cref="AtmosSimulation.RestoreCheckpoint" />, both
+    ///         <c>ReplayTo</c> methods, and the restore that puts the previous state back after a failed
+    ///         <c>ReplayTo</c>. A single host call can therefore trigger it more than once, so make it idempotent.
+    ///     </para>
+    ///     <para>
+    ///         Services and other solvers are still registered when this runs. An exception propagates to the caller
+    ///         of the restore; the restored state stays installed, but solvers later in the pipeline are not notified.
+    ///     </para>
+    /// </remarks>
+    void OnRestored()
+    {
+    }
+}
+
+/// <summary>
 ///     Selects an explicit link while Numos compiles a custom solver's neighborhood view.
 /// </summary>
 /// <param name="link">The canonical, value-only link being compiled.</param>
@@ -143,10 +231,12 @@ public sealed class AtmosWorldSolverContext
     ///     Gets the solver-specific compiled neighborhood view.
     /// </summary>
     /// <remarks>
-    ///     A stage registered through a plain <see cref="AtmosWorldSolverPipeline.Register" /> call (rather than one
-    ///     of the <c>RegisterNeighborSolver*</c> overloads) receives an empty view here: no exception, no Cartesian
-    ///     neighbors, no explicit edges. Use <see cref="AtmosWorldSolverPipeline.RegisterNeighborSolver" /> whenever
-    ///     the callback needs this property.
+    ///     A stage registered through a plain
+    ///     <see cref="AtmosWorldSolverPipeline.Register(string, AtmosWorldSolver)" /> call (rather than one of the
+    ///     <c>RegisterNeighborSolver*</c> overloads) receives an empty view here: no exception, no Cartesian
+    ///     neighbors, no explicit edges. Use
+    ///     <see cref="AtmosWorldSolverPipeline.RegisterNeighborSolver(string, AtmosNeighborSelection, AtmosWorldSolver)" />
+    ///     whenever the callback needs this property.
     /// </remarks>
     public AtmosWorldNeighborTopology Topology { get; }
 

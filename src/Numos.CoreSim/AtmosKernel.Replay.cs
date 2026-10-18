@@ -14,6 +14,7 @@ internal sealed partial class AtmosKernel
     private Action _replayTick = null!;
     private Func<string, bool, bool> _setWorldSolverEnabled = null!;
     private Func<AtmosSolverCheckpoint[]> _solverCheckpointProvider = static () => [];
+    private Action _solversRestored = static () => { };
     private AtmosStateHash? _stoppedRecordingHash;
 
     private bool ShouldRecord =>
@@ -78,14 +79,26 @@ internal sealed partial class AtmosKernel
             RecordOperation(new SetVoxelMixtureOperation(chunk, index));
     }
 
-    internal void ConfigureWorldSolverServices(
+    /// <summary>
+    ///     Connects the kernel to the world that owns its solver pipeline and tick loop.
+    /// </summary>
+    /// <param name="solverCheckpointProvider">Supplies the pipeline metadata stored in and validated against checkpoints.</param>
+    /// <param name="setWorldSolverEnabled">Applies checkpointed and recorded solver enablement.</param>
+    /// <param name="replayTick">Advances the owning world by one tick during replay.</param>
+    /// <param name="solversRestored">
+    ///     Runs at the end of every checkpoint install, including the one inside <see cref="ReplayTo" /> before any
+    ///     replayed tick and the one that puts the previous state back after a failed replay.
+    /// </param>
+    internal void ConfigureWorldCallbacks(
         Func<AtmosSolverCheckpoint[]> solverCheckpointProvider,
         Func<string, bool, bool> setWorldSolverEnabled,
-        Action replayTick)
+        Action replayTick,
+        Action solversRestored)
     {
         _solverCheckpointProvider = solverCheckpointProvider;
         _setWorldSolverEnabled = setWorldSolverEnabled;
         _replayTick = replayTick;
+        _solversRestored = solversRestored;
     }
 
     internal AtmosSimulationCheckpoint CaptureCheckpoint()
@@ -235,6 +248,10 @@ internal sealed partial class AtmosKernel
         LastBoundaryTicks = 0;
         foreach (var chunk in previous.Values)
             chunk.Release();
+
+        // Host solvers reset their own transient state last, so a throw from one leaves a fully installed
+        // checkpoint behind rather than a half-swapped kernel.
+        _solversRestored();
     }
 
     internal AtmosReplayResult ReplayTo(

@@ -121,10 +121,11 @@ public sealed partial class AtmosSimulation : IDisposable
         _kernel = new AtmosKernel(chunkWidth, chunkHeight, chunkDepth);
         _kernel.SetAtmosConfig(world.Config);
         Id = world.RegisterSimulation(this, requestedRegistration);
-        _kernel.ConfigureWorldSolverServices(
+        _kernel.ConfigureWorldCallbacks(
             world.CreateSolverCheckpoints,
             world.Solvers.SetEnabled,
-            world.Tick);
+            world.Tick,
+            world.NotifySimulationRestored);
     }
 
     /// <summary>

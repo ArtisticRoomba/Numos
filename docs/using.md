@@ -301,8 +301,8 @@ simulation.World.Solvers.RegisterAfter("produce", "consume", _ =>
 ```
 
 The key instance is the identity: two keys with the same name are different slots, so unrelated plugins can't collide.
-`T` can be an interface backed by a caller-provided service, with a factory that returns the service. Null results and
-factory cycles throw; failed creation leaves the slot available for a retry. Factories may read other keys but must not
+For a host object that every solver should see, such as a game clock or an event bus, use a
+[world service](#class-solvers-and-world-services) instead. Null results and factory cycles throw; failed creation leaves the slot available for a retry. Factories may read other keys but must not
 mutate the simulation.
 
 Sharing data does not change execution order. Register producers before consumers, and define how a consumer behaves
@@ -326,6 +326,46 @@ checkpoints, recordings, and state hashes exclude them, so factories must rebuil
 authoritative inputs. Evolving per-chunk state that must roll back belongs in a `ChunkField<T>` registered with
 `rollback: true` (see
 [per-chunk solver state](atmospherics_technical_documentation.md#123-per-chunk-solver-state-with-chunkfieldt)).
+
+## Class solvers and world services
+
+A stage can be a class instead of a lambda. Implement `IAtmosWorldSolver` and pass an instance to the same `Register`,
+`RegisterBefore`, `RegisterAfter`, and `RegisterNeighborSolver*` calls. Pipeline order and checkpoint metadata are the
+same as for a delegate with the same name, so swapping one form for the other keeps old checkpoints loading.
+
+The instance is yours and its fields are not checkpointed. Keep only scratch state there and clear it in `OnRestored`,
+which Numos calls after every checkpoint restore and before the first replayed tick. It can run more than once for a
+single host call, so make it idempotent:
+
+```csharp
+sealed class FireSolver : IAtmosWorldSolver
+{
+    private readonly List<AtmosCellRef> _ignitedThisTick = [];
+
+    public void Solve(AtmosWorldSolverContext context)
+    {
+        _ignitedThisTick.Clear();
+        // ...
+    }
+
+    public void OnRestored() => _ignitedThisTick.Clear();
+}
+
+world.Solvers.RegisterAfter(AtmosBuiltInSolvers.Thermodynamics, "my-mod/fire", new FireSolver());
+```
+
+`world.Services` holds host objects that solvers look up by type. The key is the exact type argument, so register
+through the interface you want solvers to ask for:
+
+```csharp
+world.Services.Register<IFireEvents>(fireBus);
+
+// Inside Solve, on any thread:
+context.World.Services.Get<IFireEvents>().Ignited(cell);
+```
+
+Lookups never lock, so they are fine from `Parallel.For` workers. Registering and unregistering are rejected during a
+tick and while recording or replaying. Services survive restores, and the world never disposes them.
 
 ## Caching data derived from the configuration
 

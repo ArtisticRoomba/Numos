@@ -69,21 +69,6 @@ public sealed class AtmosSolverDataTests
     }
 
     [Test]
-    public void InterfaceDependency_CanBeProvidedByTheHostAndResolvedBySolvers()
-    {
-        using var simulation = new AtmosSimulation(1, 1, 1);
-        var service = new List<int>();
-        var serviceKey = new SolverDataKey<ICollection<int>>("test/service", _ => service);
-        simulation.World.Solvers.Register(
-            "use-service",
-            _ => simulation.GetSolverData(serviceKey).Add(simulation.TickCount));
-
-        simulation.Tick();
-
-        Assert.That(service, Is.EqualTo(new[] { 1 }));
-    }
-
-    [Test]
     public void UntilRestoreData_SurvivesConfigurationChangesSolverRemovalAndPipelineReset()
     {
         using var simulation = new AtmosSimulation(1, 1, 1);

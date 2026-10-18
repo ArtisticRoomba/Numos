@@ -48,6 +48,7 @@ public sealed partial class AtmosWorld : IDisposable
     private AtmosConfigSnapshot _config;
     private bool _disposed;
     private volatile bool _isTickExecuting;
+    private bool _deferSolverRestoreNotification;
     private long _linkSetCollectionRevision;
     private AtmosSimulation[] _orderedSimulations = [];
     private AtmosConfigSnapshot? _pendingConfig;
@@ -74,9 +75,15 @@ public sealed partial class AtmosWorld : IDisposable
         ArgumentNullException.ThrowIfNull(config);
         _config = config.CreateSnapshot();
         Solvers = new AtmosWorldSolverPipeline(this);
+        Services = new AtmosWorldServices(this);
     }
 
     internal object Gate { get; } = new();
+
+    /// <summary>
+    ///     Gets whether the world has been disposed. Safe to read without <see cref="Gate" />.
+    /// </summary>
+    internal bool IsDisposed => Volatile.Read(ref _disposed);
 
     /// <summary>
     ///     Gets whether a tick is running its solver pipeline. Safe to read from any thread.
@@ -88,6 +95,16 @@ public sealed partial class AtmosWorld : IDisposable
     /// </summary>
     [PublicAPI]
     public AtmosWorldSolverPipeline Solvers { get; }
+
+    /// <summary>
+    ///     Gets the host-owned services solvers can look up by type.
+    /// </summary>
+    /// <remarks>
+    ///     Services are not checkpointed and survive <see cref="RestoreCheckpoint" />. See
+    ///     <see cref="AtmosWorldServices" /> for keying and threading rules.
+    /// </remarks>
+    [PublicAPI]
+    public AtmosWorldServices Services { get; }
 
     /// <summary>
     ///     Gets the immutable physics configuration shared by every registered simulation.
@@ -710,6 +727,9 @@ public sealed partial class AtmosWorld : IDisposable
     ///     identifiers when they use only built-in solvers; Numos cannot recreate a custom solver because its host
     ///     delegate is not checkpointed. Restore resets the elapsed-time accumulator and rebuilds sparse indexes from
     ///     authoritative link slots.
+    ///     <see cref="Services" /> are left untouched. Once the state is in place, every custom
+    ///     <see cref="IAtmosWorldSolver" /> gets <see cref="IAtmosWorldSolver.OnRestored" />; an exception from it
+    ///     propagates to this call with the restored state already installed.
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="checkpoint" /> is <see langword="null" />.</exception>
     /// <exception cref="ArgumentException">The checkpoint is malformed or incompatible with this world.</exception>
@@ -730,71 +750,112 @@ public sealed partial class AtmosWorld : IDisposable
             }
 
             ValidateCheckpoint(checkpoint);
-
-            foreach (var solver in checkpoint.Solvers)
-                Solvers.SetEnabled(solver.Name, solver.Enabled);
-
-            foreach (var simulation in _orderedSimulations.ToArray())
-            {
-                if (checkpoint.Simulations.All(saved => saved.Simulation != simulation.Id))
-                {
-                    UnregisterSimulationCore(simulation, false);
-                    simulation.DisposeFromWorld();
-                }
-            }
-
-            while (_simulationSlots.Count < checkpoint.SimulationGenerations.Length)
-                _simulationSlots.Add(new SimulationSlot(null, 1));
-
-            if (_simulationSlots.Count > checkpoint.SimulationGenerations.Length)
-            {
-                _simulationSlots.RemoveRange(
-                    checkpoint.SimulationGenerations.Length,
-                    _simulationSlots.Count - checkpoint.SimulationGenerations.Length);
-            }
-
-            _freeSimulationSlots.Clear();
-            for (int index = 0; index < _simulationSlots.Count; index++)
-            {
-                var slot = _simulationSlots[index];
-                _simulationSlots[index] = slot with { Generation = checkpoint.SimulationGenerations[index] };
-                if (slot.Simulation == null)
-                    _freeSimulationSlots.Add(index);
-            }
-
-            _config = checkpoint.Config;
-            foreach (var saved in checkpoint.Simulations)
-            {
-                if (TryGetSimulationCore(saved.Simulation) != null)
-                    continue;
-
-                var dimensions = saved.Checkpoint.Dimensions;
-                _ = new AtmosSimulation(
-                    this,
-                    false,
-                    dimensions.X,
-                    dimensions.Y,
-                    dimensions.Z,
-                    saved.Simulation);
-            }
-
-            RebuildOrderedSimulations();
-            foreach (var saved in checkpoint.Simulations)
-            {
-                var simulation = TryGetSimulationCore(saved.Simulation)!;
-                simulation.Kernel.RestoreCheckpoint(saved.Checkpoint);
-                simulation.Kernel.SetAtmosConfigWithoutRecording(_config);
-            }
-
-            RestoreTopology(checkpoint.LinkSlots);
-            TickCount = checkpoint.TickCount;
-            _lastWorldOperationSequence = checkpoint.Position.OperationSequence;
-            TopologyVersion = checkpoint.TopologyVersion;
-            _accumulator = 0f;
-            _pendingConfig = null;
-            IncrementSimulationCollectionRevision();
-            IncrementLinkSetCollectionRevision();
+            RestoreThenNotifySolvers(checkpoint, static (world, saved) => world.RestoreCheckpointCore(saved));
         }
+    }
+
+    /// <summary>
+    ///     Runs a restore with kernel notifications held back, then tells world solvers once the world's own time,
+    ///     configuration, and topology match the restored state.
+    /// </summary>
+    /// <remarks>
+    ///     The caller holds <see cref="Gate" />. A world restore would otherwise notify once per simulation, before
+    ///     topology is back, and a component restore would notify before world time is synchronized.
+    /// </remarks>
+    internal void RestoreThenNotifySolvers<TState>(TState state, Action<AtmosWorld, TState> restore)
+    {
+        bool outermost = !_deferSolverRestoreNotification;
+        _deferSolverRestoreNotification = true;
+        try
+        {
+            restore(this, state);
+        }
+        finally
+        {
+            if (outermost)
+                _deferSolverRestoreNotification = false;
+        }
+
+        if (outermost)
+            Solvers.NotifyRestored();
+    }
+
+    /// <summary>
+    ///     Receives every kernel checkpoint install. Restores that started at the world or component API are reported
+    ///     by <see cref="RestoreThenNotifySolvers{TState}" /> instead; what reaches the pipeline here is the install
+    ///     inside a component <see cref="AtmosSimulation.ReplayTo" />, which has to notify before its replayed ticks.
+    /// </summary>
+    internal void NotifySimulationRestored()
+    {
+        if (!_deferSolverRestoreNotification)
+            Solvers.NotifyRestored();
+    }
+
+    private void RestoreCheckpointCore(AtmosWorldCheckpoint checkpoint)
+    {
+        foreach (var solver in checkpoint.Solvers)
+            Solvers.SetEnabled(solver.Name, solver.Enabled);
+
+        foreach (var simulation in _orderedSimulations.ToArray())
+        {
+            if (checkpoint.Simulations.All(saved => saved.Simulation != simulation.Id))
+            {
+                UnregisterSimulationCore(simulation, false);
+                simulation.DisposeFromWorld();
+            }
+        }
+
+        while (_simulationSlots.Count < checkpoint.SimulationGenerations.Length)
+            _simulationSlots.Add(new SimulationSlot(null, 1));
+
+        if (_simulationSlots.Count > checkpoint.SimulationGenerations.Length)
+        {
+            _simulationSlots.RemoveRange(
+                checkpoint.SimulationGenerations.Length,
+                _simulationSlots.Count - checkpoint.SimulationGenerations.Length);
+        }
+
+        _freeSimulationSlots.Clear();
+        for (int index = 0; index < _simulationSlots.Count; index++)
+        {
+            var slot = _simulationSlots[index];
+            _simulationSlots[index] = slot with { Generation = checkpoint.SimulationGenerations[index] };
+            if (slot.Simulation == null)
+                _freeSimulationSlots.Add(index);
+        }
+
+        _config = checkpoint.Config;
+        foreach (var saved in checkpoint.Simulations)
+        {
+            if (TryGetSimulationCore(saved.Simulation) != null)
+                continue;
+
+            var dimensions = saved.Checkpoint.Dimensions;
+            _ = new AtmosSimulation(
+                this,
+                false,
+                dimensions.X,
+                dimensions.Y,
+                dimensions.Z,
+                saved.Simulation);
+        }
+
+        RebuildOrderedSimulations();
+        foreach (var saved in checkpoint.Simulations)
+        {
+            var simulation = TryGetSimulationCore(saved.Simulation)!;
+            simulation.Kernel.RestoreCheckpoint(saved.Checkpoint);
+            simulation.Kernel.SetAtmosConfigWithoutRecording(_config);
+        }
+
+        RestoreTopology(checkpoint.LinkSlots);
+        TickCount = checkpoint.TickCount;
+        _lastWorldOperationSequence = checkpoint.Position.OperationSequence;
+        TopologyVersion = checkpoint.TopologyVersion;
+        _accumulator = 0f;
+        _pendingConfig = null;
+        IncrementSimulationCollectionRevision();
+        IncrementLinkSetCollectionRevision();
     }
 
     /// <summary>
