@@ -42,7 +42,7 @@ public sealed class GasReactionConfig : IAtmosSolverConfiguration
         LinearReactions = Array.AsReadOnly(linearReactions?.ToArray() ?? []);
         StandardReactions = Array.AsReadOnly(standardReactions?.ToArray() ?? []);
 
-        _energyBalances = new Joule[LinearReactions.Count + StandardReactions.Count];
+        _energyBalances = new JoulePerMole[LinearReactions.Count + StandardReactions.Count];
         for (int i = 0; i < LinearReactions.Count; i++)
             _energyBalances[i] = LinearReactions[i].EnergyBalance;
         for (int i = 0; i < StandardReactions.Count; i++)

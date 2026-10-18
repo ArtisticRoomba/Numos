@@ -15,9 +15,9 @@ public readonly partial record struct LinearGasReaction
     /// <param name="LowStrict">Whether the factor is zero below <paramref name="LowMolarityBound" /> instead of extrapolated.</param>
     /// <param name="HighStrict">Whether the factor is zero above <paramref name="HighMolarityBound" /> instead of extrapolated.</param>
     /// <remarks>
-    ///     The built-in reaction solver evaluates this against the voxel's amount of <paramref name="Gas" /> in moles,
-    ///     despite the "molarity" naming, and skips the reaction for that voxel when the factor is zero, negative, or
-    ///     not a normal float.
+    ///     The built-in reaction solver evaluates this against the voxel's concentration of <paramref name="Gas" />
+    ///     in mol/m³ (moles divided by <see cref="AtmosConfig.VoxelVolume" />), and skips the reaction for that voxel
+    ///     when the factor is zero, negative, or not a normal float.
     /// </remarks>
     public readonly record struct LinearSpeedFactor(
         GasProperties Gas,

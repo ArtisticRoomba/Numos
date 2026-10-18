@@ -20,7 +20,7 @@ internal class ReactionSolver : IAtmosSolverStage
     // for no benefit, since the buffer never needs to be seen by another thread. A per-thread scratch
     // buffer that just grows to the high-water mark removes that round trip entirely.
     [ThreadStatic]
-    private static Scalar[]? _reactionSpeedsScratch;
+    private static Mole[]? _reactionSpeedsScratch;
     private readonly object _gasDataKey = new();
     private GasReactionMatrix? _changesMatrix;
     private GasReactionData[] _gasRateOrder = [];
@@ -78,12 +78,12 @@ internal class ReactionSolver : IAtmosSolverStage
         }
     }
 
-    private static Scalar[] RentReactionSpeeds(int reactionCount)
+    private static Mole[] RentReactionSpeeds(int reactionCount)
     {
-        Scalar[]? scratch = _reactionSpeedsScratch;
+        Mole[]? scratch = _reactionSpeedsScratch;
         if (scratch == null || scratch.Length < reactionCount)
         {
-            scratch = new Scalar[Math.Max(reactionCount, 16)];
+            scratch = new Mole[Math.Max(reactionCount, 16)];
             _reactionSpeedsScratch = scratch;
         }
 

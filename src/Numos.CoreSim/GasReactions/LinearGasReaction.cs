@@ -20,11 +20,14 @@ public readonly partial record struct LinearGasReaction
     /// </summary>
     /// <param name="input">Moles of each reactant consumed per reaction.</param>
     /// <param name="output">Moles of each product produced per reaction.</param>
-    /// <param name="energyBalance">Joules released (positive) or absorbed (negative) per reaction.</param>
+    /// <param name="energyBalance">
+    ///     Joules released (positive) or absorbed (negative) per mole of reaction, i.e. per mole of whichever
+    ///     reactant has a coefficient of one.
+    /// </param>
     /// <param name="lowTemperatureBound">Temperature of the line's lower point, in kelvins (K).</param>
     /// <param name="highTemperatureBound">Temperature of the line's upper point, in kelvins (K).</param>
-    /// <param name="lowTempSpeed">Reactions per second at <paramref name="lowTemperatureBound" />.</param>
-    /// <param name="highTempSpeed">Reactions per second at <paramref name="highTemperatureBound" />.</param>
+    /// <param name="lowTempSpeed">Rate in mol/(m³·s) at <paramref name="lowTemperatureBound" />.</param>
+    /// <param name="highTempSpeed">Rate in mol/(m³·s) at <paramref name="highTemperatureBound" />.</param>
     /// <param name="lowStrict">
     ///     When <see langword="true" />, the reaction stops below <paramref name="lowTemperatureBound" />; when
     ///     <see langword="false" />, the line is extrapolated.
@@ -39,8 +42,8 @@ public readonly partial record struct LinearGasReaction
         [Quantity("molarEnergy")] JoulePerMole energyBalance,
         [Quantity("temperature")] Kelvin lowTemperatureBound,
         [Quantity("temperature")] Kelvin highTemperatureBound,
-        [Quantity("frequency")] PerSecond lowTempSpeed,
-        [Quantity("frequency")] PerSecond highTempSpeed,
+        [Quantity("concentrationPerSecond")] ConcentrationPerSecond lowTempSpeed,
+        [Quantity("concentrationPerSecond")] ConcentrationPerSecond highTempSpeed,
         bool lowStrict, bool highStrict, ISet<LinearSpeedFactor> speedFactors)
     {
         Input = input.ToFrozenDictionary();
@@ -68,23 +71,23 @@ public readonly partial record struct LinearGasReaction
     private FrozenDictionary<GasProperties, float> Output { get; }
 
     /// <summary>
-    ///     Joules released (positive) or absorbed (negative) per Mole.
+    ///     Joules released (positive) or absorbed (negative) per mole of reaction.
     /// </summary>
     /// <remarks>
-    ///     It is per Mole of which ever reactant is normalized to one. So in a 2H_2 + O_2 -> 2H_0 reaction, it is the energy released per mole of oxygen consumed.
+    ///     Per mole of whichever reactant has a coefficient of one, so for 2H₂ + O₂ -> 2H₂O it is the energy released
+    ///     per mole of oxygen consumed.
     /// </remarks>
-
     internal JoulePerMole EnergyBalance { get; }
 
     private Kelvin LowTemperatureBound { get; }
     private Kelvin HighTemperatureBound { get; }
 
-    private PerSecond LowTempSpeed { get; }
-    private PerSecond HighTempSpeed { get; }
+    private ConcentrationPerSecond LowTempSpeed { get; }
+    private ConcentrationPerSecond HighTempSpeed { get; }
 
     private Kelvin BoundaryRange { get; }
 
-    private PerSecond SpeedRange { get; }
+    private ConcentrationPerSecond SpeedRange { get; }
 
     /// <summary>
     ///     Whether the rate is zero below <see cref="LowTemperatureBound" /> instead of extrapolated.
@@ -184,7 +187,7 @@ public readonly partial record struct LinearGasReaction
     /// </summary>
     /// <param name="temperatureKelvin">Mixture temperature, in kelvins (K).</param>
     /// <returns>
-    ///     Reactions per second, or zero outside a strict bound. Can be negative if the line is extrapolated past
+    ///     Rate in mol/(m³·s), or zero outside a strict bound. Can be negative if the line is extrapolated past
     ///     zero; the reaction solver treats nonpositive rates as no reaction.
     /// </returns>
     internal ConcentrationPerSecond GetRateConstantForTemperature(Kelvin temperatureKelvin)
@@ -202,23 +205,41 @@ public readonly partial record struct LinearGasReaction
     /// <summary>
     ///     Computes the reaction speed for a mixture: the temperature rate constant multiplied by every speed factor.
     /// </summary>
-    /// <param name="gasMolarities">Amount of each gas, in the units the speed factors' bounds were authored in.</param>
+    /// <param name="gasMolarities">Concentration of each gas, in mol/m³, matching the speed factors' bounds.</param>
     /// <param name="temperature">Mixture temperature, in kelvins (K).</param>
-    /// <returns>Reactions per second.</returns>
+    /// <returns>
+    ///     Reaction rate in mol/(m³·s), or zero when the rate constant or any speed factor is zero, negative, or not
+    ///     a normal float.
+    /// </returns>
     [return: Quantity("concentrationPerSecond")]
     public ConcentrationPerSecond GetReactionSpeed(
         IDictionary<GasProperties, float> gasMolarities,
         [Quantity("temperature")] Kelvin temperature)
     {
-        // Accumulated in double to match the reaction solver bit-for-bit.
-        ConcentrationPerSecond64 result = GetRateConstantForTemperature(temperature);
+        ConcentrationPerSecond rateConstant = GetRateConstantForTemperature(temperature);
+        if (!float.IsNormal(rateConstant) || rateConstant <= 0f)
+            return 0;
+
+        // Uses the solver's per-factor math, so passing the solver's concentrations reproduces its rate exactly.
+        ConcentrationPerSecond64 result = rateConstant;
         foreach (var factor in SpeedFactors.OrderBy(static factor => factor.Gas.Name, StringComparer.Ordinal)
                      .ThenBy(static factor => factor.OrderKey))
         {
             gasMolarities.TryGetValue(factor.Gas, out float molarity);
-            result *= factor.GetFactor(molarity);
+            result = ApplyFactor(result, factor.GetFactor(molarity));
+            if (result == 0)
+                return 0;
         }
 
         return (ConcentrationPerSecond)result;
+    }
+
+    /// <summary>
+    ///     Multiplies <paramref name="speed" /> by one speed factor, or returns zero when the factor is zero,
+    ///     negative, or not a normal float.
+    /// </summary>
+    internal static ConcentrationPerSecond64 ApplyFactor(ConcentrationPerSecond64 speed, float factor)
+    {
+        return float.IsNormal(factor) && factor > 0f ? speed * factor : 0;
     }
 }

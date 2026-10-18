@@ -76,22 +76,14 @@ internal sealed class GasReactionData(int gasId, string gasName, int reactionCou
         {
             foreach (var factor in factors)
             {
-                float value = factor.GetFactor((MolePerCubicMetre)concentration);
-                if (!float.IsNormal(value) || value <= 0f)
+                speed = LinearGasReaction.ApplyFactor(speed, factor.GetFactor((MolePerCubicMetre)concentration));
+                if (speed == 0)
                     return 0;
-
-                speed *= value;
             }
         }
 
-        if (StandardExponents[reactionId] is float exponent)
-        {
-            double value = Math.Pow(concentration, exponent);
-            if (double.IsNaN(value) || value <= 0 || double.IsPositiveInfinity(value) && concentration <= 0)
-                return 0;
-
-            speed *= value;
-        }
+        if (StandardExponents[reactionId] is { } exponent)
+            speed = StandardGasReaction.ApplyExponent(speed, concentration, exponent);
 
         return speed;
     }
