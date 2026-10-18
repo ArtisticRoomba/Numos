@@ -186,10 +186,7 @@ public sealed class CheckpointWireCodecGenerator : IIncrementalGenerator
                 "        internal static void WriteGeneratedChunkFields(global::System.IO.BinaryWriter writer, global::Numos.CoreSim.Replay.AtmosChunkCheckpoint chunk)");
             builder.AppendLine("        {");
             foreach (var field in chunkFields)
-            {
-                builder.Append("            foreach (").Append(ElementKeyword(field.Kind)).Append(" value in chunk.")
-                    .Append(field.PropertyName).AppendLine(") writer.Write(value);");
-            }
+                builder.Append("            WriteArray(writer, chunk.").Append(field.PropertyName).AppendLine(");");
 
             builder.AppendLine("        }");
             builder.AppendLine();
@@ -202,14 +199,11 @@ public sealed class CheckpointWireCodecGenerator : IIncrementalGenerator
             for (int i = 0; i < chunkFields.Count; i++)
             {
                 string comma = i == chunkFields.Count - 1 ? "" : ",";
-                string readMethod = chunkFields[i].Kind switch
-                {
-                    WireKind.Int32 => "static r => r.ReadInt32()",
-                    WireKind.Single => "static r => r.ReadSingle()",
-                    _ => throw new InvalidOperationException("Unsupported chunk array element kind.")
-                };
+                if (chunkFields[i].Kind is not (WireKind.Int32 or WireKind.Single))
+                    throw new InvalidOperationException("Unsupported chunk array element kind.");
 
-                builder.Append("                ReadArray(reader, voxels, ").Append(readMethod).Append(')').AppendLine(comma);
+                builder.Append("                ReadArray<").Append(ElementKeyword(chunkFields[i].Kind)).Append(">(reader, voxels)")
+                    .AppendLine(comma);
             }
 
             builder.AppendLine("            );");

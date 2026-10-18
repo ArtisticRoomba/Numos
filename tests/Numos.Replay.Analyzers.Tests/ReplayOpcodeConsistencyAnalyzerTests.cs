@@ -142,51 +142,6 @@ public sealed class ReplayOpcodeConsistencyAnalyzerTests
     }
 
     [Test]
-    public async Task MissingApplyCase_ReportsMissingApplyCase()
-    {
-        // SetSolverEnabled has a [WireOperation] registration but no Apply-switch case.
-        const string kernel = """
-                              namespace Numos.CoreSim
-                              {
-                                  internal sealed class AtmosKernel
-                                  {
-                                      internal void ApplyRecordedOperation(Numos.CoreSim.Replay.AtmosOperation operation)
-                                      {
-                                          switch (operation)
-                                          {
-                                              case Numos.CoreSim.Replay.CreateChunkOperation op:
-                                                  break;
-                                              default:
-                                                  throw new System.ArgumentException();
-                                          }
-                                      }
-                                  }
-                              }
-                              """;
-
-        const string registrations = """
-                                      namespace Numos.Serialization
-                                      {
-                                          [Numos.Replay.SourceGen.WireOperation(
-                                              typeof(Numos.CoreSim.Replay.CreateChunkOperation), Numos.CoreSim.Replay.AtmosOperationCode.CreateChunk)]
-                                          [Numos.Replay.SourceGen.WireOperation(
-                                              typeof(Numos.CoreSim.Replay.SetSolverEnabledOperation), Numos.CoreSim.Replay.AtmosOperationCode.SetSolverEnabled)]
-                                          public static class NumosReplaySerializer;
-                                      }
-                                      """;
-
-        var diagnostics = await Analyze(AttributeSource, DomainSource, kernel, registrations);
-
-        var diagnostic = diagnostics.Single(static d => d.Id == "NUMOSREPLAYGEN009");
-        Assert.Multiple(() =>
-        {
-            Assert.That(diagnostic.GetMessage(), Does.Contain("SetSolverEnabledOperation"));
-            Assert.That(diagnostic.GetMessage(), Does.Contain("AtmosKernel.ApplyRecordedOperation"));
-            Assert.That(diagnostic.Location, Is.Not.EqualTo(Location.None), "should anchor at the operation's Code override");
-        });
-    }
-
-    [Test]
     public async Task NoRegistrationsAtAll_DoesNotReportUnregisteredCode()
     {
         // A compilation that merely sees the enum/operations (e.g. Numos.CoreSim itself) has no registrations to

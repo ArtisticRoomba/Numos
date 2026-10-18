@@ -105,6 +105,32 @@ public sealed class ReplayWireFormatGoldenTests
         Assert.That(replayWorld.ComputeStateHash(), Is.EqualTo(restored.Replay.HeadStateHash));
     }
 
+    // Seekable destinations backpatch section lengths in place; anything else stages each section in memory. Both
+    // must produce the pinned bytes, including when the seekable stream doesn't start at offset zero.
+    [Test]
+    public void SimReplay_MatchesGoldenBytesThroughEveryDestinationKind()
+    {
+        byte[] golden = Convert.FromBase64String(GoldenSimReplayBase64);
+        var document = BuildGoldenSimReplayDocument();
+        Assert.Multiple(() =>
+        {
+            Assert.That(SerializeNonSeekable(stream => NumosReplaySerializer.Serialize(stream, document)), Is.EqualTo(golden));
+            Assert.That(SerializeAtOffset(stream => NumosReplaySerializer.Serialize(stream, document)), Is.EqualTo(golden));
+        });
+    }
+
+    [Test]
+    public void WorldReplay_MatchesGoldenBytesThroughEveryDestinationKind()
+    {
+        byte[] golden = Convert.FromBase64String(GoldenWorldReplayBase64);
+        var document = BuildGoldenWorldReplayDocument();
+        Assert.Multiple(() =>
+        {
+            Assert.That(SerializeNonSeekable(stream => NumosWorldReplaySerializer.Serialize(stream, document)), Is.EqualTo(golden));
+            Assert.That(SerializeAtOffset(stream => NumosWorldReplaySerializer.Serialize(stream, document)), Is.EqualTo(golden));
+        });
+    }
+
     [Test]
     [Explicit("Prints the current wire bytes as base64 so the golden constants above can be regenerated deliberately.")]
     public void PrintGoldenBytes()
@@ -215,5 +241,40 @@ public sealed class ReplayWireFormatGoldenTests
         var chunk = simulation.CreateAndRegisterChunk(position);
         simulation.SetChunkClassification(chunk, new VoxelClassification(1));
         return chunk;
+    }
+
+    private static byte[] SerializeNonSeekable(Action<Stream> serialize)
+    {
+        using var inner = new MemoryStream();
+        serialize(new NonSeekableStream(inner));
+        return inner.ToArray();
+    }
+
+    private static byte[] SerializeAtOffset(Action<Stream> serialize)
+    {
+        using var stream = new MemoryStream();
+        stream.Write([0xAA, 0xBB, 0xCC]);
+        serialize(stream);
+        return stream.ToArray()[3..];
+    }
+
+    private sealed class NonSeekableStream(Stream inner) : Stream
+    {
+        public override bool CanRead => false;
+        public override bool CanSeek => false;
+        public override bool CanWrite => true;
+        public override long Length => throw new NotSupportedException();
+
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
+        public override void Flush() => inner.Flush();
+        public override void Write(byte[] buffer, int offset, int count) => inner.Write(buffer, offset, count);
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
     }
 }
