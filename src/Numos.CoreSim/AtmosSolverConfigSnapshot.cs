@@ -19,6 +19,11 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
 
     private AtmosConfigSnapshot? _sourceConfig;
 
+    /// <summary>
+    ///     Gets solver data derived from this configuration. Every capture of a different configuration clears it.
+    /// </summary>
+    internal SolverDataStorage ConfigScopedData { get; } = new();
+
     public IReadOnlyList<IAtmosSolverConfiguration> SolverConfigurations { get; private set; } = [];
 
     public Kelvin GlobalTemperature { get; private set; }
@@ -77,11 +82,6 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
     }
 
     public int GasPropertyCount { get; private set; }
-
-    /// <summary>
-    ///     Gets solver data derived from this configuration. Every capture of a different configuration clears it.
-    /// </summary>
-    internal SolverDataStorage ConfigScopedData { get; } = new();
 
     /// <inheritdoc cref="AtmosConfigSnapshot.TryGetSolverConfiguration{T}(out T)" />
     internal bool TryGetSolverConfiguration<T>([NotNullWhen(true)] out T? configuration)

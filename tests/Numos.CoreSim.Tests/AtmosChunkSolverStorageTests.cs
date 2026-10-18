@@ -5,7 +5,7 @@ namespace Numos.CoreSim.Tests;
 [TestFixture]
 public sealed class AtmosChunkSolverStorageTests
 {
-    private static readonly ChunkFieldDescriptor<int> Field =
+    private readonly static ChunkFieldDescriptor<int> Field =
         ChunkFieldRegistry.CreatePrivate<int>($"{typeof(AtmosChunkSolverStorageTests).FullName}/scratch", null);
 
     [Test]

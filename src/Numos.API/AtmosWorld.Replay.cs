@@ -397,7 +397,8 @@ public sealed partial class AtmosWorld
         if (simulation == null)
         {
             throw new ArgumentException(
-                "A recorded operation targets a simulation that is not registered.", nameof(simulationOperation));
+                "A recorded operation targets a simulation that is not registered.",
+                nameof(simulationOperation));
         }
 
         simulation.Kernel.ApplyRecordedOperation(simulationOperation.Operation);

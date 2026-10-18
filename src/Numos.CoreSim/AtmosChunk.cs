@@ -21,6 +21,7 @@ namespace Numos.CoreSim;
 internal class AtmosChunk
 {
     private static long _nextGeneration;
+    private readonly Lock _fieldGate = new();
 
     /// <summary>
     ///     Number of valid entries at the beginning of <see cref="ActiveAirIndices" />.
@@ -148,15 +149,14 @@ internal class AtmosChunk
     ///     The number of voxels along the x-axis.
     /// </summary>
     public int Width;
-
-    private long _generation;
-    private long _revision;
+    private int _capturedFieldCount;
 
     // Indexed by ChunkFieldDescriptor.Slot. Readers load the array without a lock; writers hold _fieldGate and
     // publish a grown copy instead of resizing in place.
     private SolverArrayStorage?[]? _fields;
-    private readonly Lock _fieldGate = new();
-    private int _capturedFieldCount;
+
+    private long _generation;
+    private long _revision;
 
     /// <summary>
     ///     Creates a chunk with the specified dimensions.
@@ -306,7 +306,7 @@ internal class AtmosChunk
     /// </remarks>
     internal T[] GetOrCreateField<T>(ChunkFieldDescriptor<T> field)
     {
-        var fields = Volatile.Read(ref _fields);
+        SolverArrayStorage?[]? fields = Volatile.Read(ref _fields);
         int slot = field.Slot;
         if (fields != null && (uint)slot < (uint)fields.Length && fields[slot] is SolverArrayStorage<T> storage)
             return storage.Values;
@@ -319,7 +319,7 @@ internal class AtmosChunk
     /// </summary>
     internal bool TryGetField<T>(ChunkFieldDescriptor<T> field, [NotNullWhen(true)] out T[]? values)
     {
-        var fields = Volatile.Read(ref _fields);
+        SolverArrayStorage?[]? fields = Volatile.Read(ref _fields);
         int slot = field.Slot;
         if (fields != null && (uint)slot < (uint)fields.Length && fields[slot] is SolverArrayStorage<T> storage)
         {
@@ -335,7 +335,7 @@ internal class AtmosChunk
     {
         lock (_fieldGate)
         {
-            var fields = _fields;
+            SolverArrayStorage?[]? fields = _fields;
             int slot = field.Slot;
             if (fields != null && (uint)slot < (uint)fields.Length && fields[slot] is SolverArrayStorage<T> existing)
                 return existing.Values;
@@ -355,7 +355,7 @@ internal class AtmosChunk
     // Caller holds _fieldGate.
     private void PublishField(int slot, SolverArrayStorage storage)
     {
-        var fields = _fields;
+        SolverArrayStorage?[]? fields = _fields;
         if (fields == null || slot >= fields.Length)
         {
             var grown = new SolverArrayStorage?[Math.Max(slot + 1, ChunkFieldRegistry.SlotCount)];
@@ -379,7 +379,7 @@ internal class AtmosChunk
 
     internal AtmosSolverArraySnapshot[] CaptureSolverArrays()
     {
-        var fields = Volatile.Read(ref _fields);
+        SolverArrayStorage?[]? fields = Volatile.Read(ref _fields);
         List<AtmosSolverArraySnapshot>? captured = null;
         if (fields != null)
         {

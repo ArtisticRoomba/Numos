@@ -929,17 +929,17 @@ stale, so a missing dependency throws with the world untouched. A registration i
 returns, which is why the next tick retries a failure. The resolution order and what it means for solver code are in
 [Using Numos](using.md#declaring-dependencies-with-solverdependency).
 
-| ID | Severity | Raised when |
-| --- | --- | --- |
-| `NUMOSDEP001` | Error | The class, or a type it's nested in, isn't `partial`. |
-| `NUMOSDEP002` | Error | The property is declared in a struct, record struct, or interface. |
-| `NUMOSDEP003` | Error | The property isn't a bodiless `partial` declaration with only a `get` accessor (no `set`/`init`, not an indexer or `ref` return). |
-| `NUMOSDEP004` | Error | The property is `static`. |
-| `NUMOSDEP005` | Error | The property type isn't a reference type. |
-| `NUMOSDEP006` | Warning | `Optional` and the `?` annotation disagree. Not reported when nullable annotations are disabled. |
-| `NUMOSDEP007` | Warning | A non-abstract class doesn't implement `IAtmosWorldSolver`, so nothing will inject it. |
-| `NUMOSDEP008` | Error | A base class implements `IAtmosSolverDependencies` with no overridable `InjectSolverDependencies`, so generated injection would hide the base's. |
-| `NUMOSDEP009` | Error | The class already declares `InjectSolverDependencies` or implements `IAtmosSolverDependencies.InjectDependencies` itself. |
+| ID            | Severity | Raised when                                                                                                                                      |
+|---------------|----------|--------------------------------------------------------------------------------------------------------------------------------------------------|
+| `NUMOSDEP001` | Error    | The class, or a type it's nested in, isn't `partial`.                                                                                            |
+| `NUMOSDEP002` | Error    | The property is declared in a struct, record struct, or interface.                                                                               |
+| `NUMOSDEP003` | Error    | The property isn't a bodiless `partial` declaration with only a `get` accessor (no `set`/`init`, not an indexer or `ref` return).                |
+| `NUMOSDEP004` | Error    | The property is `static`.                                                                                                                        |
+| `NUMOSDEP005` | Error    | The property type isn't a reference type.                                                                                                        |
+| `NUMOSDEP006` | Warning  | `Optional` and the `?` annotation disagree. Not reported when nullable annotations are disabled.                                                 |
+| `NUMOSDEP007` | Warning  | A non-abstract class doesn't implement `IAtmosWorldSolver`, so nothing will inject it.                                                           |
+| `NUMOSDEP008` | Error    | A base class implements `IAtmosSolverDependencies` with no overridable `InjectSolverDependencies`, so generated injection would hide the base's. |
+| `NUMOSDEP009` | Error    | The class already declares `InjectSolverDependencies` or implements `IAtmosSolverDependencies.InjectDependencies` itself.                        |
 
 ### 12.2 Solver-specific configuration
 
@@ -1144,23 +1144,23 @@ named `Get{Name}` (`chunk.GetExposure()`) and says so with an info diagnostic.
 
 The generator catches most mistakes at compile time instead of leaving them to throw at registration:
 
-| ID | Severity | Raised when |
-| --- | --- | --- |
-| `NUMOSCHUNK001` | Error | The property isn't a bodiless `partial` declaration with only a `get` accessor. |
-| `NUMOSCHUNK002` | Error | The property isn't `static`. |
-| `NUMOSCHUNK003` | Error | The property type isn't `ChunkField<T>`. |
-| `NUMOSCHUNK004` | Error | The containing type, or a type it's nested in, isn't `partial`. |
-| `NUMOSCHUNK005` | Error | A containing type is generic, which would register one field per construction. |
-| `NUMOSCHUNK006` | Error | The key is blank. |
-| `NUMOSCHUNK007` | Error | `Rollback` is set without an explicit key. |
-| `NUMOSCHUNK008` | Error | `Rollback` is set and the element type isn't unmanaged. |
-| `NUMOSCHUNK009` | Error | `Length` is negative. |
-| `NUMOSCHUNK010` | Error | The property or a containing type isn't `public` or `internal`, so the accessors can't reach it. |
-| `NUMOSCHUNK011` | Error | Two declarations share a key with different element types, lengths, or rollback settings. |
-| `NUMOSCHUNK012` | Warning | Two declarations share a key with identical definitions; one is redundant. |
-| `NUMOSCHUNK013` | Info | C# 13 or earlier, so accessors are extension methods. |
-| `NUMOSCHUNK014` | Warning | An accessor name collides with a chunk view member or another accessor. |
-| `NUMOSCHUNK015` | Error | `AccessorName` isn't a valid C# identifier. |
+| ID              | Severity | Raised when                                                                                      |
+|-----------------|----------|--------------------------------------------------------------------------------------------------|
+| `NUMOSCHUNK001` | Error    | The property isn't a bodiless `partial` declaration with only a `get` accessor.                  |
+| `NUMOSCHUNK002` | Error    | The property isn't `static`.                                                                     |
+| `NUMOSCHUNK003` | Error    | The property type isn't `ChunkField<T>`.                                                         |
+| `NUMOSCHUNK004` | Error    | The containing type, or a type it's nested in, isn't `partial`.                                  |
+| `NUMOSCHUNK005` | Error    | A containing type is generic, which would register one field per construction.                   |
+| `NUMOSCHUNK006` | Error    | The key is blank.                                                                                |
+| `NUMOSCHUNK007` | Error    | `Rollback` is set without an explicit key.                                                       |
+| `NUMOSCHUNK008` | Error    | `Rollback` is set and the element type isn't unmanaged.                                          |
+| `NUMOSCHUNK009` | Error    | `Length` is negative.                                                                            |
+| `NUMOSCHUNK010` | Error    | The property or a containing type isn't `public` or `internal`, so the accessors can't reach it. |
+| `NUMOSCHUNK011` | Error    | Two declarations share a key with different element types, lengths, or rollback settings.        |
+| `NUMOSCHUNK012` | Warning  | Two declarations share a key with identical definitions; one is redundant.                       |
+| `NUMOSCHUNK013` | Info     | C# 13 or earlier, so accessors are extension methods.                                            |
+| `NUMOSCHUNK014` | Warning  | An accessor name collides with a chunk view member or another accessor.                          |
+| `NUMOSCHUNK015` | Error    | `AccessorName` isn't a valid C# identifier.                                                      |
 
 The key checks only see one compilation. A conflict between two assemblies still throws `InvalidOperationException`
 when the second one registers.

@@ -252,7 +252,8 @@ After validation, replay follows this order:
 4. Repeat until the target sequence is incorporated, then run ticks up to the target tick.
 
 If an operation, a solver, or dependency injection throws, Numos restores the grid state from before the `ReplayTo`
-call (calling `OnRestored()` again) and propagates the exception. It cannot undo side effects in host code. Custom solvers should use `simulation.IsReplaying` to suppress
+call (calling `OnRestored()` again) and propagates the exception. It cannot undo side effects in host code. Custom
+solvers should use `simulation.IsReplaying` to suppress
 damage, audio, spawning, telemetry, and similar effects while still performing the same Numos mutations:
 
 ```csharp

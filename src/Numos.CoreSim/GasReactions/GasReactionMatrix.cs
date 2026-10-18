@@ -40,5 +40,8 @@ internal sealed class GasReactionMatrix
     /// <summary>
     ///     Every gas's mole change for one reaction, in gas-ID order.
     /// </summary>
-    internal ReadOnlySpan<Mole> GetReactionRow(int reactionId) => _changesByReaction.AsSpan(reactionId * GasCount, GasCount);
+    internal ReadOnlySpan<Mole> GetReactionRow(int reactionId)
+    {
+        return _changesByReaction.AsSpan(reactionId * GasCount, GasCount);
+    }
 }

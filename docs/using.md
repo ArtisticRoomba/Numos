@@ -16,7 +16,8 @@ Consumers should generally add only `Numos.API` and go from there. NuGet restore
 dotnet add package Numos.API --prerelease
 ```
 
-`Numos.API` also carries the `[ChunkData]` source generator (see [Chunk data fields](#chunk-data-fields)). `Numos.API.Dangerous` and the serialization packages pass it through, so referencing any of them is enough.
+`Numos.API` also carries the `[ChunkData]` source generator (see [Chunk data fields](#chunk-data-fields)).
+`Numos.API.Dangerous` and the serialization packages pass it through, so referencing any of them is enough.
 
 `Numos.Maths` is generally restored as a dependency, though an engine adapter may want to reference it explicitly for Numos' `Int3`,
 which is used in the API.
@@ -271,7 +272,8 @@ world.Solvers.Register("my-mod/fire", context =>
 
 `Rollback = true` puts the field in checkpoints and state hashes, so `RestoreCheckpoint` and `ReplayTo` bring it back
 along with the gas. Without it the field is scratch space that starts zeroed after every restore. A rollback field's key
-is stored in checkpoints, so it has to be given explicitly; treat it like a save-format name and prefix it with your mod.
+is stored in checkpoints, so it has to be given explicitly; treat it like a save-format name and prefix it with your
+mod.
 
 The accessors are C# 14 extension properties. On C# 13 you get `chunk.GetExposure()` methods instead. The
 [technical documentation](atmospherics_technical_documentation.md#123-per-chunk-solver-state-with-chunkfieldt) covers

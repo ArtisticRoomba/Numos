@@ -187,6 +187,7 @@ public sealed class AtmosSolverDataTests
         Assert.That(
             () => simulation.GetSolverData(key),
             Throws.InvalidOperationException.With.Message.Contains("null"));
+
         Assert.That(
             () => simulation.GetSolverData(key),
             Throws.InvalidOperationException.With.Message.Contains("test/data"));
@@ -287,7 +288,7 @@ public sealed class AtmosSolverDataTests
             sim =>
             {
                 creations++;
-                return sim.Config.GasRegistry.Select(gas => (float)gas.MolarHeatCapacityAtConstantVolume).ToArray();
+                return sim.Config.GasRegistry.Select(gas => gas.MolarHeatCapacityAtConstantVolume).ToArray();
             },
             SolverDataLifetime.UntilConfigChange);
 
@@ -324,19 +325,19 @@ public sealed class AtmosSolverDataTests
             static sim => sim.Config.GasRegistry.Select(gas => gas.Name).ToArray(),
             SolverDataLifetime.UntilConfigChange);
 
-        var first = simulation.GetSolverData(key);
+        string[] first = simulation.GetSolverData(key);
         Assert.That(simulation.SetAtmosConfig(config), Is.False);
         simulation.Tick();
         Assert.That(simulation.GetSolverData(key), Is.SameAs(first));
 
         config.GasRegistry.RemoveAt(0);
         simulation.SetAtmosConfig(config);
-        var shifted = simulation.GetSolverData(key);
+        string[] shifted = simulation.GetSolverData(key);
         Assert.That(shifted, Is.EqualTo(new[] { "B" }));
 
         config.GasRegistry.Add(new GasProperties { Name = "C" });
         simulation.SetAtmosConfig(config);
-        var extended = simulation.GetSolverData(key);
+        string[] extended = simulation.GetSolverData(key);
         Assert.That(extended, Is.EqualTo(new[] { "B", "C" }));
 
         config.SolverConfigurations.Add(
@@ -372,7 +373,7 @@ public sealed class AtmosSolverDataTests
             static sim => sim.Config.GasRegistry.Select(gas => gas.Name).ToArray(),
             SolverDataLifetime.UntilConfigChange);
 
-        var original = simulation.GetSolverData(cached);
+        string[] original = simulation.GetSolverData(cached);
         config.GasRegistry.Replace(0, new GasProperties { Name = "Replacement" });
         simulation.World.Solvers.Register("replace-config", _ => simulation.SetAtmosConfig(config));
         var observedCached = new List<string[]>();

@@ -65,7 +65,11 @@ public sealed class FlatArrayTests
     {
         int[] data = new int[24];
         var array = new FlatArray<int>(data, new Int3(2, 3, 4));
-        FlatArray<int> View() => array;
+
+        FlatArray<int> View()
+        {
+            return array;
+        }
 
         // A method result isn't a variable, so these only compile because the indexers return by ref.
         View()[3] = 7;

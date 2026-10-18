@@ -106,89 +106,54 @@ public sealed class AtmosConfigSnapshot : IAtmosConfig
     /// </summary>
     public IReadOnlyList<IAtmosSolverConfiguration> SolverConfigurations { get; }
 
-    /// <summary>
-    ///     Finds the only solver configuration of type <typeparamref name="T" />.
-    /// </summary>
-    /// <typeparam name="T">
-    ///     The captured configuration type: whatever <see cref="IAtmosSolverConfiguration.CreateSnapshot" /> returned,
-    ///     which need not be the type added to <see cref="AtmosConfig.SolverConfigurations" />.
-    /// </typeparam>
-    /// <param name="configuration">The match, or <see langword="null" /> when there is none.</param>
-    /// <returns><see langword="true" /> when exactly one configuration is a <typeparamref name="T" />.</returns>
-    /// <remarks>
-    ///     Use this when a configuration type is only ever registered once. Types that can appear under several keys
-    ///     should use <see cref="TryGetSolverConfiguration{T}(string, out T)" /> instead.
-    /// </remarks>
-    /// <exception cref="InvalidOperationException">
-    ///     More than one configuration is a <typeparamref name="T" />.
-    /// </exception>
-    /// <example>
-    ///     <code>
-    ///     if (simulation.Config.TryGetSolverConfiguration(out HeaterSettings? heater))
-    ///         rate = heater.Rate;
-    ///     </code>
-    /// </example>
-    public bool TryGetSolverConfiguration<T>([NotNullWhen(true)] out T? configuration)
-        where T : class, IAtmosSolverConfiguration
-    {
-        return SolverConfigurationLookup.TryGet(SolverConfigurations, out configuration);
-    }
-
-    /// <summary>
-    ///     Finds the solver configuration registered under <paramref name="key" />.
-    /// </summary>
-    /// <typeparam name="T">The captured configuration type expected under <paramref name="key" />.</typeparam>
-    /// <param name="key">The configuration's <see cref="IAtmosSolverConfiguration.Key" />, compared ordinally.</param>
-    /// <param name="configuration">The match, or <see langword="null" /> when no configuration uses the key.</param>
-    /// <returns><see langword="true" /> when a configuration uses <paramref name="key" />.</returns>
-    /// <exception cref="ArgumentNullException"><paramref name="key" /> is <see langword="null" />.</exception>
-    /// <exception cref="InvalidOperationException">
-    ///     The configuration under <paramref name="key" /> is not a <typeparamref name="T" />.
-    /// </exception>
-    /// <example>
-    ///     <code>
-    ///     if (simulation.Config.TryGetSolverConfiguration("my-mod/heater", out HeaterSettings? heater))
-    ///         rate = heater.Rate;
-    ///     </code>
-    /// </example>
-    public bool TryGetSolverConfiguration<T>(string key, [NotNullWhen(true)] out T? configuration)
-        where T : class, IAtmosSolverConfiguration
-    {
-        return SolverConfigurationLookup.TryGet(SolverConfigurations, key, out configuration);
-    }
-
     /// <inheritdoc cref="AtmosConfig.GlobalTemperature" />
-    [ConfigCheckpointField(0)] public Kelvin GlobalTemperature { get; }
+    [ConfigCheckpointField(0)]
+    public Kelvin GlobalTemperature { get; }
     /// <inheritdoc cref="AtmosConfig.DefaultTemperatureFallback" />
-    [ConfigCheckpointField(1)] public Kelvin DefaultTemperatureFallback { get; }
+    [ConfigCheckpointField(1)]
+    public Kelvin DefaultTemperatureFallback { get; }
     /// <inheritdoc cref="AtmosConfig.DefaultMolarHeatCapacityAtConstantVolume" />
-    [ConfigCheckpointField(2)] public JoulePerMoleKelvin DefaultMolarHeatCapacityAtConstantVolume { get; }
+    [ConfigCheckpointField(2)]
+    public JoulePerMoleKelvin DefaultMolarHeatCapacityAtConstantVolume { get; }
     /// <inheritdoc cref="AtmosConfig.VoxelVolume" />
-    [ConfigCheckpointField(3)] public CubicMetre VoxelVolume { get; }
+    [ConfigCheckpointField(3)]
+    public CubicMetre VoxelVolume { get; }
     /// <inheritdoc cref="AtmosConfig.SaturationReferencePressure" />
-    [ConfigCheckpointField(4)] public Pascal SaturationReferencePressure { get; }
+    [ConfigCheckpointField(4)]
+    public Pascal SaturationReferencePressure { get; }
     /// <inheritdoc cref="AtmosConfig.DefaultDiffusionCoefficient" />
-    [ConfigCheckpointField(5)] public Scalar DefaultDiffusionCoefficient { get; }
+    [ConfigCheckpointField(5)]
+    public Scalar DefaultDiffusionCoefficient { get; }
     /// <inheritdoc cref="AtmosConfig.SpaceTemperature" />
-    [ConfigCheckpointField(6)] public Kelvin SpaceTemperature { get; }
+    [ConfigCheckpointField(6)]
+    public Kelvin SpaceTemperature { get; }
     /// <inheritdoc cref="AtmosConfig.BulkFlowCoefficient" />
-    [ConfigCheckpointField(7)] public Scalar BulkFlowCoefficient { get; }
+    [ConfigCheckpointField(7)]
+    public Scalar BulkFlowCoefficient { get; }
     /// <inheritdoc cref="AtmosConfig.VacuumThreshold" />
-    [ConfigCheckpointField(8)] public Pascal VacuumThreshold { get; }
+    [ConfigCheckpointField(8)]
+    public Pascal VacuumThreshold { get; }
     /// <inheritdoc cref="AtmosConfig.SleepThreshold" />
-    [ConfigCheckpointField(9)] public int SleepThreshold { get; }
+    [ConfigCheckpointField(9)]
+    public int SleepThreshold { get; }
     /// <inheritdoc cref="AtmosConfig.SleepEpsilon" />
-    [ConfigCheckpointField(10)] public Scalar SleepEpsilon { get; }
+    [ConfigCheckpointField(10)]
+    public Scalar SleepEpsilon { get; }
     /// <inheritdoc cref="AtmosConfig.ThermalConductance" />
-    [ConfigCheckpointField(11)] public JoulePerKelvin ThermalConductance { get; }
+    [ConfigCheckpointField(11)]
+    public JoulePerKelvin ThermalConductance { get; }
     /// <inheritdoc cref="AtmosConfig.CondensationRateFactor" />
-    [ConfigCheckpointField(12)] public Scalar CondensationRateFactor { get; }
+    [ConfigCheckpointField(12)]
+    public Scalar CondensationRateFactor { get; }
     /// <inheritdoc cref="AtmosConfig.MaxPressureTransferFractionPerNeighbor" />
-    [ConfigCheckpointField(13)] public Scalar MaxPressureTransferFractionPerNeighbor { get; }
+    [ConfigCheckpointField(13)]
+    public Scalar MaxPressureTransferFractionPerNeighbor { get; }
     /// <inheritdoc cref="AtmosConfig.AccumulatorWakeThreshold" />
-    [ConfigCheckpointField(14)] public Pascal AccumulatorWakeThreshold { get; }
+    [ConfigCheckpointField(14)]
+    public Pascal AccumulatorWakeThreshold { get; }
     /// <inheritdoc cref="AtmosConfig.AccumulatorMaxAliveTicks" />
-    [ConfigCheckpointField(15)] public int AccumulatorMaxAliveTicks { get; }
+    [ConfigCheckpointField(15)]
+    public int AccumulatorMaxAliveTicks { get; }
 
     /// <inheritdoc cref="AtmosConfig.PressurePerMoleKelvin" />
     public PascalPerMoleKelvin PressurePerMoleKelvin =>
@@ -246,6 +211,57 @@ public sealed class AtmosConfigSnapshot : IAtmosConfig
 
     /// <inheritdoc cref="AtmosConfig.GasPropertyCount" />
     public int GasPropertyCount => GasRegistry.Count;
+
+    /// <summary>
+    ///     Finds the only solver configuration of type <typeparamref name="T" />.
+    /// </summary>
+    /// <typeparam name="T">
+    ///     The captured configuration type: whatever <see cref="IAtmosSolverConfiguration.CreateSnapshot" /> returned,
+    ///     which need not be the type added to <see cref="AtmosConfig.SolverConfigurations" />.
+    /// </typeparam>
+    /// <param name="configuration">The match, or <see langword="null" /> when there is none.</param>
+    /// <returns><see langword="true" /> when exactly one configuration is a <typeparamref name="T" />.</returns>
+    /// <remarks>
+    ///     Use this when a configuration type is only ever registered once. Types that can appear under several keys
+    ///     should use <see cref="TryGetSolverConfiguration{T}(string, out T)" /> instead.
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">
+    ///     More than one configuration is a <typeparamref name="T" />.
+    /// </exception>
+    /// <example>
+    ///     <code>
+    ///     if (simulation.Config.TryGetSolverConfiguration(out HeaterSettings? heater))
+    ///         rate = heater.Rate;
+    ///     </code>
+    /// </example>
+    public bool TryGetSolverConfiguration<T>([NotNullWhen(true)] out T? configuration)
+        where T : class, IAtmosSolverConfiguration
+    {
+        return SolverConfigurationLookup.TryGet(SolverConfigurations, out configuration);
+    }
+
+    /// <summary>
+    ///     Finds the solver configuration registered under <paramref name="key" />.
+    /// </summary>
+    /// <typeparam name="T">The captured configuration type expected under <paramref name="key" />.</typeparam>
+    /// <param name="key">The configuration's <see cref="IAtmosSolverConfiguration.Key" />, compared ordinally.</param>
+    /// <param name="configuration">The match, or <see langword="null" /> when no configuration uses the key.</param>
+    /// <returns><see langword="true" /> when a configuration uses <paramref name="key" />.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="key" /> is <see langword="null" />.</exception>
+    /// <exception cref="InvalidOperationException">
+    ///     The configuration under <paramref name="key" /> is not a <typeparamref name="T" />.
+    /// </exception>
+    /// <example>
+    ///     <code>
+    ///     if (simulation.Config.TryGetSolverConfiguration("my-mod/heater", out HeaterSettings? heater))
+    ///         rate = heater.Rate;
+    ///     </code>
+    /// </example>
+    public bool TryGetSolverConfiguration<T>(string key, [NotNullWhen(true)] out T? configuration)
+        where T : class, IAtmosSolverConfiguration
+    {
+        return SolverConfigurationLookup.TryGet(SolverConfigurations, key, out configuration);
+    }
 
     /// <inheritdoc cref="AtmosConfig.ValidateGasRegistry" />
     public void ValidateGasRegistry()

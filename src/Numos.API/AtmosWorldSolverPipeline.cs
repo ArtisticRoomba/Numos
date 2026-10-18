@@ -466,8 +466,7 @@ public sealed class AtmosWorldSolverPipeline
                 .Select(static candidate => (candidate.Name, candidate.CustomSolver!))
                 .ToArray();
 
-            dependent.InjectDependencies(
-                new AtmosSolverDependencyResolver(_world, step.Name, step.CustomSolver, candidates));
+            dependent.InjectDependencies(new AtmosSolverDependencyResolver(_world, step.Name, step.CustomSolver, candidates));
             step.MarkInjected(epoch, servicesVersion);
         }
     }
@@ -638,10 +637,9 @@ internal sealed class AtmosWorldExecutionContext(
 internal sealed class WorldSolverRegistration
 {
     private readonly Action<AtmosWorldExecutionContext>? _builtInSolver;
-    private readonly IAtmosWorldSolver? _customSolver;
-    private AtmosWorldNeighborTopology _topology = AtmosWorldNeighborTopology.Empty;
     private int _injectedPipelineEpoch = -1;
     private int _injectedServicesVersion = -1;
+    private AtmosWorldNeighborTopology _topology = AtmosWorldNeighborTopology.Empty;
 
     private WorldSolverRegistration(
         string name,
@@ -653,7 +651,7 @@ internal sealed class WorldSolverRegistration
         Name = name;
         Kind = kind;
         _builtInSolver = builtInSolver;
-        _customSolver = customSolver;
+        CustomSolver = customSolver;
         Selection = selection;
     }
 
@@ -665,7 +663,7 @@ internal sealed class WorldSolverRegistration
     /// <summary>
     ///     Gets the class solver instance, or the delegate adapter, for a custom stage.
     /// </summary>
-    internal IAtmosWorldSolver? CustomSolver => _customSolver;
+    internal IAtmosWorldSolver? CustomSolver { get; }
 
     internal static WorldSolverRegistration CreateBuiltIn(
         string name,
@@ -684,10 +682,9 @@ internal sealed class WorldSolverRegistration
 
     internal void Execute(AtmosWorldExecutionContext context)
     {
-        if (_customSolver != null)
+        if (CustomSolver != null)
         {
-            _customSolver.Solve(new AtmosWorldSolverContext(
-                context.World, context.PublicSimulations, _topology, context.SolverScope));
+            CustomSolver.Solve(new AtmosWorldSolverContext(context.World, context.PublicSimulations, _topology, context.SolverScope));
             return;
         }
 
@@ -708,8 +705,8 @@ internal sealed class WorldSolverRegistration
     internal void NotifyRestored()
     {
         // Delegates have nowhere to keep state of their own, so the default no-op is skipped without a virtual call.
-        if (_customSolver is not null and not DelegateWorldSolver)
-            _customSolver.OnRestored();
+        if (CustomSolver is not null and not DelegateWorldSolver)
+            CustomSolver.OnRestored();
     }
 
     internal AtmosWorldNeighborTopology BuildTopology(

@@ -36,12 +36,11 @@ internal sealed class SolverDataStorage
         {
             if (ReferenceEquals(existing, Creating))
             {
-                throw new InvalidOperationException(
-                    $"The factory for solver data '{name}' requested its own value while creating it.");
+                throw new InvalidOperationException($"The factory for solver data '{name}' requested its own value while creating it.");
             }
 
-            return existing as T ?? throw new InvalidOperationException(
-                $"Solver data '{name}' holds a {existing.GetType()}, not a {typeof(T)}.");
+            return existing as T ??
+                   throw new InvalidOperationException($"Solver data '{name}' holds a {existing.GetType()}, not a {typeof(T)}.");
         }
 
         // Nested requests may grow the array, which copies the marker along, so always go through the current
@@ -50,8 +49,7 @@ internal sealed class SolverDataStorage
         T value;
         try
         {
-            value = factory(state) ?? throw new InvalidOperationException(
-                $"The factory for solver data '{name}' returned null.");
+            value = factory(state) ?? throw new InvalidOperationException($"The factory for solver data '{name}' returned null.");
         }
         catch
         {

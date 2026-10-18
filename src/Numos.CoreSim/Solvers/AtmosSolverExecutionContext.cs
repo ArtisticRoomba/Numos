@@ -40,8 +40,7 @@ internal sealed class AtmosSolverExecutionContext
     internal T GetSolverData<T>(SolverDataSlot<T> slot) where T : class
     {
         var storage = slot.ResetOnConfigChange ? TickConfig.ConfigScopedData : SharedData;
-        return storage.GetOrCreate(
-            slot.Id, slot.Name, (Context: this, Slot: slot), static state => state.Slot.Factory(state.Context));
+        return storage.GetOrCreate(slot.Id, slot.Name, (Context: this, Slot: slot), static state => state.Slot.Factory(state.Context));
     }
 
     /// <summary>

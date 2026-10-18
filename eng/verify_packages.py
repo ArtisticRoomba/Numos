@@ -4,9 +4,9 @@
 from __future__ import annotations
 
 import argparse
-from pathlib import Path
 import sys
 import xml.etree.ElementTree as ET
+from pathlib import Path
 from zipfile import ZipFile
 
 from package_manifest import (

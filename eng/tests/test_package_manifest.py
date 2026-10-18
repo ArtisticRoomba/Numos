@@ -1,7 +1,6 @@
-from pathlib import Path
 import sys
 import unittest
-
+from pathlib import Path
 
 ENG = Path(__file__).resolve().parents[1]
 ROOT = ENG.parent

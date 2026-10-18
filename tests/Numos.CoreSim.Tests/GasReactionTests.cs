@@ -513,8 +513,8 @@ public class GasReactionTests
         {
             // awakeChunkCount >= worker count always takes the sequential branch; 1 always takes the
             // parallel one (a real chunk count can never be below 1), regardless of the machine's core count.
-            solver.ProcessChunk(sequentialChunk, 1, config, tables, sequentialFeedback, awakeChunkCount: int.MaxValue);
-            solver.ProcessChunk(parallelChunk, 1, config, tables, parallelFeedback, awakeChunkCount: 1);
+            solver.ProcessChunk(sequentialChunk, 1, config, tables, sequentialFeedback, int.MaxValue);
+            solver.ProcessChunk(parallelChunk, 1, config, tables, parallelFeedback, 1);
 
             for (ushort i = 0; i < 64; i++)
             {

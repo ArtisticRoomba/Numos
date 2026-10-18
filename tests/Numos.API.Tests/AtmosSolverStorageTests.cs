@@ -14,7 +14,7 @@ public sealed class AtmosSolverStorageTests
     {
         using var simulation = new AtmosSimulation(2, 3, 4);
         var chunk = simulation.CreateAndRegisterChunk(default);
-        var field = ChunkField<int>.CreatePrivate(KeyPrefix + "reuse");
+        ChunkField<int> field = ChunkField<int>.CreatePrivate(KeyPrefix + "reuse");
         FlatArray<int> original = simulation.GetChunkField(chunk, field);
         Assert.That(original.ToArray(), Is.EqualTo(new int[24]));
 
@@ -45,8 +45,8 @@ public sealed class AtmosSolverStorageTests
         var first = simulation.CreateAndRegisterChunk(default);
         var second = simulation.CreateAndRegisterChunk(Int3.PosX);
         var otherChunk = other.CreateAndRegisterChunk(default);
-        var field = ChunkField<int>.CreatePrivate(KeyPrefix + "isolated");
-        var sameName = ChunkField<int>.CreatePrivate(KeyPrefix + "isolated");
+        ChunkField<int> field = ChunkField<int>.CreatePrivate(KeyPrefix + "isolated");
+        ChunkField<int> sameName = ChunkField<int>.CreatePrivate(KeyPrefix + "isolated");
         simulation.GetChunkField(first, field)[0] = 42;
 
         Assert.Multiple(() =>
@@ -64,7 +64,7 @@ public sealed class AtmosSolverStorageTests
     {
         using var simulation = new AtmosSimulation(2, 3, 4);
         var chunk = simulation.CreateAndRegisterChunk(default);
-        var field = ChunkField<int>.CreatePrivate(KeyPrefix + "fixed-length", length);
+        ChunkField<int> field = ChunkField<int>.CreatePrivate(KeyPrefix + "fixed-length", length);
         FlatArray<int> data = simulation.GetChunkField(chunk, field);
 
         Assert.Multiple(() =>
@@ -81,7 +81,7 @@ public sealed class AtmosSolverStorageTests
         using var simulation = new AtmosSimulation(2, 1, 1);
         var chunk = simulation.CreateAndRegisterChunk(default);
         const string key = KeyPrefix + "conflict";
-        var field = ChunkField<string>.Register(key);
+        ChunkField<string> field = ChunkField<string>.Register(key);
         FlatArray<string> data = simulation.GetChunkField(chunk, field);
         data[0] = "retained";
 
@@ -101,7 +101,7 @@ public sealed class AtmosSolverStorageTests
     {
         using var simulation = new AtmosSimulation(1, 1, 1);
         var chunk = simulation.CreateAndRegisterChunk(default);
-        var field = ChunkField<int>.CreatePrivate(KeyPrefix + "invalid");
+        ChunkField<int> field = ChunkField<int>.CreatePrivate(KeyPrefix + "invalid");
         var missing = new AtmosChunkHandle(Int3.PosX);
 
         Assert.Multiple(() =>
@@ -128,7 +128,7 @@ public sealed class AtmosSolverStorageTests
     {
         using var simulation = new AtmosSimulation(2, 3, 4);
         var chunk = simulation.CreateAndRegisterChunk(default);
-        var field = ChunkField<int>.CreatePrivate(KeyPrefix + "concurrent");
+        ChunkField<int> field = ChunkField<int>.CreatePrivate(KeyPrefix + "concurrent");
         var views = new FlatArray<int>[32];
 
         simulation.World.Solvers.Register(
@@ -150,7 +150,7 @@ public sealed class AtmosSolverStorageTests
     {
         using var simulation = new AtmosSimulation(1, 1, 1);
         var chunk = simulation.CreateAndRegisterChunk(default);
-        var field = ChunkField<int>.CreatePrivate(KeyPrefix + "replacement");
+        ChunkField<int> field = ChunkField<int>.CreatePrivate(KeyPrefix + "replacement");
         FlatArray<int> previous = simulation.GetChunkField(chunk, field);
         previous[0] = 42;
 
@@ -171,7 +171,7 @@ public sealed class AtmosSolverStorageTests
     {
         using var simulation = new AtmosSimulation(2, 1, 1);
         var chunk = simulation.CreateAndRegisterChunk(default);
-        var field = ChunkField<float>.CreatePrivate(KeyPrefix + "scratch");
+        ChunkField<float> field = ChunkField<float>.CreatePrivate(KeyPrefix + "scratch");
         var version = simulation.GetChunkSnapshot(chunk).Version;
         var hash = simulation.ComputeStateHash();
         simulation.StartRecording();
@@ -201,7 +201,7 @@ public sealed class AtmosSolverStorageTests
     {
         var simulation = new AtmosSimulation(1, 1, 1);
         var chunk = simulation.CreateAndRegisterChunk(default);
-        var field = ChunkField<int>.CreatePrivate(KeyPrefix + "disposed");
+        ChunkField<int> field = ChunkField<int>.CreatePrivate(KeyPrefix + "disposed");
         simulation.GetChunkField(chunk, field);
         simulation.Dispose();
 

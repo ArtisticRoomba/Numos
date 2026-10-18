@@ -46,9 +46,9 @@ public sealed partial class AtmosWorld : IDisposable
     private ExplicitAtmosEdge[] _activeEdges = [];
     private Dictionary<AtmosChunkKey, int> _activeEdgesByChunk = [];
     private AtmosConfigSnapshot _config;
+    private bool _deferSolverRestoreNotification;
     private bool _disposed;
     private volatile bool _isTickExecuting;
-    private bool _deferSolverRestoreNotification;
     private long _linkSetCollectionRevision;
     private AtmosSimulation[] _orderedSimulations = [];
     private AtmosConfigSnapshot? _pendingConfig;

@@ -11,47 +11,47 @@ public sealed class AtmosSolverStorageRollbackTests
     // The registry is process-wide and shared by every test in this assembly, so keys are namespaced to this fixture.
     private const string KeyPrefix = "tests/solver-storage-rollback/";
 
-    private static readonly ChunkField<float> HeatExposure =
+    private readonly static ChunkField<float> HeatExposure =
         ChunkField<float>.Register(KeyPrefix + "heat/exposure", true);
 
-    private static readonly ChunkField<int> HeatCounts =
+    private readonly static ChunkField<int> HeatCounts =
         ChunkField<int>.Register(KeyPrefix + "heat/counts", true, 3);
 
-    private static readonly ChunkField<int> HeatScratch =
+    private readonly static ChunkField<int> HeatScratch =
         ChunkField<int>.Register(KeyPrefix + "heat/scratch");
 
-    private static readonly ChunkField<int> Later =
+    private readonly static ChunkField<int> Later =
         ChunkField<int>.Register(KeyPrefix + "later", true);
 
     // B registers before A, so slot order and key order disagree.
-    private static readonly ChunkField<int> OrderB =
+    private readonly static ChunkField<int> OrderB =
         ChunkField<int>.Register(KeyPrefix + "order/b", true);
 
-    private static readonly ChunkField<int> OrderA =
+    private readonly static ChunkField<int> OrderA =
         ChunkField<int>.Register(KeyPrefix + "order/a", true);
 
-    private static readonly ChunkField<SolverValue> Custom =
+    private readonly static ChunkField<SolverValue> Custom =
         ChunkField<SolverValue>.Register(KeyPrefix + "custom", true);
 
-    private static readonly ChunkField<float> NegativeZero =
+    private readonly static ChunkField<float> NegativeZero =
         ChunkField<float>.Register(KeyPrefix + "negative-zero", true);
 
-    private static readonly ChunkField<int> Empty =
+    private readonly static ChunkField<int> Empty =
         ChunkField<int>.Register(KeyPrefix + "empty", true, 0);
 
-    private static readonly ChunkField<int> Captured =
+    private readonly static ChunkField<int> Captured =
         ChunkField<int>.Register(KeyPrefix + "captured", true);
 
-    private static readonly ChunkField<int> Transient =
+    private readonly static ChunkField<int> Transient =
         ChunkField<int>.Register(KeyPrefix + "transient");
 
-    private static readonly ChunkField<int> Counter =
+    private readonly static ChunkField<int> Counter =
         ChunkField<int>.Register(KeyPrefix + "counter", true);
 
-    private static readonly ChunkField<int> ReplayCount =
+    private readonly static ChunkField<int> ReplayCount =
         ChunkField<int>.Register(KeyPrefix + "counter/count", true);
 
-    private static readonly ChunkField<float> ReplayHistory =
+    private readonly static ChunkField<float> ReplayHistory =
         ChunkField<float>.Register(KeyPrefix + "counter/history", true);
 
     [Test]
@@ -138,7 +138,7 @@ public sealed class AtmosSolverStorageRollbackTests
         first.GetChunkField(chunk, OrderB)[0] = 9;
         second.GetChunkField(chunk, OrderB)[0] = 9;
         // An equal but distinct key string resolves to the same field.
-        var sameA = ChunkField<int>.Register(new string((KeyPrefix + "order/a").ToCharArray()), rollback: true);
+        ChunkField<int> sameA = ChunkField<int>.Register(new string((KeyPrefix + "order/a").ToCharArray()), true);
         Assert.That(sameA, Is.SameAs(OrderA));
         second.GetChunkField(chunk, sameA)[0] = 7;
         Assert.That(second.ComputeStateHash(), Is.EqualTo(first.ComputeStateHash()));
@@ -187,13 +187,13 @@ public sealed class AtmosSolverStorageRollbackTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(() => ChunkField<int>.Register("  ", rollback: true), Throws.ArgumentException);
+            Assert.That(() => ChunkField<int>.Register("  ", true), Throws.ArgumentException);
             Assert.That(
-                () => ChunkField<string>.Register(KeyPrefix + "strings", rollback: true),
+                () => ChunkField<string>.Register(KeyPrefix + "strings", true),
                 Throws.ArgumentException);
 
             Assert.That(
-                () => ChunkField<ReferenceValue>.Register(KeyPrefix + "references", rollback: true),
+                () => ChunkField<ReferenceValue>.Register(KeyPrefix + "references", true),
                 Throws.ArgumentException);
 
             Assert.That(ChunkField<int>.CreatePrivate(KeyPrefix + "private").Rollback, Is.False);
@@ -206,7 +206,7 @@ public sealed class AtmosSolverStorageRollbackTests
         {
             Assert.That(() => ChunkField<int>.Register(Captured.Key), Throws.InvalidOperationException);
             Assert.That(
-                () => ChunkField<int>.Register(Transient.Key, rollback: true),
+                () => ChunkField<int>.Register(Transient.Key, true),
                 Throws.InvalidOperationException);
 
             Assert.That(simulation.GetChunkField(chunk, Captured)[0], Is.EqualTo(4));

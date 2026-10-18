@@ -23,6 +23,7 @@ internal abstract class SolverArrayStorage
     ///     Returns storage sharing these values but owned by <paramref name="field" />.
     /// </summary>
     internal abstract SolverArrayStorage WithField(ChunkFieldDescriptor field);
+
     internal abstract void AppendHash(ref AtmosStateHasher hash);
 }
 

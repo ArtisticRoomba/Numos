@@ -25,8 +25,10 @@ public static class AtmosWorldSolverDangerousExtensions
     /// <summary>
     ///     Opens unchecked live storage for a solver chunk view.
     /// </summary>
-    /// <param name="chunk">A view from <see cref="AtmosWorldSolverContext.Chunks" /> or
-    ///     <see cref="AtmosWorldSolverContext.TryGetChunk" />.</param>
+    /// <param name="chunk">
+    ///     A view from <see cref="AtmosWorldSolverContext.Chunks" /> or
+    ///     <see cref="AtmosWorldSolverContext.TryGetChunk" />.
+    /// </param>
     /// <returns>A live view of the same chunk, including built-in gas and temperature storage.</returns>
     /// <remarks>
     ///     <para>

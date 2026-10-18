@@ -38,11 +38,11 @@ public delegate void AtmosWorldSolver(AtmosWorldSolverContext context);
 ///         [ChunkData("my-mod/fire/exposure", Rollback = true)]
 ///         public static partial ChunkField&lt;float&gt; Exposure { get; }
 ///     }
-///
+/// 
 ///     public sealed class ExposureDecaySolver : IAtmosWorldSolver
 ///     {
 ///         private int _chunksVisited; // transient; reset on restore
-///
+/// 
 ///         public void Solve(AtmosWorldSolverContext context)
 ///         {
 ///             foreach (var simulation in context.Simulations)
@@ -57,10 +57,10 @@ public delegate void AtmosWorldSolver(AtmosWorldSolverContext context);
 ///                 _chunksVisited += chunks.Count;
 ///             }
 ///         }
-///
+/// 
 ///         public void OnRestored() =&gt; _chunksVisited = 0;
 ///     }
-///
+/// 
 ///     world.Solvers.RegisterAfter(AtmosBuiltInSolvers.Thermodynamics, "my-mod/exposure-decay", new ExposureDecaySolver());
 ///     </code>
 /// </example>

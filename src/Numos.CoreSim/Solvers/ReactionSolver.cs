@@ -25,7 +25,7 @@ internal class ReactionSolver : IAtmosSolverStage
     private readonly static SolverDataSlot<ReactionTables> TablesSlot = new(
         "gas-reactions/tables",
         static context => ReactionTables.Create(context.TickConfig),
-        resetOnConfigChange: true);
+        true);
 
     public void Solve(AtmosSolverExecutionContext context)
     {
@@ -33,7 +33,7 @@ internal class ReactionSolver : IAtmosSolverStage
         if (GasReactionConfig.Get(context.TickConfig).Count == 0 || context.TickConfig.GasPropertyCount == 0)
             return;
 
-        ReactionTables tables = context.GetSolverData(TablesSlot);
+        var tables = context.GetSolverData(TablesSlot);
 
         // Told to ProcessChunk so it knows whether this outer per-chunk dispatch already saturates
         // the worker pool, mirroring ThermodynamicsSolver/PhaseChangeSolver's awakeChunkCount gate.
@@ -287,7 +287,7 @@ internal class ReactionSolver : IAtmosSolverStage
         Second deltaTime, Span<Mole> mixtureVector, ref Kelvin currentTemperature, CubicMetre volume,
         Scalar[]? reactionFeedback, IAtmosConfig config, int mixtureLength, ReactionTables tables)
     {
-        GasReactionConfig reactions = tables.Reactions;
+        var reactions = tables.Reactions;
         GasReactionData[] gasData = tables.GasData;
 
         // GetVoxelVolume always returns a finite positive volume, so only the timestep needs checking.
