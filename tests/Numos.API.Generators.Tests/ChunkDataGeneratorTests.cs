@@ -299,6 +299,36 @@ public sealed class ChunkDataGeneratorTests
     }
 
     [Test]
+    public void ShiftedDeclarations_LeaveGeneratedFileCached()
+    {
+        // C# 13 so the type also gets a located diagnostic, which has to follow the declaration while the file
+        // itself stays cached.
+        CSharpParseOptions parseOptions = GeneratorHarness.ParseOptions(LanguageVersion.CSharp13);
+        CSharpCompilation compilation = GeneratorHarness.CreateCompilation(true, parseOptions, FireSource);
+        GeneratorDriver driver = GeneratorHarness.CreateDriver(parseOptions, trackSteps: true);
+        driver = driver.RunGenerators(compilation);
+
+        SyntaxTree tree = compilation.SyntaxTrees.Single();
+        CSharpCompilation edited = compilation.ReplaceSyntaxTree(tree,
+            CSharpSyntaxTree.ParseText("// moved\n\n" + FireSource, parseOptions, path: tree.FilePath));
+        driver = driver.RunGenerators(edited);
+
+        GeneratorRunResult result = driver.GetRunResult().Results.Single();
+        Assert.That(result.TrackedSteps[ChunkDataGenerator.PropertiesStepName]
+                .SelectMany(static run => run.Outputs)
+                .Select(static output => output.Reason),
+            Has.Some.EqualTo(IncrementalStepRunReason.Modified));
+        Assert.That(result.TrackedSteps[ChunkDataGenerator.TypesStepName]
+                .SelectMany(static run => run.Outputs)
+                .Select(static output => output.Reason),
+            Is.Not.Empty.And.All.Matches<IncrementalStepRunReason>(static reason =>
+                reason is IncrementalStepRunReason.Cached or IncrementalStepRunReason.Unchanged));
+
+        Diagnostic fallback = result.Diagnostics.Single(static diagnostic => diagnostic.Id == "NUMOSCHUNK013");
+        Assert.That(fallback.Location.GetLineSpan().StartLinePosition.Line, Is.EqualTo(9));
+    }
+
+    [Test]
     public void GeneratedProperty_RegistersFieldAtRunTime()
     {
         const string source = """

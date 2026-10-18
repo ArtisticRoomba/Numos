@@ -18,7 +18,8 @@ namespace Numos.API.Generators.ChunkData;
 ///     <para>
 ///         Per-property checks run in the attribute transform. Key conflicts and accessor collisions need every
 ///         property in the compilation, so they run after <c>Collect</c>; that step reruns whenever any
-///         <c>[ChunkData]</c> property changes, but not on unrelated edits.
+///         <c>[ChunkData]</c> property changes, but not on unrelated edits. It hands on one location-free model per
+///         type, so a file is only rewritten when that type's output changes.
 ///     </para>
 /// </remarks>
 [Generator(LanguageNames.CSharp)]
@@ -27,31 +28,22 @@ public sealed class ChunkDataGenerator : IIncrementalGenerator
     internal const string PropertiesStepName = "ChunkDataProperties";
     internal const string LanguageVersionStepName = "ChunkDataLanguageVersion";
     internal const string ViewInfoStepName = "ChunkDataViewInfo";
+    internal const string TypesStepName = "ChunkDataTypes";
 
     private const string AttributeMetadataName = "Numos.API.ChunkDataAttribute";
     private const string ChunkFieldMetadataName = "Numos.API.ChunkField`1";
     private const string SolverChunkMetadataName = "Numos.API.AtmosSolverChunk";
     private const string DangerousChunkMetadataName = "Numos.API.Dangerous.AtmosDangerousChunk";
 
-    private static readonly SymbolDisplayFormat FullyQualifiedWithNullability =
-        SymbolDisplayFormat.FullyQualifiedFormat.AddMiscellaneousOptions(
-            SymbolDisplayMiscellaneousOptions.IncludeNullableReferenceTypeModifier);
-
     // Members a generated accessor would be hidden behind or ambiguous with. Instance members always win over
     // extension members, so an accessor with one of these names compiles but can never be called. The view types'
-    // own public members are added from the compilation; these cover object members and the Dangerous() bridge.
-    private static readonly string[] SolverChunkReservedNames =
-    [
-        "Simulation", "Handle", "Position", "Dimensions", "VoxelCount", "IsAwake", "GetCellRef", "Get", "GetSpan",
-        "ToString", "Equals", "GetHashCode", "GetType", "Dangerous",
-    ];
-
+    // own public members are added from the compilation; these cover the object members they inherit.
     private static readonly string[] ObjectMemberNames = ["ToString", "Equals", "GetHashCode", "GetType"];
 
     /// <inheritdoc />
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
-        IncrementalValuesProvider<ChunkDataPropertyModel> properties = context.SyntaxProvider
+        IncrementalValuesProvider<ChunkDataDeclaration> properties = context.SyntaxProvider
             .ForAttributeWithMetadataName(
                 AttributeMetadataName,
                 static (node, _) => node is PropertyDeclarationSyntax,
@@ -70,19 +62,20 @@ public sealed class ChunkDataGenerator : IIncrementalGenerator
             .Select(static (compilation, _) => CreateViewInfo(compilation))
             .WithTrackingName(ViewInfoStepName);
 
-        IncrementalValueProvider<((ImmutableArray<ChunkDataPropertyModel> Properties, LanguageVersion Language) Left,
-            ChunkViewInfo View)> combined = properties
+        IncrementalValueProvider<GeneratorOutput<ChunkDataTypeModel>> output = properties
             .Collect()
             .Combine(languageVersion)
-            .Combine(viewInfo);
+            .Combine(viewInfo)
+            .Select(static (input, _) => Analyze(input.Left.Left, input.Left.Right, input.Right));
 
-        context.RegisterSourceOutput(combined, static (production, input) =>
-            Execute(production, input.Left.Properties, input.Left.Language, input.View));
+        GeneratorOutput.Register(context, output, TypesStepName, static type =>
+            (type.Members[0].Property.Type.HintName + ".ChunkData.g.cs", ChunkDataEmitter.Emit(type)));
     }
 
     private static ChunkViewInfo CreateViewInfo(Compilation compilation)
     {
-        var solverMembers = new SortedSet<string>(SolverChunkReservedNames, StringComparer.Ordinal);
+        // Dangerous() is the extension bridge to the Dangerous view, so it's taken even when that isn't referenced.
+        var solverMembers = new SortedSet<string>(ObjectMemberNames, StringComparer.Ordinal) { "Dangerous" };
         AddPublicMemberNames(compilation.GetTypeByMetadataName(SolverChunkMetadataName), solverMembers);
 
         INamedTypeSymbol? dangerousChunk = compilation.GetTypeByMetadataName(DangerousChunkMetadataName);
@@ -111,7 +104,7 @@ public sealed class ChunkDataGenerator : IIncrementalGenerator
         }
     }
 
-    private static ChunkDataPropertyModel? CreateModel(GeneratorAttributeSyntaxContext context,
+    private static ChunkDataDeclaration? CreateModel(GeneratorAttributeSyntaxContext context,
         CancellationToken cancellationToken)
     {
         if (context.TargetSymbol is not IPropertySymbol property || context.Attributes.IsDefaultOrEmpty)
@@ -126,8 +119,8 @@ public sealed class ChunkDataGenerator : IIncrementalGenerator
         LocationInfo? attributeLocation =
             LocationInfo.From(attribute.ApplicationSyntaxReference?.GetSyntax(cancellationToken)) ?? location;
 
-        List<INamedTypeSymbol> chain = GetContainingChain(containingType);
-        string displayName = string.Join(".", chain.Select(static type => type.Name)) + "." + property.Name;
+        List<(INamedTypeSymbol Type, bool IsPartial)> chain = PartialSyntax.GetContainingChain(containingType, syntax);
+        string displayName = string.Join(".", chain.Select(static link => link.Type.Name)) + "." + property.Name;
 
         if (!property.IsPartialDefinition || property.PartialImplementationPart is not null ||
             property.SetMethod is not null)
@@ -152,9 +145,9 @@ public sealed class ChunkDataGenerator : IIncrementalGenerator
         }
 
         bool accessible = IsAccessibleFromNamespace(property.DeclaredAccessibility);
-        foreach (INamedTypeSymbol type in chain)
+        foreach ((INamedTypeSymbol type, bool isPartial) in chain)
         {
-            if (!IsPartial(type, cancellationToken))
+            if (!isPartial)
             {
                 diagnostics.Add(DiagnosticInfo.Create(ChunkDataDiagnostics.ContainingTypeNotPartial, location,
                     type.ToDisplayString(), displayName));
@@ -186,7 +179,9 @@ public sealed class ChunkDataGenerator : IIncrementalGenerator
         }
         else
         {
-            key = CreateDefaultKey(containingType.ContainingNamespace, chain, property.Name);
+            key = containingType.ContainingNamespace.IsGlobalNamespace
+                ? displayName
+                : containingType.ContainingNamespace.ToDisplayString() + "." + displayName;
         }
 
         bool rollback = false;
@@ -229,61 +224,25 @@ public sealed class ChunkDataGenerator : IIncrementalGenerator
                 accessorName, displayName));
         }
 
-        string modifiers = string.Join(" ", syntax.Modifiers
-            .Where(static modifier => !modifier.IsKind(SyntaxKind.PartialKeyword))
-            .Select(static modifier => modifier.Text));
-
-        string @namespace = containingType.ContainingNamespace.IsGlobalNamespace
-            ? ""
-            : containingType.ContainingNamespace.ToDisplayString();
-
-        string typeMetadataName = string.Join("+", chain.Select(static type => type.MetadataName));
-        if (@namespace.Length > 0)
-            typeMetadataName = @namespace + "." + typeMetadataName;
-
-        return new ChunkDataPropertyModel(
-            @namespace,
-            typeMetadataName,
+        var model = new ChunkDataPropertyModel(
+            PartialTypeModel.From(containingType),
             containingType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
-            string.Concat(chain.Select(static type => type.Name)) + "ChunkAccessors",
-            chain.Select(static type => new ContainingTypeModel(GetTypeKeyword(type), type.Name)).ToEquatableArray(),
+            string.Concat(chain.Select(static link => link.Type.Name)) + "ChunkAccessors",
+            displayName,
             property.Name,
-            modifiers,
-            property.Type.ToDisplayString(FullyQualifiedWithNullability),
+            PartialSyntax.ModifiersWithoutPartial(syntax.Modifiers),
+            property.Type.ToDisplayString(PartialSyntax.FullyQualifiedWithNullability),
             property.Type.NullableAnnotation == NullableAnnotation.Annotated,
-            elementType?.ToDisplayString(FullyQualifiedWithNullability),
+            elementType?.ToDisplayString(PartialSyntax.FullyQualifiedWithNullability),
             elementType?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
             property.DeclaredAccessibility == Accessibility.Public &&
-            chain.All(static type => type.DeclaredAccessibility == Accessibility.Public),
+            chain.All(static link => link.Type.DeclaredAccessibility == Accessibility.Public),
             key,
             rollback,
             length,
-            accessorName ?? property.Name,
-            location,
-            diagnostics.ToEquatableArray());
-    }
+            accessorName ?? property.Name);
 
-    private static List<INamedTypeSymbol> GetContainingChain(INamedTypeSymbol type)
-    {
-        var chain = new List<INamedTypeSymbol>();
-        for (INamedTypeSymbol? current = type; current is not null; current = current.ContainingType)
-            chain.Add(current);
-        chain.Reverse();
-        return chain;
-    }
-
-    private static bool IsPartial(INamedTypeSymbol type, CancellationToken cancellationToken)
-    {
-        foreach (SyntaxReference reference in type.DeclaringSyntaxReferences)
-        {
-            if (reference.GetSyntax(cancellationToken) is TypeDeclarationSyntax declaration &&
-                declaration.Modifiers.Any(SyntaxKind.PartialKeyword))
-            {
-                return true;
-            }
-        }
-
-        return false;
+        return new ChunkDataDeclaration(model, location, diagnostics.ToEquatableArray());
     }
 
     private static bool IsAccessibleFromNamespace(Accessibility accessibility)
@@ -291,63 +250,43 @@ public sealed class ChunkDataGenerator : IIncrementalGenerator
         return accessibility is Accessibility.Public or Accessibility.Internal or Accessibility.ProtectedOrInternal;
     }
 
-    private static string CreateDefaultKey(INamespaceSymbol @namespace, List<INamedTypeSymbol> chain, string property)
+    private static GeneratorOutput<ChunkDataTypeModel> Analyze(ImmutableArray<ChunkDataDeclaration> declarations,
+        LanguageVersion languageVersion, ChunkViewInfo view)
     {
-        string types = string.Join(".", chain.Select(static type => type.Name));
-        return @namespace.IsGlobalNamespace
-            ? types + "." + property
-            : @namespace.ToDisplayString() + "." + types + "." + property;
-    }
+        if (declarations.IsDefaultOrEmpty)
+            return GeneratorOutput<ChunkDataTypeModel>.Empty;
 
-    private static string GetTypeKeyword(INamedTypeSymbol type)
-    {
-        return type switch
-        {
-            { IsRecord: true, TypeKind: TypeKind.Struct } => "record struct",
-            { IsRecord: true } => "record",
-            { TypeKind: TypeKind.Struct } => "struct",
-            { TypeKind: TypeKind.Interface } => "interface",
-            _ => "class",
-        };
-    }
-
-    private static void Execute(SourceProductionContext production,
-        ImmutableArray<ChunkDataPropertyModel> properties, LanguageVersion languageVersion, ChunkViewInfo view)
-    {
-        if (properties.IsDefaultOrEmpty)
-            return;
-
-        ChunkDataPropertyModel[] ordered = properties
-            .OrderBy(static model => model.Location?.FilePath ?? "", StringComparer.Ordinal)
-            .ThenBy(static model => model.Location?.TextSpan.Start ?? 0)
-            .ThenBy(static model => model.TypeMetadataName, StringComparer.Ordinal)
-            .ThenBy(static model => model.PropertyName, StringComparer.Ordinal)
+        ChunkDataDeclaration[] ordered = declarations
+            .OrderBySource(static declaration => declaration.Location)
+            .ThenBy(static declaration => declaration.Property.Type.MetadataName, StringComparer.Ordinal)
+            .ThenBy(static declaration => declaration.Property.PropertyName, StringComparer.Ordinal)
             .ToArray();
 
-        var invalid = new HashSet<ChunkDataPropertyModel>(ReferenceEqualityComparer.Instance);
-        foreach (ChunkDataPropertyModel model in ordered)
+        var diagnostics = new List<DiagnosticInfo>();
+        var invalid = new HashSet<ChunkDataDeclaration>(ReferenceEqualityComparer.Instance);
+        foreach (ChunkDataDeclaration declaration in ordered)
         {
-            foreach (DiagnosticInfo diagnostic in model.Diagnostics)
-                production.ReportDiagnostic(diagnostic.ToDiagnostic(ChunkDataDiagnostics.Get(diagnostic.Id)));
-
-            if (model.HasErrors)
-                invalid.Add(model);
+            diagnostics.AddRange(declaration.Diagnostics);
+            if (declaration.HasErrors)
+                invalid.Add(declaration);
         }
 
-        CheckKeys(production, ordered, invalid);
+        CheckKeys(diagnostics, ordered, invalid);
 
         bool useExtensionBlocks = languageVersion >= LanguageVersion.CSharp14;
         var reservedOnSolver = new HashSet<string>(view.SolverChunkMembers, StringComparer.Ordinal);
         var reservedOnDangerous = new HashSet<string>(view.DangerousChunkMembers, StringComparer.Ordinal);
         var namesByClass = new HashSet<(string Namespace, string Class, string Member)>();
         var ownerByNamespaceName = new Dictionary<(string Namespace, string Member), ChunkDataPropertyModel>();
-        var accessors = new Dictionary<ChunkDataPropertyModel, AccessorTargets>(ReferenceEqualityComparer.Instance);
+        var accessors = new Dictionary<ChunkDataDeclaration, AccessorTargets>(ReferenceEqualityComparer.Instance);
 
-        foreach (ChunkDataPropertyModel model in ordered)
+        foreach (ChunkDataDeclaration declaration in ordered)
         {
-            if (invalid.Contains(model))
+            if (invalid.Contains(declaration))
                 continue;
 
+            ChunkDataPropertyModel model = declaration.Property;
+            string @namespace = model.Type.Namespace;
             string memberName = useExtensionBlocks ? model.AccessorName : "Get" + model.AccessorName;
             bool onSolver = !reservedOnSolver.Contains(memberName);
             bool onDangerous = view.HasDangerous && !reservedOnDangerous.Contains(memberName);
@@ -355,96 +294,96 @@ public sealed class ChunkDataGenerator : IIncrementalGenerator
             if (!onSolver || (view.HasDangerous && !onDangerous))
             {
                 string viewType = !onSolver ? "Numos.API.AtmosSolverChunk" : "Numos.API.Dangerous.AtmosDangerousChunk";
-                ReportCollision(production, model, memberName, $"the {viewType} member '{memberName}'");
+                diagnostics.Add(Collision(declaration, memberName, $"the {viewType} member '{memberName}'"));
             }
 
-            if (!namesByClass.Add((model.Namespace, model.AccessorClassName, memberName)))
+            if (!namesByClass.Add((@namespace, model.AccessorClassName, memberName)))
             {
-                ReportCollision(production, model, memberName,
-                    $"another accessor in '{model.AccessorClassName}' with the same name");
+                diagnostics.Add(Collision(declaration, memberName,
+                    $"another accessor in '{model.AccessorClassName}' with the same name"));
                 continue;
             }
 
-            if (ownerByNamespaceName.TryGetValue((model.Namespace, memberName), out ChunkDataPropertyModel? owner))
+            if (ownerByNamespaceName.TryGetValue((@namespace, memberName), out ChunkDataPropertyModel? owner))
             {
-                ReportCollision(production, model, memberName,
-                    $"the accessor generated for '{owner.DisplayName}' in the same namespace");
+                diagnostics.Add(Collision(declaration, memberName,
+                    $"the accessor generated for '{owner.DisplayName}' in the same namespace"));
             }
             else
             {
-                ownerByNamespaceName.Add((model.Namespace, memberName), model);
+                ownerByNamespaceName.Add((@namespace, memberName), model);
             }
 
-            accessors.Add(model, new AccessorTargets(memberName, onSolver, onDangerous));
+            accessors.Add(declaration, new AccessorTargets(memberName, onSolver, onDangerous));
         }
 
-        foreach (IGrouping<string, ChunkDataPropertyModel> type in ordered
-                     .Where(model => !invalid.Contains(model))
-                     .GroupBy(static model => model.TypeMetadataName, StringComparer.Ordinal)
+        var types = new List<ChunkDataTypeModel>();
+        foreach (IGrouping<string, ChunkDataDeclaration> type in ordered
+                     .Where(declaration => !invalid.Contains(declaration))
+                     .GroupBy(static declaration => declaration.Property.Type.MetadataName, StringComparer.Ordinal)
                      .OrderBy(static group => group.Key, StringComparer.Ordinal))
         {
-            ChunkDataPropertyModel[] members = type.ToArray();
-            if (!useExtensionBlocks && members.Any(model => accessors.ContainsKey(model)))
+            ChunkDataMemberModel[] members = type
+                .Select(declaration => new ChunkDataMemberModel(declaration.Property,
+                    accessors.TryGetValue(declaration, out AccessorTargets targets) ? targets : null))
+                .ToArray();
+
+            if (!useExtensionBlocks && members.Any(static member => member.Accessor is not null))
             {
-                ChunkDataPropertyModel first = members[0];
-                production.ReportDiagnostic(Diagnostic.Create(ChunkDataDiagnostics.ExtensionMethodFallback,
-                    first.Location?.ToLocation() ?? Location.None, first.TypeDisplay.Replace("global::", "")));
+                ChunkDataDeclaration first = type.First();
+                diagnostics.Add(DiagnosticInfo.Create(ChunkDataDiagnostics.ExtensionMethodFallback, first.Location,
+                    first.Property.TypeDisplay.Replace("global::", "")));
             }
 
-            string source = ChunkDataEmitter.Emit(members, accessors, useExtensionBlocks, view.HasDangerous);
-            production.AddSource(type.Key + ".ChunkData.g.cs", source);
+            types.Add(new ChunkDataTypeModel(members.ToEquatableArray(), useExtensionBlocks, view.HasDangerous));
         }
+
+        return new GeneratorOutput<ChunkDataTypeModel>(diagnostics.ToEquatableArray(), types.ToEquatableArray());
     }
 
-    private static void CheckKeys(SourceProductionContext production, ChunkDataPropertyModel[] ordered,
-        HashSet<ChunkDataPropertyModel> invalid)
+    private static void CheckKeys(List<DiagnosticInfo> diagnostics, ChunkDataDeclaration[] ordered,
+        HashSet<ChunkDataDeclaration> invalid)
     {
-        foreach (IGrouping<string, ChunkDataPropertyModel> group in ordered
-                     .Where(static model => model.Key is not null && model.ElementTypeIdentity is not null)
-                     .GroupBy(static model => model.Key!, StringComparer.Ordinal))
+        foreach (IGrouping<string, ChunkDataDeclaration> group in ordered
+                     .Where(static declaration =>
+                         declaration.Property.Key is not null && declaration.Property.ElementTypeIdentity is not null)
+                     .GroupBy(static declaration => declaration.Property.Key!, StringComparer.Ordinal))
         {
-            ChunkDataPropertyModel[] declarations = group.ToArray();
+            ChunkDataDeclaration[] declarations = group.ToArray();
             if (declarations.Length < 2)
                 continue;
 
-            ChunkDataPropertyModel first = declarations[0];
-            bool identical = declarations.All(model =>
-                model.ElementTypeIdentity == first.ElementTypeIdentity && model.Rollback == first.Rollback &&
-                model.Length == first.Length);
+            ChunkDataPropertyModel first = declarations[0].Property;
+            bool identical = declarations.All(declaration =>
+                declaration.Property.ElementTypeIdentity == first.ElementTypeIdentity &&
+                declaration.Property.Rollback == first.Rollback && declaration.Property.Length == first.Length);
 
             if (identical)
             {
                 for (int i = 1; i < declarations.Length; i++)
                 {
-                    production.ReportDiagnostic(Diagnostic.Create(ChunkDataDiagnostics.DuplicateKey,
-                        declarations[i].Location?.ToLocation() ?? Location.None,
-                        group.Key, declarations[i].DisplayName, first.DisplayName));
+                    diagnostics.Add(DiagnosticInfo.Create(ChunkDataDiagnostics.DuplicateKey, declarations[i].Location,
+                        group.Key, declarations[i].Property.DisplayName, first.DisplayName));
                 }
 
                 continue;
             }
 
-            foreach (ChunkDataPropertyModel model in declarations)
+            foreach (ChunkDataDeclaration declaration in declarations)
             {
                 string others = string.Join(", ", declarations
-                    .Where(other => !ReferenceEquals(other, model))
-                    .Select(static other => "'" + other.DisplayName + "'"));
-                production.ReportDiagnostic(Diagnostic.Create(ChunkDataDiagnostics.ConflictingKey,
-                    model.Location?.ToLocation() ?? Location.None, group.Key, model.DisplayName, others));
-                invalid.Add(model);
+                    .Where(other => !ReferenceEquals(other, declaration))
+                    .Select(static other => "'" + other.Property.DisplayName + "'"));
+                diagnostics.Add(DiagnosticInfo.Create(ChunkDataDiagnostics.ConflictingKey, declaration.Location,
+                    group.Key, declaration.Property.DisplayName, others));
+                invalid.Add(declaration);
             }
         }
     }
 
-    private static void ReportCollision(SourceProductionContext production, ChunkDataPropertyModel model,
-        string memberName, string collidesWith)
+    private static DiagnosticInfo Collision(ChunkDataDeclaration declaration, string memberName, string collidesWith)
     {
-        production.ReportDiagnostic(Diagnostic.Create(ChunkDataDiagnostics.AccessorNameCollision,
-            model.Location?.ToLocation() ?? Location.None, memberName, model.DisplayName, collidesWith));
+        return DiagnosticInfo.Create(ChunkDataDiagnostics.AccessorNameCollision, declaration.Location, memberName,
+            declaration.Property.DisplayName, collidesWith);
     }
 }
-
-/// <summary>
-///     Which chunk views get an accessor for one property, and under what member name.
-/// </summary>
-internal readonly record struct AccessorTargets(string MemberName, bool OnSolverChunk, bool OnDangerousChunk);

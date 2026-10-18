@@ -132,16 +132,4 @@ internal static class ChunkDataDiagnostics
         Category,
         DiagnosticSeverity.Error,
         true);
-
-    private static readonly Dictionary<string, DiagnosticDescriptor> ById = new[]
-    {
-        NotPartialDefinition, NotStatic, NotChunkField, ContainingTypeNotPartial, ContainingTypeGeneric, BlankKey,
-        RollbackWithoutKey, RollbackWithManagedType, NegativeLength, Inaccessible, ConflictingKey, DuplicateKey,
-        ExtensionMethodFallback, AccessorNameCollision, InvalidAccessorName,
-    }.ToDictionary(static descriptor => descriptor.Id, StringComparer.Ordinal);
-
-    public static DiagnosticDescriptor Get(string id)
-    {
-        return ById[id];
-    }
 }

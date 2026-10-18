@@ -183,6 +183,40 @@ public sealed class SolverDependencyDiagnosticTests
     }
 
     [Test]
+    public void TypeSplitAcrossFiles_WarnsNumosDep007OnceAndGeneratesBoth()
+    {
+        const string first = """
+                             namespace MyMod;
+
+                             public sealed partial class NotASolver
+                             {
+                                 public int Plain { get; set; }
+
+                                 [Numos.API.SolverDependency]
+                                 private partial System.IServiceProvider First { get; }
+                             }
+                             """;
+        const string second = """
+                              namespace MyMod;
+
+                              public sealed partial class NotASolver
+                              {
+                                  [Numos.API.SolverDependency]
+                                  private partial System.IServiceProvider Second { get; }
+                              }
+                              """;
+
+        GeneratorRunResult result = GeneratorHarness.RunDependencies(out Compilation output, out var diagnostics,
+            second, first);
+        Assert.That(GeneratorHarness.Ids(diagnostics), Is.EqualTo(new[] { "NUMOSDEP007" }));
+        Assert.That(diagnostics[0].Location.GetLineSpan().Path, Is.EqualTo("Source0.cs"));
+        Assert.That(GeneratorHarness.Errors(output), Is.Empty);
+
+        string generated = GeneratorHarness.GeneratedSource(result, "MyMod.NotASolver.SolverDependencies.g.cs");
+        Assert.That(generated, Does.Contain("__numosDependency_First").And.Contain("__numosDependency_Second"));
+    }
+
+    [Test]
     public void AbstractTypeWithoutWorldSolver_DoesNotWarn()
     {
         const string source = """

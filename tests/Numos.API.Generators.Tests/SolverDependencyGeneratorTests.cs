@@ -422,6 +422,36 @@ public sealed class SolverDependencyGeneratorTests
             Is.All.EqualTo(IncrementalStepRunReason.Cached));
     }
 
+    [Test]
+    public void ShiftedDeclarations_LeaveGeneratedFileCached()
+    {
+        CSharpParseOptions parseOptions = GeneratorHarness.ParseOptions();
+        CSharpCompilation compilation = GeneratorHarness.CreateCompilation(true, parseOptions, FireSource);
+        GeneratorDriver driver = GeneratorHarness.CreateDriver(parseOptions, trackSteps: true,
+            generator: new SolverDependencyGenerator());
+        driver = driver.RunGenerators(compilation);
+
+        SyntaxTree tree = compilation.SyntaxTrees.Single();
+        CSharpCompilation edited = compilation.ReplaceSyntaxTree(tree,
+            CSharpSyntaxTree.ParseText("// moved\n\n" + FireSource, parseOptions, path: tree.FilePath));
+        driver = driver.RunGenerators(edited);
+
+        GeneratorRunResult result = driver.GetRunResult().Results.Single();
+        Assert.That(result.TrackedSteps[SolverDependencyGenerator.PropertiesStepName]
+                .SelectMany(static run => run.Outputs)
+                .Select(static output => output.Reason),
+            Has.Some.EqualTo(IncrementalStepRunReason.Modified));
+        Assert.That(result.TrackedSteps[SolverDependencyGenerator.TypesStepName]
+                .SelectMany(static run => run.Outputs)
+                .Select(static output => output.Reason),
+            Is.Not.Empty.And.All.Matches<IncrementalStepRunReason>(static reason =>
+                reason is IncrementalStepRunReason.Cached or IncrementalStepRunReason.Unchanged));
+        Assert.That(result.TrackedOutputSteps.SelectMany(static step => step.Value)
+                .SelectMany(static run => run.Outputs)
+                .Select(static output => output.Reason),
+            Is.All.EqualTo(IncrementalStepRunReason.Cached));
+    }
+
     private static MetadataReference CompileLibrary(string source, bool runGenerator)
     {
         CSharpParseOptions parseOptions = GeneratorHarness.ParseOptions();

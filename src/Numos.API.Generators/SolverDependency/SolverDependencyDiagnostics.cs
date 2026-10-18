@@ -85,15 +85,4 @@ internal static class SolverDependencyDiagnostics
         Category,
         DiagnosticSeverity.Error,
         true);
-
-    private static readonly Dictionary<string, DiagnosticDescriptor> ById = new[]
-    {
-        TypeNotPartial, NotClass, NotPartialDefinition, Static, NotReferenceType, OptionalMismatch, NotWorldSolver,
-        BaseNotOverridable, AlreadyImplemented,
-    }.ToDictionary(static descriptor => descriptor.Id, StringComparer.Ordinal);
-
-    public static DiagnosticDescriptor Get(string id)
-    {
-        return ById[id];
-    }
 }
