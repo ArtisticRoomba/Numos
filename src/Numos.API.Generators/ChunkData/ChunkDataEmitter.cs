@@ -197,36 +197,6 @@ internal static class ChunkDataEmitter
 
     private static string Escape(string identifier)
     {
-        return SyntaxFacts.GetKeywordKind(identifier) == SyntaxKind.None ? identifier : "@" + identifier;
-    }
-
-    private sealed class CodeWriter
-    {
-        private readonly System.Text.StringBuilder _builder = new();
-        private int _indent;
-
-        public void Line(string text = "")
-        {
-            if (text.Length > 0)
-                _builder.Append(' ', _indent * 4).Append(text);
-            _builder.Append('\n');
-        }
-
-        public void Open()
-        {
-            Line("{");
-            _indent++;
-        }
-
-        public void Close()
-        {
-            _indent--;
-            Line("}");
-        }
-
-        public override string ToString()
-        {
-            return _builder.ToString();
-        }
+        return CodeWriter.Escape(identifier);
     }
 }

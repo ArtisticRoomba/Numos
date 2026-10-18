@@ -1116,6 +1116,50 @@ The generator ships inside the `Numos.API` package under `analyzers/dotnet/cs`, 
 `ProjectReference` don't get it that way; they reference `src/Numos.API.Generators` with `OutputItemType="Analyzer"`
 directly, as `tests/Numos.API.Tests` does.
 
+#### Declaring solver dependencies with `[SolverDependency]`
+
+A class solver (`IAtmosWorldSolver`) can declare the world services and other solvers it needs as instance partial
+properties. The same generator fills them in:
+
+```csharp
+public sealed partial class FireSolver : IAtmosWorldSolver
+{
+    [SolverDependency]
+    private partial IFireEvents Events { get; }
+
+    [SolverDependency(Optional = true)]
+    private partial ExposureSolver? Exposure { get; }
+
+    public void Solve(AtmosWorldSolverContext context) => Events.Publish(context.TickCount);
+}
+```
+
+For each class the generator emits a private `__numosDependency_{Name}` field per property, a getter that returns it
+with no null check, and an `InjectSolverDependencies(AtmosSolverDependencyResolver)` method that assigns them through
+`resolver.Resolve<T>("Name")` or `resolver.ResolveOptional<T>()`. A class with no injecting base implements
+`IAtmosSolverDependencies` explicitly and introduces the method as `protected virtual` (`private` when sealed). A class
+deriving from one, whether the base is in the same project or a referenced assembly, emits `protected override` and
+calls `base.InjectSolverDependencies` first, so base and derived dependencies are both assigned. Generic and nested
+classes work as long as every containing type is `partial`.
+
+A lookup for `T` takes the service registered under exactly `T` first, then any other registered class solver that is
+a `T`. One instance registered under two names counts once; two different instances throw. Numos injects stale
+solvers at the start of `Tick`, before any state changes, after any `Register*`, `Unregister`, `ResetToDefaults`, or
+service change. A missing or ambiguous dependency throws `InvalidOperationException` with the world untouched, and the
+next tick retries. `world.Solvers.ResolveDependencies()` runs the same pass on demand.
+
+| ID | Severity | Raised when |
+| --- | --- | --- |
+| `NUMOSDEP001` | Error | The class, or a type it's nested in, isn't `partial`. |
+| `NUMOSDEP002` | Error | The property is declared in a struct, record struct, or interface. |
+| `NUMOSDEP003` | Error | The property isn't a bodiless `partial` declaration with only a `get` accessor (no `set`/`init`, not an indexer or `ref` return). |
+| `NUMOSDEP004` | Error | The property is `static`. |
+| `NUMOSDEP005` | Error | The property type isn't a reference type. |
+| `NUMOSDEP006` | Warning | `Optional` and the `?` annotation disagree. Not reported when nullable annotations are disabled. |
+| `NUMOSDEP007` | Warning | A non-abstract class doesn't implement `IAtmosWorldSolver`, so nothing will inject it. |
+| `NUMOSDEP008` | Error | A base class implements `IAtmosSolverDependencies` with no overridable `InjectSolverDependencies`, so generated injection would hide the base's. |
+| `NUMOSDEP009` | Error | The class already declares `InjectSolverDependencies` or implements `IAtmosSolverDependencies.InjectDependencies` itself. |
+
 ### 12.4 Live storage through Numos.API.Dangerous
 
 Solvers with a measured need to avoid copying physical fields can opt into live storage from the same callback (§2.3

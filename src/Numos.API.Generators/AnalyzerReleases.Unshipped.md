@@ -20,3 +20,12 @@ NUMOSCHUNK012 | Numos.API.ChunkData | Warning | Chunk data key declared more tha
 NUMOSCHUNK013 | Numos.API.ChunkData | Info | Chunk data accessors fall back to extension methods
 NUMOSCHUNK014 | Numos.API.ChunkData | Warning | Chunk data accessor name collides with another member
 NUMOSCHUNK015 | Numos.API.ChunkData | Error | Chunk data accessor name is not a valid identifier
+NUMOSDEP001 | Numos.API.SolverDependency | Error | Type containing solver dependencies must be partial
+NUMOSDEP002 | Numos.API.SolverDependency | Error | Solver dependencies must be declared in a class
+NUMOSDEP003 | Numos.API.SolverDependency | Error | Solver dependency must be an unimplemented partial property
+NUMOSDEP004 | Numos.API.SolverDependency | Error | Solver dependency must not be static
+NUMOSDEP005 | Numos.API.SolverDependency | Error | Solver dependency must have a reference type
+NUMOSDEP006 | Numos.API.SolverDependency | Warning | Solver dependency nullability disagrees with Optional
+NUMOSDEP007 | Numos.API.SolverDependency | Warning | Type with solver dependencies is not a world solver
+NUMOSDEP008 | Numos.API.SolverDependency | Error | Base class injects dependencies without an overridable hook
+NUMOSDEP009 | Numos.API.SolverDependency | Error | Type implements dependency injection by hand

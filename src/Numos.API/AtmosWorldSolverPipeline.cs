@@ -20,6 +20,11 @@ public sealed class AtmosWorldSolverPipeline
     private readonly AtmosWorld _world;
     private AtmosSolverCheckpoint[] _checkpointSteps = [];
 
+    // Advances whenever the set of registered solvers changes, which can change what a dependency resolves to.
+    // Enabling and disabling don't count: a disabled solver is skipped by injection, so it's already stale when it
+    // comes back if anything changed meanwhile.
+    private int _dependencyEpoch;
+
     internal AtmosWorldSolverPipeline(AtmosWorld world)
     {
         _world = world;
@@ -333,6 +338,7 @@ public sealed class AtmosWorldSolverPipeline
                 return false;
 
             _steps.RemoveAt(index);
+            _dependencyEpoch++;
             PublishCheckpointSteps();
             return true;
         }
@@ -387,7 +393,74 @@ public sealed class AtmosWorldSolverPipeline
             _world.EnsureCanChangeWorldSolverDefinition();
             _steps.Clear();
             AddDefaults();
+            _dependencyEpoch++;
             PublishCheckpointSteps();
+        }
+    }
+
+    /// <summary>
+    ///     Injects dependencies into every enabled class solver now, without waiting for the next tick.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         Ticks inject lazily, so a missing dependency normally surfaces as an exception from
+    ///         <see cref="AtmosWorld.Tick" />. Call this after setting up services and solvers to get the same error up
+    ///         front. Every enabled <see cref="IAtmosSolverDependencies" /> solver is injected in pipeline order, even if
+    ///         it was already up to date; disabled solvers are injected when they are next enabled and ticked.
+    ///     </para>
+    ///     <para>
+    ///         The first failure stops the pass and propagates. Solvers before it keep their new references, and the
+    ///         failed one and everything after it are retried on the next tick.
+    ///     </para>
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">
+    ///     A dependency is missing or ambiguous, or this is called from a solver during a tick.
+    /// </exception>
+    /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
+    /// <example>
+    ///     <code>
+    ///     world.Services.Register&lt;IFireEvents&gt;(bus);
+    ///     world.Solvers.Register("my-mod/fire", new FireSolver());
+    ///     world.Solvers.ResolveDependencies(); // throws here rather than on the first tick
+    ///     </code>
+    /// </example>
+    [PublicAPI]
+    public void ResolveDependencies()
+    {
+        _world.ResolveSolverDependencies();
+    }
+
+    /// <summary>
+    ///     Injects dependencies into the class solvers in <paramref name="steps" />, in order.
+    /// </summary>
+    /// <param name="steps">The enabled registrations about to run.</param>
+    /// <param name="force">Whether to inject solvers that are already up to date.</param>
+    /// <remarks>
+    ///     The caller holds <see cref="AtmosWorld.Gate" /> and has marked the world as ticking, so services and the
+    ///     pipeline can't change underneath the pass. A registration is stamped only after its injection returns, so
+    ///     a failure leaves it stale for the next attempt.
+    /// </remarks>
+    internal void InjectDependencies(WorldSolverRegistration[] steps, bool force)
+    {
+        int epoch = _dependencyEpoch;
+        int servicesVersion = _world.Services.Version;
+        (string Name, IAtmosWorldSolver Solver)[]? candidates = null;
+        foreach (var step in steps)
+        {
+            if (step.CustomSolver is not IAtmosSolverDependencies dependent)
+                continue;
+
+            if (!force && step.IsInjected(epoch, servicesVersion))
+                continue;
+
+            candidates ??= _steps
+                .Where(static candidate => candidate.CustomSolver is not null and not DelegateWorldSolver)
+                .Select(static candidate => (candidate.Name, candidate.CustomSolver!))
+                .ToArray();
+
+            dependent.InjectDependencies(
+                new AtmosSolverDependencyResolver(_world, step.Name, step.CustomSolver, candidates));
+            step.MarkInjected(epoch, servicesVersion);
         }
     }
 
@@ -462,6 +535,7 @@ public sealed class AtmosWorldSolverPipeline
             var registration = WorldSolverRegistration.CreateCustom(name, solver, selection);
             registration.InstallTopology(registration.BuildTopology(_world, _world.GetActiveLinksCore()));
             _steps.Insert(insertionIndex < 0 ? _steps.Count : insertionIndex, registration);
+            _dependencyEpoch++;
             PublishCheckpointSteps();
         }
     }
@@ -558,6 +632,8 @@ internal sealed class WorldSolverRegistration
     private readonly Action<AtmosWorldExecutionContext>? _builtInSolver;
     private readonly IAtmosWorldSolver? _customSolver;
     private AtmosWorldNeighborTopology _topology = AtmosWorldNeighborTopology.Empty;
+    private int _injectedPipelineEpoch = -1;
+    private int _injectedServicesVersion = -1;
 
     private WorldSolverRegistration(
         string name,
@@ -577,6 +653,11 @@ internal sealed class WorldSolverRegistration
     internal AtmosWorldSolverKind Kind { get; }
     internal AtmosNeighborSelection? Selection { get; }
     internal bool IsEnabled { get; set; } = true;
+
+    /// <summary>
+    ///     Gets the class solver instance, or the delegate adapter, for a custom stage.
+    /// </summary>
+    internal IAtmosWorldSolver? CustomSolver => _customSolver;
 
     internal static WorldSolverRegistration CreateBuiltIn(
         string name,
@@ -603,6 +684,17 @@ internal sealed class WorldSolverRegistration
         }
 
         _builtInSolver!(context);
+    }
+
+    internal bool IsInjected(int pipelineEpoch, int servicesVersion)
+    {
+        return _injectedPipelineEpoch == pipelineEpoch && _injectedServicesVersion == servicesVersion;
+    }
+
+    internal void MarkInjected(int pipelineEpoch, int servicesVersion)
+    {
+        _injectedPipelineEpoch = pipelineEpoch;
+        _injectedServicesVersion = servicesVersion;
     }
 
     internal void NotifyRestored()

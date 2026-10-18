@@ -23,12 +23,19 @@ internal static class GeneratorHarness
     public static CSharpCompilation CreateCompilation(bool withDangerous, CSharpParseOptions parseOptions,
         params string[] sources)
     {
+        return CreateCompilation(withDangerous, parseOptions, [], sources);
+    }
+
+    public static CSharpCompilation CreateCompilation(bool withDangerous, CSharpParseOptions parseOptions,
+        IEnumerable<MetadataReference> extraReferences, params string[] sources)
+    {
         IEnumerable<MetadataReference> references = FrameworkReferences
             .Concat(NumosReferences(withDangerous))
-            .Select(static path => MetadataReference.CreateFromFile(path));
+            .Select(static path => (MetadataReference)MetadataReference.CreateFromFile(path))
+            .Concat(extraReferences);
 
         return CSharpCompilation.Create(
-            "ChunkDataGeneratorTest_" + Guid.NewGuid().ToString("N"),
+            "GeneratorTest_" + Guid.NewGuid().ToString("N"),
             sources.Select((source, index) =>
                 CSharpSyntaxTree.ParseText(source, parseOptions, path: $"Source{index}.cs")),
             references,
@@ -46,10 +53,28 @@ internal static class GeneratorHarness
         return driver.GetRunResult().Results.Single();
     }
 
-    public static GeneratorDriver CreateDriver(CSharpParseOptions parseOptions, bool trackSteps = false)
+    public static GeneratorRunResult RunDependencies(out Compilation output,
+        out ImmutableArray<Diagnostic> diagnostics, params string[] sources)
+    {
+        return RunDependencies(out output, out diagnostics, [], sources);
+    }
+
+    public static GeneratorRunResult RunDependencies(out Compilation output,
+        out ImmutableArray<Diagnostic> diagnostics, IEnumerable<MetadataReference> extraReferences,
+        params string[] sources)
+    {
+        CSharpParseOptions parseOptions = ParseOptions();
+        CSharpCompilation compilation = CreateCompilation(true, parseOptions, extraReferences, sources);
+        GeneratorDriver driver = CreateDriver(parseOptions, generator: new SolverDependency.SolverDependencyGenerator());
+        driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out output, out diagnostics);
+        return driver.GetRunResult().Results.Single();
+    }
+
+    public static GeneratorDriver CreateDriver(CSharpParseOptions parseOptions, bool trackSteps = false,
+        IIncrementalGenerator? generator = null)
     {
         return CSharpGeneratorDriver.Create(
-            [new ChunkData.ChunkDataGenerator().AsSourceGenerator()],
+            [(generator ?? new ChunkData.ChunkDataGenerator()).AsSourceGenerator()],
             parseOptions: parseOptions,
             driverOptions: new GeneratorDriverOptions(IncrementalGeneratorOutputKind.None, trackSteps));
     }

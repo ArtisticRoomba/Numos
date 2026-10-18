@@ -867,7 +867,10 @@ public sealed partial class AtmosWorld : IDisposable
     ///     backlog, matching standalone simulation behavior.
     /// </remarks>
     /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
-    /// <exception cref="InvalidOperationException">Called recursively from a solver callback.</exception>
+    /// <exception cref="InvalidOperationException">
+    ///     Called recursively from a solver callback, or a class solver's dependency is missing or ambiguous. A
+    ///     dependency failure leaves the world and its accumulated time unchanged.
+    /// </exception>
     [PublicAPI]
     public void Update(float elapsedSeconds)
     {
@@ -875,13 +878,18 @@ public sealed partial class AtmosWorld : IDisposable
         {
             ThrowIfDisposed();
             ThrowIfTickExecuting("update the world recursively");
+            float maximum = AtmosSolverConstants.FixedTimeStep * AtmosSolverConstants.MaximumStepsPerUpdate;
+            float accumulator = Math.Min(_accumulator + elapsedSeconds, maximum);
+
+            // TickCore injects too, but by then the accumulator has been spent. Injecting first keeps a missing
+            // dependency from consuming time it never simulated.
+            if (accumulator >= AtmosSolverConstants.FixedTimeStep)
+                InjectSolverDependencies(false);
+
             foreach (var simulation in _orderedSimulations)
                 simulation.Kernel.LastBoundaryTicks = 0;
 
-            _accumulator += elapsedSeconds;
-            float maximum = AtmosSolverConstants.FixedTimeStep * AtmosSolverConstants.MaximumStepsPerUpdate;
-            if (_accumulator > maximum)
-                _accumulator = maximum;
+            _accumulator = accumulator;
 
             int steps = 0;
             while (_accumulator >= AtmosSolverConstants.FixedTimeStep &&
@@ -899,7 +907,10 @@ public sealed partial class AtmosWorld : IDisposable
     /// </summary>
     /// <remarks>Pending topology and configuration changes are applied before solver execution begins.</remarks>
     /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
-    /// <exception cref="InvalidOperationException">Called recursively from a solver callback.</exception>
+    /// <exception cref="InvalidOperationException">
+    ///     Called recursively from a solver callback, or a class solver's dependency is missing or ambiguous. A
+    ///     dependency failure is raised before the tick changes any state.
+    /// </exception>
     [PublicAPI]
     public void Tick()
     {
@@ -1097,6 +1108,10 @@ public sealed partial class AtmosWorld : IDisposable
 
         try
         {
+            // Before anything changes: a missing dependency abandons the tick with the world as it was, and the next
+            // tick retries because the failed registration is still stale.
+            Solvers.InjectDependencies(worldSteps, false);
+
             if (_pendingConfig != null)
             {
                 var pending = _pendingConfig;
@@ -1145,6 +1160,37 @@ public sealed partial class AtmosWorld : IDisposable
             if (simulations.Length > 0)
                 ArrayPool<AtmosWorldTickExecution>.Shared.Return(executions, true);
 
+            _isTickExecuting = false;
+        }
+    }
+
+    /// <summary>
+    ///     Backs <see cref="AtmosWorldSolverPipeline.ResolveDependencies" />.
+    /// </summary>
+    internal void ResolveSolverDependencies()
+    {
+        lock (Gate)
+        {
+            ThrowIfDisposed();
+            ThrowIfTickExecuting("resolve solver dependencies");
+            InjectSolverDependencies(true);
+        }
+    }
+
+    /// <summary>
+    ///     Runs an injection pass outside <see cref="TickCore" />, marked as ticking so injection code can't change
+    ///     services, simulations, or time while the pass is iterating.
+    /// </summary>
+    /// <remarks>The caller holds <see cref="Gate" /> and has checked that no tick is running.</remarks>
+    private void InjectSolverDependencies(bool force)
+    {
+        _isTickExecuting = true;
+        try
+        {
+            Solvers.InjectDependencies(Solvers.CaptureEnabled(), force);
+        }
+        finally
+        {
             _isTickExecuting = false;
         }
     }

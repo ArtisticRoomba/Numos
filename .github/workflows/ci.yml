@@ -121,6 +121,11 @@ jobs:
                   chunk.Exposure[0] += 1f;
               }
           });
+
+          // So does the SolverDependency generator.
+          simulation.World.Services.Register<IConsumerClock>(new ConsumerClock());
+          simulation.World.Solvers.Register("consumer/clocked", new ClockedSolver());
+          simulation.World.Solvers.ResolveDependencies();
           simulation.Tick();
 
           static partial class FireChunkData
@@ -130,6 +135,27 @@ jobs:
 
               [ChunkData("consumer/fire/burn-count", Rollback = true, Length = 1)]
               public static partial ChunkField<int> BurnCount { get; }
+          }
+
+          interface IConsumerClock
+          {
+              long Now { get; }
+          }
+
+          sealed class ConsumerClock : IConsumerClock
+          {
+              public long Now => 0;
+          }
+
+          sealed partial class ClockedSolver : IAtmosWorldSolver
+          {
+              [SolverDependency]
+              private partial IConsumerClock Clock { get; }
+
+              public void Solve(AtmosWorldSolverContext context)
+              {
+                  _ = Clock.Now + context.TickCount;
+              }
           }
           EOF
           dotnet restore "$consumer" \

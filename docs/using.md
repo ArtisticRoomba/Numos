@@ -367,6 +367,26 @@ context.World.Services.Get<IFireEvents>().Ignited(cell);
 Lookups never lock, so they are fine from `Parallel.For` workers. Registering and unregistering are rejected during a
 tick and while recording or replaying. Services survive restores, and the world never disposes them.
 
+A class solver can also have its services and the other solvers it talks to handed to it. Make the class `partial` and
+declare each dependency as a `[SolverDependency]` partial property; the `Numos.API` generator implements
+`IAtmosSolverDependencies` and assigns them before the solver's first tick, and again after the pipeline or the
+services change. A lookup takes the service registered under exactly that type, otherwise another registered solver of
+that type. A missing required dependency makes `Tick` throw before anything changes; call
+`world.Solvers.ResolveDependencies()` after setup to find out earlier.
+
+```csharp
+sealed partial class FireSolver : IAtmosWorldSolver
+{
+    [SolverDependency]
+    private partial IFireEvents Events { get; }
+
+    [SolverDependency(Optional = true)]
+    private partial ExposureSolver? Exposure { get; }
+
+    public void Solve(AtmosWorldSolverContext context) => Events.Publish(context.TickCount);
+}
+```
+
 ## Caching data derived from the configuration
 
 Keys created with `SolverDataLifetime.UntilConfigChange` are also dropped whenever the applied configuration changes,
