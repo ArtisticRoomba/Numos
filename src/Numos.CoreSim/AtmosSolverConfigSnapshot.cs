@@ -78,7 +78,6 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
         return referenceThermalConductivity * MathF.Pow(temperatureRatio, ThermalConductivityExponent);
     }
 
-
     public bool TryGetGasProperties(int gasId, out GasProperties properties)
     {
         if ((uint)gasId < (uint)GasPropertyCount)

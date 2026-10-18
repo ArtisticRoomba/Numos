@@ -197,7 +197,6 @@ public sealed class AtmosConfigSnapshot : IAtmosConfig
         return referenceThermalConductivity * MathF.Pow(temperatureRatio, ThermalConductivityExponent);
     }
 
-
     /// <inheritdoc cref="AtmosConfig.TryGetGasProperties" />
     public bool TryGetGasProperties(int gasId, out GasProperties properties)
     {

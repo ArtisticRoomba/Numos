@@ -10,11 +10,8 @@ namespace Numos.CoreSim.Solvers;
 
 internal class ReactionSolver : IAtmosSolverStage
 {
-    private readonly string _ignitionPercentKey = "IgnitionPercent";
-    private readonly string _ignitedVolumeTempKey = "IgnitedVolumeTemp";
-
-    // Per-voxel ignition source requests, written by outside systems through SetIgnitionSource and
-    // consumed (and cleared) by the next reaction pass.
+    private const string IgnitionPercentKey = "IgnitionPercent";
+    private const string IgnitedVolumeTempKey = "IgnitedVolumeTemp";
     private const string IgnitionSourceTempKey = "IgnitionSourceTemp";
     private const string IgnitionSourceVolumeKey = "IgnitionSourceVolume";
 
@@ -127,8 +124,8 @@ internal class ReactionSolver : IAtmosSolverStage
                 // no worker ever creates one concurrently.
                 for (int i = 0; i < context.Chunks.Length; i++)
                 {
-                    context.Chunks[i].GetOrCreateSolverFlatArray<Scalar>(_ignitionPercentKey, true);
-                    context.Chunks[i].GetOrCreateSolverFlatArray<Kelvin>(_ignitedVolumeTempKey, true);
+                    context.Chunks[i].GetOrCreateSolverFlatArray<Scalar>(IgnitionPercentKey, true);
+                    context.Chunks[i].GetOrCreateSolverFlatArray<Kelvin>(IgnitedVolumeTempKey, true);
                 }
 
                 ParallelHelper.ForEach<AtmosChunk, TransferIgnitionAction>(
@@ -368,8 +365,8 @@ internal class ReactionSolver : IAtmosSolverStage
             out var changesMatrix);
 
         // Resolved once for the whole chunk; the voxel workers index straight into them.
-        FlatArray<Scalar> ignitionPercents = chunk.GetOrCreateSolverFlatArray<Scalar>(_ignitionPercentKey, true);
-        FlatArray<Kelvin> ignitedVolumeTemps = chunk.GetOrCreateSolverFlatArray<Kelvin>(_ignitedVolumeTempKey, true);
+        FlatArray<Scalar> ignitionPercents = chunk.GetOrCreateSolverFlatArray<Scalar>(IgnitionPercentKey, true);
+        FlatArray<Kelvin> ignitedVolumeTemps = chunk.GetOrCreateSolverFlatArray<Kelvin>(IgnitedVolumeTempKey, true);
         FlatArray<CubicMetre> sourceVolumes = chunk.GetOrCreateSolverFlatArray<CubicMetre>(IgnitionSourceVolumeKey, true);
         FlatArray<Kelvin> sourceTemps = chunk.GetOrCreateSolverFlatArray<Kelvin>(IgnitionSourceTempKey, true);
 
@@ -518,8 +515,8 @@ internal class ReactionSolver : IAtmosSolverStage
         if (!(seedFraction > 0f))
             return;
 
-        FlatArray<Scalar> ignitionPercents = chunk.GetOrCreateSolverFlatArray<Scalar>(_ignitionPercentKey, true);
-        FlatArray<Kelvin> ignitedVolumeTemps = chunk.GetOrCreateSolverFlatArray<Kelvin>(_ignitedVolumeTempKey, true);
+        FlatArray<Scalar> ignitionPercents = chunk.GetOrCreateSolverFlatArray<Scalar>(IgnitionPercentKey, true);
+        FlatArray<Kelvin> ignitedVolumeTemps = chunk.GetOrCreateSolverFlatArray<Kelvin>(IgnitedVolumeTempKey, true);
 
         for (int activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
         {
@@ -540,13 +537,13 @@ internal class ReactionSolver : IAtmosSolverStage
                 bool sameChunk = ReferenceEquals(neighborChunk, chunk);
                 FlatArray<Scalar> neighborPercents = sameChunk
                     ? ignitionPercents
-                    : neighborChunk.GetOrCreateSolverFlatArray<Scalar>(_ignitionPercentKey, true);
+                    : neighborChunk.GetOrCreateSolverFlatArray<Scalar>(IgnitionPercentKey, true);
                 if (!(neighborPercents[neighborIndex] >= 1f))
                     continue;
 
                 FlatArray<Kelvin> neighborTemps = sameChunk
                     ? ignitedVolumeTemps
-                    : neighborChunk.GetOrCreateSolverFlatArray<Kelvin>(_ignitedVolumeTempKey, true);
+                    : neighborChunk.GetOrCreateSolverFlatArray<Kelvin>(IgnitedVolumeTempKey, true);
                 donorCount++;
                 donorTemperatureSum += neighborTemps[neighborIndex];
             }
