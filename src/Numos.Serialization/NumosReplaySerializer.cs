@@ -36,6 +36,7 @@ namespace Numos.Serialization;
 [WireOperation(typeof(SetVoxelClassificationOperation), AtmosOperationCode.SetVoxelClassification)]
 [WireOperation(typeof(SetVoxelTemperatureOperation), AtmosOperationCode.SetVoxelTemperature)]
 [WireOperation(typeof(AddGasToVoxelOperation), AtmosOperationCode.AddGasToVoxel)]
+[WireOperation(typeof(SetIgnitionSourceOperation), AtmosOperationCode.SetIgnitionSource)]
 [WireOperation(typeof(WakeChunkOperation), AtmosOperationCode.WakeChunk)]
 [WireOperation(typeof(SleepChunkOperation), AtmosOperationCode.SleepChunk)]
 [WireOperation(typeof(SetSolverEnabledOperation), AtmosOperationCode.SetSolverEnabled)]

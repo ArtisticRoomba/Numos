@@ -61,7 +61,8 @@ public enum AtmosOperationCode : ushort
     /// <summary>
     ///     Apply resolved voxel gas and thermal state independent of detached container identity.
     /// </summary>
-    SetVoxelMixture = 12
+    SetVoxelMixture = 12,
+    SetIgnitionSource=13
 }
 
 /// <summary>

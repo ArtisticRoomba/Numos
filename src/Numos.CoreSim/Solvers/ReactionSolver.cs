@@ -178,7 +178,7 @@ internal class ReactionSolver : IAtmosSolverStage
     /// <param name="voxelIndex">The voxel inside <paramref name="chunk" />. Only active-air voxels are processed.</param>
     /// <param name="temperature">Temperature of the source, in kelvin.</param>
     /// <param name="volume">Volume the source ignites, in cubic metres. Clamped to the voxel volume.</param>
-    internal static void SetIgnitionSource(AtmosChunk chunk, ushort voxelIndex, Kelvin temperature, CubicMetre volume)
+    internal void SetIgnitionSource(AtmosChunk chunk, ushort voxelIndex, Kelvin temperature, CubicMetre volume)
     {
         FlatArray<Kelvin> temperatures = chunk.GetOrCreateSolverFlatArray<Kelvin>(IgnitionSourceTempKey, true);
         FlatArray<CubicMetre> volumes = chunk.GetOrCreateSolverFlatArray<CubicMetre>(IgnitionSourceVolumeKey, true);
