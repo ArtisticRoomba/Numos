@@ -8,13 +8,19 @@ namespace Numos.CoreSim.Solvers;
 
 internal class ReactionSolver : IAtmosSolverStage
 {
+    // Rates that overflow (trace gases with negative exponents) saturate here instead of being dropped, and the
+    // material limiter then scales them back to what's actually available. Must stay below float.MaxValue so the
+    // stored speed is still finite. Only reactions with a consumed input saturate, since nothing else would limit
+    // them.
+    private const double MaxReactionSpeed = 1e30;
+
     // ProcessVoxel is invoked once per voxel from an already-parallel worker (thousands of calls per
     // chunk per tick), and reactionCount is typically a handful of entries. Renting/returning that tiny
     // array from ArrayPool<T>.Shared on every call adds pool bookkeeping to the hottest part of the loop
     // for no benefit, since the buffer never needs to be seen by another thread. A per-thread scratch
     // buffer that just grows to the high-water mark removes that round trip entirely.
     [ThreadStatic]
-    private static Scalar[]? _reactionSpeedsScratch;
+    private static Mole[]? _reactionSpeedsScratch;
     private readonly object _gasDataKey = new();
     private GasReactionMatrix? _changesMatrix;
     private GasReactionData[] _gasRateOrder = [];
@@ -72,12 +78,12 @@ internal class ReactionSolver : IAtmosSolverStage
         }
     }
 
-    private static Scalar[] RentReactionSpeeds(int reactionCount)
+    private static Mole[] RentReactionSpeeds(int reactionCount)
     {
-        Scalar[]? scratch = _reactionSpeedsScratch;
+        Mole[]? scratch = _reactionSpeedsScratch;
         if (scratch == null || scratch.Length < reactionCount)
         {
-            scratch = new Scalar[Math.Max(reactionCount, 16)];
+            scratch = new Mole[Math.Max(reactionCount, 16)];
             _reactionSpeedsScratch = scratch;
         }
 
@@ -117,6 +123,7 @@ internal class ReactionSolver : IAtmosSolverStage
         }
 
         int mixtureLength = config.GasPropertyCount;
+        CubicMetre volume = config.GetVoxelVolume();
         // Resolved once for the whole chunk instead of once per voxel.
         ResolveReactionState(
             config,
@@ -136,9 +143,9 @@ internal class ReactionSolver : IAtmosSolverStage
             0,
             activeAirCount,
             new ProcessVoxelAction(
-                this,
                 chunk,
                 deltaTime,
+                volume,
                 config,
                 reactionCount,
                 reactionFeedbacks,
@@ -191,7 +198,7 @@ internal class ReactionSolver : IAtmosSolverStage
                 foreach (var gasChannel in chunk.ActiveGases.Take(c))
                 {
                     Mole diff = mixtureVector[gasChannel.GasId] - gasChannel.Moles[voxelIndex];
-                    if (diff > 0)
+                    if (diff != 0)
                     {
                         chunk.InjectGasToVoxel(
                             voxelIndex,
@@ -274,7 +281,8 @@ internal class ReactionSolver : IAtmosSolverStage
     }
 
     // Sensible energy of the mixture at its current temperature: sum of moles * Cv * T over gases.
-    private Joule ExtractHeat(ReadOnlySpan<Mole> mixtureVector, ref readonly Kelvin temperature, int mixtureLength, IAtmosConfig config)
+    private static Joule ExtractHeat(
+        ReadOnlySpan<Mole> mixtureVector, ref readonly Kelvin temperature, int mixtureLength, IAtmosConfig config)
     {
         Joule result = 0f;
         for (int i = 0; i < mixtureLength; i++)
@@ -330,10 +338,13 @@ internal class ReactionSolver : IAtmosSolverStage
             out GasReactionData[] rateOrder,
             out var changesMatrix);
 
-        ProcessVoxelCore(
+        CubicMetre volume = config.GetVoxelVolume();
+
+        ProcessMixtureCore(
             deltaTime,
             mixtureVector,
             ref currentTemperature,
+            volume,
             reactionFeedback,
             config,
             mixtureLength,
@@ -347,14 +358,18 @@ internal class ReactionSolver : IAtmosSolverStage
     ///     Does the actual per-voxel reaction work once the caller has resolved <paramref name="reactions" />,
     ///     <paramref name="gasData" />, <paramref name="rateOrder" />, and <paramref name="changesMatrix" />.
     /// </summary>
-    private void ProcessVoxelCore(
-        Second deltaTime, Span<Mole> mixtureVector, ref Kelvin currentTemperature,
+    private static void ProcessMixtureCore(
+        Second deltaTime, Span<Mole> mixtureVector, ref Kelvin currentTemperature, CubicMetre volume,
         Scalar[]? reactionFeedback, IAtmosConfig config, int mixtureLength,
         GasReactionConfig reactions, GasReactionData[] gasData, GasReactionData[] rateOrder, GasReactionMatrix changesMatrix)
     {
+        // GetVoxelVolume always returns a finite positive volume, so only the timestep needs checking.
+        if (!float.IsFinite(deltaTime))
+            return;
+
         Joule energy = ExtractHeat(mixtureVector, ref currentTemperature, mixtureLength, config);
         int reactionCount = reactions.Count;
-        Scalar[] reactionSpeeds = RentReactionSpeeds(reactionCount);
+        Mole[] reactionSpeeds = RentReactionSpeeds(reactionCount);
 
         Array.Clear(reactionSpeeds, 0, reactionCount);
         //get all reaction speeds. Sequential: reactionCount is typically a handful of items, far too
@@ -363,17 +378,29 @@ internal class ReactionSolver : IAtmosSolverStage
         Kelvin temperature = currentTemperature; //to stop warning about the later change of currentTemperature.
         for (int reactionId = 0; reactionId < reactionCount; reactionId++)
         {
-            PerSecond rate = reactions.GetRateConstant(reactionId, temperature);
+            ConcentrationPerSecond rate = reactions.GetRateConstant(reactionId, temperature);
             if (!float.IsNormal(rate) || rate <= 0f)
                 continue;
 
             // Preserve canonical gas-name and factor order independently of registry indices.
+            ConcentrationPerSecond64 rate64 = rate;
             foreach (var gas in rateOrder)
-                rate = gas.ApplyRateFactors(reactionId, mixtureVector[gas.GasId], rate);
+                rate64 = gas.ApplyRateFactors(reactionId, (Mole64)mixtureVector[gas.GasId] / volume, rate64);
 
-            Scalar speed = rate * deltaTime;
-            if (speed > 0f)
-                reactionSpeeds[reactionId] = speed;
+            // +inf is a legitimate overflow here and saturates below.
+            Mole64 speed = rate64 * deltaTime * volume;
+            if (double.IsNaN(speed) || speed <= 0.0)
+                continue;
+
+            if (speed > MaxReactionSpeed)
+            {
+                if (!ConsumesAnything(gasData, reactionId))
+                    continue;
+
+                speed = MaxReactionSpeed;
+            }
+
+            reactionSpeeds[reactionId] = (Mole)speed;
         }
 
         bool anyReaction = false;
@@ -514,6 +541,21 @@ internal class ReactionSolver : IAtmosSolverStage
             currentTemperature = energy / heatCapacity;
     }
 
+    // Only reached for an overflowing rate, so the per-gas scan stays off the normal path.
+    private static bool ConsumesAnything(GasReactionData[] gasData, int reactionId)
+    {
+        foreach (var gas in gasData)
+        {
+            foreach (var (consumingId, consumed) in gas.ConsumingReactions)
+            {
+                if (consumingId == reactionId && consumed < 0f)
+                    return true;
+            }
+        }
+
+        return false;
+    }
+
     private static GasReactionData CreateGasReactionData(IAtmosConfig config, int gasId)
     {
         config.TryGetGasProperties(gasId, out var gas);
@@ -552,7 +594,7 @@ internal class ReactionSolver : IAtmosSolverStage
             foreach (var gasChannel in chunk.ActiveGases.AsSpan(0, trackedChannels))
             {
                 Mole diff = mixtureVector[gasChannel.GasId] - gasChannel.Moles[voxelIndex];
-                if (diff > 0)
+                if (diff != 0f)
                 {
                     chunk.InjectGasToVoxel(
                         voxelIndex,
@@ -571,9 +613,9 @@ internal class ReactionSolver : IAtmosSolverStage
     }
 
     private readonly struct ProcessVoxelAction(
-        ReactionSolver solver,
         AtmosChunk chunk,
         Second deltaTime,
+        CubicMetre volume,
         IAtmosConfig config,
         Scalar[]? reactionCount,
         Scalar[][]? reactionFeedbacks,
@@ -612,10 +654,11 @@ internal class ReactionSolver : IAtmosSolverStage
             if (content <= 0.0001)
                 return;
 
-            solver.ProcessVoxelCore(
+            ProcessMixtureCore(
                 deltaTime,
                 mixtureVector,
                 ref temp,
+                volume,
                 reactionFeedback,
                 config,
                 mixtureLength,

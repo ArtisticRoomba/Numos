@@ -17,7 +17,7 @@ internal sealed class GasReactionData(int gasId, string gasName, int reactionCou
     // actually consume it). Coefficient is gross consumption (<= 0), independent of any offsetting
     // production of the same gas by the same reaction -- the limiter must not net input against
     // output, or it would hide a real overdraw.
-    internal List<(int ReactionId, Mole Consumed)> ConsumingReactions { get; } = [];
+    internal List<(int ReactionId, float Consumed)> ConsumingReactions { get; } = [];
 
     internal LinearGasReaction.LinearSpeedFactor[][] LinearFactors { get; } = new LinearGasReaction.LinearSpeedFactor[reactionCount][];
     internal float?[] StandardExponents { get; } = new float?[reactionCount];
@@ -61,28 +61,29 @@ internal sealed class GasReactionData(int gasId, string gasName, int reactionCou
         }
     }
 
-    internal PerSecond ApplyRateFactors(int reactionId, Mole moles, PerSecond speed)
+    /// <summary>
+    ///     Multiplies <paramref name="speed" /> by this gas's rate factors for <paramref name="reactionId" />.
+    /// </summary>
+    /// <remarks>
+    ///     Accumulates in double so a trace gas with a negative exponent can push the product past float range
+    ///     without being mistaken for a broken rate. The result may still overflow to positive infinity so the
+    ///     solver just saturates the rate instead.
+    /// </remarks>
+    internal ConcentrationPerSecond64 ApplyRateFactors(
+        int reactionId, MolePerCubicMetre64 concentration, ConcentrationPerSecond64 speed)
     {
         if (LinearFactors[reactionId] is { } factors)
         {
             foreach (var factor in factors)
             {
-                float value = factor.GetFactor(moles);
-                if (!float.IsNormal(value) || value <= 0f)
-                    return 0f;
-
-                speed *= value;
+                speed = LinearGasReaction.ApplyFactor(speed, factor.GetFactor((MolePerCubicMetre)concentration));
+                if (speed == 0)
+                    return 0;
             }
         }
 
-        if (StandardExponents[reactionId] is float exponent)
-        {
-            float value = MathF.Pow(moles, exponent);
-            if (!float.IsNormal(value) || value == 0f)
-                return 0f;
-
-            speed *= value;
-        }
+        if (StandardExponents[reactionId] is { } exponent)
+            speed = StandardGasReaction.ApplyExponent(speed, concentration, exponent);
 
         return speed;
     }
