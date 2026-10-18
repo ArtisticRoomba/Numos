@@ -358,15 +358,18 @@ Stages can be enabled, disabled, removed, or restored with `ResetToDefaults`. Cu
 inserted before or after any registered stage:
 
 ```csharp
-simulation.World.Solvers.RegisterAfter(AtmosBuiltInSolvers.Advection, "game-reactions", context =>
-{
-    AtmosSimulation simulation = context.Simulations[0];
-    foreach (AtmosChunkHandle chunk in simulation.GetChunkHandles())
+simulation.World.Solvers.Register(
+    "game-reactions",
+    context =>
     {
-        AtmosChunkSnapshot snapshot = simulation.GetChunkSnapshot(chunk);
-        // Inspect the detached snapshot and apply results through validated simulation methods.
-    }
-});
+        AtmosSimulation simulation = context.Simulations[0];
+        foreach (AtmosChunkHandle chunk in simulation.GetChunkHandles())
+        {
+            AtmosChunkSnapshot snapshot = simulation.GetChunkSnapshot(chunk);
+            // Inspect the detached snapshot and apply results through validated simulation methods.
+        }
+    },
+    after: AtmosBuiltInSolvers.Advection);
 
 simulation.World.Solvers.SetEnabled(AtmosBuiltInSolvers.Thermodynamics, false);
 ```
@@ -922,7 +925,7 @@ deriving from one, whether the base is in the same project or a referenced assem
 calls `base.InjectSolverDependencies` first, so base and derived dependencies are both assigned. Generic and nested
 classes work as long as every containing type is `partial`.
 
-Injection is lazy. Every `Register*`, `Unregister`, and `ResetToDefaults` bumps a pipeline epoch, every service change
+Injection is lazy. Every `Register`, `Unregister`, and `ResetToDefaults` bumps a pipeline epoch, every service change
 bumps the services version, and each registration remembers the pair it was last injected against. At the start of a
 tick, before pending configuration is applied or any stage runs, Numos injects the enabled registrations that are
 stale, so a missing dependency throws with the world untouched. A registration is stamped only after its injection
@@ -968,7 +971,7 @@ public sealed class CombustionSolver : IAtmosWorldSolver
     }
 }
 
-world.Solvers.RegisterAfter(AtmosBuiltInSolvers.Advection, "game/combustion", new CombustionSolver());
+world.Solvers.Register("game/combustion", new CombustionSolver(), after: AtmosBuiltInSolvers.Advection);
 
 var config = new AtmosConfig(world.Config);
 config.SolverConfigurations.Add(new CombustionSettings(Rate: 0.5f));
@@ -1176,16 +1179,19 @@ Solvers with a measured need to avoid copying physical fields can opt into live 
 covers what that gives up):
 
 ```csharp
-simulation.World.Solvers.RegisterAfter(AtmosBuiltInSolvers.Advection, "fast-reaction", context =>
-{
-    AtmosSimulation simulation = context.Simulations[0];
-    foreach (AtmosChunkHandle handle in simulation.GetChunkHandles())
+simulation.World.Solvers.Register(
+    "fast-reaction",
+    context =>
     {
-        AtmosDangerousChunk chunk = simulation.Dangerous().GetChunk(handle);
-        Span<float> oxygen = chunk.GetGasChannel(0).Moles;
-        // Raw writes are unchecked. Repair affected caches/topology and call MarkChanged as required.
-    }
-});
+        AtmosSimulation simulation = context.Simulations[0];
+        foreach (AtmosChunkHandle handle in simulation.GetChunkHandles())
+        {
+            AtmosDangerousChunk chunk = simulation.Dangerous().GetChunk(handle);
+            Span<float> oxygen = chunk.GetGasChannel(0).Moles;
+            // Raw writes are unchecked. Repair affected caches/topology and call MarkChanged as required.
+        }
+    },
+    after: AtmosBuiltInSolvers.Advection);
 ```
 
 From a `ChunkField<T>` view, `chunk.Dangerous()` gives the same live chunk without a handle lookup. It is safe on
@@ -1207,8 +1213,8 @@ Parallel.For(0, chunks.Count, index =>
 
 #### Writing a custom solver that touches portals
 
-If your custom stage needs to see explicit links at all, register it with `RegisterNeighborSolver` (or the
-`Before`/`After` variants), not the plain `Register`. A stage registered without a selection gets an *empty* topology
+If your custom stage needs to see explicit links at all, pass an `AtmosNeighborSelection` as `Register`'s `neighbors`
+argument. A stage registered without a selection gets an *empty* topology
 view: `context.Topology.GetOwnedEdges()` silently returns nothing, and `GetNeighbors(cell)` returns no explicit
 neighbors. There is no exception to tell you a portal-aware stage forgot to ask for one.
 
@@ -1218,13 +1224,8 @@ This stage replaces Numos' built-in portal and dock gas physics with its own:
 // Disable Numos' own portal/dock gas physics world-wide. Advection and boundary flow keep running unaffected.
 world.Solvers.SetEnabled(AtmosBuiltInSolvers.ExplicitGasTransport, false);
 
-world.Solvers.RegisterNeighborSolverAfter(
-    AtmosBuiltInSolvers.Advection,
+world.Solvers.Register(
     "game/custom-portal-gas",
-    new AtmosNeighborSelection(
-        "game/custom-portal-gas/v1",
-        includeCartesian: false, // this solver only ever cares about explicit links, not ordinary walls
-        static link => (link.Flags & ExplicitLinkFlags.GasTransport) != 0),
     context =>
     {
         foreach (AtmosNeighborEdge edge in context.Topology.GetOwnedEdges())
@@ -1236,7 +1237,12 @@ world.Solvers.RegisterNeighborSolverAfter(
             // Skip solid/void endpoints, call Wake() on anything you change, and share one per-tick limiter
             // across a cell's links; the rest of this section explains why.
         }
-    });
+    },
+    new AtmosNeighborSelection(
+        "game/custom-portal-gas/v1",
+        includeCartesian: false, // this solver only ever cares about explicit links, not ordinary walls
+        static link => (link.Flags & ExplicitLinkFlags.GasTransport) != 0),
+    after: AtmosBuiltInSolvers.Advection);
 ```
 
 `AtmosNeighborSelection` has two knobs, and picking the wrong one is the most common mistake:
@@ -1300,7 +1306,7 @@ Numos' built-in stages only ever look at the bits they know about, which leaves 
 physics with theirs:
 
 - a link can mix a built-in capability with a host-defined one (default gas physics plus a custom effect layered on
-  top with `RegisterAfter`);
+  top with `Register(..., after: ...)`);
 - a link can use only a host-defined bit to opt out of default physics entirely for that one link, while every other
   portal keeps using Numos' implementation;
 - the host can disable a built-in stage world-wide (as in the example above) and implement every portal's physics

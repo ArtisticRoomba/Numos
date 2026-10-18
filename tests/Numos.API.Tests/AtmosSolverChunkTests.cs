@@ -287,9 +287,8 @@ public sealed class AtmosSolverChunkTests
         bool missingChunk = true;
         bool missingVoxel = true;
 
-        world.Solvers.RegisterNeighborSolver(
+        world.Solvers.Register(
             "tests/solver-chunk/neighbors",
-            AtmosNeighborSelection.All("tests/solver-chunk/neighbors-v1"),
             context =>
             {
                 foreach (var neighbor in context.Topology.GetNeighbors(source))
@@ -302,7 +301,8 @@ public sealed class AtmosSolverChunkTests
                 missingChunk = context.TryGetChunk(
                     source with { Chunk = new AtmosChunkHandle(new Int3(9, 9, 9)) }, out _);
                 missingVoxel = context.TryGetChunk(source with { LocalVoxelIndex = 1 }, out _);
-            });
+            },
+            AtmosNeighborSelection.All("tests/solver-chunk/neighbors-v1"));
 
         world.Tick();
 

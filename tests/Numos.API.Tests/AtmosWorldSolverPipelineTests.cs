@@ -23,17 +23,17 @@ public sealed class AtmosWorldSolverPipelineTests
 
         int neighborCount = -1;
         AtmosNeighbor[] neighbors = [];
-        world.Solvers.RegisterNeighborSolver(
+        world.Solvers.Register(
             "inspect-neighbors",
-            new AtmosNeighborSelection(
-                "tests/gas-neighbors-v1",
-                true,
-                static link => (link.Flags & ExplicitLinkFlags.GasTransport) != 0),
             context =>
             {
                 neighborCount = context.Topology.GetNeighborCount(source);
                 neighbors = context.Topology.GetNeighbors(source).ToArray();
-            });
+            },
+            new AtmosNeighborSelection(
+                "tests/gas-neighbors-v1",
+                true,
+                static link => (link.Flags & ExplicitLinkFlags.GasTransport) != 0));
 
         world.Tick();
 
@@ -59,10 +59,10 @@ public sealed class AtmosWorldSolverPipelineTests
         var target = simulation.GetCellRef(second, 0);
         AtmosNeighbor[] neighbors = [];
 
-        world.Solvers.RegisterNeighborSolver(
+        world.Solvers.Register(
             "inspect-chunk-boundary",
-            AtmosNeighborSelection.All("tests/chunk-boundary-v1"),
-            context => neighbors = context.Topology.GetNeighbors(source).ToArray());
+            context => neighbors = context.Topology.GetNeighbors(source).ToArray(),
+            AtmosNeighborSelection.All("tests/chunk-boundary-v1"));
 
         world.Tick();
 
@@ -86,8 +86,9 @@ public sealed class AtmosWorldSolverPipelineTests
         simulation.SetChunkClassification(second, new VoxelClassification(1));
         int selectorCalls = 0;
 
-        world.Solvers.RegisterNeighborSolver(
+        world.Solvers.Register(
             "compiled-selector",
+            _ => { },
             new AtmosNeighborSelection(
                 "tests/compiled-selector-v1",
                 false,
@@ -95,8 +96,7 @@ public sealed class AtmosWorldSolverPipelineTests
                 {
                     selectorCalls++;
                     return true;
-                }),
-            _ => { });
+                }));
 
         Assert.That(selectorCalls, Is.Zero);
         world.CreatePortal(simulation.GetCellRef(first, 0), simulation.GetCellRef(second, 0));
@@ -119,15 +119,15 @@ public sealed class AtmosWorldSolverPipelineTests
         simulation.SetChunkClassification(second, new VoxelClassification(1));
         bool failCompilation = true;
 
-        world.Solvers.RegisterNeighborSolver(
+        world.Solvers.Register(
             "fallible-selector",
+            _ => { },
             new AtmosNeighborSelection(
                 "tests/fallible-selector-v1",
                 false,
                 _ => failCompilation
                     ? throw new InvalidOperationException("Expected selector failure.")
-                    : true),
-            _ => { });
+                    : true));
 
         var links = world.CreateLinks(
         [
@@ -201,10 +201,10 @@ public sealed class AtmosWorldSolverPipelineTests
         simulation.AddGasToVoxel(source, 0, "TestGas", 1f, 300f);
         float observedTargetMoles = 0f;
 
-        world.Solvers.RegisterAfter(
-            AtmosBuiltInSolvers.BoundaryFlow,
+        world.Solvers.Register(
             "observe-boundary-flow",
-            _ => observedTargetMoles = simulation.GetVoxelSnapshot(target, 0).Gases.Sum(static gas => gas.Moles));
+            _ => observedTargetMoles = simulation.GetVoxelSnapshot(target, 0).Gases.Sum(static gas => gas.Moles),
+            after: AtmosBuiltInSolvers.BoundaryFlow);
 
         world.Tick();
 
@@ -224,10 +224,10 @@ public sealed class AtmosWorldSolverPipelineTests
         world.CreatePortal(first.GetCellRef(firstChunk, 0), second.GetCellRef(secondChunk, 0));
         AtmosNeighborEdge[] edges = [];
 
-        world.Solvers.RegisterNeighborSolver(
+        world.Solvers.Register(
             "owned-edges",
-            AtmosNeighborSelection.All("tests/owned-edges-v1"),
-            context => edges = context.Topology.GetOwnedEdges().ToArray());
+            context => edges = context.Topology.GetOwnedEdges().ToArray(),
+            AtmosNeighborSelection.All("tests/owned-edges-v1"));
 
         world.Tick();
 
@@ -242,10 +242,10 @@ public sealed class AtmosWorldSolverPipelineTests
     public void WorldSolverMetadata_ParticipatesInCheckpointHashAndCompatibility()
     {
         using var world = new AtmosWorld(CreateConfig());
-        world.Solvers.RegisterNeighborSolver(
+        world.Solvers.Register(
             "authoritative-custom",
-            AtmosNeighborSelection.All("tests/authoritative-custom-v1"),
-            _ => { });
+            _ => { },
+            AtmosNeighborSelection.All("tests/authoritative-custom-v1"));
 
         var checkpoint = world.CaptureCheckpoint();
         var hash = checkpoint.ComputeStateHash();
@@ -316,13 +316,13 @@ public sealed class AtmosWorldSolverPipelineTests
             customCapability);
 
         bool customSolverSawLink = false;
-        world.Solvers.RegisterNeighborSolver(
+        world.Solvers.Register(
             "custom-capability-observer",
+            context => customSolverSawLink = context.Topology.GetOwnedEdges().Any(),
             new AtmosNeighborSelection(
                 "tests/custom-capability-v1",
                 false,
-                link => (link.Flags & customCapability) != 0),
-            context => customSolverSawLink = context.Topology.GetOwnedEdges().Any());
+                link => (link.Flags & customCapability) != 0));
 
         world.Tick();
 
@@ -401,19 +401,19 @@ public sealed class AtmosWorldSolverPipelineTests
             reversePortal ? source : target,
             ExplicitLinkFlags.GasTransport);
 
-        world.Solvers.RegisterNeighborSolver(
+        world.Solvers.Register(
             "deterministic-observer",
-            new AtmosNeighborSelection(
-                "tests/deterministic-observer-v1",
-                true,
-                static link => (link.Flags & ExplicitLinkFlags.GasTransport) != 0),
             context =>
             {
                 // Traverse the complete view so ordering bugs are observable to this fixture without mutating state.
                 foreach (var _ in context.Topology.GetOwnedEdges())
                 {
                 }
-            });
+            },
+            new AtmosNeighborSelection(
+                "tests/deterministic-observer-v1",
+                true,
+                static link => (link.Flags & ExplicitLinkFlags.GasTransport) != 0));
 
         return world;
     }

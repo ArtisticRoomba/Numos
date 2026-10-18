@@ -27,8 +27,7 @@ public sealed class AtmosSolverDataTests
             "produce",
             _ => simulation.GetSolverData(pendingKey).Enqueue(simulation.TickCount));
 
-        simulation.World.Solvers.RegisterAfter(
-            "produce",
+        simulation.World.Solvers.Register(
             "consume",
             _ =>
             {
@@ -36,7 +35,8 @@ public sealed class AtmosSolverDataTests
                 while (pending.TryDequeue(out int tick))
                     foreach (var chunk in simulation.GetChunkHandles())
                         simulation.AddGasToVoxel(chunk, 0, "TestGas0", tick, 300f);
-            });
+            },
+            after: "produce");
 
         simulation.Tick();
         simulation.Tick();
@@ -127,15 +127,15 @@ public sealed class AtmosSolverDataTests
             "produce",
             _ => simulation.GetSolverData(pendingKey).Enqueue(simulation.TickCount));
 
-        simulation.World.Solvers.RegisterAfter(
-            "produce",
+        simulation.World.Solvers.Register(
             "consume",
             _ =>
             {
                 Queue<int> pending = simulation.GetSolverData(pendingKey);
                 while (pending.TryDequeue(out int moles))
                     simulation.AddGasToVoxel(chunk, 0, "TestGas0", moles, 300f);
-            });
+            },
+            after: "produce");
 
         var checkpoint = simulation.CaptureCheckpoint();
         simulation.StartRecording();

@@ -444,10 +444,10 @@ public sealed class AtmosWorldTests
             ExplicitLinkFlags.GasTransport);
 
         float observedMoles = 0f;
-        world.Solvers.RegisterAfter(
-            AtmosBuiltInSolvers.ExplicitGasTransport,
+        world.Solvers.Register(
             "observe-explicit-flow",
-            _ => observedMoles = TotalMoles(second, target));
+            _ => observedMoles = TotalMoles(second, target),
+            after: AtmosBuiltInSolvers.ExplicitGasTransport);
 
         world.Tick();
 

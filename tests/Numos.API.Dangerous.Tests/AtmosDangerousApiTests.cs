@@ -65,15 +65,15 @@ public sealed class AtmosDangerousApiTests
         var chunk = simulation.CreateAndRegisterChunk(default);
         simulation.SetChunkClassification(chunk, new VoxelClassification(7));
         simulation.AddGasToVoxel(chunk, 0, "TestGas2", 1f, 300f);
-        simulation.World.Solvers.RegisterAfter(
-            AtmosBuiltInSolvers.Thermodynamics,
+        simulation.World.Solvers.Register(
             "raw-write",
             _ =>
             {
                 var rawChunk = simulation.Dangerous().GetChunk(chunk);
                 rawChunk.GetGasChannel(0).Moles[0] = 4f;
                 rawChunk.MarkChanged();
-            });
+            },
+            after: AtmosBuiltInSolvers.Thermodynamics);
 
         simulation.Tick();
 
@@ -98,9 +98,8 @@ public sealed class AtmosDangerousApiTests
         world.CreatePortal(source, target);
         Int3 observedPosition = new(int.MinValue, int.MinValue, int.MinValue);
 
-        world.Solvers.RegisterNeighborSolver(
+        world.Solvers.Register(
             "dangerous-neighbor",
-            AtmosNeighborSelection.All("tests/dangerous-neighbor-v1"),
             context =>
             {
                 foreach (var neighbor in context.Topology.GetNeighbors(source))
@@ -108,7 +107,8 @@ public sealed class AtmosDangerousApiTests
                     observedPosition = context.Dangerous().GetChunk(neighbor.Cell).Position;
                     break;
                 }
-            });
+            },
+            AtmosNeighborSelection.All("tests/dangerous-neighbor-v1"));
 
         world.Tick();
 
@@ -131,10 +131,10 @@ public sealed class AtmosDangerousApiTests
         var chunk = simulation.CreateAndRegisterChunk(default);
         simulation.SetChunkClassification(chunk, new VoxelClassification(7));
         simulation.AddGasToVoxel(chunk, 0, 0, 1f, 300f);
-        simulation.World.Solvers.RegisterBefore(
-            AtmosBuiltInSolvers.Advection,
+        simulation.World.Solvers.Register(
             "inject",
-            _ => simulation.AddGasToVoxel(chunk, 0, 1, 1f, 600f));
+            _ => simulation.AddGasToVoxel(chunk, 0, 1, 1f, 600f),
+            before: AtmosBuiltInSolvers.Advection);
 
         simulation.Tick();
 
@@ -149,10 +149,10 @@ public sealed class AtmosDangerousApiTests
         simulation.SetChunkClassification(chunk, new VoxelClassification(7));
         simulation.AddGasToVoxel(chunk, 0, "TestGas0", 1f, 300f);
         var solver = new ConfiguredDangerousWriter(chunk);
-        simulation.World.Solvers.RegisterAfter(
-            AtmosBuiltInSolvers.Thermodynamics,
+        simulation.World.Solvers.Register(
             "configured-write",
-            _ => solver.Solve(simulation));
+            _ => solver.Solve(simulation),
+            after: AtmosBuiltInSolvers.Thermodynamics);
 
         solver.Config.Moles = 3f;
         simulation.Tick();

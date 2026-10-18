@@ -50,12 +50,15 @@ public sealed partial class AtmosSimulation
     ///     // The producer runs first, so the consumer sees this tick's entries.
     ///     world.Solvers.Register(
     ///         "my-mod/produce", _ =&gt; simulation.GetSolverData(Pending).Enqueue(simulation.TickCount));
-    ///     world.Solvers.RegisterAfter("my-mod/produce", "my-mod/consume", _ =&gt;
-    ///     {
-    ///         var pending = simulation.GetSolverData(Pending);
-    ///         while (pending.TryDequeue(out int tick))
-    ///             Console.WriteLine(tick);
-    ///     });
+    ///     world.Solvers.Register(
+    ///         "my-mod/consume",
+    ///         _ =&gt;
+    ///         {
+    ///             var pending = simulation.GetSolverData(Pending);
+    ///             while (pending.TryDequeue(out int tick))
+    ///                 Console.WriteLine(tick);
+    ///         },
+    ///         after: "my-mod/produce");
     ///     </code>
     /// </example>
     [PublicAPI]

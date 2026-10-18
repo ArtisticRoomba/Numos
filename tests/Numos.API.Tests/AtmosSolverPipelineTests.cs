@@ -62,10 +62,10 @@ public sealed class AtmosWorldPipelineTests
         int calls = 0;
 
         Assert.That(world.Solvers.Unregister(AtmosBuiltInSolvers.Advection), Is.True);
-        world.Solvers.RegisterBefore(
-            AtmosBuiltInSolvers.ExplicitGasTransport,
+        world.Solvers.Register(
             AtmosBuiltInSolvers.Advection,
-            _ => calls++);
+            _ => calls++,
+            before: AtmosBuiltInSolvers.ExplicitGasTransport);
 
         world.Tick();
 
@@ -74,6 +74,27 @@ public sealed class AtmosWorldPipelineTests
             Assert.That(calls, Is.EqualTo(1));
             Assert.That(world.Solvers.Steps[0].Name, Is.EqualTo(AtmosBuiltInSolvers.Advection));
             Assert.That(world.Solvers.Steps[0].Kind, Is.EqualTo(AtmosWorldSolverKind.Custom));
+        });
+    }
+
+    [Test]
+    public void Register_RejectsConflictingOrUnknownPlacement()
+    {
+        using var world = new AtmosWorld();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(
+                () => world.Solvers.Register(
+                    "both",
+                    _ => { },
+                    before: AtmosBuiltInSolvers.Thermodynamics,
+                    after: AtmosBuiltInSolvers.Advection),
+                Throws.ArgumentException);
+            Assert.That(
+                () => world.Solvers.Register("orphan", _ => { }, after: "missing"),
+                Throws.TypeOf<KeyNotFoundException>());
+            Assert.That(world.Solvers.Steps, Has.Count.EqualTo(7));
         });
     }
 

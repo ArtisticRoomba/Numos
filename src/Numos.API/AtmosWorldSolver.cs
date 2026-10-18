@@ -61,7 +61,7 @@ public delegate void AtmosWorldSolver(AtmosWorldSolverContext context);
 ///         public void OnRestored() =&gt; _chunksVisited = 0;
 ///     }
 /// 
-///     world.Solvers.RegisterAfter(AtmosBuiltInSolvers.Thermodynamics, "my-mod/exposure-decay", new ExposureDecaySolver());
+///     world.Solvers.Register("my-mod/exposure-decay", new ExposureDecaySolver(), after: AtmosBuiltInSolvers.Thermodynamics);
 ///     </code>
 /// </example>
 public interface IAtmosWorldSolver
@@ -226,11 +226,9 @@ public sealed class AtmosWorldSolverContext
     ///     Gets the solver-specific compiled neighborhood view.
     /// </summary>
     /// <remarks>
-    ///     A stage registered through a plain
-    ///     <see cref="AtmosWorldSolverPipeline.Register(string, AtmosWorldSolver)" /> call (rather than one of the
-    ///     <c>RegisterNeighborSolver*</c> overloads) receives an empty view here: no exception, no Cartesian
-    ///     neighbors, no explicit edges. Use
-    ///     <see cref="AtmosWorldSolverPipeline.RegisterNeighborSolver(string, AtmosNeighborSelection, AtmosWorldSolver)" />
+    ///     A stage registered without a neighbor selection receives an empty view here: no exception, no Cartesian
+    ///     neighbors, no explicit edges. Pass <c>neighbors</c> to
+    ///     <see cref="AtmosWorldSolverPipeline.Register(string, AtmosWorldSolver, AtmosNeighborSelection?, string?, string?)" />
     ///     whenever the callback needs this property.
     /// </remarks>
     public AtmosWorldNeighborTopology Topology { get; }

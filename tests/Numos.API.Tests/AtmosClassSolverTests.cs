@@ -16,15 +16,15 @@ public sealed class AtmosClassSolverTests
 
         world.Solvers.Register("delegate-tail", _ => order.Add("delegate-tail"));
         world.Solvers.Register("class-tail", new RecordingSolver("class-tail", order));
-        world.Solvers.RegisterBefore("class-tail", "delegate-middle", _ => order.Add("delegate-middle"));
-        world.Solvers.RegisterAfter(
-            AtmosBuiltInSolvers.Advection,
+        world.Solvers.Register("delegate-middle", _ => order.Add("delegate-middle"), before: "class-tail");
+        world.Solvers.Register(
             "class-after-advection",
-            new RecordingSolver("class-after-advection", order));
-        world.Solvers.RegisterBefore(
-            AtmosBuiltInSolvers.Advection,
+            new RecordingSolver("class-after-advection", order),
+            after: AtmosBuiltInSolvers.Advection);
+        world.Solvers.Register(
             "class-first",
-            new RecordingSolver("class-first", order));
+            new RecordingSolver("class-first", order),
+            before: AtmosBuiltInSolvers.Advection);
 
         world.Tick();
 
@@ -59,9 +59,9 @@ public sealed class AtmosClassSolverTests
         var after = new NeighborProbe(source);
 
         world.Solvers.Register("plain", plain);
-        world.Solvers.RegisterNeighborSolver("neighbors", AtmosNeighborSelection.All("tests/class-v1"), new NeighborProbe(source));
-        world.Solvers.RegisterNeighborSolverBefore("neighbors", "before", AtmosNeighborSelection.All("tests/before-v1"), before);
-        world.Solvers.RegisterNeighborSolverAfter("neighbors", "after", AtmosNeighborSelection.All("tests/after-v1"), after);
+        world.Solvers.Register("neighbors", new NeighborProbe(source), AtmosNeighborSelection.All("tests/class-v1"));
+        world.Solvers.Register("before", before, AtmosNeighborSelection.All("tests/before-v1"), before: "neighbors");
+        world.Solvers.Register("after", after, AtmosNeighborSelection.All("tests/after-v1"), after: "neighbors");
 
         world.Tick();
 
@@ -81,17 +81,17 @@ public sealed class AtmosClassSolverTests
     {
         using var delegateWorld = new AtmosWorld();
         using var classWorld = new AtmosWorld();
-        delegateWorld.Solvers.RegisterNeighborSolverAfter(
-            AtmosBuiltInSolvers.Advection,
+        delegateWorld.Solvers.Register(
             "custom-neighbors",
+            _ => { },
             AtmosNeighborSelection.All("tests/metadata-v1"),
-            _ => { });
+            after: AtmosBuiltInSolvers.Advection);
         delegateWorld.Solvers.Register("custom-tail", _ => { });
-        classWorld.Solvers.RegisterNeighborSolverAfter(
-            AtmosBuiltInSolvers.Advection,
+        classWorld.Solvers.Register(
             "custom-neighbors",
+            new RecordingSolver("unused", []),
             AtmosNeighborSelection.All("tests/metadata-v1"),
-            new RecordingSolver("unused", []));
+            after: AtmosBuiltInSolvers.Advection);
         classWorld.Solvers.Register("custom-tail", new RecordingSolver("unused", []));
 
         var delegateCheckpoint = delegateWorld.CaptureCheckpoint();
@@ -114,7 +114,7 @@ public sealed class AtmosClassSolverTests
         var holder = new MethodGroupHolder();
 
         world.Solvers.Register("static-group", StaticSolve);
-        world.Solvers.RegisterAfter("static-group", "instance-group", holder.Solve);
+        world.Solvers.Register("instance-group", holder.Solve, after: "static-group");
         world.Tick();
 
         Assert.That(holder.Calls, Is.EqualTo(1));

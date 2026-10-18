@@ -97,41 +97,40 @@ for the full pattern, including replacing default transport entirely or per-link
 ## Use portals from a custom solver
 
 A plain `world.Solvers.Register(...)` stage cannot see portals or docks at all: `context.Topology` compiles to an
-empty view for it, so `GetOwnedEdges()` quietly returns nothing. To see explicit links, register through
-`RegisterNeighborSolver` (or its `Before`/`After` variants) with an `AtmosNeighborSelection`, since an explicit edge
-can join cells in two different simulations and the world — not either simulation — is what compiles the combined
-view:
+empty view for it, so `GetOwnedEdges()` quietly returns nothing. To see explicit links, pass an
+`AtmosNeighborSelection` as `neighbors`, since an explicit edge can join cells in two different simulations and the
+world — not either simulation — is what compiles the combined view:
 
 ```csharp
-world.Solvers.RegisterNeighborSolverAfter(
-    AtmosBuiltInSolvers.Advection,
+world.Solvers.Register(
     "game/fire-spread",
-    new AtmosNeighborSelection(
-        "game/fire-spread/v1",
-        includeCartesian: true,
-        static link => (link.Flags & ExplicitLinkFlags.GasTransport) != 0),
     context =>
     {
         foreach (AtmosNeighborEdge edge in context.Topology.GetOwnedEdges())
             ProcessFireEdge(edge.First, edge.Second);
-    });
+    },
+    new AtmosNeighborSelection(
+        "game/fire-spread/v1",
+        includeCartesian: true,
+        static link => (link.Flags & ExplicitLinkFlags.GasTransport) != 0),
+    after: AtmosBuiltInSolvers.Advection);
 ```
 
 Fire wants `includeCartesian: true` because it spreads through ordinary open doorways as well as portals. A solver
 that only cares about the portals and docks themselves should say so explicitly instead:
 
 ```csharp
-world.Solvers.RegisterNeighborSolver(
+world.Solvers.Register(
     "game/pressure-valve",
-    new AtmosNeighborSelection(
-        "game/pressure-valve/v1",
-        includeCartesian: false, // no ordinary walls — this only ever acts on explicit links
-        static link => (link.Flags & ExplicitLinkFlags.GasTransport) != 0),
     context =>
     {
         foreach (AtmosNeighborEdge edge in context.Topology.GetOwnedEdges())
             ProcessValveEdge(edge.First, edge.Second);
-    });
+    },
+    new AtmosNeighborSelection(
+        "game/pressure-valve/v1",
+        includeCartesian: false, // no ordinary walls — this only ever acts on explicit links
+        static link => (link.Flags & ExplicitLinkFlags.GasTransport) != 0));
 ```
 
 `includeCartesian: true` makes `GetOwnedEdges()` walk all six directions of every voxel in every chunk in the world to
@@ -319,9 +318,9 @@ process-randomized hashes such as `HashCode` or `string.GetHashCode()`.
 
 ## Class solvers
 
-A stage can be a class instead of a lambda. Implement `IAtmosWorldSolver` and pass an instance to the same `Register`,
-`RegisterBefore`, `RegisterAfter`, and `RegisterNeighborSolver*` calls. Pipeline order and checkpoint metadata are the
-same as for a delegate with the same name, so switching forms keeps old checkpoints loading.
+A stage can be a class instead of a lambda. Implement `IAtmosWorldSolver` and pass an instance to the same `Register`
+call, with the same `neighbors`, `before`, and `after` options. Pipeline order and checkpoint metadata are the same as
+for a delegate with the same name, so switching forms keeps old checkpoints loading.
 
 The instance is yours. Numos never checkpoints, clones, or disposes it, so its fields should only hold scratch state
 and references. `OnRestored` is where scratch state gets thrown away: Numos calls it on every class solver, enabled or
@@ -345,7 +344,7 @@ sealed class FireSolver : IAtmosWorldSolver
     public void OnRestored() => _ignitedThisTick.Clear();
 }
 
-world.Solvers.RegisterAfter(AtmosBuiltInSolvers.Thermodynamics, "my-mod/fire", new FireSolver());
+world.Solvers.Register("my-mod/fire", new FireSolver(), after: AtmosBuiltInSolvers.Thermodynamics);
 ```
 
 ## World services
@@ -398,7 +397,7 @@ The `Numos.API` generator implements `IAtmosSolverDependencies` for the class. A
    names counts once. Two different instances are ambiguous and throw; register a service under `T` to pick one.
 
 Numos injects at the start of a tick, before anything changes: the first time a solver runs, and again after any
-`Register*`, `Unregister`, `ResetToDefaults`, or service change. A solver that is disabled at that point is injected
+`Register`, `Unregister`, `ResetToDefaults`, or service change. A solver that is disabled at that point is injected
 when it's next enabled and ticked. In practice:
 
 - Dependency properties are null until the first injection, so don't read them from the constructor.
@@ -450,8 +449,8 @@ sealed partial class FireSolver : IAtmosWorldSolver
     }
 }
 
-world.Solvers.RegisterAfter(AtmosBuiltInSolvers.Thermodynamics, "my-mod/exposure", new ExposureSolver());
-world.Solvers.RegisterAfter("my-mod/exposure", "my-mod/fire", new FireSolver());
+world.Solvers.Register("my-mod/exposure", new ExposureSolver(), after: AtmosBuiltInSolvers.Thermodynamics);
+world.Solvers.Register("my-mod/fire", new FireSolver(), after: "my-mod/exposure");
 ```
 
 This gives a typed API, and a missing producer fails on the first tick (or in `ResolveDependencies`) instead of the
@@ -482,15 +481,18 @@ public void Solve(AtmosWorldSolverContext context)
 }
 
 // Another mod, registered after my-mod/fire:
-world.Solvers.RegisterAfter("my-mod/fire", "other-mod/smoke", context =>
-{
-    foreach (AtmosSimulation simulation in context.Simulations)
+world.Solvers.Register(
+    "other-mod/smoke",
+    context =>
     {
-        Queue<AtmosCellRef> ignitions = simulation.GetSolverData(FireData.Ignitions);
-        while (ignitions.TryDequeue(out AtmosCellRef cell))
-            EmitSmoke(simulation, cell);
-    }
-});
+        foreach (AtmosSimulation simulation in context.Simulations)
+        {
+            Queue<AtmosCellRef> ignitions = simulation.GetSolverData(FireData.Ignitions);
+            while (ignitions.TryDequeue(out AtmosCellRef cell))
+                EmitSmoke(simulation, cell);
+        }
+    },
+    after: "my-mod/fire");
 ```
 
 The built-in stages share data the same way: advection and thermodynamics publish per-chunk boundary event batches
