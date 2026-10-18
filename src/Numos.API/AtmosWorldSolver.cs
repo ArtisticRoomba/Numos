@@ -100,19 +100,23 @@ public sealed class AtmosNeighborSelection(
 ///     Tick-scoped inputs supplied to a world solver callback.
 /// </summary>
 /// <remarks>
-///     The topology view is immutable for the callback. Do not retain the context or its topology after the callback
-///     returns.
+///     The topology view is immutable for the callback. Do not retain the context, its topology, or its chunk views
+///     after the callback returns; chunk views throw once the tick ends.
 /// </remarks>
 public sealed class AtmosWorldSolverContext
 {
+    private readonly AtmosSolverTickScope _solverScope;
+
     internal AtmosWorldSolverContext(
         AtmosWorld world,
         IReadOnlyList<AtmosSimulation> simulations,
-        AtmosWorldNeighborTopology topology)
+        AtmosWorldNeighborTopology topology,
+        AtmosSolverTickScope solverScope)
     {
         World = world;
         Simulations = simulations;
         Topology = topology;
+        _solverScope = solverScope;
     }
 
     /// <summary>
@@ -145,6 +149,76 @@ public sealed class AtmosWorldSolverContext
     ///     the callback needs this property.
     /// </remarks>
     public AtmosWorldNeighborTopology Topology { get; }
+
+    /// <summary>
+    ///     Gets lock-free views of one simulation's chunks for this tick.
+    /// </summary>
+    /// <param name="simulation">A simulation from <see cref="Simulations" />.</param>
+    /// <returns>The simulation's chunks in grid order, valid until the tick ends.</returns>
+    /// <remarks>
+    ///     This is how solvers reach <see cref="ChunkField{T}" /> storage. The views never take the simulation's state
+    ///     lock, so call this once on the callback thread and hand the result to <c>Parallel.For</c> workers.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="simulation" /> is <see langword="null" />.</exception>
+    /// <exception cref="ArgumentException"><paramref name="simulation" /> is not part of this tick.</exception>
+    /// <exception cref="InvalidOperationException">The tick has ended.</exception>
+    /// <example>
+    ///     <code>
+    ///     foreach (var simulation in context.Simulations)
+    ///     {
+    ///         var chunks = context.Chunks(simulation);
+    ///         Parallel.For(0, chunks.Count, index => chunks[index].GetSpan(FireData.Exposure).Clear());
+    ///     }
+    ///     </code>
+    /// </example>
+    public AtmosSolverChunks Chunks(AtmosSimulation simulation)
+    {
+        ArgumentNullException.ThrowIfNull(simulation);
+        _solverScope.ThrowIfClosed();
+        int index = _solverScope.IndexOf(simulation);
+        if (index < 0)
+            throw new ArgumentException("The simulation is not registered in the world running this tick.", nameof(simulation));
+
+        return new AtmosSolverChunks(_solverScope, index);
+    }
+
+    /// <summary>
+    ///     Gets a lock-free view of the chunk that contains a world cell.
+    /// </summary>
+    /// <param name="cell">A cell in any simulation of this world, such as a portal or dock endpoint.</param>
+    /// <param name="chunk">The chunk view when found; otherwise <see langword="default" />.</param>
+    /// <returns>
+    ///     <see langword="true" /> when the cell's simulation, chunk, and voxel index all exist in this tick.
+    /// </returns>
+    /// <remarks>
+    ///     Index the chunk's fields with <see cref="AtmosCellRef.LocalVoxelIndex" /> to reach the cell itself. Like
+    ///     <see cref="Chunks" />, this is safe to call from worker threads during the callback.
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">The tick has ended.</exception>
+    /// <example>
+    ///     <code>
+    ///     foreach (var neighbor in context.Topology.GetNeighbors(cell))
+    ///     {
+    ///         if (context.TryGetChunk(neighbor.Cell, out var other))
+    ///             other.GetSpan(FireData.Exposure)[neighbor.Cell.LocalVoxelIndex] += 0.1f;
+    ///     }
+    ///     </code>
+    /// </example>
+    public bool TryGetChunk(AtmosCellRef cell, out AtmosSolverChunk chunk)
+    {
+        _solverScope.ThrowIfClosed();
+        int index = _solverScope.IndexOf(cell.Simulation);
+        if (index >= 0 &&
+            _solverScope.Contexts[index].TryGetChunk(cell.Chunk.Position, out var found) &&
+            cell.LocalVoxelIndex < found.VoxelCount)
+        {
+            chunk = new AtmosSolverChunk(_solverScope, index, found);
+            return true;
+        }
+
+        chunk = default;
+        return false;
+    }
 }
 
 /// <summary>

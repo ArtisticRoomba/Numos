@@ -21,6 +21,43 @@ public static class AtmosWorldSolverDangerousExtensions
         ArgumentNullException.ThrowIfNull(context);
         return new AtmosDangerousWorldSolverApi(context);
     }
+
+    /// <summary>
+    ///     Opens unchecked live storage for a solver chunk view.
+    /// </summary>
+    /// <param name="chunk">A view from <see cref="AtmosWorldSolverContext.Chunks" /> or
+    ///     <see cref="AtmosWorldSolverContext.TryGetChunk" />.</param>
+    /// <returns>A live view of the same chunk, including built-in gas and temperature storage.</returns>
+    /// <remarks>
+    ///     <para>
+    ///         Unlike <see cref="AtmosSimulationDangerousExtensions.Dangerous" />, this takes no simulation lock, so it
+    ///         works from worker threads inside a callback. The tick is checked once, here; the returned view is not
+    ///         checked again, so don't use it after the callback returns.
+    ///     </para>
+    ///     <para>
+    ///         Writes are not recorded and stay replay-safe only when they are deterministic solver work.
+    ///     </para>
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">
+    ///     <paramref name="chunk" /> is <see langword="default" /> or its tick has ended.
+    /// </exception>
+    /// <example>
+    ///     <code>
+    ///     var chunks = context.Chunks(simulation);
+    ///     Parallel.For(0, chunks.Count, index =>
+    ///     {
+    ///         var live = chunks[index].Dangerous();
+    ///         Span&lt;float&gt; exposure = live.GetSpan(FireData.Exposure);
+    ///         Span&lt;float&gt; temperature = live.Temperature;
+    ///         for (int voxel = 0; voxel &lt; exposure.Length; voxel++)
+    ///             exposure[voxel] += temperature[voxel] &gt; 500f ? 1f : 0f;
+    ///     });
+    ///     </code>
+    /// </example>
+    public static AtmosDangerousChunk Dangerous(this AtmosSolverChunk chunk)
+    {
+        return new AtmosDangerousChunk(chunk.Chunk);
+    }
 }
 
 /// <summary>

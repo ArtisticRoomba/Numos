@@ -380,12 +380,14 @@ internal sealed class AtmosWorldExecutionContext(
     AtmosWorld world,
     AtmosSimulation[] simulations,
     AtmosWorldTickExecution[] executions,
-    IReadOnlyList<AtmosSimulation> publicSimulations)
+    IReadOnlyList<AtmosSimulation> publicSimulations,
+    AtmosSolverTickScope solverScope)
 {
     internal AtmosWorld World { get; } = world;
     internal AtmosSimulation[] Simulations { get; } = simulations;
     internal AtmosWorldTickExecution[] Executions { get; } = executions;
     internal IReadOnlyList<AtmosSimulation> PublicSimulations { get; } = publicSimulations;
+    internal AtmosSolverTickScope SolverScope { get; } = solverScope;
 }
 
 internal sealed class WorldSolverRegistration
@@ -432,7 +434,8 @@ internal sealed class WorldSolverRegistration
     {
         if (_customSolver != null)
         {
-            _customSolver(new AtmosWorldSolverContext(context.World, context.PublicSimulations, _topology));
+            _customSolver(new AtmosWorldSolverContext(
+                context.World, context.PublicSimulations, _topology, context.SolverScope));
             return;
         }
 

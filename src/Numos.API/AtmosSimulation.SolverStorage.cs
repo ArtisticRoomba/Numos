@@ -229,4 +229,61 @@ public sealed partial class AtmosSimulation
         ThrowIfDisposed();
         return _kernel.GetOrCreateChunkSolverFlatArray<T>(chunk.Position, key, captureForRollback);
     }
+
+    /// <summary>
+    ///     Gets a chunk's storage for a custom field outside a solver tick, creating it on first use.
+    /// </summary>
+    /// <typeparam name="T">The field's element type.</typeparam>
+    /// <param name="chunk">The chunk that owns the storage.</param>
+    /// <param name="field">The field to read.</param>
+    /// <returns>
+    ///     A live view of the same array solvers reach through <see cref="AtmosSolverChunk.Get{T}" />. Per-voxel fields
+    ///     use <see cref="ChunkDimensions" />; fixed-length fields are one-dimensional.
+    /// </returns>
+    /// <remarks>
+    ///     <para>
+    ///         Use this to seed or inspect field data from host code. Inside solver callbacks, use
+    ///         <see cref="AtmosWorldSolverContext.Chunks" /> instead: it skips the state lock this method takes, and
+    ///         it works from worker threads.
+    ///     </para>
+    ///     <para>
+    ///         Writes are not recorded. For replay, write rollback fields before capturing the starting checkpoint and
+    ///         only from deterministic solver callbacks after that. The array stays live until the chunk is
+    ///         unregistered or a checkpoint is restored; reacquire it after either.
+    ///     </para>
+    ///     <para>
+    ///         While a world tick runs, only the tick's own thread may call this. Any other thread gets an
+    ///         <see cref="InvalidOperationException" /> rather than blocking, because a solver's worker threads would
+    ///         otherwise wait forever on a lock the tick holds until they finish.
+    ///     </para>
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="field" /> is <see langword="null" />.</exception>
+    /// <exception cref="InvalidOperationException">
+    ///     A tick is running and the caller is not the tick's thread.
+    /// </exception>
+    /// <exception cref="KeyNotFoundException">The chunk is not registered.</exception>
+    /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
+    /// <example>
+    ///     <code>
+    ///     FlatArray&lt;float&gt; exposure = simulation.GetChunkField(chunk, FireData.Exposure);
+    ///     exposure[new Int3(0, 0, 0)] = 1f;
+    ///     var checkpoint = simulation.CaptureCheckpoint(); // includes the seeded value for rollback fields
+    ///     </code>
+    /// </example>
+    [PublicAPI]
+    public FlatArray<T> GetChunkField<T>(AtmosChunkHandle chunk, ChunkField<T> field)
+    {
+        ArgumentNullException.ThrowIfNull(field);
+        ThrowIfDisposed();
+        if (World.IsTickExecuting && !Monitor.IsEntered(_kernel.StateGate))
+        {
+            throw new InvalidOperationException(
+                "Chunk fields cannot be read through AtmosSimulation from another thread while a tick is running. " +
+                "Inside a solver callback, use AtmosWorldSolverContext.Chunks or TryGetChunk and the returned " +
+                "AtmosSolverChunk views, which are safe on worker threads.");
+        }
+
+        T[] values = _kernel.GetOrCreateChunkField(chunk.Position, field.Descriptor);
+        return field.CreateView(values, ChunkDimensions);
+    }
 }

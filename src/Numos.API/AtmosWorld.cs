@@ -47,7 +47,7 @@ public sealed partial class AtmosWorld : IDisposable
     private Dictionary<AtmosChunkKey, int> _activeEdgesByChunk = [];
     private AtmosConfigSnapshot _config;
     private bool _disposed;
-    private bool _isTickExecuting;
+    private volatile bool _isTickExecuting;
     private long _linkSetCollectionRevision;
     private AtmosSimulation[] _orderedSimulations = [];
     private AtmosConfigSnapshot? _pendingConfig;
@@ -77,6 +77,11 @@ public sealed partial class AtmosWorld : IDisposable
     }
 
     internal object Gate { get; } = new();
+
+    /// <summary>
+    ///     Gets whether a tick is running its solver pipeline. Safe to read from any thread.
+    /// </summary>
+    internal bool IsTickExecuting => _isTickExecuting;
 
     /// <summary>
     ///     Gets the ordered solver pipeline used by subsequent world ticks.
@@ -1027,6 +1032,7 @@ public sealed partial class AtmosWorld : IDisposable
 
         WorldSolverRegistration[] worldSteps = Solvers.CaptureEnabled();
         IReadOnlyList<AtmosSimulation> publicSimulations = Array.AsReadOnly(simulations);
+        AtmosSolverTickScope? solverScope = null;
 
         try
         {
@@ -1044,11 +1050,13 @@ public sealed partial class AtmosWorld : IDisposable
             for (; begunTicks < simulations.Length; begunTicks++)
                 executions[begunTicks] = simulations[begunTicks].Kernel.BeginWorldTick();
 
+            solverScope = new AtmosSolverTickScope(simulations, executions);
             var executionContext = new AtmosWorldExecutionContext(
                 this,
                 simulations,
                 executions,
-                publicSimulations);
+                publicSimulations,
+                solverScope);
 
             Solvers.Execute(worldSteps, executionContext);
 
@@ -1063,6 +1071,10 @@ public sealed partial class AtmosWorld : IDisposable
         }
         finally
         {
+            // Close before releasing the state locks: solver chunk views hold raw chunk references that are only
+            // safe while this tick owns every simulation.
+            solverScope?.Close();
+
             for (int index = begunTicks - 1; index >= 0; index--)
                 simulations[index].Kernel.CompleteWorldTick();
 
