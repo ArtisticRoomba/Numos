@@ -394,10 +394,10 @@ public sealed partial class AtmosWorld
     private void ApplyWorldOperation(AtmosWorldOperation operation)
     {
         ArgumentNullException.ThrowIfNull(operation);
-        ApplyWorldOperationGenerated(operation);
+        operation.Apply(this);
     }
 
-    private void Apply(AtmosWorldSimulationOperation simulationOperation)
+    internal void Apply(AtmosWorldSimulationOperation simulationOperation)
     {
         var simulation = TryGetSimulationCore(simulationOperation.Simulation);
         if (simulation == null)
@@ -412,12 +412,12 @@ public sealed partial class AtmosWorld
             InvalidateLinksForChunk(simulation, new AtmosChunkHandle(removed.Position));
     }
 
-    private void Apply(SetAtmosWorldConfigOperation config)
+    internal void Apply(SetAtmosWorldConfigOperation config)
     {
         ApplyConfig(config.Config);
     }
 
-    private void Apply(CreateAtmosSimulationOperation create)
+    internal void Apply(CreateAtmosSimulationOperation create)
     {
         var simulation = new AtmosSimulation(
             this,
@@ -430,7 +430,7 @@ public sealed partial class AtmosWorld
             throw new ArgumentException("Simulation allocation diverged from recorded history.", nameof(create));
     }
 
-    private void Apply(DestroyAtmosSimulationOperation destroy)
+    internal void Apply(DestroyAtmosSimulationOperation destroy)
     {
         var simulation = TryGetSimulationCore(destroy.Simulation);
         if (simulation == null || !UnregisterSimulationCore(simulation, false))
@@ -439,19 +439,19 @@ public sealed partial class AtmosWorld
         simulation.DisposeFromWorld();
     }
 
-    private void Apply(CreateAtmosLinkSetOperation create)
+    internal void Apply(CreateAtmosLinkSetOperation create)
     {
         var actual = CreateLinksCore(create.Links.ToArray(), create.Kind);
         if (actual != create.Handle)
             throw new ArgumentException("Link-set allocation diverged from recorded history.", nameof(create));
     }
 
-    private void Apply(DestroyAtmosLinkSetOperation destroy)
+    internal void Apply(DestroyAtmosLinkSetOperation destroy)
     {
         DestroyLinksCore(destroy.Handle);
     }
 
-    private void Apply(SetAtmosWorldSolverEnabledOperation solver)
+    internal void Apply(SetAtmosWorldSolverEnabledOperation solver)
     {
         if (!Solvers.SetEnabled(solver.Name, solver.Enabled))
             throw new ArgumentException($"Unknown world solver '{solver.Name}'.", nameof(solver));

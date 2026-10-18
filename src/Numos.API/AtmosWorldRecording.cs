@@ -55,6 +55,12 @@ public abstract record AtmosWorldOperation
     ///     Gets the stable code used by diagnostics and portable serialization.
     /// </summary>
     public abstract AtmosWorldOperationCode Code { get; }
+
+    /// <summary>
+    ///     Replays this operation against <paramref name="world" /> through its matching <c>Apply</c> overload.
+    /// </summary>
+    /// <remarks>Internal, so the operation set stays closed to the opcodes Numos can serialize and replay.</remarks>
+    internal abstract void Apply(AtmosWorld world);
 }
 
 /// <summary>
@@ -68,6 +74,8 @@ public sealed record AtmosWorldSimulationOperation(
 {
     /// <inheritdoc />
     public override AtmosWorldOperationCode Code => AtmosWorldOperationCode.SimulationOperation;
+
+    internal override void Apply(AtmosWorld world) => world.Apply(this);
 }
 
 /// <summary>
@@ -78,6 +86,8 @@ public sealed record SetAtmosWorldConfigOperation(AtmosConfigSnapshot Config) : 
 {
     /// <inheritdoc />
     public override AtmosWorldOperationCode Code => AtmosWorldOperationCode.SetAtmosConfig;
+
+    internal override void Apply(AtmosWorld world) => world.Apply(this);
 }
 
 /// <summary>
@@ -91,6 +101,8 @@ public sealed record CreateAtmosSimulationOperation(
 {
     /// <inheritdoc />
     public override AtmosWorldOperationCode Code => AtmosWorldOperationCode.CreateSimulation;
+
+    internal override void Apply(AtmosWorld world) => world.Apply(this);
 }
 
 /// <summary>
@@ -101,6 +113,8 @@ public sealed record DestroyAtmosSimulationOperation(AtmosSimulationId Simulatio
 {
     /// <inheritdoc />
     public override AtmosWorldOperationCode Code => AtmosWorldOperationCode.DestroySimulation;
+
+    internal override void Apply(AtmosWorld world) => world.Apply(this);
 }
 
 /// <summary>
@@ -129,6 +143,8 @@ public sealed record CreateAtmosLinkSetOperation : AtmosWorldOperation
     /// <inheritdoc />
     public override AtmosWorldOperationCode Code => AtmosWorldOperationCode.CreateLinkSet;
 
+    internal override void Apply(AtmosWorld world) => world.Apply(this);
+
     /// <summary>
     ///     Gets the exact generational handle allocated by the operation.
     /// </summary>
@@ -153,6 +169,8 @@ public sealed record DestroyAtmosLinkSetOperation(ExplicitLinkSetHandle Handle) 
 {
     /// <inheritdoc />
     public override AtmosWorldOperationCode Code => AtmosWorldOperationCode.DestroyLinkSet;
+
+    internal override void Apply(AtmosWorld world) => world.Apply(this);
 }
 
 /// <summary>
@@ -164,6 +182,8 @@ public sealed record SetAtmosWorldSolverEnabledOperation(string Name, bool Enabl
 {
     /// <inheritdoc />
     public override AtmosWorldOperationCode Code => AtmosWorldOperationCode.SetSolverEnabled;
+
+    internal override void Apply(AtmosWorld world) => world.Apply(this);
 }
 
 /// <summary>

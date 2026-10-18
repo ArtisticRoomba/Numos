@@ -14,8 +14,7 @@ namespace Numos.Replay.SourceGen;
 /// <remarks>
 ///     The enums and operation records live in <c>Numos.CoreSim</c>/<c>Numos.API</c>, while <c>[WireOperation]</c>
 ///     registrations live in <c>Numos.Serialization</c>. The check only fires in a compilation where at least one
-///     registration for a family is actually found (i.e. <c>Numos.Serialization</c>), so the other projects that
-///     reference this assembly for <see cref="ApplySwitchGenerator" /> stay quiet.
+///     registration for a family is actually found (i.e. <c>Numos.Serialization</c>).
 ///     <para>
 ///         This analyzer deliberately lives in its own assembly rather than alongside <c>ReplayCodecGenerator</c>
 ///         in <c>Numos.Replay.SourceGen</c>. That generator's <c>RegisterPostInitializationOutput</c> unconditionally
@@ -24,10 +23,6 @@ namespace Numos.Replay.SourceGen;
 ///         referenced the generator, <c>Numos.Serialization</c> -- which has <c>InternalsVisibleTo</c> access to both
 ///         and also references the generator directly -- would see three colliding declarations of the same internal
 ///         type and fail with CS0436. Keeping this assembly diagnostic- and dispatch-only avoids that.
-///     </para>
-///     <para>
-///         A missing Apply overload for an operation is caught by <see cref="ApplySwitchGenerator" />'s
-///         NUMOSREPLAYGEN010.
 ///     </para>
 /// </remarks>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]

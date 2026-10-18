@@ -11,6 +11,8 @@ public sealed record CreateChunkOperation(Int3 Position) : AtmosOperation
 {
     /// <inheritdoc />
     public override AtmosOperationCode Code => AtmosOperationCode.CreateChunk;
+
+    internal override void Apply(AtmosKernel kernel) => kernel.Apply(this);
 }
 
 /// <summary>
@@ -21,6 +23,8 @@ public sealed record RemoveChunkOperation(Int3 Position) : AtmosOperation
 {
     /// <inheritdoc />
     public override AtmosOperationCode Code => AtmosOperationCode.RemoveChunk;
+
+    internal override void Apply(AtmosKernel kernel) => kernel.Apply(this);
 }
 
 /// <summary>
@@ -32,6 +36,8 @@ public sealed record SetChunkClassificationOperation(Int3 Position, VoxelClassif
 {
     /// <inheritdoc />
     public override AtmosOperationCode Code => AtmosOperationCode.SetChunkClassification;
+
+    internal override void Apply(AtmosKernel kernel) => kernel.Apply(this);
 }
 
 /// <summary>
@@ -43,6 +49,8 @@ public sealed record SetChunkBoundaryClassificationOperation(Int3 Position, Voxe
 {
     /// <inheritdoc />
     public override AtmosOperationCode Code => AtmosOperationCode.SetChunkBoundaryClassification;
+
+    internal override void Apply(AtmosKernel kernel) => kernel.Apply(this);
 }
 
 /// <summary>
@@ -56,6 +64,8 @@ public sealed record SetVoxelClassificationOperation(Int3 Position, ushort Local
 {
     /// <inheritdoc />
     public override AtmosOperationCode Code => AtmosOperationCode.SetVoxelClassification;
+
+    internal override void Apply(AtmosKernel kernel) => kernel.Apply(this);
 }
 
 /// <summary>
@@ -68,6 +78,8 @@ public sealed record SetVoxelTemperatureOperation(Int3 Position, ushort LocalVox
 {
     /// <inheritdoc />
     public override AtmosOperationCode Code => AtmosOperationCode.SetVoxelTemperature;
+
+    internal override void Apply(AtmosKernel kernel) => kernel.Apply(this);
 }
 
 /// <summary>
@@ -83,6 +95,8 @@ public sealed record AddGasToVoxelOperation(Int3 Position, ushort LocalVoxelInde
 {
     /// <inheritdoc />
     public override AtmosOperationCode Code => AtmosOperationCode.AddGasToVoxel;
+
+    internal override void Apply(AtmosKernel kernel) => kernel.Apply(this);
 }
 
 /// <summary>
@@ -93,6 +107,8 @@ public sealed record WakeChunkOperation(Int3 Position) : AtmosOperation
 {
     /// <inheritdoc />
     public override AtmosOperationCode Code => AtmosOperationCode.WakeChunk;
+
+    internal override void Apply(AtmosKernel kernel) => kernel.Apply(this);
 }
 
 /// <summary>
@@ -103,6 +119,8 @@ public sealed record SleepChunkOperation(Int3 Position) : AtmosOperation
 {
     /// <inheritdoc />
     public override AtmosOperationCode Code => AtmosOperationCode.SleepChunk;
+
+    internal override void Apply(AtmosKernel kernel) => kernel.Apply(this);
 }
 
 /// <summary>
@@ -144,6 +162,8 @@ public sealed record SetVoxelMixtureOperation : AtmosOperation
 
     /// <inheritdoc />
     public override AtmosOperationCode Code => AtmosOperationCode.SetVoxelMixture;
+
+    internal override void Apply(AtmosKernel kernel) => kernel.Apply(this);
 
     /// <summary>
     ///     Gets the chunk-grid address receiving the resolved mutation.

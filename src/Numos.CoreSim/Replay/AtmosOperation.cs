@@ -70,4 +70,10 @@ public abstract record AtmosOperation
     ///     Gets the stable discriminator used when Numos replays this payload.
     /// </summary>
     public abstract AtmosOperationCode Code { get; }
+
+    /// <summary>
+    ///     Replays this operation against <paramref name="kernel" /> through its matching <c>Apply</c> overload.
+    /// </summary>
+    /// <remarks>Internal, so the operation set stays closed to the opcodes Numos can serialize and replay.</remarks>
+    internal abstract void Apply(AtmosKernel kernel);
 }
