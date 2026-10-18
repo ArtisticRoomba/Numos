@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using Numos.CoreSim.GasReactions;
 using Numos.CoreSim.Replay;
 using Numos.Maths;
 
@@ -15,6 +16,8 @@ namespace Numos.CoreSim;
 /// </remarks>
 public sealed class AtmosConfigSnapshot : IAtmosConfig
 {
+    private ReactionTables? _reactionTables;
+
     internal AtmosConfigSnapshot(AtmosConfig source)
     {
         ArgumentNullException.ThrowIfNull(source);
@@ -267,6 +270,23 @@ public sealed class AtmosConfigSnapshot : IAtmosConfig
     public void ValidateGasRegistry()
     {
         GasRegistry.ValidateGasRegistry();
+    }
+
+    /// <summary>
+    ///     Gets the reaction solver's tables for this configuration, building them on first use.
+    /// </summary>
+    /// <remarks>
+    ///     The tables are a pure function of this snapshot, so every simulation using it shares one copy and keeps it
+    ///     across restores. Concurrent first calls may each build a copy; only one is published.
+    /// </remarks>
+    internal ReactionTables GetReactionTables()
+    {
+        var tables = Volatile.Read(ref _reactionTables);
+        if (tables != null)
+            return tables;
+
+        tables = ReactionTables.Create(this);
+        return Interlocked.CompareExchange(ref _reactionTables, tables, null) ?? tables;
     }
 
     internal void AppendHash(ref AtmosStateHasher hash)

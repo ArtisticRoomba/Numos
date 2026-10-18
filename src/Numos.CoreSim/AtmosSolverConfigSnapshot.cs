@@ -1,3 +1,4 @@
+using Numos.CoreSim.GasReactions;
 using Numos.CoreSim.Solvers;
 using Numos.Maths;
 
@@ -17,6 +18,9 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
     private JoulePerMoleKelvin[] _molarHeatCapacitiesAtConstantVolume = [];
 
     private AtmosConfigSnapshot? _sourceConfig;
+
+    // Only used when the captured configuration is not an AtmosConfigSnapshot, which has its own shared copy.
+    private ReactionTables? _reactionTables;
 
     /// <summary>
     ///     Gets solver data derived from this configuration. Every capture of a different configuration clears it.
@@ -166,7 +170,16 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
         SolverConfigurations = config.SolverConfigurations;
 
         ConfigScopedData.Clear();
+        _reactionTables = null;
         _sourceConfig = config as AtmosConfigSnapshot;
+    }
+
+    /// <summary>
+    ///     Gets the reaction solver's tables for this configuration.
+    /// </summary>
+    internal ReactionTables GetReactionTables()
+    {
+        return _sourceConfig?.GetReactionTables() ?? (_reactionTables ??= ReactionTables.Create(this));
     }
 
     public void ValidateGasRegistry()

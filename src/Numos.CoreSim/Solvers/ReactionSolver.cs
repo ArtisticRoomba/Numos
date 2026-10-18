@@ -21,11 +21,6 @@ internal class ReactionSolver : IAtmosSolverStage
     // buffer that just grows to the high-water mark removes that round trip entirely.
     [ThreadStatic]
     private static Mole[]? _reactionSpeedsScratch;
-    // Reaction tables for the tick configuration, rebuilt when the configuration changes.
-    private readonly static SolverDataSlot<ReactionTables> TablesSlot = new(
-        "gas-reactions/tables",
-        static context => ReactionTables.Create(context.TickConfig),
-        true);
 
     public void Solve(AtmosSolverExecutionContext context)
     {
@@ -33,7 +28,7 @@ internal class ReactionSolver : IAtmosSolverStage
         if (GasReactionConfig.Get(context.TickConfig).Count == 0 || context.TickConfig.GasPropertyCount == 0)
             return;
 
-        var tables = context.GetSolverData(TablesSlot);
+        var tables = context.TickConfig.GetReactionTables();
 
         // Told to ProcessChunk so it knows whether this outer per-chunk dispatch already saturates
         // the worker pool, mirroring ThermodynamicsSolver/PhaseChangeSolver's awakeChunkCount gate.
