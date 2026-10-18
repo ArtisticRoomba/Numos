@@ -1,24 +1,45 @@
 namespace Numos.CoreSim.Solvers;
 
 /// <summary>
-///     Hands out process-wide slot ids for solver data. Built-in slots and public keys share one id space, so both
-///     can live in the same <see cref="SolverDataStorage" />.
+///     Identifies one piece of solver data. Built-in slots and public keys both hold one, so they share one id space
+///     and can live in the same <see cref="SolverDataStorage" />.
 /// </summary>
 /// <remarks>
 ///     Ids follow static-initialization order and differ between processes. They index storage and nothing else:
-///     never hash, serialize, or iterate in slot order.
+///     never hash, serialize, or iterate in id order. Ids are never reclaimed.
 /// </remarks>
-internal static class SolverDataSlotIds
+internal sealed class SolverDataDescriptor
 {
-    private static int _next = -1;
+    private static int _nextId = -1;
 
     /// <summary>
-    ///     Reserves the next slot id. Ids are never reclaimed.
+    ///     Creates a descriptor with its own id.
     /// </summary>
-    /// <returns>A unique nonnegative slot id.</returns>
-    internal static int Next()
+    /// <param name="name">A diagnostic name, used in error messages only.</param>
+    /// <param name="resetOnConfigChange">
+    ///     <see langword="true" /> to store the value with the tick configuration, so a configuration change drops it;
+    ///     <see langword="false" /> to keep it until restore or disposal.
+    /// </param>
+    internal SolverDataDescriptor(string name, bool resetOnConfigChange)
     {
-        return Interlocked.Increment(ref _next);
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        Id = Interlocked.Increment(ref _nextId);
+        Name = name;
+        ResetOnConfigChange = resetOnConfigChange;
+    }
+
+    internal int Id { get; }
+    internal string Name { get; }
+    internal bool ResetOnConfigChange { get; }
+
+    /// <summary>
+    ///     Picks the storage this descriptor's values live in.
+    /// </summary>
+    /// <param name="tickConfig">The tick configuration that owns config-scoped values.</param>
+    /// <param name="untilRestore">The simulation's storage for everything else.</param>
+    internal SolverDataStorage SelectStorage(AtmosSolverConfigSnapshot tickConfig, SolverDataStorage untilRestore)
+    {
+        return ResetOnConfigChange ? tickConfig.ConfigScopedData : untilRestore;
     }
 }
 
@@ -37,22 +58,14 @@ internal sealed class SolverDataSlot<T> where T : class
     /// </summary>
     /// <param name="name">A diagnostic name, used in error messages only.</param>
     /// <param name="factory">Builds the value from the current tick's inputs. Must not return null.</param>
-    /// <param name="resetOnConfigChange">
-    ///     <see langword="true" /> to store the value with the tick configuration, so a configuration change drops it;
-    ///     <see langword="false" /> to keep it until restore or disposal.
-    /// </param>
+    /// <param name="resetOnConfigChange">See <see cref="SolverDataDescriptor" />.</param>
     internal SolverDataSlot(string name, Func<AtmosSolverExecutionContext, T> factory, bool resetOnConfigChange = false)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ArgumentNullException.ThrowIfNull(factory);
-        Id = SolverDataSlotIds.Next();
-        Name = name;
+        Descriptor = new SolverDataDescriptor(name, resetOnConfigChange);
         Factory = factory;
-        ResetOnConfigChange = resetOnConfigChange;
     }
 
-    internal int Id { get; }
-    internal string Name { get; }
-    internal bool ResetOnConfigChange { get; }
+    internal SolverDataDescriptor Descriptor { get; }
     internal Func<AtmosSolverExecutionContext, T> Factory { get; }
 }

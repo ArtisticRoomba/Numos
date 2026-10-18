@@ -1,4 +1,3 @@
-using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 
 namespace Numos.CoreSim.Solvers;
@@ -70,8 +69,6 @@ internal abstract class ChunkFieldDescriptor
         return FixedLength ?? voxelCount;
     }
 
-    internal abstract SolverArrayStorage Allocate(int voxelCount);
-
     internal string Describe()
     {
         return Describe(ElementType, CaptureForRollback, FixedLength);
@@ -95,9 +92,9 @@ internal sealed class ChunkFieldDescriptor<T> : ChunkFieldDescriptor
 
     internal override Type ElementType => typeof(T);
 
-    internal override SolverArrayStorage Allocate(int voxelCount)
+    internal SolverArrayStorage<T> Allocate(int voxelCount)
     {
-        return new SolverArrayStorage<T>(new T[GetLength(voxelCount)], CaptureForRollback) { Field = this };
+        return new SolverArrayStorage<T>(this, new T[GetLength(voxelCount)]);
     }
 
     internal bool Matches(bool captureForRollback, int? fixedLength)
@@ -117,7 +114,6 @@ internal static class ChunkFieldRegistry
 {
     private static readonly Lock Gate = new();
     private static readonly Dictionary<string, ChunkFieldDescriptor> ByKey = new(StringComparer.Ordinal);
-    private static ChunkFieldDescriptor[] _bySlot = new ChunkFieldDescriptor[16];
     private static int _slotCount;
 
     /// <summary>
@@ -162,8 +158,7 @@ internal static class ChunkFieldRegistry
                     $"again as {ChunkFieldDescriptor.Describe(typeof(T), captureForRollback, length)}.");
             }
 
-            var descriptor = new ChunkFieldDescriptor<T>(key, _slotCount, captureForRollback, length, false);
-            AddSlot(descriptor);
+            var descriptor = new ChunkFieldDescriptor<T>(key, NextSlot(), captureForRollback, length, false);
             ByKey.Add(key, descriptor);
             return descriptor;
         }
@@ -187,38 +182,15 @@ internal static class ChunkFieldRegistry
 
         lock (Gate)
         {
-            var descriptor = new ChunkFieldDescriptor<T>(debugName, _slotCount, false, length, true);
-            AddSlot(descriptor);
-            return descriptor;
+            return new ChunkFieldDescriptor<T>(debugName, NextSlot(), false, length, true);
         }
     }
 
-    internal static bool TryGetByKey(string key, [NotNullWhen(true)] out ChunkFieldDescriptor? descriptor)
+    // Caller holds Gate.
+    private static int NextSlot()
     {
-        lock (Gate)
-        {
-            return ByKey.TryGetValue(key, out descriptor);
-        }
-    }
-
-    internal static ChunkFieldDescriptor GetBySlot(int slot)
-    {
-        // Read the count first: it is published after the array that holds it.
-        ArgumentOutOfRangeException.ThrowIfNegative(slot);
-        ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(slot, SlotCount);
-        return Volatile.Read(ref _bySlot)[slot];
-    }
-
-    private static void AddSlot(ChunkFieldDescriptor descriptor)
-    {
-        if (_slotCount == _bySlot.Length)
-        {
-            var grown = new ChunkFieldDescriptor[_bySlot.Length * 2];
-            Array.Copy(_bySlot, grown, _slotCount);
-            Volatile.Write(ref _bySlot, grown);
-        }
-
-        _bySlot[_slotCount] = descriptor;
-        Volatile.Write(ref _slotCount, _slotCount + 1);
+        int slot = _slotCount;
+        Volatile.Write(ref _slotCount, slot + 1);
+        return slot;
     }
 }

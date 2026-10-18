@@ -17,13 +17,7 @@ public sealed class ChunkFieldRegistryTests
         var first = ChunkFieldRegistry.Register<int>(Key("idempotent"), true, null);
         var second = ChunkFieldRegistry.Register<int>(Key("idempotent"), true, null);
 
-        Assert.Multiple(() =>
-        {
-            Assert.That(second, Is.SameAs(first));
-            Assert.That(ChunkFieldRegistry.TryGetByKey(Key("idempotent"), out var found), Is.True);
-            Assert.That(found, Is.SameAs(first));
-            Assert.That(ChunkFieldRegistry.GetBySlot(first.Slot), Is.SameAs(first));
-        });
+        Assert.That(second, Is.SameAs(first));
     }
 
     [Test]
@@ -78,8 +72,10 @@ public sealed class ChunkFieldRegistryTests
                 ChunkFieldRegistry.Register<string>(Key("rollback-string"), true, null));
             Assert.Throws<ArgumentException>(() =>
                 ChunkFieldRegistry.Register<ReferenceHolder>(Key("rollback-holder"), true, null));
-            Assert.That(ChunkFieldRegistry.TryGetByKey(Key("rollback-string"), out _), Is.False);
         });
+
+        // A rejected registration must not claim the key.
+        Assert.That(ChunkFieldRegistry.Register<string>(Key("rollback-string"), false, null).CaptureForRollback, Is.False);
     }
 
     [Test]
@@ -117,7 +113,6 @@ public sealed class ChunkFieldRegistryTests
             Assert.That(first.CaptureForRollback, Is.False);
             Assert.That(second, Is.Not.SameAs(first));
             Assert.That(second.Slot, Is.Not.EqualTo(first.Slot));
-            Assert.That(ChunkFieldRegistry.TryGetByKey(name, out _), Is.False);
         });
 
         var registered = ChunkFieldRegistry.Register<float>(name, false, null);

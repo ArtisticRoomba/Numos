@@ -91,23 +91,22 @@ public sealed class SolverDataKey<T> where T : class
         if (lifetime is not (SolverDataLifetime.UntilRestore or SolverDataLifetime.UntilConfigChange))
             throw new ArgumentOutOfRangeException(nameof(lifetime), lifetime, "Unknown solver data lifetime.");
 
-        Name = name;
+        Descriptor = new SolverDataDescriptor(name, lifetime == SolverDataLifetime.UntilConfigChange);
         Factory = factory;
-        Lifetime = lifetime;
-        SlotId = SolverDataSlotIds.Next();
     }
 
     /// <summary>
     ///     Gets the diagnostic name.
     /// </summary>
-    public string Name { get; }
+    public string Name => Descriptor.Name;
 
     /// <summary>
     ///     Gets when cached values are dropped.
     /// </summary>
-    public SolverDataLifetime Lifetime { get; }
+    public SolverDataLifetime Lifetime =>
+        Descriptor.ResetOnConfigChange ? SolverDataLifetime.UntilConfigChange : SolverDataLifetime.UntilRestore;
 
-    internal int SlotId { get; }
+    internal SolverDataDescriptor Descriptor { get; }
     internal Func<AtmosSimulation, T> Factory { get; }
 
     /// <inheritdoc />

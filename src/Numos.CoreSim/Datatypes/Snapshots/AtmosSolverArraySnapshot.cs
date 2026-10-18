@@ -14,16 +14,15 @@ public sealed class AtmosSolverArraySnapshot
 {
     private readonly SolverArrayStorage _storage;
 
-    internal AtmosSolverArraySnapshot(string key, SolverArrayStorage storage)
+    internal AtmosSolverArraySnapshot(SolverArrayStorage storage)
     {
-        Key = key;
         _storage = storage.Clone();
     }
 
     /// <summary>
     ///     Gets the registered key of the rollback <c>ChunkField&lt;T&gt;</c> this array was captured from.
     /// </summary>
-    public string Key { get; }
+    public string Key => _storage.Field.Key;
 
     /// <summary>
     ///     Gets the field's exact element type, required when reading this array.

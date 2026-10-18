@@ -1,4 +1,3 @@
-using System.Diagnostics.CodeAnalysis;
 using Numos.CoreSim.Solvers;
 using Numos.Maths;
 
@@ -83,25 +82,6 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
 
     public int GasPropertyCount { get; private set; }
 
-    /// <inheritdoc cref="AtmosConfigSnapshot.TryGetSolverConfiguration{T}(out T)" />
-    internal bool TryGetSolverConfiguration<T>([NotNullWhen(true)] out T? configuration)
-        where T : class, IAtmosSolverConfiguration
-    {
-        return SolverConfigurationLookup.TryGet(SolverConfigurations, out configuration);
-    }
-
-    /// <inheritdoc cref="AtmosConfigSnapshot.TryGetSolverConfiguration{T}(string, out T)" />
-    internal bool TryGetSolverConfiguration<T>(string key, [NotNullWhen(true)] out T? configuration)
-        where T : class, IAtmosSolverConfiguration
-    {
-        return SolverConfigurationLookup.TryGet(SolverConfigurations, key, out configuration);
-    }
-
-    internal void ClearConfigScopedData()
-    {
-        ConfigScopedData.Clear();
-    }
-
     internal void Capture(IAtmosConfig config)
     {
         // Only immutable configurations can safely retain derived data across captures.
@@ -185,7 +165,7 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
 
         SolverConfigurations = config.SolverConfigurations;
 
-        ClearConfigScopedData();
+        ConfigScopedData.Clear();
         _sourceConfig = config as AtmosConfigSnapshot;
     }
 

@@ -39,8 +39,9 @@ internal sealed class AtmosSolverExecutionContext
     /// <remarks>Call this on the tick thread before dispatching workers; the storage is not thread-safe.</remarks>
     internal T GetSolverData<T>(SolverDataSlot<T> slot) where T : class
     {
-        var storage = slot.ResetOnConfigChange ? TickConfig.ConfigScopedData : SharedData;
-        return storage.GetOrCreate(slot.Id, slot.Name, (Context: this, Slot: slot), static state => state.Slot.Factory(state.Context));
+        var descriptor = slot.Descriptor;
+        return descriptor.SelectStorage(TickConfig, SharedData)
+            .GetOrCreate(descriptor, (Context: this, Slot: slot), static state => state.Slot.Factory(state.Context));
     }
 
     /// <summary>

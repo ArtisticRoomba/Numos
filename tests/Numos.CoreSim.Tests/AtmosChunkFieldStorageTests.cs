@@ -1,4 +1,3 @@
-using Numos.CoreSim.Datatypes.Snapshots;
 using Numos.CoreSim.Replay;
 using Numos.CoreSim.Solvers;
 using Numos.Maths;
@@ -57,7 +56,6 @@ public sealed class AtmosChunkFieldStorageTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(chunk.TryGetField(Captured, out _), Is.False);
             Assert.That(chunk.HasCapturedSolverArrays, Is.False);
             Assert.That(chunk.CaptureSolverArrays(), Is.Empty);
         });
@@ -68,10 +66,10 @@ public sealed class AtmosChunkFieldStorageTests
         {
             Assert.That(values, Has.Length.EqualTo(6));
             Assert.That(chunk.GetOrCreateField(Captured), Is.SameAs(values));
-            Assert.That(chunk.TryGetField(Captured, out int[]? found), Is.True);
-            Assert.That(found, Is.SameAs(values));
             Assert.That(chunk.HasCapturedSolverArrays, Is.True);
-            Assert.That(chunk.TryGetField(Transient, out _), Is.False);
+            Assert.That(
+                chunk.CaptureSolverArrays().Select(static array => array.Key),
+                Is.EqualTo(new[] { Captured.Key }));
         });
     }
 
@@ -112,8 +110,7 @@ public sealed class AtmosChunkFieldStorageTests
 
             for (int worker = 0; worker < workerCount; worker++)
             {
-                Assert.That(chunk.TryGetField(fields[worker % fields.Length], out int[]? stored), Is.True);
-                Assert.That(results[worker], Is.SameAs(stored));
+                Assert.That(results[worker], Is.SameAs(chunk.GetOrCreateField(fields[worker % fields.Length])));
             }
 
             Assert.That(chunk.CaptureSolverArrays(), Has.Length.EqualTo(fields.Length));
@@ -188,8 +185,8 @@ public sealed class AtmosChunkFieldStorageTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(chunk.TryGetField(Captured, out _), Is.False);
             Assert.That(chunk.HasCapturedSolverArrays, Is.False);
+            Assert.That(chunk.CaptureSolverArrays(), Is.Empty);
             Assert.That(chunk.GetOrCreateField(Captured), Is.Not.SameAs(original));
         });
     }
@@ -205,54 +202,15 @@ public sealed class AtmosChunkFieldStorageTests
         var target = new AtmosChunk(2, 1, 1);
         target.RestoreSolverArrays(snapshots);
 
+        Assert.That(target.HasCapturedSolverArrays, Is.True);
+        int[] restored = target.GetOrCreateField(Captured);
+
         Assert.Multiple(() =>
         {
-            Assert.That(target.TryGetField(Captured, out int[]? restored), Is.True);
             Assert.That(restored, Is.EqualTo(new[] { 0, 7 }));
             Assert.That(restored, Is.Not.SameAs(source.GetOrCreateField(Captured)));
             Assert.That(target.GetOrCreateField(Captured), Is.SameAs(restored));
-            Assert.That(target.TryGetField(Transient, out _), Is.False);
-            Assert.That(target.HasCapturedSolverArrays, Is.True);
-        });
-    }
-
-    [Test]
-    public void RestoreSolverArrays_BindsSnapshotsWithoutDescriptorByKey()
-    {
-        var snapshot = new AtmosSolverArraySnapshot(Captured.Key, new SolverArrayStorage<int>([4, 6], true));
-        var chunk = new AtmosChunk(2, 1, 1);
-
-        chunk.RestoreSolverArrays([snapshot]);
-
-        Assert.Multiple(() =>
-        {
-            Assert.That(chunk.TryGetField(Captured, out int[]? restored), Is.True);
-            Assert.That(restored, Is.EqualTo(new[] { 4, 6 }));
-            Assert.That(
-                chunk.CaptureSolverArrays().Select(static array => array.Key),
-                Is.EqualTo(new[] { Captured.Key }));
-        });
-    }
-
-    [Test]
-    public void RestoreSolverArrays_RejectsSnapshotsWithoutMatchingField()
-    {
-        var chunk = new AtmosChunk(2, 1, 1);
-
-        Assert.Multiple(() =>
-        {
-            Assert.That(
-                () => chunk.RestoreSolverArrays([Detached(Key("restore/unregistered"), new int[2])]),
-                Throws.InvalidOperationException);
-            Assert.That(
-                () => chunk.RestoreSolverArrays([Detached(Captured.Key, new long[2])]),
-                Throws.InvalidOperationException);
-            Assert.That(
-                () => chunk.RestoreSolverArrays([Detached(Captured.Key, new int[3])]),
-                Throws.InvalidOperationException);
-            Assert.That(
-                () => chunk.RestoreSolverArrays([Detached(Transient.Key, new float[2])]),
-                Throws.InvalidOperationException);
+            Assert.That(target.GetOrCreateField(Transient), Is.EqualTo(new[] { 0f, 0f }));
         });
     }
 
@@ -299,11 +257,6 @@ public sealed class AtmosChunkFieldStorageTests
             Assert.That(kernel.GetOrCreateChunkField(Int3.Zero, Transient)[0], Is.Zero);
             Assert.That(kernel.ComputeStateHash(), Is.EqualTo(hash));
         });
-    }
-
-    private static AtmosSolverArraySnapshot Detached<T>(string key, T[] values)
-    {
-        return new AtmosSolverArraySnapshot(key, new SolverArrayStorage<T>(values, true));
     }
 
     private static AtmosKernel CreateKernel()

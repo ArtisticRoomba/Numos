@@ -1,7 +1,7 @@
 namespace Numos.CoreSim.Solvers;
 
 /// <summary>
-///     Transient solver data for one simulation, indexed by slot id from <see cref="SolverDataSlotIds" />.
+///     Transient solver data for one simulation, indexed by <see cref="SolverDataDescriptor.Id" />.
 /// </summary>
 /// <remarks>
 ///     Callers serialize access: the kernel state gate for host requests, the tick thread for built-in stages. Slot
@@ -16,18 +16,19 @@ internal sealed class SolverDataStorage
     /// <summary>
     ///     Gets the value in a slot, running the factory on first use.
     /// </summary>
-    /// <param name="slotId">The slot id.</param>
-    /// <param name="name">The slot's diagnostic name.</param>
+    /// <param name="descriptor">The slot's descriptor.</param>
     /// <param name="state">Passed to <paramref name="factory" /> so callers can use static lambdas.</param>
     /// <param name="factory">Builds the value. Failures and null results are not cached.</param>
     /// <returns>The cached value.</returns>
     /// <exception cref="InvalidOperationException">
     ///     The factory requests its own slot, returns null, or the slot holds another type.
     /// </exception>
-    internal T GetOrCreate<T, TState>(int slotId, string name, TState state, Func<TState, T> factory) where T : class
+    internal T GetOrCreate<T, TState>(SolverDataDescriptor descriptor, TState state, Func<TState, T> factory)
+        where T : class
     {
-        ArgumentOutOfRangeException.ThrowIfNegative(slotId);
         ArgumentNullException.ThrowIfNull(factory);
+        int slotId = descriptor.Id;
+        string name = descriptor.Name;
         if (slotId >= _values.Length)
             Array.Resize(ref _values, Math.Max(slotId + 1, Math.Max(8, _values.Length * 2)));
 

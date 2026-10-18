@@ -4,46 +4,33 @@ using Numos.CoreSim.Replay;
 
 namespace Numos.CoreSim.Solvers;
 
-internal abstract class SolverArrayStorage
+internal abstract class SolverArrayStorage(ChunkFieldDescriptor field)
 {
-    internal abstract Type ElementType { get; }
+    /// <summary>
+    ///     Gets the descriptor that owns this storage.
+    /// </summary>
+    internal ChunkFieldDescriptor Field { get; } = field;
+
+    internal Type ElementType => Field.ElementType;
+    internal bool CaptureForRollback => Field.CaptureForRollback;
     internal abstract int Length { get; }
     internal abstract long PayloadBytes { get; }
-    internal abstract bool CaptureForRollback { get; }
-
-    /// <summary>
-    ///     Gets the descriptor that owns this storage. Only storage rebuilt from a snapshot that carries no descriptor
-    ///     can be null, and restore binds it by key before the chunk sees it.
-    /// </summary>
-    internal ChunkFieldDescriptor? Field { get; init; }
 
     internal abstract SolverArrayStorage Clone();
-
-    /// <summary>
-    ///     Returns storage sharing these values but owned by <paramref name="field" />.
-    /// </summary>
-    internal abstract SolverArrayStorage WithField(ChunkFieldDescriptor field);
 
     internal abstract void AppendHash(ref AtmosStateHasher hash);
 }
 
-internal sealed class SolverArrayStorage<T>(T[] values, bool captureForRollback) : SolverArrayStorage
+internal sealed class SolverArrayStorage<T>(ChunkFieldDescriptor<T> field, T[] values) : SolverArrayStorage(field)
 {
     internal T[] Values { get; } = values;
-    internal override Type ElementType => typeof(T);
     internal override int Length => Values.Length;
     internal override long PayloadBytes => (long)Values.Length * Unsafe.SizeOf<T>();
-    internal override bool CaptureForRollback => captureForRollback;
 
     internal override SolverArrayStorage Clone()
     {
         // Captured elements contain no references, so an array clone detaches their entire state.
-        return new SolverArrayStorage<T>((T[])Values.Clone(), CaptureForRollback) { Field = Field };
-    }
-
-    internal override SolverArrayStorage WithField(ChunkFieldDescriptor field)
-    {
-        return new SolverArrayStorage<T>(Values, CaptureForRollback) { Field = field };
+        return new SolverArrayStorage<T>((ChunkFieldDescriptor<T>)Field, (T[])Values.Clone());
     }
 
     internal override void AppendHash(ref AtmosStateHasher hash)

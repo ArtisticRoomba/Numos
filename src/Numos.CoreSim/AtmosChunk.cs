@@ -306,42 +306,24 @@ internal class AtmosChunk
     /// </remarks>
     internal T[] GetOrCreateField<T>(ChunkFieldDescriptor<T> field)
     {
-        SolverArrayStorage?[]? fields = Volatile.Read(ref _fields);
-        int slot = field.Slot;
-        if (fields != null && (uint)slot < (uint)fields.Length && fields[slot] is SolverArrayStorage<T> storage)
-            return storage.Values;
-
-        return CreateField(field);
+        return FindField(Volatile.Read(ref _fields), field)?.Values ?? CreateField(field);
     }
 
-    /// <summary>
-    ///     Gets a field's storage if this chunk has already allocated it.
-    /// </summary>
-    internal bool TryGetField<T>(ChunkFieldDescriptor<T> field, [NotNullWhen(true)] out T[]? values)
+    private static SolverArrayStorage<T>? FindField<T>(SolverArrayStorage?[]? fields, ChunkFieldDescriptor<T> field)
     {
-        SolverArrayStorage?[]? fields = Volatile.Read(ref _fields);
         int slot = field.Slot;
-        if (fields != null && (uint)slot < (uint)fields.Length && fields[slot] is SolverArrayStorage<T> storage)
-        {
-            values = storage.Values;
-            return true;
-        }
-
-        values = null;
-        return false;
+        return fields != null && (uint)slot < (uint)fields.Length ? fields[slot] as SolverArrayStorage<T> : null;
     }
 
     private T[] CreateField<T>(ChunkFieldDescriptor<T> field)
     {
         lock (_fieldGate)
         {
-            SolverArrayStorage?[]? fields = _fields;
-            int slot = field.Slot;
-            if (fields != null && (uint)slot < (uint)fields.Length && fields[slot] is SolverArrayStorage<T> existing)
+            if (FindField(_fields, field) is { } existing)
                 return existing.Values;
 
-            var storage = (SolverArrayStorage<T>)field.Allocate(VoxelCount);
-            PublishField(slot, storage);
+            var storage = field.Allocate(VoxelCount);
+            PublishField(field.Slot, storage);
             if (field.CaptureForRollback)
             {
                 Interlocked.Increment(ref _capturedFieldCount);
@@ -385,8 +367,8 @@ internal class AtmosChunk
         {
             foreach (var storage in fields)
             {
-                if (storage is { CaptureForRollback: true, Field: { } field })
-                    (captured ??= []).Add(new AtmosSolverArraySnapshot(field.Key, storage));
+                if (storage is { CaptureForRollback: true })
+                    (captured ??= []).Add(new AtmosSolverArraySnapshot(storage));
             }
         }
 
@@ -409,32 +391,12 @@ internal class AtmosChunk
             foreach (var snapshot in snapshots)
             {
                 var storage = snapshot.Materialize();
-                if (storage.Field == null)
-                    storage = storage.WithField(ResolveField(snapshot.Key, storage));
-
-                fields[storage.Field!.Slot] = storage;
+                fields[storage.Field.Slot] = storage;
             }
 
             Volatile.Write(ref _fields, fields);
             Volatile.Write(ref _capturedFieldCount, snapshots.Count);
         }
-    }
-
-    // Snapshots captured in this process carry their descriptor. One built from saved data only has its key, so it
-    // can only come back if something in this process registered a matching rollback field.
-    private ChunkFieldDescriptor ResolveField(string key, SolverArrayStorage storage)
-    {
-        if (!ChunkFieldRegistry.TryGetByKey(key, out var field) ||
-            field.ElementType != storage.ElementType ||
-            !field.CaptureForRollback ||
-            field.GetLength(VoxelCount) != storage.Length)
-        {
-            throw new InvalidOperationException(
-                $"Captured solver array '{key}' ({storage.ElementType.FullName}, {storage.Length} elements) " +
-                "does not match a registered rollback chunk field.");
-        }
-
-        return field;
     }
 
     /// <summary>

@@ -5,28 +5,39 @@ namespace Numos.CoreSim.Tests;
 [TestFixture]
 public sealed class SolverDataStorageTests
 {
-    [Test]
-    public void SlotIds_AreUniqueAndNonnegative()
+    private static SolverDataDescriptor Descriptor(string name)
     {
-        int first = SolverDataSlotIds.Next();
-        int second = SolverDataSlotIds.Next();
-
-        Assert.That(first, Is.GreaterThanOrEqualTo(0));
-        Assert.That(second, Is.Not.EqualTo(first));
+        return new SolverDataDescriptor(name, false);
     }
 
     [Test]
-    public void GetOrCreate_GrowsForLargeSlotIdsAndKeepsExistingValues()
+    public void DescriptorIds_AreUniqueAndNonnegative()
+    {
+        var first = Descriptor("first");
+        var second = Descriptor("second");
+
+        Assert.That(first.Id, Is.GreaterThanOrEqualTo(0));
+        Assert.That(second.Id, Is.Not.EqualTo(first.Id));
+    }
+
+    [Test]
+    public void GetOrCreate_GrowsForLargeIdsAndKeepsExistingValues()
     {
         var storage = new SolverDataStorage();
-        object low = storage.GetOrCreate(0, "low", 0, static _ => new object());
-        object high = storage.GetOrCreate(1000, "high", 0, static _ => new object());
+        var lowSlot = Descriptor("low");
+        var middleSlot = Descriptor("middle");
+        for (int i = 0; i < 64; i++)
+            Descriptor("skipped");
+
+        var highSlot = Descriptor("high");
+        object low = storage.GetOrCreate(lowSlot, 0, static _ => new object());
+        object high = storage.GetOrCreate(highSlot, 0, static _ => new object());
 
         Assert.Multiple(() =>
         {
-            Assert.That(storage.GetOrCreate(0, "low", 0, static _ => new object()), Is.SameAs(low));
-            Assert.That(storage.GetOrCreate(1000, "high", 0, static _ => new object()), Is.SameAs(high));
-            Assert.That(storage.GetOrCreate(500, "middle", 0, static _ => new object()), Is.Not.SameAs(low));
+            Assert.That(storage.GetOrCreate(lowSlot, 0, static _ => new object()), Is.SameAs(low));
+            Assert.That(storage.GetOrCreate(highSlot, 0, static _ => new object()), Is.SameAs(high));
+            Assert.That(storage.GetOrCreate(middleSlot, 0, static _ => new object()), Is.Not.SameAs(low));
         });
     }
 
@@ -34,7 +45,7 @@ public sealed class SolverDataStorageTests
     public void GetOrCreate_PassesStateToTheFactory()
     {
         var storage = new SolverDataStorage();
-        int[] value = storage.GetOrCreate(3, "state", 7, static state => new[] { state });
+        int[] value = storage.GetOrCreate(Descriptor("state"), 7, static state => new[] { state });
 
         Assert.That(value, Is.EqualTo(new[] { 7 }));
     }
@@ -43,57 +54,66 @@ public sealed class SolverDataStorageTests
     public void GetOrCreate_RejectsRecursionNullAndTypeConflictsWithoutCaching()
     {
         var storage = new SolverDataStorage();
+        var self = Descriptor("self");
         Assert.That(
             () => storage.GetOrCreate(
-                2, "self", storage, static inner => inner.GetOrCreate(2, "self", inner, static _ => new object())),
+                self, (Storage: storage, Slot: self),
+                static state => state.Storage.GetOrCreate(state.Slot, 0, static _ => new object())),
             Throws.InvalidOperationException.With.Message.Contains("'self'"));
 
         Assert.That(
-            () => storage.GetOrCreate<string, int>(2, "null", 0, static _ => null!),
+            () => storage.GetOrCreate<string, int>(Descriptor("null"), 0, static _ => null!),
             Throws.InvalidOperationException.With.Message.Contains("'null'"));
 
+        var slot = Descriptor("value");
         Assert.That(
-            () => storage.GetOrCreate<string, int>(2, "throws", 0, static _ => throw new FormatException()),
+            () => storage.GetOrCreate<string, int>(slot, 0, static _ => throw new FormatException()),
             Throws.TypeOf<FormatException>());
 
-        object value = storage.GetOrCreate(2, "value", 0, static _ => new object());
+        object value = storage.GetOrCreate(slot, 0, static _ => new object());
         Assert.That(
-            () => storage.GetOrCreate(2, "value", 0, static _ => "wrong type"),
+            () => storage.GetOrCreate(slot, 0, static _ => "wrong type"),
             Throws.InvalidOperationException);
 
-        Assert.That(storage.GetOrCreate(2, "value", 0, static _ => new object()), Is.SameAs(value));
+        Assert.That(storage.GetOrCreate(slot, 0, static _ => new object()), Is.SameAs(value));
     }
 
     [Test]
     public void GetOrCreate_NestedRequestsThatGrowStorageStillCacheTheOuterValue()
     {
         var storage = new SolverDataStorage();
+        var outerSlot = Descriptor("outer");
+        for (int i = 0; i < 64; i++)
+            Descriptor("skipped");
+
+        var innerSlot = Descriptor("inner");
         object outer = storage.GetOrCreate(
-            0,
-            "outer",
-            storage,
-            static inner =>
+            outerSlot,
+            (Storage: storage, Slot: innerSlot),
+            static state =>
             {
-                inner.GetOrCreate(4096, "inner", 0, static _ => new object());
+                state.Storage.GetOrCreate(state.Slot, 0, static _ => new object());
                 return new object();
             });
 
-        Assert.That(storage.GetOrCreate(0, "outer", 0, static _ => new object()), Is.SameAs(outer));
+        Assert.That(storage.GetOrCreate(outerSlot, 0, static _ => new object()), Is.SameAs(outer));
     }
 
     [Test]
     public void Clear_DropsEveryValue()
     {
         var storage = new SolverDataStorage();
-        object first = storage.GetOrCreate(0, "first", 0, static _ => new object());
-        object second = storage.GetOrCreate(9, "second", 0, static _ => new object());
+        var firstSlot = Descriptor("first");
+        var secondSlot = Descriptor("second");
+        object first = storage.GetOrCreate(firstSlot, 0, static _ => new object());
+        object second = storage.GetOrCreate(secondSlot, 0, static _ => new object());
 
         storage.Clear();
 
         Assert.Multiple(() =>
         {
-            Assert.That(storage.GetOrCreate(0, "first", 0, static _ => new object()), Is.Not.SameAs(first));
-            Assert.That(storage.GetOrCreate(9, "second", 0, static _ => new object()), Is.Not.SameAs(second));
+            Assert.That(storage.GetOrCreate(firstSlot, 0, static _ => new object()), Is.Not.SameAs(first));
+            Assert.That(storage.GetOrCreate(secondSlot, 0, static _ => new object()), Is.Not.SameAs(second));
         });
     }
 
@@ -102,15 +122,16 @@ public sealed class SolverDataStorageTests
     {
         var tickConfig = new AtmosSolverConfigSnapshot();
         var first = new AtmosConfig().CreateSnapshot();
+        var slot = new SolverDataDescriptor("data", true);
         tickConfig.Capture(first);
-        object value = tickConfig.ConfigScopedData.GetOrCreate(0, "data", 0, static _ => new object());
+        object value = tickConfig.ConfigScopedData.GetOrCreate(slot, 0, static _ => new object());
 
         tickConfig.Capture(first);
-        Assert.That(tickConfig.ConfigScopedData.GetOrCreate(0, "data", 0, static _ => new object()), Is.SameAs(value));
+        Assert.That(tickConfig.ConfigScopedData.GetOrCreate(slot, 0, static _ => new object()), Is.SameAs(value));
 
         tickConfig.Capture(new AtmosConfig().CreateSnapshot());
         Assert.That(
-            tickConfig.ConfigScopedData.GetOrCreate(0, "data", 0, static _ => new object()),
+            tickConfig.ConfigScopedData.GetOrCreate(slot, 0, static _ => new object()),
             Is.Not.SameAs(value));
     }
 }

@@ -71,9 +71,7 @@ public sealed partial class AtmosSimulation
         }
 
         return _kernel.GetSolverData(
-            key.SlotId,
-            key.Name,
-            key.Lifetime == SolverDataLifetime.UntilConfigChange,
+            key.Descriptor,
             (Simulation: this, Key: key),
             static state => state.Key.Factory(state.Simulation));
     }
