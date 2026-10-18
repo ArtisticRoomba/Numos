@@ -355,6 +355,9 @@ internal class ReactionSolver : IAtmosSolverStage
         Scalar[]? reactionFeedback, IAtmosConfig config, int mixtureLength,
         GasReactionConfig reactions, GasReactionData[] gasData, GasReactionData[] rateOrder, GasReactionMatrix changesMatrix)
     {
+        if (!float.IsFinite(volume) || volume <= 0f)
+            return;
+
         Joule energy = ExtractHeat(mixtureVector, ref currentTemperature, mixtureLength, config);
         int reactionCount = reactions.Count;
         Mole[] reactionSpeeds = RentReactionSpeeds(reactionCount);
