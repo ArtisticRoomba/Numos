@@ -20,6 +20,8 @@ internal class ReactionSolver : IAtmosSolverStage
     private GasReactionData[] _gasRateOrder = [];
     private GasReactionData[] _gasReactionData = [];
     private IAtmosConfig? _preparedConfig;
+    // Below float.MaxValue
+    const double MaxReactionSpeed = 1e30;
 
     public void Solve(AtmosSolverExecutionContext context)
     {
@@ -354,7 +356,7 @@ internal class ReactionSolver : IAtmosSolverStage
         Scalar[]? reactionFeedback, IAtmosConfig config, int mixtureLength,
         GasReactionConfig reactions, GasReactionData[] gasData, GasReactionData[] rateOrder, GasReactionMatrix changesMatrix)
     {
-        if (!float.IsFinite(volume) || volume <= 0f)
+        if (!float.IsFinite(volume) || volume <= 0f || !float.IsFinite(deltaTime))
             return;
 
         Joule energy = ExtractHeat(mixtureVector, ref currentTemperature, mixtureLength, config);
@@ -376,9 +378,11 @@ internal class ReactionSolver : IAtmosSolverStage
             foreach (var gas in rateOrder)
                 rate = gas.ApplyRateFactors(reactionId, mixtureVector[gas.GasId]/volume, rate);
 
-            Mole speed = rate * deltaTime * volume;
-            if (float.IsFinite(speed) && speed > 0f)
-                reactionSpeeds[reactionId] = speed;
+            Mole64 speed = (ConcentrationPerSecond64)rate * deltaTime * volume;
+            if (!double.IsFinite(speed) || speed <= 0.0)
+                continue;
+
+            reactionSpeeds[reactionId] = (Mole)Math.Min(speed, MaxReactionSpeed);
         }
 
         bool anyReaction = false;
