@@ -15,6 +15,17 @@ internal class ReactionSolver : IAtmosSolverStage
     private const string IgnitionSourceTempKey = "IgnitionSourceTemp";
     private const string IgnitionSourceVolumeKey = "IgnitionSourceVolume";
 
+    // Registered once, since every chunk shares the same descriptors. The ignition state is captured for
+    // rollback, and so are the source requests, so a rollback can't leave a stale request behind.
+    private static readonly ChunkFieldDescriptor<Scalar> IgnitionPercentField =
+        ChunkFieldRegistry.Register<Scalar>(IgnitionPercentKey, true, null);
+    private static readonly ChunkFieldDescriptor<Kelvin> IgnitedVolumeTempField =
+        ChunkFieldRegistry.Register<Kelvin>(IgnitedVolumeTempKey, true, null);
+    private static readonly ChunkFieldDescriptor<Kelvin> IgnitionSourceTempField =
+        ChunkFieldRegistry.Register<Kelvin>(IgnitionSourceTempKey, true, null);
+    private static readonly ChunkFieldDescriptor<CubicMetre> IgnitionSourceVolumeField =
+        ChunkFieldRegistry.Register<CubicMetre>(IgnitionSourceVolumeKey, true, null);
+
     // Radius factor of a sphere measured against its volume fraction of the voxel:
     // fraction = (4/3 * pi) * (r / edge)^3, so cbrt(fraction) = (4/3 * pi)^(1/3) * r / edge.
     private static readonly Scalar SphereRadiusFactor = MathF.Cbrt(4f * MathF.PI / 3f);
@@ -90,7 +101,7 @@ internal class ReactionSolver : IAtmosSolverStage
             if (context.Chunks[i].IsAwake && context.Chunks[i].ActiveAirCount > 0)
                 awakeChunkCount++;
         }
-        
+
         _anyFullyIgnited = false;
 
         ParallelHelper.ForEach<AtmosChunk, ProcessChunkAction>(
@@ -104,8 +115,8 @@ internal class ReactionSolver : IAtmosSolverStage
             // no worker ever creates one concurrently.
             for (int i = 0; i < context.Chunks.Length; i++)
             {
-                context.Chunks[i].GetOrCreateSolverFlatArray<Scalar>(IgnitionPercentKey, true);
-                context.Chunks[i].GetOrCreateSolverFlatArray<Kelvin>(IgnitedVolumeTempKey, true);
+                context.Chunks[i].GetOrCreateField(IgnitionPercentField);
+                context.Chunks[i].GetOrCreateField(IgnitedVolumeTempField);
             }
 
             ParallelHelper.ForEach<AtmosChunk, TransferIgnitionAction>(
@@ -152,8 +163,8 @@ internal class ReactionSolver : IAtmosSolverStage
     /// <param name="volume">Volume the source ignites, in cubic metres. Clamped to the voxel volume.</param>
     internal void SetIgnitionSource(AtmosChunk chunk, ushort voxelIndex, Kelvin temperature, CubicMetre volume)
     {
-        FlatArray<Kelvin> temperatures = chunk.GetOrCreateSolverFlatArray<Kelvin>(IgnitionSourceTempKey, true);
-        FlatArray<CubicMetre> volumes = chunk.GetOrCreateSolverFlatArray<CubicMetre>(IgnitionSourceVolumeKey, true);
+        Kelvin[] temperatures = chunk.GetOrCreateField(IgnitionSourceTempField);
+        CubicMetre[] volumes = chunk.GetOrCreateField(IgnitionSourceVolumeField);
         temperatures[voxelIndex] = MathF.Max(temperatures[voxelIndex], temperature);
         volumes[voxelIndex] = MathF.Max(volumes[voxelIndex], volume);
     }
@@ -333,10 +344,10 @@ internal class ReactionSolver : IAtmosSolverStage
         CubicMetre volume = config.GetVoxelVolume();
 
         // Resolved once for the whole chunk; the voxel workers index straight into them.
-        FlatArray<Scalar> ignitionPercents = chunk.GetOrCreateSolverFlatArray<Scalar>(IgnitionPercentKey, true);
-        FlatArray<Kelvin> ignitedVolumeTemps = chunk.GetOrCreateSolverFlatArray<Kelvin>(IgnitedVolumeTempKey, true);
-        FlatArray<CubicMetre> sourceVolumes = chunk.GetOrCreateSolverFlatArray<CubicMetre>(IgnitionSourceVolumeKey, true);
-        FlatArray<Kelvin> sourceTemps = chunk.GetOrCreateSolverFlatArray<Kelvin>(IgnitionSourceTempKey, true);
+        Scalar[] ignitionPercents = chunk.GetOrCreateField(IgnitionPercentField);
+        Kelvin[] ignitedVolumeTemps = chunk.GetOrCreateField(IgnitedVolumeTempField);
+        CubicMetre[] sourceVolumes = chunk.GetOrCreateField(IgnitionSourceVolumeField);
+        Kelvin[] sourceTemps = chunk.GetOrCreateField(IgnitionSourceTempField);
 
 
         // One chunk-wide voxel-by-gas matrix instead of a separately pooled array per voxel: this is
@@ -481,8 +492,8 @@ internal class ReactionSolver : IAtmosSolverStage
         if (!(seedFraction > 0f))
             return;
 
-        FlatArray<Scalar> ignitionPercents = chunk.GetOrCreateSolverFlatArray<Scalar>(IgnitionPercentKey, true);
-        FlatArray<Kelvin> ignitedVolumeTemps = chunk.GetOrCreateSolverFlatArray<Kelvin>(IgnitedVolumeTempKey, true);
+        Scalar[] ignitionPercents = chunk.GetOrCreateField(IgnitionPercentField);
+        Kelvin[] ignitedVolumeTemps = chunk.GetOrCreateField(IgnitedVolumeTempField);
 
         for (int activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
         {
@@ -501,15 +512,15 @@ internal class ReactionSolver : IAtmosSolverStage
                 // Interior faces skip the per-chunk array lookups. Solve created every chunk's ignition
                 // arrays before this stage, so the lookup for another chunk never creates anything.
                 bool sameChunk = ReferenceEquals(neighborChunk, chunk);
-                FlatArray<Scalar> neighborPercents = sameChunk
+                Scalar[] neighborPercents = sameChunk
                     ? ignitionPercents
-                    : neighborChunk.GetOrCreateSolverFlatArray<Scalar>(IgnitionPercentKey, true);
+                    : neighborChunk.GetOrCreateField(IgnitionPercentField);
                 if (!(neighborPercents[neighborIndex] >= 1f))
                     continue;
 
-                FlatArray<Kelvin> neighborTemps = sameChunk
+                Kelvin[] neighborTemps = sameChunk
                     ? ignitedVolumeTemps
-                    : neighborChunk.GetOrCreateSolverFlatArray<Kelvin>(IgnitedVolumeTempKey, true);
+                    : neighborChunk.GetOrCreateField(IgnitedVolumeTempField);
                 donorCount++;
                 donorTemperatureSum += neighborTemps[neighborIndex];
             }
@@ -738,8 +749,9 @@ internal class ReactionSolver : IAtmosSolverStage
                 rate64 = gas.ApplyRateFactors(reactionId, (Mole64)mixtureVector[gas.GasId] / volume, rate64);
 
             // Without a flame the whole voxel is reacting, so this is the rate a flame would have to beat.
+            // It has to be the rate with the concentration factors applied, like the flame's intrinsic rates.
             if (!flameActive && reactions.GetReactionIsIgnition(reactionId))
-                intrinsicRates[reactionId] = rate;
+                intrinsicRates[reactionId] = rate64;
 
             // +inf is a legitimate overflow here and saturates below.
             Mole64 speed = rate64 * deltaTime * volume;
@@ -804,7 +816,7 @@ internal class ReactionSolver : IAtmosSolverStage
                     if (flameActive && !bulkDominates && reactions.GetReactionIsIgnition(reactionId))
                         speed /= burningFraction;
                     accumulatedConsumption += consumed * speed;
-                }   
+                }
 
                 Mole consumption = (Mole)accumulatedConsumption;
 
@@ -1040,10 +1052,10 @@ internal class ReactionSolver : IAtmosSolverStage
         Scalar[][]? reactionFeedbacks,
         Mole[] mixtures,
         Kelvin[] newTemps,
-        FlatArray<Scalar> ignitionPercents,
-        FlatArray<Kelvin> ignitedVolumeTemps,
-        FlatArray<CubicMetre> sourceVolumes,
-        FlatArray<Kelvin> sourceTemps,
+        Scalar[] ignitionPercents,
+        Kelvin[] ignitedVolumeTemps,
+        CubicMetre[] sourceVolumes,
+        Kelvin[] sourceTemps,
         int mixtureLength,
         ReactionTables tables) : IAction
     {
@@ -1082,15 +1094,13 @@ internal class ReactionSolver : IAtmosSolverStage
             }
 
             newTemps[activeIndex] = temp;
-             if (content <= 0.0001)
+            if (content <= 0.0001)
             {
                 // No gas left to burn, so nothing can stay ignited here.
                 ignitionPercents[voxelIndex] = 0f;
                 ignitedVolumeTemps[voxelIndex] = 0f;
-                 return;
+                return;
             }
-
-            CubicMetre volume = config.GetVoxelVolume();
 
             // Applied before reacting, so the source's own tiny, very hot volume is what the reaction
             // rate sees this tick, even if the gas around it is far below its usual ignition temperature.
@@ -1101,9 +1111,9 @@ internal class ReactionSolver : IAtmosSolverStage
                     ref ignitedVolumeTemp,
                     sourceTemp,
                     sourceVolume,
-                    config.GetVoxelVolume());
+                    volume);
             }
- 
+
             solver.ProcessMixtureCore(
                 deltaTime,
                 mixtureVector,
