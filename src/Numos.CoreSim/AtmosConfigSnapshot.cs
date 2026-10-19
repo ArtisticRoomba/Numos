@@ -131,8 +131,8 @@ public sealed class AtmosConfigSnapshot : IAtmosConfig
     [ConfigCheckpointField(5)]
     public Scalar DefaultDiffusionCoefficient { get; }
     /// <inheritdoc cref="AtmosConfig.DefaultThermalConductivity" />
-
-    [ConfigCheckpointField(6)] public WattsPerMeterKelvin DefaultThermalConductivity { get; }
+    [ConfigCheckpointField(6)] 
+    public WattsPerMeterKelvin DefaultThermalConductivity { get; }
     /// <inheritdoc cref="AtmosConfig.SpaceTemperature" />
     [ConfigCheckpointField(7)]
     public Kelvin SpaceTemperature { get; }

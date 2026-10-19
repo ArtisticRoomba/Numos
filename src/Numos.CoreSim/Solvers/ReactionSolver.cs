@@ -15,8 +15,6 @@ internal class ReactionSolver : IAtmosSolverStage
     private const string IgnitionSourceTempKey = "IgnitionSourceTemp";
     private const string IgnitionSourceVolumeKey = "IgnitionSourceVolume";
 
-    // Registered once, since every chunk shares the same descriptors. The ignition state is captured for
-    // rollback, and so are the source requests, so a rollback can't leave a stale request behind.
     private static readonly ChunkFieldDescriptor<Scalar> IgnitionPercentField =
         ChunkFieldRegistry.Register<Scalar>(IgnitionPercentKey, true, null);
     private static readonly ChunkFieldDescriptor<Kelvin> IgnitedVolumeTempField =
@@ -33,14 +31,9 @@ internal class ReactionSolver : IAtmosSolverStage
     // A flame smaller than this is treated as burnt out.
     private const Scalar MinimumIgnitionPercent = 1e-9f;
 
-    // A transferred kernel has to stay below 1, so a voxel that just received one can never look like a
-    // fully ignited donor to the voxels that are still being processed in the same transfer pass.
+    // If the seed is set above this it will break as it could then spread many voxels in one tick.
     private const Scalar MaximumSeedFraction = 0.5f;
 
-    /// <summary>
-    ///     Calibration factor for the flame speed estimate <c>sqrt(thermal diffusivity * depletion rate)</c>.
-    ///     Tune it against known laminar flame speeds of the mixtures in use.
-    /// </summary>
     internal Scalar FlameSpeedScale { get; set; } = 1f;
 
     /// <summary>
@@ -57,7 +50,7 @@ internal class ReactionSolver : IAtmosSolverStage
 
     /// <summary>
     ///     Fraction of a voxel that a transferred flame kernel starts with. After that the kernel grows or
-    ///     recedes by the same flame speed rules as any other flame. Capped below 1.
+    ///     recedes by the same flame speed rules as any other flame. Capped below <see cref="MaximumSeedFraction"/>.
     /// </summary>
     internal Scalar TransferSeedFraction { get; set; } = 0.01f;
 
@@ -79,6 +72,7 @@ internal class ReactionSolver : IAtmosSolverStage
     private static Mole[]? _reactionSpeedsScratch;
     // Per-thread scratch for the intrinsic (unscaled) rate of every ignition reaction, same reasoning as
     // _reactionSpeedsScratch above.
+    // Maybe super mem inefficient.
     [ThreadStatic]
     private static ConcentrationPerSecond64[]? _intrinsicRatesScratch;
 
@@ -113,6 +107,7 @@ internal class ReactionSolver : IAtmosSolverStage
             // The transfer stage reads neighboring chunks' ignition arrays from workers, and a chunk
             // without active air never created them in ProcessChunk. Create them serially here so
             // no worker ever creates one concurrently.
+            // Removable??
             for (int i = 0; i < context.Chunks.Length; i++)
             {
                 context.Chunks[i].GetOrCreateField(IgnitionPercentField);
@@ -183,7 +178,6 @@ internal class ReactionSolver : IAtmosSolverStage
         ref Scalar ignitionPercent, ref Kelvin ignitedVolumeTemp,
         Kelvin sourceTemperature, CubicMetre sourceVolume, CubicMetre voxelVolume)
     {
-        // Written so NaN/zero/negative inputs all fall out as "no source".
         if (!(sourceTemperature > 0f) || !(sourceVolume > 0f) || !(voxelVolume > 0f))
             return;
 
@@ -473,8 +467,7 @@ internal class ReactionSolver : IAtmosSolverStage
     }
 
     /// <summary>
-    ///     Lets a completely ignited voxel start a flame kernel in its face neighbors. Heat transfer is the
-    ///     main way fire spreads, so this is deliberately minimal: only voxels that are ignited across their
+    ///     Lets a completely ignited voxel start a flame kernel in its face neighbors. Only voxels that are ignited across their
     ///     whole volume (which implies a sustained flame) donate, and a receiver only gets a small kernel
     ///     that then grows, recedes or dies by its own gas's flame speed.
     ///     This is a single pass with no double buffering. Donors are never written here, and a receiver
@@ -506,6 +499,7 @@ internal class ReactionSolver : IAtmosSolverStage
             Kelvin donorTemperatureSum = 0f;
             for (int face = 0; face < 6; face++)
             {
+                // TODO: This is a bad way to do this, it should do something similar to advection
                 if (!TryGetNeighbor(chunk, voxelIndex, context, face, out AtmosChunk neighborChunk, out ushort neighborIndex))
                     continue;
 
@@ -538,9 +532,9 @@ internal class ReactionSolver : IAtmosSolverStage
         }
     }
 
-    // The one adapter to fill in: reuse whatever ThermalDiffusionSolver uses to find a face neighbor
-    // (including across chunk borders). Return false for solid / non-air / sleeping-chunk neighbors.
-    // face is 0..5, one per axis direction.
+    // This is kinda bad
+    // Finds the chunk each time
+    // Should use something similar to advection solver
     private static bool TryGetNeighbor(
         AtmosChunk chunk, ushort voxelIndex, AtmosSolverExecutionContext context, int face, out AtmosChunk neighborChunk, out ushort neighborIndex)
     {
@@ -560,7 +554,7 @@ internal class ReactionSolver : IAtmosSolverStage
         return true;
     }
 
-    // Sensible energy of the mixture at its current temperature: sum of moles * Cv * T over gases.
+    // Energy of the mixture at its current temperature: sum of moles * Cv * T over gases.
     private static Joule ExtractHeat(
         ReadOnlySpan<Mole> mixtureVector, ref readonly Kelvin temperature, int mixtureLength, IAtmosConfig config)
     {
@@ -608,13 +602,13 @@ internal class ReactionSolver : IAtmosSolverStage
             moleWeightedConductivity += mixtureVector[i] * config.GetThermalConductivity(i, temperature);
         }
 
-        // No gas, no heat capacity or no volume means there is nothing to diffuse through.
         if (!(totalMoles > 0f) || !(oldHeatCapacity > 0f) || !(volume > 0f))
             return result;
 
         // Mole-fraction weighted conductivity of the mixture, divided by the volumetric heat capacity
         // (oldHeatCapacity / volume).
         WattsPerMeterKelvin conductivity = moleWeightedConductivity / totalMoles;
+        // C_V + nR for C_P
         result = conductivity * volume / (oldHeatCapacity + AtmosPhysicalConstants.MolarGasConstant*totalMoles);
         return result;
     }
@@ -735,6 +729,7 @@ internal class ReactionSolver : IAtmosSolverStage
             if (flameActive)
             {
                 ConcentrationPerSecond flameRate = reactions.GetRateConstant(reactionId, ignitedVolumeTemp) * burningFraction;
+                // Only uses the flame rate is the reaction would be faster then the bulk rate
                 if (flameRate > rate && reactions.GetReactionIsIgnition(reactionId))
                     bulkDominates = false;
 
@@ -753,7 +748,6 @@ internal class ReactionSolver : IAtmosSolverStage
             if (!flameActive && reactions.GetReactionIsIgnition(reactionId))
                 intrinsicRates[reactionId] = rate64;
 
-            // +inf is a legitimate overflow here and saturates below.
             Mole64 speed = rate64 * deltaTime * volume;
             if (double.IsNaN(speed) || speed <= 0.0)
                 continue;

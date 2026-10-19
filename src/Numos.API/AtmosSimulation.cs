@@ -856,6 +856,15 @@ public sealed partial class AtmosSimulation : IDisposable
         }
     }
 
+    /// <summary>
+    ///     Adds a one tick ignition source to a voxel and wakes its chunk.
+    /// </summary>
+    /// <param name="chunk">The target chunk.</param>
+    /// <param name="x">The zero-based local x-coordinate.</param>
+    /// <param name="y">The zero-based local y-coordinate.</param>
+    /// <param name="z">The zero-based local z-coordinate.</param>
+    /// <param name="temperature">The temperature of the ignition source</param>
+    /// <param name="volume">The volume of the ignition source</param>
     [PublicAPI]
     public void IgniteVoxel(
         AtmosChunkHandle chunk, int x, int y, int z, float temperature, float volume)
@@ -867,6 +876,13 @@ public sealed partial class AtmosSimulation : IDisposable
         }
     }
 
+    /// <summary>
+    ///     Adds a one tick ignition source to a voxel and wakes its chunk.
+    /// </summary>
+    /// <param name="chunk">The target chunk.</param>
+    /// <param name="localVoxelIndex">The voxel's zero-based flat index.</param>
+    /// <param name="temperature">The temperature of the ignition source</param>
+    /// <param name="volume">The volume of the ignition source</param>
     [PublicAPI]
     public void IgniteVoxel(
         AtmosChunkHandle chunk, ushort localVoxelIndex, float temperature, float volume)

@@ -288,11 +288,20 @@ public class AtmosConfig : IAtmosConfig
             : FloatMath.ClampUnitInterval(DefaultDiffusionCoefficient);
     }
 
+    /// <summary>
+    ///     Resolves the thermal conductivity for a gas at a specific temperature.
+    /// </summary>
+    /// <param name="gasId">The gas ID. Unregistered IDs use <see cref="DefaultThermalConductivity" />.</param>
+    /// <param name="temperature">The temperatures of the gas</param>
     public WattsPerMeterKelvin GetThermalConductivity(int gasId, Kelvin temperature)
     {
         WattsPerMeterKelvin referenceThermalConductivity = (uint)gasId < (uint)GasRegistry.Count
             ? FloatMath.ClampUnitInterval(GasRegistry[gasId].ThermalConductivity)
             : FloatMath.ClampUnitInterval(DefaultThermalConductivity);
+        // TODO: Magic numbers
+        // These are the reference temp of thermal conductivity. Most online values will be listed at this temp
+        // The exponent is the relationship with temp, it is 0.5 for mono atomic gasses but higher up to 1 for more complex gasses.
+        // 0.7 used as a middle ground, this should probably have a better reason for 0.7.
         float ReferenceConductivityTemperature = 300f;
         float ThermalConductivityExponent = 0.7f;
         // Conductivity rises roughly as a power of temperature. The stored value is the one at the reference temperature.

@@ -29,7 +29,7 @@ public readonly partial record struct StandardGasReaction
     ///     Molar activation energy <c>Ea</c>, in J/mol. Convert values authored in kJ/mol first.
     /// </param>
     /// <param name="speedFactors">Rate-equation exponent for each gas that affects the speed.</param>
-    /// <param name="requiresIgnition"></param>
+    /// <param name="requiresIgnition">Whether the reaction should use the ignition system</param>
     public StandardGasReaction(
         IDictionary<GasProperties, float> input, IDictionary<GasProperties, float> output,
         [Quantity("molarEnergy")] JoulePerMole energyBalance,
@@ -83,6 +83,9 @@ public readonly partial record struct StandardGasReaction
     /// </summary>
     private FrozenDictionary<GasProperties, float> SpeedFactors { get; }
 
+    /// <summary>
+    ///     Whether the reaction should use the ignition system.
+    /// </summary>
     internal bool RequiresIgnition { get; }
 
     internal void AppendHash(ref AtmosStateHasher hash)

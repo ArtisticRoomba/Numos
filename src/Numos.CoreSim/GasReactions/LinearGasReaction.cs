@@ -101,6 +101,9 @@ public readonly partial record struct LinearGasReaction
 
     private FrozenSet<LinearSpeedFactor> SpeedFactors { get; }
 
+    /// <summary>
+    ///     Whether the reaction should use the ignition system.
+    /// </summary>
     internal bool RequiresIgnition { get; }
 
     internal void AppendHash(ref AtmosStateHasher hash)
