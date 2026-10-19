@@ -99,6 +99,13 @@ public sealed record AddGasToVoxelOperation(Int3 Position, ushort LocalVoxelInde
     internal override void Apply(AtmosKernel kernel) => kernel.Apply(this);
 }
 
+public sealed record SetIgnitionSourceOperation(Int3 Position, ushort LocalVoxelIndex, Kelvin Temperature, CubicMetre Volume)
+    : AtmosOperation
+{
+    /// <inheritdoc />
+    public override AtmosOperationCode Code => AtmosOperationCode.SetIgnitionSource;
+}
+
 /// <summary>
 ///     Wakes a chunk and resets its sleep timer.
 /// </summary>

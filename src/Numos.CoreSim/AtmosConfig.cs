@@ -40,6 +40,7 @@ public class AtmosConfig : IAtmosConfig
         VoxelVolume = source.VoxelVolume;
         SaturationReferencePressure = source.SaturationReferencePressure;
         DefaultDiffusionCoefficient = source.DefaultDiffusionCoefficient;
+        DefaultThermalConductivity = source.DefaultThermalConductivity;
         SpaceTemperature = source.SpaceTemperature;
         BulkFlowCoefficient = source.BulkFlowCoefficient;
         VacuumThreshold = source.VacuumThreshold;
@@ -130,6 +131,7 @@ public class AtmosConfig : IAtmosConfig
     ///     Values are clamped to [0, 1]; non-finite values disable fallback diffusion.
     /// </remarks>
     public Scalar DefaultDiffusionCoefficient { get; set; } = AtmosConfigDefaults.DefaultDiffusionCoefficient;
+    public WattsPerMeterKelvin DefaultThermalConductivity { get; set; } = AtmosConfigDefaults.DefaultThermalConductivity;
 
     /// <summary>
     ///     Modeled temperature of space, in kelvins (K).
@@ -284,6 +286,18 @@ public class AtmosConfig : IAtmosConfig
         return (uint)gasId < (uint)GasRegistry.Count
             ? FloatMath.ClampUnitInterval(GasRegistry[gasId].DiffusionCoefficient)
             : FloatMath.ClampUnitInterval(DefaultDiffusionCoefficient);
+    }
+
+    public WattsPerMeterKelvin GetThermalConductivity(int gasId, Kelvin temperature)
+    {
+        WattsPerMeterKelvin referenceThermalConductivity = (uint)gasId < (uint)GasRegistry.Count
+            ? FloatMath.ClampUnitInterval(GasRegistry[gasId].ThermalConductivity)
+            : FloatMath.ClampUnitInterval(DefaultThermalConductivity);
+        float ReferenceConductivityTemperature = 300f;
+        float ThermalConductivityExponent = 0.7f;
+        // Conductivity rises roughly as a power of temperature. The stored value is the one at the reference temperature.
+        Scalar temperatureRatio = temperature / ReferenceConductivityTemperature;
+        return referenceThermalConductivity * MathF.Pow(temperatureRatio, ThermalConductivityExponent);
     }
 
     /// <summary>

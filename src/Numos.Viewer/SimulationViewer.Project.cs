@@ -19,7 +19,8 @@ public partial class SimulationViewer
         CondensationEnabled = true,
         MolarEnthalpyOfVaporization = 904f,
         LiquidId = 0,
-        DiffusionCoefficient = 0.02f
+        DiffusionCoefficient = 0.02f,
+        ThermalConductivity = 0.168f
     };
 
     private readonly static GasProperties Oxygen = new()
@@ -31,7 +32,8 @@ public partial class SimulationViewer
         CondensationEnabled = true,
         MolarEnthalpyOfVaporization = 6_820f,
         LiquidId = 0,
-        DiffusionCoefficient = 0.02f
+        DiffusionCoefficient = 0.02f,
+        ThermalConductivity = 0.024f
     };
 
     private readonly static GasProperties Nitrogen = new()
@@ -43,7 +45,8 @@ public partial class SimulationViewer
         CondensationEnabled = true,
         MolarEnthalpyOfVaporization = 5_600f,
         LiquidId = 1,
-        DiffusionCoefficient = 0.02f
+        DiffusionCoefficient = 0.02f,
+        ThermalConductivity = 0.024f
     };
 
     private readonly static GasProperties CarbonDioxide = new()
@@ -54,7 +57,8 @@ public partial class SimulationViewer
         CondensationEnabled = true,
         MolarEnthalpyOfVaporization = 9800f,
         LiquidId = 0,
-        DiffusionCoefficient = 0.02f
+        DiffusionCoefficient = 0.02f,
+        ThermalConductivity = 0.016f
     };
 
     private readonly static GasProperties NitrousOxide = new()
@@ -65,7 +69,8 @@ public partial class SimulationViewer
         CondensationEnabled = true,
         MolarEnthalpyOfVaporization = 16_540f,
         LiquidId = 0,
-        DiffusionCoefficient = 0.02f
+        DiffusionCoefficient = 0.02f,
+        ThermalConductivity = 0.016f
     };
 
     private readonly static GasProperties Water = new()
@@ -76,7 +81,8 @@ public partial class SimulationViewer
         CondensationEnabled = true,
         MolarEnthalpyOfVaporization = 40_657f,
         LiquidId = 0,
-        DiffusionCoefficient = 0.02f
+        DiffusionCoefficient = 0.02f,
+        ThermalConductivity = 0.0245f
     };
 
 
@@ -113,7 +119,8 @@ public partial class SimulationViewer
                 {
                     { Hydrogen, 1 },
                     { Oxygen, 0.5f }
-                });
+                },
+                true);
 
             config.SolverConfigurations = [new GasReactionConfig(standardReactions: [hydrogenFire])];
         }
@@ -436,6 +443,31 @@ public partial class SimulationViewer
             exception is ArgumentOutOfRangeException or KeyNotFoundException or InvalidOperationException)
         {
             _injectionFeedback = ReportException("Could not inject gas", exception);
+        }
+    }
+
+    private void IgniteProjectSource(
+        AtmosChunkHandle chunk,
+        int x,
+        int y,
+        int z,
+        float temperature,
+        float volume)
+    {
+        if (_simulation == null || _config == null)
+            return;
+
+        try
+        {
+            _simulation.IgniteVoxel(chunk, x, y, z, temperature, volume);
+            _injectionFeedback = Report(
+                $"Did it",
+                false);
+        }
+        catch (Exception exception) when (
+            exception is ArgumentOutOfRangeException or KeyNotFoundException or InvalidOperationException)
+        {
+            _injectionFeedback = ReportException("bad", exception);
         }
     }
 

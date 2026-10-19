@@ -856,6 +856,28 @@ public sealed partial class AtmosSimulation : IDisposable
         }
     }
 
+    [PublicAPI]
+    public void IgniteVoxel(
+        AtmosChunkHandle chunk, int x, int y, int z, float temperature, float volume)
+    {
+        lock (_mixtureGate)
+        {
+            ThrowIfDisposed();
+            _kernel.IgniteVoxel(chunk.Position, x, y, z, temperature, volume);
+        }
+    }
+
+    [PublicAPI]
+    public void IgniteVoxel(
+        AtmosChunkHandle chunk, ushort localVoxelIndex, float temperature, float volume)
+    {
+        lock (_mixtureGate)
+        {
+            ThrowIfDisposed();
+            _kernel.IgniteVoxel(chunk.Position, localVoxelIndex, temperature, volume);
+        }
+    }
+
     /// <summary>
     ///     Adds a registered gas by name to one voxel addressed by local coordinates and wakes its chunk.
     /// </summary>

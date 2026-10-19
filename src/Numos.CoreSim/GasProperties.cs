@@ -72,4 +72,7 @@ public record struct GasProperties
     /// </summary>
     [GasCheckpointField(0)]
     public string Name;
+
+    [GasCheckpointField(7)]
+    public WattsPerMeterKelvin ThermalConductivity;
 }

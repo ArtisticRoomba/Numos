@@ -47,6 +47,8 @@ public static class AtmosConfigDefaults
     /// </summary>
     public const Scalar DefaultDiffusionCoefficient = 0.02f;
 
+    public const WattsPerMeterKelvin DefaultThermalConductivity = 0.024f;
+
     /// <summary>
     ///     Default modeled temperature of space, in kelvins (K).
     /// </summary>

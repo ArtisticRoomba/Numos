@@ -14,6 +14,7 @@ namespace Numos.CoreSim;
 internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
 {
     private Scalar[] _diffusionCoefficients = [];
+    private WattsPerMeterKelvin[] _thermalConductivities = [];
     private GasRegistrySnapshot _gasRegistry = default!;
     private JoulePerMoleKelvin[] _molarHeatCapacitiesAtConstantVolume = [];
 
@@ -53,6 +54,7 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
 
     public JoulePerMoleKelvin DefaultMolarHeatCapacityAtConstantVolume { get; private set; }
     public Scalar DefaultDiffusionCoefficient { get; private set; }
+    public WattsPerMeterKelvin DefaultThermalConductivity { get; private set; }
 
     public CubicMetre GetVoxelVolume()
     {
@@ -76,6 +78,18 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
         return (uint)gasId < (uint)GasPropertyCount
             ? _diffusionCoefficients[gasId]
             : DefaultDiffusionCoefficient;
+    }
+
+    public WattsPerMeterKelvin GetThermalConductivity(int gasId, Kelvin temperature)
+    {
+        WattsPerMeterKelvin referenceThermalConductivity = (uint)gasId < (uint)GasPropertyCount
+            ? _thermalConductivities[gasId]
+            : DefaultThermalConductivity;
+        float ReferenceConductivityTemperature = 300f;
+        float ThermalConductivityExponent = 0.7f;
+        // Conductivity rises roughly as a power of temperature. The stored value is the one at the reference temperature.
+        Scalar temperatureRatio = temperature / ReferenceConductivityTemperature;
+        return referenceThermalConductivity * MathF.Pow(temperatureRatio, ThermalConductivityExponent);
     }
 
     public bool TryGetGasProperties(int gasId, out GasProperties properties)
@@ -105,6 +119,7 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
         {
             Array.Resize(ref _molarHeatCapacitiesAtConstantVolume, gasPropertyCount);
             Array.Resize(ref _diffusionCoefficients, gasPropertyCount);
+            Array.Resize(ref _thermalConductivities, gasPropertyCount);
         }
 
         GasPropertyCount = gasPropertyCount;
@@ -146,6 +161,10 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
                     : DefaultMolarHeatCapacityAtConstantVolume;
 
             _diffusionCoefficients[gasId] = FloatMath.ClampUnitInterval(properties.DiffusionCoefficient);
+            _thermalConductivities[gasId] = 
+                FloatMath.IsFinitePositive(properties.ThermalConductivity)
+                    ? properties.ThermalConductivity
+                    : DefaultThermalConductivity;
         }
 
         _gasRegistry = new GasRegistrySnapshot(gases);
@@ -155,6 +174,7 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
             int removedCount = previousGasRegistryCount - GasPropertyCount;
             Array.Clear(_molarHeatCapacitiesAtConstantVolume, GasPropertyCount, removedCount);
             Array.Clear(_diffusionCoefficients, GasPropertyCount, removedCount);
+            Array.Clear(_thermalConductivities, GasPropertyCount, removedCount);
         }
 
         BulkFlowCoefficient = FloatMath.ClampUnitInterval(config.BulkFlowCoefficient);

@@ -132,6 +132,14 @@ public sealed class GasReactionConfig : IAtmosSolverConfiguration
 
     internal JoulePerMole GetEnergyBalance(int reactionId) => _energyBalances[reactionId];
 
+    internal bool GetReactionIsIgnition(int reactionId)
+    {
+        return reactionId < LinearReactions.Count
+            ? LinearReactions[reactionId].RequiresIgnition
+            : StandardReactions[reactionId - LinearReactions.Count].RequiresIgnition;
+    }
+
+
     // Unlike GetEnergyBalance, this can't be precomputed once at construction: it depends on the
     // caller's temperature, which changes every voxel.
     internal ConcentrationPerSecond GetRateConstant(int reactionId, Kelvin temperature)

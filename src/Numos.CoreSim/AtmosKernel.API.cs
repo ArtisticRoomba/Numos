@@ -546,6 +546,36 @@ internal sealed partial class AtmosKernel
         }
     }
 
+    internal void IgniteVoxel(
+        Int3 position, ushort localVoxelIndex, Kelvin temperature, CubicMetre volume)
+    {
+        lock (StateGate)
+        {
+            var chunk = GetChunk(position);
+            ValidateVoxelIndex(chunk, localVoxelIndex);
+
+            int classification = chunk.VoxelRoomMap[localVoxelIndex];
+            if (classification == VoxelClassification.RoomSolid || classification == VoxelClassification.RoomVoid)
+                return;
+
+            chunk.Wake();
+            _defaultSolvers.SetIgnitionSource(chunk, localVoxelIndex, temperature, volume);
+            if (ShouldRecord) RecordOperation(new SetIgnitionSourceOperation(position, localVoxelIndex, temperature, volume));
+        }
+    }
+
+    internal void IgniteVoxel(
+        Int3 position, int x, int y, int z, Kelvin temperature, CubicMetre volume)
+    {
+        lock (StateGate)
+        {
+            var chunk = GetChunk(position);
+            IgniteVoxel(position, GetValidatedVoxelIndex(chunk, x, y, z), temperature, volume);
+        }
+    }
+
+
+
     /// <summary>
     ///     Wakes a chunk so its gas-bearing voxels participate in subsequent simulation ticks.
     /// </summary>
