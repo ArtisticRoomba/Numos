@@ -69,7 +69,7 @@ internal class ReactionSolver : IAtmosSolverStage
     // Per-thread scratch for the intrinsic (unscaled) rate of every ignition reaction, same reasoning as
     // _reactionSpeedsScratch above.
     [ThreadStatic]
-    private static ConcentrationPerSecond[]? _intrinsicRatesScratch;
+    private static ConcentrationPerSecond64[]? _intrinsicRatesScratch;
 
     public void Solve(AtmosSolverExecutionContext context)
     {
@@ -126,12 +126,12 @@ internal class ReactionSolver : IAtmosSolverStage
         return scratch;
     }
 
-    private static ConcentrationPerSecond[] RentIntrinsicRates(int reactionCount)
+    private static ConcentrationPerSecond64[] RentIntrinsicRates(int reactionCount)
     {
-        ConcentrationPerSecond[]? scratch = _intrinsicRatesScratch;
+        ConcentrationPerSecond64[]? scratch = _intrinsicRatesScratch;
         if (scratch == null || scratch.Length < reactionCount)
         {
-            scratch = new ConcentrationPerSecond[Math.Max(reactionCount, 16)];
+            scratch = new ConcentrationPerSecond64[Math.Max(reactionCount, 16)];
             _intrinsicRatesScratch = scratch;
         }
 
@@ -244,7 +244,7 @@ internal class ReactionSolver : IAtmosSolverStage
     /// </param>
     private static PerSecond ComputeDepletionRate(
         ReadOnlySpan<Mole> mixtureVector, int mixtureLength, CubicMetre volume, GasReactionConfig reactions,
-        GasReactionData[] gasData, ConcentrationPerSecond[] intrinsicRates)
+        GasReactionData[] gasData, ConcentrationPerSecond64[] intrinsicRates)
     {
         PerSecond result = 0f;
         for (int gasId = 0; gasId < mixtureLength; gasId++)
@@ -256,7 +256,7 @@ internal class ReactionSolver : IAtmosSolverStage
             foreach (var (reactionId, consumed) in gasData[gasId].ConsumingReactions)
             {
                 if (reactions.GetReactionIsIgnition(reactionId))
-                    consumption -= consumed * intrinsicRates[reactionId];
+                    consumption -= consumed * (ConcentrationPerSecond)intrinsicRates[reactionId];
             }
 
             if (consumption <= 0f)
@@ -349,6 +349,7 @@ internal class ReactionSolver : IAtmosSolverStage
             0,
             activeAirCount,
             new ProcessVoxelAction(
+                this,
                 chunk,
                 deltaTime,
                 volume,
@@ -647,7 +648,7 @@ internal class ReactionSolver : IAtmosSolverStage
     /// <summary>
     ///     Does the actual per-voxel reaction work against prebuilt <paramref name="tables" />.
     /// </summary>
-    private static void ProcessMixtureCore(
+    private void ProcessMixtureCore(
         Second deltaTime, Span<Mole> mixtureVector, ref Kelvin currentTemperature, ref Scalar ignitionPercent, ref Kelvin ignitedVolumeTemp, CubicMetre volume,
         Scalar[]? reactionFeedback, IAtmosConfig config, int mixtureLength, ReactionTables tables)
     {
@@ -665,7 +666,7 @@ internal class ReactionSolver : IAtmosSolverStage
         Joule initialEnergy = ExtractHeat(mixtureVector, ref currentTemperature, mixtureLength, config);
         int reactionCount = reactions.Count;
         Mole[] reactionSpeeds = RentReactionSpeeds(reactionCount);
-        ConcentrationPerSecond[] intrinsicRates = RentIntrinsicRates(reactionCount);
+        ConcentrationPerSecond64[] intrinsicRates = RentIntrinsicRates(reactionCount);
 
         Array.Clear(reactionSpeeds, 0, reactionCount);
         Array.Clear(intrinsicRates, 0, reactionCount);
@@ -693,12 +694,12 @@ internal class ReactionSolver : IAtmosSolverStage
                 if (!reactions.GetReactionIsIgnition(reactionId))
                     continue;
 
-                ConcentrationPerSecond intrinsicRate = reactions.GetRateConstant(reactionId, ignitedVolumeTemp);
-                if (!float.IsNormal(intrinsicRate) || intrinsicRate <= 0f)
+                ConcentrationPerSecond64 intrinsicRate = reactions.GetRateConstant(reactionId, ignitedVolumeTemp);
+                if (!double.IsNormal(intrinsicRate) || intrinsicRate <= 0f)
                     continue;
 
-                foreach (var gas in rateOrder)
-                    intrinsicRate = gas.ApplyRateFactors(reactionId, mixtureVector[gas.GasId]/volume, intrinsicRate);
+                foreach (var gas in tables.RateOrder)
+                    intrinsicRate = gas.ApplyRateFactors(reactionId, (Mole64)mixtureVector[gas.GasId] / volume, intrinsicRate);
 
                 intrinsicRates[reactionId] = intrinsicRate;
             }
@@ -899,7 +900,7 @@ internal class ReactionSolver : IAtmosSolverStage
         //bit-exact regardless of hardware SIMD width.
         Span<Mole> mixture = mixtureVector[..mixtureLength];
         for (int j = 0; j < reactionCount; j++)
-            TensorPrimitives.MultiplyAdd(changesMatrix.GetReactionRow(j), reactionSpeeds[j], mixture, mixture);
+            TensorPrimitives.MultiplyAdd(tables.Matrix.GetReactionRow(j), reactionSpeeds[j], mixture, mixture);
 
         if (reactionFeedback != null)
         {
@@ -1103,7 +1104,7 @@ internal class ReactionSolver : IAtmosSolverStage
                     config.GetVoxelVolume());
             }
  
-            ProcessMixtureCore(
+            solver.ProcessMixtureCore(
                 deltaTime,
                 mixtureVector,
                 ref temp,
