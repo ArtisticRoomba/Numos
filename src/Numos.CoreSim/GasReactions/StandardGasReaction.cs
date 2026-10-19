@@ -33,7 +33,6 @@ public readonly partial record struct StandardGasReaction
     public StandardGasReaction(
         IDictionary<GasProperties, float> input, IDictionary<GasProperties, float> output,
         [Quantity("molarEnergy")] JoulePerMole energyBalance,
-        [Quantity("molarEnergy")] JoulePerMole energyBalance,
         float arrheniusFactor, float activationEnergy,
         IDictionary<GasProperties, float> speedFactors,
         bool requiresIgnition = false)

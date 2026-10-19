@@ -188,12 +188,7 @@ internal sealed partial class AtmosKernel
         AddGasToVoxel(op.Position, op.LocalVoxelIndex, op.GasId, op.Moles, op.Temperature);
     }
 
-    private void Apply(SetIgnitionSourceOperation op)
-    {
-        IgniteVoxel(op.Position, op.LocalVoxelIndex, op.Temperature, op.Volume);
-    }
-
-    private void Apply(SetIgnitionSourceOperation op)
+    internal void Apply(SetIgnitionSourceOperation op)
     {
         IgniteVoxel(op.Position, op.LocalVoxelIndex, op.Temperature, op.Volume);
     }

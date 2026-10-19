@@ -104,6 +104,8 @@ public sealed record SetIgnitionSourceOperation(Int3 Position, ushort LocalVoxel
 {
     /// <inheritdoc />
     public override AtmosOperationCode Code => AtmosOperationCode.SetIgnitionSource;
+
+    internal override void Apply(AtmosKernel kernel) => kernel.Apply(this);
 }
 
 /// <summary>
