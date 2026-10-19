@@ -738,7 +738,7 @@ public class GasReactionTests
         float ignitedVolumeTemp = 0f;
 
         var solver = new ReactionSolver();
-        solver.ProcessVoxel(1f, mixture, ref temperature, ref ignitionPercent, ref ignitedVolumeTemp, feedback, config, 3);
+        solver.ProcessVoxel(1f, mixture, ref temperature, ref ignitionPercent, ref ignitedVolumeTemp, feedback, config, 2);
 
         Assert.Multiple(() =>
         {
