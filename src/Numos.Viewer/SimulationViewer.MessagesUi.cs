@@ -60,12 +60,14 @@ public partial class SimulationViewer
         if (args.ExceptionObject is Exception exception)
             WriteFatalException("Unhandled exception", exception);
         else
-            WriteMessage(ViewerLogLevel.Fatal, "Runtime", $"Unhandled exception: {args.ExceptionObject}");
+            WriteMessage(ViewerLogLevel.Fatal,
+                Locale.GetString("source-runtime"), 
+                Locale.GetString("message-fatal-unhandled-exception-trace", ("stackTrace", args.ExceptionObject.ToString())));
     }
 
     private void HandleUnobservedTaskException(object? sender, UnobservedTaskExceptionEventArgs args)
     {
-        WriteException("Unobserved task exception", args.Exception);
+        WriteException(Locale.GetString("message-exception-unobserved-task"), args.Exception);
     }
 
     private void WriteMessage(ViewerLogLevel level, string source, string message)
@@ -76,13 +78,13 @@ public partial class SimulationViewer
 
     private void WriteException(string context, Exception exception)
     {
-        _messages.Write(ViewerLogLevel.Error, "Exception", $"{context}: {exception.Message}", exception.ToString());
+        _messages.Write(ViewerLogLevel.Error, Locale.GetString("source-exception"), $"{context}: {exception.Message}", exception.ToString());
         RequestNextFrame();
     }
 
     private void WriteFatalException(string context, Exception exception)
     {
-        _messages.Write(ViewerLogLevel.Fatal, "Exception", $"{context}: {exception.Message}", exception.ToString());
+        _messages.Write(ViewerLogLevel.Fatal, Locale.GetString("source-exception"), $"{context}: {exception.Message}", exception.ToString());
         RequestNextFrame();
     }
 
@@ -170,15 +172,15 @@ public partial class SimulationViewer
         ImGui.SetNextItemWidth(120f);
         ImGui.Combo("##message-level", ref _messageMinimumLevel, "DEBG\0INFO\0WARN\0ERR\0FATL\0");
         ImGui.SameLine();
-        ImGui.Checkbox("Auto-scroll", ref _messageAutoScroll);
+        ImGui.Checkbox(Locale.GetString("checkbox-autoscroll"), ref _messageAutoScroll);
         ImGui.SameLine();
 
         ViewerLogEntry[] visibleEntries = entries.Where(IsMessageVisible).ToArray();
-        if (ImGui.Button("Copy"))
+        if (ImGui.Button(Locale.GetString("button-copy")))
             Raylib.SetClipboardText(FormatMessages(visibleEntries));
 
         ImGui.SameLine();
-        if (ImGui.Button("Clear"))
+        if (ImGui.Button(Locale.GetString("button-clear")))
         {
             _messages.Clear();
             entries = [];

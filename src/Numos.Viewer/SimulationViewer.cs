@@ -158,12 +158,17 @@ public partial class SimulationViewer : IDisposable
     /// </remarks>
     public void Run()
     {
+        Locale.LoadCulture();
+        
+        _newGasName = Locale.GetString("simulation-new-gas-name");
+        _projectNameDraft = Locale.GetString("simulation-name-default");
+        
         Raylib.SetConfigFlags(
             ConfigFlags.ResizableWindow |
             ConfigFlags.Msaa4xHint |
             ConfigFlags.VSyncHint);
 
-        Raylib.InitWindow(1400, 900, "Numos.Viewer");
+        Raylib.InitWindow(1400, 900, Locale.GetString("simulation-title"));
         _windowInitialized = true;
 
         string iconPath = Path.Combine(

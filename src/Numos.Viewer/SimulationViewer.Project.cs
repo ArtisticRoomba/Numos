@@ -136,7 +136,7 @@ public partial class SimulationViewer
             _config = config;
             _frameBuilder = frameBuilder;
             _projectName = string.IsNullOrWhiteSpace(projectName)
-                ? "Untitled Simulation"
+                ? Locale.GetString("simulation-name-default")
                 : projectName.Trim();
 
             _chunkDimensions = new Int3(chunkWidth, chunkHeight, chunkDepth);
@@ -145,7 +145,7 @@ public partial class SimulationViewer
             _knownSimulationRevision = -1;
             ReconcileSimulationSurfaces();
             world = null;
-            SetProjectMessage($"Created project '{_projectName}'.", false);
+            SetProjectMessage(Locale.GetString("message-project-create", ("name", _projectName)), false);
         }
         finally
         {
@@ -243,12 +243,12 @@ public partial class SimulationViewer
             var chunk = _simulation.CreateAndRegisterChunk(position);
             _simulation.SetChunkClassification(chunk, new VoxelClassification(roomId));
             _frameSceneOnNextPresentation = true;
-            _chunkFeedback = Report($"Added chunk {FormatChunkPosition(position)}.", false);
+            _chunkFeedback = Report(Locale.GetString("message-project-chunk-add", ("pos", FormatChunkPosition(position))), false);
         }
         catch (Exception exception) when (
             exception is ArgumentOutOfRangeException or InvalidOperationException)
         {
-            _chunkFeedback = ReportException($"Could not add chunk {FormatChunkPosition(position)}", exception);
+            _chunkFeedback = ReportException("message-project-exception-chunk-add", ("pos", FormatChunkPosition(position))), exception);
         }
     }
 
@@ -259,11 +259,11 @@ public partial class SimulationViewer
 
         if (_simulation.UnregisterChunk(chunk))
         {
-            _chunkFeedback = Report($"Removed chunk {FormatChunkPosition(chunk.Position)}.", false);
+            _chunkFeedback = Report(Locale.GetString("message-project-chunk-remove", ("pos", FormatChunkPosition(chunk.Position))), false);
             return;
         }
 
-        _chunkFeedback = Report($"Chunk {FormatChunkPosition(chunk.Position)} no longer exists.", true);
+        _chunkFeedback = Report(Locale.GetString("message-project-chunk-remove-fail", ("pos", FormatChunkPosition(chunk.Position))), true);
     }
 
     private void SealProjectChunk(AtmosChunkHandle chunk)
@@ -275,12 +275,12 @@ public partial class SimulationViewer
         {
             _simulation.SetChunkBoundaryClassification(chunk, VoxelClassification.RoomSolid);
             _chunkFeedback = Report(
-                $"Replaced the outer faces of chunk {FormatChunkPosition(chunk.Position)} with solid walls.",
+                Locale.GetString("message-project-chunk-seal", ("pos", FormatChunkPosition(chunk.Position))),
                 false);
         }
         catch (KeyNotFoundException exception)
         {
-            _chunkFeedback = ReportException($"Could not seal chunk {FormatChunkPosition(chunk.Position)}", exception);
+            _chunkFeedback = ReportException(Locale.GetString("message-project-chunk-seal-fail", ("pos", FormatChunkPosition(chunk.Position))), exception);
         }
     }
 
@@ -292,7 +292,8 @@ public partial class SimulationViewer
         try
         {
             _simulation.WakeChunk(chunk);
-            _chunkFeedback = Report($"Unslept chunk {FormatChunkPosition(chunk.Position)}.", false);
+            _chunkFeedback = Report(Locale.GetString("message-project-unslept-chunk",
+                ("pos", FormatChunkPosition(chunk.Position))), false);
         }
         catch (KeyNotFoundException exception)
         {
@@ -326,7 +327,7 @@ public partial class SimulationViewer
         string name = gas.Name?.Trim() ?? string.Empty;
         if (name.Length == 0)
         {
-            _newGasFeedback = Report("Could not add the gas: a name is required.", true);
+            _newGasFeedback = Report(Locale.GetString("message-project-add-gas-name-required"), true);
             return;
         }
 
@@ -340,8 +341,7 @@ public partial class SimulationViewer
             gas.DiffusionCoefficient < 0f)
         {
             _newGasFeedback = Report(
-                $"Could not add {name}: molar Cv, boiling point, vaporization enthalpy, and diffusion coefficient " +
-                "must be finite and at least 0.",
+                Locale.GetString("message-project-gas-properties-invalid", ("name", name)),
                 true);
 
             return;
@@ -365,7 +365,7 @@ public partial class SimulationViewer
             return;
         }
 
-        _newGasFeedback = Report($"Added gas {name} with ID {_config.GasRegistry.Count - 1}.", false);
+        _newGasFeedback = Report(Locale.GetString("message-project-add-gas", ("name", name), ("id", _config.GasRegistry.Count - 1)), false);
     }
 
     private void RemoveProjectGas(int gasId)
@@ -383,8 +383,7 @@ public partial class SimulationViewer
             if (snapshot.Gases.Any(gas => gas.GasId >= gasId))
             {
                 _gasRegistryFeedback = Report(
-                    $"Could not remove {_config.GasRegistry[gasId].Name}: it, or a later gas ID, has already been " +
-                    "used by a chunk. Remove the affected chunks first so gas IDs remain stable.",
+                    Locale.GetString("message-project-remove-gas-chunk-contained-error", ("name", _config.GasRegistry[gasId].Name)),
                     true);
 
                 return;
@@ -404,7 +403,7 @@ public partial class SimulationViewer
             return;
         }
 
-        _gasRegistryFeedback = Report($"Removed gas {name}.", false);
+        _gasRegistryFeedback = Report(Locale.GetString("message-project-remove-gas", ("name", name)), false);
     }
 
     private void InjectProjectGas(
@@ -421,7 +420,7 @@ public partial class SimulationViewer
 
         if (gasId < 0 || gasId >= _config.GasRegistry.Count)
         {
-            _injectionFeedback = Report("Select a registered gas before injecting.", true);
+            _injectionFeedback = Report(Locale.GetString("message-project-inject-gas-not-selected"), true);
             return;
         }
 
@@ -429,13 +428,16 @@ public partial class SimulationViewer
         {
             _simulation.AddGasToVoxel(chunk, x, y, z, gasId, moles, temperature);
             _injectionFeedback = Report(
-                $"Injected {moles:G} mol of {_config.GasRegistry[gasId].Name} into ({x}, {y}, {z}).",
+                Locale.GetString("message-project-inject-gas",
+                    ("moles", $"{moles:G}"),
+                    ("name", _config.GasRegistry[gasId].Name),
+                    ("x", x), ("y", y), ("z", z)),
                 false);
         }
         catch (Exception exception) when (
             exception is ArgumentOutOfRangeException or KeyNotFoundException or InvalidOperationException)
         {
-            _injectionFeedback = ReportException("Could not inject gas", exception);
+            _injectionFeedback = ReportException(Locale.GetString("message-project-inject-gas-exception"), exception);
         }
     }
 

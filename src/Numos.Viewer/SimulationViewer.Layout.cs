@@ -45,18 +45,23 @@ public partial class SimulationViewer
     {
         if (_userLayoutPath == null)
         {
-            WriteMessage(ViewerLogLevel.Error, "Layout", "The ImGui layout has not been initialized yet.");
+            WriteMessage(
+                ViewerLogLevel.Error,
+                Locale.GetString("source-layout"), 
+                Locale.GetString("message-layout-not-initialized"));
             return;
         }
 
         try
         {
             ImGui.SaveIniSettingsToDisk(_userLayoutPath);
-            WriteMessage(ViewerLogLevel.Info, "Layout", "Saved. This layout will be restored at the next launch.");
+            WriteMessage(ViewerLogLevel.Info,
+                Locale.GetString("source-layout"), 
+                Locale.GetString("message-layout-saved-success"));
         }
         catch (Exception ex)
         {
-            WriteException("Could not save the layout", ex);
+            WriteException(Locale.GetString("message-layout-exception"), ex);
         }
     }
 
@@ -69,18 +74,18 @@ public partial class SimulationViewer
     {
         if (_packagedDefaultLayoutPath == null)
         {
-            WriteMessage(ViewerLogLevel.Error, "Layout", "The packaged default layout has not been initialized yet.");
+            WriteMessage(ViewerLogLevel.Error, Locale.GetString("source-layout"), Locale.GetString("message-layout-not-initialized-packaged"));
             return;
         }
 
         try
         {
             ImGui.SaveIniSettingsToDisk(_packagedDefaultLayoutPath);
-            WriteMessage(ViewerLogLevel.Info, "Layout", "Saved as the packaged default for first-time launches.");
+            WriteMessage(ViewerLogLevel.Info, Locale.GetString("source-layout"), Locale.GetString("message-layout-saved-success-packaged"));
         }
         catch (Exception ex)
         {
-            WriteException("Could not save the packaged default layout", ex);
+            WriteException(Locale.GetString("message-layout-exception"), ex);
         }
     }
 
