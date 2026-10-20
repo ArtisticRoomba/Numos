@@ -774,6 +774,10 @@ public partial class SimulationViewer
         ImGui.Spacing();
         if (ImGui.CollapsingHeader("Gas Registry", ImGuiTreeNodeFlags.DefaultOpen))
             RenderProjectGasControls(inspecting);
+
+        ImGui.Spacing();
+        if (ImGui.CollapsingHeader("Solver Configurations", ImGuiTreeNodeFlags.DefaultOpen))
+            DrawSolverConfigurations(_config.SolverConfigurations);
     }
 
     private void ResetConfigurationValues()
