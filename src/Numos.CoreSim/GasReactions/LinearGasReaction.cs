@@ -63,12 +63,12 @@ public readonly partial record struct LinearGasReaction
     /// <summary>
     ///     Moles of each reactant consumed per reaction.
     /// </summary>
-    private FrozenDictionary<GasProperties, float> Input { get; }
+    public IReadOnlyDictionary<GasProperties, float> Input { get; }
 
     /// <summary>
     ///     Moles of each product produced per reaction.
     /// </summary>
-    private FrozenDictionary<GasProperties, float> Output { get; }
+    public IReadOnlyDictionary<GasProperties, float> Output { get; }
 
     /// <summary>
     ///     Joules released (positive) or absorbed (negative) per mole of reaction.
@@ -77,13 +77,32 @@ public readonly partial record struct LinearGasReaction
     ///     Per mole of whichever reactant has a coefficient of one, so for 2H₂ + O₂ -> 2H₂O it is the energy released
     ///     per mole of oxygen consumed.
     /// </remarks>
-    internal JoulePerMole EnergyBalance { get; }
+    [Quantity("molarEnergy")]
+    public JoulePerMole EnergyBalance { get; }
 
-    private Kelvin LowTemperatureBound { get; }
-    private Kelvin HighTemperatureBound { get; }
+    /// <summary>
+    ///     Temperature of the rate line's lower point, in kelvins (K).
+    /// </summary>
+    [Quantity("temperature")]
+    public Kelvin LowTemperatureBound { get; }
 
-    private ConcentrationPerSecond LowTempSpeed { get; }
-    private ConcentrationPerSecond HighTempSpeed { get; }
+    /// <summary>
+    ///     Temperature of the rate line's upper point, in kelvins (K).
+    /// </summary>
+    [Quantity("temperature")]
+    public Kelvin HighTemperatureBound { get; }
+
+    /// <summary>
+    ///     Rate in mol/(m³·s) at <see cref="LowTemperatureBound" />.
+    /// </summary>
+    [Quantity("concentrationPerSecond")]
+    public ConcentrationPerSecond LowTempSpeed { get; }
+
+    /// <summary>
+    ///     Rate in mol/(m³·s) at <see cref="HighTemperatureBound" />.
+    /// </summary>
+    [Quantity("concentrationPerSecond")]
+    public ConcentrationPerSecond HighTempSpeed { get; }
 
     private Kelvin BoundaryRange { get; }
 
@@ -92,14 +111,17 @@ public readonly partial record struct LinearGasReaction
     /// <summary>
     ///     Whether the rate is zero below <see cref="LowTemperatureBound" /> instead of extrapolated.
     /// </summary>
-    private bool LowStrict { get; }
+    public bool LowStrict { get; }
 
     /// <summary>
     ///     Whether the rate is zero above <see cref="HighTemperatureBound" /> instead of extrapolated.
     /// </summary>
-    private bool HighStrict { get; }
+    public bool HighStrict { get; }
 
-    private FrozenSet<LinearSpeedFactor> SpeedFactors { get; }
+    /// <summary>
+    ///     Multipliers on the rate constant that depend on the amount of specific gases.
+    /// </summary>
+    public IReadOnlySet<LinearSpeedFactor> SpeedFactors { get; }
 
     internal void AppendHash(ref AtmosStateHasher hash)
     {

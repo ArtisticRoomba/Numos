@@ -46,12 +46,12 @@ public readonly partial record struct StandardGasReaction
     /// <summary>
     ///     Moles of each reactant consumed per reaction.
     /// </summary>
-    private FrozenDictionary<GasProperties, Mole> Input { get; }
+    public IReadOnlyDictionary<GasProperties, float> Input { get; }
 
     /// <summary>
     ///     Moles of each product produced per reaction.
     /// </summary>
-    private FrozenDictionary<GasProperties, Mole> Output { get; }
+    public IReadOnlyDictionary<GasProperties, float> Output { get; }
 
     /// <summary>
     ///     Joules released (positive) or absorbed (negative) per mole of reaction.
@@ -60,25 +60,27 @@ public readonly partial record struct StandardGasReaction
     ///     Per mole of whichever reactant has a coefficient of one, so for 2H₂ + O₂ -> 2H₂O it is the energy released
     ///     per mole of oxygen consumed.
     /// </remarks>
-    internal JoulePerMole EnergyBalance { get; }
+    [Quantity("molarEnergy")]
+    public JoulePerMole EnergyBalance { get; }
 
     /// <summary>
     ///     Arrhenius pre-exponential factor. Its units depend on the rate law's overall order.
     /// </summary>
-    private float ArrheniusFactor { get; }
+    public float ArrheniusFactor { get; }
 
     /// <summary>
     ///     Molar activation energy, in J/mol. Used directly against <see cref="AtmosPhysicalConstants.MolarGasConstant" />
     ///     (J/(mol*K)) in the Arrhenius exponent, so values authored in kJ/mol must be converted at the call site,
     ///     e.g. via <see cref="Numos.Units.Generated.UnitConversions.FromKilojoulePerMole" />.
     /// </summary>
-    private JoulePerMole ActivationEnergy { get; }
+    [Quantity("molarEnergy")]
+    public JoulePerMole ActivationEnergy { get; }
 
     /// <summary>
     ///     The exponents of the rate equation:
     ///     k * Gas_1^{a} * Gas_2 ^ {b}...
     /// </summary>
-    private FrozenDictionary<GasProperties, float> SpeedFactors { get; }
+    public IReadOnlyDictionary<GasProperties, float> SpeedFactors { get; }
 
     internal void AppendHash(ref AtmosStateHasher hash)
     {
