@@ -125,6 +125,25 @@ internal static class EulerFaceTopology
     }
 
     /// <summary>
+    ///     Whether the face of a voxel in <paramref name="direction" /> leaves the chunk.
+    /// </summary>
+    /// <param name="position">The voxel's local position.</param>
+    /// <param name="last">The chunk's dimensions minus one on every axis.</param>
+    /// <param name="direction">The face's direction slot.</param>
+    internal static bool IsOnEdge(Int3 position, Int3 last, int direction)
+    {
+        return direction switch
+        {
+            0 => position.X == 0,
+            1 => position.X == last.X,
+            2 => position.Y == 0,
+            3 => position.Y == last.Y,
+            4 => position.Z == 0,
+            _ => position.Z == last.Z
+        };
+    }
+
+    /// <summary>
     ///     Reads the open bit of one direction slot.
     /// </summary>
     internal static bool IsOpen(byte openMask, int direction)

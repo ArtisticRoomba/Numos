@@ -528,6 +528,10 @@ about a thousand times molecular diffusivity in air, and stands in for convectiv
 The `n_g/7` cap keeps the six outgoing transfers below the voxel's inventory. A voxel with zero pressure, no non-solid
 neighbors, or none of the gas diffuses nothing.
 
+`euler-flow` runs this same kernel once per tick after its write-back, on the chunk fields rather than its own
+buffers. A chunk at rest therefore diffuses bit for bit what `advection` would have. Diffusion carries no momentum.
+A swap of species at equal pressure has no bulk velocity, so diffusion leaves the momentum arrays untouched.
+
 ### 5.4 How the advection stage runs
 
 **Scheduling.** When there are fewer awake chunks than workers (including the common single-dense-chunk case), the
@@ -588,6 +592,10 @@ instead of one work item per chunk.
 
 A low-pressure expansion front survives while it is next to pressurized gas. An isolated region is cleaned up once it
 and all of its neighbors fall below the threshold.
+
+`euler-flow` runs the same cleanup after its diffusion pass. An emptied voxel has its momentum zeroed with the rest of
+its state, and the stage re-checks its momentum invariants afterwards (a vacuum or trace voxel carries none, a voxel
+below the velocity floor is brought to rest), so the sleep metric that follows never sees motion in an empty voxel.
 
 ### 5.6 Delta buffers and reduction order
 
@@ -678,6 +686,17 @@ gas any active chunk holds (the union, in ascending gas id), zero-filled where t
 receive a gas it has never held and the mixture sums on both sides of a face run over the same list in the same
 order. Zero rows add nothing to any sum, so tabling absent gases changes no result; write-back only creates a channel
 for a row once some voxel holds a tracked amount.
+
+Species diffusion crosses chunk faces by the same symmetric-face idea, after the write-back and the intra-chunk
+diffusion pass (§5.3). For every open face between two active chunks, both chunks evaluate the §5.3 amount `q_g` of
+*both* cells from the live fields (the cell's own pressure, temperature, and moles, with the gather's
+`MinimumTrackedMoles` suppression decided from the other cell's moles), and each applies the net to its own cell:
+`q_g,neighbour − q_g,own` on one side, `q_g,own − q_g,neighbour` on the other. Float subtraction is sign-symmetric, so
+the two nets are exact negatives and nothing needs reconciling. Energy travels at the source temperature as in the
+intra-chunk gather. Every chunk computes its face amounts before any chunk applies them, because the cells a chunk
+writes are the cells its neighbour reads. A face into a chunk that is not active this tick exchanges nothing and does
+not wake it; a void voxel across a chunk face takes the cell's amount like an in-chunk void neighbour. A deposit of a
+gas the receiving chunk has no channel for creates the channel; the suppression rule guarantees it is a tracked amount.
 
 ---
 
@@ -1449,7 +1468,12 @@ nothing currently uses.
   outflow has already been applied. An edge or corner voxel with several outward faces can therefore request more
   than it holds when `BulkFlowCoefficient` approaches 0.5. At the default 0.125 the total stays well below inventory.
 - Diffusion into a sleeping chunk is one-way for a tick. A sleeping chunk publishes no boundary events, so the
-  return half of the diffusive exchange starts only after a transfer has woken it.
+  return half of the diffusive exchange starts only after a transfer has woken it. Under `euler-flow` it does not happen
+  at all. The stage exchanges diffusion only between active chunks and never wakes a chunk for it. A composition
+  gradient across a face into a sleeping chunk waits for something else to wake that chunk, such as a pressure
+  difference or an API mutation. Relatedly, `boundary-flow` keeps a chunk awake whenever its diffusion moves gas across
+  a face. The Euler sleep metric is pressure and momentum only. Two Euler chunks that mix at equal pressure across a face
+  can therefore fall asleep mid-mix, as the voxels inside one chunk always could.
 - Unused configuration fields. `MaxPressureTransferFractionPerNeighbor`, `AccumulatorWakeThreshold`,
   `AccumulatorMaxAliveTicks`, and `SpaceTemperature` are captured, normalized, and checkpointed, but no built-in
   solver reads them.
