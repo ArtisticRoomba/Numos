@@ -438,9 +438,9 @@ these parts:
 - `config`, including the gas registry and, once the session has them, the `eulerFlow` settings.
 - `solverPipeline` in execution order.
 - `flow`, what `euler-flow` did on the latest tick: `substepsLastTick`, `simulatedSeconds`, `substepCapEngaged`,
-  `maxCourantNumber`, `maxSignalSpeedMps`, `clampedVelocityCount`, `negativeInternalEnergyCount`, and
-  `negativeMolesCount`. All values are zero before the first tick and under the legacy model. Alert on
-  `substepCapEngaged` and the three counts. The rest are for tuning `eulerFlow`.
+  `maxCourantNumber`, `maxSignalSpeedMps`, `clampedVelocityCount`, `negativeInternalEnergyCount`,
+  `negativeMolesCount`, and `nonFiniteCellCount`. All values are zero before the first tick and under the legacy model.
+  Alert on `substepCapEngaged` and the four counts. The rest are for tuning `eulerFlow`.
 - `global`, with topology counts, total moles, estimated sensible energy, pressure, temperature, and speed statistics, totals by
   gas, and anomaly counts.
 - `chunks`, sorted by `(x, y, z)`, each with its own summary and optional `voxels`.

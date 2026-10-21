@@ -31,6 +31,12 @@ namespace Numos.CoreSim.EulerFlow;
 ///     Number of species updates that went below zero and were floored. Same reading as
 ///     <paramref name="NegativeInternalEnergyCount" />: a face drained more than the upwind cell held.
 /// </param>
+/// <param name="NonFiniteCellCount">
+///     Number of cell states, gathered or swept, whose energy density, temperature, pressure, or sound speed did not
+///     fit in <see langword="float" />. Such a cell keeps its gas but transports like a vacuum for the rest of the
+///     sweep, with no momentum. Nonzero means a gas's heat capacity or a voxel's energy is far outside the range
+///     the stage is built for; check the registry before anything else.
+/// </param>
 /// <remarks>
 ///     A plain measurement, not simulation state: it is neither checkpointed nor hashed, and it reads as all zeros
 ///     under the legacy transport model, after a checkpoint restore, and before the first tick.
@@ -43,4 +49,5 @@ public readonly record struct AtmosFlowDiagnostics(
     [property: Quantity("velocity")] MetrePerSecond MaxSignalSpeed,
     int ClampedVelocityCount,
     int NegativeInternalEnergyCount,
-    int NegativeMolesCount);
+    int NegativeMolesCount,
+    int NonFiniteCellCount);

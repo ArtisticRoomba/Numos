@@ -17,8 +17,12 @@ namespace Numos.CoreSim.Solvers.Euler;
 ///         gas it has no row for.
 ///     </para>
 ///     <para>
-///         Energy is double. A warm voxel's total energy is dominated by <c>C·T</c>, and the face-flux differences
-///         that move it each substep are many orders of magnitude smaller, so a float accumulator would drop them.
+///         Energy and heat capacity are double. A warm voxel's total energy is dominated by <c>C·T</c>, and the
+///         face-flux differences that move it each substep are many orders of magnitude smaller, so a float
+///         accumulator would drop them; <c>C</c> is double so a heat capacity near the float maximum overflows only
+///         once narrowed, which <see cref="EulerMixture.ToPrimitive(Kilogram, Mole, JoulePerKelvin64,
+///         KilogramMetrePerSecond, KilogramMetrePerSecond, KilogramMetrePerSecond, Joule64, CubicMetre,
+///         PascalPerMoleKelvin, out EulerCellState)" /> detects.
 ///     </para>
 /// </remarks>
 internal sealed class EulerChunkState
@@ -30,7 +34,7 @@ internal sealed class EulerChunkState
     public EulerCellState[] Cells = [];
 
     public Joule64[] Energy = [];
-    public JoulePerKelvin[] HeatCapacity = [];
+    public JoulePerKelvin64[] HeatCapacity = [];
     public Kilogram[] Mass = [];
 
     /// <summary>
@@ -60,7 +64,7 @@ internal sealed class EulerChunkState
         {
             Cells = new EulerCellState[voxelCount];
             Energy = new Joule64[voxelCount];
-            HeatCapacity = new JoulePerKelvin[voxelCount];
+            HeatCapacity = new JoulePerKelvin64[voxelCount];
             Mass = new Kilogram[voxelCount];
             MomentumX = new KilogramMetrePerSecond[voxelCount];
             MomentumY = new KilogramMetrePerSecond[voxelCount];
@@ -133,6 +137,11 @@ internal sealed class EulerChunkWorkspace
     ///     Number of gases this workspace carries rows for.
     /// </summary>
     public int GasCount;
+
+    /// <summary>
+    ///     Cells the last <see cref="Gather" /> found non-finite and gathered as vacuum. Reset by <see cref="Bind" />.
+    /// </summary>
+    public int NonFiniteCellsGathered;
 
     /// <summary>
     ///     Gas ids this workspace carries rows for, ascending.
@@ -217,6 +226,7 @@ internal sealed class EulerChunkWorkspace
         }
 
         GasCount = 0;
+        NonFiniteCellsGathered = 0;
         Chunk = chunk;
         _readIndex = 0;
         int voxelCount = chunk.VoxelCount;
@@ -316,7 +326,9 @@ internal sealed class EulerChunkWorkspace
     /// <remarks>
     ///     A voxel with no mass or fewer than <see cref="AtmosSolverConstants.MinimumTrackedMoles" /> moles is a
     ///     trace cell: its momentum is dropped, its energy is <c>C·T</c>, and its primitive state is the vacuum,
-    ///     so neighbouring faces see it as empty and only ever push gas into it. It keeps the moles it has.
+    ///     so neighbouring faces see it as empty and only ever push gas into it. It keeps the moles it has. A voxel
+    ///     whose primitive state does not fit in float (<see cref="EulerCellKind.NonFinite" />) is gathered the
+    ///     same way and counted in <see cref="NonFiniteCellsGathered" />.
     /// </remarks>
     internal void Gather(AtmosSolverConfigSnapshot config)
     {
@@ -347,7 +359,7 @@ internal sealed class EulerChunkWorkspace
             ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
             SumMixture(
                 buffer, voxelIndex,
-                out Kilogram mass, out Mole totalMoles, out JoulePerKelvin heatCapacity);
+                out Kilogram mass, out Mole totalMoles, out JoulePerKelvin64 heatCapacity);
 
             Kelvin temperature = config.GetValidatedTemp(chunk.Temperature[voxelIndex]);
             KilogramMetrePerSecond momentumX = chunk.MomentumX[voxelIndex];
@@ -359,7 +371,7 @@ internal sealed class EulerChunkWorkspace
                 momentumX = 0f;
                 momentumY = 0f;
                 momentumZ = 0f;
-                buffer.Energy[voxelIndex] = (double)heatCapacity * temperature;
+                buffer.Energy[voxelIndex] = heatCapacity * temperature;
                 buffer.Cells[voxelIndex] = default;
             }
             else
@@ -369,16 +381,21 @@ internal sealed class EulerChunkWorkspace
                     momentumX, momentumY, momentumZ);
 
                 buffer.Energy[voxelIndex] = energy;
-                if (EulerMixture.ToPrimitive(
-                        mass, totalMoles, heatCapacity,
-                        momentumX, momentumY, momentumZ,
-                        energy, config.VoxelVolume, config.PressurePerMoleKelvin,
-                        out buffer.Cells[voxelIndex]))
+                EulerCellKind kind = EulerMixture.ToPrimitive(
+                    mass, totalMoles, heatCapacity,
+                    momentumX, momentumY, momentumZ,
+                    energy, config.VoxelVolume, config.PressurePerMoleKelvin,
+                    out buffer.Cells[voxelIndex]);
+
+                if (kind == EulerCellKind.Gas)
                 {
                     maxSignalSpeed = MathF.Max(maxSignalSpeed, buffer.Cells[voxelIndex].SignalSpeed);
                 }
                 else
                 {
+                    if (kind == EulerCellKind.NonFinite)
+                        NonFiniteCellsGathered++;
+
                     momentumX = 0f;
                     momentumY = 0f;
                     momentumZ = 0f;
@@ -401,17 +418,17 @@ internal sealed class EulerChunkWorkspace
     /// </summary>
     internal void SumMixture(
         EulerChunkState buffer, int voxelIndex,
-        out Kilogram mass, out Mole totalMoles, out JoulePerKelvin heatCapacity)
+        out Kilogram mass, out Mole totalMoles, out JoulePerKelvin64 heatCapacity)
     {
         mass = 0f;
         totalMoles = 0f;
-        heatCapacity = 0f;
+        heatCapacity = 0d;
         for (int present = 0; present < GasCount; present++)
         {
             Mole moles = buffer.Species[GasIds[present]]![voxelIndex];
             mass += moles * MolarMass[present];
             totalMoles += moles;
-            heatCapacity += moles * HeatCapacity[present];
+            heatCapacity += (Mole64)moles * HeatCapacity[present];
         }
     }
 
@@ -434,12 +451,14 @@ internal sealed class EulerChunkWorkspace
     ///         The sweeps summed the mixture in ascending gas id, but the heat capacity and total moles written
     ///         here are summed in the chunk's channel order, because that is the order every other stage and
     ///         <see cref="AdvectionSolver.RefreshPressureAndHeatCapacity" /> use, and the cached values must match
-    ///         what a later refresh would produce bit for bit.
+    ///         what a later refresh would produce bit for bit. The temperature divides by the same sum formed in
+    ///         double, so a heat capacity the float cache saturates to infinity still gives a finite temperature.
     ///     </para>
     ///     <para>
     ///         The temperature is <c>(E − K)/C</c> with <c>K</c> from the momentum as it stands in the buffer, so
     ///         whatever the caller did to the momentum first (velocity floor, damping) ends up as heat rather than
-    ///         disappearing. Pressure goes through
+    ///         disappearing. A voxel whose energy or heat capacity is not finite even in double keeps the
+    ///         temperature it had. Pressure goes through
     ///         <see cref="AtmosSolverMath.CalculatePressureAtVoxel(IAtmosConfig, AtmosChunk, ushort, Mole)" /> so
     ///         <see cref="AtmosChunk.IsVacuum" /> stays consistent with the rest of the kernel.
     ///     </para>
@@ -478,14 +497,19 @@ internal sealed class EulerChunkWorkspace
             ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
             Mole totalMoles = 0f;
             JoulePerKelvin heatCapacity = 0f;
+            JoulePerKelvin64 preciseHeatCapacity = 0d;
             for (int gas = 0; gas < chunk.ActiveGasCount; gas++)
             {
                 Mole moles = chunk.ActiveGases[gas].Moles[voxelIndex];
                 if (moles <= 0f)
                     continue;
 
+                JoulePerMoleKelvin molarHeatCapacity =
+                    config.GetMolarHeatCapacityAtConstantVolume(chunk.ActiveGases[gas].GasId);
+
                 totalMoles += moles;
-                heatCapacity += moles * config.GetMolarHeatCapacityAtConstantVolume(chunk.ActiveGases[gas].GasId);
+                heatCapacity += moles * molarHeatCapacity;
+                preciseHeatCapacity += (Mole64)moles * molarHeatCapacity;
             }
 
             if (totalMoles <= 0f)
@@ -509,8 +533,9 @@ internal sealed class EulerChunkWorkspace
                 internalEnergy = 0d;
             }
 
-            Kelvin rawTemperature = heatCapacity > 0f
-                ? (float)(internalEnergy / heatCapacity)
+            Kelvin rawTemperature = preciseHeatCapacity > 0d && double.IsFinite(preciseHeatCapacity) &&
+                                    double.IsFinite(internalEnergy)
+                ? (float)(internalEnergy / preciseHeatCapacity)
                 : chunk.Temperature[voxelIndex];
 
             Kelvin temperature = config.GetValidatedTemp(rawTemperature);

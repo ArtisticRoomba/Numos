@@ -259,7 +259,8 @@ public static class SimulationStateAnalyzer
             flow.MaxSignalSpeed,
             flow.ClampedVelocityCount,
             flow.NegativeInternalEnergyCount,
-            flow.NegativeMolesCount);
+            flow.NegativeMolesCount,
+            flow.NonFiniteCellCount);
     }
 
     private static SolverStepReport CreateSolverReport(AtmosWorldSolverStep step)

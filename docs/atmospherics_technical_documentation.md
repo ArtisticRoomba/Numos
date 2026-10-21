@@ -929,6 +929,10 @@ rearranged formula instead:
 
 - Advection folds per-gas sensible energy into one `double` per voxel. An intermediate `moles * C_v * T` can exceed
   the `float` range even when the final temperature is ordinary.
+- The Euler stage keeps each voxel's total energy and heat capacity in `double`, and derives the temperature from
+  them before narrowing. A voxel whose primitive state still does not fit in `float` (its energy density is the usual
+  casualty) is swept as a vacuum with no momentum, keeps its gas, and is counted in
+  `AtmosFlowDiagnostics.NonFiniteCellCount`.
 - Thermal diffusion accumulates incident conductance and energy deltas in `double`.
 - The pair conductance is evaluated as `C_small / (1 + C_small / C_large)` rather than forming `C_i * C_j`.
 - Heat-capacity-weighted mixing uses bounded interpolation, and condensation computes its temperature increment
