@@ -327,7 +327,7 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
             for (int order = 0; order < 3; order++)
             {
                 int axis = parity == 0 ? order : 2 - order;
-                if (Extent(axis) == 1)
+                if (!AxisHasWork(axis))
                     continue;
 
                 ShareAxisGases(axis, config);
@@ -471,7 +471,7 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
     }
 
     /// <summary>
-    ///     Voxels along one axis of every chunk in this kernel. An axis one voxel long has nothing to sweep.
+    ///     Voxels along one axis of every chunk in this kernel.
     /// </summary>
     private int Extent(int axis)
     {
@@ -481,6 +481,31 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
             1 => _dimensions.Y,
             _ => _dimensions.Z
         };
+    }
+
+    /// <summary>
+    ///     Whether a sweep along <paramref name="axis" /> can move anything this substep.
+    /// </summary>
+    /// <remarks>
+    ///     An axis one voxel long has no interior faces, but its two chunk faces are still faces of the sweep, so it
+    ///     is only skipped when no active chunk has a registered neighbour on either side. Both faces are then
+    ///     walls at the cell's own pressure, whose fluxes cancel exactly, so skipping changes no bit; it mostly
+    ///     saves depth-one maps a third of their sweeps. A neighbour activated mid-tick is seen on the next
+    ///     substep, which is also the first one that could sweep it.
+    /// </remarks>
+    private bool AxisHasWork(int axis)
+    {
+        if (Extent(axis) > 1)
+            return true;
+
+        for (int index = 0; index < _activeCount; index++)
+        {
+            AtmosChunk?[] neighbours = _active[index].NeighborChunks;
+            if (neighbours[2 * axis] != null || neighbours[2 * axis + 1] != null)
+                return true;
+        }
+
+        return false;
     }
 
     private MetrePerSecond MaxSignalSpeed()
