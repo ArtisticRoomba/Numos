@@ -210,13 +210,13 @@ Some data stays outside the checkpoint:
 - `ChunkField<T>` storage registered without `rollback: true` is transient. Restore discards it.
 - Profiling values, recorder bookkeeping, object identities, chunk generations, and presentation revisions are not
   authoritative simulation state. `AtmosSimulation.LastFlowDiagnostics` is one of these: a restore zeroes it.
-- The `euler-flow` stage keeps nothing of its own between ticks. Its conserved buffers, face masks, and substep count
-  are rebuilt from the chunk fields every tick, and the only state it carries forward is the chunks' momentum arrays,
-  which are checkpointed. Which chunks it activates during a tick is derived from those fields and the configuration,
-  so activation is never recorded; a replay reactivates the same chunks at the same sweeps. Each substep picks its
-  axis order from a fixed six-order cycle by `(2·TickCount + substep) mod 6` rather than from a counter carried
-  across ticks, precisely so a restored world sweeps in the same order the original run did without the checkpoint
-  having to say so.
+- The `euler-flow` stage keeps nothing of its own between ticks; the chunks' momentum arrays, which are
+  checkpointed, are its only carried state. Everything else is derived and rebuilt every tick: the pooled
+  conserved buffers and face masks (dropped on restore and re-rented), which chunks it activates during a tick (a
+  function of the chunk fields and the configuration, so a replay reactivates the same chunks at the same sweeps),
+  and the sweep order (the six axis permutations indexed by `(2·TickCount + substep) mod 6`, a pure function of the
+  checkpointed tick count rather than a counter carried across ticks, so a restored world sweeps in the same order
+  the original run did without the checkpoint having to say so).
 
 When a detached mixture transfers gas into a voxel, the recording stores the resulting voxel state (`SetVoxelMixtureOperation`). That state includes the voxel's momentum,
 which the kernel zeroes when the write empties the voxel. Replaying that
@@ -310,12 +310,15 @@ state. Numos fixes the order wherever concurrent scheduling could otherwise beco
 
 - Solver stages run in their configured pipeline order.
 - Each tick receives chunks ordered by grid X, then Y, then Z.
-- Advection runs ordered phases. A voxel tile owns both its delta accumulation and its persistent voxel writes. Numos
-  gathers shared values in fixed source and gas order.
-- Work inside separate chunks can run in parallel, because each chunk owns its local state.
-- Numos collects and sorts thermal boundary work before a single-threaded application step.
-- Cross-chunk gas flow computes and applies transfers in parallel. Before any write happens, a single-threaded pass
-  reserves each source chunk's disjoint write range within a target's batch, in canonical source order.
+- Advection runs ordered phases. A voxel tile owns both its delta accumulation and its persistent voxel writes, and
+  shared values are gathered in fixed source and gas order.
+- The Euler sweeps read only buffers no sweep writes, each pencil writes only its own cells and reduction slot,
+  and a face shared by two chunks is solved by both from the same bits, so neither the worker count nor the tiling
+  can change a result. The per-sweep reductions are a max and a sum, which are order free.
+- Work inside separate chunks can run in parallel because each chunk owns its local state.
+- Thermal boundary work is collected and sorted before a single-threaded application step. Cross-chunk gas flow
+  computes and applies transfers in parallel, but reserves each source chunk's disjoint write range within a target's
+  batch in a single-threaded pass, in canonical source order, before any of those writes happen.
 - Reaction factors use stable ordinal gas-name and parameter order instead of parallel completion order.
 
 The kernel keeps native floating-point operations. These ordering rules therefore do not certify bitwise identity across

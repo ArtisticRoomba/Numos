@@ -128,7 +128,7 @@ world.Solvers.Register(
         "game/fire-spread/v1",
         includeCartesian: true,
         static link => (link.Flags & ExplicitLinkFlags.GasTransport) != 0),
-    after: AtmosBuiltInSolvers.Advection);
+    after: AtmosBuiltInSolvers.EulerFlow);
 ```
 
 Fire uses `includeCartesian: true` because it spreads through ordinary open doorways as well as portals. A solver
@@ -219,23 +219,42 @@ changes, gas injections, and ticks.
 
 ### Choosing the transport model
 
-A new world runs the compressible Euler solver. One `euler-flow` stage moves gas within and between chunks and carries
-per-voxel velocity. It reads its settings from an `EulerFlowConfig` in `AtmosConfig.SolverConfigurations`. It reports what
-each tick cost through `simulation.LastFlowDiagnostics` (substeps, simulated seconds, and whether the substep cap
-engaged).
+A new world runs the compressible Euler solver: one `euler-flow` stage moves gas within and between chunks,
+carries per-voxel momentum, and substeps inside the fixed 50 ms tick as often as the local sound speed demands. Its
+settings live in an `EulerFlowConfig` entry of `AtmosConfig.SolverConfigurations` (see
+[Solver settings belong in the configuration](#solver-settings-belong-in-the-configuration)), and it reports what
+each tick cost through `simulation.LastFlowDiagnostics`:
 
-The older pressure-relaxation stages (`advection` and `boundary-flow`) stay selectable. Pick them when you construct
-the world, or reset the pipeline before anything is recorded:
+```csharp
+simulation.Tick();
+AtmosFlowDiagnostics flow = simulation.LastFlowDiagnostics;
+if (flow.SubstepCapEngaged)
+    Log($"flow fell behind: {flow.Substeps} substeps covered {flow.SimulatedSeconds:F4} s of the tick");
+if (flow.ClampedVelocityCount + flow.NegativeMolesCount + flow.NegativeInternalEnergyCount + flow.NonFiniteCellCount > 0)
+    Log("the Euler stage had to repair a cell this tick");
+```
+
+`Substeps` is the number to watch: it scales with the fastest signal in the simulation, about 35 per tick for room
+air and more for hot or light gas. When `MaxSubstepsPerTick` cuts a tick short, `SubstepCapEngaged` is set and
+`SimulatedSeconds` is less than the tick, meaning the gas fell behind the rest of the world for that tick. The four
+counters are bug indicators and normally zero. The diagnostics are a measurement rather than state: all zeros
+before the first tick, under the legacy model, and after a restore.
+
+The older pressure-relaxation stages (`advection` and `boundary-flow`) are still there as
+`AtmosTransportModel.Legacy`. Pick the model when the world or simulation is constructed, or reset the pipeline
+before anything is recorded; `ResetToDefaults()` with no argument installs the Euler stages:
 
 ```csharp
 using var world = new AtmosWorld(config, AtmosTransportModel.Legacy);
+using var standalone = new AtmosSimulation(config, 16, 16, 16, AtmosTransportModel.Legacy);
 // or, on an existing world that is not recording:
 world.Solvers.ResetToDefaults(AtmosTransportModel.Legacy);
 ```
 
-The stage list is part of the world checkpoint, so the model must match when you restore. A replay recorded on the legacy
-stages needs a legacy pipeline in the receiving world. `RestoreCheckpoint` names both stage lists when it refuses a
-mismatch. Pick the model before you capture or record.
+The stage list is part of the world checkpoint, so the model must match when you restore: a replay recorded on the
+legacy stages needs a legacy pipeline in the receiving world, and `RestoreCheckpoint` names both stage lists when it
+refuses a mismatch. What the two models do differently is covered in the
+[technical documentation](atmospherics_technical_documentation.md#5-moving-gas-with-the-euler-model).
 
 ## Registering gases and adding them to voxels
 
@@ -345,7 +364,13 @@ config.SolverConfigurations.Add(new EulerFlowConfig(current) { CourantNumber = 0
 world.SetAtmosConfig(config);
 ```
 
-Numos normalizes out-of-range values when it captures the configuration, so the snapshot a solver reads is always usable.
+Out-of-range values are normalized when the configuration is captured (see each property's documentation), so the
+snapshot a solver reads is always usable. The knobs most hosts touch are `CourantNumber` (0.5, the positivity
+bound; 0.8 is a faster opt-in that can go negative next to vacuum), `MaxSubstepsPerTick` (64, the cap that bounds
+a tick's cost at the price of the gas falling behind), `VelocityFloor` (0.005 m/s, what lets a settled room sleep),
+and `MomentumDamping` (0, crude friction for hallways that ring). `EulerFlowConfig` is portable, so a `.numos`
+archive carries it. The [technical documentation](atmospherics_technical_documentation.md#35-configuration-and-the-per-tick-snapshot)
+tabulates every setting with the physics behind it.
 
 Each entry implements `IAtmosSolverConfiguration`. Numos captures a snapshot when it applies the configuration. These
 rules follow from that:
@@ -623,6 +648,18 @@ Velocity is derived, not stored. It is a voxel's momentum (set with `SetVoxelMom
 ```csharp
 AtmosVoxelVelocity velocity = simulation.GetVoxelVelocity(chunk, x: 1, y: 0, z: 0);
 simulation.TryGetChunkSnapshot(chunk, default, AtmosChunkSnapshotFields.Velocity, out var withVelocity);
+```
+
+Momentum is what you set. `SetVoxelMomentum` stores the total momentum of a voxel's gas in kg·m/s, so to give gas a
+velocity, multiply by its mass. The write wakes the chunk and is recorded while the world is recording; it is
+ignored on a solid, void, or empty voxel (inject gas first, since an empty voxel always reads as zero momentum),
+and NaN or infinite components are rejected. Adding gas later keeps the momentum and lowers the implied velocity.
+Under the legacy model nothing moves what you stored.
+
+```csharp
+simulation.AddGasToVoxel(chunk, 0, "Air", 10f, 293.15f);
+float mass = 10f * airMolarMass;                          // kg, from the registry's kg/mol
+simulation.SetVoxelMomentum(chunk, 0, mass * 2f, 0f, 0f); // 2 m/s along +x
 ```
 
 `EditVoxelBox` changes a whole box of voxels in global voxel coordinates with one call and one recorded operation.

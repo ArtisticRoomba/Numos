@@ -17,6 +17,10 @@ A list of improvements over the previous system is below:
   - Better memory lookup patterns and cache usage. In SS14, `AS` would need to dereference the component, tiles dictionary, `TileAtmosphere` tile information, `GasMixture` mixture information, and then finally the `Moles` array to get to the gases in a specific tile. In `SoA`s, each gas gets its own array, so iteration is fast because the data is contiguous.
 - Arbitrary gas additions at runtime.
   - In `AS`, gases were hardcoded and compile-time constants. Numos supports gas additions at runtime.
+- Gas that carries momentum.
+  - `AS` relaxes pressure differences with no memory of motion, so nothing travels, reflects, or overshoots.
+    Numos' default transport is a compressible Euler solver: pressure waves cross a room at the speed of sound,
+    bounce off walls, and corridors fill in a fraction of a second rather than over many ticks.
 - Multithreading.
   - `AS` is only multithreaded in `DeltaPressure`; every other compute-heavy solver stage runs single-threaded.
   - Numos can also run on its own thread if you'd like to do that in your game.
