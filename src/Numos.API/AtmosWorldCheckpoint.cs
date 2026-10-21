@@ -55,6 +55,21 @@ public sealed partial class AtmosWorldCheckpoint
     public int TickCount => checked((int)Position.Tick);
 
     /// <summary>
+    ///     Gets the completed tick and highest world operation sequence incorporated by the checkpoint.
+    /// </summary>
+    public partial AtmosTimelinePosition Position { get; }
+
+    /// <summary>
+    ///     Gets the shared immutable physics configuration.
+    /// </summary>
+    public partial AtmosConfigSnapshot Config { get; }
+
+    /// <summary>
+    ///     Gets simulation checkpoints in stable simulation-ID order.
+    /// </summary>
+    public partial IReadOnlyList<AtmosWorldSimulationCheckpoint> Simulations { get; }
+
+    /// <summary>
     ///     Gets world solver metadata in deterministic execution order.
     /// </summary>
     public partial IReadOnlyList<AtmosWorldSolverCheckpoint> Solvers { get; }

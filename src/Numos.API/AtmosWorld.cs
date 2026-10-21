@@ -153,7 +153,6 @@ public sealed partial class AtmosWorld : IDisposable
     /// </summary>
     /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
     [PublicAPI]
-    [NumosSerialize(Codec = typeof(AtmosConfigSnapshotCodec))]
     public AtmosConfigSnapshot Config
     {
         get
@@ -185,7 +184,6 @@ public sealed partial class AtmosWorld : IDisposable
     /// </summary>
     /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
     [PublicAPI]
-    [NumosSerialize]
     public IReadOnlyList<AtmosSimulation> Simulations
     {
         get
@@ -765,6 +763,27 @@ public sealed partial class AtmosWorld : IDisposable
             Solvers.NotifyRestored();
         }
     }
+
+    // The checkpoint reads world state under the gate CaptureCheckpoint already holds, so these skip the public
+    // accessors' locking and disposal checks.
+
+    /// <summary>
+    ///     The completed tick and highest world operation sequence incorporated by the checkpoint.
+    /// </summary>
+    [NumosSerialize("Position")]
+    internal AtmosTimelinePosition CheckpointPosition => new(checked((ulong)TickCount), _lastWorldOperationSequence);
+
+    /// <summary>
+    ///     The shared immutable physics configuration.
+    /// </summary>
+    [NumosSerialize("Config", Codec = typeof(AtmosConfigSnapshotCodec))]
+    internal AtmosConfigSnapshot CheckpointConfig => _config;
+
+    /// <summary>
+    ///     Every registered simulation in stable simulation-ID order.
+    /// </summary>
+    [NumosSerialize("Simulations")]
+    internal AtmosSimulation[] CheckpointSimulations => _orderedSimulations;
 
     /// <summary>
     ///     World solver metadata in deterministic execution order.

@@ -22,7 +22,6 @@ public sealed partial class AtmosWorld
     ///     Gets the exact global position formed by completed world ticks and applied external operations.
     /// </summary>
     /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
-    [NumosSerialize("Position")]
     public AtmosTimelinePosition TimelinePosition
     {
         get

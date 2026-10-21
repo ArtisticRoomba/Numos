@@ -170,7 +170,7 @@ public sealed partial class AtmosSimulation : IDisposable
     ///     The simulation-owned grid state: chunk data and rollback solver arrays.
     /// </summary>
     [NumosSerialize("Checkpoint")]
-    internal AtmosSimulationCheckpoint KernelCheckpoint => Kernel.CaptureCheckpoint();
+    internal AtmosSimulationCheckpoint KernelCheckpoint => _kernel.CaptureCheckpoint();
 
     /// <summary>
     ///     Kernel accessor for the dangerous API.
