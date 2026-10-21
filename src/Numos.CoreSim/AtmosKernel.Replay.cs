@@ -136,6 +136,7 @@ internal sealed partial class AtmosKernel
         _defaultSolvers.ClearTransientState();
         _chunkCollectionRevision++;
         LastBoundaryTicks = 0;
+        LastFlowDiagnostics = default;
         foreach (var chunk in previous.Values)
             chunk.Release();
     }

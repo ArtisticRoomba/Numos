@@ -207,6 +207,23 @@ Decide which system owns an `AtmosSimulation`'s lifecycle and update order befor
 parallelizes work inside the simulation. The engine integration must still present one coherent sequence of topology
 changes, gas injections, and ticks.
 
+### Choosing the transport model
+
+A new world runs the legacy pressure-relaxation stages (`advection` and `boundary-flow`). The compressible Euler solver
+is opt-in for now:
+
+```csharp
+world.Solvers.ResetToDefaults(AtmosTransportModel.Euler);
+```
+
+That swaps the two legacy transport stages for one `euler-flow` stage and leaves the rest of the pipeline alone. The
+stage reads its settings from an `EulerFlowConfig` in `AtmosConfig.SolverConfigurations`. It reports what each tick cost
+through `simulation.LastFlowDiagnostics` (substeps, simulated seconds, and whether the substep cap engaged).
+
+The stage list is part of the world checkpoint. Pick the model before you capture or record, and restore into a world
+running the same model. In this version `euler-flow` handles flow inside each chunk only. Faces into neighbouring chunks
+act as walls.
+
 ## Registering gases and adding them to voxels
 
 Register each gas before you inject it. Then use its exact, case-sensitive name. A new `AtmosConfig` has an empty gas

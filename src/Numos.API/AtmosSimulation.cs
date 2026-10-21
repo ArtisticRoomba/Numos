@@ -2,6 +2,7 @@ using JetBrains.Annotations;
 using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.Datatypes.Snapshots;
+using Numos.CoreSim.EulerFlow;
 using Numos.Maths;
 
 namespace Numos.API;
@@ -248,6 +249,37 @@ public sealed partial class AtmosSimulation : IDisposable
         {
             ThrowIfDisposed();
             return _kernel.LastBoundaryTicks;
+        }
+    }
+
+    /// <summary>
+    ///     Gets what the <see cref="AtmosBuiltInSolvers.EulerFlow" /> stage did to this simulation during the latest
+    ///     tick.
+    /// </summary>
+    /// <remarks>
+    ///     A measurement for profiling and tuning, not simulation state: it is not checkpointed, a restore resets it
+    ///     to all zeros, and it stays all zeros while the pipeline runs the legacy transport model
+    ///     (<see cref="AtmosTransportModel.Legacy" />) or the stage is disabled. The substep count is the number to
+    ///     watch: it scales with the fastest signal in the simulation, and
+    ///     <see cref="AtmosFlowDiagnostics.SubstepCapEngaged" /> says when
+    ///     <see cref="EulerFlowConfig.MaxSubstepsPerTick" /> cut a tick short.
+    /// </remarks>
+    /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
+    /// <example>
+    ///     <code>
+    /// simulation.Tick();
+    /// AtmosFlowDiagnostics flow = simulation.LastFlowDiagnostics;
+    /// if (flow.SubstepCapEngaged)
+    ///     Log($"flow fell behind: {flow.Substeps} substeps covered {flow.SimulatedSeconds:F4} s");
+    ///     </code>
+    /// </example>
+    [PublicAPI]
+    public AtmosFlowDiagnostics LastFlowDiagnostics
+    {
+        get
+        {
+            ThrowIfDisposed();
+            return _kernel.LastFlowDiagnostics;
         }
     }
 

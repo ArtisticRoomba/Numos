@@ -152,7 +152,7 @@ state: they are checkpointed, hashed, and settable through `AtmosSimulation.SetV
 operation). Their one invariant is that an empty voxel has zero momentum. Every path that empties a voxel (vacuum
 cleanup, a solid or void classification, a mixture write that removes the last mole) zeroes them, and a momentum write
 to a voxel with no gas is ignored. Adding gas leaves the stored momentum alone, which simply lowers the implied
-velocity. No built-in stage reads them yet; they exist for the compressible transport solver.
+velocity. The legacy transport stages leave them alone; `euler-flow` reads and writes them every tick.
 
 **Heat capacity, energy, and pressure.** A voxel's heat capacity, sensible energy, and pressure all follow from its
 composition. Every gas uses an effective molar heat capacity at constant volume, falling back to a configured default
@@ -376,6 +376,15 @@ boundary. The default pipeline has seven stages. A host can disable, reorder, or
 
 `GasReactionConfig` documents gas reactions at the configuration level. The rest of this document covers the other
 six stages.
+
+That table is the `AtmosTransportModel.Legacy` pipeline, which a new world starts with.
+`world.Solvers.ResetToDefaults(AtmosTransportModel.Euler)` installs the other model. In it, `euler-flow` takes the place
+of both `advection` and `boundary-flow`, and the remaining five stages are unchanged.
+
+`euler-flow` is a compressible Euler solver with density, momentum, and energy per voxel. It runs dimensionally split
+first-order Godunov sweeps with an HLLC flux at every face. It takes as many CFL substeps as the fastest signal in the
+world demands. `EulerFlowConfig` (§3.5) configures it. It currently moves gas inside each chunk only and treats faces into
+other chunks as walls. `AtmosSimulation.LastFlowDiagnostics` reports each tick's substep count and repairs.
 
 The default order is not a numerical requirement. `explicit-gas-transport` and `explicit-thermal-transport` are
 ordinary stages, not side effects of `advection` and `thermodynamics`. A host can therefore disable Numos' own

@@ -1126,6 +1126,12 @@ public sealed partial class AtmosWorld : IDisposable
             scope.Simulations[index].Kernel.SolveAdvection(scope.Contexts[index]);
     }
 
+    internal void SolveEulerFlowStage(AtmosSolverTickScope scope)
+    {
+        for (int index = 0; index < scope.Simulations.Length; index++)
+            scope.Simulations[index].Kernel.SolveEulerFlow(scope.Contexts[index]);
+    }
+
     internal void SolveExplicitGasTransportStage(AtmosSolverTickScope scope)
     {
         // Every kernel reaches the same stage barrier before sparse transport runs. Registration order then cannot

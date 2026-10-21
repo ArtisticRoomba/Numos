@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using Numos.CoreSim.EulerFlow;
 using Numos.CoreSim.Solvers;
 using Numos.Maths;
 
@@ -19,6 +20,12 @@ internal sealed partial class AtmosKernel : IDisposable
     ///     High-resolution timestamp ticks spent processing boundary flow since the latest elapsed-time update.
     /// </summary>
     internal long LastBoundaryTicks;
+
+    /// <summary>
+    ///     What the <c>euler-flow</c> stage did during the latest tick, or all zeros when it did not run. Reset
+    ///     when a checkpoint is installed; never part of one.
+    /// </summary>
+    internal AtmosFlowDiagnostics LastFlowDiagnostics;
 
     /// <summary>
     ///     Number of completed fixed ticks on the owning world timeline.
@@ -165,6 +172,11 @@ internal sealed partial class AtmosKernel : IDisposable
     internal void SolveAdvection(AtmosSolverExecutionContext context)
     {
         _defaultSolvers.SolveAdvection(context);
+    }
+
+    internal void SolveEulerFlow(AtmosSolverExecutionContext context)
+    {
+        LastFlowDiagnostics = _defaultSolvers.SolveEulerFlow(context);
     }
 
     internal void SolveBoundaryFlow(AtmosSolverExecutionContext context)
