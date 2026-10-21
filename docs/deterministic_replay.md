@@ -555,15 +555,55 @@ misread it.
 Viewer branch graphs are session state. Saving writes the selected branch, either through its preserved head or through
 the current inspection position. Save branches individually when more than one future must survive closing the project.
 
-The current file format supports built-in Numos simulation state only. Saving or loading reports and rejects custom
-world solver delegates, host solver configurations, and captured solver arrays, because a standalone viewer cannot
-reconstruct their host implementations. `AtmosWorldReplayArchive.UnsupportedFeatures` lists what an archive depends on.
-Of the built-in configurations, `EulerFlowConfig` is portable. The codec writes it as its key (`euler-flow`) followed by
-its settings, and reads it back through a reader table keyed by that string. `GasReactionConfig` is not portable,
-because its reactions reference gases by `GasProperties` object and not by a name a file could hold. A world with one
-still replays in memory, but `EnsurePortable` rejects it. Readers reject unknown required versions, sections, opcodes,
-and configuration keys. Future readers
-can skip optional length-prefixed metadata. `NumosReplayReadOptions` configures the payload limits.
+Saving or loading reports and rejects custom world solver delegates, captured solver arrays, and hand-written host
+solver configurations. A standalone viewer cannot reconstruct their host implementations. `EulerFlowConfig` is the one
+hand-written exception. The codec writes it as its key (`euler-flow`) followed by its settings and reads it back through
+a reader table. Readers reject unknown required versions, sections, opcodes, and configuration keys. Future readers can
+skip optional length-prefixed metadata. `NumosReplayReadOptions` configures the payload limits.
+`AtmosWorldReplayArchive.UnsupportedFeatures` lists what an archive depends on.
+
+### Solver configurations in the file
+
+A solver configuration marked `[NumosState]` saves itself. That covers the built-in `GasReactionConfig`, so a world
+with gas reactions is portable, and any host configuration built the same way. Both places a configuration can appear
+go through the same encoding: the checkpoint's applied configuration, and every recorded `SetAtmosConfig` change.
+
+Each configuration section ends with a count, then one entry per configuration in the snapshot's ordinal key order:
+
+```text
+int32  count
+repeat count times:
+  string key        (int32 UTF-8 byte length, then the bytes)
+  int32  length
+  bytes  payload    (the generated WriteState walk through StateBinarySink)
+```
+
+The payload is a run of fields, each an `int32` id, an `int32` length, and the field's bytes, in ascending id order.
+Nested `[NumosState]` values are a length followed by their own fields. Because every field carries its length, a reader
+skips ids it doesn't know and gives missing ones their default, so adding a `[StateField]` to a configuration doesn't
+break older files. Gas references are written by name and resolved against the gas registry decoded just before them;
+a name the registry doesn't have is an `InvalidDataException`.
+
+Loading has to turn a key back into a type, so it needs to know which types exist. Register custom configurations
+before loading:
+
+```csharp
+var options = new NumosReplayReadOptions();
+options.SolverConfigurations.Register<FireSettings>();
+NumosWorldReplayDocument document = NumosReplayFile.Load(path, options);
+```
+
+Built-in configurations are already registered. A key with no registered type fails the load with a
+`NotSupportedException` that names it, rather than being dropped: losing a configuration changes what the solvers do,
+and replay would quietly diverge from the recording. A configuration whose decoded `Key` disagrees with the key it was
+saved under is corrupt data.
+
+Built-in configuration keys are namespaced, like `numos/gas-reactions`, and host keys should be too (`my-mod/fire`).
+The key is part of the format now, so renaming one means files saved under the old name no longer load.
+
+No format version changed for this. A file without solver configurations is byte-for-byte what earlier writers
+produced, a single zero count. Older readers throw on a configuration key they do not know, so they cannot misread the
+new entries.
 
 Numos does not yet provide compression, network transport, replay of custom solver registration changes, restoration of
 detached mixture identity, or certified bitwise compatibility across runtime and CPU architectures.

@@ -1420,11 +1420,9 @@ restored. Replay re-runs the recorded ticks with whatever value the instance hol
 diverges. A class solver reads its settings from the tick context instead:
 
 ```csharp
-[NumosState]
+[NumosState(Key = "game/combustion")]
 public sealed partial class CombustionSettings(float rate) : IAtmosSolverConfiguration
 {
-    public string Key => "game/combustion";
-
     [StateField(1)]
     public float Rate { get; } = rate;
 
@@ -1452,8 +1450,14 @@ world.SetAtmosConfig(config); // recorded, so replay changes the rate at the sam
 `[NumosState]` has the `Numos.API` generator write `SemanticallyEquals` and `ComputeStateHash` from the
 `[StateField]` members, so the two can't disagree and a new field can't be left out of either. The generated code walks
 fields in id order through one `WriteState` method that drives an `IStateSink`; the hash is that walk fed into
-`StateHashSink`. Floats compare by bits, dictionaries and sets go in canonical key order, and `GasProperties`
-references are identified by name. `GasReactionConfig` and both reaction types are built this way.
+`StateHashSink`, and the saved bytes are the same walk fed into `StateBinarySink`. Floats compare by bits, dictionaries
+and sets go in canonical key order, and `GasProperties` references are identified by name. `GasReactionConfig` and both
+reaction types are built this way.
+
+The generator also writes a `ReadState` that rebuilds the object through a constructor, binding parameters to state
+fields by name (ignoring case) and setting any remaining fields through `init` or `set` accessors. That's what lets a
+world archive carry the configuration; see "Save portable replay files" in `docs/deterministic_replay.md`.
+`Key = "..."` on the attribute generates `Key`, so don't write it by hand as well.
 
 Every field and auto-property on the type must be tagged `[StateField(id)]` or `[NotState]`. The generator reports:
 
@@ -1466,12 +1470,14 @@ Every field and auto-property on the type must be tagged `[StateField(id)]` or `
 | `NUMOSSTATE005` | Error    | Two members share an id.                                                                                      |
 | `NUMOSSTATE006` | Error    | An id is listed in the type's `[RetiredStateFields]`.                                                         |
 | `NUMOSSTATE007` | Error    | A member's type isn't supported (delegates, `object`, mutable `List<T>`, unknown quantity aliases, ...).      |
-| `NUMOSSTATE008` | Error    | The type hand-writes `SemanticallyEquals`, `ComputeStateHash`, or `AppendHash`.                               |
+| `NUMOSSTATE008` | Error    | The type hand-writes `SemanticallyEquals`, `ComputeStateHash`, `AppendHash`, or a `Key` the attribute sets.   |
 | `NUMOSSTATE009` | Error    | `[StateField]` or `[NumosState]` is on an `IAtmosWorldSolver`, which replay never checkpoints.                |
 | `NUMOSSTATE010` | Error    | `[StateField]` is on a type without `[NumosState]`.                                                           |
 | `NUMOSSTATE011` | Error    | A member has both `[StateField]` and `[NotState]`.                                                            |
 | `NUMOSSTATE012` | Error    | `[StateField]` is on a static or const member.                                                                |
 | `NUMOSSTATE013` | Error    | A `[NumosState]` class derives from a class other than `object`, whose fields the generator can't see.        |
+| `NUMOSSTATE014` | Error    | No constructor binds: a parameter matches no field, can't take its field's type, or a field has no setter.    |
+| `NUMOSSTATE015` | Error    | `[NumosState(Key = ...)]` is blank.                                                                           |
 
 A solver can cache anything derived from the settings or the gas registry under a `SolverDataKey<T>`. Numos drops
 that value whenever the configuration changes.

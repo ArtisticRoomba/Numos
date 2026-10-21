@@ -400,12 +400,10 @@ The easy way to get the last two right is to let the generator that ships with `
 ```csharp
 using Numos.CoreSim.State;
 
-[NumosState]
+[NumosState(Key = "my-mod/fire")]
 public sealed partial class FireSettings(float ignitionTemperature, IReadOnlyDictionary<string, float> spreadRates)
     : IAtmosSolverConfiguration
 {
-    public string Key => "my-mod/fire";
-
     [StateField(1)]
     public float IgnitionTemperature { get; } = ignitionTemperature;
 
@@ -442,8 +440,52 @@ The by-type lookup throws if two entries share a type. To read a type registered
 `TryGetSolverConfiguration("my-mod/fire", out FireSettings? fire)`. Both lookups search the captured snapshots, so ask
 for the type that `CreateSnapshot` returns. Keys are unique, nonempty strings. Snapshots order them ordinally, so registration order does not change hashes.
 
+`Key` on the attribute generates the configuration's `Key` property, so leave it out of the class. A type you add
+under more than one key can't use a fixed one: drop `Key` from the attribute and make the key a state field instead,
+for example `[property: StateField(1)] string Key` on a record.
+
 A hand-written implementation still works. Put every execution-relevant field in both `SemanticallyEquals` and the
 hash. Do not use process-randomized hashes such as `HashCode` or `string.GetHashCode()`.
+They cannot be saved to `.numos` files, though. See the next section.
+
+### Saving and loading solver configurations
+
+A `[NumosState]` configuration goes into `.numos` replay files on its own: saving needs nothing extra. Loading needs
+to map each saved key back to a type, so register yours on the read options first:
+
+```csharp
+var options = new NumosReplayReadOptions();
+options.SolverConfigurations.Register<FireSettings>();
+// A type used under several keys registers each one:
+options.SolverConfigurations.Register<Scrubber>("my-mod/scrubber-a").Register<Scrubber>("my-mod/scrubber-b");
+
+NumosWorldReplayDocument document = NumosReplayFile.Load(path, options);
+```
+
+Numos's own configurations, such as `GasReactionConfig` (`numos/gas-reactions`), are registered already. A file
+containing a key you didn't register fails to load with a `NotSupportedException` naming it, instead of loading
+without that configuration and replaying differently.
+
+The reader rebuilds your object through a constructor. Each parameter binds to the state field of the same name,
+ignoring case, and fields no parameter covers are set through `init` or `set`. A parameter can be a looser collection
+type than its field, such as `IEnumerable<T>` or `IDictionary<TKey, TValue>` for a frozen field; the reader copies into
+it when it has to. If no constructor fits, the build fails with `NUMOSSTATE014`, which says what didn't match.
+
+Fields carry ids and lengths on disk, so an older file still loads after you add a field. The new field takes the
+constructor parameter's default value if it has one, otherwise `default`, an empty string, or an empty collection.
+Ids the reader doesn't recognize are skipped.
+
+To save one configuration by itself, say a preset or something to attach to a bug report, use
+`NumosStateSerializer` (streams, in `Numos.Serialization`) or `NumosStateFile` (paths, with an atomic save, in
+`Numos.Serialization.FileSystem`). Both need the type's attribute `Key`, which the file records and `Load` checks:
+
+```csharp
+NumosStateFile.Save("presets/fire.numosstate", fire);
+FireSettings preset = NumosStateFile.Load<FireSettings>("presets/fire.numosstate");
+
+// Anything that references gases needs a registry to resolve the names against.
+GasReactionConfig reactions = NumosStateFile.Load<GasReactionConfig>("presets/reactions.numosstate", world.Config.GasRegistry);
+```
 
 ## Class solvers
 
