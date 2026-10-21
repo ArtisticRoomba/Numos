@@ -356,8 +356,8 @@ internal static class EulerSpeciesDiffusion
     ///     and pressure the way <see cref="SpeciesDiffusionKernel.ApplyDeltas" /> does.
     /// </summary>
     /// <remarks>
-    ///     A deposit of a gas the chunk has no channel for creates one. The suppression rule guarantees such a
-    ///     deposit is a tracked amount, so this is the same channel-creation rule the write-back follows.
+    ///     A deposit of a gas the chunk has no channel for creates one, as in the write-back. The suppression rule
+    ///     guarantees such a deposit is a tracked amount, so diffusion never grows a channel for a trace of a gas.
     /// </remarks>
     private static void ApplyBoundary(EulerChunkWorkspace workspace, AtmosSolverConfigSnapshot config)
     {

@@ -659,7 +659,10 @@ holds, merged on the tick thread between sweeps, so a gas always has a zero-fill
 about to cross into and no worker ever creates one. A zero row adds nothing to a mixture sum (`x + 0·M` is `x`
 bitwise), so a cell's totals do not depend on how many absent gases its chunk happens to list, and a chunk that holds
 one gas in a world of many pays for that gas plus whatever its neighbours carry, not for the world's union. The
-write-back creates a channel for a row only once some voxel holds a tracked amount of it.
+write-back creates a channel for a row as soon as any voxel holds a positive amount of it, however far below
+`MinimumTrackedMoles`: the sweep already debited the upwind cell, which may be in the other chunk, so dropping a
+sub-threshold row would destroy gas every tick a slow trace flow crosses the face
+(`TraceGas_CrossingAChunkFaceIsConserved`).
 
 **Activation.** A chunk that is asleep, or awake with no gas, has no workspace and is not swept. An open face from an
 active chunk into such a chunk is a wall for that sweep. That is exact while the neighbour is at rest at the same
