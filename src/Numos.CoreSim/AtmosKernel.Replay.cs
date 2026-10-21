@@ -47,7 +47,7 @@ internal sealed partial class AtmosKernel
             AtmosChunk[] chunks = OrderedChunks();
             var chunkCheckpoints = new AtmosChunkCheckpoint[chunks.Length];
             for (int index = 0; index < chunks.Length; index++)
-                chunkCheckpoints[index] = new AtmosChunkCheckpoint(chunks[index]);
+                chunkCheckpoints[index] = AtmosChunkCheckpoint.Capture(chunks[index]);
 
             return new AtmosSimulationCheckpoint(_dimensions, chunkCheckpoints);
         }

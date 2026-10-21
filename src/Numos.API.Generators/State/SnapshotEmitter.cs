@@ -97,7 +97,11 @@ internal static class SnapshotEmitter
             return;
         }
 
-        string initializer = !member.IsReference ? "" : member.Shape.Kind == StateShapeKind.String ? " = \"\";" : " = null!;";
+        // A reference member starts at its codec's default (empty for strings and lists, null! for objects) until
+        // capture or a read assigns it.
+        string initializer = member.IsReference
+            ? " = " + Advanced + "StateCodecs.DefaultValue<" + type + ", " + member.Shape.CodecExpression + ">()!;"
+            : "";
         EmitDocumentation(writer, model, member);
         writer.Line(CodeWriter.GeneratedCodeAttribute);
         writer.Line(member.Accessibility + " " + type + " " + member.Name + " { get; private set; }" + initializer);
@@ -108,7 +112,14 @@ internal static class SnapshotEmitter
         if (member.Documentation.Count > 0)
         {
             foreach (string line in member.Documentation)
-                writer.Line("/// " + line);
+            {
+                bool tag = line.StartsWith("<summary", StringComparison.Ordinal) ||
+                           line.StartsWith("</summary", StringComparison.Ordinal) ||
+                           line.StartsWith("<remarks", StringComparison.Ordinal) ||
+                           line.StartsWith("</remarks", StringComparison.Ordinal);
+
+                writer.Line((tag ? "/// " : "///     ") + line);
+            }
 
             return;
         }

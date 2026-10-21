@@ -5,9 +5,9 @@ using Numos.CoreSim.State.Advanced;
 namespace Numos.CoreSim.Tests.Replay;
 
 /// <summary>
-///     Exercises the chunk checkpoint's generated capture and restore (<see cref="LiveChunkArrayAttribute" />) and its
-///     state schema, plus the config and gas hashes, directly against CoreSim internals rather than only through the
-///     public replay API in <c>Numos.API.Tests</c>.
+///     Exercises the chunk checkpoint generated from <see cref="AtmosChunk" />'s marked members (capture, restore, and
+///     its state schema), plus the config and gas hashes, directly against CoreSim internals rather than only through
+///     the public replay API in <c>Numos.API.Tests</c>.
 /// </summary>
 [TestFixture]
 public sealed class CheckpointStateFieldTests
@@ -28,7 +28,7 @@ public sealed class CheckpointStateFieldTests
         chunk.MomentumY[0] = -2.5f;
         chunk.MomentumZ[1] = 3.5f;
 
-        var checkpoint = new AtmosChunkCheckpoint(chunk);
+        var checkpoint = AtmosChunkCheckpoint.Capture(chunk);
 
         Assert.Multiple(() =>
         {
@@ -57,7 +57,7 @@ public sealed class CheckpointStateFieldTests
         chunk.MomentumX[0] = 1.5f;
         chunk.MomentumY[0] = -2.5f;
         chunk.MomentumZ[1] = 3.5f;
-        var checkpoint = new AtmosChunkCheckpoint(chunk);
+        var checkpoint = AtmosChunkCheckpoint.Capture(chunk);
 
         var restored = checkpoint.Materialize();
 
@@ -90,7 +90,7 @@ public sealed class CheckpointStateFieldTests
         chunk.Temperature[0] = 301f;
         chunk.TotalPressure[0] = 100f;
         chunk.TotalHeatCapacity[0] = 12f;
-        var checkpoint = new AtmosChunkCheckpoint(chunk);
+        var checkpoint = AtmosChunkCheckpoint.Capture(chunk);
 
         Assert.That(NumosState.ComputeHash(checkpoint), Is.EqualTo(NumosState.ComputeHash(checkpoint)));
     }
@@ -105,13 +105,11 @@ public sealed class CheckpointStateFieldTests
         chunk.TotalHeatCapacity[1] = 13f;
         chunk.IsAwake = true;
         chunk.SleepTimer = 4;
-        var checkpoint = new AtmosChunkCheckpoint(chunk);
+        var checkpoint = AtmosChunkCheckpoint.Capture(chunk);
 
         var sink = new StateBinarySink();
         NumosState.Write(ref sink, checkpoint);
-        var reader = new StateReader(sink.WrittenSpan);
-        var read = NumosState.Read<AtmosChunkCheckpoint>(ref reader);
-        read.ValidateDecoded();
+        var read = Read(sink.WrittenSpan.ToArray());
 
         Assert.Multiple(() =>
         {
@@ -125,7 +123,7 @@ public sealed class CheckpointStateFieldTests
     [Test]
     public void ChunkCheckpoint_DecodedArraysMustMatchTheDimensions()
     {
-        var checkpoint = new AtmosChunkCheckpoint(new AtmosChunk(2, 1, 1));
+        var checkpoint = AtmosChunkCheckpoint.Capture(new AtmosChunk(2, 1, 1));
         var sink = new StateBinarySink();
         NumosState.Write(ref sink, checkpoint);
 
@@ -136,10 +134,83 @@ public sealed class CheckpointStateFieldTests
             position += 8 + BitConverter.ToInt32(bytes, position + 4);
 
         BitConverter.GetBytes(3).CopyTo(bytes, position + 8);
-        var reader = new StateReader(bytes);
-        var read = NumosState.Read<AtmosChunkCheckpoint>(ref reader);
 
-        Assert.That(read.ValidateDecoded, Throws.InstanceOf<InvalidDataException>());
+        Assert.That(() => Read(bytes), Throws.InstanceOf<InvalidDataException>());
+    }
+
+    [Test]
+    public void ChunkCheckpoint_RestoresIntoAnExistingChunkInPlace()
+    {
+        var source = new AtmosChunk(2, 1, 1);
+        source.GridPosition = new Numos.Maths.Int3(3, 0, 0);
+        source.VoxelRoomMap[1] = 7;
+        source.Temperature[0] = 301f;
+        source.TotalPressure[0] = 100f;
+        source.TotalHeatCapacity[1] = 13f;
+        source.IsAwake = true;
+        source.SleepTimer = 4;
+        source.ActiveAirIndices[0] = 1;
+        source.ActiveAirCount = 1;
+        source.ActiveGases[source.GetOrCreateGasChannel(2)].Moles[1] = 5f;
+        var checkpoint = AtmosChunkCheckpoint.Capture(source);
+
+        // A chunk with different contents, including a gas channel the checkpoint doesn't have.
+        var target = new AtmosChunk(2, 1, 1);
+        target.Temperature[1] = 999f;
+        target.ActiveGases[target.GetOrCreateGasChannel(0)].Moles[0] = 3f;
+        var version = target.Version;
+
+        checkpoint.RestoreInto(target);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(NumosState.ComputeHash(AtmosChunkCheckpoint.Capture(target)), Is.EqualTo(NumosState.ComputeHash(checkpoint)));
+            Assert.That(target.GridPosition, Is.EqualTo(new Numos.Maths.Int3(3, 0, 0)));
+            Assert.That(target.ActiveGasCount, Is.EqualTo(1));
+            Assert.That(target.ActiveGases[0].GasId, Is.EqualTo(2));
+            Assert.That(target.ActiveAirCount, Is.EqualTo(1));
+            Assert.That(target.IsVacuum[0], Is.False);
+            Assert.That(target.IsVacuum[1], Is.True);
+            Assert.That(target.Version.Generation, Is.EqualTo(version.Generation), "restored in place");
+            Assert.That(target.Version, Is.Not.EqualTo(version), "and marked changed");
+            Assert.That(target.Temperature[1], Is.EqualTo(0f));
+        });
+    }
+
+    [Test]
+    public void ChunkCheckpoint_MaterializeCreatesAChunkMissingFromTheTarget()
+    {
+        var source = new AtmosChunk(2, 1, 1);
+        source.GridPosition = new Numos.Maths.Int3(0, 5, 0);
+        source.ActiveGases[source.GetOrCreateGasChannel(1)].Moles[0] = 2f;
+        var checkpoint = AtmosChunkCheckpoint.Capture(source);
+
+        var created = checkpoint.Materialize();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(created, Is.Not.SameAs(source));
+            Assert.That(created.Version.Generation, Is.Not.EqualTo(source.Version.Generation));
+            Assert.That(created.GridPosition, Is.EqualTo(new Numos.Maths.Int3(0, 5, 0)));
+            Assert.That(NumosState.ComputeHash(AtmosChunkCheckpoint.Capture(created)), Is.EqualTo(NumosState.ComputeHash(checkpoint)));
+        });
+    }
+
+    [Test]
+    public void ChunkCheckpoint_RefusesAChunkWithOtherDimensions()
+    {
+        var checkpoint = AtmosChunkCheckpoint.Capture(new AtmosChunk(2, 1, 1));
+        var target = new AtmosChunk(1, 2, 1);
+        target.Temperature[0] = 5f;
+
+        Assert.That(() => checkpoint.RestoreInto(target), Throws.ArgumentException);
+        Assert.That(target.Temperature[0], Is.EqualTo(5f));
+    }
+
+    private static AtmosChunkCheckpoint Read(byte[] bytes)
+    {
+        var reader = new StateReader(bytes);
+        return NumosState.Read<AtmosChunkCheckpoint>(ref reader);
     }
 
     [Test]
@@ -148,7 +219,7 @@ public sealed class CheckpointStateFieldTests
         var baseline = new AtmosChunk(2, 1, 1);
         baseline.VoxelRoomMap[0] = 5;
         baseline.TotalPressure[0] = 100f;
-        ulong baselineHash = NumosState.ComputeHash(new AtmosChunkCheckpoint(baseline));
+        ulong baselineHash = NumosState.ComputeHash(AtmosChunkCheckpoint.Capture(baseline));
 
         ulong[] changedHashes = new ulong[3];
         for (int axis = 0; axis < changedHashes.Length; axis++)
@@ -163,7 +234,7 @@ public sealed class CheckpointStateFieldTests
                 _ => changed.MomentumZ
             })[0] = 0.25f;
 
-            changedHashes[axis] = NumosState.ComputeHash(new AtmosChunkCheckpoint(changed));
+            changedHashes[axis] = NumosState.ComputeHash(AtmosChunkCheckpoint.Capture(changed));
         }
 
         Assert.Multiple(() =>

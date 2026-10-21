@@ -5,7 +5,10 @@ using Magnitudo;
 using Numos.Collections;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.Datatypes.Snapshots;
+using Numos.CoreSim.Replay;
 using Numos.CoreSim.Solvers;
+using Numos.CoreSim.State;
+using Numos.CoreSim.State.Advanced;
 using Numos.Maths;
 
 namespace Numos.CoreSim;
@@ -14,9 +17,17 @@ namespace Numos.CoreSim;
 ///     Represents the simulation state for a fixed-size voxel chunk.
 /// </summary>
 /// <remarks>
-///     Chunk-owned per-voxel data supports both flat-index and <see cref="Int3" /> coordinate access.
-///     Use <see cref="GetIndex(Int3)" /> and <see cref="GetXyzInt3(ushort)" /> when converting indices
-///     for scalar-indexed storage such as gas channels (because... you know.... they aren't physical).
+///     <para>
+///         Chunk-owned per-voxel data supports both flat-index and <see cref="Int3" /> coordinate access.
+///         Use <see cref="GetIndex(Int3)" /> and <see cref="GetXyzInt3(ushort)" /> when converting indices
+///         for scalar-indexed storage such as gas channels (because... you know.... they aren't physical).
+///     </para>
+///     <para>
+///         Members marked <see cref="NumosSerializeAttribute" /> are the chunk's continuation state. The generated
+///         <see cref="AtmosChunkCheckpoint" /> captures, restores, hashes, and saves exactly those, so new chunk state
+///         needs the attribute and nothing else. Everything unmarked is derived or scratch and must be rebuildable
+///         from the marked members.
+///     </para>
 /// </remarks>
 internal class AtmosChunk
 {
@@ -32,9 +43,11 @@ internal class AtmosChunk
     ///     Flat indices of gas-bearing voxels in this chunk while it is awake.
     /// </summary>
     /// <remarks>
-    ///     Only the first <see cref="ActiveAirCount" /> entries are valid. Rebuild this list with
-    ///     <see cref="RebuildActiveAirIndices" /> after changing <see cref="VoxelRoomMap" />.
+    ///     Only the first <see cref="ActiveAirCount" /> entries are valid, and only those are checkpointed, which
+    ///     preserves inactive topology exactly. Rebuild this list with <see cref="RebuildActiveAirIndices" /> after
+    ///     changing <see cref="VoxelRoomMap" />.
     /// </remarks>
+    [NumosSerialize(Count = nameof(ActiveAirCount))]
     public ushort[] ActiveAirIndices;
 
     /// <summary>
@@ -70,8 +83,9 @@ internal class AtmosChunk
     public int Depth;
 
     /// <summary>
-    ///     The position of this chunk in the chunk grid.
+    ///     The position of this chunk in the chunk grid; each coordinate counts whole chunks.
     /// </summary>
+    [NumosSerialize("Position")]
     public Int3 GridPosition;
 
     /// <summary>
@@ -83,6 +97,7 @@ internal class AtmosChunk
     ///     Whether this chunk is eligible to be processed by the simulation.
     ///     A sleeping chunk is skipped during simulation ticks.
     /// </summary>
+    [NumosSerialize]
     public bool IsAwake;
 
     /// <summary>
@@ -98,12 +113,15 @@ internal class AtmosChunk
     ///     Number of consecutive simulation ticks for which this chunk has remained below the sleep threshold.
     /// </summary>
     /// <seealso cref="AtmosConfig.SleepThreshold" />
+    [NumosSerialize]
     public int SleepTimer;
 
     /// <summary>
     ///     Temperature for each voxel, in kelvins (K), indexed by flat voxel index or local coordinate.
     /// </summary>
+    /// <remarks>Raw stored values: checkpoints keep non-finite values and their exact bit patterns.</remarks>
     [ElementQuantity("temperature")]
+    [NumosSerialize("Temperatures")]
     public FlatArray<Kelvin> Temperature;
 
     /// <summary>
@@ -117,6 +135,7 @@ internal class AtmosChunk
     ///     removes the last mole) zeroes it, so a vacuum voxel never carries stale momentum into a later tick.
     /// </remarks>
     [ElementQuantity("momentum")]
+    [NumosSerialize("MomentumX")]
     public FlatArray<KilogramMetrePerSecond> MomentumX;
 
     /// <summary>
@@ -124,6 +143,7 @@ internal class AtmosChunk
     ///     <see cref="MomentumX" />.
     /// </summary>
     [ElementQuantity("momentum")]
+    [NumosSerialize("MomentumY")]
     public FlatArray<KilogramMetrePerSecond> MomentumY;
 
     /// <summary>
@@ -131,6 +151,7 @@ internal class AtmosChunk
     ///     <see cref="MomentumX" />.
     /// </summary>
     [ElementQuantity("momentum")]
+    [NumosSerialize("MomentumZ")]
     public FlatArray<KilogramMetrePerSecond> MomentumZ;
 
     /// <summary>
@@ -143,13 +164,18 @@ internal class AtmosChunk
     ///     Values are total heat capacities, not molar quantities.
     /// </remarks>
     [ElementQuantity("heatCapacity")]
+    [NumosSerialize("HeatCapacities")]
     public FlatArray<JoulePerKelvin> TotalHeatCapacity;
 
     /// <summary>
     ///     Cached pressure for each voxel, in pascals (Pa), indexed by flat voxel index or local coordinate.
     /// </summary>
-    /// <remarks>These values are recomputed by the simulation each tick.</remarks>
+    /// <remarks>
+    ///     These values are recomputed by the simulation each tick. Checkpoints keep them as cached, including values
+    ///     a disabled solver stage didn't refresh.
+    /// </remarks>
     [ElementQuantity("pressure")]
+    [NumosSerialize("Pressures")]
     public FlatArray<Pascal> TotalPressure;
 
     /// <summary>
@@ -169,6 +195,7 @@ internal class AtmosChunk
     /// <seealso cref="VoxelClassification.RoomSolid" />
     /// <seealso cref="VoxelClassification.RoomVoid" />
     /// <seealso cref="VoxelClassification.RoomUnassigned" />
+    [NumosSerialize("Classifications")]
     public FlatArray<int> VoxelRoomMap;
 
     /// <summary>
@@ -218,7 +245,61 @@ internal class AtmosChunk
     /// <summary>
     ///     The number of voxels along each axis.
     /// </summary>
+    /// <remarks>Fixed at construction, so restoring a checkpoint requires a chunk with the same dimensions.</remarks>
+    [NumosSerialize]
     public Int3 Dimensions => new(Width, Height, Depth);
+
+    /// <summary>
+    ///     Gas channels in solver reduction order, including channels whose moles are all zero.
+    /// </summary>
+    /// <remarks>
+    ///     Channel order is kept because floating-point reductions can observe it. Reading copies the valid channels'
+    ///     moles out of pooled storage; assigning releases every channel and recreates the given ones in order.
+    /// </remarks>
+    [NumosSerialize("Gases")]
+    public IReadOnlyList<AtmosGasChannelCheckpoint> GasChannelCheckpoints
+    {
+        get
+        {
+            var gases = new AtmosGasChannelCheckpoint[ActiveGasCount];
+            for (int gas = 0; gas < gases.Length; gas++)
+                gases[gas] = new AtmosGasChannelCheckpoint(ActiveGases[gas], VoxelCount);
+
+            return gases;
+        }
+        set
+        {
+            for (int gas = 0; gas < ActiveGasCount; gas++)
+                ActiveGases[gas].Release();
+
+            Array.Clear(ActiveGases, 0, ActiveGasCount);
+            ActiveGasCount = 0;
+            foreach (var gas in value)
+            {
+                int channel = GetOrCreateGasChannel(gas.GasId);
+                StateArray.CopyTo(gas.Moles, ActiveGases[channel].Moles.AsSpan(0, VoxelCount));
+            }
+        }
+    }
+
+    /// <summary>
+    ///     Rollback <c>ChunkField&lt;T&gt;</c> arrays in ordinal key order, detached from live chunk storage.
+    /// </summary>
+    /// <remarks>
+    ///     Transient fields are left out. Assigning drops every field, transient ones included, and recreates the
+    ///     given arrays; reacquire them through the same <c>ChunkField&lt;T&gt;</c>, whose key, element type, and length
+    ///     must match.
+    /// </remarks>
+    [NumosSerialize(Codec = typeof(SolverArraysCodec))]
+    public IReadOnlyList<AtmosSolverArraySnapshot> SolverArrays
+    {
+        get => StateArray.Wrap(CaptureSolverArrays());
+        set
+        {
+            ResetFields();
+            RestoreSolverArrays(value);
+        }
+    }
 
     /// <summary>
     ///     Allocates any per-voxel array that is missing or sized for different dimensions.

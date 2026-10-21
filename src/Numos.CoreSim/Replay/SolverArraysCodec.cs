@@ -18,7 +18,7 @@ namespace Numos.CoreSim.Replay;
 ///     </para>
 ///     <para>
 ///         Reading maps each key back to its registered field. The length is only checked against the data here; the
-///         chunk's dimensions aren't known yet, so <see cref="AtmosChunkCheckpoint.ValidateDecoded" /> checks it against
+///         chunk's dimensions aren't known yet, so <see cref="AtmosChunkCheckpoint.OnDecoded" /> checks it against
 ///         the registration afterwards.
 ///     </para>
 /// </remarks>

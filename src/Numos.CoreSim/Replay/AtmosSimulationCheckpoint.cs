@@ -104,39 +104,19 @@ public sealed class AtmosSimulationCheckpoint
 /// </summary>
 /// <remarks>
 ///     <para>
+///         Generated from the <see cref="NumosSerializeAttribute" /> members of the live chunk, which define its
+///         members, capture, restore, hash, equality, and wire layout. To checkpoint more chunk state, mark the live
+///         member; nothing here changes.
+///     </para>
+///     <para>
 ///         Gas-channel order is retained because floating-point reductions can observe that order.
 ///         This is continuation data, not a compact presentation snapshot. For display, use
 ///         <see cref="AtmosChunkSnapshot" /> instead.
 ///     </para>
-///     <para>
-///         The <see cref="NumosSerializeAttribute" /> members define the chunk's hash, equality, and wire layout. A per-voxel
-///         array copied straight from the live chunk also carries <see cref="LiveChunkArrayAttribute" />, which
-///         generates its capture and restore.
-///     </para>
 /// </remarks>
+[NumosSnapshotOf(typeof(AtmosChunk))]
 public sealed partial class AtmosChunkCheckpoint
 {
-    internal AtmosChunkCheckpoint(AtmosChunk chunk)
-    {
-        Position = chunk.GridPosition;
-        Dimensions = chunk.Dimensions;
-        IsAwake = chunk.IsAwake;
-        SleepTimer = chunk.SleepTimer;
-        CaptureLiveArrays(chunk);
-        ActiveAirIndices = chunk.ActiveAirIndices.AsSpan(0, chunk.ActiveAirCount).ToArray();
-        var gases = new AtmosGasChannelCheckpoint[chunk.ActiveGasCount];
-        for (int gas = 0; gas < gases.Length; gas++)
-            gases[gas] = new AtmosGasChannelCheckpoint(chunk.ActiveGases[gas], chunk.VoxelCount);
-
-        Gases = gases;
-        SolverArrays = Array.AsReadOnly(chunk.CaptureSolverArrays());
-    }
-
-    // For the generated reader, which assigns every field through its setter; AtmosReplayCodec validates the result.
-    private AtmosChunkCheckpoint()
-    {
-    }
-
     /// <summary>
     ///     Copies this checkpoint with a different gas channel list. The other arrays are immutable and shared.
     /// </summary>
@@ -148,105 +128,6 @@ public sealed partial class AtmosChunkCheckpoint
     }
 
     /// <summary>
-    ///     Gets the chunk-grid address; each coordinate counts whole chunks.
-    /// </summary>
-    [NumosSerialize]
-    public Int3 Position { get; private set; }
-
-    /// <summary>
-    ///     Gets the number of local voxels along each axis.
-    /// </summary>
-    [NumosSerialize]
-    public Int3 Dimensions { get; private set; }
-
-    /// <summary>
-    ///     Gets whether the chunk is eligible for solver processing.
-    /// </summary>
-    [NumosSerialize]
-    public bool IsAwake { get; private set; }
-
-    /// <summary>
-    ///     Gets the exact number of accumulated quiet ticks used by sleep decisions.
-    /// </summary>
-    [NumosSerialize]
-    public int SleepTimer { get; private set; }
-
-    /// <summary>
-    ///     Gets flat voxel room IDs, including reserved solid, void and unassigned classifications.
-    /// </summary>
-    [NumosSerialize]
-    [LiveChunkArray(nameof(AtmosChunk.VoxelRoomMap))]
-    public IReadOnlyList<int> Classifications { get; private set => field = StateArray.Wrap(value); } = [];
-
-    /// <summary>
-    ///     Gets raw stored kelvins in flat voxel order, preserving non-finite values and their bit patterns.
-    /// </summary>
-    [NumosSerialize]
-    [LiveChunkArray(nameof(AtmosChunk.Temperature))]
-    public IReadOnlyList<float> Temperatures { get; private set => field = StateArray.Wrap(value); } = [];
-
-    /// <summary>
-    ///     Gets cached pascals in flat voxel order, including values not refreshed by disabled solver stages.
-    /// </summary>
-    [NumosSerialize]
-    [LiveChunkArray(nameof(AtmosChunk.TotalPressure))]
-    public IReadOnlyList<float> Pressures { get; private set => field = StateArray.Wrap(value); } = [];
-
-    /// <summary>
-    ///     Gets cached joules per kelvin in flat voxel order.
-    /// </summary>
-    [NumosSerialize]
-    [LiveChunkArray(nameof(AtmosChunk.TotalHeatCapacity))]
-    public IReadOnlyList<float> HeatCapacities { get; private set => field = StateArray.Wrap(value); } = [];
-
-    /// <summary>
-    ///     Gets total x-momentum in kilogram metres per second, in flat voxel order. Zero wherever the voxel holds no gas.
-    /// </summary>
-    [NumosSerialize]
-    [LiveChunkArray(nameof(AtmosChunk.MomentumX))]
-    public IReadOnlyList<float> MomentumX { get; private set => field = StateArray.Wrap(value); } = [];
-
-    /// <summary>
-    ///     Gets total y-momentum in kilogram metres per second, in flat voxel order. Zero wherever the voxel holds no gas.
-    /// </summary>
-    [NumosSerialize]
-    [LiveChunkArray(nameof(AtmosChunk.MomentumY))]
-    public IReadOnlyList<float> MomentumY { get; private set => field = StateArray.Wrap(value); } = [];
-
-    /// <summary>
-    ///     Gets total z-momentum in kilogram metres per second, in flat voxel order. Zero wherever the voxel holds no gas.
-    /// </summary>
-    [NumosSerialize]
-    [LiveChunkArray(nameof(AtmosChunk.MomentumZ))]
-    public IReadOnlyList<float> MomentumZ { get; private set => field = StateArray.Wrap(value); } = [];
-
-    /// <summary>
-    ///     Gets the valid prefix of active flat voxel indices, preserving inactive topology exactly.
-    /// </summary>
-    [NumosSerialize]
-    public IReadOnlyList<ushort> ActiveAirIndices { get; private set => field = StateArray.Wrap(value); } = [];
-
-    /// <summary>
-    ///     Gets gas channels in solver reduction order, including channels whose moles are all zero.
-    /// </summary>
-    [NumosSerialize]
-    public IReadOnlyList<AtmosGasChannelCheckpoint> Gases
-    {
-        get;
-        private set => field = Array.AsReadOnly(value as AtmosGasChannelCheckpoint[] ?? value.ToArray());
-    } = [];
-
-    /// <summary>
-    ///     Gets captured solver arrays in ordinal key order, detached from live chunk storage.
-    /// </summary>
-    /// <remarks>
-    ///     Restore recreates these arrays automatically. Reacquire them through the same <c>ChunkField&lt;T&gt;</c>, whose
-    ///     key, element type, and length must match the captured array. Transient fields are absent.
-    /// </remarks>
-    [NumosSerialize(Codec = typeof(SolverArraysCodec))]
-    public IReadOnlyList<AtmosSolverArraySnapshot> SolverArrays { get; private set; } = [];
-
-    /// <summary>
     ///     Gets bytes occupied by copied chunk and solver values, excluding object headers and keys.
     /// </summary>
     public long PayloadBytes => (long)Classifications.Count * 28 +
@@ -254,15 +135,42 @@ public sealed partial class AtmosChunkCheckpoint
                                 Gases.Sum(static gas => 4L + gas.Moles.Count * 4L) +
                                 SolverArrays.Sum(static array => array.PayloadBytes);
 
-    private partial void CaptureLiveArrays(AtmosChunk chunk);
+    /// <summary>
+    ///     Creates a new live chunk holding this checkpoint's state, for a chunk the receiving grid doesn't have.
+    /// </summary>
+    /// <returns>A chunk with a fresh generation. The caller owns its pooled storage.</returns>
+    internal AtmosChunk Materialize()
+    {
+        var chunk = new AtmosChunk(Dimensions.X, Dimensions.Y, Dimensions.Z);
+        chunk.InitializeConstructed(Position);
+        try
+        {
+            RestoreInto(chunk);
+            return chunk;
+        }
+        catch
+        {
+            chunk.Release();
+            throw;
+        }
+    }
 
-    private partial void RestoreLiveArrays(AtmosChunk chunk);
+    partial void OnRestored(AtmosChunk live)
+    {
+        // Vacuum flags are derived from the pressures rather than stored.
+        ReadOnlySpan<float> pressures = live.TotalPressure.AsSpan();
+        Span<bool> isVacuum = live.IsVacuum.AsSpan();
+        for (int index = 0; index < pressures.Length; index++)
+            isVacuum[index] = pressures[index] <= 0f;
+
+        live.MarkChanged();
+    }
 
     /// <summary>
-    ///     Checks a chunk the generated reader just decoded, which takes whatever the data says.
+    ///     Checks a chunk just read from bytes, since the reader takes whatever the data says.
     /// </summary>
     /// <exception cref="InvalidDataException">A length doesn't match the dimensions, or the dimensions are invalid.</exception>
-    internal void ValidateDecoded()
+    partial void OnDecoded()
     {
         if (Dimensions.X <= 0 || Dimensions.Y <= 0 || Dimensions.Z <= 0)
             throw new InvalidDataException("Chunk dimensions must be positive.");
@@ -272,7 +180,8 @@ public sealed partial class AtmosChunkCheckpoint
             throw new InvalidDataException("Chunk dimensions hold more voxels than a chunk can address.");
 
         if (Classifications.Count != voxels || Temperatures.Count != voxels || Pressures.Count != voxels ||
-            HeatCapacities.Count != voxels)
+            HeatCapacities.Count != voxels || MomentumX.Count != voxels || MomentumY.Count != voxels ||
+            MomentumZ.Count != voxels)
         {
             throw new InvalidDataException("Chunk voxel data does not match its dimensions.");
         }
@@ -296,40 +205,6 @@ public sealed partial class AtmosChunkCheckpoint
             }
         }
     }
-
-    internal AtmosChunk Materialize()
-    {
-        var chunk = new AtmosChunk(Dimensions.X, Dimensions.Y, Dimensions.Z);
-        chunk.InitializeConstructed(Position);
-        try
-        {
-            // Every captured per-voxel array is exactly VoxelCount long, and the active-air prefix never exceeds it.
-            RestoreLiveArrays(chunk);
-            ReadOnlySpan<float> pressures = chunk.TotalPressure.AsSpan();
-            Span<bool> isVacuum = chunk.IsVacuum.AsSpan();
-            for (int index = 0; index < pressures.Length; index++)
-                isVacuum[index] = pressures[index] <= 0f;
-
-            foreach (var gas in Gases)
-            {
-                int channel = chunk.GetOrCreateGasChannel(gas.GasId);
-                StateArray.CopyTo(gas.Moles, chunk.ActiveGases[channel].Moles.AsSpan(0, chunk.VoxelCount));
-            }
-
-            chunk.ActiveAirCount = ActiveAirIndices.Count;
-            StateArray.CopyTo(ActiveAirIndices, chunk.ActiveAirIndices);
-
-            chunk.IsAwake = IsAwake;
-            chunk.SleepTimer = SleepTimer;
-            chunk.RestoreSolverArrays(SolverArrays);
-            return chunk;
-        }
-        catch
-        {
-            chunk.Release();
-            throw;
-        }
-    }
 }
 
 /// <summary>
@@ -340,7 +215,7 @@ public sealed partial class AtmosGasChannelCheckpoint
     internal AtmosGasChannelCheckpoint(GasChannel channel, int voxelCount)
     {
         GasId = channel.GasId;
-        Moles = channel.Moles.AsSpan(0, voxelCount).ToArray();
+        Moles = StateArray.Copy<float>(channel.Moles.AsSpan(0, voxelCount));
     }
 
     internal AtmosGasChannelCheckpoint(int gasId, float[] moles)
@@ -364,5 +239,5 @@ public sealed partial class AtmosGasChannelCheckpoint
     ///     Gets gas amounts in moles, indexed by the chunk’s flat voxel index.
     /// </summary>
     [NumosSerialize]
-    public IReadOnlyList<float> Moles { get; private set => field = StateArray.Wrap(value); } = [];
+    public IReadOnlyList<float> Moles { get; private set => field = StateArray.Wrap(value); } = StateArray<float>.Empty;
 }

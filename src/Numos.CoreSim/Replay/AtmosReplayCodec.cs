@@ -101,9 +101,7 @@ internal static partial class AtmosReplayCodec
             int length = ReadCount(reader, int.MaxValue, "chunk byte");
             ReadPayload(reader, length, ref buffer);
             var state = new StateReader(buffer.AsSpan(0, length), maxStringBytes);
-            var chunk = NumosState.Read<AtmosChunkCheckpoint>(ref state);
-            chunk.ValidateDecoded();
-            chunks[index] = chunk;
+            chunks[index] = NumosState.Read<AtmosChunkCheckpoint>(ref state);
         }
 
         var checkpoint = new AtmosSimulationCheckpoint(dimensions, chunks);
