@@ -374,7 +374,9 @@ internal static class EulerSweep
     ///         subtraction from the large thermal part does not lose it. Species are floored at zero and the
     ///         speed is clamped to <see cref="EulerFlow.EulerFlowConfig.MaxVelocity" /> before the primitive state is
     ///         rebuilt; both repairs are counted, as is a cell whose primitive state does not fit in float, which
-    ///         keeps its conserved variables but is written as a vacuum with no momentum.
+    ///         keeps its conserved variables but is written as a vacuum with no momentum. A species update that is
+    ///         not finite is written as zero and counts the cell as non-finite too, so a NaN never reaches a gas
+    ///         channel, where every later comparison would let it through.
     ///     </para>
     /// </remarks>
     private static MetrePerSecond UpdateCell(
@@ -387,6 +389,7 @@ internal static class EulerSweep
 
         // Every gas an upwind neighbour cell can hold is in this list (the tick thread merged the axis
         // neighbours' lists before the sweep), so a null upwind row is a gas that side does not have.
+        bool nonFiniteSpecies = false;
         for (int present = 0; present < workspace.GasCount; present++)
         {
             int gasId = workspace.GasIds[present];
@@ -397,7 +400,13 @@ internal static class EulerSweep
                          (ahead.SpeciesRate * UpwindMoles(in ahead, gasId) -
                           behind.SpeciesRate * UpwindMoles(in behind, gasId));
 
-            if (moles < 0f)
+            if (!float.IsFinite(moles))
+            {
+                // NaN fails the floor's comparison, so it has to be caught here or it lands in the channels.
+                nonFiniteSpecies = true;
+                moles = 0f;
+            }
+            else if (moles < 0f)
             {
                 counters.NegativeMoles++;
                 moles = 0f;
@@ -405,6 +414,9 @@ internal static class EulerSweep
 
             target[voxelIndex] = moles;
         }
+
+        if (nonFiniteSpecies)
+            counters.NonFiniteCells++;
 
         // Normal momentum goes to the sweep axis; the tangential pair follows FromCell's cyclic order.
         KilogramMetrePerSecond normal = ReadMomentum(read, axis, voxelIndex) -
@@ -474,7 +486,7 @@ internal static class EulerSweep
             }
             else
             {
-                if (kind == EulerCellKind.NonFinite)
+                if (kind == EulerCellKind.NonFinite && !nonFiniteSpecies)
                     counters.NonFiniteCells++;
 
                 momentumX = 0f;
@@ -493,9 +505,16 @@ internal static class EulerSweep
     ///     Moles of one gas in a face's upwind cell; zero for a gas the upwind buffer has no row for, which is the
     ///     exact value a zero row would give.
     /// </summary>
+    /// <remarks>
+    ///     The id comes from this chunk's list and the buffer can be a neighbour's, whose row table is only as
+    ///     wide as the registry plus the ids it lists itself. An id past its end (a channel restored from a
+    ///     checkpoint with an id the registry never saw, listed here via another neighbour) is a gas that
+    ///     buffer holds none of, so it reads as a null row rather than as an index fault.
+    /// </remarks>
     private static Mole UpwindMoles(in EulerFaceRate rate, int gasId)
     {
-        Mole[]? row = rate.UpwindState.Species[gasId];
+        Mole[]?[] table = rate.UpwindState.Species;
+        Mole[]? row = gasId < table.Length ? table[gasId] : null;
         return row == null ? 0f : row[rate.UpwindIndex];
     }
 
