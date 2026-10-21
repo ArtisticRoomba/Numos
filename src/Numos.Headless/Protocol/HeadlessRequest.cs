@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Numos.CoreSim;
+using Numos.CoreSim.EulerFlow;
 using Numos.Workbench;
 
 namespace Numos.Headless.Protocol;
@@ -226,6 +227,7 @@ internal sealed class ConfigurationPatch
     public float? AccumulatorWakeThresholdPa { get; init; }
     public int? AccumulatorMaxAliveTicks { get; init; }
     public float? ReferenceMolarMassKgPerMol { get; init; }
+    public EulerFlowPatch? EulerFlow { get; init; }
 
     /// <summary>
     ///     Rejects values outside the domain of their field, as the viewer does.
@@ -319,5 +321,60 @@ internal sealed class ConfigurationPatch
 
         if (ReferenceMolarMassKgPerMol.HasValue)
             config.ReferenceMolarMass = ReferenceMolarMassKgPerMol.Value;
+
+        EulerFlow?.ApplyTo(config);
+    }
+}
+
+/// <summary>
+///     Optional Euler transport settings. Missing properties keep the value of the <see cref="EulerFlowConfig" />
+///     already in the configuration, or the library default when there is none.
+/// </summary>
+internal sealed class EulerFlowPatch
+{
+    public float? CourantNumber { get; init; }
+    public int? MaxSubstepsPerTick { get; init; }
+    public float? VelocityFloorMps { get; init; }
+    public float? MaxVelocityMps { get; init; }
+    public float? WakePressureDeltaPa { get; init; }
+    public bool? AllMachCorrection { get; init; }
+    public string? Reconstruction { get; init; }
+    public float? MomentumDampingPerSecond { get; init; }
+    public float? DefaultLinkAreaFraction { get; init; }
+
+    /// <summary>
+    ///     Replaces the configuration's <see cref="EulerFlowConfig" /> entry with one that applies this patch.
+    /// </summary>
+    internal void ApplyTo(AtmosConfig config)
+    {
+        var current = config.SolverConfigurations.OfType<EulerFlowConfig>().FirstOrDefault() ?? EulerFlowConfig.Default;
+        var patched = new EulerFlowConfig
+        {
+            CourantNumber = CourantNumber ?? current.CourantNumber,
+            MaxSubstepsPerTick = MaxSubstepsPerTick ?? current.MaxSubstepsPerTick,
+            VelocityFloor = VelocityFloorMps ?? current.VelocityFloor,
+            MaxVelocity = MaxVelocityMps ?? current.MaxVelocity,
+            WakePressureDelta = WakePressureDeltaPa ?? current.WakePressureDelta,
+            AllMachCorrection = AllMachCorrection ?? current.AllMachCorrection,
+            Reconstruction = ParseReconstruction(Reconstruction) ?? current.Reconstruction,
+            MomentumDamping = MomentumDampingPerSecond ?? current.MomentumDamping,
+            DefaultLinkAreaFraction = DefaultLinkAreaFraction ?? current.DefaultLinkAreaFraction
+        };
+
+        config.SolverConfigurations.RemoveAll(static entry => entry is EulerFlowConfig);
+        config.SolverConfigurations.Add(patched);
+    }
+
+    private static EulerReconstruction? ParseReconstruction(string? value)
+    {
+        if (value == null)
+            return null;
+
+        if (Enum.TryParse(value, true, out EulerReconstruction reconstruction) && Enum.IsDefined(reconstruction))
+            return reconstruction;
+
+        throw new HeadlessRequestException(
+            "invalidConfig",
+            $"Unknown Euler reconstruction '{value}'. Use 'firstOrder' or 'musclHancock'.");
     }
 }

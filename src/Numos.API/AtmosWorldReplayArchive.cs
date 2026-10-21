@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using Numos.CoreSim.Replay;
 
 namespace Numos.API;
 
@@ -95,8 +96,12 @@ public sealed class AtmosWorldReplayArchive
         foreach (var array in chunk.SolverArrays)
             yield return $"solver array '{array.Key}' in simulation {simulation.Simulation}, chunk {chunk.Position}";
 
+        // Built-in configurations with a wire encoding ride along; only host types are unsupported.
         foreach (var configuration in checkpoint.Config.SolverConfigurations)
-            yield return $"world solver configuration '{configuration.Key}'";
+        {
+            if (configuration is not IPortableSolverConfiguration)
+                yield return $"world solver configuration '{configuration.Key}'";
+        }
 
         foreach (var recorded in recording.Operations)
         {
@@ -104,7 +109,10 @@ public sealed class AtmosWorldReplayArchive
                 continue;
 
             foreach (var configuration in config.Config.SolverConfigurations)
-                yield return $"recorded solver configuration '{configuration.Key}'";
+            {
+                if (configuration is not IPortableSolverConfiguration)
+                    yield return $"recorded solver configuration '{configuration.Key}'";
+            }
         }
     }
 }

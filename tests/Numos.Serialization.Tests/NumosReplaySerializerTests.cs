@@ -1,6 +1,7 @@
 using Numos.API;
 using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Primitives;
+using Numos.CoreSim.EulerFlow;
 using Numos.CoreSim.Replay;
 using Numos.Maths;
 using Numos.Serialization.FileSystem;
@@ -174,6 +175,67 @@ public sealed class NumosReplaySerializerTests
         Assert.That(
             () => NumosWorldReplaySerializer.Deserialize(new MemoryStream(bytes), new NumosReplayReadOptions { MaxPayloadBytes = 1 }),
             Throws.InstanceOf<InvalidDataException>());
+    }
+
+    [Test]
+    public void RoundTrip_PreservesEulerFlowConfiguration()
+    {
+        var initial = new EulerFlowConfig
+        {
+            CourantNumber = 0.65f,
+            MaxSubstepsPerTick = 7,
+            VelocityFloor = 0.01f,
+            MaxVelocity = 1200f,
+            WakePressureDelta = 0.5f,
+            AllMachCorrection = true,
+            Reconstruction = EulerReconstruction.MusclHancock,
+            MomentumDamping = 0.05f,
+            DefaultLinkAreaFraction = 0.25f
+        };
+
+        var config = new AtmosConfig { SolverConfigurations = [initial] };
+        using var world = new AtmosWorld(config);
+        world.CreateSimulation(1, 1, 1);
+        var timeline = new AtmosWorldReplayTimeline(world);
+        world.Tick();
+        world.SetAtmosConfig(new AtmosConfig(world.Config)
+        {
+            SolverConfigurations = [new EulerFlowConfig(initial) { MaxSubstepsPerTick = 0 }]
+        });
+
+        world.Tick();
+        var document = new NumosWorldReplayDocument(
+            new NumosReplayMetadata("Euler", DateTimeOffset.UnixEpoch, "tests", "1", "1"),
+            timeline.CaptureReplay());
+
+        using var stream = new MemoryStream();
+        NumosWorldReplaySerializer.Serialize(stream, document);
+        stream.Position = 0;
+        var restored = NumosWorldReplaySerializer.Deserialize(stream);
+
+        var recordedConfig = restored.Replay.Recording.Operations
+            .Select(static recorded => recorded.Operation)
+            .OfType<SetAtmosWorldConfigOperation>()
+            .Single()
+            .Config;
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(restored.Replay.UnsupportedFeatures, Is.Empty);
+            Assert.That(
+                restored.Replay.InitialCheckpoint.Config.TryGetSolverConfiguration(out EulerFlowConfig? first),
+                Is.True);
+
+            Assert.That(first!.SemanticallyEquals(initial), Is.True);
+            Assert.That(recordedConfig.TryGetSolverConfiguration(out EulerFlowConfig? second), Is.True);
+            Assert.That(second!.MaxSubstepsPerTick, Is.Zero);
+            Assert.That(second.Reconstruction, Is.EqualTo(EulerReconstruction.MusclHancock));
+        });
+
+        using var replayWorld = new AtmosWorld(new AtmosConfig(restored.Replay.InitialCheckpoint.Config));
+        var imported = AtmosWorldReplayTimeline.Import(replayWorld, restored.Replay, 1);
+        imported.ReturnToHead();
+        Assert.That(replayWorld.ComputeStateHash(), Is.EqualTo(restored.Replay.HeadStateHash));
     }
 
     [Test]

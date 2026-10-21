@@ -105,4 +105,49 @@ public static class AtmosConfigFields
         "Reference molar mass",
         "kg/mol",
         "Molar mass assumed for gases that don't declare one.");
+
+    public readonly static AtmosConfigFieldInfo EulerCourantNumber = new(
+        "Courant number",
+        "",
+        "Largest fraction of a voxel a signal may cross per substep. 0.5 keeps the first-order scheme positive.");
+
+    public readonly static AtmosConfigFieldInfo EulerMaxSubstepsPerTick = new(
+        "Max substeps per tick",
+        "",
+        "Cap on CFL substeps per tick; 0 means no cap. When it engages the tick advances less gas time.");
+
+    public readonly static AtmosConfigFieldInfo EulerVelocityFloor = new(
+        "Velocity floor",
+        "m/s",
+        "Speeds below this are zeroed at the end of the tick so settled rooms stop sloshing.");
+
+    public readonly static AtmosConfigFieldInfo EulerMaxVelocity = new(
+        "Max velocity",
+        "m/s",
+        "Speeds are clamped to this; a safety net that only engages when a state has gone wrong.");
+
+    public readonly static AtmosConfigFieldInfo EulerWakePressureDelta = new(
+        "Wake pressure delta",
+        "Pa",
+        "Pressure difference across a chunk boundary face needed to wake the sleeping side.");
+
+    public readonly static AtmosConfigFieldInfo EulerAllMachCorrection = new(
+        "All-Mach correction",
+        "",
+        "Scales the flux's pressure dissipation by the local Mach number so slow flows aren't smeared.");
+
+    public readonly static AtmosConfigFieldInfo EulerReconstruction = new(
+        "Reconstruction",
+        "",
+        "How face states are built. MUSCL-Hancock is reserved and currently runs as first order.");
+
+    public readonly static AtmosConfigFieldInfo EulerMomentumDamping = new(
+        "Momentum damping",
+        "1/s",
+        "Exponential decay rate applied to momentum each tick; a stand-in for wall friction. 0 disables it.");
+
+    public readonly static AtmosConfigFieldInfo EulerDefaultLinkAreaFraction = new(
+        "Default link area fraction",
+        "",
+        "Open fraction of a voxel face assumed for portals and docks that declare no area.");
 }

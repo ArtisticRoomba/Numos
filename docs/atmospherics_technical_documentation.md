@@ -265,6 +265,22 @@ runtime configuration. `AtmosChunkConstants` holds the default chunk dimensions 
 | `AccumulatorMaxAliveTicks`                 | 20      | Lifetime in ticks of an accumulated activity value. Captured and checkpointed, but not read by the built-in solvers yet.                                                                                                                                 |
 | `ReferenceMolarMass`                       | 0.02897 | Molar mass (kg/mol) assumed for gases whose `MolarMass` is unset. Defaults to dry air; non-finite or nonpositive values normalize to it.                                                                                                                 |
 
+The Euler transport stage keeps its settings in an `EulerFlowConfig` entry (key `euler-flow`) of `SolverConfigurations`.
+It runs with `EulerFlowConfig.Default` when there is no entry. The keys are:
+
+- `CourantNumber` (0.5), the positivity bound of the split first-order scheme.
+- `MaxSubstepsPerTick` (64). Zero removes the cap. When the cap engages, the tick advances less than a full step of gas
+  time.
+- `VelocityFloor` (0.005 m/s). Momentum below it is zeroed at tick end.
+- `MaxVelocity` (5000 m/s), a clamp with a diagnostic counter.
+- `WakePressureDelta` (1 Pa), the boundary activation threshold.
+- `AllMachCorrection` (off).
+- `Reconstruction` (`FirstOrder`). `MusclHancock` is reserved.
+- `MomentumDamping` (0/s).
+- `DefaultLinkAreaFraction` (1), the open fraction assumed for links without an area.
+
+The per-tick snapshot resolves the entry once per capture, so the stage never searches the list on the tick path.
+
 At the start of each tick the solver captures normalized inputs from the current `AtmosConfigSnapshot`. Built-in stages
 use those values for the whole tick. Custom callbacks receive the live `AtmosSimulation`. A config applied from a
 callback updates `simulation.Config` immediately, but built-in stages see it only on the next tick. Solver-originated

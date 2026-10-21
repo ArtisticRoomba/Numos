@@ -1,5 +1,6 @@
 using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Primitives;
+using Numos.CoreSim.EulerFlow;
 using Numos.CoreSim.GasReactions;
 using Numos.Maths;
 using Numos.Serialization;
@@ -32,6 +33,38 @@ public sealed class AtmosWorldReplayTests
         Assert.That(
             () => AtmosWorldReplayTimeline.Import(importedWorld, archive, 1),
             Throws.TypeOf<NotSupportedException>());
+    }
+
+    [Test]
+    public void Import_AcceptsTheBuiltInEulerFlowConfiguration()
+    {
+        var config = CreateConfig();
+        var euler = new EulerFlowConfig { CourantNumber = 0.4f, AllMachCorrection = true };
+        config.SolverConfigurations = [euler];
+        using var source = new AtmosWorld(config);
+        source.CreateSimulation(1, 1, 1);
+        var sourceTimeline = new AtmosWorldReplayTimeline(source, 1);
+        source.Tick();
+        config.SolverConfigurations = [new EulerFlowConfig(euler) { MaxVelocity = 250f }];
+        source.SetAtmosConfig(config);
+        source.Tick();
+        var archive = sourceTimeline.CaptureReplay();
+
+        Assert.That(archive.UnsupportedFeatures, Is.Empty);
+        Assert.That(archive.EnsurePortable, Throws.Nothing);
+
+        using var importedWorld = new AtmosWorld(CreateConfig());
+        var imported = AtmosWorldReplayTimeline.Import(importedWorld, archive, 1);
+        imported.ReturnToHead();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(importedWorld.ComputeStateHash(), Is.EqualTo(archive.HeadStateHash));
+            Assert.That(importedWorld.Config.TryGetSolverConfiguration(out EulerFlowConfig? restored), Is.True);
+            Assert.That(restored!.MaxVelocity, Is.EqualTo(250f));
+            Assert.That(restored.CourantNumber, Is.EqualTo(0.4f));
+            Assert.That(restored.AllMachCorrection, Is.True);
+        });
     }
 
     [Test]

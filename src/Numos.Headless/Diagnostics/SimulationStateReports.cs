@@ -91,7 +91,22 @@ public sealed record SimulationConfigurationReport(
     float AccumulatorWakeThresholdPa,
     int AccumulatorMaxAliveTicks,
     float ReferenceMolarMassKgPerMol,
-    GasConfigurationReport[] Gases);
+    GasConfigurationReport[] Gases,
+    EulerFlowConfigurationReport? EulerFlow);
+
+/// <summary>
+///     The Euler transport settings registered in the configuration, or absent when the solver runs with defaults.
+/// </summary>
+public sealed record EulerFlowConfigurationReport(
+    float CourantNumber,
+    int MaxSubstepsPerTick,
+    float VelocityFloorMps,
+    float MaxVelocityMps,
+    float WakePressureDeltaPa,
+    bool AllMachCorrection,
+    string Reconstruction,
+    float MomentumDampingPerSecond,
+    float DefaultLinkAreaFraction);
 
 /// <summary>
 ///     One indexed gas definition captured from the configuration registry.
