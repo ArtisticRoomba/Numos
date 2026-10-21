@@ -195,7 +195,8 @@ public static class SimulationStateAnalyzer
                 gas.CondensationEnabled,
                 gas.MolarEnthalpyOfVaporization,
                 gas.LiquidId,
-                gas.DiffusionCoefficient);
+                gas.DiffusionCoefficient,
+                gas.MolarMass);
         }
 
         return new SimulationConfigurationReport(
@@ -215,6 +216,7 @@ public static class SimulationStateAnalyzer
             config.MaxPressureTransferFractionPerNeighbor,
             config.AccumulatorWakeThreshold,
             config.AccumulatorMaxAliveTicks,
+            config.ReferenceMolarMass,
             gases);
     }
 

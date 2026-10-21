@@ -219,7 +219,8 @@ Each gas species is defined by a `GasProperties` struct:
 | `CondensationEnabled`               | `bool`   | Enables this species in the condensation model                                                                                                                                                                                                      |
 | `MolarEnthalpyOfVaporization`       | `float`  | Vaporization enthalpy in J/mol, used by Clausius–Clapeyron and converted to an approximate constant-volume internal-energy change for condensation                                                                                                  |
 | `LiquidId`                          | `int`    | Reserved integration ID. The built-in solver does not create liquid state or emit a condensation event.                                                                                                                                             |
-| `DiffusionCoefficient`              | `float`  | Effective species diffusivity `D_g` in m²/s (§5.3). Negative values clamp to zero; non-finite values disable diffusion for the species.                                                                                                             |
+| `DiffusionCoefficient`              | `float`  | Effective species diffusivity `D_g` in m²/s (§5.3). Negative values clamp to zero; non-finite values disable diffusion for the species.                                                                                                     |
+| `MolarMass`                         | `float`  | Molar mass in kg/mol, used to convert moles to mass for density, momentum, and sound speed. Zero, negative, and non-finite values mean unknown and normalize to zero; such a gas weighs `ReferenceMolarMass`.                                        |
 
 The registry is a `GasRegistry` list indexed by gas ID; zero is a valid gas ID.
 
@@ -253,6 +254,7 @@ runtime configuration. `AtmosChunkConstants` holds the default chunk dimensions 
 | `MaxPressureTransferFractionPerNeighbor`   | 0.16    | Clamped to [0, 1] and checkpointed, but not read by the built-in solvers. The conductance limiter (§5.2) bounds outflow instead.                                                                                                                         |
 | `AccumulatorWakeThreshold`                 | 15      | Pressure activity (Pa) intended to wake a sleeping chunk. Captured and checkpointed, but not read by the built-in solvers yet.                                                                                                                           |
 | `AccumulatorMaxAliveTicks`                 | 20      | Lifetime in ticks of an accumulated activity value. Captured and checkpointed, but not read by the built-in solvers yet.                                                                                                                                 |
+| `ReferenceMolarMass`                       | 0.02897 | Molar mass (kg/mol) assumed for gases whose `MolarMass` is unset. Defaults to dry air; non-finite or nonpositive values normalize to it.                                                                                                                 |
 
 At the start of each tick the solver captures normalized inputs from the current `AtmosConfigSnapshot`. Built-in stages
 use those values for the whole tick. Custom callbacks receive the live `AtmosSimulation`. A config applied from a

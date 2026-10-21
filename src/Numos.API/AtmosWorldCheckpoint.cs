@@ -15,7 +15,7 @@ public sealed class AtmosWorldCheckpoint
     /// <summary>
     ///     Identifies the in-memory world checkpoint schema.
     /// </summary>
-    public const int CurrentFormatVersion = 5;
+    public const int CurrentFormatVersion = 6;
 
     // See AtmosSimulationCheckpoint: immutable after construction, so the digest is computed once.
     private ulong _digest;

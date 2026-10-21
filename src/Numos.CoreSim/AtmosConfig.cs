@@ -50,6 +50,7 @@ public class AtmosConfig : IAtmosConfig
         MaxPressureTransferFractionPerNeighbor = source.MaxPressureTransferFractionPerNeighbor;
         AccumulatorWakeThreshold = source.AccumulatorWakeThreshold;
         AccumulatorMaxAliveTicks = source.AccumulatorMaxAliveTicks;
+        ReferenceMolarMass = source.ReferenceMolarMass;
     }
 
     /// <summary>
@@ -225,6 +226,18 @@ public class AtmosConfig : IAtmosConfig
     public int AccumulatorMaxAliveTicks { get; set; } = AtmosConfigDefaults.AccumulatorMaxAliveTicks;
 
     /// <summary>
+    ///     Molar mass assumed for gases whose <see cref="GasProperties.MolarMass" /> is unset, in kilograms per mole
+    ///     (kg/mol).
+    /// </summary>
+    /// <remarks>
+    ///     The compressible transport solver needs a mass for every gas it moves, so a gas without one weighs this
+    ///     much. Non-finite and nonpositive values are normalized to
+    ///     <see cref="AtmosConfigDefaults.ReferenceMolarMass" />, dry air.
+    /// </remarks>
+    [Quantity("molarMass")]
+    public KilogramPerMole ReferenceMolarMass { get; set; } = AtmosConfigDefaults.ReferenceMolarMass;
+
+    /// <summary>
     ///     Ideal-gas pressure coefficient <c>R/V</c> for one voxel, in pascals per mole-kelvin (Pa/(mol·K)).
     /// </summary>
     public PascalPerMoleKelvin PressurePerMoleKelvin =>
@@ -275,6 +288,28 @@ public class AtmosConfig : IAtmosConfig
         }
 
         return fallback;
+    }
+
+    /// <summary>
+    ///     Resolves the molar mass used for a gas, in kg/mol.
+    /// </summary>
+    /// <param name="gasId">The gas ID. Unregistered IDs are allowed.</param>
+    /// <returns>
+    ///     The gas's configured value when it is finite and positive; otherwise <see cref="ReferenceMolarMass" />,
+    ///     or dry air if that is invalid too.
+    /// </returns>
+    public KilogramPerMole GetMolarMass(int gasId)
+    {
+        if ((uint)gasId < (uint)GasRegistry.Count)
+        {
+            KilogramPerMole configured = GasRegistry[gasId].MolarMass;
+            if (FloatMath.IsFinitePositive(configured))
+                return configured;
+        }
+
+        return FloatMath.IsFinitePositive(ReferenceMolarMass)
+            ? ReferenceMolarMass
+            : AtmosConfigDefaults.ReferenceMolarMass;
     }
 
     /// <summary>

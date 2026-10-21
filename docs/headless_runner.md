@@ -335,8 +335,9 @@ without a chunk are black.
 | `getConfig` | None | Returns the configuration and the registry. |
 
 A gas definition has a `name` and the fields `molarHeatCapacityAtConstantVolume`, `boilingPointK`,
-`condensationEnabled`, `molarEnthalpyOfVaporization`, `liquidId`, and `diffusionCoefficient`. Gas ids follow insertion
-order and stay stable.
+`condensationEnabled`, `molarEnthalpyOfVaporization`, `liquidId`, `diffusionCoefficient`, and `molarMassKgPerMol`. Gas ids
+follow insertion order and stay stable. A molar mass of 0 or an omitted one means unknown. Such a gas weighs
+`referenceMolarMassKgPerMol`.
 
 A configuration patch accepts these fields. Omitted fields keep their value. The runner rejects a value outside the
 domain of its field, such as a negative `bulkFlowCoefficient`.
@@ -344,7 +345,7 @@ domain of its field, such as a negative `bulkFlowCoefficient`.
 `globalTemperatureK`, `defaultTemperatureFallbackK`, `defaultMolarHeatCapacityAtConstantVolume`, `voxelVolumeM3`,
 `saturationReferencePressurePa`, `defaultDiffusionCoefficient`, `spaceTemperatureK`, `bulkFlowCoefficient`,
 `vacuumThresholdPa`, `sleepThreshold`, `sleepEpsilonPercent`, `thermalConductance`, `condensationRateFactor`,
-`maxPressureTransferFractionPerNeighbor`, `accumulatorWakeThresholdPa`, `accumulatorMaxAliveTicks`.
+`maxPressureTransferFractionPerNeighbor`, `accumulatorWakeThresholdPa`, `accumulatorMaxAliveTicks`, `referenceMolarMassKgPerMol`.
 
 Defaults change between versions. Set every field a study depends on.
 

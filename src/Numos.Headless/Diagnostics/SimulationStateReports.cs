@@ -90,6 +90,7 @@ public sealed record SimulationConfigurationReport(
     float MaxPressureTransferFractionPerNeighbor,
     float AccumulatorWakeThresholdPa,
     int AccumulatorMaxAliveTicks,
+    float ReferenceMolarMassKgPerMol,
     GasConfigurationReport[] Gases);
 
 /// <summary>
@@ -103,7 +104,8 @@ public sealed record GasConfigurationReport(
     bool CondensationEnabled,
     float MolarEnthalpyOfVaporization,
     int LiquidId,
-    float DiffusionCoefficient);
+    float DiffusionCoefficient,
+    float MolarMassKgPerMol);
 
 /// <summary>
 ///     Wire metadata for one solver stage, in execution order.

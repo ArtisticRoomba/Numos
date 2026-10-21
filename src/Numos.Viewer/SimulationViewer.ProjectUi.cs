@@ -48,6 +48,7 @@ public partial class SimulationViewer
     private bool _newGasCondensationEnabled;
     private float _newGasDiffusionCoefficient = AtmosConfigDefaults.DefaultDiffusionCoefficient;
     private float _newGasEnthalpyOfVaporization;
+    private float _newGasMolarMass;
     private FeedbackMessage? _newGasFeedback;
     private int _newGasLiquidId = -1;
     private float _newGasMolarHeatCapacityAtConstantVolume =
@@ -714,6 +715,13 @@ public partial class SimulationViewer
             "Dimensionless fraction of this gas's mole imbalance mixed per tick, from 0 to 1. " +
             "The solver clamps values above 1.");
 
+        ImGui.BeginDisabled(inspecting);
+        ImGui.SetNextItemWidth(NumericInputWidth);
+        formChanged |= ImGui.InputFloat("Molar mass (kg/mol)##new-gas", ref _newGasMolarMass, 0f, 0f, "%.6f");
+        ImGui.EndDisabled();
+        ImGuiExtensions.QuestionTooltip(
+            "Mass of one mole of this gas. 0 means unknown, so the gas weighs the configured reference molar mass.");
+
         if (formChanged)
             _newGasFeedback = null;
 
@@ -729,7 +737,8 @@ public partial class SimulationViewer
                     CondensationEnabled = _newGasCondensationEnabled,
                     MolarEnthalpyOfVaporization = _newGasEnthalpyOfVaporization,
                     LiquidId = _newGasLiquidId,
-                    DiffusionCoefficient = _newGasDiffusionCoefficient
+                    DiffusionCoefficient = _newGasDiffusionCoefficient,
+                    MolarMass = _newGasMolarMass
                 });
         }
 
@@ -805,7 +814,8 @@ public partial class SimulationViewer
                $"Condensation: {(gas.CondensationEnabled ? "enabled" : "disabled")}\n" +
                $"Vaporization enthalpy: {QuantityFormat.Format(gas.MolarEnthalpyOfVaporization, "J/mol")}\n" +
                $"Liquid ID: {gas.LiquidId.ToString(CultureInfo.InvariantCulture)}\n" +
-               $"Diffusion coefficient: {QuantityFormat.Format(gas.DiffusionCoefficient, "m²/s", 3)}";
+               $"Diffusion coefficient: {QuantityFormat.Format(gas.DiffusionCoefficient, "m²/s", 3)}\n" +
+               $"Molar mass: {QuantityFormat.Format(gas.MolarMass, "kg/mol", 6)}";
     }
 
     private void RenderProjectInjectionControls(bool inspecting)

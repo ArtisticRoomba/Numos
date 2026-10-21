@@ -16,6 +16,7 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
     private SquareMetrePerSecond[] _diffusionCoefficients = [];
     private GasRegistrySnapshot _gasRegistry = default!;
     private JoulePerMoleKelvin[] _molarHeatCapacitiesAtConstantVolume = [];
+    private KilogramPerMole[] _molarMasses = [];
 
     // Only used when the captured configuration is not an AtmosConfigSnapshot, which has its own shared copy.
     private ReactionTables? _reactionTables;
@@ -50,6 +51,7 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
     public Scalar MaxPressureTransferFractionPerNeighbor { get; private set; }
     public Pascal AccumulatorWakeThreshold { get; private set; }
     public int AccumulatorMaxAliveTicks { get; private set; }
+    public KilogramPerMole ReferenceMolarMass { get; private set; }
 
     public JoulePerMoleKelvin DefaultMolarHeatCapacityAtConstantVolume { get; private set; }
     public SquareMetrePerSecond DefaultDiffusionCoefficient { get; private set; }
@@ -76,6 +78,13 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
         return (uint)gasId < (uint)GasPropertyCount
             ? _diffusionCoefficients[gasId]
             : DefaultDiffusionCoefficient;
+    }
+
+    public KilogramPerMole GetMolarMass(int gasId)
+    {
+        return (uint)gasId < (uint)GasPropertyCount
+            ? _molarMasses[gasId]
+            : ReferenceMolarMass;
     }
 
     public bool TryGetGasProperties(int gasId, out GasProperties properties)
@@ -105,6 +114,7 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
         {
             Array.Resize(ref _molarHeatCapacitiesAtConstantVolume, gasPropertyCount);
             Array.Resize(ref _diffusionCoefficients, gasPropertyCount);
+            Array.Resize(ref _molarMasses, gasPropertyCount);
         }
 
         GasPropertyCount = gasPropertyCount;
@@ -135,6 +145,11 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
             ? config.SpaceTemperature
             : AtmosConfigDefaults.SpaceTemperature;
 
+        // Resolved before the per-gas loop because unset gas masses fall back to it.
+        ReferenceMolarMass = FloatMath.IsFinitePositive(config.ReferenceMolarMass)
+            ? config.ReferenceMolarMass
+            : AtmosConfigDefaults.ReferenceMolarMass;
+
         var gases = new GasRegistry();
         for (int gasId = 0; gasId < GasPropertyCount; gasId++)
         {
@@ -146,6 +161,9 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
                     : DefaultMolarHeatCapacityAtConstantVolume;
 
             _diffusionCoefficients[gasId] = FloatMath.GetNonnegativeFinite(properties.DiffusionCoefficient);
+            _molarMasses[gasId] = FloatMath.IsFinitePositive(properties.MolarMass)
+                ? properties.MolarMass
+                : ReferenceMolarMass;
         }
 
         _gasRegistry = new GasRegistrySnapshot(gases);
@@ -155,6 +173,7 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
             int removedCount = previousGasRegistryCount - GasPropertyCount;
             Array.Clear(_molarHeatCapacitiesAtConstantVolume, GasPropertyCount, removedCount);
             Array.Clear(_diffusionCoefficients, GasPropertyCount, removedCount);
+            Array.Clear(_molarMasses, GasPropertyCount, removedCount);
         }
 
         BulkFlowCoefficient = FloatMath.ClampUnitInterval(config.BulkFlowCoefficient);

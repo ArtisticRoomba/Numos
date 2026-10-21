@@ -104,6 +104,32 @@ public sealed class CheckpointFieldGenerationParityTests
     }
 
     [Test]
+    public void ConfigHash_ChangesWhenTheReferenceMolarMassChanges()
+    {
+        var baseline = new AtmosConfig().CreateSnapshot();
+        var changed = new AtmosConfig { ReferenceMolarMass = 0.032f }.CreateSnapshot();
+
+        var baselineHash = new AtmosStateHasher();
+        baseline.AppendHash(ref baselineHash);
+        var changedHash = new AtmosStateHasher();
+        changed.AppendHash(ref changedHash);
+
+        Assert.That(baselineHash.Value, Is.Not.EqualTo(changedHash.Value));
+    }
+
+    [Test]
+    public void GasHash_ChangesWhenTheMolarMassChanges()
+    {
+        var baselineHash = new AtmosStateHasher();
+        baselineHash.Add(new GasProperties { Name = "Air" });
+
+        var changedHash = new AtmosStateHasher();
+        changedHash.Add(new GasProperties { Name = "Air", MolarMass = 0.02897f });
+
+        Assert.That(baselineHash.Value, Is.Not.EqualTo(changedHash.Value));
+    }
+
+    [Test]
     public void GasHash_ChangesWhenATaggedFieldChanges()
     {
         var baselineHash = new AtmosStateHasher();

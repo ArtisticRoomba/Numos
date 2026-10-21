@@ -10,8 +10,17 @@ pressure | Pascal | global::System.Single | mass=1,length=-1,time=-2
 pressure64 | Pascal64 | global::System.Double | mass=1,length=-1,time=-2
 amount | Mole | global::System.Single | amount=1
 amount64 | Mole64 | global::System.Double | amount=1
+molarMass | KilogramPerMole | global::System.Single | mass=1,amount=-1
+mass | Kilogram | global::System.Single | mass=1
+mass64 | Kilogram64 | global::System.Double | mass=1
+inverseMass | PerKilogram | global::System.Single | mass=-1
 length | Metre | global::System.Single | length=1
 inverseArea | PerSquareMetre | global::System.Single | length=-2
+area | SquareMetre | global::System.Single | length=2
+velocity | MetrePerSecond | global::System.Single | length=1,time=-1
+momentum | KilogramMetrePerSecond | global::System.Single | mass=1,length=1,time=-1
+momentum64 | KilogramMetrePerSecond64 | global::System.Double | mass=1,length=1,time=-1
+density | KilogramPerCubicMetre | global::System.Single | mass=1,length=-3
 volume | CubicMetre | global::System.Single | length=3
 volume64 | CubicMetre64 | global::System.Double | length=3
 energy | Joule | global::System.Single | mass=1,length=2,time=-2

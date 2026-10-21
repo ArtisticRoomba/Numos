@@ -776,6 +776,14 @@ public partial class SimulationViewer
                 _session.Config.AccumulatorMaxAliveTicks,
                 inspecting,
                 static (config, value) => config.AccumulatorMaxAliveTicks = value);
+
+            ConfigFloatInput(
+                AtmosConfigFields.ReferenceMolarMass,
+                "config-reference-molar-mass",
+                _session.Config.ReferenceMolarMass,
+                ConfigDomain.Positive,
+                inspecting,
+                static (config, value) => config.ReferenceMolarMass = value);
         }
 
         ImGui.Spacing();

@@ -110,6 +110,7 @@ internal sealed class SimulationWorkload : IDisposable
                 {
                     Name = $"Gas{gas:D3}", DiffusionCoefficient = 0.02f,
                     MolarHeatCapacityAtConstantVolume = 20f + gas % 11,
+                    MolarMass = 0.028f + gas % 5 * 0.004f,
                     CondensationEnabled = gas < options.CondensingGasCount,
                     BoilingPoint = 373f, MolarEnthalpyOfVaporization = 40000f
                 });

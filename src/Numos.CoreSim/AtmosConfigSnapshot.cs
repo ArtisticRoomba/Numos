@@ -63,6 +63,9 @@ public sealed class AtmosConfigSnapshot : IAtmosConfig
 
         AccumulatorWakeThreshold = FloatMath.GetNonnegativeFinite(source.AccumulatorWakeThreshold);
         AccumulatorMaxAliveTicks = Math.Max(0, source.AccumulatorMaxAliveTicks);
+        ReferenceMolarMass = FloatMath.IsFinitePositive(source.ReferenceMolarMass)
+            ? source.ReferenceMolarMass
+            : AtmosConfigDefaults.ReferenceMolarMass;
 
         var gasRegistry = new GasRegistry();
         foreach (var sourceProperties in source.GasRegistry)
@@ -75,6 +78,11 @@ public sealed class AtmosConfigSnapshot : IAtmosConfig
             }
 
             properties.DiffusionCoefficient = FloatMath.GetNonnegativeFinite(properties.DiffusionCoefficient);
+
+            // Every invalid molar mass already means "unknown", so store the one canonical spelling of it.
+            if (!FloatMath.IsFinitePositive(properties.MolarMass))
+                properties.MolarMass = 0f;
+
             gasRegistry.Add(properties);
         }
 
@@ -100,7 +108,8 @@ public sealed class AtmosConfigSnapshot : IAtmosConfig
 
     /// <summary>
     ///     Gets the registered gases, with invalid heat capacities replaced by
-    ///     <see cref="DefaultMolarHeatCapacityAtConstantVolume" /> and diffusion coefficients clamped to [0, 1].
+    ///     <see cref="DefaultMolarHeatCapacityAtConstantVolume" />, diffusion coefficients clamped to zero or greater, and
+    ///     invalid molar masses normalized to zero.
     /// </summary>
     public GasRegistrySnapshot GasRegistry { get; }
 
@@ -157,6 +166,9 @@ public sealed class AtmosConfigSnapshot : IAtmosConfig
     /// <inheritdoc cref="AtmosConfig.AccumulatorMaxAliveTicks" />
     [ConfigCheckpointField(15)]
     public int AccumulatorMaxAliveTicks { get; }
+    /// <inheritdoc cref="AtmosConfig.ReferenceMolarMass" />
+    [ConfigCheckpointField(16)]
+    public KilogramPerMole ReferenceMolarMass { get; }
 
     /// <inheritdoc cref="AtmosConfig.PressurePerMoleKelvin" />
     public PascalPerMoleKelvin PressurePerMoleKelvin =>
@@ -197,6 +209,21 @@ public sealed class AtmosConfigSnapshot : IAtmosConfig
         return (uint)gasId < (uint)GasRegistry.Count
             ? FloatMath.GetNonnegativeFinite(GasRegistry[gasId].DiffusionCoefficient)
             : FloatMath.GetNonnegativeFinite(DefaultDiffusionCoefficient);
+    }
+
+    /// <inheritdoc cref="AtmosConfig.GetMolarMass" />
+    public KilogramPerMole GetMolarMass(int gasId)
+    {
+        if ((uint)gasId < (uint)GasRegistry.Count)
+        {
+            KilogramPerMole configured = GasRegistry[gasId].MolarMass;
+            if (FloatMath.IsFinitePositive(configured))
+                return configured;
+        }
+
+        return FloatMath.IsFinitePositive(ReferenceMolarMass)
+            ? ReferenceMolarMass
+            : AtmosConfigDefaults.ReferenceMolarMass;
     }
 
     /// <inheritdoc cref="AtmosConfig.TryGetGasProperties" />
@@ -324,6 +351,7 @@ public sealed class AtmosConfigSnapshot : IAtmosConfig
                MaxPressureTransferFractionPerNeighbor.Equals(other.MaxPressureTransferFractionPerNeighbor) &&
                AccumulatorWakeThreshold.Equals(other.AccumulatorWakeThreshold) &&
                AccumulatorMaxAliveTicks == other.AccumulatorMaxAliveTicks &&
+               ReferenceMolarMass.Equals(other.ReferenceMolarMass) &&
                GasRegistriesEqual(GasRegistry, other.GasRegistry) &&
                SolverConfigurations.Count == other.SolverConfigurations.Count &&
                SolverConfigurations.Zip(other.SolverConfigurations).All(static pair =>
@@ -345,7 +373,8 @@ public sealed class AtmosConfigSnapshot : IAtmosConfig
                 left.CondensationEnabled != right.CondensationEnabled ||
                 !left.MolarEnthalpyOfVaporization.Equals(right.MolarEnthalpyOfVaporization) ||
                 left.LiquidId != right.LiquidId ||
-                !left.DiffusionCoefficient.Equals(right.DiffusionCoefficient))
+                !left.DiffusionCoefficient.Equals(right.DiffusionCoefficient) ||
+                !left.MolarMass.Equals(right.MolarMass))
             {
                 return false;
             }

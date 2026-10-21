@@ -101,4 +101,9 @@ public static class AtmosConfigFields
         "Accumulator max alive ticks",
         "ticks",
         "Number of ticks an accumulated activity value stays alive before it expires.");
+
+    public readonly static AtmosConfigFieldInfo ReferenceMolarMass = new(
+        "Reference molar mass",
+        "kg/mol",
+        "Molar mass assumed for gases that don't declare one.");
 }
