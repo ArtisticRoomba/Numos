@@ -132,7 +132,8 @@ internal static partial class AtmosReplayCodec
 
         if (voxels != expected || voxels <= 0) throw new InvalidDataException("Chunk voxel data does not match its dimensions.");
 
-        var (classifications, temperatures, pressures, capacities) = GeneratedCheckpointFields.ReadChunkFields(reader, voxels);
+        var (classifications, temperatures, pressures, capacities, momentumX, momentumY, momentumZ) =
+            GeneratedCheckpointFields.ReadChunkFields(reader, voxels);
         ushort[] air = ReadArray<ushort>(reader, ReadCount(reader, voxels, "active air voxel"));
         int gasCount = ReadCount(reader, 1_000_000, "gas channel");
         var gases = new AtmosGasChannelCheckpoint[gasCount];
@@ -151,6 +152,9 @@ internal static partial class AtmosReplayCodec
             temperatures,
             pressures,
             capacities,
+            momentumX,
+            momentumY,
+            momentumZ,
             air,
             gases);
     }
@@ -162,6 +166,9 @@ internal static partial class AtmosReplayCodec
         writer.Write(operation.Temperature);
         writer.Write(operation.Pressure);
         writer.Write(operation.HeatCapacity);
+        writer.Write(operation.MomentumX);
+        writer.Write(operation.MomentumY);
+        writer.Write(operation.MomentumZ);
         writer.Write(operation.Gases.Count);
         foreach (var gas in operation.Gases)
         {
@@ -177,6 +184,9 @@ internal static partial class AtmosReplayCodec
         Kelvin temperature = reader.ReadSingle();
         Pascal pressure = reader.ReadSingle();
         JoulePerKelvin capacity = reader.ReadSingle();
+        KilogramMetrePerSecond momentumX = reader.ReadSingle();
+        KilogramMetrePerSecond momentumY = reader.ReadSingle();
+        KilogramMetrePerSecond momentumZ = reader.ReadSingle();
         int count = ReadCount(reader, 1_000_000, "mixture gas");
         var gases = new AtmosGasAmount[count];
         for (int index = 0; index < count; index++)
@@ -186,7 +196,16 @@ internal static partial class AtmosReplayCodec
             gases[index] = new AtmosGasAmount(gasId, moles);
         }
 
-        return new SetVoxelMixtureOperation(position, voxel, temperature, pressure, capacity, gases);
+        return new SetVoxelMixtureOperation(
+            position,
+            voxel,
+            temperature,
+            pressure,
+            capacity,
+            momentumX,
+            momentumY,
+            momentumZ,
+            gases);
     }
 
     private static void WriteEditVoxelBoxOperation(BinaryWriter writer, EditVoxelBoxOperation operation)

@@ -751,6 +751,77 @@ public sealed partial class AtmosSimulation : IDisposable
     }
 
     /// <summary>
+    ///     Stores the total momentum of the gas in one voxel addressed by its flat local index and wakes its chunk.
+    /// </summary>
+    /// <param name="chunk">A handle identifying the target chunk.</param>
+    /// <param name="localVoxelIndex">The voxel's zero-based index in the chunk's flattened storage.</param>
+    /// <param name="momentumX">Total x-momentum of the voxel's gas, in kilogram metres per second (kg·m/s).</param>
+    /// <param name="momentumY">Total y-momentum of the voxel's gas, in kilogram metres per second (kg·m/s).</param>
+    /// <param name="momentumZ">Total z-momentum of the voxel's gas, in kilogram metres per second (kg·m/s).</param>
+    /// <remarks>
+    ///     <para>
+    ///         The value is the momentum of everything in the voxel, not a velocity: to set a velocity, multiply it
+    ///         by the voxel's gas mass. Adding gas later keeps the stored momentum and lowers the implied velocity.
+    ///     </para>
+    ///     <para>
+    ///         A write to a solid or void voxel, or to a voxel that currently holds no gas, is ignored and not
+    ///         recorded, because an empty voxel always reads as zero momentum. Inject gas first, then set momentum.
+    ///         Removing the last of a voxel's gas later zeroes its momentum again.
+    ///     </para>
+    ///     <para>
+    ///         While the world is recording, a successful write is recorded as an external operation. A call made
+    ///         from inside a solver callback is applied but not recorded, since it is derived work that replay
+    ///         regenerates.
+    ///     </para>
+    /// </remarks>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="localVoxelIndex" /> is outside the chunk.</exception>
+    /// <exception cref="KeyNotFoundException">No chunk is registered at the handle's position.</exception>
+    /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
+    /// <example>
+    ///     Give 10 mol of air in voxel 0 a velocity of 2 m/s along +x:
+    ///     <code>
+    /// simulation.AddGasToVoxel(chunk, 0, "Air", 10f, 293.15f);
+    /// float mass = 10f * airMolarMass; // kg, from the registry's kg/mol
+    /// simulation.SetVoxelMomentum(chunk, 0, mass * 2f, 0f, 0f);
+    ///     </code>
+    /// </example>
+    [PublicAPI]
+    public void SetVoxelMomentum(
+        AtmosChunkHandle chunk, ushort localVoxelIndex,
+        float momentumX, float momentumY, float momentumZ)
+    {
+        ThrowIfDisposed();
+        _kernel.SetVoxelMomentum(chunk.Position, localVoxelIndex, momentumX, momentumY, momentumZ);
+    }
+
+    /// <summary>
+    ///     Stores the total momentum of the gas in one voxel addressed by local coordinates and wakes its chunk.
+    /// </summary>
+    /// <param name="chunk">A handle identifying the target chunk.</param>
+    /// <param name="x">The zero-based local x-coordinate.</param>
+    /// <param name="y">The zero-based local y-coordinate.</param>
+    /// <param name="z">The zero-based local z-coordinate.</param>
+    /// <param name="momentumX">Total x-momentum of the voxel's gas, in kilogram metres per second (kg·m/s).</param>
+    /// <param name="momentumY">Total y-momentum of the voxel's gas, in kilogram metres per second (kg·m/s).</param>
+    /// <param name="momentumZ">Total z-momentum of the voxel's gas, in kilogram metres per second (kg·m/s).</param>
+    /// <remarks>
+    ///     Same contract as <see cref="SetVoxelMomentum(AtmosChunkHandle, ushort, float, float, float)" />: writes to
+    ///     solid, void, or gasless voxels are ignored and not recorded, and successful writes outside a solver tick
+    ///     are recorded as external operations.
+    /// </remarks>
+    /// <exception cref="ArgumentOutOfRangeException">A local coordinate is outside the chunk.</exception>
+    /// <exception cref="KeyNotFoundException">No chunk is registered at the handle's position.</exception>
+    /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
+    [PublicAPI]
+    public void SetVoxelMomentum(
+        AtmosChunkHandle chunk, int x, int y, int z,
+        float momentumX, float momentumY, float momentumZ)
+    {
+        ThrowIfDisposed();
+        _kernel.SetVoxelMomentum(chunk.Position, x, y, z, momentumX, momentumY, momentumZ);
+    }
+
+    /// <summary>
     ///     Adds gas to one voxel addressed by its flat local index and wakes its chunk.
     /// </summary>
     /// <param name="chunk">A handle identifying the target chunk.</param>

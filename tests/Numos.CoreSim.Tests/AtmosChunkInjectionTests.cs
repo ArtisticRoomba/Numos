@@ -127,6 +127,76 @@ public sealed class AtmosChunkInjectionTests
         });
     }
 
+    [Test]
+    public void InjectGasToVoxel_KeepsStoredMomentum()
+    {
+        var chunk = CreateAwakeChunk(1);
+        chunk.InjectGasToVoxel(0, 3, 2f, 300f, 1f, 1f);
+        chunk.MomentumX[0] = 1f;
+        chunk.MomentumY[0] = 2f;
+        chunk.MomentumZ[0] = 3f;
+
+        chunk.InjectGasToVoxel(0, 3, 2f, 300f, 1f, 1f);
+
+        Assert.That(
+            new[] { chunk.MomentumX[0], chunk.MomentumY[0], chunk.MomentumZ[0] },
+            Is.EqualTo(new[] { 1f, 2f, 3f }));
+    }
+
+    [Test]
+    public void SetVoxelToVacuum_ZeroesMomentumOfThatVoxelOnly()
+    {
+        var chunk = CreateAwakeChunk(2);
+        for (ushort voxel = 0; voxel < 2; voxel++)
+        {
+            chunk.InjectGasToVoxel(voxel, 3, 2f, 300f, 1f, 1f);
+            chunk.MomentumX[voxel] = 1f;
+            chunk.MomentumY[voxel] = 2f;
+            chunk.MomentumZ[voxel] = 3f;
+        }
+
+        chunk.SetVoxelToVacuum(0);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(new[] { chunk.MomentumX[0], chunk.MomentumY[0], chunk.MomentumZ[0] }, Is.All.Zero);
+            Assert.That(new[] { chunk.MomentumX[1], chunk.MomentumY[1], chunk.MomentumZ[1] }, Is.EqualTo(new[] { 1f, 2f, 3f }));
+        });
+    }
+
+    [TestCase(VoxelClassification.RoomSolid)]
+    [TestCase(VoxelClassification.RoomVoid)]
+    public void SetVoxelClassification_ToSolidOrVoid_ZeroesMomentum(int classification)
+    {
+        var chunk = CreateAwakeChunk(1);
+        chunk.InjectGasToVoxel(0, 3, 2f, 300f, 1f, 1f);
+        chunk.MomentumX[0] = 1f;
+        chunk.MomentumY[0] = 2f;
+        chunk.MomentumZ[0] = 3f;
+
+        chunk.SetVoxelClassification(0, classification);
+
+        Assert.That(new[] { chunk.MomentumX[0], chunk.MomentumY[0], chunk.MomentumZ[0] }, Is.All.Zero);
+    }
+
+    [Test]
+    public void SetChunkToVacuum_ZeroesEveryMomentumComponent()
+    {
+        var chunk = CreateAwakeChunk(2);
+        chunk.MomentumX.Fill(1f);
+        chunk.MomentumY.Fill(2f);
+        chunk.MomentumZ.Fill(3f);
+
+        chunk.SetChunkToVacuum();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(chunk.MomentumX.ToArray(), Is.All.Zero);
+            Assert.That(chunk.MomentumY.ToArray(), Is.All.Zero);
+            Assert.That(chunk.MomentumZ.ToArray(), Is.All.Zero);
+        });
+    }
+
     private AtmosChunk CreateChunk(int width, int height, int depth)
     {
         var chunk = new AtmosChunk(width, height, depth);

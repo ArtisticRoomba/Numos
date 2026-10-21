@@ -156,7 +156,7 @@ grid's data:
 | Applied configuration | World      | Captures normalized scalar settings, ordered gas definitions, and immutable solver configurations. Gas IDs keep their existing index meaning; restore does not remap them. |
 | Solver pipeline       | World      | Captures enable flags and records names, custom/built-in kinds, execution order, and neighbor-selection keys for compatibility validation.                                 |
 | Membership, topology  | World      | Captures simulation registry generations, link-set slots in every lifecycle state, and the applied topology version.                                                       |
-| Chunk storage         | Simulation | Captures position, dimensions, awake state, sleep timer, classifications, temperatures, valid gas channels, and per-voxel moles.                                           |
+| Chunk storage         | Simulation | Captures position, dimensions, awake state, sleep timer, classifications, temperatures, per-voxel momentum (three components), valid gas channels, and per-voxel moles.    |
 | Continuation caches   | Simulation | Captures pressure, heat capacity, and the valid active-air prefix exactly. Disabled stages and sleeping chunks can leave meaningful cached state behind.                   |
 | Solver arrays         | Simulation | Captures `ChunkField<T>` storage registered with `rollback: true`: keys, exact element types, lengths, and values. Transient and private fields are excluded.              |
 | Pooled storage        | Simulation | Copies only valid entries. Pool capacity and unused array tails are not simulation state.                                                                                  |
@@ -167,8 +167,9 @@ detached copies. The current implementation has no copy-on-write storage, delta 
 headers and field names.
 
 The world checkpoint schema is `AtmosWorldCheckpoint.CurrentFormatVersion` 6. The grid schema inside it is format
-version 6, compatibility version 3. World version 6 added the reference and per-gas molar masses to the configuration
-section. Replay is experimental, so Numos rejects older in-memory checkpoint schemas instead
+version 7, compatibility version 4. World version 6 added the reference and per-gas molar masses to the configuration
+section. Grid version 7 added the three per-voxel momentum arrays to every chunk. Numos hashes them like any other chunk
+array, so the compatibility version moved with them. Replay is experimental, so Numos rejects older in-memory checkpoint schemas instead
 of translating them.
 
 Solver configuration keys and deterministic hashes contribute to the state hash. Their immutable snapshots supply the
@@ -176,7 +177,7 @@ restored settings. A custom configuration must capture every authoritative value
 
 Four groups of built-in fields carry tags from `Numos.CoreSim.Replay`:
 
-- the per-voxel chunk arrays (`AtmosChunkCheckpoint.Classifications`/`Temperatures`/`Pressures`/`HeatCapacities`),
+- the per-voxel chunk arrays (`AtmosChunkCheckpoint.Classifications`/`Temperatures`/`Pressures`/`HeatCapacities`/`MomentumX`/`MomentumY`/`MomentumZ`),
   tagged `[ChunkCheckpointField]`
 - the flat scalar fields of `AtmosConfigSnapshot`, tagged `[ConfigCheckpointField]`
 - the fields of `GasProperties`, tagged `[GasCheckpointField]`
@@ -205,7 +206,8 @@ Some data stays outside the checkpoint:
 - Profiling values, recorder bookkeeping, object identities, chunk generations, and presentation revisions are not
   authoritative simulation state.
 
-When a detached mixture transfers gas into a voxel, the recording stores the resulting voxel state. Replaying that
+When a detached mixture transfers gas into a voxel, the recording stores the resulting voxel state (`SetVoxelMixtureOperation`). That state includes the voxel's momentum,
+which the kernel zeroes when the write empties the voxel. Replaying that
 operation does not read, change, or restore the detached container. A custom solver must not depend on uncheckpointed
 canister or closure state if its result needs to replay deterministically.
 

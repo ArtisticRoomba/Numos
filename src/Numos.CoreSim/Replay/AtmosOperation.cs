@@ -57,7 +57,10 @@ public enum AtmosOperationCode : ushort
     /// </summary>
     SetVoxelMixture = 12,
 
-    // 13 is reserved. The Euler branch uses it for SetVoxelMomentum.
+    /// <summary>
+    ///     Store a gas-bearing voxel's total momentum vector.
+    /// </summary>
+    SetVoxelMomentum = 13,
 
     /// <summary>
     ///     Edit a box of voxels across chunks in one operation.
