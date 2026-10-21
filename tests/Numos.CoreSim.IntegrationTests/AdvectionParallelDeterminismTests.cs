@@ -67,7 +67,7 @@ public sealed class AdvectionParallelDeterminismTests
             config.GasRegistry.Replace(gas, properties);
         }
 
-        var simulation = new AtmosSimulation(config, 8, 8, 8);
+        var simulation = SimTestHelpers.CreateLegacySimulation(config, 8, 8, 8);
         simulation.World.Solvers.SetEnabled(AtmosBuiltInSolvers.Thermodynamics, false);
         simulation.World.Solvers.SetEnabled(AtmosBuiltInSolvers.GasReactions, false);
 

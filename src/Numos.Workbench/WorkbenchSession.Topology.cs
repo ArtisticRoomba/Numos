@@ -1,4 +1,5 @@
 using Numos.API;
+using Numos.CoreSim;
 using Numos.Maths;
 
 namespace Numos.Workbench;
@@ -188,11 +189,12 @@ public sealed partial class WorkbenchSession
     ///     <see langword="true" /> when the pipeline is back to its defaults. <see langword="false" /> when only the
     ///     enabled flags could be restored.
     /// </returns>
+    /// <param name="transportModel">The built-in transport stages to install, or <see langword="null" /> for the world default.</param>
     /// <remarks>
     ///     The world refuses to register or remove stages while it records, and a project timeline always records. In
     ///     that case the session enables every stage and leaves the order and any custom stages alone.
     /// </remarks>
-    public bool ResetSolvers()
+    public bool ResetSolvers(AtmosTransportModel? transportModel = null)
     {
         return Guard(
             "Could not reset the solvers",
@@ -201,7 +203,11 @@ public sealed partial class WorkbenchSession
                 var world = RequireWorld();
                 try
                 {
-                    world.Solvers.ResetToDefaults();
+                    if (transportModel is { } model)
+                        world.Solvers.ResetToDefaults(model);
+                    else
+                        world.Solvers.ResetToDefaults();
+
                     Info("Reset the solver pipeline to its defaults.");
                     return true;
                 }

@@ -362,30 +362,38 @@ one world tick per whole `FixedTimeStep` the accumulator holds, up to five. `Tic
 ### 4.2 The default stage order
 
 A world tick snapshots the enabled stages, then runs each registration once with every simulation at the same tick
-boundary. The default pipeline has seven stages. A host can disable, reorder, or replace each one:
+boundary. The default pipeline (`AtmosTransportModel.Euler`) has six stages. A host can disable, reorder, or replace each one:
 
 | Stage                        | Work performed                                                                                                             |
 |------------------------------|----------------------------------------------------------------------------------------------------------------------------|
-| `advection`                  | Intra-chunk bulk flow, species diffusion, and vacuum cleanup (§5)                                                          |
+| `euler-flow`                 | Compressible Euler transport within and across chunks, then species diffusion and vacuum cleanup (§5.3, §5.5, §6.1)       |
 | `explicit-gas-transport`     | Sparse gas transport across explicit links flagged `GasTransport` (§11)                                                    |
-| `boundary-flow`              | Cartesian gas transport across ordinary chunk boundaries (§6)                                                              |
 | `thermodynamics`             | Intra-chunk thermal diffusion and phase changes, every second tick (§7, §8)                                                |
 | `explicit-thermal-transport` | Sparse thermal transport across explicit links flagged `ThermalTransport`, on the same reduced cadence as `thermodynamics` |
 | `thermal-boundary`           | Cartesian thermal transport across ordinary chunk boundaries (§7.3)                                                        |
 | `gas-reactions`              | Per-cell gas reactions configured through a `GasReactionConfig` in `AtmosConfig.SolverConfigurations`                      |
 
 `GasReactionConfig` documents gas reactions at the configuration level. The rest of this document covers the other
-six stages.
-
-That table is the `AtmosTransportModel.Legacy` pipeline, which a new world starts with.
-`world.Solvers.ResetToDefaults(AtmosTransportModel.Euler)` installs the other model. In it, `euler-flow` takes the place
-of both `advection` and `boundary-flow`, and the remaining five stages are unchanged.
+stages.
 
 `euler-flow` is a compressible Euler solver with density, momentum, and energy per voxel. It runs dimensionally split
 first-order Godunov sweeps with an HLLC flux at every face. It takes as many CFL substeps as the fastest signal in the
 world demands. `EulerFlowConfig` (§3.5) configures it. Faces between chunks are ordinary faces of the sweep, not a
 separate boundary stage (§6). A chunk that is asleep or holds no gas joins the sweep only once a neighbouring face needs
 it (§9). `AtmosSimulation.LastFlowDiagnostics` reports each tick's substep count and repairs.
+
+The pressure-relaxation stages that preceded it remain selectable as `AtmosTransportModel.Legacy`. Use
+`new AtmosWorld(config, AtmosTransportModel.Legacy)` or `world.Solvers.ResetToDefaults(AtmosTransportModel.Legacy)`.
+That pipeline has seven stages. It has `advection` in place of `euler-flow`, adds `boundary-flow` after
+`explicit-gas-transport`, and leaves the last four unchanged.
+
+| Legacy stage                 | Work performed                                                                                                             |
+|------------------------------|----------------------------------------------------------------------------------------------------------------------------|
+| `advection`                  | Intra-chunk bulk flow, species diffusion, and vacuum cleanup (§5)                                                          |
+| `boundary-flow`              | Cartesian gas transport across ordinary chunk boundaries (§6)                                                              |
+
+Sections 5 and 6 describe the legacy flow law in full. `euler-flow` reuses its diffusion and vacuum-cleanup kernels,
+and the two models are compared throughout.
 
 The default order is not a numerical requirement. `explicit-gas-transport` and `explicit-thermal-transport` are
 ordinary stages, not side effects of `advection` and `thermodynamics`. A host can therefore disable Numos' own

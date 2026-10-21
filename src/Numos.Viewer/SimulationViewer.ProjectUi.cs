@@ -93,7 +93,7 @@ public partial class SimulationViewer
 
         _projectChunkDepthDraft = _session.ChunkDimensions.Z > 0 ? _session.ChunkDimensions.Z : 1;
         _includeDefaultGasesDraft = true;
-        _projectTransportModelDraft = GetTransportModel() ?? AtmosTransportModel.Legacy;
+        _projectTransportModelDraft = GetTransportModel() ?? AtmosTransportModel.Euler;
         _createProjectError = null;
         _requestOpenCreateProject = true;
         _createProjectModalOpen = true;

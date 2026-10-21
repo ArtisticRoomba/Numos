@@ -87,7 +87,13 @@ public sealed partial class WorkbenchSession
             var document = NumosReplayFile.Load(fullPath);
             var replay = document.Replay;
             var config = new AtmosConfig(replay.InitialCheckpoint.Config);
-            world = new AtmosWorld(config);
+            // The checkpoint lists its stages, and a world restores only a checkpoint with the same stage list.
+            var transportModel = replay.InitialCheckpoint.Solvers.Any(
+                static solver => solver.Name == AtmosBuiltInSolvers.EulerFlow)
+                ? AtmosTransportModel.Euler
+                : AtmosTransportModel.Legacy;
+
+            world = new AtmosWorld(config, transportModel);
             var timeline = AtmosWorldReplayTimeline.Import(world, replay, 50, progress, cancellation);
             var result = new LoadedReplay(fullPath, document, world, config, timeline);
             world = null;

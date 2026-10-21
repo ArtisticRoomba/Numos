@@ -138,6 +138,34 @@ public sealed class AtmosWorldReplayTests
     }
 
     [Test]
+    public void Restore_RejectsTheOtherTransportModelUntilThePipelineIsReset()
+    {
+        using var legacy = new AtmosWorld(CreateConfig(), AtmosTransportModel.Legacy);
+        var recorded = legacy.CreateSimulation(2, 1, 1);
+        var chunk = CreateOpenChunk(recorded, default);
+        recorded.AddGasToVoxel(chunk, 0, 0, 2f, 300f);
+        legacy.Tick();
+        var checkpoint = legacy.CaptureCheckpoint();
+
+        using var euler = new AtmosWorld(CreateConfig());
+        euler.CreateSimulation(2, 1, 1);
+
+        var rejection = Assert.Throws<ArgumentException>(() => euler.RestoreCheckpoint(checkpoint));
+        Assert.Multiple(() =>
+        {
+            Assert.That(rejection!.Message, Does.Contain(AtmosBuiltInSolvers.Advection));
+            Assert.That(rejection.Message, Does.Contain(AtmosBuiltInSolvers.BoundaryFlow));
+            Assert.That(rejection.Message, Does.Contain(AtmosBuiltInSolvers.EulerFlow));
+            Assert.That(rejection.Message, Does.Contain("ResetToDefaults"));
+        });
+
+        euler.Solvers.ResetToDefaults(AtmosTransportModel.Legacy);
+        euler.RestoreCheckpoint(checkpoint);
+
+        Assert.That(euler.ComputeStateHash(), Is.EqualTo(legacy.ComputeStateHash()));
+    }
+
+    [Test]
     public void WorldRecording_ReplaysSolverEnablementThroughTheWorldPipeline()
     {
         using var world = new AtmosWorld(CreateConfig());
@@ -145,18 +173,18 @@ public sealed class AtmosWorldReplayTests
         var checkpoint = world.CaptureCheckpoint();
         world.StartRecording();
 
-        world.Solvers.SetEnabled(AtmosBuiltInSolvers.Advection, false);
+        world.Solvers.SetEnabled(AtmosBuiltInSolvers.EulerFlow, false);
         world.Tick();
         var recording = world.StopRecording();
 
         Assert.That(
             recording.Operations.Single().Operation,
-            Is.EqualTo(new SetAtmosWorldSolverEnabledOperation(AtmosBuiltInSolvers.Advection, false)));
+            Is.EqualTo(new SetAtmosWorldSolverEnabledOperation(AtmosBuiltInSolvers.EulerFlow, false)));
 
         world.ReplayTo(checkpoint, recording.Operations, recording.Head);
 
         Assert.That(
-            world.Solvers.Steps.Single(step => step.Name == AtmosBuiltInSolvers.Advection).IsEnabled,
+            world.Solvers.Steps.Single(step => step.Name == AtmosBuiltInSolvers.EulerFlow).IsEnabled,
             Is.False);
     }
 

@@ -246,6 +246,13 @@ A custom solver name is a promise from the host that the receiving world has the
 World services are part of that promise. Restore leaves whatever the host registered in place, so a service whose
 answers feed simulation state must behave the same in the receiving world.
 
+The solver check is also where a transport-model mismatch shows up. A world starts on the Euler stages. Restoring an
+archive recorded on the legacy pipeline into a fresh world therefore fails with an `ArgumentException`. The message lists
+the checkpoint's stage names next to the world's (`advection, explicit-gas-transport, boundary-flow, ...` against
+`euler-flow, explicit-gas-transport, ...`). The host fixes this. It constructs the world with
+`AtmosTransportModel.Legacy`, or calls `world.Solvers.ResetToDefaults(AtmosTransportModel.Legacy)` before the restore.
+The same applies in reverse for an Euler archive and a legacy world.
+
 Numos validates everything before it changes anything. It then materializes each simulation's replacement chunk storage
 before making that storage observable. Restore keeps existing simulation objects and host integrations. It applies the
 checkpoint's configuration and solver enable flags once, clears transient solver state, and resets profiling data.

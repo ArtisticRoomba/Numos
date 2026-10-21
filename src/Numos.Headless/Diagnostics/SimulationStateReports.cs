@@ -65,6 +65,7 @@ public sealed record SimulationStateReport(
     int SimulationChunkCount,
     SimulationConfigurationReport Config,
     SolverStepReport[] SolverPipeline,
+    FlowDiagnosticsReport Flow,
     SimulationSummaryReport Global,
     ChunkStateReport[] Chunks,
     AnomalyIssueReport[] IssueLocations,
@@ -126,6 +127,21 @@ public sealed record GasConfigurationReport(
 ///     Wire metadata for one solver stage, in execution order.
 /// </summary>
 public sealed record SolverStepReport(string Name, bool IsEnabled, string Kind);
+
+/// <summary>
+///     What the <c>euler-flow</c> stage did on the most recent tick, from
+///     <see cref="Numos.API.AtmosSimulation.LastFlowDiagnostics" />. All zeros before the first tick, after a
+///     restore, and under the legacy transport model.
+/// </summary>
+public sealed record FlowDiagnosticsReport(
+    int SubstepsLastTick,
+    double SimulatedSeconds,
+    bool SubstepCapEngaged,
+    float MaxCourantNumber,
+    float MaxSignalSpeedMps,
+    int ClampedVelocityCount,
+    int NegativeInternalEnergyCount,
+    int NegativeMolesCount);
 
 /// <summary>
 ///     Aggregate values across the chunks selected for an observation.

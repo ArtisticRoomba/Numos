@@ -49,7 +49,10 @@ internal sealed class SimulationWorkload : IDisposable
             throw new ArgumentException("Active voxel count is invalid.", nameof(options));
 
         Options = options;
-        Kernel = new AtmosKernel(options.ChunkWidth, options.ChunkHeight, options.ChunkDepth);
+        Kernel = new AtmosKernel(options.ChunkWidth, options.ChunkHeight, options.ChunkDepth)
+        {
+            TransportModel = options.TransportModel
+        };
         _solvers = new DefaultAtmosSolvers(options.ChunkWidth, options.ChunkHeight, options.ChunkDepth);
         var config = CreateConfig(options);
         Kernel.SetAtmosConfig(config.CreateSnapshot());

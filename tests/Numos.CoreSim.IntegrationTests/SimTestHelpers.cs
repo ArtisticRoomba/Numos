@@ -74,6 +74,18 @@ internal static class SimTestHelpers
     }
 
     /// <summary>
+    ///     A private-world simulation on the <see cref="AtmosTransportModel.Legacy" /> stages. For tests that pin the
+    ///     pressure-relaxation law's per-tick numbers or its sleep timing, and for tests that zero
+    ///     <see cref="AtmosConfig.BulkFlowCoefficient" /> and
+    ///     <see cref="AtmosConfig.MaxPressureTransferFractionPerNeighbor" /> to switch transport off; <c>euler-flow</c>
+    ///     ignores both knobs.
+    /// </summary>
+    internal static AtmosSimulation CreateLegacySimulation(AtmosConfig config, int width, int height, int depth)
+    {
+        return new AtmosSimulation(config, width, height, depth, AtmosTransportModel.Legacy);
+    }
+
+    /// <summary>
     ///     A one-chunk simulation on the Euler pipeline. <paramref name="exactGasDynamics" /> turns off
     ///     <c>thermodynamics</c> and <c>gas-reactions</c> so the result can be compared with the Euler equations alone.
     /// </summary>
@@ -82,7 +94,6 @@ internal static class SimTestHelpers
         out AtmosChunkHandle chunk, bool exactGasDynamics = true)
     {
         var simulation = new AtmosSimulation(config, width, height, depth);
-        simulation.World.Solvers.ResetToDefaults(AtmosTransportModel.Euler);
         if (exactGasDynamics)
         {
             simulation.World.Solvers.SetEnabled(AtmosBuiltInSolvers.Thermodynamics, false);

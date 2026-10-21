@@ -154,6 +154,7 @@ An unreadable script also produces one error response with code `scriptUnavailab
 | `simulationNotCreated` | The operation needs a project or an active simulation. |
 | `simulationNotFound` | The `simulation` name or id matches nothing. |
 | `invalidGas` | A gas definition is invalid. |
+| `invalidTransportModel` | `transportModel` is neither `euler` nor `legacy`. |
 | `invalidConfig` | A configuration patch holds a value the protocol cannot map, such as an unknown `eulerFlow.reconstruction`. |
 | `gasNotFound` | A gas id is not in the registry. |
 | `fieldNotFound` | A field name is unknown. |
@@ -187,11 +188,16 @@ second and velocity is in metres per second.
 | --- | --- | --- |
 | `hello` | None | Returns the protocol number, the host name and version (with the commit), and the CoreSim version. |
 | `getLog` | optional `afterSequence`, `maxEntries`, `minLevel` | Returns session log entries. |
-| `createProject` | `name`, `chunkDimensions`, `includeDefaultGases` (default `false`), `config`, `gases` | Replaces the open project with an empty one at tick zero. |
+| `createProject` | `name`, `chunkDimensions`, `includeDefaultGases` (default `false`), `config`, `gases`, `transportModel` | Replaces the open project with an empty one at tick zero. |
 | `closeProject` | None | Closes the project. |
 | `exit` | None | Closes the project, responds, and stops reading input. In socket mode it stops the server. |
 
 `createProject` builds the new project first. The old project stays open if the new one fails.
+
+`transportModel` picks which built-in stages move gas. `"euler"` (the default) is compressible Euler flow. `"legacy"` is
+the pressure-relaxation pair of `advection` and `boundary-flow`. `createProject` and `resetSolvers` read it. Any other
+value fails with `invalidTransportModel`. The model is part of the recorded stage list, so a script that pins legacy
+numbers must say `"legacy"` and not rely on the default.
 
 `getLog` returns entries in sequence order. `afterSequence` (default `0`) skips entries up to that sequence number.
 `maxEntries` (default 200, maximum 5000) caps the reply, and `more` is `true` when entries remain. `minLevel` is
@@ -370,14 +376,15 @@ Defaults change between versions. Set every field a study depends on.
 | --- | --- | --- |
 | `listSolvers` | None | Lists the stages in execution order. |
 | `setSolverEnabled` | `solver`, `enabled` | Enables or disables a stage. |
-| `resetSolvers` | None | Restores the stage defaults. |
+| `resetSolvers` | optional `transportModel` | Restores the stage defaults of one transport model. |
 | `createPortal` | `first`, `second`, optional `flags` | Links two voxels, possibly in different simulations. |
 | `createDock` | `first`, `second`, `rotation`, `flipU`, `flipV`, `flags` | Links two chunk faces voxel by voxel. |
 | `destroyLinkSet` | `linkSet` (`index`, `generation`) | Queues a portal or dock for removal. |
 | `listLinkSets` | None | Lists portals and docks with kind, state, and link count. |
 
-The built-in stages are `advection`, `explicit-gas-transport`, `boundary-flow`, `thermodynamics`,
-`explicit-thermal-transport`, `thermal-boundary`, and `gas-reactions`.
+The built-in stages, in default order, are `euler-flow`, `explicit-gas-transport`, `thermodynamics`,
+`explicit-thermal-transport`, `thermal-boundary`, and `gas-reactions`. The legacy model runs `advection`,
+`explicit-gas-transport`, `boundary-flow`, and then the same last four.
 
 The world refuses to remove or reorder stages while it records, and a project always records. In that case
 `resetSolvers` enables every stage, leaves the order alone, and returns `changed: false`.
@@ -430,6 +437,10 @@ these parts:
 - `tick`, `simulationRate`, and `simulationChunkCount`.
 - `config`, including the gas registry and, once the session has them, the `eulerFlow` settings.
 - `solverPipeline` in execution order.
+- `flow`, what `euler-flow` did on the latest tick: `substepsLastTick`, `simulatedSeconds`, `substepCapEngaged`,
+  `maxCourantNumber`, `maxSignalSpeedMps`, `clampedVelocityCount`, `negativeInternalEnergyCount`, and
+  `negativeMolesCount`. All values are zero before the first tick and under the legacy model. Alert on
+  `substepCapEngaged` and the three counts. The rest are for tuning `eulerFlow`.
 - `global`, with topology counts, total moles, estimated sensible energy, pressure, temperature, and speed statistics, totals by
   gas, and anomaly counts.
 - `chunks`, sorted by `(x, y, z)`, each with its own summary and optional `voxels`.
@@ -454,8 +465,12 @@ boundaries can remove mass or energy on purpose.
 
 ## Example scripts
 
-[`examples/headless/two-voxel-flow.jsonl`](../examples/headless/two-voxel-flow.jsonl) creates a `2 x 1 x 1` chunk. It
-injects gas into the left voxel and observes the pressure imbalance, one tick, and the result.
+[`examples/headless/two-voxel-flow.jsonl`](../examples/headless/two-voxel-flow.jsonl) creates a `2 x 1 x 1` chunk on the
+legacy model. It injects gas into the left voxel and observes the pressure imbalance, one tick, and the result.
+
+[`examples/headless/euler-shock-tube.jsonl`](../examples/headless/euler-shock-tube.jsonl) is the Euler counterpart. It
+builds an `8 x 1 x 1` tube of air at 1 m³ per voxel with the left half at twice the pressure of the right. It observes
+the tube after one, five, and twenty ticks, so the `flow` block and the per-voxel velocities have something to show.
 
 [`examples/headless/shock-tube-1d.jsonl`](../examples/headless/shock-tube-1d.jsonl) builds a 2000-voxel tube with solid
 walls. The left half starts at 2 atmospheres and the right half at 1 atmosphere. The script uses one `editRegion` call
@@ -469,8 +484,11 @@ import numpy as np
 pressure = np.load("artifacts/headless/shock-tube-t400-pressure.npy")[1]  # row y = 1 is the tube
 ```
 
-With the default transport solver, the pressure step relaxes into a smooth ramp about 60 voxels wide at tick 400. The
-total moles stay constant. A solver with a shock-capturing scheme produces a sharper front.
+The default Euler solver keeps the waves sharp, so the tube rings. Sound speed is about 347 m/s and 400 ticks last
+20 s. By then the waves have crossed the 2 km tube several times, and the profile is a mix of reflections. To see the
+first passage, tick fewer steps. At tick 20 the pressure falls through a rarefaction fan from the left end of the
+driver, holds a plateau near 142 kPa, and jumps back to 101 kPa across a steep shock front. The total moles stay
+constant.
 
 ## Writing a study
 

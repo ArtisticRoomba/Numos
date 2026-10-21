@@ -219,19 +219,23 @@ changes, gas injections, and ticks.
 
 ### Choosing the transport model
 
-A new world runs the legacy pressure-relaxation stages (`advection` and `boundary-flow`). The compressible Euler solver
-is opt-in for now:
+A new world runs the compressible Euler solver. One `euler-flow` stage moves gas within and between chunks and carries
+per-voxel velocity. It reads its settings from an `EulerFlowConfig` in `AtmosConfig.SolverConfigurations`. It reports what
+each tick cost through `simulation.LastFlowDiagnostics` (substeps, simulated seconds, and whether the substep cap
+engaged).
+
+The older pressure-relaxation stages (`advection` and `boundary-flow`) stay selectable. Pick them when you construct
+the world, or reset the pipeline before anything is recorded:
 
 ```csharp
-world.Solvers.ResetToDefaults(AtmosTransportModel.Euler);
+using var world = new AtmosWorld(config, AtmosTransportModel.Legacy);
+// or, on an existing world that is not recording:
+world.Solvers.ResetToDefaults(AtmosTransportModel.Legacy);
 ```
 
-That swaps the two legacy transport stages for one `euler-flow` stage and leaves the rest of the pipeline alone. The
-stage reads its settings from an `EulerFlowConfig` in `AtmosConfig.SolverConfigurations`. It reports what each tick cost
-through `simulation.LastFlowDiagnostics` (substeps, simulated seconds, and whether the substep cap engaged).
-
-The stage list is part of the world checkpoint. Pick the model before you capture or record, and restore into a world
-running the same model. `euler-flow` also moves gas across chunk faces.
+The stage list is part of the world checkpoint, so the model must match when you restore. A replay recorded on the legacy
+stages needs a legacy pipeline in the receiving world. `RestoreCheckpoint` names both stage lists when it refuses a
+mismatch. Pick the model before you capture or record.
 
 ## Registering gases and adding them to voxels
 

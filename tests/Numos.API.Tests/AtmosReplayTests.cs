@@ -427,7 +427,7 @@ public sealed class AtmosReplayTests
         var world = simulation.World;
         var chunk = simulation.CreateAndRegisterChunk(default);
         simulation.AddGasToVoxel(chunk, 0, 0, 2f, 320f);
-        world.Solvers.SetEnabled(AtmosBuiltInSolvers.Advection, false);
+        world.Solvers.SetEnabled(AtmosBuiltInSolvers.EulerFlow, false);
         simulation.GetVoxelGasMixture(chunk, 0).Temperature = 280f;
         var checkpoint = world.CaptureCheckpoint();
         var oldVersion = simulation.GetChunkSnapshot(chunk).Version;
@@ -448,7 +448,7 @@ public sealed class AtmosReplayTests
         simulation.AddGasToVoxel(chunk, 0, 0, 2f, 320f);
         var grid = simulation.CaptureCheckpoint();
         world.Tick();
-        world.Solvers.SetEnabled(AtmosBuiltInSolvers.Advection, false);
+        world.Solvers.SetEnabled(AtmosBuiltInSolvers.EulerFlow, false);
         world.SetAtmosConfig(new AtmosConfig(world.Config) { ThermalConductance = 0.4f });
         simulation.SetVoxelTemperature(chunk, 0, 400f);
 
@@ -460,7 +460,7 @@ public sealed class AtmosReplayTests
             Assert.That(world.TickCount, Is.EqualTo(1));
             Assert.That(simulation.TickCount, Is.EqualTo(1));
             Assert.That(world.Config.ThermalConductance, Is.EqualTo(0.4f));
-            Assert.That(world.Solvers.Steps.Single(step => step.Name == AtmosBuiltInSolvers.Advection).IsEnabled, Is.False);
+            Assert.That(world.Solvers.Steps.Single(step => step.Name == AtmosBuiltInSolvers.EulerFlow).IsEnabled, Is.False);
         });
     }
 }

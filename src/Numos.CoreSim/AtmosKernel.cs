@@ -32,6 +32,13 @@ internal sealed partial class AtmosKernel : IDisposable
     /// </summary>
     internal int TickCount;
 
+    /// <summary>
+    ///     Which built-in transport stages <see cref="Tick" /> runs when the kernel is ticked on its own, outside a
+    ///     world pipeline. The owning simulation sets it from its constructor; benchmarks set it directly. World ticks
+    ///     ignore it, since the world's pipeline decides which stages run.
+    /// </summary>
+    internal AtmosTransportModel TransportModel { get; set; } = AtmosTransportModel.Euler;
+
     private long _chunkCollectionRevision;
     private ConcurrentDictionary<Int3, AtmosChunk> _chunkMap = new();
     private AtmosConfigSnapshot _config = new AtmosConfig().CreateSnapshot();
@@ -108,8 +115,18 @@ internal sealed partial class AtmosKernel : IDisposable
         var context = BeginTickSimulation(chunks);
         try
         {
-            SolveAdvection(context);
-            SolveBoundaryFlow(context);
+            // Mirrors AtmosWorldSolverPipeline's built-in order for each model, minus the explicit-link stages a lone
+            // kernel has no topology for.
+            if (TransportModel == AtmosTransportModel.Euler)
+            {
+                SolveEulerFlow(context);
+            }
+            else
+            {
+                SolveAdvection(context);
+                SolveBoundaryFlow(context);
+            }
+
             SolveThermodynamics(context);
             SolveThermalBoundary(context);
             SolveGasReactions(context);

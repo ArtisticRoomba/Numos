@@ -41,15 +41,20 @@ public sealed partial class AtmosSimulation : IDisposable
     /// <param name="chunkWidth">The number of voxels along each chunk's local x-axis.</param>
     /// <param name="chunkHeight">The number of voxels along each chunk's local y-axis.</param>
     /// <param name="chunkDepth">The number of voxels along each chunk's local z-axis.</param>
+    /// <param name="transportModel">
+    ///     Which built-in stages the private world runs to move gas between voxels; see
+    ///     <see cref="AtmosWorld(AtmosConfig, AtmosTransportModel)" />.
+    /// </param>
     /// <exception cref="ArgumentOutOfRangeException">
-    ///     A chunk dimension is zero or negative, or the combined voxel count exceeds
-    ///     <see cref="ushort.MaxValue" />.
+    ///     A chunk dimension is zero or negative, the combined voxel count exceeds
+    ///     <see cref="ushort.MaxValue" />, or <paramref name="transportModel" /> is not a defined model.
     /// </exception>
     public AtmosSimulation(
         int chunkWidth = AtmosChunkConstants.DefaultWidth,
         int chunkHeight = AtmosChunkConstants.DefaultHeight,
-        int chunkDepth = AtmosChunkConstants.DefaultDepth)
-        : this(new AtmosConfig(), chunkWidth, chunkHeight, chunkDepth)
+        int chunkDepth = AtmosChunkConstants.DefaultDepth,
+        AtmosTransportModel transportModel = AtmosTransportModel.Euler)
+        : this(new AtmosConfig(), chunkWidth, chunkHeight, chunkDepth, transportModel)
     {
     }
 
@@ -63,18 +68,24 @@ public sealed partial class AtmosSimulation : IDisposable
     /// <param name="chunkWidth">The number of voxels along each chunk's local x-axis.</param>
     /// <param name="chunkHeight">The number of voxels along each chunk's local y-axis.</param>
     /// <param name="chunkDepth">The number of voxels along each chunk's local z-axis.</param>
+    /// <param name="transportModel">
+    ///     Which built-in stages the private world runs to move gas between voxels; see
+    ///     <see cref="AtmosWorld(AtmosConfig, AtmosTransportModel)" />.
+    /// </param>
     /// <exception cref="ArgumentNullException"><paramref name="config" /> is <see langword="null" />.</exception>
     /// <exception cref="ArgumentOutOfRangeException">
-    ///     A chunk dimension is zero or negative, or the combined voxel count exceeds
-    ///     <see cref="ushort.MaxValue" />.
+    ///     A chunk dimension is zero or negative, the combined voxel count exceeds
+    ///     <see cref="ushort.MaxValue" />, or <paramref name="transportModel" /> is not a defined model.
     /// </exception>
     public AtmosSimulation(
         AtmosConfig config,
         int chunkWidth = AtmosChunkConstants.DefaultWidth,
         int chunkHeight = AtmosChunkConstants.DefaultHeight,
-        int chunkDepth = AtmosChunkConstants.DefaultDepth)
-        : this(new AtmosWorld(config), true, chunkWidth, chunkHeight, chunkDepth)
+        int chunkDepth = AtmosChunkConstants.DefaultDepth,
+        AtmosTransportModel transportModel = AtmosTransportModel.Euler)
+        : this(new AtmosWorld(config, transportModel), true, chunkWidth, chunkHeight, chunkDepth)
     {
+        _kernel.TransportModel = transportModel;
     }
 
     /// <summary>

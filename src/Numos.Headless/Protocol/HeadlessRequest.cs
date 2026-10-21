@@ -27,6 +27,11 @@ internal sealed class HeadlessRequest
     public ConfigurationPatch? Config { get; init; }
     public GasDefinition[]? Gases { get; init; }
 
+    /// <summary>
+    ///     `euler` (default) or `legacy`. `createProject` and `resetSolvers` read it.
+    /// </summary>
+    public string? TransportModel { get; init; }
+
     // Chunk and voxel addressing.
     public Coordinate? Position { get; init; }
     public Coordinate? Voxel { get; init; }
