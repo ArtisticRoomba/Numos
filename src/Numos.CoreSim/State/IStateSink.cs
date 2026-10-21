@@ -142,9 +142,10 @@ public interface IStateSink
 ///     An <see cref="IStateSink" /> that folds everything it receives into a 64-bit FNV-1a state hash.
 /// </summary>
 /// <remarks>
-///     Field ids are hashed, so moving a value to a different id changes the hash. Object boundaries are not; a
-///     type's field set is fixed, so they carry no extra information. Primitives are hashed little-endian at their
-///     own width, floats by their raw bits.
+///     The hash sees exactly the bytes <see cref="StateBinarySink" /> writes, minus the field and object lengths:
+///     the same field ids, counts, presence flags, primitives at their own width little-endian, floats by their raw
+///     bits, and strings as UTF-8 with a byte length. The lengths follow from the content, so leaving them out loses
+///     nothing, and it means hashing never has to buffer.
 /// </remarks>
 /// <example>
 ///     <code>
@@ -156,6 +157,8 @@ public interface IStateSink
 /// </example>
 public struct StateHashSink : IStateSink
 {
+    private static readonly System.Text.Encoding Utf8 = new System.Text.UTF8Encoding(false, true);
+
     private AtmosStateHasher _hasher;
 
     /// <summary>
@@ -166,12 +169,6 @@ public struct StateHashSink : IStateSink
         _hasher = new AtmosStateHasher();
     }
 
-    internal StateHashSink(AtmosStateHasher hasher)
-    {
-        _hasher = hasher;
-    }
-
-    internal readonly AtmosStateHasher Hasher => _hasher;
 
     /// <summary>
     ///     Gets the hash of everything written so far.
@@ -237,7 +234,22 @@ public struct StateHashSink : IStateSink
     public void WriteDouble(double value) => _hasher.Add(BitConverter.DoubleToUInt64Bits(value));
 
     /// <inheritdoc />
-    public void WriteString(string value) => _hasher.Add(value);
+    /// <remarks>Hashed exactly as <see cref="StateBinarySink" /> writes it: the UTF-8 byte length, then the bytes.</remarks>
+    public void WriteString(string value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        int length = Utf8.GetByteCount(value);
+        WriteInt32(length);
+        if (length <= 256)
+        {
+            Span<byte> bytes = stackalloc byte[length];
+            Utf8.GetBytes(value, bytes);
+            _hasher.AddBytes(bytes);
+            return;
+        }
+
+        _hasher.AddBytes(Utf8.GetBytes(value));
+    }
 
     /// <inheritdoc />
     public void WriteElements(ReadOnlySpan<byte> elements, int elementSize)

@@ -3,8 +3,8 @@ using Numos.Maths;
 
 namespace Numos.CoreSim.Replay;
 
-// Built-in primitive writes use little endian and raw IEEE bits. Solver values retain their native byte layout.
-// Never hash CLR identities or pool capacity.
+// The FNV-1a core behind StateHashSink, which is what state hashes should go through so they see the wire bytes.
+// Integers are little-endian and floats their raw IEEE bits. Never hash CLR identities or pool capacity.
 internal struct AtmosStateHasher
 {
     public AtmosStateHasher()
@@ -49,19 +49,6 @@ internal struct AtmosStateHasher
     {
         for (int shift = 0; shift < 64; shift += 8)
             AddByte((byte)(value >> shift));
-    }
-
-    internal void Add(string? value)
-    {
-        Add(value?.Length ?? -1);
-        if (value == null)
-            return;
-
-        foreach (char character in value)
-        {
-            AddByte((byte)character);
-            AddByte((byte)(character >> 8));
-        }
     }
 
     internal void Add(Int3 value)

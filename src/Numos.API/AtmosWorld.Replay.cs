@@ -497,63 +497,66 @@ public sealed partial class AtmosWorld
     }
 }
 
+// Mirrors AtmosWorldReplayCodec.WriteCheckpoint field for field, at the same widths and string encoding, except:
+// the archive's initial and head hashes (archive data, not checkpoint state) are left out, each simulation contributes
+// its grid digest rather than its full payload, and length prefixes are omitted.
 internal static class AtmosWorldCheckpointHasher
 {
     internal static ulong Hash(AtmosWorldCheckpoint checkpoint)
     {
-        var hash = new AtmosStateHasher();
-        hash.Add(checkpoint.FormatVersion);
-        hash.Add(checkpoint.Position.Tick);
-        hash.Add(checkpoint.Position.OperationSequence);
-        hash.Add(checkpoint.TopologyVersion);
-        var config = new StateHashSink(hash);
-        checkpoint.Config.WriteHash(ref config);
-        hash = config.Hasher;
-        hash.Add(checkpoint.Solvers.Count);
+        var sink = new StateHashSink();
+        sink.WriteInt32(checkpoint.FormatVersion);
+        sink.WriteUInt64(checkpoint.Position.Tick);
+        sink.WriteUInt64(checkpoint.Position.OperationSequence);
+        sink.WriteUInt64(checkpoint.TopologyVersion);
+        checkpoint.Config.WriteHash(ref sink);
+        sink.WriteCount(checkpoint.Solvers.Count);
         foreach (var solver in checkpoint.Solvers)
         {
-            hash.Add(solver.Name);
-            hash.AddByte((byte)solver.Kind);
-            hash.Add(solver.Enabled);
-            hash.Add(solver.NeighborSelectionKey ?? string.Empty);
+            sink.WriteString(solver.Name);
+            sink.WriteByte((byte)solver.Kind);
+            sink.WriteBoolean(solver.Enabled);
+            sink.WriteBoolean(solver.NeighborSelectionKey != null);
+            if (solver.NeighborSelectionKey != null)
+                sink.WriteString(solver.NeighborSelectionKey);
         }
 
-        hash.Add(checkpoint.SimulationGenerations.Length);
+        sink.WriteCount(checkpoint.SimulationGenerations.Length);
         foreach (uint generation in checkpoint.SimulationGenerations)
-            hash.Add(generation);
+            sink.WriteUInt32(generation);
 
-        hash.Add(checkpoint.Simulations.Count);
+        sink.WriteCount(checkpoint.Simulations.Count);
         foreach (var simulation in checkpoint.Simulations)
         {
-            hash.Add(simulation.Simulation.Index);
-            hash.Add(simulation.Simulation.Generation);
-            hash.Add(simulation.Checkpoint.ComputeStateHash());
+            sink.WriteInt32(simulation.Simulation.Index);
+            sink.WriteUInt32(simulation.Simulation.Generation);
+            sink.WriteUInt64(simulation.Checkpoint.ComputeStateHash());
         }
 
-        hash.Add(checkpoint.LinkSlots.Length);
+        sink.WriteCount(checkpoint.LinkSlots.Length);
         foreach (var slot in checkpoint.LinkSlots)
         {
-            hash.Add(slot.Generation);
-            hash.AddByte(slot.State);
-            hash.AddByte((byte)slot.Kind);
-            hash.Add(slot.Links.Length);
+            sink.WriteUInt32(slot.Generation);
+            sink.WriteByte(slot.State);
+            sink.WriteByte((byte)slot.Kind);
+            sink.WriteCount(slot.Links.Length);
             foreach (var link in slot.Links)
             {
-                AddCell(ref hash, link.First);
-                AddCell(ref hash, link.Second);
-                hash.AddByte((byte)link.Flags);
-                hash.Add(link.AreaFraction ?? float.NaN);
+                AddCell(ref sink, link.First);
+                AddCell(ref sink, link.Second);
+                sink.WriteByte((byte)link.Flags);
+                sink.WriteSingle(link.AreaFraction ?? float.NaN);
             }
         }
 
-        return hash.Value;
+        return sink.Value;
     }
 
-    private static void AddCell(ref AtmosStateHasher hash, AtmosCellRef cell)
+    private static void AddCell(ref StateHashSink sink, AtmosCellRef cell)
     {
-        hash.Add(cell.Simulation.Index);
-        hash.Add(cell.Simulation.Generation);
-        hash.Add(cell.Chunk.Position);
-        hash.Add(cell.LocalVoxelIndex);
+        sink.WriteInt32(cell.Simulation.Index);
+        sink.WriteUInt32(cell.Simulation.Generation);
+        StateCodecs.Int3.Write(ref sink, cell.Chunk.Position);
+        sink.WriteUInt16(cell.LocalVoxelIndex);
     }
 }
