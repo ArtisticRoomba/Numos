@@ -36,7 +36,7 @@ public delegate void AtmosWorldSolver(AtmosWorldSolverContext context);
 ///     <code>
 ///     public static partial class FireData
 ///     {
-///         [ChunkData("my-mod/fire/exposure", Rollback = true)]
+///         [ChunkData("my-mod/fire/exposure")]
 ///         public static partial ChunkField&lt;float&gt; Exposure { get; }
 ///     }
 /// 

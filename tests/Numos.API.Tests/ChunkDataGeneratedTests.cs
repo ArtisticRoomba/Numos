@@ -8,13 +8,13 @@ internal static partial class GeneratedFireData
 {
     public const string KeyPrefix = "tests/chunk-data-generated/";
 
-    [ChunkData(KeyPrefix + "exposure", Rollback = true)]
+    [ChunkData(KeyPrefix + "exposure")]
     public static partial ChunkField<float> Exposure { get; }
 
-    [ChunkData(KeyPrefix + "burn-count", Rollback = true, Length = 2)]
+    [ChunkData(KeyPrefix + "burn-count", Length = 2)]
     public static partial ChunkField<int> BurnCount { get; }
 
-    [ChunkData]
+    [ChunkData(Transient = true)]
     public static partial ChunkField<int> Scratch { get; }
 
     [ChunkData(KeyPrefix + "clears", ClearOnSleep = true, ClearOnVacuum = true)]
@@ -33,7 +33,7 @@ internal static partial class UnreadChunkData
         UnreadChunkDataProbe.TypeInitialized = true;
     }
 
-    [ChunkData(Key, Rollback = true)]
+    [ChunkData(Key)]
     public static partial ChunkField<int> Value { get; }
 }
 

@@ -19,7 +19,7 @@ public sealed class ChunkDataDiagnosticTests
         const string source = """
                               public static partial class Data
                               {
-                                  [Numos.API.ChunkData]
+                                  [Numos.API.ChunkData(Transient = true)]
                                   public static partial Numos.API.ChunkField<float> Value { get; }
 
                                   public static partial Numos.API.ChunkField<float> Value =>
@@ -36,7 +36,7 @@ public sealed class ChunkDataDiagnosticTests
         const string source = """
                               public partial class Data
                               {
-                                  [Numos.API.ChunkData]
+                                  [Numos.API.ChunkData(Transient = true)]
                                   public partial Numos.API.ChunkField<float> Value { get; }
                               }
                               """;
@@ -61,7 +61,7 @@ public sealed class ChunkDataDiagnosticTests
                               {
                                   public static partial class Inner
                                   {
-                                      [Numos.API.ChunkData]
+                                      [Numos.API.ChunkData(Transient = true)]
                                       public static partial Numos.API.ChunkField<float> Value { get; }
                                   }
                               }
@@ -77,7 +77,7 @@ public sealed class ChunkDataDiagnosticTests
         const string source = """
                               public static partial class Data<T>
                               {
-                                  [Numos.API.ChunkData]
+                                  [Numos.API.ChunkData(Transient = true)]
                                   public static partial Numos.API.ChunkField<float> Value { get; }
                               }
                               """;
@@ -99,24 +99,24 @@ public sealed class ChunkDataDiagnosticTests
     }
 
     [Test]
-    public void RollbackWithoutKey_Reports007()
+    public void SavedFieldWithoutKey_Reports007()
     {
         AssertReports(
             "NUMOSCHUNK007",
             DiagnosticSeverity.Error,
             Wrap(
-                "[Numos.API.ChunkData(Rollback = true)] public static partial Numos.API.ChunkField<float> Value { get; }",
+                "[Numos.API.ChunkData] public static partial Numos.API.ChunkField<float> Value { get; }",
                 attribute: false));
     }
 
     [Test]
-    public void RollbackWithManagedElement_Reports008()
+    public void SavedFieldWithManagedElement_Reports008()
     {
         AssertReports(
             "NUMOSCHUNK008",
             DiagnosticSeverity.Error,
             Wrap(
-                "[Numos.API.ChunkData(\"tests/managed\", Rollback = true)] " +
+                "[Numos.API.ChunkData(\"tests/managed\")] " +
                 "public static partial Numos.API.ChunkField<string> Value { get; }",
                 attribute: false));
     }
@@ -140,7 +140,7 @@ public sealed class ChunkDataDiagnosticTests
             "NUMOSCHUNK009",
             DiagnosticSeverity.Error,
             Wrap(
-                "[Numos.API.ChunkData(Length = -1)] public static partial Numos.API.ChunkField<float> Value { get; }",
+                "[Numos.API.ChunkData(Transient = true, Length = -1)] public static partial Numos.API.ChunkField<float> Value { get; }",
                 attribute: false));
     }
 
@@ -153,7 +153,7 @@ public sealed class ChunkDataDiagnosticTests
                           {
                               {{nestedAccessibility}} static partial class Data
                               {
-                                  [Numos.API.ChunkData]
+                                  [Numos.API.ChunkData(Transient = true)]
                                   {{declaration}}
                               }
                           }
@@ -213,10 +213,10 @@ public sealed class ChunkDataDiagnosticTests
         const string source = """
                               public static partial class Data
                               {
-                                  [Numos.API.ChunkData]
+                                  [Numos.API.ChunkData(Transient = true)]
                                   public static partial Numos.API.ChunkField<float> First { get; }
 
-                                  [Numos.API.ChunkData]
+                                  [Numos.API.ChunkData(Transient = true)]
                                   public static partial Numos.API.ChunkField<int> Second { get; }
                               }
                               """;
@@ -245,7 +245,7 @@ public sealed class ChunkDataDiagnosticTests
             out Compilation output,
             out var diagnostics,
             sources: Wrap(
-                $"[Numos.API.ChunkData(AccessorName = \"{name}\")] " +
+                $"[Numos.API.ChunkData(Transient = true, AccessorName = \"{name}\")] " +
                 "public static partial Numos.API.ChunkField<float> Value { get; }",
                 attribute: false));
 
@@ -274,13 +274,13 @@ public sealed class ChunkDataDiagnosticTests
                               {
                                   public static partial class Fire
                                   {
-                                      [Numos.API.ChunkData]
+                                      [Numos.API.ChunkData(Transient = true)]
                                       public static partial Numos.API.ChunkField<float> Exposure { get; }
                                   }
 
                                   public static partial class Radiation
                                   {
-                                      [Numos.API.ChunkData]
+                                      [Numos.API.ChunkData(Transient = true)]
                                       public static partial Numos.API.ChunkField<float> Exposure { get; }
                                   }
                               }
@@ -299,10 +299,10 @@ public sealed class ChunkDataDiagnosticTests
         const string source = """
                               public static partial class Data
                               {
-                                  [Numos.API.ChunkData]
+                                  [Numos.API.ChunkData(Transient = true)]
                                   public static partial Numos.API.ChunkField<float> Exposure { get; }
 
-                                  [Numos.API.ChunkData(AccessorName = "Exposure")]
+                                  [Numos.API.ChunkData(Transient = true, AccessorName = "Exposure")]
                                   public static partial Numos.API.ChunkField<int> Other { get; }
                               }
                               """;
@@ -320,7 +320,7 @@ public sealed class ChunkDataDiagnosticTests
             "NUMOSCHUNK015",
             DiagnosticSeverity.Error,
             Wrap(
-                "[Numos.API.ChunkData(AccessorName = \"not valid\")] " +
+                "[Numos.API.ChunkData(Transient = true, AccessorName = \"not valid\")] " +
                 "public static partial Numos.API.ChunkField<float> Value { get; }",
                 attribute: false));
     }
@@ -331,10 +331,10 @@ public sealed class ChunkDataDiagnosticTests
         const string source = """
                               public static partial class Data
                               {
-                                  [Numos.API.ChunkData(Length = -1)]
+                                  [Numos.API.ChunkData(Transient = true, Length = -1)]
                                   public static partial Numos.API.ChunkField<float> Broken { get; }
 
-                                  [Numos.API.ChunkData]
+                                  [Numos.API.ChunkData(Transient = true)]
                                   public static partial Numos.API.ChunkField<float> Fine { get; }
                               }
                               """;
@@ -353,7 +353,7 @@ public sealed class ChunkDataDiagnosticTests
 
     private static string[] Wrap(string declaration, bool attribute = true)
     {
-        string prefix = attribute ? "[Numos.API.ChunkData] " : "";
+        string prefix = attribute ? "[Numos.API.ChunkData(Transient = true)] " : "";
         return
         [
             $$"""

@@ -101,7 +101,7 @@ internal static class ChunkDataEmitter
     /// </summary>
     /// <param name="typeDisplays">The fully qualified declaring types, in a stable order.</param>
     /// <remarks>
-    ///     A file can't be loaded until each rollback key in it is registered, and a fresh process may load one before
+    ///     A file can't be loaded until each saved key in it is registered, and a fresh process may load one before
     ///     anything has read the properties. Running the holder's class constructor registers through the same
     ///     static initializer as the lazy path, so it happens once either way, and the declaring type's own static
     ///     constructor doesn't run early.
@@ -119,7 +119,7 @@ internal static class ChunkDataEmitter
         writer.Line("[global::System.Runtime.CompilerServices.ModuleInitializer]");
         writer.Line(
             "[global::System.Diagnostics.CodeAnalysis.SuppressMessage(\"Usage\", \"CA2255\", " +
-            "Justification = \"Rollback chunk fields must be registered before a file that holds them can load.\")]");
+            "Justification = \"Saved chunk fields must be registered before a file that holds them can load.\")]");
         writer.Line("internal static void RegisterChunkFields()");
         writer.Open();
         foreach (string type in typeDisplays)

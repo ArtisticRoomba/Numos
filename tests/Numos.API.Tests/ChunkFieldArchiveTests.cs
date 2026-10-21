@@ -10,10 +10,10 @@ internal static partial class ArchivedFireData
 {
     public const string Prefix = "tests/chunk-field-archive/";
 
-    [ChunkData(Prefix + "heat", Rollback = true)]
+    [ChunkData(Prefix + "heat")]
     public static partial ChunkField<float> Heat { get; }
 
-    [ChunkData(Prefix + "scratch")]
+    [ChunkData(Prefix + "scratch", Transient = true)]
     public static partial ChunkField<float> ArchiveScratch { get; }
 }
 
@@ -25,7 +25,7 @@ public sealed class ChunkFieldArchiveTests
 {
     private const string Prefix = ArchivedFireData.Prefix;
 
-    // Registered by hand rather than through [ChunkData], the other way downstreams declare fields.
+    // Registered by hand rather than through [ChunkData(Transient = true)], the other way downstreams declare fields.
     private static readonly ChunkField<int> Counters = ChunkField<int>.Register(Prefix + "counts", rollback: true, length: 2);
     private static readonly ChunkField<Phase> Phases = ChunkField<Phase>.Register(Prefix + "phase", rollback: true);
 

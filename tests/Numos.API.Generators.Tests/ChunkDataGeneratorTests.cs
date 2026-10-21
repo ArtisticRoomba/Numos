@@ -16,13 +16,13 @@ public sealed class ChunkDataGeneratorTests
 
                                       public static partial class FireChunkData
                                       {
-                                          [ChunkData("generator-tests/fire/exposure", Rollback = true)]
+                                          [ChunkData("generator-tests/fire/exposure")]
                                           public static partial ChunkField<float> Exposure { get; }
 
-                                          [ChunkData("generator-tests/fire/burn-count", Rollback = true, Length = 1)]
+                                          [ChunkData("generator-tests/fire/burn-count", Length = 1)]
                                           public static partial ChunkField<int> BurnCount { get; }
 
-                                          [ChunkData(AccessorName = "FireScratch")]
+                                          [ChunkData(Transient = true, AccessorName = "FireScratch")]
                                           internal static partial ChunkField<float> Scratch { get; }
                                       }
                                       """;
@@ -129,7 +129,7 @@ public sealed class ChunkDataGeneratorTests
                               {
                                   public static partial class First
                                   {
-                                      [Numos.API.ChunkData]
+                                      [Numos.API.ChunkData(Transient = true)]
                                       public static partial Numos.API.ChunkField<int> A { get; }
                                   }
 
@@ -137,7 +137,7 @@ public sealed class ChunkDataGeneratorTests
                                   {
                                       internal static partial class Second
                                       {
-                                          [Numos.API.ChunkData]
+                                          [Numos.API.ChunkData(Transient = true)]
                                           public static partial Numos.API.ChunkField<int> B { get; }
                                       }
                                   }
@@ -176,7 +176,7 @@ public sealed class ChunkDataGeneratorTests
                                   /// <summary>
                                   ///     Documented field.
                                   /// </summary>
-                                  [Numos.API.ChunkData]
+                                  [Numos.API.ChunkData(Transient = true)]
                                   public static partial Numos.API.ChunkField<float> Value { get; }
                               }
                               """;
@@ -200,7 +200,7 @@ public sealed class ChunkDataGeneratorTests
 
                               internal static partial class HiddenData
                               {
-                                  [Numos.API.ChunkData]
+                                  [Numos.API.ChunkData(Transient = true)]
                                   public static partial Numos.API.ChunkField<byte> Flags { get; }
                               }
                               """;
@@ -227,7 +227,7 @@ public sealed class ChunkDataGeneratorTests
                                   {
                                       public partial struct Inner
                                       {
-                                          [Numos.API.ChunkData]
+                                          [Numos.API.ChunkData(Transient = true)]
                                           public static partial Numos.API.ChunkField<double> Heat { get; }
                                       }
                                   }
@@ -266,7 +266,7 @@ public sealed class ChunkDataGeneratorTests
         const string source = """
                               public static partial class GlobalData
                               {
-                                  [Numos.API.ChunkData]
+                                  [Numos.API.ChunkData(Transient = true)]
                                   public static partial Numos.API.ChunkField<int> Count { get; }
                               }
                               """;
@@ -374,13 +374,13 @@ public sealed class ChunkDataGeneratorTests
 
                               public static partial class ClearData
                               {
-                                  [ChunkData("generator-tests/clear/both", ClearOnSleep = true, ClearOnVacuum = true)]
+                                  [ChunkData("generator-tests/clear/both", Transient = true, ClearOnSleep = true, ClearOnVacuum = true)]
                                   public static partial ChunkField<float> Both { get; }
 
-                                  [ChunkData("generator-tests/clear/sleep", ClearOnSleep = true)]
+                                  [ChunkData("generator-tests/clear/sleep", Transient = true, ClearOnSleep = true)]
                                   public static partial ChunkField<float> SleepOnly { get; }
 
-                                  [ChunkData]
+                                  [ChunkData(Transient = true)]
                                   public static partial ChunkField<float> Neither { get; }
                               }
                               """;
@@ -415,10 +415,10 @@ public sealed class ChunkDataGeneratorTests
 
                               public static partial class SmokeData
                               {
-                                  [Numos.API.ChunkData("generator-tests/smoke/density", Rollback = true, Length = 3)]
+                                  [Numos.API.ChunkData("generator-tests/smoke/density", Length = 3)]
                                   public static partial Numos.API.ChunkField<float> Density { get; }
 
-                                  [Numos.API.ChunkData]
+                                  [Numos.API.ChunkData(Transient = true)]
                                   public static partial Numos.API.ChunkField<long> Scratch { get; }
 
                                   [Numos.API.ChunkData("generator-tests/smoke/clears", ClearOnSleep = true, ClearOnVacuum = true)]
@@ -493,7 +493,7 @@ public sealed class ChunkDataGeneratorTests
 
                               public static partial class ConflictData
                               {
-                                  [Numos.API.ChunkData("generator-tests/conflict/taken", Rollback = true)]
+                                  [Numos.API.ChunkData("generator-tests/conflict/taken")]
                                   public static partial Numos.API.ChunkField<float> Taken { get; }
                               }
 

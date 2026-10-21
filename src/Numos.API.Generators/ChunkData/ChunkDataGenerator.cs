@@ -203,7 +203,7 @@ public sealed class ChunkDataGenerator : IIncrementalGenerator
                 : containingType.ContainingNamespace.ToDisplayString() + "." + displayName;
         }
 
-        bool rollback = false;
+        bool transient = false;
         int? length = null;
         bool clearOnSleep = false;
         bool clearOnVacuum = false;
@@ -212,8 +212,8 @@ public sealed class ChunkDataGenerator : IIncrementalGenerator
         {
             switch (argument.Key)
             {
-                case "Rollback" when argument.Value.Value is bool value:
-                    rollback = value;
+                case "Transient" when argument.Value.Value is bool value:
+                    transient = value;
                     break;
                 case "Length" when argument.Value.Value is int value:
                     length = value;
@@ -230,14 +230,16 @@ public sealed class ChunkDataGenerator : IIncrementalGenerator
             }
         }
 
+        // Everything but scratch data is saved, and a saved key is a compatibility contract.
+        bool rollback = !transient;
         if (rollback && !explicitKey)
-            diagnostics.Add(DiagnosticInfo.Create(ChunkDataDiagnostics.RollbackWithoutKey, attributeLocation, displayName));
+            diagnostics.Add(DiagnosticInfo.Create(ChunkDataDiagnostics.SavedWithoutKey, attributeLocation, displayName));
 
         if (rollback && elementType is not null && !elementType.IsUnmanagedType)
         {
             diagnostics.Add(
                 DiagnosticInfo.Create(
-                    ChunkDataDiagnostics.RollbackWithManagedType,
+                    ChunkDataDiagnostics.SavedWithManagedType,
                     attributeLocation,
                     displayName,
                     elementType.ToDisplayString()));
