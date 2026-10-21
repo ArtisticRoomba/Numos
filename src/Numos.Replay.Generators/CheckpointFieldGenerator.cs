@@ -47,7 +47,7 @@ public sealed class CheckpointFieldGenerator : IIncrementalGenerator
         IncrementalValueProvider<GeneratorOutput<CheckpointPlan>> output = chunks
             .Combine(configs)
             .Combine(gases)
-            .Combine(WireType.QuantityAliases(context))
+            .Combine(QuantityAliasCatalog.Provider(context))
             .Select(static (input, _) => Plan(
                 input.Left.Left.Left.AddRange(input.Left.Left.Right).AddRange(input.Left.Right),
                 input.Right));

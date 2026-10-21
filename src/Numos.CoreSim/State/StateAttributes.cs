@@ -56,7 +56,7 @@ public sealed class NumosStateAttribute : Attribute;
 ///     </para>
 ///     <para>
 ///         Supported types are <see langword="bool" />, the integer types, <see langword="float" />,
-///         <see langword="double" />, enums, <see langword="string" />, <c>Int3</c>, Numos.Units quantity aliases,
+///         <see langword="double" />, enums, <see langword="string" />, <c>Int3</c>, Magnitudo quantity aliases,
 ///         <see cref="GasProperties" /> (by name), other <see cref="NumosStateAttribute" /> types, arrays,
 ///         <see cref="IReadOnlyList{T}" />, <c>ImmutableArray&lt;T&gt;</c>, read-only, frozen, or plain dictionaries,
 ///         read-only or frozen sets, and nullable forms of these.

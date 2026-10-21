@@ -33,6 +33,7 @@
         <Compile Include="..\Numos.API.Generators\Common\IsExternalInit.cs" Link="Common\IsExternalInit.cs"/>
         <Compile Include="..\Numos.API.Generators\Common\LocationInfo.cs" Link="Common\LocationInfo.cs"/>
         <Compile Include="..\Numos.API.Generators\Common\PartialTypeModel.cs" Link="Common\PartialTypeModel.cs"/>
+        <Compile Include="..\Numos.API.Generators\Common\QuantityAliasCatalog.cs" Link="Common\QuantityAliasCatalog.cs"/>
     </ItemGroup>
 
     <ItemGroup>

@@ -2,7 +2,9 @@ using System.Collections.Immutable;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Numos.API.Generators.ChunkData;
+using Microsoft.CodeAnalysis.Text;
 using Numos.API.Generators.SolverDependency;
+using Numos.API.Generators.State;
 
 namespace Numos.API.Generators.Tests;
 
@@ -76,6 +78,28 @@ internal static class GeneratorHarness
         return driver.GetRunResult().Results.Single();
     }
 
+    /// <summary>
+    ///     Runs the state generator, optionally with a units catalog as an additional file.
+    /// </summary>
+    public static GeneratorRunResult RunState(
+        out Compilation output,
+        out ImmutableArray<Diagnostic> diagnostics, string? unitsCatalog, params string[] sources)
+    {
+        CSharpParseOptions parseOptions = ParseOptions();
+        CSharpCompilation compilation = CreateCompilation(parseOptions, sources);
+        ImmutableArray<AdditionalText> additionalTexts = unitsCatalog is null
+            ? []
+            : [new InMemoryAdditionalText("Test.magnitudo", unitsCatalog)];
+
+        GeneratorDriver driver = CSharpGeneratorDriver.Create(
+            [new StateGenerator().AsSourceGenerator()],
+            additionalTexts,
+            parseOptions);
+
+        driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out output, out diagnostics);
+        return driver.GetRunResult().Results.Single();
+    }
+
     public static GeneratorDriver CreateDriver(
         CSharpParseOptions parseOptions, bool trackSteps = false,
         IIncrementalGenerator? generator = null)
@@ -112,4 +136,11 @@ internal static class GeneratorHarness
                 .StartsWith("Numos.API.Generators", StringComparison.Ordinal))
             .OrderBy(static path => path, StringComparer.Ordinal);
     }
+}
+
+internal sealed class InMemoryAdditionalText(string path, string text) : AdditionalText
+{
+    public override string Path { get; } = path;
+
+    public override SourceText GetText(CancellationToken cancellationToken = default) => SourceText.From(text);
 }

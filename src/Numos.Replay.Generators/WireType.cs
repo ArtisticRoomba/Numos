@@ -40,25 +40,10 @@ internal sealed record WireType(WireTypeKind Kind, string Name)
         [SpecialType.System_Double] = "Double",
     };
 
-    private static readonly Dictionary<string, string> Keywords = new(StringComparer.Ordinal)
-    {
-        ["Boolean"] = "bool",
-        ["Byte"] = "byte",
-        ["SByte"] = "sbyte",
-        ["Int16"] = "short",
-        ["UInt16"] = "ushort",
-        ["Int32"] = "int",
-        ["UInt32"] = "uint",
-        ["Int64"] = "long",
-        ["UInt64"] = "ulong",
-        ["Single"] = "float",
-        ["Double"] = "double",
-    };
-
     /// <summary>
     ///     Gets the C# keyword for a primitive, such as <c>float</c>.
     /// </summary>
-    public string Keyword => Kind == WireTypeKind.String ? "string" : Keywords[Name];
+    public string Keyword => Kind == WireTypeKind.String ? "string" : QuantityAliasCatalog.PrimitiveKeywords[Name];
 
     public static WireType From(ITypeSymbol type)
     {
@@ -84,54 +69,7 @@ internal sealed record WireType(WireTypeKind Kind, string Name)
         if (Kind != WireTypeKind.Alias)
             return this;
 
-        foreach (QuantityAlias alias in aliases)
-        {
-            if (alias.Alias == Name)
-                return new WireType(WireTypeKind.Primitive, alias.Storage);
-        }
-
-        return this;
-    }
-
-    /// <summary>
-    ///     Reads the alias-to-storage table from the compilation's <c>*.magnitudo</c> catalogs.
-    /// </summary>
-    public static IncrementalValueProvider<EquatableArray<QuantityAlias>> QuantityAliases(
-        IncrementalGeneratorInitializationContext context)
-    {
-        return context.AdditionalTextsProvider
-            .Where(static file => file.Path.EndsWith(".magnitudo", StringComparison.OrdinalIgnoreCase))
-            .SelectMany(static (file, cancellationToken) => ParseCatalog(file.GetText(cancellationToken)?.ToString() ?? ""))
-            .Collect()
-            .Select(static (aliases, _) => new EquatableArray<QuantityAlias>(aliases));
-    }
-
-    private static IEnumerable<QuantityAlias> ParseCatalog(string text)
-    {
-        // Lines look like "temperature | Kelvin | global::System.Single | temperature=1".
-        foreach (string line in text.Split('\n'))
-        {
-            string trimmed = line.Trim();
-            if (trimmed.Length == 0 || trimmed[0] == '#')
-                continue;
-
-            string[] parts = trimmed.Split('|');
-            if (parts.Length < 3)
-                continue;
-
-            string storage = parts[2].Trim();
-            if (storage.StartsWith("global::", StringComparison.Ordinal))
-                storage = storage.Substring("global::".Length);
-
-            if (storage.StartsWith("System.", StringComparison.Ordinal))
-                storage = storage.Substring("System.".Length);
-
-            if (Keywords.ContainsKey(storage))
-                yield return new QuantityAlias(parts[1].Trim(), storage);
-        }
+        string? storage = QuantityAliasCatalog.Find(aliases, Name);
+        return storage is null ? this : new WireType(WireTypeKind.Primitive, storage);
     }
 }
-
-/// <param name="Alias">The alias identifier, such as <c>Kelvin</c>.</param>
-/// <param name="Storage">The CLR name of its storage primitive, such as <c>Single</c>.</param>
-internal sealed record QuantityAlias(string Alias, string Storage);
