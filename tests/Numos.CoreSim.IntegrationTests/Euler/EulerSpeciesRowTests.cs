@@ -126,11 +126,7 @@ public sealed class EulerSpeciesRowTests
                 .Append(new AtmosGasChannelCheckpoint(gasId, Enumerable.Repeat(moles, chunk.Temperatures.Count).ToArray()))
                 .ToArray();
 
-            return new AtmosChunkCheckpoint(
-                chunk.Position, chunk.Dimensions, chunk.IsAwake, chunk.SleepTimer,
-                chunk.Classifications.ToArray(), chunk.Temperatures.ToArray(), chunk.Pressures.ToArray(),
-                chunk.HeatCapacities.ToArray(), chunk.MomentumX.ToArray(), chunk.MomentumY.ToArray(),
-                chunk.MomentumZ.ToArray(), chunk.ActiveAirIndices.ToArray(), gases, chunk.SolverArrays.ToArray());
+            return chunk.WithGases(gases);
         }).ToArray();
 
         return new AtmosSimulationCheckpoint(checkpoint.Dimensions, chunks);

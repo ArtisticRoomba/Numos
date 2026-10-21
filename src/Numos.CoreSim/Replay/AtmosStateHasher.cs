@@ -1,3 +1,4 @@
+using Numos.CoreSim.State;
 using Numos.Maths;
 
 namespace Numos.CoreSim.Replay;
@@ -78,33 +79,18 @@ internal struct AtmosStateHasher
         return hash.Value;
     }
 
+    // Mirrors AtmosReplayCodec.WriteSimulationCheckpoint, minus the chunk payload lengths.
     internal static ulong Hash(AtmosSimulationCheckpoint checkpoint)
     {
-        var hash = new AtmosStateHasher();
-        hash.Add(checkpoint.FormatVersion);
-        hash.Add(checkpoint.CompatibilityFingerprint);
-        hash.Add(checkpoint.Chunks.Count);
+        var sink = new StateHashSink();
+        sink.WriteInt32(checkpoint.FormatVersion);
+        sink.WriteInt32(checkpoint.CompatibilityVersion);
+        sink.WriteUInt64(checkpoint.CompatibilityFingerprint);
+        StateCodecs.Int3.Write(ref sink, checkpoint.Dimensions);
+        sink.WriteCount(checkpoint.Chunks.Count);
         foreach (var chunk in checkpoint.Chunks)
-        {
-            hash.Add(chunk.Position);
-            hash.Add(chunk.Dimensions);
-            hash.Add(chunk.IsAwake);
-            hash.Add(chunk.SleepTimer);
-            GeneratedCheckpointFields.AppendChunkFields(ref hash, chunk);
-            hash.Add(chunk.ActiveAirIndices.Count);
-            foreach (ushort value in chunk.ActiveAirIndices) hash.Add(value);
-            hash.Add(chunk.Gases.Count);
-            foreach (var gas in chunk.Gases)
-            {
-                hash.Add(gas.GasId);
-                foreach (float value in gas.Moles) hash.Add(value);
-            }
+            NumosState.Write(ref sink, chunk);
 
-            hash.Add(chunk.SolverArrays.Count);
-            foreach (var array in chunk.SolverArrays)
-                array.AppendHash(ref hash);
-        }
-
-        return hash.Value;
+        return sink.Value;
     }
 }

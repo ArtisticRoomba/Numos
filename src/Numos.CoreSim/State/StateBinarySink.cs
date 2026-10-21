@@ -19,7 +19,7 @@ namespace Numos.CoreSim.State;
 ///         followed by UTF-8.
 ///     </para>
 ///     <para>
-///         <see cref="StateReader" /> reads this format back. A sink is single-use; create a new one per value.
+///         <see cref="StateReader" /> reads this format back. Call <see cref="Reset" /> before reusing a sink for another value.
 ///     </para>
 /// </remarks>
 /// <example>
@@ -55,6 +55,15 @@ public struct StateBinarySink : IStateSink
     /// </summary>
     /// <remarks>Only complete once the outermost <see cref="EndObject" /> has run.</remarks>
     public readonly ReadOnlySpan<byte> WrittenSpan => _buffer.AsSpan(0, _length);
+
+    /// <summary>
+    ///     Empties the sink so it can write another value, keeping its buffer.
+    /// </summary>
+    public void Reset()
+    {
+        _length = 0;
+        _depth = 0;
+    }
 
     /// <inheritdoc />
     public void BeginObject()

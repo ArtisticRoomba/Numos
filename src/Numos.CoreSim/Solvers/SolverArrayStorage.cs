@@ -1,6 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using Numos.CoreSim.Replay;
+using Numos.CoreSim.State;
 
 namespace Numos.CoreSim.Solvers;
 
@@ -18,7 +18,10 @@ internal abstract class SolverArrayStorage(ChunkFieldDescriptor field)
 
     internal abstract SolverArrayStorage Clone();
 
-    internal abstract void AppendHash(ref AtmosStateHasher hash);
+    /// <summary>
+    ///     Gets the values' bytes in native layout, including any struct padding.
+    /// </summary>
+    internal abstract ReadOnlySpan<byte> Bytes { get; }
 
     /// <summary>
     ///     Resets one element to default. Indices past the end of a fixed-length array are ignored.
@@ -31,10 +34,16 @@ internal abstract class SolverArrayStorage(ChunkFieldDescriptor field)
     internal abstract void ClearAll();
 
     /// <summary>
-    ///     Writes the values as one little-endian byte run, without a length prefix.
+    ///     Writes the values as one block through <see cref="IStateSink.WriteElements" />, without a count.
     /// </summary>
-    /// <remarks>Only valid for portable element types, where reversing each element's bytes converts its endianness.</remarks>
-    internal abstract void Write(BinaryWriter writer);
+    /// <remarks>
+    ///     A sink swaps each element on a big-endian host, which is only meaningful for portable element types. Struct
+    ///     elements still hash this way, in their native layout, but can't be saved.
+    /// </remarks>
+    internal void WriteValues<TSink>(ref TSink sink) where TSink : struct, IStateSink
+    {
+        sink.WriteElements(Bytes, Field.ElementSize);
+    }
 }
 
 internal sealed class SolverArrayStorage<T>(ChunkFieldDescriptor<T> field, T[] values) : SolverArrayStorage(field)
@@ -68,32 +77,5 @@ internal sealed class SolverArrayStorage<T>(ChunkFieldDescriptor<T> field, T[] v
             checked(values.Length * Unsafe.SizeOf<T>()));
     }
 
-    internal override void Write(BinaryWriter writer)
-    {
-        Span<byte> bytes = AsBytes(Values);
-        if (BitConverter.IsLittleEndian)
-        {
-            writer.Write(bytes);
-            return;
-        }
-
-        byte[] swapped = bytes.ToArray();
-        AtmosReplayCodec.ReverseElementBytes(swapped, Unsafe.SizeOf<T>());
-        writer.Write(swapped);
-    }
-
-    internal override void AppendHash(ref AtmosStateHasher hash)
-    {
-        hash.Add(typeof(T).FullName);
-        hash.Add(Unsafe.SizeOf<T>());
-        hash.Add(Length);
-        foreach (ref var value in Values.AsSpan())
-        {
-            // Registration rejects managed references before storage can enter a checkpoint.
-            // Include the exact representation, including NaN payloads and custom value-type layout.
-            ReadOnlySpan<byte> bytes = MemoryMarshal.CreateReadOnlySpan(ref Unsafe.As<T, byte>(ref value), Unsafe.SizeOf<T>());
-            foreach (byte part in bytes)
-                hash.AddByte(part);
-        }
-    }
+    internal override ReadOnlySpan<byte> Bytes => AsBytes(Values);
 }

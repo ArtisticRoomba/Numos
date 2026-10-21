@@ -43,6 +43,12 @@ internal static partial class AtmosReplayCodec
     /// <summary>
     ///     Writes one simulation's grid checkpoint nested in a world checkpoint.
     /// </summary>
+    /// <remarks>
+    ///     A hand-written header (format and compatibility versions, fingerprint, dimensions, chunk count), then each
+    ///     chunk as a length-prefixed <see cref="StateBinarySink" /> payload. <see cref="AtmosStateHasher.Hash" /> hashes
+    ///     the same sequence without the lengths.
+    /// </remarks>
+    /// <exception cref="NotSupportedException">A chunk holds a rollback field whose element type can't be saved.</exception>
     internal static void WriteSimulationCheckpoint(BinaryWriter writer, AtmosSimulationCheckpoint checkpoint)
     {
         writer.Write(checkpoint.FormatVersion);
@@ -50,7 +56,24 @@ internal static partial class AtmosReplayCodec
         writer.Write(checkpoint.CompatibilityFingerprint);
         WriteInt3(writer, checkpoint.Dimensions);
         writer.Write(checkpoint.Chunks.Count);
-        foreach (var chunk in checkpoint.Chunks) WriteChunk(writer, chunk);
+        var sink = new StateBinarySink();
+        foreach (var chunk in checkpoint.Chunks)
+        {
+            foreach (var array in chunk.SolverArrays)
+            {
+                if (!array.IsPortable)
+                {
+                    throw new NotSupportedException(
+                        $"Chunk field '{array.Key}' holds {array.ElementType.FullName}, which can't be saved. " +
+                        "Only primitives and enums over them can.");
+                }
+            }
+
+            sink.Reset();
+            NumosState.Write(ref sink, chunk);
+            writer.Write(sink.WrittenSpan.Length);
+            writer.Write(sink.WrittenSpan);
+        }
     }
 
     /// <summary>
@@ -70,7 +93,15 @@ internal static partial class AtmosReplayCodec
         var dimensions = ReadInt3(reader);
         int chunkCount = ReadCount(reader, 1_000_000, "chunk");
         var chunks = new AtmosChunkCheckpoint[chunkCount];
-        for (int index = 0; index < chunkCount; index++) chunks[index] = ReadChunk(reader, maxStringBytes);
+        for (int index = 0; index < chunkCount; index++)
+        {
+            byte[] payload = ReadPayload(reader, ReadCount(reader, int.MaxValue, "chunk byte"));
+            var state = new StateReader(payload, maxStringBytes);
+            var chunk = NumosState.Read<AtmosChunkCheckpoint>(ref state);
+            chunk.ValidateDecoded();
+            chunks[index] = chunk;
+        }
+
         var checkpoint = new AtmosSimulationCheckpoint(dimensions, chunks);
         if (fingerprint != checkpoint.CompatibilityFingerprint)
             throw new InvalidDataException("The simulation checkpoint schema or compatibility fingerprint is invalid.");
@@ -199,162 +230,6 @@ internal static partial class AtmosReplayCodec
         }
 
         return buffer;
-    }
-
-    private static void WriteChunk(BinaryWriter writer, AtmosChunkCheckpoint chunk)
-    {
-        WriteInt3(writer, chunk.Position);
-        WriteInt3(writer, chunk.Dimensions);
-        writer.Write(chunk.IsAwake);
-        writer.Write(chunk.SleepTimer);
-        writer.Write(chunk.Classifications.Count);
-        GeneratedCheckpointFields.WriteChunkFields(writer, chunk);
-        writer.Write(chunk.ActiveAirIndices.Count);
-        WriteArray(writer, chunk.ActiveAirIndices);
-        writer.Write(chunk.Gases.Count);
-        foreach (var gas in chunk.Gases)
-        {
-            writer.Write(gas.GasId);
-            WriteArray(writer, gas.Moles);
-        }
-
-        WriteSolverArrays(writer, chunk.SolverArrays);
-    }
-
-    /// <summary>
-    ///     Writes a chunk's rollback <c>ChunkField&lt;T&gt;</c> arrays.
-    /// </summary>
-    /// <remarks>
-    ///     A count, then for each array in the checkpoint's ordinal key order (the order the state hash uses): its key,
-    ///     the element type's full name, the element size and count as <c>int32</c>, and the elements as one
-    ///     little-endian byte run. A chunk with none writes a single zero count, which is what files written before
-    ///     these arrays could be saved contain.
-    /// </remarks>
-    /// <exception cref="NotSupportedException">An array's element type isn't portable.</exception>
-    private static void WriteSolverArrays(BinaryWriter writer, IReadOnlyList<AtmosSolverArraySnapshot> arrays)
-    {
-        writer.Write(arrays.Count);
-        foreach (var array in arrays)
-        {
-            if (!array.IsPortable)
-            {
-                throw new NotSupportedException(
-                    $"Chunk field '{array.Key}' holds {array.ElementType.FullName}, which can't be saved. " +
-                    "Only primitives and enums over them can.");
-            }
-
-            WriteString(writer, array.Key);
-            WriteString(writer, array.ElementType.FullName!);
-            writer.Write(array.ElementSize);
-            writer.Write(array.Length);
-            array.Write(writer);
-        }
-    }
-
-    /// <summary>
-    ///     Reads arrays written by <see cref="WriteSolverArrays" />, mapping each key to its registered field.
-    /// </summary>
-    /// <exception cref="InvalidDataException">An array doesn't match its registered field, or the data is malformed.</exception>
-    /// <exception cref="NotSupportedException">A key has no registered field.</exception>
-    private static AtmosSolverArraySnapshot[] ReadSolverArrays(BinaryReader reader, int voxels, int maxStringBytes)
-    {
-        int count = ReadCount(reader, 1_000_000, "solver array");
-        if (count == 0)
-            return [];
-
-        var arrays = new List<AtmosSolverArraySnapshot>(Math.Min(count, 64));
-        string? previousKey = null;
-        for (int index = 0; index < count; index++)
-        {
-            string key = ReadString(reader, maxStringBytes);
-            if (previousKey != null && string.CompareOrdinal(previousKey, key) >= 0)
-                throw new InvalidDataException("Chunk field arrays are not in ascending ordinal key order.");
-
-            previousKey = key;
-            string typeName = ReadString(reader, maxStringBytes);
-            int size = reader.ReadInt32();
-            int length = reader.ReadInt32();
-            if (!ChunkFieldRegistry.TryGet(key, out var field))
-            {
-                throw new NotSupportedException(
-                    $"The file contains chunk field '{key}', but no field is registered under that key. [ChunkData] " +
-                    "fields register once their assembly has run; call ChunkField<T>.Register for other fields before loading.");
-            }
-
-            if (!field.CaptureForRollback)
-                throw new InvalidDataException($"Chunk field '{key}' is saved in the file but registered without rollback.");
-
-            if (field.ElementType.FullName != typeName || field.ElementSize != size)
-            {
-                throw new InvalidDataException(
-                    $"Chunk field '{key}' was saved as {typeName} ({size} bytes) but is registered as " +
-                    $"{field.ElementType.FullName} ({field.ElementSize} bytes).");
-            }
-
-            if (!field.IsPortable)
-                throw new InvalidDataException($"Chunk field '{key}' is registered as {typeName}, which isn't a portable element type.");
-
-            // The length has to match the registration, so a corrupt length can't make the reader allocate more than
-            // the host already allocates for this field in every chunk.
-            if (length != field.GetLength(voxels))
-            {
-                throw new InvalidDataException(
-                    $"Chunk field '{key}' has {length} elements, but the registered field needs {field.GetLength(voxels)}.");
-            }
-
-            arrays.Add(AtmosSolverArraySnapshot.Adopt(field.Read(reader, length)));
-        }
-
-        return arrays.ToArray();
-    }
-
-    private static AtmosChunkCheckpoint ReadChunk(BinaryReader reader, int maxStringBytes)
-    {
-        var position = ReadInt3(reader);
-        var dimensions = ReadInt3(reader);
-        if (dimensions.X <= 0 || dimensions.Y <= 0 || dimensions.Z <= 0)
-            throw new InvalidDataException("Chunk dimensions must be positive.");
-
-        bool awake = reader.ReadBoolean();
-        int sleepTimer = reader.ReadInt32();
-        int voxels = ReadCount(reader, ushort.MaxValue, "voxel");
-        int expected;
-        try
-        {
-            expected = checked(dimensions.X * dimensions.Y * dimensions.Z);
-        }
-        catch (OverflowException exception)
-        {
-            throw new InvalidDataException("Chunk dimensions overflow.", exception);
-        }
-
-        if (voxels != expected || voxels <= 0) throw new InvalidDataException("Chunk voxel data does not match its dimensions.");
-
-        var (classifications, temperatures, pressures, capacities, momentumX, momentumY, momentumZ) =
-            GeneratedCheckpointFields.ReadChunkFields(reader, voxels);
-        ushort[] air = ReadArray<ushort>(reader, ReadCount(reader, voxels, "active air voxel"));
-        int gasCount = ReadCount(reader, 1_000_000, "gas channel");
-        var gases = new AtmosGasChannelCheckpoint[gasCount];
-        for (int index = 0; index < gasCount; index++)
-            gases[index] = new AtmosGasChannelCheckpoint(reader.ReadInt32(), ReadArray<float>(reader, voxels));
-
-        var solverArrays = ReadSolverArrays(reader, voxels, maxStringBytes);
-
-        return new AtmosChunkCheckpoint(
-            position,
-            dimensions,
-            awake,
-            sleepTimer,
-            classifications,
-            temperatures,
-            pressures,
-            capacities,
-            momentumX,
-            momentumY,
-            momentumZ,
-            air,
-            gases,
-            solverArrays);
     }
 
     private static void WriteSetVoxelMixtureOperation(BinaryWriter writer, SetVoxelMixtureOperation operation)

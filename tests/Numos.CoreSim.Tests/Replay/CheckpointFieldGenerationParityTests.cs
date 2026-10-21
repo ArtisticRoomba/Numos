@@ -93,13 +93,51 @@ public sealed class CheckpointFieldGenerationParityTests
         chunk.TotalHeatCapacity[0] = 12f;
         var checkpoint = new AtmosChunkCheckpoint(chunk);
 
-        var first = new AtmosStateHasher();
-        GeneratedCheckpointFields.AppendChunkFields(ref first, checkpoint);
+        Assert.That(NumosState.ComputeHash(checkpoint), Is.EqualTo(NumosState.ComputeHash(checkpoint)));
+    }
 
-        var second = new AtmosStateHasher();
-        GeneratedCheckpointFields.AppendChunkFields(ref second, checkpoint);
+    [Test]
+    public void ChunkCheckpoint_WireRoundTripKeepsEveryField()
+    {
+        var chunk = new AtmosChunk(2, 1, 1);
+        chunk.VoxelRoomMap[1] = 7;
+        chunk.Temperature[0] = 301f;
+        chunk.TotalPressure[0] = 100f;
+        chunk.TotalHeatCapacity[1] = 13f;
+        chunk.IsAwake = true;
+        chunk.SleepTimer = 4;
+        var checkpoint = new AtmosChunkCheckpoint(chunk);
 
-        Assert.That(first.Value, Is.EqualTo(second.Value));
+        var sink = new StateBinarySink();
+        NumosState.Write(ref sink, checkpoint);
+        var reader = new StateReader(sink.WrittenSpan);
+        var read = NumosState.Read<AtmosChunkCheckpoint>(ref reader);
+        read.ValidateDecoded();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(NumosState.StateEquals(read, checkpoint), Is.True);
+            Assert.That(NumosState.ComputeHash(read), Is.EqualTo(NumosState.ComputeHash(checkpoint)));
+            Assert.That(read.Classifications, Is.EqualTo(new[] { 0, 7 }));
+            Assert.That(read.SleepTimer, Is.EqualTo(4));
+        });
+    }
+
+    [Test]
+    public void ChunkCheckpoint_DecodedArraysMustMatchTheDimensions()
+    {
+        var checkpoint = new AtmosChunkCheckpoint(new AtmosChunk(2, 1, 1));
+        var sink = new StateBinarySink();
+        NumosState.Write(ref sink, checkpoint);
+
+        // Field 2 (Dimensions) follows field 1's 12-byte payload: id, length, then X.
+        byte[] bytes = sink.WrittenSpan.ToArray();
+        int dimensionsX = 4 + 4 + 12 + 4 + 4;
+        BitConverter.GetBytes(3).CopyTo(bytes, dimensionsX);
+        var reader = new StateReader(bytes);
+        var read = NumosState.Read<AtmosChunkCheckpoint>(ref reader);
+
+        Assert.That(read.ValidateDecoded, Throws.InstanceOf<InvalidDataException>());
     }
 
     [Test]
@@ -108,8 +146,7 @@ public sealed class CheckpointFieldGenerationParityTests
         var baseline = new AtmosChunk(2, 1, 1);
         baseline.VoxelRoomMap[0] = 5;
         baseline.TotalPressure[0] = 100f;
-        var baselineHash = new AtmosStateHasher();
-        GeneratedCheckpointFields.AppendChunkFields(ref baselineHash, new AtmosChunkCheckpoint(baseline));
+        ulong baselineHash = NumosState.ComputeHash(new AtmosChunkCheckpoint(baseline));
 
         ulong[] changedHashes = new ulong[3];
         for (int axis = 0; axis < changedHashes.Length; axis++)
@@ -124,14 +161,12 @@ public sealed class CheckpointFieldGenerationParityTests
                 _ => changed.MomentumZ
             })[0] = 0.25f;
 
-            var changedHash = new AtmosStateHasher();
-            GeneratedCheckpointFields.AppendChunkFields(ref changedHash, new AtmosChunkCheckpoint(changed));
-            changedHashes[axis] = changedHash.Value;
+            changedHashes[axis] = NumosState.ComputeHash(new AtmosChunkCheckpoint(changed));
         }
 
         Assert.Multiple(() =>
         {
-            Assert.That(changedHashes, Has.None.EqualTo(baselineHash.Value));
+            Assert.That(changedHashes, Has.None.EqualTo(baselineHash));
             Assert.That(changedHashes, Is.Unique, "Each axis must land in its own hash slot.");
         });
     }

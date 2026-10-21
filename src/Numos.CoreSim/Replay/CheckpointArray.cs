@@ -23,6 +23,23 @@ internal sealed class CheckpointArray<T> : ReadOnlyCollection<T>
 internal static class CheckpointArray
 {
     /// <summary>
+    ///     Wraps values a checkpoint is about to own, copying only when they aren't already a plain array.
+    /// </summary>
+    /// <remarks>
+    ///     Checkpoint properties pass everything they're given through this, so callers can't keep a mutable alias:
+    ///     the arrays come from a fresh capture or a fresh decode and nothing else references them.
+    /// </remarks>
+    internal static CheckpointArray<T> Wrap<T>(IReadOnlyList<T> values)
+    {
+        return values switch
+        {
+            CheckpointArray<T> owned => owned,
+            T[] array => new CheckpointArray<T>(array),
+            _ => new CheckpointArray<T>(values.ToArray()),
+        };
+    }
+
+    /// <summary>
     ///     Copies captured values into the start of <paramref name="destination" />.
     /// </summary>
     internal static void CopyTo<T>(IReadOnlyList<T> source, Span<T> destination)

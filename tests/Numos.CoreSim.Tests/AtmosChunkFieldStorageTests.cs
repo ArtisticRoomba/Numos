@@ -1,5 +1,6 @@
 using Numos.CoreSim.Replay;
 using Numos.CoreSim.Solvers;
+using Numos.CoreSim.State;
 using Numos.Maths;
 
 namespace Numos.CoreSim.Tests;
@@ -279,11 +280,8 @@ public sealed class AtmosChunkFieldStorageTests
         chunk.GetOrCreateField(HashCounts)[1] = 5;
         chunk.GetOrCreateField(HashScratch)[0] = 9;
 
-        var snapshots = chunk.CaptureSolverArrays();
-        var hash = new AtmosStateHasher();
-        hash.Add(snapshots.Length);
-        foreach (var snapshot in snapshots)
-            snapshot.AppendHash(ref hash);
+        var hash = new StateHashSink();
+        SolverArraysCodec.Write(ref hash, chunk.CaptureSolverArrays());
 
         Assert.That(hash.Value, Is.EqualTo(expected));
     }

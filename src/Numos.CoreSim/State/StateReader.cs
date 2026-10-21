@@ -273,6 +273,28 @@ public ref struct StateReader
         return values;
     }
 
+    /// <summary>
+    ///     Gets the bytes left in the current field, or in the object when no field is open.
+    /// </summary>
+    /// <remarks>Lets a reader reject a length before allocating for it.</remarks>
+    public readonly int Remaining => Limit - _position;
+
+    /// <summary>
+    ///     Fills <paramref name="destination" /> with elements written by <see cref="IStateSink.WriteElements" />.
+    /// </summary>
+    /// <param name="destination">The elements' bytes, in native layout once read.</param>
+    /// <param name="elementSize">The size of one element, for swapping on a big-endian host.</param>
+    /// <exception cref="InvalidDataException">Fewer bytes than <paramref name="destination" /> holds remain.</exception>
+    public void ReadElements(Span<byte> destination, int elementSize)
+    {
+        Take(destination.Length).CopyTo(destination);
+        if (!BitConverter.IsLittleEndian)
+        {
+            for (int offset = 0; offset < destination.Length; offset += elementSize)
+                destination.Slice(offset, elementSize).Reverse();
+        }
+    }
+
     private int ReadLength()
     {
         int length = ReadInt32();

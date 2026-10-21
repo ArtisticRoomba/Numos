@@ -1,5 +1,5 @@
-using Numos.CoreSim.Replay;
 using Numos.CoreSim.Solvers;
+using Numos.CoreSim.State;
 
 namespace Numos.CoreSim.Datatypes.Snapshots;
 
@@ -71,14 +71,26 @@ public sealed class AtmosSolverArraySnapshot
 
     internal int ElementSize => _storage.Field.ElementSize;
 
+    internal ChunkFieldDescriptor Field => _storage.Field;
+
     internal static AtmosSolverArraySnapshot Adopt(SolverArrayStorage storage)
     {
         return new AtmosSolverArraySnapshot(storage, true);
     }
 
-    internal void Write(BinaryWriter writer)
+    internal void WriteValues<TSink>(ref TSink sink) where TSink : struct, IStateSink
     {
-        _storage.Write(writer);
+        _storage.WriteValues(ref sink);
+    }
+
+    internal bool ValuesEqual(AtmosSolverArraySnapshot other)
+    {
+        return _storage.Bytes.SequenceEqual(other._storage.Bytes);
+    }
+
+    internal int CompareValues(AtmosSolverArraySnapshot other)
+    {
+        return _storage.Bytes.SequenceCompareTo(other._storage.Bytes);
     }
 
     internal SolverArrayStorage Materialize()
@@ -86,9 +98,4 @@ public sealed class AtmosSolverArraySnapshot
         return _storage.Clone();
     }
 
-    internal void AppendHash(ref AtmosStateHasher hash)
-    {
-        hash.Add(Key);
-        _storage.AppendHash(ref hash);
-    }
 }

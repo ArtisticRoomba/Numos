@@ -1,6 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
-using Numos.CoreSim.Replay;
+using Numos.CoreSim.State;
 
 namespace Numos.CoreSim.Solvers;
 
@@ -87,10 +87,11 @@ internal abstract class ChunkFieldDescriptor
     }
 
     /// <summary>
-    ///     Reads <paramref name="length" /> little-endian elements written by <see cref="SolverArrayStorage.Write" />.
+    ///     Reads <paramref name="length" /> little-endian elements written by <see cref="SolverArrayStorage.WriteValues{TSink}" />.
     /// </summary>
     /// <remarks>Only valid for portable element types.</remarks>
-    internal abstract SolverArrayStorage Read(BinaryReader reader, int length);
+    /// <exception cref="InvalidDataException">The data holds fewer elements.</exception>
+    internal abstract SolverArrayStorage Read(ref StateReader reader, int length);
 
     internal int GetLength(int voxelCount)
     {
@@ -139,14 +140,14 @@ internal sealed class ChunkFieldDescriptor<T> : ChunkFieldDescriptor
         return new SolverArrayStorage<T>(this, new T[GetLength(voxelCount)]);
     }
 
-    internal override SolverArrayStorage Read(BinaryReader reader, int length)
+    internal override SolverArrayStorage Read(ref StateReader reader, int length)
     {
-        var values = new T[length];
-        Span<byte> bytes = SolverArrayStorage<T>.AsBytes(values);
-        reader.BaseStream.ReadExactly(bytes);
-        if (!BitConverter.IsLittleEndian)
-            AtmosReplayCodec.ReverseElementBytes(bytes, Unsafe.SizeOf<T>());
+        // Checked before allocating, so a corrupt length can't ask for more than the data holds.
+        if ((long)length * Unsafe.SizeOf<T>() > reader.Remaining)
+            throw new InvalidDataException($"Chunk field '{Key}' is truncated.");
 
+        var values = new T[length];
+        reader.ReadElements(SolverArrayStorage<T>.AsBytes(values), Unsafe.SizeOf<T>());
         return new SolverArrayStorage<T>(this, values);
     }
 
