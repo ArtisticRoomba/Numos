@@ -153,6 +153,53 @@ public sealed class SliceProjectionTests
         });
     }
 
+    [TestCase(SliceAxis.X, 3f, 2f)]
+    [TestCase(SliceAxis.Y, 1f, 3f)]
+    [TestCase(SliceAxis.Z, 1f, 2f)]
+    public void ProjectToPlane_KeepsTheTwoInPlaneComponentsInCellOrder(SliceAxis axis, float expectedU, float expectedV)
+    {
+        (float u, float v) = SimulationSliceDrawData.ProjectToPlane(axis, 1f, 2f, 3f);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(u, Is.EqualTo(expectedU));
+            Assert.That(v, Is.EqualTo(expectedV));
+        });
+    }
+
+    [TestCase(SliceAxis.X)]
+    [TestCase(SliceAxis.Y)]
+    [TestCase(SliceAxis.Z)]
+    public void GetInPlaneVelocity_MatchesTheAxesTheCellsAreLaidOutAlong(SliceAxis axis)
+    {
+        // Each voxel's velocity is its own local coordinates, so a cell's in-plane velocity must equal its (U, V)
+        // if the projection agrees with the slice layout.
+        var dimensions = new Int3(2, 3, 4);
+        var builder = new SimulationFrameBuilder(new AtmosConfig());
+        var snapshot = CreateSnapshot(new Int3(0, 0, 0), dimensions);
+        int count = dimensions.X * dimensions.Y * dimensions.Z;
+        snapshot.VelocityX = new float[count];
+        snapshot.VelocityY = new float[count];
+        snapshot.VelocityZ = new float[count];
+        for (int index = 0; index < count; index++)
+        {
+            snapshot.VelocityX[index] = index % dimensions.X;
+            snapshot.VelocityY[index] = index / dimensions.X % dimensions.Y;
+            snapshot.VelocityZ[index] = index / (dimensions.X * dimensions.Y);
+        }
+
+        var frame = builder.BuildSimulation([snapshot], BuiltInVisualizationIds.Speed, 1);
+        var chunk = frame.Chunks[snapshot.GridPosition];
+        var slice = builder.BuildChunkSlice(frame, chunk.Identity, axis, 1);
+
+        Assert.That(slice.VisibleCellCount, Is.GreaterThan(0));
+        foreach (var cell in slice.EnumerateVisibleCells())
+        {
+            (float u, float v) = slice.GetInPlaneVelocity(cell);
+            Assert.That((u, v), Is.EqualTo(((float)cell.U, (float)cell.V)), $"cell ({cell.U}, {cell.V})");
+        }
+    }
+
     private static AtmosChunkSnapshot CreateSnapshot(Int3 position, Int3 dimensions)
     {
         int count = dimensions.X * dimensions.Y * dimensions.Z;

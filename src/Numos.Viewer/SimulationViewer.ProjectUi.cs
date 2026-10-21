@@ -65,6 +65,7 @@ public partial class SimulationViewer
 
     private bool _requestOpenCreateProject;
     private bool _requestRemoveChunk;
+    private AtmosTransportModel _projectTransportModelDraft;
     private bool _requestResetConfiguration;
     private bool _resetConfigurationModalOpen;
 
@@ -92,6 +93,7 @@ public partial class SimulationViewer
 
         _projectChunkDepthDraft = _session.ChunkDimensions.Z > 0 ? _session.ChunkDimensions.Z : 1;
         _includeDefaultGasesDraft = true;
+        _projectTransportModelDraft = GetTransportModel() ?? AtmosTransportModel.Legacy;
         _createProjectError = null;
         _requestOpenCreateProject = true;
         _createProjectModalOpen = true;
@@ -139,6 +141,9 @@ public partial class SimulationViewer
         ImGui.InputInt("Depth##project-chunk", ref _projectChunkDepthDraft);
 
         ImGui.Separator();
+        RenderTransportModelCombo();
+
+        ImGui.Separator();
         ImGui.Checkbox("Include Oxygen and Nitrogen", ref _includeDefaultGasesDraft);
         ImGuiExtensions.QuestionTooltip(
             _includeDefaultGasesDraft
@@ -171,7 +176,8 @@ public partial class SimulationViewer
                     _projectChunkWidthDraft,
                     _projectChunkHeightDraft,
                     _projectChunkDepthDraft,
-                    _includeDefaultGasesDraft);
+                    _includeDefaultGasesDraft,
+                    _projectTransportModelDraft);
 
                 _createProjectModalOpen = false;
                 ImGui.CloseCurrentPopup();
@@ -189,6 +195,45 @@ public partial class SimulationViewer
             _createProjectModalOpen = false;
             ImGui.CloseCurrentPopup();
         }
+    }
+
+    private static readonly AtmosTransportModel[] TransportModelValues =
+        [AtmosTransportModel.Legacy, AtmosTransportModel.Euler];
+
+    private static readonly string[] TransportModelLabels = ["Legacy (pressure relaxation)", "Euler (compressible flow)"];
+
+    /// <summary>
+    ///     The model is chosen here rather than on the running project because the Viewer records the world from
+    ///     the moment it exists, and <see cref="AtmosWorldSolverPipeline.ResetToDefaults(AtmosTransportModel)" />
+    ///     refuses to swap stages under a recording.
+    /// </summary>
+    private void RenderTransportModelCombo()
+    {
+        int index = Array.IndexOf(TransportModelValues, _projectTransportModelDraft);
+        if (ImGui.Combo("Transport model", ref index, TransportModelLabels, TransportModelLabels.Length) && index >= 0)
+            _projectTransportModelDraft = TransportModelValues[index];
+
+        ImGuiExtensions.QuestionTooltip(
+            "Which built-in stages move gas between voxels. Euler solves momentum and energy with CFL substeps, " +
+            "carries per-voxel velocity, and reports the Flow readout in this panel. The choice is fixed for the " +
+            "life of the project because the stage list is part of the recording.");
+    }
+
+    /// <summary>
+    ///     Infers the active model from the pipeline: Euler installs <c>euler-flow</c>, legacy never does.
+    /// </summary>
+    private AtmosTransportModel? GetTransportModel()
+    {
+        if (_session.World == null)
+            return null;
+
+        foreach (var step in _session.World.Solvers.Steps)
+        {
+            if (step.Name == AtmosBuiltInSolvers.EulerFlow)
+                return AtmosTransportModel.Euler;
+        }
+
+        return AtmosTransportModel.Legacy;
     }
 
     private void DrawCloseProjectModal()
@@ -419,6 +464,7 @@ public partial class SimulationViewer
             ImGui.TextDisabled($"Stepped to tick {steppedTick}.");
 
         RenderSolutionDetails();
+        RenderFlowDiagnostics();
 
         ImGui.Separator();
         if (ImGui.Button("Close Project", new Vector2(130, 0)))

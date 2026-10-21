@@ -93,10 +93,19 @@ public partial class SimulationViewer : IDisposable
     private bool _requestExit;
     private VoxelAddress? _selectedCell;
     private bool _show2DChunkOutlines;
+    private bool _show2DVelocityArrows;
     private bool _show2DVoxelOutlines = true;
     private bool _show3DChunkOutlines;
+    private bool _show3DVelocityArrows;
     private bool _show3DViewport = true;
     private bool _show3DVoxelOutlines = true;
+    private float _velocityArrowScaleSeconds = VelocityArrows.DefaultScaleSeconds;
+
+    /// <summary>
+    ///     Snapshot fields the current frame was built from. Turning arrows on widens the request to include
+    ///     velocity, but the chunk revisions do not move, so the builder has to be told to remap.
+    /// </summary>
+    private AtmosChunkSnapshotFields _appliedSnapshotFields;
     private bool _showConfigurationPanel;
     private bool _showPerformanceOverlay;
     private bool _showProgramSettingsPanel;
@@ -291,7 +300,9 @@ public partial class SimulationViewer : IDisposable
 
         bool snapshotsChanged = RefreshSnapshotCache();
         var visualization = _frameBuilder.Visualizations.GetRequired(_currentVisualizationId);
+        var requiredFields = GetRequiredSnapshotFields();
         bool visualizationChanged = _drawData == null ||
+                                    _appliedSnapshotFields != requiredFields ||
                                     !string.Equals(
                                         _drawData.Visualization.Id,
                                         visualization.Id,
@@ -326,6 +337,7 @@ public partial class SimulationViewer : IDisposable
                 : new VisualizationRange(_legendMinimum, _legendMaximum));
 
         _appliedLegendRangeRevision = _legendRangeRevision;
+        _appliedSnapshotFields = requiredFields;
         NormalizeInteractionState();
         RefreshSliceData();
         RebuildHighlights();
@@ -349,7 +361,7 @@ public partial class SimulationViewer : IDisposable
             return false;
 
         bool changed = false;
-        var requiredFields = _frameBuilder?.GetRequiredSnapshotFields(_currentVisualizationId) ?? AtmosChunkSnapshotFields.All;
+        var requiredFields = GetRequiredSnapshotFields();
         if (_simulation.TryGetChunkHandles(
                 _chunkCollectionRevision,
                 out long collectionRevision,
@@ -1055,7 +1067,9 @@ public partial class SimulationViewer : IDisposable
         return new Render3DStyleOptions(
             _show3DChunkOutlines,
             _show3DVoxelOutlines,
-            _transparent3DVoxels);
+            _transparent3DVoxels,
+            _show3DVelocityArrows,
+            _velocityArrowScaleSeconds);
     }
 
     private Render2DStyleOptions Get2DRenderStyleOptions()
@@ -1063,7 +1077,22 @@ public partial class SimulationViewer : IDisposable
         return new Render2DStyleOptions(
             _show2DChunkOutlines,
             _show2DVoxelOutlines,
-            _transparent2DVoxels);
+            _transparent2DVoxels,
+            _show2DVelocityArrows,
+            _velocityArrowScaleSeconds);
+    }
+
+    /// <summary>
+    ///     Fields the visualization needs, plus velocity whenever either viewport draws arrows: the arrows read
+    ///     <see cref="VoxelDrawData.VelocityX" /> and friends, which are NaN unless the snapshot carried them.
+    /// </summary>
+    private AtmosChunkSnapshotFields GetRequiredSnapshotFields()
+    {
+        var fields = _frameBuilder?.GetRequiredSnapshotFields(_currentVisualizationId) ?? AtmosChunkSnapshotFields.All;
+        if (_show3DVelocityArrows || _show2DVelocityArrows)
+            fields |= AtmosChunkSnapshotFields.Velocity;
+
+        return fields;
     }
 
     private void RebuildHighlights()

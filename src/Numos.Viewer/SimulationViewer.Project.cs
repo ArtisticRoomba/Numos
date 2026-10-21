@@ -13,11 +13,12 @@ public partial class SimulationViewer
         int chunkWidth,
         int chunkHeight,
         int chunkDepth,
-        bool includeDefaultGases)
+        bool includeDefaultGases,
+        AtmosTransportModel transportModel = AtmosTransportModel.Legacy)
     {
         SimulationFrameBuilder? frameBuilder = null;
         _session.CreateProject(
-            new WorkbenchProjectOptions(projectName, chunkWidth, chunkHeight, chunkDepth, includeDefaultGases),
+            new WorkbenchProjectOptions(projectName, chunkWidth, chunkHeight, chunkDepth, includeDefaultGases, transportModel),
             config =>
             {
                 var visualizations = VisualizationRegistry.CreateDefault(config);

@@ -13,12 +13,17 @@ namespace Numos.Workbench;
 /// <param name="ChunkHeight">Voxels per chunk along Y for the first simulation.</param>
 /// <param name="ChunkDepth">Voxels per chunk along Z for the first simulation.</param>
 /// <param name="IncludeDefaultGases">Whether the gas registry starts with <see cref="DefaultGases" />.</param>
+/// <param name="TransportModel">
+///     The built-in stages that move gas between voxels. The choice is fixed for the project because the stage list
+///     is part of the recording.
+/// </param>
 public readonly record struct WorkbenchProjectOptions(
     string? Name,
     int ChunkWidth = AtmosChunkConstants.DefaultWidth,
     int ChunkHeight = AtmosChunkConstants.DefaultHeight,
     int ChunkDepth = 1,
-    bool IncludeDefaultGases = true);
+    bool IncludeDefaultGases = true,
+    AtmosTransportModel TransportModel = AtmosTransportModel.Legacy);
 
 /// <summary>
 ///     Names the program that hosts a session. The session writes it to the log banner and to saved replays.
@@ -190,6 +195,8 @@ public sealed partial class WorkbenchSession : IDisposable
         try
         {
             world = new AtmosWorld(config);
+            // Must happen before the timeline starts recording. The pipeline rejects stage swaps after that.
+            world.Solvers.ResetToDefaults(options.TransportModel);
             var simulation = world.CreateSimulation(options.ChunkWidth, options.ChunkHeight, options.ChunkDepth);
             if (prepare != null)
             {

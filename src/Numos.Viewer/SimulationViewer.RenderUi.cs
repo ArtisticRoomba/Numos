@@ -585,7 +585,30 @@ public partial class SimulationViewer
             ref _transparent3DVoxels,
             ref _transparent2DVoxels);
 
+        RenderRenderingStyleRow(
+            "Velocity arrows",
+            "velocity-arrows",
+            ref _show3DVelocityArrows,
+            ref _show2DVelocityArrows);
+
         ImGui.EndTable();
+
+        ImGui.BeginDisabled(!_show3DVelocityArrows && !_show2DVelocityArrows);
+        if (ImGui.SliderFloat(
+                "Arrow scale##velocity-arrow-scale",
+                ref _velocityArrowScaleSeconds,
+                VelocityArrows.MinScaleSeconds,
+                VelocityArrows.MaxScaleSeconds,
+                "%.3f s",
+                ImGuiSliderFlags.Logarithmic))
+        {
+            _velocityArrowScaleSeconds = VelocityArrows.ClampScale(_velocityArrowScaleSeconds);
+        }
+
+        ImGui.EndDisabled();
+        ImGuiExtensions.QuestionTooltip(
+            "Seconds of travel one arrow represents. At 0.05 s a voxel moving at 20 m/s draws a one-voxel arrow. " +
+            $"Arrows longer than {VelocityArrows.MaxLength:0} voxels are capped and keep only their direction.");
     }
 
     private static void RenderRenderingStyleRow(
@@ -1973,6 +1996,35 @@ public partial class SimulationViewer
                     "Not captured for the current visualization",
                     ViewerTheme.SecondaryText);
             }
+        }
+    }
+
+    /// <summary>
+    ///     Readout of <see cref="AtmosSimulation.LastFlowDiagnostics" />. Hidden while the diagnostics are all zero,
+    ///     which is the case under the legacy transport model and before the first Euler tick.
+    /// </summary>
+    private void RenderFlowDiagnostics()
+    {
+        if (_simulation == null)
+            return;
+
+        var flow = _simulation.LastFlowDiagnostics;
+        if (flow == default)
+            return;
+
+        if (!ImGui.CollapsingHeader("Flow", ImGuiTreeNodeFlags.DefaultOpen))
+            return;
+
+        using var table = ImGuiExtensions.BeginDefinitionTable("FlowDiagnostics##flow");
+        if (!table.IsVisible)
+            return;
+
+        foreach (var row in FlowReadout.Describe(flow))
+        {
+            if (row.IsWarning)
+                ImGuiExtensions.DefinitionRow(row.Label, row.Value, ViewerTheme.Caution);
+            else
+                ImGuiExtensions.DefinitionRow(row.Label, row.Value);
         }
     }
 }
