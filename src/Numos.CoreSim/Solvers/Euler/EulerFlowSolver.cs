@@ -13,10 +13,13 @@ namespace Numos.CoreSim.Solvers.Euler;
 ///     <para>
 ///         Per tick the stage gathers each active chunk (awake, with at least one gas channel, plus whatever
 ///         activation adds) into pooled conserved buffers, runs substeps until the fixed time step is used up or
-///         the substep cap engages, writes the buffers back, and then does the tick-end bookkeeping the legacy
-///         advection stage also owns: momentum floor and damping, the sleep metric, and
-///         <see cref="ChunkSleepPolicy" />. Species diffusion, vacuum cleanup, and explicit links are not part of
-///         this stage yet.
+///         the substep cap engages, writes the buffers back, and then does the tick-end work the legacy transport
+///         stages also own, in this order: momentum floor and damping (before the write-back, so the kinetic
+///         energy they remove becomes heat), species diffusion inside and across chunks
+///         (<see cref="EulerSpeciesDiffusion" />), <see cref="VacuumCleanup" />, the momentum post-condition
+///         (<see cref="SettleMomentum" />), and last the sleep metric and <see cref="ChunkSleepPolicy" />, which
+///         therefore score the pressures diffusion and cleanup left behind. Explicit links are not part of this
+///         stage yet.
 ///     </para>
 ///     <para>
 ///         Faces between chunks are ordinary faces. Both chunks solve a shared face from the same two read-buffer
@@ -74,6 +77,8 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
     ///     What the most recent <see cref="Solve" /> did. All zeros before the first tick.
     /// </summary>
     internal AtmosFlowDiagnostics LastDiagnostics { get; private set; }
+
+    private static int WorkerCount => Math.Max(1, WorkerCountOverride ?? Environment.ProcessorCount);
 
     public void Solve(AtmosSolverExecutionContext context)
     {
@@ -243,18 +248,8 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
             Int3 position = chunk.GetXyzInt3(voxelIndex);
             for (int direction = 0; direction < NeighborResolution.NeighborDirections.Length; direction++)
             {
-                bool onEdge = direction switch
-                {
-                    0 => position.X == 0,
-                    1 => position.X == last.X,
-                    2 => position.Y == 0,
-                    3 => position.Y == last.Y,
-                    4 => position.Z == 0,
-                    _ => position.Z == last.Z
-                };
-
-                if (!onEdge || workspace.WakeRequests[direction] || workspace.NeighborWorkspaces[direction] != null ||
-                    !EulerFaceTopology.IsOpen(open, direction))
+                if (!EulerFaceTopology.IsOnEdge(position, last, direction) || workspace.WakeRequests[direction] ||
+                    workspace.NeighborWorkspaces[direction] != null || !EulerFaceTopology.IsOpen(open, direction))
                     continue;
 
                 AtmosChunk neighbor = workspace.NeighborChunks[direction]!;
@@ -375,7 +370,15 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
         for (int index = 0; index < _activeCount; index++)
             FloorMomentumAndWriteBack(_active[index], config, settings, ref negativeInternalEnergy);
 
-        // Sleep decisions read neighbours' written-back pressures, so they wait for every write-back.
+        // Diffusion runs on the written-back fields of every chunk, including the ones across a face, so it
+        // waits for every write-back; cleanup compares neighbours' pressures the same way and waits for diffusion.
+        EulerSpeciesDiffusion.Run(_active, _activeCount, WorkerCount, config);
+        VacuumCleanup.Apply(context);
+
+        for (int index = 0; index < _activeCount; index++)
+            SettleMomentum(_active[index], config, settings);
+
+        // Sleep decisions read neighbours' final pressures, so they wait for everything above.
         for (int index = 0; index < _activeCount; index++)
             UpdateSleepState(_active[index], config);
 
@@ -410,7 +413,7 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
     /// </remarks>
     private void RunSweep(int axis, Second timeStep, SquareMetre faceArea, AtmosSolverConfigSnapshot config)
     {
-        int workerCount = Math.Max(1, WorkerCountOverride ?? Environment.ProcessorCount);
+        int workerCount = WorkerCount;
         int pencilsPerChunk = EulerSweep.PencilCount(_active[0].Chunk, axis);
         if (_activeCount >= workerCount)
         {
@@ -531,6 +534,80 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
 
         workspace.WriteBack(config, ref negativeInternalEnergyCount);
         chunk.MarkChanged();
+    }
+
+    /// <summary>
+    ///     Re-establishes the momentum invariants on the live fields after diffusion and vacuum cleanup: a vacuum or
+    ///     trace voxel carries none, and a voxel slower than <see cref="EulerFlowConfig.VelocityFloor" /> is brought
+    ///     to rest with its kinetic energy turned into heat, as the pre-write-back floor does.
+    /// </summary>
+    /// <remarks>
+    ///     The floor ran on the buffers before the write-back, but diffusion changes a voxel's mass and cleanup
+    ///     empties voxels outright, so the test is repeated on the fields the sleep pass and the next tick's gather
+    ///     read. On a voxel neither pass touched it changes nothing: cleanup zeroes the momentum of what it empties,
+    ///     and the mass is summed over the same gases in the same ascending gas id order as the buffer's, so the
+    ///     floor comparison repeats bit for bit. The only gap is a row the write-back dropped as untracked, which
+    ///     makes the live mass smaller and the velocity larger, never the other way.
+    /// </remarks>
+    private void SettleMomentum(EulerChunkWorkspace workspace, AtmosSolverConfigSnapshot config, EulerFlowConfig settings)
+    {
+        AtmosChunk chunk = workspace.Chunk;
+        MetrePerSecond floor = settings.VelocityFloor;
+        for (int activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
+        {
+            ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
+            KilogramMetrePerSecond momentumX = chunk.MomentumX[voxelIndex];
+            KilogramMetrePerSecond momentumY = chunk.MomentumY[voxelIndex];
+            KilogramMetrePerSecond momentumZ = chunk.MomentumZ[voxelIndex];
+            if (momentumX == 0f && momentumY == 0f && momentumZ == 0f)
+                continue;
+
+            Kilogram mass = 0f;
+            Mole totalMoles = 0f;
+            bool zero = chunk.IsVacuum[voxelIndex];
+            if (!zero)
+            {
+                for (int present = 0; present < _gases.Count; present++)
+                {
+                    int channel = chunk.FindGasChannel(_gases.GasIds[present]);
+                    if (channel < 0)
+                        continue;
+
+                    Mole moles = chunk.ActiveGases[channel].Moles[voxelIndex];
+                    mass += moles * _gases.MolarMass[present];
+                    totalMoles += moles;
+                }
+
+                zero = EulerChunkWorkspace.IsTrace(mass, totalMoles);
+            }
+
+            if (!zero && floor > 0f)
+            {
+                PerKilogram inverseMass = 1f / mass;
+                MetrePerSecond velocityX = momentumX * inverseMass;
+                MetrePerSecond velocityY = momentumY * inverseMass;
+                MetrePerSecond velocityZ = momentumZ * inverseMass;
+                zero = velocityX * velocityX + velocityY * velocityY + velocityZ * velocityZ < floor * floor;
+            }
+
+            if (!zero)
+                continue;
+
+            JoulePerKelvin heatCapacity = chunk.TotalHeatCapacity[voxelIndex];
+            if (mass > 0f && heatCapacity > 0f)
+            {
+                Joule64 energy = (double)heatCapacity * config.GetValidatedTemp(chunk.Temperature[voxelIndex]) +
+                                 EulerMixture.KineticEnergy(mass, momentumX, momentumY, momentumZ);
+
+                chunk.Temperature[voxelIndex] = config.GetValidatedTemp((float)(energy / heatCapacity));
+                chunk.TotalPressure[voxelIndex] =
+                    AtmosSolverMath.CalculatePressureAtVoxel(config, chunk, voxelIndex, totalMoles);
+            }
+
+            chunk.MomentumX[voxelIndex] = 0f;
+            chunk.MomentumY[voxelIndex] = 0f;
+            chunk.MomentumZ[voxelIndex] = 0f;
+        }
     }
 
     /// <summary>

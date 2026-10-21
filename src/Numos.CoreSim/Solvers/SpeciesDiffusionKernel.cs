@@ -143,32 +143,55 @@ internal static class SpeciesDiffusionKernel
             }
 
             Kelvin temperature = config.GetValidatedTemp(chunk.Temperature[voxelIndex]);
-            Scalar temperatureRatio = temperature / config.GlobalTemperature;
-            Scalar pressureRatio = config.SaturationReferencePressure / pressure;
-            float environmentFactor = MathF.Pow(temperatureRatio, 1.5f) * pressureRatio * dx;
+            float environmentFactor = EnvironmentFactor(config, pressure, temperature, dx);
 
             for (int gas = 0; gas < gasCount; gas++)
             {
                 var gasChannel = chunk.ActiveGases[gas];
                 Mole sourceMoles = gasChannel.Moles[voxelIndex];
-                if (sourceMoles <= 0f)
-                {
-                    workspace.DiffusionTransfers![transferBase + gas] = 0f;
-                    continue;
-                }
-
-                float referenceDiffusivity = config.GetDiffusionCoefficient(gasChannel.GasId);
-                float diffusionConstant = referenceDiffusivity * environmentFactor;
-                Mole molesDiffused = diffusionConstant * sourceMoles * AtmosSolverConstants.FixedTimeStep;
-
-                // A voxel can lose at most one seventh of a gas to each of its six neighbors plus
-                // itself, so cap the per-neighbor amount rather than let the debit exceed inventory.
-                if (molesDiffused * 7 > sourceMoles)
-                    molesDiffused = sourceMoles / 7;
-
-                workspace.DiffusionTransfers![transferBase + gas] = molesDiffused;
+                workspace.DiffusionTransfers![transferBase + gas] = sourceMoles <= 0f
+                    ? 0f
+                    : TransferAmount(config.GetDiffusionCoefficient(gasChannel.GasId), environmentFactor, sourceMoles);
             }
         }
+    }
+
+    /// <summary>
+    ///     The environment factor of a source voxel: the kinetic-theory <c>T^(3/2) / P</c> dependence of the
+    ///     diffusivity, scaled by the voxel edge length (face area over neighbor distance for cubic voxels).
+    /// </summary>
+    /// <param name="config">The immutable configuration snapshot for the tick.</param>
+    /// <param name="pressure">The source voxel's positive total pressure.</param>
+    /// <param name="temperature">The source voxel's validated temperature.</param>
+    /// <param name="voxelEdge"><c>VoxelVolume^(1/3)</c>, computed once by the caller.</param>
+    internal static float EnvironmentFactor(
+        AtmosSolverConfigSnapshot config, Pascal pressure, Kelvin temperature, float voxelEdge)
+    {
+        Scalar temperatureRatio = temperature / config.GlobalTemperature;
+        Scalar pressureRatio = config.SaturationReferencePressure / pressure;
+        return MathF.Pow(temperatureRatio, 1.5f) * pressureRatio * voxelEdge;
+    }
+
+    /// <summary>
+    ///     Moles of one gas a source voxel sends to each of its neighbors this tick.
+    /// </summary>
+    /// <param name="referenceDiffusivity">The gas's configured diffusion coefficient.</param>
+    /// <param name="environmentFactor">The source voxel's <see cref="EnvironmentFactor" />.</param>
+    /// <param name="sourceMoles">The source voxel's positive moles of the gas.</param>
+    /// <remarks>
+    ///     A voxel can lose at most one seventh of a gas to each of its six neighbors plus itself, so the
+    ///     per-neighbor amount is capped rather than letting the debit exceed inventory. The Euler stage evaluates
+    ///     this for both cells of a chunk face, so the expression order here is what both sides of that exchange
+    ///     agree on bit for bit.
+    /// </remarks>
+    internal static Mole TransferAmount(float referenceDiffusivity, float environmentFactor, Mole sourceMoles)
+    {
+        float diffusionConstant = referenceDiffusivity * environmentFactor;
+        Mole molesDiffused = diffusionConstant * sourceMoles * AtmosSolverConstants.FixedTimeStep;
+        if (molesDiffused * 7 > sourceMoles)
+            molesDiffused = sourceMoles / 7;
+
+        return molesDiffused;
     }
 
     /// <summary>

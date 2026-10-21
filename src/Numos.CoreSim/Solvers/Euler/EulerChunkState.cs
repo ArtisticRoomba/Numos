@@ -120,7 +120,18 @@ internal sealed class EulerChunkWorkspace
     private readonly EulerChunkState[] _buffers = [new EulerChunkState(), new EulerChunkState()];
     private int _readIndex;
 
+    /// <summary>
+    ///     This chunk's recorded cross-chunk diffusion, filled and applied by <see cref="EulerSpeciesDiffusion" />.
+    /// </summary>
+    public readonly EulerBoundaryExchange Boundary = new();
+
     public AtmosChunk Chunk = null!;
+
+    /// <summary>
+    ///     The legacy diffusion kernel's scratch, rented by <see cref="EulerSpeciesDiffusion" /> after the
+    ///     write-back and released before the pass returns.
+    /// </summary>
+    public DiffusionWorkspace Diffusion;
 
     /// <summary>
     ///     The tick's gas table, shared by every workspace.
