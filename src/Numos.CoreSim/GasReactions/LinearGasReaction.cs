@@ -1,5 +1,5 @@
 using System.Collections.Frozen;
-using Numos.CoreSim.Replay;
+using Numos.CoreSim.State;
 using Magnitudo;
 
 namespace Numos.CoreSim.GasReactions;
@@ -11,6 +11,7 @@ namespace Numos.CoreSim.GasReactions;
 /// <remarks>
 ///     Cheaper to evaluate and easier to set up than <see cref="StandardGasReaction" />, at the cost of realism.
 /// </remarks>
+[NumosState]
 public readonly partial record struct LinearGasReaction
 {
     /// <summary>
@@ -63,11 +64,13 @@ public readonly partial record struct LinearGasReaction
     /// <summary>
     ///     Moles of each reactant consumed per reaction.
     /// </summary>
+    [StateField(1)]
     private FrozenDictionary<GasProperties, float> Input { get; }
 
     /// <summary>
     ///     Moles of each product produced per reaction.
     /// </summary>
+    [StateField(2)]
     private FrozenDictionary<GasProperties, float> Output { get; }
 
     /// <summary>
@@ -77,88 +80,39 @@ public readonly partial record struct LinearGasReaction
     ///     Per mole of whichever reactant has a coefficient of one, so for 2H₂ + O₂ -> 2H₂O it is the energy released
     ///     per mole of oxygen consumed.
     /// </remarks>
+    [StateField(3)]
     internal JoulePerMole EnergyBalance { get; }
 
+    [StateField(4)]
     private Kelvin LowTemperatureBound { get; }
+    [StateField(5)]
     private Kelvin HighTemperatureBound { get; }
 
+    [StateField(6)]
     private ConcentrationPerSecond LowTempSpeed { get; }
+    [StateField(7)]
     private ConcentrationPerSecond HighTempSpeed { get; }
 
+    [NotState]
     private Kelvin BoundaryRange { get; }
 
+    [NotState]
     private ConcentrationPerSecond SpeedRange { get; }
 
     /// <summary>
     ///     Whether the rate is zero below <see cref="LowTemperatureBound" /> instead of extrapolated.
     /// </summary>
+    [StateField(8)]
     private bool LowStrict { get; }
 
     /// <summary>
     ///     Whether the rate is zero above <see cref="HighTemperatureBound" /> instead of extrapolated.
     /// </summary>
+    [StateField(9)]
     private bool HighStrict { get; }
 
+    [StateField(10)]
     private FrozenSet<LinearSpeedFactor> SpeedFactors { get; }
-
-    internal void AppendHash(ref AtmosStateHasher hash)
-    {
-        hash.Add(EnergyBalance);
-        hash.Add(LowTemperatureBound);
-        hash.Add(HighTemperatureBound);
-        hash.Add(LowTempSpeed);
-        hash.Add(HighTempSpeed);
-        hash.Add(LowStrict);
-        hash.Add(HighStrict);
-        hash.Add(Input.Count);
-        foreach (KeyValuePair<GasProperties, float> entry in Input.OrderBy(static entry => entry.Key.Name, StringComparer.Ordinal))
-        {
-            hash.Add(entry.Key);
-            hash.Add(entry.Value);
-        }
-
-        hash.Add(Output.Count);
-        foreach (KeyValuePair<GasProperties, float> entry in Output.OrderBy(static entry => entry.Key.Name, StringComparer.Ordinal))
-        {
-            hash.Add(entry.Key);
-            hash.Add(entry.Value);
-        }
-
-        hash.Add(SpeedFactors.Count);
-        foreach (var factor in SpeedFactors.OrderBy(static factor => factor.Gas.Name, StringComparer.Ordinal)
-                     .ThenBy(static factor => factor.OrderKey))
-            factor.AppendHash(ref hash);
-    }
-
-    internal bool SemanticallyEquals(LinearGasReaction other)
-    {
-        return EnergyBalance.Equals(other.EnergyBalance) &&
-               LowTemperatureBound.Equals(other.LowTemperatureBound) &&
-               HighTemperatureBound.Equals(other.HighTemperatureBound) &&
-               LowTempSpeed.Equals(other.LowTempSpeed) &&
-               HighTempSpeed.Equals(other.HighTempSpeed) &&
-               LowStrict == other.LowStrict &&
-               HighStrict == other.HighStrict &&
-               DictionaryEquals(Input, other.Input) &&
-               DictionaryEquals(Output, other.Output) &&
-               SpeedFactors.SetEquals(other.SpeedFactors);
-    }
-
-    private static bool DictionaryEquals(
-        IReadOnlyDictionary<GasProperties, float> first,
-        IReadOnlyDictionary<GasProperties, float> second)
-    {
-        if (first.Count != second.Count)
-            return false;
-
-        foreach ((var gas, float amount) in first)
-        {
-            if (!second.TryGetValue(gas, out float otherAmount) || !amount.Equals(otherAmount))
-                return false;
-        }
-
-        return true;
-    }
 
     private static float EvalLinear(
         float value, float boundaryRange, float lowBound, bool lowStrict, bool highStrict,
