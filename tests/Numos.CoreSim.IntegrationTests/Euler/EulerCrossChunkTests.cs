@@ -234,6 +234,32 @@ public sealed class EulerCrossChunkTests
         });
     }
 
+    // Chunks one voxel long on the flow axis have no interior faces on it, which once made the stage skip the
+    // axis outright, chunk faces included. Both cases below are that axis with a neighbour across it.
+    [TestCase(1, 1, 1, 1, 0, 0)]
+    [TestCase(4, 4, 1, 0, 0, 1)]
+    public void OneVoxelThickChunks_ExchangeGasAcrossTheThinAxis(
+        int width, int height, int depth, int offsetX, int offsetY, int offsetZ)
+    {
+        var config = SimTestHelpers.CreateEulerConfig();
+        using var simulation = SimTestHelpers.CreateEulerSimulation(config, width, height, depth, out var source);
+        var target = SimTestHelpers.CreateOpenChunk(simulation, new Int3(offsetX, offsetY, offsetZ));
+        float targetMoles = SimTestHelpers.MolesFor(config, Atmosphere, Temperature);
+        FillRoom(simulation, source, width, height, depth, SimTestHelpers.MolesFor(config, 2f * Atmosphere, Temperature));
+        FillRoom(simulation, target, width, height, depth, targetMoles);
+        double initialMoles = TotalMoles(simulation, source, target);
+
+        simulation.Tick();
+
+        var targetSnapshot = simulation.GetChunkSnapshot(target);
+        Assert.Multiple(() =>
+        {
+            Assert.That(simulation.LastFlowDiagnostics.Substeps, Is.GreaterThan(0));
+            Assert.That(SimTestHelpers.TotalMoles(targetSnapshot), Is.GreaterThan(targetMoles * width * height * depth));
+            Assert.That(TotalMoles(simulation, source, target), Is.EqualTo(initialMoles).Within(ConservationPercent).Percent);
+        });
+    }
+
     [Test]
     public void Chain_AFrontIntoEmptyChunksWakesEachAsItArrives()
     {
