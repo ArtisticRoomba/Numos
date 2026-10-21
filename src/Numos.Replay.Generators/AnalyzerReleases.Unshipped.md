@@ -11,4 +11,3 @@
  NUMOSREPLAYGEN007  | Numos.Replay | Error    | Missing or mismatched custom codec method          
  NUMOSREPLAYGEN008  | Numos.Replay | Error    | Opcode has no operation type                       
  NUMOSREPLAYGEN011  | Numos.Replay | Error    | Operation code is not a constant opcode            
- NUMOSCHECKPTGEN001 | Numos.Replay | Error    | Unsupported live chunk array                       

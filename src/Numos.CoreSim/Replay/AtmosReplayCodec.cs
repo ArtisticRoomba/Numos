@@ -13,8 +13,8 @@ using Numos.Maths;
 namespace Numos.CoreSim.Replay;
 
 /// <summary>
-///     Binary codec for simulation operations, simulation checkpoints and configuration, plus the little-endian
-///     primitives every replay payload is built from.
+///     Binary codec for simulation operations and the configurations they carry, plus the little-endian primitives
+///     every replay payload is built from. Checkpoints are written by their generated state walkers instead.
 /// </summary>
 /// <remarks>
 ///     <para>

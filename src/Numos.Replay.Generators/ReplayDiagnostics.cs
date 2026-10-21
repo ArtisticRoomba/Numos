@@ -55,13 +55,4 @@ internal static class ReplayDiagnostics
         Category,
         DiagnosticSeverity.Error,
         true);
-
-    public static readonly DiagnosticDescriptor UnsupportedLiveChunkArray = new(
-        "NUMOSCHECKPTGEN001",
-        "Unsupported live chunk array",
-        "Live chunk array '{0}' has type '{1}'; [LiveChunkArray] needs an IReadOnlyList<T> property with a setter, " +
-        "so copy irregular shapes by hand",
-        Category,
-        DiagnosticSeverity.Error,
-        true);
 }
