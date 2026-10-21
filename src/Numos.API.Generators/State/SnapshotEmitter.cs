@@ -83,12 +83,14 @@ internal static class SnapshotEmitter
         string type = member.Shape.TypeExpression;
         string backing = SnapshotGenerator.BackingField(member.Name);
 
-        // A reference member starts empty (strings and lists) or null (objects) until capture or a read assigns it.
+        // Capture and the reader always assign the member; this only keeps the constructor cheap and non-null.
         string initializer = member.IsList
             ? " = " + StateArray + "<" + member.ElementType + ">.Empty"
-            : member.IsReference
-                ? " = " + Advanced + "StateCodecs.DefaultValue<" + type + ", " + member.Shape.CodecExpression + ">()!"
-                : "";
+            : member.Shape.Kind == StateShapeKind.String
+                ? " = \"\""
+                : member.IsReference
+                    ? " = null!"
+                    : "";
 
         writer.Line(CodeWriter.GeneratedCodeAttribute);
         writer.Line("private " + type + " " + backing + initializer + ";");
@@ -350,9 +352,21 @@ internal static class SnapshotEmitter
 
             writer.Line("if (has" + field.Id + ")");
             SnapshotMemberModel? generated = model.Members.FirstOrDefault(member => member.Name == field.MemberName);
-            writer.Line("    " + (generated is null
-                ? "result." + field.MemberName + " = field" + field.Id + ";"
-                : Store("result", generated, "field" + field.Id)));
+            if (generated is null)
+            {
+                writer.Line("    result." + field.MemberName + " = field" + field.Id + ";");
+                continue;
+            }
+
+            writer.Line("    " + Store("result", generated, "field" + field.Id));
+            if (generated is { IsReference: true, IsList: false } && generated.Shape.Kind != StateShapeKind.String)
+            {
+                // Data from before the member existed: give it the codec's default rather than leave it null.
+                writer.Line("else");
+                writer.Line("    " + Store(
+                    "result", generated,
+                    Advanced + "StateCodecs.DefaultValue<" + generated.Shape.TypeExpression + ", " + generated.Shape.CodecExpression + ">()!"));
+            }
         }
 
         writer.Line("result.OnDecoded();");

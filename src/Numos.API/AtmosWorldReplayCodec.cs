@@ -1,3 +1,4 @@
+using System.Buffers;
 using Numos.CoreSim.Replay;
 using Numos.CoreSim.State.Advanced;
 
@@ -29,10 +30,23 @@ internal static partial class AtmosWorldReplayCodec
         writer.Write(checkpoint.FormatVersion);
         WriteHash(writer, archive.InitialStateHash);
         WriteHash(writer, archive.HeadStateHash);
-        var sink = new StateBinarySink();
-        NumosState.Write(ref sink, checkpoint);
-        writer.Write(sink.WrittenSpan.Length);
-        writer.Write(sink.WrittenSpan);
+
+        // Sized for the voxel data plus framing, so a large world is written without the buffer regrowing.
+        long estimate = 4096;
+        foreach (var simulation in checkpoint.Simulations)
+            estimate += simulation.Checkpoint.PayloadBytes + 256L * simulation.Checkpoint.Chunks.Count;
+
+        var sink = StateBinarySink.Rent((int)Math.Min(estimate, Array.MaxLength));
+        try
+        {
+            NumosState.Write(ref sink, checkpoint);
+            writer.Write(sink.WrittenSpan.Length);
+            writer.Write(sink.WrittenSpan);
+        }
+        finally
+        {
+            sink.Return();
+        }
     }
 
     /// <summary>
@@ -47,13 +61,25 @@ internal static partial class AtmosWorldReplayCodec
 
         var initialHash = ReadHash(reader);
         var headHash = ReadHash(reader);
-        byte[] payload = AtmosReplayCodec.ReadPayload(reader, AtmosReplayCodec.ReadCount(reader, int.MaxValue, "world checkpoint byte"));
-        var state = new StateReader(payload, maxStringBytes)
-        {
-            SolverConfigurations = (reader as ReplayReader)?.SolverConfigurations,
-        };
+        int length = AtmosReplayCodec.ReadCount(reader, int.MaxValue, "world checkpoint byte");
 
-        var checkpoint = NumosState.Read<AtmosWorldCheckpoint>(ref state);
+        // Everything decoded is copied out of the payload, so its buffer can go back to the pool.
+        byte[] payload = AtmosReplayCodec.RentPayload(reader, length);
+        AtmosWorldCheckpoint checkpoint;
+        try
+        {
+            var state = new StateReader(payload.AsSpan(0, length), maxStringBytes)
+            {
+                SolverConfigurations = (reader as ReplayReader)?.SolverConfigurations,
+            };
+
+            checkpoint = NumosState.Read<AtmosWorldCheckpoint>(ref state);
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(payload);
+        }
+
         if (initialHash.Position != checkpoint.Position)
             throw new InvalidDataException("The world checkpoint schema or initial digest position is invalid.");
 

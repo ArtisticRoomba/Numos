@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Buffers.Binary;
 using System.Text;
 
@@ -41,6 +42,9 @@ public struct StateBinarySink : IStateSink
     private int[] _open;
     private int _depth;
 
+    // Whether _buffer came from the shared pool, so growing and Return hand it back.
+    private bool _pooled;
+
     /// <summary>
     ///     Creates an empty sink.
     /// </summary>
@@ -48,6 +52,47 @@ public struct StateBinarySink : IStateSink
     {
         _buffer = new byte[256];
         _open = new int[16];
+    }
+
+    /// <summary>
+    ///     Creates an empty sink with room for <paramref name="capacity" /> bytes before it has to grow.
+    /// </summary>
+    /// <param name="capacity">The expected payload size.</param>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="capacity" /> is negative.</exception>
+    public StateBinarySink(int capacity)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(capacity);
+        _buffer = new byte[Math.Max(capacity, 16)];
+        _open = new int[16];
+    }
+
+    private StateBinarySink(byte[] buffer, bool pooled)
+    {
+        _buffer = buffer;
+        _open = new int[16];
+        _pooled = pooled;
+    }
+
+    /// <summary>
+    ///     Creates a sink whose buffer comes from <see cref="ArrayPool{T}.Shared" />, for a large payload that's copied
+    ///     out once written. Call <see cref="Return" /> when done with <see cref="WrittenSpan" />.
+    /// </summary>
+    internal static StateBinarySink Rent(int capacity)
+    {
+        return new StateBinarySink(ArrayPool<byte>.Shared.Rent(Math.Max(capacity, 256)), true);
+    }
+
+    /// <summary>
+    ///     Gives a rented buffer back to the pool. The sink is empty afterwards.
+    /// </summary>
+    internal void Return()
+    {
+        if (_pooled)
+            ArrayPool<byte>.Shared.Return(_buffer);
+
+        _buffer = [];
+        _pooled = false;
+        Reset();
     }
 
     /// <summary>
@@ -153,11 +198,25 @@ public struct StateBinarySink : IStateSink
     {
         int required = checked(_length + count);
         if (required > _buffer.Length)
-            Array.Resize(ref _buffer, Math.Max(required, (int)Math.Min(Array.MaxLength, (long)_buffer.Length * 2)));
+            Grow(Math.Max(required, (int)Math.Min(Array.MaxLength, (long)_buffer.Length * 2)));
 
         Span<byte> span = _buffer.AsSpan(_length, count);
         _length = required;
         return span;
+    }
+
+    private void Grow(int length)
+    {
+        if (!_pooled)
+        {
+            Array.Resize(ref _buffer, length);
+            return;
+        }
+
+        byte[] grown = ArrayPool<byte>.Shared.Rent(length);
+        _buffer.AsSpan(0, _length).CopyTo(grown);
+        ArrayPool<byte>.Shared.Return(_buffer);
+        _buffer = grown;
     }
 
     private void Push(int placeholder)

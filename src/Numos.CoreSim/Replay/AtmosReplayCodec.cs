@@ -142,6 +142,43 @@ internal static partial class AtmosReplayCodec
     }
 
     /// <summary>
+    ///     Reads <paramref name="length" /> bytes into an array rented from <see cref="ArrayPool{T}.Shared" />, growing
+    ///     as data arrives like <see cref="ReadPayload(BinaryReader, int)" />.
+    /// </summary>
+    /// <returns>A rented array whose first <paramref name="length" /> bytes hold the payload. Return it when done.</returns>
+    internal static byte[] RentPayload(BinaryReader reader, int length)
+    {
+        const int chunk = 64 * 1024;
+        byte[] buffer = ArrayPool<byte>.Shared.Rent(Math.Min(length, chunk));
+        try
+        {
+            int filled = 0;
+            while (filled < length)
+            {
+                if (filled == buffer.Length)
+                {
+                    byte[] grown = ArrayPool<byte>.Shared.Rent((int)Math.Min(length, (long)buffer.Length * 2));
+                    buffer.AsSpan(0, filled).CopyTo(grown);
+                    ArrayPool<byte>.Shared.Return(buffer);
+                    buffer = grown;
+                }
+
+                int read = reader.Read(buffer, filled, Math.Min(buffer.Length, length) - filled);
+                if (read == 0) throw new EndOfStreamException();
+
+                filled += read;
+            }
+
+            return buffer;
+        }
+        catch
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+            throw;
+        }
+    }
+
+    /// <summary>
     ///     Reads <paramref name="length" /> bytes, growing the buffer as data arrives so a corrupt length can't make
     ///     the reader allocate more than the stream holds.
     /// </summary>
