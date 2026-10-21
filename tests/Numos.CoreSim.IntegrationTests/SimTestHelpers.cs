@@ -1,6 +1,7 @@
 using Numos.API;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.Datatypes.Snapshots;
+using Numos.CoreSim.EulerFlow;
 using Numos.Maths;
 
 namespace Numos.CoreSim.IntegrationTests;
@@ -15,6 +16,11 @@ internal static class SimTestHelpers
     internal const float DefaultTemperature = 300f;
     internal const float Tolerance = 0.0001f;
     internal const float EnergyTolerance = 0.001f;
+    internal const string EulerAirGasName = "Air";
+    internal const string EulerUnitGasName = "Unit";
+    internal const int EulerAirGasId = 0;
+    internal const int EulerUnitGasId = 1;
+    internal const float EulerAirMolarMass = 0.02897f;
 
     internal static AtmosConfig CreateDeterministicConfig()
     {
@@ -37,6 +43,103 @@ internal static class SimTestHelpers
                 TestGases.Create(FirstGasName, 0f),
                 TestGases.Create(SecondGasName, 0f)
             ]
+        };
+    }
+
+    /// <summary>
+    ///     SI configuration for the Euler transport tests: 1 m³ voxels, real molar masses, <c>Cv = 5R/2</c>
+    ///     (γ = 1.4), no sleep, no vacuum cleanup, no diffusion, and no substep cap unless the caller passes one.
+    /// </summary>
+    internal static AtmosConfig CreateEulerConfig(EulerFlowConfig? eulerFlow = null)
+    {
+        var config = new AtmosConfig
+        {
+            DefaultTemperatureFallback = AtmosPhysicalConstants.RoomTemperature,
+            DefaultMolarHeatCapacityAtConstantVolume =
+                AtmosPhysicalConstants.IdealDiatomicMolarHeatCapacityAtConstantVolume,
+            VoxelVolume = 1f,
+            DefaultDiffusionCoefficient = 0f,
+            VacuumThreshold = 0f,
+            SleepThreshold = int.MaxValue,
+            SleepEpsilon = 0f,
+            GasRegistry =
+            [
+                EulerGas(EulerAirGasName, EulerAirMolarMass),
+                EulerGas(EulerUnitGasName, 1f)
+            ]
+        };
+
+        config.SolverConfigurations.Add(eulerFlow ?? new EulerFlowConfig { MaxSubstepsPerTick = 0 });
+        return config;
+    }
+
+    /// <summary>
+    ///     A one-chunk simulation on the Euler pipeline. <paramref name="exactGasDynamics" /> turns off
+    ///     <c>thermodynamics</c> and <c>gas-reactions</c> so the result can be compared with the Euler equations alone.
+    /// </summary>
+    internal static AtmosSimulation CreateEulerSimulation(
+        AtmosConfig config, int width, int height, int depth,
+        out AtmosChunkHandle chunk, bool exactGasDynamics = true)
+    {
+        var simulation = new AtmosSimulation(config, width, height, depth);
+        simulation.World.Solvers.ResetToDefaults(AtmosTransportModel.Euler);
+        if (exactGasDynamics)
+        {
+            simulation.World.Solvers.SetEnabled(AtmosBuiltInSolvers.Thermodynamics, false);
+            simulation.World.Solvers.SetEnabled(AtmosBuiltInSolvers.GasReactions, false);
+        }
+
+        chunk = CreateOpenChunk(simulation, default);
+        return simulation;
+    }
+
+    /// <summary>
+    ///     Moles of an ideal gas that put one voxel of the configured volume at <paramref name="pressure" /> and
+    ///     <paramref name="temperature" />.
+    /// </summary>
+    internal static float MolesFor(AtmosConfig config, float pressure, float temperature)
+    {
+        return pressure * config.VoxelVolume / (AtmosPhysicalConstants.MolarGasConstant * temperature);
+    }
+
+    /// <summary>
+    ///     Total energy <c>Σ (C·T + ½·m·|u|²)</c> of a snapshot in double, the quantity the Euler stage conserves.
+    /// </summary>
+    internal static double TotalEulerEnergy(AtmosConfig config, AtmosChunkSnapshot snapshot)
+    {
+        double total = 0d;
+        for (int index = 0; index < snapshot.Temperature.Length; index++)
+        {
+            double heatCapacity = 0d;
+            double mass = 0d;
+            foreach (var gas in snapshot.Gases)
+            {
+                var properties = config.GasRegistry[gas.GasId];
+                heatCapacity += (double)gas.Moles[index] * properties.MolarHeatCapacityAtConstantVolume;
+                mass += (double)gas.Moles[index] * properties.MolarMass;
+            }
+
+            if (heatCapacity <= 0d)
+                continue;
+
+            double speedSquared = (double)snapshot.VelocityX[index] * snapshot.VelocityX[index] +
+                                  (double)snapshot.VelocityY[index] * snapshot.VelocityY[index] +
+                                  (double)snapshot.VelocityZ[index] * snapshot.VelocityZ[index];
+
+            total += heatCapacity * snapshot.Temperature[index] + 0.5d * mass * speedSquared;
+        }
+
+        return total;
+    }
+
+    private static GasProperties EulerGas(string name, float molarMass)
+    {
+        return new GasProperties
+        {
+            Name = name,
+            MolarMass = molarMass,
+            MolarHeatCapacityAtConstantVolume = AtmosPhysicalConstants.IdealDiatomicMolarHeatCapacityAtConstantVolume,
+            DiffusionCoefficient = 0f
         };
     }
 
