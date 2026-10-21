@@ -378,7 +378,8 @@ stages.
 
 `euler-flow` is a compressible Euler solver with density, momentum, and energy per voxel. It runs dimensionally split
 first-order Godunov sweeps with an HLLC flux at every face. It takes as many CFL substeps as the fastest signal in the
-world demands. `EulerFlowConfig` (§3.5) configures it. Faces between chunks are ordinary faces of the sweep, not a
+world demands. The sweep axis order cycles through all six permutations from one substep to the next, so no axis is
+always swept in the middle. `EulerFlowConfig` (§3.5) configures it. Faces between chunks are ordinary faces of the sweep, not a
 separate boundary stage (§6). A chunk that is asleep or holds no gas joins the sweep only once a neighbouring face needs
 it (§9). `AtmosSimulation.LastFlowDiagnostics` reports each tick's substep count and repairs.
 

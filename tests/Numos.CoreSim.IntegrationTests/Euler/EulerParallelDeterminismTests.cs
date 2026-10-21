@@ -26,7 +26,7 @@ public sealed class EulerParallelDeterminismTests
     ///     Update this only together with a deliberate physics or digest-format change, and confirm the new value is
     ///     stable across worker counts and schedules before approving it.
     /// </remarks>
-    private const ulong X64ExpectedBlastDigest = 9162575430212245762UL;
+    private const ulong X64ExpectedBlastDigest = 15150654544198574266UL;
 
     private const int ChunkSize = 16;
     private const float Temperature = 293f;
