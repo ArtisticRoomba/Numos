@@ -190,6 +190,9 @@ Four groups of built-in fields carry tags from `Numos.CoreSim.Replay`:
 `Numos.Replay.Generators` turns each tag group into one ordered field list. From that list it generates capture,
 restore, hashing, and the wire encoding. To add a field to one of these shapes, declare it and tag it with the next
 `Order` value. The hash and the codec come from the same list, so they cannot drift apart.
+Config and gas fields also get generated equality, which `AtmosConfigSnapshot.SemanticallyEquals` uses. A change to
+any tagged field is never mistaken for a no-op by `SetAtmosConfig`. The equality compares floats bitwise, the way the
+hash sees them, so `0f` and `-0f` count as different values.
 
 Fields with an irregular shape stay untagged and hand-written in `AtmosReplayCodec`. Examples are a companion count, a
 nested per-gas-channel array, and host-owned solver arrays. A hand-written `Write{Name}`/`Read{Name}` pair likewise takes
