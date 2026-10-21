@@ -407,48 +407,4 @@ internal static partial class AtmosReplayCodec
 
         return count;
     }
-
-    /// <summary>
-    ///     Reads <paramref name="count" /> little-endian primitives in one bulk read.
-    /// </summary>
-    internal static T[] ReadArray<T>(BinaryReader reader, int count)
-        where T : unmanaged
-    {
-        var values = new T[count];
-        var bytes = MemoryMarshal.AsBytes(values.AsSpan());
-        reader.BaseStream.ReadExactly(bytes);
-        if (!BitConverter.IsLittleEndian) ReverseElementBytes(bytes, Unsafe.SizeOf<T>());
-        return values;
-    }
-
-    /// <summary>
-    ///     Writes every element as a little-endian primitive in one bulk write, without a length prefix.
-    /// </summary>
-    internal static void WriteArray<T>(BinaryWriter writer, IReadOnlyList<T> values)
-        where T : unmanaged
-    {
-        T[] buffer = ArrayPool<T>.Shared.Rent(values.Count);
-        try
-        {
-            var span = buffer.AsSpan(0, values.Count);
-            if (values is ICollection<T> collection)
-                collection.CopyTo(buffer, 0);
-            else
-                for (int index = 0; index < span.Length; index++)
-                    span[index] = values[index];
-
-            var bytes = MemoryMarshal.AsBytes(span);
-            if (!BitConverter.IsLittleEndian) ReverseElementBytes(bytes, Unsafe.SizeOf<T>());
-            writer.Write(bytes);
-        }
-        finally
-        {
-            ArrayPool<T>.Shared.Return(buffer);
-        }
-    }
-
-    internal static void ReverseElementBytes(Span<byte> bytes, int elementSize)
-    {
-        for (int offset = 0; offset < bytes.Length; offset += elementSize) bytes.Slice(offset, elementSize).Reverse();
-    }
 }

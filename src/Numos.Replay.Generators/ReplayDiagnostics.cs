@@ -56,19 +56,11 @@ internal static class ReplayDiagnostics
         DiagnosticSeverity.Error,
         true);
 
-    public static readonly DiagnosticDescriptor UnsupportedCheckpointField = new(
+    public static readonly DiagnosticDescriptor UnsupportedLiveChunkArray = new(
         "NUMOSCHECKPTGEN001",
-        "Unsupported checkpoint field type",
-        "Checkpoint field '{0}' has type '{1}', which the checkpoint field generator can't copy, hash, encode, or compare; " +
-        "leave it untagged and hand-write its capture, hash, wire, and equality code",
-        Category,
-        DiagnosticSeverity.Error,
-        true);
-
-    public static readonly DiagnosticDescriptor DuplicateCheckpointOrder = new(
-        "NUMOSCHECKPTGEN002",
-        "Duplicate checkpoint field order",
-        "More than one member in '{0}' declares checkpoint field order {1}",
+        "Unsupported live chunk array",
+        "Live chunk array '{0}' has type '{1}'; [LiveChunkArray] needs an IReadOnlyList<T> property with a setter, " +
+        "so copy irregular shapes by hand",
         Category,
         DiagnosticSeverity.Error,
         true);

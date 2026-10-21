@@ -69,7 +69,7 @@ public sealed class ChunkArrayGenerator : IIncrementalGenerator
                 {
                     diagnostics.Add(
                         DiagnosticInfo.Create(
-                            ReplayDiagnostics.UnsupportedCheckpointField,
+                            ReplayDiagnostics.UnsupportedLiveChunkArray,
                             array.Location,
                             array.Member,
                             array.TypeDisplay));

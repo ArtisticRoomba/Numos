@@ -4,14 +4,12 @@ using Numos.CoreSim.State;
 namespace Numos.CoreSim.Tests.Replay;
 
 /// <summary>
-///     Exercises the checkpoint fields whose capture, restore, and hash code <c>Numos.Replay.Generators</c> generates.
-///     These are chunk arrays tagged with <see cref="ChunkCheckpointFieldAttribute" />, <see cref="AtmosConfigSnapshot" />
-///     scalars tagged with <see cref="ConfigCheckpointFieldAttribute" />, and <see cref="GasProperties" /> fields tagged
-///     with <see cref="GasCheckpointFieldAttribute" />. The tests call <c>AtmosChunkCheckpoint</c> and
-///     <c>AtmosStateHasher</c> internals directly, not only the public replay API in <c>Numos.API.Tests</c>.
+///     Exercises the chunk checkpoint's generated capture and restore (<see cref="LiveChunkArrayAttribute" />) and its
+///     state schema, plus the config and gas hashes, directly against CoreSim internals rather than only through the
+///     public replay API in <c>Numos.API.Tests</c>.
 /// </summary>
 [TestFixture]
-public sealed class CheckpointFieldGenerationParityTests
+public sealed class CheckpointStateFieldTests
 {
     [Test]
     public void ChunkCheckpoint_CapturesTaggedArraysFromLiveChunk()
