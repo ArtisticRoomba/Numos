@@ -79,7 +79,10 @@ public static class NumosWorldReplaySerializer
     ///     The container is malformed, inconsistent, or holds unsupported content such as a single-simulation replay
     ///     written by an earlier Numos version.
     /// </exception>
-    /// <exception cref="NotSupportedException">The replay contains host-defined state.</exception>
+    /// <exception cref="NotSupportedException">
+    ///     The replay contains host-defined state, such as a solver configuration whose key isn't registered in
+    ///     <see cref="NumosReplayReadOptions.SolverConfigurations" />.
+    /// </exception>
     public static NumosWorldReplayDocument Deserialize(Stream source, NumosReplayReadOptions? options = null)
     {
         var (metadata, checkpoint, recording) = ReadContainer(source, options);
@@ -166,6 +169,8 @@ public static class NumosWorldReplaySerializer
         if (options.MaxPayloadBytes <= 0 || options.MaxOperations < 0 || options.MaxStringBytes < 0 || options.MaxMetadataBytes < 0)
             throw new ArgumentOutOfRangeException(nameof(options));
 
+        ArgumentNullException.ThrowIfNull(options.SolverConfigurations, nameof(options));
+
         using var reader = new BinaryReader(source, AtmosReplayCodec.Utf8, true);
         if (!reader.ReadBytes(Magic.Length).SequenceEqual(Magic)) throw new InvalidDataException("The stream is not a Numos file.");
         if (reader.ReadUInt16() != ContainerVersion) throw new InvalidDataException("The Numos container version is unsupported.");
@@ -199,7 +204,7 @@ public static class NumosWorldReplaySerializer
                 throw new InvalidDataException("The replay metadata exceeds the configured limit.");
 
             var limited = new LimitedReadStream(source, (long)rawLength);
-            using var section = new BinaryReader(limited, AtmosReplayCodec.Utf8, true);
+            using var section = new ReplayReader(limited, options.SolverConfigurations);
             switch (id)
             {
                 case MetadataSection:
@@ -320,7 +325,7 @@ public static class NumosWorldReplaySerializer
         int count = AtmosReplayCodec.ReadCount(reader, options.MaxOperations, "world operation");
         var operations = new AtmosWorldRecordedOperation[count];
         var limited = new LimitedReadStream(reader.BaseStream, 0);
-        using var payload = new BinaryReader(limited, AtmosReplayCodec.Utf8, true);
+        using var payload = new ReplayReader(limited, options.SolverConfigurations);
         for (int index = 0; index < count; index++)
         {
             var position = AtmosReplayCodec.ReadPosition(reader);

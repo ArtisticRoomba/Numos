@@ -2,6 +2,7 @@ using Numos.API;
 using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.EulerFlow;
+using Numos.CoreSim.GasReactions;
 using Numos.CoreSim.Replay;
 using Numos.Maths;
 
@@ -53,6 +54,11 @@ public sealed class ReplayWireFormatGoldenTests
     // regenerate the constant after one. Do not hand-edit.
     private const string GoldenWorldReplayBase64 =
         "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";
+
+    // A world whose checkpoint and recorded config change both carry a GasReactionConfig. Captured with
+    // PrintGoldenBytes. Do not hand-edit.
+    private const string GoldenReactionReplayBase64 =
+        "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";
 
     [Test]
     public void LegacySimReplay_IsRejectedAsUnsupportedContent()
@@ -113,12 +119,111 @@ public sealed class ReplayWireFormatGoldenTests
     }
 
     [Test]
+    public void ReactionReplay_MatchesGoldenBytes()
+    {
+        using var stream = new MemoryStream();
+        NumosWorldReplaySerializer.Serialize(stream, BuildGoldenReactionReplayDocument());
+
+        Assert.That(stream.ToArray(), Is.EqualTo(Convert.FromBase64String(GoldenReactionReplayBase64)));
+    }
+
+    [Test]
+    public void ReactionReplay_GoldenBytesDecodeBothConfigurations()
+    {
+        var restored = NumosWorldReplaySerializer.Deserialize(new MemoryStream(Convert.FromBase64String(GoldenReactionReplayBase64)));
+        var expected = BuildGoldenReactionReplayDocument().Replay;
+
+        var initial = restored.Replay.InitialCheckpoint.Config.SolverConfigurations.Single();
+        var recorded = restored.Replay.Recording.Operations
+            .Select(static op => op.Operation)
+            .OfType<SetAtmosWorldConfigOperation>()
+            .Single()
+            .Config.SolverConfigurations.Single();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(initial.Key, Is.EqualTo(GasReactionConfig.ConfigurationKey));
+            Assert.That(initial.SemanticallyEquals(expected.InitialCheckpoint.Config.SolverConfigurations.Single()), Is.True);
+            Assert.That(recorded.SemanticallyEquals(initial), Is.False);
+            Assert.That(restored.Replay.HeadStateHash, Is.EqualTo(expected.HeadStateHash));
+        });
+
+        using var replayWorld = new AtmosWorld(new AtmosConfig(restored.Replay.InitialCheckpoint.Config));
+        var imported = AtmosWorldReplayTimeline.Import(replayWorld, restored.Replay, 1);
+        imported.ReturnToHead();
+        Assert.That(replayWorld.ComputeStateHash(), Is.EqualTo(restored.Replay.HeadStateHash));
+    }
+
+    [Test]
     [Explicit("Prints the current wire bytes as base64 so the golden constants above can be regenerated deliberately.")]
     public void PrintGoldenBytes()
     {
         using var worldStream = new MemoryStream();
         NumosWorldReplaySerializer.Serialize(worldStream, BuildGoldenWorldReplayDocument());
         TestContext.WriteLine("WORLD:" + Convert.ToBase64String(worldStream.ToArray()));
+
+        using var reactionStream = new MemoryStream();
+        NumosWorldReplaySerializer.Serialize(reactionStream, BuildGoldenReactionReplayDocument());
+        TestContext.WriteLine("REACTIONS:" + Convert.ToBase64String(reactionStream.ToArray()));
+    }
+
+    private static NumosWorldReplayDocument BuildGoldenReactionReplayDocument()
+    {
+        var air = new GasProperties { Name = "Air", DiffusionCoefficient = 0.02f };
+        var fuel = new GasProperties { Name = "Fuel", DiffusionCoefficient = 0.05f };
+        var config = new AtmosConfig { GasRegistry = [air, fuel] };
+        config.SolverConfigurations.Add(Reactions(air, fuel, 1f));
+
+        using var world = new AtmosWorld(config);
+        var simulation = world.CreateSimulation(1, 1, 1);
+        var timeline = new AtmosWorldReplayTimeline(world, 1);
+        CreateOpenChunk(simulation, new Int3(0, 0, 0));
+        world.Tick();
+
+        var changed = new AtmosConfig(world.Config);
+        changed.SolverConfigurations.Clear();
+        changed.SolverConfigurations.Add(Reactions(air, fuel, 2f));
+        world.SetAtmosConfig(changed);
+        world.Tick();
+
+        var metadata = new NumosReplayMetadata(
+            "Golden reaction fixture",
+            DateTimeOffset.UnixEpoch,
+            "numos-golden",
+            "1.0.0-golden",
+            "1.0.0-golden",
+            "phase2b-fixture");
+
+        return new NumosWorldReplayDocument(metadata, timeline.CaptureReplay());
+    }
+
+    // One reaction of each kind, every field set to something distinct, and a speed factor so the nested set and
+    // positional record are on the wire too. The reactions need temperatures no voxel reaches, so ticking leaves the
+    // fixture's gas untouched.
+    private static GasReactionConfig Reactions(GasProperties air, GasProperties fuel, float scale)
+    {
+        var factor = new LinearGasReaction.LinearSpeedFactor(fuel, 0.1f, 2f, 0.5f, 1.5f, false, true);
+        var linear = new LinearGasReaction(
+            new Dictionary<GasProperties, float> { [fuel] = 1f, [air] = 2f },
+            new Dictionary<GasProperties, float> { [air] = 3f * scale },
+            100f,
+            5000f,
+            6000f,
+            0.3f,
+            0.9f,
+            true,
+            false,
+            new HashSet<LinearGasReaction.LinearSpeedFactor> { factor });
+
+        var standard = new StandardGasReaction(
+            new Dictionary<GasProperties, float> { [fuel] = 2f },
+            new Dictionary<GasProperties, float> { [air] = 1f },
+            -50f,
+            1.3f * scale,
+            1e9f,
+            new Dictionary<GasProperties, float> { [fuel] = 0.5f });
+
+        return new GasReactionConfig([linear], [standard]);
     }
 
     private static NumosWorldReplayDocument BuildGoldenWorldReplayDocument()

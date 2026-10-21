@@ -4,6 +4,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.EulerFlow;
+using Numos.CoreSim.State;
 using Numos.Maths;
 
 namespace Numos.CoreSim.Replay;
@@ -76,9 +77,14 @@ internal static partial class AtmosReplayCodec
     }
 
     /// <summary>
-    ///     Writes a configuration snapshot, including its portable solver configurations as key/payload pairs.
+    ///     Writes a configuration: scalar fields, the gas registry, then its solver configurations.
     /// </summary>
-    /// <exception cref="NotSupportedException">A solver configuration is a host type with no wire encoding.</exception>
+    /// <remarks>
+    ///     Solver configurations are a count followed by, for each one in the snapshot's ordinal key order, its key
+    ///     and a length-prefixed <see cref="StateBinarySink" /> payload. With none, that's a single zero count, which
+    ///     is what files written before solver configurations could be saved contain.
+    /// </remarks>
+    /// <exception cref="NotSupportedException">A solver configuration is neither a <see cref="NumosStateAttribute" /> type nor a built-in portable one.</exception>
     internal static void WriteConfig(BinaryWriter writer, AtmosConfigSnapshot config)
     {
         GeneratedCheckpointFields.WriteConfigFields(writer, config);
@@ -87,17 +93,36 @@ internal static partial class AtmosReplayCodec
         writer.Write(config.SolverConfigurations.Count);
         foreach (var configuration in config.SolverConfigurations)
         {
-            if (configuration is not IPortableSolverConfiguration portable)
+            if (configuration is IPortableSolverConfiguration portable)
             {
-                throw new NotSupportedException(
-                    $"Portable replay files cannot encode the solver configuration '{configuration.Key}'.");
+                WriteString(writer, configuration.Key);
+                portable.WriteWire(writer);
+                continue;
             }
 
+            if (configuration is not INumosState state)
+            {
+                throw new NotSupportedException(
+                    $"Solver configuration '{configuration.Key}' ({configuration.GetType()}) isn't a [NumosState] type, so it can't be saved.");
+            }
+
+            var sink = new StateBinarySink();
+            state.WriteState(ref sink);
             WriteString(writer, configuration.Key);
-            portable.WriteWire(writer);
+            writer.Write(sink.WrittenSpan.Length);
+            writer.Write(sink.WrittenSpan);
         }
     }
 
+    /// <summary>
+    ///     Reads a configuration written by <see cref="WriteConfig" />.
+    /// </summary>
+    /// <remarks>
+    ///     Solver configuration keys are looked up in the <see cref="ReplayReader.SolverConfigurations" /> registry when
+    ///     <paramref name="reader" /> carries one, and in the built-in registry otherwise.
+    /// </remarks>
+    /// <exception cref="InvalidDataException">The data is malformed.</exception>
+    /// <exception cref="NotSupportedException">A solver configuration key has no registered type.</exception>
     internal static AtmosConfigSnapshot ReadConfig(BinaryReader reader, int maxStringBytes)
     {
         var config = new AtmosConfig();
@@ -107,21 +132,71 @@ internal static partial class AtmosReplayCodec
         for (int index = 0; index < gasCount; index++)
             config.GasRegistry.Add(GeneratedCheckpointFields.ReadGasFields(reader, maxStringBytes));
 
+        var types = (reader as ReplayReader)?.SolverConfigurations ?? SolverConfigurationTypes.BuiltIn;
         int configurationCount = ReadCount(reader, 1_000_000, "solver configuration");
+        string? previousKey = null;
         for (int index = 0; index < configurationCount; index++)
         {
             string key = ReadString(reader, maxStringBytes);
-            if (!PortableConfigurationReaders.TryGetValue(key, out var read))
-                throw new NotSupportedException("Portable replay files cannot decode custom solver configurations.");
+            if (previousKey != null && string.CompareOrdinal(previousKey, key) >= 0)
+                throw new InvalidDataException("Solver configurations are not in ascending ordinal key order.");
 
-            var configuration = read(reader);
-            if (configuration.Key != key)
-                throw new InvalidDataException("The solver configuration key does not match its payload.");
+            previousKey = key;
+            if (PortableConfigurationReaders.TryGetValue(key, out var readPortable))
+            {
+                var portable = readPortable(reader);
+                if (portable.Key != key)
+                    throw new InvalidDataException("The solver configuration key does not match its payload.");
+
+                config.SolverConfigurations.Add(portable);
+                continue;
+            }
+
+            byte[] payload = ReadPayload(reader, ReadCount(reader, int.MaxValue, "solver configuration byte"));
+            var state = new StateReader(payload, maxStringBytes);
+            if (!types.TryRead(key, ref state, config.GasRegistry, out var configuration))
+            {
+                throw new NotSupportedException(
+                    $"The file contains solver configuration '{key}', but no type is registered for that key. " +
+                    "Register it in NumosReplayReadOptions.SolverConfigurations before loading.");
+            }
+
+            if (!state.IsAtEnd)
+                throw new InvalidDataException($"Solver configuration '{key}' has trailing data.");
+
+            if (configuration!.Key != key)
+            {
+                throw new InvalidDataException(
+                    $"Solver configuration saved as '{key}' loaded as {configuration.GetType()} with key '{configuration.Key}'.");
+            }
 
             config.SolverConfigurations.Add(configuration);
         }
 
         return config.CreateSnapshot();
+    }
+
+    /// <summary>
+    ///     Reads <paramref name="length" /> bytes, growing the buffer as data arrives so a corrupt length can't make
+    ///     the reader allocate more than the stream holds.
+    /// </summary>
+    internal static byte[] ReadPayload(BinaryReader reader, int length)
+    {
+        const int chunk = 64 * 1024;
+        byte[] buffer = new byte[Math.Min(length, chunk)];
+        int filled = 0;
+        while (filled < length)
+        {
+            if (filled == buffer.Length)
+                Array.Resize(ref buffer, (int)Math.Min(length, (long)buffer.Length * 2));
+
+            int read = reader.Read(buffer, filled, buffer.Length - filled);
+            if (read == 0) throw new EndOfStreamException();
+
+            filled += read;
+        }
+
+        return buffer;
     }
 
     private static void WriteChunk(BinaryWriter writer, AtmosChunkCheckpoint chunk)

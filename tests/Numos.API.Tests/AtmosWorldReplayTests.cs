@@ -14,7 +14,7 @@ public sealed class AtmosWorldReplayTests
     public void Restore_AcceptsCompatibleInMemoryHistoryThatPortableImportRejects()
     {
         var config = CreateConfig();
-        config.SolverConfigurations = [new GasReactionConfig()];
+        config.SolverConfigurations = [new HandWrittenSettings(3)];
         using var source = new AtmosWorld(config);
         source.CreateSimulation(1, 1, 1);
         var sourceTimeline = new AtmosWorldReplayTimeline(source, 1);
@@ -242,6 +242,18 @@ public sealed class AtmosWorldReplayTests
         Assert.That(
             () => world.CreatePortal(simulation.GetCellRef(chunk, 0), simulation.GetCellRef(chunk, 1)),
             Throws.ArgumentException);
+    }
+
+    // No [NumosState], so it has no wire format: in-memory restore works, portable files don't.
+    private sealed record HandWrittenSettings(int Value) : IAtmosSolverConfiguration
+    {
+        public string Key => "tests/hand-written";
+
+        public IAtmosSolverConfiguration CreateSnapshot(IGasRegistry gasRegistry) => this;
+
+        public bool SemanticallyEquals(IAtmosSolverConfiguration other) => Equals(other);
+
+        public ulong ComputeStateHash() => unchecked((ulong)Value);
     }
 
     private static AtmosConfig CreateConfig()

@@ -1,3 +1,5 @@
+using Numos.CoreSim;
+using Numos.CoreSim.State;
 using System.Collections.ObjectModel;
 using Numos.CoreSim.Replay;
 
@@ -72,7 +74,8 @@ public sealed class AtmosWorldReplayArchive
     ///     Throws when this archive depends on host-defined solver state.
     /// </summary>
     /// <exception cref="NotSupportedException">
-    ///     The archive contains custom solvers, solver configurations, or solver arrays.
+    ///     The archive contains custom solvers, solver configurations that aren't <see cref="NumosStateAttribute" />
+    ///     types, or solver arrays.
     /// </exception>
     public void EnsurePortable()
     {
@@ -96,24 +99,23 @@ public sealed class AtmosWorldReplayArchive
         foreach (var array in chunk.SolverArrays)
             yield return $"solver array '{array.Key}' in simulation {simulation.Simulation}, chunk {chunk.Position}";
 
-        // Built-in configurations with a wire encoding ride along; only host types are unsupported.
-        foreach (var configuration in checkpoint.Config.SolverConfigurations)
-        {
-            if (configuration is not IPortableSolverConfiguration)
-                yield return $"world solver configuration '{configuration.Key}'";
-        }
+        // [NumosState] configurations and the built-in portable ones save themselves. Only host types are unsupported.
+        foreach (var configuration in checkpoint.Config.SolverConfigurations.Where(static value => !IsSavable(value)))
+            yield return $"world solver configuration '{configuration.Key}' (not a [NumosState] type)";
 
         foreach (var recorded in recording.Operations)
         {
             if (recorded.Operation is not SetAtmosWorldConfigOperation config)
                 continue;
 
-            foreach (var configuration in config.Config.SolverConfigurations)
-            {
-                if (configuration is not IPortableSolverConfiguration)
-                    yield return $"recorded solver configuration '{configuration.Key}'";
-            }
+            foreach (var configuration in config.Config.SolverConfigurations.Where(static value => !IsSavable(value)))
+                yield return $"recorded solver configuration '{configuration.Key}' (not a [NumosState] type)";
         }
+    }
+
+    private static bool IsSavable(IAtmosSolverConfiguration configuration)
+    {
+        return configuration is INumosState or IPortableSolverConfiguration;
     }
 }
 
