@@ -20,13 +20,18 @@ public readonly record struct DockEndpoint(AtmosSimulationId Simulation, Int3 Ch
 /// <param name="FlipU">Whether to mirror the second face along its U axis after rotation.</param>
 /// <param name="FlipV">Whether to mirror the second face along its V axis after rotation.</param>
 /// <param name="Flags">The transport modes of each link.</param>
+/// <param name="AreaFraction">
+///     The open area of each link as a fraction of one voxel face, or <see langword="null" /> to follow the
+///     configuration default.
+/// </param>
 public readonly record struct DockDefinition(
     DockEndpoint First,
     DockEndpoint Second,
     int Rotation,
     bool FlipU,
     bool FlipV,
-    ExplicitLinkFlags Flags);
+    ExplicitLinkFlags Flags,
+    float? AreaFraction = null);
 
 public sealed partial class WorkbenchSession
 {
@@ -41,8 +46,18 @@ public sealed partial class WorkbenchSession
     /// <summary>
     ///     Creates a portal between two cells. It activates at the next tick boundary.
     /// </summary>
+    /// <param name="first">The first cell.</param>
+    /// <param name="second">The second cell.</param>
+    /// <param name="flags">The transport modes of the link.</param>
+    /// <param name="areaFraction">
+    ///     The open area as a fraction of one voxel face, or <see langword="null" /> for the configuration default.
+    /// </param>
     /// <returns>The portal handle.</returns>
-    public AtmosPortalHandle CreatePortal(AtmosCellRef first, AtmosCellRef second, ExplicitLinkFlags flags)
+    public AtmosPortalHandle CreatePortal(
+        AtmosCellRef first,
+        AtmosCellRef second,
+        ExplicitLinkFlags flags,
+        float? areaFraction = null)
     {
         return Guard(
             "Could not create the portal",
@@ -50,7 +65,7 @@ public sealed partial class WorkbenchSession
             {
                 var world = RequireWorld();
                 ThrowIfInspecting();
-                var portal = world.CreatePortal(first, second, flags);
+                var portal = world.CreatePortal(first, second, flags, areaFraction);
                 Info("Created portal. It will activate on the next world tick.");
                 return portal;
             });
@@ -94,7 +109,8 @@ public sealed partial class WorkbenchSession
             links[destination++] = new ExplicitLinkDefinition(
                 new AtmosCellRef(firstSimulation.Id, firstChunk, firstIndex),
                 new AtmosCellRef(secondSimulation.Id, secondChunk, secondIndex),
-                dock.Flags);
+                dock.Flags,
+                dock.AreaFraction);
         }
 
         return links;

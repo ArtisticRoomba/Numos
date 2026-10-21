@@ -23,20 +23,37 @@ internal readonly record struct ExplicitTransportEndpoint(AtmosChunk Chunk, usho
 /// <summary>
 ///     Describes one canonical, resolved sparse edge for the duration of a world tick.
 /// </summary>
+/// <param name="First">The canonically first endpoint.</param>
+/// <param name="Second">The other endpoint.</param>
+/// <param name="Capabilities">The interactions the link allows.</param>
+/// <param name="AreaFraction">
+///     The link's open area as a fraction of one voxel face, or <see langword="null" /> to use the configured default.
+/// </param>
 internal readonly record struct ExplicitTransportEdge(
     ExplicitTransportEndpoint First,
     ExplicitTransportEndpoint Second,
-    ExplicitTransportCapabilities Capabilities);
+    ExplicitTransportCapabilities Capabilities,
+    float? AreaFraction = null);
 
 /// <summary>
 ///     Applies sparse cell-to-cell transport from a tick-start snapshot using shared per-cell limits.
 /// </summary>
 /// <remarks>
-///     The authoritative topology lives above the kernels.
-///     This type consumes a dense, already ordered view, so portal and dock lifecycle concepts stay out of the
-///     physics loop.
-///     Numos calculates all requests before it changes any cell.
-///     All outgoing requests for one cell and species share the same availability limiter.
+///     <para>
+///         The authoritative topology lives above the kernels.
+///         This type consumes a dense, already ordered view, so portal and dock lifecycle concepts stay out of the
+///         physics loop.
+///         Numos calculates all requests before it changes any cell.
+///         All outgoing requests for one cell and species share the same availability limiter.
+///     </para>
+///     <para>
+///         A link is a duct. It carries mass and the energy that mass holds, never momentum.
+///         Gas requests scale with the link's area fraction, so a half-open hatch moves half of what a full face
+///         moves under the same pressure difference.
+///         Conduction through <see cref="ExplicitTransportCapabilities.Thermal" /> is not scaled.
+///         The existing conductance law is a heat-capacity-bounded relaxation and not an area-based flux.
+///         Shrinking it with the opening is a separate modeling question.
+///     </para>
 /// </remarks>
 internal sealed class ExplicitAtmosTransportSolver
 {
@@ -204,6 +221,12 @@ internal sealed class ExplicitAtmosTransportSolver
             if ((edge.Capabilities & enabledCapabilities & ExplicitTransportCapabilities.Gas) == 0)
                 continue;
 
+            // Unsized links follow the configured default, read per tick rather than baked in at registration so a
+            // configuration change resizes every one of them without touching the topology.
+            Scalar areaFraction = edge.AreaFraction ?? config.EulerFlow.DefaultLinkAreaFraction;
+            if (areaFraction <= 0f)
+                continue;
+
             int firstCell = edgeCells[edgeIndex * 2];
             int secondCell = edgeCells[edgeIndex * 2 + 1];
             var first = cells[firstCell];
@@ -263,8 +286,9 @@ internal sealed class ExplicitAtmosTransportSolver
                     dx,
                     config);
 
-                forward = MathF.Max(0f, forward);
-                reverse = MathF.Max(0f, reverse);
+                // Scale after the per-edge diffusion cap so a narrow link never asks for more than a full face would.
+                forward = MathF.Max(0f, forward) * areaFraction;
+                reverse = MathF.Max(0f, reverse) * areaFraction;
                 forwardRequests[edgeOffset + gasId] = forward;
                 reverseRequests[edgeOffset + gasId] = reverse;
                 requestedOutflow[firstOffset + gasId] += forward;

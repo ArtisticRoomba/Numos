@@ -166,11 +166,14 @@ detached copies. The current implementation has no copy-on-write storage, delta 
 `AtmosSimulationCheckpoint.PayloadBytes` reports bytes in copied chunk and solver arrays. It excludes managed object
 headers and field names.
 
-The world checkpoint schema is `AtmosWorldCheckpoint.CurrentFormatVersion` 7. The grid schema inside it is format
+The world checkpoint schema is `AtmosWorldCheckpoint.CurrentFormatVersion` 8. The grid schema inside it is format
 version 7, compatibility version 4. World version 6 added the reference and per-gas molar masses to the configuration
 section. World version 7 made that section carry the built-in solver configurations that have a wire encoding.
 After the gas registry comes a count, then each entry's key followed by its payload. Before version 7 the count was
-always zero. Grid version 7 added the three per-voxel momentum arrays to every chunk. Numos hashes them like any other chunk
+always zero. World version 8 gave every explicit link an area fraction. It is one float after the link's flags, both in
+link-set slots and in `CreateAtmosLinkSetOperation` payloads. Numos writes NaN when the link defers to
+`EulerFlowConfig.DefaultLinkAreaFraction`. Registration never accepts NaN as a value, so the marker cannot collide. The
+hash covers the fraction the same way. Grid version 7 added the three per-voxel momentum arrays to every chunk. Numos hashes them like any other chunk
 array, so the compatibility version moved with them. Replay is experimental, so Numos rejects older in-memory checkpoint schemas instead
 of translating them.
 
@@ -520,9 +523,9 @@ A `.numos` replay contains a small provenance header, one complete initial world
 semantic opcodes. It stores initial and final state hashes. The Viewer verifies both hashes. After loading, the Viewer
 generates scrub checkpoints every 50 ticks, so those large acceleration snapshots never enter the file.
 
-The checkpoint section carries the world checkpoint format version (7). A file written before configuration and solver
-state moved out of the per-simulation checkpoints, before molar masses joined the configuration, or before solver
-configurations gained a wire encoding, fails to load with an unsupported-schema error. Numos does not
+The checkpoint section carries the world checkpoint format version (8). A file written before configuration and solver
+state moved out of the per-simulation checkpoints, before molar masses joined the configuration, before solver
+configurations gained a wire encoding, or before explicit links carried an area fraction, fails to load with an unsupported-schema error. Numos does not
 misread it.
 
 Viewer branch graphs are session state. Saving writes the selected branch, either through its preserved head or through

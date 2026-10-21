@@ -211,16 +211,22 @@ internal static partial class AtmosWorldReplayCodec
         return new ExplicitLinkSetHandle(reader.ReadInt32(), reader.ReadUInt32());
     }
 
+    // An unset area fraction is written as NaN. Registration never accepts NaN as a value, so the two cannot collide.
     private static void WriteLink(BinaryWriter writer, ExplicitLinkDefinition link)
     {
         WriteCell(writer, link.First);
         WriteCell(writer, link.Second);
         writer.Write((byte)link.Flags);
+        writer.Write(link.AreaFraction ?? float.NaN);
     }
 
     private static ExplicitLinkDefinition ReadLink(BinaryReader reader)
     {
-        return new ExplicitLinkDefinition(ReadCell(reader), ReadCell(reader), (ExplicitLinkFlags)reader.ReadByte());
+        var first = ReadCell(reader);
+        var second = ReadCell(reader);
+        var flags = (ExplicitLinkFlags)reader.ReadByte();
+        float areaFraction = reader.ReadSingle();
+        return new ExplicitLinkDefinition(first, second, flags, float.IsNaN(areaFraction) ? null : areaFraction);
     }
 
     private static void WriteCell(BinaryWriter writer, AtmosCellRef cell)

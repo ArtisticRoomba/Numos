@@ -520,6 +520,7 @@ internal static class AtmosWorldCheckpointHasher
                 AddCell(ref hash, link.First);
                 AddCell(ref hash, link.Second);
                 hash.AddByte((byte)link.Flags);
+                hash.Add(link.AreaFraction ?? float.NaN);
             }
         }
 

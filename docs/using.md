@@ -67,6 +67,16 @@ AtmosCellRef shuttleCell = shuttle.GetCellRef(shuttleChunk, shuttleVoxelIndex);
 AtmosPortalHandle portal = world.CreatePortal(stationCell, shuttleCell);
 ```
 
+A link is as wide as one voxel face unless you say otherwise. The optional `areaFraction` argument sets the open area as a
+fraction of a face, from 0 to 1. `ExplicitLinkDefinition.AreaFraction` does the same for docks and link batches. Gas
+transport through the link scales with the fraction. Thermal conduction does not. Unset links follow
+`EulerFlowConfig.DefaultLinkAreaFraction`.
+
+```csharp
+// A hatch open to half of one voxel face.
+AtmosPortalHandle hatch = world.CreatePortal(hallwayCell, maintenanceCell, areaFraction: 0.5f);
+```
+
 `CreatePortal`, `CreateDock`, and `CreateLinks` all compile to the same undirected solver edge. A dock is
 a batch of corresponding surface-cell links. Numos removes the batch as one unit:
 
