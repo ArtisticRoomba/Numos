@@ -420,6 +420,9 @@ public sealed partial class AtmosWorld : IDisposable
     ///     its ordinary Cartesian neighbors, has <see cref="ExplicitLinkFlags.None" />, or duplicates an edge already
     ///     in this batch or in another link set that is active or pending activation.
     /// </exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    ///     An edge's <see cref="ExplicitLinkDefinition.AreaFraction" /> is not finite or lies outside [0, 1].
+    /// </exception>
     /// <exception cref="InvalidOperationException">Called from a solver callback.</exception>
     /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
     [PublicAPI]
@@ -445,6 +448,7 @@ public sealed partial class AtmosWorld : IDisposable
             {
                 var definition = links[index];
                 ValidateFlags(definition.Flags, nameof(links));
+                ValidateAreaFraction(definition.AreaFraction, nameof(links));
                 ValidateCell(definition.First, nameof(links));
                 ValidateCell(definition.Second, nameof(links));
                 if (definition.First == definition.Second)
@@ -466,7 +470,7 @@ public sealed partial class AtmosWorld : IDisposable
                 if (!batchKeys.Add(key) || _reservedEdges.Contains(key))
                     throw new ArgumentException("A physical explicit edge may be registered only once.", nameof(links));
 
-                canonical[index] = new ExplicitAtmosEdge(first, second, definition.Flags);
+                canonical[index] = new ExplicitAtmosEdge(first, second, definition.Flags, definition.AreaFraction);
             }
 
             Array.Sort(canonical, ExplicitAtmosEdgeComparer.Instance);
@@ -518,15 +522,29 @@ public sealed partial class AtmosWorld : IDisposable
     /// <param name="first">One portal endpoint.</param>
     /// <param name="second">The other portal endpoint.</param>
     /// <param name="flags">The physical interactions permitted through the portal.</param>
+    /// <param name="areaFraction">
+    ///     The portal's open area as a fraction of one voxel face, in [0, 1], or <see langword="null" /> to use
+    ///     <see cref="Numos.CoreSim.EulerFlow.EulerFlowConfig.DefaultLinkAreaFraction" />. Gas transport through the
+    ///     portal scales with it; thermal conduction does not.
+    /// </param>
     /// <returns>A portal handle that removes the underlying link as one unit.</returns>
     /// <remarks>
     ///     Equivalent to <see cref="CreateLinks" /> with a single definition, except that snapshots and recordings
     ///     tag the link set as a portal.
     /// </remarks>
+    /// <example>
+    ///     <code>
+    ///     // A half-open hatch: moves half the gas per tick of a full-face portal, conducts heat as before.
+    ///     AtmosPortalHandle hatch = world.CreatePortal(cabinCell, airlockCell, areaFraction: 0.5f);
+    ///     </code>
+    /// </example>
     /// <exception cref="ArgumentException">
     ///     An endpoint is outside this world, both endpoints identify the same cell or ordinary Cartesian neighbors,
     ///     <paramref name="flags" /> is <see cref="ExplicitLinkFlags.None" />, or the physical edge is already
     ///     registered.
+    /// </exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    ///     <paramref name="areaFraction" /> is not finite or lies outside [0, 1].
     /// </exception>
     /// <exception cref="InvalidOperationException">Called from a solver callback.</exception>
     /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
@@ -534,9 +552,10 @@ public sealed partial class AtmosWorld : IDisposable
     public AtmosPortalHandle CreatePortal(
         AtmosCellRef first,
         AtmosCellRef second,
-        ExplicitLinkFlags flags = ExplicitLinkFlags.All)
+        ExplicitLinkFlags flags = ExplicitLinkFlags.All,
+        float? areaFraction = null)
     {
-        ExplicitLinkDefinition definition = new(first, second, flags);
+        ExplicitLinkDefinition definition = new(first, second, flags, areaFraction);
         return new AtmosPortalHandle(
             CreateLinksCore(new ReadOnlySpan<ExplicitLinkDefinition>(in definition), ExplicitLinkSetKind.Portal));
     }
@@ -570,6 +589,9 @@ public sealed partial class AtmosWorld : IDisposable
     ///     The surface is empty, or an edge has an endpoint outside this world, connects a cell to itself or to one
     ///     of its ordinary Cartesian neighbors, has <see cref="ExplicitLinkFlags.None" />, or duplicates an edge
     ///     already in this batch or in another link set that is active or pending activation.
+    /// </exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    ///     An edge's <see cref="ExplicitLinkDefinition.AreaFraction" /> is not finite or lies outside [0, 1].
     /// </exception>
     /// <exception cref="InvalidOperationException">Called from a solver callback.</exception>
     /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
@@ -612,7 +634,7 @@ public sealed partial class AtmosWorld : IDisposable
             for (int index = 0; index < result.Length; index++)
             {
                 var edge = slot.Edges[index];
-                result[index] = new ExplicitLinkDefinition(edge.First, edge.Second, edge.Flags);
+                result[index] = new ExplicitLinkDefinition(edge.First, edge.Second, edge.Flags, edge.AreaFraction);
             }
 
             return result;
@@ -1248,6 +1270,7 @@ public sealed partial class AtmosWorld : IDisposable
             foreach (var definition in slot.Links)
             {
                 ValidateFlags(definition.Flags, nameof(checkpoint));
+                ValidateAreaFraction(definition.AreaFraction, nameof(checkpoint));
                 bool requiresLiveEndpoints = state is LinkSetState.PendingCreate or LinkSetState.Active;
                 if (definition.First.CompareTo(definition.Second) >= 0 ||
                     requiresLiveEndpoints &&
@@ -1257,7 +1280,12 @@ public sealed partial class AtmosWorld : IDisposable
                     throw new ArgumentException("The world checkpoint contains an invalid or noncanonical edge.", nameof(checkpoint));
                 }
 
-                var edge = new ExplicitAtmosEdge(definition.First, definition.Second, definition.Flags);
+                var edge = new ExplicitAtmosEdge(
+                    definition.First,
+                    definition.Second,
+                    definition.Flags,
+                    definition.AreaFraction);
+
                 var edgeKey = new ExplicitEdgeKey(edge.First, edge.Second);
                 bool duplicateInCurrent = IsSolverActive(state) && !currentPhysicalEdges.Add(edgeKey);
                 bool duplicateAfterBoundary =
@@ -1290,7 +1318,7 @@ public sealed partial class AtmosWorld : IDisposable
             var checkpoint = checkpoints[slotIndex];
             var state = (LinkSetState)checkpoint.State;
             ExplicitAtmosEdge[] edges = checkpoint.Links
-                .Select(static link => new ExplicitAtmosEdge(link.First, link.Second, link.Flags))
+                .Select(static link => new ExplicitAtmosEdge(link.First, link.Second, link.Flags, link.AreaFraction))
                 .ToArray();
 
             _linkSlots.Add(new LinkSetSlot(checkpoint.Generation, state, checkpoint.Kind, edges));
@@ -1353,7 +1381,8 @@ public sealed partial class AtmosWorld : IDisposable
                 resolved[count++] = new ExplicitTransportEdge(
                     first,
                     second,
-                    (ExplicitTransportCapabilities)edge.Flags);
+                    (ExplicitTransportCapabilities)edge.Flags,
+                    edge.AreaFraction);
             }
 
             if (count > 0)
@@ -1626,6 +1655,19 @@ public sealed partial class AtmosWorld : IDisposable
             throw new ArgumentException("An explicit link must select at least one transport capability.", parameterName);
     }
 
+    private static void ValidateAreaFraction(float? areaFraction, string parameterName)
+    {
+        // null defers to EulerFlowConfig.DefaultLinkAreaFraction at solve time, so a config change can resize every
+        // unsized link at once. An explicit value has to be a real fraction of a face; NaN is not a second "unset".
+        if (areaFraction is { } area && !(area >= 0f && area <= 1f))
+        {
+            throw new ArgumentOutOfRangeException(
+                parameterName,
+                area,
+                "An explicit link's area fraction must be a finite value in [0, 1].");
+        }
+    }
+
     private void ValidateSimulation(AtmosSimulation simulation, string parameterName)
     {
         if (!ContainsSimulation(simulation))
@@ -1812,7 +1854,7 @@ public sealed partial class AtmosWorld : IDisposable
         for (int index = 0; index < result.Length; index++)
         {
             var edge = edges[index];
-            result[index] = new ExplicitLinkDefinition(edge.First, edge.Second, edge.Flags);
+            result[index] = new ExplicitLinkDefinition(edge.First, edge.Second, edge.Flags, edge.AreaFraction);
         }
 
         return result;
@@ -1879,7 +1921,8 @@ public sealed partial class AtmosWorld : IDisposable
     private readonly record struct ExplicitAtmosEdge(
         AtmosCellRef First,
         AtmosCellRef Second,
-        ExplicitLinkFlags Flags);
+        ExplicitLinkFlags Flags,
+        float? AreaFraction);
 
     private sealed class ExplicitAtmosEdgeComparer : IComparer<ExplicitAtmosEdge>
     {
@@ -1892,7 +1935,11 @@ public sealed partial class AtmosWorld : IDisposable
                 return comparison;
 
             comparison = left.Second.CompareTo(right.Second);
-            return comparison != 0 ? comparison : left.Flags.CompareTo(right.Flags);
+            if (comparison != 0)
+                return comparison;
+
+            comparison = left.Flags.CompareTo(right.Flags);
+            return comparison != 0 ? comparison : Nullable.Compare(left.AreaFraction, right.AreaFraction);
         }
     }
 

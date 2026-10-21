@@ -21,6 +21,7 @@ public partial class SimulationViewer
     private int _dockSecondSimulation;
     private AtmosCellRef? _portalFirst;
     private AtmosCellRef? _portalSecond;
+    private float _topologyAreaFraction = 1f;
     private bool _removeTopologyModalOpen;
     private bool _requestRemoveTopology;
     private ExplicitLinkSetHandle? _selectedLinkSet;
@@ -83,7 +84,7 @@ public partial class SimulationViewer
             ImGui.SeparatorText("Selected Connection");
             if (ImGui.BeginTable(
                     "SelectedTopologyStatus##world",
-                    3,
+                    4,
                     ImGuiTableFlags.Borders | ImGuiTableFlags.SizingStretchSame))
             {
                 ImGui.TableNextColumn();
@@ -92,6 +93,8 @@ public partial class SimulationViewer
                 ImGuiExtensions.StatusField("LINKS", selected.Links.Count.ToString());
                 ImGui.TableNextColumn();
                 ImGuiExtensions.StatusField("STATE", FormatLinkSetState(selected.State));
+                ImGui.TableNextColumn();
+                ImGuiExtensions.StatusField("AREA", FormatAreaFraction(selected.Links));
                 ImGui.EndTable();
             }
 
@@ -151,6 +154,13 @@ public partial class SimulationViewer
 
         ImGui.EndDisabled();
         ImGuiExtensions.QuestionTooltip("Allows conductive heat transfer even when no gas crosses the connection.");
+        ImGui.BeginDisabled(inspecting);
+        if (ImGui.SliderFloat("Opening area", ref _topologyAreaFraction, 0f, 1f, "%.2f of a face"))
+            _topologyFeedback = null;
+
+        ImGui.EndDisabled();
+        ImGuiExtensions.QuestionTooltip(
+            "Scales gas transport through each new link by this fraction of one voxel face. Thermal conduction is not scaled.");
 
         if (!_topologyGas && !_topologyThermal)
             ImGui.TextColored(ViewerTheme.Caution, "Enable at least one transport mode to create a connection.");
@@ -387,7 +397,8 @@ public partial class SimulationViewer
             _dockRotation,
             _dockFlipU,
             _dockFlipV,
-            GetTopologyFlags());
+            GetTopologyFlags(),
+            _topologyAreaFraction);
     }
 
     private AtmosCellRef? GetSelectedAtmosCell()
@@ -417,7 +428,8 @@ public partial class SimulationViewer
             var portal = _session.CreatePortal(
                 _portalFirst.Value,
                 _portalSecond.Value,
-                GetTopologyFlags());
+                GetTopologyFlags(),
+                _topologyAreaFraction);
 
             _selectedLinkSet = portal.Links;
             _portalFirst = null;
@@ -477,6 +489,22 @@ public partial class SimulationViewer
     private string FormatCell(AtmosCellRef cell)
     {
         return $"{GetSimulationName(cell.Simulation)}\n{FormatChunkPosition(cell.Chunk.Position)}, voxel {cell.LocalVoxelIndex}";
+    }
+
+    // A dock built in the Viewer gives every link the same fraction, but CreateLinks callers need not.
+    private static string FormatAreaFraction(IReadOnlyList<ExplicitLinkDefinition> links)
+    {
+        if (links.Count == 0)
+            return "n/a";
+
+        float? first = links[0].AreaFraction;
+        for (int index = 1; index < links.Count; index++)
+        {
+            if (links[index].AreaFraction != first)
+                return "Mixed";
+        }
+
+        return first.HasValue ? $"{first.Value:0.00} of a face" : "Config default";
     }
 
     private static string FormatLinkSetKind(ExplicitLinkSetKind kind)

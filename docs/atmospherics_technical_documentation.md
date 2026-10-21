@@ -930,6 +930,24 @@ Numos rejects `ExplicitLinkFlags.None`. A link with only host-defined bits is va
 and shows up in topology enumeration. It carries nothing through Numos' default gas or heat solvers, which suits a
 connection that a custom solver owns entirely.
 
+A link also has an opening size. `ExplicitLinkDefinition.AreaFraction` (the `areaFraction` argument on `CreatePortal`)
+is the open area as a fraction of one voxel face, `dx²`. Leave it unset and the link follows
+`EulerFlowConfig.DefaultLinkAreaFraction` from the applied configuration (1, a full face), resolved every tick, so one
+configuration change resizes every unsized link at once. `explicit-gas-transport` multiplies both the bulk and the
+diffusion request through the link by that fraction before the shared per-cell limiter sees them, so a half-open hatch
+moves exactly half of what a full face would under the same pressure difference and several narrow links still cannot
+overdraw a shared cell. A fraction of 0 is a closed valve that keeps its place in the topology. Conduction through
+`ThermalTransport` is not scaled: the conductance law in §7 is a heat-capacity-bounded relaxation rather than an
+area-based flux, and shrinking it with the opening is a separate modeling question.
+
+Under the Euler transport solver a link stays a duct. It moves mass and the energy that mass carries, never momentum,
+using the same bounded law as before: a fraction of the pressure difference per tick, limited by what the source holds.
+Putting an HLLC face flux on the link instead would look more consistent, but that flux is a rate, and a link is
+applied once per 50 ms tick with no CFL substepping. Through a 1 m² opening at room conditions the one-tick mass is
+`ρ · c · A · Δt ≈ 1.2 kg/m³ · 340 m/s · 1 m² · 0.05 s ≈ 20 kg`, about 17 times the 1.2 kg an entire 1 m³ voxel holds,
+so the duct would overdraw its source by an order of magnitude before the limiter clipped it to something arbitrary.
+Cartesian faces avoid that because the Euler stage substeps them; links are not part of that loop.
+
 ### 11.2 Creating and removing links
 
 Creating or destroying a link is queued, not immediate. The change lands at the next tick boundary, when

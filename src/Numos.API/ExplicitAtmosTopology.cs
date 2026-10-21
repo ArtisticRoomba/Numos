@@ -145,10 +145,21 @@ public enum ExplicitLinkSetKind : byte
 /// <param name="First">One endpoint. Registration canonicalizes endpoint orientation.</param>
 /// <param name="Second">The other endpoint.</param>
 /// <param name="Flags">The interactions allowed across the adjacency.</param>
+/// <param name="AreaFraction">
+///     The open area of the link as a fraction of one voxel face, in [0, 1], or <see langword="null" /> to use
+///     <see cref="Numos.CoreSim.EulerFlow.EulerFlowConfig.DefaultLinkAreaFraction" /> from the applied configuration.
+/// </param>
+/// <remarks>
+///     The built-in <see cref="AtmosBuiltInSolvers.ExplicitGasTransport" /> stage scales the gas it moves through the
+///     link by <paramref name="AreaFraction" />; a fraction of 0 lets no gas through. Conductive heat transfer through
+///     <see cref="ExplicitLinkFlags.ThermalTransport" /> is not scaled. Registration rejects a fraction that is not
+///     finite or lies outside [0, 1].
+/// </remarks>
 public readonly record struct ExplicitLinkDefinition(
     AtmosCellRef First,
     AtmosCellRef Second,
-    ExplicitLinkFlags Flags = ExplicitLinkFlags.All);
+    ExplicitLinkFlags Flags = ExplicitLinkFlags.All,
+    float? AreaFraction = null);
 
 /// <summary>
 ///     Identifies a batch of explicit links owned and removed as one lifecycle unit.

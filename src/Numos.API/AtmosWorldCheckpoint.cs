@@ -15,7 +15,11 @@ public sealed class AtmosWorldCheckpoint
     /// <summary>
     ///     Identifies the in-memory world checkpoint schema.
     /// </summary>
-    public const int CurrentFormatVersion = 7;
+    /// <remarks>
+    ///     Version 8 added the per-link area fraction to every explicit link, in link-set slots and in
+    ///     <see cref="CreateAtmosLinkSetOperation" /> payloads.
+    /// </remarks>
+    public const int CurrentFormatVersion = 8;
 
     // See AtmosSimulationCheckpoint: immutable after construction, so the digest is computed once.
     private ulong _digest;
