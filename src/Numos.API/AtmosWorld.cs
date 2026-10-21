@@ -2,6 +2,7 @@ using System.Buffers;
 using JetBrains.Annotations;
 using Numos.CoreSim;
 using Numos.CoreSim.Solvers;
+using Numos.CoreSim.State.Advanced;
 using Numos.Maths;
 
 namespace Numos.API;
@@ -741,6 +742,7 @@ public sealed partial class AtmosWorld : IDisposable
                         step.Kind,
                         step.IsEnabled,
                         step.NeighborSelectionKey)).ToArray(),
+                    CaptureSolverStates(),
                     simulationCheckpoints,
                     simulationGenerations,
                     slotCheckpoints);
@@ -793,11 +795,31 @@ public sealed partial class AtmosWorld : IDisposable
         }
     }
 
+    private AtmosWorldSolverStateCheckpoint[] CaptureSolverStates()
+    {
+        WorldSolverRegistration[] stateful = Solvers.StatefulSteps;
+        if (stateful.Length == 0)
+            return [];
+
+        var states = new AtmosWorldSolverStateCheckpoint[stateful.Length];
+        var sink = new StateBinarySink();
+        for (int index = 0; index < stateful.Length; index++)
+            states[index] = new AtmosWorldSolverStateCheckpoint(stateful[index].Name, stateful[index].CaptureState(ref sink));
+
+        return states;
+    }
+
     private void RestoreCheckpointCore(AtmosWorldCheckpoint checkpoint)
     {
         Solvers.SetLayoutCore(checkpoint.Solvers
             .Select(static solver => new AtmosWorldSolverLayoutEntry(solver.Name, solver.Enabled))
             .ToArray());
+
+        // Right after the layout, so nothing the rest of the restore runs (topology selectors, simulation
+        // construction) can see the solvers' pre-restore state. Validation already matched every entry to a stateful
+        // registration.
+        foreach (var saved in checkpoint.SolverStates)
+            Solvers.Find(saved.Name)!.RestoreState(saved.State.Span, checkpoint.Config.GasRegistry);
 
         foreach (var simulation in _orderedSimulations.ToArray())
         {
@@ -1235,6 +1257,7 @@ public sealed partial class AtmosWorld : IDisposable
         }
 
         checkpoint.Config.ValidateGasRegistry();
+        ValidateSolverStates(checkpoint);
         AtmosWorldSolverCheckpoint[] currentWorldSolvers = Solvers.Steps
             .Select(static step => new AtmosWorldSolverCheckpoint(
                 step.Name,
@@ -1357,6 +1380,85 @@ public sealed partial class AtmosWorld : IDisposable
                 previous = edge;
             }
         }
+    }
+
+    /// <summary>
+    ///     Requires the checkpoint to hold state for exactly the stateful class solvers registered here, in pipeline
+    ///     order, with payloads that are at least well-formed field records.
+    /// </summary>
+    /// <remarks>
+    ///     Strict in both directions. An entry nothing here can take would silently drop state, and a stateful solver
+    ///     with no entry would keep whatever it held before the restore; either way replay would diverge from the
+    ///     history the checkpoint came from.
+    /// </remarks>
+    private void ValidateSolverStates(AtmosWorldCheckpoint checkpoint)
+    {
+        WorldSolverRegistration[] stateful = Solvers.StatefulSteps;
+        for (int index = 0; index < checkpoint.SolverStates.Count; index++)
+        {
+            var saved = checkpoint.SolverStates[index];
+            var registration = Solvers.Find(saved.Name);
+            if (registration is null)
+            {
+                throw new ArgumentException(
+                    $"The world checkpoint holds state for world solver '{saved.Name}', which isn't registered.",
+                    nameof(checkpoint));
+            }
+
+            if (registration.State is null)
+            {
+                throw new ArgumentException(
+                    $"The world checkpoint holds state for world solver '{saved.Name}', but the registered solver " +
+                    "has no [NumosSerialize] members to restore it into.",
+                    nameof(checkpoint));
+            }
+
+            try
+            {
+                SkimStatePayload(saved.State.Span);
+            }
+            catch (InvalidDataException exception)
+            {
+                throw new ArgumentException(
+                    $"The world checkpoint's state for world solver '{saved.Name}' is malformed.",
+                    nameof(checkpoint),
+                    exception);
+            }
+        }
+
+        foreach (var registration in stateful)
+        {
+            if (!checkpoint.SolverStates.Any(saved => saved.Name == registration.Name))
+            {
+                throw new ArgumentException(
+                    $"World solver '{registration.Name}' has [NumosSerialize] members, but the world checkpoint holds " +
+                    "no state for it.",
+                    nameof(checkpoint));
+            }
+        }
+
+        // Restore adopts the checkpoint's layout, so the entries follow its stage order and not the current one.
+        string[] expectedOrder = checkpoint.Solvers
+            .Select(static solver => solver.Name)
+            .Where(name => Solvers.Find(name)?.State is not null)
+            .ToArray();
+        if (checkpoint.SolverStates.Count != stateful.Length ||
+            !checkpoint.SolverStates.Select(static saved => saved.Name).SequenceEqual(expectedOrder))
+        {
+            throw new ArgumentException("The world checkpoint's solver states are out of pipeline order or repeated.", nameof(checkpoint));
+        }
+    }
+
+    // Checks the field framing without knowing the field types, so a truncated or reordered payload is rejected
+    // before restore starts changing things.
+    private static void SkimStatePayload(ReadOnlySpan<byte> payload)
+    {
+        var reader = new StateReader(payload);
+        reader.BeginObject();
+        while (reader.TryReadField(out _))
+            reader.SkipField();
+
+        reader.EndObject();
     }
 
     private void RestoreTopology(AtmosWorldLinkSlotCheckpoint[] checkpoints)

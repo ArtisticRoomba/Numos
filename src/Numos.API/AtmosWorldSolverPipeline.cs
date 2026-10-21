@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using JetBrains.Annotations;
 using Numos.CoreSim;
+using Numos.CoreSim.State.Advanced;
 
 namespace Numos.API;
 
@@ -21,6 +22,7 @@ public sealed class AtmosWorldSolverPipeline
     private readonly List<WorldSolverRegistration> _steps = [];
     private readonly AtmosWorld _world;
     private WorldSolverRegistration[] _enabledSteps = [];
+    private WorldSolverRegistration[] _statefulSteps = [];
 
     // The world dependency epoch every registration in _enabledSteps was injected at, or -1. Republishing the steps
     // clears it, so enabling a solver that sat out an epoch change gets it injected before it runs.
@@ -232,6 +234,24 @@ public sealed class AtmosWorldSolverPipeline
     ///     The array is replaced, never mutated, so a tick can keep running it while a stage edits the pipeline.
     /// </remarks>
     internal WorldSolverRegistration[] EnabledSteps => _enabledSteps;
+
+    /// <summary>
+    ///     Gets the class solvers with <c>[NumosSerialize]</c> members, enabled or not, in pipeline order.
+    /// </summary>
+    /// <remarks>
+    ///     Usually empty, which is what lets a world without stateful solvers skip every state hash. Replaced, never
+    ///     mutated, like <see cref="EnabledSteps" />.
+    /// </remarks>
+    internal WorldSolverRegistration[] StatefulSteps => _statefulSteps;
+
+    /// <summary>
+    ///     Finds a registration by name. The caller holds <see cref="AtmosWorld.Gate" />.
+    /// </summary>
+    internal WorldSolverRegistration? Find(string name)
+    {
+        int index = IndexOf(name);
+        return index < 0 ? null : _steps[index];
+    }
 
     /// <summary>
     ///     Registers a custom stage.
@@ -741,6 +761,7 @@ public sealed class AtmosWorldSolverPipeline
     private void PublishSteps()
     {
         _enabledSteps = _steps.Where(static step => step.IsEnabled).ToArray();
+        _statefulSteps = _steps.Where(static step => step.State is not null).ToArray();
         _injectedEpoch = -1;
     }
 }
@@ -762,6 +783,7 @@ internal sealed class WorldSolverRegistration
         _builtInSolver = builtInSolver;
         CustomSolver = customSolver;
         Selection = selection;
+        State = customSolver as INumosStateTarget;
     }
 
     internal string Name { get; }
@@ -778,6 +800,49 @@ internal sealed class WorldSolverRegistration
     ///     Gets the class solver instance, or the delegate adapter, for a custom stage.
     /// </summary>
     internal IAtmosWorldSolver? CustomSolver { get; }
+
+    /// <summary>
+    ///     Gets the class solver's generated state, or <see langword="null" /> when it has no
+    ///     <c>[NumosSerialize]</c> members.
+    /// </summary>
+    internal INumosStateTarget? State { get; }
+
+    /// <summary>
+    ///     Gets or sets the hash of <see cref="State" /> when Numos last saw it, at the end of a tick or at the last
+    ///     boundary. A different hash at the next boundary means the host edited the solver in between.
+    /// </summary>
+    internal ulong StateHash { get; set; }
+
+    /// <summary>
+    ///     Hashes <see cref="State" /> without buffering it. Only valid for a stateful registration.
+    /// </summary>
+    internal ulong ComputeStateHash()
+    {
+        var sink = new StateHashSink();
+        State!.WriteState(ref sink);
+        return sink.Value;
+    }
+
+    /// <summary>
+    ///     Writes <see cref="State" /> into a fresh array. Only valid for a stateful registration.
+    /// </summary>
+    internal byte[] CaptureState(ref StateBinarySink sink)
+    {
+        sink.Reset();
+        State!.WriteState(ref sink);
+        return sink.WrittenSpan.ToArray();
+    }
+
+    /// <summary>
+    ///     Reads a payload from <see cref="CaptureState" /> back into the solver.
+    /// </summary>
+    internal void RestoreState(ReadOnlySpan<byte> payload, IGasRegistry gases)
+    {
+        var reader = new StateReader(payload);
+        State!.ReadStateInto(ref reader, gases);
+        if (!reader.IsAtEnd)
+            throw new InvalidDataException($"The state for world solver '{Name}' has trailing data.");
+    }
 
     internal static WorldSolverRegistration CreateBuiltIn(
         string name,

@@ -31,7 +31,15 @@ public static class NumosWorldReplaySerializer
     /// <param name="document">Portable world replay and provenance metadata.</param>
     /// <exception cref="ArgumentNullException">A required argument is <see langword="null" />.</exception>
     /// <exception cref="ArgumentException"><paramref name="destination" /> is not writable.</exception>
-    /// <exception cref="NotSupportedException">The replay contains host-defined state.</exception>
+    /// <exception cref="NotSupportedException">
+    ///     The replay holds state the format can't encode: a solver configuration without <c>[NumosSerialize]</c>
+    ///     members, or a rollback chunk field whose element type isn't a primitive or an enum.
+    /// </exception>
+    /// <remarks>
+    ///     Custom world solvers are saved by name, along with any <c>[NumosSerialize]</c> state they hold. Loading such a
+    ///     file works anywhere, but replaying it needs a world with the same solvers registered, through
+    ///     <see cref="AtmosWorldReplayTimeline.Restore" /> rather than <see cref="AtmosWorldReplayTimeline.Import" />.
+    /// </remarks>
     public static void Serialize(Stream destination, NumosWorldReplayDocument document)
     {
         ArgumentNullException.ThrowIfNull(destination);
@@ -39,7 +47,7 @@ public static class NumosWorldReplaySerializer
         if (!destination.CanWrite)
             throw new ArgumentException("The destination stream must be writable.", nameof(destination));
 
-        document.Replay.EnsurePortable();
+        document.Replay.EnsureSerializable();
 
         var replay = document.Replay;
         using var writer = new BinaryWriter(destination, AtmosReplayCodec.Utf8, true);
@@ -114,7 +122,7 @@ public static class NumosWorldReplaySerializer
             checkpoint.InitialHash,
             checkpoint.HeadHash);
 
-        archive.EnsurePortable();
+        archive.EnsureSerializable();
         if (source.ReadByte() != -1) throw new InvalidDataException("The Numos file has trailing data.");
 
         return new NumosWorldReplayDocument(metadata.Metadata, archive);

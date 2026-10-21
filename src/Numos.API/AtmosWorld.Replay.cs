@@ -500,7 +500,8 @@ public sealed partial class AtmosWorld
 
 // Mirrors AtmosWorldReplayCodec.WriteCheckpoint field for field, at the same widths and string encoding, except:
 // the archive's initial and head hashes (archive data, not checkpoint state) are left out, each simulation contributes
-// its grid digest rather than its full payload, and length prefixes are omitted.
+// its grid digest rather than its full payload, and length prefixes are omitted. Solver state payloads keep their
+// length, since their bytes go in verbatim.
 internal static class AtmosWorldCheckpointHasher
 {
     internal static ulong Hash(AtmosWorldCheckpoint checkpoint)
@@ -520,6 +521,15 @@ internal static class AtmosWorldCheckpointHasher
             sink.WriteBoolean(solver.NeighborSelectionKey != null);
             if (solver.NeighborSelectionKey != null)
                 sink.WriteString(solver.NeighborSelectionKey);
+        }
+
+        // The payloads are opaque here (only the solver type can walk them), so their bytes are hashed as written.
+        sink.WriteCount(checkpoint.SolverStates.Count);
+        foreach (var state in checkpoint.SolverStates)
+        {
+            sink.WriteString(state.Name);
+            sink.WriteInt32(state.State.Length);
+            sink.WriteElements(state.State.Span, 1);
         }
 
         sink.WriteCount(checkpoint.SimulationGenerations.Length);

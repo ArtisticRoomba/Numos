@@ -68,8 +68,14 @@ public sealed class AtmosWorldReplayArchive
     ///     Gets human-readable descriptions of host-defined state that the standard replay file cannot reconstruct.
     ///     Empty when the archive is portable.
     /// </summary>
+    /// <remarks>
+    ///     A custom solver is listed because a standalone host doesn't have its implementation, even though its name
+    ///     and any <see cref="NumosSerializeAttribute" /> state are saved. Such an archive can still be written to a
+    ///     file and loaded back with <see cref="AtmosWorldReplayTimeline.Restore" /> by a host that registers the same
+    ///     solvers.
+    /// </remarks>
     public IReadOnlyList<string> UnsupportedFeatures =>
-        _unsupportedFeatures ??= new ReadOnlyCollection<string>(FindUnsupportedFeatures(InitialCheckpoint, Recording).ToArray());
+        _unsupportedFeatures ??= new ReadOnlyCollection<string>(FindUnsupportedFeatures(InitialCheckpoint, Recording, true).ToArray());
 
     /// <summary>
     ///     Throws when this archive depends on host-defined solver state.
@@ -88,12 +94,35 @@ public sealed class AtmosWorldReplayArchive
         }
     }
 
+    /// <summary>
+    ///     Throws when this archive holds state the replay file format can't encode. Unlike
+    ///     <see cref="EnsurePortable" />, custom solvers are fine here: the file records their names and saved state,
+    ///     and leaves supplying their implementations to whoever loads it.
+    /// </summary>
+    /// <exception cref="NotSupportedException">
+    ///     The archive contains solver configurations without <see cref="NumosSerializeAttribute" /> members, or rollback
+    ///     chunk fields whose element type isn't a primitive or an enum.
+    /// </exception>
+    internal void EnsureSerializable()
+    {
+        string[] unsupported = FindUnsupportedFeatures(InitialCheckpoint, Recording, false).ToArray();
+        if (unsupported.Length != 0)
+        {
+            throw new NotSupportedException(
+                "World replay files do not support the following host-defined state: " + string.Join("; ", unsupported));
+        }
+    }
+
     private static IEnumerable<string> FindUnsupportedFeatures(
         AtmosWorldCheckpoint checkpoint,
-        AtmosWorldRecording recording)
+        AtmosWorldRecording recording,
+        bool includeCustomSolvers)
     {
-        foreach (var solver in checkpoint.Solvers.Where(static solver => solver.Kind == AtmosWorldSolverKind.Custom))
-            yield return $"custom world solver '{solver.Name}'";
+        if (includeCustomSolvers)
+        {
+            foreach (var solver in checkpoint.Solvers.Where(static solver => solver.Kind == AtmosWorldSolverKind.Custom))
+                yield return $"custom world solver '{solver.Name}'";
+        }
 
         foreach (var simulation in checkpoint.Simulations)
         foreach (var chunk in simulation.Checkpoint.Chunks)

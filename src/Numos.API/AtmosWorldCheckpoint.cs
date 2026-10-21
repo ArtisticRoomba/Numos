@@ -19,9 +19,9 @@ public sealed class AtmosWorldCheckpoint
     ///     Version 8 added the per-link area fraction to every explicit link, in link-set slots and in
     ///     <see cref="CreateAtmosLinkSetOperation" /> payloads. Version 9 writes the configuration as a field-id state
     ///     payload and hashes the world with the same encoding as the wire. Version 10 derives each field id from the
-    ///     member name.
+    ///     member name. Version 11 adds the <c>[NumosSerialize]</c> state of class solvers.
     /// </remarks>
-    public const int CurrentFormatVersion = 10;
+    public const int CurrentFormatVersion = 11;
 
     // See AtmosSimulationCheckpoint: immutable after construction, so the digest is computed once.
     private ulong _digest;
@@ -33,6 +33,7 @@ public sealed class AtmosWorldCheckpoint
         ulong topologyVersion,
         AtmosConfigSnapshot config,
         AtmosWorldSolverCheckpoint[] solvers,
+        AtmosWorldSolverStateCheckpoint[] solverStates,
         AtmosWorldSimulationCheckpoint[] simulations,
         uint[] simulationGenerations,
         AtmosWorldLinkSlotCheckpoint[] linkSlots)
@@ -41,6 +42,7 @@ public sealed class AtmosWorldCheckpoint
         TopologyVersion = topologyVersion;
         Config = config;
         Solvers = Array.AsReadOnly(solvers);
+        SolverStates = Array.AsReadOnly(solverStates);
         Simulations = Array.AsReadOnly(simulations);
         SimulationGenerations = simulationGenerations;
         LinkSlots = linkSlots;
@@ -75,6 +77,15 @@ public sealed class AtmosWorldCheckpoint
     ///     Gets world solver metadata in deterministic execution order.
     /// </summary>
     public IReadOnlyList<AtmosWorldSolverCheckpoint> Solvers { get; }
+
+    /// <summary>
+    ///     Gets the <c>[NumosSerialize]</c> state of every class solver that has some, in pipeline order.
+    /// </summary>
+    /// <remarks>
+    ///     Delegates and class solvers without marked members have no entry. Restoring requires the receiving world to
+    ///     have exactly these stateful solvers.
+    /// </remarks>
+    public IReadOnlyList<AtmosWorldSolverStateCheckpoint> SolverStates { get; }
 
     /// <summary>
     ///     Gets simulation checkpoints in stable simulation-ID order.
@@ -145,6 +156,18 @@ public readonly record struct AtmosWorldSolverCheckpoint(
     AtmosWorldSolverKind Kind,
     bool Enabled,
     string? NeighborSelectionKey);
+
+/// <summary>
+///     Holds one class solver's <c>[NumosSerialize]</c> members as written by its generated state walker.
+/// </summary>
+/// <param name="Name">The registered solver name.</param>
+/// <param name="State">
+///     The solver's state payload: its marked members as field-id records, the same encoding solver configurations
+///     use. Opaque without the solver type, so the world hash covers these bytes as they are.
+/// </param>
+public readonly record struct AtmosWorldSolverStateCheckpoint(
+    string Name,
+    ReadOnlyMemory<byte> State);
 
 /// <summary>
 ///     Associates one stable world registration with its independent voxel-storage checkpoint.

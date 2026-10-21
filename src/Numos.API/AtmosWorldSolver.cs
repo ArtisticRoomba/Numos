@@ -9,22 +9,25 @@ namespace Numos.API;
 public delegate void AtmosWorldSolver(AtmosWorldSolverContext context);
 
 /// <summary>
-///     A caller-provided world stage written as a class, for solvers that keep host-side state between ticks or need
-///     to react to checkpoint restores.
+///     A caller-provided world stage written as a class, for solvers that keep state between ticks or need to react
+///     to checkpoint restores.
 /// </summary>
 /// <remarks>
 ///     <para>
 ///         Register an instance with
 ///         <see cref="AtmosWorldSolverPipeline.Register(string, IAtmosWorldSolver, AtmosNeighborSelection?, string?, string?)" />.
-///         The caller owns the instance. Numos never checkpoints, clones, or disposes it. The pipeline's checkpoint
-///         metadata is the same as for a delegate registered under the same name, so switching between the two forms
-///         keeps old checkpoints compatible.
+///         The caller owns the instance. Numos never clones or disposes it. The pipeline's checkpoint metadata is the
+///         same as for a delegate registered under the same name.
 ///     </para>
 ///     <para>
-///         Fields on the instance are invisible to replay. State that has to roll back with a checkpoint belongs in a
-///         rollback <see cref="ChunkField{T}" />. Caches rebuilt from authoritative inputs can live under a
-///         <see cref="SolverDataKey{T}" />. Fields should only hold transient work that <see cref="OnRestored" /> can
-///         throw away, plus references to services, other solvers, and chunk fields.
+///         Fields marked <c>[NumosSerialize]</c> (the class must be <see langword="partial" />) are the solver's state.
+///         Numos checkpoints, hashes, and saves them, and writes them back into this instance on restore.
+///     </para>
+///     <para>
+///         Unmarked fields are invisible to replay. Keep them to scratch work that <see cref="OnRestored" /> can throw
+///         away, plus references to services, other solvers, and chunk fields. Per-voxel state belongs in a rollback
+///         <see cref="ChunkField{T}" />. Caches rebuilt from authoritative inputs can live under a
+///         <see cref="SolverDataKey{T}" />.
 ///     </para>
 ///     <para>
 ///         Configuration is not pushed to the solver. Read <see cref="AtmosWorldSolverContext.Config" /> each tick, and
@@ -83,7 +86,8 @@ public interface IAtmosWorldSolver
     /// <remarks>
     ///     <para>
     ///         Numos calls this on every custom class solver, enabled or not, in pipeline order. The call happens once
-    ///         the restored state is fully installed and before any replayed tick. That covers
+    ///         the restored state is fully installed (including every solver's <c>[NumosSerialize]</c> members) and
+    ///         before any replayed tick. That covers
     ///         <see cref="AtmosWorld.RestoreCheckpoint" />, <see cref="AtmosSimulation.RestoreCheckpoint" />, both
     ///         <c>ReplayTo</c> methods, and the restore that puts the previous state back after a failed
     ///         <c>ReplayTo</c>. A single host call can trigger it more than once, so make it idempotent.
