@@ -179,7 +179,8 @@ internal static class SnapshotEmitter
                     }
                     else
                     {
-                        writer.Line(Store("snapshot", member, StateArray + ".Copy<" + member.ElementType + ">(" + ReadSpan(member, source) + ")"));
+                        string copy = StateArray + ".Copy<" + member.ElementType + ">(" + ReadSpan(member, source) + ")";
+                        writer.Line(Store("snapshot", member, copy));
                     }
 
                     break;
@@ -257,15 +258,17 @@ internal static class SnapshotEmitter
                 case RestoreMode.Check:
                     writer.Line("if (!" + member.Shape.CodecExpression + ".StateEquals(" + source + ", " + member.Name + "))");
                     writer.Line("    throw new global::System.ArgumentException(");
-                    writer.Line("        \"The snapshot's " + label + " doesn't match the live object, which can't change it.\", nameof(live));");
+                    writer.Line(
+                        "        \"The snapshot's " + label + " doesn't match the live object, which can't change it.\", nameof(live));");
                     writer.Line();
                     break;
                 case RestoreMode.CopyInPlace:
                     string comparison = member.Count is null ? " != " : " > ";
                     writer.Line("if (" + member.Name + ".Count" + comparison + source + ".Length)");
                     writer.Line("    throw new global::System.ArgumentException(");
-                    writer.Line("        $\"The snapshot's " + label + " holds {" + member.Name + ".Count} elements, but the live array holds {" +
-                                source + ".Length}.\", nameof(live));");
+                    writer.Line(
+                        "        $\"The snapshot's " + label + " holds {" + member.Name + ".Count} elements, but the live array holds {" +
+                        source + ".Length}.\", nameof(live));");
 
                     writer.Line();
                     break;
@@ -297,7 +300,8 @@ internal static class SnapshotEmitter
                     writer.Line(target + " = " + StateArray + ".ToArray<" + member.ElementType + ">(" + member.Name + ");");
                     break;
                 case RestoreMode.CopyInPlace:
-                    writer.Line(StateArray + ".CopyTo<" + member.ElementType + ">(" + member.Name + ", " + WriteSpan(member, target) + ");");
+                    writer.Line(
+                        StateArray + ".CopyTo<" + member.ElementType + ">(" + member.Name + ", " + WriteSpan(member, target) + ");");
                     if (member.Count is not null)
                         writer.Line("live." + member.Count + " = " + member.Name + ".Count;");
 
@@ -312,8 +316,8 @@ internal static class SnapshotEmitter
         writer.Close();
         writer.Line();
         writer.Line("/// <summary>");
-        writer.Line("///     Runs at the end of <see cref=\"RestoreInto\" />, to restore members the snapshot declares itself or rebuild");
-        writer.Line("///     derived live state.");
+        writer.Line("///     Runs at the end of <see cref=\"RestoreInto\" />, to restore members the snapshot declares itself");
+        writer.Line("///     or rebuild derived live state.");
         writer.Line("/// </summary>");
         writer.Line("partial void OnRestored(" + live + " live);");
     }
@@ -363,9 +367,10 @@ internal static class SnapshotEmitter
             {
                 // Data from before the member existed: give it the codec's default rather than leave it null.
                 writer.Line("else");
-                writer.Line("    " + Store(
-                    "result", generated,
-                    Advanced + "StateCodecs.DefaultValue<" + generated.Shape.TypeExpression + ", " + generated.Shape.CodecExpression + ">()!"));
+                string fallback = Advanced + "StateCodecs.DefaultValue<" + generated.Shape.TypeExpression + ", " +
+                                  generated.Shape.CodecExpression + ">()!";
+
+                writer.Line("    " + Store("result", generated, fallback));
             }
         }
 

@@ -821,7 +821,11 @@ public sealed partial class AtmosWorld : IDisposable
             for (int index = 0; index < slots.Length; index++)
             {
                 var slot = _linkSlots[index];
-                slots[index] = new AtmosWorldLinkSlotCheckpoint(slot.Generation, (byte)slot.State, slot.Kind, ToDefinitions(slot.Edges));
+                slots[index] = new AtmosWorldLinkSlotCheckpoint(
+                    slot.Generation,
+                    (byte)slot.State,
+                    slot.Kind,
+                    ToDefinitions(slot.Edges));
             }
 
             return slots;

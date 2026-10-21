@@ -144,7 +144,8 @@ public sealed class SnapshotGenerator : IIncrementalGenerator
         foreach (ISymbol member in snapshot.GetMembers())
         {
             if (member is IPropertySymbol { IsPartialDefinition: true, PartialImplementationPart: null } property &&
-                property.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax(cancellationToken) is PropertyDeclarationSyntax declaration)
+                property.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax(cancellationToken) is
+                    PropertyDeclarationSyntax declaration)
             {
                 declared[property.Name] = PartialSyntax.ModifiersWithoutPartial(declaration.Modifiers);
                 if (property.SetMethod is not null)
@@ -403,7 +404,9 @@ public sealed class SnapshotGenerator : IIncrementalGenerator
             arrayElementImmutable,
             isFlatArray,
             collection,
-            element is INamedTypeSymbol { TypeKind: TypeKind.Class } ? element.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) : null,
+            element is INamedTypeSymbol { TypeKind: TypeKind.Class }
+                ? element.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
+                : null,
             count,
             Documentation(member, cancellationToken),
             declared.TryGetValue(name, out string? modifiers) ? modifiers : null,
@@ -529,7 +532,8 @@ public sealed class SnapshotGenerator : IIncrementalGenerator
 
         var diagnostics = new List<DiagnosticInfo>();
         var byLive = new Dictionary<string, SnapshotDeclaration>(StringComparer.Ordinal);
-        foreach (SnapshotDeclaration declaration in declarations.OrderBy(static declaration => declaration.TypeName, StringComparer.Ordinal))
+        foreach (SnapshotDeclaration declaration in
+                 declarations.OrderBy(static declaration => declaration.TypeName, StringComparer.Ordinal))
         {
             diagnostics.AddRange(declaration.Diagnostics);
             if (declaration.LiveTypeName.Length == 0)
@@ -551,7 +555,9 @@ public sealed class SnapshotGenerator : IIncrementalGenerator
             byLive.Add(declaration.LiveTypeName, declaration);
         }
 
-        var plans = new Dictionary<string, (SnapshotDeclaration Declaration, List<SnapshotMemberModel> Members, List<string> Nested, bool OwnRestorable)>(
+        var plans = new Dictionary<
+            string,
+            (SnapshotDeclaration Declaration, List<SnapshotMemberModel> Members, List<string> Nested, bool OwnRestorable)>(
             StringComparer.Ordinal);
 
         foreach (SnapshotDeclaration declaration in byLive.Values)
@@ -758,7 +764,8 @@ public sealed class SnapshotGenerator : IIncrementalGenerator
             return Checked(Model(SnapshotMemberKind.Value, shape, "", isReference, "", restore));
         }
 
-        diagnostics.Add(DiagnosticInfo.Create(StateDiagnostics.LiveMemberUnsupported, member.Location, member.DisplayName, member.TypeDisplay));
+        diagnostics.Add(
+            DiagnosticInfo.Create(StateDiagnostics.LiveMemberUnsupported, member.Location, member.DisplayName, member.TypeDisplay));
         return null;
     }
 
