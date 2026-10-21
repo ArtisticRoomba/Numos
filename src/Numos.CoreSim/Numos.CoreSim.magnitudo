@@ -20,6 +20,10 @@ velocity | MetrePerSecond | global::System.Single | length=1,time=-1
 momentum | KilogramMetrePerSecond | global::System.Single | mass=1,length=1,time=-1
 momentum64 | KilogramMetrePerSecond64 | global::System.Double | mass=1,length=1,time=-1
 density | KilogramPerCubicMetre | global::System.Single | mass=1,length=-3
+massFlux | KilogramPerSquareMetreSecond | global::System.Single | mass=1,length=-2,time=-1
+energyFlux | WattPerSquareMetre | global::System.Single | mass=1,time=-3
+energyDensity | JoulePerCubicMetre | global::System.Single | mass=1,length=-1,time=-2
+perSquareMetreSecond | PerSquareMetreSecond | global::System.Single | length=-2,time=-1
 volume | CubicMetre | global::System.Single | length=3
 volume64 | CubicMetre64 | global::System.Double | length=3
 energy | Joule | global::System.Single | mass=1,length=2,time=-2
