@@ -588,6 +588,13 @@ var voxel = simulation.GetVoxelSnapshot(chunk, localVoxelIndex: 0);
 
 A renderer that knows which revision it presented can call `TryGetVoxelSnapshot` to skip copying gas data when the chunk has not changed. `TryGetChunkHandles` lets a retained consumer refresh its handle list only when chunks are added or removed. Use these APIs instead of holding internal data or scanning the simulation every frame.
 
+Velocity is derived, not stored. It is a voxel's momentum (set with `SetVoxelMomentum`) divided by the mass of the gas in the voxel. Each gas uses its `MolarMass`, or `ReferenceMolarMass` when none is registered. `GetVoxelVelocity` reads one voxel in m/s, and `AtmosChunkSnapshotFields.Velocity` adds `VelocityX`/`VelocityY`/`VelocityZ` arrays to a chunk snapshot. A vacuum voxel always reads as zero.
+
+```csharp
+AtmosVoxelVelocity velocity = simulation.GetVoxelVelocity(chunk, x: 1, y: 0, z: 0);
+simulation.TryGetChunkSnapshot(chunk, default, AtmosChunkSnapshotFields.Velocity, out var withVelocity);
+```
+
 `EditVoxelBox` changes a whole box of voxels in global voxel coordinates with one call and one recorded operation.
 Use it instead of a loop of per-voxel calls when you fill or reshape a region. The edit applies the selected parts in a
 fixed order: classification, gas removal, temperature, gas injection. It skips voxels in chunks that do not exist.

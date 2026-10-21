@@ -216,6 +216,32 @@ public sealed partial class WorkbenchSession
     }
 
     /// <summary>
+    ///     Sets the total momentum of the gas in one voxel, in kilogram metres per second.
+    /// </summary>
+    /// <remarks>
+    ///     Momentum is ignored for solid, void, and empty voxels. See
+    ///     <see cref="AtmosSimulation.SetVoxelMomentum(AtmosChunkHandle, ushort, float, float, float)" />.
+    /// </remarks>
+    public void SetVoxelMomentum(
+        VoxelCell cell,
+        float momentumX,
+        float momentumY,
+        float momentumZ,
+        AtmosSimulationId? simulation = null)
+    {
+        EditVoxels(
+            [cell],
+            simulation,
+            "Set momentum for",
+            (target, voxel) => target.SetVoxelMomentum(
+                new AtmosChunkHandle(voxel.ChunkPosition),
+                voxel.LocalIndex,
+                momentumX,
+                momentumY,
+                momentumZ));
+    }
+
+    /// <summary>
     ///     Adds gas to one voxel.
     /// </summary>
     public void AddVoxelGas(

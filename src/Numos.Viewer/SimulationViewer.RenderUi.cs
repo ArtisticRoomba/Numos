@@ -1642,6 +1642,18 @@ public partial class SimulationViewer
                     ImGuiExtensions.DefinitionRow("Temperature", QuantityFormat.Temperature(details.Temperature));
                     ImGuiExtensions.DefinitionRow("Pressure", QuantityFormat.Pressure(details.Pressure));
                     ImGuiExtensions.DefinitionRow(
+                        "Velocity",
+                        QuantityFormat.Velocity(details.VelocityX, details.VelocityY, details.VelocityZ));
+
+                    ImGuiExtensions.DefinitionRow(
+                        "Speed",
+                        QuantityFormat.Speed(
+                            Math.Sqrt(
+                                (double)details.VelocityX * details.VelocityX +
+                                (double)details.VelocityY * details.VelocityY +
+                                (double)details.VelocityZ * details.VelocityZ)));
+
+                    ImGuiExtensions.DefinitionRow(
                         "Total amount",
                         summary.InvalidCount > 0
                             ? $"{QuantityFormat.Amount(summary.TotalMoles)}, excluding invalid amounts"

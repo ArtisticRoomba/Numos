@@ -553,6 +553,67 @@ public sealed partial class AtmosSimulation : IDisposable
     }
 
     /// <summary>
+    ///     Returns the bulk velocity of the gas in one voxel addressed by its flat local index.
+    /// </summary>
+    /// <param name="chunk">The chunk containing the voxel.</param>
+    /// <param name="localVoxelIndex">The voxel's zero-based index in the chunk's flattened storage.</param>
+    /// <returns>The voxel's velocity in metres per second (m/s); zero for a vacuum voxel.</returns>
+    /// <remarks>
+    ///     <para>
+    ///         Velocity is not stored. It is the voxel's total momentum (see
+    ///         <see cref="SetVoxelMomentum(AtmosChunkHandle, ushort, float, float, float)" />) divided by the mass of
+    ///         the gas currently in it, where each gas weighs its registered <see cref="GasProperties.MolarMass" /> or
+    ///         <see cref="AtmosConfig.ReferenceMolarMass" /> when none is set. Adding gas at rest therefore lowers
+    ///         the velocity without any momentum write.
+    ///     </para>
+    ///     <para>
+    ///         The read happens under the simulation state gate, so it is consistent with the voxel's gas amounts at
+    ///         that instant. For a whole chunk, request <see cref="AtmosChunkSnapshotFields.Velocity" /> through
+    ///         <see cref="TryGetChunkSnapshot(AtmosChunkHandle, AtmosChunkVersion, AtmosChunkSnapshotFields, out AtmosChunkSnapshot)" />
+    ///         instead of calling this per voxel.
+    ///     </para>
+    /// </remarks>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="localVoxelIndex" /> is outside the chunk.</exception>
+    /// <exception cref="KeyNotFoundException">No chunk is registered at the handle's position.</exception>
+    /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
+    /// <example>
+    ///     Read back a velocity set through momentum:
+    ///     <code>
+    /// simulation.AddGasToVoxel(chunk, 0, "Air", 10f, 293.15f);
+    /// float mass = 10f * airMolarMass; // kg, from the registry's kg/mol
+    /// simulation.SetVoxelMomentum(chunk, 0, mass * 2f, 0f, 0f);
+    /// AtmosVoxelVelocity velocity = simulation.GetVoxelVelocity(chunk, 0); // (2, 0, 0) m/s
+    ///     </code>
+    /// </example>
+    [PublicAPI]
+    public AtmosVoxelVelocity GetVoxelVelocity(AtmosChunkHandle chunk, ushort localVoxelIndex)
+    {
+        ThrowIfDisposed();
+        _kernel.GetVoxelVelocity(chunk.Position, localVoxelIndex, out float x, out float y, out float z);
+        return new AtmosVoxelVelocity(x, y, z);
+    }
+
+    /// <summary>
+    ///     Returns the bulk velocity of the gas in one voxel addressed by local coordinates.
+    /// </summary>
+    /// <param name="chunk">The chunk containing the voxel.</param>
+    /// <param name="x">The zero-based local x-coordinate.</param>
+    /// <param name="y">The zero-based local y-coordinate.</param>
+    /// <param name="z">The zero-based local z-coordinate.</param>
+    /// <returns>The voxel's velocity in metres per second (m/s); zero for a vacuum voxel.</returns>
+    /// <remarks>Same contract as <see cref="GetVoxelVelocity(AtmosChunkHandle, ushort)" />.</remarks>
+    /// <exception cref="ArgumentOutOfRangeException">A local coordinate is outside the chunk.</exception>
+    /// <exception cref="KeyNotFoundException">No chunk is registered at the handle's position.</exception>
+    /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
+    [PublicAPI]
+    public AtmosVoxelVelocity GetVoxelVelocity(AtmosChunkHandle chunk, int x, int y, int z)
+    {
+        ThrowIfDisposed();
+        _kernel.GetVoxelVelocity(chunk.Position, x, y, z, out float velocityX, out float velocityY, out float velocityZ);
+        return new AtmosVoxelVelocity(velocityX, velocityY, velocityZ);
+    }
+
+    /// <summary>
     ///     Returns a detached snapshot when a chunk changed or holds rollback chunk field storage.
     /// </summary>
     /// <remarks>

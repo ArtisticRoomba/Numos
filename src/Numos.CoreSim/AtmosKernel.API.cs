@@ -196,7 +196,7 @@ internal sealed partial class AtmosKernel
     {
         lock (StateGate)
         {
-            return GetChunk(position).GetNetworkSnapshot();
+            return GetChunk(position).GetNetworkSnapshot(AtmosChunkSnapshotFields.All, _config);
         }
     }
 
@@ -235,7 +235,7 @@ internal sealed partial class AtmosKernel
         }
     }
 
-    private static AtmosVoxelSnapshot CreateVoxelSnapshot(
+    private AtmosVoxelSnapshot CreateVoxelSnapshot(
         AtmosChunk chunk,
         Int3 position,
         ushort localVoxelIndex)
@@ -249,6 +249,14 @@ internal sealed partial class AtmosKernel
                 chunk.ActiveGases[gas].Moles[localVoxelIndex]);
         }
 
+        AtmosSolverMath.ComputeVoxelVelocity(
+            _config,
+            chunk,
+            localVoxelIndex,
+            out MetrePerSecond velocityX,
+            out MetrePerSecond velocityY,
+            out MetrePerSecond velocityZ);
+
         return new AtmosVoxelSnapshot(
             chunk.Version,
             position,
@@ -256,7 +264,60 @@ internal sealed partial class AtmosKernel
             chunk.VoxelRoomMap[localVoxelIndex],
             chunk.TotalPressure[localVoxelIndex],
             chunk.Temperature[localVoxelIndex],
+            velocityX,
+            velocityY,
+            velocityZ,
             gases);
+    }
+
+    /// <summary>
+    ///     Derives the bulk velocity of one voxel addressed by its flat local index from its stored momentum and
+    ///     current gas mass.
+    /// </summary>
+    /// <param name="position">The chunk's grid position.</param>
+    /// <param name="localVoxelIndex">The voxel's zero-based index in the chunk's flattened storage.</param>
+    /// <param name="x">Bulk x-velocity, in metres per second.</param>
+    /// <param name="y">Bulk y-velocity, in metres per second.</param>
+    /// <param name="z">Bulk z-velocity, in metres per second.</param>
+    /// <remarks>A vacuum voxel reads as zero. Nothing is stored; the division happens under the state gate.</remarks>
+    /// <exception cref="KeyNotFoundException">No chunk is registered at <paramref name="position" />.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="localVoxelIndex" /> is outside the chunk.</exception>
+    internal void GetVoxelVelocity(
+        Int3 position,
+        ushort localVoxelIndex,
+        out MetrePerSecond x,
+        out MetrePerSecond y,
+        out MetrePerSecond z)
+    {
+        lock (StateGate)
+        {
+            var chunk = GetChunk(position);
+            ValidateVoxelIndex(chunk, localVoxelIndex);
+            AtmosSolverMath.ComputeVoxelVelocity(_config, chunk, localVoxelIndex, out x, out y, out z);
+        }
+    }
+
+    /// <summary>
+    ///     Derives the bulk velocity of one voxel addressed by local coordinates. See
+    ///     <see cref="GetVoxelVelocity(Int3, ushort, out MetrePerSecond, out MetrePerSecond, out MetrePerSecond)" />.
+    /// </summary>
+    /// <exception cref="KeyNotFoundException">No chunk is registered at <paramref name="position" />.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">A local coordinate is outside the chunk.</exception>
+    internal void GetVoxelVelocity(
+        Int3 position,
+        int localX,
+        int localY,
+        int localZ,
+        out MetrePerSecond x,
+        out MetrePerSecond y,
+        out MetrePerSecond z)
+    {
+        lock (StateGate)
+        {
+            var chunk = GetChunk(position);
+            ushort localVoxelIndex = GetValidatedVoxelIndex(chunk, localX, localY, localZ);
+            AtmosSolverMath.ComputeVoxelVelocity(_config, chunk, localVoxelIndex, out x, out y, out z);
+        }
     }
 
     /// <summary>
@@ -297,7 +358,7 @@ internal sealed partial class AtmosKernel
                 return false;
             }
 
-            snapshot = chunk.GetNetworkSnapshot(fields);
+            snapshot = chunk.GetNetworkSnapshot(fields, _config);
             return true;
         }
     }
@@ -338,7 +399,7 @@ internal sealed partial class AtmosKernel
                     continue;
                 }
 
-                changed.Add(chunk.GetNetworkSnapshot(request.Fields));
+                changed.Add(chunk.GetNetworkSnapshot(request.Fields, _config));
             }
 
             return new AtmosChunkSnapshotBatch(TickCount, changed.ToArray());

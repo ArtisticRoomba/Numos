@@ -165,6 +165,50 @@ internal static class AtmosSolverMath
     }
 
     /// <summary>
+    ///     Derives a voxel's bulk velocity from its stored momentum: <c>v = p / m</c>, with the gas mass
+    ///     <c>m = Σ n_g · M_g</c> summed over the positive gas amounts in channel order.
+    /// </summary>
+    /// <remarks>
+    ///     Every component is zero for a vacuum voxel or one whose gas mass is not positive, so a consumer never
+    ///     sees the division blow up on an emptied voxel that still carries stale momentum mid-write. Gases without
+    ///     a registered molar mass weigh <see cref="IAtmosConfig.ReferenceMolarMass" />.
+    /// </remarks>
+    internal static void ComputeVoxelVelocity(
+        IAtmosConfig config, AtmosChunk chunk, ushort voxelIndex,
+        out MetrePerSecond x, out MetrePerSecond y, out MetrePerSecond z)
+    {
+        if (chunk.IsVacuum[voxelIndex])
+        {
+            x = 0f;
+            y = 0f;
+            z = 0f;
+            return;
+        }
+
+        Kilogram mass = 0f;
+        for (int gas = 0; gas < chunk.ActiveGasCount; gas++)
+        {
+            Mole moles = chunk.ActiveGases[gas].Moles[voxelIndex];
+            if (moles <= 0f)
+                continue;
+
+            mass += moles * config.GetMolarMass(chunk.ActiveGases[gas].GasId);
+        }
+
+        if (mass <= 0f)
+        {
+            x = 0f;
+            y = 0f;
+            z = 0f;
+            return;
+        }
+
+        x = chunk.MomentumX[voxelIndex] / mass;
+        y = chunk.MomentumY[voxelIndex] / mass;
+        z = chunk.MomentumZ[voxelIndex] / mass;
+    }
+
+    /// <summary>
     ///     Returns the sum of all gas moles in a voxel.
     /// </summary>
     internal static Mole GetTotalMoles(AtmosChunk chunk, ushort voxelIndex)

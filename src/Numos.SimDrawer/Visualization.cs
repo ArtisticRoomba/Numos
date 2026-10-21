@@ -137,6 +137,10 @@ public static class BuiltInVisualizationIds
     ///     Gets the voxel-classification visualization ID.
     /// </summary>
     public const string VoxelClassification = "voxel-classification";
+    /// <summary>
+    ///     Gets the speed visualization ID.
+    /// </summary>
+    public const string Speed = "speed";
 }
 
 /// <summary>
@@ -196,6 +200,9 @@ public readonly struct VoxelGasData
 /// </summary>
 /// <param name="Temperature">Temperature in kelvins (K).</param>
 /// <param name="Pressure">Pressure in pascals (Pa).</param>
+/// <param name="VelocityX">Bulk x-velocity in metres per second (m/s), or NaN when the snapshot carried none.</param>
+/// <param name="VelocityY">Bulk y-velocity in metres per second (m/s), or NaN when the snapshot carried none.</param>
+/// <param name="VelocityZ">Bulk z-velocity in metres per second (m/s), or NaN when the snapshot carried none.</param>
 /// <param name="TotalMoles">Total gas amount in moles (mol).</param>
 /// <param name="LocalIndex">Local voxel index.</param>
 /// <param name="RoomId">Voxel room ID.</param>
@@ -206,6 +213,9 @@ public readonly record struct VoxelSample(
     int RoomId,
     float Temperature,
     float Pressure,
+    float VelocityX,
+    float VelocityY,
+    float VelocityZ,
     float TotalMoles,
     int PrimaryGasId,
     VoxelGasData Gases)
@@ -214,6 +224,11 @@ public readonly record struct VoxelSample(
     ///     Gets the numeric range used for mapping this sample.
     /// </summary>
     public VisualizationRange Range { get; init; } = VisualizationRange.Default;
+
+    /// <summary>
+    ///     Gets the magnitude of the velocity, in metres per second (m/s). NaN when any component is NaN.
+    /// </summary>
+    public float Speed => MathF.Sqrt(VelocityX * VelocityX + VelocityY * VelocityY + VelocityZ * VelocityZ);
 }
 
 /// <summary>
@@ -239,9 +254,13 @@ public enum VisualizationDataRequirements
     /// </summary>
     Gases = 1 << 2,
     /// <summary>
+    ///     Requires the derived velocity field.
+    /// </summary>
+    Velocity = 1 << 3,
+    /// <summary>
     ///     Requires every supported source field.
     /// </summary>
-    All = Temperature | Pressure | Gases
+    All = Temperature | Pressure | Gases | Velocity
 }
 
 /// <summary>
@@ -388,7 +407,7 @@ public sealed class VisualizationRegistry
 
     /// <summary>
     ///     Creates a registry containing the built-in visualizations, in the order temperature, pressure, gas
-    ///     composition, active air, voxel classification.
+    ///     composition, active air, voxel classification, speed.
     /// </summary>
     /// <param name="config">Simulation configuration; the gas-composition visualization reads its gas registry.</param>
     /// <returns>The configured registry.</returns>
@@ -402,6 +421,7 @@ public sealed class VisualizationRegistry
         registry.Register(new GasCompositionVisualization(config));
         registry.Register(new ActiveOnlyVisualization());
         registry.Register(new VoxelClassificationVisualization());
+        registry.Register(new SpeedVisualization());
         return registry;
     }
 
@@ -602,6 +622,50 @@ public sealed class VisualizationRegistry
                     new VisualizationLegendEntry($"{range.Minimum:G6}", new ColorRgba(0f, 0f, 0f), range.Minimum),
                     new VisualizationLegendEntry($"{midpoint:G6}", new ColorRgba(0.5f, 0.5f, 0.5f), midpoint),
                     new VisualizationLegendEntry($"{range.Maximum:G6}", new ColorRgba(1f, 1f, 1f), range.Maximum)
+                ]);
+        }
+    }
+
+    private sealed class SpeedVisualization : IVisualizationMethod
+    {
+        private readonly static ColorRgba Still = new(0.05f, 0.05f, 0.12f);
+        private readonly static ColorRgba Moving = new(0.2f, 0.6f, 1f);
+        private readonly static ColorRgba Fast = new(1f, 1f, 1f);
+
+        public string Id => BuiltInVisualizationIds.Speed;
+
+        public string DisplayName => "Speed";
+
+        public VisualizationDataRequirements RequiredData => VisualizationDataRequirements.Velocity;
+
+        public bool TryGetColor(in VoxelSample sample, out ColorRgba color)
+        {
+            float normalized = Normalize(sample.Speed, sample.Range);
+            color = normalized < 0.5f
+                ? ColorRgba.Lerp(Still, Moving, normalized * 2f)
+                : ColorRgba.Lerp(Moving, Fast, (normalized - 0.5f) * 2f);
+
+            return true;
+        }
+
+        public VisualizationLegend CreateLegend(IReadOnlyCollection<int> activeGasIds)
+        {
+            return CreateLegend(activeGasIds, VisualizationRange.Default);
+        }
+
+        public VisualizationLegend CreateLegend(
+            IReadOnlyCollection<int> activeGasIds,
+            VisualizationRange range)
+        {
+            float midpoint = range.Minimum + (range.Maximum - range.Minimum) * 0.5f;
+            return new VisualizationLegend(
+                "Speed",
+                "m/s",
+                VisualizationLegendKind.Gradient,
+                [
+                    new VisualizationLegendEntry($"{range.Minimum:G6} m/s", Still, range.Minimum),
+                    new VisualizationLegendEntry($"{midpoint:G6} m/s", Moving, midpoint),
+                    new VisualizationLegendEntry($"{range.Maximum:G6} m/s", Fast, range.Maximum)
                 ]);
         }
     }

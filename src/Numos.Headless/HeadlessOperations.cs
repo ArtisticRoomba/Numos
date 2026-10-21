@@ -63,6 +63,7 @@ internal sealed partial class HeadlessOperations
             "fillChunk" => FillChunk(request),
             "setVoxelClassification" => SetVoxelClassification(request),
             "setVoxelTemperature" => SetVoxelTemperature(request),
+            "setVoxelMomentum" => SetVoxelMomentum(request),
             "injectGas" => InjectGas(request),
             "clearVoxelGas" => ClearVoxelGas(request),
             "editRegion" => EditRegion(request),
@@ -104,7 +105,8 @@ internal sealed partial class HeadlessOperations
     [
         "addSimulation", "removeSimulation", "selectSimulation", "listSimulations", "addChunk", "removeChunk",
         "sealChunk", "wakeChunk", "sleepChunk", "fillChunk", "setVoxelClassification", "setVoxelTemperature",
-        "injectGas", "clearVoxelGas", "editRegion", "sampleVoxels", "addGas", "removeGas", "listGases",
+        "setVoxelMomentum", "injectGas", "clearVoxelGas",
+        "editRegion", "sampleVoxels", "addGas", "removeGas", "listGases",
         "updateConfig", "getConfig", "listSolvers", "setSolverEnabled", "resetSolvers", "createPortal", "createDock",
         "destroyLinkSet", "listLinkSets", "tick", "stepForward", "seekTick", "returnToHead", "createBranch",
         "selectBranch", "continueBranch", "listBranches", "timelineInfo", "saveReplay", "observe", "exportField",
@@ -367,6 +369,19 @@ internal sealed partial class HeadlessOperations
     {
         var cell = Cell(request);
         _session.SetVoxelTemperature(cell, Require(request.TemperatureK, "temperatureK"), ResolveSimulation(request.Simulation));
+        return new CommandExecution();
+    }
+
+    private CommandExecution SetVoxelMomentum(HeadlessRequest request)
+    {
+        var cell = Cell(request);
+        _session.SetVoxelMomentum(
+            cell,
+            Require(request.MomentumX, "momentumX"),
+            Require(request.MomentumY, "momentumY"),
+            Require(request.MomentumZ, "momentumZ"),
+            ResolveSimulation(request.Simulation));
+
         return new CommandExecution();
     }
 

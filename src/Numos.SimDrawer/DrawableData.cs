@@ -115,6 +115,9 @@ public enum VoxelFaceMask : byte
 /// </summary>
 /// <param name="Temperature">Temperature in kelvins (K).</param>
 /// <param name="Pressure">Pressure in pascals (Pa).</param>
+/// <param name="VelocityX">Bulk x-velocity in metres per second (m/s), or NaN when the frame carried none.</param>
+/// <param name="VelocityY">Bulk y-velocity in metres per second (m/s), or NaN when the frame carried none.</param>
+/// <param name="VelocityZ">Bulk z-velocity in metres per second (m/s), or NaN when the frame carried none.</param>
 /// <param name="TotalMoles">Total gas amount in moles (mol).</param>
 /// <param name="IsVisible">Whether the voxel is visible.</param>
 /// <param name="VisibleFaces">Faces exposed by the voxel.</param>
@@ -126,6 +129,9 @@ public readonly record struct VoxelDrawData(
     VoxelFaceMask VisibleFaces,
     float Temperature,
     float Pressure,
+    float VelocityX,
+    float VelocityY,
+    float VelocityZ,
     float TotalMoles,
     int PrimaryGasId,
     int RoomId,

@@ -173,6 +173,61 @@ public sealed class HeadlessApplicationTests
     }
 
     [Test]
+    public async Task SetVoxelMomentum_Observe_ReportsDerivedVelocityWithoutTicking()
+    {
+        var run = await RunAsync(
+            HeadlessTestSupport.CreateProject("create", 2, 1, 1, "\"referenceMolarMassKgPerMol\":0.01"),
+            AddChunkRequest("chunk", 0, 0, 0),
+            Request(
+                "inject",
+                "injectGas",
+                "\"position\":{\"x\":0,\"y\":0,\"z\":0}," +
+                "\"voxel\":{\"x\":0,\"y\":0,\"z\":0}," +
+                "\"gasId\":0,\"moles\":2,\"temperatureK\":300"),
+            // 2 mol × 0.01 kg/mol = 0.02 kg, so (0.06, 0, -0.08) kg·m/s is (3, 0, -4) m/s.
+            Request(
+                "momentum",
+                "setVoxelMomentum",
+                "\"position\":{\"x\":0,\"y\":0,\"z\":0}," +
+                "\"voxel\":{\"x\":0,\"y\":0,\"z\":0}," +
+                "\"momentumX\":0.06,\"momentumY\":0,\"momentumZ\":-0.08"),
+            Request(
+                "observe",
+                "observe",
+                "\"position\":{\"x\":0,\"y\":0,\"z\":0},\"voxel\":{\"x\":0,\"y\":0,\"z\":0}"),
+            Request("exit", "exit"));
+
+        var momentumResponse = FindResponse(run.Responses, "momentum");
+        var observationResponse = FindResponse(run.Responses, "observe");
+        var observation = observationResponse.GetProperty("observation");
+        var chunk = observation.GetProperty("chunks")[0];
+        var voxel = chunk.GetProperty("voxels")[0];
+        var velocity = voxel.GetProperty("velocityMps");
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(run.ExitCode, Is.Zero);
+            Assert.That(momentumResponse.GetProperty("ok").GetBoolean(), Is.True);
+            Assert.That(observationResponse.GetProperty("state").GetProperty("tick").GetInt32(), Is.Zero);
+            Assert.That(velocity.GetProperty("x").GetSingle(), Is.EqualTo(3f).Within(Tolerance));
+            Assert.That(velocity.GetProperty("y").GetSingle(), Is.EqualTo(0f).Within(Tolerance));
+            Assert.That(velocity.GetProperty("z").GetSingle(), Is.EqualTo(-4f).Within(Tolerance));
+            Assert.That(voxel.GetProperty("speedMps").GetSingle(), Is.EqualTo(5f).Within(Tolerance));
+            Assert.That(
+                chunk.GetProperty("summary").GetProperty("speedMps").GetProperty("maximum").GetDouble(),
+                Is.EqualTo(5d).Within(Tolerance));
+
+            Assert.That(
+                observation.GetProperty("global").GetProperty("speedMps").GetProperty("finiteCount").GetInt32(),
+                Is.EqualTo(2));
+
+            Assert.That(
+                observation.GetProperty("global").GetProperty("anomalies").GetProperty("nonFiniteVelocityCount").GetInt32(),
+                Is.Zero);
+        });
+    }
+
+    [Test]
     public async Task InjectGas_UnregisteredGasId_IsRejected()
     {
         var run = await RunAsync(

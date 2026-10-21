@@ -145,6 +145,7 @@ public sealed record SimulationSummaryReport(
     double SensibleEnergyJ,
     FiniteStatisticsReport PressurePa,
     FiniteStatisticsReport TemperatureK,
+    FiniteStatisticsReport SpeedMps,
     GasTotalReport[] Gases,
     AnomalyCountsReport Anomalies);
 
@@ -176,6 +177,7 @@ public sealed record ChunkSummaryReport(
     double SensibleEnergyJ,
     FiniteStatisticsReport PressurePa,
     FiniteStatisticsReport TemperatureK,
+    FiniteStatisticsReport SpeedMps,
     GasTotalReport[] Gases,
     AnomalyCountsReport Anomalies);
 
@@ -202,7 +204,13 @@ public sealed record GasTotalReport(int GasId, string? Name, double Moles);
 public sealed record VoxelGasReport(int GasId, string? Name, float Moles);
 
 /// <summary>
-///     Detailed raw and derived values for one voxel.
+///     Three float components, used for the per-voxel velocity vector.
+/// </summary>
+public sealed record FloatVector(float X, float Y, float Z);
+
+/// <summary>
+///     Detailed raw and derived values for one voxel. <c>VelocityMps</c> is the bulk velocity derived from the
+///     voxel's momentum and gas mass, and <c>SpeedMps</c> is its magnitude.
 /// </summary>
 public sealed record VoxelStateReport(
     int LocalIndex,
@@ -212,6 +220,8 @@ public sealed record VoxelStateReport(
     bool IsGasBearing,
     float PressurePa,
     float TemperatureK,
+    FloatVector VelocityMps,
+    float SpeedMps,
     double TotalMoles,
     double SensibleEnergyJ,
     VoxelGasReport[] Gases);
@@ -225,7 +235,8 @@ public sealed record AnomalyCountsReport(
     int NonFiniteTemperatureCount,
     int NegativeTemperatureCount,
     int NonFiniteMolesCount,
-    int NegativeMolesCount)
+    int NegativeMolesCount,
+    int NonFiniteVelocityCount)
 {
     public int TotalCount =>
         NonFinitePressureCount +
@@ -233,7 +244,8 @@ public sealed record AnomalyCountsReport(
         NonFiniteTemperatureCount +
         NegativeTemperatureCount +
         NonFiniteMolesCount +
-        NegativeMolesCount;
+        NegativeMolesCount +
+        NonFiniteVelocityCount;
 }
 
 /// <summary>

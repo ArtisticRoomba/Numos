@@ -34,6 +34,31 @@ public struct AtmosChunkSnapshot
     /// </summary>
     [ElementQuantity("temperature")]
     public Kelvin[] Temperature;
+
+    /// <summary>
+    ///     Gets detached per-voxel x-velocity values, in metres per second (m/s), derived from the voxel's momentum
+    ///     and gas mass when the snapshot was taken.
+    /// </summary>
+    /// <remarks>
+    ///     Null or empty unless <see cref="AtmosChunkSnapshotFields.Velocity" /> was requested. A vacuum voxel
+    ///     reads as zero. The three components are separate arrays rather than a vector type so each one carries
+    ///     its dimensional annotation.
+    /// </remarks>
+    [ElementQuantity("velocity")]
+    public MetrePerSecond[] VelocityX;
+
+    /// <summary>
+    ///     Gets detached per-voxel y-velocity values, in metres per second (m/s). See <see cref="VelocityX" />.
+    /// </summary>
+    [ElementQuantity("velocity")]
+    public MetrePerSecond[] VelocityY;
+
+    /// <summary>
+    ///     Gets detached per-voxel z-velocity values, in metres per second (m/s). See <see cref="VelocityX" />.
+    /// </summary>
+    [ElementQuantity("velocity")]
+    public MetrePerSecond[] VelocityZ;
+
     /// <summary>
     ///     Gets detached gas-channel data.
     /// </summary>
@@ -122,6 +147,9 @@ public struct AtmosChunkSnapshot
 
             if (SolverArrays != null)
                 available |= AtmosChunkSnapshotFields.SolverArrays;
+
+            if (VelocityX is { Length: > 0 } && VelocityY is { Length: > 0 } && VelocityZ is { Length: > 0 })
+                available |= AtmosChunkSnapshotFields.Velocity;
         }
 
         return (available & fields) == fields;

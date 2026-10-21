@@ -318,6 +318,9 @@ molar heat capacity. Pressure is always derived from `P = nRT/V` and cannot be s
 Injecting into a voxel directly with `AtmosSimulation.AddGasToVoxel` follows the same energy rule. It recalculates the
 target voxel's total heat capacity from its gas composition before temperature mixing.
 
+Mixtures do not expose velocity. Read it with `AtmosSimulation.GetVoxelVelocity`. That call divides the voxel's stored
+momentum by its current gas mass (the sum of moles times molar mass) at the moment of the call.
+
 The `Temperature` setter stores its raw value, also for tooling parity. Pressure and sensible-energy calculations
 interpret non-finite and nonpositive stored temperatures through `DefaultTemperatureFallback`. Creation and
 incoming-gas operations still require finite, nonnegative temperatures.
@@ -1347,7 +1350,9 @@ Numos has no networking layer. It provides the pieces a host can build replicati
 
 - `AtmosChunkSnapshot` is a detached copy of a chunk's state: grid position, dimensions, pressure, heat capacity,
   temperature, per-gas moles, classification, sleep state, and optionally rollback `ChunkField<T>` storage. Snapshots
-  carry a chunk version, so a host can skip chunks that have not changed since the last send.
+  carry a chunk version, so a host can skip chunks that have not changed since the last send. Requesting
+  `AtmosChunkSnapshotFields.Velocity` adds per-voxel velocity arrays. Numos derives them from momentum and gas mass at
+  capture time. Momentum itself is only in checkpoints.
 - Checkpoints and recordings (see [deterministic_replay.md](deterministic_replay.md)) describe a full continuation
   state plus the external operations since it. `Numos.Serialization` encodes them in the versioned `.numos` binary
   format. Replaying operations against a shared checkpoint is an alternative to streaming voxel state.
