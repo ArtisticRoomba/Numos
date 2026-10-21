@@ -29,14 +29,21 @@ internal sealed class ChunkCheckpointFieldAttribute(string liveMember, int order
 }
 
 /// <summary>
-///     Marks an <see cref="AtmosConfigSnapshot" /> scalar property as one of the flat fields hashed and wire-encoded
-///     without bespoke defaulting or clamping logic. The generator emits its hash and wire read/write code from this
-///     one declaration.
+///     Marks an <see cref="AtmosConfigSnapshot" /> scalar property as one of the flat fields hashed, compared, and
+///     wire-encoded without bespoke defaulting or clamping logic. The generator emits its hash, equality, and wire
+///     read/write code from this one declaration.
 /// </summary>
 /// <remarks>
-///     Does not cover the constructor: <see cref="AtmosConfigSnapshot" />'s constructor applies per-field
-///     defaulting/clamping rules that only run once per config change and are not mechanical, so it stays hand-written.
-///     The corresponding property on the mutable <see cref="AtmosConfig" /> must share this property's name and type.
+///     <para>
+///         Tagged fields are compared by <see cref="AtmosConfigSnapshot.SemanticallyEquals" /> through the generated
+///         equality, which compares floats by their bits to agree with the hash: <c>0f</c> and <c>-0f</c> differ.
+///     </para>
+///     <para>
+///         Does not cover the constructor: <see cref="AtmosConfigSnapshot" />'s constructor applies per-field
+///         defaulting/clamping rules that only run once per config change and are not mechanical, so it stays
+///         hand-written. The corresponding property on the mutable <see cref="AtmosConfig" /> must share this
+///         property's name and type.
+///     </para>
 /// </remarks>
 /// <param name="order">
 ///     Emission order relative to other <see cref="ConfigCheckpointFieldAttribute" />-tagged properties. Wire bytes
@@ -49,9 +56,13 @@ internal sealed class ConfigCheckpointFieldAttribute(int order) : Attribute
 }
 
 /// <summary>
-///     Marks a <see cref="GasProperties" /> field as part of its flat hashed and wire-encoded field list.
-///     The generator emits that list's hash and wire read/write code from this one declaration.
+///     Marks a <see cref="GasProperties" /> field as part of its flat hashed, compared, and wire-encoded field list.
+///     The generator emits that list's hash, equality, and wire read/write code from this one declaration.
 /// </summary>
+/// <remarks>
+///     The generated equality backs the gas-registry comparison in <see cref="AtmosConfigSnapshot.SemanticallyEquals" />
+///     and compares floats by their bits, matching the hash.
+/// </remarks>
 /// <param name="order">
 ///     Emission order relative to other <see cref="GasCheckpointFieldAttribute" />-tagged fields. Wire bytes are
 ///     golden-pinned, so this must reproduce the existing field order exactly.

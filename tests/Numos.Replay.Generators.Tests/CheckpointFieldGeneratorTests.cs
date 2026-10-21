@@ -91,6 +91,20 @@ public sealed class CheckpointFieldGeneratorTests
                 Does.Contain("gas.Name = global::Numos.CoreSim.Replay.AtmosReplayCodec.ReadNullableString(reader, maxStringBytes)!;"));
 
             Assert.That(generated, Does.Contain("gas.CondensationEnabled = reader.ReadBoolean();"));
+
+            // Equality is bitwise on floats (aliases included) so it agrees with the hash.
+            Assert.That(
+                generated,
+                Does.Contain(
+                    "global::System.BitConverter.SingleToUInt32Bits(left.GlobalTemperature) == " +
+                    "global::System.BitConverter.SingleToUInt32Bits(right.GlobalTemperature) &&"));
+
+            Assert.That(generated, Does.Contain("left.SleepThreshold == right.SleepThreshold;"));
+            Assert.That(
+                generated,
+                Does.Contain("string.Equals(left.Name, right.Name, global::System.StringComparison.Ordinal) &&"));
+
+            Assert.That(generated, Does.Contain("left.CondensationEnabled == right.CondensationEnabled;"));
         });
     }
 

@@ -12,7 +12,8 @@ namespace Numos.Replay.Generators;
 /// </summary>
 /// <remarks>
 ///     One field list per group drives everything that has to agree about it: chunk-array capture and restore, state
-///     hashing, and the wire encoding. Fields are emitted in their declared order, which the golden replay bytes pin.
+///     hashing, the wire encoding, and (for config and gas fields) equality. Fields are emitted in their declared order,
+///     which the golden replay bytes pin.
 /// </remarks>
 [Generator(LanguageNames.CSharp)]
 public sealed class CheckpointFieldGenerator : IIncrementalGenerator
@@ -145,6 +146,10 @@ public sealed class CheckpointFieldGenerator : IIncrementalGenerator
                     WireTypeKind.String => group != CheckpointGroup.Chunk,
                     _ => false
                 };
+
+                // Config and gas fields also get generated equality, so a type has to be comparable as well.
+                if (group != CheckpointGroup.Chunk && CompareScalar("a", "b", type) == null)
+                    supported = false;
 
                 if (!supported)
                 {
@@ -292,6 +297,8 @@ public sealed class CheckpointFieldGenerator : IIncrementalGenerator
         writer.Close();
         writer.Line();
 
+        EmitEquality(writer, "ConfigFieldsEqual", "global::Numos.CoreSim.AtmosConfigSnapshot", fields);
+
         writer.Line(
             "internal static void ReadConfigFields(global::System.IO.BinaryReader reader, " +
             "global::Numos.CoreSim.AtmosConfig config, int maxStringBytes)");
@@ -328,6 +335,8 @@ public sealed class CheckpointFieldGenerator : IIncrementalGenerator
         writer.Close();
         writer.Line();
 
+        EmitEquality(writer, "GasFieldsEqual", "global::Numos.CoreSim.GasProperties", fields);
+
         writer.Line(
             "internal static global::Numos.CoreSim.GasProperties ReadGasFields(" +
             "global::System.IO.BinaryReader reader, int maxStringBytes)");
@@ -339,6 +348,42 @@ public sealed class CheckpointFieldGenerator : IIncrementalGenerator
 
         writer.Line("return gas;");
         writer.Close();
+    }
+
+    private static void EmitEquality(CodeWriter writer, string name, string type, EquatableArray<PlannedField> fields)
+    {
+        writer.Line($"internal static bool {name}({type} left, {type} right)");
+        writer.Open();
+        writer.Line("return");
+        for (int index = 0; index < fields.Count; index++)
+        {
+            string member = fields[index].Member;
+            writer.Line(
+                $"    {CompareScalar("left." + member, "right." + member, fields[index].Type)}" +
+                (index == fields.Count - 1 ? ";" : " &&"));
+        }
+
+        writer.Close();
+        writer.Line();
+    }
+
+    // Floats compare by bits, the same way AtmosStateHasher hashes them, so equal values always hash equal. That
+    // makes 0f and -0f different and a NaN equal to itself (when the payloads match), unlike float.Equals.
+    private static string? CompareScalar(string left, string right, WireType type)
+    {
+        return type.Kind switch
+        {
+            WireTypeKind.String => $"string.Equals({left}, {right}, global::System.StringComparison.Ordinal)",
+            WireTypeKind.Primitive => type.Name switch
+            {
+                "Single" => $"global::System.BitConverter.SingleToUInt32Bits({left}) == " +
+                            $"global::System.BitConverter.SingleToUInt32Bits({right})",
+                "Double" => $"global::System.BitConverter.DoubleToUInt64Bits({left}) == " +
+                            $"global::System.BitConverter.DoubleToUInt64Bits({right})",
+                _ => $"{left} == {right}"
+            },
+            _ => null
+        };
     }
 
     // Strings go through the nullable encoding so a scalar string field keeps the same layout whether or not it can

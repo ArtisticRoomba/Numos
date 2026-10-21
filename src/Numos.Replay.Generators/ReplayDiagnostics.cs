@@ -59,8 +59,8 @@ internal static class ReplayDiagnostics
     public static readonly DiagnosticDescriptor UnsupportedCheckpointField = new(
         "NUMOSCHECKPTGEN001",
         "Unsupported checkpoint field type",
-        "Checkpoint field '{0}' has type '{1}', which the checkpoint field generator can't copy, hash, or encode; " +
-        "leave it untagged and hand-write its capture, hash, and wire code",
+        "Checkpoint field '{0}' has type '{1}', which the checkpoint field generator can't copy, hash, encode, or compare; " +
+        "leave it untagged and hand-write its capture, hash, wire, and equality code",
         Category,
         DiagnosticSeverity.Error,
         true);

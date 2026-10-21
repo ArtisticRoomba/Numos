@@ -333,25 +333,11 @@ public sealed class AtmosConfigSnapshot : IAtmosConfig
         }
     }
 
+    // Tagged scalars and gas fields compare through the generated helpers, bitwise on floats to match AppendHash. Only
+    // the untagged members (the registry's count and order, solver configurations) are compared here.
     internal bool SemanticallyEquals(AtmosConfigSnapshot other)
     {
-        return GlobalTemperature.Equals(other.GlobalTemperature) &&
-               DefaultTemperatureFallback.Equals(other.DefaultTemperatureFallback) &&
-               DefaultMolarHeatCapacityAtConstantVolume.Equals(other.DefaultMolarHeatCapacityAtConstantVolume) &&
-               VoxelVolume.Equals(other.VoxelVolume) &&
-               SaturationReferencePressure.Equals(other.SaturationReferencePressure) &&
-               DefaultDiffusionCoefficient.Equals(other.DefaultDiffusionCoefficient) &&
-               SpaceTemperature.Equals(other.SpaceTemperature) &&
-               BulkFlowCoefficient.Equals(other.BulkFlowCoefficient) &&
-               VacuumThreshold.Equals(other.VacuumThreshold) &&
-               SleepThreshold == other.SleepThreshold &&
-               SleepEpsilon.Equals(other.SleepEpsilon) &&
-               ThermalConductance.Equals(other.ThermalConductance) &&
-               CondensationRateFactor.Equals(other.CondensationRateFactor) &&
-               MaxPressureTransferFractionPerNeighbor.Equals(other.MaxPressureTransferFractionPerNeighbor) &&
-               AccumulatorWakeThreshold.Equals(other.AccumulatorWakeThreshold) &&
-               AccumulatorMaxAliveTicks == other.AccumulatorMaxAliveTicks &&
-               ReferenceMolarMass.Equals(other.ReferenceMolarMass) &&
+        return GeneratedCheckpointFields.ConfigFieldsEqual(this, other) &&
                GasRegistriesEqual(GasRegistry, other.GasRegistry) &&
                SolverConfigurations.Count == other.SolverConfigurations.Count &&
                SolverConfigurations.Zip(other.SolverConfigurations).All(static pair =>
@@ -365,19 +351,8 @@ public sealed class AtmosConfigSnapshot : IAtmosConfig
 
         for (int i = 0; i < first.Count; i++)
         {
-            var left = first[i];
-            var right = second[i];
-            if (!string.Equals(left.Name, right.Name, StringComparison.Ordinal) ||
-                !left.MolarHeatCapacityAtConstantVolume.Equals(right.MolarHeatCapacityAtConstantVolume) ||
-                !left.BoilingPoint.Equals(right.BoilingPoint) ||
-                left.CondensationEnabled != right.CondensationEnabled ||
-                !left.MolarEnthalpyOfVaporization.Equals(right.MolarEnthalpyOfVaporization) ||
-                left.LiquidId != right.LiquidId ||
-                !left.DiffusionCoefficient.Equals(right.DiffusionCoefficient) ||
-                !left.MolarMass.Equals(right.MolarMass))
-            {
+            if (!GeneratedCheckpointFields.GasFieldsEqual(first[i], second[i]))
                 return false;
-            }
         }
 
         return true;
