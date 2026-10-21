@@ -468,6 +468,8 @@ internal class ReactionSolver : IAtmosSolverStage
     /// <param name="context">Supplies the neighbor chunk lookup.</param>
     private void TransferIgnition(AtmosChunk chunk, AtmosSolverExecutionContext context)
     {
+        // TODO: This currently finds donors from neighbours, it should really find neighbours from donors
+        // This is not trivial with parralisation in mind
         if (!chunk.IsAwake || chunk.ActiveAirCount == 0)
             return;
 
