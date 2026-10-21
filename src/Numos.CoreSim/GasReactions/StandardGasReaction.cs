@@ -115,6 +115,7 @@ public readonly partial record struct StandardGasReaction
             hash.Add(entry.Key);
             hash.Add(entry.Value);
         }
+        hash.Add(RequiresIgnition);
     }
 
     internal bool SemanticallyEquals(StandardGasReaction other)
@@ -124,7 +125,8 @@ public readonly partial record struct StandardGasReaction
                ActivationEnergy.Equals(other.ActivationEnergy) &&
                DictionaryEquals(Input, other.Input) &&
                DictionaryEquals(Output, other.Output) &&
-               DictionaryEquals(SpeedFactors, other.SpeedFactors);
+               DictionaryEquals(SpeedFactors, other.SpeedFactors) &&
+               RequiresIgnition.Equals(other.RequiresIgnition);
     }
 
     private static bool DictionaryEquals(
