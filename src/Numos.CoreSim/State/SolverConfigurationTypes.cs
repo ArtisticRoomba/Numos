@@ -1,4 +1,5 @@
 using Numos.CoreSim.GasReactions;
+using Numos.CoreSim.State.Advanced;
 
 namespace Numos.CoreSim.State;
 

@@ -266,7 +266,7 @@ internal static class StateBinding
 
     private static string DefaultValue(StateShape shape)
     {
-        return "global::Numos.CoreSim.State.StateCodecs.DefaultValue<" + shape.TypeExpression + ", " + shape.CodecExpression + ">()";
+        return "global::Numos.CoreSim.State.Advanced.StateCodecs.DefaultValue<" + shape.TypeExpression + ", " + shape.CodecExpression + ">()";
     }
 
     private static string Describe(StateShape shape)

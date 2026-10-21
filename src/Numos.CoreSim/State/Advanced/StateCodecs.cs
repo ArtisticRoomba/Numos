@@ -3,7 +3,7 @@ using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
-namespace Numos.CoreSim.State;
+namespace Numos.CoreSim.State.Advanced;
 
 /// <summary>
 ///     Writes, compares, and orders one kind of state value. Generated <see cref="NumosStateAttribute" /> code picks a

@@ -3,7 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
 
-namespace Numos.CoreSim.State;
+namespace Numos.CoreSim.State.Advanced;
 
 /// <summary>
 ///     Reads the wire format <see cref="StateBinarySink" /> writes, for generated

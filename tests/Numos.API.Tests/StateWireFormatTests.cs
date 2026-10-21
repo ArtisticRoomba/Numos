@@ -2,6 +2,7 @@ using System.Collections.Frozen;
 using System.Collections.Immutable;
 using Numos.CoreSim;
 using Numos.CoreSim.State;
+using Numos.CoreSim.State.Advanced;
 
 namespace Numos.API.Tests;
 

@@ -1,4 +1,4 @@
-namespace Numos.CoreSim.State;
+namespace Numos.CoreSim.State.Advanced;
 
 /// <summary>
 ///     Implemented by the source generator for every <see cref="NumosStateAttribute" /> type.

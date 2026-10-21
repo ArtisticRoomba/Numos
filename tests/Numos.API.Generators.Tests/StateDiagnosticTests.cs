@@ -1,4 +1,5 @@
 using Microsoft.CodeAnalysis;
+using Numos.CoreSim.State.Advanced;
 
 namespace Numos.API.Generators.Tests;
 

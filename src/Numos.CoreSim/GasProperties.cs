@@ -1,4 +1,5 @@
 using Numos.CoreSim.State;
+using Numos.CoreSim.State.Advanced;
 using Magnitudo;
 
 namespace Numos.CoreSim;

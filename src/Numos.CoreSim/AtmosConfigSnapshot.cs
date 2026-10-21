@@ -1,6 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using Numos.CoreSim.GasReactions;
 using Numos.CoreSim.State;
+using Numos.CoreSim.State.Advanced;
 using Numos.Maths;
 
 namespace Numos.CoreSim;

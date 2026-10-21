@@ -1,5 +1,6 @@
 using Numos.CoreSim;
 using Numos.CoreSim.State;
+using Numos.CoreSim.State.Advanced;
 using System.Collections.ObjectModel;
 using Numos.CoreSim.Replay;
 

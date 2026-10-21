@@ -1,6 +1,7 @@
 using Numos.CoreSim.Replay;
 using Numos.CoreSim.Solvers;
 using Numos.CoreSim.State;
+using Numos.CoreSim.State.Advanced;
 using Numos.Maths;
 
 namespace Numos.CoreSim.Tests;

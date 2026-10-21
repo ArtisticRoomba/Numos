@@ -1,5 +1,6 @@
 using Numos.CoreSim;
 using Numos.CoreSim.State;
+using Numos.CoreSim.State.Advanced;
 
 namespace Numos.Serialization.FileSystem;
 

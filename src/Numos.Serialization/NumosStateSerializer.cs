@@ -1,6 +1,7 @@
 using Numos.CoreSim;
 using Numos.CoreSim.Replay;
 using Numos.CoreSim.State;
+using Numos.CoreSim.State.Advanced;
 
 namespace Numos.Serialization;
 

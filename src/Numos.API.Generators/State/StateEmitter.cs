@@ -5,8 +5,8 @@ namespace Numos.API.Generators.State;
 
 internal static class StateEmitter
 {
-    private const string StateInterface = "global::Numos.CoreSim.State.INumosState";
-    private const string NonGenericInterface = "global::Numos.CoreSim.State.INumosState";
+    private const string StateInterface = "global::Numos.CoreSim.State.Advanced.INumosState";
+    private const string NonGenericInterface = "global::Numos.CoreSim.State.Advanced.INumosState";
     private const string SolverConfiguration = "global::Numos.CoreSim.IAtmosSolverConfiguration";
 
     public static string Emit(StateTypeModel model)
@@ -70,7 +70,7 @@ internal static class StateEmitter
         writer.Line(CodeWriter.GeneratedCodeAttribute);
         writer.Line("void " + NonGenericInterface + ".WriteState<TSink>(ref TSink sink)");
         writer.Open();
-        writer.Line("global::Numos.CoreSim.State.NumosState.Write<" + model.TypeName + ", TSink>(ref sink, this);");
+        writer.Line("global::Numos.CoreSim.State.Advanced.NumosState.Write<" + model.TypeName + ", TSink>(ref sink, this);");
         writer.Close();
     }
 
@@ -79,7 +79,7 @@ internal static class StateEmitter
         writer.Line(CodeWriter.GeneratedCodeAttribute);
         writer.Line(
             "static " + model.TypeName + " " + stateInterface +
-            ".ReadState(ref global::Numos.CoreSim.State.StateReader reader, global::Numos.CoreSim.IGasRegistry? gases)");
+            ".ReadState(ref global::Numos.CoreSim.State.Advanced.StateReader reader, global::Numos.CoreSim.IGasRegistry? gases)");
 
         writer.Open();
         foreach (StateFieldModel field in model.Fields)
@@ -242,18 +242,18 @@ internal static class StateEmitter
         writer.Line("public bool SemanticallyEquals(" + SolverConfiguration + " other)");
         writer.Open();
         writer.Line("return other is " + model.TypeName + " typed &&");
-        writer.Line("       global::Numos.CoreSim.State.NumosState.StateEquals<" + model.TypeName + ">(this, typed);");
+        writer.Line("       global::Numos.CoreSim.State.Advanced.NumosState.StateEquals<" + model.TypeName + ">(this, typed);");
         writer.Close();
         writer.Line();
         writer.Line("/// <inheritdoc />");
         writer.Line(CodeWriter.GeneratedCodeAttribute);
         writer.Line("public ulong ComputeStateHash()");
         writer.Open();
-        writer.Line("var sink = new global::Numos.CoreSim.State.StateHashSink();");
+        writer.Line("var sink = new global::Numos.CoreSim.State.Advanced.StateHashSink();");
         writer.Line("sink.WriteString(((" + SolverConfiguration + ")this).Key);");
         writer.Line(
-            "global::Numos.CoreSim.State.NumosState.Write<" + model.TypeName +
-            ", global::Numos.CoreSim.State.StateHashSink>(ref sink, this);");
+            "global::Numos.CoreSim.State.Advanced.NumosState.Write<" + model.TypeName +
+            ", global::Numos.CoreSim.State.Advanced.StateHashSink>(ref sink, this);");
 
         writer.Line("return sink.Value;");
         writer.Close();

@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Numos.CoreSim.State;
+using Numos.CoreSim.State.Advanced;
 
 namespace Numos.CoreSim.Solvers;
 

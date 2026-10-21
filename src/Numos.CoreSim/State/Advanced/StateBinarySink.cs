@@ -1,7 +1,7 @@
 using System.Buffers.Binary;
 using System.Text;
 
-namespace Numos.CoreSim.State;
+namespace Numos.CoreSim.State.Advanced;
 
 /// <summary>
 ///     An <see cref="IStateSink" /> that writes the state wire format into a growable buffer.

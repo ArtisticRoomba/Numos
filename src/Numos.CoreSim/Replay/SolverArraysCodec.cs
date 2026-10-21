@@ -1,6 +1,7 @@
 using Numos.CoreSim.Datatypes.Snapshots;
 using Numos.CoreSim.Solvers;
 using Numos.CoreSim.State;
+using Numos.CoreSim.State.Advanced;
 
 namespace Numos.CoreSim.Replay;
 

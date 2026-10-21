@@ -66,7 +66,7 @@ internal enum StateShapeKind
 /// </summary>
 internal sealed record StateShape(StateShapeKind Kind, string Name, EquatableArray<StateShape> Arguments, string Codec = "")
 {
-    private const string Codecs = "global::Numos.CoreSim.State.StateCodecs.";
+    private const string Codecs = "global::Numos.CoreSim.State.Advanced.StateCodecs.";
 
     private const string StateAttributeMetadataName = "Numos.CoreSim.State.NumosStateAttribute";
 

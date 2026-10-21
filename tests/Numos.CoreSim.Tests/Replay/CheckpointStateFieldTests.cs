@@ -1,5 +1,6 @@
 using Numos.CoreSim.Replay;
 using Numos.CoreSim.State;
+using Numos.CoreSim.State.Advanced;
 
 namespace Numos.CoreSim.Tests.Replay;
 

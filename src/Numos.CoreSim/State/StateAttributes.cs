@@ -1,3 +1,5 @@
+using Numos.CoreSim.State.Advanced;
+
 namespace Numos.CoreSim.State;
 
 /// <summary>

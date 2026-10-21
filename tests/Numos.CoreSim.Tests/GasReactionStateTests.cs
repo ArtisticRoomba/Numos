@@ -2,6 +2,7 @@ using System.Collections.Frozen;
 using System.Reflection;
 using Numos.CoreSim.GasReactions;
 using Numos.CoreSim.State;
+using Numos.CoreSim.State.Advanced;
 using LinearSpeedFactor = Numos.CoreSim.GasReactions.LinearGasReaction.LinearSpeedFactor;
 
 namespace Numos.CoreSim.Tests;

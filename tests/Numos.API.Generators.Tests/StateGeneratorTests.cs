@@ -1,5 +1,6 @@
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
+using Numos.CoreSim.State.Advanced;
 
 namespace Numos.API.Generators.Tests;
 
@@ -81,18 +82,18 @@ public sealed class StateGeneratorTests
         string source = GeneratorHarness.GeneratedSource(result, "MyMod.EveryShape.NumosState.g.cs");
         Assert.Multiple(() =>
         {
-            Assert.That(source, Does.Contain("StateCodecs.Enum<global::MyMod.Mode, byte, global::Numos.CoreSim.State.StateCodecs.Byte>"));
+            Assert.That(source, Does.Contain("StateCodecs.Enum<global::MyMod.Mode, byte, global::Numos.CoreSim.State.Advanced.StateCodecs.Byte>"));
             Assert.That(
                 source,
                 Does.Contain(
-                    "StateCodecs.Nullable<string, global::Numos.CoreSim.State.StateCodecs.String>.Write(ref sink, value.MaybeText);"));
+                    "StateCodecs.Nullable<string, global::Numos.CoreSim.State.Advanced.StateCodecs.String>.Write(ref sink, value.MaybeText);"));
 
             Assert.That(
                 source,
                 Does.Contain(
                     "StateCodecs.Dictionary<global::System.Collections.Generic.IReadOnlyDictionary<global::Numos.CoreSim.GasProperties, float>, " +
-                    "global::Numos.CoreSim.GasProperties, global::Numos.CoreSim.State.StateCodecs.Gas, float, " +
-                    "global::Numos.CoreSim.State.StateCodecs.Single>"));
+                    "global::Numos.CoreSim.GasProperties, global::Numos.CoreSim.State.Advanced.StateCodecs.Gas, float, " +
+                    "global::Numos.CoreSim.State.Advanced.StateCodecs.Single>"));
 
             Assert.That(source, Does.Contain("StateCodecs.Set<global::System.Collections.Frozen.FrozenSet<global::MyMod.Point>"));
             Assert.That(source, Does.Not.Contain("SemanticallyEquals"));
@@ -209,12 +210,12 @@ public sealed class StateGeneratorTests
         string generated = GeneratorHarness.GeneratedSource(result, "MyMod.Settings.NumosState.g.cs");
         Assert.Multiple(() =>
         {
-            Assert.That(generated, Does.Contain("global::Numos.CoreSim.State.StateCodecs.Single.Write(ref sink, value.Ignition);"));
+            Assert.That(generated, Does.Contain("global::Numos.CoreSim.State.Advanced.StateCodecs.Single.Write(ref sink, value.Ignition);"));
             Assert.That(
                 generated,
                 Does.Contain(
                     "IReadOnlyDictionary<global::Numos.CoreSim.GasProperties, double>, global::Numos.CoreSim.GasProperties, " +
-                    "global::Numos.CoreSim.State.StateCodecs.Gas, double, global::Numos.CoreSim.State.StateCodecs.Double>"));
+                    "global::Numos.CoreSim.State.Advanced.StateCodecs.Gas, double, global::Numos.CoreSim.State.Advanced.StateCodecs.Double>"));
         });
     }
 
@@ -238,7 +239,7 @@ public sealed class StateGeneratorTests
         Assert.That(GeneratorHarness.Errors(output), Is.Empty);
         Assert.That(
             GeneratorHarness.GeneratedSource(result, "MyMod.Outer+Inner.NumosState.g.cs"),
-            Does.Contain("partial record struct Outer\n").And.Contain("partial record struct Inner : global::Numos.CoreSim.State.INumosState<global::MyMod.Outer.Inner>"));
+            Does.Contain("partial record struct Outer\n").And.Contain("partial record struct Inner : global::Numos.CoreSim.State.Advanced.INumosState<global::MyMod.Outer.Inner>"));
     }
 
     [Test]
@@ -254,19 +255,19 @@ public sealed class StateGeneratorTests
             Assert.That(
                 source,
                 Does.Contain(
-                    "static global::MyMod.Point global::Numos.CoreSim.State.INumosState<global::MyMod.Point>.ReadState(" +
-                    "ref global::Numos.CoreSim.State.StateReader reader, global::Numos.CoreSim.IGasRegistry? gases)"));
+                    "static global::MyMod.Point global::Numos.CoreSim.State.Advanced.INumosState<global::MyMod.Point>.ReadState(" +
+                    "ref global::Numos.CoreSim.State.Advanced.StateReader reader, global::Numos.CoreSim.IGasRegistry? gases)"));
 
-            Assert.That(source, Does.Contain("field1 = global::Numos.CoreSim.State.StateCodecs.Single.Read(ref reader, gases);"));
+            Assert.That(source, Does.Contain("field1 = global::Numos.CoreSim.State.Advanced.StateCodecs.Single.Read(ref reader, gases);"));
             Assert.That(source, Does.Match(@"default:\s+reader\.SkipField\(\);\s+continue;"));
             Assert.That(
                 source,
                 Does.Contain(
                     "return new global::MyMod.Point(has1 ? field1 : " +
-                    "global::Numos.CoreSim.State.StateCodecs.DefaultValue<float, global::Numos.CoreSim.State.StateCodecs.Single>(), "));
+                    "global::Numos.CoreSim.State.Advanced.StateCodecs.DefaultValue<float, global::Numos.CoreSim.State.Advanced.StateCodecs.Single>(), "));
 
-            Assert.That(source, Does.Contain("static string? global::Numos.CoreSim.State.INumosState<global::MyMod.Point>.StateKey => null;"));
-            Assert.That(source, Does.Contain("void global::Numos.CoreSim.State.INumosState.WriteState<TSink>(ref TSink sink)"));
+            Assert.That(source, Does.Contain("static string? global::Numos.CoreSim.State.Advanced.INumosState<global::MyMod.Point>.StateKey => null;"));
+            Assert.That(source, Does.Contain("void global::Numos.CoreSim.State.Advanced.INumosState.WriteState<TSink>(ref TSink sink)"));
         });
 
         // Mutable fields with no constructor are assigned after construction, and only when the data has them, so a

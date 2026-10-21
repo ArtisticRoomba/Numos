@@ -1,6 +1,6 @@
 using Numos.CoreSim.Replay;
 
-namespace Numos.CoreSim.State;
+namespace Numos.CoreSim.State.Advanced;
 
 /// <summary>
 ///     Receives a <see cref="NumosStateAttribute" /> value as a stream of framed fields and primitives.
