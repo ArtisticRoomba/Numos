@@ -16,7 +16,9 @@ in the `0.x` series and may be published as prereleases (for others to just impo
 - Engine-agnostic, with a supported `Numos.API` facade over an internal simulation kernel
 - Solver pipeline, allowing you to write and add your own solvers to be executed on Numos' behalf
 - Static dimensional analysis at compile-time
-- Multithreaded intra-chunk advection and thermodynamics
+- Compressible Euler gas transport by default (HLLC fluxes, CFL substeps, per-voxel velocity), with the older
+  pressure-relaxation stages still selectable
+- Multithreaded intra-chunk flow and thermodynamics
 - Multithreaded cross-chunk boundary flow
 - Single-threaded explicit-link (portal/dock) transport
 - Attempts at being trimmable and Native AOT-compatible

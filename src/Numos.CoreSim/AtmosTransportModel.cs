@@ -19,13 +19,14 @@ public enum AtmosTransportModel
 {
     /// <summary>
     ///     Pressure-relaxation transport: <c>advection</c> inside each chunk and <c>boundary-flow</c> across chunk
-    ///     faces, with species diffusion and vacuum cleanup folded into <c>advection</c>.
+    ///     faces, with species diffusion and vacuum cleanup folded into <c>advection</c>. Kept as a selectable
+    ///     alternative; a new world does not run it.
     /// </summary>
     Legacy = 0,
 
     /// <summary>
-    ///     Compressible Euler transport: one <c>euler-flow</c> stage solves the gas dynamics (density, momentum,
-    ///     and energy) for every awake chunk with CFL substeps. Configured through
+    ///     Compressible Euler transport, the default: one <c>euler-flow</c> stage solves the gas dynamics (density,
+    ///     momentum, and energy) for every awake chunk with CFL substeps. Configured through
     ///     <see cref="EulerFlow.EulerFlowConfig" />.
     /// </summary>
     Euler = 1

@@ -77,7 +77,7 @@ public sealed class BoundaryFlowParallelDeterminismTests
         // counts. Every chunk touches at least one face neighbor, so boundary flow has cross-chunk work on every tick.
         const int gridSize = 3;
         const int chunkExtent = 4;
-        var simulation = new AtmosSimulation(config, chunkExtent, chunkExtent, chunkExtent);
+        var simulation = SimTestHelpers.CreateLegacySimulation(config, chunkExtent, chunkExtent, chunkExtent);
 
         for (int cz = 0; cz < gridSize; cz++)
         for (int cy = 0; cy < gridSize; cy++)

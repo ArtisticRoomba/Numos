@@ -23,10 +23,10 @@ public sealed class AtmosWorldSolverPipeline
     // clears it, so enabling a solver that sat out an epoch change gets it injected before it runs.
     private int _injectedEpoch = -1;
 
-    internal AtmosWorldSolverPipeline(AtmosWorld world)
+    internal AtmosWorldSolverPipeline(AtmosWorld world, AtmosTransportModel model)
     {
         _world = world;
-        AddDefaults(AtmosTransportModel.Legacy);
+        AddDefaults(model);
         PublishSteps();
     }
 
@@ -213,16 +213,16 @@ public sealed class AtmosWorldSolverPipeline
     ///     registrations.
     /// </summary>
     /// <remarks>
-    ///     Installs the <see cref="AtmosTransportModel.Legacy" /> stages, the same set a new world starts with. The
-    ///     Euler model is opt-in through <see cref="ResetToDefaults(AtmosTransportModel)" /> until it becomes the
-    ///     default.
+    ///     Installs the <see cref="AtmosTransportModel.Euler" /> stages, the same set a new world starts with. Use
+    ///     <see cref="ResetToDefaults(AtmosTransportModel)" /> to install the legacy pressure-relaxation stages
+    ///     instead.
     /// </remarks>
     /// <exception cref="InvalidOperationException">The world is recording or replaying.</exception>
     /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
     [PublicAPI]
     public void ResetToDefaults()
     {
-        ResetToDefaults(AtmosTransportModel.Legacy);
+        ResetToDefaults(AtmosTransportModel.Euler);
     }
 
     /// <summary>
@@ -232,14 +232,17 @@ public sealed class AtmosWorldSolverPipeline
     /// <param name="model">Which built-in stages carry gas between voxels.</param>
     /// <remarks>
     ///     <para>
-    ///         <see cref="AtmosTransportModel.Legacy" /> installs <c>advection</c>, <c>explicit-gas-transport</c>,
-    ///         <c>boundary-flow</c>, <c>thermodynamics</c>, <c>explicit-thermal-transport</c>,
-    ///         <c>thermal-boundary</c>, and <c>gas-reactions</c>. <see cref="AtmosTransportModel.Euler" /> replaces
-    ///         the first and third with a single <c>euler-flow</c> stage ahead of <c>explicit-gas-transport</c>.
+    ///         <see cref="AtmosTransportModel.Euler" />, the default, installs <c>euler-flow</c>,
+    ///         <c>explicit-gas-transport</c>, <c>thermodynamics</c>, <c>explicit-thermal-transport</c>,
+    ///         <c>thermal-boundary</c>, and <c>gas-reactions</c>. <see cref="AtmosTransportModel.Legacy" /> replaces
+    ///         <c>euler-flow</c> with <c>advection</c> ahead of <c>explicit-gas-transport</c> and
+    ///         <c>boundary-flow</c> after it.
     ///     </para>
     ///     <para>
     ///         The stage list is checkpointed, so a world restored from a checkpoint must hold the same model it
-    ///         was captured with; switch models before capturing, not while replaying.
+    ///         was captured with; switch models before capturing or restoring, not while replaying. Restoring a
+    ///         legacy archive into a new world means calling this with <see cref="AtmosTransportModel.Legacy" />
+    ///         first.
     ///     </para>
     /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="model" /> is not a defined model.</exception>
@@ -247,7 +250,7 @@ public sealed class AtmosWorldSolverPipeline
     /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
     /// <example>
     ///     <code>
-    /// simulation.World.Solvers.ResetToDefaults(AtmosTransportModel.Euler);
+    /// simulation.World.Solvers.ResetToDefaults(AtmosTransportModel.Legacy);
     ///     </code>
     /// </example>
     [PublicAPI]

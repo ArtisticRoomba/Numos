@@ -14,7 +14,7 @@ public partial class SimulationViewer
         int chunkHeight,
         int chunkDepth,
         bool includeDefaultGases,
-        AtmosTransportModel transportModel = AtmosTransportModel.Legacy)
+        AtmosTransportModel transportModel = AtmosTransportModel.Euler)
     {
         SimulationFrameBuilder? frameBuilder = null;
         _session.CreateProject(

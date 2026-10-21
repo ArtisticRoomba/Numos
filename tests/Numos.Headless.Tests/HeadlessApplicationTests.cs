@@ -12,8 +12,9 @@ public sealed class HeadlessApplicationTests
     [Test]
     public async Task JsonlSession_DeterministicTwoCellFlow_ReportsExpectedGasMovement()
     {
+        // The 1.5 / 0.5 split is the legacy pressure-relaxation law's one-tick answer.
         var run = await RunAsync(
-            CreateProjectRequest("create", 2, 1, 1),
+            CreateProjectRequest("create", 2, 1, 1, "legacy"),
             Request(
                 "chunk",
                 "addChunk",
@@ -49,6 +50,84 @@ public sealed class HeadlessApplicationTests
             Assert.That(gasMoles[0], Is.EqualTo(1.5f).Within(Tolerance));
             Assert.That(gasMoles[1], Is.EqualTo(0.5f).Within(Tolerance));
             Assert.That(gasMoles.Sum(), Is.EqualTo(2f).Within(Tolerance));
+        });
+    }
+
+    [Test]
+    public async Task JsonlSession_EulerTube_MovesGasTowardTheLowPressureHalf()
+    {
+        // SI air at 1 m³ per voxel: 80 mol is about 2 atm at 300 K, 40 mol about 1 atm. Eight voxels rather than
+        // two so the tube is still moving when the tick ends; a two-cell tube rings down inside one tick.
+        List<string> requests =
+        [
+            Request(
+                "create",
+                "createProject",
+                "\"chunkDimensions\":{\"x\":8,\"y\":1,\"z\":1}," +
+                "\"config\":{\"voxelVolumeM3\":1,\"defaultDiffusionCoefficient\":0,\"vacuumThresholdPa\":0," +
+                "\"sleepThreshold\":2147483647,\"sleepEpsilonPercent\":0}," +
+                "\"gases\":[{\"name\":\"Air\",\"molarHeatCapacityAtConstantVolume\":20.786," +
+                "\"molarMassKgPerMol\":0.02897}]"),
+            AddChunkRequest("chunk", 0, 0, 0)
+        ];
+
+        for (int x = 0; x < 8; x++)
+        {
+            requests.Add(Request(
+                $"inject-{x}",
+                "injectGas",
+                "\"position\":{\"x\":0,\"y\":0,\"z\":0}," +
+                $"\"voxel\":{{\"x\":{x},\"y\":0,\"z\":0}}," +
+                $"\"gasId\":0,\"moles\":{(x < 4 ? 80 : 40)},\"temperatureK\":300"));
+        }
+
+        requests.Add(Request("before", "observe"));
+        requests.Add(Request("tick", "tick", "\"count\":1"));
+        requests.Add(Request("observe", "observe", "\"includeVoxels\":true"));
+        requests.Add(Request("exit", "exit"));
+        var run = await RunAsync(requests.ToArray());
+
+        var before = FindResponse(run.Responses, "before").GetProperty("observation");
+        var observation = FindResponse(run.Responses, "observe").GetProperty("observation");
+        var flow = observation.GetProperty("flow");
+        var voxels = FindArraysNamed(observation, "voxels").Single().EnumerateArray().ToArray();
+        float[] gasMoles = voxels.Select(ReadGasZeroMoles).ToArray();
+        float[] speeds = voxels.Select(static voxel => voxel.GetProperty("speedMps").GetSingle()).ToArray();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(run.ExitCode, Is.Zero);
+            Assert.That(
+                observation.GetProperty("solverPipeline")[0].GetProperty("name").GetString(),
+                Is.EqualTo("euler-flow"));
+
+            Assert.That(before.GetProperty("flow").GetProperty("substepsLastTick").GetInt32(), Is.Zero);
+            Assert.That(gasMoles, Has.Length.EqualTo(8));
+            Assert.That(gasMoles.Sum(), Is.EqualTo(480f).Within(0.01f));
+            Assert.That(gasMoles[0], Is.LessThan(80f));
+            Assert.That(gasMoles[7], Is.GreaterThan(40f));
+            Assert.That(speeds.Max(), Is.GreaterThan(0f));
+            Assert.That(flow.GetProperty("substepsLastTick").GetInt32(), Is.GreaterThanOrEqualTo(1));
+            Assert.That(flow.GetProperty("maxSignalSpeedMps").GetSingle(), Is.GreaterThan(0f));
+            Assert.That(flow.GetProperty("substepCapEngaged").GetBoolean(), Is.False);
+        });
+    }
+
+    [Test]
+    public async Task CreateProject_UnknownTransportModel_IsRejected()
+    {
+        var run = await RunAsync(
+            CreateProjectRequest("create", 1, 1, 1, "lattice-boltzmann"),
+            Request("exit", "exit"));
+
+        var response = FindResponse(run.Responses, "create");
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(response.GetProperty("ok").GetBoolean(), Is.False);
+            Assert.That(
+                response.GetProperty("error").GetProperty("code").GetString(),
+                Is.EqualTo("invalidTransportModel"));
         });
     }
 
@@ -398,12 +477,15 @@ public sealed class HeadlessApplicationTests
                 }));
     }
 
-    private static string CreateProjectRequest(string id, int width, int height, int depth)
+    private static string CreateProjectRequest(
+        string id, int width, int height, int depth, string? transportModel = null)
     {
+        string model = transportModel == null ? string.Empty : $"\"transportModel\":\"{transportModel}\",";
         return Request(
             id,
             "createProject",
             $"\"name\":\"Headless tests\"," +
+            model +
             $"\"chunkDimensions\":{{\"x\":{width},\"y\":{height},\"z\":{depth}}}," +
             "\"config\":{" +
             "\"defaultTemperatureFallbackK\":300," +

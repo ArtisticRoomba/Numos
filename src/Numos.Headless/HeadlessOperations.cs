@@ -77,7 +77,7 @@ internal sealed partial class HeadlessOperations
             "getConfig" => GetConfig(),
             "listSolvers" => ListSolvers(),
             "setSolverEnabled" => SetSolverEnabled(request),
-            "resetSolvers" => ResetSolvers(),
+            "resetSolvers" => ResetSolvers(request),
             "createPortal" => CreatePortal(request),
             "createDock" => CreateDock(request),
             "destroyLinkSet" => DestroyLinkSet(request),
@@ -219,7 +219,8 @@ internal sealed partial class HeadlessOperations
             dimensions.X,
             dimensions.Y,
             dimensions.Z,
-            request.IncludeDefaultGases ?? false);
+            request.IncludeDefaultGases ?? false,
+            ParseTransportModel(request.TransportModel) ?? AtmosTransportModel.Euler);
 
         _session.CreateProject(
             options,
@@ -240,6 +241,24 @@ internal sealed partial class HeadlessOperations
             });
 
         return new CommandExecution();
+    }
+
+    /// <summary>
+    ///     Maps the protocol's `transportModel` names onto <see cref="AtmosTransportModel" />.
+    /// </summary>
+    /// <returns>The model, or <see langword="null" /> when the request names none.</returns>
+    /// <exception cref="HeadlessRequestException">The name is not `euler` or `legacy`.</exception>
+    private static AtmosTransportModel? ParseTransportModel(string? value)
+    {
+        return value?.Trim().ToLowerInvariant() switch
+        {
+            null or "" => null,
+            "euler" => AtmosTransportModel.Euler,
+            "legacy" => AtmosTransportModel.Legacy,
+            _ => throw new HeadlessRequestException(
+                "invalidTransportModel",
+                $"Unknown transport model '{value}'. Use 'euler' or 'legacy'.")
+        };
     }
 
     private CommandExecution CloseProject()
@@ -714,9 +733,9 @@ internal sealed partial class HeadlessOperations
         return Result(new CommandResult { Changed = true });
     }
 
-    private CommandExecution ResetSolvers()
+    private CommandExecution ResetSolvers(HeadlessRequest request)
     {
-        bool full = _session.ResetSolvers();
+        bool full = _session.ResetSolvers(ParseTransportModel(request.TransportModel));
         return Result(new CommandResult { Changed = full });
     }
 

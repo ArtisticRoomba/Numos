@@ -88,7 +88,7 @@ public sealed class NumosReplaySerializerTests
         source.AddGasToVoxel(chunk, 0, 0, 0, 0, 2f, 315f);
         source.WakeChunk(chunk);
         source.SleepChunk(chunk);
-        world.Solvers.SetEnabled(AtmosBuiltInSolvers.Advection, false);
+        world.Solvers.SetEnabled(AtmosBuiltInSolvers.EulerFlow, false);
         world.SetAtmosConfig(new AtmosConfig(world.Config) { SleepThreshold = 8 });
         var canister = source.CreateGasMixture(1f, 330f);
         canister.SetMoles(0, 1f);

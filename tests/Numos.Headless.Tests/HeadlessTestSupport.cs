@@ -24,7 +24,17 @@ internal static class HeadlessTestSupport
     /// <summary>
     ///     A project with deterministic solver settings and one gas named `First`.
     /// </summary>
-    internal static string CreateProject(string id, int width, int height, int depth, string? extraConfig = null)
+    /// <remarks>
+    ///     The project uses the legacy transport model unless a test asks otherwise. Most protocol tests care about
+    ///     the protocol and not the transport law.
+    /// </remarks>
+    internal static string CreateProject(
+        string id,
+        int width,
+        int height,
+        int depth,
+        string? extraConfig = null,
+        string transportModel = "legacy")
     {
         string config = "\"defaultTemperatureFallbackK\":300," +
                         "\"defaultMolarHeatCapacityAtConstantVolume\":1," +
@@ -44,6 +54,7 @@ internal static class HeadlessTestSupport
             id,
             "createProject",
             "\"name\":\"Headless tests\"," +
+            $"\"transportModel\":\"{transportModel}\"," +
             $"\"chunkDimensions\":{C(width, height, depth)}," +
             $"\"config\":{{{config}}}," +
             "\"gases\":[{\"name\":\"First\",\"molarHeatCapacityAtConstantVolume\":1,\"diffusionCoefficient\":0}]");

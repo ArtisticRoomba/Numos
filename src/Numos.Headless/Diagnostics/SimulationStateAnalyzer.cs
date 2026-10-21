@@ -108,6 +108,7 @@ public static class SimulationStateAnalyzer
             simulation.ChunkCount,
             CreateConfigurationReport(config),
             simulation.World.Solvers.Steps.Select(CreateSolverReport).ToArray(),
+            CreateFlowReport(simulation.LastFlowDiagnostics),
             global.ToGlobalReport(),
             chunkReports,
             issues.Items.ToArray(),
@@ -246,6 +247,19 @@ public static class SimulationStateAnalyzer
             reconstruction,
             euler.MomentumDamping,
             euler.DefaultLinkAreaFraction);
+    }
+
+    private static FlowDiagnosticsReport CreateFlowReport(AtmosFlowDiagnostics flow)
+    {
+        return new FlowDiagnosticsReport(
+            flow.Substeps,
+            flow.SimulatedSeconds,
+            flow.SubstepCapEngaged,
+            flow.MaxCourantNumber,
+            flow.MaxSignalSpeed,
+            flow.ClampedVelocityCount,
+            flow.NegativeInternalEnergyCount,
+            flow.NegativeMolesCount);
     }
 
     private static SolverStepReport CreateSolverReport(AtmosWorldSolverStep step)

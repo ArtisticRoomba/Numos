@@ -69,10 +69,40 @@ public sealed partial class AtmosWorld : IDisposable
     /// </param>
     /// <exception cref="ArgumentNullException"><paramref name="config" /> is <see langword="null" />.</exception>
     public AtmosWorld(AtmosConfig config)
+        : this(config, AtmosTransportModel.Euler)
+    {
+    }
+
+    /// <summary>
+    ///     Initializes an empty world with a detached copy of a physics configuration and the built-in stages of one
+    ///     transport model.
+    /// </summary>
+    /// <param name="config">
+    ///     The editable configuration to copy. Later edits to it do not affect this world until
+    ///     <see cref="SetAtmosConfig" /> is called.
+    /// </param>
+    /// <param name="transportModel">
+    ///     Which built-in stages move gas between voxels. <see cref="AtmosTransportModel.Euler" /> is what the other
+    ///     constructors install; <see cref="AtmosTransportModel.Legacy" /> is the pressure-relaxation pipeline, and
+    ///     the model a world must run to restore an archive recorded under it.
+    /// </param>
+    /// <remarks>
+    ///     Equivalent to constructing the world and calling
+    ///     <see cref="AtmosWorldSolverPipeline.ResetToDefaults(AtmosTransportModel)" /> before anything else;
+    ///     this overload exists so the choice is made before a recorder or timeline can attach.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="config" /> is <see langword="null" />.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    ///     <paramref name="transportModel" /> is not a defined model.
+    /// </exception>
+    public AtmosWorld(AtmosConfig config, AtmosTransportModel transportModel)
     {
         ArgumentNullException.ThrowIfNull(config);
+        if (!Enum.IsDefined(transportModel))
+            throw new ArgumentOutOfRangeException(nameof(transportModel), transportModel, "Unknown transport model.");
+
         _config = config.CreateSnapshot();
-        Solvers = new AtmosWorldSolverPipeline(this);
+        Solvers = new AtmosWorldSolverPipeline(this, transportModel);
         Services = new AtmosWorldServices(this);
     }
 
@@ -1216,8 +1246,14 @@ public sealed partial class AtmosWorld : IDisposable
                 solver.Kind != checkpoint.Solvers[index].Kind ||
                 solver.NeighborSelectionKey != checkpoint.Solvers[index].NeighborSelectionKey).Any())
         {
+            // Spell out both stage lists: the common cause is an archive recorded under the other transport model,
+            // and the fix (ResetToDefaults with that model) is only obvious once the names are side by side.
             throw new ArgumentException(
-                "The world checkpoint requires the same world solver names, kinds, order, and neighbor selections.",
+                "The world checkpoint requires the same world solver names, kinds, order, and neighbor selections. " +
+                $"Checkpoint stages: [{string.Join(", ", checkpoint.Solvers.Select(static solver => solver.Name))}]; " +
+                $"world stages: [{string.Join(", ", currentWorldSolvers.Select(static solver => solver.Name))}]. " +
+                "A checkpoint recorded under the other transport model needs " +
+                "Solvers.ResetToDefaults(AtmosTransportModel) with that model before restoring.",
                 nameof(checkpoint));
         }
 

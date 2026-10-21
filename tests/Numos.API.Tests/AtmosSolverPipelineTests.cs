@@ -6,52 +6,26 @@ namespace Numos.API.Tests;
 [TestFixture]
 public sealed class AtmosWorldPipelineTests
 {
+    [TestCase(AtmosTransportModel.Euler)]
+    [TestCase(AtmosTransportModel.Legacy)]
+    public void Defaults_AreTheBuiltInStagesOfTheTransportModel(AtmosTransportModel model)
+    {
+        using var world = new AtmosWorld(new AtmosConfig(), model);
+
+        Assert.That(
+            world.Solvers.Steps,
+            Is.EqualTo(ExpectedBuiltInSteps(model)
+                .Select(static step => new AtmosWorldSolverStep(step.Name, step.Kind, step.IsEnabled, null))));
+    }
+
     [Test]
-    public void Defaults_AreTheSevenExecutableWorldStages()
+    public void Defaults_WithoutAModel_AreTheEulerStages()
     {
         using var world = new AtmosWorld();
 
         Assert.That(
-            world.Solvers.Steps,
-            Is.EqualTo(
-                new[]
-                {
-                    new AtmosWorldSolverStep(
-                        AtmosBuiltInSolvers.Advection,
-                        AtmosWorldSolverKind.BuiltIn,
-                        true,
-                        null),
-                    new AtmosWorldSolverStep(
-                        AtmosBuiltInSolvers.ExplicitGasTransport,
-                        AtmosWorldSolverKind.BuiltIn,
-                        true,
-                        null),
-                    new AtmosWorldSolverStep(
-                        AtmosBuiltInSolvers.BoundaryFlow,
-                        AtmosWorldSolverKind.BuiltIn,
-                        true,
-                        null),
-                    new AtmosWorldSolverStep(
-                        AtmosBuiltInSolvers.Thermodynamics,
-                        AtmosWorldSolverKind.BuiltIn,
-                        true,
-                        null),
-                    new AtmosWorldSolverStep(
-                        AtmosBuiltInSolvers.ExplicitThermalTransport,
-                        AtmosWorldSolverKind.BuiltIn,
-                        true,
-                        null),
-                    new AtmosWorldSolverStep(
-                        AtmosBuiltInSolvers.ThermalBoundary,
-                        AtmosWorldSolverKind.BuiltIn,
-                        true,
-                        null),
-                    new AtmosWorldSolverStep(
-                        AtmosBuiltInSolvers.GasReactions,
-                        AtmosWorldSolverKind.BuiltIn,
-                        true,
-                        null)
-                }));
+            world.Solvers.Steps.Select(static step => step.Name),
+            Is.EqualTo(ExpectedBuiltInSteps(AtmosTransportModel.Euler).Select(static step => step.Name)));
     }
 
     [Test]
@@ -61,9 +35,9 @@ public sealed class AtmosWorldPipelineTests
         world.CreateSimulation(1, 1, 1);
         int calls = 0;
 
-        Assert.That(world.Solvers.Unregister(AtmosBuiltInSolvers.Advection), Is.True);
+        Assert.That(world.Solvers.Unregister(AtmosBuiltInSolvers.EulerFlow), Is.True);
         world.Solvers.Register(
-            AtmosBuiltInSolvers.Advection,
+            AtmosBuiltInSolvers.EulerFlow,
             _ => calls++,
             before: AtmosBuiltInSolvers.ExplicitGasTransport);
 
@@ -72,7 +46,7 @@ public sealed class AtmosWorldPipelineTests
         Assert.Multiple(() =>
         {
             Assert.That(calls, Is.EqualTo(1));
-            Assert.That(world.Solvers.Steps[0].Name, Is.EqualTo(AtmosBuiltInSolvers.Advection));
+            Assert.That(world.Solvers.Steps[0].Name, Is.EqualTo(AtmosBuiltInSolvers.EulerFlow));
             Assert.That(world.Solvers.Steps[0].Kind, Is.EqualTo(AtmosWorldSolverKind.Custom));
         });
     }
@@ -89,25 +63,25 @@ public sealed class AtmosWorldPipelineTests
                     "both",
                     _ => { },
                     before: AtmosBuiltInSolvers.Thermodynamics,
-                    after: AtmosBuiltInSolvers.Advection),
+                    after: AtmosBuiltInSolvers.EulerFlow),
                 Throws.ArgumentException);
 
             Assert.That(
                 () => world.Solvers.Register("orphan", _ => { }, after: "missing"),
                 Throws.TypeOf<KeyNotFoundException>());
 
-            Assert.That(world.Solvers.Steps, Has.Count.EqualTo(7));
+            Assert.That(world.Solvers.Steps, Has.Count.EqualTo(6));
         });
     }
 
     [Test]
-    public void DisabledAdvection_DoesNotStopExplicitGasTransport()
+    public void DisabledEulerFlow_DoesNotStopExplicitGasTransport()
     {
         using var world = CreateTransportWorld(out var source, out var target);
 
-        // Advection and explicit-gas-transport are independent stages: disabling intra-chunk advection must not
-        // silently take portal transport down with it.
-        world.Solvers.SetEnabled(AtmosBuiltInSolvers.Advection, false);
+        // Euler flow and explicit-gas-transport are independent stages: disabling grid transport must not silently
+        // take portal transport down with it.
+        Assert.That(world.Solvers.SetEnabled(AtmosBuiltInSolvers.EulerFlow, false), Is.True);
 
         world.Tick();
 
@@ -115,7 +89,7 @@ public sealed class AtmosWorldPipelineTests
     }
 
     [Test]
-    public void DisabledExplicitGasTransport_StopsPortalFlowButNotAdvection()
+    public void DisabledExplicitGasTransport_StopsPortalFlowOnly()
     {
         using var world = CreateTransportWorld(out var source, out var target);
         world.Solvers.SetEnabled(AtmosBuiltInSolvers.ExplicitGasTransport, false);
@@ -151,29 +125,77 @@ public sealed class AtmosWorldPipelineTests
         Assert.That(calls, Is.EqualTo(new[] { "first", "first", "second" }));
     }
 
-    [Test]
-    public void ResetToDefaults_RemovesCustomStagesAndRestoresBuiltIns()
+    [TestCase(AtmosTransportModel.Euler)]
+    [TestCase(AtmosTransportModel.Legacy)]
+    public void ResetToDefaults_RemovesCustomStagesAndRestoresBuiltIns(AtmosTransportModel model)
     {
         using var world = new AtmosWorld();
-        world.Solvers.SetEnabled(AtmosBuiltInSolvers.Advection, false);
+        world.Solvers.SetEnabled(AtmosBuiltInSolvers.EulerFlow, false);
         world.Solvers.Unregister(AtmosBuiltInSolvers.Thermodynamics);
+        world.Solvers.Register("custom", _ => { });
+
+        world.Solvers.ResetToDefaults(model);
+
+        Assert.That(
+            world.Solvers.Steps.Select(static step => (step.Name, step.Kind, step.IsEnabled)),
+            Is.EqualTo(ExpectedBuiltInSteps(model)));
+    }
+
+    [Test]
+    public void ResetToDefaults_WithoutAModel_InstallsTheEulerStages()
+    {
+        using var world = new AtmosWorld(new AtmosConfig(), AtmosTransportModel.Legacy);
         world.Solvers.Register("custom", _ => { });
 
         world.Solvers.ResetToDefaults();
 
         Assert.That(
             world.Solvers.Steps.Select(static step => (step.Name, step.Kind, step.IsEnabled)),
-            Is.EqualTo(
-                new[]
-                {
-                    (AtmosBuiltInSolvers.Advection, AtmosWorldSolverKind.BuiltIn, true),
-                    (AtmosBuiltInSolvers.ExplicitGasTransport, AtmosWorldSolverKind.BuiltIn, true),
-                    (AtmosBuiltInSolvers.BoundaryFlow, AtmosWorldSolverKind.BuiltIn, true),
-                    (AtmosBuiltInSolvers.Thermodynamics, AtmosWorldSolverKind.BuiltIn, true),
-                    (AtmosBuiltInSolvers.ExplicitThermalTransport, AtmosWorldSolverKind.BuiltIn, true),
-                    (AtmosBuiltInSolvers.ThermalBoundary, AtmosWorldSolverKind.BuiltIn, true),
-                    (AtmosBuiltInSolvers.GasReactions, AtmosWorldSolverKind.BuiltIn, true)
-                }));
+            Is.EqualTo(ExpectedBuiltInSteps(AtmosTransportModel.Euler)));
+    }
+
+    [Test]
+    public void TransportModel_RejectsUndefinedValues()
+    {
+        using var world = new AtmosWorld();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(
+                () => new AtmosWorld(new AtmosConfig(), (AtmosTransportModel)42),
+                Throws.TypeOf<ArgumentOutOfRangeException>());
+
+            Assert.That(
+                () => world.Solvers.ResetToDefaults((AtmosTransportModel)42),
+                Throws.TypeOf<ArgumentOutOfRangeException>());
+        });
+    }
+
+    private static (string Name, AtmosWorldSolverKind Kind, bool IsEnabled)[] ExpectedBuiltInSteps(
+        AtmosTransportModel model)
+    {
+        string[] names = model == AtmosTransportModel.Euler
+            ?
+            [
+                AtmosBuiltInSolvers.EulerFlow,
+                AtmosBuiltInSolvers.ExplicitGasTransport,
+                AtmosBuiltInSolvers.Thermodynamics,
+                AtmosBuiltInSolvers.ExplicitThermalTransport,
+                AtmosBuiltInSolvers.ThermalBoundary,
+                AtmosBuiltInSolvers.GasReactions
+            ]
+            :
+            [
+                AtmosBuiltInSolvers.Advection,
+                AtmosBuiltInSolvers.ExplicitGasTransport,
+                AtmosBuiltInSolvers.BoundaryFlow,
+                AtmosBuiltInSolvers.Thermodynamics,
+                AtmosBuiltInSolvers.ExplicitThermalTransport,
+                AtmosBuiltInSolvers.ThermalBoundary,
+                AtmosBuiltInSolvers.GasReactions
+            ];
+
+        return names.Select(static name => (name, AtmosWorldSolverKind.BuiltIn, true)).ToArray();
     }
 
     private static AtmosWorld CreateTransportWorld(

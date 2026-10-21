@@ -158,7 +158,7 @@ public sealed class AtmosDangerousApiTests
         simulation.World.Solvers.Register(
             "inject",
             _ => simulation.AddGasToVoxel(chunk, 0, 1, 1f, 600f),
-            before: AtmosBuiltInSolvers.Advection);
+            before: AtmosBuiltInSolvers.EulerFlow);
 
         simulation.Tick();
 

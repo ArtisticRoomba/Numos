@@ -12,13 +12,16 @@ namespace Numos.API;
 public static class AtmosBuiltInSolvers
 {
     /// <summary>
-    ///     Intra-chunk gas advection.
+    ///     Intra-chunk pressure-relaxation gas advection. Part of the <see cref="AtmosTransportModel.Legacy" />
+    ///     model, installed by
+    ///     <see cref="AtmosWorldSolverPipeline.ResetToDefaults(AtmosTransportModel)" /> with that model; a new world
+    ///     runs <see cref="EulerFlow" /> instead.
     /// </summary>
     public const string Advection = "advection";
 
     /// <summary>
-    ///     Compressible Euler gas transport inside each chunk, with CFL substeps; the
-    ///     <see cref="AtmosTransportModel.Euler" /> replacement for <see cref="Advection" /> and
+    ///     Compressible Euler gas transport within and between chunks, with CFL substeps. The default transport
+    ///     stage (<see cref="AtmosTransportModel.Euler" />), taking the place of both <see cref="Advection" /> and
     ///     <see cref="BoundaryFlow" />. Configured through <see cref="Numos.CoreSim.EulerFlow.EulerFlowConfig" />
     ///     and reported on through <see cref="AtmosSimulation.LastFlowDiagnostics" />.
     /// </summary>
@@ -26,12 +29,16 @@ public static class AtmosBuiltInSolvers
 
     /// <summary>
     ///     Sparse gas transport across explicit portal, dock, and arbitrary links whose flags include
-    ///     <see cref="ExplicitLinkFlags.GasTransport" />.
+    ///     <see cref="ExplicitLinkFlags.GasTransport" />. Present under both transport models, right after the
+    ///     intra-chunk flow stage.
     /// </summary>
     public const string ExplicitGasTransport = "explicit-gas-transport";
 
     /// <summary>
-    ///     Cartesian gas transport across ordinary chunk boundaries.
+    ///     Cartesian gas transport across ordinary chunk boundaries under the
+    ///     <see cref="AtmosTransportModel.Legacy" /> model. Installed alongside <see cref="Advection" /> by
+    ///     <see cref="AtmosWorldSolverPipeline.ResetToDefaults(AtmosTransportModel)" />; <see cref="EulerFlow" />
+    ///     sweeps across chunk faces itself.
     /// </summary>
     public const string BoundaryFlow = "boundary-flow";
 

@@ -23,7 +23,7 @@ public readonly record struct WorkbenchProjectOptions(
     int ChunkHeight = AtmosChunkConstants.DefaultHeight,
     int ChunkDepth = 1,
     bool IncludeDefaultGases = true,
-    AtmosTransportModel TransportModel = AtmosTransportModel.Legacy);
+    AtmosTransportModel TransportModel = AtmosTransportModel.Euler);
 
 /// <summary>
 ///     Names the program that hosts a session. The session writes it to the log banner and to saved replays.
@@ -194,9 +194,8 @@ public sealed partial class WorkbenchSession : IDisposable
         AtmosWorld? world = null;
         try
         {
-            world = new AtmosWorld(config);
-            // Must happen before the timeline starts recording. The pipeline rejects stage swaps after that.
-            world.Solvers.ResetToDefaults(options.TransportModel);
+            // The model is set at construction because the pipeline rejects stage swaps once the timeline records.
+            world = new AtmosWorld(config, options.TransportModel);
             var simulation = world.CreateSimulation(options.ChunkWidth, options.ChunkHeight, options.ChunkDepth);
             if (prepare != null)
             {
