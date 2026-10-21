@@ -121,16 +121,6 @@ public sealed partial class AtmosSimulationCheckpoint
 public sealed partial class AtmosChunkCheckpoint
 {
     /// <summary>
-    ///     Copies this checkpoint with a different gas channel list. The other arrays are immutable and shared.
-    /// </summary>
-    internal AtmosChunkCheckpoint WithGases(IReadOnlyList<AtmosGasChannelCheckpoint> gases)
-    {
-        var copy = (AtmosChunkCheckpoint)MemberwiseClone();
-        copy.Gases = gases;
-        return copy;
-    }
-
-    /// <summary>
     ///     Gets bytes occupied by copied chunk and solver values, excluding object headers and keys.
     /// </summary>
     public long PayloadBytes => (long)Classifications.Count * 28 +
@@ -219,12 +209,6 @@ public sealed partial class AtmosGasChannelCheckpoint
     {
         GasId = channel.GasId;
         Moles = StateArray.Copy<float>(channel.Moles.AsSpan(0, voxelCount));
-    }
-
-    internal AtmosGasChannelCheckpoint(int gasId, float[] moles)
-    {
-        GasId = gasId;
-        Moles = moles;
     }
 
     // For the generated reader.

@@ -1,5 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using Numos.CoreSim.GasReactions;
+using Numos.CoreSim.Replay;
 using Numos.CoreSim.State;
 using Numos.CoreSim.State.Advanced;
 using Numos.Maths;
@@ -308,22 +309,13 @@ public sealed class AtmosConfigSnapshot : IAtmosConfig
     ///     Writes this configuration into a state hash: the schema fields, then the solver configurations.
     /// </summary>
     /// <remarks>
-    ///     Mirrors <c>AtmosReplayCodec.WriteConfig</c> minus its length prefixes: the same count, and each
-    ///     configuration's key and generated walk. A hand-written configuration can't be saved, so it contributes its
-    ///     own <see cref="IAtmosSolverConfiguration.ComputeStateHash" /> instead.
+    ///     The same walk <see cref="AtmosConfigSnapshotCodec" /> saves, minus its length prefixes: the schema fields,
+    ///     then the count and each configuration's key and generated walk. A hand-written configuration can't be
+    ///     saved, so it contributes its own <see cref="IAtmosSolverConfiguration.ComputeStateHash" /> instead.
     /// </remarks>
     internal void WriteHash(ref StateHashSink sink)
     {
-        NumosState.Write(ref sink, Fields);
-        sink.WriteCount(SolverConfigurations.Count);
-        foreach (var configuration in SolverConfigurations)
-        {
-            sink.WriteString(configuration.Key);
-            if (configuration is INumosState state)
-                state.WriteState(ref sink);
-            else
-                sink.WriteUInt64(configuration.ComputeStateHash());
-        }
+        AtmosConfigSnapshotCodec.Write(ref sink, this);
     }
 
     // The schema fields compare bitwise on floats, matching the hash, so 0f and -0f differ.

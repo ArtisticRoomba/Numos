@@ -120,6 +120,10 @@ internal enum RestoreMode
 /// <param name="ElementTypeName">The element type, fully qualified, for nested snapshot lookup.</param>
 /// <param name="Count">The escaped count member, or null.</param>
 /// <param name="Documentation">The doc comment lines to put on the generated member.</param>
+/// <param name="DeclaredModifiers">
+///     The modifiers of a partial property the snapshot declares for this member (without <c>partial</c>), or null
+///     when the generator declares the whole property.
+/// </param>
 /// <param name="DisplayName">The live member for diagnostics.</param>
 /// <param name="TypeDisplay">The member type for diagnostics.</param>
 /// <param name="Location">Where diagnostics about the member point.</param>
@@ -142,6 +146,7 @@ internal sealed record LiveMemberDeclaration(
     string? ElementTypeName,
     string? Count,
     EquatableArray<string> Documentation,
+    string? DeclaredModifiers,
     string DisplayName,
     string TypeDisplay,
     LocationInfo? Location);
@@ -190,6 +195,7 @@ internal sealed record SnapshotDeclaration(
 /// <param name="Count">The escaped live count member, or null.</param>
 /// <param name="Restore">How restore puts the member back.</param>
 /// <param name="Documentation">Doc comment lines.</param>
+/// <param name="DeclaredModifiers">The modifiers of the snapshot's own partial declaration, or null.</param>
 internal sealed record SnapshotMemberModel(
     string LiveName,
     string Name,
@@ -204,7 +210,8 @@ internal sealed record SnapshotMemberModel(
     string Nested,
     string? Count,
     RestoreMode Restore,
-    EquatableArray<string> Documentation)
+    EquatableArray<string> Documentation,
+    string? DeclaredModifiers)
 {
     /// <summary>
     ///     Whether the member is an <c>IReadOnlyList&lt;T&gt;</c> whose setter wraps the value.

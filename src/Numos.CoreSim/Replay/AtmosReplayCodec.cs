@@ -35,47 +35,11 @@ internal static partial class AtmosReplayCodec
 
     // Every built-in configuration a portable file can carry, by key. A key missing here is a host type, which the
     // archive reports as unsupported before anything is written.
-    private static readonly Dictionary<string, Func<BinaryReader, IAtmosSolverConfiguration>> PortableConfigurationReaders =
+    internal static readonly Dictionary<string, Func<BinaryReader, IAtmosSolverConfiguration>> PortableConfigurationReaders =
         new(StringComparer.Ordinal)
         {
             [EulerFlowConfig.ConfigurationKey] = EulerFlowConfig.ReadWire
         };
-
-    /// <summary>
-    ///     Writes one simulation's grid checkpoint nested in a world checkpoint, as a length-prefixed
-    ///     <see cref="StateBinarySink" /> payload.
-    /// </summary>
-    /// <exception cref="NotSupportedException">A chunk holds a rollback field whose element type can't be saved.</exception>
-    internal static void WriteSimulationCheckpoint(BinaryWriter writer, AtmosSimulationCheckpoint checkpoint)
-    {
-        foreach (var chunk in checkpoint.Chunks)
-        {
-            foreach (var array in chunk.SolverArrays)
-            {
-                if (!array.IsPortable)
-                {
-                    throw new NotSupportedException(
-                        $"Chunk field '{array.Key}' holds {array.ElementType.FullName}, which can't be saved. " +
-                        "Only primitives and enums over them can.");
-                }
-            }
-        }
-
-        var sink = new StateBinarySink();
-        NumosState.Write(ref sink, checkpoint);
-        writer.Write(sink.WrittenSpan.Length);
-        writer.Write(sink.WrittenSpan);
-    }
-
-    /// <summary>
-    ///     Reads one simulation checkpoint written by <see cref="WriteSimulationCheckpoint" />.
-    /// </summary>
-    internal static AtmosSimulationCheckpoint ReadSimulationCheckpoint(BinaryReader reader, int maxStringBytes)
-    {
-        byte[] payload = ReadPayload(reader, ReadCount(reader, int.MaxValue, "simulation checkpoint byte"));
-        var state = new StateReader(payload, maxStringBytes);
-        return NumosState.Read<AtmosSimulationCheckpoint>(ref state);
-    }
 
     /// <summary>
     ///     Writes a configuration: its schema fields (scalars and the gas registry), then its solver configurations.

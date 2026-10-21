@@ -81,30 +81,46 @@ internal static class SnapshotEmitter
     private static void EmitMember(CodeWriter writer, SnapshotModel model, SnapshotMemberModel member)
     {
         string type = member.Shape.TypeExpression;
-        if (member.IsList)
+        string backing = SnapshotGenerator.BackingField(member.Name);
+
+        // A reference member starts empty (strings and lists) or null (objects) until capture or a read assigns it.
+        string initializer = member.IsList
+            ? " = " + StateArray + "<" + member.ElementType + ">.Empty"
+            : member.IsReference
+                ? " = " + Advanced + "StateCodecs.DefaultValue<" + type + ", " + member.Shape.CodecExpression + ">()!"
+                : "";
+
+        writer.Line(CodeWriter.GeneratedCodeAttribute);
+        writer.Line("private " + type + " " + backing + initializer + ";");
+        writer.Line();
+        if (member.DeclaredModifiers is { } modifiers)
         {
-            string backing = SnapshotGenerator.BackingField(member.Name);
+            // The snapshot's own partial declaration carries the visibility and docs.
             writer.Line(CodeWriter.GeneratedCodeAttribute);
-            writer.Line("private " + type + " " + backing + " = " + StateArray + "<" + member.ElementType + ">.Empty;");
-            writer.Line();
+            writer.Line((modifiers.Length > 0 ? modifiers + " " : "") + "partial " + type + " " + member.Name);
+        }
+        else
+        {
             EmitDocumentation(writer, model, member);
             writer.Line(CodeWriter.GeneratedCodeAttribute);
             writer.Line(member.Accessibility + " " + type + " " + member.Name);
-            writer.Open();
-            writer.Line("get => " + backing + ";");
-            writer.Line("private set => " + backing + " = " + StateArray + ".Wrap<" + member.ElementType + ">(value);");
-            writer.Close();
-            return;
         }
 
-        // A reference member starts at its codec's default (empty for strings and lists, null! for objects) until
-        // capture or a read assigns it.
-        string initializer = member.IsReference
-            ? " = " + Advanced + "StateCodecs.DefaultValue<" + type + ", " + member.Shape.CodecExpression + ">()!;"
-            : "";
-        EmitDocumentation(writer, model, member);
-        writer.Line(CodeWriter.GeneratedCodeAttribute);
-        writer.Line(member.Accessibility + " " + type + " " + member.Name + " { get; private set; }" + initializer);
+        writer.Open();
+        writer.Line("get => " + backing + ";");
+        writer.Close();
+    }
+
+    /// <summary>
+    ///     Gets the statement that stores <paramref name="value" /> in a generated member, wrapping a list so the
+    ///     snapshot owns it.
+    /// </summary>
+    private static string Store(string target, SnapshotMemberModel member, string value)
+    {
+        string backing = target + "." + SnapshotGenerator.BackingField(member.Name);
+        return member.IsList
+            ? backing + " = " + StateArray + ".Wrap<" + member.ElementType + ">(" + value + ");"
+            : backing + " = " + value + ";";
     }
 
     private static void EmitDocumentation(CodeWriter writer, SnapshotModel model, SnapshotMemberModel member)
@@ -148,21 +164,20 @@ internal static class SnapshotEmitter
             switch (member.Kind)
             {
                 case SnapshotMemberKind.Value:
-                    writer.Line("snapshot." + member.Name + " = " + source + ";");
+                    writer.Line(Store("snapshot", member, source));
                     break;
                 case SnapshotMemberKind.Nested:
-                    writer.Line("snapshot." + member.Name + " = " + member.Nested + ".Capture(" + source + ");");
+                    writer.Line(Store("snapshot", member, member.Nested + ".Capture(" + source + ")"));
                     break;
                 case SnapshotMemberKind.Array:
                     if (member.Storage == LiveStorage.Adapter && !member.IsFlatArray && member.Count is null)
                     {
                         // An adapter's getter hands over a fresh array, so the snapshot can own it without a copy.
-                        writer.Line("snapshot." + member.Name + " = " + StateArray + ".Wrap<" + member.ElementType + ">(" + source + ");");
+                        writer.Line(Store("snapshot", member, source));
                     }
                     else
                     {
-                        writer.Line("snapshot." + member.Name + " = " + StateArray + ".Copy<" + member.ElementType + ">(" +
-                                    ReadSpan(member, source) + ");");
+                        writer.Line(Store("snapshot", member, StateArray + ".Copy<" + member.ElementType + ">(" + ReadSpan(member, source) + ")"));
                     }
 
                     break;
@@ -178,7 +193,7 @@ internal static class SnapshotEmitter
                     writer.Line("for (int index = 0; index < count; index++)");
                     writer.Line("    items[index] = " + member.Nested + ".Capture(source[index]);");
                     writer.Line();
-                    writer.Line("snapshot." + member.Name + " = items;");
+                    writer.Line(Store("snapshot", member, "items"));
                     writer.Close();
                     break;
             }
@@ -334,7 +349,10 @@ internal static class SnapshotEmitter
                 continue;
 
             writer.Line("if (has" + field.Id + ")");
-            writer.Line("    result." + field.MemberName + " = field" + field.Id + ";");
+            SnapshotMemberModel? generated = model.Members.FirstOrDefault(member => member.Name == field.MemberName);
+            writer.Line("    " + (generated is null
+                ? "result." + field.MemberName + " = field" + field.Id + ";"
+                : Store("result", generated, "field" + field.Id)));
         }
 
         writer.Line("result.OnDecoded();");

@@ -242,4 +242,49 @@ public sealed class SnapshotDiagnosticTests
             Assert.That(snapshot.GetMembers("RestoreInto"), Is.Empty, "a list of live children makes it capture-only");
         });
     }
+
+    [Test]
+    public void PartialDeclaration_ChoosesTheGeneratedMembersVisibility()
+    {
+        string live = """
+                      public sealed class Tank
+                      {
+                          [NumosSerialize("Pressure")] internal float PressureState => 1f;
+                      }
+                      """;
+
+        string snapshot = """
+                          [NumosSnapshotOf(typeof(Tank))]
+                          public sealed partial class TankSnapshot
+                          {
+                              /// <summary>The pressure.</summary>
+                              public partial float Pressure { get; }
+                          }
+                          """;
+
+        string[] ids = Ids(Source(live, snapshot), out Compilation output);
+        Assert.Multiple(() =>
+        {
+            Assert.That(ids, Is.Empty);
+            Assert.That(GeneratorHarness.Errors(output), Is.Empty);
+            IPropertySymbol pressure = output.GetTypeByMetadataName("MyMod.TankSnapshot")!
+                .GetMembers("Pressure").OfType<IPropertySymbol>().Single();
+
+            Assert.That(pressure.DeclaredAccessibility, Is.EqualTo(Accessibility.Public));
+        });
+    }
+
+    [Test]
+    public void PartialDeclarationWithASetter_ReportsNumosState027()
+    {
+        string snapshot = """
+                          [NumosSnapshotOf(typeof(Tank))]
+                          internal sealed partial class TankSnapshot
+                          {
+                              public partial float Pressure { get; set; }
+                          }
+                          """;
+
+        Assert.That(Ids(Source(Tank, snapshot)), Does.Contain("NUMOSSTATE027"));
+    }
 }

@@ -22,6 +22,7 @@ public sealed partial class AtmosWorld
     ///     Gets the exact global position formed by completed world ticks and applied external operations.
     /// </summary>
     /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
+    [NumosSerialize("Position")]
     public AtmosTimelinePosition TimelinePosition
     {
         get
@@ -566,79 +567,5 @@ public sealed partial class AtmosWorld
     {
         if (!Solvers.SetEnabled(solver.Name, solver.Enabled))
             throw new ArgumentException($"Unknown world solver '{solver.Name}'.", nameof(solver));
-    }
-}
-
-// Mirrors AtmosWorldReplayCodec.WriteCheckpoint field for field, at the same widths and string encoding, except:
-// the archive's initial and head hashes (archive data, not checkpoint state) are left out, each simulation contributes
-// its grid digest rather than its full payload, and length prefixes are omitted. Solver state payloads keep their
-// length, since their bytes go in verbatim.
-internal static class AtmosWorldCheckpointHasher
-{
-    internal static ulong Hash(AtmosWorldCheckpoint checkpoint)
-    {
-        var sink = new StateHashSink();
-        sink.WriteInt32(checkpoint.FormatVersion);
-        sink.WriteUInt64(checkpoint.Position.Tick);
-        sink.WriteUInt64(checkpoint.Position.OperationSequence);
-        sink.WriteUInt64(checkpoint.TopologyVersion);
-        checkpoint.Config.WriteHash(ref sink);
-        sink.WriteCount(checkpoint.Solvers.Count);
-        foreach (var solver in checkpoint.Solvers)
-        {
-            sink.WriteString(solver.Name);
-            sink.WriteByte((byte)solver.Kind);
-            sink.WriteBoolean(solver.Enabled);
-            sink.WriteBoolean(solver.NeighborSelectionKey != null);
-            if (solver.NeighborSelectionKey != null)
-                sink.WriteString(solver.NeighborSelectionKey);
-        }
-
-        // The payloads are opaque here (only the solver type can walk them), so their bytes are hashed as written.
-        sink.WriteCount(checkpoint.SolverStates.Count);
-        foreach (var state in checkpoint.SolverStates)
-        {
-            sink.WriteString(state.Name);
-            sink.WriteInt32(state.State.Length);
-            sink.WriteElements(state.State.Span, 1);
-        }
-
-        sink.WriteCount(checkpoint.SimulationGenerations.Length);
-        foreach (uint generation in checkpoint.SimulationGenerations)
-            sink.WriteUInt32(generation);
-
-        sink.WriteCount(checkpoint.Simulations.Count);
-        foreach (var simulation in checkpoint.Simulations)
-        {
-            sink.WriteInt32(simulation.Simulation.Index);
-            sink.WriteUInt32(simulation.Simulation.Generation);
-            sink.WriteUInt64(simulation.Checkpoint.ComputeStateHash());
-        }
-
-        sink.WriteCount(checkpoint.LinkSlots.Length);
-        foreach (var slot in checkpoint.LinkSlots)
-        {
-            sink.WriteUInt32(slot.Generation);
-            sink.WriteByte(slot.State);
-            sink.WriteByte((byte)slot.Kind);
-            sink.WriteCount(slot.Links.Length);
-            foreach (var link in slot.Links)
-            {
-                AddCell(ref sink, link.First);
-                AddCell(ref sink, link.Second);
-                sink.WriteByte((byte)link.Flags);
-                sink.WriteSingle(link.AreaFraction ?? float.NaN);
-            }
-        }
-
-        return sink.Value;
-    }
-
-    private static void AddCell(ref StateHashSink sink, AtmosCellRef cell)
-    {
-        sink.WriteInt32(cell.Simulation.Index);
-        sink.WriteUInt32(cell.Simulation.Generation);
-        StateCodecs.Int3.Write(ref sink, cell.Chunk.Position);
-        sink.WriteUInt16(cell.LocalVoxelIndex);
     }
 }

@@ -13,8 +13,8 @@ namespace Numos.CoreSim.Replay;
 ///     <para>
 ///         A count, then for each array in ordinal key order: its key, the element type's full name, the element size
 ///         and count as <c>int32</c>, and the elements as one little-endian block. The state hash sees the same calls,
-///         so a struct-typed array hashes its native bytes even though it can't be saved;
-///         <see cref="AtmosReplayCodec" /> rejects those before writing.
+///         so a struct-typed array hashes its native bytes even though it can't be saved; writing one to any other
+///         sink throws.
 ///     </para>
 ///     <para>
 ///         Reading maps each key back to its registered field. The length is only checked against the data here; the
@@ -30,6 +30,13 @@ internal readonly struct SolverArraysCodec : IStateCodec<IReadOnlyList<AtmosSolv
         sink.WriteCount(value.Count);
         foreach (var array in value)
         {
+            if (!array.IsPortable && typeof(TSink) != typeof(StateHashSink))
+            {
+                throw new NotSupportedException(
+                    $"Chunk field '{array.Key}' holds {array.ElementType.FullName}, which can't be saved. " +
+                    "Only primitives and enums over them can.");
+            }
+
             sink.WriteString(array.Key);
             sink.WriteString(array.ElementType.FullName!);
             sink.WriteInt32(array.ElementSize);

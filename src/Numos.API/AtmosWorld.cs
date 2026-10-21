@@ -1,7 +1,9 @@
 using System.Buffers;
 using JetBrains.Annotations;
 using Numos.CoreSim;
+using Numos.CoreSim.Replay;
 using Numos.CoreSim.Solvers;
+using Numos.CoreSim.State;
 using Numos.CoreSim.State.Advanced;
 using Numos.Maths;
 
@@ -151,6 +153,7 @@ public sealed partial class AtmosWorld : IDisposable
     /// </summary>
     /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
     [PublicAPI]
+    [NumosSerialize(Codec = typeof(AtmosConfigSnapshotCodec))]
     public AtmosConfigSnapshot Config
     {
         get
@@ -174,6 +177,7 @@ public sealed partial class AtmosWorld : IDisposable
     /// </summary>
     /// <remarks>Queued link changes do not advance this value until the next tick begins.</remarks>
     [PublicAPI]
+    [NumosSerialize]
     public ulong TopologyVersion { get; private set; }
 
     /// <summary>
@@ -181,6 +185,7 @@ public sealed partial class AtmosWorld : IDisposable
     /// </summary>
     /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
     [PublicAPI]
+    [NumosSerialize]
     public IReadOnlyList<AtmosSimulation> Simulations
     {
         get
@@ -711,42 +716,7 @@ public sealed partial class AtmosWorld : IDisposable
             int enteredGates = EnterSimulationGates(simulations);
             try
             {
-                var simulationCheckpoints = new AtmosWorldSimulationCheckpoint[simulations.Length];
-                for (int index = 0; index < simulations.Length; index++)
-                {
-                    simulationCheckpoints[index] = new AtmosWorldSimulationCheckpoint(
-                        simulations[index].Id,
-                        simulations[index].Kernel.CaptureCheckpoint());
-                }
-
-                uint[] simulationGenerations = _simulationSlots
-                    .Select(static slot => slot.Generation)
-                    .ToArray();
-
-                var slotCheckpoints = new AtmosWorldLinkSlotCheckpoint[_linkSlots.Count];
-                for (int index = 0; index < _linkSlots.Count; index++)
-                {
-                    var slot = _linkSlots[index];
-                    slotCheckpoints[index] = new AtmosWorldLinkSlotCheckpoint(
-                        slot.Generation,
-                        (byte)slot.State,
-                        slot.Kind,
-                        ToDefinitions(slot.Edges));
-                }
-
-                return new AtmosWorldCheckpoint(
-                    TimelinePosition,
-                    TopologyVersion,
-                    _config,
-                    Solvers.Steps.Select(static step => new AtmosWorldSolverCheckpoint(
-                        step.Name,
-                        step.Kind,
-                        step.IsEnabled,
-                        step.NeighborSelectionKey)).ToArray(),
-                    CaptureSolverStates(),
-                    simulationCheckpoints,
-                    simulationGenerations,
-                    slotCheckpoints);
+                return AtmosWorldCheckpoint.Capture(this);
             }
             finally
             {
@@ -796,6 +766,49 @@ public sealed partial class AtmosWorld : IDisposable
         }
     }
 
+    /// <summary>
+    ///     World solver metadata in deterministic execution order.
+    /// </summary>
+    [NumosSerialize("Solvers")]
+    internal IReadOnlyList<AtmosWorldSolverCheckpoint> SolverCheckpoints =>
+        Solvers.Steps.Select(static step => new AtmosWorldSolverCheckpoint(
+            step.Name,
+            step.Kind,
+            step.IsEnabled,
+            step.NeighborSelectionKey)).ToArray();
+
+    /// <summary>
+    ///     The <c>[NumosSerialize]</c> state of every class solver that has some, in pipeline order.
+    /// </summary>
+    [NumosSerialize("SolverStates")]
+    internal IReadOnlyList<AtmosWorldSolverStateCheckpoint> SolverStateCheckpoints => CaptureSolverStates();
+
+    /// <summary>
+    ///     The generation of every simulation slot, free ones included, so restored identifiers keep their meaning.
+    /// </summary>
+    [NumosSerialize]
+    internal uint[] SimulationGenerations => _simulationSlots.Select(static slot => slot.Generation).ToArray();
+
+    /// <summary>
+    ///     Every link-set slot as canonical definitions, free slots and topology waiting for a tick boundary included.
+    /// </summary>
+    /// <remarks>Derived sparse indexes aren't saved; restore rebuilds them from these slots.</remarks>
+    [NumosSerialize("LinkSlots")]
+    internal IReadOnlyList<AtmosWorldLinkSlotCheckpoint> LinkSlotCheckpoints
+    {
+        get
+        {
+            var slots = new AtmosWorldLinkSlotCheckpoint[_linkSlots.Count];
+            for (int index = 0; index < slots.Length; index++)
+            {
+                var slot = _linkSlots[index];
+                slots[index] = new AtmosWorldLinkSlotCheckpoint(slot.Generation, (byte)slot.State, slot.Kind, ToDefinitions(slot.Edges));
+            }
+
+            return slots;
+        }
+    }
+
     private AtmosWorldSolverStateCheckpoint[] CaptureSolverStates()
     {
         WorldSolverRegistration[] stateful = Solvers.StatefulSteps;
@@ -831,14 +844,14 @@ public sealed partial class AtmosWorld : IDisposable
             }
         }
 
-        while (_simulationSlots.Count < checkpoint.SimulationGenerations.Length)
+        while (_simulationSlots.Count < checkpoint.SimulationGenerations.Count)
             _simulationSlots.Add(new SimulationSlot(null, 1));
 
-        if (_simulationSlots.Count > checkpoint.SimulationGenerations.Length)
+        if (_simulationSlots.Count > checkpoint.SimulationGenerations.Count)
         {
             _simulationSlots.RemoveRange(
-                checkpoint.SimulationGenerations.Length,
-                _simulationSlots.Count - checkpoint.SimulationGenerations.Length);
+                checkpoint.SimulationGenerations.Count,
+                _simulationSlots.Count - checkpoint.SimulationGenerations.Count);
         }
 
         _freeSimulationSlots.Clear();
@@ -1311,7 +1324,7 @@ public sealed partial class AtmosWorld : IDisposable
         foreach (var saved in checkpoint.Simulations)
         {
             if (!saved.Simulation.IsValid ||
-                (uint)saved.Simulation.Index >= (uint)checkpoint.SimulationGenerations.Length ||
+                (uint)saved.Simulation.Index >= (uint)checkpoint.SimulationGenerations.Count ||
                 checkpoint.SimulationGenerations[saved.Simulation.Index] != saved.Simulation.Generation ||
                 previousSimulation is { } previous && previous.CompareTo(saved.Simulation) >= 0)
             {
@@ -1339,7 +1352,7 @@ public sealed partial class AtmosWorld : IDisposable
 
         var currentPhysicalEdges = new HashSet<ExplicitEdgeKey>();
         var nextPhysicalEdges = new HashSet<ExplicitEdgeKey>();
-        for (int slotIndex = 0; slotIndex < checkpoint.LinkSlots.Length; slotIndex++)
+        for (int slotIndex = 0; slotIndex < checkpoint.LinkSlots.Count; slotIndex++)
         {
             var slot = checkpoint.LinkSlots[slotIndex];
             if (slot.Generation == 0 ||
@@ -1468,7 +1481,7 @@ public sealed partial class AtmosWorld : IDisposable
         reader.EndObject();
     }
 
-    private void RestoreTopology(AtmosWorldLinkSlotCheckpoint[] checkpoints)
+    private void RestoreTopology(IReadOnlyList<AtmosWorldLinkSlotCheckpoint> checkpoints)
     {
         _linkSlots.Clear();
         _freeLinkSlots.Clear();
@@ -1477,7 +1490,7 @@ public sealed partial class AtmosWorld : IDisposable
         _linkSlotsByChunk.Clear();
         _linkSlotsBySimulation.Clear();
 
-        for (int slotIndex = 0; slotIndex < checkpoints.Length; slotIndex++)
+        for (int slotIndex = 0; slotIndex < checkpoints.Count; slotIndex++)
         {
             var checkpoint = checkpoints[slotIndex];
             var state = (LinkSetState)checkpoint.State;

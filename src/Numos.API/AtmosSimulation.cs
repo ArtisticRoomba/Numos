@@ -3,6 +3,8 @@ using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.Datatypes.Snapshots;
 using Numos.CoreSim.EulerFlow;
+using Numos.CoreSim.Replay;
+using Numos.CoreSim.State;
 using Numos.Maths;
 
 namespace Numos.API;
@@ -143,6 +145,7 @@ public sealed partial class AtmosSimulation : IDisposable
     ///     Gets this simulation's stable generational identifier within <see cref="World" />.
     /// </summary>
     [PublicAPI]
+    [NumosSerialize("Simulation")]
     public AtmosSimulationId Id { get; }
 
     /// <summary>
@@ -162,6 +165,12 @@ public sealed partial class AtmosSimulation : IDisposable
             return new Int3(_chunkWidth, _chunkHeight, _chunkDepth);
         }
     }
+
+    /// <summary>
+    ///     The simulation-owned grid state: chunk data and rollback solver arrays.
+    /// </summary>
+    [NumosSerialize("Checkpoint")]
+    internal AtmosSimulationCheckpoint KernelCheckpoint => Kernel.CaptureCheckpoint();
 
     /// <summary>
     ///     Kernel accessor for the dangerous API.

@@ -1,3 +1,4 @@
+using Numos.CoreSim.State;
 using Numos.Maths;
 
 namespace Numos.API;
@@ -10,7 +11,9 @@ namespace Numos.API;
 /// <remarks>
 ///     The default value is invalid. Identifiers are meaningful only within the world that issued them.
 /// </remarks>
-public readonly record struct AtmosSimulationId(int Index, uint Generation) : IComparable<AtmosSimulationId>
+public readonly partial record struct AtmosSimulationId(
+    [property: NumosSerialize] int Index,
+    [property: NumosSerialize] uint Generation) : IComparable<AtmosSimulationId>
 {
     /// <summary>
     ///     Gets whether this value could have been issued by a world registry.
@@ -43,10 +46,10 @@ public readonly record struct AtmosSimulationId(int Index, uint Generation) : IC
 ///     It does not prove that the simulation, chunk, or voxel still exists; mutation methods validate the complete
 ///     address against the receiving world.
 /// </remarks>
-public readonly record struct AtmosCellRef(
-    AtmosSimulationId Simulation,
-    AtmosChunkHandle Chunk,
-    ushort LocalVoxelIndex) : IComparable<AtmosCellRef>
+public readonly partial record struct AtmosCellRef(
+    [property: NumosSerialize] AtmosSimulationId Simulation,
+    [property: NumosSerialize] AtmosChunkHandle Chunk,
+    [property: NumosSerialize] ushort LocalVoxelIndex) : IComparable<AtmosCellRef>
 {
     /// <summary>
     ///     Compares the complete stable address in simulation, chunk-coordinate, and voxel order.
@@ -155,11 +158,11 @@ public enum ExplicitLinkSetKind : byte
 ///     <see cref="ExplicitLinkFlags.ThermalTransport" /> is not scaled. Registration rejects a fraction that is not
 ///     finite or lies outside [0, 1].
 /// </remarks>
-public readonly record struct ExplicitLinkDefinition(
-    AtmosCellRef First,
-    AtmosCellRef Second,
-    ExplicitLinkFlags Flags = ExplicitLinkFlags.All,
-    float? AreaFraction = null);
+public readonly partial record struct ExplicitLinkDefinition(
+    [property: NumosSerialize] AtmosCellRef First,
+    [property: NumosSerialize] AtmosCellRef Second,
+    [property: NumosSerialize] ExplicitLinkFlags Flags = ExplicitLinkFlags.All,
+    [property: NumosSerialize] float? AreaFraction = null);
 
 /// <summary>
 ///     Identifies a batch of explicit links owned and removed as one lifecycle unit.

@@ -1,3 +1,5 @@
+using Numos.CoreSim.State;
+
 namespace Numos.CoreSim.Replay;
 
 /// <summary>
@@ -5,7 +7,9 @@ namespace Numos.CoreSim.Replay;
 /// </summary>
 /// <param name="Tick">Number of completed Numos ticks. Operations stamped with this tick occur before the next tick.</param>
 /// <param name="OperationSequence">Highest incorporated external operation sequence in the recording history.</param>
-public readonly record struct AtmosTimelinePosition(ulong Tick, ulong OperationSequence);
+public readonly partial record struct AtmosTimelinePosition(
+    [property: NumosSerialize] ulong Tick,
+    [property: NumosSerialize] ulong OperationSequence);
 
 /// <summary>
 ///     Stable codes for replayable semantic simulation operations.

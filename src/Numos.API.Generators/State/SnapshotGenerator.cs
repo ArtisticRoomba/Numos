@@ -138,6 +138,20 @@ public sealed class SnapshotGenerator : IIncrementalGenerator
             return Skipped(snapshot, typeName, displayName, liveName, liveDisplay, diagnostics, location);
         }
 
+        // Partial properties the snapshot declares itself, to choose a generated member's visibility or document it.
+        var declared = new Dictionary<string, string>(StringComparer.Ordinal);
+        var declaredWithSetter = new HashSet<string>(StringComparer.Ordinal);
+        foreach (ISymbol member in snapshot.GetMembers())
+        {
+            if (member is IPropertySymbol { IsPartialDefinition: true, PartialImplementationPart: null } property &&
+                property.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax(cancellationToken) is PropertyDeclarationSyntax declaration)
+            {
+                declared[property.Name] = PartialSyntax.ModifiersWithoutPartial(declaration.Modifiers);
+                if (property.SetMethod is not null)
+                    declaredWithSetter.Add(property.Name);
+            }
+        }
+
         var ids = new Dictionary<int, string>();
         var members = new List<LiveMemberDeclaration>();
         bool anyMarked = false;
@@ -152,7 +166,7 @@ public sealed class SnapshotGenerator : IIncrementalGenerator
 
             anyMarked = true;
             LiveMemberDeclaration? declaration = ParseLiveMember(
-                compilation, snapshot, live, member, serialize, ids, diagnostics, location, cancellationToken);
+                compilation, snapshot, live, member, serialize, declared, ids, diagnostics, location, cancellationToken);
 
             if (declaration is null)
                 canGenerate = false;
@@ -173,6 +187,12 @@ public sealed class SnapshotGenerator : IIncrementalGenerator
         {
             if (member.IsImplicitlyDeclared)
                 continue;
+
+            if (member is IPropertySymbol { IsPartialDefinition: true } partial && !declaredWithSetter.Contains(partial.Name) &&
+                members.Any(live => live.Name == partial.Name))
+            {
+                continue;
+            }
 
             if (member is IMethodSymbol { MethodKind: MethodKind.Constructor } constructor)
             {
@@ -244,8 +264,8 @@ public sealed class SnapshotGenerator : IIncrementalGenerator
 
     private static LiveMemberDeclaration? ParseLiveMember(
         Compilation compilation, INamedTypeSymbol snapshot, INamedTypeSymbol live, ISymbol member, AttributeData serialize,
-        Dictionary<int, string> ids, List<DiagnosticInfo> diagnostics, LocationInfo? typeLocation,
-        CancellationToken cancellationToken)
+        Dictionary<string, string> declared, Dictionary<int, string> ids, List<DiagnosticInfo> diagnostics,
+        LocationInfo? typeLocation, CancellationToken cancellationToken)
     {
         LocationInfo? location = LocationInfo.From(member.Locations.FirstOrDefault()) ?? typeLocation;
         string displayName = live.ToDisplayString() + "." + member.Name;
@@ -265,14 +285,14 @@ public sealed class SnapshotGenerator : IIncrementalGenerator
         string name = member.Name;
         if (serialize.ConstructorArguments.Length == 1)
         {
-            if (serialize.ConstructorArguments[0].Value is not string declared || declared.Trim().Length == 0 ||
-                !SyntaxFacts.IsValidIdentifier(declared))
+            if (serialize.ConstructorArguments[0].Value is not string wireName || wireName.Trim().Length == 0 ||
+                !SyntaxFacts.IsValidIdentifier(wireName))
             {
                 diagnostics.Add(DiagnosticInfo.Create(StateDiagnostics.BlankWireName, location, displayName));
                 return null;
             }
 
-            name = declared;
+            name = wireName;
         }
 
         int id = FieldIds.Compute(name);
@@ -386,6 +406,7 @@ public sealed class SnapshotGenerator : IIncrementalGenerator
             element is INamedTypeSymbol { TypeKind: TypeKind.Class } ? element.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) : null,
             count,
             Documentation(member, cancellationToken),
+            declared.TryGetValue(name, out string? modifiers) ? modifiers : null,
             displayName,
             type.ToDisplayString(),
             location);
@@ -664,7 +685,8 @@ public sealed class SnapshotGenerator : IIncrementalGenerator
                 nested,
                 member.Count,
                 restore,
-                member.Documentation);
+                member.Documentation,
+                member.DeclaredModifiers);
 
         bool IsCollectionKind(SnapshotMemberKind kind) => kind is SnapshotMemberKind.Array or SnapshotMemberKind.NestedList;
 

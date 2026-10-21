@@ -1,3 +1,4 @@
+using Numos.CoreSim.State;
 using Numos.Maths;
 
 namespace Numos.API;
@@ -11,4 +12,4 @@ namespace Numos.API;
 ///     <see cref="AtmosSimulation.UnregisterChunk" /> addresses whatever chunk is later registered at the same
 ///     position. The same handle is valid in any simulation that has a chunk there.
 /// </remarks>
-public readonly record struct AtmosChunkHandle(Int3 Position);
+public readonly partial record struct AtmosChunkHandle([property: NumosSerialize] Int3 Position);

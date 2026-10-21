@@ -163,6 +163,11 @@ public sealed class NumosSerializeAttribute : Attribute
 ///         capture-only; the owner then creates the live objects and calls the children's <c>RestoreInto</c> itself.
 ///     </para>
 ///     <para>
+///         To give a generated member different visibility or its own docs, declare it on the snapshot as a get-only
+///         partial property (<c>public partial IReadOnlyList&lt;Foo&gt; Foos { get; }</c>); the generator implements it.
+///         That's how an <see langword="internal" /> live member becomes a <see langword="public" /> snapshot member.
+///     </para>
+///     <para>
 ///         The snapshot can declare members of its own. A hand-written <see cref="NumosSerializeAttribute" /> member is
 ///         part of the hash and wire format like a generated one; fill it in an optional
 ///         <c>partial void OnCaptured(TLive live)</c> and use it in <c>partial void OnRestored(TLive live)</c>, which

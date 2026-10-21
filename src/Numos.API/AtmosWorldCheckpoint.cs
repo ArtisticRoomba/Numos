@@ -1,5 +1,7 @@
 using Numos.CoreSim;
 using Numos.CoreSim.Replay;
+using Numos.CoreSim.State;
+using Numos.CoreSim.State.Advanced;
 
 namespace Numos.API;
 
@@ -7,10 +9,18 @@ namespace Numos.API;
 ///     Holds detached continuation state for a complete atmospheric world.
 /// </summary>
 /// <remarks>
-///     Restore targets an existing compatible world, so host-owned simulation objects, solver delegates, and external
-///     integration state stay attached. Derived sparse indexes are rebuilt from the authoritative link-set slots.
+///     <para>
+///         Restore targets an existing compatible world, so host-owned simulation objects, solver delegates, and external
+///         integration state stay attached. Derived sparse indexes are rebuilt from the authoritative link-set slots.
+///     </para>
+///     <para>
+///         Generated from the <see cref="NumosSerializeAttribute" /> members of <see cref="AtmosWorld" />, which define
+///         its members, capture, hash, equality, and wire layout. Restoring stays with the world, which has to recreate
+///         and drop simulations and recompile topology in a fixed order.
+///     </para>
 /// </remarks>
-public sealed class AtmosWorldCheckpoint
+[NumosSnapshotOf(typeof(AtmosWorld))]
+public sealed partial class AtmosWorldCheckpoint
 {
     /// <summary>
     ///     Identifies the in-memory world checkpoint schema.
@@ -23,30 +33,15 @@ public sealed class AtmosWorldCheckpoint
     /// </remarks>
     public const int CurrentFormatVersion = 11;
 
-    // See AtmosSimulationCheckpoint: immutable after construction, so the digest is computed once.
+    // Immutable once captured or read, so the digest is computed once; see AtmosSimulationCheckpoint.
+    [NumosIgnore]
     private ulong _digest;
-    private volatile bool _hasDigest;
-    private IReadOnlyList<AtmosWorldLinkSetCheckpoint>? _linkSets;
 
-    internal AtmosWorldCheckpoint(
-        AtmosTimelinePosition position,
-        ulong topologyVersion,
-        AtmosConfigSnapshot config,
-        AtmosWorldSolverCheckpoint[] solvers,
-        AtmosWorldSolverStateCheckpoint[] solverStates,
-        AtmosWorldSimulationCheckpoint[] simulations,
-        uint[] simulationGenerations,
-        AtmosWorldLinkSlotCheckpoint[] linkSlots)
-    {
-        Position = position;
-        TopologyVersion = topologyVersion;
-        Config = config;
-        Solvers = Array.AsReadOnly(solvers);
-        SolverStates = Array.AsReadOnly(solverStates);
-        Simulations = Array.AsReadOnly(simulations);
-        SimulationGenerations = simulationGenerations;
-        LinkSlots = linkSlots;
-    }
+    [NumosIgnore]
+    private volatile bool _hasDigest;
+
+    [NumosIgnore]
+    private IReadOnlyList<AtmosWorldLinkSetCheckpoint>? _linkSets;
 
     /// <summary>
     ///     Gets the checkpoint schema version.
@@ -54,29 +49,14 @@ public sealed class AtmosWorldCheckpoint
     public int FormatVersion => CurrentFormatVersion;
 
     /// <summary>
-    ///     Gets the completed tick and highest world operation sequence incorporated by the checkpoint.
-    /// </summary>
-    public AtmosTimelinePosition Position { get; }
-
-    /// <summary>
     ///     Gets the completed world-tick count at capture time.
     /// </summary>
     public int TickCount => checked((int)Position.Tick);
 
     /// <summary>
-    ///     Gets the applied topology version at capture time.
-    /// </summary>
-    public ulong TopologyVersion { get; }
-
-    /// <summary>
-    ///     Gets the shared immutable physics configuration.
-    /// </summary>
-    public AtmosConfigSnapshot Config { get; }
-
-    /// <summary>
     ///     Gets world solver metadata in deterministic execution order.
     /// </summary>
-    public IReadOnlyList<AtmosWorldSolverCheckpoint> Solvers { get; }
+    public partial IReadOnlyList<AtmosWorldSolverCheckpoint> Solvers { get; }
 
     /// <summary>
     ///     Gets the <c>[NumosSerialize]</c> state of every class solver that has some, in pipeline order.
@@ -85,42 +65,78 @@ public sealed class AtmosWorldCheckpoint
     ///     Delegates and class solvers without marked members have no entry. Restoring requires the receiving world to
     ///     have exactly these stateful solvers.
     /// </remarks>
-    public IReadOnlyList<AtmosWorldSolverStateCheckpoint> SolverStates { get; }
-
-    /// <summary>
-    ///     Gets simulation checkpoints in stable simulation-ID order.
-    /// </summary>
-    public IReadOnlyList<AtmosWorldSimulationCheckpoint> Simulations { get; }
+    public partial IReadOnlyList<AtmosWorldSolverStateCheckpoint> SolverStates { get; }
 
     /// <summary>
     ///     Gets non-free link sets, including topology mutations waiting for a tick boundary.
     /// </summary>
     public IReadOnlyList<AtmosWorldLinkSetCheckpoint> LinkSets => _linkSets ??= CreateLinkSets(LinkSlots);
 
-    internal uint[] SimulationGenerations { get; }
-
-    internal AtmosWorldLinkSlotCheckpoint[] LinkSlots { get; }
-
     /// <summary>
     ///     Computes a canonical digest of the complete detached world continuation state.
     /// </summary>
     /// <returns>The checkpoint position and a deterministic non-cryptographic 64-bit digest.</returns>
+    /// <remarks>
+    ///     The digest covers the format version and then exactly the state the checkpoint saves, through the same
+    ///     generated walk, so two checkpoints that save the same bytes hash the same.
+    /// </remarks>
     public AtmosWorldStateHash ComputeStateHash()
     {
         if (!_hasDigest)
         {
-            _digest = AtmosWorldCheckpointHasher.Hash(this);
+            var sink = new StateHashSink();
+            sink.WriteInt32(FormatVersion);
+            NumosState.Write(ref sink, this);
+            _digest = sink.Value;
             _hasDigest = true;
         }
 
         return new AtmosWorldStateHash(Position, _digest);
     }
 
+    /// <summary>
+    ///     Checks what a file holds beyond its framing: solver metadata, that solver states follow custom solvers in
+    ///     pipeline order, and link-set states.
+    /// </summary>
+    /// <exception cref="InvalidDataException">The checkpoint is inconsistent.</exception>
+    partial void OnDecoded()
+    {
+        foreach (var solver in Solvers)
+        {
+            if (string.IsNullOrWhiteSpace(solver.Name) ||
+                !Enum.IsDefined(solver.Kind) ||
+                solver.NeighborSelectionKey != null && string.IsNullOrWhiteSpace(solver.NeighborSelectionKey))
+            {
+                throw new InvalidDataException("The world solver metadata is invalid.");
+            }
+        }
+
+        // Whether the receiving world's solver can take each payload is only known at restore.
+        int next = 0;
+        foreach (var state in SolverStates)
+        {
+            while (next < Solvers.Count && Solvers[next].Name != state.Name)
+                next++;
+
+            if (next == Solvers.Count || Solvers[next].Kind != AtmosWorldSolverKind.Custom)
+                throw new InvalidDataException($"World solver state '{state.Name}' doesn't follow a custom solver in pipeline order.");
+
+            next++;
+        }
+
+        // The public view maps states lazily, so reject unknown ones while reading.
+        foreach (var slot in LinkSlots)
+        {
+            if (slot.State is not (0 or 1 or 2 or 3 or 4))
+                throw new InvalidDataException("The world checkpoint contains an invalid link-set state.");
+        }
+    }
+
     // The public view shares each slot's definitions array; the read-only wrapper keeps it immutable.
-    private static IReadOnlyList<AtmosWorldLinkSetCheckpoint> CreateLinkSets(AtmosWorldLinkSlotCheckpoint[] slots)
+    private static IReadOnlyList<AtmosWorldLinkSetCheckpoint> CreateLinkSets(IReadOnlyList<AtmosWorldLinkSlotCheckpoint> slots)
     {
         var linkSets = new List<AtmosWorldLinkSetCheckpoint>();
-        for (int index = 0; index < slots.Length; index++)
+        for (int index = 0; index < slots.Count; index++)
         {
             var slot = slots[index];
             if (slot.State == 0)
@@ -151,11 +167,11 @@ public sealed class AtmosWorldCheckpoint
 /// <param name="Kind">Whether Numos or the host supplies the implementation.</param>
 /// <param name="Enabled">Whether the solver participates in ticks.</param>
 /// <param name="NeighborSelectionKey">The stable compiled-neighborhood policy key, or <see langword="null" />.</param>
-public readonly record struct AtmosWorldSolverCheckpoint(
-    string Name,
-    AtmosWorldSolverKind Kind,
-    bool Enabled,
-    string? NeighborSelectionKey);
+public readonly partial record struct AtmosWorldSolverCheckpoint(
+    [property: NumosSerialize] string Name,
+    [property: NumosSerialize] AtmosWorldSolverKind Kind,
+    [property: NumosSerialize] bool Enabled,
+    [property: NumosSerialize] string? NeighborSelectionKey);
 
 /// <summary>
 ///     Holds one class solver's <c>[NumosSerialize]</c> members as written by its generated state walker.
@@ -165,18 +181,25 @@ public readonly record struct AtmosWorldSolverCheckpoint(
 ///     The solver's state payload: its marked members as field-id records, the same encoding solver configurations
 ///     use. Opaque without the solver type, so the world hash covers these bytes as they are.
 /// </param>
-public readonly record struct AtmosWorldSolverStateCheckpoint(
-    string Name,
-    ReadOnlyMemory<byte> State);
+public readonly partial record struct AtmosWorldSolverStateCheckpoint(
+    [property: NumosSerialize] string Name,
+    [property: NumosSerialize] ReadOnlyMemory<byte> State);
 
 /// <summary>
 ///     Associates one stable world registration with its independent voxel-storage checkpoint.
 /// </summary>
-/// <param name="Simulation">The stable simulation registration.</param>
-/// <param name="Checkpoint">The simulation-owned grid state: chunk data and rollback solver arrays.</param>
-public sealed record AtmosWorldSimulationCheckpoint(
-    AtmosSimulationId Simulation,
-    AtmosSimulationCheckpoint Checkpoint);
+/// <remarks>
+///     Generated from the <see cref="NumosSerializeAttribute" /> members of <see cref="AtmosSimulation" />. The world
+///     restores simulations itself, since it may have to create or dispose them first.
+/// </remarks>
+[NumosSnapshotOf(typeof(AtmosSimulation))]
+public sealed partial class AtmosWorldSimulationCheckpoint
+{
+    /// <summary>
+    ///     Gets the simulation-owned grid state: chunk data and rollback solver arrays.
+    /// </summary>
+    public partial AtmosSimulationCheckpoint Checkpoint { get; }
+}
 
 /// <summary>
 ///     Describes where a link set is in its deterministic boundary lifecycle.
@@ -212,8 +235,11 @@ public sealed record AtmosWorldLinkSetCheckpoint(
     AtmosWorldLinkSetState State,
     IReadOnlyList<ExplicitLinkDefinition> Links);
 
-internal readonly record struct AtmosWorldLinkSlotCheckpoint(
-    uint Generation,
-    byte State,
-    ExplicitLinkSetKind Kind,
-    ExplicitLinkDefinition[] Links);
+/// <summary>
+///     One link-set slot as saved: its generation, lifecycle state, kind, and canonical links.
+/// </summary>
+internal readonly partial record struct AtmosWorldLinkSlotCheckpoint(
+    [property: NumosSerialize] uint Generation,
+    [property: NumosSerialize] byte State,
+    [property: NumosSerialize] ExplicitLinkSetKind Kind,
+    [property: NumosSerialize] ExplicitLinkDefinition[] Links);
