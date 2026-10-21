@@ -769,12 +769,19 @@ public sealed partial class AtmosSimulation : IDisposable
     ///         Removing the last of a voxel's gas later zeroes its momentum again.
     ///     </para>
     ///     <para>
+    ///         Non-finite components are rejected before any of that, like a non-finite amount passed to
+    ///         <see cref="AddGasToVoxel(AtmosChunkHandle, ushort, int, float, float)" />: NaN or infinite momentum
+    ///         would poison every voxel the flow solver pushes it into.
+    ///     </para>
+    ///     <para>
     ///         While the world is recording, a successful write is recorded as an external operation. A call made
     ///         from inside a solver callback is applied but not recorded, since it is derived work that replay
     ///         regenerates.
     ///     </para>
     /// </remarks>
-    /// <exception cref="ArgumentOutOfRangeException"><paramref name="localVoxelIndex" /> is outside the chunk.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    ///     <paramref name="localVoxelIndex" /> is outside the chunk, or a momentum component is NaN or infinite.
+    /// </exception>
     /// <exception cref="KeyNotFoundException">No chunk is registered at the handle's position.</exception>
     /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
     /// <example>
@@ -806,10 +813,12 @@ public sealed partial class AtmosSimulation : IDisposable
     /// <param name="momentumZ">Total z-momentum of the voxel's gas, in kilogram metres per second (kg·m/s).</param>
     /// <remarks>
     ///     Same contract as <see cref="SetVoxelMomentum(AtmosChunkHandle, ushort, float, float, float)" />: writes to
-    ///     solid, void, or gasless voxels are ignored and not recorded, and successful writes outside a solver tick
-    ///     are recorded as external operations.
+    ///     solid, void, or gasless voxels are ignored and not recorded, non-finite components are rejected, and
+    ///     successful writes outside a solver tick are recorded as external operations.
     /// </remarks>
-    /// <exception cref="ArgumentOutOfRangeException">A local coordinate is outside the chunk.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    ///     A local coordinate is outside the chunk, or a momentum component is NaN or infinite.
+    /// </exception>
     /// <exception cref="KeyNotFoundException">No chunk is registered at the handle's position.</exception>
     /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
     [PublicAPI]
