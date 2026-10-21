@@ -18,6 +18,15 @@ internal struct AtmosStateHasher
         Value = unchecked((Value ^ value) * 1099511628211UL);
     }
 
+    internal void AddBytes(ReadOnlySpan<byte> bytes)
+    {
+        ulong value = Value;
+        foreach (byte part in bytes)
+            value = unchecked((value ^ part) * 1099511628211UL);
+
+        Value = value;
+    }
+
     internal void Add(bool value)
     {
         AddByte(value ? (byte)1 : (byte)0);

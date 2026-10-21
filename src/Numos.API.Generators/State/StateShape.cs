@@ -289,6 +289,9 @@ internal sealed record StateShape(StateShapeKind Kind, string Name, EquatableArr
         StateShapeKind.Enum => Codecs + "Enum<" + Name + ", " + Arguments[0].TypeExpression + ", " +
                                Arguments[0].CodecExpression + ">",
         StateShapeKind.State => Codecs + "State<" + Name + ">",
+        // Primitive elements take the block path; it writes the same bytes as the per-element one.
+        StateShapeKind.List or StateShapeKind.Array when Arguments[0] is { Kind: StateShapeKind.Primitive, Name: not "Boolean" } =>
+            Generic("UnmanagedList", Arguments[0]),
         StateShapeKind.List or StateShapeKind.Array => Generic("List", Arguments[0]),
         StateShapeKind.Set => Generic("Set", Arguments[0]),
         StateShapeKind.Dictionary => Generic("Dictionary", Arguments[0], Arguments[1]),

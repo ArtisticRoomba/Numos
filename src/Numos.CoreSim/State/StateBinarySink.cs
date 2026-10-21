@@ -128,6 +128,18 @@ public struct StateBinarySink : IStateSink
         Utf8.GetBytes(value, Reserve(byteCount));
     }
 
+    /// <inheritdoc />
+    public void WriteElements(ReadOnlySpan<byte> elements, int elementSize)
+    {
+        Span<byte> destination = Reserve(elements.Length);
+        elements.CopyTo(destination);
+        if (!BitConverter.IsLittleEndian)
+        {
+            for (int offset = 0; offset < destination.Length; offset += elementSize)
+                destination.Slice(offset, elementSize).Reverse();
+        }
+    }
+
     private Span<byte> Reserve(int count)
     {
         int required = checked(_length + count);

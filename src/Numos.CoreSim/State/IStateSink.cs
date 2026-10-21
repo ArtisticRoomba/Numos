@@ -123,6 +123,19 @@ public interface IStateSink
     /// </summary>
     /// <param name="value">The value. Nullable strings are written as a presence flag followed by this call.</param>
     void WriteString(string value);
+
+    /// <summary>
+    ///     Writes a run of fixed-size elements in one call, each little-endian, with no count.
+    /// </summary>
+    /// <param name="elements">The elements' bytes in native byte order.</param>
+    /// <param name="elementSize">The size of one element in bytes; <paramref name="elements" /> is a whole number of them.</param>
+    /// <remarks>
+    ///     The bulk path for primitive arrays such as per-voxel chunk data. It produces the same bytes as writing each
+    ///     element on its own, so it's only a speedup. Sinks swap each element's bytes on a big-endian host, which is
+    ///     only correct for primitives; that's all generated code passes here. Callers that write a collection still
+    ///     write its count first.
+    /// </remarks>
+    void WriteElements(ReadOnlySpan<byte> elements, int elementSize);
 }
 
 /// <summary>
@@ -218,4 +231,22 @@ public struct StateHashSink : IStateSink
 
     /// <inheritdoc />
     public void WriteString(string value) => _hasher.Add(value);
+
+    /// <inheritdoc />
+    public void WriteElements(ReadOnlySpan<byte> elements, int elementSize)
+    {
+        if (BitConverter.IsLittleEndian)
+        {
+            _hasher.AddBytes(elements);
+            return;
+        }
+
+        Span<byte> swapped = stackalloc byte[elementSize];
+        for (int offset = 0; offset < elements.Length; offset += elementSize)
+        {
+            elements.Slice(offset, elementSize).CopyTo(swapped);
+            swapped.Reverse();
+            _hasher.AddBytes(swapped);
+        }
+    }
 }

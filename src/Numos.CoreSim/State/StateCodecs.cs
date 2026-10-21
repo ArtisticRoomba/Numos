@@ -567,7 +567,7 @@ public static class StateCodecs
         /// <inheritdoc />
         public static TList Default => FromArray([]);
 
-        private static TList FromArray(T[] elements)
+        internal static TList FromArray(T[] elements)
         {
             if (typeof(TList) == typeof(ImmutableArray<T>))
             {
@@ -577,6 +577,93 @@ public static class StateCodecs
 
             // T[] and IReadOnlyList<T>, the other declared shapes the generator allows.
             return (TList)(object)elements;
+        }
+    }
+
+    /// <summary>
+    ///     Codec for an ordered sequence of primitives (other than <see langword="bool" />), written like
+    ///     <see cref="List{TList, T, TCodec}" /> but as one block through <see cref="IStateSink.WriteElements" />.
+    /// </summary>
+    /// <typeparam name="TList">The declared collection type.</typeparam>
+    /// <typeparam name="T">The primitive element type.</typeparam>
+    /// <typeparam name="TCodec">The element codec, which orders elements the same way it would in a plain list.</typeparam>
+    /// <remarks>
+    ///     The bytes and the hash are identical to <see cref="List{TList, T, TCodec}" />; the generator picks this codec
+    ///     for primitive elements because per-voxel chunk arrays go through it on every checkpoint hash. Booleans stay
+    ///     on the per-element path so the stored byte is always 0 or 1.
+    /// </remarks>
+    public readonly struct UnmanagedList<TList, T, TCodec> : IStateCodec<TList>
+        where TList : IReadOnlyList<T>
+        where T : unmanaged
+        where TCodec : IStateCodec<T>
+    {
+        /// <inheritdoc />
+        public static void Write<TSink>(ref TSink sink, TList value) where TSink : struct, IStateSink
+        {
+            int count = value.Count;
+            sink.WriteCount(count);
+            if (TryGetSpan(value, out ReadOnlySpan<T> span))
+            {
+                sink.WriteElements(MemoryMarshal.AsBytes(span), Unsafe.SizeOf<T>());
+                return;
+            }
+
+            T[] buffer = System.Buffers.ArrayPool<T>.Shared.Rent(count);
+            try
+            {
+                for (int i = 0; i < count; i++)
+                    buffer[i] = value[i];
+
+                sink.WriteElements(MemoryMarshal.AsBytes(buffer.AsSpan(0, count)), Unsafe.SizeOf<T>());
+            }
+            finally
+            {
+                System.Buffers.ArrayPool<T>.Shared.Return(buffer);
+            }
+        }
+
+        /// <inheritdoc />
+        public static bool StateEquals(TList left, TList right)
+        {
+            if (left.Count != right.Count)
+                return false;
+
+            if (TryGetSpan(left, out ReadOnlySpan<T> first) && TryGetSpan(right, out ReadOnlySpan<T> second))
+                return MemoryMarshal.AsBytes(first).SequenceEqual(MemoryMarshal.AsBytes(second));
+
+            return List<TList, T, TCodec>.StateEquals(left, right);
+        }
+
+        /// <inheritdoc />
+        public static int Compare(TList left, TList right) => List<TList, T, TCodec>.Compare(left, right);
+
+        /// <inheritdoc />
+        public static TList Read(ref StateReader reader, IGasRegistry? gases) =>
+            List<TList, T, TCodec>.FromArray(reader.ReadArray<T>(reader.ReadCount()));
+
+        /// <inheritdoc />
+        public static TList Default => List<TList, T, TCodec>.FromArray([]);
+
+        private static bool TryGetSpan(TList value, out ReadOnlySpan<T> span)
+        {
+            if (typeof(TList) == typeof(ImmutableArray<T>))
+            {
+                span = Unsafe.As<TList, ImmutableArray<T>>(ref value).AsSpan();
+                return true;
+            }
+
+            switch (value)
+            {
+                case T[] array:
+                    span = array;
+                    return true;
+                case Replay.CheckpointArray<T> owned:
+                    span = owned.Span;
+                    return true;
+                default:
+                    span = default;
+                    return false;
+            }
         }
     }
 

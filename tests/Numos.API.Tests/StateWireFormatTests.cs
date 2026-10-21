@@ -44,6 +44,66 @@ public sealed partial class StateWireFormatTests
     }
 
     [Test]
+    public void PrimitiveBlocks_MatchPerElementWrites()
+    {
+        float[] floats = [1.5f, -0f, float.NaN, 3e7f];
+        ushort[] shorts = [1, 2, 65535];
+
+        var block = new StateBinarySink();
+        var blockHash = new StateHashSink();
+        WriteBlocks(ref block, floats, shorts);
+        WriteBlocks(ref blockHash, floats, shorts);
+
+        var single = new StateBinarySink();
+        var singleHash = new StateHashSink();
+        WriteOneByOne(ref single, floats, shorts);
+        WriteOneByOne(ref singleHash, floats, shorts);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(block.WrittenSpan.ToArray(), Is.EqualTo(single.WrittenSpan.ToArray()));
+            Assert.That(blockHash.Value, Is.EqualTo(singleHash.Value));
+        });
+
+        var reader = new StateReader(block.WrittenSpan);
+        float[] readFloats = reader.ReadArray<float>(floats.Length);
+        ushort[] readShorts = reader.ReadArray<ushort>(shorts.Length);
+        bool atEnd = reader.IsAtEnd;
+        Assert.Multiple(() =>
+        {
+            Assert.That(readFloats.Select(BitConverter.SingleToInt32Bits), Is.EqualTo(floats.Select(BitConverter.SingleToInt32Bits)));
+            Assert.That(readShorts, Is.EqualTo(shorts));
+            Assert.That(atEnd, Is.True);
+        });
+    }
+
+    [Test]
+    public void PrimitiveBlock_LongerThanTheData_IsCorruptData()
+    {
+        byte[] data = new byte[6];
+        Assert.Throws<InvalidDataException>(() =>
+        {
+            var reader = new StateReader(data);
+            reader.ReadArray<float>(2);
+        });
+    }
+
+    private static void WriteBlocks<TSink>(ref TSink sink, float[] floats, ushort[] shorts) where TSink : struct, IStateSink
+    {
+        sink.WriteElements(System.Runtime.InteropServices.MemoryMarshal.AsBytes(floats.AsSpan()), sizeof(float));
+        sink.WriteElements(System.Runtime.InteropServices.MemoryMarshal.AsBytes(shorts.AsSpan()), sizeof(ushort));
+    }
+
+    private static void WriteOneByOne<TSink>(ref TSink sink, float[] floats, ushort[] shorts) where TSink : struct, IStateSink
+    {
+        foreach (float value in floats)
+            sink.WriteSingle(value);
+
+        foreach (ushort value in shorts)
+            sink.WriteUInt16(value);
+    }
+
+    [Test]
     public void UnknownFieldIds_AreSkipped()
     {
         // Version 2 of Pair added field 3 between the two fields version 1 knows.

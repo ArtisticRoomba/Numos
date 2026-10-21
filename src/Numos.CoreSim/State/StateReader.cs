@@ -1,4 +1,6 @@
 using System.Buffers.Binary;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Text;
 
 namespace Numos.CoreSim.State;
@@ -244,6 +246,31 @@ public ref struct StateReader
         {
             throw new InvalidDataException("A state string is not valid UTF-8.", exception);
         }
+    }
+
+    /// <summary>
+    ///     Reads <paramref name="count" /> little-endian primitives written by <see cref="IStateSink.WriteElements" />.
+    /// </summary>
+    /// <param name="count">The element count, usually just read with <see cref="ReadCount" />.</param>
+    /// <typeparam name="T">A primitive type.</typeparam>
+    /// <returns>A new array holding the elements.</returns>
+    /// <exception cref="InvalidDataException">Fewer than <paramref name="count" /> elements remain in the field.</exception>
+    public T[] ReadArray<T>(int count) where T : unmanaged
+    {
+        int size = Unsafe.SizeOf<T>();
+        if (count < 0 || (long)count * size > Limit - _position)
+            throw new InvalidDataException("State data is truncated.");
+
+        var values = new T[count];
+        Span<byte> bytes = MemoryMarshal.AsBytes(values.AsSpan());
+        Take(bytes.Length).CopyTo(bytes);
+        if (!BitConverter.IsLittleEndian)
+        {
+            for (int offset = 0; offset < bytes.Length; offset += size)
+                bytes.Slice(offset, size).Reverse();
+        }
+
+        return values;
     }
 
     private int ReadLength()
