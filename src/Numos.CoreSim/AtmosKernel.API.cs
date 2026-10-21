@@ -560,6 +560,7 @@ internal sealed partial class AtmosKernel
         {
             var chunk = GetChunk(position);
             ValidateVoxelIndex(chunk, localVoxelIndex);
+            ValidateIgnition(temperature, volume);
 
             int classification = chunk.VoxelRoomMap[localVoxelIndex];
             if (classification == VoxelClassification.RoomSolid || classification == VoxelClassification.RoomVoid)
@@ -709,5 +710,19 @@ internal sealed partial class AtmosKernel
                 temperature,
                 "Temperature must be nonnegative and finite.");
         }
+    }
+
+    private void ValidateIgnition(Kelvin temperature, CubicMetre volume)
+    {
+        if (!float.IsFinite(temperature) || temperature < 0f)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(temperature),
+                temperature,
+                "Temperature must be nonnegative and finite.");
+        }
+
+        if (!float.IsFinite(volume) || volume <= 0f)
+            throw new ArgumentOutOfRangeException(nameof(volume), volume, "Volume must be positive and finite.");
     }
 }
