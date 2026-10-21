@@ -1452,7 +1452,8 @@ world.SetAtmosConfig(config); // recorded, so replay changes the rate at the sam
 fields in id order through one `WriteState` method that drives an `IStateSink`; the hash is that walk fed into
 `StateHashSink`, and the saved bytes are the same walk fed into `StateBinarySink`. Floats compare by bits, dictionaries
 and sets go in canonical key order, and `GasProperties` references are identified by name. `GasReactionConfig` and both
-reaction types are built this way.
+reaction types are built this way, as are Numos's own configuration scalars, `GasProperties`, and chunk checkpoints
+(see "Checkpoint fields come from the state schema" in `docs/deterministic_replay.md`).
 
 The generator also writes a `ReadState` that rebuilds the object through a constructor, binding parameters to state
 fields by name (ignoring case) and setting any remaining fields through `init` or `set` accessors. That's what lets a

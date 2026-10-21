@@ -478,8 +478,13 @@ type than its field, such as `IEnumerable<T>` or `IDictionary<TKey, TValue>` for
 it when it has to. If no constructor fits, the build fails with `NUMOSSTATE014`, which says what didn't match.
 
 Fields carry ids and lengths on disk, so an older file still loads after you add a field. The new field takes the
-constructor parameter's default value if it has one, otherwise `default`, an empty string, or an empty collection.
-Ids the reader doesn't recognize are skipped.
+constructor parameter's default value if it has one. A field with a plain `set` accessor (or a mutable field) keeps
+whatever the constructor or its initializer gave it. Anything else gets `default`, an empty string, or an empty
+collection. Ids the reader doesn't recognize are skipped.
+
+When a member's type isn't one the schema handles, or you want it written differently, `[StateCodec(typeof(...))]`
+names an `IStateCodec<T>` to use for that member. Numos uses it to keep `GasProperties.Name` nullable on disk and to
+save chunk solver arrays. A member with a codec is read through its setter.
 
 To save one configuration by itself, say a preset or something to attach to a bug report, use
 `NumosStateSerializer` (streams, in `Numos.Serialization`) or `NumosStateFile` (paths, with an atomic save, in
