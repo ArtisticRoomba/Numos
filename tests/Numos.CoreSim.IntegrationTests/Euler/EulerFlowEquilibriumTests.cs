@@ -7,7 +7,7 @@ namespace Numos.CoreSim.IntegrationTests.Euler;
 /// <summary>
 ///     Where the Euler stage ends up: a small pressure step in a room settles to rest and the chunk sleeps, and a
 ///     blast centred on the corner shared by a 2×2×2 block of chunks keeps the cube's full symmetry through the chunk
-///     faces and the alternating sweep order.
+///     faces and the cycling sweep order.
 /// </summary>
 [TestFixture]
 public sealed class EulerFlowEquilibriumTests
@@ -97,8 +97,9 @@ public sealed class EulerFlowEquilibriumTests
 
         // Two symmetry groups, with different expectations. Reflections in the three mid-planes are exact for the
         // sweep up to rounding, since a mirrored pencil solves the mirrored Riemann problems. Axis permutations are
-        // not: the sweep order inside a tick is fixed (and only alternates between ticks), so two voxels that swap
-        // axes see the operators in a different order and agree only to the splitting error.
+        // not: every substep sweeps the axes in some order, so two voxels that swap axes see the operators in a
+        // different order and agree only to the splitting error, which cycling through all six orders spreads
+        // evenly rather than removes.
         var byMirror = new Dictionary<(float, float, float), Sample>();
         var byPermutation = new Dictionary<(float, float, float), Sample>();
         double worstMirror = 0d;
@@ -140,12 +141,13 @@ public sealed class EulerFlowEquilibriumTests
         TestContext.Out.WriteLine(
             $"{simulation.LastFlowDiagnostics}; mirror classes={byMirror.Count} worst={worstMirror:E2} speed={worstMirrorSpeed:E2}; " +
             $"permutation classes={byPermutation.Count} worst={worstPermutation:E2} speed={worstPermutationSpeed:E2}; max speed {maxSpeed:F2} m/s");
-        // Measured on x64: mirrors exact, permutations 1.2e-2 on the scalars and 3.8% of the peak speed.
+        // Measured on x64: mirrors exact, permutations 7.8e-3 on the scalars (1.2e-2 when the order only alternated
+        // between XYZ and ZYX) and 6.7% of the peak speed.
         Assert.Multiple(() =>
         {
             Assert.That(worstMirror, Is.Zero);
             Assert.That(worstMirrorSpeed, Is.Zero);
-            Assert.That(worstPermutation, Is.LessThan(3e-2));
+            Assert.That(worstPermutation, Is.LessThan(2e-2));
             Assert.That(worstPermutationSpeed, Is.LessThan(0.1 * maxSpeed));
         });
     }

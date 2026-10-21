@@ -27,10 +27,16 @@ namespace Numos.CoreSim.Solvers.Euler;
 ///         reserve-and-merge pass: the two evaluations are the same bits, and each chunk applies its own side of
 ///         the difference. Every substep uses one global <c>Δt</c>, sized from the fastest signal in any active
 ///         chunk, so every chunk advances the same gas time and the state of a shared face is the same on both
-///         sides. Sweep order alternates between <c>X, Y, Z</c> and <c>Z, Y, X</c> from one substep to the next,
-///         the usual symmetric splitting. The starting parity is <c>TickCount &amp; 1</c> rather than a counter
-///         carried across ticks, so it is a pure function of checkpointed state and a restored world sweeps in the
-///         same order the original run did.
+///         sides.
+///     </para>
+///     <para>
+///         Each substep sweeps the axes in one of the six orders of <see cref="SweepOrders" />, walking the list so
+///         every order is followed by its reverse (the usual symmetric splitting) and no axis is always in the
+///         middle, which alternating <c>XYZ</c> and <c>ZYX</c> alone left measurably asymmetric on a spherical
+///         blast. The position is <c>(2·TickCount + substep) mod 6</c>: doubling the tick count starts every tick on
+///         the first order of a pair, whatever the previous tick's substep count, and rotates which pair leads. It
+///         is a function of checkpointed state and the substep index alone, never a counter carried across ticks,
+///         so a restored world sweeps in the same order the original run did.
 ///     </para>
 ///     <para>
 ///         The active set grows during the tick. An open face into a chunk that has no workspace is a wall for
@@ -57,6 +63,12 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
     ///     the results. It changes the schedule only, not which threads run it.
     /// </summary>
     internal static int? WorkerCountOverride;
+
+    /// <summary>
+    ///     The axis orders a substep can sweep in, as consecutive triples: <c>XYZ, ZYX, YZX, XZY, ZXY, YXZ</c>, each
+    ///     order followed by its reverse.
+    /// </summary>
+    private static ReadOnlySpan<byte> SweepOrders => [0, 1, 2, 2, 1, 0, 1, 2, 0, 0, 2, 1, 2, 0, 1, 1, 0, 2];
 
     private readonly Int3 _dimensions;
     private readonly List<AtmosChunk> _pendingActivation = [];
@@ -300,7 +312,6 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
         bool capEngaged = false;
         Scalar maxCourant = 0f;
         MetrePerSecond maxSignalSpeed = 0f;
-        int parity = context.TickCount & 1;
         var counters = new EulerSweepCounters();
 
         while (remaining > 0d)
@@ -324,9 +335,10 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
             }
 
             Second timeStep = (float)step;
-            for (int order = 0; order < 3; order++)
+            int order = (int)((2L * context.TickCount + substeps) % 6);
+            for (int position = 0; position < 3; position++)
             {
-                int axis = parity == 0 ? order : 2 - order;
+                int axis = SweepOrders[order * 3 + position];
                 if (!AxisHasWork(axis))
                     continue;
 
@@ -352,7 +364,6 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
             remaining -= step;
             simulated += step;
             substeps++;
-            parity ^= 1;
         }
 
         int negativeInternalEnergy = 0;
