@@ -107,6 +107,33 @@ internal class AtmosChunk
     public FlatArray<Kelvin> Temperature;
 
     /// <summary>
+    ///     Total x-momentum of the gas in each voxel, in kilogram metres per second (kg·m/s), indexed by flat voxel
+    ///     index or local coordinate.
+    /// </summary>
+    /// <remarks>
+    ///     This is the momentum of the voxel's whole gas content, not a velocity, so adding gas at rest lowers the
+    ///     implied velocity without touching the stored value. It is zero whenever the voxel holds no gas: every path
+    ///     that empties a voxel (<see cref="SetVoxelToVacuum" />, a classification change, a mixture write that
+    ///     removes the last mole) zeroes it, so a vacuum voxel never carries stale momentum into a later tick.
+    /// </remarks>
+    [ElementQuantity("momentum")]
+    public FlatArray<KilogramMetrePerSecond> MomentumX;
+
+    /// <summary>
+    ///     Total y-momentum of the gas in each voxel, in kilogram metres per second (kg·m/s). Shares the contract of
+    ///     <see cref="MomentumX" />.
+    /// </summary>
+    [ElementQuantity("momentum")]
+    public FlatArray<KilogramMetrePerSecond> MomentumY;
+
+    /// <summary>
+    ///     Total z-momentum of the gas in each voxel, in kilogram metres per second (kg·m/s). Shares the contract of
+    ///     <see cref="MomentumX" />.
+    /// </summary>
+    [ElementQuantity("momentum")]
+    public FlatArray<KilogramMetrePerSecond> MomentumZ;
+
+    /// <summary>
     ///     Cached total heat capacity for each voxel, in joules per kelvin (J/K).
     /// </summary>
     /// <remarks>
@@ -212,6 +239,9 @@ internal class AtmosChunk
         EnsureInitialized(ref TotalPressure, dimensions);
         EnsureInitialized(ref TotalHeatCapacity, dimensions);
         EnsureInitialized(ref Temperature, dimensions);
+        EnsureInitialized(ref MomentumX, dimensions);
+        EnsureInitialized(ref MomentumY, dimensions);
+        EnsureInitialized(ref MomentumZ, dimensions);
         EnsureInitialized(ref IsVacuum, dimensions);
         if (ActiveGases == null)
             ActiveGases = new GasChannel[AtmosChunkConstants.InitialGasChannelCapacity];
@@ -259,6 +289,9 @@ internal class AtmosChunk
         TotalPressure.Clear();
         TotalHeatCapacity.Clear();
         Temperature.Clear();
+        MomentumX.Clear();
+        MomentumY.Clear();
+        MomentumZ.Clear();
         IsVacuum.Fill(true);
         Array.Clear(ActiveGases, 0, ActiveGases.Length);
 
@@ -562,8 +595,8 @@ internal class AtmosChunk
 
 
     /// <summary>
-    ///     Clears one voxel to vacuum: zeroes <see cref="TotalPressure" />, every gas channel, and
-    ///     <see cref="TotalHeatCapacity" />, and sets <see cref="IsVacuum" />. Per-voxel fields that opt into vacuum
+    ///     Clears one voxel to vacuum: zeroes <see cref="TotalPressure" />, every gas channel,
+    ///     <see cref="TotalHeatCapacity" />, and the momentum components, and sets <see cref="IsVacuum" />. Per-voxel fields that opt into vacuum
     ///     clearing are reset for this voxel.
     /// </summary>
     /// <param name="idx">Index of voxel</param>
@@ -578,6 +611,7 @@ internal class AtmosChunk
         }
 
         TotalHeatCapacity[idx] = 0f;
+        ZeroMomentum(idx);
         IsVacuum[idx] = true;
 
         // Solver workers call this per voxel, so walk only this chunk's allocated fields without locking.
@@ -590,6 +624,17 @@ internal class AtmosChunk
             if (storage is { Field: { ClearOnVacuum: true, FixedLength: null } })
                 storage.ClearElement(idx);
         }
+    }
+
+    /// <summary>
+    ///     Zeroes every momentum component of one voxel. Call it whenever a write leaves the voxel without gas, so
+    ///     the "no gas, no momentum" invariant on <see cref="MomentumX" /> holds.
+    /// </summary>
+    internal void ZeroMomentum(ushort localVoxelIndex)
+    {
+        MomentumX[localVoxelIndex] = 0f;
+        MomentumY[localVoxelIndex] = 0f;
+        MomentumZ[localVoxelIndex] = 0f;
     }
 
     /// <summary>
@@ -606,6 +651,9 @@ internal class AtmosChunk
         }
 
         TotalHeatCapacity.Fill(0f);
+        MomentumX.Fill(0f);
+        MomentumY.Fill(0f);
+        MomentumZ.Fill(0f);
         IsVacuum.Fill(true);
 
         SolverArrayStorage?[]? fields = Volatile.Read(ref _fields);

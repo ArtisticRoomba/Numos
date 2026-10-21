@@ -12,9 +12,10 @@ public sealed class AdvectionParallelDeterminismTests
     /// </summary>
     /// <remarks>
     ///     Update this only together with a deliberate physics or digest-format change, and confirm the new value is
-    ///     stable across worker counts before approving it. It is a grid-only checkpoint digest.
+    ///     stable across worker counts before approving it. It is a grid-only checkpoint digest, last recaptured when
+    ///     grid checkpoint format 7 added the momentum arrays (and the version bump) to the hashed layout.
     /// </remarks>
-    private const ulong X64ExpectedDigest = 998283263411882128UL;
+    private const ulong X64ExpectedDigest = 17792788594731503593UL;
 
     [Test]
     [Explicit(

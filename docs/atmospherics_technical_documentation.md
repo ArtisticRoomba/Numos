@@ -138,12 +138,21 @@ Each chunk stores:
 | `TotalPressure`     | `float[]`      | Cached pressure per voxel in pascals (Pa), recalculated at advection start and refreshed as state changes |
 | `Temperature`       | `float[]`      | Temperature in kelvins (K) per voxel                                                                      |
 | `TotalHeatCapacity` | `float[]`      | Cached total heat capacity per voxel, in J/K                                                              |
+| `MomentumX/Y/Z`     | `float[]`      | Total momentum of the voxel's gas per axis, in kg·m/s; zero wherever the voxel holds no gas               |
 | `IsVacuum`          | `bool[]`       | Marks gasless voxels; vacuum voxels are skipped by thermal conduction                                     |
 | `ActiveAirIndices`  | `ushort[]`     | Dense list of non-solid, non-void voxel indices in an awake chunk                                         |
 | `ActiveGases`       | `GasChannel[]` | Sparse array of gas-specific mole data (see §3.2)                                                         |
 
 Chunks are keyed by an `Int3 GridPosition` in a `ConcurrentDictionary<Int3, AtmosChunk>` owned by the simulation's
 kernel.
+
+**Momentum.** `MomentumX/Y/Z` hold the total momentum of everything in the voxel, not a velocity, so the velocity a
+solver derives is `p / m` with `m` the voxel's gas mass from moles and molar masses. The arrays are authoritative
+state: they are checkpointed, hashed, and settable through `AtmosSimulation.SetVoxelMomentum` (recorded as an external
+operation). Their one invariant is that an empty voxel has zero momentum. Every path that empties a voxel (vacuum
+cleanup, a solid or void classification, a mixture write that removes the last mole) zeroes them, and a momentum write
+to a voxel with no gas is ignored. Adding gas leaves the stored momentum alone, which simply lowers the implied
+velocity. No built-in stage reads them yet; they exist for the compressible transport solver.
 
 **Heat capacity, energy, and pressure.** A voxel's heat capacity, sensible energy, and pressure all follow from its
 composition. Every gas uses an effective molar heat capacity at constant volume, falling back to a configured default
@@ -1384,10 +1393,13 @@ To implement this system in another engine or language, start from these pieces:
 
 At 16×16×16 with one gas:
 
-- Per chunk: about 92 KB for `VoxelRoomMap`, `TotalPressure`, `Temperature`, `TotalHeatCapacity`, `IsVacuum`,
-  `ActiveAirIndices`, and one `GasChannel`, excluding smaller metadata and pool overhead.
+- Per chunk: about **140 KB** for `VoxelRoomMap`, `TotalPressure`, `Temperature`, `TotalHeatCapacity`,
+  `MomentumX/Y/Z`, `IsVacuum`, `ActiveAirIndices`, and one `GasChannel`, excluding smaller metadata and pool overhead.
+  The three momentum arrays account for 48 KB of that.
 - Per additional gas: +16 KB.
-- 512 chunks (8×8×8 grid): about 46 MB before pool overhead and metadata.
+- 512 chunks (8×8×8 grid): about **70 MB** before pool overhead and metadata.
+- Checkpoints copy the same per-voxel arrays, so each voxel costs 28 bytes of built-in chunk state there (12 of them
+  momentum) plus 4 bytes per gas channel.
 
 Gas channels are rented from `ArrayPool`, so the real footprint depends on pool behavior. Arrays can be larger than
 requested and can stay in the pool after `Release()`.

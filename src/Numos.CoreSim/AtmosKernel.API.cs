@@ -488,6 +488,79 @@ internal sealed partial class AtmosKernel
     }
 
     /// <summary>
+    ///     Stores the total momentum vector of one voxel addressed by its flat local index and wakes its chunk.
+    /// </summary>
+    /// <param name="position">The target chunk's grid position.</param>
+    /// <param name="localVoxelIndex">The voxel's zero-based index in the chunk's flattened storage.</param>
+    /// <param name="momentumX">Total x-momentum of the voxel's gas, in kilogram metres per second.</param>
+    /// <param name="momentumY">Total y-momentum of the voxel's gas, in kilogram metres per second.</param>
+    /// <param name="momentumZ">Total z-momentum of the voxel's gas, in kilogram metres per second.</param>
+    /// <remarks>
+    ///     Momentum needs mass to carry it, so a write to a solid or void voxel, or to one whose cached pressure is
+    ///     not positive, is ignored and not recorded. That keeps <see cref="AtmosChunk.MomentumX" />'s
+    ///     "no gas, no momentum" invariant without a separate cleanup pass.
+    /// </remarks>
+    /// <exception cref="KeyNotFoundException">No chunk is registered at <paramref name="position" />.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="localVoxelIndex" /> is outside the chunk.</exception>
+    internal void SetVoxelMomentum(
+        Int3 position,
+        ushort localVoxelIndex,
+        KilogramMetrePerSecond momentumX,
+        KilogramMetrePerSecond momentumY,
+        KilogramMetrePerSecond momentumZ)
+    {
+        lock (StateGate)
+        {
+            var chunk = GetChunk(position);
+            ValidateVoxelIndex(chunk, localVoxelIndex);
+
+            int classification = chunk.VoxelRoomMap[localVoxelIndex];
+            if (classification == VoxelClassification.RoomSolid || classification == VoxelClassification.RoomVoid)
+                return;
+
+            if (chunk.TotalPressure[localVoxelIndex] <= 0f)
+                return;
+
+            chunk.Wake();
+            chunk.MomentumX[localVoxelIndex] = momentumX;
+            chunk.MomentumY[localVoxelIndex] = momentumY;
+            chunk.MomentumZ[localVoxelIndex] = momentumZ;
+            chunk.MarkChanged();
+            if (ShouldRecord)
+                RecordOperation(new SetVoxelMomentumOperation(position, localVoxelIndex, momentumX, momentumY, momentumZ));
+        }
+    }
+
+    /// <summary>
+    ///     Stores the total momentum vector of one voxel addressed by local coordinates and wakes its chunk.
+    /// </summary>
+    /// <param name="position">The target chunk's grid position.</param>
+    /// <param name="x">The zero-based local x-coordinate.</param>
+    /// <param name="y">The zero-based local y-coordinate.</param>
+    /// <param name="z">The zero-based local z-coordinate.</param>
+    /// <param name="momentumX">Total x-momentum of the voxel's gas, in kilogram metres per second.</param>
+    /// <param name="momentumY">Total y-momentum of the voxel's gas, in kilogram metres per second.</param>
+    /// <param name="momentumZ">Total z-momentum of the voxel's gas, in kilogram metres per second.</param>
+    /// <remarks>Writes to solid, void, or gasless voxels are ignored and not recorded.</remarks>
+    /// <exception cref="KeyNotFoundException">No chunk is registered at <paramref name="position" />.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">A local coordinate is outside the chunk.</exception>
+    internal void SetVoxelMomentum(
+        Int3 position,
+        int x,
+        int y,
+        int z,
+        KilogramMetrePerSecond momentumX,
+        KilogramMetrePerSecond momentumY,
+        KilogramMetrePerSecond momentumZ)
+    {
+        lock (StateGate)
+        {
+            var chunk = GetChunk(position);
+            SetVoxelMomentum(position, GetValidatedVoxelIndex(chunk, x, y, z), momentumX, momentumY, momentumZ);
+        }
+    }
+
+    /// <summary>
     ///     Adds gas to one voxel addressed by its flat local index and wakes its chunk.
     /// </summary>
     /// <param name="position">The target chunk's grid position.</param>

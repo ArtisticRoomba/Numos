@@ -437,13 +437,14 @@ internal sealed partial class AtmosKernel
             }
 
             chunk.Temperature[localVoxelIndex] = temperature;
-            chunk.TotalHeatCapacity[localVoxelIndex] = totalHeatCapacity;
-            chunk.TotalPressure[localVoxelIndex] =
-                AtmosSolverMath.CalculatePressure(_config, totalMoles, temperature);
+            ApplyVoxelMixtureTotals(
+                chunk,
+                localVoxelIndex,
+                new VoxelGasMixtureTotals(
+                    totalMoles,
+                    totalHeatCapacity,
+                    AtmosSolverMath.CalculatePressure(_config, totalMoles, temperature)));
 
-            chunk.IsVacuum[localVoxelIndex] = chunk.TotalPressure[localVoxelIndex] <= 0f;
-
-            chunk.MarkChanged();
             RecordVoxelMixture(chunk, localVoxelIndex);
         }
     }
@@ -550,12 +551,15 @@ internal sealed partial class AtmosKernel
             throw new InvalidOperationException("The mixture's pressure exceeds the supported range.");
 
         return new VoxelGasMixtureTotals(
+            totalMoles,
             totalHeatCapacity,
             pressure);
     }
 
     /// <summary>
-    ///     Writes calculated mixture caches and marks the containing chunk changed.
+    ///     Writes calculated mixture caches and marks the containing chunk changed. A write that leaves the voxel
+    ///     without gas also zeroes its momentum; the mixture API is the only external path that can empty a voxel
+    ///     without going through <see cref="AtmosChunk.SetVoxelToVacuum" />.
     /// </summary>
     private static void ApplyVoxelMixtureTotals(
         AtmosChunk chunk,
@@ -565,6 +569,9 @@ internal sealed partial class AtmosKernel
         chunk.TotalHeatCapacity[localVoxelIndex] = totals.HeatCapacity;
         chunk.TotalPressure[localVoxelIndex] = totals.Pressure;
         chunk.IsVacuum[localVoxelIndex] = totals.Pressure <= 0f;
+        if (totals.TotalMoles <= 0f)
+            chunk.ZeroMomentum(localVoxelIndex);
+
         chunk.MarkChanged();
     }
 
@@ -585,6 +592,7 @@ internal sealed partial class AtmosKernel
     }
 
     private readonly record struct VoxelGasMixtureTotals(
+        Mole TotalMoles,
         JoulePerKelvin HeatCapacity,
         Pascal Pressure);
 }

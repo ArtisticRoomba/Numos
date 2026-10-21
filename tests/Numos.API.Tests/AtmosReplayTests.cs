@@ -146,6 +146,75 @@ public sealed class AtmosReplayTests
     }
 
     [Test]
+    public void MomentumOperations_ReplayAndEmptyingAVoxelZeroesItsMomentum()
+    {
+        using var simulation = CreateSimulation();
+        var world = simulation.World;
+        var chunk = simulation.CreateAndRegisterChunk(default);
+        simulation.SetVoxelClassification(chunk, 2, new VoxelClassification(VoxelClassification.RoomSolid));
+        simulation.AddGasToVoxel(chunk, 0, 1, 2f, 300f);
+        simulation.AddGasToVoxel(chunk, 1, 0, 3f, 310f);
+        var initial = world.CaptureCheckpoint();
+        world.StartRecording();
+        var hashes = new List<AtmosWorldStateHash>();
+
+        simulation.SetVoxelMomentum(chunk, 0, 1.5f, -2.5f, 3.5f);
+        hashes.Add(world.ComputeStateHash());
+        simulation.SetVoxelMomentum(chunk, 1, 0, 0, 4f, 5f, 6f);
+        hashes.Add(world.ComputeStateHash());
+
+        // Rejected writes leave no trace: a solid voxel and a voxel with no gas both stay at zero momentum.
+        var beforeRejected = world.ComputeStateHash();
+        simulation.SetVoxelMomentum(chunk, 2, 9f, 9f, 9f);
+        simulation.SetVoxelMomentum(chunk, 3, 9f, 9f, 9f);
+        Assert.That(world.ComputeStateHash(), Is.EqualTo(beforeRejected));
+
+        // Adding gas keeps momentum; a mixture write that removes the last mole drops it.
+        simulation.AddGasToVoxel(chunk, 0, 0, 1f, 300f);
+        hashes.Add(world.ComputeStateHash());
+        simulation.GetVoxelGasMixture(chunk, 1).Clear();
+        hashes.Add(world.ComputeStateHash());
+        simulation.GetVoxelGasMixture(chunk, 0).SetMoles(1, 0f);
+        simulation.GetVoxelGasMixture(chunk, 0).SetMoles(0, 0f);
+        hashes.Add(world.ComputeStateHash());
+        var recording = world.StopRecording();
+
+        Assert.That(
+            recording.Operations
+                .Select(static op => op.Operation)
+                .OfType<AtmosWorldSimulationOperation>()
+                .Count(static op => op.Operation.Code == AtmosOperationCode.SetVoxelMomentum),
+            Is.EqualTo(2),
+            "Only accepted momentum writes are recorded.");
+
+        var emptied = simulation.CaptureCheckpoint().Chunks.Single();
+        Assert.Multiple(() =>
+        {
+            Assert.That(emptied.MomentumX.Take(2), Is.All.Zero);
+            Assert.That(emptied.MomentumY.Take(2), Is.All.Zero);
+            Assert.That(emptied.MomentumZ.Take(2), Is.All.Zero);
+        });
+
+        foreach (var hash in hashes)
+        {
+            world.ReplayTo(initial, recording.Operations, hash.Position);
+            Assert.That(world.ComputeStateHash(), Is.EqualTo(hash));
+        }
+
+        world.ReplayTo(initial, recording.Operations, hashes[2].Position);
+        var replayed = simulation.CaptureCheckpoint().Chunks.Single();
+        Assert.Multiple(() =>
+        {
+            Assert.That(replayed.MomentumX[0], Is.EqualTo(1.5f));
+            Assert.That(replayed.MomentumY[0], Is.EqualTo(-2.5f));
+            Assert.That(replayed.MomentumZ[0], Is.EqualTo(3.5f));
+            Assert.That(replayed.MomentumX[1], Is.EqualTo(4f));
+            Assert.That(replayed.MomentumY[1], Is.EqualTo(5f));
+            Assert.That(replayed.MomentumZ[1], Is.EqualTo(6f));
+        });
+    }
+
+    [Test]
     public void CustomSolver_UsesNormalApiWithoutRecordingAndCanSuppressHostEffects()
     {
         using var simulation = CreateSimulation();

@@ -198,6 +198,11 @@ internal sealed partial class AtmosKernel
         SleepChunk(op.Position);
     }
 
+    internal void Apply(SetVoxelMomentumOperation op)
+    {
+        SetVoxelMomentum(op.Position, op.LocalVoxelIndex, op.MomentumX, op.MomentumY, op.MomentumZ);
+    }
+
     internal void Apply(EditVoxelBoxOperation op)
     {
         EditVoxelBox(op);
@@ -214,6 +219,9 @@ internal sealed partial class AtmosKernel
         chunk.Temperature[op.LocalVoxelIndex] = op.Temperature;
         chunk.TotalPressure[op.LocalVoxelIndex] = op.Pressure;
         chunk.TotalHeatCapacity[op.LocalVoxelIndex] = op.HeatCapacity;
+        chunk.MomentumX[op.LocalVoxelIndex] = op.MomentumX;
+        chunk.MomentumY[op.LocalVoxelIndex] = op.MomentumY;
+        chunk.MomentumZ[op.LocalVoxelIndex] = op.MomentumZ;
         chunk.IsVacuum[op.LocalVoxelIndex] = op.Pressure <= 0f;
         chunk.MarkChanged();
     }

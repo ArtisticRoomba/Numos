@@ -124,6 +124,27 @@ public sealed record SleepChunkOperation(Int3 Position) : AtmosOperation
 }
 
 /// <summary>
+///     Stores a gas-bearing voxel's total momentum vector without touching its gas or thermal state.
+/// </summary>
+/// <param name="Position">Target chunk-grid address.</param>
+/// <param name="LocalVoxelIndex">Canonical flat local voxel index.</param>
+/// <param name="MomentumX">Total x-momentum, in kilogram metres per second.</param>
+/// <param name="MomentumY">Total y-momentum, in kilogram metres per second.</param>
+/// <param name="MomentumZ">Total z-momentum, in kilogram metres per second.</param>
+public sealed record SetVoxelMomentumOperation(
+    Int3 Position,
+    ushort LocalVoxelIndex,
+    KilogramMetrePerSecond MomentumX,
+    KilogramMetrePerSecond MomentumY,
+    KilogramMetrePerSecond MomentumZ) : AtmosOperation
+{
+    /// <inheritdoc />
+    public override AtmosOperationCode Code => AtmosOperationCode.SetVoxelMomentum;
+
+    internal override void Apply(AtmosKernel kernel) => kernel.Apply(this);
+}
+
+/// <summary>
 ///     The optional parts of an <see cref="EditVoxelBoxOperation" />.
 /// </summary>
 /// <remarks>
@@ -195,8 +216,8 @@ public sealed record EditVoxelBoxOperation(
 }
 
 /// <summary>
-///     Sets a voxel's resolved gas and thermal state, including caches and channel order, independent of detached
-///     mixture identity.
+///     Sets a voxel's resolved gas, thermal, and momentum state, including caches and channel order, independent of
+///     detached mixture identity.
 /// </summary>
 public sealed record SetVoxelMixtureOperation : AtmosOperation
 {
@@ -207,6 +228,9 @@ public sealed record SetVoxelMixtureOperation : AtmosOperation
         Temperature = chunk.Temperature[index];
         Pressure = chunk.TotalPressure[index];
         HeatCapacity = chunk.TotalHeatCapacity[index];
+        MomentumX = chunk.MomentumX[index];
+        MomentumY = chunk.MomentumY[index];
+        MomentumZ = chunk.MomentumZ[index];
         var gases = new AtmosGasAmount[chunk.ActiveGasCount];
         for (int gas = 0; gas < gases.Length; gas++)
             gases[gas] = new AtmosGasAmount(chunk.ActiveGases[gas].GasId, chunk.ActiveGases[gas].Moles[index]);
@@ -220,6 +244,9 @@ public sealed record SetVoxelMixtureOperation : AtmosOperation
         Kelvin temperature,
         Pascal pressure,
         JoulePerKelvin heatCapacity,
+        KilogramMetrePerSecond momentumX,
+        KilogramMetrePerSecond momentumY,
+        KilogramMetrePerSecond momentumZ,
         IEnumerable<AtmosGasAmount> gases)
     {
         ArgumentNullException.ThrowIfNull(gases);
@@ -228,6 +255,9 @@ public sealed record SetVoxelMixtureOperation : AtmosOperation
         Temperature = temperature;
         Pressure = pressure;
         HeatCapacity = heatCapacity;
+        MomentumX = momentumX;
+        MomentumY = momentumY;
+        MomentumZ = momentumZ;
         Gases = Array.AsReadOnly(gases.ToArray());
     }
 
@@ -258,6 +288,22 @@ public sealed record SetVoxelMixtureOperation : AtmosOperation
     ///     Gets the exact resulting cached heat capacity, in joules per kelvin.
     /// </summary>
     public JoulePerKelvin HeatCapacity { get; }
+
+    /// <summary>
+    ///     Gets the exact resulting total x-momentum, in kilogram metres per second. Zero when the write emptied the
+    ///     voxel.
+    /// </summary>
+    public KilogramMetrePerSecond MomentumX { get; }
+
+    /// <summary>
+    ///     Gets the exact resulting total y-momentum, in kilogram metres per second.
+    /// </summary>
+    public KilogramMetrePerSecond MomentumY { get; }
+
+    /// <summary>
+    ///     Gets the exact resulting total z-momentum, in kilogram metres per second.
+    /// </summary>
+    public KilogramMetrePerSecond MomentumZ { get; }
 
     /// <summary>
     ///     Gets all allocated channels at the affected voxel in reduction order, including zero amounts.

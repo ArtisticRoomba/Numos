@@ -17,12 +17,19 @@ public sealed class AtmosSimulationCheckpoint
     /// <summary>
     ///     Identifies the in-memory checkpoint schema used to interpret this data.
     /// </summary>
-    public const int CurrentFormatVersion = 6;
+    /// <remarks>
+    ///     Version 7 added the three per-voxel momentum arrays to every chunk checkpoint.
+    /// </remarks>
+    public const int CurrentFormatVersion = 7;
 
     /// <summary>
     ///     Identifies the structural and deterministic-math contract required to restore this data.
     /// </summary>
-    public const int CurrentCompatibilityVersion = 3;
+    /// <remarks>
+    ///     Version 4 goes with format 7: the momentum arrays are part of the hashed chunk state, so a version-3
+    ///     digest can never match one computed here even for a world with no momentum anywhere.
+    /// </remarks>
+    public const int CurrentCompatibilityVersion = 4;
 
     // Every member is immutable once constructed, so the digest only needs computing once. The flag is written after
     // the digest so a reader that sees it set also sees the digest.
@@ -104,7 +111,8 @@ public sealed class AtmosChunkCheckpoint
         Dimensions = chunk.Dimensions;
         IsAwake = chunk.IsAwake;
         SleepTimer = chunk.SleepTimer;
-        (Classifications, Temperatures, Pressures, HeatCapacities) = GeneratedCheckpointFields.CaptureChunkArrays(chunk);
+        (Classifications, Temperatures, Pressures, HeatCapacities, MomentumX, MomentumY, MomentumZ) =
+            GeneratedCheckpointFields.CaptureChunkArrays(chunk);
         ActiveAirIndices = new CheckpointArray<ushort>(chunk.ActiveAirIndices.AsSpan(0, chunk.ActiveAirCount).ToArray());
         var gases = new AtmosGasChannelCheckpoint[chunk.ActiveGasCount];
         for (int gas = 0; gas < gases.Length; gas++)
@@ -124,6 +132,9 @@ public sealed class AtmosChunkCheckpoint
         float[] temperatures,
         float[] pressures,
         float[] heatCapacities,
+        float[] momentumX,
+        float[] momentumY,
+        float[] momentumZ,
         ushort[] activeAirIndices,
         AtmosGasChannelCheckpoint[] gases)
     {
@@ -135,6 +146,9 @@ public sealed class AtmosChunkCheckpoint
         Temperatures = new CheckpointArray<float>(temperatures);
         Pressures = new CheckpointArray<float>(pressures);
         HeatCapacities = new CheckpointArray<float>(heatCapacities);
+        MomentumX = new CheckpointArray<float>(momentumX);
+        MomentumY = new CheckpointArray<float>(momentumY);
+        MomentumZ = new CheckpointArray<float>(momentumZ);
         ActiveAirIndices = new CheckpointArray<ushort>(activeAirIndices);
         Gases = Array.AsReadOnly(gases);
         SolverArrays = Array.Empty<AtmosSolverArraySnapshot>();
@@ -185,6 +199,24 @@ public sealed class AtmosChunkCheckpoint
     public IReadOnlyList<float> HeatCapacities { get; }
 
     /// <summary>
+    ///     Gets total x-momentum in kilogram metres per second, in flat voxel order. Zero wherever the voxel holds no gas.
+    /// </summary>
+    [ChunkCheckpointField(nameof(AtmosChunk.MomentumX), 4)]
+    public IReadOnlyList<float> MomentumX { get; }
+
+    /// <summary>
+    ///     Gets total y-momentum in kilogram metres per second, in flat voxel order. Zero wherever the voxel holds no gas.
+    /// </summary>
+    [ChunkCheckpointField(nameof(AtmosChunk.MomentumY), 5)]
+    public IReadOnlyList<float> MomentumY { get; }
+
+    /// <summary>
+    ///     Gets total z-momentum in kilogram metres per second, in flat voxel order. Zero wherever the voxel holds no gas.
+    /// </summary>
+    [ChunkCheckpointField(nameof(AtmosChunk.MomentumZ), 6)]
+    public IReadOnlyList<float> MomentumZ { get; }
+
+    /// <summary>
     ///     Gets the valid prefix of active flat voxel indices, preserving inactive topology exactly.
     /// </summary>
     public IReadOnlyList<ushort> ActiveAirIndices { get; }
@@ -206,7 +238,7 @@ public sealed class AtmosChunkCheckpoint
     /// <summary>
     ///     Gets bytes occupied by copied chunk and solver values, excluding managed object headers and keys.
     /// </summary>
-    public long PayloadBytes => (long)Classifications.Count * 16 +
+    public long PayloadBytes => (long)Classifications.Count * 28 +
                                 ActiveAirIndices.Count * 2L +
                                 Gases.Sum(static gas => 4L + gas.Moles.Count * 4L) +
                                 SolverArrays.Sum(static array => array.PayloadBytes);
