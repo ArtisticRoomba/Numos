@@ -726,11 +726,11 @@ internal class ReactionSolver : IAtmosSolverStage
         for (int reactionId = 0; reactionId < reactionCount; reactionId++)
         {
             ConcentrationPerSecond rate = reactions.GetRateConstant(reactionId, temperature);
-            if (flameActive)
+            if (flameActive && reactions.GetReactionIsIgnition(reactionId))
             {
                 ConcentrationPerSecond flameRate = reactions.GetRateConstant(reactionId, ignitedVolumeTemp) * burningFraction;
                 // Only uses the flame rate is the reaction would be faster then the bulk rate
-                if (flameRate > rate && reactions.GetReactionIsIgnition(reactionId))
+                if (flameRate > rate)
                     bulkDominates = false;
 
                 rate = MathF.Max(flameRate, rate);
