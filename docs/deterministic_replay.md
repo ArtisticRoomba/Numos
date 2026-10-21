@@ -180,8 +180,8 @@ Replay is experimental, so Numos rejects older in-memory checkpoint schemas inst
 
 ### Checkpoint fields come from the state schema
 
-The configuration scalars, every `GasProperties` field, and every `AtmosChunkCheckpoint` field are declared with
-`[StateField(id)]` on `[NumosState]` types, the same schema solver configurations use (see "Solver configurations in
+The configuration scalars, every `GasProperties` field, and every `AtmosChunkCheckpoint` field are marked
+`[NumosSerialize]`, the same schema solver configurations use (see "Solver configurations in
 the file" below). The generator turns each declaration into equality, the state hash, and the wire encoding, so a field
 can't reach the file and miss the hash, and a config or gas field can't be left out of
 `AtmosConfigSnapshot.SemanticallyEquals` and mistaken for a no-op by `SetAtmosConfig`. Equality compares floats
@@ -189,21 +189,21 @@ bitwise, the way the hash sees them, so `0f` and `-0f` count as different values
 
 Where each kind of field lives:
 
-- **Config scalars** are tagged on the mutable `AtmosConfig`, ids 1 to 17, with the gas registry as id 18. A snapshot
+- **Config scalars** are marked on the mutable `AtmosConfig`, along with the gas registry. A snapshot
   keeps its normalized values in a private `AtmosConfig`, so the snapshot and the editable config share one field list.
   Loading reads into an `AtmosConfig` and runs it through `CreateSnapshot()`, so a loaded value goes through the same
   normalization as a live one. Solver configurations aren't schema fields; they follow as their own keyed section.
-- **Gas properties** are `GasProperties` fields, ids 1 to 8. The registry writes each gas by value in gas-ID order; a
+- **Gas properties** are `GasProperties` fields. The registry writes each gas by value in gas-ID order; a
   `GasProperties` field on any other schema type is a reference and writes only the name.
-- **Chunk data** is `AtmosChunkCheckpoint`, ids 1 to 14: position, dimensions, sleep state, the seven per-voxel arrays
+- **Chunk data** is `AtmosChunkCheckpoint`: position, dimensions, sleep state, the seven per-voxel arrays
   (including the three momentum arrays), the active-air prefix, gas channels (nested `AtmosGasChannelCheckpoint` values), and rollback solver arrays. The
   per-voxel arrays also carry `[LiveChunkArray(nameof(AtmosChunk.X))]`, which generates their capture from and restore
   into the live chunk. Primitive arrays are written and hashed as one block, so checkpoint hashing stays cheap.
 
 To add a field:
 
-1. Declare it with the next unused id. Ids are never reused; if you remove a field, list its id in
-   `[RetiredStateFields]` on the type.
+1. Mark it `[NumosSerialize]`. Its id is a hash of its name (see below), so there's nothing to pick. Renaming a field
+   changes its id, so pass the old name, `[NumosSerialize("OldName")]`, to keep it compatible.
 2. For a config setting, add the normalization to the `AtmosConfigSnapshot` constructor and a snapshot property with
    the same name and type. `ConfigStateFieldTests` fails until both exist.
 3. For a per-voxel chunk array, add `[LiveChunkArray]` naming the `AtmosChunk` member. Anything with an irregular shape
@@ -589,7 +589,7 @@ skip optional length-prefixed metadata. `NumosReplayReadOptions` configures the 
 
 ### Solver configurations in the file
 
-A solver configuration marked `[NumosState]` saves itself. That covers the built-in `GasReactionConfig`, so a world
+A solver configuration with `[NumosSerialize]` members saves itself. That covers the built-in `GasReactionConfig`, so a world
 with gas reactions is portable, and any host configuration built the same way. Both places a configuration can appear
 go through the same encoding: the checkpoint's applied configuration, and every recorded `SetAtmosConfig` change.
 
@@ -605,21 +605,19 @@ repeat count times:
 ```
 
 The payload is a run of fields, each an `int32` id, an `int32` length, and the field's bytes, in ascending id order.
-Nested `[NumosState]` values are a length followed by their own fields. Because every field carries its length, a reader
-skips ids it doesn't know and gives missing ones their default, so adding a `[StateField]` to a configuration doesn't
-break older files. Gas references are written by name and resolved against the gas registry decoded just before them;
+A field's id is FNV-1a (32-bit) over the UTF-8 bytes of its wire name, which is the member name unless
+`[NumosSerialize("name")]` overrides it, with the sign bit cleared and 0 mapped to 1 so ids stay positive.
+`NumosState.FieldId` computes the same value at run time. Two members of one type with the same id fail the build
+(`NUMOSSTATE005`). Nested values are a length followed by their own fields. Because every field carries its length, a
+reader skips ids it doesn't know and gives missing ones their default, so adding or removing a member doesn't break
+older files. Gas references are written by name and resolved against the gas registry decoded just before them;
 a name the registry doesn't have is an `InvalidDataException`.
 
-Loading has to turn a key back into a type, so it needs to know which types exist. Register custom configurations
-before loading:
-
-```csharp
-var options = new NumosReplayReadOptions();
-options.SolverConfigurations.Register<FireSettings>();
-NumosWorldReplayDocument document = NumosReplayFile.Load(path, options);
-```
-
-Built-in configurations are already registered. A key with no registered type fails the load with a
+Loading has to turn a key back into a type. The generator reads each configuration's constant `Key` at build time and
+adds a module initializer to its assembly that registers the type process-wide, so every configuration whose assembly
+has run is known to every `SolverConfigurationTypes`, built-in ones included. `Register<T>()` on
+`NumosReplayReadOptions.SolverConfigurations` covers a load that happens before the assembly has run, and picks a winner
+when two assemblies claim one key (loading that key fails until one does). A key with no registered type fails the load with a
 `NotSupportedException` that names it, rather than being dropped: losing a configuration changes what the solvers do,
 and replay would quietly diverge from the recording. A configuration whose decoded `Key` disagrees with the key it was
 saved under is corrupt data.
@@ -629,9 +627,9 @@ The key is part of the format now, so renaming one means files saved under the o
 
 ### Rollback chunk fields in the file
 
-Every rollback `ChunkField<T>` a chunk holds (`[ChunkData(Rollback = true)]` or `ChunkField<T>.Register(key, rollback:
-true)`) is saved with the chunk. Transient fields never are. They're the chunk's last schema field (id 11): a count, then
-one entry per field in ordinal key order, the same order the state hash uses:
+Every rollback `ChunkField<T>` a chunk holds (`[ChunkData("key")]`, or `ChunkField<T>.Register(key, rollback: true)`)
+is saved with the chunk. Transient fields (`[ChunkData(Transient = true)]`) never are. They're the chunk's
+`SolverArrays` field: a count, then one entry per field in ordinal key order, the same order the state hash uses:
 
 ```text
 int32  count

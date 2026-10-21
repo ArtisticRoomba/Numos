@@ -320,11 +320,14 @@ using Numos.Collections;
 
 public static partial class FireChunkData
 {
-    [ChunkData("my-mod/fire/exposure", Rollback = true)]
+    [ChunkData("my-mod/fire/exposure")]
     public static partial ChunkField<float> Exposure { get; }
 
-    [ChunkData("my-mod/fire/burn-count", Rollback = true, Length = 1)]
+    [ChunkData("my-mod/fire/burn-count", Length = 1)]
     public static partial ChunkField<int> BurnCount { get; }
+
+    [ChunkData(Transient = true)]
+    public static partial ChunkField<float> Scratch { get; }
 }
 
 world.Solvers.Register("my-mod/fire", context =>
@@ -343,20 +346,22 @@ world.Solvers.Register("my-mod/fire", context =>
 });
 ```
 
-`Rollback = true` puts the field in checkpoints and state hashes, so `RestoreCheckpoint` and `ReplayTo` restore it
-with the gas. Without it, the field is scratch space that starts zeroed after every restore. Checkpoints store a
-rollback field's key, so you must give the key explicitly. Treat it like a save-format name and prefix it with your
-mod.
+A field is state unless it says otherwise: it's in checkpoints and state hashes, so `RestoreCheckpoint` and `ReplayTo`
+bring it back along with the gas. Its key is stored in checkpoints, so it has to be given explicitly; treat it like a
+save-format name and prefix it with your mod. A field without a key is a build error (`NUMOSCHUNK007`) unless it sets
+`Transient = true`, which makes it scratch space that's left out of checkpoints and starts zeroed after every restore.
+Only use that for data a solver rebuilds every tick.
 
 `ClearOnSleep = true` resets the field's whole array when the chunk goes to sleep. `ClearOnVacuum = true` resets a
 voxel's element when that voxel becomes vacuum. Use them for scratch state that must not outlive the gas in a voxel.
 A fixed-length field ignores single-voxel vacuums and resets only when the whole chunk becomes vacuum.
 
-Rollback fields of primitive or enum element type are saved in `.numos` replay files too. Loading one needs the field
-registered first. `[ChunkData]` fields register when their assembly's module initializer runs. That happens before any
-code in the assembly runs, so nothing extra is needed once the mod has been called into (to register its solvers, say)
-before the load. Register a field made with `ChunkField<T>.Register` by hand before loading. A file holding an
-unregistered key fails to load. Structs work for in-memory rollback but make the replay non-portable. See "Rollback chunk fields in the file" in [deterministic replay](deterministic_replay.md).
+Saved fields of primitive or enum element type go in `.numos` replay files too. Loading one needs the field
+registered first. `[ChunkData]` fields register when their assembly's module initializer runs, which is before any
+code in that assembly does, so nothing extra is needed as long as the mod has been called into (to register its
+solvers, say) before the load. A field made with `ChunkField<T>.Register` has to be registered by hand before loading.
+A file holding an unregistered key fails to load. Structs work for in-memory rollback but
+make the replay non-portable. See "Rollback chunk fields in the file" in [deterministic replay](deterministic_replay.md).
 
 The accessors are C# 14 extension properties. A project pinned to an older `LangVersion` gets a compile error. The
 [technical documentation](atmospherics_technical_documentation.md#123-per-chunk-solver-state-with-chunkfieldt) covers
@@ -393,47 +398,47 @@ A `.numos` archive carries `EulerFlowConfig`. The
 [technical documentation](atmospherics_technical_documentation.md#35-configuration-and-the-per-tick-snapshot)
 tabulates every setting with the physics behind it.
 
-Each entry implements `IAtmosSolverConfiguration`. Numos captures a snapshot when it applies the configuration. These
-rules follow from that:
-
-- `CreateSnapshot` returns an immutable, detached copy.
-- `SemanticallyEquals` compares every authoritative setting.
-- `ComputeStateHash` is deterministic.
-
-The easy way to get the last two right is to let the generator that ships with `Numos.API` write them. Mark the class
-`[NumosState]` and give each setting a `[StateField]` id:
+Each entry implements `IAtmosSolverConfiguration`. Numos captures a snapshot when the configuration is applied and
+compares and hashes it to decide whether anything changed. Mark each setting `[NumosSerialize]` and the generator that
+ships with `Numos.API` writes all of that, plus the save format:
 
 ```csharp
 using Numos.CoreSim.State;
 
-[NumosState(Key = "my-mod/fire")]
-public sealed partial class FireSettings(float ignitionTemperature, IReadOnlyDictionary<string, float> spreadRates)
-    : IAtmosSolverConfiguration
+public sealed partial class FireSettings : IAtmosSolverConfiguration
 {
-    [StateField(1)]
-    public float IgnitionTemperature { get; } = ignitionTemperature;
+    public string Key => "my-mod/fire";
 
-    [StateField(2)]
-    public FrozenDictionary<string, float> SpreadRates { get; } = spreadRates.ToFrozenDictionary();
-
-    // Immutable, so the snapshot can be the object itself.
-    public IAtmosSolverConfiguration CreateSnapshot(IGasRegistry gases) => this;
+    [NumosSerialize] public Kelvin IgnitionTemperature { get; init; } = 600f;
+    [NumosSerialize] public FrozenDictionary<string, float> SpreadRates { get; init; } = FrozenDictionary<string, float>.Empty;
 }
 
 var config = new AtmosConfig(world.Config);
-config.SolverConfigurations.Add(new FireSettings(600f, new Dictionary<string, float> { ["plasma"] = 0.4f }));
+config.SolverConfigurations.Add(new FireSettings { IgnitionTemperature = 650f });
 world.SetAtmosConfig(config);
 ```
 
-The generator compares and hashes every tagged field: floats by their bits, dictionaries and sets in a canonical order
-(string keys ordinally, `GasProperties` keys by name), lists in order. A record's own `Equals` is not a substitute,
-since it compares collections by reference and two identical configs would look different.
+That's the whole class. The type has to be `partial`, and `Key` has to return a constant string (a literal or a
+`const`), because the generator reads it at build time to register the type for loading (`NUMOSSTATE018` otherwise).
+Treat the key like a save-format name: renaming it means old files no longer load.
 
-Tagging is opt-out, not opt-in. Every field and auto-property on a `[NumosState]` type needs either
-`[StateField(id)]` or `[NotState]`, and an untagged one fails the build. Use `[NotState]` for caches you rebuild from
-the tagged fields. Ids are what the hash and, later, saved files key on, so never reuse one; list removed ids in
-`[RetiredStateFields(...)]` and the generator will reject them. `[StateField]` on a class that implements
-`IAtmosWorldSolver` is also a build error, for the reason at the top of this section.
+The generator writes:
+
+- `SemanticallyEquals` and `ComputeStateHash`, over every marked member: floats by their bits, dictionaries and sets in
+  a canonical order (string keys ordinally, `GasProperties` keys by name), lists in order. A record's own `Equals` is
+  no substitute, since it compares collections by reference.
+- `CreateSnapshot`, unless you write one. When every marked member is fixed (`readonly`, get-only, or `init`) and of an
+  immutable type (primitives, strings, enums, quantity aliases, `Int3`, `GasProperties`, `Frozen*` and `Immutable*`
+  collections, or other types like this one), the snapshot is the instance itself, as above. Otherwise it's a copy made
+  by writing the object and reading it back against the simulation's gas registry, which also re-resolves gas
+  references. For validation, implement `partial void OnSnapshot(IGasRegistry gases)`; it runs on the snapshot.
+- A module initializer that registers the type, so world archives that hold it load with no setup.
+
+Marking is opt-in, with a safety net: a mutable field or an auto-property with a `set` or `init` accessor that has
+neither `[NumosSerialize]` nor `[NumosIgnore]` is a build warning (`NUMOSSTATE016`), so a new setting can't quietly miss
+the hash. Put `[NumosIgnore]` on caches and scratch. Readonly fields and get-only auto-properties aren't flagged, since
+they're usually derived in the constructor. `[NumosSerialize]` on a class that implements `IAtmosWorldSolver` is an
+error, for the reason at the top of this section.
 
 Solvers read the applied snapshot from the tick context:
 
@@ -442,13 +447,9 @@ if (context.Config.TryGetSolverConfiguration(out FireSettings? fire))
     ignitionTemperature = fire.IgnitionTemperature;
 ```
 
-The by-type lookup throws if two entries share a type. To read a type registered under several keys, call
-`TryGetSolverConfiguration("my-mod/fire", out FireSettings? fire)`. Both lookups search the captured snapshots, so ask
-for the type that `CreateSnapshot` returns. Keys are unique, nonempty strings. Snapshots order them ordinally, so registration order does not change hashes.
-
-`Key` on the attribute generates the configuration's `Key` property, so leave it out of the class. A type you add
-under more than one key can't use a fixed one: drop `Key` from the attribute and make the key a state field instead,
-for example `[property: StateField(1)] string Key` on a record.
+The by-type lookup throws if two entries share a type; `TryGetSolverConfiguration("my-mod/fire", out FireSettings?
+fire)` looks up by key instead. Both search the captured snapshots, so ask for the type `CreateSnapshot` returns. Keys
+are unique, nonempty strings, and snapshots order them ordinally so registration order doesn't change hashes.
 
 A hand-written implementation still works. Put every execution-relevant field in both `SemanticallyEquals` and the
 hash. Do not use process-randomized hashes such as `HashCode` or `string.GetHashCode()`.
@@ -456,39 +457,34 @@ They cannot be saved to `.numos` files, though. See the next section.
 
 ### Saving and loading solver configurations
 
-A `[NumosState]` configuration goes into `.numos` replay files on its own: saving needs nothing extra. Loading needs
-to map each saved key back to a type, so register yours on the read options first:
-
-```csharp
-var options = new NumosReplayReadOptions();
-options.SolverConfigurations.Register<FireSettings>();
-// A type used under several keys registers each one:
-options.SolverConfigurations.Register<Scrubber>("my-mod/scrubber-a").Register<Scrubber>("my-mod/scrubber-b");
-
-NumosWorldReplayDocument document = NumosReplayFile.Load(path, options);
-```
-
-Numos's own configurations, such as `GasReactionConfig` (`numos/gas-reactions`), are registered already. A file
-containing a key you didn't register fails to load with a `NotSupportedException` naming it, instead of loading
+A configuration with `[NumosSerialize]` members goes into `.numos` replay files and comes back out with nothing extra
+on either side. Loading maps each saved key to a type through `NumosReplayReadOptions.SolverConfigurations`, which
+already holds every configuration whose assembly has run, Numos's own `GasReactionConfig` (`numos/gas-reactions`)
+included. A file holding a key nothing registered fails with a `NotSupportedException` naming it, instead of loading
 without that configuration and replaying differently.
 
-The reader rebuilds your object through a constructor. Each parameter binds to the state field of the same name,
-ignoring case, and fields no parameter covers are set through `init` or `set`. A parameter can be a looser collection
-type than its field, such as `IEnumerable<T>` or `IDictionary<TKey, TValue>` for a frozen field; the reader copies into
+Call `options.SolverConfigurations.Register<T>()` only when a load can happen before anything in the mod's assembly has
+run, or when two assemblies claim the same key and you need to pick one.
+
+The reader rebuilds your object through a constructor. Each parameter binds to the marked member of the same name,
+ignoring case, and members no parameter covers are set through `init` or `set`. A parameter can be a looser collection
+type than its member, such as `IEnumerable<T>` or `IDictionary<TKey, TValue>` for a frozen one; the reader copies into
 it when it has to. If no constructor fits, the build fails with `NUMOSSTATE014`, which says what didn't match.
 
-Fields carry ids and lengths on disk, so an older file still loads after you add a field. The new field takes the
-constructor parameter's default value if it has one. A field with a plain `set` accessor (or a mutable field) keeps
-whatever the constructor or its initializer gave it. Anything else gets `default`, an empty string, or an empty
-collection. Ids the reader doesn't recognize are skipped.
+On disk each member's id is a hash of its name, so you can reorder members freely. Renaming one changes its id; pass
+the old name, `[NumosSerialize("OldName")]`, to keep reading older files. A member older data doesn't have takes the
+constructor parameter's default value if it has one, keeps its initializer if it has a plain `set` accessor, and
+otherwise gets `default`, an empty string, or an empty collection. Ids the reader doesn't know are skipped, so removing
+a member needs nothing.
 
-When a member's type isn't one the schema handles, or you want it written differently, `[StateCodec(typeof(...))]`
-names an `IStateCodec<T>` to use for that member. Numos uses it to keep `GasProperties.Name` nullable on disk and to
-save chunk solver arrays. A member with a codec is read through its setter.
+When a member's type isn't one the schema handles, or you want it written differently,
+`[NumosSerialize(Codec = typeof(...))]` names an `IStateCodec<T>` (in `Numos.CoreSim.State.Advanced`) for that member.
+Numos uses it to keep `GasProperties.Name` nullable on disk and to save chunk solver arrays. A member with a codec is
+read through its setter.
 
 To save one configuration by itself, say a preset or something to attach to a bug report, use
 `NumosStateSerializer` (streams, in `Numos.Serialization`) or `NumosStateFile` (paths, with an atomic save, in
-`Numos.Serialization.FileSystem`). Both need the type's attribute `Key`, which the file records and `Load` checks:
+`Numos.Serialization.FileSystem`). The file records the type's `Key`, and `Load` checks it:
 
 ```csharp
 NumosStateFile.Save("presets/fire.numosstate", fire);
@@ -692,7 +688,7 @@ Keys follow these rules:
   throws. A factory that throws or returns null caches nothing, so the next read tries again.
 - Values are transient. Snapshots, checkpoints, recordings, and state hashes leave them out. A restore or a
   configuration change drops them without disposing them. Reacquire them on each callback and rebuild anything
-  replay-relevant from authoritative inputs. State that must roll back belongs in a `Rollback = true`
+  replay-relevant from authoritative inputs. State that must roll back belongs in a
   [chunk data field](#chunk-data-fields).
 
 Values survive ticks, solver removal, and pipeline resets.

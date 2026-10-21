@@ -1420,13 +1420,11 @@ restored. Replay re-runs the recorded ticks with whatever value the instance hol
 diverges. A class solver reads its settings from the tick context instead:
 
 ```csharp
-[NumosState(Key = "game/combustion")]
 public sealed partial class CombustionSettings(float rate) : IAtmosSolverConfiguration
 {
-    [StateField(1)]
-    public float Rate { get; } = rate;
+    public string Key => "game/combustion";
 
-    public IAtmosSolverConfiguration CreateSnapshot(IGasRegistry gases) => this;
+    [NumosSerialize] public float Rate { get; } = rate;
 }
 
 public sealed class CombustionSolver : IAtmosWorldSolver
@@ -1447,38 +1445,44 @@ config.SolverConfigurations.Add(new CombustionSettings(rate: 0.5f));
 world.SetAtmosConfig(config); // recorded, so replay changes the rate at the same tick
 ```
 
-`[NumosState]` has the `Numos.API` generator write `SemanticallyEquals` and `ComputeStateHash` from the
-`[StateField]` members, so the two can't disagree and a new field can't be left out of either. The generated code walks
-fields in id order through one `WriteState` method that drives an `IStateSink`; the hash is that walk fed into
-`StateHashSink`, and the saved bytes are the same walk fed into `StateBinarySink`. Floats compare by bits, dictionaries
-and sets go in canonical key order, and `GasProperties` references are identified by name. `GasReactionConfig` and both
-reaction types are built this way, as are Numos's own configuration scalars, `GasProperties`, and chunk checkpoints
-(see "Checkpoint fields come from the state schema" in `docs/deterministic_replay.md`).
+`[NumosSerialize]` members have the `Numos.API` generator write `SemanticallyEquals` and `ComputeStateHash`, so the
+two can't disagree and a new member can't be left out of either. The generated code walks members in id order through
+one `WriteState` method that drives an `IStateSink`; the hash is that walk fed into `StateHashSink`, and the saved
+bytes are the same walk fed into `StateBinarySink` (all three in `Numos.CoreSim.State.Advanced`). Floats compare by
+bits, dictionaries and sets go in canonical key order, and `GasProperties` references are identified by name.
+`GasReactionConfig` and both reaction types are built this way, as are Numos's own configuration scalars,
+`GasProperties`, and chunk checkpoints (see "Checkpoint fields come from the state schema" in
+`docs/deterministic_replay.md`).
 
-The generator also writes a `ReadState` that rebuilds the object through a constructor, binding parameters to state
-fields by name (ignoring case) and setting any remaining fields through `init` or `set` accessors. That's what lets a
-world archive carry the configuration; see "Save portable replay files" in `docs/deterministic_replay.md`.
-`Key = "..."` on the attribute generates `Key`, so don't write it by hand as well.
+The generator also writes a `ReadState` that rebuilds the object through a constructor, binding parameters to marked
+members by name (ignoring case) and setting the rest through `init` or `set` accessors. That's what lets a world archive
+carry the configuration; see "Save portable replay files" in `docs/deterministic_replay.md`. It writes
+`CreateSnapshot` unless the type has one: `this` when every marked member is fixed and of an immutable type, as in
+`CombustionSettings`, otherwise a write-and-read copy against the gas registry, followed by an optional
+`partial void OnSnapshot(IGasRegistry gases)`. Finally, one module initializer per assembly registers every
+configuration with `SolverConfigurationTypes`, so loading needs no setup. That needs the key at build time, so `Key`
+must return a constant string.
 
-Every field and auto-property on the type must be tagged `[StateField(id)]` or `[NotState]`. The generator reports:
+A member's wire id is FNV-1a over its name, or over the name passed as `[NumosSerialize("OldName")]` after a rename.
+Membership is opt-in; `[NumosIgnore]` marks a member as deliberately not state. The generator reports:
 
 | ID              | Severity | Raised when                                                                                                   |
 |-----------------|----------|---------------------------------------------------------------------------------------------------------------|
 | `NUMOSSTATE001` | Error    | The type, or a type it's nested in, isn't `partial`.                                                          |
 | `NUMOSSTATE002` | Error    | The type is generic or nested in a generic type.                                                              |
-| `NUMOSSTATE003` | Error    | A field or auto-property has neither `[StateField]` nor `[NotState]`.                                         |
-| `NUMOSSTATE004` | Error    | A `[StateField]` id is zero or negative.                                                                      |
-| `NUMOSSTATE005` | Error    | Two members share an id.                                                                                      |
-| `NUMOSSTATE006` | Error    | An id is listed in the type's `[RetiredStateFields]`.                                                         |
+| `NUMOSSTATE005` | Error    | Two members' wire names hash to the same id. The message names both.                                         |
 | `NUMOSSTATE007` | Error    | A member's type isn't supported (delegates, `object`, mutable `List<T>`, unknown quantity aliases, ...).      |
-| `NUMOSSTATE008` | Error    | The type hand-writes `SemanticallyEquals`, `ComputeStateHash`, `AppendHash`, or a `Key` the attribute sets.   |
-| `NUMOSSTATE009` | Error    | `[StateField]` or `[NumosState]` is on an `IAtmosWorldSolver`, which replay never checkpoints.                |
-| `NUMOSSTATE010` | Error    | `[StateField]` is on a type without `[NumosState]`.                                                           |
-| `NUMOSSTATE011` | Error    | A member has both `[StateField]` and `[NotState]`.                                                            |
-| `NUMOSSTATE012` | Error    | `[StateField]` is on a static or const member.                                                                |
-| `NUMOSSTATE013` | Error    | A `[NumosState]` class derives from a class other than `object`, whose fields the generator can't see.        |
-| `NUMOSSTATE014` | Error    | No constructor binds: a parameter matches no field, can't take its field's type, or a field has no setter.    |
-| `NUMOSSTATE015` | Error    | `[NumosState(Key = ...)]` is blank.                                                                           |
+| `NUMOSSTATE008` | Error    | A solver configuration hand-writes `SemanticallyEquals` or `ComputeStateHash`.                                |
+| `NUMOSSTATE009` | Error    | `[NumosSerialize]` is on an `IAtmosWorldSolver`, which replay never checkpoints.                              |
+| `NUMOSSTATE011` | Error    | A member has both `[NumosSerialize]` and `[NumosIgnore]`.                                                     |
+| `NUMOSSTATE012` | Error    | `[NumosSerialize]` is on a static or const member.                                                            |
+| `NUMOSSTATE013` | Error    | The class derives from a class other than `object`, whose members the generator can't see.                   |
+| `NUMOSSTATE014` | Error    | No constructor binds: a parameter matches no member, can't take its type, or a member has no setter.          |
+| `NUMOSSTATE015` | Error    | `Key` returns a blank string.                                                                                 |
+| `NUMOSSTATE016` | Warning  | A mutable field, or an auto-property with `set`/`init`, has neither `[NumosSerialize]` nor `[NumosIgnore]`.   |
+| `NUMOSSTATE017` | Error    | `[NumosSerialize("...")]` passes a blank wire name.                                                           |
+| `NUMOSSTATE018` | Error    | A solver configuration's `Key` doesn't return a compile-time constant.                                        |
+| `NUMOSSTATE019` | Warning  | A solver configuration is private or protected (or nested in one), so the module initializer can't name it.   |
 
 A solver can cache anything derived from the settings or the gas registry under a `SolverDataKey<T>`. Numos drops
 that value whenever the configuration changes.
@@ -1595,34 +1599,34 @@ namespace MyMod;
 
 public static partial class FireChunkData
 {
-    [ChunkData("my-mod/fire/exposure", Rollback = true)]
+    [ChunkData("my-mod/fire/exposure")]
     public static partial ChunkField<float> Exposure { get; }
 
-    [ChunkData("my-mod/fire/burn-count", Rollback = true, Length = 1)]
+    [ChunkData("my-mod/fire/burn-count", Length = 1)]
     public static partial ChunkField<int> BurnCount { get; }
 
-    // Keyed "MyMod.FireChunkData.Scratch", transient.
-    [ChunkData]
+    // Keyed "MyMod.FireChunkData.Scratch".
+    [ChunkData(Transient = true)]
     public static partial ChunkField<float> Scratch { get; }
 }
 ```
 
 The generated property body calls `ChunkField<T>.Register` with the same arguments you would pass by hand.
-`[ChunkData("my-mod/fire/exposure", Rollback = true)]` and `ChunkField<float>.Register("my-mod/fire/exposure",
-rollback: true)` return the same instance, so mods can mix the two styles. Registration lives in a nested holder
-class that initializes on first access. The property is therefore never null, even from one of the type's own static
-initializers. A generated module initializer also runs every holder when
-the assembly loads, so a replay file can load before any property has been read. It runs the holders only, not the
-declaring types' static constructors. A registration that conflicts with one from another assembly then fails there. The
-runtime reports a `TypeInitializationException` for `<Module>`, and its inner `InvalidOperationException` names the
-declaring type and the key.
+`[ChunkData("my-mod/fire/exposure")]` and `ChunkField<float>.Register("my-mod/fire/exposure", rollback: true)` return
+the same instance, so mods can mix the two styles. Registration lives in a nested holder class that initializes on first
+access. The property is therefore never null, even from one of the type's own static initializers. A generated module
+initializer also runs every holder when the assembly loads, so a replay file can load before any property has been read.
+It runs the holders only, not the declaring types' static constructors. A registration that conflicts with one from
+another assembly then fails there. The runtime reports a `TypeInitializationException` for `<Module>`, and its inner
+`InvalidOperationException` names the declaring type and the key.
 
 The attribute maps onto `Register` like this:
 
 - The constructor argument is the key. If you leave it out, the key becomes the property's full name,
-  `{Namespace}.{Type}.{Property}`. That suits scratch storage. The name changes when someone renames the type or
-  namespace, so `Rollback = true` requires an explicit key.
-- `Rollback` is `rollback:`, with the same unmanaged-element rule.
+  `{Namespace}.{Type}.{Property}`. The name changes when someone renames the type or namespace, so a keyless field
+  requires `Transient = true`.
+- `Transient` is the inverse of `rollback:`. Fields are saved by default, which means an explicit key and an unmanaged
+  element type. `Transient = true` makes the field scratch space. Numos clears it on restore and never saves it.
 - `Length` makes a fixed-size field. The generator checks whether `Length` was assigned, not its value. Without it
   the field is per-voxel, and `Length = 0` is a valid empty field.
 - `ClearOnSleep` is `clearOnSleep:`. The chunk resets the whole array when it goes to sleep.
@@ -1663,8 +1667,8 @@ The generator catches most mistakes at compile time, before they can throw at re
 | `NUMOSCHUNK004` | Error    | The containing type, or a type it's nested in, isn't `partial`.                                  |
 | `NUMOSCHUNK005` | Error    | A containing type is generic, which would register one field per construction.                   |
 | `NUMOSCHUNK006` | Error    | The key is blank.                                                                                |
-| `NUMOSCHUNK007` | Error    | `Rollback` is set without an explicit key.                                                       |
-| `NUMOSCHUNK008` | Error    | `Rollback` is set and the element type isn't unmanaged.                                          |
+| `NUMOSCHUNK007` | Error    | A saved (non-`Transient`) field has no explicit key.                                             |
+| `NUMOSCHUNK008` | Error    | A saved (non-`Transient`) field's element type isn't unmanaged.                                  |
 | `NUMOSCHUNK009` | Error    | `Length` is negative.                                                                            |
 | `NUMOSCHUNK010` | Error    | The property or a containing type isn't `public` or `internal`, so the accessors can't reach it. |
 | `NUMOSCHUNK011` | Error    | Two declarations share a key with different element types, lengths, or rollback settings.        |
