@@ -15,8 +15,14 @@ public sealed class AtmosSolverArraySnapshot
     private readonly SolverArrayStorage _storage;
 
     internal AtmosSolverArraySnapshot(SolverArrayStorage storage)
+        : this(storage.Clone(), true)
     {
-        _storage = storage.Clone();
+    }
+
+    // Takes ownership of storage nobody else references, such as an array just decoded from a file.
+    private AtmosSolverArraySnapshot(SolverArrayStorage storage, bool _)
+    {
+        _storage = storage;
     }
 
     /// <summary>
@@ -56,6 +62,23 @@ public sealed class AtmosSolverArraySnapshot
             throw new InvalidOperationException("The requested element type does not match the captured solver array.");
 
         return (T[])typed.Values.Clone();
+    }
+
+    /// <summary>
+    ///     Gets whether the element type can be written to a portable replay file.
+    /// </summary>
+    internal bool IsPortable => _storage.Field.IsPortable;
+
+    internal int ElementSize => _storage.Field.ElementSize;
+
+    internal static AtmosSolverArraySnapshot Adopt(SolverArrayStorage storage)
+    {
+        return new AtmosSolverArraySnapshot(storage, true);
+    }
+
+    internal void Write(BinaryWriter writer)
+    {
+        _storage.Write(writer);
     }
 
     internal SolverArrayStorage Materialize()

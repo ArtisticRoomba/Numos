@@ -1,4 +1,6 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
+using Numos.CoreSim.Replay;
 
 namespace Numos.CoreSim.Solvers;
 
@@ -31,6 +33,15 @@ internal abstract class ChunkFieldDescriptor
     }
 
     /// <summary>
+    ///     Gets whether a rollback field of this element type can be written to a portable replay file.
+    /// </summary>
+    /// <remarks>
+    ///     Only primitives and enums over them qualify: their bytes have no padding, and swapping each element's bytes
+    ///     converts them to little-endian. Structs are left out, since their layout and padding aren't pinned.
+    /// </remarks>
+    internal bool IsPortable => IsPortableElementType(ElementType);
+
+    /// <summary>
     ///     Gets the ordinal key.
     /// </summary>
     internal string Key { get; }
@@ -41,6 +52,8 @@ internal abstract class ChunkFieldDescriptor
     internal int Slot { get; }
 
     internal abstract Type ElementType { get; }
+
+    internal abstract int ElementSize { get; }
 
     internal bool CaptureForRollback { get; }
 
@@ -73,6 +86,12 @@ internal abstract class ChunkFieldDescriptor
         return Interlocked.CompareExchange(ref _publicHandle, handle, null) ?? handle;
     }
 
+    /// <summary>
+    ///     Reads <paramref name="length" /> little-endian elements written by <see cref="SolverArrayStorage.Write" />.
+    /// </summary>
+    /// <remarks>Only valid for portable element types.</remarks>
+    internal abstract SolverArrayStorage Read(BinaryReader reader, int length);
+
     internal int GetLength(int voxelCount)
     {
         return FixedLength ?? voxelCount;
@@ -81,6 +100,17 @@ internal abstract class ChunkFieldDescriptor
     internal string Describe()
     {
         return Describe(ElementType, CaptureForRollback, FixedLength, ClearOnSleep, ClearOnVacuum);
+    }
+
+    internal static bool IsPortableElementType(Type type)
+    {
+        if (type.IsEnum)
+            type = Enum.GetUnderlyingType(type);
+
+        return type == typeof(bool) || type == typeof(byte) || type == typeof(sbyte) ||
+               type == typeof(short) || type == typeof(ushort) || type == typeof(int) || type == typeof(uint) ||
+               type == typeof(long) || type == typeof(ulong) || type == typeof(Half) || type == typeof(float) ||
+               type == typeof(double);
     }
 
     internal static string Describe(Type elementType, bool captureForRollback, int? fixedLength, bool clearOnSleep, bool clearOnVacuum)
@@ -108,6 +138,19 @@ internal sealed class ChunkFieldDescriptor<T> : ChunkFieldDescriptor
     {
         return new SolverArrayStorage<T>(this, new T[GetLength(voxelCount)]);
     }
+
+    internal override SolverArrayStorage Read(BinaryReader reader, int length)
+    {
+        var values = new T[length];
+        Span<byte> bytes = SolverArrayStorage<T>.AsBytes(values);
+        reader.BaseStream.ReadExactly(bytes);
+        if (!BitConverter.IsLittleEndian)
+            AtmosReplayCodec.ReverseElementBytes(bytes, Unsafe.SizeOf<T>());
+
+        return new SolverArrayStorage<T>(this, values);
+    }
+
+    internal override int ElementSize => Unsafe.SizeOf<T>();
 
     internal bool Matches(bool captureForRollback, int? fixedLength, bool clearOnSleep, bool clearOnVacuum)
     {
@@ -182,5 +225,14 @@ internal static class ChunkFieldRegistry
             ByKey.Add(key, descriptor);
             return descriptor;
         }
+    }
+
+    /// <summary>
+    ///     Finds the descriptor registered under <paramref name="key" />, if any.
+    /// </summary>
+    internal static bool TryGet(string key, [NotNullWhen(true)] out ChunkFieldDescriptor? descriptor)
+    {
+        lock (Gate)
+            return ByKey.TryGetValue(key, out descriptor);
     }
 }

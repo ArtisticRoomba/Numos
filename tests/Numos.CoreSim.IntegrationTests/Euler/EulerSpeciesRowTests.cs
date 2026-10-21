@@ -130,7 +130,7 @@ public sealed class EulerSpeciesRowTests
                 chunk.Position, chunk.Dimensions, chunk.IsAwake, chunk.SleepTimer,
                 chunk.Classifications.ToArray(), chunk.Temperatures.ToArray(), chunk.Pressures.ToArray(),
                 chunk.HeatCapacities.ToArray(), chunk.MomentumX.ToArray(), chunk.MomentumY.ToArray(),
-                chunk.MomentumZ.ToArray(), chunk.ActiveAirIndices.ToArray(), gases);
+                chunk.MomentumZ.ToArray(), chunk.ActiveAirIndices.ToArray(), gases, chunk.SolverArrays.ToArray());
         }).ToArray();
 
         return new AtmosSimulationCheckpoint(checkpoint.Dimensions, chunks);

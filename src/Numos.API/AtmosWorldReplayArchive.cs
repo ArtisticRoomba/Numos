@@ -75,7 +75,7 @@ public sealed class AtmosWorldReplayArchive
     /// </summary>
     /// <exception cref="NotSupportedException">
     ///     The archive contains custom solvers, solver configurations that aren't <see cref="NumosStateAttribute" />
-    ///     types, or solver arrays.
+    ///     types, or rollback chunk fields whose element type isn't a primitive or an enum.
     /// </exception>
     public void EnsurePortable()
     {
@@ -96,8 +96,11 @@ public sealed class AtmosWorldReplayArchive
 
         foreach (var simulation in checkpoint.Simulations)
         foreach (var chunk in simulation.Checkpoint.Chunks)
-        foreach (var array in chunk.SolverArrays)
-            yield return $"solver array '{array.Key}' in simulation {simulation.Simulation}, chunk {chunk.Position}";
+        foreach (var array in chunk.SolverArrays.Where(static array => !array.IsPortable))
+        {
+            yield return $"chunk field '{array.Key}' ({array.ElementType.FullName}, not a portable element type) " +
+                         $"in simulation {simulation.Simulation}, chunk {chunk.Position}";
+        }
 
         // [NumosState] configurations and the built-in portable ones save themselves. Only host types are unsupported.
         foreach (var configuration in checkpoint.Config.SolverConfigurations.Where(static value => !IsSavable(value)))

@@ -107,7 +107,7 @@ internal static partial class AtmosWorldReplayCodec
         {
             simulations[index] = new AtmosWorldSimulationCheckpoint(
                 ReadAtmosSimulationId(reader),
-                AtmosReplayCodec.ReadSimulationCheckpoint(reader));
+                AtmosReplayCodec.ReadSimulationCheckpoint(reader, maxStringBytes));
         }
 
         int linkSlotCount = AtmosReplayCodec.ReadCount(reader, 10_000_000, "link-set slot");

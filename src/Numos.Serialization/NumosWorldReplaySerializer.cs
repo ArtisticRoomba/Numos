@@ -73,15 +73,22 @@ public static class NumosWorldReplaySerializer
     /// <param name="source">Readable stream containing exactly one world replay container.</param>
     /// <param name="options">Optional allocation and payload limits for untrusted input.</param>
     /// <returns>Decoded metadata and detached complete-world archive.</returns>
+    /// <remarks>
+    ///     Rollback chunk fields are looked up in the process-wide <c>ChunkField&lt;T&gt;</c> registry, so register every
+    ///     field the file might hold (touch its <c>[ChunkData]</c> property or call <c>ChunkField&lt;T&gt;.Register</c>)
+    ///     before loading.
+    /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="source" /> is <see langword="null" />.</exception>
     /// <exception cref="ArgumentException"><paramref name="source" /> is not readable.</exception>
     /// <exception cref="InvalidDataException">
     ///     The container is malformed, inconsistent, or holds unsupported content such as a single-simulation replay
-    ///     written by an earlier Numos version.
+    ///     written by an earlier Numos version, or a chunk field whose saved element type or length doesn't match its
+    ///     registration.
     /// </exception>
     /// <exception cref="NotSupportedException">
     ///     The replay contains host-defined state, such as a solver configuration whose key isn't registered in
-    ///     <see cref="NumosReplayReadOptions.SolverConfigurations" />.
+    ///     <see cref="NumosReplayReadOptions.SolverConfigurations" />, or a rollback chunk field the process hasn't
+    ///     registered yet.
     /// </exception>
     public static NumosWorldReplayDocument Deserialize(Stream source, NumosReplayReadOptions? options = null)
     {

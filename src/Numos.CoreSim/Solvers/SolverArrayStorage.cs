@@ -29,6 +29,12 @@ internal abstract class SolverArrayStorage(ChunkFieldDescriptor field)
     ///     Resets every element to default.
     /// </summary>
     internal abstract void ClearAll();
+
+    /// <summary>
+    ///     Writes the values as one little-endian byte run, without a length prefix.
+    /// </summary>
+    /// <remarks>Only valid for portable element types, where reversing each element's bytes converts its endianness.</remarks>
+    internal abstract void Write(BinaryWriter writer);
 }
 
 internal sealed class SolverArrayStorage<T>(ChunkFieldDescriptor<T> field, T[] values) : SolverArrayStorage(field)
@@ -52,6 +58,28 @@ internal sealed class SolverArrayStorage<T>(ChunkFieldDescriptor<T> field, T[] v
     internal override void ClearAll()
     {
         Array.Clear(Values);
+    }
+
+    internal static Span<byte> AsBytes(T[] values)
+    {
+        // Registration rejects managed references for captured fields, so the elements are plain bytes.
+        return MemoryMarshal.CreateSpan(
+            ref Unsafe.As<T, byte>(ref MemoryMarshal.GetArrayDataReference(values)),
+            checked(values.Length * Unsafe.SizeOf<T>()));
+    }
+
+    internal override void Write(BinaryWriter writer)
+    {
+        Span<byte> bytes = AsBytes(Values);
+        if (BitConverter.IsLittleEndian)
+        {
+            writer.Write(bytes);
+            return;
+        }
+
+        byte[] swapped = bytes.ToArray();
+        AtmosReplayCodec.ReverseElementBytes(swapped, Unsafe.SizeOf<T>());
+        writer.Write(swapped);
     }
 
     internal override void AppendHash(ref AtmosStateHasher hash)

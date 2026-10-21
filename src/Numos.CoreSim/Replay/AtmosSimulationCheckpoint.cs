@@ -136,7 +136,8 @@ public sealed class AtmosChunkCheckpoint
         float[] momentumY,
         float[] momentumZ,
         ushort[] activeAirIndices,
-        AtmosGasChannelCheckpoint[] gases)
+        AtmosGasChannelCheckpoint[] gases,
+        AtmosSolverArraySnapshot[] solverArrays)
     {
         Position = position;
         Dimensions = dimensions;
@@ -151,7 +152,7 @@ public sealed class AtmosChunkCheckpoint
         MomentumZ = new CheckpointArray<float>(momentumZ);
         ActiveAirIndices = new CheckpointArray<ushort>(activeAirIndices);
         Gases = Array.AsReadOnly(gases);
-        SolverArrays = Array.Empty<AtmosSolverArraySnapshot>();
+        SolverArrays = Array.AsReadOnly(solverArrays);
     }
 
     /// <summary>
