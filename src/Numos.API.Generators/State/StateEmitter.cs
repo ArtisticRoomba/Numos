@@ -8,6 +8,7 @@ internal static class StateEmitter
     private const string StateInterface = "global::Numos.CoreSim.State.Advanced.INumosState";
     private const string NonGenericInterface = "global::Numos.CoreSim.State.Advanced.INumosState";
     private const string SolverConfiguration = "global::Numos.CoreSim.IAtmosSolverConfiguration";
+    private const string Advanced = "global::Numos.CoreSim.State.Advanced.";
 
     public static string Emit(StateTypeModel model)
     {
@@ -229,33 +230,86 @@ internal static class StateEmitter
 
     private static void EmitSolverConfiguration(CodeWriter writer, StateTypeModel model)
     {
-        if (model.StateKey is not null)
-        {
-            writer.Line("/// <inheritdoc />");
-            writer.Line(CodeWriter.GeneratedCodeAttribute);
-            writer.Line("public string Key => " + SymbolDisplay.FormatLiteral(model.StateKey, true) + ";");
-            writer.Line();
-        }
-
         writer.Line("/// <inheritdoc />");
         writer.Line(CodeWriter.GeneratedCodeAttribute);
         writer.Line("public bool SemanticallyEquals(" + SolverConfiguration + " other)");
         writer.Open();
         writer.Line("return other is " + model.TypeName + " typed &&");
-        writer.Line("       global::Numos.CoreSim.State.Advanced.NumosState.StateEquals<" + model.TypeName + ">(this, typed);");
+        writer.Line("       " + Advanced + "NumosState.StateEquals<" + model.TypeName + ">(this, typed);");
         writer.Close();
         writer.Line();
         writer.Line("/// <inheritdoc />");
         writer.Line(CodeWriter.GeneratedCodeAttribute);
         writer.Line("public ulong ComputeStateHash()");
         writer.Open();
-        writer.Line("var sink = new global::Numos.CoreSim.State.Advanced.StateHashSink();");
+        writer.Line("var sink = new " + Advanced + "StateHashSink();");
         writer.Line("sink.WriteString(((" + SolverConfiguration + ")this).Key);");
-        writer.Line(
-            "global::Numos.CoreSim.State.Advanced.NumosState.Write<" + model.TypeName +
-            ", global::Numos.CoreSim.State.Advanced.StateHashSink>(ref sink, this);");
-
+        writer.Line(Advanced + "NumosState.Write<" + model.TypeName + ", " + Advanced + "StateHashSink>(ref sink, this);");
         writer.Line("return sink.Value;");
         writer.Close();
+
+        if (model.Snapshot == SnapshotKind.None)
+            return;
+
+        writer.Line();
+        writer.Line("/// <summary>");
+        writer.Line("///     Runs on the snapshot <see cref=\"CreateSnapshot\" /> returns, for validation against the gas registry.");
+        writer.Line("/// </summary>");
+        writer.Line("/// <param name=\"gases\">The registry the snapshot is for.</param>");
+        writer.Line("partial void OnSnapshot(global::Numos.CoreSim.IGasRegistry gases);");
+        writer.Line();
+        writer.Line("/// <inheritdoc />");
+        writer.Line(CodeWriter.GeneratedCodeAttribute);
+        writer.Line("public " + SolverConfiguration + " CreateSnapshot(global::Numos.CoreSim.IGasRegistry gases)");
+        writer.Open();
+        writer.Line("global::System.ArgumentNullException.ThrowIfNull(gases);");
+        if (model.Snapshot == SnapshotKind.Self)
+        {
+            // Every member is immutable, so sharing the instance can't let a later edit reach the snapshot.
+            writer.Line("OnSnapshot(gases);");
+            writer.Line("return this;");
+        }
+        else
+        {
+            // A round trip copies every collection and resolves each gas against the registry being captured for.
+            writer.Line("var sink = new " + Advanced + "StateBinarySink();");
+            writer.Line(Advanced + "NumosState.Write<" + model.TypeName + ", " + Advanced + "StateBinarySink>(ref sink, this);");
+            writer.Line("var reader = new " + Advanced + "StateReader(sink.WrittenSpan);");
+            writer.Line("var snapshot = " + Advanced + "NumosState.Read<" + model.TypeName + ">(ref reader, gases);");
+            writer.Line("snapshot.OnSnapshot(gases);");
+            writer.Line("return snapshot;");
+        }
+
+        writer.Close();
+    }
+
+    /// <summary>
+    ///     Writes the assembly's module initializer, which registers every solver configuration it can name so a world
+    ///     archive holding one loads without the host registering anything.
+    /// </summary>
+    /// <param name="types">The fully qualified solver configuration types, in a stable order.</param>
+    public static string EmitModuleInitializer(EquatableArray<string> types)
+    {
+        var writer = new CodeWriter();
+        writer.Header();
+        writer.Line("namespace Numos.CoreSim.State.Generated");
+        writer.Open();
+        writer.Line(CodeWriter.GeneratedCodeAttribute);
+        writer.Line("[global::System.ComponentModel.EditorBrowsable(global::System.ComponentModel.EditorBrowsableState.Never)]");
+        writer.Line("internal static class SolverConfigurationModuleInitializer");
+        writer.Open();
+        writer.Line("[global::System.Runtime.CompilerServices.ModuleInitializer]");
+        writer.Line(
+            "[global::System.Diagnostics.CodeAnalysis.SuppressMessage(\"Usage\", \"CA2255\", " +
+            "Justification = \"Solver configurations must be registered before a file that holds them can load.\")]");
+        writer.Line("internal static void RegisterSolverConfigurations()");
+        writer.Open();
+        foreach (string type in types)
+            writer.Line("global::Numos.CoreSim.State.SolverConfigurationTypes.RegisterDefault<" + type + ">();");
+
+        writer.Close();
+        writer.Close();
+        writer.Close();
+        return writer.ToString();
     }
 }

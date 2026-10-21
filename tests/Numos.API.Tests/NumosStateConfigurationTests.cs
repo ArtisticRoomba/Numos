@@ -5,7 +5,7 @@ using Numos.CoreSim.State.Advanced;
 namespace Numos.API.Tests;
 
 /// <summary>
-///     Uses <see cref="NumosStateAttribute" /> the way a mod would: a solver configuration in a project that only gets
+///     Uses <see cref="NumosSerializeAttribute" /> the way a mod would: a solver configuration in a project that only gets
 ///     the generator through its analyzer reference.
 /// </summary>
 [TestFixture]
@@ -92,6 +92,46 @@ public sealed partial class NumosStateConfigurationTests
         Assert.That(Settings(0f).ComputeStateHash(), Is.Not.EqualTo(Settings(-0f).ComputeStateHash()));
     }
 
+    [Test]
+    public void GeneratedSnapshot_OfAMutableConfiguration_IsAnIndependentCopy()
+    {
+        var spread = new Dictionary<string, float> { ["spread"] = 0.5f };
+        var original = new FireSettings(600f, spread) { Mode = FireMode.Smoulder };
+
+        var snapshot = (FireSettings)original.CreateSnapshot(new GasRegistry());
+        Assert.Multiple(() =>
+        {
+            Assert.That(snapshot, Is.Not.SameAs(original));
+            Assert.That(snapshot.SpreadRates, Is.Not.SameAs(original.SpreadRates));
+            Assert.That(snapshot.SemanticallyEquals(original), Is.True);
+            Assert.That(snapshot.ComputeStateHash(), Is.EqualTo(original.ComputeStateHash()));
+        });
+    }
+
+    [Test]
+    public void GeneratedSnapshot_OfAnImmutableConfiguration_IsTheSameInstance()
+    {
+        var frozen = new Frozen(1f, FireMode.Flame);
+        Assert.That(frozen.CreateSnapshot(new GasRegistry()), Is.SameAs(frozen));
+    }
+
+    [Test]
+    public void GeneratedSnapshot_RunsOnSnapshotOnTheCopy()
+    {
+        var gases = new GasRegistry { new GasProperties { Name = "Air" } };
+        var original = new Validated { GasName = "Air" };
+
+        var snapshot = (Validated)original.CreateSnapshot(gases);
+        Assert.Multiple(() =>
+        {
+            Assert.That(snapshot.Validations, Is.EqualTo(1));
+            Assert.That(original.Validations, Is.Zero);
+        });
+
+        original.GasName = "Missing";
+        Assert.That(() => original.CreateSnapshot(gases), Throws.TypeOf<KeyNotFoundException>());
+    }
+
     private static FireSettings Settings(float ignition, params (string Name, float Rate)[] rates)
     {
         var spread = new Dictionary<string, float>();
@@ -107,26 +147,45 @@ public sealed partial class NumosStateConfigurationTests
         Smoulder,
     }
 
-    [NumosState]
     public sealed partial class FireSettings(float ignitionTemperature, IReadOnlyDictionary<string, float> spreadRates)
         : IAtmosSolverConfiguration
     {
-        [NotState]
+        [NumosIgnore]
         private int _lookups;
 
         public string Key => "tests/numos-state-fire";
 
-        [StateField(1)]
+        [NumosSerialize]
         public float IgnitionTemperature { get; } = ignitionTemperature;
 
-        [StateField(2)]
+        [NumosSerialize]
         public IReadOnlyDictionary<string, float> SpreadRates { get; } = new Dictionary<string, float>(spreadRates);
 
-        [StateField(4)]
+        [NumosSerialize]
         public FireMode Mode { get; init; }
 
-        public IAtmosSolverConfiguration CreateSnapshot(IGasRegistry gasRegistry) => this;
-
         public void Touch() => _lookups++;
+    }
+
+    // Every member is fixed and of an immutable type, so the generated snapshot is the instance itself.
+    public sealed partial record Frozen([property: NumosSerialize] float Rate, [property: NumosSerialize] FireMode Mode)
+        : IAtmosSolverConfiguration
+    {
+        public string Key => "tests/numos-state-frozen";
+    }
+
+    public sealed partial class Validated : IAtmosSolverConfiguration
+    {
+        public string Key => "tests/numos-state-validated";
+
+        [NumosSerialize] public string GasName { get; set; } = "";
+
+        [NumosIgnore] public int Validations { get; private set; }
+
+        partial void OnSnapshot(IGasRegistry gases)
+        {
+            gases.GasIdToIndex(GasName);
+            Validations++;
+        }
     }
 }

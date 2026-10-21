@@ -1,12 +1,16 @@
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
-using Numos.CoreSim.State.Advanced;
+using Numos.API.Generators.State;
 
 namespace Numos.API.Generators.Tests;
 
 [TestFixture]
 public sealed class StateGeneratorTests
 {
+    private static string HasLocal(string name) => "has" + FieldIds.Compute(name);
+
+    private static string FieldLocal(string name) => "field" + FieldIds.Compute(name);
+
     private const string EveryShapeSource = """
                                             using System.Collections.Frozen;
                                             using System.Collections.Generic;
@@ -23,47 +27,44 @@ public sealed class StateGeneratorTests
                                                 On,
                                             }
 
-                                            [NumosState]
-                                            public readonly partial record struct Point([property: StateField(1)] float X, [property: StateField(2)] float Y);
+                                            public readonly partial record struct Point([property: NumosSerialize] float X, [property: NumosSerialize] float Y);
 
-                                            [NumosState]
                                             public sealed partial class Leaf
                                             {
-                                                [StateField(1)] public string Name { get; init; } = "";
+                                                [NumosSerialize] public string Name { get; init; } = "";
                                             }
 
-                                            [NumosState]
                                             public sealed partial class EveryShape
                                             {
-                                                [StateField(1)] public bool Bool;
-                                                [StateField(2)] public byte Byte;
-                                                [StateField(3)] public sbyte SByte;
-                                                [StateField(4)] public short Short;
-                                                [StateField(5)] public ushort UShort;
-                                                [StateField(6)] public int Int;
-                                                [StateField(7)] public uint UInt;
-                                                [StateField(8)] public long Long;
-                                                [StateField(9)] public ulong ULong;
-                                                [StateField(10)] public float Float;
-                                                [StateField(11)] public double Double;
-                                                [StateField(12)] public Mode Mode;
-                                                [StateField(13)] public string Text = "";
-                                                [StateField(14)] public string? MaybeText;
-                                                [StateField(15)] public Int3 Position;
-                                                [StateField(16)] public GasProperties Gas;
-                                                [StateField(17)] public GasProperties? MaybeGas;
-                                                [StateField(18)] public int? MaybeInt;
-                                                [StateField(19)] public Point Point;
-                                                [StateField(20)] public Leaf? MaybeLeaf;
-                                                [StateField(21)] public float[] Floats = [];
-                                                [StateField(22)] public IReadOnlyList<string?> Names = [];
-                                                [StateField(23)] public ImmutableArray<Point> Points = [];
-                                                [StateField(24)] public IReadOnlyDictionary<GasProperties, float> Amounts = new Dictionary<GasProperties, float>();
-                                                [StateField(25)] public FrozenDictionary<string, Leaf> Leaves = FrozenDictionary<string, Leaf>.Empty;
-                                                [StateField(26)] public Dictionary<Mode, int[]> ByMode = new();
-                                                [StateField(27)] public FrozenSet<Point> PointSet = FrozenSet<Point>.Empty;
-                                                [StateField(28)] public IReadOnlySet<string> NameSet = new HashSet<string>();
-                                                [StateField(29)] public Mode? MaybeMode;
+                                                [NumosSerialize] public bool Bool;
+                                                [NumosSerialize] public byte Byte;
+                                                [NumosSerialize] public sbyte SByte;
+                                                [NumosSerialize] public short Short;
+                                                [NumosSerialize] public ushort UShort;
+                                                [NumosSerialize] public int Int;
+                                                [NumosSerialize] public uint UInt;
+                                                [NumosSerialize] public long Long;
+                                                [NumosSerialize] public ulong ULong;
+                                                [NumosSerialize] public float Float;
+                                                [NumosSerialize] public double Double;
+                                                [NumosSerialize] public Mode Mode;
+                                                [NumosSerialize] public string Text = "";
+                                                [NumosSerialize] public string? MaybeText;
+                                                [NumosSerialize] public Int3 Position;
+                                                [NumosSerialize] public GasProperties Gas;
+                                                [NumosSerialize] public GasProperties? MaybeGas;
+                                                [NumosSerialize] public int? MaybeInt;
+                                                [NumosSerialize] public Point Point;
+                                                [NumosSerialize] public Leaf? MaybeLeaf;
+                                                [NumosSerialize] public float[] Floats = [];
+                                                [NumosSerialize] public IReadOnlyList<string?> Names = [];
+                                                [NumosSerialize] public ImmutableArray<Point> Points = [];
+                                                [NumosSerialize] public IReadOnlyDictionary<GasProperties, float> Amounts = new Dictionary<GasProperties, float>();
+                                                [NumosSerialize] public FrozenDictionary<string, Leaf> Leaves = FrozenDictionary<string, Leaf>.Empty;
+                                                [NumosSerialize] public Dictionary<Mode, int[]> ByMode = new();
+                                                [NumosSerialize] public FrozenSet<Point> PointSet = FrozenSet<Point>.Empty;
+                                                [NumosSerialize] public IReadOnlySet<string> NameSet = new HashSet<string>();
+                                                [NumosSerialize] public Mode? MaybeMode;
                                             }
                                             """;
 
@@ -108,12 +109,11 @@ public sealed class StateGeneratorTests
 
                               namespace MyMod;
 
-                              [NumosState]
                               public partial struct Settings
                               {
-                                  [StateField(9)] public float Last;
-                                  [StateField(2)] public float First;
-                                  [StateField(5)] public float Middle;
+                                  [NumosSerialize] public float Last;
+                                  [NumosSerialize] public float First;
+                                  [NumosSerialize] public float Middle;
                               }
                               """;
 
@@ -122,12 +122,80 @@ public sealed class StateGeneratorTests
         Assert.That(GeneratorHarness.Errors(output), Is.Empty);
 
         string generated = GeneratorHarness.GeneratedSource(result, "MyMod.Settings.NumosState.g.cs");
-        int first = generated.IndexOf("sink.BeginField(2);", StringComparison.Ordinal);
-        int middle = generated.IndexOf("sink.BeginField(5);", StringComparison.Ordinal);
-        int last = generated.IndexOf("sink.BeginField(9);", StringComparison.Ordinal);
-        Assert.That(first, Is.GreaterThan(0));
-        Assert.That(middle, Is.GreaterThan(first));
-        Assert.That(last, Is.GreaterThan(middle));
+        int[] positions = new[] { "Last", "First", "Middle" }
+            .OrderBy(FieldIds.Compute)
+            .Select(name => generated.IndexOf("sink.BeginField(" + FieldIds.Compute(name) + ");", StringComparison.Ordinal))
+            .ToArray();
+
+        Assert.That(positions, Has.All.GreaterThan(0));
+        Assert.That(positions, Is.Ordered.Ascending);
+    }
+
+    [Test]
+    public void FieldIds_AreFnv1aOfTheName()
+    {
+        Assert.Multiple(() =>
+        {
+            Assert.That(FieldIds.Compute("a"), Is.EqualTo(0x640c292c));
+            Assert.That(FieldIds.Compute("Rate"), Is.EqualTo(783280263));
+            Assert.That(FieldIds.Compute("GlobalTemperature"), Is.EqualTo(1407824132));
+        });
+    }
+
+    [Test]
+    public void WireName_KeepsTheOldIdAfterARename()
+    {
+        const string source = """
+                              using Numos.CoreSim.State;
+
+                              namespace MyMod;
+
+                              public partial struct Settings
+                              {
+                                  [NumosSerialize("Rate")] public float SpreadRate;
+                              }
+                              """;
+
+        GeneratorRunResult result = GeneratorHarness.RunState(out Compilation output, out var diagnostics, null, source);
+        Assert.That(diagnostics, Is.Empty);
+        Assert.That(GeneratorHarness.Errors(output), Is.Empty);
+        Assert.That(
+            GeneratorHarness.GeneratedSource(result, "MyMod.Settings.NumosState.g.cs"),
+            Does.Contain("sink.BeginField(783280263);").And.Contain("value.SpreadRate"));
+    }
+
+    [Test]
+    public void PartialTypeAcrossFiles_GeneratesOnce()
+    {
+        const string first = """
+                             using Numos.CoreSim.State;
+
+                             namespace MyMod;
+
+                             public partial class Settings
+                             {
+                                 [NumosSerialize] public float Rate;
+                             }
+                             """;
+
+        const string second = """
+                              using Numos.CoreSim.State;
+
+                              namespace MyMod;
+
+                              public partial class Settings
+                              {
+                                  [NumosSerialize] public float Spread;
+                              }
+                              """;
+
+        GeneratorRunResult result = GeneratorHarness.RunState(out Compilation output, out var diagnostics, null, first, second);
+        Assert.That(diagnostics, Is.Empty);
+        Assert.That(GeneratorHarness.Errors(output), Is.Empty);
+        Assert.That(result.GeneratedSources, Has.Length.EqualTo(1));
+        Assert.That(
+            result.GeneratedSources[0].SourceText.ToString(),
+            Does.Contain("value.Rate").And.Contain("value.Spread"));
     }
 
     [Test]
@@ -142,7 +210,6 @@ public sealed class StateGeneratorTests
                               /// <summary>
                               ///     Documented settings.
                               /// </summary>
-                              [NumosState]
                               public sealed partial class FireSettings : IAtmosSolverConfiguration
                               {
                                   /// <inheritdoc />
@@ -151,10 +218,7 @@ public sealed class StateGeneratorTests
                                   /// <summary>
                                   ///     Ignition temperature.
                                   /// </summary>
-                                  [StateField(1)] public float IgnitionTemperature { get; init; }
-
-                                  /// <inheritdoc />
-                                  public IAtmosSolverConfiguration CreateSnapshot(IGasRegistry gases) => this;
+                                  [NumosSerialize] public float IgnitionTemperature { get; init; }
                               }
                               """;
 
@@ -176,6 +240,7 @@ public sealed class StateGeneratorTests
             Assert.That(generated, Does.Contain("public bool SemanticallyEquals(global::Numos.CoreSim.IAtmosSolverConfiguration other)"));
             Assert.That(generated, Does.Contain("public ulong ComputeStateHash()"));
             Assert.That(generated, Does.Contain("sink.WriteString(((global::Numos.CoreSim.IAtmosSolverConfiguration)this).Key);"));
+            Assert.That(generated, Does.Contain("public global::Numos.CoreSim.IAtmosSolverConfiguration CreateSnapshot("));
         });
     }
 
@@ -190,11 +255,10 @@ public sealed class StateGeneratorTests
 
                               namespace MyMod;
 
-                              [NumosState]
                               public sealed partial class Settings
                               {
-                                  [StateField(1)] public Kelvin Ignition { get; init; }
-                                  [StateField(2)] public IReadOnlyDictionary<GasProperties, Mole64> Amounts { get; init; } = null!;
+                                  [NumosSerialize] public Kelvin Ignition { get; init; }
+                                  [NumosSerialize] public IReadOnlyDictionary<GasProperties, Mole64> Amounts { get; init; } = null!;
                               }
                               """;
 
@@ -229,8 +293,7 @@ public sealed class StateGeneratorTests
 
                               public readonly partial record struct Outer
                               {
-                                  [NumosState]
-                                  public readonly partial record struct Inner([property: StateField(1)] int Value);
+                                  public readonly partial record struct Inner([property: NumosSerialize] int Value);
                               }
                               """;
 
@@ -258,12 +321,12 @@ public sealed class StateGeneratorTests
                     "static global::MyMod.Point global::Numos.CoreSim.State.Advanced.INumosState<global::MyMod.Point>.ReadState(" +
                     "ref global::Numos.CoreSim.State.Advanced.StateReader reader, global::Numos.CoreSim.IGasRegistry? gases)"));
 
-            Assert.That(source, Does.Contain("field1 = global::Numos.CoreSim.State.Advanced.StateCodecs.Single.Read(ref reader, gases);"));
+            Assert.That(source, Does.Contain(FieldLocal("X") + " = global::Numos.CoreSim.State.Advanced.StateCodecs.Single.Read(ref reader, gases);"));
             Assert.That(source, Does.Match(@"default:\s+reader\.SkipField\(\);\s+continue;"));
             Assert.That(
                 source,
                 Does.Contain(
-                    "return new global::MyMod.Point(has1 ? field1 : " +
+                    "return new global::MyMod.Point(" + HasLocal("X") + " ? " + FieldLocal("X") + " : " +
                     "global::Numos.CoreSim.State.Advanced.StateCodecs.DefaultValue<float, global::Numos.CoreSim.State.Advanced.StateCodecs.Single>(), "));
 
             Assert.That(source, Does.Contain("static string? global::Numos.CoreSim.State.Advanced.INumosState<global::MyMod.Point>.StateKey => null;"));
@@ -274,7 +337,7 @@ public sealed class StateGeneratorTests
         // missing one keeps its initializer's value.
         Assert.That(
             GeneratorHarness.GeneratedSource(result, "MyMod.EveryShape.NumosState.g.cs"),
-            Does.Match(@"var result = new global::MyMod\.EveryShape\(\);\s+if \(has1\)\s+result\.Bool = field1;"));
+            Does.Match(@"var result = new global::MyMod\.EveryShape\(\);\s+if \(has\d+\)").And.Match(@"if \(" + HasLocal("Bool") + @"\)\s+result\.Bool = " + FieldLocal("Bool") + ";"));
     }
 
     [Test]
@@ -290,7 +353,6 @@ public sealed class StateGeneratorTests
 
                               namespace MyMod;
 
-                              [NumosState]
                               public sealed partial class Settings(
                                   IEnumerable<float>? rates,
                                   ISet<string> names,
@@ -299,12 +361,12 @@ public sealed class StateGeneratorTests
                                   ImmutableArray<int> more,
                                   float spread = -0.5f)
                               {
-                                  [StateField(1)] public IReadOnlyList<float> Rates { get; } = rates?.ToArray() ?? [];
-                                  [StateField(2)] public IReadOnlySet<string> Names { get; } = names.ToFrozenSet();
-                                  [StateField(3)] public FrozenDictionary<GasProperties, float> Amounts { get; } = amounts.ToFrozenDictionary();
-                                  [StateField(4)] public int[] Order { get; } = order.ToArray();
-                                  [StateField(5)] public IReadOnlyList<int> More { get; } = more;
-                                  [StateField(6)] public float Spread { get; } = spread;
+                                  [NumosSerialize] public IReadOnlyList<float> Rates { get; } = rates?.ToArray() ?? [];
+                                  [NumosSerialize] public IReadOnlySet<string> Names { get; } = names.ToFrozenSet();
+                                  [NumosSerialize] public FrozenDictionary<GasProperties, float> Amounts { get; } = amounts.ToFrozenDictionary();
+                                  [NumosSerialize] public int[] Order { get; } = order.ToArray();
+                                  [NumosSerialize] public IReadOnlyList<int> More { get; } = more;
+                                  [NumosSerialize] public float Spread { get; } = spread;
                               }
                               """;
 
@@ -316,12 +378,12 @@ public sealed class StateGeneratorTests
         string generated = GeneratorHarness.GeneratedSource(result, "MyMod.Settings.NumosState.g.cs");
         Assert.Multiple(() =>
         {
-            Assert.That(generated, Does.Contain("has1 ? field1 : "), "IReadOnlyList already is an IEnumerable");
-            Assert.That(generated, Does.Contain("has2 ? new global::System.Collections.Generic.HashSet<string>(field2) : "));
-            Assert.That(generated, Does.Contain("has3 ? field3 : "), "FrozenDictionary already is an IDictionary");
-            Assert.That(generated, Does.Contain("has4 ? new global::System.Collections.Generic.List<int>(field4) : "));
-            Assert.That(generated, Does.Contain("has5 ? global::System.Collections.Immutable.ImmutableArray.CreateRange(field5) : "));
-            Assert.That(generated, Does.Contain("has6 ? field6 : (float)(-0.5)"));
+            Assert.That(generated, Does.Contain(HasLocal("Rates") + " ? " + FieldLocal("Rates") + " : "), "IReadOnlyList already is an IEnumerable");
+            Assert.That(generated, Does.Contain(HasLocal("Names") + " ? new global::System.Collections.Generic.HashSet<string>(" + FieldLocal("Names") + ") : "));
+            Assert.That(generated, Does.Contain(HasLocal("Amounts") + " ? " + FieldLocal("Amounts") + " : "), "FrozenDictionary already is an IDictionary");
+            Assert.That(generated, Does.Contain(HasLocal("Order") + " ? new global::System.Collections.Generic.List<int>(" + FieldLocal("Order") + ") : "));
+            Assert.That(generated, Does.Contain(HasLocal("More") + " ? global::System.Collections.Immutable.ImmutableArray.CreateRange(" + FieldLocal("More") + ") : "));
+            Assert.That(generated, Does.Contain(HasLocal("Spread") + " ? " + FieldLocal("Spread") + " : (float)(-0.5)"));
         });
     }
 
@@ -337,7 +399,6 @@ public sealed class StateGeneratorTests
 
                               namespace MyMod;
 
-                              [NumosState]
                               public readonly partial record struct Reaction
                               {
                                   public Reaction(IDictionary<GasProperties, float> input, Kelvin ignition)
@@ -346,8 +407,8 @@ public sealed class StateGeneratorTests
                                       Ignition = ignition;
                                   }
 
-                                  [StateField(1)] private FrozenDictionary<GasProperties, Mole> Input { get; }
-                                  [StateField(2)] private float Ignition { get; }
+                                  [NumosSerialize] private FrozenDictionary<GasProperties, Mole> Input { get; }
+                                  [NumosSerialize] private float Ignition { get; }
                               }
                               """;
 
@@ -360,11 +421,11 @@ public sealed class StateGeneratorTests
         Assert.That(diagnostics, Is.Empty);
         Assert.That(
             GeneratorHarness.GeneratedSource(result, "MyMod.Reaction.NumosState.g.cs"),
-            Does.Contain("return new global::MyMod.Reaction(has1 ? field1 : "));
+            Does.Contain("return new global::MyMod.Reaction(" + HasLocal("Input") + " ? " + FieldLocal("Input") + " : "));
     }
 
     [Test]
-    public void DeclaredKey_BecomesStateKeyAndSolverConfigurationKey()
+    public void SolverConfigurations_AreRegisteredByOneModuleInitializer()
     {
         const string source = """
                               using Numos.CoreSim;
@@ -372,12 +433,20 @@ public sealed class StateGeneratorTests
 
                               namespace MyMod;
 
-                              [NumosState(Key = "my-mod/fire")]
-                              public sealed partial class FireSettings : IAtmosSolverConfiguration
+                              public sealed partial class Smoke : IAtmosSolverConfiguration
                               {
-                                  [StateField(1)] public float IgnitionTemperature { get; init; }
+                                  public string Key => "my-mod/smoke";
+                                  [NumosSerialize] public float Density { get; init; }
+                              }
 
-                                  public IAtmosSolverConfiguration CreateSnapshot(IGasRegistry gases) => this;
+                              internal sealed partial record Fire([property: NumosSerialize] float Ignition) : IAtmosSolverConfiguration
+                              {
+                                  public string Key => "my-mod/fire";
+                              }
+
+                              public partial struct NotAConfiguration
+                              {
+                                  [NumosSerialize] public float Value;
                               }
                               """;
 
@@ -385,11 +454,92 @@ public sealed class StateGeneratorTests
         Assert.That(diagnostics, Is.Empty);
         Assert.That(GeneratorHarness.Errors(output), Is.Empty);
 
-        string generated = GeneratorHarness.GeneratedSource(result, "MyMod.FireSettings.NumosState.g.cs");
+        string initializer = GeneratorHarness.GeneratedSource(result, StateGenerator.ModuleInitializerHintName);
         Assert.Multiple(() =>
         {
-            Assert.That(generated, Does.Contain(".StateKey => \"my-mod/fire\";"));
-            Assert.That(generated, Does.Contain("public string Key => \"my-mod/fire\";"));
+            Assert.That(initializer, Does.Contain("[global::System.Runtime.CompilerServices.ModuleInitializer]"));
+            Assert.That(initializer, Does.Contain("\"CA2255\""));
+            Assert.That(initializer, Does.Not.Contain("NotAConfiguration"));
+            Assert.That(
+                initializer.IndexOf("RegisterDefault<global::MyMod.Fire>();", StringComparison.Ordinal),
+                Is.LessThan(initializer.IndexOf("RegisterDefault<global::MyMod.Smoke>();", StringComparison.Ordinal))
+                    .And.GreaterThan(0));
         });
+    }
+
+    [Test]
+    public void NoSolverConfigurations_NoModuleInitializer()
+    {
+        GeneratorRunResult result = GeneratorHarness.RunState(out _, out _, null, EveryShapeSource);
+        Assert.That(result.GeneratedSources.Select(static source => source.HintName), Has.None.EqualTo(StateGenerator.ModuleInitializerHintName));
+    }
+
+    [TestCase("[NumosSerialize] public float Rate { get; init; }", true)]
+    [TestCase("[NumosSerialize] public readonly Numos.Maths.Int3 Size;\npublic Settings(Numos.Maths.Int3 size) => Size = size;", true)]
+    [TestCase("[NumosSerialize] public System.Collections.Frozen.FrozenDictionary<GasProperties, float> Amounts { get; init; } = null!;", true)]
+    [TestCase("[NumosSerialize] public System.Collections.Immutable.ImmutableArray<Inner> Inners { get; init; }", true)]
+    [TestCase("[NumosSerialize] public float Rate { get; set; }", false)]
+    [TestCase("[NumosSerialize] public float Rate;", false)]
+    [TestCase("[NumosSerialize] public System.Collections.Generic.IReadOnlyList<float> Rates { get; init; } = [];", false)]
+    [TestCase("[NumosSerialize] public float[] Rates { get; init; } = [];", false)]
+    [TestCase("[NumosSerialize] public System.Collections.Immutable.ImmutableArray<Loose> Loose { get; init; }", false)]
+    public void GeneratedSnapshot_IsTheInstanceOnlyWhenProvablyImmutable(string member, bool immutable)
+    {
+        string source = $$"""
+                          using Numos.CoreSim;
+                          using Numos.CoreSim.State;
+
+                          namespace MyMod;
+
+                          public readonly partial record struct Inner([property: NumosSerialize] float Value);
+
+                          public partial struct Loose
+                          {
+                              [NumosSerialize] public float Value;
+                          }
+
+                          public sealed partial class Settings : IAtmosSolverConfiguration
+                          {
+                              public string Key => "my-mod/settings";
+
+                              {{member}}
+                          }
+                          """;
+
+        GeneratorRunResult result = GeneratorHarness.RunState(out Compilation output, out var diagnostics, null, source);
+        Assert.That(diagnostics, Is.Empty);
+        Assert.That(GeneratorHarness.Errors(output), Is.Empty);
+
+        string generated = GeneratorHarness.GeneratedSource(result, "MyMod.Settings.NumosState.g.cs");
+        Assert.That(generated, Does.Contain("partial void OnSnapshot(global::Numos.CoreSim.IGasRegistry gases);"));
+        if (immutable)
+            Assert.That(generated, Does.Match(@"OnSnapshot\(gases\);\s+return this;").And.Not.Contain("StateBinarySink"));
+        else
+            Assert.That(generated, Does.Contain("var snapshot = ").And.Contain("snapshot.OnSnapshot(gases);"));
+    }
+
+    [Test]
+    public void HandWrittenCreateSnapshot_Wins()
+    {
+        const string source = """
+                              using Numos.CoreSim;
+                              using Numos.CoreSim.State;
+
+                              namespace MyMod;
+
+                              public sealed partial class Settings : IAtmosSolverConfiguration
+                              {
+                                  public string Key => "my-mod/settings";
+                                  [NumosSerialize] public float Rate { get; set; }
+                                  public IAtmosSolverConfiguration CreateSnapshot(IGasRegistry gases) => new Settings { Rate = Rate };
+                              }
+                              """;
+
+        GeneratorRunResult result = GeneratorHarness.RunState(out Compilation output, out var diagnostics, null, source);
+        Assert.That(diagnostics, Is.Empty);
+        Assert.That(GeneratorHarness.Errors(output), Is.Empty);
+        Assert.That(
+            GeneratorHarness.GeneratedSource(result, "MyMod.Settings.NumosState.g.cs"),
+            Does.Not.Contain("CreateSnapshot").And.Not.Contain("OnSnapshot"));
     }
 }

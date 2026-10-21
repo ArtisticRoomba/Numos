@@ -16,7 +16,6 @@ namespace Numos.CoreSim.GasReactions;
 ///     simulation.SetAtmosConfig(config);
 ///     </code>
 /// </example>
-[NumosState(Key = ConfigurationKey)]
 public sealed partial class GasReactionConfig : IAtmosSolverConfiguration
 {
     /// <summary>
@@ -29,7 +28,6 @@ public sealed partial class GasReactionConfig : IAtmosSolverConfiguration
     // Reaction-ID-indexed and built once at construction, because reaction definitions never change after capture.
     // Callers that need a reaction's energy balance on every iteration skip the Linear-vs-Standard branch
     // and the IReadOnlyList indexer call.
-    [NotState]
     private readonly JoulePerMole[] _energyBalances;
 
     /// <summary>
@@ -56,14 +54,17 @@ public sealed partial class GasReactionConfig : IAtmosSolverConfiguration
     /// <summary>
     ///     Gets linear reaction definitions in reaction-ID order.
     /// </summary>
-    [StateField(1)]
+    [NumosSerialize]
     public IReadOnlyList<LinearGasReaction> LinearReactions { get; }
 
     /// <summary>
     ///     Gets standard reactions, whose IDs follow all linear reactions.
     /// </summary>
-    [StateField(2)]
+    [NumosSerialize]
     public IReadOnlyList<StandardGasReaction> StandardReactions { get; }
+
+    /// <inheritdoc />
+    public string Key => ConfigurationKey;
 
     /// <summary>
     ///     Gets the combined number of reactions.

@@ -11,7 +11,6 @@ namespace Numos.CoreSim.GasReactions;
 /// <remarks>
 ///     Cheaper to evaluate and easier to set up than <see cref="StandardGasReaction" />, at the cost of realism.
 /// </remarks>
-[NumosState]
 public readonly partial record struct LinearGasReaction
 {
     /// <summary>
@@ -64,13 +63,13 @@ public readonly partial record struct LinearGasReaction
     /// <summary>
     ///     Moles of each reactant consumed per reaction.
     /// </summary>
-    [StateField(1)]
+    [NumosSerialize]
     private FrozenDictionary<GasProperties, float> Input { get; }
 
     /// <summary>
     ///     Moles of each product produced per reaction.
     /// </summary>
-    [StateField(2)]
+    [NumosSerialize]
     private FrozenDictionary<GasProperties, float> Output { get; }
 
     /// <summary>
@@ -80,38 +79,36 @@ public readonly partial record struct LinearGasReaction
     ///     Per mole of whichever reactant has a coefficient of one, so for 2H₂ + O₂ -> 2H₂O it is the energy released
     ///     per mole of oxygen consumed.
     /// </remarks>
-    [StateField(3)]
+    [NumosSerialize]
     internal JoulePerMole EnergyBalance { get; }
 
-    [StateField(4)]
+    [NumosSerialize]
     private Kelvin LowTemperatureBound { get; }
-    [StateField(5)]
+    [NumosSerialize]
     private Kelvin HighTemperatureBound { get; }
 
-    [StateField(6)]
+    [NumosSerialize]
     private ConcentrationPerSecond LowTempSpeed { get; }
-    [StateField(7)]
+    [NumosSerialize]
     private ConcentrationPerSecond HighTempSpeed { get; }
 
-    [NotState]
     private Kelvin BoundaryRange { get; }
 
-    [NotState]
     private ConcentrationPerSecond SpeedRange { get; }
 
     /// <summary>
     ///     Whether the rate is zero below <see cref="LowTemperatureBound" /> instead of extrapolated.
     /// </summary>
-    [StateField(8)]
+    [NumosSerialize]
     private bool LowStrict { get; }
 
     /// <summary>
     ///     Whether the rate is zero above <see cref="HighTemperatureBound" /> instead of extrapolated.
     /// </summary>
-    [StateField(9)]
+    [NumosSerialize]
     private bool HighStrict { get; }
 
-    [StateField(10)]
+    [NumosSerialize]
     private FrozenSet<LinearSpeedFactor> SpeedFactors { get; }
 
     private static float EvalLinear(

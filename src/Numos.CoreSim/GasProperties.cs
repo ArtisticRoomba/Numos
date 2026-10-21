@@ -9,10 +9,8 @@ namespace Numos.CoreSim;
 /// </summary>
 /// <remarks>
 ///     Every field is state: it's compared, hashed, and saved with the configuration's gas registry. A field typed
-///     <see cref="GasProperties" /> on another <see cref="NumosStateAttribute" /> type is a reference and saves only the
-///     name.
+///     <see cref="GasProperties" /> on another serializable type is a reference and saves only the name.
 /// </remarks>
-[NumosState]
 public partial record struct GasProperties
 {
     /// <summary>
@@ -20,13 +18,13 @@ public partial record struct GasProperties
     ///     <see cref="AtmosConfig.SaturationReferencePressure" />.
     /// </summary>
     [Quantity("temperature")]
-    [StateField(3)]
+    [NumosSerialize]
     public Kelvin BoilingPoint;
 
     /// <summary>
     ///     Whether this species participates in the condensation model.
     /// </summary>
-    [StateField(4)]
+    [NumosSerialize]
     public bool CondensationEnabled;
 
     /// <summary>
@@ -46,7 +44,7 @@ public partial record struct GasProperties
     ///     </para>
     /// </remarks>
     [Quantity("diffusivity")]
-    [StateField(7)]
+    [NumosSerialize]
     public SquareMetrePerSecond DiffusionCoefficient;
 
     /// <summary>
@@ -57,7 +55,7 @@ public partial record struct GasProperties
     ///     not consumed by the built-in solver. A custom liquid integration may interpret it.
     /// </remarks>
     /// TODO FAR FUTURE fluid sim :godo:
-    [StateField(6)]
+    [NumosSerialize]
     public int LiquidId;
 
     /// <summary>
@@ -68,7 +66,7 @@ public partial record struct GasProperties
     ///     balance converts it to an approximate internal-energy change, <c>ΔU_vap = ΔH_vap - RT</c>.
     /// </remarks>
     [Quantity("molarEnergy")]
-    [StateField(5)]
+    [NumosSerialize]
     public JoulePerMole MolarEnthalpyOfVaporization;
 
     /// <summary>
@@ -80,7 +78,7 @@ public partial record struct GasProperties
     ///     than or equal to zero use <see cref="AtmosConfig.DefaultMolarHeatCapacityAtConstantVolume" />.
     /// </remarks>
     [Quantity("molarHeatCapacity")]
-    [StateField(2)]
+    [NumosSerialize]
     public JoulePerMoleKelvin MolarHeatCapacityAtConstantVolume;
 
     /// <summary>
@@ -101,7 +99,7 @@ public partial record struct GasProperties
     ///     Oxygen is <c>0.031998f</c> and hydrogen is <c>0.002016f</c>.
     /// </example>
     [Quantity("molarMass")]
-    [StateField(8)]
+    [NumosSerialize]
     public KilogramPerMole MolarMass;
 
     /// <summary>
@@ -110,7 +108,6 @@ public partial record struct GasProperties
     /// <remarks>
     ///     Saved as a nullable string: the registry accepts an unnamed gas, which just can't be looked up by name.
     /// </remarks>
-    [StateField(1)]
-    [StateCodec(typeof(StateCodecs.Nullable<string, StateCodecs.String>))]
+    [NumosSerialize(Codec = typeof(StateCodecs.Nullable<string, StateCodecs.String>))]
     public string Name;
 }

@@ -39,16 +39,10 @@ public sealed class NumosReplayReadOptions
     ///     Gets or sets the solver configuration types a world replay load can decode, by key.
     /// </summary>
     /// <remarks>
-    ///     Starts with the built-in configurations. Register each custom <see cref="NumosStateAttribute" />
-    ///     configuration the file might contain; a saved key with no registered type fails the load with a
-    ///     <see cref="NotSupportedException" />.
+    ///     Already knows every solver configuration with <see cref="NumosSerializeAttribute" /> members in an
+    ///     assembly that's in use, since each registers itself. A saved key with no registered type fails the load
+    ///     with a <see cref="NotSupportedException" />.
     /// </remarks>
-    /// <example>
-    ///     <code>
-    ///     var options = new NumosReplayReadOptions();
-    ///     options.SolverConfigurations.Register&lt;FireSettings&gt;();
-    ///     </code>
-    /// </example>
     public SolverConfigurationTypes SolverConfigurations { get; set; } = new();
 
     /// <summary>

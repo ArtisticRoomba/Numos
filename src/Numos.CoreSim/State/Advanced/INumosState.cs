@@ -1,7 +1,7 @@
 namespace Numos.CoreSim.State.Advanced;
 
 /// <summary>
-///     Implemented by the source generator for every <see cref="NumosStateAttribute" /> type.
+///     Implemented by the source generator for every type with <see cref="NumosSerializeAttribute" /> members.
 /// </summary>
 /// <typeparam name="TSelf">The implementing type.</typeparam>
 /// <remarks>
@@ -12,8 +12,12 @@ namespace Numos.CoreSim.State.Advanced;
 public interface INumosState<TSelf> : INumosState where TSelf : INumosState<TSelf>
 {
     /// <summary>
-    ///     Gets the type's <see cref="NumosStateAttribute.Key" />, or <see langword="null" /> when it doesn't declare one.
+    ///     Gets the constant the type's <c>Key</c> property returns, or <see langword="null" /> when it has none.
     /// </summary>
+    /// <remarks>
+    ///     Every solver configuration has one, since the generator requires a constant key there. Standalone state files
+    ///     record it so a load can check it got the type it asked for.
+    /// </remarks>
     static abstract string? StateKey { get; }
 
     /// <summary>
@@ -56,7 +60,7 @@ public interface INumosState<TSelf> : INumosState where TSelf : INumosState<TSel
     /// <returns>The value, built through its bound constructor.</returns>
     /// <remarks>
     ///     Field ids the type doesn't know are skipped, and fields the data doesn't contain get their default (see
-    ///     <see cref="NumosStateAttribute" />), so data from an older or newer version of the type still loads.
+    ///     <see cref="NumosSerializeAttribute" />), so data from an older or newer version of the type still loads.
     /// </remarks>
     /// <exception cref="InvalidDataException">The data is malformed or names a gas <paramref name="gases" /> lacks.</exception>
     /// <exception cref="InvalidOperationException">
@@ -90,11 +94,40 @@ public interface INumosState
 public static class NumosState
 {
     /// <summary>
+    ///     Gets the wire id of a field with the given wire name: its member name, or the name passed to
+    ///     <see cref="NumosSerializeAttribute(string)" />.
+    /// </summary>
+    /// <param name="name">The wire name.</param>
+    /// <returns>A positive id.</returns>
+    /// <remarks>
+    ///     FNV-1a (32-bit) over the name's UTF-8 bytes, with the sign bit cleared so the id is positive, and 0 mapped
+    ///     to 1. The generator computes the same thing at build time. Only hand-written codecs that frame their own
+    ///     objects need to call it.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="name" /> is <see langword="null" />.</exception>
+    public static int FieldId(string name)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        uint hash = 2166136261;
+        int length = System.Text.Encoding.UTF8.GetByteCount(name);
+        Span<byte> bytes = length <= 256 ? stackalloc byte[length] : new byte[length];
+        System.Text.Encoding.UTF8.GetBytes(name, bytes);
+        foreach (byte value in bytes)
+        {
+            hash ^= value;
+            hash *= 16777619;
+        }
+
+        int id = (int)(hash & 0x7FFFFFFF);
+        return id == 0 ? 1 : id;
+    }
+
+    /// <summary>
     ///     Walks <paramref name="value" />'s state fields into <paramref name="sink" />.
     /// </summary>
     /// <param name="sink">The sink to write to.</param>
     /// <param name="value">The value to write.</param>
-    /// <typeparam name="T">A <see cref="NumosStateAttribute" /> type.</typeparam>
+    /// <typeparam name="T">A type with <see cref="NumosSerializeAttribute" /> members.</typeparam>
     /// <typeparam name="TSink">The sink type.</typeparam>
     public static void Write<T, TSink>(ref TSink sink, T value)
         where T : INumosState<T>
@@ -108,7 +141,7 @@ public static class NumosState
     /// </summary>
     /// <param name="reader">The reader, positioned at the value.</param>
     /// <param name="gases">Resolves gas references by name; needed only when the value references gases.</param>
-    /// <typeparam name="T">A <see cref="NumosStateAttribute" /> type.</typeparam>
+    /// <typeparam name="T">A type with <see cref="NumosSerializeAttribute" /> members.</typeparam>
     /// <returns>The value.</returns>
     /// <exception cref="InvalidDataException">The data is malformed or names a gas <paramref name="gases" /> lacks.</exception>
     /// <exception cref="InvalidOperationException">
@@ -124,7 +157,7 @@ public static class NumosState
     /// </summary>
     /// <param name="left">The first value.</param>
     /// <param name="right">The second value.</param>
-    /// <typeparam name="T">A <see cref="NumosStateAttribute" /> type.</typeparam>
+    /// <typeparam name="T">A type with <see cref="NumosSerializeAttribute" /> members.</typeparam>
     /// <returns>True when every state field matches.</returns>
     public static bool StateEquals<T>(T left, T right) where T : INumosState<T>
     {
@@ -135,7 +168,7 @@ public static class NumosState
     ///     Hashes a value's state fields with a fresh <see cref="StateHashSink" />.
     /// </summary>
     /// <param name="value">The value to hash.</param>
-    /// <typeparam name="T">A <see cref="NumosStateAttribute" /> type.</typeparam>
+    /// <typeparam name="T">A type with <see cref="NumosSerializeAttribute" /> members.</typeparam>
     /// <returns>The value's state hash.</returns>
     /// <remarks>
     ///     A solver configuration's generated <see cref="IAtmosSolverConfiguration.ComputeStateHash" /> also hashes its

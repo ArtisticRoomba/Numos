@@ -122,7 +122,7 @@ internal static partial class AtmosReplayCodec
     ///     snapshot's ordinal key order, its key and a length-prefixed payload. <see cref="AtmosConfigSnapshot.WriteHash" />
     ///     hashes the same sequence without the lengths.
     /// </remarks>
-    /// <exception cref="NotSupportedException">A solver configuration is neither a <see cref="NumosStateAttribute" /> type nor a built-in portable one.</exception>
+    /// <exception cref="NotSupportedException">A solver configuration has no <see cref="NumosSerializeAttribute" /> members and is not a built-in portable one.</exception>
     internal static void WriteConfig(BinaryWriter writer, AtmosConfigSnapshot config)
     {
         var fields = new StateBinarySink();
@@ -142,7 +142,7 @@ internal static partial class AtmosReplayCodec
             if (configuration is not INumosState state)
             {
                 throw new NotSupportedException(
-                    $"Solver configuration '{configuration.Key}' ({configuration.GetType()}) isn't a [NumosState] type, so it can't be saved.");
+                    $"Solver configuration '{configuration.Key}' ({configuration.GetType()}) has no [NumosSerialize] members, so it can't be saved.");
             }
 
             var sink = new StateBinarySink();

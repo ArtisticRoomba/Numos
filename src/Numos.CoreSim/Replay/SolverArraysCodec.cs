@@ -6,7 +6,7 @@ using Numos.CoreSim.State.Advanced;
 namespace Numos.CoreSim.Replay;
 
 /// <summary>
-///     The <see cref="StateCodecAttribute" /> codec for <see cref="AtmosChunkCheckpoint.SolverArrays" />, the chunk's
+///     The <see cref="NumosSerializeAttribute.Codec" /> for <see cref="AtmosChunkCheckpoint.SolverArrays" />, the chunk's
 ///     rollback <c>ChunkField&lt;T&gt;</c> arrays.
 /// </summary>
 /// <remarks>

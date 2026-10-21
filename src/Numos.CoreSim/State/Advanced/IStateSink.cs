@@ -3,7 +3,7 @@ using Numos.CoreSim.Replay;
 namespace Numos.CoreSim.State.Advanced;
 
 /// <summary>
-///     Receives a <see cref="NumosStateAttribute" /> value as a stream of framed fields and primitives.
+///     Receives a serializable value as a stream of framed fields and primitives.
 /// </summary>
 /// <remarks>
 ///     <para>
@@ -26,7 +26,7 @@ namespace Numos.CoreSim.State.Advanced;
 public interface IStateSink
 {
     /// <summary>
-    ///     Starts a <see cref="NumosStateAttribute" /> value, top-level or nested.
+    ///     Starts a serializable value, top-level or nested.
     /// </summary>
     void BeginObject();
 
@@ -38,7 +38,7 @@ public interface IStateSink
     /// <summary>
     ///     Starts the payload of the field with <paramref name="id" />.
     /// </summary>
-    /// <param name="id">The field's <see cref="StateFieldAttribute.Id" />.</param>
+    /// <param name="id">The field id, from <see cref="NumosState.FieldId" />.</param>
     void BeginField(int id);
 
     /// <summary>

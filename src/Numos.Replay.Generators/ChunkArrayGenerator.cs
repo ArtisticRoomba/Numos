@@ -10,8 +10,8 @@ namespace Numos.Replay.Generators;
 ///     <c>[LiveChunkArray]</c> properties (<c>AtmosChunkCheckpoint</c> in Numos.CoreSim).
 /// </summary>
 /// <remarks>
-///     The state schema already generates the checkpoint's hash, equality, and wire code from its <c>[StateField]</c>
-///     ids. This covers the one thing it can't know: which live <c>AtmosChunk</c> array each per-voxel property is
+///     The state schema already generates the checkpoint's hash, equality, and wire code from its <c>[NumosSerialize]</c>
+///     members. This covers the one thing it can't know: which live <c>AtmosChunk</c> array each per-voxel property is
 ///     copied from and restored into. Each property's attribute names its live member, so the mapping is declared once.
 /// </remarks>
 [Generator(LanguageNames.CSharp)]

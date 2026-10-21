@@ -90,7 +90,7 @@ internal static class StateBinding
             StateFieldModel? field = Match(parameter.Name, fields);
             if (field is null)
             {
-                failure = "constructor parameter '" + parameter.Name + "' doesn't match any [StateField] member by name";
+                failure = "constructor parameter '" + parameter.Name + "' doesn't match any [NumosSerialize] member by name";
                 return null;
             }
 

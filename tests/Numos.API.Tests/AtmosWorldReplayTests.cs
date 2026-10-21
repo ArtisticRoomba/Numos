@@ -244,7 +244,7 @@ public sealed class AtmosWorldReplayTests
             Throws.ArgumentException);
     }
 
-    // No [NumosState], so it has no wire format: in-memory restore works, portable files don't.
+    // No [NumosSerialize] members, so it has no wire format: in-memory restore works, portable files don't.
     private sealed record HandWrittenSettings(int Value) : IAtmosSolverConfiguration
     {
         public string Key => "tests/hand-written";

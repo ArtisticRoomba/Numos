@@ -3,24 +3,34 @@ using Numos.CoreSim.State.Advanced;
 namespace Numos.CoreSim.State;
 
 /// <summary>
-///     Opts a partial type into the state schema: the <c>Numos.API</c> source generator emits its equality, canonical
-///     ordering, <see cref="INumosState{TSelf}.WriteState{TSink}" /> walker, and
-///     <see cref="INumosState{TSelf}.ReadState" /> reader from its <see cref="StateFieldAttribute" /> members.
+///     Marks a field or auto-property as state. The <c>Numos.API</c> source generator then gives the declaring type
+///     equality, a state hash, a binary reader and writer, and (for solver configurations) a snapshot copy and
+///     registration for loading, with nothing else to write.
 /// </summary>
 /// <remarks>
 ///     <para>
-///         Every instance field and auto-property on the type must carry either <see cref="StateFieldAttribute" /> or
-///         <see cref="NotStateAttribute" />. An untagged one is a build error, so adding a field can't silently leave it
-///         out of equality and the hash. Computed properties with no backing storage are ignored.
+///         Any type with at least one marked member takes part, and must be <see langword="partial" /> (along with
+///         every type it's nested in), non-generic, and derive from <see cref="object" /> if it's a class. On a
+///         positional record, mark the parameter with <c>[property: NumosSerialize]</c>.
 ///     </para>
 ///     <para>
-///         A type that also implements <see cref="IAtmosSolverConfiguration" /> gets
-///         <see cref="IAtmosSolverConfiguration.SemanticallyEquals" /> and
-///         <see cref="IAtmosSolverConfiguration.ComputeStateHash" /> generated, plus
-///         <see cref="IAtmosSolverConfiguration.Key" /> when <see cref="Key" /> is set.
-///         <see cref="IAtmosSolverConfiguration.CreateSnapshot" /> stays hand-written. Don't write the generated members
-///         (or an <c>AppendHash</c>) yourself; the generator reports that as an error instead of letting two
-///         definitions disagree.
+///         A field's wire id is a hash of its name, so members can be reordered freely and an id never needs picking.
+///         Renaming a member changes its id; pass the old name (<c>[NumosSerialize("OldName")]</c>) to keep reading
+///         files written before the rename. Removing a member needs nothing: ids a reader doesn't know are skipped.
+///         Two names in one type that hash to the same id fail the build.
+///     </para>
+///     <para>
+///         A mutable instance member on a participating type with neither this attribute nor
+///         <see cref="NumosIgnoreAttribute" /> is a build warning, so a new setting can't quietly miss the hash.
+///         Readonly fields and get-only auto-properties are assumed to be derived caches and aren't flagged.
+///     </para>
+///     <para>
+///         Supported types are <see langword="bool" />, the integer types, <see langword="float" />,
+///         <see langword="double" />, enums, <see langword="string" />, <c>Int3</c>, Numos.Units quantity aliases,
+///         <see cref="GasProperties" /> (saved by name), <see cref="GasRegistry" /> (saved by value), other
+///         participating types, arrays, <see cref="IReadOnlyList{T}" />, <c>ImmutableArray&lt;T&gt;</c>, read-only,
+///         frozen, or plain dictionaries, read-only or frozen sets, and nullable forms of these. Anything else needs a
+///         <see cref="Codec" />.
 ///     </para>
 ///     <para>
 ///         Floats compare by their bits, so <c>0f</c> and <c>-0f</c> differ and a NaN equals itself, which is what the
@@ -28,148 +38,87 @@ namespace Numos.CoreSim.State;
 ///         <see cref="GasProperties.Name" />, strings ordinally), so insertion order doesn't matter.
 ///     </para>
 ///     <para>
-///         The generated reader builds the value through a constructor, the way <c>System.Text.Json</c> does: each
-///         parameter binds to the state field with the same name, ignoring case, and fields no parameter covers are
-///         set through their <c>set</c> or <c>init</c> accessor (or directly, for a mutable field). A parameter may be
-///         any collection type the field's value can be copied into, such as <see cref="IEnumerable{T}" /> or
-///         <see cref="IDictionary{TKey, TValue}" /> for a frozen field. When several constructors bind, the one with the
-///         most parameters wins; when none does, the build fails.
+///         The generated reader builds a value through a constructor, the way <c>System.Text.Json</c> does: each
+///         parameter binds to the marked member with the same name, ignoring case, and members no parameter covers are
+///         assigned through their <c>set</c> or <c>init</c> accessor. A member missing from older data gets the
+///         parameter's default value, keeps what the constructor gave it, or gets <c>default</c>.
 ///     </para>
 ///     <para>
-///         A field missing from older data gets the parameter's default value if a parameter declares one. A settable
-///         field or <c>set</c> property is left alone, so it keeps whatever the constructor or its initializer gave it.
-///         Anything else gets <c>default</c>, an empty string, or an empty collection.
+///         Not allowed on types implementing <c>IAtmosWorldSolver</c> yet: solver objects sit outside checkpoints, so a
+///         value saved there would never be reproduced by replay. Put settings in an
+///         <see cref="IAtmosSolverConfiguration" /> and per-voxel state in a <c>[ChunkData]</c> field.
 ///     </para>
 /// </remarks>
 /// <example>
+///     A complete solver configuration. It saves with the world, loads without registration, and gets
+///     <see cref="IAtmosSolverConfiguration.CreateSnapshot" /> generated:
 ///     <code>
-///     [NumosState(Key = "my-mod/fire")]
 ///     public sealed partial class FireSettings : IAtmosSolverConfiguration
 ///     {
-///         [StateField(1)] public Kelvin IgnitionTemperature { get; init; }
-///         [StateField(2)] public float SpreadRate { get; init; }
+///         public string Key => "my-mod/fire";
 ///
-///         [NotState] private float[]? _derivedTable; // rebuilt from the fields above
-///
-///         public IAtmosSolverConfiguration CreateSnapshot(IGasRegistry gases) => this;
+///         [NumosSerialize] public Kelvin IgnitionTemperature { get; init; } = 600f;
+///         [NumosSerialize] public float SpreadRate { get; init; }
 ///     }
 ///     </code>
 /// </example>
-[AttributeUsage(AttributeTargets.Class | AttributeTargets.Struct, Inherited = false)]
-public sealed class NumosStateAttribute : Attribute
+[AttributeUsage(AttributeTargets.Field | AttributeTargets.Property, Inherited = false)]
+public sealed class NumosSerializeAttribute : Attribute
 {
     /// <summary>
-    ///     Gets or sets the type's state key, a stable, namespaced name such as <c>"my-mod/fire"</c>.
+    ///     Marks a member as state under its own name.
+    /// </summary>
+    public NumosSerializeAttribute()
+    {
+    }
+
+    /// <summary>
+    ///     Marks a member as state under a different wire name, usually its name before a rename.
+    /// </summary>
+    /// <param name="name">The name whose hash is the member's wire id. Must not be blank.</param>
+    public NumosSerializeAttribute(string name)
+    {
+        Name = name;
+    }
+
+    /// <summary>
+    ///     Gets the wire name, or <see langword="null" /> when the member's own name is used.
+    /// </summary>
+    public string? Name { get; }
+
+    /// <summary>
+    ///     Gets or sets an <see cref="IStateCodec{T}" /> that writes, compares, and reads the member in place of the
+    ///     one its type would get.
     /// </summary>
     /// <remarks>
     ///     <para>
-    ///         Optional. It becomes <see cref="INumosState{TSelf}.StateKey" />, which standalone state files record so a
-    ///         load can check it got the type it asked for. On a solver configuration it also becomes the generated
-    ///         <see cref="IAtmosSolverConfiguration.Key" />, so the key the world sees and the key the file records
-    ///         can't drift apart; don't write <c>Key</c> by hand as well.
+    ///         For shapes the schema can't describe on its own, such as a count-prefixed list of runtime-typed values,
+    ///         or to change how a supported type is written, such as a <see langword="string" /> that may hold
+    ///         <see langword="null" />. The codec owns the whole member, so it's also responsible for keeping its hash
+    ///         and bytes in step: write both through the same sink calls.
     ///     </para>
     ///     <para>
-    ///         Leave it out on a solver configuration that's used under more than one key, and keep a hand-written
-    ///         <c>Key</c>. Such a type still saves into world archives, but has to be registered under each key it
-    ///         uses (<see cref="SolverConfigurationTypes.Register{T}(string)" />) and can't be saved on its own.
+    ///         The codec must implement <see cref="IStateCodec{T}" /> for the member's type and be accessible from the
+    ///         declaring type. A member with a codec is read through its setter, not a constructor parameter, and makes
+    ///         a solver configuration's generated snapshot a copy rather than the same instance.
     ///     </para>
-    ///     <para>Renaming a key is a format change: files saved under the old key no longer load.</para>
     /// </remarks>
-    public string? Key { get; set; }
+    /// <example>
+    ///     <code>
+    ///     [NumosSerialize(Codec = typeof(StateCodecs.Nullable&lt;string, StateCodecs.String&gt;))]
+    ///     public string Name;
+    ///     </code>
+    /// </example>
+    public Type? Codec { get; set; }
 }
 
 /// <summary>
-///     Marks a field or auto-property of a <see cref="NumosStateAttribute" /> type as authoritative state, under a
-///     stable id.
+///     Says a field or property of a type with <see cref="NumosSerializeAttribute" /> members is deliberately not
+///     state, which silences the warning for an unmarked mutable member.
 /// </summary>
 /// <remarks>
-///     <para>
-///         Fields are hashed and written in ascending id order, not declaration order, so members can be moved or
-///         renamed freely. Ids must be positive and unique within the type. Once a field is removed, list its id in
-///         <see cref="RetiredStateFieldsAttribute" /> so it can't be reused with a different meaning.
-///     </para>
-///     <para>
-///         Supported types are <see langword="bool" />, the integer types, <see langword="float" />,
-///         <see langword="double" />, enums, <see langword="string" />, <c>Int3</c>, Magnitudo quantity aliases,
-///         <see cref="GasProperties" /> (by name), <see cref="GasRegistry" /> (by value), other
-///         <see cref="NumosStateAttribute" /> types, arrays,
-///         <see cref="IReadOnlyList{T}" />, <c>ImmutableArray&lt;T&gt;</c>, read-only, frozen, or plain dictionaries,
-///         read-only or frozen sets, and nullable forms of these.
-///     </para>
-///     <para>
-///         Not allowed on types implementing <c>IAtmosWorldSolver</c>: solver objects sit outside checkpoints, so a
-///         value saved there would never be reproduced by replay. Put settings in an
-///         <see cref="IAtmosSolverConfiguration" /> and per-voxel state in a rollback chunk field.
-///     </para>
-/// </remarks>
-/// <param name="id">The field's stable id, greater than zero.</param>
-[AttributeUsage(AttributeTargets.Field | AttributeTargets.Property, Inherited = false)]
-public sealed class StateFieldAttribute(int id) : Attribute
-{
-    /// <summary>
-    ///     Gets the field's stable id.
-    /// </summary>
-    public int Id { get; } = id;
-}
-
-/// <summary>
-///     Hands a <see cref="StateFieldAttribute" /> member to a specific <see cref="IStateCodec{T}" /> instead of the one
-///     its type would get.
-/// </summary>
-/// <remarks>
-///     <para>
-///         For shapes the schema can't describe on its own, such as a count-prefixed array of runtime-typed values, or
-///         to change how a supported type is written, such as a <see langword="string" /> field that may hold
-///         <see langword="null" />. The codec writes, compares, orders, and reads the whole member, so it's also
-///         responsible for keeping its hash and bytes in step: write both through the same sink calls.
-///     </para>
-///     <para>
-///         The codec must implement <see cref="IStateCodec{T}" /> for the member's type and be accessible from the
-///         declaring type. A member with a codec is read through its setter, not a constructor parameter.
-///     </para>
-/// </remarks>
-/// <param name="codec">The codec type.</param>
-/// <example>
-///     <code>
-///     [StateField(1), StateCodec(typeof(StateCodecs.Nullable&lt;string, StateCodecs.String&gt;))]
-///     public string Name;
-///     </code>
-/// </example>
-[AttributeUsage(AttributeTargets.Field | AttributeTargets.Property, Inherited = false)]
-public sealed class StateCodecAttribute(Type codec) : Attribute
-{
-    /// <summary>
-    ///     Gets the codec type.
-    /// </summary>
-    public Type Codec { get; } = codec;
-}
-
-/// <summary>
-///     Excludes a field or auto-property of a <see cref="NumosStateAttribute" /> type from the state schema.
-/// </summary>
-/// <remarks>
-///     For derived caches rebuilt from the tagged fields, such as a precomputed range or lookup table. Anything that
-///     changes solver behavior on its own belongs in a <see cref="StateFieldAttribute" /> instead.
+///     For derived caches rebuilt from the marked members, scratch buffers, and the like. Anything that changes solver
+///     behavior on its own belongs in a <see cref="NumosSerializeAttribute" /> member instead, or replay will diverge.
 /// </remarks>
 [AttributeUsage(AttributeTargets.Field | AttributeTargets.Property, Inherited = false)]
-public sealed class NotStateAttribute : Attribute;
-
-/// <summary>
-///     Lists <see cref="StateFieldAttribute" /> ids that a <see cref="NumosStateAttribute" /> type used to have and must
-///     never reuse.
-/// </summary>
-/// <param name="ids">The retired ids.</param>
-/// <example>
-///     <code>
-///     [NumosState, RetiredStateFields(3)] // 3 was SpreadDelay, removed in 0.4
-///     public sealed partial class FireSettings : IAtmosSolverConfiguration { ... }
-///     </code>
-/// </example>
-[AttributeUsage(AttributeTargets.Class | AttributeTargets.Struct, Inherited = false)]
-public sealed class RetiredStateFieldsAttribute(params int[] ids) : Attribute
-{
-    /// <summary>
-    ///     Gets the retired ids.
-    /// </summary>
-    public IReadOnlyList<int> Ids { get; } = ids;
-}
+public sealed class NumosIgnoreAttribute : Attribute;

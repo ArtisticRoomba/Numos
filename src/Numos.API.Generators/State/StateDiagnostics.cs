@@ -8,129 +8,132 @@ internal static class StateDiagnostics
 
     public static readonly DiagnosticDescriptor TypeNotPartial = new(
         "NUMOSSTATE001",
-        "State type must be partial",
-        "Type '{0}' must be partial because [NumosState] type '{1}' is generated into it",
+        "Serializable type must be partial",
+        "Type '{0}' must be partial because '{1}' has [NumosSerialize] members and code is generated into it",
         Category,
         DiagnosticSeverity.Error,
         true);
 
     public static readonly DiagnosticDescriptor Generic = new(
         "NUMOSSTATE002",
-        "State type must not be generic",
-        "[NumosState] type '{0}' must not be generic or nested in a generic type",
+        "Serializable type must not be generic",
+        "'{0}' has [NumosSerialize] members, so it must not be generic or nested in a generic type",
         Category,
         DiagnosticSeverity.Error,
         true);
 
-    public static readonly DiagnosticDescriptor Untagged = new(
-        "NUMOSSTATE003",
-        "State type member is neither state nor excluded",
-        "'{0}' stores a value on [NumosState] type '{1}'; mark it [StateField(id)] if it affects behavior, or " +
-        "[NotState] if it's derived from the other fields",
-        Category,
-        DiagnosticSeverity.Error,
-        true);
-
-    public static readonly DiagnosticDescriptor NonPositiveId = new(
-        "NUMOSSTATE004",
-        "State field id must be positive",
-        "State field '{0}' has id {1}; ids must be greater than zero",
-        Category,
-        DiagnosticSeverity.Error,
-        true);
-
-    public static readonly DiagnosticDescriptor DuplicateId = new(
+    public static readonly DiagnosticDescriptor IdCollision = new(
         "NUMOSSTATE005",
-        "State field id is used twice",
-        "State field '{0}' reuses id {1}, already taken by '{2}'",
-        Category,
-        DiagnosticSeverity.Error,
-        true);
-
-    public static readonly DiagnosticDescriptor RetiredId = new(
-        "NUMOSSTATE006",
-        "State field id is retired",
-        "State field '{0}' uses id {1}, which [RetiredStateFields] on '{2}' lists as retired; pick a new id",
+        "Two serialized members hash to the same id",
+        "'{0}' and '{1}' both hash to field id {2}; give one a different wire name with [NumosSerialize(\"...\")]",
         Category,
         DiagnosticSeverity.Error,
         true);
 
     public static readonly DiagnosticDescriptor UnsupportedType = new(
         "NUMOSSTATE007",
-        "State field type is not supported",
-        "State field '{0}' has type '{1}', which [NumosState] can't hash or compare; '{2}' is not a primitive, " +
-        "enum, string, Int3, GasProperties, quantity alias, [NumosState] type, or supported read-only collection",
+        "Serialized member type is not supported",
+        "'{0}' has type '{1}', which [NumosSerialize] can't hash or compare; '{2}' is not a primitive, enum, string, " +
+        "Int3, GasProperties, quantity alias, serializable type, or supported read-only collection. Give it a Codec.",
         Category,
         DiagnosticSeverity.Error,
         true);
 
     public static readonly DiagnosticDescriptor HandWritten = new(
         "NUMOSSTATE008",
-        "State type declares a member the generator owns",
-        "[NumosState] type '{0}' declares '{1}', but the generator writes it from the type's [StateField] members " +
-        "and [NumosState] arguments; delete the hand-written '{1}'",
+        "Serializable type declares a member the generator owns",
+        "'{0}' declares '{1}', but the generator writes it from the type's [NumosSerialize] members; delete the " +
+        "hand-written '{1}'",
         Category,
         DiagnosticSeverity.Error,
         true);
 
     public static readonly DiagnosticDescriptor WorldSolver = new(
         "NUMOSSTATE009",
-        "Solver objects cannot hold state fields",
-        "'{0}' is on '{1}', which implements IAtmosWorldSolver; solver objects are outside checkpoints, so replay " +
-        "would never reproduce this value. Move it into a solver configuration (IAtmosSolverConfiguration) for " +
-        "settings, or a rollback chunk field for per-voxel state.",
-        Category,
-        DiagnosticSeverity.Error,
-        true);
-
-    public static readonly DiagnosticDescriptor NotStateType = new(
-        "NUMOSSTATE010",
-        "State field outside a state type",
-        "'{0}' has [StateField] but '{1}' is not marked [NumosState], so nothing reads it",
+        "Solver objects cannot hold serialized members",
+        "'{0}' implements IAtmosWorldSolver; solver objects are outside checkpoints, so replay would never reproduce " +
+        "its [NumosSerialize] members. Move them into a solver configuration (IAtmosSolverConfiguration) for " +
+        "settings, or a [ChunkData] field for per-voxel state.",
         Category,
         DiagnosticSeverity.Error,
         true);
 
     public static readonly DiagnosticDescriptor BothTags = new(
         "NUMOSSTATE011",
-        "Member is marked both state and not state",
-        "'{0}' has both [StateField] and [NotState]; keep one",
+        "Member is marked both serialized and ignored",
+        "'{0}' has both [NumosSerialize] and [NumosIgnore]; keep one",
         Category,
         DiagnosticSeverity.Error,
         true);
 
     public static readonly DiagnosticDescriptor StaticField = new(
         "NUMOSSTATE012",
-        "State field must be an instance member",
-        "'{0}' is static or const; [StateField] only applies to instance fields and properties",
+        "Serialized member must be an instance member",
+        "'{0}' is static or const; [NumosSerialize] only applies to instance fields and properties",
         Category,
         DiagnosticSeverity.Error,
         true);
 
     public static readonly DiagnosticDescriptor DerivedClass = new(
         "NUMOSSTATE013",
-        "State class must not derive from another class",
-        "[NumosState] class '{0}' derives from '{1}', whose fields the generator can't see; derive from object, " +
-        "or move the base's settings into a nested [NumosState] field",
+        "Serializable class must not derive from another class",
+        "'{0}' derives from '{1}', whose members the generator can't see; derive from object, or move the base's " +
+        "settings into a nested serializable member",
         Category,
         DiagnosticSeverity.Error,
         true);
 
     public static readonly DiagnosticDescriptor NoConstructor = new(
         "NUMOSSTATE014",
-        "State type has no constructor the reader can call",
-        "[NumosState] type '{0}' has no constructor the generated reader can call: {1}. Each constructor parameter " +
-        "must match a [StateField] member by name (ignoring case) with a type the field's value fits, and each " +
-        "state field no parameter covers needs a set or init accessor.",
+        "Serializable type has no constructor the reader can call",
+        "'{0}' has no constructor the generated reader can call: {1}. Each constructor parameter must match a " +
+        "[NumosSerialize] member by name (ignoring case) with a type the member's value fits, and each serialized " +
+        "member no parameter covers needs a set or init accessor.",
         Category,
         DiagnosticSeverity.Error,
         true);
 
     public static readonly DiagnosticDescriptor BlankKey = new(
         "NUMOSSTATE015",
-        "State key is blank",
-        "[NumosState] type '{0}' sets a blank Key; use a namespaced name such as \"my-mod/fire\", or leave Key unset",
+        "Key is blank",
+        "'{0}' returns a blank Key; use a namespaced name such as \"my-mod/fire\"",
         Category,
         DiagnosticSeverity.Error,
+        true);
+
+    public static readonly DiagnosticDescriptor Unmarked = new(
+        "NUMOSSTATE016",
+        "Mutable member is neither serialized nor ignored",
+        "'{0}' can change but isn't saved with '{1}'; mark it [NumosSerialize] if it affects behavior, or " +
+        "[NumosIgnore] if it's derived or scratch",
+        Category,
+        DiagnosticSeverity.Warning,
+        true);
+
+    public static readonly DiagnosticDescriptor BlankWireName = new(
+        "NUMOSSTATE017",
+        "Wire name is blank",
+        "'{0}' passes a blank wire name to [NumosSerialize]; leave the argument out to use the member's name",
+        Category,
+        DiagnosticSeverity.Error,
+        true);
+
+    public static readonly DiagnosticDescriptor NonConstantKey = new(
+        "NUMOSSTATE018",
+        "Solver configuration key is not a constant",
+        "Solver configuration '{0}' must return a constant string from Key, such as " +
+        "'public string Key => \"my-mod/fire\";', so it can be registered for loading",
+        Category,
+        DiagnosticSeverity.Error,
+        true);
+
+    public static readonly DiagnosticDescriptor NotRegistrable = new(
+        "NUMOSSTATE019",
+        "Solver configuration can't be registered automatically",
+        "Solver configuration '{0}' (or a type containing it) is private or protected, so the generated module " +
+        "initializer can't register it for loading; make it internal, or call SolverConfigurationTypes.Register " +
+        "before loading",
+        Category,
+        DiagnosticSeverity.Warning,
         true);
 }

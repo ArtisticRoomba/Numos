@@ -24,7 +24,7 @@ internal enum StateShapeKind
     Enum,
 
     /// <summary>
-    ///     A nested <c>[NumosState]</c> type; the name is its fully qualified type.
+    ///     A nested type with <c>[NumosSerialize]</c> members; the name is its fully qualified type.
     /// </summary>
     State,
 
@@ -49,7 +49,7 @@ internal enum StateShapeKind
     Container,
 
     /// <summary>
-    ///     A member with a <c>[StateCodec]</c>; the name is its declared type and <see cref="StateShape.Codec" /> the
+    ///     A member whose <c>[NumosSerialize]</c> names a <c>Codec</c>; the name is its declared type and <see cref="StateShape.Codec" /> the
     ///     codec that handles it.
     /// </summary>
     Custom,
@@ -67,8 +67,6 @@ internal enum StateShapeKind
 internal sealed record StateShape(StateShapeKind Kind, string Name, EquatableArray<StateShape> Arguments, string Codec = "")
 {
     private const string Codecs = "global::Numos.CoreSim.State.Advanced.StateCodecs.";
-
-    private const string StateAttributeMetadataName = "Numos.CoreSim.State.NumosStateAttribute";
 
     private static readonly SymbolDisplayFormat UnboundFormat =
         SymbolDisplayFormat.FullyQualifiedFormat.WithGenericsOptions(SymbolDisplayGenericsOptions.None);
@@ -185,7 +183,7 @@ internal sealed record StateShape(StateShapeKind Kind, string Name, EquatableArr
                 : Unsupported(type);
         }
 
-        if (named.TypeParameters.Length == 0 && HasStateAttribute(named))
+        if (named.TypeParameters.Length == 0 && StateGenerator.HasSerializedMembers(named))
             return Leaf(StateShapeKind.State, FullName(named));
 
         return Unsupported(type);
@@ -216,25 +214,11 @@ internal sealed record StateShape(StateShapeKind Kind, string Name, EquatableArr
     }
 
     /// <summary>
-    ///     Classifies a member whose <c>[StateCodec]</c> names the codec to use, whatever its type.
+    ///     Classifies a member whose <c>Codec</c> names the codec to use, whatever its type.
     /// </summary>
     public static StateShape FromCodec(ITypeSymbol memberType, ITypeSymbol codec)
     {
         return new StateShape(StateShapeKind.Custom, FullName(memberType), EquatableArray<StateShape>.Empty, FullName(codec));
-    }
-
-    public static bool HasStateAttribute(INamedTypeSymbol type)
-    {
-        foreach (AttributeData attribute in type.GetAttributes())
-        {
-            if (attribute.AttributeClass is { } attributeClass &&
-                MetadataName(attributeClass) == StateAttributeMetadataName)
-            {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     public static string MetadataName(INamedTypeSymbol type)

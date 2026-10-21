@@ -5,8 +5,8 @@ using Numos.CoreSim.State.Advanced;
 namespace Numos.Serialization.FileSystem;
 
 /// <summary>
-///     Loads and atomically saves single <see cref="NumosStateAttribute" /> values, such as solver configuration
-///     presets, using filesystem paths.
+///     Loads and atomically saves single serializable values, such as solver configuration presets, using
+///     filesystem paths.
 /// </summary>
 /// <remarks>The file format is <see cref="NumosStateSerializer" />'s.</remarks>
 /// <example>
@@ -23,7 +23,7 @@ public static class NumosStateFile
     /// <param name="path">Path to the state file.</param>
     /// <param name="gases">Resolves gas references by name. Needed only when the value references gases.</param>
     /// <param name="options">Optional limits for untrusted files.</param>
-    /// <typeparam name="T">A <see cref="NumosStateAttribute" /> type with a declared key.</typeparam>
+    /// <typeparam name="T">A serializable type with a constant <c>Key</c>, such as a solver configuration.</typeparam>
     /// <returns>The value.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="path" /> is <see langword="null" />.</exception>
     /// <exception cref="ArgumentException"><paramref name="path" /> is empty or whitespace.</exception>
@@ -52,7 +52,7 @@ public static class NumosStateFile
     /// <param name="path">Destination path.</param>
     /// <param name="value">The value to save.</param>
     /// <param name="overwrite">Whether an existing destination may be replaced.</param>
-    /// <typeparam name="T">A <see cref="NumosStateAttribute" /> type with a declared key.</typeparam>
+    /// <typeparam name="T">A serializable type with a constant <c>Key</c>, such as a solver configuration.</typeparam>
     /// <exception cref="ArgumentException"><paramref name="path" /> is empty or whitespace.</exception>
     /// <exception cref="ArgumentNullException">
     ///     <paramref name="path" /> or <paramref name="value" /> is <see langword="null" />.

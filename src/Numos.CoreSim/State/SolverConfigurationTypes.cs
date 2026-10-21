@@ -4,98 +4,98 @@ using Numos.CoreSim.State.Advanced;
 namespace Numos.CoreSim.State;
 
 /// <summary>
-///     Maps solver configuration keys to the <see cref="NumosStateAttribute" /> types that read them, so loading a
-///     world archive can turn each saved configuration back into an object.
+///     Maps solver configuration keys to the types that read them, so loading a world archive can turn each saved
+///     configuration back into an object.
 /// </summary>
 /// <remarks>
 ///     <para>
-///         Saving needs no registration: any solver configuration marked <see cref="NumosStateAttribute" /> is written
-///         under its <see cref="IAtmosSolverConfiguration.Key" />. Loading does, because a key on disk is all there is
-///         to go on. Register each custom configuration type before loading files that might contain it.
+///         Usually nothing needs registering. Every solver configuration with <see cref="NumosSerializeAttribute" />
+///         members is registered by a module initializer the generator adds to its assembly, so it's known as soon as
+///         that assembly is in use. That covers Numos's own configurations, such as <see cref="GasReactionConfig" />,
+///         and downstream ones alike. <see cref="Register{T}" /> is for types whose assembly may not have run yet when
+///         a file loads, or that the generator couldn't name (private nested types).
 ///     </para>
 ///     <para>
 ///         A key with no registered type fails the load rather than being skipped. Dropping a configuration would
 ///         change what the solvers do, and replay would quietly diverge from the recording.
 ///     </para>
-///     <para>
-///         A new instance already knows Numos's built-in configurations, such as <see cref="GasReactionConfig" />.
-///     </para>
 /// </remarks>
-/// <example>
-///     <code>
-///     var options = new NumosReplayReadOptions();
-///     options.SolverConfigurations.Register&lt;FireSettings&gt;();
-///     NumosWorldReplayDocument document = NumosReplayFile.Load(path, options);
-///     </code>
-/// </example>
 public sealed class SolverConfigurationTypes
 {
     // Only read from, never handed out, so it can stand in for "no host registrations" without anyone mutating it.
     internal static readonly SolverConfigurationTypes BuiltIn = new();
 
+    private static readonly object DefaultsLock = new();
+    private static readonly Dictionary<string, Entry> Defaults = new(StringComparer.Ordinal);
+
     private readonly Dictionary<string, Entry> _entries = new(StringComparer.Ordinal);
 
     /// <summary>
-    ///     Creates a registry holding the built-in solver configurations.
+    ///     Gets the registered keys, including every automatically registered configuration.
     /// </summary>
-    public SolverConfigurationTypes()
+    public IReadOnlyCollection<string> Keys
     {
-        Register<GasReactionConfig>();
-    }
-
-    /// <summary>
-    ///     Gets the registered keys.
-    /// </summary>
-    public IReadOnlyCollection<string> Keys => _entries.Keys;
-
-    /// <summary>
-    ///     Registers <typeparamref name="T" /> under its <see cref="NumosStateAttribute.Key" />.
-    /// </summary>
-    /// <typeparam name="T">A <see cref="NumosStateAttribute" /> solver configuration with a declared key.</typeparam>
-    /// <returns>This registry, for chaining.</returns>
-    /// <exception cref="ArgumentException">
-    ///     <typeparamref name="T" /> declares no key, or the key is already registered to a different type.
-    /// </exception>
-    public SolverConfigurationTypes Register<T>() where T : class, IAtmosSolverConfiguration, INumosState<T>
-    {
-        string? key = T.StateKey;
-        if (key is null)
+        get
         {
-            throw new ArgumentException(
-                $"{typeof(T)} declares no [NumosState(Key = ...)]. Register it under each key it uses with Register<T>(key).");
-        }
+            var keys = new SortedSet<string>(_entries.Keys, StringComparer.Ordinal);
+            lock (DefaultsLock)
+                keys.UnionWith(Defaults.Keys);
 
-        return Register<T>(key);
+            return keys;
+        }
     }
 
     /// <summary>
-    ///     Registers <typeparamref name="T" /> under <paramref name="key" />, for a configuration type that's used under
-    ///     more than one key.
+    ///     Registers <typeparamref name="T" /> with every registry, under its key.
     /// </summary>
-    /// <param name="key">The <see cref="IAtmosSolverConfiguration.Key" /> instances saved under it carry.</param>
-    /// <typeparam name="T">A <see cref="NumosStateAttribute" /> solver configuration.</typeparam>
+    /// <typeparam name="T">A solver configuration with <see cref="NumosSerializeAttribute" /> members.</typeparam>
+    /// <remarks>
+    ///     Generated module initializers call this; hosts rarely need to. A second type claiming a key that's already
+    ///     taken doesn't throw here, since that would fail the whole assembly's load, but loading a configuration under
+    ///     that key does, until a registry picks one with <see cref="Register{T}" />.
+    /// </remarks>
+    public static void RegisterDefault<T>() where T : IAtmosSolverConfiguration, INumosState<T>
+    {
+        Entry entry = CreateEntry<T>();
+        lock (DefaultsLock)
+        {
+            if (!Defaults.TryGetValue(entry.Key, out Entry? existing))
+                Defaults.Add(entry.Key, entry);
+            else if (existing.Type != typeof(T))
+                Defaults[entry.Key] = existing with { Conflict = typeof(T) };
+        }
+    }
+
+    /// <summary>
+    ///     Registers <typeparamref name="T" /> with this registry under its key.
+    /// </summary>
+    /// <typeparam name="T">A solver configuration with <see cref="NumosSerializeAttribute" /> members.</typeparam>
     /// <returns>This registry, for chaining.</returns>
     /// <remarks>
-    ///     Registering the same type under the same key again does nothing. A loaded configuration whose own key
-    ///     disagrees with the key it was saved under fails the load.
+    ///     Registering the same type again does nothing. When two assemblies register different types under one key,
+    ///     registering one of them here settles which this registry loads.
     /// </remarks>
-    /// <exception cref="ArgumentException">
-    ///     <paramref name="key" /> is blank, or already registered to a different type.
-    /// </exception>
-    public SolverConfigurationTypes Register<T>(string key) where T : class, IAtmosSolverConfiguration, INumosState<T>
+    /// <exception cref="ArgumentException">The key is already registered to a different type.</exception>
+    public SolverConfigurationTypes Register<T>() where T : IAtmosSolverConfiguration, INumosState<T>
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(key);
-        if (_entries.TryGetValue(key, out Entry? existing))
+        Entry entry = CreateEntry<T>();
+        Entry? existing = _entries.GetValueOrDefault(entry.Key);
+        if (existing is null)
         {
-            if (existing.Type == typeof(T))
-                return this;
-
-            throw new ArgumentException(
-                $"Solver configuration key '{key}' is already registered to {existing.Type}, not {typeof(T)}.",
-                nameof(key));
+            lock (DefaultsLock)
+            {
+                if (Defaults.TryGetValue(entry.Key, out Entry? fallback) && fallback.Conflict is null)
+                    existing = fallback;
+            }
         }
 
-        _entries.Add(key, new Entry(typeof(T), static (ref StateReader reader, IGasRegistry gases) => T.ReadState(ref reader, gases)));
+        if (existing is not null && existing.Type != typeof(T))
+        {
+            throw new ArgumentException(
+                $"Solver configuration key '{entry.Key}' is already registered to {existing.Type}, not {typeof(T)}.");
+        }
+
+        _entries[entry.Key] = entry;
         return this;
     }
 
@@ -107,22 +107,45 @@ public sealed class SolverConfigurationTypes
     public bool Contains(string key)
     {
         ArgumentNullException.ThrowIfNull(key);
-        return _entries.ContainsKey(key);
+        if (_entries.ContainsKey(key))
+            return true;
+
+        lock (DefaultsLock)
+            return Defaults.TryGetValue(key, out Entry? entry) && entry.Conflict is null;
     }
 
     internal bool TryRead(string key, ref StateReader reader, IGasRegistry gases, out IAtmosSolverConfiguration? configuration)
     {
         if (!_entries.TryGetValue(key, out Entry? entry))
         {
+            lock (DefaultsLock)
+                Defaults.TryGetValue(key, out entry);
+        }
+
+        if (entry is null)
+        {
             configuration = null;
             return false;
+        }
+
+        if (entry.Conflict is { } conflict)
+        {
+            throw new InvalidOperationException(
+                $"Solver configuration key '{key}' is claimed by both {entry.Type} and {conflict}. Register the one " +
+                "to load with NumosReplayReadOptions.SolverConfigurations.Register<T>().");
         }
 
         configuration = entry.Read(ref reader, gases);
         return true;
     }
 
+    private static Entry CreateEntry<T>() where T : IAtmosSolverConfiguration, INumosState<T>
+    {
+        string key = T.StateKey ?? throw new InvalidOperationException($"{typeof(T)} has no constant Key.");
+        return new Entry(key, typeof(T), static (ref StateReader reader, IGasRegistry gases) => T.ReadState(ref reader, gases));
+    }
+
     private delegate IAtmosSolverConfiguration ReadConfiguration(ref StateReader reader, IGasRegistry gases);
 
-    private sealed record Entry(Type Type, ReadConfiguration Read);
+    private sealed record Entry(string Key, Type Type, ReadConfiguration Read, Type? Conflict = null);
 }

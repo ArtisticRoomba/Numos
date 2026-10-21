@@ -75,8 +75,8 @@ public sealed class AtmosWorldReplayArchive
     ///     Throws when this archive depends on host-defined solver state.
     /// </summary>
     /// <exception cref="NotSupportedException">
-    ///     The archive contains custom solvers, solver configurations that aren't <see cref="NumosStateAttribute" />
-    ///     types, or rollback chunk fields whose element type isn't a primitive or an enum.
+    ///     The archive contains custom solvers, solver configurations without <see cref="NumosSerializeAttribute" />
+    ///     members, or rollback chunk fields whose element type isn't a primitive or an enum.
     /// </exception>
     public void EnsurePortable()
     {
@@ -103,9 +103,10 @@ public sealed class AtmosWorldReplayArchive
                          $"in simulation {simulation.Simulation}, chunk {chunk.Position}";
         }
 
-        // [NumosState] configurations and the built-in portable ones save themselves. Only host types are unsupported.
+        // Configurations with [NumosSerialize] members and the built-in portable ones save themselves. Only host types
+        // are unsupported.
         foreach (var configuration in checkpoint.Config.SolverConfigurations.Where(static value => !IsSavable(value)))
-            yield return $"world solver configuration '{configuration.Key}' (not a [NumosState] type)";
+            yield return $"world solver configuration '{configuration.Key}' (no [NumosSerialize] members)";
 
         foreach (var recorded in recording.Operations)
         {
@@ -113,7 +114,7 @@ public sealed class AtmosWorldReplayArchive
                 continue;
 
             foreach (var configuration in config.Config.SolverConfigurations.Where(static value => !IsSavable(value)))
-                yield return $"recorded solver configuration '{configuration.Key}' (not a [NumosState] type)";
+                yield return $"recorded solver configuration '{configuration.Key}' (no [NumosSerialize] members)";
         }
     }
 

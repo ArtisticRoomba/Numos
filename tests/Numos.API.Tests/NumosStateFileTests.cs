@@ -8,11 +8,11 @@ using static Numos.API.Tests.SolverConfigurationArchiveTests;
 namespace Numos.API.Tests;
 
 /// <summary>
-///     Saving one <see cref="NumosStateAttribute" /> value on its own through <see cref="NumosStateSerializer" /> and
+///     Saving one serializable value on its own through <see cref="NumosStateSerializer" /> and
 ///     <see cref="NumosStateFile" />.
 /// </summary>
 [TestFixture]
-public sealed class NumosStateFileTests
+public sealed partial class NumosStateFileTests
 {
     [Test]
     public void StandaloneConfiguration_RoundTrips()
@@ -54,7 +54,7 @@ public sealed class NumosStateFileTests
                 () => NumosStateSerializer.Read<GasReactionConfig>(new MemoryStream(stream.ToArray()[..^1]), new GasRegistry { Air, Fuel }),
                 Throws.TypeOf<InvalidDataException>());
 
-            Assert.That(() => NumosStateSerializer.Write(new MemoryStream(), new Scrubber("x", 1f)), Throws.InvalidOperationException);
+            Assert.That(() => NumosStateSerializer.Write(new MemoryStream(), new Unkeyed(1f)), Throws.InvalidOperationException);
         });
     }
 
@@ -83,4 +83,7 @@ public sealed class NumosStateFileTests
             Directory.Delete(directory, true);
         }
     }
+
+    // Not a solver configuration and no Key, so there's nothing to check a standalone file against.
+    public readonly partial record struct Unkeyed([property: NumosSerialize] float Rate);
 }

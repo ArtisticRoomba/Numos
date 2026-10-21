@@ -10,7 +10,6 @@ namespace Numos.CoreSim.GasReactions;
 /// <remarks>
 ///     Much slower to evaluate than <see cref="LinearGasReaction" /> because of the exponentials and powers involved.
 /// </remarks>
-[NumosState]
 public readonly partial record struct StandardGasReaction
 {
     /// <summary>
@@ -47,13 +46,13 @@ public readonly partial record struct StandardGasReaction
     /// <summary>
     ///     Moles of each reactant consumed per reaction.
     /// </summary>
-    [StateField(1)]
+    [NumosSerialize]
     private FrozenDictionary<GasProperties, Mole> Input { get; }
 
     /// <summary>
     ///     Moles of each product produced per reaction.
     /// </summary>
-    [StateField(2)]
+    [NumosSerialize]
     private FrozenDictionary<GasProperties, Mole> Output { get; }
 
     /// <summary>
@@ -63,13 +62,13 @@ public readonly partial record struct StandardGasReaction
     ///     Per mole of whichever reactant has a coefficient of one, so for 2H₂ + O₂ -> 2H₂O it is the energy released
     ///     per mole of oxygen consumed.
     /// </remarks>
-    [StateField(3)]
+    [NumosSerialize]
     internal JoulePerMole EnergyBalance { get; }
 
     /// <summary>
     ///     Arrhenius pre-exponential factor. Its units depend on the rate law's overall order.
     /// </summary>
-    [StateField(4)]
+    [NumosSerialize]
     private float ArrheniusFactor { get; }
 
     /// <summary>
@@ -78,14 +77,14 @@ public readonly partial record struct StandardGasReaction
     ///     Convert values authored in kJ/mol at the call site, for example with
     ///     <see cref="UnitConversions.FromKilojoulePerMole" />.
     /// </summary>
-    [StateField(5)]
+    [NumosSerialize]
     private JoulePerMole ActivationEnergy { get; }
 
     /// <summary>
     ///     The exponents of the rate equation:
     ///     k * Gas_1^{a} * Gas_2 ^ {b}...
     /// </summary>
-    [StateField(6)]
+    [NumosSerialize]
     private FrozenDictionary<GasProperties, float> SpeedFactors { get; }
 
     /// <summary>

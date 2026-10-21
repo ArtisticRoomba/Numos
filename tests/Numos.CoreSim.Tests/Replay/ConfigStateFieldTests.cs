@@ -5,12 +5,12 @@ using Numos.CoreSim.State.Advanced;
 namespace Numos.CoreSim.Tests.Replay;
 
 /// <summary>
-///     Checks that every <see cref="StateFieldAttribute" /> scalar on <see cref="AtmosConfig" /> and every
+///     Checks that every <see cref="NumosSerializeAttribute" /> scalar on <see cref="AtmosConfig" /> and every
 ///     <see cref="GasProperties" /> field takes part in both <see cref="AtmosConfigSnapshot.SemanticallyEquals" /> and
 ///     the config hash, and that the snapshot exposes every config scalar.
 /// </summary>
 /// <remarks>
-///     The field lists come from reflection over the attributes, so a newly tagged field is covered without touching
+///     The field lists come from reflection over the attributes, so a newly marked field is covered without touching
 ///     this file.
 /// </remarks>
 [TestFixture]
@@ -20,7 +20,7 @@ public sealed class ConfigStateFieldTests
     {
         return typeof(AtmosConfig)
             .GetProperties(BindingFlags.Public | BindingFlags.Instance)
-            .Where(static property => property.IsDefined(typeof(StateFieldAttribute)) && property.PropertyType != typeof(GasRegistry));
+            .Where(static property => property.IsDefined(typeof(NumosSerializeAttribute)) && property.PropertyType != typeof(GasRegistry));
     }
 
     private static IEnumerable<TestCaseData> ConfigFields()
@@ -32,14 +32,14 @@ public sealed class ConfigStateFieldTests
     {
         return typeof(GasProperties)
             .GetFields(BindingFlags.Public | BindingFlags.Instance)
-            .Where(static field => field.IsDefined(typeof(StateFieldAttribute)))
+            .Where(static field => field.IsDefined(typeof(NumosSerializeAttribute)))
             .Select(static field => new TestCaseData(field.Name).SetName($"GasField_{field.Name}"));
     }
 
     [Test]
     public void EveryGasFieldIsState()
     {
-        // GasProperties has no [NotState] members, so a public field without a tag would fail the build; this pins it.
+        // GasProperties has no [NumosIgnore] members, so an unmarked public field would only be a warning; this pins it.
         Assert.That(
             typeof(GasProperties).GetFields(BindingFlags.Public | BindingFlags.Instance).Select(static field => field.Name),
             Is.EquivalentTo(GasFields().Select(static data => (string)data.Arguments[0]!)));

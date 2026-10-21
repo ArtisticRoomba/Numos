@@ -19,7 +19,6 @@ public readonly partial record struct LinearGasReaction
     ///     in mol/m³ (moles divided by <see cref="AtmosConfig.VoxelVolume" />), and skips the reaction for that voxel
     ///     when the factor is zero, negative, or not a normal float.
     /// </remarks>
-    [NumosState]
     public readonly partial record struct LinearSpeedFactor(
         GasProperties Gas,
         float LowMolarityBound,
@@ -32,43 +31,41 @@ public readonly partial record struct LinearGasReaction
         /// <summary>
         ///     Gets the gas whose amount drives the factor.
         /// </summary>
-        [StateField(1)]
+        [NumosSerialize]
         public GasProperties Gas { get; } = Gas;
 
         /// <summary>
         ///     Gets the gas amount at the line's lower point.
         /// </summary>
-        [StateField(2)]
+        [NumosSerialize]
         public float LowMolarityBound { get; init; } = LowMolarityBound;
 
-        [StateField(3)]
+        [NumosSerialize]
         private float HighMolarityBound { get; } = HighMolarityBound;
 
         /// <summary>
         ///     Gets the factor at <see cref="LowMolarityBound" />.
         /// </summary>
-        [StateField(4)]
+        [NumosSerialize]
         public float LowMolaritySpeed { get; init; } = LowMolaritySpeed;
 
-        [StateField(5)]
+        [NumosSerialize]
         private float HighMolaritySpeed { get; } = HighMolaritySpeed;
 
         /// <summary>
         ///     Gets whether the factor is zero below the low bound instead of extrapolated.
         /// </summary>
-        [StateField(6)]
+        [NumosSerialize]
         public bool LowStrict { get; } = LowStrict;
 
         /// <summary>
         ///     Gets whether the factor is zero above the high bound instead of extrapolated.
         /// </summary>
-        [StateField(7)]
+        [NumosSerialize]
         public bool HighStrict { get; } = HighStrict;
 
-        [NotState]
         private float BoundaryRange { get; } = HighMolarityBound - LowMolarityBound;
 
-        [NotState]
         private float FactorRange { get; } = HighMolaritySpeed - LowMolaritySpeed;
 
         internal (int, int, int, int, bool, bool) OrderKey => (

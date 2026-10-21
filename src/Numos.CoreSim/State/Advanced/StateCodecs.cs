@@ -6,7 +6,7 @@ using System.Runtime.InteropServices;
 namespace Numos.CoreSim.State.Advanced;
 
 /// <summary>
-///     Writes, compares, and orders one kind of state value. Generated <see cref="NumosStateAttribute" /> code picks a
+///     Writes, compares, and orders one kind of state value. Generated state code picks a
 ///     codec per field type from <see cref="StateCodecs" />.
 /// </summary>
 /// <typeparam name="T">The value type the codec handles.</typeparam>
@@ -56,7 +56,7 @@ public interface IStateCodec<T>
 }
 
 /// <summary>
-///     The codecs generated <see cref="NumosStateAttribute" /> code uses for each supported field type.
+///     The codecs generated state code uses for each supported field type.
 /// </summary>
 /// <remarks>
 ///     Public because generated code in downstream assemblies refers to them. They are plumbing for the generator;
@@ -466,7 +466,7 @@ public static class StateCodecs
     }
 
     /// <summary>
-    ///     Codec for a nested <see cref="NumosStateAttribute" /> value.
+    ///     Codec for a nested serializable value (one with <see cref="NumosSerializeAttribute" /> members).
     /// </summary>
     /// <typeparam name="T">The nested type.</typeparam>
     public readonly struct State<T> : IStateCodec<T> where T : INumosState<T>

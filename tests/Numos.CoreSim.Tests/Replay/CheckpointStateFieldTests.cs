@@ -129,10 +129,13 @@ public sealed class CheckpointStateFieldTests
         var sink = new StateBinarySink();
         NumosState.Write(ref sink, checkpoint);
 
-        // Field 2 (Dimensions) follows field 1's 12-byte payload: id, length, then X.
+        // Walk the top-level fields to Dimensions, whose payload starts with X.
         byte[] bytes = sink.WrittenSpan.ToArray();
-        int dimensionsX = 4 + 4 + 12 + 4 + 4;
-        BitConverter.GetBytes(3).CopyTo(bytes, dimensionsX);
+        int position = 0;
+        while (BitConverter.ToInt32(bytes, position) != NumosState.FieldId(nameof(AtmosChunkCheckpoint.Dimensions)))
+            position += 8 + BitConverter.ToInt32(bytes, position + 4);
+
+        BitConverter.GetBytes(3).CopyTo(bytes, position + 8);
         var reader = new StateReader(bytes);
         var read = NumosState.Read<AtmosChunkCheckpoint>(ref reader);
 
@@ -171,7 +174,7 @@ public sealed class CheckpointStateFieldTests
     }
 
     [Test]
-    public void ConfigHash_ChangesWhenATaggedScalarChanges()
+    public void ConfigHash_ChangesWhenASerializedScalarChanges()
     {
         var baseline = new AtmosConfig { ThermalConductance = 0.1f }.CreateSnapshot();
         var changed = new AtmosConfig { ThermalConductance = 0.2f }.CreateSnapshot();
@@ -208,7 +211,7 @@ public sealed class CheckpointStateFieldTests
     }
 
     [Test]
-    public void GasHash_ChangesWhenATaggedFieldChanges()
+    public void GasHash_ChangesWhenASerializedFieldChanges()
     {
         ulong baseline = NumosState.ComputeHash(new GasProperties { Name = "Air", DiffusionCoefficient = 0.02f });
         ulong changed = NumosState.ComputeHash(new GasProperties { Name = "Air", DiffusionCoefficient = 0.05f });

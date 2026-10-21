@@ -107,12 +107,11 @@ public sealed class AtmosSimulationCheckpoint
 ///         <see cref="AtmosChunkSnapshot" /> instead.
 ///     </para>
 ///     <para>
-///         The <see cref="StateFieldAttribute" /> ids define the chunk's hash, equality, and wire layout. A per-voxel
+///         The <see cref="NumosSerializeAttribute" /> members define the chunk's hash, equality, and wire layout. A per-voxel
 ///         array copied straight from the live chunk also carries <see cref="LiveChunkArrayAttribute" />, which
 ///         generates its capture and restore.
 ///     </para>
 /// </remarks>
-[NumosState]
 public sealed partial class AtmosChunkCheckpoint
 {
     internal AtmosChunkCheckpoint(AtmosChunk chunk)
@@ -149,86 +148,86 @@ public sealed partial class AtmosChunkCheckpoint
     /// <summary>
     ///     Gets the chunk-grid address; each coordinate counts whole chunks.
     /// </summary>
-    [StateField(1)]
+    [NumosSerialize]
     public Int3 Position { get; private set; }
 
     /// <summary>
     ///     Gets the number of local voxels along each axis.
     /// </summary>
-    [StateField(2)]
+    [NumosSerialize]
     public Int3 Dimensions { get; private set; }
 
     /// <summary>
     ///     Gets whether the chunk is eligible for solver processing.
     /// </summary>
-    [StateField(3)]
+    [NumosSerialize]
     public bool IsAwake { get; private set; }
 
     /// <summary>
     ///     Gets the exact number of accumulated quiet ticks used by sleep decisions.
     /// </summary>
-    [StateField(4)]
+    [NumosSerialize]
     public int SleepTimer { get; private set; }
 
     /// <summary>
     ///     Gets flat voxel room IDs, including reserved solid, void and unassigned classifications.
     /// </summary>
-    [StateField(5)]
+    [NumosSerialize]
     [LiveChunkArray(nameof(AtmosChunk.VoxelRoomMap))]
     public IReadOnlyList<int> Classifications { get; private set => field = CheckpointArray.Wrap(value); } = [];
 
     /// <summary>
     ///     Gets raw stored kelvins in flat voxel order, preserving non-finite values and their bit patterns.
     /// </summary>
-    [StateField(6)]
+    [NumosSerialize]
     [LiveChunkArray(nameof(AtmosChunk.Temperature))]
     public IReadOnlyList<float> Temperatures { get; private set => field = CheckpointArray.Wrap(value); } = [];
 
     /// <summary>
     ///     Gets cached pascals in flat voxel order, including values not refreshed by disabled solver stages.
     /// </summary>
-    [StateField(7)]
+    [NumosSerialize]
     [LiveChunkArray(nameof(AtmosChunk.TotalPressure))]
     public IReadOnlyList<float> Pressures { get; private set => field = CheckpointArray.Wrap(value); } = [];
 
     /// <summary>
     ///     Gets cached joules per kelvin in flat voxel order.
     /// </summary>
-    [StateField(8)]
+    [NumosSerialize]
     [LiveChunkArray(nameof(AtmosChunk.TotalHeatCapacity))]
     public IReadOnlyList<float> HeatCapacities { get; private set => field = CheckpointArray.Wrap(value); } = [];
 
     /// <summary>
     ///     Gets total x-momentum in kilogram metres per second, in flat voxel order. Zero wherever the voxel holds no gas.
     /// </summary>
-    [StateField(9)]
+    [NumosSerialize]
     [LiveChunkArray(nameof(AtmosChunk.MomentumX))]
     public IReadOnlyList<float> MomentumX { get; private set => field = CheckpointArray.Wrap(value); } = [];
 
     /// <summary>
     ///     Gets total y-momentum in kilogram metres per second, in flat voxel order. Zero wherever the voxel holds no gas.
     /// </summary>
-    [StateField(10)]
+    [NumosSerialize]
     [LiveChunkArray(nameof(AtmosChunk.MomentumY))]
     public IReadOnlyList<float> MomentumY { get; private set => field = CheckpointArray.Wrap(value); } = [];
 
     /// <summary>
     ///     Gets total z-momentum in kilogram metres per second, in flat voxel order. Zero wherever the voxel holds no gas.
     /// </summary>
-    [StateField(11)]
+    [NumosSerialize]
     [LiveChunkArray(nameof(AtmosChunk.MomentumZ))]
     public IReadOnlyList<float> MomentumZ { get; private set => field = CheckpointArray.Wrap(value); } = [];
 
     /// <summary>
     ///     Gets the valid prefix of active flat voxel indices, preserving inactive topology exactly.
     /// </summary>
-    [StateField(12)]
+    [NumosSerialize]
     public IReadOnlyList<ushort> ActiveAirIndices { get; private set => field = CheckpointArray.Wrap(value); } = [];
 
     /// <summary>
     ///     Gets gas channels in solver reduction order, including channels whose moles are all zero.
     /// </summary>
-    [StateField(13)]
+    [NumosSerialize]
     public IReadOnlyList<AtmosGasChannelCheckpoint> Gases
     {
         get;
@@ -242,8 +241,7 @@ public sealed partial class AtmosChunkCheckpoint
     ///     Restore recreates these arrays automatically. Reacquire them through the same <c>ChunkField&lt;T&gt;</c>, whose
     ///     key, element type, and length must match the captured array. Transient fields are absent.
     /// </remarks>
-    [StateField(14)]
-    [StateCodec(typeof(SolverArraysCodec))]
+    [NumosSerialize(Codec = typeof(SolverArraysCodec))]
     public IReadOnlyList<AtmosSolverArraySnapshot> SolverArrays { get; private set; } = [];
 
     /// <summary>
@@ -335,7 +333,6 @@ public sealed partial class AtmosChunkCheckpoint
 /// <summary>
 ///     One detached structure-of-arrays gas channel, limited to valid voxel entries rather than pooled capacity.
 /// </summary>
-[NumosState]
 public sealed partial class AtmosGasChannelCheckpoint
 {
     internal AtmosGasChannelCheckpoint(GasChannel channel, int voxelCount)
@@ -358,12 +355,12 @@ public sealed partial class AtmosGasChannelCheckpoint
     /// <summary>
     ///     Gets the simulation gas ID; the channel’s list position determines reduction order.
     /// </summary>
-    [StateField(1)]
+    [NumosSerialize]
     public int GasId { get; private set; }
 
     /// <summary>
     ///     Gets gas amounts in moles, indexed by the chunk’s flat voxel index.
     /// </summary>
-    [StateField(2)]
+    [NumosSerialize]
     public IReadOnlyList<float> Moles { get; private set => field = CheckpointArray.Wrap(value); } = [];
 }

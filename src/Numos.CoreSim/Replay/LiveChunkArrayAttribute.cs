@@ -7,7 +7,7 @@ namespace Numos.CoreSim.Replay;
 /// <remarks>
 ///     <c>Numos.Replay.Generators</c> turns these into the checkpoint's <c>CaptureLiveArrays</c> and
 ///     <c>RestoreLiveArrays</c>, so adding a per-voxel array is one property with this attribute and a
-///     <see cref="State.StateFieldAttribute" />. The property must be an <see cref="IReadOnlyList{T}" /> with a setter,
+///     <see cref="State.NumosSerializeAttribute" />. The property must be an <see cref="IReadOnlyList{T}" /> with a setter,
 ///     and the live member a <c>FlatArray</c> of the same element type. Irregular shapes (the active-air prefix, gas
 ///     channels) are copied by hand.
 /// </remarks>

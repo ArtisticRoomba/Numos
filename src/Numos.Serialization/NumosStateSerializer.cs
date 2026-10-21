@@ -6,8 +6,8 @@ using Numos.CoreSim.State.Advanced;
 namespace Numos.Serialization;
 
 /// <summary>
-///     Reads and writes a single <see cref="NumosStateAttribute" /> value, such as a solver configuration preset,
-///     outside a world archive.
+///     Reads and writes a single value with <see cref="NumosSerializeAttribute" /> members, such as a solver
+///     configuration preset, outside a world archive.
 /// </summary>
 /// <remarks>
 ///     <para>
@@ -17,8 +17,8 @@ namespace Numos.Serialization;
 ///         with that field at its default, and ids the reader doesn't know are skipped.
 ///     </para>
 ///     <para>
-///         Only types with a <see cref="NumosStateAttribute.Key" /> can be saved this way; the key is how a load knows
-///         the file holds the type it asked for.
+///         Only types with a constant <c>Key</c> property (every solver configuration has one) can be saved this way;
+///         the key is how a load knows the file holds the type it asked for.
 ///     </para>
 /// </remarks>
 /// <example>
@@ -38,7 +38,7 @@ public static class NumosStateSerializer
     /// </summary>
     /// <param name="destination">Writable destination.</param>
     /// <param name="value">The value to write.</param>
-    /// <typeparam name="T">A <see cref="NumosStateAttribute" /> type with a declared key.</typeparam>
+    /// <typeparam name="T">A serializable type with a constant <c>Key</c>, such as a solver configuration.</typeparam>
     /// <exception cref="ArgumentNullException">A reference argument is <see langword="null" />.</exception>
     /// <exception cref="ArgumentException"><paramref name="destination" /> is not writable.</exception>
     /// <exception cref="InvalidOperationException"><typeparamref name="T" /> declares no key.</exception>
@@ -72,7 +72,7 @@ public static class NumosStateSerializer
     ///     Optional limits for untrusted input. <see cref="NumosReplayReadOptions.MaxPayloadBytes" /> and
     ///     <see cref="NumosReplayReadOptions.MaxStringBytes" /> apply; the rest are for world replays.
     /// </param>
-    /// <typeparam name="T">A <see cref="NumosStateAttribute" /> type with a declared key.</typeparam>
+    /// <typeparam name="T">A serializable type with a constant <c>Key</c>, such as a solver configuration.</typeparam>
     /// <returns>The value.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="source" /> is <see langword="null" />.</exception>
     /// <exception cref="ArgumentException"><paramref name="source" /> is not readable.</exception>
@@ -129,6 +129,6 @@ public static class NumosStateSerializer
     {
         return T.StateKey ??
                throw new InvalidOperationException(
-                   $"{typeof(T)} can't be saved on its own because it declares no key. Set [NumosState(Key = \"...\")].");
+                   $"{typeof(T)} can't be saved on its own because it has no constant Key property.");
     }
 }

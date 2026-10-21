@@ -29,18 +29,18 @@
  NUMOSDEP007   | Numos.API.SolverDependency | Warning  | Type with solver dependencies is not a world solver             
  NUMOSDEP008   | Numos.API.SolverDependency | Error    | Base class injects dependencies without an overridable hook     
  NUMOSDEP009   | Numos.API.SolverDependency | Error    | Type implements dependency injection by hand                    
- NUMOSSTATE001 | Numos.State                | Error    | State type must be partial                                     
- NUMOSSTATE002 | Numos.State                | Error    | State type must not be generic                                 
- NUMOSSTATE003 | Numos.State                | Error    | State type member is neither state nor excluded                
- NUMOSSTATE004 | Numos.State                | Error    | State field id must be positive                                
- NUMOSSTATE005 | Numos.State                | Error    | State field id is used twice                                   
- NUMOSSTATE006 | Numos.State                | Error    | State field id is retired                                      
- NUMOSSTATE007 | Numos.State                | Error    | State field type is not supported                              
- NUMOSSTATE008 | Numos.State                | Error    | State type declares a member the generator owns                
- NUMOSSTATE009 | Numos.State                | Error    | Solver objects cannot hold state fields                        
- NUMOSSTATE010 | Numos.State                | Error    | State field outside a state type                               
- NUMOSSTATE011 | Numos.State                | Error    | Member is marked both state and not state                      
- NUMOSSTATE012 | Numos.State                | Error    | State field must be an instance member                         
- NUMOSSTATE013 | Numos.State                | Error    | State class must not derive from another class                 
- NUMOSSTATE014 | Numos.State                | Error    | State type has no constructor the reader can call              
- NUMOSSTATE015 | Numos.State                | Error    | State key is blank                                             
+ NUMOSSTATE001 | Numos.State                | Error    | Serializable type must be partial
+ NUMOSSTATE002 | Numos.State                | Error    | Serializable type must not be generic
+ NUMOSSTATE005 | Numos.State                | Error    | Two serialized members hash to the same id
+ NUMOSSTATE007 | Numos.State                | Error    | Serialized member type is not supported
+ NUMOSSTATE008 | Numos.State                | Error    | Serializable type declares a member the generator owns
+ NUMOSSTATE009 | Numos.State                | Error    | Solver objects cannot hold serialized members
+ NUMOSSTATE011 | Numos.State                | Error    | Member is marked both serialized and ignored
+ NUMOSSTATE012 | Numos.State                | Error    | Serialized member must be an instance member
+ NUMOSSTATE013 | Numos.State                | Error    | Serializable class must not derive from another class
+ NUMOSSTATE014 | Numos.State                | Error    | Serializable type has no constructor the reader can call
+ NUMOSSTATE015 | Numos.State                | Error    | Key is blank
+ NUMOSSTATE016 | Numos.State                | Warning  | Mutable member is neither serialized nor ignored
+ NUMOSSTATE017 | Numos.State                | Error    | Wire name is blank
+ NUMOSSTATE018 | Numos.State                | Error    | Solver configuration key is not a constant
+ NUMOSSTATE019 | Numos.State                | Warning  | Solver configuration can't be registered automatically

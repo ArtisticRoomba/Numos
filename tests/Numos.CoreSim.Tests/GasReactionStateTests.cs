@@ -8,12 +8,12 @@ using LinearSpeedFactor = Numos.CoreSim.GasReactions.LinearGasReaction.LinearSpe
 namespace Numos.CoreSim.Tests;
 
 /// <summary>
-///     Checks that every <see cref="StateFieldAttribute" /> member of the reaction types reaches both
+///     Checks that every <see cref="NumosSerializeAttribute" /> member of the reaction types reaches both
 ///     <see cref="GasReactionConfig.SemanticallyEquals" /> and <see cref="GasReactionConfig.ComputeStateHash" />, and
-///     that no <see cref="NotStateAttribute" /> member does.
+///     that no unmarked member (the derived caches) does.
 /// </summary>
 /// <remarks>
-///     Members are found by reflection over the attributes, so a newly tagged field is covered without touching this
+///     Members are found by reflection over the attributes, so a newly marked field is covered without touching this
 ///     file. Each case changes one member through its backing field, bypassing the constructors that would otherwise
 ///     recompute derived caches.
 /// </remarks>
@@ -29,23 +29,30 @@ public sealed class GasReactionStateTests
     private static readonly GasProperties GasB = new() { Name = "B" };
     private static readonly GasProperties GasC = new() { Name = "C" };
 
-    private static IEnumerable<TestCaseData> Members<TAttribute>(string prefix) where TAttribute : Attribute
+    private static IEnumerable<TestCaseData> Members(string prefix, bool serialized)
     {
         foreach (Type type in StateTypes)
         {
             foreach (MemberInfo member in type.GetMembers(Instance))
             {
-                if (member is (PropertyInfo or FieldInfo) && member.IsDefined(typeof(TAttribute)))
+                bool stores = member switch
+                {
+                    FieldInfo field => !field.IsDefined(typeof(System.Runtime.CompilerServices.CompilerGeneratedAttribute)),
+                    PropertyInfo property => type.GetField($"<{property.Name}>k__BackingField", Instance) is not null,
+                    _ => false,
+                };
+
+                if (stores && member.IsDefined(typeof(NumosSerializeAttribute)) == serialized)
                     yield return new TestCaseData(type, member.Name).SetName($"{prefix}_{type.Name}_{member.Name}");
             }
         }
     }
 
-    private static IEnumerable<TestCaseData> StateMembers() => Members<StateFieldAttribute>("StateField");
+    private static IEnumerable<TestCaseData> StateMembers() => Members("Serialized", true);
 
-    private static IEnumerable<TestCaseData> NotStateMembers() => Members<NotStateAttribute>("NotState");
+    private static IEnumerable<TestCaseData> NotStateMembers() => Members("Derived", false);
 
-    private static IEnumerable<TestCaseData> RoundTripMembers() => Members<StateFieldAttribute>("RoundTrip");
+    private static IEnumerable<TestCaseData> RoundTripMembers() => Members("RoundTrip", true);
 
     [Test]
     public void TaggedMemberLists_CoverEveryType()
