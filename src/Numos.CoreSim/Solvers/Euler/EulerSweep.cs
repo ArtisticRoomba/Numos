@@ -40,6 +40,7 @@ internal struct EulerSweepCounters
 {
     public int ClampedVelocity;
     public int NegativeMoles;
+    public int NonFiniteCells;
 }
 
 /// <summary>
@@ -372,7 +373,8 @@ internal static class EulerSweep
     ///         Species and momentum are updated in float; the energy difference is formed in double so the
     ///         subtraction from the large thermal part does not lose it. Species are floored at zero and the
     ///         speed is clamped to <see cref="EulerFlow.EulerFlowConfig.MaxVelocity" /> before the primitive state is
-    ///         rebuilt; both repairs are counted.
+    ///         rebuilt; both repairs are counted, as is a cell whose primitive state does not fit in float, which
+    ///         keeps its conserved variables but is written as a vacuum with no momentum.
     ///     </para>
     /// </remarks>
     private static MetrePerSecond UpdateCell(
@@ -421,7 +423,7 @@ internal static class EulerSweep
 
         workspace.SumMixture(
             write, voxelIndex,
-            out Kilogram mass, out Mole totalMoles, out JoulePerKelvin heatCapacity);
+            out Kilogram mass, out Mole totalMoles, out JoulePerKelvin64 heatCapacity);
 
         write.Mass[voxelIndex] = mass;
         write.TotalMoles[voxelIndex] = totalMoles;
@@ -460,16 +462,21 @@ internal static class EulerSweep
                 momentumZ *= scale;
             }
 
-            if (EulerMixture.ToPrimitive(
-                    mass, totalMoles, heatCapacity,
-                    momentumX, momentumY, momentumZ,
-                    energy, config.VoxelVolume, config.PressurePerMoleKelvin,
-                    out write.Cells[voxelIndex]))
+            EulerCellKind kind = EulerMixture.ToPrimitive(
+                mass, totalMoles, heatCapacity,
+                momentumX, momentumY, momentumZ,
+                energy, config.VoxelVolume, config.PressurePerMoleKelvin,
+                out write.Cells[voxelIndex]);
+
+            if (kind == EulerCellKind.Gas)
             {
                 signalSpeed = write.Cells[voxelIndex].SignalSpeed;
             }
             else
             {
+                if (kind == EulerCellKind.NonFinite)
+                    counters.NonFiniteCells++;
+
                 momentumX = 0f;
                 momentumY = 0f;
                 momentumZ = 0f;

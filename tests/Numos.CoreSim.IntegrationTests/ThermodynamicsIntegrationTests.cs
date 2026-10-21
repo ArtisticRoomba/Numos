@@ -460,7 +460,7 @@ public sealed class ThermodynamicsIntegrationTests
         gas.MolarHeatCapacityAtConstantVolume = float.MaxValue;
         config.GasRegistry.Replace(SimTestHelpers.FirstGasId, gas);
 
-        using var simulation = SimTestHelpers.CreateLegacySimulation(config, 2, 1, 1);
+        using var simulation = new AtmosSimulation(config, 2, 1, 1);
         var chunk = SimTestHelpers.CreateOpenChunk(simulation, default);
         simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasName, 1f, 400f);
         simulation.AddGasToVoxel(chunk, 1, 0, 0, SimTestHelpers.FirstGasName, 1f, 200f);
@@ -470,6 +470,76 @@ public sealed class ThermodynamicsIntegrationTests
 
         var snapshot = simulation.GetChunkSnapshot(chunk);
         Assert.That(snapshot.Temperature, Is.All.EqualTo(300f).Within(SimTestHelpers.Tolerance));
+    }
+
+    [Test]
+    public void EulerFlow_MaximumHeatCapacitiesStayFiniteByFallingBackToVacuumTransport()
+    {
+        // C = n·Cv fits in float here, but C·T/V does not, so the Euler stage cannot form an energy density for
+        // either voxel. It must sweep them as vacuum, count them, and leave every field finite with the gas intact.
+        var config = SimTestHelpers.CreateDeterministicConfig();
+        var gas = config.GasRegistry[SimTestHelpers.FirstGasId];
+        gas.MolarHeatCapacityAtConstantVolume = float.MaxValue;
+        config.GasRegistry.Replace(SimTestHelpers.FirstGasId, gas);
+
+        using var simulation = new AtmosSimulation(config, 2, 1, 1);
+        var chunk = SimTestHelpers.CreateOpenChunk(simulation, default);
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasName, 1f, 400f);
+        simulation.AddGasToVoxel(chunk, 1, 0, 0, SimTestHelpers.FirstGasName, 1f, 200f);
+        float initialMoles = SimTestHelpers.TotalMoles(simulation.GetChunkSnapshot(chunk));
+
+        simulation.Tick();
+        var flow = simulation.LastFlowDiagnostics;
+        simulation.Tick();
+
+        var snapshot = simulation.GetChunkSnapshot(chunk);
+        TestContext.Out.WriteLine(flow.ToString());
+        Assert.Multiple(() =>
+        {
+            Assert.That(flow.NonFiniteCellCount, Is.GreaterThan(0));
+            Assert.That(snapshot.Temperature, Is.All.Matches<float>(float.IsFinite));
+            Assert.That(snapshot.TotalPressure, Is.All.Matches<float>(float.IsFinite));
+            Assert.That(snapshot.VelocityX, Is.All.Zero);
+            Assert.That(snapshot.Gases.Single().Moles, Is.All.Matches<float>(float.IsFinite));
+            Assert.That(SimTestHelpers.TotalMoles(snapshot), Is.EqualTo(initialMoles).Within(SimTestHelpers.Tolerance));
+        });
+    }
+
+    [Test]
+    public void EulerFlow_LargeHeatCapacitiesFlowWithoutFallingBack()
+    {
+        var config = SimTestHelpers.CreateDeterministicConfig();
+        var gas = config.GasRegistry[SimTestHelpers.FirstGasId];
+        gas.MolarHeatCapacityAtConstantVolume = 1e30f;
+        config.GasRegistry.Replace(SimTestHelpers.FirstGasId, gas);
+
+        using var simulation = new AtmosSimulation(config, 2, 1, 1);
+        var chunk = SimTestHelpers.CreateOpenChunk(simulation, default);
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasName, 1f, 400f);
+        simulation.AddGasToVoxel(chunk, 1, 0, 0, SimTestHelpers.FirstGasName, 1f, 200f);
+        var initial = simulation.GetChunkSnapshot(chunk);
+        float initialMoles = SimTestHelpers.TotalMoles(initial);
+        float initialPressureGap = initial.TotalPressure[0] - initial.TotalPressure[1];
+
+        simulation.Tick();
+        var flow = simulation.LastFlowDiagnostics;
+        simulation.Tick();
+
+        var snapshot = simulation.GetChunkSnapshot(chunk);
+        TestContext.Out.WriteLine(flow.ToString());
+        Assert.Multiple(() =>
+        {
+            Assert.That(flow.NonFiniteCellCount, Is.Zero);
+            Assert.That(flow.Substeps, Is.GreaterThan(0));
+            Assert.That(snapshot.Temperature, Is.All.Matches<float>(float.IsFinite));
+            Assert.That(snapshot.TotalPressure, Is.All.Matches<float>(float.IsFinite));
+            Assert.That(snapshot.VelocityX, Is.All.Matches<float>(float.IsFinite));
+            Assert.That(
+                snapshot.TotalPressure[0] - snapshot.TotalPressure[1],
+                Is.LessThan(initialPressureGap),
+                "gas should have moved down the pressure gradient");
+            Assert.That(SimTestHelpers.TotalMoles(snapshot), Is.EqualTo(initialMoles).Within(SimTestHelpers.Tolerance));
+        });
     }
 
     [Test]

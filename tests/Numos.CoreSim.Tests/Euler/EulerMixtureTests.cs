@@ -22,12 +22,12 @@ public class EulerMixtureTests
         float heatCapacity = moles * AirMolarHeatCapacity;
         double energy = EulerMixture.TotalEnergy(heatCapacity, temperature, mass, momentumX, momentumY, momentumZ);
 
-        bool hasGas = EulerMixture.ToPrimitive(
+        EulerCellKind kind = EulerMixture.ToPrimitive(
             mass, moles, heatCapacity,
             momentumX, momentumY, momentumZ,
             energy, volume,
             out EulerCellState state);
-        Assert.That(hasGas, Is.True);
+        Assert.That(kind, Is.EqualTo(EulerCellKind.Gas));
         return state;
     }
 
@@ -93,13 +93,13 @@ public class EulerMixtureTests
     [TestCase(-1f, 1f, 1f)]
     public void ToPrimitive_VacuumGivesZeroState(float mass, float moles, float heatCapacity)
     {
-        bool hasGas = EulerMixture.ToPrimitive(
+        EulerCellKind kind = EulerMixture.ToPrimitive(
             mass, moles, heatCapacity,
             3f, 4f, 5f,
             1000d, 1f,
             out EulerCellState state);
 
-        Assert.That(hasGas, Is.False);
+        Assert.That(kind, Is.EqualTo(EulerCellKind.Empty));
         Assert.That(state.Density, Is.Zero);
         Assert.That(state.VelocityX, Is.Zero);
         Assert.That(state.VelocityY, Is.Zero);
@@ -116,13 +116,13 @@ public class EulerMixtureTests
     public void ToPrimitive_ClampsInternalEnergyAtZero()
     {
         // Kinetic energy 25 J against a total of 10 J: the mixture reads as 0 K rather than negative.
-        bool hasGas = EulerMixture.ToPrimitive(
+        EulerCellKind kind = EulerMixture.ToPrimitive(
             2f, 1f, 1000f,
             6f, 8f, 0f,
             10d, 1f,
             out EulerCellState state);
 
-        Assert.That(hasGas, Is.True);
+        Assert.That(kind, Is.EqualTo(EulerCellKind.Gas));
         Assert.That(state.Temperature, Is.Zero);
         Assert.That(state.Pressure, Is.Zero);
         Assert.That(state.SoundSpeed, Is.Zero);
@@ -132,6 +132,44 @@ public class EulerMixtureTests
         Assert.That(state.EnergyDensity, Is.EqualTo(10f));
         Assert.That(state.SignalSpeed, Is.EqualTo(4f));
         Assert.That(float.IsFinite(state.SoundSpeed));
+    }
+
+    [Test]
+    public void ToPrimitive_HeatCapacityBeyondFloatRangeStillGivesTheTemperature()
+    {
+        // 1e30 J/K per mole, ten moles: C does not fit in float, but C·T/V = 4e32 J/m³ still does.
+        const double heatCapacity = 10d * 1e30;
+        const float temperature = 400f;
+        float mass = 10f * AirMolarMass;
+        double energy = EulerMixture.TotalEnergy(heatCapacity, temperature, mass, mass, 0f, 0f);
+
+        EulerCellKind kind = EulerMixture.ToPrimitive(
+            mass, 10f, heatCapacity, mass, 0f, 0f, energy, 1f,
+            out EulerCellState state);
+
+        Assert.That(kind, Is.EqualTo(EulerCellKind.Gas));
+        Assert.That(state.Temperature, Is.EqualTo(temperature).Within(1e-3f));
+        Assert.That(state.Pressure, Is.EqualTo(10f * GasConstant * temperature).Within(1e-4f).Percent);
+        Assert.That(state.VelocityX, Is.EqualTo(1f).Within(1e-6f));
+        // γ → 1 as Cv → ∞, so c² → N·R·T/m.
+        Assert.That(state.SoundSpeed, Is.EqualTo(MathF.Sqrt(10f * GasConstant * temperature / mass)).Within(1e-3f).Percent);
+        Assert.That(float.IsFinite(state.EnergyDensity));
+    }
+
+    [Test]
+    public void ToPrimitive_EnergyDensityBeyondFloatRangeReadsAsNonFinite()
+    {
+        // float.MaxValue per mole at 400 K: C fits in float, C·T/V does not.
+        const double heatCapacity = float.MaxValue;
+        float mass = AirMolarMass;
+        double energy = EulerMixture.TotalEnergy(heatCapacity, 400f, mass, mass, 0f, 0f);
+
+        EulerCellKind kind = EulerMixture.ToPrimitive(
+            mass, 1f, heatCapacity, mass, 0f, 0f, energy, 1f,
+            out EulerCellState state);
+
+        Assert.That(kind, Is.EqualTo(EulerCellKind.NonFinite));
+        Assert.That(state, Is.EqualTo(default(EulerCellState)));
     }
 
     [Test]

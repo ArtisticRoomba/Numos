@@ -141,7 +141,8 @@ public sealed record FlowDiagnosticsReport(
     float MaxSignalSpeedMps,
     int ClampedVelocityCount,
     int NegativeInternalEnergyCount,
-    int NegativeMolesCount);
+    int NegativeMolesCount,
+    int NonFiniteCellCount);
 
 /// <summary>
 ///     Aggregate values across the chunks selected for an observation.

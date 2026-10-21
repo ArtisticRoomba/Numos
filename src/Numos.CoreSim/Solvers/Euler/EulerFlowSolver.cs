@@ -367,8 +367,12 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
         }
 
         int negativeInternalEnergy = 0;
+        int nonFiniteCells = counters.NonFiniteCells;
         for (int index = 0; index < _activeCount; index++)
+        {
+            nonFiniteCells += _active[index].NonFiniteCellsGathered;
             FloorMomentumAndWriteBack(_active[index], config, settings, ref negativeInternalEnergy);
+        }
 
         // Diffusion runs on the written-back fields of every chunk, including the ones across a face, so it
         // waits for every write-back; cleanup compares neighbours' pressures the same way and waits for diffusion.
@@ -390,7 +394,8 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
             maxSignalSpeed,
             counters.ClampedVelocity,
             negativeInternalEnergy,
-            counters.NegativeMoles);
+            counters.NegativeMoles,
+            nonFiniteCells);
     }
 
     /// <summary>
@@ -476,6 +481,7 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
             signalSpeed = MathF.Max(signalSpeed, workspace.PencilSignalSpeed[pencil]);
             counters.ClampedVelocity += workspace.PencilCounters[pencil].ClampedVelocity;
             counters.NegativeMoles += workspace.PencilCounters[pencil].NegativeMoles;
+            counters.NonFiniteCells += workspace.PencilCounters[pencil].NonFiniteCells;
         }
 
         workspace.Write.MaxSignalSpeed = signalSpeed;
@@ -657,7 +663,7 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
                 continue;
 
             JoulePerKelvin heatCapacity = chunk.TotalHeatCapacity[voxelIndex];
-            if (mass > 0f && heatCapacity > 0f)
+            if (mass > 0f && AtmosSolverMath.IsFinitePositive(heatCapacity))
             {
                 Joule64 energy = (double)heatCapacity * config.GetValidatedTemp(chunk.Temperature[voxelIndex]) +
                                  EulerMixture.KineticEnergy(mass, momentumX, momentumY, momentumZ);

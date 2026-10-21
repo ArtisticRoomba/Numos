@@ -33,7 +33,8 @@ internal static class FlowReadout
             new FlowReadoutRow("Max signal speed", QuantityFormat.Speed(flow.MaxSignalSpeed), false),
             new FlowReadoutRow("Clamped velocities", Count(flow.ClampedVelocityCount), flow.ClampedVelocityCount > 0),
             new FlowReadoutRow("Negative energies", Count(flow.NegativeInternalEnergyCount), flow.NegativeInternalEnergyCount > 0),
-            new FlowReadoutRow("Negative moles", Count(flow.NegativeMolesCount), flow.NegativeMolesCount > 0)
+            new FlowReadoutRow("Negative moles", Count(flow.NegativeMolesCount), flow.NegativeMolesCount > 0),
+            new FlowReadoutRow("Non-finite cells", Count(flow.NonFiniteCellCount), flow.NonFiniteCellCount > 0)
         ];
     }
 

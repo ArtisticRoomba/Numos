@@ -17,7 +17,8 @@ public sealed class FlowReadoutTests
             MaxSignalSpeed: 412.5f,
             ClampedVelocityCount: 0,
             NegativeInternalEnergyCount: 0,
-            NegativeMolesCount: 0);
+            NegativeMolesCount: 0,
+            NonFiniteCellCount: 0);
 
         var rows = FlowReadout.Describe(flow);
 
@@ -30,7 +31,8 @@ public sealed class FlowReadoutTests
             ("Max signal speed", "412.50 m/s"),
             ("Clamped velocities", "0"),
             ("Negative energies", "0"),
-            ("Negative moles", "0")
+            ("Negative moles", "0"),
+            ("Non-finite cells", "0")
         }));
         Assert.That(rows.Any(static row => row.IsWarning), Is.False);
     }
@@ -46,7 +48,8 @@ public sealed class FlowReadoutTests
             MaxSignalSpeed: 900f,
             ClampedVelocityCount: 2,
             NegativeInternalEnergyCount: 1,
-            NegativeMolesCount: 5);
+            NegativeMolesCount: 5,
+            NonFiniteCellCount: 3);
 
         var warnings = FlowReadout.Describe(flow).Where(static row => row.IsWarning).Select(static row => row.Label);
 
@@ -56,7 +59,8 @@ public sealed class FlowReadoutTests
             "Max Courant number",
             "Clamped velocities",
             "Negative energies",
-            "Negative moles"
+            "Negative moles",
+            "Non-finite cells"
         }));
     }
 }
