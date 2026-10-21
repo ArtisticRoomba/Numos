@@ -69,7 +69,7 @@ internal struct EulerSweepCounters
 ///     <para>
 ///         Determinism rests on three things. A cell's update is a two-term difference of the rates of its own two
 ///         faces, each rate computed from read buffers no sweep writes, so the order pencils run in, or which
-///         worker runs them, cannot change a result. Mixture sums run in the gas table's ascending order. Nothing
+///         worker runs them, cannot change a result. Mixture sums run in the workspace's ascending gas list. Nothing
 ///         uses <see cref="MathF.FusedMultiplyAdd" /> or any call whose rounding is platform dependent beyond what
 ///         <see cref="HllcFlux" /> already documents. Each pencil writes its maximum signal speed and repair counts
 ///         into its own slot, and the tick thread reduces them with max and sum, which are order free.
@@ -383,16 +383,17 @@ internal static class EulerSweep
         EulerChunkState read = workspace.Read;
         EulerChunkState write = workspace.Write;
 
-        EulerGasTable gases = workspace.Gases;
-        for (int present = 0; present < gases.Count; present++)
+        // Every gas an upwind neighbour cell can hold is in this list (the tick thread merged the axis
+        // neighbours' lists before the sweep), so a null upwind row is a gas that side does not have.
+        for (int present = 0; present < workspace.GasCount; present++)
         {
-            int gasId = gases.GasIds[present];
+            int gasId = workspace.GasIds[present];
             Mole[] source = read.Species[gasId]!;
             Mole[] target = write.Species[gasId]!;
             Mole moles = source[voxelIndex] -
                          timeStep *
-                         (ahead.SpeciesRate * ahead.UpwindState.Species[gasId]![ahead.UpwindIndex] -
-                          behind.SpeciesRate * behind.UpwindState.Species[gasId]![behind.UpwindIndex]);
+                         (ahead.SpeciesRate * UpwindMoles(in ahead, gasId) -
+                          behind.SpeciesRate * UpwindMoles(in behind, gasId));
 
             if (moles < 0f)
             {
@@ -479,6 +480,16 @@ internal static class EulerSweep
         write.MomentumY[voxelIndex] = momentumY;
         write.MomentumZ[voxelIndex] = momentumZ;
         return signalSpeed;
+    }
+
+    /// <summary>
+    ///     Moles of one gas in a face's upwind cell; zero for a gas the upwind buffer has no row for, which is the
+    ///     exact value a zero row would give.
+    /// </summary>
+    private static Mole UpwindMoles(in EulerFaceRate rate, int gasId)
+    {
+        Mole[]? row = rate.UpwindState.Species[gasId];
+        return row == null ? 0f : row[rate.UpwindIndex];
     }
 
     private static KilogramMetrePerSecond ReadMomentum(EulerChunkState buffer, int axis, int voxelIndex)
