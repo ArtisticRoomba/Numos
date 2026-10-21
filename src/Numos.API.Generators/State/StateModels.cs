@@ -7,7 +7,11 @@ namespace Numos.API.Generators.State;
 /// <param name="Shape">The member's type; aliases are resolved by the time a field reaches the emitter.</param>
 /// <param name="Name">The unescaped member name, which constructor parameters bind to.</param>
 /// <param name="Settable">Whether an object initializer can assign the member (a mutable field, or a set/init accessor).</param>
-internal sealed record StateFieldModel(int Id, string MemberName, StateShape Shape, string Name, bool Settable);
+/// <param name="InitOnly">
+///     Whether the member can only be assigned in an object initializer. Other settable members are assigned after
+///     construction, and only when the data contains them, so a missing one keeps whatever the constructor set.
+/// </param>
+internal sealed record StateFieldModel(int Id, string MemberName, StateShape Shape, string Name, bool Settable, bool InitOnly);
 
 /// <param name="Name">The parameter name.</param>
 /// <param name="Shape">The parameter type, classified with <see cref="StateShape.FromParameter" />.</param>
@@ -28,7 +32,11 @@ internal sealed record StateReadPlan(EquatableArray<string> Arguments, Equatable
 
 /// <param name="MemberName">The escaped member to assign.</param>
 /// <param name="Expression">The value to assign.</param>
-internal sealed record StateInitializerModel(string MemberName, string Expression);
+/// <param name="Id">The field id, whose <c>has{id}</c> local guards an assignment after construction.</param>
+/// <param name="AfterConstruction">
+///     Whether to assign after construction when the field was read, rather than in the object initializer.
+/// </param>
+internal sealed record StateInitializerModel(string MemberName, string Expression, int Id, bool AfterConstruction);
 
 /// <param name="Type">The type to reopen.</param>
 /// <param name="TypeName">The fully qualified type, used as the interface's type argument.</param>

@@ -70,11 +70,6 @@ internal struct AtmosStateHasher
         Add(value.Z);
     }
 
-    internal void Add(GasProperties gas)
-    {
-        GeneratedCheckpointFields.AppendGasFields(ref this, gas);
-    }
-
     internal static ulong HashDefinition(AtmosSimulationCheckpoint checkpoint)
     {
         var hash = new AtmosStateHasher();

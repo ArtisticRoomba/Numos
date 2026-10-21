@@ -759,7 +759,7 @@ internal static class EulerSweep
         int[] upperMask = scratch.FaceUpperMask;
 
         int width = HllcFluxVector.Width;
-        Vector<float> area = new((float)faceArea);
+        Vector<SquareMetre> area = new((float)faceArea);
         Span<float> spill = stackalloc float[width];
         Span<int> maskSpill = stackalloc int[width];
         for (int first = 0; first < count; first += width)

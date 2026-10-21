@@ -378,6 +378,63 @@ public static class StateCodecs
     }
 
     /// <summary>
+    ///     Codec for a whole <see cref="Numos.CoreSim.GasRegistry" />, written as a count followed by each gas's
+    ///     <see cref="GasProperties" /> fields in gas-ID order.
+    /// </summary>
+    /// <remarks>
+    ///     Unlike <see cref="Gas" />, this writes the gases by value: it's how a configuration saves the registry that
+    ///     gas references elsewhere are resolved against. Order is kept, since a gas's index is its ID.
+    /// </remarks>
+    public readonly struct GasRegistry : IStateCodec<Numos.CoreSim.GasRegistry>
+    {
+        /// <inheritdoc />
+        public static void Write<TSink>(ref TSink sink, Numos.CoreSim.GasRegistry value) where TSink : struct, IStateSink
+        {
+            sink.WriteCount(value.Count);
+            for (int i = 0; i < value.Count; i++)
+                State<GasProperties>.Write(ref sink, value[i]);
+        }
+
+        /// <inheritdoc />
+        public static bool StateEquals(Numos.CoreSim.GasRegistry left, Numos.CoreSim.GasRegistry right) => Compare(left, right) == 0;
+
+        /// <inheritdoc />
+        public static int Compare(Numos.CoreSim.GasRegistry left, Numos.CoreSim.GasRegistry right)
+        {
+            int result = left.Count.CompareTo(right.Count);
+            for (int i = 0; result == 0 && i < left.Count; i++)
+                result = State<GasProperties>.Compare(left[i], right[i]);
+
+            return result;
+        }
+
+        /// <inheritdoc />
+        /// <exception cref="InvalidDataException">Two gases share a name.</exception>
+        public static Numos.CoreSim.GasRegistry Read(ref StateReader reader, IGasRegistry? gases)
+        {
+            int count = reader.ReadCount();
+            var registry = new Numos.CoreSim.GasRegistry();
+            for (int i = 0; i < count; i++)
+            {
+                GasProperties gas = State<GasProperties>.Read(ref reader, gases);
+                try
+                {
+                    registry.Add(gas);
+                }
+                catch (InvalidOperationException exception)
+                {
+                    throw new InvalidDataException(exception.Message, exception);
+                }
+            }
+
+            return registry;
+        }
+
+        /// <inheritdoc />
+        public static Numos.CoreSim.GasRegistry Default => new();
+    }
+
+    /// <summary>
     ///     Codec for an enum, written as its underlying integer.
     /// </summary>
     /// <typeparam name="TEnum">The enum type.</typeparam>

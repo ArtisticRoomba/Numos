@@ -130,10 +130,16 @@ internal static class StateBinding
                 return null;
             }
 
+            // Init-only members have to be set in the initializer, so a missing one gets the codec default. Anything
+            // assignable later is only touched when the data has it, keeping the constructor's or initializer's value.
             initializers.Add(
-                new StateInitializerModel(
-                    field.MemberName,
-                    "has" + field.Id + " ? field" + field.Id + " : " + DefaultValue(field.Shape)));
+                field.InitOnly
+                    ? new StateInitializerModel(
+                        field.MemberName,
+                        "has" + field.Id + " ? field" + field.Id + " : " + DefaultValue(field.Shape),
+                        field.Id,
+                        false)
+                    : new StateInitializerModel(field.MemberName, "field" + field.Id, field.Id, true));
         }
 
         failure = null;

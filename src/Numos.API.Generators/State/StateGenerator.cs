@@ -30,6 +30,7 @@ public sealed class StateGenerator : IIncrementalGenerator
     private const string NumosStateMetadataName = "Numos.CoreSim.State.NumosStateAttribute";
     private const string StateFieldMetadataName = "Numos.CoreSim.State.StateFieldAttribute";
     private const string NotStateMetadataName = "Numos.CoreSim.State.NotStateAttribute";
+    private const string StateCodecMetadataName = "Numos.CoreSim.State.StateCodecAttribute";
     private const string RetiredMetadataName = "Numos.CoreSim.State.RetiredStateFieldsAttribute";
     private const string SolverConfigurationMetadataName = "Numos.CoreSim.IAtmosSolverConfiguration";
     private const string WorldSolverMetadataName = "Numos.API.IAtmosWorldSolver";
@@ -252,7 +253,20 @@ public sealed class StateGenerator : IIncrementalGenerator
                 _ => false,
             };
 
-            var field = new StateFieldModel(id, CodeWriter.Escape(member.Name), StateShape.From(memberType!), member.Name, settable);
+            bool initOnly = member is IPropertySymbol { SetMethod.IsInitOnly: true };
+            AttributeData? codecAttribute = FindAttribute(member, StateCodecMetadataName);
+            StateShape shape = codecAttribute is { ConstructorArguments.Length: 1 } &&
+                               codecAttribute.ConstructorArguments[0].Value is ITypeSymbol codec
+                ? StateShape.FromCodec(memberType!, codec)
+                : StateShape.From(memberType!);
+
+            var field = new StateFieldModel(
+                id,
+                CodeWriter.Escape(member.Name),
+                shape,
+                member.Name,
+                settable,
+                initOnly);
             fields.Add(new StateFieldDeclaration(field, displayName, location));
         }
 

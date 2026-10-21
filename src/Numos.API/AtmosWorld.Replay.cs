@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using Numos.CoreSim.Replay;
+using Numos.CoreSim.State;
 
 namespace Numos.API;
 
@@ -505,7 +506,9 @@ internal static class AtmosWorldCheckpointHasher
         hash.Add(checkpoint.Position.Tick);
         hash.Add(checkpoint.Position.OperationSequence);
         hash.Add(checkpoint.TopologyVersion);
-        checkpoint.Config.AppendHash(ref hash);
+        var config = new StateHashSink(hash);
+        checkpoint.Config.WriteHash(ref config);
+        hash = config.Hasher;
         hash.Add(checkpoint.Solvers.Count);
         foreach (var solver in checkpoint.Solvers)
         {

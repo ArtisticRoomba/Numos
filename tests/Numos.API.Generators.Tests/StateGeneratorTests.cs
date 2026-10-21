@@ -269,10 +269,11 @@ public sealed class StateGeneratorTests
             Assert.That(source, Does.Contain("void global::Numos.CoreSim.State.INumosState.WriteState<TSink>(ref TSink sink)"));
         });
 
-        // Mutable fields with no constructor are filled through an object initializer.
+        // Mutable fields with no constructor are assigned after construction, and only when the data has them, so a
+        // missing one keeps its initializer's value.
         Assert.That(
             GeneratorHarness.GeneratedSource(result, "MyMod.EveryShape.NumosState.g.cs"),
-            Does.Match(@"return new global::MyMod\.EveryShape\(\)\s+\{\s+Bool = has1 \? field1 : "));
+            Does.Match(@"var result = new global::MyMod\.EveryShape\(\);\s+if \(has1\)\s+result\.Bool = field1;"));
     }
 
     [Test]

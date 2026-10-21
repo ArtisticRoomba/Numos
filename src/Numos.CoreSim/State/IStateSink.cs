@@ -166,6 +166,13 @@ public struct StateHashSink : IStateSink
         _hasher = new AtmosStateHasher();
     }
 
+    internal StateHashSink(AtmosStateHasher hasher)
+    {
+        _hasher = hasher;
+    }
+
+    internal readonly AtmosStateHasher Hasher => _hasher;
+
     /// <summary>
     ///     Gets the hash of everything written so far.
     /// </summary>

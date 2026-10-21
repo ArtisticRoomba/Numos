@@ -79,19 +79,21 @@ internal static partial class AtmosReplayCodec
     }
 
     /// <summary>
-    ///     Writes a configuration: scalar fields, the gas registry, then its solver configurations.
+    ///     Writes a configuration: its schema fields (scalars and the gas registry), then its solver configurations.
     /// </summary>
     /// <remarks>
-    ///     Solver configurations are a count followed by, for each one in the snapshot's ordinal key order, its key
-    ///     and a length-prefixed <see cref="StateBinarySink" /> payload. With none, that's a single zero count, which
-    ///     is what files written before solver configurations could be saved contain.
+    ///     The schema fields are one length-prefixed <see cref="StateBinarySink" /> payload of the snapshot's
+    ///     normalized <see cref="AtmosConfig" />. Solver configurations follow as a count and, for each one in the
+    ///     snapshot's ordinal key order, its key and a length-prefixed payload. <see cref="AtmosConfigSnapshot.WriteHash" />
+    ///     hashes the same sequence without the lengths.
     /// </remarks>
     /// <exception cref="NotSupportedException">A solver configuration is neither a <see cref="NumosStateAttribute" /> type nor a built-in portable one.</exception>
     internal static void WriteConfig(BinaryWriter writer, AtmosConfigSnapshot config)
     {
-        GeneratedCheckpointFields.WriteConfigFields(writer, config);
-        writer.Write(config.GasRegistry.Count);
-        foreach (var gas in config.GasRegistry) GeneratedCheckpointFields.WriteGasFields(writer, gas);
+        var fields = new StateBinarySink();
+        NumosState.Write(ref fields, config.Fields);
+        writer.Write(fields.WrittenSpan.Length);
+        writer.Write(fields.WrittenSpan);
         writer.Write(config.SolverConfigurations.Count);
         foreach (var configuration in config.SolverConfigurations)
         {
@@ -127,12 +129,10 @@ internal static partial class AtmosReplayCodec
     /// <exception cref="NotSupportedException">A solver configuration key has no registered type.</exception>
     internal static AtmosConfigSnapshot ReadConfig(BinaryReader reader, int maxStringBytes)
     {
-        var config = new AtmosConfig();
-        GeneratedCheckpointFields.ReadConfigFields(reader, config, maxStringBytes);
-
-        int gasCount = ReadCount(reader, 1_000_000, "gas");
-        for (int index = 0; index < gasCount; index++)
-            config.GasRegistry.Add(GeneratedCheckpointFields.ReadGasFields(reader, maxStringBytes));
+        // Read into a mutable AtmosConfig so the snapshot constructor normalizes it, exactly as for a live config.
+        byte[] fieldBytes = ReadPayload(reader, ReadCount(reader, int.MaxValue, "configuration byte"));
+        var fields = new StateReader(fieldBytes, maxStringBytes);
+        var config = NumosState.Read<AtmosConfig>(ref fields);
 
         var types = (reader as ReplayReader)?.SolverConfigurations ?? SolverConfigurationTypes.BuiltIn;
         int configurationCount = ReadCount(reader, 1_000_000, "solver configuration");

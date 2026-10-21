@@ -1,33 +1,74 @@
 using System.Reflection;
-using Numos.CoreSim.Replay;
+using Numos.CoreSim.State;
 
 namespace Numos.CoreSim.Tests.Replay;
 
 /// <summary>
-///     Checks that every <see cref="ConfigCheckpointFieldAttribute" /> and <see cref="GasCheckpointFieldAttribute" />
-///     member takes part in both <see cref="AtmosConfigSnapshot.SemanticallyEquals" /> and the config hash.
+///     Checks that every <see cref="StateFieldAttribute" /> scalar on <see cref="AtmosConfig" /> and every
+///     <see cref="GasProperties" /> field takes part in both <see cref="AtmosConfigSnapshot.SemanticallyEquals" /> and
+///     the config hash, and that the snapshot exposes every config scalar.
 /// </summary>
 /// <remarks>
 ///     The field lists come from reflection over the attributes, so a newly tagged field is covered without touching
 ///     this file.
 /// </remarks>
 [TestFixture]
-public sealed class CheckpointFieldEqualityTests
+public sealed class ConfigStateFieldTests
 {
+    private static IEnumerable<PropertyInfo> ConfigScalars()
+    {
+        return typeof(AtmosConfig)
+            .GetProperties(BindingFlags.Public | BindingFlags.Instance)
+            .Where(static property => property.IsDefined(typeof(StateFieldAttribute)) && property.PropertyType != typeof(GasRegistry));
+    }
+
     private static IEnumerable<TestCaseData> ConfigFields()
     {
-        return typeof(AtmosConfigSnapshot)
-            .GetProperties(BindingFlags.Public | BindingFlags.Instance)
-            .Where(static property => property.IsDefined(typeof(ConfigCheckpointFieldAttribute)))
-            .Select(static property => new TestCaseData(property.Name).SetName($"ConfigField_{property.Name}"));
+        return ConfigScalars().Select(static property => new TestCaseData(property.Name).SetName($"ConfigField_{property.Name}"));
     }
 
     private static IEnumerable<TestCaseData> GasFields()
     {
         return typeof(GasProperties)
             .GetFields(BindingFlags.Public | BindingFlags.Instance)
-            .Where(static field => field.IsDefined(typeof(GasCheckpointFieldAttribute)))
+            .Where(static field => field.IsDefined(typeof(StateFieldAttribute)))
             .Select(static field => new TestCaseData(field.Name).SetName($"GasField_{field.Name}"));
+    }
+
+    [Test]
+    public void EveryGasFieldIsState()
+    {
+        // GasProperties has no [NotState] members, so a public field without a tag would fail the build; this pins it.
+        Assert.That(
+            typeof(GasProperties).GetFields(BindingFlags.Public | BindingFlags.Instance).Select(static field => field.Name),
+            Is.EquivalentTo(GasFields().Select(static data => (string)data.Arguments[0]!)));
+    }
+
+    [TestCaseSource(nameof(ConfigFields))]
+    public void ConfigField_HasAMatchingSnapshotProperty(string name)
+    {
+        PropertyInfo configProperty = typeof(AtmosConfig).GetProperty(name)!;
+        PropertyInfo? snapshotProperty = typeof(AtmosConfigSnapshot).GetProperty(name, BindingFlags.Public | BindingFlags.Instance);
+
+        Assert.That(snapshotProperty, Is.Not.Null, $"AtmosConfigSnapshot has no public '{name}' property.");
+        Assert.That(snapshotProperty!.PropertyType, Is.EqualTo(configProperty.PropertyType));
+    }
+
+    [Test]
+    public void SnapshotCopy_RoundTripsEveryField()
+    {
+        // Every scalar and gas field moved off its default, so a field the copy constructor forgets shows up here.
+        var config = new TestAtmosConfig();
+        foreach (PropertyInfo property in ConfigScalars())
+        {
+            object value = property.GetValue(config)!;
+            property.SetValue(config, Candidates(value).First(candidate => !BitwiseEqual(candidate, value)));
+        }
+
+        var snapshot = config.CreateSnapshot();
+        var copy = new AtmosConfig(snapshot).CreateSnapshot();
+
+        Assert.That(NumosState.StateEquals(copy.Fields, snapshot.Fields), Is.True);
     }
 
     [Test]
@@ -104,9 +145,7 @@ public sealed class CheckpointFieldEqualityTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(
-                GeneratedCheckpointFields.GasFieldsEqual(positive.GasRegistry[0], negative.GasRegistry[0]),
-                Is.False);
+            Assert.That(NumosState.StateEquals(positive.GasRegistry[0], negative.GasRegistry[0]), Is.False);
 
             AssertDifferent(positive, negative);
         });
@@ -168,8 +207,8 @@ public sealed class CheckpointFieldEqualityTests
 
     private static ulong Hash(AtmosConfigSnapshot config)
     {
-        var hash = new AtmosStateHasher();
-        config.AppendHash(ref hash);
-        return hash.Value;
+        var sink = new StateHashSink();
+        config.WriteHash(ref sink);
+        return sink.Value;
     }
 }

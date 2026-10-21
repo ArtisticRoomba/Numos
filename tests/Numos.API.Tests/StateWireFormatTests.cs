@@ -104,6 +104,36 @@ public sealed partial class StateWireFormatTests
     }
 
     [Test]
+    public void StateCodecOverride_RoundTripsNull()
+    {
+        var value = new Tagged { Name = null!, Limit = 8 };
+        Tagged read = RoundTrip(value);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(read.Name, Is.Null);
+            Assert.That(read.Limit, Is.EqualTo(8));
+            Assert.That(NumosState.StateEquals(read, value), Is.True);
+            Assert.That(NumosState.ComputeHash(read), Is.Not.EqualTo(NumosState.ComputeHash(new Tagged { Name = "", Limit = 8 })));
+        });
+    }
+
+    [Test]
+    public void MissingSettableFields_KeepTheirInitializers()
+    {
+        var sink = new StateBinarySink();
+        sink.BeginObject();
+        sink.EndObject();
+
+        Tagged read = Read<Tagged>(sink.WrittenSpan);
+        Assert.Multiple(() =>
+        {
+            Assert.That(read.Name, Is.EqualTo("unnamed"));
+            Assert.That(read.Limit, Is.EqualTo(3));
+        });
+    }
+
+    [Test]
     public void UnknownFieldIds_AreSkipped()
     {
         // Version 2 of Pair added field 3 between the two fields version 1 knows.
@@ -299,5 +329,15 @@ public sealed partial class StateWireFormatTests
         [StateField(4)] public IReadOnlyList<string> Names { get; } = names ?? [];
         [StateField(5)] public string Label { get; init; } = "unset";
         [StateField(6)] public int Limit { get; init; } = 3;
+    }
+
+    // A codec override, and set properties that keep their initializer when the data doesn't have them.
+    [NumosState]
+    public sealed partial class Tagged
+    {
+        [StateField(1), StateCodec(typeof(StateCodecs.Nullable<string, StateCodecs.String>))]
+        public string Name { get; set; } = "unnamed";
+
+        [StateField(2)] public int Limit { get; set; } = 3;
     }
 }

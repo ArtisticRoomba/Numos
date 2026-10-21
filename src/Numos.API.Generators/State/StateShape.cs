@@ -14,6 +14,11 @@ internal enum StateShapeKind
     Gas,
 
     /// <summary>
+    ///     A whole <c>GasRegistry</c>, written by value.
+    /// </summary>
+    GasRegistry,
+
+    /// <summary>
     ///     An enum; the name is its fully qualified type and the one argument is its underlying primitive.
     /// </summary>
     Enum,
@@ -44,6 +49,12 @@ internal enum StateShapeKind
     Container,
 
     /// <summary>
+    ///     A member with a <c>[StateCodec]</c>; the name is its declared type and <see cref="StateShape.Codec" /> the
+    ///     codec that handles it.
+    /// </summary>
+    Custom,
+
+    /// <summary>
     ///     An unresolved identifier, presumably a quantity alias, still to be looked up in the catalog.
     /// </summary>
     Alias,
@@ -53,7 +64,7 @@ internal enum StateShapeKind
 /// <summary>
 ///     A state field's type, reduced to what picks its codec.
 /// </summary>
-internal sealed record StateShape(StateShapeKind Kind, string Name, EquatableArray<StateShape> Arguments)
+internal sealed record StateShape(StateShapeKind Kind, string Name, EquatableArray<StateShape> Arguments, string Codec = "")
 {
     private const string Codecs = "global::Numos.CoreSim.State.StateCodecs.";
 
@@ -156,6 +167,9 @@ internal sealed record StateShape(StateShapeKind Kind, string Name, EquatableArr
         if (metadataName == "Numos.CoreSim.GasProperties")
             return Leaf(StateShapeKind.Gas, "");
 
+        if (metadataName == "Numos.CoreSim.GasRegistry")
+            return Leaf(StateShapeKind.GasRegistry, "");
+
         if (ListTypes.Contains(metadataName))
             return Of(StateShapeKind.List, named.ToDisplayString(UnboundFormat), From(named.TypeArguments[0]));
 
@@ -199,6 +213,14 @@ internal sealed record StateShape(StateShapeKind Kind, string Name, EquatableArr
         }
 
         return From(type);
+    }
+
+    /// <summary>
+    ///     Classifies a member whose <c>[StateCodec]</c> names the codec to use, whatever its type.
+    /// </summary>
+    public static StateShape FromCodec(ITypeSymbol memberType, ITypeSymbol codec)
+    {
+        return new StateShape(StateShapeKind.Custom, FullName(memberType), EquatableArray<StateShape>.Empty, FullName(codec));
     }
 
     public static bool HasStateAttribute(INamedTypeSymbol type)
@@ -271,7 +293,8 @@ internal sealed record StateShape(StateShapeKind Kind, string Name, EquatableArr
         StateShapeKind.String => "string",
         StateShapeKind.Int3 => "global::Numos.Maths.Int3",
         StateShapeKind.Gas => "global::Numos.CoreSim.GasProperties",
-        StateShapeKind.Enum or StateShapeKind.State => Name,
+        StateShapeKind.GasRegistry => "global::Numos.CoreSim.GasRegistry",
+        StateShapeKind.Enum or StateShapeKind.State or StateShapeKind.Custom => Name,
         StateShapeKind.Array => Arguments[0].TypeExpression + "[]",
         StateShapeKind.NullableReference or StateShapeKind.NullableValue => Arguments[0].TypeExpression + "?",
         _ => Name + "<" + string.Join(", ", Arguments.Select(static argument => argument.TypeExpression)) + ">",
@@ -286,6 +309,8 @@ internal sealed record StateShape(StateShapeKind Kind, string Name, EquatableArr
         StateShapeKind.String => Codecs + "String",
         StateShapeKind.Int3 => Codecs + "Int3",
         StateShapeKind.Gas => Codecs + "Gas",
+        StateShapeKind.Custom => Codec,
+        StateShapeKind.GasRegistry => Codecs + "GasRegistry",
         StateShapeKind.Enum => Codecs + "Enum<" + Name + ", " + Arguments[0].TypeExpression + ", " +
                                Arguments[0].CodecExpression + ">",
         StateShapeKind.State => Codecs + "State<" + Name + ">",

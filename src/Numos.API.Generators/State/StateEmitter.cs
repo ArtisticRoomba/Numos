@@ -106,7 +106,9 @@ internal static class StateEmitter
             foreach (StateFieldModel field in model.Fields)
             {
                 writer.Line("case " + field.Id + ":");
-                writer.Line("    field" + field.Id + " = " + field.Shape.CodecExpression + ".Read(ref reader, gases);");
+                // A custom codec may be declared over the nullable form of the member's type.
+                string forgive = field.Shape.Kind == StateShapeKind.Custom ? "!" : "";
+                writer.Line("    field" + field.Id + " = " + field.Shape.CodecExpression + ".Read(ref reader, gases)" + forgive + ";");
                 writer.Line("    has" + field.Id + " = true;");
                 writer.Line("    break;");
             }
@@ -124,8 +126,12 @@ internal static class StateEmitter
         writer.Line();
         writer.Line("reader.EndObject();");
         StateReadPlan plan = model.Read;
-        string construction = "return new " + model.TypeName + "(" + string.Join(", ", plan.Arguments) + ")";
-        if (plan.Initializers.Count == 0)
+        StateInitializerModel[] inline = plan.Initializers.Where(static initializer => !initializer.AfterConstruction).ToArray();
+        StateInitializerModel[] after = plan.Initializers.Where(static initializer => initializer.AfterConstruction).ToArray();
+        string construction = (after.Length == 0 ? "return new " : "var result = new ") + model.TypeName + "(" +
+                              string.Join(", ", plan.Arguments) + ")";
+
+        if (inline.Length == 0)
         {
             writer.Line(construction + ";");
         }
@@ -133,10 +139,21 @@ internal static class StateEmitter
         {
             writer.Line(construction);
             writer.Open();
-            foreach (StateInitializerModel initializer in plan.Initializers)
+            foreach (StateInitializerModel initializer in inline)
                 writer.Line(initializer.MemberName + " = " + initializer.Expression + ",");
 
             writer.Close(";");
+        }
+
+        if (after.Length > 0)
+        {
+            foreach (StateInitializerModel initializer in after)
+            {
+                writer.Line("if (has" + initializer.Id + ")");
+                writer.Line("    result." + initializer.MemberName + " = " + initializer.Expression + ";");
+            }
+
+            writer.Line("return result;");
         }
 
         writer.Close();

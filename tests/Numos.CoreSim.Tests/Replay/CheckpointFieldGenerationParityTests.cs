@@ -1,4 +1,5 @@
 using Numos.CoreSim.Replay;
+using Numos.CoreSim.State;
 
 namespace Numos.CoreSim.Tests.Replay;
 
@@ -141,10 +142,10 @@ public sealed class CheckpointFieldGenerationParityTests
         var baseline = new AtmosConfig { ThermalConductance = 0.1f }.CreateSnapshot();
         var changed = new AtmosConfig { ThermalConductance = 0.2f }.CreateSnapshot();
 
-        var baselineHash = new AtmosStateHasher();
-        baseline.AppendHash(ref baselineHash);
-        var changedHash = new AtmosStateHasher();
-        changed.AppendHash(ref changedHash);
+        var baselineHash = new StateHashSink();
+        baseline.WriteHash(ref baselineHash);
+        var changedHash = new StateHashSink();
+        changed.WriteHash(ref changedHash);
 
         Assert.That(baselineHash.Value, Is.Not.EqualTo(changedHash.Value));
     }
@@ -155,10 +156,10 @@ public sealed class CheckpointFieldGenerationParityTests
         var baseline = new AtmosConfig().CreateSnapshot();
         var changed = new AtmosConfig { ReferenceMolarMass = 0.032f }.CreateSnapshot();
 
-        var baselineHash = new AtmosStateHasher();
-        baseline.AppendHash(ref baselineHash);
-        var changedHash = new AtmosStateHasher();
-        changed.AppendHash(ref changedHash);
+        var baselineHash = new StateHashSink();
+        baseline.WriteHash(ref baselineHash);
+        var changedHash = new StateHashSink();
+        changed.WriteHash(ref changedHash);
 
         Assert.That(baselineHash.Value, Is.Not.EqualTo(changedHash.Value));
     }
@@ -166,24 +167,18 @@ public sealed class CheckpointFieldGenerationParityTests
     [Test]
     public void GasHash_ChangesWhenTheMolarMassChanges()
     {
-        var baselineHash = new AtmosStateHasher();
-        baselineHash.Add(new GasProperties { Name = "Air" });
+        ulong baseline = NumosState.ComputeHash(new GasProperties { Name = "Air" });
+        ulong changed = NumosState.ComputeHash(new GasProperties { Name = "Air", MolarMass = 0.02897f });
 
-        var changedHash = new AtmosStateHasher();
-        changedHash.Add(new GasProperties { Name = "Air", MolarMass = 0.02897f });
-
-        Assert.That(baselineHash.Value, Is.Not.EqualTo(changedHash.Value));
+        Assert.That(baseline, Is.Not.EqualTo(changed));
     }
 
     [Test]
     public void GasHash_ChangesWhenATaggedFieldChanges()
     {
-        var baselineHash = new AtmosStateHasher();
-        baselineHash.Add(new GasProperties { Name = "Air", DiffusionCoefficient = 0.02f });
+        ulong baseline = NumosState.ComputeHash(new GasProperties { Name = "Air", DiffusionCoefficient = 0.02f });
+        ulong changed = NumosState.ComputeHash(new GasProperties { Name = "Air", DiffusionCoefficient = 0.05f });
 
-        var changedHash = new AtmosStateHasher();
-        changedHash.Add(new GasProperties { Name = "Air", DiffusionCoefficient = 0.05f });
-
-        Assert.That(baselineHash.Value, Is.Not.EqualTo(changedHash.Value));
+        Assert.That(baseline, Is.Not.EqualTo(changed));
     }
 }

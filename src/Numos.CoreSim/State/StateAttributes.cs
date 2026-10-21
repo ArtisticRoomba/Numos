@@ -28,11 +28,15 @@ namespace Numos.CoreSim.State;
 ///     <para>
 ///         The generated reader builds the value through a constructor, the way <c>System.Text.Json</c> does: each
 ///         parameter binds to the state field with the same name, ignoring case, and fields no parameter covers are
-///         set through their <c>set</c> or <c>init</c> accessor. A parameter may be any collection type the field's
-///         value can be copied into, such as <see cref="IEnumerable{T}" /> or <see cref="IDictionary{TKey, TValue}" />
-///         for a frozen field. When several constructors bind, the one with the most parameters wins; when none does,
-///         the build fails. A field missing from older data gets the parameter's default value if it declares one,
-///         otherwise <c>default</c>, an empty string, or an empty collection.
+///         set through their <c>set</c> or <c>init</c> accessor (or directly, for a mutable field). A parameter may be
+///         any collection type the field's value can be copied into, such as <see cref="IEnumerable{T}" /> or
+///         <see cref="IDictionary{TKey, TValue}" /> for a frozen field. When several constructors bind, the one with the
+///         most parameters wins; when none does, the build fails.
+///     </para>
+///     <para>
+///         A field missing from older data gets the parameter's default value if a parameter declares one. A settable
+///         field or <c>set</c> property is left alone, so it keeps whatever the constructor or its initializer gave it.
+///         Anything else gets <c>default</c>, an empty string, or an empty collection.
 ///     </para>
 /// </remarks>
 /// <example>
@@ -85,7 +89,8 @@ public sealed class NumosStateAttribute : Attribute
 ///     <para>
 ///         Supported types are <see langword="bool" />, the integer types, <see langword="float" />,
 ///         <see langword="double" />, enums, <see langword="string" />, <c>Int3</c>, Magnitudo quantity aliases,
-///         <see cref="GasProperties" /> (by name), other <see cref="NumosStateAttribute" /> types, arrays,
+///         <see cref="GasProperties" /> (by name), <see cref="GasRegistry" /> (by value), other
+///         <see cref="NumosStateAttribute" /> types, arrays,
 ///         <see cref="IReadOnlyList{T}" />, <c>ImmutableArray&lt;T&gt;</c>, read-only, frozen, or plain dictionaries,
 ///         read-only or frozen sets, and nullable forms of these.
 ///     </para>
@@ -103,6 +108,38 @@ public sealed class StateFieldAttribute(int id) : Attribute
     ///     Gets the field's stable id.
     /// </summary>
     public int Id { get; } = id;
+}
+
+/// <summary>
+///     Hands a <see cref="StateFieldAttribute" /> member to a specific <see cref="IStateCodec{T}" /> instead of the one
+///     its type would get.
+/// </summary>
+/// <remarks>
+///     <para>
+///         For shapes the schema can't describe on its own, such as a count-prefixed array of runtime-typed values, or
+///         to change how a supported type is written, such as a <see langword="string" /> field that may hold
+///         <see langword="null" />. The codec writes, compares, orders, and reads the whole member, so it's also
+///         responsible for keeping its hash and bytes in step: write both through the same sink calls.
+///     </para>
+///     <para>
+///         The codec must implement <see cref="IStateCodec{T}" /> for the member's type and be accessible from the
+///         declaring type. A member with a codec is read through its setter, not a constructor parameter.
+///     </para>
+/// </remarks>
+/// <param name="codec">The codec type.</param>
+/// <example>
+///     <code>
+///     [StateField(1), StateCodec(typeof(StateCodecs.Nullable&lt;string, StateCodecs.String&gt;))]
+///     public string Name;
+///     </code>
+/// </example>
+[AttributeUsage(AttributeTargets.Field | AttributeTargets.Property, Inherited = false)]
+public sealed class StateCodecAttribute(Type codec) : Attribute
+{
+    /// <summary>
+    ///     Gets the codec type.
+    /// </summary>
+    public Type Codec { get; } = codec;
 }
 
 /// <summary>
