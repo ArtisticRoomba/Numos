@@ -1,5 +1,6 @@
 using System.Globalization;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Numos.API.Generators.Common;
 
@@ -113,6 +114,18 @@ public sealed class StateGenerator : IIncrementalGenerator
         }
 
         bool isSolverConfiguration = Implements(type, SolverConfigurationMetadataName);
+        string? stateKey = null;
+        foreach (KeyValuePair<string, TypedConstant> argument in context.Attributes[0].NamedArguments)
+        {
+            if (argument.Key == "Key" && argument.Value.Value is string key)
+                stateKey = key;
+        }
+
+        if (stateKey is not null && string.IsNullOrWhiteSpace(stateKey))
+        {
+            diagnostics.Add(DiagnosticInfo.Create(StateDiagnostics.BlankKey, typeLocation, typeDisplayName));
+            canGenerate = false;
+        }
         if (Implements(type, WorldSolverMetadataName))
         {
             // Its fields would only produce noise about tags that can't fix anything.
@@ -135,6 +148,27 @@ public sealed class StateGenerator : IIncrementalGenerator
                             LocationInfo.From(member.Locations.FirstOrDefault()) ?? typeLocation,
                             typeDisplayName,
                             generated));
+
+                    canGenerate = false;
+                    break;
+                }
+            }
+        }
+
+        // With a declared key, the generator writes the solver configuration's Key so the two can't disagree.
+        if (isSolverConfiguration && stateKey is not null)
+        {
+            foreach (ISymbol member in type.GetMembers())
+            {
+                if (member is IPropertySymbol { IsImplicitlyDeclared: false } property &&
+                    (property.Name == "Key" || property.Name.EndsWith(".Key", StringComparison.Ordinal)))
+                {
+                    diagnostics.Add(
+                        DiagnosticInfo.Create(
+                            StateDiagnostics.HandWritten,
+                            LocationInfo.From(member.Locations.FirstOrDefault()) ?? typeLocation,
+                            typeDisplayName,
+                            "Key"));
 
                     canGenerate = false;
                     break;
@@ -211,17 +245,28 @@ public sealed class StateGenerator : IIncrementalGenerator
             }
 
             ids.Add(id, member.Name);
-            var field = new StateFieldModel(id, CodeWriter.Escape(member.Name), StateShape.From(memberType!));
+            bool settable = member switch
+            {
+                IFieldSymbol storage => !storage.IsReadOnly,
+                IPropertySymbol property => property.SetMethod is not null,
+                _ => false,
+            };
+
+            var field = new StateFieldModel(id, CodeWriter.Escape(member.Name), StateShape.From(memberType!), member.Name, settable);
             fields.Add(new StateFieldDeclaration(field, displayName, location));
         }
 
         return new StateTypeDeclaration(
             PartialTypeModel.From(type),
             type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+            typeDisplayName,
+            typeLocation,
             type.IsReferenceType,
             isSolverConfiguration,
+            stateKey,
             canGenerate,
             fields.OrderBy(static field => field.Field.Id).ToEquatableArray(),
+            Constructors(type),
             diagnostics.ToEquatableArray());
     }
 
@@ -230,11 +275,60 @@ public sealed class StateGenerator : IIncrementalGenerator
         return new StateTypeDeclaration(
             PartialTypeModel.From(type),
             type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+            type.ToDisplayString(),
+            null,
             type.IsReferenceType,
             false,
+            null,
             false,
             EquatableArray<StateFieldDeclaration>.Empty,
+            EquatableArray<StateConstructorModel>.Empty,
             diagnostics.ToEquatableArray());
+    }
+
+    /// <summary>
+    ///     Gets every constructor the generated reader could call. Accessibility doesn't matter, since the reader is
+    ///     generated into the type; only a record's copy constructor is left out.
+    /// </summary>
+    private static EquatableArray<StateConstructorModel> Constructors(INamedTypeSymbol type)
+    {
+        var constructors = new List<StateConstructorModel>();
+        foreach (IMethodSymbol constructor in type.InstanceConstructors)
+        {
+            if (type.IsRecord &&
+                constructor.Parameters.Length == 1 &&
+                SymbolEqualityComparer.Default.Equals(constructor.Parameters[0].Type, type))
+            {
+                continue;
+            }
+
+            constructors.Add(
+                new StateConstructorModel(
+                    constructor.Parameters
+                        .Select(static parameter => new StateParameterModel(
+                            parameter.Name,
+                            StateShape.FromParameter(parameter.Type),
+                            parameter.Type.ToDisplayString(),
+                            parameter.HasExplicitDefaultValue ? DefaultLiteral(parameter.ExplicitDefaultValue) : null))
+                        .ToEquatableArray()));
+        }
+
+        return constructors.ToEquatableArray();
+    }
+
+    private static string DefaultLiteral(object? value)
+    {
+        return value switch
+        {
+            null => "default",
+            float.NaN => "float.NaN",
+            float.PositiveInfinity => "float.PositiveInfinity",
+            float.NegativeInfinity => "float.NegativeInfinity",
+            double.NaN => "double.NaN",
+            double.PositiveInfinity => "double.PositiveInfinity",
+            double.NegativeInfinity => "double.NegativeInfinity",
+            _ => SymbolDisplay.FormatPrimitive(value, true, false) ?? "default",
+        };
     }
 
     /// <summary>
@@ -367,14 +461,25 @@ public sealed class StateGenerator : IIncrementalGenerator
         }
 
         bool hasErrors = diagnostics.Any(static diagnostic => diagnostic.Descriptor.DefaultSeverity == DiagnosticSeverity.Error);
-        StateTypeModel? model = declaration.CanGenerate && !hasErrors
-            ? new StateTypeModel(
-                declaration.Type,
-                declaration.TypeName,
-                declaration.IsReferenceType,
-                declaration.IsSolverConfiguration,
-                fields.ToEquatableArray())
-            : null;
+        if (!declaration.CanGenerate || hasErrors)
+            return new StateTypeResult(null, diagnostics.ToEquatableArray());
+
+        // Only checked once the fields themselves are fine, so a bad field type isn't reported twice.
+        StateReadPlan? plan = StateBinding.Bind(declaration.Constructors, fields, aliases, out string reason);
+        if (plan is null)
+        {
+            diagnostics.Add(DiagnosticInfo.Create(StateDiagnostics.NoConstructor, declaration.Location, declaration.DisplayName, reason));
+            return new StateTypeResult(null, diagnostics.ToEquatableArray());
+        }
+
+        var model = new StateTypeModel(
+            declaration.Type,
+            declaration.TypeName,
+            declaration.IsReferenceType,
+            declaration.IsSolverConfiguration,
+            declaration.StateKey,
+            fields.ToEquatableArray(),
+            plan);
 
         return new StateTypeResult(model, diagnostics.ToEquatableArray());
     }

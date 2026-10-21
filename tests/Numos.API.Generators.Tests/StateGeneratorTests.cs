@@ -240,4 +240,154 @@ public sealed class StateGeneratorTests
             GeneratorHarness.GeneratedSource(result, "MyMod.Outer+Inner.NumosState.g.cs"),
             Does.Contain("partial record struct Outer\n").And.Contain("partial record struct Inner : global::Numos.CoreSim.State.INumosState<global::MyMod.Outer.Inner>"));
     }
+
+    [Test]
+    public void Reader_SkipsUnknownIdsAndDefaultsMissingFields()
+    {
+        GeneratorRunResult result = GeneratorHarness.RunState(out Compilation output, out var diagnostics, null, EveryShapeSource);
+        Assert.That(diagnostics, Is.Empty);
+        Assert.That(GeneratorHarness.Errors(output), Is.Empty);
+
+        string source = GeneratorHarness.GeneratedSource(result, "MyMod.Point.NumosState.g.cs");
+        Assert.Multiple(() =>
+        {
+            Assert.That(
+                source,
+                Does.Contain(
+                    "static global::MyMod.Point global::Numos.CoreSim.State.INumosState<global::MyMod.Point>.ReadState(" +
+                    "ref global::Numos.CoreSim.State.StateReader reader, global::Numos.CoreSim.IGasRegistry? gases)"));
+
+            Assert.That(source, Does.Contain("field1 = global::Numos.CoreSim.State.StateCodecs.Single.Read(ref reader, gases);"));
+            Assert.That(source, Does.Match(@"default:\s+reader\.SkipField\(\);\s+continue;"));
+            Assert.That(
+                source,
+                Does.Contain(
+                    "return new global::MyMod.Point(has1 ? field1 : " +
+                    "global::Numos.CoreSim.State.StateCodecs.DefaultValue<float, global::Numos.CoreSim.State.StateCodecs.Single>(), "));
+
+            Assert.That(source, Does.Contain("static string? global::Numos.CoreSim.State.INumosState<global::MyMod.Point>.StateKey => null;"));
+            Assert.That(source, Does.Contain("void global::Numos.CoreSim.State.INumosState.WriteState<TSink>(ref TSink sink)"));
+        });
+
+        // Mutable fields with no constructor are filled through an object initializer.
+        Assert.That(
+            GeneratorHarness.GeneratedSource(result, "MyMod.EveryShape.NumosState.g.cs"),
+            Does.Match(@"return new global::MyMod\.EveryShape\(\)\s+\{\s+Bool = has1 \? field1 : "));
+    }
+
+    [Test]
+    public void ConstructorParameters_GetCopiesOfCollectionsTheyCantTakeDirectly()
+    {
+        const string source = """
+                              using System.Collections.Frozen;
+                              using System.Collections.Generic;
+                              using System.Collections.Immutable;
+                              using System.Linq;
+                              using Numos.CoreSim;
+                              using Numos.CoreSim.State;
+
+                              namespace MyMod;
+
+                              [NumosState]
+                              public sealed partial class Settings(
+                                  IEnumerable<float>? rates,
+                                  ISet<string> names,
+                                  IDictionary<GasProperties, float> amounts,
+                                  List<int> order,
+                                  ImmutableArray<int> more,
+                                  float spread = -0.5f)
+                              {
+                                  [StateField(1)] public IReadOnlyList<float> Rates { get; } = rates?.ToArray() ?? [];
+                                  [StateField(2)] public IReadOnlySet<string> Names { get; } = names.ToFrozenSet();
+                                  [StateField(3)] public FrozenDictionary<GasProperties, float> Amounts { get; } = amounts.ToFrozenDictionary();
+                                  [StateField(4)] public int[] Order { get; } = order.ToArray();
+                                  [StateField(5)] public IReadOnlyList<int> More { get; } = more;
+                                  [StateField(6)] public float Spread { get; } = spread;
+                              }
+                              """;
+
+        GeneratorRunResult result = GeneratorHarness.RunState(out Compilation output, out var diagnostics, null, source);
+        Assert.That(diagnostics, Is.Empty);
+        Assert.That(GeneratorHarness.Errors(output), Is.Empty, string.Join("\n", GeneratorHarness.Errors(output)));
+        Assert.That(output.GetDiagnostics().Where(static d => d.Severity == DiagnosticSeverity.Warning), Is.Empty);
+
+        string generated = GeneratorHarness.GeneratedSource(result, "MyMod.Settings.NumosState.g.cs");
+        Assert.Multiple(() =>
+        {
+            Assert.That(generated, Does.Contain("has1 ? field1 : "), "IReadOnlyList already is an IEnumerable");
+            Assert.That(generated, Does.Contain("has2 ? new global::System.Collections.Generic.HashSet<string>(field2) : "));
+            Assert.That(generated, Does.Contain("has3 ? field3 : "), "FrozenDictionary already is an IDictionary");
+            Assert.That(generated, Does.Contain("has4 ? new global::System.Collections.Generic.List<int>(field4) : "));
+            Assert.That(generated, Does.Contain("has5 ? global::System.Collections.Immutable.ImmutableArray.CreateRange(field5) : "));
+            Assert.That(generated, Does.Contain("has6 ? field6 : (float)(-0.5)"));
+        });
+    }
+
+    [Test]
+    public void QuantityAliasParameters_BindToTheirStoragePrimitive()
+    {
+        // The reaction types' shape: an alias-valued frozen field filled from a float dictionary parameter.
+        const string source = """
+                              using System.Collections.Frozen;
+                              using System.Collections.Generic;
+                              using Numos.CoreSim;
+                              using Numos.CoreSim.State;
+
+                              namespace MyMod;
+
+                              [NumosState]
+                              public readonly partial record struct Reaction
+                              {
+                                  public Reaction(IDictionary<GasProperties, float> input, Kelvin ignition)
+                                  {
+                                      Input = input.ToFrozenDictionary();
+                                      Ignition = ignition;
+                                  }
+
+                                  [StateField(1)] private FrozenDictionary<GasProperties, Mole> Input { get; }
+                                  [StateField(2)] private float Ignition { get; }
+                              }
+                              """;
+
+        const string catalog = """
+                               temperature | Kelvin | global::System.Single | temperature=1
+                               amount | Mole | global::System.Single | amount=1
+                               """;
+
+        GeneratorRunResult result = GeneratorHarness.RunState(out _, out var diagnostics, catalog, source);
+        Assert.That(diagnostics, Is.Empty);
+        Assert.That(
+            GeneratorHarness.GeneratedSource(result, "MyMod.Reaction.NumosState.g.cs"),
+            Does.Contain("return new global::MyMod.Reaction(has1 ? field1 : "));
+    }
+
+    [Test]
+    public void DeclaredKey_BecomesStateKeyAndSolverConfigurationKey()
+    {
+        const string source = """
+                              using Numos.CoreSim;
+                              using Numos.CoreSim.State;
+
+                              namespace MyMod;
+
+                              [NumosState(Key = "my-mod/fire")]
+                              public sealed partial class FireSettings : IAtmosSolverConfiguration
+                              {
+                                  [StateField(1)] public float IgnitionTemperature { get; init; }
+
+                                  public IAtmosSolverConfiguration CreateSnapshot(IGasRegistry gases) => this;
+                              }
+                              """;
+
+        GeneratorRunResult result = GeneratorHarness.RunState(out Compilation output, out var diagnostics, null, source);
+        Assert.That(diagnostics, Is.Empty);
+        Assert.That(GeneratorHarness.Errors(output), Is.Empty);
+
+        string generated = GeneratorHarness.GeneratedSource(result, "MyMod.FireSettings.NumosState.g.cs");
+        Assert.Multiple(() =>
+        {
+            Assert.That(generated, Does.Contain(".StateKey => \"my-mod/fire\";"));
+            Assert.That(generated, Does.Contain("public string Key => \"my-mod/fire\";"));
+        });
+    }
 }

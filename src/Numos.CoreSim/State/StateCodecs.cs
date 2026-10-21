@@ -1,5 +1,7 @@
+using System.Collections.Frozen;
+using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
-using Numos.Maths;
+using System.Runtime.InteropServices;
 
 namespace Numos.CoreSim.State;
 
@@ -37,6 +39,20 @@ public interface IStateCodec<T>
     /// <param name="right">The second value.</param>
     /// <returns>Negative, zero, or positive; zero exactly when <see cref="StateEquals" /> is true.</returns>
     static abstract int Compare(T left, T right);
+
+    /// <summary>
+    ///     Reads a value written by <see cref="Write{TSink}" /> through a <see cref="StateBinarySink" />.
+    /// </summary>
+    /// <param name="reader">The reader, positioned at the value.</param>
+    /// <param name="gases">Resolves gas references by name; may be <see langword="null" /> when none are expected.</param>
+    /// <returns>The value.</returns>
+    static abstract T Read(ref StateReader reader, IGasRegistry? gases);
+
+    /// <summary>
+    ///     Gets the value a field of this type takes when the data doesn't contain it.
+    /// </summary>
+    /// <remarks><c>default</c>, except that strings are empty and collections are empty rather than null.</remarks>
+    static virtual T Default => default!;
 }
 
 /// <summary>
@@ -48,6 +64,15 @@ public interface IStateCodec<T>
 /// </remarks>
 public static class StateCodecs
 {
+    /// <summary>
+    ///     Gets <typeparamref name="TCodec" />'s <see cref="IStateCodec{T}.Default" />, which generated code can't name
+    ///     directly when the codec keeps the interface's default implementation.
+    /// </summary>
+    /// <typeparam name="T">The value type.</typeparam>
+    /// <typeparam name="TCodec">The codec.</typeparam>
+    /// <returns>The value a missing field takes.</returns>
+    public static T DefaultValue<T, TCodec>() where TCodec : IStateCodec<T> => TCodec.Default;
+
     /// <summary>
     ///     Codec for <see langword="bool" />.
     /// </summary>
@@ -61,6 +86,9 @@ public static class StateCodecs
 
         /// <inheritdoc />
         public static int Compare(bool left, bool right) => left.CompareTo(right);
+
+        /// <inheritdoc />
+        public static bool Read(ref StateReader reader, IGasRegistry? gases) => reader.ReadBoolean();
     }
 
     /// <summary>
@@ -76,6 +104,9 @@ public static class StateCodecs
 
         /// <inheritdoc />
         public static int Compare(byte left, byte right) => left.CompareTo(right);
+
+        /// <inheritdoc />
+        public static byte Read(ref StateReader reader, IGasRegistry? gases) => reader.ReadByte();
     }
 
     /// <summary>
@@ -91,6 +122,9 @@ public static class StateCodecs
 
         /// <inheritdoc />
         public static int Compare(sbyte left, sbyte right) => left.CompareTo(right);
+
+        /// <inheritdoc />
+        public static sbyte Read(ref StateReader reader, IGasRegistry? gases) => reader.ReadSByte();
     }
 
     /// <summary>
@@ -106,6 +140,9 @@ public static class StateCodecs
 
         /// <inheritdoc />
         public static int Compare(short left, short right) => left.CompareTo(right);
+
+        /// <inheritdoc />
+        public static short Read(ref StateReader reader, IGasRegistry? gases) => reader.ReadInt16();
     }
 
     /// <summary>
@@ -121,6 +158,9 @@ public static class StateCodecs
 
         /// <inheritdoc />
         public static int Compare(ushort left, ushort right) => left.CompareTo(right);
+
+        /// <inheritdoc />
+        public static ushort Read(ref StateReader reader, IGasRegistry? gases) => reader.ReadUInt16();
     }
 
     /// <summary>
@@ -136,6 +176,9 @@ public static class StateCodecs
 
         /// <inheritdoc />
         public static int Compare(int left, int right) => left.CompareTo(right);
+
+        /// <inheritdoc />
+        public static int Read(ref StateReader reader, IGasRegistry? gases) => reader.ReadInt32();
     }
 
     /// <summary>
@@ -151,6 +194,9 @@ public static class StateCodecs
 
         /// <inheritdoc />
         public static int Compare(uint left, uint right) => left.CompareTo(right);
+
+        /// <inheritdoc />
+        public static uint Read(ref StateReader reader, IGasRegistry? gases) => reader.ReadUInt32();
     }
 
     /// <summary>
@@ -166,6 +212,9 @@ public static class StateCodecs
 
         /// <inheritdoc />
         public static int Compare(long left, long right) => left.CompareTo(right);
+
+        /// <inheritdoc />
+        public static long Read(ref StateReader reader, IGasRegistry? gases) => reader.ReadInt64();
     }
 
     /// <summary>
@@ -181,6 +230,9 @@ public static class StateCodecs
 
         /// <inheritdoc />
         public static int Compare(ulong left, ulong right) => left.CompareTo(right);
+
+        /// <inheritdoc />
+        public static ulong Read(ref StateReader reader, IGasRegistry? gases) => reader.ReadUInt64();
     }
 
     /// <summary>
@@ -199,6 +251,9 @@ public static class StateCodecs
         /// <inheritdoc />
         public static int Compare(float left, float right) =>
             BitConverter.SingleToInt32Bits(left).CompareTo(BitConverter.SingleToInt32Bits(right));
+
+        /// <inheritdoc />
+        public static float Read(ref StateReader reader, IGasRegistry? gases) => reader.ReadSingle();
     }
 
     /// <summary>
@@ -217,6 +272,9 @@ public static class StateCodecs
         /// <inheritdoc />
         public static int Compare(double left, double right) =>
             BitConverter.DoubleToInt64Bits(left).CompareTo(BitConverter.DoubleToInt64Bits(right));
+
+        /// <inheritdoc />
+        public static double Read(ref StateReader reader, IGasRegistry? gases) => reader.ReadDouble();
     }
 
     /// <summary>
@@ -232,6 +290,12 @@ public static class StateCodecs
 
         /// <inheritdoc />
         public static int Compare(string left, string right) => string.CompareOrdinal(left, right);
+
+        /// <inheritdoc />
+        public static string Read(ref StateReader reader, IGasRegistry? gases) => reader.ReadString();
+
+        /// <inheritdoc />
+        public static string Default => "";
     }
 
     /// <summary>
@@ -260,6 +324,14 @@ public static class StateCodecs
             result = left.Y.CompareTo(right.Y);
             return result != 0 ? result : left.Z.CompareTo(right.Z);
         }
+
+        /// <inheritdoc />
+        public static Numos.Maths.Int3 Read(ref StateReader reader, IGasRegistry? gases)
+        {
+            int x = reader.ReadInt32();
+            int y = reader.ReadInt32();
+            return new Numos.Maths.Int3(x, y, reader.ReadInt32());
+        }
     }
 
     /// <summary>
@@ -282,6 +354,27 @@ public static class StateCodecs
 
         /// <inheritdoc />
         public static int Compare(GasProperties left, GasProperties right) => string.CompareOrdinal(left.Name, right.Name);
+
+        /// <inheritdoc />
+        /// <exception cref="InvalidOperationException"><paramref name="gases" /> is <see langword="null" />.</exception>
+        /// <exception cref="InvalidDataException">No gas in <paramref name="gases" /> has the stored name.</exception>
+        public static GasProperties Read(ref StateReader reader, IGasRegistry? gases)
+        {
+            string name = reader.ReadString();
+            if (gases is null)
+            {
+                throw new InvalidOperationException(
+                    $"State data references gas '{name}', so reading it needs a gas registry to resolve the name.");
+            }
+
+            foreach (GasProperties gas in gases)
+            {
+                if (string.Equals(gas.Name, name, StringComparison.Ordinal))
+                    return gas;
+            }
+
+            throw new InvalidDataException($"State data references gas '{name}', which the gas registry doesn't contain.");
+        }
     }
 
     /// <summary>
@@ -306,6 +399,13 @@ public static class StateCodecs
         /// <inheritdoc />
         public static int Compare(TEnum left, TEnum right) =>
             TUnderlyingCodec.Compare(Unsafe.As<TEnum, TUnderlying>(ref left), Unsafe.As<TEnum, TUnderlying>(ref right));
+
+        /// <inheritdoc />
+        public static TEnum Read(ref StateReader reader, IGasRegistry? gases)
+        {
+            TUnderlying value = TUnderlyingCodec.Read(ref reader, gases);
+            return Unsafe.As<TUnderlying, TEnum>(ref value);
+        }
     }
 
     /// <summary>
@@ -322,6 +422,9 @@ public static class StateCodecs
 
         /// <inheritdoc />
         public static int Compare(T left, T right) => T.CompareState(left, right);
+
+        /// <inheritdoc />
+        public static T Read(ref StateReader reader, IGasRegistry? gases) => T.ReadState(ref reader, gases);
     }
 
     /// <summary>
@@ -359,6 +462,10 @@ public static class StateCodecs
 
             return TCodec.Compare(left, right);
         }
+
+        /// <inheritdoc />
+        public static T? Read(ref StateReader reader, IGasRegistry? gases) =>
+            reader.ReadBoolean() ? TCodec.Read(ref reader, gases) : null;
     }
 
     /// <summary>
@@ -395,6 +502,10 @@ public static class StateCodecs
 
             return TCodec.Compare(left.GetValueOrDefault(), right.GetValueOrDefault());
         }
+
+        /// <inheritdoc />
+        public static T? Read(ref StateReader reader, IGasRegistry? gases) =>
+            reader.ReadBoolean() ? TCodec.Read(ref reader, gases) : null;
     }
 
     /// <summary>
@@ -441,6 +552,31 @@ public static class StateCodecs
                 result = TCodec.Compare(left[i], right[i]);
 
             return result;
+        }
+
+        /// <inheritdoc />
+        public static TList Read(ref StateReader reader, IGasRegistry? gases)
+        {
+            var elements = new T[reader.ReadCount()];
+            for (int i = 0; i < elements.Length; i++)
+                elements[i] = TCodec.Read(ref reader, gases);
+
+            return FromArray(elements);
+        }
+
+        /// <inheritdoc />
+        public static TList Default => FromArray([]);
+
+        private static TList FromArray(T[] elements)
+        {
+            if (typeof(TList) == typeof(ImmutableArray<T>))
+            {
+                ImmutableArray<T> immutable = ImmutableCollectionsMarshal.AsImmutableArray(elements);
+                return Unsafe.As<ImmutableArray<T>, TList>(ref immutable);
+            }
+
+            // T[] and IReadOnlyList<T>, the other declared shapes the generator allows.
+            return (TList)(object)elements;
         }
     }
 
@@ -493,6 +629,32 @@ public static class StateCodecs
             Array.Sort(sorted, static (left, right) => TCodec.Compare(left, right));
             return sorted;
         }
+
+        /// <inheritdoc />
+        /// <exception cref="InvalidDataException">The data repeats an element.</exception>
+        public static TSet Read(ref StateReader reader, IGasRegistry? gases)
+        {
+            int count = reader.ReadCount();
+            var elements = new HashSet<T>(count);
+            for (int i = 0; i < count; i++)
+            {
+                if (!elements.Add(TCodec.Read(ref reader, gases)))
+                    throw new InvalidDataException("A state set repeats an element.");
+            }
+
+            return FromSet(elements);
+        }
+
+        /// <inheritdoc />
+        public static TSet Default => FromSet(new HashSet<T>());
+
+        private static TSet FromSet(HashSet<T> elements)
+        {
+            if (typeof(TSet) == typeof(FrozenSet<T>))
+                return (TSet)(object)elements.ToFrozenSet();
+
+            return (TSet)(object)elements;
+        }
     }
 
     /// <summary>
@@ -510,6 +672,7 @@ public static class StateCodecs
     /// </remarks>
     public readonly struct Dictionary<TDictionary, TKey, TKeyCodec, TValue, TValueCodec> : IStateCodec<TDictionary>
         where TDictionary : IReadOnlyDictionary<TKey, TValue>
+        where TKey : notnull
         where TKeyCodec : IStateCodec<TKey>
         where TValueCodec : IStateCodec<TValue>
     {
@@ -556,6 +719,34 @@ public static class StateCodecs
 
             Array.Sort(sorted, static (left, right) => TKeyCodec.Compare(left.Key, right.Key));
             return sorted;
+        }
+
+        /// <inheritdoc />
+        /// <exception cref="InvalidDataException">The data repeats a key.</exception>
+        public static TDictionary Read(ref StateReader reader, IGasRegistry? gases)
+        {
+            int count = reader.ReadCount();
+            var entries = new System.Collections.Generic.Dictionary<TKey, TValue>(count);
+            for (int i = 0; i < count; i++)
+            {
+                TKey key = TKeyCodec.Read(ref reader, gases);
+                if (!entries.TryAdd(key, TValueCodec.Read(ref reader, gases)))
+                    throw new InvalidDataException("A state dictionary repeats a key.");
+            }
+
+            return FromDictionary(entries);
+        }
+
+        /// <inheritdoc />
+        public static TDictionary Default => FromDictionary(new System.Collections.Generic.Dictionary<TKey, TValue>());
+
+        private static TDictionary FromDictionary(System.Collections.Generic.Dictionary<TKey, TValue> entries)
+        {
+            if (typeof(TDictionary) == typeof(FrozenDictionary<TKey, TValue>))
+                return (TDictionary)(object)entries.ToFrozenDictionary();
+
+            // Dictionary<TKey, TValue> and IReadOnlyDictionary<TKey, TValue>.
+            return (TDictionary)(object)entries;
         }
     }
 }

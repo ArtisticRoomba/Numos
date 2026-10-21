@@ -9,8 +9,13 @@ namespace Numos.CoreSim.State;
 ///     <see cref="NumosState" /> or a generic method constrained to this interface. Don't implement it by hand; the
 ///     generator is what guarantees that every field reaches all three members in the same order.
 /// </remarks>
-public interface INumosState<TSelf> where TSelf : INumosState<TSelf>
+public interface INumosState<TSelf> : INumosState where TSelf : INumosState<TSelf>
 {
+    /// <summary>
+    ///     Gets the type's <see cref="NumosStateAttribute.Key" />, or <see langword="null" /> when it doesn't declare one.
+    /// </summary>
+    static abstract string? StateKey { get; }
+
     /// <summary>
     ///     Walks <paramref name="value" />'s state fields in ascending id order into <paramref name="sink" />.
     /// </summary>
@@ -39,6 +44,44 @@ public interface INumosState<TSelf> where TSelf : INumosState<TSelf>
     ///     has no physical meaning. It returns zero exactly when <see cref="StateEquals" /> returns true.
     /// </remarks>
     static abstract int CompareState(TSelf left, TSelf right);
+
+    /// <summary>
+    ///     Reads one value written by <see cref="WriteState{TSink}" /> through a <see cref="StateBinarySink" />.
+    /// </summary>
+    /// <param name="reader">The reader, positioned at the value.</param>
+    /// <param name="gases">
+    ///     Resolves <see cref="GasProperties" /> references by name. May be <see langword="null" /> for types that don't
+    ///     reference gases.
+    /// </param>
+    /// <returns>The value, built through its bound constructor.</returns>
+    /// <remarks>
+    ///     Field ids the type doesn't know are skipped, and fields the data doesn't contain get their default (see
+    ///     <see cref="NumosStateAttribute" />), so data from an older or newer version of the type still loads.
+    /// </remarks>
+    /// <exception cref="InvalidDataException">The data is malformed or names a gas <paramref name="gases" /> lacks.</exception>
+    /// <exception cref="InvalidOperationException">
+    ///     The data references a gas and <paramref name="gases" /> is <see langword="null" />.
+    /// </exception>
+    static abstract TSelf ReadState(ref StateReader reader, IGasRegistry? gases);
+}
+
+/// <summary>
+///     The non-generic face of <see cref="INumosState{TSelf}" />, for writing a value whose static type is something
+///     else, such as an <see cref="IAtmosSolverConfiguration" /> in a configuration list.
+/// </summary>
+/// <remarks>
+///     Implemented by the generator alongside <see cref="INumosState{TSelf}" />. Writing a world archive uses it to tell
+///     schema-backed solver configurations, which it can save, from hand-written ones, which it can't.
+/// </remarks>
+public interface INumosState
+{
+    /// <summary>
+    ///     Walks this value's state fields into <paramref name="sink" />, exactly as
+    ///     <see cref="INumosState{TSelf}.WriteState{TSink}" /> would.
+    /// </summary>
+    /// <param name="sink">The sink to write to.</param>
+    /// <typeparam name="TSink">The sink type.</typeparam>
+    void WriteState<TSink>(ref TSink sink) where TSink : struct, IStateSink;
 }
 
 /// <summary>
@@ -58,6 +101,22 @@ public static class NumosState
         where TSink : struct, IStateSink
     {
         T.WriteState(ref sink, value);
+    }
+
+    /// <summary>
+    ///     Reads a value written through a <see cref="StateBinarySink" />.
+    /// </summary>
+    /// <param name="reader">The reader, positioned at the value.</param>
+    /// <param name="gases">Resolves gas references by name; needed only when the value references gases.</param>
+    /// <typeparam name="T">A <see cref="NumosStateAttribute" /> type.</typeparam>
+    /// <returns>The value.</returns>
+    /// <exception cref="InvalidDataException">The data is malformed or names a gas <paramref name="gases" /> lacks.</exception>
+    /// <exception cref="InvalidOperationException">
+    ///     The data references a gas and <paramref name="gases" /> is <see langword="null" />.
+    /// </exception>
+    public static T Read<T>(ref StateReader reader, IGasRegistry? gases = null) where T : INumosState<T>
+    {
+        return T.ReadState(ref reader, gases);
     }
 
     /// <summary>

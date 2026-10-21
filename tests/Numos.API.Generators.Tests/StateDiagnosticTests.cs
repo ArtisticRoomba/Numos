@@ -340,4 +340,98 @@ public sealed class StateDiagnosticTests
 
         Assert.That(Ids(source), Is.Empty);
     }
+
+    [Test]
+    public void GetOnlyFieldWithNoConstructorParameter_ReportsNumosState014()
+    {
+        Diagnostic[] diagnostics = Run(
+            out GeneratorRunResult result,
+            State("[StateField(1)] public float Rate { get; }"));
+
+        Assert.That(GeneratorHarness.Ids(diagnostics), Is.EqualTo(new[] { "NUMOSSTATE014" }));
+        Assert.That(diagnostics[0].GetMessage(), Does.Contain("'Rate' isn't a constructor parameter"));
+        Assert.That(result.GeneratedSources, Is.Empty);
+    }
+
+    [Test]
+    public void ReadonlyFieldWithNoConstructorParameter_ReportsNumosState014()
+    {
+        Assert.That(Ids(State("[StateField(1)] public readonly int Count;")), Is.EqualTo(new[] { "NUMOSSTATE014" }));
+    }
+
+    [Test]
+    public void UnmatchedConstructorParameter_ReportsNumosState014()
+    {
+        Diagnostic[] diagnostics = Run(
+            out _,
+            State(
+                """
+                public Settings(float rate, int extra) => Rate = rate;
+                [StateField(1)] public float Rate { get; }
+                """));
+
+        Assert.That(GeneratorHarness.Ids(diagnostics), Is.EqualTo(new[] { "NUMOSSTATE014" }));
+        Assert.That(diagnostics[0].GetMessage(), Does.Contain("parameter 'extra' doesn't match"));
+    }
+
+    [Test]
+    public void ParameterTypeTheFieldCantFill_ReportsNumosState014()
+    {
+        Diagnostic[] diagnostics = Run(
+            out _,
+            State(
+                """
+                public Settings(System.Collections.Generic.ISet<float> rates) => Rates = [.. rates];
+                [StateField(1)] public float[] Rates { get; }
+                """));
+
+        // A list can't become a set without dropping duplicates, so it's not offered.
+        Assert.That(GeneratorHarness.Ids(diagnostics), Is.EqualTo(new[] { "NUMOSSTATE014" }));
+        Assert.That(diagnostics[0].GetMessage(), Does.Contain("can't take 'Rates'"));
+    }
+
+    [Test]
+    public void LargestBindableConstructor_IsChosen()
+    {
+        string source = State(
+            """
+            public Settings() { }
+            public Settings(float rate, int count) { Rate = rate; Count = count; }
+            public Settings(float rate, int count, string missing) : this(rate, count) { }
+            [StateField(1)] public float Rate { get; init; }
+            [StateField(2)] public int Count { get; init; }
+            """);
+
+        GeneratorRunResult result = GeneratorHarness.RunState(out Compilation output, out var diagnostics, null, source);
+        Assert.That(diagnostics, Is.Empty);
+        Assert.That(GeneratorHarness.Errors(output), Is.Empty);
+        Assert.That(
+            GeneratorHarness.GeneratedSource(result, "MyMod.Settings.NumosState.g.cs"),
+            Does.Contain("return new global::MyMod.Settings(has1 ? field1 : ").And.Not.Contain("Rate = "));
+    }
+
+    [Test]
+    public void BlankKey_ReportsNumosState015()
+    {
+        Assert.That(
+            Ids(State("[StateField(1)] public float Rate { get; init; }").Replace("[NumosState]", "[NumosState(Key = \" \")]")),
+            Is.EqualTo(new[] { "NUMOSSTATE015" }));
+    }
+
+    [Test]
+    public void HandWrittenKeyNextToADeclaredKey_ReportsNumosState008()
+    {
+        string source = State(
+                """
+                public string Key => "my-mod/other";
+                [StateField(1)] public float Rate { get; init; }
+                public IAtmosSolverConfiguration CreateSnapshot(IGasRegistry gases) => this;
+                """,
+                "public sealed partial class Settings : IAtmosSolverConfiguration")
+            .Replace("[NumosState]", "[NumosState(Key = \"my-mod/fire\")]");
+
+        Diagnostic[] diagnostics = Run(out _, source);
+        Assert.That(GeneratorHarness.Ids(diagnostics), Is.EqualTo(new[] { "NUMOSSTATE008" }));
+        Assert.That(diagnostics[0].GetMessage(), Does.Contain("'Key'"));
+    }
 }

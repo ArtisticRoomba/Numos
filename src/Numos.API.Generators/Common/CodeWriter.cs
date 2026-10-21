@@ -30,10 +30,10 @@ internal sealed class CodeWriter
         _indent++;
     }
 
-    public void Close()
+    public void Close(string suffix = "")
     {
         _indent--;
-        Line("}");
+        Line("}" + suffix);
     }
 
     /// <summary>

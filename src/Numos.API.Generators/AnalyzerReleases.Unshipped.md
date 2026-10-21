@@ -42,3 +42,5 @@
  NUMOSSTATE011 | Numos.State                | Error    | Member is marked both state and not state                      
  NUMOSSTATE012 | Numos.State                | Error    | State field must be an instance member                         
  NUMOSSTATE013 | Numos.State                | Error    | State class must not derive from another class                 
+ NUMOSSTATE014 | Numos.State                | Error    | State type has no constructor the reader can call              
+ NUMOSSTATE015 | Numos.State                | Error    | State key is blank                                             

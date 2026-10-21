@@ -44,6 +44,8 @@ public sealed class GasReactionStateTests
 
     private static IEnumerable<TestCaseData> NotStateMembers() => Members<NotStateAttribute>("NotState");
 
+    private static IEnumerable<TestCaseData> RoundTripMembers() => Members<StateFieldAttribute>("RoundTrip");
+
     [Test]
     public void TaggedMemberLists_CoverEveryType()
     {
@@ -112,6 +114,96 @@ public sealed class GasReactionStateTests
         var second = new GasReactionConfig(standardReactions: [Standard((heavy, 1f))]);
 
         AssertSame(first, second);
+    }
+
+    [Test]
+    public void Baseline_RoundTripsThroughTheBinaryFormat()
+    {
+        var baseline = Baseline();
+        var read = RoundTrip(baseline);
+
+        AssertSame(baseline, read);
+        Assert.Multiple(() =>
+        {
+            Assert.That(read.Count, Is.EqualTo(baseline.Count));
+            for (int id = 0; id < baseline.Count; id++)
+                Assert.That(read.GetEnergyBalance(id), Is.EqualTo(baseline.GetEnergyBalance(id)), "derived caches are rebuilt");
+        });
+    }
+
+    [TestCaseSource(nameof(RoundTripMembers))]
+    public void StateField_ChangeSurvivesTheBinaryFormat(Type type, string member)
+    {
+        var changed = Variant(type, member);
+        var read = RoundTrip(changed);
+
+        AssertSame(changed, read);
+        Assert.That(read.SemanticallyEquals(Baseline()), Is.False);
+    }
+
+    [Test]
+    public void EachReactionType_RoundTripsOnItsOwn()
+    {
+        var factor = Factor(GasA);
+        var linear = Linear([Factor(GasA), Factor(GasB)], (GasA, 1f), (GasB, 2f));
+        var standard = Standard((GasA, 1f), (GasB, 2f));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(NumosState.StateEquals(RoundTrip(factor), factor), Is.True);
+            Assert.That(NumosState.StateEquals(RoundTrip(linear), linear), Is.True);
+            Assert.That(NumosState.StateEquals(RoundTrip(standard), standard), Is.True);
+            Assert.That(NumosState.ComputeHash(RoundTrip(linear)), Is.EqualTo(NumosState.ComputeHash(linear)));
+            Assert.That(NumosState.ComputeHash(RoundTrip(standard)), Is.EqualTo(NumosState.ComputeHash(standard)));
+        });
+    }
+
+    [Test]
+    public void GasReferences_ResolveAgainstTheRegistry()
+    {
+        var registry = new GasRegistry { new GasProperties { Name = "A", LiquidId = 7 } };
+        var read = RoundTrip(Factor(GasA), registry);
+
+        Assert.That(read.Gas.LiquidId, Is.EqualTo(7));
+    }
+
+    [Test]
+    public void UnknownGasName_IsCorruptData()
+    {
+        var registry = new GasRegistry { GasB };
+        Assert.That(() => RoundTrip(Factor(GasA), registry), Throws.TypeOf<InvalidDataException>().With.Message.Contains("'A'"));
+    }
+
+    [Test]
+    public void GasReferenceWithoutARegistry_SaysWhatsMissing()
+    {
+        Assert.That(
+            () => RoundTrip(Factor(GasA), null),
+            Throws.TypeOf<InvalidOperationException>().With.Message.Contains("gas registry"));
+    }
+
+    private static T RoundTrip<T>(T value) where T : INumosState<T>
+    {
+        var gases = new GasRegistry();
+        foreach (string name in new[] { "A", "B", "C" })
+        {
+            gases.Add(new GasProperties { Name = name });
+            gases.Add(new GasProperties { Name = name + "-changed" });
+        }
+
+        return RoundTrip(value, gases);
+    }
+
+    private static T RoundTrip<T>(T value, IGasRegistry? gases) where T : INumosState<T>
+    {
+        var sink = new StateBinarySink();
+        NumosState.Write(ref sink, value);
+        byte[] payload = sink.WrittenSpan.ToArray();
+
+        var reader = new StateReader(payload);
+        T read = NumosState.Read<T>(ref reader, gases);
+        Assert.That(reader.IsAtEnd, Is.True);
+        return read;
     }
 
     private static void AssertSame(GasReactionConfig first, GasReactionConfig second)

@@ -1,3 +1,4 @@
+using Microsoft.CodeAnalysis.CSharp;
 using Numos.API.Generators.Common;
 
 namespace Numos.API.Generators.State;
@@ -5,6 +6,7 @@ namespace Numos.API.Generators.State;
 internal static class StateEmitter
 {
     private const string StateInterface = "global::Numos.CoreSim.State.INumosState";
+    private const string NonGenericInterface = "global::Numos.CoreSim.State.INumosState";
     private const string SolverConfiguration = "global::Numos.CoreSim.IAtmosSolverConfiguration";
 
     public static string Emit(StateTypeModel model)
@@ -16,7 +18,13 @@ internal static class StateEmitter
         writer.OpenNamespace(model.Type);
         writer.OpenTypeChain(model.Type, " : " + stateInterface);
 
+        EmitStateKey(writer, model, stateInterface);
+        writer.Line();
         EmitWriteState(writer, model, stateInterface);
+        writer.Line();
+        EmitInstanceWriteState(writer, model);
+        writer.Line();
+        EmitReadState(writer, model, stateInterface);
         writer.Line();
         EmitStateEquals(writer, model, stateInterface);
         writer.Line();
@@ -47,6 +55,90 @@ internal static class StateEmitter
         }
 
         writer.Line("sink.EndObject();");
+        writer.Close();
+    }
+
+    private static void EmitStateKey(CodeWriter writer, StateTypeModel model, string stateInterface)
+    {
+        string key = model.StateKey is null ? "null" : SymbolDisplay.FormatLiteral(model.StateKey, true);
+        writer.Line(CodeWriter.GeneratedCodeAttribute);
+        writer.Line("static string? " + stateInterface + ".StateKey => " + key + ";");
+    }
+
+    private static void EmitInstanceWriteState(CodeWriter writer, StateTypeModel model)
+    {
+        writer.Line(CodeWriter.GeneratedCodeAttribute);
+        writer.Line("void " + NonGenericInterface + ".WriteState<TSink>(ref TSink sink)");
+        writer.Open();
+        writer.Line("global::Numos.CoreSim.State.NumosState.Write<" + model.TypeName + ", TSink>(ref sink, this);");
+        writer.Close();
+    }
+
+    private static void EmitReadState(CodeWriter writer, StateTypeModel model, string stateInterface)
+    {
+        writer.Line(CodeWriter.GeneratedCodeAttribute);
+        writer.Line(
+            "static " + model.TypeName + " " + stateInterface +
+            ".ReadState(ref global::Numos.CoreSim.State.StateReader reader, global::Numos.CoreSim.IGasRegistry? gases)");
+
+        writer.Open();
+        foreach (StateFieldModel field in model.Fields)
+        {
+            writer.Line(field.Shape.TypeExpression + " field" + field.Id + " = default!;");
+            writer.Line("bool has" + field.Id + " = false;");
+        }
+
+        if (model.Fields.Count > 0)
+            writer.Line();
+
+        writer.Line("reader.BeginObject();");
+        if (model.Fields.Count == 0)
+        {
+            writer.Line("while (reader.TryReadField(out _))");
+            writer.Line("    reader.SkipField();");
+        }
+        else
+        {
+            writer.Line("while (reader.TryReadField(out int id))");
+            writer.Open();
+            writer.Line("switch (id)");
+            writer.Open();
+            foreach (StateFieldModel field in model.Fields)
+            {
+                writer.Line("case " + field.Id + ":");
+                writer.Line("    field" + field.Id + " = " + field.Shape.CodecExpression + ".Read(ref reader, gases);");
+                writer.Line("    has" + field.Id + " = true;");
+                writer.Line("    break;");
+            }
+
+            // Ids from a newer version of the type; skipping them is what lets old readers load new data.
+            writer.Line("default:");
+            writer.Line("    reader.SkipField();");
+            writer.Line("    continue;");
+            writer.Close();
+            writer.Line();
+            writer.Line("reader.EndField();");
+            writer.Close();
+        }
+
+        writer.Line();
+        writer.Line("reader.EndObject();");
+        StateReadPlan plan = model.Read;
+        string construction = "return new " + model.TypeName + "(" + string.Join(", ", plan.Arguments) + ")";
+        if (plan.Initializers.Count == 0)
+        {
+            writer.Line(construction + ";");
+        }
+        else
+        {
+            writer.Line(construction);
+            writer.Open();
+            foreach (StateInitializerModel initializer in plan.Initializers)
+                writer.Line(initializer.MemberName + " = " + initializer.Expression + ",");
+
+            writer.Close(";");
+        }
+
         writer.Close();
     }
 
@@ -120,6 +212,14 @@ internal static class StateEmitter
 
     private static void EmitSolverConfiguration(CodeWriter writer, StateTypeModel model)
     {
+        if (model.StateKey is not null)
+        {
+            writer.Line("/// <inheritdoc />");
+            writer.Line(CodeWriter.GeneratedCodeAttribute);
+            writer.Line("public string Key => " + SymbolDisplay.FormatLiteral(model.StateKey, true) + ";");
+            writer.Line();
+        }
+
         writer.Line("/// <inheritdoc />");
         writer.Line(CodeWriter.GeneratedCodeAttribute);
         writer.Line("public bool SemanticallyEquals(" + SolverConfiguration + " other)");

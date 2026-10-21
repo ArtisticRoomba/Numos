@@ -2,8 +2,8 @@ namespace Numos.CoreSim.State;
 
 /// <summary>
 ///     Opts a partial type into the state schema: the <c>Numos.API</c> source generator emits its equality, canonical
-///     ordering, and <see cref="INumosState{TSelf}.WriteState{TSink}" /> walker from its <see cref="StateFieldAttribute" />
-///     members.
+///     ordering, <see cref="INumosState{TSelf}.WriteState{TSink}" /> walker, and
+///     <see cref="INumosState{TSelf}.ReadState" /> reader from its <see cref="StateFieldAttribute" /> members.
 /// </summary>
 /// <remarks>
 ///     <para>
@@ -14,8 +14,9 @@ namespace Numos.CoreSim.State;
 ///     <para>
 ///         A type that also implements <see cref="IAtmosSolverConfiguration" /> gets
 ///         <see cref="IAtmosSolverConfiguration.SemanticallyEquals" /> and
-///         <see cref="IAtmosSolverConfiguration.ComputeStateHash" /> generated; <see cref="IAtmosSolverConfiguration.Key" />
-///         and <see cref="IAtmosSolverConfiguration.CreateSnapshot" /> stay hand-written. Don't write those two methods
+///         <see cref="IAtmosSolverConfiguration.ComputeStateHash" /> generated, plus
+///         <see cref="IAtmosSolverConfiguration.Key" /> when <see cref="Key" /> is set.
+///         <see cref="IAtmosSolverConfiguration.CreateSnapshot" /> stays hand-written. Don't write the generated members
 ///         (or an <c>AppendHash</c>) yourself; the generator reports that as an error instead of letting two
 ///         definitions disagree.
 ///     </para>
@@ -24,14 +25,21 @@ namespace Numos.CoreSim.State;
 ///         hash sees too. Dictionaries and sets are compared and hashed in a canonical order (gases by
 ///         <see cref="GasProperties.Name" />, strings ordinally), so insertion order doesn't matter.
 ///     </para>
+///     <para>
+///         The generated reader builds the value through a constructor, the way <c>System.Text.Json</c> does: each
+///         parameter binds to the state field with the same name, ignoring case, and fields no parameter covers are
+///         set through their <c>set</c> or <c>init</c> accessor. A parameter may be any collection type the field's
+///         value can be copied into, such as <see cref="IEnumerable{T}" /> or <see cref="IDictionary{TKey, TValue}" />
+///         for a frozen field. When several constructors bind, the one with the most parameters wins; when none does,
+///         the build fails. A field missing from older data gets the parameter's default value if it declares one,
+///         otherwise <c>default</c>, an empty string, or an empty collection.
+///     </para>
 /// </remarks>
 /// <example>
 ///     <code>
-///     [NumosState]
+///     [NumosState(Key = "my-mod/fire")]
 ///     public sealed partial class FireSettings : IAtmosSolverConfiguration
 ///     {
-///         public string Key => "my-mod/fire";
-///
 ///         [StateField(1)] public Kelvin IgnitionTemperature { get; init; }
 ///         [StateField(2)] public float SpreadRate { get; init; }
 ///
@@ -42,7 +50,27 @@ namespace Numos.CoreSim.State;
 ///     </code>
 /// </example>
 [AttributeUsage(AttributeTargets.Class | AttributeTargets.Struct, Inherited = false)]
-public sealed class NumosStateAttribute : Attribute;
+public sealed class NumosStateAttribute : Attribute
+{
+    /// <summary>
+    ///     Gets or sets the type's state key, a stable, namespaced name such as <c>"my-mod/fire"</c>.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         Optional. It becomes <see cref="INumosState{TSelf}.StateKey" />, which standalone state files record so a
+    ///         load can check it got the type it asked for. On a solver configuration it also becomes the generated
+    ///         <see cref="IAtmosSolverConfiguration.Key" />, so the key the world sees and the key the file records
+    ///         can't drift apart; don't write <c>Key</c> by hand as well.
+    ///     </para>
+    ///     <para>
+    ///         Leave it out on a solver configuration that's used under more than one key, and keep a hand-written
+    ///         <c>Key</c>. Such a type still saves into world archives, but has to be registered under each key it
+    ///         uses (<see cref="SolverConfigurationTypes.Register{T}(string)" />) and can't be saved on its own.
+    ///     </para>
+    ///     <para>Renaming a key is a format change: files saved under the old key no longer load.</para>
+    /// </remarks>
+    public string? Key { get; set; }
+}
 
 /// <summary>
 ///     Marks a field or auto-property of a <see cref="NumosStateAttribute" /> type as authoritative state, under a

@@ -38,6 +38,12 @@ internal enum StateShapeKind
     NullableValue,
 
     /// <summary>
+    ///     A collection type that's only accepted as a constructor parameter, such as <c>IEnumerable&lt;T&gt;</c>; the
+    ///     name is the unbound generic type, the arguments its element (or key and value) shapes.
+    /// </summary>
+    Container,
+
+    /// <summary>
     ///     An unresolved identifier, presumably a quantity alias, still to be looked up in the catalog.
     /// </summary>
     Alias,
@@ -88,6 +94,18 @@ internal sealed record StateShape(StateShapeKind Kind, string Name, EquatableArr
         "System.Collections.Generic.IReadOnlyDictionary`2",
         "System.Collections.Generic.Dictionary`2",
         "System.Collections.Frozen.FrozenDictionary`2",
+    };
+
+    private static readonly HashSet<string> ParameterContainerTypes = new(StringComparer.Ordinal)
+    {
+        "System.Collections.Generic.IEnumerable`1",
+        "System.Collections.Generic.IReadOnlyCollection`1",
+        "System.Collections.Generic.ICollection`1",
+        "System.Collections.Generic.IList`1",
+        "System.Collections.Generic.List`1",
+        "System.Collections.Generic.ISet`1",
+        "System.Collections.Generic.HashSet`1",
+        "System.Collections.Generic.IDictionary`2",
     };
 
     private static StateShape Leaf(StateShapeKind kind, string name) => new(kind, name, EquatableArray<StateShape>.Empty);
@@ -157,6 +175,30 @@ internal sealed record StateShape(StateShapeKind Kind, string Name, EquatableArr
             return Leaf(StateShapeKind.State, FullName(named));
 
         return Unsupported(type);
+    }
+
+    /// <summary>
+    ///     Classifies a constructor parameter type. Like <see cref="From" />, plus the collection interfaces and classes
+    ///     a read value can be copied into but that can't be state fields themselves.
+    /// </summary>
+    public static StateShape FromParameter(ITypeSymbol type)
+    {
+        if (type.TypeKind == TypeKind.Error)
+            return From(type);
+
+        if (type.IsReferenceType && type.NullableAnnotation == NullableAnnotation.Annotated)
+            return Of(StateShapeKind.NullableReference, "", FromParameter(type.WithNullableAnnotation(NullableAnnotation.NotAnnotated)));
+
+        if (type is INamedTypeSymbol { IsGenericType: true } named &&
+            ParameterContainerTypes.Contains(MetadataName(named.OriginalDefinition)))
+        {
+            return new StateShape(
+                StateShapeKind.Container,
+                named.ToDisplayString(UnboundFormat),
+                named.TypeArguments.Select(From).ToEquatableArray());
+        }
+
+        return From(type);
     }
 
     public static bool HasStateAttribute(INamedTypeSymbol type)

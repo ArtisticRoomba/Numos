@@ -67,8 +67,8 @@ internal static class StateDiagnostics
     public static readonly DiagnosticDescriptor HandWritten = new(
         "NUMOSSTATE008",
         "State type declares a member the generator owns",
-        "[NumosState] type '{0}' declares '{1}', but the generator writes equality and hashing from its " +
-        "[StateField] members; delete the hand-written '{1}'",
+        "[NumosState] type '{0}' declares '{1}', but the generator writes it from the type's [StateField] members " +
+        "and [NumosState] arguments; delete the hand-written '{1}'",
         Category,
         DiagnosticSeverity.Error,
         true);
@@ -112,6 +112,24 @@ internal static class StateDiagnostics
         "State class must not derive from another class",
         "[NumosState] class '{0}' derives from '{1}', whose fields the generator can't see; derive from object, " +
         "or move the base's settings into a nested [NumosState] field",
+        Category,
+        DiagnosticSeverity.Error,
+        true);
+
+    public static readonly DiagnosticDescriptor NoConstructor = new(
+        "NUMOSSTATE014",
+        "State type has no constructor the reader can call",
+        "[NumosState] type '{0}' has no constructor the generated reader can call: {1}. Each constructor parameter " +
+        "must match a [StateField] member by name (ignoring case) with a type the field's value fits, and each " +
+        "state field no parameter covers needs a set or init accessor.",
+        Category,
+        DiagnosticSeverity.Error,
+        true);
+
+    public static readonly DiagnosticDescriptor BlankKey = new(
+        "NUMOSSTATE015",
+        "State key is blank",
+        "[NumosState] type '{0}' sets a blank Key; use a namespaced name such as \"my-mod/fire\", or leave Key unset",
         Category,
         DiagnosticSeverity.Error,
         true);

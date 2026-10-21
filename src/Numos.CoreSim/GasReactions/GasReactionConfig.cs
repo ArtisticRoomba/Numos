@@ -16,13 +16,13 @@ namespace Numos.CoreSim.GasReactions;
 ///     simulation.SetAtmosConfig(config);
 ///     </code>
 /// </example>
-[NumosState]
+[NumosState(Key = ConfigurationKey)]
 public sealed partial class GasReactionConfig : IAtmosSolverConfiguration
 {
     /// <summary>
     ///     Identifies the configuration consumed by the built-in reaction solver.
     /// </summary>
-    public const string ConfigurationKey = "gas-reactions";
+    public const string ConfigurationKey = "numos/gas-reactions";
 
     internal readonly static GasReactionConfig Empty = new();
 
@@ -69,9 +69,6 @@ public sealed partial class GasReactionConfig : IAtmosSolverConfiguration
     ///     Gets the combined number of reactions.
     /// </summary>
     public int Count => LinearReactions.Count + StandardReactions.Count;
-
-    /// <inheritdoc />
-    public string Key => ConfigurationKey;
 
     /// <inheritdoc />
     /// <exception cref="ArgumentNullException"><paramref name="gasRegistry" /> is null.</exception>
