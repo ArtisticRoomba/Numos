@@ -652,11 +652,15 @@ dotnet add package Numos.Viewer --prerelease
 
 The viewer needs a desktop environment with graphics support. To host it from C#, construct a `SimulationViewer` and call `Run()`. The About dialog shows the Viewer and CoreSim package versions, source references, and commit hashes, so a tester can identify the exact build.
 
-The 3D viewport keeps one mesh per chunk on the GPU, so a scene of a million voxels stays interactive. Immediate-mode drawing would send every voxel face to the driver on every frame. A mesh holds only the faces that touch empty or filtered space. The viewer rebuilds a mesh when the chunk's visible voxels change. A tick that changes only colors rewrites the color buffer and keeps the positions. A new scene uploads over a few frames, so large meshes do not stall the window.
-
-The 3D view outlines voxels only for a focused chunk or a scene of at most 20,000 voxels, because each outline costs one draw call per voxel. The 2D view outlines cells only when a cell is at least 8 pixels wide.
-
-The 2D slice view shows one plane through every chunk. The Axis and Slice controls pick the plane by global voxel coordinate. The view draws the plane as one texture. Scroll to zoom and drag with the middle button to pan. "Fit Plane" shows the whole plane again. Focusing a chunk in the 3D view moves the plane into that chunk if needed and frames the chunk. A cell that no chunk covers stays empty. The plane can be at most 16,384 cells wide or high.
+Bulk velocity has two readouts in the Viewer. The rendering-style table in the View panel has a "Velocity arrows" row
+that draws an arrow from each drawn voxel along its velocity, in the 3D viewport and in the slice (which shows only the
+two in-plane components); the arrow-scale slider sets how many seconds of travel one arrow represents, so at the default
+0.05 s a voxel moving at 20 m/s draws a one-voxel arrow. Turning arrows on makes the Viewer request velocity in its
+snapshots even when the active visualization does not need it. On a project created with the Euler transport model
+(chosen in the Create Simulation dialog, since the stage list is part of the recording and cannot change afterwards),
+the Simulation panel also shows a "Flow" readout of `AtmosSimulation.LastFlowDiagnostics`: substeps, simulated time,
+whether the substep cap engaged, the largest Courant number and signal speed, and the clamp and negative-value
+counters, with anything that means the tick did not finish cleanly shown in the caution colour.
 
 ## Dangerous API
 `Numos.API.Dangerous` is a separate package from `Numos.API` by design.

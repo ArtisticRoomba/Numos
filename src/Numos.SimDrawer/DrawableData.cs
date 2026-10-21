@@ -627,6 +627,41 @@ public sealed class SimulationSliceDrawData
     internal byte[] PixelArray => _pixels;
 
     /// <summary>
+    ///     Projects a world-space vector onto the slice plane in the same orientation the cells use: a cut across X
+    ///     shows (Z, Y), across Y shows (X, Z), and across Z shows (X, Y). The component along the slice normal is
+    ///     dropped.
+    /// </summary>
+    /// <param name="axis">Axis the slice cuts across.</param>
+    /// <param name="x">World x component.</param>
+    /// <param name="y">World y component.</param>
+    /// <param name="z">World z component.</param>
+    /// <returns>The horizontal (U) and vertical (V) components in slice coordinates.</returns>
+    /// <example>
+    ///     A velocity of <c>(1, 2, 3) m/s</c> drawn on a Y slice is the arrow <c>(1, 3)</c>: X runs along U and Z
+    ///     runs along V.
+    /// </example>
+    public static (float U, float V) ProjectToPlane(SliceAxis axis, float x, float y, float z)
+    {
+        return axis switch
+        {
+            SliceAxis.X => (z, y),
+            SliceAxis.Y => (x, z),
+            SliceAxis.Z => (x, y),
+            _ => throw new ArgumentOutOfRangeException(nameof(axis), axis, "Unknown slice axis.")
+        };
+    }
+
+    /// <summary>
+    ///     Returns the in-plane part of <paramref name="cell" />'s bulk velocity, in metres per second, oriented
+    ///     like <see cref="ProjectToPlane" />. Both components are NaN when the frame carried no velocity.
+    /// </summary>
+    /// <param name="cell">A cell of this slice.</param>
+    public (float U, float V) GetInPlaneVelocity(in SliceCellDrawData cell)
+    {
+        return ProjectToPlane(Axis, cell.Voxel.VelocityX, cell.Voxel.VelocityY, cell.Voxel.VelocityZ);
+    }
+
+    /// <summary>
     ///     Enumerates the visible cells in row order.
     /// </summary>
     /// <remarks>

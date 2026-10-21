@@ -1,5 +1,6 @@
 using System.Numerics;
 using Numos.SimDrawer;
+using Numos.Viewer.Ui;
 using Raylib_cs;
 
 namespace Numos.Viewer.Rendering;
@@ -19,7 +20,7 @@ public readonly record struct SliceRenderOptions(
 ///         A plane can hold millions of cells, so the renderer never draws one rectangle per cell. It uploads
 ///         <see cref="SimulationSliceDrawData.Pixels" /> into one point-filtered texture when
 ///         <see cref="SimulationSliceDrawData.RenderVersion" /> changes, and it draws that texture as a single quad.
-///         Outlines and highlights cover only the part of the plane in view.
+///         Outlines, arrows, and highlights cover only the part of the plane in view.
 ///     </para>
 ///     <para>
 ///         The renderer owns a GPU texture. It must be used on the GL thread and disposed before the window closes.
@@ -43,8 +44,13 @@ public sealed class SliceRenderer : IDisposable
     /// </summary>
     public const int MaxOutlinedCells = 40_000;
 
+    /// <summary>
+    ///     Most velocity arrows drawn in one frame.
+    /// </summary>
+    public const int MaxVelocityArrows = 4_000;
+
     private const byte TransparentAlpha = 89;
-    private const float HighlightThickness = 0.06f;
+    private const float ArrowThickness = 0.06f;
     private readonly static Color CellBorder = new(0f, 0f, 0f, 0.5f);
 
     private bool _disposed;
@@ -66,7 +72,7 @@ public sealed class SliceRenderer : IDisposable
     /// <param name="camera">2D camera for the slice. This method begins and ends its 2D mode.</param>
     /// <param name="viewportSize">Size in pixels of the render target, which decides the part in view.</param>
     /// <param name="options">Voxel highlights to outline.</param>
-    /// <param name="style">Outline and transparency treatments.</param>
+    /// <param name="style">Outline, transparency, and velocity-arrow treatments.</param>
     /// <exception cref="ArgumentNullException"><paramref name="slice" /> is <see langword="null" />.</exception>
     public void Draw(
         SimulationSliceDrawData slice,
@@ -95,6 +101,9 @@ public sealed class SliceRenderer : IDisposable
             if (style.ShowVoxelOutlines)
                 DrawVoxelOutlines(slice, camera.Zoom, view);
 
+            if (style.ShowVelocityArrows)
+                DrawVelocityArrows(slice, style.VelocityArrowScale, view);
+
             if (options.Highlights != null)
             {
                 foreach (var highlight in options.Highlights)
@@ -102,7 +111,7 @@ public sealed class SliceRenderer : IDisposable
                     if (!slice.TryLocate(highlight.Address, out int u, out int v))
                         continue;
 
-                    float thickness = Math.Max(HighlightThickness, 2f / camera.Zoom);
+                    float thickness = Math.Max(ArrowThickness, 2f / camera.Zoom);
                     Raylib.DrawRectangleLinesEx(
                         GetCellRectangle(slice, u, v),
                         thickness,
@@ -258,6 +267,72 @@ public sealed class SliceRenderer : IDisposable
                     Raylib.DrawRectangleLinesEx(GetCellRectangle(slice, u, v), thickness, CellBorder);
             }
         }
+    }
+
+    /// <summary>
+    ///     Draws the in-plane velocity of visible cells in view as arrows from the cell centre. The slice-normal
+    ///     component is dropped, so a cell moving straight through the plane shows no arrow. A view with more than
+    ///     <see cref="MaxVelocityArrows" /> cells keeps every n-th cell on both axes.
+    /// </summary>
+    private static void DrawVelocityArrows(
+        SimulationSliceDrawData slice,
+        float scaleSeconds,
+        (int U, int V, int Columns, int Rows) view)
+    {
+        if (view.Columns == 0 || view.Rows == 0)
+            return;
+
+        var color = SimulationRenderer.ToRaylibColor(ViewerTheme.FlowArrow);
+        int step = GetArrowStep(view.Columns, view.Rows);
+        int offset = step / 2;
+        ReadOnlySpan<byte> pixels = slice.Pixels;
+
+        // Align to multiples of the step in plane coordinates, so panning does not make arrows jump between cells.
+        int startV = FirstAligned(view.V, step, offset);
+        int startU = FirstAligned(view.U, step, offset);
+        for (int v = startV; v < view.V + view.Rows; v += step)
+        {
+            for (int u = startU; u < view.U + view.Columns; u += step)
+            {
+                if (pixels[4 * (u + slice.Width * v) + 3] == 0 || !slice.TryGetCell(u, v, out var cell))
+                    continue;
+
+                (float velocityU, float velocityV) = slice.GetInPlaneVelocity(cell);
+                if (!VelocityArrows.TryGetShaft(new Vector2(velocityU, velocityV), scaleSeconds, out var shaft))
+                    continue;
+
+                // Same V flip as the cells: screen Y grows downward, slice V grows upward.
+                var screenShaft = new Vector2(shaft.X, -shaft.Y);
+                var start = new Vector2(u + 0.5f, slice.Height - v - 0.5f);
+                var tip = start + screenShaft;
+                (Vector2 left, Vector2 right) = VelocityArrows.GetHead(tip, screenShaft);
+                Raylib.DrawLineEx(start, tip, ArrowThickness, color);
+                Raylib.DrawLineEx(tip, left, ArrowThickness, color);
+                Raylib.DrawLineEx(tip, right, ArrowThickness, color);
+            }
+        }
+    }
+
+    /// <summary>
+    ///     Picks the spacing in cells between arrows so a view of <paramref name="columns" /> by
+    ///     <paramref name="rows" /> cells gets at most <see cref="MaxVelocityArrows" /> of them.
+    /// </summary>
+    /// <param name="columns">Cells in view along U.</param>
+    /// <param name="rows">Cells in view along V.</param>
+    /// <returns>The step, at least 1.</returns>
+    internal static int GetArrowStep(int columns, int rows)
+    {
+        long cells = (long)Math.Max(columns, 0) * Math.Max(rows, 0);
+        if (cells <= MaxVelocityArrows)
+            return 1;
+
+        return (int)Math.Ceiling(Math.Sqrt((double)cells / MaxVelocityArrows));
+    }
+
+    private static int FirstAligned(int first, int step, int offset)
+    {
+        int aligned = first - first % step + offset;
+        return aligned < first ? aligned + step : aligned;
     }
 
     private static Rectangle GetCellRectangle(SimulationSliceDrawData slice, int u, int v)

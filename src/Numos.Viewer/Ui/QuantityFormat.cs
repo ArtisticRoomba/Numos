@@ -68,6 +68,14 @@ internal static class QuantityFormat
     }
 
     /// <summary>
+    ///     Formats a duration given in seconds as milliseconds, the scale a fixed time step reads best at.
+    /// </summary>
+    public static string Milliseconds(double seconds)
+    {
+        return Format(seconds * 1e3, "ms");
+    }
+
+    /// <summary>
     ///     Formats a velocity as its three components followed by one unit, e.g. <c>(1.00, 0.00, -2.50) m/s</c>.
     /// </summary>
     public static string Velocity(double x, double y, double z)
