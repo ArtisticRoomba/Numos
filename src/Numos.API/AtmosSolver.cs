@@ -1,3 +1,5 @@
+using Numos.CoreSim;
+
 namespace Numos.API;
 
 /// <summary>
@@ -13,6 +15,14 @@ public static class AtmosBuiltInSolvers
     ///     Intra-chunk gas advection.
     /// </summary>
     public const string Advection = "advection";
+
+    /// <summary>
+    ///     Compressible Euler gas transport inside each chunk, with CFL substeps; the
+    ///     <see cref="AtmosTransportModel.Euler" /> replacement for <see cref="Advection" /> and
+    ///     <see cref="BoundaryFlow" />. Configured through <see cref="Numos.CoreSim.EulerFlow.EulerFlowConfig" />
+    ///     and reported on through <see cref="AtmosSimulation.LastFlowDiagnostics" />.
+    /// </summary>
+    public const string EulerFlow = "euler-flow";
 
     /// <summary>
     ///     Sparse gas transport across explicit portal, dock, and arbitrary links whose flags include

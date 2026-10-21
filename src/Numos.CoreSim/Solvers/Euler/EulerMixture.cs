@@ -163,11 +163,22 @@ internal static class EulerMixture
         KilogramMetrePerSecond momentumX, KilogramMetrePerSecond momentumY, KilogramMetrePerSecond momentumZ)
     {
         Joule64 internalEnergy = (double)heatCapacity * temperature;
-        if (mass <= 0f)
-            return internalEnergy;
+        return mass <= 0f
+            ? internalEnergy
+            : internalEnergy + KineticEnergy(mass, momentumX, momentumY, momentumZ);
+    }
 
+    /// <summary>
+    ///     Kinetic energy of a voxel of mass <paramref name="mass" /> with the given momentum, formed from the same
+    ///     <c>1/m</c> and operand order as the forward conversion so that <c>E − K</c> recovers <c>C·T</c> exactly
+    ///     as <see cref="TotalEnergy" /> built it. <paramref name="mass" /> must be positive.
+    /// </summary>
+    internal static Joule64 KineticEnergy(
+        Kilogram mass,
+        KilogramMetrePerSecond momentumX, KilogramMetrePerSecond momentumY, KilogramMetrePerSecond momentumZ)
+    {
         PerKilogram inverseMass = 1f / mass;
-        return internalEnergy + KineticEnergy(
+        return KineticEnergy(
             momentumX, momentumY, momentumZ,
             momentumX * inverseMass, momentumY * inverseMass, momentumZ * inverseMass);
     }

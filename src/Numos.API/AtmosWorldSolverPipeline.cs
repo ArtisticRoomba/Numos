@@ -1,4 +1,5 @@
 using JetBrains.Annotations;
+using Numos.CoreSim;
 
 namespace Numos.API;
 
@@ -25,7 +26,7 @@ public sealed class AtmosWorldSolverPipeline
     internal AtmosWorldSolverPipeline(AtmosWorld world)
     {
         _world = world;
-        AddDefaults();
+        AddDefaults(AtmosTransportModel.Legacy);
         PublishSteps();
     }
 
@@ -147,7 +148,7 @@ public sealed class AtmosWorldSolverPipeline
     /// <param name="name">The registered stage name.</param>
     /// <returns><see langword="true" /> when a stage was removed.</returns>
     /// <remarks>
-    ///     Removing a built-in stage drops that physics from every subsequent tick. <see cref="ResetToDefaults" />
+    ///     Removing a built-in stage drops that physics from every subsequent tick. <see cref="ResetToDefaults()" />
     ///     brings it back.
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="name" /> is <see langword="null" />.</exception>
@@ -211,17 +212,56 @@ public sealed class AtmosWorldSolverPipeline
     ///     Restores the built-in stages in their default order and enabled state, discarding any custom
     ///     registrations.
     /// </summary>
+    /// <remarks>
+    ///     Installs the <see cref="AtmosTransportModel.Legacy" /> stages, the same set a new world starts with. The
+    ///     Euler model is opt-in through <see cref="ResetToDefaults(AtmosTransportModel)" /> until it becomes the
+    ///     default.
+    /// </remarks>
     /// <exception cref="InvalidOperationException">The world is recording or replaying.</exception>
     /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
     [PublicAPI]
     public void ResetToDefaults()
     {
+        ResetToDefaults(AtmosTransportModel.Legacy);
+    }
+
+    /// <summary>
+    ///     Restores the built-in stages of one transport model in their default order and enabled state,
+    ///     discarding any custom registrations.
+    /// </summary>
+    /// <param name="model">Which built-in stages carry gas between voxels.</param>
+    /// <remarks>
+    ///     <para>
+    ///         <see cref="AtmosTransportModel.Legacy" /> installs <c>advection</c>, <c>explicit-gas-transport</c>,
+    ///         <c>boundary-flow</c>, <c>thermodynamics</c>, <c>explicit-thermal-transport</c>,
+    ///         <c>thermal-boundary</c>, and <c>gas-reactions</c>. <see cref="AtmosTransportModel.Euler" /> replaces
+    ///         the first and third with a single <c>euler-flow</c> stage ahead of <c>explicit-gas-transport</c>.
+    ///     </para>
+    ///     <para>
+    ///         The stage list is checkpointed, so a world restored from a checkpoint must hold the same model it
+    ///         was captured with; switch models before capturing, not while replaying.
+    ///     </para>
+    /// </remarks>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="model" /> is not a defined model.</exception>
+    /// <exception cref="InvalidOperationException">The world is recording or replaying.</exception>
+    /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
+    /// <example>
+    ///     <code>
+    /// simulation.World.Solvers.ResetToDefaults(AtmosTransportModel.Euler);
+    ///     </code>
+    /// </example>
+    [PublicAPI]
+    public void ResetToDefaults(AtmosTransportModel model)
+    {
+        if (!Enum.IsDefined(model))
+            throw new ArgumentOutOfRangeException(nameof(model), model, "Unknown transport model.");
+
         lock (_world.Gate)
         {
             _world.ThrowIfDisposedForPipeline();
             _world.EnsureCanChangeWorldSolverDefinition();
             _steps.Clear();
-            AddDefaults();
+            AddDefaults(model);
             _world.InvalidateSolverDependencies();
             PublishSteps();
         }
@@ -381,22 +421,35 @@ public sealed class AtmosWorldSolverPipeline
         return _steps.FindIndex(step => string.Equals(step.Name, name, StringComparison.Ordinal));
     }
 
-    private void AddDefaults()
+    private void AddDefaults(AtmosTransportModel model)
     {
-        _steps.Add(
-            WorldSolverRegistration.CreateBuiltIn(
-                AtmosBuiltInSolvers.Advection,
-                static scope => scope.World.SolveAdvectionStage(scope)));
+        if (model == AtmosTransportModel.Euler)
+        {
+            _steps.Add(
+                WorldSolverRegistration.CreateBuiltIn(
+                    AtmosBuiltInSolvers.EulerFlow,
+                    static scope => scope.World.SolveEulerFlowStage(scope)));
+        }
+        else
+        {
+            _steps.Add(
+                WorldSolverRegistration.CreateBuiltIn(
+                    AtmosBuiltInSolvers.Advection,
+                    static scope => scope.World.SolveAdvectionStage(scope)));
+        }
 
         _steps.Add(
             WorldSolverRegistration.CreateBuiltIn(
                 AtmosBuiltInSolvers.ExplicitGasTransport,
                 static scope => scope.World.SolveExplicitGasTransportStage(scope)));
 
-        _steps.Add(
-            WorldSolverRegistration.CreateBuiltIn(
-                AtmosBuiltInSolvers.BoundaryFlow,
-                static scope => scope.World.SolveBoundaryFlowStage(scope)));
+        if (model == AtmosTransportModel.Legacy)
+        {
+            _steps.Add(
+                WorldSolverRegistration.CreateBuiltIn(
+                    AtmosBuiltInSolvers.BoundaryFlow,
+                    static scope => scope.World.SolveBoundaryFlowStage(scope)));
+        }
 
         _steps.Add(
             WorldSolverRegistration.CreateBuiltIn(

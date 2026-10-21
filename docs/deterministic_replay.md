@@ -206,7 +206,12 @@ Some data stays outside the checkpoint:
   data. Solvers reacquire them on each callback, and the key's factory rebuilds them from authoritative inputs.
 - `ChunkField<T>` storage registered without `rollback: true` is transient. Restore discards it.
 - Profiling values, recorder bookkeeping, object identities, chunk generations, and presentation revisions are not
-  authoritative simulation state.
+  authoritative simulation state. `AtmosSimulation.LastFlowDiagnostics` is one of these: a restore zeroes it.
+- The `euler-flow` stage keeps nothing of its own between ticks. Its conserved buffers, face masks, and substep count
+  are rebuilt from the chunk fields every tick, and the only state it carries forward is the chunks' momentum arrays,
+  which are checkpointed. The order it alternates its axis sweeps in starts from `TickCount & 1` each tick rather
+  than from a counter carried across ticks, precisely so a restored world sweeps in the same order the original run
+  did without the checkpoint having to say so.
 
 When a detached mixture transfers gas into a voxel, the recording stores the resulting voxel state (`SetVoxelMixtureOperation`). That state includes the voxel's momentum,
 which the kernel zeroes when the write empties the voxel. Replaying that
