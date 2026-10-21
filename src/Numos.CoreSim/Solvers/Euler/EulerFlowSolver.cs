@@ -506,9 +506,14 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
     /// <remarks>
     ///     An axis one voxel long has no interior faces, but its two chunk faces are still faces of the sweep, so it
     ///     is only skipped when no active chunk has a registered neighbour on either side. Both faces are then
-    ///     walls at the cell's own pressure, whose fluxes cancel exactly, so skipping changes no bit; it mostly
-    ///     saves depth-one maps a third of their sweeps. A neighbour activated mid-tick is seen on the next
-    ///     substep, which is also the first one that could sweep it.
+    ///     walls. For gas at rest along the axis the two wall fluxes are <c>p</c> each and cancel, so the skip
+    ///     changes no bit, which is the case on every depth-one map and saves it a third of its sweeps. Gas that
+    ///     does move along such an axis (the momentum can only come from <c>SetVoxelMomentum</c> or a checkpoint,
+    ///     since no face could have produced it) is not reflected by the skipped sweep: the walls would see
+    ///     <c>p + ρu(2u + c)</c> ahead of it and <c>p − ρuc</c> behind, whose difference would decelerate it. The
+    ///     momentum is left as it is until the velocity floor or damping removes it at the end of the tick. A
+    ///     neighbour activated mid-tick is seen on the next substep, which is also the first one that could sweep
+    ///     it.
     /// </remarks>
     private bool AxisHasWork(int axis)
     {

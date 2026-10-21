@@ -286,7 +286,7 @@ normalized when the configuration is captured; §5 explains the physics behind t
 | `AllMachCorrection`       | off       | Scales the pressure-dissipation term of the face flux by the local Mach number. Godunov fluxes dissipate at the sound speed, which smears slow flow; the fix keeps it sharp but removes the acoustic damping sleep relies on and admits checkerboards, so it is off until a scene needs it.                 |
 | `Reconstruction`          | `FirstOrder` | How face states are built. `MusclHancock` is reserved for second-order reconstruction and currently runs as `FirstOrder`.                                                                                                                                                                              |
 | `MomentumDamping`         | 0 /s      | Exponential decay applied to every voxel's momentum per tick, `max(0, 1 − α·Δt_tick)`. A stand-in for wall friction and furniture drag so a hallway does not ring at its acoustic modes indefinitely. 0 applies none.                                                                                       |
-| `DefaultLinkAreaFraction` | 1         | Open fraction of a voxel face assumed for a portal or dock that declares no area (§11.1). Clamped to [0, 1]; 0 closes such links to gas transport.                                                                                                                                                       |
+| `DefaultLinkAreaFraction` | 1         | Open fraction of a voxel face assumed for a portal or dock that declares no area (§11.1), under either transport model. Clamped to [0, 1]; 0 closes such links to gas transport.                                                                                                                                                       |
 
 - `CourantNumber` (0.5), the positivity bound of the split first-order scheme.
 - `MaxSubstepsPerTick` (64). Zero removes the cap. When the cap engages, the tick advances less than a full step of gas
@@ -600,8 +600,12 @@ takes each position twice, so the bias averages out, and the index is a pure fun
 than a counter carried across ticks, so a restored world sweeps in the same order the original run did. A corner
 blast across a 2×2×2 block of chunks keeps the cube's full symmetry through the chunk faces
 (`CornerBlast_InAChunkCube_KeepsTheCubeSymmetry`). An axis one voxel long with no neighbour chunk on either side is
-skipped: both its faces are walls at the cell's own pressure, whose fluxes cancel exactly, so the skip changes no bit
-and saves a depth-one map a third of its sweeps.
+skipped, which saves a depth-one map a third of its sweeps. Both its faces are walls, and for gas at rest along the
+axis the two wall fluxes are `p` each and cancel, so the skip changes no bit. Gas moving along such an axis is the one
+case the skip is not exact for: the wall it runs into would return `p + ρu(2u + c)` and the one it recedes from
+`p − ρuc`, so a swept axis would decelerate it, while the skipped one leaves the momentum alone until the velocity
+floor or damping removes it at the end of the tick. Nothing in the sweep can create momentum along an axis with no
+faces, so it can only have come from `SetVoxelMomentum` or a checkpoint.
 
 Work within a sweep is cut into pencils: an X sweep marches one `(y, z)` row, a Y sweep a whole z-slab, a Z sweep a
 y-sheet. A pencil keeps a rolling pair of face rows so each face is solved once and each cell sees both of its faces
@@ -1258,9 +1262,12 @@ is the open area as a fraction of one voxel face, `dx²`. Leave it unset and the
 configuration change resizes every unsized link at once. `explicit-gas-transport` multiplies both the bulk and the
 diffusion request through the link by that fraction before the shared per-cell limiter sees them, so a half-open hatch
 moves exactly half of what a full face would under the same pressure difference and several narrow links still cannot
-overdraw a shared cell. A fraction of 0 is a closed valve that keeps its place in the topology. Conduction through
-`ThermalTransport` is not scaled: the conductance law in §7 is a heat-capacity-bounded relaxation rather than an
-area-based flux, and shrinking it with the opening is a separate modeling question.
+overdraw a shared cell. A fraction of 0 is a closed valve that keeps its place in the topology. This holds under both
+transport models: links are the same duct whether the grid runs `euler-flow` or legacy `advection`, and the default
+lives on `EulerFlowConfig` only because that is where link geometry was introduced, so a host on the legacy model
+that sets it to something other than 1 sees its unsized links scale too. Conduction through `ThermalTransport` is not
+scaled: the conductance law in §7 is a heat-capacity-bounded relaxation rather than an area-based flux, and shrinking
+it with the opening is a separate modeling question.
 
 Under the Euler transport solver a link stays a duct. It moves mass and the energy that mass carries, never momentum,
 using the legacy bulk law (§6.1): a fraction of the pressure difference per tick, limited by what the source holds,
