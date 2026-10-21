@@ -26,6 +26,6 @@ internal interface IAtmosConfig
     CubicMetre GetVoxelVolume();
     JoulePerMoleKelvin GetMolarHeatCapacityAtConstantVolume(int gasId);
     Scalar GetDiffusionCoefficient(int gasId);
-    WattsPerMeterKelvin GetThermalConductivity(int gasId, Kelvin temperature);
+    WattsPerMeterKelvin GetThermalConductivity(int gasId);
     bool TryGetGasProperties(int gasId, out GasProperties properties);
 }

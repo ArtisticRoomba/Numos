@@ -599,7 +599,8 @@ internal class ReactionSolver : IAtmosSolverStage
                 continue;
 
             totalMoles += mixtureVector[i];
-            moleWeightedConductivity += mixtureVector[i] * config.GetThermalConductivity(i, temperature);
+            WattsPerMeterKelvin referenceThermalConductivity = config.GetThermalConductivity(i);
+            moleWeightedConductivity += mixtureVector[i] * AtmosSolverMath.GetThermalConductivity(referenceThermalConductivity, temperature);
         }
 
         if (!(totalMoles > 0f) || !(oldHeatCapacity > 0f) || !(volume > 0f))

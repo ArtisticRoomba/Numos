@@ -206,16 +206,11 @@ public sealed class AtmosConfigSnapshot : IAtmosConfig
     }
 
     /// <inheritdoc cref="AtmosConfig.GetThermalConductivity" />
-    public WattsPerMeterKelvin GetThermalConductivity(int gasId, Kelvin temperature)
+    public WattsPerMeterKelvin GetThermalConductivity(int gasId)
     {
-        WattsPerMeterKelvin referenceThermalConductivity = (uint)gasId < (uint)GasRegistry.Count
+        return (uint)gasId < (uint)GasRegistry.Count
             ? FloatMath.ClampUnitInterval(GasRegistry[gasId].ThermalConductivity)
             : FloatMath.ClampUnitInterval(DefaultThermalConductivity);
-        float ReferenceConductivityTemperature = 300f;
-        float ThermalConductivityExponent = 0.7f;
-        // Conductivity rises roughly as a power of temperature. The stored value is the one at the reference temperature.
-        Scalar temperatureRatio = temperature / ReferenceConductivityTemperature;
-        return referenceThermalConductivity * MathF.Pow(temperatureRatio, ThermalConductivityExponent);
     }
 
     /// <inheritdoc cref="AtmosConfig.TryGetGasProperties" />
