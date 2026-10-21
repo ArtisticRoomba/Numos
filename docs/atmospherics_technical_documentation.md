@@ -1610,7 +1610,11 @@ The generated property body calls `ChunkField<T>.Register` with the same argumen
 `[ChunkData("my-mod/fire/exposure", Rollback = true)]` and `ChunkField<float>.Register("my-mod/fire/exposure",
 rollback: true)` return the same instance, so mods can mix the two styles. Registration lives in a nested holder
 class that initializes on first access. The property is therefore never null, even from one of the type's own static
-initializers.
+initializers. A generated module initializer also runs every holder when
+the assembly loads, so a replay file can load before any property has been read. It runs the holders only, not the
+declaring types' static constructors. A registration that conflicts with one from another assembly then fails there. The
+runtime reports a `TypeInitializationException` for `<Module>`, and its inner `InvalidOperationException` names the
+declaring type and the key.
 
 The attribute maps onto `Register` like this:
 

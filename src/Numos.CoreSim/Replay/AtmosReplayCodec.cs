@@ -277,8 +277,8 @@ internal static partial class AtmosReplayCodec
             if (!ChunkFieldRegistry.TryGet(key, out var field))
             {
                 throw new NotSupportedException(
-                    $"The file contains chunk field '{key}', but no field is registered under that key. Register it " +
-                    "before loading by touching its [ChunkData] property or calling ChunkField<T>.Register.");
+                    $"The file contains chunk field '{key}', but no field is registered under that key. [ChunkData] " +
+                    "fields register once their assembly has run; call ChunkField<T>.Register for other fields before loading.");
             }
 
             if (!field.CaptureForRollback)

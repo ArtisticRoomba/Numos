@@ -630,11 +630,12 @@ works for in-memory checkpoints and `AtmosWorldReplayTimeline.Restore`; it's lis
 saving fails with a `NotSupportedException` that names the key.
 
 Loading looks each key up in the process-wide `ChunkField<T>` registry, so every field the file might contain has to
-be registered before the load. A `[ChunkData]` field registers the first time its property is read, so read it (or call
-`ChunkField<T>.Register` with the same definition) at startup:
+be registered before the load. The `[ChunkData]` generator emits a module initializer that registers every field the
+assembly declares, so they're in place once anything in that assembly has run. A field created with
+`ChunkField<T>.Register` is registered when that call runs, so make sure it has before loading:
 
 ```csharp
-_ = FireChunkData.Exposure; // registers "my-mod/fire/exposure"
+ChunkField<int>.Register("my-mod/fire/counts", rollback: true, length: 1); // same definition the mod uses
 NumosWorldReplayDocument document = NumosReplayFile.Load(path);
 ```
 

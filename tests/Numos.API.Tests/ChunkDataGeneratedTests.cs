@@ -21,9 +21,41 @@ internal static partial class GeneratedFireData
     public static partial ChunkField<int> Clears { get; }
 }
 
+// Nothing reads this property, so only the generated module initializer can have registered it.
+internal static partial class UnreadChunkData
+{
+    public const string Key = "tests/chunk-data-generated/unread";
+
+    // Runs only if something touches the declaring type itself, which early registration must not do. The flag
+    // lives elsewhere because reading it from here would run this.
+    static UnreadChunkData()
+    {
+        UnreadChunkDataProbe.TypeInitialized = true;
+    }
+
+    [ChunkData(Key, Rollback = true)]
+    public static partial ChunkField<int> Value { get; }
+}
+
+internal static class UnreadChunkDataProbe
+{
+    public static bool TypeInitialized;
+}
+
 [TestFixture]
 public sealed class ChunkDataGeneratedTests
 {
+    [Test]
+    public void ModuleInitializer_RegistersFieldsBeforeTheirPropertyIsRead()
+    {
+        // A different definition under the same key only conflicts if the key is already taken.
+        Assert.That(
+            () => ChunkField<int>.Register(UnreadChunkData.Key, rollback: true, length: 4),
+            Throws.InvalidOperationException.With.Message.Contains("already registered"));
+
+        Assert.That(UnreadChunkDataProbe.TypeInitialized, Is.False);
+    }
+
     [Test]
     public void GeneratedFields_MatchTheirAttributes()
     {

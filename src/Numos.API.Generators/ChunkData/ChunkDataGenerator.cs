@@ -13,7 +13,8 @@ namespace Numos.API.Generators.ChunkData;
 /// <remarks>
 ///     <para>
 ///         Each property gets a body that returns a <c>ChunkField&lt;T&gt;</c> registered from a nested holder class,
-///         and a C# 14 extension property on <c>AtmosSolverChunk</c>. Output is one file per declaring type.
+///         and a C# 14 extension property on <c>AtmosSolverChunk</c>. Output is one file per declaring type, plus one
+///         module initializer per assembly that registers every field when the assembly loads.
 ///     </para>
 ///     <para>
 ///         Per-property checks run in the attribute transform. Key conflicts and accessor collisions need every property in the
@@ -29,6 +30,7 @@ public sealed class ChunkDataGenerator : IIncrementalGenerator
     internal const string LanguageVersionStepName = "ChunkDataLanguageVersion";
     internal const string ViewInfoStepName = "ChunkDataViewInfo";
     internal const string TypesStepName = "ChunkDataTypes";
+    internal const string ModuleInitializerStepName = "ChunkDataModuleInitializer";
 
     private const string AttributeMetadataName = "Numos.API.ChunkDataAttribute";
     private const string ChunkFieldMetadataName = "Numos.API.ChunkField`1";
@@ -73,6 +75,20 @@ public sealed class ChunkDataGenerator : IIncrementalGenerator
             TypesStepName,
             static type =>
                 (type.Members[0].Property.Type.HintName + ".ChunkData.g.cs", ChunkDataEmitter.Emit(type)));
+
+        IncrementalValueProvider<EquatableArray<string>> declaringTypes = output
+            .Select(static (result, _) => result.Types
+                .Select(static type => type.Members[0].Property.TypeDisplay)
+                .ToEquatableArray())
+            .WithTrackingName(ModuleInitializerStepName);
+
+        context.RegisterSourceOutput(
+            declaringTypes,
+            static (production, types) =>
+            {
+                if (types.Count > 0)
+                    production.AddSource(ChunkDataEmitter.ModuleInitializerHintName, ChunkDataEmitter.EmitModuleInitializer(types));
+            });
     }
 
     private static EquatableArray<string> GetReservedNames(Compilation compilation)

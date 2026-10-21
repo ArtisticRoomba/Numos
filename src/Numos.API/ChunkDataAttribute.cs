@@ -17,6 +17,13 @@ namespace Numos.API;
 ///         observe it.
 ///     </para>
 ///     <para>
+///         A generated module initializer also registers every field in the assembly as soon as anything in it runs,
+///         so a replay file holding a rollback field loads without the property being read first. If a field
+///         conflicts with one another assembly already registered, that initializer throws: the runtime wraps it in a
+///         <see cref="TypeInitializationException" /> whose inner <see cref="InvalidOperationException" /> names the
+///         declaring type and the key.
+///     </para>
+///     <para>
 ///         The generator also emits a static class named after the declaring type (<c>FireChunkDataChunkAccessors</c>
 ///         for <c>FireChunkData</c>, <c>OuterInnerChunkAccessors</c> for a nested <c>Outer.Inner</c>) in the same
 ///         namespace. The class holds one extension property per field.
