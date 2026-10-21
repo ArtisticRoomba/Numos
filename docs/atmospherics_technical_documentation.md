@@ -1569,7 +1569,8 @@ register fields once, not per tick or per simulation.
 Checkpoints capture rollback fields by key. Checkpoints and state hashes include the key, element type, length, and the
 exact bytes of every element. Changing any of these breaks compatibility with saved checkpoints and recorded hashes.
 Elements must contain no managed references. Numeric types, enums, and reference-free structs work, and registration
-rejects anything else. Keep custom struct layout, padding, and byte order stable too.
+rejects anything else. Keep custom struct layout, padding, and byte order stable too. Only primitive and enum fields can be saved in a
+`.numos` replay file. See "Rollback chunk fields in the file" in `docs/deterministic_replay.md`.
 
 Captured arrays are ordered by ordinal key. Each field also has a slot index in every chunk, assigned in registration
 order, which depends on static initialization order. Numos never writes slots to checkpoints or hashes, and slots

@@ -224,7 +224,8 @@ canister or closure state if its result needs to replay deterministically.
 
 Store persistent per-chunk solver state in a `ChunkField<T>` registered with `ChunkField<T>.Register(key, rollback: true)`.
 Numos then captures and restores it automatically. A rollback field needs a stable key and elements that contain no
-managed references. Reach the field through `context.Chunks(simulation)` on each callback, because restore replaces the
+managed references. To save it in a replay file, the element type must also be a
+primitive or an enum (see "Rollback chunk fields in the file"). Reach the field through `context.Chunks(simulation)` on each callback, because restore replaces the
 owning chunks. Do not keep the arrays. See §12.3 of the [technical documentation](atmospherics_technical_documentation.md)
 for the full API.
 
@@ -555,8 +556,8 @@ misread it.
 Viewer branch graphs are session state. Saving writes the selected branch, either through its preserved head or through
 the current inspection position. Save branches individually when more than one future must survive closing the project.
 
-Saving or loading reports and rejects custom world solver delegates, captured solver arrays, and hand-written host
-solver configurations. A standalone viewer cannot reconstruct their host implementations. `EulerFlowConfig` is the one
+Saving or loading reports and rejects custom world solver delegates, rollback chunk fields whose element type is not
+portable (see below), and hand-written host solver configurations. A standalone viewer cannot reconstruct their host implementations. `EulerFlowConfig` is the one
 hand-written exception. The codec writes it as its key (`euler-flow`) followed by its settings and reads it back through
 a reader table. Readers reject unknown required versions, sections, opcodes, and configuration keys. Future readers can
 skip optional length-prefixed metadata. `NumosReplayReadOptions` configures the payload limits.
@@ -604,6 +605,48 @@ The key is part of the format now, so renaming one means files saved under the o
 No format version changed for this. A file without solver configurations is byte-for-byte what earlier writers
 produced, a single zero count. Older readers throw on a configuration key they do not know, so they cannot misread the
 new entries.
+
+### Rollback chunk fields in the file
+
+Every rollback `ChunkField<T>` a chunk holds (`[ChunkData(Rollback = true)]` or `ChunkField<T>.Register(key, rollback:
+true)`) is saved with the chunk. Transient fields never are. Each chunk ends with a count, then one entry per field in
+ordinal key order, the same order the state hash uses:
+
+```text
+int32  count
+repeat count times:
+  string key          (int32 UTF-8 byte length, then the bytes)
+  string element type (the type's full name, as the state hash records it)
+  int32  element size
+  int32  element count
+  bytes  elements     (element size * count bytes, little-endian, voxel order)
+```
+
+Only primitives (`bool`, `byte`, `sbyte`, `short`, `ushort`, `int`, `uint`, `long`, `ulong`, `Half`, `float`,
+`double`) and enums over them can be saved. Their bytes have no padding, and a big-endian host converts them by swapping
+each element, the same way the codec handles the built-in float arrays. Structs are rejected even when they contain
+no references and no padding, since nothing pins their layout. A rollback field of any other reference-free type still
+works for in-memory checkpoints and `AtmosWorldReplayTimeline.Restore`; it's listed in `UnsupportedFeatures`, and
+saving fails with a `NotSupportedException` that names the key.
+
+Loading looks each key up in the process-wide `ChunkField<T>` registry, so every field the file might contain has to
+be registered before the load. A `[ChunkData]` field registers the first time its property is read, so read it (or call
+`ChunkField<T>.Register` with the same definition) at startup:
+
+```csharp
+_ = FireChunkData.Exposure; // registers "my-mod/fire/exposure"
+NumosWorldReplayDocument document = NumosReplayFile.Load(path);
+```
+
+A key with no registered field fails the load with a `NotSupportedException` that names it. Skipping it would drop
+state the solvers depend on, and replay would diverge. A field registered under the key but as transient, with a
+different element type name or size, or with a length that doesn't match (the chunk's voxel count for a per-voxel
+field, the registered length otherwise) is an `InvalidDataException`. The length check also caps what a corrupt file
+can make the reader allocate.
+
+No format version changed for this either. A chunk without rollback fields is a single zero count, byte for byte what
+earlier writers produced, and the existing golden files still match. Older readers have always thrown on a nonzero
+count ("cannot decode custom solver arrays"), so they reject a file with fields instead of misreading it.
 
 Numos does not yet provide compression, network transport, replay of custom solver registration changes, restoration of
 detached mixture identity, or certified bitwise compatibility across runtime and CPU architectures.

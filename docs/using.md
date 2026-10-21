@@ -352,6 +352,12 @@ mod.
 voxel's element when that voxel becomes vacuum. Use them for scratch state that must not outlive the gas in a voxel.
 A fixed-length field ignores single-voxel vacuums and resets only when the whole chunk becomes vacuum.
 
+Rollback fields of primitive or enum element type are saved in `.numos` replay files too. Loading one needs the field
+registered first, and `[ChunkData]` registers on first read. Touch each field at startup before loading a file, for
+example `_ = FireChunkData.Exposure;`. A file holding an unregistered key fails to load. Structs work for in-memory
+rollback but make the replay non-portable. See "Rollback chunk fields in the file" in
+[deterministic replay](deterministic_replay.md).
+
 The accessors are C# 14 extension properties. A project pinned to an older `LangVersion` gets a compile error. The
 [technical documentation](atmospherics_technical_documentation.md#123-per-chunk-solver-state-with-chunkfieldt) covers
 keys, allocation, the generator's diagnostics, and the hand-written `ChunkField<T>.Register` equivalent.
