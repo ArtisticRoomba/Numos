@@ -501,7 +501,9 @@ internal sealed partial class AtmosKernel
     ///     "no gas, no momentum" invariant without a separate cleanup pass.
     /// </remarks>
     /// <exception cref="KeyNotFoundException">No chunk is registered at <paramref name="position" />.</exception>
-    /// <exception cref="ArgumentOutOfRangeException"><paramref name="localVoxelIndex" /> is outside the chunk.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    ///     <paramref name="localVoxelIndex" /> is outside the chunk, or a momentum component is not finite.
+    /// </exception>
     internal void SetVoxelMomentum(
         Int3 position,
         ushort localVoxelIndex,
@@ -513,6 +515,7 @@ internal sealed partial class AtmosKernel
         {
             var chunk = GetChunk(position);
             ValidateVoxelIndex(chunk, localVoxelIndex);
+            ValidateMomentum(momentumX, momentumY, momentumZ);
 
             int classification = chunk.VoxelRoomMap[localVoxelIndex];
             if (classification == VoxelClassification.RoomSolid || classification == VoxelClassification.RoomVoid)
@@ -543,7 +546,9 @@ internal sealed partial class AtmosKernel
     /// <param name="momentumZ">Total z-momentum of the voxel's gas, in kilogram metres per second.</param>
     /// <remarks>Writes to solid, void, or gasless voxels are ignored and not recorded.</remarks>
     /// <exception cref="KeyNotFoundException">No chunk is registered at <paramref name="position" />.</exception>
-    /// <exception cref="ArgumentOutOfRangeException">A local coordinate is outside the chunk.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    ///     A local coordinate is outside the chunk, or a momentum component is not finite.
+    /// </exception>
     internal void SetVoxelMomentum(
         Int3 position,
         int x,
@@ -719,6 +724,19 @@ internal sealed partial class AtmosKernel
                 localVoxelIndex,
                 $"Voxel index must be less than the chunk's voxel count ({chunk.VoxelCount}).");
         }
+    }
+
+    private static void ValidateMomentum(
+        KilogramMetrePerSecond momentumX, KilogramMetrePerSecond momentumY, KilogramMetrePerSecond momentumZ)
+    {
+        if (!float.IsFinite(momentumX))
+            throw new ArgumentOutOfRangeException(nameof(momentumX), momentumX, "Momentum must be finite.");
+
+        if (!float.IsFinite(momentumY))
+            throw new ArgumentOutOfRangeException(nameof(momentumY), momentumY, "Momentum must be finite.");
+
+        if (!float.IsFinite(momentumZ))
+            throw new ArgumentOutOfRangeException(nameof(momentumZ), momentumZ, "Momentum must be finite.");
     }
 
     private void ValidateGasInjection(int gasId, Mole moles, Kelvin temperature)

@@ -215,6 +215,31 @@ public sealed class AtmosReplayTests
     }
 
     [Test]
+    public void SetVoxelMomentum_RejectsNonFiniteComponentsWithoutRecording()
+    {
+        using var simulation = CreateSimulation();
+        var world = simulation.World;
+        var chunk = simulation.CreateAndRegisterChunk(default);
+        simulation.AddGasToVoxel(chunk, 0, 0, 2f, 300f);
+        world.StartRecording();
+        var before = world.ComputeStateHash();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(() => simulation.SetVoxelMomentum(chunk, 0, float.NaN, 0f, 0f), Throws.TypeOf<ArgumentOutOfRangeException>());
+            Assert.That(() => simulation.SetVoxelMomentum(chunk, 0, 0f, float.PositiveInfinity, 0f), Throws.TypeOf<ArgumentOutOfRangeException>());
+            Assert.That(() => simulation.SetVoxelMomentum(chunk, 0, 0, 0, 0f, 0f, float.NegativeInfinity), Throws.TypeOf<ArgumentOutOfRangeException>());
+        });
+
+        var recording = world.StopRecording();
+        Assert.Multiple(() =>
+        {
+            Assert.That(world.ComputeStateHash(), Is.EqualTo(before));
+            Assert.That(recording.Operations, Is.Empty);
+        });
+    }
+
+    [Test]
     public void CustomSolver_UsesNormalApiWithoutRecordingAndCanSuppressHostEffects()
     {
         using var simulation = CreateSimulation();
