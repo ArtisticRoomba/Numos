@@ -160,8 +160,11 @@ public sealed class EulerFlowConfig : IAtmosSolverConfiguration, IPortableSolver
     ///     Fraction of a full voxel face assumed open for a portal or dock link that declares no area.
     /// </summary>
     /// <remarks>
-    ///     The flux across an explicit link is scaled by its area fraction. Values are clamped to [0, 1]; non-finite
-    ///     values normalize to 0, which closes such links to Euler transport.
+    ///     The gas flux across an explicit link is scaled by its area fraction under both transport models: links
+    ///     are the same duct whether the grid runs <c>euler-flow</c> or legacy <c>advection</c>, and the setting
+    ///     lives here only because this is where link geometry was introduced. A host on the legacy model that
+    ///     changes it sees its unsized links scale too. Values are clamped to [0, 1]; non-finite values normalize
+    ///     to 0, which closes such links to gas transport.
     /// </remarks>
     public Scalar DefaultLinkAreaFraction { get; init; } = 1f;
 
