@@ -35,7 +35,11 @@ public enum AtmosChunkSnapshotFields
     /// </summary>
     SolverArrays = 1 << 5,
     /// <summary>
+    ///     Selects the velocity derived from each voxel's momentum and gas mass.
+    /// </summary>
+    Velocity = 1 << 6,
+    /// <summary>
     ///     Selects every detached field.
     /// </summary>
-    All = Pressure | Temperature | Gases | VoxelClassification | TotalHeatCapacity | SolverArrays
+    All = Pressure | Temperature | Gases | VoxelClassification | TotalHeatCapacity | SolverArrays | Velocity
 }

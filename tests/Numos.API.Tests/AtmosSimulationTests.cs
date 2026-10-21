@@ -1,5 +1,6 @@
 using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Primitives;
+using Numos.CoreSim.Datatypes.Snapshots;
 using Numos.Maths;
 
 namespace Numos.API.Tests;
@@ -7,6 +8,52 @@ namespace Numos.API.Tests;
 [TestFixture]
 public sealed class AtmosSimulationTests
 {
+    [Test]
+    public void GetVoxelVelocity_DividesStoredMomentumByCurrentGasMass()
+    {
+        var config = new AtmosConfig
+        {
+            ReferenceMolarMass = 0.01f,
+            GasRegistry = [TestGases.Create("Light", molarMass: 0.002f), TestGases.Create("Unset")]
+        };
+
+        using var simulation = new AtmosSimulation(config, 2, 1, 1);
+        var chunk = simulation.CreateAndRegisterChunk(default);
+        simulation.SetChunkClassification(chunk, new VoxelClassification(1));
+        // 3 mol × 0.002 + 2 mol × reference 0.01 = 0.026 kg.
+        simulation.AddGasToVoxel(chunk, 0, "Light", 3f, 300f);
+        simulation.AddGasToVoxel(chunk, 0, "Unset", 2f, 300f);
+        simulation.SetVoxelMomentum(chunk, 0, 0.052f, -0.013f, 0f);
+
+        var byIndex = simulation.GetVoxelVelocity(chunk, 0);
+        var byCoordinates = simulation.GetVoxelVelocity(chunk, 0, 0, 0);
+        var snapshot = simulation.GetVoxelSnapshot(chunk, 0);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(byIndex.X, Is.EqualTo(2f).Within(1e-4f));
+            Assert.That(byIndex.Y, Is.EqualTo(-0.5f).Within(1e-4f));
+            Assert.That(byIndex.Z, Is.Zero);
+            Assert.That(byCoordinates, Is.EqualTo(byIndex));
+            Assert.That(snapshot.VelocityX, Is.EqualTo(byIndex.X));
+            Assert.That(snapshot.VelocityY, Is.EqualTo(byIndex.Y));
+            Assert.That(simulation.GetVoxelVelocity(chunk, 1), Is.EqualTo(default(AtmosVoxelVelocity)));
+            Assert.That(
+                () => simulation.GetVoxelVelocity(chunk, 2, 0, 0),
+                Throws.TypeOf<ArgumentOutOfRangeException>());
+        });
+
+        // Adding gas at rest doubles the mass and halves the velocity without touching the stored momentum.
+        simulation.AddGasToVoxel(chunk, 0, "Light", 13f, 300f);
+        Assert.That(simulation.GetVoxelVelocity(chunk, 0).X, Is.EqualTo(1f).Within(1e-4f));
+
+        Assert.That(
+            simulation.TryGetChunkSnapshot(chunk, default, AtmosChunkSnapshotFields.Velocity, out var chunkSnapshot),
+            Is.True);
+
+        Assert.That(chunkSnapshot.VelocityX[0], Is.EqualTo(1f).Within(1e-4f));
+    }
+
     [Test]
     public void AddGasToVoxel_ResolvesNamesUsingCurrentRegistrationOrder()
     {

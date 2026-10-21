@@ -58,8 +58,8 @@ public sealed class SimulationFrameBuilder
     /// </summary>
     /// <param name="visualizationId">Registered visualization ID, compared case-insensitively.</param>
     /// <returns>
-    ///     Voxel classification plus whichever of temperature, pressure, and gases the visualization declares in
-    ///     <see cref="IVisualizationMethod.RequiredData" />.
+    ///     Voxel classification plus whichever of temperature, pressure, gases, and velocity the visualization
+    ///     declares in <see cref="IVisualizationMethod.RequiredData" />.
     /// </returns>
     /// <exception cref="KeyNotFoundException">
     ///     No visualization is registered under <paramref name="visualizationId" />.
@@ -76,6 +76,9 @@ public sealed class SimulationFrameBuilder
 
         if ((visualization.RequiredData & VisualizationDataRequirements.Gases) != 0)
             fields |= AtmosChunkSnapshotFields.Gases;
+
+        if ((visualization.RequiredData & VisualizationDataRequirements.Velocity) != 0)
+            fields |= AtmosChunkSnapshotFields.Velocity;
 
         return fields;
     }
@@ -112,7 +115,7 @@ public sealed class SimulationFrameBuilder
     ///     No visualization is registered under <paramref name="visualizationId" />.
     /// </exception>
     /// <remarks>
-    ///     The automatic range spans the finite temperature or pressure values in <paramref name="snapshots" />,
+    ///     The automatic range spans the finite temperature, pressure, or speed values in <paramref name="snapshots" />,
     ///     depending on what the visualization requires. A chunk is reused only when its identity, visualization,
     ///     mapping revision, and snapshot revision all match and the range is unchanged. A range change therefore
     ///     remaps every in-scope chunk.
@@ -283,6 +286,9 @@ public sealed class SimulationFrameBuilder
 
             if ((requirements & VisualizationDataRequirements.Pressure) != 0)
                 IncludeFiniteRange(snapshot.TotalPressure, ref minimum, ref maximum);
+
+            if ((requirements & VisualizationDataRequirements.Velocity) != 0)
+                IncludeFiniteSpeedRange(snapshot, ref minimum, ref maximum);
         }
 
         if (!float.IsFinite(minimum) || !float.IsFinite(maximum))
@@ -308,6 +314,38 @@ public sealed class SimulationFrameBuilder
             minimum = Math.Min(minimum, value);
             maximum = Math.Max(maximum, value);
         }
+    }
+
+    private static void IncludeFiniteSpeedRange(
+        in AtmosChunkSnapshot snapshot,
+        ref float minimum,
+        ref float maximum)
+    {
+        if (!HasCompleteVelocity(snapshot, out int voxelCount))
+            return;
+
+        for (int index = 0; index < voxelCount; index++)
+        {
+            float speed = GetSpeed(snapshot.VelocityX[index], snapshot.VelocityY[index], snapshot.VelocityZ[index]);
+            if (!float.IsFinite(speed))
+                continue;
+
+            minimum = Math.Min(minimum, speed);
+            maximum = Math.Max(maximum, speed);
+        }
+    }
+
+    private static bool HasCompleteVelocity(in AtmosChunkSnapshot snapshot, out int voxelCount)
+    {
+        voxelCount = snapshot.Dimensions.X * snapshot.Dimensions.Y * snapshot.Dimensions.Z;
+        return snapshot.VelocityX?.Length == voxelCount &&
+               snapshot.VelocityY?.Length == voxelCount &&
+               snapshot.VelocityZ?.Length == voxelCount;
+    }
+
+    private static float GetSpeed(float x, float y, float z)
+    {
+        return MathF.Sqrt(x * x + y * y + z * z);
     }
 
     /// <summary>
@@ -657,6 +695,7 @@ public sealed class SimulationFrameBuilder
 
         int visibleCount = 0;
         bool summarizeGases = (visualization.RequiredData & VisualizationDataRequirements.Gases) != 0;
+        bool hasVelocity = HasCompleteVelocity(snapshot, out _);
         for (int index = 0; index < voxelCount; index++)
         {
             ushort localIndex = checked((ushort)index);
@@ -679,11 +718,18 @@ public sealed class SimulationFrameBuilder
                 ? snapshot.TotalPressure[index]
                 : float.NaN;
 
+            float velocityX = hasVelocity ? snapshot.VelocityX[index] : float.NaN;
+            float velocityY = hasVelocity ? snapshot.VelocityY[index] : float.NaN;
+            float velocityZ = hasVelocity ? snapshot.VelocityZ[index] : float.NaN;
+
             var sample = new VoxelSample(
                 localIndex,
                 roomId,
                 temperature,
                 pressure,
+                velocityX,
+                velocityY,
+                velocityZ,
                 totalMoles,
                 primaryGasId,
                 new VoxelGasData(snapshot.Gases, localIndex));
@@ -700,6 +746,9 @@ public sealed class SimulationFrameBuilder
                 VoxelFaceMask.None,
                 sample.Temperature,
                 sample.Pressure,
+                sample.VelocityX,
+                sample.VelocityY,
+                sample.VelocityZ,
                 sample.TotalMoles,
                 sample.PrimaryGasId,
                 sample.RoomId,
@@ -874,6 +923,10 @@ public sealed class SimulationFrameBuilder
         if ((requirements & VisualizationDataRequirements.Temperature) != 0 &&
             snapshot.Temperature.Length != voxelCount)
             throw new ArgumentException("The visualization requires a complete temperature field.", nameof(snapshot));
+
+        if ((requirements & VisualizationDataRequirements.Velocity) != 0 &&
+            !HasCompleteVelocity(snapshot, out _))
+            throw new ArgumentException("The visualization requires complete velocity fields.", nameof(snapshot));
 
         if (snapshot.Gases == null)
             throw new ArgumentException("Snapshot gas channels are not initialized.", nameof(snapshot));

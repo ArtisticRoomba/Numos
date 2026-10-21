@@ -88,6 +88,56 @@ public sealed class SimulationFrameBuilderTests
     }
 
     [Test]
+    public void SpeedVisualization_MapsSpeedMagnitudeAndRequiresVelocityArrays()
+    {
+        var builder = CreateBuilder();
+        var snapshot = CreateSnapshot(
+            new Int3(0, 0, 0),
+            new Int3(2, 1, 1),
+            velocityX: [3f, 0f],
+            velocityZ: [-4f, 0f]);
+
+        var frame = builder.BuildSimulation([snapshot], BuiltInVisualizationIds.Speed, 1);
+        var chunk = frame.Chunks[snapshot.GridPosition];
+        var withoutVelocity = CreateSnapshot(new Int3(0, 0, 0), new Int3(1, 1, 1), includeVelocity: false);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(
+                builder.GetRequiredSnapshotFields(BuiltInVisualizationIds.Speed),
+                Is.EqualTo(AtmosChunkSnapshotFields.VoxelClassification | AtmosChunkSnapshotFields.Velocity));
+
+            Assert.That(frame.Visualization.Range, Is.EqualTo(new VisualizationRange(0f, 5f)));
+            Assert.That(frame.Visualization.Legend.Units, Is.EqualTo("m/s"));
+            Assert.That(chunk.GetCell(0).VelocityX, Is.EqualTo(3f));
+            Assert.That(chunk.GetCell(0).VelocityZ, Is.EqualTo(-4f));
+            Assert.That(chunk.GetCell(0).Color, Is.Not.EqualTo(chunk.GetCell(1).Color));
+            Assert.That(
+                () => builder.BuildSimulation([withoutVelocity], BuiltInVisualizationIds.Speed, 2),
+                Throws.ArgumentException);
+        });
+    }
+
+    [Test]
+    public void TemperatureVisualization_BuildsWithoutVelocityArrays()
+    {
+        var builder = CreateBuilder();
+        var snapshot = CreateSnapshot(new Int3(0, 0, 0), new Int3(1, 1, 1), includeVelocity: false);
+
+        var cell = builder.BuildSimulation([snapshot], BuiltInVisualizationIds.Temperature, 1)
+            .Chunks[snapshot.GridPosition]
+            .GetCell(0);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(cell.IsVisible, Is.True);
+            Assert.That(float.IsNaN(cell.VelocityX), Is.True);
+            Assert.That(float.IsNaN(cell.VelocityY), Is.True);
+            Assert.That(float.IsNaN(cell.VelocityZ), Is.True);
+        });
+    }
+
+    [Test]
     public void BuildSimulation_TwoAdjacentCells_OmitsTheirSharedFaces()
     {
         var builder = CreateBuilder();
@@ -534,9 +584,15 @@ public sealed class SimulationFrameBuilderTests
         float[]? temperature = null,
         int[]? rooms = null,
         GasSnapshot[]? gases = null,
-        AtmosChunkVersion version = default)
+        AtmosChunkVersion version = default,
+        float[]? velocityX = null,
+        float[]? velocityY = null,
+        float[]? velocityZ = null,
+        bool includeVelocity = true)
     {
         int count = dimensions.X * dimensions.Y * dimensions.Z;
+        // Custom visualizations default to requiring every field, so hand-built snapshots carry velocity unless a
+        // test deliberately leaves it out.
         return new AtmosChunkSnapshot
         {
             Version = version,
@@ -546,6 +602,9 @@ public sealed class SimulationFrameBuilderTests
             Temperature = temperature ?? Enumerable.Repeat(293.15f, count).ToArray(),
             VoxelRoomMap = rooms ?? Enumerable.Repeat(1, count).ToArray(),
             Gases = gases ?? [],
+            VelocityX = includeVelocity ? velocityX ?? new float[count] : null!,
+            VelocityY = includeVelocity ? velocityY ?? new float[count] : null!,
+            VelocityZ = includeVelocity ? velocityZ ?? new float[count] : null!,
             ActiveAirCount = count,
             ActiveGasCount = gases?.Length ?? 0
         };

@@ -759,14 +759,27 @@ internal class AtmosChunk
     ///     Creates a detached snapshot of the chunk's current state.
     /// </summary>
     /// <param name="fields">The per-voxel fields to copy.</param>
+    /// <param name="config">
+    ///     Configuration supplying gas molar masses. Required when <paramref name="fields" /> includes
+    ///     <see cref="AtmosChunkSnapshotFields.Velocity" />, since velocity is derived from momentum and mass rather
+    ///     than stored.
+    /// </param>
     /// <returns>A snapshot containing selected physical fields and solver arrays opted into capture.</returns>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="fields" /> contains undefined flags.</exception>
+    /// <exception cref="ArgumentException">
+    ///     <paramref name="fields" /> includes velocity but <paramref name="config" /> is <see langword="null" />.
+    /// </exception>
     [PublicAPI]
     public AtmosChunkSnapshot GetNetworkSnapshot(
-        AtmosChunkSnapshotFields fields = AtmosChunkSnapshotFields.All)
+        AtmosChunkSnapshotFields fields = AtmosChunkSnapshotFields.All,
+        IAtmosConfig? config = null)
     {
         if ((fields & ~AtmosChunkSnapshotFields.All) != 0)
             throw new ArgumentOutOfRangeException(nameof(fields));
+
+        bool includeVelocity = fields.HasFlag(AtmosChunkSnapshotFields.Velocity);
+        if (includeVelocity && config == null)
+            throw new ArgumentException("A configuration is required to derive velocity.", nameof(config));
 
         var snapshot = new AtmosChunkSnapshot
         {
@@ -789,6 +802,9 @@ internal class AtmosChunk
             VoxelRoomMap = fields.HasFlag(AtmosChunkSnapshotFields.VoxelClassification)
                 ? VoxelRoomMap.ToArray()
                 : [],
+            VelocityX = includeVelocity ? new MetrePerSecond[VoxelCount] : [],
+            VelocityY = includeVelocity ? new MetrePerSecond[VoxelCount] : [],
+            VelocityZ = includeVelocity ? new MetrePerSecond[VoxelCount] : [],
             SolverArrays = fields.HasFlag(AtmosChunkSnapshotFields.SolverArrays)
                 ? Array.AsReadOnly(CaptureSolverArrays())
                 : Array.Empty<AtmosSolverArraySnapshot>(),
@@ -809,6 +825,20 @@ internal class AtmosChunk
                 };
 
                 Array.Copy(ActiveGases[g].Moles, snapshot.Gases[g].Moles, VoxelCount);
+            }
+        }
+
+        if (includeVelocity)
+        {
+            for (int index = 0; index < VoxelCount; index++)
+            {
+                AtmosSolverMath.ComputeVoxelVelocity(
+                    config!,
+                    this,
+                    (ushort)index,
+                    out snapshot.VelocityX[index],
+                    out snapshot.VelocityY[index],
+                    out snapshot.VelocityZ[index]);
             }
         }
 

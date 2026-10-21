@@ -43,6 +43,11 @@ internal sealed class HeadlessRequest
     public float? TemperatureK { get; init; }
     public float? GasTemperatureK { get; init; }
 
+    // Momentum writes, in kg·m/s.
+    public float? MomentumX { get; init; }
+    public float? MomentumY { get; init; }
+    public float? MomentumZ { get; init; }
+
     // Regions, sampling, and links. Region and sample coordinates are global voxels.
     public Coordinate? Min { get; init; }
     public Coordinate? Max { get; init; }

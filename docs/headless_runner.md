@@ -176,7 +176,8 @@ A coordinate is an object with `x`, `y`, and `z`. Three kinds of coordinate appe
   Global coordinates make a duct of many chunks a few lines of script.
 
 Classifications are `-2` for solid, `-1` for void, `0` for unassigned, and positive room ids for air. Temperatures are
-in kelvins, pressures in pascals, volumes in cubic metres, and gas amounts in moles.
+in kelvins, pressures in pascals, volumes in cubic metres, and gas amounts in moles. Momentum is in kilogram metres per
+second and velocity is in metres per second.
 
 ## Operations
 
@@ -222,10 +223,16 @@ any study you save.
 | `fillChunk` | `position`, `classification` | Sets every voxel of a chunk. |
 | `setVoxelClassification` | `position`, local `voxel`, `classification` | Sets one voxel. |
 | `setVoxelTemperature` | `position`, local `voxel`, `temperatureK` | Sets the stored temperature. |
+| `setVoxelMomentum` | `position`, local `voxel`, `momentumX`, `momentumY`, `momentumZ` | Sets the total momentum of the voxel's gas in kg·m/s. |
 | `injectGas` | `position`, local `voxel`, `gasId`, `moles`, `temperatureK` | Adds gas to an air voxel. |
 | `clearVoxelGas` | `position`, local `voxel` | Removes the gas from one voxel. |
 
 All of these take the optional `simulation`.
+
+`setVoxelMomentum` stores momentum, not velocity. The reported velocity is that momentum divided by the gas mass in the
+voxel (moles times `molarMassKgPerMol`, or `referenceMolarMassKgPerMol` for gases without one). Inject gas first, then
+multiply the velocity you want by that mass. The call has no effect on solid, void, or empty voxels. The runner rejects
+non-finite components with `operationRejected`.
 
 ### Regions and sampling
 
@@ -421,15 +428,16 @@ the next `tick` extends the branch.
 these parts:
 
 - `tick`, `simulationRate`, and `simulationChunkCount`.
-- `config`, including the gas registry.
+- `config`, including the gas registry and, once the session has them, the `eulerFlow` settings.
 - `solverPipeline` in execution order.
-- `global`, with topology counts, total moles, estimated sensible energy, pressure and temperature statistics, totals by
+- `global`, with topology counts, total moles, estimated sensible energy, pressure, temperature, and speed statistics, totals by
   gas, and anomaly counts.
 - `chunks`, sorted by `(x, y, z)`, each with its own summary and optional `voxels`.
-- `issueLocations`, a bounded sample of voxels with non-finite or negative values.
+- `issueLocations`, a bounded sample of voxels with non-finite or negative values, plus non-finite velocity.
 
 Dense voxel data is opt-in. Set `includeVoxels` to `true` for it. Set `onlyGasBearingVoxels` to keep occupied voxels
-only. A chunk `position` limits the report to one chunk. With `position` and a local `voxel`, the report returns that
+only. Each voxel reports the derived velocity vector (`velocityMps`) and its magnitude (`speedMps`). A voxel with no gas
+reports zero. A chunk `position` limits the report to one chunk. With `position` and a local `voxel`, the report returns that
 voxel even when `includeVoxels` is `false`. `maxIssueLocations` caps the issue sample (default 32, maximum 1024).
 
 ## Determinism and comparison

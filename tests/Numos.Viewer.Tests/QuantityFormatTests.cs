@@ -60,6 +60,8 @@ public sealed class QuantityFormatTests
             Assert.That(QuantityFormat.Temperature(2.7), Is.EqualTo("2.70 K"));
             Assert.That(QuantityFormat.Pressure(101_326.0), Is.EqualTo("101.33 kPa"));
             Assert.That(QuantityFormat.Amount(12.0), Is.EqualTo("12.000 mol"));
+            Assert.That(QuantityFormat.Speed(3.5), Is.EqualTo("3.50 m/s"));
+            Assert.That(QuantityFormat.Velocity(1.0, 0.0, -2.5), Is.EqualTo("(1.00, 0.00, -2.50) m/s"));
             Assert.That(QuantityFormat.Percent(0.425), Is.EqualTo("42.5 %"));
             Assert.That(QuantityFormat.Percent(0.0), Is.EqualTo("0.0 %"));
         });
