@@ -154,6 +154,7 @@ An unreadable script also produces one error response with code `scriptUnavailab
 | `simulationNotCreated` | The operation needs a project or an active simulation. |
 | `simulationNotFound` | The `simulation` name or id matches nothing. |
 | `invalidGas` | A gas definition is invalid. |
+| `invalidConfig` | A configuration patch holds a value the protocol cannot map, such as an unknown `eulerFlow.reconstruction`. |
 | `gasNotFound` | A gas id is not in the registry. |
 | `fieldNotFound` | A field name is unknown. |
 | `invalidRegion` | A region has `max` below `min`. |
@@ -346,6 +347,13 @@ domain of its field, such as a negative `bulkFlowCoefficient`.
 `saturationReferencePressurePa`, `defaultDiffusionCoefficient`, `spaceTemperatureK`, `bulkFlowCoefficient`,
 `vacuumThresholdPa`, `sleepThreshold`, `sleepEpsilonPercent`, `thermalConductance`, `condensationRateFactor`,
 `maxPressureTransferFractionPerNeighbor`, `accumulatorWakeThresholdPa`, `accumulatorMaxAliveTicks`, `referenceMolarMassKgPerMol`.
+
+The `eulerFlow` object holds the Euler transport settings: `courantNumber`, `maxSubstepsPerTick`, `velocityFloorMps`,
+`maxVelocityMps`, `wakePressureDeltaPa`, `allMachCorrection`, `reconstruction` (`"firstOrder"` or `"musclHancock"`),
+`momentumDampingPerSecond`, and `defaultLinkAreaFraction`. A patch replaces the `EulerFlowConfig` entry with a copy that
+applies the given fields. Omitted fields keep the entry's value, or the library default when the session has no entry.
+The observation reports `config.eulerFlow` with the same names. It is absent while the session has no entry. The solver
+then runs with its defaults.
 
 Defaults change between versions. Set every field a study depends on.
 

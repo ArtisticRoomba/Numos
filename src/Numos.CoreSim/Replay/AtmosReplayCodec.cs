@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
 using Numos.CoreSim.Datatypes.Primitives;
+using Numos.CoreSim.EulerFlow;
 using Numos.Maths;
 
 namespace Numos.CoreSim.Replay;
@@ -27,6 +28,14 @@ namespace Numos.CoreSim.Replay;
 internal static partial class AtmosReplayCodec
 {
     internal static readonly Encoding Utf8 = new UTF8Encoding(false, true);
+
+    // Every built-in configuration a portable file can carry, by key. A key missing here is a host type, which the
+    // archive reports as unsupported before anything is written.
+    private static readonly Dictionary<string, Func<BinaryReader, IAtmosSolverConfiguration>> PortableConfigurationReaders =
+        new(StringComparer.Ordinal)
+        {
+            [EulerFlowConfig.ConfigurationKey] = EulerFlowConfig.ReadWire
+        };
 
     /// <summary>
     ///     Writes one simulation's grid checkpoint nested in a world checkpoint.
@@ -66,12 +75,27 @@ internal static partial class AtmosReplayCodec
         return checkpoint;
     }
 
+    /// <summary>
+    ///     Writes a configuration snapshot, including its portable solver configurations as key/payload pairs.
+    /// </summary>
+    /// <exception cref="NotSupportedException">A solver configuration is a host type with no wire encoding.</exception>
     internal static void WriteConfig(BinaryWriter writer, AtmosConfigSnapshot config)
     {
         GeneratedCheckpointFields.WriteConfigFields(writer, config);
         writer.Write(config.GasRegistry.Count);
         foreach (var gas in config.GasRegistry) GeneratedCheckpointFields.WriteGasFields(writer, gas);
         writer.Write(config.SolverConfigurations.Count);
+        foreach (var configuration in config.SolverConfigurations)
+        {
+            if (configuration is not IPortableSolverConfiguration portable)
+            {
+                throw new NotSupportedException(
+                    $"Portable replay files cannot encode the solver configuration '{configuration.Key}'.");
+            }
+
+            WriteString(writer, configuration.Key);
+            portable.WriteWire(writer);
+        }
     }
 
     internal static AtmosConfigSnapshot ReadConfig(BinaryReader reader, int maxStringBytes)
@@ -83,9 +107,19 @@ internal static partial class AtmosReplayCodec
         for (int index = 0; index < gasCount; index++)
             config.GasRegistry.Add(GeneratedCheckpointFields.ReadGasFields(reader, maxStringBytes));
 
-        int customConfigurationCount = ReadCount(reader, 1_000_000, "solver configuration");
-        if (customConfigurationCount != 0)
-            throw new NotSupportedException("Portable replay files cannot decode custom solver configurations.");
+        int configurationCount = ReadCount(reader, 1_000_000, "solver configuration");
+        for (int index = 0; index < configurationCount; index++)
+        {
+            string key = ReadString(reader, maxStringBytes);
+            if (!PortableConfigurationReaders.TryGetValue(key, out var read))
+                throw new NotSupportedException("Portable replay files cannot decode custom solver configurations.");
+
+            var configuration = read(reader);
+            if (configuration.Key != key)
+                throw new InvalidDataException("The solver configuration key does not match its payload.");
+
+            config.SolverConfigurations.Add(configuration);
+        }
 
         return config.CreateSnapshot();
     }

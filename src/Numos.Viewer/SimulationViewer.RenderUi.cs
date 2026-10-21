@@ -6,6 +6,7 @@ using Numos.API;
 using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.Datatypes.Snapshots;
+using Numos.CoreSim.EulerFlow;
 using Numos.Maths;
 using Numos.SimDrawer;
 using Numos.Viewer.Rendering;
@@ -784,6 +785,9 @@ public partial class SimulationViewer
                 ConfigDomain.Positive,
                 inspecting,
                 static (config, value) => config.ReferenceMolarMass = value);
+
+            ImGui.SeparatorText("Euler flow");
+            RenderEulerFlowSettings(inspecting);
         }
 
         ImGui.Spacing();
@@ -809,6 +813,139 @@ public partial class SimulationViewer
             _configurationFeedback = new FeedbackMessage($"Could not reset the settings: {exception.Reason}", true);
         }
     }
+
+    /// <summary>
+    ///     Draws the <see cref="EulerFlowConfig" /> settings. Each edit replaces the configuration's entry with a
+    ///     copy carrying the new value, which is why every assign goes through <see cref="ReplaceEulerFlow" />.
+    /// </summary>
+    private void RenderEulerFlowSettings(bool inspecting)
+    {
+        var euler = _session.Config!.SolverConfigurations.OfType<EulerFlowConfig>().FirstOrDefault() ?? EulerFlowConfig.Default;
+
+        ConfigFloatSlider(
+            AtmosConfigFields.EulerCourantNumber,
+            "config-euler-courant-number",
+            euler.CourantNumber,
+            0.05f,
+            1f,
+            ConfigDomain.PositiveUnitInterval,
+            inspecting,
+            static (config, value) =>
+                ReplaceEulerFlow(config, current => new EulerFlowConfig(current) { CourantNumber = value }));
+
+        ConfigIntInput(
+            AtmosConfigFields.EulerMaxSubstepsPerTick,
+            "config-euler-max-substeps",
+            euler.MaxSubstepsPerTick,
+            inspecting,
+            static (config, value) =>
+                ReplaceEulerFlow(config, current => new EulerFlowConfig(current) { MaxSubstepsPerTick = value }));
+
+        ConfigFloatInput(
+            AtmosConfigFields.EulerVelocityFloor,
+            "config-euler-velocity-floor",
+            euler.VelocityFloor,
+            ConfigDomain.NonNegative,
+            inspecting,
+            static (config, value) =>
+                ReplaceEulerFlow(config, current => new EulerFlowConfig(current) { VelocityFloor = value }));
+
+        ConfigFloatInput(
+            AtmosConfigFields.EulerMaxVelocity,
+            "config-euler-max-velocity",
+            euler.MaxVelocity,
+            ConfigDomain.Positive,
+            inspecting,
+            static (config, value) =>
+                ReplaceEulerFlow(config, current => new EulerFlowConfig(current) { MaxVelocity = value }));
+
+        ConfigFloatInput(
+            AtmosConfigFields.EulerWakePressureDelta,
+            "config-euler-wake-pressure-delta",
+            euler.WakePressureDelta,
+            ConfigDomain.NonNegative,
+            inspecting,
+            static (config, value) =>
+                ReplaceEulerFlow(config, current => new EulerFlowConfig(current) { WakePressureDelta = value }));
+
+        ConfigBoolCheckbox(
+            AtmosConfigFields.EulerAllMachCorrection,
+            "config-euler-all-mach",
+            euler.AllMachCorrection,
+            inspecting,
+            static (config, value) =>
+                ReplaceEulerFlow(config, current => new EulerFlowConfig(current) { AllMachCorrection = value }));
+
+        ConfigReconstructionCombo(euler.Reconstruction, inspecting);
+
+        ConfigFloatInput(
+            AtmosConfigFields.EulerMomentumDamping,
+            "config-euler-momentum-damping",
+            euler.MomentumDamping,
+            ConfigDomain.NonNegative,
+            inspecting,
+            static (config, value) =>
+                ReplaceEulerFlow(config, current => new EulerFlowConfig(current) { MomentumDamping = value }));
+
+        ConfigFloatSlider(
+            AtmosConfigFields.EulerDefaultLinkAreaFraction,
+            "config-euler-link-area-fraction",
+            euler.DefaultLinkAreaFraction,
+            0f,
+            1f,
+            ConfigDomain.UnitInterval,
+            inspecting,
+            static (config, value) =>
+                ReplaceEulerFlow(config, current => new EulerFlowConfig(current) { DefaultLinkAreaFraction = value }));
+    }
+
+    private static void ReplaceEulerFlow(AtmosConfig config, Func<EulerFlowConfig, EulerFlowConfig> edit)
+    {
+        var current = config.SolverConfigurations.OfType<EulerFlowConfig>().FirstOrDefault() ?? EulerFlowConfig.Default;
+        config.SolverConfigurations.RemoveAll(static entry => entry is EulerFlowConfig);
+        config.SolverConfigurations.Add(edit(current));
+    }
+
+    private void ConfigBoolCheckbox(
+        AtmosConfigFieldInfo field,
+        string id,
+        bool current,
+        bool readOnly,
+        Action<AtmosConfig, bool> assign)
+    {
+        DrawConfigFieldLabel(field);
+        bool value = current;
+        ImGui.BeginDisabled(readOnly);
+        bool changed = ImGui.Checkbox($"##{id}", ref value);
+        ImGui.EndDisabled();
+        if (!changed || value == current)
+            return;
+
+        assign(_session.Config!, value);
+        if (!TryCommitConfigurationField(field, value ? "on" : "off"))
+            assign(_session.Config!, current);
+    }
+
+    private void ConfigReconstructionCombo(EulerReconstruction current, bool readOnly)
+    {
+        DrawConfigFieldLabel(AtmosConfigFields.EulerReconstruction);
+        int index = Array.IndexOf(ReconstructionValues, current);
+        ImGui.BeginDisabled(readOnly);
+        bool changed = ImGui.Combo("##config-euler-reconstruction", ref index, ReconstructionLabels, ReconstructionLabels.Length);
+        ImGui.EndDisabled();
+        if (!changed || index < 0 || ReconstructionValues[index] == current)
+            return;
+
+        var chosen = ReconstructionValues[index];
+        ReplaceEulerFlow(_session.Config!, previous => new EulerFlowConfig(previous) { Reconstruction = chosen });
+        if (!TryCommitConfigurationField(AtmosConfigFields.EulerReconstruction, ReconstructionLabels[index]))
+            ReplaceEulerFlow(_session.Config!, previous => new EulerFlowConfig(previous) { Reconstruction = current });
+    }
+
+    private static readonly EulerReconstruction[] ReconstructionValues =
+        [EulerReconstruction.FirstOrder, EulerReconstruction.MusclHancock];
+
+    private static readonly string[] ReconstructionLabels = ["First order", "MUSCL-Hancock (reserved)"];
 
     private static void DrawConfigFieldLabel(AtmosConfigFieldInfo field)
     {

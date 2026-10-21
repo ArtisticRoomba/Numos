@@ -53,6 +53,45 @@ public sealed class HeadlessApplicationTests
     }
 
     [Test]
+    public async Task UpdateConfig_EulerFlowPatch_ReplacesOnlyTheGivenSettings()
+    {
+        var run = await RunAsync(
+            CreateProjectRequest("create", 1, 1, 1),
+            Request("before", "observe"),
+            Request(
+                "patch",
+                "updateConfig",
+                "\"config\":{\"eulerFlow\":{\"courantNumber\":0.4,\"reconstruction\":\"musclHancock\"}}"),
+            Request(
+                "patch-again",
+                "updateConfig",
+                "\"config\":{\"eulerFlow\":{\"maxSubstepsPerTick\":0,\"allMachCorrection\":true}}"),
+            Request("after", "observe"),
+            Request(
+                "bad",
+                "updateConfig",
+                "\"config\":{\"eulerFlow\":{\"reconstruction\":\"spectral\"}}"),
+            Request("exit", "exit"));
+
+        var before = FindResponse(run.Responses, "before").GetProperty("observation").GetProperty("config");
+        var after = FindResponse(run.Responses, "after").GetProperty("observation").GetProperty("config");
+        var euler = after.GetProperty("eulerFlow");
+        var bad = FindResponse(run.Responses, "bad");
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(before.TryGetProperty("eulerFlow", out _), Is.False);
+            Assert.That(euler.GetProperty("courantNumber").GetSingle(), Is.EqualTo(0.4f).Within(Tolerance));
+            Assert.That(euler.GetProperty("reconstruction").GetString(), Is.EqualTo("musclHancock"));
+            Assert.That(euler.GetProperty("maxSubstepsPerTick").GetInt32(), Is.Zero);
+            Assert.That(euler.GetProperty("allMachCorrection").GetBoolean(), Is.True);
+            Assert.That(euler.GetProperty("maxVelocityMps").GetSingle(), Is.EqualTo(5000f));
+            Assert.That(bad.GetProperty("ok").GetBoolean(), Is.False);
+            Assert.That(bad.GetProperty("error").GetProperty("code").GetString(), Is.EqualTo("invalidConfig"));
+        });
+    }
+
+    [Test]
     public async Task JsonlSession_MalformedJson_ReturnsStructuredErrorAndProcessesNextLine()
     {
         var run = await RunAsync(

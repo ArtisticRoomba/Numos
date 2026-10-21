@@ -2,6 +2,7 @@ using Numos.API;
 using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.Datatypes.Snapshots;
+using Numos.CoreSim.EulerFlow;
 using Numos.Headless.Protocol;
 using Numos.Maths;
 
@@ -217,7 +218,33 @@ public static class SimulationStateAnalyzer
             config.AccumulatorWakeThreshold,
             config.AccumulatorMaxAliveTicks,
             config.ReferenceMolarMass,
-            gases);
+            gases,
+            CreateEulerFlowReport(config));
+    }
+
+    private static EulerFlowConfigurationReport? CreateEulerFlowReport(AtmosConfig config)
+    {
+        var euler = config.SolverConfigurations.OfType<EulerFlowConfig>().FirstOrDefault();
+        if (euler == null)
+            return null;
+
+        string reconstruction = euler.Reconstruction switch
+        {
+            EulerReconstruction.FirstOrder => "firstOrder",
+            EulerReconstruction.MusclHancock => "musclHancock",
+            _ => throw new ArgumentOutOfRangeException(nameof(config))
+        };
+
+        return new EulerFlowConfigurationReport(
+            euler.CourantNumber,
+            euler.MaxSubstepsPerTick,
+            euler.VelocityFloor,
+            euler.MaxVelocity,
+            euler.WakePressureDelta,
+            euler.AllMachCorrection,
+            reconstruction,
+            euler.MomentumDamping,
+            euler.DefaultLinkAreaFraction);
     }
 
     private static SolverStepReport CreateSolverReport(AtmosWorldSolverStep step)

@@ -1,3 +1,4 @@
+using Numos.CoreSim.EulerFlow;
 using Numos.CoreSim.GasReactions;
 using Numos.CoreSim.Solvers;
 using Numos.Maths;
@@ -35,6 +36,12 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
     internal SolverDataStorage SolverData { get; } = new();
 
     public IReadOnlyList<IAtmosSolverConfiguration> SolverConfigurations { get; private set; } = [];
+
+    /// <summary>
+    ///     Gets the Euler transport settings resolved once per capture, so the stage never searches
+    ///     <see cref="SolverConfigurations" /> on the tick path.
+    /// </summary>
+    internal EulerFlowConfig EulerFlow { get; private set; } = EulerFlowConfig.Default;
 
     public Kelvin GlobalTemperature { get; private set; }
     public Kelvin DefaultTemperatureFallback { get; private set; }
@@ -193,6 +200,7 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
 
 
         SolverConfigurations = config.SolverConfigurations;
+        EulerFlow = EulerFlowConfig.Get(config);
 
         SolverData.Clear();
         _reactionTables = null;

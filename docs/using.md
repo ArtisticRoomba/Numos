@@ -303,6 +303,20 @@ Put a custom solver's tunables, such as an ignition temperature or a spread rate
 changes, so a replay sees the same settings at the same tick. Neither the recording nor the checkpoint sees a field
 that the host edits on a solver object. Replay then runs with whatever value the field holds now.
 
+The built-in stages follow the same rule. The Euler transport stage reads an `EulerFlowConfig` (key `euler-flow`). It
+runs with `EulerFlowConfig.Default` when none is registered. Its properties are init-only, so the copy constructor
+changes one setting of an applied configuration:
+
+```csharp
+var config = new AtmosConfig(world.Config);
+var current = config.SolverConfigurations.OfType<EulerFlowConfig>().FirstOrDefault() ?? EulerFlowConfig.Default;
+config.SolverConfigurations.RemoveAll(entry => entry is EulerFlowConfig);
+config.SolverConfigurations.Add(new EulerFlowConfig(current) { CourantNumber = 0.4f, MaxVelocity = 2000f });
+world.SetAtmosConfig(config);
+```
+
+Numos normalizes out-of-range values when it captures the configuration, so the snapshot a solver reads is always usable.
+
 Each entry implements `IAtmosSolverConfiguration`. Numos captures a snapshot when it applies the configuration. These
 rules follow from that:
 

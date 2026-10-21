@@ -12,7 +12,8 @@ public enum ConfigDomain
 {
     Positive,
     NonNegative,
-    UnitInterval
+    UnitInterval,
+    PositiveUnitInterval
 }
 
 /// <summary>
@@ -65,6 +66,8 @@ public static class AtmosConfigSettings
                 $"{field.Label} must be finite and at least 0{unit}. The previous value is still applied.",
             ConfigDomain.UnitInterval when !float.IsFinite(value) || value < 0f || value > 1f =>
                 $"{field.Label} must be between 0 and 1. The previous value is still applied.",
+            ConfigDomain.PositiveUnitInterval when !float.IsFinite(value) || value <= 0f || value > 1f =>
+                $"{field.Label} must be above 0 and at most 1. The previous value is still applied.",
             _ => null
         };
     }
