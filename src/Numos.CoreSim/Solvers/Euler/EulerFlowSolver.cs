@@ -384,7 +384,7 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
 
         // Sleep decisions read neighbours' final pressures, so they wait for everything above.
         for (int index = 0; index < _activeCount; index++)
-            UpdateSleepState(_active[index], config);
+            nonFiniteCells += UpdateSleepState(_active[index], config);
 
         return new AtmosFlowDiagnostics(
             substeps,
@@ -604,7 +604,9 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
     ///     read. On a voxel neither pass touched it changes nothing: cleanup zeroes the momentum of what it empties,
     ///     and the mass is summed over the workspace's gas list in the same ascending order as the buffer's, so the
     ///     floor comparison repeats bit for bit. The only gap is a channel boundary diffusion created for a gas
-    ///     outside the list, which is summed after the list.
+    ///     outside the list, which is summed after the list. The pressure a stopped voxel is left with is not
+    ///     formed from that list-order sum: it goes through the channel-order sum the write-back and every other
+    ///     refresh use, so the cache still matches a later refresh bit for bit.
     /// </remarks>
     private void SettleMomentum(EulerChunkWorkspace workspace, AtmosSolverConfigSnapshot config, EulerFlowConfig settings)
     {
@@ -668,8 +670,7 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
                                  EulerMixture.KineticEnergy(mass, momentumX, momentumY, momentumZ);
 
                 chunk.Temperature[voxelIndex] = config.GetValidatedTemp((float)(energy / heatCapacity));
-                chunk.TotalPressure[voxelIndex] =
-                    AtmosSolverMath.CalculatePressureAtVoxel(config, chunk, voxelIndex, totalMoles);
+                chunk.TotalPressure[voxelIndex] = AtmosSolverMath.CalculatePressureAtVoxel(config, chunk, voxelIndex);
             }
 
             chunk.MomentumX[voxelIndex] = 0f;
@@ -688,12 +689,17 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
     ///     activated), because the intra-chunk scan cannot see a gradient that sits on a chunk face. The metric is
     ///     forced to at least <see cref="AtmosSolverConfigSnapshot.SleepEpsilon" /> while any cell still carries
     ///     momentum, so a chunk never sleeps mid-motion and a sleeping chunk always has zero momentum everywhere.
+    ///     A pressure that is not finite, on either side of a face, scores as a gas-to-void face: a NaN would
+    ///     otherwise ride through every <see cref="MathF.Max" /> below and make the decision depend on where in
+    ///     the chunk it sits. Such voxels of this chunk are returned so the tick's non-finite count sees them.
     /// </remarks>
-    private static void UpdateSleepState(EulerChunkWorkspace workspace, AtmosSolverConfigSnapshot config)
+    /// <returns>How many of the chunk's air voxels hold a pressure that is not finite.</returns>
+    private static int UpdateSleepState(EulerChunkWorkspace workspace, AtmosSolverConfigSnapshot config)
     {
         AtmosChunk chunk = workspace.Chunk;
         Int3 dimensions = chunk.Dimensions;
         bool hasMotion = false;
+        int nonFinitePressures = 0;
         Scalar maximumRelativePressureDelta = 0f;
         for (int activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
         {
@@ -702,6 +708,13 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
                          chunk.MomentumZ[voxelIndex] != 0f;
 
             Pascal pressure = chunk.TotalPressure[voxelIndex];
+            if (!float.IsFinite(pressure))
+            {
+                nonFinitePressures++;
+                maximumRelativePressureDelta = 100f;
+                continue;
+            }
+
             byte open = workspace.OpenMask[voxelIndex];
             byte sink = workspace.VoidMask[voxelIndex];
             if (sink != 0 && pressure > 0f)
@@ -734,6 +747,12 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
                         EulerFaceTopology.NeighborIndexAcrossFace(chunk, voxelIndex, direction)];
                 }
 
+                if (!float.IsFinite(neighborPressure))
+                {
+                    maximumRelativePressureDelta = 100f;
+                    continue;
+                }
+
                 Pascal reference = MathF.Max(pressure, neighborPressure);
                 if (reference <= 0f)
                     continue;
@@ -749,6 +768,7 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
         ChunkSleepPolicy.UpdateSleepState(chunk, config, maximumRelativePressureDelta);
         Debug.Assert(chunk.IsAwake || !hasMotion, "A chunk must not fall asleep while it still carries momentum.");
         AssertEmptyVoxelsAreStill(chunk);
+        return nonFinitePressures;
     }
 
     [Conditional("DEBUG")]

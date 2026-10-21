@@ -1,5 +1,6 @@
 using Numos.API;
 using Numos.CoreSim.EulerFlow;
+using Numos.CoreSim.Replay;
 using Numos.Maths;
 
 namespace Numos.CoreSim.IntegrationTests.Euler;
@@ -64,6 +65,75 @@ public sealed class EulerSpeciesRowTests
             Assert.That(TotalMoles(simulation, LeftGas, left, right), Is.EqualTo(initialLeftGas).Within(1e-4).Percent);
             Assert.That(TotalMoles(simulation, RightGas, left, right), Is.EqualTo(initialRightGas).Within(1e-4).Percent);
         });
+    }
+
+    [Test]
+    public void GasIdBeyondTheRegistry_IsCarriedAcrossChunkFaces()
+    {
+        const int width = 4;
+        const int strayGasId = 5;
+        const float strayMoles = 0.5f;
+        var config = SimTestHelpers.CreateEulerConfig();
+        using var simulation = SimTestHelpers.CreateEulerSimulation(config, width, 1, 1, out var first);
+        var second = SimTestHelpers.CreateOpenChunk(simulation, Int3.PosX);
+        var third = SimTestHelpers.CreateOpenChunk(simulation, 2 * Int3.PosX);
+        float moles = SimTestHelpers.MolesFor(config, Atmosphere, Temperature);
+        foreach (var chunk in new[] { first, second, third })
+        {
+            for (int x = 0; x < width; x++)
+                simulation.AddGasToVoxel(chunk, x, 0, 0, SimTestHelpers.EulerAirGasName, moles, Temperature);
+        }
+
+        // A channel for an id the registry never saw, which a checkpoint can carry. The merge lists it in the
+        // middle chunk, whose sweep then reads the first chunk's rows with it; that chunk's table only ever grew
+        // to the registry size.
+        simulation.RestoreCheckpoint(WithExtraChannel(simulation.CaptureCheckpoint(), third, strayGasId, strayMoles));
+        double initialStray = TotalMoles(simulation, strayGasId, first, second, third);
+
+        Assert.That(
+            () =>
+            {
+                for (int tick = 0; tick < 5; tick++)
+                    simulation.Tick();
+            },
+            Throws.Nothing);
+
+        var secondSnapshot = simulation.GetChunkSnapshot(second);
+        TestContext.Out.WriteLine(
+            $"stray gas: {initialStray:E6} -> {TotalMoles(simulation, strayGasId, first, second, third):E6}; " +
+            $"second chunk holds {TotalMoles(simulation, strayGasId, second):E3}; {simulation.LastFlowDiagnostics}");
+        Assert.Multiple(() =>
+        {
+            Assert.That(TotalMoles(simulation, strayGasId, first, second, third), Is.EqualTo(initialStray).Within(1e-4).Percent);
+            Assert.That(secondSnapshot.Gases.Select(gas => gas.GasId), Does.Contain(strayGasId), "the stray gas crossed the face");
+        });
+    }
+
+    /// <summary>
+    ///     The checkpoint with one chunk given a full channel of <paramref name="gasId" />, whether the registry
+    ///     knows the id or not.
+    /// </summary>
+    private static AtmosSimulationCheckpoint WithExtraChannel(
+        AtmosSimulationCheckpoint checkpoint, AtmosChunkHandle target, int gasId, float moles)
+    {
+        var chunks = checkpoint.Chunks.Select(chunk =>
+        {
+            if (chunk.Position != target.Position)
+                return chunk;
+
+            var gases = chunk.Gases
+                .Select(gas => new AtmosGasChannelCheckpoint(gas.GasId, gas.Moles.ToArray()))
+                .Append(new AtmosGasChannelCheckpoint(gasId, Enumerable.Repeat(moles, chunk.Temperatures.Count).ToArray()))
+                .ToArray();
+
+            return new AtmosChunkCheckpoint(
+                chunk.Position, chunk.Dimensions, chunk.IsAwake, chunk.SleepTimer,
+                chunk.Classifications.ToArray(), chunk.Temperatures.ToArray(), chunk.Pressures.ToArray(),
+                chunk.HeatCapacities.ToArray(), chunk.MomentumX.ToArray(), chunk.MomentumY.ToArray(),
+                chunk.MomentumZ.ToArray(), chunk.ActiveAirIndices.ToArray(), gases);
+        }).ToArray();
+
+        return new AtmosSimulationCheckpoint(checkpoint.Dimensions, chunks);
     }
 
     /// <summary>

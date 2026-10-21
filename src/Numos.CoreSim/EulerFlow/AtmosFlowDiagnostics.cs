@@ -33,9 +33,10 @@ namespace Numos.CoreSim.EulerFlow;
 /// </param>
 /// <param name="NonFiniteCellCount">
 ///     Number of cell states, gathered or swept, whose energy density, temperature, pressure, or sound speed did not
-///     fit in <see langword="float" />. Such a cell keeps its gas but transports like a vacuum for the rest of the
-///     sweep, with no momentum. Nonzero means a gas's heat capacity or a voxel's energy is far outside the range
-///     the stage is built for; check the registry before anything else.
+///     fit in <see langword="float" />, plus cells whose species update came out non-finite (written as zero) and
+///     written-back voxels whose pressure is not finite (kept awake). A non-finite cell keeps its gas but transports
+///     like a vacuum for the rest of the sweep, with no momentum. Nonzero means a gas's heat capacity or a voxel's
+///     energy is far outside the range the stage is built for; check the registry before anything else.
 /// </param>
 /// <remarks>
 ///     A plain measurement, not simulation state: it is neither checkpointed nor hashed, and it reads as all zeros

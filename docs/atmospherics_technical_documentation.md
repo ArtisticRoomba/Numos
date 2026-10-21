@@ -687,7 +687,10 @@ never recorded; a replay reactivates the same chunks at the same sweeps.
 A cell with no mass or fewer than `MinimumTrackedMoles` (`0.0001 mol`) is a trace cell: its momentum is dropped, its
 energy is just `C·T`, and its primitive state is the vacuum, so its neighbours see it as empty and only push gas into
 it. A cell whose heat capacity or energy overflows to a non-finite value is treated the same way and counted in
-`AtmosFlowDiagnostics.NonFiniteCellCount`, so one corrupt voxel cannot poison its neighbours through the flux.
+`AtmosFlowDiagnostics.NonFiniteCellCount`, so one corrupt voxel cannot poison its neighbours through the flux. A
+species update that comes out non-finite is written as zero and counted the same way, so a NaN never reaches a gas
+channel, and a written-back pressure that is not finite scores as a gas-to-void face in the sleep metric (§9) and is
+counted too, rather than riding through the metric's `max` and deciding the chunk's sleep by accident.
 
 After the last substep the read buffer is written back to the chunk. Momentum below `VelocityFloor` (0.005 m/s) is
 zeroed first, and `MomentumDamping`, if set, scales the rest by `max(0, 1 − α·Δt_tick)`; both run before the
