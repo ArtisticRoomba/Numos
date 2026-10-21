@@ -394,21 +394,42 @@ rules follow from that:
 - `SemanticallyEquals` compares every authoritative setting.
 - `ComputeStateHash` is deterministic.
 
-An immutable record can return itself:
+The easy way to get the last two right is to let the generator that ships with `Numos.API` write them. Mark the class
+`[NumosState]` and give each setting a `[StateField]` id:
 
 ```csharp
-public sealed record FireSettings(float IgnitionTemperature) : IAtmosSolverConfiguration
+using Numos.CoreSim.State;
+
+[NumosState]
+public sealed partial class FireSettings(float ignitionTemperature, IReadOnlyDictionary<string, float> spreadRates)
+    : IAtmosSolverConfiguration
 {
     public string Key => "my-mod/fire";
+
+    [StateField(1)]
+    public float IgnitionTemperature { get; } = ignitionTemperature;
+
+    [StateField(2)]
+    public FrozenDictionary<string, float> SpreadRates { get; } = spreadRates.ToFrozenDictionary();
+
+    // Immutable, so the snapshot can be the object itself.
     public IAtmosSolverConfiguration CreateSnapshot(IGasRegistry gases) => this;
-    public bool SemanticallyEquals(IAtmosSolverConfiguration other) => Equals(other);
-    public ulong ComputeStateHash() => BitConverter.SingleToUInt32Bits(IgnitionTemperature);
 }
 
 var config = new AtmosConfig(world.Config);
-config.SolverConfigurations.Add(new FireSettings(IgnitionTemperature: 600f));
+config.SolverConfigurations.Add(new FireSettings(600f, new Dictionary<string, float> { ["plasma"] = 0.4f }));
 world.SetAtmosConfig(config);
 ```
+
+The generator compares and hashes every tagged field: floats by their bits, dictionaries and sets in a canonical order
+(string keys ordinally, `GasProperties` keys by name), lists in order. A record's own `Equals` is not a substitute,
+since it compares collections by reference and two identical configs would look different.
+
+Tagging is opt-out, not opt-in. Every field and auto-property on a `[NumosState]` type needs either
+`[StateField(id)]` or `[NotState]`, and an untagged one fails the build. Use `[NotState]` for caches you rebuild from
+the tagged fields. Ids are what the hash and, later, saved files key on, so never reuse one; list removed ids in
+`[RetiredStateFields(...)]` and the generator will reject them. `[StateField]` on a class that implements
+`IAtmosWorldSolver` is also a build error, for the reason at the top of this section.
 
 Solvers read the applied snapshot from the tick context:
 
@@ -419,9 +440,10 @@ if (context.Config.TryGetSolverConfiguration(out FireSettings? fire))
 
 The by-type lookup throws if two entries share a type. To read a type registered under several keys, call
 `TryGetSolverConfiguration("my-mod/fire", out FireSettings? fire)`. Both lookups search the captured snapshots, so ask
-for the type that `CreateSnapshot` returns. Keys are unique, nonempty strings. Snapshots order them ordinally, so
-registration order does not change hashes. Put every execution-relevant field in the hash. Do not use
-process-randomized hashes such as `HashCode` or `string.GetHashCode()`.
+for the type that `CreateSnapshot` returns. Keys are unique, nonempty strings. Snapshots order them ordinally, so registration order does not change hashes.
+
+A hand-written implementation still works. Put every execution-relevant field in both `SemanticallyEquals` and the
+hash. Do not use process-randomized hashes such as `HashCode` or `string.GetHashCode()`.
 
 ## Class solvers
 
