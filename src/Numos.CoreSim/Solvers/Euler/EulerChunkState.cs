@@ -455,6 +455,12 @@ internal sealed class EulerChunkWorkspace
     ///         double, so a heat capacity the float cache saturates to infinity still gives a finite temperature.
     ///     </para>
     ///     <para>
+    ///         A row for a gas the chunk has no channel for gets one as soon as any voxel holds a positive amount,
+    ///         however far below <see cref="AtmosSolverConstants.MinimumTrackedMoles" />. The threshold decides
+    ///         what counts as a trace cell for transport, not conservation: whatever the row holds was debited from
+    ///         an upwind cell, possibly in another chunk, and there is no payer left to hand it back to.
+    ///     </para>
+    ///     <para>
     ///         The temperature is <c>(E − K)/C</c> with <c>K</c> from the momentum as it stands in the buffer, so
     ///         whatever the caller did to the momentum first (velocity floor, damping) ends up as heat rather than
     ///         disappearing. A voxel whose energy or heat capacity is not finite even in double keeps the
@@ -475,10 +481,10 @@ internal sealed class EulerChunkWorkspace
             int channel = chunk.FindGasChannel(gasId);
             if (channel < 0)
             {
-                // Only worth a channel once a voxel holds a tracked amount; a chunk that is handed a few
-                // molecules of something new should not grow a 4 KB row for them. Channels are created in
-                // ascending gas id, which is the only order the list is ever walked in.
-                if (!HoldsTrackedAmount(chunk, row))
+                // However little of a new gas arrived, the sweep already took it from the upwind cell, which
+                // may sit in another chunk, so a row holding any of it gets a channel or the gas is destroyed.
+                // Channels are created in ascending gas id, which is the only order the list is ever walked in.
+                if (!HoldsAny(chunk, row))
                     continue;
 
                 channel = chunk.GetOrCreateGasChannel(gasId);
@@ -556,11 +562,11 @@ internal sealed class EulerChunkWorkspace
         }
     }
 
-    private static bool HoldsTrackedAmount(AtmosChunk chunk, Mole[] row)
+    private static bool HoldsAny(AtmosChunk chunk, Mole[] row)
     {
         for (int activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
         {
-            if (row[chunk.ActiveAirIndices[activeIndex]] >= AtmosSolverConstants.MinimumTrackedMoles)
+            if (row[chunk.ActiveAirIndices[activeIndex]] > 0f)
                 return true;
         }
 

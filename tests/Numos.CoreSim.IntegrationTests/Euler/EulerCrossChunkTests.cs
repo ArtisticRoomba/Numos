@@ -288,6 +288,49 @@ public sealed class EulerCrossChunkTests
     }
 
     [Test]
+    public void TraceGas_CrossingAChunkFaceIsConserved()
+    {
+        const int width = 8;
+        const float traceMoles = 1e-3f;
+        var config = SimTestHelpers.CreateEulerConfig();
+        using var split = SimTestHelpers.CreateEulerSimulation(config, width, 1, 1, out var left);
+        var right = SimTestHelpers.CreateOpenChunk(split, Int3.PosX);
+        using var single = SimTestHelpers.CreateEulerSimulation(config, 2 * width, 1, 1, out var tube);
+        float high = SimTestHelpers.MolesFor(config, 101_000f, Temperature);
+        float low = SimTestHelpers.MolesFor(config, 100_000f, Temperature);
+        for (int x = 0; x < width; x++)
+        {
+            // A 1 kPa step moves about 6e-5 mol of the trace gas across the face per tick, well under
+            // MinimumTrackedMoles, so the receiving chunk only ever sees sub-threshold arrivals of it.
+            split.AddGasToVoxel(left, x, 0, 0, SimTestHelpers.EulerAirGasName, high, Temperature);
+            split.AddGasToVoxel(left, x, 0, 0, SimTestHelpers.EulerUnitGasName, traceMoles, Temperature);
+            split.AddGasToVoxel(right, x, 0, 0, SimTestHelpers.EulerAirGasName, low, Temperature);
+            single.AddGasToVoxel(tube, x, 0, 0, SimTestHelpers.EulerAirGasName, high, Temperature);
+            single.AddGasToVoxel(tube, x, 0, 0, SimTestHelpers.EulerUnitGasName, traceMoles, Temperature);
+            single.AddGasToVoxel(tube, width + x, 0, 0, SimTestHelpers.EulerAirGasName, low, Temperature);
+        }
+
+        double initialTrace = TotalMoles(split, SimTestHelpers.EulerUnitGasId, left, right);
+        for (int tick = 0; tick < 20; tick++)
+        {
+            split.Tick();
+            single.Tick();
+        }
+
+        double splitTrace = TotalMoles(split, SimTestHelpers.EulerUnitGasId, left, right);
+        double singleTrace = TotalMoles(single, SimTestHelpers.EulerUnitGasId, tube);
+        TestContext.Out.WriteLine(
+            $"trace gas: initial {initialTrace:E7}, split {splitTrace:E7}, single {singleTrace:E7}; " +
+            $"right chunk holds {TotalMoles(split, SimTestHelpers.EulerUnitGasId, right):E3}");
+        Assert.Multiple(() =>
+        {
+            Assert.That(splitTrace, Is.EqualTo(initialTrace).Within(1e-4).Percent, "split tube");
+            Assert.That(singleTrace, Is.EqualTo(initialTrace).Within(1e-4).Percent, "single tube");
+            Assert.That(splitTrace, Is.EqualTo(singleTrace).Within(1e-4).Percent, "split against single");
+        });
+    }
+
+    [Test]
     public void Sleep_WaitsForTheFaceToEqualizeThenHoldsBothChunksStill()
     {
         var config = SimTestHelpers.CreateEulerConfig(new EulerFlowConfig { MaxSubstepsPerTick = 0, MomentumDamping = 4f });
@@ -371,6 +414,19 @@ public sealed class EulerCrossChunkTests
         for (int y = 0; y < height; y++)
         for (int x = 0; x < width; x++)
             simulation.AddGasToVoxel(chunk, x, y, z, SimTestHelpers.EulerAirGasName, moles, Temperature);
+    }
+
+    private static double TotalMoles(AtmosSimulation simulation, int gasId, params AtmosChunkHandle[] chunks)
+    {
+        double total = 0d;
+        foreach (var chunk in chunks)
+        {
+            var snapshot = simulation.GetChunkSnapshot(chunk);
+            for (int index = 0; index < snapshot.Temperature.Length; index++)
+                total += SimTestHelpers.Moles(snapshot, gasId, index);
+        }
+
+        return total;
     }
 
     private static double TotalMoles(AtmosSimulation simulation, params AtmosChunkHandle[] chunks)

@@ -5,8 +5,8 @@ using Numos.Maths;
 namespace Numos.CoreSim.IntegrationTests.Euler;
 
 /// <summary>
-///     Species rows are per chunk: a chunk only ever grows channels for gases it actually receives in tracked
-///     amounts, however many gases the registry or the rest of the world carries.
+///     Species rows are per chunk: a chunk only ever grows channels for gases that actually reach it, however many
+///     gases the registry or the rest of the world carries.
 /// </summary>
 [TestFixture]
 public sealed class EulerSpeciesRowTests
@@ -57,9 +57,7 @@ public sealed class EulerSpeciesRowTests
             {
                 foreach (var gas in snapshot.Gases)
                 {
-                    Assert.That(
-                        gas.Moles.Max(), Is.GreaterThanOrEqualTo(AtmosSolverConstants.MinimumTrackedMoles),
-                        $"channel {gas.GasId} holds no tracked amount");
+                    Assert.That(gas.Moles.Max(), Is.GreaterThan(0f), $"channel {gas.GasId} holds nothing");
                 }
             }
 

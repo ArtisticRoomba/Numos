@@ -408,7 +408,7 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
     ///     merge is one pass over the active list, which can hand a chunk a gas from two chunks away (its
     ///     neighbour just received the row from its own neighbour); that costs a zero row, never a wrong bit.
     ///     Rows for a chunk's sake only: a gas listed because a neighbour holds it does not get a channel unless the
-    ///     write-back finds a tracked amount of it.
+    ///     write-back finds some of it in the chunk.
     /// </remarks>
     private void ShareAxisGases(int axis, AtmosSolverConfigSnapshot config)
     {
@@ -603,9 +603,8 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
     ///     empties voxels outright, so the test is repeated on the fields the sleep pass and the next tick's gather
     ///     read. On a voxel neither pass touched it changes nothing: cleanup zeroes the momentum of what it empties,
     ///     and the mass is summed over the workspace's gas list in the same ascending order as the buffer's, so the
-    ///     floor comparison repeats bit for bit. The only gaps are a row the write-back dropped as untracked, which
-    ///     makes the live mass smaller and the velocity larger, never the other way, and a channel boundary
-    ///     diffusion created for a gas outside the list, which is summed after the list.
+    ///     floor comparison repeats bit for bit. The only gap is a channel boundary diffusion created for a gas
+    ///     outside the list, which is summed after the list.
     /// </remarks>
     private void SettleMomentum(EulerChunkWorkspace workspace, AtmosSolverConfigSnapshot config, EulerFlowConfig settings)
     {
