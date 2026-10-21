@@ -367,12 +367,14 @@ The accessors are C# 14 extension properties. A project pinned to an older `Lang
 [technical documentation](atmospherics_technical_documentation.md#123-per-chunk-solver-state-with-chunkfieldt) covers
 keys, allocation, the generator's diagnostics, and the hand-written `ChunkField<T>.Register` equivalent.
 
-## Solver settings belong in the configuration
+## Solver configurations
 
-Put a custom solver's tunables, such as an ignition temperature or a spread rate, in
-`AtmosConfig.SolverConfigurations`. Do not use fields on the solver. Numos records and checkpoints configuration
-changes, so a replay sees the same settings at the same tick. Neither the recording nor the checkpoint sees a field
-that the host edits on a solver object. Replay then runs with whatever value the field holds now.
+The simplest place for a custom solver's tunables, such as an ignition temperature or a spread rate, is a
+`[NumosSerialize]` field on the solver itself (see "Class solvers" below). A solver configuration in
+`AtmosConfig.SolverConfigurations` is the other option, for settings that should travel with the world's configuration
+or be shared by several solvers. Configuration changes are recorded and checkpointed too, so either way a replay sees
+the same settings at the same tick. An unmarked field on a solver is the one place a setting must not go: replay never
+sees it and quietly runs with whatever value it holds now.
 
 The built-in stages follow the same rule. The Euler transport stage reads an `EulerFlowConfig` (key `euler-flow`). It
 runs with `EulerFlowConfig.Default` when none is registered. Its properties are init-only, so the copy constructor
@@ -437,8 +439,7 @@ The generator writes:
 Marking is opt-in, with a safety net: a mutable field or an auto-property with a `set` or `init` accessor that has
 neither `[NumosSerialize]` nor `[NumosIgnore]` is a build warning (`NUMOSSTATE016`), so a new setting can't quietly miss
 the hash. Put `[NumosIgnore]` on caches and scratch. Readonly fields and get-only auto-properties aren't flagged, since
-they're usually derived in the constructor. `[NumosSerialize]` on a class that implements `IAtmosWorldSolver` is an
-error, for the reason at the top of this section.
+they're usually derived in the constructor.
 
 Solvers read the applied snapshot from the tick context:
 
@@ -497,33 +498,58 @@ GasReactionConfig reactions = NumosStateFile.Load<GasReactionConfig>("presets/re
 ## Class solvers
 
 A stage can be a class instead of a lambda. Implement `IAtmosWorldSolver` and pass an instance to the same `Register`
-call. The `neighbors`, `before`, and `after` options are the same. Pipeline order and checkpoint metadata match those of
-a delegate with the same name, so old checkpoints still load when you switch forms.
+call, with the same `neighbors`, `before`, and `after` options. Pipeline order and checkpoint metadata are the same as
+for a delegate with the same name.
 
-You own the instance. Numos never checkpoints, clones, or disposes it, so its fields should hold only scratch state and
-references. Clear scratch state in `OnRestored`. Numos calls it on every class solver, enabled or not, after a
-checkpoint restore and before the first replayed tick. One host call can trigger it more than once, because a failed
-`ReplayTo` restores twice. Make it idempotent.
+The instance is yours: Numos never clones or disposes it. Its fields come in two kinds.
+
+- **State**, marked `[NumosSerialize]`. Numos checkpoints it, restores it into the instance, hashes it, saves it in
+  `.numos` files, and records it when the host changes it between ticks, so a replay reproduces the edit at the same
+  point. Settings the host tweaks and counters the solver keeps both belong here.
+- **Scratch**, everything else. Numos never sees it, so it must not change what the solver does on a later tick.
+  `OnRestored` is where scratch gets thrown away: Numos calls it on every class solver, enabled or not, after a
+  checkpoint restore (with the marked members already restored) and before the first replayed tick. One host call can
+  trigger it more than once (a failed `ReplayTo` restores twice), so make it idempotent.
 
 ```csharp
-sealed class FireSolver : IAtmosWorldSolver
+public sealed partial class FireSolver : IAtmosWorldSolver
 {
-    private readonly List<AtmosCellRef> _ignitedThisTick = [];
+    [NumosSerialize] public Kelvin IgnitionTemperature = 600f; // a setting the host can change
+    [NumosSerialize] private int _ticksSinceSpread;           // state the solver updates itself
+    private readonly List<int> _scratch = [];                  // not serialized, rebuilt in OnRestored
 
     public void Solve(AtmosWorldSolverContext context)
     {
-        _ignitedThisTick.Clear();
-        if (!context.Config.TryGetSolverConfiguration(out FireSettings? settings))
-            return;
-
-        // ...collect voxels hotter than settings.IgnitionTemperature...
+        _scratch.Clear();
+        _ticksSinceSpread++;
+        // ...collect voxels hotter than IgnitionTemperature...
     }
 
-    public void OnRestored() => _ignitedThisTick.Clear();
+    public void OnRestored() => _scratch.Clear();
 }
 
-world.Solvers.Register("my-mod/fire", new FireSolver(), after: AtmosBuiltInSolvers.Thermodynamics);
+var fire = new FireSolver();
+world.Solvers.Register("my-mod/fire", fire, after: AtmosBuiltInSolvers.Thermodynamics);
+
+fire.IgnitionTemperature = 650f; // recorded at the next tick, no extra call needed
 ```
+
+The class has to be `partial` and derive from `object`, and each marked member has to be assignable: a `readonly`
+field or a get-only or `init` property is `NUMOSSTATE020`, because restoring writes into the existing instance rather
+than building a new one. The same member types solver configurations support work here, and an unmarked mutable field
+is the usual `NUMOSSTATE016` warning, so put `[NumosIgnore]` on mutable scratch.
+
+Changes made inside `Solve` are solver work and aren't recorded; replay recomputes them. Changes made between ticks are
+noticed by hashing: while a recording is live, Numos hashes each stateful solver at the end of a tick and again at the
+next boundary (the next tick, checkpoint capture, or stopping or copying the recording), and records the new state if
+the hash moved. That's two hashes per tick of everything marked, which costs nothing for a few fields. A solver that
+marks a large array pays for hashing it, so per-voxel state still belongs in a `[ChunkData]` field. See "Solver state is
+checkpointed and recorded" in [deterministic replay](deterministic_replay.md) for why recording at the boundary is
+safe.
+
+A checkpoint or replay file with solver state can only be restored into a world that has the same stateful solvers
+registered under the same names. A file with custom solvers saves and loads like any other, but replaying it needs
+`AtmosWorldReplayTimeline.Restore` in a host that registers them; `Import` rejects it.
 
 ## World services
 

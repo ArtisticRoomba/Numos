@@ -1414,10 +1414,10 @@ gives the resolution order and what it means for solver code.
 
 ### 12.2 Solver-specific configuration
 
-Solver settings go in `AtmosConfig.SolverConfigurations`, not on the solver object. Numos records configuration
-changes and restores them with checkpoints. A property the host sets on a solver instance is neither recorded nor
-restored. Replay re-runs the recorded ticks with whatever value the instance holds at replay time, and the result
-diverges. A class solver reads its settings from the tick context instead:
+Solver settings go either in `[NumosSerialize]` members on the solver object (see "Class solvers" in
+`docs/using.md`) or in `AtmosConfig.SolverConfigurations`. Both are recorded and restored with checkpoints. An unmarked
+property the host sets on a solver instance is neither, so replay re-runs the recorded ticks with whatever value the
+instance holds at replay time, and the result diverges. A configuration is read from the tick context:
 
 ```csharp
 public sealed partial class CombustionSettings(float rate) : IAtmosSolverConfiguration
