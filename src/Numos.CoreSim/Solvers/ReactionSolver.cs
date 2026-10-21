@@ -104,16 +104,6 @@ internal class ReactionSolver : IAtmosSolverStage
 
         if (IgnitionTransferEnabled && _anyFullyIgnited)
         {
-            // The transfer stage reads neighboring chunks' ignition arrays from workers, and a chunk
-            // without active air never created them in ProcessChunk. Create them serially here so
-            // no worker ever creates one concurrently.
-            // Removable??
-            for (int i = 0; i < context.Chunks.Length; i++)
-            {
-                context.Chunks[i].GetOrCreateField(IgnitionPercentField);
-                context.Chunks[i].GetOrCreateField(IgnitedVolumeTempField);
-            }
-
             ParallelHelper.ForEach<AtmosChunk, TransferIgnitionAction>(
                 context.Chunks,
                 new TransferIgnitionAction(this, context));
