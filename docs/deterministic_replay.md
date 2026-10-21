@@ -168,8 +168,8 @@ detached copies. The current implementation has no copy-on-write storage, delta 
 `AtmosSimulationCheckpoint.PayloadBytes` reports bytes in copied chunk and solver arrays. It excludes managed object
 headers and field names.
 
-The world checkpoint schema is `AtmosWorldCheckpoint.CurrentFormatVersion` 11. The grid schema inside it is format
-version 9, compatibility version 4. World version 6 added the reference and per-gas molar masses to the configuration
+The world checkpoint schema is `AtmosWorldCheckpoint.CurrentFormatVersion` 12. The grid schema inside it is format
+version 10, compatibility version 4. World version 6 added the reference and per-gas molar masses to the configuration
 section. World version 7 made that section carry the built-in solver configurations that have a wire encoding.
 After the gas registry comes a count, then each entry's key followed by its payload. Before version 7 the count was
 always zero. World version 8 gave every explicit link an area fraction. It is one float after the link's flags, both in
@@ -179,44 +179,82 @@ hash covers the fraction the same way. Grid version 7 added the three per-voxel 
 hashes them like any other chunk array, so the compatibility version moved with them. World version 9 and grid version 8
 moved the configuration, gases, and chunks onto field-id schema payloads and hash all of them with the wire encoding.
 World version 10 and grid version 9 replaced the numbered field ids with ids that hash the member names.
-World version 11 added the `[NumosSerialize]` state of class solvers.
+World version 11 added the `[NumosSerialize]` state of class solvers. World version 12 and grid version 10 generate the
+checkpoint types from the live types, so every part of them is field-id records, link slots and solver metadata included.
 Replay is experimental, so Numos rejects older in-memory checkpoint schemas instead of translating them.
 
-### Checkpoint fields come from the state schema
+### Checkpoints are generated from the live types
 
-The configuration scalars, every `GasProperties` field, and every `AtmosChunkCheckpoint` field are marked
-`[NumosSerialize]`, the same schema solver configurations use (see "Solver configurations in
-the file" below). The generator turns each declaration into equality, the state hash, and the wire encoding, so a field
-can't reach the file and miss the hash, and a config or gas field can't be left out of
-`AtmosConfigSnapshot.SemanticallyEquals` and mistaken for a no-op by `SetAtmosConfig`. Equality compares floats
-bitwise, the way the hash sees them, so `0f` and `-0f` count as different values.
+Checkpoint types aren't written by hand. `AtmosChunk`, the kernel, `AtmosSimulation`, and `AtmosWorld` mark their
+continuation state `[NumosSerialize]`, and each has a partial snapshot class that points back at it:
 
-Where each kind of field lives:
+```csharp
+[NumosSnapshotOf(typeof(AtmosChunk))]
+public sealed partial class AtmosChunkCheckpoint;
+```
 
-- **Config scalars** are marked on the mutable `AtmosConfig`, along with the gas registry. A snapshot
-  keeps its normalized values in a private `AtmosConfig`, so the snapshot and the editable config share one field list.
-  Loading reads into an `AtmosConfig` and runs it through `CreateSnapshot()`, so a loaded value goes through the same
-  normalization as a live one. Solver configurations aren't schema fields; they follow as their own keyed section.
+The generator fills the snapshot with one get-only member per marked live member, plus `Capture(live)`, the state
+walker (equality, hash, wire read and write), and, where every member can be put back, `RestoreInto(live)`. So adding
+chunk state is one attribute on the live member:
+
+```csharp
+// In AtmosChunk:
+[NumosSerialize("Charges")]
+public FlatArray<float> Charge;
+```
+
+That array is now captured, restored, hashed, and saved, and `AtmosChunkCheckpoint.Charges` exists. The chunk still
+allocates it alongside the other per-voxel arrays, but there's no checkpoint code to touch. The same goes for a new
+scalar on the world or a simulation.
+
+How a member is copied follows from what it is:
+
+- **Immutable values** (primitives, quantity aliases, enums, strings, `Int3`, immutable serializable types) are
+  copied as they are.
+- **Arrays and `FlatArray<T>`** become an `IReadOnlyList<T>` copy, written and hashed as one block. A live array
+  restores in place, so its length has to match. `[NumosSerialize(Count = nameof(ActiveAirCount))]` keeps only the
+  valid prefix of pooled storage and sets the count back on restore.
+- **Live children with their own snapshot** (the kernel's chunks, the world's simulations) are captured through that
+  snapshot, and a list of them as a list of snapshots.
+- **Adapter properties**, ones with a hand-written getter, cover state that isn't stored the way it's saved: the
+  chunk's gas channels (pooled moles sized by the chunk), its rollback `ChunkField<T>` arrays, or the world's link
+  slots (live edges and indexes, saved as canonical definitions). The snapshot keeps what the getter returns, so it
+  must be a fresh value, and restore hands it back to the setter.
+
+Restore writes in the live type's declaration order and checks everything first: read-only value members such as a
+chunk's `Dimensions` must already match, and so must array lengths. A list of live children makes a snapshot
+capture-only, because creating or dropping children is the owner's job. That's why the kernel and the world restore
+themselves: the kernel materializes each saved chunk (`new AtmosChunk(dimensions)`, then
+`AtmosChunkCheckpoint.RestoreInto`) and swaps the whole map in at once, and the world restores solver state first,
+then solver flags, simulation membership, configuration, grids, topology, and time, in that order.
+
+Field ids are a hash of the wire name, which on a live type is also the snapshot member's name: the member name unless
+`[NumosSerialize("Name")]` gives another one, as `AtmosChunk.Temperature` does to keep the `Temperatures` name. Renaming
+the live member is free as long as the wire name stays. A snapshot member has the live member's visibility; to make an
+`internal` live member `public` on the snapshot, or to document it separately, declare it on the snapshot as a get-only
+partial property and the generator implements it (`AtmosWorldCheckpoint.Solvers` does this).
+
+The snapshot can still carry hand-written members. A hand-written `[NumosSerialize]` member is part of the schema
+(`AtmosSimulationCheckpoint.FormatVersion` is one), filled in a `partial void OnCaptured(TLive)` hook. `OnRestored`
+rebuilds derived live state after a restore (the chunk rederives `IsVacuum` from pressures there) and `OnDecoded`
+validates data read from a file.
+
+Configuration scalars and gas properties use the same schema on ordinary types rather than snapshots:
+
+- **Config scalars** are marked on the mutable `AtmosConfig`, along with the gas registry. A snapshot keeps its
+  normalized values in a private `AtmosConfig`, so the snapshot and the editable config share one field list. Loading
+  reads into an `AtmosConfig` and runs it through `CreateSnapshot()`, so a loaded value goes through the same
+  normalization as a live one. Solver configurations follow as their own keyed section. A new setting also needs its
+  normalization in the `AtmosConfigSnapshot` constructor and a snapshot property; `ConfigStateFieldTests` fails until
+  both exist.
 - **Gas properties** are `GasProperties` fields. The registry writes each gas by value in gas-ID order; a
   `GasProperties` field on any other schema type is a reference and writes only the name.
-- **Chunk data** is `AtmosChunkCheckpoint`: position, dimensions, sleep state, the seven per-voxel arrays
-  (including the three momentum arrays), the active-air prefix, gas channels (nested `AtmosGasChannelCheckpoint` values), and rollback solver arrays. The
-  per-voxel arrays also carry `[LiveChunkArray(nameof(AtmosChunk.X))]`, which generates their capture from and restore
-  into the live chunk. Primitive arrays are written and hashed as one block, so checkpoint hashing stays cheap.
 
-To add a field:
-
-1. Mark it `[NumosSerialize]`. Its id is a hash of its name (see below), so there's nothing to pick. Renaming a field
-   changes its id, so pass the old name, `[NumosSerialize("OldName")]`, to keep it compatible.
-2. For a config setting, add the normalization to the `AtmosConfigSnapshot` constructor and a snapshot property with
-   the same name and type. `ConfigStateFieldTests` fails until both exist.
-3. For a per-voxel chunk array, add `[LiveChunkArray]` naming the `AtmosChunk` member. Anything with an irregular shape
-   is captured by hand in the `AtmosChunkCheckpoint` constructor and `Materialize`, like `ActiveAirIndices` and `Gases`.
-
-Because fields carry ids and lengths, a reader skips ids it doesn't know and leaves missing ones at their default, so
-files still parse across a field being added. Parsing isn't the same as replaying the same way, though: if ignoring
-the field or using its default would change what the simulation does, bump `CurrentFormatVersion` so older data is
-rejected instead.
+Equality compares floats bitwise, the way the hash sees them, so `0f` and `-0f` count as different values. Because
+fields carry ids and lengths, a reader skips ids it doesn't know and leaves missing ones at their default, so files
+still parse across a field being added. Parsing isn't the same as replaying the same way, though: if ignoring the field
+or using its default would change what the simulation does, bump `CurrentFormatVersion` so older data is rejected
+instead.
 
 Solver configuration keys and deterministic hashes contribute to the state hash. Their immutable snapshots supply the
 restored settings. A custom configuration must capture every authoritative value and keep its snapshot immutable.
@@ -475,21 +513,20 @@ exact checkpoint seek, the UI reports whether reconstruction matched that refere
 digest. `AtmosWorldCheckpoint.ComputeStateHash()` gives the same result without access to a live world. The hash is a
 fast regression and replay check. It is not a cryptographic authenticity mechanism.
 
-The canonical encoding includes checkpoint metadata, timeline position, topology version, normalized configuration,
-solver identities and enable flags, simulation registry generations, link-set slots, and one grid digest per
-simulation. `AtmosSimulationCheckpoint.ComputeStateHash()` returns that grid digest on its own: a plain `ulong` over
-compatibility metadata and chunk continuation data, with no timeline position. Chunks are sorted by X, then Y, then Z.
-Gas-channel order is preserved because it can affect floating-point reductions.
+The canonical encoding covers the format version, timeline position, topology version, normalized configuration,
+solver identities and enable flags, solver state, simulation registry generations, link-set slots, and every
+simulation's grid. `AtmosSimulationCheckpoint.ComputeStateHash()` returns a grid's digest on its own: a plain `ulong`
+over its format and compatibility versions, dimensions, and chunk continuation data, with no timeline position. Chunks
+are sorted by X, then Y, then Z. Gas-channel order is preserved because it can affect floating-point reductions.
 
-The hash input is the wire encoding. For schema types this holds by construction: the generated walker writes into
-either a `StateBinarySink` for bytes or a `StateHashSink` for the hash, and the hash sink sees exactly what the binary
-sink writes except the field and object lengths, which follow from the content. The hand-written parts of the
-checkpoint (the world header, solver identities, generations, link slots, and the simulation header) hash the same
-values at the same widths as `AtmosWorldReplayCodec` writes them. Solver state payloads can only be walked by their
-solver type, which a loaded checkpoint doesn't have, so the hash takes their bytes as written, length included. Integers are little-endian at their own width,
-floats are their raw IEEE 754 bits, a nullable value is a presence byte followed by the value, and strings are an
-`int32` UTF-8 byte length followed by the bytes. The deliberate differences are that the world hash leaves out the
-archive's initial and head hashes, and folds in each simulation's grid digest instead of its full payload.
+The hash input is the wire encoding, by construction: every checkpoint type is generated, and its walker writes into
+either a `StateBinarySink` for bytes or a `StateHashSink` for the hash. The hash sink sees exactly what the binary sink
+writes except the field and object lengths, which follow from the content. Solver state payloads can only be walked by
+their solver type, which a loaded checkpoint doesn't have, so they're hashed as an opaque byte field, length included.
+A hand-written solver configuration has no wire format and contributes its own `ComputeStateHash()` instead. Integers
+are little-endian at their own width, floats are their raw IEEE 754 bits, a nullable value is a presence byte followed
+by the value, and strings are an `int32` UTF-8 byte length followed by the bytes. The world hash starts with the format
+version and leaves out the archive's initial and head hashes, which the file keeps outside the checkpoint payload.
 
 The hash excludes profiling data, unused pooled storage, delegates, object identities, and presentation generations. The
 digest is not a serialized checkpoint format. Matching hashes show only that the states covered by this contract match.
@@ -647,13 +684,14 @@ A `.numos` replay contains a small provenance header, one complete initial world
 semantic opcodes. It stores initial and final state hashes. The Viewer verifies both hashes. After loading, the Viewer
 generates scrub checkpoints every 50 ticks, so those large acceleration snapshots never enter the file.
 
-The checkpoint section carries the world checkpoint format version (11) and each simulation the grid format version (9).
-A file from an older layout fails to load with an unsupported-schema error. Numos does not misread it. Older layouts
-include files written before configuration and solver state moved out of the per-simulation checkpoints, before molar
-masses joined the configuration, before solver configurations gained a wire encoding, and before explicit links carried
-an area fraction. Format 9/8 moved the configuration, gases, and chunks to length-prefixed schema payloads with
-numbered field ids.
-Format 10/9 derives each field id from the member name. World format 11 added solver state.
+The checkpoint section is the world checkpoint format version (12), the archive's initial and head hashes, then the
+checkpoint's generated payload with its length. Each simulation inside carries the grid format version (10). A file from
+an older layout fails to load with an unsupported-schema error. Numos does not misread it. Older layouts include files
+written before configuration and solver state moved out of the per-simulation checkpoints, before molar masses joined
+the configuration, before solver configurations gained a wire encoding, and before explicit links carried an area
+fraction. Format 9/8 moved the configuration, gases, and chunks to length-prefixed schema payloads with numbered field
+ids. Format 10/9 derives each field id from the member name. World format 11 added solver state. Format 12/10 is the
+first where the whole checkpoint is generated from the live types.
 
 Viewer branch graphs are session state. Saving writes the selected branch, either through its preserved head or through
 the current inspection position. Save branches individually when more than one future must survive closing the project.
@@ -671,11 +709,12 @@ configures the payload limits. `AtmosWorldReplayArchive.UnsupportedFeatures` lis
 ### Solver configurations in the file
 
 A solver configuration with `[NumosSerialize]` members saves itself. That covers the built-in `GasReactionConfig`, so a world
-with gas reactions is portable, and any host configuration built the same way. Both places a configuration can appear
-go through the same encoding: the checkpoint's applied configuration, and every recorded `SetAtmosConfig` change.
-
-A configuration on the wire is an `int32` length and the `AtmosConfig` schema payload (scalars and gas registry),
-then a count and one entry per solver configuration in the snapshot's ordinal key order:
+with gas reactions is portable, and any host configuration built the same way. A configuration appears in two places:
+the checkpoint's applied configuration, and every recorded `SetAtmosConfig` change. Both hold the same pieces, the
+`AtmosConfig` schema payload (scalars and gas registry) and then the solver configurations in the snapshot's ordinal
+key order. In the checkpoint they sit inside the world's `Config` field, where the schema payload and each
+configuration are nested objects and the framing supplies their lengths. A recorded change spells the lengths out: an
+`int32` length and the schema payload, then:
 
 ```text
 int32  count
@@ -708,19 +747,18 @@ The key is part of the format now, so renaming one means files saved under the o
 
 ### Solver state in the file
 
-The checkpoint section has the solver state entries right after the solver metadata, and a recorded
-`SetAtmosWorldSolverStateOperation` uses the same entry layout as its payload:
+In the checkpoint, solver state is the world's `SolverStates` field: a list of entries, each a record with the
+solver's `Name` and its `State` payload as a length and the bytes. A recorded `SetAtmosWorldSolverStateOperation`
+carries one entry directly:
 
 ```text
-int32  count          (checkpoint only)
-repeat count times:
-  string name         (int32 UTF-8 byte length, then the bytes)
-  int32  length
-  bytes  state        (the generated WriteState walk through StateBinarySink)
+string name         (int32 UTF-8 byte length, then the bytes)
+int32  length
+bytes  state        (the generated WriteState walk through StateBinarySink)
 ```
 
 Entries are in pipeline order, and each one has to name a custom solver in the checkpoint's solver list; anything else
-is an `InvalidDataException`. A world with no stateful solvers writes a count of zero. Whether the receiving world's
+is an `InvalidDataException`. A world with no stateful solvers has an empty list. Whether the receiving world's
 solver can take the payload is only known when it's restored.
 
 ### Rollback chunk fields in the file

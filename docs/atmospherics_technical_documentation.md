@@ -1450,8 +1450,10 @@ two can't disagree and a new member can't be left out of either. The generated c
 one `WriteState` method that drives an `IStateSink`; the hash is that walk fed into `StateHashSink`, and the saved
 bytes are the same walk fed into `StateBinarySink` (all three in `Numos.CoreSim.State.Advanced`). Floats compare by
 bits, dictionaries and sets go in canonical key order, and `GasProperties` references are identified by name.
-`GasReactionConfig` and both reaction types are built this way, as are Numos's own configuration scalars,
-`GasProperties`, and chunk checkpoints (see "Checkpoint fields come from the state schema" in
+`GasReactionConfig` and both reaction types are built this way, as are Numos's own configuration scalars and
+`GasProperties`. The checkpoint types go one step further: `[NumosSnapshotOf(typeof(AtmosChunk))]` on a partial class
+generates the whole snapshot, members included, from the live type's marked members, so chunk, grid, and world state
+is declared once, on the live type (see "Checkpoints are generated from the live types" in
 `docs/deterministic_replay.md`).
 
 The generator also writes a `ReadState` that rebuilds the object through a constructor, binding parameters to marked
@@ -1472,7 +1474,7 @@ Membership is opt-in; `[NumosIgnore]` marks a member as deliberately not state. 
 | `NUMOSSTATE002` | Error    | The type is generic or nested in a generic type.                                                              |
 | `NUMOSSTATE005` | Error    | Two members' wire names hash to the same id. The message names both.                                         |
 | `NUMOSSTATE007` | Error    | A member's type isn't supported (delegates, `object`, mutable `List<T>`, unknown quantity aliases, ...).      |
-| `NUMOSSTATE008` | Error    | A solver configuration hand-writes `SemanticallyEquals` or `ComputeStateHash`.                                |
+| `NUMOSSTATE008` | Error    | A solver configuration hand-writes `SemanticallyEquals`/`ComputeStateHash`, or a snapshot `Capture`/`RestoreInto`. |
 | `NUMOSSTATE009` | Error    | `[NumosSerialize]` is on a struct that implements `IAtmosWorldSolver`; stateful solvers must be classes.      |
 | `NUMOSSTATE011` | Error    | A member has both `[NumosSerialize]` and `[NumosIgnore]`.                                                     |
 | `NUMOSSTATE012` | Error    | `[NumosSerialize]` is on a static or const member.                                                            |
@@ -1484,6 +1486,17 @@ Membership is opt-in; `[NumosIgnore]` marks a member as deliberately not state. 
 | `NUMOSSTATE018` | Error    | A solver configuration's `Key` doesn't return a compile-time constant.                                        |
 | `NUMOSSTATE019` | Warning  | A solver configuration is private or protected (or nested in one), so the module initializer can't name it.   |
 | `NUMOSSTATE020` | Error    | A solver's marked member is `readonly`, get-only, or `init`, so a restore can't assign it in place.           |
+| `NUMOSSTATE021` | Error    | A `[NumosSnapshotOf]` snapshot, or a type it's nested in, isn't `partial`.                                      |
+| `NUMOSSTATE022` | Error    | The snapshot is a struct, record, generic, abstract, or static, or derives from a class other than `object`.    |
+| `NUMOSSTATE023` | Error    | The live type isn't a non-generic class in the same project.                                                    |
+| `NUMOSSTATE024` | Error    | The live type has no `[NumosSerialize]` members.                                                                |
+| `NUMOSSTATE025` | Error    | A marked live member is private or protected, so the generated snapshot can't read it.                          |
+| `NUMOSSTATE026` | Error    | A marked live member is mutable and not an array, a live type with a snapshot, or an adapter property.          |
+| `NUMOSSTATE027` | Error    | The snapshot declares a generated member's name itself, other than as a get-only partial property.              |
+| `NUMOSSTATE028` | Error    | `Count` names something other than a settable instance `int` the snapshot can reach.                            |
+| `NUMOSSTATE029` | Error    | `Count` is on a member that isn't an array, `FlatArray<T>`, or list of live children.                           |
+| `NUMOSSTATE030` | Error    | Two snapshots name the same live type.                                                                          |
+| `NUMOSSTATE031` | Error    | `Count` is on a member of an ordinary serializable type, where it means nothing.                                |
 
 A solver can cache anything derived from the settings or the gas registry under a `SolverDataKey<T>`. Numos drops
 that value whenever the configuration changes.
