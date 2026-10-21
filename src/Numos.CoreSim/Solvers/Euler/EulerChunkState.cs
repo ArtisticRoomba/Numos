@@ -11,10 +11,10 @@ namespace Numos.CoreSim.Solvers.Euler;
 /// <remarks>
 ///     <para>
 ///         Species rows are indexed by gas id rather than by the chunk's channel index, so two chunks that
-///         hold the same gases in different channel order describe a shared face identically. Every gas in the
-///         tick's <see cref="EulerGasTable" /> has a row, zero-filled where the chunk holds none of it, and every
-///         mixture sum (mass, moles, heat capacity) runs in the table's ascending order so both sides of a face
-///         agree bit for bit.
+///         hold the same gases in different channel order describe a shared face identically. A buffer only has
+///         rows for the gases its workspace lists (see <see cref="EulerChunkWorkspace.GasIds" />); a
+///         <see langword="null" /> row reads as all zeros, which is the exact value, since a chunk never holds a
+///         gas it has no row for.
 ///     </para>
 ///     <para>
 ///         Energy is double. A warm voxel's total energy is dominated by <c>C·T</c>, and the face-flux differences
@@ -44,15 +44,15 @@ internal sealed class EulerChunkState
     public KilogramMetrePerSecond[] MomentumZ = [];
 
     /// <summary>
-    ///     Moles per voxel indexed by gas id; <see langword="null" /> for a gas outside this tick's table.
+    ///     Moles per voxel indexed by gas id; <see langword="null" /> for a gas the workspace has no row for.
     /// </summary>
     public Mole[]?[] Species = [];
 
     public Mole[] TotalMoles = [];
 
     /// <summary>
-    ///     Makes every array at least <paramref name="voxelCount" /> long and the species table at least
-    ///     <paramref name="gasSlotCount" /> wide. Existing rows are kept; the caller clears what it reuses.
+    ///     Makes every array at least <paramref name="voxelCount" /> long and the row table at least
+    ///     <paramref name="gasSlotCount" /> wide. Rows are the workspace's business.
     /// </summary>
     internal void EnsureCapacity(int voxelCount, int gasSlotCount)
     {
@@ -66,31 +66,10 @@ internal sealed class EulerChunkState
             MomentumY = new KilogramMetrePerSecond[voxelCount];
             MomentumZ = new KilogramMetrePerSecond[voxelCount];
             TotalMoles = new Mole[voxelCount];
-            Species = new Mole[]?[Math.Max(gasSlotCount, Species.Length)];
-            return;
         }
 
         if (Species.Length < gasSlotCount)
             Array.Resize(ref Species, gasSlotCount);
-    }
-
-    /// <summary>
-    ///     Allocates (or zeroes) the row for one gas.
-    /// </summary>
-    internal Mole[] ClearRow(int gasId, int voxelCount)
-    {
-        Mole[]? row = Species[gasId];
-        if (row == null || row.Length < voxelCount)
-        {
-            row = new Mole[voxelCount];
-            Species[gasId] = row;
-        }
-        else
-        {
-            Array.Clear(row, 0, voxelCount);
-        }
-
-        return row;
     }
 }
 
@@ -106,6 +85,16 @@ internal sealed class EulerChunkState
 ///         them.
 ///     </para>
 ///     <para>
+///         The workspace lists the gases it carries rows for, in ascending gas id: the chunk's own channels at
+///         binding, plus whatever an active neighbour across a face of the sweep axis carries, added on the tick
+///         thread before that sweep (see <see cref="EulerFlowSolver" />). Species that cross a face therefore
+///         always have a row waiting on the receiving side, and no worker ever creates a row. Every mixture sum
+///         runs over this list in ascending order. Lists differ between chunks, but a zero row adds nothing to a
+///         sum (<c>x + 0·M</c> is <c>x</c> bitwise), so a cell's totals are the same bits whether its chunk lists
+///         three absent gases alongside its own or none, which is what makes a tube split across two chunks equal
+///         to the tube in one.
+///     </para>
+///     <para>
 ///         The neighbour slots follow <see cref="NeighborResolution.NeighborDirections" />.
 ///         <see cref="NeighborChunks" /> is fixed for the tick; <see cref="NeighborWorkspaces" /> is refreshed on the
 ///         tick thread whenever a neighbour is activated, and workers only ever read it. A sweep that finds an open
@@ -118,6 +107,13 @@ internal sealed class EulerChunkState
 internal sealed class EulerChunkWorkspace
 {
     private readonly EulerChunkState[] _buffers = [new EulerChunkState(), new EulerChunkState()];
+
+    /// <summary>
+    ///     Rows of gases earlier bindings carried, kept for reuse so a chunk that keeps changing gases does not
+    ///     allocate a 4 KB row every tick.
+    /// </summary>
+    private readonly Stack<Mole[]> _rowPool = new();
+
     private int _readIndex;
 
     /// <summary>
@@ -134,9 +130,24 @@ internal sealed class EulerChunkWorkspace
     public DiffusionWorkspace Diffusion;
 
     /// <summary>
-    ///     The tick's gas table, shared by every workspace.
+    ///     Number of gases this workspace carries rows for.
     /// </summary>
-    public EulerGasTable Gases = null!;
+    public int GasCount;
+
+    /// <summary>
+    ///     Gas ids this workspace carries rows for, ascending.
+    /// </summary>
+    public int[] GasIds = [];
+
+    /// <summary>
+    ///     <c>Cv</c> of each listed gas, parallel to <see cref="GasIds" />.
+    /// </summary>
+    public JoulePerMoleKelvin[] HeatCapacity = [];
+
+    /// <summary>
+    ///     Molar mass of each listed gas, parallel to <see cref="GasIds" />.
+    /// </summary>
+    public KilogramPerMole[] MolarMass = [];
 
     /// <summary>
     ///     The registered chunk across each face of this chunk, or <see langword="null" />.
@@ -189,14 +200,24 @@ internal sealed class EulerChunkWorkspace
     }
 
     /// <summary>
-    ///     Binds the workspace to a chunk for this tick, sizes the storage, and clears a row for every tabled gas.
+    ///     Binds the workspace to a chunk for this tick, sizes the storage, and lists the chunk's own gases with a
+    ///     cleared row for each in both buffers.
     /// </summary>
     /// <param name="chunk">The awake chunk to solve.</param>
-    /// <param name="gases">The tick's gas table, already holding this chunk's gases.</param>
-    internal void Bind(AtmosChunk chunk, EulerGasTable gases)
+    /// <param name="config">The tick's configuration snapshot.</param>
+    internal void Bind(AtmosChunk chunk, AtmosSolverConfigSnapshot config)
     {
+        foreach (EulerChunkState buffer in _buffers)
+        {
+            for (int present = 0; present < GasCount; present++)
+            {
+                _rowPool.Push(buffer.Species[GasIds[present]]!);
+                buffer.Species[GasIds[present]] = null;
+            }
+        }
+
+        GasCount = 0;
         Chunk = chunk;
-        Gases = gases;
         _readIndex = 0;
         int voxelCount = chunk.VoxelCount;
         if (OpenMask.Length < voxelCount)
@@ -218,26 +239,73 @@ internal sealed class EulerChunkWorkspace
 
         foreach (EulerChunkState buffer in _buffers)
         {
-            buffer.EnsureCapacity(voxelCount, gases.SlotCount);
+            buffer.EnsureCapacity(voxelCount, config.GasPropertyCount);
             buffer.MaxSignalSpeed = 0f;
-            // Rows of gases a previous chunk held stay allocated but are never read, because every loop walks
-            // the table rather than the row table.
-            for (int present = 0; present < gases.Count; present++)
-                buffer.ClearRow(gases.GasIds[present], voxelCount);
         }
+
+        for (int gas = 0; gas < chunk.ActiveGasCount; gas++)
+            AddGas(chunk.ActiveGases[gas].GasId, config);
     }
 
     /// <summary>
-    ///     Gives both buffers a zero row for a gas that joined the table after this workspace was bound. Tick
-    ///     thread only, between sweeps.
+    ///     Lists a gas and gives both buffers a zero row for it. Tick thread only, never while a sweep runs:
+    ///     workers walk the list and read the rows.
     /// </summary>
-    internal void AddGasRow(int gasId)
+    /// <returns><see langword="true" /> if the gas was not listed yet.</returns>
+    internal bool AddGas(int gasId, AtmosSolverConfigSnapshot config)
     {
+        int voxelCount = Chunk.VoxelCount;
+        // Channels can carry ids the registry never saw; the row table follows the largest id, not the registry.
+        foreach (EulerChunkState buffer in _buffers)
+            buffer.EnsureCapacity(voxelCount, gasId + 1);
+
+        if (_buffers[0].Species[gasId] != null)
+            return false;
+
+        int position = ~Array.BinarySearch(GasIds, 0, GasCount, gasId);
+        if (GasCount == GasIds.Length)
+        {
+            int capacity = Math.Max(4, GasCount * 2);
+            Array.Resize(ref GasIds, capacity);
+            Array.Resize(ref MolarMass, capacity);
+            Array.Resize(ref HeatCapacity, capacity);
+        }
+
+        int tail = GasCount - position;
+        Array.Copy(GasIds, position, GasIds, position + 1, tail);
+        Array.Copy(MolarMass, position, MolarMass, position + 1, tail);
+        Array.Copy(HeatCapacity, position, HeatCapacity, position + 1, tail);
+        GasIds[position] = gasId;
+        MolarMass[position] = config.GetMolarMass(gasId);
+        HeatCapacity[position] = config.GetMolarHeatCapacityAtConstantVolume(gasId);
+        GasCount++;
+
         foreach (EulerChunkState buffer in _buffers)
         {
-            buffer.EnsureCapacity(Chunk.VoxelCount, Gases.SlotCount);
-            buffer.ClearRow(gasId, Chunk.VoxelCount);
+            Mole[] row;
+            if (_rowPool.TryPop(out Mole[]? pooled) && pooled.Length >= voxelCount)
+            {
+                row = pooled;
+                Array.Clear(row, 0, voxelCount);
+            }
+            else
+            {
+                row = new Mole[voxelCount];
+            }
+
+            buffer.Species[gasId] = row;
         }
+
+        return true;
+    }
+
+    /// <summary>
+    ///     Lists every gas <paramref name="neighbor" /> lists that this workspace does not. Tick thread only.
+    /// </summary>
+    internal void AddGasesOf(EulerChunkWorkspace neighbor, AtmosSolverConfigSnapshot config)
+    {
+        for (int present = 0; present < neighbor.GasCount; present++)
+            AddGas(neighbor.GasIds[present], config);
     }
 
     /// <summary>
@@ -255,9 +323,9 @@ internal sealed class EulerChunkWorkspace
         AtmosChunk chunk = Chunk;
         EulerChunkState buffer = Read;
 
-        for (int present = 0; present < Gases.Count; present++)
+        for (int present = 0; present < GasCount; present++)
         {
-            int gasId = Gases.GasIds[present];
+            int gasId = GasIds[present];
             int channel = chunk.FindGasChannel(gasId);
             if (channel < 0)
                 continue;
@@ -329,7 +397,7 @@ internal sealed class EulerChunkWorkspace
     }
 
     /// <summary>
-    ///     Mixture totals of one cell in ascending gas id order.
+    ///     Mixture totals of one cell over the listed gases, in ascending gas id order.
     /// </summary>
     internal void SumMixture(
         EulerChunkState buffer, int voxelIndex,
@@ -338,13 +406,12 @@ internal sealed class EulerChunkWorkspace
         mass = 0f;
         totalMoles = 0f;
         heatCapacity = 0f;
-        EulerGasTable gases = Gases;
-        for (int present = 0; present < gases.Count; present++)
+        for (int present = 0; present < GasCount; present++)
         {
-            Mole moles = buffer.Species[gases.GasIds[present]]![voxelIndex];
-            mass += moles * gases.MolarMass[present];
+            Mole moles = buffer.Species[GasIds[present]]![voxelIndex];
+            mass += moles * MolarMass[present];
             totalMoles += moles;
-            heatCapacity += moles * gases.HeatCapacity[present];
+            heatCapacity += moles * HeatCapacity[present];
         }
     }
 
@@ -382,16 +449,16 @@ internal sealed class EulerChunkWorkspace
         AtmosChunk chunk = Chunk;
         EulerChunkState buffer = Read;
 
-        for (int present = 0; present < Gases.Count; present++)
+        for (int present = 0; present < GasCount; present++)
         {
-            int gasId = Gases.GasIds[present];
+            int gasId = GasIds[present];
             Mole[] row = buffer.Species[gasId]!;
             int channel = chunk.FindGasChannel(gasId);
             if (channel < 0)
             {
                 // Only worth a channel once a voxel holds a tracked amount; a chunk that is handed a few
                 // molecules of something new should not grow a 4 KB row for them. Channels are created in
-                // ascending gas id, which is the only order the table is ever walked in.
+                // ascending gas id, which is the only order the list is ever walked in.
                 if (!HoldsTrackedAmount(chunk, row))
                     continue;
 

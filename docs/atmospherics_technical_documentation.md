@@ -676,11 +676,15 @@ a resting gas, and the mass flux is zero either way. It is wrong as soon as the 
 activation (§9) exists for; a front that arrives mid-tick sees a wall for the one sweep that discovers it and the
 real face from the next sweep on.
 
-Species rows are the one piece of bookkeeping cross-chunk flow adds. Every active workspace carries a row for every
-gas any active chunk holds (the union, in ascending gas id), zero-filled where the chunk has none of it, so a chunk can
-receive a gas it has never held and the mixture sums on both sides of a face run over the same list in the same
-order. Zero rows add nothing to any sum, so tabling absent gases changes no result; write-back only creates a channel
-for a row once some voxel holds a tracked amount.
+Species rows are the one piece of bookkeeping cross-chunk flow adds. Each active workspace carries rows for its own
+gases plus, before each sweep, for every gas an active neighbour across a face of that sweep's axis carries; the tick
+thread merges the lists between sweeps, so a gas always has a row waiting on the side it is about to cross into and
+no worker ever creates one. Rows are zero-filled where the chunk has none of the gas, and every mixture sum runs over
+the chunk's list in ascending gas id. Lists differ between chunks, but a zero row adds nothing to a sum
+(`x + 0·M` is `x` bitwise), so a cell's totals are the same bits whether its chunk lists absent gases alongside its
+own or not, and the two-chunk tube still equals the one-chunk tube. A chunk that holds one gas in a world of many
+therefore pays for that one gas plus whatever its neighbours carry, not for the world's union. Write-back only creates
+a channel for a row once some voxel holds a tracked amount.
 
 Species diffusion crosses chunk faces by the same symmetric-face idea, after the write-back and the intra-chunk
 diffusion pass (§5.3). For every open face between two active chunks, both chunks evaluate the §5.3 amount `q_g` of

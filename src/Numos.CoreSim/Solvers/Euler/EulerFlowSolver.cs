@@ -59,7 +59,6 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
     internal static int? WorkerCountOverride;
 
     private readonly Int3 _dimensions;
-    private readonly EulerGasTable _gases = new();
     private readonly List<AtmosChunk> _pendingActivation = [];
     private readonly List<EulerChunkWorkspace> _pendingScan = [];
     private readonly Stack<EulerChunkWorkspace> _pool = new();
@@ -83,7 +82,6 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
     public void Solve(AtmosSolverExecutionContext context)
     {
         AtmosSolverConfigSnapshot config = context.TickConfig;
-        _gases.Clear(config);
         try
         {
             for (int chunkIndex = 0; chunkIndex < context.Chunks.Length; chunkIndex++)
@@ -135,13 +133,13 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
     }
 
     /// <summary>
-    ///     Gives a chunk a workspace for the rest of the tick: wakes it if asleep, tables its gases, builds its
-    ///     topology, gathers its live fields, and links it to its active neighbours.
+    ///     Gives a chunk a workspace for the rest of the tick: wakes it if asleep, builds its topology, gathers its
+    ///     live fields, and links it to its active neighbours. Tick thread only.
     /// </summary>
     /// <remarks>
-    ///     Tick thread only. Tabling the chunk's gases first means every workspace bound earlier gets its new rows
-    ///     before this one is bound against the grown table, and the new workspace then clears a row for every
-    ///     tabled gas including those it will only ever receive.
+    ///     The workspace lists only the chunk's own gases here. Rows for gases a neighbour can push across a face
+    ///     are added by <see cref="ShareAxisGases" /> before each sweep, so a chunk activated mid-tick is covered
+    ///     by the next sweep's merge like everyone else.
     /// </remarks>
     private EulerChunkWorkspace Activate(AtmosChunk chunk, AtmosSolverExecutionContext context)
     {
@@ -149,18 +147,8 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
         if (!chunk.IsAwake)
             chunk.Wake();
 
-        for (int gas = 0; gas < chunk.ActiveGasCount; gas++)
-        {
-            int gasId = chunk.ActiveGases[gas].GasId;
-            if (!_gases.Add(gasId, config))
-                continue;
-
-            for (int index = 0; index < _activeCount; index++)
-                _active[index].AddGasRow(gasId);
-        }
-
         EulerChunkWorkspace workspace = _pool.Count > 0 ? _pool.Pop() : new EulerChunkWorkspace();
-        workspace.Bind(chunk, _gases);
+        workspace.Bind(chunk, config);
         for (int direction = 0; direction < NeighborResolution.NeighborDirections.Length; direction++)
         {
             if (!context.TryGetChunk(chunk.GridPosition + NeighborResolution.NeighborDirections[direction], out AtmosChunk neighbor))
@@ -342,6 +330,7 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
                 if (Extent(axis) == 1)
                     continue;
 
+                ShareAxisGases(axis, config);
                 RunSweep(axis, timeStep, faceArea, config);
                 for (int index = 0; index < _activeCount; index++)
                 {
@@ -391,6 +380,32 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
             counters.ClampedVelocity,
             negativeInternalEnergy,
             counters.NegativeMoles);
+    }
+
+    /// <summary>
+    ///     Gives every active chunk a row for each gas its active neighbours across the two faces of
+    ///     <paramref name="axis" /> list, so the sweep can move any of them into the chunk without a worker ever
+    ///     creating a row.
+    /// </summary>
+    /// <remarks>
+    ///     This is the only place rows grow after binding, and it runs on the tick thread between sweeps. The
+    ///     merge is one pass over the active list, which can hand a chunk a gas from two chunks away (its
+    ///     neighbour just received the row from its own neighbour); that costs a zero row, never a wrong bit.
+    ///     Rows for a chunk's sake only: a gas listed because a neighbour holds it does not get a channel unless the
+    ///     write-back finds a tracked amount of it.
+    /// </remarks>
+    private void ShareAxisGases(int axis, AtmosSolverConfigSnapshot config)
+    {
+        for (int index = 0; index < _activeCount; index++)
+        {
+            EulerChunkWorkspace workspace = _active[index];
+            for (int direction = 2 * axis; direction <= 2 * axis + 1; direction++)
+            {
+                EulerChunkWorkspace? neighbor = workspace.NeighborWorkspaces[direction];
+                if (neighbor != null)
+                    workspace.AddGasesOf(neighbor, config);
+            }
+        }
     }
 
     /// <summary>
@@ -545,9 +560,10 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
     ///     The floor ran on the buffers before the write-back, but diffusion changes a voxel's mass and cleanup
     ///     empties voxels outright, so the test is repeated on the fields the sleep pass and the next tick's gather
     ///     read. On a voxel neither pass touched it changes nothing: cleanup zeroes the momentum of what it empties,
-    ///     and the mass is summed over the same gases in the same ascending gas id order as the buffer's, so the
-    ///     floor comparison repeats bit for bit. The only gap is a row the write-back dropped as untracked, which
-    ///     makes the live mass smaller and the velocity larger, never the other way.
+    ///     and the mass is summed over the workspace's gas list in the same ascending order as the buffer's, so the
+    ///     floor comparison repeats bit for bit. The only gaps are a row the write-back dropped as untracked, which
+    ///     makes the live mass smaller and the velocity larger, never the other way, and a channel boundary
+    ///     diffusion created for a gas outside the list, which is summed after the list.
     /// </remarks>
     private void SettleMomentum(EulerChunkWorkspace workspace, AtmosSolverConfigSnapshot config, EulerFlowConfig settings)
     {
@@ -567,14 +583,25 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
             bool zero = chunk.IsVacuum[voxelIndex];
             if (!zero)
             {
-                for (int present = 0; present < _gases.Count; present++)
+                for (int present = 0; present < workspace.GasCount; present++)
                 {
-                    int channel = chunk.FindGasChannel(_gases.GasIds[present]);
+                    int channel = chunk.FindGasChannel(workspace.GasIds[present]);
                     if (channel < 0)
                         continue;
 
                     Mole moles = chunk.ActiveGases[channel].Moles[voxelIndex];
-                    mass += moles * _gases.MolarMass[present];
+                    mass += moles * workspace.MolarMass[present];
+                    totalMoles += moles;
+                }
+
+                for (int gas = 0; gas < chunk.ActiveGasCount; gas++)
+                {
+                    int gasId = chunk.ActiveGases[gas].GasId;
+                    if (workspace.Read.Species[gasId] != null)
+                        continue;
+
+                    Mole moles = chunk.ActiveGases[gas].Moles[voxelIndex];
+                    mass += moles * config.GetMolarMass(gasId);
                     totalMoles += moles;
                 }
 
