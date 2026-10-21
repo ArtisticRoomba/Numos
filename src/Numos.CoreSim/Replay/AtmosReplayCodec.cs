@@ -42,22 +42,12 @@ internal static partial class AtmosReplayCodec
         };
 
     /// <summary>
-    ///     Writes one simulation's grid checkpoint nested in a world checkpoint.
+    ///     Writes one simulation's grid checkpoint nested in a world checkpoint, as a length-prefixed
+    ///     <see cref="StateBinarySink" /> payload.
     /// </summary>
-    /// <remarks>
-    ///     A hand-written header (format and compatibility versions, fingerprint, dimensions, chunk count), then each
-    ///     chunk as a length-prefixed <see cref="StateBinarySink" /> payload. <see cref="AtmosStateHasher.Hash" /> hashes
-    ///     the same sequence without the lengths.
-    /// </remarks>
     /// <exception cref="NotSupportedException">A chunk holds a rollback field whose element type can't be saved.</exception>
     internal static void WriteSimulationCheckpoint(BinaryWriter writer, AtmosSimulationCheckpoint checkpoint)
     {
-        writer.Write(checkpoint.FormatVersion);
-        writer.Write(checkpoint.CompatibilityVersion);
-        writer.Write(checkpoint.CompatibilityFingerprint);
-        WriteInt3(writer, checkpoint.Dimensions);
-        writer.Write(checkpoint.Chunks.Count);
-        var sink = new StateBinarySink();
         foreach (var chunk in checkpoint.Chunks)
         {
             foreach (var array in chunk.SolverArrays)
@@ -69,12 +59,12 @@ internal static partial class AtmosReplayCodec
                         "Only primitives and enums over them can.");
                 }
             }
-
-            sink.Reset();
-            NumosState.Write(ref sink, chunk);
-            writer.Write(sink.WrittenSpan.Length);
-            writer.Write(sink.WrittenSpan);
         }
+
+        var sink = new StateBinarySink();
+        NumosState.Write(ref sink, checkpoint);
+        writer.Write(sink.WrittenSpan.Length);
+        writer.Write(sink.WrittenSpan);
     }
 
     /// <summary>
@@ -82,33 +72,9 @@ internal static partial class AtmosReplayCodec
     /// </summary>
     internal static AtmosSimulationCheckpoint ReadSimulationCheckpoint(BinaryReader reader, int maxStringBytes)
     {
-        int format = reader.ReadInt32();
-        if (format != AtmosSimulationCheckpoint.CurrentFormatVersion)
-            throw new InvalidDataException("The simulation checkpoint schema is unsupported.");
-
-        int compatibility = reader.ReadInt32();
-        if (compatibility != AtmosSimulationCheckpoint.CurrentCompatibilityVersion)
-            throw new InvalidDataException("The simulation checkpoint compatibility version is unsupported.");
-
-        ulong fingerprint = reader.ReadUInt64();
-        var dimensions = ReadInt3(reader);
-        int chunkCount = ReadCount(reader, 1_000_000, "chunk");
-        var chunks = new AtmosChunkCheckpoint[chunkCount];
-        // Chunks of one simulation are all about the same size, so one buffer serves them all.
-        byte[] buffer = [];
-        for (int index = 0; index < chunkCount; index++)
-        {
-            int length = ReadCount(reader, int.MaxValue, "chunk byte");
-            ReadPayload(reader, length, ref buffer);
-            var state = new StateReader(buffer.AsSpan(0, length), maxStringBytes);
-            chunks[index] = NumosState.Read<AtmosChunkCheckpoint>(ref state);
-        }
-
-        var checkpoint = new AtmosSimulationCheckpoint(dimensions, chunks);
-        if (fingerprint != checkpoint.CompatibilityFingerprint)
-            throw new InvalidDataException("The simulation checkpoint schema or compatibility fingerprint is invalid.");
-
-        return checkpoint;
+        byte[] payload = ReadPayload(reader, ReadCount(reader, int.MaxValue, "simulation checkpoint byte"));
+        var state = new StateReader(payload, maxStringBytes);
+        return NumosState.Read<AtmosSimulationCheckpoint>(ref state);
     }
 
     /// <summary>

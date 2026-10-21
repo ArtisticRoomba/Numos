@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using Numos.CoreSim.Replay;
+using Numos.CoreSim.State;
 using Numos.Maths;
 
 namespace Numos.CoreSim;
@@ -39,17 +40,24 @@ internal sealed partial class AtmosKernel
             RecordOperation(new SetVoxelMixtureOperation(chunk, index));
     }
 
+    /// <summary>
+    ///     The voxel dimensions every chunk of this grid has.
+    /// </summary>
+    [NumosSerialize]
+    public Int3 Dimensions => _dimensions;
+
+    /// <summary>
+    ///     Every chunk's continuation data, in lexicographic chunk-position order.
+    /// </summary>
+    [NumosSerialize("Chunks")]
+    public AtmosChunk[] CheckpointChunks => OrderedChunks();
+
     internal AtmosSimulationCheckpoint CaptureCheckpoint()
     {
         lock (StateGate)
         {
             ThrowIfTickExecuting("capture a checkpoint during a tick");
-            AtmosChunk[] chunks = OrderedChunks();
-            var chunkCheckpoints = new AtmosChunkCheckpoint[chunks.Length];
-            for (int index = 0; index < chunks.Length; index++)
-                chunkCheckpoints[index] = AtmosChunkCheckpoint.Capture(chunks[index]);
-
-            return new AtmosSimulationCheckpoint(_dimensions, chunkCheckpoints);
+            return AtmosSimulationCheckpoint.Capture(this);
         }
     }
 

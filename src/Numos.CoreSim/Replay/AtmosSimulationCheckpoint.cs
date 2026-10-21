@@ -9,12 +9,19 @@ namespace Numos.CoreSim.Replay;
 ///     Holds the detached grid state of one simulation: its chunk dimensions and every chunk's continuation data.
 /// </summary>
 /// <remarks>
-///     Time, configuration, and the solver pipeline belong to the world, so they live in the containing world
-///     checkpoint rather than here. Restore uses this data with an existing compatible simulation, so host
-///     integrations and custom solver implementations stay in place. The checkpoint excludes delegates,
-///     detached mixture identity, presentation state, and other host-owned state.
+///     <para>
+///         Time, configuration, and the solver pipeline belong to the world, so they live in the containing world
+///         checkpoint rather than here. Restore uses this data with an existing compatible simulation, so host
+///         integrations and custom solver implementations stay in place. The checkpoint excludes delegates,
+///         detached mixture identity, presentation state, and other host-owned state.
+///     </para>
+///     <para>
+///         Generated from the kernel's <see cref="NumosSerializeAttribute" /> members. The chunk list is capture-only:
+///         restoring replaces the kernel's chunks wholesale, which the kernel does itself.
+///     </para>
 /// </remarks>
-public sealed class AtmosSimulationCheckpoint
+[NumosSnapshotOf(typeof(AtmosKernel))]
+public sealed partial class AtmosSimulationCheckpoint
 {
     /// <summary>
     ///     Identifies the in-memory checkpoint schema used to interpret this data.
@@ -37,42 +44,28 @@ public sealed class AtmosSimulationCheckpoint
 
     // Every member is immutable once constructed, so the digest only needs computing once. The flag is written after
     // the digest so a reader that sees it set also sees the digest.
+    [NumosIgnore]
     private ulong _digest;
+
+    [NumosIgnore]
     private volatile bool _hasDigest;
-
-    internal AtmosSimulationCheckpoint(Int3 dimensions, AtmosChunkCheckpoint[] chunks)
-    {
-        Dimensions = dimensions;
-        Chunks = Array.AsReadOnly(chunks);
-        FormatVersion = CurrentFormatVersion;
-
-        CompatibilityFingerprint = AtmosStateHasher.HashDefinition(this);
-    }
 
     /// <summary>
     ///     Gets the checkpoint schema version.
     /// </summary>
-    public int FormatVersion { get; }
+    [NumosSerialize]
+    public int FormatVersion { get; private set; } = CurrentFormatVersion;
 
     /// <summary>
     ///     Gets the deterministic simulation compatibility version.
     /// </summary>
-    public int CompatibilityVersion => CurrentCompatibilityVersion;
+    [NumosSerialize]
+    public int CompatibilityVersion { get; private set; } = CurrentCompatibilityVersion;
 
     /// <summary>
     ///     Gets the fingerprint of the compatibility version and chunk dimensions.
     /// </summary>
-    public ulong CompatibilityFingerprint { get; }
-
-    /// <summary>
-    ///     Gets the fixed voxel dimensions required for every chunk in the receiving simulation.
-    /// </summary>
-    public Int3 Dimensions { get; }
-
-    /// <summary>
-    ///     Gets complete chunk continuation data in lexicographic chunk-position order.
-    /// </summary>
-    public IReadOnlyList<AtmosChunkCheckpoint> Chunks { get; }
+    public ulong CompatibilityFingerprint => AtmosStateHasher.HashDefinition(this);
 
     /// <summary>
     ///     Bytes in copied chunk and solver arrays, excluding managed object headers and keys.
@@ -84,18 +77,28 @@ public sealed class AtmosSimulationCheckpoint
     /// </summary>
     /// <returns>A non-cryptographic FNV-1a 64-bit digest, for divergence detection rather than authentication.</returns>
     /// <remarks>
-    ///     The digest covers grid state only. Use the owning world's state hash when timeline position, configuration,
-    ///     solver enablement, or topology must match too.
+    ///     The digest covers grid state only, and is the hash of exactly the bytes the checkpoint saves as. Use the
+    ///     owning world's state hash when timeline position, configuration, solver enablement, or topology must match
+    ///     too.
     /// </remarks>
     public ulong ComputeStateHash()
     {
         if (!_hasDigest)
         {
-            _digest = AtmosStateHasher.Hash(this);
+            _digest = NumosState.ComputeHash(this);
             _hasDigest = true;
         }
 
         return _digest;
+    }
+
+    partial void OnDecoded()
+    {
+        if (FormatVersion != CurrentFormatVersion)
+            throw new InvalidDataException("The simulation checkpoint schema is unsupported.");
+
+        if (CompatibilityVersion != CurrentCompatibilityVersion)
+            throw new InvalidDataException("The simulation checkpoint compatibility version is unsupported.");
     }
 }
 

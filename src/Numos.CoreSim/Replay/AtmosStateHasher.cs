@@ -1,5 +1,3 @@
-using Numos.CoreSim.State;
-using Numos.CoreSim.State.Advanced;
 using Numos.Maths;
 
 namespace Numos.CoreSim.Replay;
@@ -65,20 +63,5 @@ internal struct AtmosStateHasher
         hash.Add(checkpoint.CompatibilityVersion);
         hash.Add(checkpoint.Dimensions);
         return hash.Value;
-    }
-
-    // Mirrors AtmosReplayCodec.WriteSimulationCheckpoint, minus the chunk payload lengths.
-    internal static ulong Hash(AtmosSimulationCheckpoint checkpoint)
-    {
-        var sink = new StateHashSink();
-        sink.WriteInt32(checkpoint.FormatVersion);
-        sink.WriteInt32(checkpoint.CompatibilityVersion);
-        sink.WriteUInt64(checkpoint.CompatibilityFingerprint);
-        StateCodecs.Int3.Write(ref sink, checkpoint.Dimensions);
-        sink.WriteCount(checkpoint.Chunks.Count);
-        foreach (var chunk in checkpoint.Chunks)
-            NumosState.Write(ref sink, chunk);
-
-        return sink.Value;
     }
 }

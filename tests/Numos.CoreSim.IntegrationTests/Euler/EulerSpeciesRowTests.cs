@@ -84,10 +84,10 @@ public sealed class EulerSpeciesRowTests
                 simulation.AddGasToVoxel(chunk, x, 0, 0, SimTestHelpers.EulerAirGasName, moles, Temperature);
         }
 
-        // A channel for an id the registry never saw, which a checkpoint can carry. The merge lists it in the
+        // A channel for an id the registry never saw, which a restored checkpoint can carry. The merge lists it in the
         // middle chunk, whose sweep then reads the first chunk's rows with it. That chunk's table only ever grew
         // to the registry size.
-        simulation.RestoreCheckpoint(WithExtraChannel(simulation.CaptureCheckpoint(), third, strayGasId, strayMoles));
+        AddExtraChannel(simulation, third, strayGasId, strayMoles);
         double initialStray = TotalMoles(simulation, strayGasId, first, second, third);
 
         Assert.That(
@@ -110,26 +110,13 @@ public sealed class EulerSpeciesRowTests
     }
 
     /// <summary>
-    ///     The checkpoint with one chunk given a full channel of <paramref name="gasId" />, whether the registry
-    ///     knows the id or not.
+    ///     Gives one chunk a full channel of <paramref name="gasId" />, whether the registry knows the id or not.
     /// </summary>
-    private static AtmosSimulationCheckpoint WithExtraChannel(
-        AtmosSimulationCheckpoint checkpoint, AtmosChunkHandle target, int gasId, float moles)
+    private static void AddExtraChannel(AtmosSimulation simulation, AtmosChunkHandle target, int gasId, float moles)
     {
-        var chunks = checkpoint.Chunks.Select(chunk =>
-        {
-            if (chunk.Position != target.Position)
-                return chunk;
-
-            var gases = chunk.Gases
-                .Select(gas => new AtmosGasChannelCheckpoint(gas.GasId, gas.Moles.ToArray()))
-                .Append(new AtmosGasChannelCheckpoint(gasId, Enumerable.Repeat(moles, chunk.Temperatures.Count).ToArray()))
-                .ToArray();
-
-            return chunk.WithGases(gases);
-        }).ToArray();
-
-        return new AtmosSimulationCheckpoint(checkpoint.Dimensions, chunks);
+        var chunk = simulation.Kernel.GetChunkForDangerousAccess(target.Position);
+        chunk.ActiveGases[chunk.GetOrCreateGasChannel(gasId)].Moles.AsSpan(0, chunk.VoxelCount).Fill(moles);
+        chunk.MarkChanged();
     }
 
     /// <summary>
