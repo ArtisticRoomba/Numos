@@ -60,6 +60,15 @@ public sealed class ReplayWireFormatGoldenTests
     private const string GoldenReactionReplayBase64 =
         "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";
 
+    // A chunk carrying a per-voxel float rollback field and a fixed-length int one. Captured with PrintGoldenBytes.
+    // Do not hand-edit. The two constants above have no chunk fields, and still pin their zero counts byte for byte.
+    private const string GoldenChunkFieldReplayBase64 =
+        "TlVNT1MNChoBAAIAAwAAAAEAAAChAAAAAAAAABoAAABHb2xkZW4gY2h1bmsgZmllbGQgZml4dHVyZQCAtff1f58IDAAAAG51bW9zLWdvbGRlbgwAAAAxLjAuMC1nb2xkZW4MAAAAMS4wLjAtZ29sZGVuAQ4AAABwaGFzZTMtZml4dHVyZQAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAgABAMICAAAAAAAACAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD++MK+v9NUpAEAAAAAAAAAAAAAAAAAAABwq9xZnhmgQDOTkkMzk5JDDEqmQQAAgD+A5sVHCtejPM3MLEAAAAA+AACAP2QAAAAAAGBAzcxMPQAAAD8K1yM+AABwQRQAAAB+Uu08AQAAAAEDAAAAQWlyDEqmQQAAAAAAAAAAAAAAAAAK16M8AAAAAAAAAAAGAAAACgAAAGV1bGVyLWZsb3cAAQAWAAAAZXhwbGljaXQtZ2FzLXRyYW5zcG9ydAABAA4AAAB0aGVybW9keW5hbWljcwABABoAAABleHBsaWNpdC10aGVybWFsLXRyYW5zcG9ydAABABAAAAB0aGVybWFsLWJvdW5kYXJ5AAEADQAAAGdhcy1yZWFjdGlvbnMAAQABAAAAAQAAAAEAAAAAAAAAAQAAAAcAAAAEAAAA8CMzXr+VvlgCAAAAAgAAAAEAAAABAAAAAAAAAAAAAAAAAAAAAgAAAAIAAAABAAAAAQAAAAAEAAAAAQAAAAEAAAABAAAAAQAAAAAAAAAAAJZDAAAAAAAAAAAAAAAAItjpRQAAAAAAAAAAAAAAABJveUIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAEAAgADAAEAAAAAAAAAAAAAAAAAQEAAAAAAAAAAAAIAAAAZAAAAZ29sZGVuL2NodW5rLWZpZWxkL2NvdW50cwwAAABTeXN0ZW0uSW50MzIEAAAAAwAAAAEAAAD+////////fxcAAABnb2xkZW4vY2h1bmstZmllbGQvaGVhdA0AAABTeXN0ZW0uU2luZ2xlBAAAAAQAAAAAAAA/AACAvwAAEEAAAJZDAAAAAAMAAQAkAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAA==";
+
+    // Process-wide registrations; the keys are part of the pinned bytes.
+    private static readonly ChunkField<float> GoldenHeat = ChunkField<float>.Register("golden/chunk-field/heat", rollback: true);
+    private static readonly ChunkField<int> GoldenCounts = ChunkField<int>.Register("golden/chunk-field/counts", rollback: true, length: 3);
+
     [Test]
     public void LegacySimReplay_IsRejectedAsUnsupportedContent()
     {
@@ -155,6 +164,36 @@ public sealed class ReplayWireFormatGoldenTests
     }
 
     [Test]
+    public void ChunkFieldReplay_MatchesGoldenBytes()
+    {
+        using var stream = new MemoryStream();
+        NumosWorldReplaySerializer.Serialize(stream, BuildGoldenChunkFieldReplayDocument());
+
+        Assert.That(stream.ToArray(), Is.EqualTo(Convert.FromBase64String(GoldenChunkFieldReplayBase64)));
+    }
+
+    [Test]
+    public void ChunkFieldReplay_GoldenBytesDecodeBothFields()
+    {
+        // Loading needs the fields registered first; reading the statics runs their registration.
+        Assert.That(new[] { GoldenHeat.Rollback, GoldenCounts.Rollback }, Is.All.True);
+        var restored = NumosWorldReplaySerializer.Deserialize(new MemoryStream(Convert.FromBase64String(GoldenChunkFieldReplayBase64)));
+        var arrays = restored.Replay.InitialCheckpoint.Simulations.Single().Checkpoint.Chunks.Single().SolverArrays;
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(arrays.Select(static array => array.Key), Is.EqualTo(new[] { GoldenCounts.Key, GoldenHeat.Key }));
+            Assert.That(arrays[0].CopyValues<int>(), Is.EqualTo(new[] { 1, -2, int.MaxValue }));
+            Assert.That(arrays[1].CopyValues<float>(), Is.EqualTo(new[] { 0.5f, -1f, 2.25f, 300f }));
+        });
+
+        using var replayWorld = new AtmosWorld(new AtmosConfig(restored.Replay.InitialCheckpoint.Config));
+        var imported = AtmosWorldReplayTimeline.Import(replayWorld, restored.Replay, 1);
+        imported.ReturnToHead();
+        Assert.That(replayWorld.ComputeStateHash(), Is.EqualTo(restored.Replay.HeadStateHash));
+    }
+
+    [Test]
     [Explicit("Prints the current wire bytes as base64 so the golden constants above can be regenerated deliberately.")]
     public void PrintGoldenBytes()
     {
@@ -165,6 +204,36 @@ public sealed class ReplayWireFormatGoldenTests
         using var reactionStream = new MemoryStream();
         NumosWorldReplaySerializer.Serialize(reactionStream, BuildGoldenReactionReplayDocument());
         TestContext.WriteLine("REACTIONS:" + Convert.ToBase64String(reactionStream.ToArray()));
+
+        using var chunkFieldStream = new MemoryStream();
+        NumosWorldReplaySerializer.Serialize(chunkFieldStream, BuildGoldenChunkFieldReplayDocument());
+        TestContext.WriteLine("CHUNK FIELDS:" + Convert.ToBase64String(chunkFieldStream.ToArray()));
+    }
+
+    private static NumosWorldReplayDocument BuildGoldenChunkFieldReplayDocument()
+    {
+        var config = new AtmosConfig { GasRegistry = [new GasProperties { Name = "Air", DiffusionCoefficient = 0.02f }] };
+        using var world = new AtmosWorld(config);
+        var simulation = world.CreateSimulation(2, 2, 1);
+        var chunk = CreateOpenChunk(simulation, new Int3(0, 0, 0));
+        simulation.AddGasToVoxel(chunk, 1, 0, 3f, 300f);
+        float[] heat = [0.5f, -1f, 2.25f, 300f];
+        heat.CopyTo(simulation.GetChunkField(chunk, GoldenHeat).AsSpan());
+        int[] counts = [1, -2, int.MaxValue];
+        counts.CopyTo(simulation.GetChunkField(chunk, GoldenCounts).AsSpan());
+
+        var timeline = new AtmosWorldReplayTimeline(world, 1);
+        world.Tick();
+
+        var metadata = new NumosReplayMetadata(
+            "Golden chunk field fixture",
+            DateTimeOffset.UnixEpoch,
+            "numos-golden",
+            "1.0.0-golden",
+            "1.0.0-golden",
+            "phase3-fixture");
+
+        return new NumosWorldReplayDocument(metadata, timeline.CaptureReplay());
     }
 
     private static NumosWorldReplayDocument BuildGoldenReactionReplayDocument()
