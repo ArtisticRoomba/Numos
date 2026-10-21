@@ -93,10 +93,13 @@ internal static partial class AtmosReplayCodec
         var dimensions = ReadInt3(reader);
         int chunkCount = ReadCount(reader, 1_000_000, "chunk");
         var chunks = new AtmosChunkCheckpoint[chunkCount];
+        // Chunks of one simulation are all about the same size, so one buffer serves them all.
+        byte[] buffer = [];
         for (int index = 0; index < chunkCount; index++)
         {
-            byte[] payload = ReadPayload(reader, ReadCount(reader, int.MaxValue, "chunk byte"));
-            var state = new StateReader(payload, maxStringBytes);
+            int length = ReadCount(reader, int.MaxValue, "chunk byte");
+            ReadPayload(reader, length, ref buffer);
+            var state = new StateReader(buffer.AsSpan(0, length), maxStringBytes);
             var chunk = NumosState.Read<AtmosChunkCheckpoint>(ref state);
             chunk.ValidateDecoded();
             chunks[index] = chunk;
@@ -215,21 +218,32 @@ internal static partial class AtmosReplayCodec
     /// </summary>
     internal static byte[] ReadPayload(BinaryReader reader, int length)
     {
+        byte[] buffer = [];
+        ReadPayload(reader, length, ref buffer);
+        return buffer.Length == length ? buffer : buffer[..length];
+    }
+
+    /// <summary>
+    ///     Reads <paramref name="length" /> bytes into the start of <paramref name="buffer" />, replacing it with a
+    ///     larger array when needed. Growth still follows the data, as in <see cref="ReadPayload(BinaryReader, int)" />.
+    /// </summary>
+    internal static void ReadPayload(BinaryReader reader, int length, ref byte[] buffer)
+    {
         const int chunk = 64 * 1024;
-        byte[] buffer = new byte[Math.Min(length, chunk)];
+        if (buffer.Length < Math.Min(length, chunk))
+            buffer = new byte[Math.Min(length, chunk)];
+
         int filled = 0;
         while (filled < length)
         {
             if (filled == buffer.Length)
                 Array.Resize(ref buffer, (int)Math.Min(length, (long)buffer.Length * 2));
 
-            int read = reader.Read(buffer, filled, buffer.Length - filled);
+            int read = reader.Read(buffer, filled, Math.Min(buffer.Length, length) - filled);
             if (read == 0) throw new EndOfStreamException();
 
             filled += read;
         }
-
-        return buffer;
     }
 
     private static void WriteSetVoxelMixtureOperation(BinaryWriter writer, SetVoxelMixtureOperation operation)
