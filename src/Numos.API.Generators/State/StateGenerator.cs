@@ -40,11 +40,24 @@ public sealed class StateGenerator : IIncrementalGenerator
     /// <inheritdoc />
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
+        // Snapshots and their live types belong to SnapshotGenerator, which reads the same attributes differently.
+        IncrementalValueProvider<EquatableArray<string>> snapshotParticipants = context.SyntaxProvider
+            .ForAttributeWithMetadataName(
+                SnapshotGenerator.SnapshotOfMetadataName,
+                static (node, _) => node is TypeDeclarationSyntax,
+                static (syntaxContext, _) => SnapshotGenerator.ParticipantNames(syntaxContext))
+            .SelectMany(static (names, _) => names)
+            .Collect()
+            .Select(static (names, _) => names.Distinct(StringComparer.Ordinal).OrderBy(static name => name, StringComparer.Ordinal).ToEquatableArray());
+
         IncrementalValuesProvider<StateTypeResult> types = context.SyntaxProvider
             .CreateSyntaxProvider(
                 static (node, _) => node is TypeDeclarationSyntax declaration && HasMarkedMemberSyntax(declaration),
                 static (syntaxContext, cancellationToken) => CreateDeclaration(syntaxContext, cancellationToken))
             .Where(static declaration => declaration is not null)
+            .Combine(snapshotParticipants)
+            .Where(static pair => !pair.Right.Contains(pair.Left!.TypeName))
+            .Select(static (pair, _) => pair.Left)
             .Combine(QuantityAliasCatalog.Provider(context))
             .Select(static (pair, _) => Resolve(pair.Left!, pair.Right))
             .WithTrackingName(TypesStepName);
@@ -314,6 +327,13 @@ public sealed class StateGenerator : IIncrementalGenerator
             {
                 // A restore writes into the registered instance, so there's no constructor or initializer to use.
                 diagnostics.Add(DiagnosticInfo.Create(StateDiagnostics.NotAssignable, location, displayName));
+                canGenerate = false;
+                continue;
+            }
+
+            if (HasNamedArgument(serialize, "Count"))
+            {
+                diagnostics.Add(DiagnosticInfo.Create(StateDiagnostics.CountOutsideSnapshot, location, displayName));
                 canGenerate = false;
                 continue;
             }
@@ -603,6 +623,17 @@ public sealed class StateGenerator : IIncrementalGenerator
         }
 
         return null;
+    }
+
+    private static bool HasNamedArgument(AttributeData attribute, string name)
+    {
+        foreach (KeyValuePair<string, TypedConstant> argument in attribute.NamedArguments)
+        {
+            if (argument.Key == name)
+                return true;
+        }
+
+        return false;
     }
 
     private static ITypeSymbol? CodecOf(AttributeData serialize)

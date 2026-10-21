@@ -19,6 +19,11 @@ internal enum StateShapeKind
     GasRegistry,
 
     /// <summary>
+    ///     An opaque <c>ReadOnlyMemory&lt;byte&gt;</c> payload, written as its length and bytes.
+    /// </summary>
+    Bytes,
+
+    /// <summary>
     ///     An enum; the name is its fully qualified type and the one argument is its underlying primitive.
     /// </summary>
     Enum,
@@ -168,6 +173,9 @@ internal sealed record StateShape(StateShapeKind Kind, string Name, EquatableArr
         if (metadataName == "Numos.CoreSim.GasRegistry")
             return Leaf(StateShapeKind.GasRegistry, "");
 
+        if (metadataName == "System.ReadOnlyMemory`1" && named.TypeArguments[0].SpecialType == SpecialType.System_Byte)
+            return Leaf(StateShapeKind.Bytes, "");
+
         if (ListTypes.Contains(metadataName))
             return Of(StateShapeKind.List, named.ToDisplayString(UnboundFormat), From(named.TypeArguments[0]));
 
@@ -183,7 +191,7 @@ internal sealed record StateShape(StateShapeKind Kind, string Name, EquatableArr
                 : Unsupported(type);
         }
 
-        if (named.TypeParameters.Length == 0 && StateGenerator.HasSerializedMembers(named))
+        if (named.TypeParameters.Length == 0 && (StateGenerator.HasSerializedMembers(named) || ImplementsOwnState(named)))
             return Leaf(StateShapeKind.State, FullName(named));
 
         return Unsupported(type);
@@ -214,11 +222,44 @@ internal sealed record StateShape(StateShapeKind Kind, string Name, EquatableArr
     }
 
     /// <summary>
+    ///     Gets the shape of an <c>IReadOnlyList&lt;T&gt;</c> over <paramref name="element" />, which is how a snapshot
+    ///     holds an array.
+    /// </summary>
+    public static StateShape ReadOnlyList(StateShape element) =>
+        Of(StateShapeKind.List, "global::System.Collections.Generic.IReadOnlyList", element);
+
+    /// <summary>
+    ///     Gets the shape of a generated snapshot type, which implements <c>INumosState&lt;T&gt;</c> like any
+    ///     serializable type.
+    /// </summary>
+    /// <param name="fullyQualifiedName">The snapshot type with its <c>global::</c> prefix.</param>
+    public static StateShape Snapshot(string fullyQualifiedName) => Leaf(StateShapeKind.State, fullyQualifiedName);
+
+    /// <summary>
     ///     Classifies a member whose <c>Codec</c> names the codec to use, whatever its type.
     /// </summary>
     public static StateShape FromCodec(ITypeSymbol memberType, ITypeSymbol codec)
     {
         return new StateShape(StateShapeKind.Custom, FullName(memberType), EquatableArray<StateShape>.Empty, FullName(codec));
+    }
+
+    /// <summary>
+    ///     Whether <paramref name="type" /> implements <c>INumosState&lt;T&gt;</c> over itself, which is how a generated
+    ///     snapshot from a referenced assembly shows up: its members carry no attributes, but the interface does.
+    /// </summary>
+    public static bool ImplementsOwnState(INamedTypeSymbol type)
+    {
+        foreach (INamedTypeSymbol candidate in type.AllInterfaces)
+        {
+            if (candidate.TypeArguments.Length == 1 &&
+                MetadataName(candidate.OriginalDefinition) == "Numos.CoreSim.State.Advanced.INumosState`1" &&
+                SymbolEqualityComparer.Default.Equals(candidate.TypeArguments[0], type))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public static string MetadataName(INamedTypeSymbol type)
@@ -278,6 +319,7 @@ internal sealed record StateShape(StateShapeKind Kind, string Name, EquatableArr
         StateShapeKind.Int3 => "global::Numos.Maths.Int3",
         StateShapeKind.Gas => "global::Numos.CoreSim.GasProperties",
         StateShapeKind.GasRegistry => "global::Numos.CoreSim.GasRegistry",
+        StateShapeKind.Bytes => "global::System.ReadOnlyMemory<byte>",
         StateShapeKind.Enum or StateShapeKind.State or StateShapeKind.Custom => Name,
         StateShapeKind.Array => Arguments[0].TypeExpression + "[]",
         StateShapeKind.NullableReference or StateShapeKind.NullableValue => Arguments[0].TypeExpression + "?",
@@ -295,6 +337,7 @@ internal sealed record StateShape(StateShapeKind Kind, string Name, EquatableArr
         StateShapeKind.Gas => Codecs + "Gas",
         StateShapeKind.Custom => Codec,
         StateShapeKind.GasRegistry => Codecs + "GasRegistry",
+        StateShapeKind.Bytes => Codecs + "Bytes",
         StateShapeKind.Enum => Codecs + "Enum<" + Name + ", " + Arguments[0].TypeExpression + ", " +
                                Arguments[0].CodecExpression + ">",
         StateShapeKind.State => Codecs + "State<" + Name + ">",

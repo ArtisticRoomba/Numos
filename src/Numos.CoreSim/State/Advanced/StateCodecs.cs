@@ -299,6 +299,38 @@ public static class StateCodecs
     }
 
     /// <summary>
+    ///     Codec for an opaque byte payload, written as its length followed by the bytes.
+    /// </summary>
+    /// <remarks>
+    ///     For data that's already encoded, such as a solver's state payload, which the hash and wire take verbatim.
+    ///     Reading copies the bytes into a new array.
+    /// </remarks>
+    public readonly struct Bytes : IStateCodec<ReadOnlyMemory<byte>>
+    {
+        /// <inheritdoc />
+        public static void Write<TSink>(ref TSink sink, ReadOnlyMemory<byte> value) where TSink : struct, IStateSink
+        {
+            sink.WriteCount(value.Length);
+            sink.WriteElements(value.Span, 1);
+        }
+
+        /// <inheritdoc />
+        public static bool StateEquals(ReadOnlyMemory<byte> left, ReadOnlyMemory<byte> right) =>
+            left.Span.SequenceEqual(right.Span);
+
+        /// <inheritdoc />
+        public static int Compare(ReadOnlyMemory<byte> left, ReadOnlyMemory<byte> right)
+        {
+            int result = left.Length.CompareTo(right.Length);
+            return result != 0 ? result : left.Span.SequenceCompareTo(right.Span);
+        }
+
+        /// <inheritdoc />
+        public static ReadOnlyMemory<byte> Read(ref StateReader reader, IGasRegistry? gases) =>
+            reader.ReadArray<byte>(reader.ReadCount());
+    }
+
+    /// <summary>
     ///     Codec for <see cref="Numos.Maths.Int3" />, written as X, Y, Z.
     /// </summary>
     public readonly struct Int3 : IStateCodec<Numos.Maths.Int3>
@@ -714,7 +746,7 @@ public static class StateCodecs
                 case T[] array:
                     span = array;
                     return true;
-                case Replay.CheckpointArray<T> owned:
+                case StateArray<T> owned:
                     span = owned.Span;
                     return true;
                 default:

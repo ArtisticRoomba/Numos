@@ -92,7 +92,7 @@ internal static class StateEmitter
         return writer.ToString();
     }
 
-    private static void EmitWriteState(CodeWriter writer, StateTypeModel model, string stateInterface)
+    internal static void EmitWriteState(CodeWriter writer, StateTypeModel model, string stateInterface)
     {
         writer.Line(CodeWriter.GeneratedCodeAttribute);
         writer.Line("static void " + stateInterface + ".WriteState<TSink>(ref TSink sink, " + model.TypeName + " value)");
@@ -109,14 +109,14 @@ internal static class StateEmitter
         writer.Close();
     }
 
-    private static void EmitStateKey(CodeWriter writer, StateTypeModel model, string stateInterface)
+    internal static void EmitStateKey(CodeWriter writer, StateTypeModel model, string stateInterface)
     {
         string key = model.StateKey is null ? "null" : SymbolDisplay.FormatLiteral(model.StateKey, true);
         writer.Line(CodeWriter.GeneratedCodeAttribute);
         writer.Line("static string? " + stateInterface + ".StateKey => " + key + ";");
     }
 
-    private static void EmitInstanceWriteState(CodeWriter writer, StateTypeModel model)
+    internal static void EmitInstanceWriteState(CodeWriter writer, StateTypeModel model)
     {
         writer.Line(CodeWriter.GeneratedCodeAttribute);
         writer.Line("void " + NonGenericInterface + ".WriteState<TSink>(ref TSink sink)");
@@ -172,7 +172,7 @@ internal static class StateEmitter
     ///     Writes the <c>field{id}</c>/<c>has{id}</c> locals and the loop that fills them from <c>reader</c>, ending
     ///     with the object closed.
     /// </summary>
-    private static void EmitReadFields(CodeWriter writer, StateTypeModel model)
+    internal static void EmitReadFields(CodeWriter writer, StateTypeModel model)
     {
         foreach (StateFieldModel field in model.Fields)
         {
@@ -219,7 +219,7 @@ internal static class StateEmitter
         writer.Line("reader.EndObject();");
     }
 
-    private static void EmitStateEquals(CodeWriter writer, StateTypeModel model, string stateInterface)
+    internal static void EmitStateEquals(CodeWriter writer, StateTypeModel model, string stateInterface)
     {
         writer.Line(CodeWriter.GeneratedCodeAttribute);
         writer.Line("static bool " + stateInterface + ".StateEquals(" + model.TypeName + " left, " + model.TypeName + " right)");
@@ -255,7 +255,7 @@ internal static class StateEmitter
         writer.Close();
     }
 
-    private static void EmitCompareState(CodeWriter writer, StateTypeModel model, string stateInterface)
+    internal static void EmitCompareState(CodeWriter writer, StateTypeModel model, string stateInterface)
     {
         writer.Line(CodeWriter.GeneratedCodeAttribute);
         writer.Line("static int " + stateInterface + ".CompareState(" + model.TypeName + " left, " + model.TypeName + " right)");

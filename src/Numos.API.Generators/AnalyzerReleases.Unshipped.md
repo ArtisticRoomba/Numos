@@ -45,3 +45,14 @@
  NUMOSSTATE018 | Numos.State                | Error    | Solver configuration key is not a constant
  NUMOSSTATE019 | Numos.State                | Warning  | Solver configuration can't be registered automatically
  NUMOSSTATE020 | Numos.State                | Error    | Solver state member can't be restored in place
+ NUMOSSTATE021 | Numos.State                | Error    | Snapshot type must be partial
+ NUMOSSTATE022 | Numos.State                | Error    | Snapshot type has the wrong shape
+ NUMOSSTATE023 | Numos.State                | Error    | Live type can't have a generated snapshot
+ NUMOSSTATE024 | Numos.State                | Error    | Live type has no serialized members
+ NUMOSSTATE025 | Numos.State                | Error    | Live member is not visible to its snapshot
+ NUMOSSTATE026 | Numos.State                | Error    | Live member can't be copied into a snapshot
+ NUMOSSTATE027 | Numos.State                | Error    | Snapshot declares a member the generator creates
+ NUMOSSTATE028 | Numos.State                | Error    | Count member is not a settable int
+ NUMOSSTATE029 | Numos.State                | Error    | Count needs an array
+ NUMOSSTATE030 | Numos.State                | Error    | Live type has more than one snapshot
+ NUMOSSTATE031 | Numos.State                | Error    | Count only applies to live types

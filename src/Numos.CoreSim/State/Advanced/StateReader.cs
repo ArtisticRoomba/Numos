@@ -66,6 +66,12 @@ public ref struct StateReader
     }
 
     /// <summary>
+    ///     Gets the registry that resolves solver configuration keys when the data holds a configuration snapshot, or
+    ///     <see langword="null" /> for the built-in registrations.
+    /// </summary>
+    public SolverConfigurationTypes? SolverConfigurations { get; init; }
+
+    /// <summary>
     ///     Gets whether every byte has been consumed.
     /// </summary>
     public readonly bool IsAtEnd => _position == _data.Length;

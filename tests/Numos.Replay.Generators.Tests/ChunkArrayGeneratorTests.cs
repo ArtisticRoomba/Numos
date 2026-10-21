@@ -50,7 +50,7 @@ public sealed class ChunkArrayGeneratorTests
             Assert.That(generated, Does.Contain("Classifications = chunk.VoxelRoomMap.ToArray();"));
             Assert.That(
                 generated,
-                Does.Contain("global::Numos.CoreSim.Replay.CheckpointArray.CopyTo(Classifications, chunk.VoxelRoomMap.AsSpan());"));
+                Does.Contain("global::Numos.CoreSim.State.Advanced.StateArray.CopyTo(Classifications, chunk.VoxelRoomMap.AsSpan());"));
         });
     }
 

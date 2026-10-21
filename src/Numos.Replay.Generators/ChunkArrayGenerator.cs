@@ -108,7 +108,7 @@ public sealed class ChunkArrayGenerator : IIncrementalGenerator
         foreach (LiveArrayMember member in plan.Members)
         {
             writer.Line(
-                $"global::Numos.CoreSim.Replay.CheckpointArray.CopyTo({member.Member}, chunk.{member.LiveMember}.AsSpan());");
+                $"global::Numos.CoreSim.State.Advanced.StateArray.CopyTo({member.Member}, chunk.{member.LiveMember}.AsSpan());");
         }
 
         writer.Close();

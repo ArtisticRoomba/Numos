@@ -100,6 +100,22 @@ internal static class GeneratorHarness
         return driver.GetRunResult().Results.Single();
     }
 
+    /// <summary>
+    ///     Runs the snapshot generator together with the state generator, which has to stay out of its way.
+    /// </summary>
+    public static GeneratorRunResult[] RunSnapshots(
+        out Compilation output, out ImmutableArray<Diagnostic> diagnostics, params string[] sources)
+    {
+        CSharpParseOptions parseOptions = ParseOptions();
+        CSharpCompilation compilation = CreateCompilation(parseOptions, sources);
+        GeneratorDriver driver = CSharpGeneratorDriver.Create(
+            [new SnapshotGenerator().AsSourceGenerator(), new StateGenerator().AsSourceGenerator()],
+            parseOptions: parseOptions);
+
+        driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out output, out diagnostics);
+        return driver.GetRunResult().Results.ToArray();
+    }
+
     public static GeneratorDriver CreateDriver(
         CSharpParseOptions parseOptions, bool trackSteps = false,
         IIncrementalGenerator? generator = null)

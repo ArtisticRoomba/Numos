@@ -111,6 +111,88 @@ public sealed class NumosSerializeAttribute : Attribute
     ///     </code>
     /// </example>
     public Type? Codec { get; set; }
+
+    /// <summary>
+    ///     Gets or sets the name of an <see langword="int" /> member holding how many leading elements of this array
+    ///     are in use. Only applies on a type with a <see cref="NumosSnapshotOfAttribute" /> snapshot.
+    /// </summary>
+    /// <remarks>
+    ///     For pooled or over-allocated live storage, such as an index list with a separate count. The snapshot holds
+    ///     only that prefix, and restoring copies it back and sets the count member to its length.
+    /// </remarks>
+    /// <example>
+    ///     <code>
+    ///     public int ActiveCount;
+    ///
+    ///     [NumosSerialize(Count = nameof(ActiveCount))]
+    ///     public ushort[] Active = new ushort[64];
+    ///     </code>
+    /// </example>
+    public string? Count { get; set; }
+}
+
+/// <summary>
+///     Makes a <see langword="partial" /> class the generated, detached snapshot of a live type: one member per
+///     <see cref="NumosSerializeAttribute" /> member of the live type, plus capture, restore, equality, a state hash, and
+///     the wire format.
+/// </summary>
+/// <remarks>
+///     <para>
+///         Marking a live member is all it takes to add it to the snapshot. Each one becomes a get-only member of the
+///         snapshot with the same name (or the name passed to <see cref="NumosSerializeAttribute(string)" />, which is
+///         also its wire name) and the live member's visibility, so marked members must be <see langword="internal" />
+///         or <see langword="public" />. The live type needs no attribute of its own and doesn't have to be partial,
+///         but it must be a class in the same project.
+///     </para>
+///     <para>
+///         How a member is captured depends on what it is. Fields and auto-properties of immutable types (primitives,
+///         enums, strings, <c>Int3</c>, quantity aliases, and immutable serializable types) are copied by value.
+///         Arrays and <c>FlatArray&lt;T&gt;</c> of such elements are copied into an
+///         <see cref="System.Collections.Generic.IReadOnlyList{T}" />, optionally only a prefix (see
+///         <see cref="NumosSerializeAttribute.Count" />). A member whose type has a snapshot of its own is captured as
+///         that snapshot, and an array or list of them as a list of snapshots. A property with a hand-written getter is
+///         an adapter: the snapshot keeps whatever the getter returns, so it must return a value nothing else holds,
+///         and restoring passes the value back to its setter.
+///     </para>
+///     <para>
+///         The generator adds <c>internal static Capture(live)</c> and, when every member can be put back, an
+///         <c>internal RestoreInto(live)</c> that writes into an existing live object in the live type's declaration
+///         order: arrays are copied into the live arrays (their lengths must match), settable members are assigned,
+///         and read-only value members (such as dimensions) must already match. Nothing is written until every check
+///         has passed. Members that only the owner can rebuild, such as a list of live children, make the snapshot
+///         capture-only; the owner then creates the live objects and calls the children's <c>RestoreInto</c> itself.
+///     </para>
+///     <para>
+///         The snapshot can declare members of its own. A hand-written <see cref="NumosSerializeAttribute" /> member is
+///         part of the hash and wire format like a generated one; fill it in an optional
+///         <c>partial void OnCaptured(TLive live)</c> and use it in <c>partial void OnRestored(TLive live)</c>, which
+///         runs after the generated restore. <c>partial void OnDecoded()</c> runs after a snapshot is read from bytes,
+///         for validation.
+///     </para>
+/// </remarks>
+/// <example>
+///     <code>
+///     internal sealed class Tank
+///     {
+///         [NumosSerialize] public float Pressure;
+///         [NumosSerialize] public float[] Cells = new float[16];
+///     }
+///
+///     [NumosSnapshotOf(typeof(Tank))]
+///     public sealed partial class TankSnapshot;
+///
+///     var snapshot = TankSnapshot.Capture(tank);
+///     snapshot.RestoreInto(otherTank);
+///     </code>
+/// </example>
+/// <param name="liveType">The live class whose marked members the snapshot mirrors.</param>
+[AttributeUsage(AttributeTargets.Class, Inherited = false)]
+public sealed class NumosSnapshotOfAttribute(Type liveType) : Attribute
+{
+    /// <summary>
+    ///     Gets the live class whose marked members the snapshot mirrors.
+    /// </summary>
+    public Type LiveType { get; } = liveType;
 }
 
 /// <summary>

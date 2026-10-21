@@ -144,4 +144,99 @@ internal static class StateDiagnostics
         Category,
         DiagnosticSeverity.Warning,
         true);
+
+    public static readonly DiagnosticDescriptor SnapshotNotPartial = new(
+        "NUMOSSTATE021",
+        "Snapshot type must be partial",
+        "Type '{0}' must be partial because '{1}' is a [NumosSnapshotOf] snapshot and its members are generated into it",
+        Category,
+        DiagnosticSeverity.Error,
+        true);
+
+    public static readonly DiagnosticDescriptor SnapshotShape = new(
+        "NUMOSSTATE022",
+        "Snapshot type has the wrong shape",
+        "Snapshot '{0}' must be a non-generic, non-static, non-abstract class that isn't a record, isn't nested in a " +
+        "generic type, and derives from object",
+        Category,
+        DiagnosticSeverity.Error,
+        true);
+
+    public static readonly DiagnosticDescriptor LiveTypeInvalid = new(
+        "NUMOSSTATE023",
+        "Live type can't have a generated snapshot",
+        "'{0}' can't be the live type of snapshot '{1}'; it must be a non-generic class declared in the same project",
+        Category,
+        DiagnosticSeverity.Error,
+        true);
+
+    public static readonly DiagnosticDescriptor LiveTypeEmpty = new(
+        "NUMOSSTATE024",
+        "Live type has no serialized members",
+        "Live type '{0}' has no [NumosSerialize] members, so snapshot '{1}' would capture nothing; mark the members " +
+        "that hold state",
+        Category,
+        DiagnosticSeverity.Error,
+        true);
+
+    public static readonly DiagnosticDescriptor LiveMemberInaccessible = new(
+        "NUMOSSTATE025",
+        "Live member is not visible to its snapshot",
+        "'{0}' must be internal or public so the generated snapshot '{1}' can read it; for private state, mark an " +
+        "internal property that reads and writes it",
+        Category,
+        DiagnosticSeverity.Error,
+        true);
+
+    public static readonly DiagnosticDescriptor LiveMemberUnsupported = new(
+        "NUMOSSTATE026",
+        "Live member can't be copied into a snapshot",
+        "'{0}' has type '{1}', which a snapshot can't copy; use an immutable type, an array or FlatArray<T> of " +
+        "immutable elements, a class with its own [NumosSnapshotOf] snapshot (or an array or list of them), or a " +
+        "property whose getter returns a value nothing else holds",
+        Category,
+        DiagnosticSeverity.Error,
+        true);
+
+    public static readonly DiagnosticDescriptor SnapshotNameClash = new(
+        "NUMOSSTATE027",
+        "Snapshot declares a member the generator creates",
+        "Snapshot '{0}' declares '{1}', which the generator also creates from '{2}'; rename one, or give the live " +
+        "member another snapshot name with [NumosSerialize(\"...\")]",
+        Category,
+        DiagnosticSeverity.Error,
+        true);
+
+    public static readonly DiagnosticDescriptor BadCountMember = new(
+        "NUMOSSTATE028",
+        "Count member is not a settable int",
+        "'{0}' names Count member '{1}', which must be a settable instance int field or property of '{2}' that the " +
+        "snapshot can read and write",
+        Category,
+        DiagnosticSeverity.Error,
+        true);
+
+    public static readonly DiagnosticDescriptor CountWithoutCollection = new(
+        "NUMOSSTATE029",
+        "Count needs an array",
+        "'{0}' sets Count, which only applies to an array, a FlatArray<T>, or a list of live objects with a snapshot",
+        Category,
+        DiagnosticSeverity.Error,
+        true);
+
+    public static readonly DiagnosticDescriptor DuplicateSnapshot = new(
+        "NUMOSSTATE030",
+        "Live type has more than one snapshot",
+        "'{0}' and '{1}' are both snapshots of '{2}'; a live type can have only one",
+        Category,
+        DiagnosticSeverity.Error,
+        true);
+
+    public static readonly DiagnosticDescriptor CountOutsideSnapshot = new(
+        "NUMOSSTATE031",
+        "Count only applies to live types",
+        "'{0}' sets Count, which only applies to members of a live type that has a [NumosSnapshotOf] snapshot",
+        Category,
+        DiagnosticSeverity.Error,
+        true);
 }
