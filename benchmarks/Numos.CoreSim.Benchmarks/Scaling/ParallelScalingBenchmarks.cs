@@ -33,7 +33,7 @@ public class ParallelScalingBenchmarks : ScalingBenchmarkBase
     [Benchmark]
     public void Advection_MultiChunkParallelWorkerScaling_Transient()
     {
-        Workload.Steps[0].Solver(Workload.Context);
+        Workload.FlowStep.Solver(Workload.Context);
     }
 }
 
@@ -56,7 +56,7 @@ public class BoundaryParallelScalingBenchmarks : ScalingBenchmarkBase
     [IterationSetup]
     public void PrepareBoundaryEvents()
     {
-        Workload.Reset(1);
+        Workload.Reset(Workload.BoundaryFlowStep);
     }
 
     /// <summary>
@@ -65,7 +65,7 @@ public class BoundaryParallelScalingBenchmarks : ScalingBenchmarkBase
     [Benchmark]
     public void Boundary_MultiChunkParallelWorkerScaling_Transient()
     {
-        Workload.Steps[1].Solver(Workload.Context);
+        Workload.BoundaryFlowStep.Solver(Workload.Context);
     }
 }
 
@@ -98,7 +98,80 @@ public class DenseChunkParallelScalingBenchmarks : ScalingBenchmarkBase
     [Benchmark]
     public void Advection_DenseChunkParallelWorkerScaling_Transient()
     {
-        Workload.Steps[0].Solver(Workload.Context);
+        Workload.FlowStep.Solver(Workload.Context);
+    }
+}
+
+/// <summary>
+///     Measures Euler transport scaling across enough chunks that every configured worker sweeps whole chunks.
+/// </summary>
+/// <remarks>
+///     The Euler stage sizes its schedule from <see cref="Environment.ProcessorCount" /> like advection does, so the
+///     <c>DOTNET_PROCESSOR_COUNT</c> jobs drive both the thread count and the whole-chunk-versus-tiled choice;
+///     <see cref="Numos.CoreSim.Solvers.Euler.EulerFlowSolver.WorkerCountOverride" /> stays unset here. Every chunk
+///     starts with the workload's pressure and temperature checkerboard, so the whole grid is live.
+/// </remarks>
+[ParallelScalingConfig]
+[BenchmarkCategory("Full", "ParallelScaling", "EulerParallelScaling")]
+public class EulerParallelScalingBenchmarks : ScalingBenchmarkBase
+{
+    internal override ScalingWorkloadOptions Options => new()
+    {
+        TransportModel = AtmosTransportModel.Euler,
+        RegisteredChunkCount = 128, AwakeChunkCount = 128, GasCount = 32,
+        BoundaryTopology = BoundaryTopology.Grid3D
+    };
+
+    /// <summary>
+    ///     Restores the same multi-chunk workload before every measured solve.
+    /// </summary>
+    [IterationSetup]
+    public void ResetTransient()
+    {
+        Workload.Reset();
+    }
+
+    /// <summary>
+    ///     Measures one transient Euler tick across 128 dense 8×8×8 chunks with 32 gases.
+    /// </summary>
+    [Benchmark]
+    public void EulerFlow_MultiChunkParallelWorkerScaling_Transient()
+    {
+        Workload.FlowStep.Solver(Workload.Context);
+    }
+}
+
+/// <summary>
+///     Measures whether one dense chunk gives the Euler stage's pencil tiles enough work to occupy multiple workers.
+/// </summary>
+[ParallelScalingConfig]
+[BenchmarkCategory("Full", "ParallelScaling", "EulerParallelScaling")]
+public class DenseChunkEulerParallelScalingBenchmarks : ScalingBenchmarkBase
+{
+    internal override ScalingWorkloadOptions Options => new()
+    {
+        TransportModel = AtmosTransportModel.Euler,
+        ChunkWidth = 16, ChunkHeight = 16, ChunkDepth = 16,
+        RegisteredChunkCount = 1, AwakeChunkCount = 1, GasCount = 32,
+        BoundaryTopology = BoundaryTopology.Isolated
+    };
+
+    /// <summary>
+    ///     Restores the same dense chunk before every measured solve.
+    /// </summary>
+    [IterationSetup]
+    public void ResetTransient()
+    {
+        Workload.Reset();
+    }
+
+    /// <summary>
+    ///     Measures one transient Euler tick in one dense 16×16×16 chunk with 32 gases.
+    /// </summary>
+    [Benchmark]
+    public void EulerFlow_DenseChunkParallelWorkerScaling_Transient()
+    {
+        Workload.FlowStep.Solver(Workload.Context);
     }
 }
 
@@ -131,7 +204,7 @@ public class ThermodynamicsParallelScalingBenchmarks : ScalingBenchmarkBase
     [Benchmark]
     public void Thermodynamics_MultiChunkParallelWorkerScaling_Transient()
     {
-        Workload.Steps[2].Solver(Workload.Context);
+        Workload.ThermodynamicsStep.Solver(Workload.Context);
     }
 }
 
@@ -165,7 +238,7 @@ public class DenseChunkThermodynamicsParallelScalingBenchmarks : ScalingBenchmar
     [Benchmark]
     public void Thermodynamics_DenseChunkParallelWorkerScaling_Transient()
     {
-        Workload.Steps[2].Solver(Workload.Context);
+        Workload.ThermodynamicsStep.Solver(Workload.Context);
     }
 }
 
@@ -198,7 +271,7 @@ public class ReactionParallelScalingBenchmarks : ScalingBenchmarkBase
     [Benchmark]
     public void Reactions_MultiChunkParallelWorkerScaling_Transient()
     {
-        Workload.Steps[4].Solver(Workload.Context);
+        Workload.ReactionsStep.Solver(Workload.Context);
     }
 }
 
@@ -232,6 +305,6 @@ public class DenseChunkReactionParallelScalingBenchmarks : ScalingBenchmarkBase
     [Benchmark]
     public void Reactions_DenseChunkParallelWorkerScaling_Transient()
     {
-        Workload.Steps[4].Solver(Workload.Context);
+        Workload.ReactionsStep.Solver(Workload.Context);
     }
 }

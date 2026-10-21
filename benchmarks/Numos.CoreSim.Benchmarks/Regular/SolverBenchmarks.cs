@@ -1,9 +1,32 @@
 using BenchmarkDotNet.Attributes;
 using Numos.CoreSim.Benchmarks.Infrastructure;
 using Numos.CoreSim.Datatypes.Events;
+using Numos.CoreSim.Replay;
 using Numos.CoreSim.Solvers;
+using Numos.Maths;
 
 namespace Numos.CoreSim.Benchmarks.Regular;
+
+/// <summary>
+///     Registry width and species present in <see cref="SolverBenchmarks.EulerFlowBenchmarks" />.
+/// </summary>
+public enum EulerMixture
+{
+    /// <summary>
+    ///     One registered gas, present everywhere.
+    /// </summary>
+    OneGas,
+
+    /// <summary>
+    ///     Thirty-two registered gases with only the first present, so the cost of registry width shows on its own.
+    /// </summary>
+    OneOfThirtyTwo,
+
+    /// <summary>
+    ///     Four registered gases, all present in equal parts.
+    /// </summary>
+    FourGasMix
+}
 
 /// <summary>
 ///     Groups independently selectable benchmarks for built-in solver stages.
@@ -56,7 +79,7 @@ public static class SolverBenchmarks
         [Benchmark]
         public void Advection()
         {
-            Workload.Steps[0].Solver(Workload.Context);
+            Workload.FlowStep.Solver(Workload.Context);
         }
 
         /// <summary>
@@ -68,8 +91,8 @@ public static class SolverBenchmarks
         [Benchmark]
         public void AdvectionAndBoundaryFlow()
         {
-            Workload.Steps[0].Solver(Workload.Context);
-            Workload.Steps[1].Solver(Workload.Context);
+            Workload.FlowStep.Solver(Workload.Context);
+            Workload.BoundaryFlowStep.Solver(Workload.Context);
         }
 
         /// <summary>
@@ -87,7 +110,155 @@ public static class SolverBenchmarks
         [Benchmark]
         public void Advection_Transient()
         {
-            Workload.Steps[0].Solver(Workload.Context);
+            Workload.FlowStep.Solver(Workload.Context);
+        }
+    }
+
+    /// <summary>
+    ///     Measures the Euler transport stage in one dense 16×16×16 chunk of room air.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         Every case keeps a live pressure feature. Once a chunk's air has evened out the stage has nothing to
+    ///         do with it: the pipeline puts it to sleep and skips it, and before that point the stage is only
+    ///         substepping over uniform air, which times the sweep loop rather than transport. So
+    ///         <see cref="EulerFlow" /> restores a chunk the blast has already rung through for
+    ///         <see cref="WarmUpTicks" /> ticks and re-seeds a small central pulse before every solve, while
+    ///         <see cref="EulerFlow_Transient" /> restores the fresh blast.
+    ///     </para>
+    ///     <para>
+    ///         The parameter varies how many gases the registry holds and how many are present, which the stage's
+    ///         per-species rows pay for separately; see <see cref="EulerMixture" />.
+    ///     </para>
+    /// </remarks>
+    [BenchmarkCategory("Regular", "Solvers", "EulerFlow")]
+    [MemoryDiagnoser]
+    public class EulerFlowBenchmarks
+    {
+        /// <summary>
+        ///     Ticks the blast is advanced before the steady-state checkpoint is taken.
+        /// </summary>
+        public const int WarmUpTicks = 32;
+
+        private const int ChunkSize = 16;
+        private const float BlastRadius = 4f;
+        private static readonly Int3 Centre = new(ChunkSize / 2, ChunkSize / 2, ChunkSize / 2);
+        private AtmosSimulationCheckpoint _blast = null!;
+        private int _presentGases;
+        private AtmosSimulationCheckpoint _settled = null!;
+
+        /// <summary>
+        ///     Gets or sets the registry width and present species.
+        /// </summary>
+        [ParamsSource(nameof(Mixtures))]
+        public EulerMixture Mixture { get; set; }
+
+        /// <summary>
+        ///     Gets the mixtures to run, reduced to the single-gas case when NUMOS_BENCHMARK_SMOKE=1.
+        /// </summary>
+        public IEnumerable<EulerMixture> Mixtures =>
+            ScalingBenchmark.Smoke ? [EulerMixture.OneGas] : Enum.GetValues<EulerMixture>();
+
+        internal SimulationWorkload Workload { get; private set; } = null!;
+
+        /// <summary>
+        ///     Builds the chunk, seeds the blast, and captures both the fresh and the rung-through state.
+        /// </summary>
+        [GlobalSetup]
+        public void Setup()
+        {
+            (int registered, int present) = Mixture switch
+            {
+                EulerMixture.OneGas => (1, 1),
+                EulerMixture.OneOfThirtyTwo => (32, 1),
+                EulerMixture.FourGasMix => (4, 4),
+                _ => throw new ArgumentOutOfRangeException(nameof(Mixture), Mixture, null)
+            };
+
+            _presentGases = present;
+            Workload = new SimulationWorkload(
+                new ScalingWorkloadOptions
+                {
+                    TransportModel = AtmosTransportModel.Euler,
+                    ChunkWidth = ChunkSize, ChunkHeight = ChunkSize, ChunkDepth = ChunkSize,
+                    RegisteredChunkCount = 1, AwakeChunkCount = 1,
+                    GasCount = registered, PresentGasCount = present,
+                    PressureGradient = GradientStrength.None, TemperatureGradient = GradientStrength.None,
+                    BoundaryTopology = BoundaryTopology.Isolated
+                });
+
+            // A hot sphere at four times ambient pressure: twice the moles at twice the temperature.
+            float ambientPerGas = SimulationWorkload.VoxelMoles / present;
+            for (int z = 0; z < ChunkSize; z++)
+            for (int y = 0; y < ChunkSize; y++)
+            for (int x = 0; x < ChunkSize; x++)
+            {
+                float dx = x + 0.5f - Centre.X;
+                float dy = y + 0.5f - Centre.Y;
+                float dz = z + 0.5f - Centre.Z;
+                if (dx * dx + dy * dy + dz * dz >= BlastRadius * BlastRadius)
+                    continue;
+
+                for (int gas = 0; gas < present; gas++)
+                    Workload.Inject(0, new Int3(x, y, z), gas, ambientPerGas, 600f);
+            }
+
+            _blast = Workload.Capture();
+            for (int tick = 0; tick < WarmUpTicks; tick++)
+                Workload.FlowStep.Solver(Workload.Context);
+
+            if (Workload.LastFlowDiagnostics.Substeps == 0)
+                throw new InvalidOperationException("The Euler stage did not advance the warmed-up chunk.");
+
+            _settled = Workload.Capture();
+        }
+
+        /// <summary>
+        ///     Releases chunk storage and worker buffers after the selected case.
+        /// </summary>
+        [GlobalCleanup]
+        public void Cleanup()
+        {
+            Workload.Dispose();
+        }
+
+        /// <summary>
+        ///     Restores the rung-through chunk and adds half a voxel of air to its centre so the solve has a front.
+        /// </summary>
+        [IterationSetup(Target = nameof(EulerFlow))]
+        public void ReseedPulse()
+        {
+            Workload.Restore(_settled);
+            float pulsePerGas = 0.5f * SimulationWorkload.VoxelMoles / _presentGases;
+            for (int gas = 0; gas < _presentGases; gas++)
+                Workload.Inject(0, Centre, gas, pulsePerGas, 300f);
+        }
+
+        /// <summary>
+        ///     Measures one Euler tick over a chunk that has settled from the blast, with a fresh central pulse.
+        /// </summary>
+        [Benchmark]
+        public void EulerFlow()
+        {
+            Workload.FlowStep.Solver(Workload.Context);
+        }
+
+        /// <summary>
+        ///     Restores the fresh blast before a transient solve.
+        /// </summary>
+        [IterationSetup(Target = nameof(EulerFlow_Transient))]
+        public void ResetTransient()
+        {
+            Workload.Restore(_blast);
+        }
+
+        /// <summary>
+        ///     Measures the first Euler tick of the blast, the tick with the fastest front and the most substeps.
+        /// </summary>
+        [Benchmark]
+        public void EulerFlow_Transient()
+        {
+            Workload.FlowStep.Solver(Workload.Context);
         }
     }
 
@@ -103,7 +274,7 @@ public static class SolverBenchmarks
         [Benchmark]
         public void Thermodynamics()
         {
-            Workload.Steps[2].Solver(Workload.Context);
+            Workload.ThermodynamicsStep.Solver(Workload.Context);
         }
 
         /// <summary>
@@ -115,8 +286,8 @@ public static class SolverBenchmarks
         [Benchmark]
         public void ThermodynamicsAndThermalBoundary()
         {
-            Workload.Steps[2].Solver(Workload.Context);
-            Workload.Steps[3].Solver(Workload.Context);
+            Workload.ThermodynamicsStep.Solver(Workload.Context);
+            Workload.ThermalBoundaryStep.Solver(Workload.Context);
         }
 
         /// <summary>
@@ -134,7 +305,7 @@ public static class SolverBenchmarks
         [Benchmark]
         public void Thermodynamics_Transient()
         {
-            Workload.Steps[2].Solver(Workload.Context);
+            Workload.ThermodynamicsStep.Solver(Workload.Context);
         }
     }
 
@@ -150,7 +321,7 @@ public static class SolverBenchmarks
         [Benchmark]
         public void Reactions()
         {
-            Workload.Steps[4].Solver(Workload.Context);
+            Workload.ReactionsStep.Solver(Workload.Context);
         }
 
         /// <summary>
@@ -168,7 +339,7 @@ public static class SolverBenchmarks
         [Benchmark]
         public void Reactions_Transient()
         {
-            Workload.Steps[4].Solver(Workload.Context);
+            Workload.ReactionsStep.Solver(Workload.Context);
         }
     }
 

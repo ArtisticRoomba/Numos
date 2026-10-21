@@ -55,6 +55,6 @@ public class ReactionScalingBenchmarks : ScalingBenchmarkBase
     [Benchmark]
     public void Reaction_ReactionCountScaling_Transient()
     {
-        Workload.Steps[4].Solver(Workload.Context);
+        Workload.ReactionsStep.Solver(Workload.Context);
     }
 }

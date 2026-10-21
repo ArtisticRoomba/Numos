@@ -17,6 +17,10 @@ public abstract class ScalingBenchmarkBase
     /// </summary>
     public virtual string WorkloadMode => "SteadyState and Transient";
     /// <summary>
+    ///     Gets the transport model whose stages the fixture runs.
+    /// </summary>
+    public AtmosTransportModel TransportModel => Options.TransportModel;
+    /// <summary>
     ///     Gets the registered chunk count.
     /// </summary>
     public int RegisteredChunks => Options.RegisteredChunkCount;
@@ -48,6 +52,10 @@ public abstract class ScalingBenchmarkBase
     ///     Gets registered gas species.
     /// </summary>
     public int GasCount => Options.GasCount;
+    /// <summary>
+    ///     Gets gas species actually injected into every active voxel.
+    /// </summary>
+    public int PresentGasCount => Options.InjectedGasCount;
     /// <summary>
     ///     Gets configured reactions.
     /// </summary>

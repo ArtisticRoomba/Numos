@@ -43,7 +43,7 @@ public class GasScalingBenchmarks : ScalingBenchmarkBase
     [Benchmark]
     public void Advection_GasScaling_SteadyState()
     {
-        Workload.Steps[0].Solver(Workload.Context);
+        Workload.FlowStep.Solver(Workload.Context);
     }
 
     /// <summary>
@@ -61,6 +61,6 @@ public class GasScalingBenchmarks : ScalingBenchmarkBase
     [Benchmark]
     public void Advection_GasScaling_Transient()
     {
-        Workload.Steps[0].Solver(Workload.Context);
+        Workload.FlowStep.Solver(Workload.Context);
     }
 }
