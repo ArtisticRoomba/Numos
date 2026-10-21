@@ -221,8 +221,7 @@ stage reads its settings from an `EulerFlowConfig` in `AtmosConfig.SolverConfigu
 through `simulation.LastFlowDiagnostics` (substeps, simulated seconds, and whether the substep cap engaged).
 
 The stage list is part of the world checkpoint. Pick the model before you capture or record, and restore into a world
-running the same model. In this version `euler-flow` handles flow inside each chunk only. Faces into neighbouring chunks
-act as walls.
+running the same model. `euler-flow` also moves gas across chunk faces.
 
 ## Registering gases and adding them to voxels
 

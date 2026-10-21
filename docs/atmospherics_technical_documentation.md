@@ -383,8 +383,9 @@ of both `advection` and `boundary-flow`, and the remaining five stages are uncha
 
 `euler-flow` is a compressible Euler solver with density, momentum, and energy per voxel. It runs dimensionally split
 first-order Godunov sweeps with an HLLC flux at every face. It takes as many CFL substeps as the fastest signal in the
-world demands. `EulerFlowConfig` (§3.5) configures it. It currently moves gas inside each chunk only and treats faces into
-other chunks as walls. `AtmosSimulation.LastFlowDiagnostics` reports each tick's substep count and repairs.
+world demands. `EulerFlowConfig` (§3.5) configures it. Faces between chunks are ordinary faces of the sweep, not a
+separate boundary stage (§6). A chunk that is asleep or holds no gas joins the sweep only once a neighbouring face needs
+it (§9). `AtmosSimulation.LastFlowDiagnostics` reports each tick's substep count and repairs.
 
 The default order is not a numerical requirement. `explicit-gas-transport` and `explicit-thermal-transport` are
 ordinary stages, not side effects of `advection` and `thermodynamics`. A host can therefore disable Numos' own
@@ -655,6 +656,29 @@ carried energy leave the source without being added anywhere.
 Any source that moves gas is kept awake with its sleep timer reset, because the intra-chunk sleep scan cannot see a
 cross-chunk gradient.
 
+### 6.1 Chunk faces under `euler-flow`
+
+The Euler stage has no boundary stage and no reserve pass. A face between two active chunks is solved twice, once by
+each chunk, from identical inputs: each side takes its own cell from its read buffer and the other cell from the
+neighbour's read buffer (the already-derived primitive state and the species rows indexed by gas id, never the
+neighbour's gas channels, whose order can differ), and calls the HLLC flux with the lower global coordinate on the
+left. Two evaluations of the same pure function on the same bits give the same bits, so each chunk applies its own
+`F_right − F_left` and the result is exactly what the same tube would produce inside one chunk. The two-chunk Sod
+test pins that bit for bit. Every chunk advances by the same global substep, so the two sides of a face always see
+each other at the same gas time.
+
+A face into a chunk that is not active this sweep is a wall for that sweep. That is exact for the common case,
+gas at rest at the same pressure on both sides: the wall flux is the pressure `p`, which is also the interior flux of
+a resting gas, and the mass flux is zero either way. It is wrong as soon as the two sides differ, which is what
+activation (§9) exists for; a front that arrives mid-tick sees a wall for the one sweep that discovers it and the
+real face from the next sweep on.
+
+Species rows are the one piece of bookkeeping cross-chunk flow adds. Every active workspace carries a row for every
+gas any active chunk holds (the union, in ascending gas id), zero-filled where the chunk has none of it, so a chunk can
+receive a gas it has never held and the mixture sums on both sides of a face run over the same list in the same
+order. Zero rows add nothing to any sum, so tabling absent gases changes no result; write-back only creates a channel
+for a row once some voxel holds a tracked amount.
+
 ---
 
 ## 7. Heat
@@ -811,6 +835,17 @@ A sleeping chunk is woken by:
 Waking resets the sleep timer and rebuilds the active-air list. Separately, a chunk that sends gas across a boundary
 stays awake with its timer reset (§6).
 
+Under `euler-flow` the sleep metric also scores open faces into neighbouring chunks against the neighbour's pressure,
+and a chunk never sleeps while any of its voxels still carries momentum, so a sleeping chunk always has zero momentum
+everywhere. The stage wakes neighbours itself, through activation: a chunk that is asleep, or awake with no gas, is
+not swept until an open face from an active chunk finds the two sides differing in pressure by more than
+`EulerFlowConfig.WakePressureDelta` or finds the active side moving normal to the face. A pre-pass before the first
+sweep runs that test over every boundary face from the live pressures and repeats for each newly activated chunk, so
+a pressure staircase across several sleeping chunks wakes all of them before any gas moves. A front that only reaches
+a face mid-tick raises the request from inside the sweep, and the tick thread applies it after that sweep's barrier:
+the chunk is woken, gathered from its untouched fields, and swept from the next sweep on. Activation is derived from
+the chunk fields and the configuration, never recorded.
+
 Integration tests (`SimulationStabilityTests`) fill one voxel of L-shaped, donut-shaped, and zigzag rooms and check
 that after 400 ticks every open voxel is within 0.002 mol of the mean, with no negative inventories and total moles
 conserved to the same tolerance.
@@ -840,6 +875,14 @@ energy deltas before writing any temperature (§7.3). Explicit-link transport fo
   keeping the apply parallel (§6).
 - Boundary event production runs in parallel, because each chunk writes only its own batch and the consumer sorts
   batches before applying cross-chunk work.
+- Euler sweeps dispatch every active chunk's pencils (rows, slabs, or sheets, by axis) across the pool, one
+  `ParallelPhase` per axis sweep. With at least as many active chunks as workers each work item is a whole chunk;
+  otherwise the pencils of all chunks are tiled into equal ranges so one dense chunk still fills the pool. Both
+  schedules call the same per-pencil routine in the same per-chunk pencil order, a pencil writes only its own cells
+  and its own reduction slot, and every read is from a buffer no sweep writes (including the neighbour's across a
+  chunk face), so the bits do not depend on the schedule or the worker count. The tick thread reduces the per-pencil
+  signal speeds and repair counts (max and sum, order free), swaps buffers, and applies activation requests between
+  sweeps; gather, write-back, and the sleep decisions are sequential.
 
 ### 10.3 Running without threads
 
