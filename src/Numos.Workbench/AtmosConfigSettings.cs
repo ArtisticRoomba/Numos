@@ -44,6 +44,7 @@ public static class AtmosConfigSettings
         destination.MaxPressureTransferFractionPerNeighbor = source.MaxPressureTransferFractionPerNeighbor;
         destination.AccumulatorWakeThreshold = source.AccumulatorWakeThreshold;
         destination.AccumulatorMaxAliveTicks = source.AccumulatorMaxAliveTicks;
+        destination.ReferenceMolarMass = source.ReferenceMolarMass;
     }
 
     /// <summary>

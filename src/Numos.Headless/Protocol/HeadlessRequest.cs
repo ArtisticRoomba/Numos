@@ -183,6 +183,7 @@ internal sealed class GasDefinition
     public float? MolarEnthalpyOfVaporization { get; init; }
     public int? LiquidId { get; init; }
     public float? DiffusionCoefficient { get; init; }
+    public float? MolarMassKgPerMol { get; init; }
 
     internal GasProperties ToGasProperties()
     {
@@ -197,7 +198,8 @@ internal sealed class GasDefinition
             CondensationEnabled = CondensationEnabled ?? false,
             MolarEnthalpyOfVaporization = MolarEnthalpyOfVaporization ?? 0f,
             LiquidId = LiquidId ?? -1,
-            DiffusionCoefficient = DiffusionCoefficient ?? 0f
+            DiffusionCoefficient = DiffusionCoefficient ?? 0f,
+            MolarMass = MolarMassKgPerMol ?? 0f
         };
     }
 }
@@ -223,6 +225,7 @@ internal sealed class ConfigurationPatch
     public float? MaxPressureTransferFractionPerNeighbor { get; init; }
     public float? AccumulatorWakeThresholdPa { get; init; }
     public int? AccumulatorMaxAliveTicks { get; init; }
+    public float? ReferenceMolarMassKgPerMol { get; init; }
 
     /// <summary>
     ///     Rejects values outside the domain of their field, as the viewer does.
@@ -313,5 +316,8 @@ internal sealed class ConfigurationPatch
 
         if (AccumulatorMaxAliveTicks.HasValue)
             config.AccumulatorMaxAliveTicks = AccumulatorMaxAliveTicks.Value;
+
+        if (ReferenceMolarMassKgPerMol.HasValue)
+            config.ReferenceMolarMass = ReferenceMolarMassKgPerMol.Value;
     }
 }

@@ -67,6 +67,28 @@ public record struct GasProperties
     [Quantity("molarHeatCapacity")]
     [GasCheckpointField(1)]
     public JoulePerMoleKelvin MolarHeatCapacityAtConstantVolume;
+
+    /// <summary>
+    ///     Molar mass, in kilograms per mole (kg/mol).
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         The compressible transport solver converts moles to mass with it, which is where a voxel's density,
+    ///         momentum, and sound speed come from.
+    ///     </para>
+    ///     <para>
+    ///         Zero, negative, and non-finite values mean "unknown": the gas is treated as weighing
+    ///         <see cref="AtmosConfig.ReferenceMolarMass" />, which is also how every gas behaves when no molar
+    ///         masses are set. Invalid values are normalized to zero when the configuration is applied.
+    ///     </para>
+    /// </remarks>
+    /// <example>
+    ///     Oxygen is <c>0.031998f</c> and hydrogen is <c>0.002016f</c>.
+    /// </example>
+    [Quantity("molarMass")]
+    [GasCheckpointField(7)]
+    public KilogramPerMole MolarMass;
+
     /// <summary>
     ///     Unique name that identifies the gas in a <see cref="GasRegistry" /> and in reaction definitions.
     /// </summary>

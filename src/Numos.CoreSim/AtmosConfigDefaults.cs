@@ -104,4 +104,10 @@ public static class AtmosConfigDefaults
     ///     reads it.
     /// </summary>
     public const int AccumulatorMaxAliveTicks = 20;
+
+    /// <summary>
+    ///     Default for <see cref="AtmosConfig.ReferenceMolarMass" />, in kilograms per mole (kg/mol). This is dry air.
+    /// </summary>
+    [Quantity("molarMass")]
+    public const KilogramPerMole ReferenceMolarMass = 0.02897f;
 }
