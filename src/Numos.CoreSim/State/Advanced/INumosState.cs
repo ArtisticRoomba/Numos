@@ -181,3 +181,37 @@ public static class NumosState
         return sink.Value;
     }
 }
+
+/// <summary>
+///     Implemented by the source generator for a class solver with <see cref="NumosSerializeAttribute" /> members, so
+///     its state can be written out and read back into the same instance.
+/// </summary>
+/// <remarks>
+///     <para>
+///         A solver is owned by its host and is never rebuilt from data, so it gets no
+///         <see cref="INumosState{TSelf}.ReadState" />. Restoring a checkpoint or replaying a recorded edit reads
+///         straight into the registered instance instead.
+///     </para>
+///     <para>
+///         Don't implement it by hand. <see cref="INumosState.WriteState{TSink}" /> and <see cref="ReadStateInto" />
+///         have to agree on every field, which is what the generator guarantees.
+///     </para>
+/// </remarks>
+public interface INumosStateTarget : INumosState
+{
+    /// <summary>
+    ///     Reads a payload written by <see cref="INumosState.WriteState{TSink}" /> into this instance.
+    /// </summary>
+    /// <param name="reader">The reader, positioned at the payload.</param>
+    /// <param name="gases">Resolves <see cref="GasProperties" /> references by name.</param>
+    /// <remarks>
+    ///     Every field is decoded before any member is assigned, so malformed data leaves the instance unchanged.
+    ///     Field ids the type doesn't know are skipped, and members the payload doesn't contain keep their current
+    ///     value.
+    /// </remarks>
+    /// <exception cref="InvalidDataException">The data is malformed or names a gas <paramref name="gases" /> lacks.</exception>
+    /// <exception cref="InvalidOperationException">
+    ///     The data references a gas and <paramref name="gases" /> is <see langword="null" />.
+    /// </exception>
+    void ReadStateInto(ref StateReader reader, IGasRegistry? gases);
+}

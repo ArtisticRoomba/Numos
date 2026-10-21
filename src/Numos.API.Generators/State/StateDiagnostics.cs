@@ -50,10 +50,9 @@ internal static class StateDiagnostics
 
     public static readonly DiagnosticDescriptor WorldSolver = new(
         "NUMOSSTATE009",
-        "Solver objects cannot hold serialized members",
-        "'{0}' implements IAtmosWorldSolver; solver objects are outside checkpoints, so replay would never reproduce " +
-        "its [NumosSerialize] members. Move them into a solver configuration (IAtmosSolverConfiguration) for " +
-        "settings, or a [ChunkData] field for per-voxel state.",
+        "Solver with serialized members must be a class",
+        "'{0}' implements IAtmosWorldSolver and has [NumosSerialize] members, so it must be a class; state is read " +
+        "back into the registered instance, which a boxed struct copy would lose track of",
         Category,
         DiagnosticSeverity.Error,
         true);
@@ -123,6 +122,15 @@ internal static class StateDiagnostics
         "Solver configuration key is not a constant",
         "Solver configuration '{0}' must return a constant string from Key, such as " +
         "'public string Key => \"my-mod/fire\";', so it can be registered for loading",
+        Category,
+        DiagnosticSeverity.Error,
+        true);
+
+    public static readonly DiagnosticDescriptor NotAssignable = new(
+        "NUMOSSTATE020",
+        "Solver state member can't be restored in place",
+        "'{0}' is readonly, get-only, or init-only, but solver state is restored by assigning to the registered " +
+        "instance; make it writable",
         Category,
         DiagnosticSeverity.Error,
         true);

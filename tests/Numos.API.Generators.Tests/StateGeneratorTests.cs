@@ -542,4 +542,54 @@ public sealed class StateGeneratorTests
             GeneratorHarness.GeneratedSource(result, "MyMod.Settings.NumosState.g.cs"),
             Does.Not.Contain("CreateSnapshot").And.Not.Contain("OnSnapshot"));
     }
+
+    [Test]
+    public void WorldSolver_GetsAnInPlaceReaderAndNoConstructedOne()
+    {
+        const string source = """
+                              using Numos.API;
+                              using Numos.CoreSim;
+                              using Numos.CoreSim.State;
+
+                              namespace MyMod;
+
+                              public sealed partial class FireSolver : IAtmosWorldSolver
+                              {
+                                  private readonly System.Collections.Generic.List<int> _scratch = [];
+
+                                  public FireSolver(int seed) => _ticks = seed;
+
+                                  [NumosSerialize] public float IgnitionTemperature = 600f;
+                                  [NumosSerialize] private int _ticks;
+                                  [NumosSerialize] public GasProperties? Fuel { get; set; }
+
+                                  public void Solve(AtmosWorldSolverContext context) => _ticks++;
+                              }
+                              """;
+
+        GeneratorRunResult result = GeneratorHarness.RunState(out Compilation output, out var diagnostics, null, source);
+        Assert.That(diagnostics, Is.Empty);
+        Assert.That(GeneratorHarness.Errors(output), Is.Empty);
+
+        string generated = GeneratorHarness.GeneratedSource(result, "MyMod.FireSolver.NumosState.g.cs");
+        Assert.Multiple(() =>
+        {
+            Assert.That(generated, Does.Contain("partial class FireSolver : global::Numos.CoreSim.State.Advanced.INumosStateTarget"));
+            Assert.That(generated, Does.Contain("void global::Numos.CoreSim.State.Advanced.INumosState.WriteState<TSink>(ref TSink sink)"));
+            Assert.That(
+                generated,
+                Does.Contain(
+                    "void global::Numos.CoreSim.State.Advanced.INumosStateTarget.ReadStateInto(" +
+                    "ref global::Numos.CoreSim.State.Advanced.StateReader reader, global::Numos.CoreSim.IGasRegistry? gases)"));
+
+            Assert.That(generated, Does.Contain("this._ticks);"));
+            Assert.That(generated, Does.Match(@"if \(" + HasLocal("_ticks") + @"\)\s+this\._ticks = " + FieldLocal("_ticks") + ";"));
+            Assert.That(generated, Does.Not.Contain("INumosState<").And.Not.Contain("new global::MyMod.FireSolver"));
+        });
+
+        // Every assignment comes after the read loop, so a payload that fails halfway changes nothing.
+        int lastRead = generated.LastIndexOf("reader.EndObject();", StringComparison.Ordinal);
+        int firstAssignment = generated.IndexOf("this._ticks = ", StringComparison.Ordinal);
+        Assert.That(firstAssignment, Is.GreaterThan(lastRead));
+    }
 }

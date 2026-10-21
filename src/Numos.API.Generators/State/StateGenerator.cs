@@ -8,7 +8,8 @@ namespace Numos.API.Generators.State;
 
 /// <summary>
 ///     Implements <c>INumosState&lt;T&gt;</c> for every type with <c>[NumosSerialize]</c> members, plus
-///     <c>IAtmosSolverConfiguration</c>'s equality, hash, and snapshot when the type is a solver configuration.
+///     <c>IAtmosSolverConfiguration</c>'s equality, hash, and snapshot when the type is a solver configuration. A class
+///     solver gets <c>INumosStateTarget</c> instead, which reads state back into the registered instance.
 /// </summary>
 /// <remarks>
 ///     <para>
@@ -180,7 +181,8 @@ public sealed class StateGenerator : IIncrementalGenerator
             node = node?.Parent;
         }
 
-        if (Implements(type, WorldSolverMetadataName))
+        bool isWorldSolver = Implements(type, WorldSolverMetadataName);
+        if (isWorldSolver && type.TypeKind != TypeKind.Class)
         {
             // Its fields would only produce noise about attributes that can't fix anything.
             diagnostics.Add(DiagnosticInfo.Create(StateDiagnostics.WorldSolver, typeLocation, typeDisplayName));
@@ -197,7 +199,7 @@ public sealed class StateGenerator : IIncrementalGenerator
         }
 
         bool isSolverConfiguration = Implements(type, SolverConfigurationMetadataName);
-        foreach (string generated in OwnedMemberNames(isSolverConfiguration))
+        foreach (string generated in OwnedMemberNames(isSolverConfiguration, isWorldSolver))
         {
             if (FindMethod(type, generated) is { } member)
             {
@@ -308,6 +310,14 @@ public sealed class StateGenerator : IIncrementalGenerator
             };
 
             bool initOnly = member is IPropertySymbol { SetMethod.IsInitOnly: true };
+            if (isWorldSolver && (!settable || initOnly))
+            {
+                // A restore writes into the registered instance, so there's no constructor or initializer to use.
+                diagnostics.Add(DiagnosticInfo.Create(StateDiagnostics.NotAssignable, location, displayName));
+                canGenerate = false;
+                continue;
+            }
+
             ITypeSymbol? codec = CodecOf(serialize);
             StateShape shape = codec is not null ? StateShape.FromCodec(memberType!, codec) : StateShape.From(memberType!);
             if (codec is not null || (settable && !initOnly) || !Immutability.IsImmutable(memberType!))
@@ -337,6 +347,7 @@ public sealed class StateGenerator : IIncrementalGenerator
             typeLocation,
             type.IsReferenceType,
             isSolverConfiguration,
+            isWorldSolver,
             stateKey,
             snapshot,
             registration,
@@ -354,6 +365,7 @@ public sealed class StateGenerator : IIncrementalGenerator
             type.ToDisplayString(),
             null,
             type.IsReferenceType,
+            false,
             false,
             null,
             SnapshotKind.None,
@@ -550,8 +562,14 @@ public sealed class StateGenerator : IIncrementalGenerator
         }
     }
 
-    private static IEnumerable<string> OwnedMemberNames(bool isSolverConfiguration)
+    private static IEnumerable<string> OwnedMemberNames(bool isSolverConfiguration, bool isWorldSolver)
     {
+        if (isWorldSolver)
+        {
+            yield return "WriteState";
+            yield return "ReadStateInto";
+        }
+
         if (!isSolverConfiguration)
             yield break;
 
@@ -660,8 +678,13 @@ public sealed class StateGenerator : IIncrementalGenerator
         if (!declaration.CanGenerate || hasErrors)
             return new StateTypeResult(null, null, diagnostics.ToEquatableArray());
 
-        // Only checked once the fields themselves are fine, so a bad field type isn't reported twice.
-        StateReadPlan? plan = StateBinding.Bind(declaration.Constructors, fields, aliases, out string reason);
+        // Only checked once the fields themselves are fine, so a bad field type isn't reported twice. A solver is
+        // restored in place, so it needs no constructor the reader can call.
+        string reason = "";
+        StateReadPlan? plan = declaration.IsWorldSolver
+            ? new StateReadPlan(EquatableArray<string>.Empty, EquatableArray<StateInitializerModel>.Empty)
+            : StateBinding.Bind(declaration.Constructors, fields, aliases, out reason);
+
         if (plan is null)
         {
             diagnostics.Add(DiagnosticInfo.Create(StateDiagnostics.NoConstructor, declaration.Location, declaration.DisplayName, reason));
@@ -673,6 +696,7 @@ public sealed class StateGenerator : IIncrementalGenerator
             declaration.TypeName,
             declaration.IsReferenceType,
             declaration.IsSolverConfiguration,
+            declaration.IsWorldSolver,
             declaration.StateKey,
             declaration.Snapshot,
             fields.ToEquatableArray(),

@@ -231,7 +231,7 @@ public sealed class StateDiagnosticTests
     }
 
     [Test]
-    public void SerializedMemberOnWorldSolver_ReportsNumosState009Once()
+    public void SerializedMemberOnWorldSolverClass_GeneratesWithoutConstructorDiagnostics()
     {
         const string source = """
                               using Numos.API;
@@ -241,10 +241,37 @@ public sealed class StateDiagnosticTests
 
                               public sealed partial class FireSolver : IAtmosWorldSolver
                               {
-                                  private int _scratch;
+                                  private readonly int _cache;
+
+                                  public FireSolver(int cache) => _cache = cache;
 
                                   [NumosSerialize] public float IgnitionTemperature { get; set; }
                                   [NumosSerialize] public float SpreadRate;
+                                  [NumosSerialize] private int _ticks;
+
+                                  public void Solve(AtmosWorldSolverContext context) => _ticks += _cache;
+                              }
+                              """;
+
+        Diagnostic[] diagnostics = Run(out GeneratorRunResult result, source);
+        Assert.That(diagnostics, Is.Empty);
+        Assert.That(result.GeneratedSources, Has.Length.EqualTo(1));
+    }
+
+    [Test]
+    public void SerializedMemberOnStructSolver_ReportsNumosState009Once()
+    {
+        const string source = """
+                              using Numos.API;
+                              using Numos.CoreSim.State;
+
+                              namespace MyMod;
+
+                              public partial struct FireSolver : IAtmosWorldSolver
+                              {
+                                  private int _scratch;
+
+                                  [NumosSerialize] public float IgnitionTemperature { get; set; }
 
                                   public void Solve(AtmosWorldSolverContext context) => _scratch++;
                               }
@@ -252,8 +279,67 @@ public sealed class StateDiagnosticTests
 
         Diagnostic[] diagnostics = Run(out GeneratorRunResult result, source);
         Assert.That(GeneratorHarness.Ids(diagnostics), Is.EqualTo(new[] { "NUMOSSTATE009" }));
-        Assert.That(diagnostics[0].GetMessage(), Does.Contain("solver configuration").And.Contain("[ChunkData]"));
+        Assert.That(diagnostics[0].GetMessage(), Does.Contain("must be a class"));
         Assert.That(result.GeneratedSources, Is.Empty);
+    }
+
+    [Test]
+    public void UnassignableSolverMembers_ReportNumosState020Each()
+    {
+        const string source = """
+                              using Numos.API;
+                              using Numos.CoreSim.State;
+
+                              namespace MyMod;
+
+                              public sealed partial class FireSolver : IAtmosWorldSolver
+                              {
+                                  [NumosSerialize] private readonly int _limit = 3;
+                                  [NumosSerialize] public float Rate { get; } = 1f;
+                                  [NumosSerialize] public float Spread { get; init; }
+                                  [NumosSerialize] public float Fine { get; private set; }
+
+                                  public void Solve(AtmosWorldSolverContext context)
+                                  {
+                                  }
+                              }
+                              """;
+
+        Diagnostic[] diagnostics = Run(out GeneratorRunResult result, source);
+        Assert.That(GeneratorHarness.Ids(diagnostics), Is.EqualTo(new[] { "NUMOSSTATE020", "NUMOSSTATE020", "NUMOSSTATE020" }));
+        Assert.That(
+            diagnostics.Select(static diagnostic => diagnostic.GetMessage()),
+            Has.Some.Contains("_limit").And.Some.Contains("Rate").And.Some.Contains("Spread"));
+
+        Assert.That(result.GeneratedSources, Is.Empty);
+    }
+
+    [Test]
+    public void HandWrittenReadStateIntoOnSolver_ReportsNumosState008()
+    {
+        const string source = """
+                              using Numos.API;
+                              using Numos.CoreSim;
+                              using Numos.CoreSim.State;
+                              using Numos.CoreSim.State.Advanced;
+
+                              namespace MyMod;
+
+                              public sealed partial class FireSolver : IAtmosWorldSolver
+                              {
+                                  [NumosSerialize] public float Rate;
+
+                                  public void ReadStateInto(ref StateReader reader, IGasRegistry? gases)
+                                  {
+                                  }
+
+                                  public void Solve(AtmosWorldSolverContext context)
+                                  {
+                                  }
+                              }
+                              """;
+
+        Assert.That(Ids(source), Is.EqualTo(new[] { "NUMOSSTATE008" }));
     }
 
     [Test]

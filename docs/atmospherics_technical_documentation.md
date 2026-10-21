@@ -1473,7 +1473,7 @@ Membership is opt-in; `[NumosIgnore]` marks a member as deliberately not state. 
 | `NUMOSSTATE005` | Error    | Two members' wire names hash to the same id. The message names both.                                         |
 | `NUMOSSTATE007` | Error    | A member's type isn't supported (delegates, `object`, mutable `List<T>`, unknown quantity aliases, ...).      |
 | `NUMOSSTATE008` | Error    | A solver configuration hand-writes `SemanticallyEquals` or `ComputeStateHash`.                                |
-| `NUMOSSTATE009` | Error    | `[NumosSerialize]` is on an `IAtmosWorldSolver`, which replay never checkpoints.                              |
+| `NUMOSSTATE009` | Error    | `[NumosSerialize]` is on a struct that implements `IAtmosWorldSolver`; stateful solvers must be classes.      |
 | `NUMOSSTATE011` | Error    | A member has both `[NumosSerialize]` and `[NumosIgnore]`.                                                     |
 | `NUMOSSTATE012` | Error    | `[NumosSerialize]` is on a static or const member.                                                            |
 | `NUMOSSTATE013` | Error    | The class derives from a class other than `object`, whose members the generator can't see.                   |
@@ -1483,6 +1483,7 @@ Membership is opt-in; `[NumosIgnore]` marks a member as deliberately not state. 
 | `NUMOSSTATE017` | Error    | `[NumosSerialize("...")]` passes a blank wire name.                                                           |
 | `NUMOSSTATE018` | Error    | A solver configuration's `Key` doesn't return a compile-time constant.                                        |
 | `NUMOSSTATE019` | Warning  | A solver configuration is private or protected (or nested in one), so the module initializer can't name it.   |
+| `NUMOSSTATE020` | Error    | A solver's marked member is `readonly`, get-only, or `init`, so a restore can't assign it in place.           |
 
 A solver can cache anything derived from the settings or the gas registry under a `SolverDataKey<T>`. Numos drops
 that value whenever the configuration changes.

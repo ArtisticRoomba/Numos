@@ -34,7 +34,7 @@
  NUMOSSTATE005 | Numos.State                | Error    | Two serialized members hash to the same id
  NUMOSSTATE007 | Numos.State                | Error    | Serialized member type is not supported
  NUMOSSTATE008 | Numos.State                | Error    | Serializable type declares a member the generator owns
- NUMOSSTATE009 | Numos.State                | Error    | Solver objects cannot hold serialized members
+ NUMOSSTATE009 | Numos.State                | Error    | Solver with serialized members must be a class
  NUMOSSTATE011 | Numos.State                | Error    | Member is marked both serialized and ignored
  NUMOSSTATE012 | Numos.State                | Error    | Serialized member must be an instance member
  NUMOSSTATE013 | Numos.State                | Error    | Serializable class must not derive from another class
@@ -44,3 +44,4 @@
  NUMOSSTATE017 | Numos.State                | Error    | Wire name is blank
  NUMOSSTATE018 | Numos.State                | Error    | Solver configuration key is not a constant
  NUMOSSTATE019 | Numos.State                | Warning  | Solver configuration can't be registered automatically
+ NUMOSSTATE020 | Numos.State                | Error    | Solver state member can't be restored in place

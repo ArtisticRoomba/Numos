@@ -63,6 +63,9 @@ internal enum SnapshotKind
 /// <param name="TypeName">The fully qualified type, used as the interface's type argument.</param>
 /// <param name="IsReferenceType">Whether generated equality and ordering need null checks.</param>
 /// <param name="IsSolverConfiguration">Whether to implement <c>IAtmosSolverConfiguration</c>'s equality and hash.</param>
+/// <param name="IsWorldSolver">
+///     Whether the type is a class solver, which gets <c>INumosStateTarget</c> rather than <c>INumosState&lt;T&gt;</c>.
+/// </param>
 /// <param name="StateKey">The constant the type's <c>Key</c> property returns, or null.</param>
 /// <param name="Snapshot">Whether and how to generate <c>CreateSnapshot</c>.</param>
 /// <param name="Fields">The state fields in ascending id order.</param>
@@ -72,6 +75,7 @@ internal sealed record StateTypeModel(
     string TypeName,
     bool IsReferenceType,
     bool IsSolverConfiguration,
+    bool IsWorldSolver,
     string? StateKey,
     SnapshotKind Snapshot,
     EquatableArray<StateFieldModel> Fields,
@@ -93,6 +97,7 @@ internal sealed record StateTypeDeclaration(
     LocationInfo? Location,
     bool IsReferenceType,
     bool IsSolverConfiguration,
+    bool IsWorldSolver,
     string? StateKey,
     SnapshotKind Snapshot,
     string? Registration,

@@ -9,9 +9,13 @@ internal static class StateEmitter
     private const string NonGenericInterface = "global::Numos.CoreSim.State.Advanced.INumosState";
     private const string SolverConfiguration = "global::Numos.CoreSim.IAtmosSolverConfiguration";
     private const string Advanced = "global::Numos.CoreSim.State.Advanced.";
+    private const string TargetInterface = "global::Numos.CoreSim.State.Advanced.INumosStateTarget";
 
     public static string Emit(StateTypeModel model)
     {
+        if (model.IsWorldSolver)
+            return EmitWorldSolver(model);
+
         string self = model.TypeName;
         string stateInterface = StateInterface + "<" + self + ">";
         var writer = new CodeWriter();
@@ -37,6 +41,52 @@ internal static class StateEmitter
             EmitSolverConfiguration(writer, model);
         }
 
+        writer.CloseTypeChain(model.Type);
+        writer.CloseNamespace(model.Type);
+        return writer.ToString();
+    }
+
+    /// <summary>
+    ///     Emits a class solver's state members. A solver is never constructed from data, so instead of
+    ///     <c>INumosState&lt;T&gt;</c> it gets an instance writer and an in-place reader.
+    /// </summary>
+    private static string EmitWorldSolver(StateTypeModel model)
+    {
+        var writer = new CodeWriter();
+        writer.Header();
+        writer.OpenNamespace(model.Type);
+        writer.OpenTypeChain(model.Type, " : " + TargetInterface);
+
+        writer.Line(CodeWriter.GeneratedCodeAttribute);
+        writer.Line("void " + NonGenericInterface + ".WriteState<TSink>(ref TSink sink)");
+        writer.Open();
+        writer.Line("sink.BeginObject();");
+        foreach (StateFieldModel field in model.Fields)
+        {
+            writer.Line("sink.BeginField(" + field.Id + ");");
+            writer.Line(field.Shape.CodecExpression + ".Write(ref sink, this." + field.MemberName + ");");
+            writer.Line("sink.EndField();");
+        }
+
+        writer.Line("sink.EndObject();");
+        writer.Close();
+        writer.Line();
+        writer.Line(CodeWriter.GeneratedCodeAttribute);
+        writer.Line(
+            "void " + TargetInterface +
+            ".ReadStateInto(ref global::Numos.CoreSim.State.Advanced.StateReader reader, global::Numos.CoreSim.IGasRegistry? gases)");
+
+        writer.Open();
+        EmitReadFields(writer, model);
+
+        // Assigned only once everything decoded, so a bad payload can't leave the solver half restored.
+        foreach (StateFieldModel field in model.Fields)
+        {
+            writer.Line("if (has" + field.Id + ")");
+            writer.Line("    this." + field.MemberName + " = field" + field.Id + ";");
+        }
+
+        writer.Close();
         writer.CloseTypeChain(model.Type);
         writer.CloseNamespace(model.Type);
         return writer.ToString();
@@ -83,6 +133,47 @@ internal static class StateEmitter
             ".ReadState(ref global::Numos.CoreSim.State.Advanced.StateReader reader, global::Numos.CoreSim.IGasRegistry? gases)");
 
         writer.Open();
+        EmitReadFields(writer, model);
+        StateReadPlan plan = model.Read;
+        StateInitializerModel[] inline = plan.Initializers.Where(static initializer => !initializer.AfterConstruction).ToArray();
+        StateInitializerModel[] after = plan.Initializers.Where(static initializer => initializer.AfterConstruction).ToArray();
+        string construction = (after.Length == 0 ? "return new " : "var result = new ") + model.TypeName + "(" +
+                              string.Join(", ", plan.Arguments) + ")";
+
+        if (inline.Length == 0)
+        {
+            writer.Line(construction + ";");
+        }
+        else
+        {
+            writer.Line(construction);
+            writer.Open();
+            foreach (StateInitializerModel initializer in inline)
+                writer.Line(initializer.MemberName + " = " + initializer.Expression + ",");
+
+            writer.Close(";");
+        }
+
+        if (after.Length > 0)
+        {
+            foreach (StateInitializerModel initializer in after)
+            {
+                writer.Line("if (has" + initializer.Id + ")");
+                writer.Line("    result." + initializer.MemberName + " = " + initializer.Expression + ";");
+            }
+
+            writer.Line("return result;");
+        }
+
+        writer.Close();
+    }
+
+    /// <summary>
+    ///     Writes the <c>field{id}</c>/<c>has{id}</c> locals and the loop that fills them from <c>reader</c>, ending
+    ///     with the object closed.
+    /// </summary>
+    private static void EmitReadFields(CodeWriter writer, StateTypeModel model)
+    {
         foreach (StateFieldModel field in model.Fields)
         {
             writer.Line(field.Shape.TypeExpression + " field" + field.Id + " = default!;");
@@ -126,38 +217,6 @@ internal static class StateEmitter
 
         writer.Line();
         writer.Line("reader.EndObject();");
-        StateReadPlan plan = model.Read;
-        StateInitializerModel[] inline = plan.Initializers.Where(static initializer => !initializer.AfterConstruction).ToArray();
-        StateInitializerModel[] after = plan.Initializers.Where(static initializer => initializer.AfterConstruction).ToArray();
-        string construction = (after.Length == 0 ? "return new " : "var result = new ") + model.TypeName + "(" +
-                              string.Join(", ", plan.Arguments) + ")";
-
-        if (inline.Length == 0)
-        {
-            writer.Line(construction + ";");
-        }
-        else
-        {
-            writer.Line(construction);
-            writer.Open();
-            foreach (StateInitializerModel initializer in inline)
-                writer.Line(initializer.MemberName + " = " + initializer.Expression + ",");
-
-            writer.Close(";");
-        }
-
-        if (after.Length > 0)
-        {
-            foreach (StateInitializerModel initializer in after)
-            {
-                writer.Line("if (has" + initializer.Id + ")");
-                writer.Line("    result." + initializer.MemberName + " = " + initializer.Expression + ";");
-            }
-
-            writer.Line("return result;");
-        }
-
-        writer.Close();
     }
 
     private static void EmitStateEquals(CodeWriter writer, StateTypeModel model, string stateInterface)

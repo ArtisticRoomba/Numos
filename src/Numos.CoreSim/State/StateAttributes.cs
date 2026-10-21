@@ -44,9 +44,10 @@ namespace Numos.CoreSim.State;
 ///         parameter's default value, keeps what the constructor gave it, or gets <c>default</c>.
 ///     </para>
 ///     <para>
-///         Not allowed on types implementing <c>IAtmosWorldSolver</c> yet: solver objects sit outside checkpoints, so a
-///         value saved there would never be reproduced by replay. Put settings in an
-///         <see cref="IAtmosSolverConfiguration" /> and per-voxel state in a <c>[ChunkData]</c> field.
+///         On a class implementing <c>IAtmosWorldSolver</c>, marked members are the solver's state: Numos checkpoints,
+///         hashes, and saves them, and records an edit the host makes between ticks. They're read back into the
+///         registered instance rather than through a constructor, so each one has to be assignable (no
+///         <see langword="readonly" /> fields, get-only, or <c>init</c> properties).
 ///     </para>
 /// </remarks>
 /// <example>
