@@ -706,6 +706,7 @@ public sealed partial class AtmosWorld : IDisposable
         {
             ThrowIfDisposed();
             ThrowIfTickExecuting("capture a world checkpoint during a tick");
+            RecordSolverStateEdits();
             AtmosSimulation[] simulations = _orderedSimulations;
             int enteredGates = EnterSimulationGates(simulations);
             try
@@ -1102,6 +1103,8 @@ public sealed partial class AtmosWorld : IDisposable
 
     private void TickCore()
     {
+        // Before anything in the tick can read solver state, so replay applies the edit at the same point.
+        RecordSolverStateEdits();
         _isTickExecuting = true;
         AtmosSimulation[] simulations = _orderedSimulations;
         int enteredGates = 0;
@@ -1156,6 +1159,10 @@ public sealed partial class AtmosWorld : IDisposable
 
             _isTickExecuting = false;
         }
+
+        // Whatever the solvers changed during the tick is derived, so it becomes the new baseline rather than an edit.
+        if (_isWorldRecording)
+            RefreshSolverStateHashes();
     }
 
     /// <summary>

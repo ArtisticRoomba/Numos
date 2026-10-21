@@ -183,6 +183,23 @@ internal static partial class AtmosWorldReplayCodec
         return states;
     }
 
+    private static void WriteSetAtmosWorldSolverStateOperation(BinaryWriter writer, SetAtmosWorldSolverStateOperation operation)
+    {
+        AtmosReplayCodec.WriteString(writer, operation.Name);
+        writer.Write(operation.State.Length);
+        writer.Write(operation.State.Span);
+    }
+
+    private static SetAtmosWorldSolverStateOperation ReadSetAtmosWorldSolverStateOperation(BinaryReader reader, int maxStringBytes)
+    {
+        string name = AtmosReplayCodec.ReadString(reader, maxStringBytes);
+        if (string.IsNullOrWhiteSpace(name))
+            throw new InvalidDataException("A solver state operation names a blank solver.");
+
+        byte[] payload = AtmosReplayCodec.ReadPayload(reader, AtmosReplayCodec.ReadCount(reader, int.MaxValue, "solver state byte"));
+        return new SetAtmosWorldSolverStateOperation(name, payload);
+    }
+
     private static void WriteSetAtmosWorldConfigOperation(BinaryWriter writer, SetAtmosWorldConfigOperation operation)
     {
         AtmosReplayCodec.WriteConfig(writer, operation.Config);

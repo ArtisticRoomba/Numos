@@ -149,6 +149,8 @@ public sealed partial class AtmosWorld
                 _isWorldRecording = true;
             }
 
+            // Edits made before the recording started belong to the starting state, not to the recording.
+            RefreshSolverStateHashes();
             foreach (var simulation in _orderedSimulations)
                 AttachWorldRecorder(simulation);
         }
@@ -162,17 +164,25 @@ public sealed partial class AtmosWorld
     /// <exception cref="InvalidOperationException">No world recording has been started.</exception>
     public AtmosWorldRecording CaptureRecording()
     {
-        lock (_recordingGate)
+        lock (Gate)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-            if (!_hasWorldRecording)
-                throw new InvalidOperationException("The world has no recording to capture.");
 
-            var head = _isWorldRecording
-                ? new AtmosTimelinePosition(checked((ulong)TickCount), _lastWorldOperationSequence)
-                : _worldRecordingHead;
+            // A solver calling this mid-tick isn't at a boundary; the tick's end takes care of its own edits.
+            if (!_isTickExecuting)
+                RecordSolverStateEdits();
 
-            return new AtmosWorldRecording(_worldRecordingStart, head, _recordedWorldOperations);
+            lock (_recordingGate)
+            {
+                if (!_hasWorldRecording)
+                    throw new InvalidOperationException("The world has no recording to capture.");
+
+                var head = _isWorldRecording
+                    ? new AtmosTimelinePosition(checked((ulong)TickCount), _lastWorldOperationSequence)
+                    : _worldRecordingHead;
+
+                return new AtmosWorldRecording(_worldRecordingStart, head, _recordedWorldOperations);
+            }
         }
     }
 
@@ -196,6 +206,7 @@ public sealed partial class AtmosWorld
         {
             ThrowIfDisposed();
             ThrowIfTickExecuting("stop recording");
+            RecordSolverStateEdits();
             lock (_recordingGate)
             {
                 if (!_isWorldRecording)
@@ -251,6 +262,7 @@ public sealed partial class AtmosWorld
                 _isWorldRecording = true;
             }
 
+            RefreshSolverStateHashes();
             foreach (var simulation in _orderedSimulations)
                 AttachWorldRecorder(simulation);
         }
@@ -421,6 +433,55 @@ public sealed partial class AtmosWorld
         }
     }
 
+    /// <summary>
+    ///     Records the state of every class solver the host edited since Numos last hashed it. Called at each
+    ///     boundary: before a tick, a checkpoint capture, and the recording being stopped or copied.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         The caller holds <see cref="Gate" /> outside a tick. Does nothing unless a recording is live, since the
+    ///         baseline hashes only matter to a recording and every way into one refreshes them first.
+    ///     </para>
+    ///     <para>
+    ///         An edit is recorded here rather than when it happened, so it can land after other operations from the
+    ///         same idle window. That's only safe because no external operation reads class solver state; keep it that
+    ///         way when adding one.
+    ///     </para>
+    /// </remarks>
+    private void RecordSolverStateEdits()
+    {
+        WorldSolverRegistration[] stateful = Solvers.StatefulSteps;
+        if (stateful.Length == 0 || !_isWorldRecording || _isApplyingWorldOperation)
+            return;
+
+        StateBinarySink sink = default;
+        bool hasSink = false;
+        foreach (var registration in stateful)
+        {
+            ulong hash = registration.ComputeStateHash();
+            if (hash == registration.StateHash)
+                continue;
+
+            if (!hasSink)
+            {
+                sink = new StateBinarySink();
+                hasSink = true;
+            }
+
+            registration.StateHash = hash;
+            RecordWorldOperation(new SetAtmosWorldSolverStateOperation(registration.Name, registration.CaptureState(ref sink)));
+        }
+    }
+
+    /// <summary>
+    ///     Takes the current state of every class solver as the baseline the next boundary compares against.
+    /// </summary>
+    private void RefreshSolverStateHashes()
+    {
+        foreach (var registration in Solvers.StatefulSteps)
+            registration.StateHash = registration.ComputeStateHash();
+    }
+
     private AtmosWorldStateHash ComputeStateHashCore()
     {
         return CaptureCheckpoint().ComputeStateHash();
@@ -489,6 +550,16 @@ public sealed partial class AtmosWorld
     internal void Apply(SetAtmosWorldSolverLayoutOperation layout)
     {
         Solvers.SetLayoutCore(layout.Stages);
+    }
+
+    internal void Apply(SetAtmosWorldSolverStateOperation state)
+    {
+        var registration = Solvers.Find(state.Name);
+        if (registration?.State is null)
+            throw new ArgumentException($"World solver '{state.Name}' has no [NumosSerialize] state to set.", nameof(state));
+
+        registration.RestoreState(state.State.Span, _config.GasRegistry);
+        registration.StateHash = registration.ComputeStateHash();
     }
 
     internal void Apply(SetAtmosWorldSolverEnabledOperation solver)

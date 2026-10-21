@@ -48,7 +48,12 @@ public enum AtmosWorldOperationCode : ushort
     /// <summary>
     ///     Replaces the order and enabled flags of the world solver stages.
     /// </summary>
-    SetSolverLayout = 8
+    SetSolverLayout = 8,
+
+    /// <summary>
+    ///     Replaces the <c>[NumosSerialize]</c> state of one class solver after the host edited it.
+    /// </summary>
+    SetSolverState = 9
 }
 
 /// <summary>
@@ -218,6 +223,25 @@ public sealed record SetAtmosWorldSolverLayoutOperation : AtmosWorldOperation
     ///     Gets the immutable ordered stage list.
     /// </summary>
     public IReadOnlyList<AtmosWorldSolverLayoutEntry> Stages { get; }
+
+    internal override void Apply(AtmosWorld world) => world.Apply(this);
+}
+
+/// <summary>
+///     Records the <c>[NumosSerialize]</c> state a class solver held after the host edited it between ticks.
+/// </summary>
+/// <param name="Name">The stable registered solver name.</param>
+/// <param name="State">The solver's complete state payload, in the same encoding as its checkpoint entry.</param>
+/// <remarks>
+///     Numos records this on its own: it compares a hash of each stateful solver with the one it took at the end of
+///     the last tick, and records the new state when they differ. That happens at the next boundary (before a tick,
+///     a checkpoint capture, or the recording being stopped or copied), so the operation lands after any other
+///     operations from the same idle window.
+/// </remarks>
+public sealed record SetAtmosWorldSolverStateOperation(string Name, ReadOnlyMemory<byte> State) : AtmosWorldOperation
+{
+    /// <inheritdoc />
+    public override AtmosWorldOperationCode Code => AtmosWorldOperationCode.SetSolverState;
 
     internal override void Apply(AtmosWorld world) => world.Apply(this);
 }
