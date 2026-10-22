@@ -600,9 +600,11 @@ sweeps. The two wall fluxes cancel for gas at rest, so the skip is exact. It is 
 axis, which a real sweep would decelerate against the wall. Such momentum can only come from `SetVoxelMomentum` or a
 checkpoint, and the velocity floor or damping removes it at the end of the tick.
 
-Within a sweep, work is cut into pencils: an X sweep marches one `(y, z)` row, a Y sweep a whole z-slab, a Z sweep a
-y-sheet. A pencil keeps a rolling pair of face rows so each face is solved once and each cell sees both of its faces
-before it is written.
+Within a sweep, work is cut into pencils. A pencil is a set of parallel lines that march along the sweep axis. X and Y
+sweeps take one z-slab, and a Z sweep takes one y-sheet. A pencil first solves each of its faces once. It then updates
+the species one gas at a time over all of its cells and sums the mixture as it goes. Last, it updates momentum and
+energy per cell. Walking gas by gas keeps one row per gas in hand for the whole pencil instead of looking it up per
+cell. The tangential momentum components follow the cyclic order `X → Y → Z → X`.
 
 ### 5.5 Substeps and the Courant number
 
@@ -1154,15 +1156,16 @@ flux (§5.6).
 
 ### 10.2 What runs in parallel
 
-- **Euler sweeps** dispatch every active chunk's pencils (rows, slabs, or sheets, by axis) across the pool, one
+- **Euler sweeps** dispatch every active chunk's pencils (z-slabs for X and Y, y-sheets for Z) across the pool, one
   `ParallelPhase` per axis sweep, three per substep. With at least as many active chunks as workers each work item is
   a whole chunk; otherwise the pencils of all chunks are tiled into equal ranges so one dense chunk still fills the
   pool. Both schedules call the same per-pencil routine in the same per-chunk pencil order, a pencil writes only its
   own cells and its own reduction slot, and every read is from a buffer no sweep writes (including the neighbour's
   across a chunk face), so the bits do not depend on the schedule or the worker count. The tick thread reduces the
   per-pencil signal speeds and repair counts (max and sum, order free), swaps buffers, and applies activation
-  requests between sweeps. Gather, write-back, momentum settling, and the sleep decisions are sequential per chunk
-  on the tick thread.
+  requests between sweeps. Gather, write-back, momentum settling, and the sleep scoring run as one parallel phase each,
+  with one item per chunk. Each item touches only its own chunk and workspace, and the tick thread sums the counters.
+  Binding, topology, list insertion, and the sleep policy call stay on the tick thread.
 - **Euler species diffusion** reuses the two schedules: one item per chunk running the kernel's phases back to back
   when chunks fill the pool, otherwise voxel tiles with a barrier between phases. The cross-chunk exchange is two
   parallel phases over chunks, compute then apply, because the cells a chunk writes are the cells its neighbour reads

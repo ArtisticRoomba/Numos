@@ -73,9 +73,11 @@ internal struct EulerSweepCounters
 /// </summary>
 /// <remarks>
 ///     <para>
-///         Work is cut into pencil bundles. An X sweep marches one row <c>(y, z)</c> along x; a Y sweep marches a
-///         whole z-slab along y, handling the <c>W</c> faces of one x-row at a time; a Z sweep marches a y-sheet
-///         along z the same way. A bundle runs in three passes. The first solves every face of the bundle once into
+///         Work is cut into pencil bundles. A bundle is a set of parallel lines that each march along the sweep
+///         axis: an X sweep takes one z-slab (the <c>H</c> rows of one <c>z</c>), a Y sweep takes one z-slab (the
+///         <c>W</c> columns of one <c>z</c>), and a Z sweep takes one y-sheet (the <c>W</c> columns of one
+///         <c>y</c>). Bundle data is stored march-major, so the cells and faces at one march position are
+///         contiguous. A bundle runs in three passes. The first solves every face of the bundle once into
 ///         a scratch array. The second updates the species of every air cell, one gas at a time, and sums the
 ///         mixture as it goes. The third updates momentum and energy per cell and rebuilds its primitive state.
 ///         Going gas by gas keeps one source row, one target row, and the two neighbour rows in hand for a whole
@@ -105,14 +107,13 @@ internal struct EulerSweepCounters
 internal static class EulerSweep
 {
     /// <summary>
-    ///     Number of pencils an axis sweep of a chunk is made of: rows for X, slabs for Y, sheets for Z.
+    ///     Number of pencil bundles an axis sweep of a chunk is made of: z-slabs for X and Y, y-sheets for Z.
     /// </summary>
     internal static int PencilCount(AtmosChunk chunk, int axis)
     {
         return axis switch
         {
-            0 => chunk.Height * chunk.Depth,
-            1 => chunk.Depth,
+            0 or 1 => chunk.Depth,
             _ => chunk.Height
         };
     }
@@ -151,10 +152,11 @@ internal static class EulerSweep
     ///     Sweeps one pencil bundle and returns the fastest signal speed among the cells it wrote.
     /// </summary>
     /// <remarks>
-    ///     Face <c>(march, offset)</c> lies between rows <c>march − 1</c> and <c>march</c>, so the bundle has
-    ///     <c>marchCount + 1</c> rows of faces, and the trailing wall faces are solved by the same loop as the
-    ///     interior ones. Cell <c>(march, offset)</c> has the faces at <c>march</c> and <c>march + 1</c>. The
-    ///     scratch sums use the cell's position in the bundle, not its voxel index.
+    ///     Face <c>(march, line)</c> lies between positions <c>march − 1</c> and <c>march</c> of its line, so the
+    ///     bundle has <c>marchCount + 1</c> rows of faces, and the trailing wall faces are solved by the same loop
+    ///     as the interior ones. Cell <c>(march, line)</c> has the faces at <c>march</c> and <c>march + 1</c>. The
+    ///     scratch arrays are indexed <c>march · lineCount + line</c>, not by voxel index. Only the first and last
+    ///     face row can name a neighbour chunk, because a face between two cells of the chunk is always interior.
     /// </remarks>
     private static MetrePerSecond SweepBundle(
         EulerChunkWorkspace workspace, int axis, int bundle, Second timeStep, SquareMetre faceArea,
@@ -166,31 +168,35 @@ internal static class EulerSweep
         int baseIndex;
         int marchStride;
         int marchCount;
-        int rowLength;
+        int lineStride;
+        int lineCount;
         switch (axis)
         {
             case 0:
-                baseIndex = bundle % height * width + bundle / height * width * height;
+                baseIndex = bundle * width * height;
                 marchStride = 1;
                 marchCount = width;
-                rowLength = 1;
+                lineStride = width;
+                lineCount = height;
                 break;
             case 1:
                 baseIndex = bundle * width * height;
                 marchStride = width;
                 marchCount = height;
-                rowLength = width;
+                lineStride = 1;
+                lineCount = width;
                 break;
             default:
                 baseIndex = bundle * width;
                 marchStride = width * height;
                 marchCount = chunk.Depth;
-                rowLength = width;
+                lineStride = 1;
+                lineCount = width;
                 break;
         }
 
-        int cellCount = marchCount * rowLength;
-        int faceCount = (marchCount + 1) * rowLength;
+        int cellCount = marchCount * lineCount;
+        int faceCount = (marchCount + 1) * lineCount;
         scratch.EnsureCapacity(faceCount, cellCount);
         MolePerSecond[] faceFlux = scratch.FaceFlux;
         PerSecond[] faceRate = scratch.FaceSpeciesRate;
@@ -209,14 +215,14 @@ internal static class EulerSweep
         {
             int lowerRow = march > 0 ? baseIndex + (march - 1) * marchStride : -1;
             int upperRow = march < marchCount ? baseIndex + march * marchStride : -1;
-            int faceRow = march * rowLength;
-            for (int offset = 0; offset < rowLength; offset++)
+            int faceRow = march * lineCount;
+            for (int line = 0; line < lineCount; line++)
             {
                 SolveFace(
                     workspace, read, axis,
-                    lowerRow < 0 ? -1 : lowerRow + offset,
-                    upperRow < 0 ? -1 : upperRow + offset,
-                    faceArea, settings, out faces[faceRow + offset]);
+                    lowerRow < 0 ? -1 : lowerRow + line * lineStride,
+                    upperRow < 0 ? -1 : upperRow + line * lineStride,
+                    faceArea, settings, out faces[faceRow + line]);
             }
         }
 
@@ -229,8 +235,8 @@ internal static class EulerSweep
         for (int march = 0; march < marchCount; march++)
         {
             int row = baseIndex + march * marchStride;
-            for (int offset = 0; offset < rowLength; offset++)
-                isAir[march * rowLength + offset] = EulerFaceTopology.IsAir(chunk, row + offset);
+            for (int line = 0; line < lineCount; line++)
+                isAir[march * lineCount + line] = EulerFaceTopology.IsAir(chunk, row + line * lineStride);
         }
 
         Array.Clear(nonFinite, 0, cellCount);
@@ -249,14 +255,15 @@ internal static class EulerSweep
             Mole[] target = write.Species[gasId]!;
             Mole[]? lowerRows = NeighborRow(lowerNeighbor, gasId);
             Mole[]? upperRows = NeighborRow(upperNeighbor, gasId);
-            // Only the first and last face rows can name a neighbour; the fix-up loops overwrite those.
+            // Only the first and last face row (the end faces of every line) can name a neighbour.
+            // The fix-up loops overwrite those.
             for (int face = 0; face < faceCount; face++)
                 faceFlux[face] = faceRate[face] * source[faceIndex[face]];
 
-            for (int face = 0; face < rowLength; face++)
+            for (int face = 0; face < lineCount; face++)
                 faceFlux[face] = faceRate[face] * UpwindMoles(in faces[face], source, lowerRows, upperRows);
 
-            for (int face = faceCount - rowLength; face < faceCount; face++)
+            for (int face = faceCount - lineCount; face < faceCount; face++)
                 faceFlux[face] = faceRate[face] * UpwindMoles(in faces[face], source, lowerRows, upperRows);
 
             KilogramPerMole molarMass = workspace.MolarMass[present];
@@ -264,15 +271,15 @@ internal static class EulerSweep
             for (int march = 0; march < marchCount; march++)
             {
                 int row = baseIndex + march * marchStride;
-                int cellRow = march * rowLength;
-                for (int offset = 0; offset < rowLength; offset++)
+                int cellRow = march * lineCount;
+                for (int line = 0; line < lineCount; line++)
                 {
-                    int cell = cellRow + offset;
+                    int cell = cellRow + line;
                     if (!isAir[cell])
                         continue;
 
-                    int voxelIndex = row + offset;
-                    Mole moles = source[voxelIndex] - timeStep * (faceFlux[cell + rowLength] - faceFlux[cell]);
+                    int voxelIndex = row + line * lineStride;
+                    Mole moles = source[voxelIndex] - timeStep * (faceFlux[cell + lineCount] - faceFlux[cell]);
 
                     if (!float.IsFinite(moles))
                     {
@@ -298,15 +305,15 @@ internal static class EulerSweep
         for (int march = 0; march < marchCount; march++)
         {
             int row = baseIndex + march * marchStride;
-            int cellRow = march * rowLength;
-            for (int offset = 0; offset < rowLength; offset++)
+            int cellRow = march * lineCount;
+            for (int line = 0; line < lineCount; line++)
             {
-                int cell = cellRow + offset;
+                int cell = cellRow + line;
                 if (!isAir[cell])
                     continue;
 
                 MetrePerSecond signalSpeed = UpdateCell(
-                    workspace, axis, row + offset, in faces[cell], in faces[cell + rowLength],
+                    workspace, axis, row + line * lineStride, in faces[cell], in faces[cell + lineCount],
                     massSum[cell], moleSum[cell], heatSum[cell], nonFinite[cell],
                     timeStep, config, ref counters);
 
@@ -673,7 +680,7 @@ internal static class EulerSweep
     ///     Scratch arrays for one bundle, owned by one worker thread and grown on demand.
     /// </summary>
     /// <remarks>
-    ///     The face array holds <c>(marchCount + 1) · rowLength</c> faces. The other arrays hold one entry per cell
+    ///     The face array holds <c>(marchCount + 1) · lineCount</c> faces. The other arrays hold one entry per cell
     ///     of the bundle, indexed by position in the bundle. A bundle zeroes the entries it uses before it adds to
     ///     them, so stale values from an earlier bundle never reach a sum.
     /// </remarks>
