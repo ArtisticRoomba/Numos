@@ -12,47 +12,42 @@ namespace Numos.CoreSim.Solvers.Euler;
 /// <remarks>
 ///     <para>
 ///         Per tick the stage gathers each active chunk (awake, with at least one gas channel, plus whatever
-///         activation adds) into pooled conserved buffers, runs substeps until the fixed time step is used up or
-///         the substep cap engages, writes the buffers back, and then does the tick-end work the legacy transport
-///         stages also own, in this order: momentum floor and damping (before the write-back, so the kinetic
-///         energy they remove becomes heat), species diffusion inside and across chunks
-///         (<see cref="EulerSpeciesDiffusion" />), <see cref="VacuumCleanup" />, the momentum post-condition
-///         (<see cref="SettleMomentum" />), and last the sleep metric and <see cref="ChunkSleepPolicy" />, which
-///         therefore score the pressures diffusion and cleanup left behind. Explicit links are not part of this
-///         stage yet.
+///         activation adds) into pooled conserved buffers, runs CFL substeps until the fixed time step is used up
+///         or the substep cap engages, and writes the buffers back. Tick-end work then runs in this order:
+///         momentum floor and damping (before the write-back, so the kinetic energy they remove becomes heat),
+///         <see cref="EulerSpeciesDiffusion" />, <see cref="VacuumCleanup" />, <see cref="SettleMomentum" />, and
+///         last the sleep metric and <see cref="ChunkSleepPolicy" />, which score the pressures diffusion and
+///         cleanup left behind. Explicit links are handled by their own stages, not this one.
 ///     </para>
 ///     <para>
 ///         Faces between chunks are ordinary faces. Both chunks solve a shared face from the same two read-buffer
 ///         cells with the lower coordinate on the left (see <see cref="EulerSweep" />), so there is no
-///         reserve-and-merge pass: the two evaluations are the same bits, and each chunk applies its own side of
-///         the difference. Every substep uses one global <c>Δt</c>, sized from the fastest signal in any active
-///         chunk, so every chunk advances the same gas time and the state of a shared face is the same on both
-///         sides.
+///         reserve-and-merge pass: the two evaluations produce the same bits and each chunk applies its own side
+///         of the difference. This relies on one global <c>Δt</c> per substep, sized from the fastest signal in
+///         any active chunk.
 ///     </para>
 ///     <para>
-///         Each substep sweeps the axes in one of the six orders of <see cref="SweepOrders" />, walking the list so
-///         every order is followed by its reverse (the usual symmetric splitting) and no axis is always in the
-///         middle, which alternating <c>XYZ</c> and <c>ZYX</c> alone left measurably asymmetric on a spherical
-///         blast. The position is <c>(2·TickCount + substep) mod 6</c>: doubling the tick count starts every tick on
-///         the first order of a pair, whatever the previous tick's substep count, and rotates which pair leads. It
-///         is a function of checkpointed state and the substep index alone, never a counter carried across ticks,
-///         so a restored world sweeps in the same order the original run did.
+///         Each substep sweeps the axes in one of the six orders of <see cref="SweepOrders" />. The list is walked
+///         so every order is followed by its reverse and no axis is always in the middle. The position is
+///         <c>(2·TickCount + substep) mod 6</c>, which starts every tick on the first order of a pair regardless
+///         of the previous tick's substep count. It depends only on checkpointed state and the substep index, never
+///         on a counter carried across ticks, so a restored world sweeps in the original order.
 ///     </para>
 ///     <para>
-///         The active set grows during the tick. An open face into a chunk that has no workspace is a wall for
-///         the sweep that meets it, and that sweep requests the chunk's activation when the two sides differ in
+///         The active set grows during the tick. An open face into a chunk with no workspace is a wall for the
+///         sweep that meets it, and that sweep requests the chunk's activation when the two sides differ in
 ///         pressure by more than <see cref="EulerFlowConfig.WakePressureDelta" /> or the active side moves normal
 ///         to the face. Requests are applied on the tick thread after the barrier that ends the sweep: the chunk
-///         is woken if it was asleep, gathered from its live fields (exact, nothing has written them this tick),
-///         and inserted into the active list in canonical chunk order. A pre-pass right after the initial gather
-///         runs the same test over every boundary face from the live pressures and iterates until no new chunk
-///         joins, so a chunk that is already different from its neighbour at the start of the tick joins before
-///         the first sweep and only a front that arrives mid-tick pays the one-sweep wall latency. Activation is
-///         derived state: it is a function of the chunk fields and the configuration, never recorded.
+///         is woken if asleep, gathered from its live fields (exact, nothing has written them this tick), and
+///         inserted into the active list in canonical chunk order. A pre-pass right after the initial gather runs
+///         the same test over every boundary face from the live pressures until no new chunk joins, so only a
+///         front that arrives mid-tick pays the one-sweep wall latency. Activation is derived state and is never
+///         recorded.
 ///     </para>
 ///     <para>
-///         Nothing else about the stage persists between ticks: the chunk's own momentum arrays are the only
-///         state it keeps, and the buffers are rebuilt from the chunk fields every tick.
+///         The stage keeps nothing between ticks beyond the chunk's own momentum arrays. The stage rebuilds the buffers
+///         from the chunk fields every tick. See docs/atmospherics_technical_documentation.md section 5 for the
+///         derivation.
 ///     </para>
 /// </remarks>
 internal sealed class EulerFlowSolver : IAtmosSolverStage
@@ -110,7 +105,7 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
                 : Advance(context, config.EulerFlow);
 
             // An awake chunk that never got a workspace has nothing to move, but its sleep timer still has to
-            // advance, as it does under advection. Chunks the stage put to sleep are no longer awake here.
+            // advance. Chunks the stage put to sleep are no longer awake here.
             for (int chunkIndex = 0; chunkIndex < context.Chunks.Length; chunkIndex++)
             {
                 AtmosChunk chunk = context.Chunks[chunkIndex];
@@ -135,8 +130,8 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
     }
 
     /// <summary>
-    ///     Drops the pooled workspaces. Called when a checkpoint replaces the kernel's chunks; the pool holds no
-    ///     simulation state, this only releases memory sized for the old grid.
+    ///     Drops the pooled workspaces when a checkpoint replaces the kernel's chunks. The pool holds no
+    ///     simulation state. Clearing it releases memory sized for the old grid.
     /// </summary>
     internal void ClearTransientState()
     {
@@ -176,7 +171,7 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
         EulerFaceTopology.Build(chunk, workspace.NeighborChunks, workspace.OpenMask, workspace.VoidMask);
         workspace.Gather(config);
 
-        // Canonical order matters for nothing numerically; it keeps diagnostics and debugging reproducible.
+        // Canonical order has no numerical effect. It keeps diagnostics reproducible.
         int position = _activeCount;
         while (position > 0 &&
                AtmosSolverMath.CompareChunkPositions(_active[position - 1].Chunk.GridPosition, chunk.GridPosition) > 0)
@@ -324,9 +319,8 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
 
             MetrePerSecond signalSpeed = MaxSignalSpeed();
             maxSignalSpeed = MathF.Max(maxSignalSpeed, signalSpeed);
-            // The last substep is however much of the tick is left, even when that is tiny. Stretching the
-            // previous substep to absorb it would run that substep above the Courant number the positivity
-            // bound was chosen for, which is exactly the margin a face next to vacuum lives on.
+            // The last substep takes whatever is left of the tick, however tiny. Stretching the previous substep
+            // to absorb it would exceed the Courant number the positivity bound assumes.
             Second64 step = remaining;
             if (signalSpeed > 0f)
             {
@@ -351,8 +345,8 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
                     workspace.Swap();
                 }
 
-                // A chunk activated here is swept from the next sweep on, at this substep's Δt. Its gas is at
-                // rest, so its signal speed is its sound speed, which the next substep's Δt accounts for.
+                // A chunk activated here is swept from the next sweep on at this substep's Δt. Its gas is at rest,
+                // so its signal speed is its sound speed, which the next substep's Δt accounts for.
                 ApplyWakeRequests(context);
             }
 
@@ -374,8 +368,8 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
             FloorMomentumAndWriteBack(_active[index], config, settings, ref negativeInternalEnergy);
         }
 
-        // Diffusion runs on the written-back fields of every chunk, including the ones across a face, so it
-        // waits for every write-back; cleanup compares neighbours' pressures the same way and waits for diffusion.
+        // Diffusion reads the written-back fields of neighbouring chunks, so it waits for every write-back.
+        // Cleanup compares neighbour pressures the same way and waits for diffusion.
         EulerSpeciesDiffusion.Run(_active, _activeCount, WorkerCount, config);
         VacuumCleanup.Apply(context);
 
@@ -405,10 +399,9 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
     /// </summary>
     /// <remarks>
     ///     This is the only place rows grow after binding, and it runs on the tick thread between sweeps. The
-    ///     merge is one pass over the active list, which can hand a chunk a gas from two chunks away (its
-    ///     neighbour just received the row from its own neighbour); that costs a zero row, never a wrong bit.
-    ///     Rows for a chunk's sake only: a gas listed because a neighbour holds it does not get a channel unless the
-    ///     write-back finds some of it in the chunk.
+    ///     merge is one pass over the active list, so a chunk can receive a gas from two chunks away. That costs a
+    ///     zero row, never a wrong bit. A listed gas gets a channel only if the write-back finds some of it in the
+    ///     chunk.
     /// </remarks>
     private void ShareAxisGases(int axis, AtmosSolverConfigSnapshot config)
     {
@@ -429,13 +422,13 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
     /// </summary>
     /// <remarks>
     ///     <para>
-    ///         Two schedules, chosen the way advection chooses. With at least as many active chunks as workers,
+    ///         Two schedules. With at least as many active chunks as workers,
     ///         one work item per chunk sweeps all of that chunk's pencils. Otherwise the pencils of every chunk are
     ///         tiled into ranges of <c>ceil(totalPencils / workers)</c>, so one dense chunk still occupies the
     ///         pool. Both schedules call <see cref="EulerSweep.RunPencils" /> and therefore visit a chunk's pencils
     ///         in the same ascending order; a pencil writes only its own cells of the write buffer and its own
     ///         reduction slots, and reads only buffers no sweep writes. Splitting the same ordered pencil list
-    ///         differently across workers thus cannot change a bit, which is what the schedule-parity tests pin.
+    ///         differently across workers therefore cannot change a bit.
     ///     </para>
     ///     <para>
     ///         Workers also read the live pressure of inactive neighbour chunks and set activation flags on their
@@ -504,16 +497,13 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
     ///     Whether a sweep along <paramref name="axis" /> can move anything this substep.
     /// </summary>
     /// <remarks>
-    ///     An axis one voxel long has no interior faces, but its two chunk faces are still faces of the sweep, so it
-    ///     is only skipped when no active chunk has a registered neighbour on either side. Both faces are then
-    ///     walls. For gas at rest along the axis the two wall fluxes are <c>p</c> each and cancel, so the skip
-    ///     changes no bit, which is the case on every depth-one map and saves it a third of its sweeps. Gas that
-    ///     does move along such an axis (the momentum can only come from <c>SetVoxelMomentum</c> or a checkpoint,
-    ///     since no face could have produced it) is not reflected by the skipped sweep: the walls would see
-    ///     <c>p + ρu(2u + c)</c> ahead of it and <c>p − ρuc</c> behind, whose difference would decelerate it. The
-    ///     momentum is left as it is until the velocity floor or damping removes it at the end of the tick. A
-    ///     neighbour activated mid-tick is seen on the next substep, which is also the first one that could sweep
-    ///     it.
+    ///     An axis one voxel long has no interior faces, but its two chunk faces still belong to the sweep, so the
+    ///     axis is skipped only when no active chunk has a neighbour on either side and both faces are walls. For
+    ///     gas at rest along the axis the two wall fluxes are <c>p</c> each and cancel, so the skip changes no bit.
+    ///     Gas moving along such an axis (momentum set through <c>SetVoxelMomentum</c> or a checkpoint) is not
+    ///     reflected: the walls would see <c>p + ρu(2u + c)</c> ahead and <c>p − ρuc</c> behind and decelerate it.
+    ///     Its momentum stays until the velocity floor or damping removes it at tick end. A neighbour activated
+    ///     mid-tick is seen on the next substep, the first one that could sweep it.
     /// </remarks>
     private bool AxisHasWork(int axis)
     {
@@ -604,14 +594,13 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
     ///     to rest with its kinetic energy turned into heat, as the pre-write-back floor does.
     /// </summary>
     /// <remarks>
-    ///     The floor ran on the buffers before the write-back, but diffusion changes a voxel's mass and cleanup
-    ///     empties voxels outright, so the test is repeated on the fields the sleep pass and the next tick's gather
-    ///     read. On a voxel neither pass touched it changes nothing: cleanup zeroes the momentum of what it empties,
-    ///     and the mass is summed over the workspace's gas list in the same ascending order as the buffer's, so the
-    ///     floor comparison repeats bit for bit. The only gap is a channel boundary diffusion created for a gas
-    ///     outside the list, which is summed after the list. The pressure a stopped voxel is left with is not
-    ///     formed from that list-order sum: it goes through the channel-order sum the write-back and every other
-    ///     refresh use, so the cache still matches a later refresh bit for bit.
+    ///     Diffusion changes a voxel's mass and cleanup empties voxels outright, so the floor test is repeated on
+    ///     the fields the sleep pass and the next tick's gather read. On a voxel neither pass touched it changes
+    ///     nothing: the mass is summed over the workspace's gas list in the same ascending order as the buffer's,
+    ///     so the comparison repeats bit for bit. The exception is a channel diffusion created for a gas outside
+    ///     the list, which is summed after it. The pressure a stopped voxel is left with comes from the
+    ///     channel-order sum the write-back and every other refresh use, not from the list-order sum, so the cache
+    ///     still matches a later refresh bit for bit.
     /// </remarks>
     private void SettleMomentum(EulerChunkWorkspace workspace, AtmosSolverConfigSnapshot config, EulerFlowConfig settings)
     {
@@ -688,15 +677,13 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
     ///     The sleep decision for one written-back chunk.
     /// </summary>
     /// <remarks>
-    ///     The sleep metric is the legacy one: the largest neighbour pressure difference as a percentage of the
-    ///     higher pressure, over open faces, with a gas-to-void face counting as 100%. Faces into other chunks
-    ///     count too, against the neighbour's written-back pressure (or its untouched live pressure if it never
-    ///     activated), because the intra-chunk scan cannot see a gradient that sits on a chunk face. The metric is
-    ///     forced to at least <see cref="AtmosSolverConfigSnapshot.SleepEpsilon" /> while any cell still carries
-    ///     momentum, so a chunk never sleeps mid-motion and a sleeping chunk always has zero momentum everywhere.
-    ///     A pressure that is not finite, on either side of a face, scores as a gas-to-void face: a NaN would
-    ///     otherwise ride through every <see cref="MathF.Max" /> below and make the decision depend on where in
-    ///     the chunk it sits. Such voxels of this chunk are returned so the tick's non-finite count sees them.
+    ///     The metric is the largest pressure difference across an open face as a percentage of the higher
+    ///     pressure, with a gas-to-void face counting as 100%. Faces into other chunks count against the
+    ///     neighbour's written-back pressure, or its live pressure if it never activated. The metric is forced to at
+    ///     least <see cref="AtmosSolverConfigSnapshot.SleepEpsilon" /> while any cell carries momentum, so a
+    ///     sleeping chunk always has zero momentum everywhere. A non-finite pressure on either side of a face
+    ///     scores as a gas-to-void face. A NaN would otherwise ride through every <see cref="MathF.Max" /> and make
+    ///     the decision depend on where in the chunk it sits.
     /// </remarks>
     /// <returns>How many of the chunk's air voxels hold a pressure that is not finite.</returns>
     private static int UpdateSleepState(EulerChunkWorkspace workspace, AtmosSolverConfigSnapshot config)

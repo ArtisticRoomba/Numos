@@ -18,8 +18,8 @@ internal enum NeighborKind : byte
 /// </summary>
 /// <remarks>
 ///     The tables are plain arrays so the hot loops that index them stay cheap. Nothing may write to them:
-///     every gather that walks <see cref="AscendingSourceSlots" /> relies on the order below to reproduce
-///     the floating-point rounding of earlier ticks and recorded replays.
+///     every gather that walks <see cref="AscendingSourceSlots" /> relies on the order below, and a different
+///     order changes floating-point rounding and therefore recorded replays.
 /// </remarks>
 internal static class NeighborResolution
 {
@@ -37,8 +37,7 @@ internal static class NeighborResolution
     ///     -W*H (NegZ) &lt; -W (NegY) &lt; -1 (NegX) &lt; 0 &lt; +1 (PosX) &lt; +W (PosY) &lt; +W*H (PosZ).
     ///     Degenerate dimensions cannot produce a tie: a chunk one voxel wide has no in-bounds X
     ///     neighbors at all, so the colliding slots are simply absent. The delta gathers walk sources in
-    ///     this order because it is the order the per-gas scatter they replaced accumulated in, and
-    ///     changing it would change floating-point rounding and therefore deterministic replay state.
+    ///     this order, so changing it changes floating-point rounding and therefore deterministic replay state.
     /// </remarks>
     internal readonly static int[] AscendingSourceSlots = [4, 2, 0, SelfSourceSlot, 1, 3, 5];
 

@@ -12,8 +12,8 @@ public enum EulerReconstruction
     FirstOrder = 0,
 
     /// <summary>
-    ///     Reserved for a second-order MUSCL-Hancock reconstruction. The solver treats it as
-    ///     <see cref="FirstOrder" /> until it is implemented.
+    ///     Second-order MUSCL-Hancock reconstruction. Not implemented: the solver runs it as
+    ///     <see cref="FirstOrder" />.
     /// </summary>
     MusclHancock = 1
 }

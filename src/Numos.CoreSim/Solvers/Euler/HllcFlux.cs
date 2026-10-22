@@ -101,11 +101,12 @@ internal struct EulerFaceFlux
 ///         both outer waves, and returns whichever of the four regions sits on the face.
 ///     </para>
 ///     <para>
-///         Everything is scalar float using only multiplies, adds, divides, and min/max (no square roots or
-///         transcendental calls), so results are reproducible across platforms. The formulas are also arranged so
-///         that reflecting the problem (swapping the cells and negating the normal velocities) negates every odd
-///         quantity bitwise, which makes a face's flux independent of which chunk happens to own it; the comments on
-///         <see cref="Solve" /> explain which operand orders that depends on.
+///         Everything is scalar float using only multiplies, adds, divides, and min/max, with no square roots or
+///         transcendental calls, so results are reproducible across platforms. The formulas are arranged so that
+///         reflecting the problem (swapping the cells and negating the normal velocities) negates every odd
+///         quantity bitwise, which makes a face's flux independent of which chunk owns it. The remarks on
+///         <see cref="Solve" /> say which operand orders that depends on. See
+///         docs/atmospherics_technical_documentation.md section 5 for the wider model.
 ///     </para>
 /// </remarks>
 internal static class HllcFlux
@@ -139,17 +140,17 @@ internal static class HllcFlux
     ///     </para>
     ///     <para>
     ///         Mirror symmetry rests on keeping the <c>a</c>/<c>b</c> operand form above. Reflecting the face maps
-    ///         <c>(L, R, u) → (R, L, −u)</c>, under which <c>S_L' = −S_R</c>, <c>a' = −b</c>, <c>b' = −a</c>, and
-    ///         because IEEE rounding is sign-symmetric and addition commutes, every term of <c>S*</c> becomes its
-    ///         exact negation and every term of <c>p*</c> maps to itself, so <c>S*' = −S*</c> and <c>p*' = p*</c>
-    ///         bitwise. The common "simplification" <c>p* = p_L + a·(S* − u_L)</c> breaks this: it is exact only on
-    ///         one side. The same reasoning covers the star flux helper, whose every factor is either even or odd
-    ///         under the reflection.
+    ///         <c>(L, R, u) → (R, L, −u)</c>, under which <c>S_L' = −S_R</c>, <c>a' = −b</c>, <c>b' = −a</c>. IEEE
+    ///         rounding is sign-symmetric and addition commutes, so every term of <c>S*</c> becomes its exact
+    ///         negation and every term of <c>p*</c> maps to itself: <c>S*' = −S*</c> and <c>p*' = p*</c> bitwise.
+    ///         The form <c>p* = p_L + a·(S* − u_L)</c> would break this because it is exact only on one side. The
+    ///         star flux helper is covered by the same argument, since each of its factors is even or odd under the
+    ///         reflection.
     ///     </para>
     ///     <para>
-    ///         Region selection is also written symmetrically: the two supersonic cases are tested before the sign
-    ///         of <c>S*</c>, so a reflected problem never lands in a different region through a rounding difference
-    ///         in <c>S*</c>. The only asymmetry left is <c>S* == 0</c> exactly, where both frames report the left
+    ///         Region selection is symmetric too: the two supersonic cases are tested before the sign of
+    ///         <c>S*</c>, so a reflected problem cannot land in a different region through a rounding difference in
+    ///         <c>S*</c>. The one remaining asymmetry is <c>S* == 0</c> exactly, where both frames report the left
     ///         cell as upwind; the mass flux is exactly zero there, so nothing is transported either way.
     ///     </para>
     ///     <para>
@@ -240,8 +241,7 @@ internal static class HllcFlux
     }
 
     /// <summary>
-    ///     The wave speeds and standard (<c>θ = 1</c>) star pressure <see cref="Solve" /> would use, exposed for
-    ///     tests and diagnostics.
+    ///     The wave speeds and standard (<c>θ = 1</c>) star pressure <see cref="Solve" /> would use, for tests.
     /// </summary>
     internal static void EstimateStarState(
         in EulerFaceState left, in EulerFaceState right,

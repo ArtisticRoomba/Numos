@@ -12,26 +12,24 @@ namespace Numos.CoreSim.Solvers.Euler;
 ///     <para>
 ///         The sweeps move species only with the bulk flow, so two gases at equal pressure on either side of a
 ///         doorway would never mix without this pass. Inside a chunk it is <see cref="SpeciesDiffusionKernel" />
-///         verbatim, run on the chunk fields after the write-back rather than on the Euler buffers, so a chunk at
-///         rest diffuses bit for bit what the <c>advection</c> stage would have diffused. Diffusion swaps species
-///         at equal pressure and carries no bulk momentum, so the momentum arrays are left alone;
-///         <see cref="SpeciesDiffusionKernel.ApplyDeltas" /> rebuilds temperature, heat capacity, and pressure.
+///         run on the chunk fields after the write-back, so a chunk at rest diffuses bit for bit what the
+///         <c>advection</c> stage would. Diffusion swaps species at equal pressure and carries no bulk momentum, so
+///         the momentum arrays are left alone. <see cref="SpeciesDiffusionKernel.ApplyDeltas" /> rebuilds
+///         temperature, heat capacity, and pressure.
 ///     </para>
 ///     <para>
-///         The legacy pipeline carries diffusion across chunk faces through the boundary events
-///         <c>boundary-flow</c> consumes. The Euler stage has no second stage, so the shared faces are handled here
-///         the way the sweeps handle them: for every open face between two active chunks, both sides evaluate the
-///         per-source amount of both cells from the same live fields, and each applies the net to its own cell.
-///         The two evaluations are the same bits and <c>fl(x − y) = −fl(y − x)</c>, so the exchange is exactly
-///         antisymmetric without a reserve-and-merge pass. A face into a chunk that is not active exchanges nothing
-///         and does not wake it; a void voxel across a chunk face is a sink, as it is inside a chunk.
+///         Faces between chunks are handled the way the sweeps handle them: for every open face between two
+///         active chunks, both sides evaluate the per-source amount of both cells from the same live fields, and
+///         each applies the net to its own cell. The two evaluations are the same bits and
+///         <c>fl(x − y) = −fl(y − x)</c>, so the exchange is exactly antisymmetric without a reserve-and-merge
+///         pass. A face into a chunk that is not active exchanges nothing and does not wake it. A void voxel across
+///         a chunk face is a sink, as it is inside a chunk.
 ///     </para>
 ///     <para>
 ///         The face amounts are computed for every chunk before any chunk applies them, because the cells a chunk
-///         writes are exactly the cells its neighbour reads. Each phase runs in parallel over the active chunks: the
-///         compute phase writes only its own chunk's record buffer and the apply phase only its own chunk's cells,
-///         so neither depends on which worker runs what. Boundary work is a surface, not a volume, so it is not
-///         tiled below one item per chunk.
+///         writes are the cells its neighbour reads. Each phase runs in parallel over the active chunks: compute
+///         writes only its own chunk's record buffer and apply only its own chunk's cells, so neither depends on
+///         which worker runs what. Boundary work is a surface, so it is not tiled below one item per chunk.
 ///     </para>
 /// </remarks>
 internal static class EulerSpeciesDiffusion
@@ -44,11 +42,11 @@ internal static class EulerSpeciesDiffusion
     /// <param name="workerCount">The worker count the schedule arithmetic uses.</param>
     /// <param name="config">The tick's configuration snapshot.</param>
     /// <remarks>
-    ///     Two schedules, chosen the way the sweeps choose. With at least as many active chunks as workers, one
-    ///     item per chunk runs the kernel's three phases back to back; otherwise the active voxels are tiled and
-    ///     each phase runs over every tile behind a barrier, because the gather reads neighbouring voxels'
-    ///     transfer amounts and the apply reads nothing but its own. Both schedules call the same kernel methods
-    ///     over the same ranges in the same phase order, so they produce the same bits.
+    ///     Two schedules, as in the sweeps. With at least as many active chunks as workers, one item per chunk runs
+    ///     the kernel's three phases back to back. Otherwise the active voxels are tiled and each phase runs over
+    ///     every tile behind a barrier, because the gather reads neighbouring voxels' transfer amounts. Both
+    ///     schedules call the same kernel methods over the same ranges in the same phase order, so they produce
+    ///     the same bits.
     /// </remarks>
     internal static void Run(
         EulerChunkWorkspace[] active, int activeCount, int workerCount, AtmosSolverConfigSnapshot config)
@@ -107,8 +105,7 @@ internal static class EulerSpeciesDiffusion
     }
 
     /// <summary>
-    ///     Rents the kernel's scratch for one chunk. The channel count it is sized for is the one after the
-    ///     write-back, which is why nothing here runs before every chunk has been written back.
+    ///     Rents the kernel's scratch for one chunk, sized for the channel count after the write-back.
     /// </summary>
     private static void Initialize(EulerChunkWorkspace workspace)
     {
@@ -119,11 +116,10 @@ internal static class EulerSpeciesDiffusion
     ///     Resolves the in-chunk neighbours of one tile of voxels and fixes their transfer amounts.
     /// </summary>
     /// <remarks>
-    ///     <see cref="NeighborResolution.ResolveNeighbors" /> classifies by voxel room, which is what the sweeps'
-    ///     masks are built from as well; an air neighbour the open mask does not carry (a face
-    ///     <see cref="EulerFaceTopology.IsFaceOpen" /> declined) is demoted to blocked so diffusion follows the
-    ///     same topology as the flow. Faces that leave the chunk are not neighbours here: the boundary exchange
-    ///     handles them.
+    ///     <see cref="NeighborResolution.ResolveNeighbors" /> classifies by voxel room. An air neighbour missing
+    ///     from the open mask, because <see cref="EulerFaceTopology.IsFaceOpen" /> declined the face, is demoted to
+    ///     blocked so diffusion follows the same topology as the flow. Faces that leave the chunk are left to the
+    ///     boundary exchange.
     /// </remarks>
     private static void ResolveAndPrepare(
         EulerChunkWorkspace workspace, int start, int length, AtmosSolverConfigSnapshot config)
@@ -159,9 +155,8 @@ internal static class EulerSpeciesDiffusion
     ///     Records the net exchange of every boundary voxel of one chunk with its active neighbours.
     /// </summary>
     /// <remarks>
-    ///     Reads live fields of this chunk and of its neighbours; writes only this chunk's
-    ///     <see cref="EulerBoundaryExchange" />. Every neighbour's fields are stable while this runs because the
-    ///     apply phase has not started anywhere.
+    ///     Reads live fields of this chunk and its neighbours and writes only this chunk's
+    ///     <see cref="EulerBoundaryExchange" />. Neighbour fields are stable because no apply phase has started.
     /// </remarks>
     private static void ComputeBoundary(EulerChunkWorkspace workspace, AtmosSolverConfigSnapshot config)
     {
@@ -169,7 +164,7 @@ internal static class EulerSpeciesDiffusion
         EulerBoundaryExchange exchange = workspace.Boundary;
         exchange.Clear();
         Int3 last = chunk.Dimensions - new Int3(1, 1, 1);
-        // Same expression as PrepareDiffusion: both sides of a face must scale by the same edge length.
+        // Must match PrepareDiffusion so both sides of a face scale by the same edge length.
         Metre voxelEdge = MathF.Pow(config.VoxelVolume, 1f / 3f);
 
         for (int activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
@@ -240,20 +235,20 @@ internal static class EulerSpeciesDiffusion
     /// <param name="energyDelta">The cell's running energy delta.</param>
     /// <remarks>
     ///     <para>
-    ///         Each amount is <see cref="SpeciesDiffusionKernel.TransferAmount" /> of one cell alone, and the
-    ///         suppression rule is the gather's: a deposit below <see cref="AtmosSolverConstants.MinimumTrackedMoles" />
-    ///         into a cell that would stay below it is dropped, and the payer keeps it. Both tests read the same
-    ///         two cells, so the neighbour drops exactly the deposits this cell refunds, and the net for a gas is
-    ///         <c>q_neighbour − q_own</c> here and <c>q_own − q_neighbour</c> there, which are exact negatives.
+    ///         Each amount is <see cref="SpeciesDiffusionKernel.TransferAmount" /> of one cell alone. Suppression
+    ///         follows the gather: a deposit below <see cref="AtmosSolverConstants.MinimumTrackedMoles" /> into a
+    ///         cell that would stay below it is dropped and the payer keeps it. Both sides test the same two cells,
+    ///         so the neighbour drops exactly the deposits this cell refunds, and the net for a gas is
+    ///         <c>q_neighbour − q_own</c> here and <c>q_own − q_neighbour</c> there, exact negatives.
     ///     </para>
     ///     <para>
     ///         The cell's own channels come first, in channel order, then the neighbour's gases this chunk has no
-    ///         channel for. The neighbour walks its own channels in a different order, which changes nothing: each
-    ///         gas's amount depends on one cell only, and a voxel's records are applied one after another.
+    ///         channel for. The neighbour walks its channels in a different order, which changes nothing because
+    ///         each gas's amount depends on one cell only.
     ///     </para>
     ///     <para>
-    ///         A void face is the kernel's void neighbour: the cell pays its amount of every gas into the sink
-    ///         without the suppression test, because nothing receives it.
+    ///         A void face pays the cell's amount of every gas into the sink without the suppression test, since
+    ///         nothing receives it.
     ///     </para>
     /// </remarks>
     private static void ExchangeFace(
@@ -317,8 +312,8 @@ internal static class EulerSpeciesDiffusion
     }
 
     /// <summary>
-    ///     The amount a source cell sends across one face, zero when the source has none of the gas or the gather's
-    ///     suppression rule would drop the deposit.
+    ///     The amount a source cell sends across one face, zero when the source has none of the gas or the
+    ///     suppression rule drops the deposit.
     /// </summary>
     private static Mole Amount(SquareMetrePerSecond diffusivity, PerSquareMetre sourceFactor, Mole sourceMoles, Mole destinationMoles)
     {
@@ -334,8 +329,8 @@ internal static class EulerSpeciesDiffusion
     }
 
     /// <summary>
-    ///     Appends the net of one gas on one face. A net of exactly zero is not recorded: adding it would change
-    ///     no bit, and the neighbour skips the same face by the same test.
+    ///     Appends the net of one gas on one face. An exactly zero net is skipped. The neighbour skips it by the
+    ///     same test, and adding it would change no bit.
     /// </summary>
     private static void Record(
         int gasId, Mole deposit, Mole debit, Kelvin depositTemperature, Kelvin debitTemperature,
@@ -356,8 +351,8 @@ internal static class EulerSpeciesDiffusion
     ///     and pressure the way <see cref="SpeciesDiffusionKernel.ApplyDeltas" /> does.
     /// </summary>
     /// <remarks>
-    ///     A deposit of a gas the chunk has no channel for creates one, as in the write-back. The suppression rule
-    ///     guarantees such a deposit is a tracked amount, so diffusion never grows a channel for a trace of a gas.
+    ///     A deposit of a gas the chunk has no channel for creates one. Suppression guarantees such a deposit is a
+    ///     tracked amount, so diffusion never grows a channel for a trace.
     /// </remarks>
     private static void ApplyBoundary(EulerChunkWorkspace workspace, AtmosSolverConfigSnapshot config)
     {
@@ -478,9 +473,9 @@ internal static class EulerSpeciesDiffusion
 ///     (gas id, mole delta) records, in the order they are applied.
 /// </summary>
 /// <remarks>
-///     Records rather than per-voxel-per-gas arrays because the exchange touches a surface, not a volume, and
-///     because a deposit can be of a gas the chunk has no channel for yet. The arrays grow on demand and stay with
-///     the pooled workspace; nothing here survives a tick.
+///     Records rather than per-voxel-per-gas arrays because the exchange touches a surface, not a volume, and a
+///     deposit can be of a gas the chunk has no channel for yet. The arrays grow on demand and stay with the
+///     pooled workspace.
 /// </remarks>
 internal sealed class EulerBoundaryExchange
 {

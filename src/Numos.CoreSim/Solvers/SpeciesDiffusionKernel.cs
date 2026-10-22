@@ -215,12 +215,12 @@ internal static class SpeciesDiffusionKernel
     ///     <para>
     ///         The amounts themselves come from <see cref="PrepareDiffusion" />; this phase only sums
     ///         them, because a source is read by up to seven destinations and recomputing its transfer at
-    ///         each one was measurably more expensive than the buffer it saves.
+    ///         each one costs more than the buffer.
     ///     </para>
     ///     <para>
     ///         Sources run in ascending voxel index (<see cref="NeighborResolution.AscendingSourceSlots" />),
-    ///         matching the active-index order the earlier per-gas scatter used, so the accumulation
-    ///         reproduces its floating-point rounding exactly.
+    ///         so the floating-point accumulation order is fixed. Changing it changes rounding and therefore
+    ///         deterministic replay state.
     ///     </para>
     /// </remarks>
     internal static void GatherDiffusionDeltas(

@@ -93,9 +93,9 @@ internal static class EulerFaceTopology
     /// <param name="neighborChunk">The chunk holding the air voxel on the other side; <paramref name="chunk" /> for an interior face.</param>
     /// <param name="neighborIndex">The air voxel on the other side, indexed in <paramref name="neighborChunk" />.</param>
     /// <remarks>
-    ///     Always <see langword="true" /> today. This is the one place a per-voxel blocked-face bit set (airtight
-    ///     doors, windows, thin walls between two air voxels) will plug in; nothing else in the sweep looks at
-    ///     the classification of an air-to-air face.
+    ///     Always <see langword="true" />: there are no blocked faces between two air voxels. A per-voxel
+    ///     blocked-face bit set would be consulted here, and nothing else in the sweep inspects the classification
+    ///     of an air-to-air face.
     /// </remarks>
     internal static bool IsFaceOpen(
         AtmosChunk chunk, ushort voxelIndex, int direction, AtmosChunk neighborChunk, ushort neighborIndex)

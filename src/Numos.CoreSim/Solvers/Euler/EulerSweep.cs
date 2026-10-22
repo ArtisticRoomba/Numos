@@ -11,9 +11,9 @@ namespace Numos.CoreSim.Solvers.Euler;
 /// <remarks>
 ///     Species are not stored per face. The face keeps the upwind cell and <c>A·Mass/m_upwind</c>, and the cell
 ///     update multiplies that by each species' moles in the upwind cell of the <em>read</em> buffer. Every species
-///     therefore moves in the proportion it has upwind, and <c>Σ_k M_k·G_k = A·G_mass</c> holds to rounding, which
-///     is the Larrouturou-consistent transport that keeps mass and moles from drifting apart. The upwind cell of a
-///     chunk-boundary face can belong to the neighbouring chunk, so the face names the buffer as well as the index.
+///     therefore moves in the proportion it has upwind and <c>Σ_k M_k·G_k = A·G_mass</c> holds to rounding, so
+///     mass and moles cannot drift apart. The upwind cell of a chunk-boundary face can belong to the neighbouring
+///     chunk, so the face names the buffer as well as the index.
 /// </remarks>
 internal struct EulerFaceRate
 {
@@ -33,8 +33,7 @@ internal struct EulerFaceRate
 }
 
 /// <summary>
-///     Counts the repairs a sweep had to make; a bug indicator surfaced through
-///     <see cref="EulerFlow.AtmosFlowDiagnostics" />.
+///     Counts the repairs a sweep had to make, surfaced through <see cref="EulerFlow.AtmosFlowDiagnostics" />.
 /// </summary>
 internal struct EulerSweepCounters
 {
@@ -51,29 +50,28 @@ internal struct EulerSweepCounters
 /// <remarks>
 ///     <para>
 ///         Work is cut into pencil bundles. An X sweep marches one row <c>(y, z)</c> along x; a Y sweep marches a
-///         whole z-slab along y, handling the <c>W</c> faces of one x-row at a time; a Z sweep marches a y-sheet
-///         along z the same way. The bundle keeps a rolling pair of face-rate rows (the faces behind the row of
-///         cells being updated and the faces ahead of it), so each face is solved exactly once per chunk and each
-///         cell sees both of its faces before it is written.
+///         whole z-slab along y, one x-row of faces at a time. A Z sweep marches a y-sheet along z the same way.
+///         The bundle keeps a rolling pair of face-rate rows (behind and ahead of the cells being updated), so
+///         each face is solved once per chunk and each cell sees both of its faces before it is written.
 ///     </para>
 ///     <para>
-///         A face shared with an active neighbouring chunk is solved by both chunks, redundantly, from identical
-///         inputs: each side projects the same two <see cref="EulerCellState" />s (its own from its read buffer,
-///         the other from the neighbour's read buffer, never recomputed from the neighbour's channels) and calls
-///         <see cref="HllcFlux.Solve" /> with the lower-coordinate cell on the left, so the two evaluations are the
-///         same bits and each side applies its own <c>F_right − F_left</c>. That is what makes a two-chunk run
-///         bitwise equal to the same tube in one chunk without any reserve-and-merge pass. A face into a chunk
-///         that is not active this sweep is a wall, and the sweep raises an activation request for it; a wall is
-///         exact while the neighbour is at rest at the same pressure, because the wall flux is then <c>p</c>, which
-///         is also the interior flux of a gas at rest, and the mass flux is zero either way.
+///         A face shared with an active neighbouring chunk is solved by both chunks from identical inputs: each
+///         side projects the same two <see cref="EulerCellState" />s (its own from its read buffer, the other from
+///         the neighbour's read buffer, never recomputed from the neighbour's channels) and calls
+///         <see cref="HllcFlux.Solve" /> with the lower-coordinate cell on the left. The two evaluations are the
+///         same bits and each side applies its own <c>F_right − F_left</c>, which is what makes a two-chunk run
+///         bitwise equal to the same tube in one chunk. A face into a chunk that is not active this sweep is a
+///         wall, and the sweep raises an activation request for it. A wall is exact while the neighbour is at
+///         rest at the same pressure: the wall flux is then <c>p</c>, the same as the interior flux of a gas at
+///         rest, and the mass flux is zero either way.
 ///     </para>
 ///     <para>
 ///         Determinism rests on three things. A cell's update is a two-term difference of the rates of its own two
-///         faces, each rate computed from read buffers no sweep writes, so the order pencils run in, or which
-///         worker runs them, cannot change a result. Mixture sums run in the workspace's ascending gas list. Nothing
-///         uses <see cref="MathF.FusedMultiplyAdd" /> or any call whose rounding is platform dependent beyond what
-///         <see cref="HllcFlux" /> already documents. Each pencil writes its maximum signal speed and repair counts
-///         into its own slot, and the tick thread reduces them with max and sum, which are order free.
+///         faces, each computed from read buffers no sweep writes, so neither pencil order nor worker assignment
+///         can change a result. Mixture sums run in the workspace's ascending gas list. Nothing uses
+///         <see cref="MathF.FusedMultiplyAdd" /> or any call with platform-dependent rounding beyond what
+///         <see cref="HllcFlux" /> documents. Each pencil writes its maximum signal speed and repair counts into
+///         its own slot, and the tick thread reduces them with max and sum, which are order free.
 ///     </para>
 /// </remarks>
 internal static class EulerSweep
@@ -103,9 +101,9 @@ internal static class EulerSweep
     /// <param name="faceArea">Area of one voxel face, <c>Δx²</c>.</param>
     /// <param name="config">The tick's configuration snapshot.</param>
     /// <remarks>
-    ///     This is the unit both parallel schedules call: a whole chunk is the range <c>[0, PencilCount)</c> and a
-    ///     tile is a sub-range of it. No pencil writes another pencil's cells or slots, so splitting a chunk's
-    ///     range differently cannot change any bit of the result.
+    ///     Both parallel schedules call this: a whole chunk is the range <c>[0, PencilCount)</c> and a tile is a
+    ///     sub-range. No pencil writes another pencil's cells or slots, so how a chunk's range is split cannot
+    ///     change any bit.
     /// </remarks>
     internal static void RunPencils(
         EulerChunkWorkspace workspace, int axis, int firstPencil, int pencilCount,
@@ -132,8 +130,8 @@ internal static class EulerSweep
     }
 
     /// <summary>
-    ///     Sweeps one pencil bundle and returns the fastest signal speed among the cells it wrote. The rolling
-    ///     face-rate rows are the caller's, rented once per pencil range.
+    ///     Sweeps one pencil bundle and returns the fastest signal speed among the cells it wrote. The caller owns
+    ///     the rolling face-rate rows.
     /// </summary>
     /// <remarks>
     ///     The march index runs one past the last cell so the trailing wall faces are solved by the same loop as
@@ -224,10 +222,9 @@ internal static class EulerSweep
     /// <param name="settings">The stage's settings.</param>
     /// <param name="rate">The extensive flux through the face.</param>
     /// <remarks>
-    ///     Two air cells of the same chunk always share an open face today, because
-    ///     <see cref="EulerFaceTopology.Build" /> sets the open bit for every air neighbour; the assertion is where a
-    ///     blocked air-to-air face would need a second rate (a wall pressure per side) instead of one shared flux.
-    ///     Everything else is a one-sided face of the air cell, which <see cref="SolveOneSided" /> classifies.
+    ///     <see cref="EulerFaceTopology.Build" /> opens every air-to-air face inside a chunk, so two air cells
+    ///     share one flux. Supporting blocked faces would need a wall pressure per side instead, which is what the
+    ///     assertion guards. Every other face is one-sided and goes to <see cref="SolveOneSided" />.
     /// </remarks>
     private static void SolveFace(
         EulerChunkWorkspace workspace, EulerChunkState read, int axis,
@@ -279,18 +276,16 @@ internal static class EulerSweep
     ///     <para>
     ///         An open bit on a face that reaches here means the face leaves the chunk into an air voxel of a
     ///         registered neighbour. If that neighbour has a workspace this sweep, the face is the shared-face
-    ///         Riemann problem described on the class, solved with the lower global coordinate on the left
-    ///         regardless of which chunk this is. If it has none, the face is a wall for this sweep and the sweep
-    ///         asks for the neighbour to be activated when the two sides differ in pressure by more than
-    ///         <see cref="EulerFlowConfig.WakePressureDelta" /> or this cell moves normal to the face at all,
-    ///         either way; a wall is only exact for gas at rest. The neighbour's pressure is its live
+    ///         Riemann problem described on the class, with the lower global coordinate on the left regardless of
+    ///         which chunk this is. Otherwise the face is a wall for this sweep, and the neighbour is requested for
+    ///         activation when the pressures differ by more than <see cref="EulerFlowConfig.WakePressureDelta" /> or
+    ///         this cell moves normal to the face at all. The neighbour's pressure is its live
     ///         <see cref="AtmosChunk.TotalPressure" />, which nothing writes while the chunk is inactive, and its
     ///         momentum is zero by invariant.
     ///     </para>
     ///     <para>
-    ///         Gas that crosses into a void cell is gone: the void cell is never updated. A trace cell presents as
-    ///         the vacuum state, so the Riemann problem against it is the expansion into vacuum and the trace cell
-    ///         can only receive.
+    ///         Gas that crosses into a void cell is gone. The void cell is never updated. A trace cell presents as
+    ///         the vacuum state, so the face is an expansion into vacuum and the trace cell can only receive.
     ///     </para>
     /// </remarks>
     private static void SolveOneSided(
@@ -364,19 +359,19 @@ internal static class EulerSweep
     /// <returns>The cell's new signal speed, or zero for a trace cell.</returns>
     /// <remarks>
     ///     <para>
-    ///         Every field of the write buffer is written for every air cell, so no stale value from an earlier
-    ///         sweep survives in it. The tangential momentum components land on the axes
+    ///         Every field of the write buffer is written for every air cell, so no stale value survives from an
+    ///         earlier sweep. The tangential momentum components land on the axes
     ///         <see cref="EulerFaceState.FromCell" /> took them from: <c>(axis + 1) mod 3</c> and
     ///         <c>(axis + 2) mod 3</c>.
     ///     </para>
     ///     <para>
-    ///         Species and momentum are updated in float; the energy difference is formed in double so the
-    ///         subtraction from the large thermal part does not lose it. Species are floored at zero and the
-    ///         speed is clamped to <see cref="EulerFlow.EulerFlowConfig.MaxVelocity" /> before the primitive state is
-    ///         rebuilt; both repairs are counted, as is a cell whose primitive state does not fit in float, which
-    ///         keeps its conserved variables but is written as a vacuum with no momentum. A species update that is
-    ///         not finite is written as zero and counts the cell as non-finite too, so a NaN never reaches a gas
-    ///         channel, where every later comparison would let it through.
+    ///         Species and momentum are updated in float. The energy difference is formed in double so subtracting
+    ///         from the large thermal part does not lose it. Species are floored at zero and the speed is clamped to
+    ///         <see cref="EulerFlow.EulerFlowConfig.MaxVelocity" /> before the primitive state is rebuilt, and both
+    ///         repairs are counted. A cell whose primitive state does not fit in float keeps its conserved variables
+    ///         but is written as a vacuum with no momentum, and is counted. A non-finite species update is written
+    ///         as zero and counts the cell as non-finite, so a NaN never reaches a gas channel, where every later
+    ///         comparison would let it through.
     ///     </para>
     /// </remarks>
     private static MetrePerSecond UpdateCell(
@@ -387,8 +382,8 @@ internal static class EulerSweep
         EulerChunkState read = workspace.Read;
         EulerChunkState write = workspace.Write;
 
-        // Every gas an upwind neighbour cell can hold is in this list (the tick thread merged the axis
-        // neighbours' lists before the sweep), so a null upwind row is a gas that side does not have.
+        // The tick thread merged the axis neighbours' gas lists before the sweep, so every gas an upwind cell
+        // can hold is in this list and a null upwind row means that side has none of it.
         bool nonFiniteSpecies = false;
         for (int present = 0; present < workspace.GasCount; present++)
         {
@@ -402,7 +397,7 @@ internal static class EulerSweep
 
             if (!float.IsFinite(moles))
             {
-                // NaN fails the floor's comparison, so it has to be caught here or it lands in the channels.
+                // NaN fails the floor's comparison below, so it has to be caught here.
                 nonFiniteSpecies = true;
                 moles = 0f;
             }
@@ -502,14 +497,12 @@ internal static class EulerSweep
     }
 
     /// <summary>
-    ///     Moles of one gas in a face's upwind cell; zero for a gas the upwind buffer has no row for, which is the
-    ///     exact value a zero row would give.
+    ///     Moles of one gas in a face's upwind cell, or zero when the upwind buffer has no row for it.
     /// </summary>
     /// <remarks>
-    ///     The id comes from this chunk's list and the buffer can be a neighbour's, whose row table is only as
-    ///     wide as the registry plus the ids it lists itself. An id past its end (a channel restored from a
-    ///     checkpoint with an id the registry never saw, listed here via another neighbour) is a gas that
-    ///     buffer holds none of, so it reads as a null row rather than as an index fault.
+    ///     The id comes from this chunk's list but the buffer can be a neighbour's, whose row table is only as
+    ///     wide as the registry plus the ids it lists itself. An id past the end, such as a checkpoint-restored
+    ///     channel with an id the registry never saw, is a gas that buffer holds none of and reads as a null row.
     /// </remarks>
     private static Mole UpwindMoles(in EulerFaceRate rate, int gasId)
     {
