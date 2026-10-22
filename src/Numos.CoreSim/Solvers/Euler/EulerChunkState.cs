@@ -13,14 +13,14 @@ namespace Numos.CoreSim.Solvers.Euler;
 ///         Species rows are indexed by gas id rather than by the chunk's channel index, so two chunks that
 ///         hold the same gases in different channel order describe a shared face identically. A buffer only has
 ///         rows for the gases its workspace lists (see <see cref="EulerChunkWorkspace.GasIds" />); a
-///         <see langword="null" /> row reads as all zeros, which is the exact value, since a chunk never holds a
-///         gas it has no row for.
+///         <see langword="null" /> row reads as all zeros, which is exact because the chunk holds none of that
+///         gas.
 ///     </para>
 ///     <para>
-///         Energy and heat capacity are double. A warm voxel's total energy is dominated by <c>C·T</c>, and the
-///         face-flux differences that move it each substep are many orders of magnitude smaller, so a float
-///         accumulator would drop them; <c>C</c> is double so a heat capacity near the float maximum overflows only
-///         once narrowed, which <see cref="EulerMixture.ToPrimitive(Kilogram, Mole, JoulePerKelvin64,
+///         Energy and heat capacity are double. Total energy is dominated by <c>C·T</c> and the per-substep
+///         flux differences are many orders of magnitude smaller, so a float accumulator would drop them.
+///         <c>C</c> is double so a heat capacity near the float maximum overflows only once narrowed, which
+///         <see cref="EulerMixture.ToPrimitive(Kilogram, Mole, JoulePerKelvin64,
 ///         KilogramMetrePerSecond, KilogramMetrePerSecond, KilogramMetrePerSecond, Joule64, CubicMetre,
 ///         PascalPerMoleKelvin, out EulerCellState)" /> detects.
 ///     </para>
@@ -84,9 +84,8 @@ internal sealed class EulerChunkState
 /// <remarks>
 ///     <para>
 ///         Instances live in a pool on <see cref="EulerFlowSolver" /> and are rebuilt from the chunk's fields when
-///         the chunk joins the tick's active set, so nothing here is checkpointed and nothing survives a tick except
-///         the arrays themselves. Every chunk of a kernel has the same dimensions, so a pooled instance fits any of
-///         them.
+///         the chunk joins the tick's active set. Nothing here is checkpointed. Every chunk of a kernel has the
+///         same dimensions, so a pooled instance fits any of them.
 ///     </para>
 ///     <para>
 ///         The workspace lists the gases it carries rows for, in ascending gas id: the chunk's own channels at
@@ -94,18 +93,16 @@ internal sealed class EulerChunkState
 ///         thread before that sweep (see <see cref="EulerFlowSolver" />). Species that cross a face therefore
 ///         always have a row waiting on the receiving side, and no worker ever creates a row. Every mixture sum
 ///         runs over this list in ascending order. Lists differ between chunks, but a zero row adds nothing to a
-///         sum (<c>x + 0·M</c> is <c>x</c> bitwise), so a cell's totals are the same bits whether its chunk lists
-///         three absent gases alongside its own or none, which is what makes a tube split across two chunks equal
-///         to the tube in one.
+///         sum (<c>x + 0·M</c> is <c>x</c> bitwise), so a cell's totals are the same bits whatever absent gases
+///         its chunk lists. That is what makes a tube split across two chunks equal to the tube in one.
 ///     </para>
 ///     <para>
 ///         The neighbour slots follow <see cref="NeighborResolution.NeighborDirections" />.
 ///         <see cref="NeighborChunks" /> is fixed for the tick; <see cref="NeighborWorkspaces" /> is refreshed on the
-///         tick thread whenever a neighbour is activated, and workers only ever read it. A sweep that finds an open
+///         tick thread whenever a neighbour is activated, and workers only read it. A sweep that finds an open
 ///         face into a chunk with no workspace sets that direction's <see cref="WakeRequests" /> flag. Several
-///         pencils of one chunk may set the same flag from different workers; each only ever stores
-///         <see langword="true" /> into its own slot, so there is no lost update to worry about, which is why this is
-///         a flag per direction and not a mask.
+///         workers may set the same flag, but each only stores <see langword="true" /> into its own slot, so no
+///         update is lost. That is why this is a flag per direction and not a shared mask.
 ///     </para>
 /// </remarks>
 internal sealed class EulerChunkWorkspace
@@ -113,8 +110,8 @@ internal sealed class EulerChunkWorkspace
     private readonly EulerChunkState[] _buffers = [new EulerChunkState(), new EulerChunkState()];
 
     /// <summary>
-    ///     Rows of gases earlier bindings carried, kept for reuse so a chunk that keeps changing gases does not
-    ///     allocate a 4 KB row every tick.
+    ///     Rows of gases earlier bindings carried, kept for reuse so a chunk whose gas set keeps changing does not
+    ///     allocate a row every tick.
     /// </summary>
     private readonly Stack<Mole[]> _rowPool = new();
 
@@ -347,7 +344,7 @@ internal sealed class EulerChunkWorkspace
             for (int activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
             {
                 ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
-                // Same guard as the legacy heat-capacity refresh: a negative or NaN channel entry counts as empty.
+                // A negative or NaN channel entry counts as empty, as in the heat-capacity refresh.
                 Mole moles = source[voxelIndex];
                 row[voxelIndex] = moles > 0f ? moles : 0f;
             }
@@ -449,22 +446,21 @@ internal sealed class EulerChunkWorkspace
     /// <remarks>
     ///     <para>
     ///         The sweeps summed the mixture in ascending gas id, but the heat capacity and total moles written
-    ///         here are summed in the chunk's channel order, because that is the order every other stage and
-    ///         <see cref="AdvectionSolver.RefreshPressureAndHeatCapacity" /> use, and the cached values must match
-    ///         what a later refresh would produce bit for bit. The temperature divides by the same sum formed in
-    ///         double, so a heat capacity the float cache saturates to infinity still gives a finite temperature.
+    ///         here are summed in the chunk's channel order, the order <see cref="AdvectionSolver.RefreshPressureAndHeatCapacity" />
+    ///         and every other stage use, so the cached values match a later refresh bit for bit. The temperature
+    ///         divides by the same sum formed in double, so a heat capacity the float cache saturates to infinity
+    ///         still gives a finite temperature.
     ///     </para>
     ///     <para>
     ///         A row for a gas the chunk has no channel for gets one as soon as any voxel holds a positive amount,
-    ///         however far below <see cref="AtmosSolverConstants.MinimumTrackedMoles" />. The threshold decides
-    ///         what counts as a trace cell for transport, not conservation: whatever the row holds was debited from
-    ///         an upwind cell, possibly in another chunk, and there is no payer left to hand it back to.
+    ///         however far below <see cref="AtmosSolverConstants.MinimumTrackedMoles" />. The threshold decides what
+    ///         counts as a trace cell for transport, not for conservation: the row's contents were debited from an
+    ///         upwind cell, possibly in another chunk, and nothing could give them back.
     ///     </para>
     ///     <para>
     ///         The temperature is <c>(E − K)/C</c> with <c>K</c> from the momentum as it stands in the buffer, so
-    ///         whatever the caller did to the momentum first (velocity floor, damping) ends up as heat rather than
-    ///         disappearing. A voxel whose energy or heat capacity is not finite even in double keeps the
-    ///         temperature it had. Pressure goes through
+    ///         any change the caller made to the momentum first (velocity floor, damping) ends up as heat. A voxel
+    ///         whose energy or heat capacity is not finite even in double keeps its temperature. Pressure goes through
     ///         <see cref="AtmosSolverMath.CalculatePressureAtVoxel(IAtmosConfig, AtmosChunk, ushort, Mole)" /> so
     ///         <see cref="AtmosChunk.IsVacuum" /> stays consistent with the rest of the kernel.
     ///     </para>
@@ -481,9 +477,9 @@ internal sealed class EulerChunkWorkspace
             int channel = chunk.FindGasChannel(gasId);
             if (channel < 0)
             {
-                // However little of a new gas arrived, the sweep already took it from the upwind cell, which
-                // may sit in another chunk, so a row holding any of it gets a channel or the gas is destroyed.
-                // Channels are created in ascending gas id, which is the only order the list is ever walked in.
+                // The sweep already debited any amount that arrived from the upwind cell, which may be in another
+                // chunk, so a row holding any of it needs a channel or the gas is destroyed. The list is walked in
+                // ascending gas id, so channels are created in that order too.
                 if (!HoldsAny(chunk, row))
                     continue;
 

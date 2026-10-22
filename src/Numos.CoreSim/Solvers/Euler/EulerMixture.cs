@@ -73,16 +73,16 @@ internal enum EulerCellKind : byte
 ///         <c>1/m</c> already computed for the velocities and never needs the volume.
 ///     </para>
 ///     <para>
-///         Sanity numbers: air at 293 K (Cv = 5R/2 per mole, M = 0.02897 kg/mol) has γ = 1.4 and c ≈ 343 m/s.
+///         For scale, air at 293 K (Cv = 5R/2 per mole, M = 0.02897 kg/mol) has γ = 1.4 and c ≈ 343 m/s.
 ///     </para>
 ///     <para>
-///         The heat capacity, the kinetic energy, and the internal-energy subtraction are double. A warm voxel's
-///         total energy is dominated by <c>C·T</c> (about 250 kJ for a cubic metre of room air, against 60 J of
-///         kinetic energy at 10 m/s), and a float subtraction would throw away the thermal part's low bits every
-///         tick; <c>C</c> itself is a sum of <c>n·Cv</c> products that a host-configured heat capacity near the
-///         float maximum pushes past float range while the temperature it implies is ordinary. Everything else is
-///         scalar float with only multiplies, adds, divides, <see cref="MathF.Sqrt" />, and min/max, so the results
-///         are reproducible across platforms.
+///         The heat capacity, the kinetic energy, and the internal-energy subtraction are double. Total energy
+///         is dominated by <c>C·T</c> (about 250 kJ for a cubic metre of room air, against 60 J of kinetic
+///         energy at 10 m/s), so a float subtraction would lose the thermal part's low bits every tick. <c>C</c>
+///         itself is a sum of <c>n·Cv</c> products that a host heat capacity near the float maximum would push
+///         out of float range while the temperature it implies is ordinary. Everything else is scalar float with
+///         only multiplies, adds, divides, <see cref="MathF.Sqrt" />, and min/max, so results are reproducible
+///         across platforms.
 ///     </para>
 /// </remarks>
 internal static class EulerMixture
@@ -112,9 +112,9 @@ internal static class EulerMixture
     ///     caller is expected to zero the voxel's momentum in either case; nothing here does it.
     /// </returns>
     /// <remarks>
-    ///     Internal energy is clamped at zero before dividing by the heat capacity: a voxel whose kinetic energy
-    ///     exceeds its total energy (possible after a lossy transfer rounded the wrong way) comes out at 0 K and zero
-    ///     pressure rather than with a negative temperature.
+    ///     Internal energy is clamped at zero before dividing by the heat capacity, so a voxel whose kinetic energy
+    ///     exceeds its total energy through rounding comes out at 0 K and zero pressure instead of a negative
+    ///     temperature.
     /// </remarks>
     internal static EulerCellKind ToPrimitive(
         Kilogram mass, Mole moles, JoulePerKelvin64 heatCapacity,
@@ -145,8 +145,8 @@ internal static class EulerMixture
         MetrePerSecond soundSpeed = MathF.Sqrt(gamma * molarGasTerm * temperature * inverseMass);
         JoulePerCubicMetre energyDensity = (float)(totalEnergy / volume);
 
-        // The energy density is the usual casualty: C·T/V overflows float long before C does, and one infinity
-        // in a face state turns the whole pencil to NaN within a sweep.
+        // The energy density is the usual casualty: C·T/V overflows float long before C does, and a single
+        // infinity in a face state turns the whole pencil to NaN within a sweep.
         if (!float.IsFinite(temperature) || !float.IsFinite(pressure) || !float.IsFinite(soundSpeed) ||
             !float.IsFinite(energyDensity) || !float.IsFinite(inverseMass))
         {
@@ -169,9 +169,8 @@ internal static class EulerMixture
     }
 
     /// <summary>
-    ///     Same as the nine-argument overload, computing <c>R / V</c> from <paramref name="volume" />. Prefer the
-    ///     overload that takes the config snapshot's precomputed coefficient inside a sweep; this one exists for
-    ///     callers that only have a volume.
+    ///     Same as the other overload, computing <c>R / V</c> from <paramref name="volume" />. Inside a sweep, use
+    ///     the overload that takes the config snapshot's precomputed coefficient.
     /// </summary>
     internal static EulerCellKind ToPrimitive(
         Kilogram mass, Mole moles, JoulePerKelvin64 heatCapacity,

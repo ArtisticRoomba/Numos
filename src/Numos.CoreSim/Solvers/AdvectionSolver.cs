@@ -551,7 +551,7 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
     ///     <para>
     ///         Terms are ordered by ascending source voxel index
     ///         (<see cref="NeighborResolution.AscendingSourceSlots" />), and each source's own terms stay
-    ///         in direction order, which is the exact sequence the earlier per-gas scatter accumulated.
+    ///         in direction order.
     ///         Reordering them changes floating-point rounding and therefore deterministic replay state.
     ///     </para>
     /// </remarks>
