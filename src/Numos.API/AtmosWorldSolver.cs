@@ -87,6 +87,8 @@ public interface IAtmosWorldSolver
     ///         <see cref="AtmosWorld.RestoreCheckpoint" />, <see cref="AtmosSimulation.RestoreCheckpoint" />, both
     ///         <c>ReplayTo</c> methods, and the restore that puts the previous state back after a failed
     ///         <c>ReplayTo</c>. A single host call can therefore trigger it more than once, so make it idempotent.
+    ///         A timeline seek that continues forward from the current inspection position restores nothing and does
+    ///         not call it.
     ///     </para>
     ///     <para>
     ///         Services and other solvers are still registered when this runs. An exception propagates to the caller

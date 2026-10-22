@@ -292,6 +292,12 @@ public sealed class AtmosWorldReplayTimeline
     /// </summary>
     /// <param name="tick">Completed tick to reconstruct.</param>
     /// <returns>Diagnostics for the reconstruction.</returns>
+    /// <remarks>
+    ///     A seek that lands at or after the current inspection position, and no earlier than the nearest retained
+    ///     checkpoint, continues from the current state instead of restoring that checkpoint, so stepping forward one
+    ///     tick at a time simulates one tick per step. This assumes the host has not mutated the world outside recorded
+    ///     history while inspecting.
+    /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="tick" /> is outside retained history.</exception>
     /// <exception cref="ObjectDisposedException">The observed world has been disposed.</exception>
     /// <exception cref="InvalidOperationException">
@@ -302,8 +308,9 @@ public sealed class AtmosWorldReplayTimeline
         if (tick < Start.Tick || tick > Head.Tick)
             throw new ArgumentOutOfRangeException(nameof(tick));
 
+        bool wasInspecting = IsInspecting;
         BeginInspection();
-        return SeekPosition(PositionBeforeOperationsAtTick(Start, _history!.Operations, tick));
+        return SeekCore(PositionBeforeOperationsAtTick(Start, _history!.Operations, tick), wasInspecting);
     }
 
     /// <summary>
@@ -311,6 +318,11 @@ public sealed class AtmosWorldReplayTimeline
     /// </summary>
     /// <param name="target">Exact tick and operation sequence to reconstruct.</param>
     /// <returns>Diagnostics for the reconstruction.</returns>
+    /// <remarks>
+    ///     Like <see cref="SeekTick" />, a seek that lands at or after the current inspection position, and no earlier
+    ///     than the nearest retained checkpoint, continues from the current state instead of restoring that checkpoint.
+    ///     This assumes the host has not mutated the world outside recorded history while inspecting.
+    /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="target" /> is outside retained history.</exception>
     /// <exception cref="ArgumentException">
     ///     The tick and operation sequence do not form a position contained in the retained history.
@@ -327,9 +339,26 @@ public sealed class AtmosWorldReplayTimeline
             target.OperationSequence > Head.OperationSequence)
             throw new ArgumentOutOfRangeException(nameof(target));
 
+        bool wasInspecting = IsInspecting;
         BeginInspection();
+        return SeekCore(target, wasInspecting);
+    }
+
+    private AtmosWorldReplayResult SeekCore(AtmosTimelinePosition target, bool wasInspecting)
+    {
         var source = _checkpoints[LastCheckpointNotAfter(target)];
-        LastReplay = _world.ReplayRecordingTo(source.Checkpoint, _history!, target);
+        var current = Position;
+
+        // While inspecting, the world sits on a position of the retained history, so moving forward from it is
+        // cheaper than restoring whenever it is already past the nearest checkpoint. A live world was at head
+        // until BeginInspection, which only the restore path can move backward from.
+        if (!wasInspecting || !IsNotAfter(current, target) || !IsNotAfter(source.Checkpoint.Position, current))
+            LastReplay = _world.ReplayRecordingTo(source.Checkpoint, _history!, target);
+        else if (current == target)
+            LastReplay = new AtmosWorldReplayResult(current, current, 0, TimeSpan.Zero);
+        else
+            LastReplay = _world.ReplayRecordingForward(_history!, target);
+
         var reference = source.Checkpoint.Position == target ? source : null;
         IsVerified = reference == null ? null : _world.ComputeStateHash() == reference.Hash;
         return LastReplay.Value;
@@ -442,8 +471,7 @@ public sealed class AtmosWorldReplayTimeline
         while (low < high)
         {
             int middle = low + (high - low) / 2;
-            var position = _checkpoints[middle].Checkpoint.Position;
-            if (position.Tick <= target.Tick && position.OperationSequence <= target.OperationSequence)
+            if (IsNotAfter(_checkpoints[middle].Checkpoint.Position, target))
                 low = middle + 1;
             else
                 high = middle;
@@ -481,6 +509,11 @@ public sealed class AtmosWorldReplayTimeline
             combined[prefix.Count + index] = tail[index];
 
         return combined;
+    }
+
+    private static bool IsNotAfter(AtmosTimelinePosition candidate, AtmosTimelinePosition position)
+    {
+        return candidate.Tick <= position.Tick && candidate.OperationSequence <= position.OperationSequence;
     }
 
     private static bool IsAfter(AtmosTimelinePosition candidate, AtmosTimelinePosition position)

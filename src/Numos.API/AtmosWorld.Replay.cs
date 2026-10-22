@@ -294,8 +294,22 @@ public sealed partial class AtmosWorld
         return ReplayToCore(checkpoint, recording.Operations, target);
     }
 
+    /// <summary>
+    ///     Continues from the world's current position through <paramref name="target" /> without restoring a
+    ///     checkpoint, for callers that know the live state already matches <paramref name="recording" /> there.
+    /// </summary>
+    /// <remarks>
+    ///     <see cref="IAtmosWorldSolver.OnRestored" /> does not run on success because no state is installed. A failure
+    ///     still restores the pre-call state, which does run it.
+    /// </remarks>
+    internal AtmosWorldReplayResult ReplayRecordingForward(AtmosWorldRecording recording, AtmosTimelinePosition target)
+    {
+        return ReplayToCore(null, recording.Operations, target);
+    }
+
+    // A null checkpoint continues from the current position instead of restoring one.
     private AtmosWorldReplayResult ReplayToCore(
-        AtmosWorldCheckpoint checkpoint,
+        AtmosWorldCheckpoint? checkpoint,
         IReadOnlyList<AtmosWorldRecordedOperation> history,
         AtmosTimelinePosition target)
     {
@@ -309,7 +323,9 @@ public sealed partial class AtmosWorld
                     throw new InvalidOperationException("Stop recording before replaying; recursive replay is unavailable.");
             }
 
-            ReplayHistory.ThrowIfInvalidReplay(checkpoint.Position, history, target);
+            var start = checkpoint?.Position ??
+                        new AtmosTimelinePosition(checked((ulong)TickCount), _lastWorldOperationSequence);
+            ReplayHistory.ThrowIfInvalidReplay(start, history, target);
             var previous = CaptureCheckpoint();
             long started = Stopwatch.GetTimestamp();
             lock (_recordingGate)
@@ -320,13 +336,16 @@ public sealed partial class AtmosWorld
             _isApplyingWorldOperation = true;
             try
             {
-                RestoreCheckpoint(checkpoint);
-                for (int index = 0; index < history.Count; index++)
+                if (checkpoint != null)
+                    RestoreCheckpoint(checkpoint);
+
+                for (int index = ReplayHistory.CountThrough(history, start.OperationSequence);
+                     index < history.Count;
+                     index++)
                 {
                     var operation = history[index];
-                    if (operation.Sequence <= checkpoint.Position.OperationSequence ||
-                        operation.Sequence > target.OperationSequence)
-                        continue;
+                    if (operation.Sequence > target.OperationSequence)
+                        break;
 
                     while ((ulong)TickCount < operation.AfterTick)
                         TickCore();
@@ -339,9 +358,9 @@ public sealed partial class AtmosWorld
                     TickCore();
 
                 return new AtmosWorldReplayResult(
-                    checkpoint.Position,
+                    start,
                     TimelinePosition,
-                    target.Tick - checkpoint.Position.Tick,
+                    target.Tick - start.Tick,
                     Stopwatch.GetElapsedTime(started));
             }
             catch
