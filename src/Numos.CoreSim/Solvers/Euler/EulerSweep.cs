@@ -1,8 +1,28 @@
-using System.Buffers;
 using System.Diagnostics;
 using Numos.CoreSim.EulerFlow;
 
 namespace Numos.CoreSim.Solvers.Euler;
+
+/// <summary>
+///     The read buffer that holds the upwind cell of a face.
+/// </summary>
+internal enum EulerUpwindSide : byte
+{
+    /// <summary>
+    ///     This chunk's read buffer.
+    /// </summary>
+    Self = 0,
+
+    /// <summary>
+    ///     The read buffer of the neighbour across the lower face of the sweep axis.
+    /// </summary>
+    LowerNeighbor = 1,
+
+    /// <summary>
+    ///     The read buffer of the neighbour across the upper face of the sweep axis.
+    /// </summary>
+    UpperNeighbor = 2
+}
 
 /// <summary>
 ///     Extensive flux through one voxel face for one substep: per-second rates, positive from the lower-coordinate
@@ -11,9 +31,10 @@ namespace Numos.CoreSim.Solvers.Euler;
 /// <remarks>
 ///     Species are not stored per face. The face keeps the upwind cell and <c>A·Mass/m_upwind</c>, and the cell
 ///     update multiplies that by each species' moles in the upwind cell of the <em>read</em> buffer. Every species
-///     therefore moves in the proportion it has upwind and <c>Σ_k M_k·G_k = A·G_mass</c> holds to rounding, so
-///     mass and moles cannot drift apart. The upwind cell of a chunk-boundary face can belong to the neighbouring
-///     chunk, so the face names the buffer as well as the index.
+///     therefore moves in the proportion it has upwind, and <c>Σ_k M_k·G_k = A·G_mass</c> holds to rounding, which
+///     is the Larrouturou-consistent transport that keeps mass and moles from drifting apart. The upwind cell of a
+///     chunk-boundary face can belong to the neighbouring chunk, so the face names the side as well as the index.
+///     The struct holds no references, so a scratch array of faces costs the garbage collector nothing to scan.
 /// </remarks>
 internal struct EulerFaceRate
 {
@@ -21,10 +42,13 @@ internal struct EulerFaceRate
     public PerSecond SpeciesRate;
 
     /// <summary>
-    ///     Read buffer holding the upwind cell: this chunk's, or the neighbour's across a chunk face.
+    ///     Which read buffer holds the upwind cell.
     /// </summary>
-    public EulerChunkState UpwindState;
+    public EulerUpwindSide UpwindSide;
 
+    /// <summary>
+    ///     Voxel index of the upwind cell in the buffer <see cref="UpwindSide" /> names.
+    /// </summary>
     public int UpwindIndex;
     public Newton NormalMomentum;
     public Newton Tangential1Momentum;
@@ -50,9 +74,12 @@ internal struct EulerSweepCounters
 /// <remarks>
 ///     <para>
 ///         Work is cut into pencil bundles. An X sweep marches one row <c>(y, z)</c> along x; a Y sweep marches a
-///         whole z-slab along y, one x-row of faces at a time. A Z sweep marches a y-sheet along z the same way.
-///         The bundle keeps a rolling pair of face-rate rows (behind and ahead of the cells being updated), so
-///         each face is solved once per chunk and each cell sees both of its faces before it is written.
+///         whole z-slab along y, handling the <c>W</c> faces of one x-row at a time; a Z sweep marches a y-sheet
+///         along z the same way. A bundle runs in three passes. The first solves every face of the bundle once into
+///         a scratch array. The second updates the species of every air cell, one gas at a time, and sums the
+///         mixture as it goes. The third updates momentum and energy per cell and rebuilds its primitive state.
+///         Going gas by gas keeps one source row, one target row, and the two neighbour rows in hand for a whole
+///         bundle instead of looking them up again per cell.
 ///     </para>
 ///     <para>
 ///         A face shared with an active neighbouring chunk is solved by both chunks from identical inputs: each
@@ -67,11 +94,12 @@ internal struct EulerSweepCounters
 ///     </para>
 ///     <para>
 ///         Determinism rests on three things. A cell's update is a two-term difference of the rates of its own two
-///         faces, each computed from read buffers no sweep writes, so neither pencil order nor worker assignment
-///         can change a result. Mixture sums run in the workspace's ascending gas list. Nothing uses
-///         <see cref="MathF.FusedMultiplyAdd" /> or any call with platform-dependent rounding beyond what
-///         <see cref="HllcFlux" /> documents. Each pencil writes its maximum signal speed and repair counts into
-///         its own slot, and the tick thread reduces them with max and sum, which are order free.
+///         faces, each rate computed from read buffers no sweep writes, so the order pencils run in, or which worker
+///         runs them, cannot change a result. Mixture sums run in the workspace's ascending gas list, because the
+///         second pass visits the gases in that order. Nothing uses <see cref="MathF.FusedMultiplyAdd" /> or any call
+///         whose rounding is platform dependent beyond what <see cref="HllcFlux" /> already documents. Each pencil
+///         writes its maximum signal speed and repair counts into its own slot, and the tick thread reduces them with
+///         max and sum, which are order free.
 ///     </para>
 /// </remarks>
 internal static class EulerSweep
@@ -109,39 +137,28 @@ internal static class EulerSweep
         EulerChunkWorkspace workspace, int axis, int firstPencil, int pencilCount,
         Second timeStep, SquareMetre faceArea, AtmosSolverConfigSnapshot config)
     {
-        int rowLength = axis == 0 ? 1 : workspace.Chunk.Width;
-        EulerFaceRate[] behind = ArrayPool<EulerFaceRate>.Shared.Rent(rowLength);
-        EulerFaceRate[] ahead = ArrayPool<EulerFaceRate>.Shared.Rent(rowLength);
-        try
+        BundleScratch scratch = t_scratch ??= new BundleScratch();
+        for (int pencil = firstPencil; pencil < firstPencil + pencilCount; pencil++)
         {
-            for (int pencil = firstPencil; pencil < firstPencil + pencilCount; pencil++)
-            {
-                workspace.PencilCounters[pencil] = default;
-                workspace.PencilSignalSpeed[pencil] = SweepBundle(
-                    workspace, axis, pencil, timeStep, faceArea, config,
-                    behind, ahead, ref workspace.PencilCounters[pencil]);
-            }
-        }
-        finally
-        {
-            ArrayPool<EulerFaceRate>.Shared.Return(behind);
-            ArrayPool<EulerFaceRate>.Shared.Return(ahead);
+            workspace.PencilCounters[pencil] = default;
+            workspace.PencilSignalSpeed[pencil] = SweepBundle(
+                workspace, axis, pencil, timeStep, faceArea, config,
+                scratch, ref workspace.PencilCounters[pencil]);
         }
     }
 
     /// <summary>
-    ///     Sweeps one pencil bundle and returns the fastest signal speed among the cells it wrote. The caller owns
-    ///     the rolling face-rate rows.
+    ///     Sweeps one pencil bundle and returns the fastest signal speed among the cells it wrote.
     /// </summary>
     /// <remarks>
-    ///     The march index runs one past the last cell so the trailing wall faces are solved by the same loop as
-    ///     the interior ones: at march position <c>j</c> the loop solves the faces between rows <c>j − 1</c> and
-    ///     <c>j</c>, then updates row <c>j − 1</c>, whose leading faces were solved on the previous step.
+    ///     Face <c>(march, offset)</c> lies between rows <c>march − 1</c> and <c>march</c>, so the bundle has
+    ///     <c>marchCount + 1</c> rows of faces, and the trailing wall faces are solved by the same loop as the
+    ///     interior ones. Cell <c>(march, offset)</c> has the faces at <c>march</c> and <c>march + 1</c>. The
+    ///     scratch sums use the cell's position in the bundle, not its voxel index.
     /// </remarks>
     private static MetrePerSecond SweepBundle(
         EulerChunkWorkspace workspace, int axis, int bundle, Second timeStep, SquareMetre faceArea,
-        AtmosSolverConfigSnapshot config, EulerFaceRate[] behind, EulerFaceRate[] ahead,
-        ref EulerSweepCounters counters)
+        AtmosSolverConfigSnapshot config, BundleScratch scratch, ref EulerSweepCounters counters)
     {
         AtmosChunk chunk = workspace.Chunk;
         int width = chunk.Width;
@@ -172,42 +189,168 @@ internal static class EulerSweep
                 break;
         }
 
-        MetrePerSecond maxSignalSpeed = 0f;
+        int cellCount = marchCount * rowLength;
+        int faceCount = (marchCount + 1) * rowLength;
+        scratch.EnsureCapacity(faceCount, cellCount);
+        MolePerSecond[] faceFlux = scratch.FaceFlux;
+        PerSecond[] faceRate = scratch.FaceSpeciesRate;
+        int[] faceIndex = scratch.FaceUpwindIndex;
+        EulerFaceRate[] faces = scratch.Faces;
+        bool[] isAir = scratch.IsAir;
+        bool[] nonFinite = scratch.NonFiniteSpecies;
+        Kilogram[] massSum = scratch.Mass;
+        Mole[] moleSum = scratch.TotalMoles;
+        JoulePerKelvin64[] heatSum = scratch.HeatCapacity;
+
         EulerFlowConfig settings = config.EulerFlow;
         EulerChunkState read = workspace.Read;
+        EulerChunkState write = workspace.Write;
         for (int march = 0; march <= marchCount; march++)
         {
             int lowerRow = march > 0 ? baseIndex + (march - 1) * marchStride : -1;
             int upperRow = march < marchCount ? baseIndex + march * marchStride : -1;
+            int faceRow = march * rowLength;
             for (int offset = 0; offset < rowLength; offset++)
             {
                 SolveFace(
                     workspace, read, axis,
                     lowerRow < 0 ? -1 : lowerRow + offset,
                     upperRow < 0 ? -1 : upperRow + offset,
-                    faceArea, settings, out ahead[offset]);
+                    faceArea, settings, out faces[faceRow + offset]);
             }
+        }
 
-            if (march > 0)
+        for (int face = 0; face < faceCount; face++)
+        {
+            faceRate[face] = faces[face].SpeciesRate;
+            faceIndex[face] = faces[face].UpwindIndex;
+        }
+
+        for (int march = 0; march < marchCount; march++)
+        {
+            int row = baseIndex + march * marchStride;
+            for (int offset = 0; offset < rowLength; offset++)
+                isAir[march * rowLength + offset] = EulerFaceTopology.IsAir(chunk, row + offset);
+        }
+
+        Array.Clear(nonFinite, 0, cellCount);
+        Array.Clear(massSum, 0, cellCount);
+        Array.Clear(moleSum, 0, cellCount);
+        Array.Clear(heatSum, 0, cellCount);
+
+        // Every gas an upwind neighbour cell can hold is in this list (the tick thread merged the axis
+        // neighbours' lists before the sweep), so a null upwind row is a gas that side does not have.
+        EulerChunkWorkspace? lowerNeighbor = workspace.NeighborWorkspaces[2 * axis];
+        EulerChunkWorkspace? upperNeighbor = workspace.NeighborWorkspaces[2 * axis + 1];
+        for (int present = 0; present < workspace.GasCount; present++)
+        {
+            int gasId = workspace.GasIds[present];
+            Mole[] source = read.Species[gasId]!;
+            Mole[] target = write.Species[gasId]!;
+            Mole[]? lowerRows = NeighborRow(lowerNeighbor, gasId);
+            Mole[]? upperRows = NeighborRow(upperNeighbor, gasId);
+            // Only the first and last face rows can name a neighbour; the fix-up loops overwrite those.
+            for (int face = 0; face < faceCount; face++)
+                faceFlux[face] = faceRate[face] * source[faceIndex[face]];
+
+            for (int face = 0; face < rowLength; face++)
+                faceFlux[face] = faceRate[face] * UpwindMoles(in faces[face], source, lowerRows, upperRows);
+
+            for (int face = faceCount - rowLength; face < faceCount; face++)
+                faceFlux[face] = faceRate[face] * UpwindMoles(in faces[face], source, lowerRows, upperRows);
+
+            KilogramPerMole molarMass = workspace.MolarMass[present];
+            JoulePerMoleKelvin molarHeat = workspace.HeatCapacity[present];
+            for (int march = 0; march < marchCount; march++)
             {
+                int row = baseIndex + march * marchStride;
+                int cellRow = march * rowLength;
                 for (int offset = 0; offset < rowLength; offset++)
                 {
-                    int voxelIndex = lowerRow + offset;
-                    if (!EulerFaceTopology.IsAir(chunk, voxelIndex))
+                    int cell = cellRow + offset;
+                    if (!isAir[cell])
                         continue;
 
-                    MetrePerSecond signalSpeed = UpdateCell(
-                        workspace, axis, voxelIndex, in behind[offset], in ahead[offset],
-                        timeStep, config, ref counters);
+                    int voxelIndex = row + offset;
+                    Mole moles = source[voxelIndex] - timeStep * (faceFlux[cell + rowLength] - faceFlux[cell]);
 
-                    maxSignalSpeed = MathF.Max(maxSignalSpeed, signalSpeed);
+                    if (!float.IsFinite(moles))
+                    {
+                        // NaN fails the floor's comparison, so it has to be caught here or it lands in the channels.
+                        nonFinite[cell] = true;
+                        moles = 0f;
+                    }
+                    else if (moles < 0f)
+                    {
+                        counters.NegativeMoles++;
+                        moles = 0f;
+                    }
+
+                    target[voxelIndex] = moles;
+                    massSum[cell] += moles * molarMass;
+                    moleSum[cell] += moles;
+                    heatSum[cell] += (Mole64)moles * molarHeat;
                 }
             }
+        }
 
-            (behind, ahead) = (ahead, behind);
+        MetrePerSecond maxSignalSpeed = 0f;
+        for (int march = 0; march < marchCount; march++)
+        {
+            int row = baseIndex + march * marchStride;
+            int cellRow = march * rowLength;
+            for (int offset = 0; offset < rowLength; offset++)
+            {
+                int cell = cellRow + offset;
+                if (!isAir[cell])
+                    continue;
+
+                MetrePerSecond signalSpeed = UpdateCell(
+                    workspace, axis, row + offset, in faces[cell], in faces[cell + rowLength],
+                    massSum[cell], moleSum[cell], heatSum[cell], nonFinite[cell],
+                    timeStep, config, ref counters);
+
+                maxSignalSpeed = MathF.Max(maxSignalSpeed, signalSpeed);
+            }
         }
 
         return maxSignalSpeed;
+    }
+
+    /// <summary>
+    ///     The row of one gas in a neighbour's read buffer, or <see langword="null" /> if the neighbour is not
+    ///     active or has no row for the gas.
+    /// </summary>
+    /// <remarks>
+    ///     The id comes from this chunk's list and the buffer is a neighbour's, whose row table is only as wide as
+    ///     the registry plus the ids it lists itself. An id past its end (a channel restored from a checkpoint with
+    ///     an id the registry never saw, listed here via another neighbour) is a gas that buffer holds none of, so
+    ///     it reads as a null row rather than as an index fault. A null row reads as zero, the exact value a zero
+    ///     row would give.
+    /// </remarks>
+    private static Mole[]? NeighborRow(EulerChunkWorkspace? neighbor, int gasId)
+    {
+        if (neighbor == null)
+            return null;
+
+        Mole[]?[] table = neighbor.Read.Species;
+        return gasId < table.Length ? table[gasId] : null;
+    }
+
+    /// <summary>
+    ///     Moles of one gas in a face's upwind cell, from the row of the buffer the face names.
+    /// </summary>
+    private static Mole UpwindMoles(
+        in EulerFaceRate rate, Mole[] selfRow, Mole[]? lowerRow, Mole[]? upperRow)
+    {
+        Mole[]? row = rate.UpwindSide switch
+        {
+            EulerUpwindSide.Self => selfRow,
+            EulerUpwindSide.LowerNeighbor => lowerRow,
+            _ => upperRow
+        };
+
+        return row == null ? 0f : row[rate.UpwindIndex];
     }
 
     /// <summary>
@@ -244,7 +387,7 @@ internal static class EulerSweep
             EulerFaceState left = EulerFaceState.FromCell(in read.Cells[lowerIndex], axis);
             EulerFaceState right = EulerFaceState.FromCell(in read.Cells[upperIndex], axis);
             HllcFlux.Solve(in left, in right, settings.AllMachCorrection, out EulerFaceFlux flux);
-            Store(in flux, read, flux.UpwindIsLeft ? lowerIndex : upperIndex, faceArea, out rate);
+            Store(in flux, EulerUpwindSide.Self, flux.UpwindIsLeft ? lowerIndex : upperIndex, faceArea, out rate);
         }
         else if (lowerAir)
         {
@@ -310,9 +453,10 @@ internal static class EulerSweep
                     HllcFlux.Solve(in other, in cell, settings.AllMachCorrection, out flux);
 
                 if (flux.UpwindIsLeft == cellIsLeft)
-                    Store(in flux, read, cellIndex, faceArea, out rate);
+                    Store(in flux, EulerUpwindSide.Self, cellIndex, faceArea, out rate);
                 else
-                    Store(in flux, neighborRead, neighborIndex, faceArea, out rate);
+                    Store(in flux, (direction & 1) == 1 ? EulerUpwindSide.UpperNeighbor : EulerUpwindSide.LowerNeighbor,
+                        neighborIndex, faceArea, out rate);
 
                 return;
             }
@@ -336,16 +480,16 @@ internal static class EulerSweep
             HllcFlux.SolveWall(in cell, cellIsLeft, out flux);
         }
 
-        Store(in flux, read, cellIndex, faceArea, out rate);
+        Store(in flux, EulerUpwindSide.Self, cellIndex, faceArea, out rate);
     }
 
     private static void Store(
-        in EulerFaceFlux flux, EulerChunkState upwindState, int upwindIndex, SquareMetre faceArea,
+        in EulerFaceFlux flux, EulerUpwindSide upwindSide, int upwindIndex, SquareMetre faceArea,
         out EulerFaceRate rate)
     {
         rate.Mass = flux.Mass * faceArea;
         rate.SpeciesRate = flux.SpeciesWeight * faceArea;
-        rate.UpwindState = upwindState;
+        rate.UpwindSide = upwindSide;
         rate.UpwindIndex = upwindIndex;
         rate.NormalMomentum = flux.NormalMomentum * faceArea;
         rate.Tangential1Momentum = flux.Tangential1Momentum * faceArea;
@@ -356,6 +500,18 @@ internal static class EulerSweep
     /// <summary>
     ///     Advances one air cell by the difference of its two face rates and refreshes its derived state.
     /// </summary>
+    /// <param name="workspace">The chunk's workspace.</param>
+    /// <param name="axis">The sweep axis.</param>
+    /// <param name="voxelIndex">The air cell.</param>
+    /// <param name="behind">The face on the cell's lower side.</param>
+    /// <param name="ahead">The face on the cell's upper side.</param>
+    /// <param name="mass">Mass of the cell's new mixture, summed by the species pass.</param>
+    /// <param name="totalMoles">Moles of the cell's new mixture, summed by the species pass.</param>
+    /// <param name="heatCapacity">Heat capacity of the cell's new mixture, summed by the species pass.</param>
+    /// <param name="nonFiniteSpecies">Whether the species pass found a non-finite species update in this cell.</param>
+    /// <param name="timeStep">The substep length.</param>
+    /// <param name="config">The tick's configuration snapshot.</param>
+    /// <param name="counters">The pencil's repair counts.</param>
     /// <returns>The cell's new signal speed, or zero for a trace cell.</returns>
     /// <remarks>
     ///     <para>
@@ -365,50 +521,23 @@ internal static class EulerSweep
     ///         <c>(axis + 2) mod 3</c>.
     ///     </para>
     ///     <para>
-    ///         Species and momentum are updated in float. The energy difference is formed in double so subtracting
-    ///         from the large thermal part does not lose it. Species are floored at zero and the speed is clamped to
-    ///         <see cref="EulerFlow.EulerFlowConfig.MaxVelocity" /> before the primitive state is rebuilt, and both
-    ///         repairs are counted. A cell whose primitive state does not fit in float keeps its conserved variables
-    ///         but is written as a vacuum with no momentum, and is counted. A non-finite species update is written
-    ///         as zero and counts the cell as non-finite, so a NaN never reaches a gas channel, where every later
-    ///         comparison would let it through.
+    ///         The species pass has already written the species rows. Momentum is updated in float; the energy
+    ///         difference is formed in double so the subtraction from the large thermal part does not lose it. Species
+    ///         are floored at zero and the speed is clamped to <see cref="EulerFlow.EulerFlowConfig.MaxVelocity" />
+    ///         before the primitive state is rebuilt; both repairs are counted, as is a cell whose primitive state does
+    ///         not fit in float, which keeps its conserved variables but is written as a vacuum with no momentum. A
+    ///         species update that is not finite is written as zero and counts the cell as non-finite too, so a NaN
+    ///         never reaches a gas channel, where every later comparison would let it through.
     ///     </para>
     /// </remarks>
     private static MetrePerSecond UpdateCell(
         EulerChunkWorkspace workspace, int axis, int voxelIndex,
         in EulerFaceRate behind, in EulerFaceRate ahead,
+        Kilogram mass, Mole totalMoles, JoulePerKelvin64 heatCapacity, bool nonFiniteSpecies,
         Second timeStep, AtmosSolverConfigSnapshot config, ref EulerSweepCounters counters)
     {
         EulerChunkState read = workspace.Read;
         EulerChunkState write = workspace.Write;
-
-        // The tick thread merged the axis neighbours' gas lists before the sweep, so every gas an upwind cell
-        // can hold is in this list and a null upwind row means that side has none of it.
-        bool nonFiniteSpecies = false;
-        for (int present = 0; present < workspace.GasCount; present++)
-        {
-            int gasId = workspace.GasIds[present];
-            Mole[] source = read.Species[gasId]!;
-            Mole[] target = write.Species[gasId]!;
-            Mole moles = source[voxelIndex] -
-                         timeStep *
-                         (ahead.SpeciesRate * UpwindMoles(in ahead, gasId) -
-                          behind.SpeciesRate * UpwindMoles(in behind, gasId));
-
-            if (!float.IsFinite(moles))
-            {
-                // NaN fails the floor's comparison below, so it has to be caught here.
-                nonFiniteSpecies = true;
-                moles = 0f;
-            }
-            else if (moles < 0f)
-            {
-                counters.NegativeMoles++;
-                moles = 0f;
-            }
-
-            target[voxelIndex] = moles;
-        }
 
         if (nonFiniteSpecies)
             counters.NonFiniteCells++;
@@ -427,10 +556,6 @@ internal static class EulerSweep
 
         Joule64 energy = read.Energy[voxelIndex] - (double)timeStep * ((double)ahead.Energy - behind.Energy);
         write.Energy[voxelIndex] = energy;
-
-        workspace.SumMixture(
-            write, voxelIndex,
-            out Kilogram mass, out Mole totalMoles, out JoulePerKelvin64 heatCapacity);
 
         write.Mass[voxelIndex] = mass;
         write.TotalMoles[voxelIndex] = totalMoles;
@@ -497,19 +622,10 @@ internal static class EulerSweep
     }
 
     /// <summary>
-    ///     Moles of one gas in a face's upwind cell, or zero when the upwind buffer has no row for it.
+    ///     Per-worker scratch for <see cref="SweepBundle" />.
     /// </summary>
-    /// <remarks>
-    ///     The id comes from this chunk's list but the buffer can be a neighbour's, whose row table is only as
-    ///     wide as the registry plus the ids it lists itself. An id past the end, such as a checkpoint-restored
-    ///     channel with an id the registry never saw, is a gas that buffer holds none of and reads as a null row.
-    /// </remarks>
-    private static Mole UpwindMoles(in EulerFaceRate rate, int gasId)
-    {
-        Mole[]?[] table = rate.UpwindState.Species;
-        Mole[]? row = gasId < table.Length ? table[gasId] : null;
-        return row == null ? 0f : row[rate.UpwindIndex];
-    }
+    [ThreadStatic]
+    private static BundleScratch? t_scratch;
 
     private static KilogramMetrePerSecond ReadMomentum(EulerChunkState buffer, int axis, int voxelIndex)
     {
@@ -550,6 +666,47 @@ internal static class EulerSweep
             default:
                 momentumZ = value;
                 break;
+        }
+    }
+
+    /// <summary>
+    ///     Scratch arrays for one bundle, owned by one worker thread and grown on demand.
+    /// </summary>
+    /// <remarks>
+    ///     The face array holds <c>(marchCount + 1) · rowLength</c> faces. The other arrays hold one entry per cell
+    ///     of the bundle, indexed by position in the bundle. A bundle zeroes the entries it uses before it adds to
+    ///     them, so stale values from an earlier bundle never reach a sum.
+    /// </remarks>
+    private sealed class BundleScratch
+    {
+        public MolePerSecond[] FaceFlux = [];
+        public PerSecond[] FaceSpeciesRate = [];
+        public int[] FaceUpwindIndex = [];
+        public EulerFaceRate[] Faces = [];
+        public JoulePerKelvin64[] HeatCapacity = [];
+        public bool[] IsAir = [];
+        public Kilogram[] Mass = [];
+        public bool[] NonFiniteSpecies = [];
+        public Mole[] TotalMoles = [];
+
+        public void EnsureCapacity(int faceCount, int cellCount)
+        {
+            if (Faces.Length < faceCount)
+            {
+                Faces = new EulerFaceRate[faceCount];
+                FaceFlux = new MolePerSecond[faceCount];
+                FaceSpeciesRate = new PerSecond[faceCount];
+                FaceUpwindIndex = new int[faceCount];
+            }
+
+            if (Mass.Length < cellCount)
+            {
+                HeatCapacity = new JoulePerKelvin64[cellCount];
+                IsAir = new bool[cellCount];
+                Mass = new Kilogram[cellCount];
+                NonFiniteSpecies = new bool[cellCount];
+                TotalMoles = new Mole[cellCount];
+            }
         }
     }
 }

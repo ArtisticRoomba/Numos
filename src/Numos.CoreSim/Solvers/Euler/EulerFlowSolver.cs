@@ -130,12 +130,12 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
     }
 
     /// <summary>
-    ///     Drops the pooled workspaces when a checkpoint replaces the kernel's chunks. The pool holds no
-    ///     simulation state. Clearing it releases memory sized for the old grid.
+    ///     Forgets the chunk-to-workspace lookup. Called when a checkpoint replaces the kernel's chunks.
+    ///     The pool stays: chunk dimensions are fixed per solver and <see cref="EulerChunkWorkspace.Bind" /> resets
+    ///     every workspace, so pooled instances hold no simulation state.
     /// </summary>
     internal void ClearTransientState()
     {
-        _pool.Clear();
         Array.Clear(_workspaceByDenseId);
     }
 
