@@ -1,9 +1,12 @@
-# Dimensional Analysis
+# Dimensional analysis
 
-To prevent developers and engineers from going insane, Numos features a static dimensional analysis Roslyn Analyzer suite that assists in tracking dimensional quantities throughout the solution.
+To prevent developers and engineers from going insane, Numos has a static dimensional analysis Roslyn analyzer suite.
+It tracks dimensional quantities throughout the solution.
 
-This is done entirely at compile time, and to preserve Native AOT compatibility, will likely never change. Using C# `alias`es allows us to annotate while keeping the underlying types with no overhead, so operations like vectorization are still done in the same manner with no required adjustment.
-A generated alias such as `Kelvin` or `Pascal` that uses `global::System.Single` as the backing is still `System.Single` in CLR metadata, arrays remain primitive arrays, and arithmetic remains ordinary primitive arithmetic.
+The analysis runs entirely at compile time. This keeps Native AOT compatibility, and that is unlikely to change. C# `alias`es
+annotate the code and keep the underlying types, so operations like vectorization work as before. A generated alias
+such as `Kelvin` or `Pascal` backed by `global::System.Single` is still `System.Single` in CLR metadata. Arrays stay
+primitive arrays, and arithmetic stays ordinary primitive arithmetic.
 
 The system has two components:
 
@@ -20,9 +23,9 @@ pipe-separated fields:
 stableId | Alias | global::System.Single | baseDimension=exponent,...
 ```
 
-Base dimensions are names rather than a fixed enum, so a domain can introduce another independent dimension without
-changing the analyzer. `1` denotes a dimensionless quantity. Multiple aliases may use the same dimensions and different
-primitive storage types, such as `Kelvin` and `Kelvin64`.
+Base dimensions are names, not a fixed enum. A domain can add an independent dimension without changing the analyzer.
+`1` denotes a dimensionless quantity. Several aliases can share the same dimensions and use different primitive
+storage types, such as `Kelvin` and `Kelvin64`.
 
 Boundary conversions use six fields:
 
@@ -30,8 +33,9 @@ Boundary conversions use six fields:
 convert | stableId | ExternalUnitName | global::System.Single | scale | offset
 ```
 
-The generated conversion follows `canonical = input * scale + offset` and emits `FromExternalUnitName` and
-`ToExternalUnitName` methods in `Numos.Units.Generated.UnitConversions`. These generated conversions also carry relevant metadata, so the analyzer can follow inputs and outputs around the solution just fine.
+The generated conversion follows `canonical = input * scale + offset`. It emits `FromExternalUnitName` and
+`ToExternalUnitName` methods in `Numos.Units.Generated.UnitConversions`. These conversions carry metadata, so the
+analyzer follows their inputs and outputs across the solution.
 
 ## Source annotations
 
@@ -47,9 +51,9 @@ internal static Pascal CalculatePressure(
 }
 ```
 
-Use `[Quantity("stableId")]` on public scalar declarations and `[ElementQuantity("stableId")]` on public arrays or
-indexable storage when the quantity must remain visible to analyzers in another assembly.
+Use `[Quantity("stableId")]` on public scalar declarations. Use `[ElementQuantity("stableId")]` on public arrays or
+indexable storage. Both attributes keep the quantity visible to analyzers in another assembly.
 
-Unannotated numeric values are deliberately treated as unknown. Numeric
-literals may adopt the surrounding quantity, allowing ordinary constants such as zero and scalar factors. When adding
-a solver path, annotate its storage boundary and important intermediate values so dimensional information is not lost.
+The analyzer treats unannotated numeric values as unknown. Numeric literals can adopt the surrounding quantity, so
+constants such as zero and scalar factors work as expected. When you add a solver path, annotate its storage boundary
+and important intermediate values. This keeps the dimensional information intact.
