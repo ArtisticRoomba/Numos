@@ -219,11 +219,11 @@ changes, gas injections, and ticks.
 
 ### Choosing the transport model
 
-A new world runs the compressible Euler solver: one `euler-flow` stage moves gas within and between chunks,
-carries per-voxel momentum, and substeps inside the fixed 50 ms tick as often as the local sound speed demands. Its
-settings live in an `EulerFlowConfig` entry of `AtmosConfig.SolverConfigurations` (see
-[Solver settings belong in the configuration](#solver-settings-belong-in-the-configuration)), and it reports what
-each tick cost through `simulation.LastFlowDiagnostics`:
+A new world runs the compressible Euler solver. One `euler-flow` stage moves gas within and between chunks, carries
+per-voxel momentum, and substeps inside the fixed 50 ms tick as often as the local sound speed demands. Its settings
+live in an `EulerFlowConfig` entry of `AtmosConfig.SolverConfigurations` (see
+[Solver settings belong in the configuration](#solver-settings-belong-in-the-configuration)), and
+`simulation.LastFlowDiagnostics` reports what each tick cost:
 
 ```csharp
 simulation.Tick();
@@ -234,15 +234,15 @@ if (flow.ClampedVelocityCount + flow.NegativeMolesCount + flow.NegativeInternalE
     Log("the Euler stage had to repair a cell this tick");
 ```
 
-`Substeps` is the number to watch: it scales with the fastest signal in the simulation, about 35 per tick for room
-air and more for hot or light gas. When `MaxSubstepsPerTick` cuts a tick short, `SubstepCapEngaged` is set and
-`SimulatedSeconds` is less than the tick, meaning the gas fell behind the rest of the world for that tick. The four
-counters are bug indicators and normally zero. The diagnostics are a measurement rather than state: all zeros
-before the first tick, under the legacy model, and after a restore.
+`Substeps` scales with the fastest signal in the simulation: about 35 per tick for room air, more for hot or light
+gas. When `MaxSubstepsPerTick` cuts a tick short, `SubstepCapEngaged` is set and `SimulatedSeconds` is less than the
+tick, so the gas fell behind the rest of the world. The four counters indicate bugs and are normally zero. The
+diagnostics are a measurement, not state: they read all zeros before the first tick, under the legacy model, and after
+a restore.
 
-The older pressure-relaxation stages (`advection` and `boundary-flow`) are still there as
-`AtmosTransportModel.Legacy`. Pick the model when the world or simulation is constructed, or reset the pipeline
-before anything is recorded; `ResetToDefaults()` with no argument installs the Euler stages:
+The older pressure-relaxation stages (`advection` and `boundary-flow`) are `AtmosTransportModel.Legacy`. Pick the model
+when the world or simulation is constructed, or reset the pipeline before anything is recorded.
+`ResetToDefaults()` with no argument installs the Euler stages:
 
 ```csharp
 using var world = new AtmosWorld(config, AtmosTransportModel.Legacy);
@@ -251,10 +251,10 @@ using var standalone = new AtmosSimulation(config, 16, 16, 16, AtmosTransportMod
 world.Solvers.ResetToDefaults(AtmosTransportModel.Legacy);
 ```
 
-The stage list is part of the world checkpoint, so the model must match when you restore: a replay recorded on the
-legacy stages needs a legacy pipeline in the receiving world, and `RestoreCheckpoint` names both stage lists when it
-refuses a mismatch. What the two models do differently is covered in the
-[technical documentation](atmospherics_technical_documentation.md#5-moving-gas-with-the-euler-model).
+The stage list is part of the world checkpoint, so the model must match on restore. `RestoreCheckpoint` names both
+stage lists when it refuses a mismatch. The
+[technical documentation](atmospherics_technical_documentation.md#5-moving-gas-with-the-euler-model) covers how the
+two models differ.
 
 ## Registering gases and adding them to voxels
 
@@ -364,12 +364,16 @@ config.SolverConfigurations.Add(new EulerFlowConfig(current) { CourantNumber = 0
 world.SetAtmosConfig(config);
 ```
 
-Out-of-range values are normalized when the configuration is captured (see each property's documentation), so the
-snapshot a solver reads is always usable. The knobs most hosts touch are `CourantNumber` (0.5, the positivity
-bound; 0.8 is a faster opt-in that can go negative next to vacuum), `MaxSubstepsPerTick` (64, the cap that bounds
-a tick's cost at the price of the gas falling behind), `VelocityFloor` (0.005 m/s, what lets a settled room sleep),
-and `MomentumDamping` (0, crude friction for hallways that ring). `EulerFlowConfig` is portable, so a `.numos`
-archive carries it. The [technical documentation](atmospherics_technical_documentation.md#35-configuration-and-the-per-tick-snapshot)
+Out-of-range values are normalized when the configuration is captured, so the snapshot a solver reads is always
+usable. The settings most hosts touch:
+
+- `CourantNumber` (0.5): the positivity bound. 0.8 is faster but can go negative next to vacuum.
+- `MaxSubstepsPerTick` (64): caps a tick's cost, at the price of the gas falling behind.
+- `VelocityFloor` (0.005 m/s): lets a settled room sleep.
+- `MomentumDamping` (0): crude friction for hallways that ring.
+
+A `.numos` archive carries `EulerFlowConfig`. The
+[technical documentation](atmospherics_technical_documentation.md#35-configuration-and-the-per-tick-snapshot)
 tabulates every setting with the physics behind it.
 
 Each entry implements `IAtmosSolverConfiguration`. Numos captures a snapshot when it applies the configuration. These
@@ -650,11 +654,10 @@ AtmosVoxelVelocity velocity = simulation.GetVoxelVelocity(chunk, x: 1, y: 0, z: 
 simulation.TryGetChunkSnapshot(chunk, default, AtmosChunkSnapshotFields.Velocity, out var withVelocity);
 ```
 
-Momentum is what you set. `SetVoxelMomentum` stores the total momentum of a voxel's gas in kg·m/s, so to give gas a
-velocity, multiply by its mass. The write wakes the chunk and is recorded while the world is recording; it is
-ignored on a solid, void, or empty voxel (inject gas first, since an empty voxel always reads as zero momentum),
-and NaN or infinite components are rejected. Adding gas later keeps the momentum and lowers the implied velocity.
-Under the legacy model nothing moves what you stored.
+`SetVoxelMomentum` stores the total momentum of a voxel's gas in kg·m/s, so to give gas a velocity, multiply by its
+mass. The write wakes the chunk and is recorded. It is ignored on a solid, void, or empty voxel (inject gas first), and
+NaN or infinite components are rejected. Adding gas later keeps the momentum and lowers the implied velocity. The
+legacy model never moves stored momentum.
 
 ```csharp
 simulation.AddGasToVoxel(chunk, 0, "Air", 10f, 293.15f);
@@ -693,15 +696,18 @@ dotnet add package Numos.Viewer --prerelease
 
 The viewer needs a desktop environment with graphics support. To host it from C#, construct a `SimulationViewer` and call `Run()`. The About dialog shows the Viewer and CoreSim package versions, source references, and commit hashes, so a tester can identify the exact build.
 
-Bulk velocity has two readouts in the Viewer. The rendering-style table in the View panel has a "Velocity arrows" row
-that draws an arrow from each drawn voxel along its velocity, in the 3D viewport and in the slice (which shows only the
-two in-plane components); the arrow-scale slider sets how many seconds of travel one arrow represents, so at the default
-0.05 s a voxel moving at 20 m/s draws a one-voxel arrow. Turning arrows on makes the Viewer request velocity in its
-snapshots even when the active visualization does not need it. On a project created with the Euler transport model
-(chosen in the Create Simulation dialog, since the stage list is part of the recording and cannot change afterwards),
-the Simulation panel also shows a "Flow" readout of `AtmosSimulation.LastFlowDiagnostics`: substeps, simulated time,
-whether the substep cap engaged, the largest Courant number and signal speed, and the clamp and negative-value
-counters, with anything that means the tick did not finish cleanly shown in the caution colour.
+The Viewer has two velocity readouts.
+
+The "Velocity arrows" row in the View panel's rendering-style table draws an arrow from each drawn voxel along its
+velocity, in the 3D viewport and in the slice (which shows only the two in-plane components). The arrow-scale slider
+sets how many seconds of travel one arrow represents: at the default 0.05 s, a voxel moving at 20 m/s draws a
+one-voxel arrow.
+
+On a project created with the Euler transport model, the Simulation panel shows a "Flow" readout of
+`AtmosSimulation.LastFlowDiagnostics`: substeps, simulated time, whether the substep cap engaged, the largest Courant
+number and signal speed, and the clamp and negative-value counters. Anything that means the tick did not finish cleanly
+is drawn in the caution colour. The transport model is chosen in the Create Simulation dialog and cannot change
+afterwards, since the stage list is part of the recording.
 
 ## Dangerous API
 `Numos.API.Dangerous` is a separate package from `Numos.API` by design.

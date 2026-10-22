@@ -446,10 +446,11 @@ these parts:
 - `chunks`, sorted by `(x, y, z)`, each with its own summary and optional `voxels`.
 - `issueLocations`, a bounded sample of voxels with non-finite or negative values, plus non-finite velocity.
 
-Dense voxel data is opt-in. Set `includeVoxels` to `true` for it. Set `onlyGasBearingVoxels` to keep occupied voxels
-only. Each voxel reports the derived velocity vector (`velocityMps`) and its magnitude (`speedMps`). A voxel with no gas
-reports zero. A chunk `position` limits the report to one chunk. With `position` and a local `voxel`, the report returns that
-voxel even when `includeVoxels` is `false`. `maxIssueLocations` caps the issue sample (default 32, maximum 1024).
+Gas totals and definitions are ordered by gas ID. Statistics report the full sample count, the finite and non-finite counts, and a nullable finite minimum, maximum, and mean. Invalid samples stay visible.
+
+Dense voxel data is opt-in because it can dominate output for normal chunk sizes. Set `includeVoxels` to `true` for it. Set `onlyGasBearingVoxels` to keep occupied voxels only. A chunk `position` limits the report to one chunk. With `position` and a local `voxel`, the report returns that voxel even when `includeVoxels` is `false`. A `voxel` without `position` is invalid. `maxIssueLocations` caps the coordinate samples on invalid-value diagnostics (default 32, maximum 1024).
+
+Each voxel has a stable local index, local coordinates, classification, gas-capable and gas-bearing flags, raw pressure and temperature, total moles, estimated sensible energy, and per-gas moles. It also reports the derived velocity vector (`velocityMps`) and its magnitude (`speedMps`). Numos derives velocity from the voxel's momentum and gas mass at observation time. A voxel with no gas reports zero.
 
 ## Determinism and comparison
 
