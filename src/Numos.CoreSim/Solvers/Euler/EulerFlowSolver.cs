@@ -67,6 +67,7 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
 
     private readonly Int3 _dimensions;
     private readonly List<AtmosChunk> _pendingActivation = [];
+    private readonly List<EulerChunkWorkspace> _pendingGather = [];
     private readonly List<EulerChunkWorkspace> _pendingScan = [];
     private readonly Stack<EulerChunkWorkspace> _pool = new();
     private EulerChunkWorkspace[] _active = [];
@@ -98,6 +99,7 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
                     Activate(chunk, context);
             }
 
+            GatherPending(config);
             ActivateNeighboursAtRest(context);
 
             LastDiagnostics = _activeCount == 0
@@ -126,6 +128,7 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
             _activeCount = 0;
             _pendingScan.Clear();
             _pendingActivation.Clear();
+            _pendingGather.Clear();
         }
     }
 
@@ -140,10 +143,12 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
     }
 
     /// <summary>
-    ///     Gives a chunk a workspace for the rest of the tick: wakes it if asleep, builds its topology, gathers its
-    ///     live fields, and links it to its active neighbours. Tick thread only.
+    ///     Gives a chunk a workspace for the rest of the tick: wakes it if asleep, builds its topology, links it to
+    ///     its active neighbours, and queues it for <see cref="GatherPending" />. Tick thread only.
     /// </summary>
     /// <remarks>
+    ///     The workspace is not gathered yet: its buffers hold nothing until the caller runs
+    ///     <see cref="GatherPending" />, which every batch of activations must do before anything reads them.
     ///     The workspace lists only the chunk's own gases here. Rows for gases a neighbour can push across a face
     ///     are added by <see cref="ShareAxisGases" /> before each sweep, so a chunk activated mid-tick is covered
     ///     by the next sweep's merge like everyone else.
@@ -169,7 +174,7 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
         }
 
         EulerFaceTopology.Build(chunk, workspace.NeighborChunks, workspace.OpenMask, workspace.VoidMask);
-        workspace.Gather(config);
+        _pendingGather.Add(workspace);
 
         // Canonical order has no numerical effect. It keeps diagnostics reproducible.
         int position = _activeCount;
@@ -190,6 +195,16 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
         _workspaceByDenseId[chunk.DenseId] = workspace;
         _pendingScan.Add(workspace);
         return workspace;
+    }
+
+    /// <summary>
+    ///     Gathers every workspace activated since the last call. Each gather reads only its own chunk and writes
+    ///     only its own buffers and counter, so the batch runs in parallel. Tick thread only.
+    /// </summary>
+    private void GatherPending(AtmosSolverConfigSnapshot config)
+    {
+        ParallelPhase.Run(_pendingGather.Count, new GatherAction(_pendingGather, config));
+        _pendingGather.Clear();
     }
 
     /// <summary>
@@ -266,7 +281,8 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
 
     /// <summary>
     ///     Activates every chunk some workspace asked for since the last call. Tick thread only, never while a
-    ///     sweep is running: it inserts into the active list and rewrites neighbour slots that workers read.
+    ///     sweep is running: it inserts into the active list and rewrites neighbour slots that workers read. The
+    ///     newly activated chunks are gathered before it returns.
     /// </summary>
     private void ApplyWakeRequests(AtmosSolverExecutionContext context)
     {
@@ -291,6 +307,7 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
         }
 
         _pendingActivation.Clear();
+        GatherPending(context.TickConfig);
     }
 
     private AtmosFlowDiagnostics Advance(AtmosSolverExecutionContext context, EulerFlowConfig settings)
@@ -360,12 +377,14 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
             substeps++;
         }
 
+        // Each chunk writes only its own fields and its own counter here; the tick thread sums the counters.
+        ParallelPhase.Run(_activeCount, new WriteBackAction(_active, config, settings));
         int negativeInternalEnergy = 0;
         int nonFiniteCells = counters.NonFiniteCells;
         for (int index = 0; index < _activeCount; index++)
         {
             nonFiniteCells += _active[index].NonFiniteCellsGathered;
-            FloorMomentumAndWriteBack(_active[index], config, settings, ref negativeInternalEnergy);
+            negativeInternalEnergy += _active[index].NegativeInternalEnergyWritten;
         }
 
         // Diffusion reads the written-back fields of neighbouring chunks, so it waits for every write-back.
@@ -373,12 +392,21 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
         EulerSpeciesDiffusion.Run(_active, _activeCount, WorkerCount, config);
         VacuumCleanup.Apply(context);
 
-        for (int index = 0; index < _activeCount; index++)
-            SettleMomentum(_active[index], config, settings);
+        ParallelPhase.Run(_activeCount, new SettleMomentumAction(_active, config, settings));
 
-        // Sleep decisions read neighbours' final pressures, so they wait for everything above.
+        // Sleep decisions read neighbours' final pressures, so they wait for everything above. Scoring only reads
+        // fields, so it runs in parallel; the policy call can run an overridden Sleep, so it stays on this thread.
+        ParallelPhase.Run(_activeCount, new ScoreSleepAction(_active, config));
         for (int index = 0; index < _activeCount; index++)
-            nonFiniteCells += UpdateSleepState(_active[index], config);
+        {
+            EulerChunkWorkspace workspace = _active[index];
+            ChunkSleepPolicy.UpdateSleepState(workspace.Chunk, config, workspace.SleepScore);
+            Debug.Assert(
+                workspace.Chunk.IsAwake || !workspace.HasMotion,
+                "A chunk must not fall asleep while it still carries momentum.");
+
+            nonFiniteCells += workspace.NonFinitePressures;
+        }
 
         return new AtmosFlowDiagnostics(
             substeps,
@@ -399,9 +427,11 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
     /// </summary>
     /// <remarks>
     ///     This is the only place rows grow after binding, and it runs on the tick thread between sweeps. The
-    ///     merge is one pass over the active list, so a chunk can receive a gas from two chunks away. That costs a
-    ///     zero row, never a wrong bit. A listed gas gets a channel only if the write-back finds some of it in the
-    ///     chunk.
+    ///     merge is one pass over the active list, so a chunk can receive a gas from two chunks away (its neighbour
+    ///     just received the row from its own neighbour). That costs a zero row, never a wrong bit. A merge whose
+    ///     neighbour list has not changed since the last merge adds nothing, and
+    ///     <see cref="EulerChunkWorkspace.AddGasesOf" /> skips it. A listed gas gets a channel only if the
+    ///     write-back finds some of it in the chunk.
     /// </remarks>
     private void ShareAxisGases(int axis, AtmosSolverConfigSnapshot config)
     {
@@ -412,7 +442,7 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
             {
                 EulerChunkWorkspace? neighbor = workspace.NeighborWorkspaces[direction];
                 if (neighbor != null)
-                    workspace.AddGasesOf(neighbor, config);
+                    workspace.AddGasesOf(neighbor, direction, config);
             }
         }
     }
@@ -536,11 +566,11 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
     ///     The floor zeroes the momentum of every cell slower than <see cref="EulerFlowConfig.VelocityFloor" />
     ///     and of every trace cell; damping then scales what is left by <c>max(0, 1 − α·Δt_tick)</c>. Both run
     ///     before the write-back computes temperatures, so the kinetic energy they remove turns into heat instead
-    ///     of vanishing.
+    ///     of vanishing. Touches only this chunk's fields and workspace, so chunks run in parallel; the count of
+    ///     voxels written at 0 K lands in <see cref="EulerChunkWorkspace.NegativeInternalEnergyWritten" />.
     /// </remarks>
     private static void FloorMomentumAndWriteBack(
-        EulerChunkWorkspace workspace, AtmosSolverConfigSnapshot config, EulerFlowConfig settings,
-        ref int negativeInternalEnergyCount)
+        EulerChunkWorkspace workspace, AtmosSolverConfigSnapshot config, EulerFlowConfig settings)
     {
         AtmosChunk chunk = workspace.Chunk;
         EulerChunkState buffer = workspace.Read;
@@ -584,7 +614,9 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
             buffer.MomentumZ[voxelIndex] = momentumZ;
         }
 
-        workspace.WriteBack(config, ref negativeInternalEnergyCount);
+        int negativeInternalEnergy = 0;
+        workspace.WriteBack(config, ref negativeInternalEnergy);
+        workspace.NegativeInternalEnergyWritten = negativeInternalEnergy;
         chunk.MarkChanged();
     }
 
@@ -602,10 +634,16 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
     ///     channel-order sum the write-back and every other refresh use, not from the list-order sum, so the cache
     ///     still matches a later refresh bit for bit.
     /// </remarks>
-    private void SettleMomentum(EulerChunkWorkspace workspace, AtmosSolverConfigSnapshot config, EulerFlowConfig settings)
+    private static void SettleMomentum(
+        EulerChunkWorkspace workspace, AtmosSolverConfigSnapshot config, EulerFlowConfig settings)
     {
         AtmosChunk chunk = workspace.Chunk;
         MetrePerSecond floor = settings.VelocityFloor;
+        workspace.ResolveSettleChannels(config);
+        int[] listedChannels = workspace.SettleListedChannels;
+        int[] unlistedChannels = workspace.SettleUnlistedChannels;
+        KilogramPerMole[] unlistedMolarMass = workspace.SettleUnlistedMolarMass;
+        int unlistedCount = workspace.SettleUnlistedCount;
         for (int activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
         {
             ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
@@ -622,7 +660,7 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
             {
                 for (int present = 0; present < workspace.GasCount; present++)
                 {
-                    int channel = chunk.FindGasChannel(workspace.GasIds[present]);
+                    int channel = listedChannels[present];
                     if (channel < 0)
                         continue;
 
@@ -631,14 +669,10 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
                     totalMoles += moles;
                 }
 
-                for (int gas = 0; gas < chunk.ActiveGasCount; gas++)
+                for (int extra = 0; extra < unlistedCount; extra++)
                 {
-                    int gasId = chunk.ActiveGases[gas].GasId;
-                    if (workspace.Read.Species[gasId] != null)
-                        continue;
-
-                    Mole moles = chunk.ActiveGases[gas].Moles[voxelIndex];
-                    mass += moles * config.GetMolarMass(gasId);
+                    Mole moles = chunk.ActiveGases[unlistedChannels[extra]].Moles[voxelIndex];
+                    mass += moles * unlistedMolarMass[extra];
                     totalMoles += moles;
                 }
 
@@ -674,19 +708,22 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
     }
 
     /// <summary>
-    ///     The sleep decision for one written-back chunk.
+    ///     The sleep score of one written-back chunk: the metric the policy compares with the sleep threshold.
     /// </summary>
     /// <remarks>
     ///     The metric is the largest pressure difference across an open face as a percentage of the higher
     ///     pressure, with a gas-to-void face counting as 100%. Faces into other chunks count against the
-    ///     neighbour's written-back pressure, or its live pressure if it never activated. The metric is forced to at
-    ///     least <see cref="AtmosSolverConfigSnapshot.SleepEpsilon" /> while any cell carries momentum, so a
-    ///     sleeping chunk always has zero momentum everywhere. A non-finite pressure on either side of a face
-    ///     scores as a gas-to-void face. A NaN would otherwise ride through every <see cref="MathF.Max" /> and make
-    ///     the decision depend on where in the chunk it sits.
+    ///     neighbour's written-back pressure, or its live pressure if it never activated. They count because the
+    ///     intra-chunk scan cannot see a gradient that sits on a chunk face. The metric is forced to at least
+    ///     <see cref="AtmosSolverConfigSnapshot.SleepEpsilon" /> while any cell carries momentum, so a sleeping
+    ///     chunk always has zero momentum everywhere. A non-finite pressure on either side of a face scores as a
+    ///     gas-to-void face. A NaN would otherwise ride through every <see cref="MathF.Max" /> and make the decision
+    ///     depend on where in the chunk it sits. The result lands in <see cref="EulerChunkWorkspace.SleepScore" />,
+    ///     <see cref="EulerChunkWorkspace.HasMotion" />, and <see cref="EulerChunkWorkspace.NonFinitePressures" />
+    ///     (the count of air voxels with a non-finite pressure). The method reads chunk fields and writes only the
+    ///     workspace, so chunks can be scored in parallel.
     /// </remarks>
-    /// <returns>How many of the chunk's air voxels hold a pressure that is not finite.</returns>
-    private static int UpdateSleepState(EulerChunkWorkspace workspace, AtmosSolverConfigSnapshot config)
+    private static void ScoreSleepState(EulerChunkWorkspace workspace, AtmosSolverConfigSnapshot config)
     {
         AtmosChunk chunk = workspace.Chunk;
         Int3 dimensions = chunk.Dimensions;
@@ -757,10 +794,10 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
         if (hasMotion)
             maximumRelativePressureDelta = MathF.Max(maximumRelativePressureDelta, config.SleepEpsilon);
 
-        ChunkSleepPolicy.UpdateSleepState(chunk, config, maximumRelativePressureDelta);
-        Debug.Assert(chunk.IsAwake || !hasMotion, "A chunk must not fall asleep while it still carries momentum.");
         AssertEmptyVoxelsAreStill(chunk);
-        return nonFinitePressures;
+        workspace.SleepScore = maximumRelativePressureDelta;
+        workspace.HasMotion = hasMotion;
+        workspace.NonFinitePressures = nonFinitePressures;
     }
 
     [Conditional("DEBUG")]
@@ -782,6 +819,40 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
     ///     A range of one chunk's pencils for the tiled schedule.
     /// </summary>
     private readonly record struct PencilWorkItem(int WorkspaceIndex, int FirstPencil, int PencilCount);
+
+    private readonly struct GatherAction(List<EulerChunkWorkspace> batch, AtmosSolverConfigSnapshot config) : IAction
+    {
+        public void Invoke(int index)
+        {
+            batch[index].Gather(config);
+        }
+    }
+
+    private readonly struct WriteBackAction(
+        EulerChunkWorkspace[] active, AtmosSolverConfigSnapshot config, EulerFlowConfig settings) : IAction
+    {
+        public void Invoke(int index)
+        {
+            FloorMomentumAndWriteBack(active[index], config, settings);
+        }
+    }
+
+    private readonly struct SettleMomentumAction(
+        EulerChunkWorkspace[] active, AtmosSolverConfigSnapshot config, EulerFlowConfig settings) : IAction
+    {
+        public void Invoke(int index)
+        {
+            SettleMomentum(active[index], config, settings);
+        }
+    }
+
+    private readonly struct ScoreSleepAction(EulerChunkWorkspace[] active, AtmosSolverConfigSnapshot config) : IAction
+    {
+        public void Invoke(int index)
+        {
+            ScoreSleepState(active[index], config);
+        }
+    }
 
     private readonly struct SweepChunkAction(
         EulerChunkWorkspace[] active, int axis, int pencilCount,

@@ -136,6 +136,39 @@ internal sealed class EulerChunkWorkspace
     public int GasCount;
 
     /// <summary>
+    ///     Counts the gases added to the list since <see cref="Bind" />. A neighbour compares it with
+    ///     <see cref="MergedNeighborVersion" /> to see whether its list changed since the last merge.
+    /// </summary>
+    public int ListVersion;
+
+    /// <summary>
+    ///     The <see cref="ListVersion" /> of the neighbour in each direction when <see cref="AddGasesOf" /> last
+    ///     merged its list, or -1 before the first merge.
+    /// </summary>
+    public readonly int[] MergedNeighborVersion = new int[NeighborResolution.NeighborDirections.Length];
+
+    /// <summary>
+    ///     Voxels the last <see cref="WriteBack" /> wrote at 0 K because their internal energy was negative. Each
+    ///     worker writes its own chunk's counter and the tick thread sums them.
+    /// </summary>
+    public int NegativeInternalEnergyWritten;
+
+    /// <summary>
+    ///     Air voxels with a pressure that is not finite, counted by the tick's sleep scoring.
+    /// </summary>
+    public int NonFinitePressures;
+
+    /// <summary>
+    ///     Whether any air voxel carried momentum when the chunk was last scored for sleep.
+    /// </summary>
+    public bool HasMotion;
+
+    /// <summary>
+    ///     The chunk's sleep metric from the last scoring, in percent.
+    /// </summary>
+    public Scalar SleepScore;
+
+    /// <summary>
     ///     Cells the last <see cref="Gather" /> found non-finite and gathered as vacuum. Reset by <see cref="Bind" />.
     /// </summary>
     public int NonFiniteCellsGathered;
@@ -167,6 +200,27 @@ internal sealed class EulerChunkWorkspace
         new EulerChunkWorkspace?[NeighborResolution.NeighborDirections.Length];
 
     public byte[] OpenMask = [];
+
+    /// <summary>
+    ///     Channel index in the chunk of each listed gas, or -1 for a listed gas the chunk has no channel for,
+    ///     parallel to <see cref="GasIds" />. Filled by <see cref="ResolveSettleChannels" />.
+    /// </summary>
+    public int[] SettleListedChannels = [];
+
+    /// <summary>
+    ///     Number of entries in <see cref="SettleUnlistedChannels" />.
+    /// </summary>
+    public int SettleUnlistedCount;
+
+    /// <summary>
+    ///     Channels of the chunk whose gas the workspace does not list, in channel order.
+    /// </summary>
+    public int[] SettleUnlistedChannels = [];
+
+    /// <summary>
+    ///     Molar mass of each gas in <see cref="SettleUnlistedChannels" />.
+    /// </summary>
+    public KilogramPerMole[] SettleUnlistedMolarMass = [];
 
     /// <summary>
     ///     Repair counts of each pencil of the most recent sweep, summed by the tick thread.
@@ -223,6 +277,8 @@ internal sealed class EulerChunkWorkspace
         }
 
         GasCount = 0;
+        ListVersion = 0;
+        Array.Fill(MergedNeighborVersion, -1);
         NonFiniteCellsGathered = 0;
         Chunk = chunk;
         _readIndex = 0;
@@ -233,7 +289,7 @@ internal sealed class EulerChunkWorkspace
             VoidMask = new byte[voxelCount];
         }
 
-        int pencilCount = Math.Max(chunk.Height * chunk.Depth, Math.Max(chunk.Height, chunk.Depth));
+        int pencilCount = Math.Max(chunk.Height, chunk.Depth);
         if (PencilSignalSpeed.Length < pencilCount)
         {
             PencilSignalSpeed = new MetrePerSecond[pencilCount];
@@ -286,6 +342,7 @@ internal sealed class EulerChunkWorkspace
         MolarMass[position] = config.GetMolarMass(gasId);
         HeatCapacity[position] = config.GetMolarHeatCapacityAtConstantVolume(gasId);
         GasCount++;
+        ListVersion++;
 
         foreach (EulerChunkState buffer in _buffers)
         {
@@ -307,10 +364,58 @@ internal sealed class EulerChunkWorkspace
     }
 
     /// <summary>
+    ///     Looks up the chunk's channel for every listed gas once, and collects the channels that have no list row,
+    ///     so the per-voxel momentum settle does not search the channel list.
+    /// </summary>
+    /// <remarks>
+    ///     Reads the chunk's channels as they stand now, so call it after the write-back and diffusion have
+    ///     created every channel they will create.
+    /// </remarks>
+    internal void ResolveSettleChannels(AtmosSolverConfigSnapshot config)
+    {
+        AtmosChunk chunk = Chunk;
+        if (SettleListedChannels.Length < GasCount)
+            SettleListedChannels = new int[GasIds.Length];
+
+        for (int present = 0; present < GasCount; present++)
+            SettleListedChannels[present] = chunk.FindGasChannel(GasIds[present]);
+
+        if (SettleUnlistedChannels.Length < chunk.ActiveGasCount)
+        {
+            SettleUnlistedChannels = new int[chunk.ActiveGasCount];
+            SettleUnlistedMolarMass = new KilogramPerMole[chunk.ActiveGasCount];
+        }
+
+        SettleUnlistedCount = 0;
+        for (int gas = 0; gas < chunk.ActiveGasCount; gas++)
+        {
+            int gasId = chunk.ActiveGases[gas].GasId;
+            if (Read.Species[gasId] != null)
+                continue;
+
+            SettleUnlistedChannels[SettleUnlistedCount] = gas;
+            SettleUnlistedMolarMass[SettleUnlistedCount] = config.GetMolarMass(gasId);
+            SettleUnlistedCount++;
+        }
+    }
+
+    /// <summary>
     ///     Lists every gas <paramref name="neighbor" /> lists that this workspace does not. Tick thread only.
     /// </summary>
-    internal void AddGasesOf(EulerChunkWorkspace neighbor, AtmosSolverConfigSnapshot config)
+    /// <param name="neighbor">The active workspace across <paramref name="direction" />.</param>
+    /// <param name="direction">The direction slot of <paramref name="neighbor" />.</param>
+    /// <param name="config">The tick's configuration snapshot.</param>
+    /// <remarks>
+    ///     Lists only grow within a tick, so after a merge this list holds every gas the neighbour listed. The
+    ///     merge is skipped while the neighbour's <see cref="ListVersion" /> is the one recorded for
+    ///     <paramref name="direction" />, because it could not add a row.
+    /// </remarks>
+    internal void AddGasesOf(EulerChunkWorkspace neighbor, int direction, AtmosSolverConfigSnapshot config)
     {
+        if (MergedNeighborVersion[direction] == neighbor.ListVersion)
+            return;
+
+        MergedNeighborVersion[direction] = neighbor.ListVersion;
         for (int present = 0; present < neighbor.GasCount; present++)
             AddGas(neighbor.GasIds[present], config);
     }
