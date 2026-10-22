@@ -1,16 +1,16 @@
 # Headless simulation runner
 
-`Numos.Headless` is a machine-readable debugging host for Numos simulations. It exercises the supported
-`Numos.API` mutation and snapshot paths without starting Raylib or ImGui, which makes experiments reproducible and
-lets command-line tools inspect the same simulation state that feeds the viewer.
+`Numos.Headless` is a machine-readable debugging host for Numos simulations. It uses the supported `Numos.API`
+mutation and snapshot paths without starting Raylib or ImGui. Experiments are reproducible, and command-line tools can
+inspect the same simulation state that feeds the viewer.
 
-The runner uses newline-delimited JSON (NDJSON/JSONL): each nonblank input line is one request and produces exactly one
-compact JSON response on standard output. Blank lines are ignored. Human-readable diagnostics are written to standard
-error so stdout can be parsed or diffed directly.
+The runner uses newline-delimited JSON (NDJSON/JSONL). Each nonblank input line is one request. Each request produces
+exactly one compact JSON response on standard output. The runner ignores blank lines. It writes human-readable
+diagnostics to standard error, so you can parse or diff stdout directly.
 
-## Running it
+## Running the runner
 
-Build the solution, then choose one of the three input modes:
+Build the solution, then pick one of three input modes:
 
 ```powershell
 # Interactive: read NDJSON requests from stdin until `exit` or end-of-file.
@@ -23,16 +23,16 @@ dotnet run --project src/Numos.Headless -- --script examples/headless/two-voxel-
 dotnet run --project src/Numos.Headless -- examples/headless/two-voxel-flow.jsonl
 ```
 
-Use `dotnet run --project src/Numos.Headless -- --help` for the command-line summary. When automating a replay, capture
-stdout independently from stderr:
+Use `dotnet run --project src/Numos.Headless -- --help` for the command-line summary. When you automate a replay,
+capture stdout separately from stderr:
 
 ```powershell
 dotnet run --project src/Numos.Headless -- --script examples/headless/two-voxel-flow.jsonl `
   > two-voxel-flow.output.jsonl
 ```
 
-JSONL files contain JSON objects only; they do not support comments or multi-line requests. `--help` is the one mode
-that deliberately writes human-readable text to stdout instead of protocol responses.
+JSONL files contain JSON objects only. They do not support comments or multi-line requests. `--help` is the one mode
+that writes human-readable text to stdout instead of protocol responses.
 
 ## Protocol envelope
 
@@ -47,20 +47,20 @@ Every request must contain:
   values when correlating a long interactive session.
 - `op` selects an operation from the table below.
 
-Every response contains `protocolVersion`, the request's `id` and `op` when they could be decoded, and an `ok` boolean.
-When a simulation is active, `state` contains its `name`, fixed chunk `dimensions`, `tick`, `chunkCount`, and `gasCount`.
-Successful operations may add a `result` or `observation`. For example, a successful tick response has this shape:
+Every response contains `protocolVersion`, an `ok` boolean, and the request's `id` and `op` when the runner could
+decode them. When a simulation is active, `state` contains its `name`, fixed chunk `dimensions`, `tick`, `chunkCount`,
+and `gasCount`. Successful operations can add a `result` or `observation`. A successful tick response looks like this:
 
 ```json
 {"protocolVersion":1,"id":"tick-1","op":"tick","ok":true,"state":{"name":"Two-voxel flow","dimensions":{"x":2,"y":1,"z":1},"tick":1,"chunkCount":1,"gasCount":1},"result":{"ticksExecuted":1}}
 ```
 
 Failed operations set `ok` to `false` and include `error.code`, `error.message`, the JSONL `line`, and an
-`exceptionType` when one is applicable. Failure output is still valid JSON, and the runner continues with the next
-line. The `exit` operation writes its response before the process terminates. Unknown JSON properties are rejected so
-a misspelled experiment setting cannot be ignored silently.
+`exceptionType` when one applies. Failure output is still valid JSON, and the runner continues with the next line. The
+`exit` operation writes its response before the process terminates. The runner rejects unknown JSON properties, so a
+misspelled experiment setting fails loudly.
 
-Do not write log text to stdout when extending the runner. Protocol consumers rely on one response object per request.
+Do not write log text to stdout when you extend the runner. Protocol consumers expect one response object per request.
 
 ### Process exit codes
 
@@ -72,7 +72,7 @@ An unavailable script also produces one JSON error response with code `scriptUna
 
 ### Error codes
 
-Protocol consumers can branch on `error.code` without parsing human-readable messages:
+Consumers can branch on `error.code` instead of parsing messages:
 
 | Code | Meaning |
 | --- | --- |
@@ -111,8 +111,8 @@ heat capacities are in joules per mole-kelvin.
 
 ## Operations
 
-Operations that access simulation state require an active simulation. A new `createSimulation` request atomically
-replaces and disposes the current simulation after the replacement has been constructed successfully.
+Operations that access simulation state require an active simulation. A new `createSimulation` request builds the
+replacement first. If construction succeeds, the runner atomically replaces and disposes the current simulation.
 
 | Operation                | Request data                                                                                   | Effect                                                                                                           |
 |--------------------------|------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------|
@@ -138,11 +138,11 @@ replaces and disposes the current simulation after the replacement has been cons
 `setSolverEnabled` accepts any stage name in the current pipeline. The built-in stages, in default order, are
 `advection`, `explicit-gas-transport`, `boundary-flow`, `thermodynamics`, `explicit-thermal-transport`,
 `thermal-boundary`, and `gas-reactions`. The runner has no operations for portals or docks, so the two explicit-link
-stages never have work here. A name that is not present in the current pipeline is an error rather than a silent no-op.
+stages never have work here. A name that is not in the current pipeline is an error.
 
 ### Configuration fields
 
-`createSimulation.config` and `updateConfig.config` accept these fields. Unit suffixes are part of the protocol names:
+`createSimulation.config` and `updateConfig.config` accept these fields. The unit suffixes are part of the names:
 
 - `globalTemperatureK`
 - `defaultTemperatureFallbackK`
@@ -161,24 +161,25 @@ stages never have work here. A name that is not present in the current pipeline 
 - `accumulatorWakeThresholdPa`
 - `accumulatorMaxAliveTicks`
 
-Omitted fields retain their current values. Production defaults change over time, so set every field an experiment
-depends on when its output will be compared across commits.
+Omitted fields keep their current values. Production defaults change over time. Set every field an experiment depends
+on if you compare its output across commits.
 
 ### Gas definitions
 
-`addGas` appends a definition containing `name` and the physical fields used by `GasProperties`:
+`addGas` appends a definition with a `name` and the physical fields of `GasProperties`:
 
 ```json
 {"protocolVersion":1,"id":"gas","op":"addGas","gas":{"name":"First","molarHeatCapacityAtConstantVolume":1,"boilingPointK":0,"condensationEnabled":false,"molarEnthalpyOfVaporization":0,"liquidId":-1,"diffusionCoefficient":0}}
 ```
 
-Gas IDs are assigned in insertion order and remain stable for the life of a simulation. Use the returned ID in later
-`injectGas` requests. `createSimulation.gases` accepts an array of the same definitions and assigns IDs in array order.
+The runner assigns gas IDs in insertion order. They stay stable for the life of a simulation. Use the returned ID in
+later `injectGas` requests. `createSimulation.gases` accepts an array of the same definitions and assigns IDs in array order.
 
 ## Observations
 
-`observe` captures the requested chunk scope under the simulation's state gate, so its tick number and chunk snapshots
-describe one coherent state. With no `position` filter, that scope is every chunk. Its `observation` object contains:
+`observe` captures the requested chunk scope under the simulation's state gate. The tick number and chunk snapshots
+therefore describe one coherent state. With no `position` filter, the scope is every chunk. The `observation` object
+contains:
 
 - `tick`, `simulationRate`, and `simulationChunkCount` (the total in the simulation, even when the report is filtered).
 - `config`, including the gas registry with assigned IDs.
@@ -187,47 +188,47 @@ describe one coherent state. With no `position` filter, that scope is every chun
   statistics, totals by gas, and anomaly counts.
 - `chunks`, sorted by `(x, y, z)`, with generation/revision, dimensions, awake/sleep metadata, the same per-chunk
   summary metrics, and optional `voxels`.
-- `issueLocations` and `issueLocationsTruncated`, which provide a bounded, deterministic sample of non-finite or
-  negative pressure, temperature, and mole locations.
+- `issueLocations` and `issueLocationsTruncated`, a bounded, deterministic sample of locations with non-finite or
+  negative pressure, temperature, or moles.
 
-Gas totals and definitions are ordered by gas ID. Statistics carry the full sample count, finite/non-finite counts,
-and nullable finite minimum, maximum, and mean rather than hiding invalid samples.
+Gas totals and definitions are ordered by gas ID. Statistics carry the full sample count, the finite and non-finite
+counts, and nullable finite minimum, maximum, and mean. They do not hide invalid samples.
 
-Dense voxel details are deliberately opt-in because they can dominate output for normal chunk sizes. Set
-`includeVoxels` to `true` when investigating spatial behavior; `onlyGasBearingVoxels` can reduce that output to occupied
-cells. An optional chunk `position` limits the report to one chunk. Supplying both `position` and a local `voxel` returns
-that exact cell even if `includeVoxels` is false; `voxel` is invalid without `position`. `maxIssueLocations` caps the
-coordinate samples attached to invalid-value diagnostics (default `32`, maximum `1024`). Each emitted voxel has a stable
-local index and local coordinates, classification, gas-capable/gas-bearing flags, raw pressure and temperature, total
-moles, estimated sensible energy, and per-gas moles.
+Dense voxel details are opt-in because they can dominate the output for normal chunk sizes. Set `includeVoxels` to
+`true` to investigate spatial behavior. `onlyGasBearingVoxels` reduces that output to occupied cells. An optional
+chunk `position` limits the report to one chunk. With both `position` and a local `voxel`, the report returns that exact
+cell even if `includeVoxels` is false. `voxel` is invalid without `position`. `maxIssueLocations` caps the coordinate
+samples attached to invalid-value diagnostics (default `32`, maximum `1024`).
 
-IEEE-754 non-finite values are encoded as the JSON strings `"NaN"`, `"Infinity"`, and `"-Infinity"`, and the same
-strings are accepted for floating-point request fields. Finite values remain JSON numbers. JSON has no literal for NaN,
-so this keeps every response parseable without throwing away the values most useful during debugging. Consumers should
-accept either a number or one of those three strings for any floating-point field.
+Each emitted voxel has a stable local index, local coordinates, and a classification. It also has gas-capable and
+gas-bearing flags, raw pressure and temperature, total moles, estimated sensible energy, and per-gas moles.
+
+JSON has no literal for NaN. The runner therefore encodes IEEE-754 non-finite values as the strings `"NaN"`,
+`"Infinity"`, and `"-Infinity"`, and every response stays parseable. It accepts the same strings in floating-point
+request fields. Finite values remain JSON numbers. Consumers should accept a number or one of those three strings for
+any floating-point field.
 
 ## Determinism and comparison
 
-`tick` calls `AtmosSimulation.Tick()` directly. It does not use the viewer's wall-clock `Update(deltaTime)` accumulator,
-so a script requests the same number of solver steps on every replay. Chunks, gases, and voxels are emitted in stable
-order, and timing measurements are excluded from canonical observations.
+`tick` calls `AtmosSimulation.Tick()` directly. It skips the viewer's wall-clock `Update(deltaTime)` accumulator, so a
+script runs the same number of solver steps on every replay. The runner emits chunks, gases, and voxels in stable
+order. Canonical observations exclude timing measurements.
 
-For useful diffs:
+To get useful diffs:
 
 1. Add gases in an explicit order and refer to their returned IDs.
 2. Build topology before injecting gas.
 3. Insert named `observe` requests before and after the ticks under investigation.
 4. Compare parsed JSON rather than relying on whitespace.
 
-The runner reports state; it does not automatically assert universal mass or energy conservation. Void flow, vacuum
-cleanup, phase changes, and thermal boundaries can intentionally remove mass or energy, so invariants depend on the
-experiment.
+The runner reports state. It does not assert mass or energy conservation. Void flow, vacuum cleanup, phase changes,
+and thermal boundaries can remove mass or energy on purpose, so the invariants depend on the experiment.
 
-## Example
+## Example script
 
-[`examples/headless/two-voxel-flow.jsonl`](../examples/headless/two-voxel-flow.jsonl) creates one `2 x 1 x 1` chunk,
-injects a single gas into its left voxel, observes the initial pressure imbalance, advances one tick, and observes the
-result. It uses the reduced-pressure deterministic configuration used by the integration tests.
+[`examples/headless/two-voxel-flow.jsonl`](../examples/headless/two-voxel-flow.jsonl) creates one `2 x 1 x 1` chunk.
+It injects a single gas into the left voxel and observes the initial pressure imbalance. It then advances one tick and
+observes the result. It uses the reduced-pressure deterministic configuration from the integration tests.
 
 Replay it with:
 
@@ -235,4 +236,4 @@ Replay it with:
 dotnet run --project src/Numos.Headless -- --script examples/headless/two-voxel-flow.jsonl
 ```
 
-It is ordinary NDJSON, so it also works as a template for generated experiments and regression fixtures.
+The script is ordinary NDJSON. Use it as a template for generated experiments and regression fixtures.
