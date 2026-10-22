@@ -155,8 +155,10 @@ internal static class EulerSweep
     ///     Face <c>(march, line)</c> lies between positions <c>march − 1</c> and <c>march</c> of its line, so the
     ///     bundle has <c>marchCount + 1</c> rows of faces, and the trailing wall faces are solved by the same loop
     ///     as the interior ones. Cell <c>(march, line)</c> has the faces at <c>march</c> and <c>march + 1</c>. The
-    ///     scratch arrays are indexed <c>march · lineCount + line</c>, not by voxel index. Only the first and last
-    ///     face row can name a neighbour chunk, because a face between two cells of the chunk is always interior.
+    ///     scratch arrays are indexed by position in the bundle, not by voxel index. A Y or Z bundle is
+    ///     <c>march · lineCount + line</c>. An X bundle is line-major, with <c>line · marchCount + march</c> for
+    ///     cells and <c>line · (marchCount + 1) + march</c> for faces. Only the first and last face of a line can
+    ///     name a neighbour chunk. The other faces name one of their own two cells.
     /// </remarks>
     private static MetrePerSecond SweepBundle(
         EulerChunkWorkspace workspace, int axis, int bundle, Second timeStep, SquareMetre faceArea,
@@ -195,54 +197,100 @@ internal static class EulerSweep
                 break;
         }
 
+        // A run is a stretch of cells that is contiguous in voxel memory: a line for X, a march row for Y and Z.
+        // The scratch is laid out run by run, so a run is contiguous there too.
+        bool alongMarch = axis == 0;
+        int runLength = alongMarch ? marchCount : lineCount;
+        int runCount = alongMarch ? lineCount : marchCount;
+        int runVoxelStride = alongMarch ? lineStride : marchStride;
+        int runFaceStride = alongMarch ? marchCount + 1 : lineCount;
+        int aheadOffset = alongMarch ? 1 : lineCount;
+
         int cellCount = marchCount * lineCount;
         int faceCount = (marchCount + 1) * lineCount;
-        scratch.EnsureCapacity(faceCount, cellCount);
-        MolePerSecond[] faceFlux = scratch.FaceFlux;
+        scratch.EnsureCapacity(faceCount, cellCount, runCount);
         PerSecond[] faceRate = scratch.FaceSpeciesRate;
-        int[] faceIndex = scratch.FaceUpwindIndex;
+        MolePerSecond[] faceFlux = scratch.FaceFlux;
+        int[] upperMask = scratch.FaceUpperMask;
+        int[] fixupFaces = scratch.FixupFaces;
         EulerFaceRate[] faces = scratch.Faces;
         bool[] isAir = scratch.IsAir;
-        bool[] nonFinite = scratch.NonFiniteSpecies;
-        Kilogram[] massSum = scratch.Mass;
-        Mole[] moleSum = scratch.TotalMoles;
-        JoulePerKelvin64[] heatSum = scratch.HeatCapacity;
+        bool[] runAllAir = scratch.RunAllAir;
 
         EulerFlowConfig settings = config.EulerFlow;
         EulerChunkState read = workspace.Read;
-        EulerChunkState write = workspace.Write;
         for (int march = 0; march <= marchCount; march++)
         {
             int lowerRow = march > 0 ? baseIndex + (march - 1) * marchStride : -1;
             int upperRow = march < marchCount ? baseIndex + march * marchStride : -1;
-            int faceRow = march * lineCount;
             for (int line = 0; line < lineCount; line++)
             {
+                int face = alongMarch ? line * runFaceStride + march : march * lineCount + line;
                 SolveFace(
                     workspace, read, axis,
                     lowerRow < 0 ? -1 : lowerRow + line * lineStride,
                     upperRow < 0 ? -1 : upperRow + line * lineStride,
-                    faceArea, settings, out faces[faceRow + line]);
+                    faceArea, settings, out faces[face]);
+
+                faceRate[face] = faces[face].SpeciesRate;
             }
         }
 
-        for (int face = 0; face < faceCount; face++)
+        for (int run = 0; run < runCount; run++)
         {
-            faceRate[face] = faces[face].SpeciesRate;
-            faceIndex[face] = faces[face].UpwindIndex;
+            int firstVoxel = baseIndex + run * runVoxelStride;
+            bool allAir = true;
+            for (int i = 0; i < runLength; i++)
+            {
+                bool air = EulerFaceTopology.IsAir(chunk, firstVoxel + i);
+                isAir[run * runLength + i] = air;
+                allAir &= air;
+            }
+
+            runAllAir[run] = allAir;
         }
 
-        for (int march = 0; march < marchCount; march++)
+        // The faces that can name a neighbour chunk are the first and last face of every line. They go to the
+        // scalar fix-up list, as does any interior face whose upwind cell is not one of its own two cells.
+        // Every other face gets a mask that picks its lower or upper cell.
+        int fixupCount = 0;
+        for (int line = 0; line < lineCount; line++)
         {
-            int row = baseIndex + march * marchStride;
-            for (int line = 0; line < lineCount; line++)
-                isAir[march * lineCount + line] = EulerFaceTopology.IsAir(chunk, row + line * lineStride);
+            fixupFaces[fixupCount++] = alongMarch ? line * runFaceStride : line;
+            fixupFaces[fixupCount++] = alongMarch ? line * runFaceStride + marchCount : marchCount * lineCount + line;
         }
 
-        Array.Clear(nonFinite, 0, cellCount);
-        Array.Clear(massSum, 0, cellCount);
-        Array.Clear(moleSum, 0, cellCount);
-        Array.Clear(heatSum, 0, cellCount);
+        int innerRunCount = alongMarch ? lineCount : marchCount - 1;
+        int innerRunLength = alongMarch ? marchCount - 1 : lineCount;
+        for (int run = 0; run < innerRunCount; run++)
+        {
+            int firstFace = alongMarch ? run * runFaceStride + 1 : (run + 1) * lineCount;
+            int firstLower = baseIndex + run * runVoxelStride;
+            for (int i = 0; i < innerRunLength; i++)
+            {
+                ref readonly EulerFaceRate rate = ref faces[firstFace + i];
+                int lower = firstLower + i;
+                bool own = rate.UpwindSide == EulerUpwindSide.Self;
+                if (own && rate.UpwindIndex == lower)
+                {
+                    upperMask[firstFace + i] = 0;
+                }
+                else if (own && rate.UpwindIndex == lower + marchStride)
+                {
+                    upperMask[firstFace + i] = -1;
+                }
+                else
+                {
+                    upperMask[firstFace + i] = 0;
+                    fixupFaces[fixupCount++] = firstFace + i;
+                }
+            }
+        }
+
+        Array.Clear(scratch.NonFiniteSpecies, 0, cellCount);
+        Array.Clear(scratch.Mass, 0, cellCount);
+        Array.Clear(scratch.TotalMoles, 0, cellCount);
+        Array.Clear(scratch.HeatCapacity, 0, cellCount);
 
         // Every gas an upwind neighbour cell can hold is in this list (the tick thread merged the axis
         // neighbours' lists before the sweep), so a null upwind row is a gas that side does not have.
@@ -252,70 +300,69 @@ internal static class EulerSweep
         {
             int gasId = workspace.GasIds[present];
             Mole[] source = read.Species[gasId]!;
-            Mole[] target = write.Species[gasId]!;
             Mole[]? lowerRows = NeighborRow(lowerNeighbor, gasId);
             Mole[]? upperRows = NeighborRow(upperNeighbor, gasId);
-            // Only the first and last face row (the end faces of every line) can name a neighbour.
-            // The fix-up loops overwrite those.
-            for (int face = 0; face < faceCount; face++)
-                faceFlux[face] = faceRate[face] * source[faceIndex[face]];
+            var pass = new EulerSpeciesPass(
+                source, workspace.Write.Species[gasId]!, scratch.FaceFlux, scratch.NonFiniteSpecies,
+                scratch.Mass, scratch.TotalMoles, scratch.HeatCapacity,
+                timeStep, workspace.MolarMass[present], workspace.HeatCapacity[present]);
 
-            for (int face = 0; face < lineCount; face++)
-                faceFlux[face] = faceRate[face] * UpwindMoles(in faces[face], source, lowerRows, upperRows);
-
-            for (int face = faceCount - lineCount; face < faceCount; face++)
-                faceFlux[face] = faceRate[face] * UpwindMoles(in faces[face], source, lowerRows, upperRows);
-
-            KilogramPerMole molarMass = workspace.MolarMass[present];
-            JoulePerMoleKelvin molarHeat = workspace.HeatCapacity[present];
-            for (int march = 0; march < marchCount; march++)
+            for (int run = 0; run < innerRunCount; run++)
             {
-                int row = baseIndex + march * marchStride;
-                int cellRow = march * lineCount;
-                for (int line = 0; line < lineCount; line++)
+                int firstFace = alongMarch ? run * runFaceStride + 1 : (run + 1) * lineCount;
+                EulerSpeciesKernel.FaceFluxRun(
+                    faceRate, upperMask, source, faceFlux,
+                    firstFace, baseIndex + run * runVoxelStride, marchStride, innerRunLength);
+            }
+
+            for (int k = 0; k < fixupCount; k++)
+            {
+                int face = fixupFaces[k];
+                faceFlux[face] = faceRate[face] * UpwindMoles(in faces[face], source, lowerRows, upperRows);
+            }
+
+            for (int run = 0; run < runCount; run++)
+            {
+                int firstVoxel = baseIndex + run * runVoxelStride;
+                int firstCell = run * runLength;
+                int firstBehind = run * runFaceStride;
+                int firstAhead = firstBehind + aheadOffset;
+                if (runAllAir[run])
                 {
-                    int cell = cellRow + line;
-                    if (!isAir[cell])
-                        continue;
+                    EulerSpeciesKernel.UpdateRun(
+                        in pass, firstVoxel, firstCell, firstBehind, firstAhead, runLength, ref counters.NegativeMoles);
 
-                    int voxelIndex = row + line * lineStride;
-                    Mole moles = source[voxelIndex] - timeStep * (faceFlux[cell + lineCount] - faceFlux[cell]);
+                    continue;
+                }
 
-                    if (!float.IsFinite(moles))
+                for (int i = 0; i < runLength; i++)
+                {
+                    if (isAir[firstCell + i])
                     {
-                        // NaN fails the floor's comparison, so it has to be caught here or it lands in the channels.
-                        nonFinite[cell] = true;
-                        moles = 0f;
+                        EulerSpeciesKernel.UpdateCell(
+                            in pass, firstVoxel + i, firstCell + i, firstBehind + i, firstAhead + i,
+                            ref counters.NegativeMoles);
                     }
-                    else if (moles < 0f)
-                    {
-                        counters.NegativeMoles++;
-                        moles = 0f;
-                    }
-
-                    target[voxelIndex] = moles;
-                    massSum[cell] += moles * molarMass;
-                    moleSum[cell] += moles;
-                    heatSum[cell] += (Mole64)moles * molarHeat;
                 }
             }
         }
 
         MetrePerSecond maxSignalSpeed = 0f;
-        for (int march = 0; march < marchCount; march++)
+        for (int run = 0; run < runCount; run++)
         {
-            int row = baseIndex + march * marchStride;
-            int cellRow = march * lineCount;
-            for (int line = 0; line < lineCount; line++)
+            int firstVoxel = baseIndex + run * runVoxelStride;
+            int firstCell = run * runLength;
+            int firstBehind = run * runFaceStride;
+            for (int i = 0; i < runLength; i++)
             {
-                int cell = cellRow + line;
+                int cell = firstCell + i;
                 if (!isAir[cell])
                     continue;
 
                 MetrePerSecond signalSpeed = UpdateCell(
-                    workspace, axis, row + line * lineStride, in faces[cell], in faces[cell + lineCount],
-                    massSum[cell], moleSum[cell], heatSum[cell], nonFinite[cell],
-                    timeStep, config, ref counters);
+                    workspace, axis, firstVoxel + i, in faces[firstBehind + i], in faces[firstBehind + aheadOffset + i],
+                    scratch.Mass[cell], scratch.TotalMoles[cell], scratch.HeatCapacity[cell],
+                    scratch.NonFiniteSpecies[cell], timeStep, config, ref counters);
 
                 maxSignalSpeed = MathF.Max(maxSignalSpeed, signalSpeed);
             }
@@ -688,7 +735,9 @@ internal static class EulerSweep
     {
         public MolePerSecond[] FaceFlux = [];
         public PerSecond[] FaceSpeciesRate = [];
-        public int[] FaceUpwindIndex = [];
+        public int[] FaceUpperMask = [];
+        public int[] FixupFaces = [];
+        public bool[] RunAllAir = [];
         public EulerFaceRate[] Faces = [];
         public JoulePerKelvin64[] HeatCapacity = [];
         public bool[] IsAir = [];
@@ -696,15 +745,19 @@ internal static class EulerSweep
         public bool[] NonFiniteSpecies = [];
         public Mole[] TotalMoles = [];
 
-        public void EnsureCapacity(int faceCount, int cellCount)
+        public void EnsureCapacity(int faceCount, int cellCount, int runCount)
         {
             if (Faces.Length < faceCount)
             {
                 Faces = new EulerFaceRate[faceCount];
                 FaceFlux = new MolePerSecond[faceCount];
                 FaceSpeciesRate = new PerSecond[faceCount];
-                FaceUpwindIndex = new int[faceCount];
+                FaceUpperMask = new int[faceCount];
+                FixupFaces = new int[faceCount];
             }
+
+            if (RunAllAir.Length < runCount)
+                RunAllAir = new bool[runCount];
 
             if (Mass.Length < cellCount)
             {
