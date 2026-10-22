@@ -1,30 +1,39 @@
-# Versioning and Releasing Numos
-Numos uses Semantic Versioning 2.0.0 for its NuGet packages. A package version tells an integrator what kind of change to expect: a major version can contain breaking changes, a minor version adds backwards-compatible capabilities, and a patch version is for backwards-compatible fixes.
+# Versioning and releasing Numos
 
-## Package Families
-There are two release families, each with its own version and Git tag.
+Numos uses Semantic Versioning 2.0.0 for its NuGet packages. A major version can contain breaking changes. A minor
+version adds backwards-compatible capabilities. A patch version contains backwards-compatible fixes.
+
+## Package families
+
+There are two release families. Each has its own version and Git tag.
 
 - CoreSim releases version `Numos.Maths`, `Numos.CoreSim`, `Numos.API`, and `Numos.API.Dangerous` together.
 - Viewer releases version `Numos.SimDrawer` and `Numos.Viewer` together.
 
-The `[ChunkData]` source generator (`src/Numos.API.Generators`) isn't a package of its own. It ships inside `Numos.API`
-under `analyzers/dotnet/cs`, so it always carries the CoreSim version.
+The `[ChunkData]` source generator (`src/Numos.API.Generators`) is not a package. It ships inside `Numos.API` under
+`analyzers/dotnet/cs`, so it always carries the CoreSim version.
 
-`Numos.Viewer` can depend on a CoreSim-family release, but releasing a new Viewer does not by itself require a new `Numos.CoreSim` version.
+`Numos.Viewer` can depend on a CoreSim-family release. A new Viewer release does not require a new `Numos.CoreSim`
+version.
 
-## Semantic Versions
-A Numos version has the following shape:
+## Semantic versions
+
+A Numos version has this shape:
 
 ```text
 major.minor.patch[-prerelease][+build-metadata]
 ```
 
-Examples include `0.1.0-alpha.1`, `0.1.0-rc.2`, and `1.4.3`. Use the conventional prerelease names `alpha`, `beta`, and `rc` when they communicate the release's maturity.
+Examples are `0.1.0-alpha.1`, `0.1.0-rc.2`, and `1.4.3`. Use the prerelease names `alpha`, `beta`, and `rc` to show
+the release's maturity.
 
-Build metadata is also valid SemVer, but it is not a useful way to distinguish published NuGet packages. NuGet normalizes metadata while resolving package identities, so `1.0.0+one` and `1.0.0+two` must never be treated as two different releases. Use the embedded commit provenance instead.
+Do not use build metadata to tell published packages apart. NuGet normalizes metadata when it resolves package
+identities, so `1.0.0+one` and `1.0.0+two` are the same release. Use the embedded commit provenance instead.
 
-## Changing a Version
-Use the repository's Python version manager rather than editing version properties by hand. It updates the selected family's SemVer value plus the corresponding .NET assembly and file versions.
+## Changing a version
+
+Use the Python version manager. Do not edit version properties by hand. The manager updates the family's SemVer value
+and the matching .NET assembly and file versions.
 
 ```shell
 # Show both current family versions.
@@ -43,17 +52,21 @@ python3 eng/version.py bump coresim prerelease
 python3 eng/version.py promote viewer
 ```
 
-`bump` accepts `major`, `minor`, `patch`, or `prerelease`. Numeric bumps reset lower numeric components as SemVer
-requires and remove any existing prerelease or build metadata unless a new `--prerelease` value is supplied.
+`bump` accepts `major`, `minor`, `patch`, or `prerelease`. A numeric bump resets the lower numeric components, as
+SemVer requires. It also removes any prerelease or build metadata unless you pass a new `--prerelease` value.
 
-A `prerelease` bump keeps the numeric version and increments the final numeric prerelease identifier: `0.1.0-alpha.1`
-becomes `0.1.0-alpha.2`; `0.1.0-alpha` becomes `0.1.0-alpha.1`. It requires a prerelease version and removes build
-metadata. `promote` only removes the prerelease and build metadata; it does not advance the numeric version.
+A `prerelease` bump keeps the numeric version and increments the final numeric prerelease identifier.
+`0.1.0-alpha.1` becomes `0.1.0-alpha.2`, and `0.1.0-alpha` becomes `0.1.0-alpha.1`. It requires a prerelease version
+and removes build metadata. `promote` removes the prerelease and build metadata. It does not advance the numeric
+version.
 
-The manager validates the complete SemVer 2.0.0 grammar. .NET assembly metadata has numeric component limits, so the tool rejects version components that cannot be represented by the shipping assemblies.
+The manager validates the full SemVer 2.0.0 grammar. .NET assembly metadata limits the size of each numeric
+component, so the tool rejects components that the shipping assemblies cannot represent.
 
-## Reviewing and Tagging a Release
-A version bump edits the family's `Version.props`. Review the result, build the packages, and commit it before creating a tag. A tag should always point at the commit that contains the version it names.
+## Reviewing and tagging a release
+
+A version bump edits the family's `Version.props`. Review the result, build the packages, and commit before you create
+a tag. The tag must point at the commit that contains the version it names.
 
 ```shell
 python3 eng/version.py verify coresim
@@ -61,23 +74,59 @@ python3 eng/version.py tag coresim
 git push origin coresim/v0.1.0
 ```
 
-`verify` checks that the selected version properties agree with their .NET assembly/file versions, that the working tree and index are clean, and that the version is committed at `HEAD`. `tag` runs the same verification and creates an annotated local tag. It never creates a commit and never pushes a tag or branch.
+`verify` checks three things:
 
-CoreSim tags use `coresim/vX.Y.Z`; Viewer tags use `viewer/vX.Y.Z`. The tag name includes the complete SemVer string, including a prerelease suffix when one exists.
+- The version properties agree with their .NET assembly and file versions.
+- The working tree and index are clean.
+- The version is committed at `HEAD`.
 
-## Shipping Checks
+`tag` runs the same verification and creates an annotated local tag. It never creates a commit. It never pushes a tag
+or a branch.
 
-The CI package job builds the solution with warnings treated as errors, packs each published package, and validates
-NuGet metadata, dependencies, runtime assets, packed analyzers, symbols, and source provenance. Packages that depend on
-`Numos.API` must not exclude its analyzers, or the generator would stop at them. It also restores a clean consumer using
-only the generated Numos packages and publishes the Viewer with NativeAOT for Linux.
+CoreSim tags use `coresim/vX.Y.Z`. Viewer tags use `viewer/vX.Y.Z`. The tag name includes the full SemVer string,
+including any prerelease suffix.
 
-Pushing a `coresim/v*` or `viewer/v*` tag starts `.github/workflows/publish.yml`. The workflow verifies that the tag exactly matches the committed family version, repeats the build and package checks, and publishes only that family. CoreSim-family packages are pushed in dependency order. Matching `.snupkg` files are published with the primary packages.
+## CI package checks
 
-Publishing uses NuGet trusted publishing and GitHub OIDC. Configure the repository variable `NUGET_USER` with the NuGet.org account name used by the trusted-publishing policy. This is an account name, not an API key. Package building and validation run in a job without OIDC permission. A separate job downloads only the reviewed artifacts and requests a short-lived credential immediately before publishing; do not create or store a long-lived `NUGET_API_KEY` repository secret.
+The CI package job builds the solution with warnings as errors and packs each published package. It validates NuGet
+metadata, dependencies, runtime assets, packed analyzers, symbols, and source provenance. Packages that depend on
+`Numos.API` must not exclude its analyzers, or the generator stops at them. The job also restores a clean consumer
+from the generated Numos packages only. Finally, it publishes the Viewer with NativeAOT for Linux.
 
-Before pushing a public package, confirm that the package family has a clear change summary, its API changes match the chosen SemVer increment, the generated artifacts are from a clean checkout, and the annotated tag points to the reviewed commit. Once a stable baseline exists, add package/API compatibility validation against the previous release so accidental breaking changes are caught before publishing.
+## Publishing to NuGet
 
-## Viewer Application Releases
+Pushing a `coresim/v*` or `viewer/v*` tag starts `.github/workflows/publish.yml`. The workflow verifies that the tag
+exactly matches the committed family version. It repeats the build and package checks and publishes only that family.
+It pushes CoreSim-family packages in dependency order and publishes the matching `.snupkg` files with the primary
+packages.
 
-Publishing the NuGet packages does not produce downloadable Viewer builds; that is a separate, manually triggered workflow. After pushing an annotated Viewer tag, run **Build Viewer release** from the Actions tab and enter that exact tag (for example, `viewer/v0.1.0`). The workflow validates the tag, builds and tests the solution on Linux, Windows, and macOS, then builds self-contained NativeAOT application archives for `linux-x64`, `win-x64`, and `osx-arm64` and attaches them to a draft GitHub Release for the tag, creating the draft if it does not exist yet. It refuses to touch a release that has already been published.
+Publishing uses NuGet trusted publishing and GitHub OIDC. Set the repository variable `NUGET_USER` to the NuGet.org
+account name that the trusted-publishing policy uses. This is an account name, not an API key. Do not create a
+long-lived `NUGET_API_KEY` repository secret.
+
+Package building and validation run in a job without OIDC permission. A separate job downloads only the reviewed
+artifacts. It requests a short-lived credential immediately before publishing.
+
+Before you push a public package, confirm four things:
+
+- The package family has a clear change summary.
+- Its API changes match the SemVer increment.
+- The generated artifacts come from a clean checkout.
+- The annotated tag points to the reviewed commit.
+
+Once a stable baseline exists, add package and API compatibility validation against the previous release. It catches
+accidental breaking changes before publishing.
+
+## Viewer application releases
+
+Publishing the NuGet packages does not produce downloadable Viewer builds. A separate workflow, triggered manually,
+produces them.
+
+1. Push an annotated Viewer tag.
+2. Run **Build Viewer release** from the Actions tab.
+3. Enter that exact tag, for example `viewer/v0.1.0`.
+
+The workflow validates the tag and builds and tests the solution on Linux, Windows, and macOS. It then builds
+self-contained NativeAOT application archives for `linux-x64`, `win-x64`, and `osx-arm64`. It attaches the archives to
+a draft GitHub Release for the tag and creates the draft if it does not exist. It refuses to touch a release that is
+already published.
