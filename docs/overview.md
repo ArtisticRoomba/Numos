@@ -19,8 +19,8 @@ A list of improvements over the previous system is below:
   - In `AS`, gases were hardcoded and compile-time constants. Numos supports gas additions at runtime.
 - Gas that carries momentum.
   - `AS` relaxes pressure differences with no memory of motion, so nothing travels, reflects, or overshoots.
-    Numos' default transport is a compressible Euler solver: pressure waves cross a room at the speed of sound,
-    bounce off walls, and corridors fill in a fraction of a second rather than over many ticks.
+    Numos' default transport is a compressible Euler solver, so pressure waves cross a room at the speed of sound and
+    bounce off walls.
 - Multithreading.
   - `AS` is only multithreaded in `DeltaPressure`; every other compute-heavy solver stage runs single-threaded.
   - Numos can also run on its own thread if you'd like to do that in your game.

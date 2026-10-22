@@ -16,8 +16,8 @@ in the `0.x` series and may be published as prereleases (for others to just impo
 - Engine-agnostic, with a supported `Numos.API` facade over an internal simulation kernel
 - Solver pipeline, allowing you to write and add your own solvers to be executed on Numos' behalf
 - Static dimensional analysis at compile-time
-- Compressible Euler gas transport by default (HLLC face fluxes, CFL substeps inside the fixed tick), with the older
-  pressure-relaxation model still selectable
+- Compressible Euler gas transport by default (HLLC fluxes, CFL substeps inside the fixed tick), with the older
+  pressure-relaxation model selectable
 - Multithreaded intra-chunk flow and thermodynamics
 - Multithreaded cross-chunk boundary flow
 - Single-threaded explicit-link (portal/dock) transport

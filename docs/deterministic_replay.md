@@ -210,13 +210,9 @@ Some data stays outside the checkpoint:
 - `ChunkField<T>` storage registered without `rollback: true` is transient. Restore discards it.
 - Profiling values, recorder bookkeeping, object identities, chunk generations, and presentation revisions are not
   authoritative simulation state. `AtmosSimulation.LastFlowDiagnostics` is one of these: a restore zeroes it.
-- The `euler-flow` stage keeps nothing of its own between ticks; the chunks' momentum arrays, which are
-  checkpointed, are its only carried state. Everything else is derived and rebuilt every tick: the pooled
-  conserved buffers and face masks (dropped on restore and re-rented), which chunks it activates during a tick (a
-  function of the chunk fields and the configuration, so a replay reactivates the same chunks at the same sweeps),
-  and the sweep order (the six axis permutations indexed by `(2·TickCount + substep) mod 6`, a pure function of the
-  checkpointed tick count rather than a counter carried across ticks, so a restored world sweeps in the same order
-  the original run did without the checkpoint having to say so).
+- The `euler-flow` stage carries nothing between ticks except the chunks' momentum arrays, which are checkpointed.
+  Its pooled buffers, activated chunks, and sweep order are rebuilt every tick from the checkpointed chunk fields,
+  configuration, and tick count, so a restored world sweeps exactly as the original run did.
 
 When a detached mixture transfers gas into a voxel, the recording stores the resulting voxel state (`SetVoxelMixtureOperation`). That state includes the voxel's momentum,
 which the kernel zeroes when the write empties the voxel. Replaying that
@@ -312,9 +308,8 @@ state. Numos fixes the order wherever concurrent scheduling could otherwise beco
 - Each tick receives chunks ordered by grid X, then Y, then Z.
 - Advection runs ordered phases. A voxel tile owns both its delta accumulation and its persistent voxel writes, and
   shared values are gathered in fixed source and gas order.
-- The Euler sweeps read only buffers no sweep writes, each pencil writes only its own cells and reduction slot,
-  and a face shared by two chunks is solved by both from the same bits, so neither the worker count nor the tiling
-  can change a result. The per-sweep reductions are a max and a sum, which are order free.
+- Euler sweeps are independent of worker count and tiling: each pencil writes only its own cells and reduction slot,
+  and a face shared by two chunks is solved by both from the same bits.
 - Work inside separate chunks can run in parallel because each chunk owns its local state.
 - Thermal boundary work is collected and sorted before a single-threaded application step. Cross-chunk gas flow
   computes and applies transfers in parallel, but reserves each source chunk's disjoint write range within a target's
@@ -363,8 +358,8 @@ the timeline's initial checkpoint stay incorporated at its start tick. Use `Seek
 select the state after a particular operation at that same tick.
 
 A seek normally restores the last retained checkpoint not after the target and replays from there. When the timeline
-is already inspecting and the target is at or after the current position, with no retained checkpoint in between, it
-continues from the current state instead, so stepping playback forward one tick costs one simulated tick.
+is already inspecting, the target is at or after the current position, and no retained checkpoint lies between them,
+it continues from the current state instead, so stepping forward one tick costs one simulated tick.
 
 The first seek stops recording and preserves the live head. `ReturnToHead()` restores that checkpoint and resumes the
 same recording. `SimulateFromHere()` destroys the controller's in-memory future. It removes later operations and
