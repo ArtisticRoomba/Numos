@@ -337,6 +337,10 @@ since the last read.
 the timeline's initial checkpoint stay incorporated at its start tick. Use `SeekPosition` when a UI or debugger must
 select the state after a particular operation at that same tick.
 
+A seek normally restores the last retained checkpoint not after the target and replays from there. When the timeline
+is already inspecting and the target is at or after the current position, with no retained checkpoint in between, it
+continues from the current state instead, so stepping playback forward one tick costs one simulated tick.
+
 The first seek stops recording and preserves the live head. `ReturnToHead()` restores that checkpoint and resumes the
 same recording. `SimulateFromHere()` destroys the controller's in-memory future. It removes later operations and
 checkpoints, makes the selected state the new head, and resumes recording there.
