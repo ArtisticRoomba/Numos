@@ -21,8 +21,8 @@
     <ItemGroup>
         <PackageReference Include="CommunityToolkit.HighPerformance" Version="8.4.2"/>
         <PackageReference Include="JetBrains.Annotations" Version="2026.2.0"/>
-        <PackageReference Include="Magnitudo" Version="0.3.0-beta.2"/>
-        <PackageReference Include="Magnitudo.Analyzers" Version="0.3.0-beta.2" PrivateAssets="all"/>
+        <PackageReference Include="Magnitudo" Version="0.3.0-beta.4"/>
+        <PackageReference Include="Magnitudo.Analyzers" Version="0.3.0-beta.4" PrivateAssets="all"/>
         <PackageReference Include="System.Numerics.Tensors" Version="10.0.11"/>
     </ItemGroup>
 

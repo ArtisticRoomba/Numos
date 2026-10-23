@@ -199,14 +199,12 @@ internal class ReactionSolver : IAtmosSolverStage
 
         if (reactionCount != null && reactionFeedbacks != null)
         {
-            // The analyzer does not follow the element quantity through a nullable array, so use a non-null local.
-            Mole[] counts = reactionCount;
             for (int activeIndex = 0; activeIndex < activeAirCount; activeIndex++)
             {
                 Mole[] feedback = reactionFeedbacks[activeIndex];
                 for (int i = 0; i < reactionCount.Length; i++)
                 {
-                    counts[i] += feedback[i];
+                    reactionCount[i] += feedback[i];
                 }
 
                 ArrayPool<float>.Shared.Return(feedback);
@@ -451,10 +449,9 @@ internal class ReactionSolver : IAtmosSolverStage
 
         if (reactionFeedback != null)
         {
-            Mole[] feedback = reactionFeedback;
             for (int j = 0; j < reactionCount; j++)
             {
-                feedback[j] += reactionSpeeds[j];
+                reactionFeedback[j] += reactionSpeeds[j];
             }
         }
 

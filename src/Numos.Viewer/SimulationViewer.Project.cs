@@ -105,9 +105,9 @@ public partial class SimulationViewer
                 {
                     { Water, 2 }
                 },
-                483_600f, // J/mol (483.6 kJ/mol)
+                UnitConversions.FromKilojoulePerMole(483.6f),
                 1.8e13f,
-                256_000f, // J/mol (256 kJ/mol)
+                UnitConversions.FromKilojoulePerMole(256f),
                 new Dictionary<GasProperties, float>
                 {
                     { Hydrogen, 1 },

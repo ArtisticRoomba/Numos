@@ -71,7 +71,7 @@ public readonly partial record struct StandardGasReaction
     ///     Molar activation energy, in J/mol. The Arrhenius exponent divides it by
     ///     <see cref="AtmosPhysicalConstants.MolarGasConstant" /> (J/(mol*K)).
     ///     Convert values authored in kJ/mol at the call site, for example with
-    ///     <see cref="Magnitudo.Generated.UnitConversions.FromKilojoulePerMole" />.
+    ///     <see cref="UnitConversions.FromKilojoulePerMole" />.
     /// </summary>
     private JoulePerMole ActivationEnergy { get; }
 

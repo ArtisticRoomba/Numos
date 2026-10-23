@@ -17,8 +17,8 @@ covers only how Numos uses it.
 `src/Numos.CoreSim/Numos.CoreSim.magnitudo`, which the project includes as an `AdditionalFiles` item. The catalog
 declares each alias (`Kelvin`, `Pascal`, `Mole`, and their 64-bit variants) and the external unit conversions.
 
-The generated conversions in `Magnitudo.Generated.UnitConversions` are `internal` to `Numos.CoreSim`. Other assemblies
-cannot call them. Pass plain SI values across assembly boundaries.
+`[UnitConversions]` on `Numos.CoreSim.UnitConversions` puts the generated conversions in that public class. Consumers
+can call them at their input boundaries, for example `UnitConversions.FromKilojoulePerMole(483.6f)`.
 
 To add a quantity, add a line to the catalog. Use the existing base dimensions where possible. A domain can add a new
 base dimension by name.
@@ -42,9 +42,5 @@ indexable storage. The aliases are erased from CLR signatures, and the attribute
 analyzers in other assemblies.
 
 The analyzer treats unannotated numeric values as unknown. Annotate storage boundaries and important intermediate
-values when you add a solver path. Two cases catch people out:
-
-- The analyzer does not follow an element quantity through a nullable array such as `Mole[]?`. Copy the array to a
-  non-null local first.
-- A cast like `(Pascal)1f` on a literal adopts the surrounding quantity, so it does not trigger a diagnostic. Use
-  typed variables or parameters when you test a deliberate mismatch.
+values when you add a solver path. A cast like `(Pascal)1f` on a literal adopts the surrounding quantity, so it does
+not trigger a diagnostic. Use typed variables or parameters when you test a deliberate mismatch.

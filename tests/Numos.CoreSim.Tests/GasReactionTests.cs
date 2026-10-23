@@ -1,6 +1,5 @@
 using Numos.CoreSim.GasReactions;
 using Numos.CoreSim.Solvers;
-using Magnitudo.Generated;
 
 namespace Numos.CoreSim.Tests;
 
