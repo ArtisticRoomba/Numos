@@ -7,8 +7,8 @@ namespace Numos.API;
 ///     Holds detached continuation state for a complete atmospheric world.
 /// </summary>
 /// <remarks>
-///     Restore targets an existing compatible world so host-owned simulation objects, solver delegates, and external
-///     integration state remain attached. Derived sparse indexes are rebuilt from the authoritative link-set slots.
+///     Restore targets an existing compatible world, so host-owned simulation objects, solver delegates, and external
+///     integration state stay attached. Derived sparse indexes are rebuilt from the authoritative link-set slots.
 /// </remarks>
 public sealed class AtmosWorldCheckpoint
 {

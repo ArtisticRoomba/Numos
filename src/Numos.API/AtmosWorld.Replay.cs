@@ -211,8 +211,8 @@ public sealed partial class AtmosWorld
     }
 
     /// <summary>
-    ///     Resumes recording right after <paramref name="head" /> was restored, trusting its cached digest instead of
-    ///     capturing the live state again.
+    ///     Resumes recording right after <paramref name="head" /> was restored. It trusts the cached digest of
+    ///     <paramref name="head" /> and does not capture the live state again.
     /// </summary>
     internal void ResumeRecordingAt(AtmosWorldCheckpoint head)
     {
@@ -265,8 +265,8 @@ public sealed partial class AtmosWorld
     /// <returns>Timing and tick-count diagnostics for the completed reconstruction.</returns>
     /// <remarks>
     ///     The operation is atomic with respect to deterministic world state. If validation or application fails,
-    ///     the state present before this call is restored. Simulation objects created after the source checkpoint
-    ///     may be replaced; reacquire them by <see cref="AtmosSimulationId" /> after seeking.
+    ///     Numos restores the state present before this call. Numos can replace simulation objects created after the
+    ///     source checkpoint. Reacquire them by <see cref="AtmosSimulationId" /> after seeking.
     ///     <see cref="IAtmosWorldSolver.OnRestored" /> runs after the checkpoint is installed and before the first
     ///     replayed tick, and again when a failure puts the pre-call state back.
     /// </remarks>
@@ -296,11 +296,11 @@ public sealed partial class AtmosWorld
 
     /// <summary>
     ///     Continues from the world's current position through <paramref name="target" /> without restoring a
-    ///     checkpoint, for callers that know the live state already matches <paramref name="recording" /> there.
+    ///     checkpoint. Callers must know the live state already matches <paramref name="recording" /> there.
     /// </summary>
     /// <remarks>
-    ///     <see cref="IAtmosWorldSolver.OnRestored" /> does not run on success because no state is installed. A failure
-    ///     still restores the pre-call state, which does run it.
+    ///     <see cref="IAtmosWorldSolver.OnRestored" /> does not run on success, because no state is installed. A failure
+    ///     still restores the pre-call state, and that restore does run it.
     /// </remarks>
     internal AtmosWorldReplayResult ReplayRecordingForward(AtmosWorldRecording recording, AtmosTimelinePosition target)
     {

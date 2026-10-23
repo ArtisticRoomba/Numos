@@ -7,10 +7,10 @@ namespace Numos.API;
 ///     Records complete world history for deterministic seeking, verification, and branching.
 /// </summary>
 /// <remarks>
-///     The timeline takes exclusive control of world recording, starting it when needed and adopting it when already
-///     active. Do not start, stop, or resume recording directly on the world while a timeline is attached. Seeking stops
-///     live recording and preserves the previous head until the caller returns to it or branches from the cursor. The
-///     caller continues to own the world and must keep it alive for the timeline's lifetime.
+///     The timeline takes exclusive control of world recording. It starts recording when needed and adopts it when
+///     already active. Do not start, stop, or resume recording directly on the world while a timeline is attached.
+///     Seeking stops live recording and preserves the previous head until the caller returns to it or branches from
+///     the cursor. The caller keeps ownership of the world and must keep it alive for the timeline's lifetime.
 /// </remarks>
 /// <example>
 ///     Observe live ticks before seeking, then either return to the saved head or branch from the selected position:
@@ -128,9 +128,9 @@ public sealed class AtmosWorldReplayTimeline
     /// <param name="cancellationToken">Cancellation observed between reconstruction intervals.</param>
     /// <returns>A read-only imported timeline positioned at its initial state.</returns>
     /// <remarks>
-    ///     Import reconstructs the archive through its head to verify the final digest, then restores the initial
-    ///     checkpoint. Progress and cancellation are observed between checkpoint intervals. If reconstruction is
-    ///     canceled, the supplied world remains at its most recently reconstructed position.
+    ///     Import reconstructs the archive through its head to verify the final digest. It then restores the initial
+    ///     checkpoint. Import reports progress and checks for cancellation between checkpoint intervals. If the caller
+    ///     cancels reconstruction, the supplied world stays at its most recently reconstructed position.
     /// </remarks>
     /// <exception cref="ArgumentNullException">A required argument is <see langword="null" />.</exception>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="checkpointInterval" /> is zero.</exception>
@@ -161,7 +161,7 @@ public sealed class AtmosWorldReplayTimeline
     /// <remarks>
     ///     Unlike <see cref="Import" />, this method does not require a portable archive. Matching custom solver
     ///     registrations and their host delegates must already be attached to the supplied world. Use this method for
-    ///     histories retained inside one host process; use <see cref="Import" /> for standalone replay files.
+    ///     histories retained inside one host process. Use <see cref="Import" /> for standalone replay files.
     /// </remarks>
     /// <example>
     ///     Restore a branch captured earlier in the same host, then inspect its fork:
@@ -294,9 +294,9 @@ public sealed class AtmosWorldReplayTimeline
     /// <returns>Diagnostics for the reconstruction.</returns>
     /// <remarks>
     ///     A seek that lands at or after the current inspection position, and no earlier than the nearest retained
-    ///     checkpoint, continues from the current state instead of restoring that checkpoint, so stepping forward one
-    ///     tick at a time simulates one tick per step. This assumes the host has not mutated the world outside recorded
-    ///     history while inspecting.
+    ///     checkpoint, continues from the current state instead of restoring that checkpoint. Stepping forward one tick
+    ///     at a time therefore simulates one tick per step. This assumes the host has not mutated the world outside
+    ///     recorded history while inspecting.
     /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="tick" /> is outside retained history.</exception>
     /// <exception cref="ObjectDisposedException">The observed world has been disposed.</exception>
@@ -349,9 +349,9 @@ public sealed class AtmosWorldReplayTimeline
         var source = _checkpoints[LastCheckpointNotAfter(target)];
         var current = Position;
 
-        // While inspecting, the world sits on a position of the retained history, so moving forward from it is
-        // cheaper than restoring whenever it is already past the nearest checkpoint. A live world was at head
-        // until BeginInspection, which only the restore path can move backward from.
+        // While inspecting, the world sits on a position of the retained history. Moving forward from it is cheaper
+        // than restoring whenever it is already past the nearest checkpoint. A live world was at head until
+        // BeginInspection, and only the restore path can move backward from there.
         if (!wasInspecting || !IsNotAfter(current, target) || !IsNotAfter(source.Checkpoint.Position, current))
             LastReplay = _world.ReplayRecordingTo(source.Checkpoint, _history!, target);
         else if (current == target)
@@ -369,7 +369,7 @@ public sealed class AtmosWorldReplayTimeline
     /// </summary>
     /// <remarks>
     ///     A live timeline resumes world recording and leaves inspection mode. An imported or restored timeline stays in
-    ///     read-only inspection until <see cref="SimulateFromHere" /> branches from it. This method has no effect while
+    ///     read-only inspection until <see cref="SimulateFromHere" /> branches from it. This method does nothing while
     ///     the timeline is already live.
     /// </remarks>
     /// <exception cref="ObjectDisposedException">The observed world has been disposed.</exception>

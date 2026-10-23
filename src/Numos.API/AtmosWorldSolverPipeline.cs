@@ -8,9 +8,9 @@ namespace Numos.API;
 /// <remarks>
 ///     The enabled stage list is captured before each tick. Pipeline edits made by a running stage take effect on the
 ///     next tick. Solver delegates and <see cref="IAtmosWorldSolver" /> instances remain caller-owned.
-///     Stage names, kinds, order, and neighbor-selection keys are checkpointed and must match on restore, so adding,
-///     removing, or resetting stages is rejected while the world is recording or replaying.
-///     Enabling and disabling stages is allowed then and is recorded.
+///     Numos checkpoints stage names, kinds, order, and neighbor-selection keys. They must match on restore, so Numos
+///     rejects adding, removing, or resetting stages while the world is recording or replaying.
+///     Enabling and disabling stages is allowed then, and Numos records it.
 /// </remarks>
 public sealed class AtmosWorldSolverPipeline
 {
@@ -70,11 +70,11 @@ public sealed class AtmosWorldSolverPipeline
     ///     </para>
     ///     <para>
     ///         Pass <paramref name="neighbors" /> whenever the solver reads <see cref="AtmosWorldSolverContext.Topology" />.
-    ///         Without it the view is empty: <c>GetOwnedEdges()</c> yields nothing and <c>GetNeighbors</c> reports no
-    ///         explicit neighbors, silently, with no exception to flag the missing selection. Set the selection's
-    ///         <c>includeCartesian</c> to <see langword="false" /> for a stage that only cares about portals and docks —
-    ///         that keeps the compiled view limited to the sparse explicit edge list instead of also re-deriving every
-    ///         ordinary chunk boundary.
+    ///         Without it the view is empty. <c>GetOwnedEdges()</c> yields nothing and <c>GetNeighbors</c> reports no
+    ///         explicit neighbors. Neither throws, so nothing flags the missing selection. Set the selection's
+    ///         <c>includeCartesian</c> to <see langword="false" /> for a stage that only cares about portals and docks.
+    ///         The compiled view then stays limited to the sparse explicit edge list. Numos does not also re-derive
+    ///         every ordinary chunk boundary.
     ///     </para>
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="name" /> or <paramref name="solver" /> is <see langword="null" />.</exception>
@@ -147,7 +147,7 @@ public sealed class AtmosWorldSolverPipeline
     /// <param name="name">The registered stage name.</param>
     /// <returns><see langword="true" /> when a stage was removed.</returns>
     /// <remarks>
-    ///     Removing a built-in stage drops that physics from every subsequent tick; <see cref="ResetToDefaults" />
+    ///     Removing a built-in stage drops that physics from every subsequent tick. <see cref="ResetToDefaults" />
     ///     brings it back.
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="name" /> is <see langword="null" />.</exception>
@@ -234,12 +234,12 @@ public sealed class AtmosWorldSolverPipeline
     ///     <para>
     ///         Ticks inject lazily, so a missing dependency normally surfaces as an exception from
     ///         <see cref="AtmosWorld.Tick" />. Call this after setting up services and solvers to get the same error up
-    ///         front. Every enabled <see cref="IAtmosSolverDependencies" /> solver is injected in pipeline order, even if
-    ///         it was already up to date; disabled solvers are injected when they are next enabled and ticked.
+    ///         front. Numos injects every enabled <see cref="IAtmosSolverDependencies" /> solver in pipeline order, even
+    ///         if it was already up to date. Numos injects disabled solvers when they are next enabled and ticked.
     ///     </para>
     ///     <para>
-    ///         The first failure stops the pass and propagates. Solvers before it keep their new references, and the
-    ///         failed one and everything after it are retried on the next tick.
+    ///         The first failure stops the pass and propagates. Solvers before it keep their new references. The next
+    ///         tick retries the failed solver and everything after it.
     ///     </para>
     /// </remarks>
     /// <exception cref="InvalidOperationException">
@@ -264,8 +264,8 @@ public sealed class AtmosWorldSolverPipeline
     /// </summary>
     /// <param name="force">Whether to inject solvers that are already up to date.</param>
     /// <remarks>
-    ///     The caller holds <see cref="AtmosWorld.Gate" /> and has marked the world as ticking, so services can't
-    ///     change underneath the pass. A registration is stamped only after its injection returns, so a failure leaves
+    ///     The caller holds <see cref="AtmosWorld.Gate" /> and has marked the world as ticking, so services cannot
+    ///     change underneath the pass. Numos stamps a registration only after its injection returns. A failure leaves
     ///     it stale for the next attempt.
     /// </remarks>
     internal void InjectDependencies(bool force)
@@ -293,8 +293,8 @@ public sealed class AtmosWorldSolverPipeline
             step.InjectedEpoch = epoch;
         }
 
-        // Pipeline edits aren't blocked here, so an injection could have republished the steps. Leave the pass
-        // unstamped then, so the next one looks at the new set.
+        // Pipeline edits are not blocked here, so an injection could have republished the steps. Leave the pass
+        // unstamped in that case, so the next pass looks at the new set.
         if (ReferenceEquals(steps, _enabledSteps))
             _injectedEpoch = epoch;
     }
@@ -320,7 +320,7 @@ public sealed class AtmosWorldSolverPipeline
     ///     order.
     /// </summary>
     /// <remarks>
-    ///     Iterates a snapshot so a solver that edits the pipeline from its hook doesn't break the loop. The first
+    ///     Iterates a snapshot, so a solver that edits the pipeline from its hook does not break the loop. The first
     ///     exception stops the pass and propagates to the restore's caller.
     /// </remarks>
     internal void NotifyRestored()

@@ -16,13 +16,13 @@ public delegate void AtmosWorldSolver(AtmosWorldSolverContext context);
 ///     <para>
 ///         Register an instance with
 ///         <see cref="AtmosWorldSolverPipeline.Register(string, IAtmosWorldSolver, AtmosNeighborSelection?, string?, string?)" />.
-///         The instance stays caller-owned: Numos never checkpoints, clones,
-///         or disposes it, and the pipeline's checkpoint metadata is the same as for a delegate registered under the
-///         same name, so switching between the two forms keeps old checkpoints compatible.
+///         The caller owns the instance. Numos never checkpoints, clones, or disposes it. The pipeline's checkpoint
+///         metadata is the same as for a delegate registered under the same name, so switching between the two forms
+///         keeps old checkpoints compatible.
 ///     </para>
 ///     <para>
 ///         Fields on the instance are invisible to replay. State that has to roll back with a checkpoint belongs in a
-///         rollback <see cref="ChunkField{T}" />, and caches rebuilt from authoritative inputs can live under a
+///         rollback <see cref="ChunkField{T}" />. Caches rebuilt from authoritative inputs can live under a
 ///         <see cref="SolverDataKey{T}" />. Fields should only hold transient work that <see cref="OnRestored" /> can
 ///         throw away, plus references to services, other solvers, and chunk fields.
 ///     </para>
@@ -82,17 +82,17 @@ public interface IAtmosWorldSolver
     /// </summary>
     /// <remarks>
     ///     <para>
-    ///         Numos calls this on every custom class solver, enabled or not, in pipeline order, once the restored
-    ///         state is fully installed and before any replayed tick. That covers
+    ///         Numos calls this on every custom class solver, enabled or not, in pipeline order. The call happens once
+    ///         the restored state is fully installed and before any replayed tick. That covers
     ///         <see cref="AtmosWorld.RestoreCheckpoint" />, <see cref="AtmosSimulation.RestoreCheckpoint" />, both
     ///         <c>ReplayTo</c> methods, and the restore that puts the previous state back after a failed
-    ///         <c>ReplayTo</c>. A single host call can therefore trigger it more than once, so make it idempotent.
+    ///         <c>ReplayTo</c>. A single host call can trigger it more than once, so make it idempotent.
     ///         A timeline seek that continues forward from the current inspection position restores nothing and does
     ///         not call it.
     ///     </para>
     ///     <para>
     ///         Services and other solvers are still registered when this runs. An exception propagates to the caller
-    ///         of the restore; the restored state stays installed, but solvers later in the pipeline are not notified.
+    ///         of the restore. The restored state stays installed, but solvers later in the pipeline are not notified.
     ///     </para>
     /// </remarks>
     void OnRestored()
@@ -146,10 +146,10 @@ public readonly record struct AtmosExplicitLinkInfo(
 /// <param name="explicitLinks">The selector evaluated for active explicit links.</param>
 /// <remarks>
 ///     Set <paramref name="includeCartesian" /> to <see langword="false" /> for a solver that only interacts with
-///     portals, docks, or other explicit links: it keeps the compiled view limited to the sparse explicit edge set
-///     instead of re-deriving all six ordinary neighbors of every voxel in every chunk. Reach for
-///     <see langword="true" /> only when the same stage genuinely needs to traverse ordinary walls too, such as fire
-///     or sound propagating through both open doorways and portals.
+///     portals, docks, or other explicit links. The compiled view then stays limited to the sparse explicit edge
+///     set. Numos does not re-derive all six ordinary neighbors of every voxel in every chunk. Use
+///     <see langword="true" /> only when the same stage must also traverse ordinary walls, such as fire or sound
+///     propagating through both open doorways and portals.
 /// </remarks>
 public sealed class AtmosNeighborSelection(
     string key,
@@ -160,10 +160,10 @@ public sealed class AtmosNeighborSelection(
     ///     Gets the stable compatibility key for this selection policy.
     /// </summary>
     /// <remarks>
-    ///     This string is checkpointed alongside the solver's registration and folded into world state hashing, so a
-    ///     restored checkpoint compiles topology using the key it was captured with. Give a selection a new key when
-    ///     its <see cref="AtmosExplicitLinkSelector" /> changes what it matches; reusing a key for a semantically
-    ///     different selection lets a restored checkpoint silently compile the wrong edges for it.
+    ///     Numos checkpoints this string with the solver's registration and folds it into world state hashing. A
+    ///     restored checkpoint therefore compiles topology using the key it was captured with. Give a selection a new
+    ///     key when its <see cref="AtmosExplicitLinkSelector" /> changes what it matches. If you reuse a key for a
+    ///     different selection, a restored checkpoint silently compiles the wrong edges for it.
     /// </remarks>
     public string Key { get; } = string.IsNullOrWhiteSpace(key)
         ? throw new ArgumentException("A neighbor selection key cannot be empty.", nameof(key))
@@ -229,8 +229,8 @@ public sealed class AtmosWorldSolverContext
     ///     Gets the solver-specific compiled neighborhood view.
     /// </summary>
     /// <remarks>
-    ///     A stage registered without a neighbor selection receives an empty view here: no exception, no Cartesian
-    ///     neighbors, no explicit edges. Pass <c>neighbors</c> to
+    ///     A stage registered without a neighbor selection receives an empty view here. The view has no Cartesian
+    ///     neighbors and no explicit edges, and access does not throw. Pass <c>neighbors</c> to
     ///     <see cref="AtmosWorldSolverPipeline.Register(string, AtmosWorldSolver, AtmosNeighborSelection?, string?, string?)" />
     ///     whenever the callback needs this property.
     /// </remarks>

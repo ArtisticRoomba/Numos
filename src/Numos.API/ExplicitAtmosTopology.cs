@@ -83,12 +83,12 @@ public readonly record struct AtmosCellRef(
 /// <remarks>
 ///     <see cref="GasTransport" /> and <see cref="ThermalTransport" /> are the only bits Numos' own built-in
 ///     <see cref="AtmosBuiltInSolvers.ExplicitGasTransport" />/<see cref="AtmosBuiltInSolvers.ExplicitThermalTransport" />
-///     stages act on. The remaining bits of this <see langword="byte" />-backed flag set are reserved for hosts: a
-///     link can carry a host-defined bit (for example <c>(ExplicitLinkFlags)(1 &lt;&lt; 2)</c>) purely so a
+///     stages act on. The remaining bits of this <see langword="byte" />-backed flag set are reserved for hosts.
+///     A link can carry a host-defined bit (for example <c>(ExplicitLinkFlags)(1 &lt;&lt; 2)</c>) so a
 ///     host-registered <see cref="AtmosExplicitLinkSelector" /> can pick it out. Numos' built-in stages ignore bits
-///     they do not recognize, so a link can mix built-in capabilities with host-defined ones, or use only
-///     host-defined ones to opt out of default physics entirely while still participating in checkpointing,
-///     recording, and topology enumeration like any other link.
+///     they do not recognize. A link can mix built-in capabilities with host-defined ones. A link can also use only
+///     host-defined bits to opt out of default physics. It still takes part in checkpointing, recording, and
+///     topology enumeration like any other link.
 /// </remarks>
 [Flags]
 public enum ExplicitLinkFlags : byte
