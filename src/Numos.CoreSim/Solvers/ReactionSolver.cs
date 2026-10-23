@@ -16,13 +16,13 @@ internal class ReactionSolver : IAtmosSolverStage
     private const string IgnitionSourceVolumeKey = "IgnitionSourceVolume";
 
     private static readonly ChunkFieldDescriptor<Scalar> IgnitionPercentField =
-        ChunkFieldRegistry.Register<Scalar>(IgnitionPercentKey, true, null);
+        ChunkFieldRegistry.Register<Scalar>(IgnitionPercentKey, captureForRollback:true, clearOnSleep:true, clearOnVacuum:true);
     private static readonly ChunkFieldDescriptor<Kelvin> IgnitedVolumeTempField =
-        ChunkFieldRegistry.Register<Kelvin>(IgnitedVolumeTempKey, true, null);
+        ChunkFieldRegistry.Register<Kelvin>(IgnitedVolumeTempKey, captureForRollback:true, clearOnSleep:true, clearOnVacuum:true);
     private static readonly ChunkFieldDescriptor<Kelvin> IgnitionSourceTempField =
-        ChunkFieldRegistry.Register<Kelvin>(IgnitionSourceTempKey, true, null);
+        ChunkFieldRegistry.Register<Kelvin>(IgnitionSourceTempKey, captureForRollback:true, clearOnSleep:true, clearOnVacuum:true);
     private static readonly ChunkFieldDescriptor<CubicMetre> IgnitionSourceVolumeField =
-        ChunkFieldRegistry.Register<CubicMetre>(IgnitionSourceVolumeKey, true, null);
+        ChunkFieldRegistry.Register<CubicMetre>(IgnitionSourceVolumeKey, captureForRollback:true, clearOnSleep:true, clearOnVacuum:true);
 
     // Radius factor of a sphere measured against its volume fraction of the voxel:
     // fraction = (4/3 * pi) * (r / edge)^3, so cbrt(fraction) = (4/3 * pi)^(1/3) * r / edge.
@@ -147,6 +147,9 @@ internal class ReactionSolver : IAtmosSolverStage
     /// <param name="volume">Volume the source ignites, in cubic metres. Clamped to the voxel volume.</param>
     internal void SetIgnitionSource(AtmosChunk chunk, ushort voxelIndex, Kelvin temperature, CubicMetre volume)
     {
+        if (!chunk.IsAwake)
+            chunk.Wake();
+
         Kelvin[] temperatures = chunk.GetOrCreateField(IgnitionSourceTempField);
         CubicMetre[] volumes = chunk.GetOrCreateField(IgnitionSourceVolumeField);
         temperatures[voxelIndex] = MathF.Max(temperatures[voxelIndex], temperature);
