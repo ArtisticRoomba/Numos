@@ -1,6 +1,6 @@
 using System.Reflection;
-using Numos.Units;
-using Numos.Units.Generated;
+using Magnitudo;
+using Magnitudo.Generated;
 
 namespace Numos.CoreSim.Tests;
 

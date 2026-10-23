@@ -1,6 +1,6 @@
 using System.Collections.Frozen;
 using Numos.CoreSim.Replay;
-using Numos.Units;
+using Magnitudo;
 
 namespace Numos.CoreSim.GasReactions;
 
@@ -71,7 +71,7 @@ public readonly partial record struct StandardGasReaction
     ///     Molar activation energy, in J/mol. The Arrhenius exponent divides it by
     ///     <see cref="AtmosPhysicalConstants.MolarGasConstant" /> (J/(mol*K)).
     ///     Convert values authored in kJ/mol at the call site, for example with
-    ///     <see cref="Numos.Units.Generated.UnitConversions.FromKilojoulePerMole" />.
+    ///     <see cref="Magnitudo.Generated.UnitConversions.FromKilojoulePerMole" />.
     /// </summary>
     private JoulePerMole ActivationEnergy { get; }
 

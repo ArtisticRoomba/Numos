@@ -13,7 +13,7 @@ internal enum WireTypeKind
     String,
 
     /// <summary>
-    ///     An unresolved identifier, presumably a Numos.Units quantity alias, still to be looked up in the catalog.
+    ///     An unresolved identifier, presumably a Magnitudo quantity alias, still to be looked up in the catalog.
     /// </summary>
     Alias,
 
@@ -68,7 +68,7 @@ internal sealed record WireType(WireTypeKind Kind, string Name)
         if (type.SpecialType == SpecialType.System_String)
             return new WireType(WireTypeKind.String, "String");
 
-        // Numos.Units emits its quantity aliases (Kelvin, Mole, ...) from a generator in the same pass, and one
+        // Magnitudo emits its quantity aliases (Kelvin, Mole, ...) from a generator in the same pass, and one
         // generator never sees another's output, so inside Numos.CoreSim an alias is still an error type here.
         if (type.TypeKind == TypeKind.Error)
             return new WireType(WireTypeKind.Alias, type.Name);
@@ -94,13 +94,13 @@ internal sealed record WireType(WireTypeKind Kind, string Name)
     }
 
     /// <summary>
-    ///     Reads the alias-to-storage table from the compilation's <c>*.numosunits</c> catalogs.
+    ///     Reads the alias-to-storage table from the compilation's <c>*.magnitudo</c> catalogs.
     /// </summary>
     public static IncrementalValueProvider<EquatableArray<QuantityAlias>> QuantityAliases(
         IncrementalGeneratorInitializationContext context)
     {
         return context.AdditionalTextsProvider
-            .Where(static file => file.Path.EndsWith(".numosunits", StringComparison.OrdinalIgnoreCase))
+            .Where(static file => file.Path.EndsWith(".magnitudo", StringComparison.OrdinalIgnoreCase))
             .SelectMany(static (file, cancellationToken) => ParseCatalog(file.GetText(cancellationToken)?.ToString() ?? ""))
             .Collect()
             .Select(static (aliases, _) => new EquatableArray<QuantityAlias>(aliases));

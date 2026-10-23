@@ -4,7 +4,6 @@ using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.GasReactions;
 using Numos.Maths;
 using Numos.SimDrawer;
-using Numos.Units.Generated;
 
 namespace Numos.Viewer;
 
@@ -106,9 +105,9 @@ public partial class SimulationViewer
                 {
                     { Water, 2 }
                 },
-                UnitConversions.FromKilojoulePerMole(483.6f),
+                483_600f, // J/mol (483.6 kJ/mol)
                 1.8e13f,
-                UnitConversions.FromKilojoulePerMole(256f),
+                256_000f, // J/mol (256 kJ/mol)
                 new Dictionary<GasProperties, float>
                 {
                     { Hydrogen, 1 },

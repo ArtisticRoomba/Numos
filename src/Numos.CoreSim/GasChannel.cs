@@ -1,5 +1,5 @@
 using System.Buffers;
-using Numos.Units;
+using Magnitudo;
 
 namespace Numos.CoreSim;
 

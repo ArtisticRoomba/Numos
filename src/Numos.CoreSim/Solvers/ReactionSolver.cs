@@ -76,7 +76,7 @@ internal class ReactionSolver : IAtmosSolverStage
     ///     Defaults to 1 (parallelize) for callers processing a single chunk directly.
     /// </param>
     internal void ProcessChunk(
-        AtmosChunk chunk, Second deltaTime, IAtmosConfig config, ReactionTables tables, Scalar[]? reactionCount = null,
+        AtmosChunk chunk, Second deltaTime, IAtmosConfig config, ReactionTables tables, Mole[]? reactionCount = null,
         int awakeChunkCount = 1)
     {
         Debug.Assert(tables.GasData.Length == config.GasPropertyCount, "Reaction tables were built from another config.");
@@ -100,7 +100,7 @@ internal class ReactionSolver : IAtmosSolverStage
         // Like the reaction matrix, it slices a shared buffer instead of renting per item.
         // This collapses activeAirCount pool round trips into one.
         Mole[] mixtures = ArrayPool<Mole>.Shared.Rent(checked(activeAirCount * mixtureLength));
-        Scalar[][]? reactionFeedbacks = reactionCount == null ? null : ArrayPool<Scalar[]>.Shared.Rent(activeAirCount);
+        Mole[][]? reactionFeedbacks = reactionCount == null ? null : ArrayPool<Mole[]>.Shared.Rent(activeAirCount);
         Kelvin[] newTemps = ArrayPool<Kelvin>.Shared.Rent(activeAirCount);
         ParallelHelper.For(
             0,
@@ -199,12 +199,14 @@ internal class ReactionSolver : IAtmosSolverStage
 
         if (reactionCount != null && reactionFeedbacks != null)
         {
+            // The analyzer does not follow the element quantity through a nullable array, so use a non-null local.
+            Mole[] counts = reactionCount;
             for (int activeIndex = 0; activeIndex < activeAirCount; activeIndex++)
             {
-                Scalar[] feedback = reactionFeedbacks[activeIndex];
+                Mole[] feedback = reactionFeedbacks[activeIndex];
                 for (int i = 0; i < reactionCount.Length; i++)
                 {
-                    reactionCount[i] += feedback[i];
+                    counts[i] += feedback[i];
                 }
 
                 ArrayPool<float>.Shared.Return(feedback);
@@ -262,7 +264,7 @@ internal class ReactionSolver : IAtmosSolverStage
     /// <param name="mixtureLength">The number of registered gases, i.e. the valid length of <paramref name="mixtureVector" />.</param>
     internal void ProcessVoxel(
         Second deltaTime, Span<Mole> mixtureVector, ref Kelvin currentTemperature,
-        Scalar[]? reactionFeedback, IAtmosConfig config, int mixtureLength)
+        Mole[]? reactionFeedback, IAtmosConfig config, int mixtureLength)
     {
         ProcessMixtureCore(
             deltaTime,
@@ -280,7 +282,7 @@ internal class ReactionSolver : IAtmosSolverStage
     /// </summary>
     private static void ProcessMixtureCore(
         Second deltaTime, Span<Mole> mixtureVector, ref Kelvin currentTemperature, CubicMetre volume,
-        Scalar[]? reactionFeedback, IAtmosConfig config, int mixtureLength, ReactionTables tables)
+        Mole[]? reactionFeedback, IAtmosConfig config, int mixtureLength, ReactionTables tables)
     {
         var reactions = tables.Reactions;
         GasReactionData[] gasData = tables.GasData;
@@ -449,9 +451,10 @@ internal class ReactionSolver : IAtmosSolverStage
 
         if (reactionFeedback != null)
         {
+            Mole[] feedback = reactionFeedback;
             for (int j = 0; j < reactionCount; j++)
             {
-                reactionFeedback[j] += reactionSpeeds[j];
+                feedback[j] += reactionSpeeds[j];
             }
         }
 
@@ -534,8 +537,8 @@ internal class ReactionSolver : IAtmosSolverStage
         Second deltaTime,
         CubicMetre volume,
         IAtmosConfig config,
-        Scalar[]? reactionCount,
-        Scalar[][]? reactionFeedbacks,
+        Mole[]? reactionCount,
+        Mole[][]? reactionFeedbacks,
         Mole[] mixtures,
         Kelvin[] newTemps,
         int mixtureLength,
@@ -545,8 +548,8 @@ internal class ReactionSolver : IAtmosSolverStage
         {
             ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
             Kelvin temp = chunk.Temperature[voxelIndex];
-            Scalar[]? reactionFeedback =
-                reactionCount == null ? null : ArrayPool<Scalar>.Shared.Rent(tables.Reactions.Count);
+            Mole[]? reactionFeedback =
+                reactionCount == null ? null : ArrayPool<Mole>.Shared.Rent(tables.Reactions.Count);
 
             if (reactionFeedback != null)
                 Array.Clear(reactionFeedback, 0, reactionFeedback.Length);

@@ -1,5 +1,5 @@
 using Numos.Maths;
-using Numos.Units;
+using Magnitudo;
 
 namespace Numos.CoreSim.Datatypes.Snapshots;
 

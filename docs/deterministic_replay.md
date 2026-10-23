@@ -430,7 +430,7 @@ Configuration and solver enablement are world state, so they exist only as world
 
 Most operations need no codec step. `Numos.Replay.Generators` finds every concrete operation type and generates
 `WriteOperation`/`ReadOperation` on the family's codec (`AtmosReplayCodec` in Numos.CoreSim, `AtmosWorldReplayCodec` in
-Numos.API). It writes fields in primary-constructor order. Primitives and Numos.Units quantity aliases go straight
+Numos.API). It writes fields in primary-constructor order. Primitives and Magnitudo quantity aliases go straight
 through `BinaryWriter`.
 
 Any other field type needs a `Write{TypeName}`/`Read{TypeName}` pair on the family's codec or on `AtmosReplayCodec`.

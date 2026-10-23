@@ -1,5 +1,5 @@
 using Numos.CoreSim.Replay;
-using Numos.Units;
+using Magnitudo;
 
 namespace Numos.CoreSim;
 

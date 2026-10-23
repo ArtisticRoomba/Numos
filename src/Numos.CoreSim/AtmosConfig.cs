@@ -1,6 +1,6 @@
 using Numos.CoreSim.Solvers;
 using Numos.Maths;
-using Numos.Units;
+using Magnitudo;
 
 namespace Numos.CoreSim;
 

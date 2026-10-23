@@ -1,4 +1,4 @@
-# Numos dimensional-analysis catalog.
+# Numos Magnitudo catalog.
 # Format: stable id | C# alias | primitive storage type | base-dimension exponents
 # Base dimensions are extensible strings. Current bases are mass, length, time, temperature, amount and tick.
 

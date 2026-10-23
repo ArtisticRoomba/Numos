@@ -6,7 +6,7 @@ using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.Datatypes.Snapshots;
 using Numos.CoreSim.Solvers;
 using Numos.Maths;
-using Numos.Units;
+using Magnitudo;
 
 namespace Numos.CoreSim;
 

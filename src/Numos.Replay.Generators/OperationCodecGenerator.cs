@@ -17,7 +17,7 @@ namespace Numos.Replay.Generators;
 ///         only generates the family whose base type it declares.
 ///     </para>
 ///     <para>
-///         Fields are encoded in primary-constructor order. Primitives and Numos.Units quantity aliases go straight
+///         Fields are encoded in primary-constructor order. Primitives and Magnitudo quantity aliases go straight
 ///         through <see cref="System.IO.BinaryWriter" />. Any other field type needs a <c>Write{TypeName}</c>/
 ///         <c>Read{TypeName}</c> pair on the family's codec or on <c>AtmosReplayCodec</c>. When the codec declares
 ///         <c>Write{OperationName}</c>/<c>Read{OperationName}</c>, those encode the operation instead.
