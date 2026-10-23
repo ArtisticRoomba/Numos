@@ -1,8 +1,9 @@
 namespace Numos.CoreSim.GasReactions;
 
 /// <summary>
-///     Per-registered-gas reaction coefficients and rate factors: dense, reaction-ID-indexed arrays for
-///     "what does every reaction do to this gas", plus a sparse list of just the reactions that consume it.
+///     Per-registered-gas reaction coefficients and rate factors.
+///     Dense, reaction-ID-indexed arrays answer "what does every reaction do to this gas".
+///     A sparse list holds just the reactions that consume it.
 /// </summary>
 internal sealed class GasReactionData(int gasId, string gasName, int reactionCount)
 {
@@ -10,13 +11,11 @@ internal sealed class GasReactionData(int gasId, string gasName, int reactionCou
     internal string GasName { get; } = gasName;
     internal Mole[] Changes { get; } = new Mole[reactionCount];
 
-    // Sparse: only the reactions that actually take this gas as an input, in reaction-ID order (the
-    // order SetChanges is called in). The material limiter needs "how much does this gas lose, and
-    // to which reactions" -- walking only the reactions that touch this gas, instead of every
-    // registered reaction, turns its per-gas scan from O(reactionCount) into O(reactions that
-    // actually consume it). Coefficient is gross consumption (<= 0), independent of any offsetting
-    // production of the same gas by the same reaction -- the limiter must not net input against
-    // output, or it would hide a real overdraw.
+    // Sparse: only the reactions that take this gas as an input, in reaction-ID order (the order SetChanges is called in).
+    // The material limiter needs to know how much this gas loses and to which reactions.
+    // Walking only those reactions makes its per-gas scan O(reactions that consume the gas) instead of O(reactionCount).
+    // Coefficient is gross consumption (<= 0), independent of any production of the same gas by the same reaction.
+    // The limiter must not net input against output, or it would hide a real overdraw.
     internal List<(int ReactionId, float Consumed)> ConsumingReactions { get; } = [];
 
     internal LinearGasReaction.LinearSpeedFactor[][] LinearFactors { get; } = new LinearGasReaction.LinearSpeedFactor[reactionCount][];
@@ -65,9 +64,9 @@ internal sealed class GasReactionData(int gasId, string gasName, int reactionCou
     ///     Multiplies <paramref name="speed" /> by this gas's rate factors for <paramref name="reactionId" />.
     /// </summary>
     /// <remarks>
-    ///     Accumulates in double so a trace gas with a negative exponent can push the product past float range
-    ///     without being mistaken for a broken rate. The result may still overflow to positive infinity so the
-    ///     solver just saturates the rate instead.
+    ///     Accumulates in double, so a trace gas with a negative exponent can push the product past float range
+    ///     without being mistaken for a broken rate. The result may still overflow to positive infinity.
+    ///     The solver then saturates the rate.
     /// </remarks>
     internal ConcentrationPerSecond64 ApplyRateFactors(
         int reactionId, MolePerCubicMetre64 concentration, ConcentrationPerSecond64 speed)

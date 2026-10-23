@@ -33,7 +33,7 @@ internal sealed class AtmosSolverExecutionContext
     /// </summary>
     /// <param name="slot">The slot.</param>
     /// <returns>The cached value.</returns>
-    /// <remarks>Call this on the tick thread before dispatching workers; the storage is not thread-safe.</remarks>
+    /// <remarks>Call this on the tick thread before dispatching workers. The storage is not thread-safe.</remarks>
     internal T GetSolverData<T>(SolverDataSlot<T> slot) where T : class
     {
         return TickConfig.SolverData.GetOrCreate(
@@ -46,8 +46,9 @@ internal sealed class AtmosSolverExecutionContext
     ///     Looks up a chunk by its grid position.
     /// </summary>
     /// <remarks>
-    ///     The only kernel operation cross-chunk solvers need — deliberately narrow rather than exposing
-    ///     <see cref="AtmosKernel" /> itself, since parallel solver stages must not touch its other members.
+    ///     This is the only kernel operation cross-chunk solvers need.
+    ///     It is narrow on purpose: parallel solver stages must not touch the other members of
+    ///     <see cref="AtmosKernel" />, so the context does not expose the kernel itself.
     /// </remarks>
     internal bool TryGetChunk(Int3 position, out AtmosChunk chunk)
     {

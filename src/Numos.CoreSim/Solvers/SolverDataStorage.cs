@@ -4,9 +4,9 @@ namespace Numos.CoreSim.Solvers;
 ///     Transient solver data for one simulation, indexed by <see cref="SolverDataDescriptor.Id" />.
 /// </summary>
 /// <remarks>
-///     Callers serialize access: the kernel state gate for host requests, the tick thread for built-in stages. Slot
-///     ids follow static-initialization order, so never iterate this storage in slot order for anything that affects
-///     results; it only gets looked up and cleared.
+///     Callers serialize access. Host requests go through the kernel state gate, and built-in stages use the tick
+///     thread. Slot ids follow static-initialization order, so never iterate this storage in slot order for anything
+///     that affects results. Code only looks up and clears slots.
 /// </remarks>
 internal sealed class SolverDataStorage
 {
@@ -44,8 +44,8 @@ internal sealed class SolverDataStorage
                    throw new InvalidOperationException($"Solver data '{name}' holds a {existing.GetType()}, not a {typeof(T)}.");
         }
 
-        // Nested requests may grow the array, which copies the marker along, so always go through the current
-        // array afterwards. A slot that no longer holds the marker was cleared mid-factory; leave it empty.
+        // Nested requests may grow the array and copy the marker along, so always go through the current array afterwards.
+        // A slot that no longer holds the marker was cleared mid-factory. Leave it empty.
         _values[slotId] = Creating;
         T value;
         try

@@ -12,27 +12,26 @@ namespace Numos.Serialization.Tests;
 /// </summary>
 /// <remarks>
 ///     Round-trip tests elsewhere (write, then read the same bytes back) cannot catch a codec change that reorders or
-///     retypes fields consistently between its writer and reader halves — the pair stays self-consistent while every
-///     previously recorded <c>.numos</c> file silently becomes unreadable. These tests compare against byte constants
-///     captured from the current serializer, so any change to field order, field encoding, or section layout fails
-///     loudly here even when every other replay test still passes.
+///     retypes fields consistently in its writer and reader halves. The pair stays self-consistent while every previously
+///     recorded <c>.numos</c> file becomes unreadable. These tests compare against byte constants captured from the current
+///     serializer. Any change to field order, field encoding, or section layout fails here even when every other replay
+///     test passes.
 ///     <para>
-///         A deliberate wire-format change (e.g. a real new field, not a refactor) must bump
-///         <c>NumosWorldReplaySerializer.ContainerVersion</c> or the relevant format/compatibility version, then
-///         regenerate the world constant below by running <see cref="PrintGoldenBytes" /> (an explicit test, skipped
-///         by default) and pasting its output line in.
+///         A deliberate wire-format change (such as a new field, not a refactor) must bump
+///         <c>NumosWorldReplaySerializer.ContainerVersion</c> or the relevant format or compatibility version. Then regenerate
+///         the world constant below. Run <see cref="PrintGoldenBytes" /> (an explicit test, skipped by default) and paste its
+///         output line in.
 ///     </para>
 ///     <para>
 ///         Any other failure, such as one after a codec refactor, means the codec disagrees with the pinned layout.
 ///         That is a regression to fix, not a reason to regenerate.
 ///     </para>
 ///     <para>
-///         The scenario below ticks the world so link and simulation lifecycle transitions stay valid,
-///         which pulls solver-computed floats into the pinned checkpoint bytes. Those floats come from straightforward
-///         scalar mixing arithmetic, not vectorized reductions, so they are expected to be bit-identical across the
-///         CI matrix (ubuntu/windows/macos) — but that has not been empirically verified on non-Linux runners. If this
-///         test ever flakes only on one OS leg, suspect float nondeterminism in the checkpoint section rather than the
-///         codec, and consider trimming the offending <c>Tick()</c> call instead of chasing the codec.
+///         The scenario below ticks the world so link and simulation lifecycle transitions stay valid. That pulls
+///         solver-computed floats into the pinned checkpoint bytes. The floats come from scalar mixing arithmetic, not
+///         vectorized reductions, so they should be bit-identical across the CI matrix (ubuntu, windows, macos). This is
+///         unverified on non-Linux runners. If this test flakes on one OS leg only, suspect float nondeterminism in the
+///         checkpoint section, not the codec. Consider trimming the offending <c>Tick()</c> call.
 ///     </para>
 /// </remarks>
 [TestFixture]
@@ -117,8 +116,8 @@ public sealed class ReplayWireFormatGoldenTests
     private static NumosWorldReplayDocument BuildGoldenWorldReplayDocument()
     {
         // Chunk dimensions, chunk-grid positions, voxel indices, gas IDs, and classification IDs are nonzero and
-        // mutually distinct within each operation's field list, so a codec that swaps two same-width fields (e.g.
-        // LocalVoxelIndex and GasId) changes the bytes instead of hiding behind a coincidental zero.
+        // mutually distinct within each operation's field list. A codec that swaps two same-width fields (e.g.
+        // LocalVoxelIndex and GasId) then changes the bytes instead of hiding behind a coincidental zero.
         var config = new AtmosConfig
         {
             GasRegistry =

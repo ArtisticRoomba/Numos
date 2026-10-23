@@ -7,9 +7,10 @@ Benchmarks live in three folders:
 
 - `Regular/`: representative solver stages, complete ticks, and expensive state operations, with independent scaling
   axes.
-- `Micro/`: focused comparisons against a baseline on identical inputs, such as the SoA chunk math against a plain
-  scalar loop, or configuration gas-property lookup against the tick's captured tables when reducing heat capacity.
-- `Scaling/`: one-axis sweeps used to measure wall-clock growth.
+- `Micro/`: focused comparisons against a baseline on identical inputs. Examples are the SoA chunk math against a
+  plain scalar loop, and configuration gas-property lookup against the tick's captured tables when reducing heat
+  capacity.
+- `Scaling/`: one-axis sweeps that measure wall-clock growth.
 
 ## Run a useful subset
 
@@ -46,26 +47,33 @@ dotnet run -c Release --project benchmarks/Numos.CoreSim.Benchmarks -- --anyCate
 NUMOS_BENCHMARK_FULL=1 dotnet run -c Release --project benchmarks/Numos.CoreSim.Benchmarks -- --anyCategories Scaling --exporters csv
 ```
 
-The parallel sweep runs fixed transient workloads at 1, 2, 4, 8, and 16 reported processors. Advection, thermodynamics,
-and reactions each have a 128-chunk throughput case and a dense single-chunk case. The paired shapes show whether a
-solver scales across chunks, inside one chunk, or both. Tiered compilation is disabled for these jobs because iteration
-setup limits each sample to one solve and worker-dependent promotion timing distorts the comparison.
+## Parallel scaling
+
+The parallel sweep runs fixed transient workloads at 1, 2, 4, 8, and 16 reported processors. Advection,
+thermodynamics, and reactions each have a 128-chunk throughput case and a dense single-chunk case. The paired shapes
+show whether a solver scales across chunks, inside one chunk, or both.
+
+These jobs disable tiered compilation. Iteration setup limits each sample to one solve, and worker-dependent promotion
+timing would distort the comparison.
 
 ```bash
 dotnet run -c Release --project benchmarks/Numos.CoreSim.Benchmarks -- \
   --filter '*ParallelScalingBenchmarks*' --exporters csv
 ```
 
-Compare each workload's worker jobs against `Workers=1`. The advection gate expects at least 3× speedup at four
-workers, the eight-worker result to be no slower than four workers, and the one-worker result to remain within 10% of
-the prior baseline. The dense single-chunk case tracks the intra-chunk gain separately and catches a return to
-chunk-only scheduling.
+Compare each workload's worker jobs against `Workers=1`. The advection gate expects three results:
+
+- At least 3× speedup at four workers.
+- An eight-worker result no slower than four workers.
+- A one-worker result within 10% of the prior baseline.
+
+The dense single-chunk case tracks the intra-chunk gain separately. It catches a return to chunk-only scheduling.
 
 ## Analyze scaling output
 
-The plotting script reads the dimensions embedded in BenchmarkDotNet CSV output and creates linear, log-log, normalized
-cost, and adjacent log-log slope graphs. Parallel runs also produce speedup and efficiency graphs. Pass it one or more
-report CSVs:
+The plotting script reads the dimensions embedded in BenchmarkDotNet CSV output. It creates linear, log-log,
+normalized-cost, and adjacent log-log slope graphs. Parallel runs also produce speedup and efficiency graphs. Pass it
+one or more report CSVs:
 
 ```bash
 python3 benchmarks/analysis/analyze_scaling.py \
@@ -76,10 +84,9 @@ python3 benchmarks/analysis/analyze_scaling.py \
 ## Select one solver group
 
 `SolverBenchmarks` contains nested benchmark classes for ticks, advection, thermodynamics, reactions, direct thermal
-diffusion, and phase change. Selecting one nested class runs only that solver group's cases and fixture setup. Advection
-and thermodynamics expose the producer alone plus a producer/consumer case.
+diffusion, and phase change. Selecting one nested class runs only that group's cases and fixture setup. Advection and
+thermodynamics expose the producer alone and a producer/consumer case.
 
-Boundary flow and thermal boundary consume transient events, so they cannot remain meaningful when invoked repeatedly
-without their producers. Their cases therefore measure advection plus boundary flow and thermodynamics plus thermal
-boundary, respectively. The standalone advection and thermodynamics cases still make it possible to subtract the
-producer cost or benchmark that solver by itself.
+Boundary flow and thermal boundary consume transient events. Called repeatedly without their producers, they measure
+nothing useful. Their cases therefore measure advection plus boundary flow, and thermodynamics plus thermal boundary.
+The standalone advection and thermodynamics cases let you subtract the producer cost or benchmark that solver alone.

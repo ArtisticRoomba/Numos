@@ -63,7 +63,7 @@ internal static class GeneratorHarness
 
     public static AdditionalText Catalog(string text)
     {
-        return new InMemoryText("Test.numosunits", text);
+        return new InMemoryText("Test.magnitudo", text);
     }
 
     private sealed class InMemoryText(string path, string text) : AdditionalText

@@ -3,15 +3,18 @@ using CommunityToolkit.HighPerformance;
 namespace Numos.CoreSim.GasReactions;
 
 /// <summary>
-///     The dense stoichiometric matrix S behind a tick's reaction set: mixture change per unit time is
-///     <c>S &#183; reactionSpeeds</c>, conceptually one row per registered gas and one column per reaction.
+///     The dense stoichiometric matrix S behind a tick's reaction set.
+///     Mixture change per unit time is <c>S &#183; reactionSpeeds</c>.
+///     Conceptually S has one row per registered gas and one column per reaction.
 /// </summary>
 /// <remarks>
-///     Storage is the transpose of that (reaction-major, so <see cref="GetReactionRow" /> returns one
-///     reaction's whole column of S as a contiguous span), because the per-voxel hot loop applies one
-///     reaction at a time to every gas -- a single lane-independent vector add per reaction, visiting
-///     every (gas, reaction) term in the same order a per-gas accumulation would. Built once per configuration from
-///     the per-gas <see cref="GasReactionData.Changes" /> columns and read-only afterwards, so workers share it.
+///     Storage is the transpose of that. It is reaction-major, so <see cref="GetReactionRow" /> returns one
+///     reaction's whole column of S as a contiguous span.
+///     The per-voxel hot loop applies one reaction at a time to every gas.
+///     That is a single lane-independent vector add per reaction, and it visits every (gas, reaction) term in the
+///     same order a per-gas accumulation would.
+///     Numos builds the matrix once per configuration from the per-gas <see cref="GasReactionData.Changes" /> columns.
+///     It is read-only afterwards, so workers share it.
 /// </remarks>
 internal sealed class GasReactionMatrix
 {
@@ -23,8 +26,8 @@ internal sealed class GasReactionMatrix
         ReactionCount = reactionCount;
         _changesByReaction = new Mole[reactionCount * GasCount];
 
-        // Span2D makes the [reaction, gas] shape explicit while building; the hot path below reads
-        // contiguous rows directly out of the backing array instead, since it's already reaction-major.
+        // Span2D makes the [reaction, gas] shape explicit while building.
+        // The hot path below reads contiguous rows straight from the reaction-major backing array.
         Span2D<Mole> changes = _changesByReaction.AsSpan().AsSpan2D(reactionCount, GasCount);
         for (int gasId = 0; gasId < GasCount; gasId++)
         {

@@ -63,8 +63,7 @@ public static class NavigationGizmo
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="sliceAxis" /> is not a defined axis.</exception>
     public static void Draw2D(SliceAxis sliceAxis, int viewportWidth, int viewportHeight)
     {
-        // U points right and V points up in the rendered slice. Keep the sliced axis
-        // visible as an oblique third spoke so all three world axes remain identifiable.
+        // U points right and V points up in the rendered slice. The sliced axis is an oblique third spoke.
         var right = Vector2.UnitX;
         var up = -Vector2.UnitY;
         var outOfPlane = Vector2.Normalize(new Vector2(-0.7f, 0.7f));

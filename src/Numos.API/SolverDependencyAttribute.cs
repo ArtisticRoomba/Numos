@@ -10,16 +10,16 @@ namespace Numos.API;
 ///     <para>
 ///         Put the attribute on an instance <see langword="partial" /> property declaration with only a
 ///         <see langword="get" /> accessor, in a <see langword="partial" /> class. Every type the class is nested in
-///         must be <see langword="partial" /> too. The property type must be a reference type; it's the type passed to
-///         <see cref="AtmosSolverDependencyResolver.Resolve{T}" />, so a service has to be registered under exactly
-///         that type, while a solver only has to be assignable to it.
+///         must be <see langword="partial" /> too. The property type must be a reference type. It is the type passed to
+///         <see cref="AtmosSolverDependencyResolver.Resolve{T}" />. A service must be registered under exactly
+///         that type. A solver only has to be assignable to it.
 ///     </para>
 ///     <para>
 ///         The generator implements <see cref="IAtmosSolverDependencies" /> on the class and gives each property a
-///         private backing field that injection assigns. The getter returns the field without checks, so reading a
+///         private backing field that injection assigns. The getter returns the field without checks. Reading a
 ///         dependency before the solver's first tick (or before <see cref="AtmosWorldSolverPipeline.ResolveDependencies" />)
-///         returns <see langword="null" />. Injection itself goes through a <c>InjectSolverDependencies</c> method,
-///         which is <see langword="protected" /> <see langword="virtual" /> on an unsealed class and overridden in
+///         returns <see langword="null" />. Injection goes through an <c>InjectSolverDependencies</c> method. That
+///         method is <see langword="protected" /> <see langword="virtual" /> on an unsealed class and is overridden in
 ///         derived classes, so a base class and its subclasses can each declare dependencies.
 ///     </para>
 ///     <para>

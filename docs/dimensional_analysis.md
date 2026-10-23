@@ -1,41 +1,31 @@
-# Dimensional Analysis
+# Dimensional analysis
 
-To prevent developers and engineers from going insane, Numos features a static dimensional analysis Roslyn Analyzer suite that assists in tracking dimensional quantities throughout the solution.
+Numos catches unit mistakes at build time with [Magnitudo](https://github.com/ArtisticRoomba/Magnitudo). Magnitudo is
+an external library, published on nuget.org as `Magnitudo` and `Magnitudo.Analyzers`. Adding a pressure to a
+temperature in solver code is a compile error, not a wrong number found in a replay diff.
 
-This is done entirely at compile time, and to preserve Native AOT compatibility, will likely never change. Using C# `alias`es allows us to annotate while keeping the underlying types with no overhead, so operations like vectorization are still done in the same manner with no required adjustment.
-A generated alias such as `Kelvin` or `Pascal` that uses `global::System.Single` as the backing is still `System.Single` in CLR metadata, arrays remain primitive arrays, and arithmetic remains ordinary primitive arithmetic.
+The analysis runs at compile time, so it keeps Native AOT compatibility. A quantity alias such as `Kelvin` or `Pascal`
+is a C# `using` alias for a primitive. In CLR metadata `Kelvin` is `System.Single`. Arrays stay primitive arrays, and
+arithmetic stays ordinary primitive arithmetic, so vectorized code is unchanged.
 
-The system has two components:
+Magnitudo's own docs cover the catalog format, the full rules, and the `QNT000` to `QNT004` diagnostics. This page
+covers only how Numos uses it.
 
-- `Numos.Units.Analyzers` generates aliases from a catalog and reports dimension mismatches as build errors.
-- `Numos.Units` supplies metadata attributes for public and cross-assembly declarations whose aliases are erased from
-  CLR signatures.
+## How Numos uses Magnitudo
 
-## Catalog format
+`Numos.CoreSim` references both packages. `Magnitudo.Analyzers` reads the catalog at
+`src/Numos.CoreSim/Numos.CoreSim.magnitudo`, which the project includes as an `AdditionalFiles` item. The catalog
+declares each alias (`Kelvin`, `Pascal`, `Mole`, and their 64-bit variants) and the external unit conversions.
 
-`Numos.CoreSim.numosunits` is included as an MSBuild `AdditionalFiles` item. Quantity declarations use four
-pipe-separated fields:
+`[UnitConversions]` on `Numos.CoreSim.UnitConversions` puts the generated conversions in that public class. Consumers
+can call them at their input boundaries, for example `UnitConversions.FromKilojoulePerMole(483.6f)`.
 
-```text
-stableId | Alias | global::System.Single | baseDimension=exponent,...
-```
+To add a quantity, add a line to the catalog. Use the existing base dimensions where possible. A domain can add a new
+base dimension by name.
 
-Base dimensions are names rather than a fixed enum, so a domain can introduce another independent dimension without
-changing the analyzer. `1` denotes a dimensionless quantity. Multiple aliases may use the same dimensions and different
-primitive storage types, such as `Kelvin` and `Kelvin64`.
+## Annotating code
 
-Boundary conversions use six fields:
-
-```text
-convert | stableId | ExternalUnitName | global::System.Single | scale | offset
-```
-
-The generated conversion follows `canonical = input * scale + offset` and emits `FromExternalUnitName` and
-`ToExternalUnitName` methods in `Numos.Units.Generated.UnitConversions`. These generated conversions also carry relevant metadata, so the analyzer can follow inputs and outputs around the solution just fine.
-
-## Source annotations
-
-Use a generated alias for local variables, parameters, return types, and generic element types:
+Use a quantity alias for locals, parameters, return types, and element types in solver code:
 
 ```csharp
 internal static Pascal CalculatePressure(
@@ -47,9 +37,10 @@ internal static Pascal CalculatePressure(
 }
 ```
 
-Use `[Quantity("stableId")]` on public scalar declarations and `[ElementQuantity("stableId")]` on public arrays or
-indexable storage when the quantity must remain visible to analyzers in another assembly.
+Use `[Quantity("stableId")]` on public scalar declarations. Use `[ElementQuantity("stableId")]` on public arrays and
+indexable storage. The aliases are erased from CLR signatures, and the attributes keep the quantity visible to
+analyzers in other assemblies.
 
-Unannotated numeric values are deliberately treated as unknown. Numeric
-literals may adopt the surrounding quantity, allowing ordinary constants such as zero and scalar factors. When adding
-a solver path, annotate its storage boundary and important intermediate values so dimensional information is not lost.
+The analyzer treats unannotated numeric values as unknown. Annotate storage boundaries and important intermediate
+values when you add a solver path. A cast like `(Pascal)1f` on a literal adopts the surrounding quantity, so it does
+not trigger a diagnostic. Use typed variables or parameters when you test a deliberate mismatch.

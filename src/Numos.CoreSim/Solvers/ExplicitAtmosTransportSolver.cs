@@ -32,9 +32,11 @@ internal readonly record struct ExplicitTransportEdge(
 ///     Applies sparse cell-to-cell transport from a tick-start snapshot using shared per-cell limits.
 /// </summary>
 /// <remarks>
-///     The authoritative topology lives above the kernels. This type consumes a dense, already ordered view so
-///     neither portal nor dock lifecycle concepts enter the physics loop. All requests are calculated before any
-///     cell is changed, and all outgoing requests for one cell and species share the same availability limiter.
+///     The authoritative topology lives above the kernels.
+///     This type consumes a dense, already ordered view, so portal and dock lifecycle concepts stay out of the
+///     physics loop.
+///     Numos calculates all requests before it changes any cell.
+///     All outgoing requests for one cell and species share the same availability limiter.
 /// </remarks>
 internal sealed class ExplicitAtmosTransportSolver
 {
@@ -287,8 +289,9 @@ internal sealed class ExplicitAtmosTransportSolver
         float environmentFactor = MathF.Pow(temperatureRatio, 1.5f) * pressureRatio * dx;
         Mole request = referenceDiffusivity * environmentFactor * sourceMoles * AtmosSolverConstants.FixedTimeStep;
 
-        // Match the Cartesian solver's per-edge stability cap. A cell may have any number of explicit neighbors, so
-        // the shared availability limiter below scales their combined requests again when they exceed the source.
+        // Match the Cartesian solver's per-edge stability cap.
+        // A cell may have any number of explicit neighbors.
+        // The shared availability limiter below scales their combined requests again when they exceed the source.
         return request * 7f > sourceMoles ? sourceMoles / 7f : request;
     }
 
@@ -405,7 +408,8 @@ internal sealed class ExplicitAtmosTransportSolver
                 AtmosSolverMath.CalculateHeatCapacityAtVoxel(config, second.Chunk, second.LocalVoxelIndex);
 
             // For each endpoint, C / sum(G) bounds its total scaled incident conductance by that cell's heat capacity.
-            // Applying the smaller endpoint scale keeps every edge equal and opposite without making edge order matter.
+            // Applying the smaller endpoint scale keeps every edge equal and opposite.
+            // Edge order then does not matter.
             Scalar64 scale = Math.Min(
                 1d,
                 Math.Min(
@@ -424,8 +428,9 @@ internal sealed class ExplicitAtmosTransportSolver
         if (request <= 0f || available <= 0f || totalRequested <= 0f)
             return 0f;
 
-        // Every edge requested gas from the same tick-start snapshot. Scale all requests from this cell and species by
-        // the same ratio so the result cannot overdraw the source or favor whichever edge happens to sort first.
+        // Every edge requested gas from the same tick-start snapshot.
+        // Scale all requests from this cell and species by the same ratio.
+        // The result then cannot overdraw the source or favor whichever edge sorts first.
         return request * MathF.Min(1f, available / totalRequested);
     }
 

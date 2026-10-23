@@ -114,9 +114,9 @@ public static class NumosWorldReplaySerializer
     ///     Writes one section header and payload, encoding the payload exactly once.
     /// </summary>
     /// <remarks>
-    ///     A seekable destination gets a placeholder length that is patched after the payload is written. Anything else
-    ///     has the payload staged in <paramref name="scratch" /> first, because the length precedes the payload on the
-    ///     wire.
+    ///     A seekable destination gets a placeholder length, which the writer patches after the payload. Any other
+    ///     destination gets the payload staged in <paramref name="scratch" /> first, because the length precedes the
+    ///     payload on the wire.
     /// </remarks>
     private static void WriteSection(
         Stream destination,

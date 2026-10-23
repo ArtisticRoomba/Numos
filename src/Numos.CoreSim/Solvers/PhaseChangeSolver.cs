@@ -16,18 +16,18 @@ internal sealed class PhaseChangeSolver
     ///     Condenses supersaturated vapor in every active voxel of one chunk.
     /// </summary>
     /// <remarks>
-    ///     Every voxel is independent (condensation reads and writes only its own <see cref="AtmosChunk" />
-    ///     column), so voxels are parallelized. Within one voxel the gases are still walked in ascending
-    ///     channel order, exactly as the fully sequential form would: gas <c>g</c>'s condensation can
-    ///     shift that voxel's temperature before gas <c>g+1</c> reads it, and preserving that order keeps
-    ///     the result bit-identical to processing one gas at a time across every voxel.
+    ///     Every voxel is independent, because condensation reads and writes only its own <see cref="AtmosChunk" />
+    ///     column. Voxels therefore run in parallel.
+    ///     Within one voxel the gases are still walked in ascending channel order, as the fully sequential form does.
+    ///     Gas <c>g</c>'s condensation can shift that voxel's temperature before gas <c>g+1</c> reads it.
+    ///     Preserving that order keeps the result bit-identical to processing one gas at a time across every voxel.
     /// </remarks>
     /// <param name="chunk">The chunk whose voxels should be checked for condensation.</param>
     /// <param name="config">The solver settings captured for this tick.</param>
     /// <param name="awakeChunkCount">
     ///     How many awake, gas-bearing chunks <see cref="ThermodynamicsSolver" /> is dispatching this tick.
-    ///     Below worker count, per-voxel parallelism here helps fill idle workers; at or above it, the
-    ///     outer per-chunk dispatch already saturates the pool, so this runs sequentially instead.
+    ///     Below worker count, per-voxel parallelism here helps fill idle workers.
+    ///     At or above it, the outer per-chunk dispatch already saturates the pool, so this runs sequentially.
     /// </param>
     internal void Solve(AtmosChunk chunk, AtmosSolverConfigSnapshot config, int awakeChunkCount)
     {
@@ -59,18 +59,17 @@ internal sealed class PhaseChangeSolver
             if (condensingCount == 0)
                 return;
 
-            // ParallelHelper.For splits [0, ActiveAirCount) into contiguous static blocks. Condensing
-            // (expensive) voxels tend to be spatially clustered -- a foggy room, a steam vent -- which
-            // clusters together in ActiveAirIndices too, so a plain contiguous split can dump nearly all
-            // the real work on one worker while the rest sit idle. A coprime-stride permutation of the
-            // work-item index spreads any contiguous run evenly across the whole range before the block
-            // split happens, without changing which voxel does what: it is a bijection over
-            // [0, ActiveAirCount), so every voxel is still visited exactly once.
+            // ParallelHelper.For splits [0, ActiveAirCount) into contiguous static blocks.
+            // Condensing (expensive) voxels cluster spatially, for example in a foggy room or a steam vent.
+            // They cluster in ActiveAirIndices too, so a plain contiguous split can put nearly all the work on one worker.
+            // A coprime-stride permutation of the work-item index spreads any contiguous run across the whole range
+            // before the block split happens.
+            // It is a bijection over [0, ActiveAirCount), so every voxel is still visited exactly once.
             int stride = ChooseStride(chunk.ActiveAirCount);
             var action = new ProcessVoxelAction(chunk, config, condensingGases, condensingCount, stride);
 
-            // See the awakeChunkCount doc above: only add per-voxel parallelism when ThermodynamicsSolver's
-            // outer per-chunk dispatch isn't already using every worker.
+            // See the awakeChunkCount doc above.
+            // Add per-voxel parallelism only when ThermodynamicsSolver's per-chunk dispatch leaves workers idle.
             int workerCount = Math.Max(1, Environment.ProcessorCount);
             if (awakeChunkCount < workerCount)
             {
@@ -97,9 +96,9 @@ internal sealed class PhaseChangeSolver
             return;
 
         Kelvin temperature = config.GetValidatedTemp(chunk.Temperature[voxelIndex]);
-        // Saturation amount from the Clausius-Clapeyron equation; any vapor above it can condense.
+        // Saturation amount from the Clausius-Clapeyron equation. Any vapor above it can condense.
         Mole64 saturationMoles = CalculateSaturationMoles(config, properties, temperature, inverseBoilingPoint);
-        // If below saturationMoles condensation is not possible (We are ignoring any special cases)
+        // At or below saturationMoles condensation is not possible. Special cases are ignored.
         if (gasMoles <= saturationMoles)
             return;
 
@@ -109,10 +108,10 @@ internal sealed class PhaseChangeSolver
             properties.MolarEnthalpyOfVaporization -
             AtmosPhysicalConstants.MolarGasConstant * temperature);
 
-        // Finding the amount of moles to condense to reach equilibrium at saturation is not possible analytically
-        // It is fine to underestimate the amount of moles which condense as the rest can condense next tick
-        // An overestimate however can easily lead to enough energy released to increase the temperature of the gas well above the boiling point
-        // This is not possible physically and needs to be avoided
+        // The moles to condense to reach equilibrium at saturation have no analytical solution.
+        // An underestimate is fine, because the rest condenses next tick.
+        // An overestimate can release enough energy to heat the gas well above the boiling point.
+        // That is not physical and must be avoided.
         Mole64 equilibriumRemainingMoles = CalculateEquilibriumRemainingMoles(
             chunk,
             config,
@@ -126,9 +125,9 @@ internal sealed class PhaseChangeSolver
             inverseBoilingPoint);
 
         Mole64 equilibriumCondensedMoles = gasMoles - equilibriumRemainingMoles;
-        // Condensation factor will lead to an exponential decay of equilibriumCondensedMoles
+        // The condensation factor gives an exponential decay of equilibriumCondensedMoles.
         Mole64 initialMolesToCondense = equilibriumCondensedMoles * config.CondensationRateFactor;
-        // Once the leftover is small, condense all of it now instead of decaying toward it over many more ticks
+        // Once the leftover is small, condense all of it now instead of decaying toward it over many ticks.
         if (equilibriumCondensedMoles - initialMolesToCondense <= AtmosSolverConstants.CondensationFactorCutoff)
             initialMolesToCondense = equilibriumCondensedMoles;
 
@@ -157,8 +156,8 @@ internal sealed class PhaseChangeSolver
 
     /// <summary>
     ///     Finds the remaining vapor amount whose warmed partial pressure equals its saturation pressure.
-    ///     A safeguarded Newton solve operates in log-mole space so large inventories and saturation pressures
-    ///     do not require an overflow-prone pressure round trip.
+    ///     A safeguarded Newton solve works in log-mole space.
+    ///     Large inventories and saturation pressures then avoid an overflow-prone pressure round trip.
     /// </summary>
     private static Mole64 CalculateEquilibriumRemainingMoles(
         AtmosChunk chunk,
@@ -167,18 +166,16 @@ internal sealed class PhaseChangeSolver
         JoulePerMole64 molarInternalEnergyOfVaporization, GasProperties properties,
         PerKelvin64 inverseBoilingPoint)
     {
-        // TODO PERF
-        // doubles are used here for higher precision
-        // This means it can't use previously cached values
-        // Check if this is required
+        // TODO PERF: this uses doubles for precision, so it cannot use previously cached values.
+        // Check whether the precision is required.
         JoulePerMoleKelvin64 molarHeatCapacity =
             config.GetMolarHeatCapacityAtConstantVolume(chunk.ActiveGases[gasIndex].GasId);
 
         JoulePerKelvin64 otherHeatCapacity = CalculateOtherHeatCapacityAtVoxel(chunk, config, gasIndex, voxelIndex);
         JoulePerKelvin64 initialTotalHeatCapacity = otherHeatCapacity + gasMoles * molarHeatCapacity;
 
-        // If it takes no energy to condense, they all condense
-        // This can only happen in specific cases with a very low MolarEnthalpyOfVaporization
+        // If condensing takes no energy, all of the excess condenses.
+        // This happens only with a very low MolarEnthalpyOfVaporization.
         if (molarInternalEnergyOfVaporization == 0d)
             return Math.Clamp(initialSaturationMoles, 0d, gasMoles);
 
@@ -213,9 +210,9 @@ internal sealed class PhaseChangeSolver
             else
                 lowerBound = candidate;
 
-            // A valid Newton step normally contracts the bracket faster than bisection. If it hugs one
-            // endpoint, also evaluate the retained interval's midpoint so every iteration still halves
-            // the previous width in the worst case.
+            // A valid Newton step normally contracts the bracket faster than bisection.
+            // If it hugs one endpoint, also evaluate the retained interval's midpoint.
+            // Every iteration then still halves the previous width in the worst case.
             if (upperBound - lowerBound > previousWidth * 0.5d)
             {
                 candidate = (lowerBound + upperBound) * 0.5d;
@@ -338,7 +335,7 @@ internal sealed class PhaseChangeSolver
         // R is Molar Gas Constant
         // T_2 is current temperature
         // P_2 is the pressure at the current temperature which being above would lead to condensation
-        // This equation has been converted to use moles instead of pressure
+        // The code converts this equation to use moles instead of pressure.
         // TODO PERF
         Scalar64 logSaturationMoles = Math.Log(config.SaturationReferencePressure) -
                                       Math.Log(config.PressurePerMoleKelvin) -
@@ -361,8 +358,8 @@ internal sealed class PhaseChangeSolver
         chunk.TotalHeatCapacity[voxelIndex] = newHeatCapacity;
         if (newHeatCapacity > 0f)
         {
-            // Algebraically this is (T*C_remaining + n_condensed*U_vap) / C_remaining. Dividing
-            // before multiplying avoids both C*T overflow and the cancellation of two large energies.
+            // Algebraically this is (T*C_remaining + n_condensed*U_vap) / C_remaining.
+            // Dividing before multiplying avoids both C*T overflow and the cancellation of two large energies.
             chunk.Temperature[voxelIndex] = MathF.Max(
                 0f,
                 temperature + condensedMoles / newHeatCapacity * molarInternalEnergyOfVaporization);
@@ -371,11 +368,10 @@ internal sealed class PhaseChangeSolver
         chunk.TotalPressure[voxelIndex] =
             AtmosSolverMath.CalculatePressureAtVoxel(config, chunk, voxelIndex);
 
-        // TODO
-        // This temperature is technically wrong. The temperature of the liquid should be at the equivalent condensation point.
-        // The saturation pressure equation requires the lambertW to invert to find.
-        // This energy which the liquid holds onto also needs to be taken away from the molar Internal Energy Of Vaporization
-        // This could potentially be ignored as it shouldn't make much of a difference. It might come up once the liquid simulation is started.
+        // TODO: this temperature is wrong. The liquid should be at the equivalent condensation point.
+        // Finding that point needs the Lambert W function to invert the saturation pressure equation.
+        // The energy the liquid keeps must also come out of the molar internal energy of vaporization.
+        // The error is probably small. It may matter once the liquid simulation starts.
         AddPrecipitationEvent(voxelIndex, gasIndex, condensedMoles, temperature);
     }
 
@@ -386,10 +382,10 @@ internal sealed class PhaseChangeSolver
 
     /// <summary>
     ///     Picks a stride coprime with <paramref name="n" /> so that <c>(i * stride) % n</c> is a bijection
-    ///     over <c>[0, n)</c> in which a contiguous run of <c>i</c> lands roughly evenly spread across the
-    ///     whole range. The golden-ratio-derived starting point is a standard Fibonacci-hashing choice for
-    ///     even spread; nudging by 2 (staying odd) until it is coprime with <paramref name="n" /> guarantees
-    ///     termination in at most a handful of steps for the chunk sizes this solver sees.
+    ///     over <c>[0, n)</c>. A contiguous run of <c>i</c> then lands roughly evenly across the whole range.
+    ///     The golden-ratio-derived starting point is a standard Fibonacci-hashing choice for even spread.
+    ///     The search adds 2 (staying odd) until the stride is coprime with <paramref name="n" />.
+    ///     For the chunk sizes this solver sees, that takes at most a handful of steps.
     /// </summary>
     private static int ChooseStride(int n)
     {
@@ -415,10 +411,10 @@ internal sealed class PhaseChangeSolver
 
     /// <summary>
     ///     One work item per active-air voxel. Each voxel owns its own <see cref="AtmosChunk" /> columns
-    ///     (moles, temperature, heat capacity, pressure), so distinct voxels never write the same slot and
-    ///     no synchronization is needed between workers. <paramref name="stride" /> permutes which voxel a
-    ///     given work-item index maps to (see <see cref="ChooseStride" />) purely for load balancing; every
-    ///     voxel is still visited exactly once, so results are unaffected.
+    ///     (moles, temperature, heat capacity, pressure). Distinct voxels never write the same slot,
+    ///     so workers need no synchronization.
+    ///     <paramref name="stride" /> permutes which voxel a work-item index maps to (see <see cref="ChooseStride" />).
+    ///     This only balances load. Every voxel is still visited exactly once, so results are unaffected.
     /// </summary>
     private readonly struct ProcessVoxelAction(
         AtmosChunk chunk,

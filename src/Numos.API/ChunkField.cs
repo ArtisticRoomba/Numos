@@ -15,20 +15,20 @@ namespace Numos.API;
 /// <remarks>
 ///     <para>
 ///         A field is a typed key, not storage. Each chunk allocates its own array the first time the field is read
-///         through <see cref="AtmosSolverChunk.Get{T}" /> or <see cref="AtmosSimulation.GetChunkField{T}" />, and the
-///         array starts filled with default values. Allocation is lazy so that a field nobody touches adds nothing to
+///         through <see cref="AtmosSolverChunk.Get{T}" /> or <see cref="AtmosSimulation.GetChunkField{T}" />. The
+///         array starts filled with default values. Allocation is lazy, so a field nobody touches adds nothing to
 ///         checkpoints or state hashes.
 ///     </para>
 ///     <para>
 ///         Fields are process-wide. Every simulation, world, and assembly in the process shares one registry, so a
 ///         <see cref="Key" /> registered by one mod is the same field everywhere. Namespace keys (for example
-///         <c>my-mod/fire/exposure</c>) and store fields in <see langword="static readonly" /> members. Each new key
-///         consumes a slot that is never reclaimed, so don't register fields per tick or per simulation.
+///         <c>my-mod/fire/exposure</c>). Store fields in <see langword="static readonly" /> members.
+///         Each new key takes a slot that Numos never reclaims, so do not register fields per tick or per simulation.
 ///     </para>
 ///     <para>
-///         Rollback fields are captured in checkpoints and state hashes by <see cref="Key" />, so the key, element
-///         type, length, and the element type's memory layout are a compatibility contract with saved checkpoints.
-///         Transient fields are discarded on restore and start empty again.
+///         Checkpoints and state hashes capture rollback fields by <see cref="Key" />. The key, element type,
+///         length, and the element type's memory layout are therefore a compatibility contract with saved
+///         checkpoints. Restore discards transient fields, and they start empty again.
 ///     </para>
 /// </remarks>
 /// <example>
@@ -139,7 +139,7 @@ public sealed class ChunkField<T>
     /// <summary>
     ///     Gets a view of this field's array in <paramref name="chunk" />, creating the array on first use.
     /// </summary>
-    /// <remarks>Takes no lock; the caller is responsible for the chunk being safe to touch.</remarks>
+    /// <remarks>Takes no lock. The caller must ensure the chunk is safe to touch.</remarks>
     internal FlatArray<T> View(AtmosChunk chunk)
     {
         return CreateView(chunk.GetOrCreateField(Descriptor), chunk.Dimensions);

@@ -97,7 +97,7 @@ public partial class SimulationViewer
 
     /// <summary>
     ///     Draws a right-aligned menu-bar item for warnings and errors logged while the Messages panel was not on
-    ///     screen. It stays until the panel is shown, since the panel is hidden by default and a failure would
+    ///     screen. It stays until the panel is shown. The panel is hidden by default, so a failure would
     ///     otherwise go unnoticed.
     /// </summary>
     private void RenderUnseenMessagesIndicator()

@@ -10,9 +10,9 @@ namespace Numos.API;
 ///     Owns shared atmospheric time, physics configuration, simulation registration, and sparse topology.
 /// </summary>
 /// <remarks>
-///     Simulations created by one world keep independent chunk storage but may exchange gas and heat through explicit
-///     links. Topology mutations are queued and become visible at the start of the next fixed tick, so a solver always
-///     observes one immutable topology version. Dispose the world to dispose every simulation still registered in it.
+///     Simulations created by one world keep independent chunk storage. They can exchange gas and heat through explicit
+///     links. Topology mutations wait in a queue until the start of the next fixed tick, so a solver always sees one
+///     immutable topology version. Disposing the world disposes every simulation still registered in it.
 /// </remarks>
 /// <example>
 ///     Create simulations through the same world when they need to share time or explicit topology:
@@ -92,9 +92,10 @@ public sealed partial class AtmosWorld : IDisposable
     ///     Gets the epoch that solver dependency injection is current against.
     /// </summary>
     /// <remarks>
-    ///     Advances whenever a service or solver is registered or removed, since either can change what a dependency
-    ///     resolves to. Enabling and disabling don't count: a disabled solver is skipped by injection, so it's already
-    ///     stale when it comes back if anything changed meanwhile. Only touched under <see cref="Gate" />.
+    ///     Advances whenever a service or solver is registered or removed, because either can change what a dependency
+    ///     resolves to. Enabling and disabling do not count. Injection skips a disabled solver, so that solver is
+    ///     already stale when it returns if anything changed meanwhile. Numos only touches this under
+    ///     <see cref="Gate" />.
     /// </remarks>
     internal int SolverDependencyEpoch { get; private set; }
 
@@ -186,8 +187,8 @@ public sealed partial class AtmosWorld : IDisposable
     ///     Gets a monotonic revision that changes whenever a link set or its lifecycle state changes.
     /// </summary>
     /// <remarks>
-    ///     Unlike <see cref="TopologyVersion" />, this revision changes as soon as a mutation is queued,
-    ///     allowing tools to display pending activation and removal without waiting for a tick.
+    ///     Unlike <see cref="TopologyVersion" />, this revision changes as soon as a mutation is queued.
+    ///     Tools can show pending activation and removal without waiting for a tick.
     ///     The value is local to this world and is not part of deterministic simulation state.
     /// </remarks>
     /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
@@ -519,8 +520,8 @@ public sealed partial class AtmosWorld : IDisposable
     /// <param name="flags">The physical interactions permitted through the portal.</param>
     /// <returns>A portal handle that removes the underlying link as one unit.</returns>
     /// <remarks>
-    ///     Equivalent to <see cref="CreateLinks" /> with a single definition, except that the link set is tagged as a
-    ///     portal in snapshots and recordings.
+    ///     Equivalent to <see cref="CreateLinks" /> with a single definition, except that snapshots and recordings
+    ///     tag the link set as a portal.
     /// </remarks>
     /// <exception cref="ArgumentException">
     ///     An endpoint is outside this world, both endpoints identify the same cell or ordinary Cartesian neighbors,
@@ -563,7 +564,7 @@ public sealed partial class AtmosWorld : IDisposable
     /// </param>
     /// <returns>A dock handle that owns every generated edge.</returns>
     /// <remarks>
-    ///     Validation matches <see cref="CreateLinks" />; the link set is tagged as a dock in snapshots and recordings.
+    ///     Validation matches <see cref="CreateLinks" />. Snapshots and recordings tag the link set as a dock.
     /// </remarks>
     /// <exception cref="ArgumentException">
     ///     The surface is empty, or an edge has an endpoint outside this world, connects a cell to itself or to one
@@ -704,13 +705,13 @@ public sealed partial class AtmosWorld : IDisposable
     /// </summary>
     /// <param name="checkpoint">The detached world continuation state to restore.</param>
     /// <remarks>
-    ///     Matching registrations are restored in place so host references and custom solver delegates remain attached.
+    ///     Matching registrations are restored in place, so host references and custom solver delegates stay attached.
     ///     Registrations absent from the checkpoint are disposed. Missing registrations are recreated with their saved
-    ///     identifiers when they use only built-in solvers; Numos cannot recreate a custom solver because its host
-    ///     delegate is not checkpointed. Restore resets the elapsed-time accumulator and rebuilds sparse indexes from
-    ///     authoritative link slots.
+    ///     identifiers when they use only built-in solvers. Numos cannot recreate a custom solver, because the
+    ///     checkpoint does not store its host delegate. Restore resets the elapsed-time accumulator and rebuilds sparse
+    ///     indexes from authoritative link slots.
     ///     <see cref="Services" /> are left untouched. Once the state is in place, every custom
-    ///     <see cref="IAtmosWorldSolver" /> gets <see cref="IAtmosWorldSolver.OnRestored" />; an exception from it
+    ///     <see cref="IAtmosWorldSolver" /> gets <see cref="IAtmosWorldSolver.OnRestored" />. An exception from it
     ///     propagates to this call with the restored state already installed.
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="checkpoint" /> is <see langword="null" />.</exception>
@@ -807,8 +808,8 @@ public sealed partial class AtmosWorld : IDisposable
     /// </summary>
     /// <param name="elapsedSeconds">Elapsed time, in seconds, since the previous update.</param>
     /// <remarks>
-    ///     Fractions of a step are retained. One call processes at most five fixed steps and discards an older excess
-    ///     backlog, matching standalone simulation behavior.
+    ///     Numos keeps fractions of a step. One call processes at most five fixed steps and discards any older backlog,
+    ///     which matches standalone simulation behavior.
     /// </remarks>
     /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
     /// <exception cref="InvalidOperationException">
@@ -825,8 +826,8 @@ public sealed partial class AtmosWorld : IDisposable
             float maximum = AtmosSolverConstants.FixedTimeStep * AtmosSolverConstants.MaximumStepsPerUpdate;
             float accumulator = Math.Min(_accumulator + elapsedSeconds, maximum);
 
-            // TickCore injects too, but by then the accumulator has been spent. Injecting first keeps a missing
-            // dependency from consuming time it never simulated.
+            // TickCore injects too, but by then the accumulator has been spent. Injecting first means a missing
+            // dependency does not consume time that was never simulated.
             if (accumulator >= AtmosSolverConstants.FixedTimeStep)
                 InjectSolverDependencies(false);
 
@@ -999,8 +1000,8 @@ public sealed partial class AtmosWorld : IDisposable
     }
 
     /// <summary>
-    ///     Rejects a grid-only restore while the world is recording or replaying, or when other simulations or explicit
-    ///     links could be left pointing at chunks that no longer exist.
+    ///     Rejects a grid-only restore while the world is recording or replaying. It also rejects the restore when
+    ///     other simulations or explicit links could point at chunks that no longer exist.
     /// </summary>
     internal void EnsureSimulationRestoreAllowed(AtmosSimulation simulation)
     {
@@ -1034,7 +1035,7 @@ public sealed partial class AtmosWorld : IDisposable
 
         try
         {
-            // Before anything changes: a missing dependency abandons the tick with the world as it was, and the next
+            // Before anything changes. A missing dependency abandons the tick with the world as it was. The next
             // tick retries because the failed registration is still stale.
             Solvers.InjectDependencies(false);
 
@@ -1066,7 +1067,7 @@ public sealed partial class AtmosWorld : IDisposable
         }
         finally
         {
-            // Close before releasing the state locks: solver chunk views hold raw chunk references that are only
+            // Close before releasing the state locks. Solver chunk views hold raw chunk references that are only
             // safe while this tick owns every simulation.
             solverScope?.Close();
 
@@ -1102,8 +1103,8 @@ public sealed partial class AtmosWorld : IDisposable
     }
 
     /// <summary>
-    ///     Runs an injection pass outside <see cref="TickCore" />, marked as ticking so injection code can't change
-    ///     services, simulations, or time while the pass is iterating.
+    ///     Runs an injection pass outside <see cref="TickCore" />. The pass is marked as ticking, so injection code
+    ///     cannot change services, simulations, or time while it iterates.
     /// </summary>
     /// <remarks>The caller holds <see cref="Gate" /> and has checked that no tick is running.</remarks>
     private void InjectSolverDependencies(bool force)
@@ -1127,8 +1128,8 @@ public sealed partial class AtmosWorld : IDisposable
 
     internal void SolveExplicitGasTransportStage(AtmosSolverTickScope scope)
     {
-        // Every kernel reaches the same stage barrier before sparse transport runs. This prevents registration
-        // order from deciding whether an endpoint sees pre-transfer or post-transfer state.
+        // Every kernel reaches the same stage barrier before sparse transport runs. Registration order then cannot
+        // decide whether an endpoint sees pre-transfer or post-transfer state.
         SolveExplicitTransport(scope.Simulations, ExplicitTransportCapabilities.Gas);
     }
 
@@ -1380,8 +1381,8 @@ public sealed partial class AtmosWorld : IDisposable
         bool rebuild = _pendingLinkSlots.Any(slotIndex => _linkSlots[slotIndex].State is
             LinkSetState.PendingCreate or LinkSetState.PendingDestroyActive);
 
-        // Compile selectors before changing authoritative link lifecycle state. A host selector may throw; in that
-        // case the pending boundary remains intact and the previous active topology is still usable on a retry.
+        // Compile selectors before changing authoritative link lifecycle state. A host selector can throw. The
+        // pending boundary then stays intact and the previous active topology stays usable on a retry.
         if (rebuild)
             CompileActiveTopology(true);
 
@@ -1612,9 +1613,9 @@ public sealed partial class AtmosWorld : IDisposable
 
     private static void ValidateFlags(ExplicitLinkFlags flags, string parameterName)
     {
-        // Bits outside GasTransport|ThermalTransport are reserved for host-defined capabilities: a link can carry
-        // them so a host-registered solver's AtmosExplicitLinkSelector can pick it out, without engaging Numos'
-        // built-in transport stages, which only ever look at the bits they know about.
+        // Bits outside GasTransport|ThermalTransport are reserved for host-defined capabilities. A link can carry
+        // them so a host solver's AtmosExplicitLinkSelector can pick it out. The built-in transport stages only look
+        // at the bits they know about, so these bits do not engage them.
         if (flags == ExplicitLinkFlags.None)
             throw new ArgumentException("An explicit link must select at least one transport capability.", parameterName);
     }

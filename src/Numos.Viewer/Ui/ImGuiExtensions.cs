@@ -91,14 +91,12 @@ internal static class ImGuiExtensions
         float buttonHeight;
         if (previousItemHeight < frameHeight)
         {
-            // Make the button only as tall as the glyph
-            // so it doesn't make the line taller.
+            // Match the glyph height so the button does not grow the line.
             buttonHeight = glyphSize.Y;
         }
         else
         {
-            // Use frame height so the glyph is
-            // centered on the widget's label.
+            // Use frame height so the glyph centers on the widget's label.
             buttonHeight = MathF.Max(glyphSize.Y, frameHeight);
         }
 

@@ -14,11 +14,11 @@ namespace Numos.CoreSim.Replay;
 /// <remarks>
 ///     <para>
 ///         Numos.Replay.Generators emits <c>WriteOperation</c>/<c>ReadOperation</c> for every concrete
-///         <see cref="AtmosOperation" />. A record's fields are written in primary-constructor order; a field type
-///         that isn't a primitive or quantity alias is written by a <c>Write{TypeName}</c>/<c>Read{TypeName}</c>
+///         <see cref="AtmosOperation" />. A record's fields are written in primary-constructor order. A field type
+///         that is not a primitive or quantity alias needs a <c>Write{TypeName}</c>/<c>Read{TypeName}</c>
 ///         pair declared here (or on <c>AtmosWorldReplayCodec</c> for world operations). An operation that needs
-///         its own layout gets hand-written <c>Write{OperationName}</c>/<c>Read{OperationName}</c> methods here
-///         instead, which the generator calls rather than generating a body.
+///         its own layout gets hand-written <c>Write{OperationName}</c>/<c>Read{OperationName}</c> methods here.
+///         The generator calls those methods instead of generating a body.
 ///     </para>
 ///     <para>
 ///         The bytes are pinned by <c>tests/Numos.Serialization.Tests/ReplayWireFormatGoldenTests.cs</c>.

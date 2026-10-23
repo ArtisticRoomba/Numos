@@ -9,18 +9,20 @@ namespace Numos.API;
 ///     <para>
 ///         Implementations either own detached container storage (<see cref="GasMixture" />) or address a live voxel
 ///         (<see cref="AtmosSimulation.GetVoxelGasMixture(AtmosChunkHandle, ushort)" />). Members never expose the
-///         solver's backing arrays or spans. Every live-voxel operation takes the simulation's state lock, so it
-///         waits for an in-progress tick instead of racing it. This is a common capability surface, not an
-///         extension point: transfer endpoints must be instances created by <see cref="AtmosSimulation" />.
+///         solver's backing arrays or spans.
+///         Every live-voxel operation takes the simulation's state lock, so it waits for an in-progress tick instead
+///         of racing it.
+///         This is a common capability surface, not an extension point. Transfer endpoints must be instances created
+///         by <see cref="AtmosSimulation" />.
 ///     </para>
 ///     <para>
-///         Mutating a live voxel is recorded as an external operation and survives replay. A standalone
-///         <see cref="GasMixture" /> is not simulation state: it is never recorded or checkpointed, so a transfer
-///         between a voxel and a container replays only the voxel's side.
+///         Numos records a live-voxel mutation as an external operation, and it survives replay. A standalone
+///         <see cref="GasMixture" /> is not simulation state. Numos never records or checkpoints it, so replay of a
+///         transfer between a voxel and a container reproduces only the voxel's side.
 ///     </para>
 ///     <para>
-///         A voxel mixture is bound to the chunk generation it was created from. Once that chunk is unregistered,
-///         members throw <see cref="KeyNotFoundException" />; once a new chunk is registered at the same position,
+///         A voxel mixture is bound to the chunk generation it was created from. After that chunk is unregistered,
+///         members throw <see cref="KeyNotFoundException" />. After a new chunk is registered at the same position,
 ///         they throw <see cref="InvalidOperationException" />. Mutations of solid or void voxels also throw
 ///         <see cref="InvalidOperationException" />.
 ///     </para>

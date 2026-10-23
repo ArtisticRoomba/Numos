@@ -1,5 +1,5 @@
 using System.Buffers;
-using Numos.Units;
+using Magnitudo;
 
 namespace Numos.CoreSim;
 
@@ -9,9 +9,8 @@ namespace Numos.CoreSim;
 /// <remarks>
 /// <para>
 ///     If you've worked with old SS14 Atmospherics/SSAir, you are probably familiar with GasMixture and its
-///     fixed-size Moles array. Old Atmos stored gases as Tiles dictionary -> TileAtmosphere -> GasMixture -> Moles,
-///     which wasn't cache-friendly and made iterating over all gases in an area slow because of all the object
-///     lookups.
+///     fixed-size Moles array. Old Atmos stored gases as Tiles dictionary -> TileAtmosphere -> GasMixture -> Moles.
+///     That layout was not cache-friendly, and the object lookups made iterating over all gases in an area slow.
 /// </para>
 /// <para>
 ///     A channel instead keeps one gas's amount for every voxel of a chunk in a single contiguous array, so memory
@@ -29,10 +28,9 @@ internal struct GasChannel
     ///     The amount of this gas in each voxel of the chunk, in moles (mol).
     /// </summary>
     /// <remarks>
-    ///     While this is not marked as nullable, this field
-    ///     can be null when the channel is not initialized via <see cref="Initialize" />. The array is rented from
-    ///     <see cref="ArrayPool{T}.Shared" />, so it can be longer than the chunk's voxel count; only the first
-    ///     voxel-count entries are meaningful.
+    ///     This field is not annotated as nullable, but it is null until <see cref="Initialize" /> runs. The array is
+    ///     rented from <see cref="ArrayPool{T}.Shared" />, so it can be longer than the chunk's voxel count.
+    ///     Only the first voxel-count entries are meaningful.
     /// </remarks>
     [ElementQuantity("amount")]
     public Mole[] Moles;

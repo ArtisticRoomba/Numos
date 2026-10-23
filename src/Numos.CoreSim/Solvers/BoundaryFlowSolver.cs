@@ -31,8 +31,9 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
                 _orderedBatches.Add(batch);
         }
 
-        // Workers preserve ActiveAirIndices order inside each batch. Sorting only the batch headers therefore
-        // produces the same chunk-position and voxel-index order without copying and sorting every event.
+        // Workers preserve ActiveAirIndices order inside each batch.
+        // Sorting only the batch headers therefore gives the same chunk-position and voxel-index order.
+        // Numos does not copy and sort every event.
         _orderedBatches.Sort(CompareBatches);
 
         int batchCount = _orderedBatches.Count;
@@ -40,10 +41,11 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
         {
             PreparePendingBuffers(batchCount);
 
-            // Each source chunk's outgoing transfers are computed in isolation: every write in this phase
-            // lands in the worker's own PendingTransferBuffer, so nothing touches shared or neighbor chunk
-            // state (in particular, no neighbor Wake()) until the reservation pass below runs. That is what
-            // makes it safe to compute every chunk concurrently regardless of chunk-grid topology.
+            // Each source chunk computes its outgoing transfers in isolation.
+            // Every write in this phase lands in the worker's own PendingTransferBuffer.
+            // Nothing touches shared or neighbor chunk state (in particular, no neighbor Wake()) until the
+            // reservation pass below runs.
+            // That makes it safe to compute every chunk concurrently, whatever the chunk-grid topology.
             int workerCount = Math.Max(1, Environment.ProcessorCount);
             bool runParallel = batchCount > 1 && batchCount >= workerCount;
             if (runParallel)
@@ -59,17 +61,17 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
                     ProcessBoundaryChunk(context, _orderedBatches[i], _pendingBuffers[i]);
             }
 
-            // Reserving in canonical source-chunk order keeps this bit-identical to a fully sequential
-            // merge: each source's reserved range within a target's batch lands at the same relative
-            // position a single-threaded append would give it, which is what the resync-on-first-touch
-            // heat-capacity logic in RunInjectionBatch depends on. Each source touches at most itself plus
-            // six neighbors, so this pass is O(batches) rather than O(events) — the per-event work happens
-            // in the parallel scatter below.
+            // Reserving in canonical source-chunk order keeps the result bit-identical to a fully sequential merge.
+            // Each source's reserved range within a target's batch lands at the same relative position a
+            // single-threaded append would give it.
+            // The resync-on-first-touch heat-capacity logic in RunInjectionBatch depends on that position.
+            // Each source touches at most itself plus six neighbors, so this pass is O(batches), not O(events).
+            // The per-event work happens in the parallel scatter below.
             for (int i = 0; i < batchCount; i++)
                 ReserveTransferRanges(_pendingBuffers[i], _injectionBuffer);
 
-            // Every source's writes land in disjoint, already-reserved index ranges of the target batches'
-            // event arrays, so scattering them is safe to run fully in parallel with no locking.
+            // Every source's writes land in disjoint, already-reserved index ranges of the target batches' event arrays.
+            // The scatter is therefore safe to run fully in parallel with no locking.
             if (runParallel)
                 ParallelHelper.For(0, batchCount, new ScatterPendingTransfersAction(_pendingBuffers, _injectionBuffer));
             else
@@ -89,8 +91,8 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
     }
 
     /// <summary>
-    ///     Ensures a worker-exclusive pending-transfer buffer exists for each of this tick's source-chunk
-    ///     batches and resets it for reuse.
+    ///     Ensures a worker-exclusive pending-transfer buffer exists for each of this tick's source-chunk batches.
+    ///     The method also resets each buffer for reuse.
     /// </summary>
     private void PreparePendingBuffers(int batchCount)
     {
@@ -114,14 +116,16 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
 
     /// <summary>
     ///     Reserves one source chunk's exclusive write range within every target batch its precomputed
-    ///     transfers touch, waking any newly discovered sleeping target first. This is the only place
-    ///     neighbor chunk state is touched, and it always runs after every worker's compute phase has
-    ///     finished, strictly before the parallel scatter that actually writes the events.
+    ///     transfers touch. It wakes any newly discovered sleeping target first.
+    ///     This is the only place that touches neighbor chunk state.
+    ///     It always runs after every worker's compute phase has finished, and before the parallel scatter that
+    ///     writes the events.
     /// </summary>
     /// <remarks>
-    ///     A source chunk touches at most itself plus six face neighbors, so this reads the small per-source
-    ///     target summary built for free during <see cref="PendingTransferBuffer.Add" /> instead of visiting
-    ///     every individual event — the reservation itself is O(distinct targets), not O(events).
+    ///     A source chunk touches at most itself plus six face neighbors.
+    ///     The method reads the small per-source target summary built during <see cref="PendingTransferBuffer.Add" />
+    ///     instead of visiting every event.
+    ///     The reservation is O(distinct targets), not O(events).
     /// </remarks>
     private static void ReserveTransferRanges(PendingTransferBuffer pending, InjectionBuffer injectionBuffer)
     {
@@ -137,13 +141,15 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
 
     /// <summary>
     ///     Writes one source chunk's precomputed transfers into the target batch ranges reserved for it by
-    ///     <see cref="ReserveTransferRanges" />. Safe to run concurrently for every source chunk: no two
-    ///     sources ever share a reserved index, even when they target the same chunk.
+    ///     <see cref="ReserveTransferRanges" />.
+    ///     This is safe to run concurrently for every source chunk, because no two sources share a reserved index,
+    ///     even when they target the same chunk.
     /// </summary>
     /// <remarks>
-    ///     Directed transfers to the same target recur across every gas species, so consecutive events tend
-    ///     to alternate between just two targets (the current source and the current neighbor). A two-entry
-    ///     most-recently-used cache turns most per-event target resolution into a reference comparison
+    ///     Directed transfers to the same target recur across every gas species.
+    ///     Consecutive events therefore tend to alternate between two targets: the current source and the current
+    ///     neighbor.
+    ///     A two-entry most-recently-used cache turns most per-event target resolution into a reference comparison
     ///     instead of a linear scan over the source's target summary.
     /// </remarks>
     private static void ScatterPendingTransfers(PendingTransferBuffer pending, InjectionBuffer injectionBuffer)
@@ -201,12 +207,10 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
         if (!context.TryGetChunk(batch.ChunkPosition, out var chunk))
             return;
 
-        // A voxel can appear in this batch multiple times — once per gas
-        // species, once per boundary direction that flowed into/out of it, etc.
-        // InjectCore/InjectGasToVoxel keep TotalHeatCapacity updated incrementally after
-        // every call, so composition only needs to be re-derived from ActiveGases once
-        // per voxel per batch; subsequent events for that voxel can trust the running
-        // total instead of re-summing every active gas from scratch.
+        // A voxel can appear in this batch several times, once per gas species and once per boundary direction.
+        // InjectCore and InjectGasToVoxel update TotalHeatCapacity incrementally after every call.
+        // Composition therefore needs re-deriving from ActiveGases only once per voxel per batch.
+        // Later events for that voxel trust the running total instead of re-summing every active gas.
         batch.ResyncedVoxels.Clear();
 
         for (int index = 0; index < batch.Count; index++)
@@ -241,8 +245,8 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
         if (!context.TryGetChunk(sourcePosition, out var sourceChunk))
             return;
 
-        // Only outflows are handled here, so each directed transfer is counted once. Nothing is mutated
-        // yet: transfers go into the pending buffer and are applied later by RunQueuedInjections.
+        // Only outflows are handled here, so each directed transfer is counted once.
+        // Nothing is mutated yet. Transfers go into the pending buffer, and RunQueuedInjections applies them later.
         var localPosition = sourceChunk.GetXyzInt3(boundaryEvent.LocalVoxelIndex);
         TryFlowToNeighbor(context, sourceChunk, sourcePosition, localPosition + Int3.NegX, Int3.NegX, pending);
         TryFlowToNeighbor(context, sourceChunk, sourcePosition, localPosition + Int3.PosX, Int3.PosX, pending);
@@ -274,14 +278,13 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
         if (sourceRoom == VoxelClassification.RoomSolid || sourceRoom == VoxelClassification.RoomVoid)
             return;
 
-        // We only care about outflows
-        // If this voxel can't have any outflow we skip it
+        // Only outflows matter. Skip this voxel if it cannot have any.
         Mole totalMoles = AtmosSolverMath.GetTotalMoles(sourceChunk, sourceIndex);
         if (totalMoles <= 0f)
             return;
 
-        // Same calculation as advection solver
-        // TODO make sure this and advection share some code
+        // Same calculation as the advection solver.
+        // TODO: share code with the advection solver.
         Pascal sourcePressure = sourceChunk.TotalPressure[sourceIndex];
         bool isVoid = neighborRoom == VoxelClassification.RoomVoid;
         Pascal neighborPressure = isVoid ? 0f : neighborChunk.TotalPressure[neighborIndex];
@@ -307,8 +310,7 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
         ushort sourceIndex, AtmosChunk neighborChunk, ushort neighborIndex, bool isVoid,
         Mole totalMoles, Pascal bulkPressureTransfer, PendingTransferBuffer pending)
     {
-        // Very similar to advection solver
-        // See there for docs on the maths
+        // Very similar to the advection solver. See there for the math.
         var config = context.TickConfig;
         Kelvin sourceTemperature = config.GetValidatedTemp(sourceChunk.Temperature[sourceIndex]);
 
@@ -350,18 +352,19 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
             if (isVoid)
                 continue;
 
-            // Waking the neighbor is deferred to the sequential reservation pass in Solve(): this method
-            // runs concurrently with other source chunks' compute passes, and neighborChunk may be a shared
-            // target of more than one of them (e.g. two chunks on opposite faces of a third chunk), so
-            // reading or writing its IsAwake/ActiveAirIndices state here would race.
+            // Waking the neighbor waits for the sequential reservation pass in Solve().
+            // This method runs concurrently with other source chunks' compute passes.
+            // neighborChunk can be a shared target of more than one of them, for example two chunks on opposite
+            // faces of a third chunk.
+            // Reading or writing its IsAwake and ActiveAirIndices state here would race.
             QueuePendingTransfer(pending, neighborChunk, neighborIndex, gasId, molesToMove, sourceTemperature);
         }
 
         if (!movedGas)
             return;
 
-        // Intra-chunk sleep detection cannot see cross-chunk gradients. A boundary transfer therefore keeps
-        // its source eligible for the next tick, just as injection keeps the target awake.
+        // Intra-chunk sleep detection cannot see cross-chunk gradients.
+        // A boundary transfer therefore keeps its source eligible for the next tick, as injection keeps the target awake.
         sourceChunk.IsAwake = true;
         sourceChunk.SleepTimer = 0;
         sourceChunk.MarkChanged();
@@ -371,8 +374,9 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
     ///     Reads one gas at a voxel by id, treating a missing channel as zero moles.
     /// </summary>
     /// <remarks>
-    ///     Used on the neighbor chunk, whose channel order need not match the source's. Runs during the parallel
-    ///     compute pass, which is safe only because nothing allocates channels until the injections are applied.
+    ///     Used on the neighbor chunk, whose channel order need not match the source's.
+    ///     Runs during the parallel compute pass.
+    ///     That is safe only because nothing allocates channels until the injections are applied.
     /// </remarks>
     private static Mole GetGasMoles(AtmosChunk chunk, ushort localVoxelIndex, int gasId)
     {
@@ -388,10 +392,11 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
     }
 
     /// <summary>
-    ///     Local injection buffer for boundary advection. Batch slots and per-source ranges are reserved
-    ///     sequentially in <see cref="ReserveTransferRanges" />, then every source's transfers are written
-    ///     into its reserved range in parallel by <see cref="ScatterPendingTransfers" />, and finally applied
-    ///     in a separate parallel pass by <see cref="RunQueuedInjections" />.
+    ///     Local injection buffer for boundary advection.
+    ///     <see cref="ReserveTransferRanges" /> reserves batch slots and per-source ranges sequentially.
+    ///     <see cref="ScatterPendingTransfers" /> then writes every source's transfers into its reserved range in
+    ///     parallel.
+    ///     A separate parallel pass in <see cref="RunQueuedInjections" /> applies them.
     /// </summary>
     private sealed class InjectionBuffer
     {
@@ -399,14 +404,14 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
 
         /// <summary>
         ///     Maps <see cref="AtmosChunk.DenseId" /> to this tick's batch index for that chunk, or -1 if the
-        ///     chunk has no batch yet. Indexed by dense id rather than a dictionary keyed on grid position so
-        ///     the lookup is a plain array read.
+        ///     chunk has no batch yet.
+        ///     The index is the dense id, not a dictionary keyed on grid position, so the lookup is a plain array read.
         /// </summary>
         private int[] _batchIndexByChunkDenseId = [];
 
         /// <summary>
-        ///     The chunk each <see cref="_batchIndexByChunkDenseId" /> slot was last resolved for. Since
-        ///     <see cref="AtmosChunk.DenseId" /> is recycled, a slot's batch index is only trusted when this
+        ///     The chunk each <see cref="_batchIndexByChunkDenseId" /> slot was last resolved for.
+        ///     <see cref="AtmosChunk.DenseId" /> is recycled, so a slot's batch index is trusted only when this
         ///     still matches the chunk being looked up.
         /// </summary>
         private AtmosChunk?[] _ownerByChunkDenseId = [];
@@ -416,9 +421,10 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
         internal InjectionBatch this[int index] => _batches[index];
 
         /// <summary>
-        ///     Resolves the batch index for a chunk, creating it and waking the chunk if this is the first
-        ///     transfer touching it this tick. Called once per distinct target per source chunk from the
-        ///     single-threaded reservation pass, never from the parallel scatter that follows it.
+        ///     Resolves the batch index for a chunk. The first transfer that touches the chunk this tick creates the
+        ///     batch and wakes the chunk.
+        ///     The single-threaded reservation pass calls this once per distinct target per source chunk.
+        ///     The parallel scatter that follows never calls it.
         /// </summary>
         internal int GetOrCreateBatchIndex(AtmosChunk chunk)
         {
@@ -449,11 +455,11 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
 
         /// <summary>
         ///     Reserves <paramref name="count" /> consecutive event slots at the end of a batch's array for
-        ///     one source chunk's exclusive use, growing the array as needed, and returns where that range
-        ///     starts. Must be called sequentially — different sources' ranges are reserved back-to-back in
-        ///     canonical source order so their relative order matches a fully sequential merge — but the
-        ///     writes into those ranges happen later, in parallel, once every range across every source has
-        ///     been reserved.
+        ///     one source chunk's exclusive use, and returns where that range starts.
+        ///     The method grows the array as needed.
+        ///     Call it sequentially. Different sources' ranges are reserved back-to-back in canonical source order,
+        ///     so their relative order matches a fully sequential merge.
+        ///     The writes into those ranges happen later, in parallel, once every source has reserved its ranges.
         /// </summary>
         internal int ReserveRange(int batchIndex, int count)
         {
@@ -465,8 +471,9 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
         }
 
         /// <summary>
-        ///     Writes one event into a batch at a previously reserved index. Safe to call concurrently for
-        ///     different source chunks: reserved ranges never overlap, even for the same target batch.
+        ///     Writes one event into a batch at a previously reserved index.
+        ///     This is safe to call concurrently for different source chunks, because reserved ranges never overlap,
+        ///     even for the same target batch.
         /// </summary>
         internal void WriteEvent(int batchIndex, int index, InjectionEvent injection)
         {
@@ -485,8 +492,8 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
         }
 
         /// <summary>
-        ///     Grows the dense-id lookup tables to cover a chunk id, filling new slots with the
-        ///     "no batch yet" sentinel and no owner.
+        ///     Grows the dense-id lookup tables to cover a chunk id.
+        ///     New slots get the "no batch yet" sentinel and no owner.
         /// </summary>
         private void EnsureCapacityFor(int denseId)
         {
@@ -528,8 +535,9 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
     }
 
     /// <summary>
-    ///     One computed mole/energy transfer destined for a target chunk, produced by the boundary-flow
-    ///     compute phase and scattered into the target's injection batch by <see cref="ScatterPendingTransfers" />.
+    ///     One computed mole/energy transfer destined for a target chunk.
+    ///     The boundary-flow compute phase produces it, and <see cref="ScatterPendingTransfers" /> scatters it into
+    ///     the target's injection batch.
     /// </summary>
     private readonly record struct PendingTransferEvent(AtmosChunk TargetChunk, InjectionEvent Injection);
 
@@ -538,27 +546,29 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
     /// </summary>
     /// <remarks>
     ///     Nothing outside the owning worker reads or writes this buffer until the reservation pass visits it
-    ///     after every worker's compute phase has finished, so it needs no synchronization during compute.
+    ///     after every worker's compute phase has finished.
+    ///     The buffer therefore needs no synchronization during compute.
     /// </remarks>
     private sealed class PendingTransferBuffer
     {
         /// <summary>
-        ///     A source chunk touches at most itself plus its six face neighbors — the neighbor at each of
-        ///     the six grid directions is fixed by the source's own position, not by which voxel within it
-        ///     is flowing, so this bound holds regardless of how many boundary voxels the chunk has.
+        ///     A source chunk touches at most itself plus its six face neighbors.
+        ///     The source's own position fixes the neighbor in each of the six grid directions, not the flowing voxel.
+        ///     The bound therefore holds for any number of boundary voxels.
         /// </summary>
         private const int MaxDistinctTargets = 7;
 
         /// <summary>
-        ///     Per-summary-slot batch index, resolved once by the sequential reservation pass and then read
-        ///     repeatedly by the parallel scatter pass — never written concurrently with a read.
+        ///     Per-summary-slot batch index.
+        ///     The sequential reservation pass resolves it once, and the parallel scatter pass reads it repeatedly.
+        ///     No write ever runs concurrently with a read.
         /// </summary>
         private readonly int[] _summaryBatchIndex = new int[MaxDistinctTargets];
 
         /// <summary>
-        ///     Per-summary-slot event count while <see cref="Add" /> is accumulating; repurposed by
-        ///     <see cref="PrepareScatter" /> as a write cursor into the target batch's reserved range once
-        ///     that range exists.
+        ///     Per-summary-slot event count while <see cref="Add" /> is accumulating.
+        ///     <see cref="PrepareScatter" /> repurposes it as a write cursor into the target batch's reserved range
+        ///     once that range exists.
         /// </summary>
         private readonly int[] _summaryCursor = new int[MaxDistinctTargets];
 
@@ -578,9 +588,9 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
 
             _events[Count++] = item;
 
-            // Tally a running per-target count alongside every event instead of scanning for it later: a
-            // source touches at most MaxDistinctTargets chunks, so this linear scan stays cheap regardless
-            // of how many events land in it.
+            // Tally a running per-target count with every event instead of scanning for it later.
+            // A source touches at most MaxDistinctTargets chunks, so this linear scan stays cheap
+            // however many events land in it.
             for (int slot = 0; slot < DistinctTargetCount; slot++)
             {
                 if (ReferenceEquals(_summaryTargets[slot], item.TargetChunk))
@@ -606,8 +616,8 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
         }
 
         /// <summary>
-        ///     Records where this source's exclusive range starts within a target batch, converting that
-        ///     summary slot from an accumulated count into a scatter write cursor.
+        ///     Records where this source's exclusive range starts within a target batch.
+        ///     This converts that summary slot from an accumulated count into a scatter write cursor.
         /// </summary>
         internal void PrepareScatter(int slot, int batchIndex, int rangeStart)
         {
@@ -621,8 +631,8 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
         }
 
         /// <summary>
-        ///     Returns the next free index in this source's reserved range for a summary slot's target, and
-        ///     advances the cursor past it.
+        ///     Returns the next free index in this source's reserved range for a summary slot's target.
+        ///     The method advances the cursor past it.
         /// </summary>
         internal int TakeScatterCursor(int slot)
         {
@@ -630,8 +640,9 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
         }
 
         /// <summary>
-        ///     Finds the summary slot for a target chunk. Every event's target was recorded in the summary by
-        ///     <see cref="Add" />, so this always succeeds for a target that actually appears in this buffer.
+        ///     Finds the summary slot for a target chunk.
+        ///     <see cref="Add" /> recorded every event's target in the summary, so this always succeeds for a target
+        ///     that appears in this buffer.
         /// </summary>
         internal int FindSummarySlot(AtmosChunk target)
         {

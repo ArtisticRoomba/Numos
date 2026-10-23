@@ -11,9 +11,9 @@ namespace Numos.CoreSim.Solvers;
 ///     Solves intra-chunk pressure advection and per-species diffusion in ordered parallel phases.
 /// </summary>
 /// <remarks>
-///     Bulk advection is calculated and applied before diffusion. The separation prevents either
-///     pass from observing partially applied work from the other, although a gas may consequently
-///     move once through bulk flow and once through diffusion during the same tick.
+///     Bulk advection is calculated and applied before diffusion.
+///     The separation stops either pass from observing partially applied work from the other.
+///     A gas can therefore move once through bulk flow and once through diffusion in the same tick.
 /// </remarks>
 internal sealed class AdvectionSolver : IAtmosSolverStage
 {
@@ -29,10 +29,10 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
     /// <remarks>
     ///     A voxel index is <c>x + y*W + z*W*H</c>, so the neighbor offsets sort as
     ///     -W*H (NegZ) &lt; -W (NegY) &lt; -1 (NegX) &lt; 0 &lt; +1 (PosX) &lt; +W (PosY) &lt; +W*H (PosZ).
-    ///     Degenerate dimensions cannot produce a tie: a chunk one voxel wide has no in-bounds X
-    ///     neighbors at all, so the colliding slots are simply absent. The delta gathers walk sources in
-    ///     this order because it is the order the per-gas scatter they replaced accumulated in, and
-    ///     changing it would change floating-point rounding and therefore deterministic replay state.
+    ///     Degenerate dimensions cannot produce a tie. A chunk one voxel wide has no in-bounds X
+    ///     neighbors, so the colliding slots are absent.
+    ///     The delta gathers walk sources in this order because the per-gas scatter they replaced accumulated in it.
+    ///     Changing the order changes floating-point rounding and therefore deterministic replay state.
     /// </remarks>
     private readonly static int[] AscendingSourceSlots = [4, 2, 0, SelfSourceSlot, 1, 3, 5];
 
@@ -40,9 +40,9 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
     ///     Neighbor offsets indexed by direction slot.
     /// </summary>
     /// <remarks>
-    ///     <see cref="AscendingSourceSlots" /> and every per-direction accumulation depend on this exact
-    ///     order, so the solver keeps its own copy rather than sharing <see cref="Int3.CardinalOffsets" />,
-    ///     which uses a different order and is publicly writable.
+    ///     <see cref="AscendingSourceSlots" /> and every per-direction accumulation depend on this exact order.
+    ///     The solver keeps its own copy instead of sharing <see cref="Int3.CardinalOffsets" />.
+    ///     That array uses a different order and is publicly writable.
     /// </remarks>
     private readonly static Int3[] NeighborDirections =
     [
@@ -76,16 +76,19 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
     ///     <para>
     ///         With enough chunks to occupy the worker pool, each worker owns a complete chunk solve.
     ///         Smaller workloads split the active voxels into tiles and step them through the same
-    ///         phases behind barriers. Every phase is tile-major: a voxel's scratch state is produced
-    ///         and consumed by the tile that owns it, including the bulk and diffusion delta gathers.
+    ///         phases behind barriers.
+    ///         Every phase is tile-major. The tile that owns a voxel produces and consumes its scratch state,
+    ///         including the bulk and diffusion delta gathers.
     ///     </para>
     ///     <para>
-    ///         Each barrier guards a real cross-tile read-after-write, so none of them can be
-    ///         dropped: conductance needs the neighbor's refreshed pressure, the incident reduction needs
-    ///         the neighbor's edge conductance, bulk flow needs the neighbor's incident conductance, the
-    ///         bulk gather needs the neighbor's outgoing fractions, and the diffusion gather needs the
-    ///         neighbor's post-bulk moles and temperature. Both schedules call the same phase methods in
-    ///         the same order, so a chunk solved whole and a chunk solved in tiles produce identical state.
+    ///         Each barrier guards a real cross-tile read-after-write, so none can be dropped.
+    ///         Conductance needs the neighbor's refreshed pressure.
+    ///         The incident reduction needs the neighbor's edge conductance.
+    ///         Bulk flow needs the neighbor's incident conductance.
+    ///         The bulk gather needs the neighbor's outgoing fractions.
+    ///         The diffusion gather needs the neighbor's post-bulk moles and temperature.
+    ///         Both schedules call the same phase methods in the same order.
+    ///         A chunk solved whole and a chunk solved in tiles therefore produce identical state.
     ///     </para>
     /// </remarks>
     public void Solve(AtmosSolverExecutionContext context)
@@ -112,8 +115,8 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
 
                 if (chunk.ActiveGasCount == 0)
                 {
-                    // An awake gasless chunk has no transfer work, but its sleep timer must still
-                    // advance on every tick just as it does after a normal bulk-flow pass.
+                    // An awake gasless chunk has no transfer work.
+                    // Its sleep timer must still advance every tick, as it does after a normal bulk-flow pass.
                     UpdateSleepState(chunk, context.TickConfig, 0f);
                     continue;
                 }
@@ -132,9 +135,9 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
             if (workspaceCount == 0)
                 return;
 
-            // Whole chunks already fill the worker pool here. Keeping each chunk on one worker
-            // avoids global barriers and shortens scratch-buffer lifetimes without changing the
-            // per-chunk operation order used by the tiled schedule below.
+            // Whole chunks already fill the worker pool here.
+            // Keeping each chunk on one worker avoids global barriers and shortens scratch-buffer lifetimes.
+            // The per-chunk operation order stays the same as in the tiled schedule below.
             int workerCount = Math.Max(1, Environment.ProcessorCount);
             if (workspaceCount > 1 && workspaceCount >= workerCount)
             {
@@ -224,15 +227,16 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
     /// <param name="context">The complete pressure field and world topology for this tick.</param>
     /// <remarks>
     ///     <para>
-    ///         Classification and removal are separate passes. This keeps the result independent of chunk
-    ///         and voxel traversal order, because every neighbor comparison observes the same pressure
-    ///         field.
+    ///         Classification and removal are separate passes.
+    ///         Every neighbor comparison observes the same pressure field.
+    ///         The result is therefore independent of chunk and voxel traversal order.
     ///     </para>
     ///     <para>
-    ///         Both passes are tiled the same way the main schedule is, so a single dense awake chunk
-    ///         does not pin this to one worker. Tiling is safe precisely because of the split above:
-    ///         classification only writes its own voxel's <c>IsVacuum</c> from a pressure field nothing
-    ///         is mutating, and removal only reads and writes its own voxel.
+    ///         Both passes are tiled like the main schedule, so a single dense awake chunk does not pin
+    ///         this to one worker.
+    ///         The split above makes tiling safe.
+    ///         Classification writes only its own voxel's <c>IsVacuum</c> from a pressure field that nothing mutates.
+    ///         Removal reads and writes only its own voxel.
     ///     </para>
     /// </remarks>
     private static void ApplyVacuumThreshold(AtmosSolverExecutionContext context)
@@ -255,9 +259,10 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
         if (awakeChunkCount == 0)
             return;
 
-        // Tiling matters when a few large chunks are awake: one work item per chunk would leave a
-        // single dense chunk on one worker. Once the awake chunks already fill the pool, a tile the
-        // size of the whole workload degenerates to one item per chunk, which is enough.
+        // Tiling matters when a few large chunks are awake. One work item per chunk would leave a
+        // single dense chunk on one worker.
+        // Once the awake chunks fill the pool, a tile the size of the whole workload degenerates to one item per chunk.
+        // That is enough.
         int tileSize = awakeChunkCount >= workerCount
             ? Math.Max(1, totalActiveAirCount)
             : Math.Max(1, DivideRoundUp(totalActiveAirCount, workerCount));
@@ -510,8 +515,8 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
             Span<Mole> totalMoles = workspace.TotalMoles!.AsSpan(start, length);
             totalMoles.Clear();
 
-            // Keep gas-channel order and each voxel's addition order. A horizontal reduction
-            // would change floating-point rounding and therefore deterministic replay state.
+            // Keep gas-channel order and each voxel's addition order.
+            // A horizontal reduction would change floating-point rounding and therefore deterministic replay state.
             for (int gas = 0; gas < chunk.ActiveGasCount; gas++)
                 TensorPrimitives.Add<float>(totalMoles, chunk.ActiveGases[gas].Moles.AsSpan(start, length), totalMoles);
 
@@ -543,8 +548,8 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
             var position = chunk.GetXyzInt3(voxelIndex);
             workspace.BoundaryEligible![activeIndex] = IsBoundary(chunk, position);
 
-            // Voxel-indexed: a diffusion gather needs a neighboring source's neighbor count and
-            // only ever knows that neighbor's voxel index.
+            // Voxel-indexed. A diffusion gather needs a neighboring source's neighbor count
+            // and knows that neighbor only by voxel index.
             workspace.NeighborCounts![voxelIndex] = ResolveNeighbors(
                 chunk,
                 position,
@@ -763,9 +768,9 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
     /// <param name="workItem">The active-air range owned by this invocation.</param>
     /// <param name="config">The immutable configuration snapshot for the tick.</param>
     /// <remarks>
-    ///     This phase reads the tick's pressure snapshot and records fractions without mutating gas
-    ///     channels. Source and neighbor conductance scaling keeps simultaneous transfers bounded
-    ///     and avoids checkerboard instability at aggressive bulk-flow coefficients.
+    ///     This phase reads the tick's pressure snapshot and records fractions without mutating gas channels.
+    ///     Source and neighbor conductance scaling bounds simultaneous transfers.
+    ///     It also avoids checkerboard instability at aggressive bulk-flow coefficients.
     /// </remarks>
     private static void ComputeBulkFlow(
         ref ChunkWorkspace workspace,
@@ -779,8 +784,8 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
             ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
             int slotBase = activeIndex * NeighborDirections.Length;
 
-            // Fractions are voxel-indexed: the bulk gather reads a neighbor's outgoing fraction
-            // toward this voxel and only knows that neighbor by voxel index.
+            // Fractions are voxel-indexed. The bulk gather reads a neighbor's outgoing fraction
+            // toward this voxel and knows that neighbor only by voxel index.
             int fractionBase = voxelIndex * NeighborDirections.Length;
             bool isBoundary = workspace.BoundaryEligible![activeIndex];
             Array.Clear(workspace.BulkMoleFractions!, fractionBase, NeighborDirections.Length);
@@ -853,16 +858,17 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
     /// <param name="config">The immutable configuration snapshot for the tick.</param>
     /// <remarks>
     ///     <para>
-    ///         A destination is credited by each air neighbor that flows toward it and debited once per
-    ///         outgoing direction of its own, void directions included, since transfers into void remove
-    ///         both gas and its thermal energy. Building the gas-independent term list once per voxel
-    ///         leaves the per-gas loop reading nothing but that gas's mole channel.
+    ///         Each air neighbor that flows toward a destination credits it.
+    ///         The destination is debited once per outgoing direction of its own, void directions included,
+    ///         because transfers into void remove both gas and its thermal energy.
+    ///         The gas-independent term list is built once per voxel.
+    ///         The per-gas loop then reads only that gas's mole channel.
     ///     </para>
     ///     <para>
-    ///         Terms are ordered by ascending source voxel index (<see cref="AscendingSourceSlots" />),
-    ///         and each source's own terms stay in direction order, which is the exact sequence the
-    ///         earlier per-gas scatter accumulated. Reordering them changes floating-point rounding and
-    ///         therefore deterministic replay state.
+    ///         Terms are ordered by ascending source voxel index (<see cref="AscendingSourceSlots" />).
+    ///         Each source's own terms stay in direction order.
+    ///         That is the exact sequence the earlier per-gas scatter accumulated.
+    ///         Reordering them changes floating-point rounding and therefore deterministic replay state.
     ///     </para>
     /// </remarks>
     private static void GatherBulkDeltas(
@@ -903,8 +909,8 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
                 if (workspace.NeighborKinds![slotBase + direction] != NeighborKind.Air)
                     continue;
 
-                // Neighbor relations are symmetric, so this voxel sits in the neighbor's opposite
-                // slot and a positive fraction there is gas the neighbor sends here.
+                // Neighbor relations are symmetric, so this voxel sits in the neighbor's opposite slot.
+                // A positive fraction there is gas the neighbor sends here.
                 ushort neighborIndex = workspace.NeighborIndices![slotBase + direction];
                 Scalar inboundFraction = workspace.BulkMoleFractions![
                     neighborIndex * NeighborDirections.Length + OppositeNeighborDirections[direction]];
@@ -971,8 +977,9 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
     /// <param name="workItem">The destination active-air range owned by this invocation.</param>
     /// <param name="config">The immutable configuration snapshot for the tick.</param>
     /// <remarks>
-    ///     Each invocation exclusively owns its destination voxels. Gas channels are visited in active
-    ///     channel order so mole totals and heat capacity retain deterministic rounding.
+    ///     Each invocation exclusively owns its destination voxels.
+    ///     Gas channels are visited in active channel order, so mole totals and heat capacity keep deterministic
+    ///     rounding.
     /// </remarks>
     private static void ApplyDeltas(
         ref ChunkWorkspace workspace,
@@ -994,8 +1001,8 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
             if (energyDelta == 0d && !anyMoleChange)
                 continue;
 
-            // Reconstruct temperature from the voxel's energy before transfer plus the net energy
-            // carried by moved moles, divided by the heat capacity of the updated mixture.
+            // Temperature is the voxel's energy before transfer plus the net energy carried by moved moles,
+            // divided by the heat capacity of the updated mixture.
             Joule64 oldEnergy =
                 (Kelvin64)config.GetValidatedTemp(chunk.Temperature[voxelIndex]) *
                 chunk.TotalHeatCapacity[voxelIndex];
@@ -1056,15 +1063,16 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
     /// <param name="config">The immutable configuration snapshot for the tick.</param>
     /// <remarks>
     ///     <para>
-    ///         Everything a voxel's transfer depends on -- post-bulk moles, pressure, and temperature,
-    ///         its neighbor count, and the environment factor computed here -- is local to that voxel and
-    ///         final by the time this runs, since the same invocation just applied the bulk deltas. That
-    ///         is what lets the amount be computed once instead of once per reader: the diffusion gather
-    ///         would otherwise redo it at each of the seven destinations that read a source.
+    ///         A voxel's transfer depends on its post-bulk moles, pressure, and temperature, its neighbor count,
+    ///         and the environment factor computed here.
+    ///         All of these are local to that voxel.
+    ///         They are final when this runs, because the same invocation just applied the bulk deltas.
+    ///         The amount can therefore be computed once instead of once per reader.
+    ///         The diffusion gather would otherwise redo it at each of the seven destinations that read a source.
     ///     </para>
     ///     <para>
-    ///         An ineligible source stores zero, which the gather treats as "did not diffuse". The
-    ///         environment factor scales with temperature, inverse pressure, and voxel edge length.
+    ///         An ineligible source stores zero, which the gather treats as "did not diffuse".
+    ///         The environment factor scales with temperature, inverse pressure, and voxel edge length.
     ///     </para>
     /// </remarks>
     private static void PrepareDiffusion(
@@ -1081,8 +1089,8 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
         {
             ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
 
-            // Voxel-indexed for the same reason as NeighborCounts: the gather reads a neighboring
-            // source's transfers and knows that neighbor only by voxel index.
+            // Voxel-indexed for the same reason as NeighborCounts.
+            // The gather reads a neighboring source's transfers and knows that neighbor only by voxel index.
             int transferBase = voxelIndex * gasCount;
             Pascal pressure = chunk.TotalPressure[voxelIndex];
             if (pressure <= 0f || workspace.NeighborCounts![voxelIndex] == 0)
@@ -1110,8 +1118,8 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
                 float diffusionConstant = referenceDiffusivity * environmentFactor;
                 Mole molesDiffused = diffusionConstant * sourceMoles * AtmosSolverConstants.FixedTimeStep;
 
-                // A voxel can lose at most one seventh of a gas to each of its six neighbors plus
-                // itself, so cap the per-neighbor amount rather than let the debit exceed inventory.
+                // A voxel can lose at most one seventh of a gas to each of its six neighbors plus itself.
+                // Cap the per-neighbor amount so the debit cannot exceed inventory.
                 if (molesDiffused * 7 > sourceMoles)
                     molesDiffused = sourceMoles / 7;
 
@@ -1128,21 +1136,22 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
     /// <param name="config">The immutable configuration snapshot for the tick.</param>
     /// <remarks>
     ///     <para>
-    ///         A destination receives one deposit from each air neighbor and pays its own transfer once
-    ///         per non-solid neighbor, void included: void takes gas out of the chunk but never receives
-    ///         any. Deposits below <see cref="AtmosSolverConstants.MinimumTrackedMoles" /> into a
-    ///         destination that would stay below it are suppressed, which is why the self debit is partly
-    ///         refunded here rather than being computed from a smaller neighbor count.
+    ///         A destination receives one deposit from each air neighbor.
+    ///         It pays its own transfer once per non-solid neighbor, void included.
+    ///         Void takes gas out of the chunk but never receives any.
+    ///         Deposits below <see cref="AtmosSolverConstants.MinimumTrackedMoles" /> into a destination that would
+    ///         stay below it are suppressed.
+    ///         The self debit is therefore partly refunded here, not computed from a smaller neighbor count.
     ///     </para>
     ///     <para>
-    ///         The amounts themselves come from <see cref="PrepareDiffusion" />; this phase only sums
-    ///         them, because a source is read by up to seven destinations and recomputing its transfer at
-    ///         each one was measurably more expensive than the buffer it saves.
+    ///         The amounts come from <see cref="PrepareDiffusion" />. This phase only sums them.
+    ///         Up to seven destinations read a source.
+    ///         Recomputing its transfer at each one measurably cost more than the buffer it saves.
     ///     </para>
     ///     <para>
-    ///         Sources run in ascending voxel index (<see cref="AscendingSourceSlots" />), matching the
-    ///         active-index order the earlier per-gas scatter used, so the accumulation reproduces its
-    ///         floating-point rounding exactly.
+    ///         Sources run in ascending voxel index (<see cref="AscendingSourceSlots" />).
+    ///         This matches the active-index order of the earlier per-gas scatter.
+    ///         The accumulation therefore reproduces its floating-point rounding exactly.
     ///     </para>
     /// </remarks>
     private static void GatherDiffusionDeltas(
@@ -1210,11 +1219,11 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
                     var source = sources[index];
                     Mole molesDiffused = workspace.DiffusionTransfers![source.Voxel * gasCount + gas];
 
-                    // Zero stands in for the eligibility tests PrepareDiffusion already ran, and
-                    // skipping it is exact even for a source that really did diffuse nothing: every
-                    // term here is non-negative and both accumulators start at +0, so neither can
-                    // hold -0, and x - 0 and x + 0 are then bit-for-bit x. NaN is not zero and still
-                    // propagates.
+                    // Zero stands in for the eligibility tests PrepareDiffusion already ran.
+                    // Skipping it is exact even for a source that really did diffuse nothing.
+                    // Every term here is non-negative and both accumulators start at +0, so neither can hold -0.
+                    // x - 0 and x + 0 are then bit-for-bit x.
+                    // NaN is not zero and still propagates.
                     if (molesDiffused == 0f)
                         continue;
 
@@ -1237,8 +1246,8 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
                     moleDelta -= molesDiffused * validCount;
                     energyDelta -= energyTransferred * validCount;
 
-                    // Refunds are the rare case, so the loop-invariant half of the suppression test
-                    // guards the loop instead of being re-evaluated inside it.
+                    // Refunds are rare.
+                    // The loop-invariant half of the suppression test guards the loop instead of running inside it.
                     if (molesDiffused < AtmosSolverConstants.MinimumTrackedMoles)
                     {
                         for (int outgoing = 0; outgoing < outgoingCount; outgoing++)
@@ -1324,8 +1333,9 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
     /// <param name="chunk">The chunk whose derived thermodynamic state will be rebuilt.</param>
     /// <param name="config">The immutable configuration snapshot used for gas properties and pressure.</param>
     /// <remarks>
-    ///     Gas channels are accumulated in their existing order. Changing the reduction order changes
-    ///     floating-point rounding and can break deterministic replay compatibility.
+    ///     Gas channels are accumulated in their existing order.
+    ///     Changing the reduction order changes floating-point rounding and can break deterministic replay
+    ///     compatibility.
     /// </remarks>
     internal static void RefreshPressureAndHeatCapacity(AtmosChunk chunk, AtmosSolverConfigSnapshot config)
     {
@@ -1349,8 +1359,8 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
                 Span<Mole> scratch = buffer.AsSpan(0, length);
                 scratch.Clear();
 
-                // Keep gas-channel order and each voxel's addition order. A horizontal reduction
-                // would change floating-point rounding and therefore deterministic replay state.
+                // Keep gas-channel order and each voxel's addition order.
+                // A horizontal reduction would change floating-point rounding and therefore deterministic replay state.
                 for (int gas = 0; gas < chunk.ActiveGasCount; gas++)
                     TensorPrimitives.Add<float>(scratch, chunk.ActiveGases[gas].Moles.AsSpan(start, length), scratch);
 
@@ -1369,7 +1379,7 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
 
                     // MaxNumber preserves the positive-moles guard for negative and NaN values.
                     TensorPrimitives.MaxNumber(chunk.ActiveGases[gas].Moles.AsSpan(start, length), 0f, scratch);
-                    // MultiplyAdd deliberately retains separate multiply/add rounding instead of FMA rounding.
+                    // MultiplyAdd keeps separate multiply and add rounding, not FMA rounding.
                     TensorPrimitives.MultiplyAdd<float>(scratch, molarHeatCapacity, heatCapacity, heatCapacity);
                 }
             }
@@ -1400,8 +1410,8 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
     ///     Identifies one contiguous range of an awake chunk's ordered active-air index list.
     /// </summary>
     /// <remarks>
-    ///     The vacuum pass covers every awake chunk in the tick, including ones with no gases that never
-    ///     got a workspace, so it indexes chunks directly rather than reusing <see cref="VoxelWorkItem" />.
+    ///     The vacuum pass covers every awake chunk in the tick, including gasless ones that never got a workspace.
+    ///     It therefore indexes chunks directly instead of reusing <see cref="VoxelWorkItem" />.
     /// </remarks>
     private readonly record struct VacuumWorkItem(int ChunkIndex, int Start, int Length);
 
@@ -1472,14 +1482,15 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
     /// </summary>
     /// <remarks>
     ///     <para>
-    ///         Every phase partitions destination voxels, so no two workers ever write the same scratch
-    ///         element. The workspace stays alive across phase barriers so resolved geometry and derived
-    ///         values can be reused.
+    ///         Every phase partitions destination voxels, so no two workers write the same scratch element.
+    ///         The workspace stays alive across phase barriers, so later phases reuse resolved geometry and
+    ///         derived values.
     ///     </para>
     ///     <para>
-    ///         Buffers a voxel only ever reads for itself stay active-indexed, while anything a gather
-    ///         reads about a <em>neighboring</em> voxel is voxel-indexed, because a neighbor is known
-    ///         only by voxel index: <see cref="BulkMoleFractions" />, <see cref="NeighborCounts" />, and
+    ///         Buffers that a voxel reads only for itself stay active-indexed.
+    ///         Anything a gather reads about a <em>neighboring</em> voxel is voxel-indexed, because a neighbor is
+    ///         known only by voxel index.
+    ///         These buffers are <see cref="BulkMoleFractions" />, <see cref="NeighborCounts" />, and
     ///         <see cref="DiffusionTransfers" />.
     ///     </para>
     /// </remarks>

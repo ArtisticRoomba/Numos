@@ -7,8 +7,8 @@ namespace Numos.API.Generators.Common;
 ///     file.
 /// </summary>
 /// <remarks>
-///     The two halves go to separate source outputs. Diagnostics carry locations, so they change whenever code
-///     above an annotated property moves; the per-type models don't, so their files stay cached through that.
+///     The two halves go to separate source outputs. Diagnostics carry locations, so they change whenever code above an
+///     annotated property moves. The per-type models don't, so their files stay cached through that.
 /// </remarks>
 internal sealed record GeneratorOutput<T>(EquatableArray<DiagnosticInfo> Diagnostics, EquatableArray<T> Types)
     where T : IEquatable<T>

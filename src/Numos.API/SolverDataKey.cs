@@ -11,13 +11,13 @@ namespace Numos.API;
 ///     <para>
 ///         The key instance is the identity: two keys with the same <see cref="Name" /> are still different slots.
 ///         Declare keys as <see langword="static readonly" /> fields and share the field between cooperating solvers.
-///         Every key consumes a slot that is never reclaimed, so don't create keys per tick or per simulation.
+///         Every key consumes a slot that Numos never reclaims, so do not create keys per tick or per simulation.
 ///     </para>
 ///     <para>
-///         Values are cached per simulation and read with <see cref="AtmosSimulation.GetSolverData{T}" />. They are
-///         excluded from snapshots, checkpoints, recordings, and state hashes, and dropped on restore and whenever the
-///         configuration changes, so the factory must be a deterministic function of authoritative inputs such as
-///         <see cref="AtmosSimulation.Config" />. Evolving state that has to roll back belongs in a
+///         Values are cached per simulation and read with <see cref="AtmosSimulation.GetSolverData{T}" />. Snapshots,
+///         checkpoints, recordings, and state hashes exclude them. Numos drops them on restore and whenever the
+///         configuration changes. The factory must therefore be a deterministic function of authoritative inputs such
+///         as <see cref="AtmosSimulation.Config" />. Evolving state that has to roll back belongs in a
 ///         <see cref="ChunkField{T}" /> registered with <c>rollback: true</c>.
 ///     </para>
 ///     <para>

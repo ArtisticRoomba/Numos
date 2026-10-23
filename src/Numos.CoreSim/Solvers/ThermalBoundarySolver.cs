@@ -59,8 +59,8 @@ internal sealed class ThermalBoundarySolver : IAtmosSolverStage
         if (!boundaryBatches.TryConsume(context.TickCount))
             return;
 
-        // Batch order doesn't matter here: events only feed the _edges set, which deduplicates them,
-        // and Solve sorts _orderedEdges from it before anything downstream reads edge order.
+        // Batch order does not matter here. Events only feed the _edges set, which deduplicates them.
+        // Solve sorts _orderedEdges from that set before anything downstream reads edge order.
         for (int batchIndex = 0; batchIndex < boundaryBatches.Count; batchIndex++)
         {
             BoundaryEventBatch<ThermalBoundaryEvent> batch = boundaryBatches[batchIndex];
@@ -188,9 +188,7 @@ internal sealed class ThermalBoundarySolver : IAtmosSolverStage
         if (!context.TryGetChunk(address.ChunkPosition, out var chunk))
             return false;
 
-        // TODO
-        // Should maybe use AtmosChunk.TryGetThermalState
-        // Unsure if recalculation of heat cap is required here
+        // TODO: consider AtmosChunk.TryGetThermalState. It is unclear whether this recalculation is required.
         ushort voxelIndex = address.LocalVoxelIndex;
         JoulePerKelvin heatCapacity = AtmosSolverMath.CalculateHeatCapacityAtVoxel(context.TickConfig, chunk, voxelIndex);
         chunk.TotalHeatCapacity[voxelIndex] = heatCapacity;

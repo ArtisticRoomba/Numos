@@ -116,8 +116,8 @@ public readonly struct FlatArray<T>
     /// <param name="position">The zero-based coordinate.</param>
     /// <returns>The flat index of <paramref name="position" />.</returns>
     /// <remarks>
-    ///     An out-of-range component isn't caught here. It either produces an index outside the array or silently
-    ///     aliases a different element (for example <c>x == Dimensions.X</c> lands on <c>(0, y + 1, z)</c>).
+    ///     This method does not catch an out-of-range component. The result is either an index outside the array or
+    ///     a silent alias of a different element (for example <c>x == Dimensions.X</c> lands on <c>(0, y + 1, z)</c>).
     /// </remarks>
     public int GetIndexUnsafe(Int3 position)
     {

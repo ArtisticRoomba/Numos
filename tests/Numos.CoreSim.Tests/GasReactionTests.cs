@@ -1,6 +1,5 @@
 using Numos.CoreSim.GasReactions;
 using Numos.CoreSim.Solvers;
-using Numos.Units.Generated;
 using NUnit.Framework.Internal;
 
 namespace Numos.CoreSim.Tests;
@@ -330,10 +329,9 @@ public class GasReactionTests
 
         Assert.That(totalReactionSum > 0);
 
-        // Golden baseline: pins the exact numeric outcome of this deterministic random scenario (fixed seed,
-        // sequential per-voxel writeback) so a change to the material-limiter or the reaction-application math that
-        // alters results -- not just one that introduces NaNs -- shows up here, even if the new result still "looks"
-        // plausible.
+        // Golden baseline. It pins the exact numeric outcome of this deterministic random scenario (fixed seed, sequential
+        // per-voxel writeback). A change to the material limiter or the reaction-application math that alters results then
+        // shows up here, even if the new result has no NaNs and still looks plausible.
         Assert.That(totalReactionSum, Is.EqualTo(1748.375f));
 
         float[] expectedGasSums =
@@ -408,8 +406,8 @@ public class GasReactionTests
         for (ushort i = 0; i < 64; i++)
         {
             chunk.VoxelRoomMap[i] = i;
-            // Seed an ignition-temperature spark: the reaction has a real activation energy (146.4 kJ/mol),
-            // so at room temperature it won't proceed at any meaningful rate.
+            // Seed an ignition-temperature spark. The reaction has a real activation energy (146.4 kJ/mol), so at room
+            // temperature it won't proceed at any meaningful rate.
             chunk.InjectGasToVoxel(i, 0, 0.001f, 900, 1, 1);
             chunk.InjectGasToVoxel(i, 1, 0.002f, 900, 1, 1);
             Assert.That(chunk.ActiveGasCount == 2);
@@ -429,18 +427,17 @@ public class GasReactionTests
 
         Assert.That(chunk.ActiveGasCount == 3);
         Assert.That(feedback[0] > 0);
-        // Regression guard: a broken energy<->temperature round trip previously sent this to ~7.9e23 K
-        // and then NaN the moment the reaction fired, instead of settling on a plausible flame temperature.
+        // Regression guard. A broken energy-temperature round trip once sent this to ~7.9e23 K, then to NaN the moment the
+        // reaction fired, instead of settling on a plausible flame temperature.
         Assert.That(chunk.Temperature[0], Is.InRange(1f, 5000f));
     }
 
     /// <summary>
-    ///     <see cref="ReactionSolver.ProcessChunk" /> picks between a parallel and a fully sequential
-    ///     write-back based on <c>awakeChunkCount</c>; this reruns <see cref="MixingWater" />'s scenario
-    ///     (water synthesis creates a gas channel the chunk didn't start with) once on each branch and
-    ///     requires the two chunks to end up bit-identical, since the parallel branch's channel pre-create
-    ///     pass exists specifically to keep the channel-append order -- and so the floating-point
-    ///     summation order <see cref="AtmosChunk.InjectGasToVoxel" /> uses -- the same as the sequential one.
+    ///     <see cref="ReactionSolver.ProcessChunk" /> picks between a parallel and a fully sequential write-back based on
+    ///     <c>awakeChunkCount</c>. This test reruns the <see cref="MixingWater" /> scenario once on each branch. Water
+    ///     synthesis creates a gas channel the chunk didn't start with. The two chunks must end bit-identical. The parallel
+    ///     branch's channel pre-create pass keeps the channel-append order the same as the sequential branch. That order sets
+    ///     the floating-point summation order that <see cref="AtmosChunk.InjectGasToVoxel" /> uses.
     /// </summary>
     [Test]
     public void ProcessChunk_ParallelWriteBackMatchesSequential_WhenReactionCreatesANewChannel()
@@ -514,8 +511,8 @@ public class GasReactionTests
 
         for (int r = 0; r < 100; r++)
         {
-            // awakeChunkCount >= worker count always takes the sequential branch; 1 always takes the
-            // parallel one (a real chunk count can never be below 1), regardless of the machine's core count.
+            // awakeChunkCount >= worker count always takes the sequential branch. A count of 1 always takes the parallel branch,
+            // because a real chunk count is never below 1. Neither depends on the machine's core count.
             solver.ProcessChunk(sequentialChunk, 1, config, tables, sequentialFeedback, int.MaxValue);
             solver.ProcessChunk(parallelChunk, 1, config, tables, parallelFeedback, 1);
 
@@ -594,8 +591,8 @@ public class GasReactionTests
         float[] feedback = [0, 0];
         solver.ProcessChunk(chunk, 1, config, ReactionTables.Create(config), feedback);
 
-        // A's scarcity must only throttle the reaction that consumes it (consumesA), never producesA,
-        // which only ever adds A to the mixture and so can't be responsible for depleting it.
+        // A's scarcity must only throttle the reaction that consumes it (consumesA). producesA only adds A to the mixture,
+        // so it can't be responsible for depleting it.
         Assert.That(feedback[1], Is.GreaterThan(10f));
     }
 
@@ -631,10 +628,9 @@ public class GasReactionTests
             SolverConfigurations = [new GasReactionConfig(standardReactions: [consumesA, consumesB])]
         }.CreateSnapshot();
 
-        // A's overdraw (5 - 20 = -15) is worse than B's (2 - 8 = -6), so the limiter clamps A first,
-        // leaving B still overdrawn -- it only resolves B on the following iteration, once A's fix no
-        // longer masks it. This scenario requires that second pass to reach the values asserted below;
-        // a limiter that only ever ran once would leave B unclamped.
+        // A's overdraw (5 - 20 = -15) is worse than B's (2 - 8 = -6), so the limiter clamps A first. That leaves B still
+        // overdrawn. B resolves only on the following iteration, once A's fix no longer masks it. The values asserted below
+        // need that second pass. A limiter that ran once would leave B unclamped.
         float[] mixture = [5f, 2f, 0f, 0f];
         float temperature = 300f;
         float[] feedback = [0f, 0f];
@@ -647,24 +643,24 @@ public class GasReactionTests
 
         Assert.Multiple(() =>
         {
-            // Every value here is an exact power-of-two fraction (0.25) of exact integers, so this is
-            // bit-exact, not approximate.
+            // Every value here is an exact power-of-two fraction (0.25) of exact integers, so the result is bit-exact, not
+            // approximate.
             Assert.That(mixture[0], Is.EqualTo(0f), "A should be exactly exhausted, not overdrawn");
             Assert.That(mixture[1], Is.EqualTo(0f), "B should be exactly exhausted, not overdrawn");
             Assert.That(mixture[2], Is.EqualTo(5f), "D should reflect R1's clamped speed (20 -> 5)");
             Assert.That(mixture[3], Is.EqualTo(2f), "E should reflect R2's clamped speed (8 -> 2)");
             Assert.That(feedback[0], Is.EqualTo(5f), "R1 should be scaled from 20 to 5 by A's scarcity");
             Assert.That(feedback[1], Is.EqualTo(2f), "R2 should be scaled from 8 to 2 by B's scarcity");
-            // No reaction here carries an energy balance, and total heat capacity is unchanged (same
-            // total moles, uniform per-gas heat capacity), so temperature must be exactly conserved.
+            // No reaction here carries an energy balance, and total heat capacity is unchanged (same total moles, uniform per-gas
+            // heat capacity). Temperature must therefore be exactly conserved.
             Assert.That(temperature, Is.EqualTo(300f));
         });
     }
 
     /// <summary>
-    ///     Negative exponents on trace gases blow the rate up past float range (-3) or past double range (-20).
-    ///     Either way the reaction is effectively instantaneous and must saturate, letting the material limiter
-    ///     consume all of A, rather than being dropped as a non-finite speed.
+    ///     Negative exponents on trace gases blow the rate up past float range (-3) or past double range (-20). Either way the
+    ///     reaction is effectively instantaneous and must saturate, so the material limiter consumes all of A. The rate must
+    ///     not be dropped as a non-finite speed.
     /// </summary>
     [TestCase(-3f)]
     [TestCase(-20f)]
@@ -708,8 +704,8 @@ public class GasReactionTests
     }
 
     /// <summary>
-    ///     A reaction with no consumed input has nothing to limit it, so an overflowing rate must be dropped rather
-    ///     than saturated into an enormous amount of product.
+    ///     A reaction with no consumed input has nothing to limit it. An overflowing rate must be dropped, not saturated into
+    ///     an enormous amount of product.
     /// </summary>
     [Test]
     public void OverflowingRateWithoutInputs_IsDropped()
@@ -751,14 +747,12 @@ public class GasReactionTests
     [Test]
     public void MaterialLimiter_AccumulatesGrossConsumptionInDoublePrecision()
     {
-        // A single reaction wants to consume far more of A than is available, so the limiter must clamp
-        // it. Three more reactions each nibble an additional 0.03 mol of A. At this magnitude (~1e6),
-        // float32's ULP is 0.0625, so summing three 0.03 terms sequentially in float32 rounds every one
-        // of them away to nothing (each individual addition is below half a ULP) -- a naive float-only
-        // rewrite of the consumption accumulator would see exactly 1,000,000 consumed against exactly
-        // 1,000,000 available, conclude nothing is overdrawn, and skip clamping the big reaction entirely.
-        // Accumulating in double (the documented contract) correctly sees 1,000,000.09-ish consumed
-        // against 1,000,000 available, and clamps it.
+        // A single reaction wants to consume far more of A than is available, so the limiter must clamp it. Three more
+        // reactions each nibble an additional 0.03 mol of A. At this magnitude (~1e6), float32's ULP is 0.0625. Summing three
+        // 0.03 terms sequentially in float32 rounds each one away, because each addition is below half a ULP. A float-only
+        // rewrite of the consumption accumulator would then see exactly 1,000,000 consumed against exactly 1,000,000
+        // available. It would conclude nothing is overdrawn and skip clamping the big reaction. Accumulating in double (the
+        // documented contract) sees about 1,000,000.09 consumed against 1,000,000 available, and clamps it.
         var a = new GasProperties { Name = "A", MolarHeatCapacityAtConstantVolume = 10f };
 
         var bigConsumer = new StandardGasReaction(
@@ -796,8 +790,8 @@ public class GasReactionTests
 
         Assert.Multiple(() =>
         {
-            // The decisive check: the big reaction must actually get throttled. A float-only accumulator
-            // would leave it at exactly 1,000,000 (unclamped) because it can't see the three 0.03 terms.
+            // The decisive check: the big reaction must be throttled. A float-only accumulator would leave it at exactly
+            // 1,000,000 (unclamped) because it can't see the three 0.03 terms.
             Assert.That(feedback[0], Is.LessThan(1_000_000f).And.GreaterThan(0f));
             // Secondary sanity check: A shouldn't be driven meaningfully negative by the clamp.
             Assert.That(mixture[0], Is.GreaterThanOrEqualTo(-0.1f).And.LessThanOrEqualTo(0.1f));

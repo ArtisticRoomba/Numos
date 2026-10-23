@@ -354,8 +354,8 @@ public static class SimulationStateAnalyzer
             {
                 float moles = gas.Moles[localIndex];
                 voxelMoles += moles;
-                // Invalid and negative amounts are still state worth retaining when a caller asks for
-                // gas-bearing voxels only; treating any non-zero value as occupied keeps them visible.
+                // Any non-zero amount counts as gas-bearing. Negative and non-finite amounts stay visible
+                // when a caller asks for gas-bearing voxels only.
                 isGasBearing |= moles != 0f;
                 _gasMoles.TryGetValue(gas.GasId, out double currentMoles);
                 _gasMoles[gas.GasId] = currentMoles + moles;

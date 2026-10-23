@@ -211,8 +211,8 @@ public sealed partial class AtmosWorld
     }
 
     /// <summary>
-    ///     Resumes recording right after <paramref name="head" /> was restored, trusting its cached digest instead of
-    ///     capturing the live state again.
+    ///     Resumes recording right after <paramref name="head" /> was restored. It trusts the cached digest of
+    ///     <paramref name="head" /> and does not capture the live state again.
     /// </summary>
     internal void ResumeRecordingAt(AtmosWorldCheckpoint head)
     {
@@ -265,8 +265,8 @@ public sealed partial class AtmosWorld
     /// <returns>Timing and tick-count diagnostics for the completed reconstruction.</returns>
     /// <remarks>
     ///     The operation is atomic with respect to deterministic world state. If validation or application fails,
-    ///     the state present before this call is restored. Simulation objects created after the source checkpoint
-    ///     may be replaced; reacquire them by <see cref="AtmosSimulationId" /> after seeking.
+    ///     Numos restores the state present before this call. Numos can replace simulation objects created after the
+    ///     source checkpoint. Reacquire them by <see cref="AtmosSimulationId" /> after seeking.
     ///     <see cref="IAtmosWorldSolver.OnRestored" /> runs after the checkpoint is installed and before the first
     ///     replayed tick, and again when a failure puts the pre-call state back.
     /// </remarks>
@@ -294,8 +294,22 @@ public sealed partial class AtmosWorld
         return ReplayToCore(checkpoint, recording.Operations, target);
     }
 
+    /// <summary>
+    ///     Continues from the world's current position through <paramref name="target" /> without restoring a
+    ///     checkpoint. Callers must know the live state already matches <paramref name="recording" /> there.
+    /// </summary>
+    /// <remarks>
+    ///     <see cref="IAtmosWorldSolver.OnRestored" /> does not run on success, because no state is installed. A failure
+    ///     still restores the pre-call state, and that restore does run it.
+    /// </remarks>
+    internal AtmosWorldReplayResult ReplayRecordingForward(AtmosWorldRecording recording, AtmosTimelinePosition target)
+    {
+        return ReplayToCore(null, recording.Operations, target);
+    }
+
+    // A null checkpoint continues from the current position instead of restoring one.
     private AtmosWorldReplayResult ReplayToCore(
-        AtmosWorldCheckpoint checkpoint,
+        AtmosWorldCheckpoint? checkpoint,
         IReadOnlyList<AtmosWorldRecordedOperation> history,
         AtmosTimelinePosition target)
     {
@@ -309,7 +323,9 @@ public sealed partial class AtmosWorld
                     throw new InvalidOperationException("Stop recording before replaying; recursive replay is unavailable.");
             }
 
-            ReplayHistory.ThrowIfInvalidReplay(checkpoint.Position, history, target);
+            var start = checkpoint?.Position ??
+                        new AtmosTimelinePosition(checked((ulong)TickCount), _lastWorldOperationSequence);
+            ReplayHistory.ThrowIfInvalidReplay(start, history, target);
             var previous = CaptureCheckpoint();
             long started = Stopwatch.GetTimestamp();
             lock (_recordingGate)
@@ -320,13 +336,16 @@ public sealed partial class AtmosWorld
             _isApplyingWorldOperation = true;
             try
             {
-                RestoreCheckpoint(checkpoint);
-                for (int index = 0; index < history.Count; index++)
+                if (checkpoint != null)
+                    RestoreCheckpoint(checkpoint);
+
+                for (int index = ReplayHistory.CountThrough(history, start.OperationSequence);
+                     index < history.Count;
+                     index++)
                 {
                     var operation = history[index];
-                    if (operation.Sequence <= checkpoint.Position.OperationSequence ||
-                        operation.Sequence > target.OperationSequence)
-                        continue;
+                    if (operation.Sequence > target.OperationSequence)
+                        break;
 
                     while ((ulong)TickCount < operation.AfterTick)
                         TickCore();
@@ -339,9 +358,9 @@ public sealed partial class AtmosWorld
                     TickCore();
 
                 return new AtmosWorldReplayResult(
-                    checkpoint.Position,
+                    start,
                     TimelinePosition,
-                    target.Tick - checkpoint.Position.Tick,
+                    target.Tick - start.Tick,
                     Stopwatch.GetElapsedTime(started));
             }
             catch

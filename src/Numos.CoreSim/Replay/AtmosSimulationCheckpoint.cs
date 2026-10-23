@@ -8,8 +8,8 @@ namespace Numos.CoreSim.Replay;
 /// </summary>
 /// <remarks>
 ///     Time, configuration, and the solver pipeline belong to the world, so they live in the containing world
-///     checkpoint rather than here. Restore uses this data with an existing compatible simulation, keeping host
-///     integrations and custom solver implementations in place. The checkpoint deliberately excludes delegates,
+///     checkpoint rather than here. Restore uses this data with an existing compatible simulation, so host
+///     integrations and custom solver implementations stay in place. The checkpoint excludes delegates,
 ///     detached mixture identity, presentation state, and other host-owned state.
 /// </remarks>
 public sealed class AtmosSimulationCheckpoint
@@ -93,7 +93,7 @@ public sealed class AtmosSimulationCheckpoint
 /// </summary>
 /// <remarks>
 ///     Gas-channel order is retained because floating-point reductions can observe that order.
-///     This is continuation data, not a compact presentation snapshot, so don't use it for display; use
+///     This is continuation data, not a compact presentation snapshot. For display, use
 ///     <see cref="AtmosChunkSnapshot" /> instead.
 /// </remarks>
 public sealed class AtmosChunkCheckpoint

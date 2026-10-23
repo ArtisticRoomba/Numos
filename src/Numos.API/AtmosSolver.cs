@@ -4,8 +4,8 @@ namespace Numos.API;
 ///     Stable names of the default world solver stages.
 /// </summary>
 /// <remarks>
-///     Every stage below is an ordinary registered stage — a host can disable, reorder, or replace any of them with
-///     <see cref="AtmosWorldSolverPipeline" /> exactly as it would its own custom stage.
+///     Every stage below is an ordinary registered stage. A host can disable, reorder, or replace any of them with
+///     <see cref="AtmosWorldSolverPipeline" />, as it would its own custom stage.
 /// </remarks>
 public static class AtmosBuiltInSolvers
 {

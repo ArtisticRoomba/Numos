@@ -12,17 +12,17 @@ namespace Numos.API;
 ///         or when a dependency needs custom handling.
 ///     </para>
 ///     <para>
-///         Numos calls <see cref="InjectDependencies" /> on the tick thread, before the first tick the solver runs in,
-///         and again before the next tick after any pipeline registration, removal, or reset, or any change to
-///         <see cref="AtmosWorld.Services" />. A solver that is disabled when that happens is injected when it is
-///         enabled again. Restoring a checkpoint does not trigger injection, since services and solver instances are
-///         host-owned and unaffected by it. <see cref="AtmosWorldSolverPipeline.ResolveDependencies" /> runs the same
-///         pass on demand.
+///         Numos calls <see cref="InjectDependencies" /> on the tick thread, before the first tick the solver runs in.
+///         It calls it again before the next tick after any pipeline registration, removal, or reset, or any change
+///         to <see cref="AtmosWorld.Services" />. Numos injects a solver that was disabled at that time when the
+///         solver is enabled again. Restoring a checkpoint does not trigger injection, because services and solver
+///         instances are host-owned and unaffected by it. <see cref="AtmosWorldSolverPipeline.ResolveDependencies" />
+///         runs the same pass on demand.
 ///     </para>
 ///     <para>
-///         Injection runs before the tick changes any state. If it throws, the tick is abandoned with the world
-///         untouched, and the next tick tries again. Only assign references here: reading or writing simulation state
-///         is not allowed, and the call can repeat many times over a solver's life.
+///         Injection runs before the tick changes any state. If it throws, Numos abandons the tick with the world
+///         untouched, and the next tick tries again. Only assign references here. Do not read or write simulation
+///         state, because the call can repeat many times over a solver's life.
 ///     </para>
 /// </remarks>
 /// <example>

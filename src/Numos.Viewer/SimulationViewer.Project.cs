@@ -4,7 +4,6 @@ using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.GasReactions;
 using Numos.Maths;
 using Numos.SimDrawer;
-using Numos.Units.Generated;
 
 namespace Numos.Viewer;
 

@@ -5,9 +5,9 @@ namespace Numos.CoreSim.Datatypes.Events;
 /// </summary>
 /// <remarks>
 ///     Boundary voxels are collected into per-chunk batches of these events and processed by
-///     <see cref="Numos.CoreSim.Solvers.BoundaryFlowSolver" /> once every chunk's interior work has finished. That
-///     solver computes each source chunk's transfers concurrently, then reserves and scatters them into target
-///     chunks' injection buffers without locking.
+///     <see cref="Numos.CoreSim.Solvers.BoundaryFlowSolver" /> once every chunk's interior work has finished.
+///     That solver computes each source chunk's transfers concurrently. It then reserves ranges in the target
+///     chunks' injection buffers and writes the transfers into them without locking.
 /// </remarks>
 internal struct BoundaryFlowEvent
 {

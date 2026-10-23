@@ -6,7 +6,7 @@ using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.Datatypes.Snapshots;
 using Numos.CoreSim.Solvers;
 using Numos.Maths;
-using Numos.Units;
+using Magnitudo;
 
 namespace Numos.CoreSim;
 
@@ -55,13 +55,12 @@ internal class AtmosChunk
     ///     A process-local index assigned when this chunk is registered.
     /// </summary>
     /// <remarks>
-    ///     Lets hot per-tick solver lookups (e.g. boundary flow's cross-chunk injection buffer) use array
-    ///     indexing instead of a dictionary keyed on <see cref="GridPosition" />. Unique only among currently
-    ///     registered chunks, and not part of the simulation's observable state, so it is absent from
-    ///     <see cref="AtmosChunkVersion" /> and the state hash. Do not use it for anything but indexing a
-    ///     solver-owned lookup table.
-    ///     Ids are recycled after a chunk is unregistered, so a DenseId-keyed lookup table must track which
-    ///     chunk currently owns each slot and validate that before trusting stale contents.
+    ///     Lets hot per-tick solver lookups (such as the boundary flow injection buffer) use array
+    ///     indexing instead of a dictionary keyed on <see cref="GridPosition" />. The ID is unique only among
+    ///     currently registered chunks. It is not observable simulation state, so <see cref="AtmosChunkVersion" />
+    ///     and the state hash exclude it. Use it only to index a solver-owned lookup table.
+    ///     Numos recycles IDs after a chunk is unregistered. A lookup table keyed on this ID must record which
+    ///     chunk owns each slot and check that before it trusts old contents.
     /// </remarks>
     public int DenseId;
 
@@ -199,7 +198,7 @@ internal class AtmosChunk
     /// </summary>
     /// <remarks>
     ///     Existing arrays are reused when they already have the required length. This method does not
-    ///     clear existing values or reset active counts; use <see cref="Initialize" /> to reset the chunk.
+    ///     clear existing values or reset active counts. Use <see cref="Initialize" /> to reset the chunk.
     /// </remarks>
     [MemberNotNull(nameof(ActiveAirIndices), nameof(ActiveGases))]
     [PublicAPI]
@@ -230,8 +229,8 @@ internal class AtmosChunk
     ///     <see cref="AtmosChunkConstants.MaximumVoxelCount" />.
     /// </exception>
     /// <remarks>
-    ///     Initialization puts the chunk to sleep, resets all active counts and timers, and clears
-    ///     its per-voxel and gas-channel data. Solver arrays are detached.
+    ///     Initialization puts the chunk to sleep and resets all active counts and timers. It clears
+    ///     the per-voxel and gas-channel data and detaches solver arrays.
     /// </remarks>
     [PublicAPI]
     public void Initialize(
@@ -268,8 +267,8 @@ internal class AtmosChunk
     }
 
     /// <summary>
-    ///     Gives a chunk straight out of the constructor its position and a fresh generation. It is equivalent to
-    ///     <see cref="Initialize" /> with the constructor's dimensions, minus clearing arrays that were just allocated.
+    ///     Gives a chunk straight out of the constructor its position and a fresh generation. This equals
+    ///     <see cref="Initialize" /> with the constructor's dimensions, except that it skips clearing new arrays.
     /// </summary>
     internal void InitializeConstructed(Int3 position)
     {
@@ -311,9 +310,9 @@ internal class AtmosChunk
     /// <param name="field">The field descriptor.</param>
     /// <returns>The live array, initially filled with default values.</returns>
     /// <remarks>
-    ///     Safe to call from parallel workers, including the first touch of a field. Storage stays lazy on purpose:
-    ///     allocating every registered field up front would add zero-filled captured arrays to every checkpoint and
-    ///     change state hashes. Arrays survive ticks and sleep, but are detached on initialization or release.
+    ///     Safe to call from parallel workers, including the first touch of a field. Storage stays lazy because
+    ///     allocating every registered field up front would add zero-filled arrays to every checkpoint and
+    ///     change state hashes. Arrays survive ticks and sleep. Initialization or release detaches them.
     /// </remarks>
     internal T[] GetOrCreateField<T>(ChunkFieldDescriptor<T> field)
     {
@@ -447,7 +446,7 @@ internal class AtmosChunk
     }
 
     /// <summary>
-    ///     Marks the chunk as sleeping so that it is skipped by simulation ticks.
+    ///     Marks the chunk as sleeping. Simulation ticks skip it.
     /// </summary>
     public virtual void Sleep()
     {
@@ -457,7 +456,7 @@ internal class AtmosChunk
 
     /// <summary>
     ///     Adds gas at <paramref name="temperature" /> to a voxel, blending the voxel's temperature by heat
-    ///     capacity and recomputing its pressure. Solid and void voxels are ignored; a sleeping chunk is woken.
+    ///     capacity and recomputing its pressure. Solid and void voxels are ignored. A sleeping chunk wakes.
     /// </summary>
     /// <param name="localVoxelIndex">The flat index of the target voxel within this chunk.</param>
     /// <param name="gasId">The ID of the gas to add.</param>
@@ -596,10 +595,7 @@ internal class AtmosChunk
     [PublicAPI]
     public void SetVoxelClassification(ushort idx, int roomId)
     {
-        if (roomId < 0)
-            SetVoxelToVacuum(idx);
-
-        VoxelRoomMap[idx] = roomId;
+        SetVoxelClassification(idx, new VoxelClassification(roomId));
     }
 
     /// <summary>
@@ -624,12 +620,8 @@ internal class AtmosChunk
     [PublicAPI]
     public void SetChunkClassification(int roomId)
     {
-        if (roomId < 0)
-            SetChunkToVacuum();
-
-        VoxelRoomMap.Fill(roomId);
+        SetChunkClassification(new VoxelClassification(roomId));
     }
-
 
     /// <summary>
     ///     Sets the entire chunk classification. Solid and void classifications clear the chunk to vacuum.
@@ -650,7 +642,7 @@ internal class AtmosChunk
     /// </summary>
     /// <remarks>
     ///     Channels are appended in the order gases first reach the chunk, so the same index can hold different
-    ///     gases in different chunks. Anything comparing gas across chunks has to look it up by id.
+    ///     gases in different chunks. Look gas up by ID when you compare chunks.
     /// </remarks>
     internal int FindGasChannel(int gasId)
     {
