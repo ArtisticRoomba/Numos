@@ -8,35 +8,32 @@ namespace Numos.CoreSim.Tests;
 public class ThermalDiffusionSolverTests
 {
     /// <summary>
-    ///     <see cref="ThermalDiffusionSolver.Solve" /> picks between a parallel per-voxel gather and a
-    ///     fully sequential scatter based on <c>awakeChunkCount</c>. Runs the same 4x4x4 block of voxels
-    ///     -- temperatures and heat capacities spanning nine orders of magnitude in every direction, plus
-    ///     one interior solid voxel that blocks its neighbors -- on each branch for several ticks and
-    ///     requires the two chunks to end up bit-identical on the float32 state that is actually persisted
-    ///     (<see cref="AtmosChunk.Temperature" />/<see cref="AtmosChunk.TotalPressure" />), since the
-    ///     gather's neighbor visitation order exists specifically to reproduce the scatter form's
-    ///     floating-point summation order.
+    ///     <see cref="ThermalDiffusionSolver.Solve" /> picks between a parallel per-voxel gather and a fully sequential
+    ///     scatter, based on <c>awakeChunkCount</c>. This test runs the same 4x4x4 block of voxels on each branch for several
+    ///     ticks. Temperatures and heat capacities span nine orders of magnitude in every direction, and one interior solid
+    ///     voxel blocks its neighbors. The two chunks must end bit-identical on the persisted float32 state
+    ///     (<see cref="AtmosChunk.Temperature" />/<see cref="AtmosChunk.TotalPressure" />). The gather's neighbor visitation
+    ///     order exists to reproduce the scatter form's floating-point summation order.
     /// </summary>
     [Test]
     public void Solve_ParallelGatherMatchesSequentialScatter()
     {
-        // A huge global cap keeps every edge's conductance at its own heat-capacity-derived
-        // equilibrium value (AtmosSolverMath.CalculateThermalConductance's MathF.Min) instead of
-        // collapsing every edge to the same constant, which would make summation order irrelevant.
+        // A huge global cap keeps every edge's conductance at its own heat-capacity-derived equilibrium value
+        // (AtmosSolverMath.CalculateThermalConductance's MathF.Min). Otherwise every edge collapses to the same constant,
+        // and summation order stops mattering.
         var config = new TestAtmosConfig { ThermalConductance = 1e9f }.CreateSnapshot();
         var tickConfig = new AtmosSolverConfigSnapshot();
         tickConfig.Capture(config);
 
-        // Generated once and replayed into both chunks -- calling BuildChunk twice against a shared
-        // Random would otherwise give each chunk different starting conditions.
+        // Generated once and replayed into both chunks. Calling BuildChunk twice against a shared Random would give each
+        // chunk different starting conditions.
         var random = new Random(20260920);
         var initialTemperatures = new float[64];
         var initialMoles = new float[64];
         for (int i = 0; i < 64; i++)
         {
-            // Wide, irregular magnitudes in both temperature and moles (heat capacity) are what
-            // actually expose a summation-order bug: values differing by orders of magnitude round
-            // differently depending on which term is added first.
+            // Wide, irregular magnitudes in temperature and moles (heat capacity) expose a summation-order bug. Values that
+            // differ by orders of magnitude round differently depending on which term is added first.
             initialTemperatures[i] = MathF.Pow(10f, -2f + random.NextSingle() * 9f);
             initialMoles[i] = MathF.Pow(10f, -6f + random.NextSingle() * 9f);
         }
@@ -53,8 +50,8 @@ public class ThermalDiffusionSolverTests
                 chunk.InjectGasToVoxel(index, 0, initialMoles[flatIndex], initialTemperatures[flatIndex], 20f, 1f);
             }
 
-            // An interior solid voxel blocks conductance/flux from every direction that reaches it,
-            // exercising the same neighbor-validity short-circuit from both sides of the gather.
+            // An interior solid voxel blocks conductance and flux from every direction. This exercises the neighbor-validity
+            // short-circuit from both sides of the gather.
             chunk.VoxelRoomMap[chunk.GetIndex(new Int3(2, 1, 1))] = VoxelClassification.RoomSolid;
             chunk.RebuildActiveAirIndices();
             return chunk;
@@ -71,14 +68,14 @@ public class ThermalDiffusionSolverTests
         int parallelBoundaryCount = 0;
         for (int tick = 0; tick < 20; tick++)
         {
-            // awakeChunkCount >= worker count always takes the sequential branch; 1 always takes the
-            // parallel one (a real chunk count can never be below 1), regardless of the machine's core count.
+            // awakeChunkCount >= worker count always takes the sequential branch. A count of 1 always takes the parallel branch,
+            // because a real chunk count is never below 1. Neither depends on the machine's core count.
             sequentialBoundaryCount = solver.Solve(sequentialChunk, tickConfig, sequentialBoundaryBuffer, awakeChunkCount: int.MaxValue);
             parallelBoundaryCount = solver.Solve(parallelChunk, tickConfig, parallelBoundaryBuffer, awakeChunkCount: 1);
         }
 
-        // Guards against a vacuous pass: this scenario must actually produce boundary events and
-        // move heat, or the bit-exact comparisons below would trivially match on unchanged state.
+        // Guards against a vacuous pass. The scenario must produce boundary events and move heat, or the bit-exact
+        // comparisons below would match on unchanged state.
         Assert.That(sequentialBoundaryCount, Is.GreaterThan(0));
         Assert.That(
             sequentialChunk.Temperature[sequentialChunk.GetIndex(new Int3(0, 0, 0))],

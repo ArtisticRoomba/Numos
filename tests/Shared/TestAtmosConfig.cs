@@ -24,7 +24,7 @@ internal static class TestGases
         return new GasProperties
         {
             Name = name,
-            // Zero deliberately selects the configuration's heat-capacity fallback.
+            // Zero selects the configuration's heat-capacity fallback.
             MolarHeatCapacityAtConstantVolume = 0f,
             DiffusionCoefficient = diffusionCoefficient
         };

@@ -13,15 +13,15 @@ namespace Numos.API.Generators.SolverDependency;
 ///     <para>
 ///         Output is one file per declaring class: a backing field and getter per property, plus an
 ///         <c>InjectSolverDependencies</c> hook. A class whose base classes have no hook implements the interface and
-///         introduces the hook (<c>protected virtual</c>, or <c>private</c> when sealed); a class deriving from one
-///         that does overrides it and calls the base first. The base can be in source, where its own generated hook
-///         isn't visible yet and is inferred from its <c>[SolverDependency]</c> properties, or in metadata.
+///         introduces the hook (<c>protected virtual</c>, or <c>private</c> when sealed). A class deriving from one that does
+///         overrides it and calls the base first. The base can be in source, where its own generated hook isn't visible yet and
+///         is inferred from its <c>[SolverDependency]</c> properties. It can also be in metadata.
 ///     </para>
 ///     <para>
-///         Every check runs in the attribute transform, which sees one property at a time and reruns for every
-///         property on each compilation change. The checks that walk the base chain only run for the type's first
-///         <c>[SolverDependency]</c> property. The grouping step after <c>Collect</c> splits diagnostics from one
-///         location-free model per type, so a file is only rewritten when that type's output changes.
+///         Every check runs in the attribute transform, which sees one property at a time and reruns for every property on each
+///         compilation change. The checks that walk the base chain only run for the type's first <c>[SolverDependency]</c>
+///         property. The grouping step after <c>Collect</c> splits diagnostics from one location-free model per type, so a file
+///         is only rewritten when that type's output changes.
 ///     </para>
 /// </remarks>
 [Generator(LanguageNames.CSharp)]
@@ -256,7 +256,7 @@ public sealed class SolverDependencyGenerator : IIncrementalGenerator
     ///     Works out whether the type introduces the injection hook or overrides one from a base class.
     /// </summary>
     /// <remarks>
-    ///     Walks the base chain and stops at the first class that has a say: one with an overridable hook (written by
+    ///     Walks the base chain and stops at the first class that has a say. That is one with an overridable hook (written by
     ///     hand, or generated into a referenced assembly), one in this compilation whose own
     ///     <c>[SolverDependency]</c> properties will get a generated hook, or one that implements the interface with
     ///     no hook to extend.

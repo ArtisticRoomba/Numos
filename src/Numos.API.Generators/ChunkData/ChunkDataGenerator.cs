@@ -16,10 +16,10 @@ namespace Numos.API.Generators.ChunkData;
 ///         and a C# 14 extension property on <c>AtmosSolverChunk</c>. Output is one file per declaring type.
 ///     </para>
 ///     <para>
-///         Per-property checks run in the attribute transform. Key conflicts and accessor collisions need every
-///         property in the compilation, so they run after <c>Collect</c>; that step reruns whenever any
-///         <c>[ChunkData]</c> property changes, but not on unrelated edits. It hands on one location-free model per
-///         type, so a file is only rewritten when that type's output changes.
+///         Per-property checks run in the attribute transform. Key conflicts and accessor collisions need every property in the
+///         compilation, so they run after <c>Collect</c>. That step reruns whenever any <c>[ChunkData]</c> property changes,
+///         but not on unrelated edits. It hands on one location-free model per type, so a file is only rewritten when that
+///         type's output changes.
 ///     </para>
 /// </remarks>
 [Generator(LanguageNames.CSharp)]

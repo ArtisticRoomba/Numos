@@ -862,9 +862,9 @@ public sealed class CrossChunkFlowTests
     }
 
     /// <summary>
-    ///     The source holds Second then First; the neighbor holds First then Second, so the channel index of
-    ///     First in the source is Second's index in the neighbor. Trace amounts of First sit on both sides and
-    ///     must stay put, which only happens if suppression reads First in the neighbor rather than Second.
+    ///     The source holds Second then First. The neighbor holds First then Second, so the channel index of First in the
+    ///     source is Second's index in the neighbor. Trace amounts of First sit on both sides and must stay put. That happens
+    ///     only if suppression reads First in the neighbor, not Second.
     /// </summary>
     [Test]
     public void BoundaryDiffusion_SuppressesTraceGasByIdWhenChannelOrdersDiffer()
