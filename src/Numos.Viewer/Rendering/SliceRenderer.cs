@@ -98,8 +98,8 @@ public static class SliceRenderer
 
     private static Rectangle GetCellRectangle(SimulationSliceDrawData slice, int u, int v)
     {
-        // Raylib's 2D screen coordinates grow downward. Flip V so the slice remains a
-        // conventional bottom-left-origin plot when its render texture is shown in ImGui.
+        // Raylib's 2D screen coordinates grow downward. Flip V so the slice keeps a
+        // bottom-left origin when ImGui shows its render texture.
         return new Rectangle(u, slice.Height - v - 1, 1f, 1f);
     }
 }

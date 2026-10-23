@@ -98,8 +98,8 @@ public sealed class SimulationFrameBuilder
     /// <remarks>
     ///     The automatic range spans the finite temperature or pressure values in <paramref name="snapshots" />,
     ///     depending on what the visualization requires. A chunk is reused only when its identity, visualization,
-    ///     mapping revision, and snapshot revision all match and the range is unchanged, so a range change remaps every
-    ///     in-scope chunk.
+    ///     mapping revision, and snapshot revision all match and the range is unchanged. A range change therefore
+    ///     remaps every in-scope chunk.
     /// </remarks>
     public SimulationDrawData BuildSimulation(
         IEnumerable<AtmosChunkSnapshot> snapshots,
@@ -139,9 +139,8 @@ public sealed class SimulationFrameBuilder
             bool shouldMap = mappingScope == null || mappingScope.Contains(snapshot.GridPosition);
             if (!shouldMap)
             {
-                // Focused presentation is intentionally sparse in work, not in retained state.
-                // Keep the last immutable mapping for hidden chunks without inspecting fields that
-                // may not even have been copied for the newly selected visualization.
+                // Keep the last mapping for hidden chunks. Do not read their fields, because the snapshot may
+                // not have copied them for the newly selected visualization.
                 if (TryRetainChunk(previousFrame, snapshot.GridPosition, identity, out var retainedChunk))
                     chunks.Add(snapshot.GridPosition, retainedChunk);
 
@@ -439,10 +438,9 @@ public sealed class SimulationFrameBuilder
         Int3 dimensions,
         ref StableHash64 topologyHash)
     {
-        // Chunk-boundary faces intentionally remain exposed. Each retained chunk is therefore
-        // self-contained and can be focused or hidden without remeshing its neighbors. Only
-        // intra-chunk faces are removed here; a future seam-occlusion pass can suppress boundary
-        // overdraw at draw time without changing this focus contract.
+        // Chunk-boundary faces stay exposed. Each retained chunk is then self-contained and can be focused or
+        // hidden without remeshing its neighbors. This method removes only intra-chunk faces.
+        // A future seam-occlusion pass can suppress boundary overdraw at draw time.
         int surfaceFaceCount = 0;
         for (int index = 0; index < cells.Length; index++)
         {

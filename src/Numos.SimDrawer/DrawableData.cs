@@ -169,8 +169,8 @@ public sealed class ChunkDrawData
     public long SourceRevision { get; }
 
     /// <summary>
-    ///     Visualization mapping that produced this chunk. This is stored per chunk because a
-    ///     focused frame may deliberately retain older, hidden chunk mappings until focus clears.
+    ///     Visualization mapping that produced this chunk. The chunk stores it because a
+    ///     focused frame can retain older hidden chunk mappings until focus clears.
     /// </summary>
     public string VisualizationId { get; }
 
@@ -342,7 +342,7 @@ public sealed class SimulationDrawData
 
     /// <summary>
     ///     Returns whether a retained chunk was mapped by the visualization described by this frame.
-    ///     Focused frames may intentionally contain older hidden mappings until their scope expands.
+    ///     Focused frames can contain older hidden mappings until their scope expands.
     /// </summary>
     public bool HasCurrentVisualizationMapping(ChunkDrawData chunk)
     {
