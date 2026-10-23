@@ -325,6 +325,12 @@ internal class AtmosChunk
         return fields != null && (uint)slot < (uint)fields.Length ? fields[slot] as SolverArrayStorage<T> : null;
     }
 
+    internal bool TryGetField<T>(ChunkFieldDescriptor<T> field, [NotNullWhen(true)] out T[]? array)
+    {
+        array = FindField(Volatile.Read(ref _fields), field)?.Values;
+        return array != null;
+    }
+
     private T[] CreateField<T>(ChunkFieldDescriptor<T> field)
     {
         lock (_fieldGate)
@@ -452,6 +458,11 @@ internal class AtmosChunk
     {
         IsAwake = false;
         MarkChanged();
+        foreach (var descriptor in ChunkFieldRegistry.GetAllDescriptors())
+        {
+            if (descriptor.ClearOnSleep && descriptor.FixedLength == null)
+                descriptor.ClearAll(this);
+        }
     }
 
     /// <summary>
@@ -568,11 +579,14 @@ internal class AtmosChunk
 
         TotalHeatCapacity[idx] = 0f;
         IsVacuum[idx] = true;
+
+        foreach (var descriptor in ChunkFieldRegistry.GetAllDescriptors())
+        {
+            if (descriptor.ClearOnVacuum && descriptor.FixedLength == null)
+                descriptor.ClearElement(this, idx);
+        }
     }
 
-    /// <summary>
-    ///     Clears every voxel in the chunk to vacuum, as <see cref="SetVoxelToVacuum" /> does for one voxel.
-    /// </summary>
     [PublicAPI]
     public void SetChunkToVacuum()
     {
@@ -584,8 +598,13 @@ internal class AtmosChunk
 
         TotalHeatCapacity.Fill(0f);
         IsVacuum.Fill(true);
-    }
 
+        foreach (var descriptor in ChunkFieldRegistry.GetAllDescriptors())
+        {
+            if (descriptor.ClearOnVacuum && descriptor.FixedLength == null)
+                descriptor.ClearAll(this);
+        }
+    }
 
     /// <summary>
     ///     Sets a specific voxel classification. Solid and void classifications clear the voxel to vacuum.
