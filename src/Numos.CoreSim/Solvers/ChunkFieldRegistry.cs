@@ -127,7 +127,7 @@ internal sealed class ChunkFieldDescriptor<T> : ChunkFieldDescriptor
 
     internal override void ClearElement(AtmosChunk chunk, int index)
     {
-        if (chunk.TryGetField(this, out var array))
+        if (chunk.TryGetField(this, out var array) && array.Length > index)
             array[index] = default!;
     }
 
