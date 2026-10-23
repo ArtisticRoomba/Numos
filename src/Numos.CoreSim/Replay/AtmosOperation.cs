@@ -11,8 +11,8 @@ public readonly record struct AtmosTimelinePosition(ulong Tick, ulong OperationS
 ///     Stable codes for replayable semantic simulation operations.
 /// </summary>
 /// <remarks>
-///     Values are wire-format opcodes. 1 and 11 belonged to configuration and solver-enablement operations that are now
-///     recorded at world scope only; leave them unassigned.
+///     Values are wire-format opcodes. Opcodes 1 and 11 belonged to configuration and solver-enablement operations.
+///     The world records those now, so leave 1 and 11 unassigned.
 /// </remarks>
 public enum AtmosOperationCode : ushort
 {

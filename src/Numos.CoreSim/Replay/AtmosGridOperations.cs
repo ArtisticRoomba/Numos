@@ -41,7 +41,7 @@ public sealed record SetChunkClassificationOperation(Int3 Position, VoxelClassif
 }
 
 /// <summary>
-///     Classifies outer chunk faces; single-layer chunks use only the X/Y perimeter.
+///     Classifies outer chunk faces. Single-layer chunks use only the X/Y perimeter.
 /// </summary>
 /// <param name="Position">Target chunk-grid address.</param>
 /// <param name="Classification">Air classification value or reserved voxel classification.</param>

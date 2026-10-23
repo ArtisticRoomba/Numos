@@ -8,8 +8,8 @@ namespace Numos.CoreSim;
 ///     Normalized solver inputs captured from the applied immutable configuration at the start of a tick.
 /// </summary>
 /// <remarks>
-///     This reusable snapshot remains stable for the duration of a tick, keeping the tick internally consistent and
-///     moving validation out of per-voxel and per-neighbor hot paths.
+///     This reusable snapshot stays stable for the duration of a tick, so the tick sees one consistent configuration.
+///     It also moves validation out of per-voxel and per-neighbor hot paths.
 /// </remarks>
 internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
 {
@@ -27,9 +27,9 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
     ///     caches a factory can rebuild from the configuration and authoritative state.
     /// </summary>
     /// <remarks>
-    ///     Living here rather than on the kernel is what ties the data to the configuration it was built from.
-    ///     Recapturing the same <see cref="AtmosConfigSnapshot" /> returns early, so a kernel that only ever holds
-    ///     snapshots keeps the data from tick to tick.
+    ///     The data lives here, not on the kernel, so it stays tied to the configuration it was built from.
+    ///     Recapturing the same <see cref="AtmosConfigSnapshot" /> returns early. A kernel that holds only
+    ///     snapshots therefore keeps the data from tick to tick.
     /// </remarks>
     internal SolverDataStorage SolverData { get; } = new();
 

@@ -126,8 +126,8 @@ public class AtmosConfig : IAtmosConfig
     ///     Reference diffusivity used for gas IDs missing from <see cref="GasRegistry" />.
     /// </summary>
     /// <remarks>
-    ///     Scaled the same way as <see cref="GasProperties.DiffusionCoefficient" />; it is not a per-tick fraction.
-    ///     Values are clamped to [0, 1]; non-finite values disable fallback diffusion.
+    ///     Scaled the same way as <see cref="GasProperties.DiffusionCoefficient" />. It is not a per-tick fraction.
+    ///     Values are clamped to [0, 1]. Non-finite values disable fallback diffusion.
     /// </remarks>
     public Scalar DefaultDiffusionCoefficient { get; set; } = AtmosConfigDefaults.DefaultDiffusionCoefficient;
 
@@ -142,7 +142,7 @@ public class AtmosConfig : IAtmosConfig
     ///     Dimensionless fraction of a pressure delta requested as bulk flow per simulation tick.
     /// </summary>
     /// <remarks>
-    ///     Values are clamped to [0, 1]; non-finite values disable large-delta bulk flow. The solvers cap the
+    ///     Values are clamped to [0, 1]. Non-finite values disable large-delta bulk flow. The solvers cap the
     ///     effective coefficient at 0.5.
     /// </remarks>
     public Scalar BulkFlowCoefficient { get; set; } = AtmosConfigDefaults.BulkFlowCoefficient;
@@ -190,7 +190,7 @@ public class AtmosConfig : IAtmosConfig
     ///     Dimensionless fraction of the heat-coupled equilibrium condensation amount applied per
     ///     thermodynamics tick.
     /// </summary>
-    /// <remarks>Values are clamped to [0, 1]; non-finite values disable condensation.</remarks>
+    /// <remarks>Values are clamped to [0, 1]. Non-finite values disable condensation.</remarks>
     public Scalar CondensationRateFactor { get; set; } = AtmosConfigDefaults.CondensationRateFactor;
 
     /// <summary>
@@ -198,7 +198,7 @@ public class AtmosConfig : IAtmosConfig
     /// </summary>
     /// <remarks>
     ///     Values are clamped to [0, 1]. Passive Fickian diffusion is calculated separately and is not capped by this
-    ///     value. The built-in solvers don't currently read this setting; it is still captured, hashed, and recorded.
+    ///     value. The built-in solvers do not read this setting, but Numos still captures, hashes, and records it.
     /// </remarks>
     public Scalar MaxPressureTransferFractionPerNeighbor { get; set; } =
         AtmosConfigDefaults.MaxPressureTransferFractionPerNeighbor;
@@ -207,8 +207,8 @@ public class AtmosConfig : IAtmosConfig
     ///     Minimum accumulated pressure activity required to wake a sleeping chunk, in pascals (Pa).
     /// </summary>
     /// <remarks>
-    ///     Non-finite and negative values are normalized to zero. The built-in solvers don't currently read this
-    ///     setting; it is still captured, hashed, and recorded.
+    ///     Non-finite and negative values are normalized to zero. The built-in solvers do not read this
+    ///     setting, but Numos still captures, hashes, and records it.
     /// </remarks>
     [Quantity("pressure")]
     public Pascal AccumulatorWakeThreshold { get; set; } = AtmosConfigDefaults.AccumulatorWakeThreshold;
@@ -217,8 +217,8 @@ public class AtmosConfig : IAtmosConfig
     ///     Maximum number of ticks that an accumulated activity value remains alive.
     /// </summary>
     /// <remarks>
-    ///     Negative values are normalized to zero. The built-in solvers don't currently read this setting; it is still
-    ///     captured, hashed, and recorded.
+    ///     Negative values are normalized to zero. The built-in solvers do not read this setting, but Numos still
+    ///     captures, hashes, and records it.
     /// </remarks>
     public int AccumulatorMaxAliveTicks { get; set; } = AtmosConfigDefaults.AccumulatorMaxAliveTicks;
 

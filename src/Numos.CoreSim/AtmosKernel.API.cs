@@ -330,7 +330,7 @@ internal sealed partial class AtmosKernel
             {
                 var request = requests[index];
                 // Handle lists are detached. A concurrent unregistration between enumeration
-                // and this batch is represented by the chunk simply not being returned.
+                // and this batch shows up as the chunk missing from the result.
                 if (!_chunkMap.TryGetValue(request.Position, out var chunk) ||
                     chunk.Version == request.KnownVersion &&
                     !(request.Fields.HasFlag(AtmosChunkSnapshotFields.SolverArrays) && chunk.HasCapturedSolverArrays))
@@ -577,7 +577,7 @@ internal sealed partial class AtmosKernel
     /// <summary>
     ///     Runs exactly one fixed simulation tick using the current configuration.
     /// </summary>
-    /// <remarks>Elapsed-time accumulation lives on the owning world; this is for deterministic driving and benchmarks.</remarks>
+    /// <remarks>Elapsed-time accumulation lives on the owning world. This method is for deterministic driving and benchmarks.</remarks>
     internal void Tick()
     {
         lock (StateGate)
