@@ -460,7 +460,7 @@ internal class AtmosChunk
         MarkChanged();
         foreach (var descriptor in ChunkFieldRegistry.GetAllDescriptors())
         {
-            if (descriptor.ClearOnSleep && descriptor.FixedLength == null)
+            if (descriptor.ClearOnSleep)
                 descriptor.ClearAll(this);
         }
     }
@@ -601,7 +601,7 @@ internal class AtmosChunk
 
         foreach (var descriptor in ChunkFieldRegistry.GetAllDescriptors())
         {
-            if (descriptor.ClearOnVacuum && descriptor.FixedLength == null)
+            if (descriptor.ClearOnVacuum)
                 descriptor.ClearAll(this);
         }
     }
