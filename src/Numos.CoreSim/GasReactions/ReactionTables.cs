@@ -5,8 +5,8 @@ namespace Numos.CoreSim.GasReactions;
 ///     the canonical rate-factor order, and the change matrix.
 /// </summary>
 /// <remarks>
-///     Nothing here is written after <see cref="Create" /> returns, so one instance is shared by every worker and
-///     reused across ticks until the configuration changes.
+///     Nothing here is written after <see cref="Create" /> returns.
+///     Every worker shares one instance, and ticks reuse it until the configuration changes.
 /// </remarks>
 internal sealed class ReactionTables
 {

@@ -33,8 +33,8 @@ internal static class AtmosSolverMath
     ///     Returns a voxel's ideal-gas pressure from its current gas amounts.
     /// </summary>
     /// <remarks>
-    ///     Not a pure function: it updates <see cref="AtmosChunk.IsVacuum" />, and a voxel with no gas is cleared
-    ///     through <see cref="AtmosChunk.SetVoxelToVacuum" />.
+    ///     Not a pure function. It updates <see cref="AtmosChunk.IsVacuum" />.
+    ///     A voxel with no gas is cleared through <see cref="AtmosChunk.SetVoxelToVacuum" />.
     /// </remarks>
     internal static Pascal CalculatePressureAtVoxel(
         IAtmosConfig config, AtmosChunk chunk,
@@ -93,9 +93,8 @@ internal static class AtmosSolverMath
     }
 
     /// <summary>
-    ///     Returns the bulk-flow pressure requested for a pressure delta:
-    ///     <c>pressureDelta × BulkFlowCoefficient</c>, with the coefficient capped at 0.5 so a transfer never asks
-    ///     for more than half the delta.
+    ///     Returns the bulk-flow pressure requested for a pressure delta: <c>pressureDelta × BulkFlowCoefficient</c>.
+    ///     The coefficient is capped at 0.5, so a transfer never asks for more than half the delta.
     /// </summary>
     internal static Pascal CalculateBulkPressureTransfer(
         AtmosSolverConfigSnapshot config,
@@ -119,8 +118,8 @@ internal static class AtmosSolverMath
         Debug.Assert(sourceMoles >= 0f && targetMoles >= 0f);
         Debug.Assert(IsFinitePositive(sourceTemperature));
 
-        // Mathematically an empty target contributes zero regardless of the temperature ratio. Handling it first
-        // prevents 0 * infinity from turning a valid outward imbalance into NaN at extreme temperatures.
+        // An empty target contributes zero whatever the temperature ratio.
+        // Handling it first stops 0 * infinity from turning a valid outward imbalance into NaN at extreme temperatures.
         if (targetMoles == 0f)
             return sourceMoles;
 
@@ -130,8 +129,9 @@ internal static class AtmosSolverMath
 
     /// <summary>
     ///     Returns the effective conductance between two voxels: the configured conductance capped at
-    ///     <c>C1·C2 / (C1 + C2)</c>, the value that would exactly equalize their temperatures in one step, so a
-    ///     transfer can't overshoot equilibrium.
+    ///     <c>C1·C2 / (C1 + C2)</c>.
+    ///     That cap is the value that equalizes their temperatures in one step, so a transfer cannot overshoot
+    ///     equilibrium.
     /// </summary>
     internal static JoulePerKelvin CalculateThermalConductance(
         JoulePerKelvin sourceHeatCapacity,
@@ -165,7 +165,7 @@ internal static class AtmosSolverMath
     }
 
     /// <summary>
-    ///     Returns the sum of all gas moles in a voxel
+    ///     Returns the sum of all gas moles in a voxel.
     /// </summary>
     internal static Mole GetTotalMoles(AtmosChunk chunk, ushort voxelIndex)
     {

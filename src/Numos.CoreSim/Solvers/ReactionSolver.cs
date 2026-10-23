@@ -8,33 +8,32 @@ namespace Numos.CoreSim.Solvers;
 
 internal class ReactionSolver : IAtmosSolverStage
 {
-    // Rates that overflow (trace gases with negative exponents) saturate here instead of being dropped, and the
-    // material limiter then scales them back to what's actually available. Must stay below float.MaxValue so the
-    // stored speed is still finite. Only reactions with a consumed input saturate, since nothing else would limit
-    // them.
+    // Rates that overflow (trace gases with negative exponents) saturate here instead of being dropped.
+    // The material limiter then scales them back to what is available.
+    // The value must stay below float.MaxValue so the stored speed is finite.
+    // Only reactions with a consumed input saturate, because nothing else would limit them.
     private const double MaxReactionSpeed = 1e30;
 
-    // ProcessVoxel is invoked once per voxel from an already-parallel worker (thousands of calls per
-    // chunk per tick), and reactionCount is typically a handful of entries. Renting/returning that tiny
-    // array from ArrayPool<T>.Shared on every call adds pool bookkeeping to the hottest part of the loop
-    // for no benefit, since the buffer never needs to be seen by another thread. A per-thread scratch
-    // buffer that just grows to the high-water mark removes that round trip entirely.
+    // ProcessVoxel runs once per voxel from an already-parallel worker (thousands of calls per chunk per tick).
+    // reactionCount is typically a handful of entries.
+    // Renting that tiny array from ArrayPool<T>.Shared on every call adds pool bookkeeping to the hottest loop.
+    // No other thread ever sees the buffer, so the pool gives no benefit.
+    // A per-thread scratch buffer that grows to the high-water mark removes the round trip.
     [ThreadStatic]
     private static Mole[]? _reactionSpeedsScratch;
 
     public void Solve(AtmosSolverExecutionContext context)
     {
-        //fast skip for empty configs.
+        // Fast skip for empty configs.
         if (GasReactionConfig.Get(context.TickConfig).Count == 0 || context.TickConfig.GasPropertyCount == 0)
             return;
 
         var tables = context.TickConfig.GetReactionTables();
 
-        // Told to ProcessChunk so it knows whether this outer per-chunk dispatch already saturates
-        // the worker pool, mirroring ThermodynamicsSolver/PhaseChangeSolver's awakeChunkCount gate.
-        // A single dense chunk only has per-voxel work to offer, so its write-back pass needs its
-        // own parallelism to use the other workers; once enough awake chunks occupy every worker,
-        // a second layer of parallelism inside each chunk is just dispatch overhead.
+        // Tells ProcessChunk whether this per-chunk dispatch already saturates the worker pool.
+        // This mirrors the awakeChunkCount gate in ThermodynamicsSolver and PhaseChangeSolver.
+        // A single dense chunk only has per-voxel work to offer, so its write-back pass needs its own parallelism.
+        // Once enough awake chunks occupy every worker, a second layer of parallelism inside each chunk is overhead.
         int awakeChunkCount = 0;
         for (int i = 0; i < context.Chunks.Length; i++)
         {
@@ -71,10 +70,10 @@ internal class ReactionSolver : IAtmosSolverStage
     ///     across the whole chunk. Pass null to skip collecting this.
     /// </param>
     /// <param name="awakeChunkCount">
-    ///     How many awake, gas-bearing chunks <see cref="Solve" /> is dispatching this tick. Below worker
-    ///     count, this chunk's write-back pass parallelizes across voxels to help fill idle workers; at or
-    ///     above it, the outer per-chunk dispatch already saturates the pool, so it runs sequentially
-    ///     instead. Defaults to 1 (i.e. "parallelize") for callers processing a single chunk directly.
+    ///     How many awake, gas-bearing chunks <see cref="Solve" /> is dispatching this tick.
+    ///     Below worker count, this chunk's write-back pass parallelizes across voxels to help fill idle workers.
+    ///     At or above it, the outer per-chunk dispatch already saturates the pool, so the pass runs sequentially.
+    ///     Defaults to 1 (parallelize) for callers processing a single chunk directly.
     /// </param>
     internal void ProcessChunk(
         AtmosChunk chunk, Second deltaTime, IAtmosConfig config, ReactionTables tables, Scalar[]? reactionCount = null,
@@ -97,9 +96,9 @@ internal class ReactionSolver : IAtmosSolverStage
         int mixtureLength = config.GasPropertyCount;
         CubicMetre volume = config.GetVoxelVolume();
 
-        // One chunk-wide voxel-by-gas matrix instead of a separately pooled array per voxel: this is
-        // the same "stop renting per item, slice a shared buffer instead" move as the reaction matrix,
-        // and it collapses activeAirCount pool round-trips into one.
+        // One chunk-wide voxel-by-gas matrix replaces a separately pooled array per voxel.
+        // Like the reaction matrix, it slices a shared buffer instead of renting per item.
+        // This collapses activeAirCount pool round trips into one.
         Mole[] mixtures = ArrayPool<Mole>.Shared.Rent(checked(activeAirCount * mixtureLength));
         Scalar[][]? reactionFeedbacks = reactionCount == null ? null : ArrayPool<Scalar[]>.Shared.Rent(activeAirCount);
         Kelvin[] newTemps = ArrayPool<Kelvin>.Shared.Rent(activeAirCount);
@@ -118,20 +117,21 @@ internal class ReactionSolver : IAtmosSolverStage
                 mixtureLength,
                 tables));
 
-        // Put data back. This is an O(activeAirCount * mixtureLength) pass that doesn't shrink with
-        // worker count, so run serially it caps scaling for a dense chunk that is the only source of
-        // parallel work (see DenseChunkReactionParallelScalingBenchmarks). Each voxel's diffing/injection
-        // only touches its own slot in every per-gas array, so voxels are independent, except for two
-        // chunk-shared side effects of InjectGasToVoxel: GetOrCreateGasChannel's first-time channel
-        // creation (mutates ActiveGases/ActiveGasCount) and Wake() (rebuilds ActiveAirIndices). The
-        // parallel branch only runs on an awake chunk, so Wake() can't fire, and it creates every
-        // missing channel serially before any worker touches a voxel.
+        // Put data back. This O(activeAirCount * mixtureLength) pass does not shrink with worker count.
+        // Run serially, it caps scaling for a dense chunk that is the only source of parallel work
+        // (see DenseChunkReactionParallelScalingBenchmarks).
+        // Each voxel's diffing and injection touch only its own slot in every per-gas array, so voxels are independent.
+        // Two chunk-shared side effects of InjectGasToVoxel are the exception.
+        // GetOrCreateGasChannel creates a channel on first use (mutates ActiveGases/ActiveGasCount).
+        // Wake() rebuilds ActiveAirIndices.
+        // The parallel branch only runs on an awake chunk, so Wake() cannot fire.
+        // The branch also creates every missing channel serially before any worker touches a voxel.
         int workerCount = Math.Max(1, Environment.ProcessorCount);
         if (awakeChunkCount < workerCount && chunk.IsAwake)
         {
-            // Same discovery order as the serial branch below (voxel-major, then ascending gas id), so
-            // the chunk's channel-append order -- and with it the per-voxel summation order
-            // InjectGasToVoxel uses when it recomputes total moles -- matches the serial path exactly.
+            // Same discovery order as the serial branch below (voxel-major, then ascending gas id).
+            // The chunk's channel-append order then matches the serial path exactly.
+            // So does the per-voxel summation order InjectGasToVoxel uses when it recomputes total moles.
             for (int activeIndex = 0; activeIndex < activeAirCount && chunk.ActiveGasCount < mixtureLength; activeIndex++)
             {
                 int offset = activeIndex * mixtureLength;
@@ -155,7 +155,7 @@ internal class ReactionSolver : IAtmosSolverStage
                 ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
                 Span<Mole> mixtureVector = mixtures.AsSpan(activeIndex * mixtureLength, mixtureLength);
                 int c = chunk.ActiveGasCount;
-                //adjust moles from the mixture vector
+                // Adjust moles from the mixture vector.
                 foreach (var gasChannel in chunk.ActiveGases.Take(c))
                 {
                     Mole diff = mixtureVector[gasChannel.GasId] - gasChannel.Moles[voxelIndex];
@@ -169,16 +169,16 @@ internal class ReactionSolver : IAtmosSolverStage
                             config.GetMolarHeatCapacityAtConstantVolume(gasChannel.GasId),
                             config.PressurePerMoleKelvin);
 
-                        //fix rounding errors causing bad value.
+                        // Fix rounding errors that cause bad values.
                         if (gasChannel.Moles[voxelIndex] < 1e-10)
                             gasChannel.Moles[voxelIndex] = 0;
                     }
 
-                    //set gas to 0.
+                    // Set gas to 0.
                     mixtureVector[gasChannel.GasId] = 0;
                 }
 
-                //inject remaining gases
+                // Inject remaining gases.
                 for (int i = 0; i < mixtureLength; i++)
                 {
                     if (mixtureVector[i] <= 0) continue;
@@ -230,8 +230,8 @@ internal class ReactionSolver : IAtmosSolverStage
         return result;
     }
 
-    // Same per-gas sum as ExtractHeat, minus the temperature factor -- used after the mixture's
-    // composition has changed, to convert the (unchanged) total energy back into a temperature.
+    // Same per-gas sum as ExtractHeat, without the temperature factor.
+    // Used after the mixture's composition has changed, to convert the unchanged total energy back into a temperature.
     private static JoulePerKelvin ComputeHeatCapacity(ReadOnlySpan<Mole> mixtureVector, int mixtureLength, IAtmosConfig config)
     {
         JoulePerKelvin result = 0f;
@@ -251,8 +251,8 @@ internal class ReactionSolver : IAtmosSolverStage
     /// </summary>
     /// <param name="deltaTime">Over which timespan reactions should occur.</param>
     /// <param name="mixtureVector">
-    ///     The voxel's mole amount for every registered gas, indexed by gas ID; updated in place to
-    ///     reflect the reactions that occurred.
+    ///     The voxel's mole amount for every registered gas, indexed by gas ID.
+    ///     The method updates it in place to reflect the reactions that occurred.
     /// </param>
     /// <param name="currentTemperature">Temperature, updated in place to reflect the post-reaction mixture.</param>
     /// <param name="reactionFeedback">
@@ -294,9 +294,9 @@ internal class ReactionSolver : IAtmosSolverStage
         Mole[] reactionSpeeds = RentReactionSpeeds(reactionCount);
 
         Array.Clear(reactionSpeeds, 0, reactionCount);
-        //get all reaction speeds. Sequential: reactionCount is typically a handful of items, far too
-        //small to justify a parallel dispatch, especially one issued once per voxel from inside an
-        //already-parallel voxel worker.
+        // Get all reaction speeds. This is sequential.
+        // reactionCount is typically a handful of items, too few to justify a parallel dispatch.
+        // That holds especially for one issued once per voxel from inside an already-parallel voxel worker.
         Kelvin temperature = currentTemperature; //to stop warning about the later change of currentTemperature.
         for (int reactionId = 0; reactionId < reactionCount; reactionId++)
         {
@@ -340,11 +340,11 @@ internal class ReactionSolver : IAtmosSolverStage
             return;
         }
 
-        // Adjust reaction speeds so they don't consume more material than is available in a single step.
-        // Bounded defensively: each pass either zeroes out a reaction's speed or converges, so this many
-        // iterations is far more than any real mixture needs, but guarantees termination even in a
-        // pathological state (e.g. moles already negative from upstream float drift) that would otherwise
-        // never find scale > 0 and loop forever.
+        // Adjust reaction speeds so they do not consume more material than is available in a single step.
+        // The loop is bounded. Each pass either zeroes out a reaction's speed or converges.
+        // This many iterations is far more than any real mixture needs.
+        // It still guarantees termination in a pathological state, for example moles already negative from upstream
+        // float drift, which would otherwise never find scale > 0 and loop forever.
         int maxIterations = mixtureLength + reactionCount + 8;
         bool converged = false;
         for (int iteration = 0; iteration < maxIterations; iteration++)
@@ -352,13 +352,13 @@ internal class ReactionSolver : IAtmosSolverStage
             int criticalIndex = -1;
             Mole criticalValue = 0;
             Mole criticalConsumption = 0;
-            //check which consumption might go over available material
+            // Check which consumption might go over available material.
             for (int i = 0; i < mixtureLength; i++)
             {
-                //we calculate total gross consumption, ignoring any offsetting production of the same gas
-                //by the same reaction (Changes is produced-consumed net, which would hide real overdraw).
-                // Only reactions that actually consume this gas can contribute, so ConsumingReactions
-                // already excludes every zero term a dense reactionCount scan would've added for nothing.
+                // Total gross consumption ignores any production of the same gas by the same reaction.
+                // Changes is the produced-minus-consumed net, which would hide a real overdraw.
+                // Only reactions that consume this gas can contribute.
+                // ConsumingReactions already excludes every zero term a dense reactionCount scan would add.
                 // Match Enumerable.Sum's double accumulator while preserving reaction order and float products.
                 Mole64 accumulatedConsumption = 0d;
                 foreach (var (reactionId, consumed) in gasData[i].ConsumingReactions)
@@ -366,9 +366,9 @@ internal class ReactionSolver : IAtmosSolverStage
 
                 Mole consumption = (Mole)accumulatedConsumption;
 
-                //check how much moles/joules are left over after all reactions.
+                // Check how many moles or joules are left after all reactions.
                 Mole postReactionMoles = mixtureVector[i] + consumption;
-                //if negative and even more critical, mark.
+                // If negative and more critical than the current worst, mark it.
                 if (postReactionMoles < criticalValue)
                 {
                     criticalValue = postReactionMoles;
@@ -379,16 +379,16 @@ internal class ReactionSolver : IAtmosSolverStage
 
             if (criticalIndex != -1)
             {
-                // Scale every reaction consuming the critical gas down by the same factor, just enough
-                // that its post-reaction moles land at exactly 0: scale = available / |consumption|,
-                // clamped to [0, 1] so a gas with moles to spare never gets sped up.
+                // Scale every reaction consuming the critical gas down by the same factor.
+                // The factor puts its post-reaction moles at exactly 0: scale = available / |consumption|.
+                // It is clamped to [0, 1], so a gas with moles to spare never speeds up.
                 Scalar scale = MathF.Min(
                     1f,
                     MathF.Max(0f, mixtureVector[criticalIndex] / Math.Abs(criticalConsumption)));
 
                 foreach (var (reactionId, _) in gasData[criticalIndex].ConsumingReactions)
                 {
-                    //select the lower reaction speed.
+                    // Select the lower reaction speed.
                     reactionSpeeds[reactionId] = MathF.Min(reactionSpeeds[reactionId], reactionSpeeds[reactionId] * scale);
                     if (reactionSpeeds[reactionId] < 1e-10f)
                         reactionSpeeds[reactionId] = 0;
@@ -397,8 +397,8 @@ internal class ReactionSolver : IAtmosSolverStage
                 continue;
             }
 
-            // Material is no longer overdrawn. Now the same idea applied to heat: endothermic reactions
-            // (negative energy balance) can't draw more energy than the mixture actually has.
+            // Material is no longer overdrawn. Heat gets the same treatment.
+            // Endothermic reactions (negative energy balance) cannot draw more energy than the mixture has.
             Joule energyConsumption = 0f;
             for (int i = 0; i < reactionCount; i++)
             {
@@ -411,7 +411,7 @@ internal class ReactionSolver : IAtmosSolverStage
                 break;
             }
 
-            // Scale down just the endothermic reactions, same "clamp to exactly enough" shape as the
+            // Scale down only the endothermic reactions, with the same "clamp to exactly enough" shape as the
             // material-limiter scale above.
             Scalar energyScale = MathF.Min(1f, MathF.Max(0f, energy / Math.Abs(energyConsumption)));
             for (int i = 0; i < reactionCount; i++)
@@ -427,17 +427,17 @@ internal class ReactionSolver : IAtmosSolverStage
 
         if (!converged)
         {
-            // Didn't reach a non-overdrawn state in budget -- skip this voxel's reactions this tick
-            // rather than risk overdraw. Retried next tick.
+            // The loop did not reach a non-overdrawn state within budget.
+            // Skip this voxel's reactions this tick rather than risk overdraw. The next tick retries.
             Debug.Assert(false, "Reaction material/energy limiter failed to converge within its iteration budget.");
             return;
         }
 
-        //apply mixture, this also includes heat, since all change equations contain energy balance.
-        //dN/dt = S * reactionSpeeds: walk one reaction (matrix row) at a time and fold its whole gas
-        //column into the mixture with one lane-independent vector add. This visits the exact same
-        //(gas, reaction) terms in the exact same order as a per-gas accumulation would, so it is
-        //bit-exact regardless of hardware SIMD width.
+        // Apply the mixture change. This includes heat, since all change equations contain the energy balance.
+        // dN/dt = S * reactionSpeeds. Walk one reaction (matrix row) at a time.
+        // Fold its whole gas column into the mixture with one lane-independent vector add.
+        // This visits the same (gas, reaction) terms in the same order as a per-gas accumulation.
+        // The result is bit-exact regardless of hardware SIMD width.
         Span<Mole> mixture = mixtureVector[..mixtureLength];
         for (int j = 0; j < reactionCount; j++)
             TensorPrimitives.MultiplyAdd(tables.Matrix.GetReactionRow(j), reactionSpeeds[j], mixture, mixture);
@@ -456,8 +456,8 @@ internal class ReactionSolver : IAtmosSolverStage
         }
 
         energy = Math.Max(0, energy);
-        //adjust temperature based on heat value, using the post-reaction mixture's heat capacity
-        //(composition changed above, so the capacity used to extract heat no longer applies).
+        // Adjust temperature from the heat value, using the post-reaction mixture's heat capacity.
+        // The composition changed above, so the capacity used to extract heat no longer applies.
         JoulePerKelvin heatCapacity = ComputeHeatCapacity(mixtureVector, mixtureLength, config);
         if (heatCapacity > 0f)
             currentTemperature = energy / heatCapacity;
@@ -491,10 +491,10 @@ internal class ReactionSolver : IAtmosSolverStage
     }
 
     /// <summary>
-    ///     Applies one voxel's post-reaction mixture back to its chunk. Requires every gas id present in
-    ///     <c>mixtures</c> to already have a channel (see the write-back parallel branch in
-    ///     <see cref="ProcessChunk" />), so every call here is a pure, voxel-disjoint read/write and safe
-    ///     to run across workers.
+    ///     Applies one voxel's post-reaction mixture back to its chunk.
+    ///     Every gas id present in <c>mixtures</c> must already have a channel (see the write-back parallel branch in
+    ///     <see cref="ProcessChunk" />).
+    ///     Each call is then a voxel-disjoint read and write, so it is safe to run across workers.
     /// </summary>
     private readonly struct WriteBackAction(
         AtmosChunk chunk,
@@ -521,7 +521,7 @@ internal class ReactionSolver : IAtmosSolverStage
                         config.GetMolarHeatCapacityAtConstantVolume(gasChannel.GasId),
                         config.PressurePerMoleKelvin);
 
-                    //fix rounding errors causing bad value.
+                    // Fix rounding errors that cause bad values.
                     if (gasChannel.Moles[voxelIndex] < 1e-10)
                         gasChannel.Moles[voxelIndex] = 0;
                 }

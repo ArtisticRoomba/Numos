@@ -29,12 +29,12 @@ public readonly partial record struct LinearGasReaction
     /// <param name="lowTempSpeed">Rate in mol/(m³·s) at <paramref name="lowTemperatureBound" />.</param>
     /// <param name="highTempSpeed">Rate in mol/(m³·s) at <paramref name="highTemperatureBound" />.</param>
     /// <param name="lowStrict">
-    ///     When <see langword="true" />, the reaction stops below <paramref name="lowTemperatureBound" />; when
-    ///     <see langword="false" />, the line is extrapolated.
+    ///     When <see langword="true" />, the reaction stops below <paramref name="lowTemperatureBound" />.
+    ///     When <see langword="false" />, the line is extrapolated.
     /// </param>
     /// <param name="highStrict">
-    ///     When <see langword="true" />, the reaction stops above <paramref name="highTemperatureBound" />; when
-    ///     <see langword="false" />, the line is extrapolated.
+    ///     When <see langword="true" />, the reaction stops above <paramref name="highTemperatureBound" />.
+    ///     When <see langword="false" />, the line is extrapolated.
     /// </param>
     /// <param name="speedFactors">Multipliers on the rate constant that depend on the amount of specific gases.</param>
     public LinearGasReaction(
@@ -188,7 +188,7 @@ public readonly partial record struct LinearGasReaction
     /// <param name="temperatureKelvin">Mixture temperature, in kelvins (K).</param>
     /// <returns>
     ///     Rate in mol/(m³·s), or zero outside a strict bound. Can be negative if the line is extrapolated past
-    ///     zero; the reaction solver treats nonpositive rates as no reaction.
+    ///     zero. The reaction solver treats nonpositive rates as no reaction.
     /// </returns>
     internal ConcentrationPerSecond GetRateConstantForTemperature(Kelvin temperatureKelvin)
     {

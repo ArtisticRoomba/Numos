@@ -1,12 +1,12 @@
 namespace Numos.CoreSim.Solvers;
 
 /// <summary>
-///     Identifies one piece of solver data. Built-in slots and public keys both hold one, so they share one id space
-///     and can live in the same <see cref="SolverDataStorage" />.
+///     Identifies one piece of solver data. Built-in slots and public keys both hold one.
+///     They share one id space, so they can live in the same <see cref="SolverDataStorage" />.
 /// </summary>
 /// <remarks>
-///     Ids follow static-initialization order and differ between processes. They index storage and nothing else:
-///     never hash, serialize, or iterate in id order. Ids are never reclaimed.
+///     Ids follow static-initialization order and differ between processes. They index storage and nothing else.
+///     Never hash, serialize, or iterate in id order. Ids are never reclaimed.
 /// </remarks>
 internal sealed class SolverDataDescriptor
 {

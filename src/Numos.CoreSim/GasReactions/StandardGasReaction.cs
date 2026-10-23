@@ -68,9 +68,10 @@ public readonly partial record struct StandardGasReaction
     private float ArrheniusFactor { get; }
 
     /// <summary>
-    ///     Molar activation energy, in J/mol. Used directly against <see cref="AtmosPhysicalConstants.MolarGasConstant" />
-    ///     (J/(mol*K)) in the Arrhenius exponent, so values authored in kJ/mol must be converted at the call site,
-    ///     e.g. via <see cref="Numos.Units.Generated.UnitConversions.FromKilojoulePerMole" />.
+    ///     Molar activation energy, in J/mol. The Arrhenius exponent divides it by
+    ///     <see cref="AtmosPhysicalConstants.MolarGasConstant" /> (J/(mol*K)).
+    ///     Convert values authored in kJ/mol at the call site, for example with
+    ///     <see cref="Numos.Units.Generated.UnitConversions.FromKilojoulePerMole" />.
     /// </summary>
     private JoulePerMole ActivationEnergy { get; }
 
@@ -189,8 +190,9 @@ public readonly partial record struct StandardGasReaction
     ///     NaN, nonpositive, or infinite because the gas is absent.
     /// </summary>
     /// <remarks>
-    ///     A trace gas with a negative exponent may overflow the result to positive infinity; that is kept so the
-    ///     solver can saturate the rate. An absent gas (0^negative) means no reaction instead.
+    ///     A trace gas with a negative exponent may overflow the result to positive infinity.
+    ///     The method keeps that value so the solver can saturate the rate.
+    ///     An absent gas (0^negative) means no reaction.
     /// </remarks>
     internal static ConcentrationPerSecond64 ApplyExponent(
         ConcentrationPerSecond64 speed, MolePerCubicMetre64 concentration, float exponent)
