@@ -595,10 +595,7 @@ internal class AtmosChunk
     [PublicAPI]
     public void SetVoxelClassification(ushort idx, int roomId)
     {
-        if (roomId < 0)
-            SetVoxelToVacuum(idx);
-
-        VoxelRoomMap[idx] = roomId;
+        SetVoxelClassification(idx, new VoxelClassification(roomId));
     }
 
     /// <summary>
@@ -623,12 +620,8 @@ internal class AtmosChunk
     [PublicAPI]
     public void SetChunkClassification(int roomId)
     {
-        if (roomId < 0)
-            SetChunkToVacuum();
-
-        VoxelRoomMap.Fill(roomId);
+        SetChunkClassification(new VoxelClassification(roomId));
     }
-
 
     /// <summary>
     ///     Sets the entire chunk classification. Solid and void classifications clear the chunk to vacuum.
