@@ -47,10 +47,14 @@ public sealed class AtmosChunkFieldStorageTests
         ChunkFieldRegistry.Register<long>(Key("vacuum/fixed"), true, 3, clearOnVacuum: true);
 
     private static readonly ChunkFieldDescriptor<int> SleepOnly =
-        ChunkFieldRegistry.Register<int>(Key("vacuum/sleep-only"), true, null, clearOnSleep: true);
+        ChunkFieldRegistry.Register<int>(Key("sleep/only"), true, null, clearOnSleep: true);
 
     private static readonly ChunkFieldDescriptor<long> SleepFixed =
         ChunkFieldRegistry.Register<long>(Key("sleep/fixed"), true, 3, clearOnSleep: true);
+
+    // Fixed length, no clear flags: must survive every clearing operation.
+    private static readonly ChunkFieldDescriptor<long> FixedKept =
+        ChunkFieldRegistry.Register<long>(Key("fixed/kept"), true, 3);
 
     private struct HashValue
     {
@@ -288,7 +292,6 @@ public sealed class AtmosChunkFieldStorageTests
     [Test]
     public void GetAllDescriptors_IsIndexedBySlot()
     {
-        // Touch the fields so the fixture's static initializers have definitely run.
         ChunkFieldDescriptor[] expected = [Captured, Transient, Zeta, Lower, Upper, VacuumCleared];
 
         var all = ChunkFieldRegistry.GetAllDescriptors();
@@ -404,10 +407,8 @@ public sealed class AtmosChunkFieldStorageTests
         var chunk = new AtmosChunk(3, 1, 1);
         int[] cleared = chunk.GetOrCreateField(VacuumCleared);
         int[] kept = chunk.GetOrCreateField(VacuumKept);
-        long[] fixedLength = chunk.GetOrCreateField(VacuumFixed);
         Array.Fill(cleared, 5);
         Array.Fill(kept, 5);
-        Array.Fill(fixedLength, 7L);
         chunk.TotalPressure.AsSpan().Fill(2f);
 
         chunk.SetChunkToVacuum();
@@ -416,9 +417,50 @@ public sealed class AtmosChunkFieldStorageTests
         {
             Assert.That(cleared, Is.EqualTo(new[] { 0, 0, 0 }));
             Assert.That(kept, Is.EqualTo(new[] { 5, 5, 5 }));
-            Assert.That(fixedLength, Is.EqualTo(new[] { 7L, 7L, 7L }));
             Assert.That(chunk.TotalPressure.ToArray(), Is.All.Zero);
             Assert.That(chunk.IsVacuum.ToArray(), Is.All.True);
+        });
+    }
+
+    [Test]
+    public void SetChunkToVacuum_ClearsFixedLengthClearOnVacuumFields()
+    {
+        var chunk = new AtmosChunk(2, 1, 1);
+        long[] values = chunk.GetOrCreateField(VacuumFixed);
+        Array.Fill(values, 7L);
+
+        chunk.SetChunkToVacuum();
+
+        Assert.That(values, Is.EqualTo(new[] { 0L, 0L, 0L }));
+    }
+
+    [Test]
+    public void SetChunkToVacuum_LeavesFixedLengthFieldsWithoutFlagAlone()
+    {
+        var chunk = new AtmosChunk(2, 1, 1);
+        long[] values = chunk.GetOrCreateField(FixedKept);
+        Array.Fill(values, 7L);
+
+        chunk.SetChunkToVacuum();
+
+        Assert.That(values, Is.EqualTo(new[] { 7L, 7L, 7L }));
+    }
+
+    [Test]
+    public void SetChunkToVacuum_IgnoresClearOnSleepFields()
+    {
+        var chunk = new AtmosChunk(2, 1, 1);
+        int[] perVoxel = chunk.GetOrCreateField(SleepOnly);
+        long[] fixedLength = chunk.GetOrCreateField(SleepFixed);
+        Array.Fill(perVoxel, 5);
+        Array.Fill(fixedLength, 7L);
+
+        chunk.SetChunkToVacuum();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(perVoxel, Is.EqualTo(new[] { 5, 5 }));
+            Assert.That(fixedLength, Is.EqualTo(new[] { 7L, 7L, 7L }));
         });
     }
 
@@ -431,7 +473,7 @@ public sealed class AtmosChunkFieldStorageTests
 
         Assert.That(chunk.HasCapturedSolverArrays, Is.False);
     }
-
+    
     [Test]
     public void Sleep_ClearsEntireClearOnSleepFields()
     {
@@ -452,19 +494,7 @@ public sealed class AtmosChunkFieldStorageTests
     }
 
     [Test]
-    public void Sleep_IgnoresClearOnVacuumFields()
-    {
-        var chunk = new AtmosChunk(2, 1, 1);
-        int[] values = chunk.GetOrCreateField(VacuumCleared);
-        Array.Fill(values, 5);
-
-        chunk.Sleep();
-
-        Assert.That(values, Is.EqualTo(new[] { 5, 5 }));
-    }
-
-    [Test]
-    public void Sleep_LeavesFixedLengthFieldsAlone()
+    public void Sleep_ClearsFixedLengthClearOnSleepFields()
     {
         var chunk = new AtmosChunk(2, 1, 1);
         long[] values = chunk.GetOrCreateField(SleepFixed);
@@ -472,7 +502,37 @@ public sealed class AtmosChunkFieldStorageTests
 
         chunk.Sleep();
 
+        Assert.That(values, Is.EqualTo(new[] { 0L, 0L, 0L }));
+    }
+
+    [Test]
+    public void Sleep_LeavesFixedLengthFieldsWithoutFlagAlone()
+    {
+        var chunk = new AtmosChunk(2, 1, 1);
+        long[] values = chunk.GetOrCreateField(FixedKept);
+        Array.Fill(values, 7L);
+
+        chunk.Sleep();
+
         Assert.That(values, Is.EqualTo(new[] { 7L, 7L, 7L }));
+    }
+
+    [Test]
+    public void Sleep_IgnoresClearOnVacuumFields()
+    {
+        var chunk = new AtmosChunk(2, 1, 1);
+        int[] perVoxel = chunk.GetOrCreateField(VacuumCleared);
+        long[] fixedLength = chunk.GetOrCreateField(VacuumFixed);
+        Array.Fill(perVoxel, 5);
+        Array.Fill(fixedLength, 7L);
+
+        chunk.Sleep();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(perVoxel, Is.EqualTo(new[] { 5, 5 }));
+            Assert.That(fixedLength, Is.EqualTo(new[] { 7L, 7L, 7L }));
+        });
     }
 
     [Test]
