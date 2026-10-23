@@ -14,8 +14,8 @@ public sealed partial class AtmosSimulation
     /// <param name="temperature">Initial temperature in kelvins (K).</param>
     /// <returns>A new empty <see cref="GasMixture" /> that uses this simulation's gas registry and configuration.</returns>
     /// <remarks>
-    ///     The mixture lives outside the chunk grid. It is not recorded, checkpointed, or restored by replay, so
-    ///     hosts that need it to survive a rollback must persist it themselves.
+    ///     The mixture lives outside the chunk grid. Replay does not record, checkpoint, or restore it. A host that
+    ///     needs it to survive a rollback must persist it.
     /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException">
     ///     The volume is not positive and finite, or the temperature is negative or non-finite.
@@ -42,9 +42,10 @@ public sealed partial class AtmosSimulation
     /// <param name="localVoxelIndex">The voxel's index within the chunk.</param>
     /// <returns>A live mixture whose reads and writes go straight to the voxel's stored state.</returns>
     /// <remarks>
-    ///     The returned capability never exposes solver arrays. It is bound to the current chunk generation and
-    ///     becomes stale if that chunk is removed or replaced at the same grid position. Mutations through it are
-    ///     recorded like any other external voxel edit. Solid and void voxels can be read but reject mutation.
+    ///     The returned capability never exposes solver arrays. It is bound to the current chunk generation and goes
+    ///     stale when that chunk is removed or replaced at the same grid position.
+    ///     Numos records mutations through it like any other external voxel edit. Solid and void voxels can be read
+    ///     but reject mutation.
     /// </remarks>
     /// <exception cref="KeyNotFoundException">No chunk is registered at <paramref name="chunk" />.</exception>
     /// <exception cref="ArgumentOutOfRangeException">
@@ -71,8 +72,8 @@ public sealed partial class AtmosSimulation
     /// <param name="z">The voxel's local Z coordinate, in [0, depth).</param>
     /// <returns>A live mixture whose reads and writes go straight to the voxel's stored state.</returns>
     /// <remarks>
-    ///     Behaves like <see cref="GetVoxelGasMixture(AtmosChunkHandle, ushort)" /> after converting the coordinates
-    ///     to a local voxel index.
+    ///     Behaves like <see cref="GetVoxelGasMixture(AtmosChunkHandle, ushort)" /> with the coordinates converted to
+    ///     a local voxel index.
     /// </remarks>
     /// <exception cref="KeyNotFoundException">No chunk is registered at <paramref name="chunk" />.</exception>
     /// <exception cref="ArgumentOutOfRangeException">A coordinate is outside the chunk's dimensions.</exception>
