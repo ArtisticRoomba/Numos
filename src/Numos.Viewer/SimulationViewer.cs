@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Numerics;
 using ImGuiNET;
+using Numos.Workbench;
 using Numos.API;
 using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Snapshots;
@@ -25,6 +26,7 @@ public partial class SimulationViewer : IDisposable
     private readonly static TimeSpan StartupRenderDuration = TimeSpan.FromMilliseconds(250);
 
     private readonly Action<VisualizationRegistry>? _configureVisualizations;
+    private readonly WorkbenchSession _session;
     private readonly List<VoxelGasSnapshot> _gasMakeupRows = [];
     private readonly List<VoxelHighlight> _highlights = [];
     private readonly List<AtmosChunkHandle> _liveChunkHandles = [];
@@ -59,7 +61,6 @@ public partial class SimulationViewer : IDisposable
     private Vector3 _cameraMoveStartPosition;
     private Vector3 _cameraMoveStartTarget;
     private long _chunkCollectionRevision = -1;
-    private AtmosConfig? _config;
     private long _continuousRenderingUntilTimestamp;
     private SliceAxis _currentSliceAxis = SliceAxis.Z;
     private int _currentSliceIndex;
@@ -88,7 +89,6 @@ public partial class SimulationViewer : IDisposable
     private bool _limitFpsWhenUnfocused = true;
     private bool _nextFrameRequested;
     private int _programSettingsTab;
-    private string? _projectName;
     private bool _requestExit;
     private VoxelAddress? _selectedCell;
     private Int3? _selectedSliceChunkPosition;
@@ -131,7 +131,6 @@ public partial class SimulationViewer : IDisposable
     private int _voxelDragViewport;
     private VoxelEditTool _voxelEditTool;
     private bool _windowInitialized;
-    private AtmosWorld? _world;
 
     /// <summary>
     ///     Creates a viewer with an optional startup hook for registering application-specific
@@ -140,6 +139,11 @@ public partial class SimulationViewer : IDisposable
     public SimulationViewer(Action<VisualizationRegistry>? configureVisualizations = null)
     {
         _configureVisualizations = configureVisualizations;
+        _session = new WorkbenchSession(
+            _messages,
+            new WorkbenchHostInfo("Numos.Viewer", ViewerBuildInfo.PackageVersion));
+
+        _session.ProjectClosing += ResetProjectPresentation;
         StartMessageCapture();
     }
 
@@ -222,26 +226,22 @@ public partial class SimulationViewer : IDisposable
         UpdateReplayFileOperations();
         HandleReplayFileDrop();
 
-        if (_world != null && _config != null)
+        if (_session.World != null && _session.Config != null)
         {
             if (!_isPaused)
             {
-                if (_replayTimeline?.IsInspecting == true)
+                if (_session.IsInspecting)
                 {
-                    _replayElapsed += deltaTime;
-                    if (_replayElapsed >= 1f / AtmosSimulation.SimulationRate)
-                    {
-                        _replayElapsed = 0f;
+                    if (_session.AccumulatePlayback(deltaTime))
                         StepTimelineForward();
-                    }
                 }
                 else
                 {
-                    _world.Update(deltaTime);
+                    _session.Update(deltaTime);
                 }
             }
 
-            _replayTimeline?.ObserveLiveState();
+            _session.ObserveLiveState();
             ReconcileSimulationSurfaces();
             if (_simulation != null)
                 RefreshPresentation();
@@ -335,7 +335,7 @@ public partial class SimulationViewer : IDisposable
 
         if (_focusedChunk.HasValue &&
             !_liveChunkPositions.Contains(_focusedChunk.Value.Position) &&
-            _replayTimeline?.IsInspecting != true &&
+            _session.Timeline?.IsInspecting != true &&
             !_refreshingReplay)
         {
             _focusedChunk = null;
@@ -396,7 +396,7 @@ public partial class SimulationViewer : IDisposable
 
         if (_selectedSliceChunkPosition.HasValue &&
             !_drawData.Chunks.ContainsKey(_selectedSliceChunkPosition.Value) &&
-            (_replayTimeline?.IsInspecting == true || _refreshingReplay))
+            (_session.Timeline?.IsInspecting == true || _refreshingReplay))
         {
             _sliceDrawData = null;
             _sliceProjectionKey = null;
@@ -443,7 +443,7 @@ public partial class SimulationViewer : IDisposable
         {
             if (_drawData.Chunks.TryGetValue(_focusedChunk.Value.Position, out var focused))
                 _focusedChunk = focused.Identity;
-            else if (_replayTimeline?.IsInspecting != true && !_refreshingReplay)
+            else if (_session.Timeline?.IsInspecting != true && !_refreshingReplay)
             {
                 _focusedChunk = null;
                 _frameSceneOnNextPresentation = true;
@@ -452,7 +452,7 @@ public partial class SimulationViewer : IDisposable
 
         if (_selectedCell.HasValue && !_drawData.TryResolve(_selectedCell.Value, out _))
         {
-            if (_replayTimeline?.IsInspecting == true || _refreshingReplay)
+            if (_session.Timeline?.IsInspecting == true || _refreshingReplay)
             {
                 var selected = _selectedCell.Value;
                 if (_drawData.Chunks.TryGetValue(selected.Chunk.Position, out var chunk))

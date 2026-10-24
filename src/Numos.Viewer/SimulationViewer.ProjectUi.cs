@@ -6,6 +6,7 @@ using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Snapshots;
 using Numos.Maths;
 using Numos.Viewer.Ui;
+using Numos.Workbench;
 
 namespace Numos.Viewer;
 
@@ -79,16 +80,16 @@ public partial class SimulationViewer
 
     private void RequestCreateProject()
     {
-        _projectNameDraft = _world == null ? "Untitled Simulation" : $"{_projectName} Copy";
-        _projectChunkWidthDraft = _chunkDimensions.X > 0
-            ? _chunkDimensions.X
+        _projectNameDraft = _session.World == null ? "Untitled Simulation" : $"{_session.ProjectName} Copy";
+        _projectChunkWidthDraft = _session.ChunkDimensions.X > 0
+            ? _session.ChunkDimensions.X
             : AtmosChunkConstants.DefaultWidth;
 
-        _projectChunkHeightDraft = _chunkDimensions.Y > 0
-            ? _chunkDimensions.Y
+        _projectChunkHeightDraft = _session.ChunkDimensions.Y > 0
+            ? _session.ChunkDimensions.Y
             : AtmosChunkConstants.DefaultHeight;
 
-        _projectChunkDepthDraft = _chunkDimensions.Z > 0 ? _chunkDimensions.Z : 1;
+        _projectChunkDepthDraft = _session.ChunkDimensions.Z > 0 ? _session.ChunkDimensions.Z : 1;
         _includeDefaultGasesDraft = true;
         _createProjectError = null;
         _requestOpenCreateProject = true;
@@ -97,7 +98,7 @@ public partial class SimulationViewer
 
     private void RequestCloseProject()
     {
-        if (_world == null)
+        if (_session.World == null)
             return;
 
         _requestOpenCloseProject = true;
@@ -143,13 +144,13 @@ public partial class SimulationViewer
                 ? "The default gas definitions will be appended to the new project."
                 : "The project will start with a blank gas registry.");
 
-        if (_world != null)
+        if (_session.World != null)
         {
             ImGui.Spacing();
             ImGui.TextColored(
                 ViewerTheme.Caution,
-                _replayBranches?.BranchCount > 1
-                    ? $"Creating this project will discard all {_replayBranches.BranchCount} in-memory branches."
+                _session.Branches?.BranchCount > 1
+                    ? $"Creating this project will discard all {_session.Branches.BranchCount} in-memory branches."
                     : "Creating this project will close the current in-memory project.");
         }
 
@@ -178,7 +179,6 @@ public partial class SimulationViewer
                 exception is ArgumentException or InvalidOperationException)
             {
                 _createProjectError = exception.Message;
-                WriteException("Could not create the simulation", exception);
             }
         }
 
@@ -200,19 +200,18 @@ public partial class SimulationViewer
         if (!modal.IsVisible)
             return;
 
-        string branchWarning = _replayBranches?.BranchCount > 1
-            ? $" All {_replayBranches.BranchCount} session branches will be discarded; save selected branches individually first."
+        string branchWarning = _session.Branches?.BranchCount > 1
+            ? $" All {_session.Branches.BranchCount} session branches will be discarded; save selected branches individually first."
             : string.Empty;
 
         ImGui.TextWrapped(
-            $"Close '{_projectName}' and dispose its world and simulations? This project only exists in memory.{branchWarning}");
+            $"Close '{_session.ProjectName}' and dispose its world and simulations? This project only exists in memory.{branchWarning}");
 
         ImGui.Spacing();
         if (ImGui.Button("Close Project", new Vector2(140, 0)))
         {
-            string projectName = _projectName ?? "Untitled Simulation";
-            DisposeSimulationProject();
-            WriteMessage(ViewerLogLevel.Info, "Simulation", $"Closed project '{projectName}'.");
+            _session.CloseProject();
+            RequestNextFrame();
             _closeProjectModalOpen = false;
             ImGui.CloseCurrentPopup();
         }
@@ -264,7 +263,7 @@ public partial class SimulationViewer
             "The removal is recorded, so you can branch from an earlier tick in the Timeline to get the chunk back.");
 
         ImGui.Spacing();
-        ImGui.BeginDisabled(_replayTimeline?.IsInspecting == true);
+        ImGui.BeginDisabled(_session.Timeline?.IsInspecting == true);
         if (ImGui.Button("Remove Chunk", new Vector2(140, 0)))
         {
             RemoveProjectChunk(chunk);
@@ -305,7 +304,7 @@ public partial class SimulationViewer
             "This is recorded as one configuration change.");
 
         ImGui.Spacing();
-        ImGui.BeginDisabled(_config == null || _replayTimeline?.IsInspecting == true);
+        ImGui.BeginDisabled(_session.Config == null || _session.Timeline?.IsInspecting == true);
         if (ImGui.Button("Reset", new Vector2(120, 0)))
         {
             ResetConfigurationValues();
@@ -330,7 +329,7 @@ public partial class SimulationViewer
     /// <returns><see langword="true" /> when the caller should disable its editing controls.</returns>
     private bool DrawInspectionNotice()
     {
-        if (_replayTimeline is not { IsInspecting: true } timeline)
+        if (_session.Timeline is not { IsInspecting: true } timeline)
             return false;
 
         ImGuiExtensions.ReadOnlyNotice(
@@ -342,7 +341,7 @@ public partial class SimulationViewer
 
     private void RenderSolutionPanel()
     {
-        if (!_showSolutionPanel || _simulation == null || _config == null)
+        if (!_showSolutionPanel || _simulation == null || _session.Config == null)
             return;
 
         using var window = ImGuiExtensions.BeginWindow(
@@ -355,11 +354,11 @@ public partial class SimulationViewer
             return;
 
         bool inspecting = DrawInspectionNotice();
-        int currentTick = _world?.TickCount ?? 0;
+        int currentTick = _session.World?.TickCount ?? 0;
         if (inspecting || !_isPaused || _steppedToTick != currentTick)
             _steppedToTick = null;
 
-        ImGui.TextUnformatted(_projectName ?? "Untitled Simulation");
+        ImGui.TextUnformatted(_session.ProjectName ?? "Untitled Simulation");
         if (ImGui.BeginTable(
                 "ProjectStatus##solution",
                 2,
@@ -377,11 +376,11 @@ public partial class SimulationViewer
             ImGui.TableNextColumn();
             ImGuiExtensions.StatusField("ACTIVE SIMULATION", GetSimulationName(_simulation.Id));
             ImGui.TableNextColumn();
-            ImGuiExtensions.StatusField("SIMULATIONS", (_world?.Simulations.Count ?? 0).ToString());
+            ImGuiExtensions.StatusField("SIMULATIONS", (_session.World?.Simulations.Count ?? 0).ToString());
             ImGui.TableNextColumn();
             ImGuiExtensions.StatusField("CHUNKS", _simulation.ChunkCount.ToString());
             ImGui.TableNextColumn();
-            ImGuiExtensions.StatusField("GASES", _config.GasRegistry.Count.ToString());
+            ImGuiExtensions.StatusField("GASES", _session.Config.GasRegistry.Count.ToString());
             ImGui.TableNextColumn();
             ImGuiExtensions.StatusField("CURRENT TICK", currentTick.ToString());
             ImGui.EndTable();
@@ -409,8 +408,7 @@ public partial class SimulationViewer
         ImGui.BeginDisabled(!_isPaused);
         if (ImGui.Button("Step", new Vector2(90, 0)))
         {
-            _world!.Tick();
-            _steppedToTick = _world.TickCount;
+            _steppedToTick = _session.Tick();
         }
 
         ImGui.EndDisabled();
@@ -469,7 +467,7 @@ public partial class SimulationViewer
 
     private void SetProjectMessage(string message, bool isError)
     {
-        WriteMessage(isError ? ViewerLogLevel.Error : ViewerLogLevel.Info, "Simulation", message);
+        WriteMessage(isError ? WorkbenchLogLevel.Error : WorkbenchLogLevel.Info, "Simulation", message);
     }
 
     private static void DrawFeedback(FeedbackMessage? feedback)
@@ -479,7 +477,7 @@ public partial class SimulationViewer
 
     private void RenderProjectChunkControls(bool inspecting)
     {
-        ImGui.TextDisabled($"Chunk size: {_chunkDimensions.X} × {_chunkDimensions.Y} × {_chunkDimensions.Z} voxels");
+        ImGui.TextDisabled($"Chunk size: {_session.ChunkDimensions.X} × {_session.ChunkDimensions.Y} × {_session.ChunkDimensions.Z} voxels");
 
         if (_liveChunkHandles.Count == 0)
         {
@@ -675,7 +673,7 @@ public partial class SimulationViewer
 
     private void RenderProjectGasControls(bool inspecting)
     {
-        if (_config!.GasRegistry.Count == 0)
+        if (_session.Config!.GasRegistry.Count == 0)
             ImGui.TextDisabled("Blank gas registry. Add a gas before injecting.");
         else
             RenderGasRegistryTable(inspecting);
@@ -748,7 +746,7 @@ public partial class SimulationViewer
             ImGuiTableFlags.RowBg |
             ImGuiTableFlags.SizingFixedFit;
 
-        var registry = _config!.GasRegistry;
+        var registry = _session.Config!.GasRegistry;
         int gasToRemove = -1;
         using (var table = ImGuiExtensions.BeginTable("GasRegistry##configuration", 6, flags))
         {
@@ -878,14 +876,14 @@ public partial class SimulationViewer
             MoveCameraToVoxel(cameraChunk, _injectionX, _injectionY, _injectionZ);
         }
 
-        bool canInject = _config!.GasRegistry.Count > 0;
+        bool canInject = _session.Config!.GasRegistry.Count > 0;
         if (canInject)
         {
-            _injectionGasId = Math.Clamp(_injectionGasId, 0, _config.GasRegistry.Count - 1);
+            _injectionGasId = Math.Clamp(_injectionGasId, 0, _session.Config.GasRegistry.Count - 1);
             ImGui.BeginDisabled(inspecting);
             if (ImGui.BeginCombo("Gas##inject", FormatGas(_injectionGasId)))
             {
-                for (int gasId = 0; gasId < _config.GasRegistry.Count; gasId++)
+                for (int gasId = 0; gasId < _session.Config.GasRegistry.Count; gasId++)
                 {
                     bool selected = gasId == _injectionGasId;
                     if (ImGui.Selectable(FormatGas(gasId), selected))
@@ -942,18 +940,5 @@ public partial class SimulationViewer
         _configFloatDrafts.Clear();
         _configIntDrafts.Clear();
         _configFieldErrors.Clear();
-    }
-
-    /// <summary>
-    ///     Validation domain for an <see cref="AtmosConfig" /> field, matching what <see cref="AtmosConfigSnapshot" />
-    ///     keeps as-is.
-    ///     The snapshot silently replaces or clamps values outside the domain. The panel rejects them instead, so it
-    ///     never records a value that means something else.
-    /// </summary>
-    private enum ConfigDomain
-    {
-        Positive,
-        NonNegative,
-        UnitInterval
     }
 }

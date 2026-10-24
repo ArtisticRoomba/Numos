@@ -1,5 +1,6 @@
 using System.Numerics;
 using ImGuiNET;
+using Numos.Workbench;
 using Numos.API;
 using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Snapshots;
@@ -13,9 +14,7 @@ namespace Numos.Viewer;
 
 public partial class SimulationViewer
 {
-    private readonly Dictionary<AtmosSimulationId, string> _simulationNames = [];
     private readonly List<SimulationSurface> _simulationSurfaces = [];
-    private AtmosSimulationId? _activeSimulationId;
     private long _knownSimulationRevision = -1;
     private int _newSimulationDepth = 1;
     private int _newSimulationHeight = AtmosChunkConstants.DefaultHeight;
@@ -29,7 +28,7 @@ public partial class SimulationViewer
 
     private void ReconcileSimulationSurfaces()
     {
-        if (_world == null || !_world.TryGetSimulations(_knownSimulationRevision, out long revision, out AtmosSimulation[] simulations))
+        if (_session.World == null || !_session.World.TryGetSimulations(_knownSimulationRevision, out long revision, out AtmosSimulation[] simulations))
             return;
 
         _knownSimulationRevision = revision;
@@ -44,7 +43,6 @@ public partial class SimulationViewer
         {
             removed.Dispose();
             _simulationSurfaces.Remove(removed);
-            _simulationNames.Remove(removed.Simulation.Id);
         }
 
         foreach (var simulation in simulations)
@@ -65,35 +63,32 @@ public partial class SimulationViewer
             }
 
             _simulationSurfaces.Add(surface);
-            _simulationNames.TryAdd(simulation.Id, $"Simulation {simulation.Id.Index + 1}");
         }
 
         _simulationSurfaces.Sort(static (left, right) => left.Simulation.Id.CompareTo(right.Simulation.Id));
-        AtmosSimulationId? nextActive = _activeSimulationId is { } active && liveIds.Contains(active)
-            ? active
-            : simulations.FirstOrDefault()?.Id;
-
-        SetActiveSimulation(nextActive);
+        _session.ReconcileSimulations();
+        SetActiveSimulation(_session.ActiveSimulationId);
     }
 
     private void SetActiveSimulation(AtmosSimulationId? id)
     {
-        if (_world == null || id == null || !_world.TryGetSimulation(id.Value, out var simulation))
+        if (_session.World == null || id == null || !_session.World.TryGetSimulation(id.Value, out var simulation))
         {
-            _activeSimulationId = null;
+            if (_session.World != null)
+                _session.SetActiveSimulation(null);
+
             _simulation = null;
             _viewport = null;
             return;
         }
 
-        if (_activeSimulationId == id && ReferenceEquals(_simulation, simulation))
+        if (_session.ActiveSimulationId == id && ReferenceEquals(_simulation, simulation))
             return;
 
         SaveActiveSurfaceState();
         var resolved = simulation!;
-        _activeSimulationId = id;
+        _session.SetActiveSimulation(id);
         _simulation = resolved;
-        _chunkDimensions = resolved.ChunkDimensions;
         var surface = _simulationSurfaces.First(candidate => candidate.Simulation.Id == id.Value);
         _viewport = surface.Viewport;
         _camera3D = surface.Camera;
@@ -103,11 +98,12 @@ public partial class SimulationViewer
 
     private void SaveActiveSurfaceState()
     {
-        if (_activeSimulationId == null)
+        // The session can already point at another simulation by now, so key off the one being presented.
+        if (_simulation == null)
             return;
 
         var surface =
-            _simulationSurfaces.FirstOrDefault(candidate => candidate.Simulation.Id == _activeSimulationId.Value);
+            _simulationSurfaces.FirstOrDefault(candidate => candidate.Simulation.Id == _simulation.Id);
 
         if (surface == null)
             return;
@@ -148,7 +144,7 @@ public partial class SimulationViewer
         SaveActiveSurfaceState();
         foreach (var surface in _simulationSurfaces)
         {
-            if (surface.Simulation.Id == _activeSimulationId && _drawData != null)
+            if (surface.Simulation.Id == _session.ActiveSimulationId && _drawData != null)
             {
                 surface.DrawData = _drawData;
                 continue;
@@ -219,7 +215,7 @@ public partial class SimulationViewer
             _viewport = surface.Viewport;
             _camera3D = surface.Camera;
             string name = GetSimulationName(surface.Simulation.Id);
-            string activeLabel = surface.Simulation.Id == _activeSimulationId ? " (Active)" : string.Empty;
+            string activeLabel = surface.Simulation.Id == _session.ActiveSimulationId ? " (Active)" : string.Empty;
             surface.Viewport.Draw(
                 $"{name} 3D{activeLabel}##viewport-{surface.Simulation.Id.Index}-{surface.Simulation.Id.Generation}",
                 RenderSimulationScene,
@@ -230,7 +226,7 @@ public partial class SimulationViewer
                     if (ImGui.IsItemClicked(ImGuiMouseButton.Left) || ImGui.IsItemClicked(ImGuiMouseButton.Middle))
                         requestedActive = surface.Simulation.Id;
 
-                    if (surface.Simulation.Id == _activeSimulationId)
+                    if (surface.Simulation.Id == _session.ActiveSimulationId)
                     {
                         Update3DPicking();
                         Render3DVoxelTooltip();
@@ -251,7 +247,7 @@ public partial class SimulationViewer
 
     private void RenderWorldPanel()
     {
-        if (!_showWorldPanel || _world == null)
+        if (!_showWorldPanel || _session.World == null)
             return;
 
         using var window = ImGuiExtensions.BeginWindow(
@@ -270,11 +266,11 @@ public partial class SimulationViewer
                 ImGuiTableFlags.Borders | ImGuiTableFlags.SizingStretchSame))
         {
             ImGui.TableNextColumn();
-            ImGuiExtensions.StatusField("SIMULATIONS", _world.Simulations.Count.ToString());
+            ImGuiExtensions.StatusField("SIMULATIONS", _session.World.Simulations.Count.ToString());
             ImGui.TableNextColumn();
-            ImGuiExtensions.StatusField("ACTIVE LINKS", _world.ActiveLinkCount.ToString());
+            ImGuiExtensions.StatusField("ACTIVE LINKS", _session.World.ActiveLinkCount.ToString());
             ImGui.TableNextColumn();
-            ImGuiExtensions.StatusField("TOPOLOGY VERSION", _world.TopologyVersion.ToString());
+            ImGuiExtensions.StatusField("TOPOLOGY VERSION", _session.World.TopologyVersion.ToString());
             ImGui.EndTable();
         }
 
@@ -296,7 +292,7 @@ public partial class SimulationViewer
                 ImGui.TableSetColumnIndex(0);
                 if (ImGui.Selectable(
                         $"{GetSimulationName(id)}##sim-{id.Index}-{id.Generation}",
-                        id == _activeSimulationId,
+                        id == _session.ActiveSimulationId,
                         ImGuiSelectableFlags.SpanAllColumns))
                 {
                     SetActiveSimulation(id);
@@ -315,10 +311,10 @@ public partial class SimulationViewer
         if (_simulationSurfaces.Count == 0)
             ImGui.TextDisabled("This world has no simulations.");
 
-        ImGui.BeginDisabled(_activeSimulationId == null || inspecting);
+        ImGui.BeginDisabled(_session.ActiveSimulationId == null || inspecting);
         if (ImGui.Button("Remove Simulation..."))
         {
-            _simulationPendingRemoval = _activeSimulationId;
+            _simulationPendingRemoval = _session.ActiveSimulationId;
             _requestRemoveSimulation = true;
             _removeSimulationModalOpen = true;
         }
@@ -349,7 +345,7 @@ public partial class SimulationViewer
         {
             try
             {
-                var added = _world.CreateSimulation(_newSimulationWidth, _newSimulationHeight, _newSimulationDepth);
+                var added = _session.AddSimulation(_newSimulationWidth, _newSimulationHeight, _newSimulationDepth);
                 ReconcileSimulationSurfaces();
                 SetActiveSimulation(added.Id);
                 SetSimulationFeedback($"Created {GetSimulationName(added.Id)}.", false);
@@ -357,7 +353,6 @@ public partial class SimulationViewer
             catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
             {
                 SetSimulationFeedback($"Could not create the simulation: {exception.Message}", true);
-                WriteException("Could not create simulation", exception);
             }
         }
 
@@ -384,9 +379,9 @@ public partial class SimulationViewer
         if (!modal.IsVisible)
             return;
 
-        if (_world == null ||
+        if (_session.World == null ||
             _simulationPendingRemoval is not { } id ||
-            !_world.TryGetSimulation(id, out var simulation))
+            !_session.World.TryGetSimulation(id, out var simulation))
         {
             ImGui.TextWrapped("The selected simulation no longer exists.");
             if (ImGui.Button("Close", new Vector2(120, 0)))
@@ -411,7 +406,7 @@ public partial class SimulationViewer
         {
             try
             {
-                _world.DestroySimulation(simulation);
+                _session.RemoveSimulation(id);
                 _simulationPendingRemoval = null;
                 _removeSimulationModalOpen = false;
                 ReconcileSimulationSurfaces();
@@ -421,7 +416,6 @@ public partial class SimulationViewer
             catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
             {
                 SetSimulationFeedback($"Could not remove {name}: {exception.Message}", true);
-                WriteException("Could not remove simulation", exception);
                 _removeSimulationModalOpen = false;
                 ImGui.CloseCurrentPopup();
             }
@@ -440,7 +434,7 @@ public partial class SimulationViewer
 
     private string GetSimulationName(AtmosSimulationId id)
     {
-        return _simulationNames.GetValueOrDefault(id, $"Simulation {id.Index + 1}");
+        return _session.GetSimulationName(id);
     }
 
     private void SetSimulationFeedback(string message, bool isError)

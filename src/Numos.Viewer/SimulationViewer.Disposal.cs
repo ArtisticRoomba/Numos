@@ -1,3 +1,4 @@
+using Numos.Workbench;
 using Raylib_cs;
 using rlImGui_cs;
 
@@ -35,7 +36,7 @@ public partial class SimulationViewer
         try
         {
             DisposeGraphics();
-            DisposeSimulationProject();
+            _session.Dispose();
         }
         finally
         {

@@ -5,6 +5,7 @@ using Numos.API;
 using Numos.CoreSim;
 using Numos.CoreSim.Replay;
 using Numos.Viewer.Ui;
+using Numos.Workbench;
 
 namespace Numos.Viewer;
 
@@ -31,9 +32,6 @@ public partial class SimulationViewer
     private bool _keepTimelinePlayheadCentered;
     private int? _pendingScrubTick;
     private bool _refreshingReplay;
-    private ReplayBranchSession? _replayBranches;
-    private float _replayElapsed;
-    private AtmosWorldReplayTimeline? _replayTimeline;
     private bool _showBranchHistory;
     private bool _showTimelinePanel = true;
     private bool _simulateWhileScrubbing = true;
@@ -44,10 +42,10 @@ public partial class SimulationViewer
 
     private void RenderTimelinePanel()
     {
-        if (!_showTimelinePanel || _replayTimeline == null || _replayBranches == null)
+        if (!_showTimelinePanel || _session.Timeline == null || _session.Branches == null)
             return;
 
-        var timeline = _replayTimeline;
+        var timeline = _session.Timeline;
         var viewport = ImGui.GetMainViewport();
         using var window = ImGuiExtensions.BeginWindow(
             "Timeline##replay",
@@ -58,10 +56,10 @@ public partial class SimulationViewer
         if (!window.IsVisible)
             return;
 
-        DrawTimelinePositionReadout(timeline, _replayBranches.SelectedBranch);
+        DrawTimelinePositionReadout(timeline, _session.Branches.SelectedBranch);
         ImGui.SeparatorText("Branches");
         DrawTimelineBranchControls();
-        timeline = _replayTimeline;
+        timeline = _session.Timeline;
 
         ImGui.SeparatorText("Transport");
         DrawTimelineTransport(timeline);
@@ -95,9 +93,9 @@ public partial class SimulationViewer
                 10,
                 Math.Max(
                     10,
-                    _replayBranches.MaximumHeadTick >= int.MaxValue
+                    _session.Branches.MaximumHeadTick >= int.MaxValue
                         ? int.MaxValue
-                        : checked((int)_replayBranches.MaximumHeadTick + 1)));
+                        : checked((int)_session.Branches.MaximumHeadTick + 1)));
 
             ImGui.EndTable();
         }
@@ -115,7 +113,7 @@ public partial class SimulationViewer
             "##timeline-first-visible-tick",
             ref _timelineFirstTick,
             (int)timeline.Start.Tick,
-            Math.Max((int)timeline.Start.Tick, checked((int)_replayBranches.MaximumHeadTick)));
+            Math.Max((int)timeline.Start.Tick, checked((int)_session.Branches.MaximumHeadTick)));
 
         ImGui.EndDisabled();
 
@@ -190,7 +188,7 @@ public partial class SimulationViewer
 
     private void DrawTimelineBranchControls()
     {
-        var branches = _replayBranches!;
+        var branches = _session.Branches!;
         var selected = branches.SelectedBranch;
         ImGui.SetNextItemWidth(190f);
         if (ImGui.BeginCombo("Selected branch", selected.Name))
@@ -746,7 +744,7 @@ public partial class SimulationViewer
         AtmosWorldReplayTimeline timeline,
         IReadOnlyList<AtmosWorldRecordedOperation> operations)
     {
-        IReadOnlyList<ReplayBranchInfo> branches = _replayBranches!.Branches;
+        IReadOnlyList<ReplayBranchInfo> branches = _session.Branches!.Branches;
         float lineHeight = ImGui.GetTextLineHeight();
         float headerHeight = MathF.Max(24f, lineHeight + 11f);
         const float rowHeight = 28f;
@@ -1130,14 +1128,9 @@ public partial class SimulationViewer
         _isPaused = true;
         try
         {
-            var branch = _replayBranches!.CreateBranchFromCurrentTick();
-            _replayTimeline = _replayBranches.Timeline;
+            _session.CreateBranch();
             _timelineOperation = null;
             _timelineError = null;
-            WriteMessage(
-                ViewerLogLevel.Info,
-                "Replay",
-                $"Created {branch.Name} from tick {branch.Fork.Tick}.");
         }
         catch (Exception exception)
         {
@@ -1152,20 +1145,13 @@ public partial class SimulationViewer
         _isPaused = true;
         try
         {
-            _replayBranches!.SelectBranch(branchId, tick);
-            _replayTimeline = _replayBranches.Timeline;
+            _session.SelectBranch(branchId, tick);
             _timelineOperation = null;
             _pendingScrubTick = null;
             _timelineError = null;
-            var branch = _replayBranches.SelectedBranch;
-            WriteMessage(
-                ViewerLogLevel.Info,
-                "Replay",
-                $"Selected {branch.Name} on tick {_replayTimeline.Position.Tick}.");
         }
         catch (Exception exception)
         {
-            _replayTimeline = _replayBranches!.Timeline;
             SetTimelineError("Could not select the replay branch", exception);
         }
 
@@ -1177,8 +1163,7 @@ public partial class SimulationViewer
         _isPaused = true;
         try
         {
-            _replayBranches!.ContinueSelectedBranch();
-            _replayTimeline = _replayBranches.Timeline;
+            _session.ContinueBranch();
             _timelineError = null;
         }
         catch (Exception exception)
@@ -1194,7 +1179,7 @@ public partial class SimulationViewer
         _isPaused = true;
         try
         {
-            _replayTimeline!.SeekTick(tick);
+            _session.SeekTick(tick);
             _timelineError = null;
         }
         catch (Exception exception)
@@ -1210,7 +1195,7 @@ public partial class SimulationViewer
         _isPaused = true;
         try
         {
-            _replayTimeline!.SeekPosition(position);
+            _session.SeekPosition(position);
             _timelineError = null;
         }
         catch (Exception exception)
@@ -1226,7 +1211,7 @@ public partial class SimulationViewer
         _isPaused = true;
         try
         {
-            _replayTimeline!.ReturnToHead();
+            _session.ReturnToHead();
             _timelineError = null;
         }
         catch (Exception exception)
@@ -1238,62 +1223,44 @@ public partial class SimulationViewer
     }
 
     /// <summary>
-    ///     Records a failed timeline action for the Timeline panel and the log. The panel keeps showing it until the
-    ///     next successful timeline action clears it.
+    ///     Records a failed timeline action for the Timeline panel. The session already logged it. The panel keeps
+    ///     showing it until the next successful timeline action clears it.
     /// </summary>
     private void SetTimelineError(string action, Exception exception)
     {
         _timelineError = $"{action}. {exception.Message}";
-        WriteException(action, exception);
     }
 
     private void StepTimelineForward()
     {
-        if (_replayTimeline == null || _world == null) return;
+        if (_session.Timeline == null || _session.World == null) return;
 
-        if (_replayTimeline.IsInspecting)
+        if (_session.IsInspecting)
         {
-            if (_replayTimeline.Position.Tick >= _replayTimeline.Head.Tick)
+            if (_session.Timeline.Position.Tick >= _session.Timeline.Head.Tick)
             {
                 _isPaused = true;
                 return;
             }
 
             bool wasPaused = _isPaused;
-            SeekTimelineTick(_replayTimeline.Position.Tick + 1);
+            SeekTimelineTick(_session.Timeline.Position.Tick + 1);
             _isPaused = wasPaused || _timelineError != null;
         }
         else
         {
-            _world.Tick();
-            _replayTimeline.ObserveLiveState();
+            _session.Tick();
             RefreshPresentation();
         }
     }
 
+    /// <summary>
+    ///     Rebuilds presentation after a timeline move. The session has already restored its configuration into the
+    ///     same <see cref="AtmosConfig" /> instance that the visualizations retain.
+    /// </summary>
     private void RefreshReplayPresentation()
     {
         ReconcileSimulationSurfaces();
-        var restored = new AtmosConfig(_world!.Config);
-        // Visualizations retain this builder; copy restored values into the same instance.
-        _config!.GasRegistry = restored.GasRegistry;
-        _config!.SolverConfigurations = restored.SolverConfigurations;
-        _config!.GlobalTemperature = restored.GlobalTemperature;
-        _config!.DefaultTemperatureFallback = restored.DefaultTemperatureFallback;
-        _config!.DefaultMolarHeatCapacityAtConstantVolume = restored.DefaultMolarHeatCapacityAtConstantVolume;
-        _config!.VoxelVolume = restored.VoxelVolume;
-        _config!.SaturationReferencePressure = restored.SaturationReferencePressure;
-        _config!.DefaultDiffusionCoefficient = restored.DefaultDiffusionCoefficient;
-        _config!.SpaceTemperature = restored.SpaceTemperature;
-        _config!.BulkFlowCoefficient = restored.BulkFlowCoefficient;
-        _config!.VacuumThreshold = restored.VacuumThreshold;
-        _config!.SleepThreshold = restored.SleepThreshold;
-        _config!.SleepEpsilon = restored.SleepEpsilon;
-        _config!.ThermalConductance = restored.ThermalConductance;
-        _config!.CondensationRateFactor = restored.CondensationRateFactor;
-        _config!.MaxPressureTransferFractionPerNeighbor = restored.MaxPressureTransferFractionPerNeighbor;
-        _config!.AccumulatorWakeThreshold = restored.AccumulatorWakeThreshold;
-        _config!.AccumulatorMaxAliveTicks = restored.AccumulatorMaxAliveTicks;
         _voxelDetailCache.Clear();
         _refreshingReplay = true;
         try

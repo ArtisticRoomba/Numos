@@ -1,5 +1,6 @@
 using System.Numerics;
 using ImGuiNET;
+using Numos.Workbench;
 using Numos.API;
 using Numos.Maths;
 using Numos.Viewer.Ui;
@@ -31,11 +32,11 @@ public partial class SimulationViewer
 
     private void RenderTopologyControls(bool inspecting)
     {
-        if (_world == null)
+        if (_session.World == null)
             return;
 
         ImGui.SeparatorText("Topology");
-        IReadOnlyList<AtmosWorldLinkSetSnapshot> linkSets = _world.GetLinkSets();
+        IReadOnlyList<AtmosWorldLinkSetSnapshot> linkSets = _session.World.GetLinkSets();
         if (_selectedLinkSet is { } selectedHandle && linkSets.All(set => set.Handle != selectedHandle))
             _selectedLinkSet = null;
 
@@ -238,17 +239,17 @@ public partial class SimulationViewer
             {
                 try
                 {
-                    ExplicitLinkDefinition[] links = BuildDockLinks();
-                    var dock = _world.CreateDock(links);
+                    DockDefinition definition = BuildDockDefinition();
+                    int linkCount = _session.BuildDockLinks(definition).Length;
+                    var dock = _session.CreateDock(definition);
                     _selectedLinkSet = dock.Links;
                     SetTopologyFeedback(
-                        $"Created dock with {links.Length} links. It will activate on the next world tick.",
+                        $"Created dock with {linkCount} links. It will activate on the next world tick.",
                         false);
                 }
                 catch (Exception exception)
                 {
                     SetTopologyFeedback($"Could not create the dock: {exception.Message}", true);
-                    WriteException("Could not create dock", exception);
                 }
             }
 
@@ -266,17 +267,13 @@ public partial class SimulationViewer
 
         bool changed = false;
         simulationIndex = Math.Clamp(simulationIndex, 0, _simulationSurfaces.Count - 1);
-        string simulationLabel = _simulationNames.GetValueOrDefault(
-            _simulationSurfaces[simulationIndex].Simulation.Id,
-            $"Simulation {_simulationSurfaces[simulationIndex].Simulation.Id.Index + 1}");
+        string simulationLabel = _session.GetSimulationName(_simulationSurfaces[simulationIndex].Simulation.Id);
 
         if (ImGui.BeginCombo($"{label} simulation", simulationLabel))
         {
             for (int index = 0; index < _simulationSurfaces.Count; index++)
             {
-                string candidate = _simulationNames.GetValueOrDefault(
-                    _simulationSurfaces[index].Simulation.Id,
-                    $"Simulation {_simulationSurfaces[index].Simulation.Id.Index + 1}");
+                string candidate = _session.GetSimulationName(_simulationSurfaces[index].Simulation.Id);
 
                 if (ImGui.Selectable(candidate, index == simulationIndex))
                 {
@@ -320,8 +317,8 @@ public partial class SimulationViewer
         if (!modal.IsVisible)
             return;
 
-        var selected = _world != null && _topologyPendingRemoval is { } handle
-            ? _world.GetLinkSets().FirstOrDefault(set => set.Handle == handle)
+        var selected = _session.World != null && _topologyPendingRemoval is { } handle
+            ? _session.World.GetLinkSets().FirstOrDefault(set => set.Handle == handle)
             : null;
 
         if (selected == null)
@@ -348,7 +345,7 @@ public partial class SimulationViewer
         {
             try
             {
-                _world!.DestroyLinks(selected.Handle);
+                _session.DestroyLinkSet(selected.Handle);
                 _topologyPendingRemoval = null;
                 _removeTopologyModalOpen = false;
                 SetTopologyFeedback("Queued the connection for removal on the next world tick.", false);
@@ -357,7 +354,6 @@ public partial class SimulationViewer
             catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
             {
                 SetTopologyFeedback($"Could not remove the connection: {exception.Message}", true);
-                WriteException("Could not remove topology", exception);
                 _removeTopologyModalOpen = false;
                 ImGui.CloseCurrentPopup();
             }
@@ -374,7 +370,7 @@ public partial class SimulationViewer
         ImGui.SetItemDefaultFocus();
     }
 
-    private ExplicitLinkDefinition[] BuildDockLinks()
+    private DockDefinition BuildDockDefinition()
     {
         var firstSurface = _simulationSurfaces[Math.Clamp(_dockFirstSimulation, 0, _simulationSurfaces.Count - 1)];
         var secondSurface = _simulationSurfaces[Math.Clamp(_dockSecondSimulation, 0, _simulationSurfaces.Count - 1)];
@@ -385,35 +381,13 @@ public partial class SimulationViewer
 
         var firstChunk = firstChunks[Math.Clamp(_dockFirstChunk, 0, firstChunks.Length - 1)];
         var secondChunk = secondChunks[Math.Clamp(_dockSecondChunk, 0, secondChunks.Length - 1)];
-        var firstSize = GetFaceSize(firstSurface.Simulation.ChunkDimensions, (DockFace)_dockFirstFace);
-        var secondSize = GetFaceSize(secondSurface.Simulation.ChunkDimensions, (DockFace)_dockSecondFace);
-        bool quarterTurn = (_dockRotation & 1) != 0;
-        if (firstSize.Width != (quarterTurn ? secondSize.Height : secondSize.Width) ||
-            firstSize.Height != (quarterTurn ? secondSize.Width : secondSize.Height))
-            throw new InvalidOperationException("The selected faces do not have matching dimensions after rotation.");
-
-        var links = new ExplicitLinkDefinition[firstSize.Width * firstSize.Height];
-        int destination = 0;
-        for (int v = 0; v < firstSize.Height; v++)
-        for (int u = 0; u < firstSize.Width; u++)
-        {
-            (int secondU, int secondV) = RotateFace(u, v, secondSize, _dockRotation);
-            if (_dockFlipU) secondU = secondSize.Width - 1 - secondU;
-            if (_dockFlipV) secondV = secondSize.Height - 1 - secondV;
-            ushort firstIndex = GetFaceVoxelIndex(firstSurface.Simulation.ChunkDimensions, (DockFace)_dockFirstFace, u, v);
-            ushort secondIndex = GetFaceVoxelIndex(
-                secondSurface.Simulation.ChunkDimensions,
-                (DockFace)_dockSecondFace,
-                secondU,
-                secondV);
-
-            links[destination++] = new ExplicitLinkDefinition(
-                new AtmosCellRef(firstSurface.Simulation.Id, firstChunk, firstIndex),
-                new AtmosCellRef(secondSurface.Simulation.Id, secondChunk, secondIndex),
-                GetTopologyFlags());
-        }
-
-        return links;
+        return new DockDefinition(
+            new DockEndpoint(firstSurface.Simulation.Id, firstChunk.Position, (DockFace)_dockFirstFace),
+            new DockEndpoint(secondSurface.Simulation.Id, secondChunk.Position, (DockFace)_dockSecondFace),
+            _dockRotation,
+            _dockFlipU,
+            _dockFlipV,
+            GetTopologyFlags());
     }
 
     private AtmosCellRef? GetSelectedAtmosCell()
@@ -435,12 +409,12 @@ public partial class SimulationViewer
 
     private void CreatePortalFromCapturedEndpoints()
     {
-        if (_world == null || !_portalFirst.HasValue || !_portalSecond.HasValue)
+        if (_session.World == null || !_portalFirst.HasValue || !_portalSecond.HasValue)
             return;
 
         try
         {
-            var portal = _world.CreatePortal(
+            var portal = _session.CreatePortal(
                 _portalFirst.Value,
                 _portalSecond.Value,
                 GetTopologyFlags());
@@ -453,16 +427,15 @@ public partial class SimulationViewer
         catch (Exception exception)
         {
             SetTopologyFeedback($"Could not create the portal: {exception.Message}", true);
-            WriteException("Could not create portal", exception);
         }
     }
 
     private void DrawTopologyOverlay()
     {
-        if (_world == null || _simulation == null || _drawData == null)
+        if (_session.World == null || _simulation == null || _drawData == null)
             return;
 
-        foreach (var set in _world.GetLinkSets())
+        foreach (var set in _session.World.GetLinkSets())
         {
             var color = GetLinkColor(set.Handle, set.State);
             foreach (var link in set.Links)
@@ -532,53 +505,5 @@ public partial class SimulationViewer
     {
         _topologyFeedback = message;
         _topologyFeedbackIsError = isError;
-    }
-
-    private static FaceSize GetFaceSize(Int3 dimensions, DockFace face)
-    {
-        return face switch
-        {
-            DockFace.NegativeX or DockFace.PositiveX => new FaceSize(dimensions.Y, dimensions.Z),
-            DockFace.NegativeY or DockFace.PositiveY => new FaceSize(dimensions.X, dimensions.Z),
-            _ => new FaceSize(dimensions.X, dimensions.Y)
-        };
-    }
-
-    private static (int U, int V) RotateFace(int u, int v, FaceSize destination, int rotation)
-    {
-        return (rotation & 3) switch
-        {
-            0 => (u, v),
-            1 => (destination.Width - 1 - v, u),
-            2 => (destination.Width - 1 - u, destination.Height - 1 - v),
-            _ => (v, destination.Height - 1 - u)
-        };
-    }
-
-    private static ushort GetFaceVoxelIndex(Int3 dimensions, DockFace face, int u, int v)
-    {
-        (int x, int y, int z) = face switch
-        {
-            DockFace.NegativeX => (0, u, v),
-            DockFace.PositiveX => (dimensions.X - 1, u, v),
-            DockFace.NegativeY => (u, 0, v),
-            DockFace.PositiveY => (u, dimensions.Y - 1, v),
-            DockFace.NegativeZ => (u, v, 0),
-            _ => (u, v, dimensions.Z - 1)
-        };
-
-        return checked((ushort)(x + dimensions.X * (y + dimensions.Y * z)));
-    }
-
-    private readonly record struct FaceSize(int Width, int Height);
-
-    private enum DockFace
-    {
-        NegativeX,
-        PositiveX,
-        NegativeY,
-        PositiveY,
-        NegativeZ,
-        PositiveZ
     }
 }

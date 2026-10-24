@@ -4,12 +4,13 @@ using System.Text;
 using ImGuiNET;
 using Numos.Viewer.Ui;
 using Raylib_cs;
+using Numos.Workbench;
 
 namespace Numos.Viewer;
 
 public partial class SimulationViewer
 {
-    private readonly ViewerLog _messages = new();
+    private readonly WorkbenchLog _messages = new();
     private bool _focusMessagesPanelRequested;
     private bool _messageAutoScroll = true;
     private string _messageFilter = string.Empty;
@@ -22,20 +23,19 @@ public partial class SimulationViewer
     private TextWriter? _originalConsoleError;
     private TextWriter? _originalConsoleOut;
     private bool _showMessagesPanel;
-    private ViewerConsoleWriter? _viewerConsoleError;
-    private ViewerConsoleWriter? _viewerConsoleOut;
+    private WorkbenchConsoleWriter? _viewerConsoleError;
+    private WorkbenchConsoleWriter? _viewerConsoleOut;
 
     private void StartMessageCapture()
     {
         _originalConsoleOut = Console.Out;
         _originalConsoleError = Console.Error;
-        _viewerConsoleOut = new ViewerConsoleWriter(_originalConsoleOut, _messages, ViewerLogLevel.Info);
-        _viewerConsoleError = new ViewerConsoleWriter(_originalConsoleError, _messages, ViewerLogLevel.Error);
+        _viewerConsoleOut = new WorkbenchConsoleWriter(_originalConsoleOut, _messages, WorkbenchLogLevel.Info);
+        _viewerConsoleError = new WorkbenchConsoleWriter(_originalConsoleError, _messages, WorkbenchLogLevel.Error);
         Console.SetOut(_viewerConsoleOut);
         Console.SetError(_viewerConsoleError);
         AppDomain.CurrentDomain.UnhandledException += HandleUnhandledException;
         TaskScheduler.UnobservedTaskException += HandleUnobservedTaskException;
-        WriteMessage(ViewerLogLevel.Info, "Viewer", $"Numos.Viewer {ViewerBuildInfo.PackageVersion} started.");
     }
 
     private void StopMessageCapture()
@@ -60,7 +60,7 @@ public partial class SimulationViewer
         if (args.ExceptionObject is Exception exception)
             WriteFatalException("Unhandled exception", exception);
         else
-            WriteMessage(ViewerLogLevel.Fatal, "Runtime", $"Unhandled exception: {args.ExceptionObject}");
+            WriteMessage(WorkbenchLogLevel.Fatal, "Runtime", $"Unhandled exception: {args.ExceptionObject}");
     }
 
     private void HandleUnobservedTaskException(object? sender, UnobservedTaskExceptionEventArgs args)
@@ -68,7 +68,7 @@ public partial class SimulationViewer
         WriteException("Unobserved task exception", args.Exception);
     }
 
-    private void WriteMessage(ViewerLogLevel level, string source, string message)
+    private void WriteMessage(WorkbenchLogLevel level, string source, string message)
     {
         _messages.Write(level, source, message);
         RequestNextFrame();
@@ -76,13 +76,13 @@ public partial class SimulationViewer
 
     private void WriteException(string context, Exception exception)
     {
-        _messages.Write(ViewerLogLevel.Error, "Exception", $"{context}: {exception.Message}", exception.ToString());
+        _messages.Write(WorkbenchLogLevel.Error, "Exception", $"{context}: {exception.Message}", exception.ToString());
         RequestNextFrame();
     }
 
     private void WriteFatalException(string context, Exception exception)
     {
-        _messages.Write(ViewerLogLevel.Fatal, "Exception", $"{context}: {exception.Message}", exception.ToString());
+        _messages.Write(WorkbenchLogLevel.Fatal, "Exception", $"{context}: {exception.Message}", exception.ToString());
         RequestNextFrame();
     }
 
@@ -163,7 +163,7 @@ public partial class SimulationViewer
         _messagesPanelVisible = true;
         _messages.MarkSeen();
 
-        ViewerLogEntry[] entries = _messages.Snapshot();
+        WorkbenchLogEntry[] entries = _messages.Snapshot();
         ImGui.SetNextItemWidth(230f);
         ImGui.InputTextWithHint("##message-filter", "Filter messages...", ref _messageFilter, 256);
         ImGui.SameLine();
@@ -173,7 +173,7 @@ public partial class SimulationViewer
         ImGui.Checkbox("Auto-scroll", ref _messageAutoScroll);
         ImGui.SameLine();
 
-        ViewerLogEntry[] visibleEntries = entries.Where(IsMessageVisible).ToArray();
+        WorkbenchLogEntry[] visibleEntries = entries.Where(IsMessageVisible).ToArray();
         if (ImGui.Button("Copy"))
             Raylib.SetClipboardText(FormatMessages(visibleEntries));
 
@@ -194,7 +194,7 @@ public partial class SimulationViewer
         _messagesLastRenderedSequence = lastSequence;
     }
 
-    private static void RenderMessageTable(ViewerLogEntry[] entries, bool scrollToBottom)
+    private static void RenderMessageTable(WorkbenchLogEntry[] entries, bool scrollToBottom)
     {
         const ImGuiTableFlags flags =
             ImGuiTableFlags.RowBg |
@@ -248,7 +248,7 @@ public partial class SimulationViewer
         ImGui.EndTable();
     }
 
-    private bool IsMessageVisible(ViewerLogEntry entry)
+    private bool IsMessageVisible(WorkbenchLogEntry entry)
     {
         if ((int)entry.Level < _messageMinimumLevel)
             return false;
@@ -259,7 +259,7 @@ public partial class SimulationViewer
                (entry.Details?.Contains(_messageFilter, StringComparison.OrdinalIgnoreCase) ?? false);
     }
 
-    private static string FormatMessages(IEnumerable<ViewerLogEntry> entries)
+    private static string FormatMessages(IEnumerable<WorkbenchLogEntry> entries)
     {
         var text = new StringBuilder();
         foreach (var entry in entries)
@@ -272,33 +272,33 @@ public partial class SimulationViewer
         return text.ToString();
     }
 
-    private static string FormatMessage(ViewerLogEntry entry)
+    private static string FormatMessage(WorkbenchLogEntry entry)
     {
         return $"{entry.Timestamp:HH:mm:ss.fff} [{GetMessageLevelLabel(entry.Level),-7}] [{entry.Source}] {entry.Message}";
     }
 
-    private static string GetMessageLevelLabel(ViewerLogLevel level)
+    private static string GetMessageLevelLabel(WorkbenchLogLevel level)
     {
         return level switch
         {
-            ViewerLogLevel.Debug => "DEBG",
-            ViewerLogLevel.Info => "INFO",
-            ViewerLogLevel.Warn => "WARN",
-            ViewerLogLevel.Error => "ERR",
-            ViewerLogLevel.Fatal => "FATL",
+            WorkbenchLogLevel.Debug => "DEBG",
+            WorkbenchLogLevel.Info => "INFO",
+            WorkbenchLogLevel.Warn => "WARN",
+            WorkbenchLogLevel.Error => "ERR",
+            WorkbenchLogLevel.Fatal => "FATL",
             _ => level.ToString().ToUpperInvariant()
         };
     }
 
-    private static Vector4 GetMessageColor(ViewerLogLevel level)
+    private static Vector4 GetMessageColor(WorkbenchLogLevel level)
     {
         return level switch
         {
-            ViewerLogLevel.Debug => ViewerTheme.SecondaryText,
-            ViewerLogLevel.Info => ViewerTheme.PrimaryText,
-            ViewerLogLevel.Warn => ViewerTheme.Caution,
-            ViewerLogLevel.Error => ViewerTheme.Error,
-            ViewerLogLevel.Fatal => ViewerTheme.Error,
+            WorkbenchLogLevel.Debug => ViewerTheme.SecondaryText,
+            WorkbenchLogLevel.Info => ViewerTheme.PrimaryText,
+            WorkbenchLogLevel.Warn => ViewerTheme.Caution,
+            WorkbenchLogLevel.Error => ViewerTheme.Error,
+            WorkbenchLogLevel.Fatal => ViewerTheme.Error,
             _ => ViewerTheme.PrimaryText
         };
     }
