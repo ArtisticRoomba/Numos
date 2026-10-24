@@ -274,8 +274,9 @@ runtime configuration. `AtmosChunkConstants` holds the default chunk dimensions 
 
 **Euler transport settings.** The `euler-flow` stage keeps its settings in an `EulerFlowConfig` entry (key
 `euler-flow`) of `SolverConfigurations` and runs with `EulerFlowConfig.Default` when there is none. The per-tick
-snapshot resolves the entry once per capture. Each setting is normalized at capture. Section 5 explains the physics behind
-them.
+snapshot resolves the entry once per capture. Each setting is normalized at capture. The settings are `[NumosSerialize]`
+members, so the entry is checkpointed, hashed, and saved in `.numos` archives with no hand-written wire code. Section 5
+explains the physics behind them.
 
 | Setting                   | Default   | What it does                                                                                                                                                                                                                                                                                  |
 |---------------------------|-----------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|

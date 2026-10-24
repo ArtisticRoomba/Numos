@@ -168,7 +168,7 @@ detached copies. The current implementation has no copy-on-write storage, delta 
 `AtmosSimulationCheckpoint.PayloadBytes` reports bytes in copied chunk and solver arrays. It excludes managed object
 headers and field names.
 
-The world checkpoint schema is `AtmosWorldCheckpoint.CurrentFormatVersion` 12. The grid schema inside it is format
+The world checkpoint schema is `AtmosWorldCheckpoint.CurrentFormatVersion` 13. The grid schema inside it is format
 version 10, compatibility version 4. World version 6 added the reference and per-gas molar masses to the configuration
 section. World version 7 made that section carry the built-in solver configurations that have a wire encoding.
 After the gas registry comes a count, then each entry's key followed by its payload. Before version 7 the count was
@@ -181,6 +181,8 @@ moved the configuration, gases, and chunks onto field-id schema payloads and has
 World version 10 and grid version 9 replaced the numbered field ids with ids that hash the member names.
 World version 11 added the `[NumosSerialize]` state of class solvers. World version 12 and grid version 10 generate the
 checkpoint types from the live types, so every part of them is field-id records, link slots and solver metadata included.
+World version 13 moved `EulerFlowConfig` from a fixed hand-written layout to the same field-id records as every other
+configuration.
 Replay is experimental, so Numos rejects older in-memory checkpoint schemas instead of translating them.
 
 ### Checkpoints are generated from the live types
@@ -684,21 +686,22 @@ A `.numos` replay contains a small provenance header, one complete initial world
 semantic opcodes. It stores initial and final state hashes. The Viewer verifies both hashes. After loading, the Viewer
 generates scrub checkpoints every 50 ticks, so those large acceleration snapshots never enter the file.
 
-The checkpoint section is the world checkpoint format version (12), the archive's initial and head hashes, then the
+The checkpoint section is the world checkpoint format version (13), the archive's initial and head hashes, then the
 checkpoint's generated payload with its length. Each simulation inside carries the grid format version (10). A file from
 an older layout fails to load with an unsupported-schema error. Numos does not misread it. Older layouts include files
 written before configuration and solver state moved out of the per-simulation checkpoints, before molar masses joined
 the configuration, before solver configurations gained a wire encoding, and before explicit links carried an area
 fraction. Format 9/8 moved the configuration, gases, and chunks to length-prefixed schema payloads with numbered field
 ids. Format 10/9 derives each field id from the member name. World format 11 added solver state. Format 12/10 is the
-first where the whole checkpoint is generated from the live types.
+first where the whole checkpoint is generated from the live types. World format 13 moved `EulerFlowConfig` onto the
+state schema.
 
 Viewer branch graphs are session state. Saving writes the selected branch, either through its preserved head or through
 the current inspection position. Save branches individually when more than one future must survive closing the project.
 
-Saving or loading rejects rollback chunk fields whose element type is not portable (see below) and hand-written host
-solver configurations, because the format has no encoding for them. `EulerFlowConfig` is the one hand-written exception.
-The codec writes it as its key (`euler-flow`) followed by its settings and reads it back through a reader table.
+Saving or loading rejects rollback chunk fields whose element type is not portable (see below) and hand-written
+solver configurations, because the format has no encoding for them. The built-in `EulerFlowConfig` and
+`GasReactionConfig` both carry `[NumosSerialize]` members, so a world with either one is portable.
 
 Custom world solvers are saved by name, with their `[NumosSerialize]` state. A file that has them loads anywhere, but
 only a host that registers the same solvers can replay it, through `AtmosWorldReplayTimeline.Restore`. `Import`, which

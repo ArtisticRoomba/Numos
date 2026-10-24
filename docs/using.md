@@ -396,7 +396,8 @@ usable. The settings most hosts touch:
 - `VelocityFloor` (0.005 m/s): lets a settled room sleep.
 - `MomentumDamping` (0): crude friction for hallways that ring.
 
-A `.numos` archive carries `EulerFlowConfig`. The
+`EulerFlowConfig` marks its settings `[NumosSerialize]` like any other configuration (see below), so a `.numos`
+archive carries it and loading needs no registration. The
 [technical documentation](atmospherics_technical_documentation.md#35-configuration-and-the-per-tick-snapshot)
 tabulates every setting with the physics behind it.
 
