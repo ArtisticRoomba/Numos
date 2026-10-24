@@ -622,7 +622,7 @@ internal static class EulerSweep
         ///         sweep survives in it.
         ///     </para>
         ///     <para>
-        ///         The species pass has already written the species rows. Momentum is updated in float; the energy
+        ///         The species pass has already written the species rows. Momentum is updated in float. The energy
         ///         difference is formed in double so the subtraction from the large thermal part does not lose it.
         ///         The speed is clamped to <see cref="EulerFlow.EulerFlowConfig.MaxVelocity" /> before the primitive
         ///         state is rebuilt, and the clamp is counted. A cell whose primitive state does not fit in float
