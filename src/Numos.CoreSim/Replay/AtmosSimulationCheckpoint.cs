@@ -19,9 +19,10 @@ public sealed class AtmosSimulationCheckpoint
     ///     Identifies the in-memory checkpoint schema used to interpret this data.
     /// </summary>
     /// <remarks>
-    ///     Version 7 added the three per-voxel momentum arrays to every chunk checkpoint.
+    ///     Version 7 added the three per-voxel momentum arrays to every chunk checkpoint. Version 8 writes each chunk as
+    ///     a field-id state payload and hashes it with the same encoding as the wire.
     /// </remarks>
-    public const int CurrentFormatVersion = 7;
+    public const int CurrentFormatVersion = 8;
 
     /// <summary>
     ///     Identifies the structural and deterministic-math contract required to restore this data.
