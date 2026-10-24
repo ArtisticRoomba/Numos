@@ -18,9 +18,10 @@ public sealed class AtmosWorldCheckpoint
     /// <remarks>
     ///     Version 8 added the per-link area fraction to every explicit link, in link-set slots and in
     ///     <see cref="CreateAtmosLinkSetOperation" /> payloads. Version 9 writes the configuration as a field-id state
-    ///     payload and hashes the world with the same encoding as the wire.
+    ///     payload and hashes the world with the same encoding as the wire. Version 10 derives each field id from the
+    ///     member name.
     /// </remarks>
-    public const int CurrentFormatVersion = 9;
+    public const int CurrentFormatVersion = 10;
 
     // See AtmosSimulationCheckpoint: immutable after construction, so the digest is computed once.
     private ulong _digest;

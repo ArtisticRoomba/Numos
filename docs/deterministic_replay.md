@@ -166,8 +166,8 @@ detached copies. The current implementation has no copy-on-write storage, delta 
 `AtmosSimulationCheckpoint.PayloadBytes` reports bytes in copied chunk and solver arrays. It excludes managed object
 headers and field names.
 
-The world checkpoint schema is `AtmosWorldCheckpoint.CurrentFormatVersion` 9. The grid schema inside it is format
-version 8, compatibility version 4. World version 6 added the reference and per-gas molar masses to the configuration
+The world checkpoint schema is `AtmosWorldCheckpoint.CurrentFormatVersion` 10. The grid schema inside it is format
+version 9, compatibility version 4. World version 6 added the reference and per-gas molar masses to the configuration
 section. World version 7 made that section carry the built-in solver configurations that have a wire encoding.
 After the gas registry comes a count, then each entry's key followed by its payload. Before version 7 the count was
 always zero. World version 8 gave every explicit link an area fraction. It is one float after the link's flags, both in
@@ -176,6 +176,7 @@ link-set slots and in `CreateAtmosLinkSetOperation` payloads. Numos writes NaN w
 hash covers the fraction the same way. Grid version 7 added the three per-voxel momentum arrays to every chunk. Numos
 hashes them like any other chunk array, so the compatibility version moved with them. World version 9 and grid version 8
 moved the configuration, gases, and chunks onto field-id schema payloads and hash all of them with the wire encoding.
+World version 10 and grid version 9 replaced the numbered field ids with ids that hash the member names.
 Replay is experimental, so Numos rejects older in-memory checkpoint schemas instead of translating them.
 
 ### Checkpoint fields come from the state schema
@@ -570,12 +571,12 @@ A `.numos` replay contains a small provenance header, one complete initial world
 semantic opcodes. It stores initial and final state hashes. The Viewer verifies both hashes. After loading, the Viewer
 generates scrub checkpoints every 50 ticks, so those large acceleration snapshots never enter the file.
 
-The checkpoint section carries the world checkpoint format version (9) and each simulation the grid format version (8).
+The checkpoint section carries the world checkpoint format version (10) and each simulation the grid format version (9).
 A file from an older layout fails to load with an unsupported-schema error. Numos does not misread it. Older layouts
 include files written before configuration and solver state moved out of the per-simulation checkpoints, before molar
 masses joined the configuration, before solver configurations gained a wire encoding, and before explicit links carried
-an area fraction. Format 9/8 is the move to field ids. Configuration, gases, and chunks became length-prefixed schema
-payloads.
+an area fraction. Format 9/8 moved the configuration, gases, and chunks to length-prefixed schema payloads with numbered field ids.
+Format 10/9 derives each field id from the member name.
 
 Viewer branch graphs are session state. Saving writes the selected branch, either through its preserved head or through
 the current inspection position. Save branches individually when more than one future must survive closing the project.

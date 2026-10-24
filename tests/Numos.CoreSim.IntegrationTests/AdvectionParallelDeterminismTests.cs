@@ -13,9 +13,9 @@ public sealed class AdvectionParallelDeterminismTests
     /// <remarks>
     ///     Update this only together with a deliberate physics or digest-format change, and confirm the new value is
     ///     stable across worker counts before approving it. It is a grid-only checkpoint digest, last recaptured for
-    ///     grid checkpoint format 8, which hashes state with the wire encoding.
+    ///     grid checkpoint format 9, which names fields by hashed member names.
     /// </remarks>
-    private const ulong X64ExpectedDigest = 17439993227758339222UL;
+    private const ulong X64ExpectedDigest = 901656640449908173UL;
 
     [Test]
     [Explicit(

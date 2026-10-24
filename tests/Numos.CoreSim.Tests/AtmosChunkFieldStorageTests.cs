@@ -269,7 +269,7 @@ public sealed class AtmosChunkFieldStorageTests
     [Test]
     public void SolverArrayHash_MatchesObjectKeyedFormat()
     {
-        // Pins the solver-array section of the state hash as of checkpoint format 8, where strings hash as UTF-8 like
+        // Pins the solver-array section of the state hash as of checkpoint format 9, where strings hash as UTF-8 like
         // the wire. It first came from the object-keyed GetOrCreateSolverArray path this storage replaced. A change here
         // breaks every saved state hash that includes rollback fields.
         const ulong expected = 0x72BB19B0E7A60E0DUL;
