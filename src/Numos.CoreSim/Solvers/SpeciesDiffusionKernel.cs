@@ -9,14 +9,16 @@ namespace Numos.CoreSim.Solvers;
 ///     <para>
 ///         The owning solver fills <see cref="NeighborIndices" />, <see cref="NeighborKinds" />, and
 ///         <see cref="NeighborCounts" /> through <see cref="NeighborResolution.ResolveNeighbors" /> before
-///         the kernel runs. The delta buffers are plain destination accumulators, so a solver's own gather
-///         (bulk flow in <see cref="AdvectionSolver" />) can fill them and hand them to
-///         <see cref="SpeciesDiffusionKernel.ApplyDeltas" /> the same way the diffusion gather does.
+///         the kernel runs.
+///         The delta buffers are plain destination accumulators.
+///         A solver's own gather (bulk flow in <see cref="AdvectionSolver" />) can fill them.
+///         It then hands them to <see cref="SpeciesDiffusionKernel.ApplyDeltas" /> as the diffusion gather does.
 ///     </para>
 ///     <para>
-///         Buffers a voxel only ever reads for itself stay active-indexed, while anything a gather reads
-///         about a <em>neighboring</em> voxel is voxel-indexed, because a neighbor is known only by voxel
-///         index: <see cref="NeighborCounts" /> and <see cref="DiffusionTransfers" />.
+///         Buffers that a voxel reads only for itself stay active-indexed.
+///         Anything a gather reads about a <em>neighboring</em> voxel is voxel-indexed, because a neighbor is known
+///         only by voxel index.
+///         These buffers are <see cref="NeighborCounts" /> and <see cref="DiffusionTransfers" />.
 ///     </para>
 /// </remarks>
 internal struct DiffusionWorkspace
@@ -90,10 +92,11 @@ internal struct DiffusionWorkspace
 ///     bulk flow finish with.
 /// </summary>
 /// <remarks>
-///     Every method covers one tile of active-air indices and only writes state owned by that tile's
-///     destination voxels, so a solver can run tiles in parallel behind barriers or run a whole chunk on
-///     one worker and get identical results. The gather reads neighbors' post-bulk moles and temperature,
-///     so <see cref="PrepareDiffusion" /> must have finished for every tile before any tile gathers.
+///     Every method covers one tile of active-air indices and writes only state that the tile's destination voxels own.
+///     A solver can therefore run tiles in parallel behind barriers or run a whole chunk on one worker.
+///     Both schedules give identical results.
+///     The gather reads neighbors' post-bulk moles and temperature.
+///     <see cref="PrepareDiffusion" /> must finish for every tile before any tile gathers.
 /// </remarks>
 internal static class SpeciesDiffusionKernel
 {
@@ -106,16 +109,16 @@ internal static class SpeciesDiffusionKernel
     /// <param name="config">The immutable configuration snapshot for the tick.</param>
     /// <remarks>
     ///     <para>
-    ///         Everything a voxel's transfer depends on -- post-bulk moles, pressure, and temperature,
-    ///         its neighbor count, and the environment factor computed here -- is local to that voxel and
-    ///         final by the time this runs, since the same invocation just applied the bulk deltas. That
-    ///         is what lets the amount be computed once instead of once per reader: the diffusion gather
-    ///         would otherwise redo it at each of the seven destinations that read a source.
+    ///         A voxel's transfer depends on its post-bulk moles, pressure, and temperature, its neighbor count,
+    ///         and the environment factor computed here.
+    ///         All of these are local to that voxel.
+    ///         They are final when this runs, because the same invocation just applied the bulk deltas.
+    ///         The amount can therefore be computed once instead of once per reader.
+    ///         The diffusion gather would otherwise redo it at each of the seven destinations that read a source.
     ///     </para>
     ///     <para>
-    ///         An ineligible source stores zero, which the gather treats as "did not diffuse". The
-    ///         environment factor scales with temperature, inverse pressure, and the inverse square of the voxel
-    ///         edge length.
+    ///         An ineligible source stores zero, which the gather treats as "did not diffuse".
+    ///         The environment factor scales with temperature, inverse pressure, and the inverse square of the voxel edge length.
     ///     </para>
     /// </remarks>
     internal static void PrepareDiffusion(
@@ -134,8 +137,8 @@ internal static class SpeciesDiffusionKernel
         {
             ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
 
-            // Voxel-indexed for the same reason as NeighborCounts: the gather reads a neighboring
-            // source's transfers and knows that neighbor only by voxel index.
+            // Voxel-indexed for the same reason as NeighborCounts.
+            // The gather reads a neighboring source's transfers and knows that neighbor only by voxel index.
             int transferBase = voxelIndex * gasCount;
             Pascal pressure = chunk.TotalPressure[voxelIndex];
             if (pressure <= 0f || workspace.NeighborCounts![voxelIndex] == 0)
@@ -159,8 +162,9 @@ internal static class SpeciesDiffusionKernel
     }
 
     /// <summary>
-    ///     The environment factor of a source voxel: the kinetic-theory <c>T^(3/2) / P</c> dependence of the
-    ///     diffusivity, divided by the squared voxel edge length (face area over neighbor distance, over source volume).
+    ///     Returns the environment factor of a source voxel.
+    ///     It is the kinetic-theory <c>T^(3/2) / P</c> dependence of the diffusivity, divided by the squared voxel edge length.
+    ///     For cubic voxels, face area over neighbor distance is one edge, and the source concentration is its moles over an edge cubed.
     /// </summary>
     /// <param name="config">The immutable configuration snapshot for the tick.</param>
     /// <param name="pressure">The source voxel's positive total pressure.</param>
@@ -181,10 +185,10 @@ internal static class SpeciesDiffusionKernel
     /// <param name="environmentFactor">The source voxel's <see cref="EnvironmentFactor" />.</param>
     /// <param name="sourceMoles">The source voxel's positive moles of the gas.</param>
     /// <remarks>
-    ///     A voxel can lose at most one seventh of a gas to each of its six neighbors plus itself, so the
-    ///     per-neighbor amount is capped rather than letting the debit exceed inventory. The Euler stage evaluates
-    ///     this for both cells of a chunk face, so the expression order here is what both sides of that exchange
-    ///     agree on bit for bit.
+    ///     A voxel can lose at most one seventh of a gas to each of its six neighbors plus itself.
+    ///     The cap keeps the debit from exceeding inventory.
+    ///     The Euler stage evaluates this for both cells of a chunk face.
+    ///     The expression order here is what both sides of that exchange agree on bit for bit.
     /// </remarks>
     internal static Mole TransferAmount(
         SquareMetrePerSecond referenceDiffusivity, PerSquareMetre environmentFactor, Mole sourceMoles)
@@ -206,21 +210,22 @@ internal static class SpeciesDiffusionKernel
     /// <param name="config">The immutable configuration snapshot for the tick.</param>
     /// <remarks>
     ///     <para>
-    ///         A destination receives one deposit from each air neighbor and pays its own transfer once
-    ///         per non-solid neighbor, void included: void takes gas out of the chunk but never receives
-    ///         any. Deposits below <see cref="AtmosSolverConstants.MinimumTrackedMoles" /> into a
-    ///         destination that would stay below it are suppressed, which is why the self debit is partly
-    ///         refunded here rather than being computed from a smaller neighbor count.
+    ///         A destination receives one deposit from each air neighbor.
+    ///         It pays its own transfer once per non-solid neighbor, void included.
+    ///         Void takes gas out of the chunk but never receives any.
+    ///         Deposits below <see cref="AtmosSolverConstants.MinimumTrackedMoles" /> into a destination that would
+    ///         stay below it are suppressed.
+    ///         The self debit is therefore partly refunded here, not computed from a smaller neighbor count.
     ///     </para>
     ///     <para>
-    ///         The amounts themselves come from <see cref="PrepareDiffusion" />; this phase only sums
-    ///         them, because a source is read by up to seven destinations and recomputing its transfer at
-    ///         each one costs more than the buffer.
+    ///         The amounts come from <see cref="PrepareDiffusion" />. This phase only sums them.
+    ///         Up to seven destinations read a source.
+    ///         Recomputing its transfer at each one measurably cost more than the buffer it saves.
     ///     </para>
     ///     <para>
-    ///         Sources run in ascending voxel index (<see cref="NeighborResolution.AscendingSourceSlots" />),
-    ///         so the floating-point accumulation order is fixed. Changing it changes rounding and therefore
-    ///         deterministic replay state.
+    ///         Sources run in ascending voxel index (<see cref="NeighborResolution.AscendingSourceSlots" />).
+    ///         This fixes the floating-point accumulation order.
+    ///         Changing it changes rounding and therefore deterministic replay state.
     ///     </para>
     /// </remarks>
     internal static void GatherDiffusionDeltas(
@@ -289,11 +294,11 @@ internal static class SpeciesDiffusionKernel
                     var source = sources[index];
                     Mole molesDiffused = workspace.DiffusionTransfers![source.Voxel * gasCount + gas];
 
-                    // Zero stands in for the eligibility tests PrepareDiffusion already ran, and
-                    // skipping it is exact even for a source that really did diffuse nothing: every
-                    // term here is non-negative and both accumulators start at +0, so neither can
-                    // hold -0, and x - 0 and x + 0 are then bit-for-bit x. NaN is not zero and still
-                    // propagates.
+                    // Zero stands in for the eligibility tests PrepareDiffusion already ran.
+                    // Skipping it is exact even for a source that really did diffuse nothing.
+                    // Every term here is non-negative and both accumulators start at +0, so neither can hold -0.
+                    // x - 0 and x + 0 are then bit-for-bit x.
+                    // NaN is not zero and still propagates.
                     if (molesDiffused == 0f)
                         continue;
 
@@ -316,8 +321,8 @@ internal static class SpeciesDiffusionKernel
                     moleDelta -= molesDiffused * validCount;
                     energyDelta -= energyTransferred * validCount;
 
-                    // Refunds are the rare case, so the loop-invariant half of the suppression test
-                    // guards the loop instead of being re-evaluated inside it.
+                    // Refunds are rare.
+                    // The loop-invariant half of the suppression test guards the loop instead of running inside it.
                     if (molesDiffused < AtmosSolverConstants.MinimumTrackedMoles)
                     {
                         for (int outgoing = 0; outgoing < outgoingCount; outgoing++)
@@ -348,8 +353,9 @@ internal static class SpeciesDiffusionKernel
     /// <param name="length">The number of destination active-air indices owned by this invocation.</param>
     /// <param name="config">The immutable configuration snapshot for the tick.</param>
     /// <remarks>
-    ///     Each invocation exclusively owns its destination voxels. Gas channels are visited in active
-    ///     channel order so mole totals and heat capacity retain deterministic rounding.
+    ///     Each invocation exclusively owns its destination voxels.
+    ///     Gas channels are visited in active channel order, so mole totals and heat capacity keep deterministic
+    ///     rounding.
     /// </remarks>
     internal static void ApplyDeltas(
         ref DiffusionWorkspace workspace,
@@ -372,8 +378,8 @@ internal static class SpeciesDiffusionKernel
             if (energyDelta == 0d && !anyMoleChange)
                 continue;
 
-            // Reconstruct temperature from the voxel's energy before transfer plus the net energy
-            // carried by moved moles, divided by the heat capacity of the updated mixture.
+            // Temperature is the voxel's energy before transfer plus the net energy carried by moved moles,
+            // divided by the heat capacity of the updated mixture.
             Joule64 oldEnergy =
                 (Kelvin64)config.GetValidatedTemp(chunk.Temperature[voxelIndex]) *
                 chunk.TotalHeatCapacity[voxelIndex];

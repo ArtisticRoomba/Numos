@@ -17,9 +17,10 @@ internal enum NeighborKind : byte
 ///     The fixed neighbor-direction tables and in-chunk neighbor resolution shared by the voxel transport solvers.
 /// </summary>
 /// <remarks>
-///     The tables are plain arrays so the hot loops that index them stay cheap. Nothing may write to them:
-///     every gather that walks <see cref="AscendingSourceSlots" /> relies on the order below, and a different
-///     order changes floating-point rounding and therefore recorded replays.
+///     The tables are plain arrays so the hot loops that index them stay cheap.
+///     Nothing may write to them.
+///     Every gather that walks <see cref="AscendingSourceSlots" /> relies on the order below.
+///     A different order changes floating-point rounding and therefore recorded replays.
 /// </remarks>
 internal static class NeighborResolution
 {
@@ -35,9 +36,10 @@ internal static class NeighborResolution
     /// <remarks>
     ///     A voxel index is <c>x + y*W + z*W*H</c>, so the neighbor offsets sort as
     ///     -W*H (NegZ) &lt; -W (NegY) &lt; -1 (NegX) &lt; 0 &lt; +1 (PosX) &lt; +W (PosY) &lt; +W*H (PosZ).
-    ///     Degenerate dimensions cannot produce a tie: a chunk one voxel wide has no in-bounds X
-    ///     neighbors at all, so the colliding slots are simply absent. The delta gathers walk sources in
-    ///     this order, so changing it changes floating-point rounding and therefore deterministic replay state.
+    ///     Degenerate dimensions cannot produce a tie. A chunk one voxel wide has no in-bounds X
+    ///     neighbors, so the colliding slots are absent.
+    ///     The delta gathers walk sources in this order because the per-gas scatter they replaced accumulated in it.
+    ///     Changing the order changes floating-point rounding and therefore deterministic replay state.
     /// </remarks>
     internal readonly static int[] AscendingSourceSlots = [4, 2, 0, SelfSourceSlot, 1, 3, 5];
 
@@ -45,9 +47,9 @@ internal static class NeighborResolution
     ///     Neighbor offsets indexed by direction slot.
     /// </summary>
     /// <remarks>
-    ///     <see cref="AscendingSourceSlots" /> and every per-direction accumulation depend on this exact
-    ///     order, so the solvers keep their own copy rather than sharing <see cref="Int3.CardinalOffsets" />,
-    ///     which uses a different order and is publicly writable.
+    ///     <see cref="AscendingSourceSlots" /> and every per-direction accumulation depend on this exact order.
+    ///     The solvers keep their own copy instead of sharing <see cref="Int3.CardinalOffsets" />.
+    ///     That array uses a different order and is publicly writable.
     /// </remarks>
     internal readonly static Int3[] NeighborDirections =
     [

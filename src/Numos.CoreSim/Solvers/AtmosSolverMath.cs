@@ -110,7 +110,7 @@ internal static class AtmosSolverMath
     /// <summary>
     ///     Returns the source-relative species imbalance <c>n_s - n_t · (T_t / T_s)</c>.
     /// </summary>
-    /// <remarks>No solver currently calls this; diffusion is driven by the source amount alone.</remarks>
+    /// <remarks>No solver currently calls this. Diffusion is driven by the source amount alone.</remarks>
     internal static Mole CalculateMoleImbalance(
         Mole sourceMoles, Kelvin sourceTemperature,
         Mole targetMoles, Kelvin targetTemperature)

@@ -11,12 +11,13 @@ namespace Numos.CoreSim.Solvers;
 ///     Solves intra-chunk pressure advection and per-species diffusion in ordered parallel phases.
 /// </summary>
 /// <remarks>
-///     Bulk advection is calculated and applied before diffusion. The separation prevents either
-///     pass from observing partially applied work from the other, although a gas may consequently
-///     move once through bulk flow and once through diffusion during the same tick. The bulk-flow
-///     phases live here; neighbor resolution, the diffusion phases, vacuum cleanup, and sleep
-///     bookkeeping are shared with other transport solvers through <see cref="NeighborResolution" />,
-///     <see cref="SpeciesDiffusionKernel" />, <see cref="VacuumCleanup" />, and <see cref="ChunkSleepPolicy" />.
+///     Bulk advection is calculated and applied before diffusion.
+///     The separation stops either pass from observing partially applied work from the other.
+///     A gas can therefore move once through bulk flow and once through diffusion in the same tick.
+///     The bulk-flow phases live here.
+///     Other transport solvers share neighbor resolution, the diffusion phases, vacuum cleanup, and sleep bookkeeping
+///     through <see cref="NeighborResolution" />, <see cref="SpeciesDiffusionKernel" />,
+///     <see cref="VacuumCleanup" />, and <see cref="ChunkSleepPolicy" />.
 /// </remarks>
 internal sealed class AdvectionSolver : IAtmosSolverStage
 {
@@ -41,16 +42,19 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
     ///     <para>
     ///         With enough chunks to occupy the worker pool, each worker owns a complete chunk solve.
     ///         Smaller workloads split the active voxels into tiles and step them through the same
-    ///         phases behind barriers. Every phase is tile-major: a voxel's scratch state is produced
-    ///         and consumed by the tile that owns it, including the bulk and diffusion delta gathers.
+    ///         phases behind barriers.
+    ///         Every phase is tile-major. The tile that owns a voxel produces and consumes its scratch state,
+    ///         including the bulk and diffusion delta gathers.
     ///     </para>
     ///     <para>
-    ///         Each barrier guards a real cross-tile read-after-write, so none of them can be
-    ///         dropped: conductance needs the neighbor's refreshed pressure, the incident reduction needs
-    ///         the neighbor's edge conductance, bulk flow needs the neighbor's incident conductance, the
-    ///         bulk gather needs the neighbor's outgoing fractions, and the diffusion gather needs the
-    ///         neighbor's post-bulk moles and temperature. Both schedules call the same phase methods in
-    ///         the same order, so a chunk solved whole and a chunk solved in tiles produce identical state.
+    ///         Each barrier guards a real cross-tile read-after-write, so none can be dropped.
+    ///         Conductance needs the neighbor's refreshed pressure.
+    ///         The incident reduction needs the neighbor's edge conductance.
+    ///         Bulk flow needs the neighbor's incident conductance.
+    ///         The bulk gather needs the neighbor's outgoing fractions.
+    ///         The diffusion gather needs the neighbor's post-bulk moles and temperature.
+    ///         Both schedules call the same phase methods in the same order.
+    ///         A chunk solved whole and a chunk solved in tiles therefore produce identical state.
     ///     </para>
     /// </remarks>
     public void Solve(AtmosSolverExecutionContext context)
@@ -77,8 +81,8 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
 
                 if (chunk.ActiveGasCount == 0)
                 {
-                    // An awake gasless chunk has no transfer work, but its sleep timer must still
-                    // advance on every tick just as it does after a normal bulk-flow pass.
+                    // An awake gasless chunk has no transfer work.
+                    // Its sleep timer must still advance every tick, as it does after a normal bulk-flow pass.
                     ChunkSleepPolicy.UpdateSleepState(chunk, context.TickConfig, 0f);
                     continue;
                 }
@@ -97,9 +101,9 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
             if (workspaceCount == 0)
                 return;
 
-            // Whole chunks already fill the worker pool here. Keeping each chunk on one worker
-            // avoids global barriers and shortens scratch-buffer lifetimes without changing the
-            // per-chunk operation order used by the tiled schedule below.
+            // Whole chunks already fill the worker pool here.
+            // Keeping each chunk on one worker avoids global barriers and shortens scratch-buffer lifetimes.
+            // The per-chunk operation order stays the same as in the tiled schedule below.
             int workerCount = Math.Max(1, Environment.ProcessorCount);
             if (workspaceCount > 1 && workspaceCount >= workerCount)
             {
@@ -265,8 +269,8 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
             Span<Mole> totalMoles = workspace.TotalMoles!.AsSpan(start, length);
             totalMoles.Clear();
 
-            // Keep gas-channel order and each voxel's addition order. A horizontal reduction
-            // would change floating-point rounding and therefore deterministic replay state.
+            // Keep gas-channel order and each voxel's addition order.
+            // A horizontal reduction would change floating-point rounding and therefore deterministic replay state.
             for (int gas = 0; gas < chunk.ActiveGasCount; gas++)
                 TensorPrimitives.Add<float>(totalMoles, chunk.ActiveGases[gas].Moles.AsSpan(start, length), totalMoles);
 
@@ -298,8 +302,8 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
             var position = chunk.GetXyzInt3(voxelIndex);
             workspace.BoundaryEligible![activeIndex] = NeighborResolution.IsBoundary(chunk, position);
 
-            // Voxel-indexed: a diffusion gather needs a neighboring source's neighbor count and
-            // only ever knows that neighbor's voxel index.
+            // Voxel-indexed. A diffusion gather needs a neighboring source's neighbor count
+            // and knows that neighbor only by voxel index.
             workspace.Diffusion.NeighborCounts![voxelIndex] = NeighborResolution.ResolveNeighbors(
                 chunk,
                 position,
@@ -453,9 +457,9 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
     /// <param name="workItem">The active-air range owned by this invocation.</param>
     /// <param name="config">The immutable configuration snapshot for the tick.</param>
     /// <remarks>
-    ///     This phase reads the tick's pressure snapshot and records fractions without mutating gas
-    ///     channels. Source and neighbor conductance scaling keeps simultaneous transfers bounded
-    ///     and avoids checkerboard instability at aggressive bulk-flow coefficients.
+    ///     This phase reads the tick's pressure snapshot and records fractions without mutating gas channels.
+    ///     Source and neighbor conductance scaling bounds simultaneous transfers.
+    ///     It also avoids checkerboard instability at aggressive bulk-flow coefficients.
     /// </remarks>
     private static void ComputeBulkFlow(
         ref ChunkWorkspace workspace,
@@ -469,8 +473,8 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
             ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
             int slotBase = activeIndex * NeighborResolution.NeighborDirections.Length;
 
-            // Fractions are voxel-indexed: the bulk gather reads a neighbor's outgoing fraction
-            // toward this voxel and only knows that neighbor by voxel index.
+            // Fractions are voxel-indexed. The bulk gather reads a neighbor's outgoing fraction
+            // toward this voxel and knows that neighbor only by voxel index.
             int fractionBase = voxelIndex * NeighborResolution.NeighborDirections.Length;
             bool isBoundary = workspace.BoundaryEligible![activeIndex];
             Array.Clear(workspace.BulkMoleFractions!, fractionBase, NeighborResolution.NeighborDirections.Length);
@@ -543,15 +547,16 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
     /// <param name="config">The immutable configuration snapshot for the tick.</param>
     /// <remarks>
     ///     <para>
-    ///         A destination is credited by each air neighbor that flows toward it and debited once per
-    ///         outgoing direction of its own, void directions included, since transfers into void remove
-    ///         both gas and its thermal energy. Building the gas-independent term list once per voxel
-    ///         leaves the per-gas loop reading nothing but that gas's mole channel.
+    ///         Each air neighbor that flows toward a destination credits it.
+    ///         The destination is debited once per outgoing direction of its own, void directions included,
+    ///         because transfers into void remove both gas and its thermal energy.
+    ///         The gas-independent term list is built once per voxel.
+    ///         The per-gas loop then reads only that gas's mole channel.
     ///     </para>
     ///     <para>
-    ///         Terms are ordered by ascending source voxel index
-    ///         (<see cref="NeighborResolution.AscendingSourceSlots" />), and each source's own terms stay
-    ///         in direction order.
+    ///         Terms are ordered by ascending source voxel index (<see cref="NeighborResolution.AscendingSourceSlots" />).
+    ///         Each source's own terms stay in direction order.
+    ///         That is the exact sequence the earlier per-gas scatter accumulated.
     ///         Reordering them changes floating-point rounding and therefore deterministic replay state.
     ///     </para>
     /// </remarks>
@@ -593,8 +598,8 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
                 if (workspace.Diffusion.NeighborKinds![slotBase + direction] != NeighborKind.Air)
                     continue;
 
-                // Neighbor relations are symmetric, so this voxel sits in the neighbor's opposite
-                // slot and a positive fraction there is gas the neighbor sends here.
+                // Neighbor relations are symmetric, so this voxel sits in the neighbor's opposite slot.
+                // A positive fraction there is gas the neighbor sends here.
                 ushort neighborIndex = workspace.Diffusion.NeighborIndices![slotBase + direction];
                 Scalar inboundFraction = workspace.BulkMoleFractions![
                     neighborIndex * NeighborResolution.NeighborDirections.Length +
@@ -700,8 +705,9 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
     /// <param name="chunk">The chunk whose derived thermodynamic state will be rebuilt.</param>
     /// <param name="config">The immutable configuration snapshot used for gas properties and pressure.</param>
     /// <remarks>
-    ///     Gas channels are accumulated in their existing order. Changing the reduction order changes
-    ///     floating-point rounding and can break deterministic replay compatibility.
+    ///     Gas channels are accumulated in their existing order.
+    ///     Changing the reduction order changes floating-point rounding and can break deterministic replay
+    ///     compatibility.
     /// </remarks>
     internal static void RefreshPressureAndHeatCapacity(AtmosChunk chunk, AtmosSolverConfigSnapshot config)
     {
@@ -725,8 +731,8 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
                 Span<Mole> scratch = buffer.AsSpan(0, length);
                 scratch.Clear();
 
-                // Keep gas-channel order and each voxel's addition order. A horizontal reduction
-                // would change floating-point rounding and therefore deterministic replay state.
+                // Keep gas-channel order and each voxel's addition order.
+                // A horizontal reduction would change floating-point rounding and therefore deterministic replay state.
                 for (int gas = 0; gas < chunk.ActiveGasCount; gas++)
                     TensorPrimitives.Add<float>(scratch, chunk.ActiveGases[gas].Moles.AsSpan(start, length), scratch);
 
@@ -818,21 +824,22 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
     /// </summary>
     /// <remarks>
     ///     <para>
-    ///         Every phase partitions destination voxels, so no two workers ever write the same scratch
-    ///         element. The workspace stays alive across phase barriers so resolved geometry and derived
-    ///         values can be reused.
+    ///         Every phase partitions destination voxels, so no two workers write the same scratch element.
+    ///         The workspace stays alive across phase barriers, so later phases reuse resolved geometry and
+    ///         derived values.
     ///     </para>
     ///     <para>
-    ///         Buffers a voxel only ever reads for itself stay active-indexed, while anything a gather
-    ///         reads about a <em>neighboring</em> voxel is voxel-indexed, because a neighbor is known
-    ///         only by voxel index: <see cref="BulkMoleFractions" />,
-    ///         <see cref="DiffusionWorkspace.NeighborCounts" />, and
-    ///         <see cref="DiffusionWorkspace.DiffusionTransfers" />.
+    ///         Buffers that a voxel reads only for itself stay active-indexed.
+    ///         Anything a gather reads about a <em>neighboring</em> voxel is voxel-indexed, because a neighbor is
+    ///         known only by voxel index.
+    ///         These buffers are <see cref="BulkMoleFractions" />, <see cref="DiffusionWorkspace.NeighborCounts" />,
+    ///         and <see cref="DiffusionWorkspace.DiffusionTransfers" />.
     ///     </para>
     ///     <para>
-    ///         Resolved neighbors and the destination delta buffers live in <see cref="Diffusion" /> so
-    ///         <see cref="SpeciesDiffusionKernel" /> can run on them directly. Bulk flow gathers into the
-    ///         same delta buffers and applies them with the kernel's <see cref="SpeciesDiffusionKernel.ApplyDeltas" />.
+    ///         Resolved neighbors and the destination delta buffers live in <see cref="Diffusion" />.
+    ///         <see cref="SpeciesDiffusionKernel" /> can then run on them directly.
+    ///         Bulk flow gathers into the same delta buffers and applies them with
+    ///         <see cref="SpeciesDiffusionKernel.ApplyDeltas" />.
     ///     </para>
     /// </remarks>
     private struct ChunkWorkspace

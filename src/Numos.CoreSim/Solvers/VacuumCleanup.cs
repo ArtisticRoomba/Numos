@@ -16,15 +16,16 @@ internal static class VacuumCleanup
     /// <param name="context">The complete pressure field and world topology for this tick.</param>
     /// <remarks>
     ///     <para>
-    ///         Classification and removal are separate passes. This keeps the result independent of chunk
-    ///         and voxel traversal order, because every neighbor comparison observes the same pressure
-    ///         field.
+    ///         Classification and removal are separate passes.
+    ///         Every neighbor comparison observes the same pressure field.
+    ///         The result is therefore independent of chunk and voxel traversal order.
     ///     </para>
     ///     <para>
-    ///         Both passes are tiled the same way the advection schedule is, so a single dense awake chunk
-    ///         does not pin this to one worker. Tiling is safe precisely because of the split above:
-    ///         classification only writes its own voxel's <c>IsVacuum</c> from a pressure field nothing
-    ///         is mutating, and removal only reads and writes its own voxel.
+    ///         Both passes are tiled like the advection schedule, so a single dense awake chunk does not pin
+    ///         this to one worker.
+    ///         The split above makes tiling safe.
+    ///         Classification writes only its own voxel's <c>IsVacuum</c> from a pressure field that nothing mutates.
+    ///         Removal reads and writes only its own voxel.
     ///     </para>
     /// </remarks>
     internal static void Apply(AtmosSolverExecutionContext context)
@@ -47,9 +48,10 @@ internal static class VacuumCleanup
         if (awakeChunkCount == 0)
             return;
 
-        // Tiling matters when a few large chunks are awake: one work item per chunk would leave a
-        // single dense chunk on one worker. Once the awake chunks already fill the pool, a tile the
-        // size of the whole workload degenerates to one item per chunk, which is enough.
+        // Tiling matters when a few large chunks are awake. One work item per chunk would leave a
+        // single dense chunk on one worker.
+        // Once the awake chunks fill the pool, a tile the size of the whole workload degenerates to one item per chunk.
+        // That is enough.
         int tileSize = awakeChunkCount >= workerCount
             ? Math.Max(1, totalActiveAirCount)
             : Math.Max(1, ParallelPhase.DivideRoundUp(totalActiveAirCount, workerCount));
@@ -180,9 +182,9 @@ internal static class VacuumCleanup
     ///     Identifies one contiguous range of an awake chunk's ordered active-air index list.
     /// </summary>
     /// <remarks>
-    ///     The vacuum pass covers every awake chunk in the tick, including gasless ones the transport
-    ///     solver never gave a workspace, so it indexes chunks directly rather than reusing the solver's
-    ///     workspace-relative work items.
+    ///     The vacuum pass covers every awake chunk in the tick.
+    ///     That includes gasless chunks to which the transport solver gave no workspace.
+    ///     The pass therefore indexes chunks directly instead of reusing the solver's workspace-relative work items.
     /// </remarks>
     private readonly record struct VacuumWorkItem(int ChunkIndex, int Start, int Length);
 
