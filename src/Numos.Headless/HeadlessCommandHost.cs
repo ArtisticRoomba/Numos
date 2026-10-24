@@ -50,6 +50,16 @@ internal sealed class HeadlessCommandHost : IDisposable
     }
 
     /// <summary>
+    ///     Gets whether an <c>exit</c> request ran. A server stops accepting input once this is <see langword="true" />.
+    /// </summary>
+    internal bool ExitRequested => _exitRequested;
+
+    /// <summary>
+    ///     Gets the session log, which doubles as the server output shell.
+    /// </summary>
+    internal WorkbenchLog Log => _session.Log;
+
+    /// <summary>
     ///     Formats a log entry as one line: timestamp, level, tick, source, message.
     /// </summary>
     internal static string FormatLogEntry(WorkbenchLogEntry entry)
@@ -88,6 +98,17 @@ internal sealed class HeadlessCommandHost : IDisposable
         }
     }
 
+    /// <summary>
+    ///     Processes the requests of one input stream, such as stdin, a script, or one socket connection.
+    /// </summary>
+    /// <param name="input">Supplies one request per line.</param>
+    /// <param name="output">Receives one response line per request.</param>
+    /// <param name="cancellationToken">Stops the read loop.</param>
+    /// <returns>1 when any response reported an error, otherwise 0.</returns>
+    /// <remarks>
+    ///     Line numbers in error responses count from the start of <paramref name="input" />. The session persists
+    ///     across calls, so a server can call this once per connection.
+    /// </remarks>
     internal async Task<int> RunAsync(
         TextReader input,
         TextWriter output,

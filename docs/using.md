@@ -577,7 +577,11 @@ A renderer that knows which revision it presented can call `TryGetVoxelSnapshot`
 ## Using the viewer
 `Numos.Viewer` is the optional desktop presentation layer, built with raylib and ImGui. It depends on `Numos.API`, `Numos.SimDrawer`, and `Numos.Workbench`. Its package includes the icon and ImGui layout assets the application needs.
 
-`Numos.Workbench` is the UI-free session layer under the viewer. `WorkbenchSession` owns one project (world, configuration, replay timeline, and branches). It runs every project, chunk, voxel, topology, solver, timeline, and replay-file operation, and it writes a server-style log that a front end can stream through `WorkbenchLog.EntryWritten`.
+`Numos.Workbench` is the UI-free session layer under the viewer. `WorkbenchSession` owns one project (world, configuration, replay timeline, and branches). It runs every project, chunk, voxel, topology, solver, timeline, and replay-file operation. A front end calls the session and reports its failures.
+
+The viewer is one front end. `Numos.Headless` is the other, so a script can do whatever a person does in the viewer. See [headless runner](headless_runner.md).
+
+The session writes a server-style log. A front end streams it through `WorkbenchLog.EntryWritten`. The viewer shows it in the Messages panel. The headless runner prints it to stderr and serves it to socket clients through the `getLog` operation.
 
 ```shell
 dotnet add package Numos.Viewer --prerelease

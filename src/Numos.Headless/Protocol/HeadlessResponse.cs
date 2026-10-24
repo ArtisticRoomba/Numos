@@ -61,6 +61,24 @@ internal sealed class CommandResult
     public ExportInfo? Export { get; init; }
     public RenderInfo? Render { get; init; }
     public ProbeInfo? Probes { get; init; }
+    public LogInfo? Log { get; init; }
+}
+
+internal sealed class LogInfo
+{
+    public required LogEntryInfo[] Entries { get; init; }
+    public required long LatestSequence { get; init; }
+    public required bool More { get; init; }
+}
+
+internal sealed class LogEntryInfo
+{
+    public required long Sequence { get; init; }
+    public required string Timestamp { get; init; }
+    public required string Level { get; init; }
+    public long? Tick { get; init; }
+    public required string Source { get; init; }
+    public required string Message { get; init; }
 }
 
 internal sealed class HelloInfo

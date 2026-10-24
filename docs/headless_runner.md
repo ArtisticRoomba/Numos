@@ -1,19 +1,21 @@
 # Headless runner
 
-`Numos.Headless` is the viewer without a window. It runs the same `WorkbenchSession` as the viewer, so a script can
-do anything the viewer can do. It also reads data out of the simulation, which lets an agent or a script run a
+`Numos.Headless` is the viewer without a window. The viewer and the runner both drive one `WorkbenchSession` from
+`Numos.Workbench`. The session owns the project, the timeline, and the replay files. A script can therefore do
+anything a person does in the viewer. It can also read data out of the simulation, so an agent or a script can run a
 validation study without a person at the screen.
 
 The runner speaks newline-delimited JSON (NDJSON). Each nonblank input line is one request. Each request produces one
-compact JSON response on standard output. The runner writes its session log to standard error. You can parse or diff
-stdout directly.
+compact JSON response on standard output. The session log works like the output shell of a simulation server. The
+runner writes it to standard error and also serves it through the `getLog` operation. You can parse or diff stdout
+directly.
 
 This is protocol version 2. It replaces version 1, which could drive only one `AtmosSimulation`. Version 2 works on a
 project with a world, several simulations, a timeline, and replay files.
 
 ## Running the runner
 
-Pick one of three input modes:
+Pick one of four input modes:
 
 ```bash
 # Interactive: read requests from stdin until `exit` or end of file.
@@ -24,7 +26,13 @@ dotnet run --project src/Numos.Headless -- --script examples/headless/two-voxel-
 
 # A script path can also be the only positional argument.
 dotnet run --project src/Numos.Headless -- examples/headless/two-voxel-flow.jsonl
+
+# Serve the protocol on a Unix socket until a client sends `exit`.
+dotnet run --project src/Numos.Headless -- --socket /tmp/numos.sock
 ```
+
+Use a script for a run that you repeat or diff. Use the socket when a person or an agent works step by step and wants the
+project to stay open between commands. See "Socket server".
 
 Add `--quiet` to drop info-level lines from the log. Use `--help` for the summary. When you automate a run, capture
 stdout and stderr separately:
@@ -48,6 +56,50 @@ message. The levels are `DEBUG`, `INFO`, `WARN`, `ERROR`, and `FATAL`. The log r
 topology changes, failures, and tick progress. A region edit writes one summary line, not one line per voxel.
 
 `--quiet` drops `DEBUG` and `INFO`. Warnings and errors always appear. Stdout never carries log text.
+
+The `getLog` operation returns the same entries as data. It works in every mode. See "Session and project".
+
+## Socket server
+
+With `--socket <path>`, the runner listens on a Unix domain socket. It works on Linux and on Windows 10 and later. The
+protocol is the same as in stdin mode: one request line in, one response line out.
+
+- The runner removes a stale socket file at startup and deletes its own file when it stops.
+- The server serves one client at a time. Other clients wait in the listen backlog until the current client
+  disconnects.
+- The session lives as long as the server. A client can create a project, disconnect, and let a later client tick it.
+- Line numbers in error responses count per connection.
+- A disconnect does not stop the server. The `exit` op responds, shuts the server down, and deletes the socket file.
+  Ctrl+C and SIGTERM also stop the server and delete the file.
+- The log still goes to stderr. A client reads it with `getLog`.
+
+The socket accepts anyone who can open the file, and the protocol can read and write any path the runner can. Keep the
+socket in a directory that only you can use.
+
+### Python client
+
+[`examples/headless/numos_client.py`](../examples/headless/numos_client.py) needs Python 3.10 and nothing else.
+`NumosClient.call(op, **fields)` adds `protocolVersion` and an incrementing `id`, and it returns the response. It raises
+`NumosError` with `code` and `message` when `ok` is `false`. The client retries the connection for 30 seconds, so you can
+start it right after the server.
+
+```python
+from numos_client import NumosClient
+
+with NumosClient("/tmp/numos.sock") as client:
+    client.call("createProject", chunkDimensions={"x": 2, "y": 1, "z": 1})
+    client.call("tick", count=100)
+    print(client.call("getLog", minLevel="warn")["result"]["log"]["entries"])
+```
+
+The command line runs one operation or streams a script over the socket:
+
+```bash
+python3 examples/headless/numos_client.py --socket /tmp/numos.sock tick '{"count": 10}'
+python3 examples/headless/numos_client.py --socket /tmp/numos.sock --script examples/headless/two-voxel-flow.jsonl
+```
+
+The command line prints each response. Its exit code is 1 when any response has `ok` set to `false`.
 
 ## Protocol envelope
 
@@ -131,15 +183,23 @@ in kelvins, pressures in pascals, volumes in cubic metres, and gas amounts in mo
 
 | Operation | Request data | Effect |
 | --- | --- | --- |
-| `hello` | None | Returns the protocol number, the host name and version, and the CoreSim version. |
+| `hello` | None | Returns the protocol number, the host name and version (with the commit), and the CoreSim version. |
+| `getLog` | optional `afterSequence`, `maxEntries`, `minLevel` | Returns session log entries. |
 | `createProject` | `name`, `chunkDimensions`, `includeDefaultGases` (default `false`), `config`, `gases` | Replaces the open project with an empty one at tick zero. |
 | `closeProject` | None | Closes the project. |
-| `exit` | None | Closes the project, responds, and stops reading input. |
+| `exit` | None | Closes the project, responds, and stops reading input. In socket mode it stops the server. |
 
 `createProject` builds the new project first. The old project stays open if the new one fails.
 
-The default gases add a gas-reaction solver configuration. A replay of such a project is not portable on this
-branch, and `saveReplay` rejects it. Leave `includeDefaultGases` off for any study you save.
+`getLog` returns entries in sequence order. `afterSequence` (default `0`) skips entries up to that sequence number.
+`maxEntries` (default 200, maximum 5000) caps the reply, and `more` is `true` when entries remain. `minLevel` is
+`debug`, `info`, `warn`, `error`, or `fatal`. Each entry has `sequence`, `timestamp`, `level`, `tick` (absent before a
+project exists), `source`, and `message`. `latestSequence` is the newest sequence in the log. To follow the log, pass
+the last `sequence` you saw as `afterSequence`. The session keeps the newest 5000 entries.
+
+The default gases add a gas-reaction solver configuration. Any solver configuration makes a replay non-portable on this
+branch, and `saveReplay` rejects it. For that reason `includeDefaultGases` is `false` unless you set it. Leave it off for
+any study you save.
 
 ### Simulations
 

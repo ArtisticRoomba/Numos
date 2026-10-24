@@ -48,6 +48,7 @@ internal sealed partial class HeadlessOperations
         return op switch
         {
             "hello" => Hello(),
+            "getLog" => GetLog(request),
             "createProject" => CreateProject(request),
             "closeProject" => CloseProject(),
             "addSimulation" => AddSimulation(request),
@@ -130,6 +131,69 @@ internal sealed partial class HeadlessOperations
     }
 
     // Project and simulations.
+
+    private const int DefaultLogEntries = 200;
+    private const int MaximumLogEntries = 5000;
+
+    private CommandExecution GetLog(HeadlessRequest request)
+    {
+        long after = request.AfterSequence ?? 0;
+        int maximum = request.MaxEntries ?? DefaultLogEntries;
+        if (maximum < 1 || maximum > MaximumLogEntries)
+        {
+            throw new HeadlessRequestException(
+                "invalidProperty",
+                $"maxEntries must be from 1 to {MaximumLogEntries}.");
+        }
+
+        var minimum = request.MinLevel switch
+        {
+            null => WorkbenchLogLevel.Debug,
+            "debug" => WorkbenchLogLevel.Debug,
+            "info" => WorkbenchLogLevel.Info,
+            "warn" => WorkbenchLogLevel.Warn,
+            "error" => WorkbenchLogLevel.Error,
+            "fatal" => WorkbenchLogLevel.Fatal,
+            _ => throw new HeadlessRequestException(
+                "invalidProperty",
+                "minLevel must be debug, info, warn, error, or fatal.")
+        };
+
+        var snapshot = _session.Log.Snapshot();
+        var entries = new List<LogEntryInfo>();
+        bool more = false;
+        foreach (var entry in snapshot)
+        {
+            if (entry.Sequence <= after || entry.Level < minimum)
+                continue;
+
+            if (entries.Count == maximum)
+            {
+                more = true;
+                break;
+            }
+
+            entries.Add(new LogEntryInfo
+            {
+                Sequence = entry.Sequence,
+                Timestamp = entry.Timestamp.ToString("yyyy-MM-dd'T'HH:mm:ss.fffzzz", CultureInfo.InvariantCulture),
+                Level = entry.Level.ToString().ToLowerInvariant(),
+                Tick = entry.Tick,
+                Source = entry.Source,
+                Message = entry.Message
+            });
+        }
+
+        return Result(new CommandResult
+        {
+            Log = new LogInfo
+            {
+                Entries = [.. entries],
+                LatestSequence = snapshot.Length == 0 ? 0 : snapshot[^1].Sequence,
+                More = more
+            }
+        });
+    }
 
     private CommandExecution Hello()
     {

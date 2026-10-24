@@ -83,6 +83,11 @@ internal sealed class HeadlessRequest
     public bool? Overwrite { get; init; }
     public bool? AtHead { get; init; }
 
+    // Log polling.
+    public long? AfterSequence { get; init; }
+    public int? MaxEntries { get; init; }
+    public string? MinLevel { get; init; }
+
     // Observation detail. Summary data is always returned by observe.
     public bool? IncludeVoxels { get; init; }
     public bool? OnlyGasBearingVoxels { get; init; }
