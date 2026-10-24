@@ -97,7 +97,7 @@ public static class NavigationGizmo
             Math.Max(Margin + Radius, viewportWidth - Margin - Radius),
             Math.Max(Margin + Radius, viewportHeight - Margin - Radius));
 
-        Raylib.DrawCircleV(origin, Radius + 9f, BackdropColor);
+        Raylib.DrawCircleV(origin, Radius + 22f, BackdropColor);
         DrawAxis(origin, xDirection, "X", XColor);
         DrawAxis(origin, yDirection, "Y", YColor);
         DrawAxis(origin, zDirection, "Z", ZColor);
