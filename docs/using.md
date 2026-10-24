@@ -722,11 +722,13 @@ Three overlays cost one draw call per voxel, so the viewer limits them. The 3D v
 
 The 2D slice view shows one plane through every chunk. The Axis and Slice controls pick the plane by global voxel coordinate. The view draws the plane as one texture. Scroll to zoom and drag with the middle button to pan. "Fit Plane" shows the whole plane again. Focusing a chunk in the 3D view moves the plane into that chunk if needed and frames the chunk. A cell that no chunk covers stays empty. The plane can be at most 16,384 cells wide or high.
 
-On a project created with the Euler transport model, the Simulation panel shows a "Flow" readout of
+The Configuration panel starts with a "Solver Pipeline" section. It lists the stages in execution order. Each row has an enabled checkbox, move buttons, and a description on hover. Built-in stages also have a remove button. The host owns custom stages, so the viewer cannot remove them. The "Add stage" combo inserts a missing built-in stage at its canonical position. The "Euler" and "Legacy" buttons swap the stages that move gas and keep the rest. "Reset to defaults" restores the built-in layout. Every click is one recorded operation, so the timeline replays it at the same tick. A row expands to show the stage settings, such as the Euler flow settings. The panel warns when no stage moves gas or when `euler-flow` and `advection` both run. The panel is read-only while the timeline inspects history. The replay inspector lists the recorded stage list and the solver configuration keys.
+
+On a project that runs the `euler-flow` stage, the Simulation panel shows a "Flow" readout of
 `AtmosSimulation.LastFlowDiagnostics`: substeps, simulated time, whether the substep cap engaged, the largest Courant
 number and signal speed, and the clamp and negative-value counters. Anything that means the tick did not finish cleanly
-is drawn in the caution colour. The transport model is chosen in the Create Simulation dialog and cannot change
-afterwards, since the stage list is part of the recording.
+is drawn in the caution colour. The Create Simulation dialog picks the initial transport model. Solver Pipeline changes
+it later.
 
 ## Dangerous API
 `Numos.API.Dangerous` is a separate package from `Numos.API` by design.
