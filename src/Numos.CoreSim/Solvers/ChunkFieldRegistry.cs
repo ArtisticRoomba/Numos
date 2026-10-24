@@ -19,12 +19,15 @@ internal abstract class ChunkFieldDescriptor
 {
     private object? _publicHandle;
 
-    private protected ChunkFieldDescriptor(string key, int slot, bool captureForRollback, int? fixedLength)
+    private protected ChunkFieldDescriptor(
+        string key, int slot, bool captureForRollback, int? fixedLength, bool clearOnSleep, bool clearOnVacuum)
     {
         Key = key;
         Slot = slot;
         CaptureForRollback = captureForRollback;
         FixedLength = fixedLength;
+        ClearOnSleep = clearOnSleep;
+        ClearOnVacuum = clearOnVacuum;
     }
 
     /// <summary>
@@ -47,6 +50,16 @@ internal abstract class ChunkFieldDescriptor
     internal int? FixedLength { get; }
 
     /// <summary>
+    ///     Gets whether <see cref="AtmosChunk.Sleep" /> resets this field's storage to default.
+    /// </summary>
+    internal bool ClearOnSleep { get; }
+
+    /// <summary>
+    ///     Gets whether clearing a voxel or chunk to vacuum resets this field's storage to default.
+    /// </summary>
+    internal bool ClearOnVacuum { get; }
+
+    /// <summary>
     ///     Gets the public wrapper published for this descriptor, if any.
     /// </summary>
     internal object? PublicHandle => Volatile.Read(ref _publicHandle);
@@ -67,22 +80,25 @@ internal abstract class ChunkFieldDescriptor
 
     internal string Describe()
     {
-        return Describe(ElementType, CaptureForRollback, FixedLength);
+        return Describe(ElementType, CaptureForRollback, FixedLength, ClearOnSleep, ClearOnVacuum);
     }
 
-    internal static string Describe(Type elementType, bool captureForRollback, int? fixedLength)
+    internal static string Describe(Type elementType, bool captureForRollback, int? fixedLength, bool clearOnSleep, bool clearOnVacuum)
     {
         string length = fixedLength is { } count ? $"{count} elements" : "one element per voxel";
         string policy = captureForRollback ? "captured for rollback" : "transient";
-        return $"{elementType.FullName} ({length}, {policy})";
+        string sleep = clearOnSleep ? "cleared on sleep" : "kept on sleep";
+        string vacuum = clearOnVacuum ? "cleared on vacuum" : "kept on vacuum";
+        return $"{elementType.FullName} ({length}, {policy}, {sleep}, {vacuum})";
     }
 }
 
 /// <inheritdoc />
 internal sealed class ChunkFieldDescriptor<T> : ChunkFieldDescriptor
 {
-    internal ChunkFieldDescriptor(string key, int slot, bool captureForRollback, int? fixedLength)
-        : base(key, slot, captureForRollback, fixedLength)
+    internal ChunkFieldDescriptor(
+        string key, int slot, bool captureForRollback, int? fixedLength, bool clearOnSleep, bool clearOnVacuum)
+        : base(key, slot, captureForRollback, fixedLength, clearOnSleep, clearOnVacuum)
     {
     }
 
@@ -93,9 +109,12 @@ internal sealed class ChunkFieldDescriptor<T> : ChunkFieldDescriptor
         return new SolverArrayStorage<T>(this, new T[GetLength(voxelCount)]);
     }
 
-    internal bool Matches(bool captureForRollback, int? fixedLength)
+    internal bool Matches(bool captureForRollback, int? fixedLength, bool clearOnSleep, bool clearOnVacuum)
     {
-        return CaptureForRollback == captureForRollback && FixedLength == fixedLength;
+        return CaptureForRollback == captureForRollback &&
+               FixedLength == fixedLength &&
+               ClearOnSleep == clearOnSleep &&
+               ClearOnVacuum == clearOnVacuum;
     }
 }
 
@@ -123,13 +142,16 @@ internal static class ChunkFieldRegistry
     /// <param name="key">The ordinal key. Captured fields persist it in checkpoints, so it must stay stable.</param>
     /// <param name="captureForRollback">Whether chunks capture and restore the field.</param>
     /// <param name="length">The array length, or null for one element per voxel.</param>
+    /// <param name="clearOnSleep">Whether the array is reset to default when a chunk sleeps.</param>
+    /// <param name="clearOnVacuum">Whether the array is reset to default when a voxel becomes a vacuum.</param>
     /// <returns>The descriptor shared by every registration of the same definition.</returns>
     /// <exception cref="ArgumentException">
     ///     <paramref name="key" /> is blank, or a captured <typeparamref name="T" /> contains managed references.
     /// </exception>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="length" /> is negative.</exception>
     /// <exception cref="InvalidOperationException">The key is registered with a different definition.</exception>
-    internal static ChunkFieldDescriptor<T> Register<T>(string key, bool captureForRollback, int? length)
+    internal static ChunkFieldDescriptor<T> Register<T>(
+        string key, bool captureForRollback = false, int? length = null, bool clearOnSleep = false, bool clearOnVacuum = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(key);
         if (length is { } count)
@@ -146,17 +168,17 @@ internal static class ChunkFieldRegistry
         {
             if (ByKey.TryGetValue(key, out var existing))
             {
-                if (existing is ChunkFieldDescriptor<T> typed && typed.Matches(captureForRollback, length))
+                if (existing is ChunkFieldDescriptor<T> typed && typed.Matches(captureForRollback, length, clearOnSleep, clearOnVacuum))
                     return typed;
 
                 throw new InvalidOperationException(
                     $"Chunk field '{key}' is already registered as {existing.Describe()} and cannot be registered " +
-                    $"again as {ChunkFieldDescriptor.Describe(typeof(T), captureForRollback, length)}.");
+                    $"again as {ChunkFieldDescriptor.Describe(typeof(T), captureForRollback, length, clearOnSleep, clearOnVacuum)}.");
             }
 
             int slot = _slotCount;
             Volatile.Write(ref _slotCount, slot + 1);
-            var descriptor = new ChunkFieldDescriptor<T>(key, slot, captureForRollback, length);
+            var descriptor = new ChunkFieldDescriptor<T>(key, slot, captureForRollback, length, clearOnSleep, clearOnVacuum);
             ByKey.Add(key, descriptor);
             return descriptor;
         }

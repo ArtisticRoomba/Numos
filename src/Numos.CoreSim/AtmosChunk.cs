@@ -1,12 +1,12 @@
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using JetBrains.Annotations;
+using Magnitudo;
 using Numos.Collections;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.Datatypes.Snapshots;
 using Numos.CoreSim.Solvers;
 using Numos.Maths;
-using Magnitudo;
 
 namespace Numos.CoreSim;
 
@@ -312,7 +312,8 @@ internal class AtmosChunk
     /// <remarks>
     ///     Safe to call from parallel workers, including the first touch of a field. Storage stays lazy because
     ///     allocating every registered field up front would add zero-filled arrays to every checkpoint and
-    ///     change state hashes. Arrays survive ticks and sleep. Initialization or release detaches them.
+    ///     change state hashes. Arrays survive ticks. Sleep and vacuum clear them only when the descriptor opts in. Initialization or
+    ///     release detaches them.
     /// </remarks>
     internal T[] GetOrCreateField<T>(ChunkFieldDescriptor<T> field)
     {
@@ -452,6 +453,15 @@ internal class AtmosChunk
     {
         IsAwake = false;
         MarkChanged();
+        SolverArrayStorage?[]? fields = Volatile.Read(ref _fields);
+        if (fields == null)
+            return;
+
+        foreach (var storage in fields)
+        {
+            if (storage is { Field.ClearOnSleep: true })
+                storage.ClearAll();
+        }
     }
 
     /// <summary>
@@ -553,7 +563,8 @@ internal class AtmosChunk
 
     /// <summary>
     ///     Clears one voxel to vacuum: zeroes <see cref="TotalPressure" />, every gas channel, and
-    ///     <see cref="TotalHeatCapacity" />, and sets <see cref="IsVacuum" />.
+    ///     <see cref="TotalHeatCapacity" />, and sets <see cref="IsVacuum" />. Per-voxel fields that opt into vacuum
+    ///     clearing are reset for this voxel.
     /// </summary>
     /// <param name="idx">Index of voxel</param>
     /// <remarks>Temperature is left as is, and the chunk revision is not advanced.</remarks>
@@ -568,10 +579,22 @@ internal class AtmosChunk
 
         TotalHeatCapacity[idx] = 0f;
         IsVacuum[idx] = true;
+
+        // Solver workers call this per voxel, so walk only this chunk's allocated fields without locking.
+        SolverArrayStorage?[]? fields = Volatile.Read(ref _fields);
+        if (fields == null)
+            return;
+
+        foreach (var storage in fields)
+        {
+            if (storage is { Field: { ClearOnVacuum: true, FixedLength: null } })
+                storage.ClearElement(idx);
+        }
     }
 
     /// <summary>
     ///     Clears every voxel in the chunk to vacuum, as <see cref="SetVoxelToVacuum" /> does for one voxel.
+    ///     Fixed-length fields that opt into vacuum clearing are also reset.
     /// </summary>
     [PublicAPI]
     public void SetChunkToVacuum()
@@ -584,8 +607,17 @@ internal class AtmosChunk
 
         TotalHeatCapacity.Fill(0f);
         IsVacuum.Fill(true);
-    }
 
+        SolverArrayStorage?[]? fields = Volatile.Read(ref _fields);
+        if (fields == null)
+            return;
+
+        foreach (var storage in fields)
+        {
+            if (storage is { Field.ClearOnVacuum: true })
+                storage.ClearAll();
+        }
+    }
 
     /// <summary>
     ///     Sets a specific voxel classification. Solid and void classifications clear the voxel to vacuum.
