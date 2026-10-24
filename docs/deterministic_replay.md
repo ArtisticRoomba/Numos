@@ -427,7 +427,7 @@ of operations, and the `.numos` file would grow to hundreds of megabytes. `Atmos
 
 The box uses global voxel coordinates, so it can span many chunks. Voxels in chunks that do not exist are skipped, and
 the edit never creates a chunk. Inside each chunk the kernel applies the selected parts in a fixed order:
-classification, gas removal, voxel temperature, gas injection. The live call and the replay run the same
+classification, gas removal, voxel temperature, gas injection, velocity. The live call and the replay run the same
 kernel code, so both give the same state hash.
 
 The result equals the same edit made with per-voxel calls. Two differences are deliberate. Gas removal skips solid and
@@ -437,9 +437,6 @@ have woken it.
 The operation holds the corner voxels, a parts mask, the scalar values, and a gas list. A hand-written codec pair writes
 the list, because the generator cannot encode a variable-length field. Numos validates the whole edit before it
 changes state, so an invalid edit throws and records nothing.
-
-The operation also reserves a parts bit and three floats for a velocity part. This build never sets the bit and
-writes zeros for the floats. A reader rejects a file that sets the bit. Opcode 13 stays free for the same reason.
 
 Adding opcode 14 did not change the checkpoint or file format versions. A checkpoint holds the same fields as before.
 A reader that predates the opcode rejects a file that contains it.

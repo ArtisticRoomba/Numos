@@ -18,8 +18,8 @@ public sealed class NumosReplaySerializerTests
         {
             GasRegistry =
             [
-                new GasProperties { Name = "Air", DiffusionCoefficient = 0.02f },
-                new GasProperties { Name = "Fuel" }
+                new GasProperties { Name = "Air", DiffusionCoefficient = 0.02f, MolarMass = 0.029f },
+                new GasProperties { Name = "Fuel", MolarMass = 0.044f }
             ]
         };
 
@@ -37,7 +37,8 @@ public sealed class NumosReplaySerializerTests
                 ClearGas = true,
                 TemperatureK = 301f,
                 Gases = [new AtmosGasAmount(1, 0.5f), new AtmosGasAmount(0, 0.25f)],
-                GasTemperatureK = 311f
+                GasTemperatureK = 311f,
+                Velocity = new System.Numerics.Vector3(1.5f, -2.5f, 0.5f)
             });
 
         world.Tick();
