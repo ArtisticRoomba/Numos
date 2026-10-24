@@ -605,6 +605,10 @@ dotnet add package Numos.Viewer --prerelease
 
 The viewer needs a desktop environment with graphics support. To host it from C#, construct a `SimulationViewer` and call `Run()`. The About dialog shows the Viewer and CoreSim package versions, source references, and commit hashes, so a tester can identify the exact build.
 
+The 3D viewport keeps one mesh per chunk on the GPU, so a scene of a million voxels stays interactive. Immediate-mode drawing would send every voxel face to the driver on every frame. A mesh holds only the faces that touch empty or filtered space. The viewer rebuilds a mesh when the chunk's visible voxels change. A tick that changes only colors rewrites the color buffer and keeps the positions. A new scene uploads over a few frames, so large meshes do not stall the window.
+
+The 3D view outlines voxels only for a focused chunk or a scene of at most 20,000 voxels, because each outline costs one draw call per voxel.
+
 ## Dangerous API
 `Numos.API.Dangerous` is a separate package from `Numos.API` by design.
 

@@ -108,6 +108,12 @@ public partial class SimulationViewer : IDisposable
     private bool _showViewPanel = true;
     private bool _showViewportBranding = true;
 
+    /// <summary>
+    ///     Mesh cache of the surface being drawn. <see cref="RenderSimulationViewports" /> points it at each surface in
+    ///     turn, like <see cref="_drawData" />.
+    /// </summary>
+    private ChunkMeshCache? _meshCache;
+
     private AtmosSimulation? _simulation;
     private SimulationSliceDrawData? _sliceDrawData;
     private SliceProjectionKey? _sliceProjectionKey;
@@ -745,7 +751,7 @@ public partial class SimulationViewer : IDisposable
 
     private void RenderSimulationScene()
     {
-        if (_drawData != null)
+        if (_drawData != null && _meshCache != null)
         {
             Raylib.BeginMode3D(_camera3D);
             try
@@ -754,6 +760,7 @@ public partial class SimulationViewer : IDisposable
                     _drawData,
                     _focusedChunk,
                     _highlights,
+                    _meshCache,
                     Get3DRenderStyleOptions());
 
                 DrawTopologyOverlay();
@@ -762,6 +769,10 @@ public partial class SimulationViewer : IDisposable
             {
                 Raylib.EndMode3D();
             }
+
+            // A large scene uploads over several frames, and the window may be waiting for events.
+            if (_meshCache.HasPendingWork)
+                RequestNextFrame();
         }
 
         if (_viewport != null)

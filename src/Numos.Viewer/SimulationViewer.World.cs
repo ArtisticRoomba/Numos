@@ -6,6 +6,7 @@ using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Snapshots;
 using Numos.Maths;
 using Numos.SimDrawer;
+using Numos.Viewer.Rendering;
 using Numos.Viewer.Rendering.Viewport;
 using Numos.Viewer.Ui;
 using Raylib_cs;
@@ -210,8 +211,10 @@ public partial class SimulationViewer
             var savedDrawData = _drawData;
             var savedViewport = _viewport;
             var savedCamera = _camera3D;
+            var savedMeshes = _meshCache;
             _simulation = surface.Simulation;
             _drawData = surface.DrawData;
+            _meshCache = surface.MeshCache;
             _viewport = surface.Viewport;
             _camera3D = surface.Camera;
             string name = GetSimulationName(surface.Simulation.Id);
@@ -239,6 +242,7 @@ public partial class SimulationViewer
             _drawData = savedDrawData;
             _viewport = savedViewport;
             _camera3D = savedCamera;
+            _meshCache = savedMeshes;
         }
 
         if (requestedActive.HasValue)
@@ -465,8 +469,15 @@ public partial class SimulationViewer
         internal Dictionary<Int3, AtmosChunkSnapshot> Snapshots { get; } = [];
         internal SimulationDrawData? DrawData { get; set; }
 
+        /// <summary>
+        ///     GPU meshes for this simulation's chunks. Chunk positions repeat between simulations, so each surface
+        ///     owns a cache.
+        /// </summary>
+        internal ChunkMeshCache MeshCache { get; } = new();
+
         public void Dispose()
         {
+            MeshCache.Dispose();
             Viewport?.Dispose();
             Viewport = null;
         }

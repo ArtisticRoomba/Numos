@@ -8,6 +8,7 @@ using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.Datatypes.Snapshots;
 using Numos.Maths;
 using Numos.SimDrawer;
+using Numos.Viewer.Rendering;
 using Numos.Viewer.Ui;
 using Raylib_cs;
 using rlImGui_cs;
@@ -572,7 +573,9 @@ public partial class SimulationViewer
             "Voxel outlines",
             "voxel-outlines",
             ref _show3DVoxelOutlines,
-            ref _show2DVoxelOutlines);
+            ref _show2DVoxelOutlines,
+            "Each outline is drawn per voxel, so large scenes skip them. The 3D view outlines voxels only for a " +
+            $"focused chunk or a scene of at most {SimulationRenderer.MaxOutlinedVoxels:N0} voxels.");
 
         RenderRenderingStyleRow(
             "Transparent voxels",
@@ -587,11 +590,15 @@ public partial class SimulationViewer
         string label,
         string id,
         ref bool show3D,
-        ref bool show2D)
+        ref bool show2D,
+        string? tooltip = null)
     {
         ImGui.TableNextRow();
         ImGui.TableSetColumnIndex(0);
         ImGui.TextUnformatted(label);
+        if (tooltip != null)
+            ImGuiExtensions.QuestionTooltip(tooltip);
+
         ImGui.TableSetColumnIndex(1);
         ImGui.Checkbox($"##{id}-3d", ref show3D);
         ImGui.TableSetColumnIndex(2);

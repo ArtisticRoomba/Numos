@@ -43,6 +43,21 @@ public readonly record struct ColorRgba(float R, float G, float B, float A = 1f)
             from.B + (to.B - from.B) * amount,
             from.A + (to.A - from.A) * amount);
     }
+
+    /// <summary>
+    ///     Converts the color to four 8-bit channels. Each channel is clamped to [0, 1], scaled by 255, and truncated,
+    ///     which matches how raylib builds a <c>Color</c> from floats.
+    /// </summary>
+    /// <returns>The red, green, blue, and alpha channels.</returns>
+    public (byte R, byte G, byte B, byte A) ToRgba8()
+    {
+        return (ToByte(R), ToByte(G), ToByte(B), ToByte(A));
+    }
+
+    private static byte ToByte(float channel)
+    {
+        return (byte)(Math.Clamp(channel, 0f, 1f) * 255f);
+    }
 }
 
 /// <summary>

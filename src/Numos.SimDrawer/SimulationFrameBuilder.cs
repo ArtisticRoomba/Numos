@@ -1,3 +1,4 @@
+using System.Runtime.ExceptionServices;
 using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.Datatypes.Snapshots;
@@ -11,6 +12,7 @@ namespace Numos.SimDrawer;
 public sealed class SimulationFrameBuilder
 {
     private long _nextFrameVersion;
+    private int _maxDegreeOfParallelism = Environment.ProcessorCount;
 
     /// <summary>
     ///     Creates a presentation-frame builder.
@@ -36,6 +38,20 @@ public sealed class SimulationFrameBuilder
     ///     Gets the registered visualization methods.
     /// </summary>
     public VisualizationRegistry Visualizations { get; }
+
+    /// <summary>
+    ///     Gets or sets how many chunks <see cref="BuildSimulation" /> maps at once. The default is the processor count.
+    /// </summary>
+    /// <remarks>
+    ///     Chunks are independent, so a large frame maps them in parallel. The result does not depend on this value.
+    ///     A visualization method that is not thread-safe needs a value of 1, because its
+    ///     <see cref="IVisualizationMethod.TryGetColor" /> then runs on several threads otherwise.
+    /// </remarks>
+    public int MaxDegreeOfParallelism
+    {
+        get => _maxDegreeOfParallelism;
+        set => _maxDegreeOfParallelism = Math.Max(value, 1);
+    }
 
     /// <summary>
     ///     Returns the minimal detached snapshot fields needed to map one visualization.
@@ -129,6 +145,7 @@ public sealed class SimulationFrameBuilder
         var chunks = new Dictionary<Int3, ChunkDrawData>();
         var seenPositions = new HashSet<Int3>();
         var activeGasIds = new HashSet<int>();
+        var pending = new List<(AtmosChunkSnapshot Snapshot, ChunkIdentity Identity)>();
 
         foreach (var snapshot in snapshotList)
         {
@@ -162,10 +179,10 @@ public sealed class SimulationFrameBuilder
                 continue;
             }
 
-            chunks.Add(
-                snapshot.GridPosition,
-                BuildChunk(snapshot, identity, visualization, visualizationMappingRevision, range));
+            pending.Add((snapshot, identity));
         }
+
+        BuildPendingChunks(pending, chunks, visualization, visualizationMappingRevision, range);
 
         var legend = visualization.CreateLegend(activeGasIds, range);
         legend.Range = range;
@@ -183,6 +200,53 @@ public sealed class SimulationFrameBuilder
             visualizationMappingRevision,
             sourceVersion,
             Interlocked.Increment(ref _nextFrameVersion));
+    }
+
+    private void BuildPendingChunks(
+        List<(AtmosChunkSnapshot Snapshot, ChunkIdentity Identity)> pending,
+        Dictionary<Int3, ChunkDrawData> destination,
+        IVisualizationMethod visualization,
+        ulong visualizationMappingRevision,
+        VisualizationRange range)
+    {
+        var built = new ChunkDrawData[pending.Count];
+        int parallelism = Math.Min(MaxDegreeOfParallelism, pending.Count);
+        if (parallelism > 1)
+        {
+            try
+            {
+                Parallel.For(
+                    0,
+                    pending.Count,
+                    new ParallelOptions { MaxDegreeOfParallelism = parallelism },
+                    index => built[index] = BuildChunk(
+                        pending[index].Snapshot,
+                        pending[index].Identity,
+                        visualization,
+                        visualizationMappingRevision,
+                        range));
+            }
+            catch (AggregateException exception) when (exception.InnerExceptions.Count > 0)
+            {
+                // Callers see the same exception type as a sequential build.
+                ExceptionDispatchInfo.Capture(exception.InnerExceptions[0]).Throw();
+            }
+        }
+        else
+        {
+            for (int index = 0; index < pending.Count; index++)
+            {
+                built[index] = BuildChunk(
+                    pending[index].Snapshot,
+                    pending[index].Identity,
+                    visualization,
+                    visualizationMappingRevision,
+                    range);
+            }
+        }
+
+        for (int index = 0; index < pending.Count; index++)
+            destination.Add(pending[index].Snapshot.GridPosition, built[index]);
     }
 
     private static VisualizationRange GetVisualizationRange(
@@ -409,13 +473,13 @@ public sealed class SimulationFrameBuilder
                 sample.RoomId,
                 visible ? color : default);
 
-            topologyHash.Add(visible);
             if (visible)
             {
                 visibleCount++;
-                styleHash.Add(index);
-                styleHash.Add(color);
+                styleHash.Add(PackColor(color));
             }
+            else
+                styleHash.Add(0u);
         }
 
         int surfaceFaceCount = AddVisibleFaceMasks(cells, snapshot.Dimensions, ref topologyHash);
@@ -445,7 +509,10 @@ public sealed class SimulationFrameBuilder
         for (int index = 0; index < cells.Length; index++)
         {
             if (!cells[index].IsVisible)
+            {
+                topologyHash.Add(0u);
                 continue;
+            }
 
             int x = index % dimensions.X;
             int yz = index / dimensions.X;
@@ -475,11 +542,23 @@ public sealed class SimulationFrameBuilder
             cells[index] = cells[index] with { VisibleFaces = mask };
             int faceCount = CountFaces(mask);
             surfaceFaceCount += faceCount;
-            topologyHash.Add(index);
-            topologyHash.Add((byte)mask);
+            topologyHash.Add(VisibleTopologyFlag | (byte)mask);
         }
 
         return surfaceFaceCount;
+    }
+
+    private const uint VisibleTopologyFlag = 1u << 8;
+    private const uint VisibleStyleFlag = 1u << 24;
+
+    /// <summary>
+    ///     Packs a color into 8-bit channels plus a visible flag, so the style hash needs one step per voxel. A color
+    ///     change that stays below one 8-bit step cannot change a rendered pixel, so the hash may ignore it.
+    /// </summary>
+    private static uint PackColor(ColorRgba color)
+    {
+        (byte r, byte g, byte b, _) = color.ToRgba8();
+        return VisibleStyleFlag | (uint)r << 16 | (uint)g << 8 | b;
     }
 
     private static bool CanReuse(
@@ -709,22 +788,16 @@ public sealed class SimulationFrameBuilder
 
         public void Add(ulong value)
         {
-            EnsureInitialized();
-            for (int shift = 0; shift < 64; shift += 8)
-            {
-                _value ^= (byte)(value >> shift);
-                _value *= Prime;
-            }
+            Add((uint)value);
+            Add((uint)(value >> 32));
         }
 
+        // One xor and one multiply per 32-bit word. The hash only detects change, so it skips FNV's per-byte steps,
+        // which cost about twenty dependent multiplies per voxel.
         public void Add(uint value)
         {
             EnsureInitialized();
-            for (int shift = 0; shift < 32; shift += 8)
-            {
-                _value ^= (byte)(value >> shift);
-                _value *= Prime;
-            }
+            _value = (_value ^ value) * Prime;
         }
 
         public void Add(string value)
@@ -735,10 +808,7 @@ public sealed class SimulationFrameBuilder
 
         public void Add(ColorRgba color)
         {
-            Add(BitConverter.SingleToUInt32Bits(color.R));
-            Add(BitConverter.SingleToUInt32Bits(color.G));
-            Add(BitConverter.SingleToUInt32Bits(color.B));
-            Add(BitConverter.SingleToUInt32Bits(color.A));
+            Add(PackColor(color));
         }
 
         private void EnsureInitialized()
