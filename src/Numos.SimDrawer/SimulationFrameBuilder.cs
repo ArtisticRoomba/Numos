@@ -311,13 +311,49 @@ public sealed class SimulationFrameBuilder
     }
 
     /// <summary>
-    ///     Projects one local slice from a focused chunk without reading the simulation again.
+    ///     Cuts one plane through every chunk of a frame at a global voxel coordinate.
+    /// </summary>
+    /// <param name="frame">Frame that holds the chunks' presentation data.</param>
+    /// <param name="axis">Axis normal to the plane.</param>
+    /// <param name="sliceIndex">
+    ///     Global voxel coordinate along <paramref name="axis" />, clamped into <see cref="SimulationDrawData.Bounds" />.
+    /// </param>
+    /// <param name="previous">
+    ///     The slice built last for the same frame lineage, or <see langword="null" />. The result shares its pixels
+    ///     and index arrays when the plane and the chunk versions are unchanged, so the builder skips that work.
+    /// </param>
+    /// <returns>
+    ///     A dense slice over the frame's bounds. Cells that no chunk covers are transparent and cannot be picked.
+    /// </returns>
+    /// <exception cref="ArgumentNullException"><paramref name="frame" /> is <see langword="null" />.</exception>
+    /// <remarks>
+    ///     The plane assumes every chunk has the same dimensions. A chunk with other dimensions than the first one
+    ///     in position order is left out.
+    /// </remarks>
+    public SimulationSliceDrawData BuildPlaneSlice(
+        SimulationDrawData frame,
+        SliceAxis axis,
+        int sliceIndex,
+        SimulationSliceDrawData? previous = null)
+    {
+        ArgumentNullException.ThrowIfNull(frame);
+        var bounds = frame.Bounds;
+        int minimum = bounds.GetMinimum(axis);
+        int maximum = Math.Max(bounds.GetMaximumExclusive(axis) - 1, minimum);
+        return BuildSlice(frame.Chunks.Values, bounds, axis, Math.Clamp(sliceIndex, minimum, maximum), previous);
+    }
+
+    /// <summary>
+    ///     Cuts one plane through a single chunk.
     /// </summary>
     /// <param name="frame">Frame that holds the chunk's presentation data.</param>
-    /// <param name="chunkIdentity">Chunk to slice; its generation must match the frame's chunk.</param>
+    /// <param name="chunkIdentity">Chunk to slice. Its generation must match the frame's chunk.</param>
     /// <param name="axis">Axis normal to the slice.</param>
     /// <param name="sliceIndex">Local index along <paramref name="axis" />, clamped into the chunk.</param>
-    /// <returns>The slice, including filtered cells for picking.</returns>
+    /// <returns>
+    ///     A slice that covers only the chunk, including filtered cells for picking. Its coordinates start at the chunk's
+    ///     corner.
+    /// </returns>
     /// <exception cref="ArgumentNullException"><paramref name="frame" /> is <see langword="null" />.</exception>
     /// <exception cref="KeyNotFoundException">
     ///     The frame has no chunk with <paramref name="chunkIdentity" />.
@@ -332,45 +368,241 @@ public sealed class SimulationFrameBuilder
         if (!frame.Chunks.TryGetValue(chunkIdentity.Position, out var chunk) || chunk.Identity != chunkIdentity)
             throw new KeyNotFoundException($"Chunk {chunkIdentity.Position} is not present in this frame.");
 
+        var bounds = VoxelBounds.Enclosing([chunk]);
         int clampedIndex = ClampSliceIndex(chunk.Dimensions, axis, sliceIndex);
-        (int width, int height) = GetSliceDimensions(chunk.Dimensions, axis);
-        var cells = new List<SliceCellDrawData>(Math.Min(width * height, chunk.VisibleCellCount));
-        var pickableCells = new SliceCellDrawData[checked(width * height)];
+        return BuildSlice([chunk], bounds, axis, bounds.GetMinimum(axis) + clampedIndex, null);
+    }
 
-        for (int v = 0; v < height; v++)
+    private static SimulationSliceDrawData BuildSlice(
+        IEnumerable<ChunkDrawData> source,
+        VoxelBounds bounds,
+        SliceAxis axis,
+        int index,
+        SimulationSliceDrawData? previous)
+    {
+        // The plane assumes one chunk size. The lowest chunk in position order sets it, so the choice does not
+        // depend on dictionary order.
+        ChunkDrawData? reference = null;
+        foreach (var chunk in source)
         {
-            for (int u = 0; u < width; u++)
-            {
-                (int x, int y, int z) = MapSliceToLocal(axis, clampedIndex, u, v);
-                ushort localIndex = chunk.GetLocalIndex(x, y, z);
-                ref readonly var voxel = ref chunk.GetCell(localIndex);
-                var sliceCell = new SliceCellDrawData(
-                    u,
-                    v,
-                    new VoxelAddress(chunk.Identity, localIndex),
-                    voxel);
+            if (chunk.CellCount > 0 && (reference == null || ComparePositions(chunk, reference) < 0))
+                reference = chunk;
+        }
 
-                pickableCells[u + width * v] = sliceCell;
-                if (voxel.IsVisible)
-                    cells.Add(sliceCell);
+        var dimensions = reference?.Dimensions ?? default;
+        var candidates = new List<ChunkDrawData>();
+        foreach (var chunk in source)
+        {
+            if (chunk.CellCount == 0 || chunk.Dimensions != dimensions)
+                continue;
+
+            int length = GetSliceAxisLength(dimensions, axis);
+            int start = GetAxisComponent(chunk.ChunkPosition, axis) * length;
+            if (index >= start && index < start + length)
+                candidates.Add(chunk);
+        }
+
+        candidates.Sort(ComparePositions);
+
+        Int3 size = bounds.Size;
+        (int width, int height) = GetSliceDimensions(size, axis);
+        (int originU, int originV) = SimulationSliceDrawData.Project(
+            axis,
+            bounds.Minimum.X,
+            bounds.Minimum.Y,
+            bounds.Minimum.Z);
+
+        var layout = new StableHash64();
+        layout.Add((int)axis);
+        layout.Add(index);
+        layout.Add(originU);
+        layout.Add(originV);
+        layout.Add(width);
+        layout.Add(height);
+        layout.Add(dimensions.X);
+        layout.Add(dimensions.Y);
+        layout.Add(dimensions.Z);
+        foreach (var chunk in candidates)
+        {
+            layout.Add(chunk.ChunkPosition.X);
+            layout.Add(chunk.ChunkPosition.Y);
+            layout.Add(chunk.ChunkPosition.Z);
+        }
+
+        var render = layout;
+        foreach (var chunk in candidates)
+        {
+            render.Add(chunk.Identity.Generation);
+            render.Add(chunk.TopologyVersion);
+            render.Add(chunk.StyleVersion);
+        }
+
+        ulong layoutVersion = layout.Value;
+        ulong renderVersion = render.Value;
+        bool reuseLayout = previous != null && previous.LayoutVersion == layoutVersion;
+        bool reusePixels = reuseLayout && previous!.RenderVersion == renderVersion;
+
+        int cellCount = checked(width * height);
+        var table = candidates.ToArray();
+        var rects = new SliceChunkRect[table.Length];
+        var origins = new (int U, int V)[table.Length];
+        for (int slot = 0; slot < table.Length; slot++)
+        {
+            var chunk = table[slot];
+            (int chunkU, int chunkV) = SimulationSliceDrawData.Project(
+                axis,
+                chunk.ChunkPosition.X * dimensions.X,
+                chunk.ChunkPosition.Y * dimensions.Y,
+                chunk.ChunkPosition.Z * dimensions.Z);
+
+            (int extentU, int extentV) = SimulationSliceDrawData.Project(
+                axis,
+                dimensions.X,
+                dimensions.Y,
+                dimensions.Z);
+
+            origins[slot] = (chunkU - originU, chunkV - originV);
+            rects[slot] = new SliceChunkRect(chunk.Identity, chunkU - originU, chunkV - originV, extentU, extentV);
+        }
+
+        int[] cellChunk;
+        ushort[] cellLocal;
+        byte[] pixels;
+        int visibleCount;
+        if (reusePixels)
+        {
+            cellChunk = previous!.CellChunkArray;
+            cellLocal = previous.CellLocalArray;
+            pixels = previous.PixelArray;
+            visibleCount = previous.VisibleCellCount;
+        }
+        else
+        {
+            cellChunk = reuseLayout ? previous!.CellChunkArray : new int[cellCount];
+            cellLocal = reuseLayout ? previous!.CellLocalArray : new ushort[cellCount];
+            pixels = new byte[checked(cellCount * 4)];
+            if (!reuseLayout)
+                Array.Fill(cellChunk, -1);
+
+            var counts = new int[table.Length];
+            void FillSlot(int slot)
+            {
+                counts[slot] = FillChunkPlane(
+                    table[slot],
+                    axis,
+                    index,
+                    width,
+                    origins[slot].U,
+                    origins[slot].V,
+                    slot,
+                    reuseLayout ? null : cellChunk,
+                    reuseLayout ? null : cellLocal,
+                    pixels);
+            }
+
+            if (table.Length >= 16)
+                Parallel.For(0, table.Length, FillSlot);
+            else
+            {
+                for (int slot = 0; slot < table.Length; slot++)
+                    FillSlot(slot);
+            }
+
+            visibleCount = 0;
+            foreach (int count in counts)
+                visibleCount += count;
+        }
+
+        return new SimulationSliceDrawData(
+            axis,
+            index,
+            originU,
+            originV,
+            width,
+            height,
+            dimensions,
+            table,
+            rects,
+            cellChunk,
+            cellLocal,
+            pixels,
+            visibleCount,
+            layoutVersion,
+            renderVersion);
+    }
+
+    private static int ComparePositions(ChunkDrawData left, ChunkDrawData right)
+    {
+        int byZ = left.ChunkPosition.Z.CompareTo(right.ChunkPosition.Z);
+        if (byZ != 0)
+            return byZ;
+
+        int byY = left.ChunkPosition.Y.CompareTo(right.ChunkPosition.Y);
+        return byY != 0 ? byY : left.ChunkPosition.X.CompareTo(right.ChunkPosition.X);
+    }
+
+    private static int FillChunkPlane(
+        ChunkDrawData chunk,
+        SliceAxis axis,
+        int index,
+        int planeWidth,
+        int offsetU,
+        int offsetV,
+        int slot,
+        int[]? cellChunk,
+        ushort[]? cellLocal,
+        byte[] pixels)
+    {
+        var dimensions = chunk.Dimensions;
+        int planeArea = dimensions.X * dimensions.Y;
+        int local = index - GetAxisComponent(chunk.ChunkPosition, axis) * GetSliceAxisLength(dimensions, axis);
+        (int extentU, int extentV, int strideU, int strideV, int origin) = axis switch
+        {
+            SliceAxis.X => (dimensions.Z, dimensions.Y, planeArea, dimensions.X, local),
+            SliceAxis.Y => (dimensions.X, dimensions.Z, 1, planeArea, local * dimensions.X),
+            _ => (dimensions.X, dimensions.Y, 1, dimensions.X, local * planeArea)
+        };
+
+        ReadOnlySpan<VoxelDrawData> cells = chunk.Cells;
+        int visible = 0;
+        for (int v = 0; v < extentV; v++)
+        {
+            int dense = (offsetV + v) * planeWidth + offsetU;
+            int row = origin + v * strideV;
+            for (int u = 0; u < extentU; u++)
+            {
+                int localIndex = row + u * strideU;
+                if (cellChunk != null)
+                {
+                    cellChunk[dense + u] = slot;
+                    cellLocal![dense + u] = (ushort)localIndex;
+                }
+
+                ref readonly var cell = ref cells[localIndex];
+                if (!cell.IsVisible)
+                    continue;
+
+                (byte r, byte g, byte b, _) = cell.Color.ToRgba8();
+                int offset = 4 * (dense + u);
+                pixels[offset] = r;
+                pixels[offset + 1] = g;
+                pixels[offset + 2] = b;
+                pixels[offset + 3] = byte.MaxValue;
+                visible++;
             }
         }
 
-        var hash = new StableHash64();
-        hash.Add(chunk.TopologyVersion);
-        hash.Add(chunk.StyleVersion);
-        hash.Add((int)axis);
-        hash.Add(clampedIndex);
+        return visible;
+    }
 
-        return new SimulationSliceDrawData(
-            chunk.Identity,
-            axis,
-            clampedIndex,
-            width,
-            height,
-            cells.ToArray(),
-            pickableCells,
-            hash.Value);
+    private static int GetAxisComponent(Int3 position, SliceAxis axis)
+    {
+        return axis switch
+        {
+            SliceAxis.X => position.X,
+            SliceAxis.Y => position.Y,
+            _ => position.Z
+        };
     }
 
     /// <summary>

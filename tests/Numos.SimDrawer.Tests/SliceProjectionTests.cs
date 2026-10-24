@@ -88,7 +88,7 @@ public sealed class SliceProjectionTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(slice.Cells.Length, Is.Zero);
+            Assert.That(slice.VisibleCellCount, Is.Zero);
             Assert.That(found, Is.True);
             Assert.That(cell.Address.LocalIndex, Is.Zero);
             Assert.That(cell.Voxel.RoomId, Is.EqualTo(classification));
@@ -145,9 +145,10 @@ public sealed class SliceProjectionTests
             SliceAxis.Z,
             0);
 
+        Assert.That(secondSlice.TryGetCell(0, 0, out var secondCell), Is.True);
         Assert.Multiple(() =>
         {
-            Assert.That(secondSlice.Cells[0].Voxel.Temperature, Is.EqualTo(500f));
+            Assert.That(secondCell.Voxel.Temperature, Is.EqualTo(500f));
             Assert.That(secondSlice.RenderVersion, Is.EqualTo(firstSlice.RenderVersion));
         });
     }

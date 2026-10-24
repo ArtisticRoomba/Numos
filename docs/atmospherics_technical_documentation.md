@@ -863,7 +863,7 @@ behind a sleeping peer. After that, explicit links interact with sleep the same 
 ### 11.3 Seeing links in the Viewer
 
 The Viewer shows every registered simulation in its own dockable 3D surface with an independent camera. One active
-simulation supplies the shared 2D slice and editing panels. Its World & Topology panel creates or removes simulations
+simulation supplies the shared 2D slice, which cuts a plane through all of its chunks, and the editing panels. Its World & Topology panel creates or removes simulations
 and captures two selected voxels for portals. It also maps complete rectangular chunk faces into docks, with
 quarter-turn and axis-flip controls.
 

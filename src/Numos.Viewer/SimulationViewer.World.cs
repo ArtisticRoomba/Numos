@@ -126,8 +126,9 @@ public partial class SimulationViewer
         _voxelDetailCache.Clear();
         _drawData = null;
         _sliceDrawData = null;
-        _sliceProjectionKey = null;
-        _selectedSliceChunkPosition = null;
+        _sliceSourceFrame = null;
+        _sliceFrameChunk = null;
+        _sliceCameraFit = true;
         _hovered3DCell = null;
         _hoveredSliceCell = null;
         _selectedCell = null;

@@ -575,7 +575,8 @@ public partial class SimulationViewer
             ref _show3DVoxelOutlines,
             ref _show2DVoxelOutlines,
             "Each outline is drawn per voxel, so large scenes skip them. The 3D view outlines voxels only for a " +
-            $"focused chunk or a scene of at most {SimulationRenderer.MaxOutlinedVoxels:N0} voxels.");
+            $"focused chunk or a scene of at most {SimulationRenderer.MaxOutlinedVoxels:N0} voxels. " +
+            $"The 2D view outlines cells only when they are at least {SliceRenderer.MinOutlinePixels:0} pixels wide.");
 
         RenderRenderingStyleRow(
             "Transparent voxels",
@@ -1089,44 +1090,6 @@ public partial class SimulationViewer
             return;
         }
 
-        if (_session.Timeline?.IsInspecting == true &&
-            _selectedSliceChunkPosition.HasValue &&
-            !_drawData.Chunks.ContainsKey(_selectedSliceChunkPosition.Value))
-        {
-            ImGui.TextDisabled(
-                $"Selected chunk {FormatChunkPosition(_selectedSliceChunkPosition.Value)} does not exist at this timeline position.");
-
-            return;
-        }
-
-        if (!_selectedSliceChunkPosition.HasValue ||
-            !_drawData.Chunks.ContainsKey(_selectedSliceChunkPosition.Value))
-            _selectedSliceChunkPosition = _drawData.Chunks.Keys.First();
-
-        string selectedChunkLabel = FormatChunkPosition(_selectedSliceChunkPosition.Value);
-        bool followsFocus = _focusedChunk.HasValue;
-        if (_focusedChunk is { } focusedChunk)
-        {
-            _selectedSliceChunkPosition = focusedChunk.Position;
-            selectedChunkLabel = FormatChunkPosition(_selectedSliceChunkPosition.Value);
-        }
-        else if (ImGui.BeginCombo("Chunk##slice-chunk", selectedChunkLabel))
-        {
-            foreach (var chunk in _drawData.Chunks.Values)
-            {
-                bool selected = chunk.ChunkPosition == _selectedSliceChunkPosition.Value;
-                string label = FormatChunkPosition(chunk.ChunkPosition);
-
-                if (ImGui.Selectable(label, selected))
-                    _selectedSliceChunkPosition = chunk.ChunkPosition;
-
-                if (selected)
-                    ImGui.SetItemDefaultFocus();
-            }
-
-            ImGui.EndCombo();
-        }
-
         int axis = (int)_currentSliceAxis;
         if (ImGui.Combo(
                 "Axis##slice-axis",
@@ -1138,25 +1101,50 @@ public partial class SimulationViewer
                     "Z (XY plane)"
                 },
                 3))
+        {
             _currentSliceAxis = (SliceAxis)axis;
+            _sliceCameraFit = true;
+            if (_focusedChunk is { } focused && _drawData.Chunks.TryGetValue(focused.Position, out var focusedData))
+                FrameSliceOnChunk(focusedData);
+        }
 
-        var selectedChunk = _drawData.Chunks[_selectedSliceChunkPosition.Value];
-        int maxSliceIndex = Math.Max(
-            SimulationFrameBuilder.GetSliceAxisLength(selectedChunk.Dimensions, _currentSliceAxis) - 1,
-            0);
+        int minimumSlice = _drawData.Bounds.GetMinimum(_currentSliceAxis);
+        int maximumSlice = Math.Max(_drawData.Bounds.GetMaximumExclusive(_currentSliceAxis) - 1, minimumSlice);
+        _currentSliceIndex = Math.Clamp(_currentSliceIndex, minimumSlice, maximumSlice);
 
-        _currentSliceIndex = Math.Clamp(_currentSliceIndex, 0, maxSliceIndex);
+        ImGui.SliderInt("Slice##slice-index", ref _currentSliceIndex, minimumSlice, maximumSlice);
+        ImGuiExtensions.QuestionTooltip(
+            "Global voxel coordinate of the plane. The slice view shows this plane across every chunk. " +
+            "Scroll to zoom and drag with the middle button to pan.");
 
-        ImGui.SliderInt("Slice##slice-index", ref _currentSliceIndex, 0, maxSliceIndex);
+        if (ImGui.Button("Fit Plane"))
+            _sliceCameraFit = true;
+
+        ImGui.SameLine();
+        ImGui.BeginDisabled(!_focusedChunk.HasValue);
+        if (ImGui.Button("Frame Focused Chunk") &&
+            _focusedChunk is { } framed &&
+            _drawData.Chunks.TryGetValue(framed.Position, out var framedData))
+        {
+            FrameSliceOnChunk(framedData);
+        }
+
+        ImGui.EndDisabled();
 
         using var readout = ImGuiExtensions.BeginDefinitionTable("slice-readout");
         if (!readout.IsVisible)
             return;
 
-        ImGuiExtensions.DefinitionRow("Showing", $"{_currentSliceAxis} = {_currentSliceIndex} of 0-{maxSliceIndex}");
         ImGuiExtensions.DefinitionRow(
-            "Chunk",
-            followsFocus ? $"{selectedChunkLabel}, from 3D focus" : selectedChunkLabel);
+            "Showing",
+            $"{_currentSliceAxis} = {_currentSliceIndex} of {minimumSlice} to {maximumSlice}");
+
+        if (_sliceDrawData != null)
+        {
+            ImGuiExtensions.DefinitionRow(
+                "Plane",
+                $"{_sliceDrawData.Width} × {_sliceDrawData.Height} cells, {_sliceDrawData.ChunkRects.Length} chunks");
+        }
     }
 
     private void RenderVisualizationLegend()
@@ -1478,7 +1466,10 @@ public partial class SimulationViewer
         ImGui.BeginTooltip();
         ImGui.Text("2D Slice Cell");
         ImGui.Separator();
-        DrawCellSelectionDetails(_hoveredSliceCell.Value.Address, _hoveredSliceCell.Value.U, _hoveredSliceCell.Value.V);
+        DrawCellSelectionDetails(
+            _hoveredSliceCell.Value.Address,
+            _hoveredSliceCell.Value.U + (_sliceDrawData?.OriginU ?? 0),
+            _hoveredSliceCell.Value.V + (_sliceDrawData?.OriginV ?? 0));
         ImGui.EndTooltip();
     }
 

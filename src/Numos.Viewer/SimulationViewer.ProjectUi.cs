@@ -432,11 +432,9 @@ public partial class SimulationViewer
             return true;
         }
 
-        if (_showSliceViewport &&
-            _selectedSliceChunkPosition is { } slice &&
-            TryGetUsableSnapshot(slice, out snapshot))
+        if (_selectedCell is { } selected && TryGetUsableSnapshot(selected.Chunk.Position, out snapshot))
         {
-            source = "Slice chunk";
+            source = "Selected voxel's chunk";
             return true;
         }
 

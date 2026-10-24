@@ -74,7 +74,10 @@ public partial class SimulationViewer
         _staleSnapshotKeys.Clear();
         _drawData = null;
         _sliceDrawData = null;
-        _sliceProjectionKey = null;
+        _sliceSourceFrame = null;
+        _sliceFrameChunk = null;
+        _sliceCameraFit = true;
+        _sliceRenderer?.ReleaseTexture();
         _hoveredSliceCell = null;
         _hovered3DCell = null;
         _selectedCell = null;
@@ -87,7 +90,6 @@ public partial class SimulationViewer
         _voxelDetailCache.Clear();
         _highlights.Clear();
         _focusedChunk = null;
-        _selectedSliceChunkPosition = null;
         _cameraInitialized = false;
         _frameSceneOnNextPresentation = false;
 

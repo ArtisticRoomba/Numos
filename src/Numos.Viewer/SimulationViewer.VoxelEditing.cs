@@ -272,16 +272,11 @@ public partial class SimulationViewer
 
     private SliceCellDrawData? FindSliceCell(VoxelAddress address)
     {
-        if (_sliceDrawData == null)
-            return null;
-
-        for (int v = 0; v < _sliceDrawData.Height; v++)
+        if (_sliceDrawData != null &&
+            _sliceDrawData.TryLocate(address, out int u, out int v) &&
+            _sliceDrawData.TryGetCell(u, v, out var cell))
         {
-            for (int u = 0; u < _sliceDrawData.Width; u++)
-            {
-                if (_sliceDrawData.TryGetCell(u, v, out var cell) && cell.Address == address)
-                    return cell;
-            }
+            return cell;
         }
 
         return null;

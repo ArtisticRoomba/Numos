@@ -51,6 +51,9 @@ public partial class SimulationViewer
 
         _viewport = null;
 
+        _sliceRenderer?.Dispose();
+        _sliceRenderer = null;
+
         _sliceViewport?.Dispose();
         _sliceViewport = null;
 

@@ -132,6 +132,80 @@ public readonly record struct VoxelDrawData(
     ColorRgba Color);
 
 /// <summary>
+///     A box of global voxel coordinates.
+/// </summary>
+/// <param name="Minimum">Smallest coordinate on each axis, inclusive.</param>
+/// <param name="MaximumExclusive">Largest coordinate on each axis plus one.</param>
+public readonly record struct VoxelBounds(Int3 Minimum, Int3 MaximumExclusive)
+{
+    /// <summary>
+    ///     Gets the number of voxels on each axis.
+    /// </summary>
+    public Int3 Size => new(
+        MaximumExclusive.X - Minimum.X,
+        MaximumExclusive.Y - Minimum.Y,
+        MaximumExclusive.Z - Minimum.Z);
+
+    /// <summary>
+    ///     Gets the smallest coordinate along <paramref name="axis" />.
+    /// </summary>
+    /// <param name="axis">Axis to read.</param>
+    public int GetMinimum(SliceAxis axis)
+    {
+        return axis switch
+        {
+            SliceAxis.X => Minimum.X,
+            SliceAxis.Y => Minimum.Y,
+            SliceAxis.Z => Minimum.Z,
+            _ => throw new ArgumentOutOfRangeException(nameof(axis), axis, "Unknown slice axis.")
+        };
+    }
+
+    /// <summary>
+    ///     Gets the largest coordinate along <paramref name="axis" />, plus one.
+    /// </summary>
+    /// <param name="axis">Axis to read.</param>
+    public int GetMaximumExclusive(SliceAxis axis)
+    {
+        return axis switch
+        {
+            SliceAxis.X => MaximumExclusive.X,
+            SliceAxis.Y => MaximumExclusive.Y,
+            SliceAxis.Z => MaximumExclusive.Z,
+            _ => throw new ArgumentOutOfRangeException(nameof(axis), axis, "Unknown slice axis.")
+        };
+    }
+
+    internal static VoxelBounds Enclosing(IEnumerable<ChunkDrawData> chunks)
+    {
+        bool any = false;
+        int minX = 0, minY = 0, minZ = 0, maxX = 0, maxY = 0, maxZ = 0;
+        foreach (var chunk in chunks)
+        {
+            int x = chunk.ChunkPosition.X * chunk.Dimensions.X;
+            int y = chunk.ChunkPosition.Y * chunk.Dimensions.Y;
+            int z = chunk.ChunkPosition.Z * chunk.Dimensions.Z;
+            if (!any)
+            {
+                (minX, minY, minZ) = (x, y, z);
+                (maxX, maxY, maxZ) = (x + chunk.Dimensions.X, y + chunk.Dimensions.Y, z + chunk.Dimensions.Z);
+                any = true;
+                continue;
+            }
+
+            minX = Math.Min(minX, x);
+            minY = Math.Min(minY, y);
+            minZ = Math.Min(minZ, z);
+            maxX = Math.Max(maxX, x + chunk.Dimensions.X);
+            maxY = Math.Max(maxY, y + chunk.Dimensions.Y);
+            maxZ = Math.Max(maxZ, z + chunk.Dimensions.Z);
+        }
+
+        return new VoxelBounds(new Int3(minX, minY, minZ), new Int3(maxX, maxY, maxZ));
+    }
+}
+
+/// <summary>
 ///     Immutable presentation data and invalidation keys for one chunk.
 /// </summary>
 public sealed class ChunkDrawData
@@ -324,6 +398,7 @@ public sealed class SimulationDrawData
         long frameVersion)
     {
         _chunks = new ReadOnlyDictionary<Int3, ChunkDrawData>(new Dictionary<Int3, ChunkDrawData>(chunks));
+        Bounds = VoxelBounds.Enclosing(_chunks.Values);
         Visualization = visualization;
         VisualizationMappingRevision = visualizationMappingRevision;
         SourceVersion = sourceVersion;
@@ -334,6 +409,11 @@ public sealed class SimulationDrawData
     ///     Gets retained chunk presentation data by grid position.
     /// </summary>
     public IReadOnlyDictionary<Int3, ChunkDrawData> Chunks => _chunks;
+
+    /// <summary>
+    ///     Gets the global voxel box that encloses every chunk of the frame. A frame without chunks has an empty box.
+    /// </summary>
+    public VoxelBounds Bounds { get; }
 
     /// <summary>
     ///     Gets the visualization descriptor used for this frame.
@@ -385,8 +465,9 @@ public sealed class SimulationDrawData
     }
 }
 
+
 /// <summary>
-///     One visible cell in a focused two-dimensional slice.
+///     One cell of a two-dimensional slice, with its presentation data resolved.
 /// </summary>
 /// <param name="U">Horizontal slice coordinate.</param>
 /// <param name="V">Vertical slice coordinate.</param>
@@ -408,37 +489,70 @@ public readonly record struct SliceCellDrawData(
 public readonly record struct SliceBounds(float Left, float Right, float Bottom, float Top);
 
 /// <summary>
-///     Immutable dense-coordinate slice view with constant-time picking.
+///     The rectangle one chunk covers in slice coordinates.
 /// </summary>
+/// <param name="Chunk">Identity of the chunk.</param>
+/// <param name="U">Slice coordinate of the left edge.</param>
+/// <param name="V">Slice coordinate of the bottom edge.</param>
+/// <param name="Width">Extent along U.</param>
+/// <param name="Height">Extent along V.</param>
+public readonly record struct SliceChunkRect(ChunkIdentity Chunk, int U, int V, int Width, int Height);
+
+/// <summary>
+///     Immutable plane through a frame, with a dense RGBA image and constant-time picking.
+/// </summary>
+/// <remarks>
+///     <para>
+///         The plane spans the bounds of the chunks it was built from. Cell (0, 0) is the corner with the smallest
+///         global coordinates, and V grows upward. A cell that no chunk covers has no address and a transparent pixel.
+///     </para>
+///     <para>
+///         The slice stores two index arrays and a chunk table instead of one object per cell. A plane over a million
+///         cells therefore costs a few bytes per cell, and <see cref="TryGetCell" /> builds a
+///         <see cref="SliceCellDrawData" /> only when asked.
+///     </para>
+/// </remarks>
 public sealed class SimulationSliceDrawData
 {
-    private readonly SliceCellDrawData[] _cells;
-    private readonly SliceCellDrawData[] _pickableCells;
+    private readonly int[] _cellChunk;
+    private readonly ushort[] _cellLocal;
+    private readonly ChunkDrawData[] _chunks;
+    private readonly byte[] _pixels;
+    private readonly SliceChunkRect[] _rects;
 
     internal SimulationSliceDrawData(
-        ChunkIdentity chunk,
         SliceAxis axis,
         int sliceIndex,
+        int originU,
+        int originV,
         int width,
         int height,
-        SliceCellDrawData[] cells,
-        SliceCellDrawData[] pickableCells,
+        Int3 chunkDimensions,
+        ChunkDrawData[] chunks,
+        SliceChunkRect[] rects,
+        int[] cellChunk,
+        ushort[] cellLocal,
+        byte[] pixels,
+        int visibleCellCount,
+        ulong layoutVersion,
         ulong renderVersion)
     {
-        Chunk = chunk;
         Axis = axis;
         SliceIndex = sliceIndex;
+        OriginU = originU;
+        OriginV = originV;
         Width = width;
         Height = height;
-        _cells = cells;
-        _pickableCells = pickableCells;
+        ChunkDimensions = chunkDimensions;
+        _chunks = chunks;
+        _rects = rects;
+        _cellChunk = cellChunk;
+        _cellLocal = cellLocal;
+        _pixels = pixels;
+        VisibleCellCount = visibleCellCount;
+        LayoutVersion = layoutVersion;
         RenderVersion = renderVersion;
     }
-
-    /// <summary>
-    ///     Gets the sliced chunk identity.
-    /// </summary>
-    public ChunkIdentity Chunk { get; }
 
     /// <summary>
     ///     Gets the axis normal to the slice.
@@ -446,9 +560,19 @@ public sealed class SimulationSliceDrawData
     public SliceAxis Axis { get; }
 
     /// <summary>
-    ///     Gets the selected index along the slice axis.
+    ///     Gets the global voxel coordinate of the plane along <see cref="Axis" />.
     /// </summary>
     public int SliceIndex { get; }
+
+    /// <summary>
+    ///     Gets the global voxel coordinate that slice coordinate U = 0 maps to.
+    /// </summary>
+    public int OriginU { get; }
+
+    /// <summary>
+    ///     Gets the global voxel coordinate that slice coordinate V = 0 maps to.
+    /// </summary>
+    public int OriginV { get; }
 
     /// <summary>
     ///     Gets the slice width.
@@ -461,14 +585,59 @@ public sealed class SimulationSliceDrawData
     public int Height { get; }
 
     /// <summary>
-    ///     Gets the render invalidation version.
+    ///     Gets the dimensions shared by the chunks of this slice.
+    /// </summary>
+    public Int3 ChunkDimensions { get; }
+
+    /// <summary>
+    ///     Gets the number of cells that are visible and so have an opaque pixel.
+    /// </summary>
+    public int VisibleCellCount { get; }
+
+    /// <summary>
+    ///     Gets the render invalidation version. It changes exactly when <see cref="Pixels" /> can differ.
     /// </summary>
     public ulong RenderVersion { get; }
 
+    internal ulong LayoutVersion { get; }
+
     /// <summary>
-    ///     Gets visible slice cells.
+    ///     Gets the image as 8-bit RGBA, row by row from V = 0. Pixel (u, v) starts at <c>4 * (u + Width * v)</c>.
     /// </summary>
-    public ReadOnlySpan<SliceCellDrawData> Cells => _cells;
+    /// <remarks>
+    ///     A visible cell is opaque. Cells with no chunk, and cells filtered from rendering, are transparent black.
+    /// </remarks>
+    public ReadOnlySpan<byte> Pixels => _pixels;
+
+    /// <summary>
+    ///     Gets the rectangle each chunk covers in the slice, in chunk position order.
+    /// </summary>
+    public ReadOnlySpan<SliceChunkRect> ChunkRects => _rects;
+
+    internal int[] CellChunkArray => _cellChunk;
+
+    internal ushort[] CellLocalArray => _cellLocal;
+
+    internal byte[] PixelArray => _pixels;
+
+    /// <summary>
+    ///     Enumerates the visible cells in row order.
+    /// </summary>
+    /// <remarks>
+    ///     This builds one <see cref="SliceCellDrawData" /> per cell. Use it for small slices and tests. A renderer
+    ///     reads <see cref="Pixels" /> instead.
+    /// </remarks>
+    public IEnumerable<SliceCellDrawData> EnumerateVisibleCells()
+    {
+        for (int v = 0; v < Height; v++)
+        {
+            for (int u = 0; u < Width; u++)
+            {
+                if (_pixels[4 * (u + Width * v) + 3] != 0 && TryGetCell(u, v, out var cell))
+                    yield return cell;
+            }
+        }
+    }
 
     /// <summary>
     ///     Attempts to get a cell by slice coordinates, including cells filtered from rendering.
@@ -476,7 +645,7 @@ public sealed class SimulationSliceDrawData
     /// <param name="u">Horizontal slice coordinate.</param>
     /// <param name="v">Vertical slice coordinate.</param>
     /// <param name="cell">The resolved cell.</param>
-    /// <returns>Whether a cell exists at the coordinates.</returns>
+    /// <returns>Whether a chunk covers the coordinates.</returns>
     public bool TryGetCell(int u, int v, out SliceCellDrawData cell)
     {
         if (u < 0 || u >= Width || v < 0 || v >= Height)
@@ -485,8 +654,98 @@ public sealed class SimulationSliceDrawData
             return false;
         }
 
-        cell = _pickableCells[u + Width * v];
+        int index = u + Width * v;
+        int slot = _cellChunk[index];
+        if (slot < 0)
+        {
+            cell = default;
+            return false;
+        }
+
+        var chunk = _chunks[slot];
+        ushort local = _cellLocal[index];
+        cell = new SliceCellDrawData(u, v, new VoxelAddress(chunk.Identity, local), chunk.GetCell(local));
         return true;
+    }
+
+    /// <summary>
+    ///     Finds the cell that shows a voxel.
+    /// </summary>
+    /// <param name="address">Address of the voxel.</param>
+    /// <param name="u">Horizontal slice coordinate of the voxel.</param>
+    /// <param name="v">Vertical slice coordinate of the voxel.</param>
+    /// <returns>
+    ///     Whether the voxel lies in this plane. The chunk generation must also match the one the slice was built from.
+    /// </returns>
+    public bool TryLocate(VoxelAddress address, out int u, out int v)
+    {
+        u = 0;
+        v = 0;
+        var dimensions = ChunkDimensions;
+        int count = dimensions.X * dimensions.Y * dimensions.Z;
+        if (address.LocalIndex >= count)
+            return false;
+
+        int x = address.LocalIndex % dimensions.X;
+        int yz = address.LocalIndex / dimensions.X;
+        int y = yz % dimensions.Y;
+        int z = yz / dimensions.Y;
+        int globalX = address.Chunk.Position.X * dimensions.X + x;
+        int globalY = address.Chunk.Position.Y * dimensions.Y + y;
+        int globalZ = address.Chunk.Position.Z * dimensions.Z + z;
+        int along = Axis switch
+        {
+            SliceAxis.X => globalX,
+            SliceAxis.Y => globalY,
+            _ => globalZ
+        };
+
+        if (along != SliceIndex)
+            return false;
+
+        (int projectedU, int projectedV) = Project(Axis, globalX, globalY, globalZ);
+        int candidateU = projectedU - OriginU;
+        int candidateV = projectedV - OriginV;
+        if (candidateU < 0 || candidateU >= Width || candidateV < 0 || candidateV >= Height)
+            return false;
+
+        int index = candidateU + Width * candidateV;
+        int slot = _cellChunk[index];
+        if (slot < 0 || _chunks[slot].Identity != address.Chunk || _cellLocal[index] != address.LocalIndex)
+            return false;
+
+        u = candidateU;
+        v = candidateV;
+        return true;
+    }
+
+    /// <summary>
+    ///     Gets the rectangle a chunk would cover in this slice, even when the plane does not cut the chunk.
+    /// </summary>
+    /// <param name="chunkPosition">Grid position of the chunk.</param>
+    /// <returns>The left, bottom, width, and height of the footprint in slice coordinates.</returns>
+    public (int U, int V, int Width, int Height) GetFootprint(Int3 chunkPosition)
+    {
+        var dimensions = ChunkDimensions;
+        (int u, int v) = Project(
+            Axis,
+            chunkPosition.X * dimensions.X,
+            chunkPosition.Y * dimensions.Y,
+            chunkPosition.Z * dimensions.Z);
+
+        (int width, int height) = Project(Axis, dimensions.X, dimensions.Y, dimensions.Z);
+        return (u - OriginU, v - OriginV, width, height);
+    }
+
+    internal static (int U, int V) Project(SliceAxis axis, int x, int y, int z)
+    {
+        return axis switch
+        {
+            SliceAxis.X => (z, y),
+            SliceAxis.Y => (x, z),
+            SliceAxis.Z => (x, y),
+            _ => throw new ArgumentOutOfRangeException(nameof(axis), axis, "Unknown slice axis.")
+        };
     }
 
     /// <summary>
