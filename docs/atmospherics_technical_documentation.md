@@ -1415,10 +1415,10 @@ gives the resolution order and what it means for solver code.
 
 ### 12.2 Solver-specific configuration
 
-Solver settings go either in `[NumosSerialize]` members on the solver object (see "Class solvers" in
-`docs/using.md`) or in `AtmosConfig.SolverConfigurations`. Both are recorded and restored with checkpoints. An unmarked
-property the host sets on a solver instance is neither, so replay re-runs the recorded ticks with whatever value the
-instance holds at replay time, and the result diverges. A configuration is read from the tick context:
+Solver settings go in one of two places. One is a `[NumosSerialize]` member on the solver object (see "Class solvers" in
+`docs/using.md`). The other is `AtmosConfig.SolverConfigurations`. Numos records and restores both with checkpoints. An
+unmarked property that the host sets on a solver instance is neither. Replay re-runs the recorded ticks with whatever
+value the instance holds at replay time, and the result diverges. A configuration is read from the tick context:
 
 ```csharp
 public sealed partial class CombustionSettings(float rate) : IAtmosSolverConfiguration
@@ -1446,28 +1446,28 @@ config.SolverConfigurations.Add(new CombustionSettings(rate: 0.5f));
 world.SetAtmosConfig(config); // recorded, so replay changes the rate at the same tick
 ```
 
-`[NumosSerialize]` members have the `Numos.API` generator write `SemanticallyEquals` and `ComputeStateHash`, so the
-two can't disagree and a new member can't be left out of either. The generated code walks members in id order through
-one `WriteState` method that drives an `IStateSink`; the hash is that walk fed into `StateHashSink`, and the saved
-bytes are the same walk fed into `StateBinarySink` (all three in `Numos.CoreSim.State.Advanced`). Floats compare by
-bits, dictionaries and sets go in canonical key order, and `GasProperties` references are identified by name.
+`[NumosSerialize]` members have the `Numos.API` generator write `SemanticallyEquals` and `ComputeStateHash`. The two
+cannot disagree, and a new member cannot be left out of either. The generated code walks members in id order through one
+`WriteState` method that drives an `IStateSink`. The hash is that walk fed into `StateHashSink`. The saved bytes are the
+same walk fed into `StateBinarySink`. All three types are in `Numos.CoreSim.State.Advanced`. Floats compare by bits,
+dictionaries and sets go in canonical key order, and `GasProperties` references are identified by name.
 `GasReactionConfig` and both reaction types are built this way, as are Numos's own configuration scalars and
-`GasProperties`. The checkpoint types go one step further: `[NumosSnapshotOf(typeof(AtmosChunk))]` on a partial class
-generates the whole snapshot, members included, from the live type's marked members, so chunk, grid, and world state
-is declared once, on the live type (see "Checkpoints are generated from the live types" in
+`GasProperties`. The checkpoint types go one step further. `[NumosSnapshotOf(typeof(AtmosChunk))]` on a partial class
+generates the whole snapshot from the marked members of the live type. Chunk, grid, and world state is therefore
+declared once, on the live type (see "Checkpoints are generated from the live types" in
 `docs/deterministic_replay.md`).
 
-The generator also writes a `ReadState` that rebuilds the object through a constructor, binding parameters to marked
-members by name (ignoring case) and setting the rest through `init` or `set` accessors. That's what lets a world archive
-carry the configuration; see "Save portable replay files" in `docs/deterministic_replay.md`. It writes
-`CreateSnapshot` unless the type has one: `this` when every marked member is fixed and of an immutable type, as in
-`CombustionSettings`, otherwise a write-and-read copy against the gas registry, followed by an optional
-`partial void OnSnapshot(IGasRegistry gases)`. Finally, one module initializer per assembly registers every
+The generator also writes a `ReadState` that rebuilds the object through a constructor. It binds parameters to marked
+members by name (ignoring case) and sets the rest through `init` or `set` accessors. That lets a world archive carry
+the configuration (see "Save portable replay files" in `docs/deterministic_replay.md`). The generator writes
+`CreateSnapshot` unless the type has one. The snapshot is `this` when every marked member is fixed and of an immutable
+type, as in `CombustionSettings`. Otherwise it is a write-and-read copy against the gas registry, followed by an
+optional `partial void OnSnapshot(IGasRegistry gases)`. Finally, one module initializer per assembly registers every
 configuration with `SolverConfigurationTypes`, so loading needs no setup. That needs the key at build time, so `Key`
 must return a constant string.
 
 A member's wire id is FNV-1a over its name, or over the name passed as `[NumosSerialize("OldName")]` after a rename.
-Membership is opt-in; `[NumosIgnore]` marks a member as deliberately not state. The generator reports:
+Membership is opt-in. `[NumosIgnore]` marks a member as deliberately not state. The generator reports:
 
 | ID              | Severity | Raised when                                                                                                   |
 |-----------------|----------|---------------------------------------------------------------------------------------------------------------|
@@ -1476,7 +1476,7 @@ Membership is opt-in; `[NumosIgnore]` marks a member as deliberately not state. 
 | `NUMOSSTATE005` | Error    | Two members' wire names hash to the same id. The message names both.                                         |
 | `NUMOSSTATE007` | Error    | A member's type isn't supported (delegates, `object`, mutable `List<T>`, unknown quantity aliases, ...).      |
 | `NUMOSSTATE008` | Error    | A solver configuration hand-writes `SemanticallyEquals`/`ComputeStateHash`, or a snapshot `Capture`/`RestoreInto`. |
-| `NUMOSSTATE009` | Error    | `[NumosSerialize]` is on a struct that implements `IAtmosWorldSolver`; stateful solvers must be classes.      |
+| `NUMOSSTATE009` | Error    | `[NumosSerialize]` is on a struct that implements `IAtmosWorldSolver`. Stateful solvers must be classes.       |
 | `NUMOSSTATE011` | Error    | A member has both `[NumosSerialize]` and `[NumosIgnore]`.                                                     |
 | `NUMOSSTATE012` | Error    | `[NumosSerialize]` is on a static or const member.                                                            |
 | `NUMOSSTATE013` | Error    | The class derives from a class other than `object`, whose members the generator can't see.                   |
