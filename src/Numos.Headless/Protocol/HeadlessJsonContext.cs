@@ -11,4 +11,6 @@ namespace Numos.Headless.Protocol;
 [JsonSerializable(typeof(HeadlessRequest))]
 [JsonSerializable(typeof(HeadlessResponse))]
 [JsonSerializable(typeof(SimulationStateReport))]
+[JsonSerializable(typeof(GasDefinition))]
+[JsonSerializable(typeof(RegionGasRequest[]))]
 internal sealed partial class HeadlessJsonContext : JsonSerializerContext;

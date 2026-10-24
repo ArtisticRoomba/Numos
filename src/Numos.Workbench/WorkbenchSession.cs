@@ -175,8 +175,8 @@ public sealed partial class WorkbenchSession : IDisposable
     /// </summary>
     /// <param name="options">Name, first chunk dimensions, and default gases.</param>
     /// <param name="prepare">
-    ///     Runs against the new configuration before the old project is closed. If it throws, the old project stays
-    ///     open.
+    ///     Runs against the new configuration before the old project is closed. The world applies the edits it makes
+    ///     to the configuration. If it throws, the old project stays open.
     /// </param>
     /// <exception cref="ArgumentException">The chunk dimensions are invalid.</exception>
     public void CreateProject(WorkbenchProjectOptions options, Action<AtmosConfig>? prepare = null)
@@ -191,7 +191,12 @@ public sealed partial class WorkbenchSession : IDisposable
         {
             world = new AtmosWorld(config);
             var simulation = world.CreateSimulation(options.ChunkWidth, options.ChunkHeight, options.ChunkDepth);
-            prepare?.Invoke(config);
+            if (prepare != null)
+            {
+                prepare(config);
+                world.SetAtmosConfig(config);
+            }
+
             string name = string.IsNullOrWhiteSpace(options.Name) ? UntitledProjectName : options.Name.Trim();
             Open(world, config, name, new AtmosWorldReplayTimeline(world), simulation);
             world = null;

@@ -1,0 +1,11 @@
+{"protocolVersion":2,"id":"create","op":"createProject","name":"Shock tube 1D","chunkDimensions":{"x":250,"y":3,"z":1},"config":{"voxelVolumeM3":1,"defaultTemperatureFallbackK":300,"sleepThreshold":2147483647},"gases":[{"name":"Air","molarHeatCapacityAtConstantVolume":20.79,"diffusionCoefficient":0}]}
+{"protocolVersion":2,"id":"walls","op":"editRegion","min":{"x":0,"y":0,"z":0},"max":{"x":1999,"y":2,"z":0},"createChunks":true,"classification":-2}
+{"protocolVersion":2,"id":"interior","op":"editRegion","min":{"x":1,"y":1,"z":0},"max":{"x":1998,"y":1,"z":0},"classification":1,"temperatureK":300}
+{"protocolVersion":2,"id":"driver","op":"editRegion","min":{"x":1,"y":1,"z":0},"max":{"x":999,"y":1,"z":0},"clearGas":true,"gas":[{"gasId":0,"partialPressurePa":202650}],"gasTemperatureK":300}
+{"protocolVersion":2,"id":"driven","op":"editRegion","min":{"x":1000,"y":1,"z":0},"max":{"x":1998,"y":1,"z":0},"clearGas":true,"gas":[{"gasId":0,"partialPressurePa":101325}],"gasTemperatureK":300}
+{"protocolVersion":2,"id":"hash-before","op":"timelineInfo"}
+{"protocolVersion":2,"id":"probe-before","op":"sampleVoxels","points":[{"x":500,"y":1,"z":0},{"x":990,"y":1,"z":0},{"x":1010,"y":1,"z":0},{"x":1500,"y":1,"z":0}],"fields":["pressure","temperature","totalMoles"]}
+{"protocolVersion":2,"id":"run","op":"tick","count":400,"progressInterval":100}
+{"protocolVersion":2,"id":"probe-after","op":"sampleVoxels","points":[{"x":500,"y":1,"z":0},{"x":990,"y":1,"z":0},{"x":1010,"y":1,"z":0},{"x":1200,"y":1,"z":0},{"x":1500,"y":1,"z":0}],"fields":["pressure","temperature","totalMoles"]}
+{"protocolVersion":2,"id":"summary","op":"observe","maxIssueLocations":0}
+{"protocolVersion":2,"id":"exit","op":"exit"}

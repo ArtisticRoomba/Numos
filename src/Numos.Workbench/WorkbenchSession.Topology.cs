@@ -168,14 +168,38 @@ public sealed partial class WorkbenchSession
     /// <summary>
     ///     Restores the built-in solver stages, order, and enabled flags.
     /// </summary>
-    public void ResetSolvers()
+    /// <returns>
+    ///     <see langword="true" /> when the pipeline is back to its defaults. <see langword="false" /> when only the
+    ///     enabled flags could be restored.
+    /// </returns>
+    /// <remarks>
+    ///     The world refuses to register or remove stages while it records, and a project timeline always records. In
+    ///     that case the session enables every stage and leaves the order and any custom stages alone.
+    /// </remarks>
+    public bool ResetSolvers()
     {
-        Guard(
+        return Guard(
             "Could not reset the solvers",
             () =>
             {
-                RequireWorld().Solvers.ResetToDefaults();
-                Info("Reset the solver pipeline to its defaults.");
+                var world = RequireWorld();
+                try
+                {
+                    world.Solvers.ResetToDefaults();
+                    Info("Reset the solver pipeline to its defaults.");
+                    return true;
+                }
+                catch (InvalidOperationException)
+                {
+                    foreach (var step in world.Solvers.Steps)
+                    {
+                        if (!step.IsEnabled)
+                            world.Solvers.SetEnabled(step.Name, true);
+                    }
+
+                    Warn("The world records, so the session enabled every solver stage and kept the stage order.");
+                    return false;
+                }
             });
     }
 }

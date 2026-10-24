@@ -1,5 +1,8 @@
+using System.Globalization;
 using System.Text.Json;
+using Numos.CoreSim;
 using Numos.Headless.Protocol;
+using Numos.Workbench;
 
 namespace Numos.Headless;
 
@@ -8,25 +11,86 @@ namespace Numos.Headless;
 /// </summary>
 internal sealed class HeadlessCommandHost : IDisposable
 {
-    internal const int ProtocolVersion = 1;
+    internal const int ProtocolVersion = 2;
 
-    private readonly SimulationSession _session = new();
+    private readonly TextWriter _error;
+    private readonly bool _quiet;
+    private readonly WorkbenchSession _session;
+    private readonly HeadlessOperations _operations;
     private bool _exitRequested;
+
+    /// <summary>
+    ///     Creates a host and starts streaming the session log to <paramref name="error" />.
+    /// </summary>
+    /// <param name="error">Receives one line per log entry and unexpected exceptions.</param>
+    /// <param name="quiet">When <see langword="true" />, the host drops entries below warning level.</param>
+    internal HeadlessCommandHost(TextWriter error, bool quiet)
+    {
+        ArgumentNullException.ThrowIfNull(error);
+        _error = error;
+        _quiet = quiet;
+        var log = new WorkbenchLog();
+        log.EntryWritten += WriteLogEntry;
+        _session = new WorkbenchSession(log, new WorkbenchHostInfo("Numos.Headless", GetVersion()));
+        _operations = new HeadlessOperations(_session);
+    }
 
     public void Dispose()
     {
         _session.Dispose();
     }
 
+    private static string GetVersion()
+    {
+        return CoreSimBuildInfo.PackageVersion;
+    }
+
+    /// <summary>
+    ///     Formats a log entry as one line: timestamp, level, tick, source, message.
+    /// </summary>
+    internal static string FormatLogEntry(WorkbenchLogEntry entry)
+    {
+        string level = entry.Level switch
+        {
+            WorkbenchLogLevel.Debug => "DEBUG",
+            WorkbenchLogLevel.Info => "INFO",
+            WorkbenchLogLevel.Warn => "WARN",
+            WorkbenchLogLevel.Error => "ERROR",
+            _ => "FATAL"
+        };
+
+        string tick = entry.Tick is { } value ? value.ToString(CultureInfo.InvariantCulture) : "-";
+        string message = entry.Message.ReplaceLineEndings(" ");
+        return $"{entry.Timestamp.ToString("yyyy-MM-dd'T'HH:mm:ss.fff", CultureInfo.InvariantCulture)} " +
+               $"{level,-5} tick={tick} {entry.Source}: {message}";
+    }
+
+    private void WriteLogEntry(WorkbenchLogEntry entry)
+    {
+        if (_quiet && entry.Level <= WorkbenchLogLevel.Info)
+            return;
+
+        try
+        {
+            lock (_error)
+            {
+                _error.WriteLine(FormatLogEntry(entry));
+                _error.Flush();
+            }
+        }
+        catch (IOException)
+        {
+            // A closed stderr must not stop the simulation.
+        }
+    }
+
     internal async Task<int> RunAsync(
         TextReader input,
         TextWriter output,
-        TextWriter error,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(input);
         ArgumentNullException.ThrowIfNull(output);
-        ArgumentNullException.ThrowIfNull(error);
 
         int lineNumber = 0;
         bool hadErrors = false;
@@ -40,7 +104,7 @@ internal sealed class HeadlessCommandHost : IDisposable
             if (string.IsNullOrWhiteSpace(line))
                 continue;
 
-            var response = ProcessLine(line, lineNumber, error);
+            var response = ProcessLine(line, lineNumber);
             if (!response.Ok)
                 hadErrors = true;
 
@@ -60,7 +124,7 @@ internal sealed class HeadlessCommandHost : IDisposable
         await output.FlushAsync(cancellationToken);
     }
 
-    private HeadlessResponse ProcessLine(string line, int lineNumber, TextWriter errorOutput)
+    private HeadlessResponse ProcessLine(string line, int lineNumber)
     {
         HeadlessRequest? request = null;
         JsonDocument document;
@@ -103,14 +167,14 @@ internal sealed class HeadlessCommandHost : IDisposable
                 if (string.IsNullOrWhiteSpace(request.Op))
                     throw new HeadlessRequestException("missingProperty", "The 'op' property is required.");
 
-                var execution = _session.Execute(request);
+                var execution = _operations.Execute(request);
                 _exitRequested = execution.ExitRequested;
                 return new HeadlessResponse
                 {
                     Id = request.Id,
                     Op = request.Op,
                     Ok = true,
-                    State = _session.GetState(),
+                    State = _operations.GetState(),
                     Result = execution.Result,
                     Observation = execution.Observation
                 };
@@ -129,6 +193,11 @@ internal sealed class HeadlessCommandHost : IDisposable
                 return Failure(request, exception.Code, exception.Message, lineNumber);
             }
             catch (Exception exception) when (
+                exception is IOException or UnauthorizedAccessException or NotSupportedException)
+            {
+                return Failure(request, "ioError", exception.Message, lineNumber, exception.GetType().Name);
+            }
+            catch (Exception exception) when (
                 exception is ArgumentException or InvalidOperationException or KeyNotFoundException or OverflowException)
             {
                 return Failure(
@@ -140,7 +209,7 @@ internal sealed class HeadlessCommandHost : IDisposable
             }
             catch (Exception exception)
             {
-                errorOutput.WriteLine($"Unhandled exception while processing JSONL line {lineNumber}: {exception}");
+                _error.WriteLine($"Unhandled exception while processing JSONL line {lineNumber}: {exception}");
                 return Failure(
                     request,
                     "internalError",
@@ -192,7 +261,7 @@ internal sealed class HeadlessCommandHost : IDisposable
             Id = request?.Id,
             Op = request?.Op,
             Ok = false,
-            State = _session.GetState(),
+            State = _operations.GetState(),
             Error = new HeadlessError
             {
                 Code = code,

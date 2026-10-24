@@ -11,6 +11,7 @@
 
     <ItemGroup>
         <ProjectReference Include="..\Numos.API\Numos.API.csproj"/>
+        <ProjectReference Include="..\Numos.Workbench\Numos.Workbench.csproj"/>
     </ItemGroup>
 
 </Project>

@@ -12,11 +12,13 @@ internal static class HeadlessApplication
 
                                     Usage:
                                       dotnet run --project src/Numos.Headless
-                                      dotnet run --project src/Numos.Headless -- --script <experiment.jsonl>
-                                      dotnet run --project src/Numos.Headless -- <experiment.jsonl>
+                                      dotnet run --project src/Numos.Headless -- [--quiet] --script <experiment.jsonl>
+                                      dotnet run --project src/Numos.Headless -- [--quiet] <experiment.jsonl>
 
                                     With no script, one JSON request is read from stdin per line. Exactly one compact
-                                    JSON response is written to stdout for each request. See docs/headless_runner.md.
+                                    JSON response is written to stdout for each request. The session log goes to stderr,
+                                    one line per entry. --quiet drops info-level log lines.
+                                    See docs/headless_runner.md.
                                     """;
 
     internal static async Task<int> RunAsync(
@@ -37,15 +39,7 @@ internal static class HeadlessApplication
             return 0;
         }
 
-        string? scriptPath = args switch
-        {
-            [] => null,
-            [var path] when !path.StartsWith("-", StringComparison.Ordinal) => path,
-            ["--script", var path] => path,
-            _ => string.Empty
-        };
-
-        if (scriptPath == string.Empty)
+        if (!TryParseArguments(args, out string? scriptPath, out bool quiet))
         {
             await error.WriteLineAsync("Invalid arguments. Use --help for usage.");
             return 2;
@@ -53,8 +47,8 @@ internal static class HeadlessApplication
 
         if (scriptPath == null)
         {
-            using var host = new HeadlessCommandHost();
-            return await host.RunAsync(input, output, error, cancellationToken);
+            using var host = new HeadlessCommandHost(error, quiet);
+            return await host.RunAsync(input, output, cancellationToken);
         }
 
         StreamReader script;
@@ -81,9 +75,37 @@ internal static class HeadlessApplication
         }
 
         using (script)
-        using (var host = new HeadlessCommandHost())
+        using (var host = new HeadlessCommandHost(error, quiet))
         {
-            return await host.RunAsync(script, output, error, cancellationToken);
+            return await host.RunAsync(script, output, cancellationToken);
         }
+    }
+
+    private static bool TryParseArguments(string[] args, out string? scriptPath, out bool quiet)
+    {
+        scriptPath = null;
+        quiet = false;
+        for (int index = 0; index < args.Length; index++)
+        {
+            string argument = args[index];
+            if (argument == "--quiet")
+            {
+                quiet = true;
+            }
+            else if (argument == "--script" && index + 1 < args.Length && scriptPath == null)
+            {
+                scriptPath = args[++index];
+            }
+            else if (!argument.StartsWith('-') && scriptPath == null)
+            {
+                scriptPath = argument;
+            }
+            else
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 }

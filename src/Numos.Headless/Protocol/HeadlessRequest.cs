@@ -1,4 +1,6 @@
+using System.Text.Json;
 using Numos.CoreSim;
+using Numos.Workbench;
 
 namespace Numos.Headless.Protocol;
 
@@ -11,9 +13,16 @@ internal sealed class HeadlessRequest
     public string? Id { get; init; }
     public string? Op { get; init; }
 
-    // Simulation construction and configuration.
+    /// <summary>
+    ///     A simulation name (string) or numeric id. Missing means the active simulation.
+    /// </summary>
+    public JsonElement? Simulation { get; init; }
+
+    // Project and simulation construction.
     public string? Name { get; init; }
-    public Coordinate? Dimensions { get; init; }
+    public Coordinate? ChunkDimensions { get; init; }
+    public bool? IncludeDefaultGases { get; init; }
+    public bool? Activate { get; init; }
     public ConfigurationPatch? Config { get; init; }
     public GasDefinition[]? Gases { get; init; }
 
@@ -22,21 +31,79 @@ internal sealed class HeadlessRequest
     public Coordinate? Voxel { get; init; }
     public int? Classification { get; init; }
 
+    /// <summary>
+    ///     A <see cref="GasDefinition" /> object for addGas, or an array of <see cref="RegionGasRequest" /> for editRegion.
+    /// </summary>
+    public JsonElement? Gas { get; init; }
+
     // Gas operations.
-    public GasDefinition? Gas { get; init; }
     public int? GasId { get; init; }
     public float? Moles { get; init; }
     public float? TemperatureK { get; init; }
+    public float? GasTemperatureK { get; init; }
 
-    // Stepping and solver isolation.
+    // Regions, sampling, and links. Region and sample coordinates are global voxels.
+    public Coordinate? Min { get; init; }
+    public Coordinate? Max { get; init; }
+    public bool? CreateChunks { get; init; }
+    public bool? ClearGas { get; init; }
+    public Coordinate[]? Points { get; init; }
+    public string[]? Fields { get; init; }
+    public LinkEndpoint? First { get; init; }
+    public LinkEndpoint? Second { get; init; }
+    public string? Flags { get; init; }
+    public int? Rotation { get; init; }
+    public bool? FlipU { get; init; }
+    public bool? FlipV { get; init; }
+    public LinkSetHandleRequest? LinkSet { get; init; }
+
+    // Stepping, solvers, and the timeline.
     public int? Count { get; init; }
+    public int? ProgressInterval { get; init; }
     public string? Solver { get; init; }
     public bool? Enabled { get; init; }
+    public long? Tick { get; init; }
+    public int? BranchId { get; init; }
+
+    // Replay files.
+    public string? Path { get; init; }
+    public bool? ThroughCurrentPosition { get; init; }
+    public bool? Overwrite { get; init; }
 
     // Observation detail. Summary data is always returned by observe.
     public bool? IncludeVoxels { get; init; }
     public bool? OnlyGasBearingVoxels { get; init; }
     public int? MaxIssueLocations { get; init; }
+}
+
+/// <summary>
+///     One gas that editRegion adds to every voxel. Set exactly one of moles and partialPressurePa.
+/// </summary>
+internal sealed class RegionGasRequest
+{
+    public int? GasId { get; init; }
+    public float? Moles { get; init; }
+    public float? PartialPressurePa { get; init; }
+}
+
+/// <summary>
+///     One end of a portal or dock.
+/// </summary>
+internal sealed class LinkEndpoint
+{
+    public JsonElement? Simulation { get; init; }
+    public Coordinate? Position { get; init; }
+    public Coordinate? Voxel { get; init; }
+    public string? Face { get; init; }
+}
+
+/// <summary>
+///     The handle of a link set, as listLinkSets reports it.
+/// </summary>
+internal sealed class LinkSetHandleRequest
+{
+    public int? Index { get; init; }
+    public uint? Generation { get; init; }
 }
 
 /// <summary>
@@ -91,6 +158,44 @@ internal sealed class ConfigurationPatch
     public float? MaxPressureTransferFractionPerNeighbor { get; init; }
     public float? AccumulatorWakeThresholdPa { get; init; }
     public int? AccumulatorMaxAliveTicks { get; init; }
+
+    /// <summary>
+    ///     Rejects values outside the domain of their field, as the viewer does.
+    /// </summary>
+    /// <exception cref="ArgumentException">A value is not finite or is outside its range.</exception>
+    internal void Validate()
+    {
+        Check(AtmosConfigFields.GlobalTemperature, GlobalTemperatureK, ConfigDomain.Positive);
+        Check(AtmosConfigFields.DefaultTemperatureFallback, DefaultTemperatureFallbackK, ConfigDomain.Positive);
+        Check(
+            AtmosConfigFields.DefaultMolarHeatCapacityAtConstantVolume,
+            DefaultMolarHeatCapacityAtConstantVolume,
+            ConfigDomain.Positive);
+
+        Check(AtmosConfigFields.VoxelVolume, VoxelVolumeM3, ConfigDomain.Positive);
+        Check(AtmosConfigFields.SaturationReferencePressure, SaturationReferencePressurePa, ConfigDomain.Positive);
+        Check(AtmosConfigFields.DefaultDiffusionCoefficient, DefaultDiffusionCoefficient, ConfigDomain.UnitInterval);
+        Check(AtmosConfigFields.SpaceTemperature, SpaceTemperatureK, ConfigDomain.Positive);
+        Check(AtmosConfigFields.BulkFlowCoefficient, BulkFlowCoefficient, ConfigDomain.UnitInterval);
+        Check(AtmosConfigFields.VacuumThreshold, VacuumThresholdPa, ConfigDomain.NonNegative);
+        Check(AtmosConfigFields.SleepEpsilon, SleepEpsilonPercent, ConfigDomain.NonNegative);
+        Check(AtmosConfigFields.ThermalConductance, ThermalConductance, ConfigDomain.NonNegative);
+        Check(AtmosConfigFields.CondensationRateFactor, CondensationRateFactor, ConfigDomain.UnitInterval);
+        Check(
+            AtmosConfigFields.MaxPressureTransferFractionPerNeighbor,
+            MaxPressureTransferFractionPerNeighbor,
+            ConfigDomain.UnitInterval);
+
+        Check(AtmosConfigFields.AccumulatorWakeThreshold, AccumulatorWakeThresholdPa, ConfigDomain.NonNegative);
+        Check(AtmosConfigFields.SleepThreshold, SleepThreshold, ConfigDomain.NonNegative);
+        Check(AtmosConfigFields.AccumulatorMaxAliveTicks, AccumulatorMaxAliveTicks, ConfigDomain.NonNegative);
+    }
+
+    private static void Check(AtmosConfigFieldInfo field, float? value, ConfigDomain domain)
+    {
+        if (value is { } present && AtmosConfigSettings.ValidateConfigValue(field, present, domain) is { } message)
+            throw new ArgumentException(message);
+    }
 
     internal void ApplyTo(AtmosConfig config)
     {

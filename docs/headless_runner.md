@@ -1,239 +1,331 @@
-# Headless simulation runner
+# Headless runner
 
-`Numos.Headless` is a machine-readable debugging host for Numos simulations. It uses the supported `Numos.API`
-mutation and snapshot paths without starting Raylib or ImGui. Experiments are reproducible, and command-line tools can
-inspect the same simulation state that feeds the viewer.
+`Numos.Headless` is the viewer without a window. It runs the same `WorkbenchSession` as the viewer, so a script can
+do anything the viewer can do. It also reads data out of the simulation, which lets an agent or a script run a
+validation study without a person at the screen.
 
-The runner uses newline-delimited JSON (NDJSON/JSONL). Each nonblank input line is one request. Each request produces
-exactly one compact JSON response on standard output. The runner ignores blank lines. It writes human-readable
-diagnostics to standard error, so you can parse or diff stdout directly.
+The runner speaks newline-delimited JSON (NDJSON). Each nonblank input line is one request. Each request produces one
+compact JSON response on standard output. The runner writes its session log to standard error. You can parse or diff
+stdout directly.
+
+This is protocol version 2. It replaces version 1, which could drive only one `AtmosSimulation`. Version 2 works on a
+project with a world, several simulations, a timeline, and replay files.
 
 ## Running the runner
 
-Build the solution, then pick one of three input modes:
+Pick one of three input modes:
 
-```powershell
-# Interactive: read NDJSON requests from stdin until `exit` or end-of-file.
+```bash
+# Interactive: read requests from stdin until `exit` or end of file.
 dotnet run --project src/Numos.Headless
 
-# Replay a script explicitly.
+# Run a script.
 dotnet run --project src/Numos.Headless -- --script examples/headless/two-voxel-flow.jsonl
 
-# A script path may also be the sole positional argument.
+# A script path can also be the only positional argument.
 dotnet run --project src/Numos.Headless -- examples/headless/two-voxel-flow.jsonl
 ```
 
-Use `dotnet run --project src/Numos.Headless -- --help` for the command-line summary. When you automate a replay,
-capture stdout separately from stderr:
+Add `--quiet` to drop info-level lines from the log. Use `--help` for the summary. When you automate a run, capture
+stdout and stderr separately:
 
-```powershell
-dotnet run --project src/Numos.Headless -- --script examples/headless/two-voxel-flow.jsonl `
-  > two-voxel-flow.output.jsonl
+```bash
+dotnet run --project src/Numos.Headless -- --quiet --script study.jsonl > study.output.jsonl 2> study.log
 ```
 
-JSONL files contain JSON objects only. They do not support comments or multi-line requests. `--help` is the one mode
-that writes human-readable text to stdout instead of protocol responses.
+A script holds JSON objects only. It has no comments and no multi-line requests.
+
+## The log stream on stderr
+
+The session log works like the output shell of a simulation server. The runner writes one line for each entry:
+
+```text
+2026-10-23T14:03:11.123 INFO  tick=100 Simulation: Tick 100 (100/400), 0.15 s elapsed.
+```
+
+The fields are the local timestamp, the level, the world tick (`-` before a project exists), the source, and the
+message. The levels are `DEBUG`, `INFO`, `WARN`, `ERROR`, and `FATAL`. The log reports project, simulation, replay, and
+topology changes, failures, and tick progress. A region edit writes one summary line, not one line per voxel.
+
+`--quiet` drops `DEBUG` and `INFO`. Warnings and errors always appear. Stdout never carries log text.
 
 ## Protocol envelope
 
-Every request must contain:
+Every request needs a version, an id, and an operation:
 
 ```json
-{"protocolVersion":1,"id":"create","op":"createSimulation","dimensions":{"x":2,"y":1,"z":1}}
+{"protocolVersion":2,"id":"create","op":"createProject","chunkDimensions":{"x":2,"y":1,"z":1}}
 ```
 
-- `protocolVersion` must be `1` on every request.
-- `id` is a required, nonblank string supplied by the caller and copied to the corresponding response. Use unique
-  values when correlating a long interactive session.
-- `op` selects an operation from the table below.
+- `protocolVersion` must be `2`.
+- `id` is a nonblank string. The runner copies it to the response.
+- `op` selects an operation from the tables below.
+- `simulation` is optional on every operation that acts on a simulation. It is a name or a numeric id. Without it, the
+  operation uses the active simulation.
 
-Every response contains `protocolVersion`, an `ok` boolean, and the request's `id` and `op` when the runner could
-decode them. When a simulation is active, `state` contains its `name`, fixed chunk `dimensions`, `tick`, `chunkCount`,
-and `gasCount`. Successful operations can add a `result` or `observation`. A successful tick response looks like this:
+Every response has `protocolVersion`, `ok`, and the request `id` and `op`. When a project is open, `state` describes it:
 
-```json
-{"protocolVersion":1,"id":"tick-1","op":"tick","ok":true,"state":{"name":"Two-voxel flow","dimensions":{"x":2,"y":1,"z":1},"tick":1,"chunkCount":1,"gasCount":1},"result":{"ticksExecuted":1}}
-```
+| Member | Meaning |
+| --- | --- |
+| `project` | The project name. |
+| `simulation`, `simulationId` | The active simulation. |
+| `simulationCount` | Simulations in the world. |
+| `tick` | The world tick. |
+| `chunkCount` | Chunks in the active simulation. |
+| `gasCount` | Gases in the registry. |
+| `inspecting` | `true` while the timeline shows history. |
 
-Failed operations set `ok` to `false` and include `error.code`, `error.message`, the JSONL `line`, and an
-`exceptionType` when one applies. Failure output is still valid JSON, and the runner continues with the next line. The
-`exit` operation writes its response before the process terminates. The runner rejects unknown JSON properties, so a
-misspelled experiment setting fails loudly.
+A successful operation can add `result` or `observation`. A failed one sets `ok` to `false` and adds `error` with
+`code`, `message`, `line`, and sometimes `exceptionType`. The runner continues with the next line. It rejects unknown
+JSON properties, so a misspelled setting fails loudly.
 
-Do not write log text to stdout when you extend the runner. Protocol consumers expect one response object per request.
+JSON has no NaN. The runner writes `NaN`, `Infinity`, and `-Infinity` as strings, and it accepts the same strings in
+floating-point request fields.
 
-### Process exit codes
+### Exit codes
 
-- `0`: every processed request succeeded.
-- `1`: at least one request produced an error response; later lines were still processed.
-- `2`: command-line usage was invalid or the requested script could not be opened.
+- `0`: every request succeeded.
+- `1`: at least one request failed. The runner still processed the later lines.
+- `2`: the arguments were invalid or the script could not be opened.
 
-An unavailable script also produces one JSON error response with code `scriptUnavailable`.
+An unreadable script also produces one error response with code `scriptUnavailable`.
 
 ### Error codes
 
-Consumers can branch on `error.code` instead of parsing messages:
-
 | Code | Meaning |
 | --- | --- |
-| `invalidJson` | The input line is not syntactically valid JSON. |
-| `invalidRequest` | The JSON is valid but does not match the v1 schema, including an unknown property or wrong value type. |
-| `unsupportedProtocol` | `protocolVersion` is not `1`. |
-| `missingProperty` | An operation is missing one of its required properties. |
-| `unknownOperation` | `op` is not a supported operation name. |
-| `simulationNotCreated` | The operation needs an active simulation. |
+| `invalidJson` | The line is not valid JSON. |
+| `invalidRequest` | The JSON does not match the schema. |
+| `unsupportedProtocol` | `protocolVersion` is not `2`. |
+| `missingProperty` | A required property is missing. |
+| `unknownOperation` | `op` is not an operation name. |
+| `simulationNotCreated` | The operation needs a project or an active simulation. |
+| `simulationNotFound` | The `simulation` name or id matches nothing. |
 | `invalidGas` | A gas definition is invalid. |
-| `gasNotFound` | `injectGas.gasId` is not present in the active gas registry. |
-| `invalidTickCount` | `tick.count` is outside the allowed range. |
-| `solverNotFound` | No registered solver has the requested name. |
-| `operationRejected` | The supported Numos API rejected the requested mutation or address. |
-| `internalError` | An unexpected failure occurred; its diagnostic is on stderr. |
-| `scriptUnavailable` | The command-line script path could not be opened. |
+| `gasNotFound` | A gas id is not in the registry. |
+| `fieldNotFound` | A field name is unknown. |
+| `invalidRegion` | A region has `max` below `min`. |
+| `invalidTickCount` | `tick.count` is outside 1 to 1000000. |
+| `solverNotFound` | No solver stage has that name. |
+| `branchNotFound` | No branch has that id. |
+| `ioError` | A file operation failed, such as saving over an existing replay. |
+| `operationRejected` | Numos rejected the operation or its arguments. |
+| `internalError` | An unexpected failure. The exception is on stderr. |
+| `scriptUnavailable` | The script path could not be opened. |
 
-## Coordinates, classifications, and values
+## Coordinates and units
 
-Chunk and voxel coordinates use objects with `x`, `y`, and `z` members:
+A coordinate is an object with `x`, `y`, and `z`. Three kinds of coordinate appear in requests:
 
-```json
-{"x":0,"y":0,"z":0}
-```
+- A chunk `position` counts chunks in the grid.
+- A `voxel` is local to its chunk.
+- Region, sample, and probe points are global voxels. A global voxel is `chunkPosition * chunkDimensions + local`.
+  Global coordinates make a duct of many chunks a few lines of script.
 
-A chunk position is measured in the chunk grid. A voxel position is local to its chunk. Voxel classifications use the
-same integer values as the public API:
-
-- `-2`: solid
-- `-1`: void
-- `0`: unassigned
-- positive values: room IDs
-
-Temperatures are in kelvins, pressure is in pascals, gas amounts are in moles, voxel volume is in cubic metres, and
-heat capacities are in joules per mole-kelvin.
+Classifications are `-2` for solid, `-1` for void, `0` for unassigned, and positive room ids for air. Temperatures are
+in kelvins, pressures in pascals, volumes in cubic metres, and gas amounts in moles.
 
 ## Operations
 
-Operations that access simulation state require an active simulation. A new `createSimulation` request builds the
-replacement first. If construction succeeds, the runner atomically replaces and disposes the current simulation.
+### Session and project
 
-| Operation                | Request data                                                                                   | Effect                                                                                                           |
-|--------------------------|------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------|
-| `createSimulation`       | Optional `name`; fixed chunk `dimensions`; optional `config` and `gases`                       | Creates a new paused, in-memory simulation at tick zero.                                                         |
-| `closeSimulation`        | None                                                                                           | Disposes the active simulation and clears its state.                                                             |
-| `addChunk`               | Chunk `position`; optional initial `classification` (default `0`)                              | Creates a chunk using the simulation's fixed dimensions and fills it with the classification.                    |
-| `removeChunk`            | Chunk `position`                                                                               | Removes and disposes the chunk at that position.                                                                 |
-| `sealChunk`              | Chunk `position`                                                                               | Replaces the chunk's simulated outer faces with solid voxels. For depth-one chunks this seals the X/Y perimeter. |
-| `setChunkClassification` | Chunk `position`; `classification`                                                             | Fills every voxel in a chunk with one classification.                                                            |
-| `setVoxelClassification` | Chunk `position`; local `voxel`; `classification`                                              | Changes one voxel's classification.                                                                              |
-| `setVoxelTemperature`    | Chunk `position`; local `voxel`; `temperatureK`                                                | Sets one voxel's stored temperature in kelvins.                                                                  |
-| `addGas`                 | `gas` definition                                                                               | Appends a gas to the registry. `result.gasId` is its stable zero-based ID.                                       |
-| `injectGas`              | Chunk `position`; local `voxel`; registered `gasId`, `moles`, and `temperatureK`               | Adds gas to an air voxel and wakes its chunk.                                                                    |
-| `wakeChunk`              | Chunk `position`                                                                               | Wakes every gas-bearing voxel in a chunk for subsequent simulation ticks.                                        |
-| `sleepChunk`             | Chunk `position`                                                                               | Explicitly puts a chunk to sleep.                                                                                |
-| `updateConfig`           | `config` patch                                                                                 | Applies a detached snapshot containing the supplied configuration changes for later mutations and ticks.         |
-| `setSolverEnabled`       | `solver` name; `enabled`                                                                       | Enables or disables a named solver stage without changing pipeline order.                                        |
-| `resetSolvers`           | None                                                                                           | Restores the built-in solver pipeline and its enabled states.                                                    |
-| `tick`                   | `count` from `1` through `1000000`                                                             | Runs exactly that many deterministic fixed simulation ticks.                                                     |
-| `observe`                | Optional `position`, `voxel`, `includeVoxels`, `onlyGasBearingVoxels`, and `maxIssueLocations` | Returns a coherent canonical report for the current tick. Dense per-voxel data is opt-in.                        |
-| `exit`                   | None                                                                                           | Disposes the active simulation, responds, and stops reading input.                                               |
+| Operation | Request data | Effect |
+| --- | --- | --- |
+| `hello` | None | Returns the protocol number, the host name and version, and the CoreSim version. |
+| `createProject` | `name`, `chunkDimensions`, `includeDefaultGases` (default `false`), `config`, `gases` | Replaces the open project with an empty one at tick zero. |
+| `closeProject` | None | Closes the project. |
+| `exit` | None | Closes the project, responds, and stops reading input. |
 
-`setSolverEnabled` accepts any stage name in the current pipeline. The built-in stages, in default order, are
-`advection`, `explicit-gas-transport`, `boundary-flow`, `thermodynamics`, `explicit-thermal-transport`,
-`thermal-boundary`, and `gas-reactions`. The runner has no operations for portals or docks, so the two explicit-link
-stages never have work here. A name that is not in the current pipeline is an error.
+`createProject` builds the new project first. The old project stays open if the new one fails.
 
-### Configuration fields
+The default gases add a gas-reaction solver configuration. A replay of such a project is not portable on this
+branch, and `saveReplay` rejects it. Leave `includeDefaultGases` off for any study you save.
 
-`createSimulation.config` and `updateConfig.config` accept these fields. The unit suffixes are part of the names:
+### Simulations
 
-- `globalTemperatureK`
-- `defaultTemperatureFallbackK`
-- `defaultMolarHeatCapacityAtConstantVolume`
-- `voxelVolumeM3`
-- `saturationReferencePressurePa`
-- `defaultDiffusionCoefficient`
-- `spaceTemperatureK`
-- `bulkFlowCoefficient`
-- `vacuumThresholdPa`
-- `sleepThreshold`
-- `sleepEpsilonPercent`
-- `thermalConductance`
-- `condensationRateFactor`
-- `maxPressureTransferFractionPerNeighbor`
-- `accumulatorWakeThresholdPa`
-- `accumulatorMaxAliveTicks`
+| Operation | Request data | Effect |
+| --- | --- | --- |
+| `addSimulation` | `chunkDimensions`, optional `name`, `activate` (default `true`) | Adds a simulation to the world. |
+| `removeSimulation` | `simulation` | Removes a simulation with its chunks and links. |
+| `selectSimulation` | `simulation` | Makes it the active simulation. |
+| `listSimulations` | None | Lists id, name, chunk dimensions, chunk count, and which one is active. |
 
-Omitted fields keep their current values. Production defaults change over time. Set every field an experiment depends
-on if you compare its output across commits.
+### Chunks and voxels
 
-### Gas definitions
+| Operation | Request data | Effect |
+| --- | --- | --- |
+| `addChunk` | `position`, optional `classification` (default `0`) | Creates a chunk filled with the classification. |
+| `removeChunk` | `position` | Removes a chunk. `result.changed` tells whether it existed. |
+| `sealChunk` | `position` | Makes the outer faces solid. |
+| `wakeChunk`, `sleepChunk` | `position` | Wakes a chunk or puts it to sleep. |
+| `fillChunk` | `position`, `classification` | Sets every voxel of a chunk. |
+| `setVoxelClassification` | `position`, local `voxel`, `classification` | Sets one voxel. |
+| `setVoxelTemperature` | `position`, local `voxel`, `temperatureK` | Sets the stored temperature. |
+| `injectGas` | `position`, local `voxel`, `gasId`, `moles`, `temperatureK` | Adds gas to an air voxel. |
+| `clearVoxelGas` | `position`, local `voxel` | Removes the gas from one voxel. |
 
-`addGas` appends a definition with a `name` and the physical fields of `GasProperties`:
+All of these take the optional `simulation`.
 
-```json
-{"protocolVersion":1,"id":"gas","op":"addGas","gas":{"name":"First","molarHeatCapacityAtConstantVolume":1,"boilingPointK":0,"condensationEnabled":false,"molarEnthalpyOfVaporization":0,"liquidId":-1,"diffusionCoefficient":0}}
-```
+### Regions and sampling
 
-The runner assigns gas IDs in insertion order. They stay stable for the life of a simulation. Use the returned ID in
-later `injectGas` requests. `createSimulation.gases` accepts an array of the same definitions and assigns IDs in array order.
+| Operation | Request data | Effect |
+| --- | --- | --- |
+| `editRegion` | `min`, `max`, and the edit members below | Edits every voxel in a global box. |
+| `sampleVoxels` | `points` (global voxels), `fields` | Returns field values inline. |
 
-## Observations
+`editRegion` is the tool for building a geometry or a flow state. The box is inclusive and global. The edit runs in this
+order:
 
-`observe` captures the requested chunk scope under the simulation's state gate. The tick number and chunk snapshots
-therefore describe one coherent state. With no `position` filter, the scope is every chunk. The `observation` object
-contains:
+1. `createChunks`: when `true`, create each missing chunk inside the box with classification `0`.
+2. `classification`: set it on every voxel.
+3. `clearGas`: when `true`, remove the gas from every voxel.
+4. `temperatureK`: set the stored temperature.
+5. `gas`: add an array of `{gasId, moles}` or `{gasId, partialPressurePa}` to every voxel.
 
-- `tick`, `simulationRate`, and `simulationChunkCount` (the total in the simulation, even when the report is filtered).
-- `config`, including the gas registry with assigned IDs.
-- `solverPipeline` in execution order, with each stage's name, kind, and enabled state.
-- `global`, with topology and awake/sleep counts, total moles, estimated sensible energy, finite pressure/temperature
-  statistics, totals by gas, and anomaly counts.
-- `chunks`, sorted by `(x, y, z)`, with generation/revision, dimensions, awake/sleep metadata, the same per-chunk
-  summary metrics, and optional `voxels`.
-- `issueLocations` and `issueLocationsTruncated`, a bounded, deterministic sample of locations with non-finite or
-  negative pressure, temperature, or moles.
+`gasTemperatureK` sets the temperature of the added gas. It defaults to `temperatureK`, then to the configured fallback
+temperature. Give each gas exactly one of `moles` and `partialPressurePa`.
 
-Gas totals and definitions are ordered by gas ID. Statistics carry the full sample count, the finite and non-finite
-counts, and nullable finite minimum, maximum, and mean. They do not hide invalid samples.
+A partial pressure converts to moles with the ideal-gas law, `n = pV / (RT)`. `V` is the configured voxel volume and `T`
+is the gas temperature. A gas added at the same temperature as the voxel keeps that temperature. Use `clearGas` when you
+want the pressure you asked for and not the sum with the gas already there.
 
-Dense voxel details are opt-in because they can dominate the output for normal chunk sizes. Set `includeVoxels` to
-`true` to investigate spatial behavior. `onlyGasBearingVoxels` reduces that output to occupied cells. An optional
-chunk `position` limits the report to one chunk. With both `position` and a local `voxel`, the report returns that exact
-cell even if `includeVoxels` is false. `voxel` is invalid without `position`. `maxIssueLocations` caps the coordinate
-samples attached to invalid-value diagnostics (default `32`, maximum `1024`).
+The result reports `voxelsEdited`, `voxelsSkipped` (inside the box but outside every chunk), `chunksTouched`,
+`chunksCreated`, and `molesPerVoxel` for each gas. A solid voxel counts as edited but ignores gas.
 
-Each emitted voxel has a stable local index, local coordinates, and a classification. It also has gas-capable and
-gas-bearing flags, raw pressure and temperature, total moles, estimated sensible energy, and per-gas moles.
+A region edit costs about 9 microseconds per voxel for gas and 0.1 microseconds for temperature. Each voxel edit is
+also one recorded operation, so a large region makes a large replay. A classification that covers a whole chunk uses
+one call for the chunk.
 
-JSON has no literal for NaN. The runner therefore encodes IEEE-754 non-finite values as the strings `"NaN"`,
-`"Infinity"`, and `"-Infinity"`, and every response stays parseable. It accepts the same strings in floating-point
-request fields. Finite values remain JSON numbers. Consumers should accept a number or one of those three strings for
-any floating-point field.
+`sampleVoxels` reads detached snapshots and never changes the simulation. `result.samples.values[i][j]` is field `j` at
+point `i`. A point outside every chunk is NaN. A solid voxel is NaN for every field except `classification`.
+
+The built-in fields are:
+
+| Field | Unit | Meaning |
+| --- | --- | --- |
+| `temperature` | K | Stored voxel temperature. |
+| `pressure` | Pa | Total pressure. |
+| `totalMoles` | mol | Sum of all gases. |
+| `moles:<gasId>` | mol | One gas, such as `moles:0`. |
+| `classification` | | The voxel classification. |
+
+A solver package can register more fields, such as density or velocity, through `WorkbenchSession.Fields`.
+
+### Gases and configuration
+
+| Operation | Request data | Effect |
+| --- | --- | --- |
+| `addGas` | `gas` definition | Appends a gas. `result.gasId` is its id. |
+| `removeGas` | `gasId` | Removes a gas that no chunk has used yet. |
+| `listGases` | None | Lists the registry. |
+| `updateConfig` | `config` patch | Applies a configuration change. |
+| `getConfig` | None | Returns the configuration and the registry. |
+
+A gas definition has a `name` and the fields `molarHeatCapacityAtConstantVolume`, `boilingPointK`,
+`condensationEnabled`, `molarEnthalpyOfVaporization`, `liquidId`, and `diffusionCoefficient`. Gas ids follow insertion
+order and stay stable.
+
+A configuration patch accepts these fields. Omitted fields keep their value. The runner rejects a value outside the
+domain of its field, such as a negative `bulkFlowCoefficient`.
+
+`globalTemperatureK`, `defaultTemperatureFallbackK`, `defaultMolarHeatCapacityAtConstantVolume`, `voxelVolumeM3`,
+`saturationReferencePressurePa`, `defaultDiffusionCoefficient`, `spaceTemperatureK`, `bulkFlowCoefficient`,
+`vacuumThresholdPa`, `sleepThreshold`, `sleepEpsilonPercent`, `thermalConductance`, `condensationRateFactor`,
+`maxPressureTransferFractionPerNeighbor`, `accumulatorWakeThresholdPa`, `accumulatorMaxAliveTicks`.
+
+Defaults change between versions. Set every field a study depends on.
+
+### Solvers and topology
+
+| Operation | Request data | Effect |
+| --- | --- | --- |
+| `listSolvers` | None | Lists the stages in execution order. |
+| `setSolverEnabled` | `solver`, `enabled` | Enables or disables a stage. |
+| `resetSolvers` | None | Restores the stage defaults. |
+| `createPortal` | `first`, `second`, optional `flags` | Links two voxels, possibly in different simulations. |
+| `createDock` | `first`, `second`, `rotation`, `flipU`, `flipV`, `flags` | Links two chunk faces voxel by voxel. |
+| `destroyLinkSet` | `linkSet` (`index`, `generation`) | Queues a portal or dock for removal. |
+| `listLinkSets` | None | Lists portals and docks with kind, state, and link count. |
+
+The built-in stages are `advection`, `explicit-gas-transport`, `boundary-flow`, `thermodynamics`,
+`explicit-thermal-transport`, `thermal-boundary`, and `gas-reactions`.
+
+The world refuses to remove or reorder stages while it records, and a project always records. In that case
+`resetSolvers` enables every stage, leaves the order alone, and returns `changed: false`.
+
+A portal endpoint is `{simulation, position, voxel}`. A dock endpoint is `{simulation, position, face}`, where `face`
+is `negativeX`, `positiveX`, `negativeY`, `positiveY`, `negativeZ`, or `positiveZ`. `flags` is `all` (default), `gas`,
+`thermal`, or `none`. Topology changes apply at the next tick.
+
+### Time and timeline
+
+| Operation | Request data | Effect |
+| --- | --- | --- |
+| `tick` | `count` (1 to 1000000), optional `progressInterval` | Runs fixed ticks. |
+| `stepForward` | None | Ticks one step on the head or seeks one tick in history. |
+| `seekTick` | `tick` | Shows the state at a past tick. The timeline then inspects history. |
+| `returnToHead` | None | Moves to the newest tick. |
+| `createBranch` | None | Forks a branch at the current tick. |
+| `selectBranch` | `branchId`, optional `tick` | Switches to a branch. |
+| `continueBranch` | None | Ends inspection so the branch can tick and take edits. |
+| `listBranches` | None | Lists branches. |
+| `timelineInfo` | None | Returns head, position, checkpoints, branches, and the state hash. |
+
+`tick` writes a progress line to the log every `progressInterval` ticks (default 100, `0` for none). It calls the world
+tick directly, so a script runs the same number of solver steps on every machine.
+
+While the timeline inspects history, every operation that edits the world fails with `operationRejected`. Call
+`returnToHead` and `continueBranch` first.
+
+`timelineInfo` reports the FNV-1a state hash as 16 hex digits. Two runs that end in the same state have the same hash.
+
+### Replay files
+
+| Operation | Request data | Effect |
+| --- | --- | --- |
+| `saveReplay` | `path`, `throughCurrentPosition`, `overwrite` | Writes the selected branch to a `.numos` file. |
+| `loadReplay` | `path` | Replaces the project with the replay, verified by replaying it. |
+
+`loadReplay` blocks until the replay is verified. It leaves the timeline at the start of the replay in inspection mode,
+like the viewer. Call `returnToHead` to reach the saved final state. Its `timelineInfo.stateHash` equals the hash that
+was current when you saved. Call `continueBranch` to keep ticking.
+
+`saveReplay` fails with `ioError` when the file exists, unless `overwrite` is `true`.
+
+### Observation
+
+`observe` captures a coherent report of one simulation. `result.stateHash` carries the world state hash. The report has
+these parts:
+
+- `tick`, `simulationRate`, and `simulationChunkCount`.
+- `config`, including the gas registry.
+- `solverPipeline` in execution order.
+- `global`, with topology counts, total moles, estimated sensible energy, pressure and temperature statistics, totals by
+  gas, and anomaly counts.
+- `chunks`, sorted by `(x, y, z)`, each with its own summary and optional `voxels`.
+- `issueLocations`, a bounded sample of voxels with non-finite or negative values.
+
+Dense voxel data is opt-in. Set `includeVoxels` to `true` for it. Set `onlyGasBearingVoxels` to keep occupied voxels
+only. A chunk `position` limits the report to one chunk. With `position` and a local `voxel`, the report returns that
+voxel even when `includeVoxels` is `false`. `maxIssueLocations` caps the issue sample (default 32, maximum 1024).
 
 ## Determinism and comparison
 
-`tick` calls `AtmosSimulation.Tick()` directly. It skips the viewer's wall-clock `Update(deltaTime)` accumulator, so a
-script runs the same number of solver steps on every replay. The runner emits chunks, gases, and voxels in stable
-order. Canonical observations exclude timing measurements.
+The runner emits chunks, gases, and voxels in a stable order, and it leaves timing out of observations. To get useful
+diffs:
 
-To get useful diffs:
+1. Add gases in an explicit order and use their returned ids.
+2. Set every configuration field the study depends on.
+3. Compare `stateHash` values for a quick check, and compare parsed JSON for details.
 
-1. Add gases in an explicit order and refer to their returned IDs.
-2. Build topology before injecting gas.
-3. Insert named `observe` requests before and after the ticks under investigation.
-4. Compare parsed JSON rather than relying on whitespace.
+The runner reports state. It does not assert conservation. Void flow, vacuum cleanup, phase change, and thermal
+boundaries can remove mass or energy on purpose.
 
-The runner reports state. It does not assert mass or energy conservation. Void flow, vacuum cleanup, phase changes,
-and thermal boundaries can remove mass or energy on purpose, so the invariants depend on the experiment.
+## Example scripts
 
-## Example script
+[`examples/headless/two-voxel-flow.jsonl`](../examples/headless/two-voxel-flow.jsonl) creates a `2 x 1 x 1` chunk. It
+injects gas into the left voxel and observes the pressure imbalance, one tick, and the result.
 
-[`examples/headless/two-voxel-flow.jsonl`](../examples/headless/two-voxel-flow.jsonl) creates one `2 x 1 x 1` chunk.
-It injects a single gas into the left voxel and observes the initial pressure imbalance. It then advances one tick and
-observes the result. It uses the reduced-pressure deterministic configuration from the integration tests.
-
-Replay it with:
-
-```powershell
-dotnet run --project src/Numos.Headless -- --script examples/headless/two-voxel-flow.jsonl
-```
-
-The script is ordinary NDJSON. Use it as a template for generated experiments and regression fixtures.
+[`examples/headless/shock-tube-1d.jsonl`](../examples/headless/shock-tube-1d.jsonl) builds a 2000-voxel tube with solid
+walls. The left half starts at 2 atmospheres and the right half at 1 atmosphere. The script ticks 400 steps and samples
+the pressure along the tube. It uses one `editRegion` call for each half.
