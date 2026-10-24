@@ -213,6 +213,7 @@ internal sealed partial class AtmosKernel
     {
         var chunk = GetChunk(op.Position);
         ValidateVoxelIndex(chunk, op.LocalVoxelIndex);
+        ValidateMomentum(op.MomentumX, op.MomentumY, op.MomentumZ);
         chunk.Wake();
         foreach (var gas in op.Gases)
             chunk.ActiveGases[chunk.GetOrCreateGasChannel(gas.GasId)].Moles[op.LocalVoxelIndex] = gas.Moles;
