@@ -3,7 +3,6 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
 using Numos.CoreSim.Datatypes.Primitives;
-using Numos.CoreSim.EulerFlow;
 using Numos.CoreSim.Datatypes.Snapshots;
 using Numos.CoreSim.Solvers;
 using Numos.CoreSim.State;
@@ -33,14 +32,6 @@ internal static partial class AtmosReplayCodec
 {
     internal static readonly Encoding Utf8 = new UTF8Encoding(false, true);
 
-    // Every built-in configuration a portable file can carry, by key. A key missing here is a host type, which the
-    // archive reports as unsupported before anything is written.
-    internal static readonly Dictionary<string, Func<BinaryReader, IAtmosSolverConfiguration>> PortableConfigurationReaders =
-        new(StringComparer.Ordinal)
-        {
-            [EulerFlowConfig.ConfigurationKey] = EulerFlowConfig.ReadWire
-        };
-
     /// <summary>
     ///     Writes a configuration: its schema fields (scalars and the gas registry), then its solver configurations.
     /// </summary>
@@ -50,7 +41,7 @@ internal static partial class AtmosReplayCodec
     ///     snapshot's ordinal key order, its key and a length-prefixed payload. <see cref="AtmosConfigSnapshot.WriteHash" />
     ///     hashes the same sequence without the lengths.
     /// </remarks>
-    /// <exception cref="NotSupportedException">A solver configuration has no <see cref="NumosSerializeAttribute" /> members and is not a built-in portable one.</exception>
+    /// <exception cref="NotSupportedException">A solver configuration has no <see cref="NumosSerializeAttribute" /> members.</exception>
     internal static void WriteConfig(BinaryWriter writer, AtmosConfigSnapshot config)
     {
         var fields = new StateBinarySink();
@@ -60,13 +51,6 @@ internal static partial class AtmosReplayCodec
         writer.Write(config.SolverConfigurations.Count);
         foreach (var configuration in config.SolverConfigurations)
         {
-            if (configuration is IPortableSolverConfiguration portable)
-            {
-                WriteString(writer, configuration.Key);
-                portable.WriteWire(writer);
-                continue;
-            }
-
             if (configuration is not INumosState state)
             {
                 throw new NotSupportedException(
@@ -107,16 +91,6 @@ internal static partial class AtmosReplayCodec
                 throw new InvalidDataException("Solver configurations are not in ascending ordinal key order.");
 
             previousKey = key;
-            if (PortableConfigurationReaders.TryGetValue(key, out var readPortable))
-            {
-                var portable = readPortable(reader);
-                if (portable.Key != key)
-                    throw new InvalidDataException("The solver configuration key does not match its payload.");
-
-                config.SolverConfigurations.Add(portable);
-                continue;
-            }
-
             byte[] payload = ReadPayload(reader, ReadCount(reader, int.MaxValue, "solver configuration byte"));
             var state = new StateReader(payload, maxStringBytes);
             if (!types.TryRead(key, ref state, config.GasRegistry, out var configuration))

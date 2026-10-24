@@ -132,8 +132,7 @@ public sealed class AtmosWorldReplayArchive
                          $"in simulation {simulation.Simulation}, chunk {chunk.Position}";
         }
 
-        // Configurations with [NumosSerialize] members and the built-in portable ones save themselves. Only host types
-        // are unsupported.
+        // Configurations with [NumosSerialize] members save themselves. Only hand-written ones have no wire format.
         foreach (var configuration in checkpoint.Config.SolverConfigurations.Where(static value => !IsSavable(value)))
             yield return $"world solver configuration '{configuration.Key}' (no [NumosSerialize] members)";
 
@@ -149,7 +148,7 @@ public sealed class AtmosWorldReplayArchive
 
     private static bool IsSavable(IAtmosSolverConfiguration configuration)
     {
-        return configuration is INumosState or IPortableSolverConfiguration;
+        return configuration is INumosState;
     }
 }
 

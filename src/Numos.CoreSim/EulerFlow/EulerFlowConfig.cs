@@ -1,4 +1,4 @@
-using Numos.CoreSim.Replay;
+using Numos.CoreSim.State;
 using Numos.Maths;
 using Magnitudo;
 
@@ -15,8 +15,8 @@ namespace Numos.CoreSim.EulerFlow;
 ///         each one normalizes to.
 ///     </para>
 ///     <para>
-///         This configuration is portable: a <c>.numos</c> replay file carries it, unlike
-///         <see cref="GasReactions.GasReactionConfig" />, whose reactions reference host gas objects.
+///         The <see cref="NumosSerializeAttribute" /> properties are the configuration's state. Numos generates its
+///         equality, state hash, and wire format from them, so a <c>.numos</c> replay file carries it.
 ///     </para>
 /// </remarks>
 /// <example>
@@ -25,7 +25,7 @@ namespace Numos.CoreSim.EulerFlow;
 ///     simulation.SetAtmosConfig(config);
 ///     </code>
 /// </example>
-public sealed class EulerFlowConfig : IAtmosSolverConfiguration, IPortableSolverConfiguration
+public sealed partial class EulerFlowConfig : IAtmosSolverConfiguration
 {
     /// <summary>
     ///     Identifies the configuration consumed by the Euler transport solver.
@@ -78,6 +78,7 @@ public sealed class EulerFlowConfig : IAtmosSolverConfiguration, IPortableSolver
     ///     fewer substeps, but a face next to vacuum can then produce a negative density that the solver has to
     ///     repair. Non-finite and nonpositive values normalize to 0.5. Values above 1 clamp to 1.
     /// </remarks>
+    [NumosSerialize]
     public Scalar CourantNumber { get; init; } = 0.5f;
 
     /// <summary>
@@ -89,6 +90,7 @@ public sealed class EulerFlowConfig : IAtmosSolverConfiguration, IPortableSolver
     ///     <see cref="AtmosSolverConstants.FixedTimeStep" /> of gas time: the flow slows down instead of the frame
     ///     stalling. Negative values normalize to 0.
     /// </remarks>
+    [NumosSerialize]
     public int MaxSubstepsPerTick { get; init; } = 64;
 
     /// <summary>
@@ -99,6 +101,7 @@ public sealed class EulerFlowConfig : IAtmosSolverConfiguration, IPortableSolver
     ///     and keeps the CFL loop substepping over noise. Non-finite and negative values normalize to 0, which
     ///     disables the floor.
     /// </remarks>
+    [NumosSerialize]
     [Quantity("velocity")]
     public MetrePerSecond VelocityFloor { get; init; } = 0.005f;
 
@@ -111,6 +114,7 @@ public sealed class EulerFlowConfig : IAtmosSolverConfiguration, IPortableSolver
     ///     wrong. The solver counts clamped voxels in a diagnostic counter so a misbehaving scene is visible.
     ///     Non-finite and nonpositive values normalize to 5000 m/s.
     /// </remarks>
+    [NumosSerialize]
     [Quantity("velocity")]
     public MetrePerSecond MaxVelocity { get; init; } = 5000f;
 
@@ -123,6 +127,7 @@ public sealed class EulerFlowConfig : IAtmosSolverConfiguration, IPortableSolver
     ///     pascals of residual non-uniformity. A lower value lets awake chunks keep re-waking neighbours that just
     ///     fell asleep. Non-finite and negative values normalize to 0, which wakes on any difference.
     /// </remarks>
+    [NumosSerialize]
     [Quantity("pressure")]
     public Pascal WakePressureDelta { get; init; } = 10f;
 
@@ -133,6 +138,7 @@ public sealed class EulerFlowConfig : IAtmosSolverConfiguration, IPortableSolver
     ///     Godunov fluxes dissipate at the sound speed, which smears flows that move at a small fraction of it. The
     ///     correction keeps slow flows sharp at a small extra cost per face. Off by default.
     /// </remarks>
+    [NumosSerialize]
     public bool AllMachCorrection { get; init; }
 
     /// <summary>
@@ -142,6 +148,7 @@ public sealed class EulerFlowConfig : IAtmosSolverConfiguration, IPortableSolver
     ///     Second-order reconstruction is planned. Undefined values normalize to
     ///     <see cref="EulerReconstruction.FirstOrder" />.
     /// </remarks>
+    [NumosSerialize]
     public EulerReconstruction Reconstruction { get; init; } = EulerReconstruction.FirstOrder;
 
     /// <summary>
@@ -152,6 +159,7 @@ public sealed class EulerFlowConfig : IAtmosSolverConfiguration, IPortableSolver
     ///     hallway does not ring at its acoustic modes indefinitely. Non-finite and negative values normalize to 0,
     ///     which applies no damping.
     /// </remarks>
+    [NumosSerialize]
     [Quantity("frequency")]
     public PerSecond MomentumDamping { get; init; }
 
@@ -163,6 +171,7 @@ public sealed class EulerFlowConfig : IAtmosSolverConfiguration, IPortableSolver
     ///     changing it also rescales unsized links on a grid that still runs the legacy model. Values are clamped to
     ///     [0, 1]. Non-finite values normalize to 0, which closes such links to gas transport.
     /// </remarks>
+    [NumosSerialize]
     public Scalar DefaultLinkAreaFraction { get; init; } = 1f;
 
     /// <inheritdoc />
@@ -189,94 +198,10 @@ public sealed class EulerFlowConfig : IAtmosSolverConfiguration, IPortableSolver
         return SemanticallyEquals(normalized) ? this : normalized;
     }
 
-    /// <inheritdoc />
-    /// <remarks>Floats are compared bit-for-bit, so equality agrees with <see cref="ComputeStateHash" />.</remarks>
-    public bool SemanticallyEquals(IAtmosSolverConfiguration other)
-    {
-        return other is EulerFlowConfig config &&
-               SameBits(CourantNumber, config.CourantNumber) &&
-               MaxSubstepsPerTick == config.MaxSubstepsPerTick &&
-               SameBits(VelocityFloor, config.VelocityFloor) &&
-               SameBits(MaxVelocity, config.MaxVelocity) &&
-               SameBits(WakePressureDelta, config.WakePressureDelta) &&
-               AllMachCorrection == config.AllMachCorrection &&
-               Reconstruction == config.Reconstruction &&
-               SameBits(MomentumDamping, config.MomentumDamping) &&
-               SameBits(DefaultLinkAreaFraction, config.DefaultLinkAreaFraction);
-    }
-
-    /// <inheritdoc />
-    public ulong ComputeStateHash()
-    {
-        var hash = new AtmosStateHasher();
-        hash.Add(CourantNumber);
-        hash.Add(MaxSubstepsPerTick);
-        hash.Add(VelocityFloor);
-        hash.Add(MaxVelocity);
-        hash.Add(WakePressureDelta);
-        hash.Add(AllMachCorrection);
-        hash.Add((int)Reconstruction);
-        hash.Add(MomentumDamping);
-        hash.Add(DefaultLinkAreaFraction);
-        return hash.Value;
-    }
-
-    // Same order as ReadWire. Pinned by the golden wire-format test, so a new setting goes at the end and needs a
-    // world checkpoint format bump.
-    void IPortableSolverConfiguration.WriteWire(BinaryWriter writer)
-    {
-        writer.Write(CourantNumber);
-        writer.Write(MaxSubstepsPerTick);
-        writer.Write(VelocityFloor);
-        writer.Write(MaxVelocity);
-        writer.Write(WakePressureDelta);
-        writer.Write(AllMachCorrection);
-        writer.Write((byte)Reconstruction);
-        writer.Write(MomentumDamping);
-        writer.Write(DefaultLinkAreaFraction);
-    }
-
-    /// <summary>
-    ///     Reads a payload written by <see cref="IPortableSolverConfiguration.WriteWire" />.
-    /// </summary>
-    /// <exception cref="InvalidDataException">The payload names an undefined reconstruction.</exception>
-    internal static EulerFlowConfig ReadWire(BinaryReader reader)
-    {
-        Scalar courantNumber = reader.ReadSingle();
-        int maxSubstepsPerTick = reader.ReadInt32();
-        MetrePerSecond velocityFloor = reader.ReadSingle();
-        MetrePerSecond maxVelocity = reader.ReadSingle();
-        Pascal wakePressureDelta = reader.ReadSingle();
-        bool allMachCorrection = reader.ReadBoolean();
-        var reconstruction = (EulerReconstruction)reader.ReadByte();
-        if (!Enum.IsDefined(reconstruction))
-            throw new InvalidDataException("The Euler flow configuration names an unknown reconstruction.");
-
-        PerSecond momentumDamping = reader.ReadSingle();
-        Scalar defaultLinkAreaFraction = reader.ReadSingle();
-        return new EulerFlowConfig
-        {
-            CourantNumber = courantNumber,
-            MaxSubstepsPerTick = maxSubstepsPerTick,
-            VelocityFloor = velocityFloor,
-            MaxVelocity = maxVelocity,
-            WakePressureDelta = wakePressureDelta,
-            AllMachCorrection = allMachCorrection,
-            Reconstruction = reconstruction,
-            MomentumDamping = momentumDamping,
-            DefaultLinkAreaFraction = defaultLinkAreaFraction
-        };
-    }
-
     internal static EulerFlowConfig Get(IAtmosConfig config)
     {
         return SolverConfigurationLookup.TryGet(config.SolverConfigurations, ConfigurationKey, out EulerFlowConfig? euler)
             ? euler
             : Default;
-    }
-
-    private static bool SameBits(float left, float right)
-    {
-        return BitConverter.SingleToInt32Bits(left) == BitConverter.SingleToInt32Bits(right);
     }
 }

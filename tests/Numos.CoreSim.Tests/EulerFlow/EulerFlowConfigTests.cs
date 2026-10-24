@@ -1,5 +1,6 @@
 using Numos.CoreSim.EulerFlow;
-using Numos.CoreSim.Replay;
+using Numos.CoreSim.State;
+using Numos.CoreSim.State.Advanced;
 
 namespace Numos.CoreSim.Tests.EulerFlow;
 
@@ -150,7 +151,7 @@ public sealed class EulerFlowConfigTests
     }
 
     [Test]
-    public void Wire_RoundTripsEveryField()
+    public void State_RoundTripsEveryField()
     {
         var config = new EulerFlowConfig
         {
@@ -164,37 +165,30 @@ public sealed class EulerFlowConfigTests
             DefaultLinkAreaFraction = 0.75f
         };
 
-        using var stream = new MemoryStream();
-        using (var writer = new BinaryWriter(stream, AtmosReplayCodec.Utf8, true))
-            ((IPortableSolverConfiguration)config).WriteWire(writer);
-
-        stream.Position = 0;
-        using var reader = new BinaryReader(stream, AtmosReplayCodec.Utf8, true);
-        var restored = EulerFlowConfig.ReadWire(reader);
+        var sink = new StateBinarySink();
+        NumosState.Write(ref sink, config);
+        var reader = new StateReader(sink.WrittenSpan);
+        var restored = NumosState.Read<EulerFlowConfig>(ref reader);
+        bool atEnd = reader.IsAtEnd;
 
         Assert.Multiple(() =>
         {
             Assert.That(restored.SemanticallyEquals(config), Is.True);
             Assert.That(restored.ComputeStateHash(), Is.EqualTo(config.ComputeStateHash()));
-            Assert.That(stream.Position, Is.EqualTo(stream.Length));
+            Assert.That(atEnd, Is.True);
         });
     }
 
     [Test]
-    public void Wire_RejectsUnknownReconstruction()
+    public void State_UndefinedReconstructionNormalizesWhenCaptured()
     {
-        using var stream = new MemoryStream();
-        using (var writer = new BinaryWriter(stream, AtmosReplayCodec.Utf8, true))
-        {
-            ((IPortableSolverConfiguration)EulerFlowConfig.Default).WriteWire(writer);
-            // Reconstruction is the byte after one float, one int, three floats, and one bool.
-            stream.Position = sizeof(float) + sizeof(int) + 3 * sizeof(float) + sizeof(bool);
-            writer.Write((byte)200);
-        }
+        var config = new EulerFlowConfig { Reconstruction = (EulerReconstruction)200 };
 
-        stream.Position = 0;
-        using var reader = new BinaryReader(stream, AtmosReplayCodec.Utf8, true);
+        var sink = new StateBinarySink();
+        NumosState.Write(ref sink, config);
+        var reader = new StateReader(sink.WrittenSpan);
+        var snapshot = (EulerFlowConfig)NumosState.Read<EulerFlowConfig>(ref reader).CreateSnapshot(new GasRegistry());
 
-        Assert.That(() => EulerFlowConfig.ReadWire(reader), Throws.TypeOf<InvalidDataException>());
+        Assert.That(snapshot.Reconstruction, Is.EqualTo(EulerReconstruction.FirstOrder));
     }
 }

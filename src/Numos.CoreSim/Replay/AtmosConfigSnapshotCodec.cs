@@ -38,16 +38,6 @@ internal readonly struct AtmosConfigSnapshotCodec : IStateCodec<AtmosConfigSnaps
             {
                 sink.WriteUInt64(configuration.ComputeStateHash());
             }
-            else if (configuration is IPortableSolverConfiguration portable)
-            {
-                // The payload is the hand-written wire format, length-prefixed so the reader can bound it.
-                using var buffer = new MemoryStream();
-                using (var writer = new BinaryWriter(buffer, AtmosReplayCodec.Utf8, leaveOpen: true))
-                    portable.WriteWire(writer);
-
-                sink.WriteInt32((int)buffer.Length);
-                sink.WriteElements(buffer.GetBuffer().AsSpan(0, (int)buffer.Length), 1);
-            }
             else
             {
                 throw new NotSupportedException(
@@ -92,22 +82,6 @@ internal readonly struct AtmosConfigSnapshotCodec : IStateCodec<AtmosConfigSnaps
                 throw new InvalidDataException("Solver configurations are not in ascending ordinal key order.");
 
             previousKey = key;
-            if (AtmosReplayCodec.PortableConfigurationReaders.TryGetValue(key, out var readPortable))
-            {
-                byte[] payload = reader.ReadArray<byte>(reader.ReadCount());
-                using var stream = new MemoryStream(payload, writable: false);
-                using var binary = new BinaryReader(stream, AtmosReplayCodec.Utf8);
-                var portable = readPortable(binary);
-                if (stream.Position != stream.Length)
-                    throw new InvalidDataException($"Solver configuration '{key}' has trailing data.");
-
-                if (portable.Key != key)
-                    throw new InvalidDataException("The solver configuration key does not match its payload.");
-
-                config.SolverConfigurations.Add(portable);
-                continue;
-            }
-
             if (!types.TryRead(key, ref reader, config.GasRegistry, out var configuration))
             {
                 throw new NotSupportedException(
