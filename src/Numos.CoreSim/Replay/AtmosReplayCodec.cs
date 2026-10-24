@@ -189,6 +189,62 @@ internal static partial class AtmosReplayCodec
         return new SetVoxelMixtureOperation(position, voxel, temperature, pressure, capacity, gases);
     }
 
+    private static void WriteEditVoxelBoxOperation(BinaryWriter writer, EditVoxelBoxOperation operation)
+    {
+        WriteInt3(writer, operation.Min);
+        WriteInt3(writer, operation.Max);
+        writer.Write((byte)operation.Parts);
+        WriteVoxelClassification(writer, operation.Classification);
+        writer.Write(operation.VoxelTemperature);
+        writer.Write(operation.GasTemperature);
+        // Three reserved floats keep the layout of the velocity part. This build writes zeros.
+        writer.Write(0f);
+        writer.Write(0f);
+        writer.Write(0f);
+        writer.Write(operation.Gases.Count);
+        foreach (var gas in operation.Gases)
+        {
+            writer.Write(gas.GasId);
+            writer.Write(gas.Moles);
+        }
+    }
+
+    private static EditVoxelBoxOperation ReadEditVoxelBoxOperation(BinaryReader reader)
+    {
+        var min = ReadInt3(reader);
+        var max = ReadInt3(reader);
+        var parts = (AtmosVoxelBoxParts)reader.ReadByte();
+        if ((parts & ~(AtmosVoxelBoxParts.Classification | AtmosVoxelBoxParts.ClearGas |
+                       AtmosVoxelBoxParts.Temperature)) != 0)
+        {
+            throw new InvalidDataException("The voxel box operation selects an unknown part.");
+        }
+
+        var classification = ReadVoxelClassification(reader);
+        Kelvin voxelTemperature = reader.ReadSingle();
+        Kelvin gasTemperature = reader.ReadSingle();
+        _ = reader.ReadSingle();
+        _ = reader.ReadSingle();
+        _ = reader.ReadSingle();
+        int count = ReadCount(reader, 1_000_000, "voxel box gas");
+        var gases = new AtmosGasAmount[count];
+        for (int index = 0; index < count; index++)
+        {
+            int gasId = reader.ReadInt32();
+            Mole moles = reader.ReadSingle();
+            gases[index] = new AtmosGasAmount(gasId, moles);
+        }
+
+        return new EditVoxelBoxOperation(
+            min,
+            max,
+            parts,
+            classification,
+            voxelTemperature,
+            gasTemperature,
+            gases);
+    }
+
     private static void WriteVoxelClassification(BinaryWriter writer, VoxelClassification value)
     {
         writer.Write(value.RoomId);

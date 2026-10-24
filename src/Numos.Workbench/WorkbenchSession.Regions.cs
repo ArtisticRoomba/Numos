@@ -2,6 +2,7 @@ using System.Globalization;
 using Numos.API;
 using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Primitives;
+using Numos.CoreSim.Replay;
 using Numos.Maths;
 
 namespace Numos.Workbench;
@@ -131,15 +132,16 @@ public sealed partial class WorkbenchSession
     /// <returns>Counts of edited and skipped voxels.</returns>
     /// <remarks>
     ///     <para>
-    ///         The edit visits one chunk at a time. A classification that covers a whole chunk uses one chunk-wide
-    ///         call, because a per-voxel classification call rebuilds the chunk's active topology each time.
+    ///         The session creates the missing chunks first when <see cref="RegionEdit.CreateChunks" /> is set. Each
+    ///         created chunk adds one chunk operation to the replay.
     ///     </para>
     ///     <para>
-    ///         Every voxel edit is a recorded operation, so a large region adds one operation per voxel and field to the
-    ///         replay. The edit writes one summary line to the log instead of one line per voxel.
+    ///         The session then applies the other changes with one <see cref="AtmosSimulation.EditVoxelBox" /> call. The
+    ///         call adds one operation to the replay for the whole region. The session writes one summary line to the log.
     ///     </para>
     ///     <para>
-    ///         The edit stops at the first failure. Chunks edited before it keep the new values.
+    ///         The session validates the edit before it changes anything. A failure while it creates chunks leaves the
+    ///         chunks created so far.
     ///     </para>
     /// </remarks>
     /// <exception cref="ArgumentException">The box, a gas, a temperature, or a pressure is invalid.</exception>
@@ -170,86 +172,47 @@ public sealed partial class WorkbenchSession
                         "chunks in one edit is not allowed.");
                 }
 
-                var existing = new HashSet<Int3>();
-                foreach (var handle in target.GetChunkHandles())
-                    existing.Add(handle.Position);
-
-                long edited = 0;
-                long skipped = 0;
-                int touched = 0;
                 int created = 0;
-                for (int cz = minChunk.Z; cz <= maxChunk.Z; cz++)
-                for (int cy = minChunk.Y; cy <= maxChunk.Y; cy++)
-                for (int cx = minChunk.X; cx <= maxChunk.X; cx++)
+                if (edit.CreateChunks)
                 {
-                    var position = new Int3(cx, cy, cz);
-                    int x0 = Math.Max(box.Min.X, cx * dimensions.X) - cx * dimensions.X;
-                    int x1 = Math.Min(box.Max.X, (cx + 1) * dimensions.X - 1) - cx * dimensions.X;
-                    int y0 = Math.Max(box.Min.Y, cy * dimensions.Y) - cy * dimensions.Y;
-                    int y1 = Math.Min(box.Max.Y, (cy + 1) * dimensions.Y - 1) - cy * dimensions.Y;
-                    int z0 = Math.Max(box.Min.Z, cz * dimensions.Z) - cz * dimensions.Z;
-                    int z1 = Math.Min(box.Max.Z, (cz + 1) * dimensions.Z - 1) - cz * dimensions.Z;
-                    long voxels = (long)(x1 - x0 + 1) * (y1 - y0 + 1) * (z1 - z0 + 1);
-                    bool isNew = false;
-                    if (!existing.Contains(position))
+                    var existing = new HashSet<Int3>();
+                    foreach (var handle in target.GetChunkHandles())
+                        existing.Add(handle.Position);
+
+                    for (int cz = minChunk.Z; cz <= maxChunk.Z; cz++)
+                    for (int cy = minChunk.Y; cy <= maxChunk.Y; cy++)
+                    for (int cx = minChunk.X; cx <= maxChunk.X; cx++)
                     {
-                        if (!edit.CreateChunks)
-                        {
-                            skipped += voxels;
+                        var position = new Int3(cx, cy, cz);
+                        if (!existing.Add(position))
                             continue;
-                        }
 
                         var newChunk = target.CreateAndRegisterChunk(position);
                         target.SetChunkClassification(newChunk, new VoxelClassification(0));
-                        existing.Add(position);
                         created++;
-                        isNew = true;
                     }
-
-                    var chunk = new AtmosChunkHandle(position);
-                    bool wholeChunk = x0 == 0 && x1 == dimensions.X - 1 &&
-                                      y0 == 0 && y1 == dimensions.Y - 1 &&
-                                      z0 == 0 && z1 == dimensions.Z - 1;
-
-                    if (edit.Classification is { } classification)
-                    {
-                        var value = new VoxelClassification(classification);
-                        if (wholeChunk)
-                        {
-                            target.SetChunkClassification(chunk, value);
-                        }
-                        else
-                        {
-                            ForEachVoxel(dimensions, x0, x1, y0, y1, z0, z1,
-                                index => target.SetVoxelClassification(chunk, index, value));
-                        }
-                    }
-
-                    if (edit.ClearGas && !isNew)
-                    {
-                        ForEachVoxel(dimensions, x0, x1, y0, y1, z0, z1,
-                            index => target.GetVoxelGasMixture(chunk, index).Clear());
-                    }
-
-                    if (edit.TemperatureK is { } temperature)
-                    {
-                        ForEachVoxel(dimensions, x0, x1, y0, y1, z0, z1,
-                            index => target.SetVoxelTemperature(chunk, index, temperature));
-                    }
-
-                    foreach (var (gasId, moles) in plan.Gases)
-                    {
-                        if (moles <= 0f)
-                            continue;
-
-                        float gasTemperature = plan.GasTemperature;
-                        ForEachVoxel(dimensions, x0, x1, y0, y1, z0, z1,
-                            index => target.AddGasToVoxel(chunk, index, gasId, moles, gasTemperature));
-                    }
-
-                    edited += voxels;
-                    touched++;
                 }
+
+                // A chunk created above holds no gas, so removing gas from a box of new chunks only wakes them.
+                bool clearGas = edit.ClearGas && created < chunkCount;
+                var boxEdit = new AtmosVoxelBoxEdit
+                {
+                    Classification = edit.Classification is { } classification
+                        ? new VoxelClassification(classification)
+                        : null,
+                    ClearGas = clearGas,
+                    TemperatureK = edit.TemperatureK,
+                    Gases = plan.Gases
+                        .Where(static gas => gas.Moles > 0f)
+                        .Select(static gas => new AtmosGasAmount(gas.GasId, gas.Moles))
+                        .ToArray(),
+                    GasTemperatureK = plan.GasTemperature
+                };
+
+                var applied = target.EditVoxelBox(box.Min, box.Max, boxEdit);
+                long edited = applied.VoxelsEdited;
+                long skipped = applied.VoxelsSkipped;
+                int touched = applied.ChunksTouched;
 
                 var result = new RegionEditResult(
                     edited,
@@ -263,26 +226,9 @@ public sealed partial class WorkbenchSession
             });
     }
 
-    private static void ForEachVoxel(
-        Int3 dimensions,
-        int x0,
-        int x1,
-        int y0,
-        int y1,
-        int z0,
-        int z1,
-        Action<ushort> action)
-    {
-        for (int z = z0; z <= z1; z++)
-        for (int y = y0; y <= y1; y++)
-        {
-            int row = dimensions.X * (y + dimensions.Y * z);
-            for (int x = x0; x <= x1; x++)
-                action(checked((ushort)(row + x)));
-        }
-    }
-
-    private readonly record struct RegionGasPlan((int GasId, float Moles)[] Gases, float GasTemperature);
+    private readonly record struct RegionGasPlan(
+        (int GasId, float Moles)[] Gases,
+        float GasTemperature);
 
     private RegionGasPlan PlanRegionGases(RegionEdit edit, AtmosConfig config)
     {

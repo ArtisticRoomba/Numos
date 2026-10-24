@@ -467,5 +467,5 @@ voxel thick in `z`:
 4. `tick` with `probes` records wall pressure over time.
 5. `exportField` and `renderSlice` write the fields and pictures.
 
-An `editRegion` that adds gas to 360000 voxels takes a few seconds, at about 9 microseconds per voxel. Plan for
-that cost when a script has many edits.
+`editRegion` records one replay operation for the whole box, plus one chunk operation for each chunk that `createChunks`
+creates. A large region therefore adds little to the replay file.

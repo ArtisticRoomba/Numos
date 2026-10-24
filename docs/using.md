@@ -574,6 +574,22 @@ var voxel = simulation.GetVoxelSnapshot(chunk, localVoxelIndex: 0);
 
 A renderer that knows which revision it presented can call `TryGetVoxelSnapshot` to skip copying gas data when the chunk has not changed. `TryGetChunkHandles` lets a retained consumer refresh its handle list only when chunks are added or removed. Use these APIs instead of holding internal data or scanning the simulation every frame.
 
+`EditVoxelBox` changes a whole box of voxels in global voxel coordinates with one call and one recorded operation.
+Use it instead of a loop of per-voxel calls when you fill or reshape a region. The edit applies the selected parts in a
+fixed order: classification, gas removal, temperature, gas injection. It skips voxels in chunks that do not exist.
+
+```csharp
+var result = simulation.EditVoxelBox(
+    new Int3(0, 0, 0),
+    new Int3(63, 15, 0),
+    new AtmosVoxelBoxEdit
+    {
+        ClearGas = true,
+        Gases = [new AtmosGasAmount(airId, 0.04f)],
+        GasTemperatureK = 293.15f
+    });
+```
+
 ## Using the viewer
 `Numos.Viewer` is the optional desktop presentation layer, built with raylib and ImGui. It depends on `Numos.API`, `Numos.SimDrawer`, and `Numos.Workbench`. Its package includes the icon and ImGui layout assets the application needs.
 

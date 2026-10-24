@@ -111,6 +111,26 @@ public sealed class WorkbenchRegionTests
     }
 
     [Test]
+    public void EditRegion_RecordsOneOperationForTheWholeRegion()
+    {
+        using var session = CreateSession();
+        session.AddChunk(new Int3(0, 0, 0), 1);
+        session.AddChunk(new Int3(1, 0, 0), 1);
+        int before = session.Timeline!.Operations.Count;
+
+        var result = session.EditRegion(
+            new VoxelBox(new Int3(0, 0, 0), new Int3(7, 1, 0)),
+            new RegionEdit(false, 1, true, 300f, [new RegionGas(0, 1f)], null));
+
+        var added = session.Timeline.Operations.Skip(before).ToArray();
+        Assert.Multiple(() =>
+        {
+            Assert.That(result.VoxelsEdited, Is.EqualTo(16));
+            Assert.That(added, Has.Length.EqualTo(1));
+        });
+    }
+
+    [Test]
     public void EditRegion_PartialClassificationKeepsOtherVoxels()
     {
         using var session = CreateSession();
