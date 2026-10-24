@@ -707,7 +707,9 @@ one-voxel arrow.
 
 The 3D viewport keeps one mesh per chunk on the GPU, so a scene of a million voxels stays interactive. Immediate-mode drawing would send every voxel face to the driver on every frame. A mesh holds only the faces that touch empty or filtered space. The viewer rebuilds a mesh when the chunk's visible voxels change. A tick that changes only colors rewrites the color buffer and keeps the positions. A new scene uploads over a few frames, so large meshes do not stall the window.
 
-Three overlays cost one draw call per voxel, so the viewer limits them. The 3D view outlines voxels only for a focused chunk or a scene of at most 20,000 voxels. Velocity arrows stop at 4,000 per view, and a larger scene shows every n-th voxel.
+Three overlays cost one draw call per voxel, so the viewer limits them. The 3D view outlines voxels only for a focused chunk or a scene of at most 20,000 voxels. Velocity arrows stop at 4,000 per view, and a larger scene shows every n-th voxel. The 2D view outlines cells only when a cell is at least 8 pixels wide.
+
+The 2D slice view shows one plane through every chunk. The Axis and Slice controls pick the plane by global voxel coordinate. The view draws the plane as one texture. Scroll to zoom and drag with the middle button to pan. "Fit Plane" shows the whole plane again. Focusing a chunk in the 3D view moves the plane into that chunk if needed and frames the chunk. A cell that no chunk covers stays empty. The plane can be at most 16,384 cells wide or high.
 
 On a project created with the Euler transport model, the Simulation panel shows a "Flow" readout of
 `AtmosSimulation.LastFlowDiagnostics`: substeps, simulated time, whether the substep cap engaged, the largest Courant
