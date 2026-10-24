@@ -79,7 +79,10 @@ public partial class SimulationViewer
 
     private void RequestCreateProject()
     {
-        _projectNameDraft = _world == null ? "Untitled Simulation" : $"{_projectName} Copy";
+        _projectNameDraft = _world == null
+            ? Locale.GetString("simulation-name-default")
+            : Locale.GetString("simulation-name-copy", ("name", _projectName));
+        
         _projectChunkWidthDraft = _chunkDimensions.X > 0
             ? _chunkDimensions.X
             : AtmosChunkConstants.DefaultWidth;
@@ -106,7 +109,7 @@ public partial class SimulationViewer
 
     private void DrawCreateProjectModal()
     {
-        const string popupId = "Create Simulation";
+        string popupId = Locale.GetString("popup-create-simulation");
         ImGuiExtensions.OpenPopupWhenRequested(popupId, ref _requestOpenCreateProject);
 
         var viewport = ImGui.GetMainViewport();
@@ -137,11 +140,11 @@ public partial class SimulationViewer
         ImGui.InputInt("Depth##project-chunk", ref _projectChunkDepthDraft);
 
         ImGui.Separator();
-        ImGui.Checkbox("Include Oxygen and Nitrogen", ref _includeDefaultGasesDraft);
+        ImGui.Checkbox(Locale.GetString("checkbox-default-gases"), ref _includeDefaultGasesDraft);
         ImGuiExtensions.QuestionTooltip(
             _includeDefaultGasesDraft
-                ? "The default gas definitions will be appended to the new project."
-                : "The project will start with a blank gas registry.");
+                ? Locale.GetString("tooltip-default-gases")
+                : Locale.GetString("tooltip-default-gases-disabled"));
 
         if (_world != null)
         {
@@ -149,8 +152,8 @@ public partial class SimulationViewer
             ImGui.TextColored(
                 ViewerTheme.Caution,
                 _replayBranches?.BranchCount > 1
-                    ? $"Creating this project will discard all {_replayBranches.BranchCount} in-memory branches."
-                    : "Creating this project will close the current in-memory project.");
+                    ? Locale.GetString("warning-discard-branches", ("count", _replayBranches.BranchCount))
+                    : Locale.GetString("info-discard-branches"));
         }
 
         if (!string.IsNullOrWhiteSpace(_createProjectError))
@@ -160,7 +163,7 @@ public partial class SimulationViewer
         }
 
         ImGui.Spacing();
-        if (ImGui.Button("Create", new Vector2(120, 0)))
+        if (ImGui.Button(Locale.GetString("button-create"), new Vector2(120, 0)))
         {
             try
             {
@@ -178,12 +181,12 @@ public partial class SimulationViewer
                 exception is ArgumentException or InvalidOperationException)
             {
                 _createProjectError = exception.Message;
-                WriteException("Could not create the simulation", exception);
+                WriteException(Locale.GetString("message-simulation-create-exception"), exception);
             }
         }
 
         ImGui.SameLine();
-        if (ImGui.Button("Cancel", new Vector2(120, 0)))
+        if (ImGui.Button(Locale.GetString("button-cancel"), new Vector2(120, 0)))
         {
             _createProjectModalOpen = false;
             ImGui.CloseCurrentPopup();
@@ -192,7 +195,7 @@ public partial class SimulationViewer
 
     private void DrawCloseProjectModal()
     {
-        const string popupId = "Close Simulation Project?";
+        string popupId = Locale.GetString("popup-close-simulation");
         ImGuiExtensions.OpenPopupWhenRequested(popupId, ref _requestOpenCloseProject);
 
         ImGui.SetNextWindowSize(new Vector2(430, 0), ImGuiCond.Appearing);
@@ -208,17 +211,17 @@ public partial class SimulationViewer
             $"Close '{_projectName}' and dispose its world and simulations? This project only exists in memory.{branchWarning}");
 
         ImGui.Spacing();
-        if (ImGui.Button("Close Project", new Vector2(140, 0)))
+        if (ImGui.Button(Locale.GetString("button-close-project"), new Vector2(140, 0)))
         {
-            string projectName = _projectName ?? "Untitled Simulation";
+            string projectName = _projectName ?? Locale.GetString("simulation-name-default");
             DisposeSimulationProject();
-            WriteMessage(ViewerLogLevel.Info, "Simulation", $"Closed project '{projectName}'.");
+            WriteMessage(ViewerLogLevel.Info, Locale.GetString("source-simulation"), Locale.GetString("message-simulation-closed-project", ("name", projectName)));
             _closeProjectModalOpen = false;
             ImGui.CloseCurrentPopup();
         }
 
         ImGui.SameLine();
-        if (ImGui.Button("Cancel", new Vector2(120, 0)))
+        if (ImGui.Button(Locale.GetString("button-cancel"), new Vector2(120, 0)))
         {
             _closeProjectModalOpen = false;
             ImGui.CloseCurrentPopup();
@@ -381,7 +384,7 @@ public partial class SimulationViewer
             ImGui.TableNextColumn();
             ImGuiExtensions.StatusField("CHUNKS", _simulation.ChunkCount.ToString());
             ImGui.TableNextColumn();
-            ImGuiExtensions.StatusField("GASES", _config.GasRegistry.Count.ToString());
+            ImGuiExtensions.StatusField(Locale.GetString("table-gases"), _config.GasRegistry.Count.ToString());
             ImGui.TableNextColumn();
             ImGuiExtensions.StatusField("CURRENT TICK", currentTick.ToString());
             ImGui.EndTable();
@@ -394,20 +397,20 @@ public partial class SimulationViewer
         ImGui.BeginDisabled(inspecting);
         if (_isPaused)
         {
-            if (ImGui.Button("Run", new Vector2(90, 0)))
+            if (ImGui.Button(Locale.GetString("button-run"), new Vector2(90, 0)))
             {
                 _isPaused = false;
                 _steppedToTick = null;
             }
         }
-        else if (ImGui.Button("Pause", new Vector2(90, 0)))
+        else if (ImGui.Button(Locale.GetString("button-pause"), new Vector2(90, 0)))
         {
             _isPaused = true;
         }
 
         ImGui.SameLine();
         ImGui.BeginDisabled(!_isPaused);
-        if (ImGui.Button("Step", new Vector2(90, 0)))
+        if (ImGui.Button(Locale.GetString("button-step"), new Vector2(90, 0)))
         {
             _world!.Tick();
             _steppedToTick = _world.TickCount;
@@ -422,7 +425,7 @@ public partial class SimulationViewer
         RenderSolutionDetails();
 
         ImGui.Separator();
-        if (ImGui.Button("Close Project", new Vector2(130, 0)))
+        if (ImGui.Button(Locale.GetString("button-close-project"), new Vector2(130, 0)))
             RequestCloseProject();
     }
 
@@ -469,7 +472,7 @@ public partial class SimulationViewer
 
     private void SetProjectMessage(string message, bool isError)
     {
-        WriteMessage(isError ? ViewerLogLevel.Error : ViewerLogLevel.Info, "Simulation", message);
+        WriteMessage(isError ? ViewerLogLevel.Error : ViewerLogLevel.Info, Locale.GetString("source-simulation"), message);
     }
 
     private static void DrawFeedback(FeedbackMessage? feedback)
