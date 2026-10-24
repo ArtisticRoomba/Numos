@@ -8,7 +8,7 @@ Start with `Numos.API`. It is the supported facade around the simulator. It give
 Numos has two independently versioned package families:
 
 - The CoreSim family contains `Numos.Maths`, `Numos.CoreSim`, `Numos.API`, and `Numos.API.Dangerous`.
-- The Viewer family contains `Numos.SimDrawer` and `Numos.Viewer`.
+- The Viewer family contains `Numos.SimDrawer`, `Numos.Workbench`, and `Numos.Viewer`.
 
 Most consumers add only `Numos.API`. NuGet restores the CoreSim and maths packages it needs.
 
@@ -575,7 +575,9 @@ var voxel = simulation.GetVoxelSnapshot(chunk, localVoxelIndex: 0);
 A renderer that knows which revision it presented can call `TryGetVoxelSnapshot` to skip copying gas data when the chunk has not changed. `TryGetChunkHandles` lets a retained consumer refresh its handle list only when chunks are added or removed. Use these APIs instead of holding internal data or scanning the simulation every frame.
 
 ## Using the viewer
-`Numos.Viewer` is the optional desktop presentation layer, built with raylib and ImGui. It depends on `Numos.API` and `Numos.SimDrawer`. Its package includes the icon and ImGui layout assets the application needs.
+`Numos.Viewer` is the optional desktop presentation layer, built with raylib and ImGui. It depends on `Numos.API`, `Numos.SimDrawer`, and `Numos.Workbench`. Its package includes the icon and ImGui layout assets the application needs.
+
+`Numos.Workbench` is the UI-free session layer under the viewer. `WorkbenchSession` owns one project (world, configuration, replay timeline, and branches). It runs every project, chunk, voxel, topology, solver, timeline, and replay-file operation, and it writes a server-style log that a front end can stream through `WorkbenchLog.EntryWritten`.
 
 ```shell
 dotnet add package Numos.Viewer --prerelease

@@ -16,7 +16,8 @@ PACKAGE_DEPENDENCIES = {
     "Numos.Serialization": ("Numos.API",),
     "Numos.Serialization.FileSystem": ("Numos.Serialization",),
     "Numos.SimDrawer": ("Numos.CoreSim",),
-    "Numos.Viewer": ("Numos.API", "Numos.SimDrawer", "Numos.Serialization.FileSystem"),
+    "Numos.Workbench": ("Numos.API", "Numos.SimDrawer", "Numos.Serialization.FileSystem"),
+    "Numos.Viewer": ("Numos.API", "Numos.SimDrawer", "Numos.Serialization.FileSystem", "Numos.Workbench"),
 }
 # Analyzer projects packed into a package under analyzers/dotnet/cs instead of being published on their own.
 PACKAGE_ANALYZERS = {
@@ -31,6 +32,7 @@ PACKAGE_VERSION_FILES = {
     "Numos.Serialization": Path("src/Numos.CoreSim/Version.props"),
     "Numos.Serialization.FileSystem": Path("src/Numos.CoreSim/Version.props"),
     "Numos.SimDrawer": Path("src/Numos.Viewer/Version.props"),
+    "Numos.Workbench": Path("src/Numos.Viewer/Version.props"),
     "Numos.Viewer": Path("src/Numos.Viewer/Version.props"),
 }
 PACKAGE_FAMILIES = {
@@ -45,6 +47,7 @@ PACKAGE_FAMILIES = {
     ),
     "viewer": (
         "Numos.SimDrawer",
+        "Numos.Workbench",
         "Numos.Viewer",
     ),
 }

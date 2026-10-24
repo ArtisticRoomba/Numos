@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <Import Project="..\Numos.Viewer\Version.props"/>
+
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <RootNamespace>Numos.Workbench</RootNamespace>
+        <AssemblyName>Numos.Workbench</AssemblyName>
+        <PackageId>Numos.Workbench</PackageId>
+        <Title>Numos Workbench</Title>
+        <Description>UI-free simulation session shared by the Numos viewer and headless runner.</Description>
+        <PackageTags>simulation;atmospherics;workbench;nativeaot</PackageTags>
+        <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <!-- PrivateAssets="none" lets the Numos.API source generator reach consumers of this package. -->
+        <ProjectReference Include="..\Numos.API\Numos.API.csproj" PrivateAssets="none"/>
+        <ProjectReference Include="..\Numos.SimDrawer\Numos.SimDrawer.csproj"/>
+        <ProjectReference Include="..\Numos.Serialization\Numos.Serialization.csproj" PrivateAssets="none"/>
+        <ProjectReference Include="..\Numos.Serialization.FileSystem\Numos.Serialization.FileSystem.csproj" PrivateAssets="none"/>
+    </ItemGroup>
+
+</Project>
