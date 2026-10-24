@@ -377,7 +377,7 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
             substeps++;
         }
 
-        // Each chunk writes only its own fields and its own counter here; the tick thread sums the counters.
+        // Each chunk writes only its own fields and its own counter here. The tick thread sums the counters.
         ParallelPhase.Run(_activeCount, new WriteBackAction(_active, config, settings));
         int negativeInternalEnergy = 0;
         int nonFiniteCells = counters.NonFiniteCells;
@@ -395,7 +395,7 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
         ParallelPhase.Run(_activeCount, new SettleMomentumAction(_active, config, settings));
 
         // Sleep decisions read neighbours' final pressures, so they wait for everything above. Scoring only reads
-        // fields, so it runs in parallel; the policy call can run an overridden Sleep, so it stays on this thread.
+        // fields, so it runs in parallel. The policy call can run an overridden Sleep, so it stays on this thread.
         ParallelPhase.Run(_activeCount, new ScoreSleepAction(_active, config));
         for (int index = 0; index < _activeCount; index++)
         {
@@ -564,10 +564,10 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
     /// </summary>
     /// <remarks>
     ///     The floor zeroes the momentum of every cell slower than <see cref="EulerFlowConfig.VelocityFloor" />
-    ///     and of every trace cell; damping then scales what is left by <c>max(0, 1 − α·Δt_tick)</c>. Both run
+    ///     and of every trace cell. Damping then scales what is left by <c>max(0, 1 − α·Δt_tick)</c>. Both run
     ///     before the write-back computes temperatures, so the kinetic energy they remove turns into heat instead
-    ///     of vanishing. Touches only this chunk's fields and workspace, so chunks run in parallel; the count of
-    ///     voxels written at 0 K lands in <see cref="EulerChunkWorkspace.NegativeInternalEnergyWritten" />.
+    ///     of vanishing. The method touches only this chunk's fields and workspace, so chunks run in parallel. The
+    ///     count of voxels written at 0 K lands in <see cref="EulerChunkWorkspace.NegativeInternalEnergyWritten" />.
     /// </remarks>
     private static void FloorMomentumAndWriteBack(
         EulerChunkWorkspace workspace, AtmosSolverConfigSnapshot config, EulerFlowConfig settings)
