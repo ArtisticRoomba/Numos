@@ -318,3 +318,10 @@ public readonly record struct AtmosWorldSolverStep(
     AtmosWorldSolverKind Kind,
     bool IsEnabled,
     string? NeighborSelectionKey);
+
+/// <summary>
+///     One stage of a requested solver layout.
+/// </summary>
+/// <param name="Name">A built-in stage name or the name of a registered custom stage.</param>
+/// <param name="Enabled">Whether the stage participates in subsequent ticks.</param>
+public readonly record struct AtmosWorldSolverLayoutEntry(string Name, bool Enabled);

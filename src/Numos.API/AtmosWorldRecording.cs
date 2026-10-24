@@ -43,7 +43,12 @@ public enum AtmosWorldOperationCode : ushort
     /// <summary>
     ///     Enables or disables one existing world solver stage.
     /// </summary>
-    SetSolverEnabled = 7
+    SetSolverEnabled = 7,
+
+    /// <summary>
+    ///     Replaces the order and enabled flags of the world solver stages.
+    /// </summary>
+    SetSolverLayout = 8
 }
 
 /// <summary>
@@ -182,6 +187,37 @@ public sealed record SetAtmosWorldSolverEnabledOperation(string Name, bool Enabl
 {
     /// <inheritdoc />
     public override AtmosWorldOperationCode Code => AtmosWorldOperationCode.SetSolverEnabled;
+
+    internal override void Apply(AtmosWorld world) => world.Apply(this);
+}
+
+/// <summary>
+///     Records a replacement of the world solver stage order and enabled flags.
+/// </summary>
+/// <remarks>
+///     The list names every stage. Built-in stages are recreated by name when replay needs them. Custom stages must
+///     already be registered, because Numos cannot recreate them.
+/// </remarks>
+public sealed record SetAtmosWorldSolverLayoutOperation : AtmosWorldOperation
+{
+    /// <summary>
+    ///     Creates the operation from an ordered stage list.
+    /// </summary>
+    /// <param name="stages">Every stage in execution order. Numos copies the list.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="stages" /> is <see langword="null" />.</exception>
+    public SetAtmosWorldSolverLayoutOperation(IEnumerable<AtmosWorldSolverLayoutEntry> stages)
+    {
+        ArgumentNullException.ThrowIfNull(stages);
+        Stages = new ReadOnlyCollection<AtmosWorldSolverLayoutEntry>(stages.ToArray());
+    }
+
+    /// <inheritdoc />
+    public override AtmosWorldOperationCode Code => AtmosWorldOperationCode.SetSolverLayout;
+
+    /// <summary>
+    ///     Gets the immutable ordered stage list.
+    /// </summary>
+    public IReadOnlyList<AtmosWorldSolverLayoutEntry> Stages { get; }
 
     internal override void Apply(AtmosWorld world) => world.Apply(this);
 }

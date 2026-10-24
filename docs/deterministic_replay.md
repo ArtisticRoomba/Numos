@@ -23,7 +23,7 @@ restores the checkpoint, reapplies each mutation at its original position, and r
 Recording, replay, timelines, archives, and positioned state hashes all belong to `AtmosWorld`. The world owns
 everything a replay must agree on: time, configuration, the solver pipeline, simulation membership, and explicit
 topology. `AtmosWorld.StartRecording()` installs one recorder across every registered simulation. Its single operation
-sequence includes grid mutations, shared configuration changes, solver enablement, simulation creation and destruction,
+sequence includes grid mutations, shared configuration changes, solver layout changes, simulation creation and destruction,
 and explicit link-set creation and removal:
 
 ```csharp
@@ -56,8 +56,8 @@ lacks. It recreates a missing simulation, with its recorded identifier, when tha
 Restore rejects a missing simulation that used a custom solver. Numos does not capture host delegates, so it cannot
 recreate that simulation.
 
-Custom world solver names, phases, enablement, and neighbor-selection keys are part of checkpoint compatibility and the
-world state hash. Register matching callbacks before you restore or replay a checkpoint that uses them.
+Custom world solver names, kinds, and neighbor-selection keys are part of checkpoint compatibility. The whole stage list
+is part of the world state hash. Register matching callbacks before you restore or replay a checkpoint that uses them.
 
 ### One grid is a one-simulation world
 
@@ -154,7 +154,7 @@ grid's data:
 |-----------------------|------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | Timeline              | World      | Captures the completed tick and last semantic operation sequence.                                                                                                          |
 | Applied configuration | World      | Captures normalized scalar settings, ordered gas definitions, and immutable solver configurations. Gas IDs keep their existing index meaning; restore does not remap them. |
-| Solver pipeline       | World      | Captures enable flags and records names, custom/built-in kinds, execution order, and neighbor-selection keys for compatibility validation.                                 |
+| Solver pipeline       | World      | Captures names, custom/built-in kinds, execution order, enable flags, and neighbor-selection keys. Restore installs the built-in layout and validates the custom stages.   |
 | Membership, topology  | World      | Captures simulation registry generations, link-set slots in every lifecycle state, and the applied topology version.                                                       |
 | Chunk storage         | Simulation | Captures position, dimensions, awake state, sleep timer, classifications, temperatures, per-voxel momentum (three components), valid gas channels, and per-voxel moles.    |
 | Continuation caches   | Simulation | Captures pressure, heat capacity, and the valid active-air prefix exactly. Disabled stages and sleeping chunks can leave meaningful cached state behind.                   |
@@ -236,23 +236,23 @@ Initialize such state before the starting checkpoint, then update it as determin
 ## Restore validates the receiving world
 
 `AtmosWorld.RestoreCheckpoint` replaces state only in a compatible, idle world. It validates the checkpoint format, the
-gas registry, and the solver pipeline's names, kinds, order, and neighbor-selection keys. For each simulation it
-validates the identity, the fixed chunk dimensions, and the unique chunk positions.
+gas registry, and the solver pipeline's custom stages. For each simulation it validates the identity, the fixed chunk
+dimensions, and the unique chunk positions.
 
 A custom solver name is a promise from the host that the receiving world has the same deterministic implementation.
 World services are part of that promise. Restore leaves whatever the host registered in place, so a service whose
 answers feed simulation state must behave the same in the receiving world.
 
-The solver check is also where a transport-model mismatch shows up. A world starts on the Euler stages. Restoring an
-archive recorded on the legacy pipeline into a fresh world therefore fails with an `ArgumentException`. The message lists
-the checkpoint's stage names next to the world's (`advection, explicit-gas-transport, boundary-flow, ...` against
-`euler-flow, explicit-gas-transport, ...`). The host fixes this. It constructs the world with
-`AtmosTransportModel.Legacy`, or calls `world.Solvers.ResetToDefaults(AtmosTransportModel.Legacy)` before the restore.
-The same applies in reverse for an Euler archive and a legacy world.
+The solver check compares custom stages only. The checkpoint's custom stages must have the same names, kinds, and
+neighbor-selection keys as the world's custom stages. Their order may differ. Numos can recreate every built-in stage by
+name, so restore installs the checkpoint's whole layout (order and enabled flags) and keeps the existing registrations
+of the custom stages. A legacy archive therefore restores into a world that starts on the Euler stages, and the world
+runs the legacy stages afterwards. A mismatch in custom stages fails with an `ArgumentException` that lists both stage
+lists.
 
 Numos validates everything before it changes anything. It then materializes each simulation's replacement chunk storage
 before making that storage observable. Restore keeps existing simulation objects and host integrations. It applies the
-checkpoint's configuration and solver enable flags once, clears transient solver state, and resets profiling data.
+checkpoint's configuration and solver layout once, clears transient solver state, and resets profiling data.
 
 Last, restore calls `OnRestored()` on every `IAtmosWorldSolver` in the pipeline, enabled or not. The hook therefore sees
 time, configuration, and topology already restored. An exception from that hook propagates with the restored state
@@ -293,8 +293,10 @@ world.Solvers.Register("life-support-v1", context =>
 });
 ```
 
-Numos rejects registering, removing, or resetting solver definitions while recording or replaying. Enable-state changes
-stay supported, because they are recorded against an existing stable solver identity.
+Numos rejects registering, removing, or resetting custom solver definitions while recording or replaying. Numos cannot
+recreate a custom solver from a name, so a replay could not reproduce the change. Changing the order and enabled flags
+of the stages stays supported, because every built-in stage is recreatable by name. See
+[Change the solver layout while recording](#change-the-solver-layout-while-recording).
 
 World services follow the same rule. A solver that resolved a different service halfway through a recording would not
 replay the same way. Numos therefore also rejects `world.Services.Register` and `Unregister` then.
@@ -438,8 +440,24 @@ The operation holds the corner voxels, a parts mask, the scalar values, and a ga
 the list, because the generator cannot encode a variable-length field. Numos validates the whole edit before it
 changes state, so an invalid edit throws and records nothing.
 
-Adding opcode 14 did not change the checkpoint or file format versions. A checkpoint holds the same fields as before.
-A reader that predates the opcode rejects a file that contains it.
+Numos adds opcodes without a checkpoint or file format bump, because a checkpoint holds the same fields as before. A
+reader that predates an opcode rejects a file that contains it.
+
+### Change the solver layout while recording
+
+A tool such as a pipeline editor needs to switch transport models or reorder stages in the middle of a session. Numos
+allows this because each built-in stage is a named piece of code that Numos can recreate. `AtmosWorldSolverPipeline.SetLayout`
+takes the full ordered list of `(name, enabled)` entries and records one `SetAtmosWorldSolverLayoutOperation` (opcode 8).
+A call that changes nothing records nothing.
+
+Custom stages are different. The checkpoint stores a custom stage's name but not its delegate, so a replay can only
+reuse a registration that already exists. `SetLayout` therefore requires every registered custom stage in the list and
+keeps its instance, topology, and injected dependencies. `Register`, `Unregister`, and `ResetToDefaults` stay rejected
+during recording.
+
+The same rule makes restore adopt the checkpoint's layout. Replay applies the operation through the non-recording core
+of the pipeline. A host that calls `SetLayout` from inside a solver tick is not recorded, because replay reproduces that
+work. A hand-written codec pair writes the entry list, because the generator cannot encode a variable-length field.
 
 ### Adding a new replay opcode
 
@@ -449,7 +467,7 @@ Two operation families follow the same recipe:
   `AtmosWorldSimulationOperation`
 - `AtmosWorldOperation`/`AtmosWorldOperationCode` for world-level mutations
 
-Configuration and solver enablement are world state, so they exist only as world operations. Simulation opcodes 1 and
+Configuration and the solver layout are world state, so they exist only as world operations. Simulation opcodes 1 and
 11 used to carry them and stay unassigned.
 
 1. Add the enum member to `AtmosOperationCode` or `AtmosWorldOperationCode`.
@@ -544,5 +562,5 @@ still replays in memory, but `EnsurePortable` rejects it. Readers reject unknown
 and configuration keys. Future readers
 can skip optional length-prefixed metadata. `NumosReplayReadOptions` configures the payload limits.
 
-Numos does not yet provide compression, network transport, replay of dynamic solver-definition changes, restoration of
+Numos does not yet provide compression, network transport, replay of custom solver registration changes, restoration of
 detached mixture identity, or certified bitwise compatibility across runtime and CPU architectures.

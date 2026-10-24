@@ -758,6 +758,8 @@ public sealed partial class AtmosWorld : IDisposable
     /// <param name="checkpoint">The detached world continuation state to restore.</param>
     /// <remarks>
     ///     Matching registrations are restored in place, so host references and custom solver delegates stay attached.
+    ///     The world adopts the checkpoint's solver layout, so a legacy checkpoint restores into an Euler world.
+    ///     The checkpoint's custom stages must be exactly the world's custom stages, in any order.
     ///     Registrations absent from the checkpoint are disposed. Missing registrations are recreated with their saved
     ///     identifiers when they use only built-in solvers. Numos cannot recreate a custom solver, because the
     ///     checkpoint does not store its host delegate. Restore resets the elapsed-time accumulator and rebuilds sparse
@@ -793,8 +795,9 @@ public sealed partial class AtmosWorld : IDisposable
 
     private void RestoreCheckpointCore(AtmosWorldCheckpoint checkpoint)
     {
-        foreach (var solver in checkpoint.Solvers)
-            Solvers.SetEnabled(solver.Name, solver.Enabled);
+        Solvers.SetLayoutCore(checkpoint.Solvers
+            .Select(static solver => new AtmosWorldSolverLayoutEntry(solver.Name, solver.Enabled))
+            .ToArray());
 
         foreach (var simulation in _orderedSimulations.ToArray())
         {
@@ -1240,21 +1243,37 @@ public sealed partial class AtmosWorld : IDisposable
                 step.NeighborSelectionKey))
             .ToArray();
 
-        if (currentWorldSolvers.Length != checkpoint.Solvers.Count ||
-            currentWorldSolvers.Where((solver, index) =>
-                solver.Name != checkpoint.Solvers[index].Name ||
-                solver.Kind != checkpoint.Solvers[index].Kind ||
-                solver.NeighborSelectionKey != checkpoint.Solvers[index].NeighborSelectionKey).Any())
+        // Built-in stages are recreated by name, so only the custom stages have to match. Their order may differ.
+        var currentCustom = currentWorldSolvers
+            .Where(static solver => solver.Kind == AtmosWorldSolverKind.Custom)
+            .Select(static solver => (solver.Name, solver.NeighborSelectionKey))
+            .Order()
+            .ToArray();
+        var checkpointCustom = checkpoint.Solvers
+            .Where(static solver => solver.Kind == AtmosWorldSolverKind.Custom)
+            .Select(static solver => (solver.Name, solver.NeighborSelectionKey))
+            .Order()
+            .ToArray();
+        if (!currentCustom.SequenceEqual(checkpointCustom))
         {
-            // Spell out both stage lists: the common cause is an archive recorded under the other transport model,
-            // and the fix (ResetToDefaults with that model) is only obvious once the names are side by side.
             throw new ArgumentException(
-                "The world checkpoint requires the same world solver names, kinds, order, and neighbor selections. " +
+                "The world checkpoint requires the same custom world solver names and neighbor selections. " +
                 $"Checkpoint stages: [{string.Join(", ", checkpoint.Solvers.Select(static solver => solver.Name))}]; " +
-                $"world stages: [{string.Join(", ", currentWorldSolvers.Select(static solver => solver.Name))}]. " +
-                "A checkpoint recorded under the other transport model needs " +
-                "Solvers.ResetToDefaults(AtmosTransportModel) with that model before restoring.",
+                $"world stages: [{string.Join(", ", currentWorldSolvers.Select(static solver => solver.Name))}].",
                 nameof(checkpoint));
+        }
+
+        var seenSolvers = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var solver in checkpoint.Solvers)
+        {
+            if (!seenSolvers.Add(solver.Name) ||
+                solver.Kind == AtmosWorldSolverKind.BuiltIn &&
+                !AtmosWorldSolverPipeline.BuiltInStageNames.Contains(solver.Name))
+            {
+                throw new ArgumentException(
+                    $"The world checkpoint lists world solver '{solver.Name}' twice or as an unknown built-in stage.",
+                    nameof(checkpoint));
+            }
         }
 
         var validCells = new Dictionary<AtmosSimulationId, Dictionary<Int3, int>>();

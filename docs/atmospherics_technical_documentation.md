@@ -397,9 +397,9 @@ face, and CFL substeps (§5). Faces between chunks are ordinary faces of the swe
 stage. `AtmosSimulation.LastFlowDiagnostics` reports what each tick cost (§5.7).
 
 `AtmosTransportModel` names the two stage sets. The model is not stored on its own: it is implied by which built-in
-stages the pipeline holds, and the world checkpoint records and validates that list, so a restored world runs the
-model it was captured with. `new AtmosWorld(config, AtmosTransportModel.Legacy)` or
-`world.Solvers.ResetToDefaults(AtmosTransportModel.Legacy)` installs the pressure-relaxation pipeline that preceded
+stages the pipeline holds. The world records that list and a restore adopts it, so a restored world runs the model it
+was captured with. `new AtmosWorld(config, AtmosTransportModel.Legacy)` or
+`world.Solvers.ResetToDefaults(AtmosTransportModel.Legacy)` (or `SetLayout`, which also works while recording) installs the pressure-relaxation pipeline that preceded
 `euler-flow`. It has seven stages: `advection` in place of `euler-flow`, `boundary-flow` added after
 `explicit-gas-transport`, and the last four unchanged.
 

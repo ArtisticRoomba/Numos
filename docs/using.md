@@ -241,7 +241,7 @@ diagnostics are a measurement, not state: they read all zeros before the first t
 a restore.
 
 The older pressure-relaxation stages (`advection` and `boundary-flow`) are `AtmosTransportModel.Legacy`. Pick the model
-when the world or simulation is constructed, or reset the pipeline before anything is recorded.
+when the world or simulation is constructed, or switch it later with `SetLayout`, which also works during recording.
 `ResetToDefaults()` with no argument installs the Euler stages:
 
 ```csharp
@@ -249,10 +249,21 @@ using var world = new AtmosWorld(config, AtmosTransportModel.Legacy);
 using var standalone = new AtmosSimulation(config, 16, 16, 16, AtmosTransportModel.Legacy);
 // or, on an existing world that is not recording:
 world.Solvers.ResetToDefaults(AtmosTransportModel.Legacy);
+// or, on any world, recorded as one operation:
+world.Solvers.SetLayout(
+    AtmosWorldSolverPipeline.GetDefaultLayout(AtmosTransportModel.Legacy)
+        .Select(static name => new AtmosWorldSolverLayoutEntry(name, true))
+        .ToArray());
 ```
 
-The stage list is part of the world checkpoint, so the model must match on restore. `RestoreCheckpoint` names both
-stage lists when it refuses a mismatch. The
+`SetLayout` takes every stage in order with its enabled flag. A built-in name that the world does not hold is created, and
+a built-in stage that the list omits is dropped. Every registered custom stage must appear. The stage list is part of
+the world checkpoint, and `RestoreCheckpoint` installs the checkpoint's layout, so a legacy archive restores into a world
+that started on Euler. Only the custom stages have to match.
+
+Only `euler-flow` reads and writes momentum. The legacy stages leave the momentum arrays untouched and do not move
+momentum with the gas. After a switch to legacy, the stored momentum stays in its voxels, and the reported velocity is
+that momentum divided by the mass that remains. A switch back to Euler resumes from the same arrays. The
 [technical documentation](atmospherics_technical_documentation.md#5-moving-gas-with-the-euler-model) covers how the
 two models differ.
 

@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using JetBrains.Annotations;
 using Numos.CoreSim;
 
@@ -9,9 +10,11 @@ namespace Numos.API;
 /// <remarks>
 ///     The enabled stage list is captured before each tick. Pipeline edits made by a running stage take effect on the
 ///     next tick. Solver delegates and <see cref="IAtmosWorldSolver" /> instances remain caller-owned.
-///     Numos checkpoints stage names, kinds, order, and neighbor-selection keys. They must match on restore, so Numos
-///     rejects adding, removing, or resetting stages while the world is recording or replaying.
-///     Enabling and disabling stages is allowed then, and Numos records it.
+///     Numos can recreate a built-in stage from its name, so the order and enabled state of the built-in stages are
+///     recorded world state. <see cref="SetLayout" /> and <see cref="SetEnabled" /> work during recording, and a
+///     checkpoint restore adopts the checkpoint's layout. Numos cannot recreate a custom stage, because it has no
+///     access to the host delegate. Registering, removing, or resetting stages is therefore rejected while the world
+///     is recording or replaying, and a restore requires the same custom stages.
 /// </remarks>
 public sealed class AtmosWorldSolverPipeline
 {
@@ -23,11 +26,188 @@ public sealed class AtmosWorldSolverPipeline
     // clears it, so enabling a solver that sat out an epoch change gets it injected before it runs.
     private int _injectedEpoch = -1;
 
+    private static readonly Dictionary<string, Action<AtmosSolverTickScope>> BuiltInFactories =
+        new(StringComparer.Ordinal)
+        {
+            [AtmosBuiltInSolvers.EulerFlow] = static scope => scope.World.SolveEulerFlowStage(scope),
+            [AtmosBuiltInSolvers.Advection] = static scope => scope.World.SolveAdvectionStage(scope),
+            [AtmosBuiltInSolvers.ExplicitGasTransport] = static scope => scope.World.SolveExplicitGasTransportStage(scope),
+            [AtmosBuiltInSolvers.BoundaryFlow] = static scope => scope.World.SolveBoundaryFlowStage(scope),
+            [AtmosBuiltInSolvers.Thermodynamics] = static scope => scope.World.SolveThermodynamicsStage(scope),
+            [AtmosBuiltInSolvers.ExplicitThermalTransport] = static scope => scope.World.SolveExplicitThermalTransportStage(scope),
+            [AtmosBuiltInSolvers.ThermalBoundary] = static scope => scope.World.SolveThermalBoundaryStage(scope),
+            [AtmosBuiltInSolvers.GasReactions] = static scope => scope.World.SolveGasReactionsStage(scope)
+        };
+
+    private static readonly ReadOnlyCollection<string> BuiltInNames = Array.AsReadOnly(
+    [
+        AtmosBuiltInSolvers.EulerFlow,
+        AtmosBuiltInSolvers.Advection,
+        AtmosBuiltInSolvers.ExplicitGasTransport,
+        AtmosBuiltInSolvers.BoundaryFlow,
+        AtmosBuiltInSolvers.Thermodynamics,
+        AtmosBuiltInSolvers.ExplicitThermalTransport,
+        AtmosBuiltInSolvers.ThermalBoundary,
+        AtmosBuiltInSolvers.GasReactions
+    ]);
+
+    private static readonly ReadOnlyCollection<string> EulerLayout = Array.AsReadOnly(
+    [
+        AtmosBuiltInSolvers.EulerFlow,
+        AtmosBuiltInSolvers.ExplicitGasTransport,
+        AtmosBuiltInSolvers.Thermodynamics,
+        AtmosBuiltInSolvers.ExplicitThermalTransport,
+        AtmosBuiltInSolvers.ThermalBoundary,
+        AtmosBuiltInSolvers.GasReactions
+    ]);
+
+    private static readonly ReadOnlyCollection<string> LegacyLayout = Array.AsReadOnly(
+    [
+        AtmosBuiltInSolvers.Advection,
+        AtmosBuiltInSolvers.ExplicitGasTransport,
+        AtmosBuiltInSolvers.BoundaryFlow,
+        AtmosBuiltInSolvers.Thermodynamics,
+        AtmosBuiltInSolvers.ExplicitThermalTransport,
+        AtmosBuiltInSolvers.ThermalBoundary,
+        AtmosBuiltInSolvers.GasReactions
+    ]);
+
     internal AtmosWorldSolverPipeline(AtmosWorld world, AtmosTransportModel model)
     {
         _world = world;
         AddDefaults(model);
         PublishSteps();
+    }
+
+    /// <summary>
+    ///     Gets the name of every built-in stage, in canonical order.
+    /// </summary>
+    /// <remarks>
+    ///     The list covers both transport models, so it includes <c>euler-flow</c> and the legacy-only
+    ///     <c>advection</c> and <c>boundary-flow</c> stages. Numos can recreate any of these by name, which is why
+    ///     <see cref="SetLayout" /> accepts them without a registration.
+    /// </remarks>
+    [PublicAPI]
+    public static IReadOnlyList<string> BuiltInStageNames => BuiltInNames;
+
+    /// <summary>
+    ///     Returns the stage names that <see cref="ResetToDefaults(AtmosTransportModel)" /> installs for a model.
+    /// </summary>
+    /// <param name="model">Which built-in stages carry gas between voxels.</param>
+    /// <returns>The built-in stage names in execution order. Every stage is enabled by default.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="model" /> is not a defined model.</exception>
+    /// <example>
+    ///     <code>
+    ///     var layout = AtmosWorldSolverPipeline.GetDefaultLayout(AtmosTransportModel.Legacy)
+    ///         .Select(static name => new AtmosWorldSolverLayoutEntry(name, true))
+    ///         .ToArray();
+    ///     world.Solvers.SetLayout(layout);
+    ///     </code>
+    /// </example>
+    [PublicAPI]
+    public static IReadOnlyList<string> GetDefaultLayout(AtmosTransportModel model)
+    {
+        return model switch
+        {
+            AtmosTransportModel.Euler => EulerLayout,
+            AtmosTransportModel.Legacy => LegacyLayout,
+            _ => throw new ArgumentOutOfRangeException(nameof(model), model, "Unknown transport model.")
+        };
+    }
+
+    /// <summary>
+    ///     Returns a layout that runs the given transport model, leaving every other stage where it is.
+    /// </summary>
+    /// <param name="layout">The layout to convert, typically from <see cref="Steps" />.</param>
+    /// <param name="model">The transport model the result runs.</param>
+    /// <returns>A new layout. Stages outside the transport set keep their order and enabled flags.</returns>
+    /// <remarks>
+    ///     <para>
+    ///         Converting to <see cref="AtmosTransportModel.Legacy" /> replaces <c>euler-flow</c> with
+    ///         <c>advection</c> at the same position. It adds <c>boundary-flow</c> after
+    ///         <c>explicit-gas-transport</c>, or after <c>advection</c> when that stage is absent. The new stages
+    ///         inherit the enabled flag of the stage they replace.
+    ///     </para>
+    ///     <para>
+    ///         Converting to <see cref="AtmosTransportModel.Euler" /> replaces <c>advection</c> and
+    ///         <c>boundary-flow</c> with one <c>euler-flow</c> at the position of the first of them. A transport stage
+    ///         that the target model already has stays as it is. A layout with no transport stage at all gains the
+    ///         target model's stages at the front.
+    ///     </para>
+    ///     <para>
+    ///         This method only builds a list. Pass the result to <see cref="SetLayout" /> to apply it.
+    ///     </para>
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="layout" /> is <see langword="null" />.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="model" /> is not a defined model.</exception>
+    [PublicAPI]
+    public static IReadOnlyList<AtmosWorldSolverLayoutEntry> ConvertTransportModel(
+        IReadOnlyList<AtmosWorldSolverLayoutEntry> layout,
+        AtmosTransportModel model)
+    {
+        ArgumentNullException.ThrowIfNull(layout);
+        if (!Enum.IsDefined(model))
+            throw new ArgumentOutOfRangeException(nameof(model), model, "Unknown transport model.");
+
+        var result = new List<AtmosWorldSolverLayoutEntry>(layout.Count + 2);
+        bool hasEuler = layout.Any(static e => e.Name == AtmosBuiltInSolvers.EulerFlow);
+        bool hasAdvection = layout.Any(static e => e.Name == AtmosBuiltInSolvers.Advection);
+        bool hasBoundary = layout.Any(static e => e.Name == AtmosBuiltInSolvers.BoundaryFlow);
+        bool anchorEnabled = true;
+        if (model == AtmosTransportModel.Legacy)
+        {
+            bool placed = hasAdvection;
+            foreach (var entry in layout)
+            {
+                if (entry.Name != AtmosBuiltInSolvers.EulerFlow)
+                {
+                    result.Add(entry);
+                    continue;
+                }
+
+                anchorEnabled = entry.Enabled;
+                if (!placed)
+                {
+                    result.Add(new AtmosWorldSolverLayoutEntry(AtmosBuiltInSolvers.Advection, entry.Enabled));
+                    placed = true;
+                }
+            }
+
+            if (!placed)
+                result.Insert(0, new AtmosWorldSolverLayoutEntry(AtmosBuiltInSolvers.Advection, true));
+
+            if (!hasBoundary)
+            {
+                int after = result.FindIndex(static e => e.Name == AtmosBuiltInSolvers.ExplicitGasTransport);
+                if (after < 0)
+                    after = result.FindIndex(static e => e.Name == AtmosBuiltInSolvers.Advection);
+
+                result.Insert(after + 1, new AtmosWorldSolverLayoutEntry(AtmosBuiltInSolvers.BoundaryFlow, anchorEnabled));
+            }
+
+            return result;
+        }
+
+        bool emitted = hasEuler;
+        foreach (var entry in layout)
+        {
+            if (entry.Name is not (AtmosBuiltInSolvers.Advection or AtmosBuiltInSolvers.BoundaryFlow))
+            {
+                result.Add(entry);
+                continue;
+            }
+
+            if (!emitted)
+            {
+                result.Add(new AtmosWorldSolverLayoutEntry(AtmosBuiltInSolvers.EulerFlow, entry.Enabled));
+                emitted = true;
+            }
+        }
+
+        if (!emitted)
+            result.Insert(0, new AtmosWorldSolverLayoutEntry(AtmosBuiltInSolvers.EulerFlow, true));
+
+        return result;
     }
 
     /// <summary>
@@ -84,7 +264,9 @@ public sealed class AtmosWorldSolverPipeline
     ///     <paramref name="after" /> are given.
     /// </exception>
     /// <exception cref="KeyNotFoundException">The <paramref name="before" /> or <paramref name="after" /> stage is not registered.</exception>
-    /// <exception cref="InvalidOperationException">The world is recording or replaying.</exception>
+    /// <exception cref="InvalidOperationException">
+    ///     The world is recording or replaying, because Numos cannot recreate a custom stage on replay.
+    /// </exception>
     /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
     /// <example>
     ///     <code>
@@ -149,7 +331,7 @@ public sealed class AtmosWorldSolverPipeline
     /// <returns><see langword="true" /> when a stage was removed.</returns>
     /// <remarks>
     ///     Removing a built-in stage drops that physics from every subsequent tick. <see cref="ResetToDefaults()" />
-    ///     brings it back.
+    ///     or <see cref="SetLayout" /> brings it back.
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="name" /> is <see langword="null" />.</exception>
     /// <exception cref="ArgumentException"><paramref name="name" /> is empty or whitespace.</exception>
@@ -209,6 +391,133 @@ public sealed class AtmosWorldSolverPipeline
     }
 
     /// <summary>
+    ///     Replaces the order and enabled flags of the stage list in one step.
+    /// </summary>
+    /// <param name="stages">Every stage in the new execution order, with its enabled flag.</param>
+    /// <returns><see langword="true" /> when the layout changed, <see langword="false" /> when it already matched.</returns>
+    /// <remarks>
+    ///     <para>
+    ///         Each name is a built-in stage name (see <see cref="BuiltInStageNames" />) or a registered custom stage.
+    ///         Numos creates a built-in stage that is not registered and drops a built-in stage that is not listed.
+    ///         Every registered custom stage must appear, because <see cref="Unregister" /> removes custom stages.
+    ///         Custom stages keep their solver instance, topology, and injected dependencies.
+    ///     </para>
+    ///     <para>
+    ///         Unlike registration, this works during recording. A change records one operation, and a call that
+    ///         changes nothing records nothing. A call from inside a solver tick is not recorded, because replay
+    ///         reproduces it. The call is rejected while a replay applies history.
+    ///     </para>
+    ///     <para>
+    ///         A rejected layout changes nothing.
+    ///     </para>
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="stages" /> is <see langword="null" />.</exception>
+    /// <exception cref="ArgumentException">
+    ///     A name is blank or listed twice, a name is neither a built-in stage nor a registered custom stage, or a
+    ///     registered custom stage is missing.
+    /// </exception>
+    /// <exception cref="InvalidOperationException">The world is replaying history.</exception>
+    /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
+    /// <example>
+    ///     <code>
+    ///     world.Solvers.SetLayout(
+    ///     [
+    ///         new(AtmosBuiltInSolvers.Advection, true),
+    ///         new(AtmosBuiltInSolvers.ExplicitGasTransport, true),
+    ///         new(AtmosBuiltInSolvers.BoundaryFlow, true),
+    ///         new(AtmosBuiltInSolvers.Thermodynamics, true),
+    ///         new(AtmosBuiltInSolvers.ExplicitThermalTransport, true),
+    ///         new(AtmosBuiltInSolvers.ThermalBoundary, true),
+    ///         new(AtmosBuiltInSolvers.GasReactions, false)
+    ///     ]);
+    ///     </code>
+    /// </example>
+    [PublicAPI]
+    public bool SetLayout(IReadOnlyList<AtmosWorldSolverLayoutEntry> stages)
+    {
+        ArgumentNullException.ThrowIfNull(stages);
+        AtmosWorldSolverLayoutEntry[] copy = stages.ToArray();
+        lock (_world.Gate)
+        {
+            _world.ThrowIfDisposedForPipeline();
+            _world.EnsureCanChangeSolverLayout();
+            if (!SetLayoutCore(copy))
+                return false;
+
+            _world.RecordWorldSolverLayout(copy);
+            return true;
+        }
+    }
+
+    /// <summary>
+    ///     Installs a layout without recording it or checking the recording state.
+    /// </summary>
+    /// <remarks>
+    ///     Replay and checkpoint restore call this. The caller holds <see cref="AtmosWorld.Gate" />. Validation
+    ///     finishes before any change, so a rejected layout leaves the pipeline as it was.
+    /// </remarks>
+    /// <returns><see langword="true" /> when the order or an enabled flag changed.</returns>
+    internal bool SetLayoutCore(IReadOnlyList<AtmosWorldSolverLayoutEntry> stages)
+    {
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var next = new WorldSolverRegistration[stages.Count];
+        for (int index = 0; index < stages.Count; index++)
+        {
+            string name = stages[index].Name;
+            if (string.IsNullOrWhiteSpace(name))
+                throw new ArgumentException($"Layout entry {index} has a blank stage name.", nameof(stages));
+
+            if (!seen.Add(name))
+                throw new ArgumentException($"The layout lists stage '{name}' more than once.", nameof(stages));
+
+            int existing = IndexOf(name);
+            if (existing >= 0)
+            {
+                next[index] = _steps[existing];
+            }
+            else if (BuiltInFactories.TryGetValue(name, out var factory))
+            {
+                next[index] = WorldSolverRegistration.CreateBuiltIn(name, factory);
+            }
+            else
+            {
+                throw new ArgumentException(
+                    $"The layout names '{name}', which is neither a built-in stage nor a registered custom stage.",
+                    nameof(stages));
+            }
+        }
+
+        foreach (var step in _steps)
+        {
+            if (step.Kind == AtmosWorldSolverKind.Custom && !seen.Contains(step.Name))
+            {
+                throw new ArgumentException(
+                    $"The layout omits custom stage '{step.Name}'. Call Unregister to remove a custom stage.",
+                    nameof(stages));
+            }
+        }
+
+        bool changed = next.Length != _steps.Count;
+        for (int index = 0; index < next.Length && !changed; index++)
+        {
+            changed = !ReferenceEquals(next[index], _steps[index]) ||
+                      next[index].IsEnabled != stages[index].Enabled;
+        }
+
+        if (!changed)
+            return false;
+
+        for (int index = 0; index < next.Length; index++)
+            next[index].IsEnabled = stages[index].Enabled;
+
+        _steps.Clear();
+        _steps.AddRange(next);
+        _world.InvalidateSolverDependencies();
+        PublishSteps();
+        return true;
+    }
+
+    /// <summary>
     ///     Restores the built-in stages in their default order and enabled state, discarding any custom
     ///     registrations.
     /// </summary>
@@ -239,10 +548,9 @@ public sealed class AtmosWorldSolverPipeline
     ///         <c>boundary-flow</c> after it.
     ///     </para>
     ///     <para>
-    ///         The stage list is checkpointed, so a world restored from a checkpoint must hold the same model it
-    ///         was captured with; switch models before capturing or restoring, not while replaying. Restoring a
-    ///         legacy archive into a new world means calling this with <see cref="AtmosTransportModel.Legacy" />
-    ///         first.
+    ///         A restore adopts the checkpoint's stage layout, so restoring a legacy archive needs no call to this
+    ///         method. To change the model during recording, call <see cref="SetLayout" /> with
+    ///         <see cref="GetDefaultLayout" /> instead. This method discards custom stages, so it is rejected then.
     ///     </para>
     /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="model" /> is not a defined model.</exception>
@@ -426,53 +734,8 @@ public sealed class AtmosWorldSolverPipeline
 
     private void AddDefaults(AtmosTransportModel model)
     {
-        if (model == AtmosTransportModel.Euler)
-        {
-            _steps.Add(
-                WorldSolverRegistration.CreateBuiltIn(
-                    AtmosBuiltInSolvers.EulerFlow,
-                    static scope => scope.World.SolveEulerFlowStage(scope)));
-        }
-        else
-        {
-            _steps.Add(
-                WorldSolverRegistration.CreateBuiltIn(
-                    AtmosBuiltInSolvers.Advection,
-                    static scope => scope.World.SolveAdvectionStage(scope)));
-        }
-
-        _steps.Add(
-            WorldSolverRegistration.CreateBuiltIn(
-                AtmosBuiltInSolvers.ExplicitGasTransport,
-                static scope => scope.World.SolveExplicitGasTransportStage(scope)));
-
-        if (model == AtmosTransportModel.Legacy)
-        {
-            _steps.Add(
-                WorldSolverRegistration.CreateBuiltIn(
-                    AtmosBuiltInSolvers.BoundaryFlow,
-                    static scope => scope.World.SolveBoundaryFlowStage(scope)));
-        }
-
-        _steps.Add(
-            WorldSolverRegistration.CreateBuiltIn(
-                AtmosBuiltInSolvers.Thermodynamics,
-                static scope => scope.World.SolveThermodynamicsStage(scope)));
-
-        _steps.Add(
-            WorldSolverRegistration.CreateBuiltIn(
-                AtmosBuiltInSolvers.ExplicitThermalTransport,
-                static scope => scope.World.SolveExplicitThermalTransportStage(scope)));
-
-        _steps.Add(
-            WorldSolverRegistration.CreateBuiltIn(
-                AtmosBuiltInSolvers.ThermalBoundary,
-                static scope => scope.World.SolveThermalBoundaryStage(scope)));
-
-        _steps.Add(
-            WorldSolverRegistration.CreateBuiltIn(
-                AtmosBuiltInSolvers.GasReactions,
-                static scope => scope.World.SolveGasReactionsStage(scope)));
+        foreach (string name in GetDefaultLayout(model))
+            _steps.Add(WorldSolverRegistration.CreateBuiltIn(name, BuiltInFactories[name]));
     }
 
     private void PublishSteps()

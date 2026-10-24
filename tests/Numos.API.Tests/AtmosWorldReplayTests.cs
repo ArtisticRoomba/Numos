@@ -138,7 +138,7 @@ public sealed class AtmosWorldReplayTests
     }
 
     [Test]
-    public void Restore_RejectsTheOtherTransportModelUntilThePipelineIsReset()
+    public void Restore_AdoptsTheCheckpointsTransportModel()
     {
         using var legacy = new AtmosWorld(CreateConfig(), AtmosTransportModel.Legacy);
         var recorded = legacy.CreateSimulation(2, 1, 1);
@@ -149,20 +149,16 @@ public sealed class AtmosWorldReplayTests
 
         using var euler = new AtmosWorld(CreateConfig());
         euler.CreateSimulation(2, 1, 1);
-
-        var rejection = Assert.Throws<ArgumentException>(() => euler.RestoreCheckpoint(checkpoint));
-        Assert.Multiple(() =>
-        {
-            Assert.That(rejection!.Message, Does.Contain(AtmosBuiltInSolvers.Advection));
-            Assert.That(rejection.Message, Does.Contain(AtmosBuiltInSolvers.BoundaryFlow));
-            Assert.That(rejection.Message, Does.Contain(AtmosBuiltInSolvers.EulerFlow));
-            Assert.That(rejection.Message, Does.Contain("ResetToDefaults"));
-        });
-
-        euler.Solvers.ResetToDefaults(AtmosTransportModel.Legacy);
         euler.RestoreCheckpoint(checkpoint);
 
-        Assert.That(euler.ComputeStateHash(), Is.EqualTo(legacy.ComputeStateHash()));
+        Assert.Multiple(() =>
+        {
+            Assert.That(
+                euler.Solvers.Steps.Select(static step => step.Name),
+                Is.EqualTo(AtmosWorldSolverPipeline.GetDefaultLayout(AtmosTransportModel.Legacy)));
+
+            Assert.That(euler.ComputeStateHash(), Is.EqualTo(legacy.ComputeStateHash()));
+        });
     }
 
     [Test]

@@ -95,6 +95,20 @@ public sealed partial class AtmosWorld
         }
     }
 
+    internal void EnsureCanChangeSolverLayout()
+    {
+        // History replay applies layouts through the non-recording core. A solver tick may still change the layout,
+        // because replay reproduces that work itself.
+        if (_isReplayingWorld && !_isTickExecuting)
+            throw new InvalidOperationException("The solver layout cannot change while a replay applies history.");
+    }
+
+    internal void RecordWorldSolverLayout(IReadOnlyList<AtmosWorldSolverLayoutEntry> stages)
+    {
+        if (!_isTickExecuting)
+            RecordWorldOperation(new SetAtmosWorldSolverLayoutOperation(stages));
+    }
+
     internal void RecordWorldSolverEnablement(string name, bool enabled)
     {
         // A solver toggling the pipeline from inside a tick is derived work that replay reproduces on its own.
@@ -106,9 +120,9 @@ public sealed partial class AtmosWorld
     ///     Starts a fresh interval of globally ordered world operation recording.
     /// </summary>
     /// <remarks>
-    ///     Recording covers simulation creation and destruction, shared configuration, solver enablement, topology,
-    ///     and supported grid mutations on every registered simulation. Solver registration cannot change until
-    ///     recording stops.
+    ///     Recording covers simulation creation and destruction, shared configuration, the built-in solver layout,
+    ///     topology, and supported grid mutations on every registered simulation. Custom solver registration cannot
+    ///     change until recording stops.
     /// </remarks>
     /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
     /// <exception cref="InvalidOperationException">
@@ -468,6 +482,11 @@ public sealed partial class AtmosWorld
     internal void Apply(DestroyAtmosLinkSetOperation destroy)
     {
         DestroyLinksCore(destroy.Handle);
+    }
+
+    internal void Apply(SetAtmosWorldSolverLayoutOperation layout)
+    {
+        Solvers.SetLayoutCore(layout.Stages);
     }
 
     internal void Apply(SetAtmosWorldSolverEnabledOperation solver)

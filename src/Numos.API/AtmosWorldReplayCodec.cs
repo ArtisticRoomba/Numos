@@ -174,6 +174,36 @@ internal static partial class AtmosWorldReplayCodec
         return new CreateAtmosLinkSetOperation(handle, kind, links);
     }
 
+    private static void WriteSetAtmosWorldSolverLayoutOperation(
+        BinaryWriter writer,
+        SetAtmosWorldSolverLayoutOperation operation)
+    {
+        writer.Write(operation.Stages.Count);
+        foreach (var stage in operation.Stages)
+        {
+            AtmosReplayCodec.WriteString(writer, stage.Name);
+            writer.Write(stage.Enabled);
+        }
+    }
+
+    private static SetAtmosWorldSolverLayoutOperation ReadSetAtmosWorldSolverLayoutOperation(
+        BinaryReader reader,
+        int maxStringBytes)
+    {
+        int count = AtmosReplayCodec.ReadCount(reader, 1024, "world solver");
+        var stages = new AtmosWorldSolverLayoutEntry[count];
+        for (int index = 0; index < count; index++)
+        {
+            string name = AtmosReplayCodec.ReadString(reader, maxStringBytes);
+            if (string.IsNullOrWhiteSpace(name))
+                throw new InvalidDataException("The world solver layout contains a blank stage name.");
+
+            stages[index] = new AtmosWorldSolverLayoutEntry(name, reader.ReadBoolean());
+        }
+
+        return new SetAtmosWorldSolverLayoutOperation(stages);
+    }
+
     /// <summary>
     ///     Writes a nested simulation operation as its opcode followed by its payload.
     /// </summary>
