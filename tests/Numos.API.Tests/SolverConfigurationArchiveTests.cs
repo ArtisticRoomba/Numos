@@ -1,3 +1,4 @@
+using Numos.CoreSim.EulerFlow;
 using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.GasReactions;
@@ -35,6 +36,24 @@ public sealed partial class SolverConfigurationArchiveTests
         var imported = AtmosWorldReplayTimeline.Import(world, restored, 1);
         imported.ReturnToHead();
         Assert.That(world.ComputeStateHash(), Is.EqualTo(archive.HeadStateHash));
+    }
+
+    [Test]
+    public void ReactionAndEulerConfigs_PassEnsurePortableAndRoundTrip()
+    {
+        var euler = new EulerFlowConfig { CourantNumber = 0.4f, MaxVelocity = 2000f };
+        AtmosWorldReplayArchive archive = RecordWorld(euler, Reactions(1f));
+
+        Assert.That(archive.EnsurePortable, Throws.Nothing);
+        AtmosWorldReplayArchive restored = RoundTrip(archive);
+
+        var configurations = restored.InitialCheckpoint.Config.SolverConfigurations;
+        Assert.Multiple(() =>
+        {
+            Assert.That(configurations.Select(static value => value.Key), Is.EqualTo(new[] { "euler-flow", "numos/gas-reactions" }));
+            Assert.That(configurations[0].SemanticallyEquals(euler.CreateSnapshot(new GasRegistry())), Is.True);
+            Assert.That(restored.HeadStateHash, Is.EqualTo(archive.HeadStateHash));
+        });
     }
 
     [Test]
