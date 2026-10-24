@@ -255,9 +255,16 @@ order:
 3. `clearGas`: when `true`, remove the gas from every voxel.
 4. `temperatureK`: set the stored temperature.
 5. `gas`: add an array of `{gasId, moles}` or `{gasId, partialPressurePa}` to every voxel.
+6. `velocity`: set the bulk velocity `{x, y, z}` in m/s of the gas in every air voxel.
 
 `gasTemperatureK` sets the temperature of the added gas. It defaults to `temperatureK`, then to the configured fallback
 temperature. Give each gas exactly one of `moles` and `partialPressurePa`.
+
+`velocity` starts a flow state, such as the gas behind a shock. The runner stores momentum equal to the gas mass in each
+voxel times the velocity. It applies the velocity last, so the mass includes the gas you just added. Solid, void, and
+empty voxels ignore it, and `result.region.velocityVoxels` counts the voxels that took it. A later `addGas` lowers the
+velocity of a voxel, because the new gas starts at rest. The runner rejects a missing or non-finite component with
+`invalidRequest`.
 
 A partial pressure converts to moles with the ideal-gas law, `n = pV / (RT)`. `V` is the configured voxel volume and `T`
 is the gas temperature. A gas added at the same temperature as the voxel keeps that temperature. Use `clearGas` when you
@@ -282,8 +289,30 @@ The built-in fields are:
 | `totalMoles` | mol | Sum of all gases. |
 | `moles:<gasId>` | mol | One gas, such as `moles:0`. |
 | `classification` | | The voxel classification. |
+| `density` | kg/m3 | Mass density, the sum of moles times molar mass over the voxel volume. |
+| `velocityX`, `velocityY`, `velocityZ` | m/s | One component of the bulk velocity. |
+| `speed` | m/s | The magnitude of the bulk velocity. |
+| `densityGradient` | kg/m4 | The magnitude of the density gradient. |
+| `schlieren` | | Numerical schlieren brightness, from 0 (dark) to 1 (no gradient). |
+| `schlieren:<k>` | | The same, with steepness `k` instead of 15. |
 
-A solver package can register more fields, such as density or velocity, through `WorkbenchSession.Fields`.
+A solver package can register more fields through `WorkbenchSession.Fields`.
+
+`density` uses `molarMassKgPerMol` of each gas, or `referenceMolarMassKgPerMol` when a gas has none. It is NaN in solid
+and void voxels. The velocity fields are zero in a voxel with no gas.
+
+`densityGradient` and `schlieren` need the neighbors of a voxel, so the runner computes them over a whole region.
+The runner reads the density over the region plus a one-voxel halo, and the halo can lie in a neighboring chunk. A
+voxel on a chunk border therefore gets the same gradient as one inside a chunk. Each axis uses a central difference when
+both neighbors have air. It uses a one-sided difference when a neighbor is solid, void, or missing. It uses zero when
+neither has air. The voxel edge is the cube root of `voxelVolumeM3`.
+
+`schlieren` is `exp(-k * g / g_ref)`, where `g` is `densityGradient` and `k` is 15 by default. Values of `k` from 10 to
+20 draw shocks as thin dark lines. The reference `g_ref` is the largest gradient inside the exported region or slice.
+Two exports of one simulation can therefore differ in brightness, and so can two frames of a time series. Pass
+`schlierenReference` (a positive number in kg/m4) to `exportField`, `sampleVoxels`, or `renderSlice` to fix `g_ref`.
+Use the same value for every frame of a series. A single voxel has no region, so `sampleVoxels` and probes reject
+`schlieren` without a `schlierenReference`. They compute `densityGradient` from the 27 voxels around each point.
 
 ### Data extraction
 
@@ -293,8 +322,8 @@ A relative path starts at the working directory, and the response reports the fu
 
 | Operation | Request data | Effect |
 | --- | --- | --- |
-| `exportField` | `fields`, `region` or `slice`, `path`, optional `format` (`npy` or `json`) | Writes fields over a box or a slice. |
-| `renderSlice` | `axis`, `index`, `path`, optional `visualization`, `scale`, `range`, `levels` | Writes a PNG of a slice. |
+| `exportField` | `fields`, `region` or `slice`, `path`, optional `format` (`npy` or `json`), `schlierenReference` | Writes fields over a box or a slice. |
+| `renderSlice` | `axis`, `index`, `path`, optional `visualization`, `scale`, `range`, `levels`, `schlierenReference` | Writes a PNG of a slice. |
 | `tick` with `probes` | `probes` object, see below | Writes a time series of fields at chosen voxels. |
 
 `exportField` takes either a `region` (`{min, max}`, inclusive, global) or a `slice` (`{axis, index}`). The `axis` is
@@ -318,7 +347,7 @@ The files use NumPy format version 1.0, little-endian `float32`. Load one with `
 {"protocolVersion":2,"id":"p","op":"exportField","fields":["pressure","temperature"],"region":{"min":{"x":0,"y":0,"z":0},"max":{"x":2399,"y":149,"z":0}},"path":"out/duct-{field}.npy"}
 ```
 
-`tick` accepts a `probes` object:
+`tick` accepts a `probes` object. It takes an optional `schlierenReference` for `schlieren` columns:
 
 ```json
 {"protocolVersion":2,"id":"run","op":"tick","count":2000,"probes":{"points":[{"name":"wall1","voxel":{"x":100,"y":1,"z":0}}],"fields":["pressure"],"path":"out/probes.csv","every":10}}
@@ -333,6 +362,12 @@ contain commas or quotes. A voxel outside every chunk reads as NaN.
 `renderSlice` colors every voxel of a slice with a SimDrawer visualization, so the picture matches the viewer. The
 `visualization` is a visualization id such as `pressure` (the default), `temperature`, or `voxel-classification`.
 `scale` is the pixel size of one voxel. `levels` is the number of color steps (default 256).
+
+The flow visualizations are `density`, `velocity-x`, `velocity-y`, `velocity-z`, and `schlieren`. `density` uses a
+sequential color ramp. The velocity components use a blue, white, and red ramp, and the automatic range is symmetric
+around 0. `schlieren` is greyscale with white for no gradient and black for the steepest gradient. Its range maximum is
+`g_ref`, and its automatic range is 0 to the largest gradient in the slice. Pass `schlierenReference` or `range` to fix
+it, which keeps one scale across frames.
 
 By default, the color range spans the finite values of the air voxels in the slice. Solid and void voxels do not count.
 Pass `range` as `{min, max}` to fix it. The response reports the range used. The image has `u` left to right and `v` bottom to top. Hidden solid voxels are gray. Voxels
@@ -473,6 +508,10 @@ legacy model. It injects gas into the left voxel and observes the pressure imbal
 builds an `8 x 1 x 1` tube of air at 1 m³ per voxel with the left half at twice the pressure of the right. It observes
 the tube after one, five, and twenty ticks, so the `flow` block and the per-voxel velocities have something to show.
 
+[`examples/headless/euler-moving-shock.jsonl`](../examples/headless/euler-moving-shock.jsonl) starts a Mach 1.53 shock in a
+400-voxel air tube. The left quarter holds the post-shock state, with 260 kPa, 393 K, and a gas velocity of 251 m/s set by
+`editRegion`. The script exports `density`, `schlieren`, and `velocityX` and renders the schlieren after each of two ticks.
+
 [`examples/headless/shock-tube-1d.jsonl`](../examples/headless/shock-tube-1d.jsonl) builds a 2000-voxel tube with solid
 walls. The left half starts at 2 atmospheres and the right half at 1 atmosphere. The script uses one `editRegion` call
 for each half and ticks 400 steps with four wall probes. It writes the pressure, temperature, and mole slices at tick 0
@@ -501,7 +540,12 @@ voxel thick in `z`:
    classification `1` opens the interior.
 3. `editRegion` with `clearGas` and `partialPressurePa` sets the initial state of each region.
 4. `tick` with `probes` records wall pressure over time.
-5. `exportField` and `renderSlice` write the fields and pictures.
+5. `exportField` and `renderSlice` write the fields and pictures. Export `density` and `schlieren` for shadowgraph-style
+   frames, and pass one `schlierenReference` to every frame.
+
+For a moving shock, fill the shocked region with `clearGas`, `partialPressurePa`, `gasTemperatureK`, and `velocity` in one
+`editRegion`. The Euler solver substeps inside each 50 ms tick. Its default `maxSubstepsPerTick` can stop a tick early on
+a fine grid, so check `flow.substepCapEngaged` and raise `eulerFlow.maxSubstepsPerTick` when it is set.
 
 `editRegion` records one replay operation for the whole box, plus one chunk operation for each chunk that `createChunks`
 creates. A large region therefore adds little to the replay file.

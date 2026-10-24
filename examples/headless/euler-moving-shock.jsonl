@@ -1,0 +1,16 @@
+{"protocolVersion": 2, "id": "create", "op": "createProject", "name": "Shock 1D", "chunkDimensions": {"x": 402, "y": 3, "z": 1}, "config": {"voxelVolumeM3": 0.125, "defaultTemperatureFallbackK": 293, "sleepThreshold": 2147483647, "eulerFlow": {"maxSubstepsPerTick": 1000}}, "gases": [{"name": "Air", "molarHeatCapacityAtConstantVolume": 20.785, "diffusionCoefficient": 0, "molarMassKgPerMol": 0.02897}]}
+{"protocolVersion": 2, "id": "walls", "op": "editRegion", "min": {"x": 0, "y": 0, "z": 0}, "max": {"x": 401, "y": 2, "z": 0}, "createChunks": true, "classification": -2}
+{"protocolVersion": 2, "id": "interior", "op": "editRegion", "min": {"x": 1, "y": 1, "z": 0}, "max": {"x": 400, "y": 1, "z": 0}, "classification": 1, "temperatureK": 293}
+{"protocolVersion": 2, "id": "right", "op": "editRegion", "min": {"x": 101, "y": 1, "z": 0}, "max": {"x": 400, "y": 1, "z": 0}, "clearGas": true, "gas": [{"gasId": 0, "partialPressurePa": 101325}], "gasTemperatureK": 293}
+{"protocolVersion": 2, "id": "left", "op": "editRegion", "min": {"x": 1, "y": 1, "z": 0}, "max": {"x": 100, "y": 1, "z": 0}, "clearGas": true, "gas": [{"gasId": 0, "partialPressurePa": 260000}], "gasTemperatureK": 393, "velocity": {"x": 251, "y": 0, "z": 0}}
+{"protocolVersion": 2, "id": "export0", "op": "exportField", "fields": ["density", "schlieren", "densityGradient", "velocityX", "pressure", "temperature"], "slice": {"axis": "z", "index": 0}, "path": "artifacts/headless/moving-shock-t0-{field}.npy"}
+{"protocolVersion": 2, "id": "png0", "op": "renderSlice", "axis": "z", "index": 0, "visualization": "schlieren", "path": "artifacts/headless/moving-shock-t0-schlieren.png", "scale": 3}
+{"protocolVersion": 2, "id": "tick1", "op": "tick", "count": 1}
+{"protocolVersion": 2, "id": "export1", "op": "exportField", "fields": ["density", "schlieren", "densityGradient", "velocityX", "pressure", "temperature"], "slice": {"axis": "z", "index": 0}, "path": "artifacts/headless/moving-shock-t1-{field}.npy"}
+{"protocolVersion": 2, "id": "png1", "op": "renderSlice", "axis": "z", "index": 0, "visualization": "schlieren", "path": "artifacts/headless/moving-shock-t1-schlieren.png", "scale": 3}
+{"protocolVersion": 2, "id": "tick2", "op": "tick", "count": 1}
+{"protocolVersion": 2, "id": "export2", "op": "exportField", "fields": ["density", "schlieren", "densityGradient", "velocityX", "pressure", "temperature"], "slice": {"axis": "z", "index": 0}, "path": "artifacts/headless/moving-shock-t2-{field}.npy"}
+{"protocolVersion": 2, "id": "png2", "op": "renderSlice", "axis": "z", "index": 0, "visualization": "schlieren", "path": "artifacts/headless/moving-shock-t2-schlieren.png", "scale": 3}
+{"protocolVersion": 2, "id": "pngd", "op": "renderSlice", "axis": "z", "index": 0, "visualization": "density", "path": "artifacts/headless/moving-shock-t2-density.png", "scale": 3}
+{"protocolVersion": 2, "id": "pngv", "op": "renderSlice", "axis": "z", "index": 0, "visualization": "velocity-x", "path": "artifacts/headless/moving-shock-t2-velx.png", "scale": 3}
+{"protocolVersion": 2, "id": "exit", "op": "exit"}

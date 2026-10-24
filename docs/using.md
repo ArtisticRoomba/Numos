@@ -682,7 +682,7 @@ var result = simulation.EditVoxelBox(
 ```
 
 ## Using the viewer
-`Numos.Viewer` is the optional desktop presentation layer, built with raylib and ImGui. It depends on `Numos.API`, `Numos.SimDrawer`, and `Numos.Workbench`. Its package includes the icon and ImGui layout assets the application needs.
+`Numos.Viewer` is the optional desktop presentation layer, built with raylib and ImGui. It depends on `Numos.API`, `Numos.SimDrawer`, and `Numos.Workbench`. Its package includes the icon and ImGui layout assets the application needs. The visualization list covers temperature, pressure, gas composition, speed, density, the three velocity components, and numerical schlieren. `Numos.CoreSim.FlowFieldMath` holds the density, gradient, and schlieren formulas, so the viewer and the headless exports agree.
 
 `Numos.Workbench` is the UI-free session layer under the viewer. `WorkbenchSession` owns one project (world, configuration, replay timeline, and branches). It runs every project, chunk, voxel, topology, solver, timeline, and replay-file operation. A front end calls the session and reports its failures.
 

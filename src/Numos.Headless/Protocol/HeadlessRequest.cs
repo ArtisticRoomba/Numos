@@ -88,6 +88,17 @@ internal sealed class HeadlessRequest
     public RangeRequest? Range { get; init; }
     public ProbeRequest? Probes { get; init; }
 
+    /// <summary>
+    ///     The gradient in kg/m4 that the schlieren field and visualization map to black. Used by sampleVoxels,
+    ///     exportField, and renderSlice.
+    /// </summary>
+    public float? SchlierenReference { get; init; }
+
+    /// <summary>
+    ///     The bulk velocity in m/s that editRegion gives the gas in every air voxel.
+    /// </summary>
+    public VelocityRequest? Velocity { get; init; }
+
     // Replay files.
     public string? Path { get; init; }
     public bool? ThroughCurrentPosition { get; init; }
@@ -126,6 +137,16 @@ internal sealed class SliceRequest
 /// <summary>
 ///     A fixed color range.
 /// </summary>
+internal sealed class VelocityRequest
+{
+    public float? X { get; init; }
+    public float? Y { get; init; }
+    public float? Z { get; init; }
+}
+
+/// <summary>
+///     A fixed color range.
+/// </summary>
 internal sealed class RangeRequest
 {
     public float? Min { get; init; }
@@ -141,6 +162,7 @@ internal sealed class ProbeRequest
     public string[]? Fields { get; init; }
     public string? Path { get; init; }
     public int? Every { get; init; }
+    public float? SchlierenReference { get; init; }
 }
 
 /// <summary>

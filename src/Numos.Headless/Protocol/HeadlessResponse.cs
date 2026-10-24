@@ -149,6 +149,7 @@ internal sealed class RegionEditInfo
     public required int ChunksTouched { get; init; }
     public required int ChunksCreated { get; init; }
     public required float[] MolesPerVoxel { get; init; }
+    public required long VelocityVoxels { get; init; }
 }
 
 internal sealed class SampleInfo

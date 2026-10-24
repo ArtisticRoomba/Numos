@@ -268,7 +268,7 @@ public sealed class HeadlessProtocolTests
         var run = await RunAsync(
             CreateProject("create", 2, 1, 1),
             Request("add", "addChunk", $"\"position\":{Coordinate0},\"classification\":1"),
-            Request("unknown", "sampleVoxels", $"\"points\":[{Coordinate0}],\"fields\":[\"density\"]"),
+            Request("unknown", "sampleVoxels", $"\"points\":[{Coordinate0}],\"fields\":[\"notAField\"]"),
             Request("missing", "sampleVoxels", $"\"points\":[{C(50, 0, 0)}],\"fields\":[\"pressure\",\"classification\"]"));
 
         var values = run.Result("missing").GetProperty("samples").GetProperty("values")[0];
