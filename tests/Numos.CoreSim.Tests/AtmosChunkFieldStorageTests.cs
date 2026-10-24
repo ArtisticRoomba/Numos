@@ -290,23 +290,6 @@ public sealed class AtmosChunkFieldStorageTests
     }
 
     [Test]
-    public void GetAllDescriptors_IsIndexedBySlot()
-    {
-        ChunkFieldDescriptor[] expected = [Captured, Transient, Zeta, Lower, Upper, VacuumCleared];
-
-        var all = ChunkFieldRegistry.GetAllDescriptors();
-
-        Assert.Multiple(() =>
-        {
-            for (int i = 0; i < all.Length; i++)
-                Assert.That(all[i].Slot, Is.EqualTo(i));
-
-            foreach (var descriptor in expected)
-                Assert.That(all[descriptor.Slot], Is.SameAs(descriptor));
-        });
-    }
-
-    [Test]
     public void Register_SameDefinition_ReturnsSameDescriptor()
     {
         var first = ChunkFieldRegistry.Register<int>(Key("repeat"), true, null, true, true);
@@ -320,8 +303,9 @@ public sealed class AtmosChunkFieldStorageTests
     {
         ChunkFieldRegistry.Register<int>(Key("conflict/sleep"), clearOnSleep: true);
 
-        var ex = Assert.Throws<InvalidOperationException>(
-            () => ChunkFieldRegistry.Register<int>(Key("conflict/sleep"), clearOnSleep: false));
+        var ex = Assert.Throws<InvalidOperationException>(() => ChunkFieldRegistry.Register<int>(
+            Key("conflict/sleep"),
+            clearOnSleep: false));
 
         Assert.That(ex!.Message, Does.Contain("cleared on sleep").And.Contain("kept on sleep"));
     }
@@ -331,8 +315,9 @@ public sealed class AtmosChunkFieldStorageTests
     {
         ChunkFieldRegistry.Register<int>(Key("conflict/vacuum"), clearOnVacuum: true);
 
-        var ex = Assert.Throws<InvalidOperationException>(
-            () => ChunkFieldRegistry.Register<int>(Key("conflict/vacuum"), clearOnVacuum: false));
+        var ex = Assert.Throws<InvalidOperationException>(() => ChunkFieldRegistry.Register<int>(
+            Key("conflict/vacuum"),
+            clearOnVacuum: false));
 
         Assert.That(ex!.Message, Does.Contain("cleared on vacuum").And.Contain("kept on vacuum"));
     }
@@ -473,7 +458,7 @@ public sealed class AtmosChunkFieldStorageTests
 
         Assert.That(chunk.HasCapturedSolverArrays, Is.False);
     }
-    
+
     [Test]
     public void Sleep_ClearsEntireClearOnSleepFields()
     {

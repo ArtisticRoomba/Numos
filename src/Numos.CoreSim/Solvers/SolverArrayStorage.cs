@@ -19,6 +19,16 @@ internal abstract class SolverArrayStorage(ChunkFieldDescriptor field)
     internal abstract SolverArrayStorage Clone();
 
     internal abstract void AppendHash(ref AtmosStateHasher hash);
+
+    /// <summary>
+    ///     Resets one element to default. Indices past the end of a fixed-length array are ignored.
+    /// </summary>
+    internal abstract void ClearElement(int index);
+
+    /// <summary>
+    ///     Resets every element to default.
+    /// </summary>
+    internal abstract void ClearAll();
 }
 
 internal sealed class SolverArrayStorage<T>(ChunkFieldDescriptor<T> field, T[] values) : SolverArrayStorage(field)
@@ -31,6 +41,17 @@ internal sealed class SolverArrayStorage<T>(ChunkFieldDescriptor<T> field, T[] v
     {
         // Captured elements contain no references, so an array clone detaches their entire state.
         return new SolverArrayStorage<T>((ChunkFieldDescriptor<T>)Field, (T[])Values.Clone());
+    }
+
+    internal override void ClearElement(int index)
+    {
+        if ((uint)index < (uint)Values.Length)
+            Values[index] = default!;
+    }
+
+    internal override void ClearAll()
+    {
+        Array.Clear(Values);
     }
 
     internal override void AppendHash(ref AtmosStateHasher hash)
