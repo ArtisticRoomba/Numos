@@ -57,7 +57,7 @@ Restore rejects a missing simulation that used a custom solver. Numos does not c
 recreate that simulation.
 
 Custom world solver names, kinds, and neighbor-selection keys are part of checkpoint compatibility. The whole stage list
-is part of the world state hash, and so is any `[NumosSerialize]` state a class solver holds (see "Solver state is
+is part of the world state hash. So is any `[NumosSerialize]` state a class solver holds (see "Solver state is
 checkpointed and recorded" below). Register matching callbacks before you restore or replay a checkpoint that uses them.
 
 ### One grid is a one-simulation world
@@ -169,21 +169,25 @@ detached copies. The current implementation has no copy-on-write storage, delta 
 headers and field names.
 
 The world checkpoint schema is `AtmosWorldCheckpoint.CurrentFormatVersion` 13. The grid schema inside it is format
-version 10, compatibility version 4. World version 6 added the reference and per-gas molar masses to the configuration
-section. World version 7 made that section carry the built-in solver configurations that have a wire encoding.
-After the gas registry comes a count, then each entry's key followed by its payload. Before version 7 the count was
-always zero. World version 8 gave every explicit link an area fraction. It is one float after the link's flags, both in
-link-set slots and in `CreateAtmosLinkSetOperation` payloads. Numos writes NaN when the link defers to
-`EulerFlowConfig.DefaultLinkAreaFraction`. Registration never accepts NaN as a value, so the marker cannot collide. The
-hash covers the fraction the same way. Grid version 7 added the three per-voxel momentum arrays to every chunk. Numos
-hashes them like any other chunk array, so the compatibility version moved with them. World version 9 and grid version 8
-moved the configuration, gases, and chunks onto field-id schema payloads and hash all of them with the wire encoding.
-World version 10 and grid version 9 replaced the numbered field ids with ids that hash the member names.
-World version 11 added the `[NumosSerialize]` state of class solvers. World version 12 and grid version 10 generate the
-checkpoint types from the live types, so every part of them is field-id records, link slots and solver metadata included.
-World version 13 moved `EulerFlowConfig` from a fixed hand-written layout to the same field-id records as every other
-configuration.
-Replay is experimental, so Numos rejects older in-memory checkpoint schemas instead of translating them.
+version 10, compatibility version 4. Replay is experimental, so Numos rejects older in-memory checkpoint schemas instead
+of translating them. The version history is:
+
+- World 6 added the reference and per-gas molar masses to the configuration section.
+- World 7 made that section carry the built-in solver configurations that have a wire encoding. After the gas registry
+  comes a count, then each entry's key followed by its payload. Before version 7 the count was always zero.
+- World 8 gave every explicit link an area fraction. It is one float after the link's flags, in link-set slots and in
+  `CreateAtmosLinkSetOperation` payloads. Numos writes NaN when the link defers to
+  `EulerFlowConfig.DefaultLinkAreaFraction`. Registration never accepts NaN as a value, so the marker cannot collide. The
+  hash covers the fraction the same way.
+- Grid 7 added the three per-voxel momentum arrays to every chunk. Numos hashes them like any other chunk array, so the
+  compatibility version moved with them.
+- World 9 and grid 8 moved the configuration, gases, and chunks onto field-id schema payloads. The hash uses the wire
+  encoding.
+- World 10 and grid 9 replaced the numbered field ids with ids that hash the member names.
+- World 11 added the `[NumosSerialize]` state of class solvers.
+- World 12 and grid 10 generate the checkpoint types from the live types. Every part is then a field-id record,
+  including link slots and solver metadata.
+- World 13 moved `EulerFlowConfig` from a fixed hand-written layout to field-id records.
 
 ### Checkpoints are generated from the live types
 
@@ -388,9 +392,9 @@ runs the legacy stages afterwards. A mismatch in custom stages fails with an `Ar
 lists.
 
 Numos validates everything before it changes anything, including the framing of each solver state payload. It then
-installs the checkpoint's solver layout, writes solver state back, and materializes each simulation's replacement chunk
-storage before making that storage observable. Restore keeps existing simulation objects and host integrations. It
-applies the checkpoint's configuration once, clears transient solver state, and resets profiling data.
+installs the checkpoint's solver layout and writes solver state back. Next it materializes each simulation's replacement
+chunk storage before making that storage observable. Restore keeps existing simulation objects and host integrations.
+It applies the checkpoint's configuration once, clears transient solver state, and resets profiling data.
 
 Last, restore calls `OnRestored()` on every `IAtmosWorldSolver` in the pipeline, enabled or not. The hook therefore sees
 time, configuration, and topology already restored. An exception from that hook propagates with the restored state
@@ -686,15 +690,10 @@ A `.numos` replay contains a small provenance header, one complete initial world
 semantic opcodes. It stores initial and final state hashes. The Viewer verifies both hashes. After loading, the Viewer
 generates scrub checkpoints every 50 ticks, so those large acceleration snapshots never enter the file.
 
-The checkpoint section is the world checkpoint format version (13), the archive's initial and head hashes, then the
+The checkpoint section is the world checkpoint format version (13), the archive's initial and head hashes, and the
 checkpoint's generated payload with its length. Each simulation inside carries the grid format version (10). A file from
-an older layout fails to load with an unsupported-schema error. Numos does not misread it. Older layouts include files
-written before configuration and solver state moved out of the per-simulation checkpoints, before molar masses joined
-the configuration, before solver configurations gained a wire encoding, and before explicit links carried an area
-fraction. Format 9/8 moved the configuration, gases, and chunks to length-prefixed schema payloads with numbered field
-ids. Format 10/9 derives each field id from the member name. World format 11 added solver state. Format 12/10 is the
-first where the whole checkpoint is generated from the live types. World format 13 moved `EulerFlowConfig` onto the
-state schema.
+an older layout fails to load with an unsupported-schema error. Numos does not misread it. The version history above
+lists the layout changes.
 
 Viewer branch graphs are session state. Saving writes the selected branch, either through its preserved head or through
 the current inspection position. Save branches individually when more than one future must survive closing the project.
@@ -703,11 +702,11 @@ Saving or loading rejects rollback chunk fields whose element type is not portab
 solver configurations, because the format has no encoding for them. The built-in `EulerFlowConfig` and
 `GasReactionConfig` both carry `[NumosSerialize]` members, so a world with either one is portable.
 
-Custom world solvers are saved by name, with their `[NumosSerialize]` state. A file that has them loads anywhere, but
-only a host that registers the same solvers can replay it, through `AtmosWorldReplayTimeline.Restore`. `Import`, which
-the Viewer uses, still rejects them through `EnsurePortable`. Readers reject unknown required versions, sections,
-opcodes, and configuration keys. Future readers can skip optional length-prefixed metadata. `NumosReplayReadOptions`
-configures the payload limits. `AtmosWorldReplayArchive.UnsupportedFeatures` lists what an archive depends on.
+Custom world solvers are saved by name, with their `[NumosSerialize]` state. A file that has them loads anywhere. Only a
+host that registers the same solvers can replay it, through `AtmosWorldReplayTimeline.Restore`. `Import`, which the
+Viewer uses, still rejects them through `EnsurePortable`. Readers reject unknown required versions, sections, opcodes,
+and configuration keys. Future readers can skip optional length-prefixed metadata. `NumosReplayReadOptions` configures
+the payload limits. `AtmosWorldReplayArchive.UnsupportedFeatures` lists what an archive depends on.
 
 ### Solver configurations in the file
 
