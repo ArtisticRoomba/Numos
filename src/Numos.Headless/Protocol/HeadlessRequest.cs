@@ -65,6 +65,18 @@ internal sealed class HeadlessRequest
     public long? Tick { get; init; }
     public int? BranchId { get; init; }
 
+    // Data extraction. Boxes, slices, and probe points are global voxels.
+    public BoxRequest? Region { get; init; }
+    public SliceRequest? Slice { get; init; }
+    public string? Format { get; init; }
+    public string? Axis { get; init; }
+    public int? Index { get; init; }
+    public string? Visualization { get; init; }
+    public int? Scale { get; init; }
+    public int? Levels { get; init; }
+    public RangeRequest? Range { get; init; }
+    public ProbeRequest? Probes { get; init; }
+
     // Replay files.
     public string? Path { get; init; }
     public bool? ThroughCurrentPosition { get; init; }
@@ -74,6 +86,53 @@ internal sealed class HeadlessRequest
     public bool? IncludeVoxels { get; init; }
     public bool? OnlyGasBearingVoxels { get; init; }
     public int? MaxIssueLocations { get; init; }
+}
+
+/// <summary>
+///     An inclusive box in global voxels.
+/// </summary>
+internal sealed class BoxRequest
+{
+    public Coordinate? Min { get; init; }
+    public Coordinate? Max { get; init; }
+}
+
+/// <summary>
+///     A slice perpendicular to one axis, at a global voxel index.
+/// </summary>
+internal sealed class SliceRequest
+{
+    public string? Axis { get; init; }
+    public int? Index { get; init; }
+}
+
+/// <summary>
+///     A fixed color range.
+/// </summary>
+internal sealed class RangeRequest
+{
+    public float? Min { get; init; }
+    public float? Max { get; init; }
+}
+
+/// <summary>
+///     Probe samples written to a CSV file during a tick request.
+/// </summary>
+internal sealed class ProbeRequest
+{
+    public ProbePointRequest[]? Points { get; init; }
+    public string[]? Fields { get; init; }
+    public string? Path { get; init; }
+    public int? Every { get; init; }
+}
+
+/// <summary>
+///     One named probe voxel.
+/// </summary>
+internal sealed class ProbePointRequest
+{
+    public string? Name { get; init; }
+    public Coordinate? Voxel { get; init; }
 }
 
 /// <summary>

@@ -70,12 +70,16 @@ public sealed partial class WorkbenchSession
     /// <param name="progressInterval">
     ///     Log a progress line every this many ticks. Zero turns progress lines off.
     /// </param>
+    /// <param name="afterTick">
+    ///     Called after each tick with the number of ticks done in this call, from 1 to <paramref name="count" />.
+    ///     The callback may read the world. It must not change it.
+    /// </param>
     /// <returns>The world tick count afterwards.</returns>
     /// <remarks>
     ///     A call with <paramref name="count" /> above 1 also logs a closing line with the elapsed wall time.
     /// </remarks>
     /// <exception cref="InvalidOperationException">The timeline is inspecting history.</exception>
-    public int Tick(int count = 1, int progressInterval = DefaultProgressInterval)
+    public int Tick(int count = 1, int progressInterval = DefaultProgressInterval, Action<int>? afterTick = null)
     {
         return Guard(
             "Could not tick the world",
@@ -90,6 +94,7 @@ public sealed partial class WorkbenchSession
                 {
                     world.Tick();
                     Timeline!.ObserveLiveState();
+                    afterTick?.Invoke(done);
                     if (progressInterval > 0 && done % progressInterval == 0 && done < count)
                     {
                         Info(

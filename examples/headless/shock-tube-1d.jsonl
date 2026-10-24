@@ -3,9 +3,10 @@
 {"protocolVersion":2,"id":"interior","op":"editRegion","min":{"x":1,"y":1,"z":0},"max":{"x":1998,"y":1,"z":0},"classification":1,"temperatureK":300}
 {"protocolVersion":2,"id":"driver","op":"editRegion","min":{"x":1,"y":1,"z":0},"max":{"x":999,"y":1,"z":0},"clearGas":true,"gas":[{"gasId":0,"partialPressurePa":202650}],"gasTemperatureK":300}
 {"protocolVersion":2,"id":"driven","op":"editRegion","min":{"x":1000,"y":1,"z":0},"max":{"x":1998,"y":1,"z":0},"clearGas":true,"gas":[{"gasId":0,"partialPressurePa":101325}],"gasTemperatureK":300}
-{"protocolVersion":2,"id":"hash-before","op":"timelineInfo"}
-{"protocolVersion":2,"id":"probe-before","op":"sampleVoxels","points":[{"x":500,"y":1,"z":0},{"x":990,"y":1,"z":0},{"x":1010,"y":1,"z":0},{"x":1500,"y":1,"z":0}],"fields":["pressure","temperature","totalMoles"]}
-{"protocolVersion":2,"id":"run","op":"tick","count":400,"progressInterval":100}
-{"protocolVersion":2,"id":"probe-after","op":"sampleVoxels","points":[{"x":500,"y":1,"z":0},{"x":990,"y":1,"z":0},{"x":1010,"y":1,"z":0},{"x":1200,"y":1,"z":0},{"x":1500,"y":1,"z":0}],"fields":["pressure","temperature","totalMoles"]}
+{"protocolVersion":2,"id":"initial","op":"exportField","fields":["pressure","temperature"],"slice":{"axis":"z","index":0},"path":"artifacts/headless/shock-tube-t0-{field}.npy"}
+{"protocolVersion":2,"id":"run","op":"tick","count":400,"progressInterval":100,"probes":{"points":[{"name":"x500","voxel":{"x":500,"y":1,"z":0}},{"name":"x990","voxel":{"x":990,"y":1,"z":0}},{"name":"x1010","voxel":{"x":1010,"y":1,"z":0}},{"name":"x1500","voxel":{"x":1500,"y":1,"z":0}}],"fields":["pressure","temperature"],"path":"artifacts/headless/shock-tube-probes.csv","every":10}}
+{"protocolVersion":2,"id":"final","op":"exportField","fields":["pressure","temperature","totalMoles"],"slice":{"axis":"z","index":0},"path":"artifacts/headless/shock-tube-t400-{field}.npy"}
+{"protocolVersion":2,"id":"row","op":"exportField","fields":["pressure"],"region":{"min":{"x":1000,"y":1,"z":0},"max":{"x":1004,"y":1,"z":0}},"format":"json"}
+{"protocolVersion":2,"id":"picture","op":"renderSlice","axis":"z","index":0,"visualization":"pressure","path":"artifacts/headless/shock-tube-t400-pressure.png","scale":4,"range":{"min":100000,"max":205000}}
 {"protocolVersion":2,"id":"summary","op":"observe","maxIssueLocations":0}
 {"protocolVersion":2,"id":"exit","op":"exit"}

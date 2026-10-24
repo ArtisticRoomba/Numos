@@ -58,6 +58,9 @@ internal sealed class CommandResult
     public string? StateHash { get; init; }
     public RegionEditInfo? Region { get; init; }
     public SampleInfo? Samples { get; init; }
+    public ExportInfo? Export { get; init; }
+    public RenderInfo? Render { get; init; }
+    public ProbeInfo? Probes { get; init; }
 }
 
 internal sealed class HelloInfo
@@ -135,6 +138,39 @@ internal sealed class SampleInfo
     public required string[] Fields { get; init; }
     public required Coordinate[] Points { get; init; }
     public required float[][] Values { get; init; }
+}
+
+internal sealed class ExportInfo
+{
+    public required string Format { get; init; }
+    public required ExportFileInfo[] Files { get; init; }
+}
+
+internal sealed class ExportFileInfo
+{
+    public required string Field { get; init; }
+    public required string Unit { get; init; }
+    public string? Path { get; init; }
+    public required int[] Shape { get; init; }
+    public float? Min { get; init; }
+    public float? Max { get; init; }
+    public float[]? Values { get; init; }
+}
+
+internal sealed class RenderInfo
+{
+    public required string Path { get; init; }
+    public required int Width { get; init; }
+    public required int Height { get; init; }
+    public required float RangeMin { get; init; }
+    public required float RangeMax { get; init; }
+}
+
+internal sealed class ProbeInfo
+{
+    public required string Path { get; init; }
+    public required int Rows { get; init; }
+    public required int Columns { get; init; }
 }
 
 internal sealed class HeadlessError

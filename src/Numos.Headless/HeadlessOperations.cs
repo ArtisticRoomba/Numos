@@ -5,6 +5,7 @@ using Numos.CoreSim;
 using Numos.Headless.Diagnostics;
 using Numos.Headless.Protocol;
 using Numos.Maths;
+using Numos.SimDrawer;
 using Numos.Workbench;
 
 namespace Numos.Headless;
@@ -65,6 +66,8 @@ internal sealed partial class HeadlessOperations
             "clearVoxelGas" => ClearVoxelGas(request),
             "editRegion" => EditRegion(request),
             "sampleVoxels" => SampleVoxels(request),
+            "exportField" => ExportField(request),
+            "renderSlice" => RenderSlice(request),
             "addGas" => AddGas(request),
             "removeGas" => RemoveGas(request),
             "listGases" => ListGases(),
@@ -103,7 +106,8 @@ internal sealed partial class HeadlessOperations
         "injectGas", "clearVoxelGas", "editRegion", "sampleVoxels", "addGas", "removeGas", "listGases",
         "updateConfig", "getConfig", "listSolvers", "setSolverEnabled", "resetSolvers", "createPortal", "createDock",
         "destroyLinkSet", "listLinkSets", "tick", "stepForward", "seekTick", "returnToHead", "createBranch",
-        "selectBranch", "continueBranch", "listBranches", "timelineInfo", "saveReplay", "observe"
+        "selectBranch", "continueBranch", "listBranches", "timelineInfo", "saveReplay", "observe", "exportField",
+        "renderSlice"
     ];
 
     internal SessionState? GetState()
@@ -404,9 +408,14 @@ internal sealed partial class HeadlessOperations
 
     private string[] RequireFields(HeadlessRequest request)
     {
-        string[] fields = Require(request.Fields, "fields");
+        return RequireFields(request.Fields, "fields");
+    }
+
+    private string[] RequireFields(string[]? names, string property)
+    {
+        string[] fields = Require(names, property);
         if (fields.Length == 0)
-            throw new HeadlessRequestException("missingProperty", "The 'fields' property needs at least one name.");
+            throw new HeadlessRequestException("missingProperty", $"The '{property}' property needs at least one name.");
 
         foreach (string name in fields)
         {
@@ -419,6 +428,140 @@ internal sealed partial class HeadlessOperations
         }
 
         return fields;
+    }
+
+    private const int MaximumInlineValues = 65_536;
+
+    private static SliceAxis ParseAxis(string? text, string property)
+    {
+        return (text ?? throw Missing(property)).Trim().ToLowerInvariant() switch
+        {
+            "x" => SliceAxis.X,
+            "y" => SliceAxis.Y,
+            "z" => SliceAxis.Z,
+            _ => throw new HeadlessRequestException("invalidRequest", $"{property} must be x, y, or z.")
+        };
+    }
+
+    private CommandExecution ExportField(HeadlessRequest request)
+    {
+        string[] fields = RequireFields(request);
+        var simulation = ResolveSimulation(request.Simulation);
+        string format = (request.Format ?? "npy").ToLowerInvariant();
+        if (format is not ("npy" or "json"))
+            throw new HeadlessRequestException("invalidRequest", "format must be npy or json.");
+
+        if ((request.Region == null) == (request.Slice == null))
+            throw new HeadlessRequestException("invalidRequest", "Give exactly one of region and slice.");
+
+        string? path = format == "npy" ? RequirePath(request) : null;
+        IReadOnlyList<FieldExport> exports;
+        if (request.Region is { } region)
+        {
+            var box = new VoxelBox(
+                Require(region.Min, "region.min").ToInt3(),
+                Require(region.Max, "region.max").ToInt3());
+
+            if (!box.IsValid)
+                throw new HeadlessRequestException("invalidRegion", "Region max must be at least min on every axis.");
+
+            CheckInlineSize(format, box.VoxelCount);
+            exports = path == null
+                ? _session.ReadRegion(box, fields, simulation)
+                : _session.ExportRegion(box, fields, path, simulation);
+        }
+        else
+        {
+            var slice = request.Slice!;
+            var axis = ParseAxis(slice.Axis, "slice.axis");
+            int index = Require(slice.Index, "slice.index");
+            if (path == null)
+            {
+                var box = _session.GetSliceBox(axis, index, simulation);
+                CheckInlineSize(format, box.VoxelCount);
+                exports = _session.ReadRegion(box, fields, simulation);
+                int[] shape = WorkbenchSession.GetSliceShape(axis, box);
+                exports = exports.Select(export => export with { Shape = shape }).ToArray();
+            }
+            else
+            {
+                exports = _session.ExportSlice(axis, index, fields, path, simulation);
+            }
+        }
+
+        return Result(new CommandResult
+        {
+            Export = new ExportInfo
+            {
+                Format = format,
+                Files = exports
+                    .Select(export => new ExportFileInfo
+                    {
+                        Field = export.Field,
+                        Unit = export.Unit,
+                        Path = export.Path,
+                        Shape = export.Shape,
+                        Min = export.Minimum,
+                        Max = export.Maximum,
+                        Values = format == "json" ? export.Values : null
+                    })
+                    .ToArray()
+            }
+        });
+    }
+
+    private static void CheckInlineSize(string format, long voxelCount)
+    {
+        if (format == "json" && voxelCount > MaximumInlineValues)
+        {
+            throw new HeadlessRequestException(
+                "invalidRequest",
+                $"format json holds at most {MaximumInlineValues} values per field. Use npy for larger extents.");
+        }
+    }
+
+    private CommandExecution RenderSlice(HeadlessRequest request)
+    {
+        var axis = ParseAxis(request.Axis, "axis");
+        int index = Require(request.Index, "index");
+        string path = RequirePath(request);
+        int scale = request.Scale ?? 1;
+        if (scale < 1)
+            throw new HeadlessRequestException("invalidRequest", "scale must be at least 1.");
+
+        VisualizationRange? range = null;
+        if (request.Range is { } requested)
+        {
+            float minimum = Require(requested.Min, "range.min");
+            float maximum = Require(requested.Max, "range.max");
+            if (!float.IsFinite(minimum) || !float.IsFinite(maximum) || maximum <= minimum)
+                throw new HeadlessRequestException("invalidRequest", "range must be finite with max above min.");
+
+            range = new VisualizationRange(minimum, maximum, request.Levels ?? 256);
+        }
+
+        var image = _session.RenderSlice(
+            axis,
+            index,
+            request.Visualization ?? BuiltInVisualizationIds.Pressure,
+            range,
+            scale,
+            request.Levels ?? 256,
+            ResolveSimulation(request.Simulation));
+
+        string fullPath = System.IO.Path.GetFullPath(path);
+        PngEncoder.WriteFile(fullPath, image.Width, image.Height, image.Rgba);
+        return Result(new CommandResult
+        {
+            Render = new RenderInfo
+            {
+                Path = fullPath,
+                Width = image.Width,
+                Height = image.Height,
+                RangeMin = image.RangeMinimum,
+                RangeMax = image.RangeMaximum
+            }
+        });
     }
 
     // Gases and configuration.
@@ -610,8 +753,53 @@ internal sealed partial class HeadlessOperations
                 $"count must be between 1 and {MaximumTicksPerRequest}.");
         }
 
-        _session.Tick(count, request.ProgressInterval ?? 100);
-        return Result(new CommandResult { TicksExecuted = count });
+        int progressInterval = request.ProgressInterval ?? 100;
+        if (request.Probes is not { } probes)
+        {
+            _session.Tick(count, progressInterval);
+            return Result(new CommandResult { TicksExecuted = count });
+        }
+
+        int every = probes.Every ?? 1;
+        if (every < 1)
+            throw new HeadlessRequestException("invalidRequest", "probes.every must be at least 1.");
+
+        string[] fields = RequireFields(probes.Fields, "probes.fields");
+        var points = Require(probes.Points, "probes.points")
+            .Select(point => new ProbePoint(
+                point?.Name ?? throw Missing("probes.points.name"),
+                Require(point.Voxel, "probes.points.voxel").ToInt3()))
+            .ToArray();
+
+        if (points.Length == 0)
+            throw new HeadlessRequestException("missingProperty", "probes.points needs at least one entry.");
+
+        using var recorder = _session.CreateProbeRecorder(
+            points,
+            fields,
+            RequirePath(probes.Path, "probes.path"),
+            ResolveSimulation(request.Simulation));
+
+        recorder.Record();
+        _session.Tick(
+            count,
+            progressInterval,
+            done =>
+            {
+                if (done % every == 0 || done == count)
+                    recorder.Record();
+            });
+
+        return Result(new CommandResult
+        {
+            TicksExecuted = count,
+            Probes = new ProbeInfo
+            {
+                Path = recorder.Path,
+                Rows = recorder.Rows,
+                Columns = 2 + points.Length * fields.Length
+            }
+        });
     }
 
     private CommandExecution StepForward()
@@ -743,10 +931,15 @@ internal sealed partial class HeadlessOperations
 
     private static string RequirePath(HeadlessRequest request)
     {
-        if (string.IsNullOrWhiteSpace(request.Path))
-            throw Missing("path");
+        return RequirePath(request.Path, "path");
+    }
 
-        return request.Path;
+    private static string RequirePath(string? path, string property)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            throw Missing(property);
+
+        return path;
     }
 
     private CommandExecution Observe(HeadlessRequest request)

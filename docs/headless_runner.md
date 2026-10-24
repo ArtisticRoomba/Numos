@@ -211,6 +211,59 @@ The built-in fields are:
 
 A solver package can register more fields, such as density or velocity, through `WorkbenchSession.Fields`.
 
+### Data extraction
+
+Three operations move data out of the simulation. They read detached snapshots, so they never change the state or the
+state hash. Output files go to the path you give. The runner creates missing directories and replaces existing files.
+A relative path starts at the working directory, and the response reports the full path.
+
+| Operation | Request data | Effect |
+| --- | --- | --- |
+| `exportField` | `fields`, `region` or `slice`, `path`, optional `format` (`npy` or `json`) | Writes fields over a box or a slice. |
+| `renderSlice` | `axis`, `index`, `path`, optional `visualization`, `scale`, `range`, `levels` | Writes a PNG of a slice. |
+| `tick` with `probes` | `probes` object, see below | Writes a time series of fields at chosen voxels. |
+
+`exportField` takes either a `region` (`{min, max}`, inclusive, global) or a `slice` (`{axis, index}`). The `axis` is
+`x`, `y`, or `z` and `index` is a global voxel index. A slice covers the bounding box of all chunks, so a chunk-sized
+hole in the middle reads as NaN.
+
+- A region has shape `(z, y, x)`, in C order, so `x` changes fastest. A region only one voxel thick in `z` is still a
+  three-dimensional array of shape `(1, y, x)`.
+- A slice has shape `(v, u)`. For a `z` slice, `u` is `x` and `v` is `y`. For a `y` slice, `u` is `x` and `v` is `z`.
+  For an `x` slice, `u` is `y` and `v` is `z`. This matches the order of the image rows from the bottom.
+- With `npy`, the runner writes one file per field. `path` must contain `{field}` when `fields` has more than one
+  entry. The runner puts the field name there and turns `:` into `_`, so `moles:0` becomes `moles_0`.
+- With `json`, the response carries each field's `values` inline in the same order. The runner allows up to 65536 values
+  per field. Use `npy` for more.
+
+The files use NumPy format version 1.0, little-endian `float32`. Load one with `numpy.load(path)`. Each entry in
+`result.export.files` has the `path`, the `shape`, the `unit`, and the `min` and `max` of the finite values.
+
+```json
+{"protocolVersion":2,"id":"p","op":"exportField","fields":["pressure","temperature"],"region":{"min":{"x":0,"y":0,"z":0},"max":{"x":2399,"y":149,"z":0}},"path":"out/duct-{field}.npy"}
+```
+
+`tick` accepts a `probes` object:
+
+```json
+{"protocolVersion":2,"id":"run","op":"tick","count":2000,"probes":{"points":[{"name":"wall1","voxel":{"x":100,"y":1,"z":0}}],"fields":["pressure"],"path":"out/probes.csv","every":10}}
+```
+
+The file is a CSV with the columns `tick`, `timeSeconds`, and then `name.field` for each probe and field, in the order
+given. `timeSeconds` is the tick divided by the simulation rate. The runner writes a row for the state before the first
+tick and then a row every `every` ticks (default 1). It also writes a row for the last tick when that tick is not a
+multiple of `every`. Sampling copies only the fields it needs from the chunks that hold probes. Probe names cannot
+contain commas or quotes. A voxel outside every chunk reads as NaN.
+
+`renderSlice` colors every voxel of a slice with a SimDrawer visualization, so the picture matches the viewer. The
+`visualization` is a visualization id such as `pressure` (the default), `temperature`, or `voxel-classification`.
+`scale` is the pixel size of one voxel. `levels` is the number of color steps (default 256).
+
+By default, the color range spans the finite values in the chunks that the slice crosses. That range includes solid
+voxels, which read 0 Pa, so a pressure picture can look washed out. Pass `range` as `{min, max}` to fix it. The response
+reports the range used. The image has `u` left to right and `v` bottom to top. Hidden solid voxels are gray. Voxels
+without a chunk are black.
+
 ### Gases and configuration
 
 | Operation | Request data | Effect |
@@ -261,7 +314,7 @@ is `negativeX`, `positiveX`, `negativeY`, `positiveY`, `negativeZ`, or `positive
 
 | Operation | Request data | Effect |
 | --- | --- | --- |
-| `tick` | `count` (1 to 1000000), optional `progressInterval` | Runs fixed ticks. |
+| `tick` | `count` (1 to 1000000), optional `progressInterval` and `probes` | Runs fixed ticks, and writes probe samples when `probes` is set. |
 | `stepForward` | None | Ticks one step on the head or seeks one tick in history. |
 | `seekTick` | `tick` | Shows the state at a past tick. The timeline then inspects history. |
 | `returnToHead` | None | Moves to the newest tick. |
@@ -272,7 +325,7 @@ is `negativeX`, `positiveX`, `negativeY`, `positiveY`, `negativeZ`, or `positive
 | `timelineInfo` | None | Returns head, position, checkpoints, branches, and the state hash. |
 
 `tick` writes a progress line to the log every `progressInterval` ticks (default 100, `0` for none). It calls the world
-tick directly, so a script runs the same number of solver steps on every machine.
+tick directly, so a script runs the same number of solver steps on every machine. See "Data extraction" for `probes`.
 
 While the timeline inspects history, every operation that edits the world fails with `operationRejected`. Call
 `returnToHead` and `continueBranch` first.
@@ -327,5 +380,31 @@ boundaries can remove mass or energy on purpose.
 injects gas into the left voxel and observes the pressure imbalance, one tick, and the result.
 
 [`examples/headless/shock-tube-1d.jsonl`](../examples/headless/shock-tube-1d.jsonl) builds a 2000-voxel tube with solid
-walls. The left half starts at 2 atmospheres and the right half at 1 atmosphere. The script ticks 400 steps and samples
-the pressure along the tube. It uses one `editRegion` call for each half.
+walls. The left half starts at 2 atmospheres and the right half at 1 atmosphere. The script uses one `editRegion` call
+for each half and ticks 400 steps with four wall probes. It writes the pressure, temperature, and mole slices at tick 0
+and tick 400 as `.npy` files, the probe CSV, and a PNG of the pressure. The files go to `artifacts/headless/`.
+
+Load the result in Python:
+
+```python
+import numpy as np
+pressure = np.load("artifacts/headless/shock-tube-t400-pressure.npy")[1]  # row y = 1 is the tube
+```
+
+With the default transport solver, the pressure step relaxes into a smooth ramp about 60 voxels wide at tick 400. The
+total moles stay constant. A solver with a shock-capturing scheme produces a sharper front.
+
+## Writing a study
+
+A validation study is a script that builds geometry, runs, and exports. For a 2D duct about 150 by 2400 voxels and one
+voxel thick in `z`:
+
+1. `createProject` with chunks of `150 x 100 x 1` voxels. A chunk can hold at most 65535 voxels.
+2. One `editRegion` with `createChunks` and a solid classification fills the bounding box. A second one with
+   classification `1` opens the interior.
+3. `editRegion` with `clearGas` and `partialPressurePa` sets the initial state of each region.
+4. `tick` with `probes` records wall pressure over time.
+5. `exportField` and `renderSlice` write the fields and pictures.
+
+An `editRegion` that adds gas to 360000 voxels takes a few seconds, at about 9 microseconds per voxel. Plan for
+that cost when a script has many edits.
