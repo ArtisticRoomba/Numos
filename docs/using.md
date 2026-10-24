@@ -705,6 +705,10 @@ velocity, in the 3D viewport and in the slice (which shows only the two in-plane
 sets how many seconds of travel one arrow represents: at the default 0.05 s, a voxel moving at 20 m/s draws a
 one-voxel arrow.
 
+The 3D viewport keeps one mesh per chunk on the GPU, so a scene of a million voxels stays interactive. Immediate-mode drawing would send every voxel face to the driver on every frame. A mesh holds only the faces that touch empty or filtered space. The viewer rebuilds a mesh when the chunk's visible voxels change. A tick that changes only colors rewrites the color buffer and keeps the positions. A new scene uploads over a few frames, so large meshes do not stall the window.
+
+Three overlays cost one draw call per voxel, so the viewer limits them. The 3D view outlines voxels only for a focused chunk or a scene of at most 20,000 voxels. Velocity arrows stop at 4,000 per view, and a larger scene shows every n-th voxel.
+
 On a project created with the Euler transport model, the Simulation panel shows a "Flow" readout of
 `AtmosSimulation.LastFlowDiagnostics`: substeps, simulated time, whether the substep cap engaged, the largest Courant
 number and signal speed, and the clamp and negative-value counters. Anything that means the tick did not finish cleanly

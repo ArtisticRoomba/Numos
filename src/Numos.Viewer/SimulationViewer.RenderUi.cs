@@ -589,7 +589,9 @@ public partial class SimulationViewer
             "Velocity arrows",
             "velocity-arrows",
             ref _show3DVelocityArrows,
-            ref _show2DVelocityArrows);
+            ref _show2DVelocityArrows,
+            $"Draws at most {SimulationRenderer.MaxVelocityArrows:N0} arrows. A larger scene shows every n-th voxel. " +
+            "Zoom the 2D view in to see more of them.");
 
         ImGui.EndTable();
 
