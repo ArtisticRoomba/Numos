@@ -28,7 +28,7 @@ internal sealed class HeadlessRequest
     public GasDefinition[]? Gases { get; init; }
 
     /// <summary>
-    ///     `euler` (default) or `legacy`. `createProject` and `resetSolvers` read it.
+    ///     `euler` (default) or `legacy`. `createProject`, `resetSolvers`, and `applyTransportPreset` read it.
     /// </summary>
     public string? TransportModel { get; init; }
 
@@ -73,6 +73,11 @@ internal sealed class HeadlessRequest
     public int? ProgressInterval { get; init; }
     public string? Solver { get; init; }
     public bool? Enabled { get; init; }
+
+    /// <summary>
+    ///     The ordered stage list for setSolverLayout.
+    /// </summary>
+    public SolverLayoutEntryRequest[]? Stages { get; init; }
     public long? Tick { get; init; }
     public int? BranchId { get; init; }
 
@@ -114,6 +119,15 @@ internal sealed class HeadlessRequest
     public bool? IncludeVoxels { get; init; }
     public bool? OnlyGasBearingVoxels { get; init; }
     public int? MaxIssueLocations { get; init; }
+}
+
+/// <summary>
+///     One stage of a setSolverLayout request.
+/// </summary>
+internal sealed class SolverLayoutEntryRequest
+{
+    public string? Name { get; init; }
+    public bool? Enabled { get; init; }
 }
 
 /// <summary>

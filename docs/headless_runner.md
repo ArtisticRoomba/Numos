@@ -411,7 +411,9 @@ Defaults change between versions. Set every field a study depends on.
 | --- | --- | --- |
 | `listSolvers` | None | Lists the stages in execution order. |
 | `setSolverEnabled` | `solver`, `enabled` | Enables or disables a stage. |
-| `resetSolvers` | optional `transportModel` | Restores the stage defaults of one transport model. |
+| `setSolverLayout` | `stages` (array of `name`, `enabled`) | Sets the order and enabled flags of every stage in one step. |
+| `applyTransportPreset` | `transportModel` | Swaps the transport stages and keeps every other stage as it is. |
+| `resetSolvers` | optional `transportModel` | Restores the stage defaults of one transport model, or of the current one. |
 | `createPortal` | `first`, `second`, optional `flags` | Links two voxels, possibly in different simulations. |
 | `createDock` | `first`, `second`, `rotation`, `flipU`, `flipV`, `flags` | Links two chunk faces voxel by voxel. |
 | `destroyLinkSet` | `linkSet` (`index`, `generation`) | Queues a portal or dock for removal. |
@@ -421,8 +423,15 @@ The built-in stages, in default order, are `euler-flow`, `explicit-gas-transport
 `explicit-thermal-transport`, `thermal-boundary`, and `gas-reactions`. The legacy model runs `advection`,
 `explicit-gas-transport`, `boundary-flow`, and then the same last four.
 
-The world refuses to remove or reorder stages while it records, and a project always records. In that case
-`resetSolvers` enables every stage, leaves the order alone, and returns `changed: false`.
+`setSolverLayout` lists every stage. Each name is a built-in stage or a registered custom stage, no name repeats, and
+every custom stage appears. Numos creates a built-in stage that the world does not hold and drops one that the list
+omits. A bad list fails with `invalidSolverLayout` and changes nothing. A project always records, and the world
+records a layout change, so a replay reproduces it. `applyTransportPreset` replaces `euler-flow` with `advection` and
+`boundary-flow` (or the reverse) at the same positions. `transportModel` is required there. Both commands report
+`changed: false` when the layout already matches.
+
+`resetSolvers` installs the default layout. A world with custom stages cannot discard them while it records. In that
+case `resetSolvers` enables every stage, leaves the order alone, and returns `changed: false`.
 
 A portal endpoint is `{simulation, position, voxel}`. A dock endpoint is `{simulation, position, face}`, where `face`
 is `negativeX`, `positiveX`, `negativeY`, `positiveY`, `negativeZ`, or `positiveZ`. `flags` is `all` (default), `gas`,

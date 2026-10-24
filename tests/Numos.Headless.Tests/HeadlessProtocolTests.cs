@@ -334,6 +334,63 @@ public sealed class HeadlessProtocolTests
     }
 
     [Test]
+    public async Task SolverLayout_ReordersTogglesAndRejectsBadInput()
+    {
+        const string legacy =
+            "\"stages\":[{\"name\":\"advection\",\"enabled\":true},{\"name\":\"thermodynamics\",\"enabled\":false}," +
+            "{\"name\":\"explicit-gas-transport\",\"enabled\":true}]";
+
+        var run = await RunAsync(
+            CreateProject("create", 2, 1, 1),
+            Request("set", "setSolverLayout", legacy),
+            Request("list", "listSolvers"),
+            Request("again", "setSolverLayout", legacy),
+            Request("duplicate", "setSolverLayout", "\"stages\":[{\"name\":\"advection\",\"enabled\":true},{\"name\":\"advection\",\"enabled\":true}]"),
+            Request("unknown", "setSolverLayout", "\"stages\":[{\"name\":\"nope\",\"enabled\":true}]"),
+            Request("noEnabled", "setSolverLayout", "\"stages\":[{\"name\":\"advection\"}]"),
+            Request("missing", "setSolverLayout"),
+            Request("after", "listSolvers"));
+
+        var names = run.Result("list").GetProperty("solvers").EnumerateArray()
+            .Select(static step => step.GetProperty("name").GetString())
+            .ToArray();
+        Assert.Multiple(() =>
+        {
+            Assert.That(run.Result("set").GetProperty("changed").GetBoolean(), Is.True);
+            Assert.That(names, Is.EqualTo(new[] { "advection", "thermodynamics", "explicit-gas-transport" }));
+            Assert.That(run.Result("again").TryGetProperty("changed", out var changed) && changed.GetBoolean(), Is.False);
+            Assert.That(run.ErrorCode("duplicate"), Is.EqualTo("invalidSolverLayout"));
+            Assert.That(run.ErrorCode("unknown"), Is.EqualTo("invalidSolverLayout"));
+            Assert.That(run.ErrorCode("noEnabled"), Is.EqualTo("missingProperty"));
+            Assert.That(run.ErrorCode("missing"), Is.EqualTo("missingProperty"));
+            Assert.That(run.Result("after").GetProperty("solvers").GetArrayLength(), Is.EqualTo(3));
+        });
+    }
+
+    [Test]
+    public async Task TransportPreset_SwapsOnlyTheTransportStages()
+    {
+        var run = await RunAsync(
+            CreateProject("create", 2, 1, 1),
+            Request("off", "setSolverEnabled", "\"solver\":\"thermodynamics\",\"enabled\":false"),
+            Request("legacy", "applyTransportPreset", "\"transportModel\":\"legacy\""),
+            Request("list", "listSolvers"),
+            Request("bad", "applyTransportPreset", "\"transportModel\":\"plasma\""),
+            Request("none", "applyTransportPreset"));
+
+        var steps = run.Result("list").GetProperty("solvers").EnumerateArray()
+            .Select(static step => (step.GetProperty("name").GetString(), step.GetProperty("isEnabled").GetBoolean()))
+            .ToArray();
+        Assert.Multiple(() =>
+        {
+            Assert.That(steps.Select(static step => step.Item1), Does.Contain("advection").And.Contain("boundary-flow").And.Not.Contain("euler-flow"));
+            Assert.That(steps.Single(static step => step.Item1 == "thermodynamics").Item2, Is.False);
+            Assert.That(run.ErrorCode("bad"), Is.EqualTo("invalidTransportModel"));
+            Assert.That(run.ErrorCode("none"), Is.EqualTo("missingProperty"));
+        });
+    }
+
+    [Test]
     public async Task Portals_ConnectTwoSimulationsAndAppearInTheLinkList()
     {
         var run = await RunAsync(

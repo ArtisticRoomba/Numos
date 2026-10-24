@@ -78,6 +78,8 @@ internal sealed partial class HeadlessOperations
             "listSolvers" => ListSolvers(),
             "setSolverEnabled" => SetSolverEnabled(request),
             "resetSolvers" => ResetSolvers(request),
+            "setSolverLayout" => SetSolverLayout(request),
+            "applyTransportPreset" => ApplyTransportPreset(request),
             "createPortal" => CreatePortal(request),
             "createDock" => CreateDock(request),
             "destroyLinkSet" => DestroyLinkSet(request),
@@ -107,7 +109,8 @@ internal sealed partial class HeadlessOperations
         "sealChunk", "wakeChunk", "sleepChunk", "fillChunk", "setVoxelClassification", "setVoxelTemperature",
         "setVoxelMomentum", "injectGas", "clearVoxelGas",
         "editRegion", "sampleVoxels", "addGas", "removeGas", "listGases",
-        "updateConfig", "getConfig", "listSolvers", "setSolverEnabled", "resetSolvers", "createPortal", "createDock",
+        "updateConfig", "getConfig", "listSolvers", "setSolverEnabled", "resetSolvers", "setSolverLayout",
+        "applyTransportPreset", "createPortal", "createDock",
         "destroyLinkSet", "listLinkSets", "tick", "stepForward", "seekTick", "returnToHead", "createBranch",
         "selectBranch", "continueBranch", "listBranches", "timelineInfo", "saveReplay", "observe", "exportField",
         "renderSlice"
@@ -768,6 +771,53 @@ internal sealed partial class HeadlessOperations
     {
         bool full = _session.ResetSolvers(ParseTransportModel(request.TransportModel));
         return Result(new CommandResult { Changed = full });
+    }
+
+    private CommandExecution SetSolverLayout(HeadlessRequest request)
+    {
+        if (request.Stages is not { } stages)
+            throw Missing("stages");
+
+        var layout = new AtmosWorldSolverLayoutEntry[stages.Length];
+        for (int index = 0; index < stages.Length; index++)
+        {
+            string property = $"stages[{index}]";
+            if (stages[index] is not { } stage || string.IsNullOrWhiteSpace(stage.Name))
+                throw Missing(property + ".name");
+
+            layout[index] = new AtmosWorldSolverLayoutEntry(stage.Name, Require(stage.Enabled, property + ".enabled"));
+        }
+
+        var before = _session.GetSolverSteps();
+        if (!_session.SetSolverLayout(layout))
+        {
+            throw new HeadlessRequestException(
+                "invalidSolverLayout",
+                "The solver layout was rejected. Name each stage once, use built-in or registered stage names, " +
+                "and list every custom stage. Call getLog for the reason.");
+        }
+
+        return Result(new CommandResult { Changed = !SameLayout(before, _session.GetSolverSteps()) });
+    }
+
+    private CommandExecution ApplyTransportPreset(HeadlessRequest request)
+    {
+        var model = ParseTransportModel(request.TransportModel) ?? throw Missing("transportModel");
+        var before = _session.GetSolverSteps();
+        if (!_session.ApplyTransportPreset(model))
+        {
+            throw new HeadlessRequestException(
+                "invalidSolverLayout",
+                "The transport preset was rejected. Call getLog for the reason.");
+        }
+
+        return Result(new CommandResult { Changed = !SameLayout(before, _session.GetSolverSteps()) });
+    }
+
+    private static bool SameLayout(IReadOnlyList<AtmosWorldSolverStep> first, IReadOnlyList<AtmosWorldSolverStep> second)
+    {
+        return first.Select(static step => (step.Name, step.IsEnabled))
+            .SequenceEqual(second.Select(static step => (step.Name, step.IsEnabled)));
     }
 
     private AtmosCellRef CellRef(LinkEndpoint endpoint, string property)
