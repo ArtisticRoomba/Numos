@@ -156,8 +156,10 @@ state: they are checkpointed, hashed, and settable through `AtmosSimulation.SetV
 operation). Their one invariant is that an empty voxel has zero momentum. Every path that empties a voxel (vacuum
 cleanup, a solid or void classification, a mixture write that removes the last mole) zeroes them, and a momentum write
 to a voxel with no gas is ignored. Adding gas leaves the stored momentum alone, which simply lowers the implied
-velocity. `euler-flow` reads and writes them every tick (§5). The legacy transport stages leave them alone, so
-under that model they only ever hold what the host wrote.
+velocity. Partial gas removal, gas reactions, and phase change do not scale momentum either. The derived velocity
+`p / m` therefore rises when they remove mass, and the Euler stage clamps it with `MaxVelocity`. `euler-flow` reads
+and writes the arrays every tick (§5). The legacy transport stages leave them alone, so under that model they only
+ever hold what the host wrote.
 
 **Heat capacity, energy, and pressure.** A voxel's heat capacity, sensible energy, and pressure all follow from its
 composition. Every gas uses an effective molar heat capacity at constant volume, falling back to a configured default
