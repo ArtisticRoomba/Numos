@@ -38,6 +38,7 @@ public partial class SimulationViewer
     private string? _timelineError;
     private int _timelineFirstTick;
     private AtmosWorldRecordedOperation? _timelineOperation;
+    private readonly TimelineOperationIndex _operationIndex = new();
     private int _timelineVisibleTicks = 200;
 
     private void RenderTimelinePanel()
@@ -130,12 +131,12 @@ public partial class SimulationViewer
         ImGuiExtensions.QuestionTooltip(
             "Shows every session branch as an aligned history lane. Operation and checkpoint detail remains on the selected branch.");
 
-        IReadOnlyList<AtmosWorldRecordedOperation> operations = timeline.Operations;
+        _operationIndex.Update(timeline.Operations);
 
         if (_showBranchHistory)
-            DrawBranchHistoryTrack(timeline, operations);
+            DrawBranchHistoryTrack(timeline);
         else
-            DrawTimelineTrack(timeline, operations);
+            DrawTimelineTrack(timeline);
 
         if (_pendingScrubTick.HasValue && ImGui.IsMouseReleased(ImGuiMouseButton.Left))
         {
@@ -146,7 +147,7 @@ public partial class SimulationViewer
         }
 
         DrawReplayStatus(timeline);
-        DrawTimelineOperations(timeline, operations);
+        DrawTimelineOperations(timeline);
     }
 
     private static void DrawTimelinePositionReadout(
@@ -327,46 +328,16 @@ public partial class SimulationViewer
         ImGui.TextDisabled(explanation);
     }
 
-    private void DrawTimelineOperations(
-        AtmosWorldReplayTimeline timeline,
-        IReadOnlyList<AtmosWorldRecordedOperation> operations)
+    private void DrawTimelineOperations(AtmosWorldReplayTimeline timeline)
     {
-        AtmosWorldRecordedOperation[] tickOperations = operations
-            .Where(operation => operation.AfterTick == timeline.Position.Tick)
-            .OrderBy(operation => operation.Sequence)
-            .ToArray();
+        int group = _operationIndex.FindGroup(timeline.Position.Tick);
+        int tickOperationCount = group < 0 ? 0 : _operationIndex.GetCount(group);
 
-        ImGui.SeparatorText($"Done in tick {timeline.Position.Tick} ({tickOperations.Length})");
-        if (tickOperations.Length == 0)
-        {
+        ImGui.SeparatorText($"Done in tick {timeline.Position.Tick} ({tickOperationCount})");
+        if (tickOperationCount == 0)
             ImGui.TextDisabled("No external operations were recorded in this tick.");
-        }
-        else if (ImGui.BeginTable(
-                     "TickOperations##replay",
-                     2,
-                     ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp))
-        {
-            ImGui.TableSetupColumn("ORDER", ImGuiTableColumnFlags.WidthFixed, 72f);
-            ImGui.TableSetupColumn("OPERATION");
-            ImGui.TableHeadersRow();
-
-            for (int index = 0; index < tickOperations.Length; index++)
-            {
-                var operation = tickOperations[index];
-                ImGui.TableNextRow();
-                ImGui.TableSetColumnIndex(0);
-                ImGui.TextDisabled($"{index + 1}");
-                ImGui.TableSetColumnIndex(1);
-                if (ImGui.Selectable(
-                        $"{operation.Code}##operation-{operation.Sequence}",
-                        _timelineOperation == operation))
-                {
-                    _timelineOperation = operation;
-                }
-            }
-
-            ImGui.EndTable();
-        }
+        else
+            DrawTickOperationList(group, tickOperationCount);
 
         if (_timelineOperation is { } selected)
         {
@@ -381,7 +352,7 @@ public partial class SimulationViewer
                 ImGui.TableNextColumn();
                 ImGuiExtensions.StatusField("DONE IN TICK", selected.AfterTick.ToString());
                 ImGui.TableNextColumn();
-                ImGuiExtensions.StatusField("ORDER", GetOperationOrder(operations, selected).ToString());
+                ImGuiExtensions.StatusField("ORDER", _operationIndex.GetOrder(selected).ToString());
                 ImGui.EndTable();
             }
 
@@ -397,22 +368,54 @@ public partial class SimulationViewer
         }
     }
 
-    private static int GetOperationOrder(
-        IReadOnlyList<AtmosWorldRecordedOperation> operations,
-        AtmosWorldRecordedOperation selected)
+    /// <summary>
+    ///     Draws the operations of one tick in a scrolling child that submits only the visible rows.
+    /// </summary>
+    /// <remarks>
+    ///     Every row is one <see cref="ImGui.Selectable(string, bool)" /> line, so the row height is the text line
+    ///     height plus the item spacing. The loop skips the hidden rows with a cursor jump and extends the scroll
+    ///     extent with an empty item. The per-frame cost is the visible row count, not the operation count.
+    /// </remarks>
+    private void DrawTickOperationList(int group, int count)
     {
-        int order = 0;
-        foreach (var operation in operations)
+        const int maxVisibleRows = 8;
+        float rowHeight = ImGui.GetTextLineHeightWithSpacing();
+        float headerHeight = rowHeight;
+        float listHeight = headerHeight + Math.Min(count, maxVisibleRows) * rowHeight + 4f;
+        if (!ImGui.BeginChild("TickOperations##replay", new Vector2(0f, listHeight), ImGuiChildFlags.Borders))
         {
-            if (operation.AfterTick != selected.AfterTick)
-                continue;
-
-            order++;
-            if (operation.Sequence == selected.Sequence)
-                return order;
+            ImGui.EndChild();
+            return;
         }
 
-        return order;
+        const float operationColumn = 72f;
+        ImGui.TextDisabled("ORDER");
+        ImGui.SameLine(operationColumn);
+        ImGui.TextDisabled("OPERATION");
+        ImGui.Separator();
+        float firstRowY = ImGui.GetCursorPosY();
+
+        float scroll = ImGui.GetScrollY();
+        float viewport = ImGui.GetWindowHeight();
+        int first = Math.Clamp((int)MathF.Floor(scroll / rowHeight), 0, count - 1);
+        int last = Math.Min(count, first + (int)MathF.Ceiling(viewport / rowHeight) + 2);
+        ImGui.SetCursorPosY(firstRowY + first * rowHeight);
+        for (int index = first; index < last; index++)
+        {
+            var operation = _operationIndex.GetOperation(group, index);
+            ImGui.TextDisabled($"{index + 1}");
+            ImGui.SameLine(operationColumn);
+            if (ImGui.Selectable(
+                    $"{operation.Code}##operation-{operation.Sequence}",
+                    _timelineOperation is { } current && current.Sequence == operation.Sequence))
+            {
+                _timelineOperation = operation;
+            }
+        }
+
+        ImGui.SetCursorPosY(firstRowY + count * rowHeight);
+        ImGui.Dummy(Vector2.Zero);
+        ImGui.EndChild();
     }
 
     private void DrawRecordedMixture(SetVoxelMixtureOperation mixture)
@@ -566,7 +569,7 @@ public partial class SimulationViewer
         return value.ToString("R", CultureInfo.InvariantCulture);
     }
 
-    private void DrawTimelineTrack(AtmosWorldReplayTimeline timeline, IReadOnlyList<AtmosWorldRecordedOperation> operations)
+    private void DrawTimelineTrack(AtmosWorldReplayTimeline timeline)
     {
         var origin = ImGui.GetCursorScreenPos();
         float width = Math.Max(1f, ImGui.GetContentRegionAvail().X);
@@ -654,28 +657,44 @@ public partial class SimulationViewer
             }
         }
 
-        var operationOrdersByTick = new Dictionary<ulong, int>();
-        foreach (var operation in operations)
+        // One marker per tick that has operations. A tick with many operations gets a thicker marker.
+        // Markers that land on the same pixel column as the previous one are skipped, so the draw cost
+        // is bounded by the track width and not by the operation count.
+        int lastColumn = int.MinValue;
+        int visibleGroup = _operationIndex.LowerBound((ulong)Math.Max(0, _timelineFirstTick - 1));
+        for (; visibleGroup < _operationIndex.TickCount; visibleGroup++)
         {
-            operationOrdersByTick.TryGetValue(operation.AfterTick, out int operationOrder);
-            operationOrder++;
-            operationOrdersByTick[operation.AfterTick] = operationOrder;
-            float x = Map(operation.AfterTick + 0.5);
+            ulong operationTick = _operationIndex.GetTick(visibleGroup);
+            if (operationTick > lastVisibleTick)
+                break;
+
+            float x = Map(operationTick + 0.5);
             if (x < origin.X || x > origin.X + width) continue;
 
-            draw.AddLine(
-                new Vector2(x, origin.Y + markerTop + 16f),
-                new Vector2(x, origin.Y + markerTop + 36f),
-                operationColor,
-                2f);
+            int operationCount = _operationIndex.GetCount(visibleGroup);
+            int column = (int)MathF.Floor(x);
+            if (column != lastColumn)
+            {
+                lastColumn = column;
+                draw.AddLine(
+                    new Vector2(x, origin.Y + markerTop + 16f),
+                    new Vector2(x, origin.Y + markerTop + 36f),
+                    operationColor,
+                    operationCount > 1 ? 3f : 2f);
+            }
 
             if (hovered &&
                 Math.Abs(ImGui.GetMousePos().X - x) < 4 &&
                 ImGui.GetMousePos().Y > origin.Y + markerTop + 12f &&
                 ImGui.GetMousePos().Y < origin.Y + plotBottom)
             {
-                ImGui.SetTooltip($"{operation.Code}\nDone in tick {operation.AfterTick}\nOrder {operationOrder}");
-                if (ImGui.IsMouseClicked(ImGuiMouseButton.Left)) _timelineOperation = operation;
+                var first = _operationIndex.GetFirstOperation(visibleGroup);
+                ImGui.SetTooltip(
+                    operationCount == 1
+                        ? $"{first.Code}\nDone in tick {operationTick}\nOrder 1"
+                        : $"{operationCount} operations in tick {operationTick}");
+
+                if (ImGui.IsMouseClicked(ImGuiMouseButton.Left)) _timelineOperation = first;
             }
         }
 
@@ -740,9 +759,7 @@ public partial class SimulationViewer
         draw.PopClipRect();
     }
 
-    private void DrawBranchHistoryTrack(
-        AtmosWorldReplayTimeline timeline,
-        IReadOnlyList<AtmosWorldRecordedOperation> operations)
+    private void DrawBranchHistoryTrack(AtmosWorldReplayTimeline timeline)
     {
         IReadOnlyList<ReplayBranchInfo> branches = _session.Branches!.Branches;
         float lineHeight = ImGui.GetTextLineHeight();
@@ -849,17 +866,29 @@ public partial class SimulationViewer
                 selectedY = y;
         }
 
-        foreach (var operation in operations)
+        // One marker per tick with operations, skipping repeated pixel columns, as in the main track.
+        int lastOperationColumn = int.MinValue;
+        int operationGroup = _operationIndex.LowerBound((ulong)Math.Max(0, _timelineFirstTick - 1));
+        for (; operationGroup < _operationIndex.TickCount; operationGroup++)
         {
-            float x = Map(operation.AfterTick + 0.5);
+            ulong operationTick = _operationIndex.GetTick(operationGroup);
+            if (operationTick > lastVisibleTick)
+                break;
+
+            float x = Map(operationTick + 0.5);
             if (x < graphLeft || x > graphLeft + graphWidth)
                 continue;
 
+            int column = (int)MathF.Floor(x);
+            if (column == lastOperationColumn)
+                continue;
+
+            lastOperationColumn = column;
             draw.AddLine(
                 new Vector2(x, selectedY - 9f),
                 new Vector2(x, selectedY + 9f),
                 operationColor,
-                2f);
+                _operationIndex.GetCount(operationGroup) > 1 ? 3f : 2f);
         }
 
         foreach (var point in timeline.Checkpoints)
