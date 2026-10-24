@@ -30,6 +30,8 @@ public sealed class GasReactionConfig : IAtmosSolverConfiguration
     // and the IReadOnlyList indexer call.
     private readonly JoulePerMole[] _energyBalances;
 
+    private readonly bool[] _requiresIgnition;
+
     /// <summary>
     ///     Captures ordered reaction definitions without retaining mutable source collections.
     /// </summary>
@@ -44,11 +46,18 @@ public sealed class GasReactionConfig : IAtmosSolverConfiguration
         StandardReactions = Array.AsReadOnly(standardReactions?.ToArray() ?? []);
 
         _energyBalances = new JoulePerMole[LinearReactions.Count + StandardReactions.Count];
+        _requiresIgnition = new bool[LinearReactions.Count + StandardReactions.Count];
         for (int i = 0; i < LinearReactions.Count; i++)
+        {
             _energyBalances[i] = LinearReactions[i].EnergyBalance;
+            _requiresIgnition[i] = LinearReactions[i].RequiresIgnition;
+        }
 
         for (int i = 0; i < StandardReactions.Count; i++)
+        {
             _energyBalances[LinearReactions.Count + i] = StandardReactions[i].EnergyBalance;
+            _requiresIgnition[LinearReactions.Count + i] = StandardReactions[i].RequiresIgnition;
+        }
     }
 
     /// <summary>
@@ -131,6 +140,8 @@ public sealed class GasReactionConfig : IAtmosSolverConfiguration
     }
 
     internal JoulePerMole GetEnergyBalance(int reactionId) => _energyBalances[reactionId];
+
+    internal bool GetReactionIsIgnition(int reactionId) => _requiresIgnition[reactionId];
 
     // Unlike GetEnergyBalance, this cannot be precomputed at construction.
     // It depends on the caller's temperature, which changes for every voxel.

@@ -547,6 +547,53 @@ internal sealed partial class AtmosKernel
     }
 
     /// <summary>
+    ///     Adds a one tick ignition source to a voxel and wakes its chunk.
+    /// </summary>
+    /// <param name="position">The target chunk's grid position.</param>
+    /// <param name="localVoxelIndex">The voxel's zero-based index in the chunk's flattened storage.</param>
+    /// <param name="temperature">The temperature of the ignition source</param>
+    /// <param name="volume">The volume of the ignition source</param>
+    internal void IgniteVoxel(
+        Int3 position, ushort localVoxelIndex, Kelvin temperature, CubicMetre volume)
+    {
+        lock (StateGate)
+        {
+            var chunk = GetChunk(position);
+            ValidateVoxelIndex(chunk, localVoxelIndex);
+            ValidateIgnition(temperature, volume);
+
+            int classification = chunk.VoxelRoomMap[localVoxelIndex];
+            if (classification == VoxelClassification.RoomSolid || classification == VoxelClassification.RoomVoid)
+                return;
+
+            chunk.Wake();
+            _defaultSolvers.SetIgnitionSource(chunk, localVoxelIndex, temperature, volume);
+            if (ShouldRecord) RecordOperation(new SetIgnitionSourceOperation(position, localVoxelIndex, temperature, volume));
+        }
+    }
+
+    /// <summary>
+    ///     Adds a one tick ignition source to a voxel and wakes its chunk.
+    /// </summary>
+    /// <param name="position">The target chunk's grid position.</param>
+    /// <param name="x">The zero-based local x-coordinate.</param>
+    /// <param name="y">The zero-based local y-coordinate.</param>
+    /// <param name="z">The zero-based local z-coordinate.</param>
+    /// <param name="temperature">The temperature of the ignition source</param>
+    /// <param name="volume">The volume of the ignition source</param>
+    internal void IgniteVoxel(
+        Int3 position, int x, int y, int z, Kelvin temperature, CubicMetre volume)
+    {
+        lock (StateGate)
+        {
+            var chunk = GetChunk(position);
+            IgniteVoxel(position, GetValidatedVoxelIndex(chunk, x, y, z), temperature, volume);
+        }
+    }
+
+
+
+    /// <summary>
     ///     Wakes a chunk so its gas-bearing voxels participate in subsequent simulation ticks.
     /// </summary>
     /// <param name="position">The target chunk's grid position.</param>
@@ -663,5 +710,19 @@ internal sealed partial class AtmosKernel
                 temperature,
                 "Temperature must be nonnegative and finite.");
         }
+    }
+
+    private void ValidateIgnition(Kelvin temperature, CubicMetre volume)
+    {
+        if (!float.IsFinite(temperature) || temperature < 0f)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(temperature),
+                temperature,
+                "Temperature must be nonnegative and finite.");
+        }
+
+        if (!float.IsFinite(volume) || volume <= 0f)
+            throw new ArgumentOutOfRangeException(nameof(volume), volume, "Volume must be positive and finite.");
     }
 }

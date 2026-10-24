@@ -72,4 +72,10 @@ public record struct GasProperties
     /// </summary>
     [GasCheckpointField(0)]
     public string Name;
+
+    /// <summary>
+    ///     Reference thermal conductivity for this gas at 300K.
+    /// </summary>
+    [GasCheckpointField(7)]
+    public WattsPerMeterKelvin ThermalConductivity;
 }

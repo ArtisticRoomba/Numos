@@ -56,8 +56,10 @@ public enum AtmosOperationCode : ushort
     ///     Apply resolved voxel gas and thermal state independent of detached container identity.
     /// </summary>
     SetVoxelMixture = 12,
-
-    // 13 is reserved. The Euler branch uses it for SetVoxelMomentum.
+    /// <summary>
+    ///     Ignite a voxel for one tick.
+    /// </summary>
+    SetIgnitionSource = 13,
 
     /// <summary>
     ///     Edit a box of voxels across chunks in one operation.

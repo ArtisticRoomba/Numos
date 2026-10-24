@@ -47,6 +47,12 @@ public static class AtmosConfigDefaults
     /// </summary>
     public const Scalar DefaultDiffusionCoefficient = 0.02f;
 
+
+    /// <summary>
+    ///     Default reference thermal conductivity for unregistered gas IDs.
+    /// </summary>
+    public const WattsPerMeterKelvin DefaultThermalConductivity = 0.024f;
+
     /// <summary>
     ///     Default modeled temperature of space, in kelvins (K).
     /// </summary>

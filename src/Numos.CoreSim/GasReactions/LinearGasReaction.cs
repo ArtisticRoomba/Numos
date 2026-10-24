@@ -101,6 +101,11 @@ public readonly partial record struct LinearGasReaction
 
     private FrozenSet<LinearSpeedFactor> SpeedFactors { get; }
 
+    /// <summary>
+    ///     Whether the reaction should use the ignition system.
+    /// </summary>
+    internal bool RequiresIgnition { get; }
+
     internal void AppendHash(ref AtmosStateHasher hash)
     {
         hash.Add(EnergyBalance);
@@ -128,6 +133,7 @@ public readonly partial record struct LinearGasReaction
         foreach (var factor in SpeedFactors.OrderBy(static factor => factor.Gas.Name, StringComparer.Ordinal)
                      .ThenBy(static factor => factor.OrderKey))
             factor.AppendHash(ref hash);
+        hash.Add(RequiresIgnition);
     }
 
     internal bool SemanticallyEquals(LinearGasReaction other)
@@ -141,7 +147,8 @@ public readonly partial record struct LinearGasReaction
                HighStrict == other.HighStrict &&
                DictionaryEquals(Input, other.Input) &&
                DictionaryEquals(Output, other.Output) &&
-               SpeedFactors.SetEquals(other.SpeedFactors);
+               SpeedFactors.SetEquals(other.SpeedFactors) &&
+               RequiresIgnition.Equals(other.RequiresIgnition);
     }
 
     private static bool DictionaryEquals(
