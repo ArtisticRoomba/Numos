@@ -34,7 +34,8 @@ public sealed partial class AtmosSimulation
     /// </remarks>
     /// <exception cref="ArgumentException">
     ///     <paramref name="min" /> exceeds <paramref name="max" /> on an axis, a gas ID is not registered, an amount
-    ///     is not positive and finite, or a temperature or velocity is not finite or is negative.
+    ///     is not positive and finite, a temperature is not finite or is negative, or a velocity component is not
+    ///     finite.
     /// </exception>
     /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
     [PublicAPI]
