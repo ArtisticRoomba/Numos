@@ -8,7 +8,7 @@ Start with `Numos.API`. It is the supported facade around the simulator. It give
 Numos has two independently versioned package families:
 
 - The CoreSim family contains `Numos.Maths`, `Numos.CoreSim`, `Numos.API`, and `Numos.API.Dangerous`.
-- The Viewer family contains `Numos.SimDrawer` and `Numos.Viewer`.
+- The Viewer family contains `Numos.SimDrawer`, `Numos.Workbench`, and `Numos.Viewer`.
 
 Most consumers add only `Numos.API`. NuGet restores the CoreSim and maths packages it needs.
 
@@ -287,6 +287,10 @@ world.Solvers.Register("my-mod/fire", context =>
 with the gas. Without it, the field is scratch space that starts zeroed after every restore. Checkpoints store a
 rollback field's key, so you must give the key explicitly. Treat it like a save-format name and prefix it with your
 mod.
+
+`ClearOnSleep = true` resets the field's whole array when the chunk goes to sleep. `ClearOnVacuum = true` resets a
+voxel's element when that voxel becomes vacuum. Use them for scratch state that must not outlive the gas in a voxel.
+A fixed-length field ignores single-voxel vacuums and resets only when the whole chunk becomes vacuum.
 
 The accessors are C# 14 extension properties. A project pinned to an older `LangVersion` gets a compile error. The
 [technical documentation](atmospherics_technical_documentation.md#123-per-chunk-solver-state-with-chunkfieldt) covers
@@ -570,14 +574,42 @@ var voxel = simulation.GetVoxelSnapshot(chunk, localVoxelIndex: 0);
 
 A renderer that knows which revision it presented can call `TryGetVoxelSnapshot` to skip copying gas data when the chunk has not changed. `TryGetChunkHandles` lets a retained consumer refresh its handle list only when chunks are added or removed. Use these APIs instead of holding internal data or scanning the simulation every frame.
 
+`EditVoxelBox` changes a whole box of voxels in global voxel coordinates with one call and one recorded operation.
+Use it instead of a loop of per-voxel calls when you fill or reshape a region. The edit applies the selected parts in a
+fixed order: classification, gas removal, temperature, gas injection. It skips voxels in chunks that do not exist.
+
+```csharp
+var result = simulation.EditVoxelBox(
+    new Int3(0, 0, 0),
+    new Int3(63, 15, 0),
+    new AtmosVoxelBoxEdit
+    {
+        ClearGas = true,
+        Gases = [new AtmosGasAmount(airId, 0.04f)],
+        GasTemperatureK = 293.15f
+    });
+```
+
 ## Using the viewer
-`Numos.Viewer` is the optional desktop presentation layer, built with raylib and ImGui. It depends on `Numos.API` and `Numos.SimDrawer`. Its package includes the icon and ImGui layout assets the application needs.
+`Numos.Viewer` is the optional desktop presentation layer, built with raylib and ImGui. It depends on `Numos.API`, `Numos.SimDrawer`, and `Numos.Workbench`. Its package includes the icon and ImGui layout assets the application needs.
+
+`Numos.Workbench` is the UI-free session layer under the viewer. `WorkbenchSession` owns one project (world, configuration, replay timeline, and branches). It runs every project, chunk, voxel, topology, solver, timeline, and replay-file operation. A front end calls the session and reports its failures.
+
+The viewer is one front end. `Numos.Headless` is the other, so a script can do whatever a person does in the viewer. See [headless runner](headless_runner.md).
+
+The session writes a server-style log. A front end streams it through `WorkbenchLog.EntryWritten`. The viewer shows it in the Messages panel. The headless runner prints it to stderr and serves it to socket clients through the `getLog` operation.
 
 ```shell
 dotnet add package Numos.Viewer --prerelease
 ```
 
 The viewer needs a desktop environment with graphics support. To host it from C#, construct a `SimulationViewer` and call `Run()`. The About dialog shows the Viewer and CoreSim package versions, source references, and commit hashes, so a tester can identify the exact build.
+
+The 3D viewport keeps one mesh per chunk on the GPU, so a scene of a million voxels stays interactive. Immediate-mode drawing would send every voxel face to the driver on every frame. A mesh holds only the faces that touch empty or filtered space. The viewer rebuilds a mesh when the chunk's visible voxels change. A tick that changes only colors rewrites the color buffer and keeps the positions. A new scene uploads over a few frames, so large meshes do not stall the window.
+
+The 3D view outlines voxels only for a focused chunk or a scene of at most 20,000 voxels, because each outline costs one draw call per voxel. The 2D view outlines cells only when a cell is at least 8 pixels wide.
+
+The 2D slice view shows one plane through every chunk. The Axis and Slice controls pick the plane by global voxel coordinate. The view draws the plane as one texture. Scroll to zoom and drag with the middle button to pan. "Fit Plane" shows the whole plane again. Focusing a chunk in the 3D view moves the plane into that chunk if needed and frames the chunk. A cell that no chunk covers stays empty. The plane can be at most 16,384 cells wide or high.
 
 ## Dangerous API
 `Numos.API.Dangerous` is a separate package from `Numos.API` by design.

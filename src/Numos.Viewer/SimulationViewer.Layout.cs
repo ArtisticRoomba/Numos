@@ -1,5 +1,6 @@
 using ImGuiNET;
 using Numos.Viewer.Ui;
+using Numos.Workbench;
 
 namespace Numos.Viewer;
 
@@ -45,14 +46,14 @@ public partial class SimulationViewer
     {
         if (_userLayoutPath == null)
         {
-            WriteMessage(ViewerLogLevel.Error, "Layout", "The ImGui layout has not been initialized yet.");
+            WriteMessage(WorkbenchLogLevel.Error, "Layout", "The ImGui layout has not been initialized yet.");
             return;
         }
 
         try
         {
             ImGui.SaveIniSettingsToDisk(_userLayoutPath);
-            WriteMessage(ViewerLogLevel.Info, "Layout", "Saved. This layout will be restored at the next launch.");
+            WriteMessage(WorkbenchLogLevel.Info, "Layout", "Saved. This layout will be restored at the next launch.");
         }
         catch (Exception ex)
         {
@@ -69,14 +70,14 @@ public partial class SimulationViewer
     {
         if (_packagedDefaultLayoutPath == null)
         {
-            WriteMessage(ViewerLogLevel.Error, "Layout", "The packaged default layout has not been initialized yet.");
+            WriteMessage(WorkbenchLogLevel.Error, "Layout", "The packaged default layout has not been initialized yet.");
             return;
         }
 
         try
         {
             ImGui.SaveIniSettingsToDisk(_packagedDefaultLayoutPath);
-            WriteMessage(ViewerLogLevel.Info, "Layout", "Saved as the packaged default for first-time launches.");
+            WriteMessage(WorkbenchLogLevel.Info, "Layout", "Saved as the packaged default for first-time launches.");
         }
         catch (Exception ex)
         {

@@ -7,6 +7,7 @@
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
         <OutputType>WinExe</OutputType>
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
         <RootNamespace>Numos.Viewer</RootNamespace>
         <AssemblyName>Numos.Viewer</AssemblyName>
         <PackageId>Numos.Viewer</PackageId>
@@ -23,6 +24,7 @@
         <!-- PrivateAssets="none" lets the Numos.API source generator reach consumers of this package. -->
         <ProjectReference Include="..\Numos.API\Numos.API.csproj" PrivateAssets="none"/>
         <ProjectReference Include="..\Numos.SimDrawer\Numos.SimDrawer.csproj"/>
+        <ProjectReference Include="..\Numos.Workbench\Numos.Workbench.csproj"/>
         <ProjectReference Include="..\Numos.Serialization\Numos.Serialization.csproj" PrivateAssets="none"/>
         <ProjectReference Include="..\Numos.Serialization.FileSystem\Numos.Serialization.FileSystem.csproj" PrivateAssets="none"/>
     </ItemGroup>

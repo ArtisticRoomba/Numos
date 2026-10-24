@@ -140,6 +140,77 @@ public sealed record SleepChunkOperation(Int3 Position) : AtmosOperation
 }
 
 /// <summary>
+///     The optional parts of an <see cref="EditVoxelBoxOperation" />.
+/// </summary>
+/// <remarks>
+///     <para>
+///         The kernel applies the parts in the order of this list: classification, gas removal, temperature, gas
+///         injection. Gas injection has no flag, because a nonempty gas list selects it.
+///     </para>
+///     <para>
+///         The flag value 8 is reserved for a velocity part. This build rejects it.
+///     </para>
+/// </remarks>
+[Flags]
+public enum AtmosVoxelBoxParts : byte
+{
+    /// <summary>
+    ///     No optional part.
+    /// </summary>
+    None = 0,
+
+    /// <summary>
+    ///     Assign the classification to every voxel.
+    /// </summary>
+    Classification = 1,
+
+    /// <summary>
+    ///     Remove the gas from every air voxel before anything is added.
+    /// </summary>
+    ClearGas = 2,
+
+    /// <summary>
+    ///     Store the voxel temperature in every voxel.
+    /// </summary>
+    Temperature = 4
+}
+
+/// <summary>
+///     Edits every voxel of a box in global voxel coordinates with one recorded operation.
+/// </summary>
+/// <remarks>
+///     <para>
+///         Voxels in chunks that do not exist are skipped. The kernel visits the existing chunks in z, y, x order of
+///         their grid positions. Inside a chunk it applies the parts in the order of <see cref="AtmosVoxelBoxParts" />.
+///         The result equals the same edit made with one per-voxel call for each part and voxel.
+///     </para>
+///     <para>
+///         A field is read only when its part is selected. The other fields hold zero.
+///     </para>
+/// </remarks>
+/// <param name="Min">Inclusive minimum corner, in global voxel coordinates.</param>
+/// <param name="Max">Inclusive maximum corner, in global voxel coordinates.</param>
+/// <param name="Parts">The selected parts.</param>
+/// <param name="Classification">The classification to assign when <see cref="AtmosVoxelBoxParts.Classification" /> is set.</param>
+/// <param name="VoxelTemperature">The stored temperature, in kelvins, when <see cref="AtmosVoxelBoxParts.Temperature" /> is set.</param>
+/// <param name="GasTemperature">The temperature of the injected gas, in kelvins. It matters when <paramref name="Gases" /> is not empty.</param>
+/// <param name="Gases">The gases to add to every air voxel, in injection order. Each amount is positive and finite.</param>
+public sealed record EditVoxelBoxOperation(
+    Int3 Min,
+    Int3 Max,
+    AtmosVoxelBoxParts Parts,
+    VoxelClassification Classification,
+    Kelvin VoxelTemperature,
+    Kelvin GasTemperature,
+    IReadOnlyList<AtmosGasAmount> Gases) : AtmosOperation
+{
+    /// <inheritdoc />
+    public override AtmosOperationCode Code => AtmosOperationCode.EditVoxelBox;
+
+    internal override void Apply(AtmosKernel kernel) => kernel.Apply(this);
+}
+
+/// <summary>
 ///     Sets a voxel's resolved gas and thermal state, including caches and channel order, independent of detached
 ///     mixture identity.
 /// </summary>

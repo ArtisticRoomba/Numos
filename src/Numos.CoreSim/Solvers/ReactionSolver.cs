@@ -97,9 +97,9 @@ internal class ReactionSolver : IAtmosSolverStage
 
         _anyFullyIgnited = false;
 
-        ParallelHelper.ForEach<AtmosChunk, ProcessChunkAction>(
-            context.Chunks,
-            new ProcessChunkAction(this, context.TickConfig, tables, awakeChunkCount));
+        ParallelPhase.Run(
+            context.Chunks.Length,
+            new ProcessChunkAction(this, context.Chunks, context.TickConfig, tables, awakeChunkCount));
 
         if (IgnitionTransferEnabled && _anyFullyIgnited)
         {
@@ -341,10 +341,7 @@ internal class ReactionSolver : IAtmosSolverStage
         Mole[] mixtures = ArrayPool<Mole>.Shared.Rent(checked(activeAirCount * mixtureLength));
         Mole[][]? reactionFeedbacks = reactionCount == null ? null : ArrayPool<Mole[]>.Shared.Rent(activeAirCount);
         Kelvin[] newTemps = ArrayPool<Kelvin>.Shared.Rent(activeAirCount);
-        ParallelHelper.For(
-            0,
-            activeAirCount,
-            new ProcessVoxelAction(
+        ParallelPhase.Run(activeAirCount, new ProcessVoxelAction(
                 this,
                 chunk,
                 deltaTime,
@@ -387,10 +384,7 @@ internal class ReactionSolver : IAtmosSolverStage
             }
 
             int trackedChannels = chunk.ActiveGasCount;
-            ParallelHelper.For(
-                0,
-                activeAirCount,
-                new WriteBackAction(chunk, mixtures, newTemps, mixtureLength, config, trackedChannels));
+            ParallelPhase.Run(activeAirCount, new WriteBackAction(chunk, mixtures, newTemps, mixtureLength, config, trackedChannels));
         }
         else
         {
@@ -974,13 +968,14 @@ internal class ReactionSolver : IAtmosSolverStage
 
     private readonly struct ProcessChunkAction(
         ReactionSolver solver,
+        AtmosChunk[] chunks,
         IAtmosConfig config,
         ReactionTables tables,
-        int awakeChunkCount) : IInAction<AtmosChunk>
+        int awakeChunkCount) : IAction
     {
-        public void Invoke(in AtmosChunk chunk)
+        public void Invoke(int index)
         {
-            solver.ProcessChunk(chunk, AtmosSolverConstants.FixedTimeStep, config, tables, awakeChunkCount: awakeChunkCount);
+            solver.ProcessChunk(chunks[index], AtmosSolverConstants.FixedTimeStep, config, tables, awakeChunkCount: awakeChunkCount);
         }
     }
 

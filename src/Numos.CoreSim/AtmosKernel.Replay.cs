@@ -203,6 +203,11 @@ internal sealed partial class AtmosKernel
         SleepChunk(op.Position);
     }
 
+    internal void Apply(EditVoxelBoxOperation op)
+    {
+        EditVoxelBox(op);
+    }
+
     internal void Apply(SetVoxelMixtureOperation op)
     {
         var chunk = GetChunk(op.Position);

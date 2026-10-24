@@ -1,7 +1,7 @@
 using Numos.API;
 using Numos.CoreSim;
 
-namespace Numos.Viewer.Tests;
+namespace Numos.Workbench.Tests;
 
 [TestFixture]
 public sealed class ReplayBranchSessionTests

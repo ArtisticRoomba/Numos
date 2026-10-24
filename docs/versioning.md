@@ -8,7 +8,7 @@ version adds backwards-compatible capabilities. A patch version contains backwar
 There are two release families. Each has its own version and Git tag.
 
 - CoreSim releases version `Numos.Maths`, `Numos.CoreSim`, `Numos.API`, and `Numos.API.Dangerous` together.
-- Viewer releases version `Numos.SimDrawer` and `Numos.Viewer` together.
+- Viewer releases version `Numos.SimDrawer`, `Numos.Workbench`, and `Numos.Viewer` together.
 
 The `[ChunkData]` source generator (`src/Numos.API.Generators`) is not a package. It ships inside `Numos.API` under
 `analyzers/dotnet/cs`, so it always carries the CoreSim version.

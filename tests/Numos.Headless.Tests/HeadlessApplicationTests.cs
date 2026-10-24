@@ -13,7 +13,7 @@ public sealed class HeadlessApplicationTests
     public async Task JsonlSession_DeterministicTwoCellFlow_ReportsExpectedGasMovement()
     {
         var run = await RunAsync(
-            CreateSimulationRequest("create", 2, 1, 1),
+            CreateProjectRequest("create", 2, 1, 1),
             Request(
                 "chunk",
                 "addChunk",
@@ -56,8 +56,8 @@ public sealed class HeadlessApplicationTests
     public async Task JsonlSession_MalformedJson_ReturnsStructuredErrorAndProcessesNextLine()
     {
         var run = await RunAsync(
-            "{\"protocolVersion\":1,\"id\":\"broken\",\"op\":",
-            CreateSimulationRequest("recovered", 1, 1, 1),
+            "{\"protocolVersion\":2,\"id\":\"broken\",\"op\":",
+            CreateProjectRequest("recovered", 1, 1, 1),
             Request("exit", "exit"));
 
         var errorResponse = run.Responses.Single(response =>
@@ -85,8 +85,8 @@ public sealed class HeadlessApplicationTests
         var run = await RunAsync(
             Request(
                 "typo",
-                "createSimulation",
-                "\"dimensions\":{\"x\":1,\"y\":1,\"z\":1},\"widht\":1"),
+                "createProject",
+                "\"chunkDimensions\":{\"x\":1,\"y\":1,\"z\":1},\"widht\":1"),
             "{\"id\":\"no-version\",\"op\":\"observe\"}",
             Request("exit", "exit"));
 
@@ -96,7 +96,7 @@ public sealed class HeadlessApplicationTests
         Assert.Multiple(() =>
         {
             Assert.That(run.ExitCode, Is.EqualTo(1));
-            Assert.That(response.GetProperty("op").GetString(), Is.EqualTo("createSimulation"));
+            Assert.That(response.GetProperty("op").GetString(), Is.EqualTo("createProject"));
             Assert.That(response.GetProperty("ok").GetBoolean(), Is.False);
             Assert.That(
                 response.GetProperty("error").GetProperty("code").GetString(),
@@ -113,7 +113,7 @@ public sealed class HeadlessApplicationTests
     public async Task JsonlSession_IncompleteCoordinate_IsRejectedWithoutMutatingState()
     {
         var run = await RunAsync(
-            CreateSimulationRequest("create", 1, 1, 1),
+            CreateProjectRequest("create", 1, 1, 1),
             Request("incomplete", "addChunk", "\"position\":{\"x\":7},\"classification\":1"),
             Request("observe", "observe"),
             Request("exit", "exit"));
@@ -137,7 +137,7 @@ public sealed class HeadlessApplicationTests
     public async Task InjectGas_UnregisteredGasId_IsRejected()
     {
         var run = await RunAsync(
-            CreateSimulationRequest("create", 1, 1, 1),
+            CreateProjectRequest("create", 1, 1, 1),
             AddChunkRequest("chunk", 0, 0, 0),
             Request(
                 "inject",
@@ -176,13 +176,14 @@ public sealed class HeadlessApplicationTests
         };
 
         startInfo.ArgumentList.Add(applicationPath);
+        startInfo.ArgumentList.Add("--quiet");
 
         using var process = Process.Start(startInfo) ??
                             throw new InvalidOperationException("Could not start the Headless process.");
 
         Task<string> standardOutput = process.StandardOutput.ReadToEndAsync();
         Task<string> standardError = process.StandardError.ReadToEndAsync();
-        await process.StandardInput.WriteLineAsync(CreateSimulationRequest("process-create", 1, 1, 1));
+        await process.StandardInput.WriteLineAsync(CreateProjectRequest("process-create", 1, 1, 1));
         await process.StandardInput.WriteLineAsync(Request("process-exit", "exit"));
         process.StandardInput.Close();
 
@@ -236,7 +237,7 @@ public sealed class HeadlessApplicationTests
     public async Task Observe_NonFiniteTemperature_EmitsValidJsonWithNamedValue()
     {
         var run = await RunAsync(
-            CreateSimulationRequest("create", 1, 1, 1),
+            CreateProjectRequest("create", 1, 1, 1),
             Request(
                 "chunk",
                 "addChunk",
@@ -279,7 +280,7 @@ public sealed class HeadlessApplicationTests
     public async Task Observe_ChunksCreatedOutOfOrder_ReturnsStableCoordinateOrder()
     {
         var run = await RunAsync(
-            CreateSimulationRequest("create", 1, 1, 1),
+            CreateProjectRequest("create", 1, 1, 1),
             AddChunkRequest("chunk-2", 2, 0, 0),
             AddChunkRequest("chunk-negative-later", -1, 4, 0),
             AddChunkRequest("chunk-negative-first", -1, 3, 5),
@@ -303,13 +304,13 @@ public sealed class HeadlessApplicationTests
                 }));
     }
 
-    private static string CreateSimulationRequest(string id, int width, int height, int depth)
+    private static string CreateProjectRequest(string id, int width, int height, int depth)
     {
         return Request(
             id,
-            "createSimulation",
+            "createProject",
             $"\"name\":\"Headless tests\"," +
-            $"\"dimensions\":{{\"x\":{width},\"y\":{height},\"z\":{depth}}}," +
+            $"\"chunkDimensions\":{{\"x\":{width},\"y\":{height},\"z\":{depth}}}," +
             "\"config\":{" +
             "\"defaultTemperatureFallbackK\":300," +
             "\"defaultMolarHeatCapacityAtConstantVolume\":1," +
@@ -352,10 +353,15 @@ public sealed class HeadlessApplicationTests
     private static string Request(string id, string op, string? payload = null)
     {
         string suffix = string.IsNullOrEmpty(payload) ? string.Empty : $",{payload}";
-        return $"{{\"protocolVersion\":1,\"id\":\"{id}\",\"op\":\"{op}\"{suffix}}}";
+        return $"{{\"protocolVersion\":2,\"id\":\"{id}\",\"op\":\"{op}\"{suffix}}}";
     }
 
-    private static async Task<RunResult> RunAsync(params string[] requests)
+    private static Task<RunResult> RunAsync(params string[] requests)
+    {
+        return RunWithArgsAsync(["--quiet"], requests);
+    }
+
+    private static async Task<RunResult> RunWithArgsAsync(string[] args, params string[] requests)
     {
         string inputText = string.Join('\n', requests) + "\n";
         using var input = new StringReader(inputText);
@@ -363,7 +369,7 @@ public sealed class HeadlessApplicationTests
         using var error = new StringWriter(CultureInfo.InvariantCulture);
 
         int exitCode = await HeadlessApplication.RunAsync(
-            [],
+            args,
             input,
             output,
             error,
@@ -453,7 +459,7 @@ public sealed class HeadlessApplicationTests
     {
         return response.ValueKind == JsonValueKind.Object &&
                response.TryGetProperty("protocolVersion", out var version) &&
-               version.GetInt32() == 1 &&
+               version.GetInt32() == 2 &&
                response.TryGetProperty("ok", out _);
     }
 

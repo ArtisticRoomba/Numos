@@ -1,12 +1,12 @@
 using Numos.API;
 using Numos.CoreSim.Replay;
 
-namespace Numos.Viewer;
+namespace Numos.Workbench;
 
 /// <summary>
-///     Keeps the Viewer's in-memory replay branches while one branch is attached to the live world.
+///     Keeps the in-memory replay branches while one branch is attached to the live world.
 /// </summary>
-internal sealed class ReplayBranchSession
+public sealed class ReplayBranchSession
 {
     private readonly List<ReplayBranch> _branches = [];
     private readonly ulong _checkpointInterval;
@@ -204,7 +204,7 @@ internal sealed class ReplayBranchSession
     }
 }
 
-internal readonly record struct ReplayBranchInfo(
+public readonly record struct ReplayBranchInfo(
     int Id,
     string Name,
     int? ParentId,

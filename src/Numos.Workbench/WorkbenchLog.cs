@@ -1,8 +1,11 @@
 using System.Text;
 
-namespace Numos.Viewer.Ui;
+namespace Numos.Workbench;
 
-internal enum ViewerLogLevel
+/// <summary>
+///     Severity of a log entry. `Warn` is the warning level.
+/// </summary>
+public enum WorkbenchLogLevel
 {
     Debug,
     Info,
@@ -11,18 +14,33 @@ internal enum ViewerLogLevel
     Fatal
 }
 
-internal sealed record ViewerLogEntry(
+/// <summary>
+///     One log line.
+/// </summary>
+/// <param name="Sequence">Position in the log, starting at 1.</param>
+/// <param name="Timestamp">Local wall-clock time of the write.</param>
+/// <param name="Level">Severity.</param>
+/// <param name="Source">The subsystem that wrote the entry.</param>
+/// <param name="Message">One-line text.</param>
+/// <param name="Details">Extra text such as a stack trace, or <see langword="null" />.</param>
+/// <param name="Tick">The world tick when the entry is about a project, or <see langword="null" />.</param>
+public sealed record WorkbenchLogEntry(
     long Sequence,
     DateTimeOffset Timestamp,
-    ViewerLogLevel Level,
+    WorkbenchLogLevel Level,
     string Source,
     string Message,
-    string? Details);
+    string? Details,
+    long? Tick = null);
 
-internal sealed class ViewerLog
+/// <summary>
+///     Bounded, thread-safe log. It works like a server output shell: sessions write entries, and front ends
+///     render the history or stream new entries through <see cref="EntryWritten" />.
+/// </summary>
+public sealed class WorkbenchLog
 {
     private const int MaximumEntries = 5_000;
-    private readonly List<ViewerLogEntry> _entries = [];
+    private readonly List<WorkbenchLogEntry> _entries = [];
     private readonly Lock _sync = new();
     private long _nextSequence;
     private int _unseenErrorCount;
@@ -38,18 +56,35 @@ internal sealed class ViewerLog
     /// </summary>
     public int UnseenWarningCount => Volatile.Read(ref _unseenWarningCount);
 
-    public void Write(ViewerLogLevel level, string source, string message, string? details = null)
+    /// <summary>
+    ///     Raised for each entry after it is stored.
+    /// </summary>
+    /// <remarks>
+    ///     Handlers run on the writing thread, outside the log's lock. A handler must be quick and must not throw.
+    /// </remarks>
+    public event Action<WorkbenchLogEntry>? EntryWritten;
+
+    /// <summary>
+    ///     Appends an entry. Blank messages are ignored.
+    /// </summary>
+    public void Write(
+        WorkbenchLogLevel level,
+        string source,
+        string message,
+        string? details = null,
+        long? tick = null)
     {
         if (string.IsNullOrWhiteSpace(message))
             return;
 
-        var entry = new ViewerLogEntry(
+        var entry = new WorkbenchLogEntry(
             Interlocked.Increment(ref _nextSequence),
             DateTimeOffset.Now,
             level,
             source,
             message.TrimEnd(),
-            details);
+            details,
+            tick);
 
         lock (_sync)
         {
@@ -58,10 +93,12 @@ internal sealed class ViewerLog
                 _entries.RemoveRange(0, _entries.Count - MaximumEntries);
         }
 
-        if (level >= ViewerLogLevel.Error)
+        if (level >= WorkbenchLogLevel.Error)
             Interlocked.Increment(ref _unseenErrorCount);
-        else if (level == ViewerLogLevel.Warn)
+        else if (level == WorkbenchLogLevel.Warn)
             Interlocked.Increment(ref _unseenWarningCount);
+
+        EntryWritten?.Invoke(entry);
     }
 
     /// <summary>
@@ -73,7 +110,7 @@ internal sealed class ViewerLog
         Interlocked.Exchange(ref _unseenWarningCount, 0);
     }
 
-    public ViewerLogEntry[] Snapshot()
+    public WorkbenchLogEntry[] Snapshot()
     {
         lock (_sync)
         {
@@ -90,15 +127,15 @@ internal sealed class ViewerLog
     }
 }
 
-internal sealed class ViewerConsoleWriter : TextWriter
+public sealed class WorkbenchConsoleWriter : TextWriter
 {
     private readonly StringBuilder _buffer = new();
-    private readonly ViewerLogLevel _level;
-    private readonly ViewerLog _log;
+    private readonly WorkbenchLogLevel _level;
+    private readonly WorkbenchLog _log;
     private readonly TextWriter _original;
     private readonly Lock _sync = new();
 
-    public ViewerConsoleWriter(TextWriter original, ViewerLog log, ViewerLogLevel level)
+    public WorkbenchConsoleWriter(TextWriter original, WorkbenchLog log, WorkbenchLogLevel level)
     {
         _original = original;
         _log = log;

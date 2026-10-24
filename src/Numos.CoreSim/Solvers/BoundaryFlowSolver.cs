@@ -50,10 +50,7 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
             bool runParallel = batchCount > 1 && batchCount >= workerCount;
             if (runParallel)
             {
-                ParallelHelper.For(
-                    0,
-                    batchCount,
-                    new ProcessBoundaryChunkAction(context, _orderedBatches, _pendingBuffers));
+                ParallelPhase.Run(batchCount, new ProcessBoundaryChunkAction(context, _orderedBatches, _pendingBuffers));
             }
             else
             {
@@ -73,7 +70,7 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
             // Every source's writes land in disjoint, already-reserved index ranges of the target batches' event arrays.
             // The scatter is therefore safe to run fully in parallel with no locking.
             if (runParallel)
-                ParallelHelper.For(0, batchCount, new ScatterPendingTransfersAction(_pendingBuffers, _injectionBuffer));
+                ParallelPhase.Run(batchCount, new ScatterPendingTransfersAction(_pendingBuffers, _injectionBuffer));
             else
                 for (int i = 0; i < batchCount; i++)
                     ScatterPendingTransfers(_pendingBuffers[i], _injectionBuffer);
@@ -192,10 +189,7 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
         AtmosSolverExecutionContext context, AtmosSolverConfigSnapshot config,
         InjectionBuffer injectionBuffer)
     {
-        ParallelHelper.For(
-            0,
-            injectionBuffer.Count,
-            new RunInjectionBatchAction(context, config, injectionBuffer));
+        ParallelPhase.Run(injectionBuffer.Count, new RunInjectionBatchAction(context, config, injectionBuffer));
 
         injectionBuffer.Clear();
     }

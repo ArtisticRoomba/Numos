@@ -38,6 +38,56 @@ public sealed class AtmosSolverStorageTests
     }
 
     [Test]
+    public void Register_ExposesClearFlags()
+    {
+        ChunkField<int> both = ChunkField<int>.Register(KeyPrefix + "flags-both", clearOnSleep: true, clearOnVacuum: true);
+        ChunkField<int> neither = ChunkField<int>.Register(KeyPrefix + "flags-neither");
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(both.ClearOnSleep, Is.True);
+            Assert.That(both.ClearOnVacuum, Is.True);
+            Assert.That(neither.ClearOnSleep, Is.False);
+            Assert.That(neither.ClearOnVacuum, Is.False);
+            Assert.That(
+                ChunkField<int>.Register(KeyPrefix + "flags-both", clearOnSleep: true, clearOnVacuum: true),
+                Is.SameAs(both));
+        });
+    }
+
+    [Test]
+    public void Register_WithDifferentClearFlags_Throws()
+    {
+        ChunkField<int>.Register(KeyPrefix + "flags-conflict", clearOnSleep: true);
+
+        Assert.Multiple(() =>
+        {
+            Assert.Throws<InvalidOperationException>(() => ChunkField<int>.Register(KeyPrefix + "flags-conflict"));
+            Assert.Throws<InvalidOperationException>(
+                () => ChunkField<int>.Register(KeyPrefix + "flags-conflict", clearOnSleep: true, clearOnVacuum: true));
+        });
+    }
+
+    [Test]
+    public void SleepChunk_ClearsOnlyClearOnSleepFields()
+    {
+        using var simulation = new AtmosSimulation(2, 2, 2);
+        var chunk = simulation.CreateAndRegisterChunk(default);
+        ChunkField<int> cleared = ChunkField<int>.Register(KeyPrefix + "sleep-cleared", clearOnSleep: true);
+        ChunkField<int> kept = ChunkField<int>.Register(KeyPrefix + "sleep-kept");
+        simulation.GetChunkField(chunk, cleared)[3] = 9;
+        simulation.GetChunkField(chunk, kept)[3] = 9;
+
+        simulation.SleepChunk(chunk);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(simulation.GetChunkField(chunk, cleared)[3], Is.Zero);
+            Assert.That(simulation.GetChunkField(chunk, kept)[3], Is.EqualTo(9));
+        });
+    }
+
+    [Test]
     public void Storage_IsIsolatedByChunkAndSimulation()
     {
         using var simulation = new AtmosSimulation(1, 1, 1);

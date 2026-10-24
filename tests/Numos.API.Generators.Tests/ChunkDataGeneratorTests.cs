@@ -303,6 +303,49 @@ public sealed class ChunkDataGeneratorTests
     }
 
     [Test]
+    public void ClearFlags_AreEmittedOnlyWhenSet()
+    {
+        const string source = """
+                              using Numos.API;
+
+                              namespace MyMod.Clear;
+
+                              public static partial class ClearData
+                              {
+                                  [ChunkData("generator-tests/clear/both", ClearOnSleep = true, ClearOnVacuum = true)]
+                                  public static partial ChunkField<float> Both { get; }
+
+                                  [ChunkData("generator-tests/clear/sleep", ClearOnSleep = true)]
+                                  public static partial ChunkField<float> SleepOnly { get; }
+
+                                  [ChunkData]
+                                  public static partial ChunkField<float> Neither { get; }
+                              }
+                              """;
+
+        var result = GeneratorHarness.Run(out Compilation _, out var diagnostics, sources: [source]);
+        Assert.That(diagnostics, Is.Empty);
+
+        string generated = GeneratorHarness.GeneratedSource(result, "MyMod.Clear.ClearData.ChunkData.g.cs");
+        Assert.Multiple(() =>
+        {
+            Assert.That(
+                generated,
+                Does.Contain(
+                    "Register(\"generator-tests/clear/both\", rollback: false, length: null, clearOnSleep: true, clearOnVacuum: true);"));
+
+            Assert.That(
+                generated,
+                Does.Contain(
+                    "Register(\"generator-tests/clear/sleep\", rollback: false, length: null, clearOnSleep: true);"));
+
+            Assert.That(
+                generated,
+                Does.Contain("Register(\"MyMod.Clear.ClearData.Neither\", rollback: false, length: null);"));
+        });
+    }
+
+    [Test]
     public void GeneratedProperty_RegistersFieldAtRunTime()
     {
         const string source = """
@@ -315,6 +358,9 @@ public sealed class ChunkDataGeneratorTests
 
                                   [Numos.API.ChunkData]
                                   public static partial Numos.API.ChunkField<long> Scratch { get; }
+
+                                  [Numos.API.ChunkData("generator-tests/smoke/clears", ClearOnSleep = true, ClearOnVacuum = true)]
+                                  public static partial Numos.API.ChunkField<int> Clears { get; }
                               }
                               """;
 
@@ -348,6 +394,12 @@ public sealed class ChunkDataGeneratorTests
             Assert.That(scratch.Key, Is.EqualTo("Smoke.SmokeData.Scratch"));
             Assert.That(scratch.Rollback, Is.False);
             Assert.That(scratch.Length, Is.Null);
+            Assert.That(scratch.ClearOnSleep, Is.False);
+            Assert.That(scratch.ClearOnVacuum, Is.False);
+
+            var clears = (ChunkField<int>)type.GetProperty("Clears")!.GetValue(null)!;
+            Assert.That(clears.ClearOnSleep, Is.True);
+            Assert.That(clears.ClearOnVacuum, Is.True);
         }
         finally
         {

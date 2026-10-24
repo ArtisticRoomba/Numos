@@ -11,6 +11,63 @@ namespace Numos.Serialization.Tests;
 public sealed class NumosReplaySerializerTests
 {
     [Test]
+    public void RoundTrip_ReplaysAVoxelBoxEditToTheSameHash()
+    {
+        var config = new AtmosConfig
+        {
+            GasRegistry =
+            [
+                new GasProperties { Name = "Air", DiffusionCoefficient = 0.02f },
+                new GasProperties { Name = "Fuel" }
+            ]
+        };
+
+        using var world = new AtmosWorld(config);
+        var source = world.CreateSimulation(4, 4, 1);
+        var timeline = new AtmosWorldReplayTimeline(world, 1);
+        source.SetChunkClassification(source.CreateAndRegisterChunk(default), new VoxelClassification(1));
+        source.SetChunkClassification(source.CreateAndRegisterChunk(Int3.PosX), new VoxelClassification(1));
+        source.EditVoxelBox(
+            new Int3(-2, 1, 0),
+            new Int3(6, 3, 0),
+            new AtmosVoxelBoxEdit
+            {
+                Classification = new VoxelClassification(1),
+                ClearGas = true,
+                TemperatureK = 301f,
+                Gases = [new AtmosGasAmount(1, 0.5f), new AtmosGasAmount(0, 0.25f)],
+                GasTemperatureK = 311f
+            });
+
+        world.Tick();
+        world.Tick();
+        timeline.ObserveLiveState();
+        var archive = timeline.CaptureReplay();
+        var document = new NumosWorldReplayDocument(
+            new NumosReplayMetadata("Box edit", DateTimeOffset.UnixEpoch, "tests", "1", CoreSimBuildInfo.PackageVersion, "fixture"),
+            archive);
+
+        using var stream = new MemoryStream();
+        NumosWorldReplaySerializer.Serialize(stream, document);
+        stream.Position = 0;
+        var restored = NumosWorldReplaySerializer.Deserialize(stream);
+
+        using var replayWorld = new AtmosWorld(new AtmosConfig(restored.Replay.InitialCheckpoint.Config));
+        var imported = AtmosWorldReplayTimeline.Import(replayWorld, restored.Replay, 1);
+        imported.ReturnToHead();
+        Assert.Multiple(() =>
+        {
+            Assert.That(
+                restored.Replay.Recording.Operations.Count(static operation =>
+                    operation.Operation is AtmosWorldSimulationOperation { Operation: EditVoxelBoxOperation }),
+                Is.EqualTo(1));
+
+            Assert.That(replayWorld.ComputeStateHash(), Is.EqualTo(world.ComputeStateHash()));
+            Assert.That(replayWorld.ComputeStateHash(), Is.EqualTo(archive.HeadStateHash));
+        });
+    }
+
+    [Test]
     public void RoundTrip_PreservesReplayAndBuildsImportedTimeline()
     {
         var config = new AtmosConfig

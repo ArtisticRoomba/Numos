@@ -76,6 +76,20 @@ public sealed class ChunkField<T>
     /// </summary>
     public int? Length => Descriptor.FixedLength;
 
+    /// <summary>
+    ///     Gets whether a chunk resets the whole array to default values when it goes to sleep.
+    /// </summary>
+    public bool ClearOnSleep => Descriptor.ClearOnSleep;
+
+    /// <summary>
+    ///     Gets whether vacuuming a voxel or a chunk resets this field's values to default.
+    /// </summary>
+    /// <remarks>
+    ///     Vacuuming one voxel resets only that voxel's element, and only for per-voxel fields.
+    ///     Vacuuming a whole chunk resets the whole array, including a fixed-length one.
+    /// </remarks>
+    public bool ClearOnVacuum => Descriptor.ClearOnVacuum;
+
     internal ChunkFieldDescriptor<T> Descriptor { get; }
 
     /// <summary>
@@ -93,13 +107,22 @@ public sealed class ChunkField<T>
     ///     The array length for a fixed-size field, or <see langword="null" /> for one element per voxel. Zero is
     ///     allowed.
     /// </param>
+    /// <param name="clearOnSleep">
+    ///     <see langword="true" /> to reset the whole array to default values when the chunk goes to sleep,
+    ///     including through <see cref="AtmosSimulation.SleepChunk" />.
+    /// </param>
+    /// <param name="clearOnVacuum">
+    ///     <see langword="true" /> to reset values to default when gas is vacuumed away.
+    ///     Vacuuming one voxel resets only that voxel's element of a per-voxel field.
+    ///     A fixed-length field ignores single-voxel vacuums. Vacuuming a whole chunk resets any opted-in array.
+    /// </param>
     /// <returns>
     ///     The field for <paramref name="key" />. Repeated registrations of the same definition return the same
     ///     instance.
     /// </returns>
     /// <remarks>
     ///     Registration is thread-safe. Registering a key that already exists with a different element type, length,
-    ///     or rollback policy throws instead of silently sharing incompatible storage.
+    ///     rollback policy, or clear flag throws instead of silently sharing incompatible storage.
     /// </remarks>
     /// <exception cref="ArgumentException">
     ///     <paramref name="key" /> is null, empty, or whitespace, or <paramref name="rollback" /> is set and
@@ -115,9 +138,10 @@ public sealed class ChunkField<T>
     ///         ChunkField&lt;int&gt;.Register("my-mod/fire/burn-count", rollback: true, length: 1);
     ///     </code>
     /// </example>
-    public static ChunkField<T> Register(string key, bool rollback = false, int? length = null)
+    public static ChunkField<T> Register(string key, bool rollback = false, int? length = null,
+        bool clearOnSleep = false, bool clearOnVacuum = false)
     {
-        return Wrap(ChunkFieldRegistry.Register<T>(key, rollback, length));
+        return Wrap(ChunkFieldRegistry.Register<T>(key, rollback, length, clearOnSleep, clearOnVacuum));
     }
 
     /// <summary>

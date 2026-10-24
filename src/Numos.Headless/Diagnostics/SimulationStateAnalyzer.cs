@@ -181,7 +181,7 @@ public static class SimulationStateAnalyzer
         return result;
     }
 
-    private static SimulationConfigurationReport CreateConfigurationReport(AtmosConfig config)
+    internal static SimulationConfigurationReport CreateConfigurationReport(AtmosConfig config)
     {
         var gases = new GasConfigurationReport[config.GasRegistry.Count];
         for (int gasId = 0; gasId < gases.Length; gasId++)

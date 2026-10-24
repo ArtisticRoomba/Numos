@@ -59,7 +59,12 @@ public enum AtmosOperationCode : ushort
     /// <summary>
     ///     Ignite a voxel for one tick.
     /// </summary>
-    SetIgnitionSource = 13
+    SetIgnitionSource = 13,
+
+    /// <summary>
+    ///     Edit a box of voxels across chunks in one operation.
+    /// </summary>
+    EditVoxelBox = 14
 }
 
 /// <summary>

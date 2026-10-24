@@ -1,92 +1,13 @@
 using Numos.API;
 using Numos.CoreSim;
-using Numos.CoreSim.Datatypes.Primitives;
-using Numos.CoreSim.GasReactions;
 using Numos.Maths;
 using Numos.SimDrawer;
+using Numos.Workbench;
 
 namespace Numos.Viewer;
 
 public partial class SimulationViewer
 {
-    private readonly static GasProperties Hydrogen = new()
-    {
-        Name = "Hydrogen",
-        MolarHeatCapacityAtConstantVolume =
-            AtmosPhysicalConstants.IdealDiatomicMolarHeatCapacityAtConstantVolume,
-        BoilingPoint = 20.4f,
-        CondensationEnabled = true,
-        MolarEnthalpyOfVaporization = 904f,
-        LiquidId = 0,
-        DiffusionCoefficient = 0.02f,
-        ThermalConductivity = 0.168f
-    };
-
-    private readonly static GasProperties Oxygen = new()
-    {
-        Name = "Oxygen",
-        MolarHeatCapacityAtConstantVolume =
-            AtmosPhysicalConstants.IdealDiatomicMolarHeatCapacityAtConstantVolume,
-        BoilingPoint = 90.2f,
-        CondensationEnabled = true,
-        MolarEnthalpyOfVaporization = 6_820f,
-        LiquidId = 0,
-        DiffusionCoefficient = 0.02f,
-        ThermalConductivity = 0.024f
-    };
-
-    private readonly static GasProperties Nitrogen = new()
-    {
-        Name = "Nitrogen",
-        MolarHeatCapacityAtConstantVolume =
-            AtmosPhysicalConstants.IdealDiatomicMolarHeatCapacityAtConstantVolume,
-        BoilingPoint = 77.34f,
-        CondensationEnabled = true,
-        MolarEnthalpyOfVaporization = 5_600f,
-        LiquidId = 1,
-        DiffusionCoefficient = 0.02f,
-        ThermalConductivity = 0.024f
-    };
-
-    private readonly static GasProperties CarbonDioxide = new()
-    {
-        Name = "Carbon Dioxide",
-        MolarHeatCapacityAtConstantVolume = 28.2f,
-        BoilingPoint = 194.7f,
-        CondensationEnabled = true,
-        MolarEnthalpyOfVaporization = 9800f,
-        LiquidId = 0,
-        DiffusionCoefficient = 0.02f,
-        ThermalConductivity = 0.016f
-    };
-
-    private readonly static GasProperties NitrousOxide = new()
-    {
-        Name = "Nitrous Oxide",
-        MolarHeatCapacityAtConstantVolume = 30.3f,
-        BoilingPoint = 184.71f,
-        CondensationEnabled = true,
-        MolarEnthalpyOfVaporization = 16_540f,
-        LiquidId = 0,
-        DiffusionCoefficient = 0.02f,
-        ThermalConductivity = 0.016f
-    };
-
-    private readonly static GasProperties Water = new()
-    {
-        Name = "Water Vapour",
-        MolarHeatCapacityAtConstantVolume = 28f,
-        BoilingPoint = 373.15f,
-        CondensationEnabled = true,
-        MolarEnthalpyOfVaporization = 40_657f,
-        LiquidId = 0,
-        DiffusionCoefficient = 0.02f,
-        ThermalConductivity = 0.0245f
-    };
-
-
-    private Int3 _chunkDimensions;
-
     private void CreateSimulationProject(
         string projectName,
         int chunkWidth,
@@ -94,84 +15,37 @@ public partial class SimulationViewer
         int chunkDepth,
         bool includeDefaultGases)
     {
-        var config = new AtmosConfig();
-        if (includeDefaultGases)
-        {
-            config.GasRegistry.Add(Hydrogen);
-            config.GasRegistry.Add(Oxygen);
-            config.GasRegistry.Add(Nitrogen);
-            config.GasRegistry.Add(CarbonDioxide);
-            config.GasRegistry.Add(NitrousOxide);
-            config.GasRegistry.Add(Water);
+        SimulationFrameBuilder? frameBuilder = null;
+        _session.CreateProject(
+            new WorkbenchProjectOptions(projectName, chunkWidth, chunkHeight, chunkDepth, includeDefaultGases),
+            config =>
+            {
+                var visualizations = VisualizationRegistry.CreateDefault(config);
+                _configureVisualizations?.Invoke(visualizations);
+                frameBuilder = new SimulationFrameBuilder(config, visualizations);
+            });
 
-            var hydrogenFire = new StandardGasReaction(
-                new Dictionary<GasProperties, float>
-                    { { Hydrogen, 2 }, { Oxygen, 1 } },
-                new Dictionary<GasProperties, float>
-                {
-                    { Water, 2 }
-                },
-                UnitConversions.FromKilojoulePerMole(483.6f),
-                1.8e13f,
-                UnitConversions.FromKilojoulePerMole(256f),
-                new Dictionary<GasProperties, float>
-                {
-                    { Hydrogen, 1 },
-                    { Oxygen, 0.5f }
-                },
-                true);
-
-            config.SolverConfigurations = [new GasReactionConfig(standardReactions: [hydrogenFire])];
-        }
-
-        AtmosWorld? world = null;
-        try
-        {
-            world = new AtmosWorld(config);
-            var simulation = world.CreateSimulation(chunkWidth, chunkHeight, chunkDepth);
-            var visualizations = VisualizationRegistry.CreateDefault(config);
-            _configureVisualizations?.Invoke(visualizations);
-            var frameBuilder = new SimulationFrameBuilder(config, visualizations);
-
-            DisposeSimulationProject();
-
-            _world = world;
-            _simulation = simulation;
-            _replayTimeline = new AtmosWorldReplayTimeline(world);
-            _replayBranches = new ReplayBranchSession(world, _replayTimeline);
-            _config = config;
-            _frameBuilder = frameBuilder;
-            _projectName = string.IsNullOrWhiteSpace(projectName)
-                ? "Untitled Simulation"
-                : projectName.Trim();
-
-            _chunkDimensions = new Int3(chunkWidth, chunkHeight, chunkDepth);
-            _isPaused = true;
-            _showConfigurationPanel = true;
-            _knownSimulationRevision = -1;
-            ReconcileSimulationSurfaces();
-            world = null;
-            SetProjectMessage($"Created project '{_projectName}'.", false);
-        }
-        finally
-        {
-            world?.Dispose();
-        }
+        _frameBuilder = frameBuilder;
+        _isPaused = true;
+        _showConfigurationPanel = true;
+        _knownSimulationRevision = -1;
+        ReconcileSimulationSurfaces();
+        RequestNextFrame();
     }
 
-    private void DisposeSimulationProject()
+    /// <summary>
+    ///     Drops every presentation object tied to the project that is closing. The session raises
+    ///     <see cref="WorkbenchSession.ProjectClosing" /> before it disposes the world.
+    /// </summary>
+    private void ResetProjectPresentation()
     {
         SaveActiveSurfaceState();
         foreach (var surface in _simulationSurfaces)
             surface.Dispose();
 
         _simulationSurfaces.Clear();
-        _simulationNames.Clear();
         _viewport = null;
-        _world?.Dispose();
-        _world = null;
         _simulation = null;
-        _activeSimulationId = null;
         _knownSimulationRevision = -1;
         _simulationFeedback = null;
         _simulationPendingRemoval = null;
@@ -184,17 +58,11 @@ public partial class SimulationViewer
         _requestRemoveTopology = false;
         _portalFirst = null;
         _portalSecond = null;
-        _replayTimeline = null;
-        _replayBranches = null;
         _timelineOperation = null;
         _timelineError = null;
         _pendingScrubTick = null;
-        _replayElapsed = 0f;
         _timelineFirstTick = 0;
-        _config = null;
         _frameBuilder = null;
-        _projectName = null;
-        _chunkDimensions = default;
 
         _liveChunkHandles.Clear();
         _liveChunkPositions.Clear();
@@ -206,7 +74,10 @@ public partial class SimulationViewer
         _staleSnapshotKeys.Clear();
         _drawData = null;
         _sliceDrawData = null;
-        _sliceProjectionKey = null;
+        _sliceSourceFrame = null;
+        _sliceFrameChunk = null;
+        _sliceCameraFit = true;
+        _sliceRenderer?.ReleaseTexture();
         _hoveredSliceCell = null;
         _hovered3DCell = null;
         _selectedCell = null;
@@ -219,7 +90,6 @@ public partial class SimulationViewer
         _voxelDetailCache.Clear();
         _highlights.Clear();
         _focusedChunk = null;
-        _selectedSliceChunkPosition = null;
         _cameraInitialized = false;
         _frameSceneOnNextPresentation = false;
 
@@ -241,176 +111,118 @@ public partial class SimulationViewer
 
     private void AddProjectChunk(Int3 position, int roomId)
     {
-        if (_simulation == null)
+        if (_session.World == null)
             return;
 
         try
         {
-            var chunk = _simulation.CreateAndRegisterChunk(position);
-            _simulation.SetChunkClassification(chunk, new VoxelClassification(roomId));
+            _session.AddChunk(position, roomId);
             _frameSceneOnNextPresentation = true;
-            _chunkFeedback = Report($"Added chunk {FormatChunkPosition(position)}.", false);
+            _chunkFeedback = new FeedbackMessage($"Added chunk {FormatChunkPosition(position)}.", false);
         }
         catch (Exception exception) when (
             exception is ArgumentOutOfRangeException or InvalidOperationException)
         {
-            _chunkFeedback = ReportException($"Could not add chunk {FormatChunkPosition(position)}", exception);
+            _chunkFeedback = new FeedbackMessage($"Could not add chunk {FormatChunkPosition(position)}: {exception.Message}", true);
         }
     }
 
     private void RemoveProjectChunk(AtmosChunkHandle chunk)
     {
-        if (_simulation == null)
+        if (_session.World == null)
             return;
 
-        if (_simulation.UnregisterChunk(chunk))
-        {
-            _chunkFeedback = Report($"Removed chunk {FormatChunkPosition(chunk.Position)}.", false);
-            return;
-        }
-
-        _chunkFeedback = Report($"Chunk {FormatChunkPosition(chunk.Position)} no longer exists.", true);
+        _chunkFeedback = _session.RemoveChunk(chunk.Position)
+            ? new FeedbackMessage($"Removed chunk {FormatChunkPosition(chunk.Position)}.", false)
+            : new FeedbackMessage($"Chunk {FormatChunkPosition(chunk.Position)} no longer exists.", true);
     }
 
     private void SealProjectChunk(AtmosChunkHandle chunk)
     {
-        if (_simulation == null)
+        if (_session.World == null)
             return;
 
         try
         {
-            _simulation.SetChunkBoundaryClassification(chunk, VoxelClassification.RoomSolid);
-            _chunkFeedback = Report(
+            _session.SealChunk(chunk.Position);
+            _chunkFeedback = new FeedbackMessage(
                 $"Replaced the outer faces of chunk {FormatChunkPosition(chunk.Position)} with solid walls.",
                 false);
         }
         catch (KeyNotFoundException exception)
         {
-            _chunkFeedback = ReportException($"Could not seal chunk {FormatChunkPosition(chunk.Position)}", exception);
+            _chunkFeedback = new FeedbackMessage($"Could not seal chunk {FormatChunkPosition(chunk.Position)}: {exception.Message}", true);
         }
     }
 
     private void UnsleepProjectChunk(AtmosChunkHandle chunk)
     {
-        if (_simulation == null)
+        if (_session.World == null)
             return;
 
         try
         {
-            _simulation.WakeChunk(chunk);
-            _chunkFeedback = Report($"Unslept chunk {FormatChunkPosition(chunk.Position)}.", false);
+            _session.WakeChunk(chunk.Position);
+            _chunkFeedback = new FeedbackMessage($"Unslept chunk {FormatChunkPosition(chunk.Position)}.", false);
         }
         catch (KeyNotFoundException exception)
         {
-            _chunkFeedback = Report(exception.Message, true);
+            _chunkFeedback = new FeedbackMessage(exception.Message, true);
         }
     }
 
     private void FillProjectChunk(AtmosChunkHandle chunk, int classification)
     {
-        if (_simulation == null)
+        if (_session.World == null)
             return;
 
         try
         {
-            _simulation.SetChunkClassification(chunk, new VoxelClassification(classification));
-            _chunkFeedback = Report(
+            _session.FillChunk(chunk.Position, classification);
+            _chunkFeedback = new FeedbackMessage(
                 $"Filled chunk {FormatChunkPosition(chunk.Position)} with classification {classification}.",
                 false);
         }
         catch (Exception exception) when (exception is ArgumentOutOfRangeException or KeyNotFoundException)
         {
-            _chunkFeedback = ReportException($"Could not fill chunk {FormatChunkPosition(chunk.Position)}", exception);
+            _chunkFeedback = new FeedbackMessage($"Could not fill chunk {FormatChunkPosition(chunk.Position)}: {exception.Message}", true);
         }
     }
 
     private void AddProjectGas(GasProperties gas)
     {
-        if (_config == null)
+        if (_session.Config == null)
             return;
 
-        string name = gas.Name?.Trim() ?? string.Empty;
-        if (name.Length == 0)
+        try
         {
-            _newGasFeedback = Report("Could not add the gas: a name is required.", true);
-            return;
+            int gasId = _session.AddGas(gas);
+            _newGasFeedback = new FeedbackMessage($"Added gas {gas.Name} with ID {gasId}.", false);
         }
-
-        if (!float.IsFinite(gas.MolarHeatCapacityAtConstantVolume) ||
-            gas.MolarHeatCapacityAtConstantVolume < 0f ||
-            !float.IsFinite(gas.BoilingPoint) ||
-            gas.BoilingPoint < 0f ||
-            !float.IsFinite(gas.MolarEnthalpyOfVaporization) ||
-            gas.MolarEnthalpyOfVaporization < 0f ||
-            !float.IsFinite(gas.DiffusionCoefficient) ||
-            gas.DiffusionCoefficient < 0f)
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
         {
-            _newGasFeedback = Report(
-                $"Could not add {name}: molar Cv, boiling point, vaporization enthalpy, and diffusion coefficient " +
-                "must be finite and at least 0.",
-                true);
-
-            return;
+            _newGasFeedback = new FeedbackMessage(exception.Message, true);
         }
-
-        foreach (var registered in _config.GasRegistry)
-        {
-            if (registered.Name == name)
-            {
-                _newGasFeedback = Report($"Could not add {name}: a gas with that name is already registered.", true);
-                return;
-            }
-        }
-
-        gas.Name = name;
-        _config.GasRegistry.Add(gas);
-        if (!TryApplyConfiguration(out string? error))
-        {
-            _config.GasRegistry.RemoveAt(_config.GasRegistry.Count - 1);
-            _newGasFeedback = new FeedbackMessage($"Could not add {name}: {error}", true);
-            return;
-        }
-
-        _newGasFeedback = Report($"Added gas {name} with ID {_config.GasRegistry.Count - 1}.", false);
     }
 
     private void RemoveProjectGas(int gasId)
     {
-        if (_world == null ||
-            _config == null ||
+        if (_session.World == null ||
+            _session.Config == null ||
             gasId < 0 ||
-            gasId >= _config.GasRegistry.Count)
+            gasId >= _session.Config.GasRegistry.Count)
             return;
 
-        foreach (var simulation in _world.Simulations)
-        foreach (var handle in simulation.GetChunkHandles())
+        string name = _session.Config.GasRegistry[gasId].Name;
+        try
         {
-            var snapshot = simulation.GetChunkSnapshot(handle);
-            if (snapshot.Gases.Any(gas => gas.GasId >= gasId))
-            {
-                _gasRegistryFeedback = Report(
-                    $"Could not remove {_config.GasRegistry[gasId].Name}: it, or a later gas ID, has already been " +
-                    "used by a chunk. Remove the affected chunks first so gas IDs remain stable.",
-                    true);
-
-                return;
-            }
+            _session.RemoveGas(gasId);
+            _gasRegistryFeedback = new FeedbackMessage($"Removed gas {name}.", false);
         }
-
-        string name = _config.GasRegistry[gasId].Name;
-        var previous = new GasRegistry();
-        foreach (var gas in _config.GasRegistry)
-            previous.Add(gas);
-
-        _config.GasRegistry.RemoveAt(gasId);
-        if (!TryApplyConfiguration(out string? error))
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
         {
-            _config.GasRegistry = previous;
-            _gasRegistryFeedback = new FeedbackMessage($"Could not remove {name}: {error}", true);
-            return;
+            _gasRegistryFeedback = new FeedbackMessage(exception.Message, true);
         }
-
-        _gasRegistryFeedback = Report($"Removed gas {name}.", false);
     }
 
     private void InjectProjectGas(
@@ -422,10 +234,10 @@ public partial class SimulationViewer
         float moles,
         float temperature)
     {
-        if (_simulation == null || _config == null)
+        if (_session.ActiveSimulation == null || _session.Config == null)
             return;
 
-        if (gasId < 0 || gasId >= _config.GasRegistry.Count)
+        if (gasId < 0 || gasId >= _session.Config.GasRegistry.Count)
         {
             _injectionFeedback = Report("Select a registered gas before injecting.", true);
             return;
@@ -433,103 +245,17 @@ public partial class SimulationViewer
 
         try
         {
-            _simulation.AddGasToVoxel(chunk, x, y, z, gasId, moles, temperature);
-            _injectionFeedback = Report(
-                $"Injected {moles:G} mol of {_config.GasRegistry[gasId].Name} into ({x}, {y}, {z}).",
+            var cell = _session.GetCell(chunk.Position, x, y, z);
+            _session.AddVoxelGas(cell, gasId, moles, temperature);
+            _injectionFeedback = new FeedbackMessage(
+                $"Injected {moles:G} mol of {_session.Config.GasRegistry[gasId].Name} into ({x}, {y}, {z}).",
                 false);
         }
         catch (Exception exception) when (
             exception is ArgumentOutOfRangeException or KeyNotFoundException or InvalidOperationException)
         {
-            _injectionFeedback = ReportException("Could not inject gas", exception);
+            _injectionFeedback = new FeedbackMessage($"Could not inject gas: {exception.Message}", true);
         }
-    }
-
-    private void IgniteProjectSource(
-        AtmosChunkHandle chunk,
-        int x,
-        int y,
-        int z,
-        float temperature,
-        float volume)
-    {
-        if (_simulation == null || _config == null)
-            return;
-
-        try
-        {
-            _simulation.IgniteVoxel(chunk, x, y, z, temperature, volume);
-            _injectionFeedback = Report(
-                $"Did it",
-                false);
-        }
-        catch (Exception exception) when (
-            exception is ArgumentOutOfRangeException or KeyNotFoundException or InvalidOperationException)
-        {
-            _injectionFeedback = ReportException("bad", exception);
-        }
-    }
-
-    private void ApplyConfiguration()
-    {
-        if (_world != null && _config != null)
-            _world.SetAtmosConfig(_config);
-    }
-
-    /// <summary>
-    ///     Applies <see cref="_config" /> to the world, reporting the failure instead of throwing.
-    /// </summary>
-    /// <param name="error">Why the world rejected the configuration, or <see langword="null" /> on success.</param>
-    /// <returns><see langword="true" /> when the world accepted the configuration.</returns>
-    /// <remarks>
-    ///     On failure the world keeps its previous configuration, so the caller must undo its change to
-    ///     <see cref="_config" /> or the panel will show values the simulation is not using.
-    /// </remarks>
-    private bool TryApplyConfiguration(out string? error)
-    {
-        try
-        {
-            ApplyConfiguration();
-            error = null;
-            return true;
-        }
-        catch (KeyNotFoundException exception)
-        {
-            // Gas reactions resolve their species by name when the config is captured.
-            error = $"a gas reaction still refers to a gas that would not be registered ({exception.Message})";
-            WriteException("Could not apply the atmosphere configuration", exception);
-            return false;
-        }
-        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
-        {
-            error = exception.Message;
-            WriteException("Could not apply the atmosphere configuration", exception);
-            return false;
-        }
-    }
-
-    /// <summary>
-    ///     Copies every scalar <see cref="AtmosConfig" /> setting, leaving the gas registry and solver configurations
-    ///     alone.
-    /// </summary>
-    private static void CopyScalarSettings(AtmosConfig source, AtmosConfig destination)
-    {
-        destination.GlobalTemperature = source.GlobalTemperature;
-        destination.DefaultTemperatureFallback = source.DefaultTemperatureFallback;
-        destination.DefaultMolarHeatCapacityAtConstantVolume = source.DefaultMolarHeatCapacityAtConstantVolume;
-        destination.VoxelVolume = source.VoxelVolume;
-        destination.SaturationReferencePressure = source.SaturationReferencePressure;
-        destination.DefaultDiffusionCoefficient = source.DefaultDiffusionCoefficient;
-        destination.SpaceTemperature = source.SpaceTemperature;
-        destination.BulkFlowCoefficient = source.BulkFlowCoefficient;
-        destination.VacuumThreshold = source.VacuumThreshold;
-        destination.SleepThreshold = source.SleepThreshold;
-        destination.SleepEpsilon = source.SleepEpsilon;
-        destination.ThermalConductance = source.ThermalConductance;
-        destination.CondensationRateFactor = source.CondensationRateFactor;
-        destination.MaxPressureTransferFractionPerNeighbor = source.MaxPressureTransferFractionPerNeighbor;
-        destination.AccumulatorWakeThreshold = source.AccumulatorWakeThreshold;
-        destination.AccumulatorMaxAliveTicks = source.AccumulatorMaxAliveTicks;
     }
 
     /// <summary>
@@ -539,15 +265,6 @@ public partial class SimulationViewer
     {
         SetProjectMessage(message, isError);
         return new FeedbackMessage(message, isError);
-    }
-
-    /// <summary>
-    ///     Logs <paramref name="exception" /> with its stack trace and returns a short local error for the panel.
-    /// </summary>
-    private FeedbackMessage ReportException(string context, Exception exception)
-    {
-        WriteException(context, exception);
-        return new FeedbackMessage($"{context}: {exception.Message}", true);
     }
 
     private readonly record struct FeedbackMessage(string Message, bool IsError);

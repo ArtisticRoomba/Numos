@@ -337,6 +337,10 @@ since the last read.
 the timeline's initial checkpoint stay incorporated at its start tick. Use `SeekPosition` when a UI or debugger must
 select the state after a particular operation at that same tick.
 
+A seek normally restores the last retained checkpoint not after the target and replays from there. When the timeline
+is already inspecting and the target is at or after the current position, with no retained checkpoint in between, it
+continues from the current state instead, so stepping playback forward one tick costs one simulated tick.
+
 The first seek stops recording and preserves the live head. `ReturnToHead()` restores that checkpoint and resumes the
 same recording. `SimulateFromHere()` destroys the controller's in-memory future. It removes later operations and
 checkpoints, makes the selected state the new head, and resumes recording there.
@@ -394,6 +398,31 @@ The replay benchmark shows checkpoint-copy costs and the effect of checkpoint sp
 dotnet run --project benchmarks/Numos.Replay.Benchmarks -c Release
 dotnet run --project benchmarks/Numos.Replay.Benchmarks -c Release -- --quick
 ```
+
+### Edit a box of voxels with one operation
+
+A per-voxel call records one operation each. A tool that fills a region of 400000 voxels would then record millions
+of operations, and the `.numos` file would grow to hundreds of megabytes. `AtmosSimulation.EditVoxelBox` records one
+`EditVoxelBoxOperation` (opcode 14) for the whole box instead.
+
+The box uses global voxel coordinates, so it can span many chunks. Voxels in chunks that do not exist are skipped, and
+the edit never creates a chunk. Inside each chunk the kernel applies the selected parts in a fixed order:
+classification, gas removal, voxel temperature, gas injection. The live call and the replay run the same
+kernel code, so both give the same state hash.
+
+The result equals the same edit made with per-voxel calls. Two differences are deliberate. Gas removal skips solid and
+void voxels, where the per-voxel call throws. The kernel also wakes a chunk once and only when a per-voxel call would
+have woken it.
+
+The operation holds the corner voxels, a parts mask, the scalar values, and a gas list. A hand-written codec pair writes
+the list, because the generator cannot encode a variable-length field. Numos validates the whole edit before it
+changes state, so an invalid edit throws and records nothing.
+
+The operation also reserves a parts bit and three floats for a velocity part. This build never sets the bit and
+writes zeros for the floats. A reader rejects a file that sets the bit. Opcode 13 stays free for the same reason.
+
+Adding opcode 14 did not change the checkpoint or file format versions. A checkpoint holds the same fields as before.
+A reader that predates the opcode rejects a file that contains it.
 
 ### Adding a new replay opcode
 

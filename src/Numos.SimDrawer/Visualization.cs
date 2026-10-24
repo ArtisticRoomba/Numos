@@ -297,6 +297,11 @@ public interface IVisualizationMethod
     /// <param name="sample">Source voxel sample.</param>
     /// <param name="color">Mapped color.</param>
     /// <returns>Whether the voxel should be visible.</returns>
+    /// <remarks>
+    ///     <see cref="SimulationFrameBuilder.BuildSimulation" /> maps chunks on several threads, so this method can run
+    ///     concurrently. Set <see cref="SimulationFrameBuilder.MaxDegreeOfParallelism" /> to 1 if an implementation keeps
+    ///     mutable state.
+    /// </remarks>
     bool TryGetColor(in VoxelSample sample, out ColorRgba color);
 
     /// <summary>

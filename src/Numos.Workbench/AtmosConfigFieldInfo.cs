@@ -1,4 +1,4 @@
-namespace Numos.Viewer.Ui;
+namespace Numos.Workbench;
 
 /// <summary>
 ///     Display wording for one <see cref="Numos.CoreSim.AtmosConfig" /> field.
@@ -6,7 +6,7 @@ namespace Numos.Viewer.Ui;
 /// <param name="Label">Sentence-case label without the unit.</param>
 /// <param name="Unit">Unit symbol, or an empty string when the field is dimensionless or a count.</param>
 /// <param name="Tooltip">One-sentence explanation of what the field controls.</param>
-internal readonly record struct AtmosConfigFieldInfo(string Label, string Unit, string Tooltip)
+public readonly record struct AtmosConfigFieldInfo(string Label, string Unit, string Tooltip)
 {
     public string LabelWithUnit => Unit.Length == 0 ? Label : $"{Label} ({Unit})";
 }
@@ -19,7 +19,7 @@ internal readonly record struct AtmosConfigFieldInfo(string Label, string Unit, 
 ///     Units follow the quantity types on <see cref="Numos.CoreSim.AtmosConfig" />. Keep them in step if a field's
 ///     type changes.
 /// </remarks>
-internal static class AtmosConfigFields
+public static class AtmosConfigFields
 {
     public readonly static AtmosConfigFieldInfo GlobalTemperature = new(
         "Global temperature",

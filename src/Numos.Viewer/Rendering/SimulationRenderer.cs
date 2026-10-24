@@ -16,12 +16,18 @@ public readonly record struct VoxelHighlight(VoxelAddress Address, ColorRgba Col
 /// </summary>
 public static class SimulationRenderer
 {
+    /// <summary>
+    ///     Most voxels that get an outline when no chunk is focused. A wireframe cube is twelve immediate-mode lines,
+    ///     so a large scene would spend its whole frame on them.
+    /// </summary>
+    public const int MaxOutlinedVoxels = 20_000;
+
     private readonly static Vector3 VoxelSize = Vector3.One;
     private readonly static Vector3 HighlightSize = new(1.04f);
 
     /// <summary>
-    ///     Draws the visible voxels of <paramref name="frame" /> as cubes, then the requested highlights. Must be
-    ///     called inside a raylib 3D mode.
+    ///     Draws the visible voxels of <paramref name="frame" /> from cached meshes, then the requested overlays.
+    ///     Must be called inside a raylib 3D mode.
     /// </summary>
     /// <param name="frame">
     ///     Frame to draw. Chunks whose colours were built for a different visualization mapping are skipped.
@@ -30,22 +36,29 @@ public static class SimulationRenderer
     /// <param name="highlights">
     ///     Voxel outlines to draw; entries that do not resolve to a drawn chunk are ignored.
     /// </param>
+    /// <param name="meshes">Mesh cache of the simulation that owns <paramref name="frame" />.</param>
     /// <param name="options">Outline and transparency treatments.</param>
-    public static void Draw(
+    internal static void Draw(
         SimulationDrawData frame,
         ChunkIdentity? focusedChunk,
         IReadOnlyList<VoxelHighlight> highlights,
+        ChunkMeshCache meshes,
         Render3DStyleOptions options = default)
     {
+        ArgumentNullException.ThrowIfNull(meshes);
+
+        // Meshes go first. Their draw call is not batched, and the overlays below are, so this order keeps depth
+        // testing and blending consistent.
+        meshes.Draw(frame, focusedChunk, options.TransparentVoxels);
+
+        bool voxelOutlines = options.ShowVoxelOutlines && ShouldOutlineVoxels(frame, focusedChunk);
         foreach (var chunk in frame.Chunks.Values)
         {
-            if (!frame.HasCurrentVisualizationMapping(chunk) ||
-                focusedChunk.HasValue && chunk.Identity != focusedChunk.Value)
-            {
+            if (!IsDrawn(frame, chunk, focusedChunk))
                 continue;
-            }
 
-            DrawChunk(chunk, options);
+            if (voxelOutlines)
+                DrawVoxelOutlines(chunk);
 
             if (options.ShowChunkOutlines)
                 DrawChunkOutline(chunk);
@@ -54,8 +67,40 @@ public static class SimulationRenderer
         DrawHighlights(frame, focusedChunk, highlights);
     }
 
-    private static void DrawChunk(ChunkDrawData chunk, Render3DStyleOptions options)
+    /// <summary>
+    ///     Returns whether voxel outlines are affordable: always for a focused chunk, otherwise only for a scene of at
+    ///     most <see cref="MaxOutlinedVoxels" /> drawn voxels.
+    /// </summary>
+    /// <param name="frame">Frame to draw.</param>
+    /// <param name="focusedChunk">The focused chunk, or <see langword="null" />.</param>
+    internal static bool ShouldOutlineVoxels(SimulationDrawData frame, ChunkIdentity? focusedChunk)
     {
+        if (focusedChunk.HasValue)
+            return true;
+
+        long voxels = 0;
+        foreach (var chunk in frame.Chunks.Values)
+        {
+            if (!IsDrawn(frame, chunk, focusedChunk))
+                continue;
+
+            voxels += chunk.VisibleCellCount;
+            if (voxels > MaxOutlinedVoxels)
+                return false;
+        }
+
+        return true;
+    }
+
+    private static bool IsDrawn(SimulationDrawData frame, ChunkDrawData chunk, ChunkIdentity? focusedChunk)
+    {
+        return frame.HasCurrentVisualizationMapping(chunk) &&
+               (!focusedChunk.HasValue || chunk.Identity == focusedChunk.Value);
+    }
+
+    private static void DrawVoxelOutlines(ChunkDrawData chunk)
+    {
+        var color = new Color(0f, 0f, 0f, 0.55f);
         ReadOnlySpan<VoxelDrawData> cells = chunk.Cells;
         for (int localIndex = 0; localIndex < cells.Length; localIndex++)
         {
@@ -63,24 +108,20 @@ public static class SimulationRenderer
             if (!cell.IsVisible || cell.VisibleFaces == VoxelFaceMask.None)
                 continue;
 
-            int x = localIndex % chunk.Dimensions.X;
-            int yz = localIndex / chunk.Dimensions.X;
-            int y = yz % chunk.Dimensions.Y;
-            int z = yz / chunk.Dimensions.Y;
-            var center = new Vector3(
-                chunk.ChunkPosition.X * chunk.Dimensions.X + x + 0.5f,
-                chunk.ChunkPosition.Y * chunk.Dimensions.Y + y + 0.5f,
-                chunk.ChunkPosition.Z * chunk.Dimensions.Z + z + 0.5f);
-
-            var color = ToRaylibColor(cell.Color);
-            if (options.TransparentVoxels)
-                color.A = 89;
-
-            Raylib.DrawCubeV(center, VoxelSize, color);
-
-            if (options.ShowVoxelOutlines)
-                Raylib.DrawCubeWiresV(center, VoxelSize, new Color(0f, 0f, 0f, 0.55f));
+            Raylib.DrawCubeWiresV(GetCellCenter(chunk, localIndex), VoxelSize, color);
         }
+    }
+
+    private static Vector3 GetCellCenter(ChunkDrawData chunk, int localIndex)
+    {
+        int x = localIndex % chunk.Dimensions.X;
+        int yz = localIndex / chunk.Dimensions.X;
+        int y = yz % chunk.Dimensions.Y;
+        int z = yz / chunk.Dimensions.Y;
+        return new Vector3(
+            chunk.ChunkPosition.X * chunk.Dimensions.X + x + 0.5f,
+            chunk.ChunkPosition.Y * chunk.Dimensions.Y + y + 0.5f,
+            chunk.ChunkPosition.Z * chunk.Dimensions.Z + z + 0.5f);
     }
 
     private static void DrawChunkOutline(ChunkDrawData chunk)

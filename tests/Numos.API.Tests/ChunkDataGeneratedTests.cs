@@ -16,6 +16,9 @@ internal static partial class GeneratedFireData
 
     [ChunkData]
     public static partial ChunkField<int> Scratch { get; }
+
+    [ChunkData(KeyPrefix + "clears", ClearOnSleep = true, ClearOnVacuum = true)]
+    public static partial ChunkField<int> Clears { get; }
 }
 
 [TestFixture]
@@ -32,6 +35,10 @@ public sealed class ChunkDataGeneratedTests
             Assert.That(GeneratedFireData.BurnCount.Length, Is.EqualTo(2));
             Assert.That(GeneratedFireData.Scratch.Key, Is.EqualTo(typeof(GeneratedFireData).FullName + ".Scratch"));
             Assert.That(GeneratedFireData.Scratch.Rollback, Is.False);
+            Assert.That(GeneratedFireData.Scratch.ClearOnSleep, Is.False);
+            Assert.That(GeneratedFireData.Scratch.ClearOnVacuum, Is.False);
+            Assert.That(GeneratedFireData.Clears.ClearOnSleep, Is.True);
+            Assert.That(GeneratedFireData.Clears.ClearOnVacuum, Is.True);
         });
     }
 

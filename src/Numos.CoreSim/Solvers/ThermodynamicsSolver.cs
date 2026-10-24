@@ -59,10 +59,7 @@ internal sealed class ThermodynamicsSolver : IAtmosSolverStage, IDisposable
                 }
             }
 
-            ParallelHelper.For(
-                0,
-                chunks.Length,
-                new SolveChunkAction(this, context, batches, awakeChunkCount));
+            ParallelPhase.Run(chunks.Length, new SolveChunkAction(this, context, batches, awakeChunkCount));
         }
         finally
         {
