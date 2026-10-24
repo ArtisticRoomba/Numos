@@ -205,9 +205,9 @@ numbers must say `"legacy"` and not rely on the default.
 project exists), `source`, and `message`. `latestSequence` is the newest sequence in the log. To follow the log, pass
 the last `sequence` you saw as `afterSequence`. The session keeps the newest 5000 entries.
 
-The default gases add a gas-reaction solver configuration. Any solver configuration makes a replay non-portable on this
-branch, and `saveReplay` rejects it. For that reason `includeDefaultGases` is `false` unless you set it. Leave it off for
-any study you save.
+The default gases add a `GasReactionConfig` solver configuration. A replay file cannot hold that configuration, so
+`saveReplay` rejects a world that has one. The built-in Euler configuration is portable. For that reason
+`includeDefaultGases` is `false` unless you set it. Leave it off for any study you save.
 
 ### Simulations
 
