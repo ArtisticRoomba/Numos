@@ -1,3 +1,4 @@
+using System.Numerics;
 using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.Datatypes.Snapshots;
@@ -18,8 +19,8 @@ public sealed class AtmosVoxelBoxEditTests
             {
                 GasRegistry =
                 [
-                    new GasProperties { Name = "A", DiffusionCoefficient = 0.02f },
-                    new GasProperties { Name = "B", MolarHeatCapacityAtConstantVolume = 32f }
+                    new GasProperties { Name = "A", DiffusionCoefficient = 0.02f, MolarMass = 0.029f },
+                    new GasProperties { Name = "B", MolarHeatCapacityAtConstantVolume = 32f, MolarMass = 0.044f }
                 ],
                 SleepThreshold = 10
             },
@@ -106,6 +107,30 @@ public sealed class AtmosVoxelBoxEditTests
                 foreach (var voxel in voxels)
                     simulation.AddGasToVoxel(chunk, voxel, gas.GasId, gas.Moles, gasTemperature);
             }
+
+            if (edit.Velocity is { } velocity)
+            {
+                var config = simulation.World.Config;
+                Assert.That(simulation.TryGetChunkSnapshot(
+                    chunk,
+                    default,
+                    AtmosChunkSnapshotFields.Gases | AtmosChunkSnapshotFields.VoxelClassification,
+                    out var gases));
+
+                foreach (var voxel in voxels)
+                {
+                    if (IsSolidOrVoid(gases, voxel))
+                        continue;
+
+                    float mass = FlowFieldMath.GetDensity(gases.Gases, voxel, new AtmosConfig(config)) *
+                                 config.GetVoxelVolume();
+
+                    if (!(mass > 0f))
+                        continue;
+
+                    simulation.SetVoxelMomentum(chunk, voxel, mass * velocity.X, mass * velocity.Y, mass * velocity.Z);
+                }
+            }
         }
     }
 
@@ -124,15 +149,17 @@ public sealed class AtmosVoxelBoxEditTests
                 ClearGas = true,
                 TemperatureK = 301f,
                 Gases = [new AtmosGasAmount(1, 0.5f), new AtmosGasAmount(0, 0.25f)],
-                GasTemperatureK = 311f
+                GasTemperatureK = 311f,
+                Velocity = new Vector3(1.5f, -2.5f, 0.5f)
             }).SetName("AllParts");
 
         yield return new TestCaseData(
             new AtmosVoxelBoxEdit
             {
                 Gases = [new AtmosGasAmount(0, 1f)],
-                GasTemperatureK = 280f
-            }).SetName("GasOverExistingGas");
+                GasTemperatureK = 280f,
+                Velocity = new Vector3(3f, 0f, 0f)
+            }).SetName("GasAndVelocityOverExistingGas");
 
         yield return new TestCaseData(
             new AtmosVoxelBoxEdit { Classification = VoxelClassification.RoomSolid, TemperatureK = 320f })
@@ -196,7 +223,8 @@ public sealed class AtmosVoxelBoxEditTests
             {
                 Classification = new VoxelClassification(1),
                 TemperatureK = 301f,
-                Gases = [new AtmosGasAmount(0, 0.25f)]
+                Gases = [new AtmosGasAmount(0, 0.25f)],
+                Velocity = new Vector3(1f, 0f, 0f)
             });
 
         var recording = simulation.World.StopRecording();
@@ -226,7 +254,8 @@ public sealed class AtmosVoxelBoxEditTests
                 ClearGas = true,
                 TemperatureK = 301f,
                 Gases = [new AtmosGasAmount(1, 0.5f), new AtmosGasAmount(0, 0.25f)],
-                GasTemperatureK = 311f
+                GasTemperatureK = 311f,
+                Velocity = new Vector3(1.5f, -2.5f, 0.5f)
             });
 
         world.Tick();
@@ -260,6 +289,20 @@ public sealed class AtmosVoxelBoxEditTests
         });
     }
 
+    [Test]
+    public void EditVoxelBox_CountsVelocityVoxels()
+    {
+        using var simulation = CreateSimulation();
+        Populate(simulation);
+        var result = simulation.EditVoxelBox(
+            new Int3(0, 0, 0),
+            new Int3(3, 3, 0),
+            new AtmosVoxelBoxEdit { Velocity = new Vector3(1f, 0f, 0f) });
+
+        // Only the two gas-bearing voxels of the origin chunk carry momentum.
+        Assert.That(result.VelocityVoxels, Is.EqualTo(2));
+    }
+
     private static IEnumerable<TestCaseData> InvalidEdits()
     {
         yield return new TestCaseData(new Int3(2, 0, 0), new Int3(1, 0, 0), new AtmosVoxelBoxEdit())
@@ -290,6 +333,10 @@ public sealed class AtmosVoxelBoxEditTests
             new Int3(1, 1, 0),
             new AtmosVoxelBoxEdit { Gases = [new AtmosGasAmount(0, 1f)], GasTemperatureK = -5f })
             .SetName("NegativeGasTemperature");
+
+        yield return new TestCaseData(
+            new Int3(0, 0, 0), new Int3(1, 1, 0), new AtmosVoxelBoxEdit { Velocity = new Vector3(float.NaN, 0f, 0f) })
+            .SetName("NonFiniteVelocity");
     }
 
     [TestCaseSource(nameof(InvalidEdits))]

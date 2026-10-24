@@ -148,13 +148,8 @@ public sealed record SetVoxelMomentumOperation(
 ///     The optional parts of an <see cref="EditVoxelBoxOperation" />.
 /// </summary>
 /// <remarks>
-///     <para>
-///         The kernel applies the parts in the order of this list: classification, gas removal, temperature, gas
-///         injection. Gas injection has no flag, because a nonempty gas list selects it.
-///     </para>
-///     <para>
-///         The flag value 8 is reserved for a velocity part. This build rejects it.
-///     </para>
+///     The kernel applies the parts in the order of this list: classification, gas removal, temperature, gas
+///     injection, velocity. Gas injection has no flag, because a nonempty gas list selects it.
 /// </remarks>
 [Flags]
 public enum AtmosVoxelBoxParts : byte
@@ -177,7 +172,12 @@ public enum AtmosVoxelBoxParts : byte
     /// <summary>
     ///     Store the voxel temperature in every voxel.
     /// </summary>
-    Temperature = 4
+    Temperature = 4,
+
+    /// <summary>
+    ///     Store momentum equal to the voxel's gas mass times the velocity in every gas-bearing air voxel.
+    /// </summary>
+    Velocity = 8
 }
 
 /// <summary>
@@ -199,6 +199,9 @@ public enum AtmosVoxelBoxParts : byte
 /// <param name="Classification">The classification to assign when <see cref="AtmosVoxelBoxParts.Classification" /> is set.</param>
 /// <param name="VoxelTemperature">The stored temperature, in kelvins, when <see cref="AtmosVoxelBoxParts.Temperature" /> is set.</param>
 /// <param name="GasTemperature">The temperature of the injected gas, in kelvins. It matters when <paramref name="Gases" /> is not empty.</param>
+/// <param name="VelocityX">The x velocity, in metres per second, when <see cref="AtmosVoxelBoxParts.Velocity" /> is set.</param>
+/// <param name="VelocityY">The y velocity, in metres per second.</param>
+/// <param name="VelocityZ">The z velocity, in metres per second.</param>
 /// <param name="Gases">The gases to add to every air voxel, in injection order. Each amount is positive and finite.</param>
 public sealed record EditVoxelBoxOperation(
     Int3 Min,
@@ -207,6 +210,9 @@ public sealed record EditVoxelBoxOperation(
     VoxelClassification Classification,
     Kelvin VoxelTemperature,
     Kelvin GasTemperature,
+    MetrePerSecond VelocityX,
+    MetrePerSecond VelocityY,
+    MetrePerSecond VelocityZ,
     IReadOnlyList<AtmosGasAmount> Gases) : AtmosOperation
 {
     /// <inheritdoc />

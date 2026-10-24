@@ -11,10 +11,12 @@ namespace Numos.CoreSim;
 /// <param name="VoxelsEdited">Voxels of the box that lie inside an existing chunk. Solid voxels count.</param>
 /// <param name="VoxelsSkipped">Voxels of the box that lie outside every chunk.</param>
 /// <param name="ChunksTouched">Existing chunks that intersect the box.</param>
+/// <param name="VelocityVoxels">Voxels that received momentum.</param>
 internal readonly record struct VoxelBoxEditCounts(
     long VoxelsEdited,
     long VoxelsSkipped,
-    int ChunksTouched);
+    int ChunksTouched,
+    long VelocityVoxels);
 
 internal sealed partial class AtmosKernel
 {
@@ -26,14 +28,15 @@ internal sealed partial class AtmosKernel
     /// <remarks>
     ///     <para>
     ///         Each existing chunk gets the same sequence that the per-voxel calls would give. The sequence is
-    ///         classification, gas removal, temperature, gas injection. The kernel wakes a chunk once, and
+    ///         classification, gas removal, temperature, gas injection, velocity. The kernel wakes a chunk once, and
     ///         only when a per-voxel call would have woken it.
     ///     </para>
     ///     <para>
     ///         Gas removal and injection skip solid and void voxels. The per-voxel removal call throws for them.
+    ///         Velocity skips a voxel without gas, and a voxel whose momentum would not be finite.
     ///     </para>
     /// </remarks>
-    /// <exception cref="ArgumentException">The box, a gas, or a temperature is invalid.</exception>
+    /// <exception cref="ArgumentException">The box, a gas, a temperature, or a velocity is invalid.</exception>
     internal VoxelBoxEditCounts EditVoxelBox(EditVoxelBoxOperation op)
     {
         ArgumentNullException.ThrowIfNull(op);
@@ -42,8 +45,9 @@ internal sealed partial class AtmosKernel
             ValidateVoxelBoxEdit(op);
             var chunks = CollectBoxChunks(op.Min, op.Max);
             long edited = 0;
+            long velocityVoxels = 0;
             foreach (var chunk in chunks)
-                edited += ApplyVoxelBoxToChunk(chunk, op);
+                edited += ApplyVoxelBoxToChunk(chunk, op, ref velocityVoxels);
 
             Int128 total = (Int128)((long)op.Max.X - op.Min.X + 1) *
                            ((long)op.Max.Y - op.Min.Y + 1) *
@@ -53,7 +57,8 @@ internal sealed partial class AtmosKernel
             var counts = new VoxelBoxEditCounts(
                 edited,
                 skipped > long.MaxValue ? long.MaxValue : (long)skipped,
-                chunks.Length);
+                chunks.Length,
+                velocityVoxels);
 
             if (ShouldRecord) RecordOperation(op);
             return counts;
@@ -64,7 +69,7 @@ internal sealed partial class AtmosKernel
     {
         ArgumentNullException.ThrowIfNull(op.Gases);
         const AtmosVoxelBoxParts known = AtmosVoxelBoxParts.Classification | AtmosVoxelBoxParts.ClearGas |
-                                         AtmosVoxelBoxParts.Temperature;
+                                         AtmosVoxelBoxParts.Temperature | AtmosVoxelBoxParts.Velocity;
 
         if ((op.Parts & ~known) != 0)
             throw new ArgumentException("The voxel box selects an unknown part.", nameof(op));
@@ -90,6 +95,11 @@ internal sealed partial class AtmosKernel
                 throw new ArgumentException($"Gas {gas.GasId} moles must be positive and finite.", nameof(op));
         }
 
+        if (op.Parts.HasFlag(AtmosVoxelBoxParts.Velocity) &&
+            (!float.IsFinite(op.VelocityX) || !float.IsFinite(op.VelocityY) || !float.IsFinite(op.VelocityZ)))
+        {
+            throw new ArgumentException("The velocity components must be finite.", nameof(op));
+        }
     }
 
     private static int FloorDivide(int value, int divisor)
@@ -161,7 +171,7 @@ internal sealed partial class AtmosKernel
         return chunks;
     }
 
-    private long ApplyVoxelBoxToChunk(AtmosChunk chunk, EditVoxelBoxOperation op)
+    private long ApplyVoxelBoxToChunk(AtmosChunk chunk, EditVoxelBoxOperation op, ref long velocityVoxels)
     {
         var dimensions = chunk.Dimensions;
         long originX = (long)chunk.GridPosition.X * dimensions.X;
@@ -253,6 +263,49 @@ internal sealed partial class AtmosKernel
 
                     WakeOnce(chunk, ref awake);
                     GasInjectionSolver.Inject(chunk, index, gas.GasId, gas.Moles, op.GasTemperature, _config);
+                }
+            }
+        }
+
+        if (op.Parts.HasFlag(AtmosVoxelBoxParts.Velocity))
+        {
+            CubicMetre volume = _config.GetVoxelVolume();
+            for (int z = z0; z <= z1; z++)
+            for (int y = y0; y <= y1; y++)
+            {
+                int row = dimensions.X * (y + dimensions.Y * z);
+                for (int x = x0; x <= x1; x++)
+                {
+                    var index = (ushort)(row + x);
+                    if (IsSolidOrVoid(chunk, index) || chunk.TotalPressure[index] <= 0f)
+                        continue;
+
+                    // Same expression as FlowFieldMath.GetDensity times the voxel volume, so the result matches the
+                    // per-voxel path bit for bit.
+                    Kilogram gasMass = 0f;
+                    for (int gas = 0; gas < chunk.ActiveGasCount; gas++)
+                    {
+                        Mole moles = chunk.ActiveGases[gas].Moles[index];
+                        if (float.IsFinite(moles) && moles > 0f)
+                            gasMass += moles * _config.GetMolarMass(chunk.ActiveGases[gas].GasId);
+                    }
+
+                    KilogramPerCubicMetre density = gasMass / volume;
+                    Kilogram mass = density * volume;
+                    if (!(mass > 0f))
+                        continue;
+
+                    KilogramMetrePerSecond momentumX = mass * op.VelocityX;
+                    KilogramMetrePerSecond momentumY = mass * op.VelocityY;
+                    KilogramMetrePerSecond momentumZ = mass * op.VelocityZ;
+                    if (!float.IsFinite(momentumX) || !float.IsFinite(momentumY) || !float.IsFinite(momentumZ))
+                        continue;
+
+                    WakeOnce(chunk, ref awake);
+                    chunk.MomentumX[index] = momentumX;
+                    chunk.MomentumY[index] = momentumY;
+                    chunk.MomentumZ[index] = momentumZ;
+                    velocityVoxels++;
                 }
             }
         }
