@@ -91,16 +91,6 @@ internal abstract class ChunkFieldDescriptor
         string vacuum = clearOnVacuum ? "cleared on vacuum" : "kept on vacuum";
         return $"{elementType.FullName} ({length}, {policy}, {sleep}, {vacuum})";
     }
-
-    /// <summary>
-    ///     Resets one element of this field's storage on <paramref name="chunk" /> to default, if the chunk has it.
-    /// </summary>
-    internal abstract void ClearElement(AtmosChunk chunk, int index);
-
-    /// <summary>
-    ///     Resets this field's entire storage on <paramref name="chunk" /> to default, if the chunk has it.
-    /// </summary>
-    internal abstract void ClearAll(AtmosChunk chunk);
 }
 
 /// <inheritdoc />
@@ -191,18 +181,6 @@ internal static class ChunkFieldRegistry
             var descriptor = new ChunkFieldDescriptor<T>(key, slot, captureForRollback, length, clearOnSleep, clearOnVacuum);
             ByKey.Add(key, descriptor);
             return descriptor;
-        }
-    }
-
-    internal static ChunkFieldDescriptor[] GetAllDescriptors()
-    {
-        lock (Gate)
-        {
-            var result = new ChunkFieldDescriptor[ByKey.Count];
-            foreach (var descriptor in ByKey.Values)
-                result[descriptor.Slot] = descriptor;
-
-            return result;
         }
     }
 }

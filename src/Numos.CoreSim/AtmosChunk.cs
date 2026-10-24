@@ -326,12 +326,6 @@ internal class AtmosChunk
         return fields != null && (uint)slot < (uint)fields.Length ? fields[slot] as SolverArrayStorage<T> : null;
     }
 
-    internal bool TryGetField<T>(ChunkFieldDescriptor<T> field, [NotNullWhen(true)] out T[]? array)
-    {
-        array = FindField(Volatile.Read(ref _fields), field)?.Values;
-        return array != null;
-    }
-
     private T[] CreateField<T>(ChunkFieldDescriptor<T> field)
     {
         lock (_fieldGate)

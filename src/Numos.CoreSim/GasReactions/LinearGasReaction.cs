@@ -71,7 +71,7 @@ public readonly partial record struct LinearGasReaction
     private FrozenDictionary<GasProperties, float> Output { get; }
 
     /// <summary>
-    ///     Joules released (positive) or absorbed (negative) per mole of Mole.
+    ///     Joules released (positive) or absorbed (negative) per mole of reaction.
     /// </summary>
     /// <remarks>
     ///     Per mole of whichever reactant has a coefficient of one, so for 2H₂ + O₂ -> 2H₂O it is the energy released
