@@ -107,6 +107,30 @@ public sealed class SolverStateTests
     }
 
     [Test]
+    public void Restore_AdoptsTheCheckpointLayoutAndKeepsStatefulSolverOrder()
+    {
+        using var world = CreateWorld(out var solver);
+        var builtIns = AtmosWorldSolverPipeline.GetDefaultLayout(AtmosTransportModel.Euler)
+            .Select(static name => new AtmosWorldSolverLayoutEntry(name, true));
+        var counterFirst = new[] { new AtmosWorldSolverLayoutEntry(Name, true) }.Concat(builtIns).ToArray();
+        var counterLast = builtIns.Append(new AtmosWorldSolverLayoutEntry(Name, true)).ToArray();
+
+        world.Solvers.SetLayout(counterFirst);
+        solver.Rate = 4f;
+        var checkpoint = world.CaptureCheckpoint();
+        world.Solvers.SetLayout(counterLast);
+        solver.Rate = 1f;
+
+        world.RestoreCheckpoint(checkpoint);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(world.CaptureCheckpoint().Solvers.Select(static value => value.Name).First(), Is.EqualTo(Name));
+            Assert.That(solver.RateSeenByOnRestored, Is.EqualTo(4f));
+        });
+    }
+
+    [Test]
     public void Restore_SetsMarkedMembersBeforeOnRestored()
     {
         using var world = CreateWorld(out var solver);
