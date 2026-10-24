@@ -250,6 +250,75 @@ public sealed class WorkbenchSessionTests
     }
 
     [Test]
+    public void ApplyTransportPreset_SwapsTransportStagesAndKeepsTheRest()
+    {
+        using var session = CreateSession();
+        session.SetSolverEnabled("thermodynamics", false);
+
+        Assert.That(session.ApplyTransportPreset(AtmosTransportModel.Legacy), Is.True);
+        var legacy = session.GetSolverSteps();
+        Assert.That(session.ApplyTransportPreset(AtmosTransportModel.Euler), Is.True);
+        var euler = session.GetSolverSteps();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(
+                legacy.Select(static step => step.Name),
+                Is.EqualTo(AtmosWorldSolverPipeline.GetDefaultLayout(AtmosTransportModel.Legacy)));
+
+            Assert.That(legacy.Single(static step => step.Name == "thermodynamics").IsEnabled, Is.False);
+            Assert.That(
+                euler.Select(static step => step.Name),
+                Is.EqualTo(AtmosWorldSolverPipeline.GetDefaultLayout(AtmosTransportModel.Euler)));
+
+            Assert.That(euler.Single(static step => step.Name == "thermodynamics").IsEnabled, Is.False);
+        });
+    }
+
+    [Test]
+    public void SetSolverLayout_ReportsARejectionWithoutThrowing()
+    {
+        using var session = CreateSession();
+        var before = session.GetSolverSteps();
+
+        bool accepted = session.SetSolverLayout([new AtmosWorldSolverLayoutEntry("nope", true)]);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(accepted, Is.False);
+            Assert.That(session.GetSolverSteps(), Is.EqualTo(before));
+        });
+    }
+
+    [Test]
+    public void LoadReplay_RestoresALegacyArchiveWithoutInferringTheModel()
+    {
+        string path = Path.Combine(_directory, "legacy-switch");
+        AtmosWorldStateHash expected;
+        using (var session = CreateSession(false))
+        {
+            session.AddGas(new GasProperties { Name = "Argon", MolarHeatCapacityAtConstantVolume = 12.5f });
+            session.AddChunk(default);
+            session.AddVoxelGas(session.GetCell(default, 0, 0, 0), 0, 5f, 300f);
+            session.Tick(3);
+            session.ApplyTransportPreset(AtmosTransportModel.Legacy);
+            session.Tick(5);
+            expected = session.World!.ComputeStateHash();
+            session.SaveReplay(path);
+        }
+
+        using var loader = new WorkbenchSession();
+        loader.InstallReplay(loader.LoadReplay(path + ".numos"));
+        loader.Timeline!.ReturnToHead();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(loader.World!.ComputeStateHash(), Is.EqualTo(expected));
+            Assert.That(loader.GetSolverSteps().Select(static step => step.Name), Does.Contain("advection"));
+        });
+    }
+
+    [Test]
     public void InstallReplay_AtHead_LetsTheSessionTickImmediately()
     {
         string path = Path.Combine(_directory, "at-head");

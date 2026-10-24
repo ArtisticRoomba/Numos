@@ -244,7 +244,7 @@ public sealed class WorkbenchRegionTests
     }
 
     [Test]
-    public void ResetSolvers_EnablesStagesEvenWhileTheWorldRecords()
+    public void ResetSolvers_RestoresTheDefaultLayoutWhileTheWorldRecords()
     {
         using var session = CreateSession();
         session.SetSolverEnabled("boundary-flow", false);
@@ -253,7 +253,7 @@ public sealed class WorkbenchRegionTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(full, Is.False);
+            Assert.That(full, Is.True);
             Assert.That(session.GetSolverSteps().All(static step => step.IsEnabled), Is.True);
         });
     }

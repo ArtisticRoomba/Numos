@@ -183,16 +183,70 @@ public sealed partial class WorkbenchSession
     }
 
     /// <summary>
+    ///     Replaces the order and enabled flags of the solver stages.
+    /// </summary>
+    /// <param name="stages">Every stage in the new order. See <see cref="AtmosWorldSolverPipeline.SetLayout" />.</param>
+    /// <returns><see langword="true" /> when the world accepted the layout, <see langword="false" /> when it rejected it.</returns>
+    /// <remarks>
+    ///     The world records an actual change, so it replays at the same position. A rejection leaves the pipeline
+    ///     unchanged and logs a warning with the reason.
+    /// </remarks>
+    public bool SetSolverLayout(IReadOnlyList<AtmosWorldSolverLayoutEntry> stages)
+    {
+        ArgumentNullException.ThrowIfNull(stages);
+        return Guard(
+            "Could not change the solver layout",
+            () =>
+            {
+                var world = RequireWorld();
+                ThrowIfInspecting();
+                try
+                {
+                    bool changed = world.Solvers.SetLayout(stages);
+                    Info(changed ? "Changed the solver layout." : "The solver layout already matches.");
+                    return true;
+                }
+                catch (ArgumentException exception)
+                {
+                    Warn($"Rejected the solver layout: {exception.Message}");
+                    return false;
+                }
+            });
+    }
+
+    /// <summary>
+    ///     Switches the transport stages to one model and keeps every other stage as it is.
+    /// </summary>
+    /// <param name="model">The transport model to run.</param>
+    /// <returns><see langword="true" /> when the world accepted the layout.</returns>
+    /// <remarks>
+    ///     See <see cref="AtmosWorldSolverPipeline.ConvertTransportModel" /> for how the stages move.
+    /// </remarks>
+    public bool ApplyTransportPreset(AtmosTransportModel model)
+    {
+        var world = RequireWorld();
+        var current = world.Solvers.Steps
+            .Select(static step => new AtmosWorldSolverLayoutEntry(step.Name, step.IsEnabled))
+            .ToArray();
+
+        return SetSolverLayout(AtmosWorldSolverPipeline.ConvertTransportModel(current, model));
+    }
+
+    /// <summary>
     ///     Restores the built-in solver stages, order, and enabled flags.
     /// </summary>
     /// <returns>
     ///     <see langword="true" /> when the pipeline is back to its defaults. <see langword="false" /> when only the
     ///     enabled flags could be restored.
     /// </returns>
-    /// <param name="transportModel">The built-in transport stages to install, or <see langword="null" /> for the world default.</param>
+    /// <param name="transportModel">
+    ///     The built-in transport stages to install, or <see langword="null" /> to keep the model the stage list runs now.
+    /// </param>
     /// <remarks>
-    ///     The world refuses to register or remove stages while it records, and a project timeline always records. In
-    ///     that case the session enables every stage and leaves the order and any custom stages alone.
+    ///     A world without custom stages gets the default layout through <see cref="AtmosWorldSolverPipeline.SetLayout" />,
+    ///     which also works while recording. The world cannot discard custom stages while it records, and a project
+    ///     timeline always records. In that case the session enables every stage and leaves the order and the custom
+    ///     stages alone.
     /// </remarks>
     public bool ResetSolvers(AtmosTransportModel? transportModel = null)
     {
@@ -201,13 +255,21 @@ public sealed partial class WorkbenchSession
             () =>
             {
                 var world = RequireWorld();
+                var model = transportModel ?? CurrentTransportModel(world);
+                if (world.Solvers.Steps.All(static step => step.Kind == AtmosWorldSolverKind.BuiltIn))
+                {
+                    ThrowIfInspecting();
+                    world.Solvers.SetLayout(AtmosWorldSolverPipeline.GetDefaultLayout(model)
+                        .Select(static name => new AtmosWorldSolverLayoutEntry(name, true))
+                        .ToArray());
+
+                    Info("Reset the solver pipeline to its defaults.");
+                    return true;
+                }
+
                 try
                 {
-                    if (transportModel is { } model)
-                        world.Solvers.ResetToDefaults(model);
-                    else
-                        world.Solvers.ResetToDefaults();
-
+                    world.Solvers.ResetToDefaults(model);
                     Info("Reset the solver pipeline to its defaults.");
                     return true;
                 }
@@ -223,5 +285,13 @@ public sealed partial class WorkbenchSession
                     return false;
                 }
             });
+    }
+
+    private static AtmosTransportModel CurrentTransportModel(AtmosWorld world)
+    {
+        var names = world.Solvers.Steps.Select(static step => step.Name).ToArray();
+        return names.Contains(AtmosBuiltInSolvers.Advection) && !names.Contains(AtmosBuiltInSolvers.EulerFlow)
+            ? AtmosTransportModel.Legacy
+            : AtmosTransportModel.Euler;
     }
 }
