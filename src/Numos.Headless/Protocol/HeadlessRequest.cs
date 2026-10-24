@@ -81,6 +81,7 @@ internal sealed class HeadlessRequest
     public string? Path { get; init; }
     public bool? ThroughCurrentPosition { get; init; }
     public bool? Overwrite { get; init; }
+    public bool? AtHead { get; init; }
 
     // Observation detail. Summary data is always returned by observe.
     public bool? IncludeVoxels { get; init; }

@@ -1,6 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
-using Numos.CoreSim;
+using Numos.Build;
 using Numos.Headless.Protocol;
 using Numos.Workbench;
 
@@ -42,7 +42,11 @@ internal sealed class HeadlessCommandHost : IDisposable
 
     private static string GetVersion()
     {
-        return CoreSimBuildInfo.PackageVersion;
+        string commit = GeneratedBuildInfo.GitCommit is { Length: >= 7 } and not "unknown"
+            ? GeneratedBuildInfo.GitCommit[..7]
+            : "unknown";
+
+        return $"{GeneratedBuildInfo.PackageVersion}+{commit}";
     }
 
     /// <summary>

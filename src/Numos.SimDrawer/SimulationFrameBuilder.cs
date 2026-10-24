@@ -619,7 +619,17 @@ public sealed class SimulationFrameBuilder
         return Math.Clamp(sliceIndex, 0, maximum);
     }
 
-    private static (int width, int height) GetSliceDimensions(Int3 dimensions, SliceAxis axis)
+    /// <summary>
+    ///     Gets the size of a slice in slice coordinates.
+    /// </summary>
+    /// <param name="dimensions">The size of the sliced box.</param>
+    /// <param name="axis">The axis the slice is perpendicular to.</param>
+    /// <returns>
+    ///     The extent along u and v. An X slice has u along z and v along y. A Y slice has u along x and v along z.
+    ///     A Z slice has u along x and v along y.
+    /// </returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="axis" /> is not a defined axis.</exception>
+    public static (int width, int height) GetSliceDimensions(Int3 dimensions, SliceAxis axis)
     {
         return axis switch
         {
@@ -630,7 +640,16 @@ public sealed class SimulationFrameBuilder
         };
     }
 
-    private static (int x, int y, int z) MapSliceToLocal(
+    /// <summary>
+    ///     Maps slice coordinates to box coordinates.
+    /// </summary>
+    /// <param name="axis">The axis the slice is perpendicular to.</param>
+    /// <param name="sliceIndex">The index along <paramref name="axis" />.</param>
+    /// <param name="u">The first slice coordinate.</param>
+    /// <param name="v">The second slice coordinate.</param>
+    /// <returns>The x, y, and z coordinates. See <see cref="GetSliceDimensions" /> for the axis order.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="axis" /> is not a defined axis.</exception>
+    public static (int x, int y, int z) MapSliceToLocal(
         SliceAxis axis,
         int sliceIndex,
         int u,

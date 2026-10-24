@@ -3,6 +3,7 @@ using System.IO.Compression;
 using System.Text;
 using Numos.API;
 using Numos.CoreSim;
+using Numos.CoreSim.Datatypes.Primitives;
 using Numos.Maths;
 using Numos.SimDrawer;
 
@@ -128,6 +129,44 @@ public sealed class WorkbenchExportTests
             Assert.That(values.Skip(12).Take(4).All(static value => value == 2f), Is.True);
             Assert.Throws<ArgumentOutOfRangeException>(() =>
                 session.ExportSlice(SliceAxis.Z, 5, ["classification"], Path.Combine(_directory, "bad.npy")));
+        });
+    }
+
+    [Test]
+    public void ExportSlice_UsesSimDrawerAxesForAnXSlice()
+    {
+        using var session = CreateSession();
+        session.AddChunk(new Int3(0, 0, 1), 2);
+
+        var exports = session.ExportSlice(SliceAxis.X, 0, ["classification"], Path.Combine(_directory, "x.npy"));
+
+        var (header, values, _) = ReadNpy(exports[0].Path!);
+        var (width, height) = SimulationFrameBuilder.GetSliceDimensions(new Int3(1, 3, 2), SliceAxis.X);
+        Assert.Multiple(() =>
+        {
+            Assert.That((width, height), Is.EqualTo((2, 3)), "u runs along z and v along y");
+            Assert.That(exports[0].Shape, Is.EqualTo(new[] { 3, 2 }));
+            Assert.That(header, Does.Contain("'shape': (3, 2)"));
+            Assert.That(values, Is.EqualTo(new[] { 1f, 2f, 1f, 2f, 1f, 2f }));
+        });
+    }
+
+    [Test]
+    public void RenderSlice_AutomaticRangeIgnoresSolidVoxels()
+    {
+        using var session = CreateSession();
+        session.AddChunk(new Int3(2, 0, 0), VoxelClassification.RoomSolid);
+        session.EditRegion(new VoxelBox(new Int3(4, 0, 0), new Int3(7, 2, 0)), new RegionEdit(
+            ClearGas: true,
+            Gases: [new RegionGas(0, null, 6000f)],
+            GasTemperatureK: 300f));
+
+        var image = session.RenderSlice(SliceAxis.Z, 0, BuiltInVisualizationIds.Pressure);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(image.RangeMinimum, Is.EqualTo(3000f).Within(30f));
+            Assert.That(image.RangeMaximum, Is.EqualTo(6000f).Within(60f));
         });
     }
 

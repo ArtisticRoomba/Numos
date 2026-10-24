@@ -452,6 +452,28 @@ public sealed class HeadlessProtocolTests
     }
 
     [Test]
+    public async Task LoadReplay_AtHeadTicksWithoutReturningToHead()
+    {
+        string path = PathFor("at-head.numos");
+        await RunAsync(
+            CreateProject("create", 2, 1, 1),
+            Request("add", "addChunk", $"\"position\":{Coordinate0},\"classification\":1"),
+            Request("tick", "tick", "\"count\":4"),
+            Request("save", "saveReplay", $"\"path\":\"{path}\""));
+
+        var load = await RunAsync(
+            Request("load", "loadReplay", $"\"path\":\"{path}\",\"atHead\":true"),
+            Request("tick", "tick", "\"count\":2"));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(load.Find("load").GetProperty("state").GetProperty("tick").GetInt32(), Is.EqualTo(4));
+            Assert.That(load.Find("load").GetProperty("state").GetProperty("inspecting").GetBoolean(), Is.False);
+            Assert.That(load.Find("tick").GetProperty("state").GetProperty("tick").GetInt32(), Is.EqualTo(6));
+        });
+    }
+
+    [Test]
     public async Task Observe_ReportsTheStateHashOfTheAddressedSimulation()
     {
         var run = await RunAsync(

@@ -237,17 +237,16 @@ public sealed partial class WorkbenchSession
     /// <summary>
     ///     Gets the shape of a slice box as (v, u).
     /// </summary>
+    /// <remarks>
+    ///     The axes follow <see cref="SimulationFrameBuilder.GetSliceDimensions" />, so a slice here matches a slice in
+    ///     the viewer.
+    /// </remarks>
     /// <param name="axis">The axis the slice is perpendicular to.</param>
     /// <param name="box">A box from <see cref="GetSliceBox" />.</param>
     public static int[] GetSliceShape(SliceAxis axis, VoxelBox box)
     {
-        int[] full = GetShape(box);
-        return axis switch
-        {
-            SliceAxis.X => [full[0], full[1]],
-            SliceAxis.Y => [full[0], full[2]],
-            _ => [full[1], full[2]]
-        };
+        (int uSize, int vSize) = SimulationFrameBuilder.GetSliceDimensions(box.Size, axis);
+        return [vSize, uSize];
     }
 
     /// <summary>
@@ -282,7 +281,8 @@ public sealed partial class WorkbenchSession
     /// <param name="simulation">The simulation to read, or <see langword="null" /> for the active one.</param>
     /// <returns>
     ///     One entry per field. The shape is (v, u), where u runs along the first remaining axis and v along the second.
-    ///     For a Z slice, u is x and v is y. For a Y slice, u is x and v is z. For an X slice, u is y and v is z.
+    ///     For a Z slice, u is x and v is y. For a Y slice, u is x and v is z. For an X slice, u is z and v is y.
+    ///     These are the axes of <see cref="SimulationFrameBuilder.GetSliceDimensions" />.
     /// </returns>
     /// <remarks>
     ///     The slice covers the bounding box of all chunks. Voxels without a chunk are NaN.
@@ -299,8 +299,18 @@ public sealed partial class WorkbenchSession
             () =>
             {
                 var box = GetSliceBox(axis, index, simulation);
-                return ExportCore(box, GetSliceShape(axis, box), fieldNames, pathTemplate, simulation, $"{axis} slice {index}");
+                return ExportCore(box, GetSliceShape(axis, box), fieldNames, pathTemplate, simulation, $"{axis} slice {index}", axis);
             });
+    }
+
+    private static float[] Transpose(float[] source, int rows, int columns)
+    {
+        var result = new float[source.Length];
+        for (int row = 0; row < rows; row++)
+        for (int column = 0; column < columns; column++)
+            result[column * rows + row] = source[row * columns + column];
+
+        return result;
     }
 
     /// <summary>
@@ -324,7 +334,8 @@ public sealed partial class WorkbenchSession
         IReadOnlyList<string> fieldNames,
         string? pathTemplate,
         AtmosSimulationId? simulation,
-        string description)
+        string description,
+        SliceAxis? sliceAxis = null)
     {
         RequireWorld();
         if (fieldNames.Count == 0)
@@ -340,6 +351,13 @@ public sealed partial class WorkbenchSession
         }
 
         float[][] values = ReadBox(box, fieldNames, simulation);
+        if (sliceAxis == SliceAxis.X)
+        {
+            // ReadBox returns (z, y, 1). An X slice is stored as (v, u) = (y, z).
+            for (int field = 0; field < values.Length; field++)
+                values[field] = Transpose(values[field], box.Size.Z, box.Size.Y);
+        }
+
         var exports = new List<FieldExport>(values.Length);
         for (int index = 0; index < values.Length; index++)
         {
@@ -386,7 +404,7 @@ public sealed partial class WorkbenchSession
     /// <param name="axis">The axis the slice is perpendicular to.</param>
     /// <param name="index">The global voxel index along <paramref name="axis" />.</param>
     /// <param name="visualizationId">A SimDrawer visualization id such as `pressure` or `temperature`.</param>
-    /// <param name="range">A fixed color range, or <see langword="null" /> for the range of the finite values in the slice.</param>
+    /// <param name="range">A fixed color range, or <see langword="null" /> for the range of the finite values in the air voxels of the slice.</param>
     /// <param name="scale">The pixel size of one voxel. Must be at least 1.</param>
     /// <param name="levels">The number of color steps. Use a high number for a smooth gradient.</param>
     /// <param name="simulation">The simulation to render, or <see langword="null" /> for the active one.</param>
@@ -396,7 +414,7 @@ public sealed partial class WorkbenchSession
     /// </returns>
     /// <remarks>
     ///     The color comes from the visualization, so the image matches what the viewer draws for the same voxel. The
-    ///     automatic range covers the chunks that the slice crosses.
+    ///     automatic range covers the finite values of the air voxels in the slice.
     /// </remarks>
     public SliceImage RenderSlice(
         SliceAxis axis,
@@ -417,12 +435,7 @@ public sealed partial class WorkbenchSession
                 var config = RequireConfig();
                 var box = GetSliceBox(axis, index, simulation);
                 var size = box.Size;
-                (int uSize, int vSize) = axis switch
-                {
-                    SliceAxis.X => (size.Y, size.Z),
-                    SliceAxis.Y => (size.X, size.Z),
-                    _ => (size.X, size.Y)
-                };
+                (int uSize, int vSize) = SimulationFrameBuilder.GetSliceDimensions(size, axis);
 
                 if ((long)uSize * scale * vSize * scale > MaximumRenderPixels)
                 {
@@ -452,11 +465,13 @@ public sealed partial class WorkbenchSession
                     }
                 }
 
+                var requirements = builder.Visualizations.GetRequired(visualizationId).RequiredData;
+                var effectiveRange = range ?? GetAirRange(snapshots, box, dimensions, requirements);
                 var frame = builder.BuildSimulation(
                     snapshots,
                     visualizationId,
                     0,
-                    rangeOverride: range,
+                    rangeOverride: effectiveRange,
                     resolution: levels);
 
                 int width = uSize * scale;
@@ -465,12 +480,8 @@ public sealed partial class WorkbenchSession
                 for (int v = 0; v < vSize; v++)
                 for (int u = 0; u < uSize; u++)
                 {
-                    var voxel = axis switch
-                    {
-                        SliceAxis.X => new Int3(box.Min.X, box.Min.Y + u, box.Min.Z + v),
-                        SliceAxis.Y => new Int3(box.Min.X + u, box.Min.Y, box.Min.Z + v),
-                        _ => new Int3(box.Min.X + u, box.Min.Y + v, box.Min.Z)
-                    };
+                    (int dx0, int dy0, int dz0) = SimulationFrameBuilder.MapSliceToLocal(axis, 0, u, v);
+                    var voxel = new Int3(box.Min.X + dx0, box.Min.Y + dy0, box.Min.Z + dz0);
 
                     (byte r, byte g, byte b) = ResolvePixel(frame, voxel, dimensions);
                     int top = (vSize - 1 - v) * scale;
@@ -495,6 +506,64 @@ public sealed partial class WorkbenchSession
 
                 return new SliceImage(width, height, rgba, used.Minimum, used.Maximum);
             });
+    }
+
+    /// <summary>
+    ///     Finds the finite range of the values a visualization colors, over the air voxels of a slice.
+    /// </summary>
+    /// <returns>
+    ///     The range, or <see langword="null" /> when the slice has no finite air value or the values are all equal.
+    ///     The builder then picks its own range.
+    /// </returns>
+    private static VisualizationRange? GetAirRange(
+        List<AtmosChunkSnapshot> snapshots,
+        VoxelBox box,
+        Int3 dimensions,
+        VisualizationDataRequirements requirements)
+    {
+        bool useTemperature = (requirements & VisualizationDataRequirements.Temperature) != 0;
+        bool usePressure = (requirements & VisualizationDataRequirements.Pressure) != 0;
+        float minimum = float.PositiveInfinity;
+        float maximum = float.NegativeInfinity;
+        foreach (var snapshot in snapshots)
+        {
+            var origin = new Int3(
+                snapshot.GridPosition.X * dimensions.X,
+                snapshot.GridPosition.Y * dimensions.Y,
+                snapshot.GridPosition.Z * dimensions.Z);
+
+            for (int index = 0; index < snapshot.VoxelRoomMap.Length; index++)
+            {
+                int room = snapshot.VoxelRoomMap[index];
+                if (room == VoxelClassification.RoomVoid || room == VoxelClassification.RoomSolid)
+                    continue;
+
+                int x = origin.X + index % dimensions.X;
+                int y = origin.Y + index / dimensions.X % dimensions.Y;
+                int z = origin.Z + index / (dimensions.X * dimensions.Y);
+                if (x < box.Min.X || x > box.Max.X || y < box.Min.Y || y > box.Max.Y || z < box.Min.Z || z > box.Max.Z)
+                    continue;
+
+                if (useTemperature && index < snapshot.Temperature.Length)
+                    Include(snapshot.Temperature[index], ref minimum, ref maximum);
+
+                if (usePressure && index < snapshot.TotalPressure.Length)
+                    Include(snapshot.TotalPressure[index], ref minimum, ref maximum);
+            }
+        }
+
+        return float.IsFinite(minimum) && float.IsFinite(maximum) && maximum > minimum
+            ? new VisualizationRange(minimum, maximum)
+            : null;
+    }
+
+    private static void Include(float value, ref float minimum, ref float maximum)
+    {
+        if (!float.IsFinite(value))
+            return;
+
+        minimum = Math.Min(minimum, value);
+        maximum = Math.Max(maximum, value);
     }
 
     private static (byte R, byte G, byte B) ResolvePixel(SimulationDrawData frame, Int3 voxel, Int3 dimensions)

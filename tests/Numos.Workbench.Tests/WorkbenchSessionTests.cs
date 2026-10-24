@@ -250,6 +250,29 @@ public sealed class WorkbenchSessionTests
     }
 
     [Test]
+    public void InstallReplay_AtHead_LetsTheSessionTickImmediately()
+    {
+        string path = Path.Combine(_directory, "at-head");
+        using (var session = CreateSession(false))
+        {
+            session.AddChunk(default);
+            session.Tick(5);
+            session.SaveReplay(path);
+        }
+
+        using var loader = new WorkbenchSession();
+        loader.InstallReplay(loader.LoadReplay(path + ".numos"), null, true);
+
+        loader.Tick(3);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(loader.World!.TickCount, Is.EqualTo(8));
+            Assert.That(loader.Timeline!.IsInspecting, Is.False);
+        });
+    }
+
+    [Test]
     public void Solvers_CanBeListedDisabledAndReset()
     {
         using var session = CreateSession();

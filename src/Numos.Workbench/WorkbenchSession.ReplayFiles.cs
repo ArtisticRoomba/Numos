@@ -135,7 +135,11 @@ public sealed partial class WorkbenchSession
     ///     Runs against the replay's configuration before the old project closes. If it throws, the old project stays
     ///     open and the caller still owns <paramref name="loaded" />.
     /// </param>
-    public void InstallReplay(LoadedReplay loaded, Action<AtmosConfig>? prepare = null)
+    /// <param name="atHead">
+    ///     When <see langword="true" />, the session moves to the head of the replay and continues its branch, so the
+    ///     next <see cref="Tick" /> extends the branch. When <see langword="false" />, the session inspects the replay.
+    /// </param>
+    public void InstallReplay(LoadedReplay loaded, Action<AtmosConfig>? prepare = null, bool atHead = false)
     {
         ThrowIfDisposed();
         ArgumentNullException.ThrowIfNull(loaded);
@@ -148,6 +152,11 @@ public sealed partial class WorkbenchSession
 
             Open(loaded.World, loaded.Config, name, loaded.Timeline, null);
             Info($"Loaded and verified replay '{Path.GetFileName(loaded.Path)}'.");
+            if (atHead)
+            {
+                ReturnToHead();
+                ContinueBranch();
+            }
         }
         catch (Exception exception)
         {

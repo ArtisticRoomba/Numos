@@ -230,7 +230,8 @@ hole in the middle reads as NaN.
 - A region has shape `(z, y, x)`, in C order, so `x` changes fastest. A region only one voxel thick in `z` is still a
   three-dimensional array of shape `(1, y, x)`.
 - A slice has shape `(v, u)`. For a `z` slice, `u` is `x` and `v` is `y`. For a `y` slice, `u` is `x` and `v` is `z`.
-  For an `x` slice, `u` is `y` and `v` is `z`. This matches the order of the image rows from the bottom.
+  For an `x` slice, `u` is `z` and `v` is `y`. These are the axes of the viewer's slice view, so a file and a viewer
+  slice of the same plane agree. The rows run from the bottom of the picture.
 - With `npy`, the runner writes one file per field. `path` must contain `{field}` when `fields` has more than one
   entry. The runner puts the field name there and turns `:` into `_`, so `moles:0` becomes `moles_0`.
 - With `json`, the response carries each field's `values` inline in the same order. The runner allows up to 65536 values
@@ -259,9 +260,8 @@ contain commas or quotes. A voxel outside every chunk reads as NaN.
 `visualization` is a visualization id such as `pressure` (the default), `temperature`, or `voxel-classification`.
 `scale` is the pixel size of one voxel. `levels` is the number of color steps (default 256).
 
-By default, the color range spans the finite values in the chunks that the slice crosses. That range includes solid
-voxels, which read 0 Pa, so a pressure picture can look washed out. Pass `range` as `{min, max}` to fix it. The response
-reports the range used. The image has `u` left to right and `v` bottom to top. Hidden solid voxels are gray. Voxels
+By default, the color range spans the finite values of the air voxels in the slice. Solid and void voxels do not count.
+Pass `range` as `{min, max}` to fix it. The response reports the range used. The image has `u` left to right and `v` bottom to top. Hidden solid voxels are gray. Voxels
 without a chunk are black.
 
 ### Gases and configuration
@@ -337,11 +337,12 @@ While the timeline inspects history, every operation that edits the world fails 
 | Operation | Request data | Effect |
 | --- | --- | --- |
 | `saveReplay` | `path`, `throughCurrentPosition`, `overwrite` | Writes the selected branch to a `.numos` file. |
-| `loadReplay` | `path` | Replaces the project with the replay, verified by replaying it. |
+| `loadReplay` | `path`, optional `atHead` | Replaces the project with the replay, verified by replaying it. |
 
 `loadReplay` blocks until the replay is verified. It leaves the timeline at the start of the replay in inspection mode,
 like the viewer. Call `returnToHead` to reach the saved final state. Its `timelineInfo.stateHash` equals the hash that
-was current when you saved. Call `continueBranch` to keep ticking.
+was current when you saved. Call `continueBranch` to keep ticking. With `"atHead":true`, `loadReplay` does both steps, so
+the next `tick` extends the branch.
 
 `saveReplay` fails with `ioError` when the file exists, unless `overwrite` is `true`.
 

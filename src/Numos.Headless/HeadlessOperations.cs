@@ -918,7 +918,7 @@ internal sealed partial class HeadlessOperations
         var loaded = _session.LoadReplay(path);
         try
         {
-            _session.InstallReplay(loaded);
+            _session.InstallReplay(loaded, null, request.AtHead ?? false);
         }
         catch
         {

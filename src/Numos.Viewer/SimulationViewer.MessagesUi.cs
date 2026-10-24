@@ -204,11 +204,12 @@ public partial class SimulationViewer
             ImGuiTableFlags.BordersOuter |
             ImGuiTableFlags.Resizable;
 
-        if (!ImGui.BeginTable("MessageLog##messages", 4, flags))
+        if (!ImGui.BeginTable("MessageLog##messages", 5, flags))
             return;
 
         ImGui.TableSetupScrollFreeze(0, 1);
         ImGui.TableSetupColumn("Time", ImGuiTableColumnFlags.WidthFixed);
+        ImGui.TableSetupColumn("Tick", ImGuiTableColumnFlags.WidthFixed);
         ImGui.TableSetupColumn("Level", ImGuiTableColumnFlags.WidthFixed);
         ImGui.TableSetupColumn("Source", ImGuiTableColumnFlags.WidthFixed);
         ImGui.TableSetupColumn("Message", ImGuiTableColumnFlags.WidthStretch);
@@ -221,15 +222,19 @@ public partial class SimulationViewer
             ImGui.TextUnformatted(entry.Timestamp.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture));
 
             ImGui.TableSetColumnIndex(1);
+            if (entry.Tick is { } tick)
+                ImGui.TextUnformatted(tick.ToString(CultureInfo.InvariantCulture));
+
+            ImGui.TableSetColumnIndex(2);
             ImGui.PushStyleColor(ImGuiCol.Text, GetMessageColor(entry.Level));
             ImGui.TextUnformatted(GetMessageLevelLabel(entry.Level));
             ImGui.PopStyleColor();
 
-            ImGui.TableSetColumnIndex(2);
+            ImGui.TableSetColumnIndex(3);
             ImGui.TextUnformatted(entry.Source);
 
             // The scrolling table is its own child window, so the panel's wrap position does not reach in here.
-            ImGui.TableSetColumnIndex(3);
+            ImGui.TableSetColumnIndex(4);
             ImGui.PushTextWrapPos(0f);
             ImGui.TextUnformatted(entry.Message);
             if (!string.IsNullOrWhiteSpace(entry.Details))
