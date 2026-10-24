@@ -105,7 +105,7 @@ public sealed class HeadlessExtractionTests
                 Request("badAxis", "exportField", $"\"fields\":[\"moles:0\"],\"slice\":{{\"axis\":\"w\",\"index\":0}},\"path\":\"{template}\""),
                 Request("badIndex", "exportField", $"\"fields\":[\"moles:0\"],\"slice\":{{\"axis\":\"z\",\"index\":9}},\"path\":\"{template}\""),
                 Request("both", "exportField", $"\"fields\":[\"moles:0\"],\"slice\":{{\"axis\":\"z\",\"index\":0}},\"region\":{{\"min\":{C(0, 0, 0)},\"max\":{C(1, 0, 0)}}},\"path\":\"{template}\""),
-                Request("unknown", "exportField", $"\"fields\":[\"density\"],\"slice\":{{\"axis\":\"z\",\"index\":0}},\"path\":\"{template}\"")]);
+                Request("unknown", "exportField", $"\"fields\":[\"notAField\"],\"slice\":{{\"axis\":\"z\",\"index\":0}},\"path\":\"{template}\"")]);
 
         var file = run.Result("export").GetProperty("export").GetProperty("files")[0];
         var (header, moles) = ReadNpy(file.GetProperty("path").GetString()!);
@@ -250,6 +250,88 @@ public sealed class HeadlessExtractionTests
             Assert.That(run.ErrorCode("bad"), Is.EqualTo("operationRejected"));
             Assert.That(run.ErrorCode("scale"), Is.EqualTo("invalidRequest"));
             Assert.That(run.ErrorCode("nopath"), Is.EqualTo("missingProperty"));
+        });
+    }
+
+    [Test]
+    public async Task EditRegion_VelocityRoundTripsThroughExportAndSampling()
+    {
+        var run = await RunAsync(
+            [.. DuctSetup(),
+                Request("move", "editRegion", $"\"min\":{C(0, 1, 0)},\"max\":{C(3, 1, 0)},\"velocity\":{{\"x\":251,\"y\":0,\"z\":-2}}"),
+                Request("export", "exportField", $"\"fields\":[\"velocityX\",\"velocityZ\",\"speed\",\"density\"],\"region\":{{\"min\":{C(2, 1, 0)},\"max\":{C(5, 1, 0)}}},\"format\":\"json\""),
+                Request("sample", "sampleVoxels", $"\"points\":[{C(1, 1, 0)}],\"fields\":[\"velocityX\"]"),
+                Request("missing", "editRegion", $"\"min\":{C(0, 1, 0)},\"max\":{C(3, 1, 0)},\"velocity\":{{\"x\":1}}"),
+                Request("nan", "editRegion", $"\"min\":{C(0, 1, 0)},\"max\":{C(3, 1, 0)},\"velocity\":{{\"x\":\"NaN\",\"y\":0,\"z\":0}}")]);
+
+        var files = run.Result("export").GetProperty("export").GetProperty("files");
+        float Value(int file, int index) => files[file].GetProperty("values")[index].GetSingle();
+        Assert.Multiple(() =>
+        {
+            Assert.That(run.Result("move").GetProperty("region").GetProperty("velocityVoxels").GetInt64(), Is.EqualTo(4));
+            Assert.That(Value(0, 0), Is.EqualTo(251f).Within(0.05f));
+            Assert.That(Value(0, 3), Is.Zero);
+            Assert.That(Value(1, 1), Is.EqualTo(-2f).Within(0.05f));
+            Assert.That(Value(2, 0), Is.EqualTo(MathF.Sqrt(251f * 251f + 4f)).Within(0.05f));
+            Assert.That(files[3].GetProperty("unit").GetString(), Is.EqualTo("kg/m3"));
+            Assert.That(Value(3, 0), Is.GreaterThan(Value(3, 3)), "6000 Pa on the left, 3000 Pa on the right");
+            Assert.That(run.Result("sample").GetProperty("samples").GetProperty("values")[0][0].GetSingle(), Is.EqualTo(251f).Within(0.05f));
+            Assert.That(run.ErrorCode("missing"), Is.EqualTo("missingProperty"));
+            Assert.That(run.ErrorCode("nan"), Is.EqualTo("invalidRequest"));
+        });
+    }
+
+    [Test]
+    public async Task ExportField_SchlierenNormalizesByTheRegionUnlessAReferenceIsGiven()
+    {
+        var run = await RunAsync(
+            [.. DuctSetup(),
+                Request("auto", "exportField", $"\"fields\":[\"schlieren\",\"densityGradient\"],\"slice\":{{\"axis\":\"z\",\"index\":0}},\"format\":\"json\""),
+                Request("fixed", "exportField", $"\"fields\":[\"schlieren:10\"],\"slice\":{{\"axis\":\"z\",\"index\":0}},\"format\":\"json\",\"schlierenReference\":1000"),
+                Request("negative", "exportField", $"\"fields\":[\"schlieren\"],\"slice\":{{\"axis\":\"z\",\"index\":0}},\"format\":\"json\",\"schlierenReference\":-1"),
+                Request("point", "sampleVoxels", $"\"points\":[{C(3, 1, 0)}],\"fields\":[\"schlieren\"]"),
+                Request("pointFixed", "sampleVoxels", $"\"points\":[{C(3, 1, 0)}],\"fields\":[\"schlieren\"],\"schlierenReference\":1e9")]);
+
+        var auto = run.Result("auto").GetProperty("export").GetProperty("files");
+        var fixedFile = run.Result("fixed").GetProperty("export").GetProperty("files")[0];
+        Assert.Multiple(() =>
+        {
+            Assert.That(auto[0].GetProperty("min").GetSingle(), Is.EqualTo(MathF.Exp(-15f)).Within(1e-9f));
+            Assert.That(auto[0].GetProperty("max").GetSingle(), Is.EqualTo(1f));
+            Assert.That(auto[1].GetProperty("max").GetSingle(), Is.GreaterThan(0f));
+            Assert.That(fixedFile.GetProperty("min").GetSingle(), Is.GreaterThan(0.9f), "the reference dwarfs the real gradient");
+            Assert.That(run.ErrorCode("negative"), Is.EqualTo("invalidRequest"));
+            Assert.That(run.ErrorCode("point"), Is.EqualTo("operationRejected"));
+            Assert.That(run.Result("pointFixed").GetProperty("samples").GetProperty("values")[0][0].GetSingle(), Is.EqualTo(1f).Within(1e-4f));
+        });
+    }
+
+    [Test]
+    public async Task RenderSlice_SchlierenAndVelocityVisualizationsWritePngs()
+    {
+        string schlieren = PathFor("render/schlieren.png");
+        string velocity = PathFor("render/velocity.png");
+        var run = await RunAsync(
+            [.. DuctSetup(),
+                Request("move", "editRegion", $"\"min\":{C(0, 1, 0)},\"max\":{C(7, 1, 0)},\"velocity\":{{\"x\":50,\"y\":0,\"z\":0}}"),
+                Request("schlieren", "renderSlice", $"\"axis\":\"z\",\"index\":0,\"visualization\":\"schlieren\",\"path\":\"{schlieren}\",\"scale\":2"),
+                Request("fixed", "renderSlice", $"\"axis\":\"z\",\"index\":0,\"visualization\":\"schlieren\",\"path\":\"{PathFor("render/fixed.png")}\",\"schlierenReference\":0.5"),
+                Request("velocity", "renderSlice", $"\"axis\":\"z\",\"index\":0,\"visualization\":\"velocity-x\",\"path\":\"{velocity}\""),
+                Request("density", "renderSlice", $"\"axis\":\"z\",\"index\":0,\"visualization\":\"density\",\"path\":\"{PathFor("render/density.png")}\"")]);
+
+        byte[] png = File.ReadAllBytes(schlieren);
+        Assert.Multiple(() =>
+        {
+            Assert.That(png.AsSpan(0, 4).ToArray(), Is.EqualTo(new byte[] { 0x89, 0x50, 0x4E, 0x47 }));
+            Assert.That(BinaryPrimitives.ReadUInt32BigEndian(png.AsSpan(16, 4)), Is.EqualTo(16u));
+            Assert.That(run.Result("schlieren").GetProperty("render").GetProperty("rangeMin").GetSingle(), Is.Zero);
+            Assert.That(run.Result("schlieren").GetProperty("render").GetProperty("rangeMax").GetSingle(), Is.GreaterThan(0f));
+            Assert.That(run.Result("fixed").GetProperty("render").GetProperty("rangeMax").GetSingle(), Is.EqualTo(0.5f));
+            Assert.That(
+                run.Result("velocity").GetProperty("render").GetProperty("rangeMin").GetSingle(),
+                Is.EqualTo(-run.Result("velocity").GetProperty("render").GetProperty("rangeMax").GetSingle()));
+            Assert.That(File.Exists(velocity), Is.True);
+            Assert.That(File.Exists(PathFor("render/density.png")), Is.True);
         });
     }
 }

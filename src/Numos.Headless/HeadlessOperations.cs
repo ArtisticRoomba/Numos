@@ -462,7 +462,8 @@ internal sealed partial class HeadlessOperations
             request.ClearGas ?? false,
             request.TemperatureK,
             gases,
-            request.GasTemperatureK);
+            request.GasTemperatureK,
+            ParseVelocity(request.Velocity));
 
         var result = _session.EditRegion(box, edit, ResolveSimulation(request.Simulation));
         return Result(new CommandResult
@@ -473,9 +474,36 @@ internal sealed partial class HeadlessOperations
                 VoxelsSkipped = result.VoxelsSkipped,
                 ChunksTouched = result.ChunksTouched,
                 ChunksCreated = result.ChunksCreated,
-                MolesPerVoxel = result.MolesPerVoxel.ToArray()
+                MolesPerVoxel = result.MolesPerVoxel.ToArray(),
+                VelocityVoxels = result.VelocityVoxels
             }
         });
+    }
+
+    private static RegionVelocity? ParseVelocity(VelocityRequest? velocity)
+    {
+        if (velocity == null)
+            return null;
+
+        float x = Require(velocity.X, "velocity.x");
+        float y = Require(velocity.Y, "velocity.y");
+        float z = Require(velocity.Z, "velocity.z");
+        if (!float.IsFinite(x) || !float.IsFinite(y) || !float.IsFinite(z))
+        {
+            throw new HeadlessRequestException(
+                "invalidRequest",
+                "velocity components must be finite numbers in m/s.");
+        }
+
+        return new RegionVelocity(x, y, z);
+    }
+
+    private static WorkbenchFieldOptions ParseFieldOptions(float? schlierenReference, string property)
+    {
+        if (schlierenReference is { } reference && (!float.IsFinite(reference) || reference <= 0f))
+            throw new HeadlessRequestException("invalidRequest", $"{property} must be a positive number in kg/m4.");
+
+        return new WorkbenchFieldOptions(schlierenReference);
     }
 
     private CommandExecution SampleVoxels(HeadlessRequest request)
@@ -492,7 +520,8 @@ internal sealed partial class HeadlessOperations
         float[] flat = _session.SampleVoxels(
             points.Select(static point => point.ToInt3()).ToArray(),
             fields,
-            ResolveSimulation(request.Simulation));
+            ResolveSimulation(request.Simulation),
+            ParseFieldOptions(request.SchlierenReference, "schlierenReference"));
 
         float[][] rows = new float[points.Length][];
         for (int row = 0; row < rows.Length; row++)
@@ -521,7 +550,7 @@ internal sealed partial class HeadlessOperations
             {
                 throw new HeadlessRequestException(
                     "fieldNotFound",
-                    $"Unknown field '{name}'. Known fields: {string.Join(", ", _session.Fields.Names)}, moles:<gasId>.");
+                    $"Unknown field '{name}'. Known fields: {string.Join(", ", _session.Fields.Names)}, moles:<gasId>, schlieren:<k>.");
             }
         }
 
@@ -553,6 +582,7 @@ internal sealed partial class HeadlessOperations
             throw new HeadlessRequestException("invalidRequest", "Give exactly one of region and slice.");
 
         string? path = format == "npy" ? RequirePath(request) : null;
+        var options = ParseFieldOptions(request.SchlierenReference, "schlierenReference");
         IReadOnlyList<FieldExport> exports;
         if (request.Region is { } region)
         {
@@ -565,8 +595,8 @@ internal sealed partial class HeadlessOperations
 
             CheckInlineSize(format, box.VoxelCount);
             exports = path == null
-                ? _session.ReadRegion(box, fields, simulation)
-                : _session.ExportRegion(box, fields, path, simulation);
+                ? _session.ReadRegion(box, fields, simulation, options)
+                : _session.ExportRegion(box, fields, path, simulation, options);
         }
         else
         {
@@ -577,13 +607,13 @@ internal sealed partial class HeadlessOperations
             {
                 var box = _session.GetSliceBox(axis, index, simulation);
                 CheckInlineSize(format, box.VoxelCount);
-                exports = _session.ReadRegion(box, fields, simulation);
+                exports = _session.ReadRegion(box, fields, simulation, options);
                 int[] shape = WorkbenchSession.GetSliceShape(axis, box);
                 exports = exports.Select(export => export with { Shape = shape }).ToArray();
             }
             else
             {
-                exports = _session.ExportSlice(axis, index, fields, path, simulation);
+                exports = _session.ExportSlice(axis, index, fields, path, simulation, options);
             }
         }
 
@@ -645,7 +675,8 @@ internal sealed partial class HeadlessOperations
             range,
             scale,
             request.Levels ?? 256,
-            ResolveSimulation(request.Simulation));
+            ResolveSimulation(request.Simulation),
+            ParseFieldOptions(request.SchlierenReference, "schlierenReference"));
 
         string fullPath = System.IO.Path.GetFullPath(path);
         PngEncoder.WriteFile(fullPath, image.Width, image.Height, image.Rgba);
@@ -876,7 +907,8 @@ internal sealed partial class HeadlessOperations
             points,
             fields,
             RequirePath(probes.Path, "probes.path"),
-            ResolveSimulation(request.Simulation));
+            ResolveSimulation(request.Simulation),
+            ParseFieldOptions(probes.SchlierenReference, "probes.schlierenReference"));
 
         recorder.Record();
         _session.Tick(
