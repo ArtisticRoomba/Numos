@@ -1,3 +1,4 @@
+using System.Numerics;
 using JetBrains.Annotations;
 using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Primitives;
@@ -11,19 +12,21 @@ namespace Numos.API;
 /// <remarks>
 ///     <para>
 ///         Every part is optional. Numos applies the selected parts to each chunk in this order: classification, gas
-///         removal, voxel temperature, gas injection.
+///         removal, voxel temperature, gas injection, velocity.
 ///     </para>
 ///     <para>
-///         Gas removal and gas injection skip solid and void voxels.
+///         Gas removal and gas injection skip solid and void voxels. Velocity skips solid and void voxels and voxels
+///         without gas.
 ///     </para>
 /// </remarks>
 /// <example>
-///     Fill a box with air at 293.15 K:
+///     Fill a box with air at 293.15 K and set it moving at 2 m/s along x:
 ///     <code>
 ///     simulation.EditVoxelBox(min, max, new AtmosVoxelBoxEdit
 ///     {
 ///         Gases = [new AtmosGasAmount(airId, 0.04f)],
-///         GasTemperatureK = 293.15f
+///         GasTemperatureK = 293.15f,
+///         Velocity = new Vector3(2f, 0f, 0f)
 ///     });
 ///     </code>
 /// </example>
@@ -34,7 +37,7 @@ public readonly record struct AtmosVoxelBoxEdit
     ///     Gets the classification to assign to every voxel, or <see langword="null" /> to keep the classification.
     /// </summary>
     /// <remarks>
-    ///     A solid or void classification removes the gas of the voxel.
+    ///     A solid or void classification removes the gas and momentum of the voxel.
     /// </remarks>
     public VoxelClassification? Classification { get; init; }
 
@@ -42,7 +45,7 @@ public readonly record struct AtmosVoxelBoxEdit
     ///     Gets whether to remove the gas from every air voxel before Numos adds any.
     /// </summary>
     /// <remarks>
-    ///     Removal keeps the stored temperature.
+    ///     Removal keeps the stored temperature and zeroes the momentum.
     /// </remarks>
     public bool ClearGas { get; init; }
 
@@ -72,6 +75,16 @@ public readonly record struct AtmosVoxelBoxEdit
     ///     The value must be finite and at least 0.
     /// </remarks>
     public float? GasTemperatureK { get; init; }
+
+    /// <summary>
+    ///     Gets the bulk velocity, in metres per second, for the gas of every air voxel, or <see langword="null" /> to
+    ///     keep the momentum.
+    /// </summary>
+    /// <remarks>
+    ///     Numos stores momentum equal to the voxel's gas mass times the velocity, after all other changes. A voxel
+    ///     whose momentum would not be finite keeps its momentum. All components must be finite.
+    /// </remarks>
+    public Vector3? Velocity { get; init; }
 }
 
 /// <summary>
@@ -80,8 +93,10 @@ public readonly record struct AtmosVoxelBoxEdit
 /// <param name="VoxelsEdited">Voxels of the box inside an existing chunk. Solid voxels count.</param>
 /// <param name="VoxelsSkipped">Voxels of the box outside every chunk.</param>
 /// <param name="ChunksTouched">Existing chunks that intersect the box.</param>
+/// <param name="VelocityVoxels">Voxels that received momentum.</param>
 [PublicAPI]
 public readonly record struct AtmosVoxelBoxEditResult(
     long VoxelsEdited,
     long VoxelsSkipped,
-    int ChunksTouched);
+    int ChunksTouched,
+    long VelocityVoxels);

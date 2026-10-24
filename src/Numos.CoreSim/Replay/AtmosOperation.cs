@@ -56,12 +56,10 @@ public enum AtmosOperationCode : ushort
     ///     Apply resolved voxel gas and thermal state independent of detached container identity.
     /// </summary>
     SetVoxelMixture = 12,
-
     /// <summary>
     ///     Store a gas-bearing voxel's total momentum vector.
     /// </summary>
     SetVoxelMomentum = 13,
-
     /// <summary>
     ///     Edit a box of voxels across chunks in one operation.
     /// </summary>

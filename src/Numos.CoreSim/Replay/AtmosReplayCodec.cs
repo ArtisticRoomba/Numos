@@ -250,10 +250,9 @@ internal static partial class AtmosReplayCodec
         WriteVoxelClassification(writer, operation.Classification);
         writer.Write(operation.VoxelTemperature);
         writer.Write(operation.GasTemperature);
-        // Three reserved floats keep the layout of the velocity part. This build writes zeros.
-        writer.Write(0f);
-        writer.Write(0f);
-        writer.Write(0f);
+        writer.Write(operation.VelocityX);
+        writer.Write(operation.VelocityY);
+        writer.Write(operation.VelocityZ);
         writer.Write(operation.Gases.Count);
         foreach (var gas in operation.Gases)
         {
@@ -268,7 +267,7 @@ internal static partial class AtmosReplayCodec
         var max = ReadInt3(reader);
         var parts = (AtmosVoxelBoxParts)reader.ReadByte();
         if ((parts & ~(AtmosVoxelBoxParts.Classification | AtmosVoxelBoxParts.ClearGas |
-                       AtmosVoxelBoxParts.Temperature)) != 0)
+                       AtmosVoxelBoxParts.Temperature | AtmosVoxelBoxParts.Velocity)) != 0)
         {
             throw new InvalidDataException("The voxel box operation selects an unknown part.");
         }
@@ -276,9 +275,9 @@ internal static partial class AtmosReplayCodec
         var classification = ReadVoxelClassification(reader);
         Kelvin voxelTemperature = reader.ReadSingle();
         Kelvin gasTemperature = reader.ReadSingle();
-        _ = reader.ReadSingle();
-        _ = reader.ReadSingle();
-        _ = reader.ReadSingle();
+        MetrePerSecond velocityX = reader.ReadSingle();
+        MetrePerSecond velocityY = reader.ReadSingle();
+        MetrePerSecond velocityZ = reader.ReadSingle();
         int count = ReadCount(reader, 1_000_000, "voxel box gas");
         var gases = new AtmosGasAmount[count];
         for (int index = 0; index < count; index++)
@@ -295,6 +294,9 @@ internal static partial class AtmosReplayCodec
             classification,
             voxelTemperature,
             gasTemperature,
+            velocityX,
+            velocityY,
+            velocityZ,
             gases);
     }
 

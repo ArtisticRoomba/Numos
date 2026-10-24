@@ -93,6 +93,7 @@ public sealed partial class WorkbenchSession : IDisposable
     public WorkbenchSession(WorkbenchLog? log = null, WorkbenchHostInfo? host = null)
     {
         Log = log ?? new WorkbenchLog();
+        Fields.RegisterFlowFields(RequireConfig);
         Host = host ?? new WorkbenchHostInfo("Numos.Workbench", CoreSimBuildInfo.PackageVersion);
         string commit = CoreSimBuildInfo.GitCommit is { Length: > 0 } and not "unknown"
             ? CoreSimBuildInfo.GitCommitShort
@@ -339,7 +340,7 @@ public sealed partial class WorkbenchSession : IDisposable
         return World ?? throw new InvalidOperationException("No project is open.");
     }
 
-    private AtmosConfig RequireConfig()
+    internal AtmosConfig RequireConfig()
     {
         RequireWorld();
         return Config!;

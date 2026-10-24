@@ -1,4 +1,5 @@
 using Numos.API;
+using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Snapshots;
 using Numos.Maths;
 
@@ -20,13 +21,35 @@ namespace Numos.Workbench;
 /// </remarks>
 public sealed class VoxelSampler
 {
+    private readonly WorkbenchSession _session;
     private readonly AtmosSimulation _simulation;
     private readonly ChunkGroup[] _groups;
     private readonly AtmosChunkSnapshotFields _required;
+    private readonly IReadOnlyList<Int3> _points;
+    private readonly WorkbenchFieldOptions _options;
+    private readonly float[] _halo = new float[27];
 
-    internal VoxelSampler(AtmosSimulation simulation, IReadOnlyList<Int3> points, WorkbenchField[] fields)
+    internal VoxelSampler(
+        WorkbenchSession session,
+        AtmosSimulation simulation,
+        IReadOnlyList<Int3> points,
+        WorkbenchField[] fields,
+        WorkbenchFieldOptions options)
     {
+        foreach (var field in fields)
+        {
+            if (field.NeedsReferenceAtPoints && options.SchlierenReference == null)
+            {
+                throw new ArgumentException(
+                    $"Field '{field.Name}' normalizes over a region, so sampling it at single voxels needs a " +
+                    "schlierenReference. Give the reference gradient in kg/m4, or export a region instead.");
+            }
+        }
+
+        _session = session;
         _simulation = simulation;
+        _points = points.ToArray();
+        _options = options;
         Fields = fields;
         PointCount = points.Count;
         var dimensions = simulation.ChunkDimensions;
@@ -51,7 +74,10 @@ public sealed class VoxelSampler
             .ToArray();
 
         foreach (var field in fields)
-            _required |= field.Required;
+        {
+            if (!field.IsRegionField)
+                _required |= field.Required;
+        }
     }
 
     /// <summary>
@@ -96,7 +122,44 @@ public sealed class VoxelSampler
             foreach (var (point, local) in group.Voxels)
             {
                 for (int column = 0; column < columns; column++)
-                    destination[point * columns + column] = Fields[column].Sample(in snapshot, local);
+                {
+                    if (!Fields[column].IsRegionField)
+                        destination[point * columns + column] = Fields[column].Sample(in snapshot, local);
+                }
+            }
+        }
+
+        SampleRegionFields(destination);
+    }
+
+    private void SampleRegionFields(Span<float> destination)
+    {
+        int columns = Fields.Count;
+        HashSet<Int3>? existing = null;
+        Span<float> value = stackalloc float[1];
+        for (int column = 0; column < columns; column++)
+        {
+            var field = Fields[column];
+            if (!field.IsRegionField)
+                continue;
+
+            var source = _session.Fields.Resolve(field.HaloSource!);
+            existing ??= _session.GetChunkPositions(_simulation);
+            float edge = FlowFieldMath.GetVoxelEdge(_session.RequireConfig());
+            for (int point = 0; point < PointCount; point++)
+            {
+                var center = _points[point];
+                var box = new VoxelBox(
+                    new Int3(center.X - 1, center.Y - 1, center.Z - 1),
+                    new Int3(center.X + 1, center.Y + 1, center.Z + 1));
+
+                WorkbenchSession.ReadVoxelFields(_simulation, box, [source], [_halo], existing);
+                value[0] = float.NaN;
+                field.ComputeRegion(
+                    new WorkbenchRegionInput(_halo, new Int3(1, 1, 1), edge, _options.SchlierenReference),
+                    value);
+
+                destination[point * columns + column] = value[0];
             }
         }
     }
@@ -120,18 +183,21 @@ public sealed partial class WorkbenchSession
     /// <param name="points">Global voxel coordinates.</param>
     /// <param name="fieldNames">Field names from <see cref="Fields" />.</param>
     /// <param name="simulation">The simulation to read, or <see langword="null" /> for the active one.</param>
+    /// <param name="options">Field options. `schlieren` needs a reference here, because a point has no region.</param>
     /// <returns>A reusable sampler.</returns>
     /// <exception cref="KeyNotFoundException">A field name is unknown.</exception>
+    /// <exception cref="ArgumentException">A schlieren field is requested without a reference.</exception>
     public VoxelSampler CreateSampler(
         IReadOnlyList<Int3> points,
         IReadOnlyList<string> fieldNames,
-        AtmosSimulationId? simulation = null)
+        AtmosSimulationId? simulation = null,
+        WorkbenchFieldOptions options = default)
     {
         ArgumentNullException.ThrowIfNull(points);
         ArgumentNullException.ThrowIfNull(fieldNames);
         var target = RequireSimulation(simulation);
         var fields = Fields.ResolveAll(fieldNames, out _);
-        return new VoxelSampler(target, points, fields);
+        return new VoxelSampler(this, target, points, fields, options);
     }
 
     /// <summary>
@@ -141,9 +207,10 @@ public sealed partial class WorkbenchSession
     public float[] SampleVoxels(
         IReadOnlyList<Int3> points,
         IReadOnlyList<string> fieldNames,
-        AtmosSimulationId? simulation = null)
+        AtmosSimulationId? simulation = null,
+        WorkbenchFieldOptions options = default)
     {
-        var sampler = CreateSampler(points, fieldNames, simulation);
+        var sampler = CreateSampler(points, fieldNames, simulation, options);
         float[] values = new float[points.Count * fieldNames.Count];
         sampler.Sample(values);
         return values;
@@ -155,42 +222,129 @@ public sealed partial class WorkbenchSession
     /// <param name="box">The inclusive box in global voxel coordinates.</param>
     /// <param name="fieldNames">Field names from <see cref="Fields" />.</param>
     /// <param name="simulation">The simulation to read, or <see langword="null" /> for the active one.</param>
+    /// <param name="options">Field options, such as the schlieren reference.</param>
     /// <returns>
     ///     One array per field, in the order of <paramref name="fieldNames" />. Each array holds
     ///     `sizeX * sizeY * sizeZ` values in C order with shape (z, y, x), so x changes fastest. A voxel outside every
     ///     chunk, or a solid voxel for a field that has no value there, is NaN.
     /// </returns>
     /// <remarks>
-    ///     The call copies each chunk once, with only the snapshot fields the requested fields need.
+    ///     <para>
+    ///         The call copies each chunk once per source field, with only the snapshot fields that field needs.
+    ///     </para>
+    ///     <para>
+    ///         A region field such as `densityGradient` reads its source over the box plus a one-voxel halo. The halo
+    ///         can lie in a chunk outside the box, so a box edge on a chunk border gets the same gradient as the
+    ///         interior. A neighbor that is solid, void, or missing gives a one-sided difference.
+    ///     </para>
+    ///     <para>
+    ///         A schlieren field with no <see cref="WorkbenchFieldOptions.SchlierenReference" /> normalizes by the
+    ///         largest gradient inside the box. Two boxes of the same simulation can therefore differ in brightness.
+    ///     </para>
     /// </remarks>
     /// <exception cref="ArgumentException">The box is invalid or holds too many voxels.</exception>
-    public float[][] ReadBox(VoxelBox box, IReadOnlyList<string> fieldNames, AtmosSimulationId? simulation = null)
+    public float[][] ReadBox(
+        VoxelBox box,
+        IReadOnlyList<string> fieldNames,
+        AtmosSimulationId? simulation = null,
+        WorkbenchFieldOptions options = default)
     {
         ArgumentNullException.ThrowIfNull(fieldNames);
         var target = RequireSimulation(simulation);
         box.ThrowIfInvalid();
-        var fields = Fields.ResolveAll(fieldNames, out var required);
-        var size = box.Size;
-        if (box.VoxelCount > MaximumReadVoxels)
-        {
-            throw new ArgumentException(
-                $"The box holds {box.VoxelCount} voxels. Reading more than {MaximumReadVoxels} voxels at once is not allowed.");
-        }
-
+        var fields = Fields.ResolveAll(fieldNames, out _);
+        CheckReadSize(box.VoxelCount);
+        var existing = GetChunkPositions(target);
         var results = new float[fields.Length][];
-        for (int index = 0; index < results.Length; index++)
+        var halos = new Dictionary<string, float[]>(StringComparer.OrdinalIgnoreCase);
+        float edge = fields.Any(static field => field.IsRegionField)
+            ? FlowFieldMath.GetVoxelEdge(RequireConfig())
+            : 0f;
+
+        var pointFields = new List<WorkbenchField>();
+        var pointResults = new List<float[]>();
+        for (int index = 0; index < fields.Length; index++)
         {
             results[index] = new float[(int)box.VoxelCount];
-            Array.Fill(results[index], float.NaN);
+            if (fields[index].IsRegionField)
+                continue;
+
+            pointFields.Add(fields[index]);
+            pointResults.Add(results[index]);
         }
 
-        var dimensions = target.ChunkDimensions;
-        var minChunk = VoxelBox.SplitGlobal(box.Min, dimensions, out _);
-        var maxChunk = VoxelBox.SplitGlobal(box.Max, dimensions, out _);
+        if (pointFields.Count > 0)
+            ReadVoxelFields(target, box, pointFields, pointResults, existing);
+
+        for (int index = 0; index < fields.Length; index++)
+        {
+            var field = fields[index];
+            if (!field.IsRegionField)
+                continue;
+
+            string sourceName = field.HaloSource!;
+            if (!halos.TryGetValue(sourceName, out float[]? halo))
+            {
+                var haloBox = new VoxelBox(
+                    new Int3(box.Min.X - 1, box.Min.Y - 1, box.Min.Z - 1),
+                    new Int3(box.Max.X + 1, box.Max.Y + 1, box.Max.Z + 1));
+
+                CheckReadSize(haloBox.VoxelCount);
+                halo = new float[(int)haloBox.VoxelCount];
+                ReadVoxelFields(target, haloBox, [Fields.Resolve(sourceName)], [halo], existing);
+                halos.Add(sourceName, halo);
+            }
+
+            field.ComputeRegion(new WorkbenchRegionInput(halo, box.Size, edge, options.SchlierenReference), results[index]);
+        }
+
+        return results;
+    }
+
+    internal HashSet<Int3> GetChunkPositions(AtmosSimulation target)
+    {
         var existing = new HashSet<Int3>();
         foreach (var handle in target.GetChunkHandles())
             existing.Add(handle.Position);
 
+        return existing;
+    }
+
+    private static void CheckReadSize(long voxelCount)
+    {
+        if (voxelCount > MaximumReadVoxels)
+        {
+            throw new ArgumentException(
+                $"The box holds {voxelCount} voxels. Reading more than {MaximumReadVoxels} voxels at once is not allowed.");
+        }
+    }
+
+    /// <summary>
+    ///     Reads voxel fields over a box into buffers, with one snapshot per chunk.
+    /// </summary>
+    /// <param name="target">The simulation to read.</param>
+    /// <param name="box">The inclusive box in global voxel coordinates. It can reach outside every chunk.</param>
+    /// <param name="fields">Voxel fields.</param>
+    /// <param name="destinations">One buffer per field. Each receives `box.VoxelCount` values with x changing fastest. Voxels without data are NaN.</param>
+    /// <param name="existing">The positions of the chunks that exist, so the read skips missing chunks without throwing.</param>
+    internal static void ReadVoxelFields(
+        AtmosSimulation target,
+        VoxelBox box,
+        IReadOnlyList<WorkbenchField> fields,
+        IReadOnlyList<float[]> destinations,
+        HashSet<Int3> existing)
+    {
+        var required = AtmosChunkSnapshotFields.None;
+        for (int index = 0; index < fields.Count; index++)
+        {
+            required |= fields[index].Required;
+            Array.Fill(destinations[index], float.NaN);
+        }
+
+        var size = box.Size;
+        var dimensions = target.ChunkDimensions;
+        var minChunk = VoxelBox.SplitGlobal(box.Min, dimensions, out _);
+        var maxChunk = VoxelBox.SplitGlobal(box.Max, dimensions, out _);
         for (int cz = minChunk.Z; cz <= maxChunk.Z; cz++)
         for (int cy = minChunk.Y; cy <= maxChunk.Y; cy++)
         for (int cx = minChunk.X; cx <= maxChunk.X; cx++)
@@ -220,13 +374,11 @@ public sealed partial class WorkbenchSession
 
                 for (int x = x0; x <= x1; x++)
                 {
-                    for (int field = 0; field < fields.Length; field++)
-                        results[field][targetRow + x] = fields[field].Sample(in snapshot, sourceRow + x);
+                    for (int field = 0; field < fields.Count; field++)
+                        destinations[field][targetRow + x] = fields[field].Sample(in snapshot, sourceRow + x);
                 }
             }
         }
-
-        return results;
     }
 
     private const int MaximumReadVoxels = 1 << 28;
