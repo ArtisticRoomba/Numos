@@ -279,7 +279,7 @@ internal sealed partial class AtmosKernel
     /// <param name="x">Bulk x-velocity, in metres per second.</param>
     /// <param name="y">Bulk y-velocity, in metres per second.</param>
     /// <param name="z">Bulk z-velocity, in metres per second.</param>
-    /// <remarks>A vacuum voxel reads as zero. Nothing is stored; the division happens under the state gate.</remarks>
+    /// <remarks>A vacuum voxel reads as zero. Nothing is stored. The division happens under the state gate.</remarks>
     /// <exception cref="KeyNotFoundException">No chunk is registered at <paramref name="position" />.</exception>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="localVoxelIndex" /> is outside the chunk.</exception>
     internal void GetVoxelVelocity(

@@ -14,7 +14,7 @@ public static class AtmosBuiltInSolvers
     /// <summary>
     ///     Intra-chunk pressure-relaxation gas advection. Part of the <see cref="AtmosTransportModel.Legacy" />
     ///     model, installed by
-    ///     <see cref="AtmosWorldSolverPipeline.ResetToDefaults(AtmosTransportModel)" /> with that model; a new world
+    ///     <see cref="AtmosWorldSolverPipeline.ResetToDefaults(AtmosTransportModel)" /> with that model. A new world
     ///     runs <see cref="EulerFlow" /> instead.
     /// </summary>
     public const string Advection = "advection";
@@ -37,7 +37,7 @@ public static class AtmosBuiltInSolvers
     /// <summary>
     ///     Cartesian gas transport across ordinary chunk boundaries under the
     ///     <see cref="AtmosTransportModel.Legacy" /> model. Installed alongside <see cref="Advection" /> by
-    ///     <see cref="AtmosWorldSolverPipeline.ResetToDefaults(AtmosTransportModel)" />; <see cref="EulerFlow" />
+    ///     <see cref="AtmosWorldSolverPipeline.ResetToDefaults(AtmosTransportModel)" />. <see cref="EulerFlow" />
     ///     sweeps across chunk faces itself.
     /// </summary>
     public const string BoundaryFlow = "boundary-flow";

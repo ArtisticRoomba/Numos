@@ -16,16 +16,16 @@ namespace Numos.CoreSim.EulerFlow;
 /// <param name="MaxCourantNumber">
 ///     Largest <c>λ·Δt/Δx</c> any substep actually ran at, measured with the fastest signal speed <c>λ</c> found
 ///     after the substep's sweeps. A value above <see cref="EulerFlowConfig.CourantNumber" /> means a signal sped
-///     up inside a substep faster than the speed it was sized for; values below 1 are still linearly stable.
+///     up inside a substep faster than the speed it was sized for. Values below 1 are still linearly stable.
 /// </param>
 /// <param name="MaxSignalSpeed">Fastest <c>|u| + c</c> seen in any active voxel during the tick, in metres per second.</param>
 /// <param name="ClampedVelocityCount">
 ///     Number of cell updates whose speed was clamped to <see cref="EulerFlowConfig.MaxVelocity" />. Nonzero
-///     means a state went wrong somewhere; the clamp is a safety net, not physics.
+///     means a state went wrong somewhere. The clamp is a safety net, not physics.
 /// </param>
 /// <param name="NegativeInternalEnergyCount">
 ///     Number of voxels whose kinetic energy exceeded their total energy at write-back, so they were written at
-///     0 K. Rare rounding at a vacuum front is tolerable; a steady count points at a bug.
+///     0 K. Rare rounding at a vacuum front is tolerable. A steady count points at a bug.
 /// </param>
 /// <param name="NegativeMolesCount">
 ///     Number of species updates that went below zero and were floored. Same reading as
@@ -36,7 +36,7 @@ namespace Numos.CoreSim.EulerFlow;
 ///     fit in <see langword="float" />, plus cells whose species update came out non-finite (written as zero) and
 ///     written-back voxels whose pressure is not finite (kept awake). A non-finite cell keeps its gas but transports
 ///     like a vacuum for the rest of the sweep, with no momentum. Nonzero means a gas's heat capacity or a voxel's
-///     energy is far outside the range the stage is built for; check the registry before anything else.
+///     energy is far outside the range the stage is built for. Check the registry before anything else.
 /// </param>
 /// <remarks>
 ///     A plain measurement, not simulation state: it is neither checkpointed nor hashed, and it reads as all zeros

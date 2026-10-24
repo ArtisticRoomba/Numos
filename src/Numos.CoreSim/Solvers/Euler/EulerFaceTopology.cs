@@ -12,14 +12,14 @@ namespace Numos.CoreSim.Solvers.Euler;
 ///         Each air voxel gets two bit masks indexed by the direction slots of
 ///         <see cref="NeighborResolution.NeighborDirections" /> (NegX, PosX, NegY, PosY, NegZ, PosZ, so the
 ///         opposite of slot <c>d</c> is <c>d ^ 1</c>). A set bit in the open mask means the neighbour is an air
-///         voxel, in this chunk or in the registered chunk across the face; a set bit in the void mask means the
+///         voxel, in this chunk or in the registered chunk across the face. A set bit in the void mask means the
 ///         neighbour is <see cref="VoxelClassification.RoomVoid" />, a sink that swallows whatever crosses the face.
 ///         A face with neither bit is a wall: a solid voxel, or the edge of the grid where no chunk is registered.
 ///     </para>
 ///     <para>
 ///         The masks describe geometry only. Whether an open face into another chunk is actually solved this tick
 ///         depends on that chunk being active, which <see cref="EulerSweep" /> decides per sweep from the
-///         workspace's neighbour slots; the masks do not change when a chunk is activated mid-tick.
+///         workspace's neighbour slots. The masks do not change when a chunk is activated mid-tick.
 ///     </para>
 ///     <para>
 ///         Solid and void voxels carry zero masks. The sweep decides a face from the masks of both cells, so the
@@ -36,8 +36,8 @@ internal static class EulerFaceTopology
     ///     The registered chunk in each direction slot, or <see langword="null" /> where there is none. Every
     ///     chunk of a kernel has the same dimensions, so a voxel's coordinate wraps straight into the neighbour.
     /// </param>
-    /// <param name="openMask">Receives the open-face bits; at least <see cref="AtmosChunk.VoxelCount" /> long.</param>
-    /// <param name="voidMask">Receives the void-face bits; at least <see cref="AtmosChunk.VoxelCount" /> long.</param>
+    /// <param name="openMask">Receives the open-face bits, at least <see cref="AtmosChunk.VoxelCount" /> long.</param>
+    /// <param name="voidMask">Receives the void-face bits, at least <see cref="AtmosChunk.VoxelCount" /> long.</param>
     internal static void Build(AtmosChunk chunk, AtmosChunk?[] neighborChunks, byte[] openMask, byte[] voidMask)
     {
         Array.Clear(openMask, 0, chunk.VoxelCount);
@@ -90,7 +90,7 @@ internal static class EulerFaceTopology
     /// <param name="chunk">The chunk holding <paramref name="voxelIndex" />.</param>
     /// <param name="voxelIndex">The voxel the face belongs to.</param>
     /// <param name="direction">The face's direction slot.</param>
-    /// <param name="neighborChunk">The chunk holding the air voxel on the other side; <paramref name="chunk" /> for an interior face.</param>
+    /// <param name="neighborChunk">The chunk holding the air voxel on the other side, or <paramref name="chunk" /> for an interior face.</param>
     /// <param name="neighborIndex">The air voxel on the other side, indexed in <paramref name="neighborChunk" />.</param>
     /// <remarks>
     ///     Always <see langword="true" />: there are no blocked faces between two air voxels. A per-voxel
@@ -109,7 +109,7 @@ internal static class EulerFaceTopology
     /// </summary>
     /// <remarks>
     ///     The caller guarantees the voxel sits on that edge of the chunk. Leaving through the positive X face
-    ///     lands on <c>x = 0</c> of the neighbour, which is <c>width − 1</c> flat indices lower; the negative face
+    ///     lands on <c>x = 0</c> of the neighbour, which is <c>width − 1</c> flat indices lower. The negative face
     ///     is the mirror. Y and Z scale the same offset by the row and slab strides.
     /// </remarks>
     internal static ushort NeighborIndexAcrossFace(AtmosChunk chunk, ushort voxelIndex, int direction)

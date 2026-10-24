@@ -42,7 +42,7 @@ public sealed partial class AtmosSimulation : IDisposable
     /// <param name="chunkHeight">The number of voxels along each chunk's local y-axis.</param>
     /// <param name="chunkDepth">The number of voxels along each chunk's local z-axis.</param>
     /// <param name="transportModel">
-    ///     Which built-in stages the private world runs to move gas between voxels; see
+    ///     Which built-in stages the private world runs to move gas between voxels. See
     ///     <see cref="AtmosWorld(AtmosConfig, AtmosTransportModel)" />.
     /// </param>
     /// <exception cref="ArgumentOutOfRangeException">
@@ -69,7 +69,7 @@ public sealed partial class AtmosSimulation : IDisposable
     /// <param name="chunkHeight">The number of voxels along each chunk's local y-axis.</param>
     /// <param name="chunkDepth">The number of voxels along each chunk's local z-axis.</param>
     /// <param name="transportModel">
-    ///     Which built-in stages the private world runs to move gas between voxels; see
+    ///     Which built-in stages the private world runs to move gas between voxels. See
     ///     <see cref="AtmosWorld(AtmosConfig, AtmosTransportModel)" />.
     /// </param>
     /// <exception cref="ArgumentNullException"><paramref name="config" /> is <see langword="null" />.</exception>
@@ -600,7 +600,7 @@ public sealed partial class AtmosSimulation : IDisposable
     /// </summary>
     /// <param name="chunk">The chunk containing the voxel.</param>
     /// <param name="localVoxelIndex">The voxel's zero-based index in the chunk's flattened storage.</param>
-    /// <returns>The voxel's velocity in metres per second (m/s); zero for a vacuum voxel.</returns>
+    /// <returns>The voxel's velocity in metres per second (m/s), or zero for a vacuum voxel.</returns>
     /// <remarks>
     ///     <para>
     ///         Velocity is not stored. It is the voxel's total momentum (see
@@ -643,7 +643,7 @@ public sealed partial class AtmosSimulation : IDisposable
     /// <param name="x">The zero-based local x-coordinate.</param>
     /// <param name="y">The zero-based local y-coordinate.</param>
     /// <param name="z">The zero-based local z-coordinate.</param>
-    /// <returns>The voxel's velocity in metres per second (m/s); zero for a vacuum voxel.</returns>
+    /// <returns>The voxel's velocity in metres per second (m/s), or zero for a vacuum voxel.</returns>
     /// <remarks>Same contract as <see cref="GetVoxelVelocity(AtmosChunkHandle, ushort)" />.</remarks>
     /// <exception cref="ArgumentOutOfRangeException">A local coordinate is outside the chunk.</exception>
     /// <exception cref="KeyNotFoundException">No chunk is registered at the handle's position.</exception>

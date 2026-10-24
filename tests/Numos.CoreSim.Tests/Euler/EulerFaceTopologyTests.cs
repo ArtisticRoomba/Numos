@@ -89,7 +89,7 @@ public class EulerFaceTopologyTests
         chunk.SetChunkClassification(1);
         chunk.Wake();
 
-        // +X neighbour: air at (0,0,0), solid at (0,1,0); -Y neighbour: void everywhere; no chunk on the other faces.
+        // +X neighbour: air at (0,0,0), solid at (0,1,0). -Y neighbour: void everywhere. No chunk on the other faces.
         var east = new AtmosChunk(2, 2, 2);
         east.SetChunkClassification(1);
         east.SetVoxelClassification(east.GetIndex(0, 1, 0), VoxelClassification.RoomSolid);

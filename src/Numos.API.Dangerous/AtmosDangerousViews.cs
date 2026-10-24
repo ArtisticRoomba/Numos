@@ -105,7 +105,7 @@ public readonly ref struct AtmosDangerousChunk
     /// </summary>
     /// <remarks>
     ///     This is the momentum of the voxel's whole gas content, not a velocity. The kernel keeps it zero wherever
-    ///     a voxel holds no gas; a raw write that breaks that (momentum in a vacuum voxel) is yours to clean up.
+    ///     a voxel holds no gas. A raw write that breaks that (momentum in a vacuum voxel) is yours to clean up.
     ///     Writes through this span are not recorded, so they only replay correctly as deterministic solver work or
     ///     when followed by a fresh checkpoint.
     /// </remarks>

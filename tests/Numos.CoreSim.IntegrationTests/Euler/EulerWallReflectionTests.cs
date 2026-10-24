@@ -11,7 +11,7 @@ namespace Numos.CoreSim.IntegrationTests.Euler;
 /// <remarks>
 ///     A gas at Mach <c>M₀</c> stopped by a wall sends back a shock whose Mach number <c>M_s</c> relative to the
 ///     oncoming gas solves <c>u₀ = 2c₀/(γ+1) · (M_s − 1/M_s)</c>, and the pressure behind it is
-///     <c>p₂/p₁ = 1 + 2γ/(γ+1) · (M_s² − 1)</c>. For <c>M₀ = 0.1</c> that is 1.1486; for 1 m/s it is within rounding
+///     <c>p₂/p₁ = 1 + 2γ/(γ+1) · (M_s² − 1)</c>. For <c>M₀ = 0.1</c> that is 1.1486. For 1 m/s it is within rounding
 ///     of the acoustic value <c>p₁ + ρ₁c₁u₀ = p₁ + 413 Pa</c>.
 /// </remarks>
 [TestFixture]

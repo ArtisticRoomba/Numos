@@ -169,7 +169,7 @@ public sealed class AtmosReplayTests
         simulation.SetVoxelMomentum(chunk, 3, 9f, 9f, 9f);
         Assert.That(world.ComputeStateHash(), Is.EqualTo(beforeRejected));
 
-        // Adding gas keeps momentum; a mixture write that removes the last mole drops it.
+        // Adding gas keeps momentum. A mixture write that removes the last mole drops it.
         simulation.AddGasToVoxel(chunk, 0, 0, 1f, 300f);
         hashes.Add(world.ComputeStateHash());
         simulation.GetVoxelGasMixture(chunk, 1).Clear();

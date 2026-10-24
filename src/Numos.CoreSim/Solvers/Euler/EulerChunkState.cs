@@ -12,7 +12,7 @@ namespace Numos.CoreSim.Solvers.Euler;
 ///     <para>
 ///         Species rows are indexed by gas id rather than by the chunk's channel index, so two chunks that
 ///         hold the same gases in different channel order describe a shared face identically. A buffer only has
-///         rows for the gases its workspace lists (see <see cref="EulerChunkWorkspace.GasIds" />); a
+///         rows for the gases its workspace lists (see <see cref="EulerChunkWorkspace.GasIds" />). A
 ///         <see langword="null" /> row reads as all zeros, which is exact because the chunk holds none of that
 ///         gas.
 ///     </para>
@@ -48,7 +48,7 @@ internal sealed class EulerChunkState
     public KilogramMetrePerSecond[] MomentumZ = [];
 
     /// <summary>
-    ///     Moles per voxel indexed by gas id; <see langword="null" /> for a gas the workspace has no row for.
+    ///     Moles per voxel indexed by gas id. The entry is <see langword="null" /> for a gas the workspace has no row for.
     /// </summary>
     public Mole[]?[] Species = [];
 
@@ -98,7 +98,7 @@ internal sealed class EulerChunkState
 ///     </para>
 ///     <para>
 ///         The neighbour slots follow <see cref="NeighborResolution.NeighborDirections" />.
-///         <see cref="NeighborChunks" /> is fixed for the tick; <see cref="NeighborWorkspaces" /> is refreshed on the
+///         <see cref="NeighborChunks" /> is fixed for the tick. <see cref="NeighborWorkspaces" /> is refreshed on the
 ///         tick thread whenever a neighbour is activated, and workers only read it. A sweep that finds an open
 ///         face into a chunk with no workspace sets that direction's <see cref="WakeRequests" /> flag. Several
 ///         workers may set the same flag, but each only stores <see langword="true" /> into its own slot, so no
@@ -230,7 +230,7 @@ internal sealed class EulerChunkWorkspace
     /// <summary>
     ///     Fastest signal speed each pencil of the most recent sweep wrote, reduced by the tick thread into
     ///     <see cref="EulerChunkState.MaxSignalSpeed" /> of the write buffer. One slot per pencil keeps workers from
-    ///     racing on a shared maximum; the reduction itself is order free.
+    ///     racing on a shared maximum. The reduction itself is order free.
     /// </summary>
     public MetrePerSecond[] PencilSignalSpeed = [];
 
@@ -318,7 +318,7 @@ internal sealed class EulerChunkWorkspace
     internal bool AddGas(int gasId, AtmosSolverConfigSnapshot config)
     {
         int voxelCount = Chunk.VoxelCount;
-        // Channels can carry ids the registry never saw; the row table follows the largest id, not the registry.
+        // Channels can carry ids the registry never saw. The row table follows the largest id, not the registry.
         foreach (EulerChunkState buffer in _buffers)
             buffer.EnsureCapacity(voxelCount, gasId + 1);
 

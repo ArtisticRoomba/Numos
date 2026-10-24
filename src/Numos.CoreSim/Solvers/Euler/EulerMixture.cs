@@ -7,7 +7,7 @@ namespace Numos.CoreSim.Solvers.Euler;
 ///     out EulerCellState)" />.
 /// </summary>
 /// <remarks>
-///     Velocities are along the grid axes; <see cref="EulerFaceState.FromCell" /> picks the normal and tangential
+///     Velocities are along the grid axes. <see cref="EulerFaceState.FromCell" /> picks the normal and tangential
 ///     components for a particular face. A vacuum cell has every field zero, including
 ///     <see cref="InverseMass" />, so a caller that finds <see cref="Density" /> zero must not divide by it.
 /// </remarks>
@@ -55,7 +55,7 @@ internal enum EulerCellKind : byte
     /// <summary>
     ///     Gas whose primitive state does not fit in <see langword="float" />: the energy density, temperature,
     ///     pressure, or sound speed came out infinite or NaN. The state is all zeros, so the voxel transports like a
-    ///     vacuum; its conserved variables are left to the caller.
+    ///     vacuum. Its conserved variables are left to the caller.
     /// </summary>
     NonFinite
 }
@@ -68,8 +68,8 @@ internal enum EulerCellKind : byte
 ///     <para>
 ///         The mixture is an ideal gas with constant per-species heat capacities, so its internal energy is
 ///         <c>U = C·T</c> with <c>C = Σ n_k·Cv_k</c>, its pressure is <c>p = N·R·T / V</c>, and its adiabatic index is
-///         <c>γ = Cp / Cv = (C + N·R) / C</c>. The sound speed follows from <c>c² = γ·p / ρ</c>; substituting
-///         <c>pV = NRT</c> and <c>ρ = m / V</c> gives <c>c² = γ·N·R·T / m</c>, the form used here because it reuses the
+///         <c>γ = Cp / Cv = (C + N·R) / C</c>. The sound speed follows from <c>c² = γ·p / ρ</c>.
+///         Substituting <c>pV = NRT</c> and <c>ρ = m / V</c> gives <c>c² = γ·N·R·T / m</c>, the form used here because it reuses the
 ///         <c>1/m</c> already computed for the velocities and never needs the volume.
 ///     </para>
 ///     <para>
@@ -109,7 +109,7 @@ internal static class EulerMixture
     ///     <see cref="EulerCellKind.Empty" /> when the voxel holds no gas (<paramref name="mass" />,
     ///     <paramref name="moles" />, or <paramref name="heatCapacity" /> is not positive),
     ///     <see cref="EulerCellKind.NonFinite" /> when it does but its primitive state does not fit in float. The
-    ///     caller is expected to zero the voxel's momentum in either case; nothing here does it.
+    ///     caller is expected to zero the voxel's momentum in either case. Nothing here does it.
     /// </returns>
     /// <remarks>
     ///     Internal energy is clamped at zero before dividing by the heat capacity, so a voxel whose kinetic energy

@@ -10,7 +10,7 @@ namespace Numos.Viewer.Rendering;
 ///     Lengths are in voxels. An arrow is <c>velocity × scale</c>, so the scale is a time: at the default 0.05 s a
 ///     cell moving at 20 m/s draws a one-voxel arrow. Scales are clamped to [<see cref="MinScaleSeconds" />,
 ///     <see cref="MaxScaleSeconds" />] and arrow lengths to <see cref="MaxLength" />, so a runaway velocity cannot
-///     smear a line across the whole scene; a clamped arrow still points the right way, it just stops reporting
+///     smear a line across the whole scene. A clamped arrow still points the right way, it just stops reporting
 ///     magnitude. Arrows shorter than <see cref="MinLength" /> are skipped rather than drawn as dots.
 /// </remarks>
 public static class VelocityArrows
@@ -88,7 +88,7 @@ public static class VelocityArrows
     }
 
     /// <summary>
-    ///     Clamps a user-entered scale into the accepted range; NaN falls back to the default.
+    ///     Clamps a user-entered scale into the accepted range. NaN falls back to the default.
     /// </summary>
     /// <param name="scaleSeconds">Seconds of travel per arrow.</param>
     public static float ClampScale(float scaleSeconds)
@@ -103,7 +103,7 @@ public static class VelocityArrows
     ///     Computes the shaft of a 3D arrow for one velocity.
     /// </summary>
     /// <param name="velocity">Bulk velocity in metres per second.</param>
-    /// <param name="scaleSeconds">Seconds of travel per arrow; clamped with <see cref="ClampScale" />.</param>
+    /// <param name="scaleSeconds">Seconds of travel per arrow, clamped with <see cref="ClampScale" />.</param>
     /// <param name="shaft">Vector from the cell centre to the arrow tip, in voxels.</param>
     /// <returns>
     ///     <see langword="false" /> when any component is not finite or the arrow would be shorter than
@@ -127,7 +127,7 @@ public static class VelocityArrows
     ///     Computes the shaft of a 2D arrow for one in-plane velocity.
     /// </summary>
     /// <param name="velocity">In-plane velocity in metres per second, U along X and V along Y.</param>
-    /// <param name="scaleSeconds">Seconds of travel per arrow; clamped with <see cref="ClampScale" />.</param>
+    /// <param name="scaleSeconds">Seconds of travel per arrow, clamped with <see cref="ClampScale" />.</param>
     /// <param name="shaft">Vector from the cell centre to the arrow tip, in cells.</param>
     /// <returns>
     ///     <see langword="false" /> when either component is not finite or the arrow would be shorter than

@@ -558,7 +558,7 @@ internal sealed partial class AtmosKernel
 
     /// <summary>
     ///     Writes calculated mixture caches and marks the containing chunk changed. A write that leaves the voxel
-    ///     without gas also zeroes its momentum; the mixture API is the only external path that can empty a voxel
+    ///     without gas also zeroes its momentum. The mixture API is the only external path that can empty a voxel
     ///     without going through <see cref="AtmosChunk.SetVoxelToVacuum" />.
     /// </summary>
     private static void ApplyVoxelMixtureTotals(

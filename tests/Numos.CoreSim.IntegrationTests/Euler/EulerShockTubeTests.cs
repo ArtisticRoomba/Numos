@@ -240,7 +240,7 @@ public sealed class EulerShockTubeTests
             Assert.That(second.SimulatedSeconds, Is.EqualTo(fixedTimeStep).Within(1e-12));
             Assert.That(first.Substeps, Is.GreaterThan(1));
             // The very first substep starts from the discontinuity, where the star state is faster than either
-            // initial state, so its after-the-fact Courant number overshoots; the fan is established by tick two.
+            // initial state, so its after-the-fact Courant number overshoots. The fan is established by tick two.
             Assert.That(first.MaxCourantNumber, Is.LessThan(1f));
             Assert.That(second.MaxCourantNumber, Is.LessThanOrEqualTo(0.5f * 1.02f));
         });
@@ -248,7 +248,7 @@ public sealed class EulerShockTubeTests
 
     /// <summary>
     ///     Fills a tube with Sod's data. <paramref name="map" /> turns tube coordinates into chunk coordinates
-    ///     for the rotated variants; <paramref name="mirrored" /> puts the high-pressure side at high x.
+    ///     for the rotated variants. <paramref name="mirrored" /> puts the high-pressure side at high x.
     /// </summary>
     private static void FillSod(
         AtmosSimulation simulation, AtmosChunkHandle chunk,

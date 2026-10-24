@@ -11,7 +11,7 @@ namespace Numos.CoreSim.EulerFlow;
 ///     <para>
 ///         Register this object in <see cref="AtmosConfig.SolverConfigurations" />. When no entry is registered the
 ///         stage runs with <see cref="Default" />. Every property is normalized when the configuration is captured,
-///         so the snapshot the solver reads never holds an out-of-range value; the property documentation says what
+///         so the snapshot the solver reads never holds an out-of-range value. The property documentation says what
 ///         each one normalizes to.
 ///     </para>
 ///     <para>
@@ -76,7 +76,7 @@ public sealed class EulerFlowConfig : IAtmosSolverConfiguration, IPortableSolver
     ///     The default of 0.5 is the positivity bound for the dimensionally split first-order scheme: below it a
     ///     substep cannot drain more gas from a voxel than it holds. Values up to 0.8 are linearly stable and take
     ///     fewer substeps, but a face next to vacuum can then produce a negative density that the solver has to
-    ///     repair. Non-finite and nonpositive values normalize to 0.5; values above 1 clamp to 1.
+    ///     repair. Non-finite and nonpositive values normalize to 0.5. Values above 1 clamp to 1.
     /// </remarks>
     public Scalar CourantNumber { get; init; } = 0.5f;
 

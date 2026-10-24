@@ -128,7 +128,7 @@ public static class SolverBenchmarks
     ///     </para>
     ///     <para>
     ///         The parameter varies how many gases the registry holds and how many are present, which the stage's
-    ///         per-species rows pay for separately; see <see cref="EulerMixture" />.
+    ///         per-species rows pay for separately. See <see cref="EulerMixture" />.
     ///     </para>
     /// </remarks>
     [BenchmarkCategory("Regular", "Solvers", "EulerFlow")]

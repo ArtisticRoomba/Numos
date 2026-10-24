@@ -85,7 +85,7 @@ public sealed class EulerSpeciesRowTests
         }
 
         // A channel for an id the registry never saw, which a checkpoint can carry. The merge lists it in the
-        // middle chunk, whose sweep then reads the first chunk's rows with it; that chunk's table only ever grew
+        // middle chunk, whose sweep then reads the first chunk's rows with it. That chunk's table only ever grew
         // to the registry size.
         simulation.RestoreCheckpoint(WithExtraChannel(simulation.CaptureCheckpoint(), third, strayGasId, strayMoles));
         double initialStray = TotalMoles(simulation, strayGasId, first, second, third);

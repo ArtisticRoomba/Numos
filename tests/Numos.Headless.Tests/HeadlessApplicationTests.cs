@@ -57,7 +57,7 @@ public sealed class HeadlessApplicationTests
     public async Task JsonlSession_EulerTube_MovesGasTowardTheLowPressureHalf()
     {
         // SI air at 1 m³ per voxel: 80 mol is about 2 atm at 300 K, 40 mol about 1 atm. Eight voxels rather than
-        // two so the tube is still moving when the tick ends; a two-cell tube rings down inside one tick.
+        // two so the tube is still moving when the tick ends. A two-cell tube rings down inside one tick.
         List<string> requests =
         [
             Request(

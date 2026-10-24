@@ -23,7 +23,7 @@ internal sealed partial class AtmosKernel : IDisposable
 
     /// <summary>
     ///     What the <c>euler-flow</c> stage did during the latest tick, or all zeros when it did not run. Reset
-    ///     when a checkpoint is installed; never part of one.
+    ///     when a checkpoint is installed. A checkpoint never holds it.
     /// </summary>
     internal AtmosFlowDiagnostics LastFlowDiagnostics;
 
@@ -34,7 +34,7 @@ internal sealed partial class AtmosKernel : IDisposable
 
     /// <summary>
     ///     Which built-in transport stages <see cref="Tick" /> runs when the kernel is ticked on its own, outside a
-    ///     world pipeline. The owning simulation sets it from its constructor; benchmarks set it directly. World ticks
+    ///     world pipeline. The owning simulation sets it from its constructor. Benchmarks set it directly. World ticks
     ///     ignore it, since the world's pipeline decides which stages run.
     /// </summary>
     internal AtmosTransportModel TransportModel { get; set; } = AtmosTransportModel.Euler;

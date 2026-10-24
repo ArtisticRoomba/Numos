@@ -27,7 +27,7 @@ internal sealed record ScalingWorkloadOptions
 {
     /// <summary>
     ///     Which built-in stages carry bulk flow. Legacy by default so every existing sweep keeps measuring what it
-    ///     always did; Euler swaps <c>advection</c> and <c>boundary-flow</c> for the single <c>euler-flow</c> stage.
+    ///     always did. Euler swaps <c>advection</c> and <c>boundary-flow</c> for the single <c>euler-flow</c> stage.
     /// </summary>
     internal AtmosTransportModel TransportModel { get; init; } = AtmosTransportModel.Legacy;
     internal int ChunkWidth { get; init; } = 8;

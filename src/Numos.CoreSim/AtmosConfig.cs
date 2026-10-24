@@ -295,8 +295,8 @@ public class AtmosConfig : IAtmosConfig
     /// </summary>
     /// <param name="gasId">The gas ID. Unregistered IDs are allowed.</param>
     /// <returns>
-    ///     The gas's configured value when it is finite and positive; otherwise <see cref="ReferenceMolarMass" />,
-    ///     or dry air if that is invalid too.
+    ///     The gas's configured value when it is finite and positive.
+    ///     Otherwise <see cref="ReferenceMolarMass" />, or dry air if that is invalid too.
     /// </returns>
     public KilogramPerMole GetMolarMass(int gasId)
     {

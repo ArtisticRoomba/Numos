@@ -171,7 +171,7 @@ public sealed class EulerCrossChunkTests
         float moles = SimTestHelpers.MolesFor(config, Atmosphere, Temperature);
         FillRoom(simulation, source, width, 1, 1, moles);
         FillRoom(simulation, target, width, 1, 1, moles);
-        // A pulse in the two cells furthest from the face; the face cells match the neighbour exactly.
+        // A pulse in the two cells furthest from the face. The face cells match the neighbour exactly.
         simulation.AddGasToVoxel(source, 0, 0, 0, SimTestHelpers.EulerAirGasName, 0.5f * moles, Temperature);
         simulation.AddGasToVoxel(source, 1, 0, 0, SimTestHelpers.EulerAirGasName, 0.5f * moles, Temperature);
         simulation.SleepChunk(target);

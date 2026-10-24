@@ -151,7 +151,7 @@ public enum ExplicitLinkSetKind : byte
 /// </param>
 /// <remarks>
 ///     The built-in <see cref="AtmosBuiltInSolvers.ExplicitGasTransport" /> stage scales the gas it moves through the
-///     link by <paramref name="AreaFraction" />; a fraction of 0 lets no gas through. Conductive heat transfer through
+///     link by <paramref name="AreaFraction" />. A fraction of 0 lets no gas through. Conductive heat transfer through
 ///     <see cref="ExplicitLinkFlags.ThermalTransport" /> is not scaled. Registration rejects a fraction that is not
 ///     finite or lies outside [0, 1].
 /// </remarks>

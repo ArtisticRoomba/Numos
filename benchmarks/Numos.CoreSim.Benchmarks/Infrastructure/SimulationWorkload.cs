@@ -118,7 +118,7 @@ internal sealed class SimulationWorkload : IDisposable
     internal BenchmarkSolverStep ReactionsStep { get; }
 
     /// <summary>
-    ///     What the most recent <see cref="FlowStep" /> call did under the Euler model; all zeros under legacy.
+    ///     What the most recent <see cref="FlowStep" /> call did under the Euler model. All zeros under legacy.
     /// </summary>
     internal AtmosFlowDiagnostics LastFlowDiagnostics { get; private set; }
 

@@ -11,7 +11,7 @@ namespace Numos.CoreSim.IntegrationTests.Euler;
 /// </summary>
 /// <remarks>
 ///     <see cref="EulerFlowSolver.WorkerCountOverride" /> picks the schedule: 1 makes every active set at least as
-///     large as the pool, so chunks go whole; a count far above the chunk count forces tiles. The real thread count
+///     large as the pool, so chunks go whole. A count far above the chunk count forces tiles. The real thread count
 ///     is whatever <c>DOTNET_PROCESSOR_COUNT</c> says, so running this fixture at 1 and at the default covers the
 ///     threading side.
 /// </remarks>

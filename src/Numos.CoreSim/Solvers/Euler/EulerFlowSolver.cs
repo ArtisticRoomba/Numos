@@ -228,7 +228,7 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
     /// <remarks>
     ///     Both sides are compared through their live <see cref="AtmosChunk.TotalPressure" /> here, not through
     ///     the gathered cell pressure, so two chunks filled identically compare exactly equal even with a zero
-    ///     wake delta; the gathered pressure round-trips through the energy and can differ in the last bit.
+    ///     wake delta. The gathered pressure round-trips through the energy and can differ in the last bit.
     /// </remarks>
     private void ActivateNeighboursAtRest(AtmosSolverExecutionContext context)
     {
@@ -456,13 +456,13 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
     ///         one work item per chunk sweeps all of that chunk's pencils. Otherwise the pencils of every chunk are
     ///         tiled into ranges of <c>ceil(totalPencils / workers)</c>, so one dense chunk still occupies the
     ///         pool. Both schedules call <see cref="EulerSweep.RunPencils" /> and therefore visit a chunk's pencils
-    ///         in the same ascending order; a pencil writes only its own cells of the write buffer and its own
+    ///         in the same ascending order. A pencil writes only its own cells of the write buffer and its own
     ///         reduction slots, and reads only buffers no sweep writes. Splitting the same ordered pencil list
     ///         differently across workers therefore cannot change a bit.
     ///     </para>
     ///     <para>
     ///         Workers also read the live pressure of inactive neighbour chunks and set activation flags on their
-    ///         own workspace; neither is written by anything else until the barrier.
+    ///         own workspace. Neither is written by anything else until the barrier.
     ///     </para>
     /// </remarks>
     private void RunSweep(int axis, Second timeStep, SquareMetre faceArea, AtmosSolverConfigSnapshot config)

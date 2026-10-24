@@ -80,7 +80,7 @@ public sealed class EulerDiffusionTests
                 Assert.That(actual.TotalPressure[index], Is.EqualTo(referencePressure).Within(1e-5).Percent, $"pressure at {index}");
             }
 
-            // The species interface sits between columns 2 and 3; the unit gas has to have crossed it.
+            // The species interface sits between columns 2 and 3. The unit gas has to have crossed it.
             Assert.That(SimTestHelpers.Moles(actual, SimTestHelpers.EulerUnitGasId, 2), Is.GreaterThan(0f));
             Assert.That(SimTestHelpers.Moles(actual, SimTestHelpers.EulerAirGasId, 3), Is.GreaterThan(0f));
         });

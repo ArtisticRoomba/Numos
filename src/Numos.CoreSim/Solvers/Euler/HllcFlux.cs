@@ -20,14 +20,14 @@ internal struct EulerFaceState
     public MetrePerSecond SoundSpeed;
 
     /// <summary>
-    ///     <c>1 / m</c> of the cell, used to turn a mass flux into the per-mole species weight. Zero for a vacuum.
+    ///     <c>1 / m</c> of the cell, used to turn a mass flux into the per-mole species weight. It is zero for a vacuum.
     /// </summary>
     public PerKilogram InverseMass;
 
     /// <summary>
     ///     Projects a cell's primitive state onto a face whose normal is the given grid axis (0 = X, 1 = Y,
     ///     2 = Z). The tangential components follow the cyclic order X → Y → Z → X, so for a Y face the first
-    ///     tangential is Z and the second is X; a caller scattering <see cref="EulerFaceFlux" /> tangential momenta
+    ///     tangential is Z and the second is X. A caller scattering <see cref="EulerFaceFlux" /> tangential momenta
     ///     back onto the grid must use the same permutation.
     /// </summary>
     internal static EulerFaceState FromCell(in EulerCellState cell, int axis)
@@ -114,13 +114,13 @@ internal static class HllcFlux
     /// <summary>
     ///     Solves the face between <paramref name="left" /> (lower coordinate) and <paramref name="right" />.
     /// </summary>
-    /// <param name="left">State of the lower-coordinate cell; the face normal points away from it.</param>
+    /// <param name="left">State of the lower-coordinate cell. The face normal points away from it.</param>
     /// <param name="right">State of the higher-coordinate cell. Either side may be a vacuum (all zeros).</param>
     /// <param name="allMach">
     ///     Scales the velocity-jump term of the star pressure used in the momentum flux by
     ///     <c>θ = min(1, max(Ma_L, Ma_R))</c>. At low Mach the standard HLLC pressure dissipation scales like
     ///     <c>ρ·c·Δu</c>, which swamps the <c>O(Ma²)</c> pressure fluctuations of nearly incompressible flow and
-    ///     smears it out; the fix reduces that term to the acoustic scale. The energy flux keeps the standard star
+    ///     smears it out. The fix reduces that term to the acoustic scale. The energy flux keeps the standard star
     ///     pressure, so with <c>θ = 1</c> every component is bitwise identical to plain HLLC.
     /// </param>
     /// <param name="flux">The per-area flux, with the upwind side and species weight filled in.</param>
@@ -151,7 +151,7 @@ internal static class HllcFlux
     ///         Region selection is symmetric too: the two supersonic cases are tested before the sign of
     ///         <c>S*</c>, so a reflected problem cannot land in a different region through a rounding difference in
     ///         <c>S*</c>. The one remaining asymmetry is <c>S* == 0</c> exactly, where both frames report the left
-    ///         cell as upwind; the mass flux is exactly zero there, so nothing is transported either way.
+    ///         cell as upwind. The mass flux is exactly zero there, so nothing is transported either way.
     ///     </para>
     ///     <para>
     ///         Worked example, 1 atm air at rest (ρ = 1.205 kg/m³, c = 343 m/s, γ = 1.4) next to a vacuum:
@@ -210,7 +210,7 @@ internal static class HllcFlux
     /// <param name="air">State of the gas cell.</param>
     /// <param name="wallIsOnRight">
     ///     Whether the wall sits on the higher-coordinate side of the face. Only the sign of the normal velocity
-    ///     depends on it; the pressure flux is the same either way.
+    ///     depends on it. The pressure flux is the same either way.
     /// </param>
     /// <param name="flux">The per-area flux, <c>(0, p_wall, 0, 0, 0)</c>, with the gas cell marked as upwind.</param>
     /// <remarks>
@@ -308,7 +308,7 @@ internal static class HllcFlux
         float theta = 1f;
         if (allMach)
         {
-            // A vacuum side has c = 0 and counts as sonic; the fix is only meant for smooth low-Mach flow.
+            // A vacuum side has c = 0 and counts as sonic. The fix is only meant for smooth low-Mach flow.
             float leftMach = left.SoundSpeed > 0f ? MathF.Abs(left.NormalVelocity) / left.SoundSpeed : 1f;
             float rightMach = right.SoundSpeed > 0f ? MathF.Abs(right.NormalVelocity) / right.SoundSpeed : 1f;
             theta = MathF.Min(1f, MathF.Max(leftMach, rightMach));
@@ -334,7 +334,7 @@ internal static class HllcFlux
     /// <summary>
     ///     Flux in the star region adjacent to <paramref name="state" />, whose outer wave moves at
     ///     <paramref name="outerSpeed" />. Mass, tangential momentum, and energy carry the factor <c>S*</c> on the
-    ///     outside so a zero contact speed gives exactly zero; the normal momentum is <c>p*</c> plus a correction
+    ///     outside so a zero contact speed gives exactly zero. The normal momentum is <c>p*</c> plus a correction
     ///     with the same factor.
     /// </summary>
     private static void StarFlux(

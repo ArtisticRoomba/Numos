@@ -187,7 +187,7 @@ public class HllcFluxTests
 
             if (contactSpeed == 0f || (left.Density == 0f && right.Density == 0f))
             {
-                // Both frames call the left cell upwind here; nothing is transported, so it does not matter.
+                // Both frames call the left cell upwind here. Nothing is transported, so it does not matter.
                 contactAtRest++;
                 Assert.That(flux.Mass, Is.Zero, label);
                 continue;
@@ -332,7 +332,7 @@ public class HllcFluxTests
     {
         EulerFaceState left = Gas(1f, 400f, 1f, 2f, 1e5f, 1.4f);
         EulerFaceState right = Gas(0.5f, 380f, -1f, 0f, 8e4f, 1.4f);
-        // Both states subsonic in the sense S_L < 0 < S_R would need a smaller u; here Ma > 1 on both sides so θ = 1
+        // Both states subsonic in the sense S_L < 0 < S_R would need a smaller u. Here Ma > 1 on both sides so θ = 1
         // and every component must agree bitwise, including the star branch reached by the lower velocity below.
         EulerFaceState slowRight = Gas(0.5f, 350f, -1f, 0f, 8e4f, 1.4f);
 

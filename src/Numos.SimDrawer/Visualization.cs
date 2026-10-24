@@ -484,7 +484,7 @@ public sealed class VisualizationRegistry
     ///     schlieren.
     /// </summary>
     /// <param name="config">
-    ///     Simulation configuration; the gas-composition visualization reads its gas registry, and the density and
+    ///     Simulation configuration. The gas-composition visualization reads its gas registry, and the density and
     ///     schlieren mappings depend on its molar masses and voxel volume.
     /// </param>
     /// <returns>The configured registry.</returns>

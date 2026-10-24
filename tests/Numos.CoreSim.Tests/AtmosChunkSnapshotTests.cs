@@ -8,7 +8,7 @@ namespace Numos.CoreSim.Tests;
 [TestFixture]
 public sealed class AtmosChunkSnapshotTests
 {
-    // Velocity needs a configuration for molar masses; the stored-field tests don't care about it.
+    // Velocity needs a configuration for molar masses. The stored-field tests don't care about it.
     private const AtmosChunkSnapshotFields PhysicalFields =
         AtmosChunkSnapshotFields.All & ~AtmosChunkSnapshotFields.Velocity;
 
@@ -51,7 +51,7 @@ public sealed class AtmosChunkSnapshotTests
             // Voxel 1: a gas without a molar mass weighs the reference, 2 mol × 0.01 = 0.02 kg.
             chunk.InjectGasToVoxel(1, 2, 2f, 300f, 1f, 1f);
             chunk.MomentumZ[1] = 0.04f;
-            // Voxel 2 stays vacuum; stale momentum written straight into storage must not leak out as velocity.
+            // Voxel 2 stays vacuum. Stale momentum written straight into storage must not leak out as velocity.
             chunk.MomentumX[2] = 5f;
 
             var snapshot = chunk.GetNetworkSnapshot(AtmosChunkSnapshotFields.Velocity, config);
