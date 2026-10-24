@@ -29,9 +29,10 @@ public sealed partial class AtmosSimulationCheckpoint
     /// <remarks>
     ///     Version 7 added the three per-voxel momentum arrays to every chunk checkpoint. Version 8 writes each chunk as
     ///     a field-id state payload and hashes it with the same encoding as the wire.
-    ///     Version 9 derives each field id from the member name.
+    ///     Version 9 derives each field id from the member name. Version 10 generates the checkpoint from the
+    ///     kernel's and chunk's <c>[NumosSerialize]</c> members.
     /// </remarks>
-    public const int CurrentFormatVersion = 9;
+    public const int CurrentFormatVersion = 10;
 
     /// <summary>
     ///     Identifies the structural and deterministic-math contract required to restore this data.

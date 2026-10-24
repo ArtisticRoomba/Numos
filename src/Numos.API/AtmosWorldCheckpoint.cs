@@ -30,8 +30,9 @@ public sealed partial class AtmosWorldCheckpoint
     ///     <see cref="CreateAtmosLinkSetOperation" /> payloads. Version 9 writes the configuration as a field-id state
     ///     payload and hashes the world with the same encoding as the wire. Version 10 derives each field id from the
     ///     member name. Version 11 adds the <c>[NumosSerialize]</c> state of class solvers.
+    ///     Version 12 generates the checkpoint from the world's <c>[NumosSerialize]</c> members.
     /// </remarks>
-    public const int CurrentFormatVersion = 11;
+    public const int CurrentFormatVersion = 12;
 
     // Immutable once captured or read, so the digest is computed once; see AtmosSimulationCheckpoint.
     [NumosIgnore]
