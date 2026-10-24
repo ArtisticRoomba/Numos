@@ -138,8 +138,7 @@ public sealed class EulerFlowConfig : IAtmosSolverConfiguration, IPortableSolver
     ///     Reconstruction used to build the face states.
     /// </summary>
     /// <remarks>
-    ///     <see cref="EulerReconstruction.MusclHancock" /> is not implemented and runs as
-    ///     <see cref="EulerReconstruction.FirstOrder" />. Undefined values normalize to
+    ///     Second-order reconstruction is planned. Undefined values normalize to
     ///     <see cref="EulerReconstruction.FirstOrder" />.
     /// </remarks>
     public EulerReconstruction Reconstruction { get; init; } = EulerReconstruction.FirstOrder;

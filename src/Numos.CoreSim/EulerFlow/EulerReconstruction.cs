@@ -9,11 +9,5 @@ public enum EulerReconstruction
     /// <summary>
     ///     Piecewise-constant states: each face sees the cell averages on either side. Robust and the most diffusive.
     /// </summary>
-    FirstOrder = 0,
-
-    /// <summary>
-    ///     Second-order MUSCL-Hancock reconstruction. Not implemented: the solver runs it as
-    ///     <see cref="FirstOrder" />.
-    /// </summary>
-    MusclHancock = 1
+    FirstOrder = 0
 }

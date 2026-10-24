@@ -285,7 +285,7 @@ them.
 | `MaxVelocity`             | 5000 m/s  | Clamp on voxel speed, with a diagnostic counter. Expansion into vacuum tops out near 1700 m/s for room air, so the clamp only fires when a state has already gone wrong. Invalid values normalize to 5000 m/s.                                                                                              |
 | `WakePressureDelta`       | 1 Pa      | Pressure difference across a chunk face that activates the inactive side (§5.6), so a 1 Pa ripple at a sealed door does not wake the whole station. 0 wakes on any difference.                                                                                                                           |
 | `AllMachCorrection`       | off       | Scales the pressure-dissipation term of the face flux by the local Mach number. Godunov fluxes dissipate at the sound speed, which smears slow flow. The fix keeps it sharp but removes the acoustic damping sleep relies on and admits checkerboards, so it is off until a scene needs it.                 |
-| `Reconstruction`          | `FirstOrder` | How face states are built. `MusclHancock` is reserved for second-order reconstruction and currently runs as `FirstOrder`.                                                                                                                                                                              |
+| `Reconstruction`          | `FirstOrder` | How face states are built. Second-order reconstruction is planned. Only `FirstOrder` exists today.                                                                                                                                                                                         |
 | `MomentumDamping`         | 0 /s      | Exponential decay applied to every voxel's momentum per tick, `max(0, 1 − α·Δt_tick)`. A stand-in for wall friction and furniture drag so a hallway does not ring at its acoustic modes indefinitely. 0 applies none.                                                                                       |
 | `DefaultLinkAreaFraction` | 1         | Open fraction of a voxel face assumed for a portal or dock that declares no area (§11.1), under either transport model. Clamped to [0, 1]. 0 closes such links to gas transport.                                                                                                                                                       |
 
@@ -296,7 +296,7 @@ them.
 - `MaxVelocity` (5000 m/s), a clamp with a diagnostic counter.
 - `WakePressureDelta` (1 Pa), the boundary activation threshold.
 - `AllMachCorrection` (off).
-- `Reconstruction` (`FirstOrder`). `MusclHancock` is reserved.
+- `Reconstruction` (`FirstOrder`). Second-order reconstruction is planned.
 - `MomentumDamping` (0/s).
 - `DefaultLinkAreaFraction` (1), the open fraction assumed for links without an area.
 
@@ -1784,7 +1784,7 @@ nothing currently uses.
   develops the constant-volume mixing pressure of §5.9 over the cells the contact smears across. It is physical, but it
   happens at the numerical mixing rate rather than the molecular one.
 - First-order smearing. Piecewise-constant reconstruction smears a contact over about ten cells and a shock over
-  four or five at `Δx = 1 m`. `EulerReconstruction.MusclHancock` is a placeholder and runs as `FirstOrder`.
+  four or five at `Δx = 1 m`. Second-order reconstruction is planned.
 - Float32 at high Mach. Conserved variables and fluxes are `float`. Only the energy is `double`. Strong blasts
   push the ratio of thermal to kinetic energy and of star to ambient pressure into the range where single precision
   rounding shows up as the negative-moles and negative-internal-energy counters ticking over (§5.7).

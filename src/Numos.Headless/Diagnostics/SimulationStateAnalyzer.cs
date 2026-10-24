@@ -233,7 +233,6 @@ public static class SimulationStateAnalyzer
         string reconstruction = euler.Reconstruction switch
         {
             EulerReconstruction.FirstOrder => "firstOrder",
-            EulerReconstruction.MusclHancock => "musclHancock",
             _ => throw new ArgumentOutOfRangeException(nameof(config))
         };
 

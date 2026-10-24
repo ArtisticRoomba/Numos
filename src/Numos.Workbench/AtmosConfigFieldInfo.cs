@@ -140,7 +140,7 @@ public static class AtmosConfigFields
     public readonly static AtmosConfigFieldInfo EulerReconstruction = new(
         "Reconstruction",
         "",
-        "How face states are built. MUSCL-Hancock is reserved and currently runs as first order.");
+        "How face states are built. Only first order exists today.");
 
     public readonly static AtmosConfigFieldInfo EulerMomentumDamping = new(
         "Momentum damping",

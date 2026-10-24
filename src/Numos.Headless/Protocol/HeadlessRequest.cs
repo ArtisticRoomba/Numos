@@ -427,6 +427,6 @@ internal sealed class EulerFlowPatch
 
         throw new HeadlessRequestException(
             "invalidConfig",
-            $"Unknown Euler reconstruction '{value}'. Use 'firstOrder' or 'musclHancock'.");
+            $"Unknown Euler reconstruction '{value}'. Use 'firstOrder'.");
     }
 }

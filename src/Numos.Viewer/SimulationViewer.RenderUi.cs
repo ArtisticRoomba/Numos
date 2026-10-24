@@ -968,9 +968,9 @@ public partial class SimulationViewer
     }
 
     private static readonly EulerReconstruction[] ReconstructionValues =
-        [EulerReconstruction.FirstOrder, EulerReconstruction.MusclHancock];
+        [EulerReconstruction.FirstOrder];
 
-    private static readonly string[] ReconstructionLabels = ["First order", "MUSCL-Hancock (reserved)"];
+    private static readonly string[] ReconstructionLabels = ["First order"];
 
     private static void DrawConfigFieldLabel(AtmosConfigFieldInfo field)
     {

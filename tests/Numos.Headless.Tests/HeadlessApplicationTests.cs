@@ -140,7 +140,7 @@ public sealed class HeadlessApplicationTests
             Request(
                 "patch",
                 "updateConfig",
-                "\"config\":{\"eulerFlow\":{\"courantNumber\":0.4,\"reconstruction\":\"musclHancock\"}}"),
+                "\"config\":{\"eulerFlow\":{\"courantNumber\":0.4,\"reconstruction\":\"firstOrder\"}}"),
             Request(
                 "patch-again",
                 "updateConfig",
@@ -149,7 +149,7 @@ public sealed class HeadlessApplicationTests
             Request(
                 "bad",
                 "updateConfig",
-                "\"config\":{\"eulerFlow\":{\"reconstruction\":\"spectral\"}}"),
+                "\"config\":{\"eulerFlow\":{\"reconstruction\":\"musclHancock\"}}"),
             Request("exit", "exit"));
 
         var before = FindResponse(run.Responses, "before").GetProperty("observation").GetProperty("config");
@@ -161,7 +161,7 @@ public sealed class HeadlessApplicationTests
         {
             Assert.That(before.TryGetProperty("eulerFlow", out _), Is.False);
             Assert.That(euler.GetProperty("courantNumber").GetSingle(), Is.EqualTo(0.4f).Within(Tolerance));
-            Assert.That(euler.GetProperty("reconstruction").GetString(), Is.EqualTo("musclHancock"));
+            Assert.That(euler.GetProperty("reconstruction").GetString(), Is.EqualTo("firstOrder"));
             Assert.That(euler.GetProperty("maxSubstepsPerTick").GetInt32(), Is.Zero);
             Assert.That(euler.GetProperty("allMachCorrection").GetBoolean(), Is.True);
             Assert.That(euler.GetProperty("maxVelocityMps").GetSingle(), Is.EqualTo(5000f));

@@ -89,7 +89,6 @@ public sealed class EulerFlowConfigTests
             new() { MaxVelocity = 100f },
             new() { WakePressureDelta = 2f },
             new() { AllMachCorrection = true },
-            new() { Reconstruction = EulerReconstruction.MusclHancock },
             new() { MomentumDamping = 0.1f },
             new() { DefaultLinkAreaFraction = 0.5f }
         ];
@@ -161,7 +160,6 @@ public sealed class EulerFlowConfigTests
             MaxVelocity = 900f,
             WakePressureDelta = 3.5f,
             AllMachCorrection = true,
-            Reconstruction = EulerReconstruction.MusclHancock,
             MomentumDamping = 0.25f,
             DefaultLinkAreaFraction = 0.75f
         };

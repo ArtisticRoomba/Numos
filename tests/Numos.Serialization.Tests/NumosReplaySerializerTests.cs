@@ -189,7 +189,6 @@ public sealed class NumosReplaySerializerTests
             MaxVelocity = 1200f,
             WakePressureDelta = 0.5f,
             AllMachCorrection = true,
-            Reconstruction = EulerReconstruction.MusclHancock,
             MomentumDamping = 0.05f,
             DefaultLinkAreaFraction = 0.25f
         };
@@ -230,7 +229,7 @@ public sealed class NumosReplaySerializerTests
             Assert.That(first!.SemanticallyEquals(initial), Is.True);
             Assert.That(recordedConfig.TryGetSolverConfiguration(out EulerFlowConfig? second), Is.True);
             Assert.That(second!.MaxSubstepsPerTick, Is.Zero);
-            Assert.That(second.Reconstruction, Is.EqualTo(EulerReconstruction.MusclHancock));
+            Assert.That(second.Reconstruction, Is.EqualTo(EulerReconstruction.FirstOrder));
         });
 
         using var replayWorld = new AtmosWorld(new AtmosConfig(restored.Replay.InitialCheckpoint.Config));

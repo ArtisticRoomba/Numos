@@ -397,7 +397,7 @@ domain of its field, such as a negative `bulkFlowCoefficient`.
 `maxPressureTransferFractionPerNeighbor`, `accumulatorWakeThresholdPa`, `accumulatorMaxAliveTicks`, `referenceMolarMassKgPerMol`.
 
 The `eulerFlow` object holds the Euler transport settings: `courantNumber`, `maxSubstepsPerTick`, `velocityFloorMps`,
-`maxVelocityMps`, `wakePressureDeltaPa`, `allMachCorrection`, `reconstruction` (`"firstOrder"` or `"musclHancock"`),
+`maxVelocityMps`, `wakePressureDeltaPa`, `allMachCorrection`, `reconstruction` (`"firstOrder"`),
 `momentumDampingPerSecond`, and `defaultLinkAreaFraction`. A patch replaces the `EulerFlowConfig` entry with a copy that
 applies the given fields. Omitted fields keep the entry's value, or the library default when the session has no entry.
 The observation reports `config.eulerFlow` with the same names. It is absent while the session has no entry. The solver
