@@ -111,6 +111,11 @@ internal sealed class LinkSetInfo
     public required string State { get; init; }
     public required int LinkCount { get; init; }
     public required string Flags { get; init; }
+
+    /// <summary>
+    ///     The open area fraction of the first link, or absent when the set follows the configuration default.
+    /// </summary>
+    public float? AreaFraction { get; init; }
 }
 
 internal sealed class BranchInfo

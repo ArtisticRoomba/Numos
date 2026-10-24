@@ -414,10 +414,10 @@ Defaults change between versions. Set every field a study depends on.
 | `setSolverLayout` | `stages` (array of `name`, `enabled`) | Sets the order and enabled flags of every stage in one step. |
 | `applyTransportPreset` | `transportModel` | Swaps the transport stages and keeps every other stage as it is. |
 | `resetSolvers` | optional `transportModel` | Restores the stage defaults of one transport model, or of the current one. |
-| `createPortal` | `first`, `second`, optional `flags` | Links two voxels, possibly in different simulations. |
-| `createDock` | `first`, `second`, `rotation`, `flipU`, `flipV`, `flags` | Links two chunk faces voxel by voxel. |
+| `createPortal` | `first`, `second`, optional `flags` and `areaFraction` | Links two voxels, possibly in different simulations. |
+| `createDock` | `first`, `second`, `rotation`, `flipU`, `flipV`, `flags`, optional `areaFraction` | Links two chunk faces voxel by voxel. |
 | `destroyLinkSet` | `linkSet` (`index`, `generation`) | Queues a portal or dock for removal. |
-| `listLinkSets` | None | Lists portals and docks with kind, state, and link count. |
+| `listLinkSets` | None | Lists portals and docks with kind, state, link count, flags, and `areaFraction`. |
 
 The built-in stages, in default order, are `euler-flow`, `explicit-gas-transport`, `thermodynamics`,
 `explicit-thermal-transport`, `thermal-boundary`, and `gas-reactions`. The legacy model runs `advection`,
@@ -432,6 +432,9 @@ records a layout change, so a replay reproduces it. `applyTransportPreset` repla
 
 `resetSolvers` installs the default layout. A world with custom stages cannot discard them while it records. In that
 case `resetSolvers` enables every stage, leaves the order alone, and returns `changed: false`.
+
+`areaFraction` is the open area of each link as a fraction of one voxel face, from 0 to 1. Without it the link follows
+`defaultLinkAreaFraction` from the configuration, and `listLinkSets` omits the field.
 
 A portal endpoint is `{simulation, position, voxel}`. A dock endpoint is `{simulation, position, face}`, where `face`
 is `negativeX`, `positiveX`, `negativeY`, `positiveY`, `negativeZ`, or `positiveZ`. `flags` is `all` (default), `gas`,

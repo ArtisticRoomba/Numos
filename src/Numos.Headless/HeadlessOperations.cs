@@ -849,11 +849,19 @@ internal sealed partial class HeadlessOperations
         };
     }
 
+    private static float? ParseAreaFraction(float? value)
+    {
+        if (value is { } fraction && (!float.IsFinite(fraction) || fraction < 0f || fraction > 1f))
+            throw new HeadlessRequestException("invalidRequest", "areaFraction must be a number from 0 to 1.");
+
+        return value;
+    }
+
     private CommandExecution CreatePortal(HeadlessRequest request)
     {
         var first = CellRef(Require(request.First, "first"), "first");
         var second = CellRef(Require(request.Second, "second"), "second");
-        var portal = _session.CreatePortal(first, second, ParseFlags(request.Flags));
+        var portal = _session.CreatePortal(first, second, ParseFlags(request.Flags), ParseAreaFraction(request.AreaFraction));
         return Result(new CommandResult { LinkSet = ToInfo(portal.Links) });
     }
 
@@ -883,7 +891,8 @@ internal sealed partial class HeadlessOperations
             request.Rotation ?? 0,
             request.FlipU ?? false,
             request.FlipV ?? false,
-            ParseFlags(request.Flags));
+            ParseFlags(request.Flags),
+            ParseAreaFraction(request.AreaFraction));
 
         var handle = _session.CreateDock(dock);
         return Result(new CommandResult { LinkSet = ToInfo(handle.Links) });
@@ -908,7 +917,8 @@ internal sealed partial class HeadlessOperations
                 Kind = set.Kind.ToString(),
                 State = set.State.ToString(),
                 LinkCount = set.Links.Count,
-                Flags = set.Links.Count == 0 ? ExplicitLinkFlags.None.ToString() : set.Links[0].Flags.ToString()
+                Flags = set.Links.Count == 0 ? ExplicitLinkFlags.None.ToString() : set.Links[0].Flags.ToString(),
+                AreaFraction = set.Links.Count == 0 ? null : set.Links[0].AreaFraction
             })
             .ToArray();
 

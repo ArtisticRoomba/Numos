@@ -391,6 +391,31 @@ public sealed class HeadlessProtocolTests
     }
 
     [Test]
+    public async Task Portals_CarryAnAreaFractionAndRejectBadOnes()
+    {
+        string endpoints =
+            $"\"first\":{{\"simulation\":0,\"position\":{Coordinate0},\"voxel\":{C(1, 0, 0)}}}," +
+            $"\"second\":{{\"simulation\":\"B\",\"position\":{Coordinate0},\"voxel\":{C(0, 0, 0)}}}";
+
+        var run = await RunAsync(
+            CreateProject("create", 2, 1, 1),
+            Request("chunk", "addChunk", $"\"position\":{Coordinate0},\"classification\":1"),
+            Request("add", "addSimulation", $"\"name\":\"B\",\"chunkDimensions\":{C(2, 1, 1)}"),
+            Request("chunk-b", "addChunk", $"\"position\":{Coordinate0},\"classification\":1"),
+            Request("bad", "createPortal", endpoints + ",\"areaFraction\":1.5"),
+            Request("portal", "createPortal", endpoints + ",\"areaFraction\":0.25"),
+            Request("tick", "tick", "\"count\":1"),
+            Request("links", "listLinkSets"));
+
+        var sets = run.Result("links").GetProperty("linkSets");
+        Assert.Multiple(() =>
+        {
+            Assert.That(run.ErrorCode("bad"), Is.EqualTo("invalidRequest"));
+            Assert.That(sets[0].GetProperty("areaFraction").GetSingle(), Is.EqualTo(0.25f));
+        });
+    }
+
+    [Test]
     public async Task Portals_ConnectTwoSimulationsAndAppearInTheLinkList()
     {
         var run = await RunAsync(

@@ -63,6 +63,12 @@ internal sealed class HeadlessRequest
     public LinkEndpoint? First { get; init; }
     public LinkEndpoint? Second { get; init; }
     public string? Flags { get; init; }
+
+    /// <summary>
+    ///     The open area of each portal or dock link as a fraction of one voxel face, from 0 to 1. Missing follows the
+    ///     configuration default.
+    /// </summary>
+    public float? AreaFraction { get; init; }
     public int? Rotation { get; init; }
     public bool? FlipU { get; init; }
     public bool? FlipV { get; init; }
