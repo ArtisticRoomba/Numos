@@ -59,11 +59,10 @@ internal sealed class PhaseChangeSolver
             if (condensingCount == 0)
                 return;
 
-            // ParallelHelper.For splits [0, ActiveAirCount) into contiguous static blocks.
             // Condensing (expensive) voxels cluster spatially, for example in a foggy room or a steam vent.
-            // They cluster in ActiveAirIndices too, so a plain contiguous split can put nearly all the work on one worker.
+            // They cluster in ActiveAirIndices too, so a run of expensive items would land in a few adjacent grains.
             // A coprime-stride permutation of the work-item index spreads any contiguous run across the whole range
-            // before the block split happens.
+            // before ParallelPhase hands the items out.
             // It is a bijection over [0, ActiveAirCount), so every voxel is still visited exactly once.
             int stride = ChooseStride(chunk.ActiveAirCount);
             var action = new ProcessVoxelAction(chunk, config, condensingGases, condensingCount, stride);
@@ -73,7 +72,7 @@ internal sealed class PhaseChangeSolver
             int workerCount = Math.Max(1, Environment.ProcessorCount);
             if (awakeChunkCount < workerCount)
             {
-                ParallelHelper.For(0, chunk.ActiveAirCount, action);
+                ParallelPhase.Run(chunk.ActiveAirCount, action);
             }
             else
             {

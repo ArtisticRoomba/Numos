@@ -141,7 +141,7 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
             int workerCount = Math.Max(1, Environment.ProcessorCount);
             if (workspaceCount > 1 && workspaceCount >= workerCount)
             {
-                RunPhase(
+                ParallelPhase.Run(
                     workspaceCount,
                     new SolveChunkWorkspaceAction(
                         workspaces,
@@ -152,7 +152,7 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
                 return;
             }
 
-            RunPhase(workspaceCount, new InitializeWorkspaceAction(workspaces));
+            ParallelPhase.Run(workspaceCount, new InitializeWorkspaceAction(workspaces));
             int voxelTileSize = Math.Max(1, DivideRoundUp(totalActiveAirCount, workerCount));
             for (int workspaceIndex = 0; workspaceIndex < workspaceCount; workspaceIndex++)
             {
@@ -167,45 +167,42 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
                 voxelTileSize,
                 voxelWorkItems);
 
-            RunPhase(
+            ParallelPhase.Run(
                 voxelWorkItemCount,
                 new RefreshAndResolveAction(workspaces, voxelWorkItems, context.TickConfig));
 
-            RunPhase(
+            ParallelPhase.Run(
                 voxelWorkItemCount,
                 new ComputeConductanceAction(workspaces, voxelWorkItems, context.TickConfig));
 
-            RunPhase(
+            ParallelPhase.Run(
                 voxelWorkItemCount,
                 new ReduceConductanceAction(workspaces, voxelWorkItems, context.TickConfig));
 
-            RunPhase(
+            ParallelPhase.Run(
                 voxelWorkItemCount,
                 new ComputeBulkFlowAction(workspaces, voxelWorkItems, context.TickConfig));
 
-            RunPhase(
+            ParallelPhase.Run(
                 voxelWorkItemCount,
                 new GatherBulkDeltasAction(workspaces, voxelWorkItems, context.TickConfig));
 
-            RunPhase(
+            ParallelPhase.Run(
                 voxelWorkItemCount,
                 new ApplyBulkDeltasAction(workspaces, voxelWorkItems, context.TickConfig));
 
             for (int workspaceIndex = 0; workspaceIndex < workspaceCount; workspaceIndex++)
                 UpdateWorkspaceSleepState(ref workspaces[workspaceIndex], context.TickConfig);
 
-            RunPhase(
+            ParallelPhase.Run(
                 voxelWorkItemCount,
                 new GatherDiffusionDeltasAction(workspaces, voxelWorkItems, context.TickConfig));
 
-            RunPhase(
+            ParallelPhase.Run(
                 voxelWorkItemCount,
                 new ApplyDiffusionDeltasAction(workspaces, voxelWorkItems, context.TickConfig));
 
-            ParallelHelper.For(
-                0,
-                workspaceCount,
-                new PublishBoundaryEventsAction(workspaces));
+            ParallelPhase.Run(workspaceCount, new PublishBoundaryEventsAction(workspaces));
 
             ApplyVacuumThreshold(context);
         }
@@ -215,7 +212,7 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
                 ArrayPool<VoxelWorkItem>.Shared.Return(voxelWorkItems);
 
             if (!workspacesReleased)
-                RunPhase(workspaceCount, new ReleaseWorkspaceAction(workspaces));
+                ParallelPhase.Run(workspaceCount, new ReleaseWorkspaceAction(workspaces));
 
             ArrayPool<ChunkWorkspace>.Shared.Return(workspaces, true);
         }
@@ -293,8 +290,8 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
                 }
             }
 
-            RunPhase(workItemCount, new ClassifyVacuumAction(context, workItems));
-            RunPhase(workItemCount, new ApplyVacuumCleanupAction(context.Chunks, workItems));
+            ParallelPhase.Run(workItemCount, new ClassifyVacuumAction(context, workItems));
+            ParallelPhase.Run(workItemCount, new ApplyVacuumCleanupAction(context.Chunks, workItems));
         }
         finally
         {
@@ -416,19 +413,6 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
         }
 
         return opposites;
-    }
-
-    /// <summary>
-    ///     Runs one parallel phase, returning only after every work item has completed.
-    /// </summary>
-    /// <typeparam name="TAction">The allocation-free action used for each work item.</typeparam>
-    /// <param name="workItemCount">The number of work items in the phase.</param>
-    /// <param name="action">The operation to perform for each work item.</param>
-    private static void RunPhase<TAction>(int workItemCount, TAction action)
-        where TAction : struct, IAction
-    {
-        if (workItemCount > 0)
-            ParallelHelper.For(0, workItemCount, action);
     }
 
     /// <summary>
