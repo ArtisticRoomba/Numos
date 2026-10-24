@@ -5,9 +5,9 @@ namespace Numos.CoreSim.State.Advanced;
 /// </summary>
 /// <typeparam name="TSelf">The implementing type.</typeparam>
 /// <remarks>
-///     Generated implementations are explicit, so the members don't show up on the type itself. Call them through
-///     <see cref="NumosState" /> or a generic method constrained to this interface. Don't implement it by hand; the
-///     generator is what guarantees that every field reaches all three members in the same order.
+///     Generated implementations are explicit, so the members do not show up on the type itself. Call them through
+///     <see cref="NumosState" /> or a generic method constrained to this interface. Do not implement it by hand. The
+///     generator guarantees that every field reaches all three members in the same order.
 /// </remarks>
 public interface INumosState<TSelf> : INumosState where TSelf : INumosState<TSelf>
 {
@@ -54,13 +54,14 @@ public interface INumosState<TSelf> : INumosState where TSelf : INumosState<TSel
     /// </summary>
     /// <param name="reader">The reader, positioned at the value.</param>
     /// <param name="gases">
-    ///     Resolves <see cref="GasProperties" /> references by name. May be <see langword="null" /> for types that don't
+    ///     Resolves <see cref="GasProperties" /> references by name. May be <see langword="null" /> for types that do not
     ///     reference gases.
     /// </param>
     /// <returns>The value, built through its bound constructor.</returns>
     /// <remarks>
-    ///     Field ids the type doesn't know are skipped, and fields the data doesn't contain get their default (see
-    ///     <see cref="NumosSerializeAttribute" />), so data from an older or newer version of the type still loads.
+    ///     The reader skips field ids the type does not know. Fields that the data does not contain get their default
+    ///     (see <see cref="NumosSerializeAttribute" />). Data from an older or newer version of the type therefore still
+    ///     loads.
     /// </remarks>
     /// <exception cref="InvalidDataException">The data is malformed or names a gas <paramref name="gases" /> lacks.</exception>
     /// <exception cref="InvalidOperationException">
@@ -140,7 +141,7 @@ public static class NumosState
     ///     Reads a value written through a <see cref="StateBinarySink" />.
     /// </summary>
     /// <param name="reader">The reader, positioned at the value.</param>
-    /// <param name="gases">Resolves gas references by name; needed only when the value references gases.</param>
+    /// <param name="gases">Resolves gas references by name. Needed only when the value references gases.</param>
     /// <typeparam name="T">A type with <see cref="NumosSerializeAttribute" /> members.</typeparam>
     /// <returns>The value.</returns>
     /// <exception cref="InvalidDataException">The data is malformed or names a gas <paramref name="gases" /> lacks.</exception>
@@ -183,8 +184,8 @@ public static class NumosState
 }
 
 /// <summary>
-///     Implemented by the source generator for a class solver with <see cref="NumosSerializeAttribute" /> members, so
-///     its state can be written out and read back into the same instance.
+///     Implemented by the source generator for a class solver with <see cref="NumosSerializeAttribute" /> members. Its
+///     state can then be written out and read back into the same instance.
 /// </summary>
 /// <remarks>
 ///     <para>
@@ -193,8 +194,8 @@ public static class NumosState
 ///         straight into the registered instance instead.
 ///     </para>
 ///     <para>
-///         Don't implement it by hand. <see cref="INumosState.WriteState{TSink}" /> and <see cref="ReadStateInto" />
-///         have to agree on every field, which is what the generator guarantees.
+///         Do not implement it by hand. <see cref="INumosState.WriteState{TSink}" /> and <see cref="ReadStateInto" />
+///         must agree on every field, and the generator guarantees that.
 ///     </para>
 /// </remarks>
 public interface INumosStateTarget : INumosState

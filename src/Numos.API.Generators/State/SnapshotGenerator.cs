@@ -13,13 +13,13 @@ namespace Numos.API.Generators.State;
 /// </summary>
 /// <remarks>
 ///     <para>
-///         The transform reads one snapshot and its live type. Whether a live member's type is itself a live type with
-///         a snapshot (a chunk inside a kernel) is only known once every snapshot in the project has been read, so
-///         members keep the type names that decide it and the cross-snapshot pass resolves them.
+///         The transform reads one snapshot and its live type. A live member may itself be a live type with a snapshot
+///         (a chunk inside a kernel). Numos knows that only after it has read every snapshot in the project. Members
+///         therefore keep the type names that decide it, and the cross-snapshot pass resolves them.
 ///     </para>
 ///     <para>
-///         Generated code lives in the snapshot, so it can only read live members the snapshot can see. That keeps the
-///         live type free of generated code: it needs no attribute and doesn't have to be partial.
+///         Generated code lives in the snapshot, so it can read only live members that the snapshot can see. That keeps
+///         the live type free of generated code. It needs no attribute and does not have to be partial.
 ///         <see cref="StateGenerator" /> leaves both types alone.
 ///     </para>
 /// </remarks>
@@ -439,7 +439,7 @@ public sealed class SnapshotGenerator : IIncrementalGenerator
     }
 
     /// <summary>
-    ///     Reads one of the snapshot's own members: a marked one joins the schema, and a mutable unmarked one gets the
+    ///     Reads one of the snapshot's own members. A marked member joins the schema. A mutable unmarked member gets the
     ///     same warning a serializable type would.
     /// </summary>
     private static StateFieldDeclaration? ParseHandWritten(
@@ -770,8 +770,8 @@ public sealed class SnapshotGenerator : IIncrementalGenerator
     }
 
     /// <summary>
-    ///     Copies a live member's summary and remarks for the generated snapshot member, with <c>cref</c>s turned into
-    ///     plain code text since they resolve against the live type.
+    ///     Copies the summary and remarks of a live member for the generated snapshot member. It turns each <c>cref</c>
+    ///     into plain code text, because the references resolve against the live type.
     /// </summary>
     private static EquatableArray<string> Documentation(ISymbol member, CancellationToken cancellationToken)
     {

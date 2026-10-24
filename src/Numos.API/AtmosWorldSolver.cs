@@ -21,11 +21,11 @@ public delegate void AtmosWorldSolver(AtmosWorldSolverContext context);
 ///     </para>
 ///     <para>
 ///         Fields marked <c>[NumosSerialize]</c> (the class must be <see langword="partial" />) are the solver's state.
-///         Numos checkpoints, hashes, and saves them, writes them back into this instance on restore, and records a
+///         Numos checkpoints, hashes, and saves them. On restore it writes them back into this instance. It records a
 ///         change the host makes between ticks as a <see cref="SetAtmosWorldSolverStateOperation" /> at the next tick
 ///         or checkpoint, so replay sees it too. Changes <see cref="Solve" /> makes are derived, like any other solver
-///         work, and aren't recorded. While recording, the marked members are hashed twice a tick, which is nothing
-///         for settings and counters but adds up for a large marked array.
+///         work, and Numos does not record them. While recording, Numos hashes the marked members twice a tick. That
+///         costs nothing for settings and counters but adds up for a large marked array.
 ///     </para>
 ///     <para>
 ///         Unmarked fields are invisible to replay. Keep them to scratch work that <see cref="OnRestored" /> can throw

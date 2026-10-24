@@ -7,8 +7,8 @@ namespace Numos.CoreSim.State.Advanced;
 /// </summary>
 /// <typeparam name="T">The element type.</typeparam>
 /// <remarks>
-///     Callers see an ordinary <see cref="ReadOnlyCollection{T}" />, but the state codecs and generated restore code can
-///     reach the array and copy or hash it as one span instead of element by element through the list interface.
+///     Callers see an ordinary <see cref="ReadOnlyCollection{T}" />. The state codecs and generated restore code can
+///     reach the array. They copy or hash it as one span, instead of element by element through the list interface.
 ///     Generated snapshot members hold their per-voxel and other array data in one of these.
 /// </remarks>
 public sealed class StateArray<T> : ReadOnlyCollection<T>

@@ -11,15 +11,15 @@ namespace Numos.CoreSim.Replay;
 /// </summary>
 /// <remarks>
 ///     <para>
-///         A count, then for each array in ordinal key order: its key, the element type's full name, the element size
-///         and count as <c>int32</c>, and the elements as one little-endian block. The state hash sees the same calls,
-///         so a struct-typed array hashes its native bytes even though it can't be saved; writing one to any other
-///         sink throws.
+///         The payload is a count, then one entry per array in ordinal key order. Each entry holds the key and the full
+///         name of the element type. It also holds the element size and count as <c>int32</c>, and then the elements as
+///         one little-endian block. The state hash sees the same calls. A struct-typed array therefore hashes its native bytes even
+///         though it cannot be saved. Writing one to any other sink throws.
 ///     </para>
 ///     <para>
-///         Reading maps each key back to its registered field. The length is only checked against the data here; the
-///         chunk's dimensions aren't known yet, so <see cref="AtmosChunkCheckpoint.OnDecoded" /> checks it against
-///         the registration afterwards.
+///         Reading maps each key back to its registered field. Here the length is checked only against the data. The
+///         dimensions of the chunk are not known yet, so <see cref="AtmosChunkCheckpoint.OnDecoded" /> checks the
+///         length against the registration afterwards.
 ///     </para>
 /// </remarks>
 internal readonly struct SolverArraysCodec : IStateCodec<IReadOnlyList<AtmosSolverArraySnapshot>>

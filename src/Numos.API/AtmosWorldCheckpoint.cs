@@ -35,7 +35,7 @@ public sealed partial class AtmosWorldCheckpoint
     /// </remarks>
     public const int CurrentFormatVersion = 13;
 
-    // Immutable once captured or read, so the digest is computed once; see AtmosSimulationCheckpoint.
+    // Immutable once captured or read, so the digest is computed once. See AtmosSimulationCheckpoint.
     [NumosIgnore]
     private ulong _digest;
 
@@ -95,7 +95,7 @@ public sealed partial class AtmosWorldCheckpoint
     /// <returns>The checkpoint position and a deterministic non-cryptographic 64-bit digest.</returns>
     /// <remarks>
     ///     The digest covers the format version and then exactly the state the checkpoint saves, through the same
-    ///     generated walk, so two checkpoints that save the same bytes hash the same.
+    ///     generated walk. Two checkpoints that save the same bytes therefore hash the same.
     /// </remarks>
     public AtmosWorldStateHash ComputeStateHash()
     {

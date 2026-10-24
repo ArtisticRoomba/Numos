@@ -811,7 +811,7 @@ public sealed partial class AtmosWorld : IDisposable
     /// <summary>
     ///     Every link-set slot as canonical definitions, free slots and topology waiting for a tick boundary included.
     /// </summary>
-    /// <remarks>Derived sparse indexes aren't saved; restore rebuilds them from these slots.</remarks>
+    /// <remarks>Numos does not save derived sparse indexes. Restore rebuilds them from these slots.</remarks>
     [NumosSerialize("LinkSlots")]
     internal IReadOnlyList<AtmosWorldLinkSlotCheckpoint> LinkSlotCheckpoints
     {
@@ -1427,12 +1427,12 @@ public sealed partial class AtmosWorld : IDisposable
 
     /// <summary>
     ///     Requires the checkpoint to hold state for exactly the stateful class solvers registered here, in pipeline
-    ///     order, with payloads that are at least well-formed field records.
+    ///     order. The payloads must be at least well-formed field records.
     /// </summary>
     /// <remarks>
-    ///     Strict in both directions. An entry nothing here can take would silently drop state, and a stateful solver
-    ///     with no entry would keep whatever it held before the restore; either way replay would diverge from the
-    ///     history the checkpoint came from.
+    ///     Strict in both directions. An entry nothing here can take would silently drop state. A stateful solver
+    ///     with no entry would keep whatever it held before the restore. In either case replay would diverge from the
+    ///     history of the checkpoint.
     /// </remarks>
     private void ValidateSolverStates(AtmosWorldCheckpoint checkpoint)
     {

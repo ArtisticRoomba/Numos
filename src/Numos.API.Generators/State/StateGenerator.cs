@@ -13,13 +13,14 @@ namespace Numos.API.Generators.State;
 /// </summary>
 /// <remarks>
 ///     <para>
-///         A type takes part as soon as one of its fields or properties is marked; there's no type-level attribute.
-///         Membership is opt-in, with a warning for each mutable member that's neither marked nor
+///         A type takes part as soon as one of its fields or properties is marked, and there is no type-level
+///         attribute. Membership is opt-in, with a warning for each mutable member that is neither marked nor
 ///         <c>[NumosIgnore]</c>.
 ///     </para>
 ///     <para>
 ///         Quantity aliases are error types in a project that owns a units catalog (see
-///         <see cref="QuantityAliasCatalog" />), so shapes keep them unbound until they're combined with the catalog.
+///         <see cref="QuantityAliasCatalog" />). Shapes therefore keep them unbound until Numos combines them with the
+///         catalog.
 ///     </para>
 ///     <para>
 ///         Every solver configuration with a constant key also lands in one module initializer per assembly, which
@@ -149,7 +150,7 @@ public sealed class StateGenerator : IIncrementalGenerator
         if (context.SemanticModel.GetDeclaredSymbol(syntax, cancellationToken) is not INamedTypeSymbol type)
             return null;
 
-        // A partial type can mark members in several declarations; only the first of those speaks for the type.
+        // A partial type can mark members in several declarations. Only the first of those speaks for the type.
         foreach (SyntaxReference reference in type.DeclaringSyntaxReferences)
         {
             if (reference.GetSyntax(cancellationToken) is TypeDeclarationSyntax candidate && HasMarkedMemberSyntax(candidate))
@@ -266,7 +267,7 @@ public sealed class StateGenerator : IIncrementalGenerator
 
             if (member.IsStatic || member is IFieldSymbol { IsConst: true })
             {
-                // Static members are never state; only flag the ones claiming otherwise.
+                // Static members are never state. Flag only the ones claiming otherwise.
                 if (serialize is not null)
                     diagnostics.Add(DiagnosticInfo.Create(StateDiagnostics.StaticField, location, displayName));
 
@@ -498,8 +499,8 @@ public sealed class StateGenerator : IIncrementalGenerator
     }
 
     /// <summary>
-    ///     Gets every constructor the generated reader could call. Accessibility doesn't matter, since the reader is
-    ///     generated into the type; only a record's copy constructor is left out.
+    ///     Gets every constructor the generated reader could call. Accessibility does not matter, because the reader is
+    ///     generated into the type. Only the copy constructor of a record is left out.
     /// </summary>
     private static EquatableArray<StateConstructorModel> Constructors(INamedTypeSymbol type)
     {
@@ -562,7 +563,7 @@ public sealed class StateGenerator : IIncrementalGenerator
         switch (member)
         {
             case IFieldSymbol field:
-                // Backing fields are covered through their property; other synthesized fields aren't the user's.
+                // Backing fields are covered through their property. Other synthesized fields are not the user's.
                 if (field.AssociatedSymbol is not null || field.IsImplicitlyDeclared)
                     return false;
 

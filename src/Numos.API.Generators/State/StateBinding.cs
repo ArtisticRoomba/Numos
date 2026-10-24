@@ -6,8 +6,9 @@ namespace Numos.API.Generators.State;
 ///     Picks the constructor a generated reader calls, and works out how each read field reaches it.
 /// </summary>
 /// <remarks>
-///     Works on resolved shapes rather than symbols: inside a project with a units catalog, quantity aliases are error
-///     types, so <c>Mole</c> and <c>float</c> only compare equal once both are reduced to their storage primitive.
+///     Works on resolved shapes rather than symbols. Inside a project with a units catalog, quantity aliases are error
+///     types. <c>Mole</c> and <c>float</c> therefore compare equal only once both are reduced to their storage
+///     primitive.
 /// </remarks>
 internal static class StateBinding
 {
@@ -162,7 +163,7 @@ internal static class StateBinding
             }
         }
 
-        // Two fields differing only by case leave the parameter ambiguous; treat it as unmatched.
+        // Two fields differing only by case leave the parameter ambiguous. Treat it as unmatched.
         return insensitiveMatches == 1 ? insensitive : null;
     }
 
@@ -177,7 +178,7 @@ internal static class StateBinding
 
         if (parameter.Kind == StateShapeKind.NullableReference)
         {
-            // A non-null value always fits a nullable parameter; a nullable one only fits without a copy.
+            // A non-null value always fits a nullable parameter. A nullable one fits only without a copy.
             StateShape inner = parameter.Arguments[0];
             if (field.Kind != StateShapeKind.NullableReference)
                 return Convert(field, inner, value);

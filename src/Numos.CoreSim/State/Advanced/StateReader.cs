@@ -11,15 +11,16 @@ namespace Numos.CoreSim.State.Advanced;
 /// </summary>
 /// <remarks>
 ///     <para>
-///         Assume the bytes are hostile. Every length is checked against the field or object that contains it before
-///         anything is allocated, field ids must strictly increase within an object (which also rules out
-///         duplicates), nesting is capped, and a field must be consumed exactly. Anything that doesn't fit is an
+///         Assume the bytes are hostile. The reader checks every length against the field or object that contains it
+///         before it allocates anything. Field ids must strictly increase within an object (which also rules out
+///         duplicates). Nesting is capped, and a field must be consumed exactly. Anything that does not fit is an
 ///         <see cref="InvalidDataException" />, the same exception replay archives use for corrupt data.
 ///     </para>
 ///     <para>
-///         Generated readers follow one pattern: <see cref="BeginObject" />, then <see cref="TryReadField" /> in a
-///         loop, reading a known field's payload and calling <see cref="EndField" />, or calling
-///         <see cref="SkipField" /> for an unknown id, then <see cref="EndObject" />.
+///         Generated readers follow one pattern. They call <see cref="BeginObject" />, then loop on
+///         <see cref="TryReadField" />. For a known field the loop reads the payload and calls
+///         <see cref="EndField" />. For an unknown id it calls <see cref="SkipField" />. After the loop the reader calls
+///         <see cref="EndObject" />.
 ///     </para>
 /// </remarks>
 public ref struct StateReader

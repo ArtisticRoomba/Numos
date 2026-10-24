@@ -205,7 +205,7 @@ internal static class StateEmitter
                 writer.Line("    break;");
             }
 
-            // Ids from a newer version of the type; skipping them is what lets old readers load new data.
+            // Ids from a newer version of the type. Skipping them lets old readers load new data.
             writer.Line("default:");
             writer.Line("    reader.SkipField();");
             writer.Line("    continue;");

@@ -5,9 +5,9 @@ using Numos.CoreSim.State.Advanced;
 namespace Numos.CoreSim.Tests.Replay;
 
 /// <summary>
-///     Exercises the chunk checkpoint generated from <see cref="AtmosChunk" />'s marked members (capture, restore, and
-///     its state schema), plus the config and gas hashes, directly against CoreSim internals rather than only through
-///     the public replay API in <c>Numos.API.Tests</c>.
+///     Exercises the chunk checkpoint generated from the marked members of <see cref="AtmosChunk" /> (capture, restore,
+///     and its state schema), plus the config and gas hashes. It works directly against CoreSim internals, not only
+///     through the public replay API in <c>Numos.API.Tests</c>.
 /// </summary>
 [TestFixture]
 public sealed class CheckpointStateFieldTests

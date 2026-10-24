@@ -32,8 +32,8 @@ public static class NumosWorldReplaySerializer
     /// <exception cref="ArgumentNullException">A required argument is <see langword="null" />.</exception>
     /// <exception cref="ArgumentException"><paramref name="destination" /> is not writable.</exception>
     /// <exception cref="NotSupportedException">
-    ///     The replay holds state the format can't encode: a solver configuration without <c>[NumosSerialize]</c>
-    ///     members, or a rollback chunk field whose element type isn't a primitive or an enum.
+    ///     The replay holds state the format cannot encode. Examples are a solver configuration without
+    ///     <c>[NumosSerialize]</c> members and a rollback chunk field whose element type is not a primitive or an enum.
     /// </exception>
     /// <remarks>
     ///     Custom world solvers are saved by name, along with any <c>[NumosSerialize]</c> state they hold. Loading such a
@@ -94,9 +94,9 @@ public static class NumosWorldReplaySerializer
     ///     registration.
     /// </exception>
     /// <exception cref="NotSupportedException">
-    ///     The replay contains host-defined state, such as a solver configuration whose key isn't registered in
-    ///     <see cref="NumosReplayReadOptions.SolverConfigurations" />, or a rollback chunk field the process hasn't
-    ///     registered yet.
+    ///     The replay contains host-defined state. Examples are a solver configuration whose key is not registered in
+    ///     <see cref="NumosReplayReadOptions.SolverConfigurations" /> and a rollback chunk field that the process has
+    ///     not registered yet.
     /// </exception>
     public static NumosWorldReplayDocument Deserialize(Stream source, NumosReplayReadOptions? options = null)
     {

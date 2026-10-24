@@ -83,7 +83,7 @@ internal class AtmosChunk
     public int Depth;
 
     /// <summary>
-    ///     The position of this chunk in the chunk grid; each coordinate counts whole chunks.
+    ///     The position of this chunk in the chunk grid. Each coordinate counts whole chunks.
     /// </summary>
     [NumosSerialize("Position")]
     public Int3 GridPosition;
@@ -253,8 +253,8 @@ internal class AtmosChunk
     ///     Gas channels in solver reduction order, including channels whose moles are all zero.
     /// </summary>
     /// <remarks>
-    ///     Channel order is kept because floating-point reductions can observe it. Reading copies the valid channels'
-    ///     moles out of pooled storage; assigning releases every channel and recreates the given ones in order.
+    ///     Channel order is kept because floating-point reductions can observe it. Reading copies the moles of the valid
+    ///     channels out of pooled storage. Assigning releases every channel and recreates the given ones in order.
     /// </remarks>
     [NumosSerialize("Gases")]
     public IReadOnlyList<AtmosGasChannelCheckpoint> GasChannelCheckpoints
@@ -287,7 +287,7 @@ internal class AtmosChunk
     /// </summary>
     /// <remarks>
     ///     Transient fields are left out. Assigning drops every field, transient ones included, and recreates the
-    ///     given arrays; reacquire them through the same <c>ChunkField&lt;T&gt;</c>, whose key, element type, and length
+    ///     given arrays. Reacquire them through the same <c>ChunkField&lt;T&gt;</c>. Its key, element type, and length
     ///     must match.
     /// </remarks>
     [NumosSerialize(Codec = typeof(SolverArraysCodec))]

@@ -19,8 +19,9 @@ public sealed class BoundaryFlowParallelDeterminismTests
     ///     it shows parallel boundary flow is bit-identical to the sequential algorithm, not merely stable across repeated
     ///     parallel runs. The value was re-captured as a grid-only
     ///     <see cref="Numos.CoreSim.Replay.AtmosSimulationCheckpoint" /> digest once the sequential-era digest had passed on
-    ///     the same code. It was captured again for grid checkpoint formats 8, 9, and 10, which hash state with the wire
-    ///     encoding, name fields by hashed member names, and generate the checkpoint from live members. Neither recapture changed the physics.
+    ///     the same code. It was captured again for grid checkpoint formats 8, 9, and 10. Those formats hash state with
+    ///     the wire encoding, name fields by hashed member names, and generate the checkpoint from live members. Neither
+    ///     recapture changed the physics.
     /// </remarks>
     [Test]
     [Explicit(

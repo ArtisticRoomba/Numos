@@ -4,7 +4,7 @@ namespace Numos.API.Generators.State;
 
 /// <param name="Id">The field's wire id, hashed from its wire name.</param>
 /// <param name="MemberName">The escaped member name to read the value from.</param>
-/// <param name="Shape">The member's type; aliases are resolved by the time a field reaches the emitter.</param>
+/// <param name="Shape">The member's type. Aliases are resolved by the time a field reaches the emitter.</param>
 /// <param name="Name">The unescaped member name, which constructor parameters bind to.</param>
 /// <param name="Settable">Whether an object initializer can assign the member (a mutable field, or a set/init accessor).</param>
 /// <param name="InitOnly">
@@ -107,7 +107,8 @@ internal sealed record StateTypeDeclaration(
     EquatableArray<DiagnosticInfo> Diagnostics);
 
 /// <summary>
-///     A resolved declaration: the diagnostics to report, the model to emit when there were no errors, and the
-///     fully qualified type to register for loading, if it's a solver configuration the module initializer can name.
+///     A resolved declaration. It holds the diagnostics to report and the model to emit when there were no errors. It
+///     also holds the fully qualified type to register for loading, if it is a solver configuration that the module
+///     initializer can name.
 /// </summary>
 internal sealed record StateTypeResult(StateTypeModel? Model, string? Registration, EquatableArray<DiagnosticInfo> Diagnostics);

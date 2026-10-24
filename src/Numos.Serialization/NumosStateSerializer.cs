@@ -11,14 +11,15 @@ namespace Numos.Serialization;
 /// </summary>
 /// <remarks>
 ///     <para>
-///         The stream holds a small header (magic, container version, the type's <see cref="INumosState{TSelf}.StateKey" />)
-///         followed by the same field payload a solver configuration has inside a world archive, so there's one wire
-///         format rather than two. Fields carry ids and lengths, so a file written before a field was added still loads
-///         with that field at its default, and ids the reader doesn't know are skipped.
+///         The stream holds a small header (magic, container version, the
+///         <see cref="INumosState{TSelf}.StateKey" /> of the type). The same field payload that a solver configuration
+///         has inside a world archive follows. There is one wire format, not two. Fields carry ids and lengths, so a
+///         file written before a field was added still loads with that field at its default. The reader skips ids it
+///         does not know.
 ///     </para>
 ///     <para>
-///         Only types with a constant <c>Key</c> property (every solver configuration has one) can be saved this way;
-///         the key is how a load knows the file holds the type it asked for.
+///         Only types with a constant <c>Key</c> property (every solver configuration has one) can be saved this way.
+///         The key tells a load that the file holds the type it asked for.
 ///     </para>
 /// </remarks>
 /// <example>
@@ -70,7 +71,7 @@ public static class NumosStateSerializer
     /// </param>
     /// <param name="options">
     ///     Optional limits for untrusted input. <see cref="NumosReplayReadOptions.MaxPayloadBytes" /> and
-    ///     <see cref="NumosReplayReadOptions.MaxStringBytes" /> apply; the rest are for world replays.
+    ///     <see cref="NumosReplayReadOptions.MaxStringBytes" /> apply. The rest are for world replays.
     /// </param>
     /// <typeparam name="T">A serializable type with a constant <c>Key</c>, such as a solver configuration.</typeparam>
     /// <returns>The value.</returns>

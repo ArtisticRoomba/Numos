@@ -9,11 +9,12 @@ namespace Numos.CoreSim.State;
 /// </summary>
 /// <remarks>
 ///     <para>
-///         Usually nothing needs registering. Every solver configuration with <see cref="NumosSerializeAttribute" />
-///         members is registered by a module initializer the generator adds to its assembly, so it's known as soon as
-///         that assembly is in use. That covers Numos's own configurations, such as <see cref="GasReactionConfig" />,
-///         and downstream ones alike. <see cref="Register{T}" /> is for types whose assembly may not have run yet when
-///         a file loads, or that the generator couldn't name (private nested types).
+///         Usually nothing needs registering. A module initializer that the generator adds to the assembly registers
+///         every solver configuration with <see cref="NumosSerializeAttribute" /> members. The configuration is
+///         therefore known as soon as that assembly is in use. That covers Numos's own configurations, such as
+///         <see cref="GasReactionConfig" />, and downstream ones alike. <see cref="Register{T}" /> is for types whose
+///         assembly may not have run yet when a file loads, or that the generator could not name (private nested
+///         types).
 ///     </para>
 ///     <para>
 ///         A key with no registered type fails the load rather than being skipped. Dropping a configuration would
@@ -50,9 +51,9 @@ public sealed class SolverConfigurationTypes
     /// </summary>
     /// <typeparam name="T">A solver configuration with <see cref="NumosSerializeAttribute" /> members.</typeparam>
     /// <remarks>
-    ///     Generated module initializers call this; hosts rarely need to. A second type claiming a key that's already
-    ///     taken doesn't throw here, since that would fail the whole assembly's load, but loading a configuration under
-    ///     that key does, until a registry picks one with <see cref="Register{T}" />.
+    ///     Generated module initializers call this. Hosts rarely need to. A second type that claims a key already taken
+    ///     does not throw here, because that would fail the load of the whole assembly. Loading a configuration under
+    ///     that key does throw, until a registry picks one with <see cref="Register{T}" />.
     /// </remarks>
     public static void RegisterDefault<T>() where T : IAtmosSolverConfiguration, INumosState<T>
     {

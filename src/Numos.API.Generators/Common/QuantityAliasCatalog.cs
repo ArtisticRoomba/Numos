@@ -11,8 +11,9 @@ internal sealed record QuantityAlias(string Alias, string Storage);
 /// </summary>
 /// <remarks>
 ///     Magnitudo emits its quantity aliases (<c>Kelvin</c>, <c>Mole</c>, ...) as global usings from a generator in
-///     the same pass, and one generator never sees another's output. In a project that owns a catalog, an alias is
-///     still an error type when another generator inspects it, so its storage type has to come from the catalog.
+///     the same pass. One generator never sees the output of another. In a project that owns a catalog, an alias is
+///     still an error type when another generator inspects it. Its storage type therefore has to come from the
+///     catalog.
 /// </remarks>
 internal static class QuantityAliasCatalog
 {

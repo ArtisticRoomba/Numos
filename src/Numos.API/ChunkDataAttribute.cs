@@ -17,17 +17,17 @@ namespace Numos.API;
 ///         observe it.
 ///     </para>
 ///     <para>
-///         A field is state by default: it's captured in checkpoints and state hashes, restored on rollback, and saved
-///         in world archives. That's why it needs an explicit, namespaced key and an unmanaged element type. Set
-///         <see cref="Transient" /> for scratch data that's rebuilt every tick; it's cleared on restore instead, and
-///         may leave the key out.
+///         A field is state by default. Checkpoints and state hashes capture it, rollback restores it, and world
+///         archives save it. That is why it needs an explicit, namespaced key and an unmanaged element type. Set
+///         <see cref="Transient" /> for scratch data that is rebuilt every tick. Restore clears such a field instead,
+///         and it may leave the key out.
 ///     </para>
 ///     <para>
-///         A generated module initializer also registers every field in the assembly as soon as anything in it runs,
-///         so a replay file holding a saved field loads without the property being read first. If a field
-///         conflicts with one another assembly already registered, that initializer throws: the runtime wraps it in a
-///         <see cref="TypeInitializationException" /> whose inner <see cref="InvalidOperationException" /> names the
-///         declaring type and the key.
+///         A generated module initializer also registers every field in the assembly as soon as anything in it runs.
+///         A replay file holding a saved field therefore loads without the property being read first. If a field
+///         conflicts with one that another assembly already registered, that initializer throws. The runtime wraps
+///         the exception in a <see cref="TypeInitializationException" />. Its inner
+///         <see cref="InvalidOperationException" /> names the declaring type and the key.
 ///     </para>
 ///     <para>
 ///         The generator also emits a static class named after the declaring type (<c>FireChunkDataChunkAccessors</c>
@@ -117,8 +117,8 @@ public sealed class ChunkDataAttribute : Attribute
     ///     cleared on restore.
     /// </summary>
     /// <remarks>
-    ///     Off by default, so a field survives rollback and saving unless it opts out. Only set it for data a solver
-    ///     rebuilds from scratch every tick; anything that carries over between ticks must stay saved or replay will
+    ///     Off by default, so a field survives rollback and saving unless it opts out. Set it only for data a solver
+    ///     rebuilds from scratch every tick. Anything that carries over between ticks must stay saved, or replay will
     ///     diverge.
     /// </remarks>
     public bool Transient { get; set; }

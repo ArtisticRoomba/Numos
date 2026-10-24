@@ -6,7 +6,7 @@ namespace Numos.API.Generators.State;
 internal enum StateShapeKind
 {
     /// <summary>
-    ///     A primitive; the name is its CLR name, such as <c>Single</c>.
+    ///     A primitive. The name is its CLR name, such as <c>Single</c>.
     /// </summary>
     Primitive,
     String,
@@ -24,38 +24,38 @@ internal enum StateShapeKind
     Bytes,
 
     /// <summary>
-    ///     An enum; the name is its fully qualified type and the one argument is its underlying primitive.
+    ///     An enum. The name is its fully qualified type, and the one argument is its underlying primitive.
     /// </summary>
     Enum,
 
     /// <summary>
-    ///     A nested type with <c>[NumosSerialize]</c> members; the name is its fully qualified type.
+    ///     A nested type with <c>[NumosSerialize]</c> members. The name is its fully qualified type.
     /// </summary>
     State,
 
     /// <summary>
-    ///     An ordered collection type; the name is the unbound generic type, the argument the element.
+    ///     An ordered collection type. The name is the unbound generic type, and the argument is the element.
     /// </summary>
     List,
     Array,
     Set,
 
     /// <summary>
-    ///     A dictionary type; the name is the unbound generic type, the arguments key then value.
+    ///     A dictionary type. The name is the unbound generic type, and the arguments are the key then the value.
     /// </summary>
     Dictionary,
     NullableReference,
     NullableValue,
 
     /// <summary>
-    ///     A collection type that's only accepted as a constructor parameter, such as <c>IEnumerable&lt;T&gt;</c>; the
-    ///     name is the unbound generic type, the arguments its element (or key and value) shapes.
+    ///     A collection type that is accepted only as a constructor parameter, such as <c>IEnumerable&lt;T&gt;</c>. The
+    ///     name is the unbound generic type, and the arguments are its element (or key and value) shapes.
     /// </summary>
     Container,
 
     /// <summary>
-    ///     A member whose <c>[NumosSerialize]</c> names a <c>Codec</c>; the name is its declared type and <see cref="StateShape.Codec" /> the
-    ///     codec that handles it.
+    ///     A member whose <c>[NumosSerialize]</c> names a <c>Codec</c>. The name is its declared type, and
+    ///     <see cref="StateShape.Codec" /> is the codec that handles it.
     /// </summary>
     Custom,
 
@@ -133,7 +133,7 @@ internal sealed record StateShape(StateShapeKind Kind, string Name, EquatableArr
     /// </summary>
     public static StateShape From(ITypeSymbol type)
     {
-        // An alias is unbound here; see QuantityAliasCatalog. It's never annotated, since it isn't known to be a
+        // An alias is unbound here (see QuantityAliasCatalog). It is never annotated, because it is not known to be a
         // reference type.
         if (type.TypeKind == TypeKind.Error)
             return Leaf(StateShapeKind.Alias, type.Name);
@@ -244,8 +244,8 @@ internal sealed record StateShape(StateShapeKind Kind, string Name, EquatableArr
     }
 
     /// <summary>
-    ///     Whether <paramref name="type" /> implements <c>INumosState&lt;T&gt;</c> over itself, which is how a generated
-    ///     snapshot from a referenced assembly shows up: its members carry no attributes, but the interface does.
+    ///     Whether <paramref name="type" /> implements <c>INumosState&lt;T&gt;</c> over itself. A generated snapshot from
+    ///     a referenced assembly shows up this way, because its members carry no attributes but the interface does.
     /// </summary>
     public static bool ImplementsOwnState(INamedTypeSymbol type)
     {
@@ -276,7 +276,7 @@ internal sealed record StateShape(StateShapeKind Kind, string Name, EquatableArr
     private static StateShape Unsupported(ITypeSymbol type) => Leaf(StateShapeKind.Unsupported, type.ToDisplayString());
 
     /// <summary>
-    ///     Replaces every alias with its storage primitive; an alias the catalog doesn't know becomes unsupported.
+    ///     Replaces every alias with its storage primitive. An alias the catalog does not know becomes unsupported.
     /// </summary>
     public StateShape Resolve(EquatableArray<QuantityAlias> aliases)
     {
@@ -341,7 +341,7 @@ internal sealed record StateShape(StateShapeKind Kind, string Name, EquatableArr
         StateShapeKind.Enum => Codecs + "Enum<" + Name + ", " + Arguments[0].TypeExpression + ", " +
                                Arguments[0].CodecExpression + ">",
         StateShapeKind.State => Codecs + "State<" + Name + ">",
-        // Primitive elements take the block path; it writes the same bytes as the per-element one.
+        // Primitive elements take the block path. It writes the same bytes as the per-element one.
         StateShapeKind.List or StateShapeKind.Array when Arguments[0] is { Kind: StateShapeKind.Primitive, Name: not "Boolean" } =>
             Generic("UnmanagedList", Arguments[0]),
         StateShapeKind.List or StateShapeKind.Array => Generic("List", Arguments[0]),

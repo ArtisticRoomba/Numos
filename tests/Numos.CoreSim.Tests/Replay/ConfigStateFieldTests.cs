@@ -5,9 +5,9 @@ using Numos.CoreSim.State.Advanced;
 namespace Numos.CoreSim.Tests.Replay;
 
 /// <summary>
-///     Checks that every <see cref="NumosSerializeAttribute" /> scalar on <see cref="AtmosConfig" /> and every
-///     <see cref="GasProperties" /> field takes part in both <see cref="AtmosConfigSnapshot.SemanticallyEquals" /> and
-///     the config hash, and that the snapshot exposes every config scalar.
+///     Checks two things. Every <see cref="NumosSerializeAttribute" /> scalar on <see cref="AtmosConfig" /> and every
+///     <see cref="GasProperties" /> field must take part in both <see cref="AtmosConfigSnapshot.SemanticallyEquals" />
+///     and the config hash. The snapshot must also expose every config scalar.
 /// </summary>
 /// <remarks>
 ///     The field lists come from reflection over the attributes, so a newly marked field is covered without touching
@@ -39,7 +39,7 @@ public sealed class ConfigStateFieldTests
     [Test]
     public void EveryGasFieldIsState()
     {
-        // GasProperties has no [NumosIgnore] members, so an unmarked public field would only be a warning; this pins it.
+        // GasProperties has no [NumosIgnore] members, so an unmarked public field would only be a warning. This test pins it.
         Assert.That(
             typeof(GasProperties).GetFields(BindingFlags.Public | BindingFlags.Instance).Select(static field => field.Name),
             Is.EquivalentTo(GasFields().Select(static data => (string)data.Arguments[0]!)));

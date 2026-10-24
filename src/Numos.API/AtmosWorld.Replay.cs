@@ -168,7 +168,7 @@ public sealed partial class AtmosWorld
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
 
-            // A solver calling this mid-tick isn't at a boundary; the tick's end takes care of its own edits.
+            // A solver calling this mid-tick is not at a boundary. The end of the tick takes care of its own edits.
             if (!_isTickExecuting)
                 RecordSolverStateEdits();
 
@@ -444,7 +444,7 @@ public sealed partial class AtmosWorld
     ///     </para>
     ///     <para>
     ///         An edit is recorded here rather than when it happened, so it can land after other operations from the
-    ///         same idle window. That's only safe because no external operation reads class solver state; keep it that
+    ///         same idle window. That is safe only because no external operation reads class solver state. Keep it that
     ///         way when adding one.
     ///     </para>
     /// </remarks>

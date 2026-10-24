@@ -110,7 +110,7 @@ public sealed partial class AtmosSimulationCheckpoint
 ///     <para>
 ///         Generated from the <see cref="NumosSerializeAttribute" /> members of the live chunk, which define its
 ///         members, capture, restore, hash, equality, and wire layout. To checkpoint more chunk state, mark the live
-///         member; nothing here changes.
+///         member. Nothing here changes.
 ///     </para>
 ///     <para>
 ///         Gas-channel order is retained because floating-point reductions can observe that order.

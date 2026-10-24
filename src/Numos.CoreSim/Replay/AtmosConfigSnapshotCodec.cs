@@ -4,20 +4,21 @@ using Numos.CoreSim.State.Advanced;
 namespace Numos.CoreSim.Replay;
 
 /// <summary>
-///     The <see cref="NumosSerializeAttribute.Codec" /> for a world's <see cref="AtmosConfigSnapshot" />: its schema
-///     fields (scalars and the gas registry), then its solver configurations as a count and, for each one in the
-///     snapshot's ordinal key order, its key and payload.
+///     The <see cref="NumosSerializeAttribute.Codec" /> for the <see cref="AtmosConfigSnapshot" /> of a world. It writes
+///     the schema fields (scalars and the gas registry). It then writes a count of solver configurations. The key and
+///     payload of each configuration follow, in the ordinal key order of the snapshot.
 /// </summary>
 /// <remarks>
 ///     <para>
-///         The solver configurations are a keyed section rather than a typed field because their types are only known
+///         The solver configurations are a keyed section and not a typed field, because their types are known only
 ///         at runtime. Reading looks each key up in <see cref="StateReader.SolverConfigurations" />, or in the built-in
 ///         registry when the reader has none.
 ///     </para>
 ///     <para>
 ///         A hand-written configuration (one without <see cref="NumosSerializeAttribute" /> members) has no wire format,
 ///         so writing one to anything but a <see cref="StateHashSink" /> throws. The hash takes its own
-///         <see cref="IAtmosSolverConfiguration.ComputeStateHash" /> instead, which keeps a world with one hashable.
+///         <see cref="IAtmosSolverConfiguration.ComputeStateHash" /> instead. A world with such a configuration stays
+///         hashable.
 ///     </para>
 /// </remarks>
 internal readonly struct AtmosConfigSnapshotCodec : IStateCodec<AtmosConfigSnapshot>
@@ -50,8 +51,8 @@ internal readonly struct AtmosConfigSnapshotCodec : IStateCodec<AtmosConfigSnaps
         ReferenceEquals(left, right) || left.SemanticallyEquals(right);
 
     /// <remarks>
-    ///     Orders by state hash. That's only canonical while hashes don't collide, which is fine because nothing sorts
-    ///     configurations; this exists to complete the codec.
+    ///     Orders by state hash. That is canonical only while hashes do not collide. Nothing sorts configurations, so
+    ///     this method only completes the codec.
     /// </remarks>
     public static int Compare(AtmosConfigSnapshot left, AtmosConfigSnapshot right)
     {

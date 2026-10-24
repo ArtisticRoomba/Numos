@@ -71,7 +71,7 @@ public sealed class ReplayWireFormatGoldenTests
     private const string GoldenSolverStateReplayBase64 =
         "TlVNT1MNChoBAAIAAwAAAAEAAACjAAAAAAAAABsAAABHb2xkZW4gc29sdmVyIHN0YXRlIGZpeHR1cmUAgLX39X+fCAwAAABudW1vcy1nb2xkZW4MAAAAMS4wLjAtZ29sZGVuDAAAADEuMC4wLWdvbGRlbgEPAAAAcGhhc2U2Yi1maXh0dXJlAAAAAAAAAAAAAAAAAAAAAAIAAAAAAAAAAQAAAAAAAAABAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAACAAEAYAQAAAAAAAANAAAAAAAAAAAAAAAAAAAAAAAAAHu6qI3UOyppAgAAAAAAAAABAAAAAAAAAM/X+PgBuWscKAQAABjF0hBYAAAAAQAAAFAAAAAGc+APEQAAAA0AAABnb2xkZW4vc29sdmVylqTsHS8AAAArAAAAmHWJFwQAAAAAAIA/FZ8dLAQAAAAAAAAAMndOUwsAAAAHAAAAaW5pdGlhbJFF9xIIAAAAAQAAAAEAAACf05Y5cAAAAAEAAABoAAAANl1sThwAAAAYAAAAS67HLgQAAAAAAAAA19r+WgQAAAABAAAAnwtiYjwAAAA4AAAAw+LUCgQAAAAAAAAAZRVmSgQAAAAEAAAA0M2XWwwAAAABAAAAAQAAAAEAAAAeV3t9BAAAAAoAAAA4HFxCCAAAAAAAAAAAAAAAWuXjSAQAAAAAAAAALx1LUaMBAAAHAAAAMQAAAAZz4A8OAAAACgAAAGV1bGVyLWZsb3c+5IYcAQAAAAFGIAI7AQAAAABjDPU/AQAAAAA9AAAABnPgDxoAAAAWAAAAZXhwbGljaXQtZ2FzLXRyYW5zcG9ydD7khhwBAAAAAUYgAjsBAAAAAGMM9T8BAAAAADUAAAAGc+APEgAAAA4AAAB0aGVybW9keW5hbWljcz7khhwBAAAAAUYgAjsBAAAAAGMM9T8BAAAAAEEAAAAGc+APHgAAABoAAABleHBsaWNpdC10aGVybWFsLXRyYW5zcG9ydD7khhwBAAAAAUYgAjsBAAAAAGMM9T8BAAAAADcAAAAGc+APFAAAABAAAAB0aGVybWFsLWJvdW5kYXJ5PuSGHAEAAAABRiACOwEAAAAAYwz1PwEAAAAANAAAAAZz4A8RAAAADQAAAGdhcy1yZWFjdGlvbnM+5IYcAQAAAAFGIAI7AQAAAABjDPU/AQAAAAA0AAAABnPgDxEAAAANAAAAZ29sZGVuL3NvbHZlcj7khhwBAAAAAUYgAjsBAAAAAGMM9T8BAAAAASo0f2IkAAAAIAAAAIeX7yUIAAAAAAAAAAAAAADE5fxdCAAAAAAAAAAAAAAA5+ASakUBAAA9AQAA4RBVCwQAAAB+Uu08OQhuFAQAAACA5sVHIbvwGgQAAAAAAIA/feVwJwQAAAAAAIA/EvGFOAQAAAAzk5JDUPSGOgQAAAAMSqZB4pKHOwQAAAAAAGBAdULCPgQAAADNzCxAy8NJSAQAAABkAAAA+vtRTwQAAAAAAAA+m7djTwQAAADNzEw9BLHpUwQAAAAzk5JDfcJhVQQAAAAAAAA/RN64WQQAAAAAAHBBqNmZZgQAAAAUAAAAWI/sbAQAAAAK1yM+OTY4fGkAAAABAAAAYQAAANXF1QUEAAAACtejPAZz4A8IAAAAAQMAAABBaXJGNXQdBAAAAAAAAACpxUEtBAAAAAAAAABlNV46BAAAAAxKpkE5Z1Q8AQAAAAAce7pZBAAAAAAAAADoSxB8BAAAAAAAAAD+xKV/BAAAAArXozwAAAAAAwABAHkAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIAAAAAAAAAAQAAAAAAAAABAAAAAQAAAAAAAAABAAAAAAAAAAkAPwAAAA0AAABnb2xkZW4vc29sdmVyKgAAAJh1iRcEAAAAAAAgQBWfHSwEAAAAAQAAADJ3TlMKAAAABgAAAGVkaXRlZA==";
 
-    // Process-wide registrations; the keys are part of the pinned bytes.
+    // Process-wide registrations. The keys are part of the pinned bytes.
     private static readonly ChunkField<float> GoldenHeat = ChunkField<float>.Register("golden/chunk-field/heat", rollback: true);
     private static readonly ChunkField<int> GoldenCounts = ChunkField<int>.Register("golden/chunk-field/counts", rollback: true, length: 3);
 
@@ -186,7 +186,7 @@ public sealed class ReplayWireFormatGoldenTests
     [Test]
     public void ChunkFieldReplay_GoldenBytesDecodeBothFields()
     {
-        // Loading needs the fields registered first; reading the statics runs their registration.
+        // Loading needs the fields registered first. Reading the statics runs their registration.
         Assert.That(new[] { GoldenHeat.Rollback, GoldenCounts.Rollback }, Is.All.True);
         var restored = NumosWorldReplaySerializer.Deserialize(new MemoryStream(Convert.FromBase64String(GoldenChunkFieldReplayBase64)));
         var arrays = restored.Replay.InitialCheckpoint.Simulations.Single().Checkpoint.Chunks.Single().SolverArrays;
@@ -345,8 +345,8 @@ public sealed class ReplayWireFormatGoldenTests
         return new NumosWorldReplayDocument(metadata, timeline.CaptureReplay());
     }
 
-    // One reaction of each kind, every field set to something distinct, and a speed factor so the nested set and
-    // positional record are on the wire too. The reactions need temperatures no voxel reaches, so ticking leaves the
+    // One reaction of each kind, with every field set to something distinct. A speed factor puts the nested set and
+    // positional record on the wire too. The reactions need temperatures no voxel reaches, so ticking leaves the
     // fixture's gas untouched.
     private static GasReactionConfig Reactions(GasProperties air, GasProperties fuel, float scale)
     {

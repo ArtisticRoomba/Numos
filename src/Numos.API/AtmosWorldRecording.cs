@@ -233,8 +233,8 @@ public sealed record SetAtmosWorldSolverLayoutOperation : AtmosWorldOperation
 /// <param name="Name">The stable registered solver name.</param>
 /// <param name="State">The solver's complete state payload, in the same encoding as its checkpoint entry.</param>
 /// <remarks>
-///     Numos records this on its own: it compares a hash of each stateful solver with the one it took at the end of
-///     the last tick, and records the new state when they differ. That happens at the next boundary (before a tick,
+///     Numos records this on its own. It compares a hash of each stateful solver with the one it took at the end of
+///     the last tick. When they differ, it records the new state. That happens at the next boundary (before a tick,
 ///     a checkpoint capture, or the recording being stopped or copied), so the operation lands after any other
 ///     operations from the same idle window.
 /// </remarks>

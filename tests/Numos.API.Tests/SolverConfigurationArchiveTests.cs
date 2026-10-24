@@ -107,7 +107,7 @@ public sealed partial class SolverConfigurationArchiveTests
     {
         AtmosWorldReplayArchive archive = RecordWorld(new FireSettings(600f, Mode.Flame, []));
 
-        // Same length, so only the key changes; nothing claims it.
+        // Same length, so only the key changes. Nothing claims it.
         byte[] bytes = Replace(Serialize(archive), "tests/fire"u8.ToArray(), "tests/fixe"u8.ToArray(), 1);
         Assert.That(
             () => NumosWorldReplaySerializer.Deserialize(new MemoryStream(bytes)),

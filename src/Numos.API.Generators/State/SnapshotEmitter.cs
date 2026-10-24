@@ -83,7 +83,7 @@ internal static class SnapshotEmitter
         string type = member.Shape.TypeExpression;
         string backing = SnapshotGenerator.BackingField(member.Name);
 
-        // Capture and the reader always assign the member; this only keeps the constructor cheap and non-null.
+        // Capture and the reader always assign the member. This only keeps the constructor cheap and non-null.
         string initializer = member.IsList
             ? " = " + StateArray + "<" + member.ElementType + ">.Empty"
             : member.Shape.Kind == StateShapeKind.String

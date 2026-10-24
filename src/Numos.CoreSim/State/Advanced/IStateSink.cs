@@ -8,18 +8,18 @@ namespace Numos.CoreSim.State.Advanced;
 /// <remarks>
 ///     <para>
 ///         Generated <see cref="INumosState{TSelf}.WriteState{TSink}" /> walkers drive a sink, and one walk serves
-///         every consumer: <see cref="StateHashSink" /> hashes it, and a binary sink writes it. Because hash and bytes
-///         come from the same calls, a field can't reach one and miss the other.
+///         every consumer. <see cref="StateHashSink" /> hashes it, and a binary sink writes it. Hash and bytes come from
+///         the same calls, so a field cannot reach one and miss the other.
 ///     </para>
 ///     <para>
-///         The call shape is fixed. Each value is bracketed by <see cref="BeginObject" /> and <see cref="EndObject" />;
-///         inside it, each field is <see cref="BeginField" />, its payload, then <see cref="EndField" />, in ascending
-///         id order. Collections write <see cref="WriteCount" /> followed by their elements, and a nullable value
+///         The call shape is fixed. Each value is bracketed by <see cref="BeginObject" /> and <see cref="EndObject" />.
+///         Inside it, each field is <see cref="BeginField" />, its payload, then <see cref="EndField" />, in ascending
+///         id order. Collections write <see cref="WriteCount" /> followed by their elements. A nullable value
 ///         writes a <see cref="WriteBoolean" /> presence flag before the value. A binary sink can therefore
-///         length-prefix each field and object, and a reader can skip ids it doesn't know.
+///         length-prefix each field and object, and a reader can skip ids it does not know.
 ///     </para>
 ///     <para>
-///         Implement this on a struct and pass it by <see langword="ref" />; walkers take
+///         Implement this on a struct and pass it by <see langword="ref" />. Walkers take
 ///         <c>where TSink : struct, IStateSink</c>, so calls are constrained and never box.
 ///     </para>
 /// </remarks>
@@ -128,12 +128,12 @@ public interface IStateSink
     ///     Writes a run of fixed-size elements in one call, each little-endian, with no count.
     /// </summary>
     /// <param name="elements">The elements' bytes in native byte order.</param>
-    /// <param name="elementSize">The size of one element in bytes; <paramref name="elements" /> is a whole number of them.</param>
+    /// <param name="elementSize">The size of one element in bytes. <paramref name="elements" /> is a whole number of them.</param>
     /// <remarks>
     ///     The bulk path for primitive arrays such as per-voxel chunk data. It produces the same bytes as writing each
-    ///     element on its own, so it's only a speedup. Sinks swap each element's bytes on a big-endian host, which is
-    ///     only correct for primitives; that's all generated code passes here. Callers that write a collection still
-    ///     write its count first.
+    ///     element on its own, so it is only a speedup. Sinks swap the bytes of each element on a big-endian host. That
+    ///     is correct only for primitives, and generated code passes nothing else here. Callers that write a collection
+    ///     still write its count first.
     /// </remarks>
     void WriteElements(ReadOnlySpan<byte> elements, int elementSize);
 }
@@ -142,10 +142,10 @@ public interface IStateSink
 ///     An <see cref="IStateSink" /> that folds everything it receives into a 64-bit FNV-1a state hash.
 /// </summary>
 /// <remarks>
-///     The hash sees exactly the bytes <see cref="StateBinarySink" /> writes, minus the field and object lengths:
-///     the same field ids, counts, presence flags, primitives at their own width little-endian, floats by their raw
-///     bits, and strings as UTF-8 with a byte length. The lengths follow from the content, so leaving them out loses
-///     nothing, and it means hashing never has to buffer.
+///     The hash sees exactly the bytes <see cref="StateBinarySink" /> writes, minus the field and object lengths.
+///     That means the same field ids, counts, and presence flags. Primitives are little-endian at their own width,
+///     floats are their raw bits, and strings are UTF-8 with a byte length. The lengths follow from the content, so
+///     leaving them out loses nothing. It also means hashing never has to buffer.
 /// </remarks>
 /// <example>
 ///     <code>

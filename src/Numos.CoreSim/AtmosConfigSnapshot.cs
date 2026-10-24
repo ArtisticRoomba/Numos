@@ -25,8 +25,8 @@ public sealed class AtmosConfigSnapshot : IAtmosConfig
         ArgumentNullException.ThrowIfNull(source);
         source.ValidateGasRegistry();
 
-        // The normalized values live in a private AtmosConfig that nothing else references, so the snapshot gets the
-        // config's generated equality, hash, and wire code without a second field list.
+        // The normalized values live in a private AtmosConfig that nothing else references. The snapshot therefore gets
+        // the generated equality, hash, and wire code of the config without a second field list.
         var fields = new AtmosConfig
         {
             GlobalTemperature = FloatMath.IsFinitePositive(source.GlobalTemperature)

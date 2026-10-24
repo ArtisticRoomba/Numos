@@ -139,7 +139,7 @@ public sealed partial class StateWireFormatTests
     {
         Assert.Multiple(() =>
         {
-            // 0xe40c292c is the published FNV-1a test vector for "a"; the sign bit is cleared.
+            // 0xe40c292c is the published FNV-1a test vector for "a". The sign bit is cleared.
             Assert.That(NumosState.FieldId("a"), Is.EqualTo(0x640c292c));
             Assert.That(NumosState.FieldId("Rate"), Is.EqualTo(783280263));
             Assert.That(NumosState.FieldId("Count"), Is.EqualTo(1642576020));
@@ -208,8 +208,8 @@ public sealed partial class StateWireFormatTests
         byte[] bytes = Write(new Settings { Rate = 1f, Label = "abc", Inner = new Inner(1, "n"), Count = 2 });
         Assert.That(() => Read<Settings>(bytes[..^1]), Throws.TypeOf<InvalidDataException>());
 
-        // A cut on a field boundary is just an older payload with fewer fields; anywhere else must be corrupt data,
-        // never an index or overflow exception.
+        // A cut on a field boundary is just an older payload with fewer fields. A cut anywhere else must be corrupt
+        // data, never an index or overflow exception.
         for (int length = 0; length < bytes.Length; length++)
         {
             byte[] truncated = bytes[..length];

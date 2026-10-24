@@ -116,7 +116,7 @@ public sealed class GasReactionStateTests
     [Test]
     public void GasReferences_CompareByNameOnly()
     {
-        // The registry owns a gas's physical properties; a reaction only names it.
+        // The registry owns the physical properties of a gas. A reaction only names it.
         var heavy = GasA with { MolarHeatCapacityAtConstantVolume = 42f };
         var first = new GasReactionConfig(standardReactions: [Standard((GasA, 1f))]);
         var second = new GasReactionConfig(standardReactions: [Standard((heavy, 1f))]);

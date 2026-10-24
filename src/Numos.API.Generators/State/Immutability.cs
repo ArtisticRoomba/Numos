@@ -7,9 +7,9 @@ namespace Numos.API.Generators.State;
 ///     can be its own snapshot.
 /// </summary>
 /// <remarks>
-///     Deliberately conservative. <c>IReadOnlyList&lt;T&gt;</c> and the other read-only interfaces don't count, since
-///     the list behind them can still change; anything not recognized here makes the snapshot a copy, which is always
-///     correct, just slower.
+///     Deliberately conservative. <c>IReadOnlyList&lt;T&gt;</c> and the other read-only interfaces do not count,
+///     because the list behind them can still change. Anything not recognized here makes the snapshot a copy. A copy
+///     is always correct, just slower.
 /// </remarks>
 internal static class Immutability
 {
@@ -20,7 +20,7 @@ internal static class Immutability
 
     private static bool IsImmutable(ITypeSymbol type, HashSet<ITypeSymbol> visiting)
     {
-        // Quantity aliases are error types inside a project with a units catalog; they're all primitives.
+        // Quantity aliases are error types inside a project with a units catalog. They are all primitives.
         if (type.TypeKind == TypeKind.Error)
             return true;
 

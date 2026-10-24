@@ -519,8 +519,8 @@ public sealed class ChunkDataGeneratorTests
             Assembly assembly = context.LoadFromStream(stream);
             MethodInfo touch = assembly.GetType("Conflict.Other", throwOnError: true)!.GetMethod("Touch")!;
 
-            // The runtime wraps a module initializer failure in a TypeInitializationException for <Module>; the
-            // generated code puts the declaring type and the registry's reason in the exception inside it.
+            // The runtime wraps a module initializer failure in a TypeInitializationException for <Module>. The
+            // generated code puts the declaring type and the reason of the registry in the inner exception.
             var thrown = Assert.Throws<TargetInvocationException>(() => touch.Invoke(null, null));
             Assert.That(thrown!.InnerException, Is.TypeOf<TypeInitializationException>());
             Exception? inner = thrown.InnerException!.InnerException;

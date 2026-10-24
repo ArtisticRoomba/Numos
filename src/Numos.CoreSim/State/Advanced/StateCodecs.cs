@@ -37,14 +37,14 @@ public interface IStateCodec<T>
     /// </summary>
     /// <param name="left">The first value.</param>
     /// <param name="right">The second value.</param>
-    /// <returns>Negative, zero, or positive; zero exactly when <see cref="StateEquals" /> is true.</returns>
+    /// <returns>Negative, zero, or positive. The result is zero exactly when <see cref="StateEquals" /> is true.</returns>
     static abstract int Compare(T left, T right);
 
     /// <summary>
     ///     Reads a value written by <see cref="Write{TSink}" /> through a <see cref="StateBinarySink" />.
     /// </summary>
     /// <param name="reader">The reader, positioned at the value.</param>
-    /// <param name="gases">Resolves gas references by name; may be <see langword="null" /> when none are expected.</param>
+    /// <param name="gases">Resolves gas references by name. May be <see langword="null" /> when none are expected.</param>
     /// <returns>The value.</returns>
     static abstract T Read(ref StateReader reader, IGasRegistry? gases);
 
@@ -677,9 +677,9 @@ public static class StateCodecs
     /// <typeparam name="T">The primitive element type.</typeparam>
     /// <typeparam name="TCodec">The element codec, which orders elements the same way it would in a plain list.</typeparam>
     /// <remarks>
-    ///     The bytes and the hash are identical to <see cref="List{TList, T, TCodec}" />; the generator picks this codec
-    ///     for primitive elements because per-voxel chunk arrays go through it on every checkpoint hash. Booleans stay
-    ///     on the per-element path so the stored byte is always 0 or 1.
+    ///     The bytes and the hash are identical to <see cref="List{TList, T, TCodec}" />. The generator picks this codec
+    ///     for primitive elements, because per-voxel chunk arrays go through it on every checkpoint hash. Booleans stay
+    ///     on the per-element path, so the stored byte is always 0 or 1.
     /// </remarks>
     public readonly struct UnmanagedList<TList, T, TCodec> : IStateCodec<TList>
         where TList : IReadOnlyList<T>
