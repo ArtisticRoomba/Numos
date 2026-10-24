@@ -650,6 +650,10 @@ public partial class SimulationViewer
         if (inspecting)
             ClearConfigurationDrafts();
 
+        if (ImGui.CollapsingHeader("Solver Pipeline", ImGuiTreeNodeFlags.DefaultOpen))
+            RenderSolverPipelineSection(inspecting);
+
+        ImGui.Spacing();
         if (ImGui.CollapsingHeader("AtmosConfig", ImGuiTreeNodeFlags.DefaultOpen))
         {
             ImGui.BeginDisabled(inspecting);
@@ -810,9 +814,6 @@ public partial class SimulationViewer
                 ConfigDomain.Positive,
                 inspecting,
                 static (config, value) => config.ReferenceMolarMass = value);
-
-            ImGui.SeparatorText("Euler flow");
-            RenderEulerFlowSettings(inspecting);
         }
 
         ImGui.Spacing();

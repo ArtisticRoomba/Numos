@@ -107,6 +107,8 @@ public partial class SimulationViewer
         _gasRegistryFeedback = null;
         _newGasFeedback = null;
         _configurationFeedback = null;
+        _solverFeedback = null;
+        _solverAddDraft = null;
         ClearConfigurationDrafts();
     }
 

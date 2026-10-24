@@ -203,9 +203,8 @@ public partial class SimulationViewer
     private static readonly string[] TransportModelLabels = ["Legacy (pressure relaxation)", "Euler (compressible flow)"];
 
     /// <summary>
-    ///     The model is chosen here rather than on the running project because the Viewer records the world from
-    ///     the moment it exists, and <see cref="AtmosWorldSolverPipeline.ResetToDefaults(AtmosTransportModel)" />
-    ///     refuses to swap stages under a recording.
+    ///     Picks the preset that fills the stage list of a new project. The Solver Pipeline panel changes the stages
+    ///     afterwards.
     /// </summary>
     private void RenderTransportModelCombo()
     {
@@ -215,8 +214,8 @@ public partial class SimulationViewer
 
         ImGuiExtensions.QuestionTooltip(
             "Which built-in stages move gas between voxels. Euler solves momentum and energy with CFL substeps, " +
-            "carries per-voxel velocity, and reports the Flow readout in this panel. The choice is fixed for the " +
-            "life of the project because the stage list is part of the recording.");
+            "carries per-voxel velocity, and reports the Flow readout in this panel. This sets the initial stages. " +
+            "You can change the stages later in Solver Pipeline.");
     }
 
     /// <summary>

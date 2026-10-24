@@ -14,8 +14,8 @@ namespace Numos.Workbench;
 /// <param name="ChunkDepth">Voxels per chunk along Z for the first simulation.</param>
 /// <param name="IncludeDefaultGases">Whether the gas registry starts with <see cref="DefaultGases" />.</param>
 /// <param name="TransportModel">
-///     The built-in stages that move gas between voxels. The choice is fixed for the project because the stage list
-///     is part of the recording.
+///     The preset that fills the initial stage list. <see cref="WorkbenchSession.ApplyTransportPreset" /> and
+///     <see cref="WorkbenchSession.SetSolverLayout" /> change the stages later, and the timeline records each change.
 /// </param>
 public readonly record struct WorkbenchProjectOptions(
     string? Name,
