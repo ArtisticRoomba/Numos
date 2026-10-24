@@ -26,6 +26,8 @@ internal sealed record ChunkDataPropertyModel(
     string? Key,
     bool Rollback,
     int? Length,
+    bool ClearOnSleep,
+    bool ClearOnVacuum,
     string AccessorName);
 
 /// <summary>

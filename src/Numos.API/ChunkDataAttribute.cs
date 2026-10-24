@@ -118,6 +118,20 @@ public sealed class ChunkDataAttribute : Attribute
     public int Length { get; set; }
 
     /// <summary>
+    ///     Gets or sets whether the field's whole array resets to default values when the chunk goes to sleep.
+    /// </summary>
+    public bool ClearOnSleep { get; set; }
+
+    /// <summary>
+    ///     Gets or sets whether vacuuming resets the field's values to default.
+    /// </summary>
+    /// <remarks>
+    ///     Vacuuming one voxel resets only that voxel's element of a per-voxel field.
+    ///     Vacuuming a whole chunk resets the whole array, including a fixed-length one.
+    /// </remarks>
+    public bool ClearOnVacuum { get; set; }
+
+    /// <summary>
     ///     Gets or sets the name of the generated chunk accessor, when it should differ from the property name.
     /// </summary>
     /// <remarks>

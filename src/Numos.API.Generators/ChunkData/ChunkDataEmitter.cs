@@ -83,6 +83,8 @@ internal static class ChunkDataEmitter
                 (model.Rollback ? "true" : "false") +
                 ", length: " +
                 length +
+                (model.ClearOnSleep ? ", clearOnSleep: true" : "") +
+                (model.ClearOnVacuum ? ", clearOnVacuum: true" : "") +
                 ");");
         }
 

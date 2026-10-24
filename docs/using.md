@@ -288,6 +288,10 @@ with the gas. Without it, the field is scratch space that starts zeroed after ev
 rollback field's key, so you must give the key explicitly. Treat it like a save-format name and prefix it with your
 mod.
 
+`ClearOnSleep = true` resets the field's whole array when the chunk goes to sleep. `ClearOnVacuum = true` resets a
+voxel's element when that voxel becomes vacuum. Use them for scratch state that must not outlive the gas in a voxel.
+A fixed-length field ignores single-voxel vacuums and resets only when the whole chunk becomes vacuum.
+
 The accessors are C# 14 extension properties. A project pinned to an older `LangVersion` gets a compile error. The
 [technical documentation](atmospherics_technical_documentation.md#123-per-chunk-solver-state-with-chunkfieldt) covers
 keys, allocation, the generator's diagnostics, and the hand-written `ChunkField<T>.Register` equivalent.

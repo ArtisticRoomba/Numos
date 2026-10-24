@@ -1055,9 +1055,9 @@ The field registry is process-wide. Every simulation, world, and loaded assembly
 mod is the same field everywhere. Namespace keys (`my-mod/fire/exposure`, not `exposure`).
 
 Registering a key that already exists returns the same `ChunkField<T>` if the definition matches in element type,
-length, and rollback policy. Any difference throws `InvalidOperationException` that names both definitions. Two
-solvers cannot share incompatible storage. Each key holds a slot for the life of the process, so register fields once,
-not per tick or per simulation.
+length, rollback policy, and clear flags. Any difference throws `InvalidOperationException` that names both
+definitions. Two solvers cannot share incompatible storage. Each key holds a slot for the life of the process, so
+register fields once, not per tick or per simulation.
 
 #### Rollback keys are a compatibility contract
 
@@ -1114,6 +1114,9 @@ The attribute maps onto `Register` like this:
 - `Rollback` is `rollback:`, with the same unmanaged-element rule.
 - `Length` makes a fixed-size field. The generator checks whether `Length` was assigned, not its value. Without it
   the field is per-voxel, and `Length = 0` is a valid empty field.
+- `ClearOnSleep` is `clearOnSleep:`. The chunk resets the whole array when it goes to sleep.
+- `ClearOnVacuum` is `clearOnVacuum:`. Vacuuming a voxel resets that voxel's element of a per-voxel field.
+  Vacuuming a whole chunk resets any opted-in array, including a fixed-length one.
 - `AccessorName` renames the generated accessor. Use it when the property name clashes with a member of
   `AtmosSolverChunk` or with another field's accessor in the same namespace.
 

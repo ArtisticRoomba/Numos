@@ -189,6 +189,8 @@ public sealed class ChunkDataGenerator : IIncrementalGenerator
 
         bool rollback = false;
         int? length = null;
+        bool clearOnSleep = false;
+        bool clearOnVacuum = false;
         string? accessorName = null;
         foreach (KeyValuePair<string, TypedConstant> argument in attribute.NamedArguments)
         {
@@ -199,6 +201,12 @@ public sealed class ChunkDataGenerator : IIncrementalGenerator
                     break;
                 case "Length" when argument.Value.Value is int value:
                     length = value;
+                    break;
+                case "ClearOnSleep" when argument.Value.Value is bool value:
+                    clearOnSleep = value;
+                    break;
+                case "ClearOnVacuum" when argument.Value.Value is bool value:
+                    clearOnVacuum = value;
                     break;
                 case "AccessorName":
                     accessorName = argument.Value.Value as string;
@@ -255,6 +263,8 @@ public sealed class ChunkDataGenerator : IIncrementalGenerator
             key,
             rollback,
             length,
+            clearOnSleep,
+            clearOnVacuum,
             accessorName ?? property.Name);
 
         return new ChunkDataDeclaration(model, location, diagnostics.ToEquatableArray());
@@ -393,7 +403,9 @@ public sealed class ChunkDataGenerator : IIncrementalGenerator
             bool identical = declarations.All(declaration =>
                 declaration.Property.ElementTypeIdentity == first.ElementTypeIdentity &&
                 declaration.Property.Rollback == first.Rollback &&
-                declaration.Property.Length == first.Length);
+                declaration.Property.Length == first.Length &&
+                declaration.Property.ClearOnSleep == first.ClearOnSleep &&
+                declaration.Property.ClearOnVacuum == first.ClearOnVacuum);
 
             if (identical)
             {
