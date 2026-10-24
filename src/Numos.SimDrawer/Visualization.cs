@@ -141,6 +141,26 @@ public static class BuiltInVisualizationIds
     ///     Gets the speed visualization ID.
     /// </summary>
     public const string Speed = "speed";
+    /// <summary>
+    ///     Gets the mass-density visualization ID.
+    /// </summary>
+    public const string Density = "density";
+    /// <summary>
+    ///     Gets the x-velocity visualization ID.
+    /// </summary>
+    public const string VelocityX = "velocity-x";
+    /// <summary>
+    ///     Gets the y-velocity visualization ID.
+    /// </summary>
+    public const string VelocityY = "velocity-y";
+    /// <summary>
+    ///     Gets the z-velocity visualization ID.
+    /// </summary>
+    public const string VelocityZ = "velocity-z";
+    /// <summary>
+    ///     Gets the numerical-schlieren visualization ID.
+    /// </summary>
+    public const string Schlieren = "schlieren";
 }
 
 /// <summary>
@@ -229,6 +249,18 @@ public readonly record struct VoxelSample(
     ///     Gets the magnitude of the velocity, in metres per second (m/s). NaN when any component is NaN.
     /// </summary>
     public float Speed => MathF.Sqrt(VelocityX * VelocityX + VelocityY * VelocityY + VelocityZ * VelocityZ);
+
+    /// <summary>
+    ///     Gets the mass density in kilograms per cubic metre (kg/m³). NaN unless the visualization requires
+    ///     <see cref="VisualizationDataRequirements.Density" /> or <see cref="VisualizationDataRequirements.DensityGradient" />.
+    /// </summary>
+    public float Density { get; init; } = float.NaN;
+
+    /// <summary>
+    ///     Gets the density gradient magnitude in kilograms per quartic metre (kg/m⁴). NaN unless the visualization
+    ///     requires <see cref="VisualizationDataRequirements.DensityGradient" />, or when the voxel has no air.
+    /// </summary>
+    public float DensityGradient { get; init; } = float.NaN;
 }
 
 /// <summary>
@@ -258,9 +290,45 @@ public enum VisualizationDataRequirements
     /// </summary>
     Velocity = 1 << 3,
     /// <summary>
+    ///     Requires the mass density, which the builder derives from the gas channels.
+    /// </summary>
+    Density = 1 << 4,
+    /// <summary>
+    ///     Requires the density gradient magnitude. It reads the six neighboring voxels, so a neighbor chunk change
+    ///     invalidates the chunk's mapping. This implies <see cref="Density" />.
+    /// </summary>
+    DensityGradient = 1 << 5,
+    /// <summary>
     ///     Requires every supported source field.
     /// </summary>
-    All = Temperature | Pressure | Gases | Velocity
+    All = Temperature | Pressure | Gases | Velocity | Density | DensityGradient
+}
+
+/// <summary>
+///     Chooses how the builder picks the automatic range of a visualization.
+/// </summary>
+public enum VisualizationRangeSource
+{
+    /// <summary>
+    ///     Spans the finite temperature, pressure, speed, and density values the visualization requires.
+    /// </summary>
+    Default,
+    /// <summary>
+    ///     Spans the x-velocity from its negative to its positive extreme, so zero is the midpoint.
+    /// </summary>
+    SymmetricVelocityX,
+    /// <summary>
+    ///     Spans the y-velocity from its negative to its positive extreme, so zero is the midpoint.
+    /// </summary>
+    SymmetricVelocityY,
+    /// <summary>
+    ///     Spans the z-velocity from its negative to its positive extreme, so zero is the midpoint.
+    /// </summary>
+    SymmetricVelocityZ,
+    /// <summary>
+    ///     Spans zero to the largest density gradient magnitude.
+    /// </summary>
+    DensityGradientFromZero
 }
 
 /// <summary>
@@ -309,6 +377,11 @@ public interface IVisualizationMethod
     ///     solids and void cells instead of inheriting the default air-only domain.
     /// </summary>
     VisualizationCellDomain CellDomain => VisualizationCellDomain.AirCells;
+
+    /// <summary>
+    ///     Chooses how the builder computes the automatic range. Defaults to the span of the required values.
+    /// </summary>
+    VisualizationRangeSource RangeSource => VisualizationRangeSource.Default;
 
     /// <summary>
     ///     Attempts to map a voxel sample to a display color.
@@ -407,9 +480,13 @@ public sealed class VisualizationRegistry
 
     /// <summary>
     ///     Creates a registry containing the built-in visualizations, in the order temperature, pressure, gas
-    ///     composition, active air, voxel classification, speed.
+    ///     composition, active air, voxel classification, speed, density, velocity x, velocity y, velocity z,
+    ///     schlieren.
     /// </summary>
-    /// <param name="config">Simulation configuration; the gas-composition visualization reads its gas registry.</param>
+    /// <param name="config">
+    ///     Simulation configuration; the gas-composition visualization reads its gas registry, and the density and
+    ///     schlieren mappings depend on its molar masses and voxel volume.
+    /// </param>
     /// <returns>The configured registry.</returns>
     public static VisualizationRegistry CreateDefault(AtmosConfig config)
     {
@@ -422,6 +499,26 @@ public sealed class VisualizationRegistry
         registry.Register(new ActiveOnlyVisualization());
         registry.Register(new VoxelClassificationVisualization());
         registry.Register(new SpeedVisualization());
+        registry.Register(new DensityVisualization(config));
+        registry.Register(new VelocityComponentVisualization(
+            BuiltInVisualizationIds.VelocityX,
+            "Velocity X",
+            VisualizationRangeSource.SymmetricVelocityX,
+            static sample => sample.VelocityX));
+
+        registry.Register(new VelocityComponentVisualization(
+            BuiltInVisualizationIds.VelocityY,
+            "Velocity Y",
+            VisualizationRangeSource.SymmetricVelocityY,
+            static sample => sample.VelocityY));
+
+        registry.Register(new VelocityComponentVisualization(
+            BuiltInVisualizationIds.VelocityZ,
+            "Velocity Z",
+            VisualizationRangeSource.SymmetricVelocityZ,
+            static sample => sample.VelocityZ));
+
+        registry.Register(new SchlierenVisualization(config));
         return registry;
     }
 
@@ -474,6 +571,155 @@ public sealed class VisualizationRegistry
             4 => new ColorRgba(t, p, value),
             _ => new ColorRgba(value, p, q)
         };
+    }
+
+    private static ulong DensityMappingRevision(AtmosConfig config)
+    {
+        const ulong offsetBasis = 14695981039346656037UL;
+        const ulong prime = 1099511628211UL;
+        ulong hash = offsetBasis;
+        hash ^= BitConverter.SingleToUInt32Bits(config.GetVoxelVolume());
+        hash *= prime;
+        for (int gasId = 0; gasId < config.GasRegistry.Count; gasId++)
+        {
+            hash ^= BitConverter.SingleToUInt32Bits(config.GetMolarMass(gasId));
+            hash *= prime;
+        }
+
+        hash ^= unchecked((uint)config.GasRegistry.Count);
+        return hash * prime;
+    }
+
+    private static VisualizationLegend CreateThreeStopLegend(
+        string title,
+        string units,
+        VisualizationRange range,
+        (ColorRgba Low, ColorRgba Middle, ColorRgba High) colors)
+    {
+        float midpoint = range.Minimum + (range.Maximum - range.Minimum) * 0.5f;
+        return new VisualizationLegend(
+            title,
+            units,
+            VisualizationLegendKind.Gradient,
+            [
+                new VisualizationLegendEntry($"{range.Minimum:G6} {units}", colors.Low, range.Minimum),
+                new VisualizationLegendEntry($"{midpoint:G6} {units}", colors.Middle, midpoint),
+                new VisualizationLegendEntry($"{range.Maximum:G6} {units}", colors.High, range.Maximum)
+            ]);
+    }
+
+    private sealed class DensityVisualization(AtmosConfig config) : IVisualizationMethod
+    {
+        private readonly static ColorRgba Thin = new(0.05f, 0.03f, 0.25f);
+        private readonly static ColorRgba Medium = new(0.1f, 0.65f, 0.55f);
+        private readonly static ColorRgba Dense = new(1f, 0.95f, 0.45f);
+
+        public string Id => BuiltInVisualizationIds.Density;
+
+        public string DisplayName => "Density";
+
+        public ulong MappingRevision => DensityMappingRevision(config);
+
+        public VisualizationDataRequirements RequiredData => VisualizationDataRequirements.Density;
+
+        public bool TryGetColor(in VoxelSample sample, out ColorRgba color)
+        {
+            float normalized = Normalize(sample.Density, sample.Range);
+            color = normalized < 0.5f
+                ? ColorRgba.Lerp(Thin, Medium, normalized * 2f)
+                : ColorRgba.Lerp(Medium, Dense, (normalized - 0.5f) * 2f);
+
+            return true;
+        }
+
+        public VisualizationLegend CreateLegend(IReadOnlyCollection<int> activeGasIds)
+        {
+            return CreateLegend(activeGasIds, VisualizationRange.Default);
+        }
+
+        public VisualizationLegend CreateLegend(IReadOnlyCollection<int> activeGasIds, VisualizationRange range)
+        {
+            return CreateThreeStopLegend("Density", "kg/m³", range, (Thin, Medium, Dense));
+        }
+    }
+
+    private sealed class VelocityComponentVisualization(
+        string id,
+        string displayName,
+        VisualizationRangeSource rangeSource,
+        Func<VoxelSample, float> select) : IVisualizationMethod
+    {
+        private readonly static ColorRgba Negative = new(0.1f, 0.25f, 0.85f);
+        private readonly static ColorRgba Zero = new(0.96f, 0.96f, 0.96f);
+        private readonly static ColorRgba Positive = new(0.85f, 0.15f, 0.1f);
+
+        public string Id => id;
+
+        public string DisplayName => displayName;
+
+        public VisualizationDataRequirements RequiredData => VisualizationDataRequirements.Velocity;
+
+        public VisualizationRangeSource RangeSource => rangeSource;
+
+        public bool TryGetColor(in VoxelSample sample, out ColorRgba color)
+        {
+            // The range is symmetric by default, but a manual range can be lopsided. Zero maps to the midpoint
+            // color only when the range is symmetric.
+            float normalized = Normalize(select(sample), sample.Range);
+            color = normalized < 0.5f
+                ? ColorRgba.Lerp(Negative, Zero, normalized * 2f)
+                : ColorRgba.Lerp(Zero, Positive, (normalized - 0.5f) * 2f);
+
+            return true;
+        }
+
+        public VisualizationLegend CreateLegend(IReadOnlyCollection<int> activeGasIds)
+        {
+            return CreateLegend(activeGasIds, new VisualizationRange(-1f, 1f));
+        }
+
+        public VisualizationLegend CreateLegend(IReadOnlyCollection<int> activeGasIds, VisualizationRange range)
+        {
+            return CreateThreeStopLegend(displayName, "m/s", range, (Negative, Zero, Positive));
+        }
+    }
+
+    private sealed class SchlierenVisualization(AtmosConfig config, float steepness = FlowFieldMath.DefaultSchlierenSteepness)
+        : IVisualizationMethod
+    {
+        public string Id => BuiltInVisualizationIds.Schlieren;
+
+        public string DisplayName => "Schlieren";
+
+        public ulong MappingRevision => DensityMappingRevision(config) ^ BitConverter.SingleToUInt32Bits(steepness);
+
+        public VisualizationDataRequirements RequiredData => VisualizationDataRequirements.DensityGradient;
+
+        public VisualizationRangeSource RangeSource => VisualizationRangeSource.DensityGradientFromZero;
+
+        public bool TryGetColor(in VoxelSample sample, out ColorRgba color)
+        {
+            // The range maximum is the gradient that maps to the darkest value.
+            float brightness = FlowFieldMath.Schlieren(sample.DensityGradient, sample.Range.Maximum, steepness);
+            color = new ColorRgba(brightness, brightness, brightness);
+            return float.IsFinite(brightness);
+        }
+
+        public VisualizationLegend CreateLegend(IReadOnlyCollection<int> activeGasIds)
+        {
+            return CreateLegend(activeGasIds, VisualizationRange.Default);
+        }
+
+        public VisualizationLegend CreateLegend(IReadOnlyCollection<int> activeGasIds, VisualizationRange range)
+        {
+            float middle = FlowFieldMath.Schlieren(range.Maximum * 0.5f, range.Maximum, steepness);
+            float dark = FlowFieldMath.Schlieren(range.Maximum, range.Maximum, steepness);
+            return CreateThreeStopLegend(
+                "Density gradient",
+                "kg/m⁴",
+                range with { Minimum = 0f },
+                (new ColorRgba(1f, 1f, 1f), new ColorRgba(middle, middle, middle), new ColorRgba(dark, dark, dark)));
+        }
     }
 
     private sealed class VoxelClassificationVisualization : IVisualizationMethod

@@ -11,6 +11,10 @@ namespace Numos.SimDrawer;
 /// </summary>
 public sealed class SimulationFrameBuilder
 {
+    private const VisualizationDataRequirements FlowFieldRequirements =
+        VisualizationDataRequirements.Density | VisualizationDataRequirements.DensityGradient;
+
+    private readonly AtmosConfig _config;
     private long _nextFrameVersion;
     private int _maxDegreeOfParallelism = Environment.ProcessorCount;
 
@@ -25,6 +29,7 @@ public sealed class SimulationFrameBuilder
     public SimulationFrameBuilder(AtmosConfig config, VisualizationRegistry? visualizations = null)
     {
         ArgumentNullException.ThrowIfNull(config);
+        _config = config;
         Visualizations = visualizations ?? VisualizationRegistry.CreateDefault(config);
         if (Visualizations.Methods.Count == 0)
         {
@@ -59,7 +64,7 @@ public sealed class SimulationFrameBuilder
     /// <param name="visualizationId">Registered visualization ID, compared case-insensitively.</param>
     /// <returns>
     ///     Voxel classification plus whichever of temperature, pressure, gases, and velocity the visualization
-    ///     declares in <see cref="IVisualizationMethod.RequiredData" />.
+    ///     declares in <see cref="IVisualizationMethod.RequiredData" />. Density and density gradient need the gases.
     /// </returns>
     /// <exception cref="KeyNotFoundException">
     ///     No visualization is registered under <paramref name="visualizationId" />.
@@ -74,7 +79,7 @@ public sealed class SimulationFrameBuilder
         if ((visualization.RequiredData & VisualizationDataRequirements.Pressure) != 0)
             fields |= AtmosChunkSnapshotFields.Pressure;
 
-        if ((visualization.RequiredData & VisualizationDataRequirements.Gases) != 0)
+        if ((visualization.RequiredData & (VisualizationDataRequirements.Gases | FlowFieldRequirements)) != 0)
             fields |= AtmosChunkSnapshotFields.Gases;
 
         if ((visualization.RequiredData & VisualizationDataRequirements.Velocity) != 0)
@@ -119,6 +124,10 @@ public sealed class SimulationFrameBuilder
     ///     depending on what the visualization requires. A chunk is reused only when its identity, visualization,
     ///     mapping revision, and snapshot revision all match and the range is unchanged. A range change therefore
     ///     remaps every in-scope chunk.
+    ///     A visualization that requires <see cref="VisualizationDataRequirements.DensityGradient" /> also reads the six
+    ///     face neighbors of each chunk. Such a chunk is reused only when its neighbors match the previous frame too.
+    ///     Include the neighbor snapshots of the chunks in <paramref name="mappingScope" />, otherwise the voxels at
+    ///     the scope edge use one-sided differences.
     /// </remarks>
     public SimulationDrawData BuildSimulation(
         IEnumerable<AtmosChunkSnapshot> snapshots,
@@ -137,12 +146,27 @@ public sealed class SimulationFrameBuilder
 
         var visualization = Visualizations.GetRequired(visualizationId);
         ulong visualizationMappingRevision = visualization.MappingRevision;
+        bool needsGradient = (visualization.RequiredData & VisualizationDataRequirements.DensityGradient) != 0;
+        FlowFieldSet? flowFields = (visualization.RequiredData & FlowFieldRequirements) != 0
+            ? FlowFieldSet.Build(snapshotList, mappingScope, _config, needsGradient)
+            : null;
+
+        Dictionary<Int3, AtmosChunkSnapshot>? snapshotsByPosition = null;
+        if (needsGradient)
+        {
+            snapshotsByPosition = new Dictionary<Int3, AtmosChunkSnapshot>(snapshotList.Count);
+            foreach (var snapshot in snapshotList)
+                snapshotsByPosition[snapshot.GridPosition] = snapshot;
+        }
+
         var range = GetVisualizationRange(
             snapshotList,
-            visualization.RequiredData,
+            visualization,
             resolution,
             automaticRangeOffset,
-            rangeOverride);
+            rangeOverride,
+            flowFields,
+            mappingScope);
 
         bool rangeChanged = previousFrame == null || previousFrame.Visualization.Range != range;
         var chunks = new Dictionary<Int3, ChunkDrawData>();
@@ -176,7 +200,9 @@ public sealed class SimulationFrameBuilder
                     visualizationMappingRevision,
                     snapshot,
                     identity,
-                    out var previousChunk))
+                    out var previousChunk) &&
+                (snapshotsByPosition == null ||
+                 NeighborsUnchanged(previousFrame!, snapshotsByPosition, snapshot.GridPosition)))
             {
                 chunks[snapshot.GridPosition] = previousChunk;
                 continue;
@@ -185,7 +211,7 @@ public sealed class SimulationFrameBuilder
             pending.Add((snapshot, identity));
         }
 
-        BuildPendingChunks(pending, chunks, visualization, visualizationMappingRevision, range);
+        BuildPendingChunks(pending, chunks, visualization, visualizationMappingRevision, range, flowFields);
 
         var legend = visualization.CreateLegend(activeGasIds, range);
         legend.Range = range;
@@ -210,7 +236,8 @@ public sealed class SimulationFrameBuilder
         Dictionary<Int3, ChunkDrawData> destination,
         IVisualizationMethod visualization,
         ulong visualizationMappingRevision,
-        VisualizationRange range)
+        VisualizationRange range,
+        FlowFieldSet? flowFields)
     {
         var built = new ChunkDrawData[pending.Count];
         int parallelism = Math.Min(MaxDegreeOfParallelism, pending.Count);
@@ -227,7 +254,8 @@ public sealed class SimulationFrameBuilder
                         pending[index].Identity,
                         visualization,
                         visualizationMappingRevision,
-                        range));
+                        range,
+                        flowFields));
             }
             catch (AggregateException exception) when (exception.InnerExceptions.Count > 0)
             {
@@ -244,7 +272,8 @@ public sealed class SimulationFrameBuilder
                     pending[index].Identity,
                     visualization,
                     visualizationMappingRevision,
-                    range);
+                    range,
+                    flowFields);
             }
         }
 
@@ -254,11 +283,14 @@ public sealed class SimulationFrameBuilder
 
     private static VisualizationRange GetVisualizationRange(
         IEnumerable<AtmosChunkSnapshot> snapshots,
-        VisualizationDataRequirements requirements,
+        IVisualizationMethod visualization,
         int resolution,
         float automaticRangeOffset,
-        VisualizationRange? rangeOverride)
+        VisualizationRange? rangeOverride,
+        FlowFieldSet? flowFields,
+        IReadOnlySet<Int3>? scope)
     {
+        var requirements = visualization.RequiredData;
         int safeResolution = Math.Max(resolution, 1);
         if (rangeOverride is { } overrideRange)
         {
@@ -277,8 +309,31 @@ public sealed class SimulationFrameBuilder
             };
         }
 
+        float offset = float.IsFinite(automaticRangeOffset)
+            ? Math.Max(automaticRangeOffset, 0f)
+            : 0f;
+
+        switch (visualization.RangeSource)
+        {
+            case VisualizationRangeSource.DensityGradientFromZero:
+                float gradient = flowFields?.GetMaximumGradient() ?? 0f;
+                return gradient > 0f
+                    ? new VisualizationRange(0f, gradient, safeResolution)
+                    : new VisualizationRange(0f, 1f, safeResolution);
+            case VisualizationRangeSource.SymmetricVelocityX:
+            case VisualizationRangeSource.SymmetricVelocityY:
+            case VisualizationRangeSource.SymmetricVelocityZ:
+                float extreme = GetVelocityExtreme(snapshots, visualization.RangeSource) + offset;
+                return extreme > 0f
+                    ? new VisualizationRange(-extreme, extreme, safeResolution)
+                    : new VisualizationRange(-1f, 1f, safeResolution);
+        }
+
         float minimum = float.PositiveInfinity;
         float maximum = float.NegativeInfinity;
+        if ((requirements & FlowFieldRequirements) != 0)
+            flowFields?.IncludeDensityRange(scope, ref minimum, ref maximum);
+
         foreach (var snapshot in snapshots)
         {
             if ((requirements & VisualizationDataRequirements.Temperature) != 0)
@@ -294,11 +349,32 @@ public sealed class SimulationFrameBuilder
         if (!float.IsFinite(minimum) || !float.IsFinite(maximum))
             return new VisualizationRange(0f, 1f, safeResolution);
 
-        float offset = float.IsFinite(automaticRangeOffset)
-            ? Math.Max(automaticRangeOffset, 0f)
-            : 0f;
-
         return new VisualizationRange(minimum - offset, maximum + offset, safeResolution);
+    }
+
+    private static float GetVelocityExtreme(IEnumerable<AtmosChunkSnapshot> snapshots, VisualizationRangeSource source)
+    {
+        float extreme = 0f;
+        foreach (var snapshot in snapshots)
+        {
+            if (!HasCompleteVelocity(snapshot, out _))
+                continue;
+
+            var component = source switch
+            {
+                VisualizationRangeSource.SymmetricVelocityX => snapshot.VelocityX,
+                VisualizationRangeSource.SymmetricVelocityY => snapshot.VelocityY,
+                _ => snapshot.VelocityZ
+            };
+
+            foreach (float value in component)
+            {
+                if (float.IsFinite(value))
+                    extreme = Math.Max(extreme, Math.Abs(value));
+            }
+        }
+
+        return extreme;
     }
 
     private static void IncludeFiniteRange(
@@ -666,7 +742,8 @@ public sealed class SimulationFrameBuilder
         ChunkIdentity identity,
         IVisualizationMethod visualization,
         ulong visualizationMappingRevision,
-        VisualizationRange range)
+        VisualizationRange range,
+        FlowFieldSet? flowFields)
     {
         int voxelCount = ValidateSnapshot(snapshot, visualization.RequiredData);
         if (voxelCount == 0)
@@ -696,6 +773,10 @@ public sealed class SimulationFrameBuilder
         int visibleCount = 0;
         bool summarizeGases = (visualization.RequiredData & VisualizationDataRequirements.Gases) != 0;
         bool hasVelocity = HasCompleteVelocity(snapshot, out _);
+        float[]? densities = null;
+        float[]? gradients = null;
+        flowFields?.TryGetDensity(snapshot.GridPosition, out densities);
+        flowFields?.TryGetGradient(snapshot.GridPosition, out gradients);
         for (int index = 0; index < voxelCount; index++)
         {
             ushort localIndex = checked((ushort)index);
@@ -732,9 +813,12 @@ public sealed class SimulationFrameBuilder
                 velocityZ,
                 totalMoles,
                 primaryGasId,
-                new VoxelGasData(snapshot.Gases, localIndex));
-
-            sample = sample with { Range = range };
+                new VoxelGasData(snapshot.Gases, localIndex))
+            {
+                Range = range,
+                Density = densities != null ? densities[index] : float.NaN,
+                DensityGradient = gradients != null ? gradients[index] : float.NaN
+            };
 
             var color = default(ColorRgba);
             bool visible = isInVisualizationDomain && visualization.TryGetColor(sample, out color);
@@ -865,6 +949,38 @@ public sealed class SimulationFrameBuilder
         return false;
     }
 
+    private static bool NeighborsUnchanged(
+        SimulationDrawData previousFrame,
+        Dictionary<Int3, AtmosChunkSnapshot> snapshots,
+        Int3 position)
+    {
+        ReadOnlySpan<Int3> offsets =
+        [
+            new(-1, 0, 0), new(1, 0, 0), new(0, -1, 0), new(0, 1, 0), new(0, 0, -1), new(0, 0, 1)
+        ];
+
+        foreach (var offset in offsets)
+        {
+            var neighbor = new Int3(position.X + offset.X, position.Y + offset.Y, position.Z + offset.Z);
+            bool hasCurrent = snapshots.TryGetValue(neighbor, out var current);
+            bool hasPrevious = previousFrame.Chunks.TryGetValue(neighbor, out var previous);
+            if (hasCurrent != hasPrevious)
+                return false;
+
+            if (!hasCurrent)
+                continue;
+
+            if (current.Version == default ||
+                previous!.Identity != new ChunkIdentity(neighbor, current.Version.Generation) ||
+                previous.SourceRevision != current.Version.Revision)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     private static bool TryRetainChunk(
         SimulationDrawData? previousFrame,
         Int3 position,
@@ -931,7 +1047,7 @@ public sealed class SimulationFrameBuilder
         if (snapshot.Gases == null)
             throw new ArgumentException("Snapshot gas channels are not initialized.", nameof(snapshot));
 
-        if ((requirements & VisualizationDataRequirements.Gases) == 0)
+        if ((requirements & (VisualizationDataRequirements.Gases | FlowFieldRequirements)) == 0)
             return voxelCount;
 
         foreach (var gas in snapshot.Gases)
