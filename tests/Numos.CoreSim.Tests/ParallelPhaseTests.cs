@@ -80,6 +80,82 @@ public class ParallelPhaseTests
         Assert.That(allocated, Is.LessThan(48 * 1024));
     }
 
+    /// <summary>
+    ///     A saturated thread pool starts helpers late or never. Phases stay correct and allocate nothing extra.
+    /// </summary>
+    [Test]
+    [CancelAfter(120_000)]
+    public void Run_StaysCorrectWhileThreadPoolIsFlooded()
+    {
+        ParallelPhase.WorkerCountOverride = 8;
+        using var gate = new ManualResetEventSlim(false);
+        int floodCount = 4 * Environment.ProcessorCount;
+        using var floodDone = new CountdownEvent(floodCount);
+        for (int i = 0; i < floodCount; i++)
+        {
+            ThreadPool.UnsafeQueueUserWorkItem(_ =>
+            {
+                try
+                {
+                    gate.Wait(TimeSpan.FromSeconds(100));
+                }
+                finally
+                {
+                    floodDone.Signal();
+                }
+            }, null);
+        }
+
+        try
+        {
+            const int phases = 2_000;
+            int[] visits = new int[256];
+            for (int phase = 0; phase < phases; phase++)
+                ParallelPhase.Run(visits.Length, new CountAction(visits));
+
+            Assert.That(visits, Is.All.EqualTo(phases));
+
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            for (int phase = 0; phase < phases; phase++)
+                ParallelPhase.Run(visits.Length, new CountAction(visits));
+            long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+            Assert.That(visits, Is.All.EqualTo(2 * phases));
+            Assert.That(allocated, Is.LessThan(48 * 1024));
+        }
+        finally
+        {
+            gate.Set();
+            floodDone.Wait(TimeSpan.FromSeconds(60));
+        }
+    }
+
+    /// <summary>
+    ///     Phases of one action type that run on several threads at once share the pool and still visit every item once.
+    /// </summary>
+    [Test]
+    [CancelAfter(120_000)]
+    public void Run_IsCorrectFromConcurrentCallers()
+    {
+        ParallelPhase.WorkerCountOverride = 4;
+        const int phases = 500;
+        Task[] tasks = new Task[4];
+        int[][] arrays = new int[tasks.Length][];
+        for (int t = 0; t < tasks.Length; t++)
+        {
+            int[] visits = arrays[t] = new int[300];
+            tasks[t] = Task.Factory.StartNew(() =>
+            {
+                for (int phase = 0; phase < phases; phase++)
+                    ParallelPhase.Run(visits.Length, new CountAction(visits));
+            }, TaskCreationOptions.LongRunning);
+        }
+
+        Assert.That(Task.WaitAll(tasks, TimeSpan.FromSeconds(100)), Is.True);
+        foreach (int[] visits in arrays)
+            Assert.That(visits, Is.All.EqualTo(phases));
+    }
+
     private readonly struct CountAction(int[] visits) : IAction
     {
         public void Invoke(int index)
