@@ -30,6 +30,26 @@ internal struct EulerFaceState
     ///     tangential is Z and the second is X. A caller scattering <see cref="EulerFaceFlux" /> tangential momenta
     ///     back onto the grid must use the same permutation.
     /// </summary>
+    internal static EulerFaceState FromCell(EulerChunkState cells, int index, int axis)
+    {
+        if ((uint)axis > 2u)
+            throw new ArgumentOutOfRangeException(nameof(axis), axis, "Axis must be 0, 1, or 2.");
+
+        EulerFaceState state;
+        state.Density = cells.CellDensity[index];
+        state.Pressure = cells.CellPressure[index];
+        state.EnergyDensity = cells.CellEnergyDensity[index];
+        state.SoundSpeed = cells.CellSoundSpeed[index];
+        state.InverseMass = cells.CellInverseMass[index];
+        state.NormalVelocity = cells.CellVelocity(axis)[index];
+        state.TangentialVelocity1 = cells.CellVelocity((axis + 1) % 3)[index];
+        state.TangentialVelocity2 = cells.CellVelocity((axis + 2) % 3)[index];
+        return state;
+    }
+
+    /// <summary>
+    ///     Same as <see cref="FromCell(EulerChunkState, int, int)" />, from a cell value already read out.
+    /// </summary>
     internal static EulerFaceState FromCell(in EulerCellState cell, int axis)
     {
         EulerFaceState state;

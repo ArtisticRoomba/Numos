@@ -15,7 +15,7 @@ internal readonly struct EulerCellRun
         int axis, float timeStep, float maxVelocity, float volume, float pressurePerMoleKelvin,
         float[] readNormal, float[] readTangential1, float[] readTangential2, double[] readEnergy,
         float[] writeNormal, float[] writeTangential1, float[] writeTangential2, double[] writeEnergy,
-        float[] writeMass, float[] writeTotalMoles, double[] writeHeatCapacity, EulerCellState[] cells,
+        float[] writeMass, float[] writeTotalMoles, double[] writeHeatCapacity, EulerChunkState cells,
         float[] faceNormal, float[] faceTangential1, float[] faceTangential2, float[] faceEnergy,
         float[] mass, float[] totalMoles, double[] heatCapacity, bool[] nonFiniteSpecies)
     {
@@ -70,7 +70,7 @@ internal readonly struct EulerCellRun
     public readonly float[] WriteMass;
     public readonly float[] WriteTotalMoles;
     public readonly double[] WriteHeatCapacity;
-    public readonly EulerCellState[] Cells;
+    public readonly EulerChunkState Cells;
     public readonly float[] FaceNormal;
     public readonly float[] FaceTangential1;
     public readonly float[] FaceTangential2;
@@ -95,8 +95,8 @@ internal readonly struct EulerCellRun
 ///     </para>
 ///     <para>
 ///         Every branch of the scalar code becomes a mask: trace cells, empty cells, cells that do not fit in float,
-///         and cells over the speed limit. The kernel writes the same arrays as the scalar update, and the cells go
-///         to the array of structs one lane at a time.
+///         and cells over the speed limit. The kernel writes the same arrays as the scalar update. Each primitive
+///         field of the cells goes to its own array with one vector store.
 ///     </para>
 /// </remarks>
 internal static class EulerCellKernel
@@ -128,7 +128,8 @@ internal static class EulerCellKernel
     {
         int width = Vector<float>.Count;
         int halfWidth = Vector<double>.Count;
-        Span<float> spill = stackalloc float[10 * width];
+        EulerChunkState cells = run.Cells;
+        Span<float> signal = stackalloc float[width];
         Span<int> flags = stackalloc int[width];
         int done = 0;
         for (; done + width <= count; done += width)
@@ -258,32 +259,23 @@ internal static class EulerCellKernel
             Vector.BitwiseAnd(momentumY, gasBits).CopyTo(PickMomentum(run, 1), voxel);
             Vector.BitwiseAnd(momentumZ, gasBits).CopyTo(PickMomentum(run, 2), voxel);
 
-            Vector.BitwiseAnd(mass / new Vector<float>(run.Volume), gasBits).CopyTo(spill);
-            Vector.BitwiseAnd(velocityX, gasBits).CopyTo(spill[width..]);
-            Vector.BitwiseAnd(velocityY, gasBits).CopyTo(spill[(2 * width)..]);
-            Vector.BitwiseAnd(velocityZ, gasBits).CopyTo(spill[(3 * width)..]);
-            Vector.BitwiseAnd(pressure, gasBits).CopyTo(spill[(4 * width)..]);
-            Vector.BitwiseAnd(energyDensity, gasBits).CopyTo(spill[(5 * width)..]);
-            Vector.BitwiseAnd(soundSpeed, gasBits).CopyTo(spill[(6 * width)..]);
-            Vector.BitwiseAnd(inverseMass, gasBits).CopyTo(spill[(7 * width)..]);
-            Vector.BitwiseAnd(temperature, gasBits).CopyTo(spill[(8 * width)..]);
-            Vector.BitwiseAnd(signalSpeed, gasBits).CopyTo(spill[(9 * width)..]);
+            Vector.BitwiseAnd(mass / new Vector<float>(run.Volume), gasBits).CopyTo(cells.CellDensity, voxel);
+            Vector.BitwiseAnd(velocityX, gasBits).CopyTo(cells.CellVelocityX, voxel);
+            Vector.BitwiseAnd(velocityY, gasBits).CopyTo(cells.CellVelocityY, voxel);
+            Vector.BitwiseAnd(velocityZ, gasBits).CopyTo(cells.CellVelocityZ, voxel);
+            Vector.BitwiseAnd(pressure, gasBits).CopyTo(cells.CellPressure, voxel);
+            Vector.BitwiseAnd(energyDensity, gasBits).CopyTo(cells.CellEnergyDensity, voxel);
+            Vector.BitwiseAnd(soundSpeed, gasBits).CopyTo(cells.CellSoundSpeed, voxel);
+            Vector.BitwiseAnd(inverseMass, gasBits).CopyTo(cells.CellInverseMass, voxel);
+            Vector.BitwiseAnd(temperature, gasBits).CopyTo(cells.CellTemperature, voxel);
+            Vector<float> gasSignalSpeed = Vector.BitwiseAnd(signalSpeed, gasBits);
+            gasSignalSpeed.CopyTo(cells.CellSignalSpeed, voxel);
+            gasSignalSpeed.CopyTo(signal);
             ((clamp & Vector<int>.One) | (notFinite & new Vector<int>(2))).CopyTo(flags);
 
             for (int lane = 0; lane < width; lane++)
             {
-                ref EulerCellState state = ref run.Cells[voxel + lane];
-                state.Density = spill[lane];
-                state.VelocityX = spill[width + lane];
-                state.VelocityY = spill[2 * width + lane];
-                state.VelocityZ = spill[3 * width + lane];
-                state.Pressure = spill[4 * width + lane];
-                state.EnergyDensity = spill[5 * width + lane];
-                state.SoundSpeed = spill[6 * width + lane];
-                state.InverseMass = spill[7 * width + lane];
-                state.Temperature = spill[8 * width + lane];
-                state.SignalSpeed = spill[9 * width + lane];
-                maxSignalSpeed = MathF.Max(maxSignalSpeed, spill[9 * width + lane]);
+                maxSignalSpeed = MathF.Max(maxSignalSpeed, signal[lane]);
 
                 bool speciesFault = run.NonFiniteSpecies[cell + lane];
                 if (speciesFault)

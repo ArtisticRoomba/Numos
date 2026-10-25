@@ -7,7 +7,7 @@ namespace Numos.CoreSim.Solvers.Euler;
 ///     out EulerCellState)" />.
 /// </summary>
 /// <remarks>
-///     Velocities are along the grid axes. <see cref="EulerFaceState.FromCell" /> picks the normal and tangential
+///     Velocities are along the grid axes. <see cref="EulerFaceState.FromCell(EulerChunkState, int, int)" /> picks the normal and tangential
 ///     components for a particular face. A vacuum cell has every field zero, including
 ///     <see cref="InverseMass" />, so a caller that finds <see cref="Density" /> zero must not divide by it.
 /// </remarks>

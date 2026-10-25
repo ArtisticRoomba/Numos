@@ -127,16 +127,16 @@ public class EulerSweepVectorTests
                     read.HeatCapacity[voxel] = Pick();
                     break;
                 case 5:
-                    read.Cells[voxel].Pressure = Pick();
-                    read.Cells[voxel].SoundSpeed = Pick();
+                    read.CellPressure[voxel] = Pick();
+                    read.CellSoundSpeed[voxel] = Pick();
                     break;
                 case 6:
-                    read.Cells[voxel].VelocityX = Pick();
-                    read.Cells[voxel].Density = Pick();
+                    read.CellVelocityX[voxel] = Pick();
+                    read.CellDensity[voxel] = Pick();
                     break;
                 default:
-                    read.Cells[voxel].EnergyDensity = Pick();
-                    read.Cells[voxel].InverseMass = Pick();
+                    read.CellEnergyDensity[voxel] = Pick();
+                    read.CellInverseMass[voxel] = Pick();
                     break;
             }
         }
@@ -256,8 +256,8 @@ public class EulerSweepVectorTests
             if (!scalar.AirMap[voxel])
                 continue;
 
-            EulerCellState e = expected.Cells[voxel];
-            EulerCellState a = actual.Cells[voxel];
+            EulerCellState e = expected.GetCell(voxel);
+            EulerCellState a = actual.GetCell(voxel);
             bool same = SameDouble(expected.Energy[voxel], actual.Energy[voxel]) &&
                         SameDouble(expected.HeatCapacity[voxel], actual.HeatCapacity[voxel]) &&
                         Same(expected.MomentumX[voxel], actual.MomentumX[voxel]) &&
@@ -436,8 +436,8 @@ public class EulerSweepVectorTests
                 if (!expectedWorkspace.AirMap[voxel])
                     continue;
 
-                EulerCellState e = expected.Cells[voxel];
-                EulerCellState a = actual.Cells[voxel];
+                EulerCellState e = expected.GetCell(voxel);
+                EulerCellState a = actual.GetCell(voxel);
                 bool same = SameDouble(expected.Energy[voxel], actual.Energy[voxel]) &&
                             SameDouble(expected.HeatCapacity[voxel], actual.HeatCapacity[voxel]) &&
                             Same(expected.MomentumX[voxel], actual.MomentumX[voxel]) &&

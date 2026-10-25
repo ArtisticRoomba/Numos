@@ -236,7 +236,6 @@ internal static class EulerSweep
         bool[] vectorRun = scratch.VectorRun;
         if (vectorFaces)
         {
-            scratch.EnsureStage(innerRunLength + 1);
             for (int run = 0; run < innerRunCount; run++)
             {
                 int firstLower = baseIndex + run * runVoxelStride;
@@ -247,7 +246,7 @@ internal static class EulerSweep
                 {
                     int firstFace = alongMarch ? run * runFaceStride + 1 : (run + 1) * lineCount;
                     SolveRun(
-                        scratch, read.Cells, axis, alongMarch, firstLower, read.Cells, firstLower + marchStride,
+                        scratch, read, axis, alongMarch, firstLower, read, firstLower + marchStride,
                         innerRunLength, firstFace, faceArea);
                 }
             }
@@ -489,8 +488,8 @@ internal static class EulerSweep
                 EulerFaceTopology.IsOpen(workspace.OpenMask[upperIndex], 2 * axis),
                 "Two air voxels always share an open face until blocked faces exist.");
 
-            EulerFaceState left = EulerFaceState.FromCell(in read.Cells[lowerIndex], axis);
-            EulerFaceState right = EulerFaceState.FromCell(in read.Cells[upperIndex], axis);
+            EulerFaceState left = EulerFaceState.FromCell(read, lowerIndex, axis);
+            EulerFaceState right = EulerFaceState.FromCell(read, upperIndex, axis);
             HllcFlux.Solve(in left, in right, settings.AllMachCorrection, out EulerFaceFlux flux);
             Store(in flux, EulerUpwindSide.Self, flux.UpwindIsLeft ? lowerIndex : upperIndex, faceArea, out rate);
         }
@@ -543,7 +542,7 @@ internal static class EulerSweep
         out EulerFaceRate rate)
     {
         bool cellIsLeft = (direction & 1) == 1;
-        EulerFaceState cell = EulerFaceState.FromCell(in read.Cells[cellIndex], axis);
+        EulerFaceState cell = EulerFaceState.FromCell(read, cellIndex, axis);
         EulerFaceFlux flux;
         if (EulerFaceTopology.IsOpen(workspace.OpenMask[cellIndex], direction))
         {
@@ -552,7 +551,7 @@ internal static class EulerSweep
             if (neighbor != null)
             {
                 EulerChunkState neighborRead = neighbor.Read;
-                EulerFaceState other = EulerFaceState.FromCell(in neighborRead.Cells[neighborIndex], axis);
+                EulerFaceState other = EulerFaceState.FromCell(neighborRead, neighborIndex, axis);
                 if (cellIsLeft)
                     HllcFlux.Solve(in cell, in other, settings.AllMachCorrection, out flux);
                 else
@@ -640,13 +639,13 @@ internal static class EulerSweep
         if (lowerBoundary)
         {
             SolveRun(
-                scratch, neighborRead.Cells, axis, false, neighborFirst, read.Cells, selfFirst, count, firstFace,
+                scratch, neighborRead, axis, false, neighborFirst, read, selfFirst, count, firstFace,
                 faceArea);
         }
         else
         {
             SolveRun(
-                scratch, read.Cells, axis, false, selfFirst, neighborRead.Cells, neighborFirst, count, firstFace,
+                scratch, read, axis, false, selfFirst, neighborRead, neighborFirst, count, firstFace,
                 faceArea);
         }
 
@@ -672,12 +671,12 @@ internal static class EulerSweep
     ///     rates exactly as <see cref="Store" /> does, into the bundle's per-field face arrays.
     /// </summary>
     /// <param name="scratch">The worker's scratch, holding the staging arrays and the face arrays.</param>
-    /// <param name="cells">The read buffer's cells.</param>
+    /// <param name="cells">The read buffer that holds the lower cells.</param>
     /// <param name="axis">The sweep axis.</param>
     /// <param name="alongMarch">Whether the lower and upper cells of the run are neighbours in one voxel row.</param>
     /// <param name="firstLower">Index of the lower cell of the first face in <paramref name="cells" />.</param>
     /// <param name="upperCells">
-    ///     The array that holds the upper cells. Ignored when <paramref name="alongMarch" /> is set, because the
+    ///     The buffer that holds the upper cells. Ignored when <paramref name="alongMarch" /> is set, because the
     ///     upper cell is then the next one in <paramref name="cells" />.
     /// </param>
     /// <param name="upperFirst">Index of the upper cell of the first face in <paramref name="upperCells" />.</param>
@@ -686,8 +685,8 @@ internal static class EulerSweep
     /// <param name="faceArea">Area of one voxel face.</param>
     /// <remarks>
     ///     <para>
-    ///         The cells are copied into field arrays first so that each vector load is contiguous. Lanes past
-    ///         <paramref name="count" /> read zero padding, which is a vacuum on both sides.
+    ///         The vector loads read the cell field arrays directly, so each load is contiguous. Lanes past
+    ///         <paramref name="count" /> read the next cells in memory or the array pad. Their results are dropped.
     ///     </para>
     ///     <para>
     ///         The run writes no <see cref="EulerFaceRate" />. Its upwind cell is always the lower or the upper cell,
@@ -696,24 +695,14 @@ internal static class EulerSweep
     ///     </para>
     /// </remarks>
     private static void SolveRun(
-        BundleScratch scratch, EulerCellState[] cells, int axis, bool alongMarch, int firstLower,
-        EulerCellState[] upperCells, int upperFirst, int count, int firstFace, SquareMetre faceArea)
+        BundleScratch scratch, EulerChunkState cells, int axis, bool alongMarch, int firstLower,
+        EulerChunkState upperCells, int upperFirst, int count, int firstFace, SquareMetre faceArea)
     {
-        float[] stage = scratch.Stage;
-        int stride = scratch.StageStride;
-        int half = scratch.StageHalf;
-        int rightOffset;
+        var lowerFields = new CellLanes(cells, axis);
+        var upperFields = new CellLanes(upperCells, axis);
+        int upperOffset = alongMarch ? firstLower + 1 : upperFirst;
         if (alongMarch)
-        {
-            StageCells(cells, firstLower, count + 1, axis, stage, stride, 0, half, ref scratch.StageDirty[0]);
-            rightOffset = 1;
-        }
-        else
-        {
-            StageCells(cells, firstLower, count, axis, stage, stride, 0, half, ref scratch.StageDirty[0]);
-            StageCells(upperCells, upperFirst, count, axis, stage, stride, half, half, ref scratch.StageDirty[1]);
-            rightOffset = half;
-        }
+            upperFields = lowerFields;
 
         float[] speciesRate = scratch.FaceSpeciesRate;
         float[] normalRate = scratch.FaceNormal;
@@ -728,8 +717,8 @@ internal static class EulerSweep
         Span<int> maskSpill = stackalloc int[width];
         for (int first = 0; first < count; first += width)
         {
-            HllcLanes left = LoadLanes(stage, stride, first);
-            HllcLanes right = LoadLanes(stage, stride, rightOffset + first);
+            HllcLanes left = lowerFields.Load(firstLower + first);
+            HllcLanes right = upperFields.Load(upperOffset + first);
             HllcLaneFlux flux = HllcFluxVector.Solve(in left, in right);
             Vector<float> species = flux.SpeciesWeight * area;
             Vector<float> normal = flux.NormalMomentum * area;
@@ -766,81 +755,54 @@ internal static class EulerSweep
         }
     }
 
-    private static HllcLanes LoadLanes(float[] stage, int stride, int offset)
-    {
-        return new HllcLanes(
-            new Vector<float>(stage, offset),
-            new Vector<float>(stage, stride + offset),
-            new Vector<float>(stage, 2 * stride + offset),
-            new Vector<float>(stage, 3 * stride + offset),
-            new Vector<float>(stage, 4 * stride + offset),
-            new Vector<float>(stage, 5 * stride + offset),
-            new Vector<float>(stage, 6 * stride + offset),
-            new Vector<float>(stage, 7 * stride + offset));
-    }
-
     /// <summary>
-    ///     Copies the face-frame primitives of <paramref name="count" /> cells into the staging arrays, in the field
-    ///     order of <see cref="HllcLanes" />. The part of the half that starts at <paramref name="dest" /> past
-    ///     <paramref name="count" /> stays zero: <paramref name="dirty" /> remembers how far an earlier call wrote.
+    ///     The eight cell field arrays the face kernel reads, picked for one sweep axis.
     /// </summary>
     /// <remarks>
-    ///     The staging arrays are plain floats for the vector kernel, which carries no units, so the dimensional
-    ///     analyzer cannot check these copies.
+    ///     The normal and tangential velocities follow <see cref="EulerFaceState.FromCell(EulerChunkState, int, int)" />'s cyclic order. The
+    ///     arrays are plain floats for the vector kernel, which carries no units, so the dimensional analyzer
+    ///     cannot check <see cref="Load" />.
     /// </remarks>
 #pragma warning disable QNT002
-    private static void StageCells(
-        EulerCellState[] cells, int first, int count, int axis, float[] stage, int stride, int dest, int half,
-        ref int dirty)
+    private readonly struct CellLanes
     {
-        // The checks here make the unchecked accesses below safe.
-        if (count > half || first < 0 || first + count > cells.Length || dest + 7 * stride + half > stage.Length)
-            throw new ArgumentOutOfRangeException(nameof(count));
+        private readonly float[] _density;
+        private readonly float[] _normal;
+        private readonly float[] _tangential1;
+        private readonly float[] _tangential2;
+        private readonly float[] _pressure;
+        private readonly float[] _energy;
+        private readonly float[] _sound;
+        private readonly float[] _inverseMass;
 
-        ref float density = ref stage[dest];
-        ref float normal = ref stage[stride + dest];
-        ref float tangential1 = ref stage[2 * stride + dest];
-        ref float tangential2 = ref stage[3 * stride + dest];
-        ref float pressure = ref stage[4 * stride + dest];
-        ref float energy = ref stage[5 * stride + dest];
-        ref float sound = ref stage[6 * stride + dest];
-        ref float inverseMass = ref stage[7 * stride + dest];
-        ref EulerCellState source = ref cells[first];
-        for (int i = 0; i < count; i++)
+        public CellLanes(EulerChunkState cells, int axis)
         {
-            ref readonly EulerCellState cell = ref Unsafe.Add(ref source, i);
-            Unsafe.Add(ref density, i) = cell.Density;
-            Unsafe.Add(ref pressure, i) = cell.Pressure;
-            Unsafe.Add(ref energy, i) = cell.EnergyDensity;
-            Unsafe.Add(ref sound, i) = cell.SoundSpeed;
-            Unsafe.Add(ref inverseMass, i) = cell.InverseMass;
-            switch (axis)
-            {
-                case 0:
-                    Unsafe.Add(ref normal, i) = cell.VelocityX;
-                    Unsafe.Add(ref tangential1, i) = cell.VelocityY;
-                    Unsafe.Add(ref tangential2, i) = cell.VelocityZ;
-                    break;
-                case 1:
-                    Unsafe.Add(ref normal, i) = cell.VelocityY;
-                    Unsafe.Add(ref tangential1, i) = cell.VelocityZ;
-                    Unsafe.Add(ref tangential2, i) = cell.VelocityX;
-                    break;
-                default:
-                    Unsafe.Add(ref normal, i) = cell.VelocityZ;
-                    Unsafe.Add(ref tangential1, i) = cell.VelocityX;
-                    Unsafe.Add(ref tangential2, i) = cell.VelocityY;
-                    break;
-            }
+            _density = cells.CellDensity;
+            _normal = cells.CellVelocity(axis);
+            _tangential1 = cells.CellVelocity((axis + 1) % 3);
+            _tangential2 = cells.CellVelocity((axis + 2) % 3);
+            _pressure = cells.CellPressure;
+            _energy = cells.CellEnergyDensity;
+            _sound = cells.CellSoundSpeed;
+            _inverseMass = cells.CellInverseMass;
         }
 
-        if (dirty > count)
+        /// <summary>
+        ///     Loads the cells <c>[first, first + Width)</c>. Lanes past the end of a run read the next cells in
+        ///     memory or the array pad, and the caller discards their results.
+        /// </summary>
+        public HllcLanes Load(int first)
         {
-            for (int field = 0; field < 8; field++)
-                stage.AsSpan(field * stride + dest + count, dirty - count).Clear();
+            return new HllcLanes(
+                new Vector<float>(_density, first),
+                new Vector<float>(_normal, first),
+                new Vector<float>(_tangential1, first),
+                new Vector<float>(_tangential2, first),
+                new Vector<float>(_pressure, first),
+                new Vector<float>(_energy, first),
+                new Vector<float>(_sound, first),
+                new Vector<float>(_inverseMass, first));
         }
-
-        dirty = count;
     }
 #pragma warning restore QNT002
 
@@ -870,7 +832,7 @@ internal static class EulerSweep
     /// <remarks>
     ///     The normal and tangential momentum arrays are picked from the sweep axis here, so the cell loop does not
     ///     branch on the axis to read them. The tangential pair follows
-    ///     <see cref="EulerFaceState.FromCell" />'s cyclic order: <c>(axis + 1) mod 3</c> and <c>(axis + 2) mod 3</c>.
+    ///     <see cref="EulerFaceState.FromCell(EulerChunkState, int, int)" />'s cyclic order: <c>(axis + 1) mod 3</c> and <c>(axis + 2) mod 3</c>.
     /// </remarks>
     private readonly struct EulerCellPass
     {
@@ -918,7 +880,7 @@ internal static class EulerSweep
                 axis, timeStep, _maxVelocity, _volume, _pressurePerMoleKelvin,
                 _readNormal, _readTangential1, _readTangential2, _readEnergy,
                 Momentum(write, axis), Momentum(write, (axis + 1) % 3), Momentum(write, (axis + 2) % 3), write.Energy,
-                write.Mass, write.TotalMoles, write.HeatCapacity, write.Cells,
+                write.Mass, write.TotalMoles, write.HeatCapacity, write,
                 _faceNormal, _faceTangential1, _faceTangential2, _faceEnergy,
                 scratch.Mass, scratch.TotalMoles, scratch.HeatCapacity, scratch.NonFiniteSpecies);
         }
@@ -991,13 +953,12 @@ internal static class EulerSweep
             KilogramMetrePerSecond momentumY;
             KilogramMetrePerSecond momentumZ;
             MetrePerSecond signalSpeed = 0f;
-            ref EulerCellState cell = ref write.Cells[voxelIndex];
             if (EulerChunkWorkspace.IsTrace(mass, totalMoles))
             {
                 momentumX = 0f;
                 momentumY = 0f;
                 momentumZ = 0f;
-                cell = default;
+                write.SetCell(voxelIndex, default);
             }
             else
             {
@@ -1040,8 +1001,9 @@ internal static class EulerSweep
                     mass, totalMoles, heatCapacity,
                     momentumX, momentumY, momentumZ,
                     energy, _volume, _pressurePerMoleKelvin,
-                    out cell);
+                    out EulerCellState cell);
 
+                write.SetCell(voxelIndex, in cell);
                 if (kind == EulerCellKind.Gas)
                 {
                     signalSpeed = cell.SignalSpeed;
@@ -1097,37 +1059,6 @@ internal static class EulerSweep
         ///     Whether the face solve covered the interior faces of each inner run with the vector kernel.
         /// </summary>
         public bool[] VectorRun = [];
-
-        /// <summary>
-        ///     Field arrays of cell primitives for the vector face solve, <see cref="StageStride" /> apart.
-        /// </summary>
-        public float[] Stage = [];
-
-        public int StageStride;
-
-        /// <summary>
-        ///     Lanes of one half of a field array: a lower run and an upper run.
-        /// </summary>
-        public int StageHalf;
-
-        /// <summary>
-        ///     Cells the last staging wrote into each half, so the next one can clear only the stale tail.
-        /// </summary>
-        public readonly int[] StageDirty = new int[2];
-
-        public void EnsureStage(int runLength)
-        {
-            int width = HllcFluxVector.Width;
-            int half = (runLength + width - 1) / width * width + width;
-            if (StageHalf == half)
-                return;
-
-            StageHalf = half;
-            StageStride = 2 * half;
-            Stage = new float[8 * StageStride];
-            StageDirty[0] = 0;
-            StageDirty[1] = 0;
-        }
 
         public void EnsureCapacity(int faceCount, int cellCount, int runCount)
         {

@@ -28,10 +28,78 @@ namespace Numos.CoreSim.Solvers.Euler;
 internal sealed class EulerChunkState
 {
     /// <summary>
-    ///     Primitive state per cell: velocities, pressure, sound speed, and signal speed. All zeros for a vacuum
-    ///     or trace cell.
+    ///     Primitive state per cell, one array per field of <see cref="EulerCellState" />: velocities, pressure,
+    ///     sound speed, and signal speed. Every field is zero for a vacuum or trace cell.
     /// </summary>
-    public EulerCellState[] Cells = [];
+    /// <remarks>
+    ///     Each array is <see cref="CellPadding" /> entries longer than the voxel count. The pad stays zero, so a
+    ///     vector load that starts in the last cells never runs off the end. Lanes that read the pad or a
+    ///     neighbouring row are discarded by the caller.
+    /// </remarks>
+    public KilogramPerCubicMetre[] CellDensity = [];
+    public MetrePerSecond[] CellVelocityX = [];
+    public MetrePerSecond[] CellVelocityY = [];
+    public MetrePerSecond[] CellVelocityZ = [];
+    public Pascal[] CellPressure = [];
+    public JoulePerCubicMetre[] CellEnergyDensity = [];
+    public MetrePerSecond[] CellSoundSpeed = [];
+    public PerKilogram[] CellInverseMass = [];
+    public Kelvin[] CellTemperature = [];
+    public MetrePerSecond[] CellSignalSpeed = [];
+
+    /// <summary>
+    ///     Entries added past the voxel count of every cell field array.
+    /// </summary>
+    internal static int CellPadding => Math.Max(System.Numerics.Vector<float>.Count, HllcFluxVector.Width);
+
+    /// <summary>
+    ///     The cell velocity array of grid axis <paramref name="axis" /> (0 = X, 1 = Y, 2 = Z).
+    /// </summary>
+    internal MetrePerSecond[] CellVelocity(int axis)
+    {
+        return axis switch
+        {
+            0 => CellVelocityX,
+            1 => CellVelocityY,
+            _ => CellVelocityZ
+        };
+    }
+
+    /// <summary>
+    ///     Reads the primitive state of one cell out of the field arrays.
+    /// </summary>
+    internal EulerCellState GetCell(int index)
+    {
+        EulerCellState cell;
+        cell.Density = CellDensity[index];
+        cell.VelocityX = CellVelocityX[index];
+        cell.VelocityY = CellVelocityY[index];
+        cell.VelocityZ = CellVelocityZ[index];
+        cell.Pressure = CellPressure[index];
+        cell.EnergyDensity = CellEnergyDensity[index];
+        cell.SoundSpeed = CellSoundSpeed[index];
+        cell.InverseMass = CellInverseMass[index];
+        cell.Temperature = CellTemperature[index];
+        cell.SignalSpeed = CellSignalSpeed[index];
+        return cell;
+    }
+
+    /// <summary>
+    ///     Writes the primitive state of one cell into the field arrays.
+    /// </summary>
+    internal void SetCell(int index, in EulerCellState cell)
+    {
+        CellDensity[index] = cell.Density;
+        CellVelocityX[index] = cell.VelocityX;
+        CellVelocityY[index] = cell.VelocityY;
+        CellVelocityZ[index] = cell.VelocityZ;
+        CellPressure[index] = cell.Pressure;
+        CellEnergyDensity[index] = cell.EnergyDensity;
+        CellSoundSpeed[index] = cell.SoundSpeed;
+        CellInverseMass[index] = cell.InverseMass;
+        CellTemperature[index] = cell.Temperature;
+        CellSignalSpeed[index] = cell.SignalSpeed;
+    }
 
     public Joule64[] Energy = [];
     public JoulePerKelvin64[] HeatCapacity = [];
@@ -60,9 +128,19 @@ internal sealed class EulerChunkState
     /// </summary>
     internal void EnsureCapacity(int voxelCount, int gasSlotCount)
     {
-        if (Cells.Length < voxelCount)
+        if (Energy.Length < voxelCount)
         {
-            Cells = new EulerCellState[voxelCount];
+            int paddedCount = voxelCount + CellPadding;
+            CellDensity = new KilogramPerCubicMetre[paddedCount];
+            CellVelocityX = new MetrePerSecond[paddedCount];
+            CellVelocityY = new MetrePerSecond[paddedCount];
+            CellVelocityZ = new MetrePerSecond[paddedCount];
+            CellPressure = new Pascal[paddedCount];
+            CellEnergyDensity = new JoulePerCubicMetre[paddedCount];
+            CellSoundSpeed = new MetrePerSecond[paddedCount];
+            CellInverseMass = new PerKilogram[paddedCount];
+            CellTemperature = new Kelvin[paddedCount];
+            CellSignalSpeed = new MetrePerSecond[paddedCount];
             Energy = new Joule64[voxelCount];
             HeatCapacity = new JoulePerKelvin64[voxelCount];
             Mass = new Kilogram[voxelCount];
@@ -489,7 +567,7 @@ internal sealed class EulerChunkWorkspace
                 momentumY = 0f;
                 momentumZ = 0f;
                 buffer.Energy[voxelIndex] = heatCapacity * temperature;
-                buffer.Cells[voxelIndex] = default;
+                buffer.SetCell(voxelIndex, default);
             }
             else
             {
@@ -502,11 +580,12 @@ internal sealed class EulerChunkWorkspace
                     mass, totalMoles, heatCapacity,
                     momentumX, momentumY, momentumZ,
                     energy, config.VoxelVolume, config.PressurePerMoleKelvin,
-                    out buffer.Cells[voxelIndex]);
+                    out EulerCellState primitive);
 
+                buffer.SetCell(voxelIndex, in primitive);
                 if (kind == EulerCellKind.Gas)
                 {
-                    maxSignalSpeed = MathF.Max(maxSignalSpeed, buffer.Cells[voxelIndex].SignalSpeed);
+                    maxSignalSpeed = MathF.Max(maxSignalSpeed, primitive.SignalSpeed);
                 }
                 else
                 {
