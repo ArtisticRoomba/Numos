@@ -857,26 +857,19 @@ internal class AtmosChunk
     /// </summary>
     /// <param name="fields">The per-voxel fields to copy.</param>
     /// <param name="config">
-    ///     Configuration supplying gas molar masses. Required when <paramref name="fields" /> includes
-    ///     <see cref="AtmosChunkSnapshotFields.Velocity" />, since velocity is derived from momentum and mass rather
-    ///     than stored.
+    ///     Configuration supplying gas molar masses. The snapshot reads it only when <paramref name="fields" />
+    ///     includes <see cref="AtmosChunkSnapshotFields.Velocity" />, because velocity is derived from momentum and
+    ///     mass rather than stored.
     /// </param>
     /// <returns>A snapshot containing selected physical fields and solver arrays opted into capture.</returns>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="fields" /> contains undefined flags.</exception>
-    /// <exception cref="ArgumentException">
-    ///     <paramref name="fields" /> includes velocity but <paramref name="config" /> is <see langword="null" />.
-    /// </exception>
     [PublicAPI]
-    public AtmosChunkSnapshot GetNetworkSnapshot(
-        AtmosChunkSnapshotFields fields = AtmosChunkSnapshotFields.All,
-        IAtmosConfig? config = null)
+    public AtmosChunkSnapshot GetNetworkSnapshot(AtmosChunkSnapshotFields fields, IAtmosConfig config)
     {
         if ((fields & ~AtmosChunkSnapshotFields.All) != 0)
             throw new ArgumentOutOfRangeException(nameof(fields));
 
         bool includeVelocity = fields.HasFlag(AtmosChunkSnapshotFields.Velocity);
-        if (includeVelocity && config == null)
-            throw new ArgumentException("A configuration is required to derive velocity.", nameof(config));
 
         var snapshot = new AtmosChunkSnapshot
         {
@@ -930,7 +923,7 @@ internal class AtmosChunk
             for (int index = 0; index < VoxelCount; index++)
             {
                 AtmosSolverMath.ComputeVoxelVelocity(
-                    config!,
+                    config,
                     this,
                     (ushort)index,
                     out snapshot.VelocityX[index],

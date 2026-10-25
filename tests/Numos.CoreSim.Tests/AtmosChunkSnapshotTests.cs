@@ -12,16 +12,7 @@ public sealed class AtmosChunkSnapshotTests
     private const AtmosChunkSnapshotFields PhysicalFields =
         AtmosChunkSnapshotFields.All & ~AtmosChunkSnapshotFields.Velocity;
 
-    [Test]
-    public void GetNetworkSnapshot_VelocityWithoutConfig_Throws()
-    {
-        var chunk = new AtmosChunk(1, 1, 1);
-        chunk.Initialize(default, 1, 1, 1);
-
-        Assert.That(
-            () => chunk.GetNetworkSnapshot(AtmosChunkSnapshotFields.Velocity),
-            Throws.ArgumentException);
-    }
+    private static readonly AtmosConfigSnapshot DefaultConfig = new AtmosConfig().CreateSnapshot();
 
     [Test]
     public void GetNetworkSnapshot_Velocity_DividesMomentumByGasMass()
@@ -107,7 +98,7 @@ public sealed class AtmosChunkSnapshotTests
         chunk.Temperature[3] = 275f;
         chunk.TotalPressure[3] = 25f;
 
-        var snapshot = chunk.GetNetworkSnapshot(PhysicalFields);
+        var snapshot = chunk.GetNetworkSnapshot(PhysicalFields, DefaultConfig);
 
         Assert.Multiple(() =>
         {
@@ -132,7 +123,7 @@ public sealed class AtmosChunkSnapshotTests
             chunk.InjectGasToVoxel(0, 3, 2f, 300f, 1f, 1f);
             chunk.InjectGasToVoxel(1, 8, 1f, 400f, 1f, 1f);
 
-            var snapshot = chunk.GetNetworkSnapshot(PhysicalFields);
+            var snapshot = chunk.GetNetworkSnapshot(PhysicalFields, DefaultConfig);
 
             Assert.Multiple(() =>
             {
@@ -151,7 +142,7 @@ public sealed class AtmosChunkSnapshotTests
             snapshot.VoxelRoomMap[0] = VoxelClassification.RoomSolid;
             snapshot.Gases[0].Moles[0] = -1f;
             snapshot.Gases[0].GasId = 99;
-            var freshSnapshot = chunk.GetNetworkSnapshot(PhysicalFields);
+            var freshSnapshot = chunk.GetNetworkSnapshot(PhysicalFields, DefaultConfig);
 
             Assert.Multiple(() =>
             {
