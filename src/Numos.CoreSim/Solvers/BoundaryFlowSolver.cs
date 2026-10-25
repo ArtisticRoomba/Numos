@@ -313,9 +313,8 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
         Mole advectedMoles = AtmosSolverMath.PressureToMoles(config, bulkPressureTransfer, sourceTemperature);
 
         Pascal sourcePressure = sourceChunk.TotalPressure[sourceIndex];
-        Scalar temperatureRatio = sourceTemperature / config.GlobalTemperature;
-        Scalar pressureRatio = config.SaturationReferencePressure / sourcePressure;
-        PerSquareMetre envFactor = MathF.Pow(temperatureRatio, 1.5f) * pressureRatio / (voxelEdge * voxelEdge);
+        PerSquareMetre envFactor =
+            SpeciesDiffusionKernel.EnvironmentFactor(config, sourcePressure, sourceTemperature, voxelEdge);
 
         bool movedGas = false;
 
@@ -325,15 +324,13 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
             Mole sourceMoles = sourceChunk.ActiveGases[gas].Moles[sourceIndex];
             Mole molesAdvected = advectedMoles * (sourceMoles / totalMoles);
 
-            SquareMetrePerSecond referenceDiffusivity = config.GetDiffusionCoefficient(gasId);
-            PerSecond diffusionConstant = referenceDiffusivity * envFactor;
-            Mole molesDiffused = diffusionConstant * sourceMoles * AtmosSolverConstants.FixedTimeStep;
-            if (molesDiffused * 7 > sourceMoles)
-                molesDiffused = sourceMoles / 7;
+            Mole molesDiffused =
+                SpeciesDiffusionKernel.TransferAmount(config.GetDiffusionCoefficient(gasId), envFactor, sourceMoles);
 
+            // The channel search in GetGasMoles only runs for a deposit that could be dropped.
             if (molesDiffused < AtmosSolverConstants.MinimumTrackedMoles &&
-                GetGasMoles(neighborChunk, neighborIndex, gasId) + molesDiffused <
-                AtmosSolverConstants.MinimumTrackedMoles)
+                SpeciesDiffusionKernel.IsSuppressed(
+                    molesDiffused, GetGasMoles(neighborChunk, neighborIndex, gasId)))
                 molesDiffused = 0;
 
             Mole molesToMove = MathF.Min(sourceMoles, molesAdvected + molesDiffused);

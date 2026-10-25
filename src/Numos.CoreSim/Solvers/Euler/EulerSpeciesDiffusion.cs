@@ -320,11 +320,7 @@ internal static class EulerSpeciesDiffusion
             return 0f;
 
         Mole molesDiffused = SpeciesDiffusionKernel.TransferAmount(diffusivity, sourceFactor, sourceMoles);
-        if (molesDiffused < AtmosSolverConstants.MinimumTrackedMoles &&
-            destinationMoles + molesDiffused < AtmosSolverConstants.MinimumTrackedMoles)
-            return 0f;
-
-        return molesDiffused;
+        return SpeciesDiffusionKernel.IsSuppressed(molesDiffused, destinationMoles) ? 0f : molesDiffused;
     }
 
     /// <summary>

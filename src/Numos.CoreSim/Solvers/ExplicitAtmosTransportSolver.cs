@@ -308,15 +308,13 @@ internal sealed class ExplicitAtmosTransportSolver
         if (sourceMoles <= 0f || sourcePressure <= 0f || referenceDiffusivity <= 0f)
             return 0f;
 
-        Scalar temperatureRatio = sourceTemperature / config.GlobalTemperature;
-        Scalar pressureRatio = config.SaturationReferencePressure / sourcePressure;
-        PerSquareMetre environmentFactor = MathF.Pow(temperatureRatio, 1.5f) * pressureRatio / (voxelEdge * voxelEdge);
-        Mole request = referenceDiffusivity * environmentFactor * sourceMoles * AtmosSolverConstants.FixedTimeStep;
+        PerSquareMetre environmentFactor =
+            SpeciesDiffusionKernel.EnvironmentFactor(config, sourcePressure, sourceTemperature, voxelEdge);
 
-        // Match the Cartesian solver's per-edge stability cap.
+        // TransferAmount applies the Cartesian solver's per-edge stability cap.
         // A cell may have any number of explicit neighbors.
         // The shared availability limiter below scales their combined requests again when they exceed the source.
-        return request * 7f > sourceMoles ? sourceMoles / 7f : request;
+        return SpeciesDiffusionKernel.TransferAmount(referenceDiffusivity, environmentFactor, sourceMoles);
     }
 
     private static void CalculateThermalConductance(

@@ -261,6 +261,21 @@ internal static class SpeciesDiffusionKernel
     }
 
     /// <summary>
+    ///     Whether a deposit is dropped because it is a trace into a destination that stays a trace.
+    /// </summary>
+    /// <param name="molesDiffused">The moles the source sends to the destination.</param>
+    /// <param name="destinationMoles">The destination's moles of the same gas before the deposit.</param>
+    /// <remarks>
+    ///     A caller that pays for reading <paramref name="destinationMoles" /> can test
+    ///     <c>molesDiffused &lt; MinimumTrackedMoles</c> first, because a larger deposit is never dropped.
+    /// </remarks>
+    internal static bool IsSuppressed(Mole molesDiffused, Mole destinationMoles)
+    {
+        return molesDiffused < AtmosSolverConstants.MinimumTrackedMoles &&
+               destinationMoles + molesDiffused < AtmosSolverConstants.MinimumTrackedMoles;
+    }
+
+    /// <summary>
     ///     Gathers every diffusion mole and thermal-energy delta owed to the destination voxels in one tile.
     /// </summary>
     /// <param name="workspace">The workspace containing resolved neighbors, diffusion transfers, and deltas.</param>
@@ -366,11 +381,8 @@ internal static class SpeciesDiffusionKernel
 
                     if (!source.IsSelf)
                     {
-                        if (molesDiffused < AtmosSolverConstants.MinimumTrackedMoles &&
-                            destinationMoles + molesDiffused < AtmosSolverConstants.MinimumTrackedMoles)
-                        {
+                        if (IsSuppressed(molesDiffused, destinationMoles))
                             continue;
-                        }
 
                         moleDelta += molesDiffused;
                         energyDelta += energyTransferred;
