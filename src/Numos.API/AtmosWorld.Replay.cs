@@ -558,8 +558,8 @@ public sealed partial class AtmosWorld
         if (registration?.State is null)
             throw new ArgumentException($"World solver '{state.Name}' has no [NumosSerialize] state to set.", nameof(state));
 
+        // No baseline refresh. Replay never runs while recording, and each recording start refreshes every baseline.
         registration.RestoreState(state.State.Span, _config.GasRegistry);
-        registration.StateHash = registration.ComputeStateHash();
     }
 
     internal void Apply(SetAtmosWorldSolverEnabledOperation solver)
