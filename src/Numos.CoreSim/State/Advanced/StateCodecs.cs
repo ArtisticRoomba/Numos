@@ -399,13 +399,17 @@ public static class StateCodecs
                     $"State data references gas '{name}', so reading it needs a gas registry to resolve the name.");
             }
 
-            foreach (GasProperties gas in gases)
+            int index;
+            try
             {
-                if (string.Equals(gas.Name, name, StringComparison.Ordinal))
-                    return gas;
+                index = gases.GasIdToIndex(name);
+            }
+            catch (KeyNotFoundException)
+            {
+                throw new InvalidDataException($"State data references gas '{name}', which the gas registry doesn't contain.");
             }
 
-            throw new InvalidDataException($"State data references gas '{name}', which the gas registry doesn't contain.");
+            return gases[index];
         }
     }
 
