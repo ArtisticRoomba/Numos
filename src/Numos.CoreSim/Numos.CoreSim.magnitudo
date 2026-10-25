@@ -18,6 +18,7 @@ length | Metre | global::System.Single | length=1
 inverseArea | PerSquareMetre | global::System.Single | length=-2
 area | SquareMetre | global::System.Single | length=2
 velocity | MetrePerSecond | global::System.Single | length=1,time=-1
+velocity64 | MetrePerSecond64 | global::System.Double | length=1,time=-1
 momentum | KilogramMetrePerSecond | global::System.Single | mass=1,length=1,time=-1
 momentum64 | KilogramMetrePerSecond64 | global::System.Double | mass=1,length=1,time=-1
 density | KilogramPerCubicMetre | global::System.Single | mass=1,length=-3
@@ -57,6 +58,7 @@ concentrationPerSecond64 | ConcentrationPerSecond64 | global::System.Double | am
 massRate | KilogramPerSecond | global::System.Single | mass=1,time=-1
 amountRate | MolePerSecond | global::System.Single | amount=1,time=-1
 power | Watt | global::System.Single | mass=1,length=2,time=-3
+power64 | Watt64 | global::System.Double | mass=1,length=2,time=-3
 force | Newton | global::System.Single | mass=1,length=1,time=-2
 
 

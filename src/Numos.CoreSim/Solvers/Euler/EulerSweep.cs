@@ -899,7 +899,7 @@ internal static class EulerSweep
         private readonly Watt[] _faceEnergy;
 
         /// <summary>
-        ///     The same arrays and constants as plain floats, for <see cref="EulerCellKernel" />.
+        ///     The same arrays and constants, for <see cref="EulerCellKernel" />.
         /// </summary>
         public readonly EulerCellRun Run;
 

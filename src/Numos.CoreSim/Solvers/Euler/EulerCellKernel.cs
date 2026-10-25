@@ -3,21 +3,23 @@ using System.Numerics;
 namespace Numos.CoreSim.Solvers.Euler;
 
 /// <summary>
-///     The arrays and constants of the cell update of one bundle, as plain floats for <see cref="EulerCellKernel" />.
+///     The arrays and constants of the cell update of one bundle, for <see cref="EulerCellKernel" />.
 /// </summary>
 /// <remarks>
-///     The kernel works on <see cref="Vector{T}" /> lanes, which carry no units.
 ///     <see cref="EulerSweep" /> fills the struct from the same arrays its scalar cell update uses.
 /// </remarks>
 internal readonly struct EulerCellRun
 {
     public EulerCellRun(
-        int axis, float timeStep, float maxVelocity, float volume, float pressurePerMoleKelvin,
-        float[] readNormal, float[] readTangential1, float[] readTangential2, double[] readEnergy,
-        float[] writeNormal, float[] writeTangential1, float[] writeTangential2, double[] writeEnergy,
-        float[] writeMass, float[] writeTotalMoles, double[] writeHeatCapacity, EulerChunkState cells,
-        float[] faceNormal, float[] faceTangential1, float[] faceTangential2, float[] faceEnergy,
-        float[] mass, float[] totalMoles, double[] heatCapacity, bool[] nonFiniteSpecies)
+        int axis, Second timeStep, MetrePerSecond maxVelocity, CubicMetre volume,
+        PascalPerMoleKelvin pressurePerMoleKelvin,
+        KilogramMetrePerSecond[] readNormal, KilogramMetrePerSecond[] readTangential1,
+        KilogramMetrePerSecond[] readTangential2, Joule64[] readEnergy,
+        KilogramMetrePerSecond[] writeNormal, KilogramMetrePerSecond[] writeTangential1,
+        KilogramMetrePerSecond[] writeTangential2, Joule64[] writeEnergy,
+        Kilogram[] writeMass, Mole[] writeTotalMoles, JoulePerKelvin64[] writeHeatCapacity, EulerChunkState cells,
+        Newton[] faceNormal, Newton[] faceTangential1, Newton[] faceTangential2, Watt[] faceEnergy,
+        Kilogram[] mass, Mole[] totalMoles, JoulePerKelvin64[] heatCapacity, bool[] nonFiniteSpecies)
     {
         Axis = axis;
         TimeStep = timeStep;
@@ -47,37 +49,37 @@ internal readonly struct EulerCellRun
     }
 
     public readonly int Axis;
-    public readonly float TimeStep;
-    public readonly float MaxVelocity;
-    public readonly float Volume;
-    public readonly float PressurePerMoleKelvin;
+    public readonly Second TimeStep;
+    public readonly MetrePerSecond MaxVelocity;
+    public readonly CubicMetre Volume;
+    public readonly PascalPerMoleKelvin PressurePerMoleKelvin;
 
     /// <summary>
     ///     Read-buffer momentum along the sweep axis and along the two axes after it in cyclic order.
     /// </summary>
-    public readonly float[] ReadNormal;
-    public readonly float[] ReadTangential1;
-    public readonly float[] ReadTangential2;
-    public readonly double[] ReadEnergy;
+    public readonly KilogramMetrePerSecond[] ReadNormal;
+    public readonly KilogramMetrePerSecond[] ReadTangential1;
+    public readonly KilogramMetrePerSecond[] ReadTangential2;
+    public readonly Joule64[] ReadEnergy;
 
     /// <summary>
     ///     Write-buffer momentum arrays, picked the same way as the read ones.
     /// </summary>
-    public readonly float[] WriteNormal;
-    public readonly float[] WriteTangential1;
-    public readonly float[] WriteTangential2;
-    public readonly double[] WriteEnergy;
-    public readonly float[] WriteMass;
-    public readonly float[] WriteTotalMoles;
-    public readonly double[] WriteHeatCapacity;
+    public readonly KilogramMetrePerSecond[] WriteNormal;
+    public readonly KilogramMetrePerSecond[] WriteTangential1;
+    public readonly KilogramMetrePerSecond[] WriteTangential2;
+    public readonly Joule64[] WriteEnergy;
+    public readonly Kilogram[] WriteMass;
+    public readonly Mole[] WriteTotalMoles;
+    public readonly JoulePerKelvin64[] WriteHeatCapacity;
     public readonly EulerChunkState Cells;
-    public readonly float[] FaceNormal;
-    public readonly float[] FaceTangential1;
-    public readonly float[] FaceTangential2;
-    public readonly float[] FaceEnergy;
-    public readonly float[] Mass;
-    public readonly float[] TotalMoles;
-    public readonly double[] HeatCapacity;
+    public readonly Newton[] FaceNormal;
+    public readonly Newton[] FaceTangential1;
+    public readonly Newton[] FaceTangential2;
+    public readonly Watt[] FaceEnergy;
+    public readonly Kilogram[] Mass;
+    public readonly Mole[] TotalMoles;
+    public readonly JoulePerKelvin64[] HeatCapacity;
     public readonly bool[] NonFiniteSpecies;
 }
 
@@ -124,12 +126,12 @@ internal static class EulerCellKernel
     /// <returns>Number of cells done, a multiple of <see cref="Width" /> that is at most <paramref name="count" />.</returns>
     internal static int UpdateRun(
         in EulerCellRun run, int firstVoxel, int firstCell, int behind, int ahead, int count,
-        ref int clampedVelocity, ref int nonFiniteCells, ref float maxSignalSpeed)
+        ref int clampedVelocity, ref int nonFiniteCells, ref MetrePerSecond maxSignalSpeed)
     {
         int width = Vector<float>.Count;
         int halfWidth = Vector<double>.Count;
         EulerChunkState cells = run.Cells;
-        Span<float> signal = stackalloc float[width];
+        Span<MetrePerSecond> signal = stackalloc MetrePerSecond[width];
         Span<int> flags = stackalloc int[width];
         int done = 0;
         for (; done + width <= count; done += width)
@@ -139,31 +141,33 @@ internal static class EulerCellKernel
             int back = behind + done;
             int front = ahead + done;
 
-            var timeStep = new Vector<float>(run.TimeStep);
-            var normal = new Vector<float>(run.ReadNormal, voxel) -
+            Vector<Second> timeStep = new Vector<float>(run.TimeStep);
+            Vector<KilogramMetrePerSecond> normal = new Vector<float>(run.ReadNormal, voxel) -
                          timeStep * (new Vector<float>(run.FaceNormal, front) - new Vector<float>(run.FaceNormal, back));
-            var tangential1 = new Vector<float>(run.ReadTangential1, voxel) -
+            Vector<KilogramMetrePerSecond> tangential1 = new Vector<float>(run.ReadTangential1, voxel) -
                               timeStep * (new Vector<float>(run.FaceTangential1, front) -
                                           new Vector<float>(run.FaceTangential1, back));
-            var tangential2 = new Vector<float>(run.ReadTangential2, voxel) -
+            Vector<KilogramMetrePerSecond> tangential2 = new Vector<float>(run.ReadTangential2, voxel) -
                               timeStep * (new Vector<float>(run.FaceTangential2, front) -
                                           new Vector<float>(run.FaceTangential2, back));
 
             // Energy difference in double: (double)ahead - behind, scaled by (double)timeStep.
-            Vector.Widen(new Vector<float>(run.FaceEnergy, front), out Vector<double> frontLow, out Vector<double> frontHigh);
-            Vector.Widen(new Vector<float>(run.FaceEnergy, back), out Vector<double> backLow, out Vector<double> backHigh);
-            var timeStepDouble = new Vector<double>(run.TimeStep);
-            Vector<double> energyLow = new Vector<double>(run.ReadEnergy, voxel) -
+            Vector.Widen(
+                new Vector<float>(run.FaceEnergy, front), out Vector<Watt64> frontLow, out Vector<Watt64> frontHigh);
+            Vector.Widen(
+                new Vector<float>(run.FaceEnergy, back), out Vector<Watt64> backLow, out Vector<Watt64> backHigh);
+            Vector<Second64> timeStepDouble = new Vector<double>(run.TimeStep);
+            Vector<Joule64> energyLow = new Vector<double>(run.ReadEnergy, voxel) -
                                        timeStepDouble * (frontLow - backLow);
-            Vector<double> energyHigh = new Vector<double>(run.ReadEnergy, voxel + halfWidth) -
+            Vector<Joule64> energyHigh = new Vector<double>(run.ReadEnergy, voxel + halfWidth) -
                                         timeStepDouble * (frontHigh - backHigh);
             energyLow.CopyTo(run.WriteEnergy, voxel);
             energyHigh.CopyTo(run.WriteEnergy, voxel + halfWidth);
 
-            var mass = new Vector<float>(run.Mass, cell);
-            var moles = new Vector<float>(run.TotalMoles, cell);
-            Vector<double> heatLow = new Vector<double>(run.HeatCapacity, cell);
-            Vector<double> heatHigh = new Vector<double>(run.HeatCapacity, cell + halfWidth);
+            Vector<Kilogram> mass = new Vector<float>(run.Mass, cell);
+            Vector<Mole> moles = new Vector<float>(run.TotalMoles, cell);
+            Vector<JoulePerKelvin64> heatLow = new Vector<double>(run.HeatCapacity, cell);
+            Vector<JoulePerKelvin64> heatHigh = new Vector<double>(run.HeatCapacity, cell + halfWidth);
             mass.CopyTo(run.WriteMass, voxel);
             moles.CopyTo(run.WriteTotalMoles, voxel);
             heatLow.CopyTo(run.WriteHeatCapacity, voxel);
@@ -173,9 +177,9 @@ internal static class EulerCellKernel
             Vector<int> trace = Vector.LessThanOrEqual(mass, zero) |
                                 Vector.LessThan(moles, new Vector<float>(AtmosSolverConstants.MinimumTrackedMoles));
 
-            Vector<float> momentumX;
-            Vector<float> momentumY;
-            Vector<float> momentumZ;
+            Vector<KilogramMetrePerSecond> momentumX;
+            Vector<KilogramMetrePerSecond> momentumY;
+            Vector<KilogramMetrePerSecond> momentumZ;
             switch (run.Axis)
             {
                 case 0:
@@ -195,16 +199,16 @@ internal static class EulerCellKernel
                     break;
             }
 
-            Vector<float> inverseMass = Vector<float>.One / mass;
-            Vector<float> velocityX = momentumX * inverseMass;
-            Vector<float> velocityY = momentumY * inverseMass;
-            Vector<float> velocityZ = momentumZ * inverseMass;
-            Vector<float> speedRatio =
+            Vector<PerKilogram> inverseMass = Vector<float>.One / mass;
+            Vector<MetrePerSecond> velocityX = momentumX * inverseMass;
+            Vector<MetrePerSecond> velocityY = momentumY * inverseMass;
+            Vector<MetrePerSecond> velocityZ = momentumZ * inverseMass;
+            Vector<Scalar> speedRatio =
                 (velocityX * velocityX + velocityY * velocityY + velocityZ * velocityZ) /
                 new Vector<float>(run.MaxVelocity * run.MaxVelocity);
 
             Vector<int> clamp = Vector.AndNot(Vector.GreaterThan(speedRatio, Vector<float>.One), trace);
-            Vector<float> scale = Vector<float>.One / Vector.SquareRoot(speedRatio);
+            Vector<Scalar> scale = Vector<float>.One / Vector.SquareRoot(speedRatio);
             momentumX = Vector.ConditionalSelect(clamp, momentumX * scale, momentumX);
             momentumY = Vector.ConditionalSelect(clamp, momentumY * scale, momentumY);
             momentumZ = Vector.ConditionalSelect(clamp, momentumZ * scale, momentumZ);
@@ -218,26 +222,30 @@ internal static class EulerCellKernel
             velocityY = momentumY * inverseMass;
             velocityZ = momentumZ * inverseMass;
 
-            Vector.Widen(momentumX, out Vector<double> pxLow, out Vector<double> pxHigh);
-            Vector.Widen(momentumY, out Vector<double> pyLow, out Vector<double> pyHigh);
-            Vector.Widen(momentumZ, out Vector<double> pzLow, out Vector<double> pzHigh);
-            Vector.Widen(velocityX, out Vector<double> vxLow, out Vector<double> vxHigh);
-            Vector.Widen(velocityY, out Vector<double> vyLow, out Vector<double> vyHigh);
-            Vector.Widen(velocityZ, out Vector<double> vzLow, out Vector<double> vzHigh);
-            var half = new Vector<double>(0.5d);
-            Vector<double> kineticLow = half * (pxLow * vxLow + pyLow * vyLow + pzLow * vzLow);
-            Vector<double> kineticHigh = half * (pxHigh * vxHigh + pyHigh * vyHigh + pzHigh * vzHigh);
-            Vector<double> internalLow = Vector.Max(Vector<double>.Zero, energyLow - kineticLow);
-            Vector<double> internalHigh = Vector.Max(Vector<double>.Zero, energyHigh - kineticHigh);
-            Vector<float> temperature = Vector.Narrow(internalLow / heatLow, internalHigh / heatHigh);
+            Vector.Widen(
+                momentumX, out Vector<KilogramMetrePerSecond64> pxLow, out Vector<KilogramMetrePerSecond64> pxHigh);
+            Vector.Widen(
+                momentumY, out Vector<KilogramMetrePerSecond64> pyLow, out Vector<KilogramMetrePerSecond64> pyHigh);
+            Vector.Widen(
+                momentumZ, out Vector<KilogramMetrePerSecond64> pzLow, out Vector<KilogramMetrePerSecond64> pzHigh);
+            Vector.Widen(velocityX, out Vector<MetrePerSecond64> vxLow, out Vector<MetrePerSecond64> vxHigh);
+            Vector.Widen(velocityY, out Vector<MetrePerSecond64> vyLow, out Vector<MetrePerSecond64> vyHigh);
+            Vector.Widen(velocityZ, out Vector<MetrePerSecond64> vzLow, out Vector<MetrePerSecond64> vzHigh);
+            Vector<Scalar64> half = new Vector<double>(0.5d);
+            Vector<Joule64> kineticLow = half * (pxLow * vxLow + pyLow * vyLow + pzLow * vzLow);
+            Vector<Joule64> kineticHigh = half * (pxHigh * vxHigh + pyHigh * vyHigh + pzHigh * vzHigh);
+            Vector<Joule64> internalLow = Vector.Max(Vector<double>.Zero, energyLow - kineticLow);
+            Vector<Joule64> internalHigh = Vector.Max(Vector<double>.Zero, energyHigh - kineticHigh);
+            Vector<Kelvin> temperature = Vector.Narrow(internalLow / heatLow, internalHigh / heatHigh);
 
-            Vector<float> pressure = moles * temperature * new Vector<float>(run.PressurePerMoleKelvin);
-            Vector<float> molarGasTerm = moles * new Vector<float>(AtmosPhysicalConstants.MolarGasConstant);
-            Vector.Widen(molarGasTerm, out Vector<double> gasLow, out Vector<double> gasHigh);
-            Vector<float> gamma = Vector.Narrow((heatLow + gasLow) / heatLow, (heatHigh + gasHigh) / heatHigh);
-            Vector<float> soundSpeed = Vector.SquareRoot(gamma * molarGasTerm * temperature * inverseMass);
-            var volumeDouble = new Vector<double>(run.Volume);
-            Vector<float> energyDensity = Vector.Narrow(energyLow / volumeDouble, energyHigh / volumeDouble);
+            Vector<Pascal> pressure = moles * temperature * new Vector<float>(run.PressurePerMoleKelvin);
+            Vector<JoulePerKelvin> molarGasTerm = moles * new Vector<float>(AtmosPhysicalConstants.MolarGasConstant);
+            Vector.Widen(molarGasTerm, out Vector<JoulePerKelvin64> gasLow, out Vector<JoulePerKelvin64> gasHigh);
+            Vector<Scalar> gamma = Vector.Narrow((heatLow + gasLow) / heatLow, (heatHigh + gasHigh) / heatHigh);
+            Vector<MetrePerSecond> soundSpeed = Vector.SquareRoot(gamma * molarGasTerm * temperature * inverseMass);
+            Vector<CubicMetre64> volumeDouble = new Vector<double>(run.Volume);
+            Vector<JoulePerCubicMetre> energyDensity =
+                Vector.Narrow(energyLow / volumeDouble, energyHigh / volumeDouble);
 
             Vector<float> infinity = new Vector<float>(float.PositiveInfinity);
             Vector<int> finite = Vector.LessThan(Vector.Abs(temperature), infinity) &
@@ -251,7 +259,7 @@ internal static class EulerCellKernel
             Vector<int> notFinite = Vector.AndNot(evaluated, finite);
             Vector<float> gasBits = Vector.AsVectorSingle(gas);
 
-            Vector<float> signalSpeed = Vector.Max(
+            Vector<MetrePerSecond> signalSpeed = Vector.Max(
                                             Vector.Max(Vector.Abs(velocityX), Vector.Abs(velocityY)),
                                             Vector.Abs(velocityZ)) + soundSpeed;
 
@@ -289,7 +297,7 @@ internal static class EulerCellKernel
         return done;
     }
 
-    private static float[] PickMomentum(in EulerCellRun run, int axisOfArray)
+    private static KilogramMetrePerSecond[] PickMomentum(in EulerCellRun run, int axisOfArray)
     {
         // The normal array belongs to the sweep axis. The next two follow in cyclic order.
         int offset = (axisOfArray - run.Axis + 3) % 3;
