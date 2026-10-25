@@ -80,6 +80,7 @@ public sealed record SimulationConfigurationReport(
     float VoxelVolumeM3,
     float SaturationReferencePressurePa,
     float DefaultDiffusionCoefficient,
+    float DefaultThermalConductivity,
     float SpaceTemperatureK,
     float BulkFlowCoefficient,
     float VacuumThresholdPa,
@@ -90,6 +91,10 @@ public sealed record SimulationConfigurationReport(
     float MaxPressureTransferFractionPerNeighbor,
     float AccumulatorWakeThresholdPa,
     int AccumulatorMaxAliveTicks,
+    float FlameSpeedScale,
+    float MinimumFlameSpeed,
+    bool IgnitionTransferEnabled,
+    float TransferSeedFraction,
     GasConfigurationReport[] Gases);
 
 /// <summary>

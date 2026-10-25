@@ -51,6 +51,10 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
     public Scalar MaxPressureTransferFractionPerNeighbor { get; private set; }
     public Pascal AccumulatorWakeThreshold { get; private set; }
     public int AccumulatorMaxAliveTicks { get; private set; }
+    public Scalar FlameSpeedScale { get; private set; }
+    public MeterPerSecond MinimumFlameSpeed { get; private set; }
+    public bool IgnitionTransferEnabled { get; private set; }
+    public Scalar TransferSeedFraction { get; private set; }
 
     public JoulePerMoleKelvin DefaultMolarHeatCapacityAtConstantVolume { get; private set; }
     public SquareMetrePerSecond DefaultDiffusionCoefficient { get; private set; }
@@ -186,7 +190,10 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
 
         AccumulatorWakeThreshold = FloatMath.GetNonnegativeFinite(config.AccumulatorWakeThreshold);
         AccumulatorMaxAliveTicks = Math.Max(0, config.AccumulatorMaxAliveTicks);
-
+        FlameSpeedScale = Math.Max(0, config.FlameSpeedScale);
+        MinimumFlameSpeed = Math.Max(0, config.MinimumFlameSpeed);
+        IgnitionTransferEnabled = config.IgnitionTransferEnabled;
+        TransferSeedFraction = Math.Max(0, config.TransferSeedFraction);
 
         SolverConfigurations = config.SolverConfigurations;
 

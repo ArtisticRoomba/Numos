@@ -213,6 +213,7 @@ internal sealed class ConfigurationPatch
     public float? VoxelVolumeM3 { get; init; }
     public float? SaturationReferencePressurePa { get; init; }
     public float? DefaultDiffusionCoefficient { get; init; }
+    public float? DefaultThermalConductivity { get; init; }
     public float? SpaceTemperatureK { get; init; }
     public float? BulkFlowCoefficient { get; init; }
     public float? VacuumThresholdPa { get; init; }
@@ -223,6 +224,10 @@ internal sealed class ConfigurationPatch
     public float? MaxPressureTransferFractionPerNeighbor { get; init; }
     public float? AccumulatorWakeThresholdPa { get; init; }
     public int? AccumulatorMaxAliveTicks { get; init; }
+    public float? FlameSpeedScale { get; init; }
+    public float? MinimumFlameSpeed { get; init; }
+    public bool? IgnitionTransferEnabled { get; init; }
+    public float? TransferSeedFraction { get; init; }
 
     /// <summary>
     ///     Rejects values outside the domain of their field, as the viewer does.
@@ -240,6 +245,7 @@ internal sealed class ConfigurationPatch
         Check(AtmosConfigFields.VoxelVolume, VoxelVolumeM3, ConfigDomain.Positive);
         Check(AtmosConfigFields.SaturationReferencePressure, SaturationReferencePressurePa, ConfigDomain.Positive);
         Check(AtmosConfigFields.DefaultDiffusionCoefficient, DefaultDiffusionCoefficient, ConfigDomain.NonNegative);
+        Check(AtmosConfigFields.DefaultThermalConductivity, DefaultThermalConductivity, ConfigDomain.NonNegative);
         Check(AtmosConfigFields.SpaceTemperature, SpaceTemperatureK, ConfigDomain.Positive);
         Check(AtmosConfigFields.BulkFlowCoefficient, BulkFlowCoefficient, ConfigDomain.UnitInterval);
         Check(AtmosConfigFields.VacuumThreshold, VacuumThresholdPa, ConfigDomain.NonNegative);
@@ -284,6 +290,9 @@ internal sealed class ConfigurationPatch
         if (DefaultDiffusionCoefficient.HasValue)
             config.DefaultDiffusionCoefficient = DefaultDiffusionCoefficient.Value;
 
+        if (DefaultThermalConductivity.HasValue)
+            config.DefaultThermalConductivity = DefaultThermalConductivity.Value;
+
         if (SpaceTemperatureK.HasValue)
             config.SpaceTemperature = SpaceTemperatureK.Value;
 
@@ -313,5 +322,17 @@ internal sealed class ConfigurationPatch
 
         if (AccumulatorMaxAliveTicks.HasValue)
             config.AccumulatorMaxAliveTicks = AccumulatorMaxAliveTicks.Value;
+
+        if (FlameSpeedScale.HasValue)
+            config.FlameSpeedScale = FlameSpeedScale.Value;
+
+        if (MinimumFlameSpeed.HasValue)
+            config.MinimumFlameSpeed = MinimumFlameSpeed.Value;
+
+        if (IgnitionTransferEnabled.HasValue)
+            config.IgnitionTransferEnabled = IgnitionTransferEnabled.Value;
+
+        if (TransferSeedFraction.HasValue)
+            config.TransferSeedFraction = TransferSeedFraction.Value;
     }
 }

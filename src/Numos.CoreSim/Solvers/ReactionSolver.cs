@@ -34,26 +34,6 @@ internal class ReactionSolver : IAtmosSolverStage
     // If the seed is set above this it will break as it could then spread many voxels in one tick.
     private const Scalar MaximumSeedFraction = 0.5f;
 
-    internal Scalar FlameSpeedScale { get; set; } = 1f;
-
-    /// <summary>
-    ///     Slowest flame speed that still sustains a flame. Below it a flame kernel recedes, and a voxel that
-    ///     burns across its whole volume stops counting as ignited. The gas itself keeps reacting normally.
-    /// </summary>
-    internal MeterPerSecond MinimumFlameSpeed { get; set; } = 0.01f;
-
-    /// <summary>
-    ///     Whether a fully ignited voxel may start a flame kernel in its face neighbors. Heat transfer is
-    ///     the main way fire spreads between voxels; this is only a supplement.
-    /// </summary>
-    internal bool IgnitionTransferEnabled { get; set; } = true;
-
-    /// <summary>
-    ///     Fraction of a voxel that a transferred flame kernel starts with. After that the kernel grows or
-    ///     recedes by the same flame speed rules as any other flame. Capped below <see cref="MaximumSeedFraction"/>.
-    /// </summary>
-    internal Scalar TransferSeedFraction { get; set; } = 0.01f;
-
     // Set by the voxel pass if any voxel is completely ignited, so the transfer stage costs nothing otherwise.
     private volatile bool _anyFullyIgnited;
 
@@ -101,11 +81,11 @@ internal class ReactionSolver : IAtmosSolverStage
             context.Chunks.Length,
             new ProcessChunkAction(this, context.Chunks, context.TickConfig, tables, awakeChunkCount));
 
-        if (IgnitionTransferEnabled && _anyFullyIgnited)
+        if (context.TickConfig.IgnitionTransferEnabled && _anyFullyIgnited)
         {
             ParallelPhase.Run(
                 context.Chunks.Length,
-                new TransferIgnitionAction(this, context.Chunks, context));
+                new TransferIgnitionAction(this, context.Chunks, context.TickConfig, context));
         }
     }
 
@@ -214,14 +194,15 @@ internal class ReactionSolver : IAtmosSolverStage
     ///     Estimates the flame speed from the thermal flame theory <c>speed = scale * sqrt(diffusivity * rate)</c>,
     ///     where the rate is how fast the limiting reactant is being used up.
     /// </summary>
+    /// <param name="config"></param>
     /// <param name="depletionRate">Fractional depletion rate of the limiting reactant, see <see cref="ComputeDepletionRate" />.</param>
     /// <param name="thermalDiffusivity">Thermal diffusivity of the gas, see <see cref="ComputeThermalDiffusivity" />.</param>
-    internal MeterPerSecond ComputeFlameSpeed(PerSecond depletionRate, SquareMetrePerSecond thermalDiffusivity)
+    internal MeterPerSecond ComputeFlameSpeed(IAtmosConfig config, PerSecond depletionRate, SquareMetrePerSecond thermalDiffusivity)
     {
         if (!(depletionRate > 0f))
             return 0f;
 
-        return FlameSpeedScale * MathF.Sqrt(thermalDiffusivity * depletionRate);
+        return config.FlameSpeedScale * MathF.Sqrt(thermalDiffusivity * depletionRate);
     }
 
     /// <summary>
@@ -461,15 +442,16 @@ internal class ReactionSolver : IAtmosSolverStage
     ///     while the pass runs.
     /// </summary>
     /// <param name="chunk">The chunk whose voxels receive ignition from their neighbors.</param>
+    /// <param name="config"></param>
     /// <param name="context">Supplies the neighbor chunk lookup.</param>
-    private void TransferIgnition(AtmosChunk chunk, AtmosSolverExecutionContext context)
+    private void TransferIgnition(AtmosChunk chunk, IAtmosConfig config, AtmosSolverExecutionContext context)
     {
         // TODO: This currently finds donors from neighbours, it should really find neighbours from donors
         // This is not trivial with parralisation in mind
         if (!chunk.IsAwake || chunk.ActiveAirCount == 0)
             return;
 
-        Scalar seedFraction = MathF.Min(TransferSeedFraction, MaximumSeedFraction);
+        Scalar seedFraction = MathF.Min(config.TransferSeedFraction, MaximumSeedFraction);
         if (!(seedFraction > 0f))
             return;
 
@@ -701,12 +683,12 @@ internal class ReactionSolver : IAtmosSolverStage
             PerSecond depletionRate = ComputeDepletionRate(mixtureVector, mixtureLength, volume, reactions, gasData, intrinsicRates);
             Kelvin conductivityTemperature = (currentTemperature + ignitedVolumeTemp) / 2f;
             SquareMetrePerSecond thermalDiffusivity = ComputeThermalDiffusivity(mixtureVector, mixtureLength, volume, conductivityTemperature, config);
-            flameSpeed = ComputeFlameSpeed(depletionRate, thermalDiffusivity);
-            sustained = flameSpeed >= MinimumFlameSpeed;
+            flameSpeed = ComputeFlameSpeed(config, depletionRate, thermalDiffusivity);
+            sustained = flameSpeed >= config.MinimumFlameSpeed;
 
             // Signed front advance in voxel edge lengths: the flame grows at the flame speed while it is
             // sustained, and recedes by how far the speed falls short of the minimum otherwise.
-            MeterPerSecond frontSpeed = sustained ? flameSpeed : flameSpeed - MinimumFlameSpeed;
+            MeterPerSecond frontSpeed = sustained ? flameSpeed : flameSpeed - config.MinimumFlameSpeed;
             Scalar frontAdvance = frontSpeed * deltaTime / MathF.Cbrt(volume);
             grownIgnitionPercent = GrowIgnition(ignitionPercent, frontAdvance);
             burningFraction = (ignitionPercent + grownIgnitionPercent) / 2f;
@@ -884,8 +866,8 @@ internal class ReactionSolver : IAtmosSolverStage
         {
             PerSecond depletionRate = ComputeDepletionRate(mixtureVector, mixtureLength, volume, reactions, gasData, intrinsicRates);
             SquareMetrePerSecond thermalDiffusivity = ComputeThermalDiffusivity(mixtureVector, mixtureLength, volume, currentTemperature, config);
-            flameSpeed = ComputeFlameSpeed(depletionRate, thermalDiffusivity);
-            sustained = flameSpeed >= MinimumFlameSpeed;
+            flameSpeed = ComputeFlameSpeed(config, depletionRate, thermalDiffusivity);
+            sustained = flameSpeed >= config.MinimumFlameSpeed;
         }
 
         // Apply the mixture change. This includes heat, since all change equations contain the energy balance.
@@ -979,11 +961,11 @@ internal class ReactionSolver : IAtmosSolverStage
         }
     }
 
-    private readonly struct TransferIgnitionAction(ReactionSolver solver, AtmosChunk[] chunks, AtmosSolverExecutionContext context) : IAction
+    private readonly struct TransferIgnitionAction(ReactionSolver solver, AtmosChunk[] chunks, IAtmosConfig config, AtmosSolverExecutionContext context) : IAction
     {
         public void Invoke(int index)
         {
-            solver.TransferIgnition(chunks[index], context);
+            solver.TransferIgnition(chunks[index], config, context);
         }
     }
 

@@ -52,6 +52,11 @@ public static class AtmosConfigFields
         "Effective diffusivity for gases missing from the registry. Each tick a voxel sends D·n·dt/dx² moles to " +
         "each neighbor.");
 
+    public readonly static AtmosConfigFieldInfo DefaultThermalConductivity = new(
+        "Default thermal conductivity",
+        "m²/s",
+        "Internal thermal conductivity of a voxel");
+
     public readonly static AtmosConfigFieldInfo SpaceTemperature = new(
         "Space temperature",
         "K",

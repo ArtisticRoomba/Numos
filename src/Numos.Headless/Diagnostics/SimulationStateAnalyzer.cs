@@ -205,6 +205,7 @@ public static class SimulationStateAnalyzer
             config.VoxelVolume,
             config.SaturationReferencePressure,
             config.DefaultDiffusionCoefficient,
+            config.DefaultThermalConductivity,
             config.SpaceTemperature,
             config.BulkFlowCoefficient,
             config.VacuumThreshold,
@@ -215,6 +216,10 @@ public static class SimulationStateAnalyzer
             config.MaxPressureTransferFractionPerNeighbor,
             config.AccumulatorWakeThreshold,
             config.AccumulatorMaxAliveTicks,
+            config.FlameSpeedScale,
+            config.MinimumFlameSpeed,
+            config.IgnitionTransferEnabled,
+            config.TransferSeedFraction,
             gases);
     }
 

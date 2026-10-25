@@ -51,6 +51,10 @@ public class AtmosConfig : IAtmosConfig
         MaxPressureTransferFractionPerNeighbor = source.MaxPressureTransferFractionPerNeighbor;
         AccumulatorWakeThreshold = source.AccumulatorWakeThreshold;
         AccumulatorMaxAliveTicks = source.AccumulatorMaxAliveTicks;
+        FlameSpeedScale = source.FlameSpeedScale;
+        MinimumFlameSpeed = source.MinimumFlameSpeed;
+        IgnitionTransferEnabled = source.IgnitionTransferEnabled;
+        TransferSeedFraction = source.TransferSeedFraction;
     }
 
     /// <summary>
@@ -231,6 +235,31 @@ public class AtmosConfig : IAtmosConfig
     /// </summary>
     public PascalPerMoleKelvin PressurePerMoleKelvin =>
         AtmosPhysicalConstants.MolarGasConstant / GetVoxelVolume();
+
+    /// <summary>
+    ///     Flame speed scalar
+    /// </summary>
+    public Scalar FlameSpeedScale { get; set; } = AtmosConfigDefaults.FlameSpeedScale;
+
+    /// <summary>
+    ///     Slowest flame speed that still sustains a flame. Below it a flame kernel recedes, and a voxel that
+    ///     burns across its whole volume stops counting as ignited. The gas itself keeps reacting normally.
+    /// </summary>
+    [Quantity("velocity")]
+    public MeterPerSecond MinimumFlameSpeed { get; set; } = AtmosConfigDefaults.MinimumFlameSpeed;
+
+    /// <summary>
+    ///     Whether a fully ignited voxel may start a flame kernel in its face neighbors. Heat transfer is
+    ///     the main way fire spreads between voxels; this is only a supplement.
+    /// </summary>
+    public bool IgnitionTransferEnabled { get; set; } = AtmosConfigDefaults.IgnitionTransferEnabled;
+
+    /// <summary>
+    ///     Fraction of a voxel that a transferred flame kernel starts with. After that the kernel grows or
+    ///     recedes by the same flame speed rules as any other flame.
+    /// </summary>
+    public Scalar TransferSeedFraction { get; set; } = AtmosConfigDefaults.TransferSeedFraction;
+
 
     /// <summary>
     ///     Returns the temperature the solvers use for a stored voxel temperature.

@@ -20,7 +20,10 @@ internal interface IAtmosConfig
     Pascal AccumulatorWakeThreshold { get; }
     int AccumulatorMaxAliveTicks { get; }
     PascalPerMoleKelvin PressurePerMoleKelvin { get; }
-
+    Scalar FlameSpeedScale { get; }
+    MeterPerSecond MinimumFlameSpeed { get; }
+    bool IgnitionTransferEnabled { get; }
+    Scalar TransferSeedFraction { get; }
     int GasPropertyCount { get; }
     Kelvin GetValidatedTemp(Kelvin storedTemperature);
     CubicMetre GetVoxelVolume();

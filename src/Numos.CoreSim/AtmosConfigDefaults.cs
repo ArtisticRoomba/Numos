@@ -111,4 +111,28 @@ public static class AtmosConfigDefaults
     ///     reads it.
     /// </summary>
     public const int AccumulatorMaxAliveTicks = 20;
+    
+    /// <summary>
+    ///     Flame speed scalar
+    /// </summary>
+    public const Scalar FlameSpeedScale = 1f;
+
+    /// <summary>
+    ///     Slowest flame speed that still sustains a flame. Below it a flame kernel recedes, and a voxel that
+    ///     burns across its whole volume stops counting as ignited. The gas itself keeps reacting normally.
+    /// </summary>
+    public const MeterPerSecond MinimumFlameSpeed = 0.01f;
+
+    /// <summary>
+    ///     Whether a fully ignited voxel may start a flame kernel in its face neighbors. Heat transfer is
+    ///     the main way fire spreads between voxels; this is only a supplement.
+    /// </summary>
+    public const bool IgnitionTransferEnabled = true;
+
+    /// <summary>
+    ///     Fraction of a voxel that a transferred flame kernel starts with. After that the kernel grows or
+    ///     recedes by the same flame speed rules as any other flame.
+    /// </summary>
+    public const Scalar TransferSeedFraction = 0.01f;
+
 }

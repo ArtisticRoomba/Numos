@@ -66,6 +66,10 @@ public sealed class AtmosConfigSnapshot : IAtmosConfig
 
         AccumulatorWakeThreshold = FloatMath.GetNonnegativeFinite(source.AccumulatorWakeThreshold);
         AccumulatorMaxAliveTicks = Math.Max(0, source.AccumulatorMaxAliveTicks);
+        FlameSpeedScale = Math.Max(0, source.FlameSpeedScale);
+        MinimumFlameSpeed = Math.Max(0, source.MinimumFlameSpeed);
+        IgnitionTransferEnabled = source.IgnitionTransferEnabled;
+        TransferSeedFraction = Math.Max(0, source.TransferSeedFraction);
 
         var gasRegistry = new GasRegistry();
         foreach (var sourceProperties in source.GasRegistry)
@@ -167,6 +171,19 @@ public sealed class AtmosConfigSnapshot : IAtmosConfig
     /// <inheritdoc cref="AtmosConfig.PressurePerMoleKelvin" />
     public PascalPerMoleKelvin PressurePerMoleKelvin =>
         AtmosPhysicalConstants.MolarGasConstant / GetVoxelVolume();
+    
+    /// <inheritdoc cref="AtmosConfig.FlameSpeedScale" />
+    public Scalar FlameSpeedScale { get; }
+
+    /// <inheritdoc cref="AtmosConfig.MinimumFlameSpeed" />
+    public MeterPerSecond MinimumFlameSpeed { get; }
+
+    /// <inheritdoc cref="AtmosConfig.IgnitionTransferEnabled" />
+    public bool IgnitionTransferEnabled { get; }
+
+    /// <inheritdoc cref="AtmosConfig.TransferSeedFraction" />
+    public Scalar TransferSeedFraction { get; }
+
 
     /// <inheritdoc cref="AtmosConfig.GetValidatedTemp" />
     public Kelvin GetValidatedTemp(Kelvin storedTemperature)
@@ -338,6 +355,10 @@ public sealed class AtmosConfigSnapshot : IAtmosConfig
                MaxPressureTransferFractionPerNeighbor.Equals(other.MaxPressureTransferFractionPerNeighbor) &&
                AccumulatorWakeThreshold.Equals(other.AccumulatorWakeThreshold) &&
                AccumulatorMaxAliveTicks == other.AccumulatorMaxAliveTicks &&
+               FlameSpeedScale.Equals(other.FlameSpeedScale) &&
+               MinimumFlameSpeed.Equals(other.MinimumFlameSpeed) &&
+               IgnitionTransferEnabled == other.IgnitionTransferEnabled &&
+               TransferSeedFraction.Equals(other.TransferSeedFraction) &&
                GasRegistriesEqual(GasRegistry, other.GasRegistry) &&
                SolverConfigurations.Count == other.SolverConfigurations.Count &&
                SolverConfigurations.Zip(other.SolverConfigurations).All(static pair =>
