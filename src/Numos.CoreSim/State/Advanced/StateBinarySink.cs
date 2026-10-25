@@ -1,6 +1,6 @@
 using System.Buffers;
 using System.Buffers.Binary;
-using System.Text;
+using Numos.CoreSim.Replay;
 
 namespace Numos.CoreSim.State.Advanced;
 
@@ -32,8 +32,6 @@ namespace Numos.CoreSim.State.Advanced;
 /// </example>
 public struct StateBinarySink : IStateSink
 {
-    private static readonly Encoding Utf8 = new UTF8Encoding(false, true);
-
     private byte[] _buffer;
     private int _length;
 
@@ -177,9 +175,9 @@ public struct StateBinarySink : IStateSink
     public void WriteString(string value)
     {
         ArgumentNullException.ThrowIfNull(value);
-        int byteCount = Utf8.GetByteCount(value);
+        int byteCount = AtmosReplayCodec.Utf8.GetByteCount(value);
         WriteInt32(byteCount);
-        Utf8.GetBytes(value, Reserve(byteCount));
+        AtmosReplayCodec.Utf8.GetBytes(value, Reserve(byteCount));
     }
 
     /// <inheritdoc />

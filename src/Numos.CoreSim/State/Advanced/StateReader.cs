@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
+using Numos.CoreSim.Replay;
 
 namespace Numos.CoreSim.State.Advanced;
 
@@ -34,8 +35,6 @@ public ref struct StateReader
     ///     The default limit on how deeply objects may nest.
     /// </summary>
     public const int DefaultMaxDepth = 64;
-
-    private static readonly Encoding Utf8 = new UTF8Encoding(false, true);
 
     private readonly ReadOnlySpan<byte> _data;
     private readonly int _maxStringBytes;
@@ -247,7 +246,7 @@ public ref struct StateReader
         ReadOnlySpan<byte> bytes = Take(length);
         try
         {
-            return Utf8.GetString(bytes);
+            return AtmosReplayCodec.Utf8.GetString(bytes);
         }
         catch (DecoderFallbackException exception)
         {

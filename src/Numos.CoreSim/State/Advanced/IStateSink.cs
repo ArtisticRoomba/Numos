@@ -157,8 +157,6 @@ public interface IStateSink
 /// </example>
 public struct StateHashSink : IStateSink
 {
-    private static readonly System.Text.Encoding Utf8 = new System.Text.UTF8Encoding(false, true);
-
     private AtmosStateHasher _hasher;
 
     /// <summary>
@@ -238,17 +236,17 @@ public struct StateHashSink : IStateSink
     public void WriteString(string value)
     {
         ArgumentNullException.ThrowIfNull(value);
-        int length = Utf8.GetByteCount(value);
+        int length = AtmosReplayCodec.Utf8.GetByteCount(value);
         WriteInt32(length);
         if (length <= 256)
         {
             Span<byte> bytes = stackalloc byte[length];
-            Utf8.GetBytes(value, bytes);
+            AtmosReplayCodec.Utf8.GetBytes(value, bytes);
             _hasher.AddBytes(bytes);
             return;
         }
 
-        _hasher.AddBytes(Utf8.GetBytes(value));
+        _hasher.AddBytes(AtmosReplayCodec.Utf8.GetBytes(value));
     }
 
     /// <inheritdoc />
