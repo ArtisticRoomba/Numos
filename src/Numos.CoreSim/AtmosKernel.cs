@@ -34,8 +34,8 @@ internal sealed partial class AtmosKernel : IDisposable
 
     /// <summary>
     ///     Which built-in transport stages <see cref="Tick" /> runs when the kernel is ticked on its own, outside a
-    ///     world pipeline. The owning simulation sets it from its constructor. Benchmarks set it directly. World ticks
-    ///     ignore it, since the world's pipeline decides which stages run.
+    ///     world pipeline. Benchmarks set it directly. World ticks ignore it, because the world's pipeline decides
+    ///     which stages run.
     /// </summary>
     internal AtmosTransportModel TransportModel { get; set; } = AtmosTransportModel.Euler;
 

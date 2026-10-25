@@ -87,7 +87,6 @@ public sealed partial class AtmosSimulation : IDisposable
         AtmosTransportModel transportModel = AtmosTransportModel.Euler)
         : this(new AtmosWorld(config, transportModel), true, chunkWidth, chunkHeight, chunkDepth)
     {
-        _kernel.TransportModel = transportModel;
     }
 
     /// <summary>
