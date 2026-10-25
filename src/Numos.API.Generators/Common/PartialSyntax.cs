@@ -64,6 +64,18 @@ internal static class PartialSyntax
     }
 
     /// <summary>
+    ///     Whether code in another file of the same assembly can name something declared with
+    ///     <paramref name="accessibility" />, as generated code outside the type does.
+    /// </summary>
+    /// <remarks>
+    ///     This reads one declaration. A nested type is only nameable when every type around it is too.
+    /// </remarks>
+    public static bool IsAccessibleFromNamespace(Accessibility accessibility)
+    {
+        return accessibility is Accessibility.Public or Accessibility.Internal or Accessibility.ProtectedOrInternal;
+    }
+
+    /// <summary>
     ///     Gets the modifiers of a partial member declaration without its <c>partial</c> keyword.
     /// </summary>
     public static string ModifiersWithoutPartial(SyntaxTokenList modifiers)

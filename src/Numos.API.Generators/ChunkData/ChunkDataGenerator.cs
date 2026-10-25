@@ -153,7 +153,7 @@ public sealed class ChunkDataGenerator : IIncrementalGenerator
                     property.Type.ToDisplayString()));
         }
 
-        bool accessible = IsAccessibleFromNamespace(property.DeclaredAccessibility);
+        bool accessible = PartialSyntax.IsAccessibleFromNamespace(property.DeclaredAccessibility);
         foreach ((INamedTypeSymbol type, bool isPartial) in chain)
         {
             if (!isPartial)
@@ -176,7 +176,7 @@ public sealed class ChunkDataGenerator : IIncrementalGenerator
                         displayName));
             }
 
-            if (type.IsFileLocal || !IsAccessibleFromNamespace(type.DeclaredAccessibility))
+            if (type.IsFileLocal || !PartialSyntax.IsAccessibleFromNamespace(type.DeclaredAccessibility))
                 accessible = false;
         }
 
@@ -284,11 +284,6 @@ public sealed class ChunkDataGenerator : IIncrementalGenerator
             accessorName ?? property.Name);
 
         return new ChunkDataDeclaration(model, location, diagnostics.ToEquatableArray());
-    }
-
-    private static bool IsAccessibleFromNamespace(Accessibility accessibility)
-    {
-        return accessibility is Accessibility.Public or Accessibility.Internal or Accessibility.ProtectedOrInternal;
     }
 
     private static GeneratorOutput<ChunkDataTypeModel> Analyze(

@@ -411,7 +411,7 @@ public sealed class StateGenerator : IIncrementalGenerator
     {
         for (INamedTypeSymbol? current = type; current is not null; current = current.ContainingType)
         {
-            if (current.DeclaredAccessibility is not (Accessibility.Public or Accessibility.Internal or Accessibility.ProtectedOrInternal))
+            if (!PartialSyntax.IsAccessibleFromNamespace(current.DeclaredAccessibility))
                 return false;
         }
 
