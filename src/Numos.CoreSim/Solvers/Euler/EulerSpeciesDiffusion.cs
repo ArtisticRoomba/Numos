@@ -161,8 +161,7 @@ internal static class EulerSpeciesDiffusion
         EulerBoundaryExchange exchange = workspace.Boundary;
         exchange.Clear();
         Int3 last = chunk.Dimensions - new Int3(1, 1, 1);
-        // Must match PrepareDiffusion so both sides of a face scale by the same edge length.
-        Metre voxelEdge = MathF.Pow(config.VoxelVolume, 1f / 3f);
+        Metre voxelEdge = SpeciesDiffusionKernel.GetVoxelEdge(config.VoxelVolume);
 
         for (int activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
         {
@@ -227,7 +226,7 @@ internal static class EulerSpeciesDiffusion
     /// <param name="neighborChunk">The active chunk across the face, or <see langword="null" /> for a void face.</param>
     /// <param name="neighborIndex">The cell across the face, in <paramref name="neighborChunk" />.</param>
     /// <param name="config">The tick's configuration snapshot.</param>
-    /// <param name="voxelEdge"><c>VoxelVolume^(1/3)</c>.</param>
+    /// <param name="voxelEdge">The voxel edge from <see cref="SpeciesDiffusionKernel.GetVoxelEdge" />.</param>
     /// <param name="exchange">The record buffer of <paramref name="chunk" />.</param>
     /// <param name="energyDelta">The cell's running energy delta.</param>
     /// <remarks>

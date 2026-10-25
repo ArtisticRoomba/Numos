@@ -175,7 +175,7 @@ internal static class SpeciesDiffusionKernel
     {
         var chunk = workspace.Chunk!;
         int gasCount = chunk.ActiveGasCount;
-        Metre dx = MathF.Pow(config.VoxelVolume, 1f / 3f);
+        Metre dx = GetVoxelEdge(config.VoxelVolume);
         int end = start + length;
         for (int activeIndex = start; activeIndex < end; activeIndex++)
         {
@@ -206,6 +206,20 @@ internal static class SpeciesDiffusionKernel
     }
 
     /// <summary>
+    ///     Returns the edge length of a cubic voxel.
+    /// </summary>
+    /// <param name="voxelVolume">The configured voxel volume.</param>
+    /// <remarks>
+    ///     Every diffusion path must take its edge from this method.
+    ///     Both sides of an exchange then scale by the same bits.
+    ///     <see cref="MathF.Cbrt" /> rounds differently, so it cannot replace the power here.
+    /// </remarks>
+    internal static Metre GetVoxelEdge(CubicMetre voxelVolume)
+    {
+        return MathF.Pow(voxelVolume, 1f / 3f);
+    }
+
+    /// <summary>
     ///     Returns the environment factor of a source voxel.
     ///     It is the kinetic-theory <c>T^(3/2) / P</c> dependence of the diffusivity over the square of the voxel edge.
     ///     That is Fick's law on a cubic grid: face area over neighbor distance is one edge, and the source
@@ -214,7 +228,7 @@ internal static class SpeciesDiffusionKernel
     /// <param name="config">The immutable configuration snapshot for the tick.</param>
     /// <param name="pressure">The source voxel's positive total pressure.</param>
     /// <param name="temperature">The source voxel's validated temperature.</param>
-    /// <param name="voxelEdge"><c>VoxelVolume^(1/3)</c>, computed once by the caller.</param>
+    /// <param name="voxelEdge">The voxel edge from <see cref="GetVoxelEdge" />, computed once by the caller.</param>
     internal static PerSquareMetre EnvironmentFactor(
         AtmosSolverConfigSnapshot config, Pascal pressure, Kelvin temperature, Metre voxelEdge)
     {

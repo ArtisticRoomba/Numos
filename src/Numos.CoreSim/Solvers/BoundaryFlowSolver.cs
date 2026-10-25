@@ -107,8 +107,9 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
         AtmosSolverExecutionContext context, BoundaryEventBatch<BoundaryFlowEvent> batch,
         PendingTransferBuffer pending)
     {
+        Metre voxelEdge = SpeciesDiffusionKernel.GetVoxelEdge(context.TickConfig.VoxelVolume);
         for (int eventIndex = 0; eventIndex < batch.Count; eventIndex++)
-            ProcessBoundaryFlow(context, batch.Key, batch[eventIndex], pending);
+            ProcessBoundaryFlow(context, batch.Key, batch[eventIndex], voxelEdge, pending);
     }
 
     /// <summary>
@@ -234,7 +235,7 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
 
     private static void ProcessBoundaryFlow(
         AtmosSolverExecutionContext context, Int3 sourcePosition, BoundaryFlowEvent boundaryEvent,
-        PendingTransferBuffer pending)
+        Metre voxelEdge, PendingTransferBuffer pending)
     {
         if (!context.TryGetChunk(sourcePosition, out var sourceChunk))
             return;
@@ -242,18 +243,18 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
         // Only outflows are handled here, so each directed transfer is counted once.
         // Nothing is mutated yet. Transfers go into the pending buffer, and RunQueuedInjections applies them later.
         var localPosition = sourceChunk.GetXyzInt3(boundaryEvent.LocalVoxelIndex);
-        TryFlowToNeighbor(context, sourceChunk, sourcePosition, localPosition + Int3.NegX, Int3.NegX, pending);
-        TryFlowToNeighbor(context, sourceChunk, sourcePosition, localPosition + Int3.PosX, Int3.PosX, pending);
-        TryFlowToNeighbor(context, sourceChunk, sourcePosition, localPosition + Int3.NegY, Int3.NegY, pending);
-        TryFlowToNeighbor(context, sourceChunk, sourcePosition, localPosition + Int3.PosY, Int3.PosY, pending);
-        TryFlowToNeighbor(context, sourceChunk, sourcePosition, localPosition + Int3.NegZ, Int3.NegZ, pending);
-        TryFlowToNeighbor(context, sourceChunk, sourcePosition, localPosition + Int3.PosZ, Int3.PosZ, pending);
+        TryFlowToNeighbor(context, sourceChunk, sourcePosition, localPosition + Int3.NegX, Int3.NegX, voxelEdge, pending);
+        TryFlowToNeighbor(context, sourceChunk, sourcePosition, localPosition + Int3.PosX, Int3.PosX, voxelEdge, pending);
+        TryFlowToNeighbor(context, sourceChunk, sourcePosition, localPosition + Int3.NegY, Int3.NegY, voxelEdge, pending);
+        TryFlowToNeighbor(context, sourceChunk, sourcePosition, localPosition + Int3.PosY, Int3.PosY, voxelEdge, pending);
+        TryFlowToNeighbor(context, sourceChunk, sourcePosition, localPosition + Int3.NegZ, Int3.NegZ, voxelEdge, pending);
+        TryFlowToNeighbor(context, sourceChunk, sourcePosition, localPosition + Int3.PosZ, Int3.PosZ, voxelEdge, pending);
     }
 
     private static void TryFlowToNeighbor(
         AtmosSolverExecutionContext context, AtmosChunk sourceChunk,
         Int3 sourcePosition, Int3 targetPosition, Int3 direction,
-        PendingTransferBuffer pending)
+        Metre voxelEdge, PendingTransferBuffer pending)
     {
         if (targetPosition.IsWithin(default, sourceChunk.Dimensions))
             return;
@@ -296,13 +297,14 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
             isVoid,
             totalMoles,
             bulkPressureTransfer,
+            voxelEdge,
             pending);
     }
 
     private static void TransferSpecies(
         AtmosSolverExecutionContext context, AtmosChunk sourceChunk,
         ushort sourceIndex, AtmosChunk neighborChunk, ushort neighborIndex, bool isVoid,
-        Mole totalMoles, Pascal bulkPressureTransfer, PendingTransferBuffer pending)
+        Mole totalMoles, Pascal bulkPressureTransfer, Metre voxelEdge, PendingTransferBuffer pending)
     {
         // Very similar to the advection solver. See there for the math.
         var config = context.TickConfig;
@@ -311,10 +313,9 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
         Mole advectedMoles = AtmosSolverMath.PressureToMoles(config, bulkPressureTransfer, sourceTemperature);
 
         Pascal sourcePressure = sourceChunk.TotalPressure[sourceIndex];
-        Metre dx = MathF.Pow(config.VoxelVolume, 1f / 3f);
         Scalar temperatureRatio = sourceTemperature / config.GlobalTemperature;
         Scalar pressureRatio = config.SaturationReferencePressure / sourcePressure;
-        PerSquareMetre envFactor = MathF.Pow(temperatureRatio, 1.5f) * pressureRatio / (dx * dx);
+        PerSquareMetre envFactor = MathF.Pow(temperatureRatio, 1.5f) * pressureRatio / (voxelEdge * voxelEdge);
 
         bool movedGas = false;
 

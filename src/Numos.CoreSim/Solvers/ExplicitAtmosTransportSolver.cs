@@ -215,6 +215,7 @@ internal sealed class ExplicitAtmosTransportSolver
         AtmosSolverConfigSnapshot config,
         ExplicitTransportCapabilities enabledCapabilities)
     {
+        Metre voxelEdge = SpeciesDiffusionKernel.GetVoxelEdge(config.VoxelVolume);
         for (int edgeIndex = 0; edgeIndex < edges.Length; edgeIndex++)
         {
             ref readonly var edge = ref edges[edgeIndex];
@@ -262,7 +263,6 @@ internal sealed class ExplicitAtmosTransportSolver
                     secondTemperature);
             }
 
-            Metre dx = MathF.Pow(config.VoxelVolume, 1f / 3f);
             for (int gasId = 0; gasId < gasCount; gasId++)
             {
                 Mole firstMoles = available[firstOffset + gasId];
@@ -275,7 +275,7 @@ internal sealed class ExplicitAtmosTransportSolver
                     firstPressure,
                     firstTemperature,
                     config.GetDiffusionCoefficient(gasId),
-                    dx,
+                    voxelEdge,
                     config);
 
                 reverse += CalculateDiffusionRequest(
@@ -283,7 +283,7 @@ internal sealed class ExplicitAtmosTransportSolver
                     secondPressure,
                     secondTemperature,
                     config.GetDiffusionCoefficient(gasId),
-                    dx,
+                    voxelEdge,
                     config);
 
                 // Scale after the per-edge diffusion cap so a narrow link never asks for more than a full face would.
@@ -302,7 +302,7 @@ internal sealed class ExplicitAtmosTransportSolver
         Pascal sourcePressure,
         Kelvin sourceTemperature,
         SquareMetrePerSecond referenceDiffusivity,
-        Metre dx,
+        Metre voxelEdge,
         AtmosSolverConfigSnapshot config)
     {
         if (sourceMoles <= 0f || sourcePressure <= 0f || referenceDiffusivity <= 0f)
@@ -310,7 +310,7 @@ internal sealed class ExplicitAtmosTransportSolver
 
         Scalar temperatureRatio = sourceTemperature / config.GlobalTemperature;
         Scalar pressureRatio = config.SaturationReferencePressure / sourcePressure;
-        PerSquareMetre environmentFactor = MathF.Pow(temperatureRatio, 1.5f) * pressureRatio / (dx * dx);
+        PerSquareMetre environmentFactor = MathF.Pow(temperatureRatio, 1.5f) * pressureRatio / (voxelEdge * voxelEdge);
         Mole request = referenceDiffusivity * environmentFactor * sourceMoles * AtmosSolverConstants.FixedTimeStep;
 
         // Match the Cartesian solver's per-edge stability cap.
