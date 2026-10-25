@@ -166,7 +166,7 @@ detached copies. The current implementation has no copy-on-write storage, delta 
 `AtmosSimulationCheckpoint.PayloadBytes` reports bytes in copied chunk and solver arrays. It excludes managed object
 headers and field names.
 
-The world checkpoint schema is `AtmosWorldCheckpoint.CurrentFormatVersion` 5. The grid schema inside it is format
+The world checkpoint schema is `AtmosWorldCheckpoint.CurrentFormatVersion` 6. The grid schema inside it is format
 version 6, compatibility version 3. Replay is experimental, so Numos rejects older in-memory checkpoint schemas instead
 of translating them.
 
@@ -509,7 +509,7 @@ A `.numos` replay contains a small provenance header, one complete initial world
 semantic opcodes. It stores initial and final state hashes. The Viewer verifies both hashes. After loading, the Viewer
 generates scrub checkpoints every 50 ticks, so those large acceleration snapshots never enter the file.
 
-The checkpoint section carries the world checkpoint format version (5). A file written before configuration and solver
+The checkpoint section carries the world checkpoint format version (6). A file written before configuration and solver
 state moved out of the per-simulation checkpoints fails to load with an unsupported-schema error. Numos does not
 misread it.
 
