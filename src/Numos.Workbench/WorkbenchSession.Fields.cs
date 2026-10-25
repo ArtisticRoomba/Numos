@@ -11,8 +11,9 @@ namespace Numos.Workbench;
 /// </summary>
 /// <remarks>
 ///     <para>
-///         Each call copies the fields it needs from every chunk that holds a point, and nothing else. The sampler
-///         allocates one snapshot per chunk per call and nothing per voxel. It never changes the simulation.
+///         Each call copies the fields it needs from every chunk that holds a point or lies within one voxel of a
+///         point that feeds a region field. The sampler copies each chunk once per call and allocates nothing per
+///         voxel. It never changes the simulation.
 ///     </para>
 ///     <para>
 ///         The sampler keeps the simulation reference it was created with. Create a new sampler after a project
@@ -28,6 +29,11 @@ public sealed class VoxelSampler
     private readonly IReadOnlyList<Int3> _points;
     private readonly WorkbenchFieldOptions _options;
     private readonly float[] _halo = new float[27];
+    private readonly float[][] _haloDestinations;
+    private readonly WorkbenchField[]?[] _haloSources;
+    private readonly ChunkSnapshotCache _snapshots;
+    private readonly HashSet<Int3> _existingChunks = [];
+    private long _chunkRevision = -1;
 
     internal VoxelSampler(
         WorkbenchSession session,
@@ -73,11 +79,26 @@ public sealed class VoxelSampler
             .Select(static pair => new ChunkGroup(new AtmosChunkHandle(pair.Key), pair.Value.ToArray()))
             .ToArray();
 
-        foreach (var field in fields)
+        _haloDestinations = [_halo];
+        _haloSources = new WorkbenchField[fields.Length][];
+        var haloRequired = AtmosChunkSnapshotFields.None;
+        for (int column = 0; column < fields.Length; column++)
         {
-            if (!field.IsRegionField)
+            var field = fields[column];
+            if (field.IsRegionField)
+            {
+                var source = session.Fields.Resolve(field.HaloSource!);
+                _haloSources[column] = [source];
+                haloRequired |= source.Required;
+            }
+            else
+            {
                 _required |= field.Required;
+            }
         }
+
+        // The chunk of a point is also in the halo of that point, so one snapshot serves both reads.
+        _snapshots = new ChunkSnapshotCache(simulation, _required | haloRequired);
     }
 
     /// <summary>
@@ -105,37 +126,46 @@ public sealed class VoxelSampler
             throw new ArgumentException("The destination is too short.", nameof(destination));
 
         destination[..(PointCount * columns)].Fill(float.NaN);
-        foreach (var group in _groups)
+        _snapshots.Clear();
+        try
         {
-            AtmosChunkSnapshot snapshot;
-            try
+            foreach (var group in _groups)
             {
-                if (!_simulation.TryGetChunkSnapshot(group.Handle, default, _required, out snapshot))
-                    continue;
-            }
-            catch (KeyNotFoundException)
-            {
-                // A point outside every chunk stays NaN.
-                continue;
-            }
-
-            foreach (var (point, local) in group.Voxels)
-            {
-                for (int column = 0; column < columns; column++)
+                AtmosChunkSnapshot snapshot;
+                try
                 {
-                    if (!Fields[column].IsRegionField)
-                        destination[point * columns + column] = Fields[column].Sample(in snapshot, local);
+                    if (!_snapshots.TryGet(group.Handle.Position, _required, out snapshot))
+                        continue;
+                }
+                catch (KeyNotFoundException)
+                {
+                    // A point outside every chunk stays NaN.
+                    continue;
+                }
+
+                foreach (var (point, local) in group.Voxels)
+                {
+                    for (int column = 0; column < columns; column++)
+                    {
+                        if (!Fields[column].IsRegionField)
+                            destination[point * columns + column] = Fields[column].Sample(in snapshot, local);
+                    }
                 }
             }
-        }
 
-        SampleRegionFields(destination);
+            SampleRegionFields(destination);
+        }
+        finally
+        {
+            _snapshots.Clear();
+        }
     }
 
     private void SampleRegionFields(Span<float> destination)
     {
         int columns = Fields.Count;
         HashSet<Int3>? existing = null;
+        float edge = 0f;
         Span<float> value = stackalloc float[1];
         for (int column = 0; column < columns; column++)
         {
@@ -143,9 +173,13 @@ public sealed class VoxelSampler
             if (!field.IsRegionField)
                 continue;
 
-            var source = _session.Fields.Resolve(field.HaloSource!);
-            existing ??= _session.GetChunkPositions(_simulation);
-            float edge = FlowFieldMath.GetVoxelEdge(_session.RequireConfig());
+            if (existing == null)
+            {
+                existing = GetExistingChunks();
+                edge = FlowFieldMath.GetVoxelEdge(_session.RequireConfig());
+            }
+
+            var source = _haloSources[column]!;
             for (int point = 0; point < PointCount; point++)
             {
                 var center = _points[point];
@@ -153,7 +187,7 @@ public sealed class VoxelSampler
                     new Int3(center.X - 1, center.Y - 1, center.Z - 1),
                     new Int3(center.X + 1, center.Y + 1, center.Z + 1));
 
-                WorkbenchSession.ReadVoxelFields(_simulation, box, [source], [_halo], existing);
+                WorkbenchSession.ReadVoxelFields(_simulation, box, source, _haloDestinations, existing, _snapshots);
                 value[0] = float.NaN;
                 field.ComputeRegion(
                     new WorkbenchRegionInput(_halo, new Int3(1, 1, 1), edge, _options.SchlierenReference),
@@ -162,6 +196,22 @@ public sealed class VoxelSampler
                 destination[point * columns + column] = value[0];
             }
         }
+    }
+
+    /// <summary>
+    ///     Returns the positions of the chunks that exist, rebuilding the set only when the simulation added or
+    ///     removed a chunk.
+    /// </summary>
+    private HashSet<Int3> GetExistingChunks()
+    {
+        if (_simulation.TryGetChunkHandles(_chunkRevision, out _chunkRevision, out var handles))
+        {
+            _existingChunks.Clear();
+            foreach (var handle in handles)
+                _existingChunks.Add(handle.Position);
+        }
+
+        return _existingChunks;
     }
 
     private readonly record struct ChunkGroup(AtmosChunkHandle Handle, (int Point, int Local)[] Voxels);
@@ -327,12 +377,17 @@ public sealed partial class WorkbenchSession
     /// <param name="fields">Voxel fields.</param>
     /// <param name="destinations">One buffer per field. Each receives `box.VoxelCount` values with x changing fastest. Voxels without data are NaN.</param>
     /// <param name="existing">The positions of the chunks that exist, so the read skips missing chunks without throwing.</param>
+    /// <param name="cache">
+    ///     Snapshots to reuse across reads, or <see langword="null" /> to copy each chunk for this read only. Without a
+    ///     cache the read holds one snapshot at a time, which keeps the memory of a large box low.
+    /// </param>
     internal static void ReadVoxelFields(
         AtmosSimulation target,
         VoxelBox box,
         IReadOnlyList<WorkbenchField> fields,
         IReadOnlyList<float[]> destinations,
-        HashSet<Int3> existing)
+        HashSet<Int3> existing,
+        ChunkSnapshotCache? cache = null)
     {
         var required = AtmosChunkSnapshotFields.None;
         for (int index = 0; index < fields.Count; index++)
@@ -350,8 +405,16 @@ public sealed partial class WorkbenchSession
         for (int cx = minChunk.X; cx <= maxChunk.X; cx++)
         {
             var position = new Int3(cx, cy, cz);
-            if (!existing.Contains(position) ||
-                !target.TryGetChunkSnapshot(new AtmosChunkHandle(position), default, required, out var snapshot))
+            if (!existing.Contains(position))
+                continue;
+
+            AtmosChunkSnapshot snapshot;
+            if (cache != null)
+            {
+                if (!cache.TryGet(position, required, out snapshot))
+                    continue;
+            }
+            else if (!target.TryGetChunkSnapshot(new AtmosChunkHandle(position), default, required, out snapshot))
             {
                 continue;
             }

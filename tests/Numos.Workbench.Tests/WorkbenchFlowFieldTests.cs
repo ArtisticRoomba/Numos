@@ -204,6 +204,50 @@ public sealed class WorkbenchFlowFieldTests
     }
 
     [Test]
+    public void Sampler_MatchesReadBoxAcrossChunkBordersAndFollowsChanges()
+    {
+        using var session = CreateRow();
+        float[] moles = [1f, 2f, 4f, 3f, 7f, 2f, 5f, 6f];
+        for (int x = 0; x < moles.Length; x++)
+            SetMoles(session, x, moles[x]);
+
+        var points = Enumerable.Range(0, 8).Select(static x => new Int3(x, 0, 0)).ToArray();
+        string[] names = ["pressure", "density", "densityGradient", "moles:0", "schlieren"];
+        var options = new WorkbenchFieldOptions(2f * MolarMass);
+        var sampler = session.CreateSampler(points, names, options: options);
+        float[] values = new float[points.Length * names.Length];
+
+        void AssertMatchesReadBox()
+        {
+            sampler.Sample(values);
+            float[][] expected = session.ReadBox(Row, names, options: options);
+            Assert.Multiple(() =>
+            {
+                for (int point = 0; point < points.Length; point++)
+                for (int column = 0; column < names.Length; column++)
+                {
+                    Assert.That(
+                        values[point * names.Length + column],
+                        Is.EqualTo(expected[column][point]).Within(1e-6f),
+                        $"{names[column]} at x={point}");
+                }
+            });
+        }
+
+        AssertMatchesReadBox();
+
+        SetMoles(session, 4, 20f);
+        AssertMatchesReadBox();
+
+        // The new chunk lies next to the last point, so the gradient there now reads a neighbor.
+        session.AddChunk(new Int3(2, 0, 0), 1);
+        for (int x = 8; x < 12; x++)
+            SetMoles(session, x, 11f);
+
+        AssertMatchesReadBox();
+    }
+
+    [Test]
     public void EditRegion_VelocityRoundTripsThroughTheVelocityFields()
     {
         using var session = CreateRow();
