@@ -108,7 +108,7 @@ internal sealed class FlowFieldSet
         foreach (var (position, density) in _density)
         {
             if (scope == null || scope.Contains(position))
-                IncludeFinite(density, ref minimum, ref maximum);
+                FiniteRange.Include(density, ref minimum, ref maximum);
         }
     }
 
@@ -145,18 +145,6 @@ internal sealed class FlowFieldSet
         }
 
         return true;
-    }
-
-    private static void IncludeFinite(float[] values, ref float minimum, ref float maximum)
-    {
-        foreach (float value in values)
-        {
-            if (!float.IsFinite(value))
-                continue;
-
-            minimum = Math.Min(minimum, value);
-            maximum = Math.Max(maximum, value);
-        }
     }
 
     private void FillPadded(Int3 position, Int3 size, float[] center, Span<float> padded)

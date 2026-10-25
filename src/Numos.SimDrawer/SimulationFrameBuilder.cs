@@ -337,10 +337,10 @@ public sealed class SimulationFrameBuilder
         foreach (var snapshot in snapshots)
         {
             if ((requirements & VisualizationDataRequirements.Temperature) != 0)
-                IncludeFiniteRange(snapshot.Temperature, ref minimum, ref maximum);
+                FiniteRange.Include(snapshot.Temperature, ref minimum, ref maximum);
 
             if ((requirements & VisualizationDataRequirements.Pressure) != 0)
-                IncludeFiniteRange(snapshot.TotalPressure, ref minimum, ref maximum);
+                FiniteRange.Include(snapshot.TotalPressure, ref minimum, ref maximum);
 
             if ((requirements & VisualizationDataRequirements.Velocity) != 0)
                 IncludeFiniteSpeedRange(snapshot, ref minimum, ref maximum);
@@ -377,21 +377,6 @@ public sealed class SimulationFrameBuilder
         return extreme;
     }
 
-    private static void IncludeFiniteRange(
-        ReadOnlySpan<float> values,
-        ref float minimum,
-        ref float maximum)
-    {
-        foreach (float value in values)
-        {
-            if (!float.IsFinite(value))
-                continue;
-
-            minimum = Math.Min(minimum, value);
-            maximum = Math.Max(maximum, value);
-        }
-    }
-
     private static void IncludeFiniteSpeedRange(
         in AtmosChunkSnapshot snapshot,
         ref float minimum,
@@ -402,12 +387,12 @@ public sealed class SimulationFrameBuilder
 
         for (int index = 0; index < voxelCount; index++)
         {
-            float speed = FlowFieldMath.Speed(snapshot.VelocityX[index], snapshot.VelocityY[index], snapshot.VelocityZ[index]);
-            if (!float.IsFinite(speed))
-                continue;
+            float speed = FlowFieldMath.Speed(
+                snapshot.VelocityX[index],
+                snapshot.VelocityY[index],
+                snapshot.VelocityZ[index]);
 
-            minimum = Math.Min(minimum, speed);
-            maximum = Math.Max(maximum, speed);
+            FiniteRange.Include(speed, ref minimum, ref maximum);
         }
     }
 

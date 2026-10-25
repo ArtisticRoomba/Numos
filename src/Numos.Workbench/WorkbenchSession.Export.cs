@@ -599,13 +599,16 @@ public sealed partial class WorkbenchSession
                     continue;
 
                 if (useTemperature && index < snapshot.Temperature.Length)
-                    Include(snapshot.Temperature[index], ref minimum, ref maximum);
+                    FiniteRange.Include(snapshot.Temperature[index], ref minimum, ref maximum);
 
                 if (usePressure && index < snapshot.TotalPressure.Length)
-                    Include(snapshot.TotalPressure[index], ref minimum, ref maximum);
+                    FiniteRange.Include(snapshot.TotalPressure[index], ref minimum, ref maximum);
 
                 if (useDensity && snapshot.Gases != null)
-                    Include(FlowFieldMath.GetDensity(snapshot.Gases, index, config), ref minimum, ref maximum);
+                {
+                    float density = FlowFieldMath.GetDensity(snapshot.Gases, index, config);
+                    FiniteRange.Include(density, ref minimum, ref maximum);
+                }
             }
         }
 
@@ -627,15 +630,6 @@ public sealed partial class WorkbenchSession
                           FlowFieldMath.MaximumFinite(ReadBox(box, ["densityGradient"], simulation)[0]);
 
         return float.IsFinite(reference) && reference > 0f ? new VisualizationRange(0f, reference) : null;
-    }
-
-    private static void Include(float value, ref float minimum, ref float maximum)
-    {
-        if (!float.IsFinite(value))
-            return;
-
-        minimum = Math.Min(minimum, value);
-        maximum = Math.Max(maximum, value);
     }
 
     private static (byte R, byte G, byte B) ResolvePixel(SimulationDrawData frame, Int3 voxel, Int3 dimensions)
