@@ -33,8 +33,6 @@ public sealed class StateGenerator : IIncrementalGenerator
     internal const string TypesStepName = "NumosStateTypes";
     internal const string ModuleInitializerHintName = "NumosSolverConfigurationModuleInitializer.g.cs";
 
-    private const string SerializeMetadataName = "Numos.CoreSim.State.NumosSerializeAttribute";
-    private const string IgnoreMetadataName = "Numos.CoreSim.State.NumosIgnoreAttribute";
     private const string SolverConfigurationMetadataName = "Numos.CoreSim.IAtmosSolverConfiguration";
     private const string WorldSolverMetadataName = "Numos.API.IAtmosWorldSolver";
 
@@ -162,7 +160,7 @@ public sealed class StateGenerator : IIncrementalGenerator
             }
         }
 
-        if (!HasSerializedMembers(type))
+        if (!StateSymbols.HasSerializedMembers(type))
             return null;
 
         Compilation compilation = context.SemanticModel.Compilation;
@@ -262,8 +260,8 @@ public sealed class StateGenerator : IIncrementalGenerator
 
             LocationInfo? location = LocationInfo.From(member.Locations.FirstOrDefault()) ?? typeLocation;
             string displayName = typeDisplayName + "." + member.Name;
-            AttributeData? serialize = FindAttribute(member, SerializeMetadataName);
-            bool ignored = FindAttribute(member, IgnoreMetadataName) is not null;
+            AttributeData? serialize = StateSymbols.FindSerialize(member);
+            bool ignored = StateSymbols.IsIgnored(member);
 
             if (member.IsStatic || member is IFieldSymbol { IsConst: true })
             {
@@ -332,14 +330,14 @@ public sealed class StateGenerator : IIncrementalGenerator
                 continue;
             }
 
-            if (HasNamedArgument(serialize, "Count"))
+            if (StateSymbols.HasNamedArgument(serialize, "Count"))
             {
                 diagnostics.Add(DiagnosticInfo.Create(StateDiagnostics.CountOutsideSnapshot, location, displayName));
                 canGenerate = false;
                 continue;
             }
 
-            ITypeSymbol? codec = CodecOf(serialize);
+            ITypeSymbol? codec = StateSymbols.CodecOf(serialize);
             StateShape shape = codec is not null ? StateShape.FromCodec(memberType!, codec) : StateShape.From(memberType!);
             if (codec is not null || (settable && !initOnly) || !Immutability.IsImmutable(memberType!))
                 immutable = false;
@@ -433,7 +431,7 @@ public sealed class StateGenerator : IIncrementalGenerator
             }
 
             keyProperty = property;
-            if (property.SetMethod is not null || HasBackingField(type, property))
+            if (property.SetMethod is not null || StateSymbols.HasBackingField(type, property))
                 return null;
 
             foreach (SyntaxReference reference in property.DeclaringSyntaxReferences)
@@ -471,17 +469,6 @@ public sealed class StateGenerator : IIncrementalGenerator
         }
 
         return null;
-    }
-
-    private static bool HasBackingField(INamedTypeSymbol type, IPropertySymbol property)
-    {
-        foreach (ISymbol candidate in type.GetMembers())
-        {
-            if (candidate is IFieldSymbol backing && SymbolEqualityComparer.Default.Equals(backing.AssociatedSymbol, property))
-                return true;
-        }
-
-        return false;
     }
 
     /// <summary>
@@ -573,7 +560,7 @@ public sealed class StateGenerator : IIncrementalGenerator
 
             case IPropertySymbol { IsIndexer: false } property:
                 memberType = property.Type;
-                hasStorage = HasBackingField(type, property);
+                hasStorage = StateSymbols.HasBackingField(type, property);
 
                 // Compiler-synthesized record members such as EqualityContract have no storage and can't be marked.
                 return hasStorage || !property.IsImplicitlyDeclared;
@@ -613,63 +600,6 @@ public sealed class StateGenerator : IIncrementalGenerator
         }
 
         return null;
-    }
-
-    private static AttributeData? FindAttribute(ISymbol symbol, string metadataName)
-    {
-        foreach (AttributeData attribute in symbol.GetAttributes())
-        {
-            if (attribute.AttributeClass is { } attributeClass && StateShape.MetadataName(attributeClass) == metadataName)
-                return attribute;
-        }
-
-        return null;
-    }
-
-    private static bool HasNamedArgument(AttributeData attribute, string name)
-    {
-        foreach (KeyValuePair<string, TypedConstant> argument in attribute.NamedArguments)
-        {
-            if (argument.Key == name)
-                return true;
-        }
-
-        return false;
-    }
-
-    private static ITypeSymbol? CodecOf(AttributeData serialize)
-    {
-        foreach (KeyValuePair<string, TypedConstant> argument in serialize.NamedArguments)
-        {
-            if (argument.Key == "Codec" && argument.Value.Value is ITypeSymbol codec)
-                return codec;
-        }
-
-        return null;
-    }
-
-    /// <summary>
-    ///     Whether <paramref name="type" /> has a field or property marked <c>[NumosSerialize]</c>.
-    /// </summary>
-    internal static bool HasSerializedMembers(INamedTypeSymbol type)
-    {
-        foreach (ISymbol member in type.GetMembers())
-        {
-            if (member is IFieldSymbol or IPropertySymbol && FindAttribute(member, SerializeMetadataName) is not null)
-                return true;
-        }
-
-        return false;
-    }
-
-    /// <summary>
-    ///     Gets <paramref name="member" />'s <c>[NumosSerialize]</c>, and whether it names a codec.
-    /// </summary>
-    internal static bool IsSerialized(ISymbol member, out bool hasCodec)
-    {
-        AttributeData? attribute = FindAttribute(member, SerializeMetadataName);
-        hasCodec = attribute is not null && CodecOf(attribute) is not null;
-        return attribute is not null;
     }
 
     private static bool Implements(INamedTypeSymbol type, string interfaceMetadataName)

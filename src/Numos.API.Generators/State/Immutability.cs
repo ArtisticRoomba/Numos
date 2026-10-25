@@ -53,7 +53,7 @@ internal static class Immutability
         if (named.IsGenericType && ns is "System.Collections.Frozen" or "System.Collections.Immutable")
             return named.TypeArguments.All(argument => IsImmutable(argument, visiting));
 
-        if (named.TypeParameters.Length > 0 || !StateGenerator.HasSerializedMembers(named))
+        if (named.TypeParameters.Length > 0 || !StateSymbols.HasSerializedMembers(named))
             return false;
 
         // A type that refers back to itself is immutable if everything else in it is.
@@ -62,7 +62,7 @@ internal static class Immutability
 
         foreach (ISymbol member in named.GetMembers())
         {
-            if (member.IsStatic || !StateGenerator.IsSerialized(member, out bool hasCodec))
+            if (member.IsStatic || !StateSymbols.IsSerialized(member, out bool hasCodec))
                 continue;
 
             bool fixedValue = member switch

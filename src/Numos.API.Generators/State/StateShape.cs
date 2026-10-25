@@ -191,7 +191,7 @@ internal sealed record StateShape(StateShapeKind Kind, string Name, EquatableArr
                 : Unsupported(type);
         }
 
-        if (named.TypeParameters.Length == 0 && (StateGenerator.HasSerializedMembers(named) || ImplementsOwnState(named)))
+        if (named.TypeParameters.Length == 0 && (StateSymbols.HasSerializedMembers(named) || ImplementsOwnState(named)))
             return Leaf(StateShapeKind.State, FullName(named));
 
         return Unsupported(type);

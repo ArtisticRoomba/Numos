@@ -29,8 +29,6 @@ public sealed class SnapshotGenerator : IIncrementalGenerator
     internal const string SnapshotOfMetadataName = "Numos.CoreSim.State.NumosSnapshotOfAttribute";
     internal const string SnapshotsStepName = "NumosSnapshots";
 
-    private const string SerializeMetadataName = "Numos.CoreSim.State.NumosSerializeAttribute";
-    private const string IgnoreMetadataName = "Numos.CoreSim.State.NumosIgnoreAttribute";
     private const string FlatArrayMetadataName = "Numos.Collections.FlatArray`1";
 
     /// <summary>
@@ -160,7 +158,7 @@ public sealed class SnapshotGenerator : IIncrementalGenerator
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (member is not (IFieldSymbol or IPropertySymbol) || member.IsImplicitlyDeclared ||
-                FindAttribute(member, SerializeMetadataName) is not { } serialize)
+                StateSymbols.FindSerialize(member) is not { } serialize)
             {
                 continue;
             }
@@ -277,7 +275,7 @@ public sealed class SnapshotGenerator : IIncrementalGenerator
             return null;
         }
 
-        if (FindAttribute(member, IgnoreMetadataName) is not null)
+        if (StateSymbols.IsIgnored(member))
         {
             diagnostics.Add(DiagnosticInfo.Create(StateDiagnostics.BothTags, location, displayName));
             return null;
@@ -321,7 +319,7 @@ public sealed class SnapshotGenerator : IIncrementalGenerator
                 break;
             case IPropertySymbol { IsIndexer: false } property:
                 type = property.Type;
-                storage = HasBackingField(live, property) ? LiveStorage.AutoProperty : LiveStorage.Adapter;
+                storage = StateSymbols.HasBackingField(live, property) ? LiveStorage.AutoProperty : LiveStorage.Adapter;
                 readable = property.GetMethod is { } getter && compilation.IsSymbolAccessibleWithin(getter, snapshot);
                 assignable = property.SetMethod is { IsInitOnly: false } setter &&
                              compilation.IsSymbolAccessibleWithin(setter, snapshot);
@@ -337,7 +335,7 @@ public sealed class SnapshotGenerator : IIncrementalGenerator
         }
 
         string? count = null;
-        if (NamedString(serialize, "Count") is { } countName)
+        if (StateSymbols.NamedString(serialize, "Count") is { } countName)
         {
             if (!IsCountMember(compilation, snapshot, live, countName))
             {
@@ -350,7 +348,7 @@ public sealed class SnapshotGenerator : IIncrementalGenerator
             count = CodeWriter.Escape(countName);
         }
 
-        ITypeSymbol? codec = NamedType(serialize, "Codec");
+        ITypeSymbol? codec = StateSymbols.CodecOf(serialize);
         StateShape shape = codec is not null ? StateShape.FromCodec(type, codec) : StateShape.From(type);
 
         StateShape? arrayElement = null;
@@ -453,12 +451,12 @@ public sealed class SnapshotGenerator : IIncrementalGenerator
             return null;
 
         string displayName = snapshot.ToDisplayString() + "." + member.Name;
-        AttributeData? serialize = FindAttribute(member, SerializeMetadataName);
-        bool ignored = FindAttribute(member, IgnoreMetadataName) is not null;
+        AttributeData? serialize = StateSymbols.FindSerialize(member);
+        bool ignored = StateSymbols.IsIgnored(member);
         bool mutable = member switch
         {
             IFieldSymbol storage => !storage.IsReadOnly && !storage.IsConst,
-            IPropertySymbol property => property.SetMethod is not null && HasBackingField(snapshot, property),
+            IPropertySymbol property => property.SetMethod is not null && StateSymbols.HasBackingField(snapshot, property),
             _ => false,
         };
 
@@ -518,7 +516,7 @@ public sealed class SnapshotGenerator : IIncrementalGenerator
             return null;
         }
 
-        ITypeSymbol? codec = NamedType(serialize, "Codec");
+        ITypeSymbol? codec = StateSymbols.CodecOf(serialize);
         StateShape shape = codec is not null ? StateShape.FromCodec(type, codec) : StateShape.From(type);
         var field = new StateFieldModel(id, CodeWriter.Escape(member.Name), shape, member.Name, true, initOnly);
         return new StateFieldDeclaration(field, displayName, location);
@@ -823,49 +821,5 @@ public sealed class SnapshotGenerator : IIncrementalGenerator
         string[] parts = name.Split('.');
         bool isMember = colon == 1 && cref[0] is not 'T' and not 'N';
         return isMember && parts.Length >= 2 ? parts[parts.Length - 2] + "." + parts[parts.Length - 1] : parts[parts.Length - 1];
-    }
-
-    private static bool HasBackingField(INamedTypeSymbol type, IPropertySymbol property)
-    {
-        foreach (ISymbol candidate in type.GetMembers())
-        {
-            if (candidate is IFieldSymbol backing && SymbolEqualityComparer.Default.Equals(backing.AssociatedSymbol, property))
-                return true;
-        }
-
-        return false;
-    }
-
-    private static AttributeData? FindAttribute(ISymbol symbol, string metadataName)
-    {
-        foreach (AttributeData attribute in symbol.GetAttributes())
-        {
-            if (attribute.AttributeClass is { } attributeClass && StateShape.MetadataName(attributeClass) == metadataName)
-                return attribute;
-        }
-
-        return null;
-    }
-
-    private static string? NamedString(AttributeData attribute, string name)
-    {
-        foreach (KeyValuePair<string, TypedConstant> argument in attribute.NamedArguments)
-        {
-            if (argument.Key == name && argument.Value.Value is string value)
-                return value;
-        }
-
-        return null;
-    }
-
-    private static ITypeSymbol? NamedType(AttributeData attribute, string name)
-    {
-        foreach (KeyValuePair<string, TypedConstant> argument in attribute.NamedArguments)
-        {
-            if (argument.Key == name && argument.Value.Value is ITypeSymbol value)
-                return value;
-        }
-
-        return null;
     }
 }
