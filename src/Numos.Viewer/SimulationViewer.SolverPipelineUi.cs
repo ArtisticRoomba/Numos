@@ -17,6 +17,7 @@ public partial class SimulationViewer
 
     private FeedbackMessage? _solverFeedback;
     private string? _solverAddDraft;
+    private string? _selectedSolverStage;
 
     /// <summary>
     ///     Draws the Solver Pipeline section of the configuration panel.
@@ -24,40 +25,46 @@ public partial class SimulationViewer
     /// <remarks>
     ///     Each click calls the session once, so the timeline records one operation per user action. The table
     ///     collects the click and applies it after <c>EndTable</c>, because an edit republishes the stage list.
+    ///     The table stays compact. Clicking a row selects the stage, and the selected stage's description and
+    ///     settings draw below the table at the full panel width.
     /// </remarks>
     private void RenderSolverPipelineSection(bool inspecting)
     {
         var steps = _session.GetSolverSteps();
         DrawFeedback(_solverFeedback);
 
+        if (_selectedSolverStage != null && !steps.Any(step => step.Name == _selectedSolverStage))
+            _selectedSolverStage = null;
+
         IReadOnlyList<AtmosWorldSolverLayoutEntry>? pendingLayout = null;
         (string Name, bool Enabled)? pendingToggle = null;
 
+        ImGui.PushStyleVar(ImGuiStyleVar.CellPadding, new Vector2(3f, ImGui.GetStyle().CellPadding.Y));
         using (var table = ImGuiExtensions.BeginTable(
                    "SolverPipeline##solver-pipeline",
-                   6,
+                   3,
                    ImGuiTableFlags.BordersInnerH | ImGuiTableFlags.NoSavedSettings))
         {
             if (table.IsVisible)
             {
-                ImGui.TableSetupColumn("#", ImGuiTableColumnFlags.WidthFixed);
-                ImGui.TableSetupColumn("On", ImGuiTableColumnFlags.WidthFixed);
-                ImGui.TableSetupColumn("Stage", ImGuiTableColumnFlags.WidthStretch);
-                ImGui.TableSetupColumn("Kind", ImGuiTableColumnFlags.WidthFixed);
-                ImGui.TableSetupColumn("Move", ImGuiTableColumnFlags.WidthFixed);
-                ImGui.TableSetupColumn("##remove", ImGuiTableColumnFlags.WidthFixed);
-                ImGui.TableHeadersRow();
+                var style = ImGui.GetStyle();
+                const float buttonGap = 2f;
+                float buttonSize = ImGui.GetFrameHeight();
+                var buttonBox = new Vector2(buttonSize, buttonSize);
+                float actionsWidth = buttonSize * 3f + buttonGap * 2f;
+
+                ImGui.TableSetupColumn("##enabled", ImGuiTableColumnFlags.WidthFixed);
+                ImGui.TableSetupColumn("##stage", ImGuiTableColumnFlags.WidthStretch);
+                ImGui.TableSetupColumn("##actions", ImGuiTableColumnFlags.WidthFixed, actionsWidth);
 
                 for (int index = 0; index < steps.Count; index++)
                 {
                     var step = steps[index];
+                    bool builtIn = step.Kind == AtmosWorldSolverKind.BuiltIn;
                     ImGui.PushID(step.Name);
                     ImGui.TableNextRow();
 
                     ImGui.TableSetColumnIndex(0);
-                    ImGui.TextDisabled((index + 1).ToString(CultureInfo.InvariantCulture));
-
-                    ImGui.TableSetColumnIndex(1);
                     bool enabled = step.IsEnabled;
                     ImGui.BeginDisabled(inspecting);
                     if (ImGui.Checkbox("##enabled", ref enabled))
@@ -65,48 +72,57 @@ public partial class SimulationViewer
 
                     ImGui.EndDisabled();
 
-                    ImGui.TableSetColumnIndex(3);
-                    ImGui.TextUnformatted(step.Kind == AtmosWorldSolverKind.BuiltIn ? "Built-in" : "Custom");
+                    ImGui.TableSetColumnIndex(1);
+                    var rowStart = ImGui.GetCursorPos();
+                    if (ImGui.Selectable("##select", step.Name == _selectedSolverStage, ImGuiSelectableFlags.AllowOverlap))
+                        _selectedSolverStage = step.Name;
 
-                    ImGui.TableSetColumnIndex(4);
+                    bool nameHovered = ImGui.IsItemHovered(ImGuiHoveredFlags.ForTooltip);
+                    ImGui.SetCursorPos(rowStart);
+                    if (step.IsEnabled)
+                        ImGui.TextUnformatted(step.Name);
+                    else
+                        ImGui.TextDisabled(step.Name);
+
+                    if (!builtIn)
+                    {
+                        ImGui.SameLine(0f, 6f);
+                        ImGui.TextDisabled("custom");
+                    }
+
+                    if (nameHovered)
+                        RenderWrappedTooltip(SolverPipelineEditor.Describe(step.Name), step.Name);
+
+                    ImGui.TableSetColumnIndex(2);
+                    ImGui.PushStyleVar(ImGuiStyleVar.ItemSpacing, new Vector2(buttonGap, style.ItemSpacing.Y));
                     ImGui.BeginDisabled(inspecting || index == 0);
                     if (ImGui.ArrowButton("##up", ImGuiDir.Up))
                         pendingLayout = SolverPipelineEditor.MoveUp(steps, index);
 
                     ImGui.EndDisabled();
+                    ItemTooltip("Move up");
                     ImGui.SameLine();
                     ImGui.BeginDisabled(inspecting || index == steps.Count - 1);
                     if (ImGui.ArrowButton("##down", ImGuiDir.Down))
                         pendingLayout = SolverPipelineEditor.MoveDown(steps, index);
 
                     ImGui.EndDisabled();
-
-                    ImGui.TableSetColumnIndex(5);
-                    bool builtIn = step.Kind == AtmosWorldSolverKind.BuiltIn;
+                    ItemTooltip("Move down");
+                    ImGui.SameLine();
                     ImGui.BeginDisabled(inspecting || !builtIn);
-                    if (ImGui.SmallButton("Remove"))
+                    if (ImGui.Button("x", buttonBox))
                         pendingLayout = SolverPipelineEditor.Remove(steps, index);
 
                     ImGui.EndDisabled();
-                    if (!builtIn && ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled | ImGuiHoveredFlags.ForTooltip))
-                        ImGui.SetTooltip("The host owns custom stages. The viewer cannot remove them.");
-
-                    // The tree node goes last so its children draw in the Stage cell after the other cells exist.
-                    ImGui.TableSetColumnIndex(2);
-                    bool open = ImGui.TreeNodeEx(step.Name, ImGuiTreeNodeFlags.SpanAvailWidth);
-                    if (ImGui.IsItemHovered(ImGuiHoveredFlags.ForTooltip))
-                        ImGui.SetTooltip(SolverPipelineEditor.Describe(step.Name));
-
-                    if (open)
-                    {
-                        RenderSolverStageDetails(step.Name, inspecting);
-                        ImGui.TreePop();
-                    }
+                    ItemTooltip(builtIn ? "Remove stage" : "The host owns custom stages. The viewer cannot remove them.");
+                    ImGui.PopStyleVar();
 
                     ImGui.PopID();
                 }
             }
         }
+
+        ImGui.PopStyleVar();
 
         if (pendingToggle is { } toggle)
             RunSolverEdit(() => _session.SetSolverEnabled(toggle.Name, toggle.Enabled));
@@ -120,13 +136,51 @@ public partial class SimulationViewer
             ImGui.PopStyleColor();
         }
 
+        RenderSolverStageDetails(inspecting);
+
+        ImGui.Separator();
         RenderSolverAddStage(steps, inspecting);
         RenderSolverPresets(steps, inspecting);
     }
 
-    private void RenderSolverStageDetails(string name, bool inspecting)
+    private static void ItemTooltip(string text)
     {
-        ImGui.TextDisabled(SolverPipelineEditor.Describe(name));
+        if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled | ImGuiHoveredFlags.ForTooltip))
+            RenderWrappedTooltip(text);
+    }
+
+    private static void RenderWrappedTooltip(string text, string? title = null)
+    {
+        if (!ImGui.BeginTooltip())
+            return;
+
+        if (title != null)
+            ImGui.TextUnformatted(title);
+
+        ImGui.PushTextWrapPos(ImGui.GetFontSize() * 24f);
+        ImGui.TextUnformatted(text);
+        ImGui.PopTextWrapPos();
+        ImGui.EndTooltip();
+    }
+
+    /// <summary>
+    ///     Draws the selected stage's name, description, and settings at the full panel width.
+    /// </summary>
+    private void RenderSolverStageDetails(bool inspecting)
+    {
+        ImGui.Separator();
+        if (_selectedSolverStage is not { } name)
+        {
+            ImGui.TextDisabled("Select a stage to see its description and settings.");
+            return;
+        }
+
+        ImGui.TextUnformatted(name);
+        ImGui.PushStyleColor(ImGuiCol.Text, ImGui.GetStyle().Colors[(int)ImGuiCol.TextDisabled]);
+        ImGui.TextWrapped(SolverPipelineEditor.Describe(name));
+        ImGui.PopStyleColor();
+
+        ImGui.Indent();
         switch (name)
         {
             case AtmosBuiltInSolvers.EulerFlow:
@@ -138,6 +192,8 @@ public partial class SimulationViewer
                 ImGui.TextUnformatted($"Configured reactions: {count.ToString(CultureInfo.InvariantCulture)}");
                 break;
         }
+
+        ImGui.Unindent();
     }
 
     private void RenderSolverAddStage(IReadOnlyList<AtmosWorldSolverStep> steps, bool inspecting)
@@ -152,8 +208,13 @@ public partial class SimulationViewer
             return;
         }
 
+        var style = ImGui.GetStyle();
+        float addWidth = ImGui.CalcTextSize("Add").X + style.FramePadding.X * 2f;
+        float markerWidth = ImGui.CalcTextSize("(?)").X + style.ItemSpacing.X * 3f;
+        float comboWidth = MathF.Max(80f, ImGui.GetContentRegionAvail().X - addWidth - markerWidth - style.ItemSpacing.X);
+
         ImGui.BeginDisabled(inspecting);
-        ImGui.SetNextItemWidth(220f);
+        ImGui.SetNextItemWidth(comboWidth);
         if (ImGui.BeginCombo("##solver-add-stage", _solverAddDraft ?? "Add stage..."))
         {
             foreach (string name in addable)
@@ -186,15 +247,21 @@ public partial class SimulationViewer
     private void RenderSolverPresets(IReadOnlyList<AtmosWorldSolverStep> steps, bool inspecting)
     {
         var current = SolverPipelineEditor.DetectTransportModel(steps);
+        var style = ImGui.GetStyle();
+        ImGui.Spacing();
+        ImGui.AlignTextToFramePadding();
+        ImGui.TextDisabled("Transport:");
+
         ImGui.BeginDisabled(inspecting);
+        SameLineOrWrap("Euler", style);
         if (RenderPresetButton("Euler##solver-preset-euler", current == AtmosTransportModel.Euler))
             RunSolverEdit(() => _session.ApplyTransportPreset(AtmosTransportModel.Euler));
 
-        ImGui.SameLine();
+        SameLineOrWrap("Legacy", style);
         if (RenderPresetButton("Legacy##solver-preset-legacy", current == AtmosTransportModel.Legacy))
             RunSolverEdit(() => _session.ApplyTransportPreset(AtmosTransportModel.Legacy));
 
-        ImGui.SameLine();
+        SameLineOrWrap("Reset to defaults", style);
         if (ImGui.Button("Reset to defaults##solver-reset"))
             RunSolverEdit(() => _session.ResetSolvers());
 
@@ -203,6 +270,17 @@ public partial class SimulationViewer
             "Euler and Legacy swap the stages that move gas and keep every other stage. " +
             "Reset to defaults restores the built-in order for the current model and enables every stage. " +
             "It cannot discard custom stages.");
+    }
+
+    /// <summary>
+    ///     Continues the current line when a button with the given label still fits, and wraps to a new line otherwise.
+    /// </summary>
+    private static void SameLineOrWrap(string label, ImGuiStylePtr style)
+    {
+        float buttonWidth = ImGui.CalcTextSize(label).X + style.FramePadding.X * 2f;
+        ImGui.SameLine();
+        if (ImGui.GetContentRegionAvail().X < buttonWidth)
+            ImGui.NewLine();
     }
 
     private static bool RenderPresetButton(string label, bool highlighted)

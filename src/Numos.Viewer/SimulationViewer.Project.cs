@@ -109,6 +109,7 @@ public partial class SimulationViewer
         _configurationFeedback = null;
         _solverFeedback = null;
         _solverAddDraft = null;
+        _selectedSolverStage = null;
         ClearConfigurationDrafts();
     }
 
