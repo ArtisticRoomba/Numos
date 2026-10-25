@@ -81,22 +81,43 @@ internal sealed partial class AtmosKernel
     }
 
     /// <summary>
+    ///     Like <see cref="RestoreCheckpoint" />, for a caller that has already passed the checkpoint to
+    ///     <see cref="ValidateCheckpoint" /> with this kernel's dimensions.
+    /// </summary>
+    /// <param name="checkpoint">Grid state to install.</param>
+    /// <param name="tickCount">The world's completed-tick count once the restore finishes.</param>
+    /// <remarks>
+    ///     A world restore validates every simulation before it changes any of them, so each kernel skips the second
+    ///     pass. An unvalidated checkpoint can leave the grid half installed.
+    /// </remarks>
+    internal void RestoreValidatedCheckpoint(AtmosSimulationCheckpoint checkpoint, int tickCount)
+    {
+        lock (StateGate)
+        {
+            ThrowIfTickExecuting("restore a checkpoint during a tick");
+            InstallCheckpoint(checkpoint, tickCount);
+        }
+    }
+
+    /// <summary>
     ///     Checks that a checkpoint can be installed in a simulation whose chunks have <paramref name="dimensions" />,
     ///     without needing a live kernel.
     /// </summary>
+    /// <remarks>
+    ///     The format and compatibility versions need no check here. A checkpoint always holds the current ones,
+    ///     because <see cref="AtmosSimulationCheckpoint" /> rejects any other while decoding.
+    /// </remarks>
     internal static void ValidateCheckpoint(AtmosSimulationCheckpoint checkpoint, Int3 dimensions)
     {
         ArgumentNullException.ThrowIfNull(checkpoint);
-        if (checkpoint.FormatVersion != AtmosSimulationCheckpoint.CurrentFormatVersion ||
-            checkpoint.CompatibilityVersion != AtmosSimulationCheckpoint.CurrentCompatibilityVersion ||
-            checkpoint.Dimensions != dimensions ||
+        if (checkpoint.Dimensions != dimensions ||
             dimensions.X <= 0 ||
             dimensions.Y <= 0 ||
             dimensions.Z <= 0 ||
             (long)dimensions.X * dimensions.Y * dimensions.Z > AtmosChunkConstants.MaximumVoxelCount)
         {
             throw new ArgumentException(
-                "The checkpoint format or dimensions are incompatible with this simulation.",
+                "The checkpoint dimensions are incompatible with this simulation.",
                 nameof(checkpoint));
         }
 

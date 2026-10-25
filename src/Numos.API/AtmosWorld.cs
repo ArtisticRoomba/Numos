@@ -905,7 +905,7 @@ public sealed partial class AtmosWorld : IDisposable
 
         RebuildOrderedSimulations();
         foreach (var saved in checkpoint.Simulations)
-            TryGetSimulationCore(saved.Simulation)!.Kernel.RestoreCheckpoint(saved.Checkpoint, checkpoint.TickCount);
+            TryGetSimulationCore(saved.Simulation)!.Kernel.RestoreValidatedCheckpoint(saved.Checkpoint, checkpoint.TickCount);
 
         RestoreTopology(checkpoint.LinkSlots);
         TickCount = checkpoint.TickCount;
@@ -1293,42 +1293,14 @@ public sealed partial class AtmosWorld : IDisposable
 
     private void ValidateCheckpoint(AtmosWorldCheckpoint checkpoint)
     {
-        if (checkpoint.FormatVersion != AtmosWorldCheckpoint.CurrentFormatVersion ||
-            checkpoint.Position.Tick > int.MaxValue)
-        {
-            throw new ArgumentException("The world checkpoint format or timeline position is incompatible.", nameof(checkpoint));
-        }
+        // The format version cannot differ, because a checkpoint always reports the current one.
+        if (checkpoint.Position.Tick > int.MaxValue)
+            throw new ArgumentException("The world checkpoint timeline position is incompatible.", nameof(checkpoint));
 
         checkpoint.Config.ValidateGasRegistry();
         ValidateSolverStates(checkpoint);
-        AtmosWorldSolverCheckpoint[] currentWorldSolvers = Solvers.Steps
-            .Select(static step => new AtmosWorldSolverCheckpoint(
-                step.Name,
-                step.Kind,
-                step.IsEnabled,
-                step.NeighborSelectionKey))
-            .ToArray();
 
-        // Built-in stages are recreated by name, so only the custom stages have to match. Their order may differ.
-        var currentCustom = currentWorldSolvers
-            .Where(static solver => solver.Kind == AtmosWorldSolverKind.Custom)
-            .Select(static solver => (solver.Name, solver.NeighborSelectionKey))
-            .Order()
-            .ToArray();
-        var checkpointCustom = checkpoint.Solvers
-            .Where(static solver => solver.Kind == AtmosWorldSolverKind.Custom)
-            .Select(static solver => (solver.Name, solver.NeighborSelectionKey))
-            .Order()
-            .ToArray();
-        if (!currentCustom.SequenceEqual(checkpointCustom))
-        {
-            throw new ArgumentException(
-                "The world checkpoint requires the same custom world solver names and neighbor selections. " +
-                $"Checkpoint stages: [{string.Join(", ", checkpoint.Solvers.Select(static solver => solver.Name))}]; " +
-                $"world stages: [{string.Join(", ", currentWorldSolvers.Select(static solver => solver.Name))}].",
-                nameof(checkpoint));
-        }
-
+        // Checked first, because the custom-stage comparison below assumes unique names.
         var seenSolvers = new HashSet<string>(StringComparer.Ordinal);
         foreach (var solver in checkpoint.Solvers)
         {
@@ -1340,6 +1312,17 @@ public sealed partial class AtmosWorld : IDisposable
                     $"The world checkpoint lists world solver '{solver.Name}' twice or as an unknown built-in stage.",
                     nameof(checkpoint));
             }
+        }
+
+        // Built-in stages are recreated by name, so only the custom stages have to match. Their order may differ.
+        IReadOnlyList<AtmosWorldSolverCheckpoint> currentWorldSolvers = SolverCheckpoints;
+        if (!HaveSameCustomSolvers(currentWorldSolvers, checkpoint.Solvers))
+        {
+            throw new ArgumentException(
+                "The world checkpoint requires the same custom world solver names and neighbor selections. " +
+                $"Checkpoint stages: [{string.Join(", ", checkpoint.Solvers.Select(static solver => solver.Name))}]; " +
+                $"world stages: [{string.Join(", ", currentWorldSolvers.Select(static solver => solver.Name))}].",
+                nameof(checkpoint));
         }
 
         var validCells = new Dictionary<AtmosSimulationId, Dictionary<Int3, int>>();
@@ -1359,7 +1342,8 @@ public sealed partial class AtmosWorld : IDisposable
             if (current != null && current.ChunkDimensions != saved.Checkpoint.Dimensions)
                 throw new ArgumentException("A retained simulation has incompatible chunk dimensions.", nameof(checkpoint));
 
-            // Also rejects duplicate chunk positions, so the map below can't collide.
+            // The only check of the grid state before the restore. It also rejects duplicate chunk positions, so the
+            // map below can't collide. Each kernel then installs its checkpoint without validating it again.
             AtmosKernel.ValidateCheckpoint(saved.Checkpoint, saved.Checkpoint.Dimensions);
             var dimensions = saved.Checkpoint.Dimensions;
             int voxelCount = dimensions.X * dimensions.Y * dimensions.Z;
@@ -1370,19 +1354,21 @@ public sealed partial class AtmosWorld : IDisposable
             validCells.Add(saved.Simulation, chunks);
         }
 
-        if (checkpoint.SimulationGenerations.Any(static generation => generation == 0))
-            throw new ArgumentException("The world checkpoint contains an invalid simulation generation.", nameof(checkpoint));
+        for (int index = 0; index < checkpoint.SimulationGenerations.Count; index++)
+        {
+            if (checkpoint.SimulationGenerations[index] == 0)
+                throw new ArgumentException("The world checkpoint contains an invalid simulation generation.", nameof(checkpoint));
+        }
 
         var currentPhysicalEdges = new HashSet<ExplicitEdgeKey>();
         var nextPhysicalEdges = new HashSet<ExplicitEdgeKey>();
         for (int slotIndex = 0; slotIndex < checkpoint.LinkSlots.Count; slotIndex++)
         {
             var slot = checkpoint.LinkSlots[slotIndex];
-            if (slot.Generation == 0 ||
-                !Enum.IsDefined((LinkSetState)slot.State) ||
-                !Enum.IsDefined(slot.Kind))
+            if (slot.Generation == 0 || !Enum.IsDefined(slot.Kind))
                 throw new ArgumentException("The world checkpoint contains an invalid link-set slot.", nameof(checkpoint));
 
+            // AtmosWorldCheckpoint.OnDecoded already rejected unknown states, and capture only writes known ones.
             var state = (LinkSetState)slot.State;
             if (state == LinkSetState.Free != (slot.Links.Length == 0))
                 throw new ArgumentException("The world checkpoint contains inconsistent free link storage.", nameof(checkpoint));
@@ -1426,13 +1412,14 @@ public sealed partial class AtmosWorld : IDisposable
     }
 
     /// <summary>
-    ///     Requires the checkpoint to hold state for exactly the stateful class solvers registered here, in pipeline
-    ///     order. The payloads must be at least well-formed field records.
+    ///     Requires the checkpoint to hold state for exactly the stateful class solvers registered here. The payloads
+    ///     must be at least well-formed field records.
     /// </summary>
     /// <remarks>
     ///     Strict in both directions. An entry nothing here can take would silently drop state. A stateful solver
     ///     with no entry would keep whatever it held before the restore. In either case replay would diverge from the
-    ///     history of the checkpoint.
+    ///     history of the checkpoint. The entries follow the checkpoint's own stage order, which
+    ///     <see cref="AtmosWorldCheckpoint" /> checks when it is decoded.
     /// </remarks>
     private void ValidateSolverStates(AtmosWorldCheckpoint checkpoint)
     {
@@ -1471,7 +1458,11 @@ public sealed partial class AtmosWorld : IDisposable
 
         foreach (var registration in stateful)
         {
-            if (!checkpoint.SolverStates.Any(saved => saved.Name == registration.Name))
+            bool found = false;
+            for (int index = 0; index < checkpoint.SolverStates.Count && !found; index++)
+                found = checkpoint.SolverStates[index].Name == registration.Name;
+
+            if (!found)
             {
                 throw new ArgumentException(
                     $"World solver '{registration.Name}' has [NumosSerialize] members, but the world checkpoint holds " +
@@ -1479,17 +1470,45 @@ public sealed partial class AtmosWorld : IDisposable
                     nameof(checkpoint));
             }
         }
+    }
 
-        // Restore adopts the checkpoint's layout, so the entries follow its stage order and not the current one.
-        string[] expectedOrder = checkpoint.Solvers
-            .Select(static solver => solver.Name)
-            .Where(name => Solvers.Find(name)?.State is not null)
-            .ToArray();
-        if (checkpoint.SolverStates.Count != stateful.Length ||
-            !checkpoint.SolverStates.Select(static saved => saved.Name).SequenceEqual(expectedOrder))
+    /// <summary>
+    ///     Gets whether the custom stages in <paramref name="saved" /> are exactly those in <paramref name="current" />,
+    ///     each with the same neighbor selection key. Order is ignored.
+    /// </summary>
+    /// <remarks>Both lists must hold unique stage names.</remarks>
+    private static bool HaveSameCustomSolvers(
+        IReadOnlyList<AtmosWorldSolverCheckpoint> current,
+        IReadOnlyList<AtmosWorldSolverCheckpoint> saved)
+    {
+        int currentCount = 0;
+        for (int index = 0; index < current.Count; index++)
         {
-            throw new ArgumentException("The world checkpoint's solver states are out of pipeline order or repeated.", nameof(checkpoint));
+            if (current[index].Kind == AtmosWorldSolverKind.Custom)
+                currentCount++;
         }
+
+        int savedCount = 0;
+        for (int index = 0; index < saved.Count; index++)
+        {
+            var solver = saved[index];
+            if (solver.Kind != AtmosWorldSolverKind.Custom)
+                continue;
+
+            savedCount++;
+            bool found = false;
+            for (int other = 0; other < current.Count && !found; other++)
+            {
+                found = current[other].Kind == AtmosWorldSolverKind.Custom &&
+                        current[other].Name == solver.Name &&
+                        current[other].NeighborSelectionKey == solver.NeighborSelectionKey;
+            }
+
+            if (!found)
+                return false;
+        }
+
+        return savedCount == currentCount;
     }
 
     // Checks the field framing without knowing the field types, so a truncated or reordered payload is rejected
