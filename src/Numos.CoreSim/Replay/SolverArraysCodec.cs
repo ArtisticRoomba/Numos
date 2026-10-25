@@ -28,9 +28,10 @@ internal readonly struct SolverArraysCodec : IStateCodec<IReadOnlyList<AtmosSolv
         where TSink : struct, IStateSink
     {
         sink.WriteCount(value.Count);
-        foreach (var array in value)
+        for (int index = 0; index < value.Count; index++)
         {
-            if (!array.IsPortable && typeof(TSink) != typeof(StateHashSink))
+            var array = value[index];
+            if (typeof(TSink) != typeof(StateHashSink) && !array.IsPortable)
             {
                 throw new NotSupportedException(
                     $"Chunk field '{array.Key}' holds {array.ElementType.FullName}, which can't be saved. " +

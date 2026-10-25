@@ -23,10 +23,11 @@ internal abstract class ChunkFieldDescriptor
     private object? _publicHandle;
 
     private protected ChunkFieldDescriptor(
-        string key, int slot, bool captureForRollback, int? fixedLength, bool clearOnSleep, bool clearOnVacuum)
+        string key, int slot, bool isPortable, bool captureForRollback, int? fixedLength, bool clearOnSleep, bool clearOnVacuum)
     {
         Key = key;
         Slot = slot;
+        IsPortable = isPortable;
         CaptureForRollback = captureForRollback;
         FixedLength = fixedLength;
         ClearOnSleep = clearOnSleep;
@@ -40,7 +41,7 @@ internal abstract class ChunkFieldDescriptor
     ///     Only primitives and enums over them qualify: their bytes have no padding, and swapping each element's bytes
     ///     converts them to little-endian. Structs are left out, since their layout and padding aren't pinned.
     /// </remarks>
-    internal bool IsPortable => IsPortableElementType(ElementType);
+    internal bool IsPortable { get; }
 
     /// <summary>
     ///     Gets the ordinal key.
@@ -130,7 +131,7 @@ internal sealed class ChunkFieldDescriptor<T> : ChunkFieldDescriptor
 {
     internal ChunkFieldDescriptor(
         string key, int slot, bool captureForRollback, int? fixedLength, bool clearOnSleep, bool clearOnVacuum)
-        : base(key, slot, captureForRollback, fixedLength, clearOnSleep, clearOnVacuum)
+        : base(key, slot, IsPortableElementType(typeof(T)), captureForRollback, fixedLength, clearOnSleep, clearOnVacuum)
     {
     }
 
