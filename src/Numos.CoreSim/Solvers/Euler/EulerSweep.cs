@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Numerics;
+using System.Runtime.CompilerServices;
 using Numos.CoreSim.EulerFlow;
 
 namespace Numos.CoreSim.Solvers.Euler;
@@ -78,8 +80,9 @@ internal struct EulerSweepCounters
 ///         <c>W</c> columns of one <c>z</c>), and a Z sweep takes one y-sheet (the <c>W</c> columns of one
 ///         <c>y</c>). Bundle data is stored march-major, so the cells and faces at one march position are
 ///         contiguous. A bundle runs in three passes. The first solves every face of the bundle once into
-///         a scratch array. The second updates the species of every air cell, one gas at a time, and sums the
-///         mixture as it goes. The third updates momentum and energy per cell and rebuilds its primitive state.
+///         a scratch array. Interior faces of rows that hold only air go through <see cref="HllcFluxVector" />, which
+///         gives the same bits as <see cref="HllcFlux.Solve" />. The second updates the species of every air cell, one
+///         gas at a time, and sums the mixture as it goes. The third updates momentum and energy per cell and rebuilds its primitive state.
 ///         Going gas by gas keeps one source row, one target row, and the two neighbour rows in hand for a whole
 ///         bundle instead of looking them up again per cell.
 ///     </para>
@@ -208,23 +211,57 @@ internal static class EulerSweep
 
         int cellCount = marchCount * lineCount;
         int faceCount = (marchCount + 1) * lineCount;
-        scratch.EnsureCapacity(faceCount, cellCount);
+        scratch.EnsureCapacity(faceCount, cellCount, runCount);
         PerSecond[] faceRate = scratch.FaceSpeciesRate;
         MolePerSecond[] faceFlux = scratch.FaceFlux;
         int[] upperMask = scratch.FaceUpperMask;
         int[] fixupFaces = scratch.FixupFaces;
         EulerFaceRate[] faces = scratch.Faces;
+        Newton[] faceNormal = scratch.FaceNormal;
+        Newton[] faceTangential1 = scratch.FaceTangential1;
+        Newton[] faceTangential2 = scratch.FaceTangential2;
+        Watt[] faceEnergy = scratch.FaceEnergy;
         bool[] airMap = workspace.AirMap;
         bool[] rowAllAir = workspace.RowAllAir;
 
         EulerFlowConfig settings = config.EulerFlow;
         EulerChunkState read = workspace.Read;
+
+        int innerRunCount = alongMarch ? lineCount : marchCount - 1;
+        int innerRunLength = alongMarch ? marchCount - 1 : lineCount;
+
+        // Interior faces of an all-air run go through the vector kernel. Every other face is solved one at a time.
+        bool vectorFaces = HllcFluxVector.Enabled && !settings.AllMachCorrection && innerRunLength > 0;
+        bool[] vectorRun = scratch.VectorRun;
+        if (vectorFaces)
+        {
+            scratch.EnsureStage(innerRunLength + 1);
+            for (int run = 0; run < innerRunCount; run++)
+            {
+                int firstLower = baseIndex + run * runVoxelStride;
+                bool allAir = rowAllAir[firstLower / width] &&
+                              (alongMarch || rowAllAir[(firstLower + marchStride) / width]);
+                vectorRun[run] = allAir;
+                if (allAir)
+                {
+                    int firstFace = alongMarch ? run * runFaceStride + 1 : (run + 1) * lineCount;
+                    SolveRun(
+                        scratch, read.Cells, axis, alongMarch, firstLower, marchStride, innerRunLength,
+                        firstFace, faceArea);
+                }
+            }
+        }
+
         for (int march = 0; march <= marchCount; march++)
         {
             int lowerRow = march > 0 ? baseIndex + (march - 1) * marchStride : -1;
             int upperRow = march < marchCount ? baseIndex + march * marchStride : -1;
+            bool innerRow = vectorFaces && march >= 1 && march < marchCount;
             for (int line = 0; line < lineCount; line++)
             {
+                if (innerRow && vectorRun[alongMarch ? line : march - 1])
+                    continue;
+
                 int face = alongMarch ? line * runFaceStride + march : march * lineCount + line;
                 SolveFace(
                     workspace, read, axis,
@@ -232,7 +269,12 @@ internal static class EulerSweep
                     upperRow < 0 ? -1 : upperRow + line * lineStride,
                     faceArea, settings, out faces[face]);
 
-                faceRate[face] = faces[face].SpeciesRate;
+                ref readonly EulerFaceRate solved = ref faces[face];
+                faceRate[face] = solved.SpeciesRate;
+                faceNormal[face] = solved.NormalMomentum;
+                faceTangential1[face] = solved.Tangential1Momentum;
+                faceTangential2[face] = solved.Tangential2Momentum;
+                faceEnergy[face] = solved.Energy;
             }
         }
 
@@ -246,10 +288,11 @@ internal static class EulerSweep
             fixupFaces[fixupCount++] = alongMarch ? line * runFaceStride + marchCount : marchCount * lineCount + line;
         }
 
-        int innerRunCount = alongMarch ? lineCount : marchCount - 1;
-        int innerRunLength = alongMarch ? marchCount - 1 : lineCount;
         for (int run = 0; run < innerRunCount; run++)
         {
+            if (vectorFaces && vectorRun[run])
+                continue;
+
             int firstFace = alongMarch ? run * runFaceStride + 1 : (run + 1) * lineCount;
             int firstLower = baseIndex + run * runVoxelStride;
             for (int i = 0; i < innerRunLength; i++)
@@ -333,7 +376,7 @@ internal static class EulerSweep
             }
         }
 
-        var cellPass = new EulerCellPass(workspace, axis, timeStep, config);
+        var cellPass = new EulerCellPass(workspace, axis, timeStep, config, scratch);
         MetrePerSecond maxSignalSpeed = 0f;
         for (int run = 0; run < runCount; run++)
         {
@@ -347,7 +390,7 @@ internal static class EulerSweep
                     continue;
 
                 MetrePerSecond signalSpeed = cellPass.UpdateCell(
-                    firstVoxel + i, in faces[firstBehind + i], in faces[firstBehind + aheadOffset + i],
+                    firstVoxel + i, firstBehind + i, firstBehind + aheadOffset + i,
                     scratch.Mass[cell], scratch.TotalMoles[cell], scratch.HeatCapacity[cell],
                     scratch.NonFiniteSpecies[cell], ref counters);
 
@@ -525,6 +568,180 @@ internal static class EulerSweep
         Store(in flux, EulerUpwindSide.Self, cellIndex, faceArea, out rate);
     }
 
+    /// <summary>
+    ///     Solves a run of interior faces whose cells are all air with <see cref="HllcFluxVector" /> and stores the
+    ///     rates exactly as <see cref="Store" /> does, into the bundle's per-field face arrays.
+    /// </summary>
+    /// <param name="scratch">The worker's scratch, holding the staging arrays and the face arrays.</param>
+    /// <param name="cells">The read buffer's cells.</param>
+    /// <param name="axis">The sweep axis.</param>
+    /// <param name="alongMarch">Whether the lower and upper cells of the run are neighbours in one voxel row.</param>
+    /// <param name="firstLower">Voxel index of the lower cell of the first face.</param>
+    /// <param name="upperOffset">Voxel distance from a face's lower cell to its upper cell.</param>
+    /// <param name="count">Number of faces. Face <c>i</c> has its lower cell at <c>firstLower + i</c>.</param>
+    /// <param name="firstFace">Index of the first face in the scratch face arrays.</param>
+    /// <param name="faceArea">Area of one voxel face.</param>
+    /// <remarks>
+    ///     <para>
+    ///         The cells are copied into field arrays first so that each vector load is contiguous. Lanes past
+    ///         <paramref name="count" /> read zero padding, which is a vacuum on both sides.
+    ///     </para>
+    ///     <para>
+    ///         The run writes no <see cref="EulerFaceRate" />. Its upwind cell is always the lower or the upper cell,
+    ///         so the species pass needs only the upper-cell mask. A vector that covers lanes past
+    ///         <paramref name="count" /> goes through a spill buffer, so no lane writes a face of another run.
+    ///     </para>
+    /// </remarks>
+    private static void SolveRun(
+        BundleScratch scratch, EulerCellState[] cells, int axis, bool alongMarch, int firstLower, int upperOffset,
+        int count, int firstFace, SquareMetre faceArea)
+    {
+        float[] stage = scratch.Stage;
+        int stride = scratch.StageStride;
+        int half = scratch.StageHalf;
+        int rightOffset;
+        if (alongMarch)
+        {
+            StageCells(cells, firstLower, count + 1, axis, stage, stride, 0, half, ref scratch.StageDirty[0]);
+            rightOffset = 1;
+        }
+        else
+        {
+            StageCells(cells, firstLower, count, axis, stage, stride, 0, half, ref scratch.StageDirty[0]);
+            StageCells(
+                cells, firstLower + upperOffset, count, axis, stage, stride, half, half, ref scratch.StageDirty[1]);
+            rightOffset = half;
+        }
+
+        float[] speciesRate = scratch.FaceSpeciesRate;
+        float[] normalRate = scratch.FaceNormal;
+        float[] tangential1Rate = scratch.FaceTangential1;
+        float[] tangential2Rate = scratch.FaceTangential2;
+        float[] energyRate = scratch.FaceEnergy;
+        int[] upperMask = scratch.FaceUpperMask;
+
+        int width = HllcFluxVector.Width;
+        Vector<float> area = new((float)faceArea);
+        Span<float> spill = stackalloc float[width];
+        Span<int> maskSpill = stackalloc int[width];
+        for (int first = 0; first < count; first += width)
+        {
+            HllcLanes left = LoadLanes(stage, stride, first);
+            HllcLanes right = LoadLanes(stage, stride, rightOffset + first);
+            HllcLaneFlux flux = HllcFluxVector.Solve(in left, in right);
+            Vector<float> species = flux.SpeciesWeight * area;
+            Vector<float> normal = flux.NormalMomentum * area;
+            Vector<float> tangential1 = flux.Tangential1Momentum * area;
+            Vector<float> tangential2 = flux.Tangential2Momentum * area;
+            Vector<float> energy = flux.Energy * area;
+            Vector<int> upwindIsUpper = ~flux.UpwindIsLeft;
+
+            int face = firstFace + first;
+            if (first + width <= count)
+            {
+                species.CopyTo(speciesRate, face);
+                normal.CopyTo(normalRate, face);
+                tangential1.CopyTo(tangential1Rate, face);
+                tangential2.CopyTo(tangential2Rate, face);
+                energy.CopyTo(energyRate, face);
+                upwindIsUpper.CopyTo(upperMask, face);
+                continue;
+            }
+
+            int lanes = count - first;
+            species.CopyTo(spill);
+            spill[..lanes].CopyTo(speciesRate.AsSpan(face));
+            normal.CopyTo(spill);
+            spill[..lanes].CopyTo(normalRate.AsSpan(face));
+            tangential1.CopyTo(spill);
+            spill[..lanes].CopyTo(tangential1Rate.AsSpan(face));
+            tangential2.CopyTo(spill);
+            spill[..lanes].CopyTo(tangential2Rate.AsSpan(face));
+            energy.CopyTo(spill);
+            spill[..lanes].CopyTo(energyRate.AsSpan(face));
+            upwindIsUpper.CopyTo(maskSpill);
+            maskSpill[..lanes].CopyTo(upperMask.AsSpan(face));
+        }
+    }
+
+    private static HllcLanes LoadLanes(float[] stage, int stride, int offset)
+    {
+        return new HllcLanes(
+            new Vector<float>(stage, offset),
+            new Vector<float>(stage, stride + offset),
+            new Vector<float>(stage, 2 * stride + offset),
+            new Vector<float>(stage, 3 * stride + offset),
+            new Vector<float>(stage, 4 * stride + offset),
+            new Vector<float>(stage, 5 * stride + offset),
+            new Vector<float>(stage, 6 * stride + offset),
+            new Vector<float>(stage, 7 * stride + offset));
+    }
+
+    /// <summary>
+    ///     Copies the face-frame primitives of <paramref name="count" /> cells into the staging arrays, in the field
+    ///     order of <see cref="HllcLanes" />. The part of the half that starts at <paramref name="dest" /> past
+    ///     <paramref name="count" /> stays zero: <paramref name="dirty" /> remembers how far an earlier call wrote.
+    /// </summary>
+    /// <remarks>
+    ///     The staging arrays are plain floats for the vector kernel, which carries no units, so the dimensional
+    ///     analyzer cannot check these copies.
+    /// </remarks>
+#pragma warning disable QNT002
+    private static void StageCells(
+        EulerCellState[] cells, int first, int count, int axis, float[] stage, int stride, int dest, int half,
+        ref int dirty)
+    {
+        // The checks here make the unchecked accesses below safe.
+        if (count > half || first < 0 || first + count > cells.Length || dest + 7 * stride + half > stage.Length)
+            throw new ArgumentOutOfRangeException(nameof(count));
+
+        ref float density = ref stage[dest];
+        ref float normal = ref stage[stride + dest];
+        ref float tangential1 = ref stage[2 * stride + dest];
+        ref float tangential2 = ref stage[3 * stride + dest];
+        ref float pressure = ref stage[4 * stride + dest];
+        ref float energy = ref stage[5 * stride + dest];
+        ref float sound = ref stage[6 * stride + dest];
+        ref float inverseMass = ref stage[7 * stride + dest];
+        ref EulerCellState source = ref cells[first];
+        for (int i = 0; i < count; i++)
+        {
+            ref readonly EulerCellState cell = ref Unsafe.Add(ref source, i);
+            Unsafe.Add(ref density, i) = cell.Density;
+            Unsafe.Add(ref pressure, i) = cell.Pressure;
+            Unsafe.Add(ref energy, i) = cell.EnergyDensity;
+            Unsafe.Add(ref sound, i) = cell.SoundSpeed;
+            Unsafe.Add(ref inverseMass, i) = cell.InverseMass;
+            switch (axis)
+            {
+                case 0:
+                    Unsafe.Add(ref normal, i) = cell.VelocityX;
+                    Unsafe.Add(ref tangential1, i) = cell.VelocityY;
+                    Unsafe.Add(ref tangential2, i) = cell.VelocityZ;
+                    break;
+                case 1:
+                    Unsafe.Add(ref normal, i) = cell.VelocityY;
+                    Unsafe.Add(ref tangential1, i) = cell.VelocityZ;
+                    Unsafe.Add(ref tangential2, i) = cell.VelocityX;
+                    break;
+                default:
+                    Unsafe.Add(ref normal, i) = cell.VelocityZ;
+                    Unsafe.Add(ref tangential1, i) = cell.VelocityX;
+                    Unsafe.Add(ref tangential2, i) = cell.VelocityY;
+                    break;
+            }
+        }
+
+        if (dirty > count)
+        {
+            for (int field = 0; field < 8; field++)
+                stage.AsSpan(field * stride + dest + count, dirty - count).Clear();
+        }
+
+        dirty = count;
+    }
+#pragma warning restore QNT002
+
     private static void Store(
         in EulerFaceFlux flux, EulerUpwindSide upwindSide, int upwindIndex, SquareMetre faceArea,
         out EulerFaceRate rate)
@@ -565,9 +782,19 @@ internal static class EulerSweep
         private readonly KilogramMetrePerSecond[] _readTangential2;
         private readonly Joule64[] _readEnergy;
         private readonly EulerChunkState _write;
+        private readonly Newton[] _faceNormal;
+        private readonly Newton[] _faceTangential1;
+        private readonly Newton[] _faceTangential2;
+        private readonly Watt[] _faceEnergy;
 
-        public EulerCellPass(EulerChunkWorkspace workspace, int axis, Second timeStep, AtmosSolverConfigSnapshot config)
+        public EulerCellPass(
+            EulerChunkWorkspace workspace, int axis, Second timeStep, AtmosSolverConfigSnapshot config,
+            BundleScratch scratch)
         {
+            _faceNormal = scratch.FaceNormal;
+            _faceTangential1 = scratch.FaceTangential1;
+            _faceTangential2 = scratch.FaceTangential2;
+            _faceEnergy = scratch.FaceEnergy;
             EulerChunkState read = workspace.Read;
             _axis = axis;
             _timeStep = timeStep;
@@ -595,8 +822,8 @@ internal static class EulerSweep
         ///     Advances one air cell by the difference of its two face rates and refreshes its derived state.
         /// </summary>
         /// <param name="voxelIndex">The air cell.</param>
-        /// <param name="behind">The face on the cell's lower side.</param>
-        /// <param name="ahead">The face on the cell's upper side.</param>
+        /// <param name="behind">The scratch index of the face on the cell's lower side.</param>
+        /// <param name="ahead">The scratch index of the face on the cell's upper side.</param>
         /// <param name="mass">Mass of the cell's new mixture, summed by the species pass.</param>
         /// <param name="totalMoles">Moles of the cell's new mixture, summed by the species pass.</param>
         /// <param name="heatCapacity">Heat capacity of the cell's new mixture, summed by the species pass.</param>
@@ -619,7 +846,7 @@ internal static class EulerSweep
         ///     </para>
         /// </remarks>
         public MetrePerSecond UpdateCell(
-            int voxelIndex, in EulerFaceRate behind, in EulerFaceRate ahead,
+            int voxelIndex, int behind, int ahead,
             Kilogram mass, Mole totalMoles, JoulePerKelvin64 heatCapacity, bool nonFiniteSpecies,
             ref EulerSweepCounters counters)
         {
@@ -630,15 +857,15 @@ internal static class EulerSweep
                 counters.NonFiniteCells++;
 
             KilogramMetrePerSecond normal = _readNormal[voxelIndex] -
-                                            timeStep * (ahead.NormalMomentum - behind.NormalMomentum);
+                                            timeStep * (_faceNormal[ahead] - _faceNormal[behind]);
 
             KilogramMetrePerSecond tangential1 = _readTangential1[voxelIndex] -
-                                                 timeStep * (ahead.Tangential1Momentum - behind.Tangential1Momentum);
+                                                 timeStep * (_faceTangential1[ahead] - _faceTangential1[behind]);
 
             KilogramMetrePerSecond tangential2 = _readTangential2[voxelIndex] -
-                                                 timeStep * (ahead.Tangential2Momentum - behind.Tangential2Momentum);
+                                                 timeStep * (_faceTangential2[ahead] - _faceTangential2[behind]);
 
-            Joule64 energy = _readEnergy[voxelIndex] - (double)timeStep * ((double)ahead.Energy - behind.Energy);
+            Joule64 energy = _readEnergy[voxelIndex] - (double)timeStep * ((double)_faceEnergy[ahead] - _faceEnergy[behind]);
             write.Energy[voxelIndex] = energy;
 
             write.Mass[voxelIndex] = mass;
@@ -737,21 +964,73 @@ internal static class EulerSweep
         public int[] FaceUpperMask = [];
         public int[] FixupFaces = [];
         public EulerFaceRate[] Faces = [];
+
+        /// <summary>
+        ///     Momentum and energy rates of every face, indexed like <see cref="Faces" />. The cell update reads these.
+        ///     The scalar solver copies its result in and the vector kernel writes them directly.
+        /// </summary>
+        public Newton[] FaceNormal = [];
+        public Newton[] FaceTangential1 = [];
+        public Newton[] FaceTangential2 = [];
+        public Watt[] FaceEnergy = [];
         public JoulePerKelvin64[] HeatCapacity = [];
         public Kilogram[] Mass = [];
         public bool[] NonFiniteSpecies = [];
         public Mole[] TotalMoles = [];
 
-        public void EnsureCapacity(int faceCount, int cellCount)
+        /// <summary>
+        ///     Whether the face solve covered the interior faces of each inner run with the vector kernel.
+        /// </summary>
+        public bool[] VectorRun = [];
+
+        /// <summary>
+        ///     Field arrays of cell primitives for the vector face solve, <see cref="StageStride" /> apart.
+        /// </summary>
+        public float[] Stage = [];
+
+        public int StageStride;
+
+        /// <summary>
+        ///     Lanes of one half of a field array: a lower run and an upper run.
+        /// </summary>
+        public int StageHalf;
+
+        /// <summary>
+        ///     Cells the last staging wrote into each half, so the next one can clear only the stale tail.
+        /// </summary>
+        public readonly int[] StageDirty = new int[2];
+
+        public void EnsureStage(int runLength)
+        {
+            int width = HllcFluxVector.Width;
+            int half = (runLength + width - 1) / width * width + width;
+            if (StageHalf == half)
+                return;
+
+            StageHalf = half;
+            StageStride = 2 * half;
+            Stage = new float[8 * StageStride];
+            StageDirty[0] = 0;
+            StageDirty[1] = 0;
+        }
+
+        public void EnsureCapacity(int faceCount, int cellCount, int runCount)
         {
             if (Faces.Length < faceCount)
             {
                 Faces = new EulerFaceRate[faceCount];
+                FaceNormal = new Newton[faceCount];
+                FaceTangential1 = new Newton[faceCount];
+                FaceTangential2 = new Newton[faceCount];
+                FaceEnergy = new Watt[faceCount];
                 FaceFlux = new MolePerSecond[faceCount];
                 FaceSpeciesRate = new PerSecond[faceCount];
                 FaceUpperMask = new int[faceCount];
                 FixupFaces = new int[faceCount];
             }
+
+            if (VectorRun.Length < runCount)
+                VectorRun = new bool[runCount];
 
             if (Mass.Length < cellCount)
             {
