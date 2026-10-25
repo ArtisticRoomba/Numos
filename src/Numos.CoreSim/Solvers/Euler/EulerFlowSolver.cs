@@ -545,7 +545,6 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
         bool capEngaged = false;
         Scalar maxCourant = 0f;
         MetrePerSecond maxSignalSpeed = 0f;
-        var counters = new EulerSweepCounters();
 
         while (remaining > 0d)
         {
@@ -577,11 +576,7 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
                 ShareAxisGases(axis, config);
                 RunSweep(axis, timeStep, faceArea, config);
                 for (int index = 0; index < _activeCount; index++)
-                {
-                    EulerChunkWorkspace workspace = _active[index];
-                    ReducePencils(workspace, axis, ref counters);
-                    workspace.Swap();
-                }
+                    _active[index].Swap();
 
                 // A chunk activated here is swept from the next sweep on at this substep's Δt. Its gas is at rest,
                 // so its signal speed is its sound speed, which the next substep's Δt accounts for.
@@ -601,9 +596,15 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
         // Each chunk writes only its own fields and its own counter here. The tick thread sums the counters.
         ParallelPhase.Run(_activeCount, new WriteBackAction(_active, config, settings));
         int negativeInternalEnergy = 0;
-        int nonFiniteCells = counters.NonFiniteCells;
+        var counters = new EulerSweepCounters();
+        int nonFiniteCells = 0;
         for (int index = 0; index < _activeCount; index++)
         {
+            EulerSweepCounters repairs = _active[index].SweepCounters;
+            counters.ClampedVelocity += repairs.ClampedVelocity;
+            counters.NegativeMoles += repairs.NegativeMoles;
+            counters.NonFiniteCells += repairs.NonFiniteCells;
+            nonFiniteCells += repairs.NonFiniteCells;
             nonFiniteCells += _active[index].NonFiniteCellsGathered;
             negativeInternalEnergy += _active[index].NegativeInternalEnergyWritten;
         }
@@ -710,14 +711,24 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
         }
 
         ParallelPhase.Run(itemCount, new SweepPencilsAction(_active, _workItems, axis, timeStep, faceArea, config));
+
+        // A chunk's tiles run on different workers, so the reduction waits for the barrier.
+        for (int index = 0; index < _activeCount; index++)
+            ReducePencils(_active[index], axis);
     }
 
     /// <summary>
-    ///     Folds a chunk's per-pencil slots into its write buffer's signal speed and the tick's repair counters.
-    ///     Max and sum, so the order is immaterial.
+    ///     Folds a chunk's per-pencil slots into its write buffer's signal speed and its
+    ///     <see cref="EulerChunkWorkspace.SweepCounters" />. Max and sum, so the order is immaterial.
     /// </summary>
-    private static void ReducePencils(EulerChunkWorkspace workspace, int axis, ref EulerSweepCounters counters)
+    /// <remarks>
+    ///     Writes only this workspace. The chunk schedule calls it from the item that swept the chunk, after the
+    ///     last pencil. Neighbours read the chunk's read buffer, never the write buffer or the counters, so no
+    ///     barrier is needed first. The counters are integers, so the tick-end sum is the same for any order.
+    /// </remarks>
+    private static void ReducePencils(EulerChunkWorkspace workspace, int axis)
     {
+        ref EulerSweepCounters counters = ref workspace.SweepCounters;
         int pencilCount = EulerSweep.PencilCount(workspace.Chunk, axis);
         MetrePerSecond signalSpeed = 0f;
         for (int pencil = 0; pencil < pencilCount; pencil++)
@@ -1108,7 +1119,9 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
     {
         public void Invoke(int index)
         {
-            EulerSweep.RunPencils(active[index], axis, 0, pencilCount, timeStep, faceArea, config);
+            EulerChunkWorkspace workspace = active[index];
+            EulerSweep.RunPencils(workspace, axis, 0, pencilCount, timeStep, faceArea, config);
+            ReducePencils(workspace, axis);
         }
     }
 

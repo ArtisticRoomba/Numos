@@ -312,9 +312,15 @@ internal sealed class EulerChunkWorkspace
     public KilogramPerMole[] SettleUnlistedMolarMass = [];
 
     /// <summary>
-    ///     Repair counts of each pencil of the most recent sweep, summed by the tick thread.
+    ///     Repair counts of each pencil of the most recent sweep, folded into <see cref="SweepCounters" /> after the sweep.
     /// </summary>
     public EulerSweepCounters[] PencilCounters = [];
+
+    /// <summary>
+    ///     Repair counts of every sweep this tick, folded from <see cref="PencilCounters" /> after each sweep and
+    ///     read by the tick thread at tick end.
+    /// </summary>
+    public EulerSweepCounters SweepCounters;
 
     /// <summary>
     ///     Fastest signal speed each pencil of the most recent sweep wrote, reduced by the tick thread into
@@ -398,6 +404,7 @@ internal sealed class EulerChunkWorkspace
         ListVersion = 0;
         Array.Fill(MergedNeighborVersion, -1);
         NonFiniteCellsGathered = 0;
+        SweepCounters = default;
         _readIndex = 0;
         int voxelCount = chunk.VoxelCount;
         if (OpenMask.Length < voxelCount)
