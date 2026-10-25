@@ -7,19 +7,20 @@ namespace Numos.CoreSim.Solvers.Euler;
 /// </summary>
 internal readonly struct HllcLanes
 {
-    public readonly Vector<float> Density;
-    public readonly Vector<float> NormalVelocity;
-    public readonly Vector<float> TangentialVelocity1;
-    public readonly Vector<float> TangentialVelocity2;
-    public readonly Vector<float> Pressure;
-    public readonly Vector<float> EnergyDensity;
-    public readonly Vector<float> SoundSpeed;
-    public readonly Vector<float> InverseMass;
+    public readonly Vector<KilogramPerCubicMetre> Density;
+    public readonly Vector<MetrePerSecond> NormalVelocity;
+    public readonly Vector<MetrePerSecond> TangentialVelocity1;
+    public readonly Vector<MetrePerSecond> TangentialVelocity2;
+    public readonly Vector<Pascal> Pressure;
+    public readonly Vector<JoulePerCubicMetre> EnergyDensity;
+    public readonly Vector<MetrePerSecond> SoundSpeed;
+    public readonly Vector<PerKilogram> InverseMass;
 
     public HllcLanes(
-        Vector<float> density, Vector<float> normalVelocity, Vector<float> tangentialVelocity1,
-        Vector<float> tangentialVelocity2, Vector<float> pressure, Vector<float> energyDensity,
-        Vector<float> soundSpeed, Vector<float> inverseMass)
+        Vector<KilogramPerCubicMetre> density, Vector<MetrePerSecond> normalVelocity,
+        Vector<MetrePerSecond> tangentialVelocity1, Vector<MetrePerSecond> tangentialVelocity2,
+        Vector<Pascal> pressure, Vector<JoulePerCubicMetre> energyDensity,
+        Vector<MetrePerSecond> soundSpeed, Vector<PerKilogram> inverseMass)
     {
         Density = density;
         NormalVelocity = normalVelocity;
@@ -37,12 +38,12 @@ internal readonly struct HllcLanes
 /// </summary>
 internal readonly struct HllcLaneFlux
 {
-    public readonly Vector<float> Mass;
-    public readonly Vector<float> NormalMomentum;
-    public readonly Vector<float> Tangential1Momentum;
-    public readonly Vector<float> Tangential2Momentum;
-    public readonly Vector<float> Energy;
-    public readonly Vector<float> SpeciesWeight;
+    public readonly Vector<KilogramPerSquareMetreSecond> Mass;
+    public readonly Vector<Pascal> NormalMomentum;
+    public readonly Vector<Pascal> Tangential1Momentum;
+    public readonly Vector<Pascal> Tangential2Momentum;
+    public readonly Vector<WattPerSquareMetre> Energy;
+    public readonly Vector<PerSquareMetreSecond> SpeciesWeight;
 
     /// <summary>
     ///     All bits set in the lanes whose upwind cell is the left one.
@@ -50,9 +51,9 @@ internal readonly struct HllcLaneFlux
     public readonly Vector<int> UpwindIsLeft;
 
     public HllcLaneFlux(
-        Vector<float> mass, Vector<float> normalMomentum, Vector<float> tangential1Momentum,
-        Vector<float> tangential2Momentum, Vector<float> energy, Vector<float> speciesWeight,
-        Vector<int> upwindIsLeft)
+        Vector<KilogramPerSquareMetreSecond> mass, Vector<Pascal> normalMomentum,
+        Vector<Pascal> tangential1Momentum, Vector<Pascal> tangential2Momentum, Vector<WattPerSquareMetre> energy,
+        Vector<PerSquareMetreSecond> speciesWeight, Vector<int> upwindIsLeft)
     {
         Mass = mass;
         NormalMomentum = normalMomentum;
@@ -108,25 +109,27 @@ internal static class HllcFluxVector
         Vector<int> bothVacuum = Vector.Equals(left.Density, zero) & Vector.Equals(right.Density, zero);
 
         // EstimateWaves.
-        Vector<float> leftSpeed = Vector.Min(
+        Vector<MetrePerSecond> leftSpeed = Vector.Min(
             left.NormalVelocity - left.SoundSpeed, right.NormalVelocity - right.SoundSpeed);
-        Vector<float> rightSpeed = Vector.Max(
+        Vector<MetrePerSecond> rightSpeed = Vector.Max(
             left.NormalVelocity + left.SoundSpeed, right.NormalVelocity + right.SoundSpeed);
-        Vector<float> a = left.Density * (leftSpeed - left.NormalVelocity);
-        Vector<float> b = right.Density * (rightSpeed - right.NormalVelocity);
-        Vector<float> impedanceGap = a - b;
-        Vector<float> contactQuotient =
+        Vector<KilogramPerSquareMetreSecond> a = left.Density * (leftSpeed - left.NormalVelocity);
+        Vector<KilogramPerSquareMetreSecond> b = right.Density * (rightSpeed - right.NormalVelocity);
+        Vector<KilogramPerSquareMetreSecond> impedanceGap = a - b;
+        Vector<MetrePerSecond> contactQuotient =
             ((right.Pressure - left.Pressure) + (a * left.NormalVelocity - b * right.NormalVelocity)) / impedanceGap;
-        Vector<float> contactSpeed = Vector.ConditionalSelect(Vector.Equals(impedanceGap, zero), zero, contactQuotient);
+        Vector<MetrePerSecond> contactSpeed =
+            Vector.ConditionalSelect(Vector.Equals(impedanceGap, zero), zero, contactQuotient);
 
         // StarPressures. The momentum star pressure equals the energy one because theta is exactly 1.
-        Vector<float> impedanceWeight = (a + b) / (b - a);
-        Vector<float> half = new Vector<float>(0.5f);
-        Vector<float> centredPressure =
+        Vector<Scalar> impedanceWeight = (a + b) / (b - a);
+        Vector<Scalar> half = new Vector<float>(0.5f);
+        Vector<Pascal> centredPressure =
             half * (left.Pressure + right.Pressure) +
             half * impedanceWeight * (left.Pressure - right.Pressure);
-        Vector<float> jumpPressure = a * b * (right.NormalVelocity - left.NormalVelocity) / (b - a);
-        Vector<float> starPressure = Vector.ConditionalSelect(Vector.Equals(a, b), zero, centredPressure + jumpPressure);
+        Vector<Pascal> jumpPressure = a * b * (right.NormalVelocity - left.NormalVelocity) / (b - a);
+        Vector<Pascal> starPressure =
+            Vector.ConditionalSelect(Vector.Equals(a, b), zero, centredPressure + jumpPressure);
 
         // Region selection, in the order of the scalar branches.
         Vector<int> physicalLeft = Vector.GreaterThanOrEqual(leftSpeed, zero);
@@ -134,57 +137,61 @@ internal static class HllcFluxVector
         Vector<int> starLeft = Vector.GreaterThanOrEqual(contactSpeed, zero);
 
         // Physical flux of the cell whose state the face sees in a supersonic region.
-        Vector<float> pDensity = Vector.ConditionalSelect(physicalLeft, left.Density, right.Density);
-        Vector<float> pNormalVelocity = Vector.ConditionalSelect(physicalLeft, left.NormalVelocity, right.NormalVelocity);
-        Vector<float> pTangential1 =
+        Vector<KilogramPerCubicMetre> pDensity = Vector.ConditionalSelect(physicalLeft, left.Density, right.Density);
+        Vector<MetrePerSecond> pNormalVelocity =
+            Vector.ConditionalSelect(physicalLeft, left.NormalVelocity, right.NormalVelocity);
+        Vector<MetrePerSecond> pTangential1 =
             Vector.ConditionalSelect(physicalLeft, left.TangentialVelocity1, right.TangentialVelocity1);
-        Vector<float> pTangential2 =
+        Vector<MetrePerSecond> pTangential2 =
             Vector.ConditionalSelect(physicalLeft, left.TangentialVelocity2, right.TangentialVelocity2);
-        Vector<float> pPressure = Vector.ConditionalSelect(physicalLeft, left.Pressure, right.Pressure);
-        Vector<float> pEnergyDensity = Vector.ConditionalSelect(physicalLeft, left.EnergyDensity, right.EnergyDensity);
-        Vector<float> physicalMass = pDensity * pNormalVelocity;
-        Vector<float> physicalNormal = physicalMass * pNormalVelocity + pPressure;
-        Vector<float> physicalTangential1 = physicalMass * pTangential1;
-        Vector<float> physicalTangential2 = physicalMass * pTangential2;
-        Vector<float> physicalEnergy = pNormalVelocity * (pEnergyDensity + pPressure);
+        Vector<Pascal> pPressure = Vector.ConditionalSelect(physicalLeft, left.Pressure, right.Pressure);
+        Vector<JoulePerCubicMetre> pEnergyDensity =
+            Vector.ConditionalSelect(physicalLeft, left.EnergyDensity, right.EnergyDensity);
+        Vector<KilogramPerSquareMetreSecond> physicalMass = pDensity * pNormalVelocity;
+        Vector<Pascal> physicalNormal = physicalMass * pNormalVelocity + pPressure;
+        Vector<Pascal> physicalTangential1 = physicalMass * pTangential1;
+        Vector<Pascal> physicalTangential2 = physicalMass * pTangential2;
+        Vector<WattPerSquareMetre> physicalEnergy = pNormalVelocity * (pEnergyDensity + pPressure);
 
         // Star flux of the cell on the side of the contact. The scalar code divides by this side's gap alone.
-        Vector<float> sDensity = Vector.ConditionalSelect(starLeft, left.Density, right.Density);
-        Vector<float> sNormalVelocity = Vector.ConditionalSelect(starLeft, left.NormalVelocity, right.NormalVelocity);
-        Vector<float> sTangential1 =
+        Vector<KilogramPerCubicMetre> sDensity = Vector.ConditionalSelect(starLeft, left.Density, right.Density);
+        Vector<MetrePerSecond> sNormalVelocity =
+            Vector.ConditionalSelect(starLeft, left.NormalVelocity, right.NormalVelocity);
+        Vector<MetrePerSecond> sTangential1 =
             Vector.ConditionalSelect(starLeft, left.TangentialVelocity1, right.TangentialVelocity1);
-        Vector<float> sTangential2 =
+        Vector<MetrePerSecond> sTangential2 =
             Vector.ConditionalSelect(starLeft, left.TangentialVelocity2, right.TangentialVelocity2);
-        Vector<float> sPressure = Vector.ConditionalSelect(starLeft, left.Pressure, right.Pressure);
-        Vector<float> sEnergyDensity = Vector.ConditionalSelect(starLeft, left.EnergyDensity, right.EnergyDensity);
-        Vector<float> outerSpeed = Vector.ConditionalSelect(starLeft, leftSpeed, rightSpeed);
-        Vector<float> starMassFlux = sDensity * sNormalVelocity;
-        Vector<float> gap = outerSpeed - contactSpeed;
-        Vector<float> starMass = contactSpeed * (outerSpeed * sDensity - starMassFlux) / gap;
-        Vector<float> starNormal = starPressure +
+        Vector<Pascal> sPressure = Vector.ConditionalSelect(starLeft, left.Pressure, right.Pressure);
+        Vector<JoulePerCubicMetre> sEnergyDensity =
+            Vector.ConditionalSelect(starLeft, left.EnergyDensity, right.EnergyDensity);
+        Vector<MetrePerSecond> outerSpeed = Vector.ConditionalSelect(starLeft, leftSpeed, rightSpeed);
+        Vector<KilogramPerSquareMetreSecond> starMassFlux = sDensity * sNormalVelocity;
+        Vector<MetrePerSecond> gap = outerSpeed - contactSpeed;
+        Vector<KilogramPerSquareMetreSecond> starMass = contactSpeed * (outerSpeed * sDensity - starMassFlux) / gap;
+        Vector<Pascal> starNormal = starPressure +
                                    contactSpeed *
                                    (outerSpeed * starMassFlux - (starMassFlux * sNormalVelocity + sPressure) +
                                     starPressure) / gap;
-        Vector<float> starTangential1 = contactSpeed *
+        Vector<Pascal> starTangential1 = contactSpeed *
                                         (outerSpeed * (sDensity * sTangential1) - starMassFlux * sTangential1) / gap;
-        Vector<float> starTangential2 = contactSpeed *
+        Vector<Pascal> starTangential2 = contactSpeed *
                                         (outerSpeed * (sDensity * sTangential2) - starMassFlux * sTangential2) / gap;
-        Vector<float> starEnergy = contactSpeed *
+        Vector<WattPerSquareMetre> starEnergy = contactSpeed *
                                    (outerSpeed * sEnergyDensity -
                                     sNormalVelocity * (sEnergyDensity + sPressure) +
                                     outerSpeed * starPressure) / gap;
 
         Vector<int> physical = physicalLeft | physicalRight;
-        Vector<float> mass = Vector.ConditionalSelect(physical, physicalMass, starMass);
-        Vector<float> normal = Vector.ConditionalSelect(physical, physicalNormal, starNormal);
-        Vector<float> tangential1 = Vector.ConditionalSelect(physical, physicalTangential1, starTangential1);
-        Vector<float> tangential2 = Vector.ConditionalSelect(physical, physicalTangential2, starTangential2);
-        Vector<float> energy = Vector.ConditionalSelect(physical, physicalEnergy, starEnergy);
+        Vector<KilogramPerSquareMetreSecond> mass = Vector.ConditionalSelect(physical, physicalMass, starMass);
+        Vector<Pascal> normal = Vector.ConditionalSelect(physical, physicalNormal, starNormal);
+        Vector<Pascal> tangential1 = Vector.ConditionalSelect(physical, physicalTangential1, starTangential1);
+        Vector<Pascal> tangential2 = Vector.ConditionalSelect(physical, physicalTangential2, starTangential2);
+        Vector<WattPerSquareMetre> energy = Vector.ConditionalSelect(physical, physicalEnergy, starEnergy);
 
         Vector<int> upwindIsLeft = physicalLeft | Vector.AndNot(starLeft, physicalRight);
-        Vector<float> upwindInverseMass = Vector.ConditionalSelect(
+        Vector<PerKilogram> upwindInverseMass = Vector.ConditionalSelect(
             upwindIsLeft, left.InverseMass, right.InverseMass);
-        Vector<float> speciesWeight = Vector.ConditionalSelect(
+        Vector<PerSquareMetreSecond> speciesWeight = Vector.ConditionalSelect(
             Vector.Equals(mass, zero), zero, mass * upwindInverseMass);
 
         // A vacuum on both sides has no flux, and the left cell is the upwind one.

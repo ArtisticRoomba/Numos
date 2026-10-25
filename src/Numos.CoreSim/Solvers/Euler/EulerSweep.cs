@@ -751,11 +751,11 @@ internal static class EulerSweep
         if (alongMarch)
             upperFields = lowerFields;
 
-        float[] speciesRate = scratch.FaceSpeciesRate;
-        float[] normalRate = scratch.FaceNormal;
-        float[] tangential1Rate = scratch.FaceTangential1;
-        float[] tangential2Rate = scratch.FaceTangential2;
-        float[] energyRate = scratch.FaceEnergy;
+        PerSecond[] speciesRate = scratch.FaceSpeciesRate;
+        Newton[] normalRate = scratch.FaceNormal;
+        Newton[] tangential1Rate = scratch.FaceTangential1;
+        Newton[] tangential2Rate = scratch.FaceTangential2;
+        Watt[] energyRate = scratch.FaceEnergy;
         int[] upperMask = scratch.FaceUpperMask;
 
         int width = HllcFluxVector.Width;
@@ -767,11 +767,11 @@ internal static class EulerSweep
             HllcLanes left = lowerFields.Load(firstLower + first);
             HllcLanes right = upperFields.Load(upperOffset + first);
             HllcLaneFlux flux = HllcFluxVector.Solve(in left, in right);
-            Vector<float> species = flux.SpeciesWeight * area;
-            Vector<float> normal = flux.NormalMomentum * area;
-            Vector<float> tangential1 = flux.Tangential1Momentum * area;
-            Vector<float> tangential2 = flux.Tangential2Momentum * area;
-            Vector<float> energy = flux.Energy * area;
+            Vector<PerSecond> species = flux.SpeciesWeight * area;
+            Vector<Newton> normal = flux.NormalMomentum * area;
+            Vector<Newton> tangential1 = flux.Tangential1Momentum * area;
+            Vector<Newton> tangential2 = flux.Tangential2Momentum * area;
+            Vector<Watt> energy = flux.Energy * area;
             Vector<int> upwindIsUpper = ~flux.UpwindIsLeft;
 
             int face = firstFace + first;
@@ -786,6 +786,9 @@ internal static class EulerSweep
                 continue;
             }
 
+            // One spill buffer carries five quantities in turn, so it stays a plain float span and each store
+            // into it drops the unit. The typed copy out of it restores the unit.
+#pragma warning disable QNT002
             int lanes = count - first;
             species.CopyTo(spill);
             spill[..lanes].CopyTo(speciesRate.AsSpan(face));
@@ -799,6 +802,7 @@ internal static class EulerSweep
             spill[..lanes].CopyTo(energyRate.AsSpan(face));
             upwindIsUpper.CopyTo(maskSpill);
             maskSpill[..lanes].CopyTo(upperMask.AsSpan(face));
+#pragma warning restore QNT002
         }
     }
 
@@ -806,21 +810,18 @@ internal static class EulerSweep
     ///     The eight cell field arrays the face kernel reads, picked for one sweep axis.
     /// </summary>
     /// <remarks>
-    ///     The normal and tangential velocities follow <see cref="EulerFaceState.FromCell(EulerChunkState, int, int)" />'s cyclic order. The
-    ///     arrays are plain floats for the vector kernel, which carries no units, so the dimensional analyzer
-    ///     cannot check <see cref="Load" />.
+    ///     The normal and tangential velocities follow <see cref="EulerFaceState.FromCell(EulerChunkState, int, int)" />'s cyclic order.
     /// </remarks>
-#pragma warning disable QNT002
     private readonly struct CellLanes
     {
-        private readonly float[] _density;
-        private readonly float[] _normal;
-        private readonly float[] _tangential1;
-        private readonly float[] _tangential2;
-        private readonly float[] _pressure;
-        private readonly float[] _energy;
-        private readonly float[] _sound;
-        private readonly float[] _inverseMass;
+        private readonly KilogramPerCubicMetre[] _density;
+        private readonly MetrePerSecond[] _normal;
+        private readonly MetrePerSecond[] _tangential1;
+        private readonly MetrePerSecond[] _tangential2;
+        private readonly Pascal[] _pressure;
+        private readonly JoulePerCubicMetre[] _energy;
+        private readonly MetrePerSecond[] _sound;
+        private readonly PerKilogram[] _inverseMass;
 
         public CellLanes(EulerChunkState cells, int axis)
         {
@@ -851,7 +852,6 @@ internal static class EulerSweep
                 new Vector<float>(_inverseMass, first));
         }
     }
-#pragma warning restore QNT002
 
     private static void Store(
         in EulerFaceFlux flux, EulerUpwindSide upwindSide, int upwindIndex, SquareMetre faceArea,
