@@ -252,6 +252,7 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
         }
 
         EulerFaceTopology.Build(chunk, workspace.NeighborChunks, workspace.OpenMask, workspace.VoidMask);
+        EulerFaceTopology.BuildAirMap(chunk, workspace.AirMap, workspace.RowAllAir);
         _pendingGather.Add(workspace);
 
         // Canonical order has no numerical effect. It keeps diagnostics reproducible.

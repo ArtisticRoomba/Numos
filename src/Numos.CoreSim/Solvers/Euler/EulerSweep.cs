@@ -208,14 +208,14 @@ internal static class EulerSweep
 
         int cellCount = marchCount * lineCount;
         int faceCount = (marchCount + 1) * lineCount;
-        scratch.EnsureCapacity(faceCount, cellCount, runCount);
+        scratch.EnsureCapacity(faceCount, cellCount);
         PerSecond[] faceRate = scratch.FaceSpeciesRate;
         MolePerSecond[] faceFlux = scratch.FaceFlux;
         int[] upperMask = scratch.FaceUpperMask;
         int[] fixupFaces = scratch.FixupFaces;
         EulerFaceRate[] faces = scratch.Faces;
-        bool[] isAir = scratch.IsAir;
-        bool[] runAllAir = scratch.RunAllAir;
+        bool[] airMap = workspace.AirMap;
+        bool[] rowAllAir = workspace.RowAllAir;
 
         EulerFlowConfig settings = config.EulerFlow;
         EulerChunkState read = workspace.Read;
@@ -234,20 +234,6 @@ internal static class EulerSweep
 
                 faceRate[face] = faces[face].SpeciesRate;
             }
-        }
-
-        for (int run = 0; run < runCount; run++)
-        {
-            int firstVoxel = baseIndex + run * runVoxelStride;
-            bool allAir = true;
-            for (int i = 0; i < runLength; i++)
-            {
-                bool air = EulerFaceTopology.IsAir(chunk, firstVoxel + i);
-                isAir[run * runLength + i] = air;
-                allAir &= air;
-            }
-
-            runAllAir[run] = allAir;
         }
 
         // The faces that can name a neighbour chunk are the first and last face of every line. They go to the
@@ -327,7 +313,7 @@ internal static class EulerSweep
                 int firstCell = run * runLength;
                 int firstBehind = run * runFaceStride;
                 int firstAhead = firstBehind + aheadOffset;
-                if (runAllAir[run])
+                if (rowAllAir[firstVoxel / width])
                 {
                     EulerSpeciesKernel.UpdateRun(
                         in pass, firstVoxel, firstCell, firstBehind, firstAhead, runLength, ref counters.NegativeMoles);
@@ -337,7 +323,7 @@ internal static class EulerSweep
 
                 for (int i = 0; i < runLength; i++)
                 {
-                    if (isAir[firstCell + i])
+                    if (airMap[firstVoxel + i])
                     {
                         EulerSpeciesKernel.UpdateCell(
                             in pass, firstVoxel + i, firstCell + i, firstBehind + i, firstAhead + i,
@@ -357,7 +343,7 @@ internal static class EulerSweep
             for (int i = 0; i < runLength; i++)
             {
                 int cell = firstCell + i;
-                if (!isAir[cell])
+                if (!airMap[firstVoxel + i])
                     continue;
 
                 MetrePerSecond signalSpeed = cellPass.UpdateCell(
@@ -429,9 +415,8 @@ internal static class EulerSweep
         int lowerIndex, int upperIndex, SquareMetre faceArea, EulerFlowConfig settings,
         out EulerFaceRate rate)
     {
-        AtmosChunk chunk = workspace.Chunk;
-        bool lowerAir = lowerIndex >= 0 && EulerFaceTopology.IsAir(chunk, lowerIndex);
-        bool upperAir = upperIndex >= 0 && EulerFaceTopology.IsAir(chunk, upperIndex);
+        bool lowerAir = lowerIndex >= 0 && workspace.AirMap[lowerIndex];
+        bool upperAir = upperIndex >= 0 && workspace.AirMap[upperIndex];
         if (lowerAir && upperAir)
         {
             Debug.Assert(
@@ -751,15 +736,13 @@ internal static class EulerSweep
         public PerSecond[] FaceSpeciesRate = [];
         public int[] FaceUpperMask = [];
         public int[] FixupFaces = [];
-        public bool[] RunAllAir = [];
         public EulerFaceRate[] Faces = [];
         public JoulePerKelvin64[] HeatCapacity = [];
-        public bool[] IsAir = [];
         public Kilogram[] Mass = [];
         public bool[] NonFiniteSpecies = [];
         public Mole[] TotalMoles = [];
 
-        public void EnsureCapacity(int faceCount, int cellCount, int runCount)
+        public void EnsureCapacity(int faceCount, int cellCount)
         {
             if (Faces.Length < faceCount)
             {
@@ -770,13 +753,9 @@ internal static class EulerSweep
                 FixupFaces = new int[faceCount];
             }
 
-            if (RunAllAir.Length < runCount)
-                RunAllAir = new bool[runCount];
-
             if (Mass.Length < cellCount)
             {
                 HeatCapacity = new JoulePerKelvin64[cellCount];
-                IsAir = new bool[cellCount];
                 Mass = new Kilogram[cellCount];
                 NonFiniteSpecies = new bool[cellCount];
                 TotalMoles = new Mole[cellCount];

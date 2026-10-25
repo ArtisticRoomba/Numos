@@ -39,6 +39,7 @@ public class EulerSweepTests
         var workspace = new EulerChunkWorkspace();
         workspace.Bind(chunk, tickConfig);
         EulerFaceTopology.Build(chunk, workspace.NeighborChunks, workspace.OpenMask, workspace.VoidMask);
+        EulerFaceTopology.BuildAirMap(chunk, workspace.AirMap, workspace.RowAllAir);
         workspace.Gather(tickConfig);
         // The gather already derived the cell from a finite row, so the NaN enters through the species update alone.
         workspace.Read.Species[0]![1] = float.NaN;

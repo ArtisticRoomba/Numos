@@ -202,6 +202,17 @@ internal sealed class EulerChunkWorkspace
     public byte[] OpenMask = [];
 
     /// <summary>
+    ///     Whether each voxel takes part in the sweeps. Filled once per binding by
+    ///     <see cref="EulerFaceTopology.BuildAirMap" />.
+    /// </summary>
+    public bool[] AirMap = [];
+
+    /// <summary>
+    ///     Whether every voxel of each x-row is air, indexed by <c>voxel / Width</c>.
+    /// </summary>
+    public bool[] RowAllAir = [];
+
+    /// <summary>
     ///     Channel index in the chunk of each listed gas, or -1 for a listed gas the chunk has no channel for,
     ///     parallel to <see cref="GasIds" />. Filled by <see cref="ResolveSettleChannels" />.
     /// </summary>
@@ -287,7 +298,11 @@ internal sealed class EulerChunkWorkspace
         {
             OpenMask = new byte[voxelCount];
             VoidMask = new byte[voxelCount];
+            AirMap = new bool[voxelCount];
         }
+
+        if (RowAllAir.Length < chunk.Height * chunk.Depth)
+            RowAllAir = new bool[chunk.Height * chunk.Depth];
 
         int pencilCount = Math.Max(chunk.Height, chunk.Depth);
         if (PencilSignalSpeed.Length < pencilCount)

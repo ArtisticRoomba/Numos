@@ -84,6 +84,38 @@ internal static class EulerFaceTopology
     }
 
     /// <summary>
+    ///     Records which voxels are air and which x-rows hold only air, so the sweeps do not classify cells again
+    ///     for every bundle of every substep.
+    /// </summary>
+    /// <param name="chunk">The chunk to classify.</param>
+    /// <param name="airMap">Receives one flag per voxel, at least <see cref="AtmosChunk.VoxelCount" /> long.</param>
+    /// <param name="rowAllAir">
+    ///     Receives one flag per x-row (<c>y + z · Height</c>), at least <c>Height · Depth</c> long. Every
+    ///     contiguous run of a sweep bundle is one such row.
+    /// </param>
+    /// <remarks>
+    ///     The room map cannot change while the solver ticks, so one call per binding stays valid for every sweep.
+    /// </remarks>
+    internal static void BuildAirMap(AtmosChunk chunk, bool[] airMap, bool[] rowAllAir)
+    {
+        int width = chunk.Width;
+        int rowCount = chunk.Height * chunk.Depth;
+        for (int row = 0; row < rowCount; row++)
+        {
+            bool allAir = true;
+            int first = row * width;
+            for (int x = 0; x < width; x++)
+            {
+                bool air = IsAir(chunk, first + x);
+                airMap[first + x] = air;
+                allAir &= air;
+            }
+
+            rowAllAir[row] = allAir;
+        }
+    }
+
+    /// <summary>
     ///     Whether gas may cross the face from an air voxel to an air neighbour, in the same chunk or across a
     ///     chunk face.
     /// </summary>
