@@ -1,4 +1,3 @@
-using System.Globalization;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -255,95 +254,41 @@ public sealed class StateGenerator : IIncrementalGenerator
         foreach (ISymbol member in type.GetMembers())
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (!TryGetMember(type, member, out ITypeSymbol? memberType, out bool hasStorage))
+            if (!StateSymbols.TryGetMember(type, member, out ITypeSymbol? memberType, out bool hasStorage))
                 continue;
 
             LocationInfo? location = LocationInfo.From(member.Locations.FirstOrDefault()) ?? typeLocation;
-            string displayName = typeDisplayName + "." + member.Name;
-            AttributeData? serialize = StateSymbols.FindSerialize(member);
-            bool ignored = StateSymbols.IsIgnored(member);
+            SerializedMember? parsed = SerializedMember.TryParse(
+                member, StateSymbols.FindSerialize(member), hasStorage, typeDisplayName, location, WireNameChecks.None,
+                ids, diagnostics);
 
-            if (member.IsStatic || member is IFieldSymbol { IsConst: true })
-            {
-                // Static members are never state. Flag only the ones claiming otherwise.
-                if (serialize is not null)
-                    diagnostics.Add(DiagnosticInfo.Create(StateDiagnostics.StaticField, location, displayName));
-
+            if (parsed is null)
                 continue;
-            }
 
-            if (serialize is not null && ignored)
-            {
-                diagnostics.Add(DiagnosticInfo.Create(StateDiagnostics.BothTags, location, displayName));
-                continue;
-            }
-
-            if (serialize is null)
-            {
-                if (!ignored && hasStorage && !member.IsImplicitlyDeclared && IsMutable(member))
-                    diagnostics.Add(DiagnosticInfo.Create(StateDiagnostics.Unmarked, location, displayName, typeDisplayName));
-
-                continue;
-            }
-
-            string wireName = member.Name;
-            if (serialize.ConstructorArguments.Length == 1)
-            {
-                string? declared = serialize.ConstructorArguments[0].Value as string;
-                if (declared is null || declared.Trim().Length == 0)
-                {
-                    diagnostics.Add(DiagnosticInfo.Create(StateDiagnostics.BlankWireName, location, displayName));
-                    continue;
-                }
-
-                wireName = declared;
-            }
-
-            int id = FieldIds.Compute(wireName);
-            if (ids.TryGetValue(id, out string? existing))
-            {
-                diagnostics.Add(
-                    DiagnosticInfo.Create(
-                        StateDiagnostics.IdCollision,
-                        location,
-                        displayName,
-                        typeDisplayName + "." + existing,
-                        id.ToString(CultureInfo.InvariantCulture)));
-
-                continue;
-            }
-
-            ids.Add(id, member.Name);
-            bool settable = member switch
-            {
-                IFieldSymbol storage => !storage.IsReadOnly,
-                IPropertySymbol property => property.SetMethod is not null,
-                _ => false,
-            };
-
-            bool initOnly = member is IPropertySymbol { SetMethod.IsInitOnly: true };
-            if (isWorldSolver && (!settable || initOnly))
+            if (isWorldSolver && (!parsed.Settable || parsed.InitOnly))
             {
                 // A restore writes into the registered instance, so there's no constructor or initializer to use.
-                diagnostics.Add(DiagnosticInfo.Create(StateDiagnostics.NotAssignable, location, displayName));
+                diagnostics.Add(DiagnosticInfo.Create(StateDiagnostics.NotAssignable, location, parsed.DisplayName));
                 canGenerate = false;
                 continue;
             }
 
-            if (StateSymbols.HasNamedArgument(serialize, "Count"))
+            if (StateSymbols.HasNamedArgument(parsed.Attribute, "Count"))
             {
-                diagnostics.Add(DiagnosticInfo.Create(StateDiagnostics.CountOutsideSnapshot, location, displayName));
+                diagnostics.Add(DiagnosticInfo.Create(StateDiagnostics.CountOutsideSnapshot, location, parsed.DisplayName));
                 canGenerate = false;
                 continue;
             }
 
-            ITypeSymbol? codec = StateSymbols.CodecOf(serialize);
-            StateShape shape = codec is not null ? StateShape.FromCodec(memberType!, codec) : StateShape.From(memberType!);
-            if (codec is not null || (settable && !initOnly) || !Immutability.IsImmutable(memberType!))
+            ITypeSymbol? codec = parsed.Codec;
+            StateShape shape = StateShape.ForMember(memberType!, codec);
+            if (codec is not null || (parsed.Settable && !parsed.InitOnly) || !Immutability.IsImmutable(memberType!))
                 immutable = false;
 
-            var field = new StateFieldModel(id, CodeWriter.Escape(member.Name), shape, member.Name, settable, initOnly);
-            fields.Add(new StateFieldDeclaration(field, displayName, location));
+            var field = new StateFieldModel(
+                parsed.Id, CodeWriter.Escape(member.Name), shape, member.Name, parsed.Settable, parsed.InitOnly);
+
+            fields.Add(new StateFieldDeclaration(field, parsed.DisplayName, location));
         }
 
         SnapshotKind snapshot = SnapshotKind.None;
@@ -393,23 +338,6 @@ public sealed class StateGenerator : IIncrementalGenerator
             EquatableArray<StateFieldDeclaration>.Empty,
             EquatableArray<StateConstructorModel>.Empty,
             diagnostics.ToEquatableArray());
-    }
-
-    /// <summary>
-    ///     Whether a member left unmarked could hold state: a writable field, or an auto-property with a setter.
-    /// </summary>
-    /// <remarks>
-    ///     Readonly fields and get-only auto-properties are left alone. They're set once in a constructor, which on a
-    ///     participating type usually means a cache derived from the marked members.
-    /// </remarks>
-    private static bool IsMutable(ISymbol member)
-    {
-        return member switch
-        {
-            IFieldSymbol field => !field.IsReadOnly,
-            IPropertySymbol property => property.SetMethod is not null,
-            _ => false,
-        };
     }
 
     /// <summary>
@@ -530,46 +458,6 @@ public sealed class StateGenerator : IIncrementalGenerator
         };
     }
 
-    /// <summary>
-    ///     Decides whether <paramref name="member" /> is a field or property the generator looks at.
-    /// </summary>
-    /// <param name="type">The member's type.</param>
-    /// <param name="member">A member of <paramref name="type" />.</param>
-    /// <param name="memberType">The value type of the field or property.</param>
-    /// <param name="hasStorage">
-    ///     Whether the member stores a value: any declared field, or a property with a backing field (auto-properties,
-    ///     positional record properties, and <c>field</c>-keyword properties).
-    /// </param>
-    /// <returns>False for members that are never state, such as methods, indexers, and backing fields.</returns>
-    private static bool TryGetMember(
-        INamedTypeSymbol type, ISymbol member,
-        out ITypeSymbol? memberType, out bool hasStorage)
-    {
-        memberType = null;
-        hasStorage = false;
-        switch (member)
-        {
-            case IFieldSymbol field:
-                // Backing fields are covered through their property. Other synthesized fields are not the user's.
-                if (field.AssociatedSymbol is not null || field.IsImplicitlyDeclared)
-                    return false;
-
-                memberType = field.Type;
-                hasStorage = true;
-                return true;
-
-            case IPropertySymbol { IsIndexer: false } property:
-                memberType = property.Type;
-                hasStorage = StateSymbols.HasBackingField(type, property);
-
-                // Compiler-synthesized record members such as EqualityContract have no storage and can't be marked.
-                return hasStorage || !property.IsImplicitlyDeclared;
-
-            default:
-                return false;
-        }
-    }
-
     private static IEnumerable<string> OwnedMemberNames(bool isSolverConfiguration, bool isWorldSolver)
     {
         if (isWorldSolver)
@@ -619,21 +507,8 @@ public sealed class StateGenerator : IIncrementalGenerator
         var fields = new List<StateFieldModel>();
         foreach (StateFieldDeclaration field in declaration.Fields)
         {
-            StateShape shape = field.Field.Shape.Resolve(aliases);
-            if (shape.FindUnsupported() is { } unsupported)
-            {
-                diagnostics.Add(
-                    DiagnosticInfo.Create(
-                        StateDiagnostics.UnsupportedType,
-                        field.Location,
-                        field.DisplayName,
-                        shape.Kind == StateShapeKind.Unsupported ? unsupported : DescribeDeclared(shape),
-                        unsupported));
-
-                continue;
-            }
-
-            fields.Add(field.Field with { Shape = shape });
+            if (field.Resolve(aliases, diagnostics, true) is { } resolved)
+                fields.Add(resolved);
         }
 
         bool hasErrors = diagnostics.Any(static diagnostic => diagnostic.Descriptor.DefaultSeverity == DiagnosticSeverity.Error);
@@ -665,20 +540,5 @@ public sealed class StateGenerator : IIncrementalGenerator
             plan);
 
         return new StateTypeResult(model, declaration.Registration, diagnostics.ToEquatableArray());
-    }
-
-    private static string DescribeDeclared(StateShape shape)
-    {
-        // Unsupported shapes can't render a codec, but their outer type still reads fine for a message.
-        return shape.Kind switch
-        {
-            StateShapeKind.Array => DescribeDeclared(shape.Arguments[0]) + "[]",
-            StateShapeKind.NullableReference or StateShapeKind.NullableValue => DescribeDeclared(shape.Arguments[0]) + "?",
-            StateShapeKind.List or StateShapeKind.Set or StateShapeKind.Dictionary =>
-                shape.Name.Replace("global::", "") + "<" +
-                string.Join(", ", shape.Arguments.Select(DescribeDeclared)) + ">",
-            StateShapeKind.Unsupported => shape.Name,
-            _ => shape.TypeExpression.Replace("global::", ""),
-        };
     }
 }

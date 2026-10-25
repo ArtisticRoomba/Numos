@@ -84,7 +84,35 @@ internal sealed record StateTypeModel(
 /// <summary>
 ///     A state field before alias resolution, with the location its type diagnostic points at.
 /// </summary>
-internal sealed record StateFieldDeclaration(StateFieldModel Field, string DisplayName, LocationInfo? Location);
+internal sealed record StateFieldDeclaration(StateFieldModel Field, string DisplayName, LocationInfo? Location)
+{
+    /// <summary>
+    ///     Resolves quantity aliases in the field's shape and reports a type the generator cannot handle.
+    /// </summary>
+    /// <param name="aliases">The units catalog.</param>
+    /// <param name="diagnostics">Receives the unsupported-type diagnostic.</param>
+    /// <param name="describeDeclared">
+    ///     Whether the diagnostic names the type as declared. Otherwise it names only the unsupported part.
+    /// </param>
+    /// <returns>The field with its shape resolved, or null when part of the shape is unsupported.</returns>
+    public StateFieldModel? Resolve(
+        EquatableArray<QuantityAlias> aliases, List<DiagnosticInfo> diagnostics, bool describeDeclared)
+    {
+        StateShape shape = Field.Shape.Resolve(aliases);
+        if (shape.FindUnsupported() is not { } unsupported)
+            return Field with { Shape = shape };
+
+        diagnostics.Add(
+            DiagnosticInfo.Create(
+                StateDiagnostics.UnsupportedType,
+                Location,
+                DisplayName,
+                describeDeclared && shape.Kind != StateShapeKind.Unsupported ? shape.DescribeDeclared() : unsupported,
+                unsupported));
+
+        return null;
+    }
+}
 
 /// <summary>
 ///     What the transform knows about one type with <c>[NumosSerialize]</c> members. <see cref="Fields" /> is empty when a

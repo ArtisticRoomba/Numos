@@ -236,11 +236,14 @@ internal sealed record StateShape(StateShapeKind Kind, string Name, EquatableArr
     public static StateShape Snapshot(string fullyQualifiedName) => Leaf(StateShapeKind.State, fullyQualifiedName);
 
     /// <summary>
-    ///     Classifies a member whose <c>Codec</c> names the codec to use, whatever its type.
+    ///     Classifies a marked member: by its <c>Codec</c> when the attribute names one, whatever the member's type, and
+    ///     by the type otherwise.
     /// </summary>
-    public static StateShape FromCodec(ITypeSymbol memberType, ITypeSymbol codec)
+    public static StateShape ForMember(ITypeSymbol memberType, ITypeSymbol? codec)
     {
-        return new StateShape(StateShapeKind.Custom, FullName(memberType), EquatableArray<StateShape>.Empty, FullName(codec));
+        return codec is not null
+            ? new StateShape(StateShapeKind.Custom, FullName(memberType), EquatableArray<StateShape>.Empty, FullName(codec))
+            : From(memberType);
     }
 
     /// <summary>
@@ -281,6 +284,24 @@ internal sealed record StateShape(StateShapeKind Kind, string Name, EquatableArr
             return this;
 
         return this with { Arguments = Arguments.Select(argument => argument.Resolve(aliases)).ToEquatableArray() };
+    }
+
+    /// <summary>
+    ///     Renders this shape as the type the member declares, for messages. An unsupported part appears under its own
+    ///     name, because it has no codec to render.
+    /// </summary>
+    public string DescribeDeclared()
+    {
+        return Kind switch
+        {
+            StateShapeKind.Array => Arguments[0].DescribeDeclared() + "[]",
+            StateShapeKind.NullableReference or StateShapeKind.NullableValue => Arguments[0].DescribeDeclared() + "?",
+            StateShapeKind.List or StateShapeKind.Set or StateShapeKind.Dictionary =>
+                Name.Replace("global::", "") + "<" +
+                string.Join(", ", Arguments.Select(static argument => argument.DescribeDeclared())) + ">",
+            StateShapeKind.Unsupported => Name,
+            _ => TypeExpression.Replace("global::", ""),
+        };
     }
 
     /// <summary>

@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Xml.Linq;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -267,44 +266,17 @@ public sealed class SnapshotGenerator : IIncrementalGenerator
         LocationInfo? typeLocation, CancellationToken cancellationToken)
     {
         LocationInfo? location = LocationInfo.From(member.Locations.FirstOrDefault()) ?? typeLocation;
-        string displayName = live.ToDisplayString() + "." + member.Name;
+        SerializedMember? parsed = SerializedMember.TryParse(
+            member, serialize, hasStorage: false, live.ToDisplayString(), location, WireNameChecks.Identifier, ids,
+            diagnostics);
+
+        if (parsed is null)
+            return null;
+
+        string displayName = parsed.DisplayName;
+        string name = parsed.WireName;
+        int id = parsed.Id;
         string snapshotDisplay = snapshot.ToDisplayString();
-        if (member.IsStatic || member is IFieldSymbol { IsConst: true })
-        {
-            diagnostics.Add(DiagnosticInfo.Create(StateDiagnostics.StaticField, location, displayName));
-            return null;
-        }
-
-        if (StateSymbols.IsIgnored(member))
-        {
-            diagnostics.Add(DiagnosticInfo.Create(StateDiagnostics.BothTags, location, displayName));
-            return null;
-        }
-
-        string name = member.Name;
-        if (serialize.ConstructorArguments.Length == 1)
-        {
-            if (serialize.ConstructorArguments[0].Value is not string wireName || wireName.Trim().Length == 0 ||
-                !SyntaxFacts.IsValidIdentifier(wireName))
-            {
-                diagnostics.Add(DiagnosticInfo.Create(StateDiagnostics.BlankWireName, location, displayName));
-                return null;
-            }
-
-            name = wireName;
-        }
-
-        int id = FieldIds.Compute(name);
-        if (ids.TryGetValue(id, out string? existing))
-        {
-            diagnostics.Add(
-                DiagnosticInfo.Create(
-                    StateDiagnostics.IdCollision, location, displayName, existing, id.ToString(CultureInfo.InvariantCulture)));
-
-            return null;
-        }
-
-        ids.Add(id, displayName);
         ITypeSymbol type;
         LiveStorage storage;
         bool readable;
@@ -348,8 +320,8 @@ public sealed class SnapshotGenerator : IIncrementalGenerator
             count = CodeWriter.Escape(countName);
         }
 
-        ITypeSymbol? codec = StateSymbols.CodecOf(serialize);
-        StateShape shape = codec is not null ? StateShape.FromCodec(type, codec) : StateShape.From(type);
+        ITypeSymbol? codec = parsed.Codec;
+        StateShape shape = StateShape.ForMember(type, codec);
 
         StateShape? arrayElement = null;
         bool arrayElementImmutable = false;
@@ -444,82 +416,25 @@ public sealed class SnapshotGenerator : IIncrementalGenerator
         INamedTypeSymbol snapshot, ISymbol member, Dictionary<int, string> ids, List<DiagnosticInfo> diagnostics,
         LocationInfo? location)
     {
-        if (member is not (IFieldSymbol or IPropertySymbol { IsIndexer: false }))
+        if (!StateSymbols.TryGetMember(snapshot, member, out ITypeSymbol? type, out bool hasStorage))
             return null;
 
-        if (member is IFieldSymbol { AssociatedSymbol: not null })
+        SerializedMember? parsed = SerializedMember.TryParse(
+            member, StateSymbols.FindSerialize(member), hasStorage, snapshot.ToDisplayString(), location,
+            WireNameChecks.NullIsMemberName, ids, diagnostics);
+
+        if (parsed is null)
             return null;
 
-        string displayName = snapshot.ToDisplayString() + "." + member.Name;
-        AttributeData? serialize = StateSymbols.FindSerialize(member);
-        bool ignored = StateSymbols.IsIgnored(member);
-        bool mutable = member switch
+        if (!parsed.Settable)
         {
-            IFieldSymbol storage => !storage.IsReadOnly && !storage.IsConst,
-            IPropertySymbol property => property.SetMethod is not null && StateSymbols.HasBackingField(snapshot, property),
-            _ => false,
-        };
-
-        if (member.IsStatic || member is IFieldSymbol { IsConst: true })
-        {
-            if (serialize is not null)
-                diagnostics.Add(DiagnosticInfo.Create(StateDiagnostics.StaticField, location, displayName));
-
+            diagnostics.Add(DiagnosticInfo.Create(StateDiagnostics.NotAssignable, location, parsed.DisplayName));
             return null;
         }
 
-        if (serialize is not null && ignored)
-        {
-            diagnostics.Add(DiagnosticInfo.Create(StateDiagnostics.BothTags, location, displayName));
-            return null;
-        }
-
-        if (serialize is null)
-        {
-            if (!ignored && mutable)
-                diagnostics.Add(DiagnosticInfo.Create(StateDiagnostics.Unmarked, location, displayName, snapshot.ToDisplayString()));
-
-            return null;
-        }
-
-        string wireName = serialize.ConstructorArguments.Length == 1 && serialize.ConstructorArguments[0].Value is string declared
-            ? declared
-            : member.Name;
-
-        if (wireName.Trim().Length == 0)
-        {
-            diagnostics.Add(DiagnosticInfo.Create(StateDiagnostics.BlankWireName, location, displayName));
-            return null;
-        }
-
-        int id = FieldIds.Compute(wireName);
-        if (ids.TryGetValue(id, out string? existing))
-        {
-            diagnostics.Add(
-                DiagnosticInfo.Create(
-                    StateDiagnostics.IdCollision, location, displayName, existing, id.ToString(CultureInfo.InvariantCulture)));
-
-            return null;
-        }
-
-        ids.Add(id, displayName);
-        (ITypeSymbol type, bool settable, bool initOnly) = member switch
-        {
-            IFieldSymbol storage => (storage.Type, !storage.IsReadOnly, false),
-            IPropertySymbol property => (property.Type, property.SetMethod is not null, property.SetMethod?.IsInitOnly == true),
-            _ => throw new InvalidOperationException(),
-        };
-
-        if (!settable)
-        {
-            diagnostics.Add(DiagnosticInfo.Create(StateDiagnostics.NotAssignable, location, displayName));
-            return null;
-        }
-
-        ITypeSymbol? codec = StateSymbols.CodecOf(serialize);
-        StateShape shape = codec is not null ? StateShape.FromCodec(type, codec) : StateShape.From(type);
-        var field = new StateFieldModel(id, CodeWriter.Escape(member.Name), shape, member.Name, true, initOnly);
-        return new StateFieldDeclaration(field, displayName, location);
+        StateShape shape = StateShape.ForMember(type!, parsed.Codec);
+        var field = new StateFieldModel(parsed.Id, CodeWriter.Escape(member.Name), shape, member.Name, true, parsed.InitOnly);
+        return new StateFieldDeclaration(field, parsed.DisplayName, location);
     }
 
     private static GeneratorOutput<SnapshotModel> Resolve(
@@ -614,18 +529,12 @@ public sealed class SnapshotGenerator : IIncrementalGenerator
             bool failed = false;
             foreach (StateFieldDeclaration handWritten in declaration.HandWritten)
             {
-                StateShape shape = handWritten.Field.Shape.Resolve(aliases);
-                if (shape.FindUnsupported() is { } unsupported)
+                if (handWritten.Resolve(aliases, diagnostics, false) is not { } field)
                 {
-                    diagnostics.Add(
-                        DiagnosticInfo.Create(
-                            StateDiagnostics.UnsupportedType, handWritten.Location, handWritten.DisplayName, unsupported, unsupported));
-
                     failed = true;
                     continue;
                 }
 
-                StateFieldModel field = handWritten.Field with { Shape = shape };
                 fields.Add(field);
                 if (field.InitOnly)
                     initOnly.Add(field);
