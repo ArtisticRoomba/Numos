@@ -670,8 +670,7 @@ internal static class EulerSweep
         if (neighbor == null)
             return false;
 
-        int offset = axis == 1 ? (chunk.Height - 1) * chunk.Width : (chunk.Depth - 1) * chunk.Width * chunk.Height;
-        neighborFirst = lowerBoundary ? selfFirst + offset : selfFirst - offset;
+        neighborFirst = EulerFaceTopology.NeighborIndexAcrossFace(chunk, (ushort)selfFirst, direction);
         int width = chunk.Width;
         if (!workspace.RowAllAir[selfFirst / width] || !neighbor.RowAllAir[neighborFirst / width])
             return false;

@@ -67,7 +67,7 @@ internal static class EulerFaceTopology
                         continue;
 
                     neighborChunk = across;
-                    neighborIndex = across.GetIndexUnsafe((neighborPosition + dimensions) % dimensions);
+                    neighborIndex = NeighborIndexAcrossFace(chunk, voxelIndex, direction);
                 }
 
                 int room = neighborChunk.VoxelRoomMap[neighborIndex];
