@@ -83,13 +83,11 @@ public sealed class StateGenerator : IIncrementalGenerator
                 .OrderBy(static name => name, StringComparer.Ordinal)
                 .ToEquatableArray());
 
-        context.RegisterSourceOutput(
+        GeneratorOutput.RegisterModuleInitializer(
+            context,
             registrations,
-            static (production, names) =>
-            {
-                if (names.Count > 0)
-                    production.AddSource(ModuleInitializerHintName, StateEmitter.EmitModuleInitializer(names));
-            });
+            ModuleInitializerHintName,
+            StateEmitter.EmitModuleInitializer);
     }
 
     /// <summary>

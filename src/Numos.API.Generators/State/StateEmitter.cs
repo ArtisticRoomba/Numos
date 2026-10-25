@@ -351,18 +351,12 @@ internal static class StateEmitter
     {
         var writer = new CodeWriter();
         writer.Header();
-        writer.Line("namespace Numos.CoreSim.State.Generated");
-        writer.Open();
-        writer.Line(CodeWriter.GeneratedCodeAttribute);
-        writer.Line("[global::System.ComponentModel.EditorBrowsable(global::System.ComponentModel.EditorBrowsableState.Never)]");
-        writer.Line("internal static class SolverConfigurationModuleInitializer");
-        writer.Open();
-        writer.Line("[global::System.Runtime.CompilerServices.ModuleInitializer]");
-        writer.Line(
-            "[global::System.Diagnostics.CodeAnalysis.SuppressMessage(\"Usage\", \"CA2255\", " +
-            "Justification = \"Solver configurations must be registered before a file that holds them can load.\")]");
-        writer.Line("internal static void RegisterSolverConfigurations()");
-        writer.Open();
+        writer.OpenModuleInitializer(
+            "Numos.CoreSim.State.Generated",
+            "SolverConfigurationModuleInitializer",
+            "RegisterSolverConfigurations",
+            "Solver configurations must be registered before a file that holds them can load.");
+
         foreach (string type in types)
             writer.Line("global::Numos.CoreSim.State.SolverConfigurationTypes.RegisterDefault<" + type + ">();");
 

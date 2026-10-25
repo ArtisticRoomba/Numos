@@ -82,13 +82,11 @@ public sealed class ChunkDataGenerator : IIncrementalGenerator
                 .ToEquatableArray())
             .WithTrackingName(ModuleInitializerStepName);
 
-        context.RegisterSourceOutput(
+        GeneratorOutput.RegisterModuleInitializer(
+            context,
             declaringTypes,
-            static (production, types) =>
-            {
-                if (types.Count > 0)
-                    production.AddSource(ChunkDataEmitter.ModuleInitializerHintName, ChunkDataEmitter.EmitModuleInitializer(types));
-            });
+            ChunkDataEmitter.ModuleInitializerHintName,
+            ChunkDataEmitter.EmitModuleInitializer);
     }
 
     private static EquatableArray<string> GetReservedNames(Compilation compilation)

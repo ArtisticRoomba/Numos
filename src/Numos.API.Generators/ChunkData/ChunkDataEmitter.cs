@@ -65,7 +65,7 @@ internal static class ChunkDataEmitter
         // holder initializes on first access instead. It's internal only so the module initializer can run it early.
         writer.Line();
         writer.Line(CodeWriter.GeneratedCodeAttribute);
-        writer.Line("[global::System.ComponentModel.EditorBrowsable(global::System.ComponentModel.EditorBrowsableState.Never)]");
+        writer.Line(CodeWriter.EditorBrowsableNeverAttribute);
         writer.Line("internal static class " + HolderName);
         writer.Open();
         for (int i = 0; i < members.Count; i++)
@@ -110,18 +110,12 @@ internal static class ChunkDataEmitter
     {
         var writer = new CodeWriter();
         writer.Header();
-        writer.Line("namespace Numos.API.Generated");
-        writer.Open();
-        writer.Line(CodeWriter.GeneratedCodeAttribute);
-        writer.Line("[global::System.ComponentModel.EditorBrowsable(global::System.ComponentModel.EditorBrowsableState.Never)]");
-        writer.Line("internal static class ChunkDataModuleInitializer");
-        writer.Open();
-        writer.Line("[global::System.Runtime.CompilerServices.ModuleInitializer]");
-        writer.Line(
-            "[global::System.Diagnostics.CodeAnalysis.SuppressMessage(\"Usage\", \"CA2255\", " +
-            "Justification = \"Saved chunk fields must be registered before a file that holds them can load.\")]");
-        writer.Line("internal static void RegisterChunkFields()");
-        writer.Open();
+        writer.OpenModuleInitializer(
+            "Numos.API.Generated",
+            "ChunkDataModuleInitializer",
+            "RegisterChunkFields",
+            "Saved chunk fields must be registered before a file that holds them can load.");
+
         foreach (string type in typeDisplays)
         {
             writer.Line(

@@ -13,8 +13,6 @@ internal static class SnapshotEmitter
 {
     private const string Advanced = "global::Numos.CoreSim.State.Advanced.";
     private const string StateArray = Advanced + "StateArray";
-    private const string NeverBrowsable =
-        "[global::System.ComponentModel.EditorBrowsable(global::System.ComponentModel.EditorBrowsableState.Never)]";
 
     public static (string HintName, string Source) Emit(SnapshotModel model)
     {
@@ -245,7 +243,7 @@ internal static class SnapshotEmitter
         writer.Line("/// <summary>");
         writer.Line("///     The checks <see cref=\"RestoreInto\" /> runs before writing anything.");
         writer.Line("/// </summary>");
-        writer.Line(NeverBrowsable);
+        writer.Line(CodeWriter.EditorBrowsableNeverAttribute);
         writer.Line(CodeWriter.GeneratedCodeAttribute);
         writer.Line("internal void CheckRestoreInto(" + live + " live)");
         writer.Open();
@@ -284,7 +282,7 @@ internal static class SnapshotEmitter
         writer.Line("/// <summary>");
         writer.Line("///     The writes <see cref=\"RestoreInto\" /> makes once its checks pass, ending with <c>OnRestored</c>.");
         writer.Line("/// </summary>");
-        writer.Line(NeverBrowsable);
+        writer.Line(CodeWriter.EditorBrowsableNeverAttribute);
         writer.Line(CodeWriter.GeneratedCodeAttribute);
         writer.Line("internal void ApplyRestoreInto(" + live + " live)");
         writer.Open();
