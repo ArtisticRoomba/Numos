@@ -214,7 +214,6 @@ internal static class EulerSweep
         int faceCount = (marchCount + 1) * lineCount;
         scratch.EnsureCapacity(faceCount, cellCount, runCount);
         PerSecond[] faceRate = scratch.FaceSpeciesRate;
-        MolePerSecond[] faceFlux = scratch.FaceFlux;
         int[] upperMask = scratch.FaceUpperMask;
         int[] fixupFaces = scratch.FixupFaces;
         EulerFaceRate[] faces = scratch.Faces;
@@ -337,14 +336,17 @@ internal static class EulerSweep
         // neighbours' lists before the sweep), so a null upwind row is a gas that side does not have.
         EulerChunkWorkspace? lowerNeighbor = workspace.NeighborWorkspaces[2 * axis];
         EulerChunkWorkspace? upperNeighbor = workspace.NeighborWorkspaces[2 * axis + 1];
-        for (int present = 0; present < workspace.GasCount; present++)
+        int gasCount = workspace.GasCount;
+        EulerSpeciesPass[] passes = scratch.Passes(gasCount);
+        for (int present = 0; present < gasCount; present++)
         {
             int gasId = workspace.GasIds[present];
             Mole[] source = read.Species[gasId]!;
             Mole[]? lowerRows = NeighborRow(lowerNeighbor, gasId);
             Mole[]? upperRows = NeighborRow(upperNeighbor, gasId);
-            var pass = new EulerSpeciesPass(
-                source, workspace.Write.Species[gasId]!, scratch.FaceFlux, scratch.NonFiniteSpecies,
+            MolePerSecond[] faceFlux = scratch.FluxOf(present, faceCount);
+            passes[present] = new EulerSpeciesPass(
+                source, workspace.Write.Species[gasId]!, faceFlux, scratch.NonFiniteSpecies,
                 scratch.Mass, scratch.TotalMoles, scratch.HeatCapacity,
                 timeStep, workspace.MolarMass[present], workspace.HeatCapacity[present]);
 
@@ -362,28 +364,35 @@ internal static class EulerSweep
                 faceFlux[face] = faceRate[face] * UpwindMoles(in faces[face], source, lowerRows, upperRows);
             }
 
-            for (int run = 0; run < runCount; run++)
+        }
+
+        // Cells sum their gases in ascending list order whatever order the passes run in, so the cells of a run
+        // take all the gases before the next run starts.
+        for (int run = 0; run < runCount; run++)
+        {
+            int firstVoxel = baseIndex + run * runVoxelStride;
+            int firstCell = run * runLength;
+            int firstBehind = run * runFaceStride;
+            int firstAhead = firstBehind + aheadOffset;
+            if (rowAllAir[firstVoxel / width])
             {
-                int firstVoxel = baseIndex + run * runVoxelStride;
-                int firstCell = run * runLength;
-                int firstBehind = run * runFaceStride;
-                int firstAhead = firstBehind + aheadOffset;
-                if (rowAllAir[firstVoxel / width])
-                {
-                    EulerSpeciesKernel.UpdateRun(
-                        in pass, firstVoxel, firstCell, firstBehind, firstAhead, runLength, ref counters.NegativeMoles);
+                EulerSpeciesKernel.UpdateRunGases(
+                    passes, gasCount, firstVoxel, firstCell, firstBehind, firstAhead, runLength,
+                    ref counters.NegativeMoles);
 
+                continue;
+            }
+
+            for (int i = 0; i < runLength; i++)
+            {
+                if (!airMap[firstVoxel + i])
                     continue;
-                }
 
-                for (int i = 0; i < runLength; i++)
+                for (int present = 0; present < gasCount; present++)
                 {
-                    if (airMap[firstVoxel + i])
-                    {
-                        EulerSpeciesKernel.UpdateCell(
-                            in pass, firstVoxel + i, firstCell + i, firstBehind + i, firstAhead + i,
-                            ref counters.NegativeMoles);
-                    }
+                    EulerSpeciesKernel.UpdateCell(
+                        in passes[present], firstVoxel + i, firstCell + i, firstBehind + i, firstAhead + i,
+                        ref counters.NegativeMoles);
                 }
             }
         }
@@ -1036,7 +1045,37 @@ internal static class EulerSweep
     /// </remarks>
     private sealed class BundleScratch
     {
-        public MolePerSecond[] FaceFlux = [];
+
+        private MolePerSecond[][] _fluxByGas = [];
+        private EulerSpeciesPass[] _passes = [];
+
+        /// <summary>
+        ///     The species pass of each gas in the list, sized for at least <paramref name="gasCount" /> gases.
+        /// </summary>
+        public EulerSpeciesPass[] Passes(int gasCount)
+        {
+            if (_passes.Length < gasCount)
+                _passes = new EulerSpeciesPass[gasCount];
+
+            return _passes;
+        }
+
+        /// <summary>
+        ///     The species flux of every face for the gas at list position <paramref name="present" />. Each gas has
+        ///     its own array because the cell update reads all gases of a run after every flux is known.
+        /// </summary>
+        public MolePerSecond[] FluxOf(int present, int faceCount)
+        {
+            if (_fluxByGas.Length <= present)
+                Array.Resize(ref _fluxByGas, Math.Max(present + 1, 2 * _fluxByGas.Length));
+
+            MolePerSecond[]? flux = _fluxByGas[present];
+            if (flux == null || flux.Length < faceCount)
+                _fluxByGas[present] = flux = new MolePerSecond[faceCount];
+
+            return flux;
+        }
+
         public PerSecond[] FaceSpeciesRate = [];
         public int[] FaceUpperMask = [];
         public int[] FixupFaces = [];
@@ -1069,7 +1108,6 @@ internal static class EulerSweep
                 FaceTangential1 = new Newton[faceCount];
                 FaceTangential2 = new Newton[faceCount];
                 FaceEnergy = new Watt[faceCount];
-                FaceFlux = new MolePerSecond[faceCount];
                 FaceSpeciesRate = new PerSecond[faceCount];
                 FaceUpperMask = new int[faceCount];
                 FixupFaces = new int[faceCount];

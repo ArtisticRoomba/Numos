@@ -7,7 +7,7 @@ public class EulerSpeciesKernelTests
     private const int Pad = 3;
 
     [Test]
-    public void UpdateRun_MatchesTheScalarCellUpdateBitForBit([Range(1, 37)] int length)
+    public void UpdateRunGases_MatchesTheScalarCellUpdateBitForBit([Range(1, 37)] int length)
     {
         var random = new Random(1234 + length);
         int total = length + 2 * Pad;
@@ -43,7 +43,7 @@ public class EulerSpeciesKernelTests
     }
 
     [Test]
-    public void UpdateRun_RepairsNonFiniteAndNegativeCellsAndKeepsNegativeZero()
+    public void UpdateRunGases_RepairsNonFiniteAndNegativeCellsAndKeepsNegativeZero()
     {
         const int length = 12;
         float[] source = new float[length];
@@ -73,7 +73,7 @@ public class EulerSpeciesKernelTests
     }
 
     [Test]
-    public void UpdateRun_CountsAStrongOutflowAsOneNegativeRepairPerCell()
+    public void UpdateRunGases_CountsAStrongOutflowAsOneNegativeRepairPerCell()
     {
         const int length = 16;
         float[] source = new float[length];
@@ -96,6 +96,97 @@ public class EulerSpeciesKernelTests
                     Assert.That(result.Target[cell], Is.EqualTo(5.1f).Within(1e-5f));
             }
         });
+    }
+
+    [Test]
+    public void UpdateRunGases_SumsManyGasesInAscendingOrderBitForBit([Range(1, 37, 4)] int length, [Values(1, 2, 5, 32)] int gasCount)
+    {
+        var random = new Random(777 + length * 100 + gasCount);
+        int total = length + 2 * Pad;
+        int cells = total;
+        float[][] sources = new float[gasCount][];
+        float[][] fluxes = new float[gasCount][];
+        float[] molarMass = new float[gasCount];
+        float[] molarHeat = new float[gasCount];
+        for (int gas = 0; gas < gasCount; gas++)
+        {
+            sources[gas] = new float[total];
+            fluxes[gas] = new float[total + 1 + Pad];
+            for (int i = 0; i < total; i++)
+            {
+                sources[gas][i] = random.Next(7) switch
+                {
+                    0 => 0f,
+                    1 => -0f,
+                    2 => float.NaN,
+                    _ => (float)random.NextDouble() * 1e3f
+                };
+            }
+
+            for (int i = 0; i < fluxes[gas].Length; i++)
+            {
+                fluxes[gas][i] = random.Next(11) switch
+                {
+                    0 => float.PositiveInfinity,
+                    1 => float.NegativeInfinity,
+                    2 => -0f,
+                    _ => (float)(random.NextDouble() - 0.5) * 2e3f
+                };
+            }
+
+            molarMass[gas] = 0.01f + 0.003f * gas;
+            molarHeat[gas] = 12.5f + 0.7f * gas;
+        }
+
+        var fused = BuildGasPasses(sources, fluxes, molarMass, molarHeat, cells, out var fusedShared);
+        var reference = BuildGasPasses(sources, fluxes, molarMass, molarHeat, cells, out var referenceShared);
+
+        int fusedNegatives = 0;
+        int referenceNegatives = 0;
+        EulerSpeciesKernel.UpdateRunGases(fused, gasCount, Pad, Pad, Pad, Pad + 1, length, ref fusedNegatives);
+        for (int gas = 0; gas < gasCount; gas++)
+        {
+            for (int i = 0; i < length; i++)
+            {
+                EulerSpeciesKernel.UpdateCell(
+                    in reference[gas], Pad + i, Pad + i, Pad + i, Pad + 1 + i, ref referenceNegatives);
+            }
+        }
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(fusedNegatives, Is.EqualTo(referenceNegatives));
+            Assert.That(Bits(fusedShared.MassSum), Is.EqualTo(Bits(referenceShared.MassSum)));
+            Assert.That(Bits(fusedShared.MoleSum), Is.EqualTo(Bits(referenceShared.MoleSum)));
+            Assert.That(fusedShared.HeatSum.Select(BitConverter.DoubleToInt64Bits),
+                Is.EqualTo(referenceShared.HeatSum.Select(BitConverter.DoubleToInt64Bits)));
+            Assert.That(fusedShared.NonFinite, Is.EqualTo(referenceShared.NonFinite));
+            for (int gas = 0; gas < gasCount; gas++)
+                Assert.That(Bits(fused[gas].Target), Is.EqualTo(Bits(reference[gas].Target)), $"gas {gas}");
+        });
+    }
+
+    private static EulerSpeciesPass[] BuildGasPasses(
+        float[][] sources, float[][] fluxes, float[] molarMass, float[] molarHeat, int cells,
+        out EulerSpeciesPassResult shared)
+    {
+        shared = new EulerSpeciesPassResult(sources[0].Length, cells);
+        for (int i = 0; i < cells; i++)
+        {
+            shared.MassSum[i] = 0.25f * i;
+            shared.MoleSum[i] = 0.5f * i;
+            shared.HeatSum[i] = 0.125 * i;
+        }
+
+        var passes = new EulerSpeciesPass[sources.Length];
+        for (int gas = 0; gas < passes.Length; gas++)
+        {
+            passes[gas] = new EulerSpeciesPass(
+                sources[gas], new float[sources[gas].Length], fluxes[gas], shared.NonFinite, shared.MassSum,
+                shared.MoleSum, shared.HeatSum, 0.5f, molarMass[gas], molarHeat[gas]);
+        }
+
+        return passes;
     }
 
     [Test]
@@ -157,7 +248,8 @@ public class EulerSpeciesKernelTests
         }
         else
         {
-            EulerSpeciesKernel.UpdateRun(in pass, firstVoxel, firstVoxel, firstBehind, firstAhead, length, ref negatives);
+            EulerSpeciesKernel.UpdateRunGases(
+                [pass], 1, firstVoxel, firstVoxel, firstBehind, firstAhead, length, ref negatives);
         }
     }
 

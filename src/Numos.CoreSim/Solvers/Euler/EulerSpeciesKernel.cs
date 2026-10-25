@@ -108,63 +108,99 @@ internal static class EulerSpeciesKernel
     }
 
     /// <summary>
-    ///     Updates a run of air cells of one gas and adds them to the cell sums.
+    ///     Updates a run of air cells for every gas of the bundle and adds each gas to the cell sums in turn.
     /// </summary>
-    /// <param name="pass">The arrays and constants of the gas.</param>
+    /// <param name="passes">The arrays and constants of each gas, in ascending gas order.</param>
+    /// <param name="gasCount">Number of gases in <paramref name="passes" /> to update.</param>
     /// <param name="firstVoxel">The voxel of the first cell. The run is contiguous in voxel memory.</param>
     /// <param name="firstCell">The scratch index of the first cell.</param>
     /// <param name="firstBehind">The face behind the first cell.</param>
     /// <param name="firstAhead">The face ahead of the first cell. Face distance between neighbours is one.</param>
     /// <param name="length">Number of cells. Every cell must be air.</param>
     /// <param name="negatives">The pencil's count of negative moles.</param>
-    public static void UpdateRun(
-        in EulerSpeciesPass pass, int firstVoxel, int firstCell, int firstBehind, int firstAhead, int length,
-        ref int negatives)
+    /// <remarks>
+    ///     <para>
+    ///         Each lane adds its gases in ascending order, as <see cref="UpdateCell" /> does when it runs once per
+    ///         gas. The sums stay in registers until the last gas, so a vector reads and writes each sum once per run
+    ///         and not once per gas. The repair count and the non-finite flag do not depend on the order. They are
+    ///         collected the same way and applied after the last gas.
+    ///     </para>
+    ///     <para>
+    ///         Cells past the last whole vector go through <see cref="UpdateCell" />, one cell at a time over all
+    ///         gases. A cell's result does not depend on which cells share its vector.
+    ///     </para>
+    /// </remarks>
+    public static void UpdateRunGases(
+        EulerSpeciesPass[] passes, int gasCount, int firstVoxel, int firstCell, int firstBehind, int firstAhead,
+        int length, ref int negatives)
     {
+        if (gasCount == 0)
+            return;
+
         int i = 0;
         if (Vector.IsHardwareAccelerated && length >= Vector<float>.Count)
         {
             int width = Vector<float>.Count;
-            var timeStep = new Vector<float>(pass.TimeStep);
-            var molarMass = new Vector<float>(pass.MolarMass);
-            var molarHeat = new Vector<double>(pass.MolarHeat);
+            int half = Vector<double>.Count;
             var zero = Vector<float>.Zero;
             var infinity = new Vector<float>(float.PositiveInfinity);
             for (; i + width <= length; i += width)
             {
-                var ahead = Load(pass.FaceFlux, firstAhead + i);
-                var behind = Load(pass.FaceFlux, firstBehind + i);
-                var moles = Load(pass.Source, firstVoxel + i) - timeStep * (ahead - behind);
+                int cell = firstCell + i;
+                var massSum = Load(passes[0].MassSum, cell);
+                var moleSum = Load(passes[0].MoleSum, cell);
+                var heatLower = Load(passes[0].HeatSum, cell);
+                var heatUpper = Load(passes[0].HeatSum, cell + half);
+                var negativeCount = Vector<int>.Zero;
+                var anyNonFinite = Vector<int>.Zero;
+                for (int gas = 0; gas < gasCount; gas++)
+                {
+                    ref readonly EulerSpeciesPass pass = ref passes[gas];
+                    var ahead = Load(pass.FaceFlux, firstAhead + i);
+                    var behind = Load(pass.FaceFlux, firstBehind + i);
+                    var moles = Load(pass.Source, firstVoxel + i) - new Vector<float>(pass.TimeStep) * (ahead - behind);
 
-                Vector<int> finite = Vector.LessThan(Vector.Abs(moles), infinity);
-                Vector<int> negative = Vector.AndNot(Vector.LessThan(moles, zero), ~finite);
-                if (!Vector.EqualsAll(finite, Vector<int>.AllBitsSet))
+                    Vector<int> finite = Vector.LessThan(Vector.Abs(moles), infinity);
+                    Vector<int> negative = Vector.AndNot(Vector.LessThan(moles, zero), ~finite);
+                    anyNonFinite |= ~finite;
+                    negativeCount += negative;
+                    moles = Vector.ConditionalSelect(Vector.AndNot(finite, negative), moles, zero);
+                    moles.StoreAt(pass.Target, firstVoxel + i);
+
+                    massSum += moles * new Vector<float>(pass.MolarMass);
+                    moleSum += moles;
+                    var molarHeat = new Vector<double>(pass.MolarHeat);
+                    heatLower += Vector.WidenLower(moles) * molarHeat;
+                    heatUpper += Vector.WidenUpper(moles) * molarHeat;
+                }
+
+                ref readonly EulerSpeciesPass sums = ref passes[0];
+                massSum.StoreAt(sums.MassSum, cell);
+                moleSum.StoreAt(sums.MoleSum, cell);
+                heatLower.StoreAt(sums.HeatSum, cell);
+                heatUpper.StoreAt(sums.HeatSum, cell + half);
+
+                // Each negative lane is -1, so the lane sum is minus the count.
+                negatives -= Vector.Sum(negativeCount);
+                if (!Vector.EqualsAll(anyNonFinite, Vector<int>.Zero))
                 {
                     for (int lane = 0; lane < width; lane++)
                     {
-                        if (finite[lane] == 0)
-                            pass.NonFinite[firstCell + i + lane] = true;
+                        if (anyNonFinite[lane] != 0)
+                            sums.NonFinite[cell + lane] = true;
                     }
                 }
-
-                // Each negative lane is -1, so the lane sum is minus the count.
-                negatives -= Vector.Sum(negative);
-                moles = Vector.ConditionalSelect(Vector.AndNot(finite, negative), moles, zero);
-                moles.StoreAt(pass.Target, firstVoxel + i);
-
-                (Load(pass.MassSum, firstCell + i) + moles * molarMass).StoreAt(pass.MassSum, firstCell + i);
-                (Load(pass.MoleSum, firstCell + i) + moles).StoreAt(pass.MoleSum, firstCell + i);
-
-                int half = Vector<double>.Count;
-                var heatLower = Load(pass.HeatSum, firstCell + i);
-                var heatUpper = Load(pass.HeatSum, firstCell + i + half);
-                (heatLower + Vector.WidenLower(moles) * molarHeat).StoreAt(pass.HeatSum, firstCell + i);
-                (heatUpper + Vector.WidenUpper(moles) * molarHeat).StoreAt(pass.HeatSum, firstCell + i + half);
             }
         }
 
         for (; i < length; i++)
-            UpdateCell(in pass, firstVoxel + i, firstCell + i, firstBehind + i, firstAhead + i, ref negatives);
+        {
+            for (int gas = 0; gas < gasCount; gas++)
+            {
+                UpdateCell(
+                    in passes[gas], firstVoxel + i, firstCell + i, firstBehind + i, firstAhead + i, ref negatives);
+            }
+        }
     }
 
     /// <summary>
