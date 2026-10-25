@@ -187,7 +187,7 @@ public partial class SimulationViewer
                 RenderEulerFlowSettings(inspecting);
                 break;
             case AtmosBuiltInSolvers.GasReactions:
-                var reactions = _session.Config!.SolverConfigurations.OfType<GasReactionConfig>().FirstOrDefault();
+                var reactions = AtmosConfigSettings.GetSolverConfiguration<GasReactionConfig>(_session.Config!);
                 int count = reactions == null ? 0 : reactions.LinearReactions.Count + reactions.StandardReactions.Count;
                 ImGui.TextUnformatted($"Configured reactions: {count.ToString(CultureInfo.InvariantCulture)}");
                 break;

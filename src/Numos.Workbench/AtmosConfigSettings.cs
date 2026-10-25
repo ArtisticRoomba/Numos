@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using Numos.CoreSim;
 
 namespace Numos.Workbench;
@@ -46,6 +47,39 @@ public static class AtmosConfigSettings
         destination.AccumulatorWakeThreshold = source.AccumulatorWakeThreshold;
         destination.AccumulatorMaxAliveTicks = source.AccumulatorMaxAliveTicks;
         destination.ReferenceMolarMass = source.ReferenceMolarMass;
+    }
+
+    /// <summary>
+    ///     Finds the first solver configuration of type <typeparamref name="T" />.
+    /// </summary>
+    /// <typeparam name="T">The solver configuration type. A derived type also matches.</typeparam>
+    /// <param name="config">The configuration to search.</param>
+    /// <param name="fallback">The value to return when <paramref name="config" /> holds no match.</param>
+    /// <returns>
+    ///     The first match, or <paramref name="fallback" /> when there is none. The result is never
+    ///     <see langword="null" /> when <paramref name="fallback" /> is not.
+    /// </returns>
+    [return: NotNullIfNotNull(nameof(fallback))]
+    public static T? GetSolverConfiguration<T>(AtmosConfig config, T? fallback = null)
+        where T : class, IAtmosSolverConfiguration
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        return config.SolverConfigurations.OfType<T>().FirstOrDefault() ?? fallback;
+    }
+
+    /// <summary>
+    ///     Replaces every solver configuration of type <typeparamref name="T" /> with one value.
+    /// </summary>
+    /// <typeparam name="T">The solver configuration type. A derived type also matches.</typeparam>
+    /// <param name="config">The configuration to edit.</param>
+    /// <param name="value">The configuration to store. It goes last in the list.</param>
+    public static void SetSolverConfiguration<T>(AtmosConfig config, T value)
+        where T : class, IAtmosSolverConfiguration
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        ArgumentNullException.ThrowIfNull(value);
+        config.SolverConfigurations.RemoveAll(static entry => entry is T);
+        config.SolverConfigurations.Add(value);
     }
 
     /// <summary>

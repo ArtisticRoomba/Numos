@@ -399,7 +399,7 @@ internal sealed class EulerFlowPatch
     /// </summary>
     internal void ApplyTo(AtmosConfig config)
     {
-        var current = config.SolverConfigurations.OfType<EulerFlowConfig>().FirstOrDefault() ?? EulerFlowConfig.Default;
+        var current = AtmosConfigSettings.GetSolverConfiguration(config, EulerFlowConfig.Default);
         var patched = new EulerFlowConfig
         {
             CourantNumber = CourantNumber ?? current.CourantNumber,
@@ -413,8 +413,7 @@ internal sealed class EulerFlowPatch
             DefaultLinkAreaFraction = DefaultLinkAreaFraction ?? current.DefaultLinkAreaFraction
         };
 
-        config.SolverConfigurations.RemoveAll(static entry => entry is EulerFlowConfig);
-        config.SolverConfigurations.Add(patched);
+        AtmosConfigSettings.SetSolverConfiguration(config, patched);
     }
 
     private static EulerReconstruction? ParseReconstruction(string? value)

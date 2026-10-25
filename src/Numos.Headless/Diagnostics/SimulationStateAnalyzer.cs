@@ -5,6 +5,7 @@ using Numos.CoreSim.Datatypes.Snapshots;
 using Numos.CoreSim.EulerFlow;
 using Numos.Headless.Protocol;
 using Numos.Maths;
+using Numos.Workbench;
 
 namespace Numos.Headless.Diagnostics;
 
@@ -226,7 +227,7 @@ public static class SimulationStateAnalyzer
 
     private static EulerFlowConfigurationReport? CreateEulerFlowReport(AtmosConfig config)
     {
-        var euler = config.SolverConfigurations.OfType<EulerFlowConfig>().FirstOrDefault();
+        var euler = AtmosConfigSettings.GetSolverConfiguration<EulerFlowConfig>(config);
         if (euler == null)
             return null;
 

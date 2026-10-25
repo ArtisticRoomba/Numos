@@ -846,7 +846,7 @@ public partial class SimulationViewer
     /// </summary>
     private void RenderEulerFlowSettings(bool inspecting)
     {
-        var euler = _session.Config!.SolverConfigurations.OfType<EulerFlowConfig>().FirstOrDefault() ?? EulerFlowConfig.Default;
+        var euler = AtmosConfigSettings.GetSolverConfiguration(_session.Config!, EulerFlowConfig.Default);
 
         ConfigFloatSlider(
             AtmosConfigFields.EulerCourantNumber,
@@ -927,9 +927,8 @@ public partial class SimulationViewer
 
     private static void ReplaceEulerFlow(AtmosConfig config, Func<EulerFlowConfig, EulerFlowConfig> edit)
     {
-        var current = config.SolverConfigurations.OfType<EulerFlowConfig>().FirstOrDefault() ?? EulerFlowConfig.Default;
-        config.SolverConfigurations.RemoveAll(static entry => entry is EulerFlowConfig);
-        config.SolverConfigurations.Add(edit(current));
+        var current = AtmosConfigSettings.GetSolverConfiguration(config, EulerFlowConfig.Default);
+        AtmosConfigSettings.SetSolverConfiguration(config, edit(current));
     }
 
     private void ConfigBoolCheckbox(
