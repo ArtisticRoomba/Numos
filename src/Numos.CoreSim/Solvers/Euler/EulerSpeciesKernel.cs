@@ -5,16 +5,12 @@ namespace Numos.CoreSim.Solvers.Euler;
 /// <summary>
 ///     The arrays and per-gas constants of one gas in the species pass of a bundle.
 /// </summary>
-/// <remarks>
-///     The arrays are raw <see cref="float" /> and <see cref="double" /> arrays because the kernel works on
-///     <see cref="Vector{T}" /> lanes, which carry no units.
-/// </remarks>
 internal readonly struct EulerSpeciesPass
 {
     public EulerSpeciesPass(
-        float[] source, float[] target, float[] faceFlux, bool[] nonFinite,
-        float[] massSum, float[] moleSum, double[] heatSum,
-        float timeStep, float molarMass, float molarHeat)
+        Mole[] source, Mole[] target, MolePerSecond[] faceFlux, bool[] nonFinite,
+        Kilogram[] massSum, Mole[] moleSum, JoulePerKelvin64[] heatSum,
+        Second timeStep, KilogramPerMole molarMass, JoulePerMoleKelvin molarHeat)
     {
         Source = source;
         Target = target;
@@ -28,16 +24,16 @@ internal readonly struct EulerSpeciesPass
         MolarHeat = molarHeat;
     }
 
-    public readonly float[] Source;
-    public readonly float[] Target;
-    public readonly float[] FaceFlux;
+    public readonly Mole[] Source;
+    public readonly Mole[] Target;
+    public readonly MolePerSecond[] FaceFlux;
     public readonly bool[] NonFinite;
-    public readonly float[] MassSum;
-    public readonly float[] MoleSum;
-    public readonly double[] HeatSum;
-    public readonly float TimeStep;
-    public readonly float MolarMass;
-    public readonly float MolarHeat;
+    public readonly Kilogram[] MassSum;
+    public readonly Mole[] MoleSum;
+    public readonly JoulePerKelvin64[] HeatSum;
+    public readonly Second TimeStep;
+    public readonly KilogramPerMole MolarMass;
+    public readonly JoulePerMoleKelvin MolarHeat;
 }
 
 /// <summary>
@@ -75,7 +71,7 @@ internal static class EulerSpeciesKernel
     ///     multiple of the vector width. The overlapped lanes store the bits they stored already.
     /// </remarks>
     public static void FaceFluxRun(
-        float[] rate, int[] upperMask, float[] source, float[] flux,
+        PerSecond[] rate, int[] upperMask, Mole[] source, MolePerSecond[] flux,
         int firstFace, int lowerVoxel, int upperOffset, int length)
     {
         int width = Vector<float>.Count;
@@ -128,17 +124,18 @@ internal static class EulerSpeciesKernel
     ///     vector overlaps the one before it when the length is not a multiple of the vector width.
     /// </remarks>
     public static void EdgeFluxRow(
-        float[] rate, int[] upperMask, bool lowerBoundary, float[] source, float[]? neighborSource, float[] flux,
-        int firstFace, int selfFirst, int neighborFirst, int length)
+        PerSecond[] rate, int[] upperMask, bool lowerBoundary, Mole[] source, Mole[]? neighborSource,
+        MolePerSecond[] flux, int firstFace, int selfFirst, int neighborFirst, int length)
     {
         int width = Vector<float>.Count;
         int start = 0;
         while (true)
         {
-            var self = Load(source, selfFirst + start);
-            var neighbor = neighborSource == null ? Vector<float>.Zero : Load(neighborSource, neighborFirst + start);
+            Vector<Mole> self = Load(source, selfFirst + start);
+            Vector<Mole> neighbor =
+                neighborSource == null ? Vector<float>.Zero : Load(neighborSource, neighborFirst + start);
             var mask = Load(upperMask, firstFace + start);
-            var upwind = lowerBoundary
+            Vector<Mole> upwind = lowerBoundary
                 ? Vector.ConditionalSelect(mask, self, neighbor)
                 : Vector.ConditionalSelect(mask, neighbor, self);
             (Load(rate, firstFace + start) * upwind).StoreAt(flux, firstFace + start);
@@ -150,11 +147,12 @@ internal static class EulerSpeciesKernel
     }
 
     private static void FaceFluxVector(
-        float[] rate, int[] upperMask, float[] source, float[] flux, int face, int lowerVoxel, int upperOffset)
+        PerSecond[] rate, int[] upperMask, Mole[] source, MolePerSecond[] flux, int face, int lowerVoxel,
+        int upperOffset)
     {
-        var lower = Load(source, lowerVoxel);
-        var upper = Load(source, lowerVoxel + upperOffset);
-        var upwind = Vector.ConditionalSelect(Load(upperMask, face), upper, lower);
+        Vector<Mole> lower = Load(source, lowerVoxel);
+        Vector<Mole> upper = Load(source, lowerVoxel + upperOffset);
+        Vector<Mole> upwind = Vector.ConditionalSelect(Load(upperMask, face), upper, lower);
         (Load(rate, face) * upwind).StoreAt(flux, face);
     }
 
@@ -198,18 +196,19 @@ internal static class EulerSpeciesKernel
             for (; i + width <= length; i += width)
             {
                 int cell = firstCell + i;
-                var massSum = Load(passes[0].MassSum, cell);
-                var moleSum = Load(passes[0].MoleSum, cell);
-                var heatLower = Load(passes[0].HeatSum, cell);
-                var heatUpper = Load(passes[0].HeatSum, cell + half);
+                Vector<Kilogram> massSum = Load(passes[0].MassSum, cell);
+                Vector<Mole> moleSum = Load(passes[0].MoleSum, cell);
+                Vector<JoulePerKelvin64> heatLower = Load(passes[0].HeatSum, cell);
+                Vector<JoulePerKelvin64> heatUpper = Load(passes[0].HeatSum, cell + half);
                 var negativeCount = Vector<int>.Zero;
                 var anyNonFinite = Vector<int>.Zero;
                 for (int gas = 0; gas < gasCount; gas++)
                 {
                     ref readonly EulerSpeciesPass pass = ref passes[gas];
-                    var ahead = Load(pass.FaceFlux, firstAhead + i);
-                    var behind = Load(pass.FaceFlux, firstBehind + i);
-                    var moles = Load(pass.Source, firstVoxel + i) - new Vector<float>(pass.TimeStep) * (ahead - behind);
+                    Vector<MolePerSecond> ahead = Load(pass.FaceFlux, firstAhead + i);
+                    Vector<MolePerSecond> behind = Load(pass.FaceFlux, firstBehind + i);
+                    Vector<Mole> moles =
+                        Load(pass.Source, firstVoxel + i) - new Vector<float>(pass.TimeStep) * (ahead - behind);
 
                     Vector<int> finite = Vector.LessThan(Vector.Abs(moles), infinity);
                     Vector<int> negative = Vector.AndNot(Vector.LessThan(moles, zero), ~finite);
@@ -220,7 +219,7 @@ internal static class EulerSpeciesKernel
 
                     massSum += moles * new Vector<float>(pass.MolarMass);
                     moleSum += moles;
-                    var molarHeat = new Vector<double>(pass.MolarHeat);
+                    Vector<JoulePerMoleKelvin64> molarHeat = new Vector<double>(pass.MolarHeat);
                     heatLower += Vector.WidenLower(moles) * molarHeat;
                     heatUpper += Vector.WidenUpper(moles) * molarHeat;
                 }
@@ -265,7 +264,7 @@ internal static class EulerSpeciesKernel
     public static void UpdateCell(
         in EulerSpeciesPass pass, int voxel, int cell, int behind, int ahead, ref int negatives)
     {
-        float moles = pass.Source[voxel] - pass.TimeStep * (pass.FaceFlux[ahead] - pass.FaceFlux[behind]);
+        Mole moles = pass.Source[voxel] - pass.TimeStep * (pass.FaceFlux[ahead] - pass.FaceFlux[behind]);
         if (!float.IsFinite(moles))
         {
             pass.NonFinite[cell] = true;
