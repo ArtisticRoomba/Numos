@@ -161,7 +161,7 @@ public sealed class AtmosConfigSnapshot : IAtmosConfig
 
     /// <inheritdoc cref="AtmosConfig.PressurePerMoleKelvin" />
     public PascalPerMoleKelvin PressurePerMoleKelvin =>
-        AtmosPhysicalConstants.MolarGasConstant / GetVoxelVolume();
+        AtmosPhysicalConstants.MolarGasConstant / VoxelVolume;
 
     /// <inheritdoc cref="AtmosConfig.GetValidatedTemp" />
     public Kelvin GetValidatedTemp(Kelvin storedTemperature)
@@ -172,47 +172,37 @@ public sealed class AtmosConfigSnapshot : IAtmosConfig
     /// <inheritdoc cref="AtmosConfig.GetVoxelVolume" />
     public CubicMetre GetVoxelVolume()
     {
-        return FloatMath.IsFinitePositive(VoxelVolume) ? VoxelVolume : AtmosConfigDefaults.VoxelVolume;
+        return VoxelVolume;
     }
 
     /// <inheritdoc cref="AtmosConfig.GetMolarHeatCapacityAtConstantVolume" />
     public JoulePerMoleKelvin GetMolarHeatCapacityAtConstantVolume(int gasId)
     {
-        JoulePerMoleKelvin fallback = FloatMath.IsFinitePositive(DefaultMolarHeatCapacityAtConstantVolume)
-            ? DefaultMolarHeatCapacityAtConstantVolume
-            : AtmosConfigDefaults.DefaultMolarHeatCapacityAtConstantVolume;
-
-        if ((uint)gasId < (uint)GasRegistry.Count)
-        {
-            JoulePerMoleKelvin configured = GasRegistry[gasId].MolarHeatCapacityAtConstantVolume;
-            if (FloatMath.IsFinitePositive(configured))
-                return configured;
-        }
-
-        return fallback;
+        return (uint)gasId < (uint)GasRegistry.Count
+            ? GasRegistry[gasId].MolarHeatCapacityAtConstantVolume
+            : DefaultMolarHeatCapacityAtConstantVolume;
     }
 
     /// <inheritdoc cref="AtmosConfig.GetDiffusionCoefficient" />
     public SquareMetrePerSecond GetDiffusionCoefficient(int gasId)
     {
         return (uint)gasId < (uint)GasRegistry.Count
-            ? FloatMath.GetNonnegativeFinite(GasRegistry[gasId].DiffusionCoefficient)
-            : FloatMath.GetNonnegativeFinite(DefaultDiffusionCoefficient);
+            ? GasRegistry[gasId].DiffusionCoefficient
+            : DefaultDiffusionCoefficient;
     }
 
     /// <inheritdoc cref="AtmosConfig.GetMolarMass" />
     public KilogramPerMole GetMolarMass(int gasId)
     {
+        // The constructor stores an unknown molar mass as zero.
         if ((uint)gasId < (uint)GasRegistry.Count)
         {
             KilogramPerMole configured = GasRegistry[gasId].MolarMass;
-            if (FloatMath.IsFinitePositive(configured))
+            if (configured > 0f)
                 return configured;
         }
 
-        return FloatMath.IsFinitePositive(ReferenceMolarMass)
-            ? ReferenceMolarMass
-            : AtmosConfigDefaults.ReferenceMolarMass;
+        return ReferenceMolarMass;
     }
 
     /// <inheritdoc cref="AtmosConfig.TryGetGasProperties" />
