@@ -8,8 +8,8 @@ namespace Numos.CoreSim.Solvers;
 /// <remarks>
 ///     <para>
 ///         The owning solver fills <see cref="NeighborIndices" />, <see cref="NeighborKinds" />, and
-///         <see cref="NeighborCounts" /> through <see cref="NeighborResolution.ResolveNeighbors" /> before
-///         the kernel runs.
+///         <see cref="NeighborCounts" /> before the kernel runs.
+///         It uses <see cref="NeighborResolution.ResolveNeighbors" /> or an equivalent classification.
 ///         The delta buffers are plain destination accumulators.
 ///         A solver's own gather (bulk flow in <see cref="AdvectionSolver" />) can fill them.
 ///         It then hands them to <see cref="SpeciesDiffusionKernel.ApplyDeltas" /> as the diffusion gather does.

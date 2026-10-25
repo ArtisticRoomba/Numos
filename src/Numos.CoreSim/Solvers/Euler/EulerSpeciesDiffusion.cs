@@ -102,42 +102,79 @@ internal static class EulerSpeciesDiffusion
     }
 
     /// <summary>
-    ///     Resolves the in-chunk neighbours of one tile of voxels and fixes their transfer amounts.
+    ///     Classifies the in-chunk neighbours of one tile of voxels and fixes their transfer amounts.
     /// </summary>
-    /// <remarks>
-    ///     <see cref="NeighborResolution.ResolveNeighbors" /> classifies by voxel room. An air neighbour missing
-    ///     from the open mask, because <see cref="EulerFaceTopology.IsFaceOpen" /> declined the face, is demoted to
-    ///     blocked so diffusion follows the same topology as the flow. Faces that leave the chunk are left to the
-    ///     boundary exchange.
-    /// </remarks>
     private static void ResolveAndPrepare(
         EulerChunkWorkspace workspace, int start, int length, AtmosSolverConfigSnapshot config)
     {
-        AtmosChunk chunk = workspace.Chunk;
         ref DiffusionWorkspace diffusion = ref workspace.Diffusion;
+        ClassifyNeighbors(workspace.Chunk, workspace.OpenMask, workspace.VoidMask, ref diffusion, start, length);
+        SpeciesDiffusionKernel.PrepareDiffusion(ref diffusion, start, length, config);
+    }
+
+    /// <summary>
+    ///     Fills the neighbour kinds, indices, and counts of one tile of voxels from the face masks.
+    /// </summary>
+    /// <param name="chunk">The chunk that owns the tile.</param>
+    /// <param name="openMask">The open-face bits that <see cref="EulerFaceTopology.Build" /> filled for the tick.</param>
+    /// <param name="voidMask">The void-face bits that <see cref="EulerFaceTopology.Build" /> filled for the tick.</param>
+    /// <param name="diffusion">The workspace that receives the kinds, indices, and counts.</param>
+    /// <param name="start">The first active-air index of the tile.</param>
+    /// <param name="length">The number of active-air indices in the tile.</param>
+    /// <remarks>
+    ///     <para>
+    ///         An open bit is an air neighbour and a void bit is a void neighbour. Any other face is blocked. This
+    ///         gives the kinds that <see cref="NeighborResolution.ResolveNeighbors" /> gives from the room map,
+    ///         except that a face <see cref="EulerFaceTopology.IsFaceOpen" /> declined is blocked. Diffusion then
+    ///         follows the same topology as the flow.
+    ///     </para>
+    ///     <para>
+    ///         Faces that leave the chunk are blocked here, and the boundary exchange handles them.
+    ///         The masks also hold bits for those faces, so the chunk edge decides.
+    ///     </para>
+    ///     <para>
+    ///         A blocked slot keeps its old index, because nothing reads the index of a blocked slot.
+    ///     </para>
+    /// </remarks>
+    internal static void ClassifyNeighbors(
+        AtmosChunk chunk, byte[] openMask, byte[] voidMask, ref DiffusionWorkspace diffusion, int start, int length)
+    {
+        Int3 last = chunk.Dimensions - new Int3(1, 1, 1);
+        int rowStride = chunk.Width;
+        int slabStride = chunk.Width * chunk.Height;
+        Span<int> offsets = [-1, 1, -rowStride, rowStride, -slabStride, slabStride];
+
         int end = start + length;
         for (int activeIndex = start; activeIndex < end; activeIndex++)
         {
             ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
             int slotBase = activeIndex * NeighborResolution.NeighborDirections.Length;
-            int count = NeighborResolution.ResolveNeighbors(
-                chunk, chunk.GetXyzInt3(voxelIndex), diffusion.NeighborIndices, diffusion.NeighborKinds, slotBase);
+            Int3 position = chunk.GetXyzInt3(voxelIndex);
+            byte open = openMask[voxelIndex];
+            byte sink = voidMask[voxelIndex];
 
-            byte open = workspace.OpenMask[voxelIndex];
+            int count = 0;
             for (int direction = 0; direction < NeighborResolution.NeighborDirections.Length; direction++)
             {
-                if (diffusion.NeighborKinds[slotBase + direction] != NeighborKind.Air ||
-                    EulerFaceTopology.IsOpen(open, direction))
+                NeighborKind kind = NeighborKind.Blocked;
+                if (!EulerFaceTopology.IsOnEdge(position, last, direction))
+                {
+                    if (EulerFaceTopology.IsOpen(open, direction))
+                        kind = NeighborKind.Air;
+                    else if (EulerFaceTopology.IsVoid(sink, direction))
+                        kind = NeighborKind.Void;
+                }
+
+                diffusion.NeighborKinds[slotBase + direction] = kind;
+                if (kind == NeighborKind.Blocked)
                     continue;
 
-                diffusion.NeighborKinds[slotBase + direction] = NeighborKind.Blocked;
-                count--;
+                diffusion.NeighborIndices[slotBase + direction] = (ushort)(voxelIndex + offsets[direction]);
+                count++;
             }
 
             diffusion.NeighborCounts[voxelIndex] = count;
         }
-
-        SpeciesDiffusionKernel.PrepareDiffusion(ref diffusion, start, length, config);
     }
 
     /// <summary>
