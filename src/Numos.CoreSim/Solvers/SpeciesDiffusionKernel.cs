@@ -449,12 +449,6 @@ internal static class SpeciesDiffusionKernel
             if (energyDelta == 0d && !anyMoleChange)
                 continue;
 
-            // Temperature is the voxel's energy before transfer plus the net energy carried by moved moles,
-            // divided by the heat capacity of the updated mixture.
-            Joule64 oldEnergy =
-                (Kelvin64)config.GetValidatedTemp(chunk.Temperature[voxelIndex]) *
-                chunk.TotalHeatCapacity[voxelIndex];
-
             Mole totalMoles = 0f;
             JoulePerKelvin totalHeatCapacity = 0f;
             for (int gas = 0; gas < gasCount; gas++)
@@ -469,17 +463,52 @@ internal static class SpeciesDiffusionKernel
                                      config.GetMolarHeatCapacityAtConstantVolume(gasChannel.GasId);
             }
 
-            chunk.TotalHeatCapacity[voxelIndex] = totalHeatCapacity;
-            if (totalHeatCapacity <= 0f)
-                continue;
-
-            chunk.Temperature[voxelIndex] = MathF.Max(
-                0f,
-                (Joule)((oldEnergy + energyDelta) / totalHeatCapacity));
-
-            chunk.TotalPressure[voxelIndex] =
-                AtmosSolverMath.CalculatePressureAtVoxel(config, chunk, voxelIndex, totalMoles);
+            FinishVoxel(config, chunk, voxelIndex, energyDelta, totalMoles, totalHeatCapacity);
         }
+    }
+
+    /// <summary>
+    ///     Rebuilds heat capacity, temperature, and pressure of a voxel whose gas moles are already final.
+    /// </summary>
+    /// <param name="config">The immutable configuration snapshot for the tick.</param>
+    /// <param name="chunk">The chunk that owns the voxel.</param>
+    /// <param name="voxelIndex">The voxel to refresh.</param>
+    /// <param name="energyDelta">The net energy carried into the voxel by the moved moles.</param>
+    /// <param name="totalMoles">The sum of the final moles over the active channels, in channel order.</param>
+    /// <param name="totalHeatCapacity">The heat capacity of the final moles, summed in channel order.</param>
+    /// <remarks>
+    ///     <para>
+    ///         Temperature is the voxel's energy before the transfer plus <paramref name="energyDelta" />, divided by
+    ///         the heat capacity of the updated mixture.
+    ///         This method reads the old temperature and heat capacity before it overwrites the heat capacity.
+    ///     </para>
+    ///     <para>
+    ///         A voxel with no heat capacity keeps its temperature and pressure.
+    ///         The callers sum the totals themselves because the order of that sum fixes the rounding.
+    ///     </para>
+    /// </remarks>
+    internal static void FinishVoxel(
+        AtmosSolverConfigSnapshot config,
+        AtmosChunk chunk,
+        ushort voxelIndex,
+        Joule64 energyDelta,
+        Mole totalMoles,
+        JoulePerKelvin totalHeatCapacity)
+    {
+        Joule64 oldEnergy =
+            (Kelvin64)config.GetValidatedTemp(chunk.Temperature[voxelIndex]) *
+            chunk.TotalHeatCapacity[voxelIndex];
+
+        chunk.TotalHeatCapacity[voxelIndex] = totalHeatCapacity;
+        if (totalHeatCapacity <= 0f)
+            return;
+
+        chunk.Temperature[voxelIndex] = MathF.Max(
+            0f,
+            (Kelvin)((oldEnergy + energyDelta) / totalHeatCapacity));
+
+        chunk.TotalPressure[voxelIndex] =
+            AtmosSolverMath.CalculatePressureAtVoxel(config, chunk, voxelIndex, totalMoles);
     }
 
     /// <summary>

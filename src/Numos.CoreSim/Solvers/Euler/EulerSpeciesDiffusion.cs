@@ -358,8 +358,6 @@ internal static class EulerSpeciesDiffusion
         {
             ushort voxelIndex = exchange.Voxels[entry];
             int end = exchange.RecordEnds[entry];
-            Joule64 oldEnergy =
-                (Kelvin64)config.GetValidatedTemp(chunk.Temperature[voxelIndex]) * chunk.TotalHeatCapacity[voxelIndex];
 
             for (; record < end; record++)
             {
@@ -376,16 +374,8 @@ internal static class EulerSpeciesDiffusion
                 totalHeatCapacity += moles * config.GetMolarHeatCapacityAtConstantVolume(chunk.ActiveGases[gas].GasId);
             }
 
-            chunk.TotalHeatCapacity[voxelIndex] = totalHeatCapacity;
-            if (totalHeatCapacity <= 0f)
-                continue;
-
-            chunk.Temperature[voxelIndex] = MathF.Max(
-                0f,
-                (Kelvin)((oldEnergy + exchange.EnergyDeltas[entry]) / totalHeatCapacity));
-
-            chunk.TotalPressure[voxelIndex] =
-                AtmosSolverMath.CalculatePressureAtVoxel(config, chunk, voxelIndex, totalMoles);
+            SpeciesDiffusionKernel.FinishVoxel(
+                config, chunk, voxelIndex, exchange.EnergyDeltas[entry], totalMoles, totalHeatCapacity);
         }
     }
 
