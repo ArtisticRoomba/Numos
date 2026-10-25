@@ -222,6 +222,22 @@ public static class FlowFieldMath
     }
 
     /// <summary>
+    /// Computes the magnitude of a velocity vector.
+    /// </summary>
+    /// <param name="x">The x-component of the velocity.</param>
+    /// <param name="y">The y-component of the velocity.</param>
+    /// <param name="z">The z-component of the velocity.</param>
+    /// <returns>The speed <c>sqrt(x^2 + y^2 + z^2)</c>, or NaN when any component is NaN.</returns>
+    [return: Quantity("velocity")]
+    public static MetrePerSecond Speed(
+        [Quantity("velocity")] MetrePerSecond x,
+        [Quantity("velocity")] MetrePerSecond y,
+        [Quantity("velocity")] MetrePerSecond z)
+    {
+        return MathF.Sqrt(x * x + y * y + z * z);
+    }
+
+    /// <summary>
     /// Finds the largest finite value of a span.
     /// </summary>
     /// <param name="values">The values to scan.</param>

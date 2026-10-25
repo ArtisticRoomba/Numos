@@ -248,7 +248,7 @@ public readonly record struct VoxelSample(
     /// <summary>
     ///     Gets the magnitude of the velocity, in metres per second (m/s). NaN when any component is NaN.
     /// </summary>
-    public float Speed => MathF.Sqrt(VelocityX * VelocityX + VelocityY * VelocityY + VelocityZ * VelocityZ);
+    public float Speed => FlowFieldMath.Speed(VelocityX, VelocityY, VelocityZ);
 
     /// <summary>
     ///     Gets the mass density in kilograms per cubic metre (kg/m³). NaN unless the visualization requires

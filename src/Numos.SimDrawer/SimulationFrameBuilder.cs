@@ -402,7 +402,7 @@ public sealed class SimulationFrameBuilder
 
         for (int index = 0; index < voxelCount; index++)
         {
-            float speed = GetSpeed(snapshot.VelocityX[index], snapshot.VelocityY[index], snapshot.VelocityZ[index]);
+            float speed = FlowFieldMath.Speed(snapshot.VelocityX[index], snapshot.VelocityY[index], snapshot.VelocityZ[index]);
             if (!float.IsFinite(speed))
                 continue;
 
@@ -417,11 +417,6 @@ public sealed class SimulationFrameBuilder
         return snapshot.VelocityX?.Length == voxelCount &&
                snapshot.VelocityY?.Length == voxelCount &&
                snapshot.VelocityZ?.Length == voxelCount;
-    }
-
-    private static float GetSpeed(float x, float y, float z)
-    {
-        return MathF.Sqrt(x * x + y * y + z * z);
     }
 
     /// <summary>

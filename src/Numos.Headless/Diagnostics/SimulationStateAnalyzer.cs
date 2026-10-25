@@ -400,7 +400,7 @@ public static class SimulationStateAnalyzer
             float velocityX = snapshot.VelocityX[localIndex];
             float velocityY = snapshot.VelocityY[localIndex];
             float velocityZ = snapshot.VelocityZ[localIndex];
-            float speed = MathF.Sqrt(velocityX * velocityX + velocityY * velocityY + velocityZ * velocityZ);
+            float speed = FlowFieldMath.Speed(velocityX, velocityY, velocityZ);
             _speed.Add(speed);
             // Velocity components are signed, so only non-finite values are anomalies; the speed is what gets reported.
             if (!float.IsFinite(speed))

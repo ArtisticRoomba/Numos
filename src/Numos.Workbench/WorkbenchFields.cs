@@ -291,12 +291,7 @@ public sealed class WorkbenchFieldRegistry
             "m/s",
             AtmosChunkSnapshotFields.Velocity,
             static (in snapshot, index) =>
-            {
-                float x = snapshot.VelocityX[index];
-                float y = snapshot.VelocityY[index];
-                float z = snapshot.VelocityZ[index];
-                return MathF.Sqrt(x * x + y * y + z * z);
-            }));
+                FlowFieldMath.Speed(snapshot.VelocityX[index], snapshot.VelocityY[index], snapshot.VelocityZ[index])));
 
         registry.RegisterResolver(static name =>
         {
