@@ -103,9 +103,9 @@ internal class ReactionSolver : IAtmosSolverStage
 
         if (IgnitionTransferEnabled && _anyFullyIgnited)
         {
-            ParallelHelper.ForEach<AtmosChunk, TransferIgnitionAction>(
-                context.Chunks,
-                new TransferIgnitionAction(this, context));
+            ParallelPhase.Run(
+                context.Chunks.Length,
+                new TransferIgnitionAction(this, context.Chunks, context));
         }
     }
 
@@ -979,11 +979,11 @@ internal class ReactionSolver : IAtmosSolverStage
         }
     }
 
-    private readonly struct TransferIgnitionAction(ReactionSolver solver, AtmosSolverExecutionContext context) : IInAction<AtmosChunk>
+    private readonly struct TransferIgnitionAction(ReactionSolver solver, AtmosChunk[] chunks, AtmosSolverExecutionContext context) : IAction
     {
-        public void Invoke(in AtmosChunk chunk)
+        public void Invoke(int index)
         {
-            solver.TransferIgnition(chunk, context);
+            solver.TransferIgnition(chunks[index], context);
         }
     }
 
