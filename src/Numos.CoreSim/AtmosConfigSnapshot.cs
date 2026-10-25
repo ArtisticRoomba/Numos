@@ -109,8 +109,8 @@ public sealed class AtmosConfigSnapshot : IAtmosConfig
 
     /// <summary>
     ///     Gets the registered gases, with invalid heat capacities replaced by
-    ///     <see cref="DefaultMolarHeatCapacityAtConstantVolume" />, diffusion coefficients clamped to zero or greater, and
-    ///     invalid molar masses normalized to zero.
+    ///     <see cref="DefaultMolarHeatCapacityAtConstantVolume" />, negative or non-finite diffusion coefficients
+    ///     normalized to zero, and invalid molar masses normalized to zero.
     /// </summary>
     public GasRegistrySnapshot GasRegistry { get; }
 
