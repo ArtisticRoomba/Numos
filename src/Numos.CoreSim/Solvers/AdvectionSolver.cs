@@ -1056,7 +1056,8 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
     ///     </para>
     ///     <para>
     ///         An ineligible source stores zero, which the gather treats as "did not diffuse".
-    ///         The environment factor scales with temperature, inverse pressure, and voxel edge length.
+    ///         The environment factor scales with temperature, inverse pressure, and the inverse square of the voxel
+    ///         edge length.
     ///     </para>
     /// </remarks>
     private static void PrepareDiffusion(
@@ -1066,8 +1067,9 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
     {
         var chunk = workspace.Chunk!;
         int gasCount = chunk.ActiveGasCount;
-        // For cubic voxels, area divided by neighbor distance is one voxel edge length.
-        float dx = MathF.Pow(config.VoxelVolume, 1f / 3f);
+        // Fick's law on a cubic grid: the face area over the neighbor distance is one edge, and the source
+        // concentration is its moles over an edge cubed, so the per-tick transfer is D * n * dt / dx^2.
+        Metre dx = MathF.Pow(config.VoxelVolume, 1f / 3f);
         int end = workItem.Start + workItem.Length;
         for (int activeIndex = workItem.Start; activeIndex < end; activeIndex++)
         {
@@ -1086,7 +1088,7 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
             Kelvin temperature = config.GetValidatedTemp(chunk.Temperature[voxelIndex]);
             Scalar temperatureRatio = temperature / config.GlobalTemperature;
             Scalar pressureRatio = config.SaturationReferencePressure / pressure;
-            float environmentFactor = MathF.Pow(temperatureRatio, 1.5f) * pressureRatio * dx;
+            PerSquareMetre environmentFactor = MathF.Pow(temperatureRatio, 1.5f) * pressureRatio / (dx * dx);
 
             for (int gas = 0; gas < gasCount; gas++)
             {
@@ -1098,8 +1100,8 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
                     continue;
                 }
 
-                float referenceDiffusivity = config.GetDiffusionCoefficient(gasChannel.GasId);
-                float diffusionConstant = referenceDiffusivity * environmentFactor;
+                SquareMetrePerSecond referenceDiffusivity = config.GetDiffusionCoefficient(gasChannel.GasId);
+                PerSecond diffusionConstant = referenceDiffusivity * environmentFactor;
                 Mole molesDiffused = diffusionConstant * sourceMoles * AtmosSolverConstants.FixedTimeStep;
 
                 // A voxel can lose at most one seventh of a gas to each of its six neighbors plus itself.

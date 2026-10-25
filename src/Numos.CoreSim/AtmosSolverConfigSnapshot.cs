@@ -13,7 +13,7 @@ namespace Numos.CoreSim;
 /// </remarks>
 internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
 {
-    private Scalar[] _diffusionCoefficients = [];
+    private SquareMetrePerSecond[] _diffusionCoefficients = [];
     private GasRegistrySnapshot _gasRegistry = default!;
     private JoulePerMoleKelvin[] _molarHeatCapacitiesAtConstantVolume = [];
 
@@ -52,7 +52,7 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
     public int AccumulatorMaxAliveTicks { get; private set; }
 
     public JoulePerMoleKelvin DefaultMolarHeatCapacityAtConstantVolume { get; private set; }
-    public Scalar DefaultDiffusionCoefficient { get; private set; }
+    public SquareMetrePerSecond DefaultDiffusionCoefficient { get; private set; }
 
     public CubicMetre GetVoxelVolume()
     {
@@ -71,7 +71,7 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
             : DefaultMolarHeatCapacityAtConstantVolume;
     }
 
-    public Scalar GetDiffusionCoefficient(int gasId)
+    public SquareMetrePerSecond GetDiffusionCoefficient(int gasId)
     {
         return (uint)gasId < (uint)GasPropertyCount
             ? _diffusionCoefficients[gasId]
@@ -130,7 +130,7 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
             ? config.SaturationReferencePressure
             : AtmosConfigDefaults.SaturationReferencePressure;
 
-        DefaultDiffusionCoefficient = FloatMath.ClampUnitInterval(config.DefaultDiffusionCoefficient);
+        DefaultDiffusionCoefficient = FloatMath.GetNonnegativeFinite(config.DefaultDiffusionCoefficient);
         SpaceTemperature = FloatMath.IsFinitePositive(config.SpaceTemperature)
             ? config.SpaceTemperature
             : AtmosConfigDefaults.SpaceTemperature;
@@ -145,7 +145,7 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
                     ? properties.MolarHeatCapacityAtConstantVolume
                     : DefaultMolarHeatCapacityAtConstantVolume;
 
-            _diffusionCoefficients[gasId] = FloatMath.ClampUnitInterval(properties.DiffusionCoefficient);
+            _diffusionCoefficients[gasId] = FloatMath.GetNonnegativeFinite(properties.DiffusionCoefficient);
         }
 
         _gasRegistry = new GasRegistrySnapshot(gases);

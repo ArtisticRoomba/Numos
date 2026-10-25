@@ -27,12 +27,20 @@ public record struct GasProperties
     ///     <see cref="AtmosConfig.SaturationReferencePressure" />.
     /// </summary>
     /// <remarks>
-    ///     Values are clamped to [0, 1]. Non-finite values disable diffusion for this species. The diffusion solvers
-    ///     scale this by <c>(T / GlobalTemperature)^1.5 * (SaturationReferencePressure / P) * dx * dt</c> and the
-    ///     source moles, then cap each neighbor's share at a seventh of the source.
+    ///     <para>
+    ///         An effective diffusivity in square metres per second (m²/s). Negative values clamp to zero, and
+    ///         non-finite values disable diffusion for this species. The diffusion solvers send each neighbor
+    ///         <c>D * (T / GlobalTemperature)^1.5 * (SaturationReferencePressure / P) * n * dt / dx^2</c> moles per
+    ///         tick, Fick's law on a grid of edge <c>dx</c>, then cap each neighbor's share at a seventh of the source.
+    ///     </para>
+    ///     <para>
+    ///         The default of 0.02 m²/s is about a thousand times molecular diffusivity in air. It stands in for the
+    ///         convective mixing the grid does not resolve.
+    ///     </para>
     /// </remarks>
+    [Quantity("diffusivity")]
     [GasCheckpointField(6)]
-    public Scalar DiffusionCoefficient;
+    public SquareMetrePerSecond DiffusionCoefficient;
 
     /// <summary>
     ///     Reserved ID for a liquid produced by condensation.

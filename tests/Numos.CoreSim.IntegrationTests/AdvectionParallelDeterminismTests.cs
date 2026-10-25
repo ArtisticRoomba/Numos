@@ -14,7 +14,7 @@ public sealed class AdvectionParallelDeterminismTests
     ///     Update this only together with a deliberate physics or digest-format change, and confirm the new value is
     ///     stable across worker counts before approving it. It is a grid-only checkpoint digest.
     /// </remarks>
-    private const ulong X64ExpectedDigest = 998283263411882128UL;
+    private const ulong X64ExpectedDigest = 7920672134438307614UL;
 
     [Test]
     [Explicit(

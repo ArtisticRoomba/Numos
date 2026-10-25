@@ -48,8 +48,9 @@ public static class AtmosConfigFields
 
     public readonly static AtmosConfigFieldInfo DefaultDiffusionCoefficient = new(
         "Default diffusion coefficient",
-        "",
-        "Fraction of a species mole imbalance mixed per tick for gases missing from the registry.");
+        "m²/s",
+        "Effective diffusivity for gases missing from the registry. Each tick a voxel sends D·n·dt/dx² moles to " +
+        "each neighbor.");
 
     public readonly static AtmosConfigFieldInfo SpaceTemperature = new(
         "Space temperature",

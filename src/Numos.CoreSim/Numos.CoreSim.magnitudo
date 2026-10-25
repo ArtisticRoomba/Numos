@@ -10,6 +10,8 @@ pressure | Pascal | global::System.Single | mass=1,length=-1,time=-2
 pressure64 | Pascal64 | global::System.Double | mass=1,length=-1,time=-2
 amount | Mole | global::System.Single | amount=1
 amount64 | Mole64 | global::System.Double | amount=1
+length | Metre | global::System.Single | length=1
+inverseArea | PerSquareMetre | global::System.Single | length=-2
 volume | CubicMetre | global::System.Single | length=3
 volume64 | CubicMetre64 | global::System.Double | length=3
 energy | Joule | global::System.Single | mass=1,length=2,time=-2
@@ -33,6 +35,7 @@ temperaturePerAmount64 | KelvinPerMole64 | global::System.Double | temperature=1
 seconds | Second | global::System.Single | time=1
 seconds64 | Second64 | global::System.Double | time=1
 frequency | PerSecond | global::System.Single | time=-1
+diffusivity | SquareMetrePerSecond | global::System.Single | length=2,time=-1
 molarConcentration | MolePerCubicMetre | global::System.Single | amount=1,length=-3
 molarConcentration64 | MolePerCubicMetre64 | global::System.Double | amount=1,length=-3
 concentrationPerSecond | ConcentrationPerSecond | global::System.Single | amount=1,length=-3,time=-1

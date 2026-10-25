@@ -805,7 +805,7 @@ public partial class SimulationViewer
                $"Condensation: {(gas.CondensationEnabled ? "enabled" : "disabled")}\n" +
                $"Vaporization enthalpy: {QuantityFormat.Format(gas.MolarEnthalpyOfVaporization, "J/mol")}\n" +
                $"Liquid ID: {gas.LiquidId.ToString(CultureInfo.InvariantCulture)}\n" +
-               $"Diffusion coefficient: {QuantityFormat.Format(gas.DiffusionCoefficient, string.Empty, 3)}";
+               $"Diffusion coefficient: {QuantityFormat.Format(gas.DiffusionCoefficient, "m²/s", 3)}";
     }
 
     private void RenderProjectInjectionControls(bool inspecting)

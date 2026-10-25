@@ -681,13 +681,11 @@ public partial class SimulationViewer
                 inspecting,
                 static (config, value) => config.DefaultMolarHeatCapacityAtConstantVolume = value);
 
-            ConfigFloatSlider(
+            ConfigFloatInput(
                 AtmosConfigFields.DefaultDiffusionCoefficient,
                 "config-default-diffusion-coefficient",
                 _session.Config.DefaultDiffusionCoefficient,
-                0f,
-                1f,
-                ConfigDomain.UnitInterval,
+                ConfigDomain.NonNegative,
                 inspecting,
                 static (config, value) => config.DefaultDiffusionCoefficient = value);
 

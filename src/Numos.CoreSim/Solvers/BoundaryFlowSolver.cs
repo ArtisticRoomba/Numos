@@ -311,10 +311,10 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
         Mole advectedMoles = AtmosSolverMath.PressureToMoles(config, bulkPressureTransfer, sourceTemperature);
 
         Pascal sourcePressure = sourceChunk.TotalPressure[sourceIndex];
-        float dx = MathF.Pow(config.VoxelVolume, 1f / 3f);
+        Metre dx = MathF.Pow(config.VoxelVolume, 1f / 3f);
         Scalar temperatureRatio = sourceTemperature / config.GlobalTemperature;
         Scalar pressureRatio = config.SaturationReferencePressure / sourcePressure;
-        float envFactor = MathF.Pow(temperatureRatio, 1.5f) * pressureRatio * dx;
+        PerSquareMetre envFactor = MathF.Pow(temperatureRatio, 1.5f) * pressureRatio / (dx * dx);
 
         bool movedGas = false;
 
@@ -324,8 +324,8 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
             Mole sourceMoles = sourceChunk.ActiveGases[gas].Moles[sourceIndex];
             Mole molesAdvected = advectedMoles * (sourceMoles / totalMoles);
 
-            float referenceDiffusivity = config.GetDiffusionCoefficient(gasId);
-            float diffusionConstant = referenceDiffusivity * envFactor;
+            SquareMetrePerSecond referenceDiffusivity = config.GetDiffusionCoefficient(gasId);
+            PerSecond diffusionConstant = referenceDiffusivity * envFactor;
             Mole molesDiffused = diffusionConstant * sourceMoles * AtmosSolverConstants.FixedTimeStep;
             if (molesDiffused * 7 > sourceMoles)
                 molesDiffused = sourceMoles / 7;

@@ -43,9 +43,10 @@ public static class AtmosConfigDefaults
     public const Pascal SaturationReferencePressure = AtmosPhysicalConstants.StandardAtmosphericPressure;
 
     /// <summary>
-    ///     Default reference diffusivity for unregistered gas IDs.
+    ///     Default reference diffusivity for unregistered gas IDs, in square metres per second (m²/s).
     /// </summary>
-    public const Scalar DefaultDiffusionCoefficient = 0.02f;
+    [Quantity("diffusivity")]
+    public const SquareMetrePerSecond DefaultDiffusionCoefficient = 0.02f;
 
     /// <summary>
     ///     Default modeled temperature of space, in kelvins (K).

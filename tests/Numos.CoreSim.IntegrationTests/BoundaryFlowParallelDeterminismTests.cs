@@ -7,7 +7,7 @@ namespace Numos.CoreSim.IntegrationTests;
 [TestFixture]
 public sealed class BoundaryFlowParallelDeterminismTests
 {
-    private const ulong X64ExpectedDigest = 2688148414183633200UL;
+    private const ulong X64ExpectedDigest = 13785052137060592037UL;
 
     /// <summary>
     ///     Requires repeated runs of this scenario to produce one digest, which on x64 must also equal
@@ -19,7 +19,8 @@ public sealed class BoundaryFlowParallelDeterminismTests
     ///     it shows parallel boundary flow is bit-identical to the sequential algorithm, not merely stable across repeated
     ///     parallel runs. The value was re-captured as a grid-only
     ///     <see cref="Numos.CoreSim.Replay.AtmosSimulationCheckpoint" /> digest once the sequential-era digest had passed on
-    ///     the same code.
+    ///     the same code. It was re-captured again when species diffusion started dividing by the voxel volume, and held
+    ///     at 1, 2, and 32 workers.
     /// </remarks>
     [Test]
     [Explicit(
