@@ -163,7 +163,8 @@ internal static class SpeciesDiffusionKernel
     ///     </para>
     ///     <para>
     ///         An ineligible source stores zero, which the gather treats as "did not diffuse".
-    ///         The environment factor scales with temperature, inverse pressure, and the inverse square of the voxel edge length.
+    ///         The environment factor scales with temperature, inverse pressure, and the inverse square of the voxel
+    ///         edge length.
     ///     </para>
     /// </remarks>
     internal static void PrepareDiffusion(
@@ -174,8 +175,6 @@ internal static class SpeciesDiffusionKernel
     {
         var chunk = workspace.Chunk!;
         int gasCount = chunk.ActiveGasCount;
-        // Fick's law on a cubic grid: the face area over the neighbor distance is one edge, and the source
-        // concentration is its moles over an edge cubed, so the per-tick transfer is D * n * dt / dx^2.
         Metre dx = MathF.Pow(config.VoxelVolume, 1f / 3f);
         int end = start + length;
         for (int activeIndex = start; activeIndex < end; activeIndex++)
@@ -208,8 +207,9 @@ internal static class SpeciesDiffusionKernel
 
     /// <summary>
     ///     Returns the environment factor of a source voxel.
-    ///     It is the kinetic-theory <c>T^(3/2) / P</c> dependence of the diffusivity, divided by the squared voxel edge length.
-    ///     For cubic voxels, face area over neighbor distance is one edge, and the source concentration is its moles over an edge cubed.
+    ///     It is the kinetic-theory <c>T^(3/2) / P</c> dependence of the diffusivity over the square of the voxel edge.
+    ///     That is Fick's law on a cubic grid: face area over neighbor distance is one edge, and the source
+    ///     concentration is its moles over an edge cubed.
     /// </summary>
     /// <param name="config">The immutable configuration snapshot for the tick.</param>
     /// <param name="pressure">The source voxel's positive total pressure.</param>
@@ -226,7 +226,7 @@ internal static class SpeciesDiffusionKernel
     /// <summary>
     ///     Moles of one gas a source voxel sends to each of its neighbors this tick.
     /// </summary>
-    /// <param name="referenceDiffusivity">The gas's configured diffusion coefficient.</param>
+    /// <param name="referenceDiffusivity">The gas's configured diffusivity, in m²/s.</param>
     /// <param name="environmentFactor">The source voxel's <see cref="EnvironmentFactor" />.</param>
     /// <param name="sourceMoles">The source voxel's positive moles of the gas.</param>
     /// <remarks>

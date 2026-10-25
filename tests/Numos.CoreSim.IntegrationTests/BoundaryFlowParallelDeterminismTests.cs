@@ -7,7 +7,7 @@ namespace Numos.CoreSim.IntegrationTests;
 [TestFixture]
 public sealed class BoundaryFlowParallelDeterminismTests
 {
-    private const ulong X64ExpectedDigest = 19499951542281852UL;
+    private const ulong X64ExpectedDigest = 18173732527204732791UL;
 
     /// <summary>
     ///     Requires repeated runs of this scenario to produce one digest, which on x64 must also equal
@@ -21,7 +21,8 @@ public sealed class BoundaryFlowParallelDeterminismTests
     ///     <see cref="Numos.CoreSim.Replay.AtmosSimulationCheckpoint" /> digest once the sequential-era digest had passed on
     ///     the same code. It was captured again for grid checkpoint formats 8, 9, and 10. Those formats hash state with
     ///     the wire encoding, name fields by hashed member names, and generate the checkpoint from live members. Neither
-    ///     recapture changed the physics.
+    ///     recapture changed the physics. The last one did: species diffusion started dividing by the voxel volume. That
+    ///     value held at 1, 2, and 32 workers.
     /// </remarks>
     [Test]
     [Explicit(

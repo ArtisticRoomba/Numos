@@ -15,8 +15,8 @@ mass | Kilogram | global::System.Single | mass=1
 mass64 | Kilogram64 | global::System.Double | mass=1
 inverseMass | PerKilogram | global::System.Single | mass=-1
 length | Metre | global::System.Single | length=1
-inverseArea | PerSquareMetre | global::System.Single | length=-2
 area | SquareMetre | global::System.Single | length=2
+inverseArea | PerSquareMetre | global::System.Single | length=-2
 velocity | MetrePerSecond | global::System.Single | length=1,time=-1
 velocity64 | MetrePerSecond64 | global::System.Double | length=1,time=-1
 momentum | KilogramMetrePerSecond | global::System.Single | mass=1,length=1,time=-1

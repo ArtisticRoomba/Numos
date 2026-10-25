@@ -12,10 +12,10 @@ public sealed class AdvectionParallelDeterminismTests
     /// </summary>
     /// <remarks>
     ///     Update this only together with a deliberate physics or digest-format change, and confirm the new value is
-    ///     stable across worker counts before approving it. It is a grid-only checkpoint digest, last recaptured for
-    ///     grid checkpoint format 10, which generates the checkpoint from live members.
+    ///     stable across worker counts before approving it. It is a grid-only checkpoint digest, last recaptured when
+    ///     species diffusion started dividing by the voxel volume.
     /// </remarks>
-    private const ulong X64ExpectedDigest = 1696324412253249575UL;
+    private const ulong X64ExpectedDigest = 7615574426436419753UL;
 
     [Test]
     [Explicit(

@@ -254,7 +254,9 @@ internal static class EulerSpeciesDiffusion
     {
         Kelvin temperature = config.GetValidatedTemp(chunk.Temperature[voxelIndex]);
         Pascal pressure = chunk.TotalPressure[voxelIndex];
-        PerSquareMetre factor = pressure > 0f ? SpeciesDiffusionKernel.EnvironmentFactor(config, pressure, temperature, voxelEdge) : 0f;
+        PerSquareMetre factor = pressure > 0f
+            ? SpeciesDiffusionKernel.EnvironmentFactor(config, pressure, temperature, voxelEdge)
+            : 0f;
 
         if (neighborChunk == null)
         {
@@ -312,7 +314,8 @@ internal static class EulerSpeciesDiffusion
     ///     The amount a source cell sends across one face, zero when the source has none of the gas or the
     ///     suppression rule drops the deposit.
     /// </summary>
-    private static Mole Amount(SquareMetrePerSecond diffusivity, PerSquareMetre sourceFactor, Mole sourceMoles, Mole destinationMoles)
+    private static Mole Amount(
+        SquareMetrePerSecond diffusivity, PerSquareMetre sourceFactor, Mole sourceMoles, Mole destinationMoles)
     {
         if (sourceMoles <= 0f || sourceFactor == 0f)
             return 0f;
