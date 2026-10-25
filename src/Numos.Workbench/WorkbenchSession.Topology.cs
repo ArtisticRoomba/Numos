@@ -186,47 +186,42 @@ public sealed partial class WorkbenchSession
     ///     Replaces the order and enabled flags of the solver stages.
     /// </summary>
     /// <param name="stages">Every stage in the new order. See <see cref="AtmosWorldSolverPipeline.SetLayout" />.</param>
-    /// <returns><see langword="true" /> when the world accepted the layout, <see langword="false" /> when it rejected it.</returns>
+    /// <returns><see langword="true" /> when the layout changed, <see langword="false" /> when it already matched.</returns>
     /// <remarks>
-    ///     The world records an actual change, so it replays at the same position. A rejection leaves the pipeline
-    ///     unchanged and logs a warning with the reason.
+    ///     The world records an actual change, so it replays at the same position.
     /// </remarks>
+    /// <exception cref="ArgumentException">
+    ///     The world rejected the layout. The pipeline stays unchanged and the log holds the reason.
+    /// </exception>
+    /// <exception cref="InvalidOperationException">No project is open, or the timeline inspects history.</exception>
     public bool SetSolverLayout(IReadOnlyList<AtmosWorldSolverLayoutEntry> stages)
     {
         ArgumentNullException.ThrowIfNull(stages);
-        return Guard(
-            "Could not change the solver layout",
-            () =>
-            {
-                var world = RequireWorld();
-                ThrowIfInspecting();
-                try
-                {
-                    bool changed = world.Solvers.SetLayout(stages);
-                    Info(changed ? "Changed the solver layout." : "The solver layout already matches.");
-                    return true;
-                }
-                catch (ArgumentException exception)
-                {
-                    Warn($"Rejected the solver layout: {exception.Message}");
-                    return false;
-                }
-            });
+        return Guard("Could not change the solver layout", () => ApplySolverLayout(stages));
     }
 
     /// <summary>
     ///     Switches the transport stages to one model and keeps every other stage as it is.
     /// </summary>
     /// <param name="model">The transport model to run.</param>
-    /// <returns><see langword="true" /> when the world accepted the layout.</returns>
+    /// <returns><see langword="true" /> when the layout changed, <see langword="false" /> when it already matched.</returns>
     /// <remarks>
     ///     See <see cref="AtmosWorldSolverPipeline.ConvertTransportModel" /> for how the stages move.
     /// </remarks>
+    /// <exception cref="ArgumentException">
+    ///     <paramref name="model" /> is not a defined model, or the world rejected the resulting layout.
+    /// </exception>
+    /// <exception cref="InvalidOperationException">No project is open, or the timeline inspects history.</exception>
     public bool ApplyTransportPreset(AtmosTransportModel model)
     {
-        var world = RequireWorld();
-        var current = SolverPipelineEditor.ToLayout(world.Solvers.Steps);
-        return SetSolverLayout(AtmosWorldSolverPipeline.ConvertTransportModel(current, model));
+        return Guard(
+            "Could not apply the transport preset",
+            () =>
+            {
+                var world = RequireWorld();
+                var current = SolverPipelineEditor.ToLayout(world.Solvers.Steps);
+                return ApplySolverLayout(AtmosWorldSolverPipeline.ConvertTransportModel(current, model));
+            });
     }
 
     /// <summary>
@@ -284,5 +279,14 @@ public sealed partial class WorkbenchSession
                     return false;
                 }
             });
+    }
+
+    private bool ApplySolverLayout(IReadOnlyList<AtmosWorldSolverLayoutEntry> stages)
+    {
+        var world = RequireWorld();
+        ThrowIfInspecting();
+        bool changed = world.Solvers.SetLayout(stages);
+        Info(changed ? "Changed the solver layout." : "The solver layout already matches.");
+        return changed;
     }
 }

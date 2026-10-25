@@ -425,7 +425,7 @@ The built-in stages, in default order, are `euler-flow`, `explicit-gas-transport
 
 `setSolverLayout` lists every stage. Each name is a built-in stage or a registered custom stage, no name repeats, and
 every custom stage appears. Numos creates a built-in stage that the world does not hold and drops one that the list
-omits. A bad list fails with `invalidSolverLayout` and changes nothing. A project always records, and the world
+omits. A bad list fails with `operationRejected` and changes nothing. A project always records, and the world
 records a layout change, so a replay reproduces it. `applyTransportPreset` replaces `euler-flow` with `advection` and
 `boundary-flow` (or the reverse) at the same positions. `transportModel` is required there. Both commands report
 `changed: false` when the layout already matches.

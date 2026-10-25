@@ -788,36 +788,13 @@ internal sealed partial class HeadlessOperations
             layout[index] = new AtmosWorldSolverLayoutEntry(stage.Name, Require(stage.Enabled, property + ".enabled"));
         }
 
-        var before = _session.GetSolverSteps();
-        if (!_session.SetSolverLayout(layout))
-        {
-            throw new HeadlessRequestException(
-                "invalidSolverLayout",
-                "The solver layout was rejected. Name each stage once, use built-in or registered stage names, " +
-                "and list every custom stage. Call getLog for the reason.");
-        }
-
-        return Result(new CommandResult { Changed = !SameLayout(before, _session.GetSolverSteps()) });
+        return Result(new CommandResult { Changed = _session.SetSolverLayout(layout) });
     }
 
     private CommandExecution ApplyTransportPreset(HeadlessRequest request)
     {
         var model = ParseTransportModel(request.TransportModel) ?? throw Missing("transportModel");
-        var before = _session.GetSolverSteps();
-        if (!_session.ApplyTransportPreset(model))
-        {
-            throw new HeadlessRequestException(
-                "invalidSolverLayout",
-                "The transport preset was rejected. Call getLog for the reason.");
-        }
-
-        return Result(new CommandResult { Changed = !SameLayout(before, _session.GetSolverSteps()) });
-    }
-
-    private static bool SameLayout(IReadOnlyList<AtmosWorldSolverStep> first, IReadOnlyList<AtmosWorldSolverStep> second)
-    {
-        return first.Select(static step => (step.Name, step.IsEnabled))
-            .SequenceEqual(second.Select(static step => (step.Name, step.IsEnabled)));
+        return Result(new CommandResult { Changed = _session.ApplyTransportPreset(model) });
     }
 
     private AtmosCellRef CellRef(LinkEndpoint endpoint, string property)

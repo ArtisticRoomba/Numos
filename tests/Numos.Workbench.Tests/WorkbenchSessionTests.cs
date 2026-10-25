@@ -256,6 +256,7 @@ public sealed class WorkbenchSessionTests
         session.SetSolverEnabled("thermodynamics", false);
 
         Assert.That(session.ApplyTransportPreset(AtmosTransportModel.Legacy), Is.True);
+        Assert.That(session.ApplyTransportPreset(AtmosTransportModel.Legacy), Is.False);
         var legacy = session.GetSolverSteps();
         Assert.That(session.ApplyTransportPreset(AtmosTransportModel.Euler), Is.True);
         var euler = session.GetSolverSteps();
@@ -276,17 +277,37 @@ public sealed class WorkbenchSessionTests
     }
 
     [Test]
-    public void SetSolverLayout_ReportsARejectionWithoutThrowing()
+    public void SetSolverLayout_ThrowsOnARejectionAndLogsTheReason()
     {
         using var session = CreateSession();
         var before = session.GetSolverSteps();
 
-        bool accepted = session.SetSolverLayout([new AtmosWorldSolverLayoutEntry("nope", true)]);
+        Assert.Multiple(() =>
+        {
+            Assert.That(
+                () => session.SetSolverLayout([new AtmosWorldSolverLayoutEntry("nope", true)]),
+                Throws.ArgumentException.With.Message.Contain("nope"));
+
+            Assert.That(session.GetSolverSteps(), Is.EqualTo(before));
+            Assert.That(session.Log.Snapshot().Last().Level, Is.EqualTo(WorkbenchLogLevel.Error));
+        });
+    }
+
+    [Test]
+    public void SetSolverLayout_ReportsWhetherTheLayoutChanged()
+    {
+        using var session = CreateSession();
+        var current = session.GetSolverSteps()
+            .Select(static step => new AtmosWorldSolverLayoutEntry(step.Name, step.IsEnabled))
+            .ToArray();
+
+        var reordered = current.Reverse().ToArray();
 
         Assert.Multiple(() =>
         {
-            Assert.That(accepted, Is.False);
-            Assert.That(session.GetSolverSteps(), Is.EqualTo(before));
+            Assert.That(session.SetSolverLayout(current), Is.False);
+            Assert.That(session.SetSolverLayout(reordered), Is.True);
+            Assert.That(session.SetSolverLayout(reordered), Is.False);
         });
     }
 

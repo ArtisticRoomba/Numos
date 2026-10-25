@@ -359,8 +359,8 @@ public sealed class HeadlessProtocolTests
             Assert.That(run.Result("set").GetProperty("changed").GetBoolean(), Is.True);
             Assert.That(names, Is.EqualTo(new[] { "advection", "thermodynamics", "explicit-gas-transport" }));
             Assert.That(run.Result("again").TryGetProperty("changed", out var changed) && changed.GetBoolean(), Is.False);
-            Assert.That(run.ErrorCode("duplicate"), Is.EqualTo("invalidSolverLayout"));
-            Assert.That(run.ErrorCode("unknown"), Is.EqualTo("invalidSolverLayout"));
+            Assert.That(run.ErrorCode("duplicate"), Is.EqualTo("operationRejected"));
+            Assert.That(run.ErrorCode("unknown"), Is.EqualTo("operationRejected"));
             Assert.That(run.ErrorCode("noEnabled"), Is.EqualTo("missingProperty"));
             Assert.That(run.ErrorCode("missing"), Is.EqualTo("missingProperty"));
             Assert.That(run.Result("after").GetProperty("solvers").GetArrayLength(), Is.EqualTo(3));
