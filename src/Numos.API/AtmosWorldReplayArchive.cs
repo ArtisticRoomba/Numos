@@ -86,12 +86,7 @@ public sealed class AtmosWorldReplayArchive
     /// </exception>
     public void EnsurePortable()
     {
-        if (UnsupportedFeatures.Count != 0)
-        {
-            throw new NotSupportedException(
-                "Portable world replay files do not support the following host-defined state: " +
-                string.Join("; ", UnsupportedFeatures));
-        }
+        ThrowIfAny(UnsupportedFeatures, "Portable world replay files do not support the following host-defined state: ");
     }
 
     /// <summary>
@@ -105,12 +100,15 @@ public sealed class AtmosWorldReplayArchive
     /// </exception>
     internal void EnsureSerializable()
     {
-        string[] unsupported = FindUnsupportedFeatures(InitialCheckpoint, Recording, false).ToArray();
-        if (unsupported.Length != 0)
-        {
-            throw new NotSupportedException(
-                "World replay files do not support the following host-defined state: " + string.Join("; ", unsupported));
-        }
+        ThrowIfAny(
+            FindUnsupportedFeatures(InitialCheckpoint, Recording, false).ToArray(),
+            "World replay files do not support the following host-defined state: ");
+    }
+
+    private static void ThrowIfAny(IReadOnlyCollection<string> unsupported, string message)
+    {
+        if (unsupported.Count != 0)
+            throw new NotSupportedException(message + string.Join("; ", unsupported));
     }
 
     private static IEnumerable<string> FindUnsupportedFeatures(
@@ -133,7 +131,7 @@ public sealed class AtmosWorldReplayArchive
         }
 
         // Configurations with [NumosSerialize] members save themselves. Only hand-written ones have no wire format.
-        foreach (var configuration in checkpoint.Config.SolverConfigurations.Where(static value => !IsSavable(value)))
+        foreach (var configuration in checkpoint.Config.SolverConfigurations.Where(static value => value is not INumosState))
             yield return $"world solver configuration '{configuration.Key}' (no [NumosSerialize] members)";
 
         foreach (var recorded in recording.Operations)
@@ -141,14 +139,9 @@ public sealed class AtmosWorldReplayArchive
             if (recorded.Operation is not SetAtmosWorldConfigOperation config)
                 continue;
 
-            foreach (var configuration in config.Config.SolverConfigurations.Where(static value => !IsSavable(value)))
+            foreach (var configuration in config.Config.SolverConfigurations.Where(static value => value is not INumosState))
                 yield return $"recorded solver configuration '{configuration.Key}' (no [NumosSerialize] members)";
         }
-    }
-
-    private static bool IsSavable(IAtmosSolverConfiguration configuration)
-    {
-        return configuration is INumosState;
     }
 }
 
