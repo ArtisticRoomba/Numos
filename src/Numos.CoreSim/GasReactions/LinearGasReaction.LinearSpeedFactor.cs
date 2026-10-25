@@ -43,11 +43,29 @@ public readonly partial record struct LinearGasReaction
         /// </summary>
         public bool HighStrict { get; } = HighStrict;
 
+        /// <summary>
+        ///     Gets the gas amount at the line's lower point.
+        /// </summary>
+        public float LowMolarityBound { get; } = LowMolarityBound;
+
+        /// <summary>
+        ///     Gets the gas amount at the line's upper point.
+        /// </summary>
+        public float HighMolarityBound { get; } = HighMolarityBound;
+
+        /// <summary>
+        ///     Gets the factor at <see cref="LowMolarityBound" />.
+        /// </summary>
+        public float LowMolaritySpeed { get; } = LowMolaritySpeed;
+
+        /// <summary>
+        ///     Gets the factor at <see cref="HighMolarityBound" />.
+        /// </summary>
+        public float HighMolaritySpeed { get; } = HighMolaritySpeed;
+
         private float BoundaryRange { get; } = HighMolarityBound - LowMolarityBound;
 
         private float FactorRange { get; } = HighMolaritySpeed - LowMolaritySpeed;
-        private float HighMolaritySpeed { get; } = HighMolaritySpeed;
-        private float HighMolarityBound { get; } = HighMolarityBound;
 
         internal (int, int, int, int, bool, bool) OrderKey => (
             BitConverter.SingleToInt32Bits(LowMolarityBound), BitConverter.SingleToInt32Bits(HighMolarityBound),
