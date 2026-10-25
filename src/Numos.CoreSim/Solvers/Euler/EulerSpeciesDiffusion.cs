@@ -34,6 +34,12 @@ namespace Numos.CoreSim.Solvers.Euler;
 internal static class EulerSpeciesDiffusion
 {
     /// <summary>
+    ///     The largest channel map, in ints, that <see cref="ComputeBoundary" /> keeps on the stack.
+    ///     A chunk with more than 85 gas channels takes an array instead.
+    /// </summary>
+    private const int MaximumStackChannelMapLength = 1024;
+
+    /// <summary>
     ///     Runs the whole pass over the active set. Tick thread only, after every chunk has been written back.
     /// </summary>
     /// <param name="active">The active workspaces, in canonical order.</param>
@@ -149,6 +155,21 @@ internal static class EulerSpeciesDiffusion
         Int3 last = chunk.Dimensions - new Int3(1, 1, 1);
         Metre voxelEdge = SpeciesDiffusionKernel.GetVoxelEdge(config.VoxelVolume);
 
+        int stride = chunk.ActiveGasCount;
+        for (int direction = 0; direction < NeighborResolution.NeighborDirections.Length; direction++)
+        {
+            EulerChunkWorkspace? neighbor = workspace.NeighborWorkspaces[direction];
+            if (neighbor != null)
+                stride = Math.Max(stride, neighbor.Chunk.ActiveGasCount);
+        }
+
+        int scratchLength = FaceGasChannels.GetScratchLength(stride);
+        Span<int> scratch = scratchLength <= MaximumStackChannelMapLength
+            ? stackalloc int[scratchLength]
+            : new int[scratchLength];
+
+        var channels = new FaceGasChannels(chunk, stride, scratch);
+
         for (int activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
         {
             ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
@@ -195,6 +216,8 @@ internal static class EulerSpeciesDiffusion
                 ExchangeFace(
                     chunk, voxelIndex, neighborChunk,
                     EulerFaceTopology.NeighborIndexAcrossFace(chunk, voxelIndex, direction),
+                    neighborChunk == null ? default : channels.OwnToNeighbor(direction, neighborChunk),
+                    neighborChunk == null ? default : channels.NeighborToOwn(direction, neighborChunk),
                     config, voxelEdge, exchange, ref energyDelta);
             }
 
@@ -211,6 +234,14 @@ internal static class EulerSpeciesDiffusion
     /// <param name="voxelIndex">The cell.</param>
     /// <param name="neighborChunk">The active chunk across the face, or <see langword="null" /> for a void face.</param>
     /// <param name="neighborIndex">The cell across the face, in <paramref name="neighborChunk" />.</param>
+    /// <param name="ownToNeighbor">
+    ///     The channel of <paramref name="neighborChunk" /> for each channel of <paramref name="chunk" />, or -1.
+    ///     Empty for a void face.
+    /// </param>
+    /// <param name="neighborToOwn">
+    ///     The channel of <paramref name="chunk" /> for each channel of <paramref name="neighborChunk" />, or -1.
+    ///     Empty for a void face.
+    /// </param>
     /// <param name="config">The tick's configuration snapshot.</param>
     /// <param name="voxelEdge">The voxel edge from <see cref="SpeciesDiffusionKernel.GetVoxelEdge" />.</param>
     /// <param name="exchange">The record buffer of <paramref name="chunk" />.</param>
@@ -235,6 +266,7 @@ internal static class EulerSpeciesDiffusion
     /// </remarks>
     private static void ExchangeFace(
         AtmosChunk chunk, ushort voxelIndex, AtmosChunk? neighborChunk, ushort neighborIndex,
+        ReadOnlySpan<int> ownToNeighbor, ReadOnlySpan<int> neighborToOwn,
         AtmosSolverConfigSnapshot config, Metre voxelEdge, EulerBoundaryExchange exchange, ref Joule64 energyDelta)
     {
         Kelvin temperature = config.GetValidatedTemp(chunk.Temperature[voxelIndex]);
@@ -273,7 +305,7 @@ internal static class EulerSpeciesDiffusion
         {
             int gasId = chunk.ActiveGases[gas].GasId;
             Mole moles = chunk.ActiveGases[gas].Moles[voxelIndex];
-            int neighborChannel = neighborChunk.FindGasChannel(gasId);
+            int neighborChannel = ownToNeighbor[gas];
             Mole neighborMoles = neighborChannel >= 0 ? neighborChunk.ActiveGases[neighborChannel].Moles[neighborIndex] : 0f;
             SquareMetrePerSecond diffusivity = config.GetDiffusionCoefficient(gasId);
             Mole debit = Amount(diffusivity, factor, moles, neighborMoles);
@@ -284,7 +316,7 @@ internal static class EulerSpeciesDiffusion
         for (int gas = 0; gas < neighborChunk.ActiveGasCount; gas++)
         {
             int gasId = neighborChunk.ActiveGases[gas].GasId;
-            if (chunk.FindGasChannel(gasId) >= 0)
+            if (neighborToOwn[gas] >= 0)
                 continue;
 
             Mole deposit = Amount(

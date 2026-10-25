@@ -29,6 +29,12 @@ namespace Numos.CoreSim.Solvers.Euler;
 internal static class EulerStaticChunk
 {
     /// <summary>
+    ///     The largest channel map, in ints, that <see cref="IsStatic" /> keeps on the stack.
+    ///     A chunk with more than 85 gas channels takes an array instead.
+    /// </summary>
+    private const int MaximumStackChannelMapLength = 1024;
+
+    /// <summary>
     ///     Whether the chunk is uniform, at rest, and bit-identical across every open chunk face.
     /// </summary>
     /// <param name="chunk">An awake chunk with at least one gas channel.</param>
@@ -58,11 +64,22 @@ internal static class EulerStaticChunk
         int pressureBits = BitConverter.SingleToInt32Bits(pressure);
         int temperatureBits = BitConverter.SingleToInt32Bits(temperature);
         var neighbors = new NeighborRing();
+        int stride = chunk.ActiveGasCount;
         for (int direction = 0; direction < NeighborResolution.NeighborDirections.Length; direction++)
         {
-            if (context.TryGetChunk(chunk.GridPosition + NeighborResolution.NeighborDirections[direction], out AtmosChunk neighbor))
-                neighbors[direction] = neighbor;
+            if (!context.TryGetChunk(chunk.GridPosition + NeighborResolution.NeighborDirections[direction], out AtmosChunk neighbor))
+                continue;
+
+            neighbors[direction] = neighbor;
+            stride = Math.Max(stride, neighbor.ActiveGasCount);
         }
+
+        int scratchLength = FaceGasChannels.GetScratchLength(stride);
+        Span<int> scratch = scratchLength <= MaximumStackChannelMapLength
+            ? stackalloc int[scratchLength]
+            : new int[scratchLength];
+
+        var channels = new FaceGasChannels(chunk, stride, scratch);
 
         Int3 last = chunk.Dimensions - new Int3(1, 1, 1);
         int rowStride = chunk.Width;
@@ -73,7 +90,7 @@ internal static class EulerStaticChunk
             if (chunk.HasMomentum(voxelIndex))
                 return false;
 
-            if (!SameState(chunk, voxelIndex, pressureBits, temperatureBits, chunk, reference))
+            if (!SameState(chunk, voxelIndex, pressureBits, temperatureBits, chunk, reference, default))
                 return false;
 
             Int3 position = chunk.GetXyzInt3(voxelIndex);
@@ -114,8 +131,10 @@ internal static class EulerStaticChunk
                     !EulerFaceTopology.IsFaceOpen(chunk, voxelIndex, direction, other, otherIndex))
                     continue;
 
-                if (!SameState(other, otherIndex, pressureBits, temperatureBits, chunk, reference) ||
-                    !ExtraGasesAreEmpty(chunk, other, otherIndex))
+                if (!SameState(
+                        other, otherIndex, pressureBits, temperatureBits, chunk, reference,
+                        channels.OwnToNeighbor(direction, other)) ||
+                    !ExtraGasesAreEmpty(other, otherIndex, channels.NeighborToOwn(direction, other)))
                     return false;
             }
         }
@@ -127,9 +146,13 @@ internal static class EulerStaticChunk
     ///     Whether a cell has the reference pressure and temperature bits and the reference moles of every gas the
     ///     reference chunk lists. A gas the cell's chunk has no channel for counts as zero.
     /// </summary>
+    /// <remarks>
+    ///     <paramref name="referenceChannels" /> holds the channel of <paramref name="chunk" /> for each channel of
+    ///     <paramref name="referenceChunk" />, or -1. It is not read when both chunks are the same.
+    /// </remarks>
     private static bool SameState(
         AtmosChunk chunk, ushort voxelIndex, int pressureBits, int temperatureBits,
-        AtmosChunk referenceChunk, ushort reference)
+        AtmosChunk referenceChunk, ushort reference, ReadOnlySpan<int> referenceChannels)
     {
         if (BitConverter.SingleToInt32Bits(chunk.TotalPressure[voxelIndex]) != pressureBits ||
             BitConverter.SingleToInt32Bits(chunk.Temperature[voxelIndex]) != temperatureBits)
@@ -139,7 +162,7 @@ internal static class EulerStaticChunk
         for (int gas = 0; gas < referenceChunk.ActiveGasCount; gas++)
         {
             Mole expected = referenceChunk.ActiveGases[gas].Moles[reference];
-            int channel = sameChunk ? gas : chunk.FindGasChannel(referenceChunk.ActiveGases[gas].GasId);
+            int channel = sameChunk ? gas : referenceChannels[gas];
             Mole actual = channel >= 0 ? chunk.ActiveGases[channel].Moles[voxelIndex] : 0f;
             if (BitConverter.SingleToInt32Bits(actual) != BitConverter.SingleToInt32Bits(expected))
                 return false;
@@ -151,11 +174,15 @@ internal static class EulerStaticChunk
     /// <summary>
     ///     Whether the cell holds no gas the reference chunk lacks a channel for.
     /// </summary>
-    private static bool ExtraGasesAreEmpty(AtmosChunk referenceChunk, AtmosChunk chunk, ushort voxelIndex)
+    /// <remarks>
+    ///     <paramref name="referenceChannels" /> holds the channel of the reference chunk for each channel of
+    ///     <paramref name="chunk" />, or -1.
+    /// </remarks>
+    private static bool ExtraGasesAreEmpty(AtmosChunk chunk, ushort voxelIndex, ReadOnlySpan<int> referenceChannels)
     {
         for (int gas = 0; gas < chunk.ActiveGasCount; gas++)
         {
-            if (referenceChunk.FindGasChannel(chunk.ActiveGases[gas].GasId) < 0 &&
+            if (referenceChannels[gas] < 0 &&
                 BitConverter.SingleToInt32Bits(chunk.ActiveGases[gas].Moles[voxelIndex]) != 0)
                 return false;
         }
