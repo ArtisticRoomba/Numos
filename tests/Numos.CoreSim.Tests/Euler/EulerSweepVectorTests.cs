@@ -1,6 +1,8 @@
 using System.Numerics;
 using Numos.CoreSim.Datatypes.Primitives;
+using Numos.CoreSim.Solvers;
 using Numos.CoreSim.Solvers.Euler;
+using Numos.Maths;
 
 namespace Numos.CoreSim.Tests.Euler;
 
@@ -34,6 +36,18 @@ public class EulerSweepVectorTests
     }
 
     private static EulerChunkWorkspace CreateWorkspace(
+        AtmosSolverConfigSnapshot tickConfig, int seed, int dimension, int solidPercent, float speed)
+    {
+        AtmosChunk chunk = CreateChunk(tickConfig, seed, dimension, solidPercent, speed);
+        var workspace = new EulerChunkWorkspace();
+        workspace.Bind(chunk, tickConfig);
+        EulerFaceTopology.Build(chunk, workspace.NeighborChunks, workspace.OpenMask, workspace.VoidMask);
+        EulerFaceTopology.BuildAirMap(chunk, workspace.AirMap, workspace.RowAllAir);
+        workspace.Gather(tickConfig);
+        return workspace;
+    }
+
+    private static AtmosChunk CreateChunk(
         AtmosSolverConfigSnapshot tickConfig, int seed, int dimension, int solidPercent, float speed)
     {
         var random = new Random(seed);
@@ -72,12 +86,7 @@ public class EulerSweepVectorTests
             chunk.MomentumZ[voxel] = mass * speed * (2f * (float)random.NextDouble() - 1f);
         }
 
-        var workspace = new EulerChunkWorkspace();
-        workspace.Bind(chunk, tickConfig);
-        EulerFaceTopology.Build(chunk, workspace.NeighborChunks, workspace.OpenMask, workspace.VoidMask);
-        EulerFaceTopology.BuildAirMap(chunk, workspace.AirMap, workspace.RowAllAir);
-        workspace.Gather(tickConfig);
-        return workspace;
+        return chunk;
     }
 
     private static readonly float[] Oddities =
@@ -272,5 +281,184 @@ public class EulerSweepVectorTests
         }
 
         Assert.That(differences, Is.Zero, $"{differences} cells differ between the scalar and vector sweep (faces {vectorFaces}, cells {vectorCells})");
+    }
+
+    /// <summary>
+    ///     A grid of chunks, each with a workspace unless it is left inactive. An inactive chunk is a wall with a
+    ///     wake test.
+    /// </summary>
+    private static EulerChunkWorkspace[] CreateGrid(
+        AtmosSolverConfigSnapshot tickConfig, Int3 size, int seed, int dimension, int solidPercent, float speed,
+        int inactivePercent, bool corrupt)
+    {
+        var random = new Random(seed * 31 + 5);
+        var chunks = new AtmosChunk[size.X * size.Y * size.Z];
+        var workspaces = new EulerChunkWorkspace?[chunks.Length];
+        int Slot(Int3 position) => position.X + size.X * (position.Y + size.Y * position.Z);
+        for (int z = 0; z < size.Z; z++)
+        for (int y = 0; y < size.Y; y++)
+        for (int x = 0; x < size.X; x++)
+        {
+            var position = new Int3(x, y, z);
+            int slot = Slot(position);
+            // The middle chunk stays active, so it has a neighbour on both sides of every axis.
+            bool middle = x == size.X / 2 && y == size.Y / 2 && z == size.Z / 2;
+            bool active = random.Next(100) >= inactivePercent || middle;
+            chunks[slot] = CreateChunk(tickConfig, seed * 1000 + slot, dimension, solidPercent, speed);
+            chunks[slot].GridPosition = position;
+            if (!active)
+                continue;
+
+            workspaces[slot] = new EulerChunkWorkspace();
+            workspaces[slot]!.Bind(chunks[slot], tickConfig);
+        }
+
+        for (int slot = 0; slot < chunks.Length; slot++)
+        {
+            if (workspaces[slot] is not { } own)
+                continue;
+
+            for (int direction = 0; direction < NeighborResolution.NeighborDirections.Length; direction++)
+            {
+                Int3 target = chunks[slot].GridPosition + NeighborResolution.NeighborDirections[direction];
+                if (target.X < 0 || target.Y < 0 || target.Z < 0 ||
+                    target.X >= size.X || target.Y >= size.Y || target.Z >= size.Z)
+                    continue;
+
+                own.NeighborChunks[direction] = chunks[Slot(target)];
+                own.NeighborWorkspaces[direction] = workspaces[Slot(target)];
+            }
+        }
+
+        var result = new List<EulerChunkWorkspace>();
+        foreach (EulerChunkWorkspace? workspace in workspaces)
+        {
+            if (workspace == null)
+                continue;
+
+            EulerFaceTopology.Build(workspace.Chunk, workspace.NeighborChunks, workspace.OpenMask, workspace.VoidMask);
+            EulerFaceTopology.BuildAirMap(workspace.Chunk, workspace.AirMap, workspace.RowAllAir);
+            workspace.AddGas(0, tickConfig);
+            workspace.AddGas(1, tickConfig);
+            workspace.Gather(tickConfig);
+            if (corrupt)
+                Corrupt(workspace, seed + result.Count);
+
+            result.Add(workspace);
+        }
+
+        return result.ToArray();
+    }
+
+    private static (int Clamped, int NonFinite, int Negative, int Signal) SweepGrid(
+        EulerChunkWorkspace[] workspaces, AtmosSolverConfigSnapshot tickConfig, bool vectorFaces, bool vectorCells)
+    {
+        int clamped = 0;
+        int nonFinite = 0;
+        int negative = 0;
+        int signal = 0;
+        bool savedFaces = HllcFluxVector.Enabled;
+        bool savedCells = EulerCellKernel.Enabled;
+        HllcFluxVector.Enabled = vectorFaces;
+        EulerCellKernel.Enabled = vectorCells;
+        try
+        {
+            for (int round = 0; round < 2; round++)
+            {
+                for (int axis = 0; axis < 3; axis++)
+                {
+                    // Every chunk sweeps before any swaps, because a face reads the neighbour's read buffer.
+                    foreach (EulerChunkWorkspace workspace in workspaces)
+                    {
+                        int pencils = EulerSweep.PencilCount(workspace.Chunk, axis);
+                        EulerSweep.RunPencils(workspace, axis, 0, pencils, 2e-5f, 1f, tickConfig);
+                        for (int pencil = 0; pencil < pencils; pencil++)
+                        {
+                            clamped += workspace.PencilCounters[pencil].ClampedVelocity;
+                            nonFinite += workspace.PencilCounters[pencil].NonFiniteCells;
+                            negative += workspace.PencilCounters[pencil].NegativeMoles;
+                            signal = signal * 31 + Bits(workspace.PencilSignalSpeed[pencil]);
+                        }
+                    }
+
+                    foreach (EulerChunkWorkspace workspace in workspaces)
+                        workspace.Swap();
+                }
+            }
+
+            return (clamped, nonFinite, negative, signal);
+        }
+        finally
+        {
+            HllcFluxVector.Enabled = savedFaces;
+            EulerCellKernel.Enabled = savedCells;
+        }
+    }
+
+    [TestCase(6, 0, 0, 200f, 1)]
+    [TestCase(6, 0, 30, 400f, 2)]
+    [TestCase(6, 10, 0, 150f, 3)]
+    [TestCase(8, 5, 25, 600f, 4)]
+    [TestCase(5, 0, 0, 3000f, 5)]
+    [TestCase(4, 20, 40, 300f, 6)]
+    [TestCase(8, 0, 0, 30f, 7)]
+    public void VectorEdgeFaces_GiveTheSameBitsAsTheScalarSweepAcrossChunks(
+        int dimension, int solidPercent, int inactivePercent, float speed, int seed)
+    {
+        foreach (bool corrupt in new[] { false, true })
+            AssertGridSweepsMatch(new Int3(2, 3, 3), dimension, solidPercent, inactivePercent, speed, seed, corrupt);
+    }
+
+    private static void AssertGridSweepsMatch(
+        Int3 size, int dimension, int solidPercent, int inactivePercent, float speed, int seed, bool corrupt)
+    {
+        Assume.That(Vector.IsHardwareAccelerated, "No vector hardware: the sweep keeps the scalar solver.");
+        AtmosSolverConfigSnapshot tickConfig = CreateConfig();
+        EulerChunkWorkspace[] scalar =
+            CreateGrid(tickConfig, size, seed, dimension, solidPercent, speed, inactivePercent, corrupt);
+        EulerChunkWorkspace[] vector =
+            CreateGrid(tickConfig, size, seed, dimension, solidPercent, speed, inactivePercent, corrupt);
+
+        var expectedCounts = SweepGrid(scalar, tickConfig, vectorFaces: false, vectorCells: false);
+        var actualCounts = SweepGrid(vector, tickConfig, vectorFaces: true, vectorCells: true);
+        Assert.That(actualCounts, Is.EqualTo(expectedCounts));
+
+        int differences = 0;
+        for (int index = 0; index < scalar.Length; index++)
+        {
+            EulerChunkWorkspace expectedWorkspace = scalar[index];
+            EulerChunkWorkspace actualWorkspace = vector[index];
+            Assert.That(actualWorkspace.WakeRequests, Is.EqualTo(expectedWorkspace.WakeRequests));
+            EulerChunkState expected = expectedWorkspace.Read;
+            EulerChunkState actual = actualWorkspace.Read;
+            for (int voxel = 0; voxel < expectedWorkspace.Chunk.VoxelCount; voxel++)
+            {
+                if (!expectedWorkspace.AirMap[voxel])
+                    continue;
+
+                EulerCellState e = expected.Cells[voxel];
+                EulerCellState a = actual.Cells[voxel];
+                bool same = SameDouble(expected.Energy[voxel], actual.Energy[voxel]) &&
+                            SameDouble(expected.HeatCapacity[voxel], actual.HeatCapacity[voxel]) &&
+                            Same(expected.MomentumX[voxel], actual.MomentumX[voxel]) &&
+                            Same(expected.MomentumY[voxel], actual.MomentumY[voxel]) &&
+                            Same(expected.MomentumZ[voxel], actual.MomentumZ[voxel]) &&
+                            Same(expected.Mass[voxel], actual.Mass[voxel]) &&
+                            Same(expected.TotalMoles[voxel], actual.TotalMoles[voxel]) &&
+                            Same(e.Density, a.Density) && Same(e.Pressure, a.Pressure) &&
+                            Same(e.VelocityX, a.VelocityX) && Same(e.VelocityY, a.VelocityY) &&
+                            Same(e.VelocityZ, a.VelocityZ) && Same(e.EnergyDensity, a.EnergyDensity);
+                for (int gas = 0; gas < 2 && same; gas++)
+                {
+                    if (expected.Species[gas] != null)
+                        same = Same(expected.Species[gas]![voxel], actual.Species[gas]![voxel]);
+                }
+
+                if (!same)
+                    differences++;
+            }
+        }
+
+        Assert.That(differences, Is.Zero, $"{differences} cells differ between the scalar and vector sweep");
     }
 }

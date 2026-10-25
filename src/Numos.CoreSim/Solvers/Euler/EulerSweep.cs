@@ -247,14 +247,26 @@ internal static class EulerSweep
                 {
                     int firstFace = alongMarch ? run * runFaceStride + 1 : (run + 1) * lineCount;
                     SolveRun(
-                        scratch, read.Cells, axis, alongMarch, firstLower, marchStride, innerRunLength,
-                        firstFace, faceArea);
+                        scratch, read.Cells, axis, alongMarch, firstLower, read.Cells, firstLower + marchStride,
+                        innerRunLength, firstFace, faceArea);
                 }
             }
         }
 
+        // The faces on the chunk boundary of a Y or Z bundle are one contiguous row each, so a row whose cells and
+        // neighbour cells are all open air goes through the vector kernel too.
+        bool lowerEdgeDone = vectorFaces && !alongMarch &&
+                             SolveEdgeRow(workspace, read, scratch, axis, baseIndex, lineCount, 0, faceArea);
+        bool upperEdgeDone = vectorFaces && !alongMarch &&
+                             SolveEdgeRow(
+                                 workspace, read, scratch, axis, baseIndex + (marchCount - 1) * marchStride, lineCount,
+                                 marchCount, faceArea);
+
         for (int march = 0; march <= marchCount; march++)
         {
+            if ((march == 0 && lowerEdgeDone) || (march == marchCount && upperEdgeDone))
+                continue;
+
             int lowerRow = march > 0 ? baseIndex + (march - 1) * marchStride : -1;
             int upperRow = march < marchCount ? baseIndex + march * marchStride : -1;
             bool innerRow = vectorFaces && march >= 1 && march < marchCount;
@@ -579,6 +591,83 @@ internal static class EulerSweep
     }
 
     /// <summary>
+    ///     Solves the row of faces between a chunk-boundary row of a Y or Z bundle and the facing row of the active
+    ///     neighbour chunk with <see cref="HllcFluxVector" />, if every face of the row is an open air-to-air face.
+    /// </summary>
+    /// <param name="workspace">The chunk's workspace.</param>
+    /// <param name="read">This chunk's read buffer.</param>
+    /// <param name="scratch">The worker's scratch.</param>
+    /// <param name="axis">The sweep axis, 1 for Y or 2 for Z.</param>
+    /// <param name="selfFirst">Voxel index of the first cell of this chunk's boundary row.</param>
+    /// <param name="count">Number of faces in the row, which is the chunk width.</param>
+    /// <param name="march">0 for the lower boundary of the bundle, or the march count for the upper one.</param>
+    /// <param name="faceArea">Area of one voxel face.</param>
+    /// <returns>
+    ///     <see langword="true" /> if the row is solved. <see langword="false" /> leaves every face of the row to
+    ///     <see cref="SolveFace" />, which also raises the wake requests of faces into an inactive neighbour.
+    /// </returns>
+    /// <remarks>
+    ///     The row takes the path of <see cref="SolveOneSided" /> for an active neighbour: the lower-coordinate cell is
+    ///     on the left, the neighbour's cell comes from its read buffer, and an upwind cell on the neighbour's side
+    ///     is named by side and index. The neighbour has a workspace, so no wake request can come from this row.
+    /// </remarks>
+    private static bool SolveEdgeRow(
+        EulerChunkWorkspace workspace, EulerChunkState read, BundleScratch scratch, int axis, int selfFirst,
+        int count, int march, SquareMetre faceArea)
+    {
+        AtmosChunk chunk = workspace.Chunk;
+        bool lowerBoundary = march == 0;
+        int direction = lowerBoundary ? 2 * axis : 2 * axis + 1;
+        EulerChunkWorkspace? neighbor = workspace.NeighborWorkspaces[direction];
+        if (neighbor == null)
+            return false;
+
+        int offset = axis == 1 ? (chunk.Height - 1) * chunk.Width : (chunk.Depth - 1) * chunk.Width * chunk.Height;
+        int neighborFirst = lowerBoundary ? selfFirst + offset : selfFirst - offset;
+        int width = chunk.Width;
+        if (!workspace.RowAllAir[selfFirst / width] || !neighbor.RowAllAir[neighborFirst / width])
+            return false;
+
+        byte[] openMask = workspace.OpenMask;
+        for (int i = 0; i < count; i++)
+        {
+            if (!EulerFaceTopology.IsOpen(openMask[selfFirst + i], direction))
+                return false;
+        }
+
+        EulerChunkState neighborRead = neighbor.Read;
+        int firstFace = march * count;
+        if (lowerBoundary)
+        {
+            SolveRun(
+                scratch, neighborRead.Cells, axis, false, neighborFirst, read.Cells, selfFirst, count, firstFace,
+                faceArea);
+        }
+        else
+        {
+            SolveRun(
+                scratch, read.Cells, axis, false, selfFirst, neighborRead.Cells, neighborFirst, count, firstFace,
+                faceArea);
+        }
+
+        // The species pass finds the upwind cell of an edge face through its side and index.
+        int[] upperMask = scratch.FaceUpperMask;
+        EulerFaceRate[] faces = scratch.Faces;
+        EulerUpwindSide neighborSide = lowerBoundary ? EulerUpwindSide.LowerNeighbor : EulerUpwindSide.UpperNeighbor;
+        for (int i = 0; i < count; i++)
+        {
+            // The mask is set where the upwind cell is the higher-coordinate one. That is this chunk's cell on the
+            // lower boundary and the neighbour's cell on the upper one.
+            bool upwindIsSelf = (upperMask[firstFace + i] != 0) == lowerBoundary;
+            ref EulerFaceRate face = ref faces[firstFace + i];
+            face.UpwindSide = upwindIsSelf ? EulerUpwindSide.Self : neighborSide;
+            face.UpwindIndex = upwindIsSelf ? selfFirst + i : neighborFirst + i;
+        }
+
+        return true;
+    }
+
+    /// <summary>
     ///     Solves a run of interior faces whose cells are all air with <see cref="HllcFluxVector" /> and stores the
     ///     rates exactly as <see cref="Store" /> does, into the bundle's per-field face arrays.
     /// </summary>
@@ -586,8 +675,12 @@ internal static class EulerSweep
     /// <param name="cells">The read buffer's cells.</param>
     /// <param name="axis">The sweep axis.</param>
     /// <param name="alongMarch">Whether the lower and upper cells of the run are neighbours in one voxel row.</param>
-    /// <param name="firstLower">Voxel index of the lower cell of the first face.</param>
-    /// <param name="upperOffset">Voxel distance from a face's lower cell to its upper cell.</param>
+    /// <param name="firstLower">Index of the lower cell of the first face in <paramref name="cells" />.</param>
+    /// <param name="upperCells">
+    ///     The array that holds the upper cells. Ignored when <paramref name="alongMarch" /> is set, because the
+    ///     upper cell is then the next one in <paramref name="cells" />.
+    /// </param>
+    /// <param name="upperFirst">Index of the upper cell of the first face in <paramref name="upperCells" />.</param>
     /// <param name="count">Number of faces. Face <c>i</c> has its lower cell at <c>firstLower + i</c>.</param>
     /// <param name="firstFace">Index of the first face in the scratch face arrays.</param>
     /// <param name="faceArea">Area of one voxel face.</param>
@@ -603,8 +696,8 @@ internal static class EulerSweep
     ///     </para>
     /// </remarks>
     private static void SolveRun(
-        BundleScratch scratch, EulerCellState[] cells, int axis, bool alongMarch, int firstLower, int upperOffset,
-        int count, int firstFace, SquareMetre faceArea)
+        BundleScratch scratch, EulerCellState[] cells, int axis, bool alongMarch, int firstLower,
+        EulerCellState[] upperCells, int upperFirst, int count, int firstFace, SquareMetre faceArea)
     {
         float[] stage = scratch.Stage;
         int stride = scratch.StageStride;
@@ -618,8 +711,7 @@ internal static class EulerSweep
         else
         {
             StageCells(cells, firstLower, count, axis, stage, stride, 0, half, ref scratch.StageDirty[0]);
-            StageCells(
-                cells, firstLower + upperOffset, count, axis, stage, stride, half, half, ref scratch.StageDirty[1]);
+            StageCells(upperCells, upperFirst, count, axis, stage, stride, half, half, ref scratch.StageDirty[1]);
             rightOffset = half;
         }
 
