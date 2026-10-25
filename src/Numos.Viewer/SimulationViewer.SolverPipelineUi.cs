@@ -91,7 +91,7 @@ public partial class SimulationViewer
                     }
 
                     if (nameHovered)
-                        RenderWrappedTooltip(SolverPipelineEditor.Describe(step.Name), step.Name);
+                        ImGuiExtensions.WrappedTooltip(SolverPipelineEditor.Describe(step.Name), step.Name);
 
                     ImGui.TableSetColumnIndex(2);
                     ImGui.PushStyleVar(ImGuiStyleVar.ItemSpacing, new Vector2(buttonGap, style.ItemSpacing.Y));
@@ -100,21 +100,22 @@ public partial class SimulationViewer
                         pendingLayout = SolverPipelineEditor.MoveUp(steps, index);
 
                     ImGui.EndDisabled();
-                    ItemTooltip("Move up");
+                    ImGuiExtensions.ItemTooltip("Move up");
                     ImGui.SameLine();
                     ImGui.BeginDisabled(inspecting || index == steps.Count - 1);
                     if (ImGui.ArrowButton("##down", ImGuiDir.Down))
                         pendingLayout = SolverPipelineEditor.MoveDown(steps, index);
 
                     ImGui.EndDisabled();
-                    ItemTooltip("Move down");
+                    ImGuiExtensions.ItemTooltip("Move down");
                     ImGui.SameLine();
                     ImGui.BeginDisabled(inspecting || !builtIn);
                     if (ImGui.Button("x", buttonBox))
                         pendingLayout = SolverPipelineEditor.Remove(steps, index);
 
                     ImGui.EndDisabled();
-                    ItemTooltip(builtIn ? "Remove stage" : "The host owns custom stages. The viewer cannot remove them.");
+                    ImGuiExtensions.ItemTooltip(
+                        builtIn ? "Remove stage" : "The host owns custom stages. The viewer cannot remove them.");
                     ImGui.PopStyleVar();
 
                     ImGui.PopID();
@@ -141,26 +142,6 @@ public partial class SimulationViewer
         ImGui.Separator();
         RenderSolverAddStage(steps, inspecting);
         RenderSolverPresets(steps, inspecting);
-    }
-
-    private static void ItemTooltip(string text)
-    {
-        if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled | ImGuiHoveredFlags.ForTooltip))
-            RenderWrappedTooltip(text);
-    }
-
-    private static void RenderWrappedTooltip(string text, string? title = null)
-    {
-        if (!ImGui.BeginTooltip())
-            return;
-
-        if (title != null)
-            ImGui.TextUnformatted(title);
-
-        ImGui.PushTextWrapPos(ImGui.GetFontSize() * 24f);
-        ImGui.TextUnformatted(text);
-        ImGui.PopTextWrapPos();
-        ImGui.EndTooltip();
     }
 
     /// <summary>
