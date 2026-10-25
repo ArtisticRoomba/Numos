@@ -318,19 +318,19 @@ internal static class HllcFlux
             return;
         }
 
-        float impedanceWeight = (a + b) / (b - a);
+        Scalar impedanceWeight = (a + b) / (b - a);
         Pascal centredPressure =
             0.5f * (left.Pressure + right.Pressure) +
             0.5f * impedanceWeight * (left.Pressure - right.Pressure);
         Pascal jumpPressure = a * b * (right.NormalVelocity - left.NormalVelocity) / (b - a);
         starPressure = centredPressure + jumpPressure;
 
-        float theta = 1f;
+        Scalar theta = 1f;
         if (allMach)
         {
             // A vacuum side has c = 0 and counts as sonic. The fix is only meant for smooth low-Mach flow.
-            float leftMach = left.SoundSpeed > 0f ? MathF.Abs(left.NormalVelocity) / left.SoundSpeed : 1f;
-            float rightMach = right.SoundSpeed > 0f ? MathF.Abs(right.NormalVelocity) / right.SoundSpeed : 1f;
+            Scalar leftMach = left.SoundSpeed > 0f ? MathF.Abs(left.NormalVelocity) / left.SoundSpeed : 1f;
+            Scalar rightMach = right.SoundSpeed > 0f ? MathF.Abs(right.NormalVelocity) / right.SoundSpeed : 1f;
             theta = MathF.Min(1f, MathF.Max(leftMach, rightMach));
         }
 

@@ -141,7 +141,7 @@ internal static class EulerMixture
 
         // N·R is the Cp − Cv gap of the whole mixture, so γ = (C + NR)/C, and c² = γ·NRT/m = γ·pV/m = γ·p/ρ.
         JoulePerKelvin molarGasTerm = moles * AtmosPhysicalConstants.MolarGasConstant;
-        float gamma = (float)((heatCapacity + molarGasTerm) / heatCapacity);
+        Scalar gamma = (float)((heatCapacity + molarGasTerm) / heatCapacity);
         MetrePerSecond soundSpeed = MathF.Sqrt(gamma * molarGasTerm * temperature * inverseMass);
         JoulePerCubicMetre energyDensity = (float)(totalEnergy / volume);
 

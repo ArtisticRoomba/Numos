@@ -79,6 +79,7 @@ public sealed partial class EulerFlowConfig : IAtmosSolverConfiguration
     ///     repair. Non-finite and nonpositive values normalize to 0.5. Values above 1 clamp to 1.
     /// </remarks>
     [NumosSerialize]
+    [Quantity("dimensionless")]
     public Scalar CourantNumber { get; init; } = 0.5f;
 
     /// <summary>
@@ -172,6 +173,7 @@ public sealed partial class EulerFlowConfig : IAtmosSolverConfiguration
     ///     [0, 1]. Non-finite values normalize to 0, which closes such links to gas transport.
     /// </remarks>
     [NumosSerialize]
+    [Quantity("dimensionless")]
     public Scalar DefaultLinkAreaFraction { get; init; } = 1f;
 
     /// <inheritdoc />
