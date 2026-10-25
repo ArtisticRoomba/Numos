@@ -267,10 +267,7 @@ internal static class EulerCellKernel
             Vector.BitwiseAnd(energyDensity, gasBits).CopyTo(cells.CellEnergyDensity, voxel);
             Vector.BitwiseAnd(soundSpeed, gasBits).CopyTo(cells.CellSoundSpeed, voxel);
             Vector.BitwiseAnd(inverseMass, gasBits).CopyTo(cells.CellInverseMass, voxel);
-            Vector.BitwiseAnd(temperature, gasBits).CopyTo(cells.CellTemperature, voxel);
-            Vector<float> gasSignalSpeed = Vector.BitwiseAnd(signalSpeed, gasBits);
-            gasSignalSpeed.CopyTo(cells.CellSignalSpeed, voxel);
-            gasSignalSpeed.CopyTo(signal);
+            Vector.BitwiseAnd(signalSpeed, gasBits).CopyTo(signal);
             ((clamp & Vector<int>.One) | (notFinite & new Vector<int>(2))).CopyTo(flags);
 
             for (int lane = 0; lane < width; lane++)

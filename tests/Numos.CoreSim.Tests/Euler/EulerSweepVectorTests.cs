@@ -290,8 +290,7 @@ public class EulerSweepVectorTests
                         Same(e.Density, a.Density) && Same(e.VelocityX, a.VelocityX) &&
                         Same(e.VelocityY, a.VelocityY) && Same(e.VelocityZ, a.VelocityZ) &&
                         Same(e.Pressure, a.Pressure) && Same(e.EnergyDensity, a.EnergyDensity) &&
-                        Same(e.SoundSpeed, a.SoundSpeed) && Same(e.InverseMass, a.InverseMass) &&
-                        Same(e.Temperature, a.Temperature) && Same(e.SignalSpeed, a.SignalSpeed);
+                        Same(e.SoundSpeed, a.SoundSpeed) && Same(e.InverseMass, a.InverseMass);
             for (int gas = 0; gas < 2 && same; gas++)
             {
                 if (expected.Species[gas] != null)

@@ -28,8 +28,9 @@ namespace Numos.CoreSim.Solvers.Euler;
 internal sealed class EulerChunkState
 {
     /// <summary>
-    ///     Primitive state per cell, one array per field of <see cref="EulerCellState" />: velocities, pressure,
-    ///     sound speed, and signal speed. Every field is zero for a vacuum or trace cell.
+    ///     Primitive state per cell, one array per field of <see cref="EulerCellState" /> except
+    ///     <see cref="EulerCellState.Temperature" /> and <see cref="EulerCellState.SignalSpeed" />. Every field is
+    ///     zero for a vacuum or trace cell.
     /// </summary>
     /// <remarks>
     ///     Each array is <see cref="CellPadding" /> entries longer than the voxel count. The pad stays zero, so a
@@ -44,8 +45,6 @@ internal sealed class EulerChunkState
     public JoulePerCubicMetre[] CellEnergyDensity = [];
     public MetrePerSecond[] CellSoundSpeed = [];
     public PerKilogram[] CellInverseMass = [];
-    public Kelvin[] CellTemperature = [];
-    public MetrePerSecond[] CellSignalSpeed = [];
 
     /// <summary>
     ///     Entries added past the voxel count of every cell field array.
@@ -68,9 +67,13 @@ internal sealed class EulerChunkState
     /// <summary>
     ///     Reads the primitive state of one cell out of the field arrays.
     /// </summary>
+    /// <remarks>
+    ///     The arrays do not hold <see cref="EulerCellState.Temperature" /> and
+    ///     <see cref="EulerCellState.SignalSpeed" />. Both come back as zero.
+    /// </remarks>
     internal EulerCellState GetCell(int index)
     {
-        EulerCellState cell;
+        EulerCellState cell = default;
         cell.Density = CellDensity[index];
         cell.VelocityX = CellVelocityX[index];
         cell.VelocityY = CellVelocityY[index];
@@ -79,13 +82,12 @@ internal sealed class EulerChunkState
         cell.EnergyDensity = CellEnergyDensity[index];
         cell.SoundSpeed = CellSoundSpeed[index];
         cell.InverseMass = CellInverseMass[index];
-        cell.Temperature = CellTemperature[index];
-        cell.SignalSpeed = CellSignalSpeed[index];
         return cell;
     }
 
     /// <summary>
-    ///     Writes the primitive state of one cell into the field arrays.
+    ///     Writes the primitive state of one cell into the field arrays. The temperature and signal speed of
+    ///     <paramref name="cell" /> are dropped.
     /// </summary>
     internal void SetCell(int index, in EulerCellState cell)
     {
@@ -97,8 +99,6 @@ internal sealed class EulerChunkState
         CellEnergyDensity[index] = cell.EnergyDensity;
         CellSoundSpeed[index] = cell.SoundSpeed;
         CellInverseMass[index] = cell.InverseMass;
-        CellTemperature[index] = cell.Temperature;
-        CellSignalSpeed[index] = cell.SignalSpeed;
     }
 
     public Joule64[] Energy = [];
@@ -139,8 +139,6 @@ internal sealed class EulerChunkState
             CellEnergyDensity = new JoulePerCubicMetre[paddedCount];
             CellSoundSpeed = new MetrePerSecond[paddedCount];
             CellInverseMass = new PerKilogram[paddedCount];
-            CellTemperature = new Kelvin[paddedCount];
-            CellSignalSpeed = new MetrePerSecond[paddedCount];
             Energy = new Joule64[voxelCount];
             HeatCapacity = new JoulePerKelvin64[voxelCount];
             Mass = new Kilogram[voxelCount];
