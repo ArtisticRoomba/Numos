@@ -470,31 +470,14 @@ public partial class SimulationViewer
         if (timeline.Checkpoints.Count == 0 || !ImGui.TreeNode("Initial solver stages##replay"))
             return;
 
-        var solvers = timeline.Checkpoints[0].Checkpoint.Solvers;
-        using (var table = ImGuiExtensions.BeginTable("InitialSolvers##replay", 4, ReplayRecordTableFlags))
-        {
-            if (table.IsVisible)
-            {
-                ImGui.TableSetupColumn("#");
-                ImGui.TableSetupColumn("Stage");
-                ImGui.TableSetupColumn("Kind");
-                ImGui.TableSetupColumn("Enabled");
-                ImGui.TableHeadersRow();
-                for (int i = 0; i < solvers.Count; i++)
-                {
-                    ImGui.TableNextRow();
-                    ImGui.TableSetColumnIndex(0);
-                    ImGui.TextDisabled((i + 1).ToString(CultureInfo.InvariantCulture));
-                    ImGui.TableSetColumnIndex(1);
-                    ImGui.TextUnformatted(solvers[i].Name);
-                    ImGui.TableSetColumnIndex(2);
-                    ImGui.TextUnformatted(solvers[i].Kind == AtmosWorldSolverKind.BuiltIn ? "Built-in" : "Custom");
-                    ImGui.TableSetColumnIndex(3);
-                    ImGui.TextUnformatted(solvers[i].Enabled ? "Yes" : "No");
-                }
-            }
-        }
+        var rows = timeline.Checkpoints[0].Checkpoint.Solvers
+            .Select(static solver => new SolverStageRow(
+                solver.Name,
+                solver.Enabled,
+                solver.Kind == AtmosWorldSolverKind.BuiltIn ? "Built-in" : "Custom"))
+            .ToArray();
 
+        DrawSolverStageTable("InitialSolvers##replay", rows);
         ImGui.TreePop();
     }
 
@@ -506,28 +489,50 @@ public partial class SimulationViewer
         if (!ImGui.TreeNode("Requested solver layout##replay"))
             return;
 
-        using (var table = ImGuiExtensions.BeginTable("RecordedLayout##replay", 3, ReplayRecordTableFlags))
-        {
-            if (table.IsVisible)
-            {
-                ImGui.TableSetupColumn("#");
-                ImGui.TableSetupColumn("Stage");
-                ImGui.TableSetupColumn("Enabled");
-                ImGui.TableHeadersRow();
-                for (int i = 0; i < stages.Count; i++)
-                {
-                    ImGui.TableNextRow();
-                    ImGui.TableSetColumnIndex(0);
-                    ImGui.TextDisabled((i + 1).ToString(CultureInfo.InvariantCulture));
-                    ImGui.TableSetColumnIndex(1);
-                    ImGui.TextUnformatted(stages[i].Name);
-                    ImGui.TableSetColumnIndex(2);
-                    ImGui.TextUnformatted(stages[i].Enabled ? "Yes" : "No");
-                }
-            }
-        }
-
+        var rows = stages.Select(static stage => new SolverStageRow(stage.Name, stage.Enabled)).ToArray();
+        DrawSolverStageTable("RecordedLayout##replay", rows);
         ImGui.TreePop();
+    }
+
+    /// <summary>
+    ///     One line of a solver stage table. A null <paramref name="Kind" /> means the source does not record the kind.
+    /// </summary>
+    private readonly record struct SolverStageRow(string Name, bool Enabled, string? Kind = null);
+
+    /// <summary>
+    ///     Draws the numbered stage table. The Kind column appears when any row has a kind.
+    /// </summary>
+    private static void DrawSolverStageTable(string tableId, SolverStageRow[] rows)
+    {
+        bool showKind = rows.Any(static row => row.Kind != null);
+        int enabledColumn = showKind ? 3 : 2;
+        using var table = ImGuiExtensions.BeginTable(tableId, enabledColumn + 1, ReplayRecordTableFlags);
+        if (!table.IsVisible)
+            return;
+
+        ImGui.TableSetupColumn("#");
+        ImGui.TableSetupColumn("Stage");
+        if (showKind)
+            ImGui.TableSetupColumn("Kind");
+
+        ImGui.TableSetupColumn("Enabled");
+        ImGui.TableHeadersRow();
+        for (int i = 0; i < rows.Length; i++)
+        {
+            ImGui.TableNextRow();
+            ImGui.TableSetColumnIndex(0);
+            ImGui.TextDisabled((i + 1).ToString(CultureInfo.InvariantCulture));
+            ImGui.TableSetColumnIndex(1);
+            ImGui.TextUnformatted(rows[i].Name);
+            if (showKind)
+            {
+                ImGui.TableSetColumnIndex(2);
+                ImGui.TextUnformatted(rows[i].Kind ?? string.Empty);
+            }
+
+            ImGui.TableSetColumnIndex(enabledColumn);
+            ImGui.TextUnformatted(rows[i].Enabled ? "Yes" : "No");
+        }
     }
 
     private static void DrawRecordedConfiguration(AtmosConfigSnapshot config)
