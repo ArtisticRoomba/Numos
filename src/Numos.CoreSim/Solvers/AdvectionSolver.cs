@@ -499,8 +499,7 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
                 ushort neighborIndex = workspace.Diffusion.NeighborIndices![slotBase + direction];
                 Pascal neighborPressure = neighborKind == NeighborKind.Void ? 0f : chunk.TotalPressure[neighborIndex];
                 Pascal pressureDelta = currentPressure - neighborPressure;
-                Pascal referencePressure = MathF.Max(currentPressure, neighborPressure);
-                Scalar relativePressureDelta = MathF.Abs(pressureDelta) / referencePressure * 100f;
+                Scalar relativePressureDelta = ChunkSleepPolicy.RelativePressureDelta(currentPressure, neighborPressure);
                 maximumRelativePressureDelta = MathF.Max(maximumRelativePressureDelta, relativePressureDelta);
 
                 Pascal bulkPressureTransfer = pressureDelta > 0f

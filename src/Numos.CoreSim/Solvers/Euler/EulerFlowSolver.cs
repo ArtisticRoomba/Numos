@@ -988,11 +988,10 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
                     continue;
                 }
 
-                Pascal reference = MathF.Max(pressure, neighborPressure);
-                if (reference <= 0f)
+                if (pressure <= 0f && neighborPressure <= 0f)
                     continue;
 
-                Scalar relative = MathF.Abs(pressure - neighborPressure) / reference * 100f;
+                Scalar relative = ChunkSleepPolicy.RelativePressureDelta(pressure, neighborPressure);
                 maximumRelativePressureDelta = MathF.Max(maximumRelativePressureDelta, relative);
             }
         }
