@@ -159,53 +159,53 @@ internal sealed class FlowFieldSet
                 .CopyTo(padded[((z + 1) * stepXY + (y + 1) * stepX + 1)..]);
         }
 
-        if (TryGetNeighbor(position, -1, 0, 0, size, out var negativeX))
+        foreach (var offset in Int3.CardinalOffsets)
         {
-            for (int z = 0; z < size.Z; z++)
-            for (int y = 0; y < size.Y; y++)
-                padded[(z + 1) * stepXY + (y + 1) * stepX] = negativeX[(z * size.Y + y) * size.X + size.X - 1];
-        }
-
-        if (TryGetNeighbor(position, 1, 0, 0, size, out var positiveX))
-        {
-            for (int z = 0; z < size.Z; z++)
-            for (int y = 0; y < size.Y; y++)
-                padded[(z + 1) * stepXY + (y + 1) * stepX + size.X + 1] = positiveX[(z * size.Y + y) * size.X];
-        }
-
-        if (TryGetNeighbor(position, 0, -1, 0, size, out var negativeY))
-        {
-            for (int z = 0; z < size.Z; z++)
-            for (int x = 0; x < size.X; x++)
-                padded[(z + 1) * stepXY + x + 1] = negativeY[(z * size.Y + size.Y - 1) * size.X + x];
-        }
-
-        if (TryGetNeighbor(position, 0, 1, 0, size, out var positiveY))
-        {
-            for (int z = 0; z < size.Z; z++)
-            for (int x = 0; x < size.X; x++)
-                padded[(z + 1) * stepXY + (size.Y + 1) * stepX + x + 1] = positiveY[z * size.Y * size.X + x];
-        }
-
-        if (TryGetNeighbor(position, 0, 0, -1, size, out var negativeZ))
-        {
-            for (int y = 0; y < size.Y; y++)
-            for (int x = 0; x < size.X; x++)
-                padded[(y + 1) * stepX + x + 1] = negativeZ[((size.Z - 1) * size.Y + y) * size.X + x];
-        }
-
-        if (TryGetNeighbor(position, 0, 0, 1, size, out var positiveZ))
-        {
-            for (int y = 0; y < size.Y; y++)
-            for (int x = 0; x < size.X; x++)
-                padded[(size.Z + 1) * stepXY + (y + 1) * stepX + x + 1] = positiveZ[y * size.X + x];
+            var neighborPosition = new Int3(position.X + offset.X, position.Y + offset.Y, position.Z + offset.Z);
+            if (TryGetNeighbor(neighborPosition, size, out var neighbor))
+                CopyHaloFace(neighbor, offset, size, padded);
         }
     }
 
-    private bool TryGetNeighbor(Int3 position, int dx, int dy, int dz, Int3 size, out float[] density)
+    /// <summary>
+    ///     Copies the voxel layer of a face neighbor that touches the chunk into the padded buffer's halo.
+    /// </summary>
+    /// <param name="neighbor">The density of the neighbor chunk.</param>
+    /// <param name="offset">The unit offset from the chunk to the neighbor.</param>
+    /// <param name="size">The chunk dimensions.</param>
+    /// <param name="padded">The padded buffer. Its halo layer on the neighbor's side receives the copy.</param>
+    private static void CopyHaloFace(float[] neighbor, Int3 offset, Int3 size, Span<float> padded)
     {
-        var neighbor = new Int3(position.X + dx, position.Y + dy, position.Z + dz);
-        return _density.TryGetValue(neighbor, out density!) &&
+        var x = new AxisLayout(1, 1, size.X);
+        var y = new AxisLayout(size.X, size.X + 2, size.Y);
+        var z = new AxisLayout(size.X * size.Y, (size.X + 2) * (size.Y + 2), size.Z);
+        var (along, first, second) = offset.X != 0 ? (x, y, z) : offset.Y != 0 ? (y, z, x) : (z, x, y);
+        bool negative = offset.X + offset.Y + offset.Z < 0;
+
+        // The neighbor's layer that touches the chunk is its last one for a negative neighbor and its first one for
+        // a positive neighbor. It fills the halo layer before the chunk or the layer after it. The other two axes
+        // skip one halo voxel.
+        int sourceStart = negative ? (along.Extent - 1) * along.SourceStride : 0;
+        int paddedStart = (negative ? 0 : along.Extent + 1) * along.PaddedStride +
+                          first.PaddedStride +
+                          second.PaddedStride;
+
+        for (int j = 0; j < second.Extent; j++)
+        for (int i = 0; i < first.Extent; i++)
+        {
+            padded[paddedStart + i * first.PaddedStride + j * second.PaddedStride] =
+                neighbor[sourceStart + i * first.SourceStride + j * second.SourceStride];
+        }
+    }
+
+    private bool TryGetNeighbor(Int3 position, Int3 size, out float[] density)
+    {
+        return _density.TryGetValue(position, out density!) &&
                density.Length == size.X * size.Y * size.Z;
     }
+
+    /// <summary>
+    ///     Describes one axis of a chunk in its own layout and in the padded layout.
+    /// </summary>
+    private readonly record struct AxisLayout(int SourceStride, int PaddedStride, int Extent);
 }
