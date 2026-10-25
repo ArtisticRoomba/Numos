@@ -76,21 +76,6 @@ internal sealed record StateShape(StateShapeKind Kind, string Name, EquatableArr
     private static readonly SymbolDisplayFormat UnboundFormat =
         SymbolDisplayFormat.FullyQualifiedFormat.WithGenericsOptions(SymbolDisplayGenericsOptions.None);
 
-    private static readonly Dictionary<SpecialType, string> Primitives = new()
-    {
-        [SpecialType.System_Boolean] = "Boolean",
-        [SpecialType.System_Byte] = "Byte",
-        [SpecialType.System_SByte] = "SByte",
-        [SpecialType.System_Int16] = "Int16",
-        [SpecialType.System_UInt16] = "UInt16",
-        [SpecialType.System_Int32] = "Int32",
-        [SpecialType.System_UInt32] = "UInt32",
-        [SpecialType.System_Int64] = "Int64",
-        [SpecialType.System_UInt64] = "UInt64",
-        [SpecialType.System_Single] = "Single",
-        [SpecialType.System_Double] = "Double",
-    };
-
     private static readonly HashSet<string> ListTypes = new(StringComparer.Ordinal)
     {
         "System.Collections.Generic.IReadOnlyList`1",
@@ -141,7 +126,7 @@ internal sealed record StateShape(StateShapeKind Kind, string Name, EquatableArr
         if (type.IsReferenceType && type.NullableAnnotation == NullableAnnotation.Annotated)
             return Of(StateShapeKind.NullableReference, "", From(type.WithNullableAnnotation(NullableAnnotation.NotAnnotated)));
 
-        if (Primitives.TryGetValue(type.SpecialType, out string? primitive))
+        if (QuantityAliasCatalog.PrimitiveNames.TryGetValue(type.SpecialType, out string? primitive))
             return Leaf(StateShapeKind.Primitive, primitive);
 
         if (type.SpecialType == SpecialType.System_String)
@@ -158,7 +143,8 @@ internal sealed record StateShape(StateShapeKind Kind, string Name, EquatableArr
 
         if (named.TypeKind == TypeKind.Enum)
         {
-            return named.EnumUnderlyingType is { } underlying && Primitives.TryGetValue(underlying.SpecialType, out string? name)
+            return named.EnumUnderlyingType is { } underlying &&
+                   QuantityAliasCatalog.PrimitiveNames.TryGetValue(underlying.SpecialType, out string? name)
                 ? Of(StateShapeKind.Enum, FullName(named), Leaf(StateShapeKind.Primitive, name))
                 : Unsupported(type);
         }

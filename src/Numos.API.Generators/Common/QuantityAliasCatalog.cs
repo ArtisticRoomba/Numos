@@ -17,23 +17,38 @@ internal sealed record QuantityAlias(string Alias, string Storage);
 /// </remarks>
 internal static class QuantityAliasCatalog
 {
+    private static readonly (SpecialType Special, string Name, string Keyword)[] Primitives =
+    [
+        (SpecialType.System_Boolean, "Boolean", "bool"),
+        (SpecialType.System_Byte, "Byte", "byte"),
+        (SpecialType.System_SByte, "SByte", "sbyte"),
+        (SpecialType.System_Int16, "Int16", "short"),
+        (SpecialType.System_UInt16, "UInt16", "ushort"),
+        (SpecialType.System_Int32, "Int32", "int"),
+        (SpecialType.System_UInt32, "UInt32", "uint"),
+        (SpecialType.System_Int64, "Int64", "long"),
+        (SpecialType.System_UInt64, "UInt64", "ulong"),
+        (SpecialType.System_Single, "Single", "float"),
+        (SpecialType.System_Double, "Double", "double"),
+    ];
+
     /// <summary>
     ///     Maps the CLR name of each storage primitive an alias can use to its C# keyword.
     /// </summary>
-    public static readonly Dictionary<string, string> PrimitiveKeywords = new(StringComparer.Ordinal)
-    {
-        ["Boolean"] = "bool",
-        ["Byte"] = "byte",
-        ["SByte"] = "sbyte",
-        ["Int16"] = "short",
-        ["UInt16"] = "ushort",
-        ["Int32"] = "int",
-        ["UInt32"] = "uint",
-        ["Int64"] = "long",
-        ["UInt64"] = "ulong",
-        ["Single"] = "float",
-        ["Double"] = "double",
-    };
+    public static readonly Dictionary<string, string> PrimitiveKeywords = Primitives.ToDictionary(
+        static primitive => primitive.Name,
+        static primitive => primitive.Keyword,
+        StringComparer.Ordinal);
+
+    /// <summary>
+    ///     Maps the special type of each storage primitive to its CLR name, the key of <see cref="PrimitiveKeywords" />.
+    /// </summary>
+    /// <remarks>
+    ///     <see cref="SpecialType.System_String" /> is not in it, because no alias stores a string.
+    /// </remarks>
+    public static readonly Dictionary<SpecialType, string> PrimitiveNames = Primitives.ToDictionary(
+        static primitive => primitive.Special,
+        static primitive => primitive.Name);
 
     /// <summary>
     ///     Gets the alias-to-storage table from every <c>*.magnitudo</c> additional file.

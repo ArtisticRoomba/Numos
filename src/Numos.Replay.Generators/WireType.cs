@@ -25,21 +25,6 @@ internal enum WireTypeKind
 /// </summary>
 internal sealed record WireType(WireTypeKind Kind, string Name)
 {
-    private static readonly Dictionary<SpecialType, string> Primitives = new()
-    {
-        [SpecialType.System_Boolean] = "Boolean",
-        [SpecialType.System_Byte] = "Byte",
-        [SpecialType.System_SByte] = "SByte",
-        [SpecialType.System_Int16] = "Int16",
-        [SpecialType.System_UInt16] = "UInt16",
-        [SpecialType.System_Int32] = "Int32",
-        [SpecialType.System_UInt32] = "UInt32",
-        [SpecialType.System_Int64] = "Int64",
-        [SpecialType.System_UInt64] = "UInt64",
-        [SpecialType.System_Single] = "Single",
-        [SpecialType.System_Double] = "Double",
-    };
-
     /// <summary>
     ///     Gets the C# keyword for a primitive, such as <c>float</c>.
     /// </summary>
@@ -47,7 +32,7 @@ internal sealed record WireType(WireTypeKind Kind, string Name)
 
     public static WireType From(ITypeSymbol type)
     {
-        if (Primitives.TryGetValue(type.SpecialType, out string? name))
+        if (QuantityAliasCatalog.PrimitiveNames.TryGetValue(type.SpecialType, out string? name))
             return new WireType(WireTypeKind.Primitive, name);
 
         if (type.SpecialType == SpecialType.System_String)

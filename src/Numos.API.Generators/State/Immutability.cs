@@ -28,13 +28,10 @@ internal static class Immutability
         if (type.IsReferenceType && type.NullableAnnotation == NullableAnnotation.Annotated)
             type = type.WithNullableAnnotation(NullableAnnotation.NotAnnotated);
 
-        switch (type.SpecialType)
+        if (type.SpecialType == SpecialType.System_String ||
+            QuantityAliasCatalog.PrimitiveNames.ContainsKey(type.SpecialType))
         {
-            case SpecialType.System_Boolean or SpecialType.System_Byte or SpecialType.System_SByte
-                or SpecialType.System_Int16 or SpecialType.System_UInt16 or SpecialType.System_Int32
-                or SpecialType.System_UInt32 or SpecialType.System_Int64 or SpecialType.System_UInt64
-                or SpecialType.System_Single or SpecialType.System_Double or SpecialType.System_String:
-                return true;
+            return true;
         }
 
         if (type is not INamedTypeSymbol named)
