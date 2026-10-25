@@ -119,20 +119,12 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
             }
 
             ParallelPhase.Run(workspaceCount, new InitializeWorkspaceAction(workspaces));
-            int voxelTileSize = Math.Max(1, ParallelPhase.DivideRoundUp(totalActiveAirCount, workerCount));
-            for (int workspaceIndex = 0; workspaceIndex < workspaceCount; workspaceIndex++)
-            {
-                voxelWorkItemCount = checked(
-                    voxelWorkItemCount +
-                    ParallelPhase.DivideRoundUp(workspaces[workspaceIndex].Chunk!.ActiveAirCount, voxelTileSize));
-            }
-
-            voxelWorkItems = ArrayPool<VoxelWorkItem>.Shared.Rent(Math.Max(1, voxelWorkItemCount));
-            PopulateWorkItems(
-                workspaces,
+            int voxelTileSize = VoxelTiling.GetTileSize(totalActiveAirCount, workerCount);
+            voxelWorkItems = VoxelTiling.Rent(
+                new WorkspaceActiveAirCounts(workspaces),
                 workspaceCount,
                 voxelTileSize,
-                voxelWorkItems);
+                out voxelWorkItemCount);
 
             ParallelPhase.Run(
                 voxelWorkItemCount,
@@ -176,39 +168,12 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
         finally
         {
             if (voxelWorkItems != null)
-                ArrayPool<VoxelWorkItem>.Shared.Return(voxelWorkItems);
+                VoxelTiling.Return(voxelWorkItems);
 
             if (!workspacesReleased)
                 ParallelPhase.Run(workspaceCount, new ReleaseWorkspaceAction(workspaces));
 
             ArrayPool<ChunkWorkspace>.Shared.Return(workspaces, true);
-        }
-    }
-
-    /// <summary>
-    ///     Builds workload-sized voxel ranges for the initialized chunk workspaces.
-    /// </summary>
-    /// <param name="workspaces">The workspaces whose chunks will be scheduled.</param>
-    /// <param name="workspaceCount">The initialized prefix of <paramref name="workspaces" />.</param>
-    /// <param name="voxelTileSize">The maximum number of active-air entries assigned to one voxel tile.</param>
-    /// <param name="voxelWorkItems">The destination for voxel tile descriptors.</param>
-    private static void PopulateWorkItems(
-        ChunkWorkspace[] workspaces,
-        int workspaceCount,
-        int voxelTileSize,
-        VoxelWorkItem[] voxelWorkItems)
-    {
-        int voxelWorkIndex = 0;
-        for (int workspaceIndex = 0; workspaceIndex < workspaceCount; workspaceIndex++)
-        {
-            var chunk = workspaces[workspaceIndex].Chunk!;
-            for (int start = 0; start < chunk.ActiveAirCount; start += voxelTileSize)
-            {
-                voxelWorkItems[voxelWorkIndex++] = new VoxelWorkItem(
-                    workspaceIndex,
-                    start,
-                    Math.Min(voxelTileSize, chunk.ActiveAirCount - start));
-            }
         }
     }
 
@@ -762,10 +727,13 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
         }
     }
 
-    /// <summary>
-    ///     Identifies one contiguous range of a chunk's ordered active-air index list.
-    /// </summary>
-    private readonly record struct VoxelWorkItem(int WorkspaceIndex, int Start, int Length);
+    private readonly struct WorkspaceActiveAirCounts(ChunkWorkspace[] workspaces) : IActiveAirCounts
+    {
+        public int GetActiveAirCount(int index)
+        {
+            return workspaces[index].Chunk!.ActiveAirCount;
+        }
+    }
 
     /// <summary>
     ///     One gas-independent bulk-flow contribution to a destination voxel.

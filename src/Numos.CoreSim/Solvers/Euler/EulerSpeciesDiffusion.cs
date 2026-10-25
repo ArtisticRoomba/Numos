@@ -1,4 +1,3 @@
-using System.Buffers;
 using CommunityToolkit.HighPerformance.Helpers;
 using Numos.Maths;
 
@@ -70,21 +69,8 @@ internal static class EulerSpeciesDiffusion
                 for (int index = 0; index < activeCount; index++)
                     totalActiveAirCount = checked(totalActiveAirCount + active[index].Chunk.ActiveAirCount);
 
-                int tileSize = Math.Max(1, ParallelPhase.DivideRoundUp(totalActiveAirCount, workerCount));
-                for (int index = 0; index < activeCount; index++)
-                {
-                    workItemCount = checked(
-                        workItemCount + ParallelPhase.DivideRoundUp(active[index].Chunk.ActiveAirCount, tileSize));
-                }
-
-                workItems = ArrayPool<VoxelWorkItem>.Shared.Rent(Math.Max(1, workItemCount));
-                int item = 0;
-                for (int index = 0; index < activeCount; index++)
-                {
-                    int activeAirCount = active[index].Chunk.ActiveAirCount;
-                    for (int start = 0; start < activeAirCount; start += tileSize)
-                        workItems[item++] = new VoxelWorkItem(index, start, Math.Min(tileSize, activeAirCount - start));
-                }
+                int tileSize = VoxelTiling.GetTileSize(totalActiveAirCount, workerCount);
+                workItems = VoxelTiling.Rent(new ActiveAirCounts(active), activeCount, tileSize, out workItemCount);
 
                 ParallelPhase.Run(workItemCount, new ResolveAndPrepareAction(active, workItems, config));
                 ParallelPhase.Run(workItemCount, new GatherAction(active, workItems, config));
@@ -97,7 +83,7 @@ internal static class EulerSpeciesDiffusion
         finally
         {
             if (workItems != null)
-                ArrayPool<VoxelWorkItem>.Shared.Return(workItems);
+                VoxelTiling.Return(workItems);
         }
     }
 
@@ -379,10 +365,13 @@ internal static class EulerSpeciesDiffusion
         }
     }
 
-    /// <summary>
-    ///     A contiguous range of one chunk's active-air list for the tiled schedule.
-    /// </summary>
-    private readonly record struct VoxelWorkItem(int WorkspaceIndex, int Start, int Length);
+    private readonly struct ActiveAirCounts(EulerChunkWorkspace[] active) : IActiveAirCounts
+    {
+        public int GetActiveAirCount(int index)
+        {
+            return active[index].Chunk.ActiveAirCount;
+        }
+    }
 
     private readonly struct DiffuseChunkAction(EulerChunkWorkspace[] active, AtmosSolverConfigSnapshot config) : IAction
     {
