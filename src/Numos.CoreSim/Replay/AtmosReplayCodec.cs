@@ -101,14 +101,34 @@ internal static partial class AtmosReplayCodec
     }
 
     /// <summary>
+    ///     Writes <paramref name="payload" /> behind its <c>int32</c> byte length. <see cref="ReadPayload" /> reads it
+    ///     back after <see cref="ReadCount" />.
+    /// </summary>
+    internal static void WritePayload(BinaryWriter writer, ReadOnlySpan<byte> payload)
+    {
+        writer.Write(payload.Length);
+        writer.Write(payload);
+    }
+
+    /// <summary>
     ///     Reads <paramref name="length" /> bytes into an array rented from <see cref="ArrayPool{T}.Shared" />, growing
-    ///     as data arrives like <see cref="ReadPayload(BinaryReader, int)" />.
+    ///     as data arrives like <see cref="ReadPayload" />.
     /// </summary>
     /// <returns>A rented array whose first <paramref name="length" /> bytes hold the payload. Return it when done.</returns>
-    internal static byte[] RentPayload(BinaryReader reader, int length)
+    internal static byte[] RentPayload(BinaryReader reader, int length) => ReadGrowing(reader, length, true);
+
+    /// <summary>
+    ///     Reads <paramref name="length" /> bytes, growing the buffer as data arrives so a corrupt length can't make
+    ///     the reader allocate more than the stream holds.
+    /// </summary>
+    /// <returns>A new array of exactly <paramref name="length" /> bytes.</returns>
+    internal static byte[] ReadPayload(BinaryReader reader, int length) => ReadGrowing(reader, length, false);
+
+    // A pooled buffer can be larger than asked for, so callers of RentPayload must use only the first length bytes.
+    private static byte[] ReadGrowing(BinaryReader reader, int length, bool pooled)
     {
         const int chunk = 64 * 1024;
-        byte[] buffer = ArrayPool<byte>.Shared.Rent(Math.Min(length, chunk));
+        byte[] buffer = Allocate(Math.Min(length, chunk), pooled);
         try
         {
             int filled = 0;
@@ -116,9 +136,10 @@ internal static partial class AtmosReplayCodec
             {
                 if (filled == buffer.Length)
                 {
-                    byte[] grown = ArrayPool<byte>.Shared.Rent((int)Math.Min(length, (long)buffer.Length * 2));
+                    byte[] grown = Allocate((int)Math.Min(length, (long)buffer.Length * 2), pooled);
                     buffer.AsSpan(0, filled).CopyTo(grown);
-                    ArrayPool<byte>.Shared.Return(buffer);
+                    if (pooled) ArrayPool<byte>.Shared.Return(buffer);
+
                     buffer = grown;
                 }
 
@@ -132,44 +153,13 @@ internal static partial class AtmosReplayCodec
         }
         catch
         {
-            ArrayPool<byte>.Shared.Return(buffer);
+            if (pooled) ArrayPool<byte>.Shared.Return(buffer);
+
             throw;
         }
     }
 
-    /// <summary>
-    ///     Reads <paramref name="length" /> bytes, growing the buffer as data arrives so a corrupt length can't make
-    ///     the reader allocate more than the stream holds.
-    /// </summary>
-    internal static byte[] ReadPayload(BinaryReader reader, int length)
-    {
-        byte[] buffer = [];
-        ReadPayload(reader, length, ref buffer);
-        return buffer.Length == length ? buffer : buffer[..length];
-    }
-
-    /// <summary>
-    ///     Reads <paramref name="length" /> bytes into the start of <paramref name="buffer" />, replacing it with a
-    ///     larger array when needed. Growth still follows the data, as in <see cref="ReadPayload(BinaryReader, int)" />.
-    /// </summary>
-    internal static void ReadPayload(BinaryReader reader, int length, ref byte[] buffer)
-    {
-        const int chunk = 64 * 1024;
-        if (buffer.Length < Math.Min(length, chunk))
-            buffer = new byte[Math.Min(length, chunk)];
-
-        int filled = 0;
-        while (filled < length)
-        {
-            if (filled == buffer.Length)
-                Array.Resize(ref buffer, (int)Math.Min(length, (long)buffer.Length * 2));
-
-            int read = reader.Read(buffer, filled, Math.Min(buffer.Length, length) - filled);
-            if (read == 0) throw new EndOfStreamException();
-
-            filled += read;
-        }
-    }
+    private static byte[] Allocate(int size, bool pooled) => pooled ? ArrayPool<byte>.Shared.Rent(size) : new byte[size];
 
     private static void WriteSetVoxelMixtureOperation(BinaryWriter writer, SetVoxelMixtureOperation operation)
     {

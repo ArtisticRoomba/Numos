@@ -40,8 +40,7 @@ internal static partial class AtmosWorldReplayCodec
         try
         {
             NumosState.Write(ref sink, checkpoint);
-            writer.Write(sink.WrittenSpan.Length);
-            writer.Write(sink.WrittenSpan);
+            AtmosReplayCodec.WritePayload(writer, sink.WrittenSpan);
         }
         finally
         {
@@ -89,8 +88,7 @@ internal static partial class AtmosWorldReplayCodec
     private static void WriteSetAtmosWorldSolverStateOperation(BinaryWriter writer, SetAtmosWorldSolverStateOperation operation)
     {
         AtmosReplayCodec.WriteString(writer, operation.Name);
-        writer.Write(operation.State.Length);
-        writer.Write(operation.State.Span);
+        AtmosReplayCodec.WritePayload(writer, operation.State.Span);
     }
 
     private static SetAtmosWorldSolverStateOperation ReadSetAtmosWorldSolverStateOperation(BinaryReader reader, int maxStringBytes)
