@@ -1,6 +1,5 @@
 using System.Xml.Linq;
 using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Numos.API.Generators.Common;
 
@@ -92,14 +91,13 @@ public sealed class SnapshotGenerator : IIncrementalGenerator
         var diagnostics = new List<DiagnosticInfo>();
         bool canGenerate = true;
 
-        SyntaxNode? node = syntax;
+        // The innermost type reports first, so walk the outermost-first chain backwards.
+        List<(INamedTypeSymbol Type, bool IsPartial)> chain = PartialSyntax.GetContainingChain(snapshot, syntax);
         bool genericChain = false;
-        for (INamedTypeSymbol? current = snapshot; current is not null; current = current.ContainingType)
+        for (int i = chain.Count - 1; i >= 0; i--)
         {
-            while (node is not null and not TypeDeclarationSyntax)
-                node = node.Parent;
-
-            if (node is not TypeDeclarationSyntax declaration || !declaration.Modifiers.Any(SyntaxKind.PartialKeyword))
+            (INamedTypeSymbol current, bool isPartial) = chain[i];
+            if (!isPartial)
             {
                 diagnostics.Add(
                     DiagnosticInfo.Create(StateDiagnostics.SnapshotNotPartial, location, current.ToDisplayString(), displayName));
@@ -108,7 +106,6 @@ public sealed class SnapshotGenerator : IIncrementalGenerator
             }
 
             genericChain |= current.TypeParameters.Length > 0;
-            node = node?.Parent;
         }
 
         if (snapshot.TypeKind != TypeKind.Class || snapshot.IsStatic || snapshot.IsAbstract || snapshot.IsRecord ||

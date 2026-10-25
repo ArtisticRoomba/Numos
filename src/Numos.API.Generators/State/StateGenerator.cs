@@ -168,13 +168,12 @@ public sealed class StateGenerator : IIncrementalGenerator
         var diagnostics = new List<DiagnosticInfo>();
         bool canGenerate = true;
 
-        SyntaxNode? node = syntax;
-        for (INamedTypeSymbol? current = type; current is not null; current = current.ContainingType)
+        // The innermost type reports first, so walk the outermost-first chain backwards.
+        List<(INamedTypeSymbol Type, bool IsPartial)> chain = PartialSyntax.GetContainingChain(type, syntax);
+        for (int i = chain.Count - 1; i >= 0; i--)
         {
-            while (node is not null and not TypeDeclarationSyntax)
-                node = node.Parent;
-
-            if (node is not TypeDeclarationSyntax declaration || !declaration.Modifiers.Any(SyntaxKind.PartialKeyword))
+            (INamedTypeSymbol current, bool isPartial) = chain[i];
+            if (!isPartial)
             {
                 diagnostics.Add(
                     DiagnosticInfo.Create(StateDiagnostics.TypeNotPartial, typeLocation, current.ToDisplayString(), typeDisplayName));
@@ -188,8 +187,6 @@ public sealed class StateGenerator : IIncrementalGenerator
                 diagnostics.Add(DiagnosticInfo.Create(StateDiagnostics.Generic, typeLocation, typeDisplayName));
                 return Skipped(type, diagnostics);
             }
-
-            node = node?.Parent;
         }
 
         bool isWorldSolver = Implements(type, WorldSolverMetadataName);
