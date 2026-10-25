@@ -400,6 +400,7 @@ The `eulerFlow` object holds the Euler transport settings: `courantNumber`, `max
 `maxVelocityMps`, `wakePressureDeltaPa`, `allMachCorrection`, `reconstruction` (`"firstOrder"`),
 `momentumDampingPerSecond`, and `defaultLinkAreaFraction`. A patch replaces the `EulerFlowConfig` entry with a copy that
 applies the given fields. Omitted fields keep the entry's value, or the library default when the session has no entry.
+The runner rejects an `eulerFlow` value outside the domain of its field, such as a `courantNumber` above 1.
 The observation reports `config.eulerFlow` with the same names. It is absent while the session has no entry. The solver
 then runs with its defaults.
 

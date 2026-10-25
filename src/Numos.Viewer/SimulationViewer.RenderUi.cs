@@ -674,7 +674,6 @@ public partial class SimulationViewer
                 AtmosConfigFields.GlobalTemperature,
                 "config-global-temperature",
                 _session.Config.GlobalTemperature,
-                ConfigDomain.Positive,
                 inspecting,
                 static (config, value) => config.GlobalTemperature = value);
 
@@ -682,7 +681,6 @@ public partial class SimulationViewer
                 AtmosConfigFields.DefaultTemperatureFallback,
                 "config-default-temperature-fallback",
                 _session.Config.DefaultTemperatureFallback,
-                ConfigDomain.Positive,
                 inspecting,
                 static (config, value) => config.DefaultTemperatureFallback = value);
 
@@ -690,7 +688,6 @@ public partial class SimulationViewer
                 AtmosConfigFields.VoxelVolume,
                 "config-voxel-volume",
                 _session.Config.VoxelVolume,
-                ConfigDomain.Positive,
                 inspecting,
                 static (config, value) => config.VoxelVolume = value);
 
@@ -698,7 +695,6 @@ public partial class SimulationViewer
                 AtmosConfigFields.SaturationReferencePressure,
                 "config-saturation-reference-pressure",
                 _session.Config.SaturationReferencePressure,
-                ConfigDomain.Positive,
                 inspecting,
                 static (config, value) => config.SaturationReferencePressure = value,
                 QuantityFormat.KilopascalsPerPascal);
@@ -707,7 +703,6 @@ public partial class SimulationViewer
                 AtmosConfigFields.DefaultMolarHeatCapacityAtConstantVolume,
                 "config-default-molar-cv",
                 _session.Config.DefaultMolarHeatCapacityAtConstantVolume,
-                ConfigDomain.Positive,
                 inspecting,
                 static (config, value) => config.DefaultMolarHeatCapacityAtConstantVolume = value);
 
@@ -715,7 +710,6 @@ public partial class SimulationViewer
                 AtmosConfigFields.DefaultDiffusionCoefficient,
                 "config-default-diffusion-coefficient",
                 _session.Config.DefaultDiffusionCoefficient,
-                ConfigDomain.NonNegative,
                 inspecting,
                 static (config, value) => config.DefaultDiffusionCoefficient = value);
 
@@ -723,7 +717,6 @@ public partial class SimulationViewer
                 AtmosConfigFields.SpaceTemperature,
                 "config-space-temperature",
                 _session.Config.SpaceTemperature,
-                ConfigDomain.Positive,
                 inspecting,
                 static (config, value) => config.SpaceTemperature = value);
 
@@ -733,7 +726,6 @@ public partial class SimulationViewer
                 _session.Config.BulkFlowCoefficient,
                 0f,
                 0.5f,
-                ConfigDomain.UnitInterval,
                 inspecting,
                 static (config, value) => config.BulkFlowCoefficient = value);
 
@@ -741,7 +733,6 @@ public partial class SimulationViewer
                 AtmosConfigFields.VacuumThreshold,
                 "config-vacuum-threshold",
                 _session.Config.VacuumThreshold,
-                ConfigDomain.NonNegative,
                 inspecting,
                 static (config, value) => config.VacuumThreshold = value,
                 QuantityFormat.KilopascalsPerPascal);
@@ -759,7 +750,6 @@ public partial class SimulationViewer
                 _session.Config.SleepEpsilon,
                 0f,
                 100f,
-                ConfigDomain.NonNegative,
                 inspecting,
                 static (config, value) => config.SleepEpsilon = value);
 
@@ -767,7 +757,6 @@ public partial class SimulationViewer
                 AtmosConfigFields.ThermalConductance,
                 "config-thermal-conductance",
                 _session.Config.ThermalConductance,
-                ConfigDomain.NonNegative,
                 inspecting,
                 static (config, value) => config.ThermalConductance = value);
 
@@ -777,7 +766,6 @@ public partial class SimulationViewer
                 _session.Config.CondensationRateFactor,
                 0f,
                 1f,
-                ConfigDomain.UnitInterval,
                 inspecting,
                 static (config, value) => config.CondensationRateFactor = value);
 
@@ -787,7 +775,6 @@ public partial class SimulationViewer
                 _session.Config.MaxPressureTransferFractionPerNeighbor,
                 0f,
                 1f,
-                ConfigDomain.UnitInterval,
                 inspecting,
                 static (config, value) => config.MaxPressureTransferFractionPerNeighbor = value);
 
@@ -795,7 +782,6 @@ public partial class SimulationViewer
                 AtmosConfigFields.AccumulatorWakeThreshold,
                 "config-accumulator-wake-threshold",
                 _session.Config.AccumulatorWakeThreshold,
-                ConfigDomain.NonNegative,
                 inspecting,
                 static (config, value) => config.AccumulatorWakeThreshold = value,
                 QuantityFormat.KilopascalsPerPascal);
@@ -811,7 +797,6 @@ public partial class SimulationViewer
                 AtmosConfigFields.ReferenceMolarMass,
                 "config-reference-molar-mass",
                 _session.Config.ReferenceMolarMass,
-                ConfigDomain.Positive,
                 inspecting,
                 static (config, value) => config.ReferenceMolarMass = value);
         }
@@ -854,7 +839,6 @@ public partial class SimulationViewer
             euler.CourantNumber,
             0.05f,
             1f,
-            ConfigDomain.PositiveUnitInterval,
             inspecting,
             static (config, value) =>
                 ReplaceEulerFlow(config, current => new EulerFlowConfig(current) { CourantNumber = value }));
@@ -871,7 +855,6 @@ public partial class SimulationViewer
             AtmosConfigFields.EulerVelocityFloor,
             "config-euler-velocity-floor",
             euler.VelocityFloor,
-            ConfigDomain.NonNegative,
             inspecting,
             static (config, value) =>
                 ReplaceEulerFlow(config, current => new EulerFlowConfig(current) { VelocityFloor = value }));
@@ -880,7 +863,6 @@ public partial class SimulationViewer
             AtmosConfigFields.EulerMaxVelocity,
             "config-euler-max-velocity",
             euler.MaxVelocity,
-            ConfigDomain.Positive,
             inspecting,
             static (config, value) =>
                 ReplaceEulerFlow(config, current => new EulerFlowConfig(current) { MaxVelocity = value }));
@@ -889,7 +871,6 @@ public partial class SimulationViewer
             AtmosConfigFields.EulerWakePressureDelta,
             "config-euler-wake-pressure-delta",
             euler.WakePressureDelta,
-            ConfigDomain.NonNegative,
             inspecting,
             static (config, value) =>
                 ReplaceEulerFlow(config, current => new EulerFlowConfig(current) { WakePressureDelta = value }));
@@ -908,7 +889,6 @@ public partial class SimulationViewer
             AtmosConfigFields.EulerMomentumDamping,
             "config-euler-momentum-damping",
             euler.MomentumDamping,
-            ConfigDomain.NonNegative,
             inspecting,
             static (config, value) =>
                 ReplaceEulerFlow(config, current => new EulerFlowConfig(current) { MomentumDamping = value }));
@@ -919,7 +899,6 @@ public partial class SimulationViewer
             euler.DefaultLinkAreaFraction,
             0f,
             1f,
-            ConfigDomain.UnitInterval,
             inspecting,
             static (config, value) =>
                 ReplaceEulerFlow(config, current => new EulerFlowConfig(current) { DefaultLinkAreaFraction = value }));
@@ -985,7 +964,6 @@ public partial class SimulationViewer
     /// <param name="field">Shared label, unit, and tooltip for the setting.</param>
     /// <param name="id">ImGui ID and draft key, unique within the Configuration panel.</param>
     /// <param name="current">The value currently in <see cref="AtmosConfig" />.</param>
-    /// <param name="domain">Values the snapshot keeps unchanged; anything else is rejected with a message.</param>
     /// <param name="readOnly">Shows <paramref name="current" /> without allowing edits.</param>
     /// <param name="assign">Writes an accepted value into the editable configuration.</param>
     /// <param name="displayScale">Factor from the stored value to the value shown in the field.</param>
@@ -993,7 +971,6 @@ public partial class SimulationViewer
         AtmosConfigFieldInfo field,
         string id,
         float current,
-        ConfigDomain domain,
         bool readOnly,
         Action<AtmosConfig, float> assign,
         float displayScale = 1f)
@@ -1011,7 +988,7 @@ public partial class SimulationViewer
             SetConfigDraft(_configFloatDrafts, id, value);
 
         if (ImGui.IsItemDeactivatedAfterEdit())
-            CommitConfigFloat(field, id, current, domain, assign, displayScale);
+            CommitConfigFloat(field, id, current, assign, displayScale);
 
         ImGuiExtensions.Feedback(_configFieldErrors.GetValueOrDefault(id), true);
     }
@@ -1020,8 +997,8 @@ public partial class SimulationViewer
     ///     Draws a slider for a bounded setting. The value is held as a draft while dragging and applied on release.
     /// </summary>
     /// <remarks>
-    ///     Ctrl+click typing can still enter a value outside the slider's range; <paramref name="domain" /> decides
-    ///     whether that value is accepted.
+    ///     Ctrl+click typing can still enter a value outside the slider's range. The
+    ///     <see cref="AtmosConfigFieldInfo.Domain" /> of the field decides whether the panel accepts that value.
     /// </remarks>
     private void ConfigFloatSlider(
         AtmosConfigFieldInfo field,
@@ -1029,7 +1006,6 @@ public partial class SimulationViewer
         float current,
         float minimum,
         float maximum,
-        ConfigDomain domain,
         bool readOnly,
         Action<AtmosConfig, float> assign)
     {
@@ -1045,7 +1021,7 @@ public partial class SimulationViewer
             SetConfigDraft(_configFloatDrafts, id, value);
 
         if (ImGui.IsItemDeactivatedAfterEdit())
-            CommitConfigFloat(field, id, current, domain, assign);
+            CommitConfigFloat(field, id, current, assign);
 
         ImGuiExtensions.Feedback(_configFieldErrors.GetValueOrDefault(id), true);
     }
@@ -1098,14 +1074,13 @@ public partial class SimulationViewer
         AtmosConfigFieldInfo field,
         string id,
         float current,
-        ConfigDomain domain,
         Action<AtmosConfig, float> assign,
         float displayScale = 1f)
     {
         if (!_configFloatDrafts.TryGetValue(id, out float draft))
             return;
 
-        string? error = AtmosConfigSettings.ValidateConfigValue(field, draft, domain);
+        string? error = AtmosConfigSettings.ValidateConfigValue(field, draft);
         if (error != null)
         {
             // Keep the rejected draft on screen so it can be corrected rather than retyped.

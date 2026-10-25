@@ -282,40 +282,38 @@ internal sealed class ConfigurationPatch
     public EulerFlowPatch? EulerFlow { get; init; }
 
     /// <summary>
-    ///     Rejects values outside the domain of their field, as the viewer does.
+    ///     Rejects a value that lies outside the <see cref="AtmosConfigFieldInfo.Domain" /> of its field.
     /// </summary>
     /// <exception cref="ArgumentException">A value is not finite or is outside its range.</exception>
     internal void Validate()
     {
-        Check(AtmosConfigFields.GlobalTemperature, GlobalTemperatureK, ConfigDomain.Positive);
-        Check(AtmosConfigFields.DefaultTemperatureFallback, DefaultTemperatureFallbackK, ConfigDomain.Positive);
-        Check(
-            AtmosConfigFields.DefaultMolarHeatCapacityAtConstantVolume,
-            DefaultMolarHeatCapacityAtConstantVolume,
-            ConfigDomain.Positive);
-
-        Check(AtmosConfigFields.VoxelVolume, VoxelVolumeM3, ConfigDomain.Positive);
-        Check(AtmosConfigFields.SaturationReferencePressure, SaturationReferencePressurePa, ConfigDomain.Positive);
-        Check(AtmosConfigFields.DefaultDiffusionCoefficient, DefaultDiffusionCoefficient, ConfigDomain.NonNegative);
-        Check(AtmosConfigFields.SpaceTemperature, SpaceTemperatureK, ConfigDomain.Positive);
-        Check(AtmosConfigFields.BulkFlowCoefficient, BulkFlowCoefficient, ConfigDomain.UnitInterval);
-        Check(AtmosConfigFields.VacuumThreshold, VacuumThresholdPa, ConfigDomain.NonNegative);
-        Check(AtmosConfigFields.SleepEpsilon, SleepEpsilonPercent, ConfigDomain.NonNegative);
-        Check(AtmosConfigFields.ThermalConductance, ThermalConductance, ConfigDomain.NonNegative);
-        Check(AtmosConfigFields.CondensationRateFactor, CondensationRateFactor, ConfigDomain.UnitInterval);
-        Check(
-            AtmosConfigFields.MaxPressureTransferFractionPerNeighbor,
-            MaxPressureTransferFractionPerNeighbor,
-            ConfigDomain.UnitInterval);
-
-        Check(AtmosConfigFields.AccumulatorWakeThreshold, AccumulatorWakeThresholdPa, ConfigDomain.NonNegative);
-        Check(AtmosConfigFields.SleepThreshold, SleepThreshold, ConfigDomain.NonNegative);
-        Check(AtmosConfigFields.AccumulatorMaxAliveTicks, AccumulatorMaxAliveTicks, ConfigDomain.NonNegative);
+        Check(AtmosConfigFields.GlobalTemperature, GlobalTemperatureK);
+        Check(AtmosConfigFields.DefaultTemperatureFallback, DefaultTemperatureFallbackK);
+        Check(AtmosConfigFields.DefaultMolarHeatCapacityAtConstantVolume, DefaultMolarHeatCapacityAtConstantVolume);
+        Check(AtmosConfigFields.VoxelVolume, VoxelVolumeM3);
+        Check(AtmosConfigFields.SaturationReferencePressure, SaturationReferencePressurePa);
+        Check(AtmosConfigFields.DefaultDiffusionCoefficient, DefaultDiffusionCoefficient);
+        Check(AtmosConfigFields.SpaceTemperature, SpaceTemperatureK);
+        Check(AtmosConfigFields.BulkFlowCoefficient, BulkFlowCoefficient);
+        Check(AtmosConfigFields.VacuumThreshold, VacuumThresholdPa);
+        Check(AtmosConfigFields.SleepEpsilon, SleepEpsilonPercent);
+        Check(AtmosConfigFields.ThermalConductance, ThermalConductance);
+        Check(AtmosConfigFields.CondensationRateFactor, CondensationRateFactor);
+        Check(AtmosConfigFields.MaxPressureTransferFractionPerNeighbor, MaxPressureTransferFractionPerNeighbor);
+        Check(AtmosConfigFields.AccumulatorWakeThreshold, AccumulatorWakeThresholdPa);
+        Check(AtmosConfigFields.SleepThreshold, SleepThreshold);
+        Check(AtmosConfigFields.AccumulatorMaxAliveTicks, AccumulatorMaxAliveTicks);
+        Check(AtmosConfigFields.ReferenceMolarMass, ReferenceMolarMassKgPerMol);
+        EulerFlow?.Validate();
     }
 
-    private static void Check(AtmosConfigFieldInfo field, float? value, ConfigDomain domain)
+    /// <summary>
+    ///     Checks one patched value against the domain of its field. A missing value passes.
+    /// </summary>
+    /// <exception cref="ArgumentException">The value is outside the domain of the field.</exception>
+    internal static void Check(AtmosConfigFieldInfo field, float? value)
     {
-        if (value is { } present && AtmosConfigSettings.ValidateConfigValue(field, present, domain) is { } message)
+        if (value is { } present && AtmosConfigSettings.ValidateConfigValue(field, present) is { } message)
             throw new ArgumentException(message);
     }
 
@@ -393,6 +391,21 @@ internal sealed class EulerFlowPatch
     public string? Reconstruction { get; init; }
     public float? MomentumDampingPerSecond { get; init; }
     public float? DefaultLinkAreaFraction { get; init; }
+
+    /// <summary>
+    ///     Rejects a value that lies outside the <see cref="AtmosConfigFieldInfo.Domain" /> of its field.
+    /// </summary>
+    /// <exception cref="ArgumentException">A value is not finite or is outside its range.</exception>
+    internal void Validate()
+    {
+        ConfigurationPatch.Check(AtmosConfigFields.EulerCourantNumber, CourantNumber);
+        ConfigurationPatch.Check(AtmosConfigFields.EulerMaxSubstepsPerTick, MaxSubstepsPerTick);
+        ConfigurationPatch.Check(AtmosConfigFields.EulerVelocityFloor, VelocityFloorMps);
+        ConfigurationPatch.Check(AtmosConfigFields.EulerMaxVelocity, MaxVelocityMps);
+        ConfigurationPatch.Check(AtmosConfigFields.EulerWakePressureDelta, WakePressureDeltaPa);
+        ConfigurationPatch.Check(AtmosConfigFields.EulerMomentumDamping, MomentumDampingPerSecond);
+        ConfigurationPatch.Check(AtmosConfigFields.EulerDefaultLinkAreaFraction, DefaultLinkAreaFraction);
+    }
 
     /// <summary>
     ///     Replaces the configuration's <see cref="EulerFlowConfig" /> entry with one that applies this patch.

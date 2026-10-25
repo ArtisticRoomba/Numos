@@ -306,6 +306,34 @@ public sealed class HeadlessProtocolTests
     }
 
     [Test]
+    public async Task UpdateConfig_RejectsEulerAndMolarMassValuesOutsideTheirDomain()
+    {
+        var run = await RunAsync(
+            CreateProject("create", 2, 1, 1),
+            Request("courant", "updateConfig", "\"config\":{\"eulerFlow\":{\"courantNumber\":1.5}}"),
+            Request("substeps", "updateConfig", "\"config\":{\"eulerFlow\":{\"maxSubstepsPerTick\":-1}}"),
+            Request("linkArea", "updateConfig", "\"config\":{\"eulerFlow\":{\"defaultLinkAreaFraction\":2}}"),
+            Request("molarMass", "updateConfig", "\"config\":{\"referenceMolarMassKgPerMol\":0}"),
+            Request("config", "getConfig"));
+
+        string ErrorMessage(string id)
+        {
+            return run.Find(id).GetProperty("error").GetProperty("message").GetString()!;
+        }
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(run.ErrorCode("courant"), Is.EqualTo("operationRejected"));
+            Assert.That(run.ErrorCode("substeps"), Is.EqualTo("operationRejected"));
+            Assert.That(run.ErrorCode("linkArea"), Is.EqualTo("operationRejected"));
+            Assert.That(run.ErrorCode("molarMass"), Is.EqualTo("operationRejected"));
+            Assert.That(ErrorMessage("courant"), Does.StartWith("Courant number must"));
+            Assert.That(ErrorMessage("molarMass"), Does.StartWith("Reference molar mass must"));
+            Assert.That(run.Result("config").GetProperty("config").TryGetProperty("eulerFlow", out _), Is.False);
+        });
+    }
+
+    [Test]
     public async Task Solvers_ListDisableAndReset()
     {
         var run = await RunAsync(

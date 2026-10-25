@@ -37,4 +37,21 @@ public sealed class AtmosConfigSettingsTests
 
         Assert.That(config.SolverConfigurations, Is.EqualTo(new IAtmosSolverConfiguration[] { reactions, replacement }));
     }
+
+    [Test]
+    public void ValidateConfigValue_UsesTheDomainOfTheField()
+    {
+        Assert.Multiple(() =>
+        {
+            Assert.That(AtmosConfigSettings.ValidateConfigValue(AtmosConfigFields.GlobalTemperature, 0f), Is.Not.Null);
+            Assert.That(AtmosConfigSettings.ValidateConfigValue(AtmosConfigFields.GlobalTemperature, 293f), Is.Null);
+            Assert.That(AtmosConfigSettings.ValidateConfigValue(AtmosConfigFields.VacuumThreshold, 0f), Is.Null);
+            Assert.That(AtmosConfigSettings.ValidateConfigValue(AtmosConfigFields.VacuumThreshold, -1f), Is.Not.Null);
+            Assert.That(AtmosConfigSettings.ValidateConfigValue(AtmosConfigFields.BulkFlowCoefficient, 1.1f), Is.Not.Null);
+            Assert.That(AtmosConfigSettings.ValidateConfigValue(AtmosConfigFields.EulerCourantNumber, 0f), Is.Not.Null);
+            Assert.That(AtmosConfigSettings.ValidateConfigValue(AtmosConfigFields.EulerCourantNumber, 1f), Is.Null);
+            Assert.That(AtmosConfigSettings.ValidateConfigValue(AtmosConfigFields.ReferenceMolarMass, float.NaN), Is.Not.Null);
+            Assert.That(AtmosConfigSettings.ValidateConfigValue(AtmosConfigFields.EulerReconstruction, -5f), Is.Null);
+        });
+    }
 }

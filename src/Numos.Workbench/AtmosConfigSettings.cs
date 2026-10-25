@@ -85,14 +85,16 @@ public static class AtmosConfigSettings
     /// <summary>
     ///     Checks a proposed value against the domain of its field.
     /// </summary>
-    /// <param name="field">Display wording for the field, used in the message.</param>
+    /// <param name="field">The field. Its label and unit appear in the message.</param>
     /// <param name="value">The proposed value.</param>
-    /// <param name="domain">The values the field accepts.</param>
-    /// <returns>A message that explains the rejection, or <see langword="null" /> when the value is valid.</returns>
-    public static string? ValidateConfigValue(AtmosConfigFieldInfo field, float value, ConfigDomain domain)
+    /// <returns>
+    ///     A message that explains the rejection, or <see langword="null" /> when the value is valid or the field has
+    ///     no <see cref="AtmosConfigFieldInfo.Domain" />.
+    /// </returns>
+    public static string? ValidateConfigValue(AtmosConfigFieldInfo field, float value)
     {
         string unit = field.Unit.Length == 0 ? string.Empty : " " + field.Unit;
-        return domain switch
+        return field.Domain switch
         {
             ConfigDomain.Positive when !float.IsFinite(value) || value <= 0f =>
                 $"{field.Label} must be finite and above 0{unit}. The previous value is still applied.",
