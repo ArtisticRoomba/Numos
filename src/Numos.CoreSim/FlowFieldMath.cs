@@ -1,6 +1,7 @@
 using Magnitudo;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.Datatypes.Snapshots;
+using Numos.CoreSim.Solvers;
 using Numos.Maths;
 
 namespace Numos.CoreSim;
@@ -82,12 +83,19 @@ public static class FlowFieldMath
         }
 
         CubicMetre volume = config.GetVoxelVolume();
+        Span<KilogramPerMole> molarMasses = gases.Length <= AtmosSolverMath.MolarMassStackLimit
+            ? stackalloc KilogramPerMole[AtmosSolverMath.MolarMassStackLimit]
+            : new KilogramPerMole[gases.Length];
+
+        for (int gas = 0; gas < gases.Length; gas++)
+            molarMasses[gas] = config.GetMolarMass(gases[gas].GasId);
+
         for (int index = 0; index < voxelCount; index++)
         {
             int room = snapshot.VoxelRoomMap[index];
             destination[index] = room == VoxelClassification.RoomSolid || room == VoxelClassification.RoomVoid
                 ? float.NaN
-                : GetDensity(gases, index, config, volume);
+                : GetDensity(gases, index, molarMasses, volume);
         }
     }
 
@@ -242,6 +250,23 @@ public static class FlowFieldMath
             Mole moles = gas.Moles[localIndex];
             if (float.IsFinite(moles) && moles > 0f)
                 mass += moles * config.GetMolarMass(gas.GasId);
+        }
+
+        return mass / volume;
+    }
+
+    private static KilogramPerCubicMetre GetDensity(
+        GasSnapshot[] gases,
+        int localIndex,
+        ReadOnlySpan<KilogramPerMole> molarMasses,
+        CubicMetre volume)
+    {
+        Kilogram mass = 0f;
+        for (int gas = 0; gas < gases.Length; gas++)
+        {
+            Mole moles = gases[gas].Moles[localIndex];
+            if (float.IsFinite(moles) && moles > 0f)
+                mass += moles * molarMasses[gas];
         }
 
         return mass / volume;

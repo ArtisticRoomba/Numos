@@ -270,6 +270,11 @@ internal sealed partial class AtmosKernel
         if (op.Parts.HasFlag(AtmosVoxelBoxParts.Velocity))
         {
             CubicMetre volume = _config.GetVoxelVolume();
+            Span<KilogramPerMole> molarMasses = chunk.ActiveGasCount <= AtmosSolverMath.MolarMassStackLimit
+                ? stackalloc KilogramPerMole[AtmosSolverMath.MolarMassStackLimit]
+                : new KilogramPerMole[chunk.ActiveGasCount];
+
+            AtmosSolverMath.ResolveMolarMasses(_config, chunk, molarMasses);
             for (int z = z0; z <= z1; z++)
             for (int y = y0; y <= y1; y++)
             {
@@ -287,7 +292,7 @@ internal sealed partial class AtmosKernel
                     {
                         Mole moles = chunk.ActiveGases[gas].Moles[index];
                         if (float.IsFinite(moles) && moles > 0f)
-                            gasMass += moles * _config.GetMolarMass(chunk.ActiveGases[gas].GasId);
+                            gasMass += moles * molarMasses[gas];
                     }
 
                     KilogramPerCubicMetre density = gasMass / volume;

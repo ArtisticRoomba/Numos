@@ -165,6 +165,11 @@ internal static class AtmosSolverMath
     }
 
     /// <summary>
+    ///     Gas count up to which a per-channel molar-mass table lives on the stack. A larger table goes on the heap.
+    /// </summary>
+    internal const int MolarMassStackLimit = 64;
+
+    /// <summary>
     ///     Derives a voxel's bulk velocity from its stored momentum: <c>v = p / m</c>, with the gas mass
     ///     <c>m = Σ n_g · M_g</c> summed over the positive gas amounts in channel order.
     /// </summary>
@@ -195,6 +200,63 @@ internal static class AtmosSolverMath
             mass += moles * config.GetMolarMass(chunk.ActiveGases[gas].GasId);
         }
 
+        DivideMomentumByMass(chunk, voxelIndex, mass, out x, out y, out z);
+    }
+
+    /// <summary>
+    ///     Derives a voxel's bulk velocity from a molar-mass table that the caller resolved once for the whole chunk.
+    ///     See <see cref="ResolveMolarMasses" />.
+    /// </summary>
+    /// <remarks>
+    ///     Use this overload in a loop over many voxels. It gives the same result as the configuration overload,
+    ///     without an interface call per voxel and gas. The table holds the molar mass of each active gas channel,
+    ///     indexed like <see cref="AtmosChunk.ActiveGases" />.
+    /// </remarks>
+    internal static void ComputeVoxelVelocity(
+        ReadOnlySpan<KilogramPerMole> molarMasses, AtmosChunk chunk, ushort voxelIndex,
+        out MetrePerSecond x, out MetrePerSecond y, out MetrePerSecond z)
+    {
+        if (chunk.IsVacuum[voxelIndex])
+        {
+            x = 0f;
+            y = 0f;
+            z = 0f;
+            return;
+        }
+
+        Kilogram mass = 0f;
+        for (int gas = 0; gas < chunk.ActiveGasCount; gas++)
+        {
+            Mole moles = chunk.ActiveGases[gas].Moles[voxelIndex];
+            if (moles <= 0f)
+                continue;
+
+            mass += moles * molarMasses[gas];
+        }
+
+        DivideMomentumByMass(chunk, voxelIndex, mass, out x, out y, out z);
+    }
+
+    /// <summary>
+    ///     Resolves the molar mass of every active gas channel of a chunk.
+    /// </summary>
+    /// <param name="config">The configuration that supplies the molar masses.</param>
+    /// <param name="chunk">The chunk whose active gas channels get a molar mass.</param>
+    /// <param name="destination">
+    ///     Receives one value per active channel, in channel order. It must hold at least
+    ///     <see cref="AtmosChunk.ActiveGasCount" /> entries.
+    /// </param>
+    internal static void ResolveMolarMasses(
+        IAtmosConfig config, AtmosChunk chunk, Span<KilogramPerMole> destination)
+    {
+        for (int gas = 0; gas < chunk.ActiveGasCount; gas++)
+            destination[gas] = config.GetMolarMass(chunk.ActiveGases[gas].GasId);
+    }
+
+    private static void DivideMomentumByMass(
+        AtmosChunk chunk, ushort voxelIndex, Kilogram mass,
+        out MetrePerSecond x, out MetrePerSecond y, out MetrePerSecond z)
+    {
         if (mass <= 0f)
         {
             x = 0f;

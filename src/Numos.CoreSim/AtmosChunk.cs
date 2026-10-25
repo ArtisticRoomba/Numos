@@ -920,10 +920,15 @@ internal class AtmosChunk
 
         if (includeVelocity)
         {
+            Span<KilogramPerMole> molarMasses = ActiveGasCount <= AtmosSolverMath.MolarMassStackLimit
+                ? stackalloc KilogramPerMole[AtmosSolverMath.MolarMassStackLimit]
+                : new KilogramPerMole[ActiveGasCount];
+
+            AtmosSolverMath.ResolveMolarMasses(config, this, molarMasses);
             for (int index = 0; index < VoxelCount; index++)
             {
                 AtmosSolverMath.ComputeVoxelVelocity(
-                    config,
+                    molarMasses,
                     this,
                     (ushort)index,
                     out snapshot.VelocityX[index],

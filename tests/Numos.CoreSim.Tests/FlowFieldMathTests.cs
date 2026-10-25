@@ -61,6 +61,44 @@ public sealed class FlowFieldMathTests
         });
     }
 
+    // 3 gases fit the stack table, 70 gases need the heap table.
+    [TestCase(3)]
+    [TestCase(70)]
+    public void ComputeDensity_MatchesGetDensityForEveryVoxel(int gasCount)
+    {
+        var config = new AtmosConfig { VoxelVolume = 2f };
+        var gases = new GasSnapshot[gasCount];
+        for (int gas = 0; gas < gasCount; gas++)
+        {
+            // Every fifth gas has no molar mass, so it weighs the reference.
+            config.GasRegistry.Add(new GasProperties
+            {
+                Name = $"Gas{gas}", MolarMass = gas % 5 == 0 ? 0f : 0.001f * (gas + 1)
+            });
+            gases[gas] = new GasSnapshot
+            {
+                GasId = gas, Moles = [0.5f + gas, gas % 3 == 0 ? float.NaN : 0.25f * gas, -1f, 0f]
+            };
+        }
+
+        var snapshot = new AtmosChunkSnapshot
+        {
+            Dimensions = new Int3(4, 1, 1),
+            GridPosition = new Int3(0, 0, 0),
+            VoxelRoomMap = [1, 1, 1, 1],
+            Gases = gases
+        };
+
+        float[] density = new float[4];
+        FlowFieldMath.ComputeDensity(in snapshot, config, density);
+
+        Assert.Multiple(() =>
+        {
+            for (int index = 0; index < density.Length; index++)
+                Assert.That(density[index], Is.EqualTo((float)FlowFieldMath.GetDensity(gases, index, config)));
+        });
+    }
+
     [Test]
     public void GradientMagnitude_UsesCentralOneSidedAndZeroDifferences()
     {
