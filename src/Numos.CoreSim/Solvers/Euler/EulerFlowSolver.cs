@@ -352,15 +352,9 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
 
                 AtmosChunk neighbor = workspace.NeighborChunks[direction]!;
                 ushort neighborIndex = EulerFaceTopology.NeighborIndexAcrossFace(chunk, voxelIndex, direction);
-                MetrePerSecond normalVelocity = direction switch
-                {
-                    0 or 1 => read.CellVelocityX[voxelIndex],
-                    2 or 3 => read.CellVelocityY[voxelIndex],
-                    _ => read.CellVelocityZ[voxelIndex]
-                };
-
+                MetrePerSecond normalVelocity = read.CellVelocity(direction >> 1)[voxelIndex];
                 Pascal pressureDelta = chunk.TotalPressure[voxelIndex] - neighbor.TotalPressure[neighborIndex];
-                if (MathF.Abs(normalVelocity) > velocityFloor || MathF.Abs(pressureDelta) > wakeDelta)
+                if (EulerSweep.WakesNeighbor(normalVelocity, pressureDelta, velocityFloor, wakeDelta))
                     workspace.WakeRequests[direction] = true;
             }
         }

@@ -595,8 +595,9 @@ internal static class EulerSweep
 
             AtmosChunk neighborChunk = workspace.NeighborChunks[direction]!;
             Pascal neighborPressure = neighborChunk.TotalPressure[neighborIndex];
-            if (MathF.Abs(cell.NormalVelocity) > settings.VelocityFloor ||
-                MathF.Abs(cell.Pressure - neighborPressure) > settings.WakePressureDelta)
+            if (WakesNeighbor(
+                    cell.NormalVelocity, cell.Pressure - neighborPressure, settings.VelocityFloor,
+                    settings.WakePressureDelta))
                 workspace.WakeRequests[direction] = true;
 
             HllcFlux.SolveWall(in cell, cellIsLeft, out flux);
@@ -614,6 +615,25 @@ internal static class EulerSweep
         }
 
         Store(in flux, EulerUpwindSide.Self, cellIndex, faceArea, scratch, face);
+    }
+
+    /// <summary>
+    ///     Whether an open face into a chunk without a workspace asks for that chunk's activation. It does when the
+    ///     cell moves normal to the face faster than <paramref name="velocityFloor" /> or the two sides differ in
+    ///     pressure by more than <paramref name="wakeDelta" />.
+    /// </summary>
+    /// <param name="normalVelocity">The cell's velocity along the face normal.</param>
+    /// <param name="pressureDelta">The cell's pressure minus the neighbour's pressure.</param>
+    /// <param name="velocityFloor">The stage's <see cref="EulerFlowConfig.VelocityFloor" />.</param>
+    /// <param name="wakeDelta">The stage's <see cref="EulerFlowConfig.WakePressureDelta" />.</param>
+    /// <remarks>
+    ///     The sweep and the activation pre-pass both call this. The pre-pass passes the live pressure difference.
+    /// </remarks>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static bool WakesNeighbor(
+        MetrePerSecond normalVelocity, Pascal pressureDelta, MetrePerSecond velocityFloor, Pascal wakeDelta)
+    {
+        return MathF.Abs(normalVelocity) > velocityFloor || MathF.Abs(pressureDelta) > wakeDelta;
     }
 
     /// <summary>
