@@ -1,3 +1,4 @@
+using System.Numerics;
 using Numos.API;
 using Numos.CoreSim;
 using Numos.Maths;
@@ -120,7 +121,7 @@ public sealed class WorkbenchRegionTests
 
         var result = session.EditRegion(
             new VoxelBox(new Int3(0, 0, 0), new Int3(7, 1, 0)),
-            new RegionEdit(false, 1, true, 300f, [new RegionGas(0, 1f)], null, new RegionVelocity(2f, 0f, 0f)));
+            new RegionEdit(false, 1, true, 300f, [new RegionGas(0, 1f)], null, new Vector3(2f, 0f, 0f)));
 
         var added = session.Timeline.Operations.Skip(before).ToArray();
         Assert.Multiple(() =>

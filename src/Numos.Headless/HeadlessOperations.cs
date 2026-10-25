@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Numerics;
 using System.Text.Json;
 using Numos.API;
 using Numos.CoreSim;
@@ -483,7 +484,7 @@ internal sealed partial class HeadlessOperations
         });
     }
 
-    private static RegionVelocity? ParseVelocity(VelocityRequest? velocity)
+    private static Vector3? ParseVelocity(VelocityRequest? velocity)
     {
         if (velocity == null)
             return null;
@@ -498,7 +499,7 @@ internal sealed partial class HeadlessOperations
                 "velocity components must be finite numbers in m/s.");
         }
 
-        return new RegionVelocity(x, y, z);
+        return new Vector3(x, y, z);
     }
 
     private static WorkbenchFieldOptions ParseFieldOptions(float? schlierenReference, string property)

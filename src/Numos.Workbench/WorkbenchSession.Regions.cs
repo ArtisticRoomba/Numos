@@ -24,14 +24,6 @@ namespace Numos.Workbench;
 public readonly record struct RegionGas(int GasId, float? Moles = null, float? PartialPressurePa = null);
 
 /// <summary>
-///     A bulk velocity in metres per second (m/s).
-/// </summary>
-/// <param name="X">The x component.</param>
-/// <param name="Y">The y component.</param>
-/// <param name="Z">The z component.</param>
-public readonly record struct RegionVelocity(float X, float Y, float Z);
-
-/// <summary>
 ///     The changes <see cref="WorkbenchSession.EditRegion" /> applies to a box of voxels.
 /// </summary>
 /// <remarks>
@@ -48,9 +40,9 @@ public readonly record struct RegionVelocity(float X, float Y, float Z);
 ///     <see cref="AtmosConfig.DefaultTemperatureFallback" />.
 /// </param>
 /// <param name="Velocity">
-///     The bulk velocity of the gas in every air voxel, or <see langword="null" /> to keep the momentum. The session
-///     stores momentum equal to the voxel's gas mass times the velocity, after all other changes. A voxel with no gas
-///     keeps zero momentum.
+///     The bulk velocity of the gas in every air voxel in metres per second (m/s), or <see langword="null" /> to keep
+///     the momentum. The session stores momentum equal to the voxel's gas mass times the velocity, after all other
+///     changes. A voxel with no gas keeps zero momentum.
 /// </param>
 public sealed record RegionEdit(
     bool CreateChunks = false,
@@ -59,7 +51,7 @@ public sealed record RegionEdit(
     float? TemperatureK = null,
     IReadOnlyList<RegionGas>? Gases = null,
     float? GasTemperatureK = null,
-    RegionVelocity? Velocity = null);
+    Vector3? Velocity = null);
 
 /// <summary>
 ///     What <see cref="WorkbenchSession.EditRegion" /> did.
@@ -231,9 +223,7 @@ public sealed partial class WorkbenchSession
                         .Select(static gas => new AtmosGasAmount(gas.GasId, gas.Moles))
                         .ToArray(),
                     GasTemperatureK = plan.GasTemperature,
-                    Velocity = plan.Velocity is { } velocity
-                        ? new Vector3(velocity.X, velocity.Y, velocity.Z)
-                        : null
+                    Velocity = plan.Velocity
                 };
 
                 var applied = target.EditVoxelBox(box.Min, box.Max, boxEdit);
@@ -258,7 +248,7 @@ public sealed partial class WorkbenchSession
     private readonly record struct RegionGasPlan(
         (int GasId, float Moles)[] Gases,
         float GasTemperature,
-        RegionVelocity? Velocity);
+        Vector3? Velocity);
 
     private RegionGasPlan PlanRegionGases(RegionEdit edit, AtmosConfig config)
     {

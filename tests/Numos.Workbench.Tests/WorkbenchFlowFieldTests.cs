@@ -1,3 +1,4 @@
+using System.Numerics;
 using Numos.API;
 using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Primitives;
@@ -212,7 +213,7 @@ public sealed class WorkbenchFlowFieldTests
 
         var result = session.EditRegion(
             new VoxelBox(new Int3(0, 0, 0), new Int3(3, 0, 0)),
-            new RegionEdit(Velocity: new RegionVelocity(251f, -4f, 0.5f)));
+            new RegionEdit(Velocity: new Vector3(251f, -4f, 0.5f)));
 
         float[][] values = session.ReadBox(Row, ["velocityX", "velocityY", "velocityZ", "speed"]);
         float expectedSpeed = MathF.Sqrt(251f * 251f + 16f + 0.25f);
@@ -242,16 +243,16 @@ public sealed class WorkbenchFlowFieldTests
 
         var result = session.EditRegion(
             new VoxelBox(new Int3(0, 0, 0), new Int3(3, 0, 0)),
-            new RegionEdit(Velocity: new RegionVelocity(10f, 0f, 0f)));
+            new RegionEdit(Velocity: new Vector3(10f, 0f, 0f)));
 
         Assert.Multiple(() =>
         {
             Assert.That(result.VelocityVoxels, Is.EqualTo(1));
             Assert.That(result.VoxelsEdited, Is.EqualTo(4));
             Assert.Throws<ArgumentException>(() => session.EditRegion(
-                Row, new RegionEdit(Velocity: new RegionVelocity(float.NaN, 0f, 0f))));
+                Row, new RegionEdit(Velocity: new Vector3(float.NaN, 0f, 0f))));
             Assert.Throws<ArgumentException>(() => session.EditRegion(
-                Row, new RegionEdit(Velocity: new RegionVelocity(0f, float.PositiveInfinity, 0f))));
+                Row, new RegionEdit(Velocity: new Vector3(0f, float.PositiveInfinity, 0f))));
         });
     }
 
@@ -287,7 +288,7 @@ public sealed class WorkbenchFlowFieldTests
         for (int x = 0; x < 8; x++)
             SetMoles(session, x, x + 1f);
 
-        session.EditRegion(Row, new RegionEdit(Velocity: new RegionVelocity(5f, 0f, 0f)));
+        session.EditRegion(Row, new RegionEdit(Velocity: new Vector3(5f, 0f, 0f)));
         var density = session.RenderSlice(SliceAxis.Z, 0, "density");
         var velocity = session.RenderSlice(SliceAxis.Z, 0, "velocity-x");
 
