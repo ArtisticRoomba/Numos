@@ -233,9 +233,8 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
     ///     are added by <see cref="ShareAxisGases" /> before each sweep, so a chunk activated mid-tick is covered
     ///     by the next sweep's merge like everyone else.
     /// </remarks>
-    private EulerChunkWorkspace Activate(AtmosChunk chunk, AtmosSolverExecutionContext context)
+    private void Activate(AtmosChunk chunk, AtmosSolverExecutionContext context)
     {
-        AtmosSolverConfigSnapshot config = context.TickConfig;
         if (!chunk.IsAwake)
             chunk.Wake();
 
@@ -273,7 +272,6 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
 
         _workspaceByDenseId[chunk.DenseId] = workspace;
         _pendingScan.Add(workspace);
-        return workspace;
     }
 
     /// <summary>
@@ -590,14 +588,14 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
         // Each chunk writes only its own fields and its own counter here. The tick thread sums the counters.
         ParallelPhase.Run(_activeCount, new WriteBackAction(_active, config, settings));
         int negativeInternalEnergy = 0;
-        var counters = new EulerSweepCounters();
+        int clampedVelocity = 0;
+        int negativeMoles = 0;
         int nonFiniteCells = 0;
         for (int index = 0; index < _activeCount; index++)
         {
             EulerSweepCounters repairs = _active[index].SweepCounters;
-            counters.ClampedVelocity += repairs.ClampedVelocity;
-            counters.NegativeMoles += repairs.NegativeMoles;
-            counters.NonFiniteCells += repairs.NonFiniteCells;
+            clampedVelocity += repairs.ClampedVelocity;
+            negativeMoles += repairs.NegativeMoles;
             nonFiniteCells += repairs.NonFiniteCells;
             nonFiniteCells += _active[index].NonFiniteCellsGathered;
             negativeInternalEnergy += _active[index].NegativeInternalEnergyWritten;
@@ -630,9 +628,9 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
             capEngaged,
             maxCourant,
             maxSignalSpeed,
-            counters.ClampedVelocity,
+            clampedVelocity,
             negativeInternalEnergy,
-            counters.NegativeMoles,
+            negativeMoles,
             nonFiniteCells);
     }
 
