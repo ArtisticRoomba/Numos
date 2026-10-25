@@ -195,7 +195,6 @@ public sealed partial class WorkbenchSession : IDisposable
         AtmosWorld? world = null;
         try
         {
-            // The model is set at construction because the pipeline rejects stage swaps once the timeline records.
             world = new AtmosWorld(config, options.TransportModel);
             var simulation = world.CreateSimulation(options.ChunkWidth, options.ChunkHeight, options.ChunkDepth);
             if (prepare != null)
