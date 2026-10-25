@@ -225,10 +225,7 @@ public sealed partial class WorkbenchSession
     public bool ApplyTransportPreset(AtmosTransportModel model)
     {
         var world = RequireWorld();
-        var current = world.Solvers.Steps
-            .Select(static step => new AtmosWorldSolverLayoutEntry(step.Name, step.IsEnabled))
-            .ToArray();
-
+        var current = SolverPipelineEditor.ToLayout(world.Solvers.Steps);
         return SetSolverLayout(AtmosWorldSolverPipeline.ConvertTransportModel(current, model));
     }
 

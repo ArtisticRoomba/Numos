@@ -178,7 +178,11 @@ public static class SolverPipelineEditor
         return result;
     }
 
-    private static List<AtmosWorldSolverLayoutEntry> ToLayout(IReadOnlyList<AtmosWorldSolverStep> steps)
+    /// <summary>
+    ///     Copies the name and enabled flag of each stage into a new editable layout.
+    /// </summary>
+    /// <param name="steps">The current stages in execution order.</param>
+    internal static List<AtmosWorldSolverLayoutEntry> ToLayout(IReadOnlyList<AtmosWorldSolverStep> steps)
     {
         var result = new List<AtmosWorldSolverLayoutEntry>(steps.Count + 1);
         foreach (var step in steps)
