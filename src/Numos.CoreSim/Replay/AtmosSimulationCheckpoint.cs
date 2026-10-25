@@ -165,7 +165,7 @@ public sealed partial class AtmosChunkCheckpoint
             throw new InvalidDataException("Chunk dimensions must be positive.");
 
         long voxels = (long)Dimensions.X * Dimensions.Y * Dimensions.Z;
-        if (voxels > ushort.MaxValue)
+        if (voxels > AtmosChunkConstants.MaximumVoxelCount)
             throw new InvalidDataException("Chunk dimensions hold more voxels than a chunk can address.");
 
         if (Classifications.Count != voxels || Temperatures.Count != voxels || Pressures.Count != voxels ||
