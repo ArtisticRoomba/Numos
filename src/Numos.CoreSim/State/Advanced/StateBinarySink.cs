@@ -187,11 +187,25 @@ public struct StateBinarySink : IStateSink
     {
         Span<byte> destination = Reserve(elements.Length);
         elements.CopyTo(destination);
-        if (!BitConverter.IsLittleEndian)
-        {
-            for (int offset = 0; offset < destination.Length; offset += elementSize)
-                destination.Slice(offset, elementSize).Reverse();
-        }
+        ReverseElements(destination, elementSize);
+    }
+
+    /// <summary>
+    ///     Reverses the bytes of each element on a big-endian host. It does nothing on a little-endian host.
+    /// </summary>
+    /// <param name="elements">The elements' bytes, a whole number of elements.</param>
+    /// <param name="elementSize">The size of one element in bytes.</param>
+    /// <remarks>
+    ///     The swap is its own inverse, so the same call converts native bytes to wire bytes and back. The reader uses
+    ///     it too. Only primitives are valid, because a struct's fields would need swapping one by one.
+    /// </remarks>
+    internal static void ReverseElements(Span<byte> elements, int elementSize)
+    {
+        if (BitConverter.IsLittleEndian)
+            return;
+
+        for (int offset = 0; offset < elements.Length; offset += elementSize)
+            elements.Slice(offset, elementSize).Reverse();
     }
 
     private Span<byte> Reserve(int count)

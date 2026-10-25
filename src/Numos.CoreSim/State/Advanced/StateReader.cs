@@ -269,14 +269,7 @@ public ref struct StateReader
             throw new InvalidDataException("State data is truncated.");
 
         var values = new T[count];
-        Span<byte> bytes = MemoryMarshal.AsBytes(values.AsSpan());
-        Take(bytes.Length).CopyTo(bytes);
-        if (!BitConverter.IsLittleEndian)
-        {
-            for (int offset = 0; offset < bytes.Length; offset += size)
-                bytes.Slice(offset, size).Reverse();
-        }
-
+        ReadElements(MemoryMarshal.AsBytes(values.AsSpan()), size);
         return values;
     }
 
@@ -295,11 +288,7 @@ public ref struct StateReader
     public void ReadElements(Span<byte> destination, int elementSize)
     {
         Take(destination.Length).CopyTo(destination);
-        if (!BitConverter.IsLittleEndian)
-        {
-            for (int offset = 0; offset < destination.Length; offset += elementSize)
-                destination.Slice(offset, elementSize).Reverse();
-        }
+        StateBinarySink.ReverseElements(destination, elementSize);
     }
 
     private int ReadLength()
