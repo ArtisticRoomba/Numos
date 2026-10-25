@@ -415,7 +415,7 @@ internal static class EulerSweep
             }
         }
 
-        var cellPass = new EulerCellPass(workspace, axis, timeStep, config, scratch);
+        EulerCellRun cellRun = CreateCellRun(workspace, axis, timeStep, config, scratch);
         MetrePerSecond maxSignalSpeed = 0f;
         bool vectorCells = EulerCellKernel.Enabled && runLength >= EulerCellKernel.Width;
         for (int run = 0; run < runCount; run++)
@@ -427,20 +427,18 @@ internal static class EulerSweep
             if (vectorCells && rowAllAir[firstVoxel / width])
             {
                 done = EulerCellKernel.UpdateRun(
-                    in cellPass.Run, firstVoxel, firstCell, firstBehind, firstBehind + aheadOffset, runLength,
+                    in cellRun, firstVoxel, firstCell, firstBehind, firstBehind + aheadOffset, runLength,
                     ref counters.ClampedVelocity, ref counters.NonFiniteCells, ref maxSignalSpeed);
             }
 
             for (int i = done; i < runLength; i++)
             {
-                int cell = firstCell + i;
                 if (!airMap[firstVoxel + i])
                     continue;
 
-                MetrePerSecond signalSpeed = cellPass.UpdateCell(
-                    firstVoxel + i, firstBehind + i, firstBehind + aheadOffset + i,
-                    scratch.Mass[cell], scratch.TotalMoles[cell], scratch.HeatCapacity[cell],
-                    scratch.NonFiniteSpecies[cell], ref counters);
+                MetrePerSecond signalSpeed = EulerCellKernel.UpdateCell(
+                    in cellRun, firstVoxel + i, firstCell + i, firstBehind + i, firstBehind + aheadOffset + i,
+                    ref counters);
 
                 maxSignalSpeed = MathF.Max(maxSignalSpeed, signalSpeed);
             }
@@ -865,210 +863,43 @@ internal static class EulerSweep
     }
 
     /// <summary>
-    ///     Per-worker scratch for <see cref="SweepBundle" />.
-    /// </summary>
-    [ThreadStatic]
-    private static BundleScratch? t_scratch;
-
-    /// <summary>
-    ///     The per-cell update of one bundle: the buffers and constants it needs, resolved once for the bundle.
+    ///     Resolves the buffers and constants of the cell update once for a bundle.
     /// </summary>
     /// <remarks>
     ///     The normal and tangential momentum arrays are picked from the sweep axis here, so the cell loop does not
     ///     branch on the axis to read them. The tangential pair follows
     ///     <see cref="EulerFaceState.FromCell(EulerChunkState, int, int)" />'s cyclic order: <c>(axis + 1) mod 3</c> and <c>(axis + 2) mod 3</c>.
     /// </remarks>
-    private readonly struct EulerCellPass
+    private static EulerCellRun CreateCellRun(
+        EulerChunkWorkspace workspace, int axis, Second timeStep, AtmosSolverConfigSnapshot config,
+        BundleScratch scratch)
     {
-        private readonly int _axis;
-        private readonly Second _timeStep;
-        private readonly MetrePerSecond _maxVelocity;
-        private readonly CubicMetre _volume;
-        private readonly PascalPerMoleKelvin _pressurePerMoleKelvin;
-        private readonly KilogramMetrePerSecond[] _readNormal;
-        private readonly KilogramMetrePerSecond[] _readTangential1;
-        private readonly KilogramMetrePerSecond[] _readTangential2;
-        private readonly Joule64[] _readEnergy;
-        private readonly EulerChunkState _write;
-        private readonly Newton[] _faceNormal;
-        private readonly Newton[] _faceTangential1;
-        private readonly Newton[] _faceTangential2;
-        private readonly Watt[] _faceEnergy;
-
-        /// <summary>
-        ///     The same arrays and constants, for <see cref="EulerCellKernel" />.
-        /// </summary>
-        public readonly EulerCellRun Run;
-
-        public EulerCellPass(
-            EulerChunkWorkspace workspace, int axis, Second timeStep, AtmosSolverConfigSnapshot config,
-            BundleScratch scratch)
-        {
-            _faceNormal = scratch.FaceNormal;
-            _faceTangential1 = scratch.FaceTangential1;
-            _faceTangential2 = scratch.FaceTangential2;
-            _faceEnergy = scratch.FaceEnergy;
-            EulerChunkState read = workspace.Read;
-            _axis = axis;
-            _timeStep = timeStep;
-            _maxVelocity = config.EulerFlow.MaxVelocity;
-            _volume = config.VoxelVolume;
-            _pressurePerMoleKelvin = config.PressurePerMoleKelvin;
-            _readEnergy = read.Energy;
-            _write = workspace.Write;
-            _readNormal = Momentum(read, axis);
-            _readTangential1 = Momentum(read, (axis + 1) % 3);
-            _readTangential2 = Momentum(read, (axis + 2) % 3);
-            EulerChunkState write = workspace.Write;
-            Run = new EulerCellRun(
-                axis, timeStep, _maxVelocity, _volume, _pressurePerMoleKelvin,
-                _readNormal, _readTangential1, _readTangential2, _readEnergy,
-                Momentum(write, axis), Momentum(write, (axis + 1) % 3), Momentum(write, (axis + 2) % 3), write.Energy,
-                write.Mass, write.TotalMoles, write.HeatCapacity, write,
-                _faceNormal, _faceTangential1, _faceTangential2, _faceEnergy,
-                scratch.Mass, scratch.TotalMoles, scratch.HeatCapacity, scratch.NonFiniteSpecies);
-        }
-
-        private static KilogramMetrePerSecond[] Momentum(EulerChunkState buffer, int axis)
-        {
-            return axis switch
-            {
-                0 => buffer.MomentumX,
-                1 => buffer.MomentumY,
-                _ => buffer.MomentumZ
-            };
-        }
-
-        /// <summary>
-        ///     Advances one air cell by the difference of its two face rates and refreshes its derived state.
-        /// </summary>
-        /// <param name="voxelIndex">The air cell.</param>
-        /// <param name="behind">The scratch index of the face on the cell's lower side.</param>
-        /// <param name="ahead">The scratch index of the face on the cell's upper side.</param>
-        /// <param name="mass">Mass of the cell's new mixture, summed by the species pass.</param>
-        /// <param name="totalMoles">Moles of the cell's new mixture, summed by the species pass.</param>
-        /// <param name="heatCapacity">Heat capacity of the cell's new mixture, summed by the species pass.</param>
-        /// <param name="nonFiniteSpecies">Whether the species pass found a non-finite species update in this cell.</param>
-        /// <param name="counters">The pencil's repair counts.</param>
-        /// <returns>The cell's new signal speed, or zero for a trace cell.</returns>
-        /// <remarks>
-        ///     <para>
-        ///         Every field of the write buffer is written for every air cell, so no stale value from an earlier
-        ///         sweep survives in it.
-        ///     </para>
-        ///     <para>
-        ///         The species pass has already written the species rows. Momentum is updated in float. The energy
-        ///         difference is formed in double so the subtraction from the large thermal part does not lose it.
-        ///         The speed is clamped to <see cref="EulerFlow.EulerFlowConfig.MaxVelocity" /> before the primitive
-        ///         state is rebuilt, and the clamp is counted. A cell whose primitive state does not fit in float
-        ///         keeps its conserved variables but is written as a vacuum with no momentum, and is counted too. A
-        ///         species update that is not finite is written as zero and counts the cell as non-finite too, so a
-        ///         NaN never reaches a gas channel, where every later comparison would let it through.
-        ///     </para>
-        /// </remarks>
-        public MetrePerSecond UpdateCell(
-            int voxelIndex, int behind, int ahead,
-            Kilogram mass, Mole totalMoles, JoulePerKelvin64 heatCapacity, bool nonFiniteSpecies,
-            ref EulerSweepCounters counters)
-        {
-            EulerChunkState write = _write;
-            Second timeStep = _timeStep;
-
-            if (nonFiniteSpecies)
-                counters.NonFiniteCells++;
-
-            KilogramMetrePerSecond normal = _readNormal[voxelIndex] -
-                                            timeStep * (_faceNormal[ahead] - _faceNormal[behind]);
-
-            KilogramMetrePerSecond tangential1 = _readTangential1[voxelIndex] -
-                                                 timeStep * (_faceTangential1[ahead] - _faceTangential1[behind]);
-
-            KilogramMetrePerSecond tangential2 = _readTangential2[voxelIndex] -
-                                                 timeStep * (_faceTangential2[ahead] - _faceTangential2[behind]);
-
-            Joule64 energy = _readEnergy[voxelIndex] - (double)timeStep * ((double)_faceEnergy[ahead] - _faceEnergy[behind]);
-            write.Energy[voxelIndex] = energy;
-
-            write.Mass[voxelIndex] = mass;
-            write.TotalMoles[voxelIndex] = totalMoles;
-            write.HeatCapacity[voxelIndex] = heatCapacity;
-
-            KilogramMetrePerSecond momentumX;
-            KilogramMetrePerSecond momentumY;
-            KilogramMetrePerSecond momentumZ;
-            MetrePerSecond signalSpeed = 0f;
-            if (EulerChunkWorkspace.IsTrace(mass, totalMoles))
-            {
-                momentumX = 0f;
-                momentumY = 0f;
-                momentumZ = 0f;
-                write.SetCell(voxelIndex, default);
-            }
-            else
-            {
-                switch (_axis)
-                {
-                    case 0:
-                        momentumX = normal;
-                        momentumY = tangential1;
-                        momentumZ = tangential2;
-                        break;
-                    case 1:
-                        momentumY = normal;
-                        momentumZ = tangential1;
-                        momentumX = tangential2;
-                        break;
-                    default:
-                        momentumZ = normal;
-                        momentumX = tangential1;
-                        momentumY = tangential2;
-                        break;
-                }
-
-                PerKilogram inverseMass = 1f / mass;
-                MetrePerSecond velocityX = momentumX * inverseMass;
-                MetrePerSecond velocityY = momentumY * inverseMass;
-                MetrePerSecond velocityZ = momentumZ * inverseMass;
-                Scalar speedRatio = (velocityX * velocityX + velocityY * velocityY + velocityZ * velocityZ) /
-                                    (_maxVelocity * _maxVelocity);
-
-                if (speedRatio > 1f)
-                {
-                    counters.ClampedVelocity++;
-                    Scalar scale = 1f / MathF.Sqrt(speedRatio);
-                    momentumX *= scale;
-                    momentumY *= scale;
-                    momentumZ *= scale;
-                }
-
-                EulerCellKind kind = EulerMixture.ToPrimitive(
-                    mass, totalMoles, heatCapacity,
-                    momentumX, momentumY, momentumZ,
-                    energy, _volume, _pressurePerMoleKelvin,
-                    out EulerCellState cell);
-
-                write.SetCell(voxelIndex, in cell);
-                if (kind == EulerCellKind.Gas)
-                {
-                    signalSpeed = cell.SignalSpeed;
-                }
-                else
-                {
-                    if (kind == EulerCellKind.NonFinite && !nonFiniteSpecies)
-                        counters.NonFiniteCells++;
-
-                    momentumX = 0f;
-                    momentumY = 0f;
-                    momentumZ = 0f;
-                }
-            }
-
-            write.MomentumX[voxelIndex] = momentumX;
-            write.MomentumY[voxelIndex] = momentumY;
-            write.MomentumZ[voxelIndex] = momentumZ;
-            return signalSpeed;
-        }
+        EulerChunkState read = workspace.Read;
+        EulerChunkState write = workspace.Write;
+        return new EulerCellRun(
+            axis, timeStep, config.EulerFlow.MaxVelocity, config.VoxelVolume, config.PressurePerMoleKelvin,
+            Momentum(read, axis), Momentum(read, (axis + 1) % 3), Momentum(read, (axis + 2) % 3), read.Energy,
+            Momentum(write, axis), Momentum(write, (axis + 1) % 3), Momentum(write, (axis + 2) % 3), write.Energy,
+            write.Mass, write.TotalMoles, write.HeatCapacity, write,
+            scratch.FaceNormal, scratch.FaceTangential1, scratch.FaceTangential2, scratch.FaceEnergy,
+            scratch.Mass, scratch.TotalMoles, scratch.HeatCapacity, scratch.NonFiniteSpecies);
     }
+
+    private static KilogramMetrePerSecond[] Momentum(EulerChunkState buffer, int axis)
+    {
+        return axis switch
+        {
+            0 => buffer.MomentumX,
+            1 => buffer.MomentumY,
+            _ => buffer.MomentumZ
+        };
+    }
+
+    /// <summary>
+    ///     Per-worker scratch for <see cref="SweepBundle" />.
+    /// </summary>
+    [ThreadStatic]
+    private static BundleScratch? t_scratch;
 
     /// <summary>
     ///     Scratch arrays for one bundle, owned by one worker thread and grown on demand.
