@@ -354,8 +354,37 @@ internal sealed class EulerChunkWorkspace
     /// </summary>
     /// <param name="chunk">The awake chunk to solve.</param>
     /// <param name="config">The tick's configuration snapshot.</param>
+    /// <remarks>
+    ///     This is <see cref="Attach" /> followed by <see cref="Prepare" />.
+    /// </remarks>
     internal void Bind(AtmosChunk chunk, AtmosSolverConfigSnapshot config)
     {
+        Attach(chunk);
+        Prepare(config);
+    }
+
+    /// <summary>
+    ///     Points the workspace at a chunk and clears its neighbour slots and wake requests. Cheap, so the solver
+    ///     calls it on the tick thread before it links neighbours.
+    /// </summary>
+    /// <param name="chunk">The awake chunk to solve.</param>
+    internal void Attach(AtmosChunk chunk)
+    {
+        Chunk = chunk;
+        Array.Clear(NeighborChunks);
+        Array.Clear(NeighborWorkspaces);
+        Array.Clear(WakeRequests);
+    }
+
+    /// <summary>
+    ///     Sizes the storage for the attached chunk and lists the chunk's own gases with a cleared row for each in
+    ///     both buffers. Touches only this workspace and reads only the chunk's gas list, so workspaces can prepare
+    ///     in parallel.
+    /// </summary>
+    /// <param name="config">The tick's configuration snapshot.</param>
+    internal void Prepare(AtmosSolverConfigSnapshot config)
+    {
+        AtmosChunk chunk = Chunk;
         foreach (EulerChunkState buffer in _buffers)
         {
             for (int present = 0; present < GasCount; present++)
@@ -369,7 +398,6 @@ internal sealed class EulerChunkWorkspace
         ListVersion = 0;
         Array.Fill(MergedNeighborVersion, -1);
         NonFiniteCellsGathered = 0;
-        Chunk = chunk;
         _readIndex = 0;
         int voxelCount = chunk.VoxelCount;
         if (OpenMask.Length < voxelCount)
@@ -388,10 +416,6 @@ internal sealed class EulerChunkWorkspace
             PencilSignalSpeed = new MetrePerSecond[pencilCount];
             PencilCounters = new EulerSweepCounters[pencilCount];
         }
-
-        Array.Clear(NeighborChunks);
-        Array.Clear(NeighborWorkspaces);
-        Array.Clear(WakeRequests);
 
         foreach (EulerChunkState buffer in _buffers)
         {

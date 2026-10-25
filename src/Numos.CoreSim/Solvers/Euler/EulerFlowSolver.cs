@@ -221,12 +221,14 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
     }
 
     /// <summary>
-    ///     Gives a chunk a workspace for the rest of the tick: wakes it if asleep, builds its topology, links it to
-    ///     its active neighbours, and queues it for <see cref="GatherPending" />. Tick thread only.
+    ///     Gives a chunk a workspace for the rest of the tick: wakes it if asleep, links it to its active
+    ///     neighbours, and queues it for <see cref="GatherPending" />. Tick thread only.
     /// </summary>
     /// <remarks>
-    ///     The workspace is not gathered yet: its buffers hold nothing until the caller runs
-    ///     <see cref="GatherPending" />, which every batch of activations must do before anything reads them.
+    ///     The workspace is not prepared yet. Its buffers, face masks, and air map hold nothing until the caller
+    ///     runs <see cref="GatherPending" />, which every batch of activations must do before anything reads them.
+    ///     Only the pool pop, the neighbour links, and the active-list insertion happen here, because they depend
+    ///     on activation order.
     ///     The workspace lists only the chunk's own gases here. Rows for gases a neighbour can push across a face
     ///     are added by <see cref="ShareAxisGases" /> before each sweep, so a chunk activated mid-tick is covered
     ///     by the next sweep's merge like everyone else.
@@ -238,7 +240,7 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
             chunk.Wake();
 
         EulerChunkWorkspace workspace = _pool.Count > 0 ? _pool.Pop() : new EulerChunkWorkspace();
-        workspace.Bind(chunk, config);
+        workspace.Attach(chunk);
         for (int direction = 0; direction < NeighborResolution.NeighborDirections.Length; direction++)
         {
             if (!context.TryGetChunk(chunk.GridPosition + NeighborResolution.NeighborDirections[direction], out AtmosChunk neighbor))
@@ -251,8 +253,6 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
                 neighborWorkspace.NeighborWorkspaces[direction ^ 1] = workspace;
         }
 
-        EulerFaceTopology.Build(chunk, workspace.NeighborChunks, workspace.OpenMask, workspace.VoidMask);
-        EulerFaceTopology.BuildAirMap(chunk, workspace.AirMap, workspace.RowAllAir);
         _pendingGather.Add(workspace);
 
         // Canonical order has no numerical effect. It keeps diagnostics reproducible.
@@ -277,9 +277,13 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
     }
 
     /// <summary>
-    ///     Gathers every workspace activated since the last call. Each gather reads only its own chunk and writes
-    ///     only its own buffers and counter, so the batch runs in parallel. Tick thread only.
+    ///     Prepares and gathers every workspace activated since the last call. Tick thread only.
     /// </summary>
+    /// <remarks>
+    ///     Each item reads its chunk, the neighbour chunks' room maps, and its own neighbour slots, which are
+    ///     final once <see cref="Activate" /> returns. It writes only its own workspace. The batch result therefore
+    ///     does not depend on which worker runs which item.
+    /// </remarks>
     private void GatherPending(AtmosSolverConfigSnapshot config)
     {
         ParallelPhase.Run(_pendingGather.Count, new GatherAction(_pendingGather, config));
@@ -308,6 +312,9 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
     ///     Both sides are compared through their live <see cref="AtmosChunk.TotalPressure" /> here, not through
     ///     the gathered cell pressure, so two chunks filled identically compare exactly equal even with a zero
     ///     wake delta. The gathered pressure round-trips through the energy and can differ in the last bit.
+    ///     The scans run in parallel. A scan sets wake flags only on its own workspace, and no activation runs
+    ///     until the scans finish. <see cref="ApplyWakeRequests" /> then reads the flags in canonical order, so the
+    ///     activation order does not depend on the worker count.
     /// </remarks>
     private void ActivateNeighboursAtRest(AtmosSolverExecutionContext context)
     {
@@ -316,8 +323,7 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
         MetrePerSecond velocityFloor = settings.VelocityFloor;
         while (_pendingScan.Count > 0)
         {
-            foreach (EulerChunkWorkspace workspace in _pendingScan)
-                ScanBoundaryFaces(workspace, wakeDelta, velocityFloor);
+            ParallelPhase.Run(_pendingScan.Count, new ScanAction(_pendingScan, wakeDelta, velocityFloor));
 
             _pendingScan.Clear();
             ApplyWakeRequests(context);
@@ -1053,7 +1059,20 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
     {
         public void Invoke(int index)
         {
-            batch[index].Gather(config);
+            EulerChunkWorkspace workspace = batch[index];
+            workspace.Prepare(config);
+            EulerFaceTopology.Build(workspace.Chunk, workspace.NeighborChunks, workspace.OpenMask, workspace.VoidMask);
+            EulerFaceTopology.BuildAirMap(workspace.Chunk, workspace.AirMap, workspace.RowAllAir);
+            workspace.Gather(config);
+        }
+    }
+
+    private readonly struct ScanAction(
+        List<EulerChunkWorkspace> batch, Pascal wakeDelta, MetrePerSecond velocityFloor) : IAction
+    {
+        public void Invoke(int index)
+        {
+            ScanBoundaryFaces(batch[index], wakeDelta, velocityFloor);
         }
     }
 
