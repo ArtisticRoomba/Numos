@@ -477,7 +477,8 @@ internal static class EulerSweep
     ///         Riemann problem described on the class, with the lower global coordinate on the left regardless of
     ///         which chunk this is. Otherwise the face is a wall for this sweep, and the neighbour is requested for
     ///         activation when the pressures differ by more than <see cref="EulerFlowConfig.WakePressureDelta" /> or
-    ///         this cell moves normal to the face at all. The neighbour's pressure is its live
+    ///         this cell moves normal to the face faster than <see cref="EulerFlowConfig.VelocityFloor" />. The
+    ///         stage zeroes slower momentum at tick end, so that motion cannot carry gas into the neighbour. The neighbour's pressure is its live
     ///         <see cref="AtmosChunk.TotalPressure" />, which nothing writes while the chunk is inactive, and its
     ///         momentum is zero by invariant.
     ///     </para>
@@ -518,7 +519,8 @@ internal static class EulerSweep
 
             AtmosChunk neighborChunk = workspace.NeighborChunks[direction]!;
             Pascal neighborPressure = neighborChunk.TotalPressure[neighborIndex];
-            if (cell.NormalVelocity != 0f || MathF.Abs(cell.Pressure - neighborPressure) > settings.WakePressureDelta)
+            if (MathF.Abs(cell.NormalVelocity) > settings.VelocityFloor ||
+                MathF.Abs(cell.Pressure - neighborPressure) > settings.WakePressureDelta)
                 workspace.WakeRequests[direction] = true;
 
             HllcFlux.SolveWall(in cell, cellIsLeft, out flux);

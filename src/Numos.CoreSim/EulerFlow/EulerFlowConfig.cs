@@ -119,11 +119,12 @@ public sealed class EulerFlowConfig : IAtmosSolverConfiguration, IPortableSolver
     /// </summary>
     /// <remarks>
     ///     A face between an awake chunk and a sleeping one is only activated when the pressures differ by more than
-    ///     this, so a 1 Pa ripple at a sealed door does not wake the whole station. Non-finite and negative values
-    ///     normalize to 0, which wakes on any difference.
+    ///     this, so a few pascals of ripple at a sealed door do not wake the whole station. A settled room keeps a few
+    ///     pascals of residual non-uniformity. A lower value lets awake chunks keep re-waking neighbours that just
+    ///     fell asleep. Non-finite and negative values normalize to 0, which wakes on any difference.
     /// </remarks>
     [Quantity("pressure")]
-    public Pascal WakePressureDelta { get; init; } = 1f;
+    public Pascal WakePressureDelta { get; init; } = 10f;
 
     /// <summary>
     ///     Whether the face flux scales its pressure dissipation by the local Mach number.

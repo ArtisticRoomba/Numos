@@ -37,9 +37,10 @@ namespace Numos.CoreSim.Solvers.Euler;
 ///         The active set grows during the tick. An open face into a chunk with no workspace is a wall for the
 ///         sweep that meets it, and that sweep requests the chunk's activation when the two sides differ in
 ///         pressure by more than <see cref="EulerFlowConfig.WakePressureDelta" /> or the active side moves normal
-///         to the face. Requests are applied on the tick thread after the barrier that ends the sweep: the chunk
-///         is woken if asleep, gathered from its live fields (exact, nothing has written them this tick), and
-///         inserted into the active list in canonical chunk order. A pre-pass right after the initial gather runs
+///         to the face faster than <see cref="EulerFlowConfig.VelocityFloor" />. Requests are applied on the tick
+///         thread after the barrier that ends the sweep: the chunk is woken if asleep, gathered from its live
+///         fields (exact, nothing has written them this tick), and inserted into the active list in canonical
+///         chunk order. A pre-pass right after the initial gather runs
 ///         the same test over every boundary face from the live pressures until no new chunk joins, so only a
 ///         front that arrives mid-tick pays the one-sweep wall latency. Activation is derived state and is never
 ///         recorded.
@@ -232,18 +233,21 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
     /// </remarks>
     private void ActivateNeighboursAtRest(AtmosSolverExecutionContext context)
     {
-        Pascal wakeDelta = context.TickConfig.EulerFlow.WakePressureDelta;
+        EulerFlowConfig settings = context.TickConfig.EulerFlow;
+        Pascal wakeDelta = settings.WakePressureDelta;
+        MetrePerSecond velocityFloor = settings.VelocityFloor;
         while (_pendingScan.Count > 0)
         {
             foreach (EulerChunkWorkspace workspace in _pendingScan)
-                ScanBoundaryFaces(workspace, wakeDelta);
+                ScanBoundaryFaces(workspace, wakeDelta, velocityFloor);
 
             _pendingScan.Clear();
             ApplyWakeRequests(context);
         }
     }
 
-    private static void ScanBoundaryFaces(EulerChunkWorkspace workspace, Pascal wakeDelta)
+    private static void ScanBoundaryFaces(
+        EulerChunkWorkspace workspace, Pascal wakeDelta, MetrePerSecond velocityFloor)
     {
         AtmosChunk chunk = workspace.Chunk;
         EulerChunkState read = workspace.Read;
@@ -273,7 +277,7 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
                 };
 
                 Pascal pressureDelta = chunk.TotalPressure[voxelIndex] - neighbor.TotalPressure[neighborIndex];
-                if (normalVelocity != 0f || MathF.Abs(pressureDelta) > wakeDelta)
+                if (MathF.Abs(normalVelocity) > velocityFloor || MathF.Abs(pressureDelta) > wakeDelta)
                     workspace.WakeRequests[direction] = true;
             }
         }

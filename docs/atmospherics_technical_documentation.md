@@ -283,7 +283,7 @@ them.
 | `MaxSubstepsPerTick`      | 64        | Cap on substeps per tick. 0 removes it. When it engages the tick advances less than 50 ms of gas time (time dilation, §5.5) and `LastFlowDiagnostics` says so. Negative values normalize to 0.                                                                                                            |
 | `VelocityFloor`           | 0.005 m/s | Speed below which a voxel's momentum is zeroed at the end of the tick, its kinetic energy becoming heat (§5.7). Without it a settled room sloshes at microscopic speeds forever and never sleeps. 0 disables it.                                                                                            |
 | `MaxVelocity`             | 5000 m/s  | Clamp on voxel speed, with a diagnostic counter. Expansion into vacuum tops out near 1700 m/s for room air, so the clamp only fires when a state has already gone wrong. Invalid values normalize to 5000 m/s.                                                                                              |
-| `WakePressureDelta`       | 1 Pa      | Pressure difference across a chunk face that activates the inactive side (§5.6), so a 1 Pa ripple at a sealed door does not wake the whole station. 0 wakes on any difference.                                                                                                                           |
+| `WakePressureDelta`       | 10 Pa     | Pressure difference across a chunk face that activates the inactive side (§5.6), so a ripple at a sealed door does not wake the whole station. A settled room keeps a few pascals of residual non-uniformity, and a lower value lets awake chunks keep re-waking neighbours that just fell asleep. 0 wakes on any difference.                                                                                                                           |
 | `AllMachCorrection`       | off       | Scales the pressure-dissipation term of the face flux by the local Mach number. Godunov fluxes dissipate at the sound speed, which smears slow flow. The fix keeps it sharp but removes the acoustic damping sleep relies on and admits checkerboards, so it is off until a scene needs it.                 |
 | `Reconstruction`          | `FirstOrder` | How face states are built. Second-order reconstruction is planned. Only `FirstOrder` exists today.                                                                                                                                                                                         |
 | `MomentumDamping`         | 0 /s      | Exponential decay applied to every voxel's momentum per tick, `max(0, 1 − α·Δt_tick)`. A stand-in for wall friction and furniture drag so a hallway does not ring at its acoustic modes indefinitely. 0 applies none.                                                                                       |
@@ -294,7 +294,7 @@ them.
   time.
 - `VelocityFloor` (0.005 m/s). Momentum below it is zeroed at tick end.
 - `MaxVelocity` (5000 m/s), a clamp with a diagnostic counter.
-- `WakePressureDelta` (1 Pa), the boundary activation threshold.
+- `WakePressureDelta` (10 Pa), the boundary activation threshold.
 - `AllMachCorrection` (off).
 - `Reconstruction` (`FirstOrder`). Second-order reconstruction is planned.
 - `MomentumDamping` (0/s).
@@ -665,7 +665,8 @@ sub-threshold row would destroy that gas (`TraceGas_CrossingAChunkFaceIsConserve
 active chunk into such a chunk is a wall for that sweep. That is exact while the neighbour is at rest at the same
 pressure (the wall flux is then `p`, the interior flux of a resting gas, and the mass flux is zero either way) and
 wrong as soon as the two sides differ. So when a sweep meets such a face, it requests the neighbour's activation if
-the pressures differ by more than `WakePressureDelta` (1 Pa) or the active side moves normal to the face at all.
+the pressures differ by more than `WakePressureDelta` (10 Pa) or the active side moves normal to the face faster than
+`VelocityFloor`. The write-back zeroes slower momentum anyway, so that motion cannot carry gas into the neighbour.
 
 Requests are applied on the tick thread after the barrier that ends the sweep. The chunk is woken if asleep, its live
 fields are gathered (exact, since nothing has written them this tick), and it is inserted into the active list in
@@ -1128,7 +1129,7 @@ A sleeping chunk is woken by:
 - a gas mutation through the public API, such as `AddGasToVoxel` or a write through a voxel gas mixture;
 - an explicit `AtmosSimulation.WakeChunk`;
 - activation by the Euler stage, when an open face from an active chunk finds the two sides differing by more than
-  `WakePressureDelta` or the active side moving (§5.6);
+  `WakePressureDelta` or the active side moving faster than `VelocityFloor` (§5.6);
 - under the legacy model, a boundary-flow transfer that reaches one of its voxels (§6.5);
 - explicit-link gas or thermal transport that changes one of its cells, or activation of a link that ends in it (§11);
 - registration of a chunk on one of its six faces.

@@ -18,7 +18,7 @@ public sealed class EulerFlowConfigTests
             Assert.That(config.MaxSubstepsPerTick, Is.EqualTo(64));
             Assert.That(config.VelocityFloor, Is.EqualTo(0.005f));
             Assert.That(config.MaxVelocity, Is.EqualTo(5000f));
-            Assert.That(config.WakePressureDelta, Is.EqualTo(1f));
+            Assert.That(config.WakePressureDelta, Is.EqualTo(10f));
             Assert.That(config.AllMachCorrection, Is.False);
             Assert.That(config.Reconstruction, Is.EqualTo(EulerReconstruction.FirstOrder));
             Assert.That(config.MomentumDamping, Is.EqualTo(0f));

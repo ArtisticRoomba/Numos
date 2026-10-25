@@ -206,6 +206,26 @@ public sealed class EulerCrossChunkTests
         Assert.That(simulation.GetChunkSnapshot(target).IsAwake, Is.False);
     }
 
+    [TestCase(0.001f, false)]
+    [TestCase(0.1f, true)]
+    public void PrePass_WakesAnEqualPressureNeighbourOnlyForMotionAboveTheVelocityFloor(float speed, bool wakes)
+    {
+        const int width = 4;
+        var config = SimTestHelpers.CreateEulerConfig();
+        using var simulation = SimTestHelpers.CreateEulerSimulation(config, width, width, width, out var active);
+        var sleeping = SimTestHelpers.CreateOpenChunk(simulation, Int3.PosX);
+        float moles = SimTestHelpers.MolesFor(config, Atmosphere, Temperature);
+        FillRoom(simulation, active, width, width, width, moles);
+        FillRoom(simulation, sleeping, width, width, width, moles);
+        float mass = moles * SimTestHelpers.EulerAirMolarMass;
+        simulation.SetVoxelMomentum(active, width - 1, 1, 1, mass * speed, 0f, 0f);
+        simulation.SleepChunk(sleeping);
+
+        simulation.Tick();
+
+        Assert.That(simulation.GetChunkSnapshot(sleeping).IsAwake, Is.EqualTo(wakes));
+    }
+
     [Test]
     public void Chain_ThePrePassFollowsAPressureStaircaseToTheEnd()
     {
