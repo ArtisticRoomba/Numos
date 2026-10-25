@@ -397,7 +397,7 @@ usable. The settings most hosts touch:
 - `MomentumDamping` (0): crude friction for hallways that ring.
 
 `EulerFlowConfig` marks its settings `[NumosSerialize]` like any other configuration (see below), so a `.numos`
-archive carries it and loading needs no registration. The
+archive carries it. Its module initializer registers it for loading. The
 [technical documentation](atmospherics_technical_documentation.md#35-configuration-and-the-per-tick-snapshot)
 tabulates every setting with the physics behind it.
 
@@ -421,7 +421,7 @@ config.SolverConfigurations.Add(new FireSettings { IgnitionTemperature = 650f })
 world.SetAtmosConfig(config);
 ```
 
-That is the whole class. The type must be `partial`. `Key` must return a constant string (a literal or a `const`),
+The type must be `partial`. `Key` must return a constant string (a literal or a `const`),
 because the generator reads it at build time to register the type for loading (`NUMOSSTATE018` otherwise). Treat the
 key like a save-format name. Renaming it means old files no longer load.
 
@@ -435,11 +435,11 @@ The generator writes:
   collections, or other types like this one), the snapshot is the instance itself, as above. Otherwise the snapshot is
   a copy. Numos writes the object and reads it back against the gas registry of the simulation, which also re-resolves
   gas references. For validation, implement `partial void OnSnapshot(IGasRegistry gases)`. It runs on the snapshot.
-- A module initializer that registers the type, so world archives that hold it load with no setup.
+- A module initializer that registers the type, so world archives that hold it can load.
 
 Marking is opt-in, with a safety net. A mutable field, or an auto-property with a `set` or `init` accessor, that has
-neither `[NumosSerialize]` nor `[NumosIgnore]` is a build warning (`NUMOSSTATE016`). A new setting therefore cannot
-quietly miss the hash. Put `[NumosIgnore]` on caches and scratch. The generator does not flag readonly fields and
+neither `[NumosSerialize]` nor `[NumosIgnore]` is a build warning (`NUMOSSTATE016`). The warning catches a setting
+that is missing from the hash. Put `[NumosIgnore]` on caches and scratch. The generator does not flag readonly fields and
 get-only auto-properties, because they are usually derived in the constructor.
 
 Solvers read the applied snapshot from the tick context:
@@ -459,8 +459,7 @@ They cannot be saved to `.numos` files, though. See the next section.
 
 ### Saving and loading solver configurations
 
-A configuration with `[NumosSerialize]` members goes into `.numos` replay files and comes back out with nothing extra
-on either side. Loading maps each saved key to a type through `NumosReplayReadOptions.SolverConfigurations`. That table
+A configuration with `[NumosSerialize]` members goes into `.numos` replay files and comes back out. Loading maps each saved key to a type through `NumosReplayReadOptions.SolverConfigurations`. That table
 already holds every configuration whose assembly has run, including Numos's own `GasReactionConfig`
 (`numos/gas-reactions`). A file holding a key nothing registered fails with a `NotSupportedException` naming it. Numos
 does not load the file without that configuration, because replay would then differ.
@@ -473,7 +472,7 @@ ignoring case. Members that no parameter covers are set through `init` or `set`.
 type than its member, such as `IEnumerable<T>` or `IDictionary<TKey, TValue>` for a frozen one. The reader copies into
 it when it has to. If no constructor fits, the build fails with `NUMOSSTATE014`, which says what did not match.
 
-On disk each member's id is a hash of its name, so you can reorder members freely. Renaming one changes its id. Pass the
+On disk each member's id is a hash of its name, so reordering members does not change ids. Renaming one changes its id. Pass the
 old name, `[NumosSerialize("OldName")]`, to keep reading older files. A member that older data lacks gets one of three
 values:
 
@@ -481,7 +480,7 @@ values:
 - its initializer, if it has a plain `set` accessor
 - `default`, an empty string, or an empty collection, otherwise
 
-The reader skips ids it does not know, so removing a member needs nothing.
+The reader skips ids it does not know, so removing a member keeps old files readable.
 
 When a member's type is not one the schema handles, or you want it written differently,
 `[NumosSerialize(Codec = typeof(...))]` names an `IStateCodec<T>` (in `Numos.CoreSim.State.Advanced`) for that member.
@@ -536,7 +535,7 @@ public sealed partial class FireSolver : IAtmosWorldSolver
 var fire = new FireSolver();
 world.Solvers.Register("my-mod/fire", fire, after: AtmosBuiltInSolvers.Thermodynamics);
 
-fire.IgnitionTemperature = 650f; // recorded at the next tick, no extra call needed
+fire.IgnitionTemperature = 650f; // Numos records this edit at the next tick boundary
 ```
 
 The class must be `partial` and derive from `object`. Each marked member must be assignable. A `readonly` field or a

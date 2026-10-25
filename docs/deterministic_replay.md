@@ -202,7 +202,7 @@ public sealed partial class AtmosChunkCheckpoint;
 
 The generator fills the snapshot with one get-only member per marked live member. It also writes `Capture(live)` and the
 state walker (equality, hash, wire read and write). Where every member can be put back, it writes `RestoreInto(live)`.
-Adding chunk state is then one attribute on the live member:
+To add chunk state, mark the live member:
 
 ```csharp
 // In AtmosChunk:
@@ -210,9 +210,8 @@ Adding chunk state is then one attribute on the live member:
 public FlatArray<float> Charge;
 ```
 
-Numos now captures, restores, hashes, and saves that array, and `AtmosChunkCheckpoint.Charges` exists. The chunk still
-allocates the array with the other per-voxel arrays. No checkpoint code changes. The same holds for a new scalar on the
-world or a simulation.
+Numos then captures, restores, hashes, and saves that array, and `AtmosChunkCheckpoint.Charges` exists. The chunk still
+allocates the array with the other per-voxel arrays. A new scalar on the world or a simulation works the same way.
 
 Numos copies a member according to its kind:
 
@@ -237,7 +236,8 @@ restores solver flags, simulation membership, configuration, grids, topology, an
 
 Field ids hash the wire name. On a live type the wire name is the snapshot member's name. That is the member name unless
 `[NumosSerialize("Name")]` gives another one, as `AtmosChunk.Temperature` does to keep the `Temperatures` name. Renaming
-the live member is free while the wire name stays. A snapshot member has the live member's visibility. To make an
+the live member keeps the wire name when the attribute passes one. A snapshot member has the live member's
+visibility. To make an
 `internal` live member `public` on the snapshot, or to document it separately, declare it on the snapshot as a get-only
 partial property. The generator implements it (`AtmosWorldCheckpoint.Solvers` does this).
 
@@ -329,8 +329,7 @@ The marked members behave as follows:
   the restored values. Restore leaves unmarked fields alone, and `OnRestored` resets them.
 - The world state hash and the `.numos` checkpoint section include the entries.
 - Numos records host edits. Setting `fire.IgnitionTemperature = 650f` between ticks while recording produces a
-  `SetAtmosWorldSolverStateOperation` with the new state of the solver. Replay applies it at the same position. The
-  host calls nothing extra.
+  `SetAtmosWorldSolverStateOperation` with the new state of the solver. Replay applies it at the same position.
 - Solver edits are derived. Whatever `Solve` does to `_ticksSinceSpread` is regular solver work. Replay recomputes it,
   so Numos never records it.
 

@@ -5,7 +5,7 @@ namespace Numos.CoreSim.State;
 /// <summary>
 ///     Marks a field or auto-property as state. The <c>Numos.API</c> source generator then writes equality, a state hash,
 ///     and a binary reader and writer for the declaring type. For solver configurations it also writes a snapshot copy
-///     and the registration for loading. The author writes nothing else.
+///     and the registration for loading.
 /// </summary>
 /// <remarks>
 ///     <para>
@@ -14,9 +14,9 @@ namespace Numos.CoreSim.State;
 ///         record, mark the parameter with <c>[property: NumosSerialize]</c>.
 ///     </para>
 ///     <para>
-///         A field's wire id is a hash of its name, so members can be reordered freely and an id never needs picking.
+///         A field's wire id is a hash of its name, so reordering members does not change ids.
 ///         Renaming a member changes its id. Pass the old name (<c>[NumosSerialize("OldName")]</c>) to keep reading
-///         files written before the rename. Removing a member needs nothing, because a reader skips ids it does not know.
+///         files written before the rename. A reader skips ids it does not know, so removing a member keeps old files readable.
 ///         Two names in one type that hash to the same id fail the build.
 ///     </para>
 ///     <para>
@@ -51,8 +51,8 @@ namespace Numos.CoreSim.State;
 ///     </para>
 /// </remarks>
 /// <example>
-///     A complete solver configuration. It saves with the world, loads without registration, and gets
-///     <see cref="IAtmosSolverConfiguration.CreateSnapshot" /> generated:
+///     A solver configuration. The generator emits its equality, hash, wire code, loading registration, and
+///     <see cref="IAtmosSolverConfiguration.CreateSnapshot" />:
 ///     <code>
 ///     public sealed partial class FireSettings : IAtmosSolverConfiguration
 ///     {
@@ -93,15 +93,15 @@ public sealed class NumosSerializeAttribute : Attribute
     /// </summary>
     /// <remarks>
     ///     <para>
-///         Use it for shapes the schema cannot describe on its own, such as a count-prefixed list of runtime-typed
-///         values. Use it also to change how a supported type is written, such as a <see langword="string" /> that may
-///         hold <see langword="null" />. The codec owns the whole member, so it must keep its hash and bytes in step.
-///         Write both through the same sink calls.
+    ///         Use it for shapes the schema cannot describe on its own, such as a count-prefixed list of runtime-typed
+    ///         values. Use it also to change how a supported type is written, such as a <see langword="string" /> that may
+    ///         hold <see langword="null" />. The codec owns the whole member, so it must keep its hash and bytes in step.
+    ///         Write both through the same sink calls.
     ///     </para>
     ///     <para>
-///         The codec must implement <see cref="IStateCodec{T}" /> for the member's type and be accessible from the
-///         declaring type. The reader sets a member with a codec through its setter, not a constructor parameter. Such a
-///         member makes the generated snapshot of a solver configuration a copy and not the same instance.
+    ///         The codec must implement <see cref="IStateCodec{T}" /> for the member's type and be accessible from the
+    ///         declaring type. The reader sets a member with a codec through its setter, not a constructor parameter. Such a
+    ///         member makes the generated snapshot of a solver configuration a copy and not the same instance.
     ///     </para>
     /// </remarks>
     /// <example>
@@ -138,11 +138,10 @@ public sealed class NumosSerializeAttribute : Attribute
 /// </summary>
 /// <remarks>
 ///     <para>
-///         Marking a live member is all it takes to add it to the snapshot. Each one becomes a get-only member of the
-///         snapshot with the visibility of the live member, so marked members must be <see langword="internal" /> or
-///         <see langword="public" />. The member has the name of the live member, or the name passed to
-///         <see cref="NumosSerializeAttribute(string)" />, which is also its wire name. The live type needs no attribute
-///         of its own and does not have to be partial. It must be a class in the same project.
+///         Each marked live member becomes a get-only snapshot member with the same visibility, so marked members must
+///         be <see langword="internal" /> or <see langword="public" />. The snapshot member has the live member's name,
+///         or the name passed to <see cref="NumosSerializeAttribute(string)" />, which is also its wire name. The live
+///         type needs no attribute and does not have to be partial. It must be a class in the same project.
 ///     </para>
 ///     <para>
 ///         How a member is captured depends on what it is. Fields and auto-properties of immutable types (primitives,

@@ -275,7 +275,7 @@ runtime configuration. `AtmosChunkConstants` holds the default chunk dimensions 
 **Euler transport settings.** The `euler-flow` stage keeps its settings in an `EulerFlowConfig` entry (key
 `euler-flow`) of `SolverConfigurations` and runs with `EulerFlowConfig.Default` when there is none. The per-tick
 snapshot resolves the entry once per capture. Each setting is normalized at capture. The settings are `[NumosSerialize]`
-members, so the entry is checkpointed, hashed, and saved in `.numos` archives with no hand-written wire code. Section 5
+members, so the entry is checkpointed, hashed, and saved in `.numos` archives. Section 5
 explains the physics behind them.
 
 | Setting                   | Default   | What it does                                                                                                                                                                                                                                                                                  |
@@ -1446,15 +1446,14 @@ config.SolverConfigurations.Add(new CombustionSettings(rate: 0.5f));
 world.SetAtmosConfig(config); // recorded, so replay changes the rate at the same tick
 ```
 
-`[NumosSerialize]` members have the `Numos.API` generator write `SemanticallyEquals` and `ComputeStateHash`. The two
-cannot disagree, and a new member cannot be left out of either. The generated code walks members in id order through one
+`[NumosSerialize]` members have the `Numos.API` generator write `SemanticallyEquals` and `ComputeStateHash`. The generated
+code walks members in id order through one
 `WriteState` method that drives an `IStateSink`. The hash is that walk fed into `StateHashSink`. The saved bytes are the
 same walk fed into `StateBinarySink`. All three types are in `Numos.CoreSim.State.Advanced`. Floats compare by bits,
 dictionaries and sets go in canonical key order, and `GasProperties` references are identified by name.
 `GasReactionConfig` and both reaction types are built this way, as are Numos's own configuration scalars and
-`GasProperties`. The checkpoint types go one step further. `[NumosSnapshotOf(typeof(AtmosChunk))]` on a partial class
-generates the whole snapshot from the marked members of the live type. Chunk, grid, and world state is therefore
-declared once, on the live type (see "Checkpoints are generated from the live types" in
+`GasProperties`. `[NumosSnapshotOf(typeof(AtmosChunk))]` on a partial class generates the whole snapshot from the marked members of the
+live type. Chunk, grid, and world state is declared on the live type (see "Checkpoints are generated from the live types" in
 `docs/deterministic_replay.md`).
 
 The generator also writes a `ReadState` that rebuilds the object through a constructor. It binds parameters to marked
@@ -1462,8 +1461,8 @@ members by name (ignoring case) and sets the rest through `init` or `set` access
 the configuration (see "Save portable replay files" in `docs/deterministic_replay.md`). The generator writes
 `CreateSnapshot` unless the type has one. The snapshot is `this` when every marked member is fixed and of an immutable
 type, as in `CombustionSettings`. Otherwise it is a write-and-read copy against the gas registry, followed by an
-optional `partial void OnSnapshot(IGasRegistry gases)`. Finally, one module initializer per assembly registers every
-configuration with `SolverConfigurationTypes`, so loading needs no setup. That needs the key at build time, so `Key`
+optional `partial void OnSnapshot(IGasRegistry gases)`. One module initializer per assembly registers every
+configuration with `SolverConfigurationTypes` for loading. That needs the key at build time, so `Key`
 must return a constant string.
 
 A member's wire id is FNV-1a over its name, or over the name passed as `[NumosSerialize("OldName")]` after a rename.

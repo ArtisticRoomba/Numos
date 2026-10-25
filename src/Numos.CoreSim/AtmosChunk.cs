@@ -24,9 +24,8 @@ namespace Numos.CoreSim;
 ///     </para>
 ///     <para>
 ///         Members marked <see cref="NumosSerializeAttribute" /> are the chunk's continuation state. The generated
-///         <see cref="AtmosChunkCheckpoint" /> captures, restores, hashes, and saves exactly those, so new chunk state
-///         needs the attribute and nothing else. Everything unmarked is derived or scratch and must be rebuildable
-///         from the marked members.
+///         <see cref="AtmosChunkCheckpoint" /> captures, restores, hashes, and saves exactly those.
+///         Everything unmarked is derived or scratch and must be rebuildable from the marked members.
 ///     </para>
 /// </remarks>
 internal class AtmosChunk

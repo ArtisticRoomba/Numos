@@ -32,7 +32,7 @@ public sealed class SolverConfigurationTypes
     private readonly Dictionary<string, Entry> _entries = new(StringComparer.Ordinal);
 
     /// <summary>
-    ///     Gets the registered keys, including every automatically registered configuration.
+    ///     Gets the registered keys, including every configuration registered by a generated module initializer.
     /// </summary>
     public IReadOnlyCollection<string> Keys
     {
