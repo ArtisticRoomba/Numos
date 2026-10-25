@@ -873,12 +873,12 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
         for (int activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
         {
             ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
+            if (!chunk.HasMomentum(voxelIndex))
+                continue;
+
             KilogramMetrePerSecond momentumX = chunk.MomentumX[voxelIndex];
             KilogramMetrePerSecond momentumY = chunk.MomentumY[voxelIndex];
             KilogramMetrePerSecond momentumZ = chunk.MomentumZ[voxelIndex];
-            if (momentumX == 0f && momentumY == 0f && momentumZ == 0f)
-                continue;
-
             Kilogram mass = 0f;
             Mole totalMoles = 0f;
             bool zero = chunk.IsVacuum[voxelIndex];
@@ -918,9 +918,7 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
                 chunk.TotalPressure[voxelIndex] = AtmosSolverMath.CalculatePressureAtVoxel(config, chunk, voxelIndex);
             }
 
-            chunk.MomentumX[voxelIndex] = 0f;
-            chunk.MomentumY[voxelIndex] = 0f;
-            chunk.MomentumZ[voxelIndex] = 0f;
+            chunk.ZeroMomentum(voxelIndex);
         }
     }
 
@@ -950,8 +948,7 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
         for (int activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
         {
             ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
-            hasMotion |= chunk.MomentumX[voxelIndex] != 0f || chunk.MomentumY[voxelIndex] != 0f ||
-                         chunk.MomentumZ[voxelIndex] != 0f;
+            hasMotion |= chunk.HasMomentum(voxelIndex);
 
             Pascal pressure = chunk.TotalPressure[voxelIndex];
             if (!float.IsFinite(pressure))
@@ -1026,9 +1023,7 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
             if (!chunk.IsVacuum[voxelIndex])
                 continue;
 
-            Debug.Assert(
-                chunk.MomentumX[voxelIndex] == 0f && chunk.MomentumY[voxelIndex] == 0f && chunk.MomentumZ[voxelIndex] == 0f,
-                "A vacuum voxel must carry no momentum.");
+            Debug.Assert(!chunk.HasMomentum(voxelIndex), "A vacuum voxel must carry no momentum.");
         }
     }
 

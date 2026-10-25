@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using System.Runtime.CompilerServices;
 using JetBrains.Annotations;
 using Magnitudo;
 using Numos.Collections;
@@ -732,6 +733,16 @@ internal class AtmosChunk
         MomentumX[localVoxelIndex] = 0f;
         MomentumY[localVoxelIndex] = 0f;
         MomentumZ[localVoxelIndex] = 0f;
+    }
+
+    /// <summary>
+    ///     Whether any momentum component of one voxel is nonzero. A NaN component counts as nonzero.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal bool HasMomentum(ushort localVoxelIndex)
+    {
+        return MomentumX[localVoxelIndex] != 0f || MomentumY[localVoxelIndex] != 0f ||
+               MomentumZ[localVoxelIndex] != 0f;
     }
 
     /// <summary>

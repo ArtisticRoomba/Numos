@@ -70,8 +70,7 @@ internal static class EulerStaticChunk
         for (int activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
         {
             ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
-            if (chunk.MomentumX[voxelIndex] != 0f || chunk.MomentumY[voxelIndex] != 0f ||
-                chunk.MomentumZ[voxelIndex] != 0f)
+            if (chunk.HasMomentum(voxelIndex))
                 return false;
 
             if (!SameState(chunk, voxelIndex, pressureBits, temperatureBits, chunk, reference))
