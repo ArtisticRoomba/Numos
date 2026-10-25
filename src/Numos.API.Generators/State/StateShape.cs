@@ -163,7 +163,7 @@ internal sealed record StateShape(StateShapeKind Kind, string Name, EquatableArr
                 : Unsupported(type);
         }
 
-        string metadataName = MetadataName(named.OriginalDefinition);
+        string metadataName = PartialTypeModel.GetMetadataName(named.OriginalDefinition);
         if (metadataName == "Numos.Maths.Int3")
             return Leaf(StateShapeKind.Int3, "");
 
@@ -210,7 +210,7 @@ internal sealed record StateShape(StateShapeKind Kind, string Name, EquatableArr
             return Of(StateShapeKind.NullableReference, "", FromParameter(type.WithNullableAnnotation(NullableAnnotation.NotAnnotated)));
 
         if (type is INamedTypeSymbol { IsGenericType: true } named &&
-            ParameterContainerTypes.Contains(MetadataName(named.OriginalDefinition)))
+            ParameterContainerTypes.Contains(PartialTypeModel.GetMetadataName(named.OriginalDefinition)))
         {
             return new StateShape(
                 StateShapeKind.Container,
@@ -252,7 +252,7 @@ internal sealed record StateShape(StateShapeKind Kind, string Name, EquatableArr
         foreach (INamedTypeSymbol candidate in type.AllInterfaces)
         {
             if (candidate.TypeArguments.Length == 1 &&
-                MetadataName(candidate.OriginalDefinition) == "Numos.CoreSim.State.Advanced.INumosState`1" &&
+                PartialTypeModel.GetMetadataName(candidate.OriginalDefinition) == "Numos.CoreSim.State.Advanced.INumosState`1" &&
                 SymbolEqualityComparer.Default.Equals(candidate.TypeArguments[0], type))
             {
                 return true;
@@ -260,15 +260,6 @@ internal sealed record StateShape(StateShapeKind Kind, string Name, EquatableArr
         }
 
         return false;
-    }
-
-    public static string MetadataName(INamedTypeSymbol type)
-    {
-        string name = type.MetadataName;
-        for (INamedTypeSymbol? containing = type.ContainingType; containing is not null; containing = containing.ContainingType)
-            name = containing.MetadataName + "+" + name;
-
-        return type.ContainingNamespace is { IsGlobalNamespace: false } ns ? ns.ToDisplayString() + "." + name : name;
     }
 
     private static string FullName(ITypeSymbol type) => type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);

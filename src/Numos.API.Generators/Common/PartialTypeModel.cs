@@ -25,6 +25,18 @@ internal sealed record PartialTypeModel(
     /// </summary>
     public string HintName => MetadataName.Replace('`', '_');
 
+    /// <summary>
+    ///     Gets the namespace-qualified metadata name of <paramref name="type" />, with <c>+</c> between nested types.
+    /// </summary>
+    public static string GetMetadataName(INamedTypeSymbol type)
+    {
+        string name = type.MetadataName;
+        for (INamedTypeSymbol? containing = type.ContainingType; containing is not null; containing = containing.ContainingType)
+            name = containing.MetadataName + "+" + name;
+
+        return type.ContainingNamespace is { IsGlobalNamespace: false } ns ? ns.ToDisplayString() + "." + name : name;
+    }
+
     public static PartialTypeModel From(INamedTypeSymbol type)
     {
         var chain = new List<INamedTypeSymbol>();
@@ -34,13 +46,10 @@ internal sealed record PartialTypeModel(
         chain.Reverse();
 
         string @namespace = type.ContainingNamespace.IsGlobalNamespace ? "" : type.ContainingNamespace.ToDisplayString();
-        string metadataName = string.Join("+", chain.Select(static containing => containing.MetadataName));
-        if (@namespace.Length > 0)
-            metadataName = @namespace + "." + metadataName;
 
         return new PartialTypeModel(
             @namespace,
-            metadataName,
+            GetMetadataName(type),
             chain.Select(static containing => new ContainingTypeModel(GetKeyword(containing), GetDeclaration(containing)))
                 .ToEquatableArray());
     }

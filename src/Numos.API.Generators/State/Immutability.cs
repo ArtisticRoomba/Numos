@@ -1,4 +1,5 @@
 using Microsoft.CodeAnalysis;
+using Numos.API.Generators.Common;
 
 namespace Numos.API.Generators.State;
 
@@ -45,7 +46,7 @@ internal static class Immutability
         if (named.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T)
             return IsImmutable(named.TypeArguments[0], visiting);
 
-        string metadataName = StateShape.MetadataName(named.OriginalDefinition);
+        string metadataName = PartialTypeModel.GetMetadataName(named.OriginalDefinition);
         if (metadataName is "Numos.Maths.Int3" or "Numos.CoreSim.GasProperties")
             return true;
 

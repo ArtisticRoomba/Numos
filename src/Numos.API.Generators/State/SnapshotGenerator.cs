@@ -365,7 +365,7 @@ public sealed class SnapshotGenerator : IIncrementalGenerator
             }
             else if (type is INamedTypeSymbol { IsGenericType: true } named)
             {
-                string metadataName = StateShape.MetadataName(named.OriginalDefinition);
+                string metadataName = PartialTypeModel.GetMetadataName(named.OriginalDefinition);
                 if (metadataName == FlatArrayMetadataName)
                 {
                     element = named.TypeArguments[0];

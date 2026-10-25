@@ -606,7 +606,7 @@ public sealed class StateGenerator : IIncrementalGenerator
     {
         foreach (INamedTypeSymbol candidate in type.AllInterfaces)
         {
-            if (StateShape.MetadataName(candidate) == interfaceMetadataName)
+            if (PartialTypeModel.GetMetadataName(candidate) == interfaceMetadataName)
                 return true;
         }
 

@@ -1,4 +1,5 @@
 using Microsoft.CodeAnalysis;
+using Numos.API.Generators.Common;
 
 namespace Numos.API.Generators.State;
 
@@ -25,7 +26,8 @@ internal static class StateSymbols
     {
         foreach (AttributeData attribute in symbol.GetAttributes())
         {
-            if (attribute.AttributeClass is { } attributeClass && StateShape.MetadataName(attributeClass) == metadataName)
+            if (attribute.AttributeClass is { } attributeClass &&
+                PartialTypeModel.GetMetadataName(attributeClass) == metadataName)
                 return attribute;
         }
 
