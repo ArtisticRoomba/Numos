@@ -253,12 +253,17 @@ internal static class EulerSweep
 
         // The faces on the chunk boundary of a Y or Z bundle are one contiguous row each, so a row whose cells and
         // neighbour cells are all open air goes through the vector kernel too.
+        int lowerNeighborFirst = 0;
+        int upperNeighborFirst = 0;
+        int upperSelfFirst = baseIndex + (marchCount - 1) * marchStride;
         bool lowerEdgeDone = vectorFaces && !alongMarch &&
-                             SolveEdgeRow(workspace, read, scratch, axis, baseIndex, lineCount, 0, faceArea);
+                             SolveEdgeRow(
+                                 workspace, read, scratch, axis, baseIndex, lineCount, 0, faceArea,
+                                 out lowerNeighborFirst);
         bool upperEdgeDone = vectorFaces && !alongMarch &&
                              SolveEdgeRow(
-                                 workspace, read, scratch, axis, baseIndex + (marchCount - 1) * marchStride, lineCount,
-                                 marchCount, faceArea);
+                                 workspace, read, scratch, axis, upperSelfFirst, lineCount,
+                                 marchCount, faceArea, out upperNeighborFirst);
 
         for (int march = 0; march <= marchCount; march++)
         {
@@ -291,12 +296,30 @@ internal static class EulerSweep
 
         // The faces that can name a neighbour chunk are the first and last face of every line. They go to the
         // scalar fix-up list, as does any interior face whose upwind cell is not one of its own two cells.
-        // Every other face gets a mask that picks its lower or upper cell.
+        // Every other face gets a mask that picks its lower or upper cell. An edge row that the vector kernel
+        // solved is the exception: the species pass reads both of its cell rows with vector loads instead.
+        bool edgeRows = EulerSpeciesKernel.EdgeRowsEnabled && lineCount >= Vector<float>.Count;
+        bool lowerEdgeRow = lowerEdgeDone && edgeRows;
+        bool upperEdgeRow = upperEdgeDone && edgeRows;
         int fixupCount = 0;
-        for (int line = 0; line < lineCount; line++)
+        if (alongMarch)
         {
-            fixupFaces[fixupCount++] = alongMarch ? line * runFaceStride : line;
-            fixupFaces[fixupCount++] = alongMarch ? line * runFaceStride + marchCount : marchCount * lineCount + line;
+            for (int line = 0; line < lineCount; line++)
+            {
+                fixupFaces[fixupCount++] = line * runFaceStride;
+                fixupFaces[fixupCount++] = line * runFaceStride + marchCount;
+            }
+        }
+        else
+        {
+            for (int line = 0; line < lineCount; line++)
+            {
+                if (!lowerEdgeRow)
+                    fixupFaces[fixupCount++] = line;
+
+                if (!upperEdgeRow)
+                    fixupFaces[fixupCount++] = marchCount * lineCount + line;
+            }
         }
 
         for (int run = 0; run < innerRunCount; run++)
@@ -358,12 +381,25 @@ internal static class EulerSweep
                     firstFace, baseIndex + run * runVoxelStride, marchStride, innerRunLength);
             }
 
+            if (lowerEdgeRow)
+            {
+                EulerSpeciesKernel.EdgeFluxRow(
+                    faceRate, upperMask, true, source, lowerRows, faceFlux, 0, baseIndex, lowerNeighborFirst,
+                    lineCount);
+            }
+
+            if (upperEdgeRow)
+            {
+                EulerSpeciesKernel.EdgeFluxRow(
+                    faceRate, upperMask, false, source, upperRows, faceFlux, marchCount * lineCount,
+                    upperSelfFirst, upperNeighborFirst, lineCount);
+            }
+
             for (int k = 0; k < fixupCount; k++)
             {
                 int face = fixupFaces[k];
                 faceFlux[face] = faceRate[face] * UpwindMoles(in faces[face], source, lowerRows, upperRows);
             }
-
         }
 
         // Cells sum their gases in ascending list order whatever order the passes run in, so the cells of a run
@@ -610,6 +646,7 @@ internal static class EulerSweep
     /// <param name="count">Number of faces in the row, which is the chunk width.</param>
     /// <param name="march">0 for the lower boundary of the bundle, or the march count for the upper one.</param>
     /// <param name="faceArea">Area of one voxel face.</param>
+    /// <param name="neighborFirst">Voxel index of the first facing cell in the neighbour's read buffer.</param>
     /// <returns>
     ///     <see langword="true" /> if the row is solved. <see langword="false" /> leaves every face of the row to
     ///     <see cref="SolveFace" />, which also raises the wake requests of faces into an inactive neighbour.
@@ -621,8 +658,9 @@ internal static class EulerSweep
     /// </remarks>
     private static bool SolveEdgeRow(
         EulerChunkWorkspace workspace, EulerChunkState read, BundleScratch scratch, int axis, int selfFirst,
-        int count, int march, SquareMetre faceArea)
+        int count, int march, SquareMetre faceArea, out int neighborFirst)
     {
+        neighborFirst = 0;
         AtmosChunk chunk = workspace.Chunk;
         bool lowerBoundary = march == 0;
         int direction = lowerBoundary ? 2 * axis : 2 * axis + 1;
@@ -631,7 +669,7 @@ internal static class EulerSweep
             return false;
 
         int offset = axis == 1 ? (chunk.Height - 1) * chunk.Width : (chunk.Depth - 1) * chunk.Width * chunk.Height;
-        int neighborFirst = lowerBoundary ? selfFirst + offset : selfFirst - offset;
+        neighborFirst = lowerBoundary ? selfFirst + offset : selfFirst - offset;
         int width = chunk.Width;
         if (!workspace.RowAllAir[selfFirst / width] || !neighbor.RowAllAir[neighborFirst / width])
             return false;

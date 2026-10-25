@@ -12,23 +12,28 @@ public class EulerSweepVectorTests
     private const float AirMolarHeatCapacity = AtmosPhysicalConstants.IdealDiatomicMolarHeatCapacityAtConstantVolume;
     private const float MolarMass = 0.02897f;
 
-    private static AtmosSolverConfigSnapshot CreateConfig()
+    private static AtmosSolverConfigSnapshot CreateConfig(int gasCount = 2)
     {
-        var config = new AtmosConfig
+        var registry = new List<GasProperties>
         {
-            VoxelVolume = 1f,
-            GasRegistry =
-            [
-                new GasProperties
-                {
-                    Name = "Air", MolarMass = MolarMass, MolarHeatCapacityAtConstantVolume = AirMolarHeatCapacity
-                },
-                new GasProperties
-                {
-                    Name = "Heavy", MolarMass = 0.044f, MolarHeatCapacityAtConstantVolume = AirMolarHeatCapacity
-                }
-            ]
-        }.CreateSnapshot();
+            new()
+            {
+                Name = "Air", MolarMass = MolarMass, MolarHeatCapacityAtConstantVolume = AirMolarHeatCapacity
+            },
+            new()
+            {
+                Name = "Heavy", MolarMass = 0.044f, MolarHeatCapacityAtConstantVolume = AirMolarHeatCapacity
+            }
+        };
+        for (int gas = 2; gas < gasCount; gas++)
+        {
+            registry.Add(new GasProperties
+            {
+                Name = $"Extra{gas}", MolarMass = 0.01f * gas, MolarHeatCapacityAtConstantVolume = AirMolarHeatCapacity
+            });
+        }
+
+        var config = new AtmosConfig { VoxelVolume = 1f, GasRegistry = [..registry] }.CreateSnapshot();
 
         var tickConfig = new AtmosSolverConfigSnapshot();
         tickConfig.Capture(config);
@@ -47,8 +52,18 @@ public class EulerSweepVectorTests
         return workspace;
     }
 
+    /// <summary>
+    ///     Whether the chunk of a grid slot holds an extra gas (id 2 and up). Neighbours disagree, so a gas is
+    ///     listed by a chunk whose neighbour has no row for it.
+    /// </summary>
+    private static bool HoldsExtraGas(int slotSeed, int gas)
+    {
+        return (slotSeed / 7 + gas) % 2 == 0;
+    }
+
     private static AtmosChunk CreateChunk(
-        AtmosSolverConfigSnapshot tickConfig, int seed, int dimension, int solidPercent, float speed)
+        AtmosSolverConfigSnapshot tickConfig, int seed, int dimension, int solidPercent, float speed,
+        int gasCount = 2)
     {
         var random = new Random(seed);
         var chunk = new AtmosChunk(dimension, dimension, dimension);
@@ -79,6 +94,13 @@ public class EulerSweepVectorTests
             if (random.Next(3) == 0)
                 chunk.InjectGasToVoxel(
                     voxel, 1, moles * 0.3f, temperature, AirMolarHeatCapacity, tickConfig.PressurePerMoleKelvin);
+
+            for (int gas = 2; gas < gasCount; gas++)
+            {
+                if (HoldsExtraGas(seed, gas) && random.Next(4) != 0)
+                    chunk.InjectGasToVoxel(
+                        voxel, gas, moles * 0.2f, temperature, AirMolarHeatCapacity, tickConfig.PressurePerMoleKelvin);
+            }
 
             float mass = moles * (MolarMass + 0.01f);
             chunk.MomentumX[voxel] = mass * speed * (2f * (float)random.NextDouble() - 1f);
@@ -289,7 +311,7 @@ public class EulerSweepVectorTests
     /// </summary>
     private static EulerChunkWorkspace[] CreateGrid(
         AtmosSolverConfigSnapshot tickConfig, Int3 size, int seed, int dimension, int solidPercent, float speed,
-        int inactivePercent, bool corrupt)
+        int inactivePercent, bool corrupt, int gasCount = 2)
     {
         var random = new Random(seed * 31 + 5);
         var chunks = new AtmosChunk[size.X * size.Y * size.Z];
@@ -304,7 +326,7 @@ public class EulerSweepVectorTests
             // The middle chunk stays active, so it has a neighbour on both sides of every axis.
             bool middle = x == size.X / 2 && y == size.Y / 2 && z == size.Z / 2;
             bool active = random.Next(100) >= inactivePercent || middle;
-            chunks[slot] = CreateChunk(tickConfig, seed * 1000 + slot, dimension, solidPercent, speed);
+            chunks[slot] = CreateChunk(tickConfig, seed * 1000 + slot, dimension, solidPercent, speed, gasCount);
             chunks[slot].GridPosition = position;
             if (!active)
                 continue;
@@ -340,6 +362,12 @@ public class EulerSweepVectorTests
             EulerFaceTopology.BuildAirMap(workspace.Chunk, workspace.AirMap, workspace.RowAllAir);
             workspace.AddGas(0, tickConfig);
             workspace.AddGas(1, tickConfig);
+            for (int gas = 2; gas < gasCount; gas++)
+            {
+                if (HoldsExtraGas(seed * 1000 + Array.IndexOf(chunks, workspace.Chunk), gas))
+                    workspace.AddGas(gas, tickConfig);
+            }
+
             workspace.Gather(tickConfig);
             if (corrupt)
                 Corrupt(workspace, seed + result.Count);
@@ -351,7 +379,8 @@ public class EulerSweepVectorTests
     }
 
     private static (int Clamped, int NonFinite, int Negative, int Signal) SweepGrid(
-        EulerChunkWorkspace[] workspaces, AtmosSolverConfigSnapshot tickConfig, bool vectorFaces, bool vectorCells)
+        EulerChunkWorkspace[] workspaces, AtmosSolverConfigSnapshot tickConfig, bool vectorFaces, bool vectorCells,
+        bool edgeRows = true)
     {
         int clamped = 0;
         int nonFinite = 0;
@@ -359,8 +388,10 @@ public class EulerSweepVectorTests
         int signal = 0;
         bool savedFaces = HllcFluxVector.Enabled;
         bool savedCells = EulerCellKernel.Enabled;
+        bool savedEdges = EulerSpeciesKernel.EdgeRowsEnabled;
         HllcFluxVector.Enabled = vectorFaces;
         EulerCellKernel.Enabled = vectorCells;
+        EulerSpeciesKernel.EdgeRowsEnabled = edgeRows;
         try
         {
             for (int round = 0; round < 2; round++)
@@ -392,6 +423,7 @@ public class EulerSweepVectorTests
         {
             HllcFluxVector.Enabled = savedFaces;
             EulerCellKernel.Enabled = savedCells;
+            EulerSpeciesKernel.EdgeRowsEnabled = savedEdges;
         }
     }
 
@@ -409,17 +441,39 @@ public class EulerSweepVectorTests
             AssertGridSweepsMatch(new Int3(2, 3, 3), dimension, solidPercent, inactivePercent, speed, seed, corrupt);
     }
 
+    [TestCase(8, 0, 0, 200f, 31, 2)]
+    [TestCase(8, 0, 30, 400f, 32, 3)]
+    [TestCase(8, 10, 0, 150f, 33, 5)]
+    [TestCase(9, 5, 25, 600f, 34, 4)]
+    [TestCase(8, 0, 0, 3000f, 35, 6)]
+    [TestCase(16, 0, 20, 300f, 36, 3)]
+    [TestCase(4, 0, 0, 300f, 37, 4)]
+    public void VectorEdgeSpeciesRows_GiveTheSameBitsAsTheScalarFixup(
+        int dimension, int solidPercent, int inactivePercent, float speed, int seed, int gasCount)
+    {
+        foreach (bool corrupt in new[] { false, true })
+        {
+            AssertGridSweepsMatch(
+                new Int3(2, 3, 3), dimension, solidPercent, inactivePercent, speed, seed, corrupt, gasCount,
+                scalarEdges: true);
+        }
+    }
+
     private static void AssertGridSweepsMatch(
-        Int3 size, int dimension, int solidPercent, int inactivePercent, float speed, int seed, bool corrupt)
+        Int3 size, int dimension, int solidPercent, int inactivePercent, float speed, int seed, bool corrupt,
+        int gasCount = 2, bool scalarEdges = false)
     {
         Assume.That(Vector.IsHardwareAccelerated, "No vector hardware: the sweep keeps the scalar solver.");
-        AtmosSolverConfigSnapshot tickConfig = CreateConfig();
+        AtmosSolverConfigSnapshot tickConfig = CreateConfig(gasCount);
         EulerChunkWorkspace[] scalar =
-            CreateGrid(tickConfig, size, seed, dimension, solidPercent, speed, inactivePercent, corrupt);
+            CreateGrid(tickConfig, size, seed, dimension, solidPercent, speed, inactivePercent, corrupt, gasCount);
         EulerChunkWorkspace[] vector =
-            CreateGrid(tickConfig, size, seed, dimension, solidPercent, speed, inactivePercent, corrupt);
+            CreateGrid(tickConfig, size, seed, dimension, solidPercent, speed, inactivePercent, corrupt, gasCount);
 
-        var expectedCounts = SweepGrid(scalar, tickConfig, vectorFaces: false, vectorCells: false);
+        // The edge test keeps every other vector kernel on, so only the species fix-up differs.
+        var expectedCounts = scalarEdges
+            ? SweepGrid(scalar, tickConfig, vectorFaces: true, vectorCells: true, edgeRows: false)
+            : SweepGrid(scalar, tickConfig, vectorFaces: false, vectorCells: false);
         var actualCounts = SweepGrid(vector, tickConfig, vectorFaces: true, vectorCells: true);
         Assert.That(actualCounts, Is.EqualTo(expectedCounts));
 
@@ -448,7 +502,7 @@ public class EulerSweepVectorTests
                             Same(e.Density, a.Density) && Same(e.Pressure, a.Pressure) &&
                             Same(e.VelocityX, a.VelocityX) && Same(e.VelocityY, a.VelocityY) &&
                             Same(e.VelocityZ, a.VelocityZ) && Same(e.EnergyDensity, a.EnergyDensity);
-                for (int gas = 0; gas < 2 && same; gas++)
+                for (int gas = 0; gas < gasCount && same; gas++)
                 {
                     if (expected.Species[gas] != null)
                         same = Same(expected.Species[gas]![voxel], actual.Species[gas]![voxel]);

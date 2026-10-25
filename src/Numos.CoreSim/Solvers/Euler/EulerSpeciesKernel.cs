@@ -98,6 +98,57 @@ internal static class EulerSpeciesKernel
         }
     }
 
+    /// <summary>
+    ///     Whether <see cref="EdgeFluxRow" /> handles the chunk-boundary rows. Tests clear it to compare against the
+    ///     scalar fix-up loop.
+    /// </summary>
+    internal static bool EdgeRowsEnabled = Vector.IsHardwareAccelerated;
+
+    /// <summary>
+    ///     Computes the species flux of the faces between a chunk-boundary row and the facing row of the active
+    ///     neighbour chunk.
+    /// </summary>
+    /// <param name="rate">The per-face species rates.</param>
+    /// <param name="upperMask">Per face, all bits set if the upwind cell is the higher-coordinate one.</param>
+    /// <param name="lowerBoundary">
+    ///     Whether the row is the lower boundary of the bundle. This chunk's cell is the higher-coordinate one there.
+    /// </param>
+    /// <param name="source">The gas row of this chunk's read buffer.</param>
+    /// <param name="neighborSource">
+    ///     The gas row of the neighbour's read buffer, or <see langword="null" /> if the neighbour has none. A null
+    ///     row reads as <c>+0</c>, which is the value the scalar fix-up reads for it.
+    /// </param>
+    /// <param name="flux">The per-face species flux to write.</param>
+    /// <param name="firstFace">The first face of the row.</param>
+    /// <param name="selfFirst">The voxel of the first cell of this chunk's row.</param>
+    /// <param name="neighborFirst">The voxel of the first facing cell in the neighbour's buffer.</param>
+    /// <param name="length">Number of faces. It must be at least one vector.</param>
+    /// <remarks>
+    ///     Each lane is <c>rate · cell</c> for the cell the scalar fix-up would pick, so the bits match. The last
+    ///     vector overlaps the one before it when the length is not a multiple of the vector width.
+    /// </remarks>
+    public static void EdgeFluxRow(
+        float[] rate, int[] upperMask, bool lowerBoundary, float[] source, float[]? neighborSource, float[] flux,
+        int firstFace, int selfFirst, int neighborFirst, int length)
+    {
+        int width = Vector<float>.Count;
+        int start = 0;
+        while (true)
+        {
+            var self = Load(source, selfFirst + start);
+            var neighbor = neighborSource == null ? Vector<float>.Zero : Load(neighborSource, neighborFirst + start);
+            var mask = Load(upperMask, firstFace + start);
+            var upwind = lowerBoundary
+                ? Vector.ConditionalSelect(mask, self, neighbor)
+                : Vector.ConditionalSelect(mask, neighbor, self);
+            (Load(rate, firstFace + start) * upwind).StoreAt(flux, firstFace + start);
+            if (start + width >= length)
+                return;
+
+            start = Math.Min(start + width, length - width);
+        }
+    }
+
     private static void FaceFluxVector(
         float[] rate, int[] upperMask, float[] source, float[] flux, int face, int lowerVoxel, int upperOffset)
     {
