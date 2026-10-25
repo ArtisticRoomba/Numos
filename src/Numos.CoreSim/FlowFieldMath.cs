@@ -93,7 +93,7 @@ public static class FlowFieldMath
         for (int index = 0; index < voxelCount; index++)
         {
             int room = snapshot.VoxelRoomMap[index];
-            destination[index] = room == VoxelClassification.RoomSolid || room == VoxelClassification.RoomVoid
+            destination[index] = !VoxelClassification.IsAirRoom(room)
                 ? float.NaN
                 : GetDensity(gases, index, molarMasses, volume);
         }

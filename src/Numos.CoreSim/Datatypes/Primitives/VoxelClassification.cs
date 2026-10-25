@@ -59,6 +59,15 @@ public readonly record struct VoxelClassification(int RoomId)
     public bool IsVoid => RoomId == RoomVoid;
 
     /// <summary>
+    ///     Returns true if a voxel with this room ID can hold gas, which means it is neither solid nor void.
+    /// </summary>
+    /// <param name="roomId">The room ID read from a voxel room map.</param>
+    internal static bool IsAirRoom(int roomId)
+    {
+        return roomId != RoomSolid && roomId != RoomVoid;
+    }
+
+    /// <summary>
     ///     Implicitly converts a <see cref="VoxelClassification" /> to an <see cref="int" /> representing the room ID.
     /// </summary>
     /// <param name="classification">The <see cref="VoxelClassification" /> to convert.</param>

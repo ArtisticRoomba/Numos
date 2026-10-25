@@ -269,7 +269,7 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
 
         ushort sourceIndex = sourceChunk.GetIndex(targetPosition - direction);
         int sourceRoom = sourceChunk.VoxelRoomMap[sourceIndex];
-        if (sourceRoom == VoxelClassification.RoomSolid || sourceRoom == VoxelClassification.RoomVoid)
+        if (!VoxelClassification.IsAirRoom(sourceRoom))
             return;
 
         // Only outflows matter. Skip this voxel if it cannot have any.

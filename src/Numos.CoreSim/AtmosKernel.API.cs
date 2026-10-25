@@ -579,7 +579,7 @@ internal sealed partial class AtmosKernel
             ValidateMomentum(momentumX, momentumY, momentumZ);
 
             int classification = chunk.VoxelRoomMap[localVoxelIndex];
-            if (classification == VoxelClassification.RoomSolid || classification == VoxelClassification.RoomVoid)
+            if (!VoxelClassification.IsAirRoom(classification))
                 return;
 
             if (chunk.TotalPressure[localVoxelIndex] <= 0f)
@@ -650,7 +650,7 @@ internal sealed partial class AtmosKernel
             ValidateGasInjection(gasId, moles, temperature);
 
             int classification = chunk.VoxelRoomMap[localVoxelIndex];
-            if (classification == VoxelClassification.RoomSolid || classification == VoxelClassification.RoomVoid)
+            if (!VoxelClassification.IsAirRoom(classification))
                 return;
 
             chunk.Wake();

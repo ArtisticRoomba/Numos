@@ -198,6 +198,6 @@ internal static class EulerFaceTopology
     internal static bool IsAir(AtmosChunk chunk, int voxelIndex)
     {
         int room = chunk.VoxelRoomMap[voxelIndex];
-        return room != VoxelClassification.RoomSolid && room != VoxelClassification.RoomVoid;
+        return VoxelClassification.IsAirRoom(room);
     }
 }

@@ -167,7 +167,7 @@ internal static class VacuumCleanup
 
             ushort neighborIndex = neighborChunk.GetIndexUnsafe(neighborPosition);
             int classification = neighborChunk.VoxelRoomMap[neighborIndex];
-            if (classification is VoxelClassification.RoomSolid or VoxelClassification.RoomVoid)
+            if (!VoxelClassification.IsAirRoom(classification))
                 continue;
 
             if (neighborChunk.TotalPressure[neighborIndex] >= vacuumThreshold)

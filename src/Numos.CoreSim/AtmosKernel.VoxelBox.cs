@@ -322,7 +322,7 @@ internal sealed partial class AtmosKernel
     private static bool IsSolidOrVoid(AtmosChunk chunk, ushort index)
     {
         int classification = chunk.VoxelRoomMap[index];
-        return classification == VoxelClassification.RoomSolid || classification == VoxelClassification.RoomVoid;
+        return !VoxelClassification.IsAirRoom(classification);
     }
 
     private static void WakeOnce(AtmosChunk chunk, ref bool awake)

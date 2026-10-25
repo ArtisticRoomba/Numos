@@ -544,7 +544,7 @@ internal sealed class ExplicitAtmosTransportSolver
     private static bool CanTransport(ExplicitTransportEndpoint endpoint)
     {
         int room = endpoint.Chunk.VoxelRoomMap[endpoint.LocalVoxelIndex];
-        return room != VoxelClassification.RoomSolid && room != VoxelClassification.RoomVoid;
+        return VoxelClassification.IsAirRoom(room);
     }
 
     private static Mole SumMoles(Mole[] available, int offset, int gasCount)
