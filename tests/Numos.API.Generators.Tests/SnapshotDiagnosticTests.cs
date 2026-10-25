@@ -244,6 +244,43 @@ public sealed class SnapshotDiagnosticTests
     }
 
     [Test]
+    public void FlatArrayMembers_GetALengthCheckAndAByteTotal()
+    {
+        string live = """
+                      internal sealed class Grid
+                      {
+                          public int Used;
+
+                          [NumosSerialize] public Numos.Collections.FlatArray<float> Pressures;
+                          [NumosSerialize] public Numos.Collections.FlatArray<int> Rooms;
+                          [NumosSerialize(Count = nameof(Used))] public ushort[] Active = new ushort[4];
+                      }
+                      """;
+
+        string[] ids = Ids(Source(live, "[NumosSnapshotOf(typeof(Grid))] internal sealed partial class GridSnapshot;"), out Compilation output);
+        Assert.Multiple(() =>
+        {
+            Assert.That(ids, Is.Empty);
+            Assert.That(GeneratorHarness.Errors(output), Is.Empty);
+            INamedTypeSymbol snapshot = output.GetTypeByMetadataName("MyMod.GridSnapshot")!;
+            Assert.That(snapshot.GetMembers("CheckFlatArrayLengths"), Has.Length.EqualTo(1));
+            Assert.That(snapshot.GetMembers("FlatArrayPayloadBytes"), Has.Length.EqualTo(1));
+        });
+    }
+
+    [Test]
+    public void SnapshotWithoutFlatArrayMembers_GetsNeitherFlatArrayMember()
+    {
+        Ids(Source(Tank), out Compilation output);
+        INamedTypeSymbol snapshot = output.GetTypeByMetadataName("MyMod.TankSnapshot")!;
+        Assert.Multiple(() =>
+        {
+            Assert.That(snapshot.GetMembers("CheckFlatArrayLengths"), Is.Empty);
+            Assert.That(snapshot.GetMembers("FlatArrayPayloadBytes"), Is.Empty);
+        });
+    }
+
+    [Test]
     public void PartialDeclaration_ChoosesTheGeneratedMembersVisibility()
     {
         string live = """

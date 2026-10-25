@@ -1,3 +1,4 @@
+using Numos.Collections;
 using Numos.CoreSim.State;
 using Numos.CoreSim.State.Advanced;
 
@@ -159,6 +160,29 @@ public sealed class SnapshotGeneratorTests
     }
 
     [Test]
+    public void FlatArrayMembers_AreCheckedAgainstOneLengthAndSummedInBytes()
+    {
+        var grid = new Grid(4) { Used = 1 };
+        GridSnapshot snapshot = GridSnapshot.Capture(grid);
+
+        snapshot.CheckFlatArrayLengths(4);
+        Assert.Multiple(() =>
+        {
+            Assert.That(() => snapshot.CheckFlatArrayLengths(5), Throws.TypeOf<InvalidDataException>().With.Message.Contains("Pressures"));
+            Assert.That(snapshot.FlatArrayPayloadBytes, Is.EqualTo(4 * 4 + 4 * 2 + 4 * 4), "floats, shorts, and ints, without the counted array");
+        });
+    }
+
+    [Test]
+    public void FlatArrayLengthCheck_NamesTheFirstMemberThatDiffers()
+    {
+        var grid = new Grid(4) { Rooms = new FlatArray<int>(new int[3]) };
+        GridSnapshot snapshot = GridSnapshot.Capture(grid);
+
+        Assert.That(() => snapshot.CheckFlatArrayLengths(4), Throws.TypeOf<InvalidDataException>().With.Message.Contains("Rooms"));
+    }
+
+    [Test]
     public void ListOfLiveChildren_IsCapturedButLeftToTheOwnerToRestore()
     {
         var plant = new Plant { Name = "plant" };
@@ -235,6 +259,21 @@ internal sealed class ExtendedTank
 
 [NumosSnapshotOf(typeof(ExtendedTank))]
 internal sealed partial class ExtendedTankSnapshot;
+
+internal sealed class Grid(int size)
+{
+    public int Used;
+
+    [NumosSerialize] public FlatArray<float> Pressures = new(new float[size]);
+    [NumosSerialize] public FlatArray<short> Levels = new(new short[size]);
+    [NumosSerialize] public FlatArray<int> Rooms = new(new int[size]);
+
+    // A counted prefix is not a per-element array, so the length check and byte total skip it.
+    [NumosSerialize(Count = nameof(Used))] public ushort[] Active = new ushort[size];
+}
+
+[NumosSnapshotOf(typeof(Grid))]
+internal sealed partial class GridSnapshot;
 
 internal sealed class Plant
 {

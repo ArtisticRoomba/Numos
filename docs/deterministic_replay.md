@@ -246,6 +246,10 @@ The snapshot can still carry hand-written members. A hand-written `[NumosSeriali
 rebuilds derived live state after a restore (the chunk rederives `IsVacuum` from pressures there). `OnDecoded` validates
 data read from a file.
 
+A snapshot with `FlatArray` members also gets `CheckFlatArrayLengths(long)` and `FlatArrayPayloadBytes`. Members with a
+`Count` are skipped, because they hold only a prefix. `AtmosChunkCheckpoint` calls the check from `OnDecoded` and adds the
+byte total to `PayloadBytes`. A new per-voxel array on `AtmosChunk` then needs no hand-written list.
+
 Configuration scalars and gas properties use the same schema, but they live on ordinary types instead of snapshots:
 
 - Config scalars are marked on the mutable `AtmosConfig`, along with the gas registry. A snapshot keeps its normalized

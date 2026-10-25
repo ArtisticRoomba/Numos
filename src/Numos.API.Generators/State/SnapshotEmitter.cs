@@ -40,6 +40,9 @@ internal static class SnapshotEmitter
             writer.Line();
         }
 
+        if (EmitFlatArrayMembers(writer, model))
+            writer.Line();
+
         EmitCapture(writer, model, live);
         writer.Line();
         if (model.Restorable)
@@ -193,6 +196,67 @@ internal static class SnapshotEmitter
         writer.Line("snapshot.OnCaptured(live);");
         writer.Line("return snapshot;");
         writer.Close();
+    }
+
+    /// <summary>
+    ///     Writes the length check and byte total for the snapshot's whole-array <c>FlatArray&lt;T&gt;</c> members,
+    ///     so a hand-written decode check does not have to list them again.
+    /// </summary>
+    /// <returns>Whether anything was written. A snapshot with no such member gets neither.</returns>
+    /// <remarks>
+    ///     A member with a count member holds only a prefix of its live array, so one expected length cannot check it.
+    ///     It stays out of both generated members.
+    /// </remarks>
+    private static bool EmitFlatArrayMembers(CodeWriter writer, SnapshotModel model)
+    {
+        SnapshotMemberModel[] arrays = model.Members
+            .Where(static member => member is { Kind: SnapshotMemberKind.Array, IsFlatArray: true, Count: null })
+            .ToArray();
+
+        if (arrays.Length == 0)
+            return false;
+
+        writer.Line("/// <summary>");
+        writer.Line("///     Checks that every member copied from a <c>FlatArray&lt;T&gt;</c> holds exactly the expected element count.");
+        writer.Line("/// </summary>");
+        writer.Line("/// <param name=\"expected\">The element count each of those members must have.</param>");
+        writer.Line("/// <exception cref=\"global::System.IO.InvalidDataException\">");
+        writer.Line("///     A member holds a different element count. The message names the first one.");
+        writer.Line("/// </exception>");
+        writer.Line(CodeWriter.GeneratedCodeAttribute);
+        writer.Line("internal void CheckFlatArrayLengths(long expected)");
+        writer.Open();
+        for (int index = 0; index < arrays.Length; index++)
+        {
+            SnapshotMemberModel member = arrays[index];
+            string label = member.Name.TrimStart('@');
+            writer.Line("if (" + member.Name + ".Count != expected)");
+            writer.Line("    throw new global::System.IO.InvalidDataException(");
+            writer.Line(
+                "        $\"The snapshot's " + label + " holds {" + member.Name + ".Count} elements, but {expected} are expected.\");");
+
+            if (index < arrays.Length - 1)
+                writer.Line();
+        }
+
+        writer.Close();
+        writer.Line();
+
+        writer.Line("/// <summary>");
+        writer.Line("///     Gets the bytes held by the members that <see cref=\"CheckFlatArrayLengths\" /> covers.");
+        writer.Line("/// </summary>");
+        writer.Line(CodeWriter.GeneratedCodeAttribute);
+        writer.Line("internal long FlatArrayPayloadBytes =>");
+        for (int index = 0; index < arrays.Length; index++)
+        {
+            SnapshotMemberModel member = arrays[index];
+            string term = "(long)" + member.Name + ".Count * global::System.Runtime.CompilerServices.Unsafe.SizeOf<" +
+                          member.ElementType + ">()";
+
+            writer.Line("    " + term + (index < arrays.Length - 1 ? " +" : ";"));
+        }
+
+        return true;
     }
 
     private static string ReadSpan(SnapshotMemberModel member, string source)

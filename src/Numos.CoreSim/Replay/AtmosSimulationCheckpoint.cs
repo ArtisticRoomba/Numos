@@ -119,7 +119,7 @@ public sealed partial class AtmosChunkCheckpoint
     /// <summary>
     ///     Gets bytes occupied by copied chunk and solver values, excluding object headers and keys.
     /// </summary>
-    public long PayloadBytes => (long)Classifications.Count * 28 +
+    public long PayloadBytes => FlatArrayPayloadBytes +
                                 ActiveAirIndices.Count * 2L +
                                 Gases.Sum(static gas => 4L + gas.Moles.Count * 4L) +
                                 SolverArrays.Sum(static array => array.PayloadBytes);
@@ -168,13 +168,9 @@ public sealed partial class AtmosChunkCheckpoint
         if (voxels > AtmosChunkConstants.MaximumVoxelCount)
             throw new InvalidDataException("Chunk dimensions hold more voxels than a chunk can address.");
 
-        if (Classifications.Count != voxels || Temperatures.Count != voxels || Pressures.Count != voxels ||
-            HeatCapacities.Count != voxels || MomentumX.Count != voxels || MomentumY.Count != voxels ||
-            MomentumZ.Count != voxels)
-        {
-            throw new InvalidDataException("Chunk voxel data does not match its dimensions.");
-        }
+        CheckFlatArrayLengths(voxels);
 
+        // Only the active prefix is captured, so this member is bounded by the voxel count and not equal to it.
         if (ActiveAirIndices.Count > voxels)
             throw new InvalidDataException("The active air voxel count is invalid.");
 
