@@ -18,10 +18,6 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
     private GasRegistrySnapshot _gasRegistry = default!;
     private JoulePerMoleKelvin[] _molarHeatCapacitiesAtConstantVolume = [];
     private KilogramPerMole[] _molarMasses = [];
-
-    // Only used when the captured configuration is not an AtmosConfigSnapshot, which has its own shared copy.
-    private ReactionTables? _reactionTables;
-
     private AtmosConfigSnapshot? _sourceConfig;
 
     /// <summary>
@@ -30,8 +26,8 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
     /// </summary>
     /// <remarks>
     ///     The data lives here, not on the kernel, so it stays tied to the configuration it was built from.
-    ///     Recapturing the same <see cref="AtmosConfigSnapshot" /> returns early. A kernel that holds only
-    ///     snapshots therefore keeps the data from tick to tick.
+    ///     Recapturing the same <see cref="AtmosConfigSnapshot" /> returns early, so the data survives from tick to
+    ///     tick.
     /// </remarks>
     internal SolverDataStorage SolverData { get; } = new();
 
@@ -108,10 +104,16 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
 
     public int GasPropertyCount { get; private set; }
 
-    internal void Capture(IAtmosConfig config)
+    /// <summary>
+    ///     Copies the scalars of an applied configuration and builds the per-gas tables.
+    /// </summary>
+    /// <param name="config">
+    ///     The applied configuration. The <see cref="AtmosConfigSnapshot" /> constructor already normalized its
+    ///     values, so this method copies them as they are.
+    /// </param>
+    internal void Capture(AtmosConfigSnapshot config)
     {
-        // Only immutable configurations can safely retain derived data across captures.
-        if (config is AtmosConfigSnapshot snapshot && ReferenceEquals(snapshot, _sourceConfig))
+        if (ReferenceEquals(config, _sourceConfig))
             return;
 
         _sourceConfig = null;
@@ -125,55 +127,23 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
         }
 
         GasPropertyCount = gasPropertyCount;
-        GlobalTemperature = FloatMath.IsFinitePositive(config.GlobalTemperature)
-            ? config.GlobalTemperature
-            : AtmosConfigDefaults.GlobalTemperature;
+        GlobalTemperature = config.GlobalTemperature;
+        DefaultTemperatureFallback = config.DefaultTemperatureFallback;
+        DefaultMolarHeatCapacityAtConstantVolume = config.DefaultMolarHeatCapacityAtConstantVolume;
+        VoxelVolume = config.VoxelVolume;
+        PressurePerMoleKelvin = config.PressurePerMoleKelvin;
+        SaturationReferencePressure = config.SaturationReferencePressure;
+        DefaultDiffusionCoefficient = config.DefaultDiffusionCoefficient;
+        SpaceTemperature = config.SpaceTemperature;
+        ReferenceMolarMass = config.ReferenceMolarMass;
 
-        DefaultTemperatureFallback = FloatMath.IsFinitePositive(config.DefaultTemperatureFallback)
-            ? config.DefaultTemperatureFallback
-            : AtmosConfigDefaults.DefaultTemperatureFallback;
-
-        DefaultMolarHeatCapacityAtConstantVolume =
-            FloatMath.IsFinitePositive(config.DefaultMolarHeatCapacityAtConstantVolume)
-                ? config.DefaultMolarHeatCapacityAtConstantVolume
-                : AtmosConfigDefaults.DefaultMolarHeatCapacityAtConstantVolume;
-
-        VoxelVolume = FloatMath.IsFinitePositive(config.VoxelVolume)
-            ? config.VoxelVolume
-            : AtmosConfigDefaults.VoxelVolume;
-
-        PressurePerMoleKelvin = AtmosPhysicalConstants.MolarGasConstant / VoxelVolume;
-        SaturationReferencePressure = FloatMath.IsFinitePositive(config.SaturationReferencePressure)
-            ? config.SaturationReferencePressure
-            : AtmosConfigDefaults.SaturationReferencePressure;
-
-        DefaultDiffusionCoefficient = FloatMath.GetNonnegativeFinite(config.DefaultDiffusionCoefficient);
-        SpaceTemperature = FloatMath.IsFinitePositive(config.SpaceTemperature)
-            ? config.SpaceTemperature
-            : AtmosConfigDefaults.SpaceTemperature;
-
-        // Resolved before the per-gas loop because unset gas masses fall back to it.
-        ReferenceMolarMass = FloatMath.IsFinitePositive(config.ReferenceMolarMass)
-            ? config.ReferenceMolarMass
-            : AtmosConfigDefaults.ReferenceMolarMass;
-
-        var gases = new GasRegistry();
+        _gasRegistry = config.GasRegistry;
         for (int gasId = 0; gasId < GasPropertyCount; gasId++)
         {
-            config.TryGetGasProperties(gasId, out var properties);
-            gases.Add(properties);
-            _molarHeatCapacitiesAtConstantVolume[gasId] =
-                FloatMath.IsFinitePositive(properties.MolarHeatCapacityAtConstantVolume)
-                    ? properties.MolarHeatCapacityAtConstantVolume
-                    : DefaultMolarHeatCapacityAtConstantVolume;
-
-            _diffusionCoefficients[gasId] = FloatMath.GetNonnegativeFinite(properties.DiffusionCoefficient);
-            _molarMasses[gasId] = FloatMath.IsFinitePositive(properties.MolarMass)
-                ? properties.MolarMass
-                : ReferenceMolarMass;
+            _molarHeatCapacitiesAtConstantVolume[gasId] = config.GetMolarHeatCapacityAtConstantVolume(gasId);
+            _diffusionCoefficients[gasId] = config.GetDiffusionCoefficient(gasId);
+            _molarMasses[gasId] = config.GetMolarMass(gasId);
         }
-
-        _gasRegistry = new GasRegistrySnapshot(gases);
 
         if (GasPropertyCount < previousGasRegistryCount)
         {
@@ -183,28 +153,21 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
             Array.Clear(_molarMasses, GasPropertyCount, removedCount);
         }
 
-        BulkFlowCoefficient = FloatMath.ClampUnitInterval(config.BulkFlowCoefficient);
-        VacuumThreshold = FloatMath.GetNonnegativeFinite(config.VacuumThreshold);
-        SleepThreshold = Math.Max(0, config.SleepThreshold);
-        SleepEpsilon = FloatMath.GetNonnegativeFinite(config.SleepEpsilon);
-        ThermalConductance = FloatMath.IsFinitePositive(config.ThermalConductance)
-            ? config.ThermalConductance
-            : 0f;
-
-        CondensationRateFactor = FloatMath.ClampUnitInterval(config.CondensationRateFactor);
-        MaxPressureTransferFractionPerNeighbor =
-            FloatMath.ClampUnitInterval(config.MaxPressureTransferFractionPerNeighbor);
-
-        AccumulatorWakeThreshold = FloatMath.GetNonnegativeFinite(config.AccumulatorWakeThreshold);
-        AccumulatorMaxAliveTicks = Math.Max(0, config.AccumulatorMaxAliveTicks);
-
+        BulkFlowCoefficient = config.BulkFlowCoefficient;
+        VacuumThreshold = config.VacuumThreshold;
+        SleepThreshold = config.SleepThreshold;
+        SleepEpsilon = config.SleepEpsilon;
+        ThermalConductance = config.ThermalConductance;
+        CondensationRateFactor = config.CondensationRateFactor;
+        MaxPressureTransferFractionPerNeighbor = config.MaxPressureTransferFractionPerNeighbor;
+        AccumulatorWakeThreshold = config.AccumulatorWakeThreshold;
+        AccumulatorMaxAliveTicks = config.AccumulatorMaxAliveTicks;
 
         SolverConfigurations = config.SolverConfigurations;
         EulerFlow = EulerFlowConfig.Get(config);
 
         SolverData.Clear();
-        _reactionTables = null;
-        _sourceConfig = config as AtmosConfigSnapshot;
+        _sourceConfig = config;
     }
 
     /// <summary>
@@ -212,7 +175,7 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
     /// </summary>
     internal ReactionTables GetReactionTables()
     {
-        return _sourceConfig?.GetReactionTables() ?? (_reactionTables ??= ReactionTables.Create(this));
+        return _sourceConfig!.GetReactionTables();
     }
 
     public void ValidateGasRegistry()
