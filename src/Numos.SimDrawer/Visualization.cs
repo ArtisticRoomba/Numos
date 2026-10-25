@@ -493,30 +493,54 @@ public sealed class VisualizationRegistry
         ArgumentNullException.ThrowIfNull(config);
 
         var registry = new VisualizationRegistry();
-        registry.Register(new TemperatureVisualization());
+        registry.Register(new ThreeStopVisualization(
+            BuiltInVisualizationIds.Temperature,
+            "Temperature",
+            "K",
+            VisualizationDataRequirements.Temperature,
+            (new ColorRgba(0f, 0f, 1f), new ColorRgba(1f, 1f, 0f), new ColorRgba(1f, 0f, 0f)),
+            static (in VoxelSample sample) => sample.Temperature));
+
         registry.Register(new PressureVisualization());
         registry.Register(new GasCompositionVisualization(config));
         registry.Register(new ActiveOnlyVisualization());
         registry.Register(new VoxelClassificationVisualization());
-        registry.Register(new SpeedVisualization());
-        registry.Register(new DensityVisualization(config));
-        registry.Register(new VelocityComponentVisualization(
+        registry.Register(new ThreeStopVisualization(
+            BuiltInVisualizationIds.Speed,
+            "Speed",
+            "m/s",
+            VisualizationDataRequirements.Velocity,
+            (new ColorRgba(0.05f, 0.05f, 0.12f), new ColorRgba(0.2f, 0.6f, 1f), new ColorRgba(1f, 1f, 1f)),
+            static (in VoxelSample sample) => sample.Speed));
+
+        registry.Register(new ThreeStopVisualization(
+            BuiltInVisualizationIds.Density,
+            "Density",
+            "kg/m³",
+            VisualizationDataRequirements.Density,
+            (new ColorRgba(0.05f, 0.03f, 0.25f), new ColorRgba(0.1f, 0.65f, 0.55f), new ColorRgba(1f, 0.95f, 0.45f)),
+            static (in VoxelSample sample) => sample.Density,
+            mappingRevision: () => DensityMappingRevision(config)));
+
+        // The automatic range is symmetric, but a manual range can be lopsided. Zero maps to the middle color only
+        // when the range is symmetric.
+        registry.Register(CreateVelocityComponent(
             BuiltInVisualizationIds.VelocityX,
             "Velocity X",
             VisualizationRangeSource.SymmetricVelocityX,
-            static sample => sample.VelocityX));
+            static (in VoxelSample sample) => sample.VelocityX));
 
-        registry.Register(new VelocityComponentVisualization(
+        registry.Register(CreateVelocityComponent(
             BuiltInVisualizationIds.VelocityY,
             "Velocity Y",
             VisualizationRangeSource.SymmetricVelocityY,
-            static sample => sample.VelocityY));
+            static (in VoxelSample sample) => sample.VelocityY));
 
-        registry.Register(new VelocityComponentVisualization(
+        registry.Register(CreateVelocityComponent(
             BuiltInVisualizationIds.VelocityZ,
             "Velocity Z",
             VisualizationRangeSource.SymmetricVelocityZ,
-            static sample => sample.VelocityZ));
+            static (in VoxelSample sample) => sample.VelocityZ));
 
         registry.Register(new SchlierenVisualization(config));
         return registry;
@@ -535,6 +559,32 @@ public sealed class VisualizationRegistry
         return resolution == 1
             ? 0.5f
             : MathF.Round(normalized * (resolution - 1)) / (resolution - 1);
+    }
+
+    private static ColorRgba ThreeStopColor(
+        float normalized,
+        in (ColorRgba Low, ColorRgba Middle, ColorRgba High) colors)
+    {
+        return normalized < 0.5f
+            ? ColorRgba.Lerp(colors.Low, colors.Middle, normalized * 2f)
+            : ColorRgba.Lerp(colors.Middle, colors.High, (normalized - 0.5f) * 2f);
+    }
+
+    private static ThreeStopVisualization CreateVelocityComponent(
+        string id,
+        string displayName,
+        VisualizationRangeSource rangeSource,
+        SampleSelector select)
+    {
+        return new ThreeStopVisualization(
+            id,
+            displayName,
+            "m/s",
+            VisualizationDataRequirements.Velocity,
+            (new ColorRgba(0.1f, 0.25f, 0.85f), new ColorRgba(0.96f, 0.96f, 0.96f), new ColorRgba(0.85f, 0.15f, 0.1f)),
+            select,
+            rangeSource,
+            new VisualizationRange(-1f, 1f));
     }
 
     /// <summary>
@@ -608,79 +658,52 @@ public sealed class VisualizationRegistry
             ]);
     }
 
-    private sealed class DensityVisualization(AtmosConfig config) : IVisualizationMethod
-    {
-        private readonly static ColorRgba Thin = new(0.05f, 0.03f, 0.25f);
-        private readonly static ColorRgba Medium = new(0.1f, 0.65f, 0.55f);
-        private readonly static ColorRgba Dense = new(1f, 0.95f, 0.45f);
+    /// <summary>
+    ///     Reads the value a visualization colors from a voxel sample.
+    /// </summary>
+    private delegate float SampleSelector(in VoxelSample sample);
 
-        public string Id => BuiltInVisualizationIds.Density;
-
-        public string DisplayName => "Density";
-
-        public ulong MappingRevision => DensityMappingRevision(config);
-
-        public VisualizationDataRequirements RequiredData => VisualizationDataRequirements.Density;
-
-        public bool TryGetColor(in VoxelSample sample, out ColorRgba color)
-        {
-            float normalized = Normalize(sample.Density, sample.Range);
-            color = normalized < 0.5f
-                ? ColorRgba.Lerp(Thin, Medium, normalized * 2f)
-                : ColorRgba.Lerp(Medium, Dense, (normalized - 0.5f) * 2f);
-
-            return true;
-        }
-
-        public VisualizationLegend CreateLegend(IReadOnlyCollection<int> activeGasIds)
-        {
-            return CreateLegend(activeGasIds, VisualizationRange.Default);
-        }
-
-        public VisualizationLegend CreateLegend(IReadOnlyCollection<int> activeGasIds, VisualizationRange range)
-        {
-            return CreateThreeStopLegend("Density", "kg/m³", range, (Thin, Medium, Dense));
-        }
-    }
-
-    private sealed class VelocityComponentVisualization(
+    /// <summary>
+    ///     Colors one scalar value of a voxel sample with a three-stop gradient.
+    /// </summary>
+    /// <remarks>
+    ///     The selector takes the sample by reference, so reading a value copies no sample.
+    /// </remarks>
+    private sealed class ThreeStopVisualization(
         string id,
         string displayName,
-        VisualizationRangeSource rangeSource,
-        Func<VoxelSample, float> select) : IVisualizationMethod
+        string units,
+        VisualizationDataRequirements requiredData,
+        (ColorRgba Low, ColorRgba Middle, ColorRgba High) colors,
+        SampleSelector select,
+        VisualizationRangeSource rangeSource = VisualizationRangeSource.Default,
+        VisualizationRange? legendRange = null,
+        Func<ulong>? mappingRevision = null) : IVisualizationMethod
     {
-        private readonly static ColorRgba Negative = new(0.1f, 0.25f, 0.85f);
-        private readonly static ColorRgba Zero = new(0.96f, 0.96f, 0.96f);
-        private readonly static ColorRgba Positive = new(0.85f, 0.15f, 0.1f);
-
         public string Id => id;
 
         public string DisplayName => displayName;
 
-        public VisualizationDataRequirements RequiredData => VisualizationDataRequirements.Velocity;
+        public ulong MappingRevision => mappingRevision?.Invoke() ?? 0;
+
+        public VisualizationDataRequirements RequiredData => requiredData;
 
         public VisualizationRangeSource RangeSource => rangeSource;
 
         public bool TryGetColor(in VoxelSample sample, out ColorRgba color)
         {
-            // The range is symmetric by default, but a manual range can be lopsided. Zero maps to the midpoint
-            // color only when the range is symmetric.
-            float normalized = Normalize(select(sample), sample.Range);
-            color = normalized < 0.5f
-                ? ColorRgba.Lerp(Negative, Zero, normalized * 2f)
-                : ColorRgba.Lerp(Zero, Positive, (normalized - 0.5f) * 2f);
-
+            color = ThreeStopColor(Normalize(select(in sample), sample.Range), in colors);
             return true;
         }
 
         public VisualizationLegend CreateLegend(IReadOnlyCollection<int> activeGasIds)
         {
-            return CreateLegend(activeGasIds, new VisualizationRange(-1f, 1f));
+            return CreateLegend(activeGasIds, legendRange ?? VisualizationRange.Default);
         }
 
         public VisualizationLegend CreateLegend(IReadOnlyCollection<int> activeGasIds, VisualizationRange range)
         {
-            return CreateThreeStopLegend(displayName, "m/s", range, (Negative, Zero, Positive));
+            return CreateThreeStopLegend(displayName, units, range, colors);
         }
     }
 
@@ -791,50 +814,6 @@ public sealed class VisualizationRegistry
         }
     }
 
-    private sealed class TemperatureVisualization : IVisualizationMethod
-    {
-        private readonly static ColorRgba Cold = new(0f, 0f, 1f);
-        private readonly static ColorRgba Temperate = new(1f, 1f, 0f);
-        private readonly static ColorRgba Hot = new(1f, 0f, 0f);
-
-        public string Id => BuiltInVisualizationIds.Temperature;
-
-        public string DisplayName => "Temperature";
-
-        public VisualizationDataRequirements RequiredData => VisualizationDataRequirements.Temperature;
-
-        public bool TryGetColor(in VoxelSample sample, out ColorRgba color)
-        {
-            float normalized = Normalize(sample.Temperature, sample.Range);
-            color = normalized < 0.5f
-                ? ColorRgba.Lerp(Cold, Temperate, normalized * 2f)
-                : ColorRgba.Lerp(Temperate, Hot, (normalized - 0.5f) * 2f);
-
-            return true;
-        }
-
-        public VisualizationLegend CreateLegend(IReadOnlyCollection<int> activeGasIds)
-        {
-            return CreateLegend(activeGasIds, VisualizationRange.Default);
-        }
-
-        public VisualizationLegend CreateLegend(
-            IReadOnlyCollection<int> activeGasIds,
-            VisualizationRange range)
-        {
-            float midpoint = range.Minimum + (range.Maximum - range.Minimum) * 0.5f;
-            return new VisualizationLegend(
-                "Temperature",
-                "K",
-                VisualizationLegendKind.Gradient,
-                [
-                    new VisualizationLegendEntry($"{range.Minimum:G6} K", Cold, range.Minimum),
-                    new VisualizationLegendEntry($"{midpoint:G6} K", Temperate, midpoint),
-                    new VisualizationLegendEntry($"{range.Maximum:G6} K", Hot, range.Maximum)
-                ]);
-        }
-    }
-
     private sealed class PressureVisualization : IVisualizationMethod
     {
         public string Id => BuiltInVisualizationIds.Pressure;
@@ -868,50 +847,6 @@ public sealed class VisualizationRegistry
                     new VisualizationLegendEntry($"{range.Minimum:G6}", new ColorRgba(0f, 0f, 0f), range.Minimum),
                     new VisualizationLegendEntry($"{midpoint:G6}", new ColorRgba(0.5f, 0.5f, 0.5f), midpoint),
                     new VisualizationLegendEntry($"{range.Maximum:G6}", new ColorRgba(1f, 1f, 1f), range.Maximum)
-                ]);
-        }
-    }
-
-    private sealed class SpeedVisualization : IVisualizationMethod
-    {
-        private readonly static ColorRgba Still = new(0.05f, 0.05f, 0.12f);
-        private readonly static ColorRgba Moving = new(0.2f, 0.6f, 1f);
-        private readonly static ColorRgba Fast = new(1f, 1f, 1f);
-
-        public string Id => BuiltInVisualizationIds.Speed;
-
-        public string DisplayName => "Speed";
-
-        public VisualizationDataRequirements RequiredData => VisualizationDataRequirements.Velocity;
-
-        public bool TryGetColor(in VoxelSample sample, out ColorRgba color)
-        {
-            float normalized = Normalize(sample.Speed, sample.Range);
-            color = normalized < 0.5f
-                ? ColorRgba.Lerp(Still, Moving, normalized * 2f)
-                : ColorRgba.Lerp(Moving, Fast, (normalized - 0.5f) * 2f);
-
-            return true;
-        }
-
-        public VisualizationLegend CreateLegend(IReadOnlyCollection<int> activeGasIds)
-        {
-            return CreateLegend(activeGasIds, VisualizationRange.Default);
-        }
-
-        public VisualizationLegend CreateLegend(
-            IReadOnlyCollection<int> activeGasIds,
-            VisualizationRange range)
-        {
-            float midpoint = range.Minimum + (range.Maximum - range.Minimum) * 0.5f;
-            return new VisualizationLegend(
-                "Speed",
-                "m/s",
-                VisualizationLegendKind.Gradient,
-                [
-                    new VisualizationLegendEntry($"{range.Minimum:G6} m/s", Still, range.Minimum),
-                    new VisualizationLegendEntry($"{midpoint:G6} m/s", Moving, midpoint),
-                    new VisualizationLegendEntry($"{range.Maximum:G6} m/s", Fast, range.Maximum)
                 ]);
         }
     }
