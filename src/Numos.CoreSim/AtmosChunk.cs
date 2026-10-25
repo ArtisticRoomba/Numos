@@ -510,7 +510,7 @@ internal class AtmosChunk
             foreach (var storage in fields)
             {
                 if (storage is { CaptureForRollback: true })
-                    (captured ??= []).Add(new AtmosSolverArraySnapshot(storage));
+                    (captured ??= []).Add(AtmosSolverArraySnapshot.Copy(storage));
             }
         }
 

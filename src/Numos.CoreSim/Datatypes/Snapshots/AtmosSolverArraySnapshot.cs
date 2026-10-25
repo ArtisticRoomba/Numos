@@ -15,13 +15,7 @@ public sealed class AtmosSolverArraySnapshot
 {
     private readonly SolverArrayStorage _storage;
 
-    internal AtmosSolverArraySnapshot(SolverArrayStorage storage)
-        : this(storage.Clone(), true)
-    {
-    }
-
-    // Takes ownership of storage nobody else references, such as an array just decoded from a file.
-    private AtmosSolverArraySnapshot(SolverArrayStorage storage, bool _)
+    private AtmosSolverArraySnapshot(SolverArrayStorage storage)
     {
         _storage = storage;
     }
@@ -74,9 +68,16 @@ public sealed class AtmosSolverArraySnapshot
 
     internal ChunkFieldDescriptor Field => _storage.Field;
 
+    // Takes ownership of storage nobody else references, such as an array just decoded from a file.
     internal static AtmosSolverArraySnapshot Adopt(SolverArrayStorage storage)
     {
-        return new AtmosSolverArraySnapshot(storage, true);
+        return new AtmosSolverArraySnapshot(storage);
+    }
+
+    // Copies live storage, which keeps changing after the capture.
+    internal static AtmosSolverArraySnapshot Copy(SolverArrayStorage storage)
+    {
+        return new AtmosSolverArraySnapshot(storage.Clone());
     }
 
     internal void WriteValues<TSink>(ref TSink sink) where TSink : struct, IStateSink
