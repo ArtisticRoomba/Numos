@@ -114,12 +114,11 @@ internal static class VacuumCleanup
                 continue;
             }
 
-            var position = chunk.GetXyzInt3(voxelIndex);
             chunk.IsVacuum[voxelIndex] = pressure < vacuumThreshold &&
                                          !HasNeighborAtOrAboveVacuumThreshold(
                                              context,
                                              chunk,
-                                             position,
+                                             chunk.GetXyzInt3(voxelIndex),
                                              vacuumThreshold);
         }
     }
