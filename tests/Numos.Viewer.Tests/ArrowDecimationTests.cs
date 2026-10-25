@@ -38,13 +38,13 @@ public sealed class ArrowDecimationTests
     [TestCase(200, 200, 4)]
     [TestCase(1500, 1500, 24)]
     [TestCase(0, 100, 1)]
-    public void GetArrowStep_KeepsArrowsUnderTheLimitOnBothAxes(int columns, int rows, int expected)
+    public void GetViewStep_KeepsArrowsUnderTheLimitOnBothAxes(int columns, int rows, int expected)
     {
-        int step = SliceRenderer.GetArrowStep(columns, rows);
+        int step = VelocityArrows.GetViewStep(columns, rows);
 
         Assert.That(step, Is.EqualTo(expected));
         long arrows = (long)Math.Ceiling(columns / (double)step) * (long)Math.Ceiling(rows / (double)step);
-        Assert.That(arrows, Is.LessThanOrEqualTo(SliceRenderer.MaxVelocityArrows));
+        Assert.That(arrows, Is.LessThanOrEqualTo(VelocityArrows.MaxArrows));
     }
 
     private static int GreatestCommonDivisor(int left, int right)

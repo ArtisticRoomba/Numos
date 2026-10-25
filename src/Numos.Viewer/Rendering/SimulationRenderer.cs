@@ -23,12 +23,6 @@ public static class SimulationRenderer
     /// </summary>
     public const int MaxOutlinedVoxels = 20_000;
 
-    /// <summary>
-    ///     Most velocity arrows drawn per frame. Arrows are immediate-mode lines, so the renderer steps over cells
-    ///     to stay under this count.
-    /// </summary>
-    public const int MaxVelocityArrows = 4_000;
-
     private readonly static Vector3 VoxelSize = Vector3.One;
     private readonly static Vector3 HighlightSize = new(1.04f);
 
@@ -124,7 +118,7 @@ public static class SimulationRenderer
 
     /// <summary>
     ///     Draws arrows from the centre of drawn voxels along <c>velocity × scale</c>, at most
-    ///     <see cref="MaxVelocityArrows" /> of them. Depth testing is off for this pass: the arrows start inside
+    ///     <see cref="VelocityArrows.MaxArrows" /> of them. Depth testing is off for this pass: the arrows start inside
     ///     opaque cubes, and a short arrow would otherwise vanish entirely.
     /// </summary>
     private static void DrawVelocityArrows(SimulationDrawData frame, ChunkIdentity? focusedChunk, float scaleSeconds)
@@ -142,7 +136,10 @@ public static class SimulationRenderer
             rowLength = chunk.Dimensions.X;
         }
 
-        int stride = VelocityArrows.GetSampleStride((int)Math.Min(candidates, int.MaxValue), MaxVelocityArrows, rowLength);
+        int stride = VelocityArrows.GetSampleStride(
+            (int)Math.Min(candidates, int.MaxValue),
+            VelocityArrows.MaxArrows,
+            rowLength);
 
         // Flush the batch before changing GL state, and the line batch before restoring it, or the
         // state change applies to whatever happens to be drawn next.

@@ -41,6 +41,12 @@ public static class VelocityArrows
     public const float MaxLength = 4f;
 
     /// <summary>
+    ///     Most arrows drawn in one frame. Arrows are immediate-mode lines, so both overlays step over cells to stay
+    ///     under this count.
+    /// </summary>
+    public const int MaxArrows = 4_000;
+
+    /// <summary>
     ///     Head segment length as a fraction of the shaft, capped at <see cref="MaxHeadLength" />.
     /// </summary>
     private const float HeadFraction = 0.3f;
@@ -77,6 +83,22 @@ public static class VelocityArrows
         }
 
         return stride;
+    }
+
+    /// <summary>
+    ///     Picks the spacing in cells between arrows so a view of <paramref name="columns" /> by
+    ///     <paramref name="rows" /> cells gets at most <see cref="MaxArrows" /> of them.
+    /// </summary>
+    /// <param name="columns">Cells in view along U.</param>
+    /// <param name="rows">Cells in view along V.</param>
+    /// <returns>The step on both axes, at least 1.</returns>
+    public static int GetViewStep(int columns, int rows)
+    {
+        long cells = (long)Math.Max(columns, 0) * Math.Max(rows, 0);
+        if (cells <= MaxArrows)
+            return 1;
+
+        return (int)Math.Ceiling(Math.Sqrt((double)cells / MaxArrows));
     }
 
     private static int GreatestCommonDivisor(int left, int right)

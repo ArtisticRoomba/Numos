@@ -44,11 +44,6 @@ public sealed class SliceRenderer : IDisposable
     /// </summary>
     public const int MaxOutlinedCells = 40_000;
 
-    /// <summary>
-    ///     Most velocity arrows drawn in one frame.
-    /// </summary>
-    public const int MaxVelocityArrows = 4_000;
-
     private const byte TransparentAlpha = 89;
     private const float ArrowThickness = 0.06f;
     private readonly static Color CellBorder = new(0f, 0f, 0f, 0.5f);
@@ -272,7 +267,7 @@ public sealed class SliceRenderer : IDisposable
     /// <summary>
     ///     Draws the in-plane velocity of visible cells in view as arrows from the cell centre. The slice-normal
     ///     component is dropped, so a cell moving straight through the plane shows no arrow. A view with more than
-    ///     <see cref="MaxVelocityArrows" /> cells keeps every n-th cell on both axes.
+    ///     <see cref="VelocityArrows.MaxArrows" /> cells keeps every n-th cell on both axes.
     /// </summary>
     private static void DrawVelocityArrows(
         SimulationSliceDrawData slice,
@@ -283,7 +278,7 @@ public sealed class SliceRenderer : IDisposable
             return;
 
         var color = SimulationRenderer.ToRaylibColor(ViewerTheme.FlowArrow);
-        int step = GetArrowStep(view.Columns, view.Rows);
+        int step = VelocityArrows.GetViewStep(view.Columns, view.Rows);
         int offset = step / 2;
         ReadOnlySpan<byte> pixels = slice.Pixels;
 
@@ -311,22 +306,6 @@ public sealed class SliceRenderer : IDisposable
                 Raylib.DrawLineEx(tip, right, ArrowThickness, color);
             }
         }
-    }
-
-    /// <summary>
-    ///     Picks the spacing in cells between arrows so a view of <paramref name="columns" /> by
-    ///     <paramref name="rows" /> cells gets at most <see cref="MaxVelocityArrows" /> of them.
-    /// </summary>
-    /// <param name="columns">Cells in view along U.</param>
-    /// <param name="rows">Cells in view along V.</param>
-    /// <returns>The step, at least 1.</returns>
-    internal static int GetArrowStep(int columns, int rows)
-    {
-        long cells = (long)Math.Max(columns, 0) * Math.Max(rows, 0);
-        if (cells <= MaxVelocityArrows)
-            return 1;
-
-        return (int)Math.Ceiling(Math.Sqrt((double)cells / MaxVelocityArrows));
     }
 
     private static int FirstAligned(int first, int step, int offset)
