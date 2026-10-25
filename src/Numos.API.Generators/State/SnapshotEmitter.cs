@@ -59,17 +59,7 @@ internal static class SnapshotEmitter
         writer.Line("partial void OnDecoded();");
         writer.Line();
 
-        StateEmitter.EmitStateKey(writer, model.State, stateInterface);
-        writer.Line();
-        StateEmitter.EmitWriteState(writer, model.State, stateInterface);
-        writer.Line();
-        StateEmitter.EmitInstanceWriteState(writer, model.State);
-        writer.Line();
-        EmitReadState(writer, model, stateInterface);
-        writer.Line();
-        StateEmitter.EmitStateEquals(writer, model.State, stateInterface);
-        writer.Line();
-        StateEmitter.EmitCompareState(writer, model.State, stateInterface);
+        StateEmitter.EmitWalker(writer, model.State, stateInterface, walker => EmitReadState(walker, model, stateInterface));
 
         writer.CloseTypeChain(model.Type);
         writer.CloseNamespace(model.Type);

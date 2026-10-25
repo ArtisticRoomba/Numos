@@ -6,7 +6,6 @@ namespace Numos.API.Generators.State;
 internal static class StateEmitter
 {
     private const string StateInterface = "global::Numos.CoreSim.State.Advanced.INumosState";
-    private const string NonGenericInterface = "global::Numos.CoreSim.State.Advanced.INumosState";
     private const string SolverConfiguration = "global::Numos.CoreSim.IAtmosSolverConfiguration";
     private const string Advanced = "global::Numos.CoreSim.State.Advanced.";
     private const string TargetInterface = "global::Numos.CoreSim.State.Advanced.INumosStateTarget";
@@ -23,17 +22,7 @@ internal static class StateEmitter
         writer.OpenNamespace(model.Type);
         writer.OpenTypeChain(model.Type, " : " + stateInterface);
 
-        EmitStateKey(writer, model, stateInterface);
-        writer.Line();
-        EmitWriteState(writer, model, stateInterface);
-        writer.Line();
-        EmitInstanceWriteState(writer, model);
-        writer.Line();
-        EmitReadState(writer, model, stateInterface);
-        writer.Line();
-        EmitStateEquals(writer, model, stateInterface);
-        writer.Line();
-        EmitCompareState(writer, model, stateInterface);
+        EmitWalker(writer, model, stateInterface, walker => EmitReadState(walker, model, stateInterface));
 
         if (model.IsSolverConfiguration)
         {
@@ -44,6 +33,29 @@ internal static class StateEmitter
         writer.CloseTypeChain(model.Type);
         writer.CloseNamespace(model.Type);
         return writer.ToString();
+    }
+
+    /// <summary>
+    ///     Writes the members <c>INumosState&lt;T&gt;</c> needs, in a fixed order with a blank line between them.
+    /// </summary>
+    /// <param name="writer">The writer, inside the open type.</param>
+    /// <param name="model">The type whose fields the members cover.</param>
+    /// <param name="stateInterface">The interface to implement, with its type argument.</param>
+    /// <param name="emitReadState">Writes <c>ReadState</c>, which a snapshot builds differently.</param>
+    internal static void EmitWalker(
+        CodeWriter writer, StateTypeModel model, string stateInterface, Action<CodeWriter> emitReadState)
+    {
+        EmitStateKey(writer, model, stateInterface);
+        writer.Line();
+        EmitWriteState(writer, model, stateInterface);
+        writer.Line();
+        EmitInstanceWriteState(writer, model);
+        writer.Line();
+        emitReadState(writer);
+        writer.Line();
+        EmitStateEquals(writer, model, stateInterface);
+        writer.Line();
+        EmitCompareState(writer, model, stateInterface);
     }
 
     /// <summary>
@@ -58,17 +70,9 @@ internal static class StateEmitter
         writer.OpenTypeChain(model.Type, " : " + TargetInterface);
 
         writer.Line(CodeWriter.GeneratedCodeAttribute);
-        writer.Line("void " + NonGenericInterface + ".WriteState<TSink>(ref TSink sink)");
+        writer.Line("void " + StateInterface + ".WriteState<TSink>(ref TSink sink)");
         writer.Open();
-        writer.Line("sink.BeginObject();");
-        foreach (StateFieldModel field in model.Fields)
-        {
-            writer.Line("sink.BeginField(" + field.Id + ");");
-            writer.Line(field.Shape.CodecExpression + ".Write(ref sink, this." + field.MemberName + ");");
-            writer.Line("sink.EndField();");
-        }
-
-        writer.Line("sink.EndObject();");
+        EmitFieldWrites(writer, model, "this");
         writer.Close();
         writer.Line();
         writer.Line(CodeWriter.GeneratedCodeAttribute);
@@ -92,34 +96,42 @@ internal static class StateEmitter
         return writer.ToString();
     }
 
-    internal static void EmitWriteState(CodeWriter writer, StateTypeModel model, string stateInterface)
+    private static void EmitWriteState(CodeWriter writer, StateTypeModel model, string stateInterface)
     {
         writer.Line(CodeWriter.GeneratedCodeAttribute);
         writer.Line("static void " + stateInterface + ".WriteState<TSink>(ref TSink sink, " + model.TypeName + " value)");
         writer.Open();
+        EmitFieldWrites(writer, model, "value");
+        writer.Close();
+    }
+
+    /// <summary>
+    ///     Writes the statements that put each field of <paramref name="receiver" /> into <c>sink</c> as one object.
+    /// </summary>
+    private static void EmitFieldWrites(CodeWriter writer, StateTypeModel model, string receiver)
+    {
         writer.Line("sink.BeginObject();");
         foreach (StateFieldModel field in model.Fields)
         {
             writer.Line("sink.BeginField(" + field.Id + ");");
-            writer.Line(field.Shape.CodecExpression + ".Write(ref sink, value." + field.MemberName + ");");
+            writer.Line(field.Shape.CodecExpression + ".Write(ref sink, " + receiver + "." + field.MemberName + ");");
             writer.Line("sink.EndField();");
         }
 
         writer.Line("sink.EndObject();");
-        writer.Close();
     }
 
-    internal static void EmitStateKey(CodeWriter writer, StateTypeModel model, string stateInterface)
+    private static void EmitStateKey(CodeWriter writer, StateTypeModel model, string stateInterface)
     {
         string key = model.StateKey is null ? "null" : SymbolDisplay.FormatLiteral(model.StateKey, true);
         writer.Line(CodeWriter.GeneratedCodeAttribute);
         writer.Line("static string? " + stateInterface + ".StateKey => " + key + ";");
     }
 
-    internal static void EmitInstanceWriteState(CodeWriter writer, StateTypeModel model)
+    private static void EmitInstanceWriteState(CodeWriter writer, StateTypeModel model)
     {
         writer.Line(CodeWriter.GeneratedCodeAttribute);
-        writer.Line("void " + NonGenericInterface + ".WriteState<TSink>(ref TSink sink)");
+        writer.Line("void " + StateInterface + ".WriteState<TSink>(ref TSink sink)");
         writer.Open();
         writer.Line("global::Numos.CoreSim.State.Advanced.NumosState.Write<" + model.TypeName + ", TSink>(ref sink, this);");
         writer.Close();
@@ -219,7 +231,7 @@ internal static class StateEmitter
         writer.Line("reader.EndObject();");
     }
 
-    internal static void EmitStateEquals(CodeWriter writer, StateTypeModel model, string stateInterface)
+    private static void EmitStateEquals(CodeWriter writer, StateTypeModel model, string stateInterface)
     {
         writer.Line(CodeWriter.GeneratedCodeAttribute);
         writer.Line("static bool " + stateInterface + ".StateEquals(" + model.TypeName + " left, " + model.TypeName + " right)");
@@ -255,7 +267,7 @@ internal static class StateEmitter
         writer.Close();
     }
 
-    internal static void EmitCompareState(CodeWriter writer, StateTypeModel model, string stateInterface)
+    private static void EmitCompareState(CodeWriter writer, StateTypeModel model, string stateInterface)
     {
         writer.Line(CodeWriter.GeneratedCodeAttribute);
         writer.Line("static int " + stateInterface + ".CompareState(" + model.TypeName + " left, " + model.TypeName + " right)");
