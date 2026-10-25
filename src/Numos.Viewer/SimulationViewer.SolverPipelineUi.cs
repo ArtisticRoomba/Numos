@@ -246,7 +246,7 @@ public partial class SimulationViewer
 
     private void RenderSolverPresets(IReadOnlyList<AtmosWorldSolverStep> steps, bool inspecting)
     {
-        var current = SolverPipelineEditor.DetectTransportModel(steps);
+        var current = AtmosWorldSolverPipeline.DetectTransportModel(steps);
         var style = ImGui.GetStyle();
         ImGui.Spacing();
         ImGui.AlignTextToFramePadding();

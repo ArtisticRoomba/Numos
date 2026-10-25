@@ -255,7 +255,9 @@ public sealed partial class WorkbenchSession
             () =>
             {
                 var world = RequireWorld();
-                var model = transportModel ?? CurrentTransportModel(world);
+                var model = transportModel ??
+                            AtmosWorldSolverPipeline.DetectTransportModel(world.Solvers.Steps) ??
+                            AtmosTransportModel.Euler;
                 if (world.Solvers.Steps.All(static step => step.Kind == AtmosWorldSolverKind.BuiltIn))
                 {
                     ThrowIfInspecting();
@@ -285,13 +287,5 @@ public sealed partial class WorkbenchSession
                     return false;
                 }
             });
-    }
-
-    private static AtmosTransportModel CurrentTransportModel(AtmosWorld world)
-    {
-        var names = world.Solvers.Steps.Select(static step => step.Name).ToArray();
-        return names.Contains(AtmosBuiltInSolvers.Advection) && !names.Contains(AtmosBuiltInSolvers.EulerFlow)
-            ? AtmosTransportModel.Legacy
-            : AtmosTransportModel.Euler;
     }
 }

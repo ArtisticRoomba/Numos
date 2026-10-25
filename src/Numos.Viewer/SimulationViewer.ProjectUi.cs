@@ -93,7 +93,11 @@ public partial class SimulationViewer
 
         _projectChunkDepthDraft = _session.ChunkDimensions.Z > 0 ? _session.ChunkDimensions.Z : 1;
         _includeDefaultGasesDraft = true;
-        _projectTransportModelDraft = GetTransportModel() ?? AtmosTransportModel.Euler;
+        var currentModel = _session.World == null
+            ? null
+            : AtmosWorldSolverPipeline.DetectTransportModel(_session.World.Solvers.Steps);
+
+        _projectTransportModelDraft = currentModel ?? AtmosTransportModel.Euler;
         _createProjectError = null;
         _requestOpenCreateProject = true;
         _createProjectModalOpen = true;
@@ -216,23 +220,6 @@ public partial class SimulationViewer
             "Which built-in stages move gas between voxels. Euler solves momentum and energy with CFL substeps, " +
             "carries per-voxel velocity, and reports the Flow readout in this panel. This sets the initial stages. " +
             "You can change the stages later in Solver Pipeline.");
-    }
-
-    /// <summary>
-    ///     Infers the active model from the pipeline: Euler installs <c>euler-flow</c>, legacy never does.
-    /// </summary>
-    private AtmosTransportModel? GetTransportModel()
-    {
-        if (_session.World == null)
-            return null;
-
-        foreach (var step in _session.World.Solvers.Steps)
-        {
-            if (step.Name == AtmosBuiltInSolvers.EulerFlow)
-                return AtmosTransportModel.Euler;
-        }
-
-        return AtmosTransportModel.Legacy;
     }
 
     private void DrawCloseProjectModal()

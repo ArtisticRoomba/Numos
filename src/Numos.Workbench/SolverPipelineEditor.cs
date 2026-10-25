@@ -110,26 +110,6 @@ public static class SolverPipelineEditor
     }
 
     /// <summary>
-    ///     Reads the transport model from the stages that move gas between voxels.
-    /// </summary>
-    /// <param name="steps">The current stages in execution order.</param>
-    /// <returns>
-    ///     <see cref="AtmosTransportModel.Euler" /> when only <c>euler-flow</c> is present and
-    ///     <see cref="AtmosTransportModel.Legacy" /> when only <c>advection</c> is present. <see langword="null" />
-    ///     when both or neither is present. The enabled flag does not matter, because a preset keeps it.
-    /// </returns>
-    public static AtmosTransportModel? DetectTransportModel(IReadOnlyList<AtmosWorldSolverStep> steps)
-    {
-        ArgumentNullException.ThrowIfNull(steps);
-        bool euler = steps.Any(static step => step.Name == AtmosBuiltInSolvers.EulerFlow);
-        bool advection = steps.Any(static step => step.Name == AtmosBuiltInSolvers.Advection);
-        if (euler == advection)
-            return null;
-
-        return euler ? AtmosTransportModel.Euler : AtmosTransportModel.Legacy;
-    }
-
-    /// <summary>
     ///     Lists the pipeline problems that a stage list can show. Order is never a warning.
     /// </summary>
     /// <param name="steps">The current stages in execution order.</param>

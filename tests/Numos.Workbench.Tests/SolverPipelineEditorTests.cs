@@ -116,21 +116,6 @@ public sealed class SolverPipelineEditorTests
     }
 
     [Test]
-    public void DetectTransportModel_ReadsTheTransportStages()
-    {
-        var legacy = AtmosWorldSolverPipeline.GetDefaultLayout(AtmosTransportModel.Legacy).Select(name => Step(name)).ToArray();
-        var both = EulerSteps().Append(Step(AtmosBuiltInSolvers.Advection)).ToArray();
-
-        Assert.Multiple(() =>
-        {
-            Assert.That(SolverPipelineEditor.DetectTransportModel(EulerSteps()), Is.EqualTo(AtmosTransportModel.Euler));
-            Assert.That(SolverPipelineEditor.DetectTransportModel(legacy), Is.EqualTo(AtmosTransportModel.Legacy));
-            Assert.That(SolverPipelineEditor.DetectTransportModel(both), Is.Null);
-            Assert.That(SolverPipelineEditor.DetectTransportModel([Step(AtmosBuiltInSolvers.Thermodynamics)]), Is.Null);
-        });
-    }
-
-    [Test]
     public void GetWarnings_FlagsTransportProblems_ButNotOrder()
     {
         var legacy = AtmosWorldSolverPipeline.GetDefaultLayout(AtmosTransportModel.Legacy).Select(name => Step(name)).ToArray();

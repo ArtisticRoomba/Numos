@@ -205,6 +205,32 @@ public sealed class AtmosWorldSolverPipeline
     }
 
     /// <summary>
+    ///     Reads the transport model from the stages that move gas between voxels.
+    /// </summary>
+    /// <param name="steps">The stages to inspect, typically from <see cref="Steps" />.</param>
+    /// <returns>
+    ///     <see cref="AtmosTransportModel.Euler" /> when only <c>euler-flow</c> is present and
+    ///     <see cref="AtmosTransportModel.Legacy" /> when only <c>advection</c> is present. <see langword="null" />
+    ///     when both or neither is present.
+    /// </returns>
+    /// <remarks>
+    ///     The enabled flag does not matter, because <see cref="ConvertTransportModel" /> keeps it. Callers that need
+    ///     a default write <c>DetectTransportModel(steps) ?? AtmosTransportModel.Euler</c>.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="steps" /> is <see langword="null" />.</exception>
+    [PublicAPI]
+    public static AtmosTransportModel? DetectTransportModel(IReadOnlyList<AtmosWorldSolverStep> steps)
+    {
+        ArgumentNullException.ThrowIfNull(steps);
+        bool hasEuler = steps.Any(static step => step.Name == AtmosBuiltInSolvers.EulerFlow);
+        bool hasAdvection = steps.Any(static step => step.Name == AtmosBuiltInSolvers.Advection);
+        if (hasEuler == hasAdvection)
+            return null;
+
+        return hasEuler ? AtmosTransportModel.Euler : AtmosTransportModel.Legacy;
+    }
+
+    /// <summary>
     ///     Returns detached metadata in execution order.
     /// </summary>
     public IReadOnlyList<AtmosWorldSolverStep> Steps

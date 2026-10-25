@@ -181,6 +181,39 @@ public sealed class AtmosWorldSolverLayoutTests
         });
     }
 
+    [Test]
+    public void DetectTransportModel_ReadsTheTransportStages()
+    {
+        static AtmosWorldSolverStep Step(string name, bool enabled = true)
+        {
+            return new AtmosWorldSolverStep(name, AtmosWorldSolverKind.BuiltIn, enabled, null);
+        }
+
+        static AtmosWorldSolverStep[] Steps(AtmosTransportModel model)
+        {
+            return AtmosWorldSolverPipeline.GetDefaultLayout(model).Select(name => Step(name)).ToArray();
+        }
+
+        var both = Steps(AtmosTransportModel.Euler).Append(Step(AtmosBuiltInSolvers.Advection)).ToArray();
+        var disabledEuler = new[] { Step(AtmosBuiltInSolvers.EulerFlow, false) };
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(
+                AtmosWorldSolverPipeline.DetectTransportModel(Steps(AtmosTransportModel.Euler)),
+                Is.EqualTo(AtmosTransportModel.Euler));
+
+            Assert.That(
+                AtmosWorldSolverPipeline.DetectTransportModel(Steps(AtmosTransportModel.Legacy)),
+                Is.EqualTo(AtmosTransportModel.Legacy));
+
+            Assert.That(AtmosWorldSolverPipeline.DetectTransportModel(disabledEuler), Is.EqualTo(AtmosTransportModel.Euler));
+            Assert.That(AtmosWorldSolverPipeline.DetectTransportModel(both), Is.Null);
+            Assert.That(AtmosWorldSolverPipeline.DetectTransportModel([Step(AtmosBuiltInSolvers.Thermodynamics)]), Is.Null);
+            Assert.That(() => AtmosWorldSolverPipeline.DetectTransportModel(null!), Throws.ArgumentNullException);
+        });
+    }
+
     private static AtmosConfig CreateConfig()
     {
         return new AtmosConfig
