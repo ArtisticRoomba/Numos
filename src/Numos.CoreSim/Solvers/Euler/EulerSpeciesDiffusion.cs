@@ -98,18 +98,15 @@ internal static class EulerSpeciesDiffusion
         {
             if (workItems != null)
                 ArrayPool<VoxelWorkItem>.Shared.Return(workItems);
-
-            for (int index = 0; index < activeCount; index++)
-                active[index].Diffusion.Release();
         }
     }
 
     /// <summary>
-    ///     Rents the kernel's scratch for one chunk, sized for the channel count after the write-back.
+    ///     Prepares the kernel's retained scratch for one chunk, sized for the channel count after the write-back.
     /// </summary>
     private static void Initialize(EulerChunkWorkspace workspace)
     {
-        workspace.Diffusion.Initialize(workspace.Chunk);
+        workspace.Diffusion.InitializeRetained(workspace.Chunk);
     }
 
     /// <summary>

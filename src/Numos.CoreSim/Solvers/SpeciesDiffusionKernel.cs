@@ -62,6 +62,51 @@ internal struct DiffusionWorkspace
     }
 
     /// <summary>
+    ///     Prepares the workspace for one chunk and keeps its buffers across ticks.
+    /// </summary>
+    /// <param name="chunk">The chunk that will own this workspace for the tick.</param>
+    /// <remarks>
+    ///     <para>
+    ///         A buffer is replaced only when it is too small, so a workspace whose owner outlives the tick stops
+    ///         allocating once it has seen its largest chunk. The kernel never reads a slot it has not written
+    ///         this tick and never reads a buffer's length, so reused contents and extra capacity do not change
+    ///         the result.
+    ///     </para>
+    ///     <para>
+    ///         Do not call <see cref="Release" /> on a workspace prepared this way, because the buffers did not
+    ///         come from the shared pool.
+    ///     </para>
+    /// </remarks>
+    public void InitializeRetained(AtmosChunk chunk)
+    {
+        Chunk = chunk;
+        int voxelCount = chunk.VoxelCount;
+        int activeAirCount = chunk.ActiveAirCount;
+        int slotCount = checked(activeAirCount * NeighborResolution.NeighborDirections.Length);
+        int gasDeltaCount = checked(activeAirCount * chunk.ActiveGasCount);
+        int transferCount = checked(voxelCount * chunk.ActiveGasCount);
+
+        Grow(ref DiffusionTransfers, Math.Max(1, transferCount));
+        Grow(ref EnergyDeltas, Math.Max(1, activeAirCount));
+        Grow(ref MoleDeltas, Math.Max(1, gasDeltaCount));
+        Grow(ref NeighborCounts, voxelCount);
+        Grow(ref NeighborIndices, Math.Max(1, slotCount));
+        Grow(ref NeighborKinds, Math.Max(1, slotCount));
+    }
+
+    /// <summary>
+    ///     Replaces a retained buffer with a larger one when it cannot hold <paramref name="length" /> elements.
+    /// </summary>
+    /// <typeparam name="T">The buffer element type.</typeparam>
+    /// <param name="buffer">The buffer to check.</param>
+    /// <param name="length">The element count the buffer must hold.</param>
+    private static void Grow<T>(ref T[] buffer, int length)
+    {
+        if (buffer == null || buffer.Length < length)
+            buffer = GC.AllocateUninitializedArray<T>(length);
+    }
+
+    /// <summary>
     ///     Returns every rented buffer and clears references held by the workspace.
     /// </summary>
     public void Release()

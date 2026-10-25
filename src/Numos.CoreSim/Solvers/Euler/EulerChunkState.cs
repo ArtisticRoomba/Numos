@@ -203,8 +203,8 @@ internal sealed class EulerChunkWorkspace
     public AtmosChunk Chunk = null!;
 
     /// <summary>
-    ///     The legacy diffusion kernel's scratch, rented by <see cref="EulerSpeciesDiffusion" /> after the
-    ///     write-back and released before the pass returns.
+    ///     The legacy diffusion kernel's scratch, prepared by <see cref="EulerSpeciesDiffusion" /> after the
+    ///     write-back. It keeps its buffers across ticks, so the pass does not allocate in steady state.
     /// </summary>
     public DiffusionWorkspace Diffusion;
 
