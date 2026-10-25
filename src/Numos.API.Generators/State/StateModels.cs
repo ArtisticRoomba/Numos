@@ -28,7 +28,13 @@ internal sealed record StateConstructorModel(EquatableArray<StateParameterModel>
 ///     How the generated reader builds a value: constructor arguments, then initializer assignments, both as complete
 ///     expressions over the <c>field{id}</c>/<c>has{id}</c> locals.
 /// </summary>
-internal sealed record StateReadPlan(EquatableArray<string> Arguments, EquatableArray<StateInitializerModel> Initializers);
+internal sealed record StateReadPlan(EquatableArray<string> Arguments, EquatableArray<StateInitializerModel> Initializers)
+{
+    /// <summary>
+    ///     Gets the plan with no arguments and no initializers, for a type that is restored in place.
+    /// </summary>
+    public static StateReadPlan Empty { get; } = new(EquatableArray<string>.Empty, EquatableArray<StateInitializerModel>.Empty);
+}
 
 /// <param name="MemberName">The escaped member to assign.</param>
 /// <param name="Expression">The value to assign.</param>
@@ -118,16 +124,20 @@ internal sealed record StateFieldDeclaration(StateFieldModel Field, string Displ
 ///     What the transform knows about one type with <c>[NumosSerialize]</c> members. <see cref="Fields" /> is empty when a
 ///     diagnostic already ruled out generating anything.
 /// </summary>
+/// <param name="Prototype">
+///     The model without its fields and read plan. Resolving the declaration fills those in.
+/// </param>
+/// <param name="DisplayName">The type for diagnostics.</param>
+/// <param name="Location">Where type-level diagnostics point.</param>
+/// <param name="Registration">The fully qualified type to register for loading, or null.</param>
+/// <param name="CanGenerate">False once a diagnostic has ruled out generating anything.</param>
+/// <param name="Fields">The state fields in ascending id order, before alias resolution.</param>
+/// <param name="Constructors">Every constructor the generated reader could call.</param>
+/// <param name="Diagnostics">Diagnostics found so far.</param>
 internal sealed record StateTypeDeclaration(
-    PartialTypeModel Type,
-    string TypeName,
+    StateTypeModel Prototype,
     string DisplayName,
     LocationInfo? Location,
-    bool IsReferenceType,
-    bool IsSolverConfiguration,
-    bool IsWorldSolver,
-    string? StateKey,
-    SnapshotKind Snapshot,
     string? Registration,
     bool CanGenerate,
     EquatableArray<StateFieldDeclaration> Fields,

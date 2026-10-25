@@ -54,7 +54,7 @@ public sealed class StateGenerator : IIncrementalGenerator
                 static (syntaxContext, cancellationToken) => CreateDeclaration(syntaxContext, cancellationToken))
             .Where(static declaration => declaration is not null)
             .Combine(snapshotParticipants)
-            .Where(static pair => !pair.Right.Contains(pair.Left!.TypeName))
+            .Where(static pair => !pair.Right.Contains(pair.Left!.Prototype.TypeName))
             .Select(static (pair, _) => pair.Left)
             .Combine(QuantityAliasCatalog.Provider(context))
             .Select(static (pair, _) => Resolve(pair.Left!, pair.Right))
@@ -299,16 +299,21 @@ public sealed class StateGenerator : IIncrementalGenerator
                 diagnostics.Add(DiagnosticInfo.Create(StateDiagnostics.NotRegistrable, typeLocation, typeDisplayName));
         }
 
-        return new StateTypeDeclaration(
+        var prototype = new StateTypeModel(
             PartialTypeModel.From(type),
             type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
-            typeDisplayName,
-            typeLocation,
             type.IsReferenceType,
             isSolverConfiguration,
             isWorldSolver,
             stateKey,
             snapshot,
+            EquatableArray<StateFieldModel>.Empty,
+            StateReadPlan.Empty);
+
+        return new StateTypeDeclaration(
+            prototype,
+            typeDisplayName,
+            typeLocation,
             registration,
             canGenerate,
             fields.OrderBy(static field => field.Field.Id).ToEquatableArray(),
@@ -318,16 +323,21 @@ public sealed class StateGenerator : IIncrementalGenerator
 
     private static StateTypeDeclaration Skipped(INamedTypeSymbol type, List<DiagnosticInfo> diagnostics)
     {
-        return new StateTypeDeclaration(
+        var prototype = new StateTypeModel(
             PartialTypeModel.From(type),
             type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
-            type.ToDisplayString(),
-            null,
             type.IsReferenceType,
             false,
             false,
             null,
             SnapshotKind.None,
+            EquatableArray<StateFieldModel>.Empty,
+            StateReadPlan.Empty);
+
+        return new StateTypeDeclaration(
+            prototype,
+            type.ToDisplayString(),
+            null,
             null,
             false,
             EquatableArray<StateFieldDeclaration>.Empty,
@@ -513,8 +523,8 @@ public sealed class StateGenerator : IIncrementalGenerator
         // Only checked once the fields themselves are fine, so a bad field type isn't reported twice. A solver is
         // restored in place, so it needs no constructor the reader can call.
         string reason = "";
-        StateReadPlan? plan = declaration.IsWorldSolver
-            ? new StateReadPlan(EquatableArray<string>.Empty, EquatableArray<StateInitializerModel>.Empty)
+        StateReadPlan? plan = declaration.Prototype.IsWorldSolver
+            ? StateReadPlan.Empty
             : StateBinding.Bind(declaration.Constructors, fields, aliases, out reason);
 
         if (plan is null)
@@ -523,16 +533,7 @@ public sealed class StateGenerator : IIncrementalGenerator
             return new StateTypeResult(null, null, diagnostics.ToEquatableArray());
         }
 
-        var model = new StateTypeModel(
-            declaration.Type,
-            declaration.TypeName,
-            declaration.IsReferenceType,
-            declaration.IsSolverConfiguration,
-            declaration.IsWorldSolver,
-            declaration.StateKey,
-            declaration.Snapshot,
-            fields.ToEquatableArray(),
-            plan);
+        StateTypeModel model = declaration.Prototype with { Fields = fields.ToEquatableArray(), Read = plan };
 
         return new StateTypeResult(model, declaration.Registration, diagnostics.ToEquatableArray());
     }

@@ -522,7 +522,6 @@ public sealed class SnapshotGenerator : IIncrementalGenerator
         {
             SnapshotDeclaration declaration = plan.Declaration;
             var fields = new List<StateFieldModel>();
-            var initOnly = new List<StateFieldModel>();
             bool failed = false;
             foreach (StateFieldDeclaration handWritten in declaration.HandWritten)
             {
@@ -533,18 +532,13 @@ public sealed class SnapshotGenerator : IIncrementalGenerator
                 }
 
                 fields.Add(field);
-                if (field.InitOnly)
-                    initOnly.Add(field);
             }
 
             if (failed)
                 continue;
 
             foreach (SnapshotMemberModel member in plan.Members)
-            {
-                LiveMemberDeclaration source = declaration.Members.First(candidate => CodeWriter.Escape(candidate.Name) == member.Name);
-                fields.Add(new StateFieldModel(source.Id, member.Name, member.Shape, source.Name, true, false));
-            }
+                fields.Add(new StateFieldModel(member.Id, member.Name, member.Shape, member.Name.TrimStart('@'), true, false));
 
             var state = new StateTypeModel(
                 declaration.Type,
@@ -555,18 +549,15 @@ public sealed class SnapshotGenerator : IIncrementalGenerator
                 null,
                 SnapshotKind.None,
                 fields.OrderBy(static field => field.Id).ToEquatableArray(),
-                new StateReadPlan(EquatableArray<string>.Empty, EquatableArray<StateInitializerModel>.Empty));
+                StateReadPlan.Empty);
 
             models.Add(
                 new SnapshotModel(
-                    declaration.Type,
-                    declaration.TypeName,
                     declaration.LiveTypeName,
                     declaration.EmitConstructor,
                     restorableTypes.Contains(declaration.TypeName),
                     plan.Members.ToEquatableArray(),
-                    state,
-                    initOnly.ToEquatableArray()));
+                    state));
         }
 
         return new GeneratorOutput<SnapshotModel>(diagnostics.ToEquatableArray(), models.ToEquatableArray());
@@ -584,6 +575,7 @@ public sealed class SnapshotGenerator : IIncrementalGenerator
             new(
                 member.LiveName,
                 name,
+                member.Id,
                 member.Accessibility,
                 kind,
                 member.Storage,

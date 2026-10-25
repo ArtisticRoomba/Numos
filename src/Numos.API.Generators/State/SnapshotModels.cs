@@ -183,6 +183,7 @@ internal sealed record SnapshotDeclaration(
 /// </summary>
 /// <param name="LiveName">The escaped live member name.</param>
 /// <param name="Name">The escaped snapshot member name.</param>
+/// <param name="Id">The wire id, hashed from the unescaped snapshot member name.</param>
 /// <param name="Accessibility">The generated member's accessibility keyword.</param>
 /// <param name="Kind">How the member is captured.</param>
 /// <param name="Storage">How the live member stores its value.</param>
@@ -199,6 +200,7 @@ internal sealed record SnapshotDeclaration(
 internal sealed record SnapshotMemberModel(
     string LiveName,
     string Name,
+    int Id,
     string Accessibility,
     SnapshotMemberKind Kind,
     LiveStorage Storage,
@@ -219,20 +221,27 @@ internal sealed record SnapshotMemberModel(
     public bool IsList => ElementType.Length > 0;
 }
 
-/// <param name="Type">The snapshot type to reopen.</param>
-/// <param name="TypeName">The snapshot type, fully qualified.</param>
 /// <param name="LiveTypeName">The live type, fully qualified.</param>
 /// <param name="EmitConstructor">Whether to generate the private parameterless constructor.</param>
 /// <param name="Restorable">Whether every member can be put back, so <c>RestoreInto</c> is generated.</param>
 /// <param name="Members">Generated members in the live type's declaration order.</param>
-/// <param name="State">Every schema field, generated and hand-written, for the state walker.</param>
-/// <param name="InitOnly">Hand-written members that can only be set in an object initializer.</param>
+/// <param name="State">
+///     The snapshot type and every schema field, generated and hand-written, for the state walker.
+/// </param>
 internal sealed record SnapshotModel(
-    PartialTypeModel Type,
-    string TypeName,
     string LiveTypeName,
     bool EmitConstructor,
     bool Restorable,
     EquatableArray<SnapshotMemberModel> Members,
-    StateTypeModel State,
-    EquatableArray<StateFieldModel> InitOnly);
+    StateTypeModel State)
+{
+    /// <summary>
+    ///     Gets the snapshot type to reopen.
+    /// </summary>
+    public PartialTypeModel Type => State.Type;
+
+    /// <summary>
+    ///     Gets the snapshot type, fully qualified.
+    /// </summary>
+    public string TypeName => State.TypeName;
+}

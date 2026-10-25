@@ -319,7 +319,8 @@ internal static class SnapshotEmitter
 
         writer.Open();
         StateEmitter.EmitReadFields(writer, model.State);
-        if (model.InitOnly.Count == 0)
+        StateFieldModel[] initOnly = model.State.Fields.Where(static field => field.InitOnly).ToArray();
+        if (initOnly.Length == 0)
         {
             writer.Line("var result = new " + model.TypeName + "();");
         }
@@ -327,7 +328,7 @@ internal static class SnapshotEmitter
         {
             writer.Line("var result = new " + model.TypeName + "()");
             writer.Open();
-            foreach (StateFieldModel field in model.InitOnly)
+            foreach (StateFieldModel field in initOnly)
             {
                 writer.Line(
                     field.MemberName + " = has" + field.Id + " ? field" + field.Id + " : " + Advanced + "StateCodecs.DefaultValue<" +
