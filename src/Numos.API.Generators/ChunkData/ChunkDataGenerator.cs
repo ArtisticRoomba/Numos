@@ -229,11 +229,10 @@ public sealed class ChunkDataGenerator : IIncrementalGenerator
         }
 
         // Everything but scratch data is saved, and a saved key is a compatibility contract.
-        bool rollback = !transient;
-        if (rollback && !explicitKey)
+        if (!transient && !explicitKey)
             diagnostics.Add(DiagnosticInfo.Create(ChunkDataDiagnostics.SavedWithoutKey, attributeLocation, displayName));
 
-        if (rollback && elementType is not null && !elementType.IsUnmanagedType)
+        if (!transient && elementType is not null && !elementType.IsUnmanagedType)
         {
             diagnostics.Add(
                 DiagnosticInfo.Create(
@@ -277,7 +276,7 @@ public sealed class ChunkDataGenerator : IIncrementalGenerator
             property.DeclaredAccessibility == Accessibility.Public &&
             chain.All(static link => link.Type.DeclaredAccessibility == Accessibility.Public),
             key,
-            rollback,
+            transient,
             length,
             clearOnSleep,
             clearOnVacuum,
@@ -413,7 +412,7 @@ public sealed class ChunkDataGenerator : IIncrementalGenerator
             ChunkDataPropertyModel first = declarations[0].Property;
             bool identical = declarations.All(declaration =>
                 declaration.Property.ElementTypeIdentity == first.ElementTypeIdentity &&
-                declaration.Property.Rollback == first.Rollback &&
+                declaration.Property.Transient == first.Transient &&
                 declaration.Property.Length == first.Length &&
                 declaration.Property.ClearOnSleep == first.ClearOnSleep &&
                 declaration.Property.ClearOnVacuum == first.ClearOnVacuum);

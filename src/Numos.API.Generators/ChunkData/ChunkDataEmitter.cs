@@ -83,7 +83,7 @@ internal static class ChunkDataEmitter
                 ".Register(" +
                 SymbolDisplay.FormatLiteral(model.Key!, true) +
                 ", rollback: " +
-                (model.Rollback ? "true" : "false") +
+                (model.Transient ? "false" : "true") +
                 ", length: " +
                 length +
                 (model.ClearOnSleep ? ", clearOnSleep: true" : "") +

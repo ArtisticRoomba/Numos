@@ -24,7 +24,7 @@ internal sealed record ChunkDataPropertyModel(
     string? ElementTypeIdentity,
     bool AccessorIsPublic,
     string? Key,
-    bool Rollback,
+    bool Transient,
     int? Length,
     bool ClearOnSleep,
     bool ClearOnVacuum,
