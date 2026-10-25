@@ -82,7 +82,8 @@ internal struct EulerSweepCounters
 ///         contiguous. A bundle runs in three passes. The first solves every face of the bundle once into
 ///         a scratch array. Interior faces of rows that hold only air go through <see cref="HllcFluxVector" />, which
 ///         gives the same bits as <see cref="HllcFlux.Solve" />. The second updates the species of every air cell, one
-///         gas at a time, and sums the mixture as it goes. The third updates momentum and energy per cell and rebuilds its primitive state.
+///         gas at a time, and sums the mixture as it goes. The third updates momentum and energy per cell and rebuilds its primitive state. Rows that hold only air use
+///         <see cref="EulerCellKernel" /> for this, with the same bits as the scalar update.
 ///         Going gas by gas keeps one source row, one target row, and the two neighbour rows in hand for a whole
 ///         bundle instead of looking them up again per cell.
 ///     </para>
@@ -378,12 +379,21 @@ internal static class EulerSweep
 
         var cellPass = new EulerCellPass(workspace, axis, timeStep, config, scratch);
         MetrePerSecond maxSignalSpeed = 0f;
+        bool vectorCells = EulerCellKernel.Enabled && runLength >= EulerCellKernel.Width;
         for (int run = 0; run < runCount; run++)
         {
             int firstVoxel = baseIndex + run * runVoxelStride;
             int firstCell = run * runLength;
             int firstBehind = run * runFaceStride;
-            for (int i = 0; i < runLength; i++)
+            int done = 0;
+            if (vectorCells && rowAllAir[firstVoxel / width])
+            {
+                done = EulerCellKernel.UpdateRun(
+                    in cellPass.Run, firstVoxel, firstCell, firstBehind, firstBehind + aheadOffset, runLength,
+                    ref counters.ClampedVelocity, ref counters.NonFiniteCells, ref maxSignalSpeed);
+            }
+
+            for (int i = done; i < runLength; i++)
             {
                 int cell = firstCell + i;
                 if (!airMap[firstVoxel + i])
@@ -787,6 +797,11 @@ internal static class EulerSweep
         private readonly Newton[] _faceTangential2;
         private readonly Watt[] _faceEnergy;
 
+        /// <summary>
+        ///     The same arrays and constants as plain floats, for <see cref="EulerCellKernel" />.
+        /// </summary>
+        public readonly EulerCellRun Run;
+
         public EulerCellPass(
             EulerChunkWorkspace workspace, int axis, Second timeStep, AtmosSolverConfigSnapshot config,
             BundleScratch scratch)
@@ -806,6 +821,14 @@ internal static class EulerSweep
             _readNormal = Momentum(read, axis);
             _readTangential1 = Momentum(read, (axis + 1) % 3);
             _readTangential2 = Momentum(read, (axis + 2) % 3);
+            EulerChunkState write = workspace.Write;
+            Run = new EulerCellRun(
+                axis, timeStep, _maxVelocity, _volume, _pressurePerMoleKelvin,
+                _readNormal, _readTangential1, _readTangential2, _readEnergy,
+                Momentum(write, axis), Momentum(write, (axis + 1) % 3), Momentum(write, (axis + 2) % 3), write.Energy,
+                write.Mass, write.TotalMoles, write.HeatCapacity, write.Cells,
+                _faceNormal, _faceTangential1, _faceTangential2, _faceEnergy,
+                scratch.Mass, scratch.TotalMoles, scratch.HeatCapacity, scratch.NonFiniteSpecies);
         }
 
         private static KilogramMetrePerSecond[] Momentum(EulerChunkState buffer, int axis)

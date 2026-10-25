@@ -300,4 +300,33 @@ public class HllcFluxVectorTests
             }
         }
     }
+
+    [Test]
+    public void DoubleMax_MatchesMathMaxForNaNAndSignedZeros()
+    {
+        Assume.That(Vector.IsHardwareAccelerated, "No vector hardware.");
+        int width = Vector<double>.Count;
+        var random = new Random(5);
+        var a = new double[width];
+        var b = new double[width];
+        var high = new double[width];
+        for (int round = 0; round < 20000; round++)
+        {
+            for (int lane = 0; lane < width; lane++)
+            {
+                a[lane] = random.Next(4) == 0 ? 0d : (double)Pick(random);
+                b[lane] = random.Next(4) == 0 ? -0d : (double)Pick(random);
+            }
+
+            Vector.Max(new Vector<double>(a), new Vector<double>(b)).CopyTo(high);
+            for (int lane = 0; lane < width; lane++)
+            {
+                double expected = Math.Max(a[lane], b[lane]);
+                bool same = double.IsNaN(expected)
+                    ? double.IsNaN(high[lane])
+                    : BitConverter.DoubleToInt64Bits(expected) == BitConverter.DoubleToInt64Bits(high[lane]);
+                Assert.That(same, Is.True, $"max({a[lane]}, {b[lane]})");
+            }
+        }
+    }
 }
