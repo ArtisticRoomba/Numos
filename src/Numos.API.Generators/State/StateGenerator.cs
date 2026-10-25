@@ -160,7 +160,6 @@ public sealed class StateGenerator : IIncrementalGenerator
         if (!StateSymbols.HasSerializedMembers(type))
             return null;
 
-        Compilation compilation = context.SemanticModel.Compilation;
         LocationInfo? typeLocation = LocationInfo.From(syntax.Identifier.GetLocation());
         string typeDisplayName = type.ToDisplayString();
         var diagnostics = new List<DiagnosticInfo>();
@@ -220,7 +219,7 @@ public sealed class StateGenerator : IIncrementalGenerator
             }
         }
 
-        string? stateKey = ReadConstantKey(type, compilation, cancellationToken, out IPropertySymbol? keyProperty);
+        string? stateKey = ReadConstantKey(type, context.SemanticModel, cancellationToken, out IPropertySymbol? keyProperty);
         if (stateKey is not null && string.IsNullOrWhiteSpace(stateKey))
         {
             diagnostics.Add(
@@ -348,9 +347,16 @@ public sealed class StateGenerator : IIncrementalGenerator
     /// <summary>
     ///     Reads the constant a get-only <c>Key</c> property returns, such as <c>public string Key =&gt; "my-mod/fire";</c>.
     /// </summary>
+    /// <param name="type">The type to read the key of.</param>
+    /// <param name="semanticModel">
+    ///     The model of the tree that declares <paramref name="type" />. A <c>Key</c> declared in another partial
+    ///     file is read through a model of that file's tree.
+    /// </param>
+    /// <param name="cancellationToken">The token to observe.</param>
+    /// <param name="keyProperty">The <c>Key</c> property, even when its value is not a constant.</param>
     /// <returns>The key, or null when there's no such property or it doesn't return a compile-time constant.</returns>
     private static string? ReadConstantKey(
-        INamedTypeSymbol type, Compilation compilation, CancellationToken cancellationToken,
+        INamedTypeSymbol type, SemanticModel semanticModel, CancellationToken cancellationToken,
         out IPropertySymbol? keyProperty)
     {
         keyProperty = null;
@@ -393,7 +399,10 @@ public sealed class StateGenerator : IIncrementalGenerator
                 if (expression is null)
                     return null;
 
-                SemanticModel model = compilation.GetSemanticModel(declaration.SyntaxTree);
+                SemanticModel model = declaration.SyntaxTree == semanticModel.SyntaxTree
+                    ? semanticModel
+                    : semanticModel.Compilation.GetSemanticModel(declaration.SyntaxTree);
+
                 Optional<object?> constant = model.GetConstantValue(expression, cancellationToken);
                 return constant is { HasValue: true, Value: string key } ? key : null;
             }
