@@ -232,7 +232,7 @@ internal static class EulerSweep
                 vectorRun[run] = allAir;
                 if (allAir)
                 {
-                    int firstFace = alongMarch ? run * runFaceStride + 1 : (run + 1) * lineCount;
+                    int firstFace = FirstInnerFace(run, runFaceStride, aheadOffset);
                     SolveRun(
                         scratch, read, axis, alongMarch, firstLower, read, firstLower + marchStride,
                         innerRunLength, firstFace, faceArea);
@@ -309,7 +309,7 @@ internal static class EulerSweep
             if (vectorFaces && vectorRun[run])
                 continue;
 
-            int firstFace = alongMarch ? run * runFaceStride + 1 : (run + 1) * lineCount;
+            int firstFace = FirstInnerFace(run, runFaceStride, aheadOffset);
             int firstLower = baseIndex + run * runVoxelStride;
             for (int i = 0; i < innerRunLength; i++)
             {
@@ -357,7 +357,7 @@ internal static class EulerSweep
 
             for (int run = 0; run < innerRunCount; run++)
             {
-                int firstFace = alongMarch ? run * runFaceStride + 1 : (run + 1) * lineCount;
+                int firstFace = FirstInnerFace(run, runFaceStride, aheadOffset);
                 EulerSpeciesKernel.FaceFluxRun(
                     faceRate, upperMask, source, faceFlux,
                     firstFace, baseIndex + run * runVoxelStride, marchStride, innerRunLength);
@@ -445,6 +445,17 @@ internal static class EulerSweep
         }
 
         return maxSignalSpeed;
+    }
+
+    /// <summary>
+    ///     Scratch index of the first interior face of an inner run, which is the face ahead of the run's first cell.
+    /// </summary>
+    /// <param name="run">The inner run.</param>
+    /// <param name="runFaceStride">Distance between the first faces of consecutive runs.</param>
+    /// <param name="aheadOffset">Distance from a cell's face behind to its face ahead.</param>
+    private static int FirstInnerFace(int run, int runFaceStride, int aheadOffset)
+    {
+        return run * runFaceStride + aheadOffset;
     }
 
     /// <summary>
