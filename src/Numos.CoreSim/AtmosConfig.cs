@@ -302,17 +302,6 @@ public class AtmosConfig : IAtmosConfig
     }
 
     /// <summary>
-    ///     Resolves the thermal conductivity for a gas at a specific temperature.
-    /// </summary>
-    /// <param name="gasId">The gas ID. Unregistered IDs use <see cref="DefaultThermalConductivity" />.</param>
-    public WattsPerMeterKelvin GetThermalConductivity(int gasId)
-    {
-        return (uint)gasId < (uint)GasRegistry.Count
-            ? FloatMath.ClampUnitInterval(GasRegistry[gasId].ThermalConductivity)
-            : FloatMath.ClampUnitInterval(DefaultThermalConductivity);
-    }
-
-    /// <summary>
     ///     Looks up a registered gas by ID.
     /// </summary>
     /// <param name="gasId">The gas ID.</param>
