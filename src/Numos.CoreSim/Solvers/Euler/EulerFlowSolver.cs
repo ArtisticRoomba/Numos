@@ -819,15 +819,8 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
             KilogramMetrePerSecond momentumX = buffer.MomentumX[voxelIndex];
             KilogramMetrePerSecond momentumY = buffer.MomentumY[voxelIndex];
             KilogramMetrePerSecond momentumZ = buffer.MomentumZ[voxelIndex];
-            bool zero = EulerChunkWorkspace.IsTrace(mass, buffer.TotalMoles[voxelIndex]);
-            if (!zero && floor > 0f)
-            {
-                PerKilogram inverseMass = 1f / mass;
-                MetrePerSecond velocityX = momentumX * inverseMass;
-                MetrePerSecond velocityY = momentumY * inverseMass;
-                MetrePerSecond velocityZ = momentumZ * inverseMass;
-                zero = velocityX * velocityX + velocityY * velocityY + velocityZ * velocityZ < floor * floor;
-            }
+            bool zero = EulerMixture.ShouldStop(
+                mass, buffer.TotalMoles[voxelIndex], momentumX, momentumY, momentumZ, floor);
 
             if (zero)
             {
@@ -909,16 +902,7 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
                     totalMoles += moles;
                 }
 
-                zero = EulerChunkWorkspace.IsTrace(mass, totalMoles);
-            }
-
-            if (!zero && floor > 0f)
-            {
-                PerKilogram inverseMass = 1f / mass;
-                MetrePerSecond velocityX = momentumX * inverseMass;
-                MetrePerSecond velocityY = momentumY * inverseMass;
-                MetrePerSecond velocityZ = momentumZ * inverseMass;
-                zero = velocityX * velocityX + velocityY * velocityY + velocityZ * velocityZ < floor * floor;
+                zero = EulerMixture.ShouldStop(mass, totalMoles, momentumX, momentumY, momentumZ, floor);
             }
 
             if (!zero)

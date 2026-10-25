@@ -223,6 +223,36 @@ internal static class EulerMixture
     }
 
     /// <summary>
+    ///     Whether the momentum floor brings a voxel to rest: it holds only trace gas, or it moves slower than
+    ///     <paramref name="velocityFloor" />. A floor of zero or less turns the speed test off.
+    /// </summary>
+    /// <remarks>
+    ///     The speed test compares the squared speed, formed from the same <c>1/m</c> as
+    ///     <see cref="KineticEnergy(Kilogram, KilogramMetrePerSecond, KilogramMetrePerSecond, KilogramMetrePerSecond)" />.
+    ///     It skips the square root.
+    /// </remarks>
+    internal static bool ShouldStop(
+        Kilogram mass, Mole totalMoles,
+        KilogramMetrePerSecond momentumX, KilogramMetrePerSecond momentumY, KilogramMetrePerSecond momentumZ,
+        MetrePerSecond velocityFloor)
+    {
+        if (EulerChunkWorkspace.IsTrace(mass, totalMoles))
+            return true;
+
+        if (velocityFloor > 0f)
+        {
+            PerKilogram inverseMass = 1f / mass;
+            MetrePerSecond velocityX = momentumX * inverseMass;
+            MetrePerSecond velocityY = momentumY * inverseMass;
+            MetrePerSecond velocityZ = momentumZ * inverseMass;
+            return velocityX * velocityX + velocityY * velocityY + velocityZ * velocityZ <
+                   velocityFloor * velocityFloor;
+        }
+
+        return false;
+    }
+
+    /// <summary>
     ///     Kinetic energy <c>½·(Px·u + Py·v + Pz·w)</c>, with the velocities already divided out of the momentum.
     ///     Written as momentum times velocity rather than <c>|P|²/(2m)</c> so it costs no second divide, and summed
     ///     in double so the subtraction from the total energy does not lose the thermal part.
