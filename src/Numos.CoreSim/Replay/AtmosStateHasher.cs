@@ -1,5 +1,3 @@
-using Numos.Maths;
-
 namespace Numos.CoreSim.Replay;
 
 // The FNV-1a core behind StateHashSink, which is what state hashes should go through so they see the wire bytes.
@@ -48,20 +46,5 @@ internal struct AtmosStateHasher
     {
         for (int shift = 0; shift < 64; shift += 8)
             AddByte((byte)(value >> shift));
-    }
-
-    internal void Add(Int3 value)
-    {
-        Add(value.X);
-        Add(value.Y);
-        Add(value.Z);
-    }
-
-    internal static ulong HashDefinition(AtmosSimulationCheckpoint checkpoint)
-    {
-        var hash = new AtmosStateHasher();
-        hash.Add(checkpoint.CompatibilityVersion);
-        hash.Add(checkpoint.Dimensions);
-        return hash.Value;
     }
 }

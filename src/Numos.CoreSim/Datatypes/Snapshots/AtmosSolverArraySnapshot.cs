@@ -84,11 +84,6 @@ public sealed class AtmosSolverArraySnapshot
         _storage.WriteValues(ref sink);
     }
 
-    internal bool ValuesEqual(AtmosSolverArraySnapshot other)
-    {
-        return _storage.Bytes.SequenceEqual(other._storage.Bytes);
-    }
-
     internal int CompareValues(AtmosSolverArraySnapshot other)
     {
         return _storage.Bytes.SequenceCompareTo(other._storage.Bytes);

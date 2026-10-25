@@ -64,11 +64,6 @@ public sealed partial class AtmosSimulationCheckpoint
     public int CompatibilityVersion { get; private set; } = CurrentCompatibilityVersion;
 
     /// <summary>
-    ///     Gets the fingerprint of the compatibility version and chunk dimensions.
-    /// </summary>
-    public ulong CompatibilityFingerprint => AtmosStateHasher.HashDefinition(this);
-
-    /// <summary>
     ///     Bytes in copied chunk and solver arrays, excluding managed object headers and keys.
     /// </summary>
     public long PayloadBytes => Chunks.Sum(static chunk => chunk.PayloadBytes);
