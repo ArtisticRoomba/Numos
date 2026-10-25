@@ -37,8 +37,8 @@ Numos simulates atmospheric gas dynamics for a space-station or sealed-environme
    joules. The default transport is a compressible Euler finite-volume model, inviscid and without body forces
    (§5). The older cellular pressure-relaxation model stays available as a selectable approximation (§6).
 2. Work-proportional cost. CPU time goes to regions with active pressure gradients. Stable rooms should cost
-   effectively nothing. Under the Euler stage this is essential: an awake chunk costs tens of substeps per
-   tick whether or not anything interesting is happening in it, so sleep (§9) is what keeps a station affordable.
+   effectively nothing. Under the Euler stage this is essential: a disturbed awake chunk costs tens of substeps per
+   tick. An awake chunk at rest costs only a short test (§5.6), and sleep (§9) is what keeps a station affordable.
 3. Engine independence. The core has no dependency on a game engine, rendering framework, or platform API. It is a
    standalone module driven from any engine's update loop.
 4. Multi-gas support. Numos tracks any number of gas species with distinct physical properties. Memory is
@@ -661,8 +661,8 @@ The write-back creates a channel for a row as soon as any voxel holds a positive
 `MinimumTrackedMoles`. The sweep has already debited the upwind cell, which may be in the other chunk, so dropping a
 sub-threshold row would destroy that gas (`TraceGas_CrossingAChunkFaceIsConserved`).
 
-**Activation.** A chunk that is asleep, or awake with no gas, has no workspace and is not swept. An open face from an
-active chunk into such a chunk is a wall for that sweep. That is exact while the neighbour is at rest at the same
+**Activation.** A chunk that is asleep, awake with no gas, or skipped as static (below) has no workspace and is not
+swept. An open face from an active chunk into such a chunk is a wall for that sweep. That is exact while the neighbour is at rest at the same
 pressure (the wall flux is then `p`, the interior flux of a resting gas, and the mass flux is zero either way) and
 wrong as soon as the two sides differ. So when a sweep meets such a face, it requests the neighbour's activation if
 the pressures differ by more than `WakePressureDelta` (10 Pa) or the active side moves normal to the face faster than
@@ -677,6 +677,47 @@ A pre-pass right after the initial gather runs the same test over every boundary
 of both sides, repeating for each newly activated chunk until the set is closed. A pressure staircase across several
 sleeping chunks therefore wakes all of them before any gas moves. Only a front that arrives mid-tick pays the
 one-sweep wall latency. Activation is derived from the chunk fields and the configuration and is never recorded.
+
+**Static chunks.** A resting room would otherwise pay the full substep cost every tick until its sleep timer runs
+out. The stage skips an awake chunk when sweeping it could not change one bit of it. The skip changes no bit of any
+chunk and no diagnostic, so it needs no configuration field.
+
+A chunk is static when all of these hold, tested on the live fields at tick start:
+
+1. Every air voxel has exactly zero momentum.
+2. Every air voxel has bit-identical `TotalPressure`, `Temperature`, and moles of every gas.
+3. No voxel is a trace cell, and no open face leads into void.
+4. Across every open face into a registered neighbour chunk, asleep or awake, the neighbour cell has the same bits.
+   A gas the neighbour has no channel for counts as zero moles.
+
+No pressure threshold takes part. The HLLC flux of two equal resting states is the interior flux of a resting gas,
+and the wall flux is the same, so the sweeps give such a chunk its own bits back. Static is not enough, because a
+source nearby can still reach the chunk.
+
+*Reach.* A first-order split sweep moves information one cell per axis sweep. One substep spreads a disturbance by one
+cell along each axis, and the tick-end species diffusion adds one more cell. A tick runs at most
+`MaxSubstepsPerTick` substeps (`N`), so a chunk can only be influenced by a source within `N + 1` cells. The sources
+are the chunks that are active after the pre-pass. The stage finds every static chunk within chunk distance `D` of
+a source by a breadth-first search over the 26 neighbouring chunk positions, through any registered chunk:
+
+```
+D = ceil((N + 2) / minExtent)      minExtent = smallest chunk dimension
+```
+
+A chunk beyond `D` has at least `D · minExtent + 1 > N + 1` cells between it and any source. The stage activates the
+static chunks within `D` through the normal path, and they join the pre-pass. They are not sources themselves, because
+they change nothing until a source reaches them. The rest get no workspace. With `MaxSubstepsPerTick` set to 0 there
+is no bound, so the stage skips static chunks only when nothing at all is active.
+
+A skipped chunk is never next to an active one, so it never acts as a wall for a sweep. It stays awake. Its sleep
+timer advances with a score of zero at the end of the stage, which is the score the sleep metric gives a static chunk:
+equal pressures on every open face and no motion. Its sound speed still counts toward the shared `Δt`, computed once
+from one cell with the same arithmetic as the gather. `VacuumCleanup` still visits it, because that pass walks chunks
+and not workspaces. When every chunk is skipped the stage reports default `AtmosFlowDiagnostics`.
+
+The test is one read-only pass per chunk with an early exit, run in parallel. A grid of 128 resting chunks costs
+about 0.4 ms per tick at 16 workers where it cost 33 ms. A source near the grid costs a search whose depth is the
+reach `D`, a few milliseconds for 128 chunks when the reach covers them all.
 
 ### 5.7 Trace cells, repairs, and the write-back
 
@@ -786,7 +827,8 @@ when something changes:
   per cell, moles conserved to `1e-6` relative and energy to `1e-4`.
 - Wall reflection: air at Mach 0.1 into a wall gives the reflected-shock plateau `p/p0 = 1.1485` against the
   Rankine-Hugoniot value 1.1486. A 1 m/s pulse gives a rise of 414 Pa against the acoustic `ρ·c·u0 = 413 Pa`.
-- Rest and drain: a uniform room is bitwise static after a tick of substeps. A tube open to void drains
+- Rest and drain: a uniform room with no source is skipped, so it is swept zero substeps and is bitwise static. It
+  is bitwise static when swept as well. A tube open to void drains
   monotonically to below `MinimumTrackedMoles` with no negative moles. A trace cell next to air never more than
   doubles the substep count.
 - Mixing pressure: a gas with `Cv = 200 J/(mol·K)` against air, both at `p0` and 10 m/s, holds `|p − p0|/p0 < 1e-5`
@@ -795,9 +837,13 @@ when something changes:
   mirror-equal bits. A corner blast across a 2×2×2 block of chunks keeps the cube's symmetry. The whole-chunk and
   tiled schedules agree bitwise at every worker count. The corner-blast digest is pinned per architecture, because x64
   and arm64 differ through `TensorPrimitives`' use of fused multiply-add (issue #87).
+- Static chunks: a 70-chunk line with a pulse at one end and a hotter sea at the other, ticked with diffusion and
+  sleep on, gives the same state hash and the same diagnostics every tick whether or not static chunks are skipped, at
+  every worker count (`EulerStaticChunkTests`). Gas next to void is never static. Two gases at equal pressure keep
+  mixing across a face.
 - Cost: room air needs about 35 substeps per tick, and one dense awake 16³ chunk of it costs about 19 ms per tick
-  single-threaded. That is why sleep (§9) and the parallel schedule (§10.2) are not optional with this model;
-  `benchmarks/README.md` has the cases.
+  single-threaded. That is why skipping static chunks (§5.6), sleep (§9), and the parallel schedule (§10.2) are not optional
+  with this model. `benchmarks/README.md` has the cases.
 
 ---
 
@@ -1110,8 +1156,10 @@ state and coordinate it with a custom solver.
 ## 9. Sleep
 
 Sleep is how Numos meets the work-proportional-cost goal: in a station with 500 chunks, only the handful with active
-pressure gradients consume CPU. Under the Euler model it matters even more, since an awake chunk pays for tens of
-substeps per tick even when nothing in it moves (§5.10). Each chunk keeps a
+pressure gradients consume CPU. Under the Euler model it matters even more, since a disturbed chunk pays for tens of
+substeps per tick (§5.10). A static awake chunk out of reach of any source is skipped (§5.6), but it still counts
+down to sleep.
+Each chunk keeps a
 `SleepTimer`, updated at the end of the transport stage:
 
 1. For each neighbor pair, divide the absolute pressure difference by the higher pressure. The largest percentage in the
@@ -1120,7 +1168,8 @@ substeps per tick even when nothing in it moves (§5.10). Each chunk keeps a
 3. Otherwise increment `SleepTimer`. Once it exceeds `SleepThreshold` (100), the chunk sleeps and is skipped by every
    built-in stage.
 
-An awake chunk with no gas still advances its timer every tick, so an emptied chunk falls asleep on schedule. The
+An awake chunk with no gas still advances its timer every tick, so an emptied chunk falls asleep on schedule. A
+skipped Euler chunk does the same with a score of zero. The
 criterion is relative, so scaling every pressure in a chunk by the same factor does not change its sleep decision.
 Only pressure counts. A temperature gradient alone does not wake a chunk or keep it active (§14).
 

@@ -2,6 +2,7 @@ using Numos.API;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.Datatypes.Snapshots;
 using Numos.CoreSim.EulerFlow;
+using Numos.CoreSim.Solvers.Euler;
 
 namespace Numos.CoreSim.IntegrationTests.Euler;
 
@@ -14,8 +15,23 @@ public sealed class EulerRestAndDrainTests
     private const float Temperature = 293f;
     private const float Pressure = AtmosPhysicalConstants.StandardAtmosphericPressure;
 
-    [Test]
-    public void UniformRoomAtRest_IsBitwiseStatic()
+    // A lone uniform room has no source within reach, so the stage skips it. Sweeping it must give the same bits.
+    [TestCase(true)]
+    [TestCase(false)]
+    public void UniformRoomAtRest_IsBitwiseStatic(bool skipStaticChunks)
+    {
+        EulerFlowSolver.SkipStaticChunks = skipStaticChunks;
+        try
+        {
+            AssertUniformRoomAtRest(skipStaticChunks);
+        }
+        finally
+        {
+            EulerFlowSolver.SkipStaticChunks = true;
+        }
+    }
+
+    private static void AssertUniformRoomAtRest(bool skipped)
     {
         var config = SimTestHelpers.CreateEulerConfig();
         using var simulation = SimTestHelpers.CreateEulerSimulation(config, 6, 5, 4, out var chunk);
@@ -30,7 +46,11 @@ public sealed class EulerRestAndDrainTests
         TestContext.Out.WriteLine($"rest: {flow}");
         Assert.Multiple(() =>
         {
-            Assert.That(flow.Substeps, Is.GreaterThan(1));
+            if (skipped)
+                Assert.That(flow.Substeps, Is.Zero, "a static chunk with no source is not swept");
+            else
+                Assert.That(flow.Substeps, Is.GreaterThan(1));
+
             for (int index = 0; index < before.Temperature.Length; index++)
             {
                 Assert.That(
@@ -138,7 +158,17 @@ public sealed class EulerRestAndDrainTests
         for (int x = 0; x < length; x++)
             reference.AddGasToVoxel(referenceChunk, x, 0, 0, SimTestHelpers.EulerAirGasName, moles, Temperature);
 
-        reference.Tick();
+        // Without a source a uniform tube is skipped, which would leave no substep count to compare with.
+        EulerFlowSolver.SkipStaticChunks = false;
+        try
+        {
+            reference.Tick();
+        }
+        finally
+        {
+            EulerFlowSolver.SkipStaticChunks = true;
+        }
+
         int airSubsteps = reference.LastFlowDiagnostics.Substeps;
 
         using var simulation = SimTestHelpers.CreateEulerSimulation(config, length, 1, 1, out var chunk);

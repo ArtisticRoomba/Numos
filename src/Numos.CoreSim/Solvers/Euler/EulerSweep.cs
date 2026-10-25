@@ -478,9 +478,9 @@ internal static class EulerSweep
     ///         which chunk this is. Otherwise the face is a wall for this sweep, and the neighbour is requested for
     ///         activation when the pressures differ by more than <see cref="EulerFlowConfig.WakePressureDelta" /> or
     ///         this cell moves normal to the face faster than <see cref="EulerFlowConfig.VelocityFloor" />. The
-    ///         stage zeroes slower momentum at tick end, so that motion cannot carry gas into the neighbour. The neighbour's pressure is its live
-    ///         <see cref="AtmosChunk.TotalPressure" />, which nothing writes while the chunk is inactive, and its
-    ///         momentum is zero by invariant.
+    ///         stage zeroes slower momentum at tick end, so that motion cannot carry gas into the neighbour. The
+    ///         neighbour's pressure is its live <see cref="AtmosChunk.TotalPressure" />, which nothing writes while
+    ///         the chunk has no workspace, and its momentum is zero by invariant.
     ///     </para>
     ///     <para>
     ///         Gas that crosses into a void cell is gone. The void cell is never updated. A trace cell presents as

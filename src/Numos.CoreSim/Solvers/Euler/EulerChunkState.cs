@@ -543,6 +543,66 @@ internal sealed class EulerChunkWorkspace
     }
 
     /// <summary>
+    ///     The signal speed <see cref="Gather" /> would give a voxel at rest, computed without a workspace.
+    /// </summary>
+    /// <param name="chunk">The chunk holding the voxel.</param>
+    /// <param name="voxelIndex">An air voxel with zero momentum.</param>
+    /// <param name="config">The tick's configuration snapshot.</param>
+    /// <param name="signalSpeed">The speed, or zero when the voxel is not a finite gas cell.</param>
+    /// <returns><see langword="false" /> when the gather would make the voxel a trace or non-finite cell.</returns>
+    /// <remarks>
+    ///     The sums run in ascending gas id with negative entries counted as empty, exactly like
+    ///     <see cref="SumMixture" />. A gather lists extra zero rows for neighbours' gases, and a zero row adds
+    ///     nothing to a sum, so the result is the same bits.
+    /// </remarks>
+    internal static bool TryGetRestSignalSpeed(
+        AtmosChunk chunk, ushort voxelIndex, AtmosSolverConfigSnapshot config, out MetrePerSecond signalSpeed)
+    {
+        signalSpeed = 0f;
+        int count = chunk.ActiveGasCount;
+        Span<int> order = count <= 64 ? stackalloc int[count] : new int[count];
+        for (int channel = 0; channel < count; channel++)
+        {
+            int position = channel;
+            while (position > 0 && chunk.ActiveGases[order[position - 1]].GasId > chunk.ActiveGases[channel].GasId)
+            {
+                order[position] = order[position - 1];
+                position--;
+            }
+
+            order[position] = channel;
+        }
+
+        Kilogram mass = 0f;
+        Mole totalMoles = 0f;
+        JoulePerKelvin64 heatCapacity = 0d;
+        for (int index = 0; index < count; index++)
+        {
+            GasChannel gas = chunk.ActiveGases[order[index]];
+            Mole moles = gas.Moles[voxelIndex];
+            moles = moles > 0f ? moles : 0f;
+            mass += moles * config.GetMolarMass(gas.GasId);
+            totalMoles += moles;
+            heatCapacity += (Mole64)moles * config.GetMolarHeatCapacityAtConstantVolume(gas.GasId);
+        }
+
+        if (IsTrace(mass, totalMoles))
+            return false;
+
+        Kelvin temperature = config.GetValidatedTemp(chunk.Temperature[voxelIndex]);
+        Joule64 energy = EulerMixture.TotalEnergy(heatCapacity, temperature, mass, 0f, 0f, 0f);
+        EulerCellKind kind = EulerMixture.ToPrimitive(
+            mass, totalMoles, heatCapacity, 0f, 0f, 0f, energy, config.VoxelVolume, config.PressurePerMoleKelvin,
+            out EulerCellState cell);
+
+        if (kind != EulerCellKind.Gas)
+            return false;
+
+        signalSpeed = cell.SignalSpeed;
+        return true;
+    }
+
+    /// <summary>
     ///     Writes the read buffer back to the chunk: channels, momentum, temperature, heat capacity, pressure, and
     ///     the vacuum flag.
     /// </summary>

@@ -1,6 +1,7 @@
 using Numos.API;
 using Numos.CoreSim.Datatypes.Snapshots;
 using Numos.CoreSim.EulerFlow;
+using Numos.CoreSim.Solvers.Euler;
 using Numos.Maths;
 
 namespace Numos.CoreSim.IntegrationTests.Euler;
@@ -136,6 +137,20 @@ public sealed class EulerCrossChunkTests
 
     [Test]
     public void PrePass_LeavesAnEqualPressureSleepingNeighbourAsleep()
+    {
+        // Nothing here is a source, so the stage would skip the active chunk. Sweep it to test the pre-pass.
+        EulerFlowSolver.SkipStaticChunks = false;
+        try
+        {
+            AssertEqualPressureNeighbourStaysAsleep();
+        }
+        finally
+        {
+            EulerFlowSolver.SkipStaticChunks = true;
+        }
+    }
+
+    private static void AssertEqualPressureNeighbourStaysAsleep()
     {
         var config = SimTestHelpers.CreateEulerConfig();
         using var simulation = SimTestHelpers.CreateEulerSimulation(config, 4, 4, 4, out var active);

@@ -11,8 +11,8 @@ namespace Numos.CoreSim.Solvers.Euler;
 /// </summary>
 /// <remarks>
 ///     <para>
-///         Per tick the stage gathers each active chunk (awake, with at least one gas channel, plus whatever
-///         activation adds) into pooled conserved buffers, runs CFL substeps until the fixed time step is used up
+///         Per tick the stage gathers each active chunk (awake, with at least one gas channel, not skipped as static, plus
+///         whatever activation adds) into pooled conserved buffers, runs CFL substeps until the fixed time step is used up
 ///         or the substep cap engages, and writes the buffers back. Tick-end work then runs in this order:
 ///         momentum floor and damping (before the write-back, so the kinetic energy they remove becomes heat),
 ///         <see cref="EulerSpeciesDiffusion" />, <see cref="VacuumCleanup" />, <see cref="SettleMomentum" />, and
@@ -46,6 +46,14 @@ namespace Numos.CoreSim.Solvers.Euler;
 ///         recorded.
 ///     </para>
 ///     <para>
+///         An awake chunk can also go without a workspace when a sweep could not change it. See
+///         <see cref="EulerStaticChunk" /> for the test and <see cref="ActivateWithinReach" /> for the distance
+///         rule. Such a chunk stays awake, so its sleep timer still advances at the end of <see cref="Solve" />.
+///         Its signal speed still counts toward the shared time step, so the substeps match an all-swept tick.
+///         The skip changes no bit of any chunk, and a tick in which nothing is swept leaves
+///         <see cref="LastDiagnostics" /> at its default.
+///     </para>
+///     <para>
 ///         The stage keeps nothing between ticks beyond the chunk's own momentum arrays. The stage rebuilds the buffers
 ///         from the chunk fields every tick. See docs/atmospherics_technical_documentation.md section 5 for the
 ///         derivation.
@@ -61,6 +69,20 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
     internal static int? WorkerCountOverride;
 
     /// <summary>
+    ///     Whether static chunks out of reach of every source skip the sweeps (see <see cref="EulerStaticChunk" />).
+    ///     Tests clear it to compare against the all-swept result. The skip changes no bit, so it is not a
+    ///     configuration field.
+    /// </summary>
+    internal static bool SkipStaticChunks = true;
+
+    /// <summary>
+    ///     How many chunks the most recent tick skipped. A test hook, shared by every solver instance.
+    /// </summary>
+    internal static int LastSkippedCount;
+
+    private static readonly Int3[] ReachOffsets = CreateReachOffsets();
+
+    /// <summary>
     ///     The axis orders a substep can sweep in, as consecutive triples: <c>XYZ, ZYX, YZX, XZY, ZXY, YXZ</c>, each
     ///     order followed by its reverse.
     /// </summary>
@@ -73,6 +95,16 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
     private readonly Stack<EulerChunkWorkspace> _pool = new();
     private EulerChunkWorkspace[] _active = [];
     private int _activeCount;
+    private readonly List<AtmosChunk> _frontier = [];
+    private readonly List<AtmosChunk> _nextFrontier = [];
+    private readonly List<AtmosChunk> _reached = [];
+    private readonly HashSet<AtmosChunk> _rangeSet = [];
+    private readonly List<AtmosChunk> _seeds = [];
+    private readonly HashSet<AtmosChunk> _seedSet = [];
+    private readonly HashSet<AtmosChunk> _visited = [];
+    private MetrePerSecond _skippedSignalSpeed;
+    private MetrePerSecond[] _staticSpeed = [];
+    private bool[] _static = [];
     private EulerChunkWorkspace?[] _workspaceByDenseId = [];
     private PencilWorkItem[] _workItems = [];
 
@@ -93,19 +125,63 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
         AtmosSolverConfigSnapshot config = context.TickConfig;
         try
         {
+            _skippedSignalSpeed = 0f;
+            LastSkippedCount = 0;
+            if (_static.Length < context.Chunks.Length)
+            {
+                _static = new bool[Math.Max(context.Chunks.Length, _static.Length * 2)];
+                _staticSpeed = new MetrePerSecond[_static.Length];
+            }
+
+            if (SkipStaticChunks)
+                ParallelPhase.Run(context.Chunks.Length, new StaticAction(context, _static, _staticSpeed));
+            else
+                Array.Clear(_static, 0, context.Chunks.Length);
+
+            int staticCount = 0;
             for (int chunkIndex = 0; chunkIndex < context.Chunks.Length; chunkIndex++)
             {
                 AtmosChunk chunk = context.Chunks[chunkIndex];
-                if (chunk.IsAwake && chunk.ActiveGasCount > 0)
+                if (!chunk.IsAwake || chunk.ActiveGasCount == 0)
+                    continue;
+
+                if (_static[chunkIndex])
+                    staticCount++;
+                else
                     Activate(chunk, context);
             }
 
             GatherPending(config);
             ActivateNeighboursAtRest(context);
+            if (staticCount > 0 && _activeCount > 0)
+            {
+                ActivateWithinReach(context);
+                for (int chunkIndex = 0; chunkIndex < context.Chunks.Length; chunkIndex++)
+                {
+                    AtmosChunk chunk = context.Chunks[chunkIndex];
+                    if (!IsSkipped(chunk))
+                        continue;
 
-            LastDiagnostics = _activeCount == 0
-                ? default
-                : Advance(context, config.EulerFlow);
+                    _skippedSignalSpeed = MathF.Max(_skippedSignalSpeed, _staticSpeed[chunkIndex]);
+                    LastSkippedCount++;
+                }
+            }
+            else
+            {
+                LastSkippedCount = staticCount;
+            }
+
+            if (_activeCount == 0)
+            {
+                LastDiagnostics = default;
+                // Cleanup normally follows the sweeps, so skipped chunks still owe it when nothing is swept.
+                if (staticCount > 0)
+                    VacuumCleanup.Apply(context);
+            }
+            else
+            {
+                LastDiagnostics = Advance(context, config.EulerFlow);
+            }
 
             // An awake chunk that never got a workspace has nothing to move, but its sleep timer still has to
             // advance. Chunks the stage put to sleep are no longer awake here.
@@ -127,6 +203,7 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
             }
 
             _activeCount = 0;
+            _skippedSignalSpeed = 0f;
             _pendingScan.Clear();
             _pendingActivation.Clear();
             _pendingGather.Clear();
@@ -281,6 +358,140 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
                     workspace.WakeRequests[direction] = true;
             }
         }
+    }
+
+    /// <summary>
+    ///     Activates every static chunk that a source could reach this tick. The chunks left without a workspace
+    ///     are exactly the ones a sweep could not change. Tick thread only.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         A source is a chunk active after the pre-pass. A first-order split sweep moves information one cell
+    ///         per axis sweep, so one substep spreads it by one cell along each axis. A tick runs at most
+    ///         <see cref="EulerFlowConfig.MaxSubstepsPerTick" /> substeps, and the tick-end species diffusion adds
+    ///         one cell. Chunks at chunk distance <c>D</c> or less are activated, with
+    ///         <c>D = ceil((MaxSubstepsPerTick + 2) / minExtent)</c>. A chunk beyond <c>D</c> has more than
+    ///         <c>MaxSubstepsPerTick + 1</c> cells between it and any source.
+    ///     </para>
+    ///     <para>
+    ///         Distance is measured by a breadth-first search over the 26 neighbouring chunk positions through
+    ///         every registered chunk. Without a substep cap the bound is unknown, so every static chunk is
+    ///         activated. An activated static chunk is not a source, because it changes nothing until a source
+    ///         reaches it. The search repeats only when the pre-pass wakes a chunk that was not static.
+    ///     </para>
+    /// </remarks>
+    private void ActivateWithinReach(AtmosSolverExecutionContext context)
+    {
+        int bound = context.TickConfig.EulerFlow.MaxSubstepsPerTick;
+        int minExtent = Math.Min(_dimensions.X, Math.Min(_dimensions.Y, _dimensions.Z));
+        int depth = bound == 0 ? 0 : ParallelPhase.DivideRoundUp(bound + 2, minExtent);
+        _seeds.Clear();
+        _seedSet.Clear();
+        _rangeSet.Clear();
+        for (int index = 0; index < _activeCount; index++)
+        {
+            AtmosChunk chunk = _active[index].Chunk;
+            _seeds.Add(chunk);
+            _seedSet.Add(chunk);
+        }
+
+        while (true)
+        {
+            _reached.Clear();
+            if (bound == 0)
+            {
+                for (int index = 0; index < context.Chunks.Length; index++)
+                {
+                    if (IsSkipped(context.Chunks[index]))
+                        _reached.Add(context.Chunks[index]);
+                }
+            }
+            else
+            {
+                FindChunksWithin(context, depth);
+            }
+
+            if (_reached.Count == 0)
+                break;
+
+            foreach (AtmosChunk chunk in _reached)
+            {
+                _rangeSet.Add(chunk);
+                Activate(chunk, context);
+            }
+
+            GatherPending(context.TickConfig);
+            ActivateNeighboursAtRest(context);
+
+            bool newSource = false;
+            for (int index = 0; index < _activeCount; index++)
+            {
+                AtmosChunk chunk = _active[index].Chunk;
+                if (_seedSet.Contains(chunk) || _rangeSet.Contains(chunk))
+                    continue;
+
+                _seeds.Add(chunk);
+                _seedSet.Add(chunk);
+                newSource = true;
+            }
+
+            if (!newSource)
+                break;
+        }
+    }
+
+    private bool IsSkipped(AtmosChunk chunk)
+    {
+        return chunk.IsAwake && chunk.ActiveGasCount > 0 && LookupWorkspace(chunk) == null;
+    }
+
+    /// <summary>
+    ///     Collects into <see cref="_reached" /> every skipped chunk within <paramref name="depth" /> steps of a seed.
+    /// </summary>
+    private void FindChunksWithin(AtmosSolverExecutionContext context, int depth)
+    {
+        _visited.Clear();
+        _frontier.Clear();
+        foreach (AtmosChunk seed in _seeds)
+        {
+            _visited.Add(seed);
+            _frontier.Add(seed);
+        }
+
+        for (int level = 0; level < depth && _frontier.Count > 0; level++)
+        {
+            _nextFrontier.Clear();
+            foreach (AtmosChunk chunk in _frontier)
+            {
+                foreach (Int3 offset in ReachOffsets)
+                {
+                    if (!context.TryGetChunk(chunk.GridPosition + offset, out AtmosChunk neighbor) ||
+                        !_visited.Add(neighbor))
+                        continue;
+
+                    _nextFrontier.Add(neighbor);
+                    if (IsSkipped(neighbor))
+                        _reached.Add(neighbor);
+                }
+            }
+
+            _frontier.Clear();
+            _frontier.AddRange(_nextFrontier);
+        }
+    }
+
+    private static Int3[] CreateReachOffsets()
+    {
+        var offsets = new List<Int3>();
+        for (int z = -1; z <= 1; z++)
+        for (int y = -1; y <= 1; y++)
+        for (int x = -1; x <= 1; x++)
+        {
+            if (x != 0 || y != 0 || z != 0)
+                offsets.Add(new Int3(x, y, z));
+        }
+
+        return offsets.ToArray();
     }
 
     /// <summary>
@@ -556,7 +767,8 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
 
     private MetrePerSecond MaxSignalSpeed()
     {
-        MetrePerSecond speed = 0f;
+        // A skipped chunk would report the same speed every substep, because its state never changes.
+        MetrePerSecond speed = _skippedSignalSpeed;
         for (int index = 0; index < _activeCount; index++)
             speed = MathF.Max(speed, _active[index].Read.MaxSignalSpeed);
 
@@ -823,6 +1035,19 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
     ///     A range of one chunk's pencils for the tiled schedule.
     /// </summary>
     private readonly record struct PencilWorkItem(int WorkspaceIndex, int FirstPencil, int PencilCount);
+
+    private readonly struct StaticAction(AtmosSolverExecutionContext context, bool[] result, MetrePerSecond[] speed) : IAction
+    {
+        public void Invoke(int index)
+        {
+            AtmosChunk chunk = context.Chunks[index];
+            MetrePerSecond signalSpeed = 0f;
+            result[index] = chunk.IsAwake && chunk.ActiveGasCount > 0 &&
+                            EulerStaticChunk.IsStatic(chunk, context, out signalSpeed);
+
+            speed[index] = signalSpeed;
+        }
+    }
 
     private readonly struct GatherAction(List<EulerChunkWorkspace> batch, AtmosSolverConfigSnapshot config) : IAction
     {
