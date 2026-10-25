@@ -101,6 +101,33 @@ public sealed class AtmosChunkFieldStorageTests
     }
 
     [Test]
+    public void TryGetField_ReturnsFalseWithoutAllocating()
+    {
+        var chunk = new AtmosChunk(2, 3, 1);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(chunk.TryGetField(Captured, out int[]? array), Is.False);
+            Assert.That(array, Is.Null);
+            Assert.That(chunk.HasCapturedSolverArrays, Is.False);
+            Assert.That(chunk.CaptureSolverArrays(), Is.Empty);
+        });
+    }
+
+    [Test]
+    public void TryGetField_ReturnsAllocatedStorage()
+    {
+        var chunk = new AtmosChunk(2, 3, 1);
+        int[] values = chunk.GetOrCreateField(Captured);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(chunk.TryGetField(Captured, out int[]? array), Is.True);
+            Assert.That(array, Is.SameAs(values));
+        });
+    }
+
+    [Test]
     public void GetOrCreateField_ParallelFirstTouchSharesStorage()
     {
         const int workerCount = 64;

@@ -320,6 +320,23 @@ internal class AtmosChunk
         return FindField(Volatile.Read(ref _fields), field)?.Values ?? CreateField(field);
     }
 
+    /// <summary>
+    ///     Gets a field's storage if this chunk has already allocated it.
+    /// </summary>
+    /// <typeparam name="T">The field's element type.</typeparam>
+    /// <param name="field">The field descriptor.</param>
+    /// <param name="array">The live array, or <see langword="null" /> when the chunk has no storage for the field.</param>
+    /// <returns><see langword="true" /> when the chunk has storage for <paramref name="field" />.</returns>
+    /// <remarks>
+    ///     Unlike <see cref="GetOrCreateField{T}" />, this never allocates. A read through it leaves checkpoints and
+    ///     state hashes unchanged. Safe to call from parallel workers.
+    /// </remarks>
+    internal bool TryGetField<T>(ChunkFieldDescriptor<T> field, [NotNullWhen(true)] out T[]? array)
+    {
+        array = FindField(Volatile.Read(ref _fields), field)?.Values;
+        return array != null;
+    }
+
     private static SolverArrayStorage<T>? FindField<T>(SolverArrayStorage?[]? fields, ChunkFieldDescriptor<T> field)
     {
         int slot = field.Slot;
