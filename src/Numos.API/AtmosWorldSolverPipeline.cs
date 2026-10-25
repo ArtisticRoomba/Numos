@@ -28,30 +28,22 @@ public sealed class AtmosWorldSolverPipeline
     // clears it, so enabling a solver that sat out an epoch change gets it injected before it runs.
     private int _injectedEpoch = -1;
 
-    private static readonly Dictionary<string, Action<AtmosSolverTickScope>> BuiltInFactories =
-        new(StringComparer.Ordinal)
-        {
-            [AtmosBuiltInSolvers.EulerFlow] = static scope => scope.World.SolveEulerFlowStage(scope),
-            [AtmosBuiltInSolvers.Advection] = static scope => scope.World.SolveAdvectionStage(scope),
-            [AtmosBuiltInSolvers.ExplicitGasTransport] = static scope => scope.World.SolveExplicitGasTransportStage(scope),
-            [AtmosBuiltInSolvers.BoundaryFlow] = static scope => scope.World.SolveBoundaryFlowStage(scope),
-            [AtmosBuiltInSolvers.Thermodynamics] = static scope => scope.World.SolveThermodynamicsStage(scope),
-            [AtmosBuiltInSolvers.ExplicitThermalTransport] = static scope => scope.World.SolveExplicitThermalTransportStage(scope),
-            [AtmosBuiltInSolvers.ThermalBoundary] = static scope => scope.World.SolveThermalBoundaryStage(scope),
-            [AtmosBuiltInSolvers.GasReactions] = static scope => scope.World.SolveGasReactionsStage(scope)
-        };
-
-    private static readonly ReadOnlyCollection<string> BuiltInNames = Array.AsReadOnly(
+    // The one source of truth for built-in stages. The order is the canonical order that BuiltInStageNames reports.
+    private static readonly (string Name, Action<AtmosSolverTickScope> Factory)[] BuiltInStages =
     [
-        AtmosBuiltInSolvers.EulerFlow,
-        AtmosBuiltInSolvers.Advection,
-        AtmosBuiltInSolvers.ExplicitGasTransport,
-        AtmosBuiltInSolvers.BoundaryFlow,
-        AtmosBuiltInSolvers.Thermodynamics,
-        AtmosBuiltInSolvers.ExplicitThermalTransport,
-        AtmosBuiltInSolvers.ThermalBoundary,
-        AtmosBuiltInSolvers.GasReactions
-    ]);
+        (AtmosBuiltInSolvers.EulerFlow, static scope => scope.World.SolveEulerFlowStage(scope)),
+        (AtmosBuiltInSolvers.Advection, static scope => scope.World.SolveAdvectionStage(scope)),
+        (AtmosBuiltInSolvers.ExplicitGasTransport, static scope => scope.World.SolveExplicitGasTransportStage(scope)),
+        (AtmosBuiltInSolvers.BoundaryFlow, static scope => scope.World.SolveBoundaryFlowStage(scope)),
+        (AtmosBuiltInSolvers.Thermodynamics, static scope => scope.World.SolveThermodynamicsStage(scope)),
+        (AtmosBuiltInSolvers.ExplicitThermalTransport, static scope => scope.World.SolveExplicitThermalTransportStage(scope)),
+        (AtmosBuiltInSolvers.ThermalBoundary, static scope => scope.World.SolveThermalBoundaryStage(scope)),
+        (AtmosBuiltInSolvers.GasReactions, static scope => scope.World.SolveGasReactionsStage(scope))
+    ];
+
+    private static readonly Dictionary<string, Action<AtmosSolverTickScope>> BuiltInFactories = CreateBuiltInFactories();
+
+    private static readonly ReadOnlyCollection<string> BuiltInNames = CreateBuiltInNames();
 
     private static readonly ReadOnlyCollection<string> EulerLayout = Array.AsReadOnly(
     [
@@ -745,6 +737,28 @@ public sealed class AtmosWorldSolverPipeline
             _world.InvalidateSolverDependencies();
             PublishSteps();
         }
+    }
+
+    private static Dictionary<string, Action<AtmosSolverTickScope>> CreateBuiltInFactories()
+    {
+        var factories = new Dictionary<string, Action<AtmosSolverTickScope>>(BuiltInStages.Length, StringComparer.Ordinal);
+        foreach (var (name, factory) in BuiltInStages)
+        {
+            factories[name] = factory;
+        }
+
+        return factories;
+    }
+
+    private static ReadOnlyCollection<string> CreateBuiltInNames()
+    {
+        var names = new string[BuiltInStages.Length];
+        for (int i = 0; i < names.Length; i++)
+        {
+            names[i] = BuiltInStages[i].Name;
+        }
+
+        return Array.AsReadOnly(names);
     }
 
     private int IndexOf(string name)
