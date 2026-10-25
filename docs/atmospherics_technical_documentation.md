@@ -219,7 +219,7 @@ Each gas species is defined by a `GasProperties` struct:
 | `CondensationEnabled`               | `bool`   | Enables this species in the condensation model                                                                                                                                                                                                      |
 | `MolarEnthalpyOfVaporization`       | `float`  | Vaporization enthalpy in J/mol, used by Clausius–Clapeyron and converted to an approximate constant-volume internal-energy change for condensation                                                                                                  |
 | `LiquidId`                          | `int`    | Reserved integration ID. The built-in solver does not create liquid state or emit a condensation event.                                                                                                                                             |
-| `DiffusionCoefficient`              | `float`  | Reference species-diffusion coefficient `D_g` (§5.3). Finite values are clamped to [0, 1]; non-finite values disable diffusion for the species.                                                                                                     |
+| `DiffusionCoefficient`              | `float`  | Effective species diffusivity `D_g` in m²/s (§5.3). Negative values clamp to zero; non-finite values disable diffusion for the species.                                                                                                             |
 
 The registry is a `GasRegistry` list indexed by gas ID; zero is a valid gas ID.
 
@@ -240,9 +240,9 @@ runtime configuration. `AtmosChunkConstants` holds the default chunk dimensions 
 | `GlobalTemperature`                        | 293.15  | Reference temperature (K) in the species-diffusion environment factor (§5.3). Non-finite or nonpositive values normalize to 293.15 K.                                                                                                                    |
 | `DefaultTemperatureFallback`               | 293.15  | Effective temperature (K) used for pressure and sensible energy when a gas-bearing voxel stores a non-finite or nonpositive temperature. Invalid values normalize to 293.15 K.                                                                           |
 | `DefaultMolarHeatCapacityAtConstantVolume` | `5R/2`  | Ideal-diatomic molar `C_v` in J/(mol·K), used for missing registry entries and non-finite or nonpositive gas heat capacities. A non-finite or nonpositive fallback value is normalized to the same value.                                                |
-| `VoxelVolume`                              | 1       | Physical volume represented by each voxel (m³). Its cube root is the voxel edge length used by diffusion. Invalid values normalize to 1 m³.                                                                                                              |
+| `VoxelVolume`                              | 1       | Physical volume represented by each voxel (m³). Its cube root is the voxel edge length `Δx` used by diffusion. Invalid values normalize to 1 m³.                                                                                                         |
 | `SaturationReferencePressure`              | 101325  | Pressure (Pa) at which each gas's `BoilingPoint` applies, and the reference pressure in the diffusion environment factor. Invalid values normalize to one standard atmosphere.                                                                           |
-| `DefaultDiffusionCoefficient`              | 0.02    | Diffusion coefficient for gas IDs without a registry entry. Finite values are clamped to [0, 1]; non-finite values disable fallback diffusion.                                                                                                           |
+| `DefaultDiffusionCoefficient`              | 0.02    | Diffusivity in m²/s for gas IDs without a registry entry. Negative values clamp to zero; non-finite values disable fallback diffusion.                                                                                                                   |
 | `SpaceTemperature`                         | 2.7     | Temperature of space (K). Not read by the built-in solvers.                                                                                                                                                                                              |
 | `BulkFlowCoefficient`                      | 0.125   | Fraction `k` of a pressure difference requested as bulk flow per tick (§5.1). Finite values are clamped to [0, 1] and the solver further caps them at 0.5; non-finite values disable bulk flow.                                                          |
 | `VacuumThreshold`                          | 1.0     | Below this pressure (Pa), voxel contents are zeroed out when every neighboring air voxel is also below the threshold. Invalid or negative values normalize to zero.                                                                                      |
@@ -472,16 +472,21 @@ For a voxel with total pressure `P`, effective temperature `T`, and `n_g` moles 
 
 ```
 Δx    = VoxelVolume^(1/3)                                  // voxel edge length
-f_env = (T / GlobalTemperature)^(3/2) * (SaturationReferencePressure / P) * Δx
+f_env = (T / GlobalTemperature)^(3/2) * (SaturationReferencePressure / P) / Δx²
 q_g   = min(D_g * f_env * n_g * FixedTimeStep, n_g / 7)    // moles sent to each non-solid neighbor
 ```
 
-`D_g` is the gas's `DiffusionCoefficient` (or `DefaultDiffusionCoefficient` for unregistered IDs). The `T^(3/2)/P`
-scaling is the kinetic-theory dependence of gas diffusivity. Diffusion speeds up in hot, thin gas and slows down in
-cold, dense gas. At the reference temperature and pressure with 1 m³ voxels, `f_env = 1`. The default `D_g = 0.02`
-then sends `0.02 × 0.05 = 0.1%` of the voxel's gas to each neighbor per tick. The `n_g/7` cap keeps the six outgoing
-transfers below the voxel's inventory. A voxel with zero pressure, no non-solid neighbors, or none of the gas
-diffuses nothing.
+This is Fick's law on the grid. The flow through a face is `D_g * (A / d) * c * Δt`. For a cube the face area over
+the neighbor distance is `Δx`, and the concentration is `n_g / Δx³`, which leaves `n_g / Δx²`. A room therefore
+mixes at the same physical rate whatever the voxel size.
+
+`D_g` is the gas's `DiffusionCoefficient` (or `DefaultDiffusionCoefficient` for unregistered IDs), in m²/s. The
+`T^(3/2)/P` scaling is the kinetic-theory dependence of gas diffusivity. Diffusion speeds up in hot, thin gas and
+slows down in cold, dense gas. At the reference temperature and pressure with 1 m³ voxels, `f_env = 1 m⁻²`. The
+default `D_g = 0.02 m²/s` then sends `0.02 × 0.05 = 0.1%` of the voxel's gas to each neighbor per tick. That is
+about a thousand times molecular diffusivity in air, and stands in for convective mixing the grid does not resolve.
+The `n_g/7` cap keeps the six outgoing transfers below the voxel's inventory. A voxel with zero pressure, no non-solid
+neighbors, or none of the gas diffuses nothing.
 
 ### 5.4 How the advection stage runs
 

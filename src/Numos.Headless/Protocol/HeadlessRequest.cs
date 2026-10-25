@@ -239,7 +239,7 @@ internal sealed class ConfigurationPatch
 
         Check(AtmosConfigFields.VoxelVolume, VoxelVolumeM3, ConfigDomain.Positive);
         Check(AtmosConfigFields.SaturationReferencePressure, SaturationReferencePressurePa, ConfigDomain.Positive);
-        Check(AtmosConfigFields.DefaultDiffusionCoefficient, DefaultDiffusionCoefficient, ConfigDomain.UnitInterval);
+        Check(AtmosConfigFields.DefaultDiffusionCoefficient, DefaultDiffusionCoefficient, ConfigDomain.NonNegative);
         Check(AtmosConfigFields.SpaceTemperature, SpaceTemperatureK, ConfigDomain.Positive);
         Check(AtmosConfigFields.BulkFlowCoefficient, BulkFlowCoefficient, ConfigDomain.UnitInterval);
         Check(AtmosConfigFields.VacuumThreshold, VacuumThresholdPa, ConfigDomain.NonNegative);

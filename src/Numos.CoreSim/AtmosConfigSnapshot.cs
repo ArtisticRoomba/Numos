@@ -44,7 +44,7 @@ public sealed class AtmosConfigSnapshot : IAtmosConfig
             ? source.SaturationReferencePressure
             : AtmosConfigDefaults.SaturationReferencePressure;
 
-        DefaultDiffusionCoefficient = FloatMath.ClampUnitInterval(source.DefaultDiffusionCoefficient);
+        DefaultDiffusionCoefficient = FloatMath.GetNonnegativeFinite(source.DefaultDiffusionCoefficient);
         DefaultThermalConductivity = FloatMath.IsFinitePositive(source.DefaultThermalConductivity)
             ? source.DefaultThermalConductivity
             : AtmosConfigDefaults.DefaultThermalConductivity;
@@ -77,7 +77,7 @@ public sealed class AtmosConfigSnapshot : IAtmosConfig
                     DefaultMolarHeatCapacityAtConstantVolume;
             }
 
-            properties.DiffusionCoefficient = FloatMath.ClampUnitInterval(properties.DiffusionCoefficient);
+            properties.DiffusionCoefficient = FloatMath.GetNonnegativeFinite(properties.DiffusionCoefficient);
             gasRegistry.Add(properties);
         }
 
@@ -129,7 +129,7 @@ public sealed class AtmosConfigSnapshot : IAtmosConfig
     public Pascal SaturationReferencePressure { get; }
     /// <inheritdoc cref="AtmosConfig.DefaultDiffusionCoefficient" />
     [ConfigCheckpointField(5)]
-    public Scalar DefaultDiffusionCoefficient { get; }
+    public SquareMetrePerSecond DefaultDiffusionCoefficient { get; }
     /// <inheritdoc cref="AtmosConfig.DefaultThermalConductivity" />
     [ConfigCheckpointField(6)] 
     public WattsPerMeterKelvin DefaultThermalConductivity { get; }
@@ -198,19 +198,19 @@ public sealed class AtmosConfigSnapshot : IAtmosConfig
     }
 
     /// <inheritdoc cref="AtmosConfig.GetDiffusionCoefficient" />
-    public Scalar GetDiffusionCoefficient(int gasId)
+    public SquareMetrePerSecond GetDiffusionCoefficient(int gasId)
     {
         return (uint)gasId < (uint)GasRegistry.Count
-            ? FloatMath.ClampUnitInterval(GasRegistry[gasId].DiffusionCoefficient)
-            : FloatMath.ClampUnitInterval(DefaultDiffusionCoefficient);
+            ? FloatMath.GetNonnegativeFinite(GasRegistry[gasId].DiffusionCoefficient)
+            : FloatMath.GetNonnegativeFinite(DefaultDiffusionCoefficient);
     }
 
     /// <inheritdoc cref="AtmosConfig.GetThermalConductivity" />
     public WattsPerMeterKelvin GetThermalConductivity(int gasId)
     {
         return (uint)gasId < (uint)GasRegistry.Count
-            ? FloatMath.ClampUnitInterval(GasRegistry[gasId].ThermalConductivity)
-            : FloatMath.ClampUnitInterval(DefaultThermalConductivity);
+            ? FloatMath.GetNonnegativeFinite(GasRegistry[gasId].ThermalConductivity)
+            : FloatMath.GetNonnegativeFinite(DefaultThermalConductivity);
     }
 
     /// <inheritdoc cref="AtmosConfig.TryGetGasProperties" />

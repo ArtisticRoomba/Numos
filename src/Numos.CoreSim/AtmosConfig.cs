@@ -127,10 +127,12 @@ public class AtmosConfig : IAtmosConfig
     ///     Reference diffusivity used for gas IDs missing from <see cref="GasRegistry" />.
     /// </summary>
     /// <remarks>
-    ///     Scaled the same way as <see cref="GasProperties.DiffusionCoefficient" />. It is not a per-tick fraction.
-    ///     Values are clamped to [0, 1]. Non-finite values disable fallback diffusion.
+    ///     In square metres per second (m²/s), scaled the same way as <see cref="GasProperties.DiffusionCoefficient" />.
+    ///     Negative values clamp to zero. Non-finite values disable fallback diffusion.
     /// </remarks>
-    public Scalar DefaultDiffusionCoefficient { get; set; } = AtmosConfigDefaults.DefaultDiffusionCoefficient;
+    [Quantity("diffusivity")]
+    public SquareMetrePerSecond DefaultDiffusionCoefficient { get; set; } =
+        AtmosConfigDefaults.DefaultDiffusionCoefficient;
     public WattsPerMeterKelvin DefaultThermalConductivity { get; set; } = AtmosConfigDefaults.DefaultThermalConductivity;
 
     /// <summary>
@@ -278,14 +280,25 @@ public class AtmosConfig : IAtmosConfig
     }
 
     /// <summary>
-    ///     Resolves the reference diffusivity for a gas, clamped to [0, 1].
+    ///     Resolves the reference diffusivity for a gas in m²/s, clamped to zero or greater.
     /// </summary>
     /// <param name="gasId">The gas ID. Unregistered IDs use <see cref="DefaultDiffusionCoefficient" />.</param>
-    public Scalar GetDiffusionCoefficient(int gasId)
+    public SquareMetrePerSecond GetDiffusionCoefficient(int gasId)
     {
         return (uint)gasId < (uint)GasRegistry.Count
-            ? FloatMath.ClampUnitInterval(GasRegistry[gasId].DiffusionCoefficient)
-            : FloatMath.ClampUnitInterval(DefaultDiffusionCoefficient);
+            ? FloatMath.GetNonnegativeFinite(GasRegistry[gasId].DiffusionCoefficient)
+            : FloatMath.GetNonnegativeFinite(DefaultDiffusionCoefficient);
+    }
+
+    /// <summary>
+    ///     Resolves the thermal conductivity for a gas at a specific temperature.
+    /// </summary>
+    /// <param name="gasId">The gas ID. Unregistered IDs use <see cref="DefaultThermalConductivity" />.</param>
+    public WattsPerMeterKelvin GetThermalConductivity(int gasId)
+    {
+        return (uint)gasId < (uint)GasRegistry.Count
+            ? FloatMath.GetNonnegativeFinite(GasRegistry[gasId].ThermalConductivity)
+            : FloatMath.GetNonnegativeFinite(DefaultThermalConductivity);
     }
 
     /// <summary>

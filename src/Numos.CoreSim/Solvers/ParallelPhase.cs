@@ -40,8 +40,9 @@ internal static class ParallelPhase
     /// <param name="action">The operation to perform for each work item.</param>
     /// <remarks>
     ///     The calling thread works on the phase too. A steady-state call allocates nothing, because the shared phase
-    ///     state is pooled per <typeparamref name="TAction" />. If items throw, the phase stops handing out new
-    ///     items, waits for the running ones, and rethrows the first exception.
+    ///     state is pooled per <typeparamref name="TAction" />. On a starved thread pool, helpers start late or never,
+    ///     and the caller finishes the phase alone. If items throw, the phase stops handing out new items, waits for
+    ///     the running ones, and rethrows the first exception.
     /// </remarks>
     internal static void Run<TAction>(int workItemCount, TAction action)
         where TAction : struct, IAction
@@ -60,7 +61,7 @@ internal static class ParallelPhase
         int grain = Math.Max(1, workItemCount / (workers * Math.Max(1, GrainsPerWorker)));
         int helpers = Math.Min(workers - 1, DivideRoundUp(workItemCount, grain) - 1);
 
-        var phase = Phase<TAction>.Rent();
+        Phase<TAction> phase = Phase<TAction>.Rent();
         phase.Start(action, workItemCount, grain, helpers);
         phase.SpawnHelpers();
         phase.Work();
@@ -70,8 +71,7 @@ internal static class ParallelPhase
         while (Volatile.Read(ref phase.Done) < workItemCount)
             spinner.SpinOnce(-1);
 
-        Exception? error = phase.Error;
-        phase.Release();
+        Exception? error = phase.Finish();
         if (error != null)
             ExceptionDispatchInfo.Capture(error).Throw();
     }
@@ -91,10 +91,19 @@ internal static class ParallelPhase
     ///     The shared state of one phase. The same object is queued once per helper thread.
     /// </summary>
     /// <remarks>
-    ///     A helper that starts after the items ran out still touches the object. The reference count keeps the
-    ///     object out of the pool until the caller and every queued helper have released it.
-    ///     The caller queues only a few helpers. Each helper that starts while items remain queues more, so the
-    ///     wake-up cost spreads over the workers like the replicating tasks of <see cref="Parallel.For(int,int,Action{int})" />.
+    ///     <para>
+    ///         A queued helper can start long after its phase ended, so the object cannot wait for every helper
+    ///         before it returns to the pool. The caller owns the object only between <see cref="Rent" /> and
+    ///         <see cref="Finish" />. A late helper finds no running phase and exits, or it joins the phase the
+    ///         object runs by then. Joining is safe because every phase on one object shares <typeparamref name="TAction" />
+    ///         and its items are independent.
+    ///     </para>
+    ///     <para>
+    ///         The caller queues only a few helpers. Each helper that starts while items remain queues more, so the
+    ///         wake-up cost spreads over the workers like the replicating tasks of <see cref="Parallel.For(int,int,Action{int})" />.
+    ///         Queued helpers that have not started count against the helper budget. A starved pool therefore
+    ///         receives no new helpers.
+    ///     </para>
     /// </remarks>
     private sealed class Phase<TAction> : IThreadPoolWorkItem
         where TAction : struct, IAction
@@ -107,12 +116,25 @@ internal static class ParallelPhase
         private int _count;
         private int _grain;
         private int _next;
-        private int _references;
         private int _maxHelpers;
-        private int _spawned;
         private Exception? _error;
 
         private int _done;
+
+        /// <summary>
+        ///     1 while a phase runs on this object, otherwise 0. <see cref="Start" /> sets it after all other fields.
+        /// </summary>
+        private int _live;
+
+        /// <summary>
+        ///     The helpers queued on the thread pool that have not started. The count persists across phases.
+        /// </summary>
+        private int _queued;
+
+        /// <summary>
+        ///     The helpers that have started and not yet left <see cref="IThreadPoolWorkItem.Execute" />.
+        /// </summary>
+        private int _active;
 
         /// <summary>
         ///     The number of items that finished, failed, or were abandoned after a failure.
@@ -120,10 +142,9 @@ internal static class ParallelPhase
         internal ref int Done => ref _done;
 
         /// <summary>
-        ///     The first exception an item threw. Valid once <see cref="Done" /> reaches the item count.
+        ///     Takes a pooled phase object, or creates one when the pool is empty.
         /// </summary>
-        internal Exception? Error => Volatile.Read(ref _error);
-
+        /// <returns>A phase object that the caller owns until <see cref="Finish" />.</returns>
         internal static Phase<TAction> Rent()
         {
             int start = Environment.CurrentManagedThreadId;
@@ -146,50 +167,78 @@ internal static class ParallelPhase
             _done = 0;
             _error = null;
             _maxHelpers = helpers;
-            _spawned = 0;
-            _references = 1;
+
+            // Published last, so a helper that sees 1 also sees every field above.
+            Volatile.Write(ref _live, 1);
         }
 
         /// <summary>
         ///     Queues up to <see cref="SpawnFanOut" /> more helpers while the helper budget lasts.
         /// </summary>
         /// <remarks>
-        ///     The caller holds a reference, so the count cannot reach zero while this method adds one.
+        ///     The budget check reads racy counters. A wrong answer changes the number of participants and never the result.
         /// </remarks>
         internal void SpawnHelpers()
         {
             for (int i = 0; i < SpawnFanOut; i++)
             {
-                if (Interlocked.Increment(ref _spawned) > _maxHelpers)
+                int queued = Interlocked.Increment(ref _queued);
+                if (queued + Volatile.Read(ref _active) > _maxHelpers)
+                {
+                    Interlocked.Decrement(ref _queued);
                     return;
+                }
 
-                Interlocked.Increment(ref _references);
                 ThreadPool.UnsafeQueueUserWorkItem(this, preferLocal: false);
             }
         }
 
         void IThreadPoolWorkItem.Execute()
         {
-            if (Volatile.Read(ref _next) < _count)
-                SpawnHelpers();
+            Interlocked.Decrement(ref _queued);
+            Interlocked.Increment(ref _active);
+            if (Volatile.Read(ref _live) == 1)
+            {
+                if (Volatile.Read(ref _next) < _count)
+                    SpawnHelpers();
 
-            Work();
-            Release();
+                Work();
+            }
+
+            Interlocked.Decrement(ref _active);
         }
 
-        internal void Release()
+        /// <summary>
+        ///     Ends the phase, returns the object to the pool, and returns the first item exception.
+        /// </summary>
+        /// <returns>The first exception an item threw, or <see langword="null" />.</returns>
+        /// <remarks>
+        ///     Call it once <see cref="Done" /> reaches the item count. A helper inside the phase has no item left to
+        ///     claim, so it leaves after one failed claim. A preempted helper can still delay the caller by a scheduler slice.
+        ///     The pool drops the object when it is full. Late helpers that still hold it see no running phase and exit.
+        /// </remarks>
+        internal Exception? Finish()
         {
-            if (Interlocked.Decrement(ref _references) != 0)
-                return;
+            // The full fence pairs with the helper's increment of _active followed by its read of _live.
+            // Either the helper sees 0 and leaves, or this method sees the helper in _active and waits for it.
+            Interlocked.Exchange(ref _live, 0);
 
+            var spinner = new SpinWait();
+            while (Volatile.Read(ref _active) != 0)
+                spinner.SpinOnce(-1);
+
+            Exception? error = Volatile.Read(ref _error);
             _action = default;
             _error = null;
+
             int start = Environment.CurrentManagedThreadId;
             for (int i = 0; i < Pool.Length; i++)
             {
                 if (Interlocked.CompareExchange(ref Pool[(start + i) % Pool.Length], this, null) == null)
-                    return;
+                    break;
             }
+
+            return error;
         }
 
         internal void Work()

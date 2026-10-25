@@ -239,7 +239,7 @@ internal sealed class ExplicitAtmosTransportSolver
                     secondTemperature);
             }
 
-            float dx = MathF.Pow(config.VoxelVolume, 1f / 3f);
+            Metre dx = MathF.Pow(config.VoxelVolume, 1f / 3f);
             for (int gasId = 0; gasId < gasCount; gasId++)
             {
                 Mole firstMoles = available[firstOffset + gasId];
@@ -277,8 +277,8 @@ internal sealed class ExplicitAtmosTransportSolver
         Mole sourceMoles,
         Pascal sourcePressure,
         Kelvin sourceTemperature,
-        float referenceDiffusivity,
-        float dx,
+        SquareMetrePerSecond referenceDiffusivity,
+        Metre dx,
         AtmosSolverConfigSnapshot config)
     {
         if (sourceMoles <= 0f || sourcePressure <= 0f || referenceDiffusivity <= 0f)
@@ -286,7 +286,7 @@ internal sealed class ExplicitAtmosTransportSolver
 
         Scalar temperatureRatio = sourceTemperature / config.GlobalTemperature;
         Scalar pressureRatio = config.SaturationReferencePressure / sourcePressure;
-        float environmentFactor = MathF.Pow(temperatureRatio, 1.5f) * pressureRatio * dx;
+        PerSquareMetre environmentFactor = MathF.Pow(temperatureRatio, 1.5f) * pressureRatio / (dx * dx);
         Mole request = referenceDiffusivity * environmentFactor * sourceMoles * AtmosSolverConstants.FixedTimeStep;
 
         // Match the Cartesian solver's per-edge stability cap.
