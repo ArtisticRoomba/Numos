@@ -642,13 +642,7 @@ public sealed class SimulationSliceDrawData
     /// </example>
     public static (float U, float V) ProjectToPlane(SliceAxis axis, float x, float y, float z)
     {
-        return axis switch
-        {
-            SliceAxis.X => (z, y),
-            SliceAxis.Y => (x, z),
-            SliceAxis.Z => (x, y),
-            _ => throw new ArgumentOutOfRangeException(nameof(axis), axis, "Unknown slice axis.")
-        };
+        return Project(axis, x, y, z);
     }
 
     /// <summary>
@@ -778,7 +772,11 @@ public sealed class SimulationSliceDrawData
         return (u - OriginU, v - OriginV, width, height);
     }
 
-    internal static (int U, int V) Project(SliceAxis axis, int x, int y, int z)
+    /// <summary>
+    ///     Picks the two components that lie in the slice plane, in cell order.
+    /// </summary>
+    /// <typeparam name="T">Component type, such as a voxel coordinate or a velocity.</typeparam>
+    internal static (T U, T V) Project<T>(SliceAxis axis, T x, T y, T z)
     {
         return axis switch
         {
