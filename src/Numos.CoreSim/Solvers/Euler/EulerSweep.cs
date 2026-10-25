@@ -27,22 +27,19 @@ internal enum EulerUpwindSide : byte
 }
 
 /// <summary>
-///     Extensive flux through one voxel face for one substep: per-second rates, positive from the lower-coordinate
-///     cell to the higher one, already multiplied by the face area.
+///     The upwind cell of one voxel face for one substep.
 /// </summary>
 /// <remarks>
-///     Species are not stored per face. The face keeps the upwind cell and <c>A·Mass/m_upwind</c>, and the cell
-///     update multiplies that by each species' moles in the upwind cell of the <em>read</em> buffer. Every species
-///     therefore moves in the proportion it has upwind, and <c>Σ_k M_k·G_k = A·G_mass</c> holds to rounding, which
-///     is the Larrouturou-consistent transport that keeps mass and moles from drifting apart. The upwind cell of a
-///     chunk-boundary face can belong to the neighbouring chunk, so the face names the side as well as the index.
-///     The struct holds no references, so a scratch array of faces costs the garbage collector nothing to scan.
+///     Species are not stored per face. The sweep keeps the species rate <c>A·Mass/m_upwind</c> of each face in a
+///     scratch array, and the cell update multiplies it by each species' moles in the upwind cell of the
+///     <em>read</em> buffer. Every species therefore moves in the proportion it has upwind, and
+///     <c>Σ_k M_k·G_k = A·G_mass</c> holds to rounding, which is the Larrouturou-consistent transport that keeps mass
+///     and moles from drifting apart. The upwind cell of a chunk-boundary face can belong to the neighbouring chunk,
+///     so the face names the side as well as the index. The struct holds no references, so a scratch array of faces
+///     costs the garbage collector nothing to scan.
 /// </remarks>
-internal struct EulerFaceRate
+internal struct EulerFaceUpwind
 {
-    public KilogramPerSecond Mass;
-    public PerSecond SpeciesRate;
-
     /// <summary>
     ///     Which read buffer holds the upwind cell.
     /// </summary>
@@ -52,10 +49,6 @@ internal struct EulerFaceRate
     ///     Voxel index of the upwind cell in the buffer <see cref="UpwindSide" /> names.
     /// </summary>
     public int UpwindIndex;
-    public Newton NormalMomentum;
-    public Newton Tangential1Momentum;
-    public Newton Tangential2Momentum;
-    public Watt Energy;
 }
 
 /// <summary>
@@ -216,11 +209,7 @@ internal static class EulerSweep
         PerSecond[] faceRate = scratch.FaceSpeciesRate;
         int[] upperMask = scratch.FaceUpperMask;
         int[] fixupFaces = scratch.FixupFaces;
-        EulerFaceRate[] faces = scratch.Faces;
-        Newton[] faceNormal = scratch.FaceNormal;
-        Newton[] faceTangential1 = scratch.FaceTangential1;
-        Newton[] faceTangential2 = scratch.FaceTangential2;
-        Watt[] faceEnergy = scratch.FaceEnergy;
+        EulerFaceUpwind[] faceUpwind = scratch.FaceUpwind;
         bool[] airMap = workspace.AirMap;
         bool[] rowAllAir = workspace.RowAllAir;
 
@@ -283,14 +272,7 @@ internal static class EulerSweep
                     workspace, read, axis,
                     lowerRow < 0 ? -1 : lowerRow + line * lineStride,
                     upperRow < 0 ? -1 : upperRow + line * lineStride,
-                    faceArea, settings, out faces[face]);
-
-                ref readonly EulerFaceRate solved = ref faces[face];
-                faceRate[face] = solved.SpeciesRate;
-                faceNormal[face] = solved.NormalMomentum;
-                faceTangential1[face] = solved.Tangential1Momentum;
-                faceTangential2[face] = solved.Tangential2Momentum;
-                faceEnergy[face] = solved.Energy;
+                    faceArea, settings, scratch, face);
             }
         }
 
@@ -331,14 +313,14 @@ internal static class EulerSweep
             int firstLower = baseIndex + run * runVoxelStride;
             for (int i = 0; i < innerRunLength; i++)
             {
-                ref readonly EulerFaceRate rate = ref faces[firstFace + i];
+                ref readonly EulerFaceUpwind upwind = ref faceUpwind[firstFace + i];
                 int lower = firstLower + i;
-                bool own = rate.UpwindSide == EulerUpwindSide.Self;
-                if (own && rate.UpwindIndex == lower)
+                bool own = upwind.UpwindSide == EulerUpwindSide.Self;
+                if (own && upwind.UpwindIndex == lower)
                 {
                     upperMask[firstFace + i] = 0;
                 }
-                else if (own && rate.UpwindIndex == lower + marchStride)
+                else if (own && upwind.UpwindIndex == lower + marchStride)
                 {
                     upperMask[firstFace + i] = -1;
                 }
@@ -398,7 +380,7 @@ internal static class EulerSweep
             for (int k = 0; k < fixupCount; k++)
             {
                 int face = fixupFaces[k];
-                faceFlux[face] = faceRate[face] * UpwindMoles(in faces[face], source, lowerRows, upperRows);
+                faceFlux[face] = faceRate[face] * UpwindMoles(in faceUpwind[face], source, lowerRows, upperRows);
             }
         }
 
@@ -491,16 +473,16 @@ internal static class EulerSweep
     ///     Moles of one gas in a face's upwind cell, from the row of the buffer the face names.
     /// </summary>
     private static Mole UpwindMoles(
-        in EulerFaceRate rate, Mole[] selfRow, Mole[]? lowerRow, Mole[]? upperRow)
+        in EulerFaceUpwind upwind, Mole[] selfRow, Mole[]? lowerRow, Mole[]? upperRow)
     {
-        Mole[]? row = rate.UpwindSide switch
+        Mole[]? row = upwind.UpwindSide switch
         {
             EulerUpwindSide.Self => selfRow,
             EulerUpwindSide.LowerNeighbor => lowerRow,
             _ => upperRow
         };
 
-        return row == null ? 0f : row[rate.UpwindIndex];
+        return row == null ? 0f : row[upwind.UpwindIndex];
     }
 
     /// <summary>
@@ -513,7 +495,8 @@ internal static class EulerSweep
     /// <param name="upperIndex">The upper cell, or -1 outside the chunk.</param>
     /// <param name="faceArea">Area of one voxel face.</param>
     /// <param name="settings">The stage's settings.</param>
-    /// <param name="rate">The extensive flux through the face.</param>
+    /// <param name="scratch">The worker's scratch, which receives the face's rates and upwind cell.</param>
+    /// <param name="face">Index of the face in the scratch face arrays.</param>
     /// <remarks>
     ///     <see cref="EulerFaceTopology.Build" /> opens every air-to-air face inside a chunk, so two air cells
     ///     share one flux. Supporting blocked faces would need a wall pressure per side instead, which is what the
@@ -522,7 +505,7 @@ internal static class EulerSweep
     private static void SolveFace(
         EulerChunkWorkspace workspace, EulerChunkState read, int axis,
         int lowerIndex, int upperIndex, SquareMetre faceArea, EulerFlowConfig settings,
-        out EulerFaceRate rate)
+        BundleScratch scratch, int face)
     {
         bool lowerAir = lowerIndex >= 0 && workspace.AirMap[lowerIndex];
         bool upperAir = upperIndex >= 0 && workspace.AirMap[upperIndex];
@@ -536,19 +519,19 @@ internal static class EulerSweep
             EulerFaceState left = EulerFaceState.FromCell(read, lowerIndex, axis);
             EulerFaceState right = EulerFaceState.FromCell(read, upperIndex, axis);
             HllcFlux.Solve(in left, in right, settings.AllMachCorrection, out EulerFaceFlux flux);
-            Store(in flux, EulerUpwindSide.Self, flux.UpwindIsLeft ? lowerIndex : upperIndex, faceArea, out rate);
+            Store(in flux, EulerUpwindSide.Self, flux.UpwindIsLeft ? lowerIndex : upperIndex, faceArea, scratch, face);
         }
         else if (lowerAir)
         {
-            SolveOneSided(workspace, read, axis, lowerIndex, 2 * axis + 1, faceArea, settings, out rate);
+            SolveOneSided(workspace, read, axis, lowerIndex, 2 * axis + 1, faceArea, settings, scratch, face);
         }
         else if (upperAir)
         {
-            SolveOneSided(workspace, read, axis, upperIndex, 2 * axis, faceArea, settings, out rate);
+            SolveOneSided(workspace, read, axis, upperIndex, 2 * axis, faceArea, settings, scratch, face);
         }
         else
         {
-            rate = default;
+            StoreNone(scratch, face);
         }
     }
 
@@ -563,7 +546,8 @@ internal static class EulerSweep
     /// <param name="direction">The direction slot of the face, seen from the cell.</param>
     /// <param name="faceArea">Area of one voxel face.</param>
     /// <param name="settings">The stage's settings.</param>
-    /// <param name="rate">The extensive flux through the face.</param>
+    /// <param name="scratch">The worker's scratch, which receives the face's rates and upwind cell.</param>
+    /// <param name="face">Index of the face in the scratch face arrays.</param>
     /// <remarks>
     ///     <para>
     ///         An open bit on a face that reaches here means the face leaves the chunk into an air voxel of a
@@ -584,7 +568,7 @@ internal static class EulerSweep
     private static void SolveOneSided(
         EulerChunkWorkspace workspace, EulerChunkState read, int axis,
         int cellIndex, int direction, SquareMetre faceArea, EulerFlowConfig settings,
-        out EulerFaceRate rate)
+        BundleScratch scratch, int face)
     {
         bool cellIsLeft = (direction & 1) == 1;
         EulerFaceState cell = EulerFaceState.FromCell(read, cellIndex, axis);
@@ -603,10 +587,10 @@ internal static class EulerSweep
                     HllcFlux.Solve(in other, in cell, settings.AllMachCorrection, out flux);
 
                 if (flux.UpwindIsLeft == cellIsLeft)
-                    Store(in flux, EulerUpwindSide.Self, cellIndex, faceArea, out rate);
+                    Store(in flux, EulerUpwindSide.Self, cellIndex, faceArea, scratch, face);
                 else
                     Store(in flux, (direction & 1) == 1 ? EulerUpwindSide.UpperNeighbor : EulerUpwindSide.LowerNeighbor,
-                        neighborIndex, faceArea, out rate);
+                        neighborIndex, faceArea, scratch, face);
 
                 return;
             }
@@ -631,7 +615,7 @@ internal static class EulerSweep
             HllcFlux.SolveWall(in cell, cellIsLeft, out flux);
         }
 
-        Store(in flux, EulerUpwindSide.Self, cellIndex, faceArea, out rate);
+        Store(in flux, EulerUpwindSide.Self, cellIndex, faceArea, scratch, face);
     }
 
     /// <summary>
@@ -698,16 +682,16 @@ internal static class EulerSweep
 
         // The species pass finds the upwind cell of an edge face through its side and index.
         int[] upperMask = scratch.FaceUpperMask;
-        EulerFaceRate[] faces = scratch.Faces;
+        EulerFaceUpwind[] faceUpwind = scratch.FaceUpwind;
         EulerUpwindSide neighborSide = lowerBoundary ? EulerUpwindSide.LowerNeighbor : EulerUpwindSide.UpperNeighbor;
         for (int i = 0; i < count; i++)
         {
             // The mask is set where the upwind cell is the higher-coordinate one. That is this chunk's cell on the
             // lower boundary and the neighbour's cell on the upper one.
             bool upwindIsSelf = (upperMask[firstFace + i] != 0) == lowerBoundary;
-            ref EulerFaceRate face = ref faces[firstFace + i];
-            face.UpwindSide = upwindIsSelf ? EulerUpwindSide.Self : neighborSide;
-            face.UpwindIndex = upwindIsSelf ? selfFirst + i : neighborFirst + i;
+            ref EulerFaceUpwind upwind = ref faceUpwind[firstFace + i];
+            upwind.UpwindSide = upwindIsSelf ? EulerUpwindSide.Self : neighborSide;
+            upwind.UpwindIndex = upwindIsSelf ? selfFirst + i : neighborFirst + i;
         }
 
         return true;
@@ -736,7 +720,7 @@ internal static class EulerSweep
     ///         <paramref name="count" /> read the next cells in memory or the array pad. Their results are dropped.
     ///     </para>
     ///     <para>
-    ///         The run writes no <see cref="EulerFaceRate" />. Its upwind cell is always the lower or the upper cell,
+    ///         The run writes no <see cref="EulerFaceUpwind" />. Its upwind cell is always the lower or the upper cell,
     ///         so the species pass needs only the upper-cell mask. A vector that covers lanes past
     ///         <paramref name="count" /> goes through a spill buffer, so no lane writes a face of another run.
     ///     </para>
@@ -855,16 +839,29 @@ internal static class EulerSweep
 
     private static void Store(
         in EulerFaceFlux flux, EulerUpwindSide upwindSide, int upwindIndex, SquareMetre faceArea,
-        out EulerFaceRate rate)
+        BundleScratch scratch, int face)
     {
-        rate.Mass = flux.Mass * faceArea;
-        rate.SpeciesRate = flux.SpeciesWeight * faceArea;
-        rate.UpwindSide = upwindSide;
-        rate.UpwindIndex = upwindIndex;
-        rate.NormalMomentum = flux.NormalMomentum * faceArea;
-        rate.Tangential1Momentum = flux.Tangential1Momentum * faceArea;
-        rate.Tangential2Momentum = flux.Tangential2Momentum * faceArea;
-        rate.Energy = flux.Energy * faceArea;
+        scratch.FaceSpeciesRate[face] = flux.SpeciesWeight * faceArea;
+        scratch.FaceNormal[face] = flux.NormalMomentum * faceArea;
+        scratch.FaceTangential1[face] = flux.Tangential1Momentum * faceArea;
+        scratch.FaceTangential2[face] = flux.Tangential2Momentum * faceArea;
+        scratch.FaceEnergy[face] = flux.Energy * faceArea;
+        ref EulerFaceUpwind upwind = ref scratch.FaceUpwind[face];
+        upwind.UpwindSide = upwindSide;
+        upwind.UpwindIndex = upwindIndex;
+    }
+
+    /// <summary>
+    ///     Stores a face between two cells that are not air: no flux and the default upwind cell.
+    /// </summary>
+    private static void StoreNone(BundleScratch scratch, int face)
+    {
+        scratch.FaceSpeciesRate[face] = 0f;
+        scratch.FaceNormal[face] = 0f;
+        scratch.FaceTangential1[face] = 0f;
+        scratch.FaceTangential2[face] = 0f;
+        scratch.FaceEnergy[face] = 0f;
+        scratch.FaceUpwind[face] = default;
     }
 
     /// <summary>
@@ -1114,15 +1111,20 @@ internal static class EulerSweep
             return flux;
         }
 
-        public PerSecond[] FaceSpeciesRate = [];
         public int[] FaceUpperMask = [];
         public int[] FixupFaces = [];
-        public EulerFaceRate[] Faces = [];
 
         /// <summary>
-        ///     Momentum and energy rates of every face, indexed like <see cref="Faces" />. The cell update reads these.
-        ///     The scalar solver copies its result in and the vector kernel writes them directly.
+        ///     The upwind cell of every face the scalar solver handled.
         /// </summary>
+        public EulerFaceUpwind[] FaceUpwind = [];
+
+        /// <summary>
+        ///     Species, momentum, and energy rates of every face, indexed like <see cref="FaceUpwind" />. They are
+        ///     per-second rates, positive from the lower-coordinate cell to the higher one, already multiplied by the
+        ///     face area. The cell update reads these. Both the scalar solver and the vector kernel write them directly.
+        /// </summary>
+        public PerSecond[] FaceSpeciesRate = [];
         public Newton[] FaceNormal = [];
         public Newton[] FaceTangential1 = [];
         public Newton[] FaceTangential2 = [];
@@ -1139,9 +1141,9 @@ internal static class EulerSweep
 
         public void EnsureCapacity(int faceCount, int cellCount, int runCount)
         {
-            if (Faces.Length < faceCount)
+            if (FaceUpwind.Length < faceCount)
             {
-                Faces = new EulerFaceRate[faceCount];
+                FaceUpwind = new EulerFaceUpwind[faceCount];
                 FaceNormal = new Newton[faceCount];
                 FaceTangential1 = new Newton[faceCount];
                 FaceTangential2 = new Newton[faceCount];
