@@ -36,33 +36,19 @@ internal static partial class AtmosReplayCodec
     ///     Writes a configuration: its schema fields (scalars and the gas registry), then its solver configurations.
     /// </summary>
     /// <remarks>
-    ///     The schema fields are one length-prefixed <see cref="StateBinarySink" /> payload of the snapshot's
-    ///     normalized <see cref="AtmosConfig" />. Solver configurations follow as a count and, for each one in the
-    ///     snapshot's ordinal key order, its key and a length-prefixed payload. <see cref="AtmosConfigSnapshot.WriteHash" />
-    ///     hashes the same sequence without the lengths.
+    ///     The bytes are one <see cref="StateBinarySink" /> walk of <see cref="AtmosConfigSnapshotCodec" />. The outer
+    ///     object has no length of its own, so the schema fields and each solver configuration are length-prefixed
+    ///     payloads inside it. Solver configurations follow the fields as a count and, for each one in the snapshot's
+    ///     ordinal key order, its key and payload. A state hash walks the same sequence without the lengths.
     /// </remarks>
     /// <exception cref="NotSupportedException">A solver configuration has no <see cref="NumosSerializeAttribute" /> members.</exception>
     internal static void WriteConfig(BinaryWriter writer, AtmosConfigSnapshot config)
     {
-        var fields = new StateBinarySink();
-        NumosState.Write(ref fields, config.Fields);
-        writer.Write(fields.WrittenSpan.Length);
-        writer.Write(fields.WrittenSpan);
-        writer.Write(config.SolverConfigurations.Count);
-        foreach (var configuration in config.SolverConfigurations)
-        {
-            if (configuration is not INumosState state)
-            {
-                throw new NotSupportedException(
-                    $"Solver configuration '{configuration.Key}' ({configuration.GetType()}) has no [NumosSerialize] members, so it can't be saved.");
-            }
-
-            var sink = new StateBinarySink();
-            state.WriteState(ref sink);
-            WriteString(writer, configuration.Key);
-            writer.Write(sink.WrittenSpan.Length);
-            writer.Write(sink.WrittenSpan);
-        }
+        var sink = new StateBinarySink();
+        sink.BeginObject();
+        AtmosConfigSnapshotCodec.Write(ref sink, config);
+        sink.EndObject();
+        writer.Write(sink.WrittenSpan);
     }
 
     /// <summary>
@@ -87,32 +73,31 @@ internal static partial class AtmosReplayCodec
         for (int index = 0; index < configurationCount; index++)
         {
             string key = ReadString(reader, maxStringBytes);
-            if (previousKey != null && string.CompareOrdinal(previousKey, key) >= 0)
-                throw new InvalidDataException("Solver configurations are not in ascending ordinal key order.");
-
+            RequireAscendingKey(previousKey, key, "Solver configurations");
             previousKey = key;
             byte[] payload = ReadPayload(reader, ReadCount(reader, int.MaxValue, "solver configuration byte"));
             var state = new StateReader(payload, maxStringBytes);
-            if (!types.TryRead(key, ref state, config.GasRegistry, out var configuration))
-            {
-                throw new NotSupportedException(
-                    $"The file contains solver configuration '{key}', but no type is registered for that key. " +
-                    "Register it in NumosReplayReadOptions.SolverConfigurations before loading.");
-            }
-
+            var configuration = types.Read(key, ref state, config.GasRegistry);
             if (!state.IsAtEnd)
                 throw new InvalidDataException($"Solver configuration '{key}' has trailing data.");
-
-            if (configuration!.Key != key)
-            {
-                throw new InvalidDataException(
-                    $"Solver configuration saved as '{key}' loaded as {configuration.GetType()} with key '{configuration.Key}'.");
-            }
 
             config.SolverConfigurations.Add(configuration);
         }
 
         return config.CreateSnapshot();
+    }
+
+    /// <summary>
+    ///     Throws unless <paramref name="key" /> sorts after <paramref name="previousKey" /> in ordinal order.
+    /// </summary>
+    /// <param name="previousKey">The key before this one, or <see langword="null" /> for the first.</param>
+    /// <param name="key">The key just read.</param>
+    /// <param name="collection">The plural name of the keyed section, for the message.</param>
+    /// <exception cref="InvalidDataException">The keys are not strictly ascending.</exception>
+    internal static void RequireAscendingKey(string? previousKey, string key, string collection)
+    {
+        if (previousKey != null && string.CompareOrdinal(previousKey, key) >= 0)
+            throw new InvalidDataException($"{collection} are not in ascending ordinal key order.");
     }
 
     /// <summary>

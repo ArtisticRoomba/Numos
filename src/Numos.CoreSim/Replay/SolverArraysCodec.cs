@@ -77,9 +77,7 @@ internal readonly struct SolverArraysCodec : IStateCodec<IReadOnlyList<AtmosSolv
         for (int index = 0; index < count; index++)
         {
             string key = reader.ReadString();
-            if (previousKey != null && string.CompareOrdinal(previousKey, key) >= 0)
-                throw new InvalidDataException("Chunk field arrays are not in ascending ordinal key order.");
-
+            AtmosReplayCodec.RequireAscendingKey(previousKey, key, "Chunk field arrays");
             previousKey = key;
             string typeName = reader.ReadString();
             int size = reader.ReadInt32();

@@ -251,9 +251,9 @@ public sealed class CheckpointStateFieldTests
         var changed = new AtmosConfig { ThermalConductance = 0.2f }.CreateSnapshot();
 
         var baselineHash = new StateHashSink();
-        baseline.WriteHash(ref baselineHash);
+        AtmosConfigSnapshotCodec.Write(ref baselineHash, baseline);
         var changedHash = new StateHashSink();
-        changed.WriteHash(ref changedHash);
+        AtmosConfigSnapshotCodec.Write(ref changedHash, changed);
 
         Assert.That(baselineHash.Value, Is.Not.EqualTo(changedHash.Value));
     }
@@ -265,9 +265,9 @@ public sealed class CheckpointStateFieldTests
         var changed = new AtmosConfig { ReferenceMolarMass = 0.032f }.CreateSnapshot();
 
         var baselineHash = new StateHashSink();
-        baseline.WriteHash(ref baselineHash);
+        AtmosConfigSnapshotCodec.Write(ref baselineHash, baseline);
         var changedHash = new StateHashSink();
-        changed.WriteHash(ref changedHash);
+        AtmosConfigSnapshotCodec.Write(ref changedHash, changed);
 
         Assert.That(baselineHash.Value, Is.Not.EqualTo(changedHash.Value));
     }

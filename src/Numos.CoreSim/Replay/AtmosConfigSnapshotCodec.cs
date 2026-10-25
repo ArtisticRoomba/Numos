@@ -79,24 +79,9 @@ internal readonly struct AtmosConfigSnapshotCodec : IStateCodec<AtmosConfigSnaps
         for (int index = 0; index < count; index++)
         {
             string key = reader.ReadString();
-            if (previousKey != null && string.CompareOrdinal(previousKey, key) >= 0)
-                throw new InvalidDataException("Solver configurations are not in ascending ordinal key order.");
-
+            AtmosReplayCodec.RequireAscendingKey(previousKey, key, "Solver configurations");
             previousKey = key;
-            if (!types.TryRead(key, ref reader, config.GasRegistry, out var configuration))
-            {
-                throw new NotSupportedException(
-                    $"The file contains solver configuration '{key}', but no type is registered for that key. " +
-                    "Register it in NumosReplayReadOptions.SolverConfigurations before loading.");
-            }
-
-            if (configuration!.Key != key)
-            {
-                throw new InvalidDataException(
-                    $"Solver configuration saved as '{key}' loaded as {configuration.GetType()} with key '{configuration.Key}'.");
-            }
-
-            config.SolverConfigurations.Add(configuration);
+            config.SolverConfigurations.Add(types.Read(key, ref reader, config.GasRegistry));
         }
 
         return config.CreateSnapshot();

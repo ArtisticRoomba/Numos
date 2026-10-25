@@ -295,19 +295,6 @@ public sealed class AtmosConfigSnapshot : IAtmosConfig
         return Interlocked.CompareExchange(ref _reactionTables, tables, null) ?? tables;
     }
 
-    /// <summary>
-    ///     Writes this configuration into a state hash: the schema fields, then the solver configurations.
-    /// </summary>
-    /// <remarks>
-    ///     The same walk <see cref="AtmosConfigSnapshotCodec" /> saves, minus its length prefixes: the schema fields,
-    ///     then the count and each configuration's key and generated walk. A hand-written configuration can't be
-    ///     saved, so it contributes its own <see cref="IAtmosSolverConfiguration.ComputeStateHash" /> instead.
-    /// </remarks>
-    internal void WriteHash(ref StateHashSink sink)
-    {
-        AtmosConfigSnapshotCodec.Write(ref sink, this);
-    }
-
     // The schema fields compare bitwise on floats, matching the hash, so 0f and -0f differ.
     internal bool SemanticallyEquals(AtmosConfigSnapshot other)
     {

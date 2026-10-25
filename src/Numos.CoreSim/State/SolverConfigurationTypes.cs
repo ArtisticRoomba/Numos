@@ -115,7 +115,17 @@ public sealed class SolverConfigurationTypes
             return Defaults.TryGetValue(key, out Entry? entry) && entry.Conflict is null;
     }
 
-    internal bool TryRead(string key, ref StateReader reader, IGasRegistry gases, out IAtmosSolverConfiguration? configuration)
+    /// <summary>
+    ///     Reads the configuration saved under <paramref name="key" /> and checks that it reports the same key.
+    /// </summary>
+    /// <param name="key">The key the data was saved under.</param>
+    /// <param name="reader">The reader, positioned at the configuration's state.</param>
+    /// <param name="gases">Resolves gas references in the configuration.</param>
+    /// <returns>The configuration.</returns>
+    /// <exception cref="NotSupportedException">No type is registered for <paramref name="key" />.</exception>
+    /// <exception cref="InvalidDataException">The data is malformed, or the loaded type has a different key.</exception>
+    /// <exception cref="InvalidOperationException">Two types claim <paramref name="key" /> and none is chosen.</exception>
+    internal IAtmosSolverConfiguration Read(string key, ref StateReader reader, IGasRegistry gases)
     {
         if (!_entries.TryGetValue(key, out Entry? entry))
         {
@@ -125,8 +135,9 @@ public sealed class SolverConfigurationTypes
 
         if (entry is null)
         {
-            configuration = null;
-            return false;
+            throw new NotSupportedException(
+                $"The file contains solver configuration '{key}', but no type is registered for that key. " +
+                "Register it in NumosReplayReadOptions.SolverConfigurations before loading.");
         }
 
         if (entry.Conflict is { } conflict)
@@ -136,8 +147,14 @@ public sealed class SolverConfigurationTypes
                 "to load with NumosReplayReadOptions.SolverConfigurations.Register<T>().");
         }
 
-        configuration = entry.Read(ref reader, gases);
-        return true;
+        IAtmosSolverConfiguration configuration = entry.Read(ref reader, gases);
+        if (configuration.Key != key)
+        {
+            throw new InvalidDataException(
+                $"Solver configuration saved as '{key}' loaded as {configuration.GetType()} with key '{configuration.Key}'.");
+        }
+
+        return configuration;
     }
 
     private static Entry CreateEntry<T>() where T : IAtmosSolverConfiguration, INumosState<T>

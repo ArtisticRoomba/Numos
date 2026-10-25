@@ -76,7 +76,7 @@ public partial class AtmosConfig : IAtmosConfig
     ///     or supply an <see cref="IAtmosSolverConfiguration" /> for a custom solver without changing Numos.
     /// </remarks>
     // Saved and hashed after the schema fields, as keyed sections: entries are polymorphic, so the codec needs the key
-    // to find each one's type (see AtmosReplayCodec.WriteConfig and AtmosConfigSnapshot.WriteHash).
+    // to find each one's type (see AtmosConfigSnapshotCodec).
     [NumosIgnore]
     public List<IAtmosSolverConfiguration> SolverConfigurations { get; set; } = [];
 

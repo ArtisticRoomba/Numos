@@ -1,4 +1,5 @@
 using System.Reflection;
+using Numos.CoreSim.Replay;
 using Numos.CoreSim.State;
 using Numos.CoreSim.State.Advanced;
 
@@ -209,7 +210,7 @@ public sealed class ConfigStateFieldTests
     private static ulong Hash(AtmosConfigSnapshot config)
     {
         var sink = new StateHashSink();
-        config.WriteHash(ref sink);
+        AtmosConfigSnapshotCodec.Write(ref sink, config);
         return sink.Value;
     }
 }
