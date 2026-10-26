@@ -17,6 +17,14 @@ public partial class SimulationViewer
     private const string RemoveChunkTooltip =
         "Remove the chunk, its gas, and any portal or dock links that touch it.";
     private const string ClassificationFormatHelp = "0 unassigned, -2 solid, -1 void, positive values are room IDs.";
+    private const string IgnitionTooltip =
+        "Ignites a very small volume at a high temperature for one tick, even if the gas around it is below its " +
+        "usual ignition temperature. The flame then grows or dies by the gas's flame speed. " +
+        "Takes effect on the next tick, so press Step or Run afterwards.";
+    private const string IgnitionModeTooltip =
+        "While on, clicking a different cell in the viewport ignites it. Nothing is ignited when this is turned " +
+        "on or off, and clicking the cell that is already selected does nothing; select another cell or " +
+        "deselect first.";
     private readonly Dictionary<string, string> _configFieldErrors = [];
 
     private readonly Dictionary<string, float> _configFloatDrafts = [];
@@ -30,6 +38,15 @@ public partial class SimulationViewer
     private bool _createProjectModalOpen;
     private FeedbackMessage? _gasRegistryFeedback;
     private bool _includeDefaultGasesDraft = true;
+
+    private bool _igniteOnCellClick;
+    private float _ignitionTemperature = 2000f;
+    private float _ignitionVolume = 1e-3f;
+
+    // The selection the ignition controls last saw, so only a change of selection counts as a click, and the
+    // frame they were last drawn on, so a selection that changed while they were hidden doesn't count either.
+    private (Int3 Chunk, int X, int Y, int Z)? _lastIgnitionSelection;
+    private int _lastIgnitionControlsFrame = -1;
 
     private Int3? _injectionChunkPosition;
     private FeedbackMessage? _injectionFeedback;
@@ -969,10 +986,92 @@ public partial class SimulationViewer
         ImGui.EndDisabled();
         ImGui.EndDisabled();
 
+        inputChanged |= RenderProjectIgnitionControls(inspecting);
+
         if (inputChanged)
             _injectionFeedback = null;
 
         DrawFeedback(_injectionFeedback);
+    }
+
+    /// <summary>
+    ///     Draws the ignition source controls under the gas injection ones. Ignition mode is a toggle: while it is
+    ///     on, clicking a cell in the viewport ignites that cell for one tick. Nothing is ignited by the controls
+    ///     themselves, so there is no default voxel that can be hit by accident.
+    /// </summary>
+    /// <returns><see langword="true" /> when one of the ignition inputs changed.</returns>
+    private bool RenderProjectIgnitionControls(bool inspecting)
+    {
+        bool inputChanged = false;
+        ImGui.SeparatorText("Ignition source");
+
+        ImGui.BeginDisabled(inspecting);
+        ImGui.SetNextItemWidth(NumericInputWidth);
+        inputChanged |= ImGui.InputFloat("Temperature (K)##ignite", ref _ignitionTemperature);
+        ImGui.SetNextItemWidth(NumericInputWidth);
+        inputChanged |= ImGui.InputFloat("Volume (m³)##ignite", ref _ignitionVolume, 0f, 0f, "%g");
+        ImGui.EndDisabled();
+        ImGuiExtensions.QuestionTooltip(IgnitionTooltip);
+
+        // The cell the user has selected in the viewport, if it can be resolved to a chunk and voxel.
+        (Int3 Chunk, int X, int Y, int Z)? selection = null;
+        if (_selectedCell.HasValue &&
+            _drawData != null &&
+            _drawData.Chunks.TryGetValue(_selectedCell.Value.Chunk.Position, out var selectedChunk) &&
+            selectedChunk.Identity == _selectedCell.Value.Chunk)
+        {
+            var coordinates = selectedChunk.GetCoordinates(_selectedCell.Value.LocalIndex);
+            selection = (selectedChunk.ChunkPosition, coordinates.X, coordinates.Y, coordinates.Z);
+        }
+
+        int frame = ImGui.GetFrameCount();
+        bool drawnLastFrame = _lastIgnitionControlsFrame == frame - 1;
+        _lastIgnitionControlsFrame = frame;
+
+        ImGui.BeginDisabled(inspecting);
+        bool modeToggled = ImGui.Checkbox("Ignition mode##ignite", ref _igniteOnCellClick);
+        ImGui.EndDisabled();
+        ImGuiExtensions.QuestionTooltip(IgnitionModeTooltip);
+
+        // Only a change of selection while the controls were visible on the previous frame is a click.
+        // Turning the mode on, the first draw, and a hidden panel only move the baseline, so none of them can
+        // ignite whatever happens to be selected (or the first voxel of the first chunk).
+        bool clicked =
+            _igniteOnCellClick &&
+            !modeToggled &&
+            drawnLastFrame &&
+            !inspecting &&
+            selection.HasValue &&
+            !Nullable.Equals(selection, _lastIgnitionSelection);
+
+        _lastIgnitionSelection = selection;
+        if (clicked)
+        {
+            var target = selection!.Value;
+            IgniteVoxelFromInputs(target.Chunk, target.X, target.Y, target.Z);
+        }
+
+        if (_igniteOnCellClick)
+            ImGui.TextColored(ViewerTheme.Caution, "Ignition mode on: click a cell to ignite it.");
+
+        return inputChanged;
+    }
+
+    private void IgniteVoxelFromInputs(Int3 chunkPosition, int x, int y, int z)
+    {
+        if (!(_ignitionTemperature > 0f) || !(_ignitionVolume > 0f))
+        {
+            _injectionFeedback = Report("Ignition temperature and volume must be greater than zero.", true);
+            return;
+        }
+
+        IgniteProjectSource(
+            new AtmosChunkHandle(chunkPosition),
+            x,
+            y,
+            z,
+            _ignitionTemperature,
+            _ignitionVolume);
     }
 
     private void ClearConfigurationDrafts()

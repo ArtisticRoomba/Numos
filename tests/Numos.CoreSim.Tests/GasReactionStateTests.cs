@@ -280,6 +280,7 @@ public sealed class GasReactionStateTests
             float value => value + 1.5f,
             bool value => !value,
             float[] values => values.Select(static value => value + 1f).ToArray(),
+            bool[] flags => flags.Select(static flag => !flag).ToArray(),
             GasProperties gas => gas with { Name = gas.Name + "-changed" },
             FrozenDictionary<GasProperties, float> amounts =>
                 amounts.ToFrozenDictionary(static entry => entry.Key, static entry => entry.Value + 1f),

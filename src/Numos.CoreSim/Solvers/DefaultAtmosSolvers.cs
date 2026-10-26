@@ -1,5 +1,6 @@
 using Numos.CoreSim.EulerFlow;
 using Numos.CoreSim.Solvers.Euler;
+using Numos.Maths;
 
 namespace Numos.CoreSim.Solvers;
 
@@ -71,6 +72,12 @@ internal sealed class DefaultAtmosSolvers : IDisposable
     {
         _reactions.Solve(context);
     }
+
+    internal void SetIgnitionSource(AtmosChunk chunk, ushort voxelIndex, Kelvin temperature, CubicMetre volume)
+    {
+        _reactions.SetIgnitionSource(chunk, voxelIndex, temperature, volume);
+    }
+
 
     private static int GetBoundaryVoxelCount(int width, int height, int depth)
     {

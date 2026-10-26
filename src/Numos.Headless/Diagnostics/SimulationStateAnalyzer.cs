@@ -210,6 +210,7 @@ public static class SimulationStateAnalyzer
             config.VoxelVolume,
             config.SaturationReferencePressure,
             config.DefaultDiffusionCoefficient,
+            config.DefaultThermalConductivity,
             config.SpaceTemperature,
             config.BulkFlowCoefficient,
             config.VacuumThreshold,
@@ -221,6 +222,10 @@ public static class SimulationStateAnalyzer
             config.AccumulatorWakeThreshold,
             config.AccumulatorMaxAliveTicks,
             config.ReferenceMolarMass,
+            config.FlameSpeedScale,
+            config.MinimumFlameSpeed,
+            config.IgnitionTransferEnabled,
+            config.TransferSeedFraction,
             gases,
             CreateEulerFlowReport(config));
     }
@@ -261,7 +266,7 @@ public static class SimulationStateAnalyzer
             flow.NegativeInternalEnergyCount,
             flow.NegativeMolesCount,
             flow.NonFiniteCellCount);
-    }
+   }
 
     private static SolverStepReport CreateSolverReport(AtmosWorldSolverStep step)
     {

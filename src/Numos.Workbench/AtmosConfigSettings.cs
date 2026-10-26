@@ -36,6 +36,7 @@ public static class AtmosConfigSettings
         destination.VoxelVolume = source.VoxelVolume;
         destination.SaturationReferencePressure = source.SaturationReferencePressure;
         destination.DefaultDiffusionCoefficient = source.DefaultDiffusionCoefficient;
+        destination.DefaultThermalConductivity = source.DefaultThermalConductivity;
         destination.SpaceTemperature = source.SpaceTemperature;
         destination.BulkFlowCoefficient = source.BulkFlowCoefficient;
         destination.VacuumThreshold = source.VacuumThreshold;
@@ -47,6 +48,10 @@ public static class AtmosConfigSettings
         destination.AccumulatorWakeThreshold = source.AccumulatorWakeThreshold;
         destination.AccumulatorMaxAliveTicks = source.AccumulatorMaxAliveTicks;
         destination.ReferenceMolarMass = source.ReferenceMolarMass;
+        destination.FlameSpeedScale = source.FlameSpeedScale;
+        destination.MinimumFlameSpeed = source.MinimumFlameSpeed;
+        destination.IgnitionTransferEnabled = source.IgnitionTransferEnabled;
+        destination.TransferSeedFraction = source.TransferSeedFraction;
     }
 
     /// <summary>
@@ -80,7 +85,7 @@ public static class AtmosConfigSettings
         ArgumentNullException.ThrowIfNull(value);
         config.SolverConfigurations.RemoveAll(static entry => entry is T);
         config.SolverConfigurations.Add(value);
-    }
+   }
 
     /// <summary>
     ///     Checks a proposed value against the domain of its field.

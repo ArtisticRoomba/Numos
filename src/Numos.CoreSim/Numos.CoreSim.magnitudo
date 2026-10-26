@@ -60,7 +60,8 @@ amountRate | MolePerSecond | global::System.Single | amount=1,time=-1
 power | Watt | global::System.Single | mass=1,length=2,time=-3
 power64 | Watt64 | global::System.Double | mass=1,length=2,time=-3
 force | Newton | global::System.Single | mass=1,length=1,time=-2
-
+wattsPerMeterKelvin | WattsPerMeterKelvin | global::System.Single | temperature=-1,mass=1,length=1,time=-3
+moleWattsPerMeterKelvin | MoleWattsPerMeterKelvin | global::System.Single | amount=1,temperature=-1,mass=1,length=1,time=-3
 
 # Boundary conversions use: convert | canonical quantity id | unit name | storage type | scale | offset
 # canonical = input * scale + offset

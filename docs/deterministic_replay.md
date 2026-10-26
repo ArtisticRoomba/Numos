@@ -168,7 +168,7 @@ detached copies. The current implementation has no copy-on-write storage, delta 
 `AtmosSimulationCheckpoint.PayloadBytes` reports bytes in copied chunk and solver arrays. It excludes managed object
 headers and field names.
 
-The world checkpoint schema is `AtmosWorldCheckpoint.CurrentFormatVersion` 13. The grid schema inside it is format
+The world checkpoint schema is `AtmosWorldCheckpoint.CurrentFormatVersion` 14. The grid schema inside it is format
 version 10, compatibility version 4. Replay is experimental, so Numos rejects older in-memory checkpoint schemas instead
 of translating them. The version history is:
 
@@ -188,6 +188,8 @@ of translating them. The version history is:
 - World 12 and grid 10 generate the checkpoint types from the live types. Every part is then a field-id record,
   including link slots and solver metadata.
 - World 13 moved `EulerFlowConfig` from a fixed hand-written layout to field-id records.
+- World 14 added the default and per-gas thermal conductivity, the ignition settings, and the reaction ignition flag to
+  the configuration. It also added the `SetIgnitionSource` operation (opcode 15).
 
 ### Checkpoints are generated from the live types
 
@@ -605,6 +607,11 @@ changes state, so an invalid edit throws and records nothing.
 Numos adds opcodes without a checkpoint or file format bump, because a checkpoint holds the same fields as before. A
 reader that predates an opcode rejects a file that contains it.
 
+### Ignite a voxel
+
+`AtmosSimulation.IgniteVoxel` records one `SetIgnitionSourceOperation` (opcode 15). The operation holds the voxel, the
+source temperature, and the source volume. Replay applies it before the next tick, as the original call did.
+
 ### Change the solver layout while recording
 
 A tool such as a pipeline editor needs to switch transport models or reorder stages in the middle of a session. Numos
@@ -707,7 +714,7 @@ A `.numos` replay contains a small provenance header, one complete initial world
 semantic opcodes. It stores initial and final state hashes. The Viewer verifies both hashes. After loading, the Viewer
 generates scrub checkpoints every 50 ticks, so those large acceleration snapshots never enter the file.
 
-The checkpoint section holds the world checkpoint format version (13) and the archive's initial and head hashes. It ends
+The checkpoint section holds the world checkpoint format version (14) and the archive's initial and head hashes. It ends
 with the generated payload of the checkpoint and its length. Each simulation inside carries the grid format version
 (10). A file from an older layout fails to load with an unsupported-schema error. Numos does not misread it. The
 version history above lists the layout changes.

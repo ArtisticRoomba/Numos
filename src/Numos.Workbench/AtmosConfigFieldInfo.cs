@@ -63,6 +63,12 @@ public static class AtmosConfigFields
         "each neighbor.",
         ConfigDomain.NonNegative);
 
+    public readonly static AtmosConfigFieldInfo DefaultThermalConductivity = new(
+        "Default thermal conductivity",
+        "W/(m·K)",
+        "Thermal conductivity for gases missing from the registry.",
+        ConfigDomain.NonNegative);
+
     public readonly static AtmosConfigFieldInfo SpaceTemperature = new(
         "Space temperature",
         "K",
@@ -128,6 +134,29 @@ public static class AtmosConfigFields
         "kg/mol",
         "Molar mass assumed for gases that don't declare one.",
         ConfigDomain.Positive);
+
+    public readonly static AtmosConfigFieldInfo FlameSpeedScale = new(
+        "Flame speed scale",
+        "",
+        "Multiplier on the speed of every flame kernel.",
+        ConfigDomain.NonNegative);
+
+    public readonly static AtmosConfigFieldInfo MinimumFlameSpeed = new(
+        "Minimum flame speed",
+        "m/s",
+        "Slowest flame speed that still sustains a flame. Below it a flame kernel recedes.",
+        ConfigDomain.NonNegative);
+
+    public readonly static AtmosConfigFieldInfo IgnitionTransferEnabled = new(
+        "Ignition transfer",
+        "",
+        "Lets a fully ignited voxel start a flame kernel in its face neighbors.");
+
+    public readonly static AtmosConfigFieldInfo TransferSeedFraction = new(
+        "Transfer seed fraction",
+        "",
+        "Fraction of a voxel that a transferred flame kernel starts with.",
+        ConfigDomain.NonNegative);
 
     public readonly static AtmosConfigFieldInfo EulerCourantNumber = new(
         "Courant number",

@@ -262,6 +262,31 @@ public partial class SimulationViewer
         }
     }
 
+    private void IgniteProjectSource(
+        AtmosChunkHandle chunk,
+        int x,
+        int y,
+        int z,
+        float temperature,
+        float volume)
+    {
+        if (_simulation == null || _session.Config == null)
+            return;
+
+        try
+        {
+            _simulation.IgniteVoxel(chunk, x, y, z, temperature, volume);
+            _injectionFeedback = Report(
+                $"Did it",
+                false);
+        }
+        catch (Exception exception) when (
+            exception is ArgumentOutOfRangeException or KeyNotFoundException or InvalidOperationException)
+        {
+            _injectionFeedback = new FeedbackMessage(exception.Message, true);
+        }
+    }
+
     /// <summary>
     ///     Logs <paramref name="message" /> and returns it for display beside the control that caused it.
     /// </summary>

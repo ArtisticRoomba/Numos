@@ -110,4 +110,14 @@ public partial record struct GasProperties
     /// </remarks>
     [NumosSerialize(Codec = typeof(StateCodecs.Nullable<string, StateCodecs.String>))]
     public string Name;
+
+    /// <summary>
+    ///     Reference thermal conductivity for this gas at 300 K, in watts per metre-kelvin (W/(m·K)).
+    /// </summary>
+    /// <remarks>
+    ///     Non-finite and nonpositive values use <see cref="AtmosConfig.DefaultThermalConductivity" />.
+    /// </remarks>
+    [Quantity("wattsPerMeterKelvin")]
+    [NumosSerialize]
+    public WattsPerMeterKelvin ThermalConductivity;
 }

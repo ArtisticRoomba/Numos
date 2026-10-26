@@ -268,6 +268,7 @@ internal sealed class ConfigurationPatch
     public float? VoxelVolumeM3 { get; init; }
     public float? SaturationReferencePressurePa { get; init; }
     public float? DefaultDiffusionCoefficient { get; init; }
+    public float? DefaultThermalConductivity { get; init; }
     public float? SpaceTemperatureK { get; init; }
     public float? BulkFlowCoefficient { get; init; }
     public float? VacuumThresholdPa { get; init; }
@@ -280,7 +281,10 @@ internal sealed class ConfigurationPatch
     public int? AccumulatorMaxAliveTicks { get; init; }
     public float? ReferenceMolarMassKgPerMol { get; init; }
     public EulerFlowPatch? EulerFlow { get; init; }
-
+    public float? FlameSpeedScale { get; init; }
+    public float? MinimumFlameSpeed { get; init; }
+    public bool? IgnitionTransferEnabled { get; init; }
+    public float? TransferSeedFraction { get; init; }
     /// <summary>
     ///     Rejects a value that lies outside the <see cref="AtmosConfigFieldInfo.Domain" /> of its field.
     /// </summary>
@@ -293,6 +297,7 @@ internal sealed class ConfigurationPatch
         Check(AtmosConfigFields.VoxelVolume, VoxelVolumeM3);
         Check(AtmosConfigFields.SaturationReferencePressure, SaturationReferencePressurePa);
         Check(AtmosConfigFields.DefaultDiffusionCoefficient, DefaultDiffusionCoefficient);
+        Check(AtmosConfigFields.DefaultThermalConductivity, DefaultThermalConductivity);
         Check(AtmosConfigFields.SpaceTemperature, SpaceTemperatureK);
         Check(AtmosConfigFields.BulkFlowCoefficient, BulkFlowCoefficient);
         Check(AtmosConfigFields.VacuumThreshold, VacuumThresholdPa);
@@ -304,8 +309,11 @@ internal sealed class ConfigurationPatch
         Check(AtmosConfigFields.SleepThreshold, SleepThreshold);
         Check(AtmosConfigFields.AccumulatorMaxAliveTicks, AccumulatorMaxAliveTicks);
         Check(AtmosConfigFields.ReferenceMolarMass, ReferenceMolarMassKgPerMol);
+        Check(AtmosConfigFields.FlameSpeedScale, FlameSpeedScale);
+        Check(AtmosConfigFields.MinimumFlameSpeed, MinimumFlameSpeed);
+        Check(AtmosConfigFields.TransferSeedFraction, TransferSeedFraction);
         EulerFlow?.Validate();
-    }
+   }
 
     /// <summary>
     ///     Checks one patched value against the domain of its field. A missing value passes.
@@ -339,6 +347,9 @@ internal sealed class ConfigurationPatch
         if (DefaultDiffusionCoefficient.HasValue)
             config.DefaultDiffusionCoefficient = DefaultDiffusionCoefficient.Value;
 
+        if (DefaultThermalConductivity.HasValue)
+            config.DefaultThermalConductivity = DefaultThermalConductivity.Value;
+
         if (SpaceTemperatureK.HasValue)
             config.SpaceTemperature = SpaceTemperatureK.Value;
 
@@ -371,6 +382,18 @@ internal sealed class ConfigurationPatch
 
         if (ReferenceMolarMassKgPerMol.HasValue)
             config.ReferenceMolarMass = ReferenceMolarMassKgPerMol.Value;
+
+        if (FlameSpeedScale.HasValue)
+            config.FlameSpeedScale = FlameSpeedScale.Value;
+
+        if (MinimumFlameSpeed.HasValue)
+            config.MinimumFlameSpeed = MinimumFlameSpeed.Value;
+
+        if (IgnitionTransferEnabled.HasValue)
+            config.IgnitionTransferEnabled = IgnitionTransferEnabled.Value;
+
+        if (TransferSeedFraction.HasValue)
+            config.TransferSeedFraction = TransferSeedFraction.Value;
 
         EulerFlow?.ApplyTo(config);
     }
@@ -440,5 +463,5 @@ internal sealed class EulerFlowPatch
         throw new HeadlessRequestException(
             "invalidConfig",
             $"Unknown Euler reconstruction '{value}'. Use 'firstOrder'.");
-    }
+   }
 }

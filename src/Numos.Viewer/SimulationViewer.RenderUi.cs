@@ -714,6 +714,13 @@ public partial class SimulationViewer
                 static (config, value) => config.DefaultDiffusionCoefficient = value);
 
             ConfigFloatInput(
+                AtmosConfigFields.DefaultThermalConductivity,
+                "config-default-thermal-conductivity",
+                _session.Config.DefaultThermalConductivity,
+                inspecting,
+                static (config, value) => config.DefaultThermalConductivity = value);
+
+            ConfigFloatInput(
                 AtmosConfigFields.SpaceTemperature,
                 "config-space-temperature",
                 _session.Config.SpaceTemperature,

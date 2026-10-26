@@ -81,6 +81,7 @@ public sealed record SimulationConfigurationReport(
     float VoxelVolumeM3,
     float SaturationReferencePressurePa,
     float DefaultDiffusionCoefficient,
+    float DefaultThermalConductivity,
     float SpaceTemperatureK,
     float BulkFlowCoefficient,
     float VacuumThresholdPa,
@@ -92,6 +93,10 @@ public sealed record SimulationConfigurationReport(
     float AccumulatorWakeThresholdPa,
     int AccumulatorMaxAliveTicks,
     float ReferenceMolarMassKgPerMol,
+    float FlameSpeedScale,
+    float MinimumFlameSpeed,
+    bool IgnitionTransferEnabled,
+    float TransferSeedFraction,
     GasConfigurationReport[] Gases,
     EulerFlowConfigurationReport? EulerFlow);
 
@@ -108,7 +113,6 @@ public sealed record EulerFlowConfigurationReport(
     string Reconstruction,
     float MomentumDampingPerSecond,
     float DefaultLinkAreaFraction);
-
 /// <summary>
 ///     One indexed gas definition captured from the configuration registry.
 /// </summary>

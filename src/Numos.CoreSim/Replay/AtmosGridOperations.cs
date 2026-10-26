@@ -97,6 +97,22 @@ public sealed record AddGasToVoxelOperation(Int3 Position, ushort LocalVoxelInde
     public override AtmosOperationCode Code => AtmosOperationCode.AddGasToVoxel;
 
     internal override void Apply(AtmosKernel kernel) => kernel.Apply(this);
+}    
+
+/// <summary>
+///     Adds a one tick ignition source to a voxel and wakes its chunk.
+/// </summary>
+/// <param name="Position">The target chunk's grid position</param>
+/// <param name="LocalVoxelIndex">The voxel's zero-based index in the chunk's flattened storage.</param>
+/// <param name="Temperature">The temperature of the ignition source</param>
+/// <param name="Volume">The volume of the ignition source</param>
+public sealed record SetIgnitionSourceOperation(Int3 Position, ushort LocalVoxelIndex, Kelvin Temperature, CubicMetre Volume)
+    : AtmosOperation
+{
+    /// <inheritdoc />
+    public override AtmosOperationCode Code => AtmosOperationCode.SetIgnitionSource;
+
+    internal override void Apply(AtmosKernel kernel) => kernel.Apply(this);
 }
 
 /// <summary>

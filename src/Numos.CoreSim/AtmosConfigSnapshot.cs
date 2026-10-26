@@ -46,6 +46,9 @@ public sealed class AtmosConfigSnapshot : IAtmosConfig
                 ? source.SaturationReferencePressure
                 : AtmosConfigDefaults.SaturationReferencePressure,
             DefaultDiffusionCoefficient = FloatMath.GetNonnegativeFinite(source.DefaultDiffusionCoefficient),
+            DefaultThermalConductivity = FloatMath.IsFinitePositive(source.DefaultThermalConductivity)
+                ? source.DefaultThermalConductivity
+                : AtmosConfigDefaults.DefaultThermalConductivity,
             SpaceTemperature = FloatMath.IsFinitePositive(source.SpaceTemperature)
                 ? source.SpaceTemperature
                 : AtmosConfigDefaults.SpaceTemperature,
@@ -64,6 +67,10 @@ public sealed class AtmosConfigSnapshot : IAtmosConfig
             ReferenceMolarMass = FloatMath.IsFinitePositive(source.ReferenceMolarMass)
                 ? source.ReferenceMolarMass
                 : AtmosConfigDefaults.ReferenceMolarMass,
+            FlameSpeedScale = Math.Max(0, source.FlameSpeedScale),
+            MinimumFlameSpeed = Math.Max(0, source.MinimumFlameSpeed),
+            IgnitionTransferEnabled = source.IgnitionTransferEnabled,
+            TransferSeedFraction = Math.Max(0, source.TransferSeedFraction),
         };
 
         var gasRegistry = new GasRegistry();
@@ -136,6 +143,8 @@ public sealed class AtmosConfigSnapshot : IAtmosConfig
     public Pascal SaturationReferencePressure => Fields.SaturationReferencePressure;
     /// <inheritdoc cref="AtmosConfig.DefaultDiffusionCoefficient" />
     public SquareMetrePerSecond DefaultDiffusionCoefficient => Fields.DefaultDiffusionCoefficient;
+    /// <inheritdoc cref="AtmosConfig.DefaultThermalConductivity" />
+    public WattsPerMeterKelvin DefaultThermalConductivity => Fields.DefaultThermalConductivity;
     /// <inheritdoc cref="AtmosConfig.SpaceTemperature" />
     public Kelvin SpaceTemperature => Fields.SpaceTemperature;
     /// <inheritdoc cref="AtmosConfig.BulkFlowCoefficient" />
@@ -158,6 +167,14 @@ public sealed class AtmosConfigSnapshot : IAtmosConfig
     public int AccumulatorMaxAliveTicks => Fields.AccumulatorMaxAliveTicks;
     /// <inheritdoc cref="AtmosConfig.ReferenceMolarMass" />
     public KilogramPerMole ReferenceMolarMass => Fields.ReferenceMolarMass;
+    /// <inheritdoc cref="AtmosConfig.FlameSpeedScale" />
+    public Scalar FlameSpeedScale => Fields.FlameSpeedScale;
+    /// <inheritdoc cref="AtmosConfig.MinimumFlameSpeed" />
+    public MetrePerSecond MinimumFlameSpeed => Fields.MinimumFlameSpeed;
+    /// <inheritdoc cref="AtmosConfig.IgnitionTransferEnabled" />
+    public bool IgnitionTransferEnabled => Fields.IgnitionTransferEnabled;
+    /// <inheritdoc cref="AtmosConfig.TransferSeedFraction" />
+    public Scalar TransferSeedFraction => Fields.TransferSeedFraction;
 
     /// <inheritdoc cref="AtmosConfig.PressurePerMoleKelvin" />
     public PascalPerMoleKelvin PressurePerMoleKelvin =>
@@ -203,6 +220,14 @@ public sealed class AtmosConfigSnapshot : IAtmosConfig
         }
 
         return ReferenceMolarMass;
+    }
+
+    /// <inheritdoc cref="AtmosConfig.GetThermalConductivity" />
+    public WattsPerMeterKelvin GetThermalConductivity(int gasId)
+    {
+        return (uint)gasId < (uint)GasRegistry.Count
+            ? FloatMath.GetNonnegativeFinite(GasRegistry[gasId].ThermalConductivity)
+            : FloatMath.GetNonnegativeFinite(DefaultThermalConductivity);
     }
 
     /// <inheritdoc cref="AtmosConfig.TryGetGasProperties" />

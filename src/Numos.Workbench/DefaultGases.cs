@@ -19,7 +19,8 @@ public static class DefaultGases
         MolarEnthalpyOfVaporization = 904f,
         LiquidId = 0,
         DiffusionCoefficient = 0.02f,
-        MolarMass = 0.002016f
+        MolarMass = 0.002016f,
+        ThermalConductivity = 0.168f
     };
 
     public readonly static GasProperties Oxygen = new()
@@ -32,7 +33,8 @@ public static class DefaultGases
         MolarEnthalpyOfVaporization = 6_820f,
         LiquidId = 0,
         DiffusionCoefficient = 0.02f,
-        MolarMass = 0.031998f
+        MolarMass = 0.031998f,
+        ThermalConductivity = 0.024f
     };
 
     public readonly static GasProperties Nitrogen = new()
@@ -45,7 +47,8 @@ public static class DefaultGases
         MolarEnthalpyOfVaporization = 5_600f,
         LiquidId = 1,
         DiffusionCoefficient = 0.02f,
-        MolarMass = 0.028014f
+        MolarMass = 0.028014f,
+        ThermalConductivity = 0.024f
     };
 
     public readonly static GasProperties CarbonDioxide = new()
@@ -57,7 +60,8 @@ public static class DefaultGases
         MolarEnthalpyOfVaporization = 9800f,
         LiquidId = 0,
         DiffusionCoefficient = 0.02f,
-        MolarMass = 0.04401f
+        MolarMass = 0.04401f,
+        ThermalConductivity = 0.016f
     };
 
     public readonly static GasProperties NitrousOxide = new()
@@ -69,7 +73,8 @@ public static class DefaultGases
         MolarEnthalpyOfVaporization = 16_540f,
         LiquidId = 0,
         DiffusionCoefficient = 0.02f,
-        MolarMass = 0.044013f
+        MolarMass = 0.044013f,
+        ThermalConductivity = 0.016f
     };
 
     public readonly static GasProperties Water = new()
@@ -81,7 +86,8 @@ public static class DefaultGases
         MolarEnthalpyOfVaporization = 40_657f,
         LiquidId = 0,
         DiffusionCoefficient = 0.02f,
-        MolarMass = 0.018015f
+        MolarMass = 0.018015f,
+        ThermalConductivity = 0.0245f
     };
 
 
@@ -117,7 +123,8 @@ public static class DefaultGases
             {
                 { Hydrogen, 1 },
                 { Oxygen, 0.5f }
-            });
+            },
+            true);
 
         config.SolverConfigurations = [new GasReactionConfig(standardReactions: [hydrogenFire])];
     }

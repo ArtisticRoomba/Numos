@@ -37,6 +37,7 @@ public readonly partial record struct LinearGasReaction
     ///     When <see langword="false" />, the line is extrapolated.
     /// </param>
     /// <param name="speedFactors">Multipliers on the rate constant that depend on the amount of specific gases.</param>
+    /// <param name="requiresIgnition">Whether the reaction should use the ignition system.</param>
     public LinearGasReaction(
         IDictionary<GasProperties, float> input, IDictionary<GasProperties, float> output,
         [Quantity("molarEnergy")] JoulePerMole energyBalance,
@@ -44,7 +45,8 @@ public readonly partial record struct LinearGasReaction
         [Quantity("temperature")] Kelvin highTemperatureBound,
         [Quantity("concentrationPerSecond")] ConcentrationPerSecond lowTempSpeed,
         [Quantity("concentrationPerSecond")] ConcentrationPerSecond highTempSpeed,
-        bool lowStrict, bool highStrict, ISet<LinearSpeedFactor> speedFactors)
+        bool lowStrict, bool highStrict, ISet<LinearSpeedFactor> speedFactors,
+        bool requiresIgnition = false)
     {
         Input = input.ToFrozenDictionary();
         Output = output.ToFrozenDictionary();
@@ -56,6 +58,7 @@ public readonly partial record struct LinearGasReaction
         LowStrict = lowStrict;
         HighStrict = highStrict;
         SpeedFactors = speedFactors.ToFrozenSet();
+        RequiresIgnition = requiresIgnition;
         BoundaryRange = HighTemperatureBound - LowTemperatureBound;
         SpeedRange = HighTempSpeed - LowTempSpeed;
     }
@@ -111,7 +114,13 @@ public readonly partial record struct LinearGasReaction
     [NumosSerialize]
     private FrozenSet<LinearSpeedFactor> SpeedFactors { get; }
 
-    private static float EvalLinear(
+    /// <summary>
+    ///     Whether the reaction should use the ignition system.
+    /// </summary>
+    [NumosSerialize]
+    internal bool RequiresIgnition { get; }
+
+   private static float EvalLinear(
         float value, float boundaryRange, float lowBound, bool lowStrict, bool highStrict,
         float valAtLow, float speedRange)
     {

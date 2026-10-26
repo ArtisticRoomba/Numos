@@ -21,12 +21,16 @@ internal interface IAtmosConfig
     int AccumulatorMaxAliveTicks { get; }
     KilogramPerMole ReferenceMolarMass { get; }
     PascalPerMoleKelvin PressurePerMoleKelvin { get; }
-
+    Scalar FlameSpeedScale { get; }
+    MetrePerSecond MinimumFlameSpeed { get; }
+    bool IgnitionTransferEnabled { get; }
+    Scalar TransferSeedFraction { get; }
     int GasPropertyCount { get; }
     Kelvin GetValidatedTemp(Kelvin storedTemperature);
     CubicMetre GetVoxelVolume();
     JoulePerMoleKelvin GetMolarHeatCapacityAtConstantVolume(int gasId);
     SquareMetrePerSecond GetDiffusionCoefficient(int gasId);
     KilogramPerMole GetMolarMass(int gasId);
+    WattsPerMeterKelvin GetThermalConductivity(int gasId);
     bool TryGetGasProperties(int gasId, out GasProperties properties);
 }

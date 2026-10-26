@@ -15,6 +15,7 @@ namespace Numos.CoreSim;
 internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
 {
     private SquareMetrePerSecond[] _diffusionCoefficients = [];
+    private WattsPerMeterKelvin[] _thermalConductivities = [];
     private GasRegistrySnapshot _gasRegistry = default!;
     private JoulePerMoleKelvin[] _molarHeatCapacitiesAtConstantVolume = [];
     private KilogramPerMole[] _molarMasses = [];
@@ -55,9 +56,13 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
     public Pascal AccumulatorWakeThreshold { get; private set; }
     public int AccumulatorMaxAliveTicks { get; private set; }
     public KilogramPerMole ReferenceMolarMass { get; private set; }
-
+    public Scalar FlameSpeedScale { get; private set; }
+    public MetrePerSecond MinimumFlameSpeed { get; private set; }
+    public bool IgnitionTransferEnabled { get; private set; }
+    public Scalar TransferSeedFraction { get; private set; }
     public JoulePerMoleKelvin DefaultMolarHeatCapacityAtConstantVolume { get; private set; }
     public SquareMetrePerSecond DefaultDiffusionCoefficient { get; private set; }
+    public WattsPerMeterKelvin DefaultThermalConductivity { get; private set; }
 
     public CubicMetre GetVoxelVolume()
     {
@@ -90,13 +95,20 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
             : ReferenceMolarMass;
     }
 
+    public WattsPerMeterKelvin GetThermalConductivity(int gasId)
+    {
+        return (uint)gasId < (uint)GasPropertyCount
+            ? _thermalConductivities[gasId]
+            : DefaultThermalConductivity;
+    }
+
     public bool TryGetGasProperties(int gasId, out GasProperties properties)
     {
         if ((uint)gasId < (uint)GasPropertyCount)
         {
             properties = _gasRegistry[gasId];
             return true;
-        }
+         }
 
         properties = default;
         return false;
@@ -124,6 +136,7 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
             Array.Resize(ref _molarHeatCapacitiesAtConstantVolume, gasPropertyCount);
             Array.Resize(ref _diffusionCoefficients, gasPropertyCount);
             Array.Resize(ref _molarMasses, gasPropertyCount);
+            Array.Resize(ref _thermalConductivities, gasPropertyCount);
         }
 
         GasPropertyCount = gasPropertyCount;
@@ -134,6 +147,7 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
         PressurePerMoleKelvin = config.PressurePerMoleKelvin;
         SaturationReferencePressure = config.SaturationReferencePressure;
         DefaultDiffusionCoefficient = config.DefaultDiffusionCoefficient;
+        DefaultThermalConductivity = config.DefaultThermalConductivity;
         SpaceTemperature = config.SpaceTemperature;
         ReferenceMolarMass = config.ReferenceMolarMass;
 
@@ -143,6 +157,10 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
             _molarHeatCapacitiesAtConstantVolume[gasId] = config.GetMolarHeatCapacityAtConstantVolume(gasId);
             _diffusionCoefficients[gasId] = config.GetDiffusionCoefficient(gasId);
             _molarMasses[gasId] = config.GetMolarMass(gasId);
+            config.TryGetGasProperties(gasId, out var properties);
+            _thermalConductivities[gasId] = FloatMath.IsFinitePositive(properties.ThermalConductivity)
+                ? properties.ThermalConductivity
+                : DefaultThermalConductivity;
         }
 
         if (GasPropertyCount < previousGasRegistryCount)
@@ -151,7 +169,8 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
             Array.Clear(_molarHeatCapacitiesAtConstantVolume, GasPropertyCount, removedCount);
             Array.Clear(_diffusionCoefficients, GasPropertyCount, removedCount);
             Array.Clear(_molarMasses, GasPropertyCount, removedCount);
-        }
+            Array.Clear(_thermalConductivities, GasPropertyCount, removedCount);
+         }
 
         BulkFlowCoefficient = config.BulkFlowCoefficient;
         VacuumThreshold = config.VacuumThreshold;
@@ -162,6 +181,10 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
         MaxPressureTransferFractionPerNeighbor = config.MaxPressureTransferFractionPerNeighbor;
         AccumulatorWakeThreshold = config.AccumulatorWakeThreshold;
         AccumulatorMaxAliveTicks = config.AccumulatorMaxAliveTicks;
+        FlameSpeedScale = config.FlameSpeedScale;
+        MinimumFlameSpeed = config.MinimumFlameSpeed;
+        IgnitionTransferEnabled = config.IgnitionTransferEnabled;
+        TransferSeedFraction = config.TransferSeedFraction;
 
         SolverConfigurations = config.SolverConfigurations;
         EulerFlow = EulerFlowConfig.Get(config);

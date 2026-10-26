@@ -49,6 +49,7 @@ public partial class AtmosConfig : IAtmosConfig
         VoxelVolume = source.VoxelVolume;
         SaturationReferencePressure = source.SaturationReferencePressure;
         DefaultDiffusionCoefficient = source.DefaultDiffusionCoefficient;
+        DefaultThermalConductivity = source.DefaultThermalConductivity;
         SpaceTemperature = source.SpaceTemperature;
         BulkFlowCoefficient = source.BulkFlowCoefficient;
         VacuumThreshold = source.VacuumThreshold;
@@ -60,6 +61,10 @@ public partial class AtmosConfig : IAtmosConfig
         AccumulatorWakeThreshold = source.AccumulatorWakeThreshold;
         AccumulatorMaxAliveTicks = source.AccumulatorMaxAliveTicks;
         ReferenceMolarMass = source.ReferenceMolarMass;
+        FlameSpeedScale = source.FlameSpeedScale;
+        MinimumFlameSpeed = source.MinimumFlameSpeed;
+        IgnitionTransferEnabled = source.IgnitionTransferEnabled;
+        TransferSeedFraction = source.TransferSeedFraction;
     }
 
     /// <summary>
@@ -152,6 +157,15 @@ public partial class AtmosConfig : IAtmosConfig
     [NumosSerialize]
     public SquareMetrePerSecond DefaultDiffusionCoefficient { get; set; } =
         AtmosConfigDefaults.DefaultDiffusionCoefficient;
+
+    /// <summary>
+    ///     Reference thermal conductivity used for gas IDs missing from <see cref="GasRegistry" />, in watts per
+    ///     metre-kelvin (W/(m·K)).
+    /// </summary>
+    /// <remarks>Non-finite and nonpositive values are normalized to <see cref="AtmosConfigDefaults.DefaultThermalConductivity" />.</remarks>
+    [Quantity("wattsPerMeterKelvin")]
+    [NumosSerialize]
+    public WattsPerMeterKelvin DefaultThermalConductivity { get; set; } = AtmosConfigDefaults.DefaultThermalConductivity;
 
     /// <summary>
     ///     Modeled temperature of space, in kelvins (K).
@@ -274,6 +288,37 @@ public partial class AtmosConfig : IAtmosConfig
         AtmosPhysicalConstants.MolarGasConstant / GetVoxelVolume();
 
     /// <summary>
+    ///     Dimensionless multiplier on the speed of every flame kernel.
+    /// </summary>
+    /// <remarks>Negative values are normalized to zero.</remarks>
+    [NumosSerialize]
+    public Scalar FlameSpeedScale { get; set; } = AtmosConfigDefaults.FlameSpeedScale;
+
+    /// <summary>
+    ///     Slowest flame speed that still sustains a flame. Below it a flame kernel recedes, and a voxel that
+    ///     burns across its whole volume stops counting as ignited. The gas itself keeps reacting normally.
+    /// </summary>
+    /// <remarks>Negative values are normalized to zero.</remarks>
+    [Quantity("velocity")]
+    [NumosSerialize]
+    public MetrePerSecond MinimumFlameSpeed { get; set; } = AtmosConfigDefaults.MinimumFlameSpeed;
+
+    /// <summary>
+    ///     Whether a fully ignited voxel may start a flame kernel in its face neighbors. Heat transfer is
+    ///     the main way fire spreads between voxels; this is only a supplement.
+    /// </summary>
+    [NumosSerialize]
+    public bool IgnitionTransferEnabled { get; set; } = AtmosConfigDefaults.IgnitionTransferEnabled;
+
+    /// <summary>
+    ///     Fraction of a voxel that a transferred flame kernel starts with. After that the kernel grows or
+    ///     recedes by the same flame speed rules as any other flame.
+    /// </summary>
+    /// <remarks>Negative values are normalized to zero.</remarks>
+    [NumosSerialize]
+    public Scalar TransferSeedFraction { get; set; } = AtmosConfigDefaults.TransferSeedFraction;
+
+    /// <summary>
     ///     Returns the temperature the solvers use for a stored voxel temperature.
     /// </summary>
     /// <param name="storedTemperature">A voxel's stored temperature, in kelvins (K).</param>
@@ -351,6 +396,17 @@ public partial class AtmosConfig : IAtmosConfig
         return (uint)gasId < (uint)GasRegistry.Count
             ? FloatMath.GetNonnegativeFinite(GasRegistry[gasId].DiffusionCoefficient)
             : FloatMath.GetNonnegativeFinite(DefaultDiffusionCoefficient);
+    }
+
+    /// <summary>
+    ///     Resolves the thermal conductivity for a gas at a specific temperature.
+    /// </summary>
+    /// <param name="gasId">The gas ID. Unregistered IDs use <see cref="DefaultThermalConductivity" />.</param>
+    public WattsPerMeterKelvin GetThermalConductivity(int gasId)
+    {
+        return (uint)gasId < (uint)GasRegistry.Count
+            ? FloatMath.GetNonnegativeFinite(GasRegistry[gasId].ThermalConductivity)
+            : FloatMath.GetNonnegativeFinite(DefaultThermalConductivity);
     }
 
     /// <summary>

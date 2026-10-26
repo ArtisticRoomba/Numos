@@ -29,11 +29,13 @@ public readonly partial record struct StandardGasReaction
     ///     Molar activation energy <c>Ea</c>, in J/mol. Convert values authored in kJ/mol first.
     /// </param>
     /// <param name="speedFactors">Rate-equation exponent for each gas that affects the speed.</param>
+    /// <param name="requiresIgnition">Whether the reaction should use the ignition system</param>
     public StandardGasReaction(
         IDictionary<GasProperties, float> input, IDictionary<GasProperties, float> output,
         [Quantity("molarEnergy")] JoulePerMole energyBalance,
         float arrheniusFactor, float activationEnergy,
-        IDictionary<GasProperties, float> speedFactors)
+        IDictionary<GasProperties, float> speedFactors,
+        bool requiresIgnition = false)
     {
         Input = input.ToFrozenDictionary();
         Output = output.ToFrozenDictionary();
@@ -41,6 +43,7 @@ public readonly partial record struct StandardGasReaction
         ArrheniusFactor = arrheniusFactor;
         ActivationEnergy = activationEnergy;
         SpeedFactors = speedFactors.ToFrozenDictionary();
+        RequiresIgnition = requiresIgnition;
     }
 
     /// <summary>
@@ -86,6 +89,12 @@ public readonly partial record struct StandardGasReaction
     /// </summary>
     [NumosSerialize]
     private FrozenDictionary<GasProperties, float> SpeedFactors { get; }
+
+    /// <summary>
+    ///     Whether the reaction should use the ignition system.
+    /// </summary>
+    [NumosSerialize]
+    internal bool RequiresIgnition { get; }
 
     /// <summary>
     ///     Calculates the rate constant at a temperature using the original Arrhenius equation.

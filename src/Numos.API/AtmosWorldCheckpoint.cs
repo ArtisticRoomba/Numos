@@ -32,8 +32,10 @@ public sealed partial class AtmosWorldCheckpoint
     ///     member name. Version 11 adds the <c>[NumosSerialize]</c> state of class solvers.
     ///     Version 12 generates the checkpoint from the world's <c>[NumosSerialize]</c> members. Version 13 writes
     ///     <see cref="Numos.CoreSim.EulerFlow.EulerFlowConfig" /> through the state schema instead of a fixed layout.
+    ///     Version 14 adds the default and per-gas thermal conductivity, the ignition settings, the reaction ignition flag,
+    ///     and the <c>SetIgnitionSource</c> operation.
     /// </remarks>
-    public const int CurrentFormatVersion = 13;
+    public const int CurrentFormatVersion = 14;
 
     // Immutable once captured or read, so the digest is computed once. See AtmosSimulationCheckpoint.
     [NumosIgnore]
