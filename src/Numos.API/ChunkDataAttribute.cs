@@ -33,8 +33,8 @@ namespace Numos.API;
 ///         The generator also emits a static class named after the declaring type (<c>FireChunkDataChunkAccessors</c>
 ///         for <c>FireChunkData</c>, <c>OuterInnerChunkAccessors</c> for a nested <c>Outer.Inner</c>) in the same
 ///         namespace. The class holds one extension property per field.
-///         Per-voxel fields return <see cref="Numos.Collections.FlatArray{T}" />. Fields with a
-///         <see cref="Length" /> return <see cref="Span{T}" />.
+///         Each one returns a <see cref="Numos.Collections.FlatArray{T}" />, sized one element per voxel or to
+///         <see cref="Length" /> when it is set.
 ///         When the project references <c>Numos.API.Dangerous</c>, the generator adds the same accessors to its chunk
 ///         view. Projects on C# 13 get <c>GetExposure()</c>-style extension methods instead, because extension
 ///         properties need C# 14.
@@ -68,7 +68,7 @@ namespace Numos.API;
 ///             foreach (var chunk in context.Chunks(simulation))
 ///             {
 ///                 FlatArray&lt;float&gt; exposure = chunk.Exposure;
-///                 Span&lt;int&gt; burnCount = chunk.BurnCount;
+///                 FlatArray&lt;int&gt; burnCount = chunk.BurnCount;
 ///                 for (int voxel = 0; voxel &lt; chunk.VoxelCount; voxel++)
 ///                     exposure[voxel] += 1f;
 ///                 burnCount[0]++;
