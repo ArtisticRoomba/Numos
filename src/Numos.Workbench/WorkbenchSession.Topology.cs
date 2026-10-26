@@ -1,4 +1,5 @@
 using Numos.API;
+using Numos.CoreSim;
 using Numos.Maths;
 
 namespace Numos.Workbench;
@@ -20,13 +21,18 @@ public readonly record struct DockEndpoint(AtmosSimulationId Simulation, Int3 Ch
 /// <param name="FlipU">Whether to mirror the second face along its U axis after rotation.</param>
 /// <param name="FlipV">Whether to mirror the second face along its V axis after rotation.</param>
 /// <param name="Flags">The transport modes of each link.</param>
+/// <param name="AreaFraction">
+///     The open area of each link as a fraction of one voxel face, or <see langword="null" /> to follow the
+///     configuration default.
+/// </param>
 public readonly record struct DockDefinition(
     DockEndpoint First,
     DockEndpoint Second,
     int Rotation,
     bool FlipU,
     bool FlipV,
-    ExplicitLinkFlags Flags);
+    ExplicitLinkFlags Flags,
+    float? AreaFraction = null);
 
 public sealed partial class WorkbenchSession
 {
@@ -41,8 +47,18 @@ public sealed partial class WorkbenchSession
     /// <summary>
     ///     Creates a portal between two cells. It activates at the next tick boundary.
     /// </summary>
+    /// <param name="first">The first cell.</param>
+    /// <param name="second">The second cell.</param>
+    /// <param name="flags">The transport modes of the link.</param>
+    /// <param name="areaFraction">
+    ///     The open area as a fraction of one voxel face, or <see langword="null" /> for the configuration default.
+    /// </param>
     /// <returns>The portal handle.</returns>
-    public AtmosPortalHandle CreatePortal(AtmosCellRef first, AtmosCellRef second, ExplicitLinkFlags flags)
+    public AtmosPortalHandle CreatePortal(
+        AtmosCellRef first,
+        AtmosCellRef second,
+        ExplicitLinkFlags flags,
+        float? areaFraction = null)
     {
         return Guard(
             "Could not create the portal",
@@ -50,7 +66,7 @@ public sealed partial class WorkbenchSession
             {
                 var world = RequireWorld();
                 ThrowIfInspecting();
-                var portal = world.CreatePortal(first, second, flags);
+                var portal = world.CreatePortal(first, second, flags, areaFraction);
                 Info("Created portal. It will activate on the next world tick.");
                 return portal;
             });
@@ -94,7 +110,8 @@ public sealed partial class WorkbenchSession
             links[destination++] = new ExplicitLinkDefinition(
                 new AtmosCellRef(firstSimulation.Id, firstChunk, firstIndex),
                 new AtmosCellRef(secondSimulation.Id, secondChunk, secondIndex),
-                dock.Flags);
+                dock.Flags,
+                dock.AreaFraction);
         }
 
         return links;
@@ -166,26 +183,87 @@ public sealed partial class WorkbenchSession
     }
 
     /// <summary>
+    ///     Replaces the order and enabled flags of the solver stages.
+    /// </summary>
+    /// <param name="stages">Every stage in the new order. See <see cref="AtmosWorldSolverPipeline.SetLayout" />.</param>
+    /// <returns><see langword="true" /> when the layout changed, <see langword="false" /> when it already matched.</returns>
+    /// <remarks>
+    ///     The world records an actual change, so it replays at the same position.
+    /// </remarks>
+    /// <exception cref="ArgumentException">
+    ///     The world rejected the layout. The pipeline stays unchanged and the log holds the reason.
+    /// </exception>
+    /// <exception cref="InvalidOperationException">No project is open, or the timeline inspects history.</exception>
+    public bool SetSolverLayout(IReadOnlyList<AtmosWorldSolverLayoutEntry> stages)
+    {
+        ArgumentNullException.ThrowIfNull(stages);
+        return Guard("Could not change the solver layout", () => ApplySolverLayout(stages));
+    }
+
+    /// <summary>
+    ///     Switches the transport stages to one model and keeps every other stage as it is.
+    /// </summary>
+    /// <param name="model">The transport model to run.</param>
+    /// <returns><see langword="true" /> when the layout changed, <see langword="false" /> when it already matched.</returns>
+    /// <remarks>
+    ///     See <see cref="AtmosWorldSolverPipeline.ConvertTransportModel" /> for how the stages move.
+    /// </remarks>
+    /// <exception cref="ArgumentException">
+    ///     <paramref name="model" /> is not a defined model, or the world rejected the resulting layout.
+    /// </exception>
+    /// <exception cref="InvalidOperationException">No project is open, or the timeline inspects history.</exception>
+    public bool ApplyTransportPreset(AtmosTransportModel model)
+    {
+        return Guard(
+            "Could not apply the transport preset",
+            () =>
+            {
+                var world = RequireWorld();
+                var current = SolverPipelineEditor.ToLayout(world.Solvers.Steps);
+                return ApplySolverLayout(AtmosWorldSolverPipeline.ConvertTransportModel(current, model));
+            });
+    }
+
+    /// <summary>
     ///     Restores the built-in solver stages, order, and enabled flags.
     /// </summary>
     /// <returns>
     ///     <see langword="true" /> when the pipeline is back to its defaults. <see langword="false" /> when only the
     ///     enabled flags could be restored.
     /// </returns>
+    /// <param name="transportModel">
+    ///     The built-in transport stages to install, or <see langword="null" /> to keep the model the stage list runs now.
+    /// </param>
     /// <remarks>
-    ///     The world refuses to register or remove stages while it records, and a project timeline always records. In
-    ///     that case the session enables every stage and leaves the order and any custom stages alone.
+    ///     A world without custom stages gets the default layout through <see cref="AtmosWorldSolverPipeline.SetLayout" />,
+    ///     which also works while recording. The world cannot discard custom stages while it records, and a project
+    ///     timeline always records. In that case the session enables every stage and leaves the order and the custom
+    ///     stages alone.
     /// </remarks>
-    public bool ResetSolvers()
+    public bool ResetSolvers(AtmosTransportModel? transportModel = null)
     {
         return Guard(
             "Could not reset the solvers",
             () =>
             {
                 var world = RequireWorld();
+                var model = transportModel ??
+                            AtmosWorldSolverPipeline.DetectTransportModel(world.Solvers.Steps) ??
+                            AtmosTransportModel.Euler;
+                if (world.Solvers.Steps.All(static step => step.Kind == AtmosWorldSolverKind.BuiltIn))
+                {
+                    ThrowIfInspecting();
+                    world.Solvers.SetLayout(AtmosWorldSolverPipeline.GetDefaultLayout(model)
+                        .Select(static name => new AtmosWorldSolverLayoutEntry(name, true))
+                        .ToArray());
+
+                    Info("Reset the solver pipeline to its defaults.");
+                    return true;
+                }
+
                 try
                 {
-                    world.Solvers.ResetToDefaults();
+                    world.Solvers.ResetToDefaults(model);
                     Info("Reset the solver pipeline to its defaults.");
                     return true;
                 }
@@ -201,5 +279,14 @@ public sealed partial class WorkbenchSession
                     return false;
                 }
             });
+    }
+
+    private bool ApplySolverLayout(IReadOnlyList<AtmosWorldSolverLayoutEntry> stages)
+    {
+        var world = RequireWorld();
+        ThrowIfInspecting();
+        bool changed = world.Solvers.SetLayout(stages);
+        Info(changed ? "Changed the solver layout." : "The solver layout already matches.");
+        return changed;
     }
 }

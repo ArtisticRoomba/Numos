@@ -34,7 +34,8 @@ public sealed partial class AtmosSimulation
     /// </remarks>
     /// <exception cref="ArgumentException">
     ///     <paramref name="min" /> exceeds <paramref name="max" /> on an axis, a gas ID is not registered, an amount
-    ///     is not positive and finite, or a temperature is not finite or is negative.
+    ///     is not positive and finite, a temperature is not finite or is negative, or a velocity component is not
+    ///     finite.
     /// </exception>
     /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
     [PublicAPI]
@@ -70,6 +71,17 @@ public sealed partial class AtmosSimulation
                                  _kernel.GetAtmosConfig().DefaultTemperatureFallback;
             }
 
+            float velocityX = 0f;
+            float velocityY = 0f;
+            float velocityZ = 0f;
+            if (edit.Velocity is { } velocity)
+            {
+                parts |= AtmosVoxelBoxParts.Velocity;
+                velocityX = velocity.X;
+                velocityY = velocity.Y;
+                velocityZ = velocity.Z;
+            }
+
             var counts = _kernel.EditVoxelBox(new EditVoxelBoxOperation(
                 min,
                 max,
@@ -77,12 +89,16 @@ public sealed partial class AtmosSimulation
                 classification,
                 voxelTemperature,
                 gasTemperature,
+                velocityX,
+                velocityY,
+                velocityZ,
                 gases));
 
             return new AtmosVoxelBoxEditResult(
                 counts.VoxelsEdited,
                 counts.VoxelsSkipped,
-                counts.ChunksTouched);
+                counts.ChunksTouched,
+                counts.VelocityVoxels);
         }
     }
 }

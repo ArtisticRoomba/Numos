@@ -1,6 +1,8 @@
 using System.Globalization;
+using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.Datatypes.Snapshots;
+using Numos.Maths;
 
 namespace Numos.Workbench;
 
@@ -13,11 +15,76 @@ namespace Numos.Workbench;
 public delegate float WorkbenchFieldSampler(in AtmosChunkSnapshot snapshot, int localIndex);
 
 /// <summary>
+///     Options that change the value of some fields without changing which fields exist.
+/// </summary>
+/// <param name="SchlierenReference">
+///     The density gradient magnitude, in kg/m⁴, that a schlieren field maps to its darkest value. When
+///     <see langword="null" />, a region read uses the largest gradient inside the region. Give a fixed value so the
+///     frames of a time series share one scale.
+/// </param>
+public readonly record struct WorkbenchFieldOptions(float? SchlierenReference = null);
+
+/// <summary>
+///     The data a <see cref="WorkbenchRegionComputer" /> reads.
+/// </summary>
+public readonly ref struct WorkbenchRegionInput
+{
+    internal WorkbenchRegionInput(
+        ReadOnlySpan<float> source,
+        Int3 size,
+        float voxelEdge,
+        float? schlierenReference)
+    {
+        Source = source;
+        Size = size;
+        VoxelEdge = voxelEdge;
+        SchlierenReference = schlierenReference;
+    }
+
+    /// <summary>
+    ///     The source field over the region plus a one-voxel halo, with x changing fastest. Its size is
+    ///     <see cref="Size" /> plus 2 on every axis. NaN marks a voxel without a value, such as a solid voxel or a voxel
+    ///     outside every chunk.
+    /// </summary>
+    public ReadOnlySpan<float> Source { get; }
+
+    /// <summary>
+    ///     The size of the region in voxels, without the halo.
+    /// </summary>
+    public Int3 Size { get; }
+
+    /// <summary>
+    ///     The voxel edge length in metres.
+    /// </summary>
+    public float VoxelEdge { get; }
+
+    /// <summary>
+    ///     The reference gradient from <see cref="WorkbenchFieldOptions" />, or <see langword="null" /> when the
+    ///     computer should normalize over the region.
+    /// </summary>
+    public float? SchlierenReference { get; }
+}
+
+/// <summary>
+///     Computes a field over a whole region from a source field that has a one-voxel halo.
+/// </summary>
+/// <param name="input">The source values and the geometry.</param>
+/// <param name="destination">Receives one value per region voxel with x changing fastest.</param>
+public delegate void WorkbenchRegionComputer(in WorkbenchRegionInput input, Span<float> destination);
+
+/// <summary>
 ///     A named scalar quantity that can be sampled, exported, and probed, such as `pressure`.
 /// </summary>
 /// <remarks>
-///     A field reads only detached snapshots, so sampling never changes the simulation. A solver package can add
-///     fields, such as density or velocity, through <see cref="WorkbenchFieldRegistry.Register" />.
+///     <para>
+///         A field reads only detached snapshots, so sampling never changes the simulation. A solver package can add
+///         fields through <see cref="WorkbenchFieldRegistry.Register" />.
+///     </para>
+///     <para>
+///         A voxel field reads one voxel of one snapshot. A region field needs the neighbors of a voxel, which can lie
+///         in another chunk. The session reads its source field over the region plus a one-voxel halo and passes the
+///         result to a <see cref="WorkbenchRegionComputer" />. The density gradient and the schlieren are region fields.
+///     </para>
 /// </remarks>
 public sealed class WorkbenchField
 {
@@ -48,9 +115,61 @@ public sealed class WorkbenchField
     }
 
     /// <summary>
+    ///     Creates a region field.
+    /// </summary>
+    /// <param name="name">The name scripts use. Names are not case-sensitive.</param>
+    /// <param name="unit">The unit label, or an empty string for a dimensionless value.</param>
+    /// <param name="haloSource">The name of the voxel field the computer reads with a one-voxel halo.</param>
+    /// <param name="computer">Computes the values of a whole region.</param>
+    /// <param name="needsReferenceAtPoints">
+    ///     Whether sampling at single voxels requires <see cref="WorkbenchFieldOptions.SchlierenReference" />. A field
+    ///     that normalizes over its region has no region at a point.
+    /// </param>
+    public WorkbenchField(
+        string name,
+        string unit,
+        string haloSource,
+        WorkbenchRegionComputer computer,
+        bool needsReferenceAtPoints = false)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ArgumentException.ThrowIfNullOrWhiteSpace(haloSource);
+        ArgumentNullException.ThrowIfNull(computer);
+        Name = name;
+        Unit = unit ?? string.Empty;
+        Required = AtmosChunkSnapshotFields.VoxelClassification;
+        Sampler = static (in _, _) => float.NaN;
+        HaloSource = haloSource;
+        RegionComputer = computer;
+        NeedsReferenceAtPoints = needsReferenceAtPoints;
+    }
+
+    /// <summary>
     ///     The name scripts use.
     /// </summary>
     public string Name { get; }
+
+    /// <summary>
+    ///     The name of the voxel field a region field reads, or <see langword="null" /> for a voxel field.
+    /// </summary>
+    public string? HaloSource { get; }
+
+    /// <summary>
+    ///     Whether this field is computed over a region instead of read from one voxel.
+    /// </summary>
+    public bool IsRegionField => RegionComputer != null;
+
+    /// <summary>
+    ///     Whether sampling at single voxels needs <see cref="WorkbenchFieldOptions.SchlierenReference" />.
+    /// </summary>
+    public bool NeedsReferenceAtPoints { get; }
+
+    private WorkbenchRegionComputer? RegionComputer { get; }
+
+    internal void ComputeRegion(in WorkbenchRegionInput input, Span<float> destination)
+    {
+        RegionComputer!(in input, destination);
+    }
 
     /// <summary>
     ///     The unit label.
@@ -80,6 +199,9 @@ public sealed class WorkbenchField
     /// <returns>The value, or NaN for a solid voxel when <see cref="ValueInSolid" /> is false.</returns>
     public float Sample(in AtmosChunkSnapshot snapshot, int localIndex)
     {
+        if (IsRegionField)
+            throw new InvalidOperationException($"Field '{Name}' is a region field. Read it through the session.");
+
         if (!ValueInSolid && snapshot.VoxelRoomMap[localIndex] == VoxelClassification.RoomSolid)
             return float.NaN;
 
@@ -92,9 +214,14 @@ public sealed class WorkbenchField
 /// </summary>
 /// <remarks>
 ///     <para>
-///         The default registry holds `temperature` (K), `pressure` (Pa), `totalMoles` (mol), `classification`, and a
-///         parametric `moles:&lt;gasId&gt;` (mol) for each gas. Solid voxels and missing chunks read as NaN, except for
+///         The default registry holds `temperature` (K), `pressure` (Pa), `totalMoles` (mol), `classification`, the
+///         velocity fields `velocityX`, `velocityY`, `velocityZ`, and `speed` (m/s), and a parametric
+///         `moles:&lt;gasId&gt;` (mol) for each gas. Solid voxels and missing chunks read as NaN, except for
 ///         `classification`, which has no value only for a missing chunk.
+///     </para>
+///     <para>
+///         <see cref="RegisterFlowFields" /> adds `density` (kg/m³), `densityGradient` (kg/m⁴), and `schlieren`
+///         (dimensionless). The `schlieren:&lt;k&gt;` family sets the steepness.
 ///     </para>
 ///     <para>
 ///         The registry is not thread-safe. Register fields before the first sample.
@@ -141,6 +268,31 @@ public sealed class WorkbenchFieldRegistry
             static (in snapshot, index) => snapshot.VoxelRoomMap[index],
             true));
 
+        registry.Register(new WorkbenchField(
+            "velocityX",
+            "m/s",
+            AtmosChunkSnapshotFields.Velocity,
+            static (in snapshot, index) => snapshot.VelocityX[index]));
+
+        registry.Register(new WorkbenchField(
+            "velocityY",
+            "m/s",
+            AtmosChunkSnapshotFields.Velocity,
+            static (in snapshot, index) => snapshot.VelocityY[index]));
+
+        registry.Register(new WorkbenchField(
+            "velocityZ",
+            "m/s",
+            AtmosChunkSnapshotFields.Velocity,
+            static (in snapshot, index) => snapshot.VelocityZ[index]));
+
+        registry.Register(new WorkbenchField(
+            "speed",
+            "m/s",
+            AtmosChunkSnapshotFields.Velocity,
+            static (in snapshot, index) =>
+                FlowFieldMath.Speed(snapshot.VelocityX[index], snapshot.VelocityY[index], snapshot.VelocityZ[index])));
+
         registry.RegisterResolver(static name =>
         {
             if (!name.StartsWith(MolesPrefix, StringComparison.OrdinalIgnoreCase) ||
@@ -161,6 +313,92 @@ public sealed class WorkbenchFieldRegistry
         });
 
         return registry;
+    }
+
+    /// <summary>
+    ///     The name prefix of the schlieren family, such as `schlieren:12`.
+    /// </summary>
+    public const string SchlierenPrefix = "schlieren:";
+
+    /// <summary>
+    ///     The name of the density field.
+    /// </summary>
+    public const string DensityName = "density";
+
+    /// <summary>
+    ///     Adds the density, density gradient, and schlieren fields.
+    /// </summary>
+    /// <param name="configProvider">
+    ///     Returns the configuration to read when a field is computed. The density follows later configuration
+    ///     changes, because the field asks for the configuration on every read.
+    /// </param>
+    /// <remarks>
+    ///     <para>
+    ///         `density` is <c>sum(n_k M_k) / V</c> in kg/m³ and is NaN in solid and void voxels. `densityGradient` is
+    ///         the magnitude of its gradient in kg/m⁴, computed by <see cref="FlowFieldMath" />. `schlieren` is
+    ///         <c>exp(-k |grad rho| / g_ref)</c> with <c>k = 15</c>, and `schlieren:&lt;k&gt;` sets <c>k</c>.
+    ///     </para>
+    ///     <para>
+    ///         The reference <c>g_ref</c> is <see cref="WorkbenchFieldOptions.SchlierenReference" />, or the largest
+    ///         gradient inside the region that is read.
+    ///     </para>
+    /// </remarks>
+    public void RegisterFlowFields(Func<AtmosConfig> configProvider)
+    {
+        ArgumentNullException.ThrowIfNull(configProvider);
+        Register(new WorkbenchField(
+            DensityName,
+            "kg/m3",
+            AtmosChunkSnapshotFields.Gases,
+            (in snapshot, index) => snapshot.VoxelRoomMap[index] == VoxelClassification.RoomVoid
+                ? float.NaN
+                : FlowFieldMath.GetDensity(snapshot.Gases, index, configProvider())));
+
+        Register(new WorkbenchField(
+            "densityGradient",
+            "kg/m4",
+            DensityName,
+            static (in input, destination) => FlowFieldMath.ComputeGradientMagnitude(
+                input.Source,
+                input.Size,
+                input.VoxelEdge,
+                destination)));
+
+        Register(CreateSchlieren("schlieren", FlowFieldMath.DefaultSchlierenSteepness));
+        RegisterResolver(static name =>
+        {
+            if (!name.StartsWith(SchlierenPrefix, StringComparison.OrdinalIgnoreCase) ||
+                !float.TryParse(
+                    name.AsSpan(SchlierenPrefix.Length),
+                    NumberStyles.Float,
+                    CultureInfo.InvariantCulture,
+                    out float steepness) ||
+                !float.IsFinite(steepness) ||
+                steepness <= 0f)
+            {
+                return null;
+            }
+
+            return CreateSchlieren(
+                SchlierenPrefix + steepness.ToString("R", CultureInfo.InvariantCulture),
+                steepness);
+        });
+    }
+
+    private static WorkbenchField CreateSchlieren(string name, float steepness)
+    {
+        return new WorkbenchField(
+            name,
+            string.Empty,
+            DensityName,
+            (in input, destination) =>
+            {
+                FlowFieldMath.ComputeGradientMagnitude(input.Source, input.Size, input.VoxelEdge, destination);
+                float reference = input.SchlierenReference ?? FlowFieldMath.MaximumFinite(destination);
+                for (int index = 0; index < destination.Length; index++)
+                    destination[index] = FlowFieldMath.Schlieren(destination[index], reference, steepness);
+            },
+            true);
     }
 
     /// <summary>
@@ -232,7 +470,8 @@ public sealed class WorkbenchFieldRegistry
             return field;
 
         throw new KeyNotFoundException(
-            $"Unknown field '{name}'. Known fields: {string.Join(", ", Names)}, {MolesPrefix}<gasId>.");
+            $"Unknown field '{name}'. Known fields: {string.Join(", ", Names)}, {MolesPrefix}<gasId>, " +
+            $"{SchlierenPrefix}<k>.");
     }
 
     /// <summary>

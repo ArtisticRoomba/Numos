@@ -25,6 +25,11 @@ public enum GradientStrength
 
 internal sealed record ScalingWorkloadOptions
 {
+    /// <summary>
+    ///     Which built-in stages carry bulk flow. Legacy by default so every existing sweep keeps measuring what it
+    ///     always did. Euler swaps <c>advection</c> and <c>boundary-flow</c> for the single <c>euler-flow</c> stage.
+    /// </summary>
+    internal AtmosTransportModel TransportModel { get; init; } = AtmosTransportModel.Legacy;
     internal int ChunkWidth { get; init; } = 8;
     internal int ChunkHeight { get; init; } = 8;
     internal int ChunkDepth { get; init; } = 8;
@@ -32,6 +37,11 @@ internal sealed record ScalingWorkloadOptions
     internal int AwakeChunkCount { get; init; } = 4;
     internal double ActiveVoxelFraction { get; init; } = 1d;
     internal int GasCount { get; init; } = 8;
+    /// <summary>
+    ///     How many of the registered gases are injected, lowest ids first, or <see langword="null" /> for all of
+    ///     them. Separates registry width from the species a voxel actually carries.
+    /// </summary>
+    internal int? PresentGasCount { get; init; }
     internal int ReactionCount { get; init; }
     internal ReactionWorkload ReactionWorkload { get; init; }
     internal int CondensingGasCount { get; init; }
@@ -43,4 +53,5 @@ internal sealed record ScalingWorkloadOptions
 
     internal int VoxelCount => checked(ChunkWidth * ChunkHeight * ChunkDepth);
     internal int ActiveVoxelCount => (int)Math.Round(VoxelCount * ActiveVoxelFraction, MidpointRounding.AwayFromZero);
+    internal int InjectedGasCount => PresentGasCount ?? GasCount;
 }

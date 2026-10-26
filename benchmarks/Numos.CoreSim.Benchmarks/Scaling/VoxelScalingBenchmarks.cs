@@ -44,7 +44,7 @@ public class VoxelScalingBenchmarks : ScalingBenchmarkBase
     [Benchmark]
     public void Advection_VoxelScaling()
     {
-        Workload.Steps[0].Solver(Workload.Context);
+        Workload.FlowStep.Solver(Workload.Context);
     }
 
     /// <summary>
@@ -86,6 +86,6 @@ public class OccupancyScalingBenchmarks : ScalingBenchmarkBase
     [Benchmark]
     public void Advection_OccupancyScaling()
     {
-        Workload.Steps[0].Solver(Workload.Context);
+        Workload.FlowStep.Solver(Workload.Context);
     }
 }

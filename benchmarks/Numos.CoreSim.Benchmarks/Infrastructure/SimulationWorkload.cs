@@ -1,4 +1,5 @@
 using Numos.CoreSim.Datatypes.Primitives;
+using Numos.CoreSim.EulerFlow;
 using Numos.CoreSim.GasReactions;
 using Numos.CoreSim.Replay;
 using Numos.CoreSim.Solvers;
@@ -12,7 +13,13 @@ internal sealed class SimulationWorkload : IDisposable
     ///     The tick <see cref="Initial" /> is restored at, one short of a thermodynamics tick.
     /// </summary>
     internal const int InitialTickCount = AtmosSolverConstants.ThermodynamicsTickInterval - 1;
+
+    /// <summary>
+    ///     Moles every active voxel starts with, split evenly over the injected gases before the gradients scale it.
+    /// </summary>
+    internal const float VoxelMoles = 20f;
     private readonly DefaultAtmosSolvers _solvers;
+    private readonly BenchmarkSolverStep? _boundaryFlowStep;
 
     internal SimulationWorkload(int chunks, int activeVoxels, int gases, bool reactions = false, bool condensation = false)
         : this(
@@ -34,14 +41,18 @@ internal sealed class SimulationWorkload : IDisposable
         if (options.AwakeChunkCount > options.RegisteredChunkCount)
             throw new ArgumentException("Awake chunks cannot exceed registered chunks.", nameof(options));
 
-        if (options.GasCount <= 0 || options.CondensingGasCount < 0 || options.CondensingGasCount > options.GasCount)
+        if (options.GasCount <= 0 || options.CondensingGasCount < 0 || options.CondensingGasCount > options.GasCount ||
+            options.InjectedGasCount <= 0 || options.InjectedGasCount > options.GasCount)
             throw new ArgumentException("Gas dimensions are invalid.", nameof(options));
 
         if (options.ActiveVoxelCount is < 0 or > AtmosChunkConstants.MaximumVoxelCount)
             throw new ArgumentException("Active voxel count is invalid.", nameof(options));
 
         Options = options;
-        Kernel = new AtmosKernel(options.ChunkWidth, options.ChunkHeight, options.ChunkDepth);
+        Kernel = new AtmosKernel(options.ChunkWidth, options.ChunkHeight, options.ChunkDepth)
+        {
+            TransportModel = options.TransportModel
+        };
         _solvers = new DefaultAtmosSolvers(options.ChunkWidth, options.ChunkHeight, options.ChunkDepth);
         var config = CreateConfig(options);
         Kernel.SetAtmosConfig(config.CreateSnapshot());
@@ -51,14 +62,25 @@ internal sealed class SimulationWorkload : IDisposable
         for (int index = 0; index < positions.Length; index++)
             CreateChunk(options, positions[index], index, index < options.AwakeChunkCount);
 
-        Steps =
-        [
-            new BenchmarkSolverStep(_solvers.SolveAdvection),
-            new BenchmarkSolverStep(_solvers.SolveBoundaryFlow),
-            new BenchmarkSolverStep(_solvers.SolveThermodynamics),
-            new BenchmarkSolverStep(_solvers.SolveThermalBoundary),
-            new BenchmarkSolverStep(_solvers.SolveGasReactions)
-        ];
+        ThermodynamicsStep = new BenchmarkSolverStep("thermodynamics", _solvers.SolveThermodynamics);
+        ThermalBoundaryStep = new BenchmarkSolverStep("thermal-boundary", _solvers.SolveThermalBoundary);
+        ReactionsStep = new BenchmarkSolverStep("gas-reactions", _solvers.SolveGasReactions);
+        switch (options.TransportModel)
+        {
+            case AtmosTransportModel.Legacy:
+                FlowStep = new BenchmarkSolverStep("advection", _solvers.SolveAdvection);
+                _boundaryFlowStep = new BenchmarkSolverStep("boundary-flow", _solvers.SolveBoundaryFlow);
+                Steps = [FlowStep, _boundaryFlowStep.Value, ThermodynamicsStep, ThermalBoundaryStep, ReactionsStep];
+                break;
+            case AtmosTransportModel.Euler:
+                FlowStep = new BenchmarkSolverStep(
+                    "euler-flow",
+                    context => LastFlowDiagnostics = _solvers.SolveEulerFlow(context));
+                Steps = [FlowStep, ThermodynamicsStep, ThermalBoundaryStep, ReactionsStep];
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(options), options.TransportModel, "Unknown transport model.");
+        }
 
         Kernel.TickCount = InitialTickCount;
         Initial = Kernel.CaptureCheckpoint();
@@ -72,7 +94,34 @@ internal sealed class SimulationWorkload : IDisposable
     internal AtmosSolverConfigSnapshot Config { get; } = new();
     internal AtmosChunk[] Chunks { get; private set; } = [];
     internal AtmosSolverExecutionContext Context { get; private set; } = null!;
+
+    /// <summary>
+    ///     The built-in stages of the selected transport model, in pipeline order. Index into it only through the
+    ///     named step properties: the layout differs between models.
+    /// </summary>
     internal BenchmarkSolverStep[] Steps { get; }
+
+    /// <summary>
+    ///     The stage that moves gas inside chunks: <c>advection</c> under the legacy model, <c>euler-flow</c> under
+    ///     Euler.
+    /// </summary>
+    internal BenchmarkSolverStep FlowStep { get; }
+
+    /// <summary>
+    ///     The legacy <c>boundary-flow</c> stage. Euler has no separate cross-chunk stage, so this throws there.
+    /// </summary>
+    internal BenchmarkSolverStep BoundaryFlowStep =>
+        _boundaryFlowStep ?? throw new InvalidOperationException("The Euler transport model has no boundary-flow stage.");
+
+    internal BenchmarkSolverStep ThermodynamicsStep { get; }
+    internal BenchmarkSolverStep ThermalBoundaryStep { get; }
+    internal BenchmarkSolverStep ReactionsStep { get; }
+
+    /// <summary>
+    ///     What the most recent <see cref="FlowStep" /> call did under the Euler model. All zeros under legacy.
+    /// </summary>
+    internal AtmosFlowDiagnostics LastFlowDiagnostics { get; private set; }
+
     internal AtmosSimulationCheckpoint Initial { get; }
     internal int BoundaryEventCount { get; }
     internal int ThermalBoundaryEdgeCount { get; }
@@ -84,14 +133,51 @@ internal sealed class SimulationWorkload : IDisposable
         Kernel.Dispose();
     }
 
-    internal void Reset(int precedingStages = 0)
+    /// <summary>
+    ///     Restores <see cref="Initial" /> and, when a step is given, runs every step that precedes it so its
+    ///     transient inputs (boundary events, thermal edges) exist again.
+    /// </summary>
+    internal void Reset(BenchmarkSolverStep? before = null)
     {
-        Kernel.RestoreCheckpoint(Initial, InitialTickCount);
+        Restore(Initial);
+        if (before == null)
+            return;
+
+        int end = Array.IndexOf(Steps, before.Value);
+        if (end < 0)
+            throw new ArgumentException("The step does not belong to this workload's transport model.", nameof(before));
+
+        for (int stage = 0; stage < end; stage++)
+            Steps[stage].Solver(Context);
+    }
+
+    /// <summary>
+    ///     Installs a checkpoint captured from this workload at <see cref="InitialTickCount" /> and drops solver
+    ///     scratch state, exactly as <see cref="Reset" /> does for <see cref="Initial" />.
+    /// </summary>
+    internal void Restore(AtmosSimulationCheckpoint checkpoint)
+    {
+        Kernel.RestoreCheckpoint(checkpoint, InitialTickCount);
         _solvers.ClearTransientState();
         Config.SolverData.Clear();
         RefreshContext();
-        for (int stage = 0; stage < precedingStages; stage++)
-            Steps[stage].Solver(Context);
+    }
+
+    /// <summary>
+    ///     Captures the current grid so a benchmark can return to a state it prepared itself.
+    /// </summary>
+    internal AtmosSimulationCheckpoint Capture()
+    {
+        return Kernel.CaptureCheckpoint();
+    }
+
+    /// <summary>
+    ///     Adds gas to one voxel of the current grid, the way the workload populates its chunks.
+    /// </summary>
+    internal void Inject(int chunkIndex, Int3 voxel, int gas, float moles, float temperature)
+    {
+        AtmosChunk chunk = Chunks[chunkIndex];
+        GasInjectionSolver.Inject(chunk, chunk.GetIndex(voxel), gas, moles, temperature, Config);
     }
 
     internal void SetTickCount(int tickCount)
@@ -110,6 +196,7 @@ internal sealed class SimulationWorkload : IDisposable
                 {
                     Name = $"Gas{gas:D3}", DiffusionCoefficient = 0.02f,
                     MolarHeatCapacityAtConstantVolume = 20f + gas % 11,
+                    MolarMass = 0.028f + gas % 5 * 0.004f,
                     CondensationEnabled = gas < options.CondensingGasCount,
                     BoilingPoint = 373f, MolarEnthalpyOfVaporization = 40000f
                 });
@@ -176,11 +263,12 @@ internal sealed class SimulationWorkload : IDisposable
             chunk.SetVoxelClassification((ushort)voxel, VoxelClassification.RoomSolid);
 
         chunk.Wake();
+        int injectedGases = options.InjectedGasCount;
         for (ushort voxel = 0; voxel < activeVoxels; voxel++)
         {
-            for (int gas = 0; gas < options.GasCount; gas++)
+            for (int gas = 0; gas < injectedGases; gas++)
             {
-                float baseMoles = 20f / options.GasCount;
+                float baseMoles = VoxelMoles / injectedGases;
                 float moles = gas < options.CondensingGasCount
                     ? voxel < supersaturatedVoxels ? 80f : 0.02f
                     : baseMoles *
@@ -192,7 +280,7 @@ internal sealed class SimulationWorkload : IDisposable
             }
         }
 
-        int expectedActiveGases = activeVoxels == 0 ? 0 : options.GasCount;
+        int expectedActiveGases = activeVoxels == 0 ? 0 : injectedGases;
         if (!chunk.IsAwake || chunk.ActiveAirCount != activeVoxels || chunk.ActiveGasCount != expectedActiveGases)
             throw new InvalidOperationException("Benchmark dimensions do not match the populated workload.");
     }
@@ -284,4 +372,7 @@ internal sealed class SimulationWorkload : IDisposable
     }
 }
 
-internal readonly record struct BenchmarkSolverStep(Action<AtmosSolverExecutionContext> Solver);
+/// <summary>
+///     One built-in stage as the benchmarks invoke it: its pipeline name and the call that runs it.
+/// </summary>
+internal readonly record struct BenchmarkSolverStep(string Name, Action<AtmosSolverExecutionContext> Solver);

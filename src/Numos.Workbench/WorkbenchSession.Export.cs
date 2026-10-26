@@ -83,7 +83,8 @@ public sealed class ProbeRecorder : IDisposable
         IReadOnlyList<ProbePoint> points,
         IReadOnlyList<string> fields,
         string path,
-        AtmosSimulationId? simulation)
+        AtmosSimulationId? simulation,
+        WorkbenchFieldOptions options)
     {
         _session = session;
         foreach (var point in points)
@@ -92,7 +93,7 @@ public sealed class ProbeRecorder : IDisposable
                 throw new ArgumentException($"Probe name '{point.Name}' must be nonblank and free of commas and quotes.");
         }
 
-        _sampler = session.CreateSampler(points.Select(static point => point.Voxel).ToArray(), fields, simulation);
+        _sampler = session.CreateSampler(points.Select(static point => point.Voxel).ToArray(), fields, simulation, options);
         _values = new float[points.Count * fields.Count];
         Path = System.IO.Path.GetFullPath(path);
         ExportFiles.EnsureParentDirectory(Path);
@@ -157,12 +158,17 @@ public sealed partial class WorkbenchSession
     /// <param name="fieldNames">Field names from <see cref="Fields" />.</param>
     /// <param name="path">The CSV file to create or replace.</param>
     /// <param name="simulation">The simulation to read, or <see langword="null" /> for the active one.</param>
+    /// <param name="options">
+    ///     Field options. A probe has no region, so a `schlieren` column needs
+    ///     <see cref="WorkbenchFieldOptions.SchlierenReference" /> here.
+    /// </param>
     /// <returns>A recorder. Dispose it to close the file.</returns>
     public ProbeRecorder CreateProbeRecorder(
         IReadOnlyList<ProbePoint> points,
         IReadOnlyList<string> fieldNames,
         string path,
-        AtmosSimulationId? simulation = null)
+        AtmosSimulationId? simulation = null,
+        WorkbenchFieldOptions options = default)
     {
         return Guard(
             "Could not open the probe file",
@@ -171,7 +177,7 @@ public sealed partial class WorkbenchSession
                 RequireWorld();
                 ArgumentNullException.ThrowIfNull(points);
                 ArgumentException.ThrowIfNullOrWhiteSpace(path);
-                var recorder = new ProbeRecorder(this, points, fieldNames, path, simulation);
+                var recorder = new ProbeRecorder(this, points, fieldNames, path, simulation, options);
                 Log.Write(
                     WorkbenchLogLevel.Info,
                     ExportSource,
@@ -259,16 +265,20 @@ public sealed partial class WorkbenchSession
     ///     with the field name and turns `:` into `_`.
     /// </param>
     /// <param name="simulation">The simulation to read, or <see langword="null" /> for the active one.</param>
+    /// <param name="options">
+    ///     Field options. Without a schlieren reference, `schlieren` normalizes by the largest gradient in the region.
+    /// </param>
     /// <returns>One entry per field with the path, the shape (z, y, x), and the finite range.</returns>
     public IReadOnlyList<FieldExport> ExportRegion(
         VoxelBox box,
         IReadOnlyList<string> fieldNames,
         string pathTemplate,
-        AtmosSimulationId? simulation = null)
+        AtmosSimulationId? simulation = null,
+        WorkbenchFieldOptions options = default)
     {
         return Guard(
             "Could not export the region",
-            () => ExportCore(box, GetShape(box), fieldNames, pathTemplate, simulation, "region"));
+            () => ExportCore(box, GetShape(box), fieldNames, pathTemplate, simulation, "region", options));
     }
 
     /// <summary>
@@ -279,6 +289,9 @@ public sealed partial class WorkbenchSession
     /// <param name="fieldNames">Field names from <see cref="Fields" />.</param>
     /// <param name="pathTemplate">The file path, as for <see cref="ExportRegion" />.</param>
     /// <param name="simulation">The simulation to read, or <see langword="null" /> for the active one.</param>
+    /// <param name="options">
+    ///     Field options. Without a schlieren reference, `schlieren` normalizes by the largest gradient in the slice.
+    /// </param>
     /// <returns>
     ///     One entry per field. The shape is (v, u), where u runs along the first remaining axis and v along the second.
     ///     For a Z slice, u is x and v is y. For a Y slice, u is x and v is z. For an X slice, u is z and v is y.
@@ -292,14 +305,23 @@ public sealed partial class WorkbenchSession
         int index,
         IReadOnlyList<string> fieldNames,
         string pathTemplate,
-        AtmosSimulationId? simulation = null)
+        AtmosSimulationId? simulation = null,
+        WorkbenchFieldOptions options = default)
     {
         return Guard(
             "Could not export the slice",
             () =>
             {
                 var box = GetSliceBox(axis, index, simulation);
-                return ExportCore(box, GetSliceShape(axis, box), fieldNames, pathTemplate, simulation, $"{axis} slice {index}", axis);
+                return ExportCore(
+                    box,
+                    GetSliceShape(axis, box),
+                    fieldNames,
+                    pathTemplate,
+                    simulation,
+                    $"{axis} slice {index}",
+                    options,
+                    axis);
             });
     }
 
@@ -319,13 +341,17 @@ public sealed partial class WorkbenchSession
     /// <param name="box">The inclusive box in global voxel coordinates.</param>
     /// <param name="fieldNames">Field names from <see cref="Fields" />.</param>
     /// <param name="simulation">The simulation to read, or <see langword="null" /> for the active one.</param>
+    /// <param name="options">Field options, as for <see cref="ExportRegion" />.</param>
     /// <returns>One entry per field, with a <see langword="null" /> path.</returns>
     public IReadOnlyList<FieldExport> ReadRegion(
         VoxelBox box,
         IReadOnlyList<string> fieldNames,
-        AtmosSimulationId? simulation = null)
+        AtmosSimulationId? simulation = null,
+        WorkbenchFieldOptions options = default)
     {
-        return Guard("Could not read the region", () => ExportCore(box, GetShape(box), fieldNames, null, simulation, "region"));
+        return Guard(
+            "Could not read the region",
+            () => ExportCore(box, GetShape(box), fieldNames, null, simulation, "region", options));
     }
 
     private IReadOnlyList<FieldExport> ExportCore(
@@ -335,6 +361,7 @@ public sealed partial class WorkbenchSession
         string? pathTemplate,
         AtmosSimulationId? simulation,
         string description,
+        WorkbenchFieldOptions options,
         SliceAxis? sliceAxis = null)
     {
         RequireWorld();
@@ -350,7 +377,7 @@ public sealed partial class WorkbenchSession
                 throw new ArgumentException("The path must contain {field} when you export more than one field.");
         }
 
-        float[][] values = ReadBox(box, fieldNames, simulation);
+        float[][] values = ReadBox(box, fieldNames, simulation, options);
         if (sliceAxis == SliceAxis.X)
         {
             // ReadBox returns (z, y, 1). An X slice is stored as (v, u) = (y, z).
@@ -408,13 +435,24 @@ public sealed partial class WorkbenchSession
     /// <param name="scale">The pixel size of one voxel. Must be at least 1.</param>
     /// <param name="levels">The number of color steps. Use a high number for a smooth gradient.</param>
     /// <param name="simulation">The simulation to render, or <see langword="null" /> for the active one.</param>
+    /// <param name="options">
+    ///     Field options. For the `schlieren` visualization, <see cref="WorkbenchFieldOptions.SchlierenReference" /> is
+    ///     the gradient that maps to black. It applies when <paramref name="range" /> is <see langword="null" />.
+    /// </param>
     /// <returns>
     ///     The image. The first axis (u) runs left to right and the second (v) runs bottom to top, as in
     ///     <see cref="ExportSlice" />. Voxels the visualization hides are dark gray if solid and black if no chunk exists.
     /// </returns>
     /// <remarks>
-    ///     The color comes from the visualization, so the image matches what the viewer draws for the same voxel. The
-    ///     automatic range covers the finite values of the air voxels in the slice.
+    ///     <para>
+    ///         The color comes from the visualization, so the image matches what the viewer draws for the same voxel.
+    ///         The automatic range covers the finite values of the air voxels in the slice.
+    ///     </para>
+    ///     <para>
+    ///         The `schlieren` visualization maps the range maximum to black. Its automatic range is zero to the
+    ///         largest density gradient in the slice, the same normalization as the `schlieren` export field. Pass a
+    ///         fixed range or a schlieren reference to keep one scale across frames.
+    ///     </para>
     /// </remarks>
     public SliceImage RenderSlice(
         SliceAxis axis,
@@ -423,7 +461,8 @@ public sealed partial class WorkbenchSession
         VisualizationRange? range = null,
         int scale = 1,
         int levels = 256,
-        AtmosSimulationId? simulation = null)
+        AtmosSimulationId? simulation = null,
+        WorkbenchFieldOptions options = default)
     {
         return Guard(
             "Could not render the slice",
@@ -445,32 +484,45 @@ public sealed partial class WorkbenchSession
 
                 var builder = new SimulationFrameBuilder(config);
                 var fields = builder.GetRequiredSnapshotFields(visualizationId);
+                var requirements = builder.Visualizations.GetRequired(visualizationId).RequiredData;
+                bool needsNeighbors = (requirements & VisualizationDataRequirements.DensityGradient) != 0;
                 var dimensions = target.ChunkDimensions;
                 var minChunk = VoxelBox.SplitGlobal(box.Min, dimensions, out _);
                 var maxChunk = VoxelBox.SplitGlobal(box.Max, dimensions, out _);
-                var existing = new HashSet<Int3>();
-                foreach (var handle in target.GetChunkHandles())
-                    existing.Add(handle.Position);
+                var existing = GetChunkPositions(target);
 
+                // A gradient reads the face neighbors, so the chunks next to the slice supply the halo.
+                int halo = needsNeighbors ? 1 : 0;
                 var snapshots = new List<AtmosChunkSnapshot>();
-                for (int cz = minChunk.Z; cz <= maxChunk.Z; cz++)
-                for (int cy = minChunk.Y; cy <= maxChunk.Y; cy++)
-                for (int cx = minChunk.X; cx <= maxChunk.X; cx++)
+                var scope = new HashSet<Int3>();
+                for (int cz = minChunk.Z - halo; cz <= maxChunk.Z + halo; cz++)
+                for (int cy = minChunk.Y - halo; cy <= maxChunk.Y + halo; cy++)
+                for (int cx = minChunk.X - halo; cx <= maxChunk.X + halo; cx++)
                 {
                     var position = new Int3(cx, cy, cz);
                     if (existing.Contains(position) &&
                         target.TryGetChunkSnapshot(new AtmosChunkHandle(position), default, fields, out var snapshot))
                     {
                         snapshots.Add(snapshot);
+                        if (cx >= minChunk.X && cx <= maxChunk.X &&
+                            cy >= minChunk.Y && cy <= maxChunk.Y &&
+                            cz >= minChunk.Z && cz <= maxChunk.Z)
+                        {
+                            scope.Add(position);
+                        }
                     }
                 }
 
-                var requirements = builder.Visualizations.GetRequired(visualizationId).RequiredData;
-                var effectiveRange = range ?? GetAirRange(snapshots, box, dimensions, requirements);
+                var effectiveRange = range ??
+                                     (needsNeighbors
+                                         ? GetGradientRange(box, options, simulation)
+                                         : GetAirRange(snapshots, box, dimensions, requirements, config));
+
                 var frame = builder.BuildSimulation(
                     snapshots,
                     visualizationId,
                     0,
+                    mappingScope: scope,
                     rangeOverride: effectiveRange,
                     resolution: levels);
 
@@ -519,10 +571,12 @@ public sealed partial class WorkbenchSession
         List<AtmosChunkSnapshot> snapshots,
         VoxelBox box,
         Int3 dimensions,
-        VisualizationDataRequirements requirements)
+        VisualizationDataRequirements requirements,
+        AtmosConfig config)
     {
         bool useTemperature = (requirements & VisualizationDataRequirements.Temperature) != 0;
         bool usePressure = (requirements & VisualizationDataRequirements.Pressure) != 0;
+        bool useDensity = (requirements & VisualizationDataRequirements.Density) != 0;
         float minimum = float.PositiveInfinity;
         float maximum = float.NegativeInfinity;
         foreach (var snapshot in snapshots)
@@ -545,10 +599,16 @@ public sealed partial class WorkbenchSession
                     continue;
 
                 if (useTemperature && index < snapshot.Temperature.Length)
-                    Include(snapshot.Temperature[index], ref minimum, ref maximum);
+                    FiniteRange.Include(snapshot.Temperature[index], ref minimum, ref maximum);
 
                 if (usePressure && index < snapshot.TotalPressure.Length)
-                    Include(snapshot.TotalPressure[index], ref minimum, ref maximum);
+                    FiniteRange.Include(snapshot.TotalPressure[index], ref minimum, ref maximum);
+
+                if (useDensity && snapshot.Gases != null)
+                {
+                    float density = FlowFieldMath.GetDensity(snapshot.Gases, index, config);
+                    FiniteRange.Include(density, ref minimum, ref maximum);
+                }
             }
         }
 
@@ -557,13 +617,19 @@ public sealed partial class WorkbenchSession
             : null;
     }
 
-    private static void Include(float value, ref float minimum, ref float maximum)
+    /// <summary>
+    ///     Picks the schlieren color range of a slice: zero to the reference gradient.
+    /// </summary>
+    /// <returns>
+    ///     The range, or <see langword="null" /> when the slice has no gradient and no valid reference was given. The
+    ///     builder then draws a uniform picture.
+    /// </returns>
+    private VisualizationRange? GetGradientRange(VoxelBox box, WorkbenchFieldOptions options, AtmosSimulationId? simulation)
     {
-        if (!float.IsFinite(value))
-            return;
+        float reference = options.SchlierenReference ??
+                          FlowFieldMath.MaximumFinite(ReadBox(box, ["densityGradient"], simulation)[0]);
 
-        minimum = Math.Min(minimum, value);
-        maximum = Math.Max(maximum, value);
+        return float.IsFinite(reference) && reference > 0f ? new VisualizationRange(0f, reference) : null;
     }
 
     private static (byte R, byte G, byte B) ResolvePixel(SimulationDrawData frame, Int3 voxel, Int3 dimensions)

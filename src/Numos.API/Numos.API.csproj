@@ -20,8 +20,10 @@
                           OutputItemType="Analyzer"
                           ReferenceOutputAssembly="false"
                           GlobalPropertiesToRemove="PublishAot;PublishTrimmed;RuntimeIdentifier;SelfContained"/>
-        <!-- Built here so pack can ship it under analyzers/; it isn't a dependency of the package. -->
+        <!-- Built here so pack can ship it under analyzers/; it isn't a dependency of the package. It also runs on
+             this project, which declares generated snapshots and serializable types of its own. -->
         <ProjectReference Include="..\Numos.API.Generators\Numos.API.Generators.csproj"
+                          OutputItemType="Analyzer"
                           ReferenceOutputAssembly="false"
                           PrivateAssets="all"
                           GlobalPropertiesToRemove="PublishAot;PublishTrimmed;RuntimeIdentifier;SelfContained"/>

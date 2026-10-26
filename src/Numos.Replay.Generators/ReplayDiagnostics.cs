@@ -55,21 +55,4 @@ internal static class ReplayDiagnostics
         Category,
         DiagnosticSeverity.Error,
         true);
-
-    public static readonly DiagnosticDescriptor UnsupportedCheckpointField = new(
-        "NUMOSCHECKPTGEN001",
-        "Unsupported checkpoint field type",
-        "Checkpoint field '{0}' has type '{1}', which the checkpoint field generator can't copy, hash, or encode; " +
-        "leave it untagged and hand-write its capture, hash, and wire code",
-        Category,
-        DiagnosticSeverity.Error,
-        true);
-
-    public static readonly DiagnosticDescriptor DuplicateCheckpointOrder = new(
-        "NUMOSCHECKPTGEN002",
-        "Duplicate checkpoint field order",
-        "More than one member in '{0}' declares checkpoint field order {1}",
-        Category,
-        DiagnosticSeverity.Error,
-        true);
 }

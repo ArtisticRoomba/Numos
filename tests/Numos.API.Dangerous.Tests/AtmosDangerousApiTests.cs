@@ -84,6 +84,30 @@ public sealed class AtmosDangerousApiTests
     }
 
     [Test]
+    public void GetChunk_ExposesLiveMomentumSpansOverEveryVoxel()
+    {
+        using var simulation = new AtmosSimulation(new TestAtmosConfig(), 2, 2, 1);
+        var chunk = simulation.CreateAndRegisterChunk(default);
+        simulation.SetChunkClassification(chunk, new VoxelClassification(7));
+        simulation.AddGasToVoxel(chunk, 3, "TestGas2", 1f, 300f);
+        simulation.SetVoxelMomentum(chunk, 3, 1f, 2f, 3f);
+
+        var rawChunk = simulation.Dangerous().GetChunk(chunk);
+        rawChunk.MomentumY[3] = -2f;
+        int voxelCount = rawChunk.VoxelCount;
+        int[] lengths = [rawChunk.MomentumX.Length, rawChunk.MomentumY.Length, rawChunk.MomentumZ.Length];
+        float[] stored = [rawChunk.MomentumX[3], rawChunk.MomentumY[3], rawChunk.MomentumZ[3]];
+        var checkpoint = simulation.CaptureCheckpoint().Chunks.Single();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(lengths, Is.All.EqualTo(voxelCount));
+            Assert.That(stored, Is.EqualTo(new[] { 1f, -2f, 3f }));
+            Assert.That(checkpoint.MomentumY[3], Is.EqualTo(-2f), "The span writes through to kernel storage.");
+        });
+    }
+
+    [Test]
     public void WorldSolver_CanResolvePortalNeighborStorage()
     {
         using var world = new AtmosWorld(new TestAtmosConfig());
@@ -134,7 +158,7 @@ public sealed class AtmosDangerousApiTests
         simulation.World.Solvers.Register(
             "inject",
             _ => simulation.AddGasToVoxel(chunk, 0, 1, 1f, 600f),
-            before: AtmosBuiltInSolvers.Advection);
+            before: AtmosBuiltInSolvers.EulerFlow);
 
         simulation.Tick();
 

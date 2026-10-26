@@ -44,3 +44,7 @@ analyzers in other assemblies.
 The analyzer treats unannotated numeric values as unknown. Annotate storage boundaries and important intermediate
 values when you add a solver path. A cast like `(Pascal)1f` on a literal adopts the surrounding quantity, so it does
 not trigger a diagnostic. Use typed variables or parameters when you test a deliberate mismatch.
+
+Vector kernels put the alias in the lane type. A `Vector<Pascal>` holds a pressure in every lane, and a load from a
+`Pascal[]` keeps it. Masks, and hoisted constants such as `Vector<float> zero` that meet several quantities, stay
+unannotated. A shared spill buffer stays a plain `Span<float>` with QNT002 suppressed around the stores into it.

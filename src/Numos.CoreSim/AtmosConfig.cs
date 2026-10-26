@@ -1,4 +1,5 @@
 using Numos.CoreSim.Solvers;
+using Numos.CoreSim.State;
 using Numos.Maths;
 using Magnitudo;
 
@@ -8,10 +9,18 @@ namespace Numos.CoreSim;
 ///     Editable simulation configuration.
 /// </summary>
 /// <remarks>
-///     Nothing here is validated on assignment. <see cref="CreateSnapshot" /> normalizes out-of-range values and
-///     produces the immutable <see cref="AtmosConfigSnapshot" /> a simulation actually runs with.
+///     <para>
+///         Nothing here is validated on assignment. <see cref="CreateSnapshot" /> normalizes out-of-range values and
+///         produces the immutable <see cref="AtmosConfigSnapshot" /> a simulation actually runs with.
+///     </para>
+///     <para>
+///         The <see cref="NumosSerializeAttribute" /> members are the configuration's state schema. A snapshot keeps
+///         its normalized values in one of these, so the generated equality, hash, and wire code cover both types. A
+///         new setting needs <see cref="NumosSerializeAttribute" /> here, its normalization in the snapshot
+///         constructor, and a snapshot property of the same name and type.
+///     </para>
 /// </remarks>
-public class AtmosConfig : IAtmosConfig
+public partial class AtmosConfig : IAtmosConfig
 {
     /// <summary>
     ///     Creates a configuration with no registered gases and every setting at its <see cref="AtmosConfigDefaults" />
@@ -50,11 +59,13 @@ public class AtmosConfig : IAtmosConfig
         MaxPressureTransferFractionPerNeighbor = source.MaxPressureTransferFractionPerNeighbor;
         AccumulatorWakeThreshold = source.AccumulatorWakeThreshold;
         AccumulatorMaxAliveTicks = source.AccumulatorMaxAliveTicks;
+        ReferenceMolarMass = source.ReferenceMolarMass;
     }
 
     /// <summary>
     ///     Gases registered to the simulation. A gas's index in this registry is its gas ID.
     /// </summary>
+    [NumosSerialize]
     public GasRegistry GasRegistry { get; set; } = [];
 
     /// <summary>
@@ -64,6 +75,9 @@ public class AtmosConfig : IAtmosConfig
     ///     Keys must be unique and nonempty. Register a <c>GasReactionConfig</c> here to configure reactions,
     ///     or supply an <see cref="IAtmosSolverConfiguration" /> for a custom solver without changing Numos.
     /// </remarks>
+    // Saved and hashed after the schema fields, as keyed sections: entries are polymorphic, so the codec needs the key
+    // to find each one's type (see AtmosConfigSnapshotCodec).
+    [NumosIgnore]
     public List<IAtmosSolverConfiguration> SolverConfigurations { get; set; } = [];
 
     IReadOnlyList<IAtmosSolverConfiguration> IAtmosConfig.SolverConfigurations => SolverConfigurations;
@@ -73,6 +87,7 @@ public class AtmosConfig : IAtmosConfig
     /// </summary>
     /// <remarks>Non-finite and nonpositive values are normalized to <see cref="AtmosConfigDefaults.GlobalTemperature" />.</remarks>
     [Quantity("temperature")]
+    [NumosSerialize]
     public Kelvin GlobalTemperature { get; set; } = AtmosConfigDefaults.GlobalTemperature;
 
     /// <summary>
@@ -86,6 +101,7 @@ public class AtmosConfig : IAtmosConfig
     ///     blended or transferred temperature.
     /// </remarks>
     [Quantity("temperature")]
+    [NumosSerialize]
     public Kelvin DefaultTemperatureFallback { get; set; } = AtmosConfigDefaults.DefaultTemperatureFallback;
 
     /// <summary>
@@ -98,6 +114,7 @@ public class AtmosConfig : IAtmosConfig
     ///     <c>5R/2</c> by the simulation.
     /// </remarks>
     [Quantity("molarHeatCapacity")]
+    [NumosSerialize]
     public JoulePerMoleKelvin DefaultMolarHeatCapacityAtConstantVolume { get; set; } =
         AtmosConfigDefaults.DefaultMolarHeatCapacityAtConstantVolume;
 
@@ -109,6 +126,7 @@ public class AtmosConfig : IAtmosConfig
     ///     normalized to <c>1 m³</c> by the simulation.
     /// </remarks>
     [Quantity("volume")]
+    [NumosSerialize]
     public CubicMetre VoxelVolume { get; set; } = AtmosConfigDefaults.VoxelVolume;
 
     /// <summary>
@@ -119,6 +137,7 @@ public class AtmosConfig : IAtmosConfig
     ///     default by the phase-change solver.
     /// </remarks>
     [Quantity("pressure")]
+    [NumosSerialize]
     public Pascal SaturationReferencePressure { get; set; } =
         AtmosConfigDefaults.SaturationReferencePressure;
 
@@ -130,6 +149,7 @@ public class AtmosConfig : IAtmosConfig
     ///     Negative values clamp to zero. Non-finite values disable fallback diffusion.
     /// </remarks>
     [Quantity("diffusivity")]
+    [NumosSerialize]
     public SquareMetrePerSecond DefaultDiffusionCoefficient { get; set; } =
         AtmosConfigDefaults.DefaultDiffusionCoefficient;
 
@@ -138,6 +158,7 @@ public class AtmosConfig : IAtmosConfig
     /// </summary>
     /// <remarks>Non-finite and nonpositive values are normalized to <see cref="AtmosConfigDefaults.SpaceTemperature" />.</remarks>
     [Quantity("temperature")]
+    [NumosSerialize]
     public Kelvin SpaceTemperature { get; set; } = AtmosConfigDefaults.SpaceTemperature;
 
     /// <summary>
@@ -147,6 +168,7 @@ public class AtmosConfig : IAtmosConfig
     ///     Values are clamped to [0, 1]. Non-finite values disable large-delta bulk flow. The solvers cap the
     ///     effective coefficient at 0.5.
     /// </remarks>
+    [NumosSerialize]
     public Scalar BulkFlowCoefficient { get; set; } = AtmosConfigDefaults.BulkFlowCoefficient;
 
     /// <summary>
@@ -157,12 +179,14 @@ public class AtmosConfig : IAtmosConfig
     ///     threshold. Non-finite and negative values are normalized to zero.
     /// </remarks>
     [Quantity("pressure")]
+    [NumosSerialize]
     public Pascal VacuumThreshold { get; set; } = AtmosConfigDefaults.VacuumThreshold;
 
     /// <summary>
     ///     Consecutive ticks below <see cref="SleepEpsilon" /> before a chunk goes to sleep.
     /// </summary>
     /// <remarks>Negative values are normalized to zero.</remarks>
+    [NumosSerialize]
     public int SleepThreshold { get; set; } = AtmosConfigDefaults.SleepThreshold;
 
     /// <summary>
@@ -173,6 +197,7 @@ public class AtmosConfig : IAtmosConfig
     ///     For example, <c>3.5</c> allows a neighboring pressure difference below 3.5%. Non-finite and negative values
     ///     are normalized to zero.
     /// </remarks>
+    [NumosSerialize]
     public Scalar SleepEpsilon { get; set; } = AtmosConfigDefaults.SleepEpsilon;
 
     /// <summary>
@@ -186,6 +211,7 @@ public class AtmosConfig : IAtmosConfig
     ///     values disable thermal diffusion.
     /// </remarks>
     [Quantity("heatCapacity")]
+    [NumosSerialize]
     public JoulePerKelvin ThermalConductance { get; set; } = AtmosConfigDefaults.ThermalConductance;
 
     /// <summary>
@@ -193,6 +219,7 @@ public class AtmosConfig : IAtmosConfig
     ///     thermodynamics tick.
     /// </summary>
     /// <remarks>Values are clamped to [0, 1]. Non-finite values disable condensation.</remarks>
+    [NumosSerialize]
     public Scalar CondensationRateFactor { get; set; } = AtmosConfigDefaults.CondensationRateFactor;
 
     /// <summary>
@@ -202,6 +229,7 @@ public class AtmosConfig : IAtmosConfig
     ///     Values are clamped to [0, 1]. Passive Fickian diffusion is calculated separately and is not capped by this
     ///     value. The built-in solvers do not read this setting, but Numos still captures, hashes, and records it.
     /// </remarks>
+    [NumosSerialize]
     public Scalar MaxPressureTransferFractionPerNeighbor { get; set; } =
         AtmosConfigDefaults.MaxPressureTransferFractionPerNeighbor;
 
@@ -213,6 +241,7 @@ public class AtmosConfig : IAtmosConfig
     ///     setting, but Numos still captures, hashes, and records it.
     /// </remarks>
     [Quantity("pressure")]
+    [NumosSerialize]
     public Pascal AccumulatorWakeThreshold { get; set; } = AtmosConfigDefaults.AccumulatorWakeThreshold;
 
     /// <summary>
@@ -222,7 +251,21 @@ public class AtmosConfig : IAtmosConfig
     ///     Negative values are normalized to zero. The built-in solvers do not read this setting, but Numos still
     ///     captures, hashes, and records it.
     /// </remarks>
+    [NumosSerialize]
     public int AccumulatorMaxAliveTicks { get; set; } = AtmosConfigDefaults.AccumulatorMaxAliveTicks;
+
+    /// <summary>
+    ///     Molar mass assumed for gases whose <see cref="GasProperties.MolarMass" /> is unset, in kilograms per mole
+    ///     (kg/mol).
+    /// </summary>
+    /// <remarks>
+    ///     The compressible transport solver needs a mass for every gas it moves, so a gas without one weighs this
+    ///     much. Non-finite and nonpositive values are normalized to
+    ///     <see cref="AtmosConfigDefaults.ReferenceMolarMass" />, dry air.
+    /// </remarks>
+    [Quantity("molarMass")]
+    [NumosSerialize]
+    public KilogramPerMole ReferenceMolarMass { get; set; } = AtmosConfigDefaults.ReferenceMolarMass;
 
     /// <summary>
     ///     Ideal-gas pressure coefficient <c>R/V</c> for one voxel, in pascals per mole-kelvin (Pa/(mol·K)).
@@ -275,6 +318,28 @@ public class AtmosConfig : IAtmosConfig
         }
 
         return fallback;
+    }
+
+    /// <summary>
+    ///     Resolves the molar mass used for a gas, in kg/mol.
+    /// </summary>
+    /// <param name="gasId">The gas ID. Unregistered IDs are allowed.</param>
+    /// <returns>
+    ///     The gas's configured value when it is finite and positive.
+    ///     Otherwise <see cref="ReferenceMolarMass" />, or dry air if that is invalid too.
+    /// </returns>
+    public KilogramPerMole GetMolarMass(int gasId)
+    {
+        if ((uint)gasId < (uint)GasRegistry.Count)
+        {
+            KilogramPerMole configured = GasRegistry[gasId].MolarMass;
+            if (FloatMath.IsFinitePositive(configured))
+                return configured;
+        }
+
+        return FloatMath.IsFinitePositive(ReferenceMolarMass)
+            ? ReferenceMolarMass
+            : AtmosConfigDefaults.ReferenceMolarMass;
     }
 
     /// <summary>

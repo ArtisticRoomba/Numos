@@ -13,11 +13,12 @@ public partial class SimulationViewer
         int chunkWidth,
         int chunkHeight,
         int chunkDepth,
-        bool includeDefaultGases)
+        bool includeDefaultGases,
+        AtmosTransportModel transportModel = AtmosTransportModel.Euler)
     {
         SimulationFrameBuilder? frameBuilder = null;
         _session.CreateProject(
-            new WorkbenchProjectOptions(projectName, chunkWidth, chunkHeight, chunkDepth, includeDefaultGases),
+            new WorkbenchProjectOptions(projectName, chunkWidth, chunkHeight, chunkDepth, includeDefaultGases, transportModel),
             config =>
             {
                 var visualizations = VisualizationRegistry.CreateDefault(config);
@@ -106,6 +107,9 @@ public partial class SimulationViewer
         _gasRegistryFeedback = null;
         _newGasFeedback = null;
         _configurationFeedback = null;
+        _solverFeedback = null;
+        _solverAddDraft = null;
+        _selectedSolverStage = null;
         ClearConfigurationDrafts();
     }
 

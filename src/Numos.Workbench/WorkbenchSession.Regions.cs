@@ -1,7 +1,9 @@
 using System.Globalization;
+using System.Numerics;
 using Numos.API;
 using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Primitives;
+using Numos.CoreSim.Datatypes.Snapshots;
 using Numos.CoreSim.Replay;
 using Numos.Maths;
 
@@ -25,7 +27,8 @@ public readonly record struct RegionGas(int GasId, float? Moles = null, float? P
 ///     The changes <see cref="WorkbenchSession.EditRegion" /> applies to a box of voxels.
 /// </summary>
 /// <remarks>
-///     The session applies the changes in this order: classification, gas removal, temperature, gas injection.
+///     The session applies the changes in this order: classification, gas removal, temperature, gas injection,
+///     velocity.
 /// </remarks>
 /// <param name="CreateChunks">Whether to create missing chunks inside the box, with classification 0, first.</param>
 /// <param name="Classification">The classification for every voxel, or <see langword="null" /> to keep it.</param>
@@ -36,13 +39,19 @@ public readonly record struct RegionGas(int GasId, float? Moles = null, float? P
 ///     The temperature of the added gas. It defaults to <paramref name="TemperatureK" />, then to
 ///     <see cref="AtmosConfig.DefaultTemperatureFallback" />.
 /// </param>
+/// <param name="Velocity">
+///     The bulk velocity of the gas in every air voxel in metres per second (m/s), or <see langword="null" /> to keep
+///     the momentum. The session stores momentum equal to the voxel's gas mass times the velocity, after all other
+///     changes. A voxel with no gas keeps zero momentum.
+/// </param>
 public sealed record RegionEdit(
     bool CreateChunks = false,
     int? Classification = null,
     bool ClearGas = false,
     float? TemperatureK = null,
     IReadOnlyList<RegionGas>? Gases = null,
-    float? GasTemperatureK = null);
+    float? GasTemperatureK = null,
+    Vector3? Velocity = null);
 
 /// <summary>
 ///     What <see cref="WorkbenchSession.EditRegion" /> did.
@@ -52,12 +61,14 @@ public sealed record RegionEdit(
 /// <param name="ChunksTouched">Chunks that hold edited voxels.</param>
 /// <param name="ChunksCreated">Chunks the edit created.</param>
 /// <param name="MolesPerVoxel">The moles added to each voxel for each entry of <see cref="RegionEdit.Gases" />.</param>
+/// <param name="VelocityVoxels">The voxels that received momentum from <see cref="RegionEdit.Velocity" />.</param>
 public sealed record RegionEditResult(
     long VoxelsEdited,
     long VoxelsSkipped,
     int ChunksTouched,
     int ChunksCreated,
-    IReadOnlyList<float> MolesPerVoxel);
+    IReadOnlyList<float> MolesPerVoxel,
+    long VelocityVoxels = 0);
 
 public sealed partial class WorkbenchSession
 {
@@ -140,6 +151,11 @@ public sealed partial class WorkbenchSession
     ///         call adds one operation to the replay for the whole region. The session writes one summary line to the log.
     ///     </para>
     ///     <para>
+    ///         A velocity sets the momentum of each air voxel to its gas mass times the velocity. The mass is
+    ///         <c>sum(n_k M_k)</c> over the gases in the voxel after the other changes. Solid and void voxels and voxels
+    ///         without gas ignore the velocity.
+    ///     </para>
+    ///     <para>
     ///         The session validates the edit before it changes anything. A failure while it creates chunks leaves the
     ///         chunks created so far.
     ///     </para>
@@ -206,12 +222,14 @@ public sealed partial class WorkbenchSession
                         .Where(static gas => gas.Moles > 0f)
                         .Select(static gas => new AtmosGasAmount(gas.GasId, gas.Moles))
                         .ToArray(),
-                    GasTemperatureK = plan.GasTemperature
+                    GasTemperatureK = plan.GasTemperature,
+                    Velocity = plan.Velocity
                 };
 
                 var applied = target.EditVoxelBox(box.Min, box.Max, boxEdit);
                 long edited = applied.VoxelsEdited;
                 long skipped = applied.VoxelsSkipped;
+                long velocityVoxels = applied.VelocityVoxels;
                 int touched = applied.ChunksTouched;
 
                 var result = new RegionEditResult(
@@ -219,7 +237,8 @@ public sealed partial class WorkbenchSession
                     skipped,
                     touched,
                     created,
-                    plan.Gases.Select(static gas => gas.Moles).ToArray());
+                    plan.Gases.Select(static gas => gas.Moles).ToArray(),
+                    velocityVoxels);
 
                 Info(DescribeRegionEdit(box, edit, result));
                 return result;
@@ -228,7 +247,8 @@ public sealed partial class WorkbenchSession
 
     private readonly record struct RegionGasPlan(
         (int GasId, float Moles)[] Gases,
-        float GasTemperature);
+        float GasTemperature,
+        Vector3? Velocity);
 
     private RegionGasPlan PlanRegionGases(RegionEdit edit, AtmosConfig config)
     {
@@ -269,7 +289,13 @@ public sealed partial class WorkbenchSession
         if (planned.Length > 0 && (!float.IsFinite(gasTemperature) || gasTemperature < 0f))
             throw new ArgumentException("gasTemperatureK must be finite and at least 0.");
 
-        return new RegionGasPlan(planned, gasTemperature);
+        if (edit.Velocity is { } velocity &&
+            (!float.IsFinite(velocity.X) || !float.IsFinite(velocity.Y) || !float.IsFinite(velocity.Z)))
+        {
+            throw new ArgumentException("velocity components must be finite.");
+        }
+
+        return new RegionGasPlan(planned, gasTemperature, edit.Velocity);
     }
 
     private static string DescribeRegionEdit(VoxelBox box, RegionEdit edit, RegionEditResult result)
@@ -286,6 +312,13 @@ public sealed partial class WorkbenchSession
 
         if (edit.Gases is { Count: > 0 } gases)
             parts.Add($"{gases.Count} gas{(gases.Count == 1 ? string.Empty : "es")}");
+
+        if (edit.Velocity is { } velocity)
+        {
+            parts.Add(string.Create(
+                CultureInfo.InvariantCulture,
+                $"velocity ({velocity.X:G6}, {velocity.Y:G6}, {velocity.Z:G6}) m/s"));
+        }
 
         string what = parts.Count == 0 ? "no changes" : string.Join(", ", parts);
         string text = string.Create(

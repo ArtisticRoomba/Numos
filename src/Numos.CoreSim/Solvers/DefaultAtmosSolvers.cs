@@ -1,3 +1,6 @@
+using Numos.CoreSim.EulerFlow;
+using Numos.CoreSim.Solvers.Euler;
+
 namespace Numos.CoreSim.Solvers;
 
 /// <summary>
@@ -7,6 +10,7 @@ internal sealed class DefaultAtmosSolvers : IDisposable
 {
     private readonly AdvectionSolver _advection;
     private readonly BoundaryFlowSolver _boundaryFlow;
+    private readonly EulerFlowSolver _eulerFlow;
     private readonly ReactionSolver _reactions;
     private readonly ThermalBoundarySolver _thermalBoundary;
     private readonly ThermodynamicsSolver _thermodynamics;
@@ -17,6 +21,7 @@ internal sealed class DefaultAtmosSolvers : IDisposable
         _boundaryFlow = new BoundaryFlowSolver();
         _thermalBoundary = new ThermalBoundarySolver();
         _advection = new AdvectionSolver(maximumBoundaryEvents);
+        _eulerFlow = new EulerFlowSolver(chunkWidth, chunkHeight, chunkDepth);
         _thermodynamics = new ThermodynamicsSolver(maximumBoundaryEvents);
         _reactions = new ReactionSolver();
     }
@@ -30,11 +35,21 @@ internal sealed class DefaultAtmosSolvers : IDisposable
     {
         _boundaryFlow.ClearTransientState();
         _thermalBoundary.ClearTransientState();
+        _eulerFlow.ClearTransientState();
     }
 
     internal void SolveAdvection(AtmosSolverExecutionContext context)
     {
         _advection.Solve(context);
+    }
+
+    /// <summary>
+    ///     Runs the <c>euler-flow</c> stage and returns what it did this tick.
+    /// </summary>
+    internal AtmosFlowDiagnostics SolveEulerFlow(AtmosSolverExecutionContext context)
+    {
+        _eulerFlow.Solve(context);
+        return _eulerFlow.LastDiagnostics;
     }
 
     internal void SolveBoundaryFlow(AtmosSolverExecutionContext context)

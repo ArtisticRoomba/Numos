@@ -18,14 +18,14 @@ public sealed class AtmosClassSolverTests
         world.Solvers.Register("class-tail", new RecordingSolver("class-tail", order));
         world.Solvers.Register("delegate-middle", _ => order.Add("delegate-middle"), before: "class-tail");
         world.Solvers.Register(
-            "class-after-advection",
-            new RecordingSolver("class-after-advection", order),
-            after: AtmosBuiltInSolvers.Advection);
+            "class-after-euler-flow",
+            new RecordingSolver("class-after-euler-flow", order),
+            after: AtmosBuiltInSolvers.EulerFlow);
 
         world.Solvers.Register(
             "class-first",
             new RecordingSolver("class-first", order),
-            before: AtmosBuiltInSolvers.Advection);
+            before: AtmosBuiltInSolvers.EulerFlow);
 
         world.Tick();
 
@@ -38,11 +38,11 @@ public sealed class AtmosClassSolverTests
         {
             Assert.That(
                 order,
-                Is.EqualTo(new[] { "class-first", "class-after-advection", "delegate-tail", "delegate-middle", "class-tail" }));
+                Is.EqualTo(new[] { "class-first", "class-after-euler-flow", "delegate-tail", "delegate-middle", "class-tail" }));
 
             Assert.That(customNames, Is.EqualTo(order));
             Assert.That(world.Solvers.Steps[0].Name, Is.EqualTo("class-first"));
-            Assert.That(world.Solvers.Steps[2].Name, Is.EqualTo("class-after-advection"));
+            Assert.That(world.Solvers.Steps[2].Name, Is.EqualTo("class-after-euler-flow"));
         });
     }
 
@@ -88,14 +88,14 @@ public sealed class AtmosClassSolverTests
             "custom-neighbors",
             _ => { },
             AtmosNeighborSelection.All("tests/metadata-v1"),
-            after: AtmosBuiltInSolvers.Advection);
+            after: AtmosBuiltInSolvers.EulerFlow);
 
         delegateWorld.Solvers.Register("custom-tail", _ => { });
         classWorld.Solvers.Register(
             "custom-neighbors",
             new RecordingSolver("unused", []),
             AtmosNeighborSelection.All("tests/metadata-v1"),
-            after: AtmosBuiltInSolvers.Advection);
+            after: AtmosBuiltInSolvers.EulerFlow);
 
         classWorld.Solvers.Register("custom-tail", new RecordingSolver("unused", []));
 

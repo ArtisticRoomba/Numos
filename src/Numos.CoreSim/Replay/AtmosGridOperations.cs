@@ -124,16 +124,32 @@ public sealed record SleepChunkOperation(Int3 Position) : AtmosOperation
 }
 
 /// <summary>
+///     Stores a gas-bearing voxel's total momentum vector without touching its gas or thermal state.
+/// </summary>
+/// <param name="Position">Target chunk-grid address.</param>
+/// <param name="LocalVoxelIndex">Canonical flat local voxel index.</param>
+/// <param name="MomentumX">Total x-momentum, in kilogram metres per second.</param>
+/// <param name="MomentumY">Total y-momentum, in kilogram metres per second.</param>
+/// <param name="MomentumZ">Total z-momentum, in kilogram metres per second.</param>
+public sealed record SetVoxelMomentumOperation(
+    Int3 Position,
+    ushort LocalVoxelIndex,
+    KilogramMetrePerSecond MomentumX,
+    KilogramMetrePerSecond MomentumY,
+    KilogramMetrePerSecond MomentumZ) : AtmosOperation
+{
+    /// <inheritdoc />
+    public override AtmosOperationCode Code => AtmosOperationCode.SetVoxelMomentum;
+
+    internal override void Apply(AtmosKernel kernel) => kernel.Apply(this);
+}
+
+/// <summary>
 ///     The optional parts of an <see cref="EditVoxelBoxOperation" />.
 /// </summary>
 /// <remarks>
-///     <para>
-///         The kernel applies the parts in the order of this list: classification, gas removal, temperature, gas
-///         injection. Gas injection has no flag, because a nonempty gas list selects it.
-///     </para>
-///     <para>
-///         The flag value 8 is reserved for a velocity part. This build rejects it.
-///     </para>
+///     The kernel applies the parts in the order of this list: classification, gas removal, temperature, gas
+///     injection, velocity. Gas injection has no flag, because a nonempty gas list selects it.
 /// </remarks>
 [Flags]
 public enum AtmosVoxelBoxParts : byte
@@ -156,7 +172,12 @@ public enum AtmosVoxelBoxParts : byte
     /// <summary>
     ///     Store the voxel temperature in every voxel.
     /// </summary>
-    Temperature = 4
+    Temperature = 4,
+
+    /// <summary>
+    ///     Store momentum equal to the voxel's gas mass times the velocity in every gas-bearing air voxel.
+    /// </summary>
+    Velocity = 8
 }
 
 /// <summary>
@@ -178,6 +199,9 @@ public enum AtmosVoxelBoxParts : byte
 /// <param name="Classification">The classification to assign when <see cref="AtmosVoxelBoxParts.Classification" /> is set.</param>
 /// <param name="VoxelTemperature">The stored temperature, in kelvins, when <see cref="AtmosVoxelBoxParts.Temperature" /> is set.</param>
 /// <param name="GasTemperature">The temperature of the injected gas, in kelvins. It matters when <paramref name="Gases" /> is not empty.</param>
+/// <param name="VelocityX">The x velocity, in metres per second, when <see cref="AtmosVoxelBoxParts.Velocity" /> is set.</param>
+/// <param name="VelocityY">The y velocity, in metres per second.</param>
+/// <param name="VelocityZ">The z velocity, in metres per second.</param>
 /// <param name="Gases">The gases to add to every air voxel, in injection order. Each amount is positive and finite.</param>
 public sealed record EditVoxelBoxOperation(
     Int3 Min,
@@ -186,6 +210,9 @@ public sealed record EditVoxelBoxOperation(
     VoxelClassification Classification,
     Kelvin VoxelTemperature,
     Kelvin GasTemperature,
+    MetrePerSecond VelocityX,
+    MetrePerSecond VelocityY,
+    MetrePerSecond VelocityZ,
     IReadOnlyList<AtmosGasAmount> Gases) : AtmosOperation
 {
     /// <inheritdoc />
@@ -195,8 +222,8 @@ public sealed record EditVoxelBoxOperation(
 }
 
 /// <summary>
-///     Sets a voxel's resolved gas and thermal state, including caches and channel order, independent of detached
-///     mixture identity.
+///     Sets a voxel's resolved gas, thermal, and momentum state, including caches and channel order, independent of
+///     detached mixture identity.
 /// </summary>
 public sealed record SetVoxelMixtureOperation : AtmosOperation
 {
@@ -207,6 +234,9 @@ public sealed record SetVoxelMixtureOperation : AtmosOperation
         Temperature = chunk.Temperature[index];
         Pressure = chunk.TotalPressure[index];
         HeatCapacity = chunk.TotalHeatCapacity[index];
+        MomentumX = chunk.MomentumX[index];
+        MomentumY = chunk.MomentumY[index];
+        MomentumZ = chunk.MomentumZ[index];
         var gases = new AtmosGasAmount[chunk.ActiveGasCount];
         for (int gas = 0; gas < gases.Length; gas++)
             gases[gas] = new AtmosGasAmount(chunk.ActiveGases[gas].GasId, chunk.ActiveGases[gas].Moles[index]);
@@ -220,6 +250,9 @@ public sealed record SetVoxelMixtureOperation : AtmosOperation
         Kelvin temperature,
         Pascal pressure,
         JoulePerKelvin heatCapacity,
+        KilogramMetrePerSecond momentumX,
+        KilogramMetrePerSecond momentumY,
+        KilogramMetrePerSecond momentumZ,
         IEnumerable<AtmosGasAmount> gases)
     {
         ArgumentNullException.ThrowIfNull(gases);
@@ -228,6 +261,9 @@ public sealed record SetVoxelMixtureOperation : AtmosOperation
         Temperature = temperature;
         Pressure = pressure;
         HeatCapacity = heatCapacity;
+        MomentumX = momentumX;
+        MomentumY = momentumY;
+        MomentumZ = momentumZ;
         Gases = Array.AsReadOnly(gases.ToArray());
     }
 
@@ -258,6 +294,22 @@ public sealed record SetVoxelMixtureOperation : AtmosOperation
     ///     Gets the exact resulting cached heat capacity, in joules per kelvin.
     /// </summary>
     public JoulePerKelvin HeatCapacity { get; }
+
+    /// <summary>
+    ///     Gets the exact resulting total x-momentum, in kilogram metres per second. Zero when the write emptied the
+    ///     voxel.
+    /// </summary>
+    public KilogramMetrePerSecond MomentumX { get; }
+
+    /// <summary>
+    ///     Gets the exact resulting total y-momentum, in kilogram metres per second.
+    /// </summary>
+    public KilogramMetrePerSecond MomentumY { get; }
+
+    /// <summary>
+    ///     Gets the exact resulting total z-momentum, in kilogram metres per second.
+    /// </summary>
+    public KilogramMetrePerSecond MomentumZ { get; }
 
     /// <summary>
     ///     Gets all allocated channels at the affected voxel in reduction order, including zero amounts.

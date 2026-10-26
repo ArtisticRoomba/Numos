@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using Numos.CoreSim.Replay;
+using Numos.CoreSim.State;
+using Numos.CoreSim.State.Advanced;
 
 namespace Numos.CoreSim.Solvers;
 
@@ -18,7 +19,10 @@ internal abstract class SolverArrayStorage(ChunkFieldDescriptor field)
 
     internal abstract SolverArrayStorage Clone();
 
-    internal abstract void AppendHash(ref AtmosStateHasher hash);
+    /// <summary>
+    ///     Gets the values' bytes in native layout, including any struct padding.
+    /// </summary>
+    internal abstract ReadOnlySpan<byte> Bytes { get; }
 
     /// <summary>
     ///     Resets one element to default. Indices past the end of a fixed-length array are ignored.
@@ -29,6 +33,18 @@ internal abstract class SolverArrayStorage(ChunkFieldDescriptor field)
     ///     Resets every element to default.
     /// </summary>
     internal abstract void ClearAll();
+
+    /// <summary>
+    ///     Writes the values as one block through <see cref="IStateSink.WriteElements" />, without a count.
+    /// </summary>
+    /// <remarks>
+    ///     A sink swaps each element on a big-endian host, which is only meaningful for portable element types. Struct
+    ///     elements still hash this way, in their native layout, but can't be saved.
+    /// </remarks>
+    internal void WriteValues<TSink>(ref TSink sink) where TSink : struct, IStateSink
+    {
+        sink.WriteElements(Bytes, Field.ElementSize);
+    }
 }
 
 internal sealed class SolverArrayStorage<T>(ChunkFieldDescriptor<T> field, T[] values) : SolverArrayStorage(field)
@@ -54,18 +70,13 @@ internal sealed class SolverArrayStorage<T>(ChunkFieldDescriptor<T> field, T[] v
         Array.Clear(Values);
     }
 
-    internal override void AppendHash(ref AtmosStateHasher hash)
+    internal static Span<byte> AsBytes(T[] values)
     {
-        hash.Add(typeof(T).FullName);
-        hash.Add(Unsafe.SizeOf<T>());
-        hash.Add(Length);
-        foreach (ref var value in Values.AsSpan())
-        {
-            // Registration rejects managed references before storage can enter a checkpoint.
-            // Include the exact representation, including NaN payloads and custom value-type layout.
-            ReadOnlySpan<byte> bytes = MemoryMarshal.CreateReadOnlySpan(ref Unsafe.As<T, byte>(ref value), Unsafe.SizeOf<T>());
-            foreach (byte part in bytes)
-                hash.AddByte(part);
-        }
+        // Registration rejects managed references for captured fields, so the elements are plain bytes.
+        return MemoryMarshal.CreateSpan(
+            ref Unsafe.As<T, byte>(ref MemoryMarshal.GetArrayDataReference(values)),
+            checked(values.Length * Unsafe.SizeOf<T>()));
     }
+
+    internal override ReadOnlySpan<byte> Bytes => AsBytes(Values);
 }

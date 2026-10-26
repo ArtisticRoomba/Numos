@@ -1,4 +1,4 @@
-using Numos.CoreSim.Replay;
+using Numos.CoreSim.State;
 
 namespace Numos.CoreSim.GasReactions;
 
@@ -19,7 +19,7 @@ public readonly partial record struct LinearGasReaction
     ///     in mol/m³ (moles divided by <see cref="AtmosConfig.VoxelVolume" />), and skips the reaction for that voxel
     ///     when the factor is zero, negative, or not a normal float.
     /// </remarks>
-    public readonly record struct LinearSpeedFactor(
+    public readonly partial record struct LinearSpeedFactor(
         GasProperties Gas,
         float LowMolarityBound,
         float HighMolarityBound,
@@ -31,38 +31,46 @@ public readonly partial record struct LinearGasReaction
         /// <summary>
         ///     Gets the gas whose amount drives the factor.
         /// </summary>
+        [NumosSerialize]
         public GasProperties Gas { get; } = Gas;
+
+        /// <summary>
+        ///     Gets the gas amount at the line's lower point.
+        /// </summary>
+        [NumosSerialize]
+        public float LowMolarityBound { get; init; } = LowMolarityBound;
+
+        [NumosSerialize]
+        private float HighMolarityBound { get; } = HighMolarityBound;
+
+        /// <summary>
+        ///     Gets the factor at <see cref="LowMolarityBound" />.
+        /// </summary>
+        [NumosSerialize]
+        public float LowMolaritySpeed { get; init; } = LowMolaritySpeed;
+
+        [NumosSerialize]
+        private float HighMolaritySpeed { get; } = HighMolaritySpeed;
 
         /// <summary>
         ///     Gets whether the factor is zero below the low bound instead of extrapolated.
         /// </summary>
+        [NumosSerialize]
         public bool LowStrict { get; } = LowStrict;
 
         /// <summary>
         ///     Gets whether the factor is zero above the high bound instead of extrapolated.
         /// </summary>
+        [NumosSerialize]
         public bool HighStrict { get; } = HighStrict;
 
         private float BoundaryRange { get; } = HighMolarityBound - LowMolarityBound;
 
         private float FactorRange { get; } = HighMolaritySpeed - LowMolaritySpeed;
-        private float HighMolaritySpeed { get; } = HighMolaritySpeed;
-        private float HighMolarityBound { get; } = HighMolarityBound;
 
         internal (int, int, int, int, bool, bool) OrderKey => (
             BitConverter.SingleToInt32Bits(LowMolarityBound), BitConverter.SingleToInt32Bits(HighMolarityBound),
             BitConverter.SingleToInt32Bits(LowMolaritySpeed), BitConverter.SingleToInt32Bits(HighMolaritySpeed), LowStrict, HighStrict);
-
-        internal void AppendHash(ref AtmosStateHasher hash)
-        {
-            hash.Add(Gas);
-            hash.Add(LowMolarityBound);
-            hash.Add(HighMolarityBound);
-            hash.Add(LowMolaritySpeed);
-            hash.Add(HighMolaritySpeed);
-            hash.Add(LowStrict);
-            hash.Add(HighStrict);
-        }
 
         /// <summary>
         ///     Evaluates the factor for a gas amount.

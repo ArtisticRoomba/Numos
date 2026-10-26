@@ -333,6 +333,8 @@ public partial class SimulationViewer
         int group = _operationIndex.FindGroup(timeline.Position.Tick);
         int tickOperationCount = group < 0 ? 0 : _operationIndex.GetCount(group);
 
+        DrawInitialSolverStages(timeline);
+
         ImGui.SeparatorText($"Done in tick {timeline.Position.Tick} ({tickOperationCount})");
         if (tickOperationCount == 0)
             ImGui.TextDisabled("No external operations were recorded in this tick.");
@@ -348,7 +350,7 @@ public partial class SimulationViewer
                     ImGuiTableFlags.Borders | ImGuiTableFlags.SizingStretchSame))
             {
                 ImGui.TableNextColumn();
-                ImGuiExtensions.StatusField("OPERATION", selected.Code.ToString());
+                ImGuiExtensions.StatusField("OPERATION", DescribeOperation(selected));
                 ImGui.TableNextColumn();
                 ImGuiExtensions.StatusField("DONE IN TICK", selected.AfterTick.ToString());
                 ImGui.TableNextColumn();
@@ -362,6 +364,9 @@ public partial class SimulationViewer
 
             if (selected.Operation is SetAtmosWorldConfigOperation config)
                 DrawRecordedConfiguration(config.Config);
+
+            if (selected.Operation is SetAtmosWorldSolverLayoutOperation layout)
+                DrawRecordedSolverLayout(layout.Stages);
 
             if (ImGui.Button("Inspect After Operation"))
                 SeekTimelinePosition(selected.Position);
@@ -406,7 +411,7 @@ public partial class SimulationViewer
             ImGui.TextDisabled($"{index + 1}");
             ImGui.SameLine(operationColumn);
             if (ImGui.Selectable(
-                    $"{operation.Code}##operation-{operation.Sequence}",
+                    $"{DescribeOperation(operation)}##operation-{operation.Sequence}",
                     _timelineOperation is { } current && current.Sequence == operation.Sequence))
             {
                 _timelineOperation = operation;
@@ -444,6 +449,89 @@ public partial class SimulationViewer
             // The cell is rounded for reading; replay compares the exact recorded value.
             if (ImGui.IsItemHovered(ImGuiHoveredFlags.ForTooltip))
                 ImGui.SetTooltip($"Recorded amount {FormatRecordedFloat(gas.Moles)} mol");
+        }
+    }
+
+    /// <summary>
+    ///     Names an operation for the list. Most operations show their opcode, and a layout change adds its size.
+    /// </summary>
+    private static string DescribeOperation(AtmosWorldRecordedOperation operation)
+    {
+        return operation.Operation is SetAtmosWorldSolverLayoutOperation layout
+            ? $"SetSolverLayout ({layout.Stages.Count} stages)"
+            : operation.Code.ToString();
+    }
+
+    /// <summary>
+    ///     Lists the solver stages that the timeline started with, from its first checkpoint.
+    /// </summary>
+    private static void DrawInitialSolverStages(AtmosWorldReplayTimeline timeline)
+    {
+        if (timeline.Checkpoints.Count == 0 || !ImGui.TreeNode("Initial solver stages##replay"))
+            return;
+
+        var rows = timeline.Checkpoints[0].Checkpoint.Solvers
+            .Select(static solver => new SolverStageRow(
+                solver.Name,
+                solver.Enabled,
+                solver.Kind == AtmosWorldSolverKind.BuiltIn ? "Built-in" : "Custom"))
+            .ToArray();
+
+        DrawSolverStageTable("InitialSolvers##replay", rows);
+        ImGui.TreePop();
+    }
+
+    /// <summary>
+    ///     Lists the stage order that one recorded layout operation requested.
+    /// </summary>
+    private static void DrawRecordedSolverLayout(IReadOnlyList<AtmosWorldSolverLayoutEntry> stages)
+    {
+        if (!ImGui.TreeNode("Requested solver layout##replay"))
+            return;
+
+        var rows = stages.Select(static stage => new SolverStageRow(stage.Name, stage.Enabled)).ToArray();
+        DrawSolverStageTable("RecordedLayout##replay", rows);
+        ImGui.TreePop();
+    }
+
+    /// <summary>
+    ///     One line of a solver stage table. A null <paramref name="Kind" /> means the source does not record the kind.
+    /// </summary>
+    private readonly record struct SolverStageRow(string Name, bool Enabled, string? Kind = null);
+
+    /// <summary>
+    ///     Draws the numbered stage table. The Kind column appears when any row has a kind.
+    /// </summary>
+    private static void DrawSolverStageTable(string tableId, SolverStageRow[] rows)
+    {
+        bool showKind = rows.Any(static row => row.Kind != null);
+        int enabledColumn = showKind ? 3 : 2;
+        using var table = ImGuiExtensions.BeginTable(tableId, enabledColumn + 1, ReplayRecordTableFlags);
+        if (!table.IsVisible)
+            return;
+
+        ImGui.TableSetupColumn("#");
+        ImGui.TableSetupColumn("Stage");
+        if (showKind)
+            ImGui.TableSetupColumn("Kind");
+
+        ImGui.TableSetupColumn("Enabled");
+        ImGui.TableHeadersRow();
+        for (int i = 0; i < rows.Length; i++)
+        {
+            ImGui.TableNextRow();
+            ImGui.TableSetColumnIndex(0);
+            ImGui.TextDisabled((i + 1).ToString(CultureInfo.InvariantCulture));
+            ImGui.TableSetColumnIndex(1);
+            ImGui.TextUnformatted(rows[i].Name);
+            if (showKind)
+            {
+                ImGui.TableSetColumnIndex(2);
+                ImGui.TextUnformatted(rows[i].Kind ?? string.Empty);
+            }
+
+            ImGui.TableSetColumnIndex(enabledColumn);
+            ImGui.TextUnformatted(rows[i].Enabled ? "Yes" : "No");
         }
     }
 
@@ -546,9 +634,11 @@ public partial class SimulationViewer
         {
             if (solverTable.IsVisible)
             {
-                ImGuiExtensions.DefinitionRow(
-                    "Solver configurations",
-                    config.SolverConfigurations.Count.ToString(CultureInfo.InvariantCulture));
+                if (config.SolverConfigurations.Count == 0)
+                    ImGuiExtensions.DefinitionRow("Solver configurations", "None");
+
+                foreach (var solverConfiguration in config.SolverConfigurations)
+                    ImGuiExtensions.DefinitionRow("Solver configuration", solverConfiguration.Key);
             }
         }
 

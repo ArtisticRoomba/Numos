@@ -57,7 +57,7 @@ public sealed class OperationCodecGenerator : IIncrementalGenerator
 
         IncrementalValueProvider<GeneratorOutput<FamilyCodec>> output = operations.Collect()
             .Combine(codes)
-            .Combine(WireType.QuantityAliases(context))
+            .Combine(QuantityAliasCatalog.Provider(context))
             .Select(static (input, _) => Plan(input.Left.Left, input.Left.Right, input.Right));
 
         GeneratorOutput.Register(context, output, "ReplayOperationCodecs", Emit);

@@ -19,6 +19,7 @@ internal interface IAtmosConfig
     Scalar MaxPressureTransferFractionPerNeighbor { get; }
     Pascal AccumulatorWakeThreshold { get; }
     int AccumulatorMaxAliveTicks { get; }
+    KilogramPerMole ReferenceMolarMass { get; }
     PascalPerMoleKelvin PressurePerMoleKelvin { get; }
 
     int GasPropertyCount { get; }
@@ -26,5 +27,6 @@ internal interface IAtmosConfig
     CubicMetre GetVoxelVolume();
     JoulePerMoleKelvin GetMolarHeatCapacityAtConstantVolume(int gasId);
     SquareMetrePerSecond GetDiffusionCoefficient(int gasId);
+    KilogramPerMole GetMolarMass(int gasId);
     bool TryGetGasProperties(int gasId, out GasProperties properties);
 }

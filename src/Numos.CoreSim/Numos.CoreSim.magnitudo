@@ -10,8 +10,23 @@ pressure | Pascal | global::System.Single | mass=1,length=-1,time=-2
 pressure64 | Pascal64 | global::System.Double | mass=1,length=-1,time=-2
 amount | Mole | global::System.Single | amount=1
 amount64 | Mole64 | global::System.Double | amount=1
+molarMass | KilogramPerMole | global::System.Single | mass=1,amount=-1
+mass | Kilogram | global::System.Single | mass=1
+mass64 | Kilogram64 | global::System.Double | mass=1
+inverseMass | PerKilogram | global::System.Single | mass=-1
 length | Metre | global::System.Single | length=1
+area | SquareMetre | global::System.Single | length=2
 inverseArea | PerSquareMetre | global::System.Single | length=-2
+velocity | MetrePerSecond | global::System.Single | length=1,time=-1
+velocity64 | MetrePerSecond64 | global::System.Double | length=1,time=-1
+momentum | KilogramMetrePerSecond | global::System.Single | mass=1,length=1,time=-1
+momentum64 | KilogramMetrePerSecond64 | global::System.Double | mass=1,length=1,time=-1
+density | KilogramPerCubicMetre | global::System.Single | mass=1,length=-3
+densityGradient | KilogramPerQuarticMetre | global::System.Single | mass=1,length=-4
+massFlux | KilogramPerSquareMetreSecond | global::System.Single | mass=1,length=-2,time=-1
+energyFlux | WattPerSquareMetre | global::System.Single | mass=1,time=-3
+energyDensity | JoulePerCubicMetre | global::System.Single | mass=1,length=-1,time=-2
+perSquareMetreSecond | PerSquareMetreSecond | global::System.Single | length=-2,time=-1
 volume | CubicMetre | global::System.Single | length=3
 volume64 | CubicMetre64 | global::System.Double | length=3
 energy | Joule | global::System.Single | mass=1,length=2,time=-2
@@ -40,6 +55,11 @@ molarConcentration | MolePerCubicMetre | global::System.Single | amount=1,length
 molarConcentration64 | MolePerCubicMetre64 | global::System.Double | amount=1,length=-3
 concentrationPerSecond | ConcentrationPerSecond | global::System.Single | amount=1,length=-3,time=-1
 concentrationPerSecond64 | ConcentrationPerSecond64 | global::System.Double | amount=1,length=-3,time=-1
+massRate | KilogramPerSecond | global::System.Single | mass=1,time=-1
+amountRate | MolePerSecond | global::System.Single | amount=1,time=-1
+power | Watt | global::System.Single | mass=1,length=2,time=-3
+power64 | Watt64 | global::System.Double | mass=1,length=2,time=-3
+force | Newton | global::System.Single | mass=1,length=1,time=-2
 
 
 # Boundary conversions use: convert | canonical quantity id | unit name | storage type | scale | offset

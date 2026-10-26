@@ -1,6 +1,8 @@
 using System.Diagnostics.CodeAnalysis;
 using Numos.CoreSim.GasReactions;
 using Numos.CoreSim.Replay;
+using Numos.CoreSim.State;
+using Numos.CoreSim.State.Advanced;
 using Numos.Maths;
 
 namespace Numos.CoreSim;
@@ -23,46 +25,46 @@ public sealed class AtmosConfigSnapshot : IAtmosConfig
         ArgumentNullException.ThrowIfNull(source);
         source.ValidateGasRegistry();
 
-        GlobalTemperature = FloatMath.IsFinitePositive(source.GlobalTemperature)
-            ? source.GlobalTemperature
-            : AtmosConfigDefaults.GlobalTemperature;
-
-        DefaultTemperatureFallback = FloatMath.IsFinitePositive(source.DefaultTemperatureFallback)
-            ? source.DefaultTemperatureFallback
-            : AtmosConfigDefaults.DefaultTemperatureFallback;
-
-        DefaultMolarHeatCapacityAtConstantVolume =
-            FloatMath.IsFinitePositive(source.DefaultMolarHeatCapacityAtConstantVolume)
-                ? source.DefaultMolarHeatCapacityAtConstantVolume
-                : AtmosConfigDefaults.DefaultMolarHeatCapacityAtConstantVolume;
-
-        VoxelVolume = FloatMath.IsFinitePositive(source.VoxelVolume)
-            ? source.VoxelVolume
-            : AtmosConfigDefaults.VoxelVolume;
-
-        SaturationReferencePressure = FloatMath.IsFinitePositive(source.SaturationReferencePressure)
-            ? source.SaturationReferencePressure
-            : AtmosConfigDefaults.SaturationReferencePressure;
-
-        DefaultDiffusionCoefficient = FloatMath.GetNonnegativeFinite(source.DefaultDiffusionCoefficient);
-        SpaceTemperature = FloatMath.IsFinitePositive(source.SpaceTemperature)
-            ? source.SpaceTemperature
-            : AtmosConfigDefaults.SpaceTemperature;
-
-        BulkFlowCoefficient = FloatMath.ClampUnitInterval(source.BulkFlowCoefficient);
-        VacuumThreshold = FloatMath.GetNonnegativeFinite(source.VacuumThreshold);
-        SleepThreshold = Math.Max(0, source.SleepThreshold);
-        SleepEpsilon = FloatMath.GetNonnegativeFinite(source.SleepEpsilon);
-        ThermalConductance = FloatMath.IsFinitePositive(source.ThermalConductance)
-            ? source.ThermalConductance
-            : 0f;
-
-        CondensationRateFactor = FloatMath.ClampUnitInterval(source.CondensationRateFactor);
-        MaxPressureTransferFractionPerNeighbor =
-            FloatMath.ClampUnitInterval(source.MaxPressureTransferFractionPerNeighbor);
-
-        AccumulatorWakeThreshold = FloatMath.GetNonnegativeFinite(source.AccumulatorWakeThreshold);
-        AccumulatorMaxAliveTicks = Math.Max(0, source.AccumulatorMaxAliveTicks);
+        // The normalized values live in a private AtmosConfig that nothing else references. The snapshot therefore gets
+        // the generated equality, hash, and wire code of the config without a second field list.
+        var fields = new AtmosConfig
+        {
+            GlobalTemperature = FloatMath.IsFinitePositive(source.GlobalTemperature)
+                ? source.GlobalTemperature
+                : AtmosConfigDefaults.GlobalTemperature,
+            DefaultTemperatureFallback = FloatMath.IsFinitePositive(source.DefaultTemperatureFallback)
+                ? source.DefaultTemperatureFallback
+                : AtmosConfigDefaults.DefaultTemperatureFallback,
+            DefaultMolarHeatCapacityAtConstantVolume =
+                FloatMath.IsFinitePositive(source.DefaultMolarHeatCapacityAtConstantVolume)
+                    ? source.DefaultMolarHeatCapacityAtConstantVolume
+                    : AtmosConfigDefaults.DefaultMolarHeatCapacityAtConstantVolume,
+            VoxelVolume = FloatMath.IsFinitePositive(source.VoxelVolume)
+                ? source.VoxelVolume
+                : AtmosConfigDefaults.VoxelVolume,
+            SaturationReferencePressure = FloatMath.IsFinitePositive(source.SaturationReferencePressure)
+                ? source.SaturationReferencePressure
+                : AtmosConfigDefaults.SaturationReferencePressure,
+            DefaultDiffusionCoefficient = FloatMath.GetNonnegativeFinite(source.DefaultDiffusionCoefficient),
+            SpaceTemperature = FloatMath.IsFinitePositive(source.SpaceTemperature)
+                ? source.SpaceTemperature
+                : AtmosConfigDefaults.SpaceTemperature,
+            BulkFlowCoefficient = FloatMath.ClampUnitInterval(source.BulkFlowCoefficient),
+            VacuumThreshold = FloatMath.GetNonnegativeFinite(source.VacuumThreshold),
+            SleepThreshold = Math.Max(0, source.SleepThreshold),
+            SleepEpsilon = FloatMath.GetNonnegativeFinite(source.SleepEpsilon),
+            ThermalConductance = FloatMath.IsFinitePositive(source.ThermalConductance)
+                ? source.ThermalConductance
+                : 0f,
+            CondensationRateFactor = FloatMath.ClampUnitInterval(source.CondensationRateFactor),
+            MaxPressureTransferFractionPerNeighbor =
+                FloatMath.ClampUnitInterval(source.MaxPressureTransferFractionPerNeighbor),
+            AccumulatorWakeThreshold = FloatMath.GetNonnegativeFinite(source.AccumulatorWakeThreshold),
+            AccumulatorMaxAliveTicks = Math.Max(0, source.AccumulatorMaxAliveTicks),
+            ReferenceMolarMass = FloatMath.IsFinitePositive(source.ReferenceMolarMass)
+                ? source.ReferenceMolarMass
+                : AtmosConfigDefaults.ReferenceMolarMass,
+        };
 
         var gasRegistry = new GasRegistry();
         foreach (var sourceProperties in source.GasRegistry)
@@ -71,13 +73,20 @@ public sealed class AtmosConfigSnapshot : IAtmosConfig
             if (!FloatMath.IsFinitePositive(properties.MolarHeatCapacityAtConstantVolume))
             {
                 properties.MolarHeatCapacityAtConstantVolume =
-                    DefaultMolarHeatCapacityAtConstantVolume;
+                    fields.DefaultMolarHeatCapacityAtConstantVolume;
             }
 
             properties.DiffusionCoefficient = FloatMath.GetNonnegativeFinite(properties.DiffusionCoefficient);
+
+            // Every invalid molar mass already means "unknown", so store the one canonical spelling of it.
+            if (!FloatMath.IsFinitePositive(properties.MolarMass))
+                properties.MolarMass = 0f;
+
             gasRegistry.Add(properties);
         }
 
+        fields.GasRegistry = gasRegistry;
+        Fields = fields;
         GasRegistry = new GasRegistrySnapshot(gasRegistry);
 
         var settings = new List<IAtmosSolverConfiguration>();
@@ -100,7 +109,8 @@ public sealed class AtmosConfigSnapshot : IAtmosConfig
 
     /// <summary>
     ///     Gets the registered gases, with invalid heat capacities replaced by
-    ///     <see cref="DefaultMolarHeatCapacityAtConstantVolume" /> and diffusion coefficients clamped to [0, 1].
+    ///     <see cref="DefaultMolarHeatCapacityAtConstantVolume" />, negative or non-finite diffusion coefficients
+    ///     normalized to zero, and invalid molar masses normalized to zero.
     /// </summary>
     public GasRegistrySnapshot GasRegistry { get; }
 
@@ -109,58 +119,49 @@ public sealed class AtmosConfigSnapshot : IAtmosConfig
     /// </summary>
     public IReadOnlyList<IAtmosSolverConfiguration> SolverConfigurations { get; }
 
+    /// <summary>
+    ///     Gets the normalized schema fields. Never handed out or mutated after construction.
+    /// </summary>
+    internal AtmosConfig Fields { get; }
+
     /// <inheritdoc cref="AtmosConfig.GlobalTemperature" />
-    [ConfigCheckpointField(0)]
-    public Kelvin GlobalTemperature { get; }
+    public Kelvin GlobalTemperature => Fields.GlobalTemperature;
     /// <inheritdoc cref="AtmosConfig.DefaultTemperatureFallback" />
-    [ConfigCheckpointField(1)]
-    public Kelvin DefaultTemperatureFallback { get; }
+    public Kelvin DefaultTemperatureFallback => Fields.DefaultTemperatureFallback;
     /// <inheritdoc cref="AtmosConfig.DefaultMolarHeatCapacityAtConstantVolume" />
-    [ConfigCheckpointField(2)]
-    public JoulePerMoleKelvin DefaultMolarHeatCapacityAtConstantVolume { get; }
+    public JoulePerMoleKelvin DefaultMolarHeatCapacityAtConstantVolume => Fields.DefaultMolarHeatCapacityAtConstantVolume;
     /// <inheritdoc cref="AtmosConfig.VoxelVolume" />
-    [ConfigCheckpointField(3)]
-    public CubicMetre VoxelVolume { get; }
+    public CubicMetre VoxelVolume => Fields.VoxelVolume;
     /// <inheritdoc cref="AtmosConfig.SaturationReferencePressure" />
-    [ConfigCheckpointField(4)]
-    public Pascal SaturationReferencePressure { get; }
+    public Pascal SaturationReferencePressure => Fields.SaturationReferencePressure;
     /// <inheritdoc cref="AtmosConfig.DefaultDiffusionCoefficient" />
-    [ConfigCheckpointField(5)]
-    public SquareMetrePerSecond DefaultDiffusionCoefficient { get; }
+    public SquareMetrePerSecond DefaultDiffusionCoefficient => Fields.DefaultDiffusionCoefficient;
     /// <inheritdoc cref="AtmosConfig.SpaceTemperature" />
-    [ConfigCheckpointField(6)]
-    public Kelvin SpaceTemperature { get; }
+    public Kelvin SpaceTemperature => Fields.SpaceTemperature;
     /// <inheritdoc cref="AtmosConfig.BulkFlowCoefficient" />
-    [ConfigCheckpointField(7)]
-    public Scalar BulkFlowCoefficient { get; }
+    public Scalar BulkFlowCoefficient => Fields.BulkFlowCoefficient;
     /// <inheritdoc cref="AtmosConfig.VacuumThreshold" />
-    [ConfigCheckpointField(8)]
-    public Pascal VacuumThreshold { get; }
+    public Pascal VacuumThreshold => Fields.VacuumThreshold;
     /// <inheritdoc cref="AtmosConfig.SleepThreshold" />
-    [ConfigCheckpointField(9)]
-    public int SleepThreshold { get; }
+    public int SleepThreshold => Fields.SleepThreshold;
     /// <inheritdoc cref="AtmosConfig.SleepEpsilon" />
-    [ConfigCheckpointField(10)]
-    public Scalar SleepEpsilon { get; }
+    public Scalar SleepEpsilon => Fields.SleepEpsilon;
     /// <inheritdoc cref="AtmosConfig.ThermalConductance" />
-    [ConfigCheckpointField(11)]
-    public JoulePerKelvin ThermalConductance { get; }
+    public JoulePerKelvin ThermalConductance => Fields.ThermalConductance;
     /// <inheritdoc cref="AtmosConfig.CondensationRateFactor" />
-    [ConfigCheckpointField(12)]
-    public Scalar CondensationRateFactor { get; }
+    public Scalar CondensationRateFactor => Fields.CondensationRateFactor;
     /// <inheritdoc cref="AtmosConfig.MaxPressureTransferFractionPerNeighbor" />
-    [ConfigCheckpointField(13)]
-    public Scalar MaxPressureTransferFractionPerNeighbor { get; }
+    public Scalar MaxPressureTransferFractionPerNeighbor => Fields.MaxPressureTransferFractionPerNeighbor;
     /// <inheritdoc cref="AtmosConfig.AccumulatorWakeThreshold" />
-    [ConfigCheckpointField(14)]
-    public Pascal AccumulatorWakeThreshold { get; }
+    public Pascal AccumulatorWakeThreshold => Fields.AccumulatorWakeThreshold;
     /// <inheritdoc cref="AtmosConfig.AccumulatorMaxAliveTicks" />
-    [ConfigCheckpointField(15)]
-    public int AccumulatorMaxAliveTicks { get; }
+    public int AccumulatorMaxAliveTicks => Fields.AccumulatorMaxAliveTicks;
+    /// <inheritdoc cref="AtmosConfig.ReferenceMolarMass" />
+    public KilogramPerMole ReferenceMolarMass => Fields.ReferenceMolarMass;
 
     /// <inheritdoc cref="AtmosConfig.PressurePerMoleKelvin" />
     public PascalPerMoleKelvin PressurePerMoleKelvin =>
-        AtmosPhysicalConstants.MolarGasConstant / GetVoxelVolume();
+        AtmosPhysicalConstants.MolarGasConstant / VoxelVolume;
 
     /// <inheritdoc cref="AtmosConfig.GetValidatedTemp" />
     public Kelvin GetValidatedTemp(Kelvin storedTemperature)
@@ -171,32 +172,37 @@ public sealed class AtmosConfigSnapshot : IAtmosConfig
     /// <inheritdoc cref="AtmosConfig.GetVoxelVolume" />
     public CubicMetre GetVoxelVolume()
     {
-        return FloatMath.IsFinitePositive(VoxelVolume) ? VoxelVolume : AtmosConfigDefaults.VoxelVolume;
+        return VoxelVolume;
     }
 
     /// <inheritdoc cref="AtmosConfig.GetMolarHeatCapacityAtConstantVolume" />
     public JoulePerMoleKelvin GetMolarHeatCapacityAtConstantVolume(int gasId)
     {
-        JoulePerMoleKelvin fallback = FloatMath.IsFinitePositive(DefaultMolarHeatCapacityAtConstantVolume)
-            ? DefaultMolarHeatCapacityAtConstantVolume
-            : AtmosConfigDefaults.DefaultMolarHeatCapacityAtConstantVolume;
-
-        if ((uint)gasId < (uint)GasRegistry.Count)
-        {
-            JoulePerMoleKelvin configured = GasRegistry[gasId].MolarHeatCapacityAtConstantVolume;
-            if (FloatMath.IsFinitePositive(configured))
-                return configured;
-        }
-
-        return fallback;
+        return (uint)gasId < (uint)GasRegistry.Count
+            ? GasRegistry[gasId].MolarHeatCapacityAtConstantVolume
+            : DefaultMolarHeatCapacityAtConstantVolume;
     }
 
     /// <inheritdoc cref="AtmosConfig.GetDiffusionCoefficient" />
     public SquareMetrePerSecond GetDiffusionCoefficient(int gasId)
     {
         return (uint)gasId < (uint)GasRegistry.Count
-            ? FloatMath.GetNonnegativeFinite(GasRegistry[gasId].DiffusionCoefficient)
-            : FloatMath.GetNonnegativeFinite(DefaultDiffusionCoefficient);
+            ? GasRegistry[gasId].DiffusionCoefficient
+            : DefaultDiffusionCoefficient;
+    }
+
+    /// <inheritdoc cref="AtmosConfig.GetMolarMass" />
+    public KilogramPerMole GetMolarMass(int gasId)
+    {
+        // The constructor stores an unknown molar mass as zero.
+        if ((uint)gasId < (uint)GasRegistry.Count)
+        {
+            KilogramPerMole configured = GasRegistry[gasId].MolarMass;
+            if (configured > 0f)
+                return configured;
+        }
+
+        return ReferenceMolarMass;
     }
 
     /// <inheritdoc cref="AtmosConfig.TryGetGasProperties" />
@@ -289,68 +295,12 @@ public sealed class AtmosConfigSnapshot : IAtmosConfig
         return Interlocked.CompareExchange(ref _reactionTables, tables, null) ?? tables;
     }
 
-    internal void AppendHash(ref AtmosStateHasher hash)
-    {
-        GeneratedCheckpointFields.AppendConfigFields(ref hash, this);
-        hash.Add(GasRegistry.Count);
-        foreach (var gas in GasRegistry) hash.Add(gas);
-        if (SolverConfigurations.Count != 0)
-        {
-            hash.Add("solver-configurations");
-            hash.Add(SolverConfigurations.Count);
-            foreach (var configuration in SolverConfigurations)
-            {
-                hash.Add(configuration.Key);
-                hash.Add(configuration.ComputeStateHash());
-            }
-        }
-    }
-
+    // The schema fields compare bitwise on floats, matching the hash, so 0f and -0f differ.
     internal bool SemanticallyEquals(AtmosConfigSnapshot other)
     {
-        return GlobalTemperature.Equals(other.GlobalTemperature) &&
-               DefaultTemperatureFallback.Equals(other.DefaultTemperatureFallback) &&
-               DefaultMolarHeatCapacityAtConstantVolume.Equals(other.DefaultMolarHeatCapacityAtConstantVolume) &&
-               VoxelVolume.Equals(other.VoxelVolume) &&
-               SaturationReferencePressure.Equals(other.SaturationReferencePressure) &&
-               DefaultDiffusionCoefficient.Equals(other.DefaultDiffusionCoefficient) &&
-               SpaceTemperature.Equals(other.SpaceTemperature) &&
-               BulkFlowCoefficient.Equals(other.BulkFlowCoefficient) &&
-               VacuumThreshold.Equals(other.VacuumThreshold) &&
-               SleepThreshold == other.SleepThreshold &&
-               SleepEpsilon.Equals(other.SleepEpsilon) &&
-               ThermalConductance.Equals(other.ThermalConductance) &&
-               CondensationRateFactor.Equals(other.CondensationRateFactor) &&
-               MaxPressureTransferFractionPerNeighbor.Equals(other.MaxPressureTransferFractionPerNeighbor) &&
-               AccumulatorWakeThreshold.Equals(other.AccumulatorWakeThreshold) &&
-               AccumulatorMaxAliveTicks == other.AccumulatorMaxAliveTicks &&
-               GasRegistriesEqual(GasRegistry, other.GasRegistry) &&
+        return NumosState.StateEquals(Fields, other.Fields) &&
                SolverConfigurations.Count == other.SolverConfigurations.Count &&
                SolverConfigurations.Zip(other.SolverConfigurations).All(static pair =>
                    pair.First.Key == pair.Second.Key && pair.First.SemanticallyEquals(pair.Second));
-    }
-
-    private static bool GasRegistriesEqual(IGasRegistry first, IGasRegistry second)
-    {
-        if (first.Count != second.Count)
-            return false;
-
-        for (int i = 0; i < first.Count; i++)
-        {
-            var left = first[i];
-            var right = second[i];
-            if (!string.Equals(left.Name, right.Name, StringComparison.Ordinal) ||
-                !left.MolarHeatCapacityAtConstantVolume.Equals(right.MolarHeatCapacityAtConstantVolume) ||
-                !left.BoilingPoint.Equals(right.BoilingPoint) ||
-                left.CondensationEnabled != right.CondensationEnabled ||
-                !left.MolarEnthalpyOfVaporization.Equals(right.MolarEnthalpyOfVaporization) ||
-                left.LiquidId != right.LiquidId ||
-                !left.DiffusionCoefficient.Equals(right.DiffusionCoefficient))
-            {
-                return false;
-            }
-        }
-
-        return true;
     }
 }

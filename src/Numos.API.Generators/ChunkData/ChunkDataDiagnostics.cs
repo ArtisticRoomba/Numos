@@ -56,20 +56,21 @@ internal static class ChunkDataDiagnostics
         DiagnosticSeverity.Error,
         true);
 
-    public static readonly DiagnosticDescriptor RollbackWithoutKey = new(
+    public static readonly DiagnosticDescriptor SavedWithoutKey = new(
         "NUMOSCHUNK007",
-        "Rollback chunk data needs an explicit key",
-        "Chunk data property '{0}' sets Rollback but has no explicit key; the key is stored in checkpoints, " +
-        "so it can't be derived from a name that may be refactored",
+        "Saved chunk data needs an explicit key",
+        "Chunk data property '{0}' has no key, but it's saved in checkpoints and files, so the key can't be derived " +
+        "from a name that may be refactored; pass a key such as \"my-mod/fire/exposure\", or set Transient = true " +
+        "for scratch data",
         Category,
         DiagnosticSeverity.Error,
         true);
 
-    public static readonly DiagnosticDescriptor RollbackWithManagedType = new(
+    public static readonly DiagnosticDescriptor SavedWithManagedType = new(
         "NUMOSCHUNK008",
-        "Rollback chunk data needs an unmanaged element type",
-        "Chunk data property '{0}' sets Rollback, but element type '{1}' is not unmanaged; " +
-        "checkpoints can only capture element types without managed references",
+        "Saved chunk data needs an unmanaged element type",
+        "Chunk data property '{0}' is saved in checkpoints, but element type '{1}' is not unmanaged; use an element " +
+        "type without managed references, or set Transient = true",
         Category,
         DiagnosticSeverity.Error,
         true);
@@ -95,7 +96,7 @@ internal static class ChunkDataDiagnostics
         "NUMOSCHUNK011",
         "Chunk data key registered with conflicting definitions",
         "Chunk data key '{0}' on '{1}' is also declared on {2} with a different element type, length, " +
-        "or rollback setting; registration would throw at run time",
+        "or transient setting; registration would throw at run time",
         Category,
         DiagnosticSeverity.Error,
         true);

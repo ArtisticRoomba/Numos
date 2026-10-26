@@ -7,7 +7,7 @@ namespace Numos.CoreSim.IntegrationTests;
 [TestFixture]
 public sealed class BoundaryFlowParallelDeterminismTests
 {
-    private const ulong X64ExpectedDigest = 13785052137060592037UL;
+    private const ulong X64ExpectedDigest = 18173732527204732791UL;
 
     /// <summary>
     ///     Requires repeated runs of this scenario to produce one digest, which on x64 must also equal
@@ -19,8 +19,10 @@ public sealed class BoundaryFlowParallelDeterminismTests
     ///     it shows parallel boundary flow is bit-identical to the sequential algorithm, not merely stable across repeated
     ///     parallel runs. The value was re-captured as a grid-only
     ///     <see cref="Numos.CoreSim.Replay.AtmosSimulationCheckpoint" /> digest once the sequential-era digest had passed on
-    ///     the same code. It was re-captured again when species diffusion started dividing by the voxel volume, and held
-    ///     at 1, 2, and 32 workers.
+    ///     the same code. It was captured again for grid checkpoint formats 8, 9, and 10. Those formats hash state with
+    ///     the wire encoding, name fields by hashed member names, and generate the checkpoint from live members. Neither
+    ///     recapture changed the physics. The last one did: species diffusion started dividing by the voxel volume. That
+    ///     value held at 1, 2, and 32 workers.
     /// </remarks>
     [Test]
     [Explicit(
@@ -77,7 +79,7 @@ public sealed class BoundaryFlowParallelDeterminismTests
         // counts. Every chunk touches at least one face neighbor, so boundary flow has cross-chunk work on every tick.
         const int gridSize = 3;
         const int chunkExtent = 4;
-        var simulation = new AtmosSimulation(config, chunkExtent, chunkExtent, chunkExtent);
+        var simulation = SimTestHelpers.CreateLegacySimulation(config, chunkExtent, chunkExtent, chunkExtent);
 
         for (int cz = 0; cz < gridSize; cz++)
         for (int cy = 0; cy < gridSize; cy++)

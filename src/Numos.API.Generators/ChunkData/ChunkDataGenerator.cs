@@ -13,7 +13,8 @@ namespace Numos.API.Generators.ChunkData;
 /// <remarks>
 ///     <para>
 ///         Each property gets a body that returns a <c>ChunkField&lt;T&gt;</c> registered from a nested holder class,
-///         and a C# 14 extension property on <c>AtmosSolverChunk</c>. Output is one file per declaring type.
+///         and a C# 14 extension property on <c>AtmosSolverChunk</c>. Output is one file per declaring type, plus one
+///         module initializer per assembly that registers every field when the assembly loads.
 ///     </para>
 ///     <para>
 ///         Per-property checks run in the attribute transform. Key conflicts and accessor collisions need every property in the
@@ -29,6 +30,7 @@ public sealed class ChunkDataGenerator : IIncrementalGenerator
     internal const string LanguageVersionStepName = "ChunkDataLanguageVersion";
     internal const string ViewInfoStepName = "ChunkDataViewInfo";
     internal const string TypesStepName = "ChunkDataTypes";
+    internal const string ModuleInitializerStepName = "ChunkDataModuleInitializer";
 
     private const string AttributeMetadataName = "Numos.API.ChunkDataAttribute";
     private const string ChunkFieldMetadataName = "Numos.API.ChunkField`1";
@@ -73,6 +75,18 @@ public sealed class ChunkDataGenerator : IIncrementalGenerator
             TypesStepName,
             static type =>
                 (type.Members[0].Property.Type.HintName + ".ChunkData.g.cs", ChunkDataEmitter.Emit(type)));
+
+        IncrementalValueProvider<EquatableArray<string>> declaringTypes = output
+            .Select(static (result, _) => result.Types
+                .Select(static type => type.Members[0].Property.TypeDisplay)
+                .ToEquatableArray())
+            .WithTrackingName(ModuleInitializerStepName);
+
+        GeneratorOutput.RegisterModuleInitializer(
+            context,
+            declaringTypes,
+            ChunkDataEmitter.ModuleInitializerHintName,
+            ChunkDataEmitter.EmitModuleInitializer);
     }
 
     private static EquatableArray<string> GetReservedNames(Compilation compilation)
@@ -139,7 +153,7 @@ public sealed class ChunkDataGenerator : IIncrementalGenerator
                     property.Type.ToDisplayString()));
         }
 
-        bool accessible = IsAccessibleFromNamespace(property.DeclaredAccessibility);
+        bool accessible = PartialSyntax.IsAccessibleFromNamespace(property.DeclaredAccessibility);
         foreach ((INamedTypeSymbol type, bool isPartial) in chain)
         {
             if (!isPartial)
@@ -162,7 +176,7 @@ public sealed class ChunkDataGenerator : IIncrementalGenerator
                         displayName));
             }
 
-            if (type.IsFileLocal || !IsAccessibleFromNamespace(type.DeclaredAccessibility))
+            if (type.IsFileLocal || !PartialSyntax.IsAccessibleFromNamespace(type.DeclaredAccessibility))
                 accessible = false;
         }
 
@@ -187,7 +201,7 @@ public sealed class ChunkDataGenerator : IIncrementalGenerator
                 : containingType.ContainingNamespace.ToDisplayString() + "." + displayName;
         }
 
-        bool rollback = false;
+        bool transient = false;
         int? length = null;
         bool clearOnSleep = false;
         bool clearOnVacuum = false;
@@ -196,8 +210,8 @@ public sealed class ChunkDataGenerator : IIncrementalGenerator
         {
             switch (argument.Key)
             {
-                case "Rollback" when argument.Value.Value is bool value:
-                    rollback = value;
+                case "Transient" when argument.Value.Value is bool value:
+                    transient = value;
                     break;
                 case "Length" when argument.Value.Value is int value:
                     length = value;
@@ -214,14 +228,15 @@ public sealed class ChunkDataGenerator : IIncrementalGenerator
             }
         }
 
-        if (rollback && !explicitKey)
-            diagnostics.Add(DiagnosticInfo.Create(ChunkDataDiagnostics.RollbackWithoutKey, attributeLocation, displayName));
+        // Everything but scratch data is saved, and a saved key is a compatibility contract.
+        if (!transient && !explicitKey)
+            diagnostics.Add(DiagnosticInfo.Create(ChunkDataDiagnostics.SavedWithoutKey, attributeLocation, displayName));
 
-        if (rollback && elementType is not null && !elementType.IsUnmanagedType)
+        if (!transient && elementType is not null && !elementType.IsUnmanagedType)
         {
             diagnostics.Add(
                 DiagnosticInfo.Create(
-                    ChunkDataDiagnostics.RollbackWithManagedType,
+                    ChunkDataDiagnostics.SavedWithManagedType,
                     attributeLocation,
                     displayName,
                     elementType.ToDisplayString()));
@@ -261,18 +276,13 @@ public sealed class ChunkDataGenerator : IIncrementalGenerator
             property.DeclaredAccessibility == Accessibility.Public &&
             chain.All(static link => link.Type.DeclaredAccessibility == Accessibility.Public),
             key,
-            rollback,
+            transient,
             length,
             clearOnSleep,
             clearOnVacuum,
             accessorName ?? property.Name);
 
         return new ChunkDataDeclaration(model, location, diagnostics.ToEquatableArray());
-    }
-
-    private static bool IsAccessibleFromNamespace(Accessibility accessibility)
-    {
-        return accessibility is Accessibility.Public or Accessibility.Internal or Accessibility.ProtectedOrInternal;
     }
 
     private static GeneratorOutput<ChunkDataTypeModel> Analyze(
@@ -402,7 +412,7 @@ public sealed class ChunkDataGenerator : IIncrementalGenerator
             ChunkDataPropertyModel first = declarations[0].Property;
             bool identical = declarations.All(declaration =>
                 declaration.Property.ElementTypeIdentity == first.ElementTypeIdentity &&
-                declaration.Property.Rollback == first.Rollback &&
+                declaration.Property.Transient == first.Transient &&
                 declaration.Property.Length == first.Length &&
                 declaration.Property.ClearOnSleep == first.ClearOnSleep &&
                 declaration.Property.ClearOnVacuum == first.ClearOnVacuum);

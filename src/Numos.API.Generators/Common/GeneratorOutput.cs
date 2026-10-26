@@ -51,4 +51,25 @@ internal static class GeneratorOutput
                 production.AddSource(hintName, source);
             });
     }
+
+    /// <summary>
+    ///     Emits one module initializer file, and only when there is something to register.
+    /// </summary>
+    /// <param name="context">The generator's initialization context.</param>
+    /// <param name="types">The names to register, in a stable order.</param>
+    /// <param name="hintName">The generated file's hint name.</param>
+    /// <param name="emit">Builds the source from the names.</param>
+    public static void RegisterModuleInitializer(
+        IncrementalGeneratorInitializationContext context,
+        IncrementalValueProvider<EquatableArray<string>> types, string hintName,
+        Func<EquatableArray<string>, string> emit)
+    {
+        context.RegisterSourceOutput(
+            types,
+            (production, names) =>
+            {
+                if (names.Count > 0)
+                    production.AddSource(hintName, emit(names));
+            });
+    }
 }

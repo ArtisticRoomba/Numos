@@ -1,5 +1,6 @@
 using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Primitives;
+using Numos.CoreSim.EulerFlow;
 using Numos.Maths;
 
 namespace Numos.API.Tests;
@@ -165,6 +166,206 @@ public sealed class AtmosWorldTests
             Assert.That(sourceMoles, Is.GreaterThanOrEqualTo(0f));
             Assert.That(firstMoles, Is.EqualTo(secondMoles).Within(1e-6f));
             Assert.That(sourceMoles + firstMoles + secondMoles, Is.EqualTo(1f).Within(1e-5f));
+        });
+    }
+
+    [Test]
+    public void HalfAreaPortal_MovesHalfTheGasOfAFullAreaPortal()
+    {
+        using var world = new AtmosWorld(CreateConfig());
+        var simulation = world.CreateSimulation(1, 1, 1);
+        var fullSource = CreateOpenChunk(simulation);
+        var fullTarget = CreateOpenChunk(simulation, new Int3(2, 0, 0));
+        var halfSource = CreateOpenChunk(simulation, new Int3(4, 0, 0));
+        var halfTarget = CreateOpenChunk(simulation, new Int3(6, 0, 0));
+        simulation.AddGasToVoxel(fullSource, 0, GasName, 1f, 300f);
+        simulation.AddGasToVoxel(halfSource, 0, GasName, 1f, 300f);
+        world.CreatePortal(simulation.GetCellRef(fullSource, 0), simulation.GetCellRef(fullTarget, 0));
+        world.CreatePortal(
+            simulation.GetCellRef(halfSource, 0),
+            simulation.GetCellRef(halfTarget, 0),
+            ExplicitLinkFlags.All,
+            0.5f);
+
+        world.Tick();
+
+        float fullMoved = TotalMoles(simulation, fullTarget);
+        float halfMoved = TotalMoles(simulation, halfTarget);
+        Assert.Multiple(() =>
+        {
+            Assert.That(fullMoved, Is.GreaterThan(0f));
+            Assert.That(halfMoved, Is.EqualTo(fullMoved * 0.5f));
+            Assert.That(TotalMoles(simulation, fullSource) + fullMoved, Is.EqualTo(1f).Within(1e-5f));
+            Assert.That(TotalMoles(simulation, halfSource) + halfMoved, Is.EqualTo(1f).Within(1e-5f));
+        });
+    }
+
+    [Test]
+    public void ClosedPortal_MovesNoGas()
+    {
+        using var world = new AtmosWorld(CreateConfig());
+        var simulation = world.CreateSimulation(1, 1, 1);
+        var source = CreateOpenChunk(simulation);
+        var target = CreateOpenChunk(simulation, new Int3(2, 0, 0));
+        simulation.AddGasToVoxel(source, 0, GasName, 1f, 300f);
+        world.CreatePortal(simulation.GetCellRef(source, 0), simulation.GetCellRef(target, 0), ExplicitLinkFlags.All, 0f);
+
+        world.Tick();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(world.ActiveLinkCount, Is.EqualTo(1));
+            Assert.That(TotalMoles(simulation, source), Is.EqualTo(1f));
+            Assert.That(TotalMoles(simulation, target), Is.Zero);
+        });
+    }
+
+    [Test]
+    public void UnsizedPortal_FollowsTheConfiguredDefaultAreaFraction()
+    {
+        var config = CreateConfig();
+        config.SolverConfigurations.Add(new EulerFlowConfig { DefaultLinkAreaFraction = 0.5f });
+        using var world = new AtmosWorld(config);
+        var simulation = world.CreateSimulation(1, 1, 1);
+        var defaultSource = CreateOpenChunk(simulation);
+        var defaultTarget = CreateOpenChunk(simulation, new Int3(2, 0, 0));
+        var sizedSource = CreateOpenChunk(simulation, new Int3(4, 0, 0));
+        var sizedTarget = CreateOpenChunk(simulation, new Int3(6, 0, 0));
+        simulation.AddGasToVoxel(defaultSource, 0, GasName, 1f, 300f);
+        simulation.AddGasToVoxel(sizedSource, 0, GasName, 1f, 300f);
+        world.CreatePortal(simulation.GetCellRef(defaultSource, 0), simulation.GetCellRef(defaultTarget, 0));
+        world.CreatePortal(
+            simulation.GetCellRef(sizedSource, 0),
+            simulation.GetCellRef(sizedTarget, 0),
+            ExplicitLinkFlags.All,
+            0.5f);
+
+        world.Tick();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(TotalMoles(simulation, defaultTarget), Is.GreaterThan(0f));
+            Assert.That(TotalMoles(simulation, defaultTarget), Is.EqualTo(TotalMoles(simulation, sizedTarget)));
+        });
+    }
+
+    [Test]
+    public void SeveralHalfAreaPortalsFromOneCell_StillCannotOverdraw()
+    {
+        var config = CreateConfig();
+        config.BulkFlowCoefficient = 0.5f;
+        using var world = new AtmosWorld(config);
+        var simulation = world.CreateSimulation(1, 1, 1);
+        var source = CreateOpenChunk(simulation);
+        simulation.AddGasToVoxel(source, 0, GasName, 1f, 300f);
+        var sourceCell = simulation.GetCellRef(source, 0);
+        // Each half-area portal asks for a quarter of the source, so five of them request more than it holds.
+        var targets = new AtmosChunkHandle[5];
+        var links = new ExplicitLinkDefinition[targets.Length];
+        for (int index = 0; index < targets.Length; index++)
+        {
+            targets[index] = CreateOpenChunk(simulation, new Int3(2 * (index + 1), 0, 0));
+            links[index] = new ExplicitLinkDefinition(
+                sourceCell,
+                simulation.GetCellRef(targets[index], 0),
+                ExplicitLinkFlags.GasTransport,
+                0.5f);
+        }
+
+        world.CreateLinks(links);
+
+        world.Tick();
+
+        float sourceMoles = TotalMoles(simulation, source);
+        float[] targetMoles = targets.Select(target => TotalMoles(simulation, target)).ToArray();
+        Assert.Multiple(() =>
+        {
+            Assert.That(sourceMoles, Is.GreaterThanOrEqualTo(0f));
+            Assert.That(targetMoles, Has.All.EqualTo(targetMoles[0]).Within(1e-6f));
+            Assert.That(targetMoles[0], Is.LessThan(0.25f));
+            Assert.That(sourceMoles + targetMoles.Sum(), Is.EqualTo(1f).Within(1e-5f));
+        });
+    }
+
+    [Test]
+    public void AreaFraction_SurvivesCheckpointRestoreAndReplay()
+    {
+        using var world = new AtmosWorld(CreateConfig());
+        var first = world.CreateSimulation(1, 1, 1);
+        var second = world.CreateSimulation(1, 1, 1);
+        var source = CreateOpenChunk(first);
+        var target = CreateOpenChunk(second);
+        first.AddGasToVoxel(source, 0, GasName, 1f, 300f);
+        var start = world.CaptureCheckpoint();
+        world.StartRecording();
+        var portal = world.CreatePortal(
+            first.GetCellRef(source, 0),
+            second.GetCellRef(target, 0),
+            ExplicitLinkFlags.All,
+            0.5f);
+
+        world.Tick();
+        var checkpoint = world.CaptureCheckpoint();
+        world.Tick();
+        var expected = world.ComputeStateHash();
+        var recording = world.StopRecording();
+
+        world.RestoreCheckpoint(checkpoint);
+        var restoredLink = world.GetLinks(portal.Links).Single();
+        world.ReplayTo(start, recording.Operations, recording.Head);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(restoredLink.AreaFraction, Is.EqualTo(0.5f));
+            Assert.That(checkpoint.LinkSets.Single().Links.Single().AreaFraction, Is.EqualTo(0.5f));
+            Assert.That(world.GetLinks(portal.Links).Single().AreaFraction, Is.EqualTo(0.5f));
+            Assert.That(world.ComputeStateHash(), Is.EqualTo(expected));
+        });
+    }
+
+    [Test]
+    public void AreaFraction_ContributesToTheStateHash()
+    {
+        using var world = new AtmosWorld(CreateConfig());
+        var simulation = world.CreateSimulation(1, 1, 1);
+        var source = CreateOpenChunk(simulation);
+        var target = CreateOpenChunk(simulation, new Int3(2, 0, 0));
+        var sourceCell = simulation.GetCellRef(source, 0);
+        var targetCell = simulation.GetCellRef(target, 0);
+
+        var unsized = world.CreatePortal(sourceCell, targetCell);
+        var unsizedHash = world.CaptureCheckpoint().ComputeStateHash();
+        world.DestroyPortal(unsized);
+        world.CreatePortal(sourceCell, targetCell, ExplicitLinkFlags.All, 1f);
+        var sizedHash = world.CaptureCheckpoint().ComputeStateHash();
+
+        Assert.That(sizedHash, Is.Not.EqualTo(unsizedHash));
+    }
+
+    [TestCase(float.NaN)]
+    [TestCase(-0.01f)]
+    [TestCase(1.01f)]
+    [TestCase(float.PositiveInfinity)]
+    public void InvalidAreaFraction_IsRejected(float areaFraction)
+    {
+        using var world = new AtmosWorld(CreateConfig());
+        var simulation = world.CreateSimulation(1, 1, 1);
+        var source = CreateOpenChunk(simulation);
+        var target = CreateOpenChunk(simulation, new Int3(2, 0, 0));
+        var sourceCell = simulation.GetCellRef(source, 0);
+        var targetCell = simulation.GetCellRef(target, 0);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(
+                () => world.CreatePortal(sourceCell, targetCell, ExplicitLinkFlags.All, areaFraction),
+                Throws.TypeOf<ArgumentOutOfRangeException>());
+
+            Assert.That(
+                () => world.CreateLinks([new ExplicitLinkDefinition(sourceCell, targetCell, ExplicitLinkFlags.All, areaFraction)]),
+                Throws.TypeOf<ArgumentOutOfRangeException>());
+
+            Assert.That(world.GetLinkSets(), Is.Empty);
         });
     }
 

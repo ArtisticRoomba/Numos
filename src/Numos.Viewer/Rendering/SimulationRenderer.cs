@@ -1,5 +1,6 @@
 using System.Numerics;
 using Numos.SimDrawer;
+using Numos.Viewer.Ui;
 using Raylib_cs;
 
 namespace Numos.Viewer.Rendering;
@@ -37,7 +38,7 @@ public static class SimulationRenderer
     ///     Voxel outlines to draw; entries that do not resolve to a drawn chunk are ignored.
     /// </param>
     /// <param name="meshes">Mesh cache of the simulation that owns <paramref name="frame" />.</param>
-    /// <param name="options">Outline and transparency treatments.</param>
+    /// <param name="options">Outline, transparency, and velocity-arrow treatments.</param>
     internal static void Draw(
         SimulationDrawData frame,
         ChunkIdentity? focusedChunk,
@@ -63,6 +64,9 @@ public static class SimulationRenderer
             if (options.ShowChunkOutlines)
                 DrawChunkOutline(chunk);
         }
+
+        if (options.ShowVelocityArrows)
+            DrawVelocityArrows(frame, focusedChunk, options.VelocityArrowScale);
 
         DrawHighlights(frame, focusedChunk, highlights);
     }
@@ -109,6 +113,69 @@ public static class SimulationRenderer
                 continue;
 
             Raylib.DrawCubeWiresV(GetCellCenter(chunk, localIndex), VoxelSize, color);
+        }
+    }
+
+    /// <summary>
+    ///     Draws arrows from the centre of drawn voxels along <c>velocity × scale</c>, at most
+    ///     <see cref="VelocityArrows.MaxArrows" /> of them. Depth testing is off for this pass: the arrows start inside
+    ///     opaque cubes, and a short arrow would otherwise vanish entirely.
+    /// </summary>
+    private static void DrawVelocityArrows(SimulationDrawData frame, ChunkIdentity? focusedChunk, float scaleSeconds)
+    {
+        var color = ToRaylibColor(ViewerTheme.FlowArrow);
+
+        long candidates = 0;
+        int rowLength = 1;
+        foreach (var chunk in frame.Chunks.Values)
+        {
+            if (!IsDrawn(frame, chunk, focusedChunk))
+                continue;
+
+            candidates += chunk.VisibleCellCount;
+            rowLength = chunk.Dimensions.X;
+        }
+
+        int stride = VelocityArrows.GetSampleStride(
+            (int)Math.Min(candidates, int.MaxValue),
+            VelocityArrows.MaxArrows,
+            rowLength);
+
+        // Flush the batch before changing GL state, and the line batch before restoring it, or the
+        // state change applies to whatever happens to be drawn next.
+        Rlgl.DrawRenderBatchActive();
+        Rlgl.DisableDepthTest();
+        try
+        {
+            foreach (var chunk in frame.Chunks.Values)
+            {
+                if (!IsDrawn(frame, chunk, focusedChunk))
+                    continue;
+
+                ReadOnlySpan<VoxelDrawData> cells = chunk.Cells;
+                for (int localIndex = stride / 2; localIndex < cells.Length; localIndex += stride)
+                {
+                    ref readonly var cell = ref cells[localIndex];
+                    if (!cell.IsVisible || cell.VisibleFaces == VoxelFaceMask.None)
+                        continue;
+
+                    var velocity = new Vector3(cell.VelocityX, cell.VelocityY, cell.VelocityZ);
+                    if (!VelocityArrows.TryGetShaft(velocity, scaleSeconds, out var shaft))
+                        continue;
+
+                    var start = GetCellCenter(chunk, localIndex);
+                    var tip = start + shaft;
+                    (Vector3 left, Vector3 right) = VelocityArrows.GetHead(tip, shaft);
+                    Raylib.DrawLine3D(start, tip, color);
+                    Raylib.DrawLine3D(tip, left, color);
+                    Raylib.DrawLine3D(tip, right, color);
+                }
+            }
+        }
+        finally
+        {
+            Rlgl.DrawRenderBatchActive();
+            Rlgl.EnableDepthTest();
         }
     }
 
@@ -171,6 +238,11 @@ public static class SimulationRenderer
 
         chunk = null!;
         return false;
+    }
+
+    internal static Color ToRaylibColor(Vector4 color)
+    {
+        return ToRaylibColor(new ColorRgba(color.X, color.Y, color.Z, color.W));
     }
 
     internal static Color ToRaylibColor(ColorRgba color)

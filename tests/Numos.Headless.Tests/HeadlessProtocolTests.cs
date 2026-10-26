@@ -268,7 +268,7 @@ public sealed class HeadlessProtocolTests
         var run = await RunAsync(
             CreateProject("create", 2, 1, 1),
             Request("add", "addChunk", $"\"position\":{Coordinate0},\"classification\":1"),
-            Request("unknown", "sampleVoxels", $"\"points\":[{Coordinate0}],\"fields\":[\"density\"]"),
+            Request("unknown", "sampleVoxels", $"\"points\":[{Coordinate0}],\"fields\":[\"notAField\"]"),
             Request("missing", "sampleVoxels", $"\"points\":[{C(50, 0, 0)}],\"fields\":[\"pressure\",\"classification\"]"));
 
         var values = run.Result("missing").GetProperty("samples").GetProperty("values")[0];
@@ -306,6 +306,34 @@ public sealed class HeadlessProtocolTests
     }
 
     [Test]
+    public async Task UpdateConfig_RejectsEulerAndMolarMassValuesOutsideTheirDomain()
+    {
+        var run = await RunAsync(
+            CreateProject("create", 2, 1, 1),
+            Request("courant", "updateConfig", "\"config\":{\"eulerFlow\":{\"courantNumber\":1.5}}"),
+            Request("substeps", "updateConfig", "\"config\":{\"eulerFlow\":{\"maxSubstepsPerTick\":-1}}"),
+            Request("linkArea", "updateConfig", "\"config\":{\"eulerFlow\":{\"defaultLinkAreaFraction\":2}}"),
+            Request("molarMass", "updateConfig", "\"config\":{\"referenceMolarMassKgPerMol\":0}"),
+            Request("config", "getConfig"));
+
+        string ErrorMessage(string id)
+        {
+            return run.Find(id).GetProperty("error").GetProperty("message").GetString()!;
+        }
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(run.ErrorCode("courant"), Is.EqualTo("operationRejected"));
+            Assert.That(run.ErrorCode("substeps"), Is.EqualTo("operationRejected"));
+            Assert.That(run.ErrorCode("linkArea"), Is.EqualTo("operationRejected"));
+            Assert.That(run.ErrorCode("molarMass"), Is.EqualTo("operationRejected"));
+            Assert.That(ErrorMessage("courant"), Does.StartWith("Courant number must"));
+            Assert.That(ErrorMessage("molarMass"), Does.StartWith("Reference molar mass must"));
+            Assert.That(run.Result("config").GetProperty("config").TryGetProperty("eulerFlow", out _), Is.False);
+        });
+    }
+
+    [Test]
     public async Task Solvers_ListDisableAndReset()
     {
         var run = await RunAsync(
@@ -330,6 +358,88 @@ public sealed class HeadlessProtocolTests
             Assert.That(Enabled("after"), Is.False);
             Assert.That(Enabled("restored"), Is.True);
             Assert.That(run.ErrorCode("unknown"), Is.EqualTo("solverNotFound"));
+        });
+    }
+
+    [Test]
+    public async Task SolverLayout_ReordersTogglesAndRejectsBadInput()
+    {
+        const string legacy =
+            "\"stages\":[{\"name\":\"advection\",\"enabled\":true},{\"name\":\"thermodynamics\",\"enabled\":false}," +
+            "{\"name\":\"explicit-gas-transport\",\"enabled\":true}]";
+
+        var run = await RunAsync(
+            CreateProject("create", 2, 1, 1),
+            Request("set", "setSolverLayout", legacy),
+            Request("list", "listSolvers"),
+            Request("again", "setSolverLayout", legacy),
+            Request("duplicate", "setSolverLayout", "\"stages\":[{\"name\":\"advection\",\"enabled\":true},{\"name\":\"advection\",\"enabled\":true}]"),
+            Request("unknown", "setSolverLayout", "\"stages\":[{\"name\":\"nope\",\"enabled\":true}]"),
+            Request("noEnabled", "setSolverLayout", "\"stages\":[{\"name\":\"advection\"}]"),
+            Request("missing", "setSolverLayout"),
+            Request("after", "listSolvers"));
+
+        var names = run.Result("list").GetProperty("solvers").EnumerateArray()
+            .Select(static step => step.GetProperty("name").GetString())
+            .ToArray();
+        Assert.Multiple(() =>
+        {
+            Assert.That(run.Result("set").GetProperty("changed").GetBoolean(), Is.True);
+            Assert.That(names, Is.EqualTo(new[] { "advection", "thermodynamics", "explicit-gas-transport" }));
+            Assert.That(run.Result("again").TryGetProperty("changed", out var changed) && changed.GetBoolean(), Is.False);
+            Assert.That(run.ErrorCode("duplicate"), Is.EqualTo("operationRejected"));
+            Assert.That(run.ErrorCode("unknown"), Is.EqualTo("operationRejected"));
+            Assert.That(run.ErrorCode("noEnabled"), Is.EqualTo("missingProperty"));
+            Assert.That(run.ErrorCode("missing"), Is.EqualTo("missingProperty"));
+            Assert.That(run.Result("after").GetProperty("solvers").GetArrayLength(), Is.EqualTo(3));
+        });
+    }
+
+    [Test]
+    public async Task TransportPreset_SwapsOnlyTheTransportStages()
+    {
+        var run = await RunAsync(
+            CreateProject("create", 2, 1, 1),
+            Request("off", "setSolverEnabled", "\"solver\":\"thermodynamics\",\"enabled\":false"),
+            Request("legacy", "applyTransportPreset", "\"transportModel\":\"legacy\""),
+            Request("list", "listSolvers"),
+            Request("bad", "applyTransportPreset", "\"transportModel\":\"plasma\""),
+            Request("none", "applyTransportPreset"));
+
+        var steps = run.Result("list").GetProperty("solvers").EnumerateArray()
+            .Select(static step => (step.GetProperty("name").GetString(), step.GetProperty("isEnabled").GetBoolean()))
+            .ToArray();
+        Assert.Multiple(() =>
+        {
+            Assert.That(steps.Select(static step => step.Item1), Does.Contain("advection").And.Contain("boundary-flow").And.Not.Contain("euler-flow"));
+            Assert.That(steps.Single(static step => step.Item1 == "thermodynamics").Item2, Is.False);
+            Assert.That(run.ErrorCode("bad"), Is.EqualTo("invalidTransportModel"));
+            Assert.That(run.ErrorCode("none"), Is.EqualTo("missingProperty"));
+        });
+    }
+
+    [Test]
+    public async Task Portals_CarryAnAreaFractionAndRejectBadOnes()
+    {
+        string endpoints =
+            $"\"first\":{{\"simulation\":0,\"position\":{Coordinate0},\"voxel\":{C(1, 0, 0)}}}," +
+            $"\"second\":{{\"simulation\":\"B\",\"position\":{Coordinate0},\"voxel\":{C(0, 0, 0)}}}";
+
+        var run = await RunAsync(
+            CreateProject("create", 2, 1, 1),
+            Request("chunk", "addChunk", $"\"position\":{Coordinate0},\"classification\":1"),
+            Request("add", "addSimulation", $"\"name\":\"B\",\"chunkDimensions\":{C(2, 1, 1)}"),
+            Request("chunk-b", "addChunk", $"\"position\":{Coordinate0},\"classification\":1"),
+            Request("bad", "createPortal", endpoints + ",\"areaFraction\":1.5"),
+            Request("portal", "createPortal", endpoints + ",\"areaFraction\":0.25"),
+            Request("tick", "tick", "\"count\":1"),
+            Request("links", "listLinkSets"));
+
+        var sets = run.Result("links").GetProperty("linkSets");
+        Assert.Multiple(() =>
+        {
+            Assert.That(run.ErrorCode("bad"), Is.EqualTo("invalidRequest"));
+            Assert.That(sets[0].GetProperty("areaFraction").GetSingle(), Is.EqualTo(0.25f));
         });
     }
 

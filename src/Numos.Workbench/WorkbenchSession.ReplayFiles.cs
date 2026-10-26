@@ -87,6 +87,7 @@ public sealed partial class WorkbenchSession
             var document = NumosReplayFile.Load(fullPath);
             var replay = document.Replay;
             var config = new AtmosConfig(replay.InitialCheckpoint.Config);
+            // Restore adopts the checkpoint's solver layout, so the world needs no matching transport model.
             world = new AtmosWorld(config);
             var timeline = AtmosWorldReplayTimeline.Import(world, replay, 50, progress, cancellation);
             var result = new LoadedReplay(fullPath, document, world, config, timeline);

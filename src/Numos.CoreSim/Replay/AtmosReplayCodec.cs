@@ -3,13 +3,17 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
 using Numos.CoreSim.Datatypes.Primitives;
+using Numos.CoreSim.Datatypes.Snapshots;
+using Numos.CoreSim.Solvers;
+using Numos.CoreSim.State;
+using Numos.CoreSim.State.Advanced;
 using Numos.Maths;
 
 namespace Numos.CoreSim.Replay;
 
 /// <summary>
-///     Binary codec for simulation operations, simulation checkpoints and configuration, plus the little-endian
-///     primitives every replay payload is built from.
+///     Binary codec for simulation operations and the configurations they carry, plus the little-endian primitives
+///     every replay payload is built from. Checkpoints are written by their generated state walkers instead.
 /// </summary>
 /// <remarks>
 ///     <para>
@@ -29,131 +33,133 @@ internal static partial class AtmosReplayCodec
     internal static readonly Encoding Utf8 = new UTF8Encoding(false, true);
 
     /// <summary>
-    ///     Writes one simulation's grid checkpoint nested in a world checkpoint.
+    ///     Writes a configuration: its schema fields (scalars and the gas registry), then its solver configurations.
     /// </summary>
-    internal static void WriteSimulationCheckpoint(BinaryWriter writer, AtmosSimulationCheckpoint checkpoint)
+    /// <remarks>
+    ///     The bytes are one <see cref="StateBinarySink" /> walk of <see cref="AtmosConfigSnapshotCodec" />. The outer
+    ///     object has no length of its own, so the schema fields and each solver configuration are length-prefixed
+    ///     payloads inside it. Solver configurations follow the fields as a count and, for each one in the snapshot's
+    ///     ordinal key order, its key and payload. A state hash walks the same sequence without the lengths.
+    /// </remarks>
+    /// <exception cref="NotSupportedException">A solver configuration has no <see cref="NumosSerializeAttribute" /> members.</exception>
+    internal static void WriteConfig(BinaryWriter writer, AtmosConfigSnapshot config)
     {
-        writer.Write(checkpoint.FormatVersion);
-        writer.Write(checkpoint.CompatibilityVersion);
-        writer.Write(checkpoint.CompatibilityFingerprint);
-        WriteInt3(writer, checkpoint.Dimensions);
-        writer.Write(checkpoint.Chunks.Count);
-        foreach (var chunk in checkpoint.Chunks) WriteChunk(writer, chunk);
+        var sink = new StateBinarySink();
+        sink.BeginObject();
+        AtmosConfigSnapshotCodec.Write(ref sink, config);
+        sink.EndObject();
+        writer.Write(sink.WrittenSpan);
     }
 
     /// <summary>
-    ///     Reads one simulation checkpoint written by <see cref="WriteSimulationCheckpoint" />.
+    ///     Reads a configuration written by <see cref="WriteConfig" />.
     /// </summary>
-    internal static AtmosSimulationCheckpoint ReadSimulationCheckpoint(BinaryReader reader)
-    {
-        int format = reader.ReadInt32();
-        if (format != AtmosSimulationCheckpoint.CurrentFormatVersion)
-            throw new InvalidDataException("The simulation checkpoint schema is unsupported.");
-
-        int compatibility = reader.ReadInt32();
-        if (compatibility != AtmosSimulationCheckpoint.CurrentCompatibilityVersion)
-            throw new InvalidDataException("The simulation checkpoint compatibility version is unsupported.");
-
-        ulong fingerprint = reader.ReadUInt64();
-        var dimensions = ReadInt3(reader);
-        int chunkCount = ReadCount(reader, 1_000_000, "chunk");
-        var chunks = new AtmosChunkCheckpoint[chunkCount];
-        for (int index = 0; index < chunkCount; index++) chunks[index] = ReadChunk(reader);
-        var checkpoint = new AtmosSimulationCheckpoint(dimensions, chunks);
-        if (fingerprint != checkpoint.CompatibilityFingerprint)
-            throw new InvalidDataException("The simulation checkpoint schema or compatibility fingerprint is invalid.");
-
-        return checkpoint;
-    }
-
-    internal static void WriteConfig(BinaryWriter writer, AtmosConfigSnapshot config)
-    {
-        GeneratedCheckpointFields.WriteConfigFields(writer, config);
-        writer.Write(config.GasRegistry.Count);
-        foreach (var gas in config.GasRegistry) GeneratedCheckpointFields.WriteGasFields(writer, gas);
-        writer.Write(config.SolverConfigurations.Count);
-    }
-
+    /// <remarks>
+    ///     Solver configuration keys are looked up in the <see cref="ReplayReader.SolverConfigurations" /> registry when
+    ///     <paramref name="reader" /> carries one, and in the built-in registry otherwise.
+    /// </remarks>
+    /// <exception cref="InvalidDataException">The data is malformed.</exception>
+    /// <exception cref="NotSupportedException">A solver configuration key has no registered type.</exception>
     internal static AtmosConfigSnapshot ReadConfig(BinaryReader reader, int maxStringBytes)
     {
-        var config = new AtmosConfig();
-        GeneratedCheckpointFields.ReadConfigFields(reader, config, maxStringBytes);
+        // Read into a mutable AtmosConfig so the snapshot constructor normalizes it, exactly as for a live config.
+        byte[] fieldBytes = ReadPayload(reader, ReadCount(reader, int.MaxValue, "configuration byte"));
+        var fields = new StateReader(fieldBytes, maxStringBytes);
+        var config = NumosState.Read<AtmosConfig>(ref fields);
 
-        int gasCount = ReadCount(reader, 1_000_000, "gas");
-        for (int index = 0; index < gasCount; index++)
-            config.GasRegistry.Add(GeneratedCheckpointFields.ReadGasFields(reader, maxStringBytes));
+        var types = (reader as ReplayReader)?.SolverConfigurations ?? SolverConfigurationTypes.BuiltIn;
+        int configurationCount = ReadCount(reader, 1_000_000, "solver configuration");
+        string? previousKey = null;
+        for (int index = 0; index < configurationCount; index++)
+        {
+            string key = ReadString(reader, maxStringBytes);
+            RequireAscendingKey(previousKey, key, "Solver configurations");
+            previousKey = key;
+            byte[] payload = ReadPayload(reader, ReadCount(reader, int.MaxValue, "solver configuration byte"));
+            var state = new StateReader(payload, maxStringBytes);
+            var configuration = types.Read(key, ref state, config.GasRegistry);
+            if (!state.IsAtEnd)
+                throw new InvalidDataException($"Solver configuration '{key}' has trailing data.");
 
-        int customConfigurationCount = ReadCount(reader, 1_000_000, "solver configuration");
-        if (customConfigurationCount != 0)
-            throw new NotSupportedException("Portable replay files cannot decode custom solver configurations.");
+            config.SolverConfigurations.Add(configuration);
+        }
 
         return config.CreateSnapshot();
     }
 
-    private static void WriteChunk(BinaryWriter writer, AtmosChunkCheckpoint chunk)
+    /// <summary>
+    ///     Throws unless <paramref name="key" /> sorts after <paramref name="previousKey" /> in ordinal order.
+    /// </summary>
+    /// <param name="previousKey">The key before this one, or <see langword="null" /> for the first.</param>
+    /// <param name="key">The key just read.</param>
+    /// <param name="collection">The plural name of the keyed section, for the message.</param>
+    /// <exception cref="InvalidDataException">The keys are not strictly ascending.</exception>
+    internal static void RequireAscendingKey(string? previousKey, string key, string collection)
     {
-        WriteInt3(writer, chunk.Position);
-        WriteInt3(writer, chunk.Dimensions);
-        writer.Write(chunk.IsAwake);
-        writer.Write(chunk.SleepTimer);
-        writer.Write(chunk.Classifications.Count);
-        GeneratedCheckpointFields.WriteChunkFields(writer, chunk);
-        writer.Write(chunk.ActiveAirIndices.Count);
-        WriteArray(writer, chunk.ActiveAirIndices);
-        writer.Write(chunk.Gases.Count);
-        foreach (var gas in chunk.Gases)
-        {
-            writer.Write(gas.GasId);
-            WriteArray(writer, gas.Moles);
-        }
-
-        writer.Write(chunk.SolverArrays.Count);
+        if (previousKey != null && string.CompareOrdinal(previousKey, key) >= 0)
+            throw new InvalidDataException($"{collection} are not in ascending ordinal key order.");
     }
 
-    private static AtmosChunkCheckpoint ReadChunk(BinaryReader reader)
+    /// <summary>
+    ///     Writes <paramref name="payload" /> behind its <c>int32</c> byte length. <see cref="ReadPayload" /> reads it
+    ///     back after <see cref="ReadCount" />.
+    /// </summary>
+    internal static void WritePayload(BinaryWriter writer, ReadOnlySpan<byte> payload)
     {
-        var position = ReadInt3(reader);
-        var dimensions = ReadInt3(reader);
-        if (dimensions.X <= 0 || dimensions.Y <= 0 || dimensions.Z <= 0)
-            throw new InvalidDataException("Chunk dimensions must be positive.");
+        writer.Write(payload.Length);
+        writer.Write(payload);
+    }
 
-        bool awake = reader.ReadBoolean();
-        int sleepTimer = reader.ReadInt32();
-        int voxels = ReadCount(reader, ushort.MaxValue, "voxel");
-        int expected;
+    /// <summary>
+    ///     Reads <paramref name="length" /> bytes into an array rented from <see cref="ArrayPool{T}.Shared" />, growing
+    ///     as data arrives like <see cref="ReadPayload" />.
+    /// </summary>
+    /// <returns>A rented array whose first <paramref name="length" /> bytes hold the payload. Return it when done.</returns>
+    internal static byte[] RentPayload(BinaryReader reader, int length) => ReadGrowing(reader, length, true);
+
+    /// <summary>
+    ///     Reads <paramref name="length" /> bytes, growing the buffer as data arrives so a corrupt length can't make
+    ///     the reader allocate more than the stream holds.
+    /// </summary>
+    /// <returns>A new array of exactly <paramref name="length" /> bytes.</returns>
+    internal static byte[] ReadPayload(BinaryReader reader, int length) => ReadGrowing(reader, length, false);
+
+    // A pooled buffer can be larger than asked for, so callers of RentPayload must use only the first length bytes.
+    private static byte[] ReadGrowing(BinaryReader reader, int length, bool pooled)
+    {
+        const int chunk = 64 * 1024;
+        byte[] buffer = Allocate(Math.Min(length, chunk), pooled);
         try
         {
-            expected = checked(dimensions.X * dimensions.Y * dimensions.Z);
+            int filled = 0;
+            while (filled < length)
+            {
+                if (filled == buffer.Length)
+                {
+                    byte[] grown = Allocate((int)Math.Min(length, (long)buffer.Length * 2), pooled);
+                    buffer.AsSpan(0, filled).CopyTo(grown);
+                    if (pooled) ArrayPool<byte>.Shared.Return(buffer);
+
+                    buffer = grown;
+                }
+
+                int read = reader.Read(buffer, filled, Math.Min(buffer.Length, length) - filled);
+                if (read == 0) throw new EndOfStreamException();
+
+                filled += read;
+            }
+
+            return buffer;
         }
-        catch (OverflowException exception)
+        catch
         {
-            throw new InvalidDataException("Chunk dimensions overflow.", exception);
+            if (pooled) ArrayPool<byte>.Shared.Return(buffer);
+
+            throw;
         }
-
-        if (voxels != expected || voxels <= 0) throw new InvalidDataException("Chunk voxel data does not match its dimensions.");
-
-        var (classifications, temperatures, pressures, capacities) = GeneratedCheckpointFields.ReadChunkFields(reader, voxels);
-        ushort[] air = ReadArray<ushort>(reader, ReadCount(reader, voxels, "active air voxel"));
-        int gasCount = ReadCount(reader, 1_000_000, "gas channel");
-        var gases = new AtmosGasChannelCheckpoint[gasCount];
-        for (int index = 0; index < gasCount; index++)
-            gases[index] = new AtmosGasChannelCheckpoint(reader.ReadInt32(), ReadArray<float>(reader, voxels));
-
-        int solverArrays = ReadCount(reader, 1_000_000, "solver array");
-        if (solverArrays != 0) throw new NotSupportedException("Portable replay files cannot decode custom solver arrays.");
-
-        return new AtmosChunkCheckpoint(
-            position,
-            dimensions,
-            awake,
-            sleepTimer,
-            classifications,
-            temperatures,
-            pressures,
-            capacities,
-            air,
-            gases);
     }
+
+    private static byte[] Allocate(int size, bool pooled) => pooled ? ArrayPool<byte>.Shared.Rent(size) : new byte[size];
 
     private static void WriteSetVoxelMixtureOperation(BinaryWriter writer, SetVoxelMixtureOperation operation)
     {
@@ -162,6 +168,9 @@ internal static partial class AtmosReplayCodec
         writer.Write(operation.Temperature);
         writer.Write(operation.Pressure);
         writer.Write(operation.HeatCapacity);
+        writer.Write(operation.MomentumX);
+        writer.Write(operation.MomentumY);
+        writer.Write(operation.MomentumZ);
         writer.Write(operation.Gases.Count);
         foreach (var gas in operation.Gases)
         {
@@ -177,6 +186,9 @@ internal static partial class AtmosReplayCodec
         Kelvin temperature = reader.ReadSingle();
         Pascal pressure = reader.ReadSingle();
         JoulePerKelvin capacity = reader.ReadSingle();
+        KilogramMetrePerSecond momentumX = reader.ReadSingle();
+        KilogramMetrePerSecond momentumY = reader.ReadSingle();
+        KilogramMetrePerSecond momentumZ = reader.ReadSingle();
         int count = ReadCount(reader, 1_000_000, "mixture gas");
         var gases = new AtmosGasAmount[count];
         for (int index = 0; index < count; index++)
@@ -186,7 +198,16 @@ internal static partial class AtmosReplayCodec
             gases[index] = new AtmosGasAmount(gasId, moles);
         }
 
-        return new SetVoxelMixtureOperation(position, voxel, temperature, pressure, capacity, gases);
+        return new SetVoxelMixtureOperation(
+            position,
+            voxel,
+            temperature,
+            pressure,
+            capacity,
+            momentumX,
+            momentumY,
+            momentumZ,
+            gases);
     }
 
     private static void WriteEditVoxelBoxOperation(BinaryWriter writer, EditVoxelBoxOperation operation)
@@ -197,10 +218,9 @@ internal static partial class AtmosReplayCodec
         WriteVoxelClassification(writer, operation.Classification);
         writer.Write(operation.VoxelTemperature);
         writer.Write(operation.GasTemperature);
-        // Three reserved floats keep the layout of the velocity part. This build writes zeros.
-        writer.Write(0f);
-        writer.Write(0f);
-        writer.Write(0f);
+        writer.Write(operation.VelocityX);
+        writer.Write(operation.VelocityY);
+        writer.Write(operation.VelocityZ);
         writer.Write(operation.Gases.Count);
         foreach (var gas in operation.Gases)
         {
@@ -215,7 +235,7 @@ internal static partial class AtmosReplayCodec
         var max = ReadInt3(reader);
         var parts = (AtmosVoxelBoxParts)reader.ReadByte();
         if ((parts & ~(AtmosVoxelBoxParts.Classification | AtmosVoxelBoxParts.ClearGas |
-                       AtmosVoxelBoxParts.Temperature)) != 0)
+                       AtmosVoxelBoxParts.Temperature | AtmosVoxelBoxParts.Velocity)) != 0)
         {
             throw new InvalidDataException("The voxel box operation selects an unknown part.");
         }
@@ -223,9 +243,9 @@ internal static partial class AtmosReplayCodec
         var classification = ReadVoxelClassification(reader);
         Kelvin voxelTemperature = reader.ReadSingle();
         Kelvin gasTemperature = reader.ReadSingle();
-        _ = reader.ReadSingle();
-        _ = reader.ReadSingle();
-        _ = reader.ReadSingle();
+        MetrePerSecond velocityX = reader.ReadSingle();
+        MetrePerSecond velocityY = reader.ReadSingle();
+        MetrePerSecond velocityZ = reader.ReadSingle();
         int count = ReadCount(reader, 1_000_000, "voxel box gas");
         var gases = new AtmosGasAmount[count];
         for (int index = 0; index < count; index++)
@@ -242,6 +262,9 @@ internal static partial class AtmosReplayCodec
             classification,
             voxelTemperature,
             gasTemperature,
+            velocityX,
+            velocityY,
+            velocityZ,
             gases);
     }
 
@@ -312,49 +335,5 @@ internal static partial class AtmosReplayCodec
         if (count < 0 || count > maximum) throw new InvalidDataException($"The {name} count is invalid.");
 
         return count;
-    }
-
-    /// <summary>
-    ///     Reads <paramref name="count" /> little-endian primitives in one bulk read.
-    /// </summary>
-    internal static T[] ReadArray<T>(BinaryReader reader, int count)
-        where T : unmanaged
-    {
-        var values = new T[count];
-        var bytes = MemoryMarshal.AsBytes(values.AsSpan());
-        reader.BaseStream.ReadExactly(bytes);
-        if (!BitConverter.IsLittleEndian) ReverseElementBytes(bytes, Unsafe.SizeOf<T>());
-        return values;
-    }
-
-    /// <summary>
-    ///     Writes every element as a little-endian primitive in one bulk write, without a length prefix.
-    /// </summary>
-    internal static void WriteArray<T>(BinaryWriter writer, IReadOnlyList<T> values)
-        where T : unmanaged
-    {
-        T[] buffer = ArrayPool<T>.Shared.Rent(values.Count);
-        try
-        {
-            var span = buffer.AsSpan(0, values.Count);
-            if (values is ICollection<T> collection)
-                collection.CopyTo(buffer, 0);
-            else
-                for (int index = 0; index < span.Length; index++)
-                    span[index] = values[index];
-
-            var bytes = MemoryMarshal.AsBytes(span);
-            if (!BitConverter.IsLittleEndian) ReverseElementBytes(bytes, Unsafe.SizeOf<T>());
-            writer.Write(bytes);
-        }
-        finally
-        {
-            ArrayPool<T>.Shared.Return(buffer);
-        }
-    }
-
-    private static void ReverseElementBytes(Span<byte> bytes, int elementSize)
-    {
-        for (int offset = 0; offset < bytes.Length; offset += elementSize) bytes.Slice(offset, elementSize).Reverse();
     }
 }

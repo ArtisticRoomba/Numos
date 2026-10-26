@@ -115,6 +115,9 @@ public enum VoxelFaceMask : byte
 /// </summary>
 /// <param name="Temperature">Temperature in kelvins (K).</param>
 /// <param name="Pressure">Pressure in pascals (Pa).</param>
+/// <param name="VelocityX">Bulk x-velocity in metres per second (m/s), or NaN when the frame carried none.</param>
+/// <param name="VelocityY">Bulk y-velocity in metres per second (m/s), or NaN when the frame carried none.</param>
+/// <param name="VelocityZ">Bulk z-velocity in metres per second (m/s), or NaN when the frame carried none.</param>
 /// <param name="TotalMoles">Total gas amount in moles (mol).</param>
 /// <param name="IsVisible">Whether the voxel is visible.</param>
 /// <param name="VisibleFaces">Faces exposed by the voxel.</param>
@@ -126,6 +129,9 @@ public readonly record struct VoxelDrawData(
     VoxelFaceMask VisibleFaces,
     float Temperature,
     float Pressure,
+    float VelocityX,
+    float VelocityY,
+    float VelocityZ,
     float TotalMoles,
     int PrimaryGasId,
     int RoomId,
@@ -621,6 +627,35 @@ public sealed class SimulationSliceDrawData
     internal byte[] PixelArray => _pixels;
 
     /// <summary>
+    ///     Projects a world-space vector onto the slice plane in the same orientation the cells use: a cut across X
+    ///     shows (Z, Y), across Y shows (X, Z), and across Z shows (X, Y). The component along the slice normal is
+    ///     dropped.
+    /// </summary>
+    /// <param name="axis">Axis the slice cuts across.</param>
+    /// <param name="x">World x component.</param>
+    /// <param name="y">World y component.</param>
+    /// <param name="z">World z component.</param>
+    /// <returns>The horizontal (U) and vertical (V) components in slice coordinates.</returns>
+    /// <example>
+    ///     A velocity of <c>(1, 2, 3) m/s</c> drawn on a Y slice is the arrow <c>(1, 3)</c>: X runs along U and Z
+    ///     runs along V.
+    /// </example>
+    public static (float U, float V) ProjectToPlane(SliceAxis axis, float x, float y, float z)
+    {
+        return Project(axis, x, y, z);
+    }
+
+    /// <summary>
+    ///     Returns the in-plane part of <paramref name="cell" />'s bulk velocity, in metres per second, oriented
+    ///     like <see cref="ProjectToPlane" />. Both components are NaN when the frame carried no velocity.
+    /// </summary>
+    /// <param name="cell">A cell of this slice.</param>
+    public (float U, float V) GetInPlaneVelocity(in SliceCellDrawData cell)
+    {
+        return ProjectToPlane(Axis, cell.Voxel.VelocityX, cell.Voxel.VelocityY, cell.Voxel.VelocityZ);
+    }
+
+    /// <summary>
     ///     Enumerates the visible cells in row order.
     /// </summary>
     /// <remarks>
@@ -737,7 +772,11 @@ public sealed class SimulationSliceDrawData
         return (u - OriginU, v - OriginV, width, height);
     }
 
-    internal static (int U, int V) Project(SliceAxis axis, int x, int y, int z)
+    /// <summary>
+    ///     Picks the two components that lie in the slice plane, in cell order.
+    /// </summary>
+    /// <typeparam name="T">Component type, such as a voxel coordinate or a velocity.</typeparam>
+    internal static (T U, T V) Project<T>(SliceAxis axis, T x, T y, T z)
     {
         return axis switch
         {

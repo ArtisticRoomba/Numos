@@ -29,6 +29,10 @@
     <ItemGroup>
         <ProjectReference Include="..\Numos.Maths\Numos.Maths.csproj"/>
         <ProjectReference Include="..\Numos.Collections\Numos.Collections.csproj"/>
+        <ProjectReference Include="..\Numos.API.Generators\Numos.API.Generators.csproj"
+                          OutputItemType="Analyzer"
+                          ReferenceOutputAssembly="false"
+                          GlobalPropertiesToRemove="PublishAot;PublishTrimmed;RuntimeIdentifier;SelfContained"/>
         <ProjectReference Include="..\Numos.Replay.Generators\Numos.Replay.Generators.csproj"
                           OutputItemType="Analyzer"
                           ReferenceOutputAssembly="false"

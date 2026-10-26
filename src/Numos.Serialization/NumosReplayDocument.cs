@@ -1,4 +1,5 @@
 using Numos.API;
+using Numos.CoreSim.State;
 
 namespace Numos.Serialization;
 
@@ -29,10 +30,21 @@ public sealed record NumosReplayMetadata(
     string? SourceReference = null);
 
 /// <summary>
-///     Bounds allocations while reading an untrusted replay stream.
+///     Bounds allocations while reading an untrusted replay or state stream, and says which solver configuration types
+///     a load can decode.
 /// </summary>
 public sealed class NumosReplayReadOptions
 {
+    /// <summary>
+    ///     Gets or sets the solver configuration types a world replay load can decode, by key.
+    /// </summary>
+    /// <remarks>
+    ///     Already knows every solver configuration with <see cref="NumosSerializeAttribute" /> members in an
+    ///     assembly that's in use, since each registers itself. A saved key with no registered type fails the load
+    ///     with a <see cref="NotSupportedException" />.
+    /// </remarks>
+    public SolverConfigurationTypes SolverConfigurations { get; set; } = new();
+
     /// <summary>
     ///     Gets or sets the maximum total declared section payload in bytes. Defaults to one gibibyte.
     /// </summary>

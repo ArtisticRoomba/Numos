@@ -1,3 +1,4 @@
+using System.Numerics;
 using Numos.API;
 using Numos.CoreSim;
 using Numos.Maths;
@@ -120,12 +121,13 @@ public sealed class WorkbenchRegionTests
 
         var result = session.EditRegion(
             new VoxelBox(new Int3(0, 0, 0), new Int3(7, 1, 0)),
-            new RegionEdit(false, 1, true, 300f, [new RegionGas(0, 1f)], null));
+            new RegionEdit(false, 1, true, 300f, [new RegionGas(0, 1f)], null, new Vector3(2f, 0f, 0f)));
 
         var added = session.Timeline.Operations.Skip(before).ToArray();
         Assert.Multiple(() =>
         {
             Assert.That(result.VoxelsEdited, Is.EqualTo(16));
+            Assert.That(result.VelocityVoxels, Is.EqualTo(16));
             Assert.That(added, Has.Length.EqualTo(1));
         });
     }
@@ -237,13 +239,13 @@ public sealed class WorkbenchRegionTests
         Assert.Multiple(() =>
         {
             Assert.That(values[0], Is.EqualTo(42f));
-            Assert.Throws<KeyNotFoundException>(() => session.SampleVoxels([new Int3(0, 0, 0)], ["density"]));
+            Assert.Throws<KeyNotFoundException>(() => session.SampleVoxels([new Int3(0, 0, 0)], ["notAField"]));
             Assert.That(session.Fields.TryResolve("moles:x", out _), Is.False);
         });
     }
 
     [Test]
-    public void ResetSolvers_EnablesStagesEvenWhileTheWorldRecords()
+    public void ResetSolvers_RestoresTheDefaultLayoutWhileTheWorldRecords()
     {
         using var session = CreateSession();
         session.SetSolverEnabled("boundary-flow", false);
@@ -252,7 +254,7 @@ public sealed class WorkbenchRegionTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(full, Is.False);
+            Assert.That(full, Is.True);
             Assert.That(session.GetSolverSteps().All(static step => step.IsEnabled), Is.True);
         });
     }

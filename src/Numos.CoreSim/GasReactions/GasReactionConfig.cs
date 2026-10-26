@@ -1,4 +1,4 @@
-using Numos.CoreSim.Replay;
+using Numos.CoreSim.State;
 
 namespace Numos.CoreSim.GasReactions;
 
@@ -16,12 +16,12 @@ namespace Numos.CoreSim.GasReactions;
 ///     simulation.SetAtmosConfig(config);
 ///     </code>
 /// </example>
-public sealed class GasReactionConfig : IAtmosSolverConfiguration
+public sealed partial class GasReactionConfig : IAtmosSolverConfiguration
 {
     /// <summary>
     ///     Identifies the configuration consumed by the built-in reaction solver.
     /// </summary>
-    public const string ConfigurationKey = "gas-reactions";
+    public const string ConfigurationKey = "numos/gas-reactions";
 
     internal readonly static GasReactionConfig Empty = new();
 
@@ -54,20 +54,22 @@ public sealed class GasReactionConfig : IAtmosSolverConfiguration
     /// <summary>
     ///     Gets linear reaction definitions in reaction-ID order.
     /// </summary>
+    [NumosSerialize]
     public IReadOnlyList<LinearGasReaction> LinearReactions { get; }
 
     /// <summary>
     ///     Gets standard reactions, whose IDs follow all linear reactions.
     /// </summary>
+    [NumosSerialize]
     public IReadOnlyList<StandardGasReaction> StandardReactions { get; }
+
+    /// <inheritdoc />
+    public string Key => ConfigurationKey;
 
     /// <summary>
     ///     Gets the combined number of reactions.
     /// </summary>
     public int Count => LinearReactions.Count + StandardReactions.Count;
-
-    /// <inheritdoc />
-    public string Key => ConfigurationKey;
 
     /// <inheritdoc />
     /// <exception cref="ArgumentNullException"><paramref name="gasRegistry" /> is null.</exception>
@@ -83,44 +85,6 @@ public sealed class GasReactionConfig : IAtmosSolverConfiguration
             reaction.ValidateGasRegistry(gasRegistry);
 
         return this;
-    }
-
-    /// <inheritdoc />
-    public bool SemanticallyEquals(IAtmosSolverConfiguration other)
-    {
-        if (other is not GasReactionConfig reactions ||
-            LinearReactions.Count != reactions.LinearReactions.Count ||
-            StandardReactions.Count != reactions.StandardReactions.Count)
-            return false;
-
-        for (int i = 0; i < LinearReactions.Count; i++)
-        {
-            if (!LinearReactions[i].SemanticallyEquals(reactions.LinearReactions[i]))
-                return false;
-        }
-
-        for (int i = 0; i < StandardReactions.Count; i++)
-        {
-            if (!StandardReactions[i].SemanticallyEquals(reactions.StandardReactions[i]))
-                return false;
-        }
-
-        return true;
-    }
-
-    /// <inheritdoc />
-    public ulong ComputeStateHash()
-    {
-        var hash = new AtmosStateHasher();
-        hash.Add(LinearReactions.Count);
-        foreach (var reaction in LinearReactions)
-            reaction.AppendHash(ref hash);
-
-        hash.Add(StandardReactions.Count);
-        foreach (var reaction in StandardReactions)
-            reaction.AppendHash(ref hash);
-
-        return hash.Value;
     }
 
     internal static GasReactionConfig Get(IAtmosConfig config)

@@ -1,4 +1,7 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
+using Numos.CoreSim.State;
+using Numos.CoreSim.State.Advanced;
 
 namespace Numos.CoreSim.Solvers;
 
@@ -20,15 +23,25 @@ internal abstract class ChunkFieldDescriptor
     private object? _publicHandle;
 
     private protected ChunkFieldDescriptor(
-        string key, int slot, bool captureForRollback, int? fixedLength, bool clearOnSleep, bool clearOnVacuum)
+        string key, int slot, bool isPortable, bool captureForRollback, int? fixedLength, bool clearOnSleep, bool clearOnVacuum)
     {
         Key = key;
         Slot = slot;
+        IsPortable = isPortable;
         CaptureForRollback = captureForRollback;
         FixedLength = fixedLength;
         ClearOnSleep = clearOnSleep;
         ClearOnVacuum = clearOnVacuum;
     }
+
+    /// <summary>
+    ///     Gets whether a rollback field of this element type can be written to a portable replay file.
+    /// </summary>
+    /// <remarks>
+    ///     Only primitives and enums over them qualify: their bytes have no padding, and swapping each element's bytes
+    ///     converts them to little-endian. Structs are left out, since their layout and padding aren't pinned.
+    /// </remarks>
+    internal bool IsPortable { get; }
 
     /// <summary>
     ///     Gets the ordinal key.
@@ -41,6 +54,8 @@ internal abstract class ChunkFieldDescriptor
     internal int Slot { get; }
 
     internal abstract Type ElementType { get; }
+
+    internal abstract int ElementSize { get; }
 
     internal bool CaptureForRollback { get; }
 
@@ -73,6 +88,13 @@ internal abstract class ChunkFieldDescriptor
         return Interlocked.CompareExchange(ref _publicHandle, handle, null) ?? handle;
     }
 
+    /// <summary>
+    ///     Reads <paramref name="length" /> little-endian elements written by <see cref="SolverArrayStorage.WriteValues{TSink}" />.
+    /// </summary>
+    /// <remarks>Only valid for portable element types.</remarks>
+    /// <exception cref="InvalidDataException">The data holds fewer elements.</exception>
+    internal abstract SolverArrayStorage Read(ref StateReader reader, int length);
+
     internal int GetLength(int voxelCount)
     {
         return FixedLength ?? voxelCount;
@@ -81,6 +103,17 @@ internal abstract class ChunkFieldDescriptor
     internal string Describe()
     {
         return Describe(ElementType, CaptureForRollback, FixedLength, ClearOnSleep, ClearOnVacuum);
+    }
+
+    internal static bool IsPortableElementType(Type type)
+    {
+        if (type.IsEnum)
+            type = Enum.GetUnderlyingType(type);
+
+        return type == typeof(bool) || type == typeof(byte) || type == typeof(sbyte) ||
+               type == typeof(short) || type == typeof(ushort) || type == typeof(int) || type == typeof(uint) ||
+               type == typeof(long) || type == typeof(ulong) || type == typeof(Half) || type == typeof(float) ||
+               type == typeof(double);
     }
 
     internal static string Describe(Type elementType, bool captureForRollback, int? fixedLength, bool clearOnSleep, bool clearOnVacuum)
@@ -98,7 +131,7 @@ internal sealed class ChunkFieldDescriptor<T> : ChunkFieldDescriptor
 {
     internal ChunkFieldDescriptor(
         string key, int slot, bool captureForRollback, int? fixedLength, bool clearOnSleep, bool clearOnVacuum)
-        : base(key, slot, captureForRollback, fixedLength, clearOnSleep, clearOnVacuum)
+        : base(key, slot, IsPortableElementType(typeof(T)), captureForRollback, fixedLength, clearOnSleep, clearOnVacuum)
     {
     }
 
@@ -108,6 +141,19 @@ internal sealed class ChunkFieldDescriptor<T> : ChunkFieldDescriptor
     {
         return new SolverArrayStorage<T>(this, new T[GetLength(voxelCount)]);
     }
+
+    internal override SolverArrayStorage Read(ref StateReader reader, int length)
+    {
+        // Checked before allocating, so a corrupt length can't ask for more than the data holds.
+        if ((long)length * Unsafe.SizeOf<T>() > reader.Remaining)
+            throw new InvalidDataException($"Chunk field '{Key}' is truncated.");
+
+        var values = new T[length];
+        reader.ReadElements(SolverArrayStorage<T>.AsBytes(values), Unsafe.SizeOf<T>());
+        return new SolverArrayStorage<T>(this, values);
+    }
+
+    internal override int ElementSize => Unsafe.SizeOf<T>();
 
     internal bool Matches(bool captureForRollback, int? fixedLength, bool clearOnSleep, bool clearOnVacuum)
     {
@@ -182,5 +228,14 @@ internal static class ChunkFieldRegistry
             ByKey.Add(key, descriptor);
             return descriptor;
         }
+    }
+
+    /// <summary>
+    ///     Finds the descriptor registered under <paramref name="key" />, if any.
+    /// </summary>
+    internal static bool TryGet(string key, [NotNullWhen(true)] out ChunkFieldDescriptor? descriptor)
+    {
+        lock (Gate)
+            return ByKey.TryGetValue(key, out descriptor);
     }
 }

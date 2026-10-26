@@ -13,12 +13,17 @@ namespace Numos.Workbench;
 /// <param name="ChunkHeight">Voxels per chunk along Y for the first simulation.</param>
 /// <param name="ChunkDepth">Voxels per chunk along Z for the first simulation.</param>
 /// <param name="IncludeDefaultGases">Whether the gas registry starts with <see cref="DefaultGases" />.</param>
+/// <param name="TransportModel">
+///     The preset that fills the initial stage list. <see cref="WorkbenchSession.ApplyTransportPreset" /> and
+///     <see cref="WorkbenchSession.SetSolverLayout" /> change the stages later, and the timeline records each change.
+/// </param>
 public readonly record struct WorkbenchProjectOptions(
     string? Name,
     int ChunkWidth = AtmosChunkConstants.DefaultWidth,
     int ChunkHeight = AtmosChunkConstants.DefaultHeight,
     int ChunkDepth = 1,
-    bool IncludeDefaultGases = true);
+    bool IncludeDefaultGases = true,
+    AtmosTransportModel TransportModel = AtmosTransportModel.Euler);
 
 /// <summary>
 ///     Names the program that hosts a session. The session writes it to the log banner and to saved replays.
@@ -88,6 +93,7 @@ public sealed partial class WorkbenchSession : IDisposable
     public WorkbenchSession(WorkbenchLog? log = null, WorkbenchHostInfo? host = null)
     {
         Log = log ?? new WorkbenchLog();
+        Fields.RegisterFlowFields(RequireConfig);
         Host = host ?? new WorkbenchHostInfo("Numos.Workbench", CoreSimBuildInfo.PackageVersion);
         string commit = CoreSimBuildInfo.GitCommit is { Length: > 0 } and not "unknown"
             ? CoreSimBuildInfo.GitCommitShort
@@ -189,7 +195,7 @@ public sealed partial class WorkbenchSession : IDisposable
         AtmosWorld? world = null;
         try
         {
-            world = new AtmosWorld(config);
+            world = new AtmosWorld(config, options.TransportModel);
             var simulation = world.CreateSimulation(options.ChunkWidth, options.ChunkHeight, options.ChunkDepth);
             if (prepare != null)
             {
@@ -333,7 +339,7 @@ public sealed partial class WorkbenchSession : IDisposable
         return World ?? throw new InvalidOperationException("No project is open.");
     }
 
-    private AtmosConfig RequireConfig()
+    internal AtmosConfig RequireConfig()
     {
         RequireWorld();
         return Config!;

@@ -50,6 +50,12 @@ internal static class ViewerTheme
     /// <inheritdoc cref="ReplayOperation" />
     public readonly static Vector4 ReplayDivergence = new(242f / 255f, 139f / 255f, 130f / 255f, 1f);
 
+    /// <summary>
+    ///     Bulk-velocity arrows in both viewports. A simulation-data colour, not an interface state: it is a warm
+    ///     near-white so it reads over every scalar map and never collides with a gas or topology colour.
+    /// </summary>
+    public readonly static Vector4 FlowArrow = new(0.97f, 0.95f, 0.86f, 1f);
+
     public readonly static Vector4[] GasPalette =
     [
         new(0.24f, 0.67f, 0.90f, 1f),

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Numos.CoreSim;
+using Numos.CoreSim.EulerFlow;
 using Numos.Workbench;
 
 namespace Numos.Headless.Protocol;
@@ -26,6 +27,11 @@ internal sealed class HeadlessRequest
     public ConfigurationPatch? Config { get; init; }
     public GasDefinition[]? Gases { get; init; }
 
+    /// <summary>
+    ///     `euler` (default) or `legacy`. `createProject`, `resetSolvers`, and `applyTransportPreset` read it.
+    /// </summary>
+    public string? TransportModel { get; init; }
+
     // Chunk and voxel addressing.
     public Coordinate? Position { get; init; }
     public Coordinate? Voxel { get; init; }
@@ -42,6 +48,11 @@ internal sealed class HeadlessRequest
     public float? TemperatureK { get; init; }
     public float? GasTemperatureK { get; init; }
 
+    // Momentum writes, in kg·m/s.
+    public float? MomentumX { get; init; }
+    public float? MomentumY { get; init; }
+    public float? MomentumZ { get; init; }
+
     // Regions, sampling, and links. Region and sample coordinates are global voxels.
     public Coordinate? Min { get; init; }
     public Coordinate? Max { get; init; }
@@ -52,6 +63,12 @@ internal sealed class HeadlessRequest
     public LinkEndpoint? First { get; init; }
     public LinkEndpoint? Second { get; init; }
     public string? Flags { get; init; }
+
+    /// <summary>
+    ///     The open area of each portal or dock link as a fraction of one voxel face, from 0 to 1. Missing follows the
+    ///     configuration default.
+    /// </summary>
+    public float? AreaFraction { get; init; }
     public int? Rotation { get; init; }
     public bool? FlipU { get; init; }
     public bool? FlipV { get; init; }
@@ -62,6 +79,11 @@ internal sealed class HeadlessRequest
     public int? ProgressInterval { get; init; }
     public string? Solver { get; init; }
     public bool? Enabled { get; init; }
+
+    /// <summary>
+    ///     The ordered stage list for setSolverLayout.
+    /// </summary>
+    public SolverLayoutEntryRequest[]? Stages { get; init; }
     public long? Tick { get; init; }
     public int? BranchId { get; init; }
 
@@ -76,6 +98,17 @@ internal sealed class HeadlessRequest
     public int? Levels { get; init; }
     public RangeRequest? Range { get; init; }
     public ProbeRequest? Probes { get; init; }
+
+    /// <summary>
+    ///     The gradient in kg/m4 that the schlieren field and visualization map to black. Used by sampleVoxels,
+    ///     exportField, and renderSlice.
+    /// </summary>
+    public float? SchlierenReference { get; init; }
+
+    /// <summary>
+    ///     The bulk velocity in m/s that editRegion gives the gas in every air voxel.
+    /// </summary>
+    public VelocityRequest? Velocity { get; init; }
 
     // Replay files.
     public string? Path { get; init; }
@@ -92,6 +125,15 @@ internal sealed class HeadlessRequest
     public bool? IncludeVoxels { get; init; }
     public bool? OnlyGasBearingVoxels { get; init; }
     public int? MaxIssueLocations { get; init; }
+}
+
+/// <summary>
+///     One stage of a setSolverLayout request.
+/// </summary>
+internal sealed class SolverLayoutEntryRequest
+{
+    public string? Name { get; init; }
+    public bool? Enabled { get; init; }
 }
 
 /// <summary>
@@ -115,6 +157,16 @@ internal sealed class SliceRequest
 /// <summary>
 ///     A fixed color range.
 /// </summary>
+internal sealed class VelocityRequest
+{
+    public float? X { get; init; }
+    public float? Y { get; init; }
+    public float? Z { get; init; }
+}
+
+/// <summary>
+///     A fixed color range.
+/// </summary>
 internal sealed class RangeRequest
 {
     public float? Min { get; init; }
@@ -130,6 +182,7 @@ internal sealed class ProbeRequest
     public string[]? Fields { get; init; }
     public string? Path { get; init; }
     public int? Every { get; init; }
+    public float? SchlierenReference { get; init; }
 }
 
 /// <summary>
@@ -183,6 +236,7 @@ internal sealed class GasDefinition
     public float? MolarEnthalpyOfVaporization { get; init; }
     public int? LiquidId { get; init; }
     public float? DiffusionCoefficient { get; init; }
+    public float? MolarMassKgPerMol { get; init; }
 
     internal GasProperties ToGasProperties()
     {
@@ -197,7 +251,8 @@ internal sealed class GasDefinition
             CondensationEnabled = CondensationEnabled ?? false,
             MolarEnthalpyOfVaporization = MolarEnthalpyOfVaporization ?? 0f,
             LiquidId = LiquidId ?? -1,
-            DiffusionCoefficient = DiffusionCoefficient ?? 0f
+            DiffusionCoefficient = DiffusionCoefficient ?? 0f,
+            MolarMass = MolarMassKgPerMol ?? 0f
         };
     }
 }
@@ -223,42 +278,42 @@ internal sealed class ConfigurationPatch
     public float? MaxPressureTransferFractionPerNeighbor { get; init; }
     public float? AccumulatorWakeThresholdPa { get; init; }
     public int? AccumulatorMaxAliveTicks { get; init; }
+    public float? ReferenceMolarMassKgPerMol { get; init; }
+    public EulerFlowPatch? EulerFlow { get; init; }
 
     /// <summary>
-    ///     Rejects values outside the domain of their field, as the viewer does.
+    ///     Rejects a value that lies outside the <see cref="AtmosConfigFieldInfo.Domain" /> of its field.
     /// </summary>
     /// <exception cref="ArgumentException">A value is not finite or is outside its range.</exception>
     internal void Validate()
     {
-        Check(AtmosConfigFields.GlobalTemperature, GlobalTemperatureK, ConfigDomain.Positive);
-        Check(AtmosConfigFields.DefaultTemperatureFallback, DefaultTemperatureFallbackK, ConfigDomain.Positive);
-        Check(
-            AtmosConfigFields.DefaultMolarHeatCapacityAtConstantVolume,
-            DefaultMolarHeatCapacityAtConstantVolume,
-            ConfigDomain.Positive);
-
-        Check(AtmosConfigFields.VoxelVolume, VoxelVolumeM3, ConfigDomain.Positive);
-        Check(AtmosConfigFields.SaturationReferencePressure, SaturationReferencePressurePa, ConfigDomain.Positive);
-        Check(AtmosConfigFields.DefaultDiffusionCoefficient, DefaultDiffusionCoefficient, ConfigDomain.NonNegative);
-        Check(AtmosConfigFields.SpaceTemperature, SpaceTemperatureK, ConfigDomain.Positive);
-        Check(AtmosConfigFields.BulkFlowCoefficient, BulkFlowCoefficient, ConfigDomain.UnitInterval);
-        Check(AtmosConfigFields.VacuumThreshold, VacuumThresholdPa, ConfigDomain.NonNegative);
-        Check(AtmosConfigFields.SleepEpsilon, SleepEpsilonPercent, ConfigDomain.NonNegative);
-        Check(AtmosConfigFields.ThermalConductance, ThermalConductance, ConfigDomain.NonNegative);
-        Check(AtmosConfigFields.CondensationRateFactor, CondensationRateFactor, ConfigDomain.UnitInterval);
-        Check(
-            AtmosConfigFields.MaxPressureTransferFractionPerNeighbor,
-            MaxPressureTransferFractionPerNeighbor,
-            ConfigDomain.UnitInterval);
-
-        Check(AtmosConfigFields.AccumulatorWakeThreshold, AccumulatorWakeThresholdPa, ConfigDomain.NonNegative);
-        Check(AtmosConfigFields.SleepThreshold, SleepThreshold, ConfigDomain.NonNegative);
-        Check(AtmosConfigFields.AccumulatorMaxAliveTicks, AccumulatorMaxAliveTicks, ConfigDomain.NonNegative);
+        Check(AtmosConfigFields.GlobalTemperature, GlobalTemperatureK);
+        Check(AtmosConfigFields.DefaultTemperatureFallback, DefaultTemperatureFallbackK);
+        Check(AtmosConfigFields.DefaultMolarHeatCapacityAtConstantVolume, DefaultMolarHeatCapacityAtConstantVolume);
+        Check(AtmosConfigFields.VoxelVolume, VoxelVolumeM3);
+        Check(AtmosConfigFields.SaturationReferencePressure, SaturationReferencePressurePa);
+        Check(AtmosConfigFields.DefaultDiffusionCoefficient, DefaultDiffusionCoefficient);
+        Check(AtmosConfigFields.SpaceTemperature, SpaceTemperatureK);
+        Check(AtmosConfigFields.BulkFlowCoefficient, BulkFlowCoefficient);
+        Check(AtmosConfigFields.VacuumThreshold, VacuumThresholdPa);
+        Check(AtmosConfigFields.SleepEpsilon, SleepEpsilonPercent);
+        Check(AtmosConfigFields.ThermalConductance, ThermalConductance);
+        Check(AtmosConfigFields.CondensationRateFactor, CondensationRateFactor);
+        Check(AtmosConfigFields.MaxPressureTransferFractionPerNeighbor, MaxPressureTransferFractionPerNeighbor);
+        Check(AtmosConfigFields.AccumulatorWakeThreshold, AccumulatorWakeThresholdPa);
+        Check(AtmosConfigFields.SleepThreshold, SleepThreshold);
+        Check(AtmosConfigFields.AccumulatorMaxAliveTicks, AccumulatorMaxAliveTicks);
+        Check(AtmosConfigFields.ReferenceMolarMass, ReferenceMolarMassKgPerMol);
+        EulerFlow?.Validate();
     }
 
-    private static void Check(AtmosConfigFieldInfo field, float? value, ConfigDomain domain)
+    /// <summary>
+    ///     Checks one patched value against the domain of its field. A missing value passes.
+    /// </summary>
+    /// <exception cref="ArgumentException">The value is outside the domain of the field.</exception>
+    internal static void Check(AtmosConfigFieldInfo field, float? value)
     {
-        if (value is { } present && AtmosConfigSettings.ValidateConfigValue(field, present, domain) is { } message)
+        if (value is { } present && AtmosConfigSettings.ValidateConfigValue(field, present) is { } message)
             throw new ArgumentException(message);
     }
 
@@ -313,5 +368,77 @@ internal sealed class ConfigurationPatch
 
         if (AccumulatorMaxAliveTicks.HasValue)
             config.AccumulatorMaxAliveTicks = AccumulatorMaxAliveTicks.Value;
+
+        if (ReferenceMolarMassKgPerMol.HasValue)
+            config.ReferenceMolarMass = ReferenceMolarMassKgPerMol.Value;
+
+        EulerFlow?.ApplyTo(config);
+    }
+}
+
+/// <summary>
+///     Optional Euler transport settings. Missing properties keep the value of the <see cref="EulerFlowConfig" />
+///     already in the configuration, or the library default when there is none.
+/// </summary>
+internal sealed class EulerFlowPatch
+{
+    public float? CourantNumber { get; init; }
+    public int? MaxSubstepsPerTick { get; init; }
+    public float? VelocityFloorMps { get; init; }
+    public float? MaxVelocityMps { get; init; }
+    public float? WakePressureDeltaPa { get; init; }
+    public bool? AllMachCorrection { get; init; }
+    public string? Reconstruction { get; init; }
+    public float? MomentumDampingPerSecond { get; init; }
+    public float? DefaultLinkAreaFraction { get; init; }
+
+    /// <summary>
+    ///     Rejects a value that lies outside the <see cref="AtmosConfigFieldInfo.Domain" /> of its field.
+    /// </summary>
+    /// <exception cref="ArgumentException">A value is not finite or is outside its range.</exception>
+    internal void Validate()
+    {
+        ConfigurationPatch.Check(AtmosConfigFields.EulerCourantNumber, CourantNumber);
+        ConfigurationPatch.Check(AtmosConfigFields.EulerMaxSubstepsPerTick, MaxSubstepsPerTick);
+        ConfigurationPatch.Check(AtmosConfigFields.EulerVelocityFloor, VelocityFloorMps);
+        ConfigurationPatch.Check(AtmosConfigFields.EulerMaxVelocity, MaxVelocityMps);
+        ConfigurationPatch.Check(AtmosConfigFields.EulerWakePressureDelta, WakePressureDeltaPa);
+        ConfigurationPatch.Check(AtmosConfigFields.EulerMomentumDamping, MomentumDampingPerSecond);
+        ConfigurationPatch.Check(AtmosConfigFields.EulerDefaultLinkAreaFraction, DefaultLinkAreaFraction);
+    }
+
+    /// <summary>
+    ///     Replaces the configuration's <see cref="EulerFlowConfig" /> entry with one that applies this patch.
+    /// </summary>
+    internal void ApplyTo(AtmosConfig config)
+    {
+        var current = AtmosConfigSettings.GetSolverConfiguration(config, EulerFlowConfig.Default);
+        var patched = new EulerFlowConfig
+        {
+            CourantNumber = CourantNumber ?? current.CourantNumber,
+            MaxSubstepsPerTick = MaxSubstepsPerTick ?? current.MaxSubstepsPerTick,
+            VelocityFloor = VelocityFloorMps ?? current.VelocityFloor,
+            MaxVelocity = MaxVelocityMps ?? current.MaxVelocity,
+            WakePressureDelta = WakePressureDeltaPa ?? current.WakePressureDelta,
+            AllMachCorrection = AllMachCorrection ?? current.AllMachCorrection,
+            Reconstruction = ParseReconstruction(Reconstruction) ?? current.Reconstruction,
+            MomentumDamping = MomentumDampingPerSecond ?? current.MomentumDamping,
+            DefaultLinkAreaFraction = DefaultLinkAreaFraction ?? current.DefaultLinkAreaFraction
+        };
+
+        AtmosConfigSettings.SetSolverConfiguration(config, patched);
+    }
+
+    private static EulerReconstruction? ParseReconstruction(string? value)
+    {
+        if (value == null)
+            return null;
+
+        if (Enum.TryParse(value, true, out EulerReconstruction reconstruction) && Enum.IsDefined(reconstruction))
+            return reconstruction;
+
+        throw new HeadlessRequestException(
+            "invalidConfig",
+            $"Unknown Euler reconstruction '{value}'. Use 'firstOrder'.");
     }
 }

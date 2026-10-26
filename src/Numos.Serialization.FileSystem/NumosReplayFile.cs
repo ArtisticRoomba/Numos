@@ -18,7 +18,10 @@ public static class NumosReplayFile
     ///     The file is malformed, internally inconsistent, or holds unsupported content such as a single-simulation
     ///     replay written by an earlier Numos version.
     /// </exception>
-    /// <exception cref="NotSupportedException">The replay contains host-defined state.</exception>
+    /// <exception cref="NotSupportedException">
+    ///     The replay contains host-defined state, such as a solver configuration whose key isn't registered in
+    ///     <see cref="NumosReplayReadOptions.SolverConfigurations" />.
+    /// </exception>
     public static NumosWorldReplayDocument Load(string path, NumosReplayReadOptions? options = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
@@ -43,29 +46,7 @@ public static class NumosReplayFile
     /// </exception>
     public static void Save(string path, NumosWorldReplayDocument document, bool overwrite = false)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(path);
         ArgumentNullException.ThrowIfNull(document);
-        string fullPath = Path.GetFullPath(path);
-        string? directory = Path.GetDirectoryName(fullPath);
-        if (directory == null || !Directory.Exists(directory))
-            throw new DirectoryNotFoundException($"Directory '{directory}' does not exist.");
-
-        if (!overwrite && File.Exists(fullPath)) throw new IOException($"File '{fullPath}' already exists.");
-
-        string temporary = Path.Combine(directory, $".{Path.GetFileName(fullPath)}.{Guid.NewGuid():N}.tmp");
-        try
-        {
-            using (var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
-            {
-                NumosWorldReplaySerializer.Serialize(stream, document);
-                stream.Flush(true);
-            }
-
-            File.Move(temporary, fullPath, overwrite);
-        }
-        finally
-        {
-            if (File.Exists(temporary)) File.Delete(temporary);
-        }
+        AtomicFile.Write(path, overwrite, stream => NumosWorldReplaySerializer.Serialize(stream, document));
     }
 }

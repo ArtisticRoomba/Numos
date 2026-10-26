@@ -1,11 +1,15 @@
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using System.Runtime.CompilerServices;
 using JetBrains.Annotations;
 using Magnitudo;
 using Numos.Collections;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.Datatypes.Snapshots;
+using Numos.CoreSim.Replay;
 using Numos.CoreSim.Solvers;
+using Numos.CoreSim.State;
+using Numos.CoreSim.State.Advanced;
 using Numos.Maths;
 
 namespace Numos.CoreSim;
@@ -14,9 +18,16 @@ namespace Numos.CoreSim;
 ///     Represents the simulation state for a fixed-size voxel chunk.
 /// </summary>
 /// <remarks>
-///     Chunk-owned per-voxel data supports both flat-index and <see cref="Int3" /> coordinate access.
-///     Use <see cref="GetIndex(Int3)" /> and <see cref="GetXyzInt3(ushort)" /> when converting indices
-///     for scalar-indexed storage such as gas channels (because... you know.... they aren't physical).
+///     <para>
+///         Chunk-owned per-voxel data supports both flat-index and <see cref="Int3" /> coordinate access.
+///         Use <see cref="GetIndex(Int3)" /> and <see cref="GetXyzInt3(ushort)" /> when converting indices
+///         for scalar-indexed storage such as gas channels (because... you know.... they aren't physical).
+///     </para>
+///     <para>
+///         Members marked <see cref="NumosSerializeAttribute" /> are the chunk's continuation state. The generated
+///         <see cref="AtmosChunkCheckpoint" /> captures, restores, hashes, and saves exactly those.
+///         Everything unmarked is derived or scratch and must be rebuildable from the marked members.
+///     </para>
 /// </remarks>
 internal class AtmosChunk
 {
@@ -32,9 +43,11 @@ internal class AtmosChunk
     ///     Flat indices of gas-bearing voxels in this chunk while it is awake.
     /// </summary>
     /// <remarks>
-    ///     Only the first <see cref="ActiveAirCount" /> entries are valid. Rebuild this list with
-    ///     <see cref="RebuildActiveAirIndices" /> after changing <see cref="VoxelRoomMap" />.
+    ///     Only the first <see cref="ActiveAirCount" /> entries are valid, and only those are checkpointed, which
+    ///     preserves inactive topology exactly. Rebuild this list with <see cref="RebuildActiveAirIndices" /> after
+    ///     changing <see cref="VoxelRoomMap" />.
     /// </remarks>
+    [NumosSerialize(Count = nameof(ActiveAirCount))]
     public ushort[] ActiveAirIndices;
 
     /// <summary>
@@ -70,8 +83,9 @@ internal class AtmosChunk
     public int Depth;
 
     /// <summary>
-    ///     The position of this chunk in the chunk grid.
+    ///     The position of this chunk in the chunk grid. Each coordinate counts whole chunks.
     /// </summary>
+    [NumosSerialize("Position")]
     public Int3 GridPosition;
 
     /// <summary>
@@ -83,6 +97,7 @@ internal class AtmosChunk
     ///     Whether this chunk is eligible to be processed by the simulation.
     ///     A sleeping chunk is skipped during simulation ticks.
     /// </summary>
+    [NumosSerialize]
     public bool IsAwake;
 
     /// <summary>
@@ -98,13 +113,46 @@ internal class AtmosChunk
     ///     Number of consecutive simulation ticks for which this chunk has remained below the sleep threshold.
     /// </summary>
     /// <seealso cref="AtmosConfig.SleepThreshold" />
+    [NumosSerialize]
     public int SleepTimer;
 
     /// <summary>
     ///     Temperature for each voxel, in kelvins (K), indexed by flat voxel index or local coordinate.
     /// </summary>
+    /// <remarks>Raw stored values: checkpoints keep non-finite values and their exact bit patterns.</remarks>
     [ElementQuantity("temperature")]
+    [NumosSerialize("Temperatures")]
     public FlatArray<Kelvin> Temperature;
+
+    /// <summary>
+    ///     Total x-momentum of the gas in each voxel, in kilogram metres per second (kg·m/s), indexed by flat voxel
+    ///     index or local coordinate.
+    /// </summary>
+    /// <remarks>
+    ///     This is the momentum of the voxel's whole gas content, not a velocity, so adding gas at rest lowers the
+    ///     implied velocity without touching the stored value. It is zero whenever the voxel holds no gas: every path
+    ///     that empties a voxel (<see cref="SetVoxelToVacuum" />, a classification change, a mixture write that
+    ///     removes the last mole) zeroes it, so a vacuum voxel never carries stale momentum into a later tick.
+    /// </remarks>
+    [ElementQuantity("momentum")]
+    [NumosSerialize("MomentumX")]
+    public FlatArray<KilogramMetrePerSecond> MomentumX;
+
+    /// <summary>
+    ///     Total y-momentum of the gas in each voxel, in kilogram metres per second (kg·m/s). Shares the contract of
+    ///     <see cref="MomentumX" />.
+    /// </summary>
+    [ElementQuantity("momentum")]
+    [NumosSerialize("MomentumY")]
+    public FlatArray<KilogramMetrePerSecond> MomentumY;
+
+    /// <summary>
+    ///     Total z-momentum of the gas in each voxel, in kilogram metres per second (kg·m/s). Shares the contract of
+    ///     <see cref="MomentumX" />.
+    /// </summary>
+    [ElementQuantity("momentum")]
+    [NumosSerialize("MomentumZ")]
+    public FlatArray<KilogramMetrePerSecond> MomentumZ;
 
     /// <summary>
     ///     Cached total heat capacity for each voxel, in joules per kelvin (J/K).
@@ -116,13 +164,18 @@ internal class AtmosChunk
     ///     Values are total heat capacities, not molar quantities.
     /// </remarks>
     [ElementQuantity("heatCapacity")]
+    [NumosSerialize("HeatCapacities")]
     public FlatArray<JoulePerKelvin> TotalHeatCapacity;
 
     /// <summary>
     ///     Cached pressure for each voxel, in pascals (Pa), indexed by flat voxel index or local coordinate.
     /// </summary>
-    /// <remarks>These values are recomputed by the simulation each tick.</remarks>
+    /// <remarks>
+    ///     These values are recomputed by the simulation each tick. Checkpoints keep them as cached, including values
+    ///     a disabled solver stage didn't refresh.
+    /// </remarks>
     [ElementQuantity("pressure")]
+    [NumosSerialize("Pressures")]
     public FlatArray<Pascal> TotalPressure;
 
     /// <summary>
@@ -142,6 +195,7 @@ internal class AtmosChunk
     /// <seealso cref="VoxelClassification.RoomSolid" />
     /// <seealso cref="VoxelClassification.RoomVoid" />
     /// <seealso cref="VoxelClassification.RoomUnassigned" />
+    [NumosSerialize("Classifications")]
     public FlatArray<int> VoxelRoomMap;
 
     /// <summary>
@@ -191,7 +245,61 @@ internal class AtmosChunk
     /// <summary>
     ///     The number of voxels along each axis.
     /// </summary>
+    /// <remarks>Fixed at construction, so restoring a checkpoint requires a chunk with the same dimensions.</remarks>
+    [NumosSerialize]
     public Int3 Dimensions => new(Width, Height, Depth);
+
+    /// <summary>
+    ///     Gas channels in solver reduction order, including channels whose moles are all zero.
+    /// </summary>
+    /// <remarks>
+    ///     Channel order is kept because floating-point reductions can observe it. Reading copies the moles of the valid
+    ///     channels out of pooled storage. Assigning releases every channel and recreates the given ones in order.
+    /// </remarks>
+    [NumosSerialize("Gases")]
+    public IReadOnlyList<AtmosGasChannelCheckpoint> GasChannelCheckpoints
+    {
+        get
+        {
+            var gases = new AtmosGasChannelCheckpoint[ActiveGasCount];
+            for (int gas = 0; gas < gases.Length; gas++)
+                gases[gas] = new AtmosGasChannelCheckpoint(ActiveGases[gas], VoxelCount);
+
+            return gases;
+        }
+        set
+        {
+            for (int gas = 0; gas < ActiveGasCount; gas++)
+                ActiveGases[gas].Release();
+
+            Array.Clear(ActiveGases, 0, ActiveGasCount);
+            ActiveGasCount = 0;
+            foreach (var gas in value)
+            {
+                int channel = GetOrCreateGasChannel(gas.GasId);
+                StateArray.CopyTo(gas.Moles, ActiveGases[channel].Moles.AsSpan(0, VoxelCount));
+            }
+        }
+    }
+
+    /// <summary>
+    ///     Rollback <c>ChunkField&lt;T&gt;</c> arrays in ordinal key order, detached from live chunk storage.
+    /// </summary>
+    /// <remarks>
+    ///     Transient fields are left out. Assigning drops every field, transient ones included, and recreates the
+    ///     given arrays. Reacquire them through the same <c>ChunkField&lt;T&gt;</c>. Its key, element type, and length
+    ///     must match.
+    /// </remarks>
+    [NumosSerialize(Codec = typeof(SolverArraysCodec))]
+    public IReadOnlyList<AtmosSolverArraySnapshot> SolverArrays
+    {
+        get => StateArray.Wrap(CaptureSolverArrays());
+        set
+        {
+            ResetFields();
+            RestoreSolverArrays(value);
+        }
+    }
 
     /// <summary>
     ///     Allocates any per-voxel array that is missing or sized for different dimensions.
@@ -212,6 +320,9 @@ internal class AtmosChunk
         EnsureInitialized(ref TotalPressure, dimensions);
         EnsureInitialized(ref TotalHeatCapacity, dimensions);
         EnsureInitialized(ref Temperature, dimensions);
+        EnsureInitialized(ref MomentumX, dimensions);
+        EnsureInitialized(ref MomentumY, dimensions);
+        EnsureInitialized(ref MomentumZ, dimensions);
         EnsureInitialized(ref IsVacuum, dimensions);
         if (ActiveGases == null)
             ActiveGases = new GasChannel[AtmosChunkConstants.InitialGasChannelCapacity];
@@ -259,6 +370,9 @@ internal class AtmosChunk
         TotalPressure.Clear();
         TotalHeatCapacity.Clear();
         Temperature.Clear();
+        MomentumX.Clear();
+        MomentumY.Clear();
+        MomentumZ.Clear();
         IsVacuum.Fill(true);
         Array.Clear(ActiveGases, 0, ActiveGases.Length);
 
@@ -396,7 +510,7 @@ internal class AtmosChunk
             foreach (var storage in fields)
             {
                 if (storage is { CaptureForRollback: true })
-                    (captured ??= []).Add(new AtmosSolverArraySnapshot(storage));
+                    (captured ??= []).Add(AtmosSolverArraySnapshot.Copy(storage));
             }
         }
 
@@ -579,8 +693,8 @@ internal class AtmosChunk
 
 
     /// <summary>
-    ///     Clears one voxel to vacuum: zeroes <see cref="TotalPressure" />, every gas channel, and
-    ///     <see cref="TotalHeatCapacity" />, and sets <see cref="IsVacuum" />. Per-voxel fields that opt into vacuum
+    ///     Clears one voxel to vacuum: zeroes <see cref="TotalPressure" />, every gas channel,
+    ///     <see cref="TotalHeatCapacity" />, and the momentum components, and sets <see cref="IsVacuum" />. Per-voxel fields that opt into vacuum
     ///     clearing are reset for this voxel.
     /// </summary>
     /// <param name="idx">Index of voxel</param>
@@ -595,6 +709,7 @@ internal class AtmosChunk
         }
 
         TotalHeatCapacity[idx] = 0f;
+        ZeroMomentum(idx);
         IsVacuum[idx] = true;
 
         // Solver workers call this per voxel, so walk only this chunk's allocated fields without locking.
@@ -607,6 +722,27 @@ internal class AtmosChunk
             if (storage is { Field: { ClearOnVacuum: true, FixedLength: null } })
                 storage.ClearElement(idx);
         }
+    }
+
+    /// <summary>
+    ///     Zeroes every momentum component of one voxel. Call it whenever a write leaves the voxel without gas, so
+    ///     the "no gas, no momentum" invariant on <see cref="MomentumX" /> holds.
+    /// </summary>
+    internal void ZeroMomentum(ushort localVoxelIndex)
+    {
+        MomentumX[localVoxelIndex] = 0f;
+        MomentumY[localVoxelIndex] = 0f;
+        MomentumZ[localVoxelIndex] = 0f;
+    }
+
+    /// <summary>
+    ///     Whether any momentum component of one voxel is nonzero. A NaN component counts as nonzero.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal bool HasMomentum(ushort localVoxelIndex)
+    {
+        return MomentumX[localVoxelIndex] != 0f || MomentumY[localVoxelIndex] != 0f ||
+               MomentumZ[localVoxelIndex] != 0f;
     }
 
     /// <summary>
@@ -623,6 +759,9 @@ internal class AtmosChunk
         }
 
         TotalHeatCapacity.Fill(0f);
+        MomentumX.Fill(0f);
+        MomentumY.Fill(0f);
+        MomentumZ.Fill(0f);
         IsVacuum.Fill(true);
 
         SolverArrayStorage?[]? fields = Volatile.Read(ref _fields);
@@ -728,14 +867,20 @@ internal class AtmosChunk
     ///     Creates a detached snapshot of the chunk's current state.
     /// </summary>
     /// <param name="fields">The per-voxel fields to copy.</param>
+    /// <param name="config">
+    ///     Configuration supplying gas molar masses. The snapshot reads it only when <paramref name="fields" />
+    ///     includes <see cref="AtmosChunkSnapshotFields.Velocity" />, because velocity is derived from momentum and
+    ///     mass rather than stored.
+    /// </param>
     /// <returns>A snapshot containing selected physical fields and solver arrays opted into capture.</returns>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="fields" /> contains undefined flags.</exception>
     [PublicAPI]
-    public AtmosChunkSnapshot GetNetworkSnapshot(
-        AtmosChunkSnapshotFields fields = AtmosChunkSnapshotFields.All)
+    public AtmosChunkSnapshot GetNetworkSnapshot(AtmosChunkSnapshotFields fields, IAtmosConfig config)
     {
         if ((fields & ~AtmosChunkSnapshotFields.All) != 0)
             throw new ArgumentOutOfRangeException(nameof(fields));
+
+        bool includeVelocity = fields.HasFlag(AtmosChunkSnapshotFields.Velocity);
 
         var snapshot = new AtmosChunkSnapshot
         {
@@ -758,6 +903,9 @@ internal class AtmosChunk
             VoxelRoomMap = fields.HasFlag(AtmosChunkSnapshotFields.VoxelClassification)
                 ? VoxelRoomMap.ToArray()
                 : [],
+            VelocityX = includeVelocity ? new MetrePerSecond[VoxelCount] : [],
+            VelocityY = includeVelocity ? new MetrePerSecond[VoxelCount] : [],
+            VelocityZ = includeVelocity ? new MetrePerSecond[VoxelCount] : [],
             SolverArrays = fields.HasFlag(AtmosChunkSnapshotFields.SolverArrays)
                 ? Array.AsReadOnly(CaptureSolverArrays())
                 : Array.Empty<AtmosSolverArraySnapshot>(),
@@ -778,6 +926,25 @@ internal class AtmosChunk
                 };
 
                 Array.Copy(ActiveGases[g].Moles, snapshot.Gases[g].Moles, VoxelCount);
+            }
+        }
+
+        if (includeVelocity)
+        {
+            Span<KilogramPerMole> molarMasses = ActiveGasCount <= AtmosSolverMath.MolarMassStackLimit
+                ? stackalloc KilogramPerMole[AtmosSolverMath.MolarMassStackLimit]
+                : new KilogramPerMole[ActiveGasCount];
+
+            AtmosSolverMath.ResolveMolarMasses(config, this, molarMasses);
+            for (int index = 0; index < VoxelCount; index++)
+            {
+                AtmosSolverMath.ComputeVoxelVelocity(
+                    molarMasses,
+                    this,
+                    (ushort)index,
+                    out snapshot.VelocityX[index],
+                    out snapshot.VelocityY[index],
+                    out snapshot.VelocityZ[index]);
             }
         }
 

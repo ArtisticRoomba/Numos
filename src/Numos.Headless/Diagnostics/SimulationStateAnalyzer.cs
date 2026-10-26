@@ -2,8 +2,10 @@ using Numos.API;
 using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.Datatypes.Snapshots;
+using Numos.CoreSim.EulerFlow;
 using Numos.Headless.Protocol;
 using Numos.Maths;
+using Numos.Workbench;
 
 namespace Numos.Headless.Diagnostics;
 
@@ -43,7 +45,8 @@ public static class SimulationStateAnalyzer
         AtmosChunkSnapshotRequest[] requests = handles
             .Select(static handle => new AtmosChunkSnapshotRequest(
                 handle.Position,
-                default))
+                default,
+                AtmosChunkSnapshotFields.All))
             .ToArray();
 
         var batch = simulation.GetChangedChunkSnapshots(requests);
@@ -106,6 +109,7 @@ public static class SimulationStateAnalyzer
             simulation.ChunkCount,
             CreateConfigurationReport(config),
             simulation.World.Solvers.Steps.Select(CreateSolverReport).ToArray(),
+            CreateFlowReport(simulation.LastFlowDiagnostics),
             global.ToGlobalReport(),
             chunkReports,
             issues.Items.ToArray(),
@@ -195,7 +199,8 @@ public static class SimulationStateAnalyzer
                 gas.CondensationEnabled,
                 gas.MolarEnthalpyOfVaporization,
                 gas.LiquidId,
-                gas.DiffusionCoefficient);
+                gas.DiffusionCoefficient,
+                gas.MolarMass);
         }
 
         return new SimulationConfigurationReport(
@@ -215,7 +220,47 @@ public static class SimulationStateAnalyzer
             config.MaxPressureTransferFractionPerNeighbor,
             config.AccumulatorWakeThreshold,
             config.AccumulatorMaxAliveTicks,
-            gases);
+            config.ReferenceMolarMass,
+            gases,
+            CreateEulerFlowReport(config));
+    }
+
+    private static EulerFlowConfigurationReport? CreateEulerFlowReport(AtmosConfig config)
+    {
+        var euler = AtmosConfigSettings.GetSolverConfiguration<EulerFlowConfig>(config);
+        if (euler == null)
+            return null;
+
+        string reconstruction = euler.Reconstruction switch
+        {
+            EulerReconstruction.FirstOrder => "firstOrder",
+            _ => throw new ArgumentOutOfRangeException(nameof(config))
+        };
+
+        return new EulerFlowConfigurationReport(
+            euler.CourantNumber,
+            euler.MaxSubstepsPerTick,
+            euler.VelocityFloor,
+            euler.MaxVelocity,
+            euler.WakePressureDelta,
+            euler.AllMachCorrection,
+            reconstruction,
+            euler.MomentumDamping,
+            euler.DefaultLinkAreaFraction);
+    }
+
+    private static FlowDiagnosticsReport CreateFlowReport(AtmosFlowDiagnostics flow)
+    {
+        return new FlowDiagnosticsReport(
+            flow.Substeps,
+            flow.SimulatedSeconds,
+            flow.SubstepCapEngaged,
+            flow.MaxCourantNumber,
+            flow.MaxSignalSpeed,
+            flow.ClampedVelocityCount,
+            flow.NegativeInternalEnergyCount,
+            flow.NegativeMolesCount,
+            flow.NonFiniteCellCount);
     }
 
     private static SolverStepReport CreateSolverReport(AtmosWorldSolverStep step)
@@ -253,6 +298,11 @@ public static class SimulationStateAnalyzer
             voxel.IsGasBearing,
             snapshot.TotalPressure[localIndex],
             snapshot.Temperature[localIndex],
+            new FloatVector(
+                snapshot.VelocityX[localIndex],
+                snapshot.VelocityY[localIndex],
+                snapshot.VelocityZ[localIndex]),
+            voxel.Speed,
             voxel.TotalMoles,
             voxel.SensibleEnergy,
             gases);
@@ -308,6 +358,7 @@ public static class SimulationStateAnalyzer
         private readonly AnomalyCountsAccumulator _anomalies = new();
         private readonly Dictionary<int, double> _gasMoles = [];
         private readonly FiniteStatisticsAccumulator _pressure = new();
+        private readonly FiniteStatisticsAccumulator _speed = new();
         private readonly FiniteStatisticsAccumulator _temperature = new();
         private int _activeAirCount;
         private int _activeGasChannelCount;
@@ -346,6 +397,25 @@ public static class SimulationStateAnalyzer
             InspectScalar(pressure, "Pressure", snapshot, localPosition, localIndex, null, issues);
             InspectScalar(temperature, "Temperature", snapshot, localPosition, localIndex, null, issues);
 
+            float velocityX = snapshot.VelocityX[localIndex];
+            float velocityY = snapshot.VelocityY[localIndex];
+            float velocityZ = snapshot.VelocityZ[localIndex];
+            float speed = FlowFieldMath.Speed(velocityX, velocityY, velocityZ);
+            _speed.Add(speed);
+            // Velocity components are signed, so only non-finite values are anomalies; the speed is what gets reported.
+            if (!float.IsFinite(speed))
+            {
+                _anomalies.AddNonFinite("Velocity");
+                issues?.Add(
+                    new AnomalyIssueReport(
+                        "nonFiniteVelocity",
+                        Coordinate.From(snapshot.GridPosition),
+                        localPosition,
+                        localIndex,
+                        null,
+                        speed));
+            }
+
             double voxelMoles = 0d;
             double voxelEnergy = 0d;
             bool isGasBearing = false;
@@ -368,7 +438,7 @@ public static class SimulationStateAnalyzer
 
             _totalMoles += voxelMoles;
             _sensibleEnergy += voxelEnergy;
-            return new VoxelAnalysis(isGasCapable, isGasBearing, voxelMoles, voxelEnergy);
+            return new VoxelAnalysis(isGasCapable, isGasBearing, voxelMoles, voxelEnergy, speed);
         }
 
         internal void AddChunk(AtmosChunkSnapshot snapshot)
@@ -392,6 +462,7 @@ public static class SimulationStateAnalyzer
                 _sensibleEnergy,
                 _pressure.ToReport(),
                 _temperature.ToReport(),
+                _speed.ToReport(),
                 CreateGasTotals(),
                 _anomalies.ToReport());
         }
@@ -413,6 +484,7 @@ public static class SimulationStateAnalyzer
                 _sensibleEnergy,
                 _pressure.ToReport(),
                 _temperature.ToReport(),
+                _speed.ToReport(),
                 CreateGasTotals(),
                 _anomalies.ToReport());
         }
@@ -501,6 +573,7 @@ public static class SimulationStateAnalyzer
         private int _nonFiniteMoles;
         private int _nonFinitePressure;
         private int _nonFiniteTemperature;
+        private int _nonFiniteVelocity;
 
         internal void AddNonFinite(string field)
         {
@@ -509,6 +582,7 @@ public static class SimulationStateAnalyzer
                 case "Pressure": _nonFinitePressure++; break;
                 case "Temperature": _nonFiniteTemperature++; break;
                 case "Moles": _nonFiniteMoles++; break;
+                case "Velocity": _nonFiniteVelocity++; break;
             }
         }
 
@@ -530,7 +604,8 @@ public static class SimulationStateAnalyzer
                 _nonFiniteTemperature,
                 _negativeTemperature,
                 _nonFiniteMoles,
-                _negativeMoles);
+                _negativeMoles,
+                _nonFiniteVelocity);
         }
     }
 
@@ -552,5 +627,6 @@ public static class SimulationStateAnalyzer
         bool IsGasCapable,
         bool IsGasBearing,
         double TotalMoles,
-        double SensibleEnergy);
+        double SensibleEnergy,
+        float Speed);
 }

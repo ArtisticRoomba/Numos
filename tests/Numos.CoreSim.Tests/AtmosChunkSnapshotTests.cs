@@ -1,12 +1,88 @@
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.Datatypes.Snapshots;
 using Numos.Maths;
+using Numos.Tests;
 
 namespace Numos.CoreSim.Tests;
 
 [TestFixture]
 public sealed class AtmosChunkSnapshotTests
 {
+    // Velocity needs a configuration for molar masses. The stored-field tests don't care about it.
+    private const AtmosChunkSnapshotFields PhysicalFields =
+        AtmosChunkSnapshotFields.All & ~AtmosChunkSnapshotFields.Velocity;
+
+    private static readonly AtmosConfigSnapshot DefaultConfig = new AtmosConfig().CreateSnapshot();
+
+    [Test]
+    public void GetNetworkSnapshot_Velocity_DividesMomentumByGasMass()
+    {
+        var config = new AtmosConfig
+        {
+            ReferenceMolarMass = 0.01f,
+            GasRegistry =
+            [
+                TestGases.Create("Light", molarMass: 0.002f),
+                TestGases.Create("Heavy", molarMass: 0.032f),
+                TestGases.Create("Unset")
+            ]
+        }.CreateSnapshot();
+
+        var chunk = new AtmosChunk(3, 1, 1);
+        try
+        {
+            chunk.Initialize(default, 3, 1, 1);
+            chunk.VoxelRoomMap.Fill(1);
+            chunk.Wake();
+            // Voxel 0: 3 mol × 0.002 + 1 mol × 0.032 = 0.038 kg.
+            chunk.InjectGasToVoxel(0, 0, 3f, 300f, 1f, 1f);
+            chunk.InjectGasToVoxel(0, 1, 1f, 300f, 1f, 1f);
+            chunk.MomentumX[0] = 0.076f;
+            chunk.MomentumY[0] = -0.019f;
+            // Voxel 1: a gas without a molar mass weighs the reference, 2 mol × 0.01 = 0.02 kg.
+            chunk.InjectGasToVoxel(1, 2, 2f, 300f, 1f, 1f);
+            chunk.MomentumZ[1] = 0.04f;
+            // Voxel 2 stays vacuum. Stale momentum written straight into storage must not leak out as velocity.
+            chunk.MomentumX[2] = 5f;
+
+            var snapshot = chunk.GetNetworkSnapshot(AtmosChunkSnapshotFields.Velocity, config);
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(snapshot.HasFields(AtmosChunkSnapshotFields.Velocity), Is.True);
+                Assert.That(snapshot.VelocityX[0], Is.EqualTo(2f).Within(1e-4f));
+                Assert.That(snapshot.VelocityY[0], Is.EqualTo(-0.5f).Within(1e-4f));
+                Assert.That(snapshot.VelocityZ[0], Is.Zero);
+                Assert.That(snapshot.VelocityZ[1], Is.EqualTo(2f).Within(1e-4f));
+                Assert.That(snapshot.VelocityX[2], Is.Zero);
+            });
+        }
+        finally
+        {
+            chunk.Release();
+        }
+    }
+
+    [Test]
+    public void HasFields_InfersVelocityFromHandBuiltArrays()
+    {
+        var withVelocity = new AtmosChunkSnapshot
+        {
+            VelocityX = [1f],
+            VelocityY = [0f],
+            VelocityZ = [0f]
+        };
+
+        var partial = new AtmosChunkSnapshot { VelocityX = [1f] };
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(withVelocity.HasFields(AtmosChunkSnapshotFields.Velocity), Is.True);
+            Assert.That(partial.HasFields(AtmosChunkSnapshotFields.Velocity), Is.False);
+            Assert.That(default(AtmosChunkSnapshot).HasFields(AtmosChunkSnapshotFields.Velocity), Is.False);
+        });
+    }
+
     [Test]
     public void DefaultSnapshot_IsInvalid()
     {
@@ -22,7 +98,7 @@ public sealed class AtmosChunkSnapshotTests
         chunk.Temperature[3] = 275f;
         chunk.TotalPressure[3] = 25f;
 
-        var snapshot = chunk.GetNetworkSnapshot();
+        var snapshot = chunk.GetNetworkSnapshot(PhysicalFields, DefaultConfig);
 
         Assert.Multiple(() =>
         {
@@ -47,7 +123,7 @@ public sealed class AtmosChunkSnapshotTests
             chunk.InjectGasToVoxel(0, 3, 2f, 300f, 1f, 1f);
             chunk.InjectGasToVoxel(1, 8, 1f, 400f, 1f, 1f);
 
-            var snapshot = chunk.GetNetworkSnapshot();
+            var snapshot = chunk.GetNetworkSnapshot(PhysicalFields, DefaultConfig);
 
             Assert.Multiple(() =>
             {
@@ -66,7 +142,7 @@ public sealed class AtmosChunkSnapshotTests
             snapshot.VoxelRoomMap[0] = VoxelClassification.RoomSolid;
             snapshot.Gases[0].Moles[0] = -1f;
             snapshot.Gases[0].GasId = 99;
-            var freshSnapshot = chunk.GetNetworkSnapshot();
+            var freshSnapshot = chunk.GetNetworkSnapshot(PhysicalFields, DefaultConfig);
 
             Assert.Multiple(() =>
             {

@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Numerics;
 using System.Text.Json;
 using Numos.API;
 using Numos.CoreSim;
@@ -63,6 +64,7 @@ internal sealed partial class HeadlessOperations
             "fillChunk" => FillChunk(request),
             "setVoxelClassification" => SetVoxelClassification(request),
             "setVoxelTemperature" => SetVoxelTemperature(request),
+            "setVoxelMomentum" => SetVoxelMomentum(request),
             "injectGas" => InjectGas(request),
             "clearVoxelGas" => ClearVoxelGas(request),
             "editRegion" => EditRegion(request),
@@ -76,7 +78,9 @@ internal sealed partial class HeadlessOperations
             "getConfig" => GetConfig(),
             "listSolvers" => ListSolvers(),
             "setSolverEnabled" => SetSolverEnabled(request),
-            "resetSolvers" => ResetSolvers(),
+            "resetSolvers" => ResetSolvers(request),
+            "setSolverLayout" => SetSolverLayout(request),
+            "applyTransportPreset" => ApplyTransportPreset(request),
             "createPortal" => CreatePortal(request),
             "createDock" => CreateDock(request),
             "destroyLinkSet" => DestroyLinkSet(request),
@@ -104,8 +108,10 @@ internal sealed partial class HeadlessOperations
     [
         "addSimulation", "removeSimulation", "selectSimulation", "listSimulations", "addChunk", "removeChunk",
         "sealChunk", "wakeChunk", "sleepChunk", "fillChunk", "setVoxelClassification", "setVoxelTemperature",
-        "injectGas", "clearVoxelGas", "editRegion", "sampleVoxels", "addGas", "removeGas", "listGases",
-        "updateConfig", "getConfig", "listSolvers", "setSolverEnabled", "resetSolvers", "createPortal", "createDock",
+        "setVoxelMomentum", "injectGas", "clearVoxelGas",
+        "editRegion", "sampleVoxels", "addGas", "removeGas", "listGases",
+        "updateConfig", "getConfig", "listSolvers", "setSolverEnabled", "resetSolvers", "setSolverLayout",
+        "applyTransportPreset", "createPortal", "createDock",
         "destroyLinkSet", "listLinkSets", "tick", "stepForward", "seekTick", "returnToHead", "createBranch",
         "selectBranch", "continueBranch", "listBranches", "timelineInfo", "saveReplay", "observe", "exportField",
         "renderSlice"
@@ -217,7 +223,8 @@ internal sealed partial class HeadlessOperations
             dimensions.X,
             dimensions.Y,
             dimensions.Z,
-            request.IncludeDefaultGases ?? false);
+            request.IncludeDefaultGases ?? false,
+            ParseTransportModel(request.TransportModel) ?? AtmosTransportModel.Euler);
 
         _session.CreateProject(
             options,
@@ -238,6 +245,24 @@ internal sealed partial class HeadlessOperations
             });
 
         return new CommandExecution();
+    }
+
+    /// <summary>
+    ///     Maps the protocol's `transportModel` names onto <see cref="AtmosTransportModel" />.
+    /// </summary>
+    /// <returns>The model, or <see langword="null" /> when the request names none.</returns>
+    /// <exception cref="HeadlessRequestException">The name is not `euler` or `legacy`.</exception>
+    private static AtmosTransportModel? ParseTransportModel(string? value)
+    {
+        return value?.Trim().ToLowerInvariant() switch
+        {
+            null or "" => null,
+            "euler" => AtmosTransportModel.Euler,
+            "legacy" => AtmosTransportModel.Legacy,
+            _ => throw new HeadlessRequestException(
+                "invalidTransportModel",
+                $"Unknown transport model '{value}'. Use 'euler' or 'legacy'.")
+        };
     }
 
     private CommandExecution CloseProject()
@@ -370,6 +395,19 @@ internal sealed partial class HeadlessOperations
         return new CommandExecution();
     }
 
+    private CommandExecution SetVoxelMomentum(HeadlessRequest request)
+    {
+        var cell = Cell(request);
+        _session.SetVoxelMomentum(
+            cell,
+            Require(request.MomentumX, "momentumX"),
+            Require(request.MomentumY, "momentumY"),
+            Require(request.MomentumZ, "momentumZ"),
+            ResolveSimulation(request.Simulation));
+
+        return new CommandExecution();
+    }
+
     private CommandExecution InjectGas(HeadlessRequest request)
     {
         var cell = Cell(request);
@@ -428,7 +466,8 @@ internal sealed partial class HeadlessOperations
             request.ClearGas ?? false,
             request.TemperatureK,
             gases,
-            request.GasTemperatureK);
+            request.GasTemperatureK,
+            ParseVelocity(request.Velocity));
 
         var result = _session.EditRegion(box, edit, ResolveSimulation(request.Simulation));
         return Result(new CommandResult
@@ -439,9 +478,36 @@ internal sealed partial class HeadlessOperations
                 VoxelsSkipped = result.VoxelsSkipped,
                 ChunksTouched = result.ChunksTouched,
                 ChunksCreated = result.ChunksCreated,
-                MolesPerVoxel = result.MolesPerVoxel.ToArray()
+                MolesPerVoxel = result.MolesPerVoxel.ToArray(),
+                VelocityVoxels = result.VelocityVoxels
             }
         });
+    }
+
+    private static Vector3? ParseVelocity(VelocityRequest? velocity)
+    {
+        if (velocity == null)
+            return null;
+
+        float x = Require(velocity.X, "velocity.x");
+        float y = Require(velocity.Y, "velocity.y");
+        float z = Require(velocity.Z, "velocity.z");
+        if (!float.IsFinite(x) || !float.IsFinite(y) || !float.IsFinite(z))
+        {
+            throw new HeadlessRequestException(
+                "invalidRequest",
+                "velocity components must be finite numbers in m/s.");
+        }
+
+        return new Vector3(x, y, z);
+    }
+
+    private static WorkbenchFieldOptions ParseFieldOptions(float? schlierenReference, string property)
+    {
+        if (schlierenReference is { } reference && (!float.IsFinite(reference) || reference <= 0f))
+            throw new HeadlessRequestException("invalidRequest", $"{property} must be a positive number in kg/m4.");
+
+        return new WorkbenchFieldOptions(schlierenReference);
     }
 
     private CommandExecution SampleVoxels(HeadlessRequest request)
@@ -458,7 +524,8 @@ internal sealed partial class HeadlessOperations
         float[] flat = _session.SampleVoxels(
             points.Select(static point => point.ToInt3()).ToArray(),
             fields,
-            ResolveSimulation(request.Simulation));
+            ResolveSimulation(request.Simulation),
+            ParseFieldOptions(request.SchlierenReference, "schlierenReference"));
 
         float[][] rows = new float[points.Length][];
         for (int row = 0; row < rows.Length; row++)
@@ -487,7 +554,7 @@ internal sealed partial class HeadlessOperations
             {
                 throw new HeadlessRequestException(
                     "fieldNotFound",
-                    $"Unknown field '{name}'. Known fields: {string.Join(", ", _session.Fields.Names)}, moles:<gasId>.");
+                    $"Unknown field '{name}'. Known fields: {string.Join(", ", _session.Fields.Names)}, moles:<gasId>, schlieren:<k>.");
             }
         }
 
@@ -519,6 +586,7 @@ internal sealed partial class HeadlessOperations
             throw new HeadlessRequestException("invalidRequest", "Give exactly one of region and slice.");
 
         string? path = format == "npy" ? RequirePath(request) : null;
+        var options = ParseFieldOptions(request.SchlierenReference, "schlierenReference");
         IReadOnlyList<FieldExport> exports;
         if (request.Region is { } region)
         {
@@ -531,8 +599,8 @@ internal sealed partial class HeadlessOperations
 
             CheckInlineSize(format, box.VoxelCount);
             exports = path == null
-                ? _session.ReadRegion(box, fields, simulation)
-                : _session.ExportRegion(box, fields, path, simulation);
+                ? _session.ReadRegion(box, fields, simulation, options)
+                : _session.ExportRegion(box, fields, path, simulation, options);
         }
         else
         {
@@ -543,13 +611,13 @@ internal sealed partial class HeadlessOperations
             {
                 var box = _session.GetSliceBox(axis, index, simulation);
                 CheckInlineSize(format, box.VoxelCount);
-                exports = _session.ReadRegion(box, fields, simulation);
+                exports = _session.ReadRegion(box, fields, simulation, options);
                 int[] shape = WorkbenchSession.GetSliceShape(axis, box);
                 exports = exports.Select(export => export with { Shape = shape }).ToArray();
             }
             else
             {
-                exports = _session.ExportSlice(axis, index, fields, path, simulation);
+                exports = _session.ExportSlice(axis, index, fields, path, simulation, options);
             }
         }
 
@@ -611,7 +679,8 @@ internal sealed partial class HeadlessOperations
             range,
             scale,
             request.Levels ?? 256,
-            ResolveSimulation(request.Simulation));
+            ResolveSimulation(request.Simulation),
+            ParseFieldOptions(request.SchlierenReference, "schlierenReference"));
 
         string fullPath = System.IO.Path.GetFullPath(path);
         PngEncoder.WriteFile(fullPath, image.Width, image.Height, image.Rgba);
@@ -699,10 +768,34 @@ internal sealed partial class HeadlessOperations
         return Result(new CommandResult { Changed = true });
     }
 
-    private CommandExecution ResetSolvers()
+    private CommandExecution ResetSolvers(HeadlessRequest request)
     {
-        bool full = _session.ResetSolvers();
+        bool full = _session.ResetSolvers(ParseTransportModel(request.TransportModel));
         return Result(new CommandResult { Changed = full });
+    }
+
+    private CommandExecution SetSolverLayout(HeadlessRequest request)
+    {
+        if (request.Stages is not { } stages)
+            throw Missing("stages");
+
+        var layout = new AtmosWorldSolverLayoutEntry[stages.Length];
+        for (int index = 0; index < stages.Length; index++)
+        {
+            string property = $"stages[{index}]";
+            if (stages[index] is not { } stage || string.IsNullOrWhiteSpace(stage.Name))
+                throw Missing(property + ".name");
+
+            layout[index] = new AtmosWorldSolverLayoutEntry(stage.Name, Require(stage.Enabled, property + ".enabled"));
+        }
+
+        return Result(new CommandResult { Changed = _session.SetSolverLayout(layout) });
+    }
+
+    private CommandExecution ApplyTransportPreset(HeadlessRequest request)
+    {
+        var model = ParseTransportModel(request.TransportModel) ?? throw Missing("transportModel");
+        return Result(new CommandResult { Changed = _session.ApplyTransportPreset(model) });
     }
 
     private AtmosCellRef CellRef(LinkEndpoint endpoint, string property)
@@ -734,11 +827,19 @@ internal sealed partial class HeadlessOperations
         };
     }
 
+    private static float? ParseAreaFraction(float? value)
+    {
+        if (value is { } fraction && (!float.IsFinite(fraction) || fraction < 0f || fraction > 1f))
+            throw new HeadlessRequestException("invalidRequest", "areaFraction must be a number from 0 to 1.");
+
+        return value;
+    }
+
     private CommandExecution CreatePortal(HeadlessRequest request)
     {
         var first = CellRef(Require(request.First, "first"), "first");
         var second = CellRef(Require(request.Second, "second"), "second");
-        var portal = _session.CreatePortal(first, second, ParseFlags(request.Flags));
+        var portal = _session.CreatePortal(first, second, ParseFlags(request.Flags), ParseAreaFraction(request.AreaFraction));
         return Result(new CommandResult { LinkSet = ToInfo(portal.Links) });
     }
 
@@ -768,7 +869,8 @@ internal sealed partial class HeadlessOperations
             request.Rotation ?? 0,
             request.FlipU ?? false,
             request.FlipV ?? false,
-            ParseFlags(request.Flags));
+            ParseFlags(request.Flags),
+            ParseAreaFraction(request.AreaFraction));
 
         var handle = _session.CreateDock(dock);
         return Result(new CommandResult { LinkSet = ToInfo(handle.Links) });
@@ -793,7 +895,8 @@ internal sealed partial class HeadlessOperations
                 Kind = set.Kind.ToString(),
                 State = set.State.ToString(),
                 LinkCount = set.Links.Count,
-                Flags = set.Links.Count == 0 ? ExplicitLinkFlags.None.ToString() : set.Links[0].Flags.ToString()
+                Flags = set.Links.Count == 0 ? ExplicitLinkFlags.None.ToString() : set.Links[0].Flags.ToString(),
+                AreaFraction = set.Links.Count == 0 ? null : set.Links[0].AreaFraction
             })
             .ToArray();
 
@@ -842,7 +945,8 @@ internal sealed partial class HeadlessOperations
             points,
             fields,
             RequirePath(probes.Path, "probes.path"),
-            ResolveSimulation(request.Simulation));
+            ResolveSimulation(request.Simulation),
+            ParseFieldOptions(probes.SchlierenReference, "probes.schlierenReference"));
 
         recorder.Record();
         _session.Tick(

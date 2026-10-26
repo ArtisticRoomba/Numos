@@ -111,6 +111,11 @@ internal sealed class LinkSetInfo
     public required string State { get; init; }
     public required int LinkCount { get; init; }
     public required string Flags { get; init; }
+
+    /// <summary>
+    ///     The open area fraction of the first link, or absent when the set follows the configuration default.
+    /// </summary>
+    public float? AreaFraction { get; init; }
 }
 
 internal sealed class BranchInfo
@@ -149,6 +154,7 @@ internal sealed class RegionEditInfo
     public required int ChunksTouched { get; init; }
     public required int ChunksCreated { get; init; }
     public required float[] MolesPerVoxel { get; init; }
+    public required long VelocityVoxels { get; init; }
 }
 
 internal sealed class SampleInfo

@@ -31,7 +31,15 @@ public static class NumosWorldReplaySerializer
     /// <param name="document">Portable world replay and provenance metadata.</param>
     /// <exception cref="ArgumentNullException">A required argument is <see langword="null" />.</exception>
     /// <exception cref="ArgumentException"><paramref name="destination" /> is not writable.</exception>
-    /// <exception cref="NotSupportedException">The replay contains host-defined state.</exception>
+    /// <exception cref="NotSupportedException">
+    ///     The replay holds state the format cannot encode. Examples are a solver configuration without
+    ///     <c>[NumosSerialize]</c> members and a rollback chunk field whose element type is not a primitive or an enum.
+    /// </exception>
+    /// <remarks>
+    ///     Custom world solvers are saved by name, along with any <c>[NumosSerialize]</c> state they hold. Loading such a
+    ///     file works anywhere, but replaying it needs a world with the same solvers registered, through
+    ///     <see cref="AtmosWorldReplayTimeline.Restore" /> rather than <see cref="AtmosWorldReplayTimeline.Import" />.
+    /// </remarks>
     public static void Serialize(Stream destination, NumosWorldReplayDocument document)
     {
         ArgumentNullException.ThrowIfNull(destination);
@@ -39,7 +47,7 @@ public static class NumosWorldReplaySerializer
         if (!destination.CanWrite)
             throw new ArgumentException("The destination stream must be writable.", nameof(destination));
 
-        document.Replay.EnsurePortable();
+        document.Replay.EnsureSerializable();
 
         var replay = document.Replay;
         using var writer = new BinaryWriter(destination, AtmosReplayCodec.Utf8, true);
@@ -73,13 +81,23 @@ public static class NumosWorldReplaySerializer
     /// <param name="source">Readable stream containing exactly one world replay container.</param>
     /// <param name="options">Optional allocation and payload limits for untrusted input.</param>
     /// <returns>Decoded metadata and detached complete-world archive.</returns>
+    /// <remarks>
+    ///     Rollback chunk fields are looked up in the process-wide <c>ChunkField&lt;T&gt;</c> registry, so register every
+    ///     field the file might hold (touch its <c>[ChunkData]</c> property or call <c>ChunkField&lt;T&gt;.Register</c>)
+    ///     before loading.
+    /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="source" /> is <see langword="null" />.</exception>
     /// <exception cref="ArgumentException"><paramref name="source" /> is not readable.</exception>
     /// <exception cref="InvalidDataException">
     ///     The container is malformed, inconsistent, or holds unsupported content such as a single-simulation replay
-    ///     written by an earlier Numos version.
+    ///     written by an earlier Numos version, or a chunk field whose saved element type or length doesn't match its
+    ///     registration.
     /// </exception>
-    /// <exception cref="NotSupportedException">The replay contains host-defined state.</exception>
+    /// <exception cref="NotSupportedException">
+    ///     The replay contains host-defined state. Examples are a solver configuration whose key is not registered in
+    ///     <see cref="NumosReplayReadOptions.SolverConfigurations" /> and a rollback chunk field that the process has
+    ///     not registered yet.
+    /// </exception>
     public static NumosWorldReplayDocument Deserialize(Stream source, NumosReplayReadOptions? options = null)
     {
         var (metadata, checkpoint, recording) = ReadContainer(source, options);
@@ -104,7 +122,7 @@ public static class NumosWorldReplaySerializer
             checkpoint.InitialHash,
             checkpoint.HeadHash);
 
-        archive.EnsurePortable();
+        archive.EnsureSerializable();
         if (source.ReadByte() != -1) throw new InvalidDataException("The Numos file has trailing data.");
 
         return new NumosWorldReplayDocument(metadata.Metadata, archive);
@@ -166,6 +184,8 @@ public static class NumosWorldReplaySerializer
         if (options.MaxPayloadBytes <= 0 || options.MaxOperations < 0 || options.MaxStringBytes < 0 || options.MaxMetadataBytes < 0)
             throw new ArgumentOutOfRangeException(nameof(options));
 
+        ArgumentNullException.ThrowIfNull(options.SolverConfigurations, nameof(options));
+
         using var reader = new BinaryReader(source, AtmosReplayCodec.Utf8, true);
         if (!reader.ReadBytes(Magic.Length).SequenceEqual(Magic)) throw new InvalidDataException("The stream is not a Numos file.");
         if (reader.ReadUInt16() != ContainerVersion) throw new InvalidDataException("The Numos container version is unsupported.");
@@ -199,7 +219,7 @@ public static class NumosWorldReplaySerializer
                 throw new InvalidDataException("The replay metadata exceeds the configured limit.");
 
             var limited = new LimitedReadStream(source, (long)rawLength);
-            using var section = new BinaryReader(limited, AtmosReplayCodec.Utf8, true);
+            using var section = new ReplayReader(limited, options.SolverConfigurations);
             switch (id)
             {
                 case MetadataSection:
@@ -320,7 +340,7 @@ public static class NumosWorldReplaySerializer
         int count = AtmosReplayCodec.ReadCount(reader, options.MaxOperations, "world operation");
         var operations = new AtmosWorldRecordedOperation[count];
         var limited = new LimitedReadStream(reader.BaseStream, 0);
-        using var payload = new BinaryReader(limited, AtmosReplayCodec.Utf8, true);
+        using var payload = new ReplayReader(limited, options.SolverConfigurations);
         for (int index = 0; index < count; index++)
         {
             var position = AtmosReplayCodec.ReadPosition(reader);

@@ -9,22 +9,29 @@ namespace Numos.API;
 public delegate void AtmosWorldSolver(AtmosWorldSolverContext context);
 
 /// <summary>
-///     A caller-provided world stage written as a class, for solvers that keep host-side state between ticks or need
-///     to react to checkpoint restores.
+///     A caller-provided world stage written as a class, for solvers that keep state between ticks or need to react
+///     to checkpoint restores.
 /// </summary>
 /// <remarks>
 ///     <para>
 ///         Register an instance with
 ///         <see cref="AtmosWorldSolverPipeline.Register(string, IAtmosWorldSolver, AtmosNeighborSelection?, string?, string?)" />.
-///         The caller owns the instance. Numos never checkpoints, clones, or disposes it. The pipeline's checkpoint
-///         metadata is the same as for a delegate registered under the same name, so switching between the two forms
-///         keeps old checkpoints compatible.
+///         The caller owns the instance. Numos never clones or disposes it. The pipeline's checkpoint metadata is the
+///         same as for a delegate registered under the same name.
 ///     </para>
 ///     <para>
-///         Fields on the instance are invisible to replay. State that has to roll back with a checkpoint belongs in a
-///         rollback <see cref="ChunkField{T}" />. Caches rebuilt from authoritative inputs can live under a
-///         <see cref="SolverDataKey{T}" />. Fields should only hold transient work that <see cref="OnRestored" /> can
-///         throw away, plus references to services, other solvers, and chunk fields.
+///         Fields marked <c>[NumosSerialize]</c> (the class must be <see langword="partial" />) are the solver's state.
+///         Numos checkpoints, hashes, and saves them. On restore it writes them back into this instance. It records a
+///         change the host makes between ticks as a <see cref="SetAtmosWorldSolverStateOperation" /> at the next tick
+///         or checkpoint, so replay sees it too. Changes <see cref="Solve" /> makes are derived, like any other solver
+///         work, and Numos does not record them. While recording, Numos hashes the marked members twice a tick. That
+///         costs nothing for settings and counters but adds up for a large marked array.
+///     </para>
+///     <para>
+///         Unmarked fields are invisible to replay. Keep them to scratch work that <see cref="OnRestored" /> can throw
+///         away, plus references to services, other solvers, and chunk fields. Per-voxel state belongs in a rollback
+///         <see cref="ChunkField{T}" />. Caches rebuilt from authoritative inputs can live under a
+///         <see cref="SolverDataKey{T}" />.
 ///     </para>
 ///     <para>
 ///         Configuration is not pushed to the solver. Read <see cref="AtmosWorldSolverContext.Config" /> each tick, and
@@ -36,7 +43,7 @@ public delegate void AtmosWorldSolver(AtmosWorldSolverContext context);
 ///     <code>
 ///     public static partial class FireData
 ///     {
-///         [ChunkData("my-mod/fire/exposure", Rollback = true)]
+///         [ChunkData("my-mod/fire/exposure")]
 ///         public static partial ChunkField&lt;float&gt; Exposure { get; }
 ///     }
 /// 
@@ -83,7 +90,8 @@ public interface IAtmosWorldSolver
     /// <remarks>
     ///     <para>
     ///         Numos calls this on every custom class solver, enabled or not, in pipeline order. The call happens once
-    ///         the restored state is fully installed and before any replayed tick. That covers
+    ///         the restored state is fully installed (including every solver's <c>[NumosSerialize]</c> members) and
+    ///         before any replayed tick. That covers
     ///         <see cref="AtmosWorld.RestoreCheckpoint" />, <see cref="AtmosSimulation.RestoreCheckpoint" />, both
     ///         <c>ReplayTo</c> methods, and the restore that puts the previous state back after a failed
     ///         <c>ReplayTo</c>. A single host call can trigger it more than once, so make it idempotent.
@@ -318,3 +326,10 @@ public readonly record struct AtmosWorldSolverStep(
     AtmosWorldSolverKind Kind,
     bool IsEnabled,
     string? NeighborSelectionKey);
+
+/// <summary>
+///     One stage of a requested solver layout.
+/// </summary>
+/// <param name="Name">A built-in stage name or the name of a registered custom stage.</param>
+/// <param name="Enabled">Whether the stage participates in subsequent ticks.</param>
+public readonly record struct AtmosWorldSolverLayoutEntry(string Name, bool Enabled);

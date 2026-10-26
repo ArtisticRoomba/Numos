@@ -158,7 +158,7 @@ public partial class SimulationViewer
 
     private void RefreshSimulationSurface(SimulationSurface surface)
     {
-        var fields = _frameBuilder!.GetRequiredSnapshotFields(_currentVisualizationId);
+        var fields = GetRequiredSnapshotFields();
         if (surface.Simulation.TryGetChunkHandles(surface.ChunkRevision, out long revision, out AtmosChunkHandle[] handles))
         {
             surface.ChunkRevision = revision;
@@ -186,7 +186,7 @@ public partial class SimulationViewer
             .Where(static snapshot => snapshot.Dimensions.X > 0)
             .ToArray();
 
-        surface.DrawData = _frameBuilder.BuildSimulation(
+        surface.DrawData = _frameBuilder!.BuildSimulation(
             ordered,
             _currentVisualizationId,
             batch.TickCount,

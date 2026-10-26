@@ -292,7 +292,7 @@ public class GasReactionTests
         };
 
         var snapshotConfig = new AtmosSolverConfigSnapshot();
-        snapshotConfig.Capture(config);
+        snapshotConfig.Capture(config.CreateSnapshot());
 
         var solver = new ReactionSolver();
 

@@ -34,7 +34,7 @@ public class ChunkScalingBenchmarks : ScalingBenchmarkBase
     [Benchmark]
     public void Advection_AwakeChunkScaling()
     {
-        Workload.Steps[0].Solver(Workload.Context);
+        Workload.FlowStep.Solver(Workload.Context);
     }
 
     /// <summary>
@@ -43,7 +43,7 @@ public class ChunkScalingBenchmarks : ScalingBenchmarkBase
     [Benchmark]
     public void Thermodynamics_AwakeChunkScaling()
     {
-        Workload.Steps[2].Solver(Workload.Context);
+        Workload.ThermodynamicsStep.Solver(Workload.Context);
     }
 
     /// <summary>
@@ -52,7 +52,7 @@ public class ChunkScalingBenchmarks : ScalingBenchmarkBase
     [Benchmark]
     public void Reactions_AwakeChunkScaling()
     {
-        Workload.Steps[4].Solver(Workload.Context);
+        Workload.ReactionsStep.Solver(Workload.Context);
     }
 
     /// <summary>

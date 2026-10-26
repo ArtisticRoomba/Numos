@@ -1,5 +1,7 @@
 using Numos.CoreSim.Replay;
 using Numos.CoreSim.Solvers;
+using Numos.CoreSim.State;
+using Numos.CoreSim.State.Advanced;
 using Numos.Maths;
 
 namespace Numos.CoreSim.Tests;
@@ -267,10 +269,10 @@ public sealed class AtmosChunkFieldStorageTests
     [Test]
     public void SolverArrayHash_MatchesObjectKeyedFormat()
     {
-        // The expected value was computed with the object-keyed GetOrCreateSolverArray path this storage replaced,
-        // using the same keys, element types, lengths and values. A change here breaks every saved state hash that
-        // includes rollback fields.
-        const ulong expected = 0x357B98807B35979FUL;
+        // Pins the solver-array section of the state hash as of checkpoint format 9, where strings hash as UTF-8 like
+        // the wire. It first came from the object-keyed GetOrCreateSolverArray path this storage replaced. A change here
+        // breaks every saved state hash that includes rollback fields.
+        const ulong expected = 0x72BB19B0E7A60E0DUL;
         var chunk = new AtmosChunk(2, 1, 1);
         chunk.GetOrCreateField(HashValueField)[0] = new HashValue { Flag = 3, Amount = 1.5f };
         chunk.GetOrCreateField(HashTotals)[1] = -3;
@@ -279,11 +281,8 @@ public sealed class AtmosChunkFieldStorageTests
         chunk.GetOrCreateField(HashCounts)[1] = 5;
         chunk.GetOrCreateField(HashScratch)[0] = 9;
 
-        var snapshots = chunk.CaptureSolverArrays();
-        var hash = new AtmosStateHasher();
-        hash.Add(snapshots.Length);
-        foreach (var snapshot in snapshots)
-            snapshot.AppendHash(ref hash);
+        var hash = new StateHashSink();
+        SolverArraysCodec.Write(ref hash, chunk.CaptureSolverArrays());
 
         Assert.That(hash.Value, Is.EqualTo(expected));
     }

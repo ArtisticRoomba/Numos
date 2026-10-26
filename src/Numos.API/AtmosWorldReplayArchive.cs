@@ -1,4 +1,8 @@
+using Numos.CoreSim;
+using Numos.CoreSim.State;
+using Numos.CoreSim.State.Advanced;
 using System.Collections.ObjectModel;
+using Numos.CoreSim.Replay;
 
 namespace Numos.API;
 
@@ -64,47 +68,79 @@ public sealed class AtmosWorldReplayArchive
     ///     Gets human-readable descriptions of host-defined state that the standard replay file cannot reconstruct.
     ///     Empty when the archive is portable.
     /// </summary>
+    /// <remarks>
+    ///     A custom solver is listed because a standalone host doesn't have its implementation, even though its name
+    ///     and any <see cref="NumosSerializeAttribute" /> state are saved. Such an archive can still be written to a
+    ///     file and loaded back with <see cref="AtmosWorldReplayTimeline.Restore" /> by a host that registers the same
+    ///     solvers.
+    /// </remarks>
     public IReadOnlyList<string> UnsupportedFeatures =>
-        _unsupportedFeatures ??= new ReadOnlyCollection<string>(FindUnsupportedFeatures(InitialCheckpoint, Recording).ToArray());
+        _unsupportedFeatures ??= new ReadOnlyCollection<string>(FindUnsupportedFeatures(InitialCheckpoint, Recording, true).ToArray());
 
     /// <summary>
     ///     Throws when this archive depends on host-defined solver state.
     /// </summary>
     /// <exception cref="NotSupportedException">
-    ///     The archive contains custom solvers, solver configurations, or solver arrays.
+    ///     The archive contains custom solvers, solver configurations without <see cref="NumosSerializeAttribute" />
+    ///     members, or rollback chunk fields whose element type isn't a primitive or an enum.
     /// </exception>
     public void EnsurePortable()
     {
-        if (UnsupportedFeatures.Count != 0)
-        {
-            throw new NotSupportedException(
-                "Portable world replay files do not support the following host-defined state: " +
-                string.Join("; ", UnsupportedFeatures));
-        }
+        ThrowIfAny(UnsupportedFeatures, "Portable world replay files do not support the following host-defined state: ");
+    }
+
+    /// <summary>
+    ///     Throws when this archive holds state the replay file format can't encode. Unlike
+    ///     <see cref="EnsurePortable" />, custom solvers are fine here: the file records their names and saved state,
+    ///     and leaves supplying their implementations to whoever loads it.
+    /// </summary>
+    /// <exception cref="NotSupportedException">
+    ///     The archive contains solver configurations without <see cref="NumosSerializeAttribute" /> members, or rollback
+    ///     chunk fields whose element type isn't a primitive or an enum.
+    /// </exception>
+    internal void EnsureSerializable()
+    {
+        ThrowIfAny(
+            FindUnsupportedFeatures(InitialCheckpoint, Recording, false).ToArray(),
+            "World replay files do not support the following host-defined state: ");
+    }
+
+    private static void ThrowIfAny(IReadOnlyCollection<string> unsupported, string message)
+    {
+        if (unsupported.Count != 0)
+            throw new NotSupportedException(message + string.Join("; ", unsupported));
     }
 
     private static IEnumerable<string> FindUnsupportedFeatures(
         AtmosWorldCheckpoint checkpoint,
-        AtmosWorldRecording recording)
+        AtmosWorldRecording recording,
+        bool includeCustomSolvers)
     {
-        foreach (var solver in checkpoint.Solvers.Where(static solver => solver.Kind == AtmosWorldSolverKind.Custom))
-            yield return $"custom world solver '{solver.Name}'";
+        if (includeCustomSolvers)
+        {
+            foreach (var solver in checkpoint.Solvers.Where(static solver => solver.Kind == AtmosWorldSolverKind.Custom))
+                yield return $"custom world solver '{solver.Name}'";
+        }
 
         foreach (var simulation in checkpoint.Simulations)
         foreach (var chunk in simulation.Checkpoint.Chunks)
-        foreach (var array in chunk.SolverArrays)
-            yield return $"solver array '{array.Key}' in simulation {simulation.Simulation}, chunk {chunk.Position}";
+        foreach (var array in chunk.SolverArrays.Where(static array => !array.IsPortable))
+        {
+            yield return $"chunk field '{array.Key}' ({array.ElementType.FullName}, not a portable element type) " +
+                         $"in simulation {simulation.Simulation}, chunk {chunk.Position}";
+        }
 
-        foreach (var configuration in checkpoint.Config.SolverConfigurations)
-            yield return $"world solver configuration '{configuration.Key}'";
+        // Configurations with [NumosSerialize] members save themselves. Only hand-written ones have no wire format.
+        foreach (var configuration in checkpoint.Config.SolverConfigurations.Where(static value => value is not INumosState))
+            yield return $"world solver configuration '{configuration.Key}' (no [NumosSerialize] members)";
 
         foreach (var recorded in recording.Operations)
         {
             if (recorded.Operation is not SetAtmosWorldConfigOperation config)
                 continue;
 
-            foreach (var configuration in config.Config.SolverConfigurations)
-                yield return $"recorded solver configuration '{configuration.Key}'";
+            foreach (var configuration in config.Config.SolverConfigurations.Where(static value => value is not INumosState))
+                yield return $"recorded solver configuration '{configuration.Key}' (no [NumosSerialize] members)";
         }
     }
 }

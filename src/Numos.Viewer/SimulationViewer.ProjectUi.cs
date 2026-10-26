@@ -48,6 +48,7 @@ public partial class SimulationViewer
     private bool _newGasCondensationEnabled;
     private float _newGasDiffusionCoefficient = AtmosConfigDefaults.DefaultDiffusionCoefficient;
     private float _newGasEnthalpyOfVaporization;
+    private float _newGasMolarMass;
     private FeedbackMessage? _newGasFeedback;
     private int _newGasLiquidId = -1;
     private float _newGasMolarHeatCapacityAtConstantVolume =
@@ -64,6 +65,7 @@ public partial class SimulationViewer
 
     private bool _requestOpenCreateProject;
     private bool _requestRemoveChunk;
+    private AtmosTransportModel _projectTransportModelDraft;
     private bool _requestResetConfiguration;
     private bool _resetConfigurationModalOpen;
 
@@ -91,6 +93,11 @@ public partial class SimulationViewer
 
         _projectChunkDepthDraft = _session.ChunkDimensions.Z > 0 ? _session.ChunkDimensions.Z : 1;
         _includeDefaultGasesDraft = true;
+        var currentModel = _session.World == null
+            ? null
+            : AtmosWorldSolverPipeline.DetectTransportModel(_session.World.Solvers.Steps);
+
+        _projectTransportModelDraft = currentModel ?? AtmosTransportModel.Euler;
         _createProjectError = null;
         _requestOpenCreateProject = true;
         _createProjectModalOpen = true;
@@ -138,6 +145,9 @@ public partial class SimulationViewer
         ImGui.InputInt("Depth##project-chunk", ref _projectChunkDepthDraft);
 
         ImGui.Separator();
+        RenderTransportModelCombo();
+
+        ImGui.Separator();
         ImGui.Checkbox("Include Oxygen and Nitrogen", ref _includeDefaultGasesDraft);
         ImGuiExtensions.QuestionTooltip(
             _includeDefaultGasesDraft
@@ -170,7 +180,8 @@ public partial class SimulationViewer
                     _projectChunkWidthDraft,
                     _projectChunkHeightDraft,
                     _projectChunkDepthDraft,
-                    _includeDefaultGasesDraft);
+                    _includeDefaultGasesDraft,
+                    _projectTransportModelDraft);
 
                 _createProjectModalOpen = false;
                 ImGui.CloseCurrentPopup();
@@ -188,6 +199,27 @@ public partial class SimulationViewer
             _createProjectModalOpen = false;
             ImGui.CloseCurrentPopup();
         }
+    }
+
+    private static readonly AtmosTransportModel[] TransportModelValues =
+        [AtmosTransportModel.Legacy, AtmosTransportModel.Euler];
+
+    private static readonly string[] TransportModelLabels = ["Legacy (pressure relaxation)", "Euler (compressible flow)"];
+
+    /// <summary>
+    ///     Picks the preset that fills the stage list of a new project. The Solver Pipeline panel changes the stages
+    ///     afterwards.
+    /// </summary>
+    private void RenderTransportModelCombo()
+    {
+        int index = Array.IndexOf(TransportModelValues, _projectTransportModelDraft);
+        if (ImGui.Combo("Transport model", ref index, TransportModelLabels, TransportModelLabels.Length) && index >= 0)
+            _projectTransportModelDraft = TransportModelValues[index];
+
+        ImGuiExtensions.QuestionTooltip(
+            "Which built-in stages move gas between voxels. Euler solves momentum and energy with CFL substeps, " +
+            "carries per-voxel velocity, and reports the Flow readout in this panel. This sets the initial stages. " +
+            "You can change the stages later in Solver Pipeline.");
     }
 
     private void DrawCloseProjectModal()
@@ -418,6 +450,7 @@ public partial class SimulationViewer
             ImGui.TextDisabled($"Stepped to tick {steppedTick}.");
 
         RenderSolutionDetails();
+        RenderFlowDiagnostics();
 
         ImGui.Separator();
         if (ImGui.Button("Close Project", new Vector2(130, 0)))
@@ -714,6 +747,13 @@ public partial class SimulationViewer
             "Dimensionless fraction of this gas's mole imbalance mixed per tick, from 0 to 1. " +
             "The solver clamps values above 1.");
 
+        ImGui.BeginDisabled(inspecting);
+        ImGui.SetNextItemWidth(NumericInputWidth);
+        formChanged |= ImGui.InputFloat("Molar mass (kg/mol)##new-gas", ref _newGasMolarMass, 0f, 0f, "%.6f");
+        ImGui.EndDisabled();
+        ImGuiExtensions.QuestionTooltip(
+            "Mass of one mole of this gas. 0 means unknown, so the gas weighs the configured reference molar mass.");
+
         if (formChanged)
             _newGasFeedback = null;
 
@@ -729,7 +769,8 @@ public partial class SimulationViewer
                     CondensationEnabled = _newGasCondensationEnabled,
                     MolarEnthalpyOfVaporization = _newGasEnthalpyOfVaporization,
                     LiquidId = _newGasLiquidId,
-                    DiffusionCoefficient = _newGasDiffusionCoefficient
+                    DiffusionCoefficient = _newGasDiffusionCoefficient,
+                    MolarMass = _newGasMolarMass
                 });
         }
 
@@ -805,7 +846,8 @@ public partial class SimulationViewer
                $"Condensation: {(gas.CondensationEnabled ? "enabled" : "disabled")}\n" +
                $"Vaporization enthalpy: {QuantityFormat.Format(gas.MolarEnthalpyOfVaporization, "J/mol")}\n" +
                $"Liquid ID: {gas.LiquidId.ToString(CultureInfo.InvariantCulture)}\n" +
-               $"Diffusion coefficient: {QuantityFormat.Format(gas.DiffusionCoefficient, "m²/s", 3)}";
+               $"Diffusion coefficient: {QuantityFormat.Format(gas.DiffusionCoefficient, "m²/s", 3)}\n" +
+               $"Molar mass: {QuantityFormat.Format(gas.MolarMass, "kg/mol", 6)}";
     }
 
     private void RenderProjectInjectionControls(bool inspecting)

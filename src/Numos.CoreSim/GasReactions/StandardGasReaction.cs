@@ -1,5 +1,5 @@
 using System.Collections.Frozen;
-using Numos.CoreSim.Replay;
+using Numos.CoreSim.State;
 using Magnitudo;
 
 namespace Numos.CoreSim.GasReactions;
@@ -46,11 +46,13 @@ public readonly partial record struct StandardGasReaction
     /// <summary>
     ///     Moles of each reactant consumed per reaction.
     /// </summary>
+    [NumosSerialize]
     private FrozenDictionary<GasProperties, Mole> Input { get; }
 
     /// <summary>
     ///     Moles of each product produced per reaction.
     /// </summary>
+    [NumosSerialize]
     private FrozenDictionary<GasProperties, Mole> Output { get; }
 
     /// <summary>
@@ -60,11 +62,13 @@ public readonly partial record struct StandardGasReaction
     ///     Per mole of whichever reactant has a coefficient of one, so for 2H₂ + O₂ -> 2H₂O it is the energy released
     ///     per mole of oxygen consumed.
     /// </remarks>
+    [NumosSerialize]
     internal JoulePerMole EnergyBalance { get; }
 
     /// <summary>
     ///     Arrhenius pre-exponential factor. Its units depend on the rate law's overall order.
     /// </summary>
+    [NumosSerialize]
     private float ArrheniusFactor { get; }
 
     /// <summary>
@@ -73,68 +77,15 @@ public readonly partial record struct StandardGasReaction
     ///     Convert values authored in kJ/mol at the call site, for example with
     ///     <see cref="UnitConversions.FromKilojoulePerMole" />.
     /// </summary>
+    [NumosSerialize]
     private JoulePerMole ActivationEnergy { get; }
 
     /// <summary>
     ///     The exponents of the rate equation:
     ///     k * Gas_1^{a} * Gas_2 ^ {b}...
     /// </summary>
+    [NumosSerialize]
     private FrozenDictionary<GasProperties, float> SpeedFactors { get; }
-
-    internal void AppendHash(ref AtmosStateHasher hash)
-    {
-        hash.Add(EnergyBalance);
-        hash.Add(ArrheniusFactor);
-        hash.Add(ActivationEnergy);
-        hash.Add(Input.Count);
-        foreach (KeyValuePair<GasProperties, Mole> entry in Input.OrderBy(static entry => entry.Key.Name, StringComparer.Ordinal))
-        {
-            hash.Add(entry.Key);
-            hash.Add(entry.Value);
-        }
-
-        hash.Add(Output.Count);
-        foreach (KeyValuePair<GasProperties, Mole> entry in Output.OrderBy(static entry => entry.Key.Name, StringComparer.Ordinal))
-        {
-            hash.Add(entry.Key);
-            hash.Add(entry.Value);
-        }
-
-        hash.Add(SpeedFactors.Count);
-        foreach (KeyValuePair<GasProperties, float> entry in SpeedFactors.OrderBy(
-                     static entry => entry.Key.Name,
-                     StringComparer.Ordinal))
-        {
-            hash.Add(entry.Key);
-            hash.Add(entry.Value);
-        }
-    }
-
-    internal bool SemanticallyEquals(StandardGasReaction other)
-    {
-        return EnergyBalance.Equals(other.EnergyBalance) &&
-               ArrheniusFactor.Equals(other.ArrheniusFactor) &&
-               ActivationEnergy.Equals(other.ActivationEnergy) &&
-               DictionaryEquals(Input, other.Input) &&
-               DictionaryEquals(Output, other.Output) &&
-               DictionaryEquals(SpeedFactors, other.SpeedFactors);
-    }
-
-    private static bool DictionaryEquals(
-        IReadOnlyDictionary<GasProperties, float> first,
-        IReadOnlyDictionary<GasProperties, float> second)
-    {
-        if (first.Count != second.Count)
-            return false;
-
-        foreach ((var gas, float amount) in first)
-        {
-            if (!second.TryGetValue(gas, out float otherAmount) || !amount.Equals(otherAmount))
-                return false;
-        }
-
-        return true;
-    }
 
     /// <summary>
     ///     Calculates the rate constant at a temperature using the original Arrhenius equation.

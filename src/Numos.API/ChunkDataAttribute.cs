@@ -17,6 +17,19 @@ namespace Numos.API;
 ///         observe it.
 ///     </para>
 ///     <para>
+///         A field is state by default. Checkpoints and state hashes capture it, rollback restores it, and world
+///         archives save it. That is why it needs an explicit, namespaced key and an unmanaged element type. Set
+///         <see cref="Transient" /> for scratch data that is rebuilt every tick. Restore clears such a field instead,
+///         and it may leave the key out.
+///     </para>
+///     <para>
+///         A generated module initializer also registers every field in the assembly as soon as anything in it runs.
+///         A replay file holding a saved field therefore loads without the property being read first. If a field
+///         conflicts with one that another assembly already registered, that initializer throws. The runtime wraps
+///         the exception in a <see cref="TypeInitializationException" />. Its inner
+///         <see cref="InvalidOperationException" /> names the declaring type and the key.
+///     </para>
+///     <para>
 ///         The generator also emits a static class named after the declaring type (<c>FireChunkDataChunkAccessors</c>
 ///         for <c>FireChunkData</c>, <c>OuterInnerChunkAccessors</c> for a nested <c>Outer.Inner</c>) in the same
 ///         namespace. The class holds one extension property per field.
@@ -35,16 +48,16 @@ namespace Numos.API;
 ///     <code>
 ///     public static partial class FireChunkData
 ///     {
-///         // Survives checkpoints and rollback, so the key is a compatibility contract.
-///         [ChunkData("my-mod/fire/exposure", Rollback = true)]
+///         // Survives checkpoints and rollback and is saved with the world, so the key is a compatibility contract.
+///         [ChunkData("my-mod/fire/exposure")]
 ///         public static partial ChunkField&lt;float&gt; Exposure { get; }
 ///
 ///         // One counter per chunk rather than one per voxel.
-///         [ChunkData("my-mod/fire/burn-count", Rollback = true, Length = 1)]
+///         [ChunkData("my-mod/fire/burn-count", Length = 1)]
 ///         public static partial ChunkField&lt;int&gt; BurnCount { get; }
 ///
 ///         // Scratch space; keyed "MyMod.FireChunkData.Scratch" and cleared on restore.
-///         [ChunkData]
+///         [ChunkData(Transient = true)]
 ///         public static partial ChunkField&lt;float&gt; Scratch { get; }
 ///     }
 ///
@@ -69,11 +82,13 @@ namespace Numos.API;
 public sealed class ChunkDataAttribute : Attribute
 {
     /// <summary>
-    ///     Declares a transient field keyed by the property's full name, <c>{Namespace}.{Type}.{Property}</c>.
+    ///     Declares a field keyed by the property's full name, <c>{Namespace}.{Type}.{Property}</c>. Only allowed with
+    ///     <see cref="Transient" /> set.
     /// </summary>
     /// <remarks>
-    ///     The derived key changes whenever the property, its type, or its namespace is renamed. Fields with
-    ///     <see cref="Rollback" /> set must therefore use <see cref="ChunkDataAttribute(string)" />.
+    ///     The derived key changes whenever the property, its type, or its namespace is renamed. That is harmless for
+    ///     scratch data. A saved field's key is written into checkpoints and files, so it must come from
+    ///     <see cref="ChunkDataAttribute(string)" />.
     /// </remarks>
     public ChunkDataAttribute()
     {
@@ -98,13 +113,15 @@ public sealed class ChunkDataAttribute : Attribute
     public string? Key { get; }
 
     /// <summary>
-    ///     Gets or sets whether the field is captured in checkpoints and state hashes and restored on rollback.
+    ///     Gets or sets whether the field is scratch data, left out of checkpoints, state hashes, and saved files and
+    ///     cleared on restore.
     /// </summary>
     /// <remarks>
-    ///     Rollback fields need an explicit <see cref="Key" /> and an unmanaged element type, because the key and the
-    ///     element layout are stored in checkpoints.
+    ///     Off by default, so a field survives rollback and saving unless it opts out. Set it only for data a solver
+    ///     rebuilds from scratch every tick. Anything that carries over between ticks must stay saved, or replay will
+    ///     diverge.
     /// </remarks>
-    public bool Rollback { get; set; }
+    public bool Transient { get; set; }
 
     /// <summary>
     ///     Gets or sets a fixed array length for the field, in place of one element per voxel.
