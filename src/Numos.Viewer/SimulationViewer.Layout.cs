@@ -1,5 +1,4 @@
 using ImGuiNET;
-using Numos.Viewer.Ui;
 using Numos.Workbench;
 
 namespace Numos.Viewer;
@@ -46,23 +45,18 @@ public partial class SimulationViewer
     {
         if (_userLayoutPath == null)
         {
-            WriteMessage(
-                WorkbenchLogLevel.Error,
-                Locale.GetString("source-layout"), 
-                Locale.GetString("message-layout-not-initialized"));
+            WriteMessage(WorkbenchLogLevel.Error, "Layout", "The ImGui layout has not been initialized yet.");
             return;
         }
 
         try
         {
             ImGui.SaveIniSettingsToDisk(_userLayoutPath);
-            WriteMessage(WorkbenchLogLevel.Info,
-                Locale.GetString("source-layout"), 
-                Locale.GetString("message-layout-saved-success"));
+            WriteMessage(WorkbenchLogLevel.Info, "Layout", "Saved. This layout will be restored at the next launch.");
         }
         catch (Exception ex)
         {
-            WriteException(Locale.GetString("message-layout-exception"), ex);
+            WriteException("Could not save the layout", ex);
         }
     }
 
@@ -75,18 +69,18 @@ public partial class SimulationViewer
     {
         if (_packagedDefaultLayoutPath == null)
         {
-            WriteMessage(WorkbenchLogLevel.Error, Locale.GetString("source-layout"), Locale.GetString("message-layout-not-initialized-packaged"));
+            WriteMessage(WorkbenchLogLevel.Error, "Layout", "The packaged default layout has not been initialized yet.");
             return;
         }
 
         try
         {
             ImGui.SaveIniSettingsToDisk(_packagedDefaultLayoutPath);
-            WriteMessage(WorkbenchLogLevel.Info, Locale.GetString("source-layout"), Locale.GetString("message-layout-saved-success-packaged"));
+            WriteMessage(WorkbenchLogLevel.Info, "Layout", "Saved as the packaged default for first-time launches.");
         }
         catch (Exception ex)
         {
-            WriteException(Locale.GetString("message-layout-exception"), ex);
+            WriteException("Could not save the packaged default layout", ex);
         }
     }
 

@@ -86,10 +86,7 @@ public partial class SimulationViewer
 
     private void RequestCreateProject()
     {
-        _projectNameDraft = _session.World == null
-            ? Locale.GetString("simulation-name-default")
-            : Locale.GetString("simulation-name-copy", ("name", _session.ProjectName));
-
+        _projectNameDraft = _session.World == null ? "Untitled Simulation" : $"{_session.ProjectName} Copy";
         _projectChunkWidthDraft = _session.ChunkDimensions.X > 0
             ? _session.ChunkDimensions.X
             : AtmosChunkConstants.DefaultWidth;
@@ -121,8 +118,7 @@ public partial class SimulationViewer
 
     private void DrawCreateProjectModal()
     {
-        string popupId = Locale.GetString("popup-create-simulation");
-        ImGuiExtensions.OpenPopupWhenRequested(popupId, ref _requestOpenCreateProject);
+        ImGuiExtensions.OpenPopupWhenRequested("Create Simulation", ref _requestOpenCreateProject);
 
         var viewport = ImGui.GetMainViewport();
         ImGui.SetNextWindowPos(
@@ -131,7 +127,7 @@ public partial class SimulationViewer
             new Vector2(0.5f, 0.5f));
 
         ImGui.SetNextWindowSize(new Vector2(520, 0), ImGuiCond.Appearing);
-        using var modal = ImGuiExtensions.BeginPopupModal(popupId, ref _createProjectModalOpen);
+        using var modal = ImGuiExtensions.BeginPopupModal("Create Simulation", ref _createProjectModalOpen);
         if (!modal.IsVisible)
             return;
 
@@ -155,11 +151,11 @@ public partial class SimulationViewer
         RenderTransportModelCombo();
 
         ImGui.Separator();
-        ImGui.Checkbox(Locale.GetString("checkbox-default-gases"), ref _includeDefaultGasesDraft);
+        ImGui.Checkbox("Include Oxygen and Nitrogen", ref _includeDefaultGasesDraft);
         ImGuiExtensions.QuestionTooltip(
             _includeDefaultGasesDraft
-                ? Locale.GetString("tooltip-default-gases")
-                : Locale.GetString("tooltip-default-gases-disabled"));
+                ? "The default gas definitions will be appended to the new project."
+                : "The project will start with a blank gas registry.");
 
         if (_session.World != null)
         {
@@ -167,8 +163,8 @@ public partial class SimulationViewer
             ImGui.TextColored(
                 ViewerTheme.Caution,
                 _session.Branches?.BranchCount > 1
-                    ? Locale.GetString("warning-discard-branches", ("count", _session.Branches.BranchCount))
-                    : Locale.GetString("info-discard-branches"));
+                    ? $"Creating this project will discard all {_session.Branches.BranchCount} in-memory branches."
+                    : "Creating this project will close the current in-memory project.");
         }
 
         if (!string.IsNullOrWhiteSpace(_createProjectError))
@@ -178,7 +174,7 @@ public partial class SimulationViewer
         }
 
         ImGui.Spacing();
-        if (ImGui.Button(Locale.GetString("button-create"), new Vector2(120, 0)))
+        if (ImGui.Button("Create", new Vector2(120, 0)))
         {
             try
             {
@@ -201,7 +197,7 @@ public partial class SimulationViewer
         }
 
         ImGui.SameLine();
-        if (ImGui.Button(Locale.GetString("button-cancel"), new Vector2(120, 0)))
+        if (ImGui.Button("Cancel", new Vector2(120, 0)))
         {
             _createProjectModalOpen = false;
             ImGui.CloseCurrentPopup();
@@ -231,11 +227,10 @@ public partial class SimulationViewer
 
     private void DrawCloseProjectModal()
     {
-        string popupId = Locale.GetString("popup-close-simulation");
-        ImGuiExtensions.OpenPopupWhenRequested(popupId, ref _requestOpenCloseProject);
+        ImGuiExtensions.OpenPopupWhenRequested("Close Simulation Project?", ref _requestOpenCloseProject);
 
         ImGui.SetNextWindowSize(new Vector2(430, 0), ImGuiCond.Appearing);
-        using var modal = ImGuiExtensions.BeginPopupModal(popupId, ref _closeProjectModalOpen);
+        using var modal = ImGuiExtensions.BeginPopupModal("Close Simulation Project?", ref _closeProjectModalOpen);
         if (!modal.IsVisible)
             return;
 
@@ -247,7 +242,7 @@ public partial class SimulationViewer
             $"Close '{_session.ProjectName}' and dispose its world and simulations? This project only exists in memory.{branchWarning}");
 
         ImGui.Spacing();
-        if (ImGui.Button(Locale.GetString("button-close-project"), new Vector2(140, 0)))
+        if (ImGui.Button("Close Project", new Vector2(140, 0)))
         {
             _session.CloseProject();
             RequestNextFrame();
@@ -256,7 +251,7 @@ public partial class SimulationViewer
         }
 
         ImGui.SameLine();
-        if (ImGui.Button(Locale.GetString("button-cancel"), new Vector2(120, 0)))
+        if (ImGui.Button("Cancel", new Vector2(120, 0)))
         {
             _closeProjectModalOpen = false;
             ImGui.CloseCurrentPopup();
@@ -274,10 +269,9 @@ public partial class SimulationViewer
 
     private void DrawRemoveChunkModal()
     {
-        const string popupId = "Remove Chunk?##tools";
-        ImGuiExtensions.OpenPopupWhenRequested(popupId, ref _requestRemoveChunk);
+        ImGuiExtensions.OpenPopupWhenRequested("Remove Chunk?##tools", ref _requestRemoveChunk);
         ImGui.SetNextWindowSize(new Vector2(440, 0), ImGuiCond.Appearing);
-        using var modal = ImGuiExtensions.BeginPopupModal(popupId, ref _removeChunkModalOpen);
+        using var modal = ImGuiExtensions.BeginPopupModal("Remove Chunk?##tools", ref _removeChunkModalOpen);
         if (!modal.IsVisible)
             return;
 
@@ -331,10 +325,9 @@ public partial class SimulationViewer
 
     private void DrawResetConfigurationModal()
     {
-        const string popupId = "Reset Atmosphere Settings?##configuration";
-        ImGuiExtensions.OpenPopupWhenRequested(popupId, ref _requestResetConfiguration);
+        ImGuiExtensions.OpenPopupWhenRequested("Reset Atmosphere Settings?##configuration", ref _requestResetConfiguration);
         ImGui.SetNextWindowSize(new Vector2(440, 0), ImGuiCond.Appearing);
-        using var modal = ImGuiExtensions.BeginPopupModal(popupId, ref _resetConfigurationModalOpen);
+        using var modal = ImGuiExtensions.BeginPopupModal("Reset Atmosphere Settings?##configuration", ref _resetConfigurationModalOpen);
         if (!modal.IsVisible)
             return;
 
@@ -419,7 +412,7 @@ public partial class SimulationViewer
             ImGui.TableNextColumn();
             ImGuiExtensions.StatusField("CHUNKS", _simulation.ChunkCount.ToString());
             ImGui.TableNextColumn();
-            ImGuiExtensions.StatusField(Locale.GetString("table-gases"), _session.Config.GasRegistry.Count.ToString());
+            ImGuiExtensions.StatusField("GASES", _session.Config.GasRegistry.Count.ToString());
             ImGui.TableNextColumn();
             ImGuiExtensions.StatusField("CURRENT TICK", currentTick.ToString());
             ImGui.EndTable();
@@ -432,20 +425,20 @@ public partial class SimulationViewer
         ImGui.BeginDisabled(inspecting);
         if (_isPaused)
         {
-            if (ImGui.Button(Locale.GetString("button-run"), new Vector2(90, 0)))
+            if (ImGui.Button("Run", new Vector2(90, 0)))
             {
                 _isPaused = false;
                 _steppedToTick = null;
             }
         }
-        else if (ImGui.Button(Locale.GetString("button-pause"), new Vector2(90, 0)))
+        else if (ImGui.Button("Pause", new Vector2(90, 0)))
         {
             _isPaused = true;
         }
 
         ImGui.SameLine();
         ImGui.BeginDisabled(!_isPaused);
-        if (ImGui.Button(Locale.GetString("button-step"), new Vector2(90, 0)))
+        if (ImGui.Button("Step", new Vector2(90, 0)))
         {
             _steppedToTick = _session.Tick();
         }
@@ -460,7 +453,7 @@ public partial class SimulationViewer
         RenderFlowDiagnostics();
 
         ImGui.Separator();
-        if (ImGui.Button(Locale.GetString("button-close-project"), new Vector2(130, 0)))
+        if (ImGui.Button("Close Project", new Vector2(130, 0)))
             RequestCloseProject();
     }
 
@@ -821,7 +814,7 @@ public partial class SimulationViewer
                 ImGuiExtensions.ColorSwatch(GetGasColor(gasId), swatchSize);
 
                 ImGui.TableSetColumnIndex(2);
-                ImGui.TextUnformatted(gas.Name);
+                ImGui.TextUnformatted(gas.Name ?? string.Empty);
                 if (ImGui.IsItemHovered(ImGuiHoveredFlags.ForTooltip))
                     ImGui.SetTooltip(FormatGasDetails(gas));
 

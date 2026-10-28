@@ -211,7 +211,7 @@ public partial class SimulationViewer : IDisposable
             ConfigFlags.Msaa4xHint |
             ConfigFlags.VSyncHint);
 
-        Raylib.InitWindow(1400, 900, Locale.GetString("simulation-title"));
+        Raylib.InitWindow(1400, 900, "Numos.Viewer");
         _windowInitialized = true;
 
         string iconPath = Path.Combine(
