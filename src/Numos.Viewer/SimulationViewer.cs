@@ -242,6 +242,13 @@ public partial class SimulationViewer : IDisposable
             var io = ImGui.GetIO();
             io.ConfigFlags |= ImGuiConfigFlags.NavEnableKeyboard;
             io.ConfigWindowsMoveFromTitleBarOnly = true;
+            string fontPath = Path.Combine(
+                AppContext.BaseDirectory,
+                "assets",
+                "ProggyClean.ttf");
+            
+            io.Fonts.AddFontFromFileTTF(fontPath, 13f);
+            rlImGui.ReloadFonts();
             ConfigureLayoutPersistence();
 
             _sliceViewport = new SimulationViewport(

@@ -51,6 +51,13 @@
             <PackagePath>contentFiles/any/any/assets/imgui-default.ini</PackagePath>
             <PackageCopyToOutput>true</PackageCopyToOutput>
         </None>
+        <None Update="assets/ProggyClean.ttf">
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+            <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+            <Pack>true</Pack>
+            <PackagePath>contentFiles/any/any/assets/ProggyClean.ttf</PackagePath>
+            <PackageCopyToOutput>true</PackageCopyToOutput>
+        </None>
         <None Update="locale/**/*.ftl">
             <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
             <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
