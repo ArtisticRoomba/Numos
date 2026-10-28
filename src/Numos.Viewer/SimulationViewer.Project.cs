@@ -122,12 +122,14 @@ public partial class SimulationViewer
         {
             _session.AddChunk(position, roomId);
             _frameSceneOnNextPresentation = true;
-            _chunkFeedback = new FeedbackMessage($"Added chunk {FormatChunkPosition(position)}.", false);
+            _chunkFeedback = new FeedbackMessage(Locale.GetString("message-project-add-chunk",
+                ("position", FormatChunkPosition(position))), false);
         }
         catch (Exception exception) when (
             exception is ArgumentOutOfRangeException or InvalidOperationException)
         {
-            _chunkFeedback = new FeedbackMessage($"Could not add chunk {FormatChunkPosition(position)}: {exception.Message}", true);
+            _chunkFeedback = new FeedbackMessage(Locale.GetString("message-project-add-chunk-failed",
+                ("position", FormatChunkPosition(position)), ("message", exception.Message)), true);
         }
     }
 
@@ -137,8 +139,10 @@ public partial class SimulationViewer
             return;
 
         _chunkFeedback = _session.RemoveChunk(chunk.Position)
-            ? new FeedbackMessage($"Removed chunk {FormatChunkPosition(chunk.Position)}.", false)
-            : new FeedbackMessage($"Chunk {FormatChunkPosition(chunk.Position)} no longer exists.", true);
+            ? new FeedbackMessage(Locale.GetString("message-project-remove-chunk",
+                ("position", FormatChunkPosition(chunk.Position))), false)
+            : new FeedbackMessage(Locale.GetString("message-project-remove-chunk-not-found",
+                ("position", FormatChunkPosition(chunk.Position))), true);
     }
 
     private void SealProjectChunk(AtmosChunkHandle chunk)
@@ -150,12 +154,14 @@ public partial class SimulationViewer
         {
             _session.SealChunk(chunk.Position);
             _chunkFeedback = new FeedbackMessage(
-                $"Replaced the outer faces of chunk {FormatChunkPosition(chunk.Position)} with solid walls.",
+                Locale.GetString("message-project-seal-chunk",
+                    ("position", FormatChunkPosition(chunk.Position))),
                 false);
         }
         catch (KeyNotFoundException exception)
         {
-            _chunkFeedback = new FeedbackMessage($"Could not seal chunk {FormatChunkPosition(chunk.Position)}: {exception.Message}", true);
+            _chunkFeedback = new FeedbackMessage(Locale.GetString("message-project-seal-chunk-failed",
+                ("position", FormatChunkPosition(chunk.Position)), ("message", exception.Message)), true);
         }
     }
 
@@ -167,7 +173,8 @@ public partial class SimulationViewer
         try
         {
             _session.WakeChunk(chunk.Position);
-            _chunkFeedback = new FeedbackMessage($"Unslept chunk {FormatChunkPosition(chunk.Position)}.", false);
+            _chunkFeedback = new FeedbackMessage(Locale.GetString("message-project-unsleep-chunk",
+                ("position", FormatChunkPosition(chunk.Position))), false);
         }
         catch (KeyNotFoundException exception)
         {
@@ -184,12 +191,14 @@ public partial class SimulationViewer
         {
             _session.FillChunk(chunk.Position, classification);
             _chunkFeedback = new FeedbackMessage(
-                $"Filled chunk {FormatChunkPosition(chunk.Position)} with classification {classification}.",
+                Locale.GetString("message-project-fill-chunk",
+                    ("position", FormatChunkPosition(chunk.Position)), ("classification", classification)),
                 false);
         }
         catch (Exception exception) when (exception is ArgumentOutOfRangeException or KeyNotFoundException)
         {
-            _chunkFeedback = new FeedbackMessage($"Could not fill chunk {FormatChunkPosition(chunk.Position)}: {exception.Message}", true);
+            _chunkFeedback = new FeedbackMessage(Locale.GetString("message-project-fill-chunk-failed",
+                ("position", FormatChunkPosition(chunk.Position)), ("message", exception.Message)), true);
         }
     }
 
@@ -201,7 +210,8 @@ public partial class SimulationViewer
         try
         {
             int gasId = _session.AddGas(gas);
-            _newGasFeedback = new FeedbackMessage($"Added gas {gas.Name} with ID {gasId}.", false);
+            _newGasFeedback = new FeedbackMessage(Locale.GetString("message-project-add-gas",
+                ("name", gas.Name), ("id", gasId)), false);
         }
         catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
         {
@@ -221,7 +231,8 @@ public partial class SimulationViewer
         try
         {
             _session.RemoveGas(gasId);
-            _gasRegistryFeedback = new FeedbackMessage($"Removed gas {name}.", false);
+            _gasRegistryFeedback = new FeedbackMessage(Locale.GetString("message-project-remove-gas",
+                ("name", name)), false);
         }
         catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
         {
@@ -261,7 +272,8 @@ public partial class SimulationViewer
         catch (Exception exception) when (
             exception is ArgumentOutOfRangeException or KeyNotFoundException or InvalidOperationException)
         {
-            _injectionFeedback = new FeedbackMessage($"Could not inject gas: {exception.Message}", true);
+            _injectionFeedback = new FeedbackMessage(Locale.GetString("message-project-inject-gas-failed",
+                ("message", exception.Message)), true);
         }
     }
 
@@ -280,7 +292,7 @@ public partial class SimulationViewer
         {
             _simulation.IgniteVoxel(chunk, x, y, z, temperature, volume);
             _injectionFeedback = Report(
-                $"Did it",
+                Locale.GetString("message-project-ignite-source-success"),
                 false);
         }
         catch (Exception exception) when (

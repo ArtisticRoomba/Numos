@@ -1,0 +1,15 @@
+﻿message-project-add-chunk = Added chunk { $position }.
+message-project-add-chunk-failed = Could not add chunk { $position }: { $message }
+message-project-remove-chunk = Removed chunk { $position }.
+message-project-remove-chunk-not-found = Chunk { $position } no longer exists.
+message-project-seal-chunk = Replaced the outer faces of chunk { $position } with solid walls.
+message-project-seal-chunk-failed = Could not seal chunk { $position }: { $message }
+message-project-unsleep-chunk = Unslept chunk { $position }.
+message-project-fill-chunk = Filled chunk { $position } with classification { $classification }.
+message-project-fill-chunk-failed = Could not fill chunk { $position }: { $message }
+message-project-add-gas = Added gas { $name } with ID { $id }.
+message-project-remove-gas = Removed gas { $name }.
+message-project-inject-gas-not-selected = No gas selected for injection.
+message-project-inject-gas = Injected { $moles } moles of { $name } at ({ $x }, { $y }, { $z }).
+message-project-inject-gas-failed = Could not inject gas: { $message }
+message-project-ignite-source-success = Did it
