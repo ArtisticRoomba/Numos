@@ -2,6 +2,8 @@
 
 Numos is an engine-agnostic, pseudo-realistic, voxel-based atmospherics simulation library.
 
+![double-bend-schlieren-960hz.webp](docs/media/double-bend-schlieren-960hz.webp)
+
 > [!WARNING]
 > Numos is currently a prototype/personal project and is being actively developed. Public APIs, project structure, and
 features are all ephemeral and can change at any time. Published packages
