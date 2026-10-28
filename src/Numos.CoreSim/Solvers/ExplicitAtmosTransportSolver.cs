@@ -64,10 +64,12 @@ internal sealed class ExplicitAtmosTransportSolver
     /// </summary>
     /// <param name="edges">Canonical edges in deterministic topology order.</param>
     /// <param name="config">The normalized, shared configuration captured for this world tick.</param>
+    /// <param name="deltaTime">The gas time the transfer covers.</param>
     /// <param name="enabledCapabilities">The solver phase capabilities to process.</param>
     internal void Solve(
         ReadOnlySpan<ExplicitTransportEdge> edges,
         AtmosSolverConfigSnapshot config,
+        Second deltaTime,
         ExplicitTransportCapabilities enabledCapabilities)
     {
         if (edges.IsEmpty || config.GasPropertyCount == 0)
@@ -121,6 +123,7 @@ internal sealed class ExplicitAtmosTransportSolver
                 forwardRequests,
                 reverseRequests,
                 config,
+                deltaTime,
                 enabledCapabilities);
 
             CalculateThermalConductance(
@@ -213,6 +216,7 @@ internal sealed class ExplicitAtmosTransportSolver
         Mole[] forwardRequests,
         Mole[] reverseRequests,
         AtmosSolverConfigSnapshot config,
+        Second deltaTime,
         ExplicitTransportCapabilities enabledCapabilities)
     {
         Metre voxelEdge = SpeciesDiffusionKernel.GetVoxelEdge(config.VoxelVolume);
@@ -276,7 +280,8 @@ internal sealed class ExplicitAtmosTransportSolver
                     firstTemperature,
                     config.GetDiffusionCoefficient(gasId),
                     voxelEdge,
-                    config);
+                    config,
+                    deltaTime);
 
                 reverse += CalculateDiffusionRequest(
                     secondMoles,
@@ -284,7 +289,8 @@ internal sealed class ExplicitAtmosTransportSolver
                     secondTemperature,
                     config.GetDiffusionCoefficient(gasId),
                     voxelEdge,
-                    config);
+                    config,
+                    deltaTime);
 
                 // Scale after the per-edge diffusion cap so a narrow link never asks for more than a full face would.
                 forward = MathF.Max(0f, forward) * areaFraction;
@@ -303,7 +309,8 @@ internal sealed class ExplicitAtmosTransportSolver
         Kelvin sourceTemperature,
         SquareMetrePerSecond referenceDiffusivity,
         Metre voxelEdge,
-        AtmosSolverConfigSnapshot config)
+        AtmosSolverConfigSnapshot config,
+        Second deltaTime)
     {
         if (sourceMoles <= 0f || sourcePressure <= 0f || referenceDiffusivity <= 0f)
             return 0f;
@@ -314,7 +321,7 @@ internal sealed class ExplicitAtmosTransportSolver
         // TransferAmount applies the Cartesian solver's per-edge stability cap.
         // A cell may have any number of explicit neighbors.
         // The shared availability limiter below scales their combined requests again when they exceed the source.
-        return SpeciesDiffusionKernel.TransferAmount(referenceDiffusivity, environmentFactor, sourceMoles);
+        return SpeciesDiffusionKernel.TransferAmount(referenceDiffusivity, environmentFactor, sourceMoles, deltaTime);
     }
 
     private static void CalculateThermalConductance(

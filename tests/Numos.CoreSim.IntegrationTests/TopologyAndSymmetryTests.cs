@@ -241,7 +241,7 @@ public sealed class TopologyAndSymmetryTests
     private static float[] RunSingleTick(float[] initialMoles)
     {
         var config = SimTestHelpers.CreateDeterministicConfig();
-        using var simulation = new AtmosSimulation(config, initialMoles.Length, 1, 1);
+        using var simulation = new AtmosSimulation(config, initialMoles.Length, 1, 1, tickRate: SimTestHelpers.PinnedTickRate);
         var chunk = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
         SimTestHelpers.SetAllTemperatures(simulation, chunk, initialMoles.Length, 1, 1);
         for (int x = 0; x < initialMoles.Length; x++)

@@ -139,8 +139,12 @@ internal static partial class AtmosWorldReplayCodec
         writer.Write(operation.Stages.Count);
         foreach (var stage in operation.Stages)
         {
+            if (stage.Interval < 1)
+                throw new InvalidDataException($"The recorded layout entry '{stage.Name}' has no resolved interval.");
+
             AtmosReplayCodec.WriteString(writer, stage.Name);
             writer.Write(stage.Enabled);
+            writer.Write(stage.Interval);
         }
     }
 
@@ -156,7 +160,12 @@ internal static partial class AtmosWorldReplayCodec
             if (string.IsNullOrWhiteSpace(name))
                 throw new InvalidDataException("The world solver layout contains a blank stage name.");
 
-            stages[index] = new AtmosWorldSolverLayoutEntry(name, reader.ReadBoolean());
+            bool enabled = reader.ReadBoolean();
+            int interval = reader.ReadInt32();
+            if (interval < 1)
+                throw new InvalidDataException($"The world solver layout gives stage '{name}' an interval below one.");
+
+            stages[index] = new AtmosWorldSolverLayoutEntry(name, enabled, interval);
         }
 
         return new SetAtmosWorldSolverLayoutOperation(stages);

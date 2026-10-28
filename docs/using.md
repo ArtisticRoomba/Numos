@@ -199,7 +199,7 @@ its host delegate. Restore also rebuilds sparse indexes and resets the elapsed-t
 
 ## Driving ticks from the game loop
 
-Numos uses a fixed simulation rate. In a normal engine loop, pass the elapsed real time to the world. The world keeps partial steps and processes complete ticks.
+Numos uses a fixed tick rate, 960 Hz by default. In a normal engine loop, pass the elapsed real time to the world. The world keeps partial steps and processes complete ticks.
 
 ```csharp
 void UpdateAtmospherics(float deltaSeconds)
@@ -213,6 +213,44 @@ step-by-step control, such as a test or a lockstep simulation, call `Tick()` ins
 solver tick and does not use the elapsed-time accumulator. `AtmosSimulation.Update` and `AtmosSimulation.Tick` drive
 that simulation's owning world. Use the world directly when it contains multiple simulations.
 
+### Tick rate and stage intervals
+
+The built-in stages do not all run every tick. Each stage has an interval, the number of ticks between its runs. The
+defaults are set in runs per second. `euler-flow` runs 60 times a second (16 ticks at 960 Hz), the gas stages 20 times
+(48 ticks), and the thermal stages 10 times (96 ticks). A frame at 30 TPS covers 32 ticks.
+
+`euler-flow` does not run every tick by default, because each run pays a fixed cost to gather and write back its
+chunks. At 960 Hz a run on every tick costs up to twice as much for the same gas time. Its CFL substeps follow fast gas
+inside each run either way. A host that wants the shortest reaction time can call
+`world.Solvers.SetInterval(AtmosBuiltInSolvers.EulerFlow, 1)`.
+
+A stage reads `AtmosWorldSolverContext.DeltaTime` to learn how much atmospheric time its run covers. That is the time
+since the stage last ran, in seconds. `Interval` reports the tick count. `world.SimulatedTime` is the total simulated
+seconds, and `world.TickRate` is the rate.
+
+```csharp
+var world = new AtmosWorld(config, AtmosTransportModel.Euler, tickRate: 240); // multiple of 20, from 20 to 100000
+
+world.Solvers.SetInterval(AtmosBuiltInSolvers.Thermodynamics, 8);
+world.Solvers.SetInterval(AtmosBuiltInSolvers.ThermalBoundary, 8); // a producer and its consumer share an interval
+
+double seconds = world.SimulatedTime;
+```
+
+The tick rate is fixed when the world is created. A checkpoint restore adopts the checkpoint's rate.
+
+`SetInterval` works while recording. `Register` takes an `interval` argument but is rejected while recording, like any
+registration. Two rules apply to intervals:
+
+- A producer and its consumer must share an interval, because they pass data within one tick. The pairs are
+  `advection` with `boundary-flow`, and `thermodynamics` with `thermal-boundary`. Numos does not check this.
+- A custom stage defaults to interval 1. A stage written for the old 20 Hz tick therefore now runs 48 times as often
+  at 960 Hz. Scale its rates by `DeltaTime`, or register it with `interval: 48`.
+
+`AtmosWorld.Update` keeps at most a quarter second of elapsed time and discards the rest. When no stage is due on a
+tick, the world only advances time and skips the solver work. Tests that count ticks should pin the rate, as the
+Numos tests do with a rate of 20.
+
 Decide which system owns an `AtmosSimulation`'s lifecycle and update order before other systems call into it. Numos
 parallelizes work inside the simulation. The engine integration must still present one coherent sequence of topology
 changes, gas injections, and ticks.
@@ -220,25 +258,26 @@ changes, gas injections, and ticks.
 ### Choosing the transport model
 
 A new world runs the compressible Euler solver. One `euler-flow` stage moves gas within and between chunks, carries
-per-voxel momentum, and substeps inside the fixed 50 ms tick as often as the local sound speed demands. Its settings
+per-voxel momentum, and substeps inside each run as often as the local sound speed demands. Its settings
 live in an `EulerFlowConfig` entry of `AtmosConfig.SolverConfigurations` (see
 [Solver settings belong in the configuration](#solver-settings-belong-in-the-configuration)), and
-`simulation.LastFlowDiagnostics` reports what each tick cost:
+`simulation.LastFlowDiagnostics` reports what the latest run cost:
 
 ```csharp
 simulation.Tick();
 AtmosFlowDiagnostics flow = simulation.LastFlowDiagnostics;
 if (flow.SubstepCapEngaged)
-    Log($"flow fell behind: {flow.Substeps} substeps covered {flow.SimulatedSeconds:F4} s of the tick");
+    Log($"flow fell behind: {flow.Substeps} substeps covered {flow.SimulatedSeconds:F4} s of the run");
 if (flow.ClampedVelocityCount + flow.NegativeMolesCount + flow.NegativeInternalEnergyCount + flow.NonFiniteCellCount > 0)
-    Log("the Euler stage had to repair a cell this tick");
+    Log("the Euler stage had to repair a cell on its latest run");
 ```
 
-`Substeps` scales with the fastest signal in the simulation: about 35 per tick for room air, more for hot or light
-gas. When `MaxSubstepsPerTick` cuts a tick short, `SubstepCapEngaged` is set and `SimulatedSeconds` is less than the
-tick, so the gas fell behind the rest of the world. The four counters indicate bugs and are normally zero. The
-diagnostics are a measurement, not state: they read all zeros before the first tick, under the legacy model, and after
-a restore.
+`Substeps` scales with the fastest signal in the simulation: about 700 per simulated second for room air, more for hot
+or light gas. At 960 Hz the default 16-tick run holds about 12. When `MaxSubstepsPerSecond` cuts a run short,
+`SubstepCapEngaged` is set and `SimulatedSeconds` is less than the run's span, so the gas fell behind the rest of the
+world. The four counters indicate bugs and are normally zero. The diagnostics keep their values on the ticks between
+runs. They are a measurement, not state: they read all zeros before the first run, under the legacy model, and after a
+restore.
 
 The older pressure-relaxation stages (`advection` and `boundary-flow`) are `AtmosTransportModel.Legacy`. Pick the model
 when the world or simulation is constructed, or switch it later with `SetLayout`, which also works during recording.
@@ -392,8 +431,18 @@ Out-of-range values are normalized when the configuration is captured, so the sn
 usable. The settings most hosts touch:
 
 - `CourantNumber` (0.5): the positivity bound. 0.8 is faster but can go negative next to vacuum.
-- `MaxSubstepsPerTick` (64): caps a tick's cost, at the price of the gas falling behind.
+- `MaxSubstepsPerSecond` (1280): caps the cost per second of gas time, at the price of the gas falling behind. A 50 ms
+  call gets 64 substeps, the default 16-tick call at 960 Hz gets 22, and a 1 ms call gets 2.
+- `SettlePeriod` (0.05 s): how often the velocity floor, species diffusion, vacuum cleanup, and the sleep decision run.
+  Momentum settling and the sleep decision run on this period, not on every tick. The sweep axis order is checkpointed,
+  so a replay sweeps the same way.
 - `VelocityFloor` (0.005 m/s): lets a settled room sleep.
+- `SleepSpeed` (0.5 m/s): lets a chunk that still moves slower than this sleep. A large open room rings for a long
+  time after a disturbance, and with 0 that motion holds every chunk awake. A chunk that falls asleep has its motion
+  stopped and turned into heat. Motion below this speed also no longer wakes a sleeping neighbour.
+- `WakePressureDelta` (50 Pa): the pressure difference across a chunk face that wakes a sleeping neighbour. It sits
+  above the acoustic pressure of slow residual ringing, so that ringing does not keep waking chunks that just fell
+  asleep. The cost is that a sleeping chunk keeps smaller differences frozen in until something wakes it.
 - `MomentumDamping` (0): crude friction for hallways that ring.
 
 `EulerFlowConfig` marks its settings `[NumosSerialize]` like any other configuration (see below), so a `.numos`

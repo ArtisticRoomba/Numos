@@ -17,21 +17,21 @@ public sealed class AtmosWorldReplayTests
         config.SolverConfigurations = [new HandWrittenSettings(3)];
         using var source = new AtmosWorld(config);
         source.CreateSimulation(1, 1, 1);
-        var sourceTimeline = new AtmosWorldReplayTimeline(source, 1);
+        var sourceTimeline = new AtmosWorldReplayTimeline(source, 0.05);
         source.Tick();
         var archive = sourceTimeline.CaptureReplay();
 
         Assert.That(archive.EnsurePortable, Throws.TypeOf<NotSupportedException>());
 
         using var restoredWorld = new AtmosWorld(config);
-        var restored = AtmosWorldReplayTimeline.Restore(restoredWorld, archive, 1);
+        var restored = AtmosWorldReplayTimeline.Restore(restoredWorld, archive, 0.05);
         restored.ReturnToHead();
 
         Assert.That(restoredWorld.ComputeStateHash(), Is.EqualTo(archive.HeadStateHash));
 
         using var importedWorld = new AtmosWorld(config);
         Assert.That(
-            () => AtmosWorldReplayTimeline.Import(importedWorld, archive, 1),
+            () => AtmosWorldReplayTimeline.Import(importedWorld, archive, 0.05),
             Throws.TypeOf<NotSupportedException>());
     }
 
@@ -43,7 +43,7 @@ public sealed class AtmosWorldReplayTests
         config.SolverConfigurations = [euler];
         using var source = new AtmosWorld(config);
         source.CreateSimulation(1, 1, 1);
-        var sourceTimeline = new AtmosWorldReplayTimeline(source, 1);
+        var sourceTimeline = new AtmosWorldReplayTimeline(source, 0.05);
         source.Tick();
         config.SolverConfigurations = [new EulerFlowConfig(euler) { MaxVelocity = 250f }];
         source.SetAtmosConfig(config);
@@ -54,7 +54,7 @@ public sealed class AtmosWorldReplayTests
         Assert.That(archive.EnsurePortable, Throws.Nothing);
 
         using var importedWorld = new AtmosWorld(CreateConfig());
-        var imported = AtmosWorldReplayTimeline.Import(importedWorld, archive, 1);
+        var imported = AtmosWorldReplayTimeline.Import(importedWorld, archive, 0.05);
         imported.ReturnToHead();
 
         Assert.Multiple(() =>
@@ -72,7 +72,7 @@ public sealed class AtmosWorldReplayTests
     {
         using var source = new AtmosWorld(CreateConfig());
         var first = source.CreateSimulation(1, 1, 1);
-        var timeline = new AtmosWorldReplayTimeline(source, 1);
+        var timeline = new AtmosWorldReplayTimeline(source, 0.05);
         var firstChunk = CreateOpenChunk(first, default);
         var second = source.CreateSimulation(1, 1, 1);
         var secondChunk = CreateOpenChunk(second, default);
@@ -88,7 +88,7 @@ public sealed class AtmosWorldReplayTests
 
         var archive = timeline.CaptureReplay();
         using var replay = new AtmosWorld(CreateConfig());
-        var imported = AtmosWorldReplayTimeline.Import(replay, archive, 1);
+        var imported = AtmosWorldReplayTimeline.Import(replay, archive, 0.05);
         imported.ReturnToHead();
 
         Assert.Multiple(() =>
@@ -190,7 +190,7 @@ public sealed class AtmosWorldReplayTests
         using var world = new AtmosWorld(CreateConfig());
         var first = world.CreateSimulation(1, 1, 1);
         var second = world.CreateSimulation(1, 1, 1);
-        var timeline = new AtmosWorldReplayTimeline(world, 1);
+        var timeline = new AtmosWorldReplayTimeline(world, 0.05);
         var firstChunk = CreateOpenChunk(first, default);
         var secondChunk = CreateOpenChunk(second, default);
         world.CreatePortal(first.GetCellRef(firstChunk, 0), second.GetCellRef(secondChunk, 0));
@@ -227,7 +227,7 @@ public sealed class AtmosWorldReplayTests
         });
 
         using var replayWorld = new AtmosWorld(CreateConfig());
-        var imported = AtmosWorldReplayTimeline.Import(replayWorld, restored.Replay, 1);
+        var imported = AtmosWorldReplayTimeline.Import(replayWorld, restored.Replay, 0.05);
         imported.ReturnToHead();
         Assert.That(replayWorld.ComputeStateHash(), Is.EqualTo(archive.HeadStateHash));
     }

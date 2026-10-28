@@ -41,13 +41,14 @@ public class EulerSweepVectorTests
     }
 
     private static EulerChunkWorkspace CreateWorkspace(
-        AtmosSolverConfigSnapshot tickConfig, int seed, int dimension, int solidPercent, float speed)
+        AtmosSolverConfigSnapshot tickConfig, int seed, int dimension, int solidPercent, float speed,
+        Action<AtmosChunk>? layout = null)
     {
-        AtmosChunk chunk = CreateChunk(tickConfig, seed, dimension, solidPercent, speed);
+        AtmosChunk chunk = CreateChunk(tickConfig, seed, dimension, solidPercent, speed, layout: layout);
         var workspace = new EulerChunkWorkspace();
         workspace.Bind(chunk, tickConfig);
         EulerFaceTopology.Build(chunk, workspace.NeighborChunks, workspace.OpenMask, workspace.VoidMask);
-        EulerFaceTopology.BuildAirMap(chunk, workspace.AirMap, workspace.RowAllAir);
+        EulerFaceTopology.BuildAirMap(chunk, workspace.AirMap, workspace.AirRunLength);
         workspace.Gather(tickConfig);
         return workspace;
     }
@@ -63,7 +64,7 @@ public class EulerSweepVectorTests
 
     private static AtmosChunk CreateChunk(
         AtmosSolverConfigSnapshot tickConfig, int seed, int dimension, int solidPercent, float speed,
-        int gasCount = 2)
+        int gasCount = 2, Action<AtmosChunk>? layout = null)
     {
         var random = new Random(seed);
         var chunk = new AtmosChunk(dimension, dimension, dimension);
@@ -77,6 +78,7 @@ public class EulerSweepVectorTests
                 chunk.VoxelRoomMap[voxel] = VoxelClassification.RoomVoid;
         }
 
+        layout?.Invoke(chunk);
         chunk.RebuildActiveAirIndices();
         float standardMoles = AtmosPhysicalConstants.StandardAtmosphericPressure /
                               (AtmosPhysicalConstants.MolarGasConstant * 293f);
@@ -250,14 +252,69 @@ public class EulerSweepVectorTests
             AssertSweepsMatch(dimension, solidPercent, speed, seed, faces, cells, corrupt: true);
     }
 
+    /// <summary>
+    ///     Rows broken by a wall: a solid column through every row at <paramref name="wallX" /> and a few scattered
+    ///     solid and void voxels. The air spans on both sides of the wall are wider than one vector.
+    /// </summary>
+    [TestCase(20, 9, 200f, 41, false)]
+    [TestCase(20, 9, 600f, 42, true)]
+    [TestCase(36, 17, 400f, 43, false)]
+    [TestCase(36, 17, 3000f, 44, true)]
+    public void VectorSweep_GivesTheSameBitsOnRowsWithWalls(int dimension, int wallX, float speed, int seed, bool corrupt)
+    {
+        void Layout(AtmosChunk chunk)
+        {
+            var random = new Random(seed * 13);
+            for (int row = 0; row < chunk.Height * chunk.Depth; row++)
+            {
+                int first = row * chunk.Width;
+                chunk.VoxelRoomMap[first + wallX] = VoxelClassification.RoomSolid;
+                int scattered = first + random.Next(chunk.Width);
+                if (random.Next(4) == 0)
+                    chunk.VoxelRoomMap[scattered] = VoxelClassification.RoomSolid;
+                else if (random.Next(8) == 0)
+                    chunk.VoxelRoomMap[scattered] = VoxelClassification.RoomVoid;
+            }
+        }
+
+        foreach ((bool faces, bool cells) in new[] { (true, false), (false, true), (true, true) })
+            AssertSweepsMatch(dimension, 0, speed, seed, faces, cells, corrupt, Layout);
+    }
+
+    /// <summary>
+    ///     A wall column at x = <c>span</c> leaves an air span of <c>span</c> cells before it, for every span from one
+    ///     vector plus one cell to two vectors minus one. The cell kernel ends each of these spans with a vector
+    ///     that overlaps the one before it.
+    /// </summary>
+    [TestCase(300f, 71, false)]
+    [TestCase(3000f, 72, false)]
+    [TestCase(600f, 73, true)]
+    public void VectorSweep_GivesTheSameBitsOnSpansBetweenOneAndTwoVectors(float speed, int seed, bool corrupt)
+    {
+        int width = Vector<float>.Count;
+        int dimension = 2 * width + 1;
+        for (int span = width + 1; span < 2 * width; span++)
+        {
+            int wallX = span;
+            void Layout(AtmosChunk chunk)
+            {
+                for (int row = 0; row < chunk.Height * chunk.Depth; row++)
+                    chunk.VoxelRoomMap[row * chunk.Width + wallX] = VoxelClassification.RoomSolid;
+            }
+
+            foreach ((bool faces, bool cells) in new[] { (false, true), (true, true) })
+                AssertSweepsMatch(dimension, 0, speed, seed + span, faces, cells, corrupt, Layout);
+        }
+    }
+
     private static void AssertSweepsMatch(
         int dimension, int solidPercent, float speed, int seed, bool vectorFaces, bool vectorCells,
-        bool corrupt = false)
+        bool corrupt = false, Action<AtmosChunk>? layout = null)
     {
         Assume.That(Vector.IsHardwareAccelerated, "No vector hardware: the sweep keeps the scalar solver.");
         AtmosSolverConfigSnapshot tickConfig = CreateConfig();
-        EulerChunkWorkspace scalar = CreateWorkspace(tickConfig, seed, dimension, solidPercent, speed);
-        EulerChunkWorkspace vector = CreateWorkspace(tickConfig, seed, dimension, solidPercent, speed);
+        EulerChunkWorkspace scalar = CreateWorkspace(tickConfig, seed, dimension, solidPercent, speed, layout);
+        EulerChunkWorkspace vector = CreateWorkspace(tickConfig, seed, dimension, solidPercent, speed, layout);
 
         if (corrupt)
         {
@@ -358,7 +415,7 @@ public class EulerSweepVectorTests
                 continue;
 
             EulerFaceTopology.Build(workspace.Chunk, workspace.NeighborChunks, workspace.OpenMask, workspace.VoidMask);
-            EulerFaceTopology.BuildAirMap(workspace.Chunk, workspace.AirMap, workspace.RowAllAir);
+            EulerFaceTopology.BuildAirMap(workspace.Chunk, workspace.AirMap, workspace.AirRunLength);
             workspace.AddGas(0, tickConfig);
             workspace.AddGas(1, tickConfig);
             for (int gas = 2; gas < gasCount; gas++)
@@ -513,5 +570,230 @@ public class EulerSweepVectorTests
         }
 
         Assert.That(differences, Is.Zero, $"{differences} cells differ between the scalar and vector sweep");
+    }
+
+    /// <summary>
+    ///     A chunk for the gather and write-back tests: a solid column at <paramref name="wallX" /> in every row, a
+    ///     few scattered solid and void voxels, and odd voxels on top of the trace and overheated ones
+    ///     <see cref="CreateChunk" /> makes. Some voxels hold no gas, a negative amount, a NaN or negative
+    ///     temperature, or momentum of <c>-0</c>.
+    /// </summary>
+    private static AtmosChunk CreateOddChunk(AtmosSolverConfigSnapshot tickConfig, int seed, int dimension, int wallX)
+    {
+        void Layout(AtmosChunk chunk)
+        {
+            var random = new Random(seed * 13);
+            for (int row = 0; row < chunk.Height * chunk.Depth; row++)
+            {
+                int first = row * chunk.Width;
+                chunk.VoxelRoomMap[first + wallX] = VoxelClassification.RoomSolid;
+                if (random.Next(3) == 0)
+                    chunk.VoxelRoomMap[first + random.Next(chunk.Width)] = VoxelClassification.RoomVoid;
+            }
+        }
+
+        AtmosChunk chunk = CreateChunk(tickConfig, seed, dimension, 0, 300f, layout: Layout);
+        var random = new Random(seed * 17 + 3);
+        for (int active = 0; active < chunk.ActiveAirCount; active++)
+        {
+            ushort voxel = chunk.ActiveAirIndices[active];
+            switch (random.Next(40))
+            {
+                case 0:
+                    for (int channel = 0; channel < chunk.ActiveGasCount; channel++)
+                        chunk.ActiveGases[channel].Moles[voxel] = 0f;
+                    break;
+                case 1:
+                    chunk.ActiveGases[0].Moles[voxel] = -1f;
+                    break;
+                case 2:
+                    chunk.Temperature[voxel] = float.NaN;
+                    break;
+                case 3:
+                    chunk.Temperature[voxel] = -5f;
+                    break;
+                case 4:
+                    chunk.MomentumX[voxel] = -0f;
+                    chunk.MomentumY[voxel] = -0f;
+                    break;
+            }
+        }
+
+        return chunk;
+    }
+
+    private static EulerChunkWorkspace GatherOddChunk(
+        AtmosSolverConfigSnapshot tickConfig, int seed, int dimension, int wallX, bool vector)
+    {
+        AtmosChunk chunk = CreateOddChunk(tickConfig, seed, dimension, wallX);
+        var workspace = new EulerChunkWorkspace();
+        workspace.Bind(chunk, tickConfig);
+        EulerFaceTopology.Build(chunk, workspace.NeighborChunks, workspace.OpenMask, workspace.VoidMask);
+        EulerFaceTopology.BuildAirMap(chunk, workspace.AirMap, workspace.AirRunLength);
+        // A listed gas the chunk has no channel for, so the write-back creates a channel.
+        workspace.AddGas(2, tickConfig);
+        bool saved = EulerCellKernel.Enabled;
+        EulerCellKernel.Enabled = vector;
+        try
+        {
+            workspace.Gather(tickConfig);
+        }
+        finally
+        {
+            EulerCellKernel.Enabled = saved;
+        }
+
+        return workspace;
+    }
+
+    [TestCase(20, 9, 51)]
+    [TestCase(17, 4, 52)]
+    [TestCase(36, 17, 53)]
+    public void VectorGather_GivesTheSameBitsAsTheScalarGather(int dimension, int wallX, int seed)
+    {
+        Assume.That(EulerCellKernel.Enabled, "No vector hardware: the gather keeps the scalar loop.");
+        AtmosSolverConfigSnapshot tickConfig = CreateConfig(gasCount: 3);
+        EulerChunkWorkspace scalar = GatherOddChunk(tickConfig, seed, dimension, wallX, vector: false);
+        EulerChunkWorkspace vector = GatherOddChunk(tickConfig, seed, dimension, wallX, vector: true);
+
+        Assert.That(vector.NonFiniteCellsGathered, Is.EqualTo(scalar.NonFiniteCellsGathered));
+        Assert.That(Bits(vector.Read.MaxSignalSpeed), Is.EqualTo(Bits(scalar.Read.MaxSignalSpeed)));
+        EulerChunkState expected = scalar.Read;
+        EulerChunkState actual = vector.Read;
+        int differences = 0;
+        for (int voxel = 0; voxel < scalar.Chunk.VoxelCount; voxel++)
+        {
+            EulerCellState e = expected.GetCell(voxel);
+            EulerCellState a = actual.GetCell(voxel);
+            bool same = SameDouble(expected.Energy[voxel], actual.Energy[voxel]) &&
+                        SameDouble(expected.HeatCapacity[voxel], actual.HeatCapacity[voxel]) &&
+                        Same(expected.MomentumX[voxel], actual.MomentumX[voxel]) &&
+                        Same(expected.MomentumY[voxel], actual.MomentumY[voxel]) &&
+                        Same(expected.MomentumZ[voxel], actual.MomentumZ[voxel]) &&
+                        Same(expected.Mass[voxel], actual.Mass[voxel]) &&
+                        Same(expected.TotalMoles[voxel], actual.TotalMoles[voxel]) &&
+                        Same(e.Density, a.Density) && Same(e.VelocityX, a.VelocityX) &&
+                        Same(e.VelocityY, a.VelocityY) && Same(e.VelocityZ, a.VelocityZ) &&
+                        Same(e.Pressure, a.Pressure) && Same(e.EnergyDensity, a.EnergyDensity) &&
+                        Same(e.SoundSpeed, a.SoundSpeed) && Same(e.InverseMass, a.InverseMass);
+            for (int gas = 0; gas < 3 && same; gas++)
+                same = Same(expected.Species[gas]![voxel], actual.Species[gas]![voxel]);
+
+            if (!same)
+                differences++;
+        }
+
+        Assert.That(differences, Is.Zero, $"{differences} voxels differ between the scalar and vector gather");
+    }
+
+    /// <summary>
+    ///     Leaves the read buffer of a gathered workspace in states a sweep can produce: emptied voxels, negative
+    ///     amounts, kinetic energy above the total, energy that is not finite, massless voxels with momentum, and
+    ///     gas in the row the chunk has no channel for. Every value the write-back asserts on stays finite.
+    /// </summary>
+    private static void Disturb(EulerChunkWorkspace workspace, int seed)
+    {
+        var random = new Random(seed * 7907);
+        EulerChunkState read = workspace.Read;
+        AtmosChunk chunk = workspace.Chunk;
+        for (int active = 0; active < chunk.ActiveAirCount; active++)
+        {
+            ushort voxel = chunk.ActiveAirIndices[active];
+            if (random.Next(5) == 0)
+                read.Species[2]![voxel] = 0.01f;
+
+            switch (random.Next(30))
+            {
+                case 0:
+                    for (int gas = 0; gas < 3; gas++)
+                        read.Species[gas]![voxel] = 0f;
+                    break;
+                case 1:
+                    read.Species[1]![voxel] = -0.5f;
+                    break;
+                case 2:
+                    read.MomentumX[voxel] = 50f;
+                    read.Energy[voxel] = 0d;
+                    break;
+                case 3:
+                    read.Energy[voxel] = double.NaN;
+                    break;
+                case 4:
+                    read.Energy[voxel] = double.PositiveInfinity;
+                    break;
+                case 5:
+                    read.Mass[voxel] = 0f;
+                    read.MomentumY[voxel] = 3f;
+                    break;
+                case 6:
+                    read.MomentumZ[voxel] = -0f;
+                    break;
+            }
+        }
+    }
+
+    private static int WriteBack(EulerChunkWorkspace workspace, AtmosSolverConfigSnapshot tickConfig, bool vector)
+    {
+        int negative = 0;
+        bool saved = EulerCellKernel.Enabled;
+        EulerCellKernel.Enabled = vector;
+        try
+        {
+            workspace.WriteBack(tickConfig, ref negative);
+        }
+        finally
+        {
+            EulerCellKernel.Enabled = saved;
+        }
+
+        return negative;
+    }
+
+    [TestCase(20, 9, 61)]
+    [TestCase(17, 4, 62)]
+    [TestCase(36, 17, 63)]
+    public void VectorWriteBack_GivesTheSameBitsAsTheScalarWriteBack(int dimension, int wallX, int seed)
+    {
+        Assume.That(EulerCellKernel.Enabled, "No vector hardware: the write-back keeps the scalar loop.");
+        AtmosSolverConfigSnapshot tickConfig = CreateConfig(gasCount: 3);
+        EulerChunkWorkspace scalar = GatherOddChunk(tickConfig, seed, dimension, wallX, vector: false);
+        EulerChunkWorkspace vector = GatherOddChunk(tickConfig, seed, dimension, wallX, vector: false);
+        Disturb(scalar, seed);
+        Disturb(vector, seed);
+
+        int expectedNegative = WriteBack(scalar, tickConfig, vector: false);
+        int actualNegative = WriteBack(vector, tickConfig, vector: true);
+        Assert.That(expectedNegative, Is.Positive, "The disturbance must reach the negative-energy path.");
+        Assert.That(actualNegative, Is.EqualTo(expectedNegative));
+
+        AtmosChunk expected = scalar.Chunk;
+        AtmosChunk actual = vector.Chunk;
+        Assert.That(actual.ActiveGasCount, Is.EqualTo(expected.ActiveGasCount));
+        int vacuumVoxels = 0;
+        int differences = 0;
+        for (int voxel = 0; voxel < expected.VoxelCount; voxel++)
+        {
+            bool same = Same(expected.Temperature[voxel], actual.Temperature[voxel]) &&
+                        Same(expected.TotalHeatCapacity[voxel], actual.TotalHeatCapacity[voxel]) &&
+                        Same(expected.TotalPressure[voxel], actual.TotalPressure[voxel]) &&
+                        expected.IsVacuum[voxel] == actual.IsVacuum[voxel] &&
+                        Same(expected.MomentumX[voxel], actual.MomentumX[voxel]) &&
+                        Same(expected.MomentumY[voxel], actual.MomentumY[voxel]) &&
+                        Same(expected.MomentumZ[voxel], actual.MomentumZ[voxel]);
+            for (int channel = 0; channel < expected.ActiveGasCount && same; channel++)
+            {
+                same = expected.ActiveGases[channel].GasId == actual.ActiveGases[channel].GasId &&
+                       Same(expected.ActiveGases[channel].Moles[voxel], actual.ActiveGases[channel].Moles[voxel]);
+            }
+
+            if (expected.IsVacuum[voxel] && scalar.AirMap[voxel])
+                vacuumVoxels++;
+
+            if (!same)
+                differences++;
+        }
+
+        Assert.That(vacuumVoxels, Is.Positive, "The disturbance must reach the vacuum path.");
+        Assert.That(differences, Is.Zero, $"{differences} voxels differ between the scalar and vector write-back");
     }
 }

@@ -133,7 +133,25 @@ public static class SolverPipelineEditor
         if (boundary && !advection)
             warnings.Add("boundary-flow is enabled without advection. Euler-flow already crosses chunk faces.");
 
+        WarnOnMismatch(steps, AtmosBuiltInSolvers.Advection, AtmosBuiltInSolvers.BoundaryFlow, warnings);
+        WarnOnMismatch(steps, AtmosBuiltInSolvers.Thermodynamics, AtmosBuiltInSolvers.ThermalBoundary, warnings);
         return warnings;
+    }
+
+    private static void WarnOnMismatch(
+        IReadOnlyList<AtmosWorldSolverStep> steps,
+        string producer,
+        string consumer,
+        List<string> warnings)
+    {
+        var first = steps.FirstOrDefault(step => step.Name == producer && step.IsEnabled);
+        var second = steps.FirstOrDefault(step => step.Name == consumer && step.IsEnabled);
+        if (first.Name != null && second.Name != null && first.Interval != second.Interval)
+        {
+            warnings.Add(
+                $"{producer} runs every {first.Interval} ticks and {consumer} every {second.Interval}. " +
+                "The two stages hand data over within a tick, so give them one interval.");
+        }
     }
 
     /// <summary>
@@ -179,14 +197,14 @@ public static class SolverPipelineEditor
     }
 
     /// <summary>
-    ///     Copies the name and enabled flag of each stage into a new editable layout.
+    ///     Copies the name, enabled flag, and interval of each stage into a new editable layout.
     /// </summary>
     /// <param name="steps">The current stages in execution order.</param>
     internal static List<AtmosWorldSolverLayoutEntry> ToLayout(IReadOnlyList<AtmosWorldSolverStep> steps)
     {
         var result = new List<AtmosWorldSolverLayoutEntry>(steps.Count + 1);
         foreach (var step in steps)
-            result.Add(new AtmosWorldSolverLayoutEntry(step.Name, step.IsEnabled));
+            result.Add(new AtmosWorldSolverLayoutEntry(step.Name, step.IsEnabled, step.Interval));
 
         return result;
     }

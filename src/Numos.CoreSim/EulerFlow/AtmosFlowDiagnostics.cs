@@ -3,22 +3,22 @@ using Magnitudo;
 namespace Numos.CoreSim.EulerFlow;
 
 /// <summary>
-///     What the <c>euler-flow</c> stage did during one simulation's most recent tick.
+///     What the <c>euler-flow</c> stage did during its most recent run on one simulation.
 /// </summary>
-/// <param name="Substeps">Number of CFL substeps the tick ran.</param>
+/// <param name="Substeps">Number of CFL substeps the run took.</param>
 /// <param name="SimulatedSeconds">
-///     Gas time the tick advanced, in seconds. Equal to the fixed time step unless
-///     <see cref="EulerFlowConfig.MaxSubstepsPerTick" /> cut the tick short.
+///     Gas time the run advanced, in seconds. Equal to the stage's time step unless
+///     <see cref="EulerFlowConfig.MaxSubstepsPerSecond" /> cut the run short.
 /// </param>
 /// <param name="SubstepCapEngaged">
-///     Whether the substep cap stopped the tick before it had simulated the whole fixed time step.
+///     Whether the substep cap stopped the run before it had simulated the stage's whole time step.
 /// </param>
 /// <param name="MaxCourantNumber">
 ///     Largest <c>λ·Δt/Δx</c> any substep actually ran at, measured with the fastest signal speed <c>λ</c> found
 ///     after the substep's sweeps. A value above <see cref="EulerFlowConfig.CourantNumber" /> means a signal sped
 ///     up inside a substep faster than the speed it was sized for. Values below 1 are still linearly stable.
 /// </param>
-/// <param name="MaxSignalSpeed">Fastest <c>|u| + c</c> seen in any active voxel during the tick, in metres per second.</param>
+/// <param name="MaxSignalSpeed">Fastest <c>|u| + c</c> seen in any active voxel during the run, in metres per second.</param>
 /// <param name="ClampedVelocityCount">
 ///     Number of cell updates whose speed was clamped to <see cref="EulerFlowConfig.MaxVelocity" />. Nonzero
 ///     means a state went wrong somewhere. The clamp is a safety net, not physics.
@@ -40,7 +40,8 @@ namespace Numos.CoreSim.EulerFlow;
 /// </param>
 /// <remarks>
 ///     A plain measurement, not simulation state: it is neither checkpointed nor hashed, and it reads as all zeros
-///     under the legacy transport model, after a checkpoint restore, and before the first tick.
+///     under the legacy transport model, after a checkpoint restore, and before the first run. The values stay the
+///     same on the ticks between runs.
 /// </remarks>
 public readonly record struct AtmosFlowDiagnostics(
     int Substeps,

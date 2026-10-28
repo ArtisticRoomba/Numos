@@ -2,7 +2,7 @@
 timeline-branches = Ветки
 timeline-transport = Транспорт
 timeline-selected-tick = Выбранный тик
-timeline-visible-ticks = Видимые тики
+timeline-visible-window = Видимое окно
 timeline-keep-playhead-centered = Центрировать индикатор
 timeline-keep-playhead-centered-tooltip = Двигает промежуток видимых тиков пока изменяется позиция выбранного таймлайна.
 timeline-first-visible-tick = Первый видимый тик
@@ -29,6 +29,8 @@ timeline-tick = Тик { $tick }
 timeline-through-operation = Через операцию #{ $sequence }
 timeline-start-button = Начало
 timeline-back-button = Назад
+timeline-step-milliseconds = мс за шаг
+timeline-step-description = Назад и Вперёд сдвигают симулируемое время на эту величину, округлённую до целых тиков. Сейчас { $ticks }.
 timeline-play-button = Продолжить
 timeline-forward-button = Вперёд
 timeline-return-to-head-button = Вернуться к Основе
@@ -84,7 +86,7 @@ replay-gas-column-liquid-id = ID Жидкости
 replay-solver-configurations = Конфигурации Решателей
 replay-solver-configuration = Конфигурация Решателя
 
-replay-timeline-axis-title = ТИК / ВРЕМЯ СИМУЛЯЦИИ
+replay-timeline-axis-title = ВРЕМЯ СИМУЛЯЦИИ / ТИК
 replay-restorable-tick-range-tooltip = Тики от { $startTick } до { $endTick } имеют записанные состояния, которые могут быть восстановлены.
 replay-single-operation-tooltip = { $code }
     Сделано в тик { $tick }

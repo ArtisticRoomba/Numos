@@ -226,7 +226,8 @@ public sealed class EulerCrossChunkTests
     public void PrePass_WakesAnEqualPressureNeighbourOnlyForMotionAboveTheVelocityFloor(float speed, bool wakes)
     {
         const int width = 4;
-        var config = SimTestHelpers.CreateEulerConfig();
+        // With a SleepSpeed of 0 the wake speed is the velocity floor.
+        var config = SimTestHelpers.CreateEulerConfig(new EulerFlowConfig { SleepSpeed = 0f });
         using var simulation = SimTestHelpers.CreateEulerSimulation(config, width, width, width, out var active);
         var sleeping = SimTestHelpers.CreateOpenChunk(simulation, Int3.PosX);
         float moles = SimTestHelpers.MolesFor(config, Atmosphere, Temperature);
@@ -368,8 +369,8 @@ public sealed class EulerCrossChunkTests
     [Test]
     public void Sleep_WaitsForTheFaceToEqualizeThenHoldsBothChunksStill()
     {
-        var config = SimTestHelpers.CreateEulerConfig(new EulerFlowConfig { MaxSubstepsPerTick = 0, MomentumDamping = 4f });
-        config.SleepThreshold = 2;
+        var config = SimTestHelpers.CreateEulerConfig(new EulerFlowConfig { MaxSubstepsPerSecond = 0, MomentumDamping = 4f });
+        config.SleepDelay = 0.1f;
         config.SleepEpsilon = 3.5f;
         using var simulation = SimTestHelpers.CreateEulerSimulation(config, 4, 1, 1, out var left);
         var right = SimTestHelpers.CreateOpenChunk(simulation, Int3.PosX);

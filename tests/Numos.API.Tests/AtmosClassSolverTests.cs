@@ -177,7 +177,7 @@ public sealed class AtmosClassSolverTests
     {
         using var world = new AtmosWorld();
         world.CreateSimulation(1, 1, 1);
-        int observedTick = -1;
+        long observedTick = -1;
         world.Solvers.Register("observer", new RestoreObserver(() => observedTick = world.TickCount));
         var checkpoint = world.CaptureCheckpoint();
         world.Tick();

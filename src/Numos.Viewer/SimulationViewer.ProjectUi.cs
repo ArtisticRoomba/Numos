@@ -72,6 +72,7 @@ public partial class SimulationViewer
 
     private bool _requestOpenCreateProject;
     private bool _requestRemoveChunk;
+    private int _newProjectTickRateDraft = AtmosWorld.DefaultTickRate;
     private bool _requestResetConfiguration;
     private bool _resetConfigurationModalOpen;
 
@@ -79,7 +80,7 @@ public partial class SimulationViewer
     ///     Tick reached by the last Step press. Cleared by Run and by anything else that moves the world away from that
     ///     tick, so the "Stepped to" line never describes a state the user is no longer looking at.
     /// </summary>
-    private int? _steppedToTick;
+    private long? _steppedToTick;
 
     private Int3? _toolChunkPosition;
     private int _toolClassificationDraft;
@@ -107,6 +108,7 @@ public partial class SimulationViewer
             : AtmosWorldSolverPipeline.DetectTransportModel(_session.World.Solvers.Steps);
 
         _projectTransportModelDraft = currentModel ?? AtmosTransportModel.Euler;
+        _newProjectTickRateDraft = _session.World?.TickRate ?? AtmosWorld.DefaultTickRate;
         _createProjectError = null;
         _requestOpenCreateProject = true;
         _createProjectModalOpen = true;
@@ -153,6 +155,9 @@ public partial class SimulationViewer
 
         ImGui.Separator();
         RenderTransportModelCombo();
+        ImGui.SetNextItemWidth(NumericInputWidth);
+        ImGui.InputInt(Locale.GetString("new-project-tick-rate") + "##new-project", ref _newProjectTickRateDraft, 0, 0);
+        ImGuiExtensions.QuestionTooltip(Locale.GetString("new-project-tick-rate-description"));
 
         ImGui.Separator();
         ImGui.Checkbox(Locale.GetString("include-oxygen-and-nitrogen"), ref _includeDefaultGasesDraft);
@@ -182,13 +187,17 @@ public partial class SimulationViewer
         {
             try
             {
+                if (TimelineTiming.DescribeTickRateError(_newProjectTickRateDraft) is { } tickRateError)
+                    throw new ArgumentException(tickRateError);
+
                 CreateSimulationProject(
                     _projectNameDraft,
                     _projectChunkWidthDraft,
                     _projectChunkHeightDraft,
                     _projectChunkDepthDraft,
                     _includeDefaultGasesDraft,
-                    _projectTransportModelDraft);
+                    _projectTransportModelDraft,
+                    _newProjectTickRateDraft);
 
                 _createProjectModalOpen = false;
                 ImGui.CloseCurrentPopup();
@@ -385,7 +394,7 @@ public partial class SimulationViewer
             return;
 
         bool inspecting = DrawInspectionNotice();
-        int currentTick = _session.World?.TickCount ?? 0;
+        long currentTick = _session.World?.TickCount ?? 0;
         if (inspecting || !_isPaused || _steppedToTick != currentTick)
             _steppedToTick = null;
 

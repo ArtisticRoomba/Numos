@@ -257,7 +257,7 @@ public sealed class CrossChunkFlowTests
     public void BoundaryFlow_TransferKeepsSourceAwakeForSubsequentTicks()
     {
         var config = SimTestHelpers.CreateDeterministicConfig();
-        config.SleepThreshold = 0;
+        config.SleepDelay = 0f;
         config.SleepEpsilon = 1f;
         using var simulation = SimTestHelpers.CreateLegacySimulation(config, 1, 1, 1);
         var source = CreateIsolatedVoxel(simulation, default, 0, 0, 0, SimTestHelpers.RoomId);

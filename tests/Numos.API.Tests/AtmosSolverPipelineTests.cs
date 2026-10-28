@@ -10,12 +10,12 @@ public sealed class AtmosWorldPipelineTests
     [TestCase(AtmosTransportModel.Legacy)]
     public void Defaults_AreTheBuiltInStagesOfTheTransportModel(AtmosTransportModel model)
     {
-        using var world = new AtmosWorld(new AtmosConfig(), model);
+        using var world = new AtmosWorld(new AtmosConfig(), model, 20);
 
         Assert.That(
             world.Solvers.Steps,
             Is.EqualTo(ExpectedBuiltInSteps(model)
-                .Select(static step => new AtmosWorldSolverStep(step.Name, step.Kind, step.IsEnabled, null))));
+                .Select(static step => new AtmosWorldSolverStep(step.Name, step.Kind, step.IsEnabled, null, step.Name is AtmosBuiltInSolvers.Thermodynamics or AtmosBuiltInSolvers.ExplicitThermalTransport or AtmosBuiltInSolvers.ThermalBoundary ? 2 : 1))));
     }
 
     [Test]
@@ -210,7 +210,7 @@ public sealed class AtmosWorldPipelineTests
             GasRegistry = [new GasProperties { Name = "Air", MolarHeatCapacityAtConstantVolume = 20f }]
         };
 
-        var world = new AtmosWorld(config);
+        var world = new AtmosWorld(config, AtmosTransportModel.Euler, 20);
         var first = world.CreateSimulation(1, 1, 1);
         var second = world.CreateSimulation(1, 1, 1);
         var firstChunk = first.CreateAndRegisterChunk(default);

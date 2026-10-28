@@ -23,9 +23,6 @@ internal sealed class ThermodynamicsSolver : IAtmosSolverStage, IDisposable
 
     public void Solve(AtmosSolverExecutionContext context)
     {
-        if (context.TickCount % AtmosSolverConstants.ThermodynamicsTickInterval != 0)
-            return;
-
         BoundaryEventBatchStorage<ThermalBoundaryEvent> boundaryBatches =
             BoundaryEventBatches<ThermalBoundaryEvent>.Get(context);
 

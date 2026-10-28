@@ -19,7 +19,7 @@ public sealed class WorkbenchFlowFieldTests
     {
         var session = new WorkbenchSession();
         session.CreateProject(
-            new WorkbenchProjectOptions("Flow", 4, 1, 1, false),
+            new WorkbenchProjectOptions("Flow", 4, 1, 1, false, TickRate: 20),
             config =>
             {
                 config.VoxelVolume = voxelVolume;

@@ -8,9 +8,12 @@ namespace Numos.API.Tests;
 public sealed class AtmosSimulationContractTests
 {
     [Test]
-    public void SimulationRate_IsDocumentedTwentyHertz()
+    public void TickRate_Defaults960Hertz()
     {
-        Assert.That(AtmosSimulation.SimulationRate, Is.EqualTo(20f));
+        using var simulation = new AtmosSimulation(1, 1, 1);
+
+        Assert.That(simulation.World.TickRate, Is.EqualTo(960));
+        Assert.That(AtmosWorld.DefaultTickRate, Is.EqualTo(960));
     }
 
     [Test]
@@ -75,7 +78,7 @@ public sealed class AtmosSimulationContractTests
         var config = new AtmosConfig
         {
             BulkFlowCoefficient = 0.2f,
-            SleepThreshold = 12
+            SleepDelay = 0.6f
         };
 
         using var simulation = new AtmosSimulation(config, 2, 3, 4);
@@ -85,7 +88,7 @@ public sealed class AtmosSimulationContractTests
         {
             Assert.That(simulation.Config, Is.Not.SameAs(config));
             Assert.That(simulation.Config.BulkFlowCoefficient, Is.EqualTo(0.2f));
-            Assert.That(simulation.Config.SleepThreshold, Is.EqualTo(12));
+            Assert.That(simulation.Config.SleepDelay, Is.EqualTo(0.6f));
         });
     }
 
@@ -93,25 +96,25 @@ public sealed class AtmosSimulationContractTests
     public void Configuration_CanBeReplacedExplicitlyAndByUpdate()
     {
         var initial = new AtmosConfig();
-        var explicitReplacement = new AtmosConfig { SleepThreshold = 8 };
-        var updateReplacement = new AtmosConfig { SleepThreshold = 3 };
+        var explicitReplacement = new AtmosConfig { SleepDelay = 0.4f };
+        var updateReplacement = new AtmosConfig { SleepDelay = 0.15f };
         using var simulation = new AtmosSimulation(initial, 1, 1, 1);
 
         simulation.SetAtmosConfig(explicitReplacement);
-        Assert.That(simulation.Config.SleepThreshold, Is.EqualTo(8));
+        Assert.That(simulation.Config.SleepDelay, Is.EqualTo(0.4f));
 
         simulation.Update(0f, updateReplacement);
 
         Assert.Multiple(() =>
         {
-            Assert.That(simulation.Config.SleepThreshold, Is.EqualTo(3));
+            Assert.That(simulation.Config.SleepDelay, Is.EqualTo(0.15f));
             Assert.That(simulation.TickCount, Is.Zero);
             Assert.That(
                 () => simulation.SetAtmosConfig(null!),
                 Throws.TypeOf<ArgumentNullException>()
                     .With.Property(nameof(ArgumentNullException.ParamName)).EqualTo("config"));
 
-            Assert.That(simulation.Config.SleepThreshold, Is.EqualTo(3));
+            Assert.That(simulation.Config.SleepDelay, Is.EqualTo(0.15f));
         });
     }
 
@@ -138,7 +141,7 @@ public sealed class AtmosSimulationContractTests
     public void Update_AccumulatesFractionalFixedSteps()
     {
         using var simulation = new AtmosSimulation(1, 1, 1);
-        float fixedStep = 1f / AtmosSimulation.SimulationRate;
+        float fixedStep = 1f / simulation.World.TickRate;
 
         simulation.Update(fixedStep / 2f);
         Assert.That(simulation.TickCount, Is.Zero);
@@ -151,7 +154,7 @@ public sealed class AtmosSimulationContractTests
     public void Tick_DoesNotConsumeElapsedTimeAccumulator()
     {
         using var simulation = new AtmosSimulation(1, 1, 1);
-        float halfStep = 0.5f / AtmosSimulation.SimulationRate;
+        float halfStep = 0.5f / simulation.World.TickRate;
 
         simulation.Update(halfStep);
         simulation.Tick();
@@ -160,20 +163,21 @@ public sealed class AtmosSimulationContractTests
         Assert.That(simulation.TickCount, Is.EqualTo(2));
     }
 
-    [Test]
-    public void Update_ClampsCatchUpToFiveStepsAndDiscardsExcessBacklog()
+    [TestCase(20, 5)]
+    [TestCase(960, 240)]
+    public void Update_ClampsCatchUpToAQuarterSecondAndDiscardsExcessBacklog(int tickRate, int clamped)
     {
-        using var simulation = new AtmosSimulation(1, 1, 1);
-        float fixedStep = 1f / AtmosSimulation.SimulationRate;
+        using var simulation = new AtmosSimulation(1, 1, 1, tickRate: tickRate);
+        float fixedStep = 1f / simulation.World.TickRate;
 
         simulation.Update(10f);
-        Assert.That(simulation.TickCount, Is.EqualTo(5));
+        Assert.That(simulation.TickCount, Is.EqualTo(clamped));
 
         simulation.Update(0f);
-        Assert.That(simulation.TickCount, Is.EqualTo(5));
+        Assert.That(simulation.TickCount, Is.EqualTo(clamped));
 
         simulation.Update(fixedStep);
-        Assert.That(simulation.TickCount, Is.EqualTo(6));
+        Assert.That(simulation.TickCount, Is.EqualTo(clamped + 1));
     }
 
     [Test]

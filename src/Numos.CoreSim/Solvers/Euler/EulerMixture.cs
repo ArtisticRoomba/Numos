@@ -253,6 +253,20 @@ internal static class EulerMixture
     }
 
     /// <summary>
+    ///     The speed <c>|P|/m</c> of a voxel, formed from the same <c>1/m</c> as <see cref="ShouldStop" />.
+    /// </summary>
+    internal static MetrePerSecond Speed(
+        Kilogram mass,
+        KilogramMetrePerSecond momentumX, KilogramMetrePerSecond momentumY, KilogramMetrePerSecond momentumZ)
+    {
+        PerKilogram inverseMass = 1f / mass;
+        MetrePerSecond velocityX = momentumX * inverseMass;
+        MetrePerSecond velocityY = momentumY * inverseMass;
+        MetrePerSecond velocityZ = momentumZ * inverseMass;
+        return MathF.Sqrt(velocityX * velocityX + velocityY * velocityY + velocityZ * velocityZ);
+    }
+
+    /// <summary>
     ///     Kinetic energy <c>½·(Px·u + Py·v + Pz·w)</c>, with the velocities already divided out of the momentum.
     ///     Written as momentum times velocity rather than <c>|P|²/(2m)</c> so it costs no second divide, and summed
     ///     in double so the subtraction from the total energy does not lose the thermal part.

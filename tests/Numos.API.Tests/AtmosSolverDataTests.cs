@@ -25,7 +25,7 @@ public sealed class AtmosSolverDataTests
 
         simulation.World.Solvers.Register(
             "produce",
-            _ => simulation.GetSolverData(pendingKey).Enqueue(simulation.TickCount));
+            _ => simulation.GetSolverData(pendingKey).Enqueue(checked((int)simulation.TickCount)));
 
         simulation.World.Solvers.Register(
             "consume",
@@ -123,7 +123,7 @@ public sealed class AtmosSolverDataTests
 
         simulation.World.Solvers.Register(
             "produce",
-            _ => simulation.GetSolverData(pendingKey).Enqueue(simulation.TickCount));
+            _ => simulation.GetSolverData(pendingKey).Enqueue(checked((int)simulation.TickCount)));
 
         simulation.World.Solvers.Register(
             "consume",

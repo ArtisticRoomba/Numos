@@ -22,7 +22,7 @@ public sealed class AtmosVoxelBoxEditTests
                     new GasProperties { Name = "A", DiffusionCoefficient = 0.02f, MolarMass = 0.029f },
                     new GasProperties { Name = "B", MolarHeatCapacityAtConstantVolume = 32f, MolarMass = 0.044f }
                 ],
-                SleepThreshold = 10
+                SleepDelay = 0.5f
             },
             Dimensions.X,
             Dimensions.Y,

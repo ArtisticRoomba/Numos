@@ -57,7 +57,7 @@ public sealed class ThermodynamicsIntegrationTests
     {
         var config = SimTestHelpers.CreateDeterministicConfig();
         config.VacuumThreshold = 1f;
-        using var simulation = new AtmosSimulation(config, 2, 1, 1);
+        using var simulation = new AtmosSimulation(config, 2, 1, 1, tickRate: SimTestHelpers.PinnedTickRate);
         var chunk = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
         simulation.SetVoxelClassification(chunk, 1, 0, 0, VoxelClassification.RoomSolid);
         simulation.SetVoxelTemperature(chunk, 0, 0, 0, 400f);
@@ -460,7 +460,7 @@ public sealed class ThermodynamicsIntegrationTests
         gas.MolarHeatCapacityAtConstantVolume = float.MaxValue;
         config.GasRegistry.Replace(SimTestHelpers.FirstGasId, gas);
 
-        using var simulation = new AtmosSimulation(config, 2, 1, 1);
+        using var simulation = new AtmosSimulation(config, 2, 1, 1, tickRate: SimTestHelpers.PinnedTickRate);
         var chunk = SimTestHelpers.CreateOpenChunk(simulation, default);
         simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasName, 1f, 400f);
         simulation.AddGasToVoxel(chunk, 1, 0, 0, SimTestHelpers.FirstGasName, 1f, 200f);
@@ -482,7 +482,7 @@ public sealed class ThermodynamicsIntegrationTests
         gas.MolarHeatCapacityAtConstantVolume = float.MaxValue;
         config.GasRegistry.Replace(SimTestHelpers.FirstGasId, gas);
 
-        using var simulation = new AtmosSimulation(config, 2, 1, 1);
+        using var simulation = new AtmosSimulation(config, 2, 1, 1, tickRate: SimTestHelpers.PinnedTickRate);
         var chunk = SimTestHelpers.CreateOpenChunk(simulation, default);
         simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasName, 1f, 400f);
         simulation.AddGasToVoxel(chunk, 1, 0, 0, SimTestHelpers.FirstGasName, 1f, 200f);
@@ -513,7 +513,7 @@ public sealed class ThermodynamicsIntegrationTests
         gas.MolarHeatCapacityAtConstantVolume = 1e30f;
         config.GasRegistry.Replace(SimTestHelpers.FirstGasId, gas);
 
-        using var simulation = new AtmosSimulation(config, 2, 1, 1);
+        using var simulation = new AtmosSimulation(config, 2, 1, 1, tickRate: SimTestHelpers.PinnedTickRate);
         var chunk = SimTestHelpers.CreateOpenChunk(simulation, default);
         simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasName, 1f, 400f);
         simulation.AddGasToVoxel(chunk, 1, 0, 0, SimTestHelpers.FirstGasName, 1f, 200f);
@@ -632,7 +632,7 @@ public sealed class ThermodynamicsIntegrationTests
     {
         var config = SimTestHelpers.CreateDeterministicConfig();
         config.VacuumThreshold = 1f;
-        using var simulation = new AtmosSimulation(config, 1, 1, 1);
+        using var simulation = new AtmosSimulation(config, 1, 1, 1, tickRate: SimTestHelpers.PinnedTickRate);
         var hot = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
         var solid = simulation.CreateAndRegisterChunk(new Int3(1, 0, 0));
         simulation.SetChunkClassification(solid, VoxelClassification.RoomSolid);
@@ -705,7 +705,7 @@ public sealed class ThermodynamicsIntegrationTests
     public void Condensation_RunsOnEvenTickAndReleasesInternalPhaseChangeEnergy()
     {
         var config = CreateCondensationConfig();
-        using var simulation = new AtmosSimulation(config, 1, 1, 1);
+        using var simulation = new AtmosSimulation(config, 1, 1, 1, tickRate: SimTestHelpers.PinnedTickRate);
         var chunk = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
         simulation.SetVoxelTemperature(chunk, 0, 0, 0, 200f);
         simulation.AddGasToVoxel(chunk, 0, 0, 0, "Condensable", 10f, 200f);
@@ -742,7 +742,7 @@ public sealed class ThermodynamicsIntegrationTests
         var gas = config.GasRegistry[SimTestHelpers.FirstGasId];
         gas.MolarHeatCapacityAtConstantVolume = configuredMolarHeatCapacityAtConstantVolume;
         config.GasRegistry.Replace(SimTestHelpers.FirstGasId, gas);
-        using var simulation = new AtmosSimulation(config, 1, 1, 1);
+        using var simulation = new AtmosSimulation(config, 1, 1, 1, tickRate: SimTestHelpers.PinnedTickRate);
         var chunk = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
         simulation.AddGasToVoxel(chunk, 0, 0, 0, "Condensable", 10f, 200f);
 
@@ -769,7 +769,7 @@ public sealed class ThermodynamicsIntegrationTests
         var gas = config.GasRegistry[SimTestHelpers.FirstGasId];
         gas.CondensationEnabled = false;
         config.GasRegistry.Replace(SimTestHelpers.FirstGasId, gas);
-        using var simulation = new AtmosSimulation(config, 1, 1, 1);
+        using var simulation = new AtmosSimulation(config, 1, 1, 1, tickRate: SimTestHelpers.PinnedTickRate);
         var chunk = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
         simulation.AddGasToVoxel(chunk, 0, 0, 0, "Condensable", 10f, 200f);
 
@@ -788,7 +788,7 @@ public sealed class ThermodynamicsIntegrationTests
     public void Condensation_DoesNotOccurAtSaturationPressure()
     {
         var config = CreateCondensationConfig();
-        using var simulation = new AtmosSimulation(config, 1, 1, 1);
+        using var simulation = new AtmosSimulation(config, 1, 1, 1, tickRate: SimTestHelpers.PinnedTickRate);
         var chunk = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
         simulation.AddGasToVoxel(chunk, 0, 0, 0, "Condensable", 5f, 200f);
 
@@ -808,7 +808,7 @@ public sealed class ThermodynamicsIntegrationTests
     {
         var config = CreateCondensationConfig();
         config.CondensationRateFactor = 2f;
-        using var simulation = new AtmosSimulation(config, 1, 1, 1);
+        using var simulation = new AtmosSimulation(config, 1, 1, 1, tickRate: SimTestHelpers.PinnedTickRate);
         var chunk = SimTestHelpers.CreateOpenChunk(simulation, default);
         simulation.AddGasToVoxel(chunk, 0, 0, 0, "Condensable", 10f, 200f);
 
@@ -850,7 +850,7 @@ public sealed class ThermodynamicsIntegrationTests
             }
         ];
 
-        using var simulation = new AtmosSimulation(config, 1, 1, 1);
+        using var simulation = new AtmosSimulation(config, 1, 1, 1, tickRate: SimTestHelpers.PinnedTickRate);
         var chunk = SimTestHelpers.CreateOpenChunk(simulation, default);
         simulation.AddGasToVoxel(
             chunk,
@@ -939,7 +939,7 @@ public sealed class ThermodynamicsIntegrationTests
             }
         ];
 
-        using var simulation = new AtmosSimulation(config, 1, 1, 1);
+        using var simulation = new AtmosSimulation(config, 1, 1, 1, tickRate: SimTestHelpers.PinnedTickRate);
         var chunk = SimTestHelpers.CreateOpenChunk(simulation, default);
         simulation.AddGasToVoxel(
             chunk,
@@ -1001,7 +1001,7 @@ public sealed class ThermodynamicsIntegrationTests
             AtmosPhysicalConstants.MolarGasConstant * initialTemperature;
 
         config.GasRegistry.Replace(SimTestHelpers.FirstGasId, gas);
-        using var simulation = new AtmosSimulation(config, 1, 1, 1);
+        using var simulation = new AtmosSimulation(config, 1, 1, 1, tickRate: SimTestHelpers.PinnedTickRate);
         var chunk = SimTestHelpers.CreateOpenChunk(simulation, default);
         simulation.AddGasToVoxel(
             chunk,
@@ -1040,7 +1040,7 @@ public sealed class ThermodynamicsIntegrationTests
         var gas = config.GasRegistry[SimTestHelpers.FirstGasId];
         gas.MolarEnthalpyOfVaporization = 1000f;
         config.GasRegistry.Replace(SimTestHelpers.FirstGasId, gas);
-        using var simulation = new AtmosSimulation(config, 1, 1, 1);
+        using var simulation = new AtmosSimulation(config, 1, 1, 1, tickRate: SimTestHelpers.PinnedTickRate);
         var chunk = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
         simulation.AddGasToVoxel(chunk, 0, 0, 0, "Condensable", initialMoles, temperature);
 
@@ -1070,7 +1070,7 @@ public sealed class ThermodynamicsIntegrationTests
         gas.MolarHeatCapacityAtConstantVolume = 1e37f;
         gas.MolarEnthalpyOfVaporization = AtmosPhysicalConstants.MolarGasConstant * 200f;
         config.GasRegistry.Replace(SimTestHelpers.FirstGasId, gas);
-        using var simulation = new AtmosSimulation(config, 1, 1, 1);
+        using var simulation = new AtmosSimulation(config, 1, 1, 1, tickRate: SimTestHelpers.PinnedTickRate);
         var chunk = SimTestHelpers.CreateOpenChunk(simulation, default);
         simulation.AddGasToVoxel(chunk, 0, 0, 0, "Condensable", 2f, 200f);
 
@@ -1097,7 +1097,7 @@ public sealed class ThermodynamicsIntegrationTests
         gas.BoilingPoint = 1f;
         gas.MolarEnthalpyOfVaporization = float.MaxValue;
         config.GasRegistry.Replace(SimTestHelpers.FirstGasId, gas);
-        using var simulation = new AtmosSimulation(config, 1, 1, 1);
+        using var simulation = new AtmosSimulation(config, 1, 1, 1, tickRate: SimTestHelpers.PinnedTickRate);
         var chunk = SimTestHelpers.CreateOpenChunk(simulation, default);
         simulation.AddGasToVoxel(chunk, 0, 0, 0, "Condensable", 10f, 200f);
 
@@ -1117,7 +1117,7 @@ public sealed class ThermodynamicsIntegrationTests
     {
         var config = CreateCondensationConfig();
         config.GasRegistry.Add(TestGases.Create(SimTestHelpers.SecondGasName, 0f));
-        using var simulation = new AtmosSimulation(config, 1, 1, 1);
+        using var simulation = new AtmosSimulation(config, 1, 1, 1, tickRate: SimTestHelpers.PinnedTickRate);
         var chunk = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
         simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.SecondGasName, 10f, 200f);
         // Existing gas can outlive its registration after a configuration replacement.

@@ -23,13 +23,6 @@ namespace Numos.API;
 /// </remarks>
 public sealed partial class AtmosSimulation : IDisposable
 {
-    /// <summary>
-    ///     The fixed simulation rate, in ticks per second.
-    /// </summary>
-    /// <remarks>Elapsed-time updates therefore use a fixed step of <c>1 / SimulationRate</c> seconds.</remarks>
-    [PublicAPI]
-    public const float SimulationRate = AtmosSolverConstants.SimulationRate;
-
     private readonly int _chunkDepth;
     private readonly int _chunkHeight;
     private readonly int _chunkWidth;
@@ -47,16 +40,21 @@ public sealed partial class AtmosSimulation : IDisposable
     ///     Which built-in stages the private world runs to move gas between voxels. See
     ///     <see cref="AtmosWorld(AtmosConfig, AtmosTransportModel)" />.
     /// </param>
+    /// <param name="tickRate">
+    ///     Ticks per second of the private world. See <see cref="AtmosWorld.TickRate" />.
+    /// </param>
     /// <exception cref="ArgumentOutOfRangeException">
     ///     A chunk dimension is zero or negative, the combined voxel count exceeds
-    ///     <see cref="ushort.MaxValue" />, or <paramref name="transportModel" /> is not a defined model.
+    ///     <see cref="ushort.MaxValue" />, <paramref name="transportModel" /> is not a defined model, or
+    ///     <paramref name="tickRate" /> is not a multiple of 20 from 20 to 100000.
     /// </exception>
     public AtmosSimulation(
         int chunkWidth = AtmosChunkConstants.DefaultWidth,
         int chunkHeight = AtmosChunkConstants.DefaultHeight,
         int chunkDepth = AtmosChunkConstants.DefaultDepth,
-        AtmosTransportModel transportModel = AtmosTransportModel.Euler)
-        : this(new AtmosConfig(), chunkWidth, chunkHeight, chunkDepth, transportModel)
+        AtmosTransportModel transportModel = AtmosTransportModel.Euler,
+        int tickRate = AtmosWorld.DefaultTickRate)
+        : this(new AtmosConfig(), chunkWidth, chunkHeight, chunkDepth, transportModel, tickRate)
     {
     }
 
@@ -74,18 +72,23 @@ public sealed partial class AtmosSimulation : IDisposable
     ///     Which built-in stages the private world runs to move gas between voxels. See
     ///     <see cref="AtmosWorld(AtmosConfig, AtmosTransportModel)" />.
     /// </param>
+    /// <param name="tickRate">
+    ///     Ticks per second of the private world. See <see cref="AtmosWorld.TickRate" />.
+    /// </param>
     /// <exception cref="ArgumentNullException"><paramref name="config" /> is <see langword="null" />.</exception>
     /// <exception cref="ArgumentOutOfRangeException">
     ///     A chunk dimension is zero or negative, the combined voxel count exceeds
-    ///     <see cref="ushort.MaxValue" />, or <paramref name="transportModel" /> is not a defined model.
+    ///     <see cref="ushort.MaxValue" />, <paramref name="transportModel" /> is not a defined model, or
+    ///     <paramref name="tickRate" /> is not a multiple of 20 from 20 to 100000.
     /// </exception>
     public AtmosSimulation(
         AtmosConfig config,
         int chunkWidth = AtmosChunkConstants.DefaultWidth,
         int chunkHeight = AtmosChunkConstants.DefaultHeight,
         int chunkDepth = AtmosChunkConstants.DefaultDepth,
-        AtmosTransportModel transportModel = AtmosTransportModel.Euler)
-        : this(new AtmosWorld(config, transportModel), true, chunkWidth, chunkHeight, chunkDepth)
+        AtmosTransportModel transportModel = AtmosTransportModel.Euler,
+        int tickRate = AtmosWorld.DefaultTickRate)
+        : this(new AtmosWorld(config, transportModel, tickRate), true, chunkWidth, chunkHeight, chunkDepth)
     {
     }
 
@@ -241,7 +244,7 @@ public sealed partial class AtmosSimulation : IDisposable
     /// </remarks>
     /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
     [PublicAPI]
-    public int TickCount
+    public long TickCount
     {
         get
         {
@@ -272,8 +275,8 @@ public sealed partial class AtmosSimulation : IDisposable
     }
 
     /// <summary>
-    ///     Gets what the <see cref="AtmosBuiltInSolvers.EulerFlow" /> stage did to this simulation during the latest
-    ///     tick.
+    ///     Gets what the <see cref="AtmosBuiltInSolvers.EulerFlow" /> stage did to this simulation during its latest
+    ///     run.
     /// </summary>
     /// <remarks>
     ///     A measurement for profiling and tuning, not simulation state: it is not checkpointed, a restore resets it
@@ -281,7 +284,8 @@ public sealed partial class AtmosSimulation : IDisposable
     ///     (<see cref="AtmosTransportModel.Legacy" />) or the stage is disabled. The substep count is the number to
     ///     watch: it scales with the fastest signal in the simulation, and
     ///     <see cref="AtmosFlowDiagnostics.SubstepCapEngaged" /> says when
-    ///     <see cref="EulerFlowConfig.MaxSubstepsPerTick" /> cut a tick short.
+    ///     <see cref="EulerFlowConfig.MaxSubstepsPerSecond" /> cut a run short. The stage runs every 16 ticks at
+    ///     960 Hz by default, and the value stays the same on the ticks between runs.
     /// </remarks>
     /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
     /// <example>
@@ -1049,7 +1053,7 @@ public sealed partial class AtmosSimulation : IDisposable
     }
 
     /// <summary>
-    ///     Adds a one tick ignition source to a voxel and wakes its chunk.
+    ///     Adds an ignition source to a voxel and wakes its chunk. The source lasts until the next <c>gas-reactions</c> pass.
     /// </summary>
     /// <param name="chunk">The target chunk.</param>
     /// <param name="x">The zero-based local x-coordinate.</param>
@@ -1069,7 +1073,7 @@ public sealed partial class AtmosSimulation : IDisposable
     }
 
     /// <summary>
-    ///     Adds a one tick ignition source to a voxel and wakes its chunk.
+    ///     Adds an ignition source to a voxel and wakes its chunk. The source lasts until the next <c>gas-reactions</c> pass.
     /// </summary>
     /// <param name="chunk">The target chunk.</param>
     /// <param name="localVoxelIndex">The voxel's zero-based flat index.</param>

@@ -250,10 +250,11 @@ public sealed class AtmosSimulationTests
         var config = new TestAtmosConfig
         {
             VacuumThreshold = 0f,
-            SleepThreshold = int.MaxValue
+            SleepDelay = float.MaxValue
         };
 
         using var simulation = new AtmosSimulation(config, 2, 1, 1);
+        simulation.World.Solvers.SetInterval(AtmosBuiltInSolvers.EulerFlow, 1);
         var chunk = simulation.CreateAndRegisterChunk(new Int3(0, 0, 0));
         simulation.SetChunkClassification(chunk, new VoxelClassification(1));
         simulation.AddGasToVoxel(chunk, 0, "TestGas1", 2f, 300f);

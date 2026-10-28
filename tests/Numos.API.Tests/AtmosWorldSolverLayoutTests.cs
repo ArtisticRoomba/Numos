@@ -38,7 +38,7 @@ public sealed class AtmosWorldSolverLayoutTests
     [Test]
     public void SetLayout_RecordsOnlyAnActualChange()
     {
-        using var world = new AtmosWorld(CreateConfig());
+        using var world = new AtmosWorld(CreateConfig(), AtmosTransportModel.Euler, 20);
         world.StartRecording();
         var current = world.Solvers.Steps
             .Select(static step => new AtmosWorldSolverLayoutEntry(step.Name, step.IsEnabled))
@@ -49,7 +49,13 @@ public sealed class AtmosWorldSolverLayoutTests
         var recording = world.StopRecording();
 
         var operation = (SetAtmosWorldSolverLayoutOperation)recording.Operations.Single().Operation;
-        Assert.That(operation.Stages, Is.EqualTo(LegacyLayout));
+        Assert.That(
+            operation.Stages,
+            Is.EqualTo(LegacyLayout.Select(static entry => entry with { Interval = entry.Name is
+                AtmosBuiltInSolvers.Thermodynamics or
+                AtmosBuiltInSolvers.ExplicitThermalTransport or
+                AtmosBuiltInSolvers.ThermalBoundary ? 2 : 1 })),
+            "The operation records the resolved interval of every stage.");
     }
 
     [Test]
@@ -186,7 +192,7 @@ public sealed class AtmosWorldSolverLayoutTests
     {
         static AtmosWorldSolverStep Step(string name, bool enabled = true)
         {
-            return new AtmosWorldSolverStep(name, AtmosWorldSolverKind.BuiltIn, enabled, null);
+            return new AtmosWorldSolverStep(name, AtmosWorldSolverKind.BuiltIn, enabled, null, 1);
         }
 
         static AtmosWorldSolverStep[] Steps(AtmosTransportModel model)

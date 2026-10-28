@@ -243,6 +243,7 @@ public sealed class AtmosChunkVersionTests
     public void TryGetChunkSnapshot_AwakeSimulationTick_AdvancesRevision()
     {
         using var simulation = new AtmosSimulation(new TestAtmosConfig(), 1, 1, 1);
+        simulation.World.Solvers.SetInterval(AtmosBuiltInSolvers.EulerFlow, 1);
         var chunk = simulation.CreateAndRegisterChunk(new Int3(0, 0, 0));
         simulation.SetChunkClassification(chunk, new VoxelClassification(1));
         simulation.AddGasToVoxel(chunk, 0, "TestGas0", 1f, 293.15f);
@@ -277,7 +278,7 @@ public sealed class AtmosChunkVersionTests
         // Legacy transport: equal pressure keeps advection from waking the neighbor, and the wake asserted below
         // comes from legacy boundary diffusion. euler-flow would deliver the heat but leave the chunk asleep a tick
         // longer.
-        using var simulation = new AtmosSimulation(config, 1, 1, 1, AtmosTransportModel.Legacy);
+        using var simulation = new AtmosSimulation(config, 1, 1, 1, AtmosTransportModel.Legacy, tickRate: 20);
         var hot = simulation.CreateAndRegisterChunk(new Int3(0, 0, 0));
         var cold = simulation.CreateAndRegisterChunk(new Int3(1, 0, 0));
         simulation.SetChunkClassification(hot, new VoxelClassification(1));

@@ -51,7 +51,7 @@ public sealed class ChunkFieldArchiveTests
         });
 
         using var world = new AtmosWorld(new AtmosConfig(restored.InitialCheckpoint.Config));
-        var imported = AtmosWorldReplayTimeline.Import(world, restored, 1);
+        var imported = AtmosWorldReplayTimeline.Import(world, restored, 0.05);
 
         var simulation = world.Simulations.Single();
         var chunk = simulation.GetChunkHandles().Single();
@@ -139,7 +139,7 @@ public sealed class ChunkFieldArchiveTests
 
         // In-memory rollback doesn't care about portability.
         using var world = new AtmosWorld(new TestAtmosConfig());
-        var restored = AtmosWorldReplayTimeline.Restore(world, archive, 1);
+        var restored = AtmosWorldReplayTimeline.Restore(world, archive, 0.05);
         restored.ReturnToHead();
         Assert.That(world.ComputeStateHash(), Is.EqualTo(archive.HeadStateHash));
     }
@@ -160,7 +160,7 @@ public sealed class ChunkFieldArchiveTests
         simulation.GetChunkField(chunk, ArchivedFireData.ArchiveScratch).AsSpan().Fill(3f);
         extra?.Invoke(simulation);
 
-        var timeline = new AtmosWorldReplayTimeline(world, 1);
+        var timeline = new AtmosWorldReplayTimeline(world, 0.05);
         world.Tick();
         simulation.AddGasToVoxel(chunk, 1, 0, 2f, 310f);
         world.Tick();

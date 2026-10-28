@@ -183,6 +183,36 @@ public sealed partial class WorkbenchSession
     }
 
     /// <summary>
+    ///     Sets how many ticks pass between runs of a solver stage.
+    /// </summary>
+    /// <param name="name">The stage name.</param>
+    /// <param name="interval">Ticks between runs. Must be at least 1.</param>
+    /// <returns><see langword="true" /> when the stage exists.</returns>
+    /// <remarks>
+    ///     The world records an actual change. Keep the interval of <c>advection</c> equal to that of
+    ///     <c>boundary-flow</c>, and <c>thermodynamics</c> equal to <c>thermal-boundary</c>.
+    ///     <see cref="SolverPipelineEditor.GetWarnings" /> reports a mismatch.
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">No project is open, or the timeline inspects history.</exception>
+    public bool SetSolverInterval(string name, int interval)
+    {
+        return Guard(
+            $"Could not change the interval of solver '{name}'",
+            () =>
+            {
+                var world = RequireWorld();
+                ThrowIfInspecting();
+                bool found = world.Solvers.SetInterval(name, interval);
+                if (found)
+                    Info($"Set solver '{name}' to run every {interval} ticks.");
+                else
+                    Warn($"Solver '{name}' does not exist.");
+
+                return found;
+            });
+    }
+
+    /// <summary>
     ///     Replaces the order and enabled flags of the solver stages.
     /// </summary>
     /// <param name="stages">Every stage in the new order. See <see cref="AtmosWorldSolverPipeline.SetLayout" />.</param>

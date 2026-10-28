@@ -62,6 +62,10 @@ arrow-scale = Масштаб стрелок
 velocity-arrow-scale-tooltip = Секунды перемещения которые показывает каждая стрелка. При 0.05 секунд воксель двигающийся при 20 м/с рисует стрелку длинной в один воксель. Стрелки длиннее чем { $max-length } ограничены и сохраняют только своё направление.
 
 solver-pipeline = Последовательность Решателей
+project-section = Проект
+tick-rate-display = Частота тиков: { $rate } Гц
+tick-rate-description = Тиков в секунду симулируемого времени. Частота задаётся при создании проекта.
+tick-rate-error = Частота тиков должна быть кратна 20, от 20 до 100000.
 atmos-config = Атмос Конфигурация
 configuration-apply-instructions = Values apply on Enter, when a field loses focus, or when a slider is released.
 gas-registry = Регистр Газов

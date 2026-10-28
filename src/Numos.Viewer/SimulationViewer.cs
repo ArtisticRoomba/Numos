@@ -151,7 +151,7 @@ public partial class SimulationViewer : IDisposable
     private SimulationDrawData? _sliceSourceFrame;
     private int _sliceSourceIndex;
     private SimulationViewport? _sliceViewport;
-    private int _snapshotSourceVersion;
+    private long _snapshotSourceVersion;
     private int _targetFps = 144;
     private bool _transparent2DVoxels;
     private bool _transparent3DVoxels;
@@ -293,8 +293,10 @@ public partial class SimulationViewer : IDisposable
             {
                 if (_session.IsInspecting)
                 {
-                    if (_session.AccumulatePlayback(deltaTime))
-                        StepTimelineForward();
+                    // One batched step per frame, so a high tick rate costs one seek and one redraw.
+                    int due = _session.AccumulatePlayback(deltaTime);
+                    if (due > 0)
+                        StepTimelineForward(due);
                 }
                 else
                 {

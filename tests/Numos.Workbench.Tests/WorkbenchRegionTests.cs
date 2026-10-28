@@ -12,7 +12,7 @@ public sealed class WorkbenchRegionTests
     {
         var session = new WorkbenchSession();
         session.CreateProject(
-            new WorkbenchProjectOptions("Regions", width, height, depth, false),
+            new WorkbenchProjectOptions("Regions", width, height, depth, false, TickRate: 20),
             config =>
             {
                 config.VoxelVolume = 8.31446262f;

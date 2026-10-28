@@ -34,6 +34,7 @@
 
     <ItemGroup>
         <Compile Include="../Shared/TestAtmosConfig.cs" Link="Shared/TestAtmosConfig.cs"/>
+        <Compile Include="../Shared/TickHelpers.cs" Link="Shared/TickHelpers.cs"/>
         <Using Include="Numos.Tests"/>
     </ItemGroup>
 

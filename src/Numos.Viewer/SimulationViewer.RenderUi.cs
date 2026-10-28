@@ -634,6 +634,21 @@ public partial class SimulationViewer
         ImGui.Checkbox($"##{id}-2d", ref show2D);
     }
 
+    private string FormatSleepTimer(int ticks)
+    {
+        return QuantityFormat.Format(ticks / (double)(_session.World?.TickRate ?? AtmosWorld.DefaultTickRate), "s");
+    }
+
+    /// <summary>
+    ///     Shows the world tick rate. The rate is fixed when the world is created.
+    /// </summary>
+    private void RenderTickRateSection()
+    {
+        int current = _session.World?.TickRate ?? AtmosWorld.DefaultTickRate;
+        ImGui.Text(Locale.GetString("tick-rate-display", ("rate", current)));
+        ImGuiExtensions.QuestionTooltip(Locale.GetString("tick-rate-description"));
+    }
+
     private void RenderConfigurationPanel()
     {
         if (!_showConfigurationPanel || _session.Config == null)
@@ -653,6 +668,10 @@ public partial class SimulationViewer
         if (inspecting)
             ClearConfigurationDrafts();
 
+        if (ImGui.CollapsingHeader(Locale.GetString("project-section"), ImGuiTreeNodeFlags.DefaultOpen))
+            RenderTickRateSection();
+
+        ImGui.Spacing();
         if (ImGui.CollapsingHeader(Locale.GetString("solver-pipeline"), ImGuiTreeNodeFlags.DefaultOpen))
             RenderSolverPipelineSection(inspecting);
 
@@ -747,12 +766,12 @@ public partial class SimulationViewer
                 static (config, value) => config.VacuumThreshold = value,
                 QuantityFormat.KilopascalsPerPascal);
 
-            ConfigIntInput(
-                AtmosConfigFields.SleepThreshold,
-                "config-sleep-threshold",
-                _session.Config.SleepThreshold,
+            ConfigFloatInput(
+                AtmosConfigFields.SleepDelay,
+                "config-sleep-delay",
+                _session.Config.SleepDelay,
                 inspecting,
-                static (config, value) => config.SleepThreshold = value);
+                static (config, value) => config.SleepDelay = value);
 
             ConfigFloatSlider(
                 AtmosConfigFields.SleepEpsilon,
@@ -856,12 +875,20 @@ public partial class SimulationViewer
                 ReplaceEulerFlow(config, current => new EulerFlowConfig(current) { CourantNumber = value }));
 
         ConfigIntInput(
-            AtmosConfigFields.EulerMaxSubstepsPerTick,
+            AtmosConfigFields.EulerMaxSubstepsPerSecond,
             "config-euler-max-substeps",
-            euler.MaxSubstepsPerTick,
+            euler.MaxSubstepsPerSecond,
             inspecting,
             static (config, value) =>
-                ReplaceEulerFlow(config, current => new EulerFlowConfig(current) { MaxSubstepsPerTick = value }));
+                ReplaceEulerFlow(config, current => new EulerFlowConfig(current) { MaxSubstepsPerSecond = value }));
+
+        ConfigFloatInput(
+            AtmosConfigFields.EulerSettlePeriod,
+            "config-euler-settle-period",
+            euler.SettlePeriod,
+            inspecting,
+            static (config, value) =>
+                ReplaceEulerFlow(config, current => new EulerFlowConfig(current) { SettlePeriod = value }));
 
         ConfigFloatInput(
             AtmosConfigFields.EulerVelocityFloor,
@@ -870,6 +897,14 @@ public partial class SimulationViewer
             inspecting,
             static (config, value) =>
                 ReplaceEulerFlow(config, current => new EulerFlowConfig(current) { VelocityFloor = value }));
+
+        ConfigFloatInput(
+            AtmosConfigFields.EulerSleepSpeed,
+            "config-euler-sleep-speed",
+            euler.SleepSpeed,
+            inspecting,
+            static (config, value) =>
+                ReplaceEulerFlow(config, current => new EulerFlowConfig(current) { SleepSpeed = value }));
 
         ConfigFloatInput(
             AtmosConfigFields.EulerMaxVelocity,
@@ -1960,7 +1995,7 @@ public partial class SimulationViewer
                 Locale.GetString("simulation-state-label"),
                 snapshot.IsAwake ? Locale.GetString("awake") : Locale.GetString("sleeping"));
 
-            ImGuiExtensions.DefinitionRow(Locale.GetString("sleep-timer"), QuantityFormat.Ticks(snapshot.SleepTimer));
+            ImGuiExtensions.DefinitionRow(Locale.GetString("sleep-timer"), FormatSleepTimer(snapshot.SleepTimer));
 
             // Zero entries are solid or empty voxels, so the average and minimum skip them.
             if (snapshot.TotalPressure is { Length: > 0 } pressures)

@@ -11,12 +11,44 @@ internal sealed class AtmosSolverExecutionContext
 
     internal AtmosSolverExecutionContext(
         AtmosKernel world, AtmosChunk[] chunks,
-        AtmosSolverConfigSnapshot config, int tickCount)
+        AtmosSolverConfigSnapshot config, long tickCount, int tickRate = 20)
     {
         _world = world;
         Chunks = chunks;
         TickConfig = config;
         TickCount = tickCount;
+        TickRate = tickRate;
+        DeltaTime = 1f / tickRate;
+        Interval = 1;
+        SleepDelayTicks = BuiltInStageSchedule.SecondsToTicks(config.SleepDelay, tickRate);
+    }
+
+    /// <summary>
+    ///     The sleep delay in ticks: <c>round(SleepDelay * TickRate)</c>, saturating at <see cref="int.MaxValue" />.
+    /// </summary>
+    /// <remarks>
+    ///     Computed when the tick starts, so a changed tick rate or sleep delay applies on the next tick.
+    /// </remarks>
+    internal int SleepDelayTicks { get; }
+
+    /// <summary>
+    ///     Ticks the <c>euler-flow</c> stage has covered since its last settle pass. The stage reads and writes it on
+    ///     the tick thread, and the kernel checkpoints it.
+    /// </summary>
+    internal int EulerSettleTicks
+    {
+        get => _world.EulerSettleTicks;
+        set => _world.EulerSettleTicks = value;
+    }
+
+    /// <summary>
+    ///     Position in the <c>euler-flow</c> stage's six-order sweep cycle, in [0, 6). The stage reads and writes it
+    ///     on the tick thread, and the kernel checkpoints it.
+    /// </summary>
+    internal int EulerSweepPhase
+    {
+        get => _world.EulerSweepPhase;
+        set => _world.EulerSweepPhase = value;
     }
 
     internal AtmosChunk[] Chunks { get; }
@@ -25,7 +57,31 @@ internal sealed class AtmosSolverExecutionContext
     /// </summary>
     internal AtmosSolverConfigSnapshot TickConfig { get; }
 
-    internal int TickCount { get; }
+    internal long TickCount { get; }
+
+    /// <summary>
+    ///     The gas time the running stage advances, in seconds.
+    /// </summary>
+    internal Second DeltaTime { get; private set; }
+
+    /// <summary>
+    ///     How many ticks the running stage spans. One means the stage runs every tick.
+    /// </summary>
+    internal int Interval { get; private set; }
+
+    /// <summary>
+    ///     Ticks per second of atmospheric time.
+    /// </summary>
+    internal int TickRate { get; }
+
+    /// <summary>
+    ///     Sets the interval and gas time the next stage sees.
+    /// </summary>
+    internal void BeginStage(int interval, Second deltaTime)
+    {
+        Interval = interval;
+        DeltaTime = deltaTime;
+    }
 
     /// <summary>
     ///     Gets a built-in stage's shared data from <see cref="AtmosSolverConfigSnapshot.SolverData" />, creating it

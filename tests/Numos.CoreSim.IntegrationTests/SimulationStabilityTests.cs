@@ -18,7 +18,7 @@ public sealed class SimulationStabilityTests
         bool expectedAwake)
     {
         var config = SimTestHelpers.CreateDeterministicConfig();
-        config.SleepThreshold = 0;
+        config.SleepDelay = 0f;
         config.SleepEpsilon = 3.5f;
         config.BulkFlowCoefficient = 0f;
         config.MaxPressureTransferFractionPerNeighbor = 0f;
@@ -44,7 +44,7 @@ public sealed class SimulationStabilityTests
     public void StableChunk_SleepsAtConfiguredThresholdUntilExplicitlyWoken()
     {
         var config = SimTestHelpers.CreateDeterministicConfig();
-        config.SleepThreshold = 0;
+        config.SleepDelay = 0f;
         config.SleepEpsilon = 0.1f;
         using var simulation = SimTestHelpers.CreateLegacySimulation(config, 2, 1, 1);
         var chunk = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));

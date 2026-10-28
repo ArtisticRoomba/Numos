@@ -78,6 +78,7 @@ internal sealed partial class HeadlessOperations
             "getConfig" => GetConfig(),
             "listSolvers" => ListSolvers(),
             "setSolverEnabled" => SetSolverEnabled(request),
+            "setSolverInterval" => SetSolverInterval(request),
             "resetSolvers" => ResetSolvers(request),
             "setSolverLayout" => SetSolverLayout(request),
             "applyTransportPreset" => ApplyTransportPreset(request),
@@ -110,7 +111,7 @@ internal sealed partial class HeadlessOperations
         "sealChunk", "wakeChunk", "sleepChunk", "fillChunk", "setVoxelClassification", "setVoxelTemperature",
         "setVoxelMomentum", "injectGas", "clearVoxelGas",
         "editRegion", "sampleVoxels", "addGas", "removeGas", "listGases",
-        "updateConfig", "getConfig", "listSolvers", "setSolverEnabled", "resetSolvers", "setSolverLayout",
+        "updateConfig", "getConfig", "listSolvers", "setSolverEnabled", "setSolverInterval", "resetSolvers", "setSolverLayout",
         "applyTransportPreset", "createPortal", "createDock",
         "destroyLinkSet", "listLinkSets", "tick", "stepForward", "seekTick", "returnToHead", "createBranch",
         "selectBranch", "continueBranch", "listBranches", "timelineInfo", "saveReplay", "observe", "exportField",
@@ -130,6 +131,8 @@ internal sealed partial class HeadlessOperations
             SimulationId = simulation?.Id.Index,
             SimulationCount = _session.Simulations.Count,
             Tick = _session.World!.TickCount,
+            TickRate = _session.World.TickRate,
+            SimulatedTime = _session.World.SimulatedTime,
             ChunkCount = simulation?.ChunkCount ?? 0,
             GasCount = _session.Config!.GasRegistry.Count,
             Inspecting = _session.IsInspecting
@@ -224,7 +227,8 @@ internal sealed partial class HeadlessOperations
             dimensions.Y,
             dimensions.Z,
             request.IncludeDefaultGases ?? false,
-            ParseTransportModel(request.TransportModel) ?? AtmosTransportModel.Euler);
+            ParseTransportModel(request.TransportModel) ?? AtmosTransportModel.Euler,
+            ParseTickRate(request.TickRate) ?? AtmosWorld.DefaultTickRate);
 
         _session.CreateProject(
             options,
@@ -245,6 +249,17 @@ internal sealed partial class HeadlessOperations
             });
 
         return new CommandExecution();
+    }
+
+    private static int? ParseTickRate(int? value)
+    {
+        if (value is not { } rate)
+            return null;
+
+        if (!AtmosWorld.IsValidTickRate(rate))
+            throw new HeadlessRequestException("invalidRequest", "tickRate must be a multiple of 20 from 20 to 100000.");
+
+        return rate;
     }
 
     /// <summary>
@@ -748,7 +763,8 @@ internal sealed partial class HeadlessOperations
             .Select(static step => new SolverStepReport(
                 step.Name,
                 step.IsEnabled,
-                step.Kind == AtmosWorldSolverKind.BuiltIn ? "builtIn" : "custom"))
+                step.Kind == AtmosWorldSolverKind.BuiltIn ? "builtIn" : "custom",
+                step.Interval))
             .ToArray();
     }
 
@@ -766,6 +782,28 @@ internal sealed partial class HeadlessOperations
         }
 
         return Result(new CommandResult { Changed = true });
+    }
+
+    private CommandExecution SetSolverInterval(HeadlessRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Solver))
+            throw Missing("solver");
+
+        int interval = Require(request.Interval, "interval");
+        if (interval < 1)
+            throw new HeadlessRequestException("invalidRequest", "interval must be at least 1.");
+
+        // SetInterval reports whether the stage exists, not whether its interval changed.
+        string name = request.Solver;
+        bool unchanged = _session.World!.Solvers.Steps.Any(step => step.Name == name && step.Interval == interval);
+        if (!_session.SetSolverInterval(name, interval))
+        {
+            throw new HeadlessRequestException(
+                "solverNotFound",
+                $"No solver stage named '{request.Solver}' is registered.");
+        }
+
+        return Result(new CommandResult { Changed = !unchanged });
     }
 
     private CommandExecution ResetSolvers(HeadlessRequest request)
@@ -786,7 +824,10 @@ internal sealed partial class HeadlessOperations
             if (stages[index] is not { } stage || string.IsNullOrWhiteSpace(stage.Name))
                 throw Missing(property + ".name");
 
-            layout[index] = new AtmosWorldSolverLayoutEntry(stage.Name, Require(stage.Enabled, property + ".enabled"));
+            layout[index] = new AtmosWorldSolverLayoutEntry(
+                stage.Name,
+                Require(stage.Enabled, property + ".enabled"),
+                stage.Interval ?? 0);
         }
 
         return Result(new CommandResult { Changed = _session.SetSolverLayout(layout) });
@@ -910,9 +951,28 @@ internal sealed partial class HeadlessOperations
 
     // Time and timeline.
 
-    private CommandExecution Tick(HeadlessRequest request)
+    /// <summary>
+    ///     Reads the tick count from `count`, or converts `seconds` at the world's current tick rate.
+    /// </summary>
+    private int ResolveTickCount(HeadlessRequest request)
     {
-        int count = Require(request.Count, "count");
+        if (request.Count.HasValue == request.Seconds.HasValue)
+            throw new HeadlessRequestException("invalidTickCount", "Give exactly one of count and seconds.");
+
+        if (request.Seconds is { } seconds)
+        {
+            double ticks = Math.Round(seconds * _session.World!.TickRate, MidpointRounding.AwayFromZero);
+            if (!double.IsFinite(ticks) || ticks < 1d || ticks > MaximumTicksPerRequest)
+            {
+                throw new HeadlessRequestException(
+                    "invalidTickCount",
+                    $"seconds must convert to between 1 and {MaximumTicksPerRequest} ticks at {_session.World!.TickRate} Hz.");
+            }
+
+            return (int)ticks;
+        }
+
+        int count = request.Count!.Value;
         if (count <= 0 || count > MaximumTicksPerRequest)
         {
             throw new HeadlessRequestException(
@@ -920,7 +980,13 @@ internal sealed partial class HeadlessOperations
                 $"count must be between 1 and {MaximumTicksPerRequest}.");
         }
 
-        int progressInterval = request.ProgressInterval ?? 100;
+        return count;
+    }
+
+    private CommandExecution Tick(HeadlessRequest request)
+    {
+        int count = ResolveTickCount(request);
+        int? progressInterval = request.ProgressInterval;
         if (request.Probes is not { } probes)
         {
             _session.Tick(count, progressInterval);
@@ -1045,6 +1111,8 @@ internal sealed partial class HeadlessOperations
             StartTick = timeline.Start.Tick,
             HeadTick = timeline.Head.Tick,
             PositionTick = timeline.Position.Tick,
+            PositionTime = timeline.TimeAt(timeline.Position.Tick),
+            HeadTime = timeline.TimeAt(timeline.Head.Tick),
             Inspecting = timeline.IsInspecting,
             Verified = timeline.IsVerified,
             SelectedBranchId = _session.Branches!.SelectedBranchId,

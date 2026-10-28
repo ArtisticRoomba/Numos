@@ -1,7 +1,9 @@
 using System.Runtime.InteropServices;
 using Numos.API;
+using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.Solvers.Euler;
 using Numos.Maths;
+using Numos.Tests;
 
 namespace Numos.CoreSim.IntegrationTests.Euler;
 
@@ -26,7 +28,16 @@ public sealed class EulerParallelDeterminismTests
     ///     Update this only together with a deliberate physics or digest-format change, and confirm the new value is
     ///     stable across worker counts and schedules before approving it.
     /// </remarks>
-    private const ulong X64ExpectedBlastDigest = 8210648234598680168UL;
+    private const ulong X64ExpectedBlastDigest = 13887279013525372312UL;
+
+    /// <summary>
+    ///     The approved x64 digest of the blast profile after 0.1 s at 960 Hz, the default tick rate, with the default
+    ///     <c>euler-flow</c> interval of 16 ticks.
+    /// </summary>
+    /// <remarks>
+    ///     Same rules as <see cref="X64ExpectedBlastDigest" />.
+    /// </remarks>
+    private const ulong X64ExpectedBlastDigest960 = 16474074692313213741UL;
 
     private const int ChunkSize = 16;
     private const float Temperature = 293f;
@@ -34,6 +45,7 @@ public sealed class EulerParallelDeterminismTests
 
     [TestCase("sod")]
     [TestCase("blast")]
+    [TestCase("walls")]
     public void Schedules_ProduceOneDigest(string profile)
     {
         ulong whole = Run(profile, workerCount: 1);
@@ -73,15 +85,54 @@ public sealed class EulerParallelDeterminismTests
         }
     }
 
-    private static ulong Run(string profile, int? workerCount)
+    [Test]
+    [Explicit(
+        "Verifies four parallel runs produce one deterministic digest at 960 Hz. x64 also checks the approved golden " +
+        "digest; capture an Arm64 baseline before making its digest a golden value.")]
+    public void Blast960_ParallelRunsMatchGoldenHash()
+    {
+        ulong? expectedDigest = RuntimeInformation.ProcessArchitecture switch
+        {
+            Architecture.X64 => X64ExpectedBlastDigest960,
+            Architecture.Arm64 => null,
+            var architecture => throw new PlatformNotSupportedException(
+                $"The Euler blast profile has no digest baseline for {architecture}.")
+        };
+
+        for (int run = 0; run < 4; run++)
+        {
+            ulong actualDigest = Run("blast", workerCount: null, tickRate: 960);
+            TestContext.Out.WriteLine($"blast960 digest={actualDigest} (DOTNET_PROCESSOR_COUNT={Environment.ProcessorCount})");
+            expectedDigest ??= actualDigest;
+            Assert.That(
+                actualDigest,
+                Is.EqualTo(expectedDigest.Value),
+                $"Run {run}; architecture={RuntimeInformation.ProcessArchitecture}; " +
+                $"DOTNET_PROCESSOR_COUNT={Environment.ProcessorCount}; digest={actualDigest}");
+        }
+    }
+
+    private static ulong Run(string profile, int? workerCount, int tickRate = SimTestHelpers.PinnedTickRate)
     {
         EulerFlowSolver.WorkerCountOverride = workerCount;
         try
         {
-            using AtmosSimulation simulation = profile == "sod" ? CreateTwoChunkSod() : CreateBlast();
-            int ticks = profile == "sod" ? 5 : 2;
-            for (int tick = 0; tick < ticks; tick++)
-                simulation.Tick();
+            using AtmosSimulation simulation = profile switch
+            {
+                "sod" => CreateTwoChunkSod(),
+                "walls" => CreateBlast(tickRate, walls: true),
+                _ => CreateBlast(tickRate)
+            };
+            if (profile == "sod")
+            {
+                for (int tick = 0; tick < 5; tick++)
+                    simulation.Tick();
+            }
+            else
+            {
+                // Two ticks at 20 Hz, 0.1 s at any rate.
+                TickHelpers.TickFor(simulation, 0.1);
+            }
 
             return simulation.CaptureCheckpoint().ComputeStateHash();
         }
@@ -114,10 +165,14 @@ public sealed class EulerParallelDeterminismTests
     ///     Eight 16³ chunks of room air in a 2×2×2 block, with a hot high-pressure sphere centred on the corner
     ///     they all share, so every chunk face carries the blast.
     /// </summary>
-    private static AtmosSimulation CreateBlast()
+    /// <remarks>
+    ///     With <paramref name="walls" /> each chunk also gets a solid column and scattered solid voxels, so the
+    ///     active-air list has gaps inside rows and the tiled gather and write-back cut it between runs.
+    /// </remarks>
+    private static AtmosSimulation CreateBlast(int tickRate = SimTestHelpers.PinnedTickRate, bool walls = false)
     {
         var config = SimTestHelpers.CreateEulerConfig();
-        var simulation = SimTestHelpers.CreateEulerSimulation(config, ChunkSize, ChunkSize, ChunkSize, out _);
+        var simulation = SimTestHelpers.CreateEulerSimulation(config, ChunkSize, ChunkSize, ChunkSize, out _, tickRate: tickRate);
         float ambient = SimTestHelpers.MolesFor(config, Atmosphere, Temperature);
         float hot = SimTestHelpers.MolesFor(config, 4f * Atmosphere, 600f);
         const float radius = 4f;
@@ -134,6 +189,12 @@ public sealed class EulerParallelDeterminismTests
             for (int y = 0; y < ChunkSize; y++)
             for (int x = 0; x < ChunkSize; x++)
             {
+                if (walls && (x == 5 && y < 12 || (x * 7 + y * 3 + z * 5) % 23 == 0))
+                {
+                    simulation.SetVoxelClassification(chunk, x, y, z, VoxelClassification.RoomSolid);
+                    continue;
+                }
+
                 float dx = cx * ChunkSize + x + 0.5f - ChunkSize;
                 float dy = cy * ChunkSize + y + 0.5f - ChunkSize;
                 float dz = cz * ChunkSize + z + 0.5f - ChunkSize;

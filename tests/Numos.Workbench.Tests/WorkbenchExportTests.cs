@@ -31,7 +31,7 @@ public sealed class WorkbenchExportTests
     {
         var session = new WorkbenchSession();
         session.CreateProject(
-            new WorkbenchProjectOptions("Export", 4, 3, 1, false),
+            new WorkbenchProjectOptions("Export", 4, 3, 1, false, TickRate: 20),
             config =>
             {
                 config.VoxelVolume = 8.31446262f;

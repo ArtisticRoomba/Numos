@@ -10,9 +10,10 @@ namespace Numos.CoreSim.Benchmarks.Infrastructure;
 internal sealed class SimulationWorkload : IDisposable
 {
     /// <summary>
-    ///     The tick <see cref="Initial" /> is restored at, one short of a thermodynamics tick.
+    ///     The tick <see cref="Initial" /> is restored at. It is one short of an even tick, so the next
+    ///     <see cref="AtmosKernel.Tick" /> runs the thermal stages as well. The step delegates run whenever called.
     /// </summary>
-    internal const int InitialTickCount = AtmosSolverConstants.ThermodynamicsTickInterval - 1;
+    internal const int InitialTickCount = 1;
 
     /// <summary>
     ///     Moles every active voxel starts with, split evenly over the injected gases before the gradients scale it.
@@ -188,7 +189,7 @@ internal sealed class SimulationWorkload : IDisposable
 
     private static AtmosConfig CreateConfig(ScalingWorkloadOptions options)
     {
-        var config = new AtmosConfig { SleepThreshold = int.MaxValue, ThermalConductance = 2f };
+        var config = new AtmosConfig { SleepDelay = float.MaxValue, ThermalConductance = 2f };
         for (int gas = 0; gas < options.GasCount; gas++)
         {
             config.GasRegistry.Add(

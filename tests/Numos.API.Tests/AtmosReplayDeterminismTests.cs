@@ -18,7 +18,7 @@ public sealed class AtmosReplayDeterminismTests
                     new GasProperties { Name = "A", DiffusionCoefficient = 0.025f },
                     new GasProperties { Name = "B", MolarHeatCapacityAtConstantVolume = 30f }
                 ],
-                SleepThreshold = 8
+                SleepDelay = 0.4f
             });
 
         var simulation = world.CreateSimulation(4, 3, 2);

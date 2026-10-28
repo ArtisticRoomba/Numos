@@ -74,9 +74,10 @@ public static class AtmosConfigDefaults
     public const Pascal VacuumThreshold = 1f;
 
     /// <summary>
-    ///     Default consecutive quiet ticks required before a chunk sleeps.
+    ///     Default time below the sleep epsilon before a chunk sleeps, in seconds (s).
     /// </summary>
-    public const int SleepThreshold = 100;
+    [Quantity("seconds")]
+    public const Second SleepDelay = 5f;
 
     /// <summary>
     ///     Default maximum relative pressure difference considered at rest, as a percentage.

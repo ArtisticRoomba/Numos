@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Runtime.CompilerServices;
 
 namespace Numos.CoreSim.Solvers.Euler;
 
@@ -85,6 +86,57 @@ internal readonly struct EulerCellRun
 }
 
 /// <summary>
+///     The primitive state of one vector of cells, from <see cref="EulerCellKernel.ToPrimitive" />. Each lane holds
+///     what <see cref="EulerMixture.ToPrimitive(Kilogram, Mole, JoulePerKelvin64, KilogramMetrePerSecond,
+///     KilogramMetrePerSecond, KilogramMetrePerSecond, Joule64, CubicMetre, PascalPerMoleKelvin,
+///     out EulerCellState)" /> computes for that cell before it checks the result.
+/// </summary>
+/// <remarks>
+///     The fields are not masked. A lane outside <see cref="Gas" /> holds whatever the arithmetic gave, so the
+///     caller masks every field before it stores it.
+/// </remarks>
+internal struct EulerPrimitiveLanes
+{
+    public Vector<KilogramPerCubicMetre> Density;
+    public Vector<MetrePerSecond> VelocityX;
+    public Vector<MetrePerSecond> VelocityY;
+    public Vector<MetrePerSecond> VelocityZ;
+    public Vector<Pascal> Pressure;
+    public Vector<JoulePerCubicMetre> EnergyDensity;
+    public Vector<MetrePerSecond> SoundSpeed;
+    public Vector<PerKilogram> InverseMass;
+    public Vector<MetrePerSecond> SignalSpeed;
+
+    /// <summary>
+    ///     All bits set in the lanes the scalar conversion returns <see cref="EulerCellKind.Gas" /> for.
+    /// </summary>
+    public Vector<int> Gas;
+
+    /// <summary>
+    ///     All bits set in the lanes the scalar conversion returns <see cref="EulerCellKind.NonFinite" /> for.
+    /// </summary>
+    public Vector<int> NonFinite;
+
+    /// <summary>
+    ///     Writes the cell fields of the lanes to <paramref name="cells" /> at <paramref name="voxel" />, each ANDed
+    ///     with <paramref name="keep" />, so a lane with no bits in <paramref name="keep" /> is written as the
+    ///     vacuum.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public readonly void Store(EulerChunkState cells, int voxel, Vector<float> keep)
+    {
+        Vector.BitwiseAnd(Density, keep).CopyTo(cells.CellDensity, voxel);
+        Vector.BitwiseAnd(VelocityX, keep).CopyTo(cells.CellVelocityX, voxel);
+        Vector.BitwiseAnd(VelocityY, keep).CopyTo(cells.CellVelocityY, voxel);
+        Vector.BitwiseAnd(VelocityZ, keep).CopyTo(cells.CellVelocityZ, voxel);
+        Vector.BitwiseAnd(Pressure, keep).CopyTo(cells.CellPressure, voxel);
+        Vector.BitwiseAnd(EnergyDensity, keep).CopyTo(cells.CellEnergyDensity, voxel);
+        Vector.BitwiseAnd(SoundSpeed, keep).CopyTo(cells.CellSoundSpeed, voxel);
+        Vector.BitwiseAnd(InverseMass, keep).CopyTo(cells.CellInverseMass, voxel);
+    }
+}
+
+/// <summary>
 ///     The cell update of <see cref="EulerSweep" />: a vector version for runs of air cells and the scalar update
 ///     for the other cells.
 /// </summary>
@@ -114,7 +166,7 @@ internal static class EulerCellKernel
                                    Vector<double>.Count * 2 == Vector<float>.Count;
 
     /// <summary>
-    ///     Updates the air cells <c>[0, count)</c> of a run, a whole number of vectors at a time.
+    ///     Updates the air cells <c>[0, count)</c> of a run, one vector at a time.
     /// </summary>
     /// <param name="run">The bundle's arrays and constants.</param>
     /// <param name="firstVoxel">Voxel index of the first cell. The cells are contiguous in voxel memory.</param>
@@ -125,8 +177,12 @@ internal static class EulerCellKernel
     /// <param name="clampedVelocity">The pencil's count of clamped velocities.</param>
     /// <param name="nonFiniteCells">The pencil's count of non-finite cells.</param>
     /// <param name="maxSignalSpeed">Raised to the fastest signal speed of the cells written.</param>
-    /// <returns>Number of cells done, a multiple of <see cref="Width" /> that is at most <paramref name="count" />.</returns>
-    internal static int UpdateRun(
+    /// <remarks>
+    ///     When <paramref name="count" /> is not a whole number of vectors, the last vector ends at the last cell and
+    ///     overlaps the vector before it. The update reads only the read buffer, the face arrays and the species
+    ///     sums, so a cell done twice gets the same bits twice. The counters count each cell once.
+    /// </remarks>
+    internal static void UpdateRun(
         in EulerCellRun run, int firstVoxel, int firstCell, int behind, int ahead, int count,
         ref int clampedVelocity, ref int nonFiniteCells, ref MetrePerSecond maxSignalSpeed)
     {
@@ -135,13 +191,15 @@ internal static class EulerCellKernel
         EulerChunkState cells = run.Cells;
         Span<MetrePerSecond> signal = stackalloc MetrePerSecond[width];
         Span<int> flags = stackalloc int[width];
-        int done = 0;
-        for (; done + width <= count; done += width)
+        for (int done = 0; done < count; done += width)
         {
-            int voxel = firstVoxel + done;
-            int cell = firstCell + done;
-            int back = behind + done;
-            int front = ahead + done;
+            // A last partial vector moves back to end at the last cell. Its lanes before firstNewLane are done.
+            int start = Math.Min(done, count - width);
+            int firstNewLane = done - start;
+            int voxel = firstVoxel + start;
+            int cell = firstCell + start;
+            int back = behind + start;
+            int front = ahead + start;
 
             Vector<Second> timeStep = new Vector<float>(run.TimeStep);
             Vector<KilogramMetrePerSecond> normal = new Vector<float>(run.ReadNormal, voxel) -
@@ -215,72 +273,23 @@ internal static class EulerCellKernel
             momentumY = Vector.ConditionalSelect(clamp, momentumY * scale, momentumY);
             momentumZ = Vector.ConditionalSelect(clamp, momentumZ * scale, momentumZ);
 
-            // ToPrimitive, from the clamped momentum.
-            Vector<int> empty = Vector.LessThanOrEqual(mass, zero) | Vector.LessThanOrEqual(moles, zero) |
-                                Vector.Narrow(
-                                    Vector.LessThanOrEqual(heatLow, Vector<double>.Zero),
-                                    Vector.LessThanOrEqual(heatHigh, Vector<double>.Zero));
-            velocityX = momentumX * inverseMass;
-            velocityY = momentumY * inverseMass;
-            velocityZ = momentumZ * inverseMass;
+            ToPrimitive(
+                mass, inverseMass, moles, heatLow, heatHigh, momentumX, momentumY, momentumZ, energyLow, energyHigh,
+                run.Volume, run.PressurePerMoleKelvin, out EulerPrimitiveLanes primitive);
 
-            Vector.Widen(
-                momentumX, out Vector<KilogramMetrePerSecond64> pxLow, out Vector<KilogramMetrePerSecond64> pxHigh);
-            Vector.Widen(
-                momentumY, out Vector<KilogramMetrePerSecond64> pyLow, out Vector<KilogramMetrePerSecond64> pyHigh);
-            Vector.Widen(
-                momentumZ, out Vector<KilogramMetrePerSecond64> pzLow, out Vector<KilogramMetrePerSecond64> pzHigh);
-            Vector.Widen(velocityX, out Vector<MetrePerSecond64> vxLow, out Vector<MetrePerSecond64> vxHigh);
-            Vector.Widen(velocityY, out Vector<MetrePerSecond64> vyLow, out Vector<MetrePerSecond64> vyHigh);
-            Vector.Widen(velocityZ, out Vector<MetrePerSecond64> vzLow, out Vector<MetrePerSecond64> vzHigh);
-            Vector<Scalar64> half = new Vector<double>(0.5d);
-            Vector<Joule64> kineticLow = half * (pxLow * vxLow + pyLow * vyLow + pzLow * vzLow);
-            Vector<Joule64> kineticHigh = half * (pxHigh * vxHigh + pyHigh * vyHigh + pzHigh * vzHigh);
-            Vector<Joule64> internalLow = Vector.Max(Vector<double>.Zero, energyLow - kineticLow);
-            Vector<Joule64> internalHigh = Vector.Max(Vector<double>.Zero, energyHigh - kineticHigh);
-            Vector<Kelvin> temperature = Vector.Narrow(internalLow / heatLow, internalHigh / heatHigh);
-
-            Vector<Pascal> pressure = moles * temperature * new Vector<float>(run.PressurePerMoleKelvin);
-            Vector<JoulePerKelvin> molarGasTerm = moles * new Vector<float>(AtmosPhysicalConstants.MolarGasConstant);
-            Vector.Widen(molarGasTerm, out Vector<JoulePerKelvin64> gasLow, out Vector<JoulePerKelvin64> gasHigh);
-            Vector<Scalar> gamma = Vector.Narrow((heatLow + gasLow) / heatLow, (heatHigh + gasHigh) / heatHigh);
-            Vector<MetrePerSecond> soundSpeed = Vector.SquareRoot(gamma * molarGasTerm * temperature * inverseMass);
-            Vector<CubicMetre64> volumeDouble = new Vector<double>(run.Volume);
-            Vector<JoulePerCubicMetre> energyDensity =
-                Vector.Narrow(energyLow / volumeDouble, energyHigh / volumeDouble);
-
-            Vector<float> infinity = new Vector<float>(float.PositiveInfinity);
-            Vector<int> finite = Vector.LessThan(Vector.Abs(temperature), infinity) &
-                                 Vector.LessThan(Vector.Abs(pressure), infinity) &
-                                 Vector.LessThan(Vector.Abs(soundSpeed), infinity) &
-                                 Vector.LessThan(Vector.Abs(energyDensity), infinity) &
-                                 Vector.LessThan(Vector.Abs(inverseMass), infinity);
-
-            Vector<int> evaluated = Vector.AndNot(~empty, trace);
-            Vector<int> gas = evaluated & finite;
-            Vector<int> notFinite = Vector.AndNot(evaluated, finite);
+            Vector<int> gas = Vector.AndNot(primitive.Gas, trace);
+            Vector<int> notFinite = Vector.AndNot(primitive.NonFinite, trace);
             Vector<float> gasBits = Vector.AsVectorSingle(gas);
-
-            Vector<MetrePerSecond> signalSpeed = Vector.Max(
-                                            Vector.Max(Vector.Abs(velocityX), Vector.Abs(velocityY)),
-                                            Vector.Abs(velocityZ)) + soundSpeed;
 
             Vector.BitwiseAnd(momentumX, gasBits).CopyTo(PickMomentum(run, 0), voxel);
             Vector.BitwiseAnd(momentumY, gasBits).CopyTo(PickMomentum(run, 1), voxel);
             Vector.BitwiseAnd(momentumZ, gasBits).CopyTo(PickMomentum(run, 2), voxel);
 
-            Vector.BitwiseAnd(mass / new Vector<float>(run.Volume), gasBits).CopyTo(cells.CellDensity, voxel);
-            Vector.BitwiseAnd(velocityX, gasBits).CopyTo(cells.CellVelocityX, voxel);
-            Vector.BitwiseAnd(velocityY, gasBits).CopyTo(cells.CellVelocityY, voxel);
-            Vector.BitwiseAnd(velocityZ, gasBits).CopyTo(cells.CellVelocityZ, voxel);
-            Vector.BitwiseAnd(pressure, gasBits).CopyTo(cells.CellPressure, voxel);
-            Vector.BitwiseAnd(energyDensity, gasBits).CopyTo(cells.CellEnergyDensity, voxel);
-            Vector.BitwiseAnd(soundSpeed, gasBits).CopyTo(cells.CellSoundSpeed, voxel);
-            Vector.BitwiseAnd(inverseMass, gasBits).CopyTo(cells.CellInverseMass, voxel);
-            Vector.BitwiseAnd(signalSpeed, gasBits).CopyTo(signal);
+            primitive.Store(cells, voxel, gasBits);
+            Vector.BitwiseAnd(primitive.SignalSpeed, gasBits).CopyTo(signal);
             ((clamp & Vector<int>.One) | (notFinite & new Vector<int>(2))).CopyTo(flags);
 
-            for (int lane = 0; lane < width; lane++)
+            for (int lane = firstNewLane; lane < width; lane++)
             {
                 maxSignalSpeed = MathF.Max(maxSignalSpeed, signal[lane]);
 
@@ -295,8 +304,93 @@ internal static class EulerCellKernel
                     nonFiniteCells++;
             }
         }
+    }
 
-        return done;
+    /// <summary>
+    ///     The vector twin of <see cref="EulerMixture.ToPrimitive(Kilogram, Mole, JoulePerKelvin64,
+    ///     KilogramMetrePerSecond, KilogramMetrePerSecond, KilogramMetrePerSecond, Joule64, CubicMetre,
+    ///     PascalPerMoleKelvin, out EulerCellState)" />, one cell per lane with the same bits.
+    /// </summary>
+    /// <param name="mass">Total gas mass per lane.</param>
+    /// <param name="inverseMass">
+    ///     <c>1 / mass</c>, computed by the caller as <c>Vector&lt;float&gt;.One / mass</c>. It is a parameter so a
+    ///     caller that already needed it does not divide twice.
+    /// </param>
+    /// <param name="moles">Total moles per lane.</param>
+    /// <param name="heatLow">Heat capacity of the lower half of the lanes.</param>
+    /// <param name="heatHigh">Heat capacity of the upper half of the lanes.</param>
+    /// <param name="momentumX">Momentum along X.</param>
+    /// <param name="momentumY">Momentum along Y.</param>
+    /// <param name="momentumZ">Momentum along Z.</param>
+    /// <param name="energyLow">Total energy of the lower half of the lanes.</param>
+    /// <param name="energyHigh">Total energy of the upper half of the lanes.</param>
+    /// <param name="volume">Voxel volume.</param>
+    /// <param name="pressurePerMoleKelvin"><c>R / V</c>, as for the scalar conversion.</param>
+    /// <param name="lanes">The unmasked primitive state and the kind of each lane.</param>
+    /// <remarks>
+    ///     A lane in neither <see cref="EulerPrimitiveLanes.Gas" /> nor <see cref="EulerPrimitiveLanes.NonFinite" />
+    ///     is <see cref="EulerCellKind.Empty" />. Trace cells are the caller's business, as in the scalar code.
+    /// </remarks>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static void ToPrimitive(
+        Vector<Kilogram> mass, Vector<PerKilogram> inverseMass, Vector<Mole> moles,
+        Vector<JoulePerKelvin64> heatLow, Vector<JoulePerKelvin64> heatHigh,
+        Vector<KilogramMetrePerSecond> momentumX, Vector<KilogramMetrePerSecond> momentumY,
+        Vector<KilogramMetrePerSecond> momentumZ, Vector<Joule64> energyLow, Vector<Joule64> energyHigh,
+        CubicMetre volume, PascalPerMoleKelvin pressurePerMoleKelvin, out EulerPrimitiveLanes lanes)
+    {
+        Vector<float> zero = Vector<float>.Zero;
+        Vector<int> empty = Vector.LessThanOrEqual(mass, zero) | Vector.LessThanOrEqual(moles, zero) |
+                            Vector.Narrow(
+                                Vector.LessThanOrEqual(heatLow, Vector<double>.Zero),
+                                Vector.LessThanOrEqual(heatHigh, Vector<double>.Zero));
+        Vector<MetrePerSecond> velocityX = momentumX * inverseMass;
+        Vector<MetrePerSecond> velocityY = momentumY * inverseMass;
+        Vector<MetrePerSecond> velocityZ = momentumZ * inverseMass;
+
+        Vector.Widen(
+            momentumX, out Vector<KilogramMetrePerSecond64> pxLow, out Vector<KilogramMetrePerSecond64> pxHigh);
+        Vector.Widen(
+            momentumY, out Vector<KilogramMetrePerSecond64> pyLow, out Vector<KilogramMetrePerSecond64> pyHigh);
+        Vector.Widen(
+            momentumZ, out Vector<KilogramMetrePerSecond64> pzLow, out Vector<KilogramMetrePerSecond64> pzHigh);
+        Vector.Widen(velocityX, out Vector<MetrePerSecond64> vxLow, out Vector<MetrePerSecond64> vxHigh);
+        Vector.Widen(velocityY, out Vector<MetrePerSecond64> vyLow, out Vector<MetrePerSecond64> vyHigh);
+        Vector.Widen(velocityZ, out Vector<MetrePerSecond64> vzLow, out Vector<MetrePerSecond64> vzHigh);
+        Vector<Scalar64> half = new Vector<double>(0.5d);
+        Vector<Joule64> kineticLow = half * (pxLow * vxLow + pyLow * vyLow + pzLow * vzLow);
+        Vector<Joule64> kineticHigh = half * (pxHigh * vxHigh + pyHigh * vyHigh + pzHigh * vzHigh);
+        Vector<Joule64> internalLow = Vector.Max(Vector<double>.Zero, energyLow - kineticLow);
+        Vector<Joule64> internalHigh = Vector.Max(Vector<double>.Zero, energyHigh - kineticHigh);
+        Vector<Kelvin> temperature = Vector.Narrow(internalLow / heatLow, internalHigh / heatHigh);
+
+        Vector<Pascal> pressure = moles * temperature * new Vector<float>(pressurePerMoleKelvin);
+        Vector<JoulePerKelvin> molarGasTerm = moles * new Vector<float>(AtmosPhysicalConstants.MolarGasConstant);
+        Vector.Widen(molarGasTerm, out Vector<JoulePerKelvin64> gasLow, out Vector<JoulePerKelvin64> gasHigh);
+        Vector<Scalar> gamma = Vector.Narrow((heatLow + gasLow) / heatLow, (heatHigh + gasHigh) / heatHigh);
+        Vector<MetrePerSecond> soundSpeed = Vector.SquareRoot(gamma * molarGasTerm * temperature * inverseMass);
+        Vector<CubicMetre64> volumeDouble = new Vector<double>(volume);
+        Vector<JoulePerCubicMetre> energyDensity = Vector.Narrow(energyLow / volumeDouble, energyHigh / volumeDouble);
+
+        Vector<float> infinity = new Vector<float>(float.PositiveInfinity);
+        Vector<int> finite = Vector.LessThan(Vector.Abs(temperature), infinity) &
+                             Vector.LessThan(Vector.Abs(pressure), infinity) &
+                             Vector.LessThan(Vector.Abs(soundSpeed), infinity) &
+                             Vector.LessThan(Vector.Abs(energyDensity), infinity) &
+                             Vector.LessThan(Vector.Abs(inverseMass), infinity);
+
+        lanes.Density = mass / new Vector<float>(volume);
+        lanes.VelocityX = velocityX;
+        lanes.VelocityY = velocityY;
+        lanes.VelocityZ = velocityZ;
+        lanes.Pressure = pressure;
+        lanes.EnergyDensity = energyDensity;
+        lanes.SoundSpeed = soundSpeed;
+        lanes.InverseMass = inverseMass;
+        lanes.SignalSpeed = Vector.Max(Vector.Max(Vector.Abs(velocityX), Vector.Abs(velocityY)), Vector.Abs(velocityZ)) +
+                            soundSpeed;
+        lanes.Gas = Vector.AndNot(finite, empty);
+        lanes.NonFinite = ~(empty | finite);
     }
 
     /// <summary>
@@ -311,9 +405,9 @@ internal static class EulerCellKernel
     /// <returns>The cell's new signal speed, or zero for a trace cell.</returns>
     /// <remarks>
     ///     <para>
-    ///         The sweep calls this for the cells <see cref="UpdateRun" /> leaves. Those are the tail of a run and the
-    ///         air cells of a row that holds non-air voxels. Every field of the write buffer is written for every air
-    ///         cell, so no stale value from an earlier sweep survives in it.
+    ///         The sweep calls this for air spans shorter than one vector. It also calls this for every cell when
+    ///         <see cref="Enabled" /> is false. Every field of the write buffer is written for every air cell, so no
+    ///         stale value from an earlier sweep survives in it.
     ///     </para>
     ///     <para>
     ///         The species pass has already written the species rows. Momentum is updated in float. The energy

@@ -60,8 +60,10 @@ public sealed class VoxelSelection
 ///     A coherent detached observation of a simulation state.
 /// </summary>
 public sealed record SimulationStateReport(
-    int Tick,
+    long Tick,
     float SimulationRate,
+    int TickRate,
+    double SimulatedTime,
     int SimulationChunkCount,
     SimulationConfigurationReport Config,
     SolverStepReport[] SolverPipeline,
@@ -85,7 +87,7 @@ public sealed record SimulationConfigurationReport(
     float SpaceTemperatureK,
     float BulkFlowCoefficient,
     float VacuumThresholdPa,
-    int SleepThreshold,
+    float SleepDelay,
     float SleepEpsilonPercent,
     float ThermalConductance,
     float CondensationRateFactor,
@@ -105,8 +107,10 @@ public sealed record SimulationConfigurationReport(
 /// </summary>
 public sealed record EulerFlowConfigurationReport(
     float CourantNumber,
-    int MaxSubstepsPerTick,
+    int MaxSubstepsPerSecond,
+    float SettlePeriod,
     float VelocityFloorMps,
+    float SleepSpeedMps,
     float MaxVelocityMps,
     float WakePressureDeltaPa,
     bool AllMachCorrection,
@@ -130,11 +134,11 @@ public sealed record GasConfigurationReport(
 /// <summary>
 ///     Wire metadata for one solver stage, in execution order.
 /// </summary>
-public sealed record SolverStepReport(string Name, bool IsEnabled, string Kind);
+public sealed record SolverStepReport(string Name, bool IsEnabled, string Kind, int Interval);
 
 /// <summary>
-///     What the <c>euler-flow</c> stage did on the most recent tick, from
-///     <see cref="Numos.API.AtmosSimulation.LastFlowDiagnostics" />. All zeros before the first tick, after a
+///     What the <c>euler-flow</c> stage did on its most recent run, from
+///     <see cref="Numos.API.AtmosSimulation.LastFlowDiagnostics" />. All zeros before the first run, after a
 ///     restore, and under the legacy transport model.
 /// </summary>
 public sealed record FlowDiagnosticsReport(

@@ -26,7 +26,7 @@ internal static class BoundaryEventBatches<T> where T : struct
 internal sealed class BoundaryEventBatchStorage<T> where T : struct
 {
     private BoundaryEventBatch<T>[] _batches = [];
-    private int _producedTick = -1;
+    private long _producedTick = -1;
 
     internal int Count { get; private set; }
 
@@ -36,7 +36,7 @@ internal sealed class BoundaryEventBatchStorage<T> where T : struct
     ///     Invalidates any unconsumed output and begins collecting batches for a new tick.
     /// </summary>
     /// <param name="tickCount">The tick that will own the new batches.</param>
-    internal void BeginTick(int tickCount)
+    internal void BeginTick(long tickCount)
     {
         _producedTick = tickCount;
         Count = 0;
@@ -64,7 +64,7 @@ internal sealed class BoundaryEventBatchStorage<T> where T : struct
     /// </summary>
     /// <param name="tickCount">The consumer's current tick.</param>
     /// <returns><see langword="true" /> when the producer completed batches for this tick.</returns>
-    internal bool TryConsume(int tickCount)
+    internal bool TryConsume(long tickCount)
     {
         bool isCurrent = _producedTick == tickCount;
         _producedTick = -1;

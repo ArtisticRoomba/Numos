@@ -152,6 +152,7 @@ internal static class SpeciesDiffusionKernel
     /// <param name="start">The first active-air index owned by this invocation.</param>
     /// <param name="length">The number of active-air indices owned by this invocation.</param>
     /// <param name="config">The immutable configuration snapshot for the tick.</param>
+    /// <param name="deltaTime">The gas time the transfers cover.</param>
     /// <remarks>
     ///     <para>
     ///         A voxel's transfer depends on its post-bulk moles, pressure, and temperature, its neighbor count,
@@ -171,7 +172,8 @@ internal static class SpeciesDiffusionKernel
         ref DiffusionWorkspace workspace,
         int start,
         int length,
-        AtmosSolverConfigSnapshot config)
+        AtmosSolverConfigSnapshot config,
+        Second deltaTime)
     {
         var chunk = workspace.Chunk!;
         int gasCount = chunk.ActiveGasCount;
@@ -200,7 +202,7 @@ internal static class SpeciesDiffusionKernel
                 Mole sourceMoles = gasChannel.Moles[voxelIndex];
                 workspace.DiffusionTransfers![transferBase + gas] = sourceMoles <= 0f
                     ? 0f
-                    : TransferAmount(config.GetDiffusionCoefficient(gasChannel.GasId), environmentFactor, sourceMoles);
+                    : TransferAmount(config.GetDiffusionCoefficient(gasChannel.GasId), environmentFactor, sourceMoles, deltaTime);
             }
         }
     }
@@ -243,6 +245,7 @@ internal static class SpeciesDiffusionKernel
     /// <param name="referenceDiffusivity">The gas's configured diffusivity, in m²/s.</param>
     /// <param name="environmentFactor">The source voxel's <see cref="EnvironmentFactor" />.</param>
     /// <param name="sourceMoles">The source voxel's positive moles of the gas.</param>
+    /// <param name="deltaTime">The gas time the transfer covers.</param>
     /// <remarks>
     ///     A voxel can lose at most one seventh of a gas to each of its six neighbors plus itself.
     ///     The cap keeps the debit from exceeding inventory.
@@ -250,10 +253,10 @@ internal static class SpeciesDiffusionKernel
     ///     The expression order here is what both sides of that exchange agree on bit for bit.
     /// </remarks>
     internal static Mole TransferAmount(
-        SquareMetrePerSecond referenceDiffusivity, PerSquareMetre environmentFactor, Mole sourceMoles)
+        SquareMetrePerSecond referenceDiffusivity, PerSquareMetre environmentFactor, Mole sourceMoles, Second deltaTime)
     {
         PerSecond diffusionConstant = referenceDiffusivity * environmentFactor;
-        Mole molesDiffused = diffusionConstant * sourceMoles * AtmosSolverConstants.FixedTimeStep;
+        Mole molesDiffused = diffusionConstant * sourceMoles * deltaTime;
         if (molesDiffused * 7 > sourceMoles)
             molesDiffused = sourceMoles / 7;
 

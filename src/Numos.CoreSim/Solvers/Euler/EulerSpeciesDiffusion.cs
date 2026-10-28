@@ -46,6 +46,7 @@ internal static class EulerSpeciesDiffusion
     /// <param name="activeCount">How many of <paramref name="active" /> are bound this tick.</param>
     /// <param name="workerCount">The worker count the schedule arithmetic uses.</param>
     /// <param name="config">The tick's configuration snapshot.</param>
+    /// <param name="deltaTime">The gas time the diffusion covers.</param>
     /// <remarks>
     ///     Two schedules, as in the sweeps. With at least as many active chunks as workers, one item per chunk runs
     ///     the kernel's three phases back to back. Otherwise the active voxels are tiled and each phase runs over
@@ -54,7 +55,8 @@ internal static class EulerSpeciesDiffusion
     ///     the same bits.
     /// </remarks>
     internal static void Run(
-        EulerChunkWorkspace[] active, int activeCount, int workerCount, AtmosSolverConfigSnapshot config)
+        EulerChunkWorkspace[] active, int activeCount, int workerCount, AtmosSolverConfigSnapshot config,
+        Second deltaTime)
     {
         if (activeCount == 0)
             return;
@@ -65,7 +67,7 @@ internal static class EulerSpeciesDiffusion
         {
             if (activeCount >= workerCount)
             {
-                ParallelPhase.Run(activeCount, new DiffuseChunkAction(active, config));
+                ParallelPhase.Run(activeCount, new DiffuseChunkAction(active, config, deltaTime));
             }
             else
             {
@@ -78,12 +80,12 @@ internal static class EulerSpeciesDiffusion
                 int tileSize = VoxelTiling.GetTileSize(totalActiveAirCount, workerCount);
                 workItems = VoxelTiling.Rent(new ActiveAirCounts(active), activeCount, tileSize, out workItemCount);
 
-                ParallelPhase.Run(workItemCount, new ResolveAndPrepareAction(active, workItems, config));
+                ParallelPhase.Run(workItemCount, new ResolveAndPrepareAction(active, workItems, config, deltaTime));
                 ParallelPhase.Run(workItemCount, new GatherAction(active, workItems, config));
                 ParallelPhase.Run(workItemCount, new ApplyAction(active, workItems, config));
             }
 
-            ParallelPhase.Run(activeCount, new ComputeBoundaryAction(active, config));
+            ParallelPhase.Run(activeCount, new ComputeBoundaryAction(active, config, deltaTime));
             ParallelPhase.Run(activeCount, new ApplyBoundaryAction(active, config));
         }
         finally
@@ -105,11 +107,11 @@ internal static class EulerSpeciesDiffusion
     ///     Classifies the in-chunk neighbours of one tile of voxels and fixes their transfer amounts.
     /// </summary>
     private static void ResolveAndPrepare(
-        EulerChunkWorkspace workspace, int start, int length, AtmosSolverConfigSnapshot config)
+        EulerChunkWorkspace workspace, int start, int length, AtmosSolverConfigSnapshot config, Second deltaTime)
     {
         ref DiffusionWorkspace diffusion = ref workspace.Diffusion;
         ClassifyNeighbors(workspace.Chunk, workspace.OpenMask, workspace.VoidMask, ref diffusion, start, length);
-        SpeciesDiffusionKernel.PrepareDiffusion(ref diffusion, start, length, config);
+        SpeciesDiffusionKernel.PrepareDiffusion(ref diffusion, start, length, config, deltaTime);
     }
 
     /// <summary>
@@ -181,14 +183,33 @@ internal static class EulerSpeciesDiffusion
     ///     Records the net exchange of every boundary voxel of one chunk with its active neighbours.
     /// </summary>
     /// <remarks>
-    ///     Reads live fields of this chunk and its neighbours and writes only this chunk's
-    ///     <see cref="EulerBoundaryExchange" />. Neighbour fields are stable because no apply phase has started.
+    ///     <para>
+    ///         Reads live fields of this chunk and its neighbours and writes only this chunk's
+    ///         <see cref="EulerBoundaryExchange" />. Neighbour fields are stable because no apply phase has started.
+    ///     </para>
+    ///     <para>
+    ///         Only the faces toward a registered chunk are walked, because <see cref="EulerFaceTopology.Build" />
+    ///         sets edge bits only there. The walk visits voxels in ascending flat index, the order of the active-air
+    ///         list. <see cref="ApplyBoundary" /> creates missing gas channels in record order, so the order decides
+    ///         the channel layout. An edge or corner voxel is visited once and records all its faces together.
+    ///     </para>
     /// </remarks>
-    private static void ComputeBoundary(EulerChunkWorkspace workspace, AtmosSolverConfigSnapshot config)
+    private static void ComputeBoundary(
+        EulerChunkWorkspace workspace, AtmosSolverConfigSnapshot config, Second deltaTime)
     {
         AtmosChunk chunk = workspace.Chunk;
         EulerBoundaryExchange exchange = workspace.Boundary;
         exchange.Clear();
+
+        bool negX = workspace.NeighborChunks[0] != null;
+        bool posX = workspace.NeighborChunks[1] != null;
+        bool negY = workspace.NeighborChunks[2] != null;
+        bool posY = workspace.NeighborChunks[3] != null;
+        bool negZ = workspace.NeighborChunks[4] != null;
+        bool posZ = workspace.NeighborChunks[5] != null;
+        if (!(negX || posX || negY || posY || negZ || posZ))
+            return;
+
         Int3 last = chunk.Dimensions - new Int3(1, 1, 1);
         Metre voxelEdge = SpeciesDiffusionKernel.GetVoxelEdge(config.VoxelVolume);
 
@@ -207,60 +228,98 @@ internal static class EulerSpeciesDiffusion
 
         var channels = new FaceGasChannels(chunk, stride, scratch);
 
-        for (int activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
+        int width = chunk.Width;
+        for (int z = 0; z <= last.Z; z++)
         {
-            ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
-            byte open = workspace.OpenMask[voxelIndex];
-            byte sink = workspace.VoidMask[voxelIndex];
-            if ((open | sink) == 0)
-                continue;
-
-            Int3 position = chunk.GetXyzInt3(voxelIndex);
-            if (!NeighborResolution.IsBoundary(chunk, position))
-                continue;
-
-            bool begun = false;
-            Joule64 energyDelta = 0d;
-            for (int direction = 0; direction < NeighborResolution.NeighborDirections.Length; direction++)
+            for (int y = 0; y <= last.Y; y++)
             {
-                if (!EulerFaceTopology.IsOnEdge(position, last, direction))
+                int rowStart = (z * chunk.Height + y) * width;
+
+                // A row on a walked Y or Z face lies wholly on it.
+                // Any other row touches the walked faces only at its ends.
+                if ((z == 0 && negZ) || (z == last.Z && posZ) || (y == 0 && negY) || (y == last.Y && posY))
+                {
+                    for (int x = 0; x < width; x++)
+                    {
+                        ComputeBoundaryVoxel(
+                            workspace, (ushort)(rowStart + x), new Int3(x, y, z), last, ref channels, config,
+                            voxelEdge, deltaTime);
+                    }
+                }
+                else if (negX || posX)
+                {
+                    // Visiting an end whose face is not walked is harmless, because it has no edge bit to record.
+                    ComputeBoundaryVoxel(
+                        workspace, (ushort)rowStart, new Int3(0, y, z), last, ref channels, config, voxelEdge,
+                        deltaTime);
+                    if (last.X > 0)
+                    {
+                        ComputeBoundaryVoxel(
+                            workspace, (ushort)(rowStart + last.X), new Int3(last.X, y, z), last, ref channels, config,
+                            voxelEdge, deltaTime);
+                    }
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    ///     Records one boundary voxel's exchange across every chunk face it sits on, in direction order, as one
+    ///     record with one energy delta. A voxel with no open or void face out of the chunk records nothing.
+    /// </summary>
+    private static void ComputeBoundaryVoxel(
+        EulerChunkWorkspace workspace, ushort voxelIndex, Int3 position, Int3 last, ref FaceGasChannels channels,
+        AtmosSolverConfigSnapshot config, Metre voxelEdge, Second deltaTime)
+    {
+        // Masks are zero off the active-air list, so this also skips solid and void voxels.
+        byte open = workspace.OpenMask[voxelIndex];
+        byte sink = workspace.VoidMask[voxelIndex];
+        if ((open | sink) == 0)
+            return;
+
+        AtmosChunk chunk = workspace.Chunk;
+        EulerBoundaryExchange exchange = workspace.Boundary;
+        bool begun = false;
+        Joule64 energyDelta = 0d;
+        for (int direction = 0; direction < NeighborResolution.NeighborDirections.Length; direction++)
+        {
+            if (!EulerFaceTopology.IsOnEdge(position, last, direction))
+                continue;
+
+            AtmosChunk? neighborChunk;
+            if (EulerFaceTopology.IsOpen(open, direction))
+            {
+                EulerChunkWorkspace? neighbor = workspace.NeighborWorkspaces[direction];
+                if (neighbor == null)
                     continue;
 
-                AtmosChunk? neighborChunk;
-                if (EulerFaceTopology.IsOpen(open, direction))
-                {
-                    EulerChunkWorkspace? neighbor = workspace.NeighborWorkspaces[direction];
-                    if (neighbor == null)
-                        continue;
-
-                    neighborChunk = neighbor.Chunk;
-                }
-                else if (EulerFaceTopology.IsVoid(sink, direction))
-                {
-                    neighborChunk = null;
-                }
-                else
-                {
-                    continue;
-                }
-
-                if (!begun)
-                {
-                    exchange.BeginVoxel(voxelIndex);
-                    begun = true;
-                }
-
-                ExchangeFace(
-                    chunk, voxelIndex, neighborChunk,
-                    EulerFaceTopology.NeighborIndexAcrossFace(chunk, voxelIndex, direction),
-                    neighborChunk == null ? default : channels.OwnToNeighbor(direction, neighborChunk),
-                    neighborChunk == null ? default : channels.NeighborToOwn(direction, neighborChunk),
-                    config, voxelEdge, exchange, ref energyDelta);
+                neighborChunk = neighbor.Chunk;
+            }
+            else if (EulerFaceTopology.IsVoid(sink, direction))
+            {
+                neighborChunk = null;
+            }
+            else
+            {
+                continue;
             }
 
-            if (begun)
-                exchange.EndVoxel(energyDelta);
+            if (!begun)
+            {
+                exchange.BeginVoxel(voxelIndex);
+                begun = true;
+            }
+
+            ExchangeFace(
+                chunk, voxelIndex, neighborChunk,
+                EulerFaceTopology.NeighborIndexAcrossFace(chunk, voxelIndex, direction),
+                neighborChunk == null ? default : channels.OwnToNeighbor(direction, neighborChunk),
+                neighborChunk == null ? default : channels.NeighborToOwn(direction, neighborChunk),
+                config, voxelEdge, deltaTime, exchange, ref energyDelta);
         }
+
+        if (begun)
+            exchange.EndVoxel(energyDelta);
     }
 
     /// <summary>
@@ -281,6 +340,7 @@ internal static class EulerSpeciesDiffusion
     /// </param>
     /// <param name="config">The tick's configuration snapshot.</param>
     /// <param name="voxelEdge">The voxel edge from <see cref="SpeciesDiffusionKernel.GetVoxelEdge" />.</param>
+    /// <param name="deltaTime">The gas time the amounts cover.</param>
     /// <param name="exchange">The record buffer of <paramref name="chunk" />.</param>
     /// <param name="energyDelta">The cell's running energy delta.</param>
     /// <remarks>
@@ -304,7 +364,8 @@ internal static class EulerSpeciesDiffusion
     private static void ExchangeFace(
         AtmosChunk chunk, ushort voxelIndex, AtmosChunk? neighborChunk, ushort neighborIndex,
         ReadOnlySpan<int> ownToNeighbor, ReadOnlySpan<int> neighborToOwn,
-        AtmosSolverConfigSnapshot config, Metre voxelEdge, EulerBoundaryExchange exchange, ref Joule64 energyDelta)
+        AtmosSolverConfigSnapshot config, Metre voxelEdge, Second deltaTime, EulerBoundaryExchange exchange,
+        ref Joule64 energyDelta)
     {
         Kelvin temperature = config.GetValidatedTemp(chunk.Temperature[voxelIndex]);
         Pascal pressure = chunk.TotalPressure[voxelIndex];
@@ -321,7 +382,7 @@ internal static class EulerSpeciesDiffusion
                 if (moles <= 0f)
                     continue;
 
-                Mole debit = SpeciesDiffusionKernel.TransferAmount(config.GetDiffusionCoefficient(channel.GasId), factor, moles);
+                Mole debit = SpeciesDiffusionKernel.TransferAmount(config.GetDiffusionCoefficient(channel.GasId), factor, moles, deltaTime);
                 if (debit == 0f)
                     continue;
 
@@ -345,8 +406,8 @@ internal static class EulerSpeciesDiffusion
             int neighborChannel = ownToNeighbor[gas];
             Mole neighborMoles = neighborChannel >= 0 ? neighborChunk.ActiveGases[neighborChannel].Moles[neighborIndex] : 0f;
             SquareMetrePerSecond diffusivity = config.GetDiffusionCoefficient(gasId);
-            Mole debit = Amount(diffusivity, factor, moles, neighborMoles);
-            Mole deposit = Amount(diffusivity, neighborFactor, neighborMoles, moles);
+            Mole debit = Amount(diffusivity, factor, moles, neighborMoles, deltaTime);
+            Mole deposit = Amount(diffusivity, neighborFactor, neighborMoles, moles, deltaTime);
             Record(gasId, deposit, debit, neighborTemperature, temperature, config, exchange, ref energyDelta);
         }
 
@@ -358,7 +419,7 @@ internal static class EulerSpeciesDiffusion
 
             Mole deposit = Amount(
                 config.GetDiffusionCoefficient(gasId), neighborFactor,
-                neighborChunk.ActiveGases[gas].Moles[neighborIndex], 0f);
+                neighborChunk.ActiveGases[gas].Moles[neighborIndex], 0f, deltaTime);
 
             Record(gasId, deposit, 0f, neighborTemperature, temperature, config, exchange, ref energyDelta);
         }
@@ -369,12 +430,13 @@ internal static class EulerSpeciesDiffusion
     ///     suppression rule drops the deposit.
     /// </summary>
     private static Mole Amount(
-        SquareMetrePerSecond diffusivity, PerSquareMetre sourceFactor, Mole sourceMoles, Mole destinationMoles)
+        SquareMetrePerSecond diffusivity, PerSquareMetre sourceFactor, Mole sourceMoles, Mole destinationMoles,
+        Second deltaTime)
     {
         if (sourceMoles <= 0f || sourceFactor == 0f)
             return 0f;
 
-        Mole molesDiffused = SpeciesDiffusionKernel.TransferAmount(diffusivity, sourceFactor, sourceMoles);
+        Mole molesDiffused = SpeciesDiffusionKernel.TransferAmount(diffusivity, sourceFactor, sourceMoles, deltaTime);
         return SpeciesDiffusionKernel.IsSuppressed(molesDiffused, destinationMoles) ? 0f : molesDiffused;
     }
 
@@ -442,14 +504,15 @@ internal static class EulerSpeciesDiffusion
         }
     }
 
-    private readonly struct DiffuseChunkAction(EulerChunkWorkspace[] active, AtmosSolverConfigSnapshot config) : IAction
+    private readonly struct DiffuseChunkAction(
+        EulerChunkWorkspace[] active, AtmosSolverConfigSnapshot config, Second deltaTime) : IAction
     {
         public void Invoke(int index)
         {
             EulerChunkWorkspace workspace = active[index];
             int activeAirCount = workspace.Chunk.ActiveAirCount;
             Initialize(workspace);
-            ResolveAndPrepare(workspace, 0, activeAirCount, config);
+            ResolveAndPrepare(workspace, 0, activeAirCount, config, deltaTime);
             SpeciesDiffusionKernel.GatherDiffusionDeltas(ref workspace.Diffusion, 0, activeAirCount, config);
             SpeciesDiffusionKernel.ApplyDeltas(ref workspace.Diffusion, 0, activeAirCount, config);
         }
@@ -464,12 +527,13 @@ internal static class EulerSpeciesDiffusion
     }
 
     private readonly struct ResolveAndPrepareAction(
-        EulerChunkWorkspace[] active, VoxelWorkItem[] items, AtmosSolverConfigSnapshot config) : IAction
+        EulerChunkWorkspace[] active, VoxelWorkItem[] items, AtmosSolverConfigSnapshot config,
+        Second deltaTime) : IAction
     {
         public void Invoke(int index)
         {
             VoxelWorkItem item = items[index];
-            ResolveAndPrepare(active[item.WorkspaceIndex], item.Start, item.Length, config);
+            ResolveAndPrepare(active[item.WorkspaceIndex], item.Start, item.Length, config, deltaTime);
         }
     }
 
@@ -494,11 +558,12 @@ internal static class EulerSpeciesDiffusion
         }
     }
 
-    private readonly struct ComputeBoundaryAction(EulerChunkWorkspace[] active, AtmosSolverConfigSnapshot config) : IAction
+    private readonly struct ComputeBoundaryAction(
+        EulerChunkWorkspace[] active, AtmosSolverConfigSnapshot config, Second deltaTime) : IAction
     {
         public void Invoke(int index)
         {
-            ComputeBoundary(active[index], config);
+            ComputeBoundary(active[index], config, deltaTime);
         }
     }
 

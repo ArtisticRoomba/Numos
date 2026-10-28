@@ -17,13 +17,18 @@ namespace Numos.Workbench;
 ///     The preset that fills the initial stage list. <see cref="WorkbenchSession.ApplyTransportPreset" /> and
 ///     <see cref="WorkbenchSession.SetSolverLayout" /> change the stages later, and the timeline records each change.
 /// </param>
+/// <param name="TickRate">
+///     Ticks per second of atmospheric time. It must be a multiple of 20 from 20 to 100000, and it is fixed for the
+///     life of the project.
+/// </param>
 public readonly record struct WorkbenchProjectOptions(
     string? Name,
     int ChunkWidth = AtmosChunkConstants.DefaultWidth,
     int ChunkHeight = AtmosChunkConstants.DefaultHeight,
     int ChunkDepth = 1,
     bool IncludeDefaultGases = true,
-    AtmosTransportModel TransportModel = AtmosTransportModel.Euler);
+    AtmosTransportModel TransportModel = AtmosTransportModel.Euler,
+    int TickRate = AtmosWorld.DefaultTickRate);
 
 /// <summary>
 ///     Names the program that hosts a session. The session writes it to the log banner and to saved replays.
@@ -195,7 +200,7 @@ public sealed partial class WorkbenchSession : IDisposable
         AtmosWorld? world = null;
         try
         {
-            world = new AtmosWorld(config, options.TransportModel);
+            world = new AtmosWorld(config, options.TransportModel, options.TickRate);
             var simulation = world.CreateSimulation(options.ChunkWidth, options.ChunkHeight, options.ChunkDepth);
             if (prepare != null)
             {

@@ -25,7 +25,7 @@ public sealed class WorkbenchSessionTests
     private static WorkbenchSession CreateSession(bool includeGases = true)
     {
         var session = new WorkbenchSession();
-        session.CreateProject(new WorkbenchProjectOptions("Test", 4, 4, 1, includeGases));
+        session.CreateProject(new WorkbenchProjectOptions("Test", 4, 4, 1, includeGases, TickRate: 20));
         return session;
     }
 
@@ -139,7 +139,7 @@ public sealed class WorkbenchSessionTests
         var entries = new List<WorkbenchLogEntry>();
         session.Log.EntryWritten += entries.Add;
 
-        int tick = session.Tick(25, 10);
+        long tick = session.Tick(25, 10);
 
         Assert.That(tick, Is.EqualTo(25));
         Assert.That(session.World!.TickCount, Is.EqualTo(25));
@@ -419,5 +419,30 @@ public sealed class WorkbenchSessionTests
         Assert.That(closing, Is.EqualTo(1));
         Assert.That(session.HasProject, Is.False);
         Assert.That(session.ProjectName, Is.Null);
+    }
+
+    [Test]
+    public void CreateProject_UsesTheRequestedTickRate()
+    {
+        using var session = new WorkbenchSession();
+        session.CreateProject(new WorkbenchProjectOptions("Rate", 2, 2, 1, false, TickRate: 960));
+
+        Assert.That(session.World!.TickRate, Is.EqualTo(960));
+    }
+
+    [Test]
+    public void AccumulatePlayback_RunsInRealTimeAtAnyRate()
+    {
+        using var slow = CreateSession(false);
+        using var fast = new WorkbenchSession();
+        fast.CreateProject(new WorkbenchProjectOptions("Fast", 2, 2, 1, false, TickRate: 960));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(slow.AccumulatePlayback(0.5f), Is.EqualTo(10));
+            Assert.That(fast.AccumulatePlayback(0.5f), Is.EqualTo(480));
+            Assert.That(fast.AccumulatePlayback(0.001f), Is.EqualTo(0));
+            Assert.That(fast.AccumulatePlayback(0.001f), Is.EqualTo(1));
+        });
     }
 }

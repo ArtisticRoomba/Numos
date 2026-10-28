@@ -9,7 +9,7 @@ public sealed class AtmosRecordingTests
     [Test]
     public void Update_DoesNotRecordHostFrameTimingAndRestoreResetsClockPhase()
     {
-        using var world = new AtmosWorld();
+        using var world = new AtmosWorld(new AtmosConfig(), AtmosTransportModel.Euler, 20);
         var simulation = world.CreateSimulation(1, 1, 1);
         world.StartRecording();
         world.Update(0.025f);
@@ -32,12 +32,12 @@ public sealed class AtmosRecordingTests
         world.StartRecording();
         world.Tick();
 
-        var config = new AtmosConfig(world.Config) { SleepThreshold = 10 };
+        var config = new AtmosConfig(world.Config) { SleepDelay = 0.5f };
         Assert.That(world.SetAtmosConfig(config), Is.True);
         Assert.That(world.SetAtmosConfig(new AtmosConfig(world.Config)), Is.False);
 
         world.Tick();
-        config.SleepThreshold = 20;
+        config.SleepDelay = 1f;
         Assert.That(world.SetAtmosConfig(config), Is.True);
 
         var recording = world.StopRecording();
@@ -57,9 +57,9 @@ public sealed class AtmosRecordingTests
         var second = (SetAtmosWorldConfigOperation)recording.Operations[1].Operation;
         Assert.Multiple(() =>
         {
-            Assert.That(first.Config.SleepThreshold, Is.EqualTo(10));
-            Assert.That(second.Config.SleepThreshold, Is.EqualTo(20));
-            Assert.That(simulation.Config.SleepThreshold, Is.EqualTo(20));
+            Assert.That(first.Config.SleepDelay, Is.EqualTo(0.5f));
+            Assert.That(second.Config.SleepDelay, Is.EqualTo(1f));
+            Assert.That(simulation.Config.SleepDelay, Is.EqualTo(1f));
         });
     }
 
@@ -68,7 +68,7 @@ public sealed class AtmosRecordingTests
     {
         using var world = new AtmosWorld();
         var simulation = world.CreateSimulation(1, 1, 1);
-        var replacement = new AtmosConfig(world.Config) { SleepThreshold = 17 };
+        var replacement = new AtmosConfig(world.Config) { SleepDelay = 0.85f };
         world.Solvers.Register(
             "set-config",
             _ =>
@@ -83,7 +83,7 @@ public sealed class AtmosRecordingTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(simulation.Config.SleepThreshold, Is.EqualTo(17));
+            Assert.That(simulation.Config.SleepDelay, Is.EqualTo(0.85f));
             Assert.That(recording.Head, Is.EqualTo(new AtmosTimelinePosition(1, 0)));
             Assert.That(recording.Operations, Is.Empty);
         });
@@ -94,17 +94,17 @@ public sealed class AtmosRecordingTests
     {
         var builder = new AtmosConfig
         {
-            SleepThreshold = 4,
+            SleepDelay = 0.2f,
             GasRegistry = [new GasProperties { Name = "Initial" }]
         };
 
         using var simulation = new AtmosSimulation(builder, 1, 1, 1);
-        builder.SleepThreshold = 9;
+        builder.SleepDelay = 0.45f;
         builder.GasRegistry.Add(new GasProperties { Name = "Later" });
 
         Assert.Multiple(() =>
         {
-            Assert.That(simulation.Config.SleepThreshold, Is.EqualTo(4));
+            Assert.That(simulation.Config.SleepDelay, Is.EqualTo(0.2f));
             Assert.That(simulation.Config.GasRegistry, Has.Count.EqualTo(1));
             Assert.That(simulation.Config.GasRegistry[0].Name, Is.EqualTo("Initial"));
         });

@@ -32,6 +32,11 @@ internal sealed class HeadlessRequest
     /// </summary>
     public string? TransportModel { get; init; }
 
+    /// <summary>
+    ///     Ticks per second of atmospheric time. `createProject` reads it.
+    /// </summary>
+    public int? TickRate { get; init; }
+
     // Chunk and voxel addressing.
     public Coordinate? Position { get; init; }
     public Coordinate? Voxel { get; init; }
@@ -76,6 +81,16 @@ internal sealed class HeadlessRequest
 
     // Stepping, solvers, and the timeline.
     public int? Count { get; init; }
+
+    /// <summary>
+    ///     Simulated seconds for `tick`, as an alternative to <see cref="Count" />.
+    /// </summary>
+    public double? Seconds { get; init; }
+
+    /// <summary>
+    ///     Ticks between runs of the stage that `setSolverInterval` names.
+    /// </summary>
+    public int? Interval { get; init; }
     public int? ProgressInterval { get; init; }
     public string? Solver { get; init; }
     public bool? Enabled { get; init; }
@@ -134,6 +149,11 @@ internal sealed class SolverLayoutEntryRequest
 {
     public string? Name { get; init; }
     public bool? Enabled { get; init; }
+
+    /// <summary>
+    ///     Ticks between runs. Missing or zero keeps the current interval of a registered stage.
+    /// </summary>
+    public int? Interval { get; init; }
 }
 
 /// <summary>
@@ -272,7 +292,7 @@ internal sealed class ConfigurationPatch
     public float? SpaceTemperatureK { get; init; }
     public float? BulkFlowCoefficient { get; init; }
     public float? VacuumThresholdPa { get; init; }
-    public int? SleepThreshold { get; init; }
+    public float? SleepDelay { get; init; }
     public float? SleepEpsilonPercent { get; init; }
     public float? ThermalConductance { get; init; }
     public float? CondensationRateFactor { get; init; }
@@ -306,7 +326,7 @@ internal sealed class ConfigurationPatch
         Check(AtmosConfigFields.CondensationRateFactor, CondensationRateFactor);
         Check(AtmosConfigFields.MaxPressureTransferFractionPerNeighbor, MaxPressureTransferFractionPerNeighbor);
         Check(AtmosConfigFields.AccumulatorWakeThreshold, AccumulatorWakeThresholdPa);
-        Check(AtmosConfigFields.SleepThreshold, SleepThreshold);
+        Check(AtmosConfigFields.SleepDelay, SleepDelay);
         Check(AtmosConfigFields.AccumulatorMaxAliveTicks, AccumulatorMaxAliveTicks);
         Check(AtmosConfigFields.ReferenceMolarMass, ReferenceMolarMassKgPerMol);
         Check(AtmosConfigFields.FlameSpeedScale, FlameSpeedScale);
@@ -359,8 +379,8 @@ internal sealed class ConfigurationPatch
         if (VacuumThresholdPa.HasValue)
             config.VacuumThreshold = VacuumThresholdPa.Value;
 
-        if (SleepThreshold.HasValue)
-            config.SleepThreshold = SleepThreshold.Value;
+        if (SleepDelay.HasValue)
+            config.SleepDelay = SleepDelay.Value;
 
         if (SleepEpsilonPercent.HasValue)
             config.SleepEpsilon = SleepEpsilonPercent.Value;
@@ -406,8 +426,10 @@ internal sealed class ConfigurationPatch
 internal sealed class EulerFlowPatch
 {
     public float? CourantNumber { get; init; }
-    public int? MaxSubstepsPerTick { get; init; }
+    public int? MaxSubstepsPerSecond { get; init; }
+    public float? SettlePeriod { get; init; }
     public float? VelocityFloorMps { get; init; }
+    public float? SleepSpeedMps { get; init; }
     public float? MaxVelocityMps { get; init; }
     public float? WakePressureDeltaPa { get; init; }
     public bool? AllMachCorrection { get; init; }
@@ -422,8 +444,10 @@ internal sealed class EulerFlowPatch
     internal void Validate()
     {
         ConfigurationPatch.Check(AtmosConfigFields.EulerCourantNumber, CourantNumber);
-        ConfigurationPatch.Check(AtmosConfigFields.EulerMaxSubstepsPerTick, MaxSubstepsPerTick);
+        ConfigurationPatch.Check(AtmosConfigFields.EulerMaxSubstepsPerSecond, MaxSubstepsPerSecond);
+        ConfigurationPatch.Check(AtmosConfigFields.EulerSettlePeriod, SettlePeriod);
         ConfigurationPatch.Check(AtmosConfigFields.EulerVelocityFloor, VelocityFloorMps);
+        ConfigurationPatch.Check(AtmosConfigFields.EulerSleepSpeed, SleepSpeedMps);
         ConfigurationPatch.Check(AtmosConfigFields.EulerMaxVelocity, MaxVelocityMps);
         ConfigurationPatch.Check(AtmosConfigFields.EulerWakePressureDelta, WakePressureDeltaPa);
         ConfigurationPatch.Check(AtmosConfigFields.EulerMomentumDamping, MomentumDampingPerSecond);
@@ -439,8 +463,10 @@ internal sealed class EulerFlowPatch
         var patched = new EulerFlowConfig
         {
             CourantNumber = CourantNumber ?? current.CourantNumber,
-            MaxSubstepsPerTick = MaxSubstepsPerTick ?? current.MaxSubstepsPerTick,
+            MaxSubstepsPerSecond = MaxSubstepsPerSecond ?? current.MaxSubstepsPerSecond,
+            SettlePeriod = SettlePeriod ?? current.SettlePeriod,
             VelocityFloor = VelocityFloorMps ?? current.VelocityFloor,
+            SleepSpeed = SleepSpeedMps ?? current.SleepSpeed,
             MaxVelocity = MaxVelocityMps ?? current.MaxVelocity,
             WakePressureDelta = WakePressureDeltaPa ?? current.WakePressureDelta,
             AllMachCorrection = AllMachCorrection ?? current.AllMachCorrection,

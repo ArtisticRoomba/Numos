@@ -9,8 +9,8 @@ namespace Numos.Workbench;
 public sealed class ReplayBranchSession
 {
     private readonly List<ReplayBranch> _branches = [];
-    private readonly ulong _checkpointInterval;
-    private readonly Func<AtmosWorld, AtmosWorldReplayArchive, ulong, AtmosWorldReplayTimeline> _restoreTimeline;
+    private readonly double? _checkpointSpacingSeconds;
+    private readonly Func<AtmosWorld, AtmosWorldReplayArchive, double?, AtmosWorldReplayTimeline> _restoreTimeline;
     private readonly AtmosWorld _world;
     private int _nextBranchNumber = 1;
     private ReplayBranch _selectedBranch;
@@ -18,16 +18,15 @@ public sealed class ReplayBranchSession
     public ReplayBranchSession(
         AtmosWorld world,
         AtmosWorldReplayTimeline timeline,
-        ulong checkpointInterval = 50,
-        Func<AtmosWorld, AtmosWorldReplayArchive, ulong, AtmosWorldReplayTimeline>? restoreTimeline = null)
+        double? checkpointSpacingSeconds = null,
+        Func<AtmosWorld, AtmosWorldReplayArchive, double?, AtmosWorldReplayTimeline>? restoreTimeline = null)
     {
         ArgumentNullException.ThrowIfNull(world);
         ArgumentNullException.ThrowIfNull(timeline);
-        ArgumentOutOfRangeException.ThrowIfZero(checkpointInterval);
 
         _world = world;
         Timeline = timeline;
-        _checkpointInterval = checkpointInterval;
+        _checkpointSpacingSeconds = checkpointSpacingSeconds;
         _restoreTimeline = restoreTimeline ?? RestoreTimeline;
         _selectedBranch = new ReplayBranch(0, "main", null, timeline.Start, null);
         _branches.Add(_selectedBranch);
@@ -73,7 +72,7 @@ public sealed class ReplayBranchSession
 
         var fork = Timeline.Position;
         Timeline.SimulateFromHere();
-        Timeline = new AtmosWorldReplayTimeline(_world, _checkpointInterval);
+        Timeline = new AtmosWorldReplayTimeline(_world, _checkpointSpacingSeconds);
 
         var child = new ReplayBranch(
             _branches.Count,
@@ -118,7 +117,7 @@ public sealed class ReplayBranchSession
 
         try
         {
-            var restored = _restoreTimeline(_world, target.Archive!, _checkpointInterval);
+            var restored = _restoreTimeline(_world, target.Archive!, _checkpointSpacingSeconds);
 
             restored.SeekTick(targetTick);
             Timeline = restored;
@@ -129,7 +128,7 @@ public sealed class ReplayBranchSession
             try
             {
                 StopRecording();
-                var restored = _restoreTimeline(_world, sourceArchive, _checkpointInterval);
+                var restored = _restoreTimeline(_world, sourceArchive, _checkpointSpacingSeconds);
 
                 restored.SeekPosition(sourcePosition);
                 if (sourceWasLive)
@@ -184,9 +183,9 @@ public sealed class ReplayBranchSession
     private static AtmosWorldReplayTimeline RestoreTimeline(
         AtmosWorld world,
         AtmosWorldReplayArchive archive,
-        ulong checkpointInterval)
+        double? checkpointSpacingSeconds)
     {
-        return AtmosWorldReplayTimeline.Restore(world, archive, checkpointInterval);
+        return AtmosWorldReplayTimeline.Restore(world, archive, checkpointSpacingSeconds);
     }
 
     private sealed class ReplayBranch(

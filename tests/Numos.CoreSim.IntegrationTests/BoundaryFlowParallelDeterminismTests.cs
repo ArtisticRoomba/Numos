@@ -1,13 +1,20 @@
 using System.Runtime.InteropServices;
 using Numos.API;
 using Numos.Maths;
+using Numos.Tests;
 
 namespace Numos.CoreSim.IntegrationTests;
 
 [TestFixture]
 public sealed class BoundaryFlowParallelDeterminismTests
 {
-    private const ulong X64ExpectedDigest = 18173732527204732791UL;
+    private const ulong X64ExpectedDigest = 7765241427565000519UL;
+
+    /// <summary>
+    ///     The approved x64 digest for the same scenario after 0.15 s at 960 Hz (144 ticks), the default tick rate.
+    ///     Equal to the 20 Hz digest, because the legacy stages give the same state at both rates.
+    /// </summary>
+    private const ulong X64ExpectedDigest960 = 7765241427565000519UL;
 
     /// <summary>
     ///     Requires repeated runs of this scenario to produce one digest, which on x64 must also equal
@@ -56,7 +63,39 @@ public sealed class BoundaryFlowParallelDeterminismTests
         }
     }
 
-    private static AtmosSimulation CreateSimulation()
+    [Test]
+    [Explicit(
+        "Verifies four runs produce one deterministic digest at 960 Hz. x64 also checks the approved golden digest; " +
+        "capture an Arm64 baseline before making its digest a golden value.")]
+    public void BoundaryFlow_ParallelPhasesMatchGoldenHashAt960Hz()
+    {
+        ulong? expectedDigest = RuntimeInformation.ProcessArchitecture switch
+        {
+            Architecture.X64 => X64ExpectedDigest960,
+            Architecture.Arm64 => null,
+            var architecture => throw new PlatformNotSupportedException(
+                $"Boundary flow parallel determinism has no digest baseline for {architecture}.")
+        };
+
+        for (int run = 0; run < 4; run++)
+        {
+            using var simulation = CreateSimulation(960);
+
+            TickHelpers.TickFor(simulation, 0.15);
+
+            ulong actualDigest = simulation.CaptureCheckpoint().ComputeStateHash();
+            TestContext.Out.WriteLine($"boundary960 digest={actualDigest} (DOTNET_PROCESSOR_COUNT={Environment.ProcessorCount})");
+            expectedDigest ??= actualDigest;
+
+            Assert.That(
+                actualDigest,
+                Is.EqualTo(expectedDigest.Value),
+                $"Run {run}; architecture={RuntimeInformation.ProcessArchitecture}; " +
+                $"DOTNET_PROCESSOR_COUNT={Environment.ProcessorCount}");
+        }
+    }
+
+    private static AtmosSimulation CreateSimulation(int tickRate = SimTestHelpers.PinnedTickRate)
     {
         var config = SimTestHelpers.CreateDeterministicConfig();
         string[] gasNames = new string[4];
@@ -79,7 +118,7 @@ public sealed class BoundaryFlowParallelDeterminismTests
         // counts. Every chunk touches at least one face neighbor, so boundary flow has cross-chunk work on every tick.
         const int gridSize = 3;
         const int chunkExtent = 4;
-        var simulation = SimTestHelpers.CreateLegacySimulation(config, chunkExtent, chunkExtent, chunkExtent);
+        var simulation = SimTestHelpers.CreateLegacySimulation(config, chunkExtent, chunkExtent, chunkExtent, tickRate);
 
         for (int cz = 0; cz < gridSize; cz++)
         for (int cy = 0; cy < gridSize; cy++)

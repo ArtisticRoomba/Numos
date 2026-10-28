@@ -28,7 +28,7 @@ public enum TimelineStepResult
 
 public sealed partial class WorkbenchSession
 {
-    private const int DefaultProgressInterval = 100;
+    private const double DefaultProgressIntervalSeconds = 5d;
     private const string ReplaySource = "Replay";
 
     /// <summary>
@@ -68,7 +68,8 @@ public sealed partial class WorkbenchSession
     /// </summary>
     /// <param name="count">How many ticks to run. Must be at least 1.</param>
     /// <param name="progressInterval">
-    ///     Log a progress line every this many ticks. Zero turns progress lines off.
+    ///     Log a progress line every this many ticks. Zero turns progress lines off. The default is about
+    ///     5 s of simulated time at the world's tick rate.
     /// </param>
     /// <param name="afterTick">
     ///     Called after each tick with the number of ticks done in this call, from 1 to <paramref name="count" />.
@@ -79,15 +80,16 @@ public sealed partial class WorkbenchSession
     ///     A call with <paramref name="count" /> above 1 also logs a closing line with the elapsed wall time.
     /// </remarks>
     /// <exception cref="InvalidOperationException">The timeline is inspecting history.</exception>
-    public int Tick(int count = 1, int progressInterval = DefaultProgressInterval, Action<int>? afterTick = null)
+    public long Tick(int count = 1, int? progressInterval = null, Action<int>? afterTick = null)
     {
         return Guard(
             "Could not tick the world",
             () =>
             {
                 ArgumentOutOfRangeException.ThrowIfLessThan(count, 1);
-                ArgumentOutOfRangeException.ThrowIfNegative(progressInterval);
+                ArgumentOutOfRangeException.ThrowIfNegative(progressInterval ?? 0);
                 var world = RequireWorld();
+                int interval = progressInterval ?? (int)Math.Max(1d, DefaultProgressIntervalSeconds * world.TickRate);
                 ThrowIfInspecting();
                 long start = Stopwatch.GetTimestamp();
                 for (int done = 1; done <= count; done++)
@@ -95,7 +97,7 @@ public sealed partial class WorkbenchSession
                     world.Tick();
                     Timeline!.ObserveLiveState();
                     afterTick?.Invoke(done);
-                    if (progressInterval > 0 && done % progressInterval == 0 && done < count)
+                    if (interval > 0 && done % interval == 0 && done < count)
                     {
                         Info(
                             $"Tick {world.TickCount} ({done}/{count}), " +
@@ -131,22 +133,29 @@ public sealed partial class WorkbenchSession
     }
 
     /// <summary>
-    ///     Counts frame time toward the next playback step while inspecting history.
+    ///     Counts frame time toward playback steps while inspecting history.
     /// </summary>
     /// <param name="elapsedSeconds">Frame time in seconds.</param>
     /// <returns>
-    ///     <see langword="true" /> when a step is due. The counter restarts, and the caller then calls
-    ///     <see cref="StepForward" />.
+    ///     The number of ticks due at the world's current tick rate. The caller then calls
+    ///     <see cref="StepForward" /> that many times. Playback runs in real time at any rate.
     /// </returns>
-    public bool AccumulatePlayback(float elapsedSeconds)
+    /// <remarks>
+    ///     The fractional remainder carries to the next call.
+    /// </remarks>
+    public int AccumulatePlayback(float elapsedSeconds)
     {
+        int rate = World?.TickRate ?? AtmosWorld.DefaultTickRate;
         PlaybackElapsed += elapsedSeconds;
-        if (PlaybackElapsed < 1f / AtmosSimulation.SimulationRate)
-            return false;
+        double due = Math.Floor(PlaybackElapsed * rate);
+        if (due < 1d)
+            return 0;
 
-        PlaybackElapsed = 0f;
-        return true;
+        PlaybackElapsed -= (float)(due / rate);
+        return (int)Math.Min(due, MaximumPlaybackTicksPerFrame);
     }
+
+    private const int MaximumPlaybackTicksPerFrame = 10_000;
 
     /// <summary>
     ///     Samples the live state for the timeline's checkpoints. Does nothing without a project.

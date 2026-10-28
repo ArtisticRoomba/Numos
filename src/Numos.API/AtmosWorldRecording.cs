@@ -53,7 +53,7 @@ public enum AtmosWorldOperationCode : ushort
     /// <summary>
     ///     Replaces the <c>[NumosSerialize]</c> state of one class solver after the host edited it.
     /// </summary>
-    SetSolverState = 9
+    SetSolverState = 9,
 }
 
 /// <summary>

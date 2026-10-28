@@ -48,8 +48,8 @@ internal readonly struct EulerSpeciesPass
 ///         therefore gives the same bits as a scalar loop over its lanes, with or without hardware support.
 ///     </para>
 ///     <para>
-///         A run is a stretch of cells that is contiguous in voxel memory and in the bundle scratch. A vector loop
-///         handles whole vectors and a scalar loop handles the rest, through the same <see cref="UpdateCell" />.
+///         A run is a stretch of cells that is contiguous in voxel memory and in the bundle scratch. A run of at
+///         least one vector goes through the vector loop. A shorter run goes through <see cref="UpdateCell" />.
 ///     </para>
 /// </remarks>
 internal static class EulerSpeciesKernel
@@ -66,20 +66,40 @@ internal static class EulerSpeciesKernel
     /// <param name="upperOffset">Voxel distance between the lower and the upper cell of a face.</param>
     /// <param name="length">Number of faces.</param>
     /// <remarks>
-    ///     The mask picks the same cell the scalar code reads through the face's upwind index, so each lane is
-    ///     <c>rate · source[upwind]</c>. The last vector overlaps the one before it when the length is not a
-    ///     multiple of the vector width. The overlapped lanes store the bits they stored already.
+    ///     <para>
+    ///         The mask picks the same cell the scalar code reads through the face's upwind index, so each lane is
+    ///         <c>rate · source[upwind]</c>. The last vector overlaps the one before it when the length is not a
+    ///         multiple of the vector width. The overlapped lanes store the bits they stored already.
+    ///     </para>
+    ///     <para>
+    ///         A run shorter than a vector is one vector that goes through a spill buffer, so only its
+    ///         <paramref name="length" /> faces are written. Its loads still read a whole vector of
+    ///         <paramref name="rate" />, <paramref name="upperMask" />, and both cell rows of
+    ///         <paramref name="source" />. Those arrays must hold one vector past the run, which the face scratch
+    ///         and species row padding give them. The lanes past the run are dropped.
+    ///     </para>
     /// </remarks>
     public static void FaceFluxRun(
         PerSecond[] rate, int[] upperMask, Mole[] source, MolePerSecond[] flux,
         int firstFace, int lowerVoxel, int upperOffset, int length)
     {
         int width = Vector<float>.Count;
-        if (!Vector.IsHardwareAccelerated || length < width)
+        if (!Vector.IsHardwareAccelerated)
         {
             for (int i = 0; i < length; i++)
                 flux[firstFace + i] = rate[firstFace + i] * source[lowerVoxel + i + (upperMask[firstFace + i] & upperOffset)];
 
+            return;
+        }
+
+        if (length < width)
+        {
+            if (length == 0)
+                return;
+
+            Span<MolePerSecond> spill = stackalloc MolePerSecond[width];
+            FaceFluxLanes(rate, upperMask, source, firstFace, lowerVoxel, upperOffset).CopyTo(spill);
+            spill[..length].CopyTo(flux.AsSpan(firstFace));
             return;
         }
 
@@ -150,10 +170,16 @@ internal static class EulerSpeciesKernel
         PerSecond[] rate, int[] upperMask, Mole[] source, MolePerSecond[] flux, int face, int lowerVoxel,
         int upperOffset)
     {
+        FaceFluxLanes(rate, upperMask, source, face, lowerVoxel, upperOffset).StoreAt(flux, face);
+    }
+
+    private static Vector<MolePerSecond> FaceFluxLanes(
+        PerSecond[] rate, int[] upperMask, Mole[] source, int face, int lowerVoxel, int upperOffset)
+    {
         Vector<Mole> lower = Load(source, lowerVoxel);
         Vector<Mole> upper = Load(source, lowerVoxel + upperOffset);
         Vector<Mole> upwind = Vector.ConditionalSelect(Load(upperMask, face), upper, lower);
-        (Load(rate, face) * upwind).StoreAt(flux, face);
+        return Load(rate, face) * upwind;
     }
 
     /// <summary>
@@ -165,7 +191,9 @@ internal static class EulerSpeciesKernel
     /// <param name="firstCell">The scratch index of the first cell.</param>
     /// <param name="firstBehind">The face behind the first cell.</param>
     /// <param name="firstAhead">The face ahead of the first cell. Face distance between neighbours is one.</param>
-    /// <param name="length">Number of cells. Every cell must be air.</param>
+    /// <param name="length">
+    ///     Number of cells. Every cell must be air, and its mass, mole and heat sums must be zero on entry.
+    /// </param>
     /// <param name="negatives">The pencil's count of negative moles.</param>
     /// <remarks>
     ///     <para>
@@ -175,7 +203,13 @@ internal static class EulerSpeciesKernel
     ///         collected the same way and applied after the last gas.
     ///     </para>
     ///     <para>
-    ///         Cells past the last whole vector go through <see cref="UpdateCell" />, one cell at a time over all
+    ///         When <paramref name="length" /> is not a whole number of vectors, the last vector ends at the last cell
+    ///         and overlaps the vector before it. A lane's result depends only on the read rows, the face flux and
+    ///         the zero sums it starts from, so a cell done twice gets the same bits twice. The repair count and the
+    ///         non-finite flag take each cell once.
+    ///     </para>
+    ///     <para>
+    ///         A run shorter than one vector goes through <see cref="UpdateCell" />, one cell at a time over all
     ///         gases. A cell's result does not depend on which cells share its vector.
     ///     </para>
     /// </remarks>
@@ -186,36 +220,44 @@ internal static class EulerSpeciesKernel
         if (gasCount == 0)
             return;
 
-        int i = 0;
         if (Vector.IsHardwareAccelerated && length >= Vector<float>.Count)
         {
             int width = Vector<float>.Count;
             int half = Vector<double>.Count;
             var zero = Vector<float>.Zero;
             var infinity = new Vector<float>(float.PositiveInfinity);
-            for (; i + width <= length; i += width)
+            for (int done = 0; done < length; done += width)
             {
-                int cell = firstCell + i;
-                Vector<Kilogram> massSum = Load(passes[0].MassSum, cell);
-                Vector<Mole> moleSum = Load(passes[0].MoleSum, cell);
-                Vector<JoulePerKelvin64> heatLower = Load(passes[0].HeatSum, cell);
-                Vector<JoulePerKelvin64> heatUpper = Load(passes[0].HeatSum, cell + half);
+                // A last partial vector moves back to end at the last cell. Its lanes before firstNewLane are done.
+                int start = Math.Min(done, length - width);
+                int firstNewLane = done - start;
+                int voxel = firstVoxel + start;
+                int cell = firstCell + start;
+                int behindFace = firstBehind + start;
+                int aheadFace = firstAhead + start;
+
+                // The sums of a run's cells are zero on entry, so they start at zero and are not loaded. A done
+                // lane then gets the same bits again.
+                Vector<Kilogram> massSum = Vector<float>.Zero;
+                Vector<Mole> moleSum = Vector<float>.Zero;
+                Vector<JoulePerKelvin64> heatLower = Vector<double>.Zero;
+                Vector<JoulePerKelvin64> heatUpper = Vector<double>.Zero;
                 var negativeCount = Vector<int>.Zero;
                 var anyNonFinite = Vector<int>.Zero;
                 for (int gas = 0; gas < gasCount; gas++)
                 {
                     ref readonly EulerSpeciesPass pass = ref passes[gas];
-                    Vector<MolePerSecond> ahead = Load(pass.FaceFlux, firstAhead + i);
-                    Vector<MolePerSecond> behind = Load(pass.FaceFlux, firstBehind + i);
+                    Vector<MolePerSecond> ahead = Load(pass.FaceFlux, aheadFace);
+                    Vector<MolePerSecond> behind = Load(pass.FaceFlux, behindFace);
                     Vector<Mole> moles =
-                        Load(pass.Source, firstVoxel + i) - new Vector<float>(pass.TimeStep) * (ahead - behind);
+                        Load(pass.Source, voxel) - new Vector<float>(pass.TimeStep) * (ahead - behind);
 
                     Vector<int> finite = Vector.LessThan(Vector.Abs(moles), infinity);
                     Vector<int> negative = Vector.AndNot(Vector.LessThan(moles, zero), ~finite);
                     anyNonFinite |= ~finite;
                     negativeCount += negative;
                     moles = Vector.ConditionalSelect(Vector.AndNot(finite, negative), moles, zero);
-                    moles.StoreAt(pass.Target, firstVoxel + i);
+                    moles.StoreAt(pass.Target, voxel);
 
                     massSum += moles * new Vector<float>(pass.MolarMass);
                     moleSum += moles;
@@ -230,20 +272,27 @@ internal static class EulerSpeciesKernel
                 heatLower.StoreAt(sums.HeatSum, cell);
                 heatUpper.StoreAt(sums.HeatSum, cell + half);
 
+                // Only the new lanes count, so a cell done twice counts once.
+                Vector<int> newLanes = Vector.GreaterThanOrEqual(Vector<int>.Indices, new Vector<int>(firstNewLane));
+                negativeCount &= newLanes;
+                anyNonFinite &= newLanes;
+
                 // Each negative lane is -1, so the lane sum is minus the count.
                 negatives -= Vector.Sum(negativeCount);
                 if (!Vector.EqualsAll(anyNonFinite, Vector<int>.Zero))
                 {
-                    for (int lane = 0; lane < width; lane++)
+                    for (int lane = firstNewLane; lane < width; lane++)
                     {
                         if (anyNonFinite[lane] != 0)
                             sums.NonFinite[cell + lane] = true;
                     }
                 }
             }
+
+            return;
         }
 
-        for (; i < length; i++)
+        for (int i = 0; i < length; i++)
         {
             for (int gas = 0; gas < gasCount; gas++)
             {

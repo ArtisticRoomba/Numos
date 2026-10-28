@@ -282,6 +282,10 @@ public sealed class AtmosWorldSolverPipeline
     /// </param>
     /// <param name="before">The registered stage the new stage runs immediately before.</param>
     /// <param name="after">The registered stage the new stage runs immediately after.</param>
+    /// <param name="interval">
+    ///     How many ticks pass between runs of the stage. One runs it every tick. See
+    ///     <see cref="AtmosWorldSolverContext.DeltaTime" /> for the time each run covers.
+    /// </param>
     /// <remarks>
     ///     <para>
     ///         Without <paramref name="before" /> or <paramref name="after" />, the stage is appended to the end of the
@@ -301,6 +305,7 @@ public sealed class AtmosWorldSolverPipeline
     ///     A name is blank, <paramref name="name" /> is already registered, or both <paramref name="before" /> and
     ///     <paramref name="after" /> are given.
     /// </exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="interval" /> is less than one.</exception>
     /// <exception cref="KeyNotFoundException">The <paramref name="before" /> or <paramref name="after" /> stage is not registered.</exception>
     /// <exception cref="InvalidOperationException">
     ///     The world is recording or replaying, because Numos cannot recreate a custom stage on replay.
@@ -322,10 +327,11 @@ public sealed class AtmosWorldSolverPipeline
         AtmosWorldSolver solver,
         AtmosNeighborSelection? neighbors = null,
         string? before = null,
-        string? after = null)
+        string? after = null,
+        int interval = 1)
     {
         ArgumentNullException.ThrowIfNull(solver);
-        RegisterCore(name, new DelegateWorldSolver(solver), neighbors, before, after);
+        RegisterCore(name, new DelegateWorldSolver(solver), neighbors, before, after, interval);
     }
 
     /// <summary>
@@ -339,6 +345,7 @@ public sealed class AtmosWorldSolverPipeline
     /// </param>
     /// <param name="before">The registered stage the new stage runs immediately before.</param>
     /// <param name="after">The registered stage the new stage runs immediately after.</param>
+    /// <param name="interval">How many ticks pass between runs of the stage. One runs it every tick.</param>
     /// <remarks>
     ///     Identical to the <see cref="AtmosWorldSolver" /> overload in placement, topology, and checkpoint metadata. The
     ///     instance is caller-owned and also receives <see cref="IAtmosWorldSolver.OnRestored" />.
@@ -348,6 +355,7 @@ public sealed class AtmosWorldSolverPipeline
     ///     A name is blank, <paramref name="name" /> is already registered, or both <paramref name="before" /> and
     ///     <paramref name="after" /> are given.
     /// </exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="interval" /> is less than one.</exception>
     /// <exception cref="KeyNotFoundException">The <paramref name="before" /> or <paramref name="after" /> stage is not registered.</exception>
     /// <exception cref="InvalidOperationException">The world is recording or replaying.</exception>
     /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
@@ -357,9 +365,10 @@ public sealed class AtmosWorldSolverPipeline
         IAtmosWorldSolver solver,
         AtmosNeighborSelection? neighbors = null,
         string? before = null,
-        string? after = null)
+        string? after = null,
+        int interval = 1)
     {
-        RegisterCore(name, solver, neighbors, before, after);
+        RegisterCore(name, solver, neighbors, before, after, interval);
     }
 
     /// <summary>
@@ -422,6 +431,9 @@ public sealed class AtmosWorldSolverPipeline
                 return true;
 
             _steps[index].IsEnabled = enabled;
+            if (enabled)
+                AlignSchedule(_steps[index]);
+
             PublishSteps();
             _world.RecordWorldSolverEnablement(name, enabled);
             return true;
@@ -429,9 +441,69 @@ public sealed class AtmosWorldSolverPipeline
     }
 
     /// <summary>
+    ///     Sets how many ticks pass between runs of a registered stage.
+    /// </summary>
+    /// <param name="name">The registered stage name.</param>
+    /// <param name="interval">The new interval in ticks. One runs the stage every tick.</param>
+    /// <returns><see langword="true" /> when the named stage exists.</returns>
+    /// <remarks>
+    ///     <para>
+    ///         The stage runs on multiples of <paramref name="interval" />, the same ticks as a stage that always had
+    ///         that interval. The next run is the first such tick after the current tick. The first run after the
+    ///         change covers the time since the last run, so <see cref="AtmosWorldSolverContext.DeltaTime" /> stays
+    ///         the real elapsed time.
+    ///     </para>
+    ///     <para>
+    ///         Producer and consumer stages must share an interval. <c>advection</c> and <c>boundary-flow</c> hand
+    ///         data over within a tick, and so do <c>thermodynamics</c> and <c>thermal-boundary</c>. Numos does not
+    ///         check this, because a host can replace the producer.
+    ///     </para>
+    ///     <para>
+    ///         Unlike registration, this works during recording. A change records one solver layout operation that
+    ///         carries every interval, and a call that changes nothing records nothing. A call from inside a solver
+    ///         tick is not recorded, because replay reproduces it. The call is rejected while a replay applies history.
+    ///     </para>
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="name" /> is <see langword="null" />.</exception>
+    /// <exception cref="ArgumentException"><paramref name="name" /> is empty or whitespace.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="interval" /> is less than one.</exception>
+    /// <exception cref="InvalidOperationException">The world is replaying history.</exception>
+    /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
+    /// <example>
+    ///     <code>
+    ///     world.Solvers.SetInterval(AtmosBuiltInSolvers.Thermodynamics, 4);
+    ///     world.Solvers.SetInterval(AtmosBuiltInSolvers.ThermalBoundary, 4);
+    ///     </code>
+    /// </example>
+    [PublicAPI]
+    public bool SetInterval(string name, int interval)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ArgumentOutOfRangeException.ThrowIfLessThan(interval, 1);
+        lock (_world.Gate)
+        {
+            _world.ThrowIfDisposedForPipeline();
+            _world.EnsureCanChangeSolverLayout();
+            int index = IndexOf(name);
+            if (index < 0)
+                return false;
+
+            if (_steps[index].Interval == interval)
+                return true;
+
+            ApplyInterval(_steps[index], interval);
+            _world.RecordWorldSolverLayout(ResolveLayout());
+            return true;
+        }
+    }
+
+    /// <summary>
     ///     Replaces the order and enabled flags of the stage list in one step.
     /// </summary>
-    /// <param name="stages">Every stage in the new execution order, with its enabled flag.</param>
+    /// <param name="stages">
+    ///     Every stage in the new execution order, with its enabled flag and interval. An interval of zero keeps the
+    ///     current interval of a registered stage and gives a new built-in stage its default.
+    /// </param>
     /// <returns><see langword="true" /> when the layout changed, <see langword="false" /> when it already matched.</returns>
     /// <remarks>
     ///     <para>
@@ -446,13 +518,14 @@ public sealed class AtmosWorldSolverPipeline
     ///         reproduces it. The call is rejected while a replay applies history.
     ///     </para>
     ///     <para>
-    ///         A rejected layout changes nothing.
+    ///         The recorded operation lists the resolved interval of every stage, so replay never depends on a
+    ///         default. A rejected layout changes nothing.
     ///     </para>
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="stages" /> is <see langword="null" />.</exception>
     /// <exception cref="ArgumentException">
-    ///     A name is blank or listed twice, a name is neither a built-in stage nor a registered custom stage, or a
-    ///     registered custom stage is missing.
+    ///     A name is blank or listed twice, a name is neither a built-in stage nor a registered custom stage, a
+    ///     registered custom stage is missing, or an interval is negative.
     /// </exception>
     /// <exception cref="InvalidOperationException">The world is replaying history.</exception>
     /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
@@ -482,7 +555,7 @@ public sealed class AtmosWorldSolverPipeline
             if (!SetLayoutCore(copy))
                 return false;
 
-            _world.RecordWorldSolverLayout(copy);
+            _world.RecordWorldSolverLayout(ResolveLayout());
             return true;
         }
     }
@@ -499,6 +572,8 @@ public sealed class AtmosWorldSolverPipeline
     {
         var seen = new HashSet<string>(StringComparer.Ordinal);
         var next = new WorldSolverRegistration[stages.Count];
+        var intervals = new int[stages.Count];
+        var created = new bool[stages.Count];
         for (int index = 0; index < stages.Count; index++)
         {
             string name = stages[index].Name;
@@ -508,14 +583,22 @@ public sealed class AtmosWorldSolverPipeline
             if (!seen.Add(name))
                 throw new ArgumentException($"The layout lists stage '{name}' more than once.", nameof(stages));
 
+            if (stages[index].Interval < 0)
+                throw new ArgumentException($"Layout entry '{name}' has a negative interval.", nameof(stages));
+
             int existing = IndexOf(name);
             if (existing >= 0)
             {
                 next[index] = _steps[existing];
+                intervals[index] = stages[index].Interval == 0 ? next[index].Interval : stages[index].Interval;
             }
             else if (BuiltInFactories.TryGetValue(name, out var factory))
             {
-                next[index] = WorldSolverRegistration.CreateBuiltIn(name, factory);
+                intervals[index] = stages[index].Interval == 0
+                    ? BuiltInStageSchedule.GetInterval(name, _world.TickRate)
+                    : stages[index].Interval;
+                next[index] = WorldSolverRegistration.CreateBuiltIn(name, factory, intervals[index]);
+                created[index] = true;
             }
             else
             {
@@ -539,20 +622,124 @@ public sealed class AtmosWorldSolverPipeline
         for (int index = 0; index < next.Length && !changed; index++)
         {
             changed = !ReferenceEquals(next[index], _steps[index]) ||
-                      next[index].IsEnabled != stages[index].Enabled;
+                      next[index].IsEnabled != stages[index].Enabled ||
+                      next[index].Interval != intervals[index];
         }
 
         if (!changed)
             return false;
 
         for (int index = 0; index < next.Length; index++)
-            next[index].IsEnabled = stages[index].Enabled;
+        {
+            var step = next[index];
+            bool enabling = !step.IsEnabled && stages[index].Enabled;
+            step.IsEnabled = stages[index].Enabled;
+            if (created[index])
+                AlignSchedule(step);
+            else if (step.Interval != intervals[index])
+                ApplyInterval(step, intervals[index]);
+
+            if (enabling && !created[index])
+                AlignSchedule(step);
+        }
 
         _steps.Clear();
         _steps.AddRange(next);
         _world.InvalidateSolverDependencies();
         PublishSteps();
         return true;
+    }
+
+    /// <summary>
+    ///     Lists every stage with its enabled flag and resolved interval, in execution order.
+    /// </summary>
+    /// <remarks>The caller holds <see cref="AtmosWorld.Gate" />.</remarks>
+    internal AtmosWorldSolverLayoutEntry[] ResolveLayout()
+    {
+        var layout = new AtmosWorldSolverLayoutEntry[_steps.Count];
+        for (int index = 0; index < layout.Length; index++)
+            layout[index] = new AtmosWorldSolverLayoutEntry(_steps[index].Name, _steps[index].IsEnabled, _steps[index].Interval);
+
+        return layout;
+    }
+
+    /// <summary>
+    ///     Captures the identity, interval, and schedule state of every stage for a world checkpoint.
+    /// </summary>
+    internal AtmosWorldSolverCheckpoint[] CaptureCheckpoints()
+    {
+        lock (_world.Gate)
+        {
+            var result = new AtmosWorldSolverCheckpoint[_steps.Count];
+            for (int index = 0; index < result.Length; index++)
+            {
+                var step = _steps[index];
+                result[index] = new AtmosWorldSolverCheckpoint(
+                    step.Name,
+                    step.Kind,
+                    step.IsEnabled,
+                    step.Selection?.Key,
+                    step.Interval,
+                    step.NextDueTick,
+                    step.LastRunTick);
+            }
+
+            return result;
+        }
+    }
+
+    /// <summary>
+    ///     Installs the schedule state of a checkpoint on the stages <see cref="SetLayoutCore" /> just arranged.
+    /// </summary>
+    /// <remarks>The caller holds <see cref="AtmosWorld.Gate" /> and has validated that every name is registered.</remarks>
+    internal void RestoreSchedules(IReadOnlyList<AtmosWorldSolverCheckpoint> saved)
+    {
+        foreach (var entry in saved)
+        {
+            var step = Find(entry.Name)!;
+            step.Interval = entry.Interval;
+            step.NextDueTick = entry.NextDueTick;
+            step.LastRunTick = entry.LastRunTick;
+        }
+    }
+
+    /// <summary>
+    ///     Starts a stage's schedule on the first tick that is a multiple of its interval.
+    /// </summary>
+    /// <remarks>
+    ///     A new or re-enabled stage has no meaningful last run. Starting on the interval grid gives it the nominal
+    ///     <c>interval / tickRate</c> dt on its first run and keeps the cadence <c>tick % interval == 0</c> of a stage
+    ///     that never changed interval.
+    /// </remarks>
+    private void AlignSchedule(WorldSolverRegistration step)
+    {
+        long due = FirstGridTick(step.Interval);
+        step.NextDueTick = due;
+        step.LastRunTick = due - step.Interval;
+    }
+
+    /// <summary>
+    ///     Moves a stage to a new interval and puts it on the new interval grid.
+    /// </summary>
+    /// <remarks>
+    ///     <see cref="WorldSolverRegistration.LastRunTick" /> stays the real last run, so the first
+    ///     <c>DeltaTime</c> after the change covers the real gap. A stage off the grid would run on different ticks
+    ///     than its paired stage, and the pair hands boundary batches over only on the tick they were made.
+    /// </remarks>
+    private void ApplyInterval(WorldSolverRegistration step, int interval)
+    {
+        step.Interval = interval;
+        step.NextDueTick = FirstGridTick(interval);
+    }
+
+    /// <summary>
+    ///     Returns the first multiple of <paramref name="interval" /> that the next tick pass can still run.
+    /// </summary>
+    private long FirstGridTick(int interval)
+    {
+        // A change made from inside a tick misses the current tick, because the tick runs a fixed stage list.
+        long first = (long)_world.TickCount + (_world.IsTickExecuting ? 2 : 1);
+        return (first + interval - 1) / interval * interval;
     }
 
     /// <summary>
@@ -688,10 +875,43 @@ public sealed class AtmosWorldSolverPipeline
             _injectedEpoch = epoch;
     }
 
+    /// <summary>
+    ///     Reports whether any of the stages is due on the next tick.
+    /// </summary>
+    internal bool AnyDueOnNextTick(WorldSolverRegistration[] steps)
+    {
+        long tick = (long)_world.TickCount + 1;
+        foreach (var step in steps)
+        {
+            if (tick >= step.NextDueTick)
+                return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    ///     Runs the stages that are due on the tick now executing.
+    /// </summary>
+    /// <remarks>
+    ///     A stage is due when the one-based tick has reached its next due tick. Execution advances the schedule
+    ///     before the stage runs, so a stage that calls <see cref="SetInterval" /> on itself measures from this run.
+    /// </remarks>
     internal void Execute(WorldSolverRegistration[] steps, AtmosSolverTickScope scope)
     {
+        long tick = (long)_world.TickCount + 1;
+        int tickRate = _world.TickRate;
         foreach (var step in steps)
+        {
+            if (tick < step.NextDueTick)
+                continue;
+
+            float deltaTime = BuiltInStageSchedule.GapTime(tick - step.LastRunTick, tickRate);
+            scope.BeginStage(step.Interval, deltaTime);
+            step.NextDueTick = tick + step.Interval;
+            step.LastRunTick = tick;
             step.Execute(scope);
+        }
     }
 
     internal void RecompileTopology(IReadOnlyList<ExplicitLinkDefinition> links)
@@ -729,10 +949,12 @@ public sealed class AtmosWorldSolverPipeline
         IAtmosWorldSolver solver,
         AtmosNeighborSelection? selection,
         string? before,
-        string? after)
+        string? after,
+        int interval)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ArgumentNullException.ThrowIfNull(solver);
+        ArgumentOutOfRangeException.ThrowIfLessThan(interval, 1);
         if (before != null && after != null)
             throw new ArgumentException("A world solver can be placed before or after another stage, not both.", nameof(after));
 
@@ -757,7 +979,8 @@ public sealed class AtmosWorldSolverPipeline
                 insertionIndex = before != null ? anchorIndex : anchorIndex + 1;
             }
 
-            var registration = WorldSolverRegistration.CreateCustom(name, solver, selection);
+            var registration = WorldSolverRegistration.CreateCustom(name, solver, selection, interval);
+            AlignSchedule(registration);
             registration.InstallTopology(registration.BuildTopology(_world, _world.GetActiveLinksCore()));
             _steps.Insert(insertionIndex, registration);
             _world.InvalidateSolverDependencies();
@@ -795,7 +1018,14 @@ public sealed class AtmosWorldSolverPipeline
     private void AddDefaults(AtmosTransportModel model)
     {
         foreach (string name in GetDefaultLayout(model))
-            _steps.Add(WorldSolverRegistration.CreateBuiltIn(name, BuiltInFactories[name]));
+        {
+            var step = WorldSolverRegistration.CreateBuiltIn(
+                name,
+                BuiltInFactories[name],
+                BuiltInStageSchedule.GetInterval(name, _world.TickRate));
+            AlignSchedule(step);
+            _steps.Add(step);
+        }
     }
 
     private void PublishSteps()
@@ -816,8 +1046,10 @@ internal sealed class WorldSolverRegistration
         AtmosWorldSolverKind kind,
         Action<AtmosSolverTickScope>? builtInSolver,
         IAtmosWorldSolver? customSolver,
-        AtmosNeighborSelection? selection)
+        AtmosNeighborSelection? selection,
+        int interval)
     {
+        Interval = interval;
         Name = name;
         Kind = kind;
         _builtInSolver = builtInSolver;
@@ -830,6 +1062,21 @@ internal sealed class WorldSolverRegistration
     internal AtmosWorldSolverKind Kind { get; }
     internal AtmosNeighborSelection? Selection { get; }
     internal bool IsEnabled { get; set; } = true;
+
+    /// <summary>
+    ///     Gets or sets how many ticks pass between runs.
+    /// </summary>
+    internal int Interval { get; set; }
+
+    /// <summary>
+    ///     Gets or sets the first one-based tick on which the stage runs again.
+    /// </summary>
+    internal long NextDueTick { get; set; }
+
+    /// <summary>
+    ///     Gets or sets the one-based tick of the latest run, or the grid tick before the first run.
+    /// </summary>
+    internal long LastRunTick { get; set; }
 
     /// <summary>
     ///     Gets or sets the world dependency epoch this solver was last injected at, or -1.
@@ -886,17 +1133,19 @@ internal sealed class WorldSolverRegistration
 
     internal static WorldSolverRegistration CreateBuiltIn(
         string name,
-        Action<AtmosSolverTickScope> solver)
+        Action<AtmosSolverTickScope> solver,
+        int interval)
     {
-        return new WorldSolverRegistration(name, AtmosWorldSolverKind.BuiltIn, solver, null, null);
+        return new WorldSolverRegistration(name, AtmosWorldSolverKind.BuiltIn, solver, null, null, interval);
     }
 
     internal static WorldSolverRegistration CreateCustom(
         string name,
         IAtmosWorldSolver solver,
-        AtmosNeighborSelection? selection)
+        AtmosNeighborSelection? selection,
+        int interval)
     {
-        return new WorldSolverRegistration(name, AtmosWorldSolverKind.Custom, null, solver, selection);
+        return new WorldSolverRegistration(name, AtmosWorldSolverKind.Custom, null, solver, selection, interval);
     }
 
     internal void Execute(AtmosSolverTickScope scope)
@@ -933,7 +1182,7 @@ internal sealed class WorldSolverRegistration
 
     internal AtmosWorldSolverStep ToPublic()
     {
-        return new AtmosWorldSolverStep(Name, Kind, IsEnabled, Selection?.Key);
+        return new AtmosWorldSolverStep(Name, Kind, IsEnabled, Selection?.Key, Interval);
     }
 }
 

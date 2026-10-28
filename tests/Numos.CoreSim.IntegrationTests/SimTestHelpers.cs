@@ -8,6 +8,12 @@ namespace Numos.CoreSim.IntegrationTests;
 
 internal static class SimTestHelpers
 {
+    /// <summary>
+    ///     The tick rate the helpers use when a test does not pick one. The pinned numbers in these tests were
+    ///     taken at 20 ticks per second; tests about behaviour over simulated time pass their own rate.
+    /// </summary>
+    internal const int PinnedTickRate = 20;
+
     internal const string FirstGasName = "First";
     internal const string SecondGasName = "Second";
     internal const int FirstGasId = 0;
@@ -33,7 +39,7 @@ internal static class SimTestHelpers
             SaturationReferencePressure = 1000f,
             BulkFlowCoefficient = 0.25f,
             VacuumThreshold = 0f,
-            SleepThreshold = int.MaxValue,
+            SleepDelay = float.MaxValue,
             SleepEpsilon = 0f,
             ThermalConductance = 0.05f,
             CondensationRateFactor = 0.5f,
@@ -60,7 +66,7 @@ internal static class SimTestHelpers
             VoxelVolume = 1f,
             DefaultDiffusionCoefficient = 0f,
             VacuumThreshold = 0f,
-            SleepThreshold = int.MaxValue,
+            SleepDelay = float.MaxValue,
             SleepEpsilon = 0f,
             GasRegistry =
             [
@@ -69,7 +75,7 @@ internal static class SimTestHelpers
             ]
         };
 
-        config.SolverConfigurations.Add(eulerFlow ?? new EulerFlowConfig { MaxSubstepsPerTick = 0 });
+        config.SolverConfigurations.Add(eulerFlow ?? new EulerFlowConfig { MaxSubstepsPerSecond = 0 });
         return config;
     }
 
@@ -80,9 +86,10 @@ internal static class SimTestHelpers
     ///     <see cref="AtmosConfig.MaxPressureTransferFractionPerNeighbor" /> to switch transport off.
     ///     The <c>euler-flow</c> stage ignores both knobs.
     /// </summary>
-    internal static AtmosSimulation CreateLegacySimulation(AtmosConfig config, int width, int height, int depth)
+    internal static AtmosSimulation CreateLegacySimulation(
+        AtmosConfig config, int width, int height, int depth, int tickRate = PinnedTickRate)
     {
-        return new AtmosSimulation(config, width, height, depth, AtmosTransportModel.Legacy);
+        return new AtmosSimulation(config, width, height, depth, AtmosTransportModel.Legacy, tickRate);
     }
 
     /// <summary>
@@ -91,9 +98,9 @@ internal static class SimTestHelpers
     /// </summary>
     internal static AtmosSimulation CreateEulerSimulation(
         AtmosConfig config, int width, int height, int depth,
-        out AtmosChunkHandle chunk, bool exactGasDynamics = true)
+        out AtmosChunkHandle chunk, bool exactGasDynamics = true, int tickRate = PinnedTickRate)
     {
-        var simulation = new AtmosSimulation(config, width, height, depth);
+        var simulation = new AtmosSimulation(config, width, height, depth, AtmosTransportModel.Euler, tickRate);
         if (exactGasDynamics)
         {
             simulation.World.Solvers.SetEnabled(AtmosBuiltInSolvers.Thermodynamics, false);

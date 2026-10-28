@@ -79,7 +79,7 @@ internal class ReactionSolver : IAtmosSolverStage
 
         ParallelPhase.Run(
             context.Chunks.Length,
-            new ProcessChunkAction(this, context.Chunks, context.TickConfig, tables, awakeChunkCount));
+            new ProcessChunkAction(this, context.Chunks, context.TickConfig, tables, awakeChunkCount, context.DeltaTime));
 
         if (context.TickConfig.IgnitionTransferEnabled && _anyFullyIgnited)
         {
@@ -953,11 +953,12 @@ internal class ReactionSolver : IAtmosSolverStage
         AtmosChunk[] chunks,
         IAtmosConfig config,
         ReactionTables tables,
-        int awakeChunkCount) : IAction
+        int awakeChunkCount,
+        Second deltaTime) : IAction
     {
         public void Invoke(int index)
         {
-            solver.ProcessChunk(chunks[index], AtmosSolverConstants.FixedTimeStep, config, tables, awakeChunkCount: awakeChunkCount);
+            solver.ProcessChunk(chunks[index], deltaTime, config, tables, awakeChunkCount: awakeChunkCount);
         }
     }
 

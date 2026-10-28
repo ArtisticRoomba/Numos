@@ -62,6 +62,10 @@ arrow-scale = Arrow scale
 velocity-arrow-scale-tooltip = Seconds of travel one arrow represents. At 0.05 s a voxel moving at 20 m/s draws a one-voxel arrow. Arrows longer than { $max-length } voxels are capped and keep only their direction.
 
 solver-pipeline = Solver Pipeline
+project-section = Project
+tick-rate-display = Tick rate: { $rate } Hz
+tick-rate-description = Ticks per second of simulated time. The rate is set when the project is created.
+tick-rate-error = The tick rate must be a multiple of 20 from 20 to 100000.
 atmos-config = AtmosConfig
 configuration-apply-instructions = Values apply on Enter, when a field loses focus, or when a slider is released.
 gas-registry = Gas Registry

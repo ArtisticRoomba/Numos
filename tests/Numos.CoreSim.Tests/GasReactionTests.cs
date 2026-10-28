@@ -65,15 +65,16 @@ public class GasReactionTests
                 chunk.Wake();
                 int sourceId = config.GasRegistry.GasIdToIndex("A");
                 chunk.InjectGasToVoxel(0, sourceId, 10f, 300f, 10f, 1f);
-                solver.Solve(new AtmosSolverExecutionContext(null!, [chunk], tickConfig, iteration + 1));
+                var context = new AtmosSolverExecutionContext(null!, [chunk], tickConfig, iteration + 1);
+                solver.Solve(context);
 
                 var reactions = GasReactionConfig.Get(config);
                 float[] expectedProducts = new float[config.GasPropertyCount];
                 if (reactions.StandardReactions.Contains(toSecond))
-                    expectedProducts[config.GasRegistry.GasIdToIndex("B")] = 2f * (0.25f * 10f * AtmosSolverConstants.FixedTimeStep);
+                    expectedProducts[config.GasRegistry.GasIdToIndex("B")] = 2f * (0.25f * 10f * context.DeltaTime);
 
                 if (reactions.StandardReactions.Contains(toThird))
-                    expectedProducts[config.GasRegistry.GasIdToIndex("C")] = 3f * (0.5f * 100f * AtmosSolverConstants.FixedTimeStep);
+                    expectedProducts[config.GasRegistry.GasIdToIndex("C")] = 3f * (0.5f * 100f * context.DeltaTime);
 
                 for (int gasId = 0; gasId < expectedProducts.Length; gasId++)
                 {

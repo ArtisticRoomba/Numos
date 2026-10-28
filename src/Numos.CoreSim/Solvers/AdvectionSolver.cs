@@ -83,7 +83,8 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
                 {
                     // An awake gasless chunk has no transfer work.
                     // Its sleep timer must still advance every tick, as it does after a normal bulk-flow pass.
-                    ChunkSleepPolicy.UpdateSleepState(chunk, context.TickConfig, 0f);
+                    ChunkSleepPolicy.UpdateSleepState(
+                        chunk, context.TickConfig, 0f, context.Interval, context.SleepDelayTicks);
                     continue;
                 }
 
@@ -111,7 +112,10 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
                     workspaceCount,
                     new SolveChunkWorkspaceAction(
                         workspaces,
-                        context.TickConfig));
+                        context.TickConfig,
+                        context.DeltaTime,
+                        context.Interval,
+                        context.SleepDelayTicks));
 
                 workspacesReleased = true;
                 VacuumCleanup.Apply(context);
@@ -148,10 +152,11 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
 
             ParallelPhase.Run(
                 voxelWorkItemCount,
-                new ApplyBulkDeltasAction(workspaces, voxelWorkItems, context.TickConfig));
+                new ApplyBulkDeltasAction(workspaces, voxelWorkItems, context.TickConfig, context.DeltaTime));
 
             for (int workspaceIndex = 0; workspaceIndex < workspaceCount; workspaceIndex++)
-                UpdateWorkspaceSleepState(ref workspaces[workspaceIndex], context.TickConfig);
+                UpdateWorkspaceSleepState(
+                    ref workspaces[workspaceIndex], context.TickConfig, context.Interval, context.SleepDelayTicks);
 
             ParallelPhase.Run(
                 voxelWorkItemCount,
@@ -183,10 +188,16 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
     /// <param name="workspace">The initialized scratch storage for the chunk.</param>
     /// <param name="workspaceIndex">The workspace index embedded in locally constructed work items.</param>
     /// <param name="config">The immutable configuration snapshot for the tick.</param>
+    /// <param name="deltaTime">The gas time the diffusion transfers cover.</param>
+    /// <param name="interval">The ticks this run spans, added to the sleep timer.</param>
+    /// <param name="sleepDelayTicks">The sleep delay in ticks.</param>
     private static void SolveChunkWorkspace(
         ref ChunkWorkspace workspace,
         int workspaceIndex,
-        AtmosSolverConfigSnapshot config)
+        AtmosSolverConfigSnapshot config,
+        Second deltaTime,
+        int interval,
+        int sleepDelayTicks)
     {
         var chunk = workspace.Chunk!;
         var workItem = new VoxelWorkItem(workspaceIndex, 0, chunk.ActiveAirCount);
@@ -196,9 +207,9 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
         ComputeBulkFlow(ref workspace, workItem, config);
         GatherBulkDeltas(ref workspace, workItem, config);
         SpeciesDiffusionKernel.ApplyDeltas(ref workspace.Diffusion, workItem.Start, workItem.Length, config);
-        SpeciesDiffusionKernel.PrepareDiffusion(ref workspace.Diffusion, workItem.Start, workItem.Length, config);
+        SpeciesDiffusionKernel.PrepareDiffusion(ref workspace.Diffusion, workItem.Start, workItem.Length, config, deltaTime);
 
-        UpdateWorkspaceSleepState(ref workspace, config);
+        UpdateWorkspaceSleepState(ref workspace, config, interval, sleepDelayTicks);
 
         SpeciesDiffusionKernel.GatherDiffusionDeltas(ref workspace.Diffusion, workItem.Start, workItem.Length, config);
         SpeciesDiffusionKernel.ApplyDeltas(ref workspace.Diffusion, workItem.Start, workItem.Length, config);
@@ -629,9 +640,13 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
     /// </summary>
     /// <param name="workspace">The workspace containing relative pressure differences for the chunk.</param>
     /// <param name="config">The immutable configuration snapshot for the tick.</param>
+    /// <param name="interval">The ticks this run spans, added to the sleep timer.</param>
+    /// <param name="sleepDelayTicks">The sleep delay in ticks.</param>
     private static void UpdateWorkspaceSleepState(
         ref ChunkWorkspace workspace,
-        AtmosSolverConfigSnapshot config)
+        AtmosSolverConfigSnapshot config,
+        int interval,
+        int sleepDelayTicks)
     {
         Scalar maximumRelativePressureDelta = 0f;
         var chunk = workspace.Chunk!;
@@ -642,7 +657,7 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
                 workspace.MaximumRelativePressureDeltas![activeIndex]);
         }
 
-        ChunkSleepPolicy.UpdateSleepState(chunk, config, maximumRelativePressureDelta);
+        ChunkSleepPolicy.UpdateSleepState(chunk, config, maximumRelativePressureDelta, interval, sleepDelayTicks);
     }
 
     /// <summary>
@@ -750,7 +765,10 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
 
     private readonly struct SolveChunkWorkspaceAction(
         ChunkWorkspace[] workspaces,
-        AtmosSolverConfigSnapshot config) : IAction
+        AtmosSolverConfigSnapshot config,
+        Second deltaTime,
+        int interval,
+        int sleepDelayTicks) : IAction
     {
         public void Invoke(int index)
         {
@@ -759,7 +777,7 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
             try
             {
                 workspaces[index].Initialize(chunk, boundaryBatch);
-                SolveChunkWorkspace(ref workspaces[index], index, config);
+                SolveChunkWorkspace(ref workspaces[index], index, config, deltaTime, interval, sleepDelayTicks);
             }
             finally
             {
@@ -953,14 +971,15 @@ internal sealed class AdvectionSolver : IAtmosSolverStage
     private readonly struct ApplyBulkDeltasAction(
         ChunkWorkspace[] workspaces,
         VoxelWorkItem[] workItems,
-        AtmosSolverConfigSnapshot config) : IAction
+        AtmosSolverConfigSnapshot config,
+        Second deltaTime) : IAction
     {
         public void Invoke(int index)
         {
             var workItem = workItems[index];
             ref DiffusionWorkspace diffusion = ref workspaces[workItem.WorkspaceIndex].Diffusion;
             SpeciesDiffusionKernel.ApplyDeltas(ref diffusion, workItem.Start, workItem.Length, config);
-            SpeciesDiffusionKernel.PrepareDiffusion(ref diffusion, workItem.Start, workItem.Length, config);
+            SpeciesDiffusionKernel.PrepareDiffusion(ref diffusion, workItem.Start, workItem.Length, config, deltaTime);
         }
     }
 

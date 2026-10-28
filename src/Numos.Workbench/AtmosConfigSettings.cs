@@ -40,7 +40,7 @@ public static class AtmosConfigSettings
         destination.SpaceTemperature = source.SpaceTemperature;
         destination.BulkFlowCoefficient = source.BulkFlowCoefficient;
         destination.VacuumThreshold = source.VacuumThreshold;
-        destination.SleepThreshold = source.SleepThreshold;
+        destination.SleepDelay = source.SleepDelay;
         destination.SleepEpsilon = source.SleepEpsilon;
         destination.ThermalConductance = source.ThermalConductance;
         destination.CondensationRateFactor = source.CondensationRateFactor;

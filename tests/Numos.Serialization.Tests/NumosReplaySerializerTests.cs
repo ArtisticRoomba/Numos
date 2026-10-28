@@ -25,7 +25,7 @@ public sealed class NumosReplaySerializerTests
 
         using var world = new AtmosWorld(config);
         var source = world.CreateSimulation(4, 4, 1);
-        var timeline = new AtmosWorldReplayTimeline(world, 1);
+        var timeline = new AtmosWorldReplayTimeline(world, 0.05);
         source.SetChunkClassification(source.CreateAndRegisterChunk(default), new VoxelClassification(1));
         source.SetChunkClassification(source.CreateAndRegisterChunk(Int3.PosX), new VoxelClassification(1));
         source.EditVoxelBox(
@@ -55,7 +55,7 @@ public sealed class NumosReplaySerializerTests
         var restored = NumosWorldReplaySerializer.Deserialize(stream);
 
         using var replayWorld = new AtmosWorld(new AtmosConfig(restored.Replay.InitialCheckpoint.Config));
-        var imported = AtmosWorldReplayTimeline.Import(replayWorld, restored.Replay, 1);
+        var imported = AtmosWorldReplayTimeline.Import(replayWorld, restored.Replay, 0.05);
         imported.ReturnToHead();
         Assert.Multiple(() =>
         {
@@ -75,13 +75,13 @@ public sealed class NumosReplaySerializerTests
         var config = new AtmosConfig
         {
             GasRegistry = [new GasProperties { Name = "Air", DiffusionCoefficient = 0.02f }],
-            SleepThreshold = 7,
+            SleepDelay = 0.35f,
             ThermalConductance = 0.15f
         };
 
         using var world = new AtmosWorld(config);
         var source = world.CreateSimulation(2, 2, 1);
-        var timeline = new AtmosWorldReplayTimeline(world, 1);
+        var timeline = new AtmosWorldReplayTimeline(world, 0.05);
         var chunk = source.CreateAndRegisterChunk(default);
         source.SetChunkClassification(chunk, new VoxelClassification(1));
         source.SetChunkBoundaryClassification(chunk, new VoxelClassification(1));
@@ -90,7 +90,7 @@ public sealed class NumosReplaySerializerTests
         source.WakeChunk(chunk);
         source.SleepChunk(chunk);
         world.Solvers.SetEnabled(AtmosBuiltInSolvers.EulerFlow, false);
-        world.SetAtmosConfig(new AtmosConfig(world.Config) { SleepThreshold = 8 });
+        world.SetAtmosConfig(new AtmosConfig(world.Config) { SleepDelay = 0.4f });
         var canister = source.CreateGasMixture(1f, 330f);
         canister.SetMoles(0, 1f);
         canister.TransferTo(source.GetVoxelGasMixture(chunk, 0), 0.5f);
@@ -131,7 +131,7 @@ public sealed class NumosReplaySerializerTests
         });
 
         using var replayWorld = new AtmosWorld(new AtmosConfig(restored.Replay.InitialCheckpoint.Config));
-        var imported = AtmosWorldReplayTimeline.Import(replayWorld, restored.Replay, 1);
+        var imported = AtmosWorldReplayTimeline.Import(replayWorld, restored.Replay, 0.05);
         Assert.Multiple(() =>
         {
             Assert.That(imported.IsImported, Is.True);
@@ -184,8 +184,9 @@ public sealed class NumosReplaySerializerTests
         var initial = new EulerFlowConfig
         {
             CourantNumber = 0.65f,
-            MaxSubstepsPerTick = 7,
+            MaxSubstepsPerSecond = 7,
             VelocityFloor = 0.01f,
+            SleepSpeed = 0.2f,
             MaxVelocity = 1200f,
             WakePressureDelta = 0.5f,
             AllMachCorrection = true,
@@ -200,7 +201,7 @@ public sealed class NumosReplaySerializerTests
         world.Tick();
         world.SetAtmosConfig(new AtmosConfig(world.Config)
         {
-            SolverConfigurations = [new EulerFlowConfig(initial) { MaxSubstepsPerTick = 0 }]
+            SolverConfigurations = [new EulerFlowConfig(initial) { MaxSubstepsPerSecond = 0 }]
         });
 
         world.Tick();
@@ -228,12 +229,12 @@ public sealed class NumosReplaySerializerTests
 
             Assert.That(first!.SemanticallyEquals(initial), Is.True);
             Assert.That(recordedConfig.TryGetSolverConfiguration(out EulerFlowConfig? second), Is.True);
-            Assert.That(second!.MaxSubstepsPerTick, Is.Zero);
+            Assert.That(second!.MaxSubstepsPerSecond, Is.Zero);
             Assert.That(second.Reconstruction, Is.EqualTo(EulerReconstruction.FirstOrder));
         });
 
         using var replayWorld = new AtmosWorld(new AtmosConfig(restored.Replay.InitialCheckpoint.Config));
-        var imported = AtmosWorldReplayTimeline.Import(replayWorld, restored.Replay, 1);
+        var imported = AtmosWorldReplayTimeline.Import(replayWorld, restored.Replay, 0.05);
         imported.ReturnToHead();
         Assert.That(replayWorld.ComputeStateHash(), Is.EqualTo(restored.Replay.HeadStateHash));
     }
@@ -280,7 +281,7 @@ public sealed class NumosReplaySerializerTests
         });
 
         using var replayWorld = new AtmosWorld(new AtmosConfig(restored.Replay.InitialCheckpoint.Config));
-        var imported = AtmosWorldReplayTimeline.Import(replayWorld, restored.Replay, 1);
+        var imported = AtmosWorldReplayTimeline.Import(replayWorld, restored.Replay, 0.05);
         imported.ReturnToHead();
         Assert.That(replayWorld.ComputeStateHash(), Is.EqualTo(restored.Replay.HeadStateHash));
     }
@@ -332,7 +333,7 @@ public sealed class NumosReplaySerializerTests
         using var world = new AtmosWorld();
         var simulation = world.CreateSimulation(1, 1, 1);
         var chunk = simulation.CreateAndRegisterChunk(default);
-        var timeline = new AtmosWorldReplayTimeline(world, 1);
+        var timeline = new AtmosWorldReplayTimeline(world, 0.05);
         simulation.SetVoxelTemperature(chunk, 0, 300f);
         world.Tick();
         simulation.SetVoxelTemperature(chunk, 0, 310f);

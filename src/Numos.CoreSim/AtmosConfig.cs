@@ -53,7 +53,7 @@ public partial class AtmosConfig : IAtmosConfig
         SpaceTemperature = source.SpaceTemperature;
         BulkFlowCoefficient = source.BulkFlowCoefficient;
         VacuumThreshold = source.VacuumThreshold;
-        SleepThreshold = source.SleepThreshold;
+        SleepDelay = source.SleepDelay;
         SleepEpsilon = source.SleepEpsilon;
         ThermalConductance = source.ThermalConductance;
         CondensationRateFactor = source.CondensationRateFactor;
@@ -197,11 +197,16 @@ public partial class AtmosConfig : IAtmosConfig
     public Pascal VacuumThreshold { get; set; } = AtmosConfigDefaults.VacuumThreshold;
 
     /// <summary>
-    ///     Consecutive ticks below <see cref="SleepEpsilon" /> before a chunk goes to sleep.
+    ///     Time below <see cref="SleepEpsilon" /> before a chunk goes to sleep, in seconds (s).
     /// </summary>
-    /// <remarks>Negative values are normalized to zero.</remarks>
+    /// <remarks>
+    ///     The solvers convert this to ticks with the world's tick rate when each tick starts, so the delay in
+    ///     simulated time does not change with the rate. Positive infinity means chunks never sleep. NaN and negative
+    ///     values are normalized to zero.
+    /// </remarks>
+    [Quantity("seconds")]
     [NumosSerialize]
-    public int SleepThreshold { get; set; } = AtmosConfigDefaults.SleepThreshold;
+    public Second SleepDelay { get; set; } = AtmosConfigDefaults.SleepDelay;
 
     /// <summary>
     ///     Maximum relative pressure difference considered "at rest", as a percentage of the higher neighboring

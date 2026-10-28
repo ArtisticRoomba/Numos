@@ -100,7 +100,7 @@ public sealed record AddGasToVoxelOperation(Int3 Position, ushort LocalVoxelInde
 }    
 
 /// <summary>
-///     Adds a one tick ignition source to a voxel and wakes its chunk.
+///     Adds an ignition source to a voxel and wakes its chunk. The source lasts until the next <c>gas-reactions</c> pass.
 /// </summary>
 /// <param name="Position">The target chunk's grid position</param>
 /// <param name="LocalVoxelIndex">The voxel's zero-based index in the chunk's flattened storage.</param>

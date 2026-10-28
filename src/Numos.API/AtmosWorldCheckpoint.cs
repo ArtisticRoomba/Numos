@@ -33,9 +33,10 @@ public sealed partial class AtmosWorldCheckpoint
     ///     Version 12 generates the checkpoint from the world's <c>[NumosSerialize]</c> members. Version 13 writes
     ///     <see cref="Numos.CoreSim.EulerFlow.EulerFlowConfig" /> through the state schema instead of a fixed layout.
     ///     Version 14 adds the default and per-gas thermal conductivity, the ignition settings, the reaction ignition flag,
-    ///     and the <c>SetIgnitionSource</c> operation.
+    ///     and the <c>SetIgnitionSource</c> operation. Version 15 adds the tick rate and each solver
+    ///     stage's interval and schedule state.
     /// </remarks>
-    public const int CurrentFormatVersion = 14;
+    public const int CurrentFormatVersion = 15;
 
     // Immutable once captured or read, so the digest is computed once. See AtmosSimulationCheckpoint.
     [NumosIgnore]
@@ -55,7 +56,7 @@ public sealed partial class AtmosWorldCheckpoint
     /// <summary>
     ///     Gets the completed world-tick count at capture time.
     /// </summary>
-    public int TickCount => checked((int)Position.Tick);
+    public long TickCount => checked((long)Position.Tick);
 
     /// <summary>
     ///     Gets the completed tick and highest world operation sequence incorporated by the checkpoint.
@@ -124,7 +125,8 @@ public sealed partial class AtmosWorldCheckpoint
         {
             if (string.IsNullOrWhiteSpace(solver.Name) ||
                 !Enum.IsDefined(solver.Kind) ||
-                solver.NeighborSelectionKey != null && string.IsNullOrWhiteSpace(solver.NeighborSelectionKey))
+                solver.NeighborSelectionKey != null && string.IsNullOrWhiteSpace(solver.NeighborSelectionKey) ||
+                solver.Interval < 1)
             {
                 throw new InvalidDataException("The world solver metadata is invalid.");
             }
@@ -186,11 +188,17 @@ public sealed partial class AtmosWorldCheckpoint
 /// <param name="Kind">Whether Numos or the host supplies the implementation.</param>
 /// <param name="Enabled">Whether the solver participates in ticks.</param>
 /// <param name="NeighborSelectionKey">The stable compiled-neighborhood policy key, or <see langword="null" />.</param>
+/// <param name="Interval">How many ticks pass between runs of the stage.</param>
+/// <param name="NextDueTick">The first one-based tick on which the stage runs again.</param>
+/// <param name="LastRunTick">The one-based tick of the stage's latest run, or the grid tick before its first run.</param>
 public readonly partial record struct AtmosWorldSolverCheckpoint(
     [property: NumosSerialize] string Name,
     [property: NumosSerialize] AtmosWorldSolverKind Kind,
     [property: NumosSerialize] bool Enabled,
-    [property: NumosSerialize] string? NeighborSelectionKey);
+    [property: NumosSerialize] string? NeighborSelectionKey,
+    [property: NumosSerialize] int Interval,
+    [property: NumosSerialize] long NextDueTick,
+    [property: NumosSerialize] long LastRunTick);
 
 /// <summary>
 ///     Holds one class solver's <c>[NumosSerialize]</c> members as written by its generated state walker.

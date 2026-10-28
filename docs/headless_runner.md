@@ -123,6 +123,8 @@ Every response has `protocolVersion`, `ok`, and the request `id` and `op`. When 
 | `simulation`, `simulationId` | The active simulation. |
 | `simulationCount` | Simulations in the world. |
 | `tick` | The world tick. |
+| `tickRate` | Ticks per second of atmospheric time. |
+| `simulatedTime` | Atmospheric time in seconds, the tick count divided by the tick rate. |
 | `chunkCount` | Chunks in the active simulation. |
 | `gasCount` | Gases in the registry. |
 | `inspecting` | `true` while the timeline shows history. |
@@ -159,7 +161,7 @@ An unreadable script also produces one error response with code `scriptUnavailab
 | `gasNotFound` | A gas id is not in the registry. |
 | `fieldNotFound` | A field name is unknown. |
 | `invalidRegion` | A region has `max` below `min`. |
-| `invalidTickCount` | `tick.count` is outside 1 to 1000000. |
+| `invalidTickCount` | `tick` has both or neither of `count` and `seconds`, or the tick count is outside 1 to 1000000. |
 | `solverNotFound` | No solver stage has that name. |
 | `branchNotFound` | No branch has that id. |
 | `ioError` | A file operation failed, such as saving over an existing replay. |
@@ -188,7 +190,7 @@ second and velocity is in metres per second.
 | --- | --- | --- |
 | `hello` | None | Returns the protocol number, the host name and version (with the commit), and the CoreSim version. |
 | `getLog` | optional `afterSequence`, `maxEntries`, `minLevel` | Returns session log entries. |
-| `createProject` | `name`, `chunkDimensions`, `includeDefaultGases` (default `false`), `config`, `gases`, `transportModel` | Replaces the open project with an empty one at tick zero. |
+| `createProject` | `name`, `chunkDimensions`, `includeDefaultGases` (default `false`), `config`, `gases`, `transportModel`, `tickRate` (default 960) | Replaces the open project with an empty one at tick zero. |
 | `closeProject` | None | Closes the project. |
 | `exit` | None | Closes the project, responds, and stops reading input. In socket mode it stops the server. |
 
@@ -198,6 +200,9 @@ second and velocity is in metres per second.
 the pressure-relaxation pair of `advection` and `boundary-flow`. `createProject` and `resetSolvers` read it. Any other
 value fails with `invalidTransportModel`. The model is part of the recorded stage list, so a script that pins legacy
 numbers must say `"legacy"` and not rely on the default.
+
+`tickRate` is the number of ticks per second of atmospheric time. The default is 960. It must be a multiple of 20 from 20
+to 100000. Any other value fails with `invalidRequest`.
 
 `getLog` returns entries in sequence order. `afterSequence` (default `0`) skips entries up to that sequence number.
 `maxEntries` (default 200, maximum 5000) caps the reply, and `more` is `true` when entries remain. `minLevel` is
@@ -354,7 +359,7 @@ The files use NumPy format version 1.0, little-endian `float32`. Load one with `
 ```
 
 The file is a CSV with the columns `tick`, `timeSeconds`, and then `name.field` for each probe and field, in the order
-given. `timeSeconds` is the tick divided by the simulation rate. The runner writes a row for the state before the first
+given. `timeSeconds` is the world's simulated time. The runner writes a row for the state before the first
 tick and then a row every `every` ticks (default 1). It also writes a row for the last tick when that tick is not a
 multiple of `every`. Sampling copies only the fields it needs from the chunks that hold probes. Probe names cannot
 contain commas or quotes. A voxel outside every chunk reads as NaN.
@@ -393,13 +398,13 @@ domain of its field, such as a negative `bulkFlowCoefficient`.
 
 `globalTemperatureK`, `defaultTemperatureFallbackK`, `defaultMolarHeatCapacityAtConstantVolume`, `voxelVolumeM3`,
 `saturationReferencePressurePa`, `defaultDiffusionCoefficient`, `spaceTemperatureK`, `bulkFlowCoefficient`,
-`vacuumThresholdPa`, `sleepThreshold`, `sleepEpsilonPercent`, `thermalConductance`, `condensationRateFactor`,
+`vacuumThresholdPa`, `sleepDelay`, `sleepEpsilonPercent`, `thermalConductance`, `condensationRateFactor`,
 `maxPressureTransferFractionPerNeighbor`, `accumulatorWakeThresholdPa`, `accumulatorMaxAliveTicks`, `referenceMolarMassKgPerMol`.
 
-The `eulerFlow` object holds the Euler transport settings: `courantNumber`, `maxSubstepsPerTick`, `velocityFloorMps`,
-`maxVelocityMps`, `wakePressureDeltaPa`, `allMachCorrection`, `reconstruction` (`"firstOrder"`),
-`momentumDampingPerSecond`, and `defaultLinkAreaFraction`. A patch replaces the `EulerFlowConfig` entry with a copy that
-applies the given fields. Omitted fields keep the entry's value, or the library default when the session has no entry.
+The `eulerFlow` object holds the Euler transport settings: `courantNumber`, `maxSubstepsPerSecond`, `velocityFloorMps`,
+`sleepSpeedMps`, `settlePeriod`, `maxVelocityMps`, `wakePressureDeltaPa`, `allMachCorrection`, `reconstruction`
+(`"firstOrder"`), `momentumDampingPerSecond`, and `defaultLinkAreaFraction`. A patch replaces the `EulerFlowConfig` entry
+with a copy that applies the given fields. Omitted fields keep the entry's value, or the library default when the session has no entry.
 The runner rejects an `eulerFlow` value outside the domain of its field, such as a `courantNumber` above 1.
 The observation reports `config.eulerFlow` with the same names. It is absent while the session has no entry. The solver
 then runs with its defaults.
@@ -410,9 +415,10 @@ Defaults change between versions. Set every field a study depends on.
 
 | Operation | Request data | Effect |
 | --- | --- | --- |
-| `listSolvers` | None | Lists the stages in execution order. |
+| `listSolvers` | None | Lists the stages in execution order. Each entry has `name`, `isEnabled`, `kind`, and `interval` in ticks. |
 | `setSolverEnabled` | `solver`, `enabled` | Enables or disables a stage. |
-| `setSolverLayout` | `stages` (array of `name`, `enabled`) | Sets the order and enabled flags of every stage in one step. |
+| `setSolverInterval` | `solver`, `interval` | Sets how many ticks pass between runs of a stage. |
+| `setSolverLayout` | `stages` (array of `name`, `enabled`, optional `interval`) | Sets the order, enabled flags, and intervals of every stage in one step. |
 | `applyTransportPreset` | `transportModel` | Swaps the transport stages and keeps every other stage as it is. |
 | `resetSolvers` | optional `transportModel` | Restores the stage defaults of one transport model, or of the current one. |
 | `createPortal` | `first`, `second`, optional `flags` and `areaFraction` | Links two voxels, possibly in different simulations. |
@@ -422,14 +428,17 @@ Defaults change between versions. Set every field a study depends on.
 
 The built-in stages, in default order, are `euler-flow`, `explicit-gas-transport`, `thermodynamics`,
 `explicit-thermal-transport`, `thermal-boundary`, and `gas-reactions`. The legacy model runs `advection`,
-`explicit-gas-transport`, `boundary-flow`, and then the same last four.
+`explicit-gas-transport`, `boundary-flow`, and then the same last four. At 960 Hz `euler-flow` runs every 16 ticks by
+default. Send `setSolverInterval` with an `interval` of 1 to run it on every tick.
 
 `setSolverLayout` lists every stage. Each name is a built-in stage or a registered custom stage, no name repeats, and
 every custom stage appears. Numos creates a built-in stage that the world does not hold and drops one that the list
 omits. A bad list fails with `operationRejected` and changes nothing. A project always records, and the world
 records a layout change, so a replay reproduces it. `applyTransportPreset` replaces `euler-flow` with `advection` and
 `boundary-flow` (or the reverse) at the same positions. `transportModel` is required there. Both commands report
-`changed: false` when the layout already matches.
+`changed: false` when the layout already matches. An `interval` of zero or a missing `interval` keeps the current
+interval of a registered stage and gives a new built-in stage its default. Give `advection` and `boundary-flow` one
+interval, and give `thermodynamics` and `thermal-boundary` one interval. The stages hand data over within a tick.
 
 `resetSolvers` installs the default layout. A world with custom stages cannot discard them while it records. In that
 case `resetSolvers` enables every stage, leaves the order alone, and returns `changed: false`.
@@ -445,7 +454,7 @@ is `negativeX`, `positiveX`, `negativeY`, `positiveY`, `negativeZ`, or `positive
 
 | Operation | Request data | Effect |
 | --- | --- | --- |
-| `tick` | `count` (1 to 1000000), optional `progressInterval` and `probes` | Runs fixed ticks, and writes probe samples when `probes` is set. |
+| `tick` | `count` (1 to 1000000) or `seconds`, optional `progressInterval` and `probes` | Runs fixed ticks, and writes probe samples when `probes` is set. |
 | `stepForward` | None | Ticks one step on the head or seeks one tick in history. |
 | `seekTick` | `tick` | Shows the state at a past tick. The timeline then inspects history. |
 | `returnToHead` | None | Moves to the newest tick. |
@@ -453,9 +462,11 @@ is `negativeX`, `positiveX`, `negativeY`, `positiveY`, `negativeZ`, or `positive
 | `selectBranch` | `branchId`, optional `tick` | Switches to a branch. |
 | `continueBranch` | None | Ends inspection so the branch can tick and take edits. |
 | `listBranches` | None | Lists branches. |
-| `timelineInfo` | None | Returns head, position, checkpoints, branches, and the state hash. |
+| `timelineInfo` | None | Returns head, position, their times in seconds (`headTime`, `positionTime`), checkpoints, branches, and the state hash. |
 
-`tick` writes a progress line to the log every `progressInterval` ticks (default 100, `0` for none). It calls the world
+`tick` takes exactly one of `count` and `seconds`. The runner converts `seconds` to `round(seconds × tickRate)` ticks at the
+current rate. The result must be from 1 to 1000000 ticks, which covers over 1000 s at 960 Hz. `tick` writes a progress
+line to the log every `progressInterval` ticks (default about 5 s of atmospheric time, `0` for none). It calls the world
 tick directly, so a script runs the same number of solver steps on every machine. See "Data extraction" for `probes`.
 
 While the timeline inspects history, every operation that edits the world fails with `operationRejected`. Call
@@ -482,12 +493,14 @@ the next `tick` extends the branch.
 `observe` captures a coherent report of one simulation. `result.stateHash` carries the world state hash. The report has
 these parts:
 
-- `tick`, `simulationRate`, and `simulationChunkCount`.
+- `tick`, `simulationRate`, `tickRate`, `simulatedTime`, and `simulationChunkCount`. `simulationRate` and `tickRate` both
+  hold the world's tick rate. New scripts read `tickRate`.
 - `config`, including the gas registry and, once the session has them, the `eulerFlow` settings.
 - `solverPipeline` in execution order.
-- `flow`, what `euler-flow` did on the latest tick: `substepsLastTick`, `simulatedSeconds`, `substepCapEngaged`,
+- `flow`, what `euler-flow` did on its latest run: `substepsLastTick`, `simulatedSeconds`, `substepCapEngaged`,
   `maxCourantNumber`, `maxSignalSpeedMps`, `clampedVelocityCount`, `negativeInternalEnergyCount`,
-  `negativeMolesCount`, and `nonFiniteCellCount`. All values are zero before the first tick and under the legacy model.
+  `negativeMolesCount`, and `nonFiniteCellCount`. The values stay the same on the ticks between runs. All values are
+  zero before the first run and under the legacy model.
   Alert on `substepCapEngaged` and the four counts. The rest are for tuning `eulerFlow`.
 - `global`, with topology counts, total moles, estimated sensible energy, pressure, temperature, and speed statistics, totals by
   gas, and anomaly counts.
@@ -515,20 +528,20 @@ boundaries can remove mass or energy on purpose.
 ## Example scripts
 
 [`examples/headless/two-voxel-flow.jsonl`](../examples/headless/two-voxel-flow.jsonl) creates a `2 x 1 x 1` chunk on the
-legacy model. It injects gas into the left voxel and observes the pressure imbalance, one tick, and the result.
+legacy model. It injects gas into the left voxel and observes the pressure imbalance, 0.05 s of flow, and the result.
 
 [`examples/headless/euler-shock-tube.jsonl`](../examples/headless/euler-shock-tube.jsonl) is the Euler counterpart. It
 builds an `8 x 1 x 1` tube of air at 1 m³ per voxel with the left half at twice the pressure of the right. It observes
-the tube after one, five, and twenty ticks, so the `flow` block and the per-voxel velocities have something to show.
+the tube after 0.05 s, 0.25 s, and 1 s, so the `flow` block and the per-voxel velocities have something to show.
 
 [`examples/headless/euler-moving-shock.jsonl`](../examples/headless/euler-moving-shock.jsonl) starts a Mach 1.53 shock in a
 400-voxel air tube. The left quarter holds the post-shock state, with 260 kPa, 393 K, and a gas velocity of 251 m/s set by
-`editRegion`. The script exports `density`, `schlieren`, and `velocityX` and renders the schlieren after each of two ticks.
+`editRegion`. The script exports `density`, `schlieren`, and `velocityX` and renders the schlieren after each of two 0.05 s steps.
 
 [`examples/headless/shock-tube-1d.jsonl`](../examples/headless/shock-tube-1d.jsonl) builds a 2000-voxel tube with solid
 walls. The left half starts at 2 atmospheres and the right half at 1 atmosphere. The script uses one `editRegion` call
-for each half and ticks 400 steps with four wall probes. It writes the pressure, temperature, and mole slices at tick 0
-and tick 400 as `.npy` files, the probe CSV, and a PNG of the pressure. The files go to `artifacts/headless/`.
+for each half and runs 20 s with four wall probes sampled every 0.5 s. It writes the pressure, temperature, and mole
+slices at 0 s and 20 s as `.npy` files, the probe CSV, and a PNG of the pressure. The files go to `artifacts/headless/`.
 
 Load the result in Python:
 
@@ -537,9 +550,8 @@ import numpy as np
 pressure = np.load("artifacts/headless/shock-tube-t400-pressure.npy")[1]  # row y = 1 is the tube
 ```
 
-The default Euler solver keeps the waves sharp, so the tube rings. Sound speed is about 347 m/s and 400 ticks last
-20 s. By then the waves have crossed the 2 km tube several times, and the profile is a mix of reflections. To see the
-first passage, tick fewer steps. At tick 20 the pressure falls through a rarefaction fan from the left end of the
+The default Euler solver keeps the waves sharp, so the tube rings. Sound speed is about 347 m/s. By 20 s the waves have crossed the 2 km tube several times, and the profile is a
+mix of reflections. To see the first passage, tick for less time. At 1 s the pressure falls through a rarefaction fan from the left end of the
 driver, holds a plateau near 142 kPa, and jumps back to 101 kPa across a steep shock front. The total moles stay
 constant.
 
@@ -557,8 +569,8 @@ voxel thick in `z`:
    frames, and pass one `schlierenReference` to every frame.
 
 For a moving shock, fill the shocked region with `clearGas`, `partialPressurePa`, `gasTemperatureK`, and `velocity` in one
-`editRegion`. The Euler solver substeps inside each 50 ms tick. Its default `maxSubstepsPerTick` can stop a tick early on
-a fine grid, so check `flow.substepCapEngaged` and raise `eulerFlow.maxSubstepsPerTick` when it is set.
+`editRegion`. The Euler solver substeps inside each run. Its default `maxSubstepsPerSecond` can stop a call early on
+a fine grid, so check `flow.substepCapEngaged` and raise `eulerFlow.maxSubstepsPerSecond` when it is set.
 
 `editRegion` records one replay operation for the whole box, plus one chunk operation for each chunk that `createChunks`
 creates. A large region therefore adds little to the replay file.

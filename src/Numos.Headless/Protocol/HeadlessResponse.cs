@@ -26,7 +26,9 @@ internal sealed class SessionState
     public required string? Simulation { get; init; }
     public required int? SimulationId { get; init; }
     public required int SimulationCount { get; init; }
-    public required int Tick { get; init; }
+    public required long Tick { get; init; }
+    public required long TickRate { get; init; }
+    public required double SimulatedTime { get; init; }
     public required int ChunkCount { get; init; }
     public required int GasCount { get; init; }
     public required bool Inspecting { get; init; }
@@ -139,6 +141,8 @@ internal sealed class TimelineInfo
     public required ulong StartTick { get; init; }
     public required ulong HeadTick { get; init; }
     public required ulong PositionTick { get; init; }
+    public required double PositionTime { get; init; }
+    public required double HeadTime { get; init; }
     public required bool Inspecting { get; init; }
     public bool? Verified { get; init; }
     public required int SelectedBranchId { get; init; }

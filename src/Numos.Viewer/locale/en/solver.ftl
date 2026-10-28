@@ -1,6 +1,7 @@
 ﻿move-up = Move up
 move-down = Move down
 remove-stage = Remove stage
+solver-interval-tooltip = Ticks between runs of this stage. Edits apply on Enter or when the field loses focus.
 custom-stage-removal-unavailable = The host owns custom stages. The viewer cannot remove them.
 select-stage-description-settings = Select a stage to see its description and settings.
 configured-reactions = Configured reactions: { $count }

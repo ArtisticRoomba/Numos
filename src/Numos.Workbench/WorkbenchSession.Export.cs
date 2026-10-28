@@ -123,12 +123,12 @@ public sealed class ProbeRecorder : IDisposable
     /// </summary>
     public void Record()
     {
-        int tick = _session.World!.TickCount;
+        long tick = _session.World!.TickCount;
         _sampler.Sample(_values);
         _line.Clear();
         _line.Append(tick.ToString(CultureInfo.InvariantCulture))
             .Append(',')
-            .Append((tick / (double)AtmosSimulation.SimulationRate).ToString("R", CultureInfo.InvariantCulture));
+            .Append(_session.World!.SimulatedTime.ToString("R", CultureInfo.InvariantCulture));
 
         foreach (float value in _values)
             _line.Append(',').Append(value.ToString("R", CultureInfo.InvariantCulture));

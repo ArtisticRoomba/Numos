@@ -77,7 +77,7 @@ public sealed class EulerRestAndDrainTests
     public void UniformRoomAtRest_FallsAsleep()
     {
         var config = SimTestHelpers.CreateEulerConfig();
-        config.SleepThreshold = 5;
+        config.SleepDelay = 0.25f;
         config.SleepEpsilon = 3.5f;
         using var simulation = SimTestHelpers.CreateEulerSimulation(config, 4, 4, 4, out var chunk);
         FillRoom(simulation, chunk, 4, 4, 4, SimTestHelpers.MolesFor(config, Pressure, Temperature));

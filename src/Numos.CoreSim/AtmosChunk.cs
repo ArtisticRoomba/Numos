@@ -56,6 +56,19 @@ internal class AtmosChunk
     public int ActiveGasCount;
 
     /// <summary>
+    ///     Advances on every write of <see cref="VoxelRoomMap" /> made inside this class and at the end of every
+    ///     <see cref="RebuildActiveAirIndices" />. Solvers that derive geometry from the room map and the
+    ///     active-air list compare it to know when to rebuild. It is not checkpointed.
+    /// </summary>
+    /// <remarks>
+    ///     The counter only grows, so two reads that match saw the same room map. A raw room-map edit that skips
+    ///     <see cref="RebuildActiveAirIndices" /> leaves it behind. Such an edit was already unsupported, because
+    ///     it leaves the active-air list stale too. A chunk restored from a checkpoint is a new object, so cached
+    ///     geometry must also check the chunk reference and its generation.
+    /// </remarks>
+    internal long AirTopologyVersion;
+
+    /// <summary>
     ///     Gas channels currently present in this chunk.
     /// </summary>
     /// <remarks>
@@ -110,9 +123,13 @@ internal class AtmosChunk
     public FlatArray<bool> IsVacuum;
 
     /// <summary>
-    ///     Number of consecutive simulation ticks for which this chunk has remained below the sleep threshold.
+    ///     Number of simulation ticks for which this chunk has remained below the sleep epsilon.
     /// </summary>
-    /// <seealso cref="AtmosConfig.SleepThreshold" />
+    /// <remarks>
+    ///     A stage that runs every <c>n</c> ticks adds <c>n</c> per run. The chunk sleeps when the count exceeds the
+    ///     sleep delay converted to ticks.
+    /// </remarks>
+    /// <seealso cref="AtmosConfig.SleepDelay" />
     [NumosSerialize]
     public int SleepTimer;
 
@@ -366,6 +383,7 @@ internal class AtmosChunk
         SleepTimer = 0;
 
         VoxelRoomMap.Clear();
+        AirTopologyVersion++;
         Array.Clear(ActiveAirIndices, 0, ActiveAirIndices.Length);
         TotalPressure.Clear();
         TotalHeatCapacity.Clear();
@@ -575,6 +593,8 @@ internal class AtmosChunk
             ActiveAirIndices[ActiveAirCount] = i;
             ActiveAirCount++;
         }
+
+        AirTopologyVersion++;
     }
 
     /// <summary>
@@ -798,6 +818,7 @@ internal class AtmosChunk
             SetVoxelToVacuum(idx);
 
         VoxelRoomMap[idx] = classification.RoomId;
+        AirTopologyVersion++;
     }
 
 
@@ -822,6 +843,7 @@ internal class AtmosChunk
             SetChunkToVacuum();
 
         VoxelRoomMap.Fill(classification.RoomId);
+        AirTopologyVersion++;
     }
 
 

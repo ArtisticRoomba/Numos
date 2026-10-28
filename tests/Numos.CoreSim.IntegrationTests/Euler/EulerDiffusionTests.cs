@@ -268,7 +268,7 @@ public sealed class EulerDiffusionTests
     private static AtmosSimulation CreateLegacySimulation(
         AtmosConfig config, int width, int height, int depth, out AtmosChunkHandle chunk)
     {
-        var simulation = new AtmosSimulation(config, width, height, depth);
+        var simulation = new AtmosSimulation(config, width, height, depth, tickRate: SimTestHelpers.PinnedTickRate);
         simulation.World.Solvers.ResetToDefaults(AtmosTransportModel.Legacy);
         simulation.World.Solvers.SetEnabled(AtmosBuiltInSolvers.Thermodynamics, false);
         simulation.World.Solvers.SetEnabled(AtmosBuiltInSolvers.GasReactions, false);

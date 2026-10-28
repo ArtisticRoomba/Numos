@@ -197,6 +197,7 @@ public sealed class AtmosWorldSolverPipelineTests
         simulation.SetChunkClassification(source, new VoxelClassification(1));
         simulation.SetChunkClassification(target, new VoxelClassification(1));
         simulation.AddGasToVoxel(source, 0, "TestGas", 1f, 300f);
+        world.Solvers.SetInterval(AtmosBuiltInSolvers.EulerFlow, 1);
         float observedTargetMoles = 0f;
 
         world.Solvers.Register(

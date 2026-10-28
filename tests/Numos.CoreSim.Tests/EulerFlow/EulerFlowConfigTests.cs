@@ -16,10 +16,12 @@ public sealed class EulerFlowConfigTests
         {
             Assert.That(config.Key, Is.EqualTo("euler-flow"));
             Assert.That(config.CourantNumber, Is.EqualTo(0.5f));
-            Assert.That(config.MaxSubstepsPerTick, Is.EqualTo(64));
+            Assert.That(config.MaxSubstepsPerSecond, Is.EqualTo(1280));
+            Assert.That(config.SettlePeriod, Is.EqualTo(0.05f));
             Assert.That(config.VelocityFloor, Is.EqualTo(0.005f));
+            Assert.That(config.SleepSpeed, Is.EqualTo(0.5f));
             Assert.That(config.MaxVelocity, Is.EqualTo(5000f));
-            Assert.That(config.WakePressureDelta, Is.EqualTo(10f));
+            Assert.That(config.WakePressureDelta, Is.EqualTo(50f));
             Assert.That(config.AllMachCorrection, Is.False);
             Assert.That(config.Reconstruction, Is.EqualTo(EulerReconstruction.FirstOrder));
             Assert.That(config.MomentumDamping, Is.EqualTo(0f));
@@ -31,7 +33,7 @@ public sealed class EulerFlowConfigTests
     [Test]
     public void Snapshot_ReturnsItselfWhenAlreadyNormalized()
     {
-        var config = new EulerFlowConfig { CourantNumber = 0.8f, MaxSubstepsPerTick = 0 };
+        var config = new EulerFlowConfig { CourantNumber = 0.8f, MaxSubstepsPerSecond = 0 };
         var gases = new AtmosConfig().CreateSnapshot().GasRegistry;
 
         Assert.That(config.CreateSnapshot(gases), Is.SameAs(config));
@@ -43,8 +45,10 @@ public sealed class EulerFlowConfigTests
         var config = new EulerFlowConfig
         {
             CourantNumber = 1.5f,
-            MaxSubstepsPerTick = -3,
+            MaxSubstepsPerSecond = -3,
+            SettlePeriod = float.NaN,
             VelocityFloor = -1f,
+            SleepSpeed = float.PositiveInfinity,
             MaxVelocity = float.NaN,
             WakePressureDelta = float.NegativeInfinity,
             Reconstruction = (EulerReconstruction)42,
@@ -58,8 +62,10 @@ public sealed class EulerFlowConfigTests
         {
             Assert.That(snapshot, Is.Not.SameAs(config));
             Assert.That(snapshot.CourantNumber, Is.EqualTo(1f));
-            Assert.That(snapshot.MaxSubstepsPerTick, Is.Zero);
+            Assert.That(snapshot.MaxSubstepsPerSecond, Is.Zero);
+            Assert.That(snapshot.SettlePeriod, Is.Zero);
             Assert.That(snapshot.VelocityFloor, Is.Zero);
+            Assert.That(snapshot.SleepSpeed, Is.Zero);
             Assert.That(snapshot.MaxVelocity, Is.EqualTo(5000f));
             Assert.That(snapshot.WakePressureDelta, Is.Zero);
             Assert.That(snapshot.Reconstruction, Is.EqualTo(EulerReconstruction.FirstOrder));
@@ -85,8 +91,10 @@ public sealed class EulerFlowConfigTests
         EulerFlowConfig[] variants =
         [
             new() { CourantNumber = 0.4f },
-            new() { MaxSubstepsPerTick = 8 },
+            new() { MaxSubstepsPerSecond = 8 },
+            new() { SettlePeriod = 0.2f },
             new() { VelocityFloor = 0.01f },
+            new() { SleepSpeed = 0.25f },
             new() { MaxVelocity = 100f },
             new() { WakePressureDelta = 2f },
             new() { AllMachCorrection = true },
@@ -156,8 +164,10 @@ public sealed class EulerFlowConfigTests
         var config = new EulerFlowConfig
         {
             CourantNumber = 0.7f,
-            MaxSubstepsPerTick = 12,
+            MaxSubstepsPerSecond = 12,
+            SettlePeriod = 0.125f,
             VelocityFloor = 0.02f,
+            SleepSpeed = 0.3f,
             MaxVelocity = 900f,
             WakePressureDelta = 3.5f,
             AllMachCorrection = true,

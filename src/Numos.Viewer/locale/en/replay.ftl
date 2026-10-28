@@ -2,7 +2,7 @@
 timeline-branches = Branches
 timeline-transport = Transport
 timeline-selected-tick = Selected tick
-timeline-visible-ticks = Visible ticks
+timeline-visible-window = Visible window
 timeline-keep-playhead-centered = Keep playhead centered
 timeline-keep-playhead-centered-tooltip = Moves the visible tick range as the selected timeline position changes.
 timeline-first-visible-tick = First visible tick
@@ -29,6 +29,8 @@ timeline-tick = Tick { $tick }
 timeline-through-operation = Through operation #{ $sequence }
 timeline-start-button = Start
 timeline-back-button = Back
+timeline-step-milliseconds = ms per step
+timeline-step-description = Back and Forward move this much simulated time, rounded to whole ticks. Now { $ticks }.
 timeline-play-button = Play
 timeline-forward-button = Forward
 timeline-return-to-head-button = Return to Head
@@ -84,7 +86,7 @@ replay-gas-column-liquid-id = Liquid ID
 replay-solver-configurations = Solver configurations
 replay-solver-configuration = Solver configuration
 
-replay-timeline-axis-title = TICK / SIMULATION TIME
+replay-timeline-axis-title = SIMULATION TIME / TICK
 replay-restorable-tick-range-tooltip = Ticks { $startTick } through { $endTick } have recorded states that can be restored.
 replay-single-operation-tooltip = { $code }
     Done in tick { $tick }

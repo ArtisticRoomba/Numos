@@ -12,8 +12,8 @@ public sealed class ReplayBranchSessionTests
         using var world = new AtmosWorld(new AtmosConfig());
         var simulation = world.CreateSimulation(1, 1, 1);
         var chunk = simulation.CreateAndRegisterChunk(default);
-        var timeline = new AtmosWorldReplayTimeline(world, 1);
-        var branches = new ReplayBranchSession(world, timeline, 1);
+        var timeline = new AtmosWorldReplayTimeline(world, 0.05);
+        var branches = new ReplayBranchSession(world, timeline, 0.05);
 
         world.Tick();
         simulation.SetVoxelTemperature(chunk, 0, 310f);
@@ -43,7 +43,7 @@ public sealed class ReplayBranchSessionTests
         using var world = new AtmosWorld(new AtmosConfig());
         var simulation = world.CreateSimulation(1, 1, 1);
         var chunk = simulation.CreateAndRegisterChunk(default);
-        var branches = new ReplayBranchSession(world, new AtmosWorldReplayTimeline(world, 1), 1);
+        var branches = new ReplayBranchSession(world, new AtmosWorldReplayTimeline(world, 0.05), 0.05);
 
         simulation.SetVoxelTemperature(chunk, 0, 300f);
         world.Tick();
@@ -75,7 +75,7 @@ public sealed class ReplayBranchSessionTests
     {
         using var world = new AtmosWorld(new AtmosConfig());
         world.CreateSimulation(1, 1, 1);
-        var branches = new ReplayBranchSession(world, new AtmosWorldReplayTimeline(world, 1), 1);
+        var branches = new ReplayBranchSession(world, new AtmosWorldReplayTimeline(world, 0.05), 0.05);
 
         var first = branches.CreateBranchFromCurrentTick();
         world.Tick();
@@ -99,7 +99,7 @@ public sealed class ReplayBranchSessionTests
     {
         using var world = new AtmosWorld(new AtmosConfig());
         world.CreateSimulation(1, 1, 1);
-        var branches = new ReplayBranchSession(world, new AtmosWorldReplayTimeline(world, 1), 1);
+        var branches = new ReplayBranchSession(world, new AtmosWorldReplayTimeline(world, 0.05), 0.05);
 
         world.Tick();
         world.Tick();
@@ -118,7 +118,7 @@ public sealed class ReplayBranchSessionTests
     {
         using var world = new AtmosWorld(new AtmosConfig());
         world.CreateSimulation(1, 1, 1);
-        var branches = new ReplayBranchSession(world, new AtmosWorldReplayTimeline(world, 1), 1);
+        var branches = new ReplayBranchSession(world, new AtmosWorldReplayTimeline(world, 0.05), 0.05);
 
         world.Tick();
         var child = branches.CreateBranchFromCurrentTick();
@@ -145,12 +145,12 @@ public sealed class ReplayBranchSessionTests
         using var world = new AtmosWorld(new AtmosConfig());
         var simulation = world.CreateSimulation(1, 1, 1);
         var chunk = simulation.CreateAndRegisterChunk(default);
-        var timeline = new AtmosWorldReplayTimeline(world, 1);
+        var timeline = new AtmosWorldReplayTimeline(world, 0.05);
         int restoreCalls = 0;
         var branches = new ReplayBranchSession(
             world,
             timeline,
-            1,
+            0.05,
             (targetWorld, archive, interval) =>
             {
                 restoreCalls++;

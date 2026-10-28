@@ -43,7 +43,7 @@ public sealed partial class AtmosWorld : IDisposable
     private readonly SortedSet<int> _pendingLinkSlots = [];
     private readonly HashSet<ExplicitEdgeKey> _reservedEdges = [];
     private readonly List<SimulationSlot> _simulationSlots = [];
-    private float _accumulator;
+    private double _accumulator;
 
     private ExplicitAtmosEdge[] _activeEdges = [];
     private Dictionary<AtmosChunkKey, int> _activeEdgesByChunk = [];
@@ -99,11 +99,40 @@ public sealed partial class AtmosWorld : IDisposable
     ///     <paramref name="transportModel" /> is not a defined model.
     /// </exception>
     public AtmosWorld(AtmosConfig config, AtmosTransportModel transportModel)
+        : this(config, transportModel, DefaultTickRate)
+    {
+    }
+
+    /// <summary>
+    ///     Initializes an empty world with a detached copy of a physics configuration, the built-in stages of one
+    ///     transport model, and a tick rate.
+    /// </summary>
+    /// <param name="config">
+    ///     The editable configuration to copy. Later edits to it do not affect this world until
+    ///     <see cref="SetAtmosConfig" /> is called.
+    /// </param>
+    /// <param name="transportModel">Which built-in stages move gas between voxels.</param>
+    /// <param name="tickRate">
+    ///     Ticks per second of atmospheric time. It must be a multiple of 20 from 20 to 100000, so the built-in 50 ms
+    ///     and 100 ms stage periods are whole tick counts.
+    /// </param>
+    /// <remarks>
+    ///     The tick rate sets the default interval of each built-in stage, and the stage dt is
+    ///     <c>interval / tickRate</c> seconds. A restore adopts the checkpoint's rate.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="config" /> is <see langword="null" />.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    ///     <paramref name="transportModel" /> is not a defined model, or <paramref name="tickRate" /> is not a
+    ///     multiple of 20 from 20 to 100000.
+    /// </exception>
+    public AtmosWorld(AtmosConfig config, AtmosTransportModel transportModel, int tickRate)
     {
         ArgumentNullException.ThrowIfNull(config);
         if (!Enum.IsDefined(transportModel))
             throw new ArgumentOutOfRangeException(nameof(transportModel), transportModel, "Unknown transport model.");
 
+        ValidateTickRate(tickRate, nameof(tickRate));
+        TickRate = tickRate;
         _config = config.CreateSnapshot();
         Solvers = new AtmosWorldSolverPipeline(this, transportModel);
         Services = new AtmosWorldServices(this);
@@ -169,7 +198,62 @@ public sealed partial class AtmosWorld : IDisposable
     ///     Gets the number of completed fixed world ticks.
     /// </summary>
     [PublicAPI]
-    public int TickCount { get; private set; }
+    public long TickCount { get; private set; }
+
+    /// <summary>
+    ///     The tick rate that <see cref="AtmosWorld(AtmosConfig, AtmosTransportModel, int)" /> assumes when the caller
+    ///     gives none, in ticks per second.
+    /// </summary>
+    [PublicAPI]
+    public const int DefaultTickRate = 960;
+
+    /// <summary>
+    ///     Gets the number of fixed ticks per second of atmospheric time.
+    /// </summary>
+    /// <remarks>
+    ///     A multiple of 20 from 20 to 100000. The constructor sets it, and a checkpoint restore adopts the
+    ///     checkpoint's value.
+    /// </remarks>
+    [PublicAPI]
+    [NumosSerialize]
+    public int TickRate { get; private set; }
+
+    /// <summary>
+    ///     Gets the atmospheric time the world has simulated so far, in seconds.
+    /// </summary>
+    /// <remarks>
+    ///     Equal to <see cref="TickCount" /> divided by <see cref="TickRate" />.
+    /// </remarks>
+    [PublicAPI]
+    public double SimulatedTime => (double)TickCount / TickRate;
+
+    /// <summary>
+    ///     Reports whether a tick rate is one that the constructor accepts.
+    /// </summary>
+    /// <param name="tickRate">The candidate rate, in ticks per second.</param>
+    /// <returns><see langword="true" /> for a multiple of 20 from 20 to 100000.</returns>
+    [PublicAPI]
+    public static bool IsValidTickRate(int tickRate)
+    {
+        return tickRate is >= MinimumTickRate and <= MaximumTickRate && tickRate % MinimumTickRate == 0;
+    }
+
+    /// <summary>
+    ///     Throws unless a tick rate is a multiple of 20 from 20 to 100000.
+    /// </summary>
+    internal static void ValidateTickRate(int tickRate, string parameterName)
+    {
+        if (!IsValidTickRate(tickRate))
+        {
+            throw new ArgumentOutOfRangeException(
+                parameterName,
+                tickRate,
+                $"The tick rate must be a multiple of {MinimumTickRate} from {MinimumTickRate} to {MaximumTickRate}.");
+        }
+    }
+
+    private const int MinimumTickRate = 20;
+    private const int MaximumTickRate = 100_000;
 
     /// <summary>
     ///     Gets the version of authoritative topology most recently applied at a tick boundary.
@@ -789,12 +873,7 @@ public sealed partial class AtmosWorld : IDisposable
     ///     World solver metadata in deterministic execution order.
     /// </summary>
     [NumosSerialize("Solvers")]
-    internal IReadOnlyList<AtmosWorldSolverCheckpoint> SolverCheckpoints =>
-        Solvers.Steps.Select(static step => new AtmosWorldSolverCheckpoint(
-            step.Name,
-            step.Kind,
-            step.IsEnabled,
-            step.NeighborSelectionKey)).ToArray();
+    internal IReadOnlyList<AtmosWorldSolverCheckpoint> SolverCheckpoints => Solvers.CaptureCheckpoints();
 
     /// <summary>
     ///     The <c>[NumosSerialize]</c> state of every class solver that has some, in pipeline order.
@@ -848,9 +927,12 @@ public sealed partial class AtmosWorld : IDisposable
 
     private void RestoreCheckpointCore(AtmosWorldCheckpoint checkpoint)
     {
+        // Before the layout, because a stage the layout creates takes its default interval from the rate.
+        TickRate = checkpoint.TickRate;
         Solvers.SetLayoutCore(checkpoint.Solvers
-            .Select(static solver => new AtmosWorldSolverLayoutEntry(solver.Name, solver.Enabled))
+            .Select(static solver => new AtmosWorldSolverLayoutEntry(solver.Name, solver.Enabled, solver.Interval))
             .ToArray());
+        Solvers.RestoreSchedules(checkpoint.Solvers);
 
         // Right after the layout, so nothing the rest of the restore runs (topology selectors, simulation
         // construction) can see the solvers' pre-restore state. Validation already matched every entry to a stateful
@@ -911,7 +993,7 @@ public sealed partial class AtmosWorld : IDisposable
         TickCount = checkpoint.TickCount;
         _lastWorldOperationSequence = checkpoint.Position.OperationSequence;
         TopologyVersion = checkpoint.TopologyVersion;
-        _accumulator = 0f;
+        _accumulator = 0d;
         _pendingConfig = null;
         IncrementSimulationCollectionRevision();
         IncrementLinkSetCollectionRevision();
@@ -920,10 +1002,12 @@ public sealed partial class AtmosWorld : IDisposable
     /// <summary>
     ///     Adds elapsed real time and advances every registered simulation through complete shared fixed steps.
     /// </summary>
-    /// <param name="elapsedSeconds">Elapsed time, in seconds, since the previous update.</param>
+    /// <param name="elapsedSeconds">
+    ///     Elapsed time, in seconds, since the previous update. NaN and values of zero or less add no time.
+    /// </param>
     /// <remarks>
-    ///     Numos keeps fractions of a step. One call processes at most five fixed steps and discards any older backlog,
-    ///     which matches standalone simulation behavior.
+    ///     Numos keeps fractions of a step. One call keeps at most a quarter second of backlog and discards any older
+    ///     time, which is five steps at 20 Hz.
     /// </remarks>
     /// <exception cref="ObjectDisposedException">The world has been disposed.</exception>
     /// <exception cref="InvalidOperationException">
@@ -937,12 +1021,13 @@ public sealed partial class AtmosWorld : IDisposable
         {
             ThrowIfDisposed();
             ThrowIfTickExecuting("update the world recursively");
-            float maximum = AtmosSolverConstants.FixedTimeStep * AtmosSolverConstants.MaximumStepsPerUpdate;
-            float accumulator = Math.Min(_accumulator + elapsedSeconds, maximum);
+            // NaN would stick in the accumulator and stop every later update, and negative time would become a debt.
+            double elapsed = elapsedSeconds > 0f ? elapsedSeconds : 0d;
+            double accumulator = Math.Min(_accumulator + elapsed, AtmosSolverConstants.MaximumUpdateBacklog);
 
             // TickCore injects too, but by then the accumulator has been spent. Injecting first means a missing
             // dependency does not consume time that was never simulated.
-            if (accumulator >= AtmosSolverConstants.FixedTimeStep)
+            if (HasWholeTick(accumulator))
                 InjectSolverDependencies(false);
 
             foreach (var simulation in _orderedSimulations)
@@ -950,15 +1035,33 @@ public sealed partial class AtmosWorld : IDisposable
 
             _accumulator = accumulator;
 
-            int steps = 0;
-            while (_accumulator >= AtmosSolverConstants.FixedTimeStep &&
-                   steps < AtmosSolverConstants.MaximumStepsPerUpdate)
+            // Nothing outside a tick can touch solver state while this loop holds the gate. The first tick records
+            // host edits, and one refresh after the last tick sets the baseline the per-tick refreshes would have.
+            bool first = true;
+            bool ticked = false;
+            try
             {
-                _accumulator -= AtmosSolverConstants.FixedTimeStep;
-                steps++;
-                TickCore();
+                while (HasWholeTick(_accumulator))
+                {
+                    _accumulator = Math.Max(0d, _accumulator - 1d / TickRate);
+                    TickCore(first, false);
+                    first = false;
+                    ticked = true;
+                }
+            }
+            finally
+            {
+                if (ticked && _isWorldRecording)
+                    RefreshSolverStateHashes();
             }
         }
+    }
+
+    // Repeated subtraction leaves rounding error of order 1e-17 s, which would otherwise turn a frame of exactly N ticks
+    // into N - 1 ticks now and N + 1 on the next frame.
+    private bool HasWholeTick(double accumulator)
+    {
+        return accumulator * TickRate >= 1d - 1e-9;
     }
 
     /// <summary>
@@ -1137,17 +1240,31 @@ public sealed partial class AtmosWorld : IDisposable
         }
     }
 
-    private void TickCore()
+    /// <summary>
+    ///     Runs one world tick, or only advances time when no stage is due.
+    /// </summary>
+    /// <param name="recordEdits">
+    ///     Whether to record host edits to stateful solver state first. <see cref="Update" /> passes
+    ///     <see langword="false" /> after its first tick, because nothing but the previous tick can have changed it.
+    /// </param>
+    /// <param name="refreshHashes">
+    ///     Whether to take the solver-state hash baseline when the tick ends. <see cref="Update" /> takes it once
+    ///     after its last tick instead.
+    /// </param>
+    private void TickCore(bool recordEdits = true, bool refreshHashes = true)
     {
         // Before anything in the tick can read solver state, so replay applies the edit at the same point.
-        RecordSolverStateEdits();
+        if (recordEdits)
+            RecordSolverStateEdits();
+
         _isTickExecuting = true;
         AtmosSimulation[] simulations = _orderedSimulations;
         int enteredGates = 0;
         int begunTicks = 0;
-        var contexts = new AtmosSolverExecutionContext[simulations.Length];
+        AtmosSolverExecutionContext[]? contexts = null;
         WorldSolverRegistration[] worldSteps = Solvers.EnabledSteps;
         AtmosSolverTickScope? solverScope = null;
+        bool idle = false;
 
         try
         {
@@ -1162,24 +1279,40 @@ public sealed partial class AtmosWorld : IDisposable
                 ApplyConfig(pending);
             }
 
+            // An idle tick only moves time forward. Topology changes wait for a tick boundary, so a pending one
+            // makes this a full tick.
+            idle = _pendingLinkSlots.Count == 0 && !Solvers.AnyDueOnNextTick(worldSteps);
+
             for (; enteredGates < simulations.Length; enteredGates++)
                 Monitor.Enter(simulations[enteredGates].Kernel.StateGate);
 
-            ApplyPendingTopology();
-            for (; begunTicks < simulations.Length; begunTicks++)
-                contexts[begunTicks] = simulations[begunTicks].Kernel.BeginWorldTick();
-
-            solverScope = new AtmosSolverTickScope(this, simulations, Array.AsReadOnly(simulations), contexts);
-            Solvers.Execute(worldSteps, solverScope);
-
-            if (_pendingConfig != null)
+            long tick = checked(TickCount + 1);
+            if (idle)
             {
-                var pending = _pendingConfig;
-                _pendingConfig = null;
-                ApplyConfig(pending);
-            }
+                foreach (var simulation in simulations)
+                    simulation.Kernel.AdvanceIdleTick(tick);
 
-            TickCount = checked(TickCount + 1);
+                TickCount = tick;
+            }
+            else
+            {
+                ApplyPendingTopology();
+                contexts = new AtmosSolverExecutionContext[simulations.Length];
+                for (; begunTicks < simulations.Length; begunTicks++)
+                    contexts[begunTicks] = simulations[begunTicks].Kernel.BeginWorldTick(tick, TickRate);
+
+                solverScope = new AtmosSolverTickScope(this, simulations, Array.AsReadOnly(simulations), contexts);
+                Solvers.Execute(worldSteps, solverScope);
+
+                if (_pendingConfig != null)
+                {
+                    var pending = _pendingConfig;
+                    _pendingConfig = null;
+                    ApplyConfig(pending);
+                }
+
+                TickCount = tick;
+            }
         }
         finally
         {
@@ -1197,7 +1330,8 @@ public sealed partial class AtmosWorld : IDisposable
         }
 
         // Whatever the solvers changed during the tick is derived, so it becomes the new baseline rather than an edit.
-        if (_isWorldRecording)
+        // An idle tick ran no solver.
+        if (refreshHashes && !idle && _isWorldRecording)
             RefreshSolverStateHashes();
     }
 
@@ -1256,7 +1390,7 @@ public sealed partial class AtmosWorld : IDisposable
     {
         // Every kernel reaches the same stage barrier before sparse transport runs. Registration order then cannot
         // decide whether an endpoint sees pre-transfer or post-transfer state.
-        SolveExplicitTransport(scope.Simulations, ExplicitTransportCapabilities.Gas);
+        SolveExplicitTransport(scope.Simulations, ExplicitTransportCapabilities.Gas, scope.DeltaTime);
     }
 
     internal void SolveBoundaryFlowStage(AtmosSolverTickScope scope)
@@ -1273,10 +1407,7 @@ public sealed partial class AtmosWorld : IDisposable
 
     internal void SolveExplicitThermalTransportStage(AtmosSolverTickScope scope)
     {
-        // Thermal transport shares thermodynamics' reduced cadence so a disabled or replaced stage still runs on the
-        // same tick pattern the default implementation used.
-        if (checked(TickCount + 1) % AtmosSolverConstants.ThermodynamicsTickInterval == 0)
-            SolveExplicitTransport(scope.Simulations, ExplicitTransportCapabilities.Thermal);
+        SolveExplicitTransport(scope.Simulations, ExplicitTransportCapabilities.Thermal, scope.DeltaTime);
     }
 
     internal void SolveThermalBoundaryStage(AtmosSolverTickScope scope)
@@ -1294,9 +1425,10 @@ public sealed partial class AtmosWorld : IDisposable
     private void ValidateCheckpoint(AtmosWorldCheckpoint checkpoint)
     {
         // The format version cannot differ, because a checkpoint always reports the current one.
-        if (checkpoint.Position.Tick > int.MaxValue)
+        if (checkpoint.Position.Tick > long.MaxValue)
             throw new ArgumentException("The world checkpoint timeline position is incompatible.", nameof(checkpoint));
 
+        ValidateTickRate(checkpoint.TickRate, nameof(checkpoint));
         checkpoint.Config.ValidateGasRegistry();
         ValidateSolverStates(checkpoint);
 
@@ -1304,6 +1436,16 @@ public sealed partial class AtmosWorld : IDisposable
         var seenSolvers = new HashSet<string>(StringComparer.Ordinal);
         foreach (var solver in checkpoint.Solvers)
         {
+            if (solver.Interval < 1 ||
+                solver.LastRunTick < 0 ||
+                solver.LastRunTick > checkpoint.TickCount ||
+                solver.NextDueTick <= solver.LastRunTick)
+            {
+                throw new ArgumentException(
+                    $"The world checkpoint has an invalid schedule for world solver '{solver.Name}'.",
+                    nameof(checkpoint));
+            }
+
             if (!seenSolvers.Add(solver.Name) ||
                 solver.Kind == AtmosWorldSolverKind.BuiltIn &&
                 !AtmosWorldSolverPipeline.BuiltInStageNames.Contains(solver.Name))
@@ -1567,7 +1709,8 @@ public sealed partial class AtmosWorld : IDisposable
 
     private void SolveExplicitTransport(
         AtmosSimulation[] simulations,
-        ExplicitTransportCapabilities capabilities)
+        ExplicitTransportCapabilities capabilities,
+        float deltaTime)
     {
         if (_activeEdges.Length == 0 || simulations.Length == 0)
             return;
@@ -1609,6 +1752,7 @@ public sealed partial class AtmosWorld : IDisposable
                 _explicitTransport.Solve(
                     resolved.AsSpan(0, count),
                     simulations[0].Kernel.CurrentTickConfig,
+                    deltaTime,
                     capabilities);
             }
         }

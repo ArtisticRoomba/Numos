@@ -466,7 +466,7 @@ public sealed partial class AtmosSolverDependencyTests
             new AtmosConfig
             {
                 GasRegistry = [new GasProperties { Name = "TestGas", MolarHeatCapacityAtConstantVolume = 20f }]
-            });
+            }, AtmosTransportModel.Euler, 20);
 
         var simulation = world.CreateSimulation(2, 1, 1);
         var chunk = simulation.CreateAndRegisterChunk(default);

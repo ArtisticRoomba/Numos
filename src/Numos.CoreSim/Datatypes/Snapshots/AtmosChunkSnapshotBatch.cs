@@ -14,5 +14,5 @@ public readonly record struct AtmosChunkSnapshotRequest(
 ///     Changed chunk snapshots captured under one simulation-state gate.
 /// </summary>
 public readonly record struct AtmosChunkSnapshotBatch(
-    int TickCount,
+    long TickCount,
     AtmosChunkSnapshot[] ChangedChunks);

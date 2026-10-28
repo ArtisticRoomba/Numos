@@ -12,7 +12,7 @@ internal interface IAtmosConfig
     Kelvin SpaceTemperature { get; }
     Scalar BulkFlowCoefficient { get; }
     Pascal VacuumThreshold { get; }
-    int SleepThreshold { get; }
+    Second SleepDelay { get; }
     Scalar SleepEpsilon { get; }
     JoulePerKelvin ThermalConductance { get; }
     Scalar CondensationRateFactor { get; }

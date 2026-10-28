@@ -261,13 +261,13 @@ runtime configuration. `AtmosChunkConstants` holds the default chunk dimensions 
 | `SaturationReferencePressure`              | 101325  | Pressure (Pa) at which each gas's `BoilingPoint` applies, and the reference pressure in the diffusion environment factor. Invalid values normalize to one standard atmosphere.                                                                           |
 | `DefaultDiffusionCoefficient`              | 0.02    | Diffusivity in m²/s for gas IDs without a registry entry. Negative values clamp to zero; non-finite values disable fallback diffusion.                                                                                                                   |
 | `SpaceTemperature`                         | 2.7     | Temperature of space (K). Not read by the built-in solvers.                                                                                                                                                                                              |
-| `BulkFlowCoefficient`                      | 0.125   | Legacy model only: fraction `k` of a pressure difference requested as bulk flow per tick (§6.1). Finite values are clamped to [0, 1] and the solver further caps them at 0.5. Non-finite values disable bulk flow.                                                          |
+| `BulkFlowCoefficient`                      | 0.125   | Legacy model only: fraction `k` of a pressure difference requested as bulk flow per gas stage step (§6.1). Finite values are clamped to [0, 1] and the solver further caps them at 0.5. Non-finite values disable bulk flow.                                                          |
 | `VacuumThreshold`                          | 1.0     | Below this pressure (Pa), voxel contents are zeroed out when every neighboring air voxel is also below the threshold. Invalid or negative values normalize to zero.                                                                                      |
-| `SleepThreshold`                           | 100     | Consecutive ticks below `SleepEpsilon` before a chunk goes to sleep. Negative values normalize to zero.                                                                                                                                                  |
+| `SleepDelay`                               | 5 s     | Simulated time below `SleepEpsilon` before a chunk goes to sleep. The solvers convert it to ticks with the tick rate, so the delay in seconds does not change with the rate. Invalid or negative values normalize to zero.                                                                                                |
 | `SleepEpsilon`                             | 3.5     | Maximum relative pressure difference considered "at rest" (% of the higher neighboring pressure). Invalid or negative values normalize to zero.                                                                                                          |
-| `ThermalConductance`                       | 0.05    | Effective per-face conductance in J/K per thermodynamics tick. Multiplying it by a temperature difference produces a candidate energy transfer, which is bounded for explicit-solver stability. Invalid or nonpositive values disable thermal diffusion. |
-| `CondensationRateFactor`                   | 0.5     | Fraction of the heat-coupled equilibrium condensation amount applied per thermodynamics tick. Finite values are clamped to [0, 1]; non-finite values disable condensation.                                                                               |
-| `MaxPressureTransferFractionPerNeighbor`   | 0.16    | Clamped to [0, 1] and checkpointed, but not read by the built-in solvers. The legacy conductance limiter (§6.2) bounds outflow instead.                                                                                                                         |
+| `ThermalConductance`                       | 0.05    | Effective per-face conductance in J/K per thermal stage step (one `thermodynamics` run). Multiplying it by a temperature difference produces a candidate energy transfer, which is bounded for explicit-solver stability. Invalid or nonpositive values disable thermal diffusion. |
+| `CondensationRateFactor`                   | 0.5     | Fraction of the heat-coupled equilibrium condensation amount applied per thermal stage step. Finite values are clamped to [0, 1]; non-finite values disable condensation.                                                                               |
+| `MaxPressureTransferFractionPerNeighbor`   | 0.16    | Per gas stage step. Clamped to [0, 1] and checkpointed, but not read by the built-in solvers. The legacy conductance limiter (§6.2) bounds outflow instead.                                                                                                                         |
 | `AccumulatorWakeThreshold`                 | 15      | Pressure activity (Pa) intended to wake a sleeping chunk. Captured and checkpointed, but not read by the built-in solvers yet.                                                                                                                           |
 | `AccumulatorMaxAliveTicks`                 | 20      | Lifetime in ticks of an accumulated activity value. Captured and checkpointed, but not read by the built-in solvers yet.                                                                                                                                 |
 | `ReferenceMolarMass`                       | 0.02897 | Molar mass (kg/mol) assumed for gases whose `MolarMass` is unset. Defaults to dry air. Non-finite or nonpositive values normalize to it.                                                                                                                 |
@@ -281,21 +281,25 @@ explains the physics behind them.
 | Setting                   | Default   | What it does                                                                                                                                                                                                                                                                                  |
 |---------------------------|-----------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `CourantNumber`           | 0.5       | Largest fraction of a voxel a signal may cross per substep (§5.5). 0.5 is the positivity bound of the split first-order scheme: below it a substep cannot drain more gas than a voxel holds. Up to 0.8 is linearly stable with fewer substeps but can go negative next to vacuum. Clamped to (0, 1]. Invalid values normalize to 0.5. |
-| `MaxSubstepsPerTick`      | 64        | Cap on substeps per tick. 0 removes it. When it engages the tick advances less than 50 ms of gas time (time dilation, §5.5) and `LastFlowDiagnostics` says so. Negative values normalize to 0.                                                                                                            |
+| `MaxSubstepsPerSecond`    | 1280      | Cap on substeps per second of gas time. Each call may run `ceil(cap · Interval / TickRate)`: 64 at 20 Hz, 22 at the default 16-tick interval at 960 Hz. 0 removes it. When it engages the call advances less gas time than its span (time dilation, §5.5) and `LastFlowDiagnostics` says so. Negative values normalize to 0. |
+| `SettlePeriod`            | 0.05 s    | How often the velocity floor, species diffusion, vacuum cleanup, and sleep scoring run, as `max(1, round(SettlePeriod · TickRate))` ticks. At 20 Hz every call settles. NaN and negative values normalize to 0. |
 | `VelocityFloor`           | 0.005 m/s | Speed below which a voxel's momentum is zeroed at the end of the tick, its kinetic energy becoming heat (§5.7). Without it a settled room sloshes at microscopic speeds forever and never sleeps. 0 disables it.                                                                                            |
+| `SleepSpeed`              | 0.5 m/s   | Speed below which motion no longer holds a chunk awake (§9). A chunk that falls asleep has its momentum stopped and turned into heat. Motion wakes a sleeping neighbour only above `max(VelocityFloor, SleepSpeed)`. 0 keeps any motion above the floor awake. Invalid values normalize to 0. |
 | `MaxVelocity`             | 5000 m/s  | Clamp on voxel speed, with a diagnostic counter. Expansion into vacuum tops out near 1700 m/s for room air, so the clamp only fires when a state has already gone wrong. Invalid values normalize to 5000 m/s.                                                                                              |
-| `WakePressureDelta`       | 10 Pa     | Pressure difference across a chunk face that activates the inactive side (§5.6), so a ripple at a sealed door does not wake the whole station. A settled room keeps a few pascals of residual non-uniformity, and a lower value lets awake chunks keep re-waking neighbours that just fell asleep. 0 wakes on any difference.                                                                                                                           |
+| `WakePressureDelta`       | 50 Pa     | Pressure difference across a chunk face that activates the inactive side (§5.6). 50 Pa sits above the acoustic pressure of slow residual ringing (0.12 m/s or less), so that ringing does not keep re-waking neighbours that just fell asleep. A sleeping chunk keeps smaller differences frozen in until something wakes it (§9). 0 wakes on any difference.                                                                                       |
 | `AllMachCorrection`       | off       | Scales the pressure-dissipation term of the face flux by the local Mach number. Godunov fluxes dissipate at the sound speed, which smears slow flow. The fix keeps it sharp but removes the acoustic damping sleep relies on and admits checkerboards, so it is off until a scene needs it.                 |
 | `Reconstruction`          | `FirstOrder` | How face states are built. Second-order reconstruction is planned. Only `FirstOrder` exists today.                                                                                                                                                                                         |
-| `MomentumDamping`         | 0 /s      | Exponential decay applied to every voxel's momentum per tick, `max(0, 1 − α·Δt_tick)`. A stand-in for wall friction and furniture drag so a hallway does not ring at its acoustic modes indefinitely. 0 applies none.                                                                                       |
+| `MomentumDamping`         | 0 /s      | Exponential decay applied to every voxel's momentum on each call of the stage, `max(0, 1 − α·Δt_call)`. A stand-in for wall friction and furniture drag so a hallway does not ring at its acoustic modes indefinitely. 0 applies none.                                                                                       |
 | `DefaultLinkAreaFraction` | 1         | Open fraction of a voxel face assumed for a portal or dock that declares no area (§11.1), under either transport model. Clamped to [0, 1]. 0 closes such links to gas transport.                                                                                                                                                       |
 
 - `CourantNumber` (0.5), the positivity bound of the split first-order scheme.
-- `MaxSubstepsPerTick` (64). Zero removes the cap. When the cap engages, the tick advances less than a full step of gas
-  time.
+- `MaxSubstepsPerSecond` (1280). Zero removes the cap. When the cap engages, the call advances less than a full step of
+  gas time.
+- `SettlePeriod` (0.05 s). The velocity floor, diffusion, cleanup, and sleep scoring run once per period.
 - `VelocityFloor` (0.005 m/s). Momentum below it is zeroed at tick end.
+- `SleepSpeed` (0.5 m/s). Motion slower than it no longer holds a chunk awake.
 - `MaxVelocity` (5000 m/s), a clamp with a diagnostic counter.
-- `WakePressureDelta` (10 Pa), the boundary activation threshold.
+- `WakePressureDelta` (50 Pa), the boundary activation threshold.
 - `AllMachCorrection` (off).
 - `Reconstruction` (`FirstOrder`). Second-order reconstruction is planned.
 - `MomentumDamping` (0/s).
@@ -368,36 +372,37 @@ while replacing its globally sized per-mixture gas array with sparse container s
 
 ### 4.1 Fixed timestep accumulator
 
-The simulation runs on a fixed timestep, decoupled from the rendering frame rate. The values live in
-`AtmosSolverConstants`:
+The simulation runs on a fixed timestep, decoupled from the rendering frame rate. `AtmosWorld.TickRate` sets the tick
+length as `1 / TickRate` seconds. The rate defaults to `AtmosWorld.DefaultTickRate` (960 Hz) and must be a multiple of 20
+from 20 to 100000. At 960 Hz one tick lasts about 1.04 ms, and a frame at 30 TPS holds 32 ticks.
+`AtmosSolverConstants.MaximumUpdateBacklog` is 0.25 s.
 
-```
-SimulationRate        = 20 Hz
-FixedTimeStep         = 1 / SimulationRate = 0.05 s
-MaximumStepsPerUpdate = 5
-```
+`AtmosWorld.Update(elapsedSeconds)` adds the elapsed time to an accumulator. It clamps the accumulator to the backlog
+limit, so a frame-rate drop cannot snowball into a "spiral of death." It then runs one world tick per whole tick length
+the accumulator holds. The clamp allows 240 ticks at 960 Hz and five at 20 Hz. `Tick()` runs exactly one.
 
-`AtmosWorld.Update(elapsedSeconds)` adds the elapsed time to an accumulator. It clamps the accumulator to
-`FixedTimeStep * MaximumStepsPerUpdate`, so a frame-rate drop cannot snowball into a "spiral of death." It then runs
-one world tick per whole `FixedTimeStep` the accumulator holds, up to five. `Tick()` runs exactly one.
+When no stage is due on a tick, the world takes an idle fast path. It advances time, sleep timers, and the tick counter
+and skips the solver work. Most ticks of a thermal-only or gas-only schedule are idle.
 
-### 4.2 The default stage order
+`SimulatedTime` is the atmospheric time the world has run, in seconds. It equals the tick count divided by the tick rate.
 
-A world tick snapshots the enabled stages, then runs each registration once with every simulation at the same tick
+### 4.2 The default stage order and schedule
+
+A world tick snapshots the enabled stages, then runs each stage that is due once, with every simulation at the same tick
 boundary. The default pipeline (`AtmosTransportModel.Euler`) has six stages. A host can disable, reorder, or replace each one:
 
 | Stage                        | Work performed                                                                                                             |
 |------------------------------|----------------------------------------------------------------------------------------------------------------------------|
 | `euler-flow`                 | Compressible Euler transport within and across chunks, then species diffusion and vacuum cleanup (§5)                     |
 | `explicit-gas-transport`     | Sparse gas transport across explicit links flagged `GasTransport` (§11)                                                    |
-| `thermodynamics`             | Intra-chunk thermal diffusion and phase changes, every second tick (§7, §8)                                                |
-| `explicit-thermal-transport` | Sparse thermal transport across explicit links flagged `ThermalTransport`, on the same reduced cadence as `thermodynamics` |
+| `thermodynamics`             | Intra-chunk thermal diffusion and phase changes, every 100 ms (§7, §8)                                                |
+| `explicit-thermal-transport` | Sparse thermal transport across explicit links flagged `ThermalTransport`, every 100 ms, like `thermodynamics` |
 | `thermal-boundary`           | Cartesian thermal transport across ordinary chunk boundaries (§7.3)                                                        |
 | `gas-reactions`              | Per-cell gas reactions configured through a `GasReactionConfig` in `AtmosConfig.SolverConfigurations`                      |
 
 `euler-flow` solves species, momentum, and energy per voxel with dimensionally split sweeps, an HLLC flux at every
 face, and CFL substeps (§5). Faces between chunks are ordinary faces of the sweep, so there is no separate boundary
-stage. `AtmosSimulation.LastFlowDiagnostics` reports what each tick cost (§5.7).
+stage. `AtmosSimulation.LastFlowDiagnostics` reports what its latest run cost (§5.7).
 
 `AtmosTransportModel` names the two stage sets. The model is not stored on its own: it is implied by which built-in
 stages the pipeline holds. The world records that list and a restore adopts it, so a restored world runs the model it
@@ -443,19 +448,54 @@ simulation.World.Solvers.SetEnabled(AtmosBuiltInSolvers.Thermodynamics, false);
 
 Some built-in stages hand boundary work to each other through internal tick-tagged batches: `thermodynamics`
 publishes for `thermal-boundary`, and under the legacy model `advection` publishes for `boundary-flow`. That
-producer/consumer link is an implementation detail, not a public stage boundary. `euler-flow` has no consumer.
+producer/consumer link is an implementation detail, not a public stage boundary. The two stages of each pair must
+still share an interval. `euler-flow` has no consumer.
+
+#### Schedule and delta time
+
+Every stage has an integer interval, the number of ticks between its runs. The world tracks each stage's next due tick
+and last run tick. A stage runs on the first tick at or after its due tick. Its `DeltaTime` is the gap since
+its last run divided by the tick rate, so the stage always integrates the time that actually passed.
+
+The built-in intervals follow from runs per second, so they scale with the rate. The interval is
+`max(1, TickRate / runsPerSecond)`, rounded down:
+
+| Stage                                                              | Runs per second | Ticks at 960 Hz |
+|--------------------------------------------------------------------|-----------------|-----------------|
+| `euler-flow`                                                       | 60              | 16              |
+| `advection`, `explicit-gas-transport`, `boundary-flow`, `gas-reactions` | 20              | 48              |
+| `thermodynamics`, `explicit-thermal-transport`, `thermal-boundary` | 10              | 96              |
+
+The gas and thermal intervals are exact at every legal tick rate, because the rate is a multiple of 20. The
+`euler-flow` interval rounds down when 60 does not divide the rate (1 tick at 20 Hz and at 100 Hz). Its CFL substeps
+follow fast gas inside each run. A run on every tick picks up a new disturbance up to 16 ms sooner, but each run pays
+a fixed cost to gather and write back its chunks. At 960 Hz a run on every tick costs up to twice as much for the same
+gas time. `SetInterval(AtmosBuiltInSolvers.EulerFlow, 1)` restores it for a host that wants the shorter reaction time.
+
+A custom stage defaults to interval 1. `SetInterval` changes one stage. The
+schedule is checkpointed, so a restored world runs the same stages on the same ticks.
+
+A producer and its consumer must share an interval, because the consumer drains what the producer published in the
+same tick. The pairs are `advection` with `boundary-flow`, and `thermodynamics` with `thermal-boundary`. The world does
+not check this.
+
+`IgniteVoxel` adds a source that lasts until the next `gas-reactions` pass, so a source added between passes can wait up
+to 50 ms before it acts.
+
+At 20 Hz the gas periods are one tick and the thermal period is two. The legacy stages then run as they did before
+the tick rate became configurable, and they give the same state at any rate once the same simulated time has elapsed.
 
 ### 4.3 How explicit transport fits into a tick
 
 A world tick captures every simulation's pipeline before running any callback. It then advances every simulation
 through its gas-transport barrier (`euler-flow`, or `advection` under the legacy model), applies explicit gas
 transport once across the compiled world edge set, advances every simulation through thermodynamics, and applies
-explicit thermal transport on the same cadence.
+explicit thermal transport on the thermal cadence. A stage that is not due on the tick is skipped.
 
 Explicit gas transport therefore sees the state `euler-flow` left behind: after its last substep, its diffusion
-pass, and its cleanup. A link is applied once per tick from that state, outside the substep loop, which is why it
+pass, and its cleanup. A link is applied once per run of its stage (every 50 ms by default) from that state, outside the substep loop, which is why it
 keeps the bounded duct law instead of a face flux (§11.1). The gas a link moves sits in its destination until the
-next tick's sweeps pick it up.
+next run of `euler-flow` picks it up. At 960 Hz that is at most 16 ticks (about 17 ms) by default.
 
 Later stages, including custom ones, always see the completed result of both transport passes. Registration order
 cannot decide which endpoint of a link updates first, because the explicit solver computes every edge's request
@@ -477,22 +517,22 @@ its stage list.
 
 `euler-flow` is the stage that moves gas under the default transport model. It solves the compressible Euler
 equations (conservation of species moles, momentum, and total energy, with no viscosity and no body forces) with a
-first-order finite-volume scheme: one HLLC Riemann problem per voxel face, and as many substeps inside the 50 ms tick
+first-order finite-volume scheme: one HLLC Riemann problem per voxel face, and as many substeps inside each call
 as the fastest wave demands. The class remarks on `EulerFlowSolver`, `EulerSweep`, `HllcFlux`, and `EulerMixture` under
 `src/Numos.CoreSim/Solvers/Euler` carry the same arguments next to the code.
 
 ### 5.1 Why the legacy model can't carry a wave
 
-The legacy model (§6) moves a fixed fraction of a pressure difference per tick. That is a relaxation: the pressure
+The legacy model (§6) moves a fixed fraction of a pressure difference per stage step (50 ms by default). That is a relaxation: the pressure
 field decays toward uniform and nothing remembers which way the gas was going. Without inertia it cannot produce
 three things a station wants:
 
 - A pressure wave that travels. A breach makes a front that crosses a room at the speed of sound, around 340 m/s;
-  relaxation smears it out at a few voxels per tick.
+  relaxation smears it out at a few voxels per step.
 - A reflection. Gas hitting a wall piles up and the pressure spike bounces back. A relaxation never overshoots, so
   nothing rebounds.
-- A corridor that fills quickly. At `k = 0.125` an isolated pair loses 25% of its difference per tick, so a long
-  hallway equalises over seconds of ticks rather than the fraction of a second sound takes.
+- A corridor that fills quickly. At `k = 0.125` an isolated pair loses 25% of its difference per step, so a long
+  hallway equalises over many steps rather than the fraction of a second sound takes.
 
 Momentum as state fixes all three, and once momentum is state the natural solver is a compressible one.
 
@@ -574,7 +614,7 @@ away sees `p − ρ·c·|u_n|`, clamped at zero.
 moles, is presented to the flux as the vacuum state (all zeros). The Riemann problem against vacuum is the expansion
 fan: `a = −ρc`, `b = 0`, `S* = c/γ`, `p* = 0`, and a mass flux of `ρc/(γ + 1)`. For 1 atm air that is about
 172 kg/(m²·s) against the 1.2 kg a 1 m³ voxel holds, so a voxel open to space drains in roughly 8 ms, a handful of
-substeps rather than the seconds the legacy 25%-per-tick law takes.
+substeps rather than the seconds the legacy 25%-per-step law takes.
 
 Whatever crosses into a void voxel is destroyed. A trace cell keeps the moles it has and can only receive. Vacuum never
 emits flux, and a face with vacuum on both sides returns zero before any division.
@@ -594,9 +634,9 @@ parallel schedule in §10.2 deterministic.
 
 Splitting is not symmetric: the axis swept last has slightly more say in the result, and always sweeping `X, Y, Z`
 would give a blast a visible preferred direction. The sweep order therefore cycles through all six permutations,
-`XYZ, ZYX, YZX, XZY, ZXY, YXZ`, indexed by `(2·TickCount + substep) mod 6`. Over any six consecutive substeps each axis
-takes each position twice, so the bias averages out. The index is a pure function of checkpointed state, so a restored
-world sweeps in the same order the original run did.
+`XYZ, ZYX, YZX, XZY, ZXY, YXZ`, indexed by the sweep phase, a counter in [0, 6) that advances once per substep. It carries across ticks, so
+ticks of one substep still walk all six orders. Over any six consecutive substeps each axis takes each position twice,
+so the bias averages out. The phase is checkpointed, so a restored world sweeps in the same order the original run did.
 
 An axis one voxel long with no neighbour chunk on either side is skipped, which saves a depth-one map a third of its
 sweeps. The two wall fluxes cancel for gas at rest, so the skip is exact. It is not exact for gas moving along that
@@ -611,7 +651,7 @@ cell. The tangential momentum components follow the cyclic order `X → Y → Z 
 
 ### 5.5 Substeps and the Courant number
 
-An explicit scheme is only stable while no wave crosses more than a cell per step, so the stage cuts the 50 ms tick
+An explicit scheme is only stable while no wave crosses more than a cell per step, so the stage cuts each call
 into substeps sized from the fastest signal in any active chunk:
 
 ```
@@ -620,10 +660,10 @@ into substeps sized from the fastest signal in any active chunk:
 ```
 
 `λ` is recomputed from the refreshed primitives every substep, and `remaining` is accumulated in `double`. The last
-substep is whatever is left, however small, so the tick lands on exactly 50 ms. Stretching the previous substep to
+substep is whatever is left, however small, so the call lands on exactly its time step. Stretching the previous substep to
 absorb the remainder would run it above the Courant number, and that margin is what a face next to vacuum lives on.
 
-Room air at 293 K (`c = 343 m/s`, `Δx = 1 m`) gives 1.46 ms substeps and about 35 per tick. Air at 1000 K needs about
+Room air at 293 K (`c = 343 m/s`, `Δx = 1 m`) gives 1.46 ms substeps and about 700 per second of gas time (35 per 50 ms). Air at 1000 K needs about
 65.
 
 **Why 0.5.** For the split first-order scheme with the `max(|u| + c)` speed definition, `CourantNumber ≤ 0.5` is the
@@ -631,10 +671,18 @@ positivity bound: each updated cell is a convex combination of the cells feeding
 more gas from a cell than it holds. Values up to 0.8 are linearly stable and save substeps, but a face next to vacuum
 can then produce a negative density that the solver has to repair and count in the diagnostics.
 
-**The cap.** `MaxSubstepsPerTick` (64 by default, 0 for none) stops the loop early. Stability is unaffected, since the
-scheme has no time history, but the tick then advances less than 50 ms of gas time while thermodynamics, reactions,
-and everything else still advance a full tick, so the flow slows down relative to the rest of the world. That is time
+**The cap.** `MaxSubstepsPerSecond` (1280 by default, 0 for none) stops the loop early. The limit for one call is `ceil(cap · Interval / TickRate)`: 22 for the default 16-tick call at 960 Hz, 2 for a 1 ms call, and 64 for a 50 ms call. Stability is
+unaffected, since the scheme has no time history, but the call then advances less than its time step of gas time while thermodynamics, reactions,
+and everything else still advance a full step, so the flow slows down relative to the rest of the world. That is time
 dilation. `AtmosFlowDiagnostics.SubstepCapEngaged` and `SimulatedSeconds` report it, and §14 covers its limits.
+
+**The settle pass.** Some steps act per period, not per call. The velocity floor, species diffusion, vacuum cleanup,
+momentum settling, and the sleep decision run once every `SettlePeriod` (0.05 s, 48 ticks at 960 Hz). At the default
+interval of 16 ticks that is every third call. The floor needs this because a gradient of a pascal or two accelerates
+a voxel by far less than the floor in one short call. Per-call flooring
+would zero that momentum before it built up. The stage counts the ticks since the last pass, and the count is
+checkpointed. `MaxSubstepsPerSecond` keeps the substep budget per second of gas time
+the same at every rate, and the sweep phase carries across ticks (§5.4).
 
 **Worked example.** A 10 m room with its left half 1% over pressure launches a wave that crosses the room in about
 30 ms, reflects, and rings. HLLC dissipates at the acoustic scale, so the fundamental mode decays with an e-folding
@@ -666,8 +714,10 @@ sub-threshold row would destroy that gas (`TraceGas_CrossingAChunkFaceIsConserve
 swept. An open face from an active chunk into such a chunk is a wall for that sweep. That is exact while the neighbour is at rest at the same
 pressure (the wall flux is then `p`, the interior flux of a resting gas, and the mass flux is zero either way) and
 wrong as soon as the two sides differ. So when a sweep meets such a face, it requests the neighbour's activation if
-the pressures differ by more than `WakePressureDelta` (10 Pa) or the active side moves normal to the face faster than
-`VelocityFloor`. The write-back zeroes slower momentum anyway, so that motion cannot carry gas into the neighbour.
+the pressures differ by more than `WakePressureDelta` (50 Pa) or the active side moves normal to the face faster than
+the wake speed, `max(VelocityFloor, SleepSpeed)`. Slower motion reflects off the wall and carries no gas into the
+neighbour. The wake speed is at least `SleepSpeed` so that a ringing neighbour does not wake a chunk that just fell
+asleep (§9).
 
 Requests are applied on the tick thread after the barrier that ends the sweep. The chunk is woken if asleep, its live
 fields are gathered (exact, since nothing has written them this tick), and it is inserted into the active list in
@@ -695,30 +745,42 @@ No pressure threshold takes part. The HLLC flux of two equal resting states is t
 and the wall flux is the same, so the sweeps give such a chunk its own bits back. Static is not enough, because a
 source nearby can still reach the chunk.
 
-*Reach.* A first-order split sweep moves information one cell per axis sweep. One substep spreads a disturbance by one
-cell along each axis, and the tick-end species diffusion adds one more cell. A tick runs at most
-`MaxSubstepsPerTick` substeps (`N`), so a chunk can only be influenced by a source within `N + 1` cells. The sources
-are the chunks that are active after the pre-pass. The stage finds every static chunk within chunk distance `D` of
-a source by a breadth-first search over the 26 neighbouring chunk positions, through any registered chunk:
+*Reach.* A first-order split sweep moves information at most one cell per substep along each axis, and the species
+diffusion of a settle pass adds one more cell. A call runs at most `N` substeps (the per-call cap), so a disturbance
+moves at most `N + 1` cells along each axis. Along an axis of `n` voxels it therefore stays within `R` chunks of its
+source:
 
 ```
-D = ceil((N + 2) / minExtent)      minExtent = smallest chunk dimension
+R_x = ceil((N + 2) / width)      R_y = ceil((N + 2) / height)      R_z = ceil((N + 2) / depth)
 ```
 
-A chunk beyond `D` has at least `D · minExtent + 1 > N + 1` cells between it and any source. The stage activates the
-static chunks within `D` through the normal path, and they join the pre-pass. They are not sources themselves, because
-they change nothing until a source reaches them. The rest get no workspace. With `MaxSubstepsPerTick` set to 0 there
-is no bound, so the stage skips static chunks only when nothing at all is active.
+A chunk more than `R` chunks from the source along some axis has at least `R · n + 1 > N + 1` cells between it and
+any source cell. Each axis has its own reach because one shared reach is set by the shortest axis. For a 16x16x1
+chunk at 22 substeps that is 24 chunks in every direction, so one disturbed room kept a whole station swept.
 
-A skipped chunk is never next to an active one, so it never acts as a wall for a sweep. It stays awake. Its sleep
+The sources are the chunks that are active after the pre-pass. From each source the stage walks the six face
+directions through any registered chunk, asleep or awake, and never leaves the box of `R` chunks per axis around
+that source. The walk crosses a chunk face only where some voxel pair across it is open: both voxels air (a void
+passes nothing on), and the face between them is not blocked. A wall of solid voxels along a chunk edge therefore
+stops the walk, and a sealed room stays skipped however close the disturbance is.
+
+The walk misses nothing. A disturbance passes from chunk to chunk only through an open face, and every cell on its
+path lies inside the box. A diagonal move inside one substep (an X sweep, then a Y sweep) passes through a cell of a
+face-adjacent chunk, so the face walk covers it. The stage activates the static chunks the walk finds through the
+normal path, and they join the pre-pass. They are not sources themselves, because they change nothing until a source
+reaches them. The rest get no workspace. With `MaxSubstepsPerSecond` set to 0 there is no bound, so the walk has no
+box and activates every static chunk that open faces connect to a source.
+
+A skipped chunk can be next to an active one only behind a sealed face. That face is a wall for the sweep whether
+the neighbour is swept or not. The sweep, the pre-pass, the diffusion boundary pass, and the sleep score read a
+neighbour only across an open face, so they compute the same bits either way. A skipped chunk stays awake. Its sleep
 timer advances with a score of zero at the end of the stage, which is the score the sleep metric gives a static chunk:
 equal pressures on every open face and no motion. Its sound speed still counts toward the shared `Δt`, computed once
 from one cell with the same arithmetic as the gather. `VacuumCleanup` still visits it, because that pass walks chunks
 and not workspaces. When every chunk is skipped the stage reports default `AtmosFlowDiagnostics`.
 
 The test is one read-only pass per chunk with an early exit, run in parallel. A grid of 128 resting chunks costs
-about 0.4 ms per tick at 16 workers where it cost 33 ms. A source near the grid costs a search whose depth is the
-reach `D`, a few milliseconds for 128 chunks when the reach covers them all.
+about 0.4 ms per tick at 16 workers where it cost 33 ms. A source near the grid adds one walk over its box.
 
 ### 5.7 Trace cells, repairs, and the write-back
 
@@ -731,9 +793,9 @@ A species update that comes out non-finite is written as zero and counted the sa
 channel. A non-finite written-back pressure is counted too and scores as a gas-to-void face in the sleep metric (§9).
 
 After the last substep the read buffer is written back to the chunk. Momentum below `VelocityFloor` (0.005 m/s) is
-zeroed first, and `MomentumDamping`, if set, scales the rest by `max(0, 1 − α·Δt_tick)`. Both run before the
+zeroed first, and `MomentumDamping`, if set, scales the rest by `max(0, 1 − α·Δt_call)`. Both run before the
 temperature is computed, so the kinetic energy they remove becomes heat instead of vanishing. The floor runs once per
-tick rather than per substep because zeroing per substep would stall every gradient below about 2 Pa/m. The
+settle pass rather than per substep because zeroing per substep would stall every gradient below about 2 Pa/m. The
 temperature is then
 
 ```
@@ -762,7 +824,7 @@ For a voxel with total pressure `P`, effective temperature `T`, and `n_g` moles 
 ```
 Δx    = VoxelVolume^(1/3)                                  // voxel edge length
 f_env = (T / GlobalTemperature)^(3/2) * (SaturationReferencePressure / P) / Δx²
-q_g   = min(D_g * f_env * n_g * FixedTimeStep, n_g / 7)    // moles sent to each non-solid neighbor
+q_g   = min(D_g * f_env * n_g * DeltaTime, n_g / 7)    // moles sent to each non-solid neighbor
 ```
 
 This is Fick's law on the grid. The flow through a face is `D_g * (A / d) * c * Δt`. For a cube the face area over
@@ -772,7 +834,7 @@ mixes at the same physical rate whatever the voxel size.
 `D_g` is the gas's `DiffusionCoefficient` (or `DefaultDiffusionCoefficient` for unregistered IDs), in m²/s. The
 `T^(3/2)/P` scaling is the kinetic-theory dependence of gas diffusivity: faster in hot, thin gas, slower in cold,
 dense gas. At the reference temperature and pressure with 1 m³ voxels `f_env = 1 m⁻²`, so the default
-`D_g = 0.02 m²/s` sends `0.02 × 0.05 = 0.1%` of a voxel's gas to each neighbour per tick, and the `n_g/7` cap keeps
+`D_g = 0.02 m²/s` sends `0.02 × 0.05 = 0.1%` of a voxel's gas to each neighbour per 50 ms, and the `n_g/7` cap keeps
 the six outgoing transfers below the inventory. That default is about a thousand times molecular diffusivity in air
 and stands in for convective mixing the grid does not resolve. Tiny deposits into an air voxel are suppressed when both the existing and the transferred amount
 stay below `MinimumTrackedMoles`, and the source keeps that share. Transfers into void are lost. Energy travels at the
@@ -840,10 +902,11 @@ when something changes:
   and arm64 differ through `TensorPrimitives`' use of fused multiply-add (issue #87).
 - Static chunks: a 70-chunk line with a pulse at one end and a hotter sea at the other, ticked with diffusion and
   sleep on, gives the same state hash and the same diagnostics every tick whether or not static chunks are skipped, at
-  every worker count (`EulerStaticChunkTests`). Gas next to void is never static. Two gases at equal pressure keep
-  mixing across a face.
-- Cost: room air needs about 35 substeps per tick, and one dense awake 16³ chunk of it costs about 19 ms per tick
-  single-threaded. That is why skipping static chunks (§5.6), sleep (§9), and the parallel schedule (§10.2) are not optional
+  every worker count (`EulerStaticChunkTests`). Grids of flat and cubic chunks, sealed rooms, and sealed rooms with a
+  door give the same bits too, at 20 Hz and 960 Hz, and skip exactly the chunks outside the per-axis box or behind
+  sealed faces. Gas next to void is never static. Two gases at equal pressure keep mixing across a face.
+- Cost: room air needs about 35 substeps per 50 ms of gas time, and one dense awake 16³ chunk of it costs about 19 ms
+  per 50 ms single-threaded. That is why skipping static chunks (§5.6), sleep (§9), and the parallel schedule (§10.2) are not optional
   with this model. `benchmarks/README.md` has the cases.
 
 ---
@@ -872,9 +935,9 @@ n_ij     = ΔP_req * VoxelVolume / (R * T_i)
 ```
 
 For an isolated pair at equal temperature, `i` drops by `ΔP_req` and `j` rises by `ΔP_req`, so the remaining
-difference is `(1 − 2k)(P_i − P_j)`. At `k = 0.5` the pair equalizes in a single tick. A larger `k` would flip the
+difference is `(1 − 2k)(P_i − P_j)`. At `k = 0.5` the pair equalizes in a single step. A larger `k` would flip the
 sign of the difference and ring, so the solver caps `k` at 0.5 regardless of configuration. The default `k = 0.125`
-shrinks an isolated pair's difference by 25% per tick.
+shrinks an isolated pair's difference by 25% per step.
 
 Bulk flow only runs from high to low pressure. Each voxel computes its own outflows, and its inflows arrive as the
 outflows of its higher-pressure neighbors.
@@ -1006,7 +1069,7 @@ For each boundary voxel, the compute phase looks at every face that leaves the c
 5. For each source species, combine bulk flow with the same diffusion amount the voxel uses inside its chunk (§5.8):
    ```
    molesAdvected = n_bulk * (sourceMoles / totalMoles)
-   molesDiffused = min(D_g * f_env * sourceMoles * FixedTimeStep, sourceMoles / 7)
+   molesDiffused = min(D_g * f_env * sourceMoles * DeltaTime, sourceMoles / 7)
    molesMoved    = min(sourceMoles, molesAdvected + molesDiffused)
    ```
    Diffusion is evaluated even when bulk flow is zero or points the other way. The neighbor's own boundary event sends
@@ -1030,8 +1093,8 @@ cross-chunk gradient.
 
 ### 7.1 When heat moves
 
-Thermodynamics runs every second tick (`ThermodynamicsTickInterval = 2`) to save computation. A thermodynamics tick
-runs these steps:
+Thermodynamics runs every 100 ms by default (96 ticks at 960 Hz) to save computation. Each run integrates the time
+since the last one, `DeltaTime`. A thermodynamics run executes these steps:
 
 1. Each awake chunk solves intra-chunk thermal diffusion and records its boundary voxels.
 2. Still within that per-chunk pass, phase changes (§8) run on the post-diffusion voxel state, after intra-chunk
@@ -1158,18 +1221,18 @@ state and coordinate it with a custom solver.
 
 Sleep is how Numos meets the work-proportional-cost goal: in a station with 500 chunks, only the handful with active
 pressure gradients consume CPU. Under the Euler model it matters even more, since a disturbed chunk pays for tens of
-substeps per tick (§5.10). A static awake chunk out of reach of any source is skipped (§5.6), but it still counts
+substeps per 50 ms (§5.10). A static awake chunk out of reach of any source is skipped (§5.6), but it still counts
 down to sleep.
 Each chunk keeps a
-`SleepTimer`, updated at the end of the transport stage:
+`SleepTimer` in ticks, updated at the end of the transport stage:
 
 1. For each neighbor pair, divide the absolute pressure difference by the higher pressure. The largest percentage in the
    chunk is tracked. A gas-to-vacuum edge counts as a 100% difference.
 2. If that maximum is at least `SleepEpsilon` (3.5%), reset `SleepTimer` to 0.
-3. Otherwise increment `SleepTimer`. Once it exceeds `SleepThreshold` (100), the chunk sleeps and is skipped by every
-   built-in stage.
+3. Otherwise add the stage's interval in ticks to `SleepTimer`. Once it exceeds `SleepDelay` converted to ticks
+   (`round(SleepDelay * TickRate)`: 4800 by default at 960 Hz, 100 at 20 Hz), the chunk sleeps and is skipped by every built-in stage.
 
-An awake chunk with no gas still advances its timer every tick, so an emptied chunk falls asleep on schedule. A
+An awake chunk with no gas still advances its timer on every run of the transport stage, so an emptied chunk falls asleep on schedule. A
 skipped Euler chunk does the same with a score of zero. The
 criterion is relative, so scaling every pressure in a chunk by the same factor does not change its sleep decision.
 Only pressure counts. A temperature gradient alone does not wake a chunk or keep it active (§14).
@@ -1179,7 +1242,7 @@ A sleeping chunk is woken by:
 - a gas mutation through the public API, such as `AddGasToVoxel` or a write through a voxel gas mixture;
 - an explicit `AtmosSimulation.WakeChunk`;
 - activation by the Euler stage, when an open face from an active chunk finds the two sides differing by more than
-  `WakePressureDelta` or the active side moving faster than `VelocityFloor` (§5.6);
+  `WakePressureDelta` or the active side moving faster than `max(VelocityFloor, SleepSpeed)` (§5.6);
 - under the legacy model, a boundary-flow transfer that reaches one of its voxels (§6.5);
 - explicit-link gas or thermal transport that changes one of its cells, or activation of a link that ends in it (§11);
 - registration of a chunk on one of its six faces.
@@ -1189,10 +1252,38 @@ a boundary is also kept awake with its timer reset (§6.5), because its intra-ch
 
 The Euler stage uses the same percentage metric with two additions. Open faces into neighbouring chunks are scored
 too, against the neighbour's written-back pressure (or its untouched live pressure if it never activated), which
-replaces the legacy keep-awake rule. And the metric is forced to at least `SleepEpsilon` while any voxel still
-carries momentum after the velocity floor (§5.7), so a chunk never sleeps mid-motion and a sleeping chunk has zero
-momentum everywhere. That second rule is why the floor matters for cost: without it, a settled room sloshing at
-microscopic speeds would stay awake and substepping forever.
+replaces the legacy keep-awake rule. And motion holds a chunk awake: the metric is forced to at least `SleepEpsilon`
+while the chunk's fastest voxel, after the velocity floor (§5.7), moves at `SleepSpeed` or faster. That rule is why
+the floor matters for cost. Without it, a settled room sloshing at microscopic speeds would stay awake and
+substepping forever.
+
+**Why slow motion may sleep.** Sound in a large open room dies slowly. After a pressure step across a station-sized
+room, the residual ringing still moves at 0.3 to 1 m/s after 20 s. The pressure spread is by then far below
+`SleepEpsilon`. With a `SleepSpeed` of 0, any motion above the velocity floor still holds every chunk awake. Small
+rooms escape this because their ringing dies sooner.
+
+`SleepSpeed` lets a chunk whose fastest voxel is slower than it sleep on its pressure differences alone. When the
+policy puts such a chunk to sleep, the stage stops every voxel through the momentum-settling code (§5.8) with an
+infinite floor. The kinetic energy becomes heat and the pressure is recomputed, so total energy is conserved. A
+sleeping chunk therefore still has zero momentum everywhere. A non-finite speed never counts as slow.
+
+Motion wakes a sleeping neighbour only above `max(VelocityFloor, SleepSpeed)`, so a chunk that fell asleep beside a
+neighbour ringing below `SleepSpeed` stays asleep. The pressure test at `WakePressureDelta` still applies. An acoustic
+wave at speed `u` carries a pressure swing of about `ρ·c·u`, which is 50 Pa at about 0.12 m/s in room air. So a
+neighbour ringing much above that speed can still wake the chunk through pressure.
+
+**Why the defaults are 0.5 m/s and 50 Pa.** The two settings work as a pair. `SleepSpeed` stops slow motion from
+waking a neighbour, but its pressure swing still can. At a 10 Pa threshold, ringing faster than 0.024 m/s keeps waking
+neighbours that just fell asleep. At 50 Pa only ringing faster than about 0.12 m/s does, so the rest of the station
+falls asleep around the few chunks that still ring. In a station-sized open room the pair needs less than half the CPU
+time of 0 m/s and 10 Pa. The cost is accuracy at rest. A chunk falls asleep with its pressure differences against its
+neighbours still in place, and they stay frozen in until something wakes it. In a station-sized room they reach about
+75 Pa. Total energy is conserved either way. A `SleepSpeed` of 0 restores the old rule: any momentum after the floor
+holds a chunk awake.
+
+`EulerRoomSleepTests` pins the rule with an explicit `SleepSpeed` of 0.25 m/s. A 2% pressure step across a 6x6 grid
+of flat 16x16x1 chunks falls asleep within 48 s, and does not with a `SleepSpeed` of 0. A chunk that falls asleep
+while it moves keeps its total energy, and a neighbour that rings below `SleepSpeed` does not wake it.
 
 Integration tests (`SimulationStabilityTests`) fill one voxel of L-shaped, donut-shaped, and zigzag rooms and check
 that after 400 ticks every open voxel is within 0.002 mol of the mean, with no negative inventories and total moles
@@ -1297,7 +1388,7 @@ connection that a custom solver owns entirely.
 
 A link also has an opening size. `ExplicitLinkDefinition.AreaFraction` (the `areaFraction` argument on `CreatePortal`)
 is the open area as a fraction of one voxel face, `dx²`. Leave it unset and the link follows
-`EulerFlowConfig.DefaultLinkAreaFraction` from the applied configuration (1, a full face), resolved every tick, so one
+`EulerFlowConfig.DefaultLinkAreaFraction` from the applied configuration (1, a full face), resolved every run, so one
 configuration change resizes every unsized link at once. `explicit-gas-transport` multiplies both the bulk and the
 diffusion request through the link by that fraction before the shared per-cell limiter sees them, so a half-open hatch
 moves exactly half of what a full face would under the same pressure difference and several narrow links still cannot
@@ -1309,9 +1400,9 @@ scaled: the conductance law in §7 is a heat-capacity-bounded relaxation rather 
 it with the opening is a separate modeling question.
 
 Under the Euler transport solver a link stays a duct. It moves mass and the energy that mass carries, never momentum,
-using the legacy bulk law (§6.1): a fraction of the pressure difference per tick, limited by what the source holds,
-applied once per tick after the sweeps (§4.3). Putting an HLLC face flux on the link instead would look more
-consistent, but that flux is a rate, and a link is applied once per 50 ms tick with no CFL substepping. Through a 1 m² opening at room conditions the one-tick mass is
+using the legacy bulk law (§6.1): a fraction of the pressure difference per run, limited by what the source holds,
+applied once per run of `explicit-gas-transport` after the sweeps (§4.3). Putting an HLLC face flux on the link
+instead would look more consistent, but that flux is a rate, and a link is applied once per 50 ms with no CFL substepping. Through a 1 m² opening at room conditions the one-tick mass is
 `ρ · c · A · Δt ≈ 1.2 kg/m³ · 340 m/s · 1 m² · 0.05 s ≈ 20 kg`, about 17 times the 1.2 kg an entire 1 m³ voxel holds,
 so the duct would overdraw its source by an order of magnitude before the limiter clipped it to something arbitrary.
 Cartesian faces avoid that because the Euler stage substeps them. Links are not part of that loop.
@@ -1846,10 +1937,11 @@ a vacuum voxel must end the tick with zero momentum (the Euler stage asserts it 
 not recorded, so they only replay as deterministic solver work. `SetVoxelMomentum` through the facade follows the
 same invariant by ignoring writes to empty voxels. A call from a callback is applied but not recorded.
 
-`AtmosSimulation.LastFlowDiagnostics` is the per-tick cost report of `euler-flow` (§5.7): substeps, simulated
-seconds, whether the cap engaged, the largest Courant number and signal speed, and the repair counters. It is a
-measurement, not state: zero before the first tick, under the legacy model, and after a restore. A stage that runs
-after `euler-flow` can read it to scale its own work by the gas time the tick actually covered when the cap engaged.
+`AtmosSimulation.LastFlowDiagnostics` is the cost report of the latest `euler-flow` run (§5.7): substeps, simulated
+seconds, whether the cap engaged, the largest Courant number and signal speed, and the repair counters. It keeps its
+values on the ticks between runs. It is a measurement, not state: zero before the first run, under the legacy model,
+and after a restore. A stage that runs after `euler-flow` can read it to scale its own work by the gas time the run
+actually covered when the cap engaged.
 
 ---
 
@@ -1883,7 +1975,7 @@ nothing currently uses.
 - No viscosity, no gravity. The Euler equations are inviscid and the stage applies no body forces. Boundary layers,
   drag on furniture, and stratification of heavy gases are not modelled. `MomentumDamping` is the only knob that
   removes momentum, and it does so uniformly.
-- The substep cap is time dilation. When `MaxSubstepsPerTick` engages, gas time falls behind world time while
+- The substep cap is time dilation. When `MaxSubstepsPerSecond` engages, gas time falls behind world time while
   thermodynamics, reactions, and host code advance a full tick (§5.5). One `Δt` is global per simulation, so one hot
   or light gas anywhere, a tritium fire at 1500 K say, slows the flow in every active chunk. There is no local time
   stepping per connected awake region.

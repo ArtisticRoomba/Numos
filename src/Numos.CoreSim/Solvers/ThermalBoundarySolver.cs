@@ -18,9 +18,6 @@ internal sealed class ThermalBoundarySolver : IAtmosSolverStage
 
     public void Solve(AtmosSolverExecutionContext context)
     {
-        if (context.TickCount % AtmosSolverConstants.ThermodynamicsTickInterval != 0)
-            return;
-
         ResetWorkspace();
         if (context.TickConfig.ThermalConductance <= 0f)
             return;

@@ -26,7 +26,8 @@ internal static class HeadlessTestSupport
     /// </summary>
     /// <remarks>
     ///     The project uses the legacy transport model unless a test asks otherwise. Most protocol tests care about
-    ///     the protocol and not the transport law.
+    ///     the protocol and not the transport law. The tick rate is pinned at 20 Hz so tick counts in the tests mean
+    ///     50 ms each; a test about another rate passes its own <c>tickRate</c>.
     /// </remarks>
     internal static string CreateProject(
         string id,
@@ -43,7 +44,7 @@ internal static class HeadlessTestSupport
                         "\"defaultDiffusionCoefficient\":0," +
                         "\"bulkFlowCoefficient\":0.25," +
                         "\"vacuumThresholdPa\":0," +
-                        "\"sleepThreshold\":2147483647," +
+                        "\"sleepDelay\":1e9," +
                         "\"sleepEpsilonPercent\":0," +
                         "\"thermalConductance\":0.05," +
                         "\"condensationRateFactor\":0.5," +
@@ -55,6 +56,7 @@ internal static class HeadlessTestSupport
             "createProject",
             "\"name\":\"Headless tests\"," +
             $"\"transportModel\":\"{transportModel}\"," +
+            "\"tickRate\":20," +
             $"\"chunkDimensions\":{C(width, height, depth)}," +
             $"\"config\":{{{config}}}," +
             "\"gases\":[{\"name\":\"First\",\"molarHeatCapacityAtConstantVolume\":1,\"diffusionCoefficient\":0}]");

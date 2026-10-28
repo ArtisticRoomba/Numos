@@ -25,11 +25,12 @@ public partial class SimulationViewer
 
         IReadOnlyList<AtmosWorldSolverLayoutEntry>? pendingLayout = null;
         (string Name, bool Enabled)? pendingToggle = null;
+        (string Name, int Interval)? pendingInterval = null;
 
         ImGui.PushStyleVar(ImGuiStyleVar.CellPadding, new Vector2(3f, ImGui.GetStyle().CellPadding.Y));
         using (var table = ImGuiExtensions.BeginTable(
                    "SolverPipeline##solver-pipeline",
-                   3,
+                   4,
                    ImGuiTableFlags.BordersInnerH | ImGuiTableFlags.NoSavedSettings))
         {
             if (table.IsVisible)
@@ -42,6 +43,7 @@ public partial class SimulationViewer
 
                 ImGui.TableSetupColumn("##enabled", ImGuiTableColumnFlags.WidthFixed);
                 ImGui.TableSetupColumn("##stage", ImGuiTableColumnFlags.WidthStretch);
+                ImGui.TableSetupColumn("##interval", ImGuiTableColumnFlags.WidthFixed, 80f);
                 ImGui.TableSetupColumn("##actions", ImGuiTableColumnFlags.WidthFixed, actionsWidth);
 
                 for (int index = 0; index < steps.Count; index++)
@@ -82,6 +84,17 @@ public partial class SimulationViewer
                         ImGuiExtensions.WrappedTooltip(SolverPipelineEditor.Describe(step.Name), step.Name);
 
                     ImGui.TableSetColumnIndex(2);
+                    int interval = step.Interval;
+                    ImGui.BeginDisabled(inspecting);
+                    ImGui.SetNextItemWidth(-1f);
+                    ImGui.InputInt("##interval", ref interval, 0, 0);
+                    if (ImGui.IsItemDeactivatedAfterEdit() && interval >= 1 && interval != step.Interval)
+                        pendingInterval = (step.Name, interval);
+
+                    ImGui.EndDisabled();
+                    ImGuiExtensions.ItemTooltip(Locale.GetString("solver-interval-tooltip"));
+
+                    ImGui.TableSetColumnIndex(3);
                     ImGui.PushStyleVar(ImGuiStyleVar.ItemSpacing, new Vector2(buttonGap, style.ItemSpacing.Y));
                     ImGui.BeginDisabled(inspecting || index == 0);
                     if (ImGui.ArrowButton("##up", ImGuiDir.Up))
@@ -115,7 +128,9 @@ public partial class SimulationViewer
 
         ImGui.PopStyleVar();
 
-        if (pendingToggle is { } toggle)
+        if (pendingInterval is { } change)
+            RunSolverEdit(() => _session.SetSolverInterval(change.Name, change.Interval));
+        else if (pendingToggle is { } toggle)
             RunSolverEdit(() => _session.SetSolverEnabled(toggle.Name, toggle.Enabled));
         else if (pendingLayout != null)
             RunSolverEdit(() => _session.SetSolverLayout(pendingLayout));

@@ -30,7 +30,7 @@ internal sealed partial class AtmosKernel : IDisposable
     /// <summary>
     ///     Number of completed fixed ticks on the owning world timeline.
     /// </summary>
-    internal int TickCount;
+    internal long TickCount;
 
     /// <summary>
     ///     Which built-in transport stages <see cref="Tick" /> runs when the kernel is ticked on its own, outside a
@@ -39,7 +39,15 @@ internal sealed partial class AtmosKernel : IDisposable
     /// </summary>
     internal AtmosTransportModel TransportModel { get; set; } = AtmosTransportModel.Euler;
 
+    /// <summary>
+    ///     Ticks per second used when the kernel ticks on its own. A world tick ignores it and passes the world's
+    ///     rate to <see cref="BeginWorldTick" />. This stays at 20 and does not follow
+    ///     <c>AtmosWorld.DefaultTickRate</c>: the kernel's tests and benchmarks pin numbers taken at 50 ms ticks.
+    /// </summary>
+    internal int TickRate { get; set; } = 20;
+
     private long _chunkCollectionRevision;
+    private OrderedChunkCache? _orderedChunks;
     private ConcurrentDictionary<Int3, AtmosChunk> _chunkMap = new();
     private AtmosConfigSnapshot _config = new AtmosConfig().CreateSnapshot();
     private bool _isTickExecuting;
@@ -74,6 +82,7 @@ internal sealed partial class AtmosKernel : IDisposable
                 chunk.Release();
 
             _chunkMap.Clear();
+            _orderedChunks = null;
             ClearSolverData();
             _defaultSolvers.Dispose();
         }
@@ -112,24 +121,42 @@ internal sealed partial class AtmosKernel : IDisposable
 
     private void TickSimulation(AtmosChunk[] chunks)
     {
-        var context = BeginTickSimulation(chunks);
+        var context = BeginTickSimulation(chunks, checked(TickCount + 1L), TickRate);
         try
         {
             // Mirrors AtmosWorldSolverPipeline's built-in order for each model, minus the explicit-link stages a lone
-            // kernel has no topology for.
+            // kernel has no topology for. A stage runs when the tick count is a multiple of its interval, which is
+            // the cadence a world gives a stage that never changes interval.
+            int eulerInterval = BuiltInStageSchedule.IntervalFor(BuiltInStageSchedule.EulerRunsPerSecond, TickRate);
+            int gasInterval = BuiltInStageSchedule.IntervalFor(BuiltInStageSchedule.GasRunsPerSecond, TickRate);
+            int thermalInterval = BuiltInStageSchedule.IntervalFor(BuiltInStageSchedule.ThermalRunsPerSecond, TickRate);
             if (TransportModel == AtmosTransportModel.Euler)
             {
-                SolveEulerFlow(context);
+                if (context.TickCount % eulerInterval == 0)
+                {
+                    context.BeginStage(eulerInterval, BuiltInStageSchedule.GapTime(eulerInterval, TickRate));
+                    SolveEulerFlow(context);
+                }
             }
-            else
+            else if (context.TickCount % gasInterval == 0)
             {
+                context.BeginStage(gasInterval, BuiltInStageSchedule.GapTime(gasInterval, TickRate));
                 SolveAdvection(context);
                 SolveBoundaryFlow(context);
             }
 
-            SolveThermodynamics(context);
-            SolveThermalBoundary(context);
-            SolveGasReactions(context);
+            if (context.TickCount % thermalInterval == 0)
+            {
+                context.BeginStage(thermalInterval, BuiltInStageSchedule.GapTime(thermalInterval, TickRate));
+                SolveThermodynamics(context);
+                SolveThermalBoundary(context);
+            }
+
+            if (context.TickCount % gasInterval == 0)
+            {
+                context.BeginStage(gasInterval, BuiltInStageSchedule.GapTime(gasInterval, TickRate));
+                SolveGasReactions(context);
+            }
         }
         finally
         {
@@ -140,12 +167,34 @@ internal sealed partial class AtmosKernel : IDisposable
     /// <summary>
     ///     Begins one tick whose pipeline stages will be coordinated by a containing world.
     /// </summary>
+    /// <param name="tick">The one-based world tick that is starting. The kernel adopts it as its tick count.</param>
+    /// <param name="tickRate">The world's ticks per second.</param>
     /// <returns>The tick's solver execution context.</returns>
-    internal AtmosSolverExecutionContext BeginWorldTick()
+    internal AtmosSolverExecutionContext BeginWorldTick(long tick, int tickRate)
     {
         lock (StateGate)
         {
-            return BeginTickSimulation(OrderedChunks());
+            return BeginTickSimulation(OrderedChunks(), tick, tickRate);
+        }
+    }
+
+    /// <summary>
+    ///     Advances the tick count for a world tick on which no stage runs.
+    /// </summary>
+    /// <param name="tick">The one-based world tick that is completing. It must follow the kernel's current count.</param>
+    /// <remarks>
+    ///     Skips the config capture, gas registry check and chunk revision bump that a full tick does. With no
+    ///     stage running, none of them can have changed anything.
+    /// </remarks>
+    internal void AdvanceIdleTick(long tick)
+    {
+        lock (StateGate)
+        {
+            ThrowIfTickExecuting("advance a tick");
+            if (tick != checked(TickCount + 1L))
+                throw new InvalidOperationException("The world tick does not follow the simulation's tick count.");
+
+            TickCount = tick;
         }
     }
 
@@ -160,7 +209,7 @@ internal sealed partial class AtmosKernel : IDisposable
         }
     }
 
-    private AtmosSolverExecutionContext BeginTickSimulation(AtmosChunk[] chunks)
+    private AtmosSolverExecutionContext BeginTickSimulation(AtmosChunk[] chunks, long tick, int tickRate)
     {
         ThrowIfTickExecuting("run a recursive simulation tick");
         _isTickExecuting = true;
@@ -168,7 +217,7 @@ internal sealed partial class AtmosKernel : IDisposable
         {
             _config.ValidateGasRegistry();
             CurrentTickConfig.Capture(_config);
-            TickCount = checked(TickCount + 1);
+            TickCount = tick;
 
             foreach (var chunk in chunks)
             {
@@ -176,7 +225,7 @@ internal sealed partial class AtmosKernel : IDisposable
                     chunk.MarkChanged();
             }
 
-            var context = new AtmosSolverExecutionContext(this, chunks, CurrentTickConfig, TickCount);
+            var context = new AtmosSolverExecutionContext(this, chunks, CurrentTickConfig, TickCount, tickRate);
             return context;
         }
         catch
@@ -223,6 +272,8 @@ internal sealed partial class AtmosKernel : IDisposable
         if (_isTickExecuting)
             throw new InvalidOperationException($"A solver callback cannot {operation}.");
     }
+
+    private sealed record OrderedChunkCache(long Revision, AtmosChunk[] Chunks);
 
     private readonly record struct ThermalVoxelAddress(Int3 ChunkPosition, ushort LocalVoxelIndex);
 

@@ -397,6 +397,27 @@ internal sealed class AtmosSolverTickScope
 
     internal bool IsClosed => _closed;
 
+    /// <summary>
+    ///     Gets the interval of the running stage, in ticks.
+    /// </summary>
+    internal int Interval { get; private set; } = 1;
+
+    /// <summary>
+    ///     Gets the gas time the running stage advances, in seconds.
+    /// </summary>
+    internal float DeltaTime { get; private set; }
+
+    /// <summary>
+    ///     Sets the interval and gas time of the next stage on this scope and on every kernel context.
+    /// </summary>
+    internal void BeginStage(int interval, float deltaTime)
+    {
+        Interval = interval;
+        DeltaTime = deltaTime;
+        foreach (var context in Contexts)
+            context.BeginStage(interval, deltaTime);
+    }
+
     internal static InvalidOperationException DefaultViewException()
     {
         return new InvalidOperationException(

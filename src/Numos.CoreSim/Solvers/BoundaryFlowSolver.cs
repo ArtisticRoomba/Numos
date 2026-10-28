@@ -325,7 +325,7 @@ internal sealed class BoundaryFlowSolver : IAtmosSolverStage
             Mole molesAdvected = advectedMoles * (sourceMoles / totalMoles);
 
             Mole molesDiffused =
-                SpeciesDiffusionKernel.TransferAmount(config.GetDiffusionCoefficient(gasId), envFactor, sourceMoles);
+                SpeciesDiffusionKernel.TransferAmount(config.GetDiffusionCoefficient(gasId), envFactor, sourceMoles, context.DeltaTime);
 
             // The channel search in GetGasMoles only runs for a deposit that could be dropped.
             if (molesDiffused < AtmosSolverConstants.MinimumTrackedMoles &&

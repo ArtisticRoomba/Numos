@@ -47,6 +47,26 @@ internal sealed partial class AtmosKernel
     public Int3 Dimensions => _dimensions;
 
     /// <summary>
+    ///     Ticks the <c>euler-flow</c> stage has covered since its last settle pass.
+    /// </summary>
+    /// <remarks>
+    ///     The next settle pass depends on it, so a restored kernel must continue the count to stay on the
+    ///     uninterrupted run's schedule. Only the stage writes it, on the tick thread.
+    /// </remarks>
+    [NumosSerialize]
+    internal int EulerSettleTicks { get; set; }
+
+    /// <summary>
+    ///     Position in the six-order sweep cycle of the <c>euler-flow</c> stage, in [0, 6).
+    /// </summary>
+    /// <remarks>
+    ///     The stage advances it by one per substep, across ticks. A restored kernel must continue the cycle so every
+    ///     order stays followed by its reverse.
+    /// </remarks>
+    [NumosSerialize]
+    internal int EulerSweepPhase { get; set; }
+
+    /// <summary>
     ///     Every chunk's continuation data, in lexicographic chunk-position order.
     /// </summary>
     [NumosSerialize("Chunks")]
@@ -70,7 +90,7 @@ internal sealed partial class AtmosKernel
     ///     Configuration and solver enablement belong to the world, which applies its own before or after this call.
     ///     Transient solver data is discarded either way.
     /// </remarks>
-    internal void RestoreCheckpoint(AtmosSimulationCheckpoint checkpoint, int tickCount)
+    internal void RestoreCheckpoint(AtmosSimulationCheckpoint checkpoint, long tickCount)
     {
         lock (StateGate)
         {
@@ -90,7 +110,7 @@ internal sealed partial class AtmosKernel
     ///     A world restore validates every simulation before it changes any of them, so each kernel skips the second
     ///     pass. An unvalidated checkpoint can leave the grid half installed.
     /// </remarks>
-    internal void RestoreValidatedCheckpoint(AtmosSimulationCheckpoint checkpoint, int tickCount)
+    internal void RestoreValidatedCheckpoint(AtmosSimulationCheckpoint checkpoint, long tickCount)
     {
         lock (StateGate)
         {
@@ -129,7 +149,7 @@ internal sealed partial class AtmosKernel
         }
     }
 
-    private void InstallCheckpoint(AtmosSimulationCheckpoint checkpoint, int tickCount)
+    private void InstallCheckpoint(AtmosSimulationCheckpoint checkpoint, long tickCount)
     {
         // Materialize all pooled storage before replacing anything observable.
         var replacement = new ConcurrentDictionary<Int3, AtmosChunk>();
@@ -162,6 +182,8 @@ internal sealed partial class AtmosKernel
         CurrentTickConfig.Capture(_config);
         ClearSolverData();
         TickCount = tickCount;
+        EulerSettleTicks = checkpoint.EulerSettleTicks;
+        EulerSweepPhase = checkpoint.EulerSweepPhase;
         _defaultSolvers.ClearTransientState();
         _chunkCollectionRevision++;
         LastBoundaryTicks = 0;
@@ -264,6 +286,13 @@ internal sealed partial class AtmosKernel
 
     private AtmosChunk[] OrderedChunks()
     {
+        // Every add, remove and restore bumps the revision, so the cached order is valid while it matches. The array is
+        // shared between ticks, so callers must not write to it.
+        long revision = _chunkCollectionRevision;
+        var cached = _orderedChunks;
+        if (cached != null && cached.Revision == revision)
+            return cached.Chunks;
+
         // Positions are the map's keys, so this order is total and doesn't depend on sort stability.
         AtmosChunk[] chunks = _chunkMap.Values.ToArray();
         Array.Sort(
@@ -277,6 +306,7 @@ internal sealed partial class AtmosKernel
                 return order != 0 ? order : first.GridPosition.Z.CompareTo(second.GridPosition.Z);
             });
 
+        _orderedChunks = new OrderedChunkCache(revision, chunks);
         return chunks;
     }
 }

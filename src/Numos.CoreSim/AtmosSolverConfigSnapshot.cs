@@ -48,7 +48,7 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
     public Kelvin SpaceTemperature { get; private set; }
     public Scalar BulkFlowCoefficient { get; private set; }
     public Pascal VacuumThreshold { get; private set; }
-    public int SleepThreshold { get; private set; }
+    public Second SleepDelay { get; private set; }
     public Scalar SleepEpsilon { get; private set; }
     public JoulePerKelvin ThermalConductance { get; private set; }
     public Scalar CondensationRateFactor { get; private set; }
@@ -174,7 +174,7 @@ internal sealed class AtmosSolverConfigSnapshot : IAtmosConfig
 
         BulkFlowCoefficient = config.BulkFlowCoefficient;
         VacuumThreshold = config.VacuumThreshold;
-        SleepThreshold = config.SleepThreshold;
+        SleepDelay = config.SleepDelay;
         SleepEpsilon = config.SleepEpsilon;
         ThermalConductance = config.ThermalConductance;
         CondensationRateFactor = config.CondensationRateFactor;

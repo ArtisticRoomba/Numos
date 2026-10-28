@@ -26,26 +26,54 @@ internal static class ChunkSleepPolicy
     }
 
     /// <summary>
-    ///     Resets or advances a chunk's sleep timer from its greatest relative pressure difference this tick.
+    ///     Resets or advances a chunk's sleep timer from its greatest relative pressure difference this run.
     /// </summary>
     /// <param name="chunk">The chunk whose sleep state will be updated.</param>
     /// <param name="config">The immutable configuration snapshot containing sleep thresholds.</param>
     /// <param name="maximumRelativePressureDelta">
     ///     The greatest neighbor pressure difference in the chunk, as a percentage of the higher pressure.
     /// </param>
+    /// <param name="elapsedTicks">The ticks this run spans. The timer grows by this amount and saturates.</param>
+    /// <param name="sleepDelayTicks">
+    ///     The sleep delay in ticks. The chunk sleeps once the timer exceeds it.
+    /// </param>
     internal static void UpdateSleepState(
         AtmosChunk chunk,
         AtmosSolverConfigSnapshot config,
-        Scalar maximumRelativePressureDelta)
+        Scalar maximumRelativePressureDelta,
+        int elapsedTicks,
+        int sleepDelayTicks)
+    {
+        if (AdvanceSleepTimer(chunk, config, maximumRelativePressureDelta, elapsedTicks, sleepDelayTicks))
+            chunk.Sleep();
+    }
+
+    /// <summary>
+    ///     Resets or advances a chunk's sleep timer like <see cref="UpdateSleepState" />, but leaves the
+    ///     <see cref="AtmosChunk.Sleep" /> call to the caller.
+    /// </summary>
+    /// <returns>
+    ///     <see langword="true" /> when the timer has passed the delay and the caller must put the chunk to sleep.
+    /// </returns>
+    /// <remarks>
+    ///     A solver uses this when it has to change the chunk's fields before the chunk falls asleep.
+    /// </remarks>
+    internal static bool AdvanceSleepTimer(
+        AtmosChunk chunk,
+        AtmosSolverConfigSnapshot config,
+        Scalar maximumRelativePressureDelta,
+        int elapsedTicks,
+        int sleepDelayTicks)
     {
         if (maximumRelativePressureDelta >= config.SleepEpsilon)
         {
             chunk.SleepTimer = 0;
-            return;
+            return false;
         }
 
-        chunk.SleepTimer++;
-        if (chunk.SleepTimer > config.SleepThreshold)
-            chunk.Sleep();
+        chunk.SleepTimer = elapsedTicks > int.MaxValue - chunk.SleepTimer
+            ? int.MaxValue
+            : chunk.SleepTimer + elapsedTicks;
+        return chunk.SleepTimer > sleepDelayTicks;
     }
 }

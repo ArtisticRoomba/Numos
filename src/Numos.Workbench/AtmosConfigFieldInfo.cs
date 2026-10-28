@@ -87,10 +87,10 @@ public static class AtmosConfigFields
         "Below this pressure a voxel's gas is removed, provided every adjacent air voxel is also below it.",
         ConfigDomain.NonNegative);
 
-    public readonly static AtmosConfigFieldInfo SleepThreshold = new(
-        "Sleep threshold",
-        "ticks",
-        "Consecutive ticks below the sleep epsilon before a chunk goes to sleep.",
+    public readonly static AtmosConfigFieldInfo SleepDelay = new(
+        "Sleep delay",
+        "s",
+        "Time below the sleep epsilon before a chunk goes to sleep.",
         ConfigDomain.NonNegative);
 
     public readonly static AtmosConfigFieldInfo SleepEpsilon = new(
@@ -164,16 +164,28 @@ public static class AtmosConfigFields
         "Largest fraction of a voxel a signal may cross per substep. 0.5 keeps the first-order scheme positive.",
         ConfigDomain.PositiveUnitInterval);
 
-    public readonly static AtmosConfigFieldInfo EulerMaxSubstepsPerTick = new(
-        "Max substeps per tick",
-        "",
-        "Cap on CFL substeps per tick; 0 means no cap. When it engages the tick advances less gas time.",
+    public readonly static AtmosConfigFieldInfo EulerMaxSubstepsPerSecond = new(
+        "Max substeps per second",
+        "1/s",
+        "Cap on CFL substeps per second of gas time; 0 means no cap. When it engages a call advances less gas time.",
+        ConfigDomain.NonNegative);
+
+    public readonly static AtmosConfigFieldInfo EulerSettlePeriod = new(
+        "Settle period",
+        "s",
+        "Time between velocity-floor, diffusion, cleanup, and sleep passes. 0 settles on every call.",
         ConfigDomain.NonNegative);
 
     public readonly static AtmosConfigFieldInfo EulerVelocityFloor = new(
         "Velocity floor",
         "m/s",
         "Speeds below this are zeroed at the end of the tick so settled rooms stop sloshing.",
+        ConfigDomain.NonNegative);
+
+    public readonly static AtmosConfigFieldInfo EulerSleepSpeed = new(
+        "Sleep speed",
+        "m/s",
+        "Motion slower than this no longer keeps a chunk awake or wakes a sleeping neighbour. 0 keeps any motion awake.",
         ConfigDomain.NonNegative);
 
     public readonly static AtmosConfigFieldInfo EulerMaxVelocity = new(

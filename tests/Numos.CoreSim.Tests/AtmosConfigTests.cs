@@ -32,7 +32,7 @@ public sealed class AtmosConfigTests
             Assert.That(config.SpaceTemperature, Is.EqualTo(AtmosConfigDefaults.SpaceTemperature));
             Assert.That(config.BulkFlowCoefficient, Is.EqualTo(AtmosConfigDefaults.BulkFlowCoefficient));
             Assert.That(config.VacuumThreshold, Is.EqualTo(AtmosConfigDefaults.VacuumThreshold));
-            Assert.That(config.SleepThreshold, Is.EqualTo(AtmosConfigDefaults.SleepThreshold));
+            Assert.That(config.SleepDelay, Is.EqualTo(AtmosConfigDefaults.SleepDelay));
             Assert.That(config.SleepEpsilon, Is.EqualTo(AtmosConfigDefaults.SleepEpsilon));
             Assert.That(config.ThermalConductance, Is.EqualTo(AtmosConfigDefaults.ThermalConductance));
             Assert.That(

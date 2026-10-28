@@ -22,7 +22,7 @@ public sealed class EulerFlowEquilibriumTests
         const int height = 10;
         const int depth = 3;
         var config = SimTestHelpers.CreateEulerConfig();
-        config.SleepThreshold = 20;
+        config.SleepDelay = 1f;
         config.SleepEpsilon = 0.5f;
         using var simulation = SimTestHelpers.CreateEulerSimulation(config, width, height, depth, out var chunk);
         float ambient = SimTestHelpers.MolesFor(config, Atmosphere, Temperature);
@@ -142,13 +142,14 @@ public sealed class EulerFlowEquilibriumTests
             $"{simulation.LastFlowDiagnostics}; mirror classes={byMirror.Count} worst={worstMirror:E2} speed={worstMirrorSpeed:E2}; " +
             $"permutation classes={byPermutation.Count} worst={worstPermutation:E2} speed={worstPermutationSpeed:E2}; max speed {maxSpeed:F2} m/s");
         // Measured on x64: mirrors exact, permutations 7.8e-3 on the scalars (1.2e-2 when the order only alternated
-        // between XYZ and ZYX) and 6.7% of the peak speed.
+        // between XYZ and ZYX) and 6.7% of the peak speed. With the checkpointed sweep phase both ticks start on XYZ,
+        // which gives 1.3e-2 and 12.4%.
         Assert.Multiple(() =>
         {
             Assert.That(worstMirror, Is.Zero);
             Assert.That(worstMirrorSpeed, Is.Zero);
             Assert.That(worstPermutation, Is.LessThan(2e-2));
-            Assert.That(worstPermutationSpeed, Is.LessThan(0.1 * maxSpeed));
+            Assert.That(worstPermutationSpeed, Is.LessThan(0.15 * maxSpeed));
         });
     }
 

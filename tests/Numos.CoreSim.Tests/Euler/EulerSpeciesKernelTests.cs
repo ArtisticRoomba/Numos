@@ -1,3 +1,4 @@
+using System.Numerics;
 using Numos.CoreSim.Solvers.Euler;
 
 namespace Numos.CoreSim.Tests.Euler;
@@ -101,7 +102,24 @@ public class EulerSpeciesKernelTests
     [Test]
     public void UpdateRunGases_SumsManyGasesInAscendingOrderBitForBit([Range(1, 37, 4)] int length, [Values(1, 2, 5, 32)] int gasCount)
     {
-        var random = new Random(777 + length * 100 + gasCount);
+        AssertManyGasesMatchTheScalarCellUpdate(length, gasCount, 777 + length * 100 + gasCount);
+    }
+
+    /// <summary>
+    ///     Runs from one vector plus one cell to two vectors minus one end with a vector that overlaps the one before
+    ///     it. The overlapped cells must keep the same bits and count once.
+    /// </summary>
+    [Test]
+    public void UpdateRunGases_EndsARunWithAnOverlappingVectorBitForBit([Values(1, 3, 32)] int gasCount)
+    {
+        int width = Vector<float>.Count;
+        for (int length = width + 1; length < 2 * width; length++)
+            AssertManyGasesMatchTheScalarCellUpdate(length, gasCount, 4242 + length * 100 + gasCount);
+    }
+
+    private static void AssertManyGasesMatchTheScalarCellUpdate(int length, int gasCount, int seed)
+    {
+        var random = new Random(seed);
         int total = length + 2 * Pad;
         int cells = total;
         float[][] sources = new float[gasCount][];
@@ -155,7 +173,7 @@ public class EulerSpeciesKernelTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(fusedNegatives, Is.EqualTo(referenceNegatives));
+            Assert.That(fusedNegatives, Is.EqualTo(referenceNegatives), $"length {length}");
             Assert.That(Bits(fusedShared.MassSum), Is.EqualTo(Bits(referenceShared.MassSum)));
             Assert.That(Bits(fusedShared.MoleSum), Is.EqualTo(Bits(referenceShared.MoleSum)));
             Assert.That(fusedShared.HeatSum.Select(BitConverter.DoubleToInt64Bits),
@@ -170,14 +188,8 @@ public class EulerSpeciesKernelTests
         float[][] sources, float[][] fluxes, float[] molarMass, float[] molarHeat, int cells,
         out EulerSpeciesPassResult shared)
     {
+        // The sweep clears the sums before the species pass, and the kernel relies on that.
         shared = new EulerSpeciesPassResult(sources[0].Length, cells);
-        for (int i = 0; i < cells; i++)
-        {
-            shared.MassSum[i] = 0.25f * i;
-            shared.MoleSum[i] = 0.5f * i;
-            shared.HeatSum[i] = 0.125 * i;
-        }
-
         var passes = new EulerSpeciesPass[sources.Length];
         for (int gas = 0; gas < passes.Length; gas++)
         {
@@ -190,30 +202,43 @@ public class EulerSpeciesKernelTests
     }
 
     [Test]
-    public void FaceFluxRun_MatchesTheScalarUpwindProduct([Range(1, 37)] int length)
+    public void FaceFluxRun_MatchesTheScalarUpwindProduct([Range(1, 37)] int length, [Values(1, 5)] int upperOffset)
     {
-        var random = new Random(99 + length);
-        int total = length + 1;
-        float[] source = new float[total];
-        for (int i = 0; i < total; i++)
+        // Callers pad the face scratch and the species rows by one vector, so a short run can load a whole one.
+        int width = Vector<float>.Count;
+        const int firstFace = 2;
+        const int lowerVoxel = 3;
+        var random = new Random(99 + length * 10 + upperOffset);
+        float[] source = new float[lowerVoxel + upperOffset + length + width];
+        for (int i = 0; i < source.Length; i++)
             source[i] = (float)random.NextDouble();
 
-        float[] rate = new float[length];
-        int[] mask = new int[length];
-        for (int i = 0; i < length; i++)
+        int faceCount = firstFace + length + 2;
+        float[] rate = new float[faceCount + width];
+        int[] mask = new int[faceCount + width];
+        for (int i = 0; i < rate.Length; i++)
         {
             rate[i] = (float)(random.NextDouble() - 0.5);
             mask[i] = random.Next(2) == 0 ? 0 : -1;
         }
 
-        float[] flux = new float[length];
-        EulerSpeciesKernel.FaceFluxRun(rate, mask, source, flux, 0, 0, 1, length);
+        float[] flux = new float[faceCount];
+        Array.Fill(flux, float.NaN);
+        EulerSpeciesKernel.FaceFluxRun(rate, mask, source, flux, firstFace, lowerVoxel, upperOffset, length);
 
-        for (int i = 0; i < length; i++)
+        Assert.Multiple(() =>
         {
-            float expected = rate[i] * source[mask[i] == 0 ? i : i + 1];
-            Assert.That(BitConverter.SingleToInt32Bits(flux[i]), Is.EqualTo(BitConverter.SingleToInt32Bits(expected)), $"face {i}");
-        }
+            for (int face = 0; face < faceCount; face++)
+            {
+                int i = face - firstFace;
+                float expected = i >= 0 && i < length
+                    ? rate[face] * source[lowerVoxel + i + (mask[face] == 0 ? 0 : upperOffset)]
+                    : float.NaN;
+                Assert.That(
+                    BitConverter.SingleToInt32Bits(flux[face]), Is.EqualTo(BitConverter.SingleToInt32Bits(expected)),
+                    $"face {face}");
+            }
+        });
     }
 
     private static void Run(
@@ -229,13 +254,6 @@ public class EulerSpeciesKernelTests
     {
         int cells = length + 2 * Pad;
         result = new EulerSpeciesPassResult(source.Length, cells);
-        for (int i = 0; i < cells; i++)
-        {
-            result.MassSum[i] = 0.25f * i;
-            result.MoleSum[i] = 0.5f * i;
-            result.HeatSum[i] = 0.125 * i;
-        }
-
         var pass = new EulerSpeciesPass(
             source, result.Target, flux, result.NonFinite, result.MassSum, result.MoleSum, result.HeatSum,
             1f, 0.02897f, 20.8f);

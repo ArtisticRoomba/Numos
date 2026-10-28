@@ -73,10 +73,13 @@ internal struct EulerSweepCounters
 ///         <c>W</c> columns of one <c>z</c>), and a Z sweep takes one y-sheet (the <c>W</c> columns of one
 ///         <c>y</c>). Bundle data is stored march-major, so the cells and faces at one march position are
 ///         contiguous. A bundle runs in three passes. The first solves every face of the bundle once into
-///         a scratch array. Interior faces of rows that hold only air go through <see cref="HllcFluxVector" />, which
-///         gives the same bits as <see cref="HllcFlux.Solve" />. The second updates the species of every air cell, one
-///         gas at a time, and sums the mixture as it goes. The third updates momentum and energy per cell and rebuilds its primitive state. Rows that hold only air use
-///         <see cref="EulerCellKernel" /> for this, with the same bits as the scalar update.
+///         a scratch array. Interior faces inside a stretch of air go through
+///         <see cref="HllcFluxVector" />, which gives the same bits as <see cref="HllcFlux.Solve" />. The second
+///         updates the species of every air cell, one gas at a time, and sums the mixture as it goes. The third
+///         updates momentum and energy per cell and rebuilds its primitive state. Stretches of air at least one
+///         vector wide use <see cref="EulerCellKernel" /> for this, with the same bits as the scalar update. Each
+///         pass finds its stretches with <see cref="AirSpans" />, so a wall voxel takes only its own cells and
+///         faces off the vector path.
 ///         Going gas by gas keeps one source row, one target row, and the two neighbour rows in hand for a whole
 ///         bundle instead of looking them up again per cell.
 ///     </para>
@@ -205,13 +208,12 @@ internal static class EulerSweep
 
         int cellCount = marchCount * lineCount;
         int faceCount = (marchCount + 1) * lineCount;
-        scratch.EnsureCapacity(faceCount, cellCount, runCount);
+        scratch.EnsureCapacity(faceCount, cellCount);
         PerSecond[] faceRate = scratch.FaceSpeciesRate;
         int[] upperMask = scratch.FaceUpperMask;
         int[] fixupFaces = scratch.FixupFaces;
         EulerFaceUpwind[] faceUpwind = scratch.FaceUpwind;
-        bool[] airMap = workspace.AirMap;
-        bool[] rowAllAir = workspace.RowAllAir;
+        int[] airRunLength = workspace.AirRunLength;
 
         EulerFlowConfig settings = config.EulerFlow;
         EulerChunkState read = workspace.Read;
@@ -219,23 +221,27 @@ internal static class EulerSweep
         int innerRunCount = alongMarch ? lineCount : marchCount - 1;
         int innerRunLength = alongMarch ? marchCount - 1 : lineCount;
 
-        // Interior faces of an all-air run go through the vector kernel. Every other face is solved one at a time.
-        bool vectorFaces = HllcFluxVector.Enabled && !settings.AllMachCorrection && innerRunLength > 0;
-        bool[] vectorRun = scratch.VectorRun;
+        // Interior faces whose two cells share a stretch of air go through the vector kernel and are flagged. A
+        // stretch shorter than a vector runs through the spill buffer. Every other face is solved one at a time.
+        bool vectorFaces = HllcFluxVector.Enabled && !settings.AllMachCorrection;
+        bool[] vectorFace = scratch.VectorFace;
+        Array.Clear(vectorFace, 0, faceCount);
         if (vectorFaces)
         {
             for (int run = 0; run < innerRunCount; run++)
             {
                 int firstLower = baseIndex + run * runVoxelStride;
-                bool allAir = rowAllAir[firstLower / width] &&
-                              (alongMarch || rowAllAir[(firstLower + marchStride) / width]);
-                vectorRun[run] = allAir;
-                if (allAir)
+                int firstFace = FirstInnerFace(run, runFaceStride, aheadOffset);
+                var spans = new AirSpans(airRunLength, firstLower, firstLower + marchStride, innerRunLength);
+                while (spans.MoveNext())
                 {
-                    int firstFace = FirstInnerFace(run, runFaceStride, aheadOffset);
+                    int lower = firstLower + spans.Start;
+                    int face = firstFace + spans.Start;
                     SolveRun(
-                        scratch, read, axis, alongMarch, firstLower, read, firstLower + marchStride,
-                        innerRunLength, firstFace, faceArea);
+                        scratch, read, axis, alongMarch, lower, read, lower + marchStride, spans.Length, face,
+                        faceArea);
+
+                    Array.Fill(vectorFace, true, face, spans.Length);
                 }
             }
         }
@@ -261,13 +267,12 @@ internal static class EulerSweep
 
             int lowerRow = march > 0 ? baseIndex + (march - 1) * marchStride : -1;
             int upperRow = march < marchCount ? baseIndex + march * marchStride : -1;
-            bool innerRow = vectorFaces && march >= 1 && march < marchCount;
             for (int line = 0; line < lineCount; line++)
             {
-                if (innerRow && vectorRun[alongMarch ? line : march - 1])
+                int face = alongMarch ? line * runFaceStride + march : march * lineCount + line;
+                if (vectorFace[face])
                     continue;
 
-                int face = alongMarch ? line * runFaceStride + march : march * lineCount + line;
                 SolveFace(
                     workspace, read, axis,
                     lowerRow < 0 ? -1 : lowerRow + line * lineStride,
@@ -306,13 +311,14 @@ internal static class EulerSweep
 
         for (int run = 0; run < innerRunCount; run++)
         {
-            if (vectorFaces && vectorRun[run])
-                continue;
-
             int firstFace = FirstInnerFace(run, runFaceStride, aheadOffset);
             int firstLower = baseIndex + run * runVoxelStride;
             for (int i = 0; i < innerRunLength; i++)
             {
+                // The vector kernel set the mask of its faces and wrote no upwind cell for them.
+                if (vectorFace[firstFace + i])
+                    continue;
+
                 ref readonly EulerFaceUpwind upwind = ref faceUpwind[firstFace + i];
                 int lower = firstLower + i;
                 bool own = upwind.UpwindSide == EulerUpwindSide.Self;
@@ -385,66 +391,128 @@ internal static class EulerSweep
         }
 
         // Cells sum their gases in ascending list order whatever order the passes run in, so the cells of a run
-        // take all the gases before the next run starts.
+        // take all the gases before the next run starts. The spans do not overlap, so each cell's sums are still
+        // zero from the clear above when its span starts. The kernel relies on that.
         for (int run = 0; run < runCount; run++)
         {
             int firstVoxel = baseIndex + run * runVoxelStride;
             int firstCell = run * runLength;
             int firstBehind = run * runFaceStride;
             int firstAhead = firstBehind + aheadOffset;
-            if (rowAllAir[firstVoxel / width])
+            var spans = new AirSpans(airRunLength, firstVoxel, firstVoxel, runLength);
+            while (spans.MoveNext())
             {
+                // The kernel takes any span. Spans shorter than one vector go one cell at a time inside it.
+                int start = spans.Start;
                 EulerSpeciesKernel.UpdateRunGases(
-                    passes, gasCount, firstVoxel, firstCell, firstBehind, firstAhead, runLength,
-                    ref counters.NegativeMoles);
-
-                continue;
-            }
-
-            for (int i = 0; i < runLength; i++)
-            {
-                if (!airMap[firstVoxel + i])
-                    continue;
-
-                for (int present = 0; present < gasCount; present++)
-                {
-                    EulerSpeciesKernel.UpdateCell(
-                        in passes[present], firstVoxel + i, firstCell + i, firstBehind + i, firstAhead + i,
-                        ref counters.NegativeMoles);
-                }
+                    passes, gasCount, firstVoxel + start, firstCell + start, firstBehind + start,
+                    firstAhead + start, spans.Length, ref counters.NegativeMoles);
             }
         }
 
         EulerCellRun cellRun = CreateCellRun(workspace, axis, timeStep, config, scratch);
         MetrePerSecond maxSignalSpeed = 0f;
-        bool vectorCells = EulerCellKernel.Enabled && runLength >= EulerCellKernel.Width;
         for (int run = 0; run < runCount; run++)
         {
             int firstVoxel = baseIndex + run * runVoxelStride;
             int firstCell = run * runLength;
             int firstBehind = run * runFaceStride;
-            int done = 0;
-            if (vectorCells && rowAllAir[firstVoxel / width])
+            var spans = new AirSpans(airRunLength, firstVoxel, firstVoxel, runLength);
+            while (spans.MoveNext())
             {
-                done = EulerCellKernel.UpdateRun(
-                    in cellRun, firstVoxel, firstCell, firstBehind, firstBehind + aheadOffset, runLength,
-                    ref counters.ClampedVelocity, ref counters.NonFiniteCells, ref maxSignalSpeed);
-            }
-
-            for (int i = done; i < runLength; i++)
-            {
-                if (!airMap[firstVoxel + i])
+                // The kernel takes any span of at least one vector. Shorter spans go one cell at a time.
+                int start = spans.Start;
+                int end = spans.Start + spans.Length;
+                if (EulerCellKernel.Enabled && spans.Length >= EulerCellKernel.Width)
+                {
+                    EulerCellKernel.UpdateRun(
+                        in cellRun, firstVoxel + start, firstCell + start, firstBehind + start,
+                        firstBehind + aheadOffset + start, spans.Length, ref counters.ClampedVelocity,
+                        ref counters.NonFiniteCells, ref maxSignalSpeed);
                     continue;
+                }
 
-                MetrePerSecond signalSpeed = EulerCellKernel.UpdateCell(
-                    in cellRun, firstVoxel + i, firstCell + i, firstBehind + i, firstBehind + aheadOffset + i,
-                    ref counters);
+                for (int i = start; i < end; i++)
+                {
+                    MetrePerSecond signalSpeed = EulerCellKernel.UpdateCell(
+                        in cellRun, firstVoxel + i, firstCell + i, firstBehind + i, firstBehind + aheadOffset + i,
+                        ref counters);
 
-                maxSignalSpeed = MathF.Max(maxSignalSpeed, signalSpeed);
+                    maxSignalSpeed = MathF.Max(maxSignalSpeed, signalSpeed);
+                }
             }
         }
 
         return maxSignalSpeed;
+    }
+
+    /// <summary>
+    ///     Walks the stretches of air shared by two x-row segments of equal length, in ascending order.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         A stretch <c>[Start, Start + Length)</c> holds the positions where both segments hold air, and it ends
+    ///         where either segment's air span ends. Pass the same first voxel twice to walk the air spans of one
+    ///         segment, which is what the species and cell passes do. The face pass passes the lower and upper cell
+    ///         of the first face, so a stretch is a run of faces with air on both sides.
+    ///     </para>
+    ///     <para>
+    ///         Along an x-row the upper cell is the next voxel. Its span is one shorter than the lower cell's span,
+    ///         so a stretch stops one face before the last air cell, as it should.
+    ///     </para>
+    /// </remarks>
+    private struct AirSpans
+    {
+        private readonly int[] _airRunLength;
+        private readonly int _lowerFirst;
+        private readonly int _upperFirst;
+        private readonly int _count;
+        private int _next;
+
+        /// <param name="airRunLength">The workspace's <see cref="EulerChunkWorkspace.AirRunLength" />.</param>
+        /// <param name="lowerFirst">Voxel index of the first position of one segment.</param>
+        /// <param name="upperFirst">Voxel index of the first position of the other segment.</param>
+        /// <param name="count">Number of positions in each segment.</param>
+        public AirSpans(int[] airRunLength, int lowerFirst, int upperFirst, int count)
+        {
+            _airRunLength = airRunLength;
+            _lowerFirst = lowerFirst;
+            _upperFirst = upperFirst;
+            _count = count;
+        }
+
+        /// <summary>
+        ///     Position of the current stretch's first entry within the segments.
+        /// </summary>
+        public int Start { get; private set; }
+
+        /// <summary>
+        ///     Number of positions in the current stretch, at least one.
+        /// </summary>
+        public int Length { get; private set; }
+
+        /// <summary>
+        ///     Moves to the next stretch, or returns <see langword="false" /> past the last one.
+        /// </summary>
+        public bool MoveNext()
+        {
+            while (_next < _count)
+            {
+                int span = Math.Min(_airRunLength[_lowerFirst + _next], _airRunLength[_upperFirst + _next]);
+                if (span == 0)
+                {
+                    _next++;
+                    continue;
+                }
+
+                Start = _next;
+                Length = Math.Min(span, _count - _next);
+                _next += Length;
+                return true;
+            }
+
+            return false;
+        }
     }
 
     /// <summary>
@@ -564,9 +632,8 @@ internal static class EulerSweep
     ///         Riemann problem described on the class, with the lower global coordinate on the left regardless of
     ///         which chunk this is. Otherwise the face is a wall for this sweep, and the neighbour is requested for
     ///         activation when the pressures differ by more than <see cref="EulerFlowConfig.WakePressureDelta" /> or
-    ///         this cell moves normal to the face faster than <see cref="EulerFlowConfig.VelocityFloor" />. The
-    ///         stage zeroes slower momentum at tick end, so that motion cannot carry gas into the neighbour. The
-    ///         neighbour's pressure is its live <see cref="AtmosChunk.TotalPressure" />, which nothing writes while
+    ///         this cell moves normal to the face faster than <see cref="EulerFlowConfig.WakeSpeed" />. Slower
+    ///         motion reflects off the wall and carries no gas into the neighbour. The neighbour's pressure is its live <see cref="AtmosChunk.TotalPressure" />, which nothing writes while
     ///         the chunk has no workspace, and its momentum is zero by invariant.
     ///     </para>
     ///     <para>
@@ -607,7 +674,7 @@ internal static class EulerSweep
             AtmosChunk neighborChunk = workspace.NeighborChunks[direction]!;
             Pascal neighborPressure = neighborChunk.TotalPressure[neighborIndex];
             if (WakesNeighbor(
-                    cell.NormalVelocity, cell.Pressure - neighborPressure, settings.VelocityFloor,
+                    cell.NormalVelocity, cell.Pressure - neighborPressure, settings.WakeSpeed,
                     settings.WakePressureDelta))
                 workspace.WakeRequests[direction] = true;
 
@@ -630,21 +697,21 @@ internal static class EulerSweep
 
     /// <summary>
     ///     Whether an open face into a chunk without a workspace asks for that chunk's activation. It does when the
-    ///     cell moves normal to the face faster than <paramref name="velocityFloor" /> or the two sides differ in
+    ///     cell moves normal to the face faster than <paramref name="wakeSpeed" /> or the two sides differ in
     ///     pressure by more than <paramref name="wakeDelta" />.
     /// </summary>
     /// <param name="normalVelocity">The cell's velocity along the face normal.</param>
     /// <param name="pressureDelta">The cell's pressure minus the neighbour's pressure.</param>
-    /// <param name="velocityFloor">The stage's <see cref="EulerFlowConfig.VelocityFloor" />.</param>
+    /// <param name="wakeSpeed">The stage's <see cref="EulerFlowConfig.WakeSpeed" />.</param>
     /// <param name="wakeDelta">The stage's <see cref="EulerFlowConfig.WakePressureDelta" />.</param>
     /// <remarks>
     ///     The sweep and the activation pre-pass both call this. The pre-pass passes the live pressure difference.
     /// </remarks>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static bool WakesNeighbor(
-        MetrePerSecond normalVelocity, Pascal pressureDelta, MetrePerSecond velocityFloor, Pascal wakeDelta)
+        MetrePerSecond normalVelocity, Pascal pressureDelta, MetrePerSecond wakeSpeed, Pascal wakeDelta)
     {
-        return MathF.Abs(normalVelocity) > velocityFloor || MathF.Abs(pressureDelta) > wakeDelta;
+        return MathF.Abs(normalVelocity) > wakeSpeed || MathF.Abs(pressureDelta) > wakeDelta;
     }
 
     /// <summary>
@@ -683,7 +750,7 @@ internal static class EulerSweep
 
         neighborFirst = EulerFaceTopology.NeighborIndexAcrossFace(chunk, (ushort)selfFirst, direction);
         int width = chunk.Width;
-        if (!workspace.RowAllAir[selfFirst / width] || !neighbor.RowAllAir[neighborFirst / width])
+        if (workspace.AirRunLength[selfFirst] != width || neighbor.AirRunLength[neighborFirst] != width)
             return false;
 
         byte[] openMask = workspace.OpenMask;
@@ -972,6 +1039,14 @@ internal static class EulerSweep
             return flux;
         }
 
+        /// <summary>
+        ///     Per face, all bits set if the upwind cell is the upper one, else zero.
+        /// </summary>
+        /// <remarks>
+        ///     This array and <see cref="FaceSpeciesRate" /> are one vector longer than the face count. A species flux
+        ///     run shorter than a vector loads a whole vector of both (<see cref="EulerSpeciesKernel.FaceFluxRun" />),
+        ///     and the pad keeps the load inside the array.
+        /// </remarks>
         public int[] FaceUpperMask = [];
         public int[] FixupFaces = [];
 
@@ -996,11 +1071,12 @@ internal static class EulerSweep
         public Mole[] TotalMoles = [];
 
         /// <summary>
-        ///     Whether the face solve covered the interior faces of each inner run with the vector kernel.
+        ///     Whether the vector kernel solved each interior face, indexed like <see cref="FaceUpwind" />. A bundle
+        ///     clears its faces before the face solve.
         /// </summary>
-        public bool[] VectorRun = [];
+        public bool[] VectorFace = [];
 
-        public void EnsureCapacity(int faceCount, int cellCount, int runCount)
+        public void EnsureCapacity(int faceCount, int cellCount)
         {
             if (FaceUpwind.Length < faceCount)
             {
@@ -1009,13 +1085,11 @@ internal static class EulerSweep
                 FaceTangential1 = new Newton[faceCount];
                 FaceTangential2 = new Newton[faceCount];
                 FaceEnergy = new Watt[faceCount];
-                FaceSpeciesRate = new PerSecond[faceCount];
-                FaceUpperMask = new int[faceCount];
+                FaceSpeciesRate = new PerSecond[faceCount + Vector<float>.Count];
+                FaceUpperMask = new int[faceCount + Vector<float>.Count];
                 FixupFaces = new int[faceCount];
+                VectorFace = new bool[faceCount];
             }
-
-            if (VectorRun.Length < runCount)
-                VectorRun = new bool[runCount];
 
             if (Mass.Length < cellCount)
             {

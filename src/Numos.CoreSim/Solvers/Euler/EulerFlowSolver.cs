@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Numerics;
+using System.Runtime.InteropServices;
 using CommunityToolkit.HighPerformance.Helpers;
 using Numos.CoreSim.EulerFlow;
 using Numos.Maths;
@@ -11,13 +13,20 @@ namespace Numos.CoreSim.Solvers.Euler;
 /// </summary>
 /// <remarks>
 ///     <para>
-///         Per tick the stage gathers each active chunk (awake, with at least one gas channel, not skipped as static, plus
-///         whatever activation adds) into pooled conserved buffers, runs CFL substeps until the fixed time step is used up
-///         or the substep cap engages, and writes the buffers back. Tick-end work then runs in this order:
-///         momentum floor and damping (before the write-back, so the kinetic energy they remove becomes heat),
-///         <see cref="EulerSpeciesDiffusion" />, <see cref="VacuumCleanup" />, <see cref="SettleMomentum" />, and
-///         last the sleep metric and <see cref="ChunkSleepPolicy" />, which score the pressures diffusion and
-///         cleanup left behind. Explicit links are handled by their own stages, not this one.
+///         On every call the stage gathers each active chunk (awake, with at least one gas channel, not skipped as static, plus
+///         whatever activation adds) into pooled conserved buffers, runs CFL substeps until the call's time step is used up
+///         or the substep cap engages, and writes the buffers back. Trace cells are zeroed and momentum damping is
+///         applied before the write-back, so the kinetic energy they remove becomes heat.
+///     </para>
+///     <para>
+///         A settle pass runs once every <see cref="EulerFlowConfig.SettlePeriod" />, counted in ticks by
+///         <see cref="AtmosSolverExecutionContext.EulerSettleTicks" />. The pass runs after the write-back, in this
+///         order: the velocity floor (inside the write-back), <see cref="EulerSpeciesDiffusion" /> over the whole
+///         period, <see cref="VacuumCleanup" />, <see cref="SettleMomentum" />, and last the sleep metric and
+///         <see cref="ChunkSleepPolicy" />, which score the pressures diffusion and cleanup left behind. These steps
+///         wait for a settle pass because their effect is per period, not per tick: at a 1 ms call the floor would
+///         zero a gradient's momentum before it built up. At 20 Hz every call settles. Explicit links are handled
+///         by their own stages, not this one.
 ///     </para>
 ///     <para>
 ///         Faces between chunks are ordinary faces. Both chunks solve a shared face from the same two read-buffer
@@ -29,15 +38,15 @@ namespace Numos.CoreSim.Solvers.Euler;
 ///     <para>
 ///         Each substep sweeps the axes in one of the six orders of <see cref="SweepOrders" />. The list is walked
 ///         so every order is followed by its reverse and no axis is always in the middle. The position is
-///         <c>(2·TickCount + substep) mod 6</c>, which starts every tick on the first order of a pair regardless
-///         of the previous tick's substep count. It depends only on checkpointed state and the substep index, never
-///         on a counter carried across ticks, so a restored world sweeps in the original order.
+///         <see cref="AtmosSolverExecutionContext.EulerSweepPhase" />, a counter in [0, 6) that advances by one per
+///         substep across ticks, so a run of one-substep ticks still walks all six orders. The kernel checkpoints
+///         it, so a restored world continues the cycle.
 ///     </para>
 ///     <para>
 ///         The active set grows during the tick. An open face into a chunk with no workspace is a wall for the
 ///         sweep that meets it, and that sweep requests the chunk's activation when the two sides differ in
 ///         pressure by more than <see cref="EulerFlowConfig.WakePressureDelta" /> or the active side moves normal
-///         to the face faster than <see cref="EulerFlowConfig.VelocityFloor" />. Requests are applied on the tick
+///         to the face faster than <see cref="EulerFlowConfig.WakeSpeed" />. Requests are applied on the tick
 ///         thread after the barrier that ends the sweep: the chunk is woken if asleep, gathered from its live
 ///         fields (exact, nothing has written them this tick), and inserted into the active list in canonical
 ///         chunk order. A pre-pass right after the initial gather runs
@@ -48,7 +57,7 @@ namespace Numos.CoreSim.Solvers.Euler;
 ///     <para>
 ///         An awake chunk can also go without a workspace when a sweep could not change it. See
 ///         <see cref="EulerStaticChunk" /> for the test and <see cref="ActivateWithinReach" /> for the distance
-///         rule. Such a chunk stays awake, so its sleep timer still advances at the end of <see cref="Solve" />.
+///         rule. Such a chunk stays awake, so its sleep timer still advances at the end of a settle pass.
 ///         Its signal speed still counts toward the shared time step, so the substeps match an all-swept tick.
 ///         The skip changes no bit of any chunk, and a tick in which nothing is swept leaves
 ///         <see cref="LastDiagnostics" /> at its default.
@@ -69,6 +78,11 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
     internal static int? WorkerCountOverride;
 
     /// <summary>
+    ///     The <see cref="SettleMomentum" /> floor that stops every voxel with a finite speed.
+    /// </summary>
+    private const MetrePerSecond StopEveryVoxel = float.PositiveInfinity;
+
+    /// <summary>
     ///     Whether static chunks out of reach of every source skip the sweeps (see <see cref="EulerStaticChunk" />).
     ///     Tests clear it to compare against the all-swept result. The skip changes no bit, so it is not a
     ///     configuration field.
@@ -76,11 +90,23 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
     internal static bool SkipStaticChunks = true;
 
     /// <summary>
+    ///     Whether a workspace keeps its face masks and air map from an earlier binding when its geometry key
+    ///     still matches (see <see cref="EulerChunkWorkspace.HasGeometryForBinding" />). Tests clear it to compare
+    ///     against a rebuild on every call. The reuse changes no bit, so it is not a configuration field.
+    /// </summary>
+    internal static bool ReuseFaceGeometry = true;
+
+    /// <summary>
     ///     How many chunks the most recent tick skipped. A test hook, shared by every solver instance.
     /// </summary>
     internal static int LastSkippedCount;
 
-    private static readonly Int3[] ReachOffsets = CreateReachOffsets();
+    /// <summary>
+    ///     The sweep phase that follows <paramref name="phase" /> in the six-order cycle.
+    /// </summary>
+    internal static int NextSweepPhase(int phase) => phase == SweepOrderCount - 1 ? 0 : phase + 1;
+
+    private const int SweepOrderCount = 6;
 
     /// <summary>
     ///     The axis orders a substep can sweep in, as consecutive triples: <c>XYZ, ZYX, YZX, XZY, ZXY, YXZ</c>, each
@@ -92,21 +118,32 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
     private readonly List<AtmosChunk> _pendingActivation = [];
     private readonly List<EulerChunkWorkspace> _pendingGather = [];
     private readonly List<EulerChunkWorkspace> _pendingScan = [];
-    private readonly Stack<EulerChunkWorkspace> _pool = new();
+    private readonly List<EulerChunkWorkspace> _pool = [];
     private EulerChunkWorkspace[] _active = [];
     private int _activeCount;
     private readonly List<AtmosChunk> _frontier = [];
-    private readonly List<AtmosChunk> _nextFrontier = [];
     private readonly List<AtmosChunk> _reached = [];
     private readonly HashSet<AtmosChunk> _rangeSet = [];
     private readonly List<AtmosChunk> _seeds = [];
     private readonly HashSet<AtmosChunk> _seedSet = [];
-    private readonly HashSet<AtmosChunk> _visited = [];
     private MetrePerSecond _skippedSignalSpeed;
+    private int _visitGeneration;
+    private int[] _visitMarks = [];
     private MetrePerSecond[] _staticSpeed = [];
     private bool[] _static = [];
     private EulerChunkWorkspace?[] _workspaceByDenseId = [];
+
+    /// <summary>
+    ///     The workspace each chunk was last bound to, by dense id, kept across ticks. A hint for
+    ///     <see cref="TakeFromPool" /> only, so a stale entry costs a rebuild and nothing else.
+    /// </summary>
+    private EulerChunkWorkspace?[] _lastBoundByDenseId = [];
     private PencilWorkItem[] _workItems = [];
+
+    // The voxel tiles of the current gather or write-back phase and one result slot per tile.
+    private VoxelTile[] _voxelTiles = [];
+    private MetrePerSecond[] _tileSignalSpeed = [];
+    private int[] _tileCount = [];
 
     internal EulerFlowSolver(int chunkWidth, int chunkHeight, int chunkDepth)
     {
@@ -123,6 +160,12 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
     public void Solve(AtmosSolverExecutionContext context)
     {
         AtmosSolverConfigSnapshot config = context.TickConfig;
+        EulerFlowConfig settings = config.EulerFlow;
+        int substepCap = SubstepCap(settings.MaxSubstepsPerSecond, context.Interval, context.TickRate);
+        int elapsedTicks = (int)Math.Min((long)context.EulerSettleTicks + context.Interval, int.MaxValue);
+        bool settle = elapsedTicks >= SettleThresholdTicks(settings.SettlePeriod, context.TickRate);
+        var pass = new SettlePass(
+            settle, elapsedTicks, BuiltInStageSchedule.GapTime(elapsedTicks, context.TickRate));
         try
         {
             _skippedSignalSpeed = 0f;
@@ -155,7 +198,7 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
             ActivateNeighboursAtRest(context);
             if (staticCount > 0 && _activeCount > 0)
             {
-                ActivateWithinReach(context);
+                ActivateWithinReach(context, substepCap);
                 for (int chunkIndex = 0; chunkIndex < context.Chunks.Length; chunkIndex++)
                 {
                     AtmosChunk chunk = context.Chunks[chunkIndex];
@@ -175,22 +218,29 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
             {
                 LastDiagnostics = default;
                 // Cleanup normally follows the sweeps, so skipped chunks still owe it when nothing is swept.
-                if (staticCount > 0)
+                if (settle && staticCount > 0)
                     VacuumCleanup.Apply(context);
             }
             else
             {
-                LastDiagnostics = Advance(context, config.EulerFlow);
+                LastDiagnostics = Advance(context, settings, substepCap, pass);
             }
 
             // An awake chunk that never got a workspace has nothing to move, but its sleep timer still has to
-            // advance. Chunks the stage put to sleep are no longer awake here.
-            for (int chunkIndex = 0; chunkIndex < context.Chunks.Length; chunkIndex++)
+            // advance. Chunks the stage put to sleep are no longer awake here. Like every sleep decision, the
+            // update waits for a settle pass and covers the whole period.
+            if (settle)
             {
-                AtmosChunk chunk = context.Chunks[chunkIndex];
-                if (chunk.IsAwake && LookupWorkspace(chunk) == null)
-                    ChunkSleepPolicy.UpdateSleepState(chunk, config, 0f);
+                for (int chunkIndex = 0; chunkIndex < context.Chunks.Length; chunkIndex++)
+                {
+                    AtmosChunk chunk = context.Chunks[chunkIndex];
+                    if (chunk.IsAwake && LookupWorkspace(chunk) == null)
+                        ChunkSleepPolicy.UpdateSleepState(
+                            chunk, config, 0f, elapsedTicks, context.SleepDelayTicks);
+                }
             }
+
+            context.EulerSettleTicks = settle ? 0 : elapsedTicks;
         }
         finally
         {
@@ -198,7 +248,8 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
             {
                 EulerChunkWorkspace workspace = _active[index];
                 _workspaceByDenseId[workspace.Chunk.DenseId] = null;
-                _pool.Push(workspace);
+                workspace.PoolSlot = _pool.Count;
+                _pool.Add(workspace);
                 _active[index] = null!;
             }
 
@@ -211,23 +262,65 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
     }
 
     /// <summary>
-    ///     Forgets the chunk-to-workspace lookup. Called when a checkpoint replaces the kernel's chunks.
+    ///     Forgets the chunk-to-workspace lookups and every workspace's geometry key. Called when a checkpoint
+    ///     replaces the kernel's chunks.
     ///     The pool stays: chunk dimensions are fixed per solver and <see cref="EulerChunkWorkspace.Bind" /> resets
     ///     every workspace, so pooled instances hold no simulation state.
     /// </summary>
     internal void ClearTransientState()
     {
         Array.Clear(_workspaceByDenseId);
+        Array.Clear(_lastBoundByDenseId);
+        foreach (EulerChunkWorkspace workspace in _pool)
+            workspace.InvalidateGeometry();
+
+        for (int index = 0; index < _activeCount; index++)
+            _active[index].InvalidateGeometry();
     }
+
+    /// <summary>
+    ///     The substep cap of one call: <c>ceil(maxSubstepsPerSecond · interval / tickRate)</c> in integer arithmetic.
+    /// </summary>
+    /// <param name="maxSubstepsPerSecond">The configured cap per second of gas time. Zero or less means no cap.</param>
+    /// <param name="interval">The ticks the call spans.</param>
+    /// <param name="tickRate">Ticks per second.</param>
+    /// <returns>The cap, at least 1, or 0 for no cap.</returns>
+    internal static int SubstepCap(int maxSubstepsPerSecond, int interval, int tickRate)
+    {
+        if (maxSubstepsPerSecond <= 0)
+            return 0;
+
+        long cap = ((long)maxSubstepsPerSecond * interval + tickRate - 1) / tickRate;
+        return (int)Math.Clamp(cap, 1L, int.MaxValue);
+    }
+
+    /// <summary>
+    ///     The ticks between settle passes: <c>max(1, round(settlePeriod · tickRate))</c>, saturating at
+    ///     <see cref="int.MaxValue" />.
+    /// </summary>
+    /// <param name="settlePeriod">The configured period in seconds, already normalized.</param>
+    /// <param name="tickRate">Ticks per second.</param>
+    internal static int SettleThresholdTicks(Second settlePeriod, int tickRate)
+    {
+        return Math.Max(1, BuiltInStageSchedule.SecondsToTicks(settlePeriod, tickRate));
+    }
+
+    /// <summary>
+    ///     Whether a call runs the settle pass, and the span the pass covers.
+    /// </summary>
+    /// <param name="Active">Whether the settle pass runs on this call.</param>
+    /// <param name="ElapsedTicks">The ticks since the last pass, including this call.</param>
+    /// <param name="Time">The gas time of those ticks, from <see cref="BuiltInStageSchedule.GapTime" />.</param>
+    private readonly record struct SettlePass(bool Active, int ElapsedTicks, Second Time);
 
     /// <summary>
     ///     Gives a chunk a workspace for the rest of the tick: wakes it if asleep, links it to its active
     ///     neighbours, and queues it for <see cref="GatherPending" />. Tick thread only.
     /// </summary>
     /// <remarks>
-    ///     The workspace is not prepared yet. Its buffers, face masks, and air map hold nothing until the caller
+    ///     The workspace is not prepared yet. Its buffers, face masks, and air map are not valid until the caller
     ///     runs <see cref="GatherPending" />, which every batch of activations must do before anything reads them.
-    ///     Only the pool pop, the neighbour links, and the active-list insertion happen here, because they depend
+    ///     Only the pool take, the neighbour links, and the active-list insertion happen here, because they depend
     ///     on activation order.
     ///     The workspace lists only the chunk's own gases here. Rows for gases a neighbour can push across a face
     ///     are added by <see cref="ShareAxisGases" /> before each sweep, so a chunk activated mid-tick is covered
@@ -238,7 +331,7 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
         if (!chunk.IsAwake)
             chunk.Wake();
 
-        EulerChunkWorkspace workspace = _pool.Count > 0 ? _pool.Pop() : new EulerChunkWorkspace();
+        EulerChunkWorkspace workspace = TakeFromPool(chunk);
         workspace.Attach(chunk);
         for (int direction = 0; direction < NeighborResolution.NeighborDirections.Length; direction++)
         {
@@ -268,24 +361,207 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
         _activeCount++;
 
         if (chunk.DenseId >= _workspaceByDenseId.Length)
-            Array.Resize(ref _workspaceByDenseId, Math.Max(chunk.DenseId + 1, Math.Max(4, _workspaceByDenseId.Length * 2)));
+        {
+            int length = Math.Max(chunk.DenseId + 1, Math.Max(4, _workspaceByDenseId.Length * 2));
+            Array.Resize(ref _workspaceByDenseId, length);
+            Array.Resize(ref _lastBoundByDenseId, length);
+        }
 
         _workspaceByDenseId[chunk.DenseId] = workspace;
+        _lastBoundByDenseId[chunk.DenseId] = workspace;
         _pendingScan.Add(workspace);
+    }
+
+    /// <summary>
+    ///     Takes a workspace out of the pool for <paramref name="chunk" />, or creates one. Tick thread only.
+    /// </summary>
+    /// <remarks>
+    ///     The workspace the chunk had last is preferred while it is still pooled, because its face masks then
+    ///     usually match and <see cref="PrepareForGather" /> skips the rebuild. The choice changes no bit.
+    ///     <see cref="EulerChunkWorkspace.HasGeometryForBinding" /> alone decides whether masks are reused, and
+    ///     <see cref="EulerChunkWorkspace.Prepare" /> resets everything else.
+    /// </remarks>
+    private EulerChunkWorkspace TakeFromPool(AtmosChunk chunk)
+    {
+        EulerChunkWorkspace? workspace = null;
+        if (chunk.DenseId < _lastBoundByDenseId.Length)
+        {
+            EulerChunkWorkspace? last = _lastBoundByDenseId[chunk.DenseId];
+            // Dense ids are recycled and a workspace moves on to other chunks, so check it still names this one.
+            if (last is { PoolSlot: >= 0 } && ReferenceEquals(last.Chunk, chunk))
+                workspace = last;
+        }
+
+        if (workspace == null)
+        {
+            if (_pool.Count == 0)
+                return new EulerChunkWorkspace();
+
+            workspace = _pool[^1];
+        }
+
+        // Swap-remove: the last pooled workspace moves into the freed slot.
+        int slot = workspace.PoolSlot;
+        EulerChunkWorkspace moved = _pool[^1];
+        _pool[slot] = moved;
+        moved.PoolSlot = slot;
+        _pool.RemoveAt(_pool.Count - 1);
+        workspace.PoolSlot = -1;
+        return workspace;
     }
 
     /// <summary>
     ///     Prepares and gathers every workspace activated since the last call. Tick thread only.
     /// </summary>
     /// <remarks>
-    ///     Each item reads its chunk, the neighbour chunks' room maps, and its own neighbour slots, which are
-    ///     final once <see cref="Activate" /> returns. It writes only its own workspace. The batch result therefore
-    ///     does not depend on which worker runs which item.
+    ///     <para>
+    ///         Each workspace is prepared and gets its face geometry once, then its voxels are gathered in the
+    ///         tiles of <see cref="BuildVoxelTiles" />. With at least as many workspaces as workers, one item per
+    ///         workspace does both. Otherwise one phase prepares the workspaces and a second gathers the tiles.
+    ///     </para>
+    ///     <para>
+    ///         Each item reads its chunk, the neighbour chunks' room maps, and its own neighbour slots, which are
+    ///         final once <see cref="Activate" /> returns. It writes only its own workspace, and a tile writes only
+    ///         its own voxels and result slot. The tick thread folds the tile results in tile order, with a max and
+    ///         an integer sum. The batch result therefore does not depend on which worker runs which item.
+    ///     </para>
     /// </remarks>
     private void GatherPending(AtmosSolverConfigSnapshot config)
     {
-        ParallelPhase.Run(_pendingGather.Count, new GatherAction(_pendingGather, config));
+        int count = _pendingGather.Count;
+        if (count == 0)
+            return;
+
+        bool whole = count >= WorkerCount;
+        if (!whole)
+            ParallelPhase.Run(count, new PrepareGatherAction(_pendingGather, config));
+
+        ReadOnlySpan<EulerChunkWorkspace> batch = CollectionsMarshal.AsSpan(_pendingGather);
+        int tileCount = BuildVoxelTiles(batch, whole);
+        ParallelPhase.Run(
+            tileCount, new GatherTileAction(_pendingGather, _voxelTiles, _tileSignalSpeed, _tileCount, config, whole));
+
+        // Prepare zeroed both results, so a chunk with no tile keeps the values of an empty gather.
+        for (int tile = 0; tile < tileCount; tile++)
+        {
+            EulerChunkWorkspace workspace = batch[_voxelTiles[tile].WorkspaceIndex];
+            workspace.Read.MaxSignalSpeed = MathF.Max(workspace.Read.MaxSignalSpeed, _tileSignalSpeed[tile]);
+            workspace.NonFiniteCellsGathered += _tileCount[tile];
+        }
+
         _pendingGather.Clear();
+    }
+
+    /// <summary>
+    ///     Prepares a workspace for its gather tiles: sizes and clears its buffers, builds its face geometry unless
+    ///     the cached geometry still matches, and looks up its gather rows.
+    /// </summary>
+    private static void PrepareForGather(EulerChunkWorkspace workspace, AtmosSolverConfigSnapshot config)
+    {
+        workspace.Prepare(config);
+        if (!ReuseFaceGeometry || !workspace.HasGeometryForBinding())
+        {
+            EulerFaceTopology.Build(workspace.Chunk, workspace.NeighborChunks, workspace.OpenMask, workspace.VoidMask);
+            EulerFaceTopology.BuildAirMap(workspace.Chunk, workspace.AirMap, workspace.AirRunLength);
+            workspace.RecordGeometry();
+        }
+
+        workspace.BeginGather();
+    }
+
+    /// <summary>
+    ///     Splits the active-air lists of <paramref name="workspaces" /> into the tiles of one parallel phase, in
+    ///     workspace order and ascending list position.
+    /// </summary>
+    /// <param name="workspaces">The workspaces to tile.</param>
+    /// <param name="whole">Whether every workspace is one tile, the schedule for at least as many workspaces as workers.</param>
+    /// <returns>The number of tiles written to <see cref="_voxelTiles" />.</returns>
+    /// <remarks>
+    ///     Otherwise the z-slabs of each chunk are cut into ranges of <c>ceil(slabs × workspaces / workers)</c>, as
+    ///     <see cref="RunSweep" /> cuts pencils, and each range becomes the list positions of its voxels. That needs
+    ///     a strictly ascending list (<see cref="EulerChunkWorkspace.ActiveAirAscending" />), so any other chunk
+    ///     stays one tile. A slab range with no air voxel gets no tile.
+    /// </remarks>
+    private int BuildVoxelTiles(ReadOnlySpan<EulerChunkWorkspace> workspaces, bool whole)
+    {
+        int slabCount = _dimensions.Z;
+        int tileSlabs = whole
+            ? slabCount
+            : Math.Max(1, ParallelPhase.DivideRoundUp(checked(slabCount * workspaces.Length), WorkerCount));
+        int maxTiles = checked(workspaces.Length * ParallelPhase.DivideRoundUp(slabCount, tileSlabs));
+        if (_voxelTiles.Length < maxTiles)
+        {
+            int length = Math.Max(maxTiles, _voxelTiles.Length * 2);
+            _voxelTiles = new VoxelTile[length];
+            _tileSignalSpeed = new MetrePerSecond[length];
+            _tileCount = new int[length];
+        }
+
+        int tile = 0;
+        for (int index = 0; index < workspaces.Length; index++)
+        {
+            EulerChunkWorkspace workspace = workspaces[index];
+            AtmosChunk chunk = workspace.Chunk;
+            int count = chunk.ActiveAirCount;
+            if (tileSlabs >= slabCount || !workspace.ActiveAirAscending)
+            {
+                _voxelTiles[tile++] = new VoxelTile(index, 0, count);
+                continue;
+            }
+
+            ReadOnlySpan<ushort> indices = chunk.ActiveAirIndices.AsSpan(0, count);
+            int slabVoxels = chunk.Width * chunk.Height;
+            int first = 0;
+            for (int endSlab = tileSlabs; first < count; endSlab += tileSlabs)
+            {
+                int end = endSlab >= slabCount ? count : LowerBound(indices, endSlab * slabVoxels);
+                if (end > first)
+                    _voxelTiles[tile++] = new VoxelTile(index, first, end);
+
+                first = end;
+            }
+        }
+
+        return tile;
+    }
+
+    /// <summary>
+    ///     The first position in an ascending list whose voxel index is at least <paramref name="voxel" />.
+    /// </summary>
+    private static int LowerBound(ReadOnlySpan<ushort> indices, int voxel)
+    {
+        // BinarySearch returns the complement of the insertion point when the value is absent.
+        int found = indices.BinarySearch((ushort)voxel);
+        return found >= 0 ? found : ~found;
+    }
+
+    /// <summary>
+    ///     Whether every entry is greater than the one before it, so slab ranges map to list ranges and no voxel
+    ///     appears twice.
+    /// </summary>
+    private static bool IsStrictlyAscending(ReadOnlySpan<ushort> indices)
+    {
+        int index = 0;
+        if (Vector.IsHardwareAccelerated)
+        {
+            // Compares a vector of entries with the vector one position later.
+            int width = Vector<ushort>.Count;
+            for (; index + width < indices.Length; index += width)
+            {
+                var current = new Vector<ushort>(indices.Slice(index));
+                var next = new Vector<ushort>(indices.Slice(index + 1));
+                if (Vector.GreaterThanOrEqualAny(current, next))
+                    return false;
+            }
+        }
+
+        for (; index + 1 < indices.Length; index++)
+        {
+            if (indices[index] >= indices[index + 1])
+                return false;
+        }
+
+        return true;
     }
 
     /// <summary>
@@ -318,44 +594,64 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
     {
         EulerFlowConfig settings = context.TickConfig.EulerFlow;
         Pascal wakeDelta = settings.WakePressureDelta;
-        MetrePerSecond velocityFloor = settings.VelocityFloor;
+        MetrePerSecond wakeSpeed = settings.WakeSpeed;
         while (_pendingScan.Count > 0)
         {
-            ParallelPhase.Run(_pendingScan.Count, new ScanAction(_pendingScan, wakeDelta, velocityFloor));
+            ParallelPhase.Run(_pendingScan.Count, new ScanAction(_pendingScan, wakeDelta, wakeSpeed));
 
             _pendingScan.Clear();
             ApplyWakeRequests(context);
         }
     }
 
+    /// <summary>
+    ///     Sets <see cref="EulerChunkWorkspace.WakeRequests" /> for each face that opens onto a chunk without a
+    ///     workspace and would wake it.
+    /// </summary>
+    /// <remarks>
+    ///     Only faces that can still wake something are walked: a registered neighbour, no workspace for it, and
+    ///     no request yet. A walk stops at the first voxel that wakes. Open bits are set on air voxels only, so the
+    ///     open-bit test stands in for the active-air walk.
+    /// </remarks>
     private static void ScanBoundaryFaces(
-        EulerChunkWorkspace workspace, Pascal wakeDelta, MetrePerSecond velocityFloor)
+        EulerChunkWorkspace workspace, Pascal wakeDelta, MetrePerSecond wakeSpeed)
     {
-        AtmosChunk chunk = workspace.Chunk;
-        EulerChunkState read = workspace.Read;
-        Int3 last = chunk.Dimensions - new Int3(1, 1, 1);
-        for (int activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
+        for (int direction = 0; direction < NeighborResolution.NeighborDirections.Length; direction++)
         {
-            ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
-            byte open = workspace.OpenMask[voxelIndex];
-            if (open == 0)
+            if (workspace.NeighborChunks[direction] == null || workspace.NeighborWorkspaces[direction] != null ||
+                workspace.WakeRequests[direction])
                 continue;
 
-            Int3 position = chunk.GetXyzInt3(voxelIndex);
-            for (int direction = 0; direction < NeighborResolution.NeighborDirections.Length; direction++)
+            if (FaceWakesNeighbour(workspace, direction, wakeDelta, wakeSpeed))
+                workspace.WakeRequests[direction] = true;
+        }
+    }
+
+    private static bool FaceWakesNeighbour(
+        EulerChunkWorkspace workspace, int direction, Pascal wakeDelta, MetrePerSecond wakeSpeed)
+    {
+        AtmosChunk chunk = workspace.Chunk;
+        AtmosChunk neighbor = workspace.NeighborChunks[direction]!;
+        EulerChunkState read = workspace.Read;
+        int axis = direction >> 1;
+        FacePlane plane = EulerFaceTopology.GetFacePlane(chunk, direction);
+        for (int outer = 0; outer < plane.OuterCount; outer++)
+        {
+            for (int inner = 0; inner < plane.InnerCount; inner++)
             {
-                if (!EulerFaceTopology.IsOnEdge(position, last, direction) || workspace.WakeRequests[direction] ||
-                    workspace.NeighborWorkspaces[direction] != null || !EulerFaceTopology.IsOpen(open, direction))
+                ushort voxelIndex = plane.VoxelIndex(inner, outer);
+                if (!EulerFaceTopology.IsOpen(workspace.OpenMask[voxelIndex], direction))
                     continue;
 
-                AtmosChunk neighbor = workspace.NeighborChunks[direction]!;
                 ushort neighborIndex = EulerFaceTopology.NeighborIndexAcrossFace(chunk, voxelIndex, direction);
-                MetrePerSecond normalVelocity = read.CellVelocity(direction >> 1)[voxelIndex];
+                MetrePerSecond normalVelocity = read.CellVelocity(axis)[voxelIndex];
                 Pascal pressureDelta = chunk.TotalPressure[voxelIndex] - neighbor.TotalPressure[neighborIndex];
-                if (EulerSweep.WakesNeighbor(normalVelocity, pressureDelta, velocityFloor, wakeDelta))
-                    workspace.WakeRequests[direction] = true;
+                if (EulerSweep.WakesNeighbor(normalVelocity, pressureDelta, wakeSpeed, wakeDelta))
+                    return true;
             }
         }
+
+        return false;
     }
 
     /// <summary>
@@ -364,25 +660,39 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
     /// </summary>
     /// <remarks>
     ///     <para>
-    ///         A source is a chunk active after the pre-pass. A first-order split sweep moves information one cell
-    ///         per axis sweep, so one substep spreads it by one cell along each axis. A tick runs at most
-    ///         <see cref="EulerFlowConfig.MaxSubstepsPerTick" /> substeps, and the tick-end species diffusion adds
-    ///         one cell. Chunks at chunk distance <c>D</c> or less are activated, with
-    ///         <c>D = ceil((MaxSubstepsPerTick + 2) / minExtent)</c>. A chunk beyond <c>D</c> has more than
-    ///         <c>MaxSubstepsPerTick + 1</c> cells between it and any source.
+    ///         A source is a chunk active after the pre-pass. A first-order split sweep moves information at most
+    ///         one cell per substep along each axis. A call runs at most <see cref="SubstepCap" /> substeps, and the
+    ///         species diffusion of a settle pass adds one cell. Along an axis of <c>n</c> voxels a signal therefore
+    ///         stays within <c>R = ceil((cap + 2) / n)</c> chunks of its source. Each axis has its own
+    ///         <c>R</c>, so an axis one voxel long does not widen the other two. A chunk more than <c>R</c> chunks
+    ///         away along some axis has more than <c>cap + 1</c> cells between it and any cell of the source.
     ///     </para>
     ///     <para>
-    ///         Distance is measured by a breadth-first search over the 26 neighbouring chunk positions through
-    ///         every registered chunk. Without a substep cap the bound is unknown, so every static chunk is
-    ///         activated. An activated static chunk is not a source, because it changes nothing until a source
-    ///         reaches it. The search repeats only when the pre-pass wakes a chunk that was not static.
+    ///         The search walks the six face directions from each source through every registered chunk, in any
+    ///         state, and never leaves that source's box of <c>R</c> chunks per axis. It crosses a chunk face only
+    ///         when <see cref="EulerFaceTopology.HasOpenFace" /> holds, because a signal crosses from chunk to chunk
+    ///         only through an open air-to-air face. Every cell on the signal's path lies inside the box, so the
+    ///         search finds every chunk the signal can reach. A diagonal step inside one substep passes through a
+    ///         cell of a face-adjacent chunk. Without a substep cap the box has no limit. An activated static chunk
+    ///         is not a source, because it changes nothing until a source reaches it. The search repeats only when
+    ///         the pre-pass wakes a chunk that was not static.
+    ///     </para>
+    ///     <para>
+    ///         A skipped chunk can sit next to an active one behind a sealed face. That face is a wall for the sweep
+    ///         whether the neighbour is swept or not. The sweep, the pre-pass, the diffusion boundary pass, and the
+    ///         sleep score read a neighbour only across an open face. <see cref="VacuumCleanup" /> reads every air
+    ///         neighbour, but a skipped chunk keeps the pressures a sweep would give it.
     ///     </para>
     /// </remarks>
-    private void ActivateWithinReach(AtmosSolverExecutionContext context)
+    private void ActivateWithinReach(AtmosSolverExecutionContext context, int bound)
     {
-        int bound = context.TickConfig.EulerFlow.MaxSubstepsPerTick;
-        int minExtent = Math.Min(_dimensions.X, Math.Min(_dimensions.Y, _dimensions.Z));
-        int depth = bound == 0 ? 0 : ParallelPhase.DivideRoundUp(bound + 2, minExtent);
+        bool unbounded = bound == 0;
+        Int3 reach = unbounded
+            ? default
+            : new Int3(
+                ParallelPhase.DivideRoundUp(bound + 2, _dimensions.X),
+                ParallelPhase.DivideRoundUp(bound + 2, _dimensions.Y),
+                ParallelPhase.DivideRoundUp(bound + 2, _dimensions.Z));
         _seeds.Clear();
         _seedSet.Clear();
         _rangeSet.Clear();
@@ -396,27 +706,12 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
         while (true)
         {
             _reached.Clear();
-            if (bound == 0)
-            {
-                for (int index = 0; index < context.Chunks.Length; index++)
-                {
-                    if (IsSkipped(context.Chunks[index]))
-                        _reached.Add(context.Chunks[index]);
-                }
-            }
-            else
-            {
-                FindChunksWithin(context, depth);
-            }
-
+            FindChunksWithin(context, reach, unbounded);
             if (_reached.Count == 0)
                 break;
 
             foreach (AtmosChunk chunk in _reached)
-            {
-                _rangeSet.Add(chunk);
                 Activate(chunk, context);
-            }
 
             GatherPending(context.TickConfig);
             ActivateNeighboursAtRest(context);
@@ -444,52 +739,96 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
     }
 
     /// <summary>
-    ///     Collects into <see cref="_reached" /> every skipped chunk within <paramref name="depth" /> steps of a seed.
+    ///     Adds to <see cref="_reached" /> and <see cref="_rangeSet" /> every skipped chunk the search from some seed
+    ///     enters through an open chunk face, once.
     /// </summary>
-    private void FindChunksWithin(AtmosSolverExecutionContext context, int depth)
+    /// <param name="context">The tick context, used to find neighbour chunks.</param>
+    /// <param name="reach">The largest chunk offset from a seed along each axis. Ignored when unbounded.</param>
+    /// <param name="unbounded">Whether the search has no box, which is the case without a substep cap.</param>
+    /// <remarks>
+    ///     Each seed has its own box, so a chunk one seed passed through can still be entered from another seed's
+    ///     box, and each seed starts with a fresh visited mark. Without a box every seed reaches the same chunks, so
+    ///     the marks are kept across seeds. A chunk is marked only when the search enters it, so a sealed face
+    ///     leaves it open to another path. The walk order does not matter, because a chunk is entered exactly when
+    ///     some path of open faces inside the box leads to it.
+    /// </remarks>
+    private void FindChunksWithin(AtmosSolverExecutionContext context, Int3 reach, bool unbounded)
     {
-        _visited.Clear();
-        _frontier.Clear();
+        if (unbounded)
+            BeginVisit();
+
         foreach (AtmosChunk seed in _seeds)
         {
-            _visited.Add(seed);
-            _frontier.Add(seed);
-        }
+            if (!unbounded)
+                BeginVisit();
 
-        for (int level = 0; level < depth && _frontier.Count > 0; level++)
-        {
-            _nextFrontier.Clear();
-            foreach (AtmosChunk chunk in _frontier)
+            if (IsVisited(seed))
+                continue;
+
+            MarkVisited(seed);
+
+            _frontier.Clear();
+            _frontier.Add(seed);
+            while (_frontier.Count > 0)
             {
-                foreach (Int3 offset in ReachOffsets)
+                AtmosChunk chunk = _frontier[^1];
+                _frontier.RemoveAt(_frontier.Count - 1);
+                for (int direction = 0; direction < NeighborResolution.NeighborDirections.Length; direction++)
                 {
-                    if (!context.TryGetChunk(chunk.GridPosition + offset, out AtmosChunk neighbor) ||
-                        !_visited.Add(neighbor))
+                    Int3 position = chunk.GridPosition + NeighborResolution.NeighborDirections[direction];
+                    if (!unbounded && !IsWithinBox(position - seed.GridPosition, reach))
                         continue;
 
-                    _nextFrontier.Add(neighbor);
-                    if (IsSkipped(neighbor))
+                    if (!context.TryGetChunk(position, out AtmosChunk neighbor) || IsVisited(neighbor) ||
+                        !EulerFaceTopology.HasOpenFace(chunk, direction, neighbor))
+                        continue;
+
+                    MarkVisited(neighbor);
+                    _frontier.Add(neighbor);
+                    if (IsSkipped(neighbor) && _rangeSet.Add(neighbor))
                         _reached.Add(neighbor);
                 }
             }
-
-            _frontier.Clear();
-            _frontier.AddRange(_nextFrontier);
         }
     }
 
-    private static Int3[] CreateReachOffsets()
+    private static bool IsWithinBox(Int3 offset, Int3 reach)
     {
-        var offsets = new List<Int3>();
-        for (int z = -1; z <= 1; z++)
-        for (int y = -1; y <= 1; y++)
-        for (int x = -1; x <= 1; x++)
+        return Math.Abs(offset.X) <= reach.X && Math.Abs(offset.Y) <= reach.Y && Math.Abs(offset.Z) <= reach.Z;
+    }
+
+    /// <summary>
+    ///     Starts a new visited set for <see cref="IsVisited" /> without clearing the marks.
+    /// </summary>
+    private void BeginVisit()
+    {
+        if (_visitGeneration == int.MaxValue)
         {
-            if (x != 0 || y != 0 || z != 0)
-                offsets.Add(new Int3(x, y, z));
+            Array.Clear(_visitMarks);
+            _visitGeneration = 0;
         }
 
-        return offsets.ToArray();
+        _visitGeneration++;
+    }
+
+    /// <summary>
+    ///     Whether a registered chunk is in the current visited set.
+    /// </summary>
+    /// <remarks>
+    ///     Marks are keyed on <see cref="AtmosChunk.DenseId" />, which is unique among registered chunks. A recycled
+    ///     id can only carry a mark from an older set, so it reads as unvisited.
+    /// </remarks>
+    private bool IsVisited(AtmosChunk chunk)
+    {
+        return chunk.DenseId < _visitMarks.Length && _visitMarks[chunk.DenseId] == _visitGeneration;
+    }
+
+    private void MarkVisited(AtmosChunk chunk)
+    {
+        if (chunk.DenseId >= _visitMarks.Length)
+            Array.Resize(ref _visitMarks, Math.Max(chunk.DenseId + 1, Math.Max(4, _visitMarks.Length * 2)));
+
+        _visitMarks[chunk.DenseId] = _visitGeneration;
     }
 
     /// <summary>
@@ -523,15 +862,15 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
         GatherPending(context.TickConfig);
     }
 
-    private AtmosFlowDiagnostics Advance(AtmosSolverExecutionContext context, EulerFlowConfig settings)
+    private AtmosFlowDiagnostics Advance(
+        AtmosSolverExecutionContext context, EulerFlowConfig settings, int cap, SettlePass pass)
     {
         AtmosSolverConfigSnapshot config = context.TickConfig;
         Metre voxelEdge = MathF.Cbrt(config.VoxelVolume);
         SquareMetre faceArea = voxelEdge * voxelEdge;
         Scalar courant = settings.CourantNumber;
-        int cap = settings.MaxSubstepsPerTick;
 
-        Second64 remaining = AtmosSolverConstants.FixedTimeStep;
+        Second64 remaining = context.DeltaTime;
         Second64 simulated = 0d;
         int substeps = 0;
         bool capEngaged = false;
@@ -558,7 +897,8 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
             }
 
             Second timeStep = (float)step;
-            int order = (int)((2L * context.TickCount + substeps) % 6);
+            int order = context.EulerSweepPhase;
+            context.EulerSweepPhase = NextSweepPhase(order);
             for (int position = 0; position < 3; position++)
             {
                 int axis = SweepOrders[order * 3 + position];
@@ -585,8 +925,7 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
             substeps++;
         }
 
-        // Each chunk writes only its own fields and its own counter here. The tick thread sums the counters.
-        ParallelPhase.Run(_activeCount, new WriteBackAction(_active, config, settings));
+        WriteBackActive(config, settings, context.DeltaTime, pass.Active);
         int negativeInternalEnergy = 0;
         int clampedVelocity = 0;
         int negativeMoles = 0;
@@ -601,25 +940,40 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
             negativeInternalEnergy += _active[index].NegativeInternalEnergyWritten;
         }
 
-        // Diffusion reads the written-back fields of neighbouring chunks, so it waits for every write-back.
-        // Cleanup compares neighbour pressures the same way and waits for diffusion.
-        EulerSpeciesDiffusion.Run(_active, _activeCount, WorkerCount, config);
-        VacuumCleanup.Apply(context);
-
-        ParallelPhase.Run(_activeCount, new SettleMomentumAction(_active, config, settings));
-
-        // Sleep decisions read neighbours' final pressures, so they wait for everything above. Scoring only reads
-        // fields, so it runs in parallel. The policy call can run an overridden Sleep, so it stays on this thread.
-        ParallelPhase.Run(_activeCount, new ScoreSleepAction(_active, config));
-        for (int index = 0; index < _activeCount; index++)
+        if (pass.Active)
         {
-            EulerChunkWorkspace workspace = _active[index];
-            ChunkSleepPolicy.UpdateSleepState(workspace.Chunk, config, workspace.SleepScore);
-            Debug.Assert(
-                workspace.Chunk.IsAwake || !workspace.HasMotion,
-                "A chunk must not fall asleep while it still carries momentum.");
+            // Diffusion reads the written-back fields of neighbouring chunks, so it waits for every write-back.
+            // Cleanup compares neighbour pressures the same way and waits for diffusion. Diffusion covers the whole
+            // period since the last pass.
+            EulerSpeciesDiffusion.Run(_active, _activeCount, WorkerCount, config, pass.Time);
+            VacuumCleanup.Apply(context);
 
-            nonFiniteCells += workspace.NonFinitePressures;
+            ParallelPhase.Run(_activeCount, new SettleMomentumAction(_active, config, settings.VelocityFloor));
+
+            // Sleep decisions read neighbours' final pressures, so they wait for everything above. Scoring only reads
+            // fields, so it runs in parallel. The policy call can run an overridden Sleep, so it stays on this thread.
+            // The score and the non-finite pressure count are stale between passes, so only a pass reads them.
+            ParallelPhase.Run(_activeCount, new ScoreSleepAction(_active, config, settings));
+            for (int index = 0; index < _activeCount; index++)
+            {
+                EulerChunkWorkspace workspace = _active[index];
+                AtmosChunk chunk = workspace.Chunk;
+                if (ChunkSleepPolicy.AdvanceSleepTimer(
+                        chunk, config, workspace.SleepScore, pass.ElapsedTicks, context.SleepDelayTicks))
+                {
+                    // Motion slower than SleepSpeed lets the chunk sleep, but a sleeping chunk carries no momentum.
+                    // An infinite floor stops every voxel, with its kinetic energy turned into heat. The scores of
+                    // the chunks after this one were taken before, so the order of this loop does not matter to
+                    // them.
+                    if (workspace.HasMotion)
+                        SettleMomentum(workspace, config, StopEveryVoxel);
+
+                    chunk.Sleep();
+                }
+
+                AssertSleepingChunkIsStill(chunk);
+                nonFiniteCells += workspace.NonFinitePressures;
+            }
         }
 
         return new AtmosFlowDiagnostics(
@@ -785,26 +1139,64 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
     }
 
     /// <summary>
-    ///     Tick-end work for one chunk's buffer: the momentum floor and damping, then the write-back.
+    ///     Runs <see cref="FloorMomentumAndWriteBack" /> over every active chunk on the worker pool, in the tiles of
+    ///     <see cref="BuildVoxelTiles" />. Tick thread only.
     /// </summary>
     /// <remarks>
-    ///     The floor zeroes the momentum of every cell slower than <see cref="EulerFlowConfig.VelocityFloor" />
-    ///     and of every trace cell. Damping then scales what is left by <c>max(0, 1 − α·Δt_tick)</c>. Both run
-    ///     before the write-back computes temperatures, so the kinetic energy they remove turns into heat instead
-    ///     of vanishing. The method touches only this chunk's fields and workspace, so chunks run in parallel. The
-    ///     count of voxels written at 0 K lands in <see cref="EulerChunkWorkspace.NegativeInternalEnergyWritten" />.
+    ///     <see cref="EulerChunkWorkspace.BeginWriteBack" /> creates channels from the whole chunk, so it runs once
+    ///     per chunk before any tile of that chunk writes a voxel. With at least as many chunks as workers, one item
+    ///     per chunk does both. Otherwise one phase begins every chunk and a second runs the tiles. Each tile writes
+    ///     only its own voxels and its own count. The tick thread sums the counts into
+    ///     <see cref="EulerChunkWorkspace.NegativeInternalEnergyWritten" />.
     /// </remarks>
-    private static void FloorMomentumAndWriteBack(
-        EulerChunkWorkspace workspace, AtmosSolverConfigSnapshot config, EulerFlowConfig settings)
+    private void WriteBackActive(
+        AtmosSolverConfigSnapshot config, EulerFlowConfig settings, Second deltaTime, bool applyFloor)
+    {
+        bool whole = _activeCount >= WorkerCount;
+        if (!whole)
+            ParallelPhase.Run(_activeCount, new BeginWriteBackAction(_active, config));
+
+        int tileCount = BuildVoxelTiles(_active.AsSpan(0, _activeCount), whole);
+        ParallelPhase.Run(
+            tileCount,
+            new WriteBackTileAction(_active, _voxelTiles, _tileCount, config, settings, deltaTime, applyFloor, whole));
+
+        for (int index = 0; index < _activeCount; index++)
+            _active[index].NegativeInternalEnergyWritten = 0;
+
+        for (int tile = 0; tile < tileCount; tile++)
+            _active[_voxelTiles[tile].WorkspaceIndex].NegativeInternalEnergyWritten += _tileCount[tile];
+
+        for (int index = 0; index < _activeCount; index++)
+            _active[index].Chunk.MarkChanged();
+    }
+
+    /// <summary>
+    ///     Tick-end work for one tile of a chunk's buffer: trace-cell zeroing, the momentum floor on a settle pass,
+    ///     damping, then the write-back of the voxels at list positions <c>[firstActive, endActive)</c>.
+    /// </summary>
+    /// <returns>The number of voxels written at 0 K.</returns>
+    /// <remarks>
+    ///     Every call zeroes the momentum of every trace cell. A settle pass (<c>applyFloor</c>) also zeroes every
+    ///     cell slower than <see cref="EulerFlowConfig.VelocityFloor" />. Damping then scales what is left by
+    ///     <c>max(0, 1 − α·Δt_call)</c> on every call. A floor of zero in <see cref="EulerMixture.ShouldStop" />
+    ///     leaves only the trace test, so a settle pass matches the old per-tick behavior bit for bit. All of this runs
+    ///     before the write-back computes temperatures, so the kinetic energy they remove turns into heat instead
+    ///     of vanishing. The method touches only the tile's voxels, so tiles and chunks run in parallel once
+    ///     <see cref="EulerChunkWorkspace.BeginWriteBack" /> has run for the chunk.
+    /// </remarks>
+    private static int FloorMomentumAndWriteBack(
+        EulerChunkWorkspace workspace, AtmosSolverConfigSnapshot config, EulerFlowConfig settings, Second deltaTime,
+        bool applyFloor, int firstActive, int endActive)
     {
         AtmosChunk chunk = workspace.Chunk;
         EulerChunkState buffer = workspace.Read;
-        MetrePerSecond floor = settings.VelocityFloor;
+        MetrePerSecond floor = applyFloor ? settings.VelocityFloor : 0f;
         Scalar damping = settings.MomentumDamping > 0f
-            ? MathF.Max(0f, 1f - settings.MomentumDamping * AtmosSolverConstants.FixedTimeStep)
+            ? MathF.Max(0f, 1f - settings.MomentumDamping * deltaTime)
             : 1f;
 
-        for (int activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
+        for (int activeIndex = firstActive; activeIndex < endActive; activeIndex++)
         {
             ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
             Kilogram mass = buffer.Mass[voxelIndex];
@@ -833,30 +1225,41 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
         }
 
         int negativeInternalEnergy = 0;
-        workspace.WriteBack(config, ref negativeInternalEnergy);
-        workspace.NegativeInternalEnergyWritten = negativeInternalEnergy;
-        chunk.MarkChanged();
+        workspace.WriteBackRange(config, firstActive, endActive, ref negativeInternalEnergy);
+        return negativeInternalEnergy;
     }
 
     /// <summary>
     ///     Re-establishes the momentum invariants on the live fields after diffusion and vacuum cleanup: a vacuum or
-    ///     trace voxel carries none, and a voxel slower than <see cref="EulerFlowConfig.VelocityFloor" /> is brought
-    ///     to rest with its kinetic energy turned into heat, as the pre-write-back floor does.
+    ///     trace voxel carries none, and a voxel slower than <paramref name="floor" /> is brought to rest with its
+    ///     kinetic energy turned into heat, as the pre-write-back floor does.
     /// </summary>
+    /// <param name="workspace">The chunk to settle.</param>
+    /// <param name="config">The tick's configuration snapshot.</param>
+    /// <param name="floor">
+    ///     The speed below which a voxel stops. A settle pass passes <see cref="EulerFlowConfig.VelocityFloor" />.
+    ///     A chunk that falls asleep passes infinity, which stops every voxel with a finite speed.
+    /// </param>
     /// <remarks>
-    ///     Diffusion changes a voxel's mass and cleanup empties voxels outright, so the floor test is repeated on
-    ///     the fields the sleep pass and the next tick's gather read. On a voxel neither pass touched it changes
-    ///     nothing: the mass is summed over the workspace's gas list in the same ascending order as the buffer's,
-    ///     so the comparison repeats bit for bit. The exception is a channel diffusion created for a gas outside
-    ///     the list, which is summed after it. The pressure a stopped voxel is left with comes from the
-    ///     channel-order sum the write-back and every other refresh use, not from the list-order sum, so the cache
-    ///     still matches a later refresh bit for bit.
+    ///     <para>
+    ///         The largest speed among the voxels left moving lands in <see cref="EulerChunkWorkspace.MaxSpeed" />
+    ///         for the sleep scoring, because the mass it needs is summed here anyway.
+    ///     </para>
+    ///     <para>
+    ///         Diffusion changes a voxel's mass and cleanup empties voxels outright, so the floor test is repeated on
+    ///         the fields the sleep pass and the next tick's gather read. On a voxel neither pass touched it changes
+    ///         nothing: the mass is summed over the workspace's gas list in the same ascending order as the buffer's,
+    ///         so the comparison repeats bit for bit. The exception is a channel diffusion created for a gas outside
+    ///         the list, which is summed after it. The pressure a stopped voxel is left with comes from the
+    ///         channel-order sum the write-back and every other refresh use, not from the list-order sum, so the
+    ///         cache still matches a later refresh bit for bit.
+    ///     </para>
     /// </remarks>
     private static void SettleMomentum(
-        EulerChunkWorkspace workspace, AtmosSolverConfigSnapshot config, EulerFlowConfig settings)
+        EulerChunkWorkspace workspace, AtmosSolverConfigSnapshot config, MetrePerSecond floor)
     {
         AtmosChunk chunk = workspace.Chunk;
-        MetrePerSecond floor = settings.VelocityFloor;
+        MetrePerSecond maxSpeed = 0f;
         workspace.ResolveSettleChannels(config);
         int[] listedChannels = workspace.SettleListedChannels;
         int[] unlistedChannels = workspace.SettleUnlistedChannels;
@@ -898,7 +1301,11 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
             }
 
             if (!zero)
+            {
+                // MathF.Max returns NaN when either side is NaN, so a non-finite speed survives the reduction.
+                maxSpeed = MathF.Max(maxSpeed, EulerMixture.Speed(mass, momentumX, momentumY, momentumZ));
                 continue;
+            }
 
             JoulePerKelvin heatCapacity = chunk.TotalHeatCapacity[voxelIndex];
             if (mass > 0f && AtmosSolverMath.IsFinitePositive(heatCapacity))
@@ -912,6 +1319,8 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
 
             chunk.ZeroMomentum(voxelIndex);
         }
+
+        workspace.MaxSpeed = maxSpeed;
     }
 
     /// <summary>
@@ -922,15 +1331,19 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
     ///     pressure, with a gas-to-void face counting as 100%. Faces into other chunks count against the
     ///     neighbour's written-back pressure, or its live pressure if it never activated. They count because the
     ///     intra-chunk scan cannot see a gradient that sits on a chunk face. The metric is forced to at least
-    ///     <see cref="AtmosSolverConfigSnapshot.SleepEpsilon" /> while any cell carries momentum, so a sleeping
-    ///     chunk always has zero momentum everywhere. A non-finite pressure on either side of a face scores as a
-    ///     gas-to-void face. A NaN would otherwise ride through every <see cref="MathF.Max" /> and make the decision
-    ///     depend on where in the chunk it sits. The result lands in <see cref="EulerChunkWorkspace.SleepScore" />,
-    ///     <see cref="EulerChunkWorkspace.HasMotion" />, and <see cref="EulerChunkWorkspace.NonFinitePressures" />
-    ///     (the count of air voxels with a non-finite pressure). The method reads chunk fields and writes only the
-    ///     workspace, so chunks can be scored in parallel.
+    ///     <see cref="AtmosSolverConfigSnapshot.SleepEpsilon" /> while any cell carries momentum and
+    ///     <see cref="EulerChunkWorkspace.MaxSpeed" /> is not below <see cref="EulerFlowConfig.SleepSpeed" />. A
+    ///     NaN speed counts as fast. Slower motion leaves the pressure differences to decide, and the stage stops
+    ///     that motion when the chunk falls asleep, so a sleeping chunk has zero momentum everywhere. With a
+    ///     <see cref="EulerFlowConfig.SleepSpeed" /> of 0 any momentum holds the chunk awake. A non-finite pressure
+    ///     on either side of a face scores as a gas-to-void face. A NaN would otherwise ride through every
+    ///     <see cref="MathF.Max" /> and make the decision depend on where in the chunk it sits. The result lands in
+    ///     <see cref="EulerChunkWorkspace.SleepScore" />, <see cref="EulerChunkWorkspace.HasMotion" />, and
+    ///     <see cref="EulerChunkWorkspace.NonFinitePressures" /> (the count of air voxels with a non-finite pressure).
+    ///     The method reads chunk fields and writes only the workspace, so chunks can be scored in parallel.
     /// </remarks>
-    private static void ScoreSleepState(EulerChunkWorkspace workspace, AtmosSolverConfigSnapshot config)
+    private static void ScoreSleepState(
+        EulerChunkWorkspace workspace, AtmosSolverConfigSnapshot config, EulerFlowConfig settings)
     {
         AtmosChunk chunk = workspace.Chunk;
         Int3 dimensions = chunk.Dimensions;
@@ -996,13 +1409,28 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
             }
         }
 
-        if (hasMotion)
+        // Inverted so a NaN speed holds the chunk awake. A SleepSpeed of 0 holds it awake for any motion.
+        if (hasMotion && !(workspace.MaxSpeed < settings.SleepSpeed))
             maximumRelativePressureDelta = MathF.Max(maximumRelativePressureDelta, config.SleepEpsilon);
 
         AssertEmptyVoxelsAreStill(chunk);
         workspace.SleepScore = maximumRelativePressureDelta;
         workspace.HasMotion = hasMotion;
         workspace.NonFinitePressures = nonFinitePressures;
+    }
+
+    [Conditional("DEBUG")]
+    private static void AssertSleepingChunkIsStill(AtmosChunk chunk)
+    {
+        if (chunk.IsAwake)
+            return;
+
+        for (int activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
+        {
+            Debug.Assert(
+                !chunk.HasMomentum(chunk.ActiveAirIndices[activeIndex]),
+                "A chunk must not fall asleep while it still carries momentum.");
+        }
     }
 
     [Conditional("DEBUG")]
@@ -1023,6 +1451,12 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
     /// </summary>
     private readonly record struct PencilWorkItem(int WorkspaceIndex, int FirstPencil, int PencilCount);
 
+    /// <summary>
+    ///     The list positions <c>[FirstActive, EndActive)</c> of one chunk's active-air list, a tile of the gather or
+    ///     write-back.
+    /// </summary>
+    private readonly record struct VoxelTile(int WorkspaceIndex, int FirstActive, int EndActive);
+
     private readonly struct StaticAction(AtmosSolverExecutionContext context, bool[] result, MetrePerSecond[] speed) : IAction
     {
         public void Invoke(int index)
@@ -1036,50 +1470,95 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
         }
     }
 
-    private readonly struct GatherAction(List<EulerChunkWorkspace> batch, AtmosSolverConfigSnapshot config) : IAction
+    private readonly struct PrepareGatherAction(List<EulerChunkWorkspace> batch, AtmosSolverConfigSnapshot config)
+        : IAction
     {
         public void Invoke(int index)
         {
             EulerChunkWorkspace workspace = batch[index];
-            workspace.Prepare(config);
-            EulerFaceTopology.Build(workspace.Chunk, workspace.NeighborChunks, workspace.OpenMask, workspace.VoidMask);
-            EulerFaceTopology.BuildAirMap(workspace.Chunk, workspace.AirMap, workspace.RowAllAir);
-            workspace.Gather(config);
+            PrepareForGather(workspace, config);
+            AtmosChunk chunk = workspace.Chunk;
+            workspace.ActiveAirAscending = IsStrictlyAscending(chunk.ActiveAirIndices.AsSpan(0, chunk.ActiveAirCount));
+        }
+    }
+
+    /// <summary>
+    ///     Gathers one tile. With <c>prepare</c> set, every workspace is one tile and the item prepares it first.
+    /// </summary>
+    private readonly struct GatherTileAction(
+        List<EulerChunkWorkspace> batch, VoxelTile[] tiles, MetrePerSecond[] signalSpeed, int[] nonFiniteCells,
+        AtmosSolverConfigSnapshot config, bool prepare) : IAction
+    {
+        public void Invoke(int index)
+        {
+            VoxelTile tile = tiles[index];
+            EulerChunkWorkspace workspace = batch[tile.WorkspaceIndex];
+            if (prepare)
+                PrepareForGather(workspace, config);
+
+            int count = 0;
+            signalSpeed[index] = workspace.GatherRange(config, tile.FirstActive, tile.EndActive, ref count);
+            nonFiniteCells[index] = count;
         }
     }
 
     private readonly struct ScanAction(
-        List<EulerChunkWorkspace> batch, Pascal wakeDelta, MetrePerSecond velocityFloor) : IAction
+        List<EulerChunkWorkspace> batch, Pascal wakeDelta, MetrePerSecond wakeSpeed) : IAction
     {
         public void Invoke(int index)
         {
-            ScanBoundaryFaces(batch[index], wakeDelta, velocityFloor);
+            ScanBoundaryFaces(batch[index], wakeDelta, wakeSpeed);
         }
     }
 
-    private readonly struct WriteBackAction(
-        EulerChunkWorkspace[] active, AtmosSolverConfigSnapshot config, EulerFlowConfig settings) : IAction
+    private readonly struct BeginWriteBackAction(EulerChunkWorkspace[] active, AtmosSolverConfigSnapshot config)
+        : IAction
     {
         public void Invoke(int index)
         {
-            FloorMomentumAndWriteBack(active[index], config, settings);
+            EulerChunkWorkspace workspace = active[index];
+            workspace.BeginWriteBack(config);
+            AtmosChunk chunk = workspace.Chunk;
+            workspace.ActiveAirAscending = IsStrictlyAscending(chunk.ActiveAirIndices.AsSpan(0, chunk.ActiveAirCount));
+        }
+    }
+
+    /// <summary>
+    ///     Floors, damps, and writes back one tile. With <c>begin</c> set, every workspace is one tile and the item
+    ///     begins its write-back first.
+    /// </summary>
+    private readonly struct WriteBackTileAction(
+        EulerChunkWorkspace[] active, VoxelTile[] tiles, int[] negativeInternalEnergy,
+        AtmosSolverConfigSnapshot config, EulerFlowConfig settings, Second deltaTime, bool applyFloor, bool begin)
+        : IAction
+    {
+        public void Invoke(int index)
+        {
+            VoxelTile tile = tiles[index];
+            EulerChunkWorkspace workspace = active[tile.WorkspaceIndex];
+            if (begin)
+                workspace.BeginWriteBack(config);
+
+            negativeInternalEnergy[index] = FloorMomentumAndWriteBack(
+                workspace, config, settings, deltaTime, applyFloor, tile.FirstActive, tile.EndActive);
         }
     }
 
     private readonly struct SettleMomentumAction(
+        EulerChunkWorkspace[] active, AtmosSolverConfigSnapshot config, MetrePerSecond floor) : IAction
+    {
+        public void Invoke(int index)
+        {
+            SettleMomentum(active[index], config, floor);
+        }
+    }
+
+    private readonly struct ScoreSleepAction(
         EulerChunkWorkspace[] active, AtmosSolverConfigSnapshot config, EulerFlowConfig settings) : IAction
     {
         public void Invoke(int index)
         {
-            SettleMomentum(active[index], config, settings);
-        }
-    }
-
-    private readonly struct ScoreSleepAction(EulerChunkWorkspace[] active, AtmosSolverConfigSnapshot config) : IAction
-    {
-        public void Invoke(int index)
-        {
-            ScoreSleepState(active[index], config);
+            ScoreSleepState(active[index], config, settings);
         }
     }
 

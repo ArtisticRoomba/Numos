@@ -14,11 +14,12 @@ public partial class SimulationViewer
         int chunkHeight,
         int chunkDepth,
         bool includeDefaultGases,
-        AtmosTransportModel transportModel = AtmosTransportModel.Euler)
+        AtmosTransportModel transportModel = AtmosTransportModel.Euler,
+        int tickRate = AtmosWorld.DefaultTickRate)
     {
         SimulationFrameBuilder? frameBuilder = null;
         _session.CreateProject(
-            new WorkbenchProjectOptions(projectName, chunkWidth, chunkHeight, chunkDepth, includeDefaultGases, transportModel),
+            new WorkbenchProjectOptions(projectName, chunkWidth, chunkHeight, chunkDepth, includeDefaultGases, transportModel, tickRate),
             config =>
             {
                 var visualizations = VisualizationRegistry.CreateDefault(config);

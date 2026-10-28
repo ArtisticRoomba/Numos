@@ -50,7 +50,7 @@ public sealed class AtmosReplayTests
                     new GasProperties { Name = "A", DiffusionCoefficient = 0.02f },
                     new GasProperties { Name = "B", MolarHeatCapacityAtConstantVolume = 32f }
                 ],
-                SleepThreshold = 10
+                SleepDelay = 0.5f
             },
             4,
             4,
@@ -62,6 +62,8 @@ public sealed class AtmosReplayTests
     {
         using var simulation = CreateSimulation();
         var world = simulation.World;
+        // Gas has to cross into the second chunk within two ticks.
+        world.Solvers.SetInterval(AtmosBuiltInSolvers.EulerFlow, 1);
         var first = simulation.CreateAndRegisterChunk(default);
         var second = simulation.CreateAndRegisterChunk(Int3.PosX);
         simulation.AddGasToVoxel(first, 3, 1, 0, 1, 2.25f, 420f);

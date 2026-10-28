@@ -33,7 +33,7 @@ public sealed partial class SolverConfigurationArchiveTests
         });
 
         using var world = new AtmosWorld(new AtmosConfig(restored.InitialCheckpoint.Config));
-        var imported = AtmosWorldReplayTimeline.Import(world, restored, 1);
+        var imported = AtmosWorldReplayTimeline.Import(world, restored, 0.05);
         imported.ReturnToHead();
         Assert.That(world.ComputeStateHash(), Is.EqualTo(archive.HeadStateHash));
     }
@@ -160,9 +160,9 @@ public sealed partial class SolverConfigurationArchiveTests
         var config = new AtmosConfig { GasRegistry = [Air, Fuel] };
         config.SolverConfigurations.Add(Reactions(1f));
 
-        using var world = new AtmosWorld(config);
+        using var world = new AtmosWorld(config, AtmosTransportModel.Euler, 20);
         var simulation = world.CreateSimulation(1, 1, 1);
-        var timeline = new AtmosWorldReplayTimeline(world, 1);
+        var timeline = new AtmosWorldReplayTimeline(world, 0.05);
         var chunk = simulation.CreateAndRegisterChunk(default);
         simulation.SetChunkClassification(chunk, new VoxelClassification(1));
         simulation.AddGasToVoxel(chunk, 0, 1, 10f, 300f);
@@ -186,7 +186,7 @@ public sealed partial class SolverConfigurationArchiveTests
 
         using var world = new AtmosWorld(config);
         world.CreateSimulation(1, 1, 1);
-        var timeline = new AtmosWorldReplayTimeline(world, 1);
+        var timeline = new AtmosWorldReplayTimeline(world, 0.05);
         world.Tick();
         return timeline.CaptureReplay();
     }

@@ -11,24 +11,9 @@ namespace Numos.CoreSim;
 internal static class AtmosSolverConstants
 {
     /// <summary>
-    ///     Number of fixed simulation ticks processed per simulated second.
+    ///     Longest backlog, in seconds, that one elapsed-time update keeps. Older time is discarded.
     /// </summary>
-    internal const PerSecond SimulationRate = 20f;
-
-    /// <summary>
-    ///     Duration of one fixed simulation tick, in seconds.
-    /// </summary>
-    internal const Second FixedTimeStep = 1f / SimulationRate;
-
-    /// <summary>
-    ///     Maximum fixed ticks consumed by one elapsed-time update.
-    /// </summary>
-    internal const int MaximumStepsPerUpdate = 5;
-
-    /// <summary>
-    ///     Number of simulation ticks between thermodynamics passes.
-    /// </summary>
-    internal const int ThermodynamicsTickInterval = 2;
+    internal const double MaximumUpdateBacklog = 0.25;
 
     /// <summary>
     ///     Per-species amount below which residual gas is discarded, in moles (mol).

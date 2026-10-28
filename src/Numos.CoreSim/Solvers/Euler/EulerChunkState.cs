@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Numerics;
+using System.Runtime.InteropServices;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.Maths;
 
@@ -191,7 +193,36 @@ internal sealed class EulerChunkWorkspace
     /// </summary>
     private readonly Stack<Mole[]> _rowPool = new();
 
+    /// <summary>
+    ///     Entries added past the voxel count of every species row.
+    /// </summary>
+    /// <remarks>
+    ///     A species flux run shorter than a vector still loads a whole vector from its last row of cells
+    ///     (<see cref="EulerSpeciesKernel.FaceFluxRun" />). The pad stays zero and keeps that load inside the row.
+    /// </remarks>
+    internal static int RowPadding => Vector<float>.Count;
+
     private int _readIndex;
+
+    // The geometry key: the chunk, generation, and room-map versions the face masks and air map were built from.
+    // A null chunk means the masks describe nothing.
+    private AtmosChunk? _geometryChunk;
+    private long _geometryGeneration;
+    private long _geometryVersion;
+    private readonly AtmosChunk?[] _geometryNeighbors = new AtmosChunk?[NeighborResolution.NeighborDirections.Length];
+    private readonly long[] _geometryNeighborVersions = new long[NeighborResolution.NeighborDirections.Length];
+
+    /// <summary>
+    ///     Species rows of the listed gases, parallel to <see cref="GasIds" />, for the gather's mixture sums.
+    /// </summary>
+    private Mole[][] _gatherRows = [];
+
+    /// <summary>
+    ///     <c>Cv</c> and moles per chunk channel, for the write-back's per-voxel sums.
+    /// </summary>
+    private JoulePerMoleKelvin[] _channelHeatCapacity = [];
+
+    private Mole[][] _channelMoles = [];
 
     /// <summary>
     ///     This chunk's recorded cross-chunk diffusion, filled and applied by <see cref="EulerSpeciesDiffusion" />.
@@ -224,8 +255,8 @@ internal sealed class EulerChunkWorkspace
     public readonly int[] MergedNeighborVersion = new int[NeighborResolution.NeighborDirections.Length];
 
     /// <summary>
-    ///     Voxels the last <see cref="WriteBack" /> wrote at 0 K because their internal energy was negative. Each
-    ///     worker writes its own chunk's counter and the tick thread sums them.
+    ///     Voxels the last write-back wrote at 0 K because their internal energy was negative. The tick thread
+    ///     sums the tile counts into it and then sums the chunks' counters.
     /// </summary>
     public int NegativeInternalEnergyWritten;
 
@@ -240,6 +271,12 @@ internal sealed class EulerChunkWorkspace
     public bool HasMotion;
 
     /// <summary>
+    ///     The largest speed of a voxel the last momentum settling left moving, or 0 when it stopped every voxel.
+    ///     NaN when some voxel's speed is not finite.
+    /// </summary>
+    public MetrePerSecond MaxSpeed;
+
+    /// <summary>
     ///     The chunk's sleep metric from the last scoring, in percent.
     /// </summary>
     public Scalar SleepScore;
@@ -248,6 +285,12 @@ internal sealed class EulerChunkWorkspace
     ///     Cells the last <see cref="Gather" /> found non-finite and gathered as vacuum. Reset by <see cref="Bind" />.
     /// </summary>
     public int NonFiniteCellsGathered;
+
+    /// <summary>
+    ///     Whether the chunk's active-air list was strictly ascending when the solver last checked it. The solver
+    ///     sets it before it splits a gather or write-back into slab tiles, and reads it only right after.
+    /// </summary>
+    public bool ActiveAirAscending;
 
     /// <summary>
     ///     Gas ids this workspace carries rows for, ascending.
@@ -275,18 +318,28 @@ internal sealed class EulerChunkWorkspace
     public EulerChunkWorkspace?[] NeighborWorkspaces =
         new EulerChunkWorkspace?[NeighborResolution.NeighborDirections.Length];
 
+    /// <summary>
+    ///     The open-face bits of every voxel, filled by <see cref="EulerFaceTopology.Build" />. Like
+    ///     <see cref="VoidMask" />, <see cref="AirMap" />, and <see cref="AirRunLength" />, it survives a return to
+    ///     the pool and is reused while <see cref="HasGeometryForBinding" /> holds.
+    /// </summary>
     public byte[] OpenMask = [];
 
     /// <summary>
-    ///     Whether each voxel takes part in the sweeps. Filled once per binding by
-    ///     <see cref="EulerFaceTopology.BuildAirMap" />.
+    ///     This workspace's index in the solver's pool, or -1 while it is out of the pool.
+    /// </summary>
+    public int PoolSlot = -1;
+
+    /// <summary>
+    ///     Whether each voxel takes part in the sweeps. Filled by <see cref="EulerFaceTopology.BuildAirMap" />.
     /// </summary>
     public bool[] AirMap = [];
 
     /// <summary>
-    ///     Whether every voxel of each x-row is air, indexed by <c>voxel / Width</c>.
+    ///     Per voxel, the number of consecutive air voxels from it to the end of its air span in the x-row, or 0
+    ///     for a voxel that is not air. Filled with <see cref="AirMap" />.
     /// </summary>
-    public bool[] RowAllAir = [];
+    public int[] AirRunLength = [];
 
     /// <summary>
     ///     Channel index in the chunk of each listed gas, or -1 for a listed gas the chunk has no channel for,
@@ -327,6 +380,9 @@ internal sealed class EulerChunkWorkspace
     /// </summary>
     public MetrePerSecond[] PencilSignalSpeed = [];
 
+    /// <summary>
+    ///     The void-face bits of every voxel, filled with <see cref="OpenMask" />.
+    /// </summary>
     public byte[] VoidMask = [];
 
     /// <summary>
@@ -407,13 +463,12 @@ internal sealed class EulerChunkWorkspace
         int voxelCount = chunk.VoxelCount;
         if (OpenMask.Length < voxelCount)
         {
+            InvalidateGeometry();
             OpenMask = new byte[voxelCount];
             VoidMask = new byte[voxelCount];
             AirMap = new bool[voxelCount];
+            AirRunLength = new int[voxelCount];
         }
-
-        if (RowAllAir.Length < chunk.Height * chunk.Depth)
-            RowAllAir = new bool[chunk.Height * chunk.Depth];
 
         int pencilCount = Math.Max(chunk.Height, chunk.Depth);
         if (PencilSignalSpeed.Length < pencilCount)
@@ -430,6 +485,61 @@ internal sealed class EulerChunkWorkspace
 
         for (int gas = 0; gas < chunk.ActiveGasCount; gas++)
             AddGas(chunk.ActiveGases[gas].GasId, config);
+    }
+
+    /// <summary>
+    ///     Whether <see cref="OpenMask" />, <see cref="VoidMask" />, <see cref="AirMap" />, and
+    ///     <see cref="AirRunLength" /> were built for the attached chunk and neighbours in their current state.
+    /// </summary>
+    /// <remarks>
+    ///     The masks read the chunk's room map and active-air list, the room maps of the neighbours, and which
+    ///     neighbours are registered. The key covers each of them through the chunk reference, its generation,
+    ///     and <see cref="AtmosChunk.AirTopologyVersion" /> of the chunk and of every neighbour. Call it after
+    ///     <see cref="Prepare" />, which drops the key when it replaces the arrays.
+    /// </remarks>
+    internal bool HasGeometryForBinding()
+    {
+        if (!ReferenceEquals(_geometryChunk, Chunk) ||
+            _geometryGeneration != Chunk.Version.Generation ||
+            _geometryVersion != Chunk.AirTopologyVersion)
+            return false;
+
+        for (int direction = 0; direction < NeighborChunks.Length; direction++)
+        {
+            AtmosChunk? neighbor = NeighborChunks[direction];
+            if (!ReferenceEquals(_geometryNeighbors[direction], neighbor))
+                return false;
+
+            if (neighbor != null && _geometryNeighborVersions[direction] != neighbor.AirTopologyVersion)
+                return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    ///     Records that the masks now describe the attached chunk and neighbours. Call it right after building them.
+    /// </summary>
+    internal void RecordGeometry()
+    {
+        _geometryChunk = Chunk;
+        _geometryGeneration = Chunk.Version.Generation;
+        _geometryVersion = Chunk.AirTopologyVersion;
+        for (int direction = 0; direction < NeighborChunks.Length; direction++)
+        {
+            AtmosChunk? neighbor = NeighborChunks[direction];
+            _geometryNeighbors[direction] = neighbor;
+            _geometryNeighborVersions[direction] = neighbor?.AirTopologyVersion ?? 0;
+        }
+    }
+
+    /// <summary>
+    ///     Forgets the geometry key, so the next binding rebuilds the masks.
+    /// </summary>
+    internal void InvalidateGeometry()
+    {
+        _geometryChunk = null;
+        Array.Clear(_geometryNeighbors);
     }
 
     /// <summary>
@@ -468,15 +578,16 @@ internal sealed class EulerChunkWorkspace
 
         foreach (EulerChunkState buffer in _buffers)
         {
+            int rowLength = voxelCount + RowPadding;
             Mole[] row;
-            if (_rowPool.TryPop(out Mole[]? pooled) && pooled.Length >= voxelCount)
+            if (_rowPool.TryPop(out Mole[]? pooled) && pooled.Length >= rowLength)
             {
                 row = pooled;
-                Array.Clear(row, 0, voxelCount);
+                Array.Clear(row, 0, rowLength);
             }
             else
             {
-                row = new Mole[voxelCount];
+                row = new Mole[rowLength];
             }
 
             buffer.Species[gasId] = row;
@@ -552,12 +663,53 @@ internal sealed class EulerChunkWorkspace
     ///     trace cell: its momentum is dropped, its energy is <c>C·T</c>, and its primitive state is the vacuum,
     ///     so neighbouring faces see it as empty and only ever push gas into it. It keeps the moles it has. A voxel
     ///     whose primitive state does not fit in float (<see cref="EulerCellKind.NonFinite" />) is gathered the
-    ///     same way and counted in <see cref="NonFiniteCellsGathered" />.
+    ///     same way and counted in <see cref="NonFiniteCellsGathered" />. This is <see cref="BeginGather" />
+    ///     followed by <see cref="GatherRange" /> over the whole active-air list.
     /// </remarks>
     internal void Gather(AtmosSolverConfigSnapshot config)
     {
+        BeginGather();
+        int nonFiniteCells = 0;
+        Read.MaxSignalSpeed = GatherRange(config, 0, Chunk.ActiveAirCount, ref nonFiniteCells);
+        NonFiniteCellsGathered += nonFiniteCells;
+    }
+
+    /// <summary>
+    ///     Looks up the species rows <see cref="GatherRange" /> sums. Call it once per binding, after
+    ///     <see cref="Prepare" /> and before any range.
+    /// </summary>
+    internal void BeginGather()
+    {
+        if (_gatherRows.Length < GasCount)
+            _gatherRows = new Mole[Math.Max(4, GasCount)][];
+
+        EulerChunkState buffer = Read;
+        for (int present = 0; present < GasCount; present++)
+            _gatherRows[present] = buffer.Species[GasIds[present]]!;
+    }
+
+    /// <summary>
+    ///     Gathers the air voxels at positions <c>[firstActive, endActive)</c> of
+    ///     <see cref="AtmosChunk.ActiveAirIndices" /> into the read buffer.
+    /// </summary>
+    /// <param name="config">The tick's configuration snapshot.</param>
+    /// <param name="firstActive">The first position in the active-air list.</param>
+    /// <param name="endActive">One past the last position.</param>
+    /// <param name="nonFiniteCells">Incremented for every cell gathered as vacuum because it was non-finite.</param>
+    /// <returns>The highest signal speed of a gas cell in the range, or zero.</returns>
+    /// <remarks>
+    ///     A range writes only its own voxels and reads only their channel entries, so disjoint ranges of one chunk
+    ///     can run in parallel. How the list is split cannot change a bit, because the vector and scalar paths agree
+    ///     bit for bit. The caller folds the returned speeds with a max and the counts with a sum. On an all-air
+    ///     chunk the channel copy treats the positions as voxel indices. That holds for the whole list in any order,
+    ///     and for a sub-range only when the list is ascending.
+    /// </remarks>
+    internal MetrePerSecond GatherRange(
+        AtmosSolverConfigSnapshot config, int firstActive, int endActive, ref int nonFiniteCells)
+    {
         AtmosChunk chunk = Chunk;
         EulerChunkState buffer = Read;
+        bool full = chunk.ActiveAirCount == chunk.VoxelCount;
 
         for (int present = 0; present < GasCount; present++)
         {
@@ -568,7 +720,14 @@ internal sealed class EulerChunkWorkspace
 
             Mole[] source = chunk.ActiveGases[channel].Moles;
             Mole[] row = buffer.Species[gasId]!;
-            for (int activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
+            if (full)
+            {
+                int length = endActive - firstActive;
+                ClampPositive(source.AsSpan(firstActive, length), row.AsSpan(firstActive, length));
+                continue;
+            }
+
+            for (int activeIndex = firstActive; activeIndex < endActive; activeIndex++)
             {
                 ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
                 // A negative or NaN channel entry counts as empty, as in the heat-capacity refresh.
@@ -577,65 +736,231 @@ internal sealed class EulerChunkWorkspace
             }
         }
 
+        Mole[][] rows = _gatherRows;
         MetrePerSecond maxSignalSpeed = 0f;
-        for (int activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
+        Vector<MetrePerSecond> maxSignalLanes = Vector<float>.Zero;
+        for (int activeIndex = firstActive; activeIndex < endActive;)
         {
-            ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
-            SumMixture(
-                buffer, voxelIndex,
-                out Kilogram mass, out Mole totalMoles, out JoulePerKelvin64 heatCapacity);
+            int firstVoxel = chunk.ActiveAirIndices[activeIndex];
+            int length = ContiguousRunLength(chunk, activeIndex, endActive);
+            int done = EulerCellKernel.Enabled && length >= Vector<float>.Count
+                ? GatherRun(config, buffer, rows, firstVoxel, length, ref maxSignalLanes, ref nonFiniteCells)
+                : 0;
 
-            Kelvin temperature = config.GetValidatedTemp(chunk.Temperature[voxelIndex]);
-            KilogramMetrePerSecond momentumX = chunk.MomentumX[voxelIndex];
-            KilogramMetrePerSecond momentumY = chunk.MomentumY[voxelIndex];
-            KilogramMetrePerSecond momentumZ = chunk.MomentumZ[voxelIndex];
+            for (int cell = done; cell < length; cell++)
+                GatherVoxel(config, buffer, rows, firstVoxel + cell, ref maxSignalSpeed, ref nonFiniteCells);
 
-            if (IsTrace(mass, totalMoles))
+            activeIndex += length;
+        }
+
+        // Every lane is a gas cell's signal speed or zero, never NaN, so the fold order does not matter.
+        for (int lane = 0; lane < Vector<float>.Count; lane++)
+            maxSignalSpeed = MathF.Max(maxSignalSpeed, maxSignalLanes[lane]);
+
+        return maxSignalSpeed;
+    }
+
+    /// <summary>
+    ///     The scalar gather of one air voxel, for the voxels <see cref="GatherRun" /> leaves.
+    /// </summary>
+    private void GatherVoxel(
+        AtmosSolverConfigSnapshot config, EulerChunkState buffer, Mole[][] rows, int voxelIndex,
+        ref MetrePerSecond maxSignalSpeed, ref int nonFiniteCells)
+    {
+        AtmosChunk chunk = Chunk;
+        SumMixtureRows(
+            rows, voxelIndex,
+            out Kilogram mass, out Mole totalMoles, out JoulePerKelvin64 heatCapacity);
+
+        Kelvin temperature = config.GetValidatedTemp(chunk.Temperature[voxelIndex]);
+        KilogramMetrePerSecond momentumX = chunk.MomentumX[voxelIndex];
+        KilogramMetrePerSecond momentumY = chunk.MomentumY[voxelIndex];
+        KilogramMetrePerSecond momentumZ = chunk.MomentumZ[voxelIndex];
+
+        if (IsTrace(mass, totalMoles))
+        {
+            momentumX = 0f;
+            momentumY = 0f;
+            momentumZ = 0f;
+            buffer.Energy[voxelIndex] = heatCapacity * temperature;
+            buffer.SetCell(voxelIndex, default);
+        }
+        else
+        {
+            Joule64 energy = EulerMixture.TotalEnergy(
+                heatCapacity, temperature, mass,
+                momentumX, momentumY, momentumZ);
+
+            buffer.Energy[voxelIndex] = energy;
+            EulerCellKind kind = EulerMixture.ToPrimitive(
+                mass, totalMoles, heatCapacity,
+                momentumX, momentumY, momentumZ,
+                energy, config.VoxelVolume, config.PressurePerMoleKelvin,
+                out EulerCellState primitive);
+
+            buffer.SetCell(voxelIndex, in primitive);
+            if (kind == EulerCellKind.Gas)
             {
-                momentumX = 0f;
-                momentumY = 0f;
-                momentumZ = 0f;
-                buffer.Energy[voxelIndex] = heatCapacity * temperature;
-                buffer.SetCell(voxelIndex, default);
+                maxSignalSpeed = MathF.Max(maxSignalSpeed, primitive.SignalSpeed);
             }
             else
             {
-                Joule64 energy = EulerMixture.TotalEnergy(
-                    heatCapacity, temperature, mass,
-                    momentumX, momentumY, momentumZ);
+                if (kind == EulerCellKind.NonFinite)
+                    nonFiniteCells++;
 
-                buffer.Energy[voxelIndex] = energy;
-                EulerCellKind kind = EulerMixture.ToPrimitive(
-                    mass, totalMoles, heatCapacity,
-                    momentumX, momentumY, momentumZ,
-                    energy, config.VoxelVolume, config.PressurePerMoleKelvin,
-                    out EulerCellState primitive);
-
-                buffer.SetCell(voxelIndex, in primitive);
-                if (kind == EulerCellKind.Gas)
-                {
-                    maxSignalSpeed = MathF.Max(maxSignalSpeed, primitive.SignalSpeed);
-                }
-                else
-                {
-                    if (kind == EulerCellKind.NonFinite)
-                        NonFiniteCellsGathered++;
-
-                    momentumX = 0f;
-                    momentumY = 0f;
-                    momentumZ = 0f;
-                }
+                momentumX = 0f;
+                momentumY = 0f;
+                momentumZ = 0f;
             }
-
-            buffer.MomentumX[voxelIndex] = momentumX;
-            buffer.MomentumY[voxelIndex] = momentumY;
-            buffer.MomentumZ[voxelIndex] = momentumZ;
-            buffer.Mass[voxelIndex] = mass;
-            buffer.TotalMoles[voxelIndex] = totalMoles;
-            buffer.HeatCapacity[voxelIndex] = heatCapacity;
         }
 
-        buffer.MaxSignalSpeed = maxSignalSpeed;
+        buffer.MomentumX[voxelIndex] = momentumX;
+        buffer.MomentumY[voxelIndex] = momentumY;
+        buffer.MomentumZ[voxelIndex] = momentumZ;
+        buffer.Mass[voxelIndex] = mass;
+        buffer.TotalMoles[voxelIndex] = totalMoles;
+        buffer.HeatCapacity[voxelIndex] = heatCapacity;
+    }
+
+    /// <summary>
+    ///     Gathers the air voxels <c>[firstVoxel, firstVoxel + count)</c> a whole vector at a time, with the same
+    ///     bits as <see cref="GatherVoxel" />.
+    /// </summary>
+    /// <param name="config">The tick's configuration snapshot.</param>
+    /// <param name="buffer">The read buffer.</param>
+    /// <param name="rows">The species rows of the listed gases, parallel to <see cref="GasIds" />.</param>
+    /// <param name="firstVoxel">The first voxel. The voxels are contiguous in voxel memory and all active air.</param>
+    /// <param name="count">Number of voxels.</param>
+    /// <param name="maxSignalSpeed">Raised, per lane, to the signal speed of every gas cell written.</param>
+    /// <param name="nonFiniteCells">Incremented for every cell gathered as vacuum because it was non-finite.</param>
+    /// <returns>Number of voxels done, a multiple of the vector width that is at most <paramref name="count" />.</returns>
+    /// <remarks>
+    ///     The mixture sums run gas by gas in list order, as in <see cref="SumMixtureRows" />. A trace cell's energy
+    ///     is <c>C·T</c>, which is also the first term of <see cref="EulerMixture.TotalEnergy" />, so one select
+    ///     covers both branches.
+    /// </remarks>
+    private int GatherRun(
+        AtmosSolverConfigSnapshot config, EulerChunkState buffer, Mole[][] rows, int firstVoxel, int count,
+        ref Vector<MetrePerSecond> maxSignalSpeed, ref int nonFiniteCells)
+    {
+        AtmosChunk chunk = Chunk;
+        int width = Vector<float>.Count;
+        int halfWidth = Vector<double>.Count;
+        ReadOnlySpan<Kelvin> storedTemperature = chunk.Temperature.AsSpan();
+        ReadOnlySpan<KilogramMetrePerSecond> storedMomentumX = chunk.MomentumX.AsSpan();
+        ReadOnlySpan<KilogramMetrePerSecond> storedMomentumY = chunk.MomentumY.AsSpan();
+        ReadOnlySpan<KilogramMetrePerSecond> storedMomentumZ = chunk.MomentumZ.AsSpan();
+        Vector<float> zero = Vector<float>.Zero;
+        Vector<Kelvin> fallbackTemperature = new Vector<float>(config.DefaultTemperatureFallback);
+        Vector<Mole> minimumMoles = new Vector<float>(AtmosSolverConstants.MinimumTrackedMoles);
+        int done = 0;
+        for (; done + width <= count; done += width)
+        {
+            int voxel = firstVoxel + done;
+            Vector<Kilogram> mass = zero;
+            Vector<Mole> totalMoles = zero;
+            Vector<JoulePerKelvin64> heatLow = Vector<double>.Zero;
+            Vector<JoulePerKelvin64> heatHigh = Vector<double>.Zero;
+            for (int present = 0; present < GasCount; present++)
+            {
+                Vector<Mole> moles = new Vector<float>(rows[present], voxel);
+                mass += moles * new Vector<float>(MolarMass[present]);
+                totalMoles += moles;
+                Vector.Widen(moles, out Vector<Mole64> molesLow, out Vector<Mole64> molesHigh);
+                Vector<JoulePerMoleKelvin64> molarHeatCapacity = new Vector<double>((double)HeatCapacity[present]);
+                heatLow += molesLow * molarHeatCapacity;
+                heatHigh += molesHigh * molarHeatCapacity;
+            }
+
+            // GetValidatedTemp: a temperature that is not finite and positive becomes the fallback.
+            Vector<Kelvin> temperature = new Vector<float>(storedTemperature.Slice(voxel));
+            Vector<int> validTemperature = Vector.GreaterThan(temperature, zero) &
+                                           Vector.LessThan(temperature, new Vector<float>(float.PositiveInfinity));
+            temperature = Vector.ConditionalSelect(validTemperature, temperature, fallbackTemperature);
+
+            Vector<KilogramMetrePerSecond> momentumX = new Vector<float>(storedMomentumX.Slice(voxel));
+            Vector<KilogramMetrePerSecond> momentumY = new Vector<float>(storedMomentumY.Slice(voxel));
+            Vector<KilogramMetrePerSecond> momentumZ = new Vector<float>(storedMomentumZ.Slice(voxel));
+            Vector<int> trace = Vector.LessThanOrEqual(mass, zero) | Vector.LessThan(totalMoles, minimumMoles);
+            Vector.Widen(trace, out Vector<long> traceLow, out Vector<long> traceHigh);
+
+            Vector.Widen(temperature, out Vector<Kelvin64> temperatureLow, out Vector<Kelvin64> temperatureHigh);
+            Vector<PerKilogram> inverseMass = Vector<float>.One / mass;
+            KineticEnergy(
+                momentumX, momentumY, momentumZ, inverseMass,
+                out Vector<Joule64> kineticLow, out Vector<Joule64> kineticHigh);
+            Vector<Joule64> internalLow = heatLow * temperatureLow;
+            Vector<Joule64> internalHigh = heatHigh * temperatureHigh;
+            Vector<Joule64> energyLow = Vector.ConditionalSelect(traceLow, internalLow, internalLow + kineticLow);
+            Vector<Joule64> energyHigh = Vector.ConditionalSelect(traceHigh, internalHigh, internalHigh + kineticHigh);
+
+            EulerCellKernel.ToPrimitive(
+                mass, inverseMass, totalMoles, heatLow, heatHigh, momentumX, momentumY, momentumZ,
+                energyLow, energyHigh, config.VoxelVolume, config.PressurePerMoleKelvin,
+                out EulerPrimitiveLanes primitive);
+
+            Vector<int> gas = Vector.AndNot(primitive.Gas, trace);
+            Vector<int> nonFinite = Vector.AndNot(primitive.NonFinite, trace);
+            Vector<float> gasBits = Vector.AsVectorSingle(gas);
+            primitive.Store(buffer, voxel, gasBits);
+            maxSignalSpeed = Vector.Max(maxSignalSpeed, Vector.BitwiseAnd(primitive.SignalSpeed, gasBits));
+            // A mask lane is -1, so the negated sum counts the lanes.
+            nonFiniteCells -= Vector.Sum(nonFinite);
+
+            energyLow.CopyTo(buffer.Energy, voxel);
+            energyHigh.CopyTo(buffer.Energy, voxel + halfWidth);
+            Vector.BitwiseAnd(momentumX, gasBits).CopyTo(buffer.MomentumX, voxel);
+            Vector.BitwiseAnd(momentumY, gasBits).CopyTo(buffer.MomentumY, voxel);
+            Vector.BitwiseAnd(momentumZ, gasBits).CopyTo(buffer.MomentumZ, voxel);
+            mass.CopyTo(buffer.Mass, voxel);
+            totalMoles.CopyTo(buffer.TotalMoles, voxel);
+            heatLow.CopyTo(buffer.HeatCapacity, voxel);
+            heatHigh.CopyTo(buffer.HeatCapacity, voxel + halfWidth);
+        }
+
+        return done;
+    }
+
+    /// <summary>
+    ///     The vector form of <see cref="EulerMixture.KineticEnergy(Kilogram, KilogramMetrePerSecond,
+    ///     KilogramMetrePerSecond, KilogramMetrePerSecond)" />, split into the lower and upper half of the lanes.
+    /// </summary>
+    private static void KineticEnergy(
+        Vector<KilogramMetrePerSecond> momentumX, Vector<KilogramMetrePerSecond> momentumY,
+        Vector<KilogramMetrePerSecond> momentumZ, Vector<PerKilogram> inverseMass,
+        out Vector<Joule64> kineticLow, out Vector<Joule64> kineticHigh)
+    {
+        Vector.Widen(
+            momentumX, out Vector<KilogramMetrePerSecond64> pxLow, out Vector<KilogramMetrePerSecond64> pxHigh);
+        Vector.Widen(
+            momentumY, out Vector<KilogramMetrePerSecond64> pyLow, out Vector<KilogramMetrePerSecond64> pyHigh);
+        Vector.Widen(
+            momentumZ, out Vector<KilogramMetrePerSecond64> pzLow, out Vector<KilogramMetrePerSecond64> pzHigh);
+        Vector.Widen(
+            momentumX * inverseMass, out Vector<MetrePerSecond64> vxLow, out Vector<MetrePerSecond64> vxHigh);
+        Vector.Widen(
+            momentumY * inverseMass, out Vector<MetrePerSecond64> vyLow, out Vector<MetrePerSecond64> vyHigh);
+        Vector.Widen(
+            momentumZ * inverseMass, out Vector<MetrePerSecond64> vzLow, out Vector<MetrePerSecond64> vzHigh);
+        Vector<Scalar64> half = new Vector<double>(0.5d);
+        kineticLow = half * (pxLow * vxLow + pyLow * vyLow + pzLow * vzLow);
+        kineticHigh = half * (pxHigh * vxHigh + pyHigh * vyHigh + pzHigh * vzHigh);
+    }
+
+    /// <summary>
+    ///     Length of the run of consecutive voxel indices that starts at <paramref name="activeIndex" /> in
+    ///     <see cref="AtmosChunk.ActiveAirIndices" /> and ends before position <paramref name="endActive" />. A run
+    ///     is contiguous in voxel memory, so a vector can load it.
+    /// </summary>
+    private static int ContiguousRunLength(AtmosChunk chunk, int activeIndex, int endActive)
+    {
+        ushort[] indices = chunk.ActiveAirIndices;
+        int first = indices[activeIndex];
+        int length = 1;
+        while (activeIndex + length < endActive && indices[activeIndex + length] == first + length)
+            length++;
+
+        return length;
     }
 
     /// <summary>
@@ -654,6 +979,56 @@ internal sealed class EulerChunkWorkspace
             mass += moles * MolarMass[present];
             totalMoles += moles;
             heatCapacity += (Mole64)moles * HeatCapacity[present];
+        }
+    }
+
+    /// <summary>
+    ///     The sums of <see cref="SumMixture" />
+    ///     over species rows the caller looked up once.
+    /// </summary>
+    /// <param name="rows">The species rows of the listed gases, parallel to <see cref="GasIds" />.</param>
+    /// <param name="voxelIndex">The cell to sum.</param>
+    /// <param name="mass">The mixture mass.</param>
+    /// <param name="totalMoles">The total moles.</param>
+    /// <param name="heatCapacity">The heat capacity at constant volume.</param>
+    private void SumMixtureRows(
+        Mole[][] rows, int voxelIndex,
+        out Kilogram mass, out Mole totalMoles, out JoulePerKelvin64 heatCapacity)
+    {
+        mass = 0f;
+        totalMoles = 0f;
+        heatCapacity = 0d;
+        for (int present = 0; present < GasCount; present++)
+        {
+            Mole moles = rows[present][voxelIndex];
+            mass += moles * MolarMass[present];
+            totalMoles += moles;
+            heatCapacity += (Mole64)moles * HeatCapacity[present];
+        }
+    }
+
+    /// <summary>
+    ///     Copies <paramref name="source" /> into <paramref name="destination" />, mapping every entry that is not
+    ///     above zero (negative, <c>-0</c>, NaN) to <c>+0</c>.
+    /// </summary>
+    private static void ClampPositive(ReadOnlySpan<Mole> source, Span<Mole> destination)
+    {
+        int index = 0;
+        if (Vector.IsHardwareAccelerated)
+        {
+            Vector<float> zero = Vector<float>.Zero;
+            for (; index <= source.Length - Vector<float>.Count; index += Vector<float>.Count)
+            {
+                var value = new Vector<float>(MemoryMarshal.Cast<Mole, float>(source.Slice(index)));
+                Vector.ConditionalSelect(Vector.GreaterThan(value, zero), value, zero)
+                    .CopyTo(MemoryMarshal.Cast<Mole, float>(destination.Slice(index)));
+            }
+        }
+
+        for (; index < source.Length; index++)
+        {
+            Mole moles = source[index];
+            destination[index] = moles > 0f ? moles : 0f;
         }
     }
 
@@ -752,98 +1127,314 @@ internal sealed class EulerChunkWorkspace
     ///         <see cref="AtmosSolverMath.CalculatePressureAtVoxel(IAtmosConfig, AtmosChunk, ushort, Mole)" /> so
     ///         <see cref="AtmosChunk.IsVacuum" /> stays consistent with the rest of the kernel.
     ///     </para>
+    ///     <para>
+    ///         This is <see cref="BeginWriteBack" /> followed by <see cref="WriteBackRange" /> over the whole
+    ///         active-air list.
+    ///     </para>
     /// </remarks>
     internal void WriteBack(AtmosSolverConfigSnapshot config, ref int negativeInternalEnergyCount)
     {
+        BeginWriteBack(config);
+        WriteBackRange(config, 0, Chunk.ActiveAirCount, ref negativeInternalEnergyCount);
+    }
+
+    /// <summary>
+    ///     Creates the channels the write-back needs and looks up every channel's moles and <c>Cv</c>. Call it once
+    ///     per write-back, before any <see cref="WriteBackRange" />.
+    /// </summary>
+    /// <param name="config">The tick's configuration snapshot.</param>
+    /// <remarks>
+    ///     A channel is created for a listed gas whose row holds a positive amount anywhere in the chunk, so this
+    ///     step sees the whole chunk and must finish before any range writes a voxel.
+    /// </remarks>
+    internal void BeginWriteBack(AtmosSolverConfigSnapshot config)
+    {
         AtmosChunk chunk = Chunk;
         EulerChunkState buffer = Read;
+        for (int present = 0; present < GasCount; present++)
+        {
+            int gasId = GasIds[present];
+            // The sweep already debited any amount that arrived from the upwind cell, which may be in another
+            // chunk, so a row holding any of it needs a channel or the gas is destroyed. The list is walked in
+            // ascending gas id, so channels are created in that order too.
+            if (chunk.FindGasChannel(gasId) < 0 && HoldsAny(chunk, buffer.Species[gasId]!))
+                chunk.GetOrCreateGasChannel(gasId);
+        }
+
+        int channelCount = chunk.ActiveGasCount;
+        if (_channelMoles.Length < channelCount)
+        {
+            _channelMoles = new Mole[Math.Max(4, channelCount)][];
+            _channelHeatCapacity = new JoulePerMoleKelvin[_channelMoles.Length];
+        }
+
+        for (int gas = 0; gas < channelCount; gas++)
+        {
+            _channelMoles[gas] = chunk.ActiveGases[gas].Moles;
+            _channelHeatCapacity[gas] = config.GetMolarHeatCapacityAtConstantVolume(chunk.ActiveGases[gas].GasId);
+        }
+    }
+
+    /// <summary>
+    ///     Writes back the air voxels at positions <c>[firstActive, endActive)</c> of
+    ///     <see cref="AtmosChunk.ActiveAirIndices" />.
+    /// </summary>
+    /// <param name="config">The tick's configuration snapshot.</param>
+    /// <param name="firstActive">The first position in the active-air list.</param>
+    /// <param name="endActive">One past the last position.</param>
+    /// <param name="negativeInternalEnergyCount">Incremented for every voxel written at 0 K because <c>E &lt; K</c>.</param>
+    /// <remarks>
+    ///     A range writes only its own voxels, so disjoint ranges of one chunk can run in parallel once
+    ///     <see cref="BeginWriteBack" /> has returned. On an all-air chunk the row copy treats the positions as voxel
+    ///     indices. That holds for the whole list in any order, and for a sub-range only when the list is ascending.
+    /// </remarks>
+    internal void WriteBackRange(
+        AtmosSolverConfigSnapshot config, int firstActive, int endActive, ref int negativeInternalEnergyCount)
+    {
+        AtmosChunk chunk = Chunk;
+        EulerChunkState buffer = Read;
+        bool full = chunk.ActiveAirCount == chunk.VoxelCount;
 
         for (int present = 0; present < GasCount; present++)
         {
             int gasId = GasIds[present];
-            Mole[] row = buffer.Species[gasId]!;
             int channel = chunk.FindGasChannel(gasId);
+            // BeginWriteBack gave a channel to every row that holds gas.
             if (channel < 0)
-            {
-                // The sweep already debited any amount that arrived from the upwind cell, which may be in another
-                // chunk, so a row holding any of it needs a channel or the gas is destroyed. The list is walked in
-                // ascending gas id, so channels are created in that order too.
-                if (!HoldsAny(chunk, row))
-                    continue;
+                continue;
 
-                channel = chunk.GetOrCreateGasChannel(gasId);
+            Mole[] row = buffer.Species[gasId]!;
+            Mole[] target = chunk.ActiveGases[channel].Moles;
+            if (full)
+            {
+                row.AsSpan(firstActive, endActive - firstActive).CopyTo(target.AsSpan(firstActive));
+                continue;
             }
 
-            Mole[] target = chunk.ActiveGases[channel].Moles;
-            for (int activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
+            for (int activeIndex = firstActive; activeIndex < endActive; activeIndex++)
             {
                 ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
                 target[voxelIndex] = row[voxelIndex];
             }
         }
 
-        for (int activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
+        Mole[][] channelMoles = _channelMoles;
+        JoulePerMoleKelvin[] channelHeatCapacity = _channelHeatCapacity;
+        for (int activeIndex = firstActive; activeIndex < endActive;)
         {
-            ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
-            Mole totalMoles = 0f;
-            JoulePerKelvin heatCapacity = 0f;
-            JoulePerKelvin64 preciseHeatCapacity = 0d;
-            for (int gas = 0; gas < chunk.ActiveGasCount; gas++)
+            int firstVoxel = chunk.ActiveAirIndices[activeIndex];
+            int length = ContiguousRunLength(chunk, activeIndex, endActive);
+            int done = EulerCellKernel.Enabled && length >= Vector<float>.Count
+                ? WriteBackRun(config, buffer, channelMoles, channelHeatCapacity, firstVoxel, length,
+                    ref negativeInternalEnergyCount)
+                : 0;
+
+            for (int cell = done; cell < length; cell++)
             {
-                Mole moles = chunk.ActiveGases[gas].Moles[voxelIndex];
-                if (moles <= 0f)
-                    continue;
-
-                JoulePerMoleKelvin molarHeatCapacity =
-                    config.GetMolarHeatCapacityAtConstantVolume(chunk.ActiveGases[gas].GasId);
-
-                totalMoles += moles;
-                heatCapacity += moles * molarHeatCapacity;
-                preciseHeatCapacity += (Mole64)moles * molarHeatCapacity;
+                WriteBackVoxel(
+                    config, buffer, channelMoles, channelHeatCapacity, (ushort)(firstVoxel + cell),
+                    ref negativeInternalEnergyCount);
             }
 
-            if (totalMoles <= 0f)
+            activeIndex += length;
+        }
+    }
+
+    /// <summary>
+    ///     The scalar write-back of one air voxel, for the voxels <see cref="WriteBackRun" /> leaves.
+    /// </summary>
+    private void WriteBackVoxel(
+        AtmosSolverConfigSnapshot config, EulerChunkState buffer, Mole[][] channelMoles,
+        JoulePerMoleKelvin[] channelHeatCapacity, ushort voxelIndex, ref int negativeInternalEnergyCount)
+    {
+        AtmosChunk chunk = Chunk;
+        int channelCount = chunk.ActiveGasCount;
+        Mole totalMoles = 0f;
+        JoulePerKelvin heatCapacity = 0f;
+        JoulePerKelvin64 preciseHeatCapacity = 0d;
+        for (int gas = 0; gas < channelCount; gas++)
+        {
+            Mole moles = channelMoles[gas][voxelIndex];
+            if (moles <= 0f)
+                continue;
+
+            JoulePerMoleKelvin molarHeatCapacity = channelHeatCapacity[gas];
+
+            totalMoles += moles;
+            heatCapacity += moles * molarHeatCapacity;
+            preciseHeatCapacity += (Mole64)moles * molarHeatCapacity;
+        }
+
+        if (totalMoles <= 0f)
+        {
+            // Clears the channels, the heat capacity, and the momentum, and raises IsVacuum.
+            chunk.TotalPressure[voxelIndex] = AtmosSolverMath.CalculatePressureAtVoxel(config, chunk, voxelIndex, 0f);
+            return;
+        }
+
+        KilogramMetrePerSecond momentumX = buffer.MomentumX[voxelIndex];
+        KilogramMetrePerSecond momentumY = buffer.MomentumY[voxelIndex];
+        KilogramMetrePerSecond momentumZ = buffer.MomentumZ[voxelIndex];
+        Kilogram mass = buffer.Mass[voxelIndex];
+        Joule64 internalEnergy = buffer.Energy[voxelIndex];
+        if (mass > 0f)
+            internalEnergy -= EulerMixture.KineticEnergy(mass, momentumX, momentumY, momentumZ);
+
+        if (internalEnergy < 0d)
+        {
+            negativeInternalEnergyCount++;
+            internalEnergy = 0d;
+        }
+
+        Kelvin rawTemperature = preciseHeatCapacity > 0d && double.IsFinite(preciseHeatCapacity) &&
+                                double.IsFinite(internalEnergy)
+            ? (float)(internalEnergy / preciseHeatCapacity)
+            : chunk.Temperature[voxelIndex];
+
+        Kelvin temperature = config.GetValidatedTemp(rawTemperature);
+
+        Debug.Assert(float.IsFinite(temperature));
+        Debug.Assert(
+            float.IsFinite(momentumX) && float.IsFinite(momentumY) && float.IsFinite(momentumZ),
+            "The Euler stage must never write non-finite momentum.");
+
+        chunk.Temperature[voxelIndex] = temperature;
+        chunk.TotalHeatCapacity[voxelIndex] = heatCapacity;
+        chunk.TotalPressure[voxelIndex] =
+            AtmosSolverMath.CalculatePressureAtVoxel(config, chunk, voxelIndex, totalMoles);
+
+        chunk.MomentumX[voxelIndex] = momentumX;
+        chunk.MomentumY[voxelIndex] = momentumY;
+        chunk.MomentumZ[voxelIndex] = momentumZ;
+    }
+
+    /// <summary>
+    ///     Writes back the air voxels <c>[firstVoxel, firstVoxel + count)</c> a whole vector at a time, with the
+    ///     same bits as <see cref="WriteBackVoxel" />.
+    /// </summary>
+    /// <param name="config">The tick's configuration snapshot.</param>
+    /// <param name="buffer">The read buffer.</param>
+    /// <param name="channelMoles">The mole arrays of the chunk's channels.</param>
+    /// <param name="channelHeatCapacity">The molar heat capacity of each channel.</param>
+    /// <param name="firstVoxel">The first voxel. The voxels are contiguous in voxel memory and all active air.</param>
+    /// <param name="count">Number of voxels.</param>
+    /// <param name="negativeInternalEnergyCount">Incremented for every voxel written at 0 K.</param>
+    /// <returns>Number of voxels done, a multiple of the vector width that is at most <paramref name="count" />.</returns>
+    /// <remarks>
+    ///     A vector that holds a vacuum voxel goes to <see cref="WriteBackVoxel" /> whole, because the vacuum path
+    ///     clears the voxel through <see cref="AtmosChunk.SetVoxelToVacuum" />. The temperature written is already
+    ///     validated, so the pressure is <see cref="AtmosSolverMath.CalculatePressure" /> without its second
+    ///     validation, which would return the same value.
+    /// </remarks>
+    private int WriteBackRun(
+        AtmosSolverConfigSnapshot config, EulerChunkState buffer, Mole[][] channelMoles,
+        JoulePerMoleKelvin[] channelHeatCapacity, int firstVoxel, int count, ref int negativeInternalEnergyCount)
+    {
+        AtmosChunk chunk = Chunk;
+        int channelCount = chunk.ActiveGasCount;
+        int width = Vector<float>.Count;
+        int halfWidth = Vector<double>.Count;
+        Span<Kelvin> temperatures = chunk.Temperature.AsSpan();
+        Span<JoulePerKelvin> heatCapacities = chunk.TotalHeatCapacity.AsSpan();
+        Span<Pascal> pressures = chunk.TotalPressure.AsSpan();
+        Span<KilogramMetrePerSecond> momentaX = chunk.MomentumX.AsSpan();
+        Span<KilogramMetrePerSecond> momentaY = chunk.MomentumY.AsSpan();
+        Span<KilogramMetrePerSecond> momentaZ = chunk.MomentumZ.AsSpan();
+        Span<bool> vacuum = chunk.IsVacuum.AsSpan();
+        Vector<float> zero = Vector<float>.Zero;
+        Vector<float> infinity = new Vector<float>(float.PositiveInfinity);
+        Vector<double> infinityDouble = new Vector<double>(double.PositiveInfinity);
+        Vector<Kelvin> fallbackTemperature = new Vector<float>(config.DefaultTemperatureFallback);
+        Vector<PascalPerMoleKelvin> pressurePerMoleKelvin = new Vector<float>(config.PressurePerMoleKelvin);
+        int done = 0;
+        for (; done + width <= count; done += width)
+        {
+            int voxel = firstVoxel + done;
+            Vector<Mole> totalMoles = zero;
+            Vector<JoulePerKelvin> heatCapacity = zero;
+            Vector<JoulePerKelvin64> preciseLow = Vector<double>.Zero;
+            Vector<JoulePerKelvin64> preciseHigh = Vector<double>.Zero;
+            for (int gas = 0; gas < channelCount; gas++)
             {
-                // Clears the channels, the heat capacity, and the momentum, and raises IsVacuum.
-                chunk.TotalPressure[voxelIndex] = AtmosSolverMath.CalculatePressureAtVoxel(config, chunk, voxelIndex, 0f);
+                // A lane whose amount is not above zero skips the gas, as the scalar `continue` does. NaN is held.
+                Vector<Mole> moles = new Vector<float>(channelMoles[gas], voxel);
+                Vector<int> held = ~Vector.LessThanOrEqual(moles, zero);
+                Vector.Widen(held, out Vector<long> heldLow, out Vector<long> heldHigh);
+                Vector.Widen(moles, out Vector<Mole64> molesLow, out Vector<Mole64> molesHigh);
+                JoulePerMoleKelvin molarHeatCapacity = channelHeatCapacity[gas];
+                Vector<JoulePerMoleKelvin64> preciseMolarHeatCapacity = new Vector<double>((double)molarHeatCapacity);
+
+                totalMoles = Vector.ConditionalSelect(held, totalMoles + moles, totalMoles);
+                heatCapacity = Vector.ConditionalSelect(
+                    held, heatCapacity + moles * new Vector<float>(molarHeatCapacity), heatCapacity);
+                preciseLow = Vector.ConditionalSelect(heldLow, preciseLow + molesLow * preciseMolarHeatCapacity, preciseLow);
+                preciseHigh = Vector.ConditionalSelect(
+                    heldHigh, preciseHigh + molesHigh * preciseMolarHeatCapacity, preciseHigh);
+            }
+
+            if (Vector.LessThanOrEqualAny(totalMoles, zero))
+            {
+                for (int lane = 0; lane < width; lane++)
+                {
+                    WriteBackVoxel(
+                        config, buffer, channelMoles, channelHeatCapacity, (ushort)(voxel + lane),
+                        ref negativeInternalEnergyCount);
+                }
+
                 continue;
             }
 
-            KilogramMetrePerSecond momentumX = buffer.MomentumX[voxelIndex];
-            KilogramMetrePerSecond momentumY = buffer.MomentumY[voxelIndex];
-            KilogramMetrePerSecond momentumZ = buffer.MomentumZ[voxelIndex];
-            Kilogram mass = buffer.Mass[voxelIndex];
-            Joule64 internalEnergy = buffer.Energy[voxelIndex];
-            if (mass > 0f)
-                internalEnergy -= EulerMixture.KineticEnergy(mass, momentumX, momentumY, momentumZ);
+            Vector<KilogramMetrePerSecond> momentumX = new Vector<float>(buffer.MomentumX, voxel);
+            Vector<KilogramMetrePerSecond> momentumY = new Vector<float>(buffer.MomentumY, voxel);
+            Vector<KilogramMetrePerSecond> momentumZ = new Vector<float>(buffer.MomentumZ, voxel);
+            Vector<Kilogram> mass = new Vector<float>(buffer.Mass, voxel);
+            Vector.Widen(Vector.GreaterThan(mass, zero), out Vector<long> movingLow, out Vector<long> movingHigh);
+            KineticEnergy(
+                momentumX, momentumY, momentumZ, Vector<float>.One / mass,
+                out Vector<Joule64> kineticLow, out Vector<Joule64> kineticHigh);
+            Vector<Joule64> internalLow = new Vector<double>(buffer.Energy, voxel);
+            Vector<Joule64> internalHigh = new Vector<double>(buffer.Energy, voxel + halfWidth);
+            internalLow = Vector.ConditionalSelect(movingLow, internalLow - kineticLow, internalLow);
+            internalHigh = Vector.ConditionalSelect(movingHigh, internalHigh - kineticHigh, internalHigh);
 
-            if (internalEnergy < 0d)
-            {
-                negativeInternalEnergyCount++;
-                internalEnergy = 0d;
-            }
+            Vector<long> negativeLow = Vector.LessThan(internalLow, Vector<double>.Zero);
+            Vector<long> negativeHigh = Vector.LessThan(internalHigh, Vector<double>.Zero);
+            // A mask lane is -1, so the negated sum counts the lanes.
+            negativeInternalEnergyCount -= Vector.Sum(Vector.Narrow(negativeLow, negativeHigh));
+            internalLow = Vector.ConditionalSelect(negativeLow, Vector<double>.Zero, internalLow);
+            internalHigh = Vector.ConditionalSelect(negativeHigh, Vector<double>.Zero, internalHigh);
 
-            Kelvin rawTemperature = preciseHeatCapacity > 0d && double.IsFinite(preciseHeatCapacity) &&
-                                    double.IsFinite(internalEnergy)
-                ? (float)(internalEnergy / preciseHeatCapacity)
-                : chunk.Temperature[voxelIndex];
+            // The temperature comes from the energy only where C is positive and finite and E − K is finite.
+            Vector<long> usableLow = Vector.GreaterThan(preciseLow, Vector<double>.Zero) &
+                                     Vector.LessThan(preciseLow, infinityDouble) &
+                                     Vector.LessThan(Vector.Abs(internalLow), infinityDouble);
+            Vector<long> usableHigh = Vector.GreaterThan(preciseHigh, Vector<double>.Zero) &
+                                      Vector.LessThan(preciseHigh, infinityDouble) &
+                                      Vector.LessThan(Vector.Abs(internalHigh), infinityDouble);
+            Vector<Kelvin> temperature = Vector.ConditionalSelect(
+                Vector.Narrow(usableLow, usableHigh),
+                Vector.Narrow(internalLow / preciseLow, internalHigh / preciseHigh),
+                new Vector<float>(temperatures.Slice(voxel)));
 
-            Kelvin temperature = config.GetValidatedTemp(rawTemperature);
+            // GetValidatedTemp: a temperature that is not finite and positive becomes the fallback.
+            Vector<int> validTemperature = Vector.GreaterThan(temperature, zero) & Vector.LessThan(temperature, infinity);
+            temperature = Vector.ConditionalSelect(validTemperature, temperature, fallbackTemperature);
 
-            Debug.Assert(float.IsFinite(temperature));
-            Debug.Assert(
-                float.IsFinite(momentumX) && float.IsFinite(momentumY) && float.IsFinite(momentumZ),
-                "The Euler stage must never write non-finite momentum.");
+            Vector<Pascal> pressure = totalMoles * temperature * pressurePerMoleKelvin;
 
-            chunk.Temperature[voxelIndex] = temperature;
-            chunk.TotalHeatCapacity[voxelIndex] = heatCapacity;
-            chunk.TotalPressure[voxelIndex] =
-                AtmosSolverMath.CalculatePressureAtVoxel(config, chunk, voxelIndex, totalMoles);
-
-            chunk.MomentumX[voxelIndex] = momentumX;
-            chunk.MomentumY[voxelIndex] = momentumY;
-            chunk.MomentumZ[voxelIndex] = momentumZ;
+            // The analyzer sees a span store as unannotated float. Each span is the chunk field of the same unit.
+#pragma warning disable QNT002
+            temperature.CopyTo(temperatures.Slice(voxel));
+            heatCapacity.CopyTo(heatCapacities.Slice(voxel));
+            pressure.CopyTo(pressures.Slice(voxel));
+            momentumX.CopyTo(momentaX.Slice(voxel));
+            momentumY.CopyTo(momentaY.Slice(voxel));
+            momentumZ.CopyTo(momentaZ.Slice(voxel));
+#pragma warning restore QNT002
+            vacuum.Slice(voxel, width).Fill(false);
         }
+
+        return done;
     }
 
     private static bool HoldsAny(AtmosChunk chunk, Mole[] row)

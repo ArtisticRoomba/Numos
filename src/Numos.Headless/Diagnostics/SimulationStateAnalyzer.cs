@@ -105,7 +105,9 @@ public static class SimulationStateAnalyzer
 
         return new SimulationStateReport(
             batch.TickCount,
-            AtmosSimulation.SimulationRate,
+            simulation.World.TickRate,
+            simulation.World.TickRate,
+            simulation.World.SimulatedTime,
             simulation.ChunkCount,
             CreateConfigurationReport(config),
             simulation.World.Solvers.Steps.Select(CreateSolverReport).ToArray(),
@@ -214,7 +216,7 @@ public static class SimulationStateAnalyzer
             config.SpaceTemperature,
             config.BulkFlowCoefficient,
             config.VacuumThreshold,
-            config.SleepThreshold,
+            config.SleepDelay,
             config.SleepEpsilon,
             config.ThermalConductance,
             config.CondensationRateFactor,
@@ -244,8 +246,10 @@ public static class SimulationStateAnalyzer
 
         return new EulerFlowConfigurationReport(
             euler.CourantNumber,
-            euler.MaxSubstepsPerTick,
+            euler.MaxSubstepsPerSecond,
+            euler.SettlePeriod,
             euler.VelocityFloor,
+            euler.SleepSpeed,
             euler.MaxVelocity,
             euler.WakePressureDelta,
             euler.AllMachCorrection,
@@ -277,7 +281,7 @@ public static class SimulationStateAnalyzer
             _ => throw new ArgumentOutOfRangeException(nameof(step))
         };
 
-        return new SolverStepReport(step.Name, step.IsEnabled, kind);
+        return new SolverStepReport(step.Name, step.IsEnabled, kind, step.Interval);
     }
 
     private static VoxelStateReport CreateVoxelReport(

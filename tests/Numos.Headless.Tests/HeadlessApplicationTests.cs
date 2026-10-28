@@ -63,9 +63,9 @@ public sealed class HeadlessApplicationTests
             Request(
                 "create",
                 "createProject",
-                "\"chunkDimensions\":{\"x\":8,\"y\":1,\"z\":1}," +
+                "\"tickRate\":20,\"chunkDimensions\":{\"x\":8,\"y\":1,\"z\":1}," +
                 "\"config\":{\"voxelVolumeM3\":1,\"defaultDiffusionCoefficient\":0,\"vacuumThresholdPa\":0," +
-                "\"sleepThreshold\":2147483647,\"sleepEpsilonPercent\":0}," +
+                "\"sleepDelay\":1e9,\"sleepEpsilonPercent\":0}," +
                 "\"gases\":[{\"name\":\"Air\",\"molarHeatCapacityAtConstantVolume\":20.786," +
                 "\"molarMassKgPerMol\":0.02897}]"),
             AddChunkRequest("chunk", 0, 0, 0)
@@ -144,7 +144,7 @@ public sealed class HeadlessApplicationTests
             Request(
                 "patch-again",
                 "updateConfig",
-                "\"config\":{\"eulerFlow\":{\"maxSubstepsPerTick\":0,\"allMachCorrection\":true}}"),
+                "\"config\":{\"eulerFlow\":{\"maxSubstepsPerSecond\":0,\"allMachCorrection\":true,\"sleepSpeedMps\":0.25}}"),
             Request("after", "observe"),
             Request(
                 "bad",
@@ -162,9 +162,10 @@ public sealed class HeadlessApplicationTests
             Assert.That(before.TryGetProperty("eulerFlow", out _), Is.False);
             Assert.That(euler.GetProperty("courantNumber").GetSingle(), Is.EqualTo(0.4f).Within(Tolerance));
             Assert.That(euler.GetProperty("reconstruction").GetString(), Is.EqualTo("firstOrder"));
-            Assert.That(euler.GetProperty("maxSubstepsPerTick").GetInt32(), Is.Zero);
+            Assert.That(euler.GetProperty("maxSubstepsPerSecond").GetInt32(), Is.Zero);
             Assert.That(euler.GetProperty("allMachCorrection").GetBoolean(), Is.True);
             Assert.That(euler.GetProperty("maxVelocityMps").GetSingle(), Is.EqualTo(5000f));
+            Assert.That(euler.GetProperty("sleepSpeedMps").GetSingle(), Is.EqualTo(0.25f));
             Assert.That(bad.GetProperty("ok").GetBoolean(), Is.False);
             Assert.That(bad.GetProperty("error").GetProperty("code").GetString(), Is.EqualTo("invalidConfig"));
         });
@@ -484,7 +485,7 @@ public sealed class HeadlessApplicationTests
         return Request(
             id,
             "createProject",
-            $"\"name\":\"Headless tests\"," +
+            $"\"name\":\"Headless tests\",\"tickRate\":20," +
             model +
             $"\"chunkDimensions\":{{\"x\":{width},\"y\":{height},\"z\":{depth}}}," +
             "\"config\":{" +
@@ -495,7 +496,7 @@ public sealed class HeadlessApplicationTests
             "\"defaultDiffusionCoefficient\":0," +
             "\"bulkFlowCoefficient\":0.25," +
             "\"vacuumThresholdPa\":0," +
-            "\"sleepThreshold\":2147483647," +
+            "\"sleepDelay\":1e9," +
             "\"sleepEpsilonPercent\":0," +
             "\"thermalConductance\":0.05," +
             "\"condensationRateFactor\":0.5," +

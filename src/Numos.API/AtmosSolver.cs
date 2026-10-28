@@ -50,7 +50,7 @@ public static class AtmosBuiltInSolvers
     /// <summary>
     ///     Sparse thermal transport across explicit portal, dock, and arbitrary links whose flags include
     ///     <see cref="ExplicitLinkFlags.ThermalTransport" />. Runs on the same cadence as
-    ///     <see cref="Thermodynamics" /> (see <c>AtmosSolverConstants.ThermodynamicsTickInterval</c>).
+    ///     <see cref="Thermodynamics" />, which is every 100 ms of simulated time by default.
     /// </summary>
     public const string ExplicitThermalTransport = "explicit-thermal-transport";
 

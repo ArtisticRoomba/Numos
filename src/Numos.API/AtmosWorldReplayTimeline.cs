@@ -15,7 +15,7 @@ namespace Numos.API;
 /// <example>
 ///     Observe live ticks before seeking, then either return to the saved head or branch from the selected position:
 ///     <code>
-///     var timeline = new AtmosWorldReplayTimeline(world, checkpointInterval: 50);
+///     var timeline = new AtmosWorldReplayTimeline(world, checkpointSpacingSeconds: 2.5);
 ///     world.Tick();
 ///     timeline.ObserveLiveState();
 /// 
@@ -40,24 +40,32 @@ public sealed class AtmosWorldReplayTimeline
     ///     Starts inspection history at a world's current state.
     /// </summary>
     /// <param name="world">The world to observe; its lifetime remains owned by the caller.</param>
-    /// <param name="checkpointInterval">Minimum completed ticks between automatic checkpoint samples.</param>
+    /// <param name="checkpointSpacingSeconds">
+    ///     Simulated seconds between automatic checkpoint samples, or <see langword="null" /> for
+    ///     <see cref="DefaultCheckpointSpacingSeconds" />.
+    /// </param>
     /// <exception cref="ArgumentNullException"><paramref name="world" /> is <see langword="null" />.</exception>
-    /// <exception cref="ArgumentOutOfRangeException"><paramref name="checkpointInterval" /> is zero.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    ///     <paramref name="checkpointSpacingSeconds" /> is not a positive finite number.
+    /// </exception>
     /// <exception cref="ObjectDisposedException"><paramref name="world" /> has been disposed.</exception>
     /// <exception cref="InvalidOperationException">
     ///     The world cannot start recording at its current execution state.
     /// </exception>
-    public AtmosWorldReplayTimeline(AtmosWorld world, ulong checkpointInterval = 50)
-        : this(world, checkpointInterval, true)
+    public AtmosWorldReplayTimeline(AtmosWorld world, double? checkpointSpacingSeconds = null)
+        : this(world, checkpointSpacingSeconds, true)
     {
     }
 
-    private AtmosWorldReplayTimeline(AtmosWorld world, ulong checkpointInterval, bool initializeLive)
+    private AtmosWorldReplayTimeline(AtmosWorld world, double? checkpointSpacingSeconds, bool initializeLive)
     {
         ArgumentNullException.ThrowIfNull(world);
-        ArgumentOutOfRangeException.ThrowIfZero(checkpointInterval);
+        double spacing = checkpointSpacingSeconds ?? DefaultCheckpointSpacingSeconds;
+        if (!double.IsFinite(spacing) || spacing <= 0d)
+            throw new ArgumentOutOfRangeException(nameof(checkpointSpacingSeconds));
+
         _world = world;
-        CheckpointInterval = checkpointInterval;
+        CheckpointSpacingSeconds = spacing;
         _checkpointView = _checkpoints.AsReadOnly();
         if (!initializeLive)
             return;
@@ -69,9 +77,18 @@ public sealed class AtmosWorldReplayTimeline
     }
 
     /// <summary>
-    ///     Gets the minimum completed-tick interval between automatic checkpoint samples.
+    ///     The checkpoint spacing, in simulated seconds, used when the caller passes no spacing.
     /// </summary>
-    public ulong CheckpointInterval { get; }
+    public const double DefaultCheckpointSpacingSeconds = 2.5;
+
+    /// <summary>
+    ///     Gets the simulated seconds between automatic checkpoint samples.
+    /// </summary>
+    /// <remarks>
+    ///     A sample is due when <see cref="AtmosWorld.SimulatedTime" /> reaches the next multiple of this spacing after
+    ///     the newest checkpoint.
+    /// </remarks>
+    public double CheckpointSpacingSeconds { get; }
 
     /// <summary>
     ///     Gets the first inspectable position.
@@ -119,11 +136,47 @@ public sealed class AtmosWorldReplayTimeline
     public IReadOnlyList<AtmosWorldRecordedOperation> Operations => IsInspecting ? _history!.Operations : LiveOperations();
 
     /// <summary>
+    ///     Converts a completed tick to atmospheric time, in seconds.
+    /// </summary>
+    /// <param name="tick">The completed tick to convert.</param>
+    /// <returns>The simulated time at <paramref name="tick" />.</returns>
+    /// <remarks>
+    ///     The tick rate is fixed for the whole timeline, so the result is <paramref name="tick" /> divided by the
+    ///     tick rate of the start checkpoint. It equals <see cref="AtmosWorld.SimulatedTime" /> when the world stood at
+    ///     that tick.
+    /// </remarks>
+    public double TimeAt(ulong tick)
+    {
+        return (double)tick / _checkpoints[0].Checkpoint.TickRate;
+    }
+
+    private static double CheckpointTime(AtmosWorldCheckpoint checkpoint)
+    {
+        return (double)checkpoint.Position.Tick / checkpoint.TickRate;
+    }
+
+    private static ulong FirstTickAtOrAfter(double time, int tickRate, ulong minimumTick)
+    {
+        double ticks = Math.Ceiling(time * tickRate - BoundaryTolerance);
+        return Math.Max((ulong)Math.Max(0d, ticks), minimumTick);
+    }
+
+    private static double NextBoundary(double time, double spacing)
+    {
+        return (Math.Floor(time / spacing + BoundaryTolerance) + 1d) * spacing;
+    }
+
+    private const double BoundaryTolerance = 1e-9;
+
+    /// <summary>
     ///     Restores, verifies, and indexes a portable archive in an existing idle world.
     /// </summary>
     /// <param name="world">The world that receives reconstructed state.</param>
     /// <param name="archive">The portable world archive to import.</param>
-    /// <param name="checkpointInterval">Completed ticks between runtime scrub checkpoints.</param>
+    /// <param name="checkpointSpacingSeconds">
+    ///     Simulated seconds between runtime scrub checkpoints, or <see langword="null" /> for
+    ///     <see cref="DefaultCheckpointSpacingSeconds" />.
+    /// </param>
     /// <param name="progress">Optional progress receiver invoked between reconstruction intervals.</param>
     /// <param name="cancellationToken">Cancellation observed between reconstruction intervals.</param>
     /// <returns>A read-only imported timeline positioned at its initial state.</returns>
@@ -133,7 +186,9 @@ public sealed class AtmosWorldReplayTimeline
     ///     cancels reconstruction, the supplied world stays at its most recently reconstructed position.
     /// </remarks>
     /// <exception cref="ArgumentNullException">A required argument is <see langword="null" />.</exception>
-    /// <exception cref="ArgumentOutOfRangeException"><paramref name="checkpointInterval" /> is zero.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    ///     <paramref name="checkpointSpacingSeconds" /> is not a positive finite number.
+    /// </exception>
     /// <exception cref="InvalidOperationException"><paramref name="world" /> is recording.</exception>
     /// <exception cref="InvalidDataException">A reference digest does not match reconstructed state.</exception>
     /// <exception cref="NotSupportedException"><paramref name="archive" /> contains host-defined solver state.</exception>
@@ -142,11 +197,11 @@ public sealed class AtmosWorldReplayTimeline
     public static AtmosWorldReplayTimeline Import(
         AtmosWorld world,
         AtmosWorldReplayArchive archive,
-        ulong checkpointInterval = 50,
+        double? checkpointSpacingSeconds = null,
         IProgress<AtmosWorldReplayIndexProgress>? progress = null,
         CancellationToken cancellationToken = default)
     {
-        return RestoreCore(world, archive, checkpointInterval, progress, cancellationToken, true);
+        return RestoreCore(world, archive, checkpointSpacingSeconds, progress, cancellationToken, true);
     }
 
     /// <summary>
@@ -154,7 +209,10 @@ public sealed class AtmosWorldReplayTimeline
     /// </summary>
     /// <param name="world">The compatible world that receives reconstructed state.</param>
     /// <param name="archive">Detached history captured from this world or another compatible host.</param>
-    /// <param name="checkpointInterval">Completed ticks between runtime scrub checkpoints.</param>
+    /// <param name="checkpointSpacingSeconds">
+    ///     Simulated seconds between runtime scrub checkpoints, or <see langword="null" /> for
+    ///     <see cref="DefaultCheckpointSpacingSeconds" />.
+    /// </param>
     /// <param name="progress">Optional progress receiver invoked between reconstruction intervals.</param>
     /// <param name="cancellationToken">Cancellation observed between reconstruction intervals.</param>
     /// <returns>A read-only restored timeline positioned at its initial state.</returns>
@@ -175,7 +233,9 @@ public sealed class AtmosWorldReplayTimeline
     ///     </code>
     /// </example>
     /// <exception cref="ArgumentNullException">A required argument is <see langword="null" />.</exception>
-    /// <exception cref="ArgumentOutOfRangeException"><paramref name="checkpointInterval" /> is zero.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    ///     <paramref name="checkpointSpacingSeconds" /> is not a positive finite number.
+    /// </exception>
     /// <exception cref="ArgumentException">The archive is incompatible with the supplied world.</exception>
     /// <exception cref="InvalidOperationException"><paramref name="world" /> is recording.</exception>
     /// <exception cref="InvalidDataException">A reference digest does not match reconstructed state.</exception>
@@ -184,17 +244,17 @@ public sealed class AtmosWorldReplayTimeline
     public static AtmosWorldReplayTimeline Restore(
         AtmosWorld world,
         AtmosWorldReplayArchive archive,
-        ulong checkpointInterval = 50,
+        double? checkpointSpacingSeconds = null,
         IProgress<AtmosWorldReplayIndexProgress>? progress = null,
         CancellationToken cancellationToken = default)
     {
-        return RestoreCore(world, archive, checkpointInterval, progress, cancellationToken, false);
+        return RestoreCore(world, archive, checkpointSpacingSeconds, progress, cancellationToken, false);
     }
 
     private static AtmosWorldReplayTimeline RestoreCore(
         AtmosWorld world,
         AtmosWorldReplayArchive archive,
-        ulong checkpointInterval,
+        double? checkpointSpacingSeconds,
         IProgress<AtmosWorldReplayIndexProgress>? progress,
         CancellationToken cancellationToken,
         bool requirePortable)
@@ -207,7 +267,7 @@ public sealed class AtmosWorldReplayTimeline
         if (world.IsRecording)
             throw new InvalidOperationException("Stop recording before restoring a world replay archive.");
 
-        var timeline = new AtmosWorldReplayTimeline(world, checkpointInterval, false);
+        var timeline = new AtmosWorldReplayTimeline(world, checkpointSpacingSeconds, false);
         var initial = archive.InitialCheckpoint;
         if (initial.ComputeStateHash() != archive.InitialStateHash)
             throw new InvalidDataException("The replay's initial world checkpoint does not match its reference digest.");
@@ -216,10 +276,16 @@ public sealed class AtmosWorldReplayTimeline
         timeline._checkpoints.Add(new AtmosWorldReplayVerificationPoint(initial, archive.InitialStateHash));
         ulong totalTicks = archive.Recording.Head.Tick - archive.Recording.Start.Tick;
         var source = initial;
-        for (ulong tick = checked(initial.Position.Tick + checkpointInterval);
-             tick < archive.Recording.Head.Tick;
-             tick = checked(tick + checkpointInterval))
+        int tickRate = initial.TickRate;
+        double spacing = timeline.CheckpointSpacingSeconds;
+        ulong tick = initial.Position.Tick;
+        while (true)
         {
+            double boundary = NextBoundary((double)tick / tickRate, spacing);
+            tick = FirstTickAtOrAfter(boundary, tickRate, tick + 1);
+            if (tick >= archive.Recording.Head.Tick)
+                break;
+
             cancellationToken.ThrowIfCancellationRequested();
             var target = PositionBeforeOperationsAtTick(initial.Position, archive.Recording.Operations, tick);
             world.ReplayRecordingTo(source, archive.Recording, target);
@@ -275,14 +341,18 @@ public sealed class AtmosWorldReplayTimeline
     }
 
     /// <summary>
-    ///     Samples a checkpoint when live advancement has crossed the configured interval.
+    ///     Samples a checkpoint when simulated time has crossed the next multiple of the checkpoint spacing.
     /// </summary>
     /// <remarks>This method has no effect while the timeline is inspecting retained history.</remarks>
     /// <exception cref="ObjectDisposedException">The observed world has been disposed.</exception>
     /// <exception cref="InvalidOperationException">A world tick is executing.</exception>
     public void ObserveLiveState()
     {
-        if (!IsInspecting && Position.Tick - _checkpoints[^1].Checkpoint.Position.Tick >= CheckpointInterval)
+        if (IsInspecting)
+            return;
+
+        double next = NextBoundary(CheckpointTime(_checkpoints[^1].Checkpoint), CheckpointSpacingSeconds);
+        if (_world.SimulatedTime >= next - BoundaryTolerance)
             AddCheckpoint();
     }
 

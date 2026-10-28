@@ -43,22 +43,45 @@ internal static class EulerFaceTopology
         Array.Clear(openMask, 0, chunk.VoxelCount);
         Array.Clear(voidMask, 0, chunk.VoxelCount);
 
-        Int3 dimensions = chunk.Dimensions;
+        int width = chunk.Width;
+        int height = chunk.Height;
+        int rowStride = width;
+        int slabStride = width * height;
         for (int activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
         {
             ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
-            Int3 position = chunk.GetXyzInt3(voxelIndex);
+            int row = voxelIndex / width;
+            int x = voxelIndex - row * width;
+            int z = row / height;
+            int y = row - z * height;
             byte open = 0;
             byte sink = 0;
             for (int direction = 0; direction < NeighborResolution.NeighborDirections.Length; direction++)
             {
-                Int3 neighborPosition = position + NeighborResolution.NeighborDirections[direction];
                 AtmosChunk neighborChunk;
                 ushort neighborIndex;
-                if (neighborPosition.IsWithin(dimensions))
+                bool onEdge = direction switch
                 {
+                    0 => x == 0,
+                    1 => x == width - 1,
+                    2 => y == 0,
+                    3 => y == height - 1,
+                    4 => z == 0,
+                    _ => z == chunk.Depth - 1
+                };
+                if (!onEdge)
+                {
+                    int step = direction switch
+                    {
+                        0 => -1,
+                        1 => 1,
+                        2 => -rowStride,
+                        3 => rowStride,
+                        4 => -slabStride,
+                        _ => slabStride
+                    };
                     neighborChunk = chunk;
-                    neighborIndex = chunk.GetIndexUnsafe(neighborPosition);
+                    neighborIndex = (ushort)(voxelIndex + step);
                 }
                 else
                 {
@@ -84,34 +107,36 @@ internal static class EulerFaceTopology
     }
 
     /// <summary>
-    ///     Records which voxels are air and which x-rows hold only air, so the sweeps do not classify cells again
-    ///     for every bundle of every substep.
+    ///     Records which voxels are air and how far each air voxel's stretch of air reaches along its x-row, so the
+    ///     sweeps do not classify cells again for every bundle of every substep.
     /// </summary>
     /// <param name="chunk">The chunk to classify.</param>
     /// <param name="airMap">Receives one flag per voxel, at least <see cref="AtmosChunk.VoxelCount" /> long.</param>
-    /// <param name="rowAllAir">
-    ///     Receives one flag per x-row (<c>y + z · Height</c>), at least <c>Height · Depth</c> long. Every
-    ///     contiguous run of a sweep bundle is one such row.
+    /// <param name="airRunLength">
+    ///     Receives, per voxel, the number of consecutive air voxels from that voxel to the end of its air span in
+    ///     the x-row, or 0 for a voxel that is not air. It must be at least <see cref="AtmosChunk.VoxelCount" />
+    ///     long. Every contiguous run of a sweep bundle lies in one x-row, so a row is all air when its first
+    ///     voxel's entry equals the chunk width.
     /// </param>
     /// <remarks>
     ///     The room map cannot change while the solver ticks, so one call per binding stays valid for every sweep.
     /// </remarks>
-    internal static void BuildAirMap(AtmosChunk chunk, bool[] airMap, bool[] rowAllAir)
+    internal static void BuildAirMap(AtmosChunk chunk, bool[] airMap, int[] airRunLength)
     {
         int width = chunk.Width;
         int rowCount = chunk.Height * chunk.Depth;
         for (int row = 0; row < rowCount; row++)
         {
-            bool allAir = true;
+            // Walk the row backwards, so each air voxel extends the span of the voxel after it.
             int first = row * width;
-            for (int x = 0; x < width; x++)
+            int span = 0;
+            for (int x = width - 1; x >= 0; x--)
             {
                 bool air = IsAir(chunk, first + x);
                 airMap[first + x] = air;
-                allAir &= air;
+                span = air ? span + 1 : 0;
+                airRunLength[first + x] = span;
             }
-
-            rowAllAir[row] = allAir;
         }
     }
 
@@ -133,6 +158,62 @@ internal static class EulerFaceTopology
         AtmosChunk chunk, ushort voxelIndex, int direction, AtmosChunk neighborChunk, ushort neighborIndex)
     {
         return true;
+    }
+
+    /// <summary>
+    ///     Whether gas can cross from <paramref name="chunk" /> into <paramref name="neighbor" /> anywhere on the chunk
+    ///     face in <paramref name="direction" />.
+    /// </summary>
+    /// <param name="chunk">The chunk whose face is walked.</param>
+    /// <param name="direction">The face's direction slot.</param>
+    /// <param name="neighbor">The registered chunk across the face.</param>
+    /// <returns>
+    ///     <see langword="true" /> when some air voxel on the face meets an air voxel of <paramref name="neighbor" />
+    ///     and <see cref="IsFaceOpen" /> holds for the pair.
+    /// </returns>
+    /// <remarks>
+    ///     This is the test <see cref="Build" /> uses for the open bits of that face, read from the room maps, so it
+    ///     needs no workspace. A void voxel passes nothing on, so a pair with a void side does not count. The result
+    ///     is the same seen from either chunk. The walk stops at the first open pair.
+    /// </remarks>
+    internal static bool HasOpenFace(AtmosChunk chunk, int direction, AtmosChunk neighbor)
+    {
+        FacePlane plane = GetFacePlane(chunk, direction);
+        for (int outer = 0; outer < plane.OuterCount; outer++)
+        {
+            for (int inner = 0; inner < plane.InnerCount; inner++)
+            {
+                ushort voxelIndex = plane.VoxelIndex(inner, outer);
+                if (!IsAir(chunk, voxelIndex))
+                    continue;
+
+                ushort neighborIndex = NeighborIndexAcrossFace(chunk, voxelIndex, direction);
+                if (IsAir(neighbor, neighborIndex) &&
+                    IsFaceOpen(chunk, voxelIndex, direction, neighbor, neighborIndex))
+                    return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    ///     The voxels of the chunk face in <paramref name="direction" />, as a loop over the two axes that span it.
+    /// </summary>
+    /// <remarks>
+    ///     The inner axis is the lower of the two, so the loop visits the face in ascending voxel index.
+    /// </remarks>
+    internal static FacePlane GetFacePlane(AtmosChunk chunk, int direction)
+    {
+        int rowStride = chunk.Width;
+        int slabStride = chunk.Width * chunk.Height;
+        bool high = (direction & 1) != 0;
+        return (direction >> 1) switch
+        {
+            0 => new FacePlane(high ? chunk.Width - 1 : 0, chunk.Height, rowStride, chunk.Depth, slabStride),
+            1 => new FacePlane(high ? (chunk.Height - 1) * rowStride : 0, chunk.Width, 1, chunk.Depth, slabStride),
+            _ => new FacePlane(high ? (chunk.Depth - 1) * slabStride : 0, chunk.Width, 1, chunk.Height, rowStride)
+        };
     }
 
     /// <summary>
@@ -200,4 +281,16 @@ internal static class EulerFaceTopology
         int room = chunk.VoxelRoomMap[voxelIndex];
         return VoxelClassification.IsAirRoom(room);
     }
+}
+
+/// <summary>
+///     The voxels of one chunk face as a 2D loop: a start voxel, then an inner and an outer axis with their counts
+///     and strides. See <see cref="EulerFaceTopology.GetFacePlane" />.
+/// </summary>
+internal readonly record struct FacePlane(int Start, int InnerCount, int InnerStride, int OuterCount, int OuterStride)
+{
+    /// <summary>
+    ///     The flat index of the voxel at one position of the loop.
+    /// </summary>
+    internal ushort VoxelIndex(int inner, int outer) => (ushort)(Start + outer * OuterStride + inner * InnerStride);
 }

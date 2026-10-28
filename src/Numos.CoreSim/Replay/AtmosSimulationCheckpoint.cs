@@ -30,18 +30,19 @@ public sealed partial class AtmosSimulationCheckpoint
     ///     Version 7 added the three per-voxel momentum arrays to every chunk checkpoint. Version 8 writes each chunk as
     ///     a field-id state payload and hashes it with the same encoding as the wire.
     ///     Version 9 derives each field id from the member name. Version 10 generates the checkpoint from the
-    ///     kernel's and chunk's <c>[NumosSerialize]</c> members.
+    ///     kernel's and chunk's <c>[NumosSerialize]</c> members. Version 11 adds the Euler settle count.
     /// </remarks>
-    public const int CurrentFormatVersion = 10;
+    public const int CurrentFormatVersion = 11;
 
     /// <summary>
     ///     Identifies the structural and deterministic-math contract required to restore this data.
     /// </summary>
     /// <remarks>
     ///     Version 4 goes with format 7: the momentum arrays are part of the hashed chunk state, so a version-3
-    ///     digest can never match one computed here even for a world with no momentum anywhere.
+    ///     digest can never match one computed here even for a world with no momentum anywhere. Version 5 goes with
+    ///     format 11: the Euler settle count decides which ticks run the settle pass, so it is part of the hashed state.
     /// </remarks>
-    public const int CurrentCompatibilityVersion = 4;
+    public const int CurrentCompatibilityVersion = 5;
 
     // Every member is immutable once constructed, so the digest only needs computing once. The flag is written after
     // the digest so a reader that sees it set also sees the digest.
@@ -95,6 +96,12 @@ public sealed partial class AtmosSimulationCheckpoint
 
         if (CompatibilityVersion != CurrentCompatibilityVersion)
             throw new InvalidDataException("The simulation checkpoint compatibility version is unsupported.");
+
+        if (EulerSettleTicks < 0)
+            throw new InvalidDataException("The Euler settle count cannot be negative.");
+
+        if (EulerSweepPhase is < 0 or >= 6)
+            throw new InvalidDataException("The Euler sweep phase must be in [0, 6).");
     }
 }
 

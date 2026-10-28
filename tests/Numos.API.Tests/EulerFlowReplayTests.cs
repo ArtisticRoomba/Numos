@@ -104,7 +104,7 @@ public sealed class EulerFlowReplayTests
             VoxelVolume = 1f,
             DefaultDiffusionCoefficient = 0f,
             VacuumThreshold = 0f,
-            SleepThreshold = 6,
+            SleepDelay = 0.3f,
             SleepEpsilon = 0.5f,
             GasRegistry =
             [

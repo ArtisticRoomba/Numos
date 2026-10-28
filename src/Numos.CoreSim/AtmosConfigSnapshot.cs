@@ -54,7 +54,8 @@ public sealed class AtmosConfigSnapshot : IAtmosConfig
                 : AtmosConfigDefaults.SpaceTemperature,
             BulkFlowCoefficient = FloatMath.ClampUnitInterval(source.BulkFlowCoefficient),
             VacuumThreshold = FloatMath.GetNonnegativeFinite(source.VacuumThreshold),
-            SleepThreshold = Math.Max(0, source.SleepThreshold),
+            // Positive infinity stays: it saturates to "never sleep" when converted to ticks.
+            SleepDelay = source.SleepDelay >= 0f ? source.SleepDelay : 0f,
             SleepEpsilon = FloatMath.GetNonnegativeFinite(source.SleepEpsilon),
             ThermalConductance = FloatMath.IsFinitePositive(source.ThermalConductance)
                 ? source.ThermalConductance
@@ -151,8 +152,8 @@ public sealed class AtmosConfigSnapshot : IAtmosConfig
     public Scalar BulkFlowCoefficient => Fields.BulkFlowCoefficient;
     /// <inheritdoc cref="AtmosConfig.VacuumThreshold" />
     public Pascal VacuumThreshold => Fields.VacuumThreshold;
-    /// <inheritdoc cref="AtmosConfig.SleepThreshold" />
-    public int SleepThreshold => Fields.SleepThreshold;
+    /// <inheritdoc cref="AtmosConfig.SleepDelay" />
+    public Second SleepDelay => Fields.SleepDelay;
     /// <inheritdoc cref="AtmosConfig.SleepEpsilon" />
     public Scalar SleepEpsilon => Fields.SleepEpsilon;
     /// <inheritdoc cref="AtmosConfig.ThermalConductance" />

@@ -23,7 +23,7 @@ public sealed class EulerSpeciesRowTests
     {
         const int size = 4;
         var config = CreateConfig();
-        var simulation = new AtmosSimulation(config, size, size, size);
+        var simulation = new AtmosSimulation(config, size, size, size, tickRate: SimTestHelpers.PinnedTickRate);
         using var _ = simulation;
         simulation.World.Solvers.ResetToDefaults(AtmosTransportModel.Euler);
         var left = SimTestHelpers.CreateOpenChunk(simulation, default);
@@ -131,7 +131,7 @@ public sealed class EulerSpeciesRowTests
                 AtmosPhysicalConstants.IdealDiatomicMolarHeatCapacityAtConstantVolume,
             VoxelVolume = 1f,
             VacuumThreshold = 0f,
-            SleepThreshold = int.MaxValue,
+            SleepDelay = float.MaxValue,
             SleepEpsilon = 0f
         };
 
@@ -146,7 +146,7 @@ public sealed class EulerSpeciesRowTests
             });
         }
 
-        config.SolverConfigurations.Add(new EulerFlowConfig { MaxSubstepsPerTick = 0 });
+        config.SolverConfigurations.Add(new EulerFlowConfig { MaxSubstepsPerSecond = 0 });
         return config;
     }
 

@@ -72,7 +72,7 @@ public sealed class AtmosWorldServicesTests
         simulation.World.Services.Register<ICollection<int>>(ticks);
         simulation.World.Solvers.Register(
             "use-service",
-            context => context.World.Services.Get<ICollection<int>>().Add(context.TickCount));
+            context => context.World.Services.Get<ICollection<int>>().Add(checked((int)context.TickCount)));
 
         simulation.Tick();
         simulation.Tick();

@@ -26,11 +26,21 @@ public sealed class EulerShockTubeTests
     private const float RightDensity = 0.125f;
     private const float RightPressure = 1e3f;
 
-    [Test]
-    public void SodShockTube_MatchesTheExactRiemannSolution()
+    // Each write-back rounds every cell to float, so 48 times as many calls leave 7e-6 percent of the moles off when
+    // the stage runs on every 960 Hz tick. An interval of 0 keeps the default schedule.
+    [TestCase(20, Ticks, 0, 1e-6)]
+    [TestCase(960, Ticks * 48, 0, 1e-5)]
+    [TestCase(960, Ticks * 48, 1, 1e-5)]
+    public void SodShockTube_MatchesTheExactRiemannSolution(
+        int tickRate, int ticks, int eulerInterval, double molesTolerancePercent)
     {
         var config = SimTestHelpers.CreateEulerConfig();
-        using var simulation = SimTestHelpers.CreateEulerSimulation(config, Length, 1, 1, out var chunk);
+        using var simulation = SimTestHelpers.CreateEulerSimulation(
+            config, Length, 1, 1, out var chunk, tickRate: tickRate);
+        if (eulerInterval > 0)
+            simulation.World.Solvers.SetInterval(AtmosBuiltInSolvers.EulerFlow, eulerInterval);
+
+        int interval = simulation.World.Solvers.Steps.Single(static step => step.Name == AtmosBuiltInSolvers.EulerFlow).Interval;
         FillSod(simulation, chunk, (x, y, z) => (x, y, z), mirrored: false);
         var initial = simulation.GetChunkSnapshot(chunk);
         double initialMoles = SimTestHelpers.TotalMoles(initial);
@@ -38,14 +48,20 @@ public sealed class EulerShockTubeTests
 
         var exact = new ExactRiemannSolver(LeftDensity, 0d, LeftPressure, RightDensity, 0d, RightPressure, Gamma);
         double time = 0d;
-        for (int tick = 0; tick < Ticks; tick++)
+        for (int tick = 0; tick < ticks; tick++)
         {
             simulation.Tick();
             AtmosFlowDiagnostics flow = simulation.LastFlowDiagnostics;
-            time += flow.SimulatedSeconds;
-            TestContext.Out.WriteLine(
-                $"tick {tick}: substeps={flow.Substeps} simulated={flow.SimulatedSeconds:R} courant={flow.MaxCourantNumber:F3} " +
-                $"lambda={flow.MaxSignalSpeed:F1} clamps={flow.ClampedVelocityCount} negE={flow.NegativeInternalEnergyCount} negN={flow.NegativeMolesCount}");
+            // The diagnostics stay from the stage's last run until it runs again.
+            if (simulation.TickCount % interval == 0)
+                time += flow.SimulatedSeconds;
+
+            if (tick % 24 == 0)
+            {
+                TestContext.Out.WriteLine(
+                    $"tick {tick}: substeps={flow.Substeps} simulated={flow.SimulatedSeconds:R} courant={flow.MaxCourantNumber:F3} " +
+                    $"lambda={flow.MaxSignalSpeed:F1} clamps={flow.ClampedVelocityCount} negE={flow.NegativeInternalEnergyCount} negN={flow.NegativeMolesCount}");
+            }
 
             Assert.That(flow.SubstepCapEngaged, Is.False);
             Assert.That(flow.ClampedVelocityCount, Is.Zero);
@@ -119,7 +135,7 @@ public sealed class EulerShockTubeTests
             Assert.That(leftStarCells, Is.GreaterThan(4));
             Assert.That(rightStarCells, Is.GreaterThan(4));
             Assert.That(densityError, Is.LessThan(0.03d * Length));
-            Assert.That(SimTestHelpers.TotalMoles(snapshot), Is.EqualTo(initialMoles).Within(1e-6).Percent);
+            Assert.That(SimTestHelpers.TotalMoles(snapshot), Is.EqualTo(initialMoles).Within(molesTolerancePercent).Percent);
             Assert.That(
                 SimTestHelpers.TotalEulerEnergy(config, snapshot),
                 Is.EqualTo(initialEnergy).Within(1e-4).Percent);
@@ -202,7 +218,7 @@ public sealed class EulerShockTubeTests
     [Test]
     public void SubstepCap_CutsTheTickShortAndReportsIt()
     {
-        var config = SimTestHelpers.CreateEulerConfig(new EulerFlowConfig { MaxSubstepsPerTick = 2 });
+        var config = SimTestHelpers.CreateEulerConfig(new EulerFlowConfig { MaxSubstepsPerSecond = 40 });
         using var simulation = SimTestHelpers.CreateEulerSimulation(config, Length, 1, 1, out var chunk);
         FillSod(simulation, chunk, (x, y, z) => (x, y, z), mirrored: false);
 
@@ -221,7 +237,7 @@ public sealed class EulerShockTubeTests
     [Test]
     public void NoSubstepCap_SimulatesTheWholeTickWithinTheCourantNumber()
     {
-        var config = SimTestHelpers.CreateEulerConfig(new EulerFlowConfig { MaxSubstepsPerTick = 0, CourantNumber = 0.5f });
+        var config = SimTestHelpers.CreateEulerConfig(new EulerFlowConfig { MaxSubstepsPerSecond = 0, CourantNumber = 0.5f });
         using var simulation = SimTestHelpers.CreateEulerSimulation(config, Length, 1, 1, out var chunk);
         FillSod(simulation, chunk, (x, y, z) => (x, y, z), mirrored: false);
 
@@ -232,7 +248,7 @@ public sealed class EulerShockTubeTests
         TestContext.Out.WriteLine($"first: {first}");
         TestContext.Out.WriteLine($"second: {second}");
 
-        double fixedTimeStep = AtmosSolverConstants.FixedTimeStep;
+        double fixedTimeStep = 1f / simulation.World.TickRate;
         Assert.Multiple(() =>
         {
             Assert.That(first.SubstepCapEngaged, Is.False);

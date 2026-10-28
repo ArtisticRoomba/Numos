@@ -14,7 +14,7 @@ public sealed class AtmosWorldReplayTimelineTests
         using var world = new AtmosWorld();
         var simulation = world.CreateSimulation(1, 1, 1);
         var chunk = simulation.CreateAndRegisterChunk(default);
-        var timeline = new AtmosWorldReplayTimeline(world, 2);
+        var timeline = new AtmosWorldReplayTimeline(world, 0.1);
         simulation.SetVoxelTemperature(chunk, 0, 300f);
         world.Tick();
         var tickOne = world.ComputeStateHash();
@@ -56,7 +56,7 @@ public sealed class AtmosWorldReplayTimelineTests
         var chunk = simulation.CreateAndRegisterChunk(default);
         world.StartRecording();
         simulation.SetVoxelTemperature(chunk, 0, 300f);
-        var timeline = new AtmosWorldReplayTimeline(world, 1);
+        var timeline = new AtmosWorldReplayTimeline(world, 0.05);
         world.Tick();
         var boundary = world.ComputeStateHash();
         simulation.SetVoxelTemperature(chunk, 0, 330f);
@@ -74,7 +74,7 @@ public sealed class AtmosWorldReplayTimelineTests
         using var world = new AtmosWorld();
         var simulation = world.CreateSimulation(1, 1, 1);
         var chunk = simulation.CreateAndRegisterChunk(default);
-        var timeline = new AtmosWorldReplayTimeline(world, 1);
+        var timeline = new AtmosWorldReplayTimeline(world, 0.05);
         simulation.SetVoxelTemperature(chunk, 0, 300f);
         world.Tick();
         var selected = world.ComputeStateHash();
@@ -185,8 +185,8 @@ public sealed class AtmosWorldReplayTimelineTests
                     new GasProperties { Name = "A", DiffusionCoefficient = 0.025f },
                     new GasProperties { Name = "B", MolarHeatCapacityAtConstantVolume = 30f }
                 ],
-                SleepThreshold = 8
-            });
+                SleepDelay = 0.4f
+            }, AtmosTransportModel.Euler, 20);
 
         var simulation = world.CreateSimulation(4, 3, 2);
         var first = simulation.CreateAndRegisterChunk(default);
@@ -195,7 +195,7 @@ public sealed class AtmosWorldReplayTimelineTests
         simulation.AddGasToVoxel(first, 0, 0, 5f, 290f);
         simulation.AddGasToVoxel(second, 3, 0, 2f, 310f);
 
-        timeline = new AtmosWorldReplayTimeline(world, 4);
+        timeline = new AtmosWorldReplayTimeline(world, 0.2);
         live = new Dictionary<AtmosTimelinePosition, AtmosWorldStateHash>();
         Capture(world, live);
         for (int tick = 1; tick <= 12; tick++)
@@ -237,5 +237,50 @@ public sealed class AtmosWorldReplayTimelineTests
     {
         var hash = world.ComputeStateHash();
         live.Add(hash.Position, hash);
+    }
+
+    [TestCase(20)]
+    [TestCase(960)]
+    public void Checkpoints_FollowTimeSpacingAtAnyTickRate(int tickRate)
+    {
+        using var world = new AtmosWorld(new AtmosConfig(), AtmosTransportModel.Legacy, tickRate);
+        world.CreateSimulation(1, 1, 1);
+        var timeline = new AtmosWorldReplayTimeline(world, 0.5);
+        for (int tick = 0; tick < tickRate * 2; tick++)
+        {
+            world.Tick();
+            timeline.ObserveLiveState();
+        }
+
+        var times = timeline.Checkpoints.Select(point => timeline.TimeAt(point.Hash.Position.Tick)).ToArray();
+        Assert.That(times, Is.EqualTo(new[] { 0d, 0.5d, 1d, 1.5d, 2d }).Within(1e-9));
+    }
+
+    [Test]
+    public void Checkpoints_DefaultSpacingIsTwoAndAHalfSeconds()
+    {
+        using var world = new AtmosWorld(new AtmosConfig(), AtmosTransportModel.Legacy, 960);
+        world.CreateSimulation(1, 1, 1);
+        var timeline = new AtmosWorldReplayTimeline(world);
+        for (int tick = 0; tick < 960 * 5; tick++)
+        {
+            world.Tick();
+            timeline.ObserveLiveState();
+        }
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(timeline.CheckpointSpacingSeconds, Is.EqualTo(2.5d));
+            Assert.That(timeline.Checkpoints, Has.Count.EqualTo(3));
+        });
+    }
+
+    [TestCase(0d)]
+    [TestCase(-1d)]
+    [TestCase(double.NaN)]
+    public void Constructor_RejectsANonPositiveSpacing(double spacing)
+    {
+        using var world = new AtmosWorld();
+        Assert.That(() => new AtmosWorldReplayTimeline(world, spacing), Throws.TypeOf<ArgumentOutOfRangeException>());
     }
 }

@@ -120,8 +120,19 @@ Sequences increase while recording, under the same state gate that the mutation 
 recording interval starts. `StartRecording()` clears the retained operation list for that interval, but not the
 sequence. Sequence zero means that the world has not incorporated a recorded external operation.
 
-The public `TickCount` remains an `int`. Positions use `ulong`. Restore and replay reject targets beyond `int.MaxValue`,
-and live tick advancement checks for overflow.
+The public `TickCount` is a `long`, because an `int` overflows after about 25.9 days of simulated time at 960 Hz.
+Positions use `ulong`. Restore and replay reject targets beyond `long.MaxValue`, and live tick advancement checks for
+overflow.
+
+### Ticks count steps, `SimulatedTime` counts seconds
+
+A tick is one fixed step of the world. Its length is `1 / TickRate` seconds, and the default rate is 960 Hz. Positions
+and operation stamps use ticks, because a tick is exact and an integer. `AtmosWorld.SimulatedTime` converts to
+seconds for display and for host logic.
+
+The tick rate is fixed when the world is created, so tick `N` is always at `N / TickRate` seconds. A checkpoint stores
+the rate, and a restore adopts it. `AtmosWorldReplayTimeline.TimeAt(tick)` applies the same division with the start
+checkpoint's rate.
 
 ## Recording stores external causes
 
@@ -156,6 +167,8 @@ grid's data:
 | Timeline              | World      | Captures the completed tick and last semantic operation sequence.                                                                                                          |
 | Applied configuration | World      | Captures normalized scalar settings, ordered gas definitions, and immutable solver configurations. Gas IDs keep their existing index meaning; restore does not remap them. |
 | Solver pipeline       | World      | Captures names, custom/built-in kinds, execution order, enable flags, and neighbor-selection keys. Restore installs the built-in layout and validates the custom stages.   |
+| Tick rate             | World      | Captures `TickRate`. |
+| Stage schedule        | World      | Captures each stage's interval, next due tick, and last run tick. |
 | Solver state          | World      | Captures every class solver's `[NumosSerialize]` members, keyed by solver name in pipeline order. Delegates and solvers without marked members have no entry.              |
 | Membership, topology  | World      | Captures simulation registry generations, link-set slots in every lifecycle state, and the applied topology version.                                                       |
 | Chunk storage         | Simulation | Captures position, dimensions, awake state, sleep timer, classifications, temperatures, per-voxel momentum (three components), valid gas channels, and per-voxel moles.    |
@@ -168,8 +181,8 @@ detached copies. The current implementation has no copy-on-write storage, delta 
 `AtmosSimulationCheckpoint.PayloadBytes` reports bytes in copied chunk and solver arrays. It excludes managed object
 headers and field names.
 
-The world checkpoint schema is `AtmosWorldCheckpoint.CurrentFormatVersion` 14. The grid schema inside it is format
-version 10, compatibility version 4. Replay is experimental, so Numos rejects older in-memory checkpoint schemas instead
+The world checkpoint schema is `AtmosWorldCheckpoint.CurrentFormatVersion` 15. The grid schema inside it is format
+version 11, compatibility version 5. Replay is experimental, so Numos rejects older in-memory checkpoint schemas instead
 of translating them. The version history is:
 
 - World 6 added the reference and per-gas molar masses to the configuration section.
@@ -190,6 +203,13 @@ of translating them. The version history is:
 - World 13 moved `EulerFlowConfig` from a fixed hand-written layout to field-id records.
 - World 14 added the default and per-gas thermal conductivity, the ignition settings, and the reaction ignition flag to
   the configuration. It also added the `SetIgnitionSource` operation (opcode 15).
+- World 15 added the tick rate and the schedule of each solver stage (interval, next due tick, and last run tick). It replaced the configuration's `SleepThreshold` (int, ticks) with `SleepDelay`
+  (float, seconds). The `SetSolverLayout` operation (opcode 8) writes an int32 interval after each entry's enabled
+  flag.
+- Grid 11 and compatibility 5 added the Euler settle count and the Euler sweep phase to the grid checkpoint. The
+  settle count is the number of ticks the `euler-flow` stage has covered since its last settle pass. The sweep phase
+  is the position in the six-order sweep cycle, in [0, 6), advanced once per substep. `SleepTimer` counts ticks, and
+  a stage that runs every `n` ticks adds `n` per run.
 
 ### Checkpoints are generated from the live types
 
@@ -285,9 +305,10 @@ Some data stays outside the checkpoint:
 - `ChunkField<T>` storage registered without `rollback: true` is transient. Restore discards it.
 - Profiling values, recorder bookkeeping, object identities, chunk generations, and presentation revisions are not
   authoritative simulation state. `AtmosSimulation.LastFlowDiagnostics` is one of these: a restore zeroes it.
-- The `euler-flow` stage carries nothing between ticks except the chunks' momentum arrays, which are checkpointed.
-  Its pooled buffers, activated chunks, and sweep order are rebuilt every tick from the checkpointed chunk fields,
-  configuration, and tick count, so a restored world sweeps exactly as the original run did.
+- The `euler-flow` stage carries the chunks' momentum arrays, the settle count, and the sweep phase between ticks, and
+  the checkpoint holds all three. The sweep phase is a counter in [0, 6) that advances once per substep and picks the
+  axis order. Its pooled buffers and activated chunks are rebuilt on every run from the checkpointed state, so a
+  restored world sweeps exactly as the original run did.
 
 When a detached mixture transfers gas into a voxel, the recording stores the resulting voxel state (`SetVoxelMixtureOperation`). That state includes the voxel's momentum,
 which the kernel zeroes when the write empties the voxel. Replaying that
@@ -487,10 +508,11 @@ effects that already escaped the simulation.
 
 `AtmosWorldReplayTimeline` adds checkpoint retention and seek behavior, and it does not depend on the Viewer. It adopts an
 existing world recording or starts one, and it captures the initial state. It takes another checkpoint whenever
-`ObserveLiveState()` sees that the configured tick interval has elapsed. The default interval is 50 completed ticks.
+`ObserveLiveState()` sees that the configured spacing has elapsed in simulated time. The default spacing is 2.5 s at any
+tick rate.
 
 ```csharp
-var timeline = new AtmosWorldReplayTimeline(world, checkpointInterval: 50);
+var timeline = new AtmosWorldReplayTimeline(world, checkpointSpacingSeconds: 2.5);
 
 world.Update(elapsedSeconds);
 timeline.ObserveLiveState(); // Call after each live host-loop update.
@@ -610,14 +632,21 @@ reader that predates an opcode rejects a file that contains it.
 ### Ignite a voxel
 
 `AtmosSimulation.IgniteVoxel` records one `SetIgnitionSourceOperation` (opcode 15). The operation holds the voxel, the
-source temperature, and the source volume. Replay applies it before the next tick, as the original call did.
+source temperature, and the source volume. Replay applies it before the next tick, as the original call did. The source lasts until the next `gas-reactions`
+pass, which at the default schedule can be up to 50 ms later.
 
 ### Change the solver layout while recording
 
 A tool such as a pipeline editor needs to switch transport models or reorder stages in the middle of a session. Numos
 allows this because each built-in stage is a named piece of code that Numos can recreate. `AtmosWorldSolverPipeline.SetLayout`
-takes the full ordered list of `(name, enabled)` entries and records one `SetAtmosWorldSolverLayoutOperation` (opcode 8).
-A call that changes nothing records nothing.
+takes the full ordered list of `(name, enabled, interval)` entries and records one `SetAtmosWorldSolverLayoutOperation`
+(opcode 8). An interval of zero keeps the stage's current interval. A call that changes nothing records nothing.
+`SetInterval` changes one stage's interval and records the same operation with every interval filled in. Registering a
+custom stage with an interval stays rejected during recording, like any registration.
+
+The operation stores resolved intervals, never zero. A checkpoint stores them too. A replay or restore therefore keeps the
+original schedule even when a later Numos version changes a default interval. For example, an archive from before
+`euler-flow` defaulted to 60 runs per second still runs it on every tick.
 
 Custom stages are different. The checkpoint stores a custom stage's name but not its delegate, so a replay can only
 reuse a registration that already exists. `SetLayout` therefore requires every registered custom stage in the list and
@@ -712,11 +741,11 @@ NumosWorldReplaySerializer.Serialize(destination, new NumosWorldReplayDocument(m
 
 A `.numos` replay contains a small provenance header, one complete initial world checkpoint, and length-prefixed
 semantic opcodes. It stores initial and final state hashes. The Viewer verifies both hashes. After loading, the Viewer
-generates scrub checkpoints every 50 ticks, so those large acceleration snapshots never enter the file.
+generates scrub checkpoints every 2.5 s of simulated time, so those large acceleration snapshots never enter the file.
 
-The checkpoint section holds the world checkpoint format version (14) and the archive's initial and head hashes. It ends
+The checkpoint section holds the world checkpoint format version (15) and the archive's initial and head hashes. It ends
 with the generated payload of the checkpoint and its length. Each simulation inside carries the grid format version
-(10). A file from an older layout fails to load with an unsupported-schema error. Numos does not misread it. The
+(11). A file from an older layout fails to load with an unsupported-schema error. Numos does not misread it. The
 version history above lists the layout changes.
 Viewer branch graphs are session state. Saving writes the selected branch, either through its preserved head or through
 the current inspection position. Save branches individually when more than one future must survive closing the project.

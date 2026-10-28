@@ -135,7 +135,7 @@ internal static class ReplayHistory
         IReadOnlyList<AtmosWorldRecordedOperation> history,
         AtmosTimelinePosition target)
     {
-        var error = target.Tick > int.MaxValue
+        var error = target.Tick > long.MaxValue
             ? ReplayHistoryError.TargetBeforeStart
             : Validate(start, history, target, false);
 

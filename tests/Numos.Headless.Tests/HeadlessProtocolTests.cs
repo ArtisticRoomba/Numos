@@ -311,7 +311,7 @@ public sealed class HeadlessProtocolTests
         var run = await RunAsync(
             CreateProject("create", 2, 1, 1),
             Request("courant", "updateConfig", "\"config\":{\"eulerFlow\":{\"courantNumber\":1.5}}"),
-            Request("substeps", "updateConfig", "\"config\":{\"eulerFlow\":{\"maxSubstepsPerTick\":-1}}"),
+            Request("substeps", "updateConfig", "\"config\":{\"eulerFlow\":{\"maxSubstepsPerSecond\":-1}}"),
             Request("linkArea", "updateConfig", "\"config\":{\"eulerFlow\":{\"defaultLinkAreaFraction\":2}}"),
             Request("molarMass", "updateConfig", "\"config\":{\"referenceMolarMassKgPerMol\":0}"),
             Request("config", "getConfig"));
@@ -602,6 +602,97 @@ public sealed class HeadlessProtocolTests
                 Is.Not.EqualTo(run.Result("one").GetProperty("stateHash").GetString()));
 
             Assert.That(run.ErrorCode("missing"), Is.EqualTo("simulationNotFound"));
+        });
+    }
+
+    [Test]
+    public async Task CreateProject_TickRate_SetsTheWorldRateAndRejectsBadValues()
+    {
+        var run = await RunAsync(
+            Request("bad", "createProject", $"\"chunkDimensions\":{C(2, 1, 1)},\"tickRate\":30"),
+            Request("create", "createProject", $"\"chunkDimensions\":{C(2, 1, 1)},\"tickRate\":960"),
+            Request("tick", "tick", "\"count\":960"));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(run.ErrorCode("bad"), Is.EqualTo("invalidRequest"));
+            Assert.That(run.Find("create").GetProperty("state").GetProperty("tickRate").GetInt32(), Is.EqualTo(960));
+            Assert.That(run.Find("tick").GetProperty("state").GetProperty("simulatedTime").GetDouble(), Is.EqualTo(1d).Within(1e-9));
+        });
+    }
+
+    [Test]
+    public async Task TickRate_FromCreateProject_SurvivesSaveAndLoad()
+    {
+        string path = PathFor("rate.numos");
+        var save = await RunAsync(
+            Request("create", "createProject", $"\"chunkDimensions\":{C(2, 1, 1)},\"tickRate\":40"),
+            Request("bad", "createProject", $"\"chunkDimensions\":{C(2, 1, 1)},\"tickRate\":33"),
+            Request("b", "tick", "\"count\":80"),
+            Request("save", "saveReplay", $"\"path\":\"{path}\""));
+
+        var load = await RunAsync(
+            Request("load", "loadReplay", $"\"path\":\"{path}\",\"atHead\":true"));
+
+        var saved = save.Find("b").GetProperty("state");
+        var loaded = load.Find("load").GetProperty("state");
+        Assert.Multiple(() =>
+        {
+            Assert.That(save.ErrorCode("bad"), Is.EqualTo("invalidRequest"));
+            Assert.That(saved.GetProperty("simulatedTime").GetDouble(), Is.EqualTo(2d).Within(1e-9));
+            Assert.That(loaded.GetProperty("tickRate").GetInt32(), Is.EqualTo(40));
+            Assert.That(loaded.GetProperty("simulatedTime").GetDouble(), Is.EqualTo(2d).Within(1e-9));
+        });
+    }
+
+    [Test]
+    public async Task Tick_Seconds_ConvertsAtTheCurrentRate()
+    {
+        var run = await RunAsync(
+            Request("create", "createProject", $"\"chunkDimensions\":{C(2, 1, 1)},\"tickRate\":960"),
+            Request("tick", "tick", "\"seconds\":0.5"),
+            Request("both", "tick", "\"seconds\":1,\"count\":1"),
+            Request("neither", "tick"),
+            Request("tiny", "tick", "\"seconds\":0.0001"),
+            Request("huge", "tick", "\"seconds\":100000"));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(run.Result("tick").GetProperty("ticksExecuted").GetInt32(), Is.EqualTo(480));
+            Assert.That(run.Find("tick").GetProperty("state").GetProperty("tick").GetInt32(), Is.EqualTo(480));
+            Assert.That(run.ErrorCode("both"), Is.EqualTo("invalidTickCount"));
+            Assert.That(run.ErrorCode("neither"), Is.EqualTo("invalidTickCount"));
+            Assert.That(run.ErrorCode("tiny"), Is.EqualTo("invalidTickCount"));
+            Assert.That(run.ErrorCode("huge"), Is.EqualTo("invalidTickCount"));
+        });
+    }
+
+    [Test]
+    public async Task SolverIntervals_AreListedSetAndLaidOut()
+    {
+        var run = await RunAsync(
+            CreateProject("create", 2, 1, 1),
+            Request("list", "listSolvers"),
+            Request("set", "setSolverInterval", "\"solver\":\"advection\",\"interval\":4"),
+            Request("zero", "setSolverInterval", "\"solver\":\"advection\",\"interval\":0"),
+            Request("unknown", "setSolverInterval", "\"solver\":\"nope\",\"interval\":2"),
+            Request("layout", "setSolverLayout", "\"stages\":[{\"name\":\"advection\",\"enabled\":true,\"interval\":8},{\"name\":\"boundary-flow\",\"enabled\":true}]"),
+            Request("after", "listSolvers"));
+
+        int Interval(string id, string name)
+        {
+            return run.Result(id).GetProperty("solvers").EnumerateArray()
+                .Single(step => step.GetProperty("name").GetString() == name)
+                .GetProperty("interval").GetInt32();
+        }
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(Interval("list", "advection"), Is.EqualTo(1));
+            Assert.That(run.Result("set").GetProperty("changed").GetBoolean(), Is.True);
+            Assert.That(run.ErrorCode("zero"), Is.EqualTo("invalidRequest"));
+            Assert.That(run.ErrorCode("unknown"), Is.EqualTo("solverNotFound"));
+            Assert.That(Interval("after", "advection"), Is.EqualTo(8));
         });
     }
 }

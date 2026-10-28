@@ -364,7 +364,7 @@ public partial class SimulationViewer
         ReconcileSimulationSurfaces();
         _isPaused = true;
         _showTimelinePanel = true;
-        _timelineFirstTick = checked((int)loaded.Timeline.Start.Tick);
+        _timelineFirstTick = checked((long)loaded.Timeline.Start.Tick);
         _frameSceneOnNextPresentation = true;
         RequestNextFrame();
     }

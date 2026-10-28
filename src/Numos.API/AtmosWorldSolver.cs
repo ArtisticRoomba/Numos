@@ -15,7 +15,7 @@ public delegate void AtmosWorldSolver(AtmosWorldSolverContext context);
 /// <remarks>
 ///     <para>
 ///         Register an instance with
-///         <see cref="AtmosWorldSolverPipeline.Register(string, IAtmosWorldSolver, AtmosNeighborSelection?, string?, string?)" />.
+///         <see cref="AtmosWorldSolverPipeline.Register(string, IAtmosWorldSolver, AtmosNeighborSelection?, string?, string?, int)" />.
 ///         The caller owns the instance. Numos never clones or disposes it. The pipeline's checkpoint metadata is the
 ///         same as for a delegate registered under the same name.
 ///     </para>
@@ -221,7 +221,22 @@ public sealed class AtmosWorldSolverContext
     /// <summary>
     ///     Gets the one-based world tick currently being executed.
     /// </summary>
-    public int TickCount => checked(World.TickCount + 1);
+    public long TickCount => checked(World.TickCount + 1);
+
+    /// <summary>
+    ///     Gets how many ticks pass between runs of this stage.
+    /// </summary>
+    public int Interval => _solverScope.Interval;
+
+    /// <summary>
+    ///     Gets the atmospheric time this run covers, in seconds.
+    /// </summary>
+    /// <remarks>
+    ///     The time since the stage last ran, which is <see cref="Interval" /> divided by
+    ///     <see cref="AtmosWorld.TickRate" /> while neither changes. Scale rates by this value instead of assuming a
+    ///     fixed step.
+    /// </remarks>
+    public float DeltaTime => _solverScope.DeltaTime;
 
     /// <summary>
     ///     Gets the immutable configuration captured for this tick.
@@ -239,7 +254,7 @@ public sealed class AtmosWorldSolverContext
     /// <remarks>
     ///     A stage registered without a neighbor selection receives an empty view here. The view has no Cartesian
     ///     neighbors and no explicit edges, and access does not throw. Pass <c>neighbors</c> to
-    ///     <see cref="AtmosWorldSolverPipeline.Register(string, AtmosWorldSolver, AtmosNeighborSelection?, string?, string?)" />
+    ///     <see cref="AtmosWorldSolverPipeline.Register(string, AtmosWorldSolver, AtmosNeighborSelection?, string?, string?, int)" />
     ///     whenever the callback needs this property.
     /// </remarks>
     public AtmosWorldNeighborTopology Topology { get; }
@@ -321,15 +336,21 @@ public sealed class AtmosWorldSolverContext
 /// <param name="Kind">Whether Numos or the caller supplied the implementation.</param>
 /// <param name="IsEnabled">Whether the stage participates in subsequent ticks.</param>
 /// <param name="NeighborSelectionKey">The compiled-neighborhood policy key, or <see langword="null" />.</param>
+/// <param name="Interval">How many ticks pass between runs of the stage.</param>
 public readonly record struct AtmosWorldSolverStep(
     string Name,
     AtmosWorldSolverKind Kind,
     bool IsEnabled,
-    string? NeighborSelectionKey);
+    string? NeighborSelectionKey,
+    int Interval);
 
 /// <summary>
 ///     One stage of a requested solver layout.
 /// </summary>
 /// <param name="Name">A built-in stage name or the name of a registered custom stage.</param>
 /// <param name="Enabled">Whether the stage participates in subsequent ticks.</param>
-public readonly record struct AtmosWorldSolverLayoutEntry(string Name, bool Enabled);
+/// <param name="Interval">
+///     How many ticks pass between runs of the stage. Zero keeps the current interval of a registered stage and gives
+///     a new built-in stage its default.
+/// </param>
+public readonly record struct AtmosWorldSolverLayoutEntry(string Name, bool Enabled, int Interval = 0);

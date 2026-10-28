@@ -53,8 +53,10 @@ public sealed partial class EulerFlowConfig : IAtmosSolverConfiguration
     {
         ArgumentNullException.ThrowIfNull(source);
         CourantNumber = source.CourantNumber;
-        MaxSubstepsPerTick = source.MaxSubstepsPerTick;
+        MaxSubstepsPerSecond = source.MaxSubstepsPerSecond;
+        SettlePeriod = source.SettlePeriod;
         VelocityFloor = source.VelocityFloor;
+        SleepSpeed = source.SleepSpeed;
         MaxVelocity = source.MaxVelocity;
         WakePressureDelta = source.WakePressureDelta;
         AllMachCorrection = source.AllMachCorrection;
@@ -83,16 +85,44 @@ public sealed partial class EulerFlowConfig : IAtmosSolverConfiguration
     public Scalar CourantNumber { get; init; } = 0.5f;
 
     /// <summary>
-    ///     Cap on the number of CFL substeps the stage runs in one tick, or 0 for no cap.
+    ///     Cap on the CFL substeps the stage runs per second of gas time, or 0 for no cap.
     /// </summary>
     /// <remarks>
-    ///     The substep count follows the fastest signal in the world, so one shock front into vacuum can demand
-    ///     hundreds of substeps. When the cap engages the stage stops early and the tick advances less than
-    ///     <see cref="AtmosSolverConstants.FixedTimeStep" /> of gas time: the flow slows down instead of the frame
-    ///     stalling. Negative values normalize to 0.
+    ///     <para>
+    ///         Each call of the stage may run at most <c>ceil(MaxSubstepsPerSecond · Interval / TickRate)</c> substeps,
+    ///         so the default of 1280 gives 64 substeps for a 50 ms call, 22 for the default 16-tick call at 960 Hz,
+    ///         and 2 for a 1 ms call.
+    ///     </para>
+    ///     <para>
+    ///         The substep count follows the fastest signal in the world, so one shock front into vacuum can demand
+    ///         hundreds of substeps. When the cap engages the stage stops early and the call advances less than
+    ///         the stage's full time step of gas time: the flow slows down instead of the frame
+    ///         stalling. Negative values normalize to 0.
+    ///     </para>
     /// </remarks>
     [NumosSerialize]
-    public int MaxSubstepsPerTick { get; init; } = 64;
+    public int MaxSubstepsPerSecond { get; init; } = 1280;
+
+    /// <summary>
+    ///     Interval between the stage's settle passes, in seconds (s).
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         The velocity floor, species diffusion, vacuum cleanup, momentum settling, and the sleep decision run once
+    ///         per settle pass, not on every call. The stage converts this to ticks as
+    ///         <c>max(1, round(SettlePeriod · TickRate))</c>. At a tick rate of 20 Hz or less the default of 0.05 s
+    ///         settles on every call. At 960 Hz it settles every 48 ticks, which is every third call at the default
+    ///         <c>euler-flow</c> interval of 16 ticks.
+    ///     </para>
+    ///     <para>
+    ///         The floor needs this period because a pressure gradient of a pascal or two accelerates a voxel by
+    ///         far less than the floor in 1 ms, so a per-call floor would zero the momentum before it could build up.
+    ///         NaN and negative values normalize to 0, which settles on every call.
+    ///     </para>
+    /// </remarks>
+    [NumosSerialize]
+    [Quantity("seconds")]
+    public Second SettlePeriod { get; init; } = 0.05f;
 
     /// <summary>
     ///     Speed below which a voxel's momentum is zeroed at the end of the tick, in metres per second (m/s).
@@ -105,6 +135,28 @@ public sealed partial class EulerFlowConfig : IAtmosSolverConfiguration
     [NumosSerialize]
     [Quantity("velocity")]
     public MetrePerSecond VelocityFloor { get; init; } = 0.005f;
+
+    /// <summary>
+    ///     Speed below which motion no longer keeps a chunk awake, in metres per second (m/s).
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         A chunk whose fastest voxel moves at this speed or faster cannot fall asleep. A slower chunk sleeps on
+    ///         its pressure differences alone, like a still one. When it falls asleep the stage zeroes its momentum
+    ///         and turns the kinetic energy into heat, so a sleeping chunk still carries no momentum. Residual sound
+    ///         in a large open room rings well above <see cref="VelocityFloor" /> for a long time, and without this
+    ///         setting such a room never sleeps.
+    ///     </para>
+    ///     <para>
+    ///         Motion wakes a sleeping neighbour only above the larger of this and <see cref="VelocityFloor" />, so
+    ///         a ringing neighbour does not wake a chunk that just fell asleep. The default is 0.5 m/s. A value of 0
+    ///         keeps the old rule: any momentum keeps a chunk awake, and motion above <see cref="VelocityFloor" />
+    ///         wakes a neighbour. Non-finite and negative values normalize to 0.
+    ///     </para>
+    /// </remarks>
+    [NumosSerialize]
+    [Quantity("velocity")]
+    public MetrePerSecond SleepSpeed { get; init; } = 0.5f;
 
     /// <summary>
     ///     Speed a voxel's velocity is clamped to, in metres per second (m/s).
@@ -124,13 +176,14 @@ public sealed partial class EulerFlowConfig : IAtmosSolverConfiguration
     /// </summary>
     /// <remarks>
     ///     A face between an awake chunk and a sleeping one is only activated when the pressures differ by more than
-    ///     this, so a few pascals of ripple at a sealed door do not wake the whole station. A settled room keeps a few
-    ///     pascals of residual non-uniformity. A lower value lets awake chunks keep re-waking neighbours that just
-    ///     fell asleep. Non-finite and negative values normalize to 0, which wakes on any difference.
+    ///     this. The default of 50 Pa sits above the acoustic pressure of slow residual ringing (about 0.12 m/s or
+    ///     less in room air), so that ringing does not keep re-waking neighbours that just fell asleep. The cost is
+    ///     that a sleeping chunk keeps any difference below 50 Pa frozen in until something else wakes it.
+    ///     Non-finite and negative values normalize to 0, which wakes on any difference.
     /// </remarks>
     [NumosSerialize]
     [Quantity("pressure")]
-    public Pascal WakePressureDelta { get; init; } = 10f;
+    public Pascal WakePressureDelta { get; init; } = 50f;
 
     /// <summary>
     ///     Whether the face flux scales its pressure dissipation by the local Mach number.
@@ -153,7 +206,7 @@ public sealed partial class EulerFlowConfig : IAtmosSolverConfiguration
     public EulerReconstruction Reconstruction { get; init; } = EulerReconstruction.FirstOrder;
 
     /// <summary>
-    ///     Exponential decay rate applied to every voxel's momentum each tick, in inverse seconds (1/s).
+    ///     Exponential decay rate applied to every voxel's momentum on each Euler call, in inverse seconds (1/s).
     /// </summary>
     /// <remarks>
     ///     A crude stand-in for wall friction and drag from whatever furniture the host has in the room, so a
@@ -187,8 +240,10 @@ public sealed partial class EulerFlowConfig : IAtmosSolverConfiguration
         var normalized = new EulerFlowConfig
         {
             CourantNumber = FloatMath.IsFinitePositive(CourantNumber) ? MathF.Min(CourantNumber, 1f) : 0.5f,
-            MaxSubstepsPerTick = Math.Max(0, MaxSubstepsPerTick),
+            MaxSubstepsPerSecond = Math.Max(0, MaxSubstepsPerSecond),
+            SettlePeriod = float.IsNaN(SettlePeriod) ? 0f : MathF.Max(0f, SettlePeriod),
             VelocityFloor = FloatMath.GetNonnegativeFinite(VelocityFloor),
+            SleepSpeed = FloatMath.GetNonnegativeFinite(SleepSpeed),
             MaxVelocity = FloatMath.IsFinitePositive(MaxVelocity) ? MaxVelocity : 5000f,
             WakePressureDelta = FloatMath.GetNonnegativeFinite(WakePressureDelta),
             AllMachCorrection = AllMachCorrection,
@@ -199,6 +254,12 @@ public sealed partial class EulerFlowConfig : IAtmosSolverConfiguration
 
         return SemanticallyEquals(normalized) ? this : normalized;
     }
+
+    /// <summary>
+    ///     Normal speed across a chunk face above which motion wakes the sleeping side: the larger of
+    ///     <see cref="VelocityFloor" /> and <see cref="SleepSpeed" />.
+    /// </summary>
+    internal MetrePerSecond WakeSpeed => MathF.Max(VelocityFloor, SleepSpeed);
 
     internal static EulerFlowConfig Get(IAtmosConfig config)
     {

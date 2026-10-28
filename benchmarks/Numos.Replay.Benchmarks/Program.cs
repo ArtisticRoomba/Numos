@@ -22,7 +22,7 @@ foreach (int chunkCount in quick ? new[] { 1, 8 } : new[] { 1, 8, 32 })
                 new GasProperties { Name = "A", DiffusionCoefficient = 0.02f, MolarMass = 0.028f },
                 new GasProperties { Name = "B", MolarHeatCapacityAtConstantVolume = 30f, MolarMass = 0.044f }
             ],
-            SleepThreshold = int.MaxValue
+            SleepDelay = float.MaxValue
         });
 
     var simulation = world.CreateSimulation(8, 8, 4);

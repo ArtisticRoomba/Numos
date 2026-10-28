@@ -12,7 +12,8 @@ public sealed class SolverPipelineEditorTests
             name,
             custom ? AtmosWorldSolverKind.Custom : AtmosWorldSolverKind.BuiltIn,
             enabled,
-            null);
+            null,
+            1);
     }
 
     private static AtmosWorldSolverStep[] EulerSteps()
@@ -144,5 +145,31 @@ public sealed class SolverPipelineEditorTests
             Assert.That(SolverPipelineEditor.Describe(name), Does.Not.Contain("registered by the host"), name);
 
         Assert.That(SolverPipelineEditor.Describe("mine"), Does.Contain("host"));
+    }
+
+    [Test]
+    public void GetWarnings_FlagsMismatchedIntervalsOfPairedStages()
+    {
+        var legacy = AtmosWorldSolverPipeline.GetDefaultLayout(AtmosTransportModel.Legacy)
+            .Select(name => Step(name))
+            .ToArray();
+        var advectionSlow = legacy
+            .Select(step => step.Name == AtmosBuiltInSolvers.Advection ? step with { Interval = 4 } : step)
+            .ToArray();
+        var thermalSlow = legacy
+            .Select(step => step.Name == AtmosBuiltInSolvers.ThermalBoundary ? step with { Interval = 3 } : step)
+            .ToArray();
+        var boundaryDisabled = advectionSlow
+            .Select(step => step.Name == AtmosBuiltInSolvers.BoundaryFlow ? step with { IsEnabled = false } : step)
+            .ToArray();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(SolverPipelineEditor.GetWarnings(advectionSlow), Has.Count.EqualTo(1));
+            Assert.That(SolverPipelineEditor.GetWarnings(advectionSlow)[0], Does.Contain("advection").And.Contain("boundary-flow"));
+            Assert.That(SolverPipelineEditor.GetWarnings(thermalSlow), Has.Count.EqualTo(1));
+            Assert.That(SolverPipelineEditor.GetWarnings(thermalSlow)[0], Does.Contain("thermodynamics").And.Contain("thermal-boundary"));
+            Assert.That(SolverPipelineEditor.GetWarnings(boundaryDisabled).Any(warning => warning.Contains("every")), Is.False);
+        });
     }
 }

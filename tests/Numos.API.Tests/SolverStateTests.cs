@@ -267,7 +267,7 @@ public sealed class SolverStateTests
     {
         using var source = CreateWorld(out var solver);
         solver.Label = "initial";
-        var timeline = new AtmosWorldReplayTimeline(source, 2);
+        var timeline = new AtmosWorldReplayTimeline(source, 0.1);
         source.Tick();
         solver.Rate = 3f;
         source.Tick();
@@ -293,7 +293,7 @@ public sealed class SolverStateTests
         });
 
         using var target = CreateWorld(out var restoredSolver);
-        var restored = AtmosWorldReplayTimeline.Restore(target, loaded, 2);
+        var restored = AtmosWorldReplayTimeline.Restore(target, loaded, 0.1);
         Assert.That(restoredSolver.Label, Is.EqualTo("initial"));
 
         restored.ReturnToHead();
@@ -310,8 +310,8 @@ public sealed class SolverStateTests
         bare.CreateSimulation(1, 1, 1);
         Assert.Multiple(() =>
         {
-            Assert.That(() => AtmosWorldReplayTimeline.Import(bare, loaded, 2), Throws.TypeOf<NotSupportedException>());
-            Assert.That(() => AtmosWorldReplayTimeline.Restore(bare, loaded, 2), Throws.ArgumentException);
+            Assert.That(() => AtmosWorldReplayTimeline.Import(bare, loaded, 0.1), Throws.TypeOf<NotSupportedException>());
+            Assert.That(() => AtmosWorldReplayTimeline.Restore(bare, loaded, 0.1), Throws.ArgumentException);
         });
     }
 
@@ -319,7 +319,7 @@ public sealed class SolverStateTests
     public void Timeline_SeekAndBranchRestoreSolverState()
     {
         using var world = CreateWorld(out var solver);
-        var timeline = new AtmosWorldReplayTimeline(world, 2);
+        var timeline = new AtmosWorldReplayTimeline(world, 0.1);
         world.Tick();
         world.Tick();
         timeline.ObserveLiveState();
@@ -356,7 +356,7 @@ public sealed class SolverStateTests
 
         var branch = timeline.CaptureReplay();
         using var replay = CreateWorld(out var replayed);
-        var restored = AtmosWorldReplayTimeline.Restore(replay, branch, 1);
+        var restored = AtmosWorldReplayTimeline.Restore(replay, branch, 0.05);
         restored.ReturnToHead();
         Assert.Multiple(() =>
         {

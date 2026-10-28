@@ -1,4 +1,6 @@
+using System.Numerics;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.Maths;
 
@@ -18,8 +20,8 @@ namespace Numos.CoreSim.Solvers.Euler;
 ///     </para>
 ///     <para>
 ///         Static alone does not allow a skip. A split first-order sweep moves information one cell per axis sweep,
-///         so a source can reach a chunk only if it lies within the substep count of cells. The stage checks that
-///         distance after the pre-pass (see <see cref="EulerFlowSolver" />).
+///         so a source can reach a chunk only if it lies within the substep count of cells along a path of open
+///         faces. The stage checks that after the pre-pass (see <see cref="EulerFlowSolver" />).
 ///     </para>
 ///     <para>
 ///         The test reads live chunk fields only and writes nothing, so chunks run in parallel and the result does
@@ -42,8 +44,8 @@ internal static class EulerStaticChunk
     /// <param name="signalSpeed">The signal speed a gather would give every cell, valid when the result is true.</param>
     /// <returns><see langword="true" /> when a sweep over the chunk would change no bit of it.</returns>
     /// <remarks>
-    ///     One pass with an early exit on the first failure and no allocation. The first air voxel is the reference,
-    ///     and every other cell is compared with it bit for bit.
+    ///     No allocation. The first air voxel is the reference, and every other cell is compared with it bit for
+    ///     bit. The interior, the void test, and each registered face are separate passes with early exits.
     /// </remarks>
     internal static bool IsStatic(
         AtmosChunk chunk, AtmosSolverExecutionContext context, out MetrePerSecond signalSpeed)
@@ -81,60 +83,160 @@ internal static class EulerStaticChunk
 
         var channels = new FaceGasChannels(chunk, stride, scratch);
 
+        if (!InteriorIsUniformAndAtRest(chunk, reference, pressureBits, temperatureBits) ||
+            !HasNoVoidNeighbor(chunk))
+            return false;
+
+        for (int direction = 0; direction < NeighborResolution.NeighborDirections.Length; direction++)
+        {
+            AtmosChunk? across = neighbors[direction];
+            if (across != null &&
+                !FaceMatchesNeighbor(chunk, direction, across, reference, pressureBits, temperatureBits, channels))
+                return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    ///     Whether every air voxel has no momentum and the reference pressure, temperature, and moles.
+    /// </summary>
+    /// <remarks>
+    ///     When every voxel is air the arrays are contiguous, so the bits are compared as spans. Momentum uses float
+    ///     equality like <see cref="AtmosChunk.HasMomentum" />, where <c>-0f</c> is rest and NaN is not.
+    /// </remarks>
+    private static bool InteriorIsUniformAndAtRest(
+        AtmosChunk chunk, ushort reference, int pressureBits, int temperatureBits)
+    {
+        if (chunk.ActiveAirCount != chunk.VoxelCount)
+        {
+            for (int activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
+            {
+                ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
+                if (chunk.HasMomentum(voxelIndex) ||
+                    !SameState(chunk, voxelIndex, pressureBits, temperatureBits, chunk, reference, default))
+                    return false;
+            }
+
+            return true;
+        }
+
+        int count = chunk.VoxelCount;
+        if (!IsAllZero(chunk.MomentumX.AsSpan()[..count]) ||
+            !IsAllZero(chunk.MomentumY.AsSpan()[..count]) ||
+            !IsAllZero(chunk.MomentumZ.AsSpan()[..count]))
+            return false;
+
+        if (MemoryMarshal.Cast<Pascal, int>(chunk.TotalPressure.AsSpan()[..count]).IndexOfAnyExcept(pressureBits) >= 0 ||
+            MemoryMarshal.Cast<Kelvin, int>(chunk.Temperature.AsSpan()[..count]).IndexOfAnyExcept(temperatureBits) >= 0)
+            return false;
+
+        for (int gas = 0; gas < chunk.ActiveGasCount; gas++)
+        {
+            Mole[] moles = chunk.ActiveGases[gas].Moles;
+            int expected = BitConverter.SingleToInt32Bits(moles[reference]);
+            if (MemoryMarshal.Cast<Mole, int>(moles.AsSpan(0, count)).IndexOfAnyExcept(expected) >= 0)
+                return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    ///     Whether every value equals zero by float comparison. A NaN is not zero.
+    /// </summary>
+    private static bool IsAllZero(ReadOnlySpan<float> values)
+    {
+        int index = 0;
+        if (Vector.IsHardwareAccelerated)
+        {
+            int lastVector = values.Length - Vector<float>.Count;
+            for (; index <= lastVector; index += Vector<float>.Count)
+            {
+                if (!Vector.EqualsAll(new Vector<float>(values.Slice(index)), Vector<float>.Zero))
+                    return false;
+            }
+        }
+
+        for (; index < values.Length; index++)
+        {
+            if (values[index] != 0f)
+                return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    ///     Whether no air voxel has a void neighbour inside the chunk. Faces that leave the chunk are tested by
+    ///     <see cref="FaceMatchesNeighbor" />.
+    /// </summary>
+    private static bool HasNoVoidNeighbor(AtmosChunk chunk)
+    {
+        if (!chunk.VoxelRoomMap.AsSpan()[..chunk.VoxelCount].Contains(VoxelClassification.RoomVoid))
+            return true;
+
         Int3 last = chunk.Dimensions - new Int3(1, 1, 1);
         int rowStride = chunk.Width;
         int slabStride = chunk.Width * chunk.Height;
         for (int activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
         {
             ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
-            if (chunk.HasMomentum(voxelIndex))
-                return false;
-
-            if (!SameState(chunk, voxelIndex, pressureBits, temperatureBits, chunk, reference, default))
-                return false;
-
             Int3 position = chunk.GetXyzInt3(voxelIndex);
             for (int direction = 0; direction < NeighborResolution.NeighborDirections.Length; direction++)
             {
-                AtmosChunk other;
-                ushort otherIndex;
-                bool leaves = EulerFaceTopology.IsOnEdge(position, last, direction);
-                if (leaves)
-                {
-                    AtmosChunk? across = neighbors[direction];
-                    if (across == null)
-                        continue;
+                if (EulerFaceTopology.IsOnEdge(position, last, direction))
+                    continue;
 
-                    other = across;
-                    otherIndex = EulerFaceTopology.NeighborIndexAcrossFace(chunk, voxelIndex, direction);
-                }
-                else
+                int otherIndex = voxelIndex + direction switch
                 {
-                    other = chunk;
-                    otherIndex = (ushort)(voxelIndex + direction switch
-                    {
-                        0 => -1,
-                        1 => 1,
-                        2 => -rowStride,
-                        3 => rowStride,
-                        4 => -slabStride,
-                        _ => slabStride
-                    });
-                }
+                    0 => -1,
+                    1 => 1,
+                    2 => -rowStride,
+                    3 => rowStride,
+                    4 => -slabStride,
+                    _ => slabStride
+                };
 
-                int room = other.VoxelRoomMap[otherIndex];
+                if (chunk.VoxelRoomMap[otherIndex] == VoxelClassification.RoomVoid)
+                    return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    ///     Whether every air voxel on one chunk face meets a non-void cell, and an air cell across an open face has
+    ///     the reference state and no extra gas.
+    /// </summary>
+    private static bool FaceMatchesNeighbor(
+        AtmosChunk chunk, int direction, AtmosChunk neighbor, ushort reference, int pressureBits,
+        int temperatureBits, FaceGasChannels channels)
+    {
+        FacePlane plane = EulerFaceTopology.GetFacePlane(chunk, direction);
+        for (int outer = 0; outer < plane.OuterCount; outer++)
+        {
+            for (int inner = 0; inner < plane.InnerCount; inner++)
+            {
+                ushort voxelIndex = plane.VoxelIndex(inner, outer);
+                int ownRoom = chunk.VoxelRoomMap[voxelIndex];
+                if (ownRoom == VoxelClassification.RoomSolid || ownRoom == VoxelClassification.RoomVoid)
+                    continue;
+
+                ushort otherIndex = EulerFaceTopology.NeighborIndexAcrossFace(chunk, voxelIndex, direction);
+                int room = neighbor.VoxelRoomMap[otherIndex];
                 if (room == VoxelClassification.RoomVoid)
                     return false;
 
-                // Interior air neighbours are compared with the reference when the loop reaches them.
-                if (!leaves || room == VoxelClassification.RoomSolid ||
-                    !EulerFaceTopology.IsFaceOpen(chunk, voxelIndex, direction, other, otherIndex))
+                if (room == VoxelClassification.RoomSolid ||
+                    !EulerFaceTopology.IsFaceOpen(chunk, voxelIndex, direction, neighbor, otherIndex))
                     continue;
 
                 if (!SameState(
-                        other, otherIndex, pressureBits, temperatureBits, chunk, reference,
-                        channels.OwnToNeighbor(direction, other)) ||
-                    !ExtraGasesAreEmpty(other, otherIndex, channels.NeighborToOwn(direction, other)))
+                        neighbor, otherIndex, pressureBits, temperatureBits, chunk, reference,
+                        channels.OwnToNeighbor(direction, neighbor)) ||
+                    !ExtraGasesAreEmpty(neighbor, otherIndex, channels.NeighborToOwn(direction, neighbor)))
                     return false;
             }
         }

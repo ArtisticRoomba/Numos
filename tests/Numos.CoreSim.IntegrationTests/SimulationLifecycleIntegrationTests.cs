@@ -17,12 +17,12 @@ public sealed class SimulationLifecycleIntegrationTests
             Assert.That(
                 FlowsAfterStableTicks(2),
                 Is.True,
-                "The chunk must remain awake when SleepTimer equals SleepThreshold.");
+                "The chunk must remain awake when SleepTimer equals the sleep delay in ticks.");
 
             Assert.That(
                 FlowsAfterStableTicks(3),
                 Is.False,
-                "The chunk must sleep when SleepTimer becomes greater than SleepThreshold.");
+                "The chunk must sleep when SleepTimer becomes greater than the sleep delay in ticks.");
         });
     }
 
@@ -95,7 +95,7 @@ public sealed class SimulationLifecycleIntegrationTests
         (int X, int Y)[] openVoxels = [(0, 0), (1, 0), (2, 0), (0, 1), (0, 2)];
         var config = SimTestHelpers.CreateDeterministicConfig();
         config.SleepEpsilon = 1f;
-        config.SleepThreshold = 3;
+        config.SleepDelay = 0.15f;
         using var simulation = SimTestHelpers.CreateLegacySimulation(config, width, height, 1);
         var chunk = simulation.CreateAndRegisterChunk(new Int3(0, 0, 0));
         simulation.SetChunkClassification(chunk, VoxelClassification.RoomSolid);
@@ -152,7 +152,7 @@ public sealed class SimulationLifecycleIntegrationTests
     private static bool FlowsAfterStableTicks(int stableTicks)
     {
         var config = SimTestHelpers.CreateDeterministicConfig();
-        config.SleepThreshold = 2;
+        config.SleepDelay = 0.1f;
         config.SleepEpsilon = 0.1f;
         using var simulation = SimTestHelpers.CreateLegacySimulation(config, 2, 1, 1);
         var chunk = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));

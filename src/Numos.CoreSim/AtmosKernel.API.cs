@@ -98,7 +98,7 @@ internal sealed partial class AtmosKernel
     ///     Aligns a newly registered kernel with its containing world's completed-tick count.
     /// </summary>
     /// <param name="tickCount">The nonnegative world tick at registration time.</param>
-    internal void SetInitialWorldTickCount(int tickCount)
+    internal void SetInitialWorldTickCount(long tickCount)
     {
         lock (StateGate)
         {
@@ -686,7 +686,7 @@ internal sealed partial class AtmosKernel
     }
 
     /// <summary>
-    ///     Adds a one tick ignition source to a voxel and wakes its chunk.
+    ///     Adds an ignition source to a voxel and wakes its chunk. The source lasts until the next <c>gas-reactions</c> pass.
     /// </summary>
     /// <param name="position">The target chunk's grid position.</param>
     /// <param name="localVoxelIndex">The voxel's zero-based index in the chunk's flattened storage.</param>
@@ -712,7 +712,7 @@ internal sealed partial class AtmosKernel
     }
 
     /// <summary>
-    ///     Adds a one tick ignition source to a voxel and wakes its chunk.
+    ///     Adds an ignition source to a voxel and wakes its chunk. The source lasts until the next <c>gas-reactions</c> pass.
     /// </summary>
     /// <param name="position">The target chunk's grid position.</param>
     /// <param name="x">The zero-based local x-coordinate.</param>

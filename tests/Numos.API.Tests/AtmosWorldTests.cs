@@ -61,7 +61,7 @@ public sealed class AtmosWorldTests
     [Test]
     public void InterSimulationPortal_ActivatesAtTickBoundaryAndConservesGas()
     {
-        using var world = new AtmosWorld(CreateConfig());
+        using var world = new AtmosWorld(CreateConfig(), AtmosTransportModel.Euler, 20);
         var first = world.CreateSimulation(1, 1, 1);
         var second = world.CreateSimulation(1, 1, 1);
         var source = CreateOpenChunk(first);
@@ -172,7 +172,7 @@ public sealed class AtmosWorldTests
     [Test]
     public void HalfAreaPortal_MovesHalfTheGasOfAFullAreaPortal()
     {
-        using var world = new AtmosWorld(CreateConfig());
+        using var world = new AtmosWorld(CreateConfig(), AtmosTransportModel.Euler, 20);
         var simulation = world.CreateSimulation(1, 1, 1);
         var fullSource = CreateOpenChunk(simulation);
         var fullTarget = CreateOpenChunk(simulation, new Int3(2, 0, 0));
@@ -225,7 +225,7 @@ public sealed class AtmosWorldTests
     {
         var config = CreateConfig();
         config.SolverConfigurations.Add(new EulerFlowConfig { DefaultLinkAreaFraction = 0.5f });
-        using var world = new AtmosWorld(config);
+        using var world = new AtmosWorld(config, AtmosTransportModel.Euler, 20);
         var simulation = world.CreateSimulation(1, 1, 1);
         var defaultSource = CreateOpenChunk(simulation);
         var defaultTarget = CreateOpenChunk(simulation, new Int3(2, 0, 0));
@@ -393,7 +393,7 @@ public sealed class AtmosWorldTests
     [Test]
     public void WorldCheckpoint_RestoresTopologyHandlesAndSimulationState()
     {
-        using var world = new AtmosWorld(CreateConfig());
+        using var world = new AtmosWorld(CreateConfig(), AtmosTransportModel.Euler, 20);
         var first = world.CreateSimulation(1, 1, 1);
         var second = world.CreateSimulation(1, 1, 1);
         var source = CreateOpenChunk(first);
@@ -429,7 +429,7 @@ public sealed class AtmosWorldTests
     [Test]
     public void WorldCheckpoint_RestoresPendingLinkActivation()
     {
-        using var world = new AtmosWorld(CreateConfig());
+        using var world = new AtmosWorld(CreateConfig(), AtmosTransportModel.Euler, 20);
         var first = world.CreateSimulation(1, 1, 1);
         var second = world.CreateSimulation(1, 1, 1);
         var source = CreateOpenChunk(first);
@@ -538,7 +538,7 @@ public sealed class AtmosWorldTests
     [Test]
     public void PortalAndOrdinaryNeighbor_DoNotOverdrawTheirSharedSource()
     {
-        using var world = new AtmosWorld(CreateConfig());
+        using var world = new AtmosWorld(CreateConfig(), AtmosTransportModel.Euler, 20);
         var local = world.CreateSimulation(2, 1, 1);
         var remote = world.CreateSimulation(1, 1, 1);
         var localChunk = local.CreateAndRegisterChunk(default);
@@ -569,7 +569,7 @@ public sealed class AtmosWorldTests
     [Test]
     public void DockBatch_TransfersAcrossEveryPairAndUndocksAsOneUnit()
     {
-        using var world = new AtmosWorld(CreateConfig());
+        using var world = new AtmosWorld(CreateConfig(), AtmosTransportModel.Euler, 20);
         var first = world.CreateSimulation(2, 1, 1);
         var second = world.CreateSimulation(2, 1, 1);
         var firstChunk = first.CreateAndRegisterChunk(default);
@@ -633,7 +633,7 @@ public sealed class AtmosWorldTests
     [Test]
     public void ExplicitTransport_RunsAtTheSharedAdvectionBarrierBeforeLaterStages()
     {
-        using var world = new AtmosWorld(CreateConfig());
+        using var world = new AtmosWorld(CreateConfig(), AtmosTransportModel.Euler, 20);
         var first = world.CreateSimulation(1, 1, 1);
         var second = world.CreateSimulation(1, 1, 1);
         var source = CreateOpenChunk(first);
@@ -661,7 +661,7 @@ public sealed class AtmosWorldTests
         var config = CreateConfig();
         config.ThermalConductance = 1f;
         config.BulkFlowCoefficient = 0f;
-        using var world = new AtmosWorld(config);
+        using var world = new AtmosWorld(config, AtmosTransportModel.Euler, 20);
         var first = world.CreateSimulation(1, 1, 1);
         var second = world.CreateSimulation(1, 1, 1);
         var firstChunk = CreateOpenChunk(first);
@@ -736,7 +736,7 @@ public sealed class AtmosWorldTests
         var config = CreateConfig();
         config.ThermalConductance = 1f;
         config.BulkFlowCoefficient = 0f;
-        using var world = new AtmosWorld(config);
+        using var world = new AtmosWorld(config, AtmosTransportModel.Euler, 20);
         var first = world.CreateSimulation(1, 1, 1);
         var second = world.CreateSimulation(1, 1, 1);
         var firstChunk = CreateOpenChunk(first);
