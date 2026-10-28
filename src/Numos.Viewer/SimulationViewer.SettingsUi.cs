@@ -26,7 +26,7 @@ public partial class SimulationViewer
             new Vector2(0.5f, 0.5f));
 
         using var window = ImGuiExtensions.BeginWindow(
-            Locale.GetString("program-settings.configure") + "##program-settings",
+            Locale.GetString("configure-program-settings"),
             ref _showProgramSettingsPanel,
             new Vector2(460, 120),
             new Vector2(760, 430));
@@ -39,10 +39,10 @@ public partial class SimulationViewer
             new Vector2(180, 0),
             ImGuiChildFlags.Borders);
 
-        if (ImGui.Selectable(Locale.GetString("settings.graphics"), _programSettingsTab == 0))
+        if (ImGui.Selectable(Locale.GetString("graphics"), _programSettingsTab == 0))
             _programSettingsTab = 0;
 
-        if (ImGui.Selectable(Locale.GetString("settings.interface"), _programSettingsTab == 1))
+        if (ImGui.Selectable(Locale.GetString("interface"), _programSettingsTab == 1))
             _programSettingsTab = 1;
 
         ImGui.EndChild();
@@ -60,7 +60,7 @@ public partial class SimulationViewer
 
     private void RenderGraphicsSettings()
     {
-        ImGui.SeparatorText(Locale.GetString("settings.graphics"));
+        ImGui.SeparatorText(Locale.GetString("graphics"));
 
         (int Width, int Height)[] resolutions = GetTargetResolutions();
         int currentWidth = Raylib.GetScreenWidth();
@@ -68,14 +68,14 @@ public partial class SimulationViewer
         int selectedResolution = FindResolutionIndex(resolutions, currentWidth, currentHeight);
         string resolutionLabel = selectedResolution >= 0
             ? FormatResolution(resolutions[selectedResolution])
-            : Locale.GetString("settings.custom-resolution", ("width", currentWidth), ("height", currentHeight));
+            : Locale.GetString("custom-resolution", ("width", currentWidth), ("height", currentHeight));
 
         bool resolutionSelectorDisabled = _resolutionConfirmationPending;
         if (resolutionSelectorDisabled)
             ImGui.BeginDisabled();
 
         ImGui.SetNextItemWidth(220f);
-        if (ImGui.BeginCombo(Locale.GetString("settings.target-resolution"), resolutionLabel))
+        if (ImGui.BeginCombo(Locale.GetString("target-resolution"), resolutionLabel))
         {
             for (int index = 0; index < resolutions.Length; index++)
             {
@@ -94,40 +94,40 @@ public partial class SimulationViewer
             ImGui.EndDisabled();
 
         bool fullscreen = Raylib.IsWindowState(ConfigFlags.FullscreenMode);
-        if (ImGui.Checkbox(Locale.GetString("settings.fullscreen"), ref fullscreen))
+        if (ImGui.Checkbox(Locale.GetString("fullscreen"), ref fullscreen))
             Raylib.ToggleFullscreen();
 
-        ImGui.SeparatorText(Locale.GetString("settings.frame-pacing"));
+        ImGui.SeparatorText(Locale.GetString("frame-pacing"));
 
-        ImGui.Checkbox(Locale.GetString("settings.uncap-fps"), ref _uncappedFps);
+        ImGui.Checkbox(Locale.GetString("uncap-fps"), ref _uncappedFps);
 
         ImGuiExtensions.QuestionTooltip(
-            Locale.GetString("settings.uncap-fps-tooltip"));
+            Locale.GetString("uncap-fps-tooltip"));
 
         if (_uncappedFps)
             ImGui.BeginDisabled();
 
         ImGui.SetNextItemWidth(220f);
-        ImGui.SliderInt(Locale.GetString("settings.frame-rate-limit"), ref _targetFps, 30, 240);
+        ImGui.SliderInt(Locale.GetString("frame-rate-limit"), ref _targetFps, 30, 240);
 
         if (_uncappedFps)
             ImGui.EndDisabled();
 
-        ImGui.Checkbox(Locale.GetString("settings.limit-fps-unfocused"), ref _limitFpsWhenUnfocused);
+        ImGui.Checkbox(Locale.GetString("limit-fps-when-unfocused"), ref _limitFpsWhenUnfocused);
         ImGuiExtensions.QuestionTooltip(
-            Locale.GetString("settings.limit-fps-unfocused-tooltip"));
+            Locale.GetString("limit-fps-when-unfocused-tooltip"));
 
         if (!_limitFpsWhenUnfocused)
             ImGui.BeginDisabled();
 
         ImGui.SetNextItemWidth(220f);
-        ImGui.SliderInt(Locale.GetString("settings.unfocused-frame-rate"), ref _unfocusedFps, 1, 60);
+        ImGui.SliderInt(Locale.GetString("unfocused-frame-rate"), ref _unfocusedFps, 1, 60);
 
         if (!_limitFpsWhenUnfocused)
             ImGui.EndDisabled();
 
         bool vsyncEnabled = Raylib.IsWindowState(ConfigFlags.VSyncHint);
-        if (ImGui.Checkbox(Locale.GetString("settings.vsync"), ref vsyncEnabled))
+        if (ImGui.Checkbox(Locale.GetString("vsync"), ref vsyncEnabled))
         {
             if (vsyncEnabled)
                 Raylib.SetWindowState(ConfigFlags.VSyncHint);
@@ -135,28 +135,28 @@ public partial class SimulationViewer
                 Raylib.ClearWindowState(ConfigFlags.VSyncHint);
         }
 
-        ImGuiExtensions.QuestionTooltip(Locale.GetString("settings.vsync-tooltip"));
+        ImGuiExtensions.QuestionTooltip(Locale.GetString("vsync-tooltip"));
 
-        ImGui.Checkbox(Locale.GetString("settings.event-based-rendering"), ref _eventBasedRenderingEnabled);
+        ImGui.Checkbox(Locale.GetString("use-event-based-rendering"), ref _eventBasedRenderingEnabled);
         ImGuiExtensions.QuestionTooltip(
-            Locale.GetString("settings.event-based-rendering-tooltip"));
+            Locale.GetString("event-based-rendering-tooltip"));
     }
 
     private void RenderInterfaceSettings()
     {
-        ImGui.SeparatorText(Locale.GetString("settings.interface"));
-        ImGui.Checkbox(Locale.GetString("settings.show-fps-overlay"), ref _showPerformanceOverlay);
-        ImGuiExtensions.QuestionTooltip(Locale.GetString("settings.show-fps-overlay-tooltip"));
+        ImGui.SeparatorText(Locale.GetString("interface"));
+        ImGui.Checkbox(Locale.GetString("show-fps-overlay"), ref _showPerformanceOverlay);
+        ImGuiExtensions.QuestionTooltip(Locale.GetString("show-fps-overlay-tooltip"));
 
         ImGui.Spacing();
-        ImGui.Checkbox(Locale.GetString("settings.show-viewport-branding"), ref _showViewportBranding);
+        ImGui.Checkbox(Locale.GetString("show-viewport-branding"), ref _showViewportBranding);
         ImGuiExtensions.QuestionTooltip(
-            Locale.GetString("settings.show-viewport-branding-tooltip"));
+            Locale.GetString("show-viewport-branding-tooltip"));
 
         ImGui.SetNextItemWidth(220f);
-        ImGui.SliderFloat(Locale.GetString("settings.branding-opacity"), ref _viewportBrandingOpacityPercent, 0f, 100f, "%.0f%%");
+        ImGui.SliderFloat(Locale.GetString("branding-opacity"), ref _viewportBrandingOpacityPercent, 0f, 100f, "%.0f%%");
         ImGui.SetNextItemWidth(220f);
-        if (ImGui.BeginCombo(Locale.GetString("settings.corner"), GetViewportBrandingCornerLabel(_viewportBrandingCorner)))
+        if (ImGui.BeginCombo(Locale.GetString("corner"), GetViewportBrandingCornerLabel(_viewportBrandingCorner)))
         {
             foreach (var corner in Enum.GetValues<ViewportBrandingCorner>())
             {
@@ -172,24 +172,24 @@ public partial class SimulationViewer
         }
 
         ImGui.SetNextItemWidth(220f);
-        ImGui.SliderFloat(Locale.GetString("settings.offset-x"), ref _viewportBrandingOffsetX, 0f, 500f, "%.0f px");
+        ImGui.SliderFloat(Locale.GetString("offset-x"), ref _viewportBrandingOffsetX, 0f, 500f, "%.0f px");
         ImGui.SetNextItemWidth(220f);
-        ImGui.SliderFloat(Locale.GetString("settings.offset-y"), ref _viewportBrandingOffsetY, 0f, 500f, "%.0f px");
+        ImGui.SliderFloat(Locale.GetString("offset-y"), ref _viewportBrandingOffsetY, 0f, 500f, "%.0f px");
         ImGui.SetNextItemWidth(220f);
-        ImGui.SliderFloat(Locale.GetString("settings.logo-size"), ref _viewportBrandingSizePercent, 1f, 25f, "%.0f%%");
+        ImGui.SliderFloat(Locale.GetString("logo-size"), ref _viewportBrandingSizePercent, 1f, 25f, "%.0f%%");
 
-        ImGui.SeparatorText(Locale.GetString("settings.window-layout"));
-        if (ImGui.Button(Locale.GetString("settings.save-current-layout")))
+        ImGui.SeparatorText(Locale.GetString("window-layout"));
+        if (ImGui.Button(Locale.GetString("save-current-layout")))
             SaveCurrentLayout();
 
-        ImGuiExtensions.QuestionTooltip(Locale.GetString("settings.save-current-layout-tooltip"));
+        ImGuiExtensions.QuestionTooltip(Locale.GetString("save-current-layout-tooltip"));
 
 #if DEBUG || TOOLS
         ImGui.Spacing();
-        if (ImGui.Button(Locale.GetString("settings.save-default-preset")))
+        if (ImGui.Button(Locale.GetString("save-as-default-preset")))
             SavePackagedDefaultLayout();
 
-        ImGuiExtensions.QuestionTooltip(Locale.GetString("settings.save-default-preset-tooltip"));
+        ImGuiExtensions.QuestionTooltip(Locale.GetString("save-as-default-preset-tooltip"));
 #endif
     }
 
@@ -219,7 +219,7 @@ public partial class SimulationViewer
 
     private static string FormatResolution((int Width, int Height) resolution)
     {
-        return Locale.GetString("settings.resolution-format", ("width", resolution.Width), ("height", resolution.Height));
+        return $"{resolution.Width} x {resolution.Height}";
     }
 
     private void ApplyTargetResolution(int width, int height)
@@ -237,7 +237,7 @@ public partial class SimulationViewer
 
     private void RenderResolutionConfirmationModal()
     {
-        string popupId = Locale.GetString("resolution.confirm-title");
+        const string popupId = "Confirm Resolution Change";
         if (_requestResolutionConfirmation)
         {
             ImGui.OpenPopup(popupId);
@@ -265,22 +265,22 @@ public partial class SimulationViewer
         if (!modal.IsVisible)
             return;
 
-        ImGui.TextWrapped(Locale.GetString("resolution.confirm-message"));
+        ImGui.TextWrapped(Locale.GetString("keep-resolution-prompt"));
         ImGui.Spacing();
         ImGui.TextColored(
             ViewerTheme.Caution,
-            Locale.GetString("resolution.reverting-countdown", ("seconds", secondsRemaining)));
+            Locale.GetString("reverting-in-seconds", ("seconds", secondsRemaining)));
 
         ImGui.Spacing();
 
-        if (ImGui.Button(Locale.GetString("resolution.keep"), new Vector2(150, 0)))
+        if (ImGui.Button(Locale.GetString("keep-resolution"), new Vector2(150, 0)))
         {
             _resolutionConfirmationPending = false;
             ImGui.CloseCurrentPopup();
         }
 
         ImGui.SameLine();
-        bool revert = ImGui.Button(Locale.GetString("resolution.revert"), new Vector2(120, 0));
+        bool revert = ImGui.Button(Locale.GetString("revert"), new Vector2(120, 0));
 
         // Reverting is the safe choice if the new mode left the window unusable.
         ImGui.SetItemDefaultFocus();
@@ -315,7 +315,7 @@ public partial class SimulationViewer
             ImGuiWindowFlags.NoNav;
 
         ImGui.Begin("Performance##performance-overlay", flags);
-        ImGui.TextDisabled(Locale.GetString("performance.fps", ("fps", $"{ImGui.GetIO().Framerate:F1}")));
+        ImGui.TextDisabled($"{ImGui.GetIO().Framerate:F1} FPS");
         ImGui.End();
     }
 }
