@@ -36,6 +36,11 @@ internal sealed class ThermalDiffusionSolver
         if (thermalConductance <= 0f)
             return 0;
 
+        // Every edge transfer is scale * conductance * (T - T), which is zero for equal temperatures, so the
+        // conductance and delta passes would change nothing. The boundary events still go out.
+        if (IsThermallyUniform(chunk, config))
+            return DetectBoundaries(chunk, config, boundaryBuffer);
+
         JoulePerKelvin64[] incidentConductances = ArrayPool<JoulePerKelvin64>.Shared.Rent(chunk.VoxelCount);
         Joule64[] energyDeltas = ArrayPool<Joule64>.Shared.Rent(chunk.VoxelCount);
         Array.Clear(incidentConductances, 0, chunk.VoxelCount);
@@ -67,6 +72,79 @@ internal sealed class ThermalDiffusionSolver
             ArrayPool<Joule64>.Shared.Return(energyDeltas);
             ArrayPool<JoulePerKelvin64>.Shared.Return(incidentConductances);
         }
+    }
+
+    /// <summary>
+    ///     Whether every thermally valid voxel has the same validated temperature, bit for bit.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         Every edge partner is a non-solid, non-void voxel, so it is in <see cref="AtmosChunk.ActiveAirIndices" />.
+    ///         An edge needs both ends to pass <see cref="AtmosChunk.TryGetThermalState" />, so equal temperatures over
+    ///         the valid voxels make every edge difference exactly <c>+0</c>.
+    ///     </para>
+    ///     <para>
+    ///         A zero difference gives a zero transfer, because the conductance and the scale are finite and not
+    ///         negative. The solver config normalizes <see cref="AtmosSolverConfigSnapshot.ThermalConductance" /> to a
+    ///         finite positive value. The heat capacities are finite and positive. A zero incident conductance gives a
+    ///         scale of 1, not NaN. A zero transfer adds nothing to the energy deltas. The solver therefore writes no
+    ///         field, and the conductance passes write none either.
+    ///     </para>
+    ///     <para>
+    ///         When every voxel is air, the active list is the identity, so the scan reads the columns directly.
+    ///     </para>
+    /// </remarks>
+    private static bool IsThermallyUniform(AtmosChunk chunk, AtmosSolverConfigSnapshot config)
+    {
+        bool hasReference = false;
+        int referenceBits = 0;
+
+        if (chunk.ActiveAirCount == chunk.VoxelCount)
+        {
+            int count = chunk.VoxelCount;
+            ReadOnlySpan<JoulePerKelvin> heatCapacities = chunk.TotalHeatCapacity.AsSpan()[..count];
+            ReadOnlySpan<bool> vacuum = chunk.IsVacuum.AsSpan()[..count];
+            ReadOnlySpan<Kelvin> temperatures = chunk.Temperature.AsSpan()[..count];
+            for (int voxelIndex = 0; voxelIndex < count; voxelIndex++)
+            {
+                JoulePerKelvin heatCapacity = heatCapacities[voxelIndex];
+                if (!float.IsFinite(heatCapacity) || heatCapacity <= 0f || vacuum[voxelIndex])
+                    continue;
+
+                int bits = BitConverter.SingleToInt32Bits(config.GetValidatedTemp(temperatures[voxelIndex]));
+                if (!hasReference)
+                {
+                    hasReference = true;
+                    referenceBits = bits;
+                }
+                else if (bits != referenceBits)
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        for (int activeIndex = 0; activeIndex < chunk.ActiveAirCount; activeIndex++)
+        {
+            ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
+            if (!chunk.TryGetThermalState(config, voxelIndex, out Kelvin temperature, out _))
+                continue;
+
+            int bits = BitConverter.SingleToInt32Bits(temperature);
+            if (!hasReference)
+            {
+                hasReference = true;
+                referenceBits = bits;
+            }
+            else if (bits != referenceBits)
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     // ----- Sequential scatter form: used once enough chunks already fill the pool. -----

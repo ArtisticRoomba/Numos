@@ -782,6 +782,16 @@ and not workspaces. When every chunk is skipped the stage reports default `Atmos
 The test is one read-only pass per chunk with an early exit, run in parallel. A grid of 128 resting chunks costs
 about 0.4 ms per tick at 16 workers where it cost 33 ms. A source near the grid adds one walk over its box.
 
+Inside the chunk, conditions 1 to 3 read only the chunk's own fields. The stage stores the chunk version (generation
+and revision) at which they last passed and skips them while the version holds. The face checks (condition 4 and void
+across a chunk face) and the sound speed still run on every call, because a neighbour or the configuration can change
+without touching the chunk. The cache is exact only while
+every write to a chunk advances its revision. Supported mutations do. Before every stage but `euler-flow` runs, the
+pipeline advances the revision of each awake chunk. `euler-flow` marks each chunk it writes itself: the swept
+chunks, chunks emptied by `VacuumCleanup`, and skipped chunks whose sleep timer moved. A raw write through
+`Numos.API.Dangerous` between ticks must call `MarkChanged`. A failed test is not stored, and restores and
+configuration changes clear the cache.
+
 ### 5.7 Trace cells, repairs, and the write-back
 
 A cell with no mass or fewer than `MinimumTrackedMoles` (`0.0001 mol`) is a trace cell: its momentum is dropped, its

@@ -27,6 +27,10 @@ internal static class VacuumCleanup
     ///         Classification writes only its own voxel's <c>IsVacuum</c> from a pressure field that nothing mutates.
     ///         Removal reads and writes only its own voxel.
     ///     </para>
+    ///     <para>
+    ///         A chunk that loses gas to the pass advances its revision once, on the tick thread after removal. The
+    ///         <c>euler-flow</c> stage relies on this, because the pipeline does not mark its chunks for it.
+    ///     </para>
     /// </remarks>
     internal static void Apply(AtmosSolverExecutionContext context)
     {
@@ -67,6 +71,8 @@ internal static class VacuumCleanup
         }
 
         VacuumWorkItem[] workItems = ArrayPool<VacuumWorkItem>.Shared.Rent(Math.Max(1, workItemCount));
+        // Every tile writes its own slot, so the rented array needs no clearing.
+        bool[] emptied = ArrayPool<bool>.Shared.Rent(Math.Max(1, workItemCount));
         try
         {
             int workIndex = 0;
@@ -86,10 +92,23 @@ internal static class VacuumCleanup
             }
 
             ParallelPhase.Run(workItemCount, new ClassifyVacuumAction(context, workItems));
-            ParallelPhase.Run(workItemCount, new ApplyVacuumCleanupAction(context.Chunks, workItems));
+            ParallelPhase.Run(workItemCount, new ApplyVacuumCleanupAction(context.Chunks, workItems, emptied));
+
+            // A chunk's tiles are adjacent, so one pass marks each emptied chunk once whatever the tile size.
+            int marked = -1;
+            for (int item = 0; item < workItemCount; item++)
+            {
+                int chunkIndex = workItems[item].ChunkIndex;
+                if (!emptied[item] || chunkIndex == marked)
+                    continue;
+
+                context.Chunks[chunkIndex].MarkChanged();
+                marked = chunkIndex;
+            }
         }
         finally
         {
+            ArrayPool<bool>.Shared.Return(emptied);
             ArrayPool<VacuumWorkItem>.Shared.Return(workItems);
         }
     }
@@ -128,16 +147,23 @@ internal static class VacuumCleanup
     /// </summary>
     /// <param name="chunks">Every chunk in the tick, indexed by the work item.</param>
     /// <param name="workItem">The chunk and active-air range owned by this invocation.</param>
-    private static void ApplyVacuumCleanupTile(AtmosChunk[] chunks, VacuumWorkItem workItem)
+    /// <returns><see langword="true" /> when the tile emptied at least one voxel.</returns>
+    private static bool ApplyVacuumCleanupTile(AtmosChunk[] chunks, VacuumWorkItem workItem)
     {
         var chunk = chunks[workItem.ChunkIndex];
         int end = workItem.Start + workItem.Length;
+        bool emptied = false;
         for (int activeIndex = workItem.Start; activeIndex < end; activeIndex++)
         {
             ushort voxelIndex = chunk.ActiveAirIndices[activeIndex];
             if (chunk.IsVacuum[voxelIndex] && chunk.TotalPressure[voxelIndex] > 0f)
+            {
                 chunk.SetVoxelToVacuum(voxelIndex);
+                emptied = true;
+            }
         }
+
+        return emptied;
     }
 
     /// <summary>
@@ -199,11 +225,12 @@ internal static class VacuumCleanup
 
     private readonly struct ApplyVacuumCleanupAction(
         AtmosChunk[] chunks,
-        VacuumWorkItem[] workItems) : IAction
+        VacuumWorkItem[] workItems,
+        bool[] emptied) : IAction
     {
         public void Invoke(int index)
         {
-            ApplyVacuumCleanupTile(chunks, workItems[index]);
+            emptied[index] = ApplyVacuumCleanupTile(chunks, workItems[index]);
         }
     }
 }

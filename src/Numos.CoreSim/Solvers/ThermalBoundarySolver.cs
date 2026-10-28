@@ -61,37 +61,45 @@ internal sealed class ThermalBoundarySolver : IAtmosSolverStage
         for (int batchIndex = 0; batchIndex < boundaryBatches.Count; batchIndex++)
         {
             BoundaryEventBatch<ThermalBoundaryEvent> batch = boundaryBatches[batchIndex];
+            if (!context.TryGetChunk(batch.Key, out var sourceChunk))
+                continue;
+
+            // A flat grid emits an event for nearly every voxel, so the six face neighbours are looked up once per
+            // batch instead of once per voxel and direction. A missing neighbour stays null and skips that face.
+            var neighbors = new FaceNeighbors(context, batch.Key);
             for (int eventIndex = 0; eventIndex < batch.Count; eventIndex++)
-                CollectEdges(context, batch.Key, batch[eventIndex]);
+                CollectEdges(sourceChunk, batch.Key, in neighbors, batch[eventIndex]);
         }
     }
 
     private void CollectEdges(
-        AtmosSolverExecutionContext context, Int3 sourcePosition,
+        AtmosChunk sourceChunk, Int3 sourcePosition, in FaceNeighbors neighbors,
         ThermalBoundaryEvent boundaryEvent)
     {
-        if (!context.TryGetChunk(sourcePosition, out var sourceChunk))
-            return;
-
         var localPosition = sourceChunk.GetXyzInt3(boundaryEvent.LocalVoxelIndex);
-        TryAddEdge(context, sourceChunk, sourcePosition, localPosition + Int3.NegX, Int3.NegX);
-        TryAddEdge(context, sourceChunk, sourcePosition, localPosition + Int3.PosX, Int3.PosX);
-        TryAddEdge(context, sourceChunk, sourcePosition, localPosition + Int3.NegY, Int3.NegY);
-        TryAddEdge(context, sourceChunk, sourcePosition, localPosition + Int3.PosY, Int3.PosY);
-        TryAddEdge(context, sourceChunk, sourcePosition, localPosition + Int3.NegZ, Int3.NegZ);
-        TryAddEdge(context, sourceChunk, sourcePosition, localPosition + Int3.PosZ, Int3.PosZ);
+        var dimensions = sourceChunk.Dimensions;
+        if (localPosition.X == 0)
+            TryAddEdge(sourceChunk, sourcePosition, localPosition + Int3.NegX, Int3.NegX, neighbors.NegX);
+        if (localPosition.X == dimensions.X - 1)
+            TryAddEdge(sourceChunk, sourcePosition, localPosition + Int3.PosX, Int3.PosX, neighbors.PosX);
+        if (localPosition.Y == 0)
+            TryAddEdge(sourceChunk, sourcePosition, localPosition + Int3.NegY, Int3.NegY, neighbors.NegY);
+        if (localPosition.Y == dimensions.Y - 1)
+            TryAddEdge(sourceChunk, sourcePosition, localPosition + Int3.PosY, Int3.PosY, neighbors.PosY);
+        if (localPosition.Z == 0)
+            TryAddEdge(sourceChunk, sourcePosition, localPosition + Int3.NegZ, Int3.NegZ, neighbors.NegZ);
+        if (localPosition.Z == dimensions.Z - 1)
+            TryAddEdge(sourceChunk, sourcePosition, localPosition + Int3.PosZ, Int3.PosZ, neighbors.PosZ);
     }
 
     private void TryAddEdge(
-        AtmosSolverExecutionContext context, AtmosChunk sourceChunk,
-        Int3 sourcePosition, Int3 targetPosition, Int3 direction)
+        AtmosChunk sourceChunk, Int3 sourcePosition, Int3 targetPosition, Int3 direction,
+        AtmosChunk? neighborChunk)
     {
-        if (targetPosition.IsWithin(default, sourceChunk.Dimensions))
+        if (neighborChunk is null || targetPosition.IsWithin(default, sourceChunk.Dimensions))
             return;
 
         var neighborPosition = sourcePosition + direction;
-        if (!context.TryGetChunk(neighborPosition, out var neighborChunk))
-            return;
 
         var neighborLocalPosition = (targetPosition + neighborChunk.Dimensions) % neighborChunk.Dimensions;
         ushort neighborIndex = neighborChunk.GetIndex(neighborLocalPosition);
@@ -225,6 +233,29 @@ internal sealed class ThermalBoundarySolver : IAtmosSolverStage
         ThermalVoxelAddress address, Joule64 value)
     {
         values[address] = values.GetValueOrDefault(address) + value;
+    }
+
+    private readonly struct FaceNeighbors
+    {
+        public readonly AtmosChunk? NegX;
+        public readonly AtmosChunk? PosX;
+        public readonly AtmosChunk? NegY;
+        public readonly AtmosChunk? PosY;
+        public readonly AtmosChunk? NegZ;
+        public readonly AtmosChunk? PosZ;
+
+        public FaceNeighbors(AtmosSolverExecutionContext context, Int3 position)
+        {
+            NegX = Find(context, position + Int3.NegX);
+            PosX = Find(context, position + Int3.PosX);
+            NegY = Find(context, position + Int3.NegY);
+            PosY = Find(context, position + Int3.PosY);
+            NegZ = Find(context, position + Int3.NegZ);
+            PosZ = Find(context, position + Int3.PosZ);
+        }
+
+        private static AtmosChunk? Find(AtmosSolverExecutionContext context, Int3 position) =>
+            context.TryGetChunk(position, out var chunk) ? chunk : null;
     }
 
     private readonly record struct ThermalVoxelAddress(Int3 ChunkPosition, ushort LocalVoxelIndex);

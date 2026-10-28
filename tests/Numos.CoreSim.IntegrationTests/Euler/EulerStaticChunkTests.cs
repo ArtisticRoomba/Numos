@@ -1,5 +1,6 @@
 using Numos.API;
 using Numos.CoreSim.Datatypes.Primitives;
+using Numos.CoreSim.Datatypes.Snapshots;
 using Numos.CoreSim.EulerFlow;
 using Numos.CoreSim.Solvers.Euler;
 using Numos.Maths;
@@ -22,6 +23,8 @@ public sealed class EulerStaticChunkTests
     private const float Temperature = 293f;
     private const float HotTemperature = 400f;
     private const float Atmosphere = AtmosPhysicalConstants.StandardAtmosphericPressure;
+    private const float LowRoomPressure = 500f;
+    private static readonly Int3 LowRoom = new(5, 5, 0);
 
     [TearDown]
     public void RestoreSwitches()
@@ -212,6 +215,281 @@ public sealed class EulerStaticChunkTests
     }
 
     /// <summary>
+    ///     At 960 Hz <c>euler-flow</c> runs alone on tick 32, and the gas stages run after it on tick 48. Only the
+    ///     stages that do not mark their own writes advance the revision of every awake chunk.
+    /// </summary>
+    [Test]
+    public void EulerOnlyTick_KeepsSkippedRevisionsAndOtherStagesAdvanceEveryAwakeChunk()
+    {
+        using var simulation = CreateFlatGrid(960, walls: true, door: false);
+        AtmosChunkHandle[] chunks = simulation.GetChunkHandles();
+        var disturbed = new Int3(1, 1, 0);
+        TickTo(simulation, 16);
+        AtmosChunkVersion[] beforeEuler = Versions(simulation, chunks);
+        TickTo(simulation, 32);
+        int skipped = EulerFlowSolver.LastSkippedCount;
+        AtmosChunkVersion[] afterEuler = Versions(simulation, chunks);
+        TickTo(simulation, 48);
+        AtmosChunkVersion[] afterGas = Versions(simulation, chunks);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(skipped, Is.EqualTo(FlatGridSize * FlatGridSize - 1), "every sealed room is skipped");
+            Assert.That(chunks.All(chunk => simulation.GetChunkSnapshot(chunk).IsAwake), Is.True, "nothing sleeps");
+            for (int index = 0; index < chunks.Length; index++)
+            {
+                bool swept = chunks[index].Position == disturbed;
+                Assert.That(
+                    afterEuler[index] != beforeEuler[index], Is.EqualTo(swept),
+                    $"revision of {chunks[index].Position} on the euler-flow tick");
+                Assert.That(
+                    afterGas[index], Is.Not.EqualTo(afterEuler[index]),
+                    $"revision of {chunks[index].Position} on the gas stage tick");
+            }
+        });
+    }
+
+    /// <summary>
+    ///     The stage reuses a chunk's static test while its revision holds. A no-op custom stage right after
+    ///     <c>euler-flow</c> advances every awake chunk's revision on every call, so that copy rescans every chunk.
+    ///     The two must agree bit for bit over 3 s of the default 960 Hz pipeline, with rooms falling asleep and a
+    ///     low-pressure room emptied by vacuum cleanup.
+    /// </summary>
+    /// <remarks>
+    ///     The reuse is exact only if <c>euler-flow</c> marks every chunk it writes. So after every call, any chunk
+    ///     whose snapshot changed since the call before must also have a new revision. The settle period is 32
+    ///     ticks, so settle passes also land on ticks where <c>euler-flow</c> runs alone.
+    /// </remarks>
+    [Test]
+    public void ReusedStaticTest_MatchesARescanOnEveryCall()
+    {
+        using var reusing = CreateStation();
+        using var rescanning = CreateStation();
+        rescanning.World.Solvers.Register(
+            "test/no-op", static _ => { }, after: AtmosBuiltInSolvers.EulerFlow, interval: 16);
+        AtmosChunkHandle[] chunks = reusing.GetChunkHandles();
+        AtmosChunkSnapshot[] previous = chunks.Select(chunk => reusing.GetChunkSnapshot(chunk)).ToArray();
+        int calls = 0;
+        int heldRevisions = 0;
+        int skippedTotal = 0;
+        for (int tick = 1; tick <= 3 * 960; tick++)
+        {
+            EulerFlowSolver.LastSkippedCount = -1;
+            reusing.Tick();
+            int reusedSkips = EulerFlowSolver.LastSkippedCount;
+            EulerFlowSolver.LastSkippedCount = -1;
+            rescanning.Tick();
+            int rescannedSkips = EulerFlowSolver.LastSkippedCount;
+            if (reusedSkips < 0 && rescannedSkips < 0)
+                continue;
+
+            calls++;
+            skippedTotal += reusedSkips;
+            var current = chunks.Select(chunk => reusing.GetChunkSnapshot(chunk)).ToArray();
+            for (int index = 0; index < chunks.Length; index++)
+            {
+                bool held = current[index].Version == previous[index].Version;
+                if (held && current[index].IsAwake)
+                    heldRevisions++;
+
+                if (held)
+                {
+                    Assert.That(
+                        SnapshotDigest(current[index]), Is.EqualTo(SnapshotDigest(previous[index])),
+                        $"{chunks[index].Position} changed without a new revision, tick {tick}");
+                }
+            }
+
+            previous = current;
+            Assert.Multiple(() =>
+            {
+                Assert.That(reusedSkips, Is.EqualTo(rescannedSkips), $"skipped count, tick {tick}");
+                Assert.That(reusing.LastFlowDiagnostics, Is.EqualTo(rescanning.LastFlowDiagnostics), $"diagnostics, tick {tick}");
+                Assert.That(
+                    reusing.CaptureCheckpoint().ComputeStateHash(),
+                    Is.EqualTo(rescanning.CaptureCheckpoint().ComputeStateHash()), $"state hash, tick {tick}");
+            });
+        }
+
+        int asleep = previous.Count(snapshot => !snapshot.IsAwake);
+        double lowRoomMoles = SimTestHelpers.TotalMoles(previous[Array.FindIndex(chunks, chunk => chunk.Position == LowRoom)]);
+        TestContext.Out.WriteLine(
+            $"calls: {calls}, skipped: {skippedTotal}, awake revisions held: {heldRevisions}, asleep: {asleep}");
+        Assert.Multiple(() =>
+        {
+            Assert.That(calls, Is.EqualTo(3 * 60), "euler-flow calls");
+            Assert.That(skippedTotal, Is.GreaterThan(0), "the comparison skipped nothing");
+            Assert.That(heldRevisions, Is.GreaterThan(0), "no static test was reused");
+            Assert.That(asleep, Is.InRange(1, chunks.Length - 1), "some rooms sleep and some stay awake");
+            Assert.That(lowRoomMoles, Is.Zero, "vacuum cleanup emptied the low-pressure room");
+        });
+    }
+
+    /// <summary>
+    ///     A skipped chunk below the vacuum threshold is emptied by the settle pass on tick 32, where
+    ///     <c>euler-flow</c> runs alone. Its sleep timer stays at zero, so only the cleanup can advance its revision.
+    /// </summary>
+    [Test]
+    public void VacuumCleanupOfASkippedChunk_AdvancesItsRevision()
+    {
+        var config = CreateConfig(16, settlePeriod: 1f / 30f);
+        config.VacuumThreshold = LowRoomPressure * 2f;
+        using var simulation = SimTestHelpers.CreateEulerSimulation(
+            config, ChunkSize, ChunkSize, 1, out var chunk, tickRate: 960);
+        float moles = SimTestHelpers.MolesFor(config, LowRoomPressure, Temperature);
+        for (int y = 0; y < ChunkSize; y++)
+        for (int x = 0; x < ChunkSize; x++)
+            simulation.AddGasToVoxel(chunk, x, y, 0, SimTestHelpers.EulerAirGasName, moles, Temperature);
+
+        TickTo(simulation, 16);
+        int skipped = EulerFlowSolver.LastSkippedCount;
+        var before = simulation.GetChunkSnapshot(chunk);
+        TickTo(simulation, 32);
+        var after = simulation.GetChunkSnapshot(chunk);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(skipped, Is.EqualTo(1), "the chunk is skipped as static");
+            Assert.That(SimTestHelpers.TotalMoles(before), Is.GreaterThan(0f), "gas before the settle pass");
+            Assert.That(SimTestHelpers.TotalMoles(after), Is.Zero, "emptied by the settle pass");
+            Assert.That(after.SleepTimer, Is.EqualTo(before.SleepTimer), "sleep timer");
+            Assert.That(after.Version, Is.Not.EqualTo(before.Version), "revision");
+        });
+    }
+
+    /// <summary>
+    ///     A direct temperature write marks a static chunk changed. The next call, with no stage between, must
+    ///     test the chunk again and sweep it rather than reuse the pass from the call before.
+    /// </summary>
+    [Test]
+    public void ExternalWriteBetweenEulerCalls_MakesTheChunkNonStatic()
+    {
+        using var skipping = CreateFlatGrid(960, walls: true, door: false);
+        using var sweeping = CreateFlatGrid(960, walls: true, door: false);
+        var target = skipping.GetChunkHandles().Single(chunk => chunk.Position == new Int3(4, 4, 0));
+        foreach (var simulation in new[] { skipping, sweeping })
+        {
+            EulerFlowSolver.SkipStaticChunks = ReferenceEquals(simulation, skipping);
+            TickTo(simulation, 31);
+            simulation.SetVoxelTemperature(target, 5, 5, 0, HotTemperature);
+        }
+
+        EulerFlowSolver.SkipStaticChunks = true;
+        skipping.Tick();
+        int skipped = EulerFlowSolver.LastSkippedCount;
+        EulerFlowSolver.SkipStaticChunks = false;
+        sweeping.Tick();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(skipping.TickCount, Is.EqualTo(32), "tick 32 runs euler-flow alone");
+            Assert.That(skipped, Is.EqualTo(FlatGridSize * FlatGridSize - 2), "the written room is swept");
+            Assert.That(
+                skipping.CaptureCheckpoint().ComputeStateHash(),
+                Is.EqualTo(sweeping.CaptureCheckpoint().ComputeStateHash()), "state hash");
+        });
+    }
+
+    /// <summary>
+    ///     The flat grid at 960 Hz with the default pipeline and sleep on. Columns 0 to 2 are open into each other
+    ///     and columns 3 to 5 are sealed rooms. Chunk (1, 1) holds the pressure block, so the open side stays awake
+    ///     and the sealed rooms fall asleep after <see cref="AtmosConfig.SleepDelay" />. The sealed room at
+    ///     <see cref="LowRoom" /> holds gas below the vacuum threshold.
+    /// </summary>
+    private static AtmosSimulation CreateStation()
+    {
+        var config = CreateConfig(16, settlePeriod: 1f / 30f);
+        config.SleepDelay = 1f;
+        config.SleepEpsilon = 3.5f;
+        config.VacuumThreshold = LowRoomPressure * 2f;
+        var simulation = SimTestHelpers.CreateEulerSimulation(
+            config, FlatSize, FlatSize, 1, out var first, exactGasDynamics: false, tickRate: 960);
+        float ambient = SimTestHelpers.MolesFor(config, Atmosphere, Temperature);
+        for (int gridY = 0; gridY < FlatGridSize; gridY++)
+        for (int gridX = 0; gridX < FlatGridSize; gridX++)
+        {
+            var position = new Int3(gridX, gridY, 0);
+            var chunk = position == default ? first : SimTestHelpers.CreateOpenChunk(simulation, position);
+            bool disturbed = gridX == 1 && gridY == 1;
+            bool walls = gridX >= FlatGridSize / 2;
+            for (int y = 0; y < FlatSize; y++)
+            for (int x = 0; x < FlatSize; x++)
+            {
+                if (walls && (x == 0 || y == 0))
+                {
+                    simulation.SetVoxelClassification(chunk, x, y, 0, VoxelClassification.RoomSolid);
+                    continue;
+                }
+
+                float moles = disturbed && x is >= 4 and < 12 && y is >= 4 and < 12 ? 1.5f * ambient : ambient;
+                if (position == LowRoom)
+                    moles = SimTestHelpers.MolesFor(config, LowRoomPressure, Temperature);
+
+                simulation.AddGasToVoxel(chunk, x, y, 0, SimTestHelpers.EulerAirGasName, moles, Temperature);
+            }
+        }
+
+        return simulation;
+    }
+
+    /// <summary>
+    ///     FNV-1a over every snapshot field a chunk revision covers.
+    /// </summary>
+    private static ulong SnapshotDigest(AtmosChunkSnapshot snapshot)
+    {
+        ulong hash = 14695981039346656037UL;
+        void Add(int value)
+        {
+            hash = (hash ^ (uint)value) * 1099511628211UL;
+        }
+
+        void AddAll(float[] values)
+        {
+            foreach (float value in values)
+                Add(BitConverter.SingleToInt32Bits(value));
+        }
+
+        AddAll(snapshot.TotalPressure);
+        AddAll(snapshot.Temperature);
+        AddAll(snapshot.TotalHeatCapacity);
+        AddAll(snapshot.VelocityX);
+        AddAll(snapshot.VelocityY);
+        AddAll(snapshot.VelocityZ);
+        foreach (var gas in snapshot.Gases)
+        {
+            Add(gas.GasId);
+            AddAll(gas.Moles);
+        }
+
+        foreach (int room in snapshot.VoxelRoomMap)
+            Add(room);
+
+        Add(snapshot.ActiveAirCount);
+        Add(snapshot.ActiveGasCount);
+        Add(snapshot.IsAwake ? 1 : 0);
+        Add(snapshot.SleepTimer);
+        return hash;
+    }
+
+    private static void TickTo(AtmosSimulation simulation, long tick)
+    {
+        while (simulation.TickCount < tick)
+            simulation.Tick();
+    }
+
+    private static AtmosChunkVersion[] Versions(AtmosSimulation simulation, AtmosChunkHandle[] chunks)
+    {
+        var versions = new AtmosChunkVersion[chunks.Length];
+        for (int index = 0; index < chunks.Length; index++)
+        {
+            simulation.TryGetChunkSnapshot(chunks[index], default, AtmosChunkSnapshotFields.None, out var snapshot);
+            versions[index] = snapshot.Version;
+        }
+
+        return versions;
+    }
+
+    /// <summary>
     ///     Ticks a skipping and a sweeping copy side by side for 0.3 s and compares the diagnostics and the state
     ///     hash after every tick. That is 6 <c>euler-flow</c> calls at 20 Hz and 18 at 960 Hz.
     /// </summary>
@@ -339,9 +617,10 @@ public sealed class EulerStaticChunkTests
         return simulation;
     }
 
-    private static AtmosConfig CreateConfig(int substepCap)
+    private static AtmosConfig CreateConfig(int substepCap, float settlePeriod = 0.05f)
     {
-        var config = SimTestHelpers.CreateEulerConfig(new EulerFlowConfig { MaxSubstepsPerSecond = substepCap * 20 });
+        var config = SimTestHelpers.CreateEulerConfig(
+            new EulerFlowConfig { MaxSubstepsPerSecond = substepCap * 20, SettlePeriod = settlePeriod });
         var registry = new GasRegistry();
         for (int gasId = 0; gasId < config.GasRegistry.Count; gasId++)
             registry.Add(config.GasRegistry[gasId] with { DiffusionCoefficient = 0.02f });

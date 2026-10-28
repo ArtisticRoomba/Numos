@@ -206,9 +206,17 @@ public readonly ref struct AtmosDangerousChunk
     ///     Advances the chunk revision after raw observable writes.
     /// </summary>
     /// <remarks>
-    ///     Span writes do not change the revision on their own, so conditional snapshot requests such as
-    ///     <see cref="AtmosSimulation.GetChangedChunkSnapshots" /> keep reporting the chunk as unchanged until this is
-    ///     called.
+    ///     <para>
+    ///         Span writes do not change the revision on their own, so conditional snapshot requests such as
+    ///         <see cref="AtmosSimulation.GetChangedChunkSnapshots" /> keep reporting the chunk as unchanged until this
+    ///         is called.
+    ///     </para>
+    ///     <para>
+    ///         The <c>euler-flow</c> stage reuses its static test of a chunk while the revision holds. A raw write
+    ///         between ticks that skips this call can leave a changed chunk skipped as static. A write inside a
+    ///         custom stage is covered, because Numos advances every awake chunk's revision before a custom stage
+    ///         runs.
+    ///     </para>
     /// </remarks>
     public void MarkChanged()
     {

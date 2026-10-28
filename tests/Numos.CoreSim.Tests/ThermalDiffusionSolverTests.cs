@@ -103,4 +103,81 @@ public class ThermalDiffusionSolverTests
             Assert.That(parallelChunk.TotalPressure[i], Is.EqualTo(sequentialChunk.TotalPressure[i]), $"voxel {i} pressure");
         }
     }
+
+    private static AtmosChunk BuildUniformChunk(float temperature, bool solidVoxel)
+    {
+        var chunk = new AtmosChunk();
+        for (ushort index = 0; index < chunk.VoxelCount; index++)
+            chunk.InjectGasToVoxel(index, 0, 1f + index % 5, temperature, 20f, 1f);
+
+        if (solidVoxel)
+        {
+            var solid = chunk.GetIndex(new Int3(2, 1, 1));
+            chunk.VoxelRoomMap[solid] = VoxelClassification.RoomSolid;
+            chunk.Temperature[solid] = temperature * 3f;
+            chunk.RebuildActiveAirIndices();
+        }
+
+        return chunk;
+    }
+
+    /// <summary>
+    ///     A chunk whose valid voxels share one temperature must come out unchanged and must still report every boundary
+    ///     voxel. The solid case has a stored temperature that differs, and it leaves the other voxels as they were.
+    /// </summary>
+    [TestCase(true, 1)]
+    [TestCase(false, 1)]
+    [TestCase(true, int.MaxValue)]
+    [TestCase(false, int.MaxValue)]
+    public void Solve_UniformTemperature_LeavesChunkUnchangedAndEmitsBoundaries(bool solidVoxel, int awakeChunkCount)
+    {
+        var config = new TestAtmosConfig { ThermalConductance = 0.5f }.CreateSnapshot();
+        var tickConfig = new AtmosSolverConfigSnapshot();
+        tickConfig.Capture(config);
+        var chunk = BuildUniformChunk(300f, solidVoxel);
+        var temperature = chunk.Temperature.AsSpan().ToArray();
+        var pressure = chunk.TotalPressure.AsSpan().ToArray();
+        var buffer = new ThermalBoundaryEvent[chunk.VoxelCount];
+
+        int count = new ThermalDiffusionSolver().Solve(chunk, tickConfig, buffer, awakeChunkCount);
+
+        int expectedBoundaryCount = 0;
+        for (ushort index = 0; index < chunk.VoxelCount; index++)
+        {
+            var p = chunk.GetXyzInt3(index);
+            bool onFace = p.X == 0 || p.X == chunk.Width - 1 || p.Y == 0 || p.Y == chunk.Height - 1 ||
+                          p.Z == 0 || p.Z == chunk.Depth - 1;
+            if (onFace && chunk.VoxelRoomMap[index] != VoxelClassification.RoomSolid)
+                expectedBoundaryCount++;
+        }
+
+        Assert.That(expectedBoundaryCount, Is.GreaterThan(0));
+        Assert.That(count, Is.EqualTo(expectedBoundaryCount));
+        Assert.That(chunk.Temperature.AsSpan().ToArray(), Is.EqualTo(temperature));
+        Assert.That(chunk.TotalPressure.AsSpan().ToArray(), Is.EqualTo(pressure));
+    }
+
+    /// <summary>
+    ///     One warmer voxel is enough to defeat the skip, in the full-air span scan and in the active-list scan.
+    /// </summary>
+    [TestCase(true, 1)]
+    [TestCase(false, 1)]
+    [TestCase(true, int.MaxValue)]
+    [TestCase(false, int.MaxValue)]
+    public void Solve_OneWarmerVoxel_StillDiffuses(bool solidVoxel, int awakeChunkCount)
+    {
+        var config = new TestAtmosConfig { ThermalConductance = 0.5f }.CreateSnapshot();
+        var tickConfig = new AtmosSolverConfigSnapshot();
+        tickConfig.Capture(config);
+        var chunk = BuildUniformChunk(300f, solidVoxel);
+        var warm = chunk.GetIndex(new Int3(0, 0, 0));
+        chunk.Temperature[warm] = 400f;
+        var neighbor = chunk.GetIndex(new Int3(1, 0, 0));
+        var buffer = new ThermalBoundaryEvent[chunk.VoxelCount];
+
+        new ThermalDiffusionSolver().Solve(chunk, tickConfig, buffer, awakeChunkCount);
+
+        Assert.That(chunk.Temperature[warm], Is.LessThan(400f));
+        Assert.That(chunk.Temperature[neighbor], Is.GreaterThan(300f));
+    }
 }

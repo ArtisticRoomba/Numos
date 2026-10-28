@@ -418,6 +418,15 @@ internal sealed class AtmosSolverTickScope
             context.BeginStage(interval, deltaTime);
     }
 
+    /// <summary>
+    ///     Advances the revision of every awake chunk in every simulation of the tick.
+    /// </summary>
+    internal void MarkAwakeChunksChanged()
+    {
+        foreach (var context in Contexts)
+            context.MarkAwakeChunksChanged();
+    }
+
     internal static InvalidOperationException DefaultViewException()
     {
         return new InvalidOperationException(

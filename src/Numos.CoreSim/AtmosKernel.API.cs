@@ -91,6 +91,7 @@ internal sealed partial class AtmosKernel
             ArgumentNullException.ThrowIfNull(config);
             config.ValidateGasRegistry();
             _config = config;
+            _defaultSolvers.OnConfigChanged();
         }
     }
 

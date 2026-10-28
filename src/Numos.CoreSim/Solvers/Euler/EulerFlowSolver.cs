@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using CommunityToolkit.HighPerformance.Helpers;
+using Numos.CoreSim.Datatypes.Snapshots;
 using Numos.CoreSim.EulerFlow;
 using Numos.Maths;
 
@@ -64,7 +65,8 @@ namespace Numos.CoreSim.Solvers.Euler;
 ///     </para>
 ///     <para>
 ///         The stage keeps nothing between ticks beyond the chunk's own momentum arrays. The stage rebuilds the buffers
-///         from the chunk fields every tick. See docs/atmospherics_technical_documentation.md section 5 for the
+///         from the chunk fields every tick. The static-test passes it keeps are a cache keyed on the chunk
+///         version, so they change no result. See docs/atmospherics_technical_documentation.md section 5 for the
 ///         derivation.
 ///     </para>
 /// </remarks>
@@ -131,6 +133,17 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
     private int[] _visitMarks = [];
     private MetrePerSecond[] _staticSpeed = [];
     private bool[] _static = [];
+
+    /// <summary>
+    ///     The chunk version at which each chunk's interior last passed the static test, by dense id, kept across
+    ///     calls (see <see cref="EulerStaticChunk.IsStatic" />). Only passes are stored.
+    /// </summary>
+    /// <remarks>
+    ///     A recycled dense id carries the old chunk's version, whose generation no new chunk shares, so a stale
+    ///     slot never matches. Restore and config changes clear it anyway. The static test runs in parallel, and
+    ///     each chunk writes only its own slot.
+    /// </remarks>
+    private AtmosChunkVersion[] _interiorPassedAt = [];
     private EulerChunkWorkspace?[] _workspaceByDenseId = [];
 
     /// <summary>
@@ -177,7 +190,11 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
             }
 
             if (SkipStaticChunks)
-                ParallelPhase.Run(context.Chunks.Length, new StaticAction(context, _static, _staticSpeed));
+            {
+                EnsureInteriorSlots(context.Chunks);
+                ParallelPhase.Run(
+                    context.Chunks.Length, new StaticAction(context, _static, _staticSpeed, _interiorPassedAt));
+            }
             else
                 Array.Clear(_static, 0, context.Chunks.Length);
 
@@ -228,15 +245,27 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
 
             // An awake chunk that never got a workspace has nothing to move, but its sleep timer still has to
             // advance. Chunks the stage put to sleep are no longer awake here. Like every sleep decision, the
-            // update waits for a settle pass and covers the whole period.
+            // update waits for a settle pass and covers the whole period. Snapshots carry the timer, so a chunk
+            // whose timer moved is marked changed. The static test does not read the timer, so a pass stored at the
+            // version just before moves to the new version.
             if (settle)
             {
                 for (int chunkIndex = 0; chunkIndex < context.Chunks.Length; chunkIndex++)
                 {
                     AtmosChunk chunk = context.Chunks[chunkIndex];
-                    if (chunk.IsAwake && LookupWorkspace(chunk) == null)
-                        ChunkSleepPolicy.UpdateSleepState(
-                            chunk, config, 0f, elapsedTicks, context.SleepDelayTicks);
+                    if (!chunk.IsAwake || LookupWorkspace(chunk) != null)
+                        continue;
+
+                    int timer = chunk.SleepTimer;
+                    AtmosChunkVersion before = chunk.Version;
+                    ChunkSleepPolicy.UpdateSleepState(chunk, config, 0f, elapsedTicks, context.SleepDelayTicks);
+                    if (chunk.SleepTimer == timer)
+                        continue;
+
+                    chunk.MarkChanged();
+                    if (chunk.IsAwake && chunk.DenseId < _interiorPassedAt.Length &&
+                        _interiorPassedAt[chunk.DenseId] == before)
+                        _interiorPassedAt[chunk.DenseId] = chunk.Version;
                 }
             }
 
@@ -271,11 +300,35 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
     {
         Array.Clear(_workspaceByDenseId);
         Array.Clear(_lastBoundByDenseId);
+        ForgetStaticPasses();
         foreach (EulerChunkWorkspace workspace in _pool)
             workspace.InvalidateGeometry();
 
         for (int index = 0; index < _activeCount; index++)
             _active[index].InvalidateGeometry();
+    }
+
+    /// <summary>
+    ///     Drops every stored static-test pass, so the next call scans every awake chunk's interior again. Called
+    ///     on restore and when the configuration changes.
+    /// </summary>
+    internal void ForgetStaticPasses()
+    {
+        Array.Clear(_interiorPassedAt);
+    }
+
+    /// <summary>
+    ///     Grows <see cref="_interiorPassedAt" /> to cover every dense id in <paramref name="chunks" />. Tick thread
+    ///     only, before the parallel static test.
+    /// </summary>
+    private void EnsureInteriorSlots(AtmosChunk[] chunks)
+    {
+        int maximum = -1;
+        foreach (AtmosChunk chunk in chunks)
+            maximum = Math.Max(maximum, chunk.DenseId);
+
+        if (maximum >= _interiorPassedAt.Length)
+            Array.Resize(ref _interiorPassedAt, Math.Max(maximum + 1, Math.Max(4, _interiorPassedAt.Length * 2)));
     }
 
     /// <summary>
@@ -1457,14 +1510,17 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
     /// </summary>
     private readonly record struct VoxelTile(int WorkspaceIndex, int FirstActive, int EndActive);
 
-    private readonly struct StaticAction(AtmosSolverExecutionContext context, bool[] result, MetrePerSecond[] speed) : IAction
+    private readonly struct StaticAction(
+        AtmosSolverExecutionContext context, bool[] result, MetrePerSecond[] speed,
+        AtmosChunkVersion[] interiorPassedAt) : IAction
     {
         public void Invoke(int index)
         {
             AtmosChunk chunk = context.Chunks[index];
             MetrePerSecond signalSpeed = 0f;
             result[index] = chunk.IsAwake && chunk.ActiveGasCount > 0 &&
-                            EulerStaticChunk.IsStatic(chunk, context, out signalSpeed);
+                            EulerStaticChunk.IsStatic(
+                                chunk, context, ref interiorPassedAt[chunk.DenseId], out signalSpeed);
 
             speed[index] = signalSpeed;
         }

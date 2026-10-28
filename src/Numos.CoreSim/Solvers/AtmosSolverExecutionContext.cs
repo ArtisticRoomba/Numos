@@ -84,6 +84,23 @@ internal sealed class AtmosSolverExecutionContext
     }
 
     /// <summary>
+    ///     Advances the revision of every awake chunk. The tick runs this before each stage that does not mark its
+    ///     own writes.
+    /// </summary>
+    /// <remarks>
+    ///     Covering only awake chunks is enough. A sleeping chunk that a stage writes must be woken, and
+    ///     <see cref="AtmosChunk.Wake" /> advances the revision.
+    /// </remarks>
+    internal void MarkAwakeChunksChanged()
+    {
+        foreach (AtmosChunk chunk in Chunks)
+        {
+            if (chunk.IsAwake)
+                chunk.MarkChanged();
+        }
+    }
+
+    /// <summary>
     ///     Gets a built-in stage's shared data from <see cref="AtmosSolverConfigSnapshot.SolverData" />, creating it
     ///     on first use.
     /// </summary>

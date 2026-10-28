@@ -39,6 +39,18 @@ internal sealed class DefaultAtmosSolvers : IDisposable
         _eulerFlow.ClearTransientState();
     }
 
+    /// <summary>
+    ///     Resets the cross-call caches of the built-in stages after a configuration change.
+    /// </summary>
+    /// <remarks>
+    ///     The <c>euler-flow</c> static passes read no configuration. Clearing them costs one rescan, and no cache
+    ///     then outlives a configuration change.
+    /// </remarks>
+    internal void OnConfigChanged()
+    {
+        _eulerFlow.ForgetStaticPasses();
+    }
+
     internal void SolveAdvection(AtmosSolverExecutionContext context)
     {
         _advection.Solve(context);

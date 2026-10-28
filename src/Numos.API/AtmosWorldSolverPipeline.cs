@@ -894,8 +894,16 @@ public sealed class AtmosWorldSolverPipeline
     ///     Runs the stages that are due on the tick now executing.
     /// </summary>
     /// <remarks>
-    ///     A stage is due when the one-based tick has reached its next due tick. Execution advances the schedule
-    ///     before the stage runs, so a stage that calls <see cref="SetInterval" /> on itself measures from this run.
+    ///     <para>
+    ///         A stage is due when the one-based tick has reached its next due tick. Execution advances the schedule
+    ///         before the stage runs, so a stage that calls <see cref="SetInterval" /> on itself measures from this
+    ///         run.
+    ///     </para>
+    ///     <para>
+    ///         Before a due stage runs, every awake chunk of every simulation advances its revision, unless the stage
+    ///         marks its own writes (<see cref="WorldSolverRegistration.MarksOwnChanges" />). Custom stages always
+    ///         get the bump, because Numos cannot see which chunks they write.
+    ///     </para>
     /// </remarks>
     internal void Execute(WorldSolverRegistration[] steps, AtmosSolverTickScope scope)
     {
@@ -910,6 +918,9 @@ public sealed class AtmosWorldSolverPipeline
             scope.BeginStage(step.Interval, deltaTime);
             step.NextDueTick = tick + step.Interval;
             step.LastRunTick = tick;
+            if (!step.MarksOwnChanges)
+                scope.MarkAwakeChunksChanged();
+
             step.Execute(scope);
         }
     }
@@ -1052,6 +1063,7 @@ internal sealed class WorldSolverRegistration
         Interval = interval;
         Name = name;
         Kind = kind;
+        MarksOwnChanges = kind == AtmosWorldSolverKind.BuiltIn && name == AtmosBuiltInSolvers.EulerFlow;
         _builtInSolver = builtInSolver;
         CustomSolver = customSolver;
         Selection = selection;
@@ -1062,6 +1074,17 @@ internal sealed class WorldSolverRegistration
     internal AtmosWorldSolverKind Kind { get; }
     internal AtmosNeighborSelection? Selection { get; }
     internal bool IsEnabled { get; set; } = true;
+
+    /// <summary>
+    ///     Gets whether the stage advances the revision of every chunk it writes, so the pipeline can skip the
+    ///     revision bump of every awake chunk before it runs.
+    /// </summary>
+    /// <remarks>
+    ///     Only the built-in <c>euler-flow</c> stage sets it. A chunk that the stage skips as static keeps its
+    ///     revision, so a renderer does not copy it again. The stage also reuses its static test of a chunk while
+    ///     the revision holds, so a blanket bump would force a rescan of every awake chunk on every call.
+    /// </remarks>
+    internal bool MarksOwnChanges { get; }
 
     /// <summary>
     ///     Gets or sets how many ticks pass between runs.

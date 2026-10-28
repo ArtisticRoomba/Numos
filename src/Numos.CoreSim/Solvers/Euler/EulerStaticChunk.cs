@@ -2,6 +2,7 @@ using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Numos.CoreSim.Datatypes.Primitives;
+using Numos.CoreSim.Datatypes.Snapshots;
 using Numos.Maths;
 
 namespace Numos.CoreSim.Solvers.Euler;
@@ -24,8 +25,14 @@ namespace Numos.CoreSim.Solvers.Euler;
 ///         faces. The stage checks that after the pre-pass (see <see cref="EulerFlowSolver" />).
 ///     </para>
 ///     <para>
-///         The test reads live chunk fields only and writes nothing, so chunks run in parallel and the result does
-///         not depend on the worker count.
+///         The test reads live chunk fields only and writes nothing to the chunk, so chunks run in parallel and
+///         the result does not depend on the worker count.
+///     </para>
+///     <para>
+///         The interior and void passes read only the chunk's own fields. While the chunk's
+///         <see cref="AtmosChunk.Version" /> holds, those fields hold too, so the caller keeps the version at
+///         which both passed and the test skips them. The signal speed and the face passes still run, because
+///         they read the config and the neighbours, which change on their own.
 ///     </para>
 /// </remarks>
 internal static class EulerStaticChunk
@@ -41,14 +48,20 @@ internal static class EulerStaticChunk
     /// </summary>
     /// <param name="chunk">An awake chunk with at least one gas channel.</param>
     /// <param name="context">The tick context, used to find neighbour chunks.</param>
+    /// <param name="interiorPassedAt">
+    ///     The chunk version at which the interior and void passes last passed, or <see langword="default" />. The
+    ///     test skips both passes when it equals the current version, and stores the current version when both pass.
+    /// </param>
     /// <param name="signalSpeed">The signal speed a gather would give every cell, valid when the result is true.</param>
     /// <returns><see langword="true" /> when a sweep over the chunk would change no bit of it.</returns>
     /// <remarks>
     ///     No allocation. The first air voxel is the reference, and every other cell is compared with it bit for
-    ///     bit. The interior, the void test, and each registered face are separate passes with early exits.
+    ///     bit. The interior, the void test, and each registered face are separate passes with early exits. A
+    ///     failed pass leaves <paramref name="interiorPassedAt" /> unchanged.
     /// </remarks>
     internal static bool IsStatic(
-        AtmosChunk chunk, AtmosSolverExecutionContext context, out MetrePerSecond signalSpeed)
+        AtmosChunk chunk, AtmosSolverExecutionContext context, ref AtmosChunkVersion interiorPassedAt,
+        out MetrePerSecond signalSpeed)
     {
         signalSpeed = 0f;
         if (chunk.ActiveAirCount == 0)
@@ -83,9 +96,15 @@ internal static class EulerStaticChunk
 
         var channels = new FaceGasChannels(chunk, stride, scratch);
 
-        if (!InteriorIsUniformAndAtRest(chunk, reference, pressureBits, temperatureBits) ||
-            !HasNoVoidNeighbor(chunk))
-            return false;
+        AtmosChunkVersion version = chunk.Version;
+        if (interiorPassedAt != version)
+        {
+            if (!InteriorIsUniformAndAtRest(chunk, reference, pressureBits, temperatureBits) ||
+                !HasNoVoidNeighbor(chunk))
+                return false;
+
+            interiorPassedAt = version;
+        }
 
         for (int direction = 0; direction < NeighborResolution.NeighborDirections.Length; direction++)
         {

@@ -126,7 +126,8 @@ internal sealed partial class AtmosKernel : IDisposable
         {
             // Mirrors AtmosWorldSolverPipeline's built-in order for each model, minus the explicit-link stages a lone
             // kernel has no topology for. A stage runs when the tick count is a multiple of its interval, which is
-            // the cadence a world gives a stage that never changes interval.
+            // the cadence a world gives a stage that never changes interval. As in the world, every stage but
+            // euler-flow first marks the awake chunks changed, because only euler-flow marks its own writes.
             int eulerInterval = BuiltInStageSchedule.IntervalFor(BuiltInStageSchedule.EulerRunsPerSecond, TickRate);
             int gasInterval = BuiltInStageSchedule.IntervalFor(BuiltInStageSchedule.GasRunsPerSecond, TickRate);
             int thermalInterval = BuiltInStageSchedule.IntervalFor(BuiltInStageSchedule.ThermalRunsPerSecond, TickRate);
@@ -141,20 +142,25 @@ internal sealed partial class AtmosKernel : IDisposable
             else if (context.TickCount % gasInterval == 0)
             {
                 context.BeginStage(gasInterval, BuiltInStageSchedule.GapTime(gasInterval, TickRate));
+                context.MarkAwakeChunksChanged();
                 SolveAdvection(context);
+                context.MarkAwakeChunksChanged();
                 SolveBoundaryFlow(context);
             }
 
             if (context.TickCount % thermalInterval == 0)
             {
                 context.BeginStage(thermalInterval, BuiltInStageSchedule.GapTime(thermalInterval, TickRate));
+                context.MarkAwakeChunksChanged();
                 SolveThermodynamics(context);
+                context.MarkAwakeChunksChanged();
                 SolveThermalBoundary(context);
             }
 
             if (context.TickCount % gasInterval == 0)
             {
                 context.BeginStage(gasInterval, BuiltInStageSchedule.GapTime(gasInterval, TickRate));
+                context.MarkAwakeChunksChanged();
                 SolveGasReactions(context);
             }
         }
@@ -183,8 +189,8 @@ internal sealed partial class AtmosKernel : IDisposable
     /// </summary>
     /// <param name="tick">The one-based world tick that is completing. It must follow the kernel's current count.</param>
     /// <remarks>
-    ///     Skips the config capture, gas registry check and chunk revision bump that a full tick does. With no
-    ///     stage running, none of them can have changed anything.
+    ///     Skips the config capture and gas registry check that a full tick does. With no stage running, neither can
+    ///     have changed anything.
     /// </remarks>
     internal void AdvanceIdleTick(long tick)
     {
@@ -215,15 +221,8 @@ internal sealed partial class AtmosKernel : IDisposable
         _isTickExecuting = true;
         try
         {
-            _config.ValidateGasRegistry();
             CurrentTickConfig.Capture(_config);
             TickCount = tick;
-
-            foreach (var chunk in chunks)
-            {
-                if (chunk.IsAwake)
-                    chunk.MarkChanged();
-            }
 
             var context = new AtmosSolverExecutionContext(this, chunks, CurrentTickConfig, TickCount, tickRate);
             return context;

@@ -240,18 +240,51 @@ public sealed class AtmosChunkVersionTests
     }
 
     [Test]
-    public void TryGetChunkSnapshot_AwakeSimulationTick_AdvancesRevision()
+    public void TryGetChunkSnapshot_EulerTickMovingGas_AdvancesRevision()
     {
-        using var simulation = new AtmosSimulation(new TestAtmosConfig(), 1, 1, 1);
-        simulation.World.Solvers.SetInterval(AtmosBuiltInSolvers.EulerFlow, 1);
-        var chunk = simulation.CreateAndRegisterChunk(new Int3(0, 0, 0));
-        simulation.SetChunkClassification(chunk, new VoxelClassification(1));
-        simulation.AddGasToVoxel(chunk, 0, "TestGas0", 1f, 293.15f);
+        using var simulation = CreateEulerOnlySimulation(out var chunk);
+        simulation.SetVoxelMomentum(chunk, 0, 1f, 0f, 0f);
         var before = simulation.GetChunkSnapshot(chunk);
 
         simulation.Tick();
 
         Assert.That(simulation.TryGetChunkSnapshot(chunk, before.Version, out _), Is.True);
+    }
+
+    [Test]
+    public void TryGetChunkSnapshot_EulerTickSkippingRestingChunk_KeepsRevision()
+    {
+        using var simulation = CreateEulerOnlySimulation(out var chunk);
+        var before = simulation.GetChunkSnapshot(chunk);
+
+        simulation.Tick();
+
+        Assert.That(simulation.TryGetChunkSnapshot(chunk, before.Version, out _), Is.False);
+    }
+
+    [Test]
+    public void TryGetChunkSnapshot_CustomStageTick_AdvancesEveryAwakeChunk()
+    {
+        using var simulation = CreateEulerOnlySimulation(out var chunk);
+        simulation.World.Solvers.Register("test/no-op", static _ => { });
+        var before = simulation.GetChunkSnapshot(chunk);
+
+        simulation.Tick();
+
+        Assert.That(simulation.TryGetChunkSnapshot(chunk, before.Version, out _), Is.True);
+    }
+
+    /// <summary>
+    ///     A one-voxel chunk of gas at rest, with <c>euler-flow</c> running every tick and before any other stage.
+    /// </summary>
+    private static AtmosSimulation CreateEulerOnlySimulation(out AtmosChunkHandle chunk)
+    {
+        var simulation = new AtmosSimulation(new TestAtmosConfig(), 1, 1, 1);
+        simulation.World.Solvers.SetInterval(AtmosBuiltInSolvers.EulerFlow, 1);
+        chunk = simulation.CreateAndRegisterChunk(new Int3(0, 0, 0));
+        simulation.SetChunkClassification(chunk, new VoxelClassification(1));
+        simulation.AddGasToVoxel(chunk, 0, "TestGas0", 1f, 293.15f);
+        return simulation;
     }
 
     [Test]

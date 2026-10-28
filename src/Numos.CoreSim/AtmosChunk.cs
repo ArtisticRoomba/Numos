@@ -412,6 +412,11 @@ internal class AtmosChunk
     /// <summary>
     ///     Marks the externally observable state as potentially changed.
     /// </summary>
+    /// <remarks>
+    ///     Every write to the chunk outside a solver stage must call this. Inside a tick the pipeline calls it on
+    ///     every awake chunk before each stage, except <c>euler-flow</c>, which calls it for each chunk it writes
+    ///     (see <see cref="AtmosChunkVersion" />).
+    /// </remarks>
     public void MarkChanged()
     {
         Interlocked.Increment(ref _revision);
