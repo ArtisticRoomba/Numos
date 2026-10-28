@@ -101,7 +101,7 @@ public partial class SimulationViewer
     {
         _projectNameDraft = _session.World == null
             ? Locale.GetString("simulation-name-default")
-            : Locale.GetString("simulation-name-copy", ("name", _projectName));
+            : Locale.GetString("simulation-name-copy", ("name", _session.ProjectName));
 
         _projectChunkWidthDraft = _session.ChunkDimensions.X > 0
             ? _session.ChunkDimensions.X

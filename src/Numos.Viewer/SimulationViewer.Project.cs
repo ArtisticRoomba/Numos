@@ -254,7 +254,7 @@ public partial class SimulationViewer
             _injectionFeedback = new FeedbackMessage(
                 Locale.GetString("message-project-inject-gas",
                     ("moles", $"{moles:G}"),
-                    ("name", _config.GasRegistry[gasId].Name),
+                    ("name", _session.Config.GasRegistry[gasId].Name),
                     ("x", x), ("y", y), ("z", z)),
                 false);
         }
