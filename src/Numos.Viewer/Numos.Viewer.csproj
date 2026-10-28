@@ -51,6 +51,13 @@
             <PackagePath>contentFiles/any/any/assets/imgui-default.ini</PackagePath>
             <PackageCopyToOutput>true</PackageCopyToOutput>
         </None>
+        <None Update="locale/**/*.ftl">
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+            <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+            <Pack>true</Pack>
+            <PackagePath>contentFiles/any/any/locale/**/*.ftl</PackagePath>
+            <PackageCopyToOutput>true</PackageCopyToOutput>
+        </None>
     </ItemGroup>
 
 </Project>
