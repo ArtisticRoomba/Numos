@@ -22,3 +22,6 @@ common-state-heading = STATE
 common-tools = Tools
 common-untitled-simulation = Untitled Simulation
 common-world-topology = World & Topology
+common-yes = Yes
+common-no = No
+common-none = None
