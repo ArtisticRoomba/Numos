@@ -25,7 +25,7 @@ public static partial class Locale
     // TODO consider making a source gen for the code below
 
     /// <summary>
-    /// Gets a raw fluent string without 1 argument.
+    /// Gets a raw fluent string with 1 argument.
     /// </summary>
     /// <param name="key">The key of the string to get.</param>
     /// <param name="arg1">First argument.</param>
