@@ -834,7 +834,7 @@ public partial class SimulationViewer
                 ImGuiExtensions.ColorSwatch(GetGasColor(gasId), swatchSize);
 
                 ImGui.TableSetColumnIndex(2);
-                ImGui.TextUnformatted(gas.Name ?? string.Empty);
+                ImGui.TextUnformatted(gas.Name);
                 if (ImGui.IsItemHovered(ImGuiHoveredFlags.ForTooltip))
                     ImGui.SetTooltip(FormatGasDetails(gas));
 

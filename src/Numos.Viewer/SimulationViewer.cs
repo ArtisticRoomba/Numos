@@ -201,7 +201,7 @@ public partial class SimulationViewer : IDisposable
     /// </remarks>
     public void Run()
     {
-        Locale.LoadCulture();
+        Locale.SetCulture();
         
         _newGasName = Locale.GetString("simulation-new-gas-name");
         _projectNameDraft = Locale.GetString("simulation-name-default");
