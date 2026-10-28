@@ -461,7 +461,7 @@ public partial class SimulationViewer
                 bool worldAvailable = _session.World != null && _session.Config != null;
                 ImGui.BeginDisabled(!worldAvailable);
                 ImGui.MenuItem(Locale.GetString("configuration"), null, ref _showConfigurationPanel);
-                ImGui.MenuItem(Locale.GetString("timeline"), null, ref _showTimelinePanel);
+                ImGui.MenuItem(Locale.GetString("timeline-window"), null, ref _showTimelinePanel);
                 ImGui.MenuItem(Locale.GetString("common-world-topology"), null, ref _showWorldPanel);
                 ImGui.EndDisabled();
 

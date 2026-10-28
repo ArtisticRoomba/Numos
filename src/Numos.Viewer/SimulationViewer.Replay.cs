@@ -690,7 +690,7 @@ public partial class SimulationViewer
             return origin.X + (float)((tick - _timelineFirstTick) / _timelineVisibleTicks * width);
         }
 
-        string trackTitle = Locale.GetString("timeline-axis-title");
+        string trackTitle = Locale.GetString("replay-timeline-axis-title");
         draw.AddText(origin + new Vector2(8f, 4f), secondaryText, trackTitle);
         DrawTimelineLegend(
             draw,
