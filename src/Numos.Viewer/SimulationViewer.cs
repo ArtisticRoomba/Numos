@@ -247,7 +247,7 @@ public partial class SimulationViewer : IDisposable
                 "assets",
                 "ProggyClean.ttf");
             
-            io.Fonts.AddFontFromFileTTF(fontPath, 13f);
+            io.Fonts.AddFontFromFileTTF(fontPath, 13f, null, io.Fonts.GetGlyphRangesCyrillic());
             rlImGui.ReloadFonts();
             ConfigureLayoutPersistence();
 
