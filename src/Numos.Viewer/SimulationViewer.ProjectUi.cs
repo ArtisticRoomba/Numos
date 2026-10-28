@@ -12,19 +12,6 @@ namespace Numos.Viewer;
 
 public partial class SimulationViewer
 {
-    private const string SealChunkTooltip = "Replace the chunk's simulated outer faces with solid voxels.";
-    private const string UnsleepChunkTooltip = "Wake the chunk so it participates in subsequent simulation ticks.";
-    private const string RemoveChunkTooltip =
-        "Remove the chunk, its gas, and any portal or dock links that touch it.";
-    private const string ClassificationFormatHelp = "0 unassigned, -2 solid, -1 void, positive values are room IDs.";
-    private const string IgnitionTooltip =
-        "Ignites a very small volume at a high temperature for one tick, even if the gas around it is below its " +
-        "usual ignition temperature. The flame then grows or dies by the gas's flame speed. " +
-        "Takes effect on the next tick, so press Step or Run afterwards.";
-    private const string IgnitionModeTooltip =
-        "While on, clicking a different cell in the viewport ignites it. Nothing is ignited when this is turned " +
-        "on or off, and clicking the cell that is already selected does nothing; select another cell or " +
-        "deselect first.";
     private readonly Dictionary<string, string> _configFieldErrors = [];
 
     private readonly Dictionary<string, float> _configFloatDrafts = [];
@@ -518,7 +505,7 @@ public partial class SimulationViewer
 
     private void SetProjectMessage(string message, bool isError)
     {
-        WriteMessage(isError ? WorkbenchLogLevel.Error : WorkbenchLogLevel.Info, Locale.GetString("source-simulation"), message);
+        WriteMessage(isError ? WorkbenchLogLevel.Error : WorkbenchLogLevel.Info, "Simulation", message);
     }
 
     private static void DrawFeedback(FeedbackMessage? feedback)
@@ -564,7 +551,7 @@ public partial class SimulationViewer
         ImGui.SetNextItemWidth(NumericInputWidth);
         newChunkChanged |= ImGui.InputInt("Initial room ID##new-chunk", ref _newChunkRoomId);
         ImGui.EndDisabled();
-        ImGuiExtensions.QuestionTooltip("Classification written to every voxel of the new chunk. " + ClassificationFormatHelp);
+        ImGuiExtensions.QuestionTooltip("Classification written to every voxel of the new chunk. " + "0 unassigned, -2 solid, -1 void, positive values are room IDs.");
 
         if (newChunkChanged)
             _chunkFeedback = null;
@@ -624,13 +611,13 @@ public partial class SimulationViewer
                     chunkToSeal = handle;
 
                 if (ImGui.IsItemHovered())
-                    ImGui.SetTooltip(SealChunkTooltip);
+                    ImGui.SetTooltip("Replace the chunk's simulated outer faces with solid voxels.");
 
                 if (ImGui.MenuItem("Unsleep", null, false, !inspecting))
                     chunkToUnsleep = handle;
 
                 if (ImGui.IsItemHovered())
-                    ImGui.SetTooltip(UnsleepChunkTooltip);
+                    ImGui.SetTooltip("Wake the chunk so it participates in subsequent simulation ticks.");
 
                 if (ImGui.MenuItem("Remove...", null, false, !inspecting))
                     RequestRemoveChunk(handle);
@@ -690,21 +677,21 @@ public partial class SimulationViewer
             UnsleepProjectChunk(chunk);
 
         ImGui.EndDisabled();
-        ImGuiExtensions.QuestionTooltip(UnsleepChunkTooltip);
+        ImGuiExtensions.QuestionTooltip("Wake the chunk so it participates in subsequent simulation ticks.");
 
         ImGui.BeginDisabled(inspecting);
         if (ImGui.Button("Seal With Walls##chunk-action"))
             SealProjectChunk(chunk);
 
         ImGui.EndDisabled();
-        ImGuiExtensions.QuestionTooltip(SealChunkTooltip);
+        ImGuiExtensions.QuestionTooltip("Replace the chunk's simulated outer faces with solid voxels.");
 
         ImGui.BeginDisabled(inspecting);
         if (ImGui.Button("Remove Chunk...##chunk-action"))
             RequestRemoveChunk(chunk);
 
         ImGui.EndDisabled();
-        ImGuiExtensions.QuestionTooltip(RemoveChunkTooltip);
+        ImGuiExtensions.QuestionTooltip("Remove the chunk, its gas, and any portal or dock links that touch it.");
 
         ImGui.Spacing();
         ImGui.BeginDisabled(inspecting);
@@ -713,7 +700,7 @@ public partial class SimulationViewer
             _chunkFeedback = null;
 
         ImGui.EndDisabled();
-        ImGui.TextDisabled(ClassificationFormatHelp);
+        ImGui.TextDisabled("0 unassigned, -2 solid, -1 void, positive values are room IDs.");
 
         ImGui.BeginDisabled(inspecting);
         if (ImGui.Button("Fill Selected Chunk"))
@@ -1014,7 +1001,9 @@ public partial class SimulationViewer
         ImGui.SetNextItemWidth(NumericInputWidth);
         inputChanged |= ImGui.InputFloat("Volume (m³)##ignite", ref _ignitionVolume, 0f, 0f, "%g");
         ImGui.EndDisabled();
-        ImGuiExtensions.QuestionTooltip(IgnitionTooltip);
+        ImGuiExtensions.QuestionTooltip("Ignites a very small volume at a high temperature for one tick, even if the gas around it is below its " +
+                                        "usual ignition temperature. The flame then grows or dies by the gas's flame speed. " +
+                                        "Takes effect on the next tick, so press Step or Run afterwards.");
 
         // The cell the user has selected in the viewport, if it can be resolved to a chunk and voxel.
         (Int3 Chunk, int X, int Y, int Z)? selection = null;
@@ -1034,7 +1023,9 @@ public partial class SimulationViewer
         ImGui.BeginDisabled(inspecting);
         bool modeToggled = ImGui.Checkbox("Ignition mode##ignite", ref _igniteOnCellClick);
         ImGui.EndDisabled();
-        ImGuiExtensions.QuestionTooltip(IgnitionModeTooltip);
+        ImGuiExtensions.QuestionTooltip("While on, clicking a different cell in the viewport ignites it. Nothing is ignited when this is turned " +
+                                        "on or off, and clicking the cell that is already selected does nothing; select another cell or " +
+                                        "deselect first.");
 
         // Only a change of selection while the controls were visible on the previous frame is a click.
         // Turning the mode on, the first draw, and a hidden panel only move the baseline, so none of them can

@@ -36,7 +36,7 @@ public partial class SimulationViewer
         if (_session.World == null)
             return;
 
-        ImGui.SeparatorText("Topology");
+        ImGui.SeparatorText(Locale.GetString("topology"));
         IReadOnlyList<AtmosWorldLinkSetSnapshot> linkSets = _session.World.GetLinkSets();
         if (_selectedLinkSet is { } selectedHandle && linkSets.All(set => set.Handle != selectedHandle))
             _selectedLinkSet = null;
@@ -46,9 +46,9 @@ public partial class SimulationViewer
                 3,
                 ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp))
         {
-            ImGui.TableSetupColumn("CONNECTION");
-            ImGui.TableSetupColumn("LINKS", ImGuiTableColumnFlags.WidthFixed, 54f);
-            ImGui.TableSetupColumn("STATE", ImGuiTableColumnFlags.WidthFixed, 118f);
+            ImGui.TableSetupColumn(Locale.GetString("connection"));
+            ImGui.TableSetupColumn(Locale.GetString("links"), ImGuiTableColumnFlags.WidthFixed, 54f);
+            ImGui.TableSetupColumn(Locale.GetString("state"), ImGuiTableColumnFlags.WidthFixed, 118f);
             ImGui.TableHeadersRow();
             foreach (var set in linkSets)
             {
@@ -73,7 +73,7 @@ public partial class SimulationViewer
         }
 
         if (linkSets.Count == 0)
-            ImGui.TextDisabled("No portals or docks connect this world.");
+            ImGui.TextDisabled(Locale.GetString("no-portals-or-docks-connect-this-world"));
 
         var selected = _selectedLinkSet is { } selectedId
             ? linkSets.FirstOrDefault(set => set.Handle == selectedId)
@@ -81,32 +81,32 @@ public partial class SimulationViewer
 
         if (selected != null)
         {
-            ImGui.SeparatorText("Selected Connection");
+            ImGui.SeparatorText(Locale.GetString("selected-connection"));
             if (ImGui.BeginTable(
                     "SelectedTopologyStatus##world",
                     4,
                     ImGuiTableFlags.Borders | ImGuiTableFlags.SizingStretchSame))
             {
                 ImGui.TableNextColumn();
-                ImGuiExtensions.StatusField("TYPE", FormatLinkSetKind(selected.Kind));
+                ImGuiExtensions.StatusField(Locale.GetString("type"), FormatLinkSetKind(selected.Kind));
                 ImGui.TableNextColumn();
-                ImGuiExtensions.StatusField("LINKS", selected.Links.Count.ToString());
+                ImGuiExtensions.StatusField(Locale.GetString("links"), selected.Links.Count.ToString());
                 ImGui.TableNextColumn();
-                ImGuiExtensions.StatusField("STATE", FormatLinkSetState(selected.State));
+                ImGuiExtensions.StatusField(Locale.GetString("state"), FormatLinkSetState(selected.State));
                 ImGui.TableNextColumn();
-                ImGuiExtensions.StatusField("AREA", FormatAreaFraction(selected.Links));
+                ImGuiExtensions.StatusField(Locale.GetString("area"), FormatAreaFraction(selected.Links));
                 ImGui.EndTable();
             }
 
-            if (ImGui.CollapsingHeader("Endpoints"))
+            if (ImGui.CollapsingHeader(Locale.GetString("endpoints")))
             {
                 if (ImGui.BeginTable(
                         "SelectedTopologyEndpoints##world",
                         2,
                         ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchSame))
                 {
-                    ImGui.TableSetupColumn("FIRST CELL");
-                    ImGui.TableSetupColumn("SECOND CELL");
+                    ImGui.TableSetupColumn(Locale.GetString("first-cell"));
+                    ImGui.TableSetupColumn(Locale.GetString("second-cell"));
                     ImGui.TableHeadersRow();
                     foreach (var link in selected.Links.Take(24))
                     {
@@ -120,11 +120,11 @@ public partial class SimulationViewer
                 }
 
                 if (selected.Links.Count > 24)
-                    ImGui.TextDisabled($"Showing 24 of {selected.Links.Count} links.");
+                    ImGui.TextDisabled(Locale.GetString("showing-links", ("count", 24), ("total", selected.Links.Count)));
             }
 
             ImGui.BeginDisabled(selected.State == AtmosWorldLinkSetState.PendingRemoval || inspecting);
-            if (ImGui.Button("Remove Connection..."))
+            if (ImGui.Button(Locale.GetString("remove-connection-ellipsis")))
             {
                 _topologyPendingRemoval = selected.Handle;
                 _requestRemoveTopology = true;
@@ -141,42 +141,41 @@ public partial class SimulationViewer
                 _topologyFeedback);
         }
 
-        ImGui.SeparatorText("New Connection");
+        ImGui.SeparatorText(Locale.GetString("new-connection"));
         ImGui.BeginDisabled(inspecting);
-        if (ImGui.Checkbox("Gas transport", ref _topologyGas))
+        if (ImGui.Checkbox(Locale.GetString("gas-transport"), ref _topologyGas))
             _topologyFeedback = null;
 
         ImGui.EndDisabled();
-        ImGuiExtensions.QuestionTooltip("Allows pressure flow, gas diffusion, and the thermal energy carried by moving gas.");
+        ImGuiExtensions.QuestionTooltip(Locale.GetString("gas-transport-tooltip"));
         ImGui.BeginDisabled(inspecting);
-        if (ImGui.Checkbox("Thermal conduction", ref _topologyThermal))
+        if (ImGui.Checkbox(Locale.GetString("thermal-conduction"), ref _topologyThermal))
             _topologyFeedback = null;
 
         ImGui.EndDisabled();
-        ImGuiExtensions.QuestionTooltip("Allows conductive heat transfer even when no gas crosses the connection.");
+        ImGuiExtensions.QuestionTooltip(Locale.GetString("thermal-conduction-tooltip"));
         ImGui.BeginDisabled(inspecting);
-        if (ImGui.SliderFloat("Opening area", ref _topologyAreaFraction, 0f, 1f, "%.2f of a face"))
+        if (ImGui.SliderFloat(Locale.GetString("opening-area"), ref _topologyAreaFraction, 0f, 1f, "%.2f " + Locale.GetString("of-a-face")))
             _topologyFeedback = null;
 
         ImGui.EndDisabled();
-        ImGuiExtensions.QuestionTooltip(
-            "Scales gas transport through each new link by this fraction of one voxel face. Thermal conduction is not scaled.");
+        ImGuiExtensions.QuestionTooltip(Locale.GetString("opening-area-tooltip"));
 
         if (!_topologyGas && !_topologyThermal)
-            ImGui.TextColored(ViewerTheme.Caution, "Enable at least one transport mode to create a connection.");
+            ImGui.TextColored(ViewerTheme.Caution, Locale.GetString("enable-transport-mode"));
 
-        if (ImGui.CollapsingHeader("New Portal", ImGuiTreeNodeFlags.DefaultOpen))
+        if (ImGui.CollapsingHeader(Locale.GetString("new-portal"), ImGuiTreeNodeFlags.DefaultOpen))
         {
-            ImGui.TextWrapped("Activate a 3D viewport, select a voxel, then capture each endpoint.");
+            ImGui.TextWrapped(Locale.GetString("capture-portal-endpoints-instructions"));
             bool canCapture = GetSelectedAtmosCell().HasValue;
             ImGui.BeginDisabled(!canCapture || inspecting);
-            if (ImGui.Button("Capture Endpoint 1"))
+            if (ImGui.Button(Locale.GetString("capture-endpoint", ("number", 1))))
             {
                 _portalFirst = GetSelectedAtmosCell();
                 _topologyFeedback = null;
             }
 
-            if (ImGui.Button("Capture Endpoint 2"))
+            if (ImGui.Button(Locale.GetString("capture-endpoint", ("number", 2))))
             {
                 _portalSecond = GetSelectedAtmosCell();
                 _topologyFeedback = null;
@@ -184,7 +183,7 @@ public partial class SimulationViewer
 
             ImGui.EndDisabled();
             if (!canCapture)
-                ImGui.TextDisabled("Select a voxel in the active viewport to enable capture.");
+                ImGui.TextDisabled(Locale.GetString("select-voxel-to-enable-capture"));
 
             if (ImGui.BeginTable(
                     "PortalEndpoints##world",
@@ -193,13 +192,13 @@ public partial class SimulationViewer
             {
                 ImGui.TableNextColumn();
                 ImGuiExtensions.StatusField(
-                    "ENDPOINT 1",
-                    _portalFirst.HasValue ? FormatCell(_portalFirst.Value) : "Not captured");
+                    Locale.GetString("endpoint-number", ("number", 1)),
+                    _portalFirst.HasValue ? FormatCell(_portalFirst.Value) : Locale.GetString("not-captured"));
 
                 ImGui.TableNextColumn();
                 ImGuiExtensions.StatusField(
-                    "ENDPOINT 2",
-                    _portalSecond.HasValue ? FormatCell(_portalSecond.Value) : "Not captured");
+                    Locale.GetString("endpoint-number", ("number", 2)),
+                    _portalSecond.HasValue ? FormatCell(_portalSecond.Value) : Locale.GetString("not-captured"));
 
                 ImGui.EndTable();
             }
@@ -210,32 +209,32 @@ public partial class SimulationViewer
                 GetTopologyFlags() == ExplicitLinkFlags.None ||
                 inspecting);
 
-            if (ImGui.Button("Create Portal"))
+            if (ImGui.Button(Locale.GetString("create-portal")))
                 CreatePortalFromCapturedEndpoints();
 
             ImGui.EndDisabled();
         }
 
-        if (ImGui.CollapsingHeader("New Rectangular Face Dock"))
+        if (ImGui.CollapsingHeader(Locale.GetString("new-rectangular-face-dock")))
         {
             ImGui.BeginDisabled(inspecting);
             bool dockInputChanged = DrawDockEndpoint(
-                "First",
+                Locale.GetString("first"),
                 ref _dockFirstSimulation,
                 ref _dockFirstChunk,
                 ref _dockFirstFace);
 
             dockInputChanged |= DrawDockEndpoint(
-                "Second",
+                Locale.GetString("second"),
                 ref _dockSecondSimulation,
                 ref _dockSecondChunk,
                 ref _dockSecondFace);
 
             string[] rotations = ["0°", "90°", "180°", "270°"];
-            dockInputChanged |= ImGui.Combo("Rotation", ref _dockRotation, rotations, rotations.Length);
-            dockInputChanged |= ImGui.Checkbox("Flip U", ref _dockFlipU);
+            dockInputChanged |= ImGui.Combo(Locale.GetString("rotation"), ref _dockRotation, rotations, rotations.Length);
+            dockInputChanged |= ImGui.Checkbox(Locale.GetString("flip-u"), ref _dockFlipU);
             ImGui.SameLine();
-            dockInputChanged |= ImGui.Checkbox("Flip V", ref _dockFlipV);
+            dockInputChanged |= ImGui.Checkbox(Locale.GetString("flip-v"), ref _dockFlipV);
             if (dockInputChanged)
                 _topologyFeedback = null;
 
@@ -245,7 +244,7 @@ public partial class SimulationViewer
                 _simulationSurfaces.Count == 0 ||
                 inspecting);
 
-            if (ImGui.Button("Create Dock"))
+            if (ImGui.Button(Locale.GetString("create-dock")))
             {
                 try
                 {
@@ -254,12 +253,12 @@ public partial class SimulationViewer
                     var dock = _session.CreateDock(definition);
                     _selectedLinkSet = dock.Links;
                     SetTopologyFeedback(
-                        $"Created dock with {linkCount} links. It will activate on the next world tick.",
+                        Locale.GetString("created-dock-feedback", ("count", linkCount)),
                         false);
                 }
                 catch (Exception exception)
                 {
-                    SetTopologyFeedback($"Could not create the dock: {exception.Message}", true);
+                    SetTopologyFeedback(Locale.GetString("could-not-create-dock", ("message", exception.Message)), true);
                 }
             }
 
@@ -271,7 +270,7 @@ public partial class SimulationViewer
     {
         if (_simulationSurfaces.Count == 0)
         {
-            ImGui.TextDisabled($"{label}: no simulation");
+            ImGui.TextDisabled(Locale.GetString("no-simulation-for-endpoint", ("label", label)));
             return false;
         }
 
@@ -279,7 +278,7 @@ public partial class SimulationViewer
         simulationIndex = Math.Clamp(simulationIndex, 0, _simulationSurfaces.Count - 1);
         string simulationLabel = _session.GetSimulationName(_simulationSurfaces[simulationIndex].Simulation.Id);
 
-        if (ImGui.BeginCombo($"{label} simulation", simulationLabel))
+        if (ImGui.BeginCombo(Locale.GetString("endpoint-simulation", ("label", label)), simulationLabel))
         {
             for (int index = 0; index < _simulationSurfaces.Count; index++)
             {
@@ -298,8 +297,8 @@ public partial class SimulationViewer
 
         AtmosChunkHandle[] chunks = _simulationSurfaces[simulationIndex].Simulation.GetChunkHandles().ToArray();
         chunkIndex = chunks.Length == 0 ? 0 : Math.Clamp(chunkIndex, 0, chunks.Length - 1);
-        string chunkLabel = chunks.Length == 0 ? "No chunks" : FormatChunkPosition(chunks[chunkIndex].Position);
-        if (ImGui.BeginCombo($"{label} chunk", chunkLabel))
+        string chunkLabel = chunks.Length == 0 ? Locale.GetString("no-chunks") : FormatChunkPosition(chunks[chunkIndex].Position);
+        if (ImGui.BeginCombo(Locale.GetString("endpoint-chunk", ("label", label)), chunkLabel))
         {
             for (int index = 0; index < chunks.Length; index++)
             {
@@ -314,7 +313,7 @@ public partial class SimulationViewer
         }
 
         string[] faces = ["-X", "+X", "-Y", "+Y", "-Z", "+Z"];
-        changed |= ImGui.Combo($"{label} face", ref face, faces, faces.Length);
+        changed |= ImGui.Combo(Locale.GetString("endpoint-face", ("label", label)), ref face, faces, faces.Length);
         return changed;
     }
 
@@ -333,8 +332,8 @@ public partial class SimulationViewer
 
         if (selected == null)
         {
-            ImGui.TextWrapped("The selected connection no longer exists.");
-            if (ImGui.Button("Close", new Vector2(120, 0)))
+            ImGui.TextWrapped(Locale.GetString("selected-connection-no-longer-exists"));
+            if (ImGui.Button(Locale.GetString("close"), new Vector2(120, 0)))
             {
                 _removeTopologyModalOpen = false;
                 _topologyPendingRemoval = null;
@@ -347,30 +346,33 @@ public partial class SimulationViewer
         }
 
         ImGui.TextWrapped(
-            $"Remove this {FormatLinkSetKind(selected.Kind).ToLowerInvariant()} and its {selected.Links.Count} " +
-            $"link{(selected.Links.Count == 1 ? string.Empty : "s")}? It will stop transporting at the next world tick.");
+            Locale.GetString(
+                "remove-connection-confirmation",
+                ("kind", FormatLinkSetKind(selected.Kind).ToLowerInvariant()),
+                ("count", selected.Links.Count),
+                ("pluralSuffix", selected.Links.Count == 1 ? string.Empty : "s")));
 
         ImGui.Spacing();
-        if (ImGui.Button("Remove Connection", new Vector2(160, 0)))
+        if (ImGui.Button(Locale.GetString("remove-connection"), new Vector2(160, 0)))
         {
             try
             {
                 _session.DestroyLinkSet(selected.Handle);
                 _topologyPendingRemoval = null;
                 _removeTopologyModalOpen = false;
-                SetTopologyFeedback("Queued the connection for removal on the next world tick.", false);
+                SetTopologyFeedback(Locale.GetString("queued-connection-removal"), false);
                 ImGui.CloseCurrentPopup();
             }
             catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
             {
-                SetTopologyFeedback($"Could not remove the connection: {exception.Message}", true);
+                SetTopologyFeedback(Locale.GetString("could-not-remove-connection", ("message", exception.Message)), true);
                 _removeTopologyModalOpen = false;
                 ImGui.CloseCurrentPopup();
             }
         }
 
         ImGui.SameLine();
-        if (ImGui.Button("Cancel", new Vector2(120, 0)))
+        if (ImGui.Button(Locale.GetString("cancel"), new Vector2(120, 0)))
         {
             _removeTopologyModalOpen = false;
             _topologyPendingRemoval = null;
@@ -387,7 +389,7 @@ public partial class SimulationViewer
         AtmosChunkHandle[] firstChunks = firstSurface.Simulation.GetChunkHandles().ToArray();
         AtmosChunkHandle[] secondChunks = secondSurface.Simulation.GetChunkHandles().ToArray();
         if (firstChunks.Length == 0 || secondChunks.Length == 0)
-            throw new InvalidOperationException("Each dock endpoint needs a chunk.");
+            throw new InvalidOperationException(Locale.GetString("each-dock-endpoint-needs-a-chunk"));
 
         var firstChunk = firstChunks[Math.Clamp(_dockFirstChunk, 0, firstChunks.Length - 1)];
         var secondChunk = secondChunks[Math.Clamp(_dockSecondChunk, 0, secondChunks.Length - 1)];
@@ -434,11 +436,11 @@ public partial class SimulationViewer
             _selectedLinkSet = portal.Links;
             _portalFirst = null;
             _portalSecond = null;
-            SetTopologyFeedback("Created portal. It will activate on the next world tick.", false);
+            SetTopologyFeedback(Locale.GetString("created-portal-feedback"), false);
         }
         catch (Exception exception)
         {
-            SetTopologyFeedback($"Could not create the portal: {exception.Message}", true);
+            SetTopologyFeedback(Locale.GetString("could-not-create-portal", ("message", exception.Message)), true);
         }
     }
 
@@ -488,32 +490,35 @@ public partial class SimulationViewer
 
     private string FormatCell(AtmosCellRef cell)
     {
-        return $"{GetSimulationName(cell.Simulation)}\n{FormatChunkPosition(cell.Chunk.Position)}, voxel {cell.LocalVoxelIndex}";
+        return $"{GetSimulationName(cell.Simulation)}\n{FormatChunkPosition(cell.Chunk.Position)}, " +
+            Locale.GetString("voxel-number", ("index", cell.LocalVoxelIndex));
     }
 
     // A dock built in the Viewer gives every link the same fraction, but CreateLinks callers need not.
     private static string FormatAreaFraction(IReadOnlyList<ExplicitLinkDefinition> links)
     {
         if (links.Count == 0)
-            return "n/a";
+            return Locale.GetString("not-applicable");
 
         float? first = links[0].AreaFraction;
         for (int index = 1; index < links.Count; index++)
         {
             if (links[index].AreaFraction != first)
-                return "Mixed";
+                return Locale.GetString("mixed");
         }
 
-        return first.HasValue ? $"{first.Value:0.00} of a face" : "Config default";
+        return first.HasValue
+            ? Locale.GetString("area-fraction-of-face", ("fraction", first.Value.ToString("0.00")))
+            : Locale.GetString("config-default");
     }
 
     private static string FormatLinkSetKind(ExplicitLinkSetKind kind)
     {
         return kind switch
         {
-            ExplicitLinkSetKind.Arbitrary => "Link Set",
-            ExplicitLinkSetKind.Portal => "Portal",
-            ExplicitLinkSetKind.Dock => "Dock",
+            ExplicitLinkSetKind.Arbitrary => Locale.GetString("link-set"),
+            ExplicitLinkSetKind.Portal => Locale.GetString("portal"),
+            ExplicitLinkSetKind.Dock => Locale.GetString("dock"),
             _ => kind.ToString()
         };
     }
@@ -522,9 +527,9 @@ public partial class SimulationViewer
     {
         return state switch
         {
-            AtmosWorldLinkSetState.PendingActivation => "Pending activation",
-            AtmosWorldLinkSetState.Active => "Active",
-            AtmosWorldLinkSetState.PendingRemoval => "Pending removal",
+            AtmosWorldLinkSetState.PendingActivation => Locale.GetString("pending-activation"),
+            AtmosWorldLinkSetState.Active => Locale.GetString("active"),
+            AtmosWorldLinkSetState.PendingRemoval => Locale.GetString("pending-removal"),
             _ => state.ToString()
         };
     }

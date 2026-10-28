@@ -1,6 +1,5 @@
 using System.Numerics;
 using ImGuiNET;
-using Numos.Workbench;
 using Numos.API;
 using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Snapshots;
@@ -219,7 +218,7 @@ public partial class SimulationViewer
             _viewport = surface.Viewport;
             _camera3D = surface.Camera;
             string name = GetSimulationName(surface.Simulation.Id);
-            string activeLabel = surface.Simulation.Id == _session.ActiveSimulationId ? " (Active)" : string.Empty;
+            string activeLabel = surface.Simulation.Id == _session.ActiveSimulationId ? Locale.GetString("active-label") : string.Empty;
             surface.Viewport.Draw(
                 $"{name} 3D{activeLabel}##viewport-{surface.Simulation.Id.Index}-{surface.Simulation.Id.Generation}",
                 RenderSimulationScene,
@@ -256,7 +255,7 @@ public partial class SimulationViewer
             return;
 
         using var window = ImGuiExtensions.BeginWindow(
-            "World & Topology##world",
+            Locale.GetString("world-topology-window") + "##world",
             ref _showWorldPanel,
             new Vector2(580, 80),
             new Vector2(430, 620));
@@ -271,23 +270,23 @@ public partial class SimulationViewer
                 ImGuiTableFlags.Borders | ImGuiTableFlags.SizingStretchSame))
         {
             ImGui.TableNextColumn();
-            ImGuiExtensions.StatusField("SIMULATIONS", _session.World.Simulations.Count.ToString());
+            ImGuiExtensions.StatusField(Locale.GetString("simulations-label"), _session.World.Simulations.Count.ToString());
             ImGui.TableNextColumn();
-            ImGuiExtensions.StatusField("ACTIVE LINKS", _session.World.ActiveLinkCount.ToString());
+            ImGuiExtensions.StatusField(Locale.GetString("active-links-label"), _session.World.ActiveLinkCount.ToString());
             ImGui.TableNextColumn();
-            ImGuiExtensions.StatusField("TOPOLOGY VERSION", _session.World.TopologyVersion.ToString());
+            ImGuiExtensions.StatusField(Locale.GetString("topology-version-label"), _session.World.TopologyVersion.ToString());
             ImGui.EndTable();
         }
 
-        ImGui.SeparatorText("Simulations");
+        ImGui.SeparatorText(Locale.GetString("simulations-label"));
         if (ImGui.BeginTable(
                 "Simulations##world",
                 3,
                 ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp))
         {
-            ImGui.TableSetupColumn("SIMULATION");
-            ImGui.TableSetupColumn("CHUNKS", ImGuiTableColumnFlags.WidthFixed, 64f);
-            ImGui.TableSetupColumn("CHUNK SIZE", ImGuiTableColumnFlags.WidthFixed, 100f);
+            ImGui.TableSetupColumn(Locale.GetString("simulation-label"));
+            ImGui.TableSetupColumn(Locale.GetString("chunks-label"), ImGuiTableColumnFlags.WidthFixed, 64f);
+            ImGui.TableSetupColumn(Locale.GetString("chunk-size-label"), ImGuiTableColumnFlags.WidthFixed, 100f);
             ImGui.TableHeadersRow();
             foreach (var surface in _simulationSurfaces)
             {
@@ -314,10 +313,10 @@ public partial class SimulationViewer
         }
 
         if (_simulationSurfaces.Count == 0)
-            ImGui.TextDisabled("This world has no simulations.");
+            ImGui.TextDisabled(Locale.GetString("world-no-simulations"));
 
         ImGui.BeginDisabled(_session.ActiveSimulationId == null || inspecting);
-        if (ImGui.Button("Remove Simulation..."))
+        if (ImGui.Button(Locale.GetString("remove-simulation-button")))
         {
             _simulationPendingRemoval = _session.ActiveSimulationId;
             _requestRemoveSimulation = true;
@@ -325,7 +324,7 @@ public partial class SimulationViewer
         }
 
         ImGui.EndDisabled();
-        ImGuiExtensions.QuestionTooltip("Removes the selected simulation, its chunks, and every link connected to it.");
+        ImGuiExtensions.QuestionTooltip(Locale.GetString("remove-simulation-tooltip"));
 
         if (!string.IsNullOrWhiteSpace(_simulationFeedback))
         {
@@ -334,35 +333,35 @@ public partial class SimulationViewer
                 _simulationFeedback);
         }
 
-        ImGui.SeparatorText("New Simulation");
+        ImGui.SeparatorText(Locale.GetString("new-simulation-heading"));
         bool dimensionsChanged = false;
         ImGui.BeginDisabled(inspecting);
         ImGui.SetNextItemWidth(NumericInputWidth);
-        dimensionsChanged |= ImGui.InputInt("Chunk width", ref _newSimulationWidth);
+        dimensionsChanged |= ImGui.InputInt(Locale.GetString("chunk-width-label"), ref _newSimulationWidth);
         ImGui.SetNextItemWidth(NumericInputWidth);
-        dimensionsChanged |= ImGui.InputInt("Chunk height", ref _newSimulationHeight);
+        dimensionsChanged |= ImGui.InputInt(Locale.GetString("chunk-height-label"), ref _newSimulationHeight);
         ImGui.SetNextItemWidth(NumericInputWidth);
-        dimensionsChanged |= ImGui.InputInt("Chunk depth", ref _newSimulationDepth);
+        dimensionsChanged |= ImGui.InputInt(Locale.GetString("chunk-depth-label"), ref _newSimulationDepth);
         if (dimensionsChanged)
             _simulationFeedback = null;
 
-        if (ImGui.Button("Add Simulation"))
+        if (ImGui.Button(Locale.GetString("add-simulation-button")))
         {
             try
             {
                 var added = _session.AddSimulation(_newSimulationWidth, _newSimulationHeight, _newSimulationDepth);
                 ReconcileSimulationSurfaces();
                 SetActiveSimulation(added.Id);
-                SetSimulationFeedback($"Created {GetSimulationName(added.Id)}.", false);
+                SetSimulationFeedback(Locale.GetString("simulation-created-feedback", ("name", GetSimulationName(added.Id))), false);
             }
             catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
             {
-                SetSimulationFeedback($"Could not create the simulation: {exception.Message}", true);
+                SetSimulationFeedback(Locale.GetString("simulation-create-failed-feedback", ("message", exception.Message)), true);
             }
         }
 
         ImGui.EndDisabled();
-        ImGuiExtensions.QuestionTooltip("Creates another simulation in this world using the shared atmosphere configuration.");
+        ImGuiExtensions.QuestionTooltip(Locale.GetString("add-simulation-tooltip"));
 
         RenderTopologyControls(inspecting);
     }
@@ -388,8 +387,8 @@ public partial class SimulationViewer
             _simulationPendingRemoval is not { } id ||
             !_session.World.TryGetSimulation(id, out var simulation))
         {
-            ImGui.TextWrapped("The selected simulation no longer exists.");
-            if (ImGui.Button("Close", new Vector2(120, 0)))
+            ImGui.TextWrapped(Locale.GetString("simulation-no-longer-exists"));
+            if (ImGui.Button(Locale.GetString("close-button"), new Vector2(120, 0)))
             {
                 _removeSimulationModalOpen = false;
                 _simulationPendingRemoval = null;
@@ -403,11 +402,11 @@ public partial class SimulationViewer
 
         string name = GetSimulationName(id);
         ImGui.TextWrapped(
-            $"Remove {name}, its {simulation!.ChunkCount} chunks, and every portal or dock connected to it? " +
-            "This changes the in-memory world immediately.");
+            Locale.GetString("simulation-remove-confirmation", ("name", name), ("chunk-count", simulation!.ChunkCount)) + " " +
+            Locale.GetString("simulation-remove-immediate-warning"));
 
         ImGui.Spacing();
-        if (ImGui.Button("Remove Simulation", new Vector2(160, 0)))
+        if (ImGui.Button(Locale.GetString("remove-simulation-button"), new Vector2(160, 0)))
         {
             try
             {
@@ -415,19 +414,19 @@ public partial class SimulationViewer
                 _simulationPendingRemoval = null;
                 _removeSimulationModalOpen = false;
                 ReconcileSimulationSurfaces();
-                SetSimulationFeedback($"Removed {name}.", false);
+                SetSimulationFeedback(Locale.GetString("simulation-removed-feedback", ("name", name)), false);
                 ImGui.CloseCurrentPopup();
             }
             catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
             {
-                SetSimulationFeedback($"Could not remove {name}: {exception.Message}", true);
+                SetSimulationFeedback(Locale.GetString("simulation-remove-failed-feedback", ("name", name), ("message", exception.Message)), true);
                 _removeSimulationModalOpen = false;
                 ImGui.CloseCurrentPopup();
             }
         }
 
         ImGui.SameLine();
-        if (ImGui.Button("Cancel", new Vector2(120, 0)))
+        if (ImGui.Button(Locale.GetString("cancel-button"), new Vector2(120, 0)))
         {
             _removeSimulationModalOpen = false;
             _simulationPendingRemoval = null;

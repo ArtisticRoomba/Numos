@@ -1164,7 +1164,7 @@ public partial class SimulationViewer
         ImGui.SetNextItemWidth(NumericInputWidth);
         draftChanged |= ImGui.InputInt("Classification##voxel-edit", ref _voxelClassificationDraft);
         ImGui.EndDisabled();
-        ImGui.TextDisabled(ClassificationFormatHelp);
+        ImGui.TextDisabled("0 unassigned, -2 solid, -1 void, positive values are room IDs.");
 
         ImGui.BeginDisabled(inspecting);
         if (_session.Config!.GasRegistry.Count > 0)
