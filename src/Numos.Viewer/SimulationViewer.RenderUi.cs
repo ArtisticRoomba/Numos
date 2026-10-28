@@ -139,15 +139,15 @@ public partial class SimulationViewer
         ImGui.Spacing();
         ImGui.Separator();
 
-        ImGuiExtensions.TextCentered("An external viewer for Numos, an engine-agnostic,");
-        ImGuiExtensions.TextCentered(" pseudo-realistic, voxel-based atmospherics simulation library.");
+        ImGuiExtensions.TextCentered(Locale.GetString("viewer-description-line-one"));
+        ImGuiExtensions.TextCentered(Locale.GetString("viewer-description-line-two"));
 
         ImGui.Separator();
         ImGui.Spacing();
 
-        ImGuiExtensions.TextCentered("No simulation is currently loaded.", ImGui.TextDisabled);
+        ImGuiExtensions.TextCentered(Locale.GetString("no-simulation-loaded"), ImGui.TextDisabled);
         ImGuiExtensions.TextCentered(
-            "Choose File > New Simulation to create a workspace.",
+            Locale.GetString("create-workspace-instruction"),
             ImGui.TextDisabled);
 
         ImGui.End();
@@ -176,7 +176,7 @@ public partial class SimulationViewer
         float availableWidth = ImGui.GetContentRegionAvail().X;
         ImGui.SetCursorPosX(ImGui.GetCursorPosX() + availableWidth - buttonWidth);
 
-        if (ImGui.Button("Close", new Vector2(buttonWidth, 0)))
+        if (ImGui.Button(Locale.GetString("close"), new Vector2(buttonWidth, 0)))
         {
             _aboutModalOpen = false;
             ImGui.CloseCurrentPopup();
@@ -189,19 +189,19 @@ public partial class SimulationViewer
 
         if (ImGui.BeginTabBar("AboutTabs", ImGuiTabBarFlags.None))
         {
-            if (ImGui.BeginTabItem("About"))
+            if (ImGui.BeginTabItem(Locale.GetString("about")))
             {
                 DrawAboutTab(tabAreaSize);
                 ImGui.EndTabItem();
             }
 
-            if (ImGui.BeginTabItem("Authors"))
+            if (ImGui.BeginTabItem(Locale.GetString("authors")))
             {
                 DrawAuthorsTab(tabAreaSize);
                 ImGui.EndTabItem();
             }
 
-            if (ImGui.BeginTabItem("Thanks To"))
+            if (ImGui.BeginTabItem(Locale.GetString("thanks-to")))
             {
                 DrawThanksToTab(tabAreaSize);
                 ImGui.EndTabItem();
@@ -220,7 +220,7 @@ public partial class SimulationViewer
             ImGuiWindowFlags.None);
 
         ImGui.TextWrapped(
-            "An external viewer for Numos, an engine-agnostic, pseudo-realistic, voxel-based atmospherics simulation library.");
+            Locale.GetString("viewer-description"));
 
         ImGui.Spacing();
 
@@ -228,15 +228,15 @@ public partial class SimulationViewer
         {
             if (legal.IsVisible)
             {
-                ImGuiExtensions.DefinitionRow("Copyright", "© 2026 Numos contributors");
-                ImGuiExtensions.DefinitionRow("License", "MIT");
+                ImGuiExtensions.DefinitionRow(Locale.GetString("copyright"), Locale.GetString("copyright-notice"));
+                ImGuiExtensions.DefinitionRow(Locale.GetString("license"), "MIT");
             }
         }
 
         ImGui.Spacing();
-        ImGui.SeparatorText("Build provenance");
+        ImGui.SeparatorText(Locale.GetString("build-provenance"));
         DrawBuildProvenance(
-            "Viewer",
+            Locale.GetString("viewer"),
             ViewerBuildInfo.PackageVersion,
             ViewerBuildInfo.GitBranch ?? ViewerBuildInfo.SourceReference,
             ViewerBuildInfo.GitCommit,
@@ -280,11 +280,11 @@ public partial class SimulationViewer
         {
             if (table.IsVisible)
             {
-                ImGuiExtensions.DefinitionRow("Source", sourceReference);
-                ImGuiExtensions.DefinitionRow("Commit", shortCommit);
-                ImGuiExtensions.DefinitionRow("Configuration", configuration);
-                ImGuiExtensions.DefinitionRow("Framework", targetFramework);
-                ImGuiExtensions.DefinitionRow("SDK", sdkVersion);
+                ImGuiExtensions.DefinitionRow(Locale.GetString("source"), sourceReference);
+                ImGuiExtensions.DefinitionRow(Locale.GetString("commit"), shortCommit);
+                ImGuiExtensions.DefinitionRow(Locale.GetString("configuration"), configuration);
+                ImGuiExtensions.DefinitionRow(Locale.GetString("framework"), targetFramework);
+                ImGuiExtensions.DefinitionRow(Locale.GetString("sdk"), sdkVersion);
             }
         }
 
@@ -292,7 +292,7 @@ public partial class SimulationViewer
         if (!hasRepository)
             ImGui.BeginDisabled();
 
-        if (ImGui.SmallButton($"Repository##{component}"))
+        if (ImGui.SmallButton($"{Locale.GetString("repository")}##{component}"))
             Raylib.OpenURL(repositoryUrl);
 
         if (!hasRepository)
@@ -303,7 +303,7 @@ public partial class SimulationViewer
         if (!hasCommitUrl)
             ImGui.BeginDisabled();
 
-        if (ImGui.SmallButton($"Commit##{component}") && commitUrl != null)
+        if (ImGui.SmallButton($"{Locale.GetString("commit")}##{component}") && commitUrl != null)
             Raylib.OpenURL(commitUrl);
 
         if (!hasCommitUrl)
@@ -314,7 +314,7 @@ public partial class SimulationViewer
         if (!hasCommit)
             ImGui.BeginDisabled();
 
-        if (ImGui.SmallButton($"Copy hash##{component}"))
+        if (ImGui.SmallButton($"{Locale.GetString("copy-hash")}##{component}"))
             Raylib.SetClipboardText(commit);
 
         if (!hasCommit)
@@ -336,12 +336,12 @@ public partial class SimulationViewer
             ImGuiWindowFlags.None);
 
         ImGui.Text("VeritableCalamity");
-        ImGui.TextDisabled("Original author of CoreSim");
+        ImGui.TextDisabled(Locale.GetString("original-author-of-coresim"));
 
         ImGui.Separator();
 
         ImGui.Text("ArtisticRoomba");
-        ImGui.TextDisabled("CoreSim maintainer, Viewer author");
+        ImGui.TextDisabled(Locale.GetString("coresim-maintainer-viewer-author"));
 
         ImGui.EndChild();
     }
@@ -355,12 +355,12 @@ public partial class SimulationViewer
             ImGuiWindowFlags.None);
 
         ImGui.Text("riccardi48");
-        ImGui.TextDisabled("Numerical methods and physics guidance");
+        ImGui.TextDisabled(Locale.GetString("numerical-methods-and-physics-guidance"));
 
         ImGui.Separator();
 
         ImGui.Text("Ewanderer");
-        ImGui.TextDisabled("GasReactions solver");
+        ImGui.TextDisabled(Locale.GetString("gas-reactions-solver"));
 
         ImGui.EndChild();
     }
@@ -394,7 +394,7 @@ public partial class SimulationViewer
         if (_viewportBranding.Id == 0)
             return;
 
-        const string title = "Numos Simulation Viewer";
+        string title = Locale.GetString("simulation-viewer-title");
         string coreSimVersion = $"CoreSim v{CoreSimBuildInfo.PackageVersion}";
         string viewerVersion = $"Viewer v{ViewerBuildInfo.PackageVersion}";
         float textHeight = ImGui.GetTextLineHeight() * 3 + ImGui.GetStyle().ItemSpacing.Y * 2;
@@ -421,69 +421,69 @@ public partial class SimulationViewer
     {
         if (ImGui.BeginMainMenuBar())
         {
-            if (ImGui.BeginMenu("File"))
+            if (ImGui.BeginMenu(Locale.GetString("file")))
             {
-                if (ImGui.MenuItem("New Simulation"))
+                if (ImGui.MenuItem(Locale.GetString("new-simulation")))
                     RequestCreateProject();
 
-                if (ImGui.MenuItem("Open Replay..."))
+                if (ImGui.MenuItem(Locale.GetString("open-replay")))
                     RequestOpenReplay();
 
                 ImGui.BeginDisabled(_session.World == null);
-                if (ImGui.MenuItem("Save Replay..."))
+                if (ImGui.MenuItem(Locale.GetString("save-replay")))
                     RequestSaveReplay();
 
-                if (ImGui.MenuItem("Close Project"))
+                if (ImGui.MenuItem(Locale.GetString("close-project")))
                     RequestCloseProject();
 
                 ImGui.EndDisabled();
 
                 ImGui.Separator();
-                if (ImGui.MenuItem("Exit", "Alt+F4"))
+                if (ImGui.MenuItem(Locale.GetString("exit"), "Alt+F4"))
                     _requestExit = true;
 
                 ImGui.EndMenu();
             }
 
-            if (ImGui.BeginMenu("View"))
+            if (ImGui.BeginMenu(Locale.GetString("view")))
             {
-                ImGui.MenuItem("Messages / Logs", null, ref _showMessagesPanel);
+                ImGui.MenuItem(Locale.GetString("messages-logs"), null, ref _showMessagesPanel);
                 ImGui.Separator();
 
                 bool simulationAvailable = _simulation != null && _session.Config != null;
                 ImGui.BeginDisabled(!simulationAvailable);
 
-                ImGui.MenuItem("Solution", null, ref _showSolutionPanel);
-                ImGui.MenuItem("Tools", null, ref _showToolsPanel);
-                ImGui.MenuItem("View", null, ref _showViewPanel);
+                ImGui.MenuItem(Locale.GetString("solution"), null, ref _showSolutionPanel);
+                ImGui.MenuItem(Locale.GetString("tools"), null, ref _showToolsPanel);
+                ImGui.MenuItem(Locale.GetString("view"), null, ref _showViewPanel);
                 ImGui.EndDisabled();
 
                 bool worldAvailable = _session.World != null && _session.Config != null;
                 ImGui.BeginDisabled(!worldAvailable);
-                ImGui.MenuItem("Configuration", null, ref _showConfigurationPanel);
-                ImGui.MenuItem("Timeline", null, ref _showTimelinePanel);
-                ImGui.MenuItem("World & Topology", null, ref _showWorldPanel);
+                ImGui.MenuItem(Locale.GetString("configuration"), null, ref _showConfigurationPanel);
+                ImGui.MenuItem(Locale.GetString("timeline"), null, ref _showTimelinePanel);
+                ImGui.MenuItem(Locale.GetString("world-topology"), null, ref _showWorldPanel);
                 ImGui.EndDisabled();
 
                 ImGui.BeginDisabled(!simulationAvailable);
-                ImGui.MenuItem("3D Viewport", null, ref _show3DViewport);
-                ImGui.MenuItem("2D Slice Viewport", null, ref _showSliceViewport);
+                ImGui.MenuItem(Locale.GetString("three-d-viewport"), null, ref _show3DViewport);
+                ImGui.MenuItem(Locale.GetString("two-d-slice-viewport"), null, ref _showSliceViewport);
                 ImGui.EndDisabled();
 
                 ImGui.EndMenu();
             }
 
-            if (ImGui.BeginMenu("Settings"))
+            if (ImGui.BeginMenu(Locale.GetString("settings")))
             {
-                if (ImGui.MenuItem("Configure"))
+                if (ImGui.MenuItem(Locale.GetString("configure")))
                     _showProgramSettingsPanel = true;
 
                 ImGui.EndMenu();
             }
 
-            if (ImGui.BeginMenu("Help"))
+            if (ImGui.BeginMenu(Locale.GetString("help")))
             {
-                if (ImGui.MenuItem("About"))
+                if (ImGui.MenuItem(Locale.GetString("about")))
                 {
                     _requestOpenAboutModal = true;
                     _aboutModalOpen = true;
@@ -511,7 +511,7 @@ public partial class SimulationViewer
         if (!window.IsVisible)
             return;
 
-        ImGui.SeparatorText("Visualization");
+        ImGui.SeparatorText(Locale.GetString("visualization"));
 
         if (_frameBuilder != null)
         {
@@ -538,14 +538,14 @@ public partial class SimulationViewer
 
         RenderVisualizationLegend();
 
-        ImGui.SeparatorText("Rendering style");
+        ImGui.SeparatorText(Locale.GetString("rendering-style"));
         RenderRenderingStyleTable();
 
-        ImGui.SeparatorText("3D focus");
+        ImGui.SeparatorText(Locale.GetString("three-d-focus"));
         RenderChunkFocusControls();
 
-        ImGui.SeparatorText("2D slice");
-        ImGui.Checkbox("Show slice viewport", ref _showSliceViewport);
+        ImGui.SeparatorText(Locale.GetString("two-d-slice"));
+        ImGui.Checkbox(Locale.GetString("show-slice-viewport"), ref _showSliceViewport);
         RenderSliceControls();
     }
 
@@ -560,44 +560,41 @@ public partial class SimulationViewer
         }
 
         ImGui.TableSetupColumn("");
-        ImGui.TableSetupColumn("3D", ImGuiTableColumnFlags.WidthFixed, 40f);
-        ImGui.TableSetupColumn("2D", ImGuiTableColumnFlags.WidthFixed, 40f);
+        ImGui.TableSetupColumn(Locale.GetString("three-dimensional"), ImGuiTableColumnFlags.WidthFixed, 40f);
+        ImGui.TableSetupColumn(Locale.GetString("two-dimensional"), ImGuiTableColumnFlags.WidthFixed, 40f);
         ImGui.TableHeadersRow();
 
         RenderRenderingStyleRow(
-            "Chunk outlines",
+            Locale.GetString("chunk-outlines"),
             "chunk-outlines",
             ref _show3DChunkOutlines,
             ref _show2DChunkOutlines);
 
         RenderRenderingStyleRow(
-            "Voxel outlines",
+            Locale.GetString("voxel-outlines"),
             "voxel-outlines",
             ref _show3DVoxelOutlines,
             ref _show2DVoxelOutlines,
-            "Each outline is drawn per voxel, so large scenes skip them. The 3D view outlines voxels only for a " +
-            $"focused chunk or a scene of at most {SimulationRenderer.MaxOutlinedVoxels:N0} voxels. " +
-            $"The 2D view outlines cells only when they are at least {SliceRenderer.MinOutlinePixels:0} pixels wide.");
+            Locale.GetString("voxel-outlines-tooltip", ("max-outlined-voxels", SimulationRenderer.MaxOutlinedVoxels), ("min-outline-pixels", SliceRenderer.MinOutlinePixels)));
 
         RenderRenderingStyleRow(
-            "Transparent voxels",
+            Locale.GetString("transparent-voxels"),
             "transparent-voxels",
             ref _transparent3DVoxels,
             ref _transparent2DVoxels);
 
         RenderRenderingStyleRow(
-            "Velocity arrows",
+            Locale.GetString("velocity-arrows"),
             "velocity-arrows",
             ref _show3DVelocityArrows,
             ref _show2DVelocityArrows,
-            $"Draws at most {VelocityArrows.MaxArrows:N0} arrows. A larger scene shows every n-th voxel. " +
-            "Zoom the 2D view in to see more of them.");
+            Locale.GetString("velocity-arrows-tooltip", ("max-arrows", VelocityArrows.MaxArrows)));
 
         ImGui.EndTable();
 
         ImGui.BeginDisabled(!_show3DVelocityArrows && !_show2DVelocityArrows);
         if (ImGui.SliderFloat(
-                "Arrow scale##velocity-arrow-scale",
+                Locale.GetString("arrow-scale") + "##velocity-arrow-scale",
                 ref _velocityArrowScaleSeconds,
                 VelocityArrows.MinScaleSeconds,
                 VelocityArrows.MaxScaleSeconds,
@@ -609,8 +606,7 @@ public partial class SimulationViewer
 
         ImGui.EndDisabled();
         ImGuiExtensions.QuestionTooltip(
-            "Seconds of travel one arrow represents. At 0.05 s a voxel moving at 20 m/s draws a one-voxel arrow. " +
-            $"Arrows longer than {VelocityArrows.MaxLength:0} voxels are capped and keep only their direction.");
+            Locale.GetString("velocity-arrow-scale-tooltip", ("max-length", VelocityArrows.MaxLength)));
     }
 
     private static void RenderRenderingStyleRow(
@@ -638,7 +634,7 @@ public partial class SimulationViewer
             return;
 
         using var window = ImGuiExtensions.BeginWindow(
-            "Configuration##configuration",
+            Locale.GetString("configuration") + "##configuration",
             ref _showConfigurationPanel,
             new Vector2(990, 470),
             new Vector2(400, 420));
@@ -650,14 +646,14 @@ public partial class SimulationViewer
         if (inspecting)
             ClearConfigurationDrafts();
 
-        if (ImGui.CollapsingHeader("Solver Pipeline", ImGuiTreeNodeFlags.DefaultOpen))
+        if (ImGui.CollapsingHeader(Locale.GetString("solver-pipeline"), ImGuiTreeNodeFlags.DefaultOpen))
             RenderSolverPipelineSection(inspecting);
 
         ImGui.Spacing();
-        if (ImGui.CollapsingHeader("AtmosConfig", ImGuiTreeNodeFlags.DefaultOpen))
+        if (ImGui.CollapsingHeader(Locale.GetString("atmos-config"), ImGuiTreeNodeFlags.DefaultOpen))
         {
             ImGui.BeginDisabled(inspecting);
-            if (ImGui.Button("Reset to Defaults...##config-reset"))
+            if (ImGui.Button(Locale.GetString("reset-to-defaults") + "...##config-reset"))
                 RequestResetConfiguration();
 
             ImGui.EndDisabled();
@@ -665,7 +661,7 @@ public partial class SimulationViewer
             // Every apply is a recorded replay operation, so typed values wait for Enter or focus loss instead of
             // recording each keystroke.
             if (!inspecting)
-                ImGui.TextDisabled("Values apply on Enter, when a field loses focus, or when a slider is released.");
+                ImGui.TextDisabled(Locale.GetString("configuration-apply-instructions"));
 
             DrawFeedback(_configurationFeedback);
             ImGui.Separator();
@@ -809,7 +805,7 @@ public partial class SimulationViewer
         }
 
         ImGui.Spacing();
-        if (ImGui.CollapsingHeader("Gas Registry", ImGuiTreeNodeFlags.DefaultOpen))
+        if (ImGui.CollapsingHeader(Locale.GetString("gas-registry"), ImGuiTreeNodeFlags.DefaultOpen))
             RenderProjectGasControls(inspecting);
     }
 
@@ -824,11 +820,11 @@ public partial class SimulationViewer
         try
         {
             _session.ResetConfiguration();
-            _configurationFeedback = new FeedbackMessage("Reset every AtmosConfig setting to the library defaults.", false);
+            _configurationFeedback = new FeedbackMessage(Locale.GetString("reset-configuration-success"), false);
         }
         catch (ConfigurationRejectedException exception)
         {
-            _configurationFeedback = new FeedbackMessage($"Could not reset the settings: {exception.Reason}", true);
+            _configurationFeedback = new FeedbackMessage(Locale.GetString("reset-configuration-failure", ("reason", exception.Reason)), true);
         }
     }
 
@@ -1057,7 +1053,7 @@ public partial class SimulationViewer
             if (draft < 0)
             {
                 _configIntDrafts[id] = draft;
-                _configFieldErrors[id] = $"{field.Label} must be 0 or more. The previous value is still applied.";
+                _configFieldErrors[id] = Locale.GetString("config-value-minimum-error", ("field", field.Label));
             }
             else if (draft != current)
             {
@@ -1108,11 +1104,11 @@ public partial class SimulationViewer
     {
         if (_session.TryApplyConfiguration(out string? error))
         {
-            _configurationFeedback = new FeedbackMessage($"{field.Label} set to {formattedValue}.", false);
+            _configurationFeedback = new FeedbackMessage(Locale.GetString("config-field-set-feedback", ("field", field.Label), ("value", formattedValue)), false);
             return true;
         }
 
-        _configurationFeedback = new FeedbackMessage($"Could not apply {field.Label}: {error}", true);
+        _configurationFeedback = new FeedbackMessage(Locale.GetString("config-field-apply-error", ("field", field.Label), ("error", error)), true);
         return false;
     }
 
@@ -1128,7 +1124,7 @@ public partial class SimulationViewer
             return;
 
         using var window = ImGuiExtensions.BeginWindow(
-            "Tools##tools",
+            Locale.GetString("tools-window-title") + "##tools",
             ref _showToolsPanel,
             new Vector2(10, 340),
             new Vector2(300, 550));
@@ -1137,34 +1133,34 @@ public partial class SimulationViewer
             return;
 
         bool inspecting = DrawInspectionNotice();
-        ImGui.TextDisabled($"{(inspecting ? "Viewing" : "Editing")} {GetSimulationName(_simulation.Id)}");
+        ImGui.TextDisabled(Locale.GetString("simulation-inspection-status", ("mode", Locale.GetString(inspecting ? "viewing" : "editing")), ("simulation", GetSimulationName(_simulation.Id))));
 
-        if (ImGui.CollapsingHeader("Chunks", ImGuiTreeNodeFlags.DefaultOpen))
+        if (ImGui.CollapsingHeader(Locale.GetString("chunks-section"), ImGuiTreeNodeFlags.DefaultOpen))
             RenderProjectChunkControls(inspecting);
 
-        if (ImGui.CollapsingHeader("Voxel Tools", ImGuiTreeNodeFlags.DefaultOpen))
+        if (ImGui.CollapsingHeader(Locale.GetString("voxel-tools-section"), ImGuiTreeNodeFlags.DefaultOpen))
             RenderVoxelTools(inspecting);
 
-        if (ImGui.CollapsingHeader("Inject Gas"))
+        if (ImGui.CollapsingHeader(Locale.GetString("inject-gas-section")))
             RenderProjectInjectionControls(inspecting);
     }
 
     private void RenderVoxelTools(bool inspecting)
     {
-        ImGui.SeparatorText("Viewport tool");
-        DrawVoxelToolButton("Select / Box", VoxelEditTool.Select);
+        ImGui.SeparatorText(Locale.GetString("viewport-tool-label"));
+        DrawVoxelToolButton(Locale.GetString("select-box-tool"), VoxelEditTool.Select);
         ImGui.SameLine();
-        DrawVoxelToolButton("Paint Room", VoxelEditTool.PaintClassification);
-        DrawVoxelToolButton("Paint Gas", VoxelEditTool.PaintGas);
+        DrawVoxelToolButton(Locale.GetString("paint-room-tool"), VoxelEditTool.PaintClassification);
+        DrawVoxelToolButton(Locale.GetString("paint-gas-tool"), VoxelEditTool.PaintGas);
         ImGui.SameLine();
-        DrawVoxelToolButton("Erase Gas", VoxelEditTool.EraseGas);
+        DrawVoxelToolButton(Locale.GetString("erase-gas-tool"), VoxelEditTool.EraseGas);
 
         bool draftChanged = false;
         ImGui.BeginDisabled(inspecting);
         ImGui.SetNextItemWidth(NumericInputWidth);
-        draftChanged |= ImGui.InputInt("Classification##voxel-edit", ref _voxelClassificationDraft);
+        draftChanged |= ImGui.InputInt(Locale.GetString("classification-label") + "##voxel-edit", ref _voxelClassificationDraft);
         ImGui.EndDisabled();
-        ImGui.TextDisabled("0 unassigned, -2 solid, -1 void, positive values are room IDs.");
+        ImGui.TextDisabled(Locale.GetString("classification-values-description"));
 
         ImGui.BeginDisabled(inspecting);
         if (_session.Config!.GasRegistry.Count > 0)
@@ -1187,38 +1183,38 @@ public partial class SimulationViewer
         }
 
         ImGui.SetNextItemWidth(NumericInputWidth);
-        draftChanged |= ImGui.InputFloat("Amount (mol)##voxel-edit", ref _injectionMoles);
+        draftChanged |= ImGui.InputFloat(Locale.GetString("amount-mol-label") + "##voxel-edit", ref _injectionMoles);
         ImGui.SetNextItemWidth(NumericInputWidth);
-        draftChanged |= ImGui.InputFloat("Temperature (K)##voxel-edit", ref _injectionTemperature);
+        draftChanged |= ImGui.InputFloat(Locale.GetString("temperature-k-label") + "##voxel-edit", ref _injectionTemperature);
         ImGui.EndDisabled();
 
         if (draftChanged)
             _voxelFeedback = null;
 
-        ImGui.SeparatorText("Selection");
+        ImGui.SeparatorText(Locale.GetString("selection-section"));
         if (!_selectedCell.HasValue)
         {
-            ImGui.TextDisabled("No voxels selected.");
+            ImGui.TextDisabled(Locale.GetString("no-voxels-selected"));
         }
         else
         {
-            ImGui.Text($"{_selectedCells.Count} voxel{(_selectedCells.Count == 1 ? string.Empty : "s")} selected");
+            ImGui.Text(Locale.GetString(_selectedCells.Count == 1 ? "selected-voxel-count-singular" : "selected-voxel-count-plural", ("count", _selectedCells.Count)));
             DrawCellSelectionDetails(_selectedCell.Value);
 
             ImGui.BeginDisabled(inspecting);
-            if (ImGui.Button("Set Classification"))
+            if (ImGui.Button(Locale.GetString("set-classification-button")))
                 ApplyClassification(_selectedCells, _voxelClassificationDraft);
 
             ImGui.SameLine();
-            if (ImGui.Button("Inject Gas##selected-voxels"))
+            if (ImGui.Button(Locale.GetString("inject-gas-button") + "##selected-voxels"))
                 ApplyGasInjection(_selectedCells);
 
-            if (ImGui.Button("Clear Gas"))
+            if (ImGui.Button(Locale.GetString("clear-gas-button")))
                 ApplyClearGas(_selectedCells);
 
             ImGui.EndDisabled();
             ImGui.SameLine();
-            if (ImGui.Button("Clear Selection"))
+            if (ImGui.Button(Locale.GetString("clear-selection-button")))
                 ClearVoxelSelection();
         }
 
@@ -1236,7 +1232,7 @@ public partial class SimulationViewer
     {
         if (_drawData == null || _drawData.Chunks.Count == 0)
         {
-            ImGui.TextDisabled("No chunks available.");
+            ImGui.TextDisabled(Locale.GetString("no-chunks-available"));
             return;
         }
 
@@ -1246,9 +1242,9 @@ public partial class SimulationViewer
                 ref axis,
                 new[]
                 {
-                    "X (YZ plane)",
-                    "Y (XZ plane)",
-                    "Z (XY plane)"
+                    Locale.GetString("axis-x-yz-plane"),
+                    Locale.GetString("axis-y-xz-plane"),
+                    Locale.GetString("axis-z-xy-plane")
                 },
                 3))
         {
@@ -1264,15 +1260,14 @@ public partial class SimulationViewer
 
         ImGui.SliderInt("Slice##slice-index", ref _currentSliceIndex, minimumSlice, maximumSlice);
         ImGuiExtensions.QuestionTooltip(
-            "Global voxel coordinate of the plane. The slice view shows this plane across every chunk. " +
-            "Scroll to zoom and drag with the middle button to pan.");
+            Locale.GetString("slice-plane-description"));
 
-        if (ImGui.Button("Fit Plane"))
+        if (ImGui.Button(Locale.GetString("fit-plane-button")))
             _sliceCameraFit = true;
 
         ImGui.SameLine();
         ImGui.BeginDisabled(!_focusedChunk.HasValue);
-        if (ImGui.Button("Frame Focused Chunk") &&
+        if (ImGui.Button(Locale.GetString("frame-focused-chunk-button")) &&
             _focusedChunk is { } framed &&
             _drawData.Chunks.TryGetValue(framed.Position, out var framedData))
         {
@@ -1286,14 +1281,14 @@ public partial class SimulationViewer
             return;
 
         ImGuiExtensions.DefinitionRow(
-            "Showing",
-            $"{_currentSliceAxis} = {_currentSliceIndex} of {minimumSlice} to {maximumSlice}");
+            Locale.GetString("showing-label"),
+            $"{_currentSliceAxis} = {_currentSliceIndex} {Locale.GetString("of-label")} {minimumSlice} {Locale.GetString("to-label")} {maximumSlice}");
 
         if (_sliceDrawData != null)
         {
             ImGuiExtensions.DefinitionRow(
-                "Plane",
-                $"{_sliceDrawData.Width} × {_sliceDrawData.Height} cells, {_sliceDrawData.ChunkRects.Length} chunks");
+                Locale.GetString("plane-label"),
+                Locale.GetString("slice-plane-cell-count", ("width", _sliceDrawData.Width), ("height", _sliceDrawData.Height), ("chunks", _sliceDrawData.ChunkRects.Length)));
         }
     }
 
@@ -1322,15 +1317,15 @@ public partial class SimulationViewer
                 if (readout.IsVisible)
                 {
                     var range = legend.Range;
-                    ImGuiExtensions.DefinitionRow("Range", FormatLegendRangeMode(units, scale));
-                    ImGuiExtensions.DefinitionRow("Minimum", QuantityFormat.Format(range.Minimum * scale, units));
-                    ImGuiExtensions.DefinitionRow("Maximum", QuantityFormat.Format(range.Maximum * scale, units));
+                    ImGuiExtensions.DefinitionRow(Locale.GetString("range-label"), FormatLegendRangeMode(units, scale));
+                    ImGuiExtensions.DefinitionRow(Locale.GetString("minimum-label"), QuantityFormat.Format(range.Minimum * scale, units));
+                    ImGuiExtensions.DefinitionRow(Locale.GetString("maximum-label"), QuantityFormat.Format(range.Maximum * scale, units));
                 }
             }
 
             RenderLegendBoundsControls(legend.Range, scale);
 
-            ImGui.Checkbox("Custom resolution##legend-resolution-enabled", ref _legendResolutionEnabled);
+            ImGui.Checkbox(Locale.GetString("custom-resolution-checkbox") + "##legend-resolution-enabled", ref _legendResolutionEnabled);
             ImGui.SameLine();
             if (_legendResolutionEnabled)
             {
@@ -1339,7 +1334,7 @@ public partial class SimulationViewer
             }
             else
             {
-                ImGui.TextDisabled($"{DefaultLegendResolution} levels (default)");
+                ImGui.TextDisabled(Locale.GetString("default-resolution-levels", ("count", DefaultLegendResolution)));
             }
 
             return;
@@ -1358,17 +1353,17 @@ public partial class SimulationViewer
     private string FormatLegendRangeMode(string units, float scale)
     {
         if (!_legendAutomaticBounds)
-            return "Fixed";
+            return Locale.GetString("fixed-range-mode");
 
         return _legendAutomaticRangeOffset > 0f
-            ? $"Automatic ± {QuantityFormat.Format(_legendAutomaticRangeOffset * scale, units)}, recomputed each frame"
-            : "Automatic, recomputed each frame";
+            ? Locale.GetString("automatic-range-offset-mode", ("offset", QuantityFormat.Format(_legendAutomaticRangeOffset * scale, units)))
+            : Locale.GetString("automatic-range-mode");
     }
 
     private void RenderLegendBoundsControls(VisualizationRange currentRange, float scale)
     {
         bool automaticBounds = _legendAutomaticBounds;
-        if (ImGui.Checkbox("Automatic bounds##legend-automatic-bounds", ref automaticBounds))
+        if (ImGui.Checkbox(Locale.GetString("automatic-bounds-checkbox") + "##legend-automatic-bounds", ref automaticBounds))
         {
             _legendAutomaticBounds = automaticBounds;
             if (!automaticBounds)
@@ -1384,20 +1379,20 @@ public partial class SimulationViewer
         {
             ImGui.SetNextItemWidth(NumericInputWidth);
             float offset = _legendAutomaticRangeOffset * scale;
-            if (ImGui.InputFloat("± Offset##legend-range-offset", ref offset))
+            if (ImGui.InputFloat(Locale.GetString("offset-label") + "##legend-range-offset", ref offset))
             {
                 _legendAutomaticRangeOffset = Math.Max(offset / scale, 0f);
                 _legendRangeRevision++;
             }
 
-            ImGuiExtensions.QuestionTooltip("Expands the automatic minimum and maximum by this amount.");
+            ImGuiExtensions.QuestionTooltip(Locale.GetString("automatic-bounds-offset-tooltip"));
 
             return;
         }
 
         ImGui.SetNextItemWidth(NumericInputWidth);
         float minimum = _legendMinimum * scale;
-        if (ImGui.InputFloat("Min##legend-minimum", ref minimum))
+        if (ImGui.InputFloat(Locale.GetString("minimum-short-label") + "##legend-minimum", ref minimum))
         {
             _legendMinimum = Math.Min(minimum / scale, _legendMaximum);
             _legendRangeRevision++;
@@ -1406,7 +1401,7 @@ public partial class SimulationViewer
         ImGui.SameLine();
         ImGui.SetNextItemWidth(NumericInputWidth);
         float maximum = _legendMaximum * scale;
-        if (ImGui.InputFloat("Max##legend-maximum", ref maximum))
+        if (ImGui.InputFloat(Locale.GetString("maximum-short-label") + "##legend-maximum", ref maximum))
         {
             _legendMaximum = Math.Max(maximum / scale, _legendMinimum);
             _legendRangeRevision++;
@@ -1563,12 +1558,12 @@ public partial class SimulationViewer
     {
         string currentLabel = _focusedChunk.HasValue
             ? FormatChunkPosition(_focusedChunk.Value.Position)
-            : "All chunks";
+            : Locale.GetString("all-chunks");
 
-        if (ImGui.BeginCombo("Focus##chunk-focus", currentLabel))
+        if (ImGui.BeginCombo(Locale.GetString("focus-chunk-id"), currentLabel))
         {
             bool allSelected = !_focusedChunk.HasValue;
-            if (ImGui.Selectable("All chunks", allSelected))
+            if (ImGui.Selectable(Locale.GetString("all-chunks"), allSelected))
                 SetFocusedChunk(null);
 
             if (allSelected)
@@ -1590,7 +1585,7 @@ public partial class SimulationViewer
             ImGui.EndCombo();
         }
 
-        if (ImGui.Button("Frame View"))
+        if (ImGui.Button(Locale.GetString("frame-view")))
         {
             if (_focusedChunk.HasValue &&
                 _drawData != null &&
@@ -1603,7 +1598,7 @@ public partial class SimulationViewer
         if (_focusedChunk.HasValue)
         {
             ImGui.SameLine();
-            if (ImGui.Button("Show All Chunks"))
+            if (ImGui.Button(Locale.GetString("show-all-chunks")))
                 SetFocusedChunk(null);
         }
     }
@@ -1614,7 +1609,7 @@ public partial class SimulationViewer
             return;
 
         ImGui.BeginTooltip();
-        ImGui.Text("2D Slice Cell");
+        ImGui.Text(Locale.GetString("slice-cell-2d"));
         ImGui.Separator();
         DrawCellSelectionDetails(
             _hoveredSliceCell.Value.Address,
@@ -1639,21 +1634,21 @@ public partial class SimulationViewer
         {
             if (table.IsVisible)
             {
-                ImGuiExtensions.DefinitionRow("Chunk", FormatChunkPosition(address.Chunk.Position));
-                ImGuiExtensions.DefinitionRow("Cell", FormatCellCoordinates(address));
+                ImGuiExtensions.DefinitionRow(Locale.GetString("chunk"), FormatChunkPosition(address.Chunk.Position));
+                ImGuiExtensions.DefinitionRow(Locale.GetString("cell"), FormatCellCoordinates(address));
                 if (sliceU.HasValue && sliceV.HasValue)
-                    ImGuiExtensions.DefinitionRow("Slice UV", $"({sliceU.Value}, {sliceV.Value})");
+                    ImGuiExtensions.DefinitionRow(Locale.GetString("slice-uv"), $"({sliceU.Value}, {sliceV.Value})");
 
                 if (hasDetails)
                 {
-                    ImGuiExtensions.DefinitionRow("Temperature", QuantityFormat.Temperature(details.Temperature));
-                    ImGuiExtensions.DefinitionRow("Pressure", QuantityFormat.Pressure(details.Pressure));
+                    ImGuiExtensions.DefinitionRow(Locale.GetString("temperature"), QuantityFormat.Temperature(details.Temperature));
+                    ImGuiExtensions.DefinitionRow(Locale.GetString("pressure"), QuantityFormat.Pressure(details.Pressure));
                     ImGuiExtensions.DefinitionRow(
-                        "Velocity",
+                        Locale.GetString("velocity"),
                         QuantityFormat.Velocity(details.VelocityX, details.VelocityY, details.VelocityZ));
 
                     ImGuiExtensions.DefinitionRow(
-                        "Speed",
+                        Locale.GetString("speed"),
                         QuantityFormat.Speed(
                             Math.Sqrt(
                                 (double)details.VelocityX * details.VelocityX +
@@ -1661,21 +1656,23 @@ public partial class SimulationViewer
                                 (double)details.VelocityZ * details.VelocityZ)));
 
                     ImGuiExtensions.DefinitionRow(
-                        "Total amount",
+                        Locale.GetString("total-amount"),
                         summary.InvalidCount > 0
-                            ? $"{QuantityFormat.Amount(summary.TotalMoles)}, excluding invalid amounts"
+                            ? Locale.GetString(
+                                "amount-excluding-invalid",
+                                ("amount", QuantityFormat.Amount(summary.TotalMoles)))
                             : QuantityFormat.Amount(summary.TotalMoles));
 
-                    ImGuiExtensions.DefinitionRow("Primary gas", FormatGas(summary.PrimaryGasId));
-                    ImGuiExtensions.DefinitionRow("Room", FormatRoomId(details.RoomId));
+                    ImGuiExtensions.DefinitionRow(Locale.GetString("primary-gas"), FormatGas(summary.PrimaryGasId));
+                    ImGuiExtensions.DefinitionRow(Locale.GetString("room"), FormatRoomId(details.RoomId));
                 }
             }
         }
 
         if (!exists)
-            ImGui.TextDisabled("Selected voxel/chunk does not exist at this timeline position.");
+            ImGui.TextDisabled(Locale.GetString("selected-voxel-chunk-missing"));
         else if (!hasDetails)
-            ImGui.TextDisabled("Details are unavailable for this presented revision.");
+            ImGui.TextDisabled(Locale.GetString("details-unavailable-revision"));
         else
             DrawGasMakeupBar(details.Gases, summary);
 
@@ -1686,7 +1683,7 @@ public partial class SimulationViewer
         IReadOnlyList<VoxelGasSnapshot> gases,
         GasSummary summary)
     {
-        ImGui.TextUnformatted("Gas makeup");
+        ImGui.TextUnformatted(Locale.GetString("gas-makeup"));
         ImGui.PushID("gas-makeup");
         Vector2 size = new(Math.Max(ImGui.GetContentRegionAvail().X, 1f), ImGui.GetFrameHeight());
         var minimum = ImGui.GetCursorScreenPos();
@@ -1717,10 +1714,12 @@ public partial class SimulationViewer
 
         draw.AddRect(minimum, maximum, ImGui.ColorConvertFloat4ToU32(ViewerTheme.StructuralLine));
         string overlay = totalMoles > 0f
-            ? summary.GasCount == 1 ? "1 gas" : $"{summary.GasCount} gases"
+            ? summary.GasCount == 1
+                ? Locale.GetString("gas-count-singular")
+                : Locale.GetString("gas-count-plural", ("count", summary.GasCount))
             : summary.InvalidCount > 0
-                ? "No valid amounts"
-                : "Vacuum";
+                ? Locale.GetString("no-valid-amounts")
+                : Locale.GetString("vacuum");
 
         var textSize = ImGui.CalcTextSize(overlay);
         draw.AddText(
@@ -1755,9 +1754,9 @@ public partial class SimulationViewer
 
         float swatchSize = ImGui.GetTextLineHeight();
         ImGui.TableSetupColumn("", ImGuiTableColumnFlags.WidthFixed, swatchSize);
-        ImGui.TableSetupColumn("Gas", ImGuiTableColumnFlags.WidthFixed);
-        ImGui.TableSetupColumn("Amount", ImGuiTableColumnFlags.WidthFixed);
-        ImGui.TableSetupColumn("Share", ImGuiTableColumnFlags.WidthFixed);
+        ImGui.TableSetupColumn(Locale.GetString("gas"), ImGuiTableColumnFlags.WidthFixed);
+        ImGui.TableSetupColumn(Locale.GetString("amount"), ImGuiTableColumnFlags.WidthFixed);
+        ImGui.TableSetupColumn(Locale.GetString("share"), ImGuiTableColumnFlags.WidthFixed);
         ImGui.TableHeadersRow();
 
         foreach (var gas in _gasMakeupRows)
@@ -1783,7 +1782,7 @@ public partial class SimulationViewer
             if (valid && totalMoles > 0f)
                 ImGuiExtensions.TextRightAligned(QuantityFormat.Percent(gas.Moles / totalMoles));
             else
-                ImGui.TextDisabled("invalid, not in bar");
+                ImGui.TextDisabled(Locale.GetString("invalid-not-in-bar"));
         }
     }
 
@@ -1796,9 +1795,9 @@ public partial class SimulationViewer
     {
         return roomId switch
         {
-            VoxelClassification.RoomSolid => $"Solid ({roomId})",
-            VoxelClassification.RoomVoid => $"Void ({roomId})",
-            VoxelClassification.RoomUnassigned => $"Unassigned ({roomId})",
+            VoxelClassification.RoomSolid => Locale.GetString("room-solid", ("id", roomId)),
+            VoxelClassification.RoomVoid => Locale.GetString("room-void", ("id", roomId)),
+            VoxelClassification.RoomUnassigned => Locale.GetString("room-unassigned", ("id", roomId)),
             _ => roomId.ToString(CultureInfo.InvariantCulture)
         };
     }
@@ -1869,7 +1868,7 @@ public partial class SimulationViewer
             return $"({coordinates.X}, {coordinates.Y}, {coordinates.Z})";
         }
 
-        return $"index {address.LocalIndex}";
+        return Locale.GetString("cell-index", ("index", address.LocalIndex));
     }
 
     private static string FormatChunkPosition(Int3 position)
@@ -1880,17 +1879,20 @@ public partial class SimulationViewer
     private string FormatGas(int gasId)
     {
         if (gasId < 0)
-            return "none";
+            return Locale.GetString("none");
 
         if (_session.Config != null && gasId < _session.Config.GasRegistry.Count)
-            return $"{_session.Config.GasRegistry[gasId].Name} ({gasId})";
+            return Locale.GetString(
+                "gas-name-id",
+                ("name", _session.Config.GasRegistry[gasId].Name),
+                ("id", gasId));
 
-        return $"Gas {gasId}";
+        return Locale.GetString("gas-id", ("id", gasId));
     }
 
     private void RenderSolutionDetails()
     {
-        if (ImGui.CollapsingHeader("Simulation State", ImGuiTreeNodeFlags.DefaultOpen))
+        if (ImGui.CollapsingHeader(Locale.GetString("simulation-state"), ImGuiTreeNodeFlags.DefaultOpen))
         {
             if (_simulation == null)
                 return;
@@ -1899,8 +1901,8 @@ public partial class SimulationViewer
             {
                 ImGui.TextDisabled(
                     _liveChunkHandles.Count == 0
-                        ? "No chunks in this simulation."
-                        : "Waiting for a chunk snapshot.");
+                        ? Locale.GetString("no-chunks-in-simulation")
+                        : Locale.GetString("waiting-for-chunk-snapshot"));
 
                 return;
             }
@@ -1910,14 +1912,22 @@ public partial class SimulationViewer
                 return;
 
             var dimensions = snapshot.Dimensions;
-            ImGuiExtensions.DefinitionRow("Chunk", FormatChunkPosition(snapshot.GridPosition));
-            ImGuiExtensions.DefinitionRow("Source", source);
-            ImGuiExtensions.DefinitionRow("Dimensions", $"{dimensions.X} × {dimensions.Y} × {dimensions.Z} voxels");
-            ImGuiExtensions.DefinitionRow("Total voxels", (dimensions.X * dimensions.Y * dimensions.Z).ToString());
-            ImGuiExtensions.DefinitionRow("Active voxels", snapshot.ActiveAirCount.ToString());
-            ImGuiExtensions.DefinitionRow("Active gases", snapshot.ActiveGasCount.ToString());
-            ImGuiExtensions.DefinitionRow("State", snapshot.IsAwake ? "Awake" : "Sleeping");
-            ImGuiExtensions.DefinitionRow("Sleep timer", QuantityFormat.Ticks(snapshot.SleepTimer));
+            ImGuiExtensions.DefinitionRow(Locale.GetString("chunk"), FormatChunkPosition(snapshot.GridPosition));
+            ImGuiExtensions.DefinitionRow(Locale.GetString("source"), source);
+            ImGuiExtensions.DefinitionRow(
+                Locale.GetString("dimensions"),
+                Locale.GetString(
+                    "voxel-dimensions",
+                    ("x", dimensions.X),
+                    ("y", dimensions.Y),
+                    ("z", dimensions.Z)));
+            ImGuiExtensions.DefinitionRow(Locale.GetString("total-voxels"), (dimensions.X * dimensions.Y * dimensions.Z).ToString());
+            ImGuiExtensions.DefinitionRow(Locale.GetString("active-voxels"), snapshot.ActiveAirCount.ToString());
+            ImGuiExtensions.DefinitionRow(Locale.GetString("active-gases"), snapshot.ActiveGasCount.ToString());
+            ImGuiExtensions.DefinitionRow(
+                Locale.GetString("state"),
+                snapshot.IsAwake ? Locale.GetString("awake") : Locale.GetString("sleeping"));
+            ImGuiExtensions.DefinitionRow(Locale.GetString("sleep-timer"), QuantityFormat.Ticks(snapshot.SleepTimer));
 
             // Zero entries are solid or empty voxels, so the average and minimum skip them.
             if (snapshot.TotalPressure is { Length: > 0 } pressures)
@@ -1937,16 +1947,16 @@ public partial class SimulationViewer
                     }
                 }
 
-                ImGuiExtensions.DefinitionRow("Max pressure", QuantityFormat.Pressure(maximum));
+                ImGuiExtensions.DefinitionRow(Locale.GetString("max-pressure"), QuantityFormat.Pressure(maximum));
                 ImGuiExtensions.DefinitionRow(
-                    "Avg pressure (non-zero voxels)",
+                    Locale.GetString("average-pressure-non-zero-voxels"),
                     QuantityFormat.Pressure(count == 0 ? 0d : sum / count));
             }
             else
             {
                 ImGuiExtensions.DefinitionRow(
-                    "Pressure",
-                    "Not captured for the current visualization",
+                    Locale.GetString("pressure"),
+                    Locale.GetString("not-captured-current-visualization"),
                     ViewerTheme.SecondaryText);
             }
 
@@ -1968,16 +1978,16 @@ public partial class SimulationViewer
                 }
 
                 ImGuiExtensions.DefinitionRow(
-                    "Min temperature (non-zero voxels)",
+                    Locale.GetString("min-temperature-non-zero-voxels"),
                     QuantityFormat.Temperature(minimum));
 
-                ImGuiExtensions.DefinitionRow("Max temperature", QuantityFormat.Temperature(maximum));
+                ImGuiExtensions.DefinitionRow(Locale.GetString("max-temperature"), QuantityFormat.Temperature(maximum));
             }
             else
             {
                 ImGuiExtensions.DefinitionRow(
-                    "Temperature",
-                    "Not captured for the current visualization",
+                    Locale.GetString("temperature"),
+                    Locale.GetString("not-captured-current-visualization"),
                     ViewerTheme.SecondaryText);
             }
         }
@@ -1996,7 +2006,7 @@ public partial class SimulationViewer
         if (flow == default)
             return;
 
-        if (!ImGui.CollapsingHeader("Flow", ImGuiTreeNodeFlags.DefaultOpen))
+        if (!ImGui.CollapsingHeader(Locale.GetString("flow"), ImGuiTreeNodeFlags.DefaultOpen))
             return;
 
         using var table = ImGuiExtensions.BeginDefinitionTable("FlowDiagnostics##flow");
