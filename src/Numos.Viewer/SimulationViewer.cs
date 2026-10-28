@@ -204,7 +204,7 @@ public partial class SimulationViewer : IDisposable
         Locale.SetCulture();
         
         _newGasName = Locale.GetString("simulation-new-gas-name");
-        _projectNameDraft = Locale.GetString("simulation-name-default");
+        _projectNameDraft = Locale.GetString("common-untitled-simulation");
         
         Raylib.SetConfigFlags(
             ConfigFlags.ResizableWindow |
@@ -970,10 +970,10 @@ public partial class SimulationViewer : IDisposable
     {
         return corner switch
         {
-            ViewportBrandingCorner.TopLeft => "Top left",
-            ViewportBrandingCorner.TopRight => "Top right",
-            ViewportBrandingCorner.BottomLeft => "Bottom left",
-            ViewportBrandingCorner.BottomRight => "Bottom right",
+            ViewportBrandingCorner.TopLeft => Locale.GetString("side-top-left"),
+            ViewportBrandingCorner.TopRight => Locale.GetString("side-top-right"),
+            ViewportBrandingCorner.BottomLeft => Locale.GetString("side-bottom-left"),
+            ViewportBrandingCorner.BottomRight => Locale.GetString("side-bottom-right"),
             _ => throw new ArgumentOutOfRangeException(nameof(corner), corner, null)
         };
     }
@@ -1139,6 +1139,4 @@ public partial class SimulationViewer : IDisposable
         AtmosChunkVersion PresentedVersion,
         bool IsAvailable,
         AtmosVoxelSnapshot Snapshot);
-
-
 }

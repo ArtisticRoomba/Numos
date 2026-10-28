@@ -7,14 +7,11 @@ replay-file-save-dialog-select-error = The operating system file dialog could no
 
 replay-file-open-description = Open a .numos replay. Numos verifies it before replacing the current project.
 replay-file-path-label = Path
-replay-file-browse-button = Browse...
 replay-file-load-discard-branches-warning = Loading successfully will discard all { $branchCount } in-memory branches.
 replay-file-load-close-project-warning = Loading successfully will close the current in-memory project.
 replay-file-open-button = Open
 replay-file-load-replace-button = Load and Replace
-replay-file-cancel-button = Cancel
 
-replay-file-browse-save-button = Browse...
 replay-file-save-full-branch-option = Save full selected branch
 replay-file-save-branch-until-here-option = Save selected branch up to here
 replay-file-save-live-branch-description = The selected live branch will be saved through its current head.

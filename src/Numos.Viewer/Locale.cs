@@ -73,9 +73,11 @@ public static partial class Locale
             .CultureInfo(culture)
             .AddFiles(files)
             .UseConcurrent()
-            .UncheckedBuild();
+            .Build();
+        
+        // TODO error handling
 
-        return new LocaleState(culture, bundle);
+        return new LocaleState(culture, bundle.Item1);
     }
 
     private static LocaleState GetState() =>

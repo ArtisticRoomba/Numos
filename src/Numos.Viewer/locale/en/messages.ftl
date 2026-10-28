@@ -8,7 +8,6 @@ open-messages-logs = Open Messages / Logs.
 count-singular = { $number } { $noun }
 count-plural = { $number } { $noun }s
 
-messages-logs-window = Messages / Logs
 filter-messages = Filter messages...
 auto-scroll = Auto-scroll
 copy = Copy

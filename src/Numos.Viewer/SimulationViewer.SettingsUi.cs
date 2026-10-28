@@ -26,7 +26,7 @@ public partial class SimulationViewer
             new Vector2(0.5f, 0.5f));
 
         using var window = ImGuiExtensions.BeginWindow(
-            Locale.GetString("configure-program-settings"),
+            Locale.GetString("common-configure"),
             ref _showProgramSettingsPanel,
             new Vector2(460, 120),
             new Vector2(760, 430));

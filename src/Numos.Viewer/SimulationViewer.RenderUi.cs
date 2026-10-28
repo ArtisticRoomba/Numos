@@ -176,7 +176,7 @@ public partial class SimulationViewer
         float availableWidth = ImGui.GetContentRegionAvail().X;
         ImGui.SetCursorPosX(ImGui.GetCursorPosX() + availableWidth - buttonWidth);
 
-        if (ImGui.Button(Locale.GetString("close"), new Vector2(buttonWidth, 0)))
+        if (ImGui.Button(Locale.GetString("common-close"), new Vector2(buttonWidth, 0)))
         {
             _aboutModalOpen = false;
             ImGui.CloseCurrentPopup();
@@ -423,7 +423,7 @@ public partial class SimulationViewer
         {
             if (ImGui.BeginMenu(Locale.GetString("file")))
             {
-                if (ImGui.MenuItem(Locale.GetString("new-simulation")))
+                if (ImGui.MenuItem(Locale.GetString("common-new-simulation")))
                     RequestCreateProject();
 
                 if (ImGui.MenuItem(Locale.GetString("open-replay")))
@@ -447,14 +447,14 @@ public partial class SimulationViewer
 
             if (ImGui.BeginMenu(Locale.GetString("view")))
             {
-                ImGui.MenuItem(Locale.GetString("messages-logs"), null, ref _showMessagesPanel);
+                ImGui.MenuItem(Locale.GetString("common-messages-logs"), null, ref _showMessagesPanel);
                 ImGui.Separator();
 
                 bool simulationAvailable = _simulation != null && _session.Config != null;
                 ImGui.BeginDisabled(!simulationAvailable);
 
                 ImGui.MenuItem(Locale.GetString("solution"), null, ref _showSolutionPanel);
-                ImGui.MenuItem(Locale.GetString("tools"), null, ref _showToolsPanel);
+                ImGui.MenuItem(Locale.GetString("common-tools"), null, ref _showToolsPanel);
                 ImGui.MenuItem(Locale.GetString("view"), null, ref _showViewPanel);
                 ImGui.EndDisabled();
 
@@ -462,7 +462,7 @@ public partial class SimulationViewer
                 ImGui.BeginDisabled(!worldAvailable);
                 ImGui.MenuItem(Locale.GetString("configuration"), null, ref _showConfigurationPanel);
                 ImGui.MenuItem(Locale.GetString("timeline"), null, ref _showTimelinePanel);
-                ImGui.MenuItem(Locale.GetString("world-topology"), null, ref _showWorldPanel);
+                ImGui.MenuItem(Locale.GetString("common-world-topology"), null, ref _showWorldPanel);
                 ImGui.EndDisabled();
 
                 ImGui.BeginDisabled(!simulationAvailable);
@@ -475,7 +475,7 @@ public partial class SimulationViewer
 
             if (ImGui.BeginMenu(Locale.GetString("settings")))
             {
-                if (ImGui.MenuItem(Locale.GetString("configure")))
+                if (ImGui.MenuItem(Locale.GetString("common-configure")))
                     _showProgramSettingsPanel = true;
 
                 ImGui.EndMenu();
@@ -653,7 +653,7 @@ public partial class SimulationViewer
         if (ImGui.CollapsingHeader(Locale.GetString("atmos-config"), ImGuiTreeNodeFlags.DefaultOpen))
         {
             ImGui.BeginDisabled(inspecting);
-            if (ImGui.Button(Locale.GetString("reset-to-defaults") + "...##config-reset"))
+            if (ImGui.Button(Locale.GetString("common-reset-to-defaults") + "...##config-reset"))
                 RequestResetConfiguration();
 
             ImGui.EndDisabled();
@@ -1124,7 +1124,7 @@ public partial class SimulationViewer
             return;
 
         using var window = ImGuiExtensions.BeginWindow(
-            Locale.GetString("tools-window-title") + "##tools",
+            Locale.GetString("common-tools") + "##tools",
             ref _showToolsPanel,
             new Vector2(10, 340),
             new Vector2(300, 550));
@@ -1141,7 +1141,7 @@ public partial class SimulationViewer
         if (ImGui.CollapsingHeader(Locale.GetString("voxel-tools-section"), ImGuiTreeNodeFlags.DefaultOpen))
             RenderVoxelTools(inspecting);
 
-        if (ImGui.CollapsingHeader(Locale.GetString("inject-gas-section")))
+        if (ImGui.CollapsingHeader(Locale.GetString("common-inject-gas")))
             RenderProjectInjectionControls(inspecting);
     }
 
@@ -1160,7 +1160,7 @@ public partial class SimulationViewer
         ImGui.SetNextItemWidth(NumericInputWidth);
         draftChanged |= ImGui.InputInt(Locale.GetString("classification-label") + "##voxel-edit", ref _voxelClassificationDraft);
         ImGui.EndDisabled();
-        ImGui.TextDisabled(Locale.GetString("classification-values-description"));
+        ImGui.TextDisabled(Locale.GetString("common-classification-values-description"));
 
         ImGui.BeginDisabled(inspecting);
         if (_session.Config!.GasRegistry.Count > 0)
@@ -1202,14 +1202,14 @@ public partial class SimulationViewer
             DrawCellSelectionDetails(_selectedCell.Value);
 
             ImGui.BeginDisabled(inspecting);
-            if (ImGui.Button(Locale.GetString("set-classification-button")))
+            if (ImGui.Button(Locale.GetString("common-set-classification")))
                 ApplyClassification(_selectedCells, _voxelClassificationDraft);
 
             ImGui.SameLine();
-            if (ImGui.Button(Locale.GetString("inject-gas-button") + "##selected-voxels"))
+            if (ImGui.Button(Locale.GetString("common-inject-gas") + "##selected-voxels"))
                 ApplyGasInjection(_selectedCells);
 
-            if (ImGui.Button(Locale.GetString("clear-gas-button")))
+            if (ImGui.Button(Locale.GetString("common-clear-gas")))
                 ApplyClearGas(_selectedCells);
 
             ImGui.EndDisabled();
@@ -1317,7 +1317,7 @@ public partial class SimulationViewer
                 if (readout.IsVisible)
                 {
                     var range = legend.Range;
-                    ImGuiExtensions.DefinitionRow(Locale.GetString("range-label"), FormatLegendRangeMode(units, scale));
+                    ImGuiExtensions.DefinitionRow(Locale.GetString("common-range"), FormatLegendRangeMode(units, scale));
                     ImGuiExtensions.DefinitionRow(Locale.GetString("minimum-label"), QuantityFormat.Format(range.Minimum * scale, units));
                     ImGuiExtensions.DefinitionRow(Locale.GetString("maximum-label"), QuantityFormat.Format(range.Maximum * scale, units));
                 }
@@ -1754,8 +1754,8 @@ public partial class SimulationViewer
 
         float swatchSize = ImGui.GetTextLineHeight();
         ImGui.TableSetupColumn("", ImGuiTableColumnFlags.WidthFixed, swatchSize);
-        ImGui.TableSetupColumn(Locale.GetString("gas"), ImGuiTableColumnFlags.WidthFixed);
-        ImGui.TableSetupColumn(Locale.GetString("amount"), ImGuiTableColumnFlags.WidthFixed);
+        ImGui.TableSetupColumn(Locale.GetString("common-gas"), ImGuiTableColumnFlags.WidthFixed);
+        ImGui.TableSetupColumn(Locale.GetString("common-amount"), ImGuiTableColumnFlags.WidthFixed);
         ImGui.TableSetupColumn(Locale.GetString("share"), ImGuiTableColumnFlags.WidthFixed);
         ImGui.TableHeadersRow();
 
@@ -1925,7 +1925,7 @@ public partial class SimulationViewer
             ImGuiExtensions.DefinitionRow(Locale.GetString("active-voxels"), snapshot.ActiveAirCount.ToString());
             ImGuiExtensions.DefinitionRow(Locale.GetString("active-gases"), snapshot.ActiveGasCount.ToString());
             ImGuiExtensions.DefinitionRow(
-                Locale.GetString("state"),
+                Locale.GetString("simulation-state-label"),
                 snapshot.IsAwake ? Locale.GetString("awake") : Locale.GetString("sleeping"));
             ImGuiExtensions.DefinitionRow(Locale.GetString("sleep-timer"), QuantityFormat.Ticks(snapshot.SleepTimer));
 

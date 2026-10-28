@@ -66,7 +66,7 @@ public partial class SimulationViewer
         DrawTimelineTransport(timeline);
         ImGuiExtensions.Feedback(_timelineError, true);
 
-        ImGui.SeparatorText(Locale.GetString("timeline-range"));
+        ImGui.SeparatorText(Locale.GetString("common-range"));
         int selectedTick = checked((int)timeline.Position.Tick);
         if (ImGui.BeginTable(
                 "TimelineRange##replay",
@@ -176,7 +176,7 @@ public partial class SimulationViewer
         ImGui.TextDisabled(Locale.GetString("timeline-mode"));
         if (timeline.IsInspecting)
         {
-            ImGui.TextUnformatted(Locale.GetString("timeline-inspecting-history"));
+            ImGui.TextUnformatted(Locale.GetString("common-inspecting-history"));
             ImGui.TextDisabled(Locale.GetString("timeline-read-only"));
         }
         else
@@ -270,7 +270,7 @@ public partial class SimulationViewer
         ImGui.EndDisabled();
 
         ImGui.SameLine();
-        if (ImGui.Button(_isPaused ? Locale.GetString("timeline-play-button") : Locale.GetString("timeline-pause-button"), new Vector2(76f, 0f)))
+        if (ImGui.Button(_isPaused ? Locale.GetString("timeline-play-button") : Locale.GetString("common-pause"), new Vector2(76f, 0f)))
             _isPaused = !_isPaused;
 
         ImGui.SameLine();
@@ -435,8 +435,8 @@ public partial class SimulationViewer
         if (!table.IsVisible)
             return;
 
-        ImGui.TableSetupColumn(Locale.GetString("timeline-gas"));
-        ImGui.TableSetupColumn(Locale.GetString("timeline-amount"));
+        ImGui.TableSetupColumn(Locale.GetString("common-gas"));
+        ImGui.TableSetupColumn(Locale.GetString("common-amount"));
         ImGui.TableHeadersRow();
         foreach (var gas in mixture.Gases)
         {
@@ -474,7 +474,7 @@ public partial class SimulationViewer
             .Select(static solver => new SolverStageRow(
                 solver.Name,
                 solver.Enabled,
-                solver.Kind == AtmosWorldSolverKind.BuiltIn ? Locale.GetString("timeline-built-in") : Locale.GetString("timeline-custom")))
+                solver.Kind == AtmosWorldSolverKind.BuiltIn ? Locale.GetString("timeline-built-in") : Locale.GetString("common-custom")))
             .ToArray();
 
         DrawSolverStageTable("InitialSolvers##replay", rows);
@@ -690,7 +690,7 @@ public partial class SimulationViewer
             return origin.X + (float)((tick - _timelineFirstTick) / _timelineVisibleTicks * width);
         }
 
-        string trackTitle = Locale.GetString("replay-timeline-axis-title");
+        string trackTitle = Locale.GetString("timeline-axis-title");
         draw.AddText(origin + new Vector2(8f, 4f), secondaryText, trackTitle);
         DrawTimelineLegend(
             draw,

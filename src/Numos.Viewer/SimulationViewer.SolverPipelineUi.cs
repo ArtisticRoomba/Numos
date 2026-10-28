@@ -75,7 +75,7 @@ public partial class SimulationViewer
                     if (!builtIn)
                     {
                         ImGui.SameLine(0f, 6f);
-                        ImGui.TextDisabled(Locale.GetString("custom"));
+                        ImGui.TextDisabled(Locale.GetString("common-custom"));
                     }
 
                     if (nameHovered)
@@ -181,7 +181,7 @@ public partial class SimulationViewer
         }
 
         var style = ImGui.GetStyle();
-        float addWidth = ImGui.CalcTextSize(Locale.GetString("add")).X + style.FramePadding.X * 2f;
+        float addWidth = ImGui.CalcTextSize(Locale.GetString("common-add")).X + style.FramePadding.X * 2f;
         float markerWidth = ImGui.CalcTextSize("(?)").X + style.ItemSpacing.X * 3f;
         float comboWidth = MathF.Max(80f,
             ImGui.GetContentRegionAvail().X - addWidth - markerWidth - style.ItemSpacing.X);
@@ -204,7 +204,7 @@ public partial class SimulationViewer
 
         ImGui.SameLine();
         ImGui.BeginDisabled(_solverAddDraft == null);
-        if (ImGui.Button(Locale.GetString("add-solver-stage-button")) && _solverAddDraft != null)
+        if (ImGui.Button(Locale.GetString("common-add")) && _solverAddDraft != null)
         {
             var layout = SolverPipelineEditor.Add(steps, _solverAddDraft);
             _solverAddDraft = null;
@@ -234,8 +234,8 @@ public partial class SimulationViewer
         if (RenderPresetButton("Legacy##solver-preset-legacy", current == AtmosTransportModel.Legacy))
             RunSolverEdit(() => _session.ApplyTransportPreset(AtmosTransportModel.Legacy));
 
-        SameLineOrWrap(Locale.GetString("reset-to-defaults"), style);
-        if (ImGui.Button(Locale.GetString("reset-to-defaults-button")))
+        SameLineOrWrap(Locale.GetString("common-reset-to-defaults"), style);
+        if (ImGui.Button(Locale.GetString("common-reset-to-defaults")))
             RunSolverEdit(() => _session.ResetSolvers());
 
         ImGui.EndDisabled();

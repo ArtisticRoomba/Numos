@@ -147,7 +147,7 @@ public partial class SimulationViewer
         ImGui.SetNextItemWidth(460f);
         ImGui.InputText(Locale.GetString("replay-file-path-label"), ref _replayOpenPath, 4096);
         ImGui.SameLine();
-        if (ImGui.Button(Locale.GetString("replay-file-browse-button"))) PickReplayFile();
+        if (ImGui.Button(Locale.GetString("common-browse"))) PickReplayFile();
         if (_session.World != null)
         {
             ImGui.TextColored(
@@ -167,7 +167,7 @@ public partial class SimulationViewer
 
         ImGui.EndDisabled();
         ImGui.SameLine();
-        if (ImGui.Button(Locale.GetString("replay-file-cancel-button"), new Vector2(120f, 0f))) ImGui.CloseCurrentPopup();
+        if (ImGui.Button(Locale.GetString("common-cancel"), new Vector2(120f, 0f))) ImGui.CloseCurrentPopup();
         ImGui.SetItemDefaultFocus();
     }
 
@@ -183,7 +183,7 @@ public partial class SimulationViewer
         ImGui.SetNextItemWidth(460f);
         ImGui.InputText(Locale.GetString("replay-file-path-label"), ref _replaySavePath, 4096);
         ImGui.SameLine();
-        if (ImGui.Button(Locale.GetString("replay-file-browse-save-button") + "##save-replay")) PickReplaySaveFile();
+        if (ImGui.Button(Locale.GetString("common-browse") + "##save-replay")) PickReplaySaveFile();
         if (_session.Timeline.IsInspecting)
         {
             ImGui.RadioButton(Locale.GetString("replay-file-save-full-branch-option"), ref _replaySaveRange, 0);
@@ -217,7 +217,7 @@ public partial class SimulationViewer
 
         ImGui.EndDisabled();
         ImGui.SameLine();
-        if (ImGui.Button(Locale.GetString("replay-file-cancel-button"), new Vector2(120f, 0f))) ImGui.CloseCurrentPopup();
+        if (ImGui.Button(Locale.GetString("common-cancel"), new Vector2(120f, 0f))) ImGui.CloseCurrentPopup();
         ImGui.SetItemDefaultFocus();
     }
 
@@ -235,7 +235,7 @@ public partial class SimulationViewer
         {
             ImGui.TextUnformatted(Locale.GetString("replay-file-loading-progress"));
             ImGui.ProgressBar(Math.Clamp(_replayFileProgress, 0f, 1f), new Vector2(420f, 0f));
-            if (ImGui.Button(Locale.GetString("replay-file-cancel-button"), new Vector2(120f, 0f))) _replayFileCancellation?.Cancel();
+            if (ImGui.Button(Locale.GetString("common-cancel"), new Vector2(120f, 0f))) _replayFileCancellation?.Cancel();
         }
         else
         {

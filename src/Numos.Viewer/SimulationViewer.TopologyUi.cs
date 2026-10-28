@@ -48,7 +48,7 @@ public partial class SimulationViewer
         {
             ImGui.TableSetupColumn(Locale.GetString("connection"));
             ImGui.TableSetupColumn(Locale.GetString("links"), ImGuiTableColumnFlags.WidthFixed, 54f);
-            ImGui.TableSetupColumn(Locale.GetString("state"), ImGuiTableColumnFlags.WidthFixed, 118f);
+            ImGui.TableSetupColumn(Locale.GetString("common-state-heading"), ImGuiTableColumnFlags.WidthFixed, 118f);
             ImGui.TableHeadersRow();
             foreach (var set in linkSets)
             {
@@ -92,7 +92,7 @@ public partial class SimulationViewer
                 ImGui.TableNextColumn();
                 ImGuiExtensions.StatusField(Locale.GetString("links"), selected.Links.Count.ToString());
                 ImGui.TableNextColumn();
-                ImGuiExtensions.StatusField(Locale.GetString("state"), FormatLinkSetState(selected.State));
+                ImGuiExtensions.StatusField(Locale.GetString("common-state-heading"), FormatLinkSetState(selected.State));
                 ImGui.TableNextColumn();
                 ImGuiExtensions.StatusField(Locale.GetString("area"), FormatAreaFraction(selected.Links));
                 ImGui.EndTable();
@@ -297,7 +297,7 @@ public partial class SimulationViewer
 
         AtmosChunkHandle[] chunks = _simulationSurfaces[simulationIndex].Simulation.GetChunkHandles().ToArray();
         chunkIndex = chunks.Length == 0 ? 0 : Math.Clamp(chunkIndex, 0, chunks.Length - 1);
-        string chunkLabel = chunks.Length == 0 ? Locale.GetString("no-chunks") : FormatChunkPosition(chunks[chunkIndex].Position);
+        string chunkLabel = chunks.Length == 0 ? Locale.GetString("topology-no-chunks") : FormatChunkPosition(chunks[chunkIndex].Position);
         if (ImGui.BeginCombo(Locale.GetString("endpoint-chunk", ("label", label)), chunkLabel))
         {
             for (int index = 0; index < chunks.Length; index++)
@@ -333,7 +333,7 @@ public partial class SimulationViewer
         if (selected == null)
         {
             ImGui.TextWrapped(Locale.GetString("selected-connection-no-longer-exists"));
-            if (ImGui.Button(Locale.GetString("close"), new Vector2(120, 0)))
+            if (ImGui.Button(Locale.GetString("common-close"), new Vector2(120, 0)))
             {
                 _removeTopologyModalOpen = false;
                 _topologyPendingRemoval = null;
@@ -372,7 +372,7 @@ public partial class SimulationViewer
         }
 
         ImGui.SameLine();
-        if (ImGui.Button(Locale.GetString("cancel"), new Vector2(120, 0)))
+        if (ImGui.Button(Locale.GetString("common-cancel"), new Vector2(120, 0)))
         {
             _removeTopologyModalOpen = false;
             _topologyPendingRemoval = null;

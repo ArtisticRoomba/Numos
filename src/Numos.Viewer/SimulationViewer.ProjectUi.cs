@@ -86,7 +86,7 @@ public partial class SimulationViewer
 
     private void RequestCreateProject()
     {
-        _projectNameDraft = _session.World == null ? Locale.GetString("untitled-simulation") : Locale.GetString("project-name-copy", ("projectName", _session.ProjectName));
+        _projectNameDraft = _session.World == null ? Locale.GetString("common-untitled-simulation") : Locale.GetString("project-name-copy", ("projectName", _session.ProjectName));
         _projectChunkWidthDraft = _session.ChunkDimensions.X > 0
             ? _session.ChunkDimensions.X
             : AtmosChunkConstants.DefaultWidth;
@@ -197,7 +197,7 @@ public partial class SimulationViewer
         }
 
         ImGui.SameLine();
-        if (ImGui.Button(Locale.GetString("cancel"), new Vector2(120, 0)))
+        if (ImGui.Button(Locale.GetString("common-cancel"), new Vector2(120, 0)))
         {
             _createProjectModalOpen = false;
             ImGui.CloseCurrentPopup();
@@ -249,7 +249,7 @@ public partial class SimulationViewer
         }
 
         ImGui.SameLine();
-        if (ImGui.Button(Locale.GetString("cancel"), new Vector2(120, 0)))
+        if (ImGui.Button(Locale.GetString("common-cancel"), new Vector2(120, 0)))
         {
             _closeProjectModalOpen = false;
             ImGui.CloseCurrentPopup();
@@ -278,7 +278,7 @@ public partial class SimulationViewer
             !_liveChunkPositions.Contains(chunk.Position))
         {
             ImGui.TextWrapped(Locale.GetString("selected-chunk-no-longer-exists"));
-            if (ImGui.Button(Locale.GetString("close"), new Vector2(120, 0)))
+            if (ImGui.Button(Locale.GetString("common-close"), new Vector2(120, 0)))
             {
                 _removeChunkModalOpen = false;
                 _chunkPendingRemoval = null;
@@ -304,7 +304,7 @@ public partial class SimulationViewer
 
         ImGui.EndDisabled();
         ImGui.SameLine();
-        if (ImGui.Button(Locale.GetString("cancel"), new Vector2(120, 0)))
+        if (ImGui.Button(Locale.GetString("common-cancel"), new Vector2(120, 0)))
         {
             _chunkPendingRemoval = null;
             _removeChunkModalOpen = false;
@@ -342,7 +342,7 @@ public partial class SimulationViewer
 
         ImGui.EndDisabled();
         ImGui.SameLine();
-        if (ImGui.Button(Locale.GetString("cancel"), new Vector2(120, 0)))
+        if (ImGui.Button(Locale.GetString("common-cancel"), new Vector2(120, 0)))
         {
             _resetConfigurationModalOpen = false;
             ImGui.CloseCurrentPopup();
@@ -385,16 +385,16 @@ public partial class SimulationViewer
         if (inspecting || !_isPaused || _steppedToTick != currentTick)
             _steppedToTick = null;
 
-        ImGui.TextUnformatted(_session.ProjectName ?? Locale.GetString("untitled-simulation"));
+        ImGui.TextUnformatted(_session.ProjectName ?? Locale.GetString("common-untitled-simulation"));
         if (ImGui.BeginTable(
                 "ProjectStatus##solution",
                 2,
                 ImGuiTableFlags.Borders | ImGuiTableFlags.SizingStretchSame))
         {
             ImGui.TableNextColumn();
-            ImGui.TextDisabled(Locale.GetString("state"));
+            ImGui.TextDisabled(Locale.GetString("common-state-heading"));
             if (inspecting)
-                ImGui.TextUnformatted(Locale.GetString("inspecting-history"));
+                ImGui.TextUnformatted(Locale.GetString("common-inspecting-history"));
             else if (_isPaused)
                 ImGui.TextUnformatted(Locale.GetString("paused"));
             else
@@ -403,9 +403,9 @@ public partial class SimulationViewer
             ImGui.TableNextColumn();
             ImGuiExtensions.StatusField(Locale.GetString("active-simulation"), GetSimulationName(_simulation.Id));
             ImGui.TableNextColumn();
-            ImGuiExtensions.StatusField(Locale.GetString("simulations"), (_session.World?.Simulations.Count ?? 0).ToString());
+            ImGuiExtensions.StatusField(Locale.GetString("common-simulations-heading"), (_session.World?.Simulations.Count ?? 0).ToString());
             ImGui.TableNextColumn();
-            ImGuiExtensions.StatusField(Locale.GetString("chunks"), _simulation.ChunkCount.ToString());
+            ImGuiExtensions.StatusField(Locale.GetString("common-chunks-heading"), _simulation.ChunkCount.ToString());
             ImGui.TableNextColumn();
             ImGuiExtensions.StatusField(Locale.GetString("gases"), _session.Config.GasRegistry.Count.ToString());
             ImGui.TableNextColumn();
@@ -426,7 +426,7 @@ public partial class SimulationViewer
                 _steppedToTick = null;
             }
         }
-        else if (ImGui.Button(Locale.GetString("pause"), new Vector2(90, 0)))
+        else if (ImGui.Button(Locale.GetString("common-pause"), new Vector2(90, 0)))
         {
             _isPaused = true;
         }
@@ -570,7 +570,7 @@ public partial class SimulationViewer
 
         ImGui.TableSetupScrollFreeze(0, 1);
         ImGui.TableSetupColumn(Locale.GetString("chunk-column"));
-        ImGui.TableSetupColumn(Locale.GetString("state-column"), ImGuiTableColumnFlags.WidthFixed, 80f);
+        ImGui.TableSetupColumn(Locale.GetString("common-state-heading"), ImGuiTableColumnFlags.WidthFixed, 80f);
         ImGui.TableHeadersRow();
 
         AtmosChunkHandle? chunkToSeal = null;
@@ -688,7 +688,7 @@ public partial class SimulationViewer
             _chunkFeedback = null;
 
         ImGui.EndDisabled();
-        ImGui.TextDisabled(Locale.GetString("classification-values-tooltip"));
+        ImGui.TextDisabled(Locale.GetString("common-classification-values-description"));
 
         ImGui.BeginDisabled(inspecting);
         if (ImGui.Button(Locale.GetString("fill-selected-chunk")))

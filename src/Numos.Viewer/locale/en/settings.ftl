@@ -1,5 +1,4 @@
-﻿configure-program-settings = Configure
-graphics = Graphics
+﻿graphics = Graphics
 interface = Interface
 custom-resolution = {$width} x {$height} (custom)
 target-resolution = Target resolution

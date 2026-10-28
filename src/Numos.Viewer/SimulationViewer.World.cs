@@ -255,7 +255,7 @@ public partial class SimulationViewer
             return;
 
         using var window = ImGuiExtensions.BeginWindow(
-            Locale.GetString("world-topology-window") + "##world",
+            Locale.GetString("common-world-topology") + "##world",
             ref _showWorldPanel,
             new Vector2(580, 80),
             new Vector2(430, 620));
@@ -270,7 +270,7 @@ public partial class SimulationViewer
                 ImGuiTableFlags.Borders | ImGuiTableFlags.SizingStretchSame))
         {
             ImGui.TableNextColumn();
-            ImGuiExtensions.StatusField(Locale.GetString("simulations-label"), _session.World.Simulations.Count.ToString());
+            ImGuiExtensions.StatusField(Locale.GetString("common-simulations-heading"), _session.World.Simulations.Count.ToString());
             ImGui.TableNextColumn();
             ImGuiExtensions.StatusField(Locale.GetString("active-links-label"), _session.World.ActiveLinkCount.ToString());
             ImGui.TableNextColumn();
@@ -278,14 +278,14 @@ public partial class SimulationViewer
             ImGui.EndTable();
         }
 
-        ImGui.SeparatorText(Locale.GetString("simulations-label"));
+        ImGui.SeparatorText(Locale.GetString("common-simulations-heading"));
         if (ImGui.BeginTable(
                 "Simulations##world",
                 3,
                 ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp))
         {
             ImGui.TableSetupColumn(Locale.GetString("simulation-label"));
-            ImGui.TableSetupColumn(Locale.GetString("chunks-label"), ImGuiTableColumnFlags.WidthFixed, 64f);
+            ImGui.TableSetupColumn(Locale.GetString("common-chunks-heading"), ImGuiTableColumnFlags.WidthFixed, 64f);
             ImGui.TableSetupColumn(Locale.GetString("chunk-size-label"), ImGuiTableColumnFlags.WidthFixed, 100f);
             ImGui.TableHeadersRow();
             foreach (var surface in _simulationSurfaces)
@@ -333,7 +333,7 @@ public partial class SimulationViewer
                 _simulationFeedback);
         }
 
-        ImGui.SeparatorText(Locale.GetString("new-simulation-heading"));
+        ImGui.SeparatorText(Locale.GetString("common-new-simulation"));
         bool dimensionsChanged = false;
         ImGui.BeginDisabled(inspecting);
         ImGui.SetNextItemWidth(NumericInputWidth);
@@ -426,7 +426,7 @@ public partial class SimulationViewer
         }
 
         ImGui.SameLine();
-        if (ImGui.Button(Locale.GetString("cancel-button"), new Vector2(120, 0)))
+        if (ImGui.Button(Locale.GetString("common-cancel"), new Vector2(120, 0)))
         {
             _removeSimulationModalOpen = false;
             _simulationPendingRemoval = null;

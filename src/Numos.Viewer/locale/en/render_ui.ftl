@@ -4,7 +4,6 @@ viewer-description = An external viewer for Numos, an engine-agnostic, pseudo-re
 no-simulation-loaded = No simulation is currently loaded.
 create-workspace-instruction = Choose File > New Simulation to create a workspace.
 
-close = Close
 about = About
 authors = Authors
 thanks-to = Thanks To
@@ -15,7 +14,6 @@ license = License
 build-provenance = Build provenance
 
 viewer = Viewer
-source = Source
 commit = Commit
 configuration = Configuration
 framework = Framework
@@ -31,22 +29,16 @@ gas-reactions-solver = GasReactions solver
 simulation-viewer-title = Numos Simulation Viewer
 
 file = File
-new-simulation = New Simulation
 open-replay = Open Replay...
 save-replay = Save Replay...
-close-project = Close Project
 exit = Exit
 
 view = View
-messages-logs = Messages / Logs
 solution = Solution
-tools = Tools
-world-topology = World & Topology
 three-d-viewport = 3D Viewport
 two-d-slice-viewport = 2D Slice Viewport
 
 settings = Settings
-configure = Configure
 help = Help
 
 visualization = Visualization
@@ -69,10 +61,8 @@ velocity-arrows-tooltip = Draws at most { $max-arrows } arrows. A larger scene s
 arrow-scale = Arrow scale
 velocity-arrow-scale-tooltip = Seconds of travel one arrow represents. At 0.05 s a voxel moving at 20 m/s draws a one-voxel arrow. Arrows longer than { $max-length } voxels are capped and keep only their direction.
 
-configuration = Configuration
 solver-pipeline = Solver Pipeline
 atmos-config = AtmosConfig
-reset-to-defaults = Reset to Defaults
 configuration-apply-instructions = Values apply on Enter, when a field loses focus, or when a slider is released.
 gas-registry = Gas Registry
 
@@ -83,13 +73,11 @@ config-value-minimum-error = {$field} must be 0 or more. The previous value is s
 config-field-set-feedback = {$field} set to {$value}.
 config-field-apply-error = Could not apply {$field}: {$error}
 
-tools-window-title = Tools
 viewing = Viewing
 editing = Editing
 simulation-inspection-status = {$mode} {$simulation}
 chunks-section = Chunks
 voxel-tools-section = Voxel Tools
-inject-gas-section = Inject Gas
 
 viewport-tool-label = Viewport tool
 select-box-tool = Select / Box
@@ -97,7 +85,6 @@ paint-room-tool = Paint Room
 paint-gas-tool = Paint Gas
 erase-gas-tool = Erase Gas
 classification-label = Classification
-classification-values-description = 0 unassigned, -2 solid, -1 void, positive values are room IDs.
 amount-mol-label = Amount (mol)
 temperature-k-label = Temperature (K)
 
@@ -105,9 +92,6 @@ selection-section = Selection
 no-voxels-selected = No voxels selected.
 selected-voxel-count-singular = {$count} voxel selected
 selected-voxel-count-plural = {$count} voxels selected
-set-classification-button = Set Classification
-inject-gas-button = Inject Gas
-clear-gas-button = Clear Gas
 clear-selection-button = Clear Selection
 
 no-chunks-available = No chunks available.
@@ -123,7 +107,6 @@ to-label = to
 plane-label = Plane
 slice-plane-cell-count = {$width} × {$height} cells, {$chunks} chunks
 
-range-label = Range
 minimum-label = Minimum
 maximum-label = Maximum
 custom-resolution-checkbox = Custom resolution
@@ -164,8 +147,6 @@ gas-count-plural = { $count } gases
 no-valid-amounts = No valid amounts
 vacuum = Vacuum
 
-gas = Gas
-amount = Amount
 share = Share
 invalid-not-in-bar = invalid, not in bar
 
@@ -181,15 +162,12 @@ gas-id = Gas { $id }
 simulation-state = Simulation State
 no-chunks-in-simulation = No chunks in this simulation.
 waiting-for-chunk-snapshot = Waiting for a chunk snapshot.
-source = Source
 dimensions = Dimensions
 voxel-dimensions = { $x } × { $y } × { $z } voxels
 total-voxels = Total voxels
 active-voxels = Active voxels
 active-gases = Active gases
-state = State
-awake = Awake
-sleeping = Sleeping
+simulation-state-label = State
 sleep-timer = Sleep timer
 max-pressure = Max pressure
 average-pressure-non-zero-voxels = Avg pressure (non-zero voxels)

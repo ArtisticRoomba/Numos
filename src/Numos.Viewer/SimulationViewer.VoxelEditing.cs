@@ -41,7 +41,7 @@ public partial class SimulationViewer
         }
 
         ImGui.BeginTooltip();
-        ImGui.Text(Locale.GetString("3d-voxel"));
+        ImGui.Text(Locale.GetString("three-d-voxel"));
         ImGui.Separator();
         DrawCellSelectionDetails(_hovered3DCell.Value);
         ImGui.EndTooltip();
@@ -419,13 +419,13 @@ public partial class SimulationViewer
 
         RenderContextPortalMenu();
 
-        if (ImGui.MenuItem(Locale.GetString("clear-gas")))
+        if (ImGui.MenuItem(Locale.GetString("common-clear-gas")))
             ApplyClearGas(_selectedCells);
 
         if (ImGui.MenuItem(Locale.GetString("clear-cell")))
             ApplyClearCell(_selectedCells);
 
-        if (ImGui.BeginMenu(Locale.GetString("set-classification")))
+        if (ImGui.BeginMenu(Locale.GetString("common-set-classification")))
         {
             if (ImGui.MenuItem(Locale.GetString("unassigned-classification")))
                 ApplyClassification(_selectedCells, VoxelClassification.RoomUnassigned);

@@ -154,7 +154,7 @@ public partial class SimulationViewer
         }
 
         using var window = ImGuiExtensions.BeginWindow(
-            Locale.GetString("messages-logs-window"),
+            Locale.GetString("common-messages-logs"),
             ref _showMessagesPanel,
             new Vector2(320, 650),
             new Vector2(900, 240));

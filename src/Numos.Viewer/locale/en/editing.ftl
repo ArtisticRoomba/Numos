@@ -1,13 +1,11 @@
-﻿3d-voxel = 3D Voxel
+﻿three-d-voxel = 3D Voxel
 
 selected-voxel-count = { $count } voxel{ $count ->
-    [one] 
+    [one]
    *[other] s
-} selected
+    } selected
 
-clear-gas = Clear Gas
 clear-cell = Clear Cell
-set-classification = Set Classification
 unassigned-classification = Unassigned (0)
 solid-classification = Solid (-2)
 void-classification = Void (-1)
@@ -37,4 +35,4 @@ set-temperature-for = Set temperature to { $temperature } K for
 voxel-mutation-feedback = { $action } { $edited } voxel{ $edited ->
     [one] .
    *[other] s.
-}
+    }
