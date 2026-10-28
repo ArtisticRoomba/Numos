@@ -6,7 +6,7 @@ using Linguini.Shared.Types.Bundle;
 
 namespace Numos.Viewer;
 
-public static class Locale
+public static partial class Locale
 {
     private static readonly string LocaleDirectory =
         Path.Combine(AppContext.BaseDirectory, "locale");
@@ -40,8 +40,7 @@ public static class Locale
             _ => new Lazy<LocaleState>(
                 () => BuildState(cultureInfo),
                 LazyThreadSafetyMode.ExecutionAndPublication));
-
-        // If loading fails, the previously active culture remains unchanged.
+        
         var state = lazyState.Value;
         Volatile.Write(ref _current, state);
     }
@@ -84,36 +83,8 @@ public static class Locale
         ?? throw new InvalidOperationException(
             "No localization culture has been set. " +
             "Call Locale.SetCulture() first.");
-
-    public static string GetString(string key)
-    {
-        var bundle = GetState().Bundle;
-
-        return bundle.GetAttrMessage(key)
-            ?? throw new ArgumentException(
-                $"Locale key '{key}' returned a null value.",
-                nameof(key));
-    }
-
-    public static string GetString(
-        string key,
-        params (string, object?)[] args)
-    {
-        var bundle = GetState().Bundle;
-        var cast = new (string, IFluentType)[args.Length];
-
-        for (int i = 0; i < args.Length; i++)
-        {
-            cast[i] = (args[i].Item1, FluentFromObject(args[i].Item2));
-        }
-
-        return bundle.GetAttrMessage(key, cast)
-            ?? throw new ArgumentException(
-                $"Locale key '{key}' returned a null value.",
-                nameof(key));
-    }
-
-    private static IFluentType FluentFromObject(object? obj)
+    
+    private static IFluentType FluentFromObject<T>(T? obj)
     {
         return obj switch
         {
@@ -133,7 +104,7 @@ public static class Locale
             float n => (FluentNumber)n,
 
             null => (FluentString)string.Empty,
-            _ => (FluentString)obj.ToString()!,
+            _ => (FluentString)obj.ToString()!
         };
     }
 }
