@@ -13,6 +13,12 @@ internal sealed class CodeWriter
         typeof(CodeWriter).Assembly.GetName().Version +
         "\")]";
 
+    /// <summary>
+    ///     Hides a generated type from IntelliSense.
+    /// </summary>
+    public const string EditorBrowsableNeverAttribute =
+        "[global::System.ComponentModel.EditorBrowsable(global::System.ComponentModel.EditorBrowsableState.Never)]";
+
     private readonly StringBuilder _builder = new();
     private int _indent;
 
@@ -30,10 +36,10 @@ internal sealed class CodeWriter
         _indent++;
     }
 
-    public void Close()
+    public void Close(string suffix = "")
     {
         _indent--;
-        Line("}");
+        Line("}" + suffix);
     }
 
     /// <summary>
@@ -59,6 +65,30 @@ internal sealed class CodeWriter
     {
         if (type.Namespace.Length > 0)
             Close();
+    }
+
+    /// <summary>
+    ///     Opens a hidden static class with one module initializer method, inside its own namespace.
+    ///     The namespace, the class, and the method stay open for the caller to fill and close.
+    /// </summary>
+    /// <param name="namespace">The namespace to declare.</param>
+    /// <param name="className">The class to declare.</param>
+    /// <param name="methodName">The module initializer method to declare.</param>
+    /// <param name="justification">Why the module initializer is needed, for the CA2255 suppression.</param>
+    public void OpenModuleInitializer(string @namespace, string className, string methodName, string justification)
+    {
+        Line("namespace " + @namespace);
+        Open();
+        Line(GeneratedCodeAttribute);
+        Line(EditorBrowsableNeverAttribute);
+        Line("internal static class " + className);
+        Open();
+        Line("[global::System.Runtime.CompilerServices.ModuleInitializer]");
+        Line(
+            "[global::System.Diagnostics.CodeAnalysis.SuppressMessage(\"Usage\", \"CA2255\", " +
+            "Justification = \"" + justification + "\")]");
+        Line("internal static void " + methodName + "()");
+        Open();
     }
 
     /// <summary>

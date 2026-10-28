@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Numerics;
 using ImGuiNET;
+using Numos.Workbench;
 using Numos.API;
 using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Snapshots;
@@ -20,11 +21,13 @@ namespace Numos.Viewer;
 public partial class SimulationViewer : IDisposable
 {
     private const float CameraMoveDuration = 0.45f;
+    private const float MaxSliceZoom = 256f;
     private const int DefaultLegendResolution = 8;
     private readonly static TimeSpan ImGuiTransitionRenderDuration = TimeSpan.FromMilliseconds(250);
     private readonly static TimeSpan StartupRenderDuration = TimeSpan.FromMilliseconds(250);
 
     private readonly Action<VisualizationRegistry>? _configureVisualizations;
+    private readonly WorkbenchSession _session;
     private readonly List<VoxelGasSnapshot> _gasMakeupRows = [];
     private readonly List<VoxelHighlight> _highlights = [];
     private readonly List<AtmosChunkHandle> _liveChunkHandles = [];
@@ -59,7 +62,6 @@ public partial class SimulationViewer : IDisposable
     private Vector3 _cameraMoveStartPosition;
     private Vector3 _cameraMoveStartTarget;
     private long _chunkCollectionRevision = -1;
-    private AtmosConfig? _config;
     private long _continuousRenderingUntilTimestamp;
     private SliceAxis _currentSliceAxis = SliceAxis.Z;
     private int _currentSliceIndex;
@@ -88,15 +90,22 @@ public partial class SimulationViewer : IDisposable
     private bool _limitFpsWhenUnfocused = true;
     private bool _nextFrameRequested;
     private int _programSettingsTab;
-    private string? _projectName;
     private bool _requestExit;
     private VoxelAddress? _selectedCell;
-    private Int3? _selectedSliceChunkPosition;
     private bool _show2DChunkOutlines;
+    private bool _show2DVelocityArrows;
     private bool _show2DVoxelOutlines = true;
     private bool _show3DChunkOutlines;
+    private bool _show3DVelocityArrows;
     private bool _show3DViewport = true;
     private bool _show3DVoxelOutlines = true;
+    private float _velocityArrowScaleSeconds = VelocityArrows.DefaultScaleSeconds;
+
+    /// <summary>
+    ///     Snapshot fields the current frame was built from. Turning arrows on widens the request to include
+    ///     velocity, but the chunk revisions do not move, so the builder has to be told to remap.
+    /// </summary>
+    private AtmosChunkSnapshotFields _appliedSnapshotFields;
     private bool _showConfigurationPanel;
     private bool _showPerformanceOverlay;
     private bool _showProgramSettingsPanel;
@@ -108,10 +117,40 @@ public partial class SimulationViewer : IDisposable
     private bool _showViewPanel = true;
     private bool _showViewportBranding = true;
 
+    /// <summary>
+    ///     Mesh cache of the surface being drawn. <see cref="RenderSimulationViewports" /> points it at each surface in
+    ///     turn, like <see cref="_drawData" />.
+    /// </summary>
+    private ChunkMeshCache? _meshCache;
+
     private AtmosSimulation? _simulation;
     private SimulationSliceDrawData? _sliceDrawData;
-    private SliceProjectionKey? _sliceProjectionKey;
+    private SliceRenderer? _sliceRenderer;
     private SimulationViewport? _sliceViewport;
+
+    /// <summary>
+    ///     Frame, axis, and index that <see cref="_sliceDrawData" /> was built from. The plane is rebuilt only when
+    ///     one of them changes, so a paused viewer does no slice work.
+    /// </summary>
+    private SimulationDrawData? _sliceSourceFrame;
+    private SliceAxis _sliceSourceAxis;
+    private int _sliceSourceIndex;
+
+    /// <summary>
+    ///     Slice camera. The camera follows the plane while <see cref="_sliceCameraFit" /> is set, and it keeps the
+    ///     centre and zoom below once a person pans or zooms. The centre is in camera coordinates, where Y grows
+    ///     downward, so V maps to <c>Height - V</c>.
+    /// </summary>
+    private bool _sliceCameraFit = true;
+    private Vector2 _sliceCameraCenter;
+    private float _sliceCameraZoom = 1f;
+    private bool _sliceIsPanning;
+    private (int Width, int Height, SliceAxis Axis) _sliceCameraPlane;
+
+    /// <summary>
+    ///     Chunk that the slice camera should frame once a slice exists, set when the 3D view focuses a chunk.
+    /// </summary>
+    private Int3? _sliceFrameChunk;
     private int _snapshotSourceVersion;
     private int _targetFps = 144;
     private bool _transparent2DVoxels;
@@ -131,7 +170,6 @@ public partial class SimulationViewer : IDisposable
     private int _voxelDragViewport;
     private VoxelEditTool _voxelEditTool;
     private bool _windowInitialized;
-    private AtmosWorld? _world;
 
     /// <summary>
     ///     Creates a viewer with an optional startup hook for registering application-specific
@@ -140,6 +178,11 @@ public partial class SimulationViewer : IDisposable
     public SimulationViewer(Action<VisualizationRegistry>? configureVisualizations = null)
     {
         _configureVisualizations = configureVisualizations;
+        _session = new WorkbenchSession(
+            _messages,
+            new WorkbenchHostInfo("Numos.Viewer", ViewerBuildInfo.PackageVersion));
+
+        _session.ProjectClosing += ResetProjectPresentation;
         StartMessageCapture();
     }
 
@@ -205,6 +248,8 @@ public partial class SimulationViewer : IDisposable
                 TextureFilter.Point,
                 new Color(0.04f, 0.04f, 0.05f, 1f));
 
+            _sliceRenderer = new SliceRenderer();
+
             RequestRenderingFor(StartupRenderDuration);
             ApplyFramePacing();
 
@@ -227,26 +272,22 @@ public partial class SimulationViewer : IDisposable
         UpdateReplayFileOperations();
         HandleReplayFileDrop();
 
-        if (_world != null && _config != null)
+        if (_session.World != null && _session.Config != null)
         {
             if (!_isPaused)
             {
-                if (_replayTimeline?.IsInspecting == true)
+                if (_session.IsInspecting)
                 {
-                    _replayElapsed += deltaTime;
-                    if (_replayElapsed >= 1f / AtmosSimulation.SimulationRate)
-                    {
-                        _replayElapsed = 0f;
+                    if (_session.AccumulatePlayback(deltaTime))
                         StepTimelineForward();
-                    }
                 }
                 else
                 {
-                    _world.Update(deltaTime);
+                    _session.Update(deltaTime);
                 }
             }
 
-            _replayTimeline?.ObserveLiveState();
+            _session.ObserveLiveState();
             ReconcileSimulationSurfaces();
             if (_simulation != null)
                 RefreshPresentation();
@@ -264,7 +305,9 @@ public partial class SimulationViewer : IDisposable
 
         bool snapshotsChanged = RefreshSnapshotCache();
         var visualization = _frameBuilder.Visualizations.GetRequired(_currentVisualizationId);
+        var requiredFields = GetRequiredSnapshotFields();
         bool visualizationChanged = _drawData == null ||
+                                    _appliedSnapshotFields != requiredFields ||
                                     !string.Equals(
                                         _drawData.Visualization.Id,
                                         visualization.Id,
@@ -299,6 +342,7 @@ public partial class SimulationViewer : IDisposable
                 : new VisualizationRange(_legendMinimum, _legendMaximum));
 
         _appliedLegendRangeRevision = _legendRangeRevision;
+        _appliedSnapshotFields = requiredFields;
         NormalizeInteractionState();
         RefreshSliceData();
         RebuildHighlights();
@@ -322,7 +366,7 @@ public partial class SimulationViewer : IDisposable
             return false;
 
         bool changed = false;
-        var requiredFields = _frameBuilder?.GetRequiredSnapshotFields(_currentVisualizationId) ?? AtmosChunkSnapshotFields.All;
+        var requiredFields = GetRequiredSnapshotFields();
         if (_simulation.TryGetChunkHandles(
                 _chunkCollectionRevision,
                 out long collectionRevision,
@@ -340,7 +384,7 @@ public partial class SimulationViewer : IDisposable
 
         if (_focusedChunk.HasValue &&
             !_liveChunkPositions.Contains(_focusedChunk.Value.Position) &&
-            _replayTimeline?.IsInspecting != true &&
+            _session.Timeline?.IsInspecting != true &&
             !_refreshingReplay)
         {
             _focusedChunk = null;
@@ -389,54 +433,57 @@ public partial class SimulationViewer : IDisposable
         if (_drawData == null || _frameBuilder == null || _drawData.Chunks.Count == 0)
         {
             _sliceDrawData = null;
-            _sliceProjectionKey = null;
+            _sliceSourceFrame = null;
             return;
         }
 
         if (!_showSliceViewport)
             return;
 
-        if (_focusedChunk.HasValue && _selectedSliceChunkPosition != _focusedChunk.Value.Position)
-            _selectedSliceChunkPosition = _focusedChunk.Value.Position;
-
-        if (_selectedSliceChunkPosition.HasValue &&
-            !_drawData.Chunks.ContainsKey(_selectedSliceChunkPosition.Value) &&
-            (_replayTimeline?.IsInspecting == true || _refreshingReplay))
+        _currentSliceIndex = ClampSliceIndex(_drawData, _currentSliceAxis, _currentSliceIndex);
+        if (ReferenceEquals(_sliceSourceFrame, _drawData) &&
+            _sliceSourceAxis == _currentSliceAxis &&
+            _sliceSourceIndex == _currentSliceIndex)
         {
-            _sliceDrawData = null;
-            _sliceProjectionKey = null;
             return;
         }
 
-        if (!_selectedSliceChunkPosition.HasValue ||
-            !_drawData.Chunks.ContainsKey(_selectedSliceChunkPosition.Value))
-            _selectedSliceChunkPosition = _focusedChunk?.Position ?? _drawData.Chunks.Keys.First();
-
-        var chunk = _drawData.Chunks[_selectedSliceChunkPosition.Value];
-        int maximumSlice = Math.Max(
-            SimulationFrameBuilder.GetSliceAxisLength(chunk.Dimensions, _currentSliceAxis) - 1,
-            0);
-
-        _currentSliceIndex = Math.Clamp(_currentSliceIndex, 0, maximumSlice);
-
-        var projectionKey = new SliceProjectionKey(
-            chunk.Identity,
-            chunk.TopologyVersion,
-            chunk.StyleVersion,
-            _currentSliceAxis,
-            _currentSliceIndex);
-
-        if (_sliceProjectionKey == projectionKey)
-            return;
-
-        _sliceDrawData = _frameBuilder.BuildChunkSlice(
+        // Passing the old slice lets the builder keep its pixels and cell lookup when nothing in the plane changed.
+        _sliceDrawData = _frameBuilder.BuildPlaneSlice(
             _drawData,
-            chunk.Identity,
             _currentSliceAxis,
-            _currentSliceIndex);
+            _currentSliceIndex,
+            _sliceDrawData);
 
-        _sliceProjectionKey = projectionKey;
+        _sliceSourceFrame = _drawData;
+        _sliceSourceAxis = _currentSliceAxis;
+        _sliceSourceIndex = _currentSliceIndex;
         _hoveredSliceCell = null;
+    }
+
+    private static int ClampSliceIndex(SimulationDrawData frame, SliceAxis axis, int index)
+    {
+        int minimum = frame.Bounds.GetMinimum(axis);
+        int maximum = Math.Max(frame.Bounds.GetMaximumExclusive(axis) - 1, minimum);
+        return Math.Clamp(index, minimum, maximum);
+    }
+
+    /// <summary>
+    ///     Points the slice at a chunk. The plane moves to the chunk if it does not cut it, and the slice camera frames
+    ///     the chunk once the slice exists.
+    /// </summary>
+    private void FrameSliceOnChunk(ChunkDrawData chunk)
+    {
+        int length = SimulationFrameBuilder.GetSliceAxisLength(chunk.Dimensions, _currentSliceAxis);
+        int first = _currentSliceAxis switch
+        {
+            SliceAxis.X => chunk.ChunkPosition.X,
+            SliceAxis.Y => chunk.ChunkPosition.Y,
+            _ => chunk.ChunkPosition.Z
+        } * length;
+
+        _currentSliceIndex = Math.Clamp(_currentSliceIndex, first, first + length - 1);
+        _sliceFrameChunk = chunk.ChunkPosition;
     }
 
     private void NormalizeInteractionState()
@@ -448,7 +495,7 @@ public partial class SimulationViewer : IDisposable
         {
             if (_drawData.Chunks.TryGetValue(_focusedChunk.Value.Position, out var focused))
                 _focusedChunk = focused.Identity;
-            else if (_replayTimeline?.IsInspecting != true && !_refreshingReplay)
+            else if (_session.Timeline?.IsInspecting != true && !_refreshingReplay)
             {
                 _focusedChunk = null;
                 _frameSceneOnNextPresentation = true;
@@ -457,7 +504,7 @@ public partial class SimulationViewer : IDisposable
 
         if (_selectedCell.HasValue && !_drawData.TryResolve(_selectedCell.Value, out _))
         {
-            if (_replayTimeline?.IsInspecting == true || _refreshingReplay)
+            if (_session.Timeline?.IsInspecting == true || _refreshingReplay)
             {
                 var selected = _selectedCell.Value;
                 if (_drawData.Chunks.TryGetValue(selected.Chunk.Position, out var chunk))
@@ -489,11 +536,13 @@ public partial class SimulationViewer : IDisposable
         _focusedChunk = chunk;
         if (chunk.HasValue && _drawData != null && _drawData.Chunks.TryGetValue(chunk.Value.Position, out var data))
         {
-            _selectedSliceChunkPosition = data.ChunkPosition;
+            FrameSliceOnChunk(data);
             FocusCameraOnChunk(data);
         }
         else
         {
+            _sliceFrameChunk = null;
+            _sliceCameraFit = true;
             FocusCameraOnScene();
         }
     }
@@ -750,7 +799,7 @@ public partial class SimulationViewer : IDisposable
 
     private void RenderSimulationScene()
     {
-        if (_drawData != null)
+        if (_drawData != null && _meshCache != null)
         {
             Raylib.BeginMode3D(_camera3D);
             try
@@ -759,6 +808,7 @@ public partial class SimulationViewer : IDisposable
                     _drawData,
                     _focusedChunk,
                     _highlights,
+                    _meshCache,
                     Get3DRenderStyleOptions());
 
                 DrawTopologyOverlay();
@@ -767,6 +817,10 @@ public partial class SimulationViewer : IDisposable
             {
                 Raylib.EndMode3D();
             }
+
+            // A large scene uploads over several frames, and the window may be waiting for events.
+            if (_meshCache.HasPendingWork)
+                RequestNextFrame();
         }
 
         if (_viewport != null)
@@ -777,21 +831,14 @@ public partial class SimulationViewer : IDisposable
 
     private void RenderSimulationSliceScene()
     {
-        if (_sliceDrawData != null && _sliceViewport != null)
+        if (_sliceDrawData != null && _sliceViewport != null && _sliceRenderer != null)
         {
-            const float margin = 0.5f;
-            _camera2D.Offset = new Vector2(_sliceViewport.Width, _sliceViewport.Height) * 0.5f;
-            _camera2D.Target = new Vector2(_sliceDrawData.Width * 0.5f, _sliceDrawData.Height * 0.5f);
-            _camera2D.Rotation = 0f;
-            _camera2D.Zoom = Math.Max(
-                0.01f,
-                Math.Min(
-                    _sliceViewport.Width / (_sliceDrawData.Width + margin * 2f),
-                    _sliceViewport.Height / (_sliceDrawData.Height + margin * 2f)));
-
-            SliceRenderer.Draw(
+            var viewportSize = new Vector2(_sliceViewport.Width, _sliceViewport.Height);
+            UpdateSliceCamera(_sliceDrawData, viewportSize);
+            _sliceRenderer.Draw(
                 _sliceDrawData,
                 _camera2D,
+                viewportSize,
                 GetSliceRenderOptions(),
                 Get2DRenderStyleOptions());
 
@@ -802,6 +849,52 @@ public partial class SimulationViewer : IDisposable
         }
 
         DrawViewportBranding(_sliceViewport?.Width ?? 1, _sliceViewport?.Height ?? 1);
+    }
+
+    /// <summary>
+    ///     Sets <see cref="_camera2D" /> for this frame: it fits the plane, frames a requested chunk, or keeps the
+    ///     centre and zoom a person chose.
+    /// </summary>
+    private void UpdateSliceCamera(SimulationSliceDrawData slice, Vector2 viewportSize)
+    {
+        const float margin = 0.5f;
+        if (_sliceCameraPlane != (slice.Width, slice.Height, slice.Axis))
+        {
+            _sliceCameraPlane = (slice.Width, slice.Height, slice.Axis);
+            _sliceCameraFit = true;
+        }
+
+        float fitZoom = Math.Max(
+            0.001f,
+            Math.Min(
+                viewportSize.X / (slice.Width + margin * 2f),
+                viewportSize.Y / (slice.Height + margin * 2f)));
+
+        if (_sliceFrameChunk is { } framed)
+        {
+            _sliceFrameChunk = null;
+            var (u, v, width, height) = slice.GetFootprint(framed);
+            _sliceCameraCenter = new Vector2(u + width * 0.5f, slice.Height - v - height * 0.5f);
+            _sliceCameraZoom = Math.Max(
+                0.001f,
+                Math.Min(
+                    viewportSize.X / (width + margin * 2f),
+                    viewportSize.Y / (height + margin * 2f)));
+
+            _sliceCameraFit = false;
+        }
+
+        if (_sliceCameraFit)
+        {
+            _sliceCameraCenter = new Vector2(slice.Width * 0.5f, slice.Height * 0.5f);
+            _sliceCameraZoom = fitZoom;
+        }
+
+        _sliceCameraZoom = Math.Clamp(_sliceCameraZoom, fitZoom * 0.25f, MaxSliceZoom);
+        _camera2D.Offset = viewportSize * 0.5f;
+        _camera2D.Target = _sliceCameraCenter;
+        _camera2D.Rotation = 0f;
+        _camera2D.Zoom = _sliceCameraZoom;
     }
 
     private void DrawViewportBranding(int viewportWidth, int viewportHeight)
@@ -895,13 +988,9 @@ public partial class SimulationViewer : IDisposable
         }
 
         var viewport = _sliceViewport;
-        float aspectRatio = viewport.Width / (float)Math.Max(viewport.Height, 1);
+        HandleSliceCameraInput(viewport);
         if (viewport.IsHovered &&
-            _sliceDrawData.TryPickNormalized(
-                viewport.NormalizedMousePosition.X,
-                viewport.NormalizedMousePosition.Y,
-                aspectRatio,
-                out var cell))
+            TryPickSliceCell(viewport, _sliceDrawData, out var cell))
         {
             _hoveredSliceCell = cell;
         }
@@ -909,6 +998,68 @@ public partial class SimulationViewer : IDisposable
         HandleVoxelPointer(viewport, _hoveredSliceCell?.Address, 2);
 
         RebuildHighlights();
+    }
+
+    /// <summary>
+    ///     Finds the slice cell under the pointer with the camera the slice was drawn with.
+    /// </summary>
+    private bool TryPickSliceCell(
+        SimulationViewport viewport,
+        SimulationSliceDrawData slice,
+        out SliceCellDrawData cell)
+    {
+        var screen = new Vector2(
+            viewport.NormalizedMousePosition.X * viewport.Width,
+            (1f - viewport.NormalizedMousePosition.Y) * viewport.Height);
+
+        var world = Raylib.GetScreenToWorld2D(screen, _camera2D);
+        int u = (int)MathF.Floor(world.X);
+        int v = slice.Height - 1 - (int)MathF.Floor(world.Y);
+        return slice.TryGetCell(u, v, out cell);
+    }
+
+    /// <summary>
+    ///     Zooms the slice camera with the wheel around the pointer and pans it with the middle button. The left
+    ///     button stays free for selection and painting.
+    /// </summary>
+    private void HandleSliceCameraInput(SimulationViewport viewport)
+    {
+        bool middleDown = Raylib.IsMouseButtonDown(MouseButton.Middle);
+        if (middleDown && (viewport.IsHovered || _sliceIsPanning))
+        {
+            _sliceIsPanning = true;
+            var delta = Raylib.GetMouseDelta();
+            if (delta != Vector2.Zero)
+            {
+                _sliceCameraCenter -= delta / _sliceCameraZoom;
+                _sliceCameraFit = false;
+                RequestNextFrame();
+            }
+        }
+        else
+        {
+            _sliceIsPanning = false;
+        }
+
+        float wheel = viewport.IsHovered ? Raylib.GetMouseWheelMove() : 0f;
+        if (wheel == 0f)
+            return;
+
+        var screen = new Vector2(
+            viewport.NormalizedMousePosition.X * viewport.Width,
+            (1f - viewport.NormalizedMousePosition.Y) * viewport.Height);
+
+        // The picking code reads _camera2D after this call, so the zoom is applied to a copy.
+        var zoomed = _camera2D;
+        var before = Raylib.GetScreenToWorld2D(screen, zoomed);
+        _sliceCameraZoom = Math.Clamp(_sliceCameraZoom * MathF.Pow(1.2f, wheel), 0.001f, MaxSliceZoom);
+        zoomed.Zoom = _sliceCameraZoom;
+        var after = Raylib.GetScreenToWorld2D(screen, zoomed);
+
+        // Keep the world point under the pointer fixed.
+        _sliceCameraCenter += before - after;
+        _sliceCameraFit = false;
+        RequestNextFrame();
     }
 
     private SliceRenderOptions GetSliceRenderOptions()
@@ -921,7 +1072,9 @@ public partial class SimulationViewer : IDisposable
         return new Render3DStyleOptions(
             _show3DChunkOutlines,
             _show3DVoxelOutlines,
-            _transparent3DVoxels);
+            _transparent3DVoxels,
+            _show3DVelocityArrows,
+            _velocityArrowScaleSeconds);
     }
 
     private Render2DStyleOptions Get2DRenderStyleOptions()
@@ -929,7 +1082,22 @@ public partial class SimulationViewer : IDisposable
         return new Render2DStyleOptions(
             _show2DChunkOutlines,
             _show2DVoxelOutlines,
-            _transparent2DVoxels);
+            _transparent2DVoxels,
+            _show2DVelocityArrows,
+            _velocityArrowScaleSeconds);
+    }
+
+    /// <summary>
+    ///     Fields the visualization needs, plus velocity whenever either viewport draws arrows: the arrows read
+    ///     <see cref="VoxelDrawData.VelocityX" /> and friends, which are NaN unless the snapshot carried them.
+    /// </summary>
+    private AtmosChunkSnapshotFields GetRequiredSnapshotFields()
+    {
+        var fields = _frameBuilder?.GetRequiredSnapshotFields(_currentVisualizationId) ?? AtmosChunkSnapshotFields.All;
+        if (_show3DVelocityArrows || _show2DVelocityArrows)
+            fields |= AtmosChunkSnapshotFields.Velocity;
+
+        return fields;
     }
 
     private void RebuildHighlights()
@@ -972,10 +1140,5 @@ public partial class SimulationViewer : IDisposable
         bool IsAvailable,
         AtmosVoxelSnapshot Snapshot);
 
-    private readonly record struct SliceProjectionKey(
-        ChunkIdentity Chunk,
-        ulong TopologyVersion,
-        ulong StyleVersion,
-        SliceAxis Axis,
-        int SliceIndex);
+
 }

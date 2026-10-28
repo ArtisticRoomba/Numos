@@ -4,8 +4,8 @@ namespace Numos.API;
 ///     Mutable, simulation-owned state for a standalone <see cref="GasMixture" />.
 /// </summary>
 /// <remarks>
-///     Voxel mixtures do not use this type as backing storage. They are captured into an instance for a
-///     transaction, then written back to the kernel as an atomic replacement.
+///     Voxel mixtures do not use this type as backing storage. Numos captures a voxel into an instance for a
+///     transaction, then writes it back to the kernel as an atomic replacement.
 /// </remarks>
 internal sealed class GasMixtureState
 {

@@ -33,8 +33,8 @@ public static class AtmosWorldSolverDangerousExtensions
     /// <remarks>
     ///     <para>
     ///         Unlike <see cref="AtmosSimulationDangerousExtensions.Dangerous" />, this takes no simulation lock, so it
-    ///         works from worker threads inside a callback. The tick is checked once, here; the returned view is not
-    ///         checked again, so don't use it after the callback returns.
+    ///         works from worker threads inside a callback. This call checks the tick once. The returned view is not
+    ///         checked again, so do not use it after the callback returns.
     ///     </para>
     ///     <para>
     ///         Writes are not recorded and stay replay-safe only when they are deterministic solver work.

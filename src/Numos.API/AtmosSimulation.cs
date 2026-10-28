@@ -2,6 +2,9 @@ using JetBrains.Annotations;
 using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.Datatypes.Snapshots;
+using Numos.CoreSim.EulerFlow;
+using Numos.CoreSim.Replay;
+using Numos.CoreSim.State;
 using Numos.Maths;
 
 namespace Numos.API;
@@ -11,13 +14,12 @@ namespace Numos.API;
 /// </summary>
 /// <remarks>
 ///     The simulation owns every chunk created through <see cref="CreateAndRegisterChunk" />. Call
-///     <see cref="Dispose" /> when the simulation is no longer needed to release those chunks and its
-///     worker-local buffers. Its <see cref="World" /> owns fixed-step time, shared physics configuration, and
-///     explicit links to other simulations. Compatibility constructors create a private one-simulation world.
-///     Unless otherwise noted, members that access kernel state throw
-///     <see cref="ObjectDisposedException" /> after disposal. A solver callback may use the simulation API and edit
-///     the solver pipeline, but it must not recursively execute or dispose the simulation or change chunk ownership
-///     during the current tick.
+///     <see cref="Dispose" /> to release those chunks and the worker-local buffers. Its <see cref="World" /> owns
+///     fixed-step time, shared physics configuration, and explicit links to other simulations. Compatibility
+///     constructors create a private one-simulation world.
+///     Unless noted otherwise, members that access kernel state throw <see cref="ObjectDisposedException" /> after
+///     disposal. A solver callback can use the simulation API and edit the solver pipeline. During the current tick
+///     it must not recursively execute the simulation, dispose it, or change chunk ownership.
 /// </remarks>
 public sealed partial class AtmosSimulation : IDisposable
 {
@@ -41,15 +43,20 @@ public sealed partial class AtmosSimulation : IDisposable
     /// <param name="chunkWidth">The number of voxels along each chunk's local x-axis.</param>
     /// <param name="chunkHeight">The number of voxels along each chunk's local y-axis.</param>
     /// <param name="chunkDepth">The number of voxels along each chunk's local z-axis.</param>
+    /// <param name="transportModel">
+    ///     Which built-in stages the private world runs to move gas between voxels. See
+    ///     <see cref="AtmosWorld(AtmosConfig, AtmosTransportModel)" />.
+    /// </param>
     /// <exception cref="ArgumentOutOfRangeException">
-    ///     A chunk dimension is zero or negative, or the combined voxel count exceeds
-    ///     <see cref="ushort.MaxValue" />.
+    ///     A chunk dimension is zero or negative, the combined voxel count exceeds
+    ///     <see cref="ushort.MaxValue" />, or <paramref name="transportModel" /> is not a defined model.
     /// </exception>
     public AtmosSimulation(
         int chunkWidth = AtmosChunkConstants.DefaultWidth,
         int chunkHeight = AtmosChunkConstants.DefaultHeight,
-        int chunkDepth = AtmosChunkConstants.DefaultDepth)
-        : this(new AtmosConfig(), chunkWidth, chunkHeight, chunkDepth)
+        int chunkDepth = AtmosChunkConstants.DefaultDepth,
+        AtmosTransportModel transportModel = AtmosTransportModel.Euler)
+        : this(new AtmosConfig(), chunkWidth, chunkHeight, chunkDepth, transportModel)
     {
     }
 
@@ -63,17 +70,22 @@ public sealed partial class AtmosSimulation : IDisposable
     /// <param name="chunkWidth">The number of voxels along each chunk's local x-axis.</param>
     /// <param name="chunkHeight">The number of voxels along each chunk's local y-axis.</param>
     /// <param name="chunkDepth">The number of voxels along each chunk's local z-axis.</param>
+    /// <param name="transportModel">
+    ///     Which built-in stages the private world runs to move gas between voxels. See
+    ///     <see cref="AtmosWorld(AtmosConfig, AtmosTransportModel)" />.
+    /// </param>
     /// <exception cref="ArgumentNullException"><paramref name="config" /> is <see langword="null" />.</exception>
     /// <exception cref="ArgumentOutOfRangeException">
-    ///     A chunk dimension is zero or negative, or the combined voxel count exceeds
-    ///     <see cref="ushort.MaxValue" />.
+    ///     A chunk dimension is zero or negative, the combined voxel count exceeds
+    ///     <see cref="ushort.MaxValue" />, or <paramref name="transportModel" /> is not a defined model.
     /// </exception>
     public AtmosSimulation(
         AtmosConfig config,
         int chunkWidth = AtmosChunkConstants.DefaultWidth,
         int chunkHeight = AtmosChunkConstants.DefaultHeight,
-        int chunkDepth = AtmosChunkConstants.DefaultDepth)
-        : this(new AtmosWorld(config), true, chunkWidth, chunkHeight, chunkDepth)
+        int chunkDepth = AtmosChunkConstants.DefaultDepth,
+        AtmosTransportModel transportModel = AtmosTransportModel.Euler)
+        : this(new AtmosWorld(config, transportModel), true, chunkWidth, chunkHeight, chunkDepth)
     {
     }
 
@@ -132,14 +144,15 @@ public sealed partial class AtmosSimulation : IDisposable
     ///     Gets this simulation's stable generational identifier within <see cref="World" />.
     /// </summary>
     [PublicAPI]
+    [NumosSerialize("Simulation")]
     public AtmosSimulationId Id { get; }
 
     /// <summary>
     ///     Gets the fixed dimensions used by every chunk owned by this simulation.
     /// </summary>
     /// <remarks>
-    ///     Simulations in the same <see cref="AtmosWorld" /> may use different chunk dimensions.
-    ///     The dimensions cannot change after the simulation has been created.
+    ///     Simulations in the same <see cref="AtmosWorld" /> can use different chunk dimensions.
+    ///     The dimensions cannot change after construction.
     /// </remarks>
     /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
     [PublicAPI]
@@ -151,6 +164,12 @@ public sealed partial class AtmosSimulation : IDisposable
             return new Int3(_chunkWidth, _chunkHeight, _chunkDepth);
         }
     }
+
+    /// <summary>
+    ///     The simulation-owned grid state: chunk data and rollback solver arrays.
+    /// </summary>
+    [NumosSerialize("Checkpoint")]
+    internal AtmosSimulationCheckpoint KernelCheckpoint => _kernel.CaptureCheckpoint();
 
     /// <summary>
     ///     Kernel accessor for the dangerous API.
@@ -217,8 +236,8 @@ public sealed partial class AtmosSimulation : IDisposable
     ///     Gets the owning world's completed fixed-tick count.
     /// </summary>
     /// <remarks>
-    ///     A simulation created after its world has advanced starts at the current world count. Both
-    ///     <see cref="Update(float)" /> and <see cref="Tick" /> advance every simulation in that world together.
+    ///     A simulation created after its world has advanced starts at the current world count.
+    ///     <see cref="Update(float)" /> and <see cref="Tick" /> both advance every simulation in that world.
     /// </remarks>
     /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
     [PublicAPI]
@@ -232,14 +251,14 @@ public sealed partial class AtmosSimulation : IDisposable
     }
 
     /// <summary>
-    ///     Gets the high-resolution timestamp ticks spent processing cross-chunk boundary flow during the
-    ///     latest call to <see cref="Update(float)" />.
+    ///     Gets the timestamp ticks spent on cross-chunk boundary flow during the latest call to
+    ///     <see cref="Update(float)" />.
     /// </summary>
     /// <remarks>
-    ///     This is a profiling counter measured with <see cref="System.Diagnostics.Stopwatch.GetTimestamp" />,
-    ///     not a simulation-tick count or a duration in <see cref="TimeSpan" /> ticks. Convert it using
-    ///     <see cref="System.Diagnostics.Stopwatch.Frequency" />. The value is the total across all fixed steps
-    ///     processed by that update. Direct <see cref="Tick" /> calls add to this value until the next update resets it.
+    ///     This profiling counter comes from <see cref="System.Diagnostics.Stopwatch.GetTimestamp" />. It is neither a
+    ///     simulation-tick count nor a duration in <see cref="TimeSpan" /> ticks. Convert it using
+    ///     <see cref="System.Diagnostics.Stopwatch.Frequency" />. The value is the total across all fixed steps in
+    ///     that update. Direct <see cref="Tick" /> calls add to it until the next update resets it.
     /// </remarks>
     /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
     [PublicAPI]
@@ -249,6 +268,37 @@ public sealed partial class AtmosSimulation : IDisposable
         {
             ThrowIfDisposed();
             return _kernel.LastBoundaryTicks;
+        }
+    }
+
+    /// <summary>
+    ///     Gets what the <see cref="AtmosBuiltInSolvers.EulerFlow" /> stage did to this simulation during the latest
+    ///     tick.
+    /// </summary>
+    /// <remarks>
+    ///     A measurement for profiling and tuning, not simulation state: it is not checkpointed, a restore resets it
+    ///     to all zeros, and it stays all zeros while the pipeline runs the legacy transport model
+    ///     (<see cref="AtmosTransportModel.Legacy" />) or the stage is disabled. The substep count is the number to
+    ///     watch: it scales with the fastest signal in the simulation, and
+    ///     <see cref="AtmosFlowDiagnostics.SubstepCapEngaged" /> says when
+    ///     <see cref="EulerFlowConfig.MaxSubstepsPerTick" /> cut a tick short.
+    /// </remarks>
+    /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
+    /// <example>
+    ///     <code>
+    /// simulation.Tick();
+    /// AtmosFlowDiagnostics flow = simulation.LastFlowDiagnostics;
+    /// if (flow.SubstepCapEngaged)
+    ///     Log($"flow fell behind: {flow.Substeps} substeps covered {flow.SimulatedSeconds:F4} s");
+    ///     </code>
+    /// </example>
+    [PublicAPI]
+    public AtmosFlowDiagnostics LastFlowDiagnostics
+    {
+        get
+        {
+            ThrowIfDisposed();
+            return _kernel.LastFlowDiagnostics;
         }
     }
 
@@ -295,10 +345,10 @@ public sealed partial class AtmosSimulation : IDisposable
     /// </summary>
     /// <param name="elapsedSeconds">Elapsed real time, in seconds, since the previous update.</param>
     /// <remarks>
-    ///     Fractions of a fixed step are retained for later calls. To prevent an unbounded catch-up loop, one
-    ///     update processes at most five fixed steps and discards time beyond that backlog limit. If the world owns
-    ///     multiple simulations, this method advances all of them; prefer calling <see cref="AtmosWorld.Update" />
-    ///     directly in that case.
+    ///     Fractions of a fixed step carry over to later calls. One update processes at most five fixed steps and
+    ///     discards time beyond that backlog limit, so a long stall cannot start an unbounded catch-up loop.
+    ///     This method advances every simulation in the world. When the world owns several simulations, call
+    ///     <see cref="AtmosWorld.Update" /> directly.
     /// </remarks>
     /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
     /// <exception cref="InvalidOperationException">Called recursively from a solver callback.</exception>
@@ -317,10 +367,10 @@ public sealed partial class AtmosSimulation : IDisposable
     ///     The editable configuration to copy and use for this update and subsequent simulation operations.
     /// </param>
     /// <remarks>
-    ///     The configuration is shared by every simulation in the owning <see cref="AtmosWorld" />: this replaces the
-    ///     single world-wide configuration, not a per-simulation override, and the subsequent tick advances every
-    ///     simulation the world owns. Prefer <see cref="AtmosWorld.SetAtmosConfig" /> and <see cref="AtmosWorld.Update" />
-    ///     directly when the world owns multiple simulations.
+    ///     This replaces the single world-wide configuration, so it applies to every simulation in the owning
+    ///     <see cref="AtmosWorld" />. The tick that follows also advances every simulation in the world.
+    ///     When the world owns several simulations, call <see cref="AtmosWorld.SetAtmosConfig" /> and
+    ///     <see cref="AtmosWorld.Update" /> directly.
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="config" /> is <see langword="null" />.</exception>
     /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
@@ -363,9 +413,9 @@ public sealed partial class AtmosSimulation : IDisposable
     /// </param>
     /// <returns>A lightweight handle that identifies the new chunk to this facade.</returns>
     /// <remarks>
-    ///     The simulation owns the new chunk. A handle identifies its grid position; it does not provide direct
-    ///     access to mutable kernel state. Registering the chunk wakes sleeping face neighbors so they can react
-    ///     to the new boundary on the next simulation tick.
+    ///     The simulation owns the new chunk. A handle identifies its grid position and gives no direct access to
+    ///     mutable kernel state. Registering the chunk wakes sleeping face neighbors, so they react to the new
+    ///     boundary on the next tick.
     /// </remarks>
     /// <exception cref="InvalidOperationException">
     ///     A chunk is already registered at <paramref name="position" />, or this is called from a solver callback.
@@ -385,8 +435,8 @@ public sealed partial class AtmosSimulation : IDisposable
     /// <param name="chunk">A handle identifying the chunk-grid position to remove.</param>
     /// <returns><see langword="true" /> if a chunk was removed; otherwise, <see langword="false" />.</returns>
     /// <remarks>
-    ///     Because handles identify positions, a handle from another simulation can remove a chunk at the same
-    ///     position. Callers are responsible for keeping handles associated with their owning simulation.
+    ///     Handles identify positions, so a handle from another simulation removes the chunk at the same position.
+    ///     Callers must keep each handle with its owning simulation.
     /// </remarks>
     /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
     /// <exception cref="InvalidOperationException">Called from a solver callback.</exception>
@@ -429,8 +479,8 @@ public sealed partial class AtmosSimulation : IDisposable
     ///     Returns handles for every chunk currently registered with the simulation.
     /// </summary>
     /// <remarks>
-    ///     The returned array is detached from the simulation. It can be used by retained consumers to
-    ///     discover additions and removals without maintaining a second chunk registry.
+    ///     The returned array is detached from the simulation. A retained consumer can compare it between calls to
+    ///     find added and removed chunks without keeping a second chunk registry.
     /// </remarks>
     /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
     [PublicAPI]
@@ -529,9 +579,8 @@ public sealed partial class AtmosSimulation : IDisposable
     ///     Returns detached values for one voxel only if its chunk is still at an expected version.
     /// </summary>
     /// <remarks>
-    ///     The version comparison and scalar/gas copy occur under the simulation state gate. A
-    ///     mismatch returns without allocating a gas array, which makes this suitable for retained
-    ///     frame tooltips.
+    ///     The version comparison and the scalar and gas copy run under the simulation state gate. A mismatch
+    ///     returns without allocating a gas array, so this suits retained frame tooltips.
     /// </remarks>
     /// <param name="chunk">The chunk containing the voxel.</param>
     /// <param name="localVoxelIndex">The voxel's flat local index.</param>
@@ -555,11 +604,72 @@ public sealed partial class AtmosSimulation : IDisposable
     }
 
     /// <summary>
+    ///     Returns the bulk velocity of the gas in one voxel addressed by its flat local index.
+    /// </summary>
+    /// <param name="chunk">The chunk containing the voxel.</param>
+    /// <param name="localVoxelIndex">The voxel's zero-based index in the chunk's flattened storage.</param>
+    /// <returns>The voxel's velocity in metres per second (m/s), or zero for a vacuum voxel.</returns>
+    /// <remarks>
+    ///     <para>
+    ///         Velocity is not stored. It is the voxel's total momentum (see
+    ///         <see cref="SetVoxelMomentum(AtmosChunkHandle, ushort, float, float, float)" />) divided by the mass of
+    ///         the gas currently in it, where each gas weighs its registered <see cref="GasProperties.MolarMass" /> or
+    ///         <see cref="AtmosConfig.ReferenceMolarMass" /> when none is set. Adding gas at rest therefore lowers
+    ///         the velocity without any momentum write.
+    ///     </para>
+    ///     <para>
+    ///         The read happens under the simulation state gate, so it is consistent with the voxel's gas amounts at
+    ///         that instant. For a whole chunk, request <see cref="AtmosChunkSnapshotFields.Velocity" /> through
+    ///         <see cref="TryGetChunkSnapshot(AtmosChunkHandle, AtmosChunkVersion, AtmosChunkSnapshotFields, out AtmosChunkSnapshot)" />
+    ///         instead of calling this per voxel.
+    ///     </para>
+    /// </remarks>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="localVoxelIndex" /> is outside the chunk.</exception>
+    /// <exception cref="KeyNotFoundException">No chunk is registered at the handle's position.</exception>
+    /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
+    /// <example>
+    ///     Read back a velocity set through momentum:
+    ///     <code>
+    /// simulation.AddGasToVoxel(chunk, 0, "Air", 10f, 293.15f);
+    /// float mass = 10f * airMolarMass; // kg, from the registry's kg/mol
+    /// simulation.SetVoxelMomentum(chunk, 0, mass * 2f, 0f, 0f);
+    /// AtmosVoxelVelocity velocity = simulation.GetVoxelVelocity(chunk, 0); // (2, 0, 0) m/s
+    ///     </code>
+    /// </example>
+    [PublicAPI]
+    public AtmosVoxelVelocity GetVoxelVelocity(AtmosChunkHandle chunk, ushort localVoxelIndex)
+    {
+        ThrowIfDisposed();
+        _kernel.GetVoxelVelocity(chunk.Position, localVoxelIndex, out float x, out float y, out float z);
+        return new AtmosVoxelVelocity(x, y, z);
+    }
+
+    /// <summary>
+    ///     Returns the bulk velocity of the gas in one voxel addressed by local coordinates.
+    /// </summary>
+    /// <param name="chunk">The chunk containing the voxel.</param>
+    /// <param name="x">The zero-based local x-coordinate.</param>
+    /// <param name="y">The zero-based local y-coordinate.</param>
+    /// <param name="z">The zero-based local z-coordinate.</param>
+    /// <returns>The voxel's velocity in metres per second (m/s), or zero for a vacuum voxel.</returns>
+    /// <remarks>Same contract as <see cref="GetVoxelVelocity(AtmosChunkHandle, ushort)" />.</remarks>
+    /// <exception cref="ArgumentOutOfRangeException">A local coordinate is outside the chunk.</exception>
+    /// <exception cref="KeyNotFoundException">No chunk is registered at the handle's position.</exception>
+    /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
+    [PublicAPI]
+    public AtmosVoxelVelocity GetVoxelVelocity(AtmosChunkHandle chunk, int x, int y, int z)
+    {
+        ThrowIfDisposed();
+        _kernel.GetVoxelVelocity(chunk.Position, x, y, z, out float velocityX, out float velocityY, out float velocityZ);
+        return new AtmosVoxelVelocity(velocityX, velocityY, velocityZ);
+    }
+
+    /// <summary>
     ///     Returns a detached snapshot when a chunk changed or holds rollback chunk field storage.
     /// </summary>
     /// <remarks>
-    ///     Writes to <see cref="ChunkField{T}" /> storage cannot advance chunk revisions. Chunks holding rollback fields
-    ///     are therefore copied on every request; use the field-selecting overload to retain revision filtering for
+    ///     Writes to <see cref="ChunkField{T}" /> storage cannot advance chunk revisions. Numos therefore copies chunks
+    ///     that hold rollback fields on every request. The field-selecting overload keeps revision filtering for
     ///     physical fields.
     /// </remarks>
     /// <param name="chunk">A handle identifying the chunk to inspect.</param>
@@ -582,10 +692,10 @@ public sealed partial class AtmosSimulation : IDisposable
     ///     Returns selected detached fields when a chunk changed or the request includes captured solver arrays.
     /// </summary>
     /// <remarks>
-    ///     Version comparison and field copies are serialized with simulation ticks and direct API mutations,
-    ///     so a successful result is a consistent snapshot for the returned version. Pass a default known
-    ///     version when expanding a cached snapshot with additional fields.
-    ///     Requests including <see cref="AtmosChunkSnapshotFields.SolverArrays" /> copy chunks holding rollback
+    ///     Version comparison and field copies are serialized with simulation ticks and direct API mutations. A
+    ///     successful result is therefore a consistent snapshot for the returned version. Pass a default known
+    ///     version when expanding a cached snapshot with more fields.
+    ///     A request that includes <see cref="AtmosChunkSnapshotFields.SolverArrays" /> copies chunks holding rollback
     ///     <see cref="ChunkField{T}" /> storage on every call, because field writes cannot update chunk revisions.
     /// </remarks>
     /// <param name="chunk">A handle identifying the chunk to inspect.</param>
@@ -608,13 +718,13 @@ public sealed partial class AtmosSimulation : IDisposable
     }
 
     /// <summary>
-    ///     Captures all changed requests from one coherent simulation tick/state.
+    ///     Captures all changed requests from one coherent simulation state.
     /// </summary>
     /// <remarks>
-    ///     Version checks and requested field copies occur under one state gate. Handles that were
-    ///     unregistered after a detached handle enumeration are omitted. Duplicate positions are rejected.
-    ///     Requests including rollback chunk field storage are copied even when the known version matches, since
-    ///     field writes cannot advance chunk revisions.
+    ///     Version checks and requested field copies run under one state gate. The result omits handles that were
+    ///     unregistered after a detached handle enumeration. Duplicate positions are rejected.
+    ///     Requests that include rollback chunk field storage are copied even when the known version matches,
+    ///     because field writes cannot advance chunk revisions.
     /// </remarks>
     /// <param name="requests">Conditional per-chunk field requests.</param>
     /// <returns>The coherent tick count and changed detached chunk snapshots.</returns>
@@ -652,9 +762,9 @@ public sealed partial class AtmosSimulation : IDisposable
     /// <param name="chunk">A handle identifying the target chunk.</param>
     /// <param name="classification">The air, solid, or void classification to assign.</param>
     /// <remarks>
-    ///     X and Y faces are always included. Z faces are included only when the chunk has more than one
-    ///     layer, so a two-dimensional chunk receives a perimeter instead of becoming entirely classified.
-    ///     The active-voxel topology is rebuilt once after the bulk update.
+    ///     X and Y faces are always included. Z faces are included only when the chunk has more than one layer, so a
+    ///     two-dimensional chunk gets a perimeter and is not classified entirely.
+    ///     Numos rebuilds the active-voxel topology once after the bulk update.
     /// </remarks>
     /// <exception cref="KeyNotFoundException">No chunk is registered at the handle's position.</exception>
     /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
@@ -713,10 +823,10 @@ public sealed partial class AtmosSimulation : IDisposable
     /// <param name="localVoxelIndex">The voxel's zero-based index in the chunk's flattened storage.</param>
     /// <param name="temperature">The raw temperature value to store, in kelvins.</param>
     /// <remarks>
-    ///     The supplied value is stored without validation or eager normalization. Snapshots expose that raw value
-    ///     until a later operation overwrites it. The pressure cache is refreshed immediately; pressure and
-    ///     sensible-energy calculations treat a gas-bearing voxel's non-finite or nonpositive stored value as
-    ///     <see cref="AtmosConfig.DefaultTemperatureFallback" /> for that calculation.
+    ///     Numos stores the value without validation or normalization. Snapshots expose that raw value until a later
+    ///     operation overwrites it. The pressure cache refreshes immediately.
+    ///     Pressure and sensible-energy calculations use <see cref="AtmosConfig.DefaultTemperatureFallback" /> when a
+    ///     gas-bearing voxel's stored value is non-finite or nonpositive.
     /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="localVoxelIndex" /> is outside the chunk.</exception>
     /// <exception cref="KeyNotFoundException">No chunk is registered at the handle's position.</exception>
@@ -737,10 +847,10 @@ public sealed partial class AtmosSimulation : IDisposable
     /// <param name="z">The zero-based local z-coordinate.</param>
     /// <param name="temperature">The raw temperature value to store, in kelvins.</param>
     /// <remarks>
-    ///     The supplied value is stored without validation or eager normalization. Snapshots expose that raw value
-    ///     until a later operation overwrites it. The pressure cache is refreshed immediately; pressure and
-    ///     sensible-energy calculations treat a gas-bearing voxel's non-finite or nonpositive stored value as
-    ///     <see cref="AtmosConfig.DefaultTemperatureFallback" /> for that calculation.
+    ///     Numos stores the value without validation or normalization. Snapshots expose that raw value until a later
+    ///     operation overwrites it. The pressure cache refreshes immediately.
+    ///     Pressure and sensible-energy calculations use <see cref="AtmosConfig.DefaultTemperatureFallback" /> when a
+    ///     gas-bearing voxel's stored value is non-finite or nonpositive.
     /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException">A local coordinate is outside the chunk.</exception>
     /// <exception cref="KeyNotFoundException">No chunk is registered at the handle's position.</exception>
@@ -753,6 +863,86 @@ public sealed partial class AtmosSimulation : IDisposable
     }
 
     /// <summary>
+    ///     Stores the total momentum of the gas in one voxel addressed by its flat local index and wakes its chunk.
+    /// </summary>
+    /// <param name="chunk">A handle identifying the target chunk.</param>
+    /// <param name="localVoxelIndex">The voxel's zero-based index in the chunk's flattened storage.</param>
+    /// <param name="momentumX">Total x-momentum of the voxel's gas, in kilogram metres per second (kg·m/s).</param>
+    /// <param name="momentumY">Total y-momentum of the voxel's gas, in kilogram metres per second (kg·m/s).</param>
+    /// <param name="momentumZ">Total z-momentum of the voxel's gas, in kilogram metres per second (kg·m/s).</param>
+    /// <remarks>
+    ///     <para>
+    ///         The value is the momentum of everything in the voxel, not a velocity: to set a velocity, multiply it
+    ///         by the voxel's gas mass. Adding gas later keeps the stored momentum and lowers the implied velocity.
+    ///     </para>
+    ///     <para>
+    ///         A write to a solid or void voxel, or to a voxel that currently holds no gas, is ignored and not
+    ///         recorded, because an empty voxel always reads as zero momentum. Inject gas first, then set momentum.
+    ///         Removing the last of a voxel's gas later zeroes its momentum again.
+    ///     </para>
+    ///     <para>
+    ///         Non-finite components are rejected before any of that, like a non-finite amount passed to
+    ///         <see cref="AddGasToVoxel(AtmosChunkHandle, ushort, int, float, float)" />: NaN or infinite momentum
+    ///         would poison every voxel the flow solver pushes it into.
+    ///     </para>
+    ///     <para>
+    ///         While the world is recording, a successful write is recorded as an external operation. A call made
+    ///         from inside a solver callback is applied but not recorded, since it is derived work that replay
+    ///         regenerates.
+    ///     </para>
+    /// </remarks>
+    /// <exception cref="ArgumentOutOfRangeException">
+    ///     <paramref name="localVoxelIndex" /> is outside the chunk, or a momentum component is NaN or infinite.
+    /// </exception>
+    /// <exception cref="KeyNotFoundException">No chunk is registered at the handle's position.</exception>
+    /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
+    /// <example>
+    ///     Give 10 mol of air in voxel 0 a velocity of 2 m/s along +x:
+    ///     <code>
+    /// simulation.AddGasToVoxel(chunk, 0, "Air", 10f, 293.15f);
+    /// float mass = 10f * airMolarMass; // kg, from the registry's kg/mol
+    /// simulation.SetVoxelMomentum(chunk, 0, mass * 2f, 0f, 0f);
+    ///     </code>
+    /// </example>
+    [PublicAPI]
+    public void SetVoxelMomentum(
+        AtmosChunkHandle chunk, ushort localVoxelIndex,
+        float momentumX, float momentumY, float momentumZ)
+    {
+        ThrowIfDisposed();
+        _kernel.SetVoxelMomentum(chunk.Position, localVoxelIndex, momentumX, momentumY, momentumZ);
+    }
+
+    /// <summary>
+    ///     Stores the total momentum of the gas in one voxel addressed by local coordinates and wakes its chunk.
+    /// </summary>
+    /// <param name="chunk">A handle identifying the target chunk.</param>
+    /// <param name="x">The zero-based local x-coordinate.</param>
+    /// <param name="y">The zero-based local y-coordinate.</param>
+    /// <param name="z">The zero-based local z-coordinate.</param>
+    /// <param name="momentumX">Total x-momentum of the voxel's gas, in kilogram metres per second (kg·m/s).</param>
+    /// <param name="momentumY">Total y-momentum of the voxel's gas, in kilogram metres per second (kg·m/s).</param>
+    /// <param name="momentumZ">Total z-momentum of the voxel's gas, in kilogram metres per second (kg·m/s).</param>
+    /// <remarks>
+    ///     Same contract as <see cref="SetVoxelMomentum(AtmosChunkHandle, ushort, float, float, float)" />: writes to
+    ///     solid, void, or gasless voxels are ignored and not recorded, non-finite components are rejected, and
+    ///     successful writes outside a solver tick are recorded as external operations.
+    /// </remarks>
+    /// <exception cref="ArgumentOutOfRangeException">
+    ///     A local coordinate is outside the chunk, or a momentum component is NaN or infinite.
+    /// </exception>
+    /// <exception cref="KeyNotFoundException">No chunk is registered at the handle's position.</exception>
+    /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
+    [PublicAPI]
+    public void SetVoxelMomentum(
+        AtmosChunkHandle chunk, int x, int y, int z,
+        float momentumX, float momentumY, float momentumZ)
+    {
+        ThrowIfDisposed();
+        _kernel.SetVoxelMomentum(chunk.Position, x, y, z, momentumX, momentumY, momentumZ);
+    }
+
+    /// <summary>
     ///     Adds gas to one voxel addressed by its flat local index and wakes its chunk.
     /// </summary>
     /// <param name="chunk">A handle identifying the target chunk.</param>
@@ -761,13 +951,14 @@ public sealed partial class AtmosSimulation : IDisposable
     /// <param name="moles">The amount of gas to add, in moles.</param>
     /// <param name="temperature">The temperature of the added gas, in kelvins.</param>
     /// <remarks>
-    ///     Injection into a solid or void voxel is silently ignored and does not wake the chunk. The added gas carries
-    ///     sensible internal energy according to its molar heat capacity at constant volume, and the stored
-    ///     temperature is updated by energy balance. Before blending, the heat capacity of gas already in the voxel is
-    ///     recomputed from the current <see cref="Config" />. A non-finite or nonpositive configured heat capacity
-    ///     uses <see cref="AtmosConfig.DefaultMolarHeatCapacityAtConstantVolume" />. When gas is already present, a
-    ///     non-finite or nonpositive stored temperature contributes prior sensible energy at
-    ///     <see cref="AtmosConfig.DefaultTemperatureFallback" />. An empty voxel instead adopts the incoming
+    ///     Injection into a solid or void voxel is silently ignored and does not wake the chunk.
+    ///     The added gas carries sensible internal energy from its molar heat capacity at constant volume. Numos
+    ///     updates the stored temperature by energy balance.
+    ///     Before blending, Numos recomputes the heat capacity of the gas already in the voxel from the current
+    ///     <see cref="Config" />. A non-finite or nonpositive configured heat capacity uses
+    ///     <see cref="AtmosConfig.DefaultMolarHeatCapacityAtConstantVolume" />.
+    ///     When gas is already present and the stored temperature is non-finite or nonpositive, the prior sensible
+    ///     energy uses <see cref="AtmosConfig.DefaultTemperatureFallback" />. An empty voxel adopts the incoming
     ///     temperature.
     /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="localVoxelIndex" /> is outside the chunk.</exception>
@@ -800,13 +991,14 @@ public sealed partial class AtmosSimulation : IDisposable
     /// <param name="moles">The amount of gas to add, in moles.</param>
     /// <param name="temperature">The temperature of the added gas, in kelvins.</param>
     /// <remarks>
-    ///     Injection into a solid or void voxel is silently ignored and does not wake the chunk. The added gas carries
-    ///     sensible internal energy according to its molar heat capacity at constant volume, and the stored
-    ///     temperature is updated by energy balance. Before blending, the heat capacity of gas already in the voxel is
-    ///     recomputed from the current <see cref="Config" />. A non-finite or nonpositive configured heat capacity
-    ///     uses <see cref="AtmosConfig.DefaultMolarHeatCapacityAtConstantVolume" />. When gas is already present, a
-    ///     non-finite or nonpositive stored temperature contributes prior sensible energy at
-    ///     <see cref="AtmosConfig.DefaultTemperatureFallback" />. An empty voxel instead adopts the incoming
+    ///     Injection into a solid or void voxel is silently ignored and does not wake the chunk.
+    ///     The added gas carries sensible internal energy from its molar heat capacity at constant volume. Numos
+    ///     updates the stored temperature by energy balance.
+    ///     Before blending, Numos recomputes the heat capacity of the gas already in the voxel from the current
+    ///     <see cref="Config" />. A non-finite or nonpositive configured heat capacity uses
+    ///     <see cref="AtmosConfig.DefaultMolarHeatCapacityAtConstantVolume" />.
+    ///     When gas is already present and the stored temperature is non-finite or nonpositive, the prior sensible
+    ///     energy uses <see cref="AtmosConfig.DefaultTemperatureFallback" />. An empty voxel adopts the incoming
     ///     temperature.
     /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException">A local coordinate is outside the chunk.</exception>
@@ -838,8 +1030,8 @@ public sealed partial class AtmosSimulation : IDisposable
     /// <param name="moles">The positive, finite amount to add, in moles.</param>
     /// <param name="temperature">The nonnegative, finite incoming temperature, in kelvins.</param>
     /// <remarks>
-    ///     Resolves <paramref name="gasName" /> and forwards to the gas-ID overload, so solid and void voxels ignore
-    ///     the injection and incoming sensible energy is mixed with the voxel's gas the same way.
+    ///     Resolves <paramref name="gasName" /> and forwards to the gas-ID overload. Solid and void voxels ignore the
+    ///     injection, and the incoming sensible energy mixes with the voxel's gas the same way.
     /// </remarks>
     /// <exception cref="KeyNotFoundException">The gas name or chunk is not registered.</exception>
     /// <exception cref="ArgumentException">The gas name is null or empty.</exception>
@@ -857,6 +1049,44 @@ public sealed partial class AtmosSimulation : IDisposable
     }
 
     /// <summary>
+    ///     Adds a one tick ignition source to a voxel and wakes its chunk.
+    /// </summary>
+    /// <param name="chunk">The target chunk.</param>
+    /// <param name="x">The zero-based local x-coordinate.</param>
+    /// <param name="y">The zero-based local y-coordinate.</param>
+    /// <param name="z">The zero-based local z-coordinate.</param>
+    /// <param name="temperature">The temperature of the ignition source</param>
+    /// <param name="volume">The volume of the ignition source</param>
+    [PublicAPI]
+    public void IgniteVoxel(
+        AtmosChunkHandle chunk, int x, int y, int z, float temperature, float volume)
+    {
+        lock (_mixtureGate)
+        {
+            ThrowIfDisposed();
+            _kernel.IgniteVoxel(chunk.Position, x, y, z, temperature, volume);
+        }
+    }
+
+    /// <summary>
+    ///     Adds a one tick ignition source to a voxel and wakes its chunk.
+    /// </summary>
+    /// <param name="chunk">The target chunk.</param>
+    /// <param name="localVoxelIndex">The voxel's zero-based flat index.</param>
+    /// <param name="temperature">The temperature of the ignition source</param>
+    /// <param name="volume">The volume of the ignition source</param>
+    [PublicAPI]
+    public void IgniteVoxel(
+        AtmosChunkHandle chunk, ushort localVoxelIndex, float temperature, float volume)
+    {
+        lock (_mixtureGate)
+        {
+            ThrowIfDisposed();
+            _kernel.IgniteVoxel(chunk.Position, localVoxelIndex, temperature, volume);
+        }
+    }
+
+    /// <summary>
     ///     Adds a registered gas by name to one voxel addressed by local coordinates and wakes its chunk.
     /// </summary>
     /// <param name="chunk">The target chunk.</param>
@@ -867,8 +1097,8 @@ public sealed partial class AtmosSimulation : IDisposable
     /// <param name="moles">The positive, finite amount to add, in moles.</param>
     /// <param name="temperature">The nonnegative, finite incoming temperature, in kelvins.</param>
     /// <remarks>
-    ///     Resolves <paramref name="gasName" /> and forwards to the gas-ID overload, so solid and void voxels ignore
-    ///     the injection and incoming sensible energy is mixed with the voxel's gas the same way.
+    ///     Resolves <paramref name="gasName" /> and forwards to the gas-ID overload. Solid and void voxels ignore the
+    ///     injection, and the incoming sensible energy mixes with the voxel's gas the same way.
     /// </remarks>
     /// <exception cref="KeyNotFoundException">The gas name or chunk is not registered.</exception>
     /// <exception cref="ArgumentException">The gas name is null or empty.</exception>
@@ -916,9 +1146,9 @@ public sealed partial class AtmosSimulation : IDisposable
     ///     Runs exactly one fixed tick for every simulation in the owning <see cref="World" />.
     /// </summary>
     /// <remarks>
-    ///     This bypasses the elapsed-time accumulator. It is useful for deterministic driving and tests, and
-    ///     increments <see cref="TickCount" /> by one. Prefer <see cref="AtmosWorld.Tick" /> when the world owns
-    ///     multiple simulations.
+    ///     This bypasses the elapsed-time accumulator and increments <see cref="TickCount" /> by one. It suits
+    ///     deterministic driving and tests. When the world owns several simulations, call
+    ///     <see cref="AtmosWorld.Tick" /> directly.
     /// </remarks>
     /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
     /// <exception cref="InvalidOperationException">Called recursively from a solver callback.</exception>

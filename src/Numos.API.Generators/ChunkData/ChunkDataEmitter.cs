@@ -9,6 +9,8 @@ namespace Numos.API.Generators.ChunkData;
 /// </summary>
 internal static class ChunkDataEmitter
 {
+    internal const string ModuleInitializerHintName = "NumosChunkDataModuleInitializer.g.cs";
+
     private const string HolderName = "__NumosChunkFields";
     private const string SolverChunkType = "global::Numos.API.AtmosSolverChunk";
     private const string FlatArrayType = "global::Numos.Collections.FlatArray";
@@ -60,10 +62,11 @@ internal static class ChunkDataEmitter
 
         // Static initializer order across partial declarations is unspecified, so a backing field on the declaring
         // type could still be null when one of the user's own static initializers reads the property. The nested
-        // holder initializes on first access instead.
+        // holder initializes on first access instead. It's internal only so the module initializer can run it early.
         writer.Line();
         writer.Line(CodeWriter.GeneratedCodeAttribute);
-        writer.Line("private static class " + HolderName);
+        writer.Line(CodeWriter.EditorBrowsableNeverAttribute);
+        writer.Line("internal static class " + HolderName);
         writer.Open();
         for (int i = 0; i < members.Count; i++)
         {
@@ -80,14 +83,64 @@ internal static class ChunkDataEmitter
                 ".Register(" +
                 SymbolDisplay.FormatLiteral(model.Key!, true) +
                 ", rollback: " +
-                (model.Rollback ? "true" : "false") +
+                (model.Transient ? "false" : "true") +
                 ", length: " +
                 length +
+                (model.ClearOnSleep ? ", clearOnSleep: true" : "") +
+                (model.ClearOnVacuum ? ", clearOnVacuum: true" : "") +
                 ");");
         }
 
         writer.Close();
         writer.CloseTypeChain(type);
+    }
+
+    /// <summary>
+    ///     Writes the assembly's module initializer, which registers every <c>[ChunkData]</c> field when the assembly
+    ///     loads.
+    /// </summary>
+    /// <param name="typeDisplays">The fully qualified declaring types, in a stable order.</param>
+    /// <remarks>
+    ///     A file cannot be loaded until each saved key in it is registered. A fresh process may load one before
+    ///     anything has read the properties. Running the class constructor of the holder registers through the same
+    ///     static initializer as the lazy path, so registration happens once either way. The static constructor of the
+    ///     declaring type does not run early.
+    /// </remarks>
+    public static string EmitModuleInitializer(EquatableArray<string> typeDisplays)
+    {
+        var writer = new CodeWriter();
+        writer.Header();
+        writer.OpenModuleInitializer(
+            "Numos.API.Generated",
+            "ChunkDataModuleInitializer",
+            "RegisterChunkFields",
+            "Saved chunk fields must be registered before a file that holds them can load.");
+
+        foreach (string type in typeDisplays)
+        {
+            writer.Line(
+                "Register(typeof(" + type + "." + HolderName + "), " +
+                SymbolDisplay.FormatLiteral(type.Replace("global::", ""), true) + ");");
+        }
+
+        writer.Close();
+        writer.Line();
+        writer.Line("private static void Register(global::System.Type holder, string declaringType)");
+        writer.Open();
+        writer.Line("try");
+        writer.Open();
+        writer.Line("global::System.Runtime.CompilerServices.RuntimeHelpers.RunClassConstructor(holder.TypeHandle);");
+        writer.Close();
+        writer.Line("catch (global::System.TypeInitializationException exception) when (exception.InnerException is not null)");
+        writer.Open();
+        writer.Line("throw new global::System.InvalidOperationException(");
+        writer.Line("    \"Registering the [ChunkData] fields of '\" + declaringType + \"' failed: \" + exception.InnerException.Message,");
+        writer.Line("    exception.InnerException);");
+        writer.Close();
+        writer.Close();
+        writer.Close();
+        writer.Close();
+        return writer.ToString();
     }
 
     private static void WriteAccessorClass(

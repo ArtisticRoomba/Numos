@@ -1,5 +1,6 @@
 using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Primitives;
+using Numos.CoreSim.EulerFlow;
 using Numos.CoreSim.GasReactions;
 using Numos.Maths;
 using Numos.Serialization;
@@ -13,7 +14,7 @@ public sealed class AtmosWorldReplayTests
     public void Restore_AcceptsCompatibleInMemoryHistoryThatPortableImportRejects()
     {
         var config = CreateConfig();
-        config.SolverConfigurations = [new GasReactionConfig()];
+        config.SolverConfigurations = [new HandWrittenSettings(3)];
         using var source = new AtmosWorld(config);
         source.CreateSimulation(1, 1, 1);
         var sourceTimeline = new AtmosWorldReplayTimeline(source, 1);
@@ -32,6 +33,38 @@ public sealed class AtmosWorldReplayTests
         Assert.That(
             () => AtmosWorldReplayTimeline.Import(importedWorld, archive, 1),
             Throws.TypeOf<NotSupportedException>());
+    }
+
+    [Test]
+    public void Import_AcceptsTheBuiltInEulerFlowConfiguration()
+    {
+        var config = CreateConfig();
+        var euler = new EulerFlowConfig { CourantNumber = 0.4f, AllMachCorrection = true };
+        config.SolverConfigurations = [euler];
+        using var source = new AtmosWorld(config);
+        source.CreateSimulation(1, 1, 1);
+        var sourceTimeline = new AtmosWorldReplayTimeline(source, 1);
+        source.Tick();
+        config.SolverConfigurations = [new EulerFlowConfig(euler) { MaxVelocity = 250f }];
+        source.SetAtmosConfig(config);
+        source.Tick();
+        var archive = sourceTimeline.CaptureReplay();
+
+        Assert.That(archive.UnsupportedFeatures, Is.Empty);
+        Assert.That(archive.EnsurePortable, Throws.Nothing);
+
+        using var importedWorld = new AtmosWorld(CreateConfig());
+        var imported = AtmosWorldReplayTimeline.Import(importedWorld, archive, 1);
+        imported.ReturnToHead();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(importedWorld.ComputeStateHash(), Is.EqualTo(archive.HeadStateHash));
+            Assert.That(importedWorld.Config.TryGetSolverConfiguration(out EulerFlowConfig? restored), Is.True);
+            Assert.That(restored!.MaxVelocity, Is.EqualTo(250f));
+            Assert.That(restored.CourantNumber, Is.EqualTo(0.4f));
+            Assert.That(restored.AllMachCorrection, Is.True);
+        });
     }
 
     [Test]
@@ -105,6 +138,30 @@ public sealed class AtmosWorldReplayTests
     }
 
     [Test]
+    public void Restore_AdoptsTheCheckpointsTransportModel()
+    {
+        using var legacy = new AtmosWorld(CreateConfig(), AtmosTransportModel.Legacy);
+        var recorded = legacy.CreateSimulation(2, 1, 1);
+        var chunk = CreateOpenChunk(recorded, default);
+        recorded.AddGasToVoxel(chunk, 0, 0, 2f, 300f);
+        legacy.Tick();
+        var checkpoint = legacy.CaptureCheckpoint();
+
+        using var euler = new AtmosWorld(CreateConfig());
+        euler.CreateSimulation(2, 1, 1);
+        euler.RestoreCheckpoint(checkpoint);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(
+                euler.Solvers.Steps.Select(static step => step.Name),
+                Is.EqualTo(AtmosWorldSolverPipeline.GetDefaultLayout(AtmosTransportModel.Legacy)));
+
+            Assert.That(euler.ComputeStateHash(), Is.EqualTo(legacy.ComputeStateHash()));
+        });
+    }
+
+    [Test]
     public void WorldRecording_ReplaysSolverEnablementThroughTheWorldPipeline()
     {
         using var world = new AtmosWorld(CreateConfig());
@@ -112,18 +169,18 @@ public sealed class AtmosWorldReplayTests
         var checkpoint = world.CaptureCheckpoint();
         world.StartRecording();
 
-        world.Solvers.SetEnabled(AtmosBuiltInSolvers.Advection, false);
+        world.Solvers.SetEnabled(AtmosBuiltInSolvers.EulerFlow, false);
         world.Tick();
         var recording = world.StopRecording();
 
         Assert.That(
             recording.Operations.Single().Operation,
-            Is.EqualTo(new SetAtmosWorldSolverEnabledOperation(AtmosBuiltInSolvers.Advection, false)));
+            Is.EqualTo(new SetAtmosWorldSolverEnabledOperation(AtmosBuiltInSolvers.EulerFlow, false)));
 
         world.ReplayTo(checkpoint, recording.Operations, recording.Head);
 
         Assert.That(
-            world.Solvers.Steps.Single(step => step.Name == AtmosBuiltInSolvers.Advection).IsEnabled,
+            world.Solvers.Steps.Single(step => step.Name == AtmosBuiltInSolvers.EulerFlow).IsEnabled,
             Is.False);
     }
 
@@ -185,6 +242,18 @@ public sealed class AtmosWorldReplayTests
         Assert.That(
             () => world.CreatePortal(simulation.GetCellRef(chunk, 0), simulation.GetCellRef(chunk, 1)),
             Throws.ArgumentException);
+    }
+
+    // No [NumosSerialize] members, so it has no wire format: in-memory restore works, portable files don't.
+    private sealed record HandWrittenSettings(int Value) : IAtmosSolverConfiguration
+    {
+        public string Key => "tests/hand-written";
+
+        public IAtmosSolverConfiguration CreateSnapshot(IGasRegistry gasRegistry) => this;
+
+        public bool SemanticallyEquals(IAtmosSolverConfiguration other) => Equals(other);
+
+        public ulong ComputeStateHash() => unchecked((ulong)Value);
     }
 
     private static AtmosConfig CreateConfig()

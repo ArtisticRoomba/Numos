@@ -1,5 +1,6 @@
 using System.Numerics;
 using ImGuiNET;
+using Numos.Workbench;
 using Numos.API;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.SimDrawer;
@@ -108,7 +109,7 @@ public partial class SimulationViewer
 
     private void HandleVoxelPointer(SimulationViewport viewport, VoxelAddress? hovered, int viewportKind)
     {
-        bool canEdit = _replayTimeline?.IsInspecting != true;
+        bool canEdit = _session.Timeline?.IsInspecting != true;
         if (viewport.IsHovered && ImGui.IsMouseClicked(ImGuiMouseButton.Right) && hovered.HasValue)
         {
             if (!_selectedCells.Contains(hovered.Value))
@@ -271,16 +272,11 @@ public partial class SimulationViewer
 
     private SliceCellDrawData? FindSliceCell(VoxelAddress address)
     {
-        if (_sliceDrawData == null)
-            return null;
-
-        for (int v = 0; v < _sliceDrawData.Height; v++)
+        if (_sliceDrawData != null &&
+            _sliceDrawData.TryLocate(address, out int u, out int v) &&
+            _sliceDrawData.TryGetCell(u, v, out var cell))
         {
-            for (int u = 0; u < _sliceDrawData.Width; u++)
-            {
-                if (_sliceDrawData.TryGetCell(u, v, out var cell) && cell.Address == address)
-                    return cell;
-            }
+            return cell;
         }
 
         return null;
@@ -417,7 +413,7 @@ public partial class SimulationViewer
             return;
 
         ImGui.TextDisabled($"{_selectedCells.Count} voxel{(_selectedCells.Count == 1 ? string.Empty : "s")} selected");
-        if (_replayTimeline?.IsInspecting == true)
+        if (_session.Timeline?.IsInspecting == true)
             ImGui.BeginDisabled();
 
         RenderContextInjectionMenu();
@@ -450,7 +446,7 @@ public partial class SimulationViewer
         if (ImGui.MenuItem($"Set Temperature to {_injectionTemperature:F1} K"))
             ApplyTemperature(_selectedCells, _injectionTemperature);
 
-        if (_replayTimeline?.IsInspecting == true)
+        if (_session.Timeline?.IsInspecting == true)
             ImGui.EndDisabled();
 
         ImGui.Separator();
@@ -506,14 +502,14 @@ public partial class SimulationViewer
         if (!ImGui.BeginMenu("Inject"))
             return;
 
-        if (_config == null || _config.GasRegistry.Count == 0)
+        if (_session.Config == null || _session.Config.GasRegistry.Count == 0)
         {
             ImGui.TextDisabled("No gases registered");
             ImGui.EndMenu();
             return;
         }
 
-        for (int gasId = 0; gasId < _config.GasRegistry.Count; gasId++)
+        for (int gasId = 0; gasId < _session.Config.GasRegistry.Count; gasId++)
         {
             ImGui.PushID(gasId);
             if (ImGui.BeginMenu(FormatGas(gasId)))
@@ -552,22 +548,19 @@ public partial class SimulationViewer
     {
         ApplyVoxelMutation(
             addresses,
-            address => _simulation!.SetVoxelClassification(
-                new AtmosChunkHandle(address.Chunk.Position),
-                address.LocalIndex,
-                new VoxelClassification(classification)),
-            $"Set classification {classification}");
+            $"Set classification {classification}",
+            cells => _session.SetVoxelClassification(cells, classification));
     }
 
     private void ApplyGasInjection(IEnumerable<VoxelAddress> addresses)
     {
-        if (_config == null || _config.GasRegistry.Count == 0)
+        if (_session.Config == null || _session.Config.GasRegistry.Count == 0)
         {
             _voxelFeedback = Report("Register a gas before injecting voxels.", true);
             return;
         }
 
-        _injectionGasId = Math.Clamp(_injectionGasId, 0, _config.GasRegistry.Count - 1);
+        _injectionGasId = Math.Clamp(_injectionGasId, 0, _session.Config.GasRegistry.Count - 1);
         ApplyGasInjection(addresses, _injectionGasId, _injectionMoles, _injectionTemperature);
     }
 
@@ -579,69 +572,48 @@ public partial class SimulationViewer
     {
         ApplyVoxelMutation(
             addresses,
-            address => _simulation!.AddGasToVoxel(
-                new AtmosChunkHandle(address.Chunk.Position),
-                address.LocalIndex,
-                gasId,
-                moles,
-                temperature),
-            $"Injected {moles:G4} mol {FormatGas(gasId)} into");
+            $"Injected {moles:G4} mol {FormatGas(gasId)} into",
+            cells => _session.AddVoxelGas(cells, gasId, moles, temperature));
     }
 
     private void ApplyClearGas(IEnumerable<VoxelAddress> addresses)
     {
-        ApplyVoxelMutation(
-            addresses,
-            address => _simulation!.GetVoxelGasMixture(
-                new AtmosChunkHandle(address.Chunk.Position),
-                address.LocalIndex).Clear(),
-            "Cleared gas from");
+        ApplyVoxelMutation(addresses, "Cleared gas from", cells => _session.ClearVoxelGas(cells));
     }
 
     private void ApplyClearCell(IEnumerable<VoxelAddress> addresses)
     {
-        ApplyVoxelMutation(
-            addresses,
-            address =>
-            {
-                var handle = new AtmosChunkHandle(address.Chunk.Position);
-                _simulation!.GetVoxelGasMixture(handle, address.LocalIndex).Clear();
-                _simulation.SetVoxelClassification(
-                    handle,
-                    address.LocalIndex,
-                    new VoxelClassification(VoxelClassification.RoomUnassigned));
-            },
-            "Cleared");
+        ApplyVoxelMutation(addresses, "Cleared", cells => _session.ClearVoxelCells(cells));
     }
 
     private void ApplyTemperature(IEnumerable<VoxelAddress> addresses, float temperature)
     {
         ApplyVoxelMutation(
             addresses,
-            address => _simulation!.SetVoxelTemperature(
-                new AtmosChunkHandle(address.Chunk.Position),
-                address.LocalIndex,
-                temperature),
-            $"Set temperature to {temperature:F1} K for");
+            $"Set temperature to {temperature:F1} K for",
+            cells => _session.SetVoxelTemperature(cells, temperature));
     }
 
-    private void ApplyVoxelMutation(IEnumerable<VoxelAddress> addresses, Action<VoxelAddress> mutation, string action)
+    private void ApplyVoxelMutation(
+        IEnumerable<VoxelAddress> addresses,
+        string action,
+        Func<IReadOnlyCollection<VoxelCell>, int> mutation)
     {
-        VoxelAddress[] targets = addresses.Distinct().ToArray();
-        if (targets.Length == 0 || _simulation == null || _replayTimeline?.IsInspecting == true)
+        VoxelCell[] targets = addresses.Select(VoxelCell.From).Distinct().ToArray();
+        if (targets.Length == 0 || _simulation == null || _session.IsInspecting)
             return;
 
         try
         {
-            foreach (var address in targets)
-                mutation(address);
-
-            _voxelFeedback = Report($"{action} {targets.Length} voxel{(targets.Length == 1 ? string.Empty : "s")}.", false);
+            int edited = mutation(targets);
+            _voxelFeedback = new FeedbackMessage(
+                $"{action} {edited} voxel{(edited == 1 ? string.Empty : "s")}.",
+                false);
         }
         catch (Exception exception) when (
             exception is ArgumentException or InvalidOperationException or KeyNotFoundException)
         {
-            WriteException("Could not edit the voxel selection", exception);
+            // The session already logged the failure.
         }
     }
 }

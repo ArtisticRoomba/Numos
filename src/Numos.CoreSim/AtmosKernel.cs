@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using Numos.CoreSim.EulerFlow;
 using Numos.CoreSim.Solvers;
 using Numos.Maths;
 
@@ -21,9 +22,22 @@ internal sealed partial class AtmosKernel : IDisposable
     internal long LastBoundaryTicks;
 
     /// <summary>
+    ///     What the <c>euler-flow</c> stage did during the latest tick, or all zeros when it did not run. Reset
+    ///     when a checkpoint is installed. A checkpoint never holds it.
+    /// </summary>
+    internal AtmosFlowDiagnostics LastFlowDiagnostics;
+
+    /// <summary>
     ///     Number of completed fixed ticks on the owning world timeline.
     /// </summary>
     internal int TickCount;
+
+    /// <summary>
+    ///     Which built-in transport stages <see cref="Tick" /> runs when the kernel is ticked on its own, outside a
+    ///     world pipeline. Benchmarks set it directly. World ticks ignore it, because the world's pipeline decides
+    ///     which stages run.
+    /// </summary>
+    internal AtmosTransportModel TransportModel { get; set; } = AtmosTransportModel.Euler;
 
     private long _chunkCollectionRevision;
     private ConcurrentDictionary<Int3, AtmosChunk> _chunkMap = new();
@@ -101,8 +115,18 @@ internal sealed partial class AtmosKernel : IDisposable
         var context = BeginTickSimulation(chunks);
         try
         {
-            SolveAdvection(context);
-            SolveBoundaryFlow(context);
+            // Mirrors AtmosWorldSolverPipeline's built-in order for each model, minus the explicit-link stages a lone
+            // kernel has no topology for.
+            if (TransportModel == AtmosTransportModel.Euler)
+            {
+                SolveEulerFlow(context);
+            }
+            else
+            {
+                SolveAdvection(context);
+                SolveBoundaryFlow(context);
+            }
+
             SolveThermodynamics(context);
             SolveThermalBoundary(context);
             SolveGasReactions(context);
@@ -165,6 +189,11 @@ internal sealed partial class AtmosKernel : IDisposable
     internal void SolveAdvection(AtmosSolverExecutionContext context)
     {
         _defaultSolvers.SolveAdvection(context);
+    }
+
+    internal void SolveEulerFlow(AtmosSolverExecutionContext context)
+    {
+        LastFlowDiagnostics = _defaultSolvers.SolveEulerFlow(context);
     }
 
     internal void SolveBoundaryFlow(AtmosSolverExecutionContext context)

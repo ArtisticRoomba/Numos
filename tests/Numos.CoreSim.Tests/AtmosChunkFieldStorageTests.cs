@@ -1,5 +1,7 @@
 using Numos.CoreSim.Replay;
 using Numos.CoreSim.Solvers;
+using Numos.CoreSim.State;
+using Numos.CoreSim.State.Advanced;
 using Numos.Maths;
 
 namespace Numos.CoreSim.Tests;
@@ -36,6 +38,25 @@ public sealed class AtmosChunkFieldStorageTests
 
     private static readonly ChunkFieldDescriptor<int> HashScratch =
         ChunkFieldRegistry.Register<int>(Key("hash/scratch"), false, null);
+
+    private static readonly ChunkFieldDescriptor<int> VacuumCleared =
+        ChunkFieldRegistry.Register<int>(Key("vacuum/cleared"), true, null, clearOnVacuum: true);
+
+    private static readonly ChunkFieldDescriptor<int> VacuumKept =
+        ChunkFieldRegistry.Register<int>(Key("vacuum/kept"), true, null);
+
+    private static readonly ChunkFieldDescriptor<long> VacuumFixed =
+        ChunkFieldRegistry.Register<long>(Key("vacuum/fixed"), true, 3, clearOnVacuum: true);
+
+    private static readonly ChunkFieldDescriptor<int> SleepOnly =
+        ChunkFieldRegistry.Register<int>(Key("sleep/only"), true, null, clearOnSleep: true);
+
+    private static readonly ChunkFieldDescriptor<long> SleepFixed =
+        ChunkFieldRegistry.Register<long>(Key("sleep/fixed"), true, 3, clearOnSleep: true);
+
+    // Fixed length, no clear flags: must survive every clearing operation.
+    private static readonly ChunkFieldDescriptor<long> FixedKept =
+        ChunkFieldRegistry.Register<long>(Key("fixed/kept"), true, 3);
 
     private struct HashValue
     {
@@ -79,6 +100,33 @@ public sealed class AtmosChunkFieldStorageTests
         var chunk = new AtmosChunk(2, 3, 1);
 
         Assert.That(chunk.GetOrCreateField(FixedLength), Has.Length.EqualTo(3));
+    }
+
+    [Test]
+    public void TryGetField_ReturnsFalseWithoutAllocating()
+    {
+        var chunk = new AtmosChunk(2, 3, 1);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(chunk.TryGetField(Captured, out int[]? array), Is.False);
+            Assert.That(array, Is.Null);
+            Assert.That(chunk.HasCapturedSolverArrays, Is.False);
+            Assert.That(chunk.CaptureSolverArrays(), Is.Empty);
+        });
+    }
+
+    [Test]
+    public void TryGetField_ReturnsAllocatedStorage()
+    {
+        var chunk = new AtmosChunk(2, 3, 1);
+        int[] values = chunk.GetOrCreateField(Captured);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(chunk.TryGetField(Captured, out int[]? array), Is.True);
+            Assert.That(array, Is.SameAs(values));
+        });
     }
 
     [Test]
@@ -221,10 +269,10 @@ public sealed class AtmosChunkFieldStorageTests
     [Test]
     public void SolverArrayHash_MatchesObjectKeyedFormat()
     {
-        // The expected value was computed with the object-keyed GetOrCreateSolverArray path this storage replaced,
-        // using the same keys, element types, lengths and values. A change here breaks every saved state hash that
-        // includes rollback fields.
-        const ulong expected = 0x357B98807B35979FUL;
+        // Pins the solver-array section of the state hash as of checkpoint format 9, where strings hash as UTF-8 like
+        // the wire. It first came from the object-keyed GetOrCreateSolverArray path this storage replaced. A change here
+        // breaks every saved state hash that includes rollback fields.
+        const ulong expected = 0x72BB19B0E7A60E0DUL;
         var chunk = new AtmosChunk(2, 1, 1);
         chunk.GetOrCreateField(HashValueField)[0] = new HashValue { Flag = 3, Amount = 1.5f };
         chunk.GetOrCreateField(HashTotals)[1] = -3;
@@ -233,11 +281,8 @@ public sealed class AtmosChunkFieldStorageTests
         chunk.GetOrCreateField(HashCounts)[1] = 5;
         chunk.GetOrCreateField(HashScratch)[0] = 9;
 
-        var snapshots = chunk.CaptureSolverArrays();
-        var hash = new AtmosStateHasher();
-        hash.Add(snapshots.Length);
-        foreach (var snapshot in snapshots)
-            snapshot.AppendHash(ref hash);
+        var hash = new StateHashSink();
+        SolverArraysCodec.Write(ref hash, chunk.CaptureSolverArrays());
 
         Assert.That(hash.Value, Is.EqualTo(expected));
     }
@@ -268,5 +313,270 @@ public sealed class AtmosChunkFieldStorageTests
         var kernel = new AtmosKernel(2, 2, 1);
         kernel.CreateAndRegisterChunk(Int3.Zero, 2, 2, 1);
         return kernel;
+    }
+
+    [Test]
+    public void Register_SameDefinition_ReturnsSameDescriptor()
+    {
+        var first = ChunkFieldRegistry.Register<int>(Key("repeat"), true, null, true, true);
+        var second = ChunkFieldRegistry.Register<int>(Key("repeat"), true, null, true, true);
+
+        Assert.That(second, Is.SameAs(first));
+    }
+
+    [Test]
+    public void Register_DifferentClearOnSleep_Throws()
+    {
+        ChunkFieldRegistry.Register<int>(Key("conflict/sleep"), clearOnSleep: true);
+
+        var ex = Assert.Throws<InvalidOperationException>(() => ChunkFieldRegistry.Register<int>(
+            Key("conflict/sleep"),
+            clearOnSleep: false));
+
+        Assert.That(ex!.Message, Does.Contain("cleared on sleep").And.Contain("kept on sleep"));
+    }
+
+    [Test]
+    public void Register_DifferentClearOnVacuum_Throws()
+    {
+        ChunkFieldRegistry.Register<int>(Key("conflict/vacuum"), clearOnVacuum: true);
+
+        var ex = Assert.Throws<InvalidOperationException>(() => ChunkFieldRegistry.Register<int>(
+            Key("conflict/vacuum"),
+            clearOnVacuum: false));
+
+        Assert.That(ex!.Message, Does.Contain("cleared on vacuum").And.Contain("kept on vacuum"));
+    }
+
+    [Test]
+    public void Register_DifferentElementType_Throws()
+    {
+        ChunkFieldRegistry.Register<int>(Key("conflict/type"));
+
+        Assert.Throws<InvalidOperationException>(() => ChunkFieldRegistry.Register<float>(Key("conflict/type")));
+    }
+
+    [Test]
+    public void SetVoxelToVacuum_ClearsOnlyClearOnVacuumFieldsAtThatVoxel()
+    {
+        var chunk = new AtmosChunk(3, 1, 1);
+        int[] cleared = chunk.GetOrCreateField(VacuumCleared);
+        int[] kept = chunk.GetOrCreateField(VacuumKept);
+        Array.Fill(cleared, 5);
+        Array.Fill(kept, 5);
+
+        chunk.SetVoxelToVacuum(1);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(cleared, Is.EqualTo(new[] { 5, 0, 5 }));
+            Assert.That(kept, Is.EqualTo(new[] { 5, 5, 5 }));
+        });
+    }
+
+    [Test]
+    public void SetVoxelToVacuum_IgnoresClearOnSleepFields()
+    {
+        var chunk = new AtmosChunk(2, 1, 1);
+        int[] values = chunk.GetOrCreateField(SleepOnly);
+        Array.Fill(values, 5);
+
+        chunk.SetVoxelToVacuum(0);
+
+        Assert.That(values, Is.EqualTo(new[] { 5, 5 }));
+    }
+
+    [Test]
+    public void SetVoxelToVacuum_LeavesFixedLengthFieldsAlone()
+    {
+        var chunk = new AtmosChunk(2, 1, 1);
+        long[] values = chunk.GetOrCreateField(VacuumFixed);
+        Array.Fill(values, 7L);
+
+        chunk.SetVoxelToVacuum(1);
+
+        Assert.That(values, Is.EqualTo(new[] { 7L, 7L, 7L }));
+    }
+
+    [Test]
+    public void SetVoxelToVacuum_DoesNotAllocateMissingFields()
+    {
+        var chunk = new AtmosChunk(2, 1, 1);
+
+        chunk.SetVoxelToVacuum(0);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(chunk.HasCapturedSolverArrays, Is.False);
+            Assert.That(chunk.IsVacuum[0], Is.True);
+        });
+    }
+
+    [Test]
+    public void SetChunkToVacuum_ClearsEveryVoxelOfClearOnVacuumFields()
+    {
+        var chunk = new AtmosChunk(3, 1, 1);
+        int[] cleared = chunk.GetOrCreateField(VacuumCleared);
+        int[] kept = chunk.GetOrCreateField(VacuumKept);
+        Array.Fill(cleared, 5);
+        Array.Fill(kept, 5);
+        chunk.TotalPressure.AsSpan().Fill(2f);
+
+        chunk.SetChunkToVacuum();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(cleared, Is.EqualTo(new[] { 0, 0, 0 }));
+            Assert.That(kept, Is.EqualTo(new[] { 5, 5, 5 }));
+            Assert.That(chunk.TotalPressure.ToArray(), Is.All.Zero);
+            Assert.That(chunk.IsVacuum.ToArray(), Is.All.True);
+        });
+    }
+
+    [Test]
+    public void SetChunkToVacuum_ClearsFixedLengthClearOnVacuumFields()
+    {
+        var chunk = new AtmosChunk(2, 1, 1);
+        long[] values = chunk.GetOrCreateField(VacuumFixed);
+        Array.Fill(values, 7L);
+
+        chunk.SetChunkToVacuum();
+
+        Assert.That(values, Is.EqualTo(new[] { 0L, 0L, 0L }));
+    }
+
+    [Test]
+    public void SetChunkToVacuum_LeavesFixedLengthFieldsWithoutFlagAlone()
+    {
+        var chunk = new AtmosChunk(2, 1, 1);
+        long[] values = chunk.GetOrCreateField(FixedKept);
+        Array.Fill(values, 7L);
+
+        chunk.SetChunkToVacuum();
+
+        Assert.That(values, Is.EqualTo(new[] { 7L, 7L, 7L }));
+    }
+
+    [Test]
+    public void SetChunkToVacuum_IgnoresClearOnSleepFields()
+    {
+        var chunk = new AtmosChunk(2, 1, 1);
+        int[] perVoxel = chunk.GetOrCreateField(SleepOnly);
+        long[] fixedLength = chunk.GetOrCreateField(SleepFixed);
+        Array.Fill(perVoxel, 5);
+        Array.Fill(fixedLength, 7L);
+
+        chunk.SetChunkToVacuum();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(perVoxel, Is.EqualTo(new[] { 5, 5 }));
+            Assert.That(fixedLength, Is.EqualTo(new[] { 7L, 7L, 7L }));
+        });
+    }
+
+    [Test]
+    public void SetChunkToVacuum_DoesNotAllocateMissingFields()
+    {
+        var chunk = new AtmosChunk(2, 1, 1);
+
+        chunk.SetChunkToVacuum();
+
+        Assert.That(chunk.HasCapturedSolverArrays, Is.False);
+    }
+
+    [Test]
+    public void Sleep_ClearsEntireClearOnSleepFields()
+    {
+        var chunk = new AtmosChunk(3, 1, 1);
+        int[] cleared = chunk.GetOrCreateField(SleepOnly);
+        int[] kept = chunk.GetOrCreateField(VacuumKept);
+        Array.Fill(cleared, 5);
+        Array.Fill(kept, 5);
+
+        chunk.Sleep();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(chunk.IsAwake, Is.False);
+            Assert.That(cleared, Is.EqualTo(new[] { 0, 0, 0 }));
+            Assert.That(kept, Is.EqualTo(new[] { 5, 5, 5 }));
+        });
+    }
+
+    [Test]
+    public void Sleep_ClearsFixedLengthClearOnSleepFields()
+    {
+        var chunk = new AtmosChunk(2, 1, 1);
+        long[] values = chunk.GetOrCreateField(SleepFixed);
+        Array.Fill(values, 7L);
+
+        chunk.Sleep();
+
+        Assert.That(values, Is.EqualTo(new[] { 0L, 0L, 0L }));
+    }
+
+    [Test]
+    public void Sleep_LeavesFixedLengthFieldsWithoutFlagAlone()
+    {
+        var chunk = new AtmosChunk(2, 1, 1);
+        long[] values = chunk.GetOrCreateField(FixedKept);
+        Array.Fill(values, 7L);
+
+        chunk.Sleep();
+
+        Assert.That(values, Is.EqualTo(new[] { 7L, 7L, 7L }));
+    }
+
+    [Test]
+    public void Sleep_IgnoresClearOnVacuumFields()
+    {
+        var chunk = new AtmosChunk(2, 1, 1);
+        int[] perVoxel = chunk.GetOrCreateField(VacuumCleared);
+        long[] fixedLength = chunk.GetOrCreateField(VacuumFixed);
+        Array.Fill(perVoxel, 5);
+        Array.Fill(fixedLength, 7L);
+
+        chunk.Sleep();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(perVoxel, Is.EqualTo(new[] { 5, 5 }));
+            Assert.That(fixedLength, Is.EqualTo(new[] { 7L, 7L, 7L }));
+        });
+    }
+
+    [Test]
+    public void Sleep_DoesNotAllocateMissingFields()
+    {
+        var chunk = new AtmosChunk(2, 1, 1);
+
+        chunk.Sleep();
+
+        Assert.That(chunk.HasCapturedSolverArrays, Is.False);
+    }
+
+    [Test]
+    public void Sleep_MarksChunkChanged()
+    {
+        var chunk = new AtmosChunk(1, 1, 1);
+        long before = chunk.Version.Revision;
+
+        chunk.Sleep();
+
+        Assert.That(chunk.Version.Revision, Is.GreaterThan(before));
+    }
+
+    [Test]
+    public void Sleep_WhenAlreadyAsleep_StillClears()
+    {
+        var chunk = new AtmosChunk(2, 1, 1);
+        int[] values = chunk.GetOrCreateField(SleepOnly);
+        chunk.Sleep();
+        Array.Fill(values, 5);
+
+        chunk.Sleep();
+
+        Assert.That(values, Is.EqualTo(new[] { 0, 0 }));
     }
 }

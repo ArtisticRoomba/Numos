@@ -196,7 +196,7 @@ internal sealed partial class AtmosKernel
     {
         lock (StateGate)
         {
-            return GetChunk(position).GetNetworkSnapshot();
+            return GetChunk(position).GetNetworkSnapshot(AtmosChunkSnapshotFields.All, _config);
         }
     }
 
@@ -235,7 +235,7 @@ internal sealed partial class AtmosKernel
         }
     }
 
-    private static AtmosVoxelSnapshot CreateVoxelSnapshot(
+    private AtmosVoxelSnapshot CreateVoxelSnapshot(
         AtmosChunk chunk,
         Int3 position,
         ushort localVoxelIndex)
@@ -249,6 +249,14 @@ internal sealed partial class AtmosKernel
                 chunk.ActiveGases[gas].Moles[localVoxelIndex]);
         }
 
+        AtmosSolverMath.ComputeVoxelVelocity(
+            _config,
+            chunk,
+            localVoxelIndex,
+            out MetrePerSecond velocityX,
+            out MetrePerSecond velocityY,
+            out MetrePerSecond velocityZ);
+
         return new AtmosVoxelSnapshot(
             chunk.Version,
             position,
@@ -256,7 +264,60 @@ internal sealed partial class AtmosKernel
             chunk.VoxelRoomMap[localVoxelIndex],
             chunk.TotalPressure[localVoxelIndex],
             chunk.Temperature[localVoxelIndex],
+            velocityX,
+            velocityY,
+            velocityZ,
             gases);
+    }
+
+    /// <summary>
+    ///     Derives the bulk velocity of one voxel addressed by its flat local index from its stored momentum and
+    ///     current gas mass.
+    /// </summary>
+    /// <param name="position">The chunk's grid position.</param>
+    /// <param name="localVoxelIndex">The voxel's zero-based index in the chunk's flattened storage.</param>
+    /// <param name="x">Bulk x-velocity, in metres per second.</param>
+    /// <param name="y">Bulk y-velocity, in metres per second.</param>
+    /// <param name="z">Bulk z-velocity, in metres per second.</param>
+    /// <remarks>A vacuum voxel reads as zero. Nothing is stored. The division happens under the state gate.</remarks>
+    /// <exception cref="KeyNotFoundException">No chunk is registered at <paramref name="position" />.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="localVoxelIndex" /> is outside the chunk.</exception>
+    internal void GetVoxelVelocity(
+        Int3 position,
+        ushort localVoxelIndex,
+        out MetrePerSecond x,
+        out MetrePerSecond y,
+        out MetrePerSecond z)
+    {
+        lock (StateGate)
+        {
+            var chunk = GetChunk(position);
+            ValidateVoxelIndex(chunk, localVoxelIndex);
+            AtmosSolverMath.ComputeVoxelVelocity(_config, chunk, localVoxelIndex, out x, out y, out z);
+        }
+    }
+
+    /// <summary>
+    ///     Derives the bulk velocity of one voxel addressed by local coordinates. See
+    ///     <see cref="GetVoxelVelocity(Int3, ushort, out MetrePerSecond, out MetrePerSecond, out MetrePerSecond)" />.
+    /// </summary>
+    /// <exception cref="KeyNotFoundException">No chunk is registered at <paramref name="position" />.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">A local coordinate is outside the chunk.</exception>
+    internal void GetVoxelVelocity(
+        Int3 position,
+        int localX,
+        int localY,
+        int localZ,
+        out MetrePerSecond x,
+        out MetrePerSecond y,
+        out MetrePerSecond z)
+    {
+        lock (StateGate)
+        {
+            var chunk = GetChunk(position);
+            ushort localVoxelIndex = GetValidatedVoxelIndex(chunk, localX, localY, localZ);
+            AtmosSolverMath.ComputeVoxelVelocity(_config, chunk, localVoxelIndex, out x, out y, out z);
+        }
     }
 
     /// <summary>
@@ -297,7 +358,7 @@ internal sealed partial class AtmosKernel
                 return false;
             }
 
-            snapshot = chunk.GetNetworkSnapshot(fields);
+            snapshot = chunk.GetNetworkSnapshot(fields, _config);
             return true;
         }
     }
@@ -330,7 +391,7 @@ internal sealed partial class AtmosKernel
             {
                 var request = requests[index];
                 // Handle lists are detached. A concurrent unregistration between enumeration
-                // and this batch is represented by the chunk simply not being returned.
+                // and this batch shows up as the chunk missing from the result.
                 if (!_chunkMap.TryGetValue(request.Position, out var chunk) ||
                     chunk.Version == request.KnownVersion &&
                     !(request.Fields.HasFlag(AtmosChunkSnapshotFields.SolverArrays) && chunk.HasCapturedSolverArrays))
@@ -338,7 +399,7 @@ internal sealed partial class AtmosKernel
                     continue;
                 }
 
-                changed.Add(chunk.GetNetworkSnapshot(request.Fields));
+                changed.Add(chunk.GetNetworkSnapshot(request.Fields, _config));
             }
 
             return new AtmosChunkSnapshotBatch(TickCount, changed.ToArray());
@@ -488,6 +549,84 @@ internal sealed partial class AtmosKernel
     }
 
     /// <summary>
+    ///     Stores the total momentum vector of one voxel addressed by its flat local index and wakes its chunk.
+    /// </summary>
+    /// <param name="position">The target chunk's grid position.</param>
+    /// <param name="localVoxelIndex">The voxel's zero-based index in the chunk's flattened storage.</param>
+    /// <param name="momentumX">Total x-momentum of the voxel's gas, in kilogram metres per second.</param>
+    /// <param name="momentumY">Total y-momentum of the voxel's gas, in kilogram metres per second.</param>
+    /// <param name="momentumZ">Total z-momentum of the voxel's gas, in kilogram metres per second.</param>
+    /// <remarks>
+    ///     Momentum needs mass to carry it, so a write to a solid or void voxel, or to one whose cached pressure is
+    ///     not positive, is ignored and not recorded. That keeps <see cref="AtmosChunk.MomentumX" />'s
+    ///     "no gas, no momentum" invariant without a separate cleanup pass.
+    /// </remarks>
+    /// <exception cref="KeyNotFoundException">No chunk is registered at <paramref name="position" />.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    ///     <paramref name="localVoxelIndex" /> is outside the chunk, or a momentum component is not finite.
+    /// </exception>
+    internal void SetVoxelMomentum(
+        Int3 position,
+        ushort localVoxelIndex,
+        KilogramMetrePerSecond momentumX,
+        KilogramMetrePerSecond momentumY,
+        KilogramMetrePerSecond momentumZ)
+    {
+        lock (StateGate)
+        {
+            var chunk = GetChunk(position);
+            ValidateVoxelIndex(chunk, localVoxelIndex);
+            ValidateMomentum(momentumX, momentumY, momentumZ);
+
+            int classification = chunk.VoxelRoomMap[localVoxelIndex];
+            if (!VoxelClassification.IsAirRoom(classification))
+                return;
+
+            if (chunk.TotalPressure[localVoxelIndex] <= 0f)
+                return;
+
+            chunk.Wake();
+            chunk.MomentumX[localVoxelIndex] = momentumX;
+            chunk.MomentumY[localVoxelIndex] = momentumY;
+            chunk.MomentumZ[localVoxelIndex] = momentumZ;
+            chunk.MarkChanged();
+            if (ShouldRecord)
+                RecordOperation(new SetVoxelMomentumOperation(position, localVoxelIndex, momentumX, momentumY, momentumZ));
+        }
+    }
+
+    /// <summary>
+    ///     Stores the total momentum vector of one voxel addressed by local coordinates and wakes its chunk.
+    /// </summary>
+    /// <param name="position">The target chunk's grid position.</param>
+    /// <param name="x">The zero-based local x-coordinate.</param>
+    /// <param name="y">The zero-based local y-coordinate.</param>
+    /// <param name="z">The zero-based local z-coordinate.</param>
+    /// <param name="momentumX">Total x-momentum of the voxel's gas, in kilogram metres per second.</param>
+    /// <param name="momentumY">Total y-momentum of the voxel's gas, in kilogram metres per second.</param>
+    /// <param name="momentumZ">Total z-momentum of the voxel's gas, in kilogram metres per second.</param>
+    /// <remarks>Writes to solid, void, or gasless voxels are ignored and not recorded.</remarks>
+    /// <exception cref="KeyNotFoundException">No chunk is registered at <paramref name="position" />.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    ///     A local coordinate is outside the chunk, or a momentum component is not finite.
+    /// </exception>
+    internal void SetVoxelMomentum(
+        Int3 position,
+        int x,
+        int y,
+        int z,
+        KilogramMetrePerSecond momentumX,
+        KilogramMetrePerSecond momentumY,
+        KilogramMetrePerSecond momentumZ)
+    {
+        lock (StateGate)
+        {
+            var chunk = GetChunk(position);
+            SetVoxelMomentum(position, GetValidatedVoxelIndex(chunk, x, y, z), momentumX, momentumY, momentumZ);
+        }
+    }
+
+    /// <summary>
     ///     Adds gas to one voxel addressed by its flat local index and wakes its chunk.
     /// </summary>
     /// <param name="position">The target chunk's grid position.</param>
@@ -511,7 +650,7 @@ internal sealed partial class AtmosKernel
             ValidateGasInjection(gasId, moles, temperature);
 
             int classification = chunk.VoxelRoomMap[localVoxelIndex];
-            if (classification == VoxelClassification.RoomSolid || classification == VoxelClassification.RoomVoid)
+            if (!VoxelClassification.IsAirRoom(classification))
                 return;
 
             chunk.Wake();
@@ -547,6 +686,53 @@ internal sealed partial class AtmosKernel
     }
 
     /// <summary>
+    ///     Adds a one tick ignition source to a voxel and wakes its chunk.
+    /// </summary>
+    /// <param name="position">The target chunk's grid position.</param>
+    /// <param name="localVoxelIndex">The voxel's zero-based index in the chunk's flattened storage.</param>
+    /// <param name="temperature">The temperature of the ignition source</param>
+    /// <param name="volume">The volume of the ignition source</param>
+    internal void IgniteVoxel(
+        Int3 position, ushort localVoxelIndex, Kelvin temperature, CubicMetre volume)
+    {
+        lock (StateGate)
+        {
+            var chunk = GetChunk(position);
+            ValidateVoxelIndex(chunk, localVoxelIndex);
+            ValidateIgnition(temperature, volume);
+
+            int classification = chunk.VoxelRoomMap[localVoxelIndex];
+            if (classification == VoxelClassification.RoomSolid || classification == VoxelClassification.RoomVoid)
+                return;
+
+            chunk.Wake();
+            _defaultSolvers.SetIgnitionSource(chunk, localVoxelIndex, temperature, volume);
+            if (ShouldRecord) RecordOperation(new SetIgnitionSourceOperation(position, localVoxelIndex, temperature, volume));
+        }
+    }
+
+    /// <summary>
+    ///     Adds a one tick ignition source to a voxel and wakes its chunk.
+    /// </summary>
+    /// <param name="position">The target chunk's grid position.</param>
+    /// <param name="x">The zero-based local x-coordinate.</param>
+    /// <param name="y">The zero-based local y-coordinate.</param>
+    /// <param name="z">The zero-based local z-coordinate.</param>
+    /// <param name="temperature">The temperature of the ignition source</param>
+    /// <param name="volume">The volume of the ignition source</param>
+    internal void IgniteVoxel(
+        Int3 position, int x, int y, int z, Kelvin temperature, CubicMetre volume)
+    {
+        lock (StateGate)
+        {
+            var chunk = GetChunk(position);
+            IgniteVoxel(position, GetValidatedVoxelIndex(chunk, x, y, z), temperature, volume);
+        }
+    }
+
+
+
+    /// <summary>
     ///     Wakes a chunk so its gas-bearing voxels participate in subsequent simulation ticks.
     /// </summary>
     /// <param name="position">The target chunk's grid position.</param>
@@ -577,7 +763,7 @@ internal sealed partial class AtmosKernel
     /// <summary>
     ///     Runs exactly one fixed simulation tick using the current configuration.
     /// </summary>
-    /// <remarks>Elapsed-time accumulation lives on the owning world; this is for deterministic driving and benchmarks.</remarks>
+    /// <remarks>Elapsed-time accumulation lives on the owning world. This method is for deterministic driving and benchmarks.</remarks>
     internal void Tick()
     {
         lock (StateGate)
@@ -648,6 +834,19 @@ internal sealed partial class AtmosKernel
         }
     }
 
+    private static void ValidateMomentum(
+        KilogramMetrePerSecond momentumX, KilogramMetrePerSecond momentumY, KilogramMetrePerSecond momentumZ)
+    {
+        if (!float.IsFinite(momentumX))
+            throw new ArgumentOutOfRangeException(nameof(momentumX), momentumX, "Momentum must be finite.");
+
+        if (!float.IsFinite(momentumY))
+            throw new ArgumentOutOfRangeException(nameof(momentumY), momentumY, "Momentum must be finite.");
+
+        if (!float.IsFinite(momentumZ))
+            throw new ArgumentOutOfRangeException(nameof(momentumZ), momentumZ, "Momentum must be finite.");
+    }
+
     private void ValidateGasInjection(int gasId, Mole moles, Kelvin temperature)
     {
         if ((uint)gasId >= (uint)_config.GasRegistry.Count)
@@ -663,5 +862,19 @@ internal sealed partial class AtmosKernel
                 temperature,
                 "Temperature must be nonnegative and finite.");
         }
+    }
+
+    private void ValidateIgnition(Kelvin temperature, CubicMetre volume)
+    {
+        if (!float.IsFinite(temperature) || temperature < 0f)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(temperature),
+                temperature,
+                "Temperature must be nonnegative and finite.");
+        }
+
+        if (!float.IsFinite(volume) || volume <= 0f)
+            throw new ArgumentOutOfRangeException(nameof(volume), volume, "Volume must be positive and finite.");
     }
 }

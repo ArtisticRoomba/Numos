@@ -4,12 +4,13 @@ using System.Text;
 using ImGuiNET;
 using Numos.Viewer.Ui;
 using Raylib_cs;
+using Numos.Workbench;
 
 namespace Numos.Viewer;
 
 public partial class SimulationViewer
 {
-    private readonly ViewerLog _messages = new();
+    private readonly WorkbenchLog _messages = new();
     private bool _focusMessagesPanelRequested;
     private bool _messageAutoScroll = true;
     private string _messageFilter = string.Empty;
@@ -22,20 +23,19 @@ public partial class SimulationViewer
     private TextWriter? _originalConsoleError;
     private TextWriter? _originalConsoleOut;
     private bool _showMessagesPanel;
-    private ViewerConsoleWriter? _viewerConsoleError;
-    private ViewerConsoleWriter? _viewerConsoleOut;
+    private WorkbenchConsoleWriter? _viewerConsoleError;
+    private WorkbenchConsoleWriter? _viewerConsoleOut;
 
     private void StartMessageCapture()
     {
         _originalConsoleOut = Console.Out;
         _originalConsoleError = Console.Error;
-        _viewerConsoleOut = new ViewerConsoleWriter(_originalConsoleOut, _messages, ViewerLogLevel.Info);
-        _viewerConsoleError = new ViewerConsoleWriter(_originalConsoleError, _messages, ViewerLogLevel.Error);
+        _viewerConsoleOut = new WorkbenchConsoleWriter(_originalConsoleOut, _messages, WorkbenchLogLevel.Info);
+        _viewerConsoleError = new WorkbenchConsoleWriter(_originalConsoleError, _messages, WorkbenchLogLevel.Error);
         Console.SetOut(_viewerConsoleOut);
         Console.SetError(_viewerConsoleError);
         AppDomain.CurrentDomain.UnhandledException += HandleUnhandledException;
         TaskScheduler.UnobservedTaskException += HandleUnobservedTaskException;
-        WriteMessage(ViewerLogLevel.Info, "Viewer", $"Numos.Viewer {ViewerBuildInfo.PackageVersion} started.");
     }
 
     private void StopMessageCapture()
@@ -60,7 +60,7 @@ public partial class SimulationViewer
         if (args.ExceptionObject is Exception exception)
             WriteFatalException("Unhandled exception", exception);
         else
-            WriteMessage(ViewerLogLevel.Fatal,
+            WriteMessage(WorkbenchLogLevel.Fatal,
                 Locale.GetString("source-runtime"), 
                 Locale.GetString("message-fatal-unhandled-exception-trace", ("stackTrace", args.ExceptionObject.ToString())));
     }
@@ -70,7 +70,7 @@ public partial class SimulationViewer
         WriteException(Locale.GetString("message-exception-unobserved-task"), args.Exception);
     }
 
-    private void WriteMessage(ViewerLogLevel level, string source, string message)
+    private void WriteMessage(WorkbenchLogLevel level, string source, string message)
     {
         _messages.Write(level, source, message);
         RequestNextFrame();
@@ -78,13 +78,13 @@ public partial class SimulationViewer
 
     private void WriteException(string context, Exception exception)
     {
-        _messages.Write(ViewerLogLevel.Error, Locale.GetString("source-exception"), $"{context}: {exception.Message}", exception.ToString());
+        _messages.Write(WorkbenchLogLevel.Error, Locale.GetString("source-exception"), $"{context}: {exception.Message}", exception.ToString());
         RequestNextFrame();
     }
 
     private void WriteFatalException(string context, Exception exception)
     {
-        _messages.Write(ViewerLogLevel.Fatal, Locale.GetString("source-exception"), $"{context}: {exception.Message}", exception.ToString());
+        _messages.Write(WorkbenchLogLevel.Fatal, Locale.GetString("source-exception"), $"{context}: {exception.Message}", exception.ToString());
         RequestNextFrame();
     }
 
@@ -99,7 +99,7 @@ public partial class SimulationViewer
 
     /// <summary>
     ///     Draws a right-aligned menu-bar item for warnings and errors logged while the Messages panel was not on
-    ///     screen. It stays until the panel is shown, since the panel is hidden by default and a failure would
+    ///     screen. It stays until the panel is shown. The panel is hidden by default, so a failure would
     ///     otherwise go unnoticed.
     /// </summary>
     private void RenderUnseenMessagesIndicator()
@@ -165,7 +165,7 @@ public partial class SimulationViewer
         _messagesPanelVisible = true;
         _messages.MarkSeen();
 
-        ViewerLogEntry[] entries = _messages.Snapshot();
+        WorkbenchLogEntry[] entries = _messages.Snapshot();
         ImGui.SetNextItemWidth(230f);
         ImGui.InputTextWithHint("##message-filter", "Filter messages...", ref _messageFilter, 256);
         ImGui.SameLine();
@@ -175,7 +175,7 @@ public partial class SimulationViewer
         ImGui.Checkbox(Locale.GetString("checkbox-autoscroll"), ref _messageAutoScroll);
         ImGui.SameLine();
 
-        ViewerLogEntry[] visibleEntries = entries.Where(IsMessageVisible).ToArray();
+        WorkbenchLogEntry[] visibleEntries = entries.Where(IsMessageVisible).ToArray();
         if (ImGui.Button(Locale.GetString("button-copy")))
             Raylib.SetClipboardText(FormatMessages(visibleEntries));
 
@@ -196,7 +196,7 @@ public partial class SimulationViewer
         _messagesLastRenderedSequence = lastSequence;
     }
 
-    private static void RenderMessageTable(ViewerLogEntry[] entries, bool scrollToBottom)
+    private static void RenderMessageTable(WorkbenchLogEntry[] entries, bool scrollToBottom)
     {
         const ImGuiTableFlags flags =
             ImGuiTableFlags.RowBg |
@@ -206,11 +206,12 @@ public partial class SimulationViewer
             ImGuiTableFlags.BordersOuter |
             ImGuiTableFlags.Resizable;
 
-        if (!ImGui.BeginTable("MessageLog##messages", 4, flags))
+        if (!ImGui.BeginTable("MessageLog##messages", 5, flags))
             return;
 
         ImGui.TableSetupScrollFreeze(0, 1);
         ImGui.TableSetupColumn("Time", ImGuiTableColumnFlags.WidthFixed);
+        ImGui.TableSetupColumn("Tick", ImGuiTableColumnFlags.WidthFixed);
         ImGui.TableSetupColumn("Level", ImGuiTableColumnFlags.WidthFixed);
         ImGui.TableSetupColumn("Source", ImGuiTableColumnFlags.WidthFixed);
         ImGui.TableSetupColumn("Message", ImGuiTableColumnFlags.WidthStretch);
@@ -223,15 +224,19 @@ public partial class SimulationViewer
             ImGui.TextUnformatted(entry.Timestamp.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture));
 
             ImGui.TableSetColumnIndex(1);
+            if (entry.Tick is { } tick)
+                ImGui.TextUnformatted(tick.ToString(CultureInfo.InvariantCulture));
+
+            ImGui.TableSetColumnIndex(2);
             ImGui.PushStyleColor(ImGuiCol.Text, GetMessageColor(entry.Level));
             ImGui.TextUnformatted(GetMessageLevelLabel(entry.Level));
             ImGui.PopStyleColor();
 
-            ImGui.TableSetColumnIndex(2);
+            ImGui.TableSetColumnIndex(3);
             ImGui.TextUnformatted(entry.Source);
 
             // The scrolling table is its own child window, so the panel's wrap position does not reach in here.
-            ImGui.TableSetColumnIndex(3);
+            ImGui.TableSetColumnIndex(4);
             ImGui.PushTextWrapPos(0f);
             ImGui.TextUnformatted(entry.Message);
             if (!string.IsNullOrWhiteSpace(entry.Details))
@@ -250,7 +255,7 @@ public partial class SimulationViewer
         ImGui.EndTable();
     }
 
-    private bool IsMessageVisible(ViewerLogEntry entry)
+    private bool IsMessageVisible(WorkbenchLogEntry entry)
     {
         if ((int)entry.Level < _messageMinimumLevel)
             return false;
@@ -261,7 +266,7 @@ public partial class SimulationViewer
                (entry.Details?.Contains(_messageFilter, StringComparison.OrdinalIgnoreCase) ?? false);
     }
 
-    private static string FormatMessages(IEnumerable<ViewerLogEntry> entries)
+    private static string FormatMessages(IEnumerable<WorkbenchLogEntry> entries)
     {
         var text = new StringBuilder();
         foreach (var entry in entries)
@@ -274,33 +279,33 @@ public partial class SimulationViewer
         return text.ToString();
     }
 
-    private static string FormatMessage(ViewerLogEntry entry)
+    private static string FormatMessage(WorkbenchLogEntry entry)
     {
         return $"{entry.Timestamp:HH:mm:ss.fff} [{GetMessageLevelLabel(entry.Level),-7}] [{entry.Source}] {entry.Message}";
     }
 
-    private static string GetMessageLevelLabel(ViewerLogLevel level)
+    private static string GetMessageLevelLabel(WorkbenchLogLevel level)
     {
         return level switch
         {
-            ViewerLogLevel.Debug => "DEBG",
-            ViewerLogLevel.Info => "INFO",
-            ViewerLogLevel.Warn => "WARN",
-            ViewerLogLevel.Error => "ERR",
-            ViewerLogLevel.Fatal => "FATL",
+            WorkbenchLogLevel.Debug => "DEBG",
+            WorkbenchLogLevel.Info => "INFO",
+            WorkbenchLogLevel.Warn => "WARN",
+            WorkbenchLogLevel.Error => "ERR",
+            WorkbenchLogLevel.Fatal => "FATL",
             _ => level.ToString().ToUpperInvariant()
         };
     }
 
-    private static Vector4 GetMessageColor(ViewerLogLevel level)
+    private static Vector4 GetMessageColor(WorkbenchLogLevel level)
     {
         return level switch
         {
-            ViewerLogLevel.Debug => ViewerTheme.SecondaryText,
-            ViewerLogLevel.Info => ViewerTheme.PrimaryText,
-            ViewerLogLevel.Warn => ViewerTheme.Caution,
-            ViewerLogLevel.Error => ViewerTheme.Error,
-            ViewerLogLevel.Fatal => ViewerTheme.Error,
+            WorkbenchLogLevel.Debug => ViewerTheme.SecondaryText,
+            WorkbenchLogLevel.Info => ViewerTheme.PrimaryText,
+            WorkbenchLogLevel.Warn => ViewerTheme.Caution,
+            WorkbenchLogLevel.Error => ViewerTheme.Error,
+            WorkbenchLogLevel.Fatal => ViewerTheme.Error,
             _ => ViewerTheme.PrimaryText
         };
     }

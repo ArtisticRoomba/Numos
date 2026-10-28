@@ -48,8 +48,8 @@ public readonly record struct AtmosNeighborEdge(
 /// <remarks>
 ///     Explicit edges are compiled from the stage's <see cref="AtmosNeighborSelection" /> whenever the applied
 ///     topology or the stage registration changes.
-///     Cartesian adjacency is not precompiled: it is derived from chunk dimensions and whichever neighboring chunks
-///     are registered when a query runs. Adjacency is structural, so solid and void voxels still have neighbors.
+///     Cartesian adjacency is not precompiled. Numos derives it from chunk dimensions and the neighboring chunks
+///     registered when a query runs. Adjacency is structural, so solid and void voxels still have neighbors.
 /// </remarks>
 public sealed class AtmosWorldNeighborTopology
 {
@@ -166,14 +166,13 @@ public sealed class AtmosWorldNeighborTopology
     /// </summary>
     /// <returns>Canonical Cartesian edges followed by selected explicit edges.</returns>
     /// <remarks>
-    ///     This is the convenient shape for a conservative transfer, where something removed from one endpoint must
-    ///     be added to the other exactly once regardless of which side you started from. It re-derives current chunk
-    ///     membership on every call, and when the selection includes Cartesian neighbors it walks all six directions
-    ///     of every voxel in every chunk in the world to find them — for a selection built with
-    ///     <c>includeCartesian: false</c>, it only walks the sparse explicit edge list instead. A
-    ///     performance-sensitive tiled solver should acquire <see cref="AtmosChunkNeighborView" /> once per chunk via
-    ///     <see cref="GetChunk" /> and call <see cref="AtmosChunkNeighborView.GetNeighbors" /> per voxel instead of
-    ///     calling this every tick.
+    ///     Use this for a conservative transfer, where something removed from one endpoint must be added to the other
+    ///     exactly once, whichever side you started from. Each call re-derives current chunk membership. When the
+    ///     selection includes Cartesian neighbors, it walks all six directions of every voxel in every chunk in the
+    ///     world. A selection built with <c>includeCartesian: false</c> walks only the sparse explicit edge list.
+    ///     A performance-sensitive tiled solver should not call this every tick. It should get an
+    ///     <see cref="AtmosChunkNeighborView" /> once per chunk with <see cref="GetChunk" />. It then calls
+    ///     <see cref="AtmosChunkNeighborView.GetNeighbors" /> per voxel.
     /// </remarks>
     public IEnumerable<AtmosNeighborEdge> GetOwnedEdges()
     {

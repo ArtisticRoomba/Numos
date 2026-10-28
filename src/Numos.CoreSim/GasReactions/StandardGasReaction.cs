@@ -1,6 +1,6 @@
 using System.Collections.Frozen;
-using Numos.CoreSim.Replay;
-using Numos.Units;
+using Numos.CoreSim.State;
+using Magnitudo;
 
 namespace Numos.CoreSim.GasReactions;
 
@@ -29,11 +29,13 @@ public readonly partial record struct StandardGasReaction
     ///     Molar activation energy <c>Ea</c>, in J/mol. Convert values authored in kJ/mol first.
     /// </param>
     /// <param name="speedFactors">Rate-equation exponent for each gas that affects the speed.</param>
+    /// <param name="requiresIgnition">Whether the reaction should use the ignition system</param>
     public StandardGasReaction(
         IDictionary<GasProperties, float> input, IDictionary<GasProperties, float> output,
         [Quantity("molarEnergy")] JoulePerMole energyBalance,
         float arrheniusFactor, float activationEnergy,
-        IDictionary<GasProperties, float> speedFactors)
+        IDictionary<GasProperties, float> speedFactors,
+        bool requiresIgnition = false)
     {
         Input = input.ToFrozenDictionary();
         Output = output.ToFrozenDictionary();
@@ -41,16 +43,19 @@ public readonly partial record struct StandardGasReaction
         ArrheniusFactor = arrheniusFactor;
         ActivationEnergy = activationEnergy;
         SpeedFactors = speedFactors.ToFrozenDictionary();
+        RequiresIgnition = requiresIgnition;
     }
 
     /// <summary>
     ///     Moles of each reactant consumed per reaction.
     /// </summary>
+    [NumosSerialize]
     private FrozenDictionary<GasProperties, Mole> Input { get; }
 
     /// <summary>
     ///     Moles of each product produced per reaction.
     /// </summary>
+    [NumosSerialize]
     private FrozenDictionary<GasProperties, Mole> Output { get; }
 
     /// <summary>
@@ -60,80 +65,36 @@ public readonly partial record struct StandardGasReaction
     ///     Per mole of whichever reactant has a coefficient of one, so for 2H₂ + O₂ -> 2H₂O it is the energy released
     ///     per mole of oxygen consumed.
     /// </remarks>
+    [NumosSerialize]
     internal JoulePerMole EnergyBalance { get; }
 
     /// <summary>
     ///     Arrhenius pre-exponential factor. Its units depend on the rate law's overall order.
     /// </summary>
+    [NumosSerialize]
     private float ArrheniusFactor { get; }
 
     /// <summary>
-    ///     Molar activation energy, in J/mol. Used directly against <see cref="AtmosPhysicalConstants.MolarGasConstant" />
-    ///     (J/(mol*K)) in the Arrhenius exponent, so values authored in kJ/mol must be converted at the call site,
-    ///     e.g. via <see cref="Numos.Units.Generated.UnitConversions.FromKilojoulePerMole" />.
+    ///     Molar activation energy, in J/mol. The Arrhenius exponent divides it by
+    ///     <see cref="AtmosPhysicalConstants.MolarGasConstant" /> (J/(mol*K)).
+    ///     Convert values authored in kJ/mol at the call site, for example with
+    ///     <see cref="UnitConversions.FromKilojoulePerMole" />.
     /// </summary>
+    [NumosSerialize]
     private JoulePerMole ActivationEnergy { get; }
 
     /// <summary>
     ///     The exponents of the rate equation:
     ///     k * Gas_1^{a} * Gas_2 ^ {b}...
     /// </summary>
+    [NumosSerialize]
     private FrozenDictionary<GasProperties, float> SpeedFactors { get; }
 
-    internal void AppendHash(ref AtmosStateHasher hash)
-    {
-        hash.Add(EnergyBalance);
-        hash.Add(ArrheniusFactor);
-        hash.Add(ActivationEnergy);
-        hash.Add(Input.Count);
-        foreach (KeyValuePair<GasProperties, Mole> entry in Input.OrderBy(static entry => entry.Key.Name, StringComparer.Ordinal))
-        {
-            hash.Add(entry.Key);
-            hash.Add(entry.Value);
-        }
-
-        hash.Add(Output.Count);
-        foreach (KeyValuePair<GasProperties, Mole> entry in Output.OrderBy(static entry => entry.Key.Name, StringComparer.Ordinal))
-        {
-            hash.Add(entry.Key);
-            hash.Add(entry.Value);
-        }
-
-        hash.Add(SpeedFactors.Count);
-        foreach (KeyValuePair<GasProperties, float> entry in SpeedFactors.OrderBy(
-                     static entry => entry.Key.Name,
-                     StringComparer.Ordinal))
-        {
-            hash.Add(entry.Key);
-            hash.Add(entry.Value);
-        }
-    }
-
-    internal bool SemanticallyEquals(StandardGasReaction other)
-    {
-        return EnergyBalance.Equals(other.EnergyBalance) &&
-               ArrheniusFactor.Equals(other.ArrheniusFactor) &&
-               ActivationEnergy.Equals(other.ActivationEnergy) &&
-               DictionaryEquals(Input, other.Input) &&
-               DictionaryEquals(Output, other.Output) &&
-               DictionaryEquals(SpeedFactors, other.SpeedFactors);
-    }
-
-    private static bool DictionaryEquals(
-        IReadOnlyDictionary<GasProperties, float> first,
-        IReadOnlyDictionary<GasProperties, float> second)
-    {
-        if (first.Count != second.Count)
-            return false;
-
-        foreach ((var gas, float amount) in first)
-        {
-            if (!second.TryGetValue(gas, out float otherAmount) || !amount.Equals(otherAmount))
-                return false;
-        }
-
-        return true;
-    }
+    /// <summary>
+    ///     Whether the reaction should use the ignition system.
+    /// </summary>
+    [NumosSerialize]
+    internal bool RequiresIgnition { get; }
 
     /// <summary>
     ///     Calculates the rate constant at a temperature using the original Arrhenius equation.
@@ -189,8 +150,9 @@ public readonly partial record struct StandardGasReaction
     ///     NaN, nonpositive, or infinite because the gas is absent.
     /// </summary>
     /// <remarks>
-    ///     A trace gas with a negative exponent may overflow the result to positive infinity; that is kept so the
-    ///     solver can saturate the rate. An absent gas (0^negative) means no reaction instead.
+    ///     A trace gas with a negative exponent may overflow the result to positive infinity.
+    ///     The method keeps that value so the solver can saturate the rate.
+    ///     An absent gas (0^negative) means no reaction.
     /// </remarks>
     internal static ConcentrationPerSecond64 ApplyExponent(
         ConcentrationPerSecond64 speed, MolePerCubicMetre64 concentration, float exponent)

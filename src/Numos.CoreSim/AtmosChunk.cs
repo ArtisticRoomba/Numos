@@ -1,12 +1,16 @@
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using System.Runtime.CompilerServices;
 using JetBrains.Annotations;
+using Magnitudo;
 using Numos.Collections;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.Datatypes.Snapshots;
+using Numos.CoreSim.Replay;
 using Numos.CoreSim.Solvers;
+using Numos.CoreSim.State;
+using Numos.CoreSim.State.Advanced;
 using Numos.Maths;
-using Numos.Units;
 
 namespace Numos.CoreSim;
 
@@ -14,9 +18,16 @@ namespace Numos.CoreSim;
 ///     Represents the simulation state for a fixed-size voxel chunk.
 /// </summary>
 /// <remarks>
-///     Chunk-owned per-voxel data supports both flat-index and <see cref="Int3" /> coordinate access.
-///     Use <see cref="GetIndex(Int3)" /> and <see cref="GetXyzInt3(ushort)" /> when converting indices
-///     for scalar-indexed storage such as gas channels (because... you know.... they aren't physical).
+///     <para>
+///         Chunk-owned per-voxel data supports both flat-index and <see cref="Int3" /> coordinate access.
+///         Use <see cref="GetIndex(Int3)" /> and <see cref="GetXyzInt3(ushort)" /> when converting indices
+///         for scalar-indexed storage such as gas channels (because... you know.... they aren't physical).
+///     </para>
+///     <para>
+///         Members marked <see cref="NumosSerializeAttribute" /> are the chunk's continuation state. The generated
+///         <see cref="AtmosChunkCheckpoint" /> captures, restores, hashes, and saves exactly those.
+///         Everything unmarked is derived or scratch and must be rebuildable from the marked members.
+///     </para>
 /// </remarks>
 internal class AtmosChunk
 {
@@ -32,9 +43,11 @@ internal class AtmosChunk
     ///     Flat indices of gas-bearing voxels in this chunk while it is awake.
     /// </summary>
     /// <remarks>
-    ///     Only the first <see cref="ActiveAirCount" /> entries are valid. Rebuild this list with
-    ///     <see cref="RebuildActiveAirIndices" /> after changing <see cref="VoxelRoomMap" />.
+    ///     Only the first <see cref="ActiveAirCount" /> entries are valid, and only those are checkpointed, which
+    ///     preserves inactive topology exactly. Rebuild this list with <see cref="RebuildActiveAirIndices" /> after
+    ///     changing <see cref="VoxelRoomMap" />.
     /// </remarks>
+    [NumosSerialize(Count = nameof(ActiveAirCount))]
     public ushort[] ActiveAirIndices;
 
     /// <summary>
@@ -55,13 +68,12 @@ internal class AtmosChunk
     ///     A process-local index assigned when this chunk is registered.
     /// </summary>
     /// <remarks>
-    ///     Lets hot per-tick solver lookups (e.g. boundary flow's cross-chunk injection buffer) use array
-    ///     indexing instead of a dictionary keyed on <see cref="GridPosition" />. Unique only among currently
-    ///     registered chunks, and not part of the simulation's observable state, so it is absent from
-    ///     <see cref="AtmosChunkVersion" /> and the state hash. Do not use it for anything but indexing a
-    ///     solver-owned lookup table.
-    ///     Ids are recycled after a chunk is unregistered, so a DenseId-keyed lookup table must track which
-    ///     chunk currently owns each slot and validate that before trusting stale contents.
+    ///     Lets hot per-tick solver lookups (such as the boundary flow injection buffer) use array
+    ///     indexing instead of a dictionary keyed on <see cref="GridPosition" />. The ID is unique only among
+    ///     currently registered chunks. It is not observable simulation state, so <see cref="AtmosChunkVersion" />
+    ///     and the state hash exclude it. Use it only to index a solver-owned lookup table.
+    ///     Numos recycles IDs after a chunk is unregistered. A lookup table keyed on this ID must record which
+    ///     chunk owns each slot and check that before it trusts old contents.
     /// </remarks>
     public int DenseId;
 
@@ -71,8 +83,9 @@ internal class AtmosChunk
     public int Depth;
 
     /// <summary>
-    ///     The position of this chunk in the chunk grid.
+    ///     The position of this chunk in the chunk grid. Each coordinate counts whole chunks.
     /// </summary>
+    [NumosSerialize("Position")]
     public Int3 GridPosition;
 
     /// <summary>
@@ -84,6 +97,7 @@ internal class AtmosChunk
     ///     Whether this chunk is eligible to be processed by the simulation.
     ///     A sleeping chunk is skipped during simulation ticks.
     /// </summary>
+    [NumosSerialize]
     public bool IsAwake;
 
     /// <summary>
@@ -99,13 +113,46 @@ internal class AtmosChunk
     ///     Number of consecutive simulation ticks for which this chunk has remained below the sleep threshold.
     /// </summary>
     /// <seealso cref="AtmosConfig.SleepThreshold" />
+    [NumosSerialize]
     public int SleepTimer;
 
     /// <summary>
     ///     Temperature for each voxel, in kelvins (K), indexed by flat voxel index or local coordinate.
     /// </summary>
+    /// <remarks>Raw stored values: checkpoints keep non-finite values and their exact bit patterns.</remarks>
     [ElementQuantity("temperature")]
+    [NumosSerialize("Temperatures")]
     public FlatArray<Kelvin> Temperature;
+
+    /// <summary>
+    ///     Total x-momentum of the gas in each voxel, in kilogram metres per second (kg·m/s), indexed by flat voxel
+    ///     index or local coordinate.
+    /// </summary>
+    /// <remarks>
+    ///     This is the momentum of the voxel's whole gas content, not a velocity, so adding gas at rest lowers the
+    ///     implied velocity without touching the stored value. It is zero whenever the voxel holds no gas: every path
+    ///     that empties a voxel (<see cref="SetVoxelToVacuum" />, a classification change, a mixture write that
+    ///     removes the last mole) zeroes it, so a vacuum voxel never carries stale momentum into a later tick.
+    /// </remarks>
+    [ElementQuantity("momentum")]
+    [NumosSerialize("MomentumX")]
+    public FlatArray<KilogramMetrePerSecond> MomentumX;
+
+    /// <summary>
+    ///     Total y-momentum of the gas in each voxel, in kilogram metres per second (kg·m/s). Shares the contract of
+    ///     <see cref="MomentumX" />.
+    /// </summary>
+    [ElementQuantity("momentum")]
+    [NumosSerialize("MomentumY")]
+    public FlatArray<KilogramMetrePerSecond> MomentumY;
+
+    /// <summary>
+    ///     Total z-momentum of the gas in each voxel, in kilogram metres per second (kg·m/s). Shares the contract of
+    ///     <see cref="MomentumX" />.
+    /// </summary>
+    [ElementQuantity("momentum")]
+    [NumosSerialize("MomentumZ")]
+    public FlatArray<KilogramMetrePerSecond> MomentumZ;
 
     /// <summary>
     ///     Cached total heat capacity for each voxel, in joules per kelvin (J/K).
@@ -117,13 +164,18 @@ internal class AtmosChunk
     ///     Values are total heat capacities, not molar quantities.
     /// </remarks>
     [ElementQuantity("heatCapacity")]
+    [NumosSerialize("HeatCapacities")]
     public FlatArray<JoulePerKelvin> TotalHeatCapacity;
 
     /// <summary>
     ///     Cached pressure for each voxel, in pascals (Pa), indexed by flat voxel index or local coordinate.
     /// </summary>
-    /// <remarks>These values are recomputed by the simulation each tick.</remarks>
+    /// <remarks>
+    ///     These values are recomputed by the simulation each tick. Checkpoints keep them as cached, including values
+    ///     a disabled solver stage didn't refresh.
+    /// </remarks>
     [ElementQuantity("pressure")]
+    [NumosSerialize("Pressures")]
     public FlatArray<Pascal> TotalPressure;
 
     /// <summary>
@@ -143,6 +195,7 @@ internal class AtmosChunk
     /// <seealso cref="VoxelClassification.RoomSolid" />
     /// <seealso cref="VoxelClassification.RoomVoid" />
     /// <seealso cref="VoxelClassification.RoomUnassigned" />
+    [NumosSerialize("Classifications")]
     public FlatArray<int> VoxelRoomMap;
 
     /// <summary>
@@ -192,14 +245,68 @@ internal class AtmosChunk
     /// <summary>
     ///     The number of voxels along each axis.
     /// </summary>
+    /// <remarks>Fixed at construction, so restoring a checkpoint requires a chunk with the same dimensions.</remarks>
+    [NumosSerialize]
     public Int3 Dimensions => new(Width, Height, Depth);
+
+    /// <summary>
+    ///     Gas channels in solver reduction order, including channels whose moles are all zero.
+    /// </summary>
+    /// <remarks>
+    ///     Channel order is kept because floating-point reductions can observe it. Reading copies the moles of the valid
+    ///     channels out of pooled storage. Assigning releases every channel and recreates the given ones in order.
+    /// </remarks>
+    [NumosSerialize("Gases")]
+    public IReadOnlyList<AtmosGasChannelCheckpoint> GasChannelCheckpoints
+    {
+        get
+        {
+            var gases = new AtmosGasChannelCheckpoint[ActiveGasCount];
+            for (int gas = 0; gas < gases.Length; gas++)
+                gases[gas] = new AtmosGasChannelCheckpoint(ActiveGases[gas], VoxelCount);
+
+            return gases;
+        }
+        set
+        {
+            for (int gas = 0; gas < ActiveGasCount; gas++)
+                ActiveGases[gas].Release();
+
+            Array.Clear(ActiveGases, 0, ActiveGasCount);
+            ActiveGasCount = 0;
+            foreach (var gas in value)
+            {
+                int channel = GetOrCreateGasChannel(gas.GasId);
+                StateArray.CopyTo(gas.Moles, ActiveGases[channel].Moles.AsSpan(0, VoxelCount));
+            }
+        }
+    }
+
+    /// <summary>
+    ///     Rollback <c>ChunkField&lt;T&gt;</c> arrays in ordinal key order, detached from live chunk storage.
+    /// </summary>
+    /// <remarks>
+    ///     Transient fields are left out. Assigning drops every field, transient ones included, and recreates the
+    ///     given arrays. Reacquire them through the same <c>ChunkField&lt;T&gt;</c>. Its key, element type, and length
+    ///     must match.
+    /// </remarks>
+    [NumosSerialize(Codec = typeof(SolverArraysCodec))]
+    public IReadOnlyList<AtmosSolverArraySnapshot> SolverArrays
+    {
+        get => StateArray.Wrap(CaptureSolverArrays());
+        set
+        {
+            ResetFields();
+            RestoreSolverArrays(value);
+        }
+    }
 
     /// <summary>
     ///     Allocates any per-voxel array that is missing or sized for different dimensions.
     /// </summary>
     /// <remarks>
     ///     Existing arrays are reused when they already have the required length. This method does not
-    ///     clear existing values or reset active counts; use <see cref="Initialize" /> to reset the chunk.
+    ///     clear existing values or reset active counts. Use <see cref="Initialize" /> to reset the chunk.
     /// </remarks>
     [MemberNotNull(nameof(ActiveAirIndices), nameof(ActiveGases))]
     [PublicAPI]
@@ -213,6 +320,9 @@ internal class AtmosChunk
         EnsureInitialized(ref TotalPressure, dimensions);
         EnsureInitialized(ref TotalHeatCapacity, dimensions);
         EnsureInitialized(ref Temperature, dimensions);
+        EnsureInitialized(ref MomentumX, dimensions);
+        EnsureInitialized(ref MomentumY, dimensions);
+        EnsureInitialized(ref MomentumZ, dimensions);
         EnsureInitialized(ref IsVacuum, dimensions);
         if (ActiveGases == null)
             ActiveGases = new GasChannel[AtmosChunkConstants.InitialGasChannelCapacity];
@@ -230,8 +340,8 @@ internal class AtmosChunk
     ///     <see cref="AtmosChunkConstants.MaximumVoxelCount" />.
     /// </exception>
     /// <remarks>
-    ///     Initialization puts the chunk to sleep, resets all active counts and timers, and clears
-    ///     its per-voxel and gas-channel data. Solver arrays are detached.
+    ///     Initialization puts the chunk to sleep and resets all active counts and timers. It clears
+    ///     the per-voxel and gas-channel data and detaches solver arrays.
     /// </remarks>
     [PublicAPI]
     public void Initialize(
@@ -260,6 +370,9 @@ internal class AtmosChunk
         TotalPressure.Clear();
         TotalHeatCapacity.Clear();
         Temperature.Clear();
+        MomentumX.Clear();
+        MomentumY.Clear();
+        MomentumZ.Clear();
         IsVacuum.Fill(true);
         Array.Clear(ActiveGases, 0, ActiveGases.Length);
 
@@ -268,8 +381,8 @@ internal class AtmosChunk
     }
 
     /// <summary>
-    ///     Gives a chunk straight out of the constructor its position and a fresh generation. It is equivalent to
-    ///     <see cref="Initialize" /> with the constructor's dimensions, minus clearing arrays that were just allocated.
+    ///     Gives a chunk straight out of the constructor its position and a fresh generation. This equals
+    ///     <see cref="Initialize" /> with the constructor's dimensions, except that it skips clearing new arrays.
     /// </summary>
     internal void InitializeConstructed(Int3 position)
     {
@@ -311,13 +424,31 @@ internal class AtmosChunk
     /// <param name="field">The field descriptor.</param>
     /// <returns>The live array, initially filled with default values.</returns>
     /// <remarks>
-    ///     Safe to call from parallel workers, including the first touch of a field. Storage stays lazy on purpose:
-    ///     allocating every registered field up front would add zero-filled captured arrays to every checkpoint and
-    ///     change state hashes. Arrays survive ticks and sleep, but are detached on initialization or release.
+    ///     Safe to call from parallel workers, including the first touch of a field. Storage stays lazy because
+    ///     allocating every registered field up front would add zero-filled arrays to every checkpoint and
+    ///     change state hashes. Arrays survive ticks. Sleep and vacuum clear them only when the descriptor opts in. Initialization or
+    ///     release detaches them.
     /// </remarks>
     internal T[] GetOrCreateField<T>(ChunkFieldDescriptor<T> field)
     {
         return FindField(Volatile.Read(ref _fields), field)?.Values ?? CreateField(field);
+    }
+
+    /// <summary>
+    ///     Gets a field's storage if this chunk has already allocated it.
+    /// </summary>
+    /// <typeparam name="T">The field's element type.</typeparam>
+    /// <param name="field">The field descriptor.</param>
+    /// <param name="array">The live array, or <see langword="null" /> when the chunk has no storage for the field.</param>
+    /// <returns><see langword="true" /> when the chunk has storage for <paramref name="field" />.</returns>
+    /// <remarks>
+    ///     Unlike <see cref="GetOrCreateField{T}" />, this never allocates. A read through it leaves checkpoints and
+    ///     state hashes unchanged. Safe to call from parallel workers.
+    /// </remarks>
+    internal bool TryGetField<T>(ChunkFieldDescriptor<T> field, [NotNullWhen(true)] out T[]? array)
+    {
+        array = FindField(Volatile.Read(ref _fields), field)?.Values;
+        return array != null;
     }
 
     private static SolverArrayStorage<T>? FindField<T>(SolverArrayStorage?[]? fields, ChunkFieldDescriptor<T> field)
@@ -379,7 +510,7 @@ internal class AtmosChunk
             foreach (var storage in fields)
             {
                 if (storage is { CaptureForRollback: true })
-                    (captured ??= []).Add(new AtmosSolverArraySnapshot(storage));
+                    (captured ??= []).Add(AtmosSolverArraySnapshot.Copy(storage));
             }
         }
 
@@ -447,17 +578,26 @@ internal class AtmosChunk
     }
 
     /// <summary>
-    ///     Marks the chunk as sleeping so that it is skipped by simulation ticks.
+    ///     Marks the chunk as sleeping. Simulation ticks skip it.
     /// </summary>
     public virtual void Sleep()
     {
         IsAwake = false;
         MarkChanged();
+        SolverArrayStorage?[]? fields = Volatile.Read(ref _fields);
+        if (fields == null)
+            return;
+
+        foreach (var storage in fields)
+        {
+            if (storage is { Field.ClearOnSleep: true })
+                storage.ClearAll();
+        }
     }
 
     /// <summary>
     ///     Adds gas at <paramref name="temperature" /> to a voxel, blending the voxel's temperature by heat
-    ///     capacity and recomputing its pressure. Solid and void voxels are ignored; a sleeping chunk is woken.
+    ///     capacity and recomputing its pressure. Solid and void voxels are ignored. A sleeping chunk wakes.
     /// </summary>
     /// <param name="localVoxelIndex">The flat index of the target voxel within this chunk.</param>
     /// <param name="gasId">The ID of the gas to add.</param>
@@ -553,8 +693,9 @@ internal class AtmosChunk
 
 
     /// <summary>
-    ///     Clears one voxel to vacuum: zeroes <see cref="TotalPressure" />, every gas channel, and
-    ///     <see cref="TotalHeatCapacity" />, and sets <see cref="IsVacuum" />.
+    ///     Clears one voxel to vacuum: zeroes <see cref="TotalPressure" />, every gas channel,
+    ///     <see cref="TotalHeatCapacity" />, and the momentum components, and sets <see cref="IsVacuum" />. Per-voxel fields that opt into vacuum
+    ///     clearing are reset for this voxel.
     /// </summary>
     /// <param name="idx">Index of voxel</param>
     /// <remarks>Temperature is left as is, and the chunk revision is not advanced.</remarks>
@@ -568,11 +709,45 @@ internal class AtmosChunk
         }
 
         TotalHeatCapacity[idx] = 0f;
+        ZeroMomentum(idx);
         IsVacuum[idx] = true;
+
+        // Solver workers call this per voxel, so walk only this chunk's allocated fields without locking.
+        SolverArrayStorage?[]? fields = Volatile.Read(ref _fields);
+        if (fields == null)
+            return;
+
+        foreach (var storage in fields)
+        {
+            if (storage is { Field: { ClearOnVacuum: true, FixedLength: null } })
+                storage.ClearElement(idx);
+        }
+    }
+
+    /// <summary>
+    ///     Zeroes every momentum component of one voxel. Call it whenever a write leaves the voxel without gas, so
+    ///     the "no gas, no momentum" invariant on <see cref="MomentumX" /> holds.
+    /// </summary>
+    internal void ZeroMomentum(ushort localVoxelIndex)
+    {
+        MomentumX[localVoxelIndex] = 0f;
+        MomentumY[localVoxelIndex] = 0f;
+        MomentumZ[localVoxelIndex] = 0f;
+    }
+
+    /// <summary>
+    ///     Whether any momentum component of one voxel is nonzero. A NaN component counts as nonzero.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal bool HasMomentum(ushort localVoxelIndex)
+    {
+        return MomentumX[localVoxelIndex] != 0f || MomentumY[localVoxelIndex] != 0f ||
+               MomentumZ[localVoxelIndex] != 0f;
     }
 
     /// <summary>
     ///     Clears every voxel in the chunk to vacuum, as <see cref="SetVoxelToVacuum" /> does for one voxel.
+    ///     Fixed-length fields that opt into vacuum clearing are also reset.
     /// </summary>
     [PublicAPI]
     public void SetChunkToVacuum()
@@ -584,9 +759,21 @@ internal class AtmosChunk
         }
 
         TotalHeatCapacity.Fill(0f);
+        MomentumX.Fill(0f);
+        MomentumY.Fill(0f);
+        MomentumZ.Fill(0f);
         IsVacuum.Fill(true);
-    }
 
+        SolverArrayStorage?[]? fields = Volatile.Read(ref _fields);
+        if (fields == null)
+            return;
+
+        foreach (var storage in fields)
+        {
+            if (storage is { Field.ClearOnVacuum: true })
+                storage.ClearAll();
+        }
+    }
 
     /// <summary>
     ///     Sets a specific voxel classification. Solid and void classifications clear the voxel to vacuum.
@@ -596,10 +783,7 @@ internal class AtmosChunk
     [PublicAPI]
     public void SetVoxelClassification(ushort idx, int roomId)
     {
-        if (roomId < 0)
-            SetVoxelToVacuum(idx);
-
-        VoxelRoomMap[idx] = roomId;
+        SetVoxelClassification(idx, new VoxelClassification(roomId));
     }
 
     /// <summary>
@@ -624,12 +808,8 @@ internal class AtmosChunk
     [PublicAPI]
     public void SetChunkClassification(int roomId)
     {
-        if (roomId < 0)
-            SetChunkToVacuum();
-
-        VoxelRoomMap.Fill(roomId);
+        SetChunkClassification(new VoxelClassification(roomId));
     }
-
 
     /// <summary>
     ///     Sets the entire chunk classification. Solid and void classifications clear the chunk to vacuum.
@@ -650,7 +830,7 @@ internal class AtmosChunk
     /// </summary>
     /// <remarks>
     ///     Channels are appended in the order gases first reach the chunk, so the same index can hold different
-    ///     gases in different chunks. Anything comparing gas across chunks has to look it up by id.
+    ///     gases in different chunks. Look gas up by ID when you compare chunks.
     /// </remarks>
     internal int FindGasChannel(int gasId)
     {
@@ -687,14 +867,20 @@ internal class AtmosChunk
     ///     Creates a detached snapshot of the chunk's current state.
     /// </summary>
     /// <param name="fields">The per-voxel fields to copy.</param>
+    /// <param name="config">
+    ///     Configuration supplying gas molar masses. The snapshot reads it only when <paramref name="fields" />
+    ///     includes <see cref="AtmosChunkSnapshotFields.Velocity" />, because velocity is derived from momentum and
+    ///     mass rather than stored.
+    /// </param>
     /// <returns>A snapshot containing selected physical fields and solver arrays opted into capture.</returns>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="fields" /> contains undefined flags.</exception>
     [PublicAPI]
-    public AtmosChunkSnapshot GetNetworkSnapshot(
-        AtmosChunkSnapshotFields fields = AtmosChunkSnapshotFields.All)
+    public AtmosChunkSnapshot GetNetworkSnapshot(AtmosChunkSnapshotFields fields, IAtmosConfig config)
     {
         if ((fields & ~AtmosChunkSnapshotFields.All) != 0)
             throw new ArgumentOutOfRangeException(nameof(fields));
+
+        bool includeVelocity = fields.HasFlag(AtmosChunkSnapshotFields.Velocity);
 
         var snapshot = new AtmosChunkSnapshot
         {
@@ -717,6 +903,9 @@ internal class AtmosChunk
             VoxelRoomMap = fields.HasFlag(AtmosChunkSnapshotFields.VoxelClassification)
                 ? VoxelRoomMap.ToArray()
                 : [],
+            VelocityX = includeVelocity ? new MetrePerSecond[VoxelCount] : [],
+            VelocityY = includeVelocity ? new MetrePerSecond[VoxelCount] : [],
+            VelocityZ = includeVelocity ? new MetrePerSecond[VoxelCount] : [],
             SolverArrays = fields.HasFlag(AtmosChunkSnapshotFields.SolverArrays)
                 ? Array.AsReadOnly(CaptureSolverArrays())
                 : Array.Empty<AtmosSolverArraySnapshot>(),
@@ -737,6 +926,25 @@ internal class AtmosChunk
                 };
 
                 Array.Copy(ActiveGases[g].Moles, snapshot.Gases[g].Moles, VoxelCount);
+            }
+        }
+
+        if (includeVelocity)
+        {
+            Span<KilogramPerMole> molarMasses = ActiveGasCount <= AtmosSolverMath.MolarMassStackLimit
+                ? stackalloc KilogramPerMole[AtmosSolverMath.MolarMassStackLimit]
+                : new KilogramPerMole[ActiveGasCount];
+
+            AtmosSolverMath.ResolveMolarMasses(config, this, molarMasses);
+            for (int index = 0; index < VoxelCount; index++)
+            {
+                AtmosSolverMath.ComputeVoxelVelocity(
+                    molarMasses,
+                    this,
+                    (ushort)index,
+                    out snapshot.VelocityX[index],
+                    out snapshot.VelocityY[index],
+                    out snapshot.VelocityZ[index]);
             }
         }
 

@@ -33,16 +33,16 @@ internal sealed class ThermodynamicsSolver : IAtmosSolverStage, IDisposable
 
         AtmosChunk[] chunks = context.Chunks;
 
-        // Batches are reserved here, single-threaded, before any worker starts, so each worker only
-        // writes into the batch reserved for its own chunk instead of contending on a shared queue
-        // for every boundary voxel. Same pattern as AdvectionSolver/BoundaryFlowSolver.
+        // Batches are reserved here, single-threaded, before any worker starts.
+        // Each worker writes only into its own chunk's batch, so boundary voxels never contend on a shared queue.
+        // AdvectionSolver and BoundaryFlowSolver use the same pattern.
         BoundaryEventBatch<ThermalBoundaryEvent>?[] batches =
             ArrayPool<BoundaryEventBatch<ThermalBoundaryEvent>?>.Shared.Rent(Math.Max(1, chunks.Length));
 
         try
         {
-            // Told to PhaseChangeSolver so it knows whether this outer per-chunk dispatch already
-            // saturates the worker pool, to avoid oversubscribing with its own per-voxel parallelism.
+            // Tells PhaseChangeSolver whether this per-chunk dispatch already saturates the worker pool.
+            // If it does, PhaseChangeSolver skips its own per-voxel parallelism to avoid oversubscription.
             int awakeChunkCount = 0;
             for (int i = 0; i < chunks.Length; i++)
             {
@@ -59,10 +59,7 @@ internal sealed class ThermodynamicsSolver : IAtmosSolverStage, IDisposable
                 }
             }
 
-            ParallelHelper.For(
-                0,
-                chunks.Length,
-                new SolveChunkAction(this, context, batches, awakeChunkCount));
+            ParallelPhase.Run(chunks.Length, new SolveChunkAction(this, context, batches, awakeChunkCount));
         }
         finally
         {

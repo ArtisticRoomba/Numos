@@ -1,4 +1,4 @@
-using Numos.CoreSim.Replay;
+using Numos.CoreSim.State;
 
 namespace Numos.CoreSim.GasReactions;
 
@@ -16,19 +16,21 @@ namespace Numos.CoreSim.GasReactions;
 ///     simulation.SetAtmosConfig(config);
 ///     </code>
 /// </example>
-public sealed class GasReactionConfig : IAtmosSolverConfiguration
+public sealed partial class GasReactionConfig : IAtmosSolverConfiguration
 {
     /// <summary>
     ///     Identifies the configuration consumed by the built-in reaction solver.
     /// </summary>
-    public const string ConfigurationKey = "gas-reactions";
+    public const string ConfigurationKey = "numos/gas-reactions";
 
     internal readonly static GasReactionConfig Empty = new();
 
-    // Reaction-ID-indexed, built once at construction since reaction definitions never change after
-    // capture. Spares the per-reaction-per-iteration caller from a Linear-vs-Standard branch and an
-    // IReadOnlyList indexer call every time it needs a reaction's energy balance.
+    // Reaction-ID-indexed and built once at construction, because reaction definitions never change after capture.
+    // Callers that need a reaction's energy balance on every iteration skip the Linear-vs-Standard branch
+    // and the IReadOnlyList indexer call.
     private readonly JoulePerMole[] _energyBalances;
+
+    private readonly bool[] _requiresIgnition;
 
     /// <summary>
     ///     Captures ordered reaction definitions without retaining mutable source collections.
@@ -44,30 +46,39 @@ public sealed class GasReactionConfig : IAtmosSolverConfiguration
         StandardReactions = Array.AsReadOnly(standardReactions?.ToArray() ?? []);
 
         _energyBalances = new JoulePerMole[LinearReactions.Count + StandardReactions.Count];
+        _requiresIgnition = new bool[LinearReactions.Count + StandardReactions.Count];
         for (int i = 0; i < LinearReactions.Count; i++)
+        {
             _energyBalances[i] = LinearReactions[i].EnergyBalance;
+            _requiresIgnition[i] = LinearReactions[i].RequiresIgnition;
+        }
 
         for (int i = 0; i < StandardReactions.Count; i++)
+        {
             _energyBalances[LinearReactions.Count + i] = StandardReactions[i].EnergyBalance;
+            _requiresIgnition[LinearReactions.Count + i] = StandardReactions[i].RequiresIgnition;
+        }
     }
 
     /// <summary>
     ///     Gets linear reaction definitions in reaction-ID order.
     /// </summary>
+    [NumosSerialize]
     public IReadOnlyList<LinearGasReaction> LinearReactions { get; }
 
     /// <summary>
     ///     Gets standard reactions, whose IDs follow all linear reactions.
     /// </summary>
+    [NumosSerialize]
     public IReadOnlyList<StandardGasReaction> StandardReactions { get; }
+
+    /// <inheritdoc />
+    public string Key => ConfigurationKey;
 
     /// <summary>
     ///     Gets the combined number of reactions.
     /// </summary>
     public int Count => LinearReactions.Count + StandardReactions.Count;
-
-    /// <inheritdoc />
-    public string Key => ConfigurationKey;
 
     /// <inheritdoc />
     /// <exception cref="ArgumentNullException"><paramref name="gasRegistry" /> is null.</exception>
@@ -85,44 +96,6 @@ public sealed class GasReactionConfig : IAtmosSolverConfiguration
         return this;
     }
 
-    /// <inheritdoc />
-    public bool SemanticallyEquals(IAtmosSolverConfiguration other)
-    {
-        if (other is not GasReactionConfig reactions ||
-            LinearReactions.Count != reactions.LinearReactions.Count ||
-            StandardReactions.Count != reactions.StandardReactions.Count)
-            return false;
-
-        for (int i = 0; i < LinearReactions.Count; i++)
-        {
-            if (!LinearReactions[i].SemanticallyEquals(reactions.LinearReactions[i]))
-                return false;
-        }
-
-        for (int i = 0; i < StandardReactions.Count; i++)
-        {
-            if (!StandardReactions[i].SemanticallyEquals(reactions.StandardReactions[i]))
-                return false;
-        }
-
-        return true;
-    }
-
-    /// <inheritdoc />
-    public ulong ComputeStateHash()
-    {
-        var hash = new AtmosStateHasher();
-        hash.Add(LinearReactions.Count);
-        foreach (var reaction in LinearReactions)
-            reaction.AppendHash(ref hash);
-
-        hash.Add(StandardReactions.Count);
-        foreach (var reaction in StandardReactions)
-            reaction.AppendHash(ref hash);
-
-        return hash.Value;
-    }
-
     internal static GasReactionConfig Get(IAtmosConfig config)
     {
         return SolverConfigurationLookup.TryGet(config.SolverConfigurations, ConfigurationKey, out GasReactionConfig? reactions)
@@ -132,8 +105,10 @@ public sealed class GasReactionConfig : IAtmosSolverConfiguration
 
     internal JoulePerMole GetEnergyBalance(int reactionId) => _energyBalances[reactionId];
 
-    // Unlike GetEnergyBalance, this can't be precomputed once at construction: it depends on the
-    // caller's temperature, which changes every voxel.
+    internal bool GetReactionIsIgnition(int reactionId) => _requiresIgnition[reactionId];
+
+    // Unlike GetEnergyBalance, this cannot be precomputed at construction.
+    // It depends on the caller's temperature, which changes for every voxel.
     internal ConcentrationPerSecond GetRateConstant(int reactionId, Kelvin temperature)
     {
         return reactionId < LinearReactions.Count

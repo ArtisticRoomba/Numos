@@ -238,7 +238,7 @@ public sealed partial class AtmosSolverDependencyTests
 
         world.Tick();
         world.Tick();
-        world.Solvers.SetEnabled(AtmosBuiltInSolvers.Advection, false);
+        world.Solvers.SetEnabled(AtmosBuiltInSolvers.EulerFlow, false);
         world.Tick();
 
         Assert.That(consumer.Injections, Is.EqualTo(1));

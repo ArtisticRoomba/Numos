@@ -12,8 +12,9 @@ public sealed class HeadlessApplicationTests
     [Test]
     public async Task JsonlSession_DeterministicTwoCellFlow_ReportsExpectedGasMovement()
     {
+        // The 1.5 / 0.5 split is the legacy pressure-relaxation law's one-tick answer.
         var run = await RunAsync(
-            CreateSimulationRequest("create", 2, 1, 1),
+            CreateProjectRequest("create", 2, 1, 1, "legacy"),
             Request(
                 "chunk",
                 "addChunk",
@@ -53,11 +54,128 @@ public sealed class HeadlessApplicationTests
     }
 
     [Test]
+    public async Task JsonlSession_EulerTube_MovesGasTowardTheLowPressureHalf()
+    {
+        // SI air at 1 m³ per voxel: 80 mol is about 2 atm at 300 K, 40 mol about 1 atm. Eight voxels rather than
+        // two so the tube is still moving when the tick ends. A two-cell tube rings down inside one tick.
+        List<string> requests =
+        [
+            Request(
+                "create",
+                "createProject",
+                "\"chunkDimensions\":{\"x\":8,\"y\":1,\"z\":1}," +
+                "\"config\":{\"voxelVolumeM3\":1,\"defaultDiffusionCoefficient\":0,\"vacuumThresholdPa\":0," +
+                "\"sleepThreshold\":2147483647,\"sleepEpsilonPercent\":0}," +
+                "\"gases\":[{\"name\":\"Air\",\"molarHeatCapacityAtConstantVolume\":20.786," +
+                "\"molarMassKgPerMol\":0.02897}]"),
+            AddChunkRequest("chunk", 0, 0, 0)
+        ];
+
+        for (int x = 0; x < 8; x++)
+        {
+            requests.Add(Request(
+                $"inject-{x}",
+                "injectGas",
+                "\"position\":{\"x\":0,\"y\":0,\"z\":0}," +
+                $"\"voxel\":{{\"x\":{x},\"y\":0,\"z\":0}}," +
+                $"\"gasId\":0,\"moles\":{(x < 4 ? 80 : 40)},\"temperatureK\":300"));
+        }
+
+        requests.Add(Request("before", "observe"));
+        requests.Add(Request("tick", "tick", "\"count\":1"));
+        requests.Add(Request("observe", "observe", "\"includeVoxels\":true"));
+        requests.Add(Request("exit", "exit"));
+        var run = await RunAsync(requests.ToArray());
+
+        var before = FindResponse(run.Responses, "before").GetProperty("observation");
+        var observation = FindResponse(run.Responses, "observe").GetProperty("observation");
+        var flow = observation.GetProperty("flow");
+        var voxels = FindArraysNamed(observation, "voxels").Single().EnumerateArray().ToArray();
+        float[] gasMoles = voxels.Select(ReadGasZeroMoles).ToArray();
+        float[] speeds = voxels.Select(static voxel => voxel.GetProperty("speedMps").GetSingle()).ToArray();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(run.ExitCode, Is.Zero);
+            Assert.That(
+                observation.GetProperty("solverPipeline")[0].GetProperty("name").GetString(),
+                Is.EqualTo("euler-flow"));
+
+            Assert.That(before.GetProperty("flow").GetProperty("substepsLastTick").GetInt32(), Is.Zero);
+            Assert.That(gasMoles, Has.Length.EqualTo(8));
+            Assert.That(gasMoles.Sum(), Is.EqualTo(480f).Within(0.01f));
+            Assert.That(gasMoles[0], Is.LessThan(80f));
+            Assert.That(gasMoles[7], Is.GreaterThan(40f));
+            Assert.That(speeds.Max(), Is.GreaterThan(0f));
+            Assert.That(flow.GetProperty("substepsLastTick").GetInt32(), Is.GreaterThanOrEqualTo(1));
+            Assert.That(flow.GetProperty("maxSignalSpeedMps").GetSingle(), Is.GreaterThan(0f));
+            Assert.That(flow.GetProperty("substepCapEngaged").GetBoolean(), Is.False);
+        });
+    }
+
+    [Test]
+    public async Task CreateProject_UnknownTransportModel_IsRejected()
+    {
+        var run = await RunAsync(
+            CreateProjectRequest("create", 1, 1, 1, "lattice-boltzmann"),
+            Request("exit", "exit"));
+
+        var response = FindResponse(run.Responses, "create");
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(response.GetProperty("ok").GetBoolean(), Is.False);
+            Assert.That(
+                response.GetProperty("error").GetProperty("code").GetString(),
+                Is.EqualTo("invalidTransportModel"));
+        });
+    }
+
+    [Test]
+    public async Task UpdateConfig_EulerFlowPatch_ReplacesOnlyTheGivenSettings()
+    {
+        var run = await RunAsync(
+            CreateProjectRequest("create", 1, 1, 1),
+            Request("before", "observe"),
+            Request(
+                "patch",
+                "updateConfig",
+                "\"config\":{\"eulerFlow\":{\"courantNumber\":0.4,\"reconstruction\":\"firstOrder\"}}"),
+            Request(
+                "patch-again",
+                "updateConfig",
+                "\"config\":{\"eulerFlow\":{\"maxSubstepsPerTick\":0,\"allMachCorrection\":true}}"),
+            Request("after", "observe"),
+            Request(
+                "bad",
+                "updateConfig",
+                "\"config\":{\"eulerFlow\":{\"reconstruction\":\"musclHancock\"}}"),
+            Request("exit", "exit"));
+
+        var before = FindResponse(run.Responses, "before").GetProperty("observation").GetProperty("config");
+        var after = FindResponse(run.Responses, "after").GetProperty("observation").GetProperty("config");
+        var euler = after.GetProperty("eulerFlow");
+        var bad = FindResponse(run.Responses, "bad");
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(before.TryGetProperty("eulerFlow", out _), Is.False);
+            Assert.That(euler.GetProperty("courantNumber").GetSingle(), Is.EqualTo(0.4f).Within(Tolerance));
+            Assert.That(euler.GetProperty("reconstruction").GetString(), Is.EqualTo("firstOrder"));
+            Assert.That(euler.GetProperty("maxSubstepsPerTick").GetInt32(), Is.Zero);
+            Assert.That(euler.GetProperty("allMachCorrection").GetBoolean(), Is.True);
+            Assert.That(euler.GetProperty("maxVelocityMps").GetSingle(), Is.EqualTo(5000f));
+            Assert.That(bad.GetProperty("ok").GetBoolean(), Is.False);
+            Assert.That(bad.GetProperty("error").GetProperty("code").GetString(), Is.EqualTo("invalidConfig"));
+        });
+    }
+
+    [Test]
     public async Task JsonlSession_MalformedJson_ReturnsStructuredErrorAndProcessesNextLine()
     {
         var run = await RunAsync(
-            "{\"protocolVersion\":1,\"id\":\"broken\",\"op\":",
-            CreateSimulationRequest("recovered", 1, 1, 1),
+            "{\"protocolVersion\":2,\"id\":\"broken\",\"op\":",
+            CreateProjectRequest("recovered", 1, 1, 1),
             Request("exit", "exit"));
 
         var errorResponse = run.Responses.Single(response =>
@@ -85,8 +203,8 @@ public sealed class HeadlessApplicationTests
         var run = await RunAsync(
             Request(
                 "typo",
-                "createSimulation",
-                "\"dimensions\":{\"x\":1,\"y\":1,\"z\":1},\"widht\":1"),
+                "createProject",
+                "\"chunkDimensions\":{\"x\":1,\"y\":1,\"z\":1},\"widht\":1"),
             "{\"id\":\"no-version\",\"op\":\"observe\"}",
             Request("exit", "exit"));
 
@@ -96,7 +214,7 @@ public sealed class HeadlessApplicationTests
         Assert.Multiple(() =>
         {
             Assert.That(run.ExitCode, Is.EqualTo(1));
-            Assert.That(response.GetProperty("op").GetString(), Is.EqualTo("createSimulation"));
+            Assert.That(response.GetProperty("op").GetString(), Is.EqualTo("createProject"));
             Assert.That(response.GetProperty("ok").GetBoolean(), Is.False);
             Assert.That(
                 response.GetProperty("error").GetProperty("code").GetString(),
@@ -113,7 +231,7 @@ public sealed class HeadlessApplicationTests
     public async Task JsonlSession_IncompleteCoordinate_IsRejectedWithoutMutatingState()
     {
         var run = await RunAsync(
-            CreateSimulationRequest("create", 1, 1, 1),
+            CreateProjectRequest("create", 1, 1, 1),
             Request("incomplete", "addChunk", "\"position\":{\"x\":7},\"classification\":1"),
             Request("observe", "observe"),
             Request("exit", "exit"));
@@ -134,10 +252,65 @@ public sealed class HeadlessApplicationTests
     }
 
     [Test]
+    public async Task SetVoxelMomentum_Observe_ReportsDerivedVelocityWithoutTicking()
+    {
+        var run = await RunAsync(
+            HeadlessTestSupport.CreateProject("create", 2, 1, 1, "\"referenceMolarMassKgPerMol\":0.01"),
+            AddChunkRequest("chunk", 0, 0, 0),
+            Request(
+                "inject",
+                "injectGas",
+                "\"position\":{\"x\":0,\"y\":0,\"z\":0}," +
+                "\"voxel\":{\"x\":0,\"y\":0,\"z\":0}," +
+                "\"gasId\":0,\"moles\":2,\"temperatureK\":300"),
+            // 2 mol × 0.01 kg/mol = 0.02 kg, so (0.06, 0, -0.08) kg·m/s is (3, 0, -4) m/s.
+            Request(
+                "momentum",
+                "setVoxelMomentum",
+                "\"position\":{\"x\":0,\"y\":0,\"z\":0}," +
+                "\"voxel\":{\"x\":0,\"y\":0,\"z\":0}," +
+                "\"momentumX\":0.06,\"momentumY\":0,\"momentumZ\":-0.08"),
+            Request(
+                "observe",
+                "observe",
+                "\"position\":{\"x\":0,\"y\":0,\"z\":0},\"voxel\":{\"x\":0,\"y\":0,\"z\":0}"),
+            Request("exit", "exit"));
+
+        var momentumResponse = FindResponse(run.Responses, "momentum");
+        var observationResponse = FindResponse(run.Responses, "observe");
+        var observation = observationResponse.GetProperty("observation");
+        var chunk = observation.GetProperty("chunks")[0];
+        var voxel = chunk.GetProperty("voxels")[0];
+        var velocity = voxel.GetProperty("velocityMps");
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(run.ExitCode, Is.Zero);
+            Assert.That(momentumResponse.GetProperty("ok").GetBoolean(), Is.True);
+            Assert.That(observationResponse.GetProperty("state").GetProperty("tick").GetInt32(), Is.Zero);
+            Assert.That(velocity.GetProperty("x").GetSingle(), Is.EqualTo(3f).Within(Tolerance));
+            Assert.That(velocity.GetProperty("y").GetSingle(), Is.EqualTo(0f).Within(Tolerance));
+            Assert.That(velocity.GetProperty("z").GetSingle(), Is.EqualTo(-4f).Within(Tolerance));
+            Assert.That(voxel.GetProperty("speedMps").GetSingle(), Is.EqualTo(5f).Within(Tolerance));
+            Assert.That(
+                chunk.GetProperty("summary").GetProperty("speedMps").GetProperty("maximum").GetDouble(),
+                Is.EqualTo(5d).Within(Tolerance));
+
+            Assert.That(
+                observation.GetProperty("global").GetProperty("speedMps").GetProperty("finiteCount").GetInt32(),
+                Is.EqualTo(2));
+
+            Assert.That(
+                observation.GetProperty("global").GetProperty("anomalies").GetProperty("nonFiniteVelocityCount").GetInt32(),
+                Is.Zero);
+        });
+    }
+
+    [Test]
     public async Task InjectGas_UnregisteredGasId_IsRejected()
     {
         var run = await RunAsync(
-            CreateSimulationRequest("create", 1, 1, 1),
+            CreateProjectRequest("create", 1, 1, 1),
             AddChunkRequest("chunk", 0, 0, 0),
             Request(
                 "inject",
@@ -176,13 +349,14 @@ public sealed class HeadlessApplicationTests
         };
 
         startInfo.ArgumentList.Add(applicationPath);
+        startInfo.ArgumentList.Add("--quiet");
 
         using var process = Process.Start(startInfo) ??
                             throw new InvalidOperationException("Could not start the Headless process.");
 
         Task<string> standardOutput = process.StandardOutput.ReadToEndAsync();
         Task<string> standardError = process.StandardError.ReadToEndAsync();
-        await process.StandardInput.WriteLineAsync(CreateSimulationRequest("process-create", 1, 1, 1));
+        await process.StandardInput.WriteLineAsync(CreateProjectRequest("process-create", 1, 1, 1));
         await process.StandardInput.WriteLineAsync(Request("process-exit", "exit"));
         process.StandardInput.Close();
 
@@ -236,7 +410,7 @@ public sealed class HeadlessApplicationTests
     public async Task Observe_NonFiniteTemperature_EmitsValidJsonWithNamedValue()
     {
         var run = await RunAsync(
-            CreateSimulationRequest("create", 1, 1, 1),
+            CreateProjectRequest("create", 1, 1, 1),
             Request(
                 "chunk",
                 "addChunk",
@@ -279,7 +453,7 @@ public sealed class HeadlessApplicationTests
     public async Task Observe_ChunksCreatedOutOfOrder_ReturnsStableCoordinateOrder()
     {
         var run = await RunAsync(
-            CreateSimulationRequest("create", 1, 1, 1),
+            CreateProjectRequest("create", 1, 1, 1),
             AddChunkRequest("chunk-2", 2, 0, 0),
             AddChunkRequest("chunk-negative-later", -1, 4, 0),
             AddChunkRequest("chunk-negative-first", -1, 3, 5),
@@ -303,13 +477,16 @@ public sealed class HeadlessApplicationTests
                 }));
     }
 
-    private static string CreateSimulationRequest(string id, int width, int height, int depth)
+    private static string CreateProjectRequest(
+        string id, int width, int height, int depth, string? transportModel = null)
     {
+        string model = transportModel == null ? string.Empty : $"\"transportModel\":\"{transportModel}\",";
         return Request(
             id,
-            "createSimulation",
+            "createProject",
             $"\"name\":\"Headless tests\"," +
-            $"\"dimensions\":{{\"x\":{width},\"y\":{height},\"z\":{depth}}}," +
+            model +
+            $"\"chunkDimensions\":{{\"x\":{width},\"y\":{height},\"z\":{depth}}}," +
             "\"config\":{" +
             "\"defaultTemperatureFallbackK\":300," +
             "\"defaultMolarHeatCapacityAtConstantVolume\":1," +
@@ -352,10 +529,15 @@ public sealed class HeadlessApplicationTests
     private static string Request(string id, string op, string? payload = null)
     {
         string suffix = string.IsNullOrEmpty(payload) ? string.Empty : $",{payload}";
-        return $"{{\"protocolVersion\":1,\"id\":\"{id}\",\"op\":\"{op}\"{suffix}}}";
+        return $"{{\"protocolVersion\":2,\"id\":\"{id}\",\"op\":\"{op}\"{suffix}}}";
     }
 
-    private static async Task<RunResult> RunAsync(params string[] requests)
+    private static Task<RunResult> RunAsync(params string[] requests)
+    {
+        return RunWithArgsAsync(["--quiet"], requests);
+    }
+
+    private static async Task<RunResult> RunWithArgsAsync(string[] args, params string[] requests)
     {
         string inputText = string.Join('\n', requests) + "\n";
         using var input = new StringReader(inputText);
@@ -363,7 +545,7 @@ public sealed class HeadlessApplicationTests
         using var error = new StringWriter(CultureInfo.InvariantCulture);
 
         int exitCode = await HeadlessApplication.RunAsync(
-            [],
+            args,
             input,
             output,
             error,
@@ -453,7 +635,7 @@ public sealed class HeadlessApplicationTests
     {
         return response.ValueKind == JsonValueKind.Object &&
                response.TryGetProperty("protocolVersion", out var version) &&
-               version.GetInt32() == 1 &&
+               version.GetInt32() == 2 &&
                response.TryGetProperty("ok", out _);
     }
 

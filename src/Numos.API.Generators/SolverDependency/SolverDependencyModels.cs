@@ -32,7 +32,7 @@ internal sealed record SolverDependencyPropertyModel(
 /// </summary>
 /// <param name="Hook">How the type's injection hook relates to its base classes.</param>
 /// <param name="Diagnostics">
-///     Type-level diagnostics without a location; the output step places them on the type's first declaration.
+///     Type-level diagnostics without a location. The output step places them on the type's first declaration.
 /// </param>
 internal sealed record DependencyTypeAnalysis(DependencyHookModel Hook, EquatableArray<DiagnosticInfo> Diagnostics);
 

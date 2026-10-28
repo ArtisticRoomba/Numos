@@ -91,14 +91,12 @@ internal static class ImGuiExtensions
         float buttonHeight;
         if (previousItemHeight < frameHeight)
         {
-            // Make the button only as tall as the glyph
-            // so it doesn't make the line taller.
+            // Match the glyph height so the button does not grow the line.
             buttonHeight = glyphSize.Y;
         }
         else
         {
-            // Use frame height so the glyph is
-            // centered on the widget's label.
+            // Use frame height so the glyph centers on the widget's label.
             buttonHeight = MathF.Max(glyphSize.Y, frameHeight);
         }
 
@@ -119,6 +117,35 @@ internal static class ImGuiExtensions
             ImGui.SetTooltip(tooltip);
 
         ImGui.PopID();
+    }
+
+    /// <summary>
+    ///     Shows a wrapped tooltip while the mouse is over the previous item, including a disabled one.
+    /// </summary>
+    /// <param name="text">The tooltip body.</param>
+    public static void ItemTooltip(string text)
+    {
+        if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled | ImGuiHoveredFlags.ForTooltip))
+            WrappedTooltip(text);
+    }
+
+    /// <summary>
+    ///     Draws a tooltip whose body wraps at 24 font sizes. The caller decides when to show it.
+    /// </summary>
+    /// <param name="text">The tooltip body.</param>
+    /// <param name="title">An optional line above the body that does not wrap.</param>
+    public static void WrappedTooltip(string text, string? title = null)
+    {
+        if (!ImGui.BeginTooltip())
+            return;
+
+        if (title != null)
+            ImGui.TextUnformatted(title);
+
+        ImGui.PushTextWrapPos(ImGui.GetFontSize() * 24f);
+        ImGui.TextUnformatted(text);
+        ImGui.PopTextWrapPos();
+        ImGui.EndTooltip();
     }
 
     /// <summary>

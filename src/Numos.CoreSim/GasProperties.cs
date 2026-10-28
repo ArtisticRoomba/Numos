@@ -1,25 +1,30 @@
-using Numos.CoreSim.Replay;
-using Numos.Units;
+using Numos.CoreSim.State;
+using Numos.CoreSim.State.Advanced;
+using Magnitudo;
 
 namespace Numos.CoreSim;
 
 /// <summary>
 ///     Defines the physical properties of a gas.
 /// </summary>
-public record struct GasProperties
+/// <remarks>
+///     Every field is state: it's compared, hashed, and saved with the configuration's gas registry. A field typed
+///     <see cref="GasProperties" /> on another serializable type is a reference and saves only the name.
+/// </remarks>
+public partial record struct GasProperties
 {
     /// <summary>
     ///     Normal boiling temperature, in kelvins (K), at
     ///     <see cref="AtmosConfig.SaturationReferencePressure" />.
     /// </summary>
     [Quantity("temperature")]
-    [GasCheckpointField(2)]
+    [NumosSerialize]
     public Kelvin BoilingPoint;
 
     /// <summary>
     ///     Whether this species participates in the condensation model.
     /// </summary>
-    [GasCheckpointField(3)]
+    [NumosSerialize]
     public bool CondensationEnabled;
 
     /// <summary>
@@ -27,12 +32,20 @@ public record struct GasProperties
     ///     <see cref="AtmosConfig.SaturationReferencePressure" />.
     /// </summary>
     /// <remarks>
-    ///     Values are clamped to [0, 1]; non-finite values disable diffusion for this species. The diffusion solvers
-    ///     scale this by <c>(T / GlobalTemperature)^1.5 * (SaturationReferencePressure / P) * dx * dt</c> and the
-    ///     source moles, then cap each neighbor's share at a seventh of the source.
+    ///     <para>
+    ///         An effective diffusivity in square metres per second (m²/s). Negative values clamp to zero, and
+    ///         non-finite values disable diffusion for this species. The diffusion solvers send each neighbor
+    ///         <c>D * (T / GlobalTemperature)^1.5 * (SaturationReferencePressure / P) * n * dt / dx^2</c> moles per
+    ///         tick, Fick's law on a grid of edge <c>dx</c>, then cap each neighbor's share at a seventh of the source.
+    ///     </para>
+    ///     <para>
+    ///         The default of 0.02 m²/s is about a thousand times molecular diffusivity in air. It stands in for the
+    ///         convective mixing the grid does not resolve.
+    ///     </para>
     /// </remarks>
-    [GasCheckpointField(6)]
-    public Scalar DiffusionCoefficient;
+    [Quantity("diffusivity")]
+    [NumosSerialize]
+    public SquareMetrePerSecond DiffusionCoefficient;
 
     /// <summary>
     ///     Reserved ID for a liquid produced by condensation.
@@ -42,7 +55,7 @@ public record struct GasProperties
     ///     not consumed by the built-in solver. A custom liquid integration may interpret it.
     /// </remarks>
     /// TODO FAR FUTURE fluid sim :godo:
-    [GasCheckpointField(5)]
+    [NumosSerialize]
     public int LiquidId;
 
     /// <summary>
@@ -53,7 +66,7 @@ public record struct GasProperties
     ///     balance converts it to an approximate internal-energy change, <c>ΔU_vap = ΔH_vap - RT</c>.
     /// </remarks>
     [Quantity("molarEnergy")]
-    [GasCheckpointField(4)]
+    [NumosSerialize]
     public JoulePerMole MolarEnthalpyOfVaporization;
 
     /// <summary>
@@ -65,11 +78,46 @@ public record struct GasProperties
     ///     than or equal to zero use <see cref="AtmosConfig.DefaultMolarHeatCapacityAtConstantVolume" />.
     /// </remarks>
     [Quantity("molarHeatCapacity")]
-    [GasCheckpointField(1)]
+    [NumosSerialize]
     public JoulePerMoleKelvin MolarHeatCapacityAtConstantVolume;
+
+    /// <summary>
+    ///     Molar mass, in kilograms per mole (kg/mol).
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         The compressible transport solver converts moles to mass with it, which is where a voxel's density,
+    ///         momentum, and sound speed come from.
+    ///     </para>
+    ///     <para>
+    ///         Zero, negative, and non-finite values mean "unknown": the gas is treated as weighing
+    ///         <see cref="AtmosConfig.ReferenceMolarMass" />, which is also how every gas behaves when no molar
+    ///         masses are set. Invalid values are normalized to zero when the configuration is applied.
+    ///     </para>
+    /// </remarks>
+    /// <example>
+    ///     Oxygen is <c>0.031998f</c> and hydrogen is <c>0.002016f</c>.
+    /// </example>
+    [Quantity("molarMass")]
+    [NumosSerialize]
+    public KilogramPerMole MolarMass;
+
     /// <summary>
     ///     Unique name that identifies the gas in a <see cref="GasRegistry" /> and in reaction definitions.
     /// </summary>
-    [GasCheckpointField(0)]
+    /// <remarks>
+    ///     Saved as a nullable string: the registry accepts an unnamed gas, which just can't be looked up by name.
+    /// </remarks>
+    [NumosSerialize(Codec = typeof(StateCodecs.Nullable<string, StateCodecs.String>))]
     public string Name;
+
+    /// <summary>
+    ///     Reference thermal conductivity for this gas at 300 K, in watts per metre-kelvin (W/(m·K)).
+    /// </summary>
+    /// <remarks>
+    ///     Non-finite and nonpositive values use <see cref="AtmosConfig.DefaultThermalConductivity" />.
+    /// </remarks>
+    [Quantity("wattsPerMeterKelvin")]
+    [NumosSerialize]
+    public WattsPerMeterKelvin ThermalConductivity;
 }

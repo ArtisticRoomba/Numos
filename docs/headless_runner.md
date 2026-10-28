@@ -1,238 +1,564 @@
-# Headless simulation runner
+# Headless runner
 
-`Numos.Headless` is a machine-readable debugging host for Numos simulations. It exercises the supported
-`Numos.API` mutation and snapshot paths without starting Raylib or ImGui, which makes experiments reproducible and
-lets command-line tools inspect the same simulation state that feeds the viewer.
+`Numos.Headless` is the viewer without a window. The viewer and the runner both drive one `WorkbenchSession` from
+`Numos.Workbench`. The session owns the project, the timeline, and the replay files. A script can therefore do
+anything a person does in the viewer. It can also read data out of the simulation, so an agent or a script can run a
+validation study without a person at the screen.
 
-The runner uses newline-delimited JSON (NDJSON/JSONL): each nonblank input line is one request and produces exactly one
-compact JSON response on standard output. Blank lines are ignored. Human-readable diagnostics are written to standard
-error so stdout can be parsed or diffed directly.
+The runner speaks newline-delimited JSON (NDJSON). Each nonblank input line is one request. Each request produces one
+compact JSON response on standard output. The session log works like the output shell of a simulation server. The
+runner writes it to standard error and also serves it through the `getLog` operation. You can parse or diff stdout
+directly.
 
-## Running it
+This is protocol version 2. It replaces version 1, which could drive only one `AtmosSimulation`. Version 2 works on a
+project with a world, several simulations, a timeline, and replay files.
 
-Build the solution, then choose one of the three input modes:
+## Running the runner
 
-```powershell
-# Interactive: read NDJSON requests from stdin until `exit` or end-of-file.
+Pick one of four input modes:
+
+```bash
+# Interactive: read requests from stdin until `exit` or end of file.
 dotnet run --project src/Numos.Headless
 
-# Replay a script explicitly.
+# Run a script.
 dotnet run --project src/Numos.Headless -- --script examples/headless/two-voxel-flow.jsonl
 
-# A script path may also be the sole positional argument.
+# A script path can also be the only positional argument.
 dotnet run --project src/Numos.Headless -- examples/headless/two-voxel-flow.jsonl
+
+# Serve the protocol on a Unix socket until a client sends `exit`.
+dotnet run --project src/Numos.Headless -- --socket /tmp/numos.sock
 ```
 
-Use `dotnet run --project src/Numos.Headless -- --help` for the command-line summary. When automating a replay, capture
-stdout independently from stderr:
+Use a script for a run that you repeat or diff. Use the socket when a person or an agent works step by step and wants the
+project to stay open between commands. See "Socket server".
 
-```powershell
-dotnet run --project src/Numos.Headless -- --script examples/headless/two-voxel-flow.jsonl `
-  > two-voxel-flow.output.jsonl
+Add `--quiet` to drop info-level lines from the log. Use `--help` for the summary. When you automate a run, capture
+stdout and stderr separately:
+
+```bash
+dotnet run --project src/Numos.Headless -- --quiet --script study.jsonl > study.output.jsonl 2> study.log
 ```
 
-JSONL files contain JSON objects only; they do not support comments or multi-line requests. `--help` is the one mode
-that deliberately writes human-readable text to stdout instead of protocol responses.
+A script holds JSON objects only. It has no comments and no multi-line requests.
+
+## The log stream on stderr
+
+The session log works like the output shell of a simulation server. The runner writes one line for each entry:
+
+```text
+2026-10-23T14:03:11.123 INFO  tick=100 Simulation: Tick 100 (100/400), 0.15 s elapsed.
+```
+
+The fields are the local timestamp, the level, the world tick (`-` before a project exists), the source, and the
+message. The levels are `DEBUG`, `INFO`, `WARN`, `ERROR`, and `FATAL`. The log reports project, simulation, replay, and
+topology changes, failures, and tick progress. A region edit writes one summary line, not one line per voxel.
+
+`--quiet` drops `DEBUG` and `INFO`. Warnings and errors always appear. Stdout never carries log text.
+
+The `getLog` operation returns the same entries as data. It works in every mode. See "Session and project".
+
+## Socket server
+
+With `--socket <path>`, the runner listens on a Unix domain socket. It works on Linux and on Windows 10 and later. The
+protocol is the same as in stdin mode: one request line in, one response line out.
+
+- The runner removes a stale socket file at startup and deletes its own file when it stops.
+- The server serves one client at a time. Other clients wait in the listen backlog until the current client
+  disconnects.
+- The session lives as long as the server. A client can create a project, disconnect, and let a later client tick it.
+- Line numbers in error responses count per connection.
+- A disconnect does not stop the server. The `exit` op responds, shuts the server down, and deletes the socket file.
+  Ctrl+C and SIGTERM also stop the server and delete the file.
+- The log still goes to stderr. A client reads it with `getLog`.
+
+The socket accepts anyone who can open the file, and the protocol can read and write any path the runner can. Keep the
+socket in a directory that only you can use.
+
+### Python client
+
+[`examples/headless/numos_client.py`](../examples/headless/numos_client.py) needs Python 3.10 and nothing else.
+`NumosClient.call(op, **fields)` adds `protocolVersion` and an incrementing `id`, and it returns the response. It raises
+`NumosError` with `code` and `message` when `ok` is `false`. The client retries the connection for 30 seconds, so you can
+start it right after the server.
+
+```python
+from numos_client import NumosClient
+
+with NumosClient("/tmp/numos.sock") as client:
+    client.call("createProject", chunkDimensions={"x": 2, "y": 1, "z": 1})
+    client.call("tick", count=100)
+    print(client.call("getLog", minLevel="warn")["result"]["log"]["entries"])
+```
+
+The command line runs one operation or streams a script over the socket:
+
+```bash
+python3 examples/headless/numos_client.py --socket /tmp/numos.sock tick '{"count": 10}'
+python3 examples/headless/numos_client.py --socket /tmp/numos.sock --script examples/headless/two-voxel-flow.jsonl
+```
+
+The command line prints each response. Its exit code is 1 when any response has `ok` set to `false`.
 
 ## Protocol envelope
 
-Every request must contain:
+Every request needs a version, an id, and an operation:
 
 ```json
-{"protocolVersion":1,"id":"create","op":"createSimulation","dimensions":{"x":2,"y":1,"z":1}}
+{"protocolVersion":2,"id":"create","op":"createProject","chunkDimensions":{"x":2,"y":1,"z":1}}
 ```
 
-- `protocolVersion` must be `1` on every request.
-- `id` is a required, nonblank string supplied by the caller and copied to the corresponding response. Use unique
-  values when correlating a long interactive session.
-- `op` selects an operation from the table below.
+- `protocolVersion` must be `2`.
+- `id` is a nonblank string. The runner copies it to the response.
+- `op` selects an operation from the tables below.
+- `simulation` is optional on every operation that acts on a simulation. It is a name or a numeric id. Without it, the
+  operation uses the active simulation.
 
-Every response contains `protocolVersion`, the request's `id` and `op` when they could be decoded, and an `ok` boolean.
-When a simulation is active, `state` contains its `name`, fixed chunk `dimensions`, `tick`, `chunkCount`, and `gasCount`.
-Successful operations may add a `result` or `observation`. For example, a successful tick response has this shape:
+Every response has `protocolVersion`, `ok`, and the request `id` and `op`. When a project is open, `state` describes it:
 
-```json
-{"protocolVersion":1,"id":"tick-1","op":"tick","ok":true,"state":{"name":"Two-voxel flow","dimensions":{"x":2,"y":1,"z":1},"tick":1,"chunkCount":1,"gasCount":1},"result":{"ticksExecuted":1}}
-```
+| Member | Meaning |
+| --- | --- |
+| `project` | The project name. |
+| `simulation`, `simulationId` | The active simulation. |
+| `simulationCount` | Simulations in the world. |
+| `tick` | The world tick. |
+| `chunkCount` | Chunks in the active simulation. |
+| `gasCount` | Gases in the registry. |
+| `inspecting` | `true` while the timeline shows history. |
 
-Failed operations set `ok` to `false` and include `error.code`, `error.message`, the JSONL `line`, and an
-`exceptionType` when one is applicable. Failure output is still valid JSON, and the runner continues with the next
-line. The `exit` operation writes its response before the process terminates. Unknown JSON properties are rejected so
-a misspelled experiment setting cannot be ignored silently.
+A successful operation can add `result` or `observation`. A failed one sets `ok` to `false` and adds `error` with
+`code`, `message`, `line`, and sometimes `exceptionType`. The runner continues with the next line. It rejects unknown
+JSON properties, so a misspelled setting fails loudly.
 
-Do not write log text to stdout when extending the runner. Protocol consumers rely on one response object per request.
+JSON has no NaN. The runner writes `NaN`, `Infinity`, and `-Infinity` as strings, and it accepts the same strings in
+floating-point request fields.
 
-### Process exit codes
+### Exit codes
 
-- `0`: every processed request succeeded.
-- `1`: at least one request produced an error response; later lines were still processed.
-- `2`: command-line usage was invalid or the requested script could not be opened.
+- `0`: every request succeeded.
+- `1`: at least one request failed. The runner still processed the later lines.
+- `2`: the arguments were invalid or the script could not be opened.
 
-An unavailable script also produces one JSON error response with code `scriptUnavailable`.
+An unreadable script also produces one error response with code `scriptUnavailable`.
 
 ### Error codes
 
-Protocol consumers can branch on `error.code` without parsing human-readable messages:
-
 | Code | Meaning |
 | --- | --- |
-| `invalidJson` | The input line is not syntactically valid JSON. |
-| `invalidRequest` | The JSON is valid but does not match the v1 schema, including an unknown property or wrong value type. |
-| `unsupportedProtocol` | `protocolVersion` is not `1`. |
-| `missingProperty` | An operation is missing one of its required properties. |
-| `unknownOperation` | `op` is not a supported operation name. |
-| `simulationNotCreated` | The operation needs an active simulation. |
+| `invalidJson` | The line is not valid JSON. |
+| `invalidRequest` | The JSON does not match the schema. |
+| `unsupportedProtocol` | `protocolVersion` is not `2`. |
+| `missingProperty` | A required property is missing. |
+| `unknownOperation` | `op` is not an operation name. |
+| `simulationNotCreated` | The operation needs a project or an active simulation. |
+| `simulationNotFound` | The `simulation` name or id matches nothing. |
 | `invalidGas` | A gas definition is invalid. |
-| `gasNotFound` | `injectGas.gasId` is not present in the active gas registry. |
-| `invalidTickCount` | `tick.count` is outside the allowed range. |
-| `solverNotFound` | No registered solver has the requested name. |
-| `operationRejected` | The supported Numos API rejected the requested mutation or address. |
-| `internalError` | An unexpected failure occurred; its diagnostic is on stderr. |
-| `scriptUnavailable` | The command-line script path could not be opened. |
+| `invalidTransportModel` | `transportModel` is neither `euler` nor `legacy`. |
+| `invalidConfig` | A configuration patch holds a value the protocol cannot map, such as an unknown `eulerFlow.reconstruction`. |
+| `gasNotFound` | A gas id is not in the registry. |
+| `fieldNotFound` | A field name is unknown. |
+| `invalidRegion` | A region has `max` below `min`. |
+| `invalidTickCount` | `tick.count` is outside 1 to 1000000. |
+| `solverNotFound` | No solver stage has that name. |
+| `branchNotFound` | No branch has that id. |
+| `ioError` | A file operation failed, such as saving over an existing replay. |
+| `operationRejected` | Numos rejected the operation or its arguments. |
+| `internalError` | An unexpected failure. The exception is on stderr. |
+| `scriptUnavailable` | The script path could not be opened. |
 
-## Coordinates, classifications, and values
+## Coordinates and units
 
-Chunk and voxel coordinates use objects with `x`, `y`, and `z` members:
+A coordinate is an object with `x`, `y`, and `z`. Three kinds of coordinate appear in requests:
 
-```json
-{"x":0,"y":0,"z":0}
-```
+- A chunk `position` counts chunks in the grid.
+- A `voxel` is local to its chunk.
+- Region, sample, and probe points are global voxels. A global voxel is `chunkPosition * chunkDimensions + local`.
+  Global coordinates make a duct of many chunks a few lines of script.
 
-A chunk position is measured in the chunk grid. A voxel position is local to its chunk. Voxel classifications use the
-same integer values as the public API:
-
-- `-2`: solid
-- `-1`: void
-- `0`: unassigned
-- positive values: room IDs
-
-Temperatures are in kelvins, pressure is in pascals, gas amounts are in moles, voxel volume is in cubic metres, and
-heat capacities are in joules per mole-kelvin.
+Classifications are `-2` for solid, `-1` for void, `0` for unassigned, and positive room ids for air. Temperatures are
+in kelvins, pressures in pascals, volumes in cubic metres, and gas amounts in moles. Momentum is in kilogram metres per
+second and velocity is in metres per second.
 
 ## Operations
 
-Operations that access simulation state require an active simulation. A new `createSimulation` request atomically
-replaces and disposes the current simulation after the replacement has been constructed successfully.
+### Session and project
 
-| Operation                | Request data                                                                                   | Effect                                                                                                           |
-|--------------------------|------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------|
-| `createSimulation`       | Optional `name`; fixed chunk `dimensions`; optional `config` and `gases`                       | Creates a new paused, in-memory simulation at tick zero.                                                         |
-| `closeSimulation`        | None                                                                                           | Disposes the active simulation and clears its state.                                                             |
-| `addChunk`               | Chunk `position`; optional initial `classification` (default `0`)                              | Creates a chunk using the simulation's fixed dimensions and fills it with the classification.                    |
-| `removeChunk`            | Chunk `position`                                                                               | Removes and disposes the chunk at that position.                                                                 |
-| `sealChunk`              | Chunk `position`                                                                               | Replaces the chunk's simulated outer faces with solid voxels. For depth-one chunks this seals the X/Y perimeter. |
-| `setChunkClassification` | Chunk `position`; `classification`                                                             | Fills every voxel in a chunk with one classification.                                                            |
-| `setVoxelClassification` | Chunk `position`; local `voxel`; `classification`                                              | Changes one voxel's classification.                                                                              |
-| `setVoxelTemperature`    | Chunk `position`; local `voxel`; `temperatureK`                                                | Sets one voxel's stored temperature in kelvins.                                                                  |
-| `addGas`                 | `gas` definition                                                                               | Appends a gas to the registry. `result.gasId` is its stable zero-based ID.                                       |
-| `injectGas`              | Chunk `position`; local `voxel`; registered `gasId`, `moles`, and `temperatureK`               | Adds gas to an air voxel and wakes its chunk.                                                                    |
-| `wakeChunk`              | Chunk `position`                                                                               | Wakes every gas-bearing voxel in a chunk for subsequent simulation ticks.                                        |
-| `sleepChunk`             | Chunk `position`                                                                               | Explicitly puts a chunk to sleep.                                                                                |
-| `updateConfig`           | `config` patch                                                                                 | Applies a detached snapshot containing the supplied configuration changes for later mutations and ticks.         |
-| `setSolverEnabled`       | `solver` name; `enabled`                                                                       | Enables or disables a named solver stage without changing pipeline order.                                        |
-| `resetSolvers`           | None                                                                                           | Restores the built-in solver pipeline and its enabled states.                                                    |
-| `tick`                   | `count` from `1` through `1000000`                                                             | Runs exactly that many deterministic fixed simulation ticks.                                                     |
-| `observe`                | Optional `position`, `voxel`, `includeVoxels`, `onlyGasBearingVoxels`, and `maxIssueLocations` | Returns a coherent canonical report for the current tick. Dense per-voxel data is opt-in.                        |
-| `exit`                   | None                                                                                           | Disposes the active simulation, responds, and stops reading input.                                               |
+| Operation | Request data | Effect |
+| --- | --- | --- |
+| `hello` | None | Returns the protocol number, the host name and version (with the commit), and the CoreSim version. |
+| `getLog` | optional `afterSequence`, `maxEntries`, `minLevel` | Returns session log entries. |
+| `createProject` | `name`, `chunkDimensions`, `includeDefaultGases` (default `false`), `config`, `gases`, `transportModel` | Replaces the open project with an empty one at tick zero. |
+| `closeProject` | None | Closes the project. |
+| `exit` | None | Closes the project, responds, and stops reading input. In socket mode it stops the server. |
 
-`setSolverEnabled` accepts any stage name in the current pipeline. The built-in stages, in default order, are
-`advection`, `explicit-gas-transport`, `boundary-flow`, `thermodynamics`, `explicit-thermal-transport`,
-`thermal-boundary`, and `gas-reactions`. The runner has no operations for portals or docks, so the two explicit-link
-stages never have work here. A name that is not present in the current pipeline is an error rather than a silent no-op.
+`createProject` builds the new project first. The old project stays open if the new one fails.
 
-### Configuration fields
+`transportModel` picks which built-in stages move gas. `"euler"` (the default) is compressible Euler flow. `"legacy"` is
+the pressure-relaxation pair of `advection` and `boundary-flow`. `createProject` and `resetSolvers` read it. Any other
+value fails with `invalidTransportModel`. The model is part of the recorded stage list, so a script that pins legacy
+numbers must say `"legacy"` and not rely on the default.
 
-`createSimulation.config` and `updateConfig.config` accept these fields. Unit suffixes are part of the protocol names:
+`getLog` returns entries in sequence order. `afterSequence` (default `0`) skips entries up to that sequence number.
+`maxEntries` (default 200, maximum 5000) caps the reply, and `more` is `true` when entries remain. `minLevel` is
+`debug`, `info`, `warn`, `error`, or `fatal`. Each entry has `sequence`, `timestamp`, `level`, `tick` (absent before a
+project exists), `source`, and `message`. `latestSequence` is the newest sequence in the log. To follow the log, pass
+the last `sequence` you saw as `afterSequence`. The session keeps the newest 5000 entries.
 
-- `globalTemperatureK`
-- `defaultTemperatureFallbackK`
-- `defaultMolarHeatCapacityAtConstantVolume`
-- `voxelVolumeM3`
-- `saturationReferencePressurePa`
-- `defaultDiffusionCoefficient`
-- `spaceTemperatureK`
-- `bulkFlowCoefficient`
-- `vacuumThresholdPa`
-- `sleepThreshold`
-- `sleepEpsilonPercent`
-- `thermalConductance`
-- `condensationRateFactor`
-- `maxPressureTransferFractionPerNeighbor`
-- `accumulatorWakeThresholdPa`
-- `accumulatorMaxAliveTicks`
+The default gases add a `GasReactionConfig` solver configuration. A replay file cannot hold that configuration, so
+`saveReplay` rejects a world that has one. The built-in Euler configuration is portable. For that reason
+`includeDefaultGases` is `false` unless you set it. Leave it off for any study you save.
 
-Omitted fields retain their current values. Production defaults change over time, so set every field an experiment
-depends on when its output will be compared across commits.
+### Simulations
 
-### Gas definitions
+| Operation | Request data | Effect |
+| --- | --- | --- |
+| `addSimulation` | `chunkDimensions`, optional `name`, `activate` (default `true`) | Adds a simulation to the world. |
+| `removeSimulation` | `simulation` | Removes a simulation with its chunks and links. |
+| `selectSimulation` | `simulation` | Makes it the active simulation. |
+| `listSimulations` | None | Lists id, name, chunk dimensions, chunk count, and which one is active. |
 
-`addGas` appends a definition containing `name` and the physical fields used by `GasProperties`:
+### Chunks and voxels
+
+| Operation | Request data | Effect |
+| --- | --- | --- |
+| `addChunk` | `position`, optional `classification` (default `0`) | Creates a chunk filled with the classification. |
+| `removeChunk` | `position` | Removes a chunk. `result.changed` tells whether it existed. |
+| `sealChunk` | `position` | Makes the outer faces solid. |
+| `wakeChunk`, `sleepChunk` | `position` | Wakes a chunk or puts it to sleep. |
+| `fillChunk` | `position`, `classification` | Sets every voxel of a chunk. |
+| `setVoxelClassification` | `position`, local `voxel`, `classification` | Sets one voxel. |
+| `setVoxelTemperature` | `position`, local `voxel`, `temperatureK` | Sets the stored temperature. |
+| `setVoxelMomentum` | `position`, local `voxel`, `momentumX`, `momentumY`, `momentumZ` | Sets the total momentum of the voxel's gas in kg·m/s. |
+| `injectGas` | `position`, local `voxel`, `gasId`, `moles`, `temperatureK` | Adds gas to an air voxel. |
+| `clearVoxelGas` | `position`, local `voxel` | Removes the gas from one voxel. |
+
+All of these take the optional `simulation`.
+
+`setVoxelMomentum` stores momentum, not velocity. The reported velocity is that momentum divided by the gas mass in the
+voxel (moles times `molarMassKgPerMol`, or `referenceMolarMassKgPerMol` for gases without one). Inject gas first, then
+multiply the velocity you want by that mass. The call has no effect on solid, void, or empty voxels. The runner rejects
+non-finite components with `operationRejected`.
+
+### Regions and sampling
+
+| Operation | Request data | Effect |
+| --- | --- | --- |
+| `editRegion` | `min`, `max`, and the edit members below | Edits every voxel in a global box. |
+| `sampleVoxels` | `points` (global voxels), `fields` | Returns field values inline. |
+
+`editRegion` is the tool for building a geometry or a flow state. The box is inclusive and global. The edit runs in this
+order:
+
+1. `createChunks`: when `true`, create each missing chunk inside the box with classification `0`.
+2. `classification`: set it on every voxel.
+3. `clearGas`: when `true`, remove the gas from every voxel.
+4. `temperatureK`: set the stored temperature.
+5. `gas`: add an array of `{gasId, moles}` or `{gasId, partialPressurePa}` to every voxel.
+6. `velocity`: set the bulk velocity `{x, y, z}` in m/s of the gas in every air voxel.
+
+`gasTemperatureK` sets the temperature of the added gas. It defaults to `temperatureK`, then to the configured fallback
+temperature. Give each gas exactly one of `moles` and `partialPressurePa`.
+
+`velocity` starts a flow state, such as the gas behind a shock. The runner stores momentum equal to the gas mass in each
+voxel times the velocity. It applies the velocity last, so the mass includes the gas you just added. Solid, void, and
+empty voxels ignore it, and `result.region.velocityVoxels` counts the voxels that took it. A later `addGas` lowers the
+velocity of a voxel, because the new gas starts at rest. The runner rejects a missing or non-finite component with
+`invalidRequest`.
+
+A partial pressure converts to moles with the ideal-gas law, `n = pV / (RT)`. `V` is the configured voxel volume and `T`
+is the gas temperature. A gas added at the same temperature as the voxel keeps that temperature. Use `clearGas` when you
+want the pressure you asked for and not the sum with the gas already there.
+
+The result reports `voxelsEdited`, `voxelsSkipped` (inside the box but outside every chunk), `chunksTouched`,
+`chunksCreated`, and `molesPerVoxel` for each gas. A solid voxel counts as edited but ignores gas.
+
+A region edit costs about 9 microseconds per voxel for gas and 0.1 microseconds for temperature. Each voxel edit is
+also one recorded operation, so a large region makes a large replay. A classification that covers a whole chunk uses
+one call for the chunk.
+
+`sampleVoxels` reads detached snapshots and never changes the simulation. `result.samples.values[i][j]` is field `j` at
+point `i`. A point outside every chunk is NaN. A solid voxel is NaN for every field except `classification`.
+
+The built-in fields are:
+
+| Field | Unit | Meaning |
+| --- | --- | --- |
+| `temperature` | K | Stored voxel temperature. |
+| `pressure` | Pa | Total pressure. |
+| `totalMoles` | mol | Sum of all gases. |
+| `moles:<gasId>` | mol | One gas, such as `moles:0`. |
+| `classification` | | The voxel classification. |
+| `density` | kg/m3 | Mass density, the sum of moles times molar mass over the voxel volume. |
+| `velocityX`, `velocityY`, `velocityZ` | m/s | One component of the bulk velocity. |
+| `speed` | m/s | The magnitude of the bulk velocity. |
+| `densityGradient` | kg/m4 | The magnitude of the density gradient. |
+| `schlieren` | | Numerical schlieren brightness, from 0 (dark) to 1 (no gradient). |
+| `schlieren:<k>` | | The same, with steepness `k` instead of 15. |
+
+A solver package can register more fields through `WorkbenchSession.Fields`.
+
+`density` uses `molarMassKgPerMol` of each gas, or `referenceMolarMassKgPerMol` when a gas has none. It is NaN in solid
+and void voxels. The velocity fields are zero in a voxel with no gas.
+
+`densityGradient` and `schlieren` need the neighbors of a voxel, so the runner computes them over a whole region.
+The runner reads the density over the region plus a one-voxel halo, and the halo can lie in a neighboring chunk. A
+voxel on a chunk border therefore gets the same gradient as one inside a chunk. Each axis uses a central difference when
+both neighbors have air. It uses a one-sided difference when a neighbor is solid, void, or missing. It uses zero when
+neither has air. The voxel edge is the cube root of `voxelVolumeM3`.
+
+`schlieren` is `exp(-k * g / g_ref)`, where `g` is `densityGradient` and `k` is 15 by default. Values of `k` from 10 to
+20 draw shocks as thin dark lines. The reference `g_ref` is the largest gradient inside the exported region or slice.
+Two exports of one simulation can therefore differ in brightness, and so can two frames of a time series. Pass
+`schlierenReference` (a positive number in kg/m4) to `exportField`, `sampleVoxels`, or `renderSlice` to fix `g_ref`.
+Use the same value for every frame of a series. A single voxel has no region, so `sampleVoxels` and probes reject
+`schlieren` without a `schlierenReference`. They compute `densityGradient` from the 27 voxels around each point.
+
+### Data extraction
+
+Three operations move data out of the simulation. They read detached snapshots, so they never change the state or the
+state hash. Output files go to the path you give. The runner creates missing directories and replaces existing files.
+A relative path starts at the working directory, and the response reports the full path.
+
+| Operation | Request data | Effect |
+| --- | --- | --- |
+| `exportField` | `fields`, `region` or `slice`, `path`, optional `format` (`npy` or `json`), `schlierenReference` | Writes fields over a box or a slice. |
+| `renderSlice` | `axis`, `index`, `path`, optional `visualization`, `scale`, `range`, `levels`, `schlierenReference` | Writes a PNG of a slice. |
+| `tick` with `probes` | `probes` object, see below | Writes a time series of fields at chosen voxels. |
+
+`exportField` takes either a `region` (`{min, max}`, inclusive, global) or a `slice` (`{axis, index}`). The `axis` is
+`x`, `y`, or `z` and `index` is a global voxel index. A slice covers the bounding box of all chunks, so a chunk-sized
+hole in the middle reads as NaN.
+
+- A region has shape `(z, y, x)`, in C order, so `x` changes fastest. A region only one voxel thick in `z` is still a
+  three-dimensional array of shape `(1, y, x)`.
+- A slice has shape `(v, u)`. For a `z` slice, `u` is `x` and `v` is `y`. For a `y` slice, `u` is `x` and `v` is `z`.
+  For an `x` slice, `u` is `z` and `v` is `y`. These are the axes of the viewer's slice view, so a file and a viewer
+  slice of the same plane agree. The rows run from the bottom of the picture.
+- With `npy`, the runner writes one file per field. `path` must contain `{field}` when `fields` has more than one
+  entry. The runner puts the field name there and turns `:` into `_`, so `moles:0` becomes `moles_0`.
+- With `json`, the response carries each field's `values` inline in the same order. The runner allows up to 65536 values
+  per field. Use `npy` for more.
+
+The files use NumPy format version 1.0, little-endian `float32`. Load one with `numpy.load(path)`. Each entry in
+`result.export.files` has the `path`, the `shape`, the `unit`, and the `min` and `max` of the finite values.
 
 ```json
-{"protocolVersion":1,"id":"gas","op":"addGas","gas":{"name":"First","molarHeatCapacityAtConstantVolume":1,"boilingPointK":0,"condensationEnabled":false,"molarEnthalpyOfVaporization":0,"liquidId":-1,"diffusionCoefficient":0}}
+{"protocolVersion":2,"id":"p","op":"exportField","fields":["pressure","temperature"],"region":{"min":{"x":0,"y":0,"z":0},"max":{"x":2399,"y":149,"z":0}},"path":"out/duct-{field}.npy"}
 ```
 
-Gas IDs are assigned in insertion order and remain stable for the life of a simulation. Use the returned ID in later
-`injectGas` requests. `createSimulation.gases` accepts an array of the same definitions and assigns IDs in array order.
+`tick` accepts a `probes` object. It takes an optional `schlierenReference` for `schlieren` columns:
 
-## Observations
+```json
+{"protocolVersion":2,"id":"run","op":"tick","count":2000,"probes":{"points":[{"name":"wall1","voxel":{"x":100,"y":1,"z":0}}],"fields":["pressure"],"path":"out/probes.csv","every":10}}
+```
 
-`observe` captures the requested chunk scope under the simulation's state gate, so its tick number and chunk snapshots
-describe one coherent state. With no `position` filter, that scope is every chunk. Its `observation` object contains:
+The file is a CSV with the columns `tick`, `timeSeconds`, and then `name.field` for each probe and field, in the order
+given. `timeSeconds` is the tick divided by the simulation rate. The runner writes a row for the state before the first
+tick and then a row every `every` ticks (default 1). It also writes a row for the last tick when that tick is not a
+multiple of `every`. Sampling copies only the fields it needs from the chunks that hold probes. Probe names cannot
+contain commas or quotes. A voxel outside every chunk reads as NaN.
 
-- `tick`, `simulationRate`, and `simulationChunkCount` (the total in the simulation, even when the report is filtered).
-- `config`, including the gas registry with assigned IDs.
-- `solverPipeline` in execution order, with each stage's name, kind, and enabled state.
-- `global`, with topology and awake/sleep counts, total moles, estimated sensible energy, finite pressure/temperature
-  statistics, totals by gas, and anomaly counts.
-- `chunks`, sorted by `(x, y, z)`, with generation/revision, dimensions, awake/sleep metadata, the same per-chunk
-  summary metrics, and optional `voxels`.
-- `issueLocations` and `issueLocationsTruncated`, which provide a bounded, deterministic sample of non-finite or
-  negative pressure, temperature, and mole locations.
+`renderSlice` colors every voxel of a slice with a SimDrawer visualization, so the picture matches the viewer. The
+`visualization` is a visualization id such as `pressure` (the default), `temperature`, or `voxel-classification`.
+`scale` is the pixel size of one voxel. `levels` is the number of color steps (default 256).
 
-Gas totals and definitions are ordered by gas ID. Statistics carry the full sample count, finite/non-finite counts,
-and nullable finite minimum, maximum, and mean rather than hiding invalid samples.
+The flow visualizations are `density`, `velocity-x`, `velocity-y`, `velocity-z`, and `schlieren`. `density` uses a
+sequential color ramp. The velocity components use a blue, white, and red ramp, and the automatic range is symmetric
+around 0. `schlieren` is greyscale with white for no gradient and black for the steepest gradient. Its range maximum is
+`g_ref`, and its automatic range is 0 to the largest gradient in the slice. Pass `schlierenReference` or `range` to fix
+it, which keeps one scale across frames.
 
-Dense voxel details are deliberately opt-in because they can dominate output for normal chunk sizes. Set
-`includeVoxels` to `true` when investigating spatial behavior; `onlyGasBearingVoxels` can reduce that output to occupied
-cells. An optional chunk `position` limits the report to one chunk. Supplying both `position` and a local `voxel` returns
-that exact cell even if `includeVoxels` is false; `voxel` is invalid without `position`. `maxIssueLocations` caps the
-coordinate samples attached to invalid-value diagnostics (default `32`, maximum `1024`). Each emitted voxel has a stable
-local index and local coordinates, classification, gas-capable/gas-bearing flags, raw pressure and temperature, total
-moles, estimated sensible energy, and per-gas moles.
+By default, the color range spans the finite values of the air voxels in the slice. Solid and void voxels do not count.
+Pass `range` as `{min, max}` to fix it. The response reports the range used. The image has `u` left to right and `v` bottom to top. Hidden solid voxels are gray. Voxels
+without a chunk are black.
 
-IEEE-754 non-finite values are encoded as the JSON strings `"NaN"`, `"Infinity"`, and `"-Infinity"`, and the same
-strings are accepted for floating-point request fields. Finite values remain JSON numbers. JSON has no literal for NaN,
-so this keeps every response parseable without throwing away the values most useful during debugging. Consumers should
-accept either a number or one of those three strings for any floating-point field.
+### Gases and configuration
+
+| Operation | Request data | Effect |
+| --- | --- | --- |
+| `addGas` | `gas` definition | Appends a gas. `result.gasId` is its id. |
+| `removeGas` | `gasId` | Removes a gas that no chunk has used yet. |
+| `listGases` | None | Lists the registry. |
+| `updateConfig` | `config` patch | Applies a configuration change. |
+| `getConfig` | None | Returns the configuration and the registry. |
+
+A gas definition has a `name` and the fields `molarHeatCapacityAtConstantVolume`, `boilingPointK`,
+`condensationEnabled`, `molarEnthalpyOfVaporization`, `liquidId`, `diffusionCoefficient`, and `molarMassKgPerMol`. Gas ids
+follow insertion order and stay stable. A molar mass of 0 or an omitted one means unknown. Such a gas weighs
+`referenceMolarMassKgPerMol`.
+
+A configuration patch accepts these fields. Omitted fields keep their value. The runner rejects a value outside the
+domain of its field, such as a negative `bulkFlowCoefficient`.
+
+`globalTemperatureK`, `defaultTemperatureFallbackK`, `defaultMolarHeatCapacityAtConstantVolume`, `voxelVolumeM3`,
+`saturationReferencePressurePa`, `defaultDiffusionCoefficient`, `spaceTemperatureK`, `bulkFlowCoefficient`,
+`vacuumThresholdPa`, `sleepThreshold`, `sleepEpsilonPercent`, `thermalConductance`, `condensationRateFactor`,
+`maxPressureTransferFractionPerNeighbor`, `accumulatorWakeThresholdPa`, `accumulatorMaxAliveTicks`, `referenceMolarMassKgPerMol`.
+
+The `eulerFlow` object holds the Euler transport settings: `courantNumber`, `maxSubstepsPerTick`, `velocityFloorMps`,
+`maxVelocityMps`, `wakePressureDeltaPa`, `allMachCorrection`, `reconstruction` (`"firstOrder"`),
+`momentumDampingPerSecond`, and `defaultLinkAreaFraction`. A patch replaces the `EulerFlowConfig` entry with a copy that
+applies the given fields. Omitted fields keep the entry's value, or the library default when the session has no entry.
+The runner rejects an `eulerFlow` value outside the domain of its field, such as a `courantNumber` above 1.
+The observation reports `config.eulerFlow` with the same names. It is absent while the session has no entry. The solver
+then runs with its defaults.
+
+Defaults change between versions. Set every field a study depends on.
+
+### Solvers and topology
+
+| Operation | Request data | Effect |
+| --- | --- | --- |
+| `listSolvers` | None | Lists the stages in execution order. |
+| `setSolverEnabled` | `solver`, `enabled` | Enables or disables a stage. |
+| `setSolverLayout` | `stages` (array of `name`, `enabled`) | Sets the order and enabled flags of every stage in one step. |
+| `applyTransportPreset` | `transportModel` | Swaps the transport stages and keeps every other stage as it is. |
+| `resetSolvers` | optional `transportModel` | Restores the stage defaults of one transport model, or of the current one. |
+| `createPortal` | `first`, `second`, optional `flags` and `areaFraction` | Links two voxels, possibly in different simulations. |
+| `createDock` | `first`, `second`, `rotation`, `flipU`, `flipV`, `flags`, optional `areaFraction` | Links two chunk faces voxel by voxel. |
+| `destroyLinkSet` | `linkSet` (`index`, `generation`) | Queues a portal or dock for removal. |
+| `listLinkSets` | None | Lists portals and docks with kind, state, link count, flags, and `areaFraction`. |
+
+The built-in stages, in default order, are `euler-flow`, `explicit-gas-transport`, `thermodynamics`,
+`explicit-thermal-transport`, `thermal-boundary`, and `gas-reactions`. The legacy model runs `advection`,
+`explicit-gas-transport`, `boundary-flow`, and then the same last four.
+
+`setSolverLayout` lists every stage. Each name is a built-in stage or a registered custom stage, no name repeats, and
+every custom stage appears. Numos creates a built-in stage that the world does not hold and drops one that the list
+omits. A bad list fails with `operationRejected` and changes nothing. A project always records, and the world
+records a layout change, so a replay reproduces it. `applyTransportPreset` replaces `euler-flow` with `advection` and
+`boundary-flow` (or the reverse) at the same positions. `transportModel` is required there. Both commands report
+`changed: false` when the layout already matches.
+
+`resetSolvers` installs the default layout. A world with custom stages cannot discard them while it records. In that
+case `resetSolvers` enables every stage, leaves the order alone, and returns `changed: false`.
+
+`areaFraction` is the open area of each link as a fraction of one voxel face, from 0 to 1. Without it the link follows
+`defaultLinkAreaFraction` from the configuration, and `listLinkSets` omits the field.
+
+A portal endpoint is `{simulation, position, voxel}`. A dock endpoint is `{simulation, position, face}`, where `face`
+is `negativeX`, `positiveX`, `negativeY`, `positiveY`, `negativeZ`, or `positiveZ`. `flags` is `all` (default), `gas`,
+`thermal`, or `none`. Topology changes apply at the next tick.
+
+### Time and timeline
+
+| Operation | Request data | Effect |
+| --- | --- | --- |
+| `tick` | `count` (1 to 1000000), optional `progressInterval` and `probes` | Runs fixed ticks, and writes probe samples when `probes` is set. |
+| `stepForward` | None | Ticks one step on the head or seeks one tick in history. |
+| `seekTick` | `tick` | Shows the state at a past tick. The timeline then inspects history. |
+| `returnToHead` | None | Moves to the newest tick. |
+| `createBranch` | None | Forks a branch at the current tick. |
+| `selectBranch` | `branchId`, optional `tick` | Switches to a branch. |
+| `continueBranch` | None | Ends inspection so the branch can tick and take edits. |
+| `listBranches` | None | Lists branches. |
+| `timelineInfo` | None | Returns head, position, checkpoints, branches, and the state hash. |
+
+`tick` writes a progress line to the log every `progressInterval` ticks (default 100, `0` for none). It calls the world
+tick directly, so a script runs the same number of solver steps on every machine. See "Data extraction" for `probes`.
+
+While the timeline inspects history, every operation that edits the world fails with `operationRejected`. Call
+`returnToHead` and `continueBranch` first.
+
+`timelineInfo` reports the FNV-1a state hash as 16 hex digits. Two runs that end in the same state have the same hash.
+
+### Replay files
+
+| Operation | Request data | Effect |
+| --- | --- | --- |
+| `saveReplay` | `path`, `throughCurrentPosition`, `overwrite` | Writes the selected branch to a `.numos` file. |
+| `loadReplay` | `path`, optional `atHead` | Replaces the project with the replay, verified by replaying it. |
+
+`loadReplay` blocks until the replay is verified. It leaves the timeline at the start of the replay in inspection mode,
+like the viewer. Call `returnToHead` to reach the saved final state. Its `timelineInfo.stateHash` equals the hash that
+was current when you saved. Call `continueBranch` to keep ticking. With `"atHead":true`, `loadReplay` does both steps, so
+the next `tick` extends the branch.
+
+`saveReplay` fails with `ioError` when the file exists, unless `overwrite` is `true`.
+
+### Observation
+
+`observe` captures a coherent report of one simulation. `result.stateHash` carries the world state hash. The report has
+these parts:
+
+- `tick`, `simulationRate`, and `simulationChunkCount`.
+- `config`, including the gas registry and, once the session has them, the `eulerFlow` settings.
+- `solverPipeline` in execution order.
+- `flow`, what `euler-flow` did on the latest tick: `substepsLastTick`, `simulatedSeconds`, `substepCapEngaged`,
+  `maxCourantNumber`, `maxSignalSpeedMps`, `clampedVelocityCount`, `negativeInternalEnergyCount`,
+  `negativeMolesCount`, and `nonFiniteCellCount`. All values are zero before the first tick and under the legacy model.
+  Alert on `substepCapEngaged` and the four counts. The rest are for tuning `eulerFlow`.
+- `global`, with topology counts, total moles, estimated sensible energy, pressure, temperature, and speed statistics, totals by
+  gas, and anomaly counts.
+- `chunks`, sorted by `(x, y, z)`, each with its own summary and optional `voxels`.
+- `issueLocations`, a bounded sample of voxels with non-finite or negative values, plus non-finite velocity.
+
+Gas totals and definitions are ordered by gas ID. Statistics report the full sample count, the finite and non-finite counts, and a nullable finite minimum, maximum, and mean. Invalid samples stay visible.
+
+Dense voxel data is opt-in because it can dominate output for normal chunk sizes. Set `includeVoxels` to `true` for it. Set `onlyGasBearingVoxels` to keep occupied voxels only. A chunk `position` limits the report to one chunk. With `position` and a local `voxel`, the report returns that voxel even when `includeVoxels` is `false`. A `voxel` without `position` is invalid. `maxIssueLocations` caps the coordinate samples on invalid-value diagnostics (default 32, maximum 1024).
+
+Each voxel has a stable local index, local coordinates, classification, gas-capable and gas-bearing flags, raw pressure and temperature, total moles, estimated sensible energy, and per-gas moles. It also reports the derived velocity vector (`velocityMps`) and its magnitude (`speedMps`). Numos derives velocity from the voxel's momentum and gas mass at observation time. A voxel with no gas reports zero.
 
 ## Determinism and comparison
 
-`tick` calls `AtmosSimulation.Tick()` directly. It does not use the viewer's wall-clock `Update(deltaTime)` accumulator,
-so a script requests the same number of solver steps on every replay. Chunks, gases, and voxels are emitted in stable
-order, and timing measurements are excluded from canonical observations.
+The runner emits chunks, gases, and voxels in a stable order, and it leaves timing out of observations. To get useful
+diffs:
 
-For useful diffs:
+1. Add gases in an explicit order and use their returned ids.
+2. Set every configuration field the study depends on.
+3. Compare `stateHash` values for a quick check, and compare parsed JSON for details.
 
-1. Add gases in an explicit order and refer to their returned IDs.
-2. Build topology before injecting gas.
-3. Insert named `observe` requests before and after the ticks under investigation.
-4. Compare parsed JSON rather than relying on whitespace.
+The runner reports state. It does not assert conservation. Void flow, vacuum cleanup, phase change, and thermal
+boundaries can remove mass or energy on purpose.
 
-The runner reports state; it does not automatically assert universal mass or energy conservation. Void flow, vacuum
-cleanup, phase changes, and thermal boundaries can intentionally remove mass or energy, so invariants depend on the
-experiment.
+## Example scripts
 
-## Example
+[`examples/headless/two-voxel-flow.jsonl`](../examples/headless/two-voxel-flow.jsonl) creates a `2 x 1 x 1` chunk on the
+legacy model. It injects gas into the left voxel and observes the pressure imbalance, one tick, and the result.
 
-[`examples/headless/two-voxel-flow.jsonl`](../examples/headless/two-voxel-flow.jsonl) creates one `2 x 1 x 1` chunk,
-injects a single gas into its left voxel, observes the initial pressure imbalance, advances one tick, and observes the
-result. It uses the reduced-pressure deterministic configuration used by the integration tests.
+[`examples/headless/euler-shock-tube.jsonl`](../examples/headless/euler-shock-tube.jsonl) is the Euler counterpart. It
+builds an `8 x 1 x 1` tube of air at 1 m³ per voxel with the left half at twice the pressure of the right. It observes
+the tube after one, five, and twenty ticks, so the `flow` block and the per-voxel velocities have something to show.
 
-Replay it with:
+[`examples/headless/euler-moving-shock.jsonl`](../examples/headless/euler-moving-shock.jsonl) starts a Mach 1.53 shock in a
+400-voxel air tube. The left quarter holds the post-shock state, with 260 kPa, 393 K, and a gas velocity of 251 m/s set by
+`editRegion`. The script exports `density`, `schlieren`, and `velocityX` and renders the schlieren after each of two ticks.
 
-```powershell
-dotnet run --project src/Numos.Headless -- --script examples/headless/two-voxel-flow.jsonl
+[`examples/headless/shock-tube-1d.jsonl`](../examples/headless/shock-tube-1d.jsonl) builds a 2000-voxel tube with solid
+walls. The left half starts at 2 atmospheres and the right half at 1 atmosphere. The script uses one `editRegion` call
+for each half and ticks 400 steps with four wall probes. It writes the pressure, temperature, and mole slices at tick 0
+and tick 400 as `.npy` files, the probe CSV, and a PNG of the pressure. The files go to `artifacts/headless/`.
+
+Load the result in Python:
+
+```python
+import numpy as np
+pressure = np.load("artifacts/headless/shock-tube-t400-pressure.npy")[1]  # row y = 1 is the tube
 ```
 
-It is ordinary NDJSON, so it also works as a template for generated experiments and regression fixtures.
+The default Euler solver keeps the waves sharp, so the tube rings. Sound speed is about 347 m/s and 400 ticks last
+20 s. By then the waves have crossed the 2 km tube several times, and the profile is a mix of reflections. To see the
+first passage, tick fewer steps. At tick 20 the pressure falls through a rarefaction fan from the left end of the
+driver, holds a plateau near 142 kPa, and jumps back to 101 kPa across a steep shock front. The total moles stay
+constant.
+
+## Writing a study
+
+A validation study is a script that builds geometry, runs, and exports. For a 2D duct about 150 by 2400 voxels and one
+voxel thick in `z`:
+
+1. `createProject` with chunks of `150 x 100 x 1` voxels. A chunk can hold at most 65535 voxels.
+2. One `editRegion` with `createChunks` and a solid classification fills the bounding box. A second one with
+   classification `1` opens the interior.
+3. `editRegion` with `clearGas` and `partialPressurePa` sets the initial state of each region.
+4. `tick` with `probes` records wall pressure over time.
+5. `exportField` and `renderSlice` write the fields and pictures. Export `density` and `schlieren` for shadowgraph-style
+   frames, and pass one `schlierenReference` to every frame.
+
+For a moving shock, fill the shocked region with `clearGas`, `partialPressurePa`, `gasTemperatureK`, and `velocity` in one
+`editRegion`. The Euler solver substeps inside each 50 ms tick. Its default `maxSubstepsPerTick` can stop a tick early on
+a fine grid, so check `flow.substepCapEngaged` and raise `eulerFlow.maxSubstepsPerTick` when it is set.
+
+`editRegion` records one replay operation for the whole box, plus one chunk operation for each chunk that `createChunks`
+creates. A large region therefore adds little to the replay file.

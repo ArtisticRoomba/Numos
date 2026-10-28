@@ -13,12 +13,12 @@ namespace Numos.Replay.Generators;
 /// <remarks>
 ///     <para>
 ///         An operation's opcode is read from its <c>Code</c> override, so the operation type is the only
-///         registration. Numos.CoreSim owns the simulation family and Numos.API the world family; each compilation
+///         registration. Numos.CoreSim owns the simulation family and Numos.API the world family. Each compilation
 ///         only generates the family whose base type it declares.
 ///     </para>
 ///     <para>
-///         Fields are encoded in primary-constructor order. Primitives and Numos.Units quantity aliases go straight
-///         through <see cref="System.IO.BinaryWriter" />; any other field type needs a <c>Write{TypeName}</c>/
+///         Fields are encoded in primary-constructor order. Primitives and Magnitudo quantity aliases go straight
+///         through <see cref="System.IO.BinaryWriter" />. Any other field type needs a <c>Write{TypeName}</c>/
 ///         <c>Read{TypeName}</c> pair on the family's codec or on <c>AtmosReplayCodec</c>. When the codec declares
 ///         <c>Write{OperationName}</c>/<c>Read{OperationName}</c>, those encode the operation instead.
 ///     </para>
@@ -57,7 +57,7 @@ public sealed class OperationCodecGenerator : IIncrementalGenerator
 
         IncrementalValueProvider<GeneratorOutput<FamilyCodec>> output = operations.Collect()
             .Combine(codes)
-            .Combine(WireType.QuantityAliases(context))
+            .Combine(QuantityAliasCatalog.Provider(context))
             .Select(static (input, _) => Plan(input.Left.Left, input.Left.Right, input.Right));
 
         GeneratorOutput.Register(context, output, "ReplayOperationCodecs", Emit);
@@ -506,7 +506,7 @@ public sealed class OperationCodecGenerator : IIncrementalGenerator
 
 /// <summary>
 ///     One primary-constructor field. <paramref name="Write" /> is the qualified helper called as
-///     <c>Write(writer, value)</c> and <paramref name="Read" /> the complete read expression; both are null for a
+///     <c>Write(writer, value)</c>, and <paramref name="Read" /> is the complete read expression. Both are null for a
 ///     primitive or quantity alias, which <see cref="System.IO.BinaryWriter" /> handles directly.
 /// </summary>
 internal sealed record OperationField(string Name, WireType Type, string? Write, string? Read);

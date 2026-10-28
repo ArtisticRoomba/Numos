@@ -62,6 +62,27 @@ internal static class QuantityFormat
         return Format(moles, "mol", 3);
     }
 
+    public static string Speed(double metresPerSecond)
+    {
+        return Format(metresPerSecond, "m/s");
+    }
+
+    /// <summary>
+    ///     Formats a duration given in seconds as milliseconds, the scale a fixed time step reads best at.
+    /// </summary>
+    public static string Milliseconds(double seconds)
+    {
+        return Format(seconds * 1e3, "ms");
+    }
+
+    /// <summary>
+    ///     Formats a velocity as its three components followed by one unit, e.g. <c>(1.00, 0.00, -2.50) m/s</c>.
+    /// </summary>
+    public static string Velocity(double x, double y, double z)
+    {
+        return "(" + Format(x, "") + ", " + Format(y, "") + ", " + Format(z, "") + ") m/s";
+    }
+
     /// <summary>
     ///     Formats a fraction in [0, 1] as a percentage with one decimal place.
     /// </summary>

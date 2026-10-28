@@ -1,4 +1,6 @@
+using System.Buffers;
 using Numos.CoreSim.Replay;
+using Numos.CoreSim.State.Advanced;
 
 namespace Numos.API;
 
@@ -15,47 +17,34 @@ namespace Numos.API;
 internal static partial class AtmosWorldReplayCodec
 {
     /// <summary>
-    ///     Writes the world checkpoint section, with the archive's initial and head hashes embedded after the
-    ///     topology version.
+    ///     Writes the world checkpoint section: the format version, the archive's initial and head hashes, then the
+    ///     checkpoint's generated state payload with its length.
     /// </summary>
+    /// <remarks>
+    ///     The version and hashes stay outside the payload. A reader has to check the version before it can trust the
+    ///     payload's layout, and the hashes describe the archive rather than the checkpoint.
+    /// </remarks>
     internal static void WriteCheckpoint(BinaryWriter writer, AtmosWorldReplayArchive archive)
     {
         var checkpoint = archive.InitialCheckpoint;
         writer.Write(checkpoint.FormatVersion);
-        AtmosReplayCodec.WritePosition(writer, checkpoint.Position);
-        writer.Write(checkpoint.TopologyVersion);
         WriteHash(writer, archive.InitialStateHash);
         WriteHash(writer, archive.HeadStateHash);
-        AtmosReplayCodec.WriteConfig(writer, checkpoint.Config);
-        writer.Write(checkpoint.Solvers.Count);
-        foreach (var solver in checkpoint.Solvers)
-        {
-            AtmosReplayCodec.WriteString(writer, solver.Name);
-            writer.Write((byte)solver.Kind);
-            writer.Write(solver.Enabled);
-            AtmosReplayCodec.WriteNullableString(writer, solver.NeighborSelectionKey);
-        }
 
-        writer.Write(checkpoint.SimulationGenerations.Length);
-        foreach (uint generation in checkpoint.SimulationGenerations)
-            writer.Write(generation);
-
-        writer.Write(checkpoint.Simulations.Count);
+        // Sized for the voxel data plus framing, so a large world is written without the buffer regrowing.
+        long estimate = 4096;
         foreach (var simulation in checkpoint.Simulations)
-        {
-            WriteAtmosSimulationId(writer, simulation.Simulation);
-            AtmosReplayCodec.WriteSimulationCheckpoint(writer, simulation.Checkpoint);
-        }
+            estimate += simulation.Checkpoint.PayloadBytes + 256L * simulation.Checkpoint.Chunks.Count;
 
-        writer.Write(checkpoint.LinkSlots.Length);
-        foreach (var slot in checkpoint.LinkSlots)
+        var sink = StateBinarySink.Rent((int)Math.Min(estimate, Array.MaxLength));
+        try
         {
-            writer.Write(slot.Generation);
-            writer.Write(slot.State);
-            writer.Write((byte)slot.Kind);
-            writer.Write(slot.Links.Length);
-            foreach (var link in slot.Links)
-                WriteLink(writer, link);
+            NumosState.Write(ref sink, checkpoint);
+            AtmosReplayCodec.WritePayload(writer, sink.WrittenSpan);
+        }
+        finally
+        {
+            sink.Return();
         }
     }
 
@@ -69,78 +58,47 @@ internal static partial class AtmosWorldReplayCodec
         if (format != AtmosWorldCheckpoint.CurrentFormatVersion)
             throw new InvalidDataException("The world checkpoint schema is unsupported.");
 
-        var position = AtmosReplayCodec.ReadPosition(reader);
-        ulong topologyVersion = reader.ReadUInt64();
         var initialHash = ReadHash(reader);
         var headHash = ReadHash(reader);
-        var config = AtmosReplayCodec.ReadConfig(reader, maxStringBytes);
-        int solverCount = AtmosReplayCodec.ReadCount(reader, 1024, "world solver");
-        var solvers = new AtmosWorldSolverCheckpoint[solverCount];
-        for (int index = 0; index < solverCount; index++)
+        int length = AtmosReplayCodec.ReadCount(reader, int.MaxValue, "world checkpoint byte");
+
+        // Everything decoded is copied out of the payload, so its buffer can go back to the pool.
+        byte[] payload = AtmosReplayCodec.RentPayload(reader, length);
+        AtmosWorldCheckpoint checkpoint;
+        try
         {
-            string name = AtmosReplayCodec.ReadString(reader, maxStringBytes);
-            var kind = (AtmosWorldSolverKind)reader.ReadByte();
-            bool enabled = reader.ReadBoolean();
-            string? selectionKey = AtmosReplayCodec.ReadNullableString(reader, maxStringBytes);
-            if (string.IsNullOrWhiteSpace(name) ||
-                !Enum.IsDefined(kind) ||
-                selectionKey != null && string.IsNullOrWhiteSpace(selectionKey))
+            var state = new StateReader(payload.AsSpan(0, length), maxStringBytes)
             {
-                throw new InvalidDataException("The world solver metadata is invalid.");
-            }
+                SolverConfigurations = (reader as ReplayReader)?.SolverConfigurations,
+            };
 
-            solvers[index] = new AtmosWorldSolverCheckpoint(
-                name,
-                kind,
-                enabled,
-                selectionKey);
+            checkpoint = NumosState.Read<AtmosWorldCheckpoint>(ref state);
         }
-
-        int generationCount = AtmosReplayCodec.ReadCount(reader, 1_000_000, "simulation generation");
-        uint[] generations = new uint[generationCount];
-        for (int index = 0; index < generationCount; index++)
-            generations[index] = reader.ReadUInt32();
-
-        int simulationCount = AtmosReplayCodec.ReadCount(reader, 1_000_000, "simulation");
-        var simulations = new AtmosWorldSimulationCheckpoint[simulationCount];
-        for (int index = 0; index < simulationCount; index++)
+        finally
         {
-            simulations[index] = new AtmosWorldSimulationCheckpoint(
-                ReadAtmosSimulationId(reader),
-                AtmosReplayCodec.ReadSimulationCheckpoint(reader));
+            ArrayPool<byte>.Shared.Return(payload);
         }
 
-        int linkSlotCount = AtmosReplayCodec.ReadCount(reader, 10_000_000, "link-set slot");
-        var slots = new AtmosWorldLinkSlotCheckpoint[linkSlotCount];
-        for (int index = 0; index < linkSlotCount; index++)
-        {
-            uint generation = reader.ReadUInt32();
-            byte state = reader.ReadByte();
-            var kind = (ExplicitLinkSetKind)reader.ReadByte();
-            int linkCount = AtmosReplayCodec.ReadCount(reader, 10_000_000, "explicit link");
-            var links = new ExplicitLinkDefinition[linkCount];
-            for (int linkIndex = 0; linkIndex < linkCount; linkIndex++)
-                links[linkIndex] = ReadLink(reader);
-
-            slots[index] = new AtmosWorldLinkSlotCheckpoint(generation, state, kind, links);
-            // The checkpoint maps states for its public view lazily, so reject unknown ones while reading.
-            if (state is not (0 or 1 or 2 or 3 or 4))
-                throw new InvalidDataException("The world checkpoint contains an invalid link-set state.");
-        }
-
-        var checkpoint = new AtmosWorldCheckpoint(
-            position,
-            topologyVersion,
-            config,
-            solvers,
-            simulations,
-            generations,
-            slots);
-
-        if (initialHash.Position != position)
+        if (initialHash.Position != checkpoint.Position)
             throw new InvalidDataException("The world checkpoint schema or initial digest position is invalid.");
 
         return (checkpoint, initialHash, headHash);
+    }
+
+    private static void WriteSetAtmosWorldSolverStateOperation(BinaryWriter writer, SetAtmosWorldSolverStateOperation operation)
+    {
+        AtmosReplayCodec.WriteString(writer, operation.Name);
+        AtmosReplayCodec.WritePayload(writer, operation.State.Span);
+    }
+
+    private static SetAtmosWorldSolverStateOperation ReadSetAtmosWorldSolverStateOperation(BinaryReader reader, int maxStringBytes)
+    {
+        string name = AtmosReplayCodec.ReadString(reader, maxStringBytes);
+        if (string.IsNullOrWhiteSpace(name))
+            throw new InvalidDataException("A solver state operation names a blank solver.");
+
+        byte[] payload = AtmosReplayCodec.ReadPayload(reader, AtmosReplayCodec.ReadCount(reader, int.MaxValue, "solver state byte"));
+        return new SetAtmosWorldSolverStateOperation(name, payload);
     }
 
     private static void WriteSetAtmosWorldConfigOperation(BinaryWriter writer, SetAtmosWorldConfigOperation operation)
@@ -172,6 +130,36 @@ internal static partial class AtmosWorldReplayCodec
             links[index] = ReadLink(reader);
 
         return new CreateAtmosLinkSetOperation(handle, kind, links);
+    }
+
+    private static void WriteSetAtmosWorldSolverLayoutOperation(
+        BinaryWriter writer,
+        SetAtmosWorldSolverLayoutOperation operation)
+    {
+        writer.Write(operation.Stages.Count);
+        foreach (var stage in operation.Stages)
+        {
+            AtmosReplayCodec.WriteString(writer, stage.Name);
+            writer.Write(stage.Enabled);
+        }
+    }
+
+    private static SetAtmosWorldSolverLayoutOperation ReadSetAtmosWorldSolverLayoutOperation(
+        BinaryReader reader,
+        int maxStringBytes)
+    {
+        int count = AtmosReplayCodec.ReadCount(reader, 1024, "world solver");
+        var stages = new AtmosWorldSolverLayoutEntry[count];
+        for (int index = 0; index < count; index++)
+        {
+            string name = AtmosReplayCodec.ReadString(reader, maxStringBytes);
+            if (string.IsNullOrWhiteSpace(name))
+                throw new InvalidDataException("The world solver layout contains a blank stage name.");
+
+            stages[index] = new AtmosWorldSolverLayoutEntry(name, reader.ReadBoolean());
+        }
+
+        return new SetAtmosWorldSolverLayoutOperation(stages);
     }
 
     /// <summary>
@@ -211,16 +199,22 @@ internal static partial class AtmosWorldReplayCodec
         return new ExplicitLinkSetHandle(reader.ReadInt32(), reader.ReadUInt32());
     }
 
+    // An unset area fraction is written as NaN. Registration never accepts NaN as a value, so the two cannot collide.
     private static void WriteLink(BinaryWriter writer, ExplicitLinkDefinition link)
     {
         WriteCell(writer, link.First);
         WriteCell(writer, link.Second);
         writer.Write((byte)link.Flags);
+        writer.Write(link.AreaFraction ?? float.NaN);
     }
 
     private static ExplicitLinkDefinition ReadLink(BinaryReader reader)
     {
-        return new ExplicitLinkDefinition(ReadCell(reader), ReadCell(reader), (ExplicitLinkFlags)reader.ReadByte());
+        var first = ReadCell(reader);
+        var second = ReadCell(reader);
+        var flags = (ExplicitLinkFlags)reader.ReadByte();
+        float areaFraction = reader.ReadSingle();
+        return new ExplicitLinkDefinition(first, second, flags, float.IsNaN(areaFraction) ? null : areaFraction);
     }
 
     private static void WriteCell(BinaryWriter writer, AtmosCellRef cell)

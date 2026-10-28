@@ -50,6 +50,65 @@ public sealed class AtmosConfigTests
             Assert.That(
                 config.AccumulatorMaxAliveTicks,
                 Is.EqualTo(AtmosConfigDefaults.AccumulatorMaxAliveTicks));
+
+            Assert.That(config.ReferenceMolarMass, Is.EqualTo(AtmosConfigDefaults.ReferenceMolarMass));
+        });
+    }
+
+    [TestCase(0f)]
+    [TestCase(-0.01f)]
+    [TestCase(float.NaN)]
+    [TestCase(float.PositiveInfinity)]
+    public void Snapshot_NormalizesInvalidMolarMasses(float invalid)
+    {
+        var config = new AtmosConfig { ReferenceMolarMass = invalid };
+        config.GasRegistry.Add(new GasProperties { Name = "Unknown", MolarMass = invalid });
+        config.GasRegistry.Add(new GasProperties { Name = "Oxygen", MolarMass = 0.031998f });
+
+        var snapshot = config.CreateSnapshot();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(snapshot.ReferenceMolarMass, Is.EqualTo(AtmosConfigDefaults.ReferenceMolarMass));
+            Assert.That(BitConverter.SingleToInt32Bits(snapshot.GasRegistry[0].MolarMass), Is.Zero);
+            Assert.That(snapshot.GasRegistry[1].MolarMass, Is.EqualTo(0.031998f));
+            Assert.That(snapshot.GetMolarMass(0), Is.EqualTo(AtmosConfigDefaults.ReferenceMolarMass));
+            Assert.That(snapshot.GetMolarMass(1), Is.EqualTo(0.031998f));
+            Assert.That(snapshot.GetMolarMass(2), Is.EqualTo(AtmosConfigDefaults.ReferenceMolarMass));
+        });
+    }
+
+    [Test]
+    public void EditableCopy_PreservesMolarMasses()
+    {
+        var config = new AtmosConfig { ReferenceMolarMass = 0.032f };
+        config.GasRegistry.Add(new GasProperties { Name = "Hydrogen", MolarMass = 0.002016f });
+
+        var copy = new AtmosConfig(config.CreateSnapshot());
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(copy.ReferenceMolarMass, Is.EqualTo(0.032f));
+            Assert.That(copy.GasRegistry[0].MolarMass, Is.EqualTo(0.002016f));
+        });
+    }
+
+    [Test]
+    public void SemanticEquality_DistinguishesMolarMasses()
+    {
+        var baseline = new AtmosConfig();
+        baseline.GasRegistry.Add(new GasProperties { Name = "Gas", MolarMass = 0.028f });
+        var otherGas = new AtmosConfig();
+        otherGas.GasRegistry.Add(new GasProperties { Name = "Gas", MolarMass = 0.044f });
+        var otherReference = new AtmosConfig { ReferenceMolarMass = 0.03f };
+        otherReference.GasRegistry.Add(new GasProperties { Name = "Gas", MolarMass = 0.028f });
+        var snapshot = baseline.CreateSnapshot();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(snapshot.SemanticallyEquals(new AtmosConfig(snapshot).CreateSnapshot()), Is.True);
+            Assert.That(snapshot.SemanticallyEquals(otherGas.CreateSnapshot()), Is.False);
+            Assert.That(snapshot.SemanticallyEquals(otherReference.CreateSnapshot()), Is.False);
         });
     }
 

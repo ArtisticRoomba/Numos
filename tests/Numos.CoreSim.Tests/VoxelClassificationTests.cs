@@ -37,6 +37,15 @@ public sealed class VoxelClassificationTests
         });
     }
 
+    [TestCase(VoxelClassification.RoomUnassigned, true)]
+    [TestCase(VoxelClassification.RoomSolid, false)]
+    [TestCase(VoxelClassification.RoomVoid, false)]
+    [TestCase(42, true)]
+    public void IsAirRoom_ExcludesOnlySolidAndVoid(int roomId, bool expected)
+    {
+        Assert.That(VoxelClassification.IsAirRoom(roomId), Is.EqualTo(expected));
+    }
+
     [TestCase(int.MinValue)]
     [TestCase(VoxelClassification.RoomSolid)]
     [TestCase(VoxelClassification.RoomVoid)]

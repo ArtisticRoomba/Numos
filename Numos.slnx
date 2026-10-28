@@ -15,8 +15,8 @@
         <Project Path="tests\Numos.Replay.Generators.Tests\Numos.Replay.Generators.Tests.csproj"/>
         <Project Path="tests\Numos.Serialization.Tests\Numos.Serialization.Tests.csproj"/>
         <Project Path="tests\Numos.SimDrawer.Tests\Numos.SimDrawer.Tests.csproj"/>
-        <Project Path="tests\Numos.Units.Analyzers.Tests\Numos.Units.Analyzers.Tests.csproj"/>
         <Project Path="tests\Numos.Viewer.Tests\Numos.Viewer.Tests.csproj"/>
+        <Project Path="tests\Numos.Workbench.Tests\Numos.Workbench.Tests.csproj"/>
     </Folder>
 
     <Project Path="src\Numos.API.Dangerous\Numos.API.Dangerous.csproj"/>
@@ -30,7 +30,6 @@
     <Project Path="src\Numos.SimDrawer\Numos.SimDrawer.csproj"/>
     <Project Path="src\Numos.Serialization\Numos.Serialization.csproj"/>
     <Project Path="src\Numos.Serialization.FileSystem\Numos.Serialization.FileSystem.csproj"/>
-    <Project Path="src\Numos.Units\Numos.Units.csproj"/>
-    <Project Path="src\Numos.Units.Analyzers\Numos.Units.Analyzers.csproj"/>
     <Project Path="src\Numos.Viewer\Numos.Viewer.csproj"/>
+    <Project Path="src\Numos.Workbench\Numos.Workbench.csproj"/>
 </Solution>

@@ -33,8 +33,8 @@ internal static class AtmosSolverMath
     ///     Returns a voxel's ideal-gas pressure from its current gas amounts.
     /// </summary>
     /// <remarks>
-    ///     Not a pure function: it updates <see cref="AtmosChunk.IsVacuum" />, and a voxel with no gas is cleared
-    ///     through <see cref="AtmosChunk.SetVoxelToVacuum" />.
+    ///     Not a pure function. It updates <see cref="AtmosChunk.IsVacuum" />.
+    ///     A voxel with no gas is cleared through <see cref="AtmosChunk.SetVoxelToVacuum" />.
     /// </remarks>
     internal static Pascal CalculatePressureAtVoxel(
         IAtmosConfig config, AtmosChunk chunk,
@@ -93,9 +93,8 @@ internal static class AtmosSolverMath
     }
 
     /// <summary>
-    ///     Returns the bulk-flow pressure requested for a pressure delta:
-    ///     <c>pressureDelta × BulkFlowCoefficient</c>, with the coefficient capped at 0.5 so a transfer never asks
-    ///     for more than half the delta.
+    ///     Returns the bulk-flow pressure requested for a pressure delta: <c>pressureDelta × BulkFlowCoefficient</c>.
+    ///     The coefficient is capped at 0.5, so a transfer never asks for more than half the delta.
     /// </summary>
     internal static Pascal CalculateBulkPressureTransfer(
         AtmosSolverConfigSnapshot config,
@@ -111,7 +110,7 @@ internal static class AtmosSolverMath
     /// <summary>
     ///     Returns the source-relative species imbalance <c>n_s - n_t · (T_t / T_s)</c>.
     /// </summary>
-    /// <remarks>No solver currently calls this; diffusion is driven by the source amount alone.</remarks>
+    /// <remarks>No solver currently calls this. Diffusion is driven by the source amount alone.</remarks>
     internal static Mole CalculateMoleImbalance(
         Mole sourceMoles, Kelvin sourceTemperature,
         Mole targetMoles, Kelvin targetTemperature)
@@ -119,8 +118,8 @@ internal static class AtmosSolverMath
         Debug.Assert(sourceMoles >= 0f && targetMoles >= 0f);
         Debug.Assert(IsFinitePositive(sourceTemperature));
 
-        // Mathematically an empty target contributes zero regardless of the temperature ratio. Handling it first
-        // prevents 0 * infinity from turning a valid outward imbalance into NaN at extreme temperatures.
+        // An empty target contributes zero whatever the temperature ratio.
+        // Handling it first stops 0 * infinity from turning a valid outward imbalance into NaN at extreme temperatures.
         if (targetMoles == 0f)
             return sourceMoles;
 
@@ -130,8 +129,9 @@ internal static class AtmosSolverMath
 
     /// <summary>
     ///     Returns the effective conductance between two voxels: the configured conductance capped at
-    ///     <c>C1·C2 / (C1 + C2)</c>, the value that would exactly equalize their temperatures in one step, so a
-    ///     transfer can't overshoot equilibrium.
+    ///     <c>C1·C2 / (C1 + C2)</c>.
+    ///     That cap is the value that equalizes their temperatures in one step, so a transfer cannot overshoot
+    ///     equilibrium.
     /// </summary>
     internal static JoulePerKelvin CalculateThermalConductance(
         JoulePerKelvin sourceHeatCapacity,
@@ -165,7 +165,113 @@ internal static class AtmosSolverMath
     }
 
     /// <summary>
-    ///     Returns the sum of all gas moles in a voxel
+    ///     Gas count up to which a per-channel molar-mass table lives on the stack. A larger table goes on the heap.
+    /// </summary>
+    internal const int MolarMassStackLimit = 64;
+
+    /// <summary>
+    ///     Derives a voxel's bulk velocity from its stored momentum: <c>v = p / m</c>, with the gas mass
+    ///     <c>m = Σ n_g · M_g</c> summed over the positive gas amounts in channel order.
+    /// </summary>
+    /// <remarks>
+    ///     Every component is zero for a vacuum voxel or one whose gas mass is not positive, so a consumer never
+    ///     sees the division blow up on an emptied voxel that still carries stale momentum mid-write. Gases without
+    ///     a registered molar mass weigh <see cref="IAtmosConfig.ReferenceMolarMass" />.
+    /// </remarks>
+    internal static void ComputeVoxelVelocity(
+        IAtmosConfig config, AtmosChunk chunk, ushort voxelIndex,
+        out MetrePerSecond x, out MetrePerSecond y, out MetrePerSecond z)
+    {
+        if (chunk.IsVacuum[voxelIndex])
+        {
+            x = 0f;
+            y = 0f;
+            z = 0f;
+            return;
+        }
+
+        Kilogram mass = 0f;
+        for (int gas = 0; gas < chunk.ActiveGasCount; gas++)
+        {
+            Mole moles = chunk.ActiveGases[gas].Moles[voxelIndex];
+            if (moles <= 0f)
+                continue;
+
+            mass += moles * config.GetMolarMass(chunk.ActiveGases[gas].GasId);
+        }
+
+        DivideMomentumByMass(chunk, voxelIndex, mass, out x, out y, out z);
+    }
+
+    /// <summary>
+    ///     Derives a voxel's bulk velocity from a molar-mass table that the caller resolved once for the whole chunk.
+    ///     See <see cref="ResolveMolarMasses" />.
+    /// </summary>
+    /// <remarks>
+    ///     Use this overload in a loop over many voxels. It gives the same result as the configuration overload,
+    ///     without an interface call per voxel and gas. The table holds the molar mass of each active gas channel,
+    ///     indexed like <see cref="AtmosChunk.ActiveGases" />.
+    /// </remarks>
+    internal static void ComputeVoxelVelocity(
+        ReadOnlySpan<KilogramPerMole> molarMasses, AtmosChunk chunk, ushort voxelIndex,
+        out MetrePerSecond x, out MetrePerSecond y, out MetrePerSecond z)
+    {
+        if (chunk.IsVacuum[voxelIndex])
+        {
+            x = 0f;
+            y = 0f;
+            z = 0f;
+            return;
+        }
+
+        Kilogram mass = 0f;
+        for (int gas = 0; gas < chunk.ActiveGasCount; gas++)
+        {
+            Mole moles = chunk.ActiveGases[gas].Moles[voxelIndex];
+            if (moles <= 0f)
+                continue;
+
+            mass += moles * molarMasses[gas];
+        }
+
+        DivideMomentumByMass(chunk, voxelIndex, mass, out x, out y, out z);
+    }
+
+    /// <summary>
+    ///     Resolves the molar mass of every active gas channel of a chunk.
+    /// </summary>
+    /// <param name="config">The configuration that supplies the molar masses.</param>
+    /// <param name="chunk">The chunk whose active gas channels get a molar mass.</param>
+    /// <param name="destination">
+    ///     Receives one value per active channel, in channel order. It must hold at least
+    ///     <see cref="AtmosChunk.ActiveGasCount" /> entries.
+    /// </param>
+    internal static void ResolveMolarMasses(
+        IAtmosConfig config, AtmosChunk chunk, Span<KilogramPerMole> destination)
+    {
+        for (int gas = 0; gas < chunk.ActiveGasCount; gas++)
+            destination[gas] = config.GetMolarMass(chunk.ActiveGases[gas].GasId);
+    }
+
+    private static void DivideMomentumByMass(
+        AtmosChunk chunk, ushort voxelIndex, Kilogram mass,
+        out MetrePerSecond x, out MetrePerSecond y, out MetrePerSecond z)
+    {
+        if (mass <= 0f)
+        {
+            x = 0f;
+            y = 0f;
+            z = 0f;
+            return;
+        }
+
+        x = chunk.MomentumX[voxelIndex] / mass;
+        y = chunk.MomentumY[voxelIndex] / mass;
+        z = chunk.MomentumZ[voxelIndex] / mass;
+    }
+
+    /// <summary>
+    ///     Returns the sum of all gas moles in a voxel.
     /// </summary>
     internal static Mole GetTotalMoles(AtmosChunk chunk, ushort voxelIndex)
     {
@@ -174,5 +280,21 @@ internal static class AtmosSolverMath
             totalMoles += chunk.ActiveGases[gas].Moles[voxelIndex];
 
         return totalMoles;
+    }
+
+    /// <summary>
+    ///     Resolves the thermal conductivity for a gas at a specific temperature.
+    /// </summary>
+    internal static WattsPerMeterKelvin GetThermalConductivity(WattsPerMeterKelvin referenceThermalConductivity, Kelvin temperature)
+    {
+        // TODO: Magic numbers
+        // These are the reference temp of thermal conductivity. Most online values will be listed at this temp
+        // The exponent is the relationship with temp, it is 0.5 for mono atomic gasses but higher up to 1 for more complex gasses.
+        // 0.7 used as a middle ground, this should probably have a better reason for 0.7.
+        float ReferenceConductivityTemperature = 300f;
+        float ThermalConductivityExponent = 0.7f;
+        // Conductivity rises roughly as a power of temperature. The stored value is the one at the reference temperature.
+        Scalar temperatureRatio = temperature / ReferenceConductivityTemperature;
+        return referenceThermalConductivity * MathF.Pow(temperatureRatio, ThermalConductivityExponent);
     }
 }

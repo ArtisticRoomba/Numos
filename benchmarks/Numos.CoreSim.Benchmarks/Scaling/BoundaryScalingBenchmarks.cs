@@ -61,7 +61,7 @@ public class BoundaryScalingBenchmarks : ScalingBenchmarkBase
     [IterationSetup(Target = nameof(Boundary_ChunkScaling_Transient))]
     public void PrepareBoundaryEvents()
     {
-        Workload.Reset(1);
+        Workload.Reset(Workload.BoundaryFlowStep);
     }
 
     /// <summary>
@@ -70,7 +70,7 @@ public class BoundaryScalingBenchmarks : ScalingBenchmarkBase
     [Benchmark]
     public void Boundary_ChunkScaling_Transient()
     {
-        Workload.Steps[1].Solver(Workload.Context);
+        Workload.BoundaryFlowStep.Solver(Workload.Context);
     }
 }
 
@@ -130,7 +130,7 @@ public class ThermalBoundaryScalingBenchmarks : ScalingBenchmarkBase
     [IterationSetup(Target = nameof(ThermalBoundary_EdgeScaling_Transient))]
     public void PrepareThermalEvents()
     {
-        Workload.Reset(3);
+        Workload.Reset(Workload.ThermalBoundaryStep);
     }
 
     /// <summary>
@@ -139,6 +139,6 @@ public class ThermalBoundaryScalingBenchmarks : ScalingBenchmarkBase
     [Benchmark]
     public void ThermalBoundary_EdgeScaling_Transient()
     {
-        Workload.Steps[3].Solver(Workload.Context);
+        Workload.ThermalBoundaryStep.Solver(Workload.Context);
     }
 }

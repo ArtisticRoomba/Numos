@@ -146,6 +146,100 @@ public sealed class AtmosReplayTests
     }
 
     [Test]
+    public void MomentumOperations_ReplayAndEmptyingAVoxelZeroesItsMomentum()
+    {
+        using var simulation = CreateSimulation();
+        var world = simulation.World;
+        var chunk = simulation.CreateAndRegisterChunk(default);
+        simulation.SetVoxelClassification(chunk, 2, new VoxelClassification(VoxelClassification.RoomSolid));
+        simulation.AddGasToVoxel(chunk, 0, 1, 2f, 300f);
+        simulation.AddGasToVoxel(chunk, 1, 0, 3f, 310f);
+        var initial = world.CaptureCheckpoint();
+        world.StartRecording();
+        var hashes = new List<AtmosWorldStateHash>();
+
+        simulation.SetVoxelMomentum(chunk, 0, 1.5f, -2.5f, 3.5f);
+        hashes.Add(world.ComputeStateHash());
+        simulation.SetVoxelMomentum(chunk, 1, 0, 0, 4f, 5f, 6f);
+        hashes.Add(world.ComputeStateHash());
+
+        // Rejected writes leave no trace: a solid voxel and a voxel with no gas both stay at zero momentum.
+        var beforeRejected = world.ComputeStateHash();
+        simulation.SetVoxelMomentum(chunk, 2, 9f, 9f, 9f);
+        simulation.SetVoxelMomentum(chunk, 3, 9f, 9f, 9f);
+        Assert.That(world.ComputeStateHash(), Is.EqualTo(beforeRejected));
+
+        // Adding gas keeps momentum. A mixture write that removes the last mole drops it.
+        simulation.AddGasToVoxel(chunk, 0, 0, 1f, 300f);
+        hashes.Add(world.ComputeStateHash());
+        simulation.GetVoxelGasMixture(chunk, 1).Clear();
+        hashes.Add(world.ComputeStateHash());
+        simulation.GetVoxelGasMixture(chunk, 0).SetMoles(1, 0f);
+        simulation.GetVoxelGasMixture(chunk, 0).SetMoles(0, 0f);
+        hashes.Add(world.ComputeStateHash());
+        var recording = world.StopRecording();
+
+        Assert.That(
+            recording.Operations
+                .Select(static op => op.Operation)
+                .OfType<AtmosWorldSimulationOperation>()
+                .Count(static op => op.Operation.Code == AtmosOperationCode.SetVoxelMomentum),
+            Is.EqualTo(2),
+            "Only accepted momentum writes are recorded.");
+
+        var emptied = simulation.CaptureCheckpoint().Chunks.Single();
+        Assert.Multiple(() =>
+        {
+            Assert.That(emptied.MomentumX.Take(2), Is.All.Zero);
+            Assert.That(emptied.MomentumY.Take(2), Is.All.Zero);
+            Assert.That(emptied.MomentumZ.Take(2), Is.All.Zero);
+        });
+
+        foreach (var hash in hashes)
+        {
+            world.ReplayTo(initial, recording.Operations, hash.Position);
+            Assert.That(world.ComputeStateHash(), Is.EqualTo(hash));
+        }
+
+        world.ReplayTo(initial, recording.Operations, hashes[2].Position);
+        var replayed = simulation.CaptureCheckpoint().Chunks.Single();
+        Assert.Multiple(() =>
+        {
+            Assert.That(replayed.MomentumX[0], Is.EqualTo(1.5f));
+            Assert.That(replayed.MomentumY[0], Is.EqualTo(-2.5f));
+            Assert.That(replayed.MomentumZ[0], Is.EqualTo(3.5f));
+            Assert.That(replayed.MomentumX[1], Is.EqualTo(4f));
+            Assert.That(replayed.MomentumY[1], Is.EqualTo(5f));
+            Assert.That(replayed.MomentumZ[1], Is.EqualTo(6f));
+        });
+    }
+
+    [Test]
+    public void SetVoxelMomentum_RejectsNonFiniteComponentsWithoutRecording()
+    {
+        using var simulation = CreateSimulation();
+        var world = simulation.World;
+        var chunk = simulation.CreateAndRegisterChunk(default);
+        simulation.AddGasToVoxel(chunk, 0, 0, 2f, 300f);
+        world.StartRecording();
+        var before = world.ComputeStateHash();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(() => simulation.SetVoxelMomentum(chunk, 0, float.NaN, 0f, 0f), Throws.TypeOf<ArgumentOutOfRangeException>());
+            Assert.That(() => simulation.SetVoxelMomentum(chunk, 0, 0f, float.PositiveInfinity, 0f), Throws.TypeOf<ArgumentOutOfRangeException>());
+            Assert.That(() => simulation.SetVoxelMomentum(chunk, 0, 0, 0, 0f, 0f, float.NegativeInfinity), Throws.TypeOf<ArgumentOutOfRangeException>());
+        });
+
+        var recording = world.StopRecording();
+        Assert.Multiple(() =>
+        {
+            Assert.That(world.ComputeStateHash(), Is.EqualTo(before));
+            Assert.That(recording.Operations, Is.Empty);
+        });
+    }
+
+    [Test]
     public void CustomSolver_UsesNormalApiWithoutRecordingAndCanSuppressHostEffects()
     {
         using var simulation = CreateSimulation();
@@ -333,7 +427,7 @@ public sealed class AtmosReplayTests
         var world = simulation.World;
         var chunk = simulation.CreateAndRegisterChunk(default);
         simulation.AddGasToVoxel(chunk, 0, 0, 2f, 320f);
-        world.Solvers.SetEnabled(AtmosBuiltInSolvers.Advection, false);
+        world.Solvers.SetEnabled(AtmosBuiltInSolvers.EulerFlow, false);
         simulation.GetVoxelGasMixture(chunk, 0).Temperature = 280f;
         var checkpoint = world.CaptureCheckpoint();
         var oldVersion = simulation.GetChunkSnapshot(chunk).Version;
@@ -354,7 +448,7 @@ public sealed class AtmosReplayTests
         simulation.AddGasToVoxel(chunk, 0, 0, 2f, 320f);
         var grid = simulation.CaptureCheckpoint();
         world.Tick();
-        world.Solvers.SetEnabled(AtmosBuiltInSolvers.Advection, false);
+        world.Solvers.SetEnabled(AtmosBuiltInSolvers.EulerFlow, false);
         world.SetAtmosConfig(new AtmosConfig(world.Config) { ThermalConductance = 0.4f });
         simulation.SetVoxelTemperature(chunk, 0, 400f);
 
@@ -366,7 +460,7 @@ public sealed class AtmosReplayTests
             Assert.That(world.TickCount, Is.EqualTo(1));
             Assert.That(simulation.TickCount, Is.EqualTo(1));
             Assert.That(world.Config.ThermalConductance, Is.EqualTo(0.4f));
-            Assert.That(world.Solvers.Steps.Single(step => step.Name == AtmosBuiltInSolvers.Advection).IsEnabled, Is.False);
+            Assert.That(world.Solvers.Steps.Single(step => step.Name == AtmosBuiltInSolvers.EulerFlow).IsEnabled, Is.False);
         });
     }
 }

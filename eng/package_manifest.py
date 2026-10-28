@@ -9,15 +9,15 @@ from pathlib import Path
 
 PACKAGE_DEPENDENCIES = {
     "Numos.Maths": (),
-    "Numos.Units": (),
     "Numos.Collections": ("Numos.Maths",),
-    "Numos.CoreSim": ("Numos.Maths", "Numos.Collections", "Numos.Units",),
+    "Numos.CoreSim": ("Numos.Maths", "Numos.Collections"),
     "Numos.API": ("Numos.CoreSim",),
     "Numos.API.Dangerous": ("Numos.API",),
     "Numos.Serialization": ("Numos.API",),
     "Numos.Serialization.FileSystem": ("Numos.Serialization",),
     "Numos.SimDrawer": ("Numos.CoreSim",),
-    "Numos.Viewer": ("Numos.API", "Numos.SimDrawer", "Numos.Serialization.FileSystem"),
+    "Numos.Workbench": ("Numos.API", "Numos.SimDrawer", "Numos.Serialization.FileSystem"),
+    "Numos.Viewer": ("Numos.API", "Numos.SimDrawer", "Numos.Serialization.FileSystem", "Numos.Workbench"),
 }
 # Analyzer projects packed into a package under analyzers/dotnet/cs instead of being published on their own.
 PACKAGE_ANALYZERS = {
@@ -26,20 +26,19 @@ PACKAGE_ANALYZERS = {
 PACKAGE_VERSION_FILES = {
     "Numos.Maths": Path("src/Numos.CoreSim/Version.props"),
     "Numos.Collections": Path("src/Numos.CoreSim/Version.props"),
-    "Numos.Units": Path("src/Numos.CoreSim/Version.props"),
     "Numos.CoreSim": Path("src/Numos.CoreSim/Version.props"),
     "Numos.API": Path("src/Numos.CoreSim/Version.props"),
     "Numos.API.Dangerous": Path("src/Numos.CoreSim/Version.props"),
     "Numos.Serialization": Path("src/Numos.CoreSim/Version.props"),
     "Numos.Serialization.FileSystem": Path("src/Numos.CoreSim/Version.props"),
     "Numos.SimDrawer": Path("src/Numos.Viewer/Version.props"),
+    "Numos.Workbench": Path("src/Numos.Viewer/Version.props"),
     "Numos.Viewer": Path("src/Numos.Viewer/Version.props"),
 }
 PACKAGE_FAMILIES = {
     "coresim": (
         "Numos.Maths",
         "Numos.Collections",
-        "Numos.Units",
         "Numos.CoreSim",
         "Numos.API",
         "Numos.API.Dangerous",
@@ -48,6 +47,7 @@ PACKAGE_FAMILIES = {
     ),
     "viewer": (
         "Numos.SimDrawer",
+        "Numos.Workbench",
         "Numos.Viewer",
     ),
 }

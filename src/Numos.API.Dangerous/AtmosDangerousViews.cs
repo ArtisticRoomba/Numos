@@ -101,6 +101,29 @@ public readonly ref struct AtmosDangerousChunk
     public Span<float> TotalHeatCapacity => _chunk.TotalHeatCapacity.AsSpan();
 
     /// <summary>
+    ///     Live per-voxel total x-momentum storage, in kilogram metres per second.
+    /// </summary>
+    /// <remarks>
+    ///     This is the momentum of the voxel's whole gas content, not a velocity. The kernel keeps it zero wherever
+    ///     a voxel holds no gas. A raw write that breaks that (momentum in a vacuum voxel) is yours to clean up.
+    ///     Writes through this span are not recorded, so they only replay correctly as deterministic solver work or
+    ///     when followed by a fresh checkpoint.
+    /// </remarks>
+    public Span<float> MomentumX => _chunk.MomentumX.AsSpan();
+
+    /// <summary>
+    ///     Live per-voxel total y-momentum storage, in kilogram metres per second. Same contract as
+    ///     <see cref="MomentumX" />.
+    /// </summary>
+    public Span<float> MomentumY => _chunk.MomentumY.AsSpan();
+
+    /// <summary>
+    ///     Live per-voxel total z-momentum storage, in kilogram metres per second. Same contract as
+    ///     <see cref="MomentumX" />.
+    /// </summary>
+    public Span<float> MomentumZ => _chunk.MomentumZ.AsSpan();
+
+    /// <summary>
     ///     Live per-voxel room-classification storage.
     /// </summary>
     /// <remarks>

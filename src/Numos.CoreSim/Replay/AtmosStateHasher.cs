@@ -1,9 +1,7 @@
-using Numos.Maths;
-
 namespace Numos.CoreSim.Replay;
 
-// Built-in primitive writes use little endian and raw IEEE bits. Solver values retain their native byte layout.
-// Never hash CLR identities or pool capacity.
+// The FNV-1a core behind StateHashSink, which is what state hashes should go through so they see the wire bytes.
+// Integers are little-endian and floats their raw IEEE bits. Never hash CLR identities or pool capacity.
 internal struct AtmosStateHasher
 {
     public AtmosStateHasher()
@@ -16,6 +14,15 @@ internal struct AtmosStateHasher
     internal void AddByte(byte value)
     {
         Value = unchecked((Value ^ value) * 1099511628211UL);
+    }
+
+    internal void AddBytes(ReadOnlySpan<byte> bytes)
+    {
+        ulong value = Value;
+        foreach (byte part in bytes)
+            value = unchecked((value ^ part) * 1099511628211UL);
+
+        Value = value;
     }
 
     internal void Add(bool value)
@@ -39,68 +46,5 @@ internal struct AtmosStateHasher
     {
         for (int shift = 0; shift < 64; shift += 8)
             AddByte((byte)(value >> shift));
-    }
-
-    internal void Add(string? value)
-    {
-        Add(value?.Length ?? -1);
-        if (value == null)
-            return;
-
-        foreach (char character in value)
-        {
-            AddByte((byte)character);
-            AddByte((byte)(character >> 8));
-        }
-    }
-
-    internal void Add(Int3 value)
-    {
-        Add(value.X);
-        Add(value.Y);
-        Add(value.Z);
-    }
-
-    internal void Add(GasProperties gas)
-    {
-        GeneratedCheckpointFields.AppendGasFields(ref this, gas);
-    }
-
-    internal static ulong HashDefinition(AtmosSimulationCheckpoint checkpoint)
-    {
-        var hash = new AtmosStateHasher();
-        hash.Add(checkpoint.CompatibilityVersion);
-        hash.Add(checkpoint.Dimensions);
-        return hash.Value;
-    }
-
-    internal static ulong Hash(AtmosSimulationCheckpoint checkpoint)
-    {
-        var hash = new AtmosStateHasher();
-        hash.Add(checkpoint.FormatVersion);
-        hash.Add(checkpoint.CompatibilityFingerprint);
-        hash.Add(checkpoint.Chunks.Count);
-        foreach (var chunk in checkpoint.Chunks)
-        {
-            hash.Add(chunk.Position);
-            hash.Add(chunk.Dimensions);
-            hash.Add(chunk.IsAwake);
-            hash.Add(chunk.SleepTimer);
-            GeneratedCheckpointFields.AppendChunkFields(ref hash, chunk);
-            hash.Add(chunk.ActiveAirIndices.Count);
-            foreach (ushort value in chunk.ActiveAirIndices) hash.Add(value);
-            hash.Add(chunk.Gases.Count);
-            foreach (var gas in chunk.Gases)
-            {
-                hash.Add(gas.GasId);
-                foreach (float value in gas.Moles) hash.Add(value);
-            }
-
-            hash.Add(chunk.SolverArrays.Count);
-            foreach (var array in chunk.SolverArrays)
-                array.AppendHash(ref hash);
-        }
-
-        return hash.Value;
     }
 }

@@ -1,4 +1,4 @@
-using Numos.Units;
+using Magnitudo;
 
 namespace Numos.CoreSim;
 
@@ -43,9 +43,17 @@ public static class AtmosConfigDefaults
     public const Pascal SaturationReferencePressure = AtmosPhysicalConstants.StandardAtmosphericPressure;
 
     /// <summary>
-    ///     Default reference diffusivity for unregistered gas IDs.
+    ///     Default reference diffusivity for unregistered gas IDs, in square metres per second (m²/s).
     /// </summary>
-    public const Scalar DefaultDiffusionCoefficient = 0.02f;
+    [Quantity("diffusivity")]
+    public const SquareMetrePerSecond DefaultDiffusionCoefficient = 0.02f;
+
+
+    /// <summary>
+    ///     Default reference thermal conductivity for unregistered gas IDs, in watts per metre-kelvin (W/(m·K)).
+    /// </summary>
+    [Quantity("wattsPerMeterKelvin")]
+    public const WattsPerMeterKelvin DefaultThermalConductivity = 0.024f;
 
     /// <summary>
     ///     Default modeled temperature of space, in kelvins (K).
@@ -104,4 +112,35 @@ public static class AtmosConfigDefaults
     ///     reads it.
     /// </summary>
     public const int AccumulatorMaxAliveTicks = 20;
+
+    /// <summary>
+    ///     Default for <see cref="AtmosConfig.ReferenceMolarMass" />, in kilograms per mole (kg/mol). This is dry air.
+    /// </summary>
+    [Quantity("molarMass")]
+    public const KilogramPerMole ReferenceMolarMass = 0.02897f;
+
+    /// <summary>
+    ///     Default for <see cref="AtmosConfig.FlameSpeedScale" />, a dimensionless multiplier.
+    /// </summary>
+    public const Scalar FlameSpeedScale = 1f;
+
+    /// <summary>
+    ///     Slowest flame speed that still sustains a flame. Below it a flame kernel recedes, and a voxel that
+    ///     burns across its whole volume stops counting as ignited. The gas itself keeps reacting normally.
+    /// </summary>
+    [Quantity("velocity")]
+    public const MetrePerSecond MinimumFlameSpeed = 0.01f;
+
+    /// <summary>
+    ///     Whether a fully ignited voxel may start a flame kernel in its face neighbors. Heat transfer is
+    ///     the main way fire spreads between voxels; this is only a supplement.
+    /// </summary>
+    public const bool IgnitionTransferEnabled = true;
+
+    /// <summary>
+    ///     Fraction of a voxel that a transferred flame kernel starts with. After that the kernel grows or
+    ///     recedes by the same flame speed rules as any other flame.
+    /// </summary>
+    public const Scalar TransferSeedFraction = 0.01f;
+
 }

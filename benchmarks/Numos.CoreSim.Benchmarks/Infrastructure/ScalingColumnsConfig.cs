@@ -23,6 +23,7 @@ public sealed class ScalingColumnsConfig : ManualConfig
                     benchmark.Descriptor.WorkloadMethod.Name.Contains("Transient", StringComparison.Ordinal)
                         ? "Transient"
                         : "SteadyState"),
+            new ScalingColumn("TransportModel", false, (options, _) => options.TransportModel.ToString()),
             new ScalingColumn("RegisteredChunks", true, (options, _) => options.RegisteredChunkCount.ToString()),
             new ScalingColumn("AwakeChunks", true, (options, _) => options.AwakeChunkCount.ToString()),
             new ScalingColumn("ChunkWidth", true, (options, _) => options.ChunkWidth.ToString()),
@@ -31,6 +32,7 @@ public sealed class ScalingColumnsConfig : ManualConfig
             new ScalingColumn("VoxelCount", true, (options, _) => options.VoxelCount.ToString()),
             new ScalingColumn("ActiveVoxelCount", true, (options, _) => options.ActiveVoxelCount.ToString()),
             new ScalingColumn("GasCount", true, (options, _) => options.GasCount.ToString()),
+            new ScalingColumn("PresentGasCount", true, (options, _) => options.InjectedGasCount.ToString()),
             new ScalingColumn("ReactionCount", true, (options, _) => options.ReactionCount.ToString()),
             new ScalingColumn("CondensingGasCount", true, (options, _) => options.CondensingGasCount.ToString()),
             new ScalingColumn("SupersaturatedVoxelFraction", true, (options, _) => options.SupersaturatedVoxelFraction.ToString("G")),
@@ -39,7 +41,9 @@ public sealed class ScalingColumnsConfig : ManualConfig
                 "BoundaryEventCount",
                 true,
                 (options, _) =>
-                    options.ActiveVoxelFraction == 1d ? SimulationWorkload.GetBoundaryEventCount(options).ToString() : "-"),
+                    options is { TransportModel: AtmosTransportModel.Legacy, ActiveVoxelFraction: 1d }
+                        ? SimulationWorkload.GetBoundaryEventCount(options).ToString()
+                        : "-"),
             new ScalingColumn(
                 "ThermalBoundaryEdgeCount",
                 true,

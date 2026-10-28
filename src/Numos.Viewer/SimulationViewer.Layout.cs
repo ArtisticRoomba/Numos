@@ -1,5 +1,6 @@
 using ImGuiNET;
 using Numos.Viewer.Ui;
+using Numos.Workbench;
 
 namespace Numos.Viewer;
 
@@ -46,7 +47,7 @@ public partial class SimulationViewer
         if (_userLayoutPath == null)
         {
             WriteMessage(
-                ViewerLogLevel.Error,
+                WorkbenchLogLevel.Error,
                 Locale.GetString("source-layout"), 
                 Locale.GetString("message-layout-not-initialized"));
             return;
@@ -55,7 +56,7 @@ public partial class SimulationViewer
         try
         {
             ImGui.SaveIniSettingsToDisk(_userLayoutPath);
-            WriteMessage(ViewerLogLevel.Info,
+            WriteMessage(WorkbenchLogLevel.Info,
                 Locale.GetString("source-layout"), 
                 Locale.GetString("message-layout-saved-success"));
         }
@@ -74,14 +75,14 @@ public partial class SimulationViewer
     {
         if (_packagedDefaultLayoutPath == null)
         {
-            WriteMessage(ViewerLogLevel.Error, Locale.GetString("source-layout"), Locale.GetString("message-layout-not-initialized-packaged"));
+            WriteMessage(WorkbenchLogLevel.Error, Locale.GetString("source-layout"), Locale.GetString("message-layout-not-initialized-packaged"));
             return;
         }
 
         try
         {
             ImGui.SaveIniSettingsToDisk(_packagedDefaultLayoutPath);
-            WriteMessage(ViewerLogLevel.Info, Locale.GetString("source-layout"), Locale.GetString("message-layout-saved-success-packaged"));
+            WriteMessage(WorkbenchLogLevel.Info, Locale.GetString("source-layout"), Locale.GetString("message-layout-saved-success-packaged"));
         }
         catch (Exception ex)
         {

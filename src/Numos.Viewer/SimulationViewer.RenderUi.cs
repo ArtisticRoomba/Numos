@@ -1,12 +1,15 @@
 using System.Globalization;
 using System.Numerics;
 using ImGuiNET;
+using Numos.Workbench;
 using Numos.API;
 using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.Datatypes.Snapshots;
+using Numos.CoreSim.EulerFlow;
 using Numos.Maths;
 using Numos.SimDrawer;
+using Numos.Viewer.Rendering;
 using Numos.Viewer.Ui;
 using Raylib_cs;
 using rlImGui_cs;
@@ -34,7 +37,7 @@ public partial class SimulationViewer
         DrawWorldModals();
         RenderMessagesPanel();
 
-        if (_world == null)
+        if (_session.World == null)
         {
             RenderEmptyWorkspaceMessage();
             DrawCreateProjectModal();
@@ -426,7 +429,7 @@ public partial class SimulationViewer
                 if (ImGui.MenuItem("Open Replay..."))
                     RequestOpenReplay();
 
-                ImGui.BeginDisabled(_world == null);
+                ImGui.BeginDisabled(_session.World == null);
                 if (ImGui.MenuItem("Save Replay..."))
                     RequestSaveReplay();
 
@@ -447,7 +450,7 @@ public partial class SimulationViewer
                 ImGui.MenuItem("Messages / Logs", null, ref _showMessagesPanel);
                 ImGui.Separator();
 
-                bool simulationAvailable = _simulation != null && _config != null;
+                bool simulationAvailable = _simulation != null && _session.Config != null;
                 ImGui.BeginDisabled(!simulationAvailable);
 
                 ImGui.MenuItem("Solution", null, ref _showSolutionPanel);
@@ -455,7 +458,7 @@ public partial class SimulationViewer
                 ImGui.MenuItem("View", null, ref _showViewPanel);
                 ImGui.EndDisabled();
 
-                bool worldAvailable = _world != null && _config != null;
+                bool worldAvailable = _session.World != null && _session.Config != null;
                 ImGui.BeginDisabled(!worldAvailable);
                 ImGui.MenuItem("Configuration", null, ref _showConfigurationPanel);
                 ImGui.MenuItem("Timeline", null, ref _showTimelinePanel);
@@ -571,7 +574,10 @@ public partial class SimulationViewer
             "Voxel outlines",
             "voxel-outlines",
             ref _show3DVoxelOutlines,
-            ref _show2DVoxelOutlines);
+            ref _show2DVoxelOutlines,
+            "Each outline is drawn per voxel, so large scenes skip them. The 3D view outlines voxels only for a " +
+            $"focused chunk or a scene of at most {SimulationRenderer.MaxOutlinedVoxels:N0} voxels. " +
+            $"The 2D view outlines cells only when they are at least {SliceRenderer.MinOutlinePixels:0} pixels wide.");
 
         RenderRenderingStyleRow(
             "Transparent voxels",
@@ -579,18 +585,47 @@ public partial class SimulationViewer
             ref _transparent3DVoxels,
             ref _transparent2DVoxels);
 
+        RenderRenderingStyleRow(
+            "Velocity arrows",
+            "velocity-arrows",
+            ref _show3DVelocityArrows,
+            ref _show2DVelocityArrows,
+            $"Draws at most {VelocityArrows.MaxArrows:N0} arrows. A larger scene shows every n-th voxel. " +
+            "Zoom the 2D view in to see more of them.");
+
         ImGui.EndTable();
+
+        ImGui.BeginDisabled(!_show3DVelocityArrows && !_show2DVelocityArrows);
+        if (ImGui.SliderFloat(
+                "Arrow scale##velocity-arrow-scale",
+                ref _velocityArrowScaleSeconds,
+                VelocityArrows.MinScaleSeconds,
+                VelocityArrows.MaxScaleSeconds,
+                "%.3f s",
+                ImGuiSliderFlags.Logarithmic))
+        {
+            _velocityArrowScaleSeconds = VelocityArrows.ClampScale(_velocityArrowScaleSeconds);
+        }
+
+        ImGui.EndDisabled();
+        ImGuiExtensions.QuestionTooltip(
+            "Seconds of travel one arrow represents. At 0.05 s a voxel moving at 20 m/s draws a one-voxel arrow. " +
+            $"Arrows longer than {VelocityArrows.MaxLength:0} voxels are capped and keep only their direction.");
     }
 
     private static void RenderRenderingStyleRow(
         string label,
         string id,
         ref bool show3D,
-        ref bool show2D)
+        ref bool show2D,
+        string? tooltip = null)
     {
         ImGui.TableNextRow();
         ImGui.TableSetColumnIndex(0);
         ImGui.TextUnformatted(label);
+        if (tooltip != null)
+            ImGuiExtensions.QuestionTooltip(tooltip);
+
         ImGui.TableSetColumnIndex(1);
         ImGui.Checkbox($"##{id}-3d", ref show3D);
         ImGui.TableSetColumnIndex(2);
@@ -599,7 +634,7 @@ public partial class SimulationViewer
 
     private void RenderConfigurationPanel()
     {
-        if (!_showConfigurationPanel || _config == null)
+        if (!_showConfigurationPanel || _session.Config == null)
             return;
 
         using var window = ImGuiExtensions.BeginWindow(
@@ -615,6 +650,10 @@ public partial class SimulationViewer
         if (inspecting)
             ClearConfigurationDrafts();
 
+        if (ImGui.CollapsingHeader("Solver Pipeline", ImGuiTreeNodeFlags.DefaultOpen))
+            RenderSolverPipelineSection(inspecting);
+
+        ImGui.Spacing();
         if (ImGui.CollapsingHeader("AtmosConfig", ImGuiTreeNodeFlags.DefaultOpen))
         {
             ImGui.BeginDisabled(inspecting);
@@ -634,32 +673,28 @@ public partial class SimulationViewer
             ConfigFloatInput(
                 AtmosConfigFields.GlobalTemperature,
                 "config-global-temperature",
-                _config.GlobalTemperature,
-                ConfigDomain.Positive,
+                _session.Config.GlobalTemperature,
                 inspecting,
                 static (config, value) => config.GlobalTemperature = value);
 
             ConfigFloatInput(
                 AtmosConfigFields.DefaultTemperatureFallback,
                 "config-default-temperature-fallback",
-                _config.DefaultTemperatureFallback,
-                ConfigDomain.Positive,
+                _session.Config.DefaultTemperatureFallback,
                 inspecting,
                 static (config, value) => config.DefaultTemperatureFallback = value);
 
             ConfigFloatInput(
                 AtmosConfigFields.VoxelVolume,
                 "config-voxel-volume",
-                _config.VoxelVolume,
-                ConfigDomain.Positive,
+                _session.Config.VoxelVolume,
                 inspecting,
                 static (config, value) => config.VoxelVolume = value);
 
             ConfigFloatInput(
                 AtmosConfigFields.SaturationReferencePressure,
                 "config-saturation-reference-pressure",
-                _config.SaturationReferencePressure,
-                ConfigDomain.Positive,
+                _session.Config.SaturationReferencePressure,
                 inspecting,
                 static (config, value) => config.SaturationReferencePressure = value,
                 QuantityFormat.KilopascalsPerPascal);
@@ -667,44 +702,44 @@ public partial class SimulationViewer
             ConfigFloatInput(
                 AtmosConfigFields.DefaultMolarHeatCapacityAtConstantVolume,
                 "config-default-molar-cv",
-                _config.DefaultMolarHeatCapacityAtConstantVolume,
-                ConfigDomain.Positive,
+                _session.Config.DefaultMolarHeatCapacityAtConstantVolume,
                 inspecting,
                 static (config, value) => config.DefaultMolarHeatCapacityAtConstantVolume = value);
 
-            ConfigFloatSlider(
+            ConfigFloatInput(
                 AtmosConfigFields.DefaultDiffusionCoefficient,
                 "config-default-diffusion-coefficient",
-                _config.DefaultDiffusionCoefficient,
-                0f,
-                1f,
-                ConfigDomain.UnitInterval,
+                _session.Config.DefaultDiffusionCoefficient,
                 inspecting,
                 static (config, value) => config.DefaultDiffusionCoefficient = value);
 
             ConfigFloatInput(
+                AtmosConfigFields.DefaultThermalConductivity,
+                "config-default-thermal-conductivity",
+                _session.Config.DefaultThermalConductivity,
+                inspecting,
+                static (config, value) => config.DefaultThermalConductivity = value);
+
+            ConfigFloatInput(
                 AtmosConfigFields.SpaceTemperature,
                 "config-space-temperature",
-                _config.SpaceTemperature,
-                ConfigDomain.Positive,
+                _session.Config.SpaceTemperature,
                 inspecting,
                 static (config, value) => config.SpaceTemperature = value);
 
             ConfigFloatSlider(
                 AtmosConfigFields.BulkFlowCoefficient,
                 "config-bulk-flow-coefficient",
-                _config.BulkFlowCoefficient,
+                _session.Config.BulkFlowCoefficient,
                 0f,
                 0.5f,
-                ConfigDomain.UnitInterval,
                 inspecting,
                 static (config, value) => config.BulkFlowCoefficient = value);
 
             ConfigFloatInput(
                 AtmosConfigFields.VacuumThreshold,
                 "config-vacuum-threshold",
-                _config.VacuumThreshold,
-                ConfigDomain.NonNegative,
+                _session.Config.VacuumThreshold,
                 inspecting,
                 static (config, value) => config.VacuumThreshold = value,
                 QuantityFormat.KilopascalsPerPascal);
@@ -712,53 +747,48 @@ public partial class SimulationViewer
             ConfigIntInput(
                 AtmosConfigFields.SleepThreshold,
                 "config-sleep-threshold",
-                _config.SleepThreshold,
+                _session.Config.SleepThreshold,
                 inspecting,
                 static (config, value) => config.SleepThreshold = value);
 
             ConfigFloatSlider(
                 AtmosConfigFields.SleepEpsilon,
                 "config-sleep-epsilon",
-                _config.SleepEpsilon,
+                _session.Config.SleepEpsilon,
                 0f,
                 100f,
-                ConfigDomain.NonNegative,
                 inspecting,
                 static (config, value) => config.SleepEpsilon = value);
 
             ConfigFloatInput(
                 AtmosConfigFields.ThermalConductance,
                 "config-thermal-conductance",
-                _config.ThermalConductance,
-                ConfigDomain.NonNegative,
+                _session.Config.ThermalConductance,
                 inspecting,
                 static (config, value) => config.ThermalConductance = value);
 
             ConfigFloatSlider(
                 AtmosConfigFields.CondensationRateFactor,
                 "config-condensation-rate-factor",
-                _config.CondensationRateFactor,
+                _session.Config.CondensationRateFactor,
                 0f,
                 1f,
-                ConfigDomain.UnitInterval,
                 inspecting,
                 static (config, value) => config.CondensationRateFactor = value);
 
             ConfigFloatSlider(
                 AtmosConfigFields.MaxPressureTransferFractionPerNeighbor,
                 "config-max-pressure-transfer-fraction",
-                _config.MaxPressureTransferFractionPerNeighbor,
+                _session.Config.MaxPressureTransferFractionPerNeighbor,
                 0f,
                 1f,
-                ConfigDomain.UnitInterval,
                 inspecting,
                 static (config, value) => config.MaxPressureTransferFractionPerNeighbor = value);
 
             ConfigFloatInput(
                 AtmosConfigFields.AccumulatorWakeThreshold,
                 "config-accumulator-wake-threshold",
-                _config.AccumulatorWakeThreshold,
-                ConfigDomain.NonNegative,
+                _session.Config.AccumulatorWakeThreshold,
                 inspecting,
                 static (config, value) => config.AccumulatorWakeThreshold = value,
                 QuantityFormat.KilopascalsPerPascal);
@@ -766,9 +796,16 @@ public partial class SimulationViewer
             ConfigIntInput(
                 AtmosConfigFields.AccumulatorMaxAliveTicks,
                 "config-accumulator-max-alive-ticks",
-                _config.AccumulatorMaxAliveTicks,
+                _session.Config.AccumulatorMaxAliveTicks,
                 inspecting,
                 static (config, value) => config.AccumulatorMaxAliveTicks = value);
+
+            ConfigFloatInput(
+                AtmosConfigFields.ReferenceMolarMass,
+                "config-reference-molar-mass",
+                _session.Config.ReferenceMolarMass,
+                inspecting,
+                static (config, value) => config.ReferenceMolarMass = value);
         }
 
         ImGui.Spacing();
@@ -778,24 +815,148 @@ public partial class SimulationViewer
 
     private void ResetConfigurationValues()
     {
-        if (_config == null)
+        if (_session.Config == null)
             return;
 
         ClearConfigurationDrafts();
-        var previous = new AtmosConfig();
-        CopyScalarSettings(_config, previous);
-        CopyScalarSettings(new AtmosConfig(), _config);
 
         // One SetAtmosConfig call, so the Timeline records the whole reset as a single operation.
-        if (TryApplyConfiguration(out string? error))
+        try
         {
+            _session.ResetConfiguration();
             _configurationFeedback = new FeedbackMessage("Reset every AtmosConfig setting to the library defaults.", false);
-            return;
         }
-
-        CopyScalarSettings(previous, _config);
-        _configurationFeedback = new FeedbackMessage($"Could not reset the settings: {error}", true);
+        catch (ConfigurationRejectedException exception)
+        {
+            _configurationFeedback = new FeedbackMessage($"Could not reset the settings: {exception.Reason}", true);
+        }
     }
+
+    /// <summary>
+    ///     Draws the <see cref="EulerFlowConfig" /> settings. Each edit replaces the configuration's entry with a
+    ///     copy carrying the new value, which is why every assign goes through <see cref="ReplaceEulerFlow" />.
+    /// </summary>
+    private void RenderEulerFlowSettings(bool inspecting)
+    {
+        var euler = AtmosConfigSettings.GetSolverConfiguration(_session.Config!, EulerFlowConfig.Default);
+
+        ConfigFloatSlider(
+            AtmosConfigFields.EulerCourantNumber,
+            "config-euler-courant-number",
+            euler.CourantNumber,
+            0.05f,
+            1f,
+            inspecting,
+            static (config, value) =>
+                ReplaceEulerFlow(config, current => new EulerFlowConfig(current) { CourantNumber = value }));
+
+        ConfigIntInput(
+            AtmosConfigFields.EulerMaxSubstepsPerTick,
+            "config-euler-max-substeps",
+            euler.MaxSubstepsPerTick,
+            inspecting,
+            static (config, value) =>
+                ReplaceEulerFlow(config, current => new EulerFlowConfig(current) { MaxSubstepsPerTick = value }));
+
+        ConfigFloatInput(
+            AtmosConfigFields.EulerVelocityFloor,
+            "config-euler-velocity-floor",
+            euler.VelocityFloor,
+            inspecting,
+            static (config, value) =>
+                ReplaceEulerFlow(config, current => new EulerFlowConfig(current) { VelocityFloor = value }));
+
+        ConfigFloatInput(
+            AtmosConfigFields.EulerMaxVelocity,
+            "config-euler-max-velocity",
+            euler.MaxVelocity,
+            inspecting,
+            static (config, value) =>
+                ReplaceEulerFlow(config, current => new EulerFlowConfig(current) { MaxVelocity = value }));
+
+        ConfigFloatInput(
+            AtmosConfigFields.EulerWakePressureDelta,
+            "config-euler-wake-pressure-delta",
+            euler.WakePressureDelta,
+            inspecting,
+            static (config, value) =>
+                ReplaceEulerFlow(config, current => new EulerFlowConfig(current) { WakePressureDelta = value }));
+
+        ConfigBoolCheckbox(
+            AtmosConfigFields.EulerAllMachCorrection,
+            "config-euler-all-mach",
+            euler.AllMachCorrection,
+            inspecting,
+            static (config, value) =>
+                ReplaceEulerFlow(config, current => new EulerFlowConfig(current) { AllMachCorrection = value }));
+
+        ConfigReconstructionCombo(euler.Reconstruction, inspecting);
+
+        ConfigFloatInput(
+            AtmosConfigFields.EulerMomentumDamping,
+            "config-euler-momentum-damping",
+            euler.MomentumDamping,
+            inspecting,
+            static (config, value) =>
+                ReplaceEulerFlow(config, current => new EulerFlowConfig(current) { MomentumDamping = value }));
+
+        ConfigFloatSlider(
+            AtmosConfigFields.EulerDefaultLinkAreaFraction,
+            "config-euler-link-area-fraction",
+            euler.DefaultLinkAreaFraction,
+            0f,
+            1f,
+            inspecting,
+            static (config, value) =>
+                ReplaceEulerFlow(config, current => new EulerFlowConfig(current) { DefaultLinkAreaFraction = value }));
+    }
+
+    private static void ReplaceEulerFlow(AtmosConfig config, Func<EulerFlowConfig, EulerFlowConfig> edit)
+    {
+        var current = AtmosConfigSettings.GetSolverConfiguration(config, EulerFlowConfig.Default);
+        AtmosConfigSettings.SetSolverConfiguration(config, edit(current));
+    }
+
+    private void ConfigBoolCheckbox(
+        AtmosConfigFieldInfo field,
+        string id,
+        bool current,
+        bool readOnly,
+        Action<AtmosConfig, bool> assign)
+    {
+        DrawConfigFieldLabel(field);
+        bool value = current;
+        ImGui.BeginDisabled(readOnly);
+        bool changed = ImGui.Checkbox($"##{id}", ref value);
+        ImGui.EndDisabled();
+        if (!changed || value == current)
+            return;
+
+        assign(_session.Config!, value);
+        if (!TryCommitConfigurationField(field, value ? "on" : "off"))
+            assign(_session.Config!, current);
+    }
+
+    private void ConfigReconstructionCombo(EulerReconstruction current, bool readOnly)
+    {
+        DrawConfigFieldLabel(AtmosConfigFields.EulerReconstruction);
+        int index = Array.IndexOf(ReconstructionValues, current);
+        ImGui.BeginDisabled(readOnly);
+        bool changed = ImGui.Combo("##config-euler-reconstruction", ref index, ReconstructionLabels, ReconstructionLabels.Length);
+        ImGui.EndDisabled();
+        if (!changed || index < 0 || ReconstructionValues[index] == current)
+            return;
+
+        var chosen = ReconstructionValues[index];
+        ReplaceEulerFlow(_session.Config!, previous => new EulerFlowConfig(previous) { Reconstruction = chosen });
+        if (!TryCommitConfigurationField(AtmosConfigFields.EulerReconstruction, ReconstructionLabels[index]))
+            ReplaceEulerFlow(_session.Config!, previous => new EulerFlowConfig(previous) { Reconstruction = current });
+    }
+
+    private static readonly EulerReconstruction[] ReconstructionValues =
+        [EulerReconstruction.FirstOrder];
+
+    private static readonly string[] ReconstructionLabels = ["First order"];
 
     private static void DrawConfigFieldLabel(AtmosConfigFieldInfo field)
     {
@@ -809,8 +970,7 @@ public partial class SimulationViewer
     /// </summary>
     /// <param name="field">Shared label, unit, and tooltip for the setting.</param>
     /// <param name="id">ImGui ID and draft key, unique within the Configuration panel.</param>
-    /// <param name="current">The value currently in <see cref="_config" />.</param>
-    /// <param name="domain">Values the snapshot keeps unchanged; anything else is rejected with a message.</param>
+    /// <param name="current">The value currently in <see cref="AtmosConfig" />.</param>
     /// <param name="readOnly">Shows <paramref name="current" /> without allowing edits.</param>
     /// <param name="assign">Writes an accepted value into the editable configuration.</param>
     /// <param name="displayScale">Factor from the stored value to the value shown in the field.</param>
@@ -818,7 +978,6 @@ public partial class SimulationViewer
         AtmosConfigFieldInfo field,
         string id,
         float current,
-        ConfigDomain domain,
         bool readOnly,
         Action<AtmosConfig, float> assign,
         float displayScale = 1f)
@@ -836,7 +995,7 @@ public partial class SimulationViewer
             SetConfigDraft(_configFloatDrafts, id, value);
 
         if (ImGui.IsItemDeactivatedAfterEdit())
-            CommitConfigFloat(field, id, current, domain, assign, displayScale);
+            CommitConfigFloat(field, id, current, assign, displayScale);
 
         ImGuiExtensions.Feedback(_configFieldErrors.GetValueOrDefault(id), true);
     }
@@ -845,8 +1004,8 @@ public partial class SimulationViewer
     ///     Draws a slider for a bounded setting. The value is held as a draft while dragging and applied on release.
     /// </summary>
     /// <remarks>
-    ///     Ctrl+click typing can still enter a value outside the slider's range; <paramref name="domain" /> decides
-    ///     whether that value is accepted.
+    ///     Ctrl+click typing can still enter a value outside the slider's range. The
+    ///     <see cref="AtmosConfigFieldInfo.Domain" /> of the field decides whether the panel accepts that value.
     /// </remarks>
     private void ConfigFloatSlider(
         AtmosConfigFieldInfo field,
@@ -854,7 +1013,6 @@ public partial class SimulationViewer
         float current,
         float minimum,
         float maximum,
-        ConfigDomain domain,
         bool readOnly,
         Action<AtmosConfig, float> assign)
     {
@@ -870,7 +1028,7 @@ public partial class SimulationViewer
             SetConfigDraft(_configFloatDrafts, id, value);
 
         if (ImGui.IsItemDeactivatedAfterEdit())
-            CommitConfigFloat(field, id, current, domain, assign);
+            CommitConfigFloat(field, id, current, assign);
 
         ImGuiExtensions.Feedback(_configFieldErrors.GetValueOrDefault(id), true);
     }
@@ -903,9 +1061,9 @@ public partial class SimulationViewer
             }
             else if (draft != current)
             {
-                assign(_config!, draft);
+                assign(_session.Config!, draft);
                 if (!TryCommitConfigurationField(field, FormatConfigValue(draft, field.Unit)))
-                    assign(_config!, current);
+                    assign(_session.Config!, current);
             }
         }
 
@@ -923,14 +1081,13 @@ public partial class SimulationViewer
         AtmosConfigFieldInfo field,
         string id,
         float current,
-        ConfigDomain domain,
         Action<AtmosConfig, float> assign,
         float displayScale = 1f)
     {
         if (!_configFloatDrafts.TryGetValue(id, out float draft))
             return;
 
-        string? error = ValidateConfigValue(field, draft, domain);
+        string? error = AtmosConfigSettings.ValidateConfigValue(field, draft);
         if (error != null)
         {
             // Keep the rejected draft on screen so it can be corrected rather than retyped.
@@ -942,14 +1099,14 @@ public partial class SimulationViewer
         if (draft.Equals(current * displayScale))
             return;
 
-        assign(_config!, draft / displayScale);
+        assign(_session.Config!, draft / displayScale);
         if (!TryCommitConfigurationField(field, FormatConfigValue(draft, field.Unit)))
-            assign(_config!, current);
+            assign(_session.Config!, current);
     }
 
     private bool TryCommitConfigurationField(AtmosConfigFieldInfo field, string formattedValue)
     {
-        if (TryApplyConfiguration(out string? error))
+        if (_session.TryApplyConfiguration(out string? error))
         {
             _configurationFeedback = new FeedbackMessage($"{field.Label} set to {formattedValue}.", false);
             return true;
@@ -957,21 +1114,6 @@ public partial class SimulationViewer
 
         _configurationFeedback = new FeedbackMessage($"Could not apply {field.Label}: {error}", true);
         return false;
-    }
-
-    private static string? ValidateConfigValue(AtmosConfigFieldInfo field, float value, ConfigDomain domain)
-    {
-        string unit = field.Unit.Length == 0 ? string.Empty : " " + field.Unit;
-        return domain switch
-        {
-            ConfigDomain.Positive when !float.IsFinite(value) || value <= 0f =>
-                $"{field.Label} must be finite and above 0{unit}. The previous value is still applied.",
-            ConfigDomain.NonNegative when !float.IsFinite(value) || value < 0f =>
-                $"{field.Label} must be finite and at least 0{unit}. The previous value is still applied.",
-            ConfigDomain.UnitInterval when !float.IsFinite(value) || value < 0f || value > 1f =>
-                $"{field.Label} must be between 0 and 1. The previous value is still applied.",
-            _ => null
-        };
     }
 
     private static string FormatConfigValue(double value, string unit)
@@ -982,7 +1124,7 @@ public partial class SimulationViewer
 
     private void RenderToolsPanel()
     {
-        if (!_showToolsPanel || _simulation == null || _config == null)
+        if (!_showToolsPanel || _simulation == null || _session.Config == null)
             return;
 
         using var window = ImGuiExtensions.BeginWindow(
@@ -1025,12 +1167,12 @@ public partial class SimulationViewer
         ImGui.TextDisabled(ClassificationFormatHelp);
 
         ImGui.BeginDisabled(inspecting);
-        if (_config!.GasRegistry.Count > 0)
+        if (_session.Config!.GasRegistry.Count > 0)
         {
-            _injectionGasId = Math.Clamp(_injectionGasId, 0, _config.GasRegistry.Count - 1);
+            _injectionGasId = Math.Clamp(_injectionGasId, 0, _session.Config.GasRegistry.Count - 1);
             if (ImGui.BeginCombo("Gas##voxel-edit", FormatGas(_injectionGasId)))
             {
-                for (int gasId = 0; gasId < _config.GasRegistry.Count; gasId++)
+                for (int gasId = 0; gasId < _session.Config.GasRegistry.Count; gasId++)
                 {
                     bool gasSelected = gasId == _injectionGasId;
                     if (ImGui.Selectable(FormatGas(gasId), gasSelected))
@@ -1098,44 +1240,6 @@ public partial class SimulationViewer
             return;
         }
 
-        if (_replayTimeline?.IsInspecting == true &&
-            _selectedSliceChunkPosition.HasValue &&
-            !_drawData.Chunks.ContainsKey(_selectedSliceChunkPosition.Value))
-        {
-            ImGui.TextDisabled(
-                $"Selected chunk {FormatChunkPosition(_selectedSliceChunkPosition.Value)} does not exist at this timeline position.");
-
-            return;
-        }
-
-        if (!_selectedSliceChunkPosition.HasValue ||
-            !_drawData.Chunks.ContainsKey(_selectedSliceChunkPosition.Value))
-            _selectedSliceChunkPosition = _drawData.Chunks.Keys.First();
-
-        string selectedChunkLabel = FormatChunkPosition(_selectedSliceChunkPosition.Value);
-        bool followsFocus = _focusedChunk.HasValue;
-        if (_focusedChunk is { } focusedChunk)
-        {
-            _selectedSliceChunkPosition = focusedChunk.Position;
-            selectedChunkLabel = FormatChunkPosition(_selectedSliceChunkPosition.Value);
-        }
-        else if (ImGui.BeginCombo("Chunk##slice-chunk", selectedChunkLabel))
-        {
-            foreach (var chunk in _drawData.Chunks.Values)
-            {
-                bool selected = chunk.ChunkPosition == _selectedSliceChunkPosition.Value;
-                string label = FormatChunkPosition(chunk.ChunkPosition);
-
-                if (ImGui.Selectable(label, selected))
-                    _selectedSliceChunkPosition = chunk.ChunkPosition;
-
-                if (selected)
-                    ImGui.SetItemDefaultFocus();
-            }
-
-            ImGui.EndCombo();
-        }
-
         int axis = (int)_currentSliceAxis;
         if (ImGui.Combo(
                 "Axis##slice-axis",
@@ -1147,25 +1251,50 @@ public partial class SimulationViewer
                     "Z (XY plane)"
                 },
                 3))
+        {
             _currentSliceAxis = (SliceAxis)axis;
+            _sliceCameraFit = true;
+            if (_focusedChunk is { } focused && _drawData.Chunks.TryGetValue(focused.Position, out var focusedData))
+                FrameSliceOnChunk(focusedData);
+        }
 
-        var selectedChunk = _drawData.Chunks[_selectedSliceChunkPosition.Value];
-        int maxSliceIndex = Math.Max(
-            SimulationFrameBuilder.GetSliceAxisLength(selectedChunk.Dimensions, _currentSliceAxis) - 1,
-            0);
+        int minimumSlice = _drawData.Bounds.GetMinimum(_currentSliceAxis);
+        int maximumSlice = Math.Max(_drawData.Bounds.GetMaximumExclusive(_currentSliceAxis) - 1, minimumSlice);
+        _currentSliceIndex = Math.Clamp(_currentSliceIndex, minimumSlice, maximumSlice);
 
-        _currentSliceIndex = Math.Clamp(_currentSliceIndex, 0, maxSliceIndex);
+        ImGui.SliderInt("Slice##slice-index", ref _currentSliceIndex, minimumSlice, maximumSlice);
+        ImGuiExtensions.QuestionTooltip(
+            "Global voxel coordinate of the plane. The slice view shows this plane across every chunk. " +
+            "Scroll to zoom and drag with the middle button to pan.");
 
-        ImGui.SliderInt("Slice##slice-index", ref _currentSliceIndex, 0, maxSliceIndex);
+        if (ImGui.Button("Fit Plane"))
+            _sliceCameraFit = true;
+
+        ImGui.SameLine();
+        ImGui.BeginDisabled(!_focusedChunk.HasValue);
+        if (ImGui.Button("Frame Focused Chunk") &&
+            _focusedChunk is { } framed &&
+            _drawData.Chunks.TryGetValue(framed.Position, out var framedData))
+        {
+            FrameSliceOnChunk(framedData);
+        }
+
+        ImGui.EndDisabled();
 
         using var readout = ImGuiExtensions.BeginDefinitionTable("slice-readout");
         if (!readout.IsVisible)
             return;
 
-        ImGuiExtensions.DefinitionRow("Showing", $"{_currentSliceAxis} = {_currentSliceIndex} of 0-{maxSliceIndex}");
         ImGuiExtensions.DefinitionRow(
-            "Chunk",
-            followsFocus ? $"{selectedChunkLabel}, from 3D focus" : selectedChunkLabel);
+            "Showing",
+            $"{_currentSliceAxis} = {_currentSliceIndex} of {minimumSlice} to {maximumSlice}");
+
+        if (_sliceDrawData != null)
+        {
+            ImGuiExtensions.DefinitionRow(
+                "Plane",
+                $"{_sliceDrawData.Width} × {_sliceDrawData.Height} cells, {_sliceDrawData.ChunkRects.Length} chunks");
+        }
     }
 
     private void RenderVisualizationLegend()
@@ -1487,7 +1616,10 @@ public partial class SimulationViewer
         ImGui.BeginTooltip();
         ImGui.Text("2D Slice Cell");
         ImGui.Separator();
-        DrawCellSelectionDetails(_hoveredSliceCell.Value.Address, _hoveredSliceCell.Value.U, _hoveredSliceCell.Value.V);
+        DrawCellSelectionDetails(
+            _hoveredSliceCell.Value.Address,
+            _hoveredSliceCell.Value.U + (_sliceDrawData?.OriginU ?? 0),
+            _hoveredSliceCell.Value.V + (_sliceDrawData?.OriginV ?? 0));
         ImGui.EndTooltip();
     }
 
@@ -1501,7 +1633,7 @@ public partial class SimulationViewer
         bool exists = _drawData != null && _drawData.TryResolve(address, out _);
         AtmosVoxelSnapshot details = default;
         bool hasDetails = exists && TryGetVoxelDetails(address, out details);
-        var summary = hasDetails ? GetGasSummary(details.Gases) : default;
+        var summary = hasDetails ? GasAmounts.GetGasSummary(details.Gases) : default;
 
         using (var table = ImGuiExtensions.BeginDefinitionTable("voxel-details"))
         {
@@ -1516,6 +1648,18 @@ public partial class SimulationViewer
                 {
                     ImGuiExtensions.DefinitionRow("Temperature", QuantityFormat.Temperature(details.Temperature));
                     ImGuiExtensions.DefinitionRow("Pressure", QuantityFormat.Pressure(details.Pressure));
+                    ImGuiExtensions.DefinitionRow(
+                        "Velocity",
+                        QuantityFormat.Velocity(details.VelocityX, details.VelocityY, details.VelocityZ));
+
+                    ImGuiExtensions.DefinitionRow(
+                        "Speed",
+                        QuantityFormat.Speed(
+                            Math.Sqrt(
+                                (double)details.VelocityX * details.VelocityX +
+                                (double)details.VelocityY * details.VelocityY +
+                                (double)details.VelocityZ * details.VelocityZ)));
+
                     ImGuiExtensions.DefinitionRow(
                         "Total amount",
                         summary.InvalidCount > 0
@@ -1557,7 +1701,7 @@ public partial class SimulationViewer
         {
             foreach (var gas in gases)
             {
-                if (!IsValidGasAmount(gas.Moles) || gas.Moles == 0f)
+                if (!GasAmounts.IsValidGasAmount(gas.Moles) || gas.Moles == 0f)
                     continue;
 
                 float fraction = gas.Moles / totalMoles;
@@ -1599,7 +1743,7 @@ public partial class SimulationViewer
         _gasMakeupRows.Clear();
         foreach (var gas in gases)
         {
-            if (!IsValidGasAmount(gas.Moles) || gas.Moles != 0f)
+            if (!GasAmounts.IsValidGasAmount(gas.Moles) || gas.Moles != 0f)
                 _gasMakeupRows.Add(gas);
         }
 
@@ -1618,7 +1762,7 @@ public partial class SimulationViewer
 
         foreach (var gas in _gasMakeupRows)
         {
-            bool valid = IsValidGasAmount(gas.Moles);
+            bool valid = GasAmounts.IsValidGasAmount(gas.Moles);
             ImGui.TableNextRow();
 
             ImGui.TableSetColumnIndex(0);
@@ -1648,11 +1792,6 @@ public partial class SimulationViewer
         return ViewerTheme.GasPalette[Math.Abs(gasId) % ViewerTheme.GasPalette.Length];
     }
 
-    private static bool IsValidGasAmount(float moles)
-    {
-        return float.IsFinite(moles) && moles >= 0f;
-    }
-
     private static string FormatRoomId(int roomId)
     {
         return roomId switch
@@ -1662,39 +1801,6 @@ public partial class SimulationViewer
             VoxelClassification.RoomUnassigned => $"Unassigned ({roomId})",
             _ => roomId.ToString(CultureInfo.InvariantCulture)
         };
-    }
-
-    private static GasSummary GetGasSummary(IReadOnlyList<VoxelGasSnapshot> gases)
-    {
-        float totalMoles = 0f;
-        int primaryGasId = -1;
-        int gasCount = 0;
-        int invalidCount = 0;
-        float maximumMoles = 0f;
-        foreach (var gas in gases)
-        {
-            float moles = gas.Moles;
-            if (!IsValidGasAmount(moles))
-            {
-                invalidCount++;
-                continue;
-            }
-
-            if (moles > 0f)
-            {
-                totalMoles += moles;
-                gasCount++;
-            }
-
-            if (moles > maximumMoles ||
-                moles == maximumMoles && moles > 0f && (primaryGasId < 0 || gas.GasId < primaryGasId))
-            {
-                maximumMoles = moles;
-                primaryGasId = gas.GasId;
-            }
-        }
-
-        return new GasSummary(totalMoles, primaryGasId, gasCount, invalidCount);
     }
 
     private bool TryGetVoxelDetails(VoxelAddress address, out AtmosVoxelSnapshot snapshot)
@@ -1776,8 +1882,8 @@ public partial class SimulationViewer
         if (gasId < 0)
             return "none";
 
-        if (_config != null && gasId < _config.GasRegistry.Count)
-            return $"{_config.GasRegistry[gasId].Name} ({gasId})";
+        if (_session.Config != null && gasId < _session.Config.GasRegistry.Count)
+            return $"{_session.Config.GasRegistry[gasId].Name} ({gasId})";
 
         return $"Gas {gasId}";
     }
@@ -1878,11 +1984,31 @@ public partial class SimulationViewer
     }
 
     /// <summary>
-    ///     Per-voxel gas totals shared by the details table, the makeup bar, and the makeup table.
+    ///     Readout of <see cref="AtmosSimulation.LastFlowDiagnostics" />. Hidden while the diagnostics are all zero,
+    ///     which is the case under the legacy transport model and before the first Euler tick.
     /// </summary>
-    /// <param name="TotalMoles">Sum of the valid, positive amounts; this is what the makeup bar divides.</param>
-    /// <param name="PrimaryGasId">Gas with the largest valid amount, or -1 when there is none.</param>
-    /// <param name="GasCount">Gases with a valid, positive amount.</param>
-    /// <param name="InvalidCount">Gases whose amount is NaN, infinite, or negative.</param>
-    private readonly record struct GasSummary(float TotalMoles, int PrimaryGasId, int GasCount, int InvalidCount);
+    private void RenderFlowDiagnostics()
+    {
+        if (_simulation == null)
+            return;
+
+        var flow = _simulation.LastFlowDiagnostics;
+        if (flow == default)
+            return;
+
+        if (!ImGui.CollapsingHeader("Flow", ImGuiTreeNodeFlags.DefaultOpen))
+            return;
+
+        using var table = ImGuiExtensions.BeginDefinitionTable("FlowDiagnostics##flow");
+        if (!table.IsVisible)
+            return;
+
+        foreach (var row in FlowReadout.Describe(flow))
+        {
+            if (row.IsWarning)
+                ImGuiExtensions.DefinitionRow(row.Label, row.Value, ViewerTheme.Caution);
+            else
+                ImGuiExtensions.DefinitionRow(row.Label, row.Value);
+        }
+    }
 }

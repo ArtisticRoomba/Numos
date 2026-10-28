@@ -114,7 +114,7 @@ public sealed class GasRegistry : IGasRegistry
         _gases.RemoveAt(index);
         _idMap.Remove(removedName);
 
-        // Every gas after the removed one shifted down by one — rebuild rather than patch in place.
+        // Every gas after the removed one shifted down by one, so rebuild rather than patch in place.
         for (int i = index; i < _gases.Count; i++)
             _idMap[_gases[i].Name] = i;
     }
@@ -157,7 +157,7 @@ public sealed class GasRegistrySnapshot : IGasRegistry
     ///     Copies the gases from <paramref name="source" />.
     /// </summary>
     /// <param name="source">The registry to copy.</param>
-    /// <remarks>Duplicate names are not rejected here; call <see cref="ValidateGasRegistry" /> to check.</remarks>
+    /// <remarks>This method does not reject duplicate names. Call <see cref="ValidateGasRegistry" /> to check.</remarks>
     public GasRegistrySnapshot(IGasRegistry source)
     {
         _gases = source.ToArray();

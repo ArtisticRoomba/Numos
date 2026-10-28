@@ -6,8 +6,8 @@ namespace Numos.CoreSim.Datatypes.Primitives;
 ///     Classification of a voxel: a room ID, or one of the reserved solid and void values.
 /// </summary>
 /// <remarks>
-///     In Numos, voxels are grouped together to form rooms, but IDs other than the reserved solid and void values are
-///     topology metadata only; they do not partition solver work. For now, their usage is similar to SS14
+///     Numos groups voxels into rooms. IDs other than the reserved solid and void values are
+///     topology metadata only and do not partition solver work. For now, their usage is similar to SS14
 ///     Atmospherics' AirtightData, which stores whether a tile is airtight.
 /// </remarks>
 public readonly record struct VoxelClassification(int RoomId)
@@ -57,6 +57,15 @@ public readonly record struct VoxelClassification(int RoomId)
     /// </summary>
     [PublicAPI]
     public bool IsVoid => RoomId == RoomVoid;
+
+    /// <summary>
+    ///     Returns true if a voxel with this room ID can hold gas, which means it is neither solid nor void.
+    /// </summary>
+    /// <param name="roomId">The room ID read from a voxel room map.</param>
+    internal static bool IsAirRoom(int roomId)
+    {
+        return roomId != RoomSolid && roomId != RoomVoid;
+    }
 
     /// <summary>
     ///     Implicitly converts a <see cref="VoxelClassification" /> to an <see cref="int" /> representing the room ID.

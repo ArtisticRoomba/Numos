@@ -4,6 +4,7 @@ using Numos.Maths;
 
 namespace Numos.CoreSim.IntegrationTests;
 
+// Convergence and sleep timing are pinned for the legacy transport law.
 [TestFixture]
 public sealed class SimulationStabilityTests
 {
@@ -21,7 +22,7 @@ public sealed class SimulationStabilityTests
         config.SleepEpsilon = 3.5f;
         config.BulkFlowCoefficient = 0f;
         config.MaxPressureTransferFractionPerNeighbor = 0f;
-        using var simulation = new AtmosSimulation(config, 2, 1, 1);
+        using var simulation = SimTestHelpers.CreateLegacySimulation(config, 2, 1, 1);
         var chunk = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
         SimTestHelpers.SetAllTemperatures(simulation, chunk, 2, 1, 1);
         simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasName, pressureScale, 300f);
@@ -45,7 +46,7 @@ public sealed class SimulationStabilityTests
         var config = SimTestHelpers.CreateDeterministicConfig();
         config.SleepThreshold = 0;
         config.SleepEpsilon = 0.1f;
-        using var simulation = new AtmosSimulation(config, 2, 1, 1);
+        using var simulation = SimTestHelpers.CreateLegacySimulation(config, 2, 1, 1);
         var chunk = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
         SimTestHelpers.SetAllTemperatures(simulation, chunk, 2, 1, 1);
         simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasName, 1f, 300f);
@@ -125,7 +126,7 @@ public sealed class SimulationStabilityTests
     private static void AssertGeometryConverges(int width, int height, (int X, int Y)[] openVoxels)
     {
         var config = SimTestHelpers.CreateDeterministicConfig();
-        using var simulation = new AtmosSimulation(config, width, height, 1);
+        using var simulation = SimTestHelpers.CreateLegacySimulation(config, width, height, 1);
         var chunk = simulation.CreateAndRegisterChunk(new Int3(0, 0, 0));
         simulation.SetChunkClassification(chunk, VoxelClassification.RoomSolid);
 

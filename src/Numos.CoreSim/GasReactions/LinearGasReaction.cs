@@ -1,6 +1,6 @@
 using System.Collections.Frozen;
-using Numos.CoreSim.Replay;
-using Numos.Units;
+using Numos.CoreSim.State;
+using Magnitudo;
 
 namespace Numos.CoreSim.GasReactions;
 
@@ -29,14 +29,15 @@ public readonly partial record struct LinearGasReaction
     /// <param name="lowTempSpeed">Rate in mol/(m³·s) at <paramref name="lowTemperatureBound" />.</param>
     /// <param name="highTempSpeed">Rate in mol/(m³·s) at <paramref name="highTemperatureBound" />.</param>
     /// <param name="lowStrict">
-    ///     When <see langword="true" />, the reaction stops below <paramref name="lowTemperatureBound" />; when
-    ///     <see langword="false" />, the line is extrapolated.
+    ///     When <see langword="true" />, the reaction stops below <paramref name="lowTemperatureBound" />.
+    ///     When <see langword="false" />, the line is extrapolated.
     /// </param>
     /// <param name="highStrict">
-    ///     When <see langword="true" />, the reaction stops above <paramref name="highTemperatureBound" />; when
-    ///     <see langword="false" />, the line is extrapolated.
+    ///     When <see langword="true" />, the reaction stops above <paramref name="highTemperatureBound" />.
+    ///     When <see langword="false" />, the line is extrapolated.
     /// </param>
     /// <param name="speedFactors">Multipliers on the rate constant that depend on the amount of specific gases.</param>
+    /// <param name="requiresIgnition">Whether the reaction should use the ignition system.</param>
     public LinearGasReaction(
         IDictionary<GasProperties, float> input, IDictionary<GasProperties, float> output,
         [Quantity("molarEnergy")] JoulePerMole energyBalance,
@@ -44,7 +45,8 @@ public readonly partial record struct LinearGasReaction
         [Quantity("temperature")] Kelvin highTemperatureBound,
         [Quantity("concentrationPerSecond")] ConcentrationPerSecond lowTempSpeed,
         [Quantity("concentrationPerSecond")] ConcentrationPerSecond highTempSpeed,
-        bool lowStrict, bool highStrict, ISet<LinearSpeedFactor> speedFactors)
+        bool lowStrict, bool highStrict, ISet<LinearSpeedFactor> speedFactors,
+        bool requiresIgnition = false)
     {
         Input = input.ToFrozenDictionary();
         Output = output.ToFrozenDictionary();
@@ -56,6 +58,7 @@ public readonly partial record struct LinearGasReaction
         LowStrict = lowStrict;
         HighStrict = highStrict;
         SpeedFactors = speedFactors.ToFrozenSet();
+        RequiresIgnition = requiresIgnition;
         BoundaryRange = HighTemperatureBound - LowTemperatureBound;
         SpeedRange = HighTempSpeed - LowTempSpeed;
     }
@@ -63,11 +66,13 @@ public readonly partial record struct LinearGasReaction
     /// <summary>
     ///     Moles of each reactant consumed per reaction.
     /// </summary>
+    [NumosSerialize]
     private FrozenDictionary<GasProperties, float> Input { get; }
 
     /// <summary>
     ///     Moles of each product produced per reaction.
     /// </summary>
+    [NumosSerialize]
     private FrozenDictionary<GasProperties, float> Output { get; }
 
     /// <summary>
@@ -77,12 +82,17 @@ public readonly partial record struct LinearGasReaction
     ///     Per mole of whichever reactant has a coefficient of one, so for 2H₂ + O₂ -> 2H₂O it is the energy released
     ///     per mole of oxygen consumed.
     /// </remarks>
+    [NumosSerialize]
     internal JoulePerMole EnergyBalance { get; }
 
+    [NumosSerialize]
     private Kelvin LowTemperatureBound { get; }
+    [NumosSerialize]
     private Kelvin HighTemperatureBound { get; }
 
+    [NumosSerialize]
     private ConcentrationPerSecond LowTempSpeed { get; }
+    [NumosSerialize]
     private ConcentrationPerSecond HighTempSpeed { get; }
 
     private Kelvin BoundaryRange { get; }
@@ -92,75 +102,25 @@ public readonly partial record struct LinearGasReaction
     /// <summary>
     ///     Whether the rate is zero below <see cref="LowTemperatureBound" /> instead of extrapolated.
     /// </summary>
+    [NumosSerialize]
     private bool LowStrict { get; }
 
     /// <summary>
     ///     Whether the rate is zero above <see cref="HighTemperatureBound" /> instead of extrapolated.
     /// </summary>
+    [NumosSerialize]
     private bool HighStrict { get; }
 
+    [NumosSerialize]
     private FrozenSet<LinearSpeedFactor> SpeedFactors { get; }
 
-    internal void AppendHash(ref AtmosStateHasher hash)
-    {
-        hash.Add(EnergyBalance);
-        hash.Add(LowTemperatureBound);
-        hash.Add(HighTemperatureBound);
-        hash.Add(LowTempSpeed);
-        hash.Add(HighTempSpeed);
-        hash.Add(LowStrict);
-        hash.Add(HighStrict);
-        hash.Add(Input.Count);
-        foreach (KeyValuePair<GasProperties, float> entry in Input.OrderBy(static entry => entry.Key.Name, StringComparer.Ordinal))
-        {
-            hash.Add(entry.Key);
-            hash.Add(entry.Value);
-        }
+    /// <summary>
+    ///     Whether the reaction should use the ignition system.
+    /// </summary>
+    [NumosSerialize]
+    internal bool RequiresIgnition { get; }
 
-        hash.Add(Output.Count);
-        foreach (KeyValuePair<GasProperties, float> entry in Output.OrderBy(static entry => entry.Key.Name, StringComparer.Ordinal))
-        {
-            hash.Add(entry.Key);
-            hash.Add(entry.Value);
-        }
-
-        hash.Add(SpeedFactors.Count);
-        foreach (var factor in SpeedFactors.OrderBy(static factor => factor.Gas.Name, StringComparer.Ordinal)
-                     .ThenBy(static factor => factor.OrderKey))
-            factor.AppendHash(ref hash);
-    }
-
-    internal bool SemanticallyEquals(LinearGasReaction other)
-    {
-        return EnergyBalance.Equals(other.EnergyBalance) &&
-               LowTemperatureBound.Equals(other.LowTemperatureBound) &&
-               HighTemperatureBound.Equals(other.HighTemperatureBound) &&
-               LowTempSpeed.Equals(other.LowTempSpeed) &&
-               HighTempSpeed.Equals(other.HighTempSpeed) &&
-               LowStrict == other.LowStrict &&
-               HighStrict == other.HighStrict &&
-               DictionaryEquals(Input, other.Input) &&
-               DictionaryEquals(Output, other.Output) &&
-               SpeedFactors.SetEquals(other.SpeedFactors);
-    }
-
-    private static bool DictionaryEquals(
-        IReadOnlyDictionary<GasProperties, float> first,
-        IReadOnlyDictionary<GasProperties, float> second)
-    {
-        if (first.Count != second.Count)
-            return false;
-
-        foreach ((var gas, float amount) in first)
-        {
-            if (!second.TryGetValue(gas, out float otherAmount) || !amount.Equals(otherAmount))
-                return false;
-        }
-
-        return true;
-    }
-
-    private static float EvalLinear(
+   private static float EvalLinear(
         float value, float boundaryRange, float lowBound, bool lowStrict, bool highStrict,
         float valAtLow, float speedRange)
     {
@@ -188,7 +148,7 @@ public readonly partial record struct LinearGasReaction
     /// <param name="temperatureKelvin">Mixture temperature, in kelvins (K).</param>
     /// <returns>
     ///     Rate in mol/(m³·s), or zero outside a strict bound. Can be negative if the line is extrapolated past
-    ///     zero; the reaction solver treats nonpositive rates as no reaction.
+    ///     zero. The reaction solver treats nonpositive rates as no reaction.
     /// </returns>
     internal ConcentrationPerSecond GetRateConstantForTemperature(Kelvin temperatureKelvin)
     {

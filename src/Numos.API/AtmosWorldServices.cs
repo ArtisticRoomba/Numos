@@ -11,8 +11,8 @@ namespace Numos.API;
 ///     <para>
 ///         Services are keyed by the exact type argument given to <see cref="Register{T}" />. Registering a
 ///         <c>FireBus</c> as <c>IFireEvents</c> resolves through <c>Get&lt;IFireEvents&gt;()</c> only, not through
-///         <c>Get&lt;FireBus&gt;()</c>. There is no assignability search, so lookups are a single dictionary hit and
-///         need no reflection.
+///         <c>Get&lt;FireBus&gt;()</c>. There is no assignability search, so a lookup is a single dictionary hit
+///         and needs no reflection.
 ///     </para>
 ///     <para>
 ///         The world never checkpoints, clears, or disposes a service. Restoring a checkpoint leaves every
@@ -21,11 +21,11 @@ namespace Numos.API;
 ///         is deterministic.
 ///     </para>
 ///     <para>
-///         Lookups never lock: each change publishes a new immutable table, and <see cref="Get{T}" /> and
-///         <see cref="TryGet{T}" /> read whichever table is current. That makes them safe from any thread, including
-///         <c>Parallel.For</c> workers inside a solver callback. Changes take <see cref="AtmosWorld" />'s lock and are
-///         rejected during a tick and while the world is recording or replaying, because a solver that resolves a
-///         different service halfway through a recording would not replay the same way.
+///         Lookups never lock. Each change publishes a new immutable table, and <see cref="Get{T}" /> and
+///         <see cref="TryGet{T}" /> read whichever table is current. They are safe from any thread, including
+///         <c>Parallel.For</c> workers inside a solver callback. Changes take the lock of <see cref="AtmosWorld" />.
+///         Numos rejects changes during a tick and while the world is recording or replaying. A solver that resolves
+///         a different service halfway through a recording would not replay the same way.
 ///     </para>
 /// </remarks>
 /// <example>
@@ -169,16 +169,16 @@ public sealed class AtmosWorldServices
 
     private void Publish(Dictionary<Type, object> next)
     {
-        // Readers never lock, so the table is replaced rather than mutated: a reader sees the old table or the new
-        // one, never a dictionary halfway through a resize.
+        // Readers never lock, so Numos replaces the table instead of mutating it. A reader sees the old table or the
+        // new one, never a dictionary halfway through a resize.
         Volatile.Write(ref _services, next);
         _world.InvalidateSolverDependencies();
     }
 
     private void ThrowIfTickExecuting()
     {
-        // Checked before taking the gate as well as after: a solver's worker thread would otherwise block on a lock
-        // the tick holds until those same workers finish.
+        // Checked before taking the gate as well as after. Otherwise a solver's worker thread would block on a lock
+        // that the tick holds until those same workers finish.
         if (_world.IsTickExecuting)
             throw new InvalidOperationException("World services cannot be registered or removed while a tick is running.");
     }

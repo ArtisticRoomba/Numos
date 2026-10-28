@@ -129,10 +129,10 @@ jobs:
 
           static partial class FireChunkData
           {
-              [ChunkData("consumer/fire/exposure", Rollback = true)]
+              [ChunkData("consumer/fire/exposure")]
               public static partial ChunkField<float> Exposure { get; }
 
-              [ChunkData("consumer/fire/burn-count", Rollback = true, Length = 1)]
+              [ChunkData("consumer/fire/burn-count", Length = 1)]
               public static partial ChunkField<int> BurnCount { get; }
           }
 

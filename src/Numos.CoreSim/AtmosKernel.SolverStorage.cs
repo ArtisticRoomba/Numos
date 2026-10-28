@@ -13,9 +13,9 @@ internal sealed partial class AtmosKernel
     /// <param name="factory">Builds the value on a miss.</param>
     /// <returns>The cached value.</returns>
     /// <remarks>
-    ///     Outside a tick this first catches the tick configuration up with the applied one, dropping the data if the
-    ///     configuration changed, so the value matches what the next tick would see. During a tick the applied
-    ///     configuration can't change (the world defers it to the next tick boundary), so both agree there too.
+    ///     Outside a tick, this first catches the tick configuration up with the applied one. It drops the data if the
+    ///     configuration changed, so the value matches what the next tick sees. During a tick the applied
+    ///     configuration cannot change, because the world defers changes to the next tick boundary.
     /// </remarks>
     internal T GetSolverData<T, TState>(SolverDataDescriptor descriptor, TState state, Func<TState, T> factory)
         where T : class

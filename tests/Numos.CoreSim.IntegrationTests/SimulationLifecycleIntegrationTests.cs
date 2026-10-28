@@ -5,6 +5,7 @@ using Numos.Maths;
 
 namespace Numos.CoreSim.IntegrationTests;
 
+// Sleep timing and the one-tick split are pinned for the legacy transport law.
 [TestFixture]
 public sealed class SimulationLifecycleIntegrationTests
 {
@@ -29,7 +30,7 @@ public sealed class SimulationLifecycleIntegrationTests
     public void SleepChunk_HaltsSimulationUntilAddingGasWakesIt()
     {
         var config = SimTestHelpers.CreateDeterministicConfig();
-        using var simulation = new AtmosSimulation(config, 2, 1, 1);
+        using var simulation = SimTestHelpers.CreateLegacySimulation(config, 2, 1, 1);
         var chunk = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
         SimTestHelpers.SetAllTemperatures(simulation, chunk, 2, 1, 1);
         simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasName, 2f, 300f);
@@ -67,7 +68,7 @@ public sealed class SimulationLifecycleIntegrationTests
     {
         var config = SimTestHelpers.CreateDeterministicConfig();
         config.DefaultTemperatureFallback = 123f;
-        using var simulation = new AtmosSimulation(config, 1, 1, 1);
+        using var simulation = SimTestHelpers.CreateLegacySimulation(config, 1, 1, 1);
         var chunk = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
         simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasName, 2f, 300f);
         simulation.SetVoxelTemperature(chunk, 0, 0, 0, 0f);
@@ -95,7 +96,7 @@ public sealed class SimulationLifecycleIntegrationTests
         var config = SimTestHelpers.CreateDeterministicConfig();
         config.SleepEpsilon = 1f;
         config.SleepThreshold = 3;
-        using var simulation = new AtmosSimulation(config, width, height, 1);
+        using var simulation = SimTestHelpers.CreateLegacySimulation(config, width, height, 1);
         var chunk = simulation.CreateAndRegisterChunk(new Int3(0, 0, 0));
         simulation.SetChunkClassification(chunk, VoxelClassification.RoomSolid);
         foreach ((int x, int y) in openVoxels)
@@ -153,7 +154,7 @@ public sealed class SimulationLifecycleIntegrationTests
         var config = SimTestHelpers.CreateDeterministicConfig();
         config.SleepThreshold = 2;
         config.SleepEpsilon = 0.1f;
-        using var simulation = new AtmosSimulation(config, 2, 1, 1);
+        using var simulation = SimTestHelpers.CreateLegacySimulation(config, 2, 1, 1);
         var chunk = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
         SimTestHelpers.SetAllTemperatures(simulation, chunk, 2, 1, 1);
         simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasName, 1f, 300f);

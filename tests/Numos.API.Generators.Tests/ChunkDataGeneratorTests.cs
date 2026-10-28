@@ -16,13 +16,13 @@ public sealed class ChunkDataGeneratorTests
 
                                       public static partial class FireChunkData
                                       {
-                                          [ChunkData("generator-tests/fire/exposure", Rollback = true)]
+                                          [ChunkData("generator-tests/fire/exposure")]
                                           public static partial ChunkField<float> Exposure { get; }
 
-                                          [ChunkData("generator-tests/fire/burn-count", Rollback = true, Length = 1)]
+                                          [ChunkData("generator-tests/fire/burn-count", Length = 1)]
                                           public static partial ChunkField<int> BurnCount { get; }
 
-                                          [ChunkData(AccessorName = "FireScratch")]
+                                          [ChunkData(Transient = true, AccessorName = "FireScratch")]
                                           internal static partial ChunkField<float> Scratch { get; }
                                       }
                                       """;
@@ -97,6 +97,68 @@ public sealed class ChunkDataGeneratorTests
 
             Assert.That(source, Does.Contain("/// <inheritdoc cref=\"global::MyMod.Fire.FireChunkData.Exposure\" />"));
         });
+
+        string initializer = GeneratorHarness.GeneratedSource(result, "NumosChunkDataModuleInitializer.g.cs");
+        Assert.Multiple(() =>
+        {
+            Assert.That(initializer, Does.Contain("[global::System.Runtime.CompilerServices.ModuleInitializer]"));
+            Assert.That(
+                initializer,
+                Does.Contain(
+                    "Register(typeof(global::MyMod.Fire.FireChunkData.__NumosChunkFields), \"MyMod.Fire.FireChunkData\");"));
+        });
+    }
+
+    [Test]
+    public void NoChunkData_EmitsNoModuleInitializer()
+    {
+        GeneratorRunResult result = GeneratorHarness.Run(
+            out _,
+            out var diagnostics,
+            sources: ["namespace MyMod; internal static class Plain { }"]);
+
+        Assert.That(diagnostics, Is.Empty);
+        Assert.That(result.GeneratedSources, Is.Empty);
+    }
+
+    [Test]
+    public void SeveralTypes_ShareOneModuleInitializer()
+    {
+        const string source = """
+                              namespace MyMod
+                              {
+                                  public static partial class First
+                                  {
+                                      [Numos.API.ChunkData(Transient = true)]
+                                      public static partial Numos.API.ChunkField<int> A { get; }
+                                  }
+
+                                  public partial class Outer
+                                  {
+                                      internal static partial class Second
+                                      {
+                                          [Numos.API.ChunkData(Transient = true)]
+                                          public static partial Numos.API.ChunkField<int> B { get; }
+                                      }
+                                  }
+                              }
+                              """;
+
+        GeneratorRunResult result = GeneratorHarness.Run(
+            out Compilation output,
+            out var diagnostics,
+            sources: [source]);
+
+        Assert.That(diagnostics, Is.Empty);
+        Assert.That(GeneratorHarness.Errors(output), Is.Empty);
+        string initializer = GeneratorHarness.GeneratedSource(result, "NumosChunkDataModuleInitializer.g.cs");
+        Assert.Multiple(() =>
+        {
+            Assert.That(initializer, Does.Contain("Register(typeof(global::MyMod.First.__NumosChunkFields), \"MyMod.First\");"));
+            Assert.That(
+                initializer,
+                Does.Contain("Register(typeof(global::MyMod.Outer.Second.__NumosChunkFields), \"MyMod.Outer.Second\");"));
+        });
     }
 
     [Test]
@@ -114,7 +176,7 @@ public sealed class ChunkDataGeneratorTests
                                   /// <summary>
                                   ///     Documented field.
                                   /// </summary>
-                                  [Numos.API.ChunkData]
+                                  [Numos.API.ChunkData(Transient = true)]
                                   public static partial Numos.API.ChunkField<float> Value { get; }
                               }
                               """;
@@ -138,7 +200,7 @@ public sealed class ChunkDataGeneratorTests
 
                               internal static partial class HiddenData
                               {
-                                  [Numos.API.ChunkData]
+                                  [Numos.API.ChunkData(Transient = true)]
                                   public static partial Numos.API.ChunkField<byte> Flags { get; }
                               }
                               """;
@@ -165,7 +227,7 @@ public sealed class ChunkDataGeneratorTests
                                   {
                                       public partial struct Inner
                                       {
-                                          [Numos.API.ChunkData]
+                                          [Numos.API.ChunkData(Transient = true)]
                                           public static partial Numos.API.ChunkField<double> Heat { get; }
                                       }
                                   }
@@ -204,7 +266,7 @@ public sealed class ChunkDataGeneratorTests
         const string source = """
                               public static partial class GlobalData
                               {
-                                  [Numos.API.ChunkData]
+                                  [Numos.API.ChunkData(Transient = true)]
                                   public static partial Numos.API.ChunkField<int> Count { get; }
                               }
                               """;
@@ -303,6 +365,49 @@ public sealed class ChunkDataGeneratorTests
     }
 
     [Test]
+    public void ClearFlags_AreEmittedOnlyWhenSet()
+    {
+        const string source = """
+                              using Numos.API;
+
+                              namespace MyMod.Clear;
+
+                              public static partial class ClearData
+                              {
+                                  [ChunkData("generator-tests/clear/both", Transient = true, ClearOnSleep = true, ClearOnVacuum = true)]
+                                  public static partial ChunkField<float> Both { get; }
+
+                                  [ChunkData("generator-tests/clear/sleep", Transient = true, ClearOnSleep = true)]
+                                  public static partial ChunkField<float> SleepOnly { get; }
+
+                                  [ChunkData(Transient = true)]
+                                  public static partial ChunkField<float> Neither { get; }
+                              }
+                              """;
+
+        var result = GeneratorHarness.Run(out Compilation _, out var diagnostics, sources: [source]);
+        Assert.That(diagnostics, Is.Empty);
+
+        string generated = GeneratorHarness.GeneratedSource(result, "MyMod.Clear.ClearData.ChunkData.g.cs");
+        Assert.Multiple(() =>
+        {
+            Assert.That(
+                generated,
+                Does.Contain(
+                    "Register(\"generator-tests/clear/both\", rollback: false, length: null, clearOnSleep: true, clearOnVacuum: true);"));
+
+            Assert.That(
+                generated,
+                Does.Contain(
+                    "Register(\"generator-tests/clear/sleep\", rollback: false, length: null, clearOnSleep: true);"));
+
+            Assert.That(
+                generated,
+                Does.Contain("Register(\"MyMod.Clear.ClearData.Neither\", rollback: false, length: null);"));
+        });
+    }
+
+    [Test]
     public void GeneratedProperty_RegistersFieldAtRunTime()
     {
         const string source = """
@@ -310,11 +415,21 @@ public sealed class ChunkDataGeneratorTests
 
                               public static partial class SmokeData
                               {
-                                  [Numos.API.ChunkData("generator-tests/smoke/density", Rollback = true, Length = 3)]
+                                  [Numos.API.ChunkData("generator-tests/smoke/density", Length = 3)]
                                   public static partial Numos.API.ChunkField<float> Density { get; }
 
-                                  [Numos.API.ChunkData]
+                                  [Numos.API.ChunkData(Transient = true)]
                                   public static partial Numos.API.ChunkField<long> Scratch { get; }
+
+                                  [Numos.API.ChunkData("generator-tests/smoke/clears", ClearOnSleep = true, ClearOnVacuum = true)]
+                                  public static partial Numos.API.ChunkField<int> Clears { get; }
+                              }
+
+                              public static class Other
+                              {
+                                  public static void Touch()
+                                  {
+                                  }
                               }
                               """;
 
@@ -332,6 +447,14 @@ public sealed class ChunkDataGeneratorTests
         {
             stream.Position = 0;
             Assembly assembly = context.LoadFromStream(stream);
+
+            // Calling anything in the assembly runs its module initializer, which registers the fields before
+            // their properties are read. A conflicting definition shows that the key is already taken.
+            assembly.GetType("Smoke.Other", throwOnError: true)!.GetMethod("Touch")!.Invoke(null, null);
+            Assert.That(
+                () => ChunkField<float>.Register("generator-tests/smoke/density", rollback: true, length: 4),
+                Throws.InvalidOperationException.With.Message.Contains("already registered"));
+
             Type type = assembly.GetType("Smoke.SmokeData", throwOnError: true)!;
 
             object? density = type.GetProperty("Density")!.GetValue(null);
@@ -348,6 +471,63 @@ public sealed class ChunkDataGeneratorTests
             Assert.That(scratch.Key, Is.EqualTo("Smoke.SmokeData.Scratch"));
             Assert.That(scratch.Rollback, Is.False);
             Assert.That(scratch.Length, Is.Null);
+            Assert.That(scratch.ClearOnSleep, Is.False);
+            Assert.That(scratch.ClearOnVacuum, Is.False);
+
+            var clears = (ChunkField<int>)type.GetProperty("Clears")!.GetValue(null)!;
+            Assert.That(clears.ClearOnSleep, Is.True);
+            Assert.That(clears.ClearOnVacuum, Is.True);
+        }
+        finally
+        {
+            context.Unload();
+        }
+    }
+
+    [Test]
+    public void ConflictingRegistration_ReportsTheDeclaringTypeFromTheModuleInitializer()
+    {
+        ChunkField<int>.Register("generator-tests/conflict/taken", rollback: true);
+        const string source = """
+                              namespace Conflict;
+
+                              public static partial class ConflictData
+                              {
+                                  [Numos.API.ChunkData("generator-tests/conflict/taken")]
+                                  public static partial Numos.API.ChunkField<float> Taken { get; }
+                              }
+
+                              public static class Other
+                              {
+                                  public static void Touch()
+                                  {
+                                  }
+                              }
+                              """;
+
+        GeneratorHarness.Run(out Compilation output, out var diagnostics, sources: [source]);
+        Assert.That(diagnostics, Is.Empty);
+
+        using var stream = new MemoryStream();
+        var emit = output.Emit(stream);
+        Assert.That(emit.Success, Is.True, string.Join("\n", emit.Diagnostics));
+
+        var context = new AssemblyLoadContext("ChunkDataConflict", isCollectible: true);
+        try
+        {
+            stream.Position = 0;
+            Assembly assembly = context.LoadFromStream(stream);
+            MethodInfo touch = assembly.GetType("Conflict.Other", throwOnError: true)!.GetMethod("Touch")!;
+
+            // The runtime wraps a module initializer failure in a TypeInitializationException for <Module>. The
+            // generated code puts the declaring type and the reason of the registry in the inner exception.
+            var thrown = Assert.Throws<TargetInvocationException>(() => touch.Invoke(null, null));
+            Assert.That(thrown!.InnerException, Is.TypeOf<TypeInitializationException>());
+            Exception? inner = thrown.InnerException!.InnerException;
+            Assert.That(inner, Is.TypeOf<InvalidOperationException>());
+            Assert.That(
+                inner!.Message,
+                Does.Contain("Conflict.ConflictData").And.Contain("'generator-tests/conflict/taken' is already registered"));
         }
         finally
         {

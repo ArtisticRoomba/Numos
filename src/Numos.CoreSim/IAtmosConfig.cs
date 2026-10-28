@@ -8,7 +8,7 @@ internal interface IAtmosConfig
     JoulePerMoleKelvin DefaultMolarHeatCapacityAtConstantVolume { get; }
     CubicMetre VoxelVolume { get; }
     Pascal SaturationReferencePressure { get; }
-    Scalar DefaultDiffusionCoefficient { get; }
+    SquareMetrePerSecond DefaultDiffusionCoefficient { get; }
     Kelvin SpaceTemperature { get; }
     Scalar BulkFlowCoefficient { get; }
     Pascal VacuumThreshold { get; }
@@ -19,12 +19,18 @@ internal interface IAtmosConfig
     Scalar MaxPressureTransferFractionPerNeighbor { get; }
     Pascal AccumulatorWakeThreshold { get; }
     int AccumulatorMaxAliveTicks { get; }
+    KilogramPerMole ReferenceMolarMass { get; }
     PascalPerMoleKelvin PressurePerMoleKelvin { get; }
-
+    Scalar FlameSpeedScale { get; }
+    MetrePerSecond MinimumFlameSpeed { get; }
+    bool IgnitionTransferEnabled { get; }
+    Scalar TransferSeedFraction { get; }
     int GasPropertyCount { get; }
     Kelvin GetValidatedTemp(Kelvin storedTemperature);
     CubicMetre GetVoxelVolume();
     JoulePerMoleKelvin GetMolarHeatCapacityAtConstantVolume(int gasId);
-    Scalar GetDiffusionCoefficient(int gasId);
+    SquareMetrePerSecond GetDiffusionCoefficient(int gasId);
+    KilogramPerMole GetMolarMass(int gasId);
+    WattsPerMeterKelvin GetThermalConductivity(int gasId);
     bool TryGetGasProperties(int gasId, out GasProperties properties);
 }

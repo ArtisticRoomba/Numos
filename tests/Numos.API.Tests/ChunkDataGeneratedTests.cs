@@ -8,19 +8,54 @@ internal static partial class GeneratedFireData
 {
     public const string KeyPrefix = "tests/chunk-data-generated/";
 
-    [ChunkData(KeyPrefix + "exposure", Rollback = true)]
+    [ChunkData(KeyPrefix + "exposure")]
     public static partial ChunkField<float> Exposure { get; }
 
-    [ChunkData(KeyPrefix + "burn-count", Rollback = true, Length = 2)]
+    [ChunkData(KeyPrefix + "burn-count", Length = 2)]
     public static partial ChunkField<int> BurnCount { get; }
 
-    [ChunkData]
+    [ChunkData(Transient = true)]
     public static partial ChunkField<int> Scratch { get; }
+
+    [ChunkData(KeyPrefix + "clears", ClearOnSleep = true, ClearOnVacuum = true)]
+    public static partial ChunkField<int> Clears { get; }
+}
+
+// Nothing reads this property, so only the generated module initializer can have registered it.
+internal static partial class UnreadChunkData
+{
+    public const string Key = "tests/chunk-data-generated/unread";
+
+    // Runs only if something touches the declaring type itself, which early registration must not do. The flag
+    // lives elsewhere because reading it from here would run this.
+    static UnreadChunkData()
+    {
+        UnreadChunkDataProbe.TypeInitialized = true;
+    }
+
+    [ChunkData(Key)]
+    public static partial ChunkField<int> Value { get; }
+}
+
+internal static class UnreadChunkDataProbe
+{
+    public static bool TypeInitialized;
 }
 
 [TestFixture]
 public sealed class ChunkDataGeneratedTests
 {
+    [Test]
+    public void ModuleInitializer_RegistersFieldsBeforeTheirPropertyIsRead()
+    {
+        // A different definition under the same key only conflicts if the key is already taken.
+        Assert.That(
+            () => ChunkField<int>.Register(UnreadChunkData.Key, rollback: true, length: 4),
+            Throws.InvalidOperationException.With.Message.Contains("already registered"));
+
+        Assert.That(UnreadChunkDataProbe.TypeInitialized, Is.False);
+    }
+
     [Test]
     public void GeneratedFields_MatchTheirAttributes()
     {
@@ -32,6 +67,10 @@ public sealed class ChunkDataGeneratedTests
             Assert.That(GeneratedFireData.BurnCount.Length, Is.EqualTo(2));
             Assert.That(GeneratedFireData.Scratch.Key, Is.EqualTo(typeof(GeneratedFireData).FullName + ".Scratch"));
             Assert.That(GeneratedFireData.Scratch.Rollback, Is.False);
+            Assert.That(GeneratedFireData.Scratch.ClearOnSleep, Is.False);
+            Assert.That(GeneratedFireData.Scratch.ClearOnVacuum, Is.False);
+            Assert.That(GeneratedFireData.Clears.ClearOnSleep, Is.True);
+            Assert.That(GeneratedFireData.Clears.ClearOnVacuum, Is.True);
         });
     }
 

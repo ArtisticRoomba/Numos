@@ -21,14 +21,15 @@
     <ItemGroup>
         <PackageReference Include="CommunityToolkit.HighPerformance" Version="8.4.2"/>
         <PackageReference Include="JetBrains.Annotations" Version="2026.2.0"/>
+        <PackageReference Include="Magnitudo" Version="0.4.0-beta.1"/>
+        <PackageReference Include="Magnitudo.Analyzers" Version="0.4.0-beta.1" PrivateAssets="all"/>
         <PackageReference Include="System.Numerics.Tensors" Version="10.0.11"/>
     </ItemGroup>
 
     <ItemGroup>
         <ProjectReference Include="..\Numos.Maths\Numos.Maths.csproj"/>
         <ProjectReference Include="..\Numos.Collections\Numos.Collections.csproj"/>
-        <ProjectReference Include="..\Numos.Units\Numos.Units.csproj"/>
-        <ProjectReference Include="..\Numos.Units.Analyzers\Numos.Units.Analyzers.csproj"
+        <ProjectReference Include="..\Numos.API.Generators\Numos.API.Generators.csproj"
                           OutputItemType="Analyzer"
                           ReferenceOutputAssembly="false"
                           GlobalPropertiesToRemove="PublishAot;PublishTrimmed;RuntimeIdentifier;SelfContained"/>
@@ -39,7 +40,7 @@
     </ItemGroup>
 
     <ItemGroup>
-        <AdditionalFiles Include="Numos.CoreSim.numosunits"/>
+        <AdditionalFiles Include="Numos.CoreSim.magnitudo"/>
     </ItemGroup>
 
 </Project>

@@ -12,9 +12,10 @@ public sealed class AdvectionParallelDeterminismTests
     /// </summary>
     /// <remarks>
     ///     Update this only together with a deliberate physics or digest-format change, and confirm the new value is
-    ///     stable across worker counts before approving it. It is a grid-only checkpoint digest.
+    ///     stable across worker counts before approving it. It is a grid-only checkpoint digest, last recaptured when
+    ///     species diffusion started dividing by the voxel volume.
     /// </remarks>
-    private const ulong X64ExpectedDigest = 998283263411882128UL;
+    private const ulong X64ExpectedDigest = 7615574426436419753UL;
 
     [Test]
     [Explicit(
@@ -66,7 +67,7 @@ public sealed class AdvectionParallelDeterminismTests
             config.GasRegistry.Replace(gas, properties);
         }
 
-        var simulation = new AtmosSimulation(config, 8, 8, 8);
+        var simulation = SimTestHelpers.CreateLegacySimulation(config, 8, 8, 8);
         simulation.World.Solvers.SetEnabled(AtmosBuiltInSolvers.Thermodynamics, false);
         simulation.World.Solvers.SetEnabled(AtmosBuiltInSolvers.GasReactions, false);
 

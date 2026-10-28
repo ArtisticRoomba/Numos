@@ -1,0 +1,18 @@
+{"protocolVersion":2,"id":"create","op":"createProject","name":"Euler shock tube","transportModel":"euler","chunkDimensions":{"x":8,"y":1,"z":1},"config":{"voxelVolumeM3":1,"defaultDiffusionCoefficient":0,"vacuumThresholdPa":0,"sleepThreshold":2147483647,"sleepEpsilonPercent":0},"gases":[{"name":"Air","molarHeatCapacityAtConstantVolume":20.786,"molarMassKgPerMol":0.02897,"diffusionCoefficient":0}]}
+{"protocolVersion":2,"id":"chunk","op":"addChunk","position":{"x":0,"y":0,"z":0},"classification":1}
+{"protocolVersion":2,"id":"inject-0","op":"injectGas","position":{"x":0,"y":0,"z":0},"voxel":{"x":0,"y":0,"z":0},"gasId":0,"moles":80.19,"temperatureK":300}
+{"protocolVersion":2,"id":"inject-1","op":"injectGas","position":{"x":0,"y":0,"z":0},"voxel":{"x":1,"y":0,"z":0},"gasId":0,"moles":80.19,"temperatureK":300}
+{"protocolVersion":2,"id":"inject-2","op":"injectGas","position":{"x":0,"y":0,"z":0},"voxel":{"x":2,"y":0,"z":0},"gasId":0,"moles":80.19,"temperatureK":300}
+{"protocolVersion":2,"id":"inject-3","op":"injectGas","position":{"x":0,"y":0,"z":0},"voxel":{"x":3,"y":0,"z":0},"gasId":0,"moles":80.19,"temperatureK":300}
+{"protocolVersion":2,"id":"inject-4","op":"injectGas","position":{"x":0,"y":0,"z":0},"voxel":{"x":4,"y":0,"z":0},"gasId":0,"moles":40.09,"temperatureK":300}
+{"protocolVersion":2,"id":"inject-5","op":"injectGas","position":{"x":0,"y":0,"z":0},"voxel":{"x":5,"y":0,"z":0},"gasId":0,"moles":40.09,"temperatureK":300}
+{"protocolVersion":2,"id":"inject-6","op":"injectGas","position":{"x":0,"y":0,"z":0},"voxel":{"x":6,"y":0,"z":0},"gasId":0,"moles":40.09,"temperatureK":300}
+{"protocolVersion":2,"id":"inject-7","op":"injectGas","position":{"x":0,"y":0,"z":0},"voxel":{"x":7,"y":0,"z":0},"gasId":0,"moles":40.09,"temperatureK":300}
+{"protocolVersion":2,"id":"before","op":"observe","includeVoxels":true}
+{"protocolVersion":2,"id":"tick-1","op":"tick","count":1}
+{"protocolVersion":2,"id":"after-1","op":"observe","includeVoxels":true}
+{"protocolVersion":2,"id":"tick-5","op":"tick","count":4}
+{"protocolVersion":2,"id":"after-5","op":"observe","includeVoxels":true}
+{"protocolVersion":2,"id":"tick-20","op":"tick","count":15}
+{"protocolVersion":2,"id":"after-20","op":"observe","includeVoxels":true}
+{"protocolVersion":2,"id":"exit","op":"exit"}

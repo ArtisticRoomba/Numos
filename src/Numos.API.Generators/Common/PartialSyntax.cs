@@ -25,8 +25,28 @@ internal static class PartialSyntax
         INamedTypeSymbol type,
         SyntaxNode member)
     {
+        return GetChain(type, member.Parent);
+    }
+
+    /// <summary>
+    ///     Gets <paramref name="type" /> and every type enclosing it, outermost first, with whether
+    ///     <paramref name="declaration" /> and the declarations around it are marked partial.
+    /// </summary>
+    /// <remarks>
+    ///     This is the overload for a generator whose syntax node is the type declaration itself. The other overload
+    ///     starts one level up, at the declaration a member sits in.
+    /// </remarks>
+    public static List<(INamedTypeSymbol Type, bool IsPartial)> GetContainingChain(
+        INamedTypeSymbol type,
+        TypeDeclarationSyntax declaration)
+    {
+        return GetChain(type, declaration);
+    }
+
+    private static List<(INamedTypeSymbol Type, bool IsPartial)> GetChain(INamedTypeSymbol type, SyntaxNode? start)
+    {
         var chain = new List<(INamedTypeSymbol Type, bool IsPartial)>();
-        SyntaxNode? node = member.Parent;
+        SyntaxNode? node = start;
         for (INamedTypeSymbol? current = type; current is not null; current = current.ContainingType)
         {
             while (node is not null and not TypeDeclarationSyntax)
@@ -41,6 +61,18 @@ internal static class PartialSyntax
 
         chain.Reverse();
         return chain;
+    }
+
+    /// <summary>
+    ///     Whether code in another file of the same assembly can name something declared with
+    ///     <paramref name="accessibility" />, as generated code outside the type does.
+    /// </summary>
+    /// <remarks>
+    ///     This reads one declaration. A nested type is only nameable when every type around it is too.
+    /// </remarks>
+    public static bool IsAccessibleFromNamespace(Accessibility accessibility)
+    {
+        return accessibility is Accessibility.Public or Accessibility.Internal or Accessibility.ProtectedOrInternal;
     }
 
     /// <summary>

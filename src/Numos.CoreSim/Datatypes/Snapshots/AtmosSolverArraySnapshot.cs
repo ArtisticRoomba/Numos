@@ -1,5 +1,6 @@
-using Numos.CoreSim.Replay;
 using Numos.CoreSim.Solvers;
+using Numos.CoreSim.State;
+using Numos.CoreSim.State.Advanced;
 
 namespace Numos.CoreSim.Datatypes.Snapshots;
 
@@ -14,9 +15,9 @@ public sealed class AtmosSolverArraySnapshot
 {
     private readonly SolverArrayStorage _storage;
 
-    internal AtmosSolverArraySnapshot(SolverArrayStorage storage)
+    private AtmosSolverArraySnapshot(SolverArrayStorage storage)
     {
-        _storage = storage.Clone();
+        _storage = storage;
     }
 
     /// <summary>
@@ -58,14 +59,40 @@ public sealed class AtmosSolverArraySnapshot
         return (T[])typed.Values.Clone();
     }
 
+    /// <summary>
+    ///     Gets whether the element type can be written to a portable replay file.
+    /// </summary>
+    internal bool IsPortable => _storage.Field.IsPortable;
+
+    internal int ElementSize => _storage.Field.ElementSize;
+
+    internal ChunkFieldDescriptor Field => _storage.Field;
+
+    // Takes ownership of storage nobody else references, such as an array just decoded from a file.
+    internal static AtmosSolverArraySnapshot Adopt(SolverArrayStorage storage)
+    {
+        return new AtmosSolverArraySnapshot(storage);
+    }
+
+    // Copies live storage, which keeps changing after the capture.
+    internal static AtmosSolverArraySnapshot Copy(SolverArrayStorage storage)
+    {
+        return new AtmosSolverArraySnapshot(storage.Clone());
+    }
+
+    internal void WriteValues<TSink>(ref TSink sink) where TSink : struct, IStateSink
+    {
+        _storage.WriteValues(ref sink);
+    }
+
+    internal int CompareValues(AtmosSolverArraySnapshot other)
+    {
+        return _storage.Bytes.SequenceCompareTo(other._storage.Bytes);
+    }
+
     internal SolverArrayStorage Materialize()
     {
         return _storage.Clone();
     }
 
-    internal void AppendHash(ref AtmosStateHasher hash)
-    {
-        hash.Add(Key);
-        _storage.AppendHash(ref hash);
-    }
 }

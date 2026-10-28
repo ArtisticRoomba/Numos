@@ -1,3 +1,4 @@
+using Numos.CoreSim;
 using Numos.CoreSim.Datatypes.Primitives;
 using Numos.CoreSim.Datatypes.Snapshots;
 using Numos.Maths;
@@ -273,14 +274,16 @@ public sealed class AtmosChunkVersionTests
             VacuumThreshold = 0.1f
         };
 
-        using var simulation = new AtmosSimulation(config, 1, 1, 1);
+        // Legacy transport: equal pressure keeps advection from waking the neighbor, and the wake asserted below
+        // comes from legacy boundary diffusion. euler-flow would deliver the heat but leave the chunk asleep a tick
+        // longer.
+        using var simulation = new AtmosSimulation(config, 1, 1, 1, AtmosTransportModel.Legacy);
         var hot = simulation.CreateAndRegisterChunk(new Int3(0, 0, 0));
         var cold = simulation.CreateAndRegisterChunk(new Int3(1, 0, 0));
         simulation.SetChunkClassification(hot, new VoxelClassification(1));
         simulation.SetChunkClassification(cold, new VoxelClassification(1));
 
-        // Equal pressure prevents advection from waking the neighbor. Different temperature
-        // still produces boundary heat transfer on the second (thermodynamic) tick.
+        // Different temperature still produces boundary heat transfer on the second (thermodynamic) tick.
         simulation.AddGasToVoxel(hot, 0, "TestGas0", 0.00125f, 400f);
         simulation.AddGasToVoxel(cold, 0, "TestGas0", 0.0025f, 200f);
         simulation.SleepChunk(cold);

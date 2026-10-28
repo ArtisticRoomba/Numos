@@ -23,18 +23,37 @@ internal readonly record struct ExplicitTransportEndpoint(AtmosChunk Chunk, usho
 /// <summary>
 ///     Describes one canonical, resolved sparse edge for the duration of a world tick.
 /// </summary>
+/// <param name="First">The canonically first endpoint.</param>
+/// <param name="Second">The other endpoint.</param>
+/// <param name="Capabilities">The interactions the link allows.</param>
+/// <param name="AreaFraction">
+///     The link's open area as a fraction of one voxel face, or <see langword="null" /> to use the configured default.
+/// </param>
 internal readonly record struct ExplicitTransportEdge(
     ExplicitTransportEndpoint First,
     ExplicitTransportEndpoint Second,
-    ExplicitTransportCapabilities Capabilities);
+    ExplicitTransportCapabilities Capabilities,
+    float? AreaFraction = null);
 
 /// <summary>
 ///     Applies sparse cell-to-cell transport from a tick-start snapshot using shared per-cell limits.
 /// </summary>
 /// <remarks>
-///     The authoritative topology lives above the kernels. This type consumes a dense, already ordered view so
-///     neither portal nor dock lifecycle concepts enter the physics loop. All requests are calculated before any
-///     cell is changed, and all outgoing requests for one cell and species share the same availability limiter.
+///     <para>
+///         The authoritative topology lives above the kernels.
+///         This type consumes a dense, already ordered view, so portal and dock lifecycle concepts stay out of the
+///         physics loop.
+///         Numos calculates all requests before it changes any cell.
+///         All outgoing requests for one cell and species share the same availability limiter.
+///     </para>
+///     <para>
+///         A link is a duct. It carries mass and the energy that mass holds, never momentum.
+///         Gas requests scale with the link's area fraction, so a half-open hatch moves half of what a full face
+///         moves under the same pressure difference.
+///         Conduction through <see cref="ExplicitTransportCapabilities.Thermal" /> is not scaled.
+///         The existing conductance law is a heat-capacity-bounded relaxation and not an area-based flux.
+///         Shrinking it with the opening is a separate modeling question.
+///     </para>
 /// </remarks>
 internal sealed class ExplicitAtmosTransportSolver
 {
@@ -196,10 +215,17 @@ internal sealed class ExplicitAtmosTransportSolver
         AtmosSolverConfigSnapshot config,
         ExplicitTransportCapabilities enabledCapabilities)
     {
+        Metre voxelEdge = SpeciesDiffusionKernel.GetVoxelEdge(config.VoxelVolume);
         for (int edgeIndex = 0; edgeIndex < edges.Length; edgeIndex++)
         {
             ref readonly var edge = ref edges[edgeIndex];
             if ((edge.Capabilities & enabledCapabilities & ExplicitTransportCapabilities.Gas) == 0)
+                continue;
+
+            // Unsized links follow the configured default, read per tick rather than baked in at registration so a
+            // configuration change resizes every one of them without touching the topology.
+            Scalar areaFraction = edge.AreaFraction ?? config.EulerFlow.DefaultLinkAreaFraction;
+            if (areaFraction <= 0f)
                 continue;
 
             int firstCell = edgeCells[edgeIndex * 2];
@@ -237,7 +263,6 @@ internal sealed class ExplicitAtmosTransportSolver
                     secondTemperature);
             }
 
-            float dx = MathF.Pow(config.VoxelVolume, 1f / 3f);
             for (int gasId = 0; gasId < gasCount; gasId++)
             {
                 Mole firstMoles = available[firstOffset + gasId];
@@ -250,7 +275,7 @@ internal sealed class ExplicitAtmosTransportSolver
                     firstPressure,
                     firstTemperature,
                     config.GetDiffusionCoefficient(gasId),
-                    dx,
+                    voxelEdge,
                     config);
 
                 reverse += CalculateDiffusionRequest(
@@ -258,11 +283,12 @@ internal sealed class ExplicitAtmosTransportSolver
                     secondPressure,
                     secondTemperature,
                     config.GetDiffusionCoefficient(gasId),
-                    dx,
+                    voxelEdge,
                     config);
 
-                forward = MathF.Max(0f, forward);
-                reverse = MathF.Max(0f, reverse);
+                // Scale after the per-edge diffusion cap so a narrow link never asks for more than a full face would.
+                forward = MathF.Max(0f, forward) * areaFraction;
+                reverse = MathF.Max(0f, reverse) * areaFraction;
                 forwardRequests[edgeOffset + gasId] = forward;
                 reverseRequests[edgeOffset + gasId] = reverse;
                 requestedOutflow[firstOffset + gasId] += forward;
@@ -275,21 +301,20 @@ internal sealed class ExplicitAtmosTransportSolver
         Mole sourceMoles,
         Pascal sourcePressure,
         Kelvin sourceTemperature,
-        float referenceDiffusivity,
-        float dx,
+        SquareMetrePerSecond referenceDiffusivity,
+        Metre voxelEdge,
         AtmosSolverConfigSnapshot config)
     {
         if (sourceMoles <= 0f || sourcePressure <= 0f || referenceDiffusivity <= 0f)
             return 0f;
 
-        Scalar temperatureRatio = sourceTemperature / config.GlobalTemperature;
-        Scalar pressureRatio = config.SaturationReferencePressure / sourcePressure;
-        float environmentFactor = MathF.Pow(temperatureRatio, 1.5f) * pressureRatio * dx;
-        Mole request = referenceDiffusivity * environmentFactor * sourceMoles * AtmosSolverConstants.FixedTimeStep;
+        PerSquareMetre environmentFactor =
+            SpeciesDiffusionKernel.EnvironmentFactor(config, sourcePressure, sourceTemperature, voxelEdge);
 
-        // Match the Cartesian solver's per-edge stability cap. A cell may have any number of explicit neighbors, so
-        // the shared availability limiter below scales their combined requests again when they exceed the source.
-        return request * 7f > sourceMoles ? sourceMoles / 7f : request;
+        // TransferAmount applies the Cartesian solver's per-edge stability cap.
+        // A cell may have any number of explicit neighbors.
+        // The shared availability limiter below scales their combined requests again when they exceed the source.
+        return SpeciesDiffusionKernel.TransferAmount(referenceDiffusivity, environmentFactor, sourceMoles);
     }
 
     private static void CalculateThermalConductance(
@@ -405,7 +430,8 @@ internal sealed class ExplicitAtmosTransportSolver
                 AtmosSolverMath.CalculateHeatCapacityAtVoxel(config, second.Chunk, second.LocalVoxelIndex);
 
             // For each endpoint, C / sum(G) bounds its total scaled incident conductance by that cell's heat capacity.
-            // Applying the smaller endpoint scale keeps every edge equal and opposite without making edge order matter.
+            // Applying the smaller endpoint scale keeps every edge equal and opposite.
+            // Edge order then does not matter.
             Scalar64 scale = Math.Min(
                 1d,
                 Math.Min(
@@ -424,8 +450,9 @@ internal sealed class ExplicitAtmosTransportSolver
         if (request <= 0f || available <= 0f || totalRequested <= 0f)
             return 0f;
 
-        // Every edge requested gas from the same tick-start snapshot. Scale all requests from this cell and species by
-        // the same ratio so the result cannot overdraw the source or favor whichever edge happens to sort first.
+        // Every edge requested gas from the same tick-start snapshot.
+        // Scale all requests from this cell and species by the same ratio.
+        // The result then cannot overdraw the source or favor whichever edge sorts first.
         return request * MathF.Min(1f, available / totalRequested);
     }
 
@@ -515,7 +542,7 @@ internal sealed class ExplicitAtmosTransportSolver
     private static bool CanTransport(ExplicitTransportEndpoint endpoint)
     {
         int room = endpoint.Chunk.VoxelRoomMap[endpoint.LocalVoxelIndex];
-        return room != VoxelClassification.RoomSolid && room != VoxelClassification.RoomVoid;
+        return VoxelClassification.IsAirRoom(room);
     }
 
     private static Mole SumMoles(Mole[] available, int offset, int gasCount)

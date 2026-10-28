@@ -1,4 +1,7 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
+using Numos.CoreSim.State;
+using Numos.CoreSim.State.Advanced;
 
 namespace Numos.CoreSim.Solvers;
 
@@ -19,13 +22,26 @@ internal abstract class ChunkFieldDescriptor
 {
     private object? _publicHandle;
 
-    private protected ChunkFieldDescriptor(string key, int slot, bool captureForRollback, int? fixedLength)
+    private protected ChunkFieldDescriptor(
+        string key, int slot, bool isPortable, bool captureForRollback, int? fixedLength, bool clearOnSleep, bool clearOnVacuum)
     {
         Key = key;
         Slot = slot;
+        IsPortable = isPortable;
         CaptureForRollback = captureForRollback;
         FixedLength = fixedLength;
+        ClearOnSleep = clearOnSleep;
+        ClearOnVacuum = clearOnVacuum;
     }
+
+    /// <summary>
+    ///     Gets whether a rollback field of this element type can be written to a portable replay file.
+    /// </summary>
+    /// <remarks>
+    ///     Only primitives and enums over them qualify: their bytes have no padding, and swapping each element's bytes
+    ///     converts them to little-endian. Structs are left out, since their layout and padding aren't pinned.
+    /// </remarks>
+    internal bool IsPortable { get; }
 
     /// <summary>
     ///     Gets the ordinal key.
@@ -39,12 +55,24 @@ internal abstract class ChunkFieldDescriptor
 
     internal abstract Type ElementType { get; }
 
+    internal abstract int ElementSize { get; }
+
     internal bool CaptureForRollback { get; }
 
     /// <summary>
     ///     Gets the array length, or null for one element per voxel.
     /// </summary>
     internal int? FixedLength { get; }
+
+    /// <summary>
+    ///     Gets whether <see cref="AtmosChunk.Sleep" /> resets this field's storage to default.
+    /// </summary>
+    internal bool ClearOnSleep { get; }
+
+    /// <summary>
+    ///     Gets whether clearing a voxel or chunk to vacuum resets this field's storage to default.
+    /// </summary>
+    internal bool ClearOnVacuum { get; }
 
     /// <summary>
     ///     Gets the public wrapper published for this descriptor, if any.
@@ -60,6 +88,13 @@ internal abstract class ChunkFieldDescriptor
         return Interlocked.CompareExchange(ref _publicHandle, handle, null) ?? handle;
     }
 
+    /// <summary>
+    ///     Reads <paramref name="length" /> little-endian elements written by <see cref="SolverArrayStorage.WriteValues{TSink}" />.
+    /// </summary>
+    /// <remarks>Only valid for portable element types.</remarks>
+    /// <exception cref="InvalidDataException">The data holds fewer elements.</exception>
+    internal abstract SolverArrayStorage Read(ref StateReader reader, int length);
+
     internal int GetLength(int voxelCount)
     {
         return FixedLength ?? voxelCount;
@@ -67,22 +102,36 @@ internal abstract class ChunkFieldDescriptor
 
     internal string Describe()
     {
-        return Describe(ElementType, CaptureForRollback, FixedLength);
+        return Describe(ElementType, CaptureForRollback, FixedLength, ClearOnSleep, ClearOnVacuum);
     }
 
-    internal static string Describe(Type elementType, bool captureForRollback, int? fixedLength)
+    internal static bool IsPortableElementType(Type type)
+    {
+        if (type.IsEnum)
+            type = Enum.GetUnderlyingType(type);
+
+        return type == typeof(bool) || type == typeof(byte) || type == typeof(sbyte) ||
+               type == typeof(short) || type == typeof(ushort) || type == typeof(int) || type == typeof(uint) ||
+               type == typeof(long) || type == typeof(ulong) || type == typeof(Half) || type == typeof(float) ||
+               type == typeof(double);
+    }
+
+    internal static string Describe(Type elementType, bool captureForRollback, int? fixedLength, bool clearOnSleep, bool clearOnVacuum)
     {
         string length = fixedLength is { } count ? $"{count} elements" : "one element per voxel";
         string policy = captureForRollback ? "captured for rollback" : "transient";
-        return $"{elementType.FullName} ({length}, {policy})";
+        string sleep = clearOnSleep ? "cleared on sleep" : "kept on sleep";
+        string vacuum = clearOnVacuum ? "cleared on vacuum" : "kept on vacuum";
+        return $"{elementType.FullName} ({length}, {policy}, {sleep}, {vacuum})";
     }
 }
 
 /// <inheritdoc />
 internal sealed class ChunkFieldDescriptor<T> : ChunkFieldDescriptor
 {
-    internal ChunkFieldDescriptor(string key, int slot, bool captureForRollback, int? fixedLength)
-        : base(key, slot, captureForRollback, fixedLength)
+    internal ChunkFieldDescriptor(
+        string key, int slot, bool captureForRollback, int? fixedLength, bool clearOnSleep, bool clearOnVacuum)
+        : base(key, slot, IsPortableElementType(typeof(T)), captureForRollback, fixedLength, clearOnSleep, clearOnVacuum)
     {
     }
 
@@ -93,9 +142,25 @@ internal sealed class ChunkFieldDescriptor<T> : ChunkFieldDescriptor
         return new SolverArrayStorage<T>(this, new T[GetLength(voxelCount)]);
     }
 
-    internal bool Matches(bool captureForRollback, int? fixedLength)
+    internal override SolverArrayStorage Read(ref StateReader reader, int length)
     {
-        return CaptureForRollback == captureForRollback && FixedLength == fixedLength;
+        // Checked before allocating, so a corrupt length can't ask for more than the data holds.
+        if ((long)length * Unsafe.SizeOf<T>() > reader.Remaining)
+            throw new InvalidDataException($"Chunk field '{Key}' is truncated.");
+
+        var values = new T[length];
+        reader.ReadElements(SolverArrayStorage<T>.AsBytes(values), Unsafe.SizeOf<T>());
+        return new SolverArrayStorage<T>(this, values);
+    }
+
+    internal override int ElementSize => Unsafe.SizeOf<T>();
+
+    internal bool Matches(bool captureForRollback, int? fixedLength, bool clearOnSleep, bool clearOnVacuum)
+    {
+        return CaptureForRollback == captureForRollback &&
+               FixedLength == fixedLength &&
+               ClearOnSleep == clearOnSleep &&
+               ClearOnVacuum == clearOnVacuum;
     }
 }
 
@@ -123,13 +188,16 @@ internal static class ChunkFieldRegistry
     /// <param name="key">The ordinal key. Captured fields persist it in checkpoints, so it must stay stable.</param>
     /// <param name="captureForRollback">Whether chunks capture and restore the field.</param>
     /// <param name="length">The array length, or null for one element per voxel.</param>
+    /// <param name="clearOnSleep">Whether the array is reset to default when a chunk sleeps.</param>
+    /// <param name="clearOnVacuum">Whether the array is reset to default when a voxel becomes a vacuum.</param>
     /// <returns>The descriptor shared by every registration of the same definition.</returns>
     /// <exception cref="ArgumentException">
     ///     <paramref name="key" /> is blank, or a captured <typeparamref name="T" /> contains managed references.
     /// </exception>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="length" /> is negative.</exception>
     /// <exception cref="InvalidOperationException">The key is registered with a different definition.</exception>
-    internal static ChunkFieldDescriptor<T> Register<T>(string key, bool captureForRollback, int? length)
+    internal static ChunkFieldDescriptor<T> Register<T>(
+        string key, bool captureForRollback = false, int? length = null, bool clearOnSleep = false, bool clearOnVacuum = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(key);
         if (length is { } count)
@@ -146,19 +214,28 @@ internal static class ChunkFieldRegistry
         {
             if (ByKey.TryGetValue(key, out var existing))
             {
-                if (existing is ChunkFieldDescriptor<T> typed && typed.Matches(captureForRollback, length))
+                if (existing is ChunkFieldDescriptor<T> typed && typed.Matches(captureForRollback, length, clearOnSleep, clearOnVacuum))
                     return typed;
 
                 throw new InvalidOperationException(
                     $"Chunk field '{key}' is already registered as {existing.Describe()} and cannot be registered " +
-                    $"again as {ChunkFieldDescriptor.Describe(typeof(T), captureForRollback, length)}.");
+                    $"again as {ChunkFieldDescriptor.Describe(typeof(T), captureForRollback, length, clearOnSleep, clearOnVacuum)}.");
             }
 
             int slot = _slotCount;
             Volatile.Write(ref _slotCount, slot + 1);
-            var descriptor = new ChunkFieldDescriptor<T>(key, slot, captureForRollback, length);
+            var descriptor = new ChunkFieldDescriptor<T>(key, slot, captureForRollback, length, clearOnSleep, clearOnVacuum);
             ByKey.Add(key, descriptor);
             return descriptor;
         }
+    }
+
+    /// <summary>
+    ///     Finds the descriptor registered under <paramref name="key" />, if any.
+    /// </summary>
+    internal static bool TryGet(string key, [NotNullWhen(true)] out ChunkFieldDescriptor? descriptor)
+    {
+        lock (Gate)
+            return ByKey.TryGetValue(key, out descriptor);
     }
 }

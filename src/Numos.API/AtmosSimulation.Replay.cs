@@ -27,8 +27,9 @@ public sealed partial class AtmosSimulation
     /// <returns>Immutable chunk continuation data, including rollback <see cref="ChunkField{T}" /> storage.</returns>
     /// <remarks>
     ///     Only the grid is captured. World time, configuration, solver enablement, and explicit topology belong to
-    ///     <see cref="World" />; use <see cref="AtmosWorld.CaptureCheckpoint" /> for a complete continuation state that
-    ///     replay can start from. Detached containers and custom-solver closure state remain host-owned.
+    ///     <see cref="World" />. For a complete continuation state that replay can start from, use
+    ///     <see cref="AtmosWorld.CaptureCheckpoint" />. The host owns detached containers and custom-solver closure
+    ///     state.
     /// </remarks>
     /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
     /// <exception cref="InvalidOperationException">Called during a solver tick.</exception>
@@ -43,11 +44,11 @@ public sealed partial class AtmosSimulation
     /// </summary>
     /// <param name="checkpoint">Detached grid state with matching chunk dimensions.</param>
     /// <remarks>
-    ///     World time, configuration, and solver enablement are left as they are. Numos validates compatibility and
-    ///     replacement storage before changing live state, then keeps existing integration objects and delegates
-    ///     attached. Address-only chunk handles still identify positions, while generation-bound voxel mixtures must be
-    ///     reacquired. Custom <see cref="IAtmosWorldSolver" /> stages get <see cref="IAtmosWorldSolver.OnRestored" />
-    ///     after the state is in place; an exception from it propagates with the restored state kept.
+    ///     World time, configuration, and solver enablement stay as they are. Numos validates compatibility and
+    ///     replacement storage before it changes live state. Existing integration objects and delegates stay attached.
+    ///     Chunk handles still identify positions. Generation-bound voxel mixtures must be reacquired.
+    ///     Custom <see cref="IAtmosWorldSolver" /> stages get <see cref="IAtmosWorldSolver.OnRestored" /> after the
+    ///     state is in place. An exception from it propagates, and the restored state stays.
     /// </remarks>
     /// <exception cref="ArgumentNullException">The checkpoint is null.</exception>
     /// <exception cref="ArgumentException">The checkpoint is incompatible with this simulation.</exception>

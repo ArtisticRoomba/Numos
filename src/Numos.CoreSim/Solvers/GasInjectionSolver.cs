@@ -10,8 +10,8 @@ namespace Numos.CoreSim.Solvers;
 internal static class GasInjectionSolver
 {
     /// <summary>
-    ///     Injects gas outside a tick (direct API mutations such as explosions or tools), recomputing the voxel's
-    ///     heat capacity from its current composition first.
+    ///     Injects gas outside a tick (direct API mutations such as explosions or tools).
+    ///     The method first recomputes the voxel's heat capacity from its current composition.
     /// </summary>
     /// <remarks>
     ///     Solver stages use the
@@ -37,9 +37,9 @@ internal static class GasInjectionSolver
     }
 
     /// <summary>
-    ///     Injects against a tick config snapshot using an already-known heat capacity. Lets a batched
-    ///     caller (e.g. queued boundary flow injections) skip re-deriving composition for a voxel it has
-    ///     already resynced earlier in the same batch.
+    ///     Injects against a tick config snapshot using an already-known heat capacity.
+    ///     A batched caller (for example queued boundary flow injections) can then skip re-deriving composition
+    ///     for a voxel it already resynced earlier in the same batch.
     /// </summary>
     internal static void Inject(
         AtmosChunk chunk, ushort localVoxelIndex, int gasId, Mole moles,

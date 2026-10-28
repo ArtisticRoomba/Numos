@@ -19,14 +19,17 @@ internal sealed class TestAtmosConfig : AtmosConfig
 internal static class TestGases
 {
     internal static GasProperties Create(
-        string name, float diffusionCoefficient = AtmosConfigDefaults.DefaultDiffusionCoefficient)
+        string name,
+        float diffusionCoefficient = AtmosConfigDefaults.DefaultDiffusionCoefficient,
+        float molarMass = 0f)
     {
         return new GasProperties
         {
             Name = name,
-            // Zero deliberately selects the configuration's heat-capacity fallback.
+            // Zero selects the configuration's heat-capacity fallback, and the same for molar mass.
             MolarHeatCapacityAtConstantVolume = 0f,
-            DiffusionCoefficient = diffusionCoefficient
+            DiffusionCoefficient = diffusionCoefficient,
+            MolarMass = molarMass
         };
     }
 }
