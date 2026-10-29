@@ -15,12 +15,12 @@ public sealed class SimulationLifecycleIntegrationTests
         Assert.Multiple(() =>
         {
             Assert.That(
-                FlowsAfterStableTicks(2),
+                IsAwakeAfterStableTicks(2),
                 Is.True,
                 "The chunk must remain awake when SleepTimer equals the sleep delay in ticks.");
 
             Assert.That(
-                FlowsAfterStableTicks(3),
+                IsAwakeAfterStableTicks(3),
                 Is.False,
                 "The chunk must sleep when SleepTimer becomes greater than the sleep delay in ticks.");
         });
@@ -126,6 +126,7 @@ public sealed class SimulationLifecycleIntegrationTests
         var converged = simulation.GetChunkSnapshot(chunk);
         float[] convergedMoles = ReadOpenMoles(converged, openVoxels, width, height);
         simulation.SetVoxelTemperature(chunk, 0, 0, 0, 600f);
+        simulation.SleepChunk(chunk);
         simulation.Tick();
         var stillSleeping = simulation.GetChunkSnapshot(chunk);
         simulation.WakeChunk(chunk);
@@ -149,7 +150,66 @@ public sealed class SimulationLifecycleIntegrationTests
         });
     }
 
-    private static bool FlowsAfterStableTicks(int stableTicks)
+    [Test]
+    public void SetVoxelTemperature_WakesSleepingChunkAndNextTickMovesGas()
+    {
+        using var simulation = CreateSleepingTwoVoxelChunk(out var chunk);
+
+        simulation.SetVoxelTemperature(chunk, 0, 0, 0, 600f);
+        Assert.That(simulation.GetChunkSnapshot(chunk).IsAwake, Is.True);
+
+        simulation.Tick();
+        var snapshot = simulation.GetChunkSnapshot(chunk);
+        Assert.That(SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 1), Is.GreaterThan(1f));
+    }
+
+    [Test]
+    public void EditVoxelBoxTemperature_WakesSleepingChunkAndNextTickMovesGas()
+    {
+        using var simulation = CreateSleepingTwoVoxelChunk(out var chunk);
+
+        simulation.EditVoxelBox(new Int3(0, 0, 0), new Int3(0, 0, 0), new AtmosVoxelBoxEdit { TemperatureK = 600f });
+        Assert.That(simulation.GetChunkSnapshot(chunk).IsAwake, Is.True);
+
+        simulation.Tick();
+        var snapshot = simulation.GetChunkSnapshot(chunk);
+        Assert.That(SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 1), Is.GreaterThan(1f));
+    }
+
+    [Test]
+    public void TemperatureEditsOnSleepingChunk_ReplayToTheLiveState()
+    {
+        using var simulation = CreateSleepingTwoVoxelChunk(out _);
+        var world = simulation.World;
+        var initial = world.CaptureCheckpoint();
+        world.StartRecording();
+        simulation.SetVoxelTemperature(simulation.GetChunkHandles()[0], 0, 0, 0, 600f);
+        world.Tick();
+        world.Tick();
+        simulation.EditVoxelBox(new Int3(0, 0, 0), new Int3(1, 0, 0), new AtmosVoxelBoxEdit { TemperatureK = 350f });
+        world.Tick();
+        var head = world.CaptureCheckpoint();
+        var recording = world.StopRecording();
+        var liveHash = world.ComputeStateHash();
+
+        world.ReplayTo(initial, recording.Operations, head.Position);
+
+        Assert.That(world.ComputeStateHash(), Is.EqualTo(liveHash));
+    }
+
+    private static AtmosSimulation CreateSleepingTwoVoxelChunk(out AtmosChunkHandle chunk)
+    {
+        var config = SimTestHelpers.CreateDeterministicConfig();
+        var simulation = SimTestHelpers.CreateLegacySimulation(config, 2, 1, 1);
+        chunk = SimTestHelpers.CreateOpenChunk(simulation, new Int3(0, 0, 0));
+        SimTestHelpers.SetAllTemperatures(simulation, chunk, 2, 1, 1);
+        simulation.AddGasToVoxel(chunk, 0, 0, 0, SimTestHelpers.FirstGasName, 1f, 300f);
+        simulation.AddGasToVoxel(chunk, 1, 0, 0, SimTestHelpers.FirstGasName, 1f, 300f);
+        simulation.SleepChunk(chunk);
+        return simulation;
+    }
+
+    private static bool IsAwakeAfterStableTicks(int stableTicks)
     {
         var config = SimTestHelpers.CreateDeterministicConfig();
         config.SleepDelay = 0.1f;
@@ -163,10 +223,7 @@ public sealed class SimulationLifecycleIntegrationTests
         for (int i = 0; i < stableTicks; i++)
             simulation.Tick();
 
-        simulation.SetVoxelTemperature(chunk, 0, 0, 0, 600f);
-        simulation.Tick();
-        var snapshot = simulation.GetChunkSnapshot(chunk);
-        return SimTestHelpers.Moles(snapshot, SimTestHelpers.FirstGasId, 1) > 1f;
+        return simulation.GetChunkSnapshot(chunk).IsAwake;
     }
 
     private static float[] ReadOpenMoles(

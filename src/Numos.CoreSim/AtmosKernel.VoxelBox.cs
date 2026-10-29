@@ -234,6 +234,7 @@ internal sealed partial class AtmosKernel
 
         if (op.Parts.HasFlag(AtmosVoxelBoxParts.Temperature))
         {
+            WakeOnce(chunk, ref awake);
             for (int z = z0; z <= z1; z++)
             for (int y = y0; y <= y1; y++)
             {

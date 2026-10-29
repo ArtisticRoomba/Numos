@@ -832,7 +832,7 @@ simulation.SetVoxelMomentum(chunk, 0, mass * 2f, 0f, 0f); // 2 m/s along +x
 `EditVoxelBox` changes a whole box of voxels in global voxel coordinates with one call and one recorded operation.
 Use it instead of a loop of per-voxel calls when you fill or reshape a region. The edit applies the selected parts in a
 fixed order: classification, gas removal, temperature, gas injection, velocity. It skips voxels in chunks that do not
-exist.
+exist. A temperature, gas, or velocity edit wakes each chunk it changes.
 
 ```csharp
 var result = simulation.EditVoxelBox(

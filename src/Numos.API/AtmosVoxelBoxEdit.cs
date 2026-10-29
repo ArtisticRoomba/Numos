@@ -53,7 +53,7 @@ public readonly record struct AtmosVoxelBoxEdit
     ///     Gets the stored temperature, in kelvins, for every voxel, or <see langword="null" /> to keep it.
     /// </summary>
     /// <remarks>
-    ///     The value must be finite and at least 0. Numos refreshes the cached pressure of each voxel.
+    ///     The value must be finite and at least 0. Numos refreshes the cached pressure of each voxel and wakes the chunk.
     /// </remarks>
     public float? TemperatureK { get; init; }
 

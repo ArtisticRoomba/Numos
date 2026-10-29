@@ -521,6 +521,7 @@ internal sealed partial class AtmosKernel
         {
             var chunk = GetChunk(position);
             ValidateVoxelIndex(chunk, localVoxelIndex);
+            chunk.Wake();
             chunk.Temperature[localVoxelIndex] = temperature;
             chunk.TotalPressure[localVoxelIndex] =
                 AtmosSolverMath.CalculatePressureAtVoxel(_config, chunk, localVoxelIndex);

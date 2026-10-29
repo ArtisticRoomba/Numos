@@ -829,6 +829,7 @@ public sealed partial class AtmosSimulation : IDisposable
     /// <remarks>
     ///     Numos stores the value without validation or normalization. Snapshots expose that raw value until a later
     ///     operation overwrites it. The pressure cache refreshes immediately.
+    ///     The call wakes a sleeping chunk, so the next tick sees the new temperature and pressure.
     ///     Pressure and sensible-energy calculations use <see cref="AtmosConfig.DefaultTemperatureFallback" /> when a
     ///     gas-bearing voxel's stored value is non-finite or nonpositive.
     /// </remarks>
@@ -853,6 +854,7 @@ public sealed partial class AtmosSimulation : IDisposable
     /// <remarks>
     ///     Numos stores the value without validation or normalization. Snapshots expose that raw value until a later
     ///     operation overwrites it. The pressure cache refreshes immediately.
+    ///     The call wakes a sleeping chunk, so the next tick sees the new temperature and pressure.
     ///     Pressure and sensible-energy calculations use <see cref="AtmosConfig.DefaultTemperatureFallback" /> when a
     ///     gas-bearing voxel's stored value is non-finite or nonpositive.
     /// </remarks>
