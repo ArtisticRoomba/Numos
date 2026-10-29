@@ -37,6 +37,24 @@ internal static class GasInjectionSolver
     }
 
     /// <summary>
+    ///     Injects gas that a vent pushes in, outside a tick. The voxel's sensible energy grows by the enthalpy
+    ///     <c>n * (cv + R) * T_in</c> because the vent also does flow work <c>p * V = n * R * T_in</c>.
+    /// </summary>
+    /// <remarks>
+    ///     The heat capacity still grows by <c>n * cv</c>. The method therefore injects at the effective temperature
+    ///     <c>T_in * (cv + R) / cv</c>, where <c>R</c> is <see cref="AtmosPhysicalConstants.MolarGasConstant" />.
+    ///     An empty voxel lands at <c>gamma * T_in</c>, the textbook result for filling an evacuated rigid tank.
+    /// </remarks>
+    internal static void Vent(
+        AtmosChunk chunk, ushort localVoxelIndex, int gasId, Mole moles,
+        Kelvin temperature, IAtmosConfig config)
+    {
+        JoulePerMoleKelvin cv = config.GetMolarHeatCapacityAtConstantVolume(gasId);
+        Kelvin effectiveTemperature = temperature * ((cv + AtmosPhysicalConstants.MolarGasConstant) / cv);
+        Inject(chunk, localVoxelIndex, gasId, moles, effectiveTemperature, config);
+    }
+
+    /// <summary>
     ///     Injects against a tick config snapshot using an already-known heat capacity.
     ///     A batched caller (for example queued boundary flow injections) can then skip re-deriving composition
     ///     for a voxel it already resynced earlier in the same batch.

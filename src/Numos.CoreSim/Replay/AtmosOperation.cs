@@ -73,7 +73,12 @@ public enum AtmosOperationCode : ushort
     /// <summary>
     ///     Ignite a voxel for one tick.
     /// </summary>
-    SetIgnitionSource = 15
+    SetIgnitionSource = 15,
+
+    /// <summary>
+    ///     Vent gas into a voxel, adding its enthalpy.
+    /// </summary>
+    VentGasToVoxel = 16
 }
 
 /// <summary>

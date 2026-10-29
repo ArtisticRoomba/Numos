@@ -242,16 +242,17 @@ public sealed partial class WorkbenchSession
     }
 
     /// <summary>
-    ///     Adds gas to one voxel.
+    ///     Adds gas to one voxel. Pass <paramref name="vent" /> to add the gas as a vent does, with its enthalpy.
     /// </summary>
     public void AddVoxelGas(
         VoxelCell cell,
         int gasId,
         float moles,
         float temperature,
-        AtmosSimulationId? simulation = null)
+        AtmosSimulationId? simulation = null,
+        bool vent = false)
     {
-        AddVoxelGas([cell], gasId, moles, temperature, simulation);
+        AddVoxelGas([cell], gasId, moles, temperature, simulation, vent);
     }
 
     /// <summary>
@@ -262,13 +263,18 @@ public sealed partial class WorkbenchSession
     /// <param name="moles">Moles added to each voxel. Must be positive and finite.</param>
     /// <param name="temperature">Temperature of the added gas, in kelvins.</param>
     /// <param name="simulation">The target simulation, or <see langword="null" /> for the active one.</param>
+    /// <param name="vent">
+    ///     <see langword="true" /> to add the gas with <see cref="AtmosSimulation.VentGasToVoxel(AtmosChunkHandle, ushort, int, float, float)" />,
+    ///     so it carries its enthalpy.
+    /// </param>
     /// <returns>The number of distinct voxels edited.</returns>
     public int AddVoxelGas(
         IEnumerable<VoxelCell> cells,
         int gasId,
         float moles,
         float temperature,
-        AtmosSimulationId? simulation = null)
+        AtmosSimulationId? simulation = null,
+        bool vent = false)
     {
         string gas = Config != null && gasId >= 0 && gasId < Config.GasRegistry.Count
             ? $"{Config.GasRegistry[gasId].Name} ({gasId})"
@@ -278,12 +284,14 @@ public sealed partial class WorkbenchSession
             cells,
             simulation,
             $"Injected {moles:G4} mol {gas} into",
-            (target, cell) => target.AddGasToVoxel(
-                new AtmosChunkHandle(cell.ChunkPosition),
-                cell.LocalIndex,
-                gasId,
-                moles,
-                temperature));
+            (target, cell) =>
+            {
+                var handle = new AtmosChunkHandle(cell.ChunkPosition);
+                if (vent)
+                    target.VentGasToVoxel(handle, cell.LocalIndex, gasId, moles, temperature);
+                else
+                    target.AddGasToVoxel(handle, cell.LocalIndex, gasId, moles, temperature);
+            });
     }
 
     /// <summary>

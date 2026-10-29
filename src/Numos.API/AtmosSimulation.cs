@@ -966,6 +966,8 @@ public sealed partial class AtmosSimulation : IDisposable
     ///     When gas is already present and the stored temperature is non-finite or nonpositive, the prior sensible
     ///     energy uses <see cref="AtmosConfig.DefaultTemperatureFallback" />. An empty voxel adopts the incoming
     ///     temperature.
+    ///     The gas appears in the voxel with only its internal energy. For gas pushed in by a vent, use
+    ///     <see cref="VentGasToVoxel(AtmosChunkHandle, ushort, int, float, float)" />.
     /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="localVoxelIndex" /> is outside the chunk.</exception>
     /// <exception cref="ArgumentOutOfRangeException">
@@ -1118,6 +1120,142 @@ public sealed partial class AtmosSimulation : IDisposable
         lock (_mixtureGate)
         {
             AddGasToVoxel(chunk, x, y, z, ResolveGasName(gasName), moles, temperature);
+        }
+    }
+
+    /// <summary>
+    ///     Vents gas into one voxel addressed by its flat local index and wakes its chunk.
+    /// </summary>
+    /// <param name="chunk">A handle identifying the target chunk.</param>
+    /// <param name="localVoxelIndex">The voxel's zero-based index in the chunk's flattened storage.</param>
+    /// <param name="gasId">The registered gas channel identifier. Prefer the gas-name overload for application code.</param>
+    /// <param name="moles">The amount of gas to vent in, in moles.</param>
+    /// <param name="temperature">The temperature of the vented gas, in kelvins.</param>
+    /// <remarks>
+    ///     A vent pushes gas in through a pipe and does flow work, so the voxel gains the enthalpy
+    ///     <c>n * (cv + R) * T</c> instead of the internal energy <c>n * cv * T</c>. An empty voxel settles at
+    ///     gamma times <paramref name="temperature" />. Use this method for vents and other pressurized sources. Use
+    ///     <see cref="AddGasToVoxel(AtmosChunkHandle, ushort, int, float, float)" /> for gas that appears in the voxel
+    ///     at the given temperature. The wake, validation, and recording rules match that method.
+    /// </remarks>
+    /// <exception cref="ArgumentOutOfRangeException">
+    ///     The voxel address is outside the chunk, the gas is not registered, <paramref name="moles" /> is not positive
+    ///     and finite, or <paramref name="temperature" /> is negative or non-finite.
+    /// </exception>
+    /// <exception cref="KeyNotFoundException">No chunk is registered at the handle's position.</exception>
+    /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
+    [PublicAPI]
+    public void VentGasToVoxel(
+        AtmosChunkHandle chunk, ushort localVoxelIndex, int gasId, float moles,
+        float temperature)
+    {
+        lock (_mixtureGate)
+        {
+            ThrowIfDisposed();
+            _kernel.VentGasToVoxel(chunk.Position, localVoxelIndex, gasId, moles, temperature);
+        }
+    }
+
+    /// <summary>
+    ///     Vents gas into one voxel addressed by local coordinates and wakes its chunk.
+    /// </summary>
+    /// <param name="chunk">A handle identifying the target chunk.</param>
+    /// <param name="x">The zero-based local x-coordinate.</param>
+    /// <param name="y">The zero-based local y-coordinate.</param>
+    /// <param name="z">The zero-based local z-coordinate.</param>
+    /// <param name="gasId">The registered gas channel identifier. Prefer the gas-name overload for application code.</param>
+    /// <param name="moles">The amount of gas to vent in, in moles.</param>
+    /// <param name="temperature">The temperature of the vented gas, in kelvins.</param>
+    /// <remarks>
+    ///     A vent pushes gas in through a pipe and does flow work, so the voxel gains the enthalpy
+    ///     <c>n * (cv + R) * T</c> instead of the internal energy <c>n * cv * T</c>. An empty voxel settles at
+    ///     gamma times <paramref name="temperature" />. Use this method for vents and other pressurized sources. Use
+    ///     <see cref="AddGasToVoxel(AtmosChunkHandle, ushort, int, float, float)" /> for gas that appears in the voxel
+    ///     at the given temperature. The wake, validation, and recording rules match that method.
+    /// </remarks>
+    /// <exception cref="ArgumentOutOfRangeException">
+    ///     The voxel address is outside the chunk, the gas is not registered, <paramref name="moles" /> is not positive
+    ///     and finite, or <paramref name="temperature" /> is negative or non-finite.
+    /// </exception>
+    /// <exception cref="KeyNotFoundException">No chunk is registered at the handle's position.</exception>
+    /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
+    [PublicAPI]
+    public void VentGasToVoxel(
+        AtmosChunkHandle chunk, int x, int y, int z, int gasId, float moles,
+        float temperature)
+    {
+        lock (_mixtureGate)
+        {
+            ThrowIfDisposed();
+            _kernel.VentGasToVoxel(chunk.Position, x, y, z, gasId, moles, temperature);
+        }
+    }
+
+    /// <summary>
+    ///     Vents a registered gas by name into one voxel addressed by its flat local index and wakes its chunk.
+    /// </summary>
+    /// <param name="chunk">A handle identifying the target chunk.</param>
+    /// <param name="localVoxelIndex">The voxel's zero-based index in the chunk's flattened storage.</param>
+    /// <param name="gasName">The exact, case-sensitive name in the simulation's gas registry.</param>
+    /// <param name="moles">The amount of gas to vent in, in moles.</param>
+    /// <param name="temperature">The temperature of the vented gas, in kelvins.</param>
+    /// <remarks>
+    ///     A vent pushes gas in through a pipe and does flow work, so the voxel gains the enthalpy
+    ///     <c>n * (cv + R) * T</c> instead of the internal energy <c>n * cv * T</c>. An empty voxel settles at
+    ///     gamma times <paramref name="temperature" />. Use this method for vents and other pressurized sources. Use
+    ///     <see cref="AddGasToVoxel(AtmosChunkHandle, ushort, int, float, float)" /> for gas that appears in the voxel
+    ///     at the given temperature. The wake, validation, and recording rules match that method.
+    /// </remarks>
+    /// <exception cref="ArgumentOutOfRangeException">
+    ///     The voxel address is outside the chunk, the gas is not registered, <paramref name="moles" /> is not positive
+    ///     and finite, or <paramref name="temperature" /> is negative or non-finite.
+    /// </exception>
+    /// <exception cref="KeyNotFoundException">No chunk is registered at the handle's position.</exception>
+    /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
+    [PublicAPI]
+    public void VentGasToVoxel(
+        AtmosChunkHandle chunk, ushort localVoxelIndex,
+        string gasName, float moles, float temperature)
+    {
+        lock (_mixtureGate)
+        {
+            ThrowIfDisposed();
+            VentGasToVoxel(chunk, localVoxelIndex, ResolveGasName(gasName), moles, temperature);
+        }
+    }
+
+    /// <summary>
+    ///     Vents a registered gas by name into one voxel addressed by local coordinates and wakes its chunk.
+    /// </summary>
+    /// <param name="chunk">A handle identifying the target chunk.</param>
+    /// <param name="x">The zero-based local x-coordinate.</param>
+    /// <param name="y">The zero-based local y-coordinate.</param>
+    /// <param name="z">The zero-based local z-coordinate.</param>
+    /// <param name="gasName">The exact, case-sensitive name in the simulation's gas registry.</param>
+    /// <param name="moles">The amount of gas to vent in, in moles.</param>
+    /// <param name="temperature">The temperature of the vented gas, in kelvins.</param>
+    /// <remarks>
+    ///     A vent pushes gas in through a pipe and does flow work, so the voxel gains the enthalpy
+    ///     <c>n * (cv + R) * T</c> instead of the internal energy <c>n * cv * T</c>. An empty voxel settles at
+    ///     gamma times <paramref name="temperature" />. Use this method for vents and other pressurized sources. Use
+    ///     <see cref="AddGasToVoxel(AtmosChunkHandle, ushort, int, float, float)" /> for gas that appears in the voxel
+    ///     at the given temperature. The wake, validation, and recording rules match that method.
+    /// </remarks>
+    /// <exception cref="ArgumentOutOfRangeException">
+    ///     The voxel address is outside the chunk, the gas is not registered, <paramref name="moles" /> is not positive
+    ///     and finite, or <paramref name="temperature" /> is negative or non-finite.
+    /// </exception>
+    /// <exception cref="KeyNotFoundException">No chunk is registered at the handle's position.</exception>
+    /// <exception cref="ObjectDisposedException">The simulation has been disposed.</exception>
+    [PublicAPI]
+    public void VentGasToVoxel(
+        AtmosChunkHandle chunk, int x, int y, int z,
+        string gasName, float moles, float temperature)
+    {
+        lock (_mixtureGate)
+        {
+            ThrowIfDisposed();
+            VentGasToVoxel(chunk, x, y, z, ResolveGasName(gasName), moles, temperature);
         }
     }
 

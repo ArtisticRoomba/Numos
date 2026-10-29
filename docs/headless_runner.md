@@ -235,7 +235,7 @@ The default gases add a `GasReactionConfig` solver configuration. A replay file 
 | `setVoxelClassification` | `position`, local `voxel`, `classification` | Sets one voxel. |
 | `setVoxelTemperature` | `position`, local `voxel`, `temperatureK` | Sets the stored temperature. |
 | `setVoxelMomentum` | `position`, local `voxel`, `momentumX`, `momentumY`, `momentumZ` | Sets the total momentum of the voxel's gas in kg·m/s. |
-| `injectGas` | `position`, local `voxel`, `gasId`, `moles`, `temperatureK` | Adds gas to an air voxel. |
+| `injectGas` | `position`, local `voxel`, `gasId`, `moles`, `temperatureK`, optional `vent` | Adds gas to an air voxel. |
 | `clearVoxelGas` | `position`, local `voxel` | Removes the gas from one voxel. |
 
 All of these take the optional `simulation`.
@@ -244,6 +244,10 @@ All of these take the optional `simulation`.
 voxel (moles times `molarMassKgPerMol`, or `referenceMolarMassKgPerMol` for gases without one). Inject gas first, then
 multiply the velocity you want by that mass. The call has no effect on solid, void, or empty voxels. The runner rejects
 non-finite components with `operationRejected`.
+
+`injectGas` adds the gas with its internal energy by default. Set `vent` to `true` to add it as a vent does, with its
+enthalpy. An empty voxel then settles at gamma times `temperatureK`. Use `vent` for pressurized sources, because a
+source cell fed by the default form settles at `temperatureK` divided by gamma.
 
 ### Regions and sampling
 

@@ -347,6 +347,13 @@ molar heat capacity. Pressure is always derived from `P = nRT/V` and cannot be s
 Injecting into a voxel directly with `AtmosSimulation.AddGasToVoxel` follows the same energy rule. It recalculates the
 target voxel's total heat capacity from its gas composition before temperature mixing.
 
+A vent also does flow work, because it pushes the gas in against the voxel's pressure. The voxel then gains the
+enthalpy `n * (cv + R) * T_in` instead of `n * cv * T_in`, where `R` is the molar gas constant. Without that term, a
+source cell fed by repeated `AddGasToVoxel` calls settles at `T_in / gamma`. `AtmosSimulation.VentGasToVoxel` takes
+the same arguments and adds the enthalpy. It injects at the effective temperature `T_in * (cv + R) / cv`, so the
+heat capacity still grows by `n * cv`. An empty voxel lands at `gamma * T_in`, the result for filling an evacuated rigid
+tank.
+
 Mixtures do not expose velocity. Read it with `AtmosSimulation.GetVoxelVelocity`. That call divides the voxel's stored
 momentum by its current gas mass (the sum of moles times molar mass) at the moment of the call.
 
@@ -2107,7 +2114,7 @@ To implement this system in another engine or language, start from these pieces:
 | Tick driver integration | Provided                  | Call `Update(deltaSeconds)` on the world or simulation from your engine's update loop.                                                                         |
 | Chunk lifecycle         | Provided                  | Call `CreateAndRegisterChunk` / `UnregisterChunk`; chunks remain owned by the simulation.                                                                      |
 | Voxel topology          | API provided              | Populate topology through `SetChunkClassification` and `SetVoxelClassification`.                                                                               |
-| Gas source API          | API provided              | Use `AddGasToVoxel` or voxel gas mixtures for game-side sources such as pipes, vents, and fires.                                                               |
+| Gas source API          | API provided              | Use `VentGasToVoxel` for pipes and vents, and `AddGasToVoxel` or voxel gas mixtures for fires.                                                                  |
 | Liquid system           | Not provided              | Condensation updates atmospheric state only. Build liquid state and integration if needed.                                                                     |
 | Visualization           | Not provided in the core  | Pressure, temperature, and gas composition are available per voxel. `Numos.SimDrawer` extracts render data; the overlays, particle effects, and fog are yours. |
 | Networking              | Snapshots and replay only | See §13. Wire serialization, transport, and client reconciliation are not implemented.                                                                         |

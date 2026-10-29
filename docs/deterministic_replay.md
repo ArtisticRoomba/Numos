@@ -639,6 +639,11 @@ reader that predates an opcode rejects a file that contains it.
 source temperature, and the source volume. Replay applies it before the next tick, as the original call did. The source lasts until the next `gas-reactions`
 pass, which at the default schedule can be up to 50 ms later.
 
+### Vent gas into a voxel
+
+`AtmosSimulation.VentGasToVoxel` records one `VentGasToVoxelOperation` (opcode 16). It has the same fields as
+`AddGasToVoxelOperation`. Replay differs only in the energy rule: the voxel gains the gas's enthalpy.
+
 ### Change the solver layout while recording
 
 A tool such as a pipeline editor needs to switch transport models or reorder stages in the middle of a session. Numos

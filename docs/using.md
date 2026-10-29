@@ -335,6 +335,11 @@ simulation.AddGasToVoxel(
     temperature: 293.15f);
 ```
 
+`AddGasToVoxel` adds gas with its internal energy, as if the gas appeared in the voxel at the given temperature. A vent
+pushes gas in and also does flow work, so call `VentGasToVoxel` for vents and other pressurized sources. It takes the
+same arguments. An empty voxel settles at gamma times the given temperature. A source cell fed every tick stays near
+the given temperature, where `AddGasToVoxel` would leave it at that temperature divided by gamma.
+
 For initial setup, populate an `AtmosConfig` and pass it to the simulation constructor. Later changes to the builder
 apply only after `SetAtmosConfig`, because the simulation keeps an immutable copy.
 

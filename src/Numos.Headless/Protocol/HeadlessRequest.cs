@@ -53,6 +53,11 @@ internal sealed class HeadlessRequest
     public float? TemperatureK { get; init; }
     public float? GasTemperatureK { get; init; }
 
+    /// <summary>
+    ///     Makes `injectGas` use vent semantics, so the gas carries its enthalpy. Missing means false.
+    /// </summary>
+    public bool? Vent { get; init; }
+
     // Momentum writes, in kg·m/s.
     public float? MomentumX { get; init; }
     public float? MomentumY { get; init; }

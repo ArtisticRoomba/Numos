@@ -430,7 +430,7 @@ internal sealed partial class HeadlessOperations
         RequireRegisteredGas(gasId);
         float moles = Require(request.Moles, "moles");
         float temperature = Require(request.TemperatureK, "temperatureK");
-        _session.AddVoxelGas(cell, gasId, moles, temperature, ResolveSimulation(request.Simulation));
+        _session.AddVoxelGas(cell, gasId, moles, temperature, ResolveSimulation(request.Simulation), request.Vent ?? false);
         return new CommandExecution();
     }
 

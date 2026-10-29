@@ -97,7 +97,24 @@ public sealed record AddGasToVoxelOperation(Int3 Position, ushort LocalVoxelInde
     public override AtmosOperationCode Code => AtmosOperationCode.AddGasToVoxel;
 
     internal override void Apply(AtmosKernel kernel) => kernel.Apply(this);
-}    
+}
+
+/// <summary>
+///     Vents gas into a voxel and wakes its chunk. The voxel gains the gas's enthalpy, not only its internal energy.
+/// </summary>
+/// <param name="Position">Target chunk-grid address.</param>
+/// <param name="LocalVoxelIndex">Canonical flat local voxel index.</param>
+/// <param name="GasId">Nonnegative simulation gas ID.</param>
+/// <param name="Moles">Positive finite amount to add, in moles.</param>
+/// <param name="Temperature">Nonnegative finite temperature of the incoming gas, in kelvins.</param>
+public sealed record VentGasToVoxelOperation(Int3 Position, ushort LocalVoxelIndex, int GasId, Mole Moles, Kelvin Temperature)
+    : AtmosOperation
+{
+    /// <inheritdoc />
+    public override AtmosOperationCode Code => AtmosOperationCode.VentGasToVoxel;
+
+    internal override void Apply(AtmosKernel kernel) => kernel.Apply(this);
+}
 
 /// <summary>
 ///     Adds an ignition source to a voxel and wakes its chunk. The source lasts until the next <c>gas-reactions</c> pass.

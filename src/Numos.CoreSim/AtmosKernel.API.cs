@@ -688,6 +688,69 @@ internal sealed partial class AtmosKernel
     }
 
     /// <summary>
+    ///     Vents gas into one voxel addressed by its flat local index and wakes its chunk.
+    /// </summary>
+    /// <param name="position">The target chunk's grid position.</param>
+    /// <param name="localVoxelIndex">The voxel's zero-based index in the chunk's flattened storage.</param>
+    /// <param name="gasId">The gas channel identifier.</param>
+    /// <param name="moles">The amount of gas to add, in moles.</param>
+    /// <param name="temperature">The temperature of the added gas, in kelvins.</param>
+    /// <remarks>
+    ///     Injection into a solid or void voxel is ignored and not recorded. The gas carries its enthalpy, so an empty
+    ///     voxel settles at gamma times <paramref name="temperature" />. <see cref="AddGasToVoxel(Int3, ushort, int, Mole, Kelvin)" />
+    ///     adds only the internal energy.
+    /// </remarks>
+    /// <exception cref="KeyNotFoundException">No chunk is registered at <paramref name="position" />.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    ///     <paramref name="localVoxelIndex" /> is outside the chunk, or the gas ID, amount, or temperature is invalid.
+    /// </exception>
+    internal void VentGasToVoxel(
+        Int3 position, ushort localVoxelIndex, int gasId, Mole moles,
+        Kelvin temperature)
+    {
+        lock (StateGate)
+        {
+            var chunk = GetChunk(position);
+            ValidateVoxelIndex(chunk, localVoxelIndex);
+            ValidateGasInjection(gasId, moles, temperature);
+
+            int classification = chunk.VoxelRoomMap[localVoxelIndex];
+            if (!VoxelClassification.IsAirRoom(classification))
+                return;
+
+            chunk.Wake();
+            GasInjectionSolver.Vent(chunk, localVoxelIndex, gasId, moles, temperature, _config);
+            if (ShouldRecord) RecordOperation(new VentGasToVoxelOperation(position, localVoxelIndex, gasId, moles, temperature));
+        }
+    }
+
+    /// <summary>
+    ///     Vents gas into one voxel addressed by local coordinates and wakes its chunk.
+    /// </summary>
+    /// <param name="position">The target chunk's grid position.</param>
+    /// <param name="x">The zero-based local x-coordinate.</param>
+    /// <param name="y">The zero-based local y-coordinate.</param>
+    /// <param name="z">The zero-based local z-coordinate.</param>
+    /// <param name="gasId">The gas channel identifier.</param>
+    /// <param name="moles">The amount of gas to add, in moles.</param>
+    /// <param name="temperature">The temperature of the added gas, in kelvins.</param>
+    /// <remarks>Injection into a solid or void voxel is ignored and not recorded. See the flat-index overload for the energy model.</remarks>
+    /// <exception cref="KeyNotFoundException">No chunk is registered at <paramref name="position" />.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    ///     A local coordinate is outside the chunk, or the gas ID, amount, or temperature is invalid.
+    /// </exception>
+    internal void VentGasToVoxel(
+        Int3 position, int x, int y, int z, int gasId, Mole moles,
+        Kelvin temperature)
+    {
+        lock (StateGate)
+        {
+            var chunk = GetChunk(position);
+            VentGasToVoxel(position, GetValidatedVoxelIndex(chunk, x, y, z), gasId, moles, temperature);
+        }
+    }
+
+    /// <summary>
     ///     Adds an ignition source to a voxel and wakes its chunk. The source lasts until the next <c>gas-reactions</c> pass.
     /// </summary>
     /// <param name="position">The target chunk's grid position.</param>
