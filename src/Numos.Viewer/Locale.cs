@@ -8,7 +8,7 @@ namespace Numos.Viewer;
 
 public static partial class Locale
 {
-    private static readonly string LocaleDirectory =
+    public static readonly string LocaleDirectory =
         Path.Combine(AppContext.BaseDirectory, "locale");
 
     private static readonly ConcurrentDictionary<string, Lazy<LocaleState>>

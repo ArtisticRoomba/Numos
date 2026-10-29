@@ -62,7 +62,7 @@
             <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
             <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
             <Pack>true</Pack>
-            <PackagePath>contentFiles/any/any/locale/**/*.ftl</PackagePath>
+            <PackagePath>contentFiles/any/any/locale/any/*.ftl</PackagePath>
             <PackageCopyToOutput>true</PackageCopyToOutput>
         </None>
     </ItemGroup>

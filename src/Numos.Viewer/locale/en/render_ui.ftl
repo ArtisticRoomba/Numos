@@ -2,7 +2,7 @@
 viewer-description-line-two = pseudo-realistic, voxel-based atmospherics simulation library.
 viewer-description = An external viewer for Numos, an engine-agnostic, pseudo-realistic, voxel-based atmospherics simulation library.
 no-simulation-loaded = No simulation is currently loaded.
-create-workspace-instruction = Choose File > New Simulation to create a workspace.
+create-workspace-instruction = "Choose File > New Simulation to create a workspace."
 
 about = About
 authors = Authors
