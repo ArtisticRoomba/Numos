@@ -121,6 +121,51 @@ public sealed class CheckpointStateFieldTests
     }
 
     [Test]
+    public void ChunkCheckpoint_KeepsEulerMomentumScaleAcrossTheWire()
+    {
+        var chunk = new AtmosChunk(2, 1, 1) { EulerMomentumScale = 8f };
+        var checkpoint = AtmosChunkCheckpoint.Capture(chunk);
+        var sink = new StateBinarySink();
+        NumosState.Write(ref sink, checkpoint);
+        var read = Read(sink.WrittenSpan.ToArray());
+
+        var restored = new AtmosChunk(2, 1, 1);
+        read.RestoreInto(restored);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(read.EulerMomentumScale, Is.EqualTo(8f));
+            Assert.That(restored.EulerMomentumScale, Is.EqualTo(8f));
+            Assert.That(NumosState.ComputeHash(read), Is.EqualTo(NumosState.ComputeHash(checkpoint)));
+            Assert.That(
+                NumosState.ComputeHash(AtmosChunkCheckpoint.Capture(new AtmosChunk(2, 1, 1))),
+                Is.Not.EqualTo(NumosState.ComputeHash(checkpoint)));
+        });
+    }
+
+    [Test]
+    public void ChunkCheckpoint_ReadsAMissingEulerMomentumScaleAsOne()
+    {
+        var checkpoint = AtmosChunkCheckpoint.Capture(new AtmosChunk(2, 1, 1) { EulerMomentumScale = 8f });
+        var sink = new StateBinarySink();
+        NumosState.Write(ref sink, checkpoint);
+
+        // Cut the field record out, as a file written before the field existed would lack it.
+        byte[] bytes = sink.WrittenSpan.ToArray();
+        int position = 0;
+        while (BitConverter.ToInt32(bytes, position) != NumosState.FieldId(nameof(AtmosChunkCheckpoint.EulerMomentumScale)))
+            position += 8 + BitConverter.ToInt32(bytes, position + 4);
+
+        int length = 8 + BitConverter.ToInt32(bytes, position + 4);
+        byte[] stripped = [.. bytes[..position], .. bytes[(position + length)..]];
+
+        var restored = new AtmosChunk(2, 1, 1) { EulerMomentumScale = 4f };
+        Read(stripped).RestoreInto(restored);
+
+        Assert.That(restored.EulerMomentumScale, Is.EqualTo(1f));
+    }
+
+    [Test]
     public void ChunkCheckpoint_DecodedArraysMustMatchTheDimensions()
     {
         var checkpoint = AtmosChunkCheckpoint.Capture(new AtmosChunk(2, 1, 1));

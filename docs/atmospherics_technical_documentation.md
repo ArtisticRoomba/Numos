@@ -283,7 +283,7 @@ explains the physics behind them.
 | `CourantNumber`           | 0.5       | Largest fraction of a voxel a signal may cross per substep (§5.5). 0.5 is the positivity bound of the split first-order scheme: below it a substep cannot drain more gas than a voxel holds. Up to 0.8 is linearly stable with fewer substeps but can go negative next to vacuum. Clamped to (0, 1]. Invalid values normalize to 0.5. |
 | `MaxSubstepsPerSecond`    | 1280      | Cap on substeps per second of gas time. Each call may run `ceil(cap · Interval / TickRate)`: 64 at 20 Hz, 22 at the default 16-tick interval at 960 Hz. 0 removes it. When it engages the call advances less gas time than its span (time dilation, §5.5) and `LastFlowDiagnostics` says so. Negative values normalize to 0. |
 | `SettlePeriod`            | 0.05 s    | How often the velocity floor, species diffusion, vacuum cleanup, and sleep scoring run, as `max(1, round(SettlePeriod · TickRate))` ticks. At 20 Hz every call settles. NaN and negative values normalize to 0. |
-| `VelocityFloor`           | 0.005 m/s | Speed below which a voxel's momentum is zeroed at the end of the tick, its kinetic energy becoming heat (§5.7). Without it a settled room sloshes at microscopic speeds forever and never sleeps. 0 disables it.                                                                                            |
+| `VelocityFloor`           | 0.005 m/s | Speed below which a voxel's momentum is zeroed at the end of the tick, its kinetic energy becoming heat (§5.7). Without it a settled room sloshes at microscopic speeds forever and never sleeps. 0 disables it. A chunk slowed by a factor s uses this value divided by s (§5.11).                                                                                            |
 | `SleepSpeed`              | 0.5 m/s   | Speed below which motion no longer holds a chunk awake (§9). A chunk that falls asleep has its momentum stopped and turned into heat. Motion wakes a sleeping neighbour only above `max(VelocityFloor, SleepSpeed)`. 0 keeps any motion above the floor awake. Invalid values normalize to 0. |
 | `MaxVelocity`             | 5000 m/s  | Clamp on voxel speed, with a diagnostic counter. Expansion into vacuum tops out near 1700 m/s for room air, so the clamp only fires when a state has already gone wrong. Invalid values normalize to 5000 m/s.                                                                                              |
 | `WakePressureDelta`       | 50 Pa     | Pressure difference across a chunk face that activates the inactive side (§5.6). 50 Pa sits above the acoustic pressure of slow residual ringing (0.12 m/s or less), so that ringing does not keep re-waking neighbours that just fell asleep. A sleeping chunk keeps smaller differences frozen in until something wakes it (§9). 0 wakes on any difference.                                                                                       |
@@ -291,6 +291,9 @@ explains the physics behind them.
 | `Reconstruction`          | `FirstOrder` | How face states are built. Second-order reconstruction is planned. Only `FirstOrder` exists today.                                                                                                                                                                                         |
 | `MomentumDamping`         | 0 /s      | Exponential decay applied to every voxel's momentum on each call of the stage, `max(0, 1 − α·Δt_call)`. A stand-in for wall friction and furniture drag so a hallway does not ring at its acoustic modes indefinitely. 0 applies none.                                                                                       |
 | `DefaultLinkAreaFraction` | 1         | Open fraction of a voxel face assumed for a portal or dock that declares no area (§11.1), under either transport model. Clamped to [0, 1]. 0 closes such links to gas transport.                                                                                                                                                       |
+| `MaxSoundSpeedReduction`  | 1         | Largest factor α by which a calm group of chunks slows its sound speed to take α times fewer substeps (§5.11). 1 runs the unscaled solver. Values below 1 and non-finite values normalize to 1. Above 16 clamps to 16. |
+| `FullSpeedPressureJump`   | 500 Pa    | Pressure difference across an open face above which a group runs at full speed. A slowed group returns above this value. A full-speed group slows only below half of it. Non-finite and negative values normalize to 500 Pa. |
+| `FullSpeedVelocity`       | 2 m/s     | Gas speed above which a group runs at full speed, with the same half-value hysteresis. Non-finite and negative values normalize to 2 m/s. |
 
 - `CourantNumber` (0.5), the positivity bound of the split first-order scheme.
 - `MaxSubstepsPerSecond` (1280). Zero removes the cap. When the cap engages, the call advances less than a full step of
@@ -918,6 +921,67 @@ when something changes:
 - Cost: room air needs about 35 substeps per 50 ms of gas time, and one dense awake 16³ chunk of it costs about 19 ms
   per 50 ms single-threaded. That is why skipping static chunks (§5.6), sleep (§9), and the parallel schedule (§10.2) are not optional
   with this model. `benchmarks/README.md` has the cases.
+
+### 5.11 Acoustic scaling: fewer substeps for calm rooms
+
+A calm room spends most of its substeps resolving sound that nobody watches. At 293 K the Courant limit makes about 700
+substeps per second of gas time, and a quiet room changes little in any of them. `MaxSoundSpeedReduction` (α) trades
+that cost for slow motion. The idea is pressure-gradient scaling (Ramshaw, O'Rourke and Stein, 1985).
+
+**The model.** For a uniform factor α ≥ 1 the Euler equations map onto themselves in scaled variables:
+
+```
+ũ = α·u        Ẽ = ρe + ½ρ|ũ|²        t̃ = t / α
+```
+
+The sound speed `c` is unchanged, so the signal speed `|ũ| + c` falls relative to the time the call must cover. The
+existing HLLC sweep runs untouched on this valid gas state for `Δt / α` of scaled time, and takes about α times fewer
+substeps. Mass and every species stay exact, because `F̃ · Δt/α = F · Δt`. Temperature and composition stay per
+voxel, so a hot corner is still resolved.
+
+**What a host sees.** Two effects follow, and both are physical consequences of the mapping.
+
+- A pressure-driven transient plays in slow motion. A door opening or an expanding hot spot reaches the same end state,
+  but its real velocity is α times lower and it takes α times longer.
+- A source-driven flow keeps its real velocity. A vent holds the flow it injects, so the pressure it needs grows with α.
+  The near-field pressure of a vent therefore rises with α, and its ripples grow by α².
+
+Scaling suits rooms that sit near rest. Do not use it where a host reads exact pressure waves or exact transient speeds.
+
+**Groups.** One α for the whole simulation would let a single explosion force every quiet room back to full speed.
+The stage instead splits the active chunks into groups. A group is a set of chunks joined by chunk faces that have at
+least one open air face. Groups share no open face when the call starts, so they cannot exchange flux. Each group
+picks its own α and needs no change in the kernel. Per-chunk α inside one connected volume
+was tried and rejected, because the boundary between a slow and a fast region reflects about 78% of the sound at α = 8.
+
+Groups that picked the same α then run together as a batch: one substep loop, one time step, and one parallel sweep
+over all of their chunks. A call has at most two batches in practice, one at full speed and one slowed. Running every
+group on its own would serialize a station of one-chunk rooms and leave the workers idle. Each batch starts its sweep
+from the same phase (§5.4), which keeps its result independent of the batches that ran before it. After the last batch,
+the shared phase advances by the total substep count. A chunk that wakes during a batch's loop joins that batch. Its
+links to workspaces of other batches are cut for the rest of the call, so the face acts as a wall and conserves mass.
+Two slowed rooms bridged by a woken chunk share a loop and cut nothing. The solver restores the links before the
+write-back.
+
+**Choosing α.** A group runs slowed only when its state is calm. The stage measures two things on the gathered real
+state: the largest pressure difference across an open face (`jump`, including faces to inactive chunks and to void),
+and the largest cell speed (`speed`). A group that ran slowed on the last call returns to α = 1 when `jump` exceeds
+`FullSpeedPressureJump` or `speed` exceeds `FullSpeedVelocity`. A group at full speed slows down to the maximum only
+when both are below half of those values. The gap keeps a group from flipping every call.
+
+**Changing α between calls.** Each chunk stores real momentum and the α it was last written with. A rise in α carries
+the scaled velocity, because keeping the real velocity would add energy. A fall keeps the real velocity, because
+carrying the scaled one would turn a 1.5 m/s draft into 12 m/s at α = 8. Both directions only remove kinetic energy, so
+no sequence of switches can add any.
+
+**The velocity floor.** The floor compares the solver's working velocity. A chunk written at factor s uses
+`VelocityFloor / s` as its real-velocity threshold, in the write-back and in the settle pass. Without this a slowed
+group would stop flow whose scaled speed is up to α times the floor, such as the slow expansion around a heated
+corner. `SleepSpeed` is not scaled.
+
+**Static chunks.** A static chunk that the stage skips keeps its real signal speed. That speed still bounds the step of
+every group, as it does without scaling (§5.6). A slowed group that borders a hot static chunk therefore gains less
+than α.
 
 ---
 
@@ -1987,8 +2051,10 @@ nothing currently uses.
   removes momentum, and it does so uniformly.
 - The substep cap is time dilation. When `MaxSubstepsPerSecond` engages, gas time falls behind world time while
   thermodynamics, reactions, and host code advance a full tick (§5.5). One `Δt` is global per simulation, so one hot
-  or light gas anywhere, a tritium fire at 1500 K say, slows the flow in every active chunk. There is no local time
-  stepping per connected awake region.
+  or light gas anywhere, a tritium fire at 1500 K say, slows the flow in every active chunk. Acoustic scaling (§5.11)
+  gives each connected group its own step count, but it does not change the step of one group.
+- Acoustic scaling changes the transient. Within a slowed group, real velocity is α times lower and a vent's near-field
+  pressure grows with α (§5.11). The default of 1 is exact. A static chunk beside a slowed group still bounds its step.
 - Species contacts carry a mixing pressure. A contact between gases that differ in both `Cv` and temperature
   develops the constant-volume mixing pressure of §5.9 over the cells the contact smears across. It is physical, but it
   happens at the numerical mixing rate rather than the molecular one.

@@ -403,7 +403,8 @@ domain of its field, such as a negative `bulkFlowCoefficient`.
 
 The `eulerFlow` object holds the Euler transport settings: `courantNumber`, `maxSubstepsPerSecond`, `velocityFloorMps`,
 `sleepSpeedMps`, `settlePeriod`, `maxVelocityMps`, `wakePressureDeltaPa`, `allMachCorrection`, `reconstruction`
-(`"firstOrder"`), `momentumDampingPerSecond`, and `defaultLinkAreaFraction`. A patch replaces the `EulerFlowConfig` entry
+(`"firstOrder"`), `momentumDampingPerSecond`, `defaultLinkAreaFraction`, `maxSoundSpeedReduction`, `fullSpeedPressureJumpPa`, and
+`fullSpeedVelocityMps`. A patch replaces the `EulerFlowConfig` entry
 with a copy that applies the given fields. Omitted fields keep the entry's value, or the library default when the session has no entry.
 The runner rejects an `eulerFlow` value outside the domain of its field, such as a `courantNumber` above 1.
 The observation reports `config.eulerFlow` with the same names. It is absent while the session has no entry. The solver
@@ -499,8 +500,9 @@ these parts:
 - `solverPipeline` in execution order.
 - `flow`, what `euler-flow` did on its latest run: `substepsLastTick`, `simulatedSeconds`, `substepCapEngaged`,
   `maxCourantNumber`, `maxSignalSpeedMps`, `clampedVelocityCount`, `negativeInternalEnergyCount`,
-  `negativeMolesCount`, and `nonFiniteCellCount`. The values stay the same on the ticks between runs. All values are
-  zero before the first run and under the legacy model.
+  `negativeMolesCount`, `nonFiniteCellCount`, `soundSpeedReduction` (the largest acoustic scaling factor, 1 when off), `flowGroups`, and
+  `slowedChunks`. The values stay the same on the ticks between runs. All values are zero before the first run and under
+  the legacy model.
   Alert on `substepCapEngaged` and the four counts. The rest are for tuning `eulerFlow`.
 - `global`, with topology counts, total moles, estimated sensible energy, pressure, temperature, and speed statistics, totals by
   gas, and anomaly counts.

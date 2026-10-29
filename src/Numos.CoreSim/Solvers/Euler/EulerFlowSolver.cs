@@ -99,9 +99,33 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
     internal static bool ReuseFaceGeometry = true;
 
     /// <summary>
+    ///     Replaces the acoustic scaling factor the rule would pick, for every call. Tests set it. Null leaves the
+    ///     choice to <see cref="EulerAcousticScaling.ChooseScale" />.
+    /// </summary>
+    internal static float? ForcedSoundSpeedReduction;
+
+    /// <summary>
+    ///     Runs a scaled call as one group over the whole active list, without building flow groups. Tests set it to
+    ///     compare the group path with the single-loop path on a scene that has one group.
+    /// </summary>
+    internal static bool GroupingDisabled;
+
+    /// <summary>
     ///     How many chunks the most recent tick skipped. A test hook, shared by every solver instance.
     /// </summary>
     internal static int LastSkippedCount;
+
+    /// <summary>
+    ///     How many links between flow groups the most recent call cut and restored. A test hook, shared by every
+    ///     solver instance.
+    /// </summary>
+    internal static int LastCutLinkCount;
+
+    /// <summary>
+    ///     How many batches of flow groups the most recent call ran: 0 when it took the single loop over the whole
+    ///     active list. A test hook, shared by every solver instance.
+    /// </summary>
+    internal static int LastBatchCount;
 
     /// <summary>
     ///     The sweep phase that follows <paramref name="phase" /> in the six-order cycle.
@@ -129,6 +153,21 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
     private readonly List<AtmosChunk> _seeds = [];
     private readonly HashSet<AtmosChunk> _seedSet = [];
     private MetrePerSecond _skippedSignalSpeed;
+
+    /// <summary>
+    ///     The acoustic scaling factor of the running call, 1 outside the substep loop. <see cref="Activate" />
+    ///     scales the momentum of a chunk activated mid-call by it.
+    /// </summary>
+    private float _scale = 1f;
+
+    private readonly EulerFlowGroups _groups = new();
+    private readonly EulerFlowGroups.Group _wholeList = new();
+
+    /// <summary>
+    ///     The batch whose loop is running, or -1 outside a batch loop and while the call runs as one list.
+    ///     <see cref="Activate" /> assigns a chunk activated mid-loop to it.
+    /// </summary>
+    private int _runningGroup = -1;
     private int _visitGeneration;
     private int[] _visitMarks = [];
     private MetrePerSecond[] _staticSpeed = [];
@@ -283,6 +322,9 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
             }
 
             _activeCount = 0;
+            _scale = 1f;
+            _runningGroup = -1;
+            _groups.DiscardCuts();
             _skippedSignalSpeed = 0f;
             _pendingScan.Clear();
             _pendingActivation.Clear();
@@ -378,6 +420,8 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
     ///     The workspace lists only the chunk's own gases here. Rows for gases a neighbour can push across a face
     ///     are added by <see cref="ShareAxisGases" /> before each sweep, so a chunk activated mid-tick is covered
     ///     by the next sweep's merge like everyone else.
+    ///     During a batch's loop the chunk joins that batch, and its links to other batches' workspaces are cut
+    ///     (see <see cref="EulerFlowGroups" />).
     /// </remarks>
     private void Activate(AtmosChunk chunk, AtmosSolverExecutionContext context)
     {
@@ -386,6 +430,7 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
 
         EulerChunkWorkspace workspace = TakeFromPool(chunk);
         workspace.Attach(chunk);
+        workspace.Group = Math.Max(_runningGroup, 0);
         for (int direction = 0; direction < NeighborResolution.NeighborDirections.Length; direction++)
         {
             if (!context.TryGetChunk(chunk.GridPosition + NeighborResolution.NeighborDirections[direction], out AtmosChunk neighbor))
@@ -393,11 +438,20 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
 
             workspace.NeighborChunks[direction] = neighbor;
             EulerChunkWorkspace? neighborWorkspace = LookupWorkspace(neighbor);
+            if (neighborWorkspace != null && _runningGroup >= 0 && neighborWorkspace.Group != _runningGroup)
+            {
+                // The running batch's sweep must not read another batch's buffers. The face stays a wall for both.
+                _groups.RecordCut(workspace, direction, neighborWorkspace);
+                continue;
+            }
+
             workspace.NeighborWorkspaces[direction] = neighborWorkspace;
             if (neighborWorkspace != null)
                 neighborWorkspace.NeighborWorkspaces[direction ^ 1] = workspace;
         }
 
+        // Stored momentum is real. A chunk joining a scaled call gathers it scaled.
+        EulerAcousticScaling.ScaleUp(chunk, _scale);
         _pendingGather.Add(workspace);
 
         // Canonical order has no numerical effect. It keeps diagnostics reproducible.
@@ -921,61 +975,60 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
         AtmosSolverConfigSnapshot config = context.TickConfig;
         Metre voxelEdge = MathF.Cbrt(config.VoxelVolume);
         SquareMetre faceArea = voxelEdge * voxelEdge;
-        Scalar courant = settings.CourantNumber;
 
-        Second64 remaining = context.DeltaTime;
-        Second64 simulated = 0d;
-        int substeps = 0;
-        bool capEngaged = false;
-        Scalar maxCourant = 0f;
-        MetrePerSecond maxSignalSpeed = 0f;
-
-        while (remaining > 0d)
+        var totals = new FlowTotals();
+        LastCutLinkCount = 0;
+        LastBatchCount = 0;
+        if (!EulerAcousticScaling.IsEnabled(settings, ForcedSoundSpeedReduction) || GroupingDisabled)
         {
-            if (cap > 0 && substeps == cap)
+            // One loop over the whole active list, which a mid-call activation grows.
+            _wholeList.Members = _active;
+            _wholeList.Count = _activeCount;
+            Scalar wholeScale = EulerAcousticScaling.ChooseScale(
+                _active, _activeCount, settings, ForcedSoundSpeedReduction);
+            totals.Add(RunGroup(_wholeList, -1, wholeScale, context, settings, cap, voxelEdge, faceArea), _activeCount);
+            totals.Groups = 1;
+        }
+        else
+        {
+            _groups.Build(_active, _activeCount);
+            int groupCount = _groups.GroupCount;
+            // Every group picks its factor from the gathered real state, before any batch scales or sweeps.
+            // One parallel measuring pass covers all groups, so many small groups do not each pay a dispatch.
+            bool forced = ForcedSoundSpeedReduction.HasValue;
+            if (!forced)
+                EulerAcousticScaling.MeasureAll(_active, _activeCount);
+
+            for (int index = 0; index < groupCount; index++)
             {
-                capEngaged = true;
-                break;
+                EulerFlowGroups.Group group = _groups.GroupAt(index);
+                float scale = forced
+                    ? EulerAcousticScaling.ChooseScale(group.Members, group.Count, settings, ForcedSoundSpeedReduction)
+                    : EulerAcousticScaling.Decide(group.Members, group.Count, settings);
+                _groups.SetGroupScale(index, scale);
             }
 
-            MetrePerSecond signalSpeed = MaxSignalSpeed();
-            maxSignalSpeed = MathF.Max(maxSignalSpeed, signalSpeed);
-            // The last substep takes whatever is left of the tick, however tiny. Stretching the previous substep
-            // to absorb it would exceed the Courant number the positivity bound assumes.
-            Second64 step = remaining;
-            if (signalSpeed > 0f)
+            _groups.Batch(_active, _activeCount);
+            int batchCount = _groups.Count;
+            LastBatchCount = batchCount;
+            // Batches share no open face, so each one starts from the same sweep order. Its result then does not
+            // depend on the batches that ran before it.
+            int firstPhase = context.EulerSweepPhase;
+            for (int index = 0; index < batchCount; index++)
             {
-                Second cflStep = courant * voxelEdge / signalSpeed;
-                step = Math.Min(cflStep, remaining);
+                context.EulerSweepPhase = firstPhase;
+                EulerFlowGroups.Group batch = _groups[index];
+                totals.Add(
+                    RunGroup(batch, index, _groups.BatchScale(index), context, settings, cap, voxelEdge, faceArea),
+                    batch.Count);
             }
 
-            Second timeStep = (float)step;
-            int order = context.EulerSweepPhase;
-            context.EulerSweepPhase = NextSweepPhase(order);
-            for (int position = 0; position < 3; position++)
-            {
-                int axis = SweepOrders[order * 3 + position];
-                if (!AxisHasWork(axis))
-                    continue;
+            totals.Groups = groupCount;
 
-                ShareAxisGases(axis, config);
-                RunSweep(axis, timeStep, faceArea, config);
-                for (int index = 0; index < _activeCount; index++)
-                    _active[index].Swap();
+            context.EulerSweepPhase = (firstPhase + totals.Substeps) % SweepOrderCount;
 
-                // A chunk activated here is swept from the next sweep on at this substep's Δt. Its gas is at rest,
-                // so its signal speed is its sound speed, which the next substep's Δt accounts for.
-                ApplyWakeRequests(context);
-            }
-
-            MetrePerSecond signalSpeedAfter = MaxSignalSpeed();
-            maxSignalSpeed = MathF.Max(maxSignalSpeed, signalSpeedAfter);
-            Scalar courantAfter = (float)(signalSpeedAfter * step / voxelEdge);
-            maxCourant = MathF.Max(maxCourant, courantAfter);
-
-            remaining -= step;
-            simulated += step;
-            substeps++;
+            // The write-back, diffusion, settling, and sleep read links between groups.
+            LastCutLinkCount = _groups.RestoreCuts();
         }
 
         WriteBackActive(config, settings, context.DeltaTime, pass.Active);
@@ -1030,15 +1083,210 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
         }
 
         return new AtmosFlowDiagnostics(
-            substeps,
-            simulated,
-            capEngaged,
-            maxCourant,
-            maxSignalSpeed,
+            totals.Substeps,
+            totals.SimulatedSeconds,
+            totals.CapEngaged,
+            totals.MaxCourant,
+            totals.MaxSignalSpeed,
             clampedVelocity,
             negativeInternalEnergy,
             negativeMoles,
-            nonFiniteCells);
+            nonFiniteCells,
+            totals.Scale,
+            totals.Groups,
+            totals.SlowedChunks);
+    }
+
+    /// <summary>
+    ///     What one batch's loop did.
+    /// </summary>
+    /// <param name="Substeps">Substeps the loop took.</param>
+    /// <param name="SimulatedSeconds">Real time the loop advanced, which is scaled time times the factor.</param>
+    /// <param name="CapEngaged">Whether the substep cap ended the loop.</param>
+    /// <param name="MaxCourant">Largest Courant number after a substep, in scaled variables.</param>
+    /// <param name="MaxSignalSpeed">Largest signal speed seen, in scaled variables.</param>
+    /// <param name="Scale">The batch's factor α.</param>
+    private readonly record struct GroupRun(
+        int Substeps, Second64 SimulatedSeconds, bool CapEngaged, Scalar MaxCourant, MetrePerSecond MaxSignalSpeed,
+        Scalar Scale);
+
+    /// <summary>
+    ///     The diagnostics of a call, folded over its batches: the largest substep count, Courant number, signal speed,
+    ///     and factor, the smallest simulated time, and the counts. <see cref="Groups" /> is the number of flow groups,
+    ///     which the caller sets, and <see cref="SlowedChunks" /> counts the members of slowed batches.
+    /// </summary>
+    private struct FlowTotals
+    {
+        public int Substeps;
+        public Second64 SimulatedSeconds;
+        public bool CapEngaged;
+        public Scalar MaxCourant;
+        public MetrePerSecond MaxSignalSpeed;
+        public Scalar Scale;
+        public int Groups;
+        public int SlowedChunks;
+        private int _runs;
+
+        public void Add(in GroupRun run, int memberCount)
+        {
+            SimulatedSeconds = _runs++ == 0 ? run.SimulatedSeconds : Math.Min(SimulatedSeconds, run.SimulatedSeconds);
+            Substeps = Math.Max(Substeps, run.Substeps);
+            CapEngaged |= run.CapEngaged;
+            MaxCourant = MathF.Max(MaxCourant, run.MaxCourant);
+            MaxSignalSpeed = MathF.Max(MaxSignalSpeed, run.MaxSignalSpeed);
+            Scale = MathF.Max(Scale, run.Scale);
+            if (run.Scale > 1f)
+                SlowedChunks += memberCount;
+        }
+    }
+
+    /// <summary>
+    ///     Runs one batch of flow groups that share a factor: scales it up, takes its substeps, and scales it back to
+    ///     real momentum and energy.
+    /// </summary>
+    /// <param name="group">The batch's members. The solver refills it when a sweep activates more chunks.</param>
+    /// <param name="index">The batch's number, or -1 when <paramref name="group" /> is the whole active list.</param>
+    /// <param name="scale">The factor α of every member, chosen by the caller.</param>
+    /// <param name="context">The stage's execution context.</param>
+    /// <param name="settings">The stage's settings.</param>
+    /// <param name="cap">Substep cap of the call, 0 for none.</param>
+    /// <param name="voxelEdge">Edge length of one voxel.</param>
+    /// <param name="faceArea">Area of one voxel face.</param>
+    /// <remarks>
+    ///     The loop reads and writes only the members' buffers, and the groups in it share one time step. A chunk
+    ///     activated here joins the batch, and <see cref="Activate" /> cuts its links to other batches' workspaces so
+    ///     that no sweep reads across batches. The factor applied and removed is the same for every member, including
+    ///     those added mid-loop.
+    /// </remarks>
+    private GroupRun RunGroup(
+        EulerFlowGroups.Group group, int index, Scalar scale, AtmosSolverExecutionContext context,
+        EulerFlowConfig settings, int cap, Metre voxelEdge, SquareMetre faceArea)
+    {
+        AtmosSolverConfigSnapshot config = context.TickConfig;
+        Scalar courant = settings.CourantNumber;
+
+        if (scale > 1f)
+            ScaleUpMembers(group, scale, config);
+
+        _scale = scale;
+        _runningGroup = index;
+
+        // Simulated time is tracked in scaled time and reported in real time.
+        Second64 remaining = context.DeltaTime / scale;
+        Second64 simulated = 0d;
+        int substeps = 0;
+        bool capEngaged = false;
+        Scalar maxCourant = 0f;
+        MetrePerSecond maxSignalSpeed = 0f;
+
+        while (remaining > 0d)
+        {
+            if (cap > 0 && substeps == cap)
+            {
+                capEngaged = true;
+                break;
+            }
+
+            MetrePerSecond signalSpeed = MaxSignalSpeed(group.Members, group.Count);
+            maxSignalSpeed = MathF.Max(maxSignalSpeed, signalSpeed);
+            // The last substep takes whatever is left of the tick, however tiny. Stretching the previous substep
+            // to absorb it would exceed the Courant number the positivity bound assumes.
+            Second64 step = remaining;
+            if (signalSpeed > 0f)
+            {
+                Second cflStep = courant * voxelEdge / signalSpeed;
+                step = Math.Min(cflStep, remaining);
+            }
+
+            Second timeStep = (float)step;
+            int order = context.EulerSweepPhase;
+            context.EulerSweepPhase = NextSweepPhase(order);
+            for (int position = 0; position < 3; position++)
+            {
+                int axis = SweepOrders[order * 3 + position];
+                if (!AxisHasWork(group.Members, group.Count, axis))
+                    continue;
+
+                ShareAxisGases(group.Members, group.Count, axis, config);
+                RunSweep(group.Members, group.Count, axis, timeStep, faceArea, config);
+                for (int member = 0; member < group.Count; member++)
+                    group.Members[member].Swap();
+
+                // A chunk activated here is swept from the next sweep on at this substep's Δt. Its gas is at rest,
+                // so its signal speed is its sound speed, which the next substep's Δt accounts for.
+                int before = _activeCount;
+                ApplyWakeRequests(context);
+                if (_activeCount != before)
+                    RefillGroup(group, index);
+            }
+
+            MetrePerSecond signalSpeedAfter = MaxSignalSpeed(group.Members, group.Count);
+            maxSignalSpeed = MathF.Max(maxSignalSpeed, signalSpeedAfter);
+            Scalar courantAfter = (float)(signalSpeedAfter * step / voxelEdge);
+            maxCourant = MathF.Max(maxCourant, courantAfter);
+
+            remaining -= step;
+            simulated += step;
+            substeps++;
+        }
+
+        _scale = 1f;
+        _runningGroup = -1;
+        if (scale > 1f || AnyScaled(group))
+            EulerAcousticScaling.ScaleDown(group.Members, group.Count, scale);
+
+        return new GroupRun(substeps, simulated * scale, capEngaged, maxCourant, maxSignalSpeed, scale);
+    }
+
+    /// <summary>
+    ///     Brings a batch's member list up to date after an activation. The whole-list group points at the active
+    ///     array again, because an activation can replace it.
+    /// </summary>
+    private void RefillGroup(EulerFlowGroups.Group group, int index)
+    {
+        if (index < 0)
+        {
+            group.Members = _active;
+            group.Count = _activeCount;
+            return;
+        }
+
+        _groups.Refill(index, _active, _activeCount);
+    }
+
+    /// <summary>
+    ///     Scales the stored momentum of the batch's chunks for a call at factor <paramref name="scale" /> and
+    ///     gathers the chunks that changed again, so their buffers hold the scaled state.
+    /// </summary>
+    /// <remarks>
+    ///     Runs once, before the first substep, when the gathered state is still the real one the factor was chosen
+    ///     from. The gather rebuilds a workspace from its chunk and keeps its face masks.
+    /// </remarks>
+    private void ScaleUpMembers(EulerFlowGroups.Group group, float scale, AtmosSolverConfigSnapshot config)
+    {
+        for (int index = 0; index < group.Count; index++)
+        {
+            EulerChunkWorkspace workspace = group.Members[index];
+            if (EulerAcousticScaling.ScaleUp(workspace.Chunk, scale))
+                _pendingGather.Add(workspace);
+        }
+
+        GatherPending(config);
+    }
+
+    /// <summary>
+    ///     Whether any chunk of the group carries an acoustic scaling factor other than 1, which the feature-off
+    ///     path resets.
+    /// </summary>
+    private static bool AnyScaled(EulerFlowGroups.Group group)
+    {
+        for (int index = 0; index < group.Count; index++)
+        {
+            if (group.Members[index].Chunk.EulerMomentumScale != 1f)
+                return true;
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -1054,15 +1302,17 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
     ///     <see cref="EulerChunkWorkspace.AddGasesOf" /> skips it. A listed gas gets a channel only if the
     ///     write-back finds some of it in the chunk.
     /// </remarks>
-    private void ShareAxisGases(int axis, AtmosSolverConfigSnapshot config)
+    private static void ShareAxisGases(
+        EulerChunkWorkspace[] members, int count, int axis, AtmosSolverConfigSnapshot config)
     {
-        for (int index = 0; index < _activeCount; index++)
+        for (int index = 0; index < count; index++)
         {
-            EulerChunkWorkspace workspace = _active[index];
+            EulerChunkWorkspace workspace = members[index];
             for (int direction = 2 * axis; direction <= 2 * axis + 1; direction++)
             {
+                // A neighbour in another group sits across a closed face, so no gas crosses and its list may differ.
                 EulerChunkWorkspace? neighbor = workspace.NeighborWorkspaces[direction];
-                if (neighbor != null)
+                if (neighbor != null && neighbor.Group == workspace.Group)
                     workspace.AddGasesOf(neighbor, direction, config);
             }
         }
@@ -1086,34 +1336,36 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
     ///         own workspace. Neither is written by anything else until the barrier.
     ///     </para>
     /// </remarks>
-    private void RunSweep(int axis, Second timeStep, SquareMetre faceArea, AtmosSolverConfigSnapshot config)
+    private void RunSweep(
+        EulerChunkWorkspace[] members, int count, int axis, Second timeStep, SquareMetre faceArea,
+        AtmosSolverConfigSnapshot config)
     {
         int workerCount = WorkerCount;
-        int pencilsPerChunk = EulerSweep.PencilCount(_active[0].Chunk, axis);
-        if (_activeCount >= workerCount)
+        int pencilsPerChunk = EulerSweep.PencilCount(members[0].Chunk, axis);
+        if (count >= workerCount)
         {
-            ParallelPhase.Run(_activeCount, new SweepChunkAction(_active, axis, pencilsPerChunk, timeStep, faceArea, config));
+            ParallelPhase.Run(count, new SweepChunkAction(members, axis, pencilsPerChunk, timeStep, faceArea, config));
             return;
         }
 
-        int tileSize = Math.Max(1, ParallelPhase.DivideRoundUp(checked(pencilsPerChunk * _activeCount), workerCount));
+        int tileSize = Math.Max(1, ParallelPhase.DivideRoundUp(checked(pencilsPerChunk * count), workerCount));
         int tilesPerChunk = ParallelPhase.DivideRoundUp(pencilsPerChunk, tileSize);
-        int itemCount = tilesPerChunk * _activeCount;
+        int itemCount = tilesPerChunk * count;
         if (_workItems.Length < itemCount)
             _workItems = new PencilWorkItem[Math.Max(itemCount, _workItems.Length * 2)];
 
         int item = 0;
-        for (int index = 0; index < _activeCount; index++)
+        for (int index = 0; index < count; index++)
         {
             for (int first = 0; first < pencilsPerChunk; first += tileSize)
                 _workItems[item++] = new PencilWorkItem(index, first, Math.Min(tileSize, pencilsPerChunk - first));
         }
 
-        ParallelPhase.Run(itemCount, new SweepPencilsAction(_active, _workItems, axis, timeStep, faceArea, config));
+        ParallelPhase.Run(itemCount, new SweepPencilsAction(members, _workItems, axis, timeStep, faceArea, config));
 
         // A chunk's tiles run on different workers, so the reduction waits for the barrier.
-        for (int index = 0; index < _activeCount; index++)
-            ReducePencils(_active[index], axis);
+        for (int index = 0; index < count; index++)
+            ReducePencils(members[index], axis);
     }
 
     /// <summary>
@@ -1166,14 +1418,14 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
     ///     Its momentum stays until the velocity floor or damping removes it at tick end. A neighbour activated
     ///     mid-tick is seen on the next substep, the first one that could sweep it.
     /// </remarks>
-    private bool AxisHasWork(int axis)
+    private bool AxisHasWork(EulerChunkWorkspace[] members, int count, int axis)
     {
         if (Extent(axis) > 1)
             return true;
 
-        for (int index = 0; index < _activeCount; index++)
+        for (int index = 0; index < count; index++)
         {
-            AtmosChunk?[] neighbours = _active[index].NeighborChunks;
+            AtmosChunk?[] neighbours = members[index].NeighborChunks;
             if (neighbours[2 * axis] != null || neighbours[2 * axis + 1] != null)
                 return true;
         }
@@ -1181,12 +1433,12 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
         return false;
     }
 
-    private MetrePerSecond MaxSignalSpeed()
+    private MetrePerSecond MaxSignalSpeed(EulerChunkWorkspace[] members, int count)
     {
         // A skipped chunk would report the same speed every substep, because its state never changes.
         MetrePerSecond speed = _skippedSignalSpeed;
-        for (int index = 0; index < _activeCount; index++)
-            speed = MathF.Max(speed, _active[index].Read.MaxSignalSpeed);
+        for (int index = 0; index < count; index++)
+            speed = MathF.Max(speed, members[index].Read.MaxSignalSpeed);
 
         return speed;
     }
@@ -1231,7 +1483,8 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
     /// <returns>The number of voxels written at 0 K.</returns>
     /// <remarks>
     ///     Every call zeroes the momentum of every trace cell. A settle pass (<c>applyFloor</c>) also zeroes every
-    ///     cell slower than <see cref="EulerFlowConfig.VelocityFloor" />. Damping then scales what is left by
+    ///     cell slower than <see cref="EulerFlowConfig.VelocityFloor" /> divided by the chunk's
+    ///     <see cref="AtmosChunk.EulerMomentumScale" />. Damping then scales what is left by
     ///     <c>max(0, 1 − α·Δt_call)</c> on every call. A floor of zero in <see cref="EulerMixture.ShouldStop" />
     ///     leaves only the trace test, so a settle pass matches the old per-tick behavior bit for bit. All of this runs
     ///     before the write-back computes temperatures, so the kinetic energy they remove turns into heat instead
@@ -1244,7 +1497,8 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
     {
         AtmosChunk chunk = workspace.Chunk;
         EulerChunkState buffer = workspace.Read;
-        MetrePerSecond floor = applyFloor ? settings.VelocityFloor : 0f;
+        // ScaleDown has already set the chunk's scale, so the floor compares the solver's working velocity.
+        MetrePerSecond floor = applyFloor ? settings.VelocityFloor / chunk.EulerMomentumScale : 0f;
         Scalar damping = settings.MomentumDamping > 0f
             ? MathF.Max(0f, 1f - settings.MomentumDamping * deltaTime)
             : 1f;
@@ -1605,7 +1859,9 @@ internal sealed class EulerFlowSolver : IAtmosSolverStage
     {
         public void Invoke(int index)
         {
-            SettleMomentum(active[index], config, floor);
+            // A chunk written with scale s holds real momentum, so its floor in real velocity is floor / s.
+            MetrePerSecond scaledFloor = floor / active[index].Chunk.EulerMomentumScale;
+            SettleMomentum(active[index], config, scaledFloor);
         }
     }
 

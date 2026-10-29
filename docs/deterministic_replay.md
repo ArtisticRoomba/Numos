@@ -181,8 +181,8 @@ detached copies. The current implementation has no copy-on-write storage, delta 
 `AtmosSimulationCheckpoint.PayloadBytes` reports bytes in copied chunk and solver arrays. It excludes managed object
 headers and field names.
 
-The world checkpoint schema is `AtmosWorldCheckpoint.CurrentFormatVersion` 15. The grid schema inside it is format
-version 11, compatibility version 5. Replay is experimental, so Numos rejects older in-memory checkpoint schemas instead
+The world checkpoint schema is `AtmosWorldCheckpoint.CurrentFormatVersion` 16. The grid schema inside it is format
+version 12, compatibility version 5. Replay is experimental, so Numos rejects older in-memory checkpoint schemas instead
 of translating them. The version history is:
 
 - World 6 added the reference and per-gas molar masses to the configuration section.
@@ -210,6 +210,10 @@ of translating them. The version history is:
   settle count is the number of ticks the `euler-flow` stage has covered since its last settle pass. The sweep phase
   is the position in the six-order sweep cycle, in [0, 6), advanced once per substep. `SleepTimer` counts ticks, and
   a stage that runs every `n` ticks adds `n` per run.
+- World 16 and grid 12 added `EulerFlowConfig.MaxSoundSpeedReduction`, `FullSpeedPressureJump`, and
+  `FullSpeedVelocity`, and the per-chunk `EulerMomentumScale`. A missing scale reads as 1 and the new settings read as
+  their defaults, so an old checkpoint would replay the same way. The hash covers the wire encoding, so every digest
+  moved with the new fields. The bump makes Numos reject older data instead of failing on a digest mismatch.
 
 ### Checkpoints are generated from the live types
 
@@ -743,9 +747,9 @@ A `.numos` replay contains a small provenance header, one complete initial world
 semantic opcodes. It stores initial and final state hashes. The Viewer verifies both hashes. After loading, the Viewer
 generates scrub checkpoints every 2.5 s of simulated time, so those large acceleration snapshots never enter the file.
 
-The checkpoint section holds the world checkpoint format version (15) and the archive's initial and head hashes. It ends
+The checkpoint section holds the world checkpoint format version (16) and the archive's initial and head hashes. It ends
 with the generated payload of the checkpoint and its length. Each simulation inside carries the grid format version
-(11). A file from an older layout fails to load with an unsupported-schema error. Numos does not misread it. The
+(12). A file from an older layout fails to load with an unsupported-schema error. Numos does not misread it. The
 version history above lists the layout changes.
 Viewer branch graphs are session state. Saving writes the selected branch, either through its preserved head or through
 the current inspection position. Save branches individually when more than one future must survive closing the project.

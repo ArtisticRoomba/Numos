@@ -92,6 +92,11 @@ public struct AtmosChunkSnapshot
     /// </summary>
     public int SleepTimer;
     /// <summary>
+    ///     Gets the acoustic scaling factor the Euler solver last wrote the chunk's momentum with. 1 means real momentum.
+    ///     A hand-built snapshot leaves it at 0, which also means real momentum.
+    /// </summary>
+    public float EulerMomentumScale;
+    /// <summary>
     ///     Gets the source chunk version.
     /// </summary>
     public AtmosChunkVersion Version;

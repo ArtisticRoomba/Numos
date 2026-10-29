@@ -26,6 +26,9 @@ public sealed class EulerFlowConfigTests
             Assert.That(config.Reconstruction, Is.EqualTo(EulerReconstruction.FirstOrder));
             Assert.That(config.MomentumDamping, Is.EqualTo(0f));
             Assert.That(config.DefaultLinkAreaFraction, Is.EqualTo(1f));
+            Assert.That(config.MaxSoundSpeedReduction, Is.EqualTo(1f));
+            Assert.That(config.FullSpeedPressureJump, Is.EqualTo(500f));
+            Assert.That(config.FullSpeedVelocity, Is.EqualTo(2f));
             Assert.That(config.SemanticallyEquals(EulerFlowConfig.Default), Is.True);
         });
     }
@@ -53,7 +56,10 @@ public sealed class EulerFlowConfigTests
             WakePressureDelta = float.NegativeInfinity,
             Reconstruction = (EulerReconstruction)42,
             MomentumDamping = float.PositiveInfinity,
-            DefaultLinkAreaFraction = 7f
+            DefaultLinkAreaFraction = 7f,
+            MaxSoundSpeedReduction = float.NaN,
+            FullSpeedPressureJump = -1f,
+            FullSpeedVelocity = float.PositiveInfinity
         };
 
         var snapshot = (EulerFlowConfig)config.CreateSnapshot(new AtmosConfig().CreateSnapshot().GasRegistry);
@@ -71,7 +77,23 @@ public sealed class EulerFlowConfigTests
             Assert.That(snapshot.Reconstruction, Is.EqualTo(EulerReconstruction.FirstOrder));
             Assert.That(snapshot.MomentumDamping, Is.Zero);
             Assert.That(snapshot.DefaultLinkAreaFraction, Is.EqualTo(1f));
+            Assert.That(snapshot.MaxSoundSpeedReduction, Is.EqualTo(1f));
+            Assert.That(snapshot.FullSpeedPressureJump, Is.EqualTo(500f));
+            Assert.That(snapshot.FullSpeedVelocity, Is.EqualTo(2f));
         });
+    }
+
+    [TestCase(0.25f, 1f)]
+    [TestCase(1f, 1f)]
+    [TestCase(8f, 8f)]
+    [TestCase(40f, 16f)]
+    [TestCase(float.NegativeInfinity, 1f)]
+    public void Snapshot_ClampsSoundSpeedReduction(float requested, float expected)
+    {
+        var config = new EulerFlowConfig { MaxSoundSpeedReduction = requested };
+        var snapshot = (EulerFlowConfig)config.CreateSnapshot(new AtmosConfig().CreateSnapshot().GasRegistry);
+
+        Assert.That(snapshot.MaxSoundSpeedReduction, Is.EqualTo(expected));
     }
 
     [TestCase(0f)]
@@ -99,7 +121,10 @@ public sealed class EulerFlowConfigTests
             new() { WakePressureDelta = 2f },
             new() { AllMachCorrection = true },
             new() { MomentumDamping = 0.1f },
-            new() { DefaultLinkAreaFraction = 0.5f }
+            new() { DefaultLinkAreaFraction = 0.5f },
+            new() { MaxSoundSpeedReduction = 8f },
+            new() { FullSpeedPressureJump = 300f },
+            new() { FullSpeedVelocity = 3f }
         ];
 
         ulong[] hashes = [EulerFlowConfig.Default.ComputeStateHash(), .. variants.Select(static v => v.ComputeStateHash())];

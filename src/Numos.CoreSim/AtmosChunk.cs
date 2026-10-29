@@ -134,6 +134,19 @@ internal class AtmosChunk
     public int SleepTimer;
 
     /// <summary>
+    ///     The acoustic scaling factor α the Euler solver last wrote this chunk's momentum with. 1 means real momentum.
+    /// </summary>
+    /// <remarks>
+    ///     Stored momentum is always real. The solver needs this value to decide how much of a scaled velocity to carry
+    ///     when the factor changes between calls. Data saved before this field existed reads as 1. A structural reset
+    ///     sets it to 1. Waking, sleeping, and injecting gas leave it alone, because the carried velocity is still
+    ///     there.
+    /// </remarks>
+    /// <seealso cref="EulerFlow.EulerFlowConfig.MaxSoundSpeedReduction" />
+    [NumosSerialize]
+    public float EulerMomentumScale = 1f;
+
+    /// <summary>
     ///     Temperature for each voxel, in kelvins (K), indexed by flat voxel index or local coordinate.
     /// </summary>
     /// <remarks>Raw stored values: checkpoints keep non-finite values and their exact bit patterns.</remarks>
@@ -381,6 +394,7 @@ internal class AtmosChunk
         ActiveAirCount = 0;
         ActiveGasCount = 0;
         SleepTimer = 0;
+        EulerMomentumScale = 1f;
 
         VoxelRoomMap.Clear();
         AirTopologyVersion++;
@@ -939,7 +953,8 @@ internal class AtmosChunk
             ActiveAirCount = ActiveAirCount,
             ActiveGasCount = ActiveGasCount,
             IsAwake = IsAwake,
-            SleepTimer = SleepTimer
+            SleepTimer = SleepTimer,
+            EulerMomentumScale = EulerMomentumScale
         };
 
         if (fields.HasFlag(AtmosChunkSnapshotFields.Gases))

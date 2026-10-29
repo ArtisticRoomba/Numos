@@ -255,7 +255,10 @@ public static class SimulationStateAnalyzer
             euler.AllMachCorrection,
             reconstruction,
             euler.MomentumDamping,
-            euler.DefaultLinkAreaFraction);
+            euler.DefaultLinkAreaFraction,
+            euler.MaxSoundSpeedReduction,
+            euler.FullSpeedPressureJump,
+            euler.FullSpeedVelocity);
     }
 
     private static FlowDiagnosticsReport CreateFlowReport(AtmosFlowDiagnostics flow)
@@ -269,7 +272,10 @@ public static class SimulationStateAnalyzer
             flow.ClampedVelocityCount,
             flow.NegativeInternalEnergyCount,
             flow.NegativeMolesCount,
-            flow.NonFiniteCellCount);
+            flow.NonFiniteCellCount,
+            flow.SoundSpeedReduction,
+            flow.FlowGroups,
+            flow.SlowedChunks);
    }
 
     private static SolverStepReport CreateSolverReport(AtmosWorldSolverStep step)

@@ -28,7 +28,7 @@ public sealed class EulerParallelDeterminismTests
     ///     Update this only together with a deliberate physics or digest-format change, and confirm the new value is
     ///     stable across worker counts and schedules before approving it.
     /// </remarks>
-    private const ulong X64ExpectedBlastDigest = 13887279013525372312UL;
+    private const ulong X64ExpectedBlastDigest = 6392939173558140719UL;
 
     /// <summary>
     ///     The approved x64 digest of the blast profile after 0.1 s at 960 Hz, the default tick rate, with the default
@@ -37,7 +37,7 @@ public sealed class EulerParallelDeterminismTests
     /// <remarks>
     ///     Same rules as <see cref="X64ExpectedBlastDigest" />.
     /// </remarks>
-    private const ulong X64ExpectedBlastDigest960 = 16474074692313213741UL;
+    private const ulong X64ExpectedBlastDigest960 = 12863616055034563626UL;
 
     private const int ChunkSize = 16;
     private const float Temperature = 293f;

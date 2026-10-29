@@ -221,4 +221,22 @@ public static class AtmosConfigFields
         "",
         "Open fraction of a voxel face assumed for portals and docks that declare no area.",
         ConfigDomain.UnitInterval);
+
+    public readonly static AtmosConfigFieldInfo EulerMaxSoundSpeedReduction = new(
+        "Max sound-speed reduction",
+        "",
+        "Largest factor by which calm regions slow sound to take fewer substeps. 1 disables it; the solver clamps to 16.",
+        ConfigDomain.Positive);
+
+    public readonly static AtmosConfigFieldInfo EulerFullSpeedPressureJump = new(
+        "Full-speed pressure jump",
+        "Pa",
+        "Pressure difference across an open face above which a region runs at full sound speed.",
+        ConfigDomain.NonNegative);
+
+    public readonly static AtmosConfigFieldInfo EulerFullSpeedVelocity = new(
+        "Full-speed velocity",
+        "m/s",
+        "Gas speed above which a region runs at full sound speed.",
+        ConfigDomain.NonNegative);
 }

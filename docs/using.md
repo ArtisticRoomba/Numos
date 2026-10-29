@@ -444,6 +444,9 @@ usable. The settings most hosts touch:
   above the acoustic pressure of slow residual ringing, so that ringing does not keep waking chunks that just fell
   asleep. The cost is that a sleeping chunk keeps smaller differences frozen in until something wakes it.
 - `MomentumDamping` (0): crude friction for hallways that ring.
+- `MaxSoundSpeedReduction` (1): largest factor by which calm regions slow sound to take fewer substeps. At 1 the
+  solver runs unscaled. `FullSpeedPressureJump` (500 Pa) and `FullSpeedVelocity` (2 m/s) set when a region returns to
+  full speed.
 
 `EulerFlowConfig` marks its settings `[NumosSerialize]` like any other configuration (see below), so a `.numos`
 archive carries it. Its module initializer registers it for loading. The

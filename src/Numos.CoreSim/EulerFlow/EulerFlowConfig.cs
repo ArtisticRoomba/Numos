@@ -63,6 +63,9 @@ public sealed partial class EulerFlowConfig : IAtmosSolverConfiguration
         Reconstruction = source.Reconstruction;
         MomentumDamping = source.MomentumDamping;
         DefaultLinkAreaFraction = source.DefaultLinkAreaFraction;
+        MaxSoundSpeedReduction = source.MaxSoundSpeedReduction;
+        FullSpeedPressureJump = source.FullSpeedPressureJump;
+        FullSpeedVelocity = source.FullSpeedVelocity;
     }
 
     /// <summary>
@@ -131,6 +134,9 @@ public sealed partial class EulerFlowConfig : IAtmosSolverConfiguration
     ///     Without a floor a settled room keeps sloshing at microscopic speeds forever, which keeps its chunks awake
     ///     and keeps the CFL loop substepping over noise. Non-finite and negative values normalize to 0, which
     ///     disables the floor.
+    ///     The floor compares the solver's working velocity. A chunk written at sound-speed reduction α has a real
+    ///     velocity threshold of the floor divided by α, so a slowed flow stops at the same scaled speed as a full-speed
+    ///     one. See <see cref="MaxSoundSpeedReduction" />.
     /// </remarks>
     [NumosSerialize]
     [Quantity("velocity")]
@@ -229,6 +235,52 @@ public sealed partial class EulerFlowConfig : IAtmosSolverConfiguration
     [Quantity("dimensionless")]
     public Scalar DefaultLinkAreaFraction { get; init; } = 1f;
 
+    /// <summary>
+    ///     Largest factor by which the stage may slow the sound speed of a calm region, or 1 for no reduction.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         A factor α scales velocity by α and time by 1/α, so the CFL loop takes about α times fewer substeps.
+    ///         Mass and every species stay exact. A pressure-driven transient plays in slow motion, and a
+    ///         source-driven flow keeps its real velocity. The solver picks α per connected region of active chunks
+    ///         from <see cref="FullSpeedPressureJump" /> and <see cref="FullSpeedVelocity" />.
+    ///     </para>
+    ///     <para>
+    ///         <see cref="MaxVelocity" /> limits the scaled velocity α·|u|, not the real one. <see cref="VelocityFloor" />
+    ///         also compares the scaled velocity, so a slowed chunk stops flow below the floor divided by α in real
+    ///         velocity. The default of 1 runs the
+    ///         unscaled solver. Values below 1 and non-finite values normalize to 1. Values above 16 clamp to 16.
+    ///     </para>
+    /// </remarks>
+    [NumosSerialize]
+    [Quantity("dimensionless")]
+    public Scalar MaxSoundSpeedReduction { get; init; } = 1f;
+
+    /// <summary>
+    ///     Pressure difference across an open face above which a region runs at full sound speed, in pascals (Pa).
+    /// </summary>
+    /// <remarks>
+    ///     A region that already runs slowed needs a jump above this value to return to full speed. A region at full
+    ///     speed needs a jump below half of it to slow down. The gap stops a region from flipping between the two.
+    ///     Only used when <see cref="MaxSoundSpeedReduction" /> is above 1. Non-finite and negative values normalize
+    ///     to 500 Pa.
+    /// </remarks>
+    [NumosSerialize]
+    [Quantity("pressure")]
+    public Pascal FullSpeedPressureJump { get; init; } = 500f;
+
+    /// <summary>
+    ///     Gas speed above which a region runs at full sound speed, in metres per second (m/s).
+    /// </summary>
+    /// <remarks>
+    ///     The same hysteresis applies as for <see cref="FullSpeedPressureJump" />: the return threshold is this value
+    ///     and the slow-down threshold is half of it. Only used when <see cref="MaxSoundSpeedReduction" /> is above 1.
+    ///     Non-finite and negative values normalize to 2 m/s.
+    /// </remarks>
+    [NumosSerialize]
+    [Quantity("velocity")]
+    public MetrePerSecond FullSpeedVelocity { get; init; } = 2f;
+
     /// <inheritdoc />
     public string Key => ConfigurationKey;
 
@@ -249,7 +301,10 @@ public sealed partial class EulerFlowConfig : IAtmosSolverConfiguration
             AllMachCorrection = AllMachCorrection,
             Reconstruction = Enum.IsDefined(Reconstruction) ? Reconstruction : EulerReconstruction.FirstOrder,
             MomentumDamping = FloatMath.GetNonnegativeFinite(MomentumDamping),
-            DefaultLinkAreaFraction = FloatMath.ClampUnitInterval(DefaultLinkAreaFraction)
+            DefaultLinkAreaFraction = FloatMath.ClampUnitInterval(DefaultLinkAreaFraction),
+            MaxSoundSpeedReduction = float.IsFinite(MaxSoundSpeedReduction) ? Math.Clamp(MaxSoundSpeedReduction, 1f, 16f) : 1f,
+            FullSpeedPressureJump = float.IsFinite(FullSpeedPressureJump) && FullSpeedPressureJump >= 0f ? FullSpeedPressureJump : 500f,
+            FullSpeedVelocity = float.IsFinite(FullSpeedVelocity) && FullSpeedVelocity >= 0f ? FullSpeedVelocity : 2f
         };
 
         return SemanticallyEquals(normalized) ? this : normalized;

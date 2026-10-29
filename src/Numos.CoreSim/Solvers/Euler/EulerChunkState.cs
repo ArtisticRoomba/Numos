@@ -277,6 +277,24 @@ internal sealed class EulerChunkWorkspace
     public MetrePerSecond MaxSpeed;
 
     /// <summary>
+    ///     The flow group the workspace belongs to during a call, 0 when the call runs without groups. Set by
+    ///     <see cref="EulerFlowGroups" /> and by the solver's activation.
+    /// </summary>
+    public int Group;
+
+    /// <summary>
+    ///     The largest pressure difference across an open face the last <see cref="EulerAcousticScaling.Measure" />
+    ///     found, in pascals. NaN when a pressure was not finite.
+    /// </summary>
+    public Pascal PressureJump;
+
+    /// <summary>
+    ///     The largest velocity component of a gas cell the last <see cref="EulerAcousticScaling.Measure" /> found,
+    ///     in metres per second. NaN when a velocity was not finite.
+    /// </summary>
+    public MetrePerSecond CellSpeed;
+
+    /// <summary>
     ///     The chunk's sleep metric from the last scoring, in percent.
     /// </summary>
     public Scalar SleepScore;

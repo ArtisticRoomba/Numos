@@ -436,6 +436,9 @@ internal sealed class EulerFlowPatch
     public string? Reconstruction { get; init; }
     public float? MomentumDampingPerSecond { get; init; }
     public float? DefaultLinkAreaFraction { get; init; }
+    public float? MaxSoundSpeedReduction { get; init; }
+    public float? FullSpeedPressureJumpPa { get; init; }
+    public float? FullSpeedVelocityMps { get; init; }
 
     /// <summary>
     ///     Rejects a value that lies outside the <see cref="AtmosConfigFieldInfo.Domain" /> of its field.
@@ -452,6 +455,9 @@ internal sealed class EulerFlowPatch
         ConfigurationPatch.Check(AtmosConfigFields.EulerWakePressureDelta, WakePressureDeltaPa);
         ConfigurationPatch.Check(AtmosConfigFields.EulerMomentumDamping, MomentumDampingPerSecond);
         ConfigurationPatch.Check(AtmosConfigFields.EulerDefaultLinkAreaFraction, DefaultLinkAreaFraction);
+        ConfigurationPatch.Check(AtmosConfigFields.EulerMaxSoundSpeedReduction, MaxSoundSpeedReduction);
+        ConfigurationPatch.Check(AtmosConfigFields.EulerFullSpeedPressureJump, FullSpeedPressureJumpPa);
+        ConfigurationPatch.Check(AtmosConfigFields.EulerFullSpeedVelocity, FullSpeedVelocityMps);
     }
 
     /// <summary>
@@ -472,7 +478,10 @@ internal sealed class EulerFlowPatch
             AllMachCorrection = AllMachCorrection ?? current.AllMachCorrection,
             Reconstruction = ParseReconstruction(Reconstruction) ?? current.Reconstruction,
             MomentumDamping = MomentumDampingPerSecond ?? current.MomentumDamping,
-            DefaultLinkAreaFraction = DefaultLinkAreaFraction ?? current.DefaultLinkAreaFraction
+            DefaultLinkAreaFraction = DefaultLinkAreaFraction ?? current.DefaultLinkAreaFraction,
+            MaxSoundSpeedReduction = MaxSoundSpeedReduction ?? current.MaxSoundSpeedReduction,
+            FullSpeedPressureJump = FullSpeedPressureJumpPa ?? current.FullSpeedPressureJump,
+            FullSpeedVelocity = FullSpeedVelocityMps ?? current.FullSpeedVelocity
         };
 
         AtmosConfigSettings.SetSolverConfiguration(config, patched);

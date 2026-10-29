@@ -16,13 +16,13 @@ public sealed class AdvectionParallelDeterminismTests
     ///     stable across worker counts before approving it. It is a grid-only checkpoint digest, last recaptured when
     ///     species diffusion started dividing by the voxel volume.
     /// </remarks>
-    private const ulong X64ExpectedDigest = 3952612403902241117UL;
+    private const ulong X64ExpectedDigest = 15048083309192399630UL;
 
     /// <summary>
     ///     The approved x64 digest for the same profile after 0.05 s at 960 Hz (48 ticks), the default tick rate.
     ///     Equal to the 20 Hz digest, because the legacy stages give the same state at both rates.
     /// </summary>
-    private const ulong X64ExpectedDigest960 = 3952612403902241117UL;
+    private const ulong X64ExpectedDigest960 = 15048083309192399630UL;
 
     [Test]
     [Explicit(

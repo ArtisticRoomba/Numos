@@ -31,8 +31,9 @@ public sealed partial class AtmosSimulationCheckpoint
     ///     a field-id state payload and hashes it with the same encoding as the wire.
     ///     Version 9 derives each field id from the member name. Version 10 generates the checkpoint from the
     ///     kernel's and chunk's <c>[NumosSerialize]</c> members. Version 11 adds the Euler settle count.
+    ///     Version 12 adds the per-chunk Euler momentum scale.
     /// </remarks>
-    public const int CurrentFormatVersion = 11;
+    public const int CurrentFormatVersion = 12;
 
     /// <summary>
     ///     Identifies the structural and deterministic-math contract required to restore this data.
@@ -158,6 +159,10 @@ public sealed partial class AtmosChunkCheckpoint
         Span<bool> isVacuum = live.IsVacuum.AsSpan();
         for (int index = 0; index < pressures.Length; index++)
             isVacuum[index] = pressures[index] <= 0f;
+
+        // Data saved before the Euler momentum scale existed decodes it as 0. Real momentum is a scale of 1.
+        if (!(live.EulerMomentumScale >= 1f))
+            live.EulerMomentumScale = 1f;
 
         live.MarkChanged();
     }

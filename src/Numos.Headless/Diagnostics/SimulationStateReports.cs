@@ -116,7 +116,10 @@ public sealed record EulerFlowConfigurationReport(
     bool AllMachCorrection,
     string Reconstruction,
     float MomentumDampingPerSecond,
-    float DefaultLinkAreaFraction);
+    float DefaultLinkAreaFraction,
+    float MaxSoundSpeedReduction,
+    float FullSpeedPressureJumpPa,
+    float FullSpeedVelocityMps);
 /// <summary>
 ///     One indexed gas definition captured from the configuration registry.
 /// </summary>
@@ -150,7 +153,10 @@ public sealed record FlowDiagnosticsReport(
     int ClampedVelocityCount,
     int NegativeInternalEnergyCount,
     int NegativeMolesCount,
-    int NonFiniteCellCount);
+    int NonFiniteCellCount,
+    float SoundSpeedReduction,
+    int FlowGroups,
+    int SlowedChunks);
 
 /// <summary>
 ///     Aggregate values across the chunks selected for an observation.

@@ -8,13 +8,13 @@ namespace Numos.CoreSim.IntegrationTests;
 [TestFixture]
 public sealed class BoundaryFlowParallelDeterminismTests
 {
-    private const ulong X64ExpectedDigest = 7765241427565000519UL;
+    private const ulong X64ExpectedDigest = 16781892038452400983UL;
 
     /// <summary>
     ///     The approved x64 digest for the same scenario after 0.15 s at 960 Hz (144 ticks), the default tick rate.
     ///     Equal to the 20 Hz digest, because the legacy stages give the same state at both rates.
     /// </summary>
-    private const ulong X64ExpectedDigest960 = 7765241427565000519UL;
+    private const ulong X64ExpectedDigest960 = 16781892038452400983UL;
 
     /// <summary>
     ///     Requires repeated runs of this scenario to produce one digest, which on x64 must also equal
