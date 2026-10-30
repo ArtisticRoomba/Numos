@@ -1,6 +1,6 @@
-﻿simulation-new-gas-name = New Gas
+﻿simulation-new-gas-name = Новый Газ
 
-side-top-left = Top left
-side-top-right = Top right
-side-bottom-left = Bottom left
-side-bottom-right = Bottom right
+side-top-left = Верхний левый
+side-top-right = Верхний правый
+side-bottom-left = Нижний левый
+side-bottom-right = Нижний правый

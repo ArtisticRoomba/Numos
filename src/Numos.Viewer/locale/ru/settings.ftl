@@ -1,40 +1,40 @@
-﻿graphics = Graphics
-interface = Interface
-custom-resolution = {$width} x {$height} (custom)
-target-resolution = Target resolution
-fullscreen = Fullscreen
-frame-pacing = Frame pacing
-uncap-fps = Uncap FPS
-uncap-fps-tooltip = Removes the software frame limit. If VSync is disabled, this may max out a CPU core while updating the UI.
-    Ill-advised to use, made accessible just for the love of the game.
-frame-rate-limit = Frame rate limit
-limit-fps-when-unfocused = Limit FPS when unfocused
-limit-fps-when-unfocused-tooltip = Uses a lower render rate while the viewer is in the background. The simulation keeps running at its normal fixed tick rate.
-unfocused-frame-rate = Unfocused frame rate
+﻿graphics = Графика
+interface = Интерфейс
+custom-resolution = {$width} x {$height} (кастомное)
+target-resolution = Целевое разрешение
+fullscreen = Полный экран
+frame-pacing = Кадры в секунду
+uncap-fps = Безлимитный FPS
+uncap-fps-tooltip = Убирает программный лимит частоты кадров. Если VSync выключен, это может полность загрузить одно ядро процессора при обновлении интерфейса.
+    Не рекомендовано к использованию, сделано ради прикола.
+frame-rate-limit = Ограничение кадров в секунду
+limit-fps-when-unfocused = Ограничивать FPS когда не в фокусе
+limit-fps-when-unfocused-tooltip = Использует низкую частоту кадров когда программа просмотра находится в фоне. Симуляция продолжает расчёт с фиксированной длиной тика.
+unfocused-frame-rate = Кадры в секунду не в фокусе
 vsync = VSync
-vsync-tooltip = Synchronizes presentation to the display refresh rate.
-use-event-based-rendering = Use event-based rendering
-event-based-rendering-tooltip = When enabled, the viewer waits for window events while the simulation is paused.
-    Reduces CPU usage for drawing the UI while the simulation is paused.
-    Experimental: the viewer may miss redraws in some cases.
-show-fps-overlay = Show FPS overlay
-show-fps-overlay-tooltip = Displays the current render rate in the upper-left corner.
-show-viewport-branding = Show viewport branding
-show-viewport-branding-tooltip = Displays the Numos logo and name in simulation views.
-    How it feels to LARP as an actual CFD tool.
-branding-opacity = Branding opacity
-corner = Corner
-offset-x = Offset X
-offset-y = Offset Y
-logo-size = Logo size
-window-layout = Window layout
-save-current-layout = Save Current Layout
-save-current-layout-tooltip = Restores this arrangement the next time Numos starts.
-save-as-default-preset = Save as Default Preset
-save-as-default-preset-tooltip = Saves the default that future publishes use on first launch.
-keep-resolution-prompt = Keep this resolution? The previous resolution will be restored automatically if you do not confirm.
-reverting-in-seconds = Reverting in {$seconds} seconds.
-keep-resolution = Keep Resolution
-revert = Revert
+vsync-tooltip = Синхронизирует частоту кадров до частоты обновления экрана дисплея.
+use-event-based-rendering = Использовать отрисовку с помощью событий
+event-based-rendering-tooltip = Когда включено, просмотрщик ждёт события окна пока симуляция находится на паузе.
+    Уменьшает загруженность процессора на отрисовку интерфейса пока симуляция находится на паузе.
+    Эксперимент: программа просмотра может иногда не запускать переотрисовку.
+show-fps-overlay = Показать FPS оверлей
+show-fps-overlay-tooltip = Показывает частоту отрисовки кадров в левом верхнем углу.
+show-viewport-branding = Показать брэндинг в окне просмотра
+show-viewport-branding-tooltip = Показать Numos логоти и имя в окнах просмотра.
+    Вот какого этого "LARP"ить как настоящий CFD инструмент.
+branding-opacity = Прозрачность брэндинга
+corner = Угол
+offset-x = Смещение X
+offset-y = Смещение Y
+logo-size = Размер лого
+window-layout = Окно схемы
+save-current-layout = Сохранить Текущую Схему
+save-current-layout-tooltip = Восстанавливает эту расстановку при следующем запуске программы.
+save-as-default-preset = Сохранить как схему по умолчанию
+save-as-default-preset-tooltip = Сохраняет схему по умолчанию которая будет использована для будущих публикаций при первом запуске.
+keep-resolution-prompt = Оставить данное разрешение? Прошлое разрешение будет восстановлено автоматически если вы не подтвердите.
+reverting-in-seconds = Отмена через {$seconds} секунд.
+keep-resolution = Оставить разрешение
+revert = Отменить
 language = Язык
 language-tooltip = Меняет язык интерфейса.
