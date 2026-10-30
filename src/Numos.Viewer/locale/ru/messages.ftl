@@ -1,21 +1,21 @@
-﻿unhandled-exception = Unhandled exception
-unhandled-exception-message = Unhandled exception: { $exception }
-unobserved-task-exception = Unobserved task exception
+﻿unhandled-exception = Необработанное исключение
+unhandled-exception-message = Необработанное исключение: { $exception }
+unobserved-task-exception = Исключение ненаблюдаемой задачи
 exception-message = { $context }: { $message }
 
-open-messages-logs = Open Messages / Logs.
+open-messages-logs = Открыть Сообщения / Логи.
 
 count-singular = { $number } { $noun }
-count-plural = { $number } { $noun }s
+count-plural = { $number } { $noun }
 
-filter-messages = Filter messages...
-auto-scroll = Auto-scroll
-copy = Copy
-clear = Clear
-messages-count-summary = { $shown } shown / { $total } total
+filter-messages = Отфильтровать сообщения...
+auto-scroll = Авто-скролл
+copy = Копировать
+clear = Очистить
+messages-count-summary = { $shown } показано / { $total } всего
 
-time = Time
-tick = Tick
-level = Level
-source = Source
-message = Message
+time = Время
+tick = Тик
+level = Уровень
+source = Источник
+message = Сообщение

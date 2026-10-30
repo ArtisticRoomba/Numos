@@ -1,4 +1,4 @@
-﻿replay-file-filter-name = Numos replay
+﻿replay-file-filter-name = Numos повтор
 
 replay-file-open-dialog-select-error = The operating system file dialog could not select a replay.
 replay-file-invalid-extension-error = Select a .numos replay file.
