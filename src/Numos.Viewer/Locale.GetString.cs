@@ -1,5 +1,4 @@
 ﻿using Linguini.Bundle;
-using Linguini.Shared.Types.Bundle;
 
 namespace Numos.Viewer;
 
@@ -15,10 +14,61 @@ public static partial class Locale
     {
         var bundle = GetState().Bundle;
 
-        return bundle.GetAttrMessage(key)
-               ?? throw new ArgumentException(
+        bundle.TryGetAttrMessage(key, EmptyCache, out _, out var result);
+        return result ?? throw new ArgumentException(
                    $"Locale key '{key}' returned a null value.",
                    nameof(key));
+    }
+    
+    public static string GetString<T1>(
+        string key,
+        (string, T1?) arg1)
+    {
+        var bundle = GetState().Bundle;
+        
+        ArgumentCache.Clear();
+        ArgumentCache.Add(arg1.Item1, FluentFromObject(arg1.Item2));
+        
+        bundle.TryGetAttrMessage(key, ArgumentCache, out _, out var result);
+        return result ?? throw new ArgumentException(
+            $"Locale key '{key}' returned a null value.",
+            nameof(key));
+    }
+    
+    public static string GetString<T1, T2>(
+        string key,
+        (string, T1?) arg1,
+        (string, T2?) arg2)
+    {
+        var bundle = GetState().Bundle;
+        
+        ArgumentCache.Clear();
+        ArgumentCache.Add(arg1.Item1, FluentFromObject(arg1.Item2));
+        ArgumentCache.Add(arg2.Item1, FluentFromObject(arg2.Item2));
+        
+        bundle.TryGetAttrMessage(key, ArgumentCache, out _, out var result);
+        return result ?? throw new ArgumentException(
+            $"Locale key '{key}' returned a null value.",
+            nameof(key));
+    }
+    
+    public static string GetString<T1, T2, T3>(
+        string key,
+        (string, T1?) arg1,
+        (string, T2?) arg2,
+        (string, T3?) arg3)
+    {
+        var bundle = GetState().Bundle;
+        
+        ArgumentCache.Clear();
+        ArgumentCache.Add(arg1.Item1, FluentFromObject(arg1.Item2));
+        ArgumentCache.Add(arg2.Item1, FluentFromObject(arg2.Item2));
+        ArgumentCache.Add(arg3.Item1, FluentFromObject(arg3.Item2));
+        
+        bundle.TryGetAttrMessage(key, ArgumentCache, out _, out var result);
+        return result ?? throw new ArgumentException(
+            $"Locale key '{key}' returned a null value.",
+            nameof(key));
     }
     
     public static string GetString(
@@ -26,14 +76,14 @@ public static partial class Locale
         params (string, object?)[] args)
     {
         var bundle = GetState().Bundle;
-        var array = new (string, IFluentType)[args.Length];
-        for (int i = 0; i < args.Length; i++)
+        ArgumentCache.Clear();
+        foreach (var (name, obj) in args)
         {
-            array[i] = (args[i].Item1, FluentFromObject(args[i].Item2));
+            ArgumentCache.Add(name, FluentFromObject(obj));
         }
-        return bundle.GetAttrMessage(key, array)
-                  ?? throw new ArgumentException(
-                      $"Locale key '{key}' returned a null value.",
-                      nameof(key));
+        bundle.TryGetAttrMessage(key, ArgumentCache, out _, out var result);
+        return result ?? throw new ArgumentException(
+            $"Locale key '{key}' returned a null value.",
+            nameof(key));
     }
 }

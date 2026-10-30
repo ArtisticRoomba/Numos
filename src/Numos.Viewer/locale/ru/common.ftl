@@ -20,6 +20,6 @@ common-set-classification = Установить классификацию
 common-simulations-heading = СИМУЛЯЦИИ
 common-state-heading = СОСТОЯНИЕ
 common-tools = Инструменты
-common-untitled-simulation = Симуляция Без Названия
+common-untitled-simulation = Безымянная Симуляция
 common-world-topology = Мир и Топология
 locale-name = Русский

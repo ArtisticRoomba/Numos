@@ -63,7 +63,7 @@ public partial class SimulationViewer
             WriteMessage(
                 WorkbenchLogLevel.Fatal,
                 Locale.GetString("source-runtime"),
-                Locale.GetString("unhandled-exception-message", ("exception", args.ExceptionObject)));
+                Locale.GetString("unhandled-exception-message", ("exception", args.ExceptionObject.ToString())));
     }
 
     private void HandleUnobservedTaskException(object? sender, UnobservedTaskExceptionEventArgs args)

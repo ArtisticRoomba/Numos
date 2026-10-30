@@ -1,4 +1,5 @@
 ﻿using System.Collections.Concurrent;
+using System.Collections.Frozen;
 using System.Globalization;
 using Linguini.Bundle;
 using Linguini.Bundle.Builder;
@@ -15,6 +16,11 @@ public static partial class Locale
 
     private static readonly ConcurrentDictionary<string, Lazy<LocaleState>>
         BundleCache = new(StringComparer.OrdinalIgnoreCase);
+    
+    private static readonly FrozenDictionary<string, IFluentType> EmptyCache =
+        FrozenDictionary.ToFrozenDictionary<string, IFluentType>([]);
+    
+    private static readonly Dictionary<string, IFluentType> ArgumentCache = new();
 
     private static LocaleState? _current;
 

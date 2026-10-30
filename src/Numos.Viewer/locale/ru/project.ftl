@@ -10,6 +10,6 @@ message-project-fill-chunk-failed = Could not fill chunk { $position }: { $messa
 message-project-add-gas = Added gas { $name } with ID { $id }.
 message-project-remove-gas = Removed gas { $name }.
 message-project-inject-gas-not-selected = No gas selected for injection.
-message-project-inject-gas = Injected { $moles } moles of { $name } at ({ $x }, { $y }, { $z }).
+message-project-inject-gas = Injected { $moles } moles of { $name } at ({ $pos }).
 message-project-inject-gas-failed = Could not inject gas: { $message }
 message-project-ignite-source-success = Did it

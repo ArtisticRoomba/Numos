@@ -2,6 +2,7 @@
     <Folder Name="/Benchmarks/">
         <Project Path="benchmarks\Numos.CoreSim.Benchmarks\Numos.CoreSim.Benchmarks.csproj"/>
         <Project Path="benchmarks\Numos.Replay.Benchmarks\Numos.Replay.Benchmarks.csproj"/>
+        <Project Path="benchmarks\Numos.Viewer.Benchmarks\Numos.Viewer.Benchmarks.csproj"/>
     </Folder>
     <Folder Name="/Tests/">
         <Project Path="tests\Numos.API.Dangerous.Tests\Numos.API.Dangerous.Tests.csproj"/>

@@ -1,38 +1,32 @@
-﻿three-d-voxel = 3D Voxel
+﻿three-d-voxel = 3D Воксель
 
-selected-voxel-count = { $count ->
-    [one] { $count } voxel
-   *[other] { $count } voxels
-}
+selected-voxel-count = { $count } вокселей выбрано
 
-clear-cell = Clear Cell
-unassigned-classification = Unassigned (0)
-solid-classification = Solid (-2)
-void-classification = Void (-1)
-draft-classification = Draft ({ $classification })
-set-temperature = Set Temperature to { $temperature } K
-frame-voxel = Frame Voxel
+clear-cell = Очистить Клетку
+unassigned-classification = Не назначен (0)
+solid-classification = Твёрдый (-2)
+void-classification = Пустота (-1)
+draft-classification = Драфт ({ $classification })
+set-temperature = Установить Температуру на { $temperature } K
+frame-voxel = Сфокусироваться на Вокселе
 
-portal = Portal
-start-portal-here = Start Portal Here
-create-portal-to-here = Create Portal to Here
-portal-first-endpoint = From: { $cell }
-portal-first-endpoint-instruction = Start a portal at its first endpoint.
-enable-transport-mode-in-world-topology = Enable a transport mode in World & Topology.
+portal = Портал
+start-portal-here = Начать Портал здесь
+create-portal-to-here = Создать Портал сюда
+portal-first-endpoint = От: { $cell }
+portal-first-endpoint-instruction = Начать портал от его первого края.
+enable-transport-mode-in-world-topology = Включить режим передвижения в Мире и Топологии.
 
-inject = Inject
-no-gases-registered = No gases registered
-moles-context-injection = Moles##context-injection
-temperature-kelvin = Temperature: { $temperature } K
-inject-context-confirm = Inject##context-confirm
+inject = Впрыснуть
+no-gases-registered = Нет зарегистрированных газов
+moles-context-injection = Моли##context-injection
+temperature-kelvin = Температура: { $temperature } K
+inject-context-confirm = Впрыснуть##context-confirm
 
-set-classification-action = Set classification { $classification }
-register-gas-before-injecting-voxels = Register a gas before injecting voxels.
-injected-gas-into = Injected { $moles } mol { $gas } into
-cleared-gas-from = Cleared gas from
-cleared-cells = Cleared
-set-temperature-for = Set temperature to { $temperature } K for
-voxel-mutation-feedback = { $action } { $edited } voxel{ $edited ->
-    [one] .
-   *[other] s.
-    }
+set-classification-action = Установить классфикацию { $classification }
+register-gas-before-injecting-voxels = Зарегистрируйте газ прежде чем впрыскивать в воксели.
+injected-gas-into = Впрыснуто { $moles } моль { $gas } в
+cleared-gas-from = Очищен газ из
+cleared-cells = Очищено
+set-temperature-for = Установлена температура { $temperature } K для
+voxel-mutation-feedback = { $action } { $edited } вокселей.
